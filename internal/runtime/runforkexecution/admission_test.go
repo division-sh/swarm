@@ -11,6 +11,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -19,6 +21,7 @@ import (
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
 
 func TestBuildSelectedContractExecutionAdmissionConsumesDurableBinding(t *testing.T) {
@@ -463,6 +466,94 @@ func TestBundleCatalogSelectedContractSourceLoaderLoadsPersistedSourceForRequest
 	}
 }
 
+func TestBundleCatalogSelectedContractSourceLoaderPreservesImportedPackGenerationForFork(t *testing.T) {
+	ctx := context.Background()
+	repoRoot := runForkExecutionRepoRoot(t)
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier12-runtime-fork", "test-selected-contract-fork-execution")
+	project := t.TempDir()
+	if err := os.CopyFS(project, os.DirFS(fixtureRoot)); err != nil {
+		t.Fatalf("copy selected-contract fixture: %v", err)
+	}
+	base := packfixture.EmbeddedBase(t)
+	baseGenerations, err := packartifact.NewPlatformPackBaseGenerationOwner(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := packartifact.ImportEmbeddedPack(project, "provider.telegram", base); err != nil || !changed {
+		t.Fatalf("import Telegram pack changed=%t: %v", changed, err)
+	}
+	manifestPath := filepath.Join(project, "packs", "provider.telegram", packartifact.TriggerManifestFileName)
+	body, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := []byte(strings.Replace(string(body), "telegram update object is required", "fork project telegram update object is required", 1))
+	if string(edited) == string(body) {
+		t.Fatal("Telegram fork edit found no canonical field")
+	}
+	if err := os.WriteFile(manifestPath, edited, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(
+		repoRoot,
+		project,
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+		runtimecontracts.WorkflowContractLoadOptions{
+			PlatformPackBase: base, AdmitPackInventory: packadmission.AdmitInventory,
+		},
+	)
+	if err != nil {
+		t.Fatalf("load imported project-pack bundle: %v", err)
+	}
+	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
+	if err != nil {
+		t.Fatalf("build imported project-pack catalog projection: %v", err)
+	}
+	telegram, ok := base.Lookup("provider.telegram")
+	if !ok {
+		t.Fatal("embedded Telegram pack is missing")
+	}
+	successorBody := []byte(strings.Replace(string(telegram.ManifestBody()), "telegram update object is required", "successor development telegram update object is required", 1))
+	successor, _ := packfixture.DevelopmentBase(t, map[string][]byte{"provider.telegram": successorBody})
+	if err := baseGenerations.Select(successor); err != nil {
+		t.Fatalf("select successor development generation: %v", err)
+	}
+	sourceRunID := uuid.NewString()
+	catalogStore := &fakeBundleCatalogSelectedContractSourceStore{
+		availability: runbundle.Availability{
+			RunID: sourceRunID, Status: "running", BundleHash: projection.BundleHash,
+			BundleSource: runbundle.AvailabilitySourcePersisted, BundleRowPresent: true,
+		},
+		record: runbundle.BundleCatalogRuntimeRecord{
+			BundleHash: projection.BundleHash, ContentYAML: projection.ContentYAML, DataBlob: projection.DataBlob,
+		},
+	}
+	loader := BundleCatalogSelectedContractSourceLoader{
+		RepoRoot: repoRoot, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+		PlatformPackBases: baseGenerations, Store: catalogStore,
+	}
+	loaded, err := loader.LoadRunForkSelectedContractSourceForRequest(ctx, SelectedContractSourceLoadRequest{
+		SourceRunID: sourceRunID,
+		BundleHash:  projection.BundleHash,
+		Selection: runfork.RunForkContractSelection{
+			Mode: runfork.RunForkContractSelectionModeBundleHash, BundleHash: projection.BundleHash,
+		},
+	})
+	if err != nil {
+		t.Fatalf("load imported project-pack fork source: %v", err)
+	}
+	defer cleanupLoadedSelectedContractSource(loaded)
+	loadedBundle, ok := semanticview.Bundle(loaded.Source)
+	if !ok || loadedBundle == nil || loadedBundle.PackInventory == nil {
+		t.Fatalf("fork source bundle = %#v, present=%t", loadedBundle, ok)
+	}
+	entry, ok := loadedBundle.PackInventory.Lookup("provider.telegram")
+	if !ok || entry.Source() != packartifact.ProvenanceProject || !entry.Modified() || !entry.ShadowsBase() ||
+		loadedBundle.PackInventory.BaseDigest() != base.Digest() || string(entry.ManifestBody()) != string(edited) {
+		t.Fatalf("fork imported pack = %#v present=%t base=%s", entry, ok, loadedBundle.PackInventory.BaseDigest())
+	}
+}
+
 func TestContractBundleSourceLoaderRejectsIncompatiblePlatformVersion(t *testing.T) {
 	ctx := context.Background()
 	repoRoot := runForkExecutionRepoRoot(t)
@@ -787,10 +878,7 @@ func assertLoadedSelectedConnectorResponse(t *testing.T, loaded LoadedSelectedCo
 	if len(response) != 0 {
 		t.Fatalf("telegram generated response = %#v, want canonical empty object", response)
 	}
-	ambient, ok := providerconnectors.BuiltinTool("github", "github.create_issue")
-	if !ok {
-		t.Fatal("built-in github.create_issue fixture missing")
-	}
+	ambient := packfixture.ConnectorTool(t, "github", "github.create_issue").Tool
 	if _, err := loaded.MockConnectorResponses.Admit("github.create_issue", ambient); err == nil || !strings.Contains(err.Error(), "not configured") {
 		t.Fatalf("selected response plan admitted unimported github.create_issue: %v", err)
 	}

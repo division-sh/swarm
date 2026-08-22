@@ -19,8 +19,11 @@ import (
 
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	bundlecatalog "github.com/division-sh/swarm/internal/bundlecatalog"
+	"github.com/division-sh/swarm/internal/packartifact"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"gopkg.in/yaml.v3"
 )
 
@@ -614,6 +617,51 @@ func TestBundleBuildMaterializesContractsAndJSONReport(t *testing.T) {
 	}
 }
 
+func TestBundleBuildUsesConfiguredDevelopmentPackBase(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	embedded := packfixture.EmbeddedBase(t)
+	telegram, ok := embedded.Lookup("provider.telegram")
+	if !ok {
+		t.Fatal("embedded Telegram pack is missing")
+	}
+	modified := []byte(strings.Replace(string(telegram.ManifestBody()), "telegram update object is required", "development telegram update object is required", 1))
+	if string(modified) == string(telegram.ManifestBody()) {
+		t.Fatal("Telegram development fixture changed")
+	}
+	development, dirs := packfixture.DevelopmentBase(t, map[string][]byte{"provider.telegram": modified})
+	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
+	configLines := []string{"runtime:", "  execution_posture: live", "llm:", "  backend: anthropic", "platform:", "  packs:", "    platform_dirs:"}
+	for _, dir := range dirs {
+		configLines = append(configLines, "      - "+dir)
+	}
+	writeRuntimeConfigText(t, configPath, strings.Join(configLines, "\n")+"\n")
+
+	contractsDir := writeBundleBuildCLIContractsFixture(t)
+	outputRoot := filepath.Join(t.TempDir(), "build-output")
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
+		"bundle", "build", "--contracts", contractsDir, "--output", outputRoot, "--report", "json", "--config", configPath,
+	}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("development build code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var report runtimecontracts.BundleBuildReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	receiptBody, err := os.ReadFile(filepath.Join(report.OutputPath, filepath.FromSlash(packartifact.PackSelectionRelativePath)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := packartifact.ParsePackSelectionReceipt(receiptBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.BaseMode != packartifact.SelectionDevelopmentOverride || receipt.BaseDigest != development.Digest() || receipt.EffectiveDigest == "" {
+		t.Fatalf("materialized development receipt = %#v, want base %s", receipt, development.Digest())
+	}
+}
+
 func TestBundleBuildHelpAndOutOfScopeShapes(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"bundle", "build", "--help"}, &stdout, &stderr, rootCommandOptions{})
@@ -733,7 +781,7 @@ func TestBundleRegisterContractsDirectoryUsesCanonicalRPCAndRenders(t *testing.T
 			t.Fatalf("ignored content leaked through %s", file.Path)
 		}
 	}
-	wantPaths := []string{"agents.yaml", "flows/alpha/schema.yaml", "package.yaml", "prompts/root.md"}
+	wantPaths := []string{".swarm/pack-selection.yaml", "agents.yaml", "flows/alpha/schema.yaml", "package.yaml", "prompts/root.md"}
 	if !reflect.DeepEqual(paths, wantPaths) {
 		t.Fatalf("content_yaml files = %#v, want %#v\n%s", paths, wantPaths, contentYAML)
 	}
@@ -763,6 +811,60 @@ func TestBundleRegisterContractsDirectoryUsesCanonicalRPCAndRenders(t *testing.T
 	}
 	if strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestBundleRegisterContractsDoesNotRequireExecutionPosture(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	userConfigDir, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(userConfigDir, "swarm", "swarm.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	contractsDir := writeBundleRegisterContractsFixture(t)
+	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
+	writeRuntimeConfigText(t, configPath, "platform:\n  packs: {}\n")
+	var captured jsonRPCRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		writeJSONRPCResult(t, w, captured.ID, validBundleRegistrationResult(validBundleHash("7")))
+	}))
+	defer server.Close()
+	rootOpts := defaultRootCommandOptions()
+	rootOpts.apiRPCEndpointOverride = server.URL + "/v1/rpc"
+	rootOpts.apiTokenFile = writeCLIAPITokenFile(t, "test-token")
+	rootOpts.httpClient = server.Client()
+
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
+		"bundle", "register", "--contracts", contractsDir, "--config", configPath,
+	}, &stdout, &stderr, rootOpts)
+	if code != 0 {
+		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if captured.Method != bundleRegisterMethod {
+		t.Fatalf("method = %q, want %q", captured.Method, bundleRegisterMethod)
+	}
+	if strings.TrimSpace(stderr.String()) != "" {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+
+	writeRuntimeConfigText(t, configPath, "runtime:\n  execution_posture: invalid\n")
+	captured = jsonRPCRequest{}
+	stdout.Reset()
+	stderr.Reset()
+	code = executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
+		"bundle", "register", "--contracts", contractsDir, "--config", configPath,
+	}, &stdout, &stderr, rootOpts)
+	if code != CLIExitValidation || !strings.Contains(stderr.String(), `runtime.execution_posture must be exactly live or mock_only, got "invalid"`) {
+		t.Fatalf("invalid posture code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+	if captured.Method != "" {
+		t.Fatalf("invalid posture reached RPC method %q", captured.Method)
 	}
 }
 

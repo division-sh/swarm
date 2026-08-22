@@ -12,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
-	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
@@ -28,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
 )
 
@@ -223,10 +223,7 @@ func TestNewRuntimeValidatesInboundPublicationIntegrityBeforeWiringGateway(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	catalog, err := providertriggers.NewCatalogSnapshot()
-	if err != nil {
-		t.Fatalf("NewCatalogSnapshot: %v", err)
-	}
+	catalog := packfixture.TriggerCatalog(t)
 	sentinel := errors.New("inbound publication corruption")
 	corrupt := &recordingInboundStore{integrityErr: sentinel}
 	_, err = newScopedTestRuntime(t, context.Background(), RuntimeDeps{

@@ -29,7 +29,7 @@ func TestVersionLocalDoesNotRequireTokenOrRequest(t *testing.T) {
 		t.Fatalf("server calls = %d, want 0", calls.Load())
 	}
 	metadata := currentTestVersionMetadata(t)
-	for _, want := range []string{"Swarm " + metadata.BinaryVersion, "Commit: " + metadata.Commit, "Built: " + metadata.Built, "Go:"} {
+	for _, want := range []string{"Swarm " + metadata.BinaryVersion, "Commit: " + metadata.Commit, "Built: " + metadata.Built, "Go:", "Embedded pack inventory digest: sha256:"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}

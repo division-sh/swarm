@@ -398,16 +398,16 @@ func slackManagedConnectorSource(t *testing.T, baseURL, flowInstance string) sem
 			},
 		},
 	}
-	source, err := providerconnectors.SourceWithConnectorPackImportsFromRegistry(importSource, slackManagedConnectorPackRegistry(t, baseURL))
+	source, err := providerconnectors.SourceWithConnectorPackImports(importSource, slackManagedConnectorPackRegistry(t, baseURL))
 	if err != nil {
-		t.Fatalf("SourceWithConnectorPackImportsFromRegistry: %v", err)
+		t.Fatalf("SourceWithConnectorPackImports: %v", err)
 	}
 	return source
 }
 
 func slackManagedConnectorPackRegistry(t *testing.T, baseURL string) *providerconnectors.PackRegistry {
 	t.Helper()
-	tool, ok := providerconnectors.BuiltinTool("slack", "slack.post_message")
+	tool, ok := embeddedConnectorTool(t, "slack", "slack.post_message")
 	if !ok {
 		t.Fatal("provider connector pack slack.post_message not found")
 	}

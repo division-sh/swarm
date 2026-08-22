@@ -585,9 +585,9 @@ func githubAppIssueWorkflowSource(t *testing.T, baseURL, flowInstance string) se
 			},
 		},
 	}
-	source, err := providerconnectors.SourceWithConnectorPackImportsFromRegistry(importSource, githubAppIssueWorkflowPackRegistry(t, baseURL))
+	source, err := providerconnectors.SourceWithConnectorPackImports(importSource, githubAppIssueWorkflowPackRegistry(t, baseURL))
 	if err != nil {
-		t.Fatalf("SourceWithConnectorPackImportsFromRegistry: %v", err)
+		t.Fatalf("SourceWithConnectorPackImports: %v", err)
 	}
 	return source
 }
@@ -596,7 +596,7 @@ func githubAppIssueWorkflowPackRegistry(t *testing.T, baseURL string) *providerc
 	t.Helper()
 	tools := map[string]runtimecontracts.ToolSchemaEntry{}
 	for _, toolID := range []string{"github.add_labels_to_issue", "github.create_issue", "github.create_issue_comment"} {
-		tool, ok := providerconnectors.BuiltinTool("github", toolID)
+		tool, ok := embeddedConnectorTool(t, "github", toolID)
 		if !ok {
 			t.Fatalf("provider connector pack %s not found", toolID)
 		}

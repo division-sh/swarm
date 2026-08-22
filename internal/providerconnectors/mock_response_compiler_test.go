@@ -13,7 +13,7 @@ import (
 
 func TestCompileMockResponsePlanGeneratesEveryEffectiveConnectorDeterministically(t *testing.T) {
 	tools := map[string]runtimecontracts.ToolSchemaEntry{}
-	for _, installed := range DefaultPackRegistry().Inventory() {
+	for _, installed := range testPackRegistry(t).Inventory() {
 		if installed.Tool.Category() != runtimecontracts.ToolCategoryProviderConnector {
 			continue
 		}

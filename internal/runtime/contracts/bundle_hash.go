@@ -17,6 +17,7 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
+	"github.com/division-sh/swarm/internal/packartifact"
 	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"golang.org/x/text/unicode/norm"
@@ -41,6 +42,7 @@ type bundleHashEntry struct {
 	Label         string
 	Path          string
 	Policy        bundleHashContentPolicy
+	SourceExact   []byte
 	ExpectedExact []byte
 	ExactOwner    string
 }
@@ -167,11 +169,115 @@ func bundleHashEntries(bundle *WorkflowContractBundle) ([]bundleHashEntry, error
 	if err := builder.addAgentIntentFiles(bundle); err != nil {
 		return nil, err
 	}
+	if err := builder.addPackInputs(bundle); err != nil {
+		return nil, err
+	}
 
 	sort.Slice(builder.entries, func(i, j int) bool {
 		return builder.entries[i].Label < builder.entries[j].Label
 	})
 	return builder.entries, nil
+}
+
+func (b *bundleHashEntryBuilder) addPackInputs(bundle *WorkflowContractBundle) error {
+	if bundle == nil || bundle.PackInventory == nil {
+		return nil
+	}
+	receipt := append([]byte(nil), bundle.PackSelectionBody...)
+	if len(receipt) == 0 {
+		return fmt.Errorf("workflow contract bundle pack selection receipt is required")
+	}
+	if err := b.addPackSelectionInput(bundle.PackSelectionPath, receipt); err != nil {
+		return err
+	}
+	for _, file := range bundle.ProjectPacks.Files {
+		var err error
+		if file.RelativePath == packartifact.ProjectPackManifestLabel {
+			err = b.addExactYAMLBundleInput(file.AbsolutePath, file.RelativePath, file.Body, "project pack manifest admission")
+		} else {
+			err = b.addExactBundleInput(file.AbsolutePath, file.RelativePath, file.Body, "project pack admission")
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (b *bundleHashEntryBuilder) addPackSelectionInput(filePath string, source []byte) error {
+	label := "bundle/" + packartifact.PackSelectionRelativePath
+	if err := validateBundleHashLabel(label); err != nil {
+		return err
+	}
+	if _, exists := b.labels[label]; exists {
+		return fmt.Errorf("duplicate bundle hash label %q", label)
+	}
+	folded := asciiFoldBundleHashLabel(label)
+	if existing, exists := b.foldedLabels[folded]; exists && existing != label {
+		return fmt.Errorf("case-colliding bundle hash labels %q and %q", existing, label)
+	}
+	if strings.TrimSpace(filePath) != "" {
+		abs, err := canonicalContractsRootInput(b.contractsRoot, filePath, "effective pack base selection", false)
+		if err != nil {
+			return err
+		}
+		filePath = abs
+		b.seenPaths[filePath] = struct{}{}
+	}
+	b.labels[label] = filePath
+	b.foldedLabels[folded] = label
+	b.entries = append(b.entries, bundleHashEntry{
+		Label: label, Path: filePath, Policy: bundleHashYAML,
+		SourceExact: append([]byte(nil), source...), ExactOwner: "effective pack base selection",
+	})
+	return nil
+}
+
+func (b *bundleHashEntryBuilder) addExactBundleInput(filePath, relative string, expected []byte, owner string) error {
+	return b.addExactBundleInputWithPolicy(filePath, relative, expected, owner, bundleHashRaw)
+}
+
+func (b *bundleHashEntryBuilder) addExactYAMLBundleInput(filePath, relative string, expected []byte, owner string) error {
+	return b.addExactBundleInputWithPolicy(filePath, relative, expected, owner, bundleHashYAML)
+}
+
+func (b *bundleHashEntryBuilder) addExactBundleInputWithPolicy(filePath, relative string, expected []byte, owner string, policy bundleHashContentPolicy) error {
+	relative = filepath.ToSlash(strings.TrimSpace(relative))
+	if relative == "" || len(expected) == 0 {
+		return fmt.Errorf("%s requires a relative path and exact bytes", owner)
+	}
+	label := "bundle/" + relative
+	if err := validateBundleHashLabel(label); err != nil {
+		return err
+	}
+	if existing, exists := b.labels[label]; exists {
+		return fmt.Errorf("duplicate bundle hash label %q for %s and %s", label, existing, filePath)
+	}
+	folded := asciiFoldBundleHashLabel(label)
+	if existing, exists := b.foldedLabels[folded]; exists && existing != label {
+		return fmt.Errorf("case-colliding bundle hash labels %q and %q", existing, label)
+	}
+	if strings.TrimSpace(filePath) != "" {
+		abs, err := canonicalContractsRootInput(b.contractsRoot, filePath, owner, false)
+		if err != nil {
+			return err
+		}
+		filePath = abs
+		if _, exists := b.seenPaths[filePath]; exists {
+			return fmt.Errorf("%s %s overlaps another canonical input", owner, relative)
+		}
+		b.seenPaths[filePath] = struct{}{}
+	}
+	b.labels[label] = filePath
+	b.foldedLabels[folded] = label
+	entry := bundleHashEntry{Label: label, Path: filePath, Policy: policy, ExactOwner: owner}
+	if policy == bundleHashYAML {
+		entry.SourceExact = append([]byte(nil), expected...)
+	} else {
+		entry.ExpectedExact = append([]byte(nil), expected...)
+	}
+	b.entries = append(b.entries, entry)
+	return nil
 }
 
 type bundleHashEntryBuilder struct {
@@ -628,6 +734,55 @@ func canonicalBundleHashContent(path string, policy bundleHashContentPolicy) ([]
 	if err != nil {
 		return nil, err
 	}
+	return canonicalBundleHashRawContent(raw, policy)
+}
+
+func canonicalBundleHashEntryContent(entry bundleHashEntry) ([]byte, error) {
+	raw, err := bundleHashEntryRawContent(entry)
+	if err != nil {
+		return nil, err
+	}
+	content, err := canonicalBundleHashRawContent(raw, entry.Policy)
+	if err != nil {
+		return nil, err
+	}
+	if entry.ExpectedExact != nil && !bytes.Equal(content, entry.ExpectedExact) {
+		owner := strings.TrimSpace(entry.ExactOwner)
+		if owner == "" {
+			owner = "exact artifact compilation"
+		}
+		return nil, fmt.Errorf("canonical input changed after %s", owner)
+	}
+	return content, nil
+}
+
+func bundleHashEntryRawContent(entry bundleHashEntry) ([]byte, error) {
+	if entry.SourceExact != nil {
+		if strings.TrimSpace(entry.Path) != "" {
+			raw, err := os.ReadFile(entry.Path)
+			if err != nil {
+				return nil, err
+			}
+			if !bytes.Equal(raw, entry.SourceExact) {
+				return nil, fmt.Errorf("canonical input changed after %s", firstNonEmpty(strings.TrimSpace(entry.ExactOwner), "exact source admission"))
+			}
+		}
+		return append([]byte(nil), entry.SourceExact...), nil
+	}
+	if strings.TrimSpace(entry.Path) == "" {
+		if entry.ExpectedExact == nil {
+			return nil, fmt.Errorf("canonical input %s has neither a source path nor exact bytes", entry.Label)
+		}
+		return append([]byte(nil), entry.ExpectedExact...), nil
+	}
+	raw, err := os.ReadFile(entry.Path)
+	if err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+
+func canonicalBundleHashRawContent(raw []byte, policy bundleHashContentPolicy) ([]byte, error) {
 	switch policy {
 	case bundleHashYAML:
 		return canonicalBundleHashYAML(raw)
@@ -641,21 +796,6 @@ func canonicalBundleHashContent(path string, policy bundleHashContentPolicy) ([]
 	default:
 		return nil, fmt.Errorf("unknown bundle hash content policy %d", policy)
 	}
-}
-
-func canonicalBundleHashEntryContent(entry bundleHashEntry) ([]byte, error) {
-	content, err := canonicalBundleHashContent(entry.Path, entry.Policy)
-	if err != nil {
-		return nil, err
-	}
-	if entry.ExpectedExact != nil && !bytes.Equal(content, entry.ExpectedExact) {
-		owner := strings.TrimSpace(entry.ExactOwner)
-		if owner == "" {
-			owner = "exact artifact compilation"
-		}
-		return nil, fmt.Errorf("canonical input changed after %s", owner)
-	}
-	return content, nil
 }
 
 func canonicalBundleHashYAML(raw []byte) ([]byte, error) {

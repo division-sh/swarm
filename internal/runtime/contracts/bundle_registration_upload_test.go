@@ -10,8 +10,17 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/packartifact"
 	"gopkg.in/yaml.v3"
 )
+
+type testPackAdmissionProjection string
+
+func (p testPackAdmissionProjection) EffectivePackInventoryDigest() string { return string(p) }
+
+func admitPackInventoryForRegistrationTest(inventory *packartifact.EffectivePackInventory, _ PlatformSpecDocument) (PackAdmissionProjection, error) {
+	return testPackAdmissionProjection(inventory.Digest()), nil
+}
 
 func TestBuildBundleRegistrationDirectoryUploadPackagesTextAndData(t *testing.T) {
 	repo := repoRootForContractsTest(t)
@@ -40,6 +49,7 @@ func TestBuildBundleRegistrationDirectoryUploadPackagesTextAndData(t *testing.T)
 		}
 	}
 	wantPaths := []string{
+		".swarm/pack-selection.yaml",
 		"agents.yaml",
 		"flows/alpha/flows/gamma/schema.yaml",
 		"flows/alpha/package.yaml",
@@ -142,6 +152,147 @@ terminal_states: [ready]
 	}
 	if string(workerRaw) != intentContent {
 		t.Fatalf("reconstructed intent = %q, want exact %q", workerRaw, intentContent)
+	}
+}
+
+func TestProjectPackBytesAndBaseReceiptSurviveCatalogReconstruction(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := t.TempDir()
+	writeBundleRegistrationUploadFixture(t, root)
+	platform := DefaultPlatformSpecFile(repo)
+	base, err := packartifact.LoadEmbeddedPlatformPackInventory("0.7.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseGenerations, err := packartifact.NewPlatformPackBaseGenerationOwner(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := packartifact.ImportEmbeddedPack(root, "provider.telegram", base); err != nil || !changed {
+		t.Fatalf("import telegram changed=%t error=%v", changed, err)
+	}
+	bodyPath := filepath.Join(root, "packs", "provider.telegram", packartifact.TriggerManifestFileName)
+	body, err := os.ReadFile(bodyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := []byte(strings.Replace(string(body), "telegram update object is required", "catalog project telegram update object is required", 1))
+	if string(edited) == string(body) {
+		t.Fatal("telegram test edit found no canonical field")
+	}
+	if err := os.WriteFile(bodyPath, edited, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	bundle, err := LoadWorkflowContractBundleWithOptions(repo, root, platform, WorkflowContractLoadOptions{
+		PlatformPackBase:   base,
+		AdmitPackInventory: admitPackInventoryForRegistrationTest,
+	})
+	if err != nil {
+		t.Fatalf("load project pack bundle: %v", err)
+	}
+	upload, err := BuildBundleRegistrationDirectoryUploadWithOptions(repo, root, platform, WorkflowContractLoadOptions{
+		PlatformPackBase:   base,
+		AdmitPackInventory: admitPackInventoryForRegistrationTest,
+	})
+	if err != nil {
+		t.Fatalf("build project pack registration upload: %v", err)
+	}
+	var uploadEnvelope bundleRegistrationEnvelopeUploadV1
+	if err := yaml.Unmarshal([]byte(upload.ContentYAML), &uploadEnvelope); err != nil {
+		t.Fatal(err)
+	}
+	textPaths := make(map[string]struct{}, len(uploadEnvelope.Files))
+	for _, file := range uploadEnvelope.Files {
+		textPaths[file.Path] = struct{}{}
+	}
+	if _, ok := textPaths[packartifact.ProjectPackManifestLabel]; !ok {
+		t.Fatalf("registration text upload omitted canonical membership: %#v", uploadEnvelope.Files)
+	}
+	if upload.DataBlob == nil {
+		t.Fatal("registration upload omitted exact project pack data")
+	}
+	rawPaths := make(map[string]struct{}, len(upload.DataBlob.Entries))
+	for _, file := range upload.DataBlob.Entries {
+		rawPaths[file.Path] = struct{}{}
+	}
+	for _, path := range []string{
+		"packs/provider.telegram/" + packartifact.EnvelopeFileName,
+		"packs/provider.telegram/" + packartifact.TriggerManifestFileName,
+	} {
+		if _, ok := rawPaths[path]; !ok {
+			t.Fatalf("registration data upload omitted exact %s: %#v", path, upload.DataBlob.Entries)
+		}
+	}
+	if _, ok := rawPaths[packartifact.ProjectPackManifestLabel]; ok {
+		t.Fatalf("registration data upload treated membership as raw: %#v", upload.DataBlob.Entries)
+	}
+	projection, err := BuildBundleCatalogProjection(bundle)
+	if err != nil {
+		t.Fatalf("project pack catalog projection: %v", err)
+	}
+	for _, path := range []string{".swarm/pack-selection.yaml", "packs/manifest.yaml", "packs/provider.telegram/pack.yaml", "packs/provider.telegram/trigger.yaml"} {
+		if !strings.Contains(projection.ContentYAML, path) {
+			t.Fatalf("catalog projection omitted %s:\n%s", path, projection.ContentYAML)
+		}
+	}
+
+	loaded, err := LoadBundleCatalogRuntimeSource(repo, BundleCatalogRuntimeLoadRequest{
+		BundleHash: projection.BundleHash, ContentYAML: projection.ContentYAML, DataBlob: projection.DataBlob,
+		RunningPlatformSpecPath: platform, PlatformPackBases: baseGenerations,
+		AdmitPackInventory: admitPackInventoryForRegistrationTest,
+	})
+	if err != nil {
+		t.Fatalf("reconstruct project pack bundle: %v", err)
+	}
+	defer loaded.Cleanup()
+	gotBody, err := os.ReadFile(filepath.Join(loaded.ContractsRoot, "packs", "provider.telegram", packartifact.TriggerManifestFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(gotBody, edited) {
+		t.Fatalf("reconstructed project pack body = %q, want %q", gotBody, edited)
+	}
+	entry, ok := loaded.Bundle.PackInventory.Lookup("provider.telegram")
+	if !ok || entry.Source() != packartifact.ProvenanceProject || !entry.Modified() || !entry.ShadowsBase() {
+		t.Fatalf("reconstructed telegram inventory entry = %#v found=%t", entry, ok)
+	}
+
+	tamperedDigest := "sha256:" + strings.Repeat("0", 64)
+	var archive bundleCatalogContentArchive
+	if err := yaml.Unmarshal([]byte(projection.ContentYAML), &archive); err != nil {
+		t.Fatal(err)
+	}
+	tampered := false
+	for i := range archive.Files {
+		if archive.Files[i].Label != "bundle/"+packartifact.PackSelectionRelativePath {
+			continue
+		}
+		receipt, err := base64.StdEncoding.DecodeString(archive.Files[i].ContentBase64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		replaced := strings.Replace(string(receipt), bundle.PackInventory.BaseDigest(), tamperedDigest, 1)
+		if replaced == string(receipt) {
+			t.Fatal("catalog projection pack receipt omitted exact base digest")
+		}
+		archive.Files[i].ContentBase64 = base64.StdEncoding.EncodeToString([]byte(replaced))
+		tampered = true
+	}
+	if !tampered {
+		t.Fatal("catalog projection omitted pack selection receipt")
+	}
+	tamperedProjectionBody, err := yaml.Marshal(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = LoadBundleCatalogRuntimeSource(repo, BundleCatalogRuntimeLoadRequest{
+		BundleHash: projection.BundleHash, ContentYAML: string(tamperedProjectionBody), DataBlob: projection.DataBlob,
+		RunningPlatformSpecPath: platform, PlatformPackBases: baseGenerations,
+		AdmitPackInventory: admitPackInventoryForRegistrationTest,
+	})
+	if err == nil || !strings.Contains(err.Error(), "pack selection receipt requires embedded base "+tamperedDigest) {
+		t.Fatalf("tampered base receipt error = %v", err)
 	}
 }
 

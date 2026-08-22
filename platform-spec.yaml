@@ -9110,9 +9110,9 @@ tool_model:
         deterministic tool-id order, and rejects any declared capability or requirement drift. Connector envelopes declare
         action capability truth as `capabilities.can.call_provider_actions`, a non-empty list of the exact packed tool ids;
         the former scalar `capabilities.can.call_provider_action` form is retired and MUST fail closed under strict
-        envelope parsing rather than being accepted as a compatibility alias. External connector-pack directories remain a
-        later gated surface, so first-party connector packs are migrated aggressively before any external connector-pack
-        compatibility promise exists.
+        envelope parsing rather than being accepted as a compatibility alias. Remote marketplace fetch/version policy remains
+        a later gated surface; accepted non-base connector packs are explicit project-owned imports rather than external
+        runtime directories.
       capability_surface: >
         Connector body facts and deployment readiness consume `tool_model.provider_capability_surface`. Effective imported
         and flow-local connectors use the same typed model; installed unimported actions render AVAILABLE without becoming
@@ -9216,7 +9216,7 @@ tool_model:
         result without a second provider dispatch.
       non_goals:
       - read-only provider connector admission
-      - external connector-pack directories or marketplace publication
+      - remote connector-pack fetching, version solving, or marketplace publication
       - full GitHub API generation or broad OpenAPI normalization
       - provider rate-limit or generic error-taxonomy expansion
       - provider-specific generator or runtime branches
@@ -9593,14 +9593,15 @@ tool_model:
         branch. A structurally different satisfier with object/scalar reference differences and tighter limits must pass the
         same production compiler.
     configuration:
-      pack_roots:
-      - channels.packs.platform_dirs
-      - channels.packs.external_dirs
+      pack_inventory: internal/packartifact.EffectivePackInventory selected for the exact bundle
+      development_override: elevated `platform.packs.platform_dirs` complete replacement of the embedded base inventory
+      project_imports: explicit project `packs/manifest.yaml` membership included in bundle identity
       outbound_binding_shape: 'channels.bindings.<id>: {pack: <channel-pack-id>, destination: <provider-owned semantic value>}'
       trust: >
-        Platform pack directories and binding identities/destinations are elevated operator configuration. External pack
-        directories are project-contained paths. Missing dependencies, malformed packs, duplicate inventory, invalid
-        destinations, or unusable connector requirements fail closed before runtime construction.
+        Channel descriptors are selected only from the bundle's exact effective pack inventory. Development override paths
+        and binding identities/destinations are elevated operator configuration; project-imported pack bytes are explicit
+        project-owned bundle inputs. Missing dependencies, malformed packs, duplicate inventory, invalid destinations, or
+        unusable connector requirements fail closed before runtime construction.
       credential_requirements: >
         Requirement aggregation is deterministic across operation names. Requirements with one kind/key must be exactly
         equal across grant type, scopes, grant model, token request profile, and installation input; incompatible same-key
@@ -9833,13 +9834,14 @@ tool_model:
         secret requirement, typed raw-versus-normalized output manifest, event-name policy, and unsigned acknowledgement fact. Runtime targets and effective capability
         subjects carry this plan; a target without a valid plan is unavailable and the gateway fails before credential
         lookup, body interpretation, marker persistence, or publish.
-      process_generation: >
-        Boot compiles primary and every additional loaded BundleContext against one CatalogSnapshot generation before any
-        runtime is published. Reload re-reads and re-verifies configured pack directories into a candidate snapshot, then
-        recompiles the candidate context and every surviving loaded context. RuntimeContextManager validates and atomically
-        publishes the candidate primary context, all surviving target plans, catalog generation, installed subjects, and
-        effective subjects. Missing/remapped/tampered packs, incomplete surviving-context recompilation, generation mismatch,
-        target collision, or projection failure rejects reload while the predecessor contexts and generation remain loaded.
+      bundle_generation: >
+        Each loaded BundleContext owns the immutable trigger catalog, connector registry, channel plans, installed subjects,
+        and effective subjects derived from that bundle's exact EffectivePackInventory. Boot and reload compile a candidate
+        only from its own selected base digest, project pack bytes, and selection receipt. RuntimeContextManager validates
+        and atomically publishes that bundle generation without recompiling or reinterpreting surviving bundles against the
+        candidate inventory. Missing, remapped, tampered, or incompatible packs, base/project digest mismatch, target
+        collision, or projection failure rejects the candidate while every predecessor and unrelated bundle generation
+        remains authoritative.
       projections: >
         Verify, local preflight, serve readiness, and doctor consume `tool_model.provider_capability_surface` installed and
         effective subjects from the compiled owner. Basic describe and routing topology remain declaration-only and show
@@ -9855,22 +9857,56 @@ tool_model:
         is a post-commit side effect queued before event dispatch; persisted flow-instance and route authority remain
         transaction participants.
     pack_envelope_source_authority:
-      owner: internal/packs universal envelope plus body-specific verifiers such as internal/providertriggers and internal/providerconnectors
+      owner: internal/packartifact explicit base/project/effective inventories, internal/packmodel universal envelope, and body-specific verifiers
       status: >
         E5 source-authority path. Provider-trigger, provider-connector, and channel packs wrap their body-specific canonical
         vocabulary in a universal pack envelope before registration/import. The envelope is a trust/admission artifact, not
-        a provider-specific adapter and not a new body vocabulary owner. Configured-provider manifests are selected
-        filesystem pack inventory, never an executable hard-coded identity list. Elevated runtime config declares platform
-        provider-trigger pack directories at `provider_triggers.packs.platform_dirs`; project config cannot select that
-        platform-authored capability source. Runtime config declares external provider-trigger packs separately at
-        `provider_triggers.packs.external_dirs`. Relative paths in both lists resolve against the config layer that declares
-        the effective key. `swarm serve` verifies the declared set before runtime construction and injects one
-        immutable catalog snapshot generation into every runtime and Builder replacement runtime. Missing, malformed,
-        incompatible, tampered, or
-        colliding declared packs fail boot; no executable-relative, current-directory, source-checkout, embedded, package-
-        global default, or nil-catalog discovery fallback exists. Connector packs in this first slice are platform packs
-        explicitly imported by package.yaml `connector_packs.imports[]`; external connector-pack directories require a later
-        gated surface.
+        a provider-specific adapter and not a new body vocabulary owner. One explicit manifest inside the binary owns the
+        immutable embedded base membership for all three pack kinds. Elevated `platform.packs.platform_dirs` is the sole
+        development override and atomically replaces that complete base; it never overlays or falls back to embedded packs.
+        A selected project may add only the exact project pack paths listed in strict `packs/manifest.yaml`; those current
+        bytes, immutable embedded import receipts, and shadowed-base facts are bundle inputs. Effective precedence is one
+        exact project-local id over the selected embedded-or-development base id. `swarm serve`, Builder replacement,
+        registration, reconstruction, recovery, and fork all retain the same bundle-specific effective inventory and exact
+        selected base receipt. Missing, extra, malformed, incompatible, tampered, colliding, traversing, symlinked, or
+        digest-mismatched inputs fail before publication. No executable-relative, current-directory, source-checkout,
+        machine-global, package-global, nil, per-kind-directory, or independent archive-scan fallback exists.
+        Development inventory readback retains the exact configured absolute directory associated with each admitted pack;
+        synthetic paths used to validate the complete replacement are not source provenance.
+      admitted_projection: >
+        `internal/packadmission` is the sole body-admission orchestrator for an exact EffectivePackInventory. It parses and
+        validates every trigger, connector, and channel body and compiles their cross-kind channel satisfaction plans into
+        one bundle-owned admitted projection. Pack import path resolution, inventory readback, hashing, bundle build and
+        registration, verify, describe,
+        describe routes, doctor schema inventory, secrets requirement discovery, serve, effective-source compilation,
+        replacement, recovery, and fork must receive that projection from the exact configured base before publishing,
+        executing, or reporting the inventory. CLI workflow-module consumers must resolve the selected base through runtime
+        configuration; a nil or default-base selector is not an authoritative fallback. Downstream consumers retrieve the
+        stored projection and must not independently reparse an inventory body. Credential binding and deployment activation
+        remain later, different semantic concepts. Pack import is non-executing packaging: omitted execution posture cannot
+        block it, while an explicitly authored invalid posture still fails closed.
+      inventory_immutability: >
+        Platform and effective inventories own immutable envelope, envelope-body, and manifest-body snapshots. Every lookup,
+        enumeration, and envelope accessor returns defensive copies of all nested slices, maps, and byte collections. A
+        caller cannot mutate stored admission bytes, filesystem projections, or semantic fields while the inventory digest
+        remains unchanged, and concurrent readers never share caller-mutable envelope collections.
+      selected_base_generation_lifecycle: >
+        A serving process retains each immutable embedded or complete-development base it has selected, addressed by the
+        exact base digest in the bundle receipt. Reload prepares fresh effective config, base bytes, project bytes, and the
+        admitted projection as one candidate, then makes that base current only when candidate publication succeeds. A
+        rejected candidate does not change the current base or predecessor runtime. Same-process survivor reconstruction,
+        recovery, and fork resolve their receipt against the retained exact generation. This retention is not an archive,
+        migration, or compatibility promise across binary starts.
+      project_inventory_transaction: >
+        Project pack mutation and validated reads share one project-scoped cross-process transaction/snapshot lock anchored
+        without mutation on the existing root `package.yaml`, outside the strict `packs/` namespace. Validated readers open
+        that anchor read-only and take a shared lock, so read-only source and materialized bundles remain supported; imports
+        take the exclusive lock before their first inventory path or manifest read and retain it through directory and
+        manifest publication. Validation holds the shared snapshot through every manifest, envelope, body, and unexpected-
+        entry read. Temporary import and manifest artifacts remain outside reader-visible inventory. Successful concurrent
+        imports preserve every committed membership row and directory, and a reader observes only a complete predecessor or
+        successor snapshot. Ordinary publication failures roll back their candidate. No contracts-tree lock artifact,
+        unlocked reader, process-local mutex, compare/retry fallback, repair, or migration path is authoritative.
       envelope_fields:
         id: >
           Required stable pack identity. Values must be normalized ASCII identifiers and must not be inferred from directory
@@ -9886,8 +9922,13 @@ tool_model:
           Implementations MUST NOT hash re-serialized YAML or semantic object forms because those are not stable contract
           bytes.
         provenance: >
-          Required provenance block. The first supported `source` values are `platform` and `external`. Provenance changes
-          review/readback classification but does not create verification shortcuts.
+          Required provenance block. Platform base envelopes use `platform`; imported current envelopes use `project` while
+          their immutable receipt separately preserves embedded source/id/version/body-digest origin plus the exact project
+          envelope digest emitted at import. Provenance and effective selection (`embedded`, `development_override`, or
+          `project`) change readback classification but never create a verification shortcut. A receipt missing either
+          digest is invalid. Effective-inventory construction MUST require the complete receipt tuple to equal the baseline
+          derived from the binary's exact embedded artifact for that id; syntactic digest validity or agreement with edited
+          project bytes cannot establish embedded provenance. No legacy reconstruction or fallback is permitted.
         capabilities: >
           Required declared capability surface. The loader derives canonical capabilities mechanically from the accepted
           body manifest and requires the declared block to equal the derived block in canonical form. Drift, extra
@@ -9901,11 +9942,17 @@ tool_model:
           a later gated harness; current behavioral proof remains the provider-trigger conformance/runtime suite.
       verification_order:
       - >
-        read configured platform pack directories and external directories while preserving each effective key's declaring
-        config layer
+        read the explicit embedded membership manifest, or the complete development replacement selected by the effective
+        elevated `platform.packs.platform_dirs` key
       - >
-        require platform directory envelopes to declare `provenance.source: platform` and external directory envelopes to
-        declare `provenance.source: external`
+        require selected base envelopes to declare `provenance.source: platform`, and reject missing or unexpected base
+        membership before reading project imports
+      - >
+        require every configured development pack root and each filesystem ancestor from its volume root to be a real
+        directory; a symlink at the root or in any ancestor fails closed before reading inventory bytes
+      - >
+        enumerate the exact two development-pack entries and require both to be regular non-symlink files before opening
+        either `pack.yaml` or its body manifest; unsupported entries fail without blocking on or following them
       - parse envelope with strict known fields
       - validate id/version/platform_version/type/provenance/tests metadata
       - read body manifest bytes selected by pack type, such as trigger.yaml or connector.yaml
@@ -9913,17 +9960,24 @@ tool_model:
       - parse and validate the body manifest through the matching body-specific owner
       - derive body capabilities and requires mechanically from the manifest
       - compare declared capabilities/requires to derived values
-      - reject competing immutable identities and duplicate universal pack ids across the composed set
+      - read only project paths listed by strict `packs/manifest.yaml`; reject extras, duplicates, traversal, symlinks, and invalid import receipts
+      - derive project current identity from exact admitted current bytes and apply exact-id project precedence over the selected base
+      - reject competing immutable identities and duplicate universal pack ids within each source tier
       - reject provider-name/tool-name collisions independently according to the body-specific collision rule
-      - construct one immutable CatalogSnapshot and compile every effective ingress plan only from that snapshot
+      - construct one immutable EffectivePackInventory and body-specific admitted projections for the exact bundle only
       trust_tiers: >
-        Trust tiers differ by provenance value and by readback/operational policy only. First-party bundled packs and
-        future external packs use the identical verifier path. No pack is trusted merely because the platform ships it.
+        Trust tiers differ by source/provenance readback and operational policy only. Embedded, development-replacement, and
+        project pack bodies use the identical envelope and body-specific verifier path. No pack is trusted merely because
+        the binary ships it or because an import receipt exists.
       shadowing_policy: >
-        No pack-id or provider-name shadowing is allowed in this slice. Any duplicate universal pack id or duplicate
-        normalized provider name across platform and external inventories fails closed independently and reports both source
-        paths and provenance values. The tuple `(id, version, manifest_hash)` is immutable within boot admission; competing
-        instances fail before registration. Explicit override or replacement semantics require a later gated affordance.
+        One project-local pack may shadow the same exact pack id in the selected base and readback must render that fact.
+        Other duplicate universal ids or duplicate normalized provider/tool ownership fail closed and report both sources.
+        Development override replaces the complete embedded base before project precedence and never overlays or falls back.
+        The exact selected base digest, project bytes, and resulting effective digest are immutable bundle identity facts.
+        Project readback marks an entry modified when its current exact envelope digest or current body digest differs from
+        the immutable import baseline tuple. This includes version, platform compatibility, tests, capabilities, requires,
+        implements, provenance, formatting, and any other admitted envelope-byte edit; body equality alone cannot hide an
+        envelope edit.
       capability_surface: >
         Readback consumes `tool_model.provider_capability_surface`. Trigger facts derive from the accepted body manifest,
         while envelope capabilities/requires remain integrity assertions only. Trigger pack subjects render AVAILABLE with
@@ -9937,12 +9991,12 @@ tool_model:
         dispatch still fails closed before provider dispatch and before creating a new activity_attempts row when a required
         connector credential is unavailable or unusable.
       first_party_pack_migration: >
-        GitHub, Slack, Stripe, Twilio, Shopify, Typeform, Intercom, and Telegram provider-trigger manifests are first-party
-        platform packs distributed as filesystem inventory and loaded through this envelope path. Their trigger bodies are
-        absent from binary embed inputs. There is no permanent built-in-control exemption, package-global default registry,
-        nil-catalog reconstruction path, or partial platform-inventory mode for configured-provider manifests. Envelope
-        `manifest_hash`, `capabilities`, and `requires` are deterministic build-stamped summaries; import verifies exact-byte
-        body hash and body-derived equality.
+        First-party trigger, connector, and channel bodies live under the one binary-owned embedded inventory and load through
+        this envelope path. There is no built-in-control exemption, ambient connector registry, package-global default,
+        nil-catalog reconstruction, per-kind path loader, or partial development inventory. Generators consume explicit
+        source profiles only at build time, produce checked-in bodies named by the explicit inventory manifest, and provide
+        no runtime discovery or membership authority. Envelope `manifest_hash`, `capabilities`, and `requires` remain
+        deterministic summaries verified against exact body bytes.
       non_goals:
       - pack signing, remote distribution, ownership transfer, or marketplace trust economics
       - executing pack-declared tests
@@ -11051,8 +11105,10 @@ flow_model:
         existing-run-root constructor, preserve that owner, and admit as require-active; it MUST NOT mint a run per webhook.
         An exact committed retry returns the same operation without invoking EventBus or replanning.
       replacement_policy: >
-        Provider-trigger pack directories are re-read and re-verified for every reload. One candidate catalog generation must
-        successfully recompile every surviving loaded context and the replacement context before readiness changes.
+        The replacement project is rebuilt into one candidate bundle-specific effective pack inventory. Its exact selected
+        base receipt, project bytes, trigger catalog, connector registry, and channel plans must validate before readiness
+        changes. Surviving loaded contexts retain their own admitted inventory generations and are never recompiled against
+        the candidate.
         Replacement first rejects new predecessor admission and quiesces predecessor shared-store/background consumers under
         the configured grace while retaining the process capability and predecessor grant. RuntimeContextManager compiles the
         complete successor declaration source set through its private runtime owners; public context snapshots never expose
@@ -16669,6 +16725,15 @@ multi_bundle_persistence:
           - label: bundle/package.yaml
             source: root package manifest
             policy: yaml
+          - label: bundle/.swarm/pack-selection.yaml
+            source: canonical receipt naming the exact selected embedded/development base digest and effective inventory digest
+            policy: yaml
+        project_packs: >
+          When `packs/manifest.yaml` is present, include its canonical YAML plus the exact envelope and body bytes for every
+          explicitly listed project pack under their contract-root-relative labels. No unlisted pack path is scanned or
+          transported. Registration upload, catalog persistence, materialization, reconstruction, recovery, and fork consume
+          these same canonical entries and must fail closed if the current selected base cannot reproduce the persisted base
+          receipt.
         root_optional_yaml:
           - schema.yaml
           - types.yaml
@@ -17192,7 +17257,9 @@ multi_bundle_persistence:
         `--contracts` value is an explicit operator input: it MUST name either the selected contracts directory itself
         or that directory's `package.yaml` file shorthand, and MUST NOT fall back to a parent bundle when the supplied
         path is a typo/non-root child. It is distinct from `swarm bundle build` materialization. Archive packaging remains
-        split until archive format and extraction safety rules are promoted.
+        split until archive format and extraction safety rules are promoted. This packaging-only command may load pack
+        selection config when `runtime.execution_posture` is omitted because it cannot execute a bundle; an explicitly
+        authored invalid posture still fails closed.
     bundle_build_materialization:
       owner: internal/runtime/contracts.BuildBundleMaterialization
       status: implemented_wasm_and_python_slice_b
@@ -18835,20 +18902,26 @@ configuration_source_authority:
             `max_concurrency_max_wait`, and profile-level `models`. Unknown policy fields under a provider profile
             or model policy MUST fail closed as unknown config keys before YAML struct decoding can silently ignore
             them. Nested `models` maps under model-specific policy entries remain unsupported and fail closed.
-        provider_triggers:
-          trust: split_by_pack_authorship
+        platform:
+          trust: elevated
           keys:
             packs.platform_dirs: elevated
-            packs.external_dirs: project_contained_path_or_elevated
-          owner: contract_formats.configured_provider_triggers
+          owner: provider_trigger_adapters.pack_envelope_source_authority
           path_rule: >
-            Project config cannot declare `packs.platform_dirs`; platform-authored capability inventory requires
-            local-operator, user-global, explicit config, or a future promoted flag. Project config may name external packs
-            only through project-contained relative directories. Absolute paths, parent escapes, symlink escapes, or paths
-            outside the canonical project root are elevated. Relative entries in each effective directory-list key resolve
-            from the config layer that declared that key, not from an aggregate or highest-precedence config path. The
-            effective elevated `packs.platform_dirs` key is mandatory and must resolve to the exact current-platform
-            first-party identity inventory; missing, empty, partial, or unexpected platform inventory fails before stores.
+            `platform.packs.platform_dirs` is optional and elevated; omission always selects the immutable embedded base.
+            Presence selects one complete development replacement inventory whose exact membership must equal the embedded
+            id/type set. Relative entries resolve from the config layer that declared the effective key. Missing, empty,
+            partial, extra, duplicate, malformed, or incompatible replacement inventory fails before stores with no embedded
+            fallback. Project-owned pack customization uses explicit `packs/manifest.yaml`, not config paths.
+        provider_triggers:
+          trust: split_unsupported_retired
+          keys:
+            packs.platform_dirs: split_unsupported_retired
+            packs.external_dirs: split_unsupported_retired
+          owner: provider_trigger_adapters.pack_envelope_source_authority
+          path_rule: >
+            The per-kind provider-trigger pack keys are retired and fail closed with guidance to the embedded default,
+            `swarm import <pack-id>`, or elevated `platform.packs.platform_dirs`. They confer no compatibility behavior.
         budget:
           trust: project_safe
           keys:
@@ -18964,8 +19037,11 @@ configuration_source_authority:
       runtime_config_loader: consumed_by_unified_owner_first_slice_implemented
       executable_adjacent_config_yaml: invalid_ambient_reader_removed_by_1858
       env_guard_delegated_env_sources: consumed_by_unified_owner_first_slice_implemented
-      provider_triggers_packs_platform_dirs: consumed_by_unified_owner
-      provider_triggers_packs_external_dirs: consumed_by_unified_owner
+      platform_packs_platform_dirs: consumed_by_unified_owner_complete_development_replacement
+      provider_triggers_packs_platform_dirs: retired_fail_closed_use_platform_packs_platform_dirs
+      provider_triggers_packs_external_dirs: retired_fail_closed_use_project_import
+      channels_packs_platform_dirs: retired_fail_closed_use_platform_packs_platform_dirs
+      channels_packs_external_dirs: retired_fail_closed_use_project_import
       budget_human_tasks_inline_extension: consumed_by_unified_owner_code_migration_split
       llm_retired_model_selection_keys: split_unsupported_retired_use_llm.models
       llm_claude_cli_current_controls: split_unsupported_tracked_by_1803
@@ -21191,6 +21267,10 @@ cli_specification:
           `platform-spec.yaml`. Implementations may materialize these
           embedded bytes to an internal cache path for existing path-based readers, but that path is not a user-facing
           configuration source and MUST NOT require a source checkout.
+        platform_packs: >
+          One explicit membership manifest and the exact first-party trigger, connector, and channel pack bodies are compiled
+          into the binary. The embedded inventory digest is local binary metadata. Runtime selection never discovers packs
+          from cwd, executable-adjacent paths, a source checkout, or a machine-global cache.
       runtime_workspace_assets:
         workspace_image: >
           Runtime workspace startup consumes `workspace_model.runtime_image_packaging`. An installed binary MUST NOT use
@@ -21738,6 +21818,14 @@ cli_specification:
             normalization: trim only; case-sensitive
             display_projection: full
             display_shortening_eligible: false
+          pack:
+            candidate_source: local_effective_pack_inventory
+            scope_mode: local_bounded
+            scope_rule: exact selected embedded or effective project pack inventory
+            normalization_mode: trim_case_sensitive
+            normalization: trim only; case-sensitive
+            display_projection: full
+            display_shortening_eligible: false
         input_rows:
           agent_frame_agent: {command: swarm agent frame, selector: 'arg:agent-id', family: agent, mode: full_only}
           agent_frame_bundle_hash: {command: swarm agent frame, selector: 'flag:bundle-hash', family: bundle, mode: full_only}
@@ -21821,6 +21909,8 @@ cli_specification:
           standing_suspend_service: {command: swarm standing suspend, selector: 'arg:service-id', family: standing_service, mode: full_only, safety: mutating}
           standing_resume_service: {command: swarm standing resume, selector: 'arg:service-id', family: standing_service, mode: full_only, safety: mutating}
           standing_reset_service: {command: swarm standing reset, selector: 'arg:service-id', family: standing_service, mode: full_only, safety: mutating}
+          import_pack: {command: swarm import, selector: 'arg:pack-id', family: pack, mode: full_only, safety: mutating}
+          packs_show_pack: {command: swarm packs show, selector: 'arg:pack-id', family: pack, mode: full_only}
           mutating_idempotency: {command: 'swarm <mutating>', selector: 'flag:idempotency-key', family: none, mode: different_concept, scope_rule: caller-authored retry key}
           connections_key: {command: 'swarm connections <key>', selector: 'arg:key', family: none, mode: different_concept, scope_rule: authored stable connection key}
           secrets_key: {command: 'swarm secrets <key>', selector: 'arg:key', family: none, mode: different_concept, scope_rule: authored stable secret key}
@@ -22138,11 +22228,36 @@ cli_specification:
             version:
               command: swarm version
               classification: shared_output
-              fact_owner: local binary metadata from injected release metadata, Go build info, and embedded platform-spec version and sha256 digest; /v1/rpc health.check when --server is supplied
-              json_shape: local binary metadata object with binary_version, module_version, platform_version, platform_spec_digest, commit, built, go_version, goos, and goarch; with --server includes a server health.check object
+              fact_owner: local binary metadata from injected release metadata, Go build info, embedded platform-spec version/digest, and embedded pack inventory digest; /v1/rpc health.check when --server is supplied
+              json_shape: local binary metadata object with binary_version, module_version, platform_version, platform_spec_digest, embedded_pack_inventory_digest, commit, built, go_version, goos, and goarch; with --server includes a server health.check object
               quiet_values:
               - binary_version
               - server_bundle_hash when --server is supplied
+            import_pack:
+              command: swarm import
+              classification: shared_output
+              fact_owner: embedded pack inventory plus selected project packs/manifest.yaml mutation owner
+              json_shape: object with id, changed, and source
+              quiet_values:
+              - imported pack id
+            packs:
+              command: swarm packs
+              classification: exception
+              exception_rule: group_help
+            packs_list:
+              command: swarm packs list
+              classification: shared_output
+              fact_owner: exact selected bundle EffectivePackInventory
+              json_shape: object with base_mode, base_digest, base_directories, effective_digest, and ordered packs
+              quiet_values:
+              - selected pack ids in canonical order
+            packs_show:
+              command: swarm packs show
+              classification: shared_output
+              fact_owner: exact selected bundle EffectivePackInventory entry
+              json_shape: object with id, type, version, manifest_hash, source, directory, origin, modified, and shadows_base
+              quiet_values:
+              - selected pack id
             doctor:
               command: swarm doctor
               classification: split
@@ -23459,7 +23574,7 @@ cli_specification:
       implementation_status: implemented
       local_owner: local binary metadata resolver
       server_owner: /v1/rpc health.check
-      behavior: '`swarm version` prints local binary identity and performs no API call. Local binary identity resolves injected release metadata first, Go module/VCS build info second, and deterministic dev/unknown fallbacks last. `swarm version --json` additionally exposes module_version, platform_version, and platform_spec_digest as separate fields; platform_version is the embedded root platform-spec.yaml platform.version and platform_spec_digest is the sha256 digest of the embedded spec bytes. `swarm version --server` first queries `/v1/rpc health.check`, then prints the same local binary identity followed by a `Server:` section containing v1 server bundle/runtime identity from health.check.'
+      behavior: '`swarm version` prints local binary identity and performs no API call. Local binary identity resolves injected release metadata first, Go module/VCS build info second, and deterministic dev/unknown fallbacks last. `swarm version --json` additionally exposes module_version, platform_version, platform_spec_digest, and embedded_pack_inventory_digest as separate fields; platform_version and platform_spec_digest derive from the embedded root platform-spec.yaml, while embedded_pack_inventory_digest derives from the exact explicit embedded pack membership and bytes. `swarm version --server` first queries `/v1/rpc health.check`, then prints the same local binary identity followed by a `Server:` section containing v1 server bundle/runtime identity from health.check.'
       output_contract:
         local:
         - Swarm <binary-version>
@@ -23467,6 +23582,7 @@ cli_specification:
         - 'Built: <binary-build-date>'
         - 'Go: <go-version> <goos>/<goarch>'
         - 'Platform spec digest: <platform-spec-sha256-digest>'
+        - 'Embedded pack inventory digest: <embedded-pack-inventory-sha256-digest>'
         server_flag:
           source: /v1/rpc health.check
           rendering:
@@ -23479,6 +23595,38 @@ cli_specification:
           - remote server commit
           - remote server build date
           - server-local bundle path
+    import_pack:
+      command: swarm import <pack-id> [--contracts <path>] [--json|--quiet]
+      group: author_validate
+      tier: must_have
+      implementation_status: implemented
+      owner: provider_trigger_adapters.pack_envelope_source_authority
+      behavior: >
+        Copies one exact embedded pack into the selected project, records strict membership and immutable embedded origin in
+        `packs/manifest.yaml`, including the exact emitted project-envelope baseline digest, returns idempotently for an
+        identical import, and refuses every conflicting existing path or row without overwriting project edits. The project
+        inventory transaction serializes cross-process imports and validated readers so successful concurrent imports
+        preserve all rows and readers never observe partial publication.
+    packs:
+      command: swarm packs
+      group: author_validate
+      tier: must_have
+      implementation_status: implemented
+      behavior: render pack command help
+    packs_list:
+      command: swarm packs list [--contracts <path>] [--json|--quiet]
+      group: author_validate
+      tier: must_have
+      implementation_status: implemented
+      owner: provider_trigger_adapters.pack_envelope_source_authority
+      behavior: Render the exact selected base/effective digests and ordered effective pack inventory with source, origin, modified, and shadow facts.
+    packs_show:
+      command: swarm packs show <pack-id> [--contracts <path>] [--json|--quiet]
+      group: author_validate
+      tier: must_have
+      implementation_status: implemented
+      owner: provider_trigger_adapters.pack_envelope_source_authority
+      behavior: Render one exact selected pack identity and provenance; unknown or unselected ids fail closed.
     doctor:
       command: swarm doctor [--backend claude_cli] [--target] [--schema-inventory] [--contracts <path>] [--json]
       group: getting_started

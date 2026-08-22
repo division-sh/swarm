@@ -13,6 +13,7 @@ import (
 	builderpkg "github.com/division-sh/swarm/internal/builder"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime"
@@ -28,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/scenarioderivation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/google/uuid"
 )
@@ -44,11 +46,13 @@ type runtimeProjectSupervisor struct {
 	credentials          runtimecredentials.Store
 	providerCredentials  runtimecredentials.Store
 	providerTriggers     *providertriggers.CatalogSnapshot
+	platformPackBase     *packartifact.PlatformPackInventory
+	platformPackBases    *packartifact.PlatformPackBaseGenerationOwner
 	processWorkOwner     *worklifetime.Process
 	processCapability    runtimestartupownership.ProcessCapability
 	runtimeGeneration    uint64
-	loadProviderCatalog  func() (*providertriggers.CatalogSnapshot, error)
-	loadChannelPacks     func(context.Context, semanticview.Source, *providertriggers.CatalogSnapshot) (cliapp.ChannelPackLoad, error)
+	loadRuntimeConfig    func() (cliapp.RuntimeConfigLoadResult, error)
+	loadBundlePacks      func(context.Context, cliapp.RuntimeConfigLoadResult, *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error)
 	onRuntimePublished   func(context.Context) error
 	beforeStartupHandoff func(context.Context) (func(), error)
 	channelPlans         []packs.SatisfactionPlan
@@ -56,7 +60,7 @@ type runtimeProjectSupervisor struct {
 	startRuntime         func(context.Context, *runtime.Runtime) error
 	quiesceRuntime       func(context.Context, *runtime.Runtime, runtime.ShutdownOptions) error
 	shutdownRuntime      func(context.Context, *runtime.Runtime, runtime.ShutdownOptions) error
-	loadWorkflow         func(RepoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error)
+	loadWorkflow         func(RepoRoot, contractsRoot, platformSpecPath string, base *packartifact.PlatformPackInventory) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error)
 	validateSource       func(context.Context, semanticview.Source, *providertriggers.CatalogSnapshot) error
 	initStateStores      func(context.Context, storeBundle, *runtimecontracts.WorkflowContractBundle) (string, error)
 	newWorkspaces        func(storeBundle, string, semanticview.Source, cliapp.WorkspaceMountSources) (workspace.Lifecycle, cliapp.WorkspaceBackendSelection, error)
@@ -105,13 +109,31 @@ func (s *runtimeProjectSupervisor) SetRuntimeContextManager(manager *runtime.Run
 	s.currentBundleIdentity = identity
 }
 
-func (s *runtimeProjectSupervisor) SetChannelPackLoader(loader func(context.Context, semanticview.Source, *providertriggers.CatalogSnapshot) (cliapp.ChannelPackLoad, error)) {
+func (s *runtimeProjectSupervisor) SetBundlePackRuntimeLoader(loader func(context.Context, cliapp.RuntimeConfigLoadResult, *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error)) {
 	if s == nil {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.loadChannelPacks = loader
+	s.loadBundlePacks = loader
+}
+
+func (s *runtimeProjectSupervisor) SetRuntimeConfigLoader(loader func() (cliapp.RuntimeConfigLoadResult, error)) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.loadRuntimeConfig = loader
+	s.mu.Unlock()
+}
+
+func (s *runtimeProjectSupervisor) SetPlatformPackBaseGenerationOwner(owner *packartifact.PlatformPackBaseGenerationOwner) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.platformPackBases = owner
+	s.mu.Unlock()
 }
 
 func (s *runtimeProjectSupervisor) SetRuntimePublishedHook(hook func(context.Context) error) {
@@ -152,6 +174,7 @@ func newRuntimeProjectSupervisor(
 	credentials runtimecredentials.Store,
 	providerCredentials runtimecredentials.Store,
 	providerTriggers *providertriggers.CatalogSnapshot,
+	platformPackBase *packartifact.PlatformPackInventory,
 	initialRoot string,
 	initialBundle *runtimecontracts.WorkflowContractBundle,
 	initialSource semanticview.Source,
@@ -162,6 +185,7 @@ func newRuntimeProjectSupervisor(
 	if len(devMode) > 0 {
 		dev = devMode[0]
 	}
+	packBases, _ := packartifact.NewPlatformPackBaseGenerationOwner(platformPackBase)
 	supervisor := &runtimeProjectSupervisor{
 		RepoRoot:            strings.TrimSpace(RepoRoot),
 		platformSpecPath:    strings.TrimSpace(platformSpecPath),
@@ -174,6 +198,8 @@ func newRuntimeProjectSupervisor(
 		credentials:         credentials,
 		providerCredentials: providerCredentials,
 		providerTriggers:    providerTriggers,
+		platformPackBase:    platformPackBase,
+		platformPackBases:   packBases,
 		processWorkOwner: func() *worklifetime.Process {
 			if initialRT == nil {
 				return nil
@@ -195,23 +221,11 @@ func newRuntimeProjectSupervisor(
 		shutdownRuntime: func(_ context.Context, rt *runtime.Runtime, opts runtime.ShutdownOptions) error {
 			return rt.ShutdownWithOptions(opts)
 		},
-		loadWorkflow: func(RepoRoot, contractsRoot, platformSpecPath string) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
-			return cliapp.NewSwarmWorkflowModule(RepoRoot, contractsRoot, platformSpecPath)
+		loadWorkflow: func(RepoRoot, contractsRoot, platformSpecPath string, base *packartifact.PlatformPackInventory) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
+			return cliapp.NewSwarmWorkflowModuleWithPackBase(RepoRoot, contractsRoot, platformSpecPath, base)
 		},
-		validateSource: newBuilderProjectSourceValidator(cfg),
 		initStateStores: func(ctx context.Context, stores storeBundle, bundle *runtimecontracts.WorkflowContractBundle) (string, error) {
 			return initializeStateStores(ctx, stores, bundle)
-		},
-		newWorkspaces: func(stores storeBundle, contractsRoot string, source semanticview.Source, mountSources cliapp.WorkspaceMountSources) (workspace.Lifecycle, cliapp.WorkspaceBackendSelection, error) {
-			decision, err := cliapp.DecideWorkspaceBackend(workspaceBackend, cfg, source)
-			if err != nil {
-				return nil, cliapp.WorkspaceBackendSelection{}, err
-			}
-			lifecycle, err := cliapp.ConfiguredWorkspaceLifecycleForBackend(stores.facade().workspaceLookup(), cfg, contractsRoot, source, mountSources, decision)
-			if err != nil {
-				return nil, decision, err
-			}
-			return lifecycle, decision, nil
 		},
 		createRuntime: func(ctx context.Context, deps runtime.RuntimeDeps) (*runtime.Runtime, error) {
 			return runtime.NewRuntime(ctx, deps)
@@ -394,7 +408,22 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 		return builderpkg.ProjectStatus{}, err
 	}
 
-	module, bundle, err := s.loadWorkflow(s.RepoRoot, resolvedRoot, s.platformSpecPath)
+	s.mu.RLock()
+	loadRuntimeConfig := s.loadRuntimeConfig
+	candidateBase := s.platformPackBase
+	candidateConfig := cliapp.RuntimeConfigLoadResult{Config: s.cfg}
+	s.mu.RUnlock()
+	if loadRuntimeConfig != nil {
+		candidateConfig, err = loadRuntimeConfig()
+		if err != nil {
+			return builderpkg.ProjectStatus{}, fmt.Errorf("load candidate runtime config: %w", err)
+		}
+		candidateBase, err = cliapp.LoadConfiguredPlatformPackBase(s.RepoRoot, candidateConfig)
+		if err != nil {
+			return builderpkg.ProjectStatus{}, fmt.Errorf("select candidate platform pack base: %w", err)
+		}
+	}
+	module, bundle, err := s.loadWorkflow(s.RepoRoot, resolvedRoot, s.platformSpecPath, candidateBase)
 	if err != nil {
 		return builderpkg.ProjectStatus{}, fmt.Errorf("load project: %w", err)
 	}
@@ -404,27 +433,19 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	if module.SemanticSource() == nil {
 		return builderpkg.ProjectStatus{}, errors.New("loaded project semantic source is required")
 	}
-	authoredSource := semanticview.Wrap(bundle)
-	candidateCatalog := s.providerTriggers
-	if s.loadProviderCatalog != nil {
-		candidateCatalog, err = s.loadProviderCatalog()
-		if err != nil {
-			return builderpkg.ProjectStatus{}, fmt.Errorf("load candidate provider-trigger catalog: %w", err)
-		}
+	if s.loadBundlePacks == nil {
+		return builderpkg.ProjectStatus{}, fmt.Errorf("bundle-specific pack runtime loader is required")
 	}
+	candidatePacks, err := s.loadBundlePacks(ctx, candidateConfig, bundle)
+	if err != nil {
+		return builderpkg.ProjectStatus{}, fmt.Errorf("load candidate bundle pack runtime: %w", err)
+	}
+	candidateCatalog := candidatePacks.ProviderTriggers.Catalog
 	if candidateCatalog == nil {
 		return builderpkg.ProjectStatus{}, fmt.Errorf("candidate provider-trigger catalog is required")
 	}
-	candidateChannelPlans := append([]packs.SatisfactionPlan(nil), s.channelPlans...)
-	candidateChannelBindings := append([]packs.OutboundBindingPlan(nil), s.channelBindings...)
-	if s.loadChannelPacks != nil {
-		channelLoad, loadErr := s.loadChannelPacks(ctx, authoredSource, candidateCatalog)
-		if loadErr != nil {
-			return builderpkg.ProjectStatus{}, fmt.Errorf("load candidate channel packs: %w", loadErr)
-		}
-		candidateChannelPlans = channelLoad.Plans
-		candidateChannelBindings = channelLoad.Bindings
-	}
+	candidateChannelPlans := append([]packs.SatisfactionPlan(nil), candidatePacks.Channels.Plans...)
+	candidateChannelBindings := append([]packs.OutboundBindingPlan(nil), candidatePacks.Channels.Bindings...)
 	bundleSourcePlan, err := planServeBundleSource(s.stores, bundle, s.dev)
 	if err != nil {
 		return builderpkg.ProjectStatus{}, fmt.Errorf("plan project bundle source: %w", err)
@@ -438,12 +459,32 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 		return builderpkg.ProjectStatus{}, fmt.Errorf("admit candidate effective source projection: %w", err)
 	}
 	source := projection.Source()
-	if err := s.validateSource(ctx, source, candidateCatalog); err != nil {
+	validateSource := s.validateSource
+	if validateSource == nil {
+		validateSource = newBuilderProjectSourceValidator(candidateConfig.Config)
+	}
+	if err := validateSource(ctx, source, candidateCatalog); err != nil {
 		return builderpkg.ProjectStatus{}, err
 	}
-	admissionCandidate, err := s.compileProcessAdmissionCandidate(ctx, candidateCatalog)
+	installedTriggerSubjects, err := candidateCatalog.InstalledCapabilitySubjects()
 	if err != nil {
 		return builderpkg.ProjectStatus{}, err
+	}
+	if bundle.PackInventory == nil {
+		return builderpkg.ProjectStatus{}, fmt.Errorf("candidate bundle effective pack inventory is required")
+	}
+	var baseSelection *packartifact.PreparedPlatformPackBaseSelection
+	if s.platformPackBases != nil {
+		baseSelection, err = s.platformPackBases.PrepareSelection(candidateBase)
+		if err != nil {
+			return builderpkg.ProjectStatus{}, fmt.Errorf("prepare candidate platform pack base generation: %w", err)
+		}
+	}
+	packCandidate := bundlePackCandidate{
+		catalog: candidateCatalog, generation: candidateCatalog.Generation(),
+		installedSubjects: installedTriggerSubjects, inventoryDigest: bundle.PackInventory.Digest(),
+		channelPlans: candidateChannelPlans, channelBindings: candidateChannelBindings,
+		base: candidateBase, baseSelection: baseSelection, config: candidateConfig.Config,
 	}
 	if _, err := s.initStateStores(ctx, s.stores, bundle); err != nil {
 		return builderpkg.ProjectStatus{}, err
@@ -463,7 +504,20 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	if err != nil {
 		return builderpkg.ProjectStatus{}, fmt.Errorf("configure managed credentials: %w", err)
 	}
-	workspaces, workspaceBackend, err := s.newWorkspaces(s.stores, resolvedRoot, source, s.mountSources)
+	currentConfig := s.cfg
+	if candidateConfig.Config != nil {
+		currentConfig = candidateConfig.Config
+	}
+	var workspaces workspace.Lifecycle
+	var workspaceBackend cliapp.WorkspaceBackendSelection
+	if s.newWorkspaces != nil {
+		workspaces, workspaceBackend, err = s.newWorkspaces(s.stores, resolvedRoot, source, s.mountSources)
+	} else {
+		workspaceBackend, err = cliapp.DecideWorkspaceBackend(s.workspaceBackend, currentConfig, source)
+		if err == nil {
+			workspaces, err = cliapp.ConfiguredWorkspaceLifecycleForBackend(s.stores.facade().workspaceLookup(), currentConfig, resolvedRoot, source, s.mountSources, workspaceBackend)
+		}
+	}
 	if err != nil {
 		return builderpkg.ProjectStatus{}, err
 	}
@@ -487,7 +541,7 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 		return builderpkg.ProjectStatus{}, errors.New("served process work owner is required for project runtime replacement")
 	}
 	deps := s.stores.runtimeDeps()
-	deps.Config = s.cfg
+	deps.Config = currentConfig
 	locatedScenarios, err := scenarioderivation.LoadDeclarations(resolvedRoot)
 	if err != nil {
 		return builderpkg.ProjectStatus{}, fmt.Errorf("load candidate scenario derivation profiles: %w", err)
@@ -534,10 +588,7 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	if err != nil {
 		return builderpkg.ProjectStatus{}, fmt.Errorf("retain replacement runtime source: %w", err)
 	}
-	admissionCandidate.catalog = candidateCatalog
-	admissionCandidate.channelPlans = append([]packs.SatisfactionPlan(nil), candidateChannelPlans...)
-	admissionCandidate.channelBindings = append([]packs.OutboundBindingPlan(nil), candidateChannelBindings...)
-	status, err := s.replaceCurrentRuntimeWithSourceAndAdmission(ctx, resolvedRoot, source, bundle, bundleSourceFact, bundleIdentity, newRT, newRT.WorkOccurrence(), &admissionCandidate)
+	status, err := s.replaceCurrentRuntimeWithSourceAndPacks(ctx, resolvedRoot, source, bundle, bundleSourceFact, bundleIdentity, newRT, newRT.WorkOccurrence(), &packCandidate)
 	if err != nil {
 		return builderpkg.ProjectStatus{}, err
 	}
@@ -549,12 +600,16 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	return status, nil
 }
 
-type processAdmissionCandidate struct {
-	catalog          *providertriggers.CatalogSnapshot
-	state            runtime.ProcessAdmissionState
-	survivingTargets map[string][]runtime.StandingTarget
-	channelPlans     []packs.SatisfactionPlan
-	channelBindings  []packs.OutboundBindingPlan
+type bundlePackCandidate struct {
+	catalog           *providertriggers.CatalogSnapshot
+	generation        triggergeneration.Generation
+	installedSubjects []packs.Subject
+	inventoryDigest   string
+	channelPlans      []packs.SatisfactionPlan
+	channelBindings   []packs.OutboundBindingPlan
+	base              *packartifact.PlatformPackInventory
+	baseSelection     *packartifact.PreparedPlatformPackBaseSelection
+	config            *config.Config
 }
 
 type runtimeReplacementPublication interface {
@@ -583,21 +638,23 @@ type pendingRuntimeReplacement struct {
 	fact                   runtimecorrelation.BundleSourceFact
 	identity               runtimecontracts.BundleIdentity
 	runtime                *runtime.Runtime
-	admission              *processAdmissionCandidate
+	packCandidate          *bundlePackCandidate
 	freeze                 *startupHandoffFreeze
 	retainCurrentProject   bool
 }
 
 type runtimeProjectSnapshot struct {
-	root            string
-	source          semanticview.Source
-	bundle          *runtimecontracts.WorkflowContractBundle
-	runtime         *runtime.Runtime
-	fact            runtimecorrelation.BundleSourceFact
-	identity        runtimecontracts.BundleIdentity
-	providerCatalog *providertriggers.CatalogSnapshot
-	channelPlans    []packs.SatisfactionPlan
-	channelBindings []packs.OutboundBindingPlan
+	root             string
+	source           semanticview.Source
+	bundle           *runtimecontracts.WorkflowContractBundle
+	runtime          *runtime.Runtime
+	fact             runtimecorrelation.BundleSourceFact
+	identity         runtimecontracts.BundleIdentity
+	providerCatalog  *providertriggers.CatalogSnapshot
+	channelPlans     []packs.SatisfactionPlan
+	channelBindings  []packs.OutboundBindingPlan
+	platformPackBase *packartifact.PlatformPackInventory
+	config           *config.Config
 }
 
 type runtimeReplacementRollbackPhase uint8
@@ -681,16 +738,12 @@ func (f *startupHandoffFreeze) Release() {
 	})
 }
 
-func cloneProcessAdmissionCandidate(candidate *processAdmissionCandidate) *processAdmissionCandidate {
+func cloneBundlePackCandidate(candidate *bundlePackCandidate) *bundlePackCandidate {
 	if candidate == nil {
 		return nil
 	}
 	cloned := *candidate
-	cloned.state.InstalledSubjects = packs.CloneSubjects(candidate.state.InstalledSubjects)
-	cloned.survivingTargets = make(map[string][]runtime.StandingTarget, len(candidate.survivingTargets))
-	for bundleHash, targets := range candidate.survivingTargets {
-		cloned.survivingTargets[bundleHash] = append([]runtime.StandingTarget(nil), targets...)
-	}
+	cloned.installedSubjects = packs.CloneSubjects(candidate.installedSubjects)
 	cloned.channelPlans = append([]packs.SatisfactionPlan(nil), candidate.channelPlans...)
 	cloned.channelBindings = append([]packs.OutboundBindingPlan(nil), candidate.channelBindings...)
 	return &cloned
@@ -707,6 +760,11 @@ func (s *runtimeProjectSupervisor) restoreProjectSnapshot(snapshot runtimeProjec
 	s.providerTriggers = snapshot.providerCatalog
 	s.channelPlans = append([]packs.SatisfactionPlan(nil), snapshot.channelPlans...)
 	s.channelBindings = append([]packs.OutboundBindingPlan(nil), snapshot.channelBindings...)
+	s.platformPackBase = snapshot.platformPackBase
+	s.cfg = snapshot.config
+	if s.platformPackBases != nil && snapshot.platformPackBase != nil {
+		_ = s.platformPackBases.Select(snapshot.platformPackBase)
+	}
 	s.mu.Unlock()
 }
 
@@ -1010,6 +1068,9 @@ func (s *runtimeProjectSupervisor) completePendingReplacement() error {
 			s.setReady(false)
 			return fmt.Errorf("publish finalized runtime replacement: %w", err)
 		}
+		if !pending.retainCurrentProject && pending.packCandidate != nil {
+			pending.packCandidate.baseSelection.Commit()
+		}
 		s.mu.Lock()
 		if s.pendingReplacement != pending {
 			s.mu.Unlock()
@@ -1022,10 +1083,12 @@ func (s *runtimeProjectSupervisor) completePendingReplacement() error {
 			s.currentRT = pending.runtime
 			s.currentBundleSourceFact = pending.fact
 			s.currentBundleIdentity = pending.identity
-			if pending.admission != nil {
-				s.providerTriggers = pending.admission.catalog
-				s.channelPlans = append([]packs.SatisfactionPlan(nil), pending.admission.channelPlans...)
-				s.channelBindings = append([]packs.OutboundBindingPlan(nil), pending.admission.channelBindings...)
+			if pending.packCandidate != nil {
+				s.providerTriggers = pending.packCandidate.catalog
+				s.channelPlans = append([]packs.SatisfactionPlan(nil), pending.packCandidate.channelPlans...)
+				s.channelBindings = append([]packs.OutboundBindingPlan(nil), pending.packCandidate.channelBindings...)
+				s.platformPackBase = pending.packCandidate.base
+				s.cfg = pending.packCandidate.config
 			}
 		}
 		pending.reconcilePublicIngress = s.onRuntimePublished
@@ -1200,38 +1263,6 @@ func (s *runtimeProjectSupervisor) completePendingReplacementRollback(ctx contex
 	}
 }
 
-func (s *runtimeProjectSupervisor) compileProcessAdmissionCandidate(ctx context.Context, catalog *providertriggers.CatalogSnapshot) (processAdmissionCandidate, error) {
-	installed, err := catalog.InstalledCapabilitySubjects()
-	if err != nil {
-		return processAdmissionCandidate{}, err
-	}
-	candidate := processAdmissionCandidate{
-		state:            runtime.ProcessAdmissionState{Generation: catalog.Generation(), InstalledSubjects: installed},
-		survivingTargets: map[string][]runtime.StandingTarget{},
-	}
-	s.mu.RLock()
-	manager := s.runtimeContexts
-	currentHash := s.currentBundleSourceFact.BundleHash()
-	s.mu.RUnlock()
-	if manager == nil {
-		return candidate, nil
-	}
-	for _, loaded := range manager.LoadedContexts() {
-		if loaded.BundleHash() == currentHash {
-			continue
-		}
-		if err := s.validateSource(ctx, loaded.Source, catalog); err != nil {
-			return processAdmissionCandidate{}, fmt.Errorf("candidate provider-trigger catalog rejected loaded runtime context %s: %w", loaded.BundleHash(), err)
-		}
-		targets, err := runtime.RecompileStandingTargetAdmissions(loaded.Source, catalog, loaded.StandingTargets)
-		if err != nil {
-			return processAdmissionCandidate{}, fmt.Errorf("candidate provider-trigger catalog cannot recompile loaded runtime context %s: %w", loaded.BundleHash(), err)
-		}
-		candidate.survivingTargets[loaded.BundleHash()] = targets
-	}
-	return candidate, nil
-}
-
 func (s *runtimeProjectSupervisor) sourceReplacementDisabled() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1264,10 +1295,10 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSource(
 	newRT *runtime.Runtime,
 	workOwner *worklifetime.RuntimeOccurrence,
 ) (builderpkg.ProjectStatus, error) {
-	return s.replaceCurrentRuntimeWithSourceAndAdmission(ctx, resolvedRoot, source, bundle, fact, identity, newRT, workOwner, nil)
+	return s.replaceCurrentRuntimeWithSourceAndPacks(ctx, resolvedRoot, source, bundle, fact, identity, newRT, workOwner, nil)
 }
 
-func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
+func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndPacks(
 	ctx context.Context,
 	resolvedRoot string,
 	source semanticview.Source,
@@ -1276,7 +1307,7 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 	identity runtimecontracts.BundleIdentity,
 	newRT *runtime.Runtime,
 	workOwner *worklifetime.RuntimeOccurrence,
-	admissionCandidate *processAdmissionCandidate,
+	packCandidate *bundlePackCandidate,
 ) (builderpkg.ProjectStatus, error) {
 	if err := s.completePendingReplacementRollback(ctx); err != nil {
 		return s.CurrentProject(), fmt.Errorf("finalize pending runtime replacement rollback before replacement: %w", err)
@@ -1313,17 +1344,17 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 			BundleSourceFact: fact, BundleIdentity: identity, Source: source,
 			ContractsRoot: resolvedRoot, PlatformSpecPath: s.platformSpecPath, Runtime: newRT, WorkOwner: workOwner, StandingTargets: plannedTargets,
 		}
+		if packCandidate != nil {
+			contextDef.ProviderTriggerGeneration = packCandidate.generation
+			contextDef.InstalledTriggerSubjects = packCandidate.installedSubjects
+			contextDef.PackInventoryDigest = packCandidate.inventoryDigest
+		}
 		candidatePlan, err := replacementSourceSetPlan(manager, oldHash, contextDef)
 		if err != nil {
 			return builderpkg.ProjectStatus{}, fmt.Errorf("compile replacement source set: %w", err)
 		}
 		if err := manager.ValidateReplacement(oldHash, contextDef); err != nil {
 			return builderpkg.ProjectStatus{}, err
-		}
-		if admissionCandidate != nil {
-			if err := manager.ValidateProcessAdmissionReplacement(oldHash, contextDef, admissionCandidate.survivingTargets, admissionCandidate.state); err != nil {
-				return builderpkg.ProjectStatus{}, err
-			}
 		}
 		oldContext, ok := manager.LookupBundleHash(oldHash)
 		if !ok || oldContext == nil {
@@ -1340,11 +1371,14 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 		oldProviderTriggers := s.providerTriggers
 		oldChannelPlans := append([]packs.SatisfactionPlan(nil), s.channelPlans...)
 		oldChannelBindings := append([]packs.OutboundBindingPlan(nil), s.channelBindings...)
+		oldPlatformPackBase := s.platformPackBase
+		oldConfig := s.cfg
 		s.mu.RUnlock()
 		predecessorProject := runtimeProjectSnapshot{
 			root: oldRoot, source: oldSource, bundle: oldBundle, runtime: oldRT,
 			fact: oldFact, identity: oldIdentity, providerCatalog: oldProviderTriggers,
 			channelPlans: oldChannelPlans, channelBindings: oldChannelBindings,
+			platformPackBase: oldPlatformPackBase, config: oldConfig,
 		}
 		s.setReady(false)
 		s.mu.RLock()
@@ -1445,11 +1479,7 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 			return s.CurrentProject(), restorePredecessor(err)
 		}
 		contextDef.StandingTargets = targets
-		if admissionCandidate == nil {
-			publication, err = manager.PrepareBundleHashReplacementPublication(oldHash, contextDef)
-		} else {
-			publication, err = manager.PrepareBundleHashReplacementPublicationWithAdmission(oldHash, contextDef, admissionCandidate.survivingTargets, admissionCandidate.state)
-		}
+		publication, err = manager.PrepareBundleHashReplacementPublication(oldHash, contextDef)
 		if err != nil {
 			_ = s.shutdownCurrentRuntimeWithOptions(context.Background(), newRT, s.replacementShutdown)
 			return s.CurrentProject(), restorePredecessor(err)
@@ -1466,7 +1496,7 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 		pending := &pendingRuntimeReplacement{
 			publication: publication,
 			root:        resolvedRoot, source: source, bundle: bundle, fact: fact, identity: identity, runtime: newRT,
-			admission: cloneProcessAdmissionCandidate(admissionCandidate), freeze: freeze,
+			packCandidate: cloneBundlePackCandidate(packCandidate), freeze: freeze,
 		}
 		s.mu.Lock()
 		if s.pendingReplacement != nil {
@@ -1525,9 +1555,12 @@ func (s *runtimeProjectSupervisor) replaceCurrentRuntimeWithSourceAndAdmission(
 		}
 		return builderpkg.ProjectStatus{}, err
 	}
-	if admissionCandidate != nil {
+	if packCandidate != nil {
+		packCandidate.baseSelection.Commit()
 		s.mu.Lock()
-		s.providerTriggers = admissionCandidate.catalog
+		s.providerTriggers = packCandidate.catalog
+		s.platformPackBase = packCandidate.base
+		s.cfg = packCandidate.config
 		s.mu.Unlock()
 	}
 	return s.attachCurrentRuntime(resolvedRoot, source, bundle, fact, identity, newRT), nil

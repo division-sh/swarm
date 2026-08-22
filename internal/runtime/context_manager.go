@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
 
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -30,17 +32,20 @@ type RunBundleAvailabilityReader interface {
 }
 
 type BundleContext struct {
-	BundleSourceFact        runtimecorrelation.BundleSourceFact
-	BundleIdentity          runtimecontracts.BundleIdentity
-	Source                  semanticview.Source
-	ContractsRoot           string
-	PlatformSpecPath        string
-	Runtime                 *Runtime
-	WorkOwner               *worklifetime.RuntimeOccurrence
-	WorkspaceScopeKey       string
-	StandingTargets         []StandingTarget
-	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
-	ScenarioProfileCatalog  *scenarioexecution.Catalog
+	BundleSourceFact          runtimecorrelation.BundleSourceFact
+	BundleIdentity            runtimecontracts.BundleIdentity
+	Source                    semanticview.Source
+	ContractsRoot             string
+	PlatformSpecPath          string
+	Runtime                   *Runtime
+	WorkOwner                 *worklifetime.RuntimeOccurrence
+	WorkspaceScopeKey         string
+	StandingTargets           []StandingTarget
+	ProviderTriggerGeneration triggergeneration.Generation
+	InstalledTriggerSubjects  []packs.Subject
+	PackInventoryDigest       string
+	EffectiveSourceIdentity   scenarioexecution.EffectiveSourceIdentity
+	ScenarioProfileCatalog    *scenarioexecution.Catalog
 }
 
 type RuntimeContextState string
@@ -61,6 +66,8 @@ func (c BundleContext) normalized() BundleContext {
 	c.ContractsRoot = strings.TrimSpace(c.ContractsRoot)
 	c.PlatformSpecPath = strings.TrimSpace(c.PlatformSpecPath)
 	c.WorkspaceScopeKey = strings.TrimSpace(c.WorkspaceScopeKey)
+	c.PackInventoryDigest = strings.TrimSpace(c.PackInventoryDigest)
+	c.InstalledTriggerSubjects = packs.CloneSubjects(c.InstalledTriggerSubjects)
 	if len(c.StandingTargets) > 0 {
 		targets := make([]StandingTarget, 0, len(c.StandingTargets))
 		for _, target := range c.StandingTargets {
@@ -88,23 +95,17 @@ type runtimeContextEntry struct {
 }
 
 type replacementPublication struct {
-	existingHash                   string
-	bundleHash                     string
-	entry                          *runtimeContextEntry
-	predecessorContext             BundleContext
-	predecessorRuntime             *Runtime
-	predecessorWorkOwner           *worklifetime.RuntimeOccurrence
-	context                        BundleContext
-	runtime                        *Runtime
-	workOwner                      *worklifetime.RuntimeOccurrence
-	standing                       map[string]*worklifetime.StandingOccurrence
-	parkedStanding                 map[string]*runtimepipeline.ParkedOccurrence
-	survivingContexts              map[string]*BundleContext
-	predecessorSurvivors           map[string]*BundleContext
-	admissionGeneration            triggergeneration.Generation
-	installedSubjects              []packs.Subject
-	predecessorAdmissionGeneration triggergeneration.Generation
-	predecessorInstalledSubjects   []packs.Subject
+	existingHash         string
+	bundleHash           string
+	entry                *runtimeContextEntry
+	predecessorContext   BundleContext
+	predecessorRuntime   *Runtime
+	predecessorWorkOwner *worklifetime.RuntimeOccurrence
+	context              BundleContext
+	runtime              *Runtime
+	workOwner            *worklifetime.RuntimeOccurrence
+	standing             map[string]*worklifetime.StandingOccurrence
+	parkedStanding       map[string]*runtimepipeline.ParkedOccurrence
 }
 
 // PreparedRuntimeContextReplacement is a fully validated, executable
@@ -426,8 +427,6 @@ type RuntimeContextManager struct {
 	availability               RunBundleAvailabilityReader
 	contexts                   map[string]*runtimeContextEntry
 	order                      []string
-	admissionGeneration        triggergeneration.Generation
-	installedTriggerSubjects   []packs.Subject
 	capabilitySubjects         []packs.Subject
 	capabilityRevision         uint64
 	suppressedStandingServices map[string]struct{}
@@ -439,38 +438,20 @@ type runtimeContextVisibilityUpdate struct {
 	cause string
 }
 
-type ProcessAdmissionState struct {
-	Generation        triggergeneration.Generation
-	InstalledSubjects []packs.Subject
-}
-
 func NewRuntimeContextManager(availability RunBundleAvailabilityReader, contexts ...BundleContext) (*RuntimeContextManager, error) {
-	return newRuntimeContextManager(availability, ProcessAdmissionState{}, contexts...)
+	return newRuntimeContextManager(availability, contexts...)
 }
 
-func NewRuntimeContextManagerWithAdmission(availability RunBundleAvailabilityReader, state ProcessAdmissionState, contexts ...BundleContext) (*RuntimeContextManager, error) {
-	return newRuntimeContextManager(availability, state, contexts...)
-}
-
-func newRuntimeContextManagerState(availability RunBundleAvailabilityReader, state ProcessAdmissionState) (*RuntimeContextManager, error) {
-	installed, err := packs.NormalizeSubjects(state.InstalledSubjects)
-	if err != nil {
-		return nil, fmt.Errorf("normalize installed provider trigger subjects: %w", err)
-	}
+func newRuntimeContextManagerState(availability RunBundleAvailabilityReader) *RuntimeContextManager {
 	return &RuntimeContextManager{
 		availability:               availability,
 		contexts:                   map[string]*runtimeContextEntry{},
-		admissionGeneration:        state.Generation,
-		installedTriggerSubjects:   installed,
 		suppressedStandingServices: map[string]struct{}{},
-	}, nil
+	}
 }
 
-func newRuntimeContextManager(availability RunBundleAvailabilityReader, state ProcessAdmissionState, contexts ...BundleContext) (*RuntimeContextManager, error) {
-	manager, err := newRuntimeContextManagerState(availability, state)
-	if err != nil {
-		return nil, err
-	}
+func newRuntimeContextManager(availability RunBundleAvailabilityReader, contexts ...BundleContext) (*RuntimeContextManager, error) {
+	manager := newRuntimeContextManagerState(availability)
 	for _, contextDef := range contexts {
 		if err := manager.Register(contextDef); err != nil {
 			return nil, errors.Join(err, manager.quiesceConstructionFailure())
@@ -495,17 +476,10 @@ func (m *RuntimeContextManager) quiesceConstructionFailure() error {
 	return cleanupErr
 }
 
-// ValidateRuntimeContextSet applies the manager's process-global collision
+// ValidateRuntimeContextSet applies the manager's cross-bundle collision
 // rules without publishing any context as loaded.
 func ValidateRuntimeContextSet(contexts ...BundleContext) error {
-	return ValidateRuntimeContextSetWithAdmission(ProcessAdmissionState{}, contexts...)
-}
-
-func ValidateRuntimeContextSetWithAdmission(state ProcessAdmissionState, contexts ...BundleContext) error {
-	manager, err := newRuntimeContextManagerState(nil, state)
-	if err != nil {
-		return err
-	}
+	manager := newRuntimeContextManagerState(nil)
 	for _, contextDef := range contexts {
 		if err := manager.register(contextDef, false); err != nil {
 			return err
@@ -529,9 +503,6 @@ func (m *RuntimeContextManager) register(contextDef BundleContext, activateOccur
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if err := m.validateAdmissionGenerationLocked(contextDef); err != nil {
-		return err
-	}
 	if m.contexts == nil {
 		m.contexts = map[string]*runtimeContextEntry{}
 	}
@@ -719,6 +690,39 @@ func validateRuntimeContextDefinition(contextDef BundleContext) (BundleContext, 
 	if err := validateRuntimeContextStandingTargets(contextDef); err != nil {
 		return BundleContext{}, err
 	}
+	normalizedSubjects, err := packs.NormalizeSubjects(contextDef.InstalledTriggerSubjects)
+	if err != nil {
+		return BundleContext{}, fmt.Errorf("runtime context %s installed provider trigger subjects: %w", bundleHash, err)
+	}
+	contextDef.InstalledTriggerSubjects = normalizedSubjects
+	if bundle, ok := semanticview.Bundle(contextDef.Source); ok && bundle != nil && bundle.PackInventory != nil {
+		inventoryDigest := bundle.PackInventory.Digest()
+		if contextDef.PackInventoryDigest == "" || contextDef.PackInventoryDigest != inventoryDigest {
+			return BundleContext{}, fmt.Errorf("runtime context %s pack inventory digest %q does not match bundle inventory %q", bundleHash, contextDef.PackInventoryDigest, inventoryDigest)
+		}
+		projection, err := packadmission.FromBundle(bundle)
+		if err != nil {
+			return BundleContext{}, fmt.Errorf("runtime context %s load admitted pack projection: %w", bundleHash, err)
+		}
+		catalog := projection.ProviderTriggers
+		if !contextDef.ProviderTriggerGeneration.Equal(catalog.Generation()) {
+			return BundleContext{}, fmt.Errorf("runtime context %s provider-trigger generation %q does not match bundle inventory generation %q", bundleHash, contextDef.ProviderTriggerGeneration.Diagnostic(), catalog.Generation().Diagnostic())
+		}
+		expectedSubjects, err := catalog.InstalledCapabilitySubjects()
+		if err != nil {
+			return BundleContext{}, fmt.Errorf("runtime context %s derive installed provider-trigger subjects: %w", bundleHash, err)
+		}
+		expectedSubjects, err = packs.NormalizeSubjects(expectedSubjects)
+		if err != nil {
+			return BundleContext{}, err
+		}
+		if !reflect.DeepEqual(contextDef.InstalledTriggerSubjects, expectedSubjects) {
+			return BundleContext{}, fmt.Errorf("runtime context %s installed provider-trigger subjects do not match its bundle inventory", bundleHash)
+		}
+	}
+	if err := validateTargetsGeneration(contextDef, contextDef.ProviderTriggerGeneration); err != nil {
+		return BundleContext{}, err
+	}
 	return contextDef, nil
 }
 
@@ -745,25 +749,20 @@ func validateRuntimeContextStandingTargets(contextDef BundleContext) error {
 	return nil
 }
 
-func (m *RuntimeContextManager) validateAdmissionGenerationLocked(contextDef BundleContext) error {
-	for _, target := range contextDef.StandingTargets {
-		generation := target.AdmissionPlan.Generation()
-		if !m.admissionGeneration.Valid() {
-			return fmt.Errorf("runtime context %s standing target %q/%q requires process admission catalog generation", contextDef.BundleHash(), target.Alias, target.Provider)
-		}
-		if !generation.Equal(m.admissionGeneration) {
-			return fmt.Errorf("runtime context %s standing target %q/%q admission generation %q does not match process generation %q", contextDef.BundleHash(), target.Alias, target.Provider, generation.Diagnostic(), m.admissionGeneration.Diagnostic())
-		}
-	}
-	return nil
-}
-
 func (m *RuntimeContextManager) refreshCapabilitySubjectsLocked() error {
-	subjects := append([]packs.Subject(nil), m.installedTriggerSubjects...)
+	var installed []bundleScopedInstalledSubject
+	var subjects []packs.Subject
 	for _, bundleHash := range m.order {
 		entry := m.contexts[bundleHash]
 		if !runtimeContextEntryLoaded(entry) {
 			continue
+		}
+		for _, subject := range entry.context.InstalledTriggerSubjects {
+			installed = append(installed, bundleScopedInstalledSubject{
+				subject: subject, bundleHash: bundleHash,
+				inventoryDigest: entry.context.PackInventoryDigest,
+				generation:      entry.context.ProviderTriggerGeneration.Diagnostic(),
+			})
 		}
 		for _, target := range entry.context.StandingTargets {
 			if m.standingServiceSuppressedLocked(target.ServiceID) {
@@ -776,12 +775,73 @@ func (m *RuntimeContextManager) refreshCapabilitySubjectsLocked() error {
 			subjects = append(subjects, subject)
 		}
 	}
+	projected, err := projectBundleScopedInstalledSubjects(installed)
+	if err != nil {
+		return fmt.Errorf("project installed provider capability subjects: %w", err)
+	}
+	subjects = append(projected, subjects...)
 	normalized, err := packs.NormalizeSubjects(subjects)
 	if err != nil {
 		return fmt.Errorf("normalize process provider capability subjects: %w", err)
 	}
 	m.setBaseCapabilitySubjectsLocked(normalized)
 	return nil
+}
+
+type bundleScopedInstalledSubject struct {
+	subject         packs.Subject
+	bundleHash      string
+	inventoryDigest string
+	generation      string
+}
+
+func projectBundleScopedInstalledSubjects(scoped []bundleScopedInstalledSubject) ([]packs.Subject, error) {
+	groups := map[string][]bundleScopedInstalledSubject{}
+	var keys []string
+	for _, item := range scoped {
+		normalized, err := packs.NormalizeSubjects([]packs.Subject{item.subject})
+		if err != nil {
+			return nil, err
+		}
+		item.subject = normalized[0]
+		key := string(item.subject.Kind) + "\x00" + item.subject.ID
+		if _, exists := groups[key]; !exists {
+			keys = append(keys, key)
+		}
+		groups[key] = append(groups[key], item)
+	}
+	sort.Strings(keys)
+	var out []packs.Subject
+	for _, key := range keys {
+		items := groups[key]
+		unique := make([]bundleScopedInstalledSubject, 0, len(items))
+		for _, item := range items {
+			duplicate := false
+			for _, existing := range unique {
+				if reflect.DeepEqual(existing.subject, item.subject) {
+					duplicate = true
+					break
+				}
+			}
+			if !duplicate {
+				unique = append(unique, item)
+			}
+		}
+		if len(unique) == 1 {
+			out = append(out, unique[0].subject)
+			continue
+		}
+		sort.Slice(unique, func(i, j int) bool { return unique[i].bundleHash < unique[j].bundleHash })
+		for _, item := range unique {
+			subject := item.subject
+			subject.ID += "@" + item.bundleHash
+			subject.Evidence = append(subject.Evidence, packs.Evidence{Kind: "bundle_pack_generation", Fields: map[string]string{
+				"bundle_hash": item.bundleHash, "inventory_digest": item.inventoryDigest, "catalog_generation": item.generation,
+			}})
+			out = append(out, subject)
+		}
+	}
+	return out, nil
 }
 
 func (m *RuntimeContextManager) setBaseCapabilitySubjectsLocked(subjects []packs.Subject) {
@@ -820,15 +880,6 @@ func (m *RuntimeContextManager) publishRuntimeContextVisibilityLocked(updates ..
 		return errors.Join(fmt.Errorf("publish runtime context visibility: %w", err), restoreErr)
 	}
 	return nil
-}
-
-func (m *RuntimeContextManager) AdmissionState() ProcessAdmissionState {
-	if m == nil {
-		return ProcessAdmissionState{}
-	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return ProcessAdmissionState{Generation: m.admissionGeneration, InstalledSubjects: packs.CloneSubjects(m.installedTriggerSubjects)}
 }
 
 func (m *RuntimeContextManager) BaseCapabilitySubjects() []packs.Subject {
@@ -1832,8 +1883,7 @@ func (m *RuntimeContextManager) beginBundleHashReplacement(ctx context.Context, 
 	return predecessor, nil
 }
 
-// PublishBundleHashReplacement publishes a replacement that carries no
-// admission targets. Admission-bearing reloads use the process-wide API.
+// PublishBundleHashReplacement publishes one exact bundle-owned replacement.
 func (m *RuntimeContextManager) PublishBundleHashReplacement(existingHash string, contextDef BundleContext) error {
 	prepared, err := m.PrepareBundleHashReplacementPublication(existingHash, contextDef)
 	if err != nil {
@@ -1857,9 +1907,6 @@ func (m *RuntimeContextManager) PrepareBundleHashReplacementPublication(existing
 	if entry == nil || entry.state != RuntimeContextStateUnloaded || entry.cause != RuntimeContextCauseReplacing {
 		return nil, fmt.Errorf("runtime context %s is not unavailable for replacement", existingHash)
 	}
-	if m.admissionGeneration.Valid() && (len(entry.context.StandingTargets) > 0 || len(contextDef.StandingTargets) > 0) {
-		return nil, fmt.Errorf("runtime context %s carries compiled admission targets; publish through PublishBundleHashReplacementWithAdmission", existingHash)
-	}
 	publication, err := m.prepareReplacementPublicationLocked(existingHash, contextDef, entry)
 	if err != nil {
 		return nil, err
@@ -1867,8 +1914,7 @@ func (m *RuntimeContextManager) PrepareBundleHashReplacementPublication(existing
 	return &PreparedRuntimeContextReplacement{manager: m, publication: publication}, nil
 }
 
-// PublishRestoredBundleHashReplacement restores the withdrawn predecessor
-// against the already-published catalog generation after candidate failure.
+// PublishRestoredBundleHashReplacement restores the withdrawn predecessor.
 func (m *RuntimeContextManager) PublishRestoredBundleHashReplacement(existingHash string, contextDef BundleContext) error {
 	prepared, err := m.PrepareRestoredBundleHashReplacementPublication(existingHash, contextDef)
 	if err != nil {
@@ -1892,9 +1938,6 @@ func (m *RuntimeContextManager) PrepareRestoredBundleHashReplacementPublication(
 	if entry == nil || entry.state != RuntimeContextStateUnloaded || entry.cause != RuntimeContextCauseReplacing || entry.context == nil {
 		return nil, fmt.Errorf("runtime context %s is not unavailable for predecessor restoration", existingHash)
 	}
-	if err := validateTargetsGeneration(contextDef, m.admissionGeneration); err != nil {
-		return nil, err
-	}
 	if err := validateRestoredAdmissionAuthority(*entry.context, contextDef); err != nil {
 		return nil, err
 	}
@@ -1904,10 +1947,6 @@ func (m *RuntimeContextManager) PrepareRestoredBundleHashReplacementPublication(
 	publication, err := m.prepareReplacementPublicationLocked(existingHash, contextDef, entry)
 	if err != nil {
 		return nil, err
-	}
-	if m.admissionGeneration.Valid() {
-		publication.admissionGeneration = m.admissionGeneration
-		publication.installedSubjects = packs.CloneSubjects(m.installedTriggerSubjects)
 	}
 	return &PreparedRuntimeContextReplacement{manager: m, publication: publication}, nil
 }
@@ -1939,19 +1978,17 @@ func (m *RuntimeContextManager) prepareReplacementPublicationLocked(existingHash
 	}
 	predecessorContext := *entry.context
 	return &replacementPublication{
-		existingHash:                   existingHash,
-		bundleHash:                     contextDef.BundleHash(),
-		entry:                          entry,
-		predecessorContext:             predecessorContext,
-		predecessorRuntime:             entry.runtime,
-		predecessorWorkOwner:           entry.workOwner,
-		context:                        copied,
-		runtime:                        runtimeOwner,
-		workOwner:                      workOwner,
-		standing:                       standing,
-		parkedStanding:                 copyParkedStandingOccurrences(entry.parkedStanding),
-		predecessorAdmissionGeneration: m.admissionGeneration,
-		predecessorInstalledSubjects:   packs.CloneSubjects(m.installedTriggerSubjects),
+		existingHash:         existingHash,
+		bundleHash:           contextDef.BundleHash(),
+		entry:                entry,
+		predecessorContext:   predecessorContext,
+		predecessorRuntime:   entry.runtime,
+		predecessorWorkOwner: entry.workOwner,
+		context:              copied,
+		runtime:              runtimeOwner,
+		workOwner:            workOwner,
+		standing:             standing,
+		parkedStanding:       copyParkedStandingOccurrences(entry.parkedStanding),
 	}, nil
 }
 
@@ -1984,14 +2021,6 @@ func (m *RuntimeContextManager) restoreWithdrawnReplacementPredecessor(publicati
 	publication.entry.workOwner = publication.predecessorWorkOwner
 	publication.entry.standing = nil
 	publication.entry.parkedStanding = parked
-	for bundleHash, contextDef := range publication.predecessorSurvivors {
-		if surviving := m.contexts[bundleHash]; surviving != nil && surviving.context != nil {
-			copied := *contextDef
-			surviving.context = &copied
-		}
-	}
-	m.admissionGeneration = publication.predecessorAdmissionGeneration
-	m.installedTriggerSubjects = packs.CloneSubjects(publication.predecessorInstalledSubjects)
 	return m.publishRuntimeContextVisibilityLocked(runtimeContextVisibilityUpdate{
 		entry: publication.entry, state: RuntimeContextStateUnloaded, cause: RuntimeContextCauseReplacing,
 	})
@@ -2012,11 +2041,6 @@ func (m *RuntimeContextManager) applyReplacementPublicationLocked(publication *r
 		m.order = append(m.order, publication.bundleHash)
 		sort.Strings(m.order)
 	}
-	for bundleHash, contextDef := range publication.survivingContexts {
-		if surviving := m.contexts[bundleHash]; surviving != nil && runtimeContextEntryLoaded(surviving) {
-			surviving.context = contextDef
-		}
-	}
 	contextDef := publication.context
 	entry.context = &contextDef
 	entry.runtime = publication.runtime
@@ -2025,10 +2049,6 @@ func (m *RuntimeContextManager) applyReplacementPublicationLocked(publication *r
 	entry.parkedStanding = nil
 	if entry.runtime != nil && entry.runtime.Bus != nil {
 		entry.runtime.Bus.SetStandingRunWorkOwner(m)
-	}
-	if publication.admissionGeneration.Valid() {
-		m.admissionGeneration = publication.admissionGeneration
-		m.installedTriggerSubjects = publication.installedSubjects
 	}
 	if err := m.publishRuntimeContextVisibilityLocked(runtimeContextVisibilityUpdate{
 		entry: entry, state: RuntimeContextStateLoaded,
@@ -2076,7 +2096,8 @@ func validateRestoredAdmissionAuthority(predecessor, restored BundleContext) err
 }
 
 func (m *RuntimeContextManager) replacementCapabilitySubjectsLocked(existingHash string, contextDef BundleContext) ([]packs.Subject, error) {
-	subjects := packs.CloneSubjects(m.installedTriggerSubjects)
+	var installed []bundleScopedInstalledSubject
+	var subjects []packs.Subject
 	for _, bundleHash := range m.order {
 		if bundleHash == existingHash {
 			continue
@@ -2084,6 +2105,13 @@ func (m *RuntimeContextManager) replacementCapabilitySubjectsLocked(existingHash
 		entry := m.contexts[bundleHash]
 		if !runtimeContextEntryLoaded(entry) {
 			continue
+		}
+		for _, subject := range entry.context.InstalledTriggerSubjects {
+			installed = append(installed, bundleScopedInstalledSubject{
+				subject: subject, bundleHash: bundleHash,
+				inventoryDigest: entry.context.PackInventoryDigest,
+				generation:      entry.context.ProviderTriggerGeneration.Diagnostic(),
+			})
 		}
 		for _, target := range entry.context.StandingTargets {
 			subject, err := target.CapabilitySubject()
@@ -2093,6 +2121,13 @@ func (m *RuntimeContextManager) replacementCapabilitySubjectsLocked(existingHash
 			subjects = append(subjects, subject)
 		}
 	}
+	for _, subject := range contextDef.InstalledTriggerSubjects {
+		installed = append(installed, bundleScopedInstalledSubject{
+			subject: subject, bundleHash: contextDef.BundleHash(),
+			inventoryDigest: contextDef.PackInventoryDigest,
+			generation:      contextDef.ProviderTriggerGeneration.Diagnostic(),
+		})
+	}
 	for _, target := range contextDef.StandingTargets {
 		subject, err := target.CapabilitySubject()
 		if err != nil {
@@ -2100,142 +2135,20 @@ func (m *RuntimeContextManager) replacementCapabilitySubjectsLocked(existingHash
 		}
 		subjects = append(subjects, subject)
 	}
-	return packs.NormalizeSubjects(subjects)
-}
-
-func (m *RuntimeContextManager) ValidateProcessAdmissionReplacement(existingHash string, contextDef BundleContext, survivingTargets map[string][]StandingTarget, state ProcessAdmissionState) error {
-	if m == nil {
-		return fmt.Errorf("runtime context manager is required")
-	}
-	contextDef, err := validateRuntimeContextDefinition(contextDef)
-	if err != nil {
-		return err
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if err := m.validateReplacementLocked(strings.TrimSpace(existingHash), contextDef); err != nil {
-		return err
-	}
-	_, _, err = m.validateProcessAdmissionCandidateLocked(strings.TrimSpace(existingHash), contextDef, survivingTargets, state)
-	return err
-}
-
-// PublishBundleHashReplacementWithAdmission is the sole authority transition
-// for a runtime replacement and its process-global provider-trigger catalog.
-func (m *RuntimeContextManager) PublishBundleHashReplacementWithAdmission(existingHash string, contextDef BundleContext, survivingTargets map[string][]StandingTarget, state ProcessAdmissionState) error {
-	prepared, err := m.PrepareBundleHashReplacementPublicationWithAdmission(existingHash, contextDef, survivingTargets, state)
-	if err != nil {
-		return err
-	}
-	return prepared.Publish()
-}
-
-func (m *RuntimeContextManager) PrepareBundleHashReplacementPublicationWithAdmission(existingHash string, contextDef BundleContext, survivingTargets map[string][]StandingTarget, state ProcessAdmissionState) (*PreparedRuntimeContextReplacement, error) {
-	if m == nil {
-		return nil, fmt.Errorf("runtime context manager is required")
-	}
-	contextDef, err := validateRuntimeContextDefinition(contextDef)
+	projected, err := projectBundleScopedInstalledSubjects(installed)
 	if err != nil {
 		return nil, err
 	}
-	existingHash = strings.TrimSpace(existingHash)
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	entry := m.contexts[existingHash]
-	if entry == nil || entry.state != RuntimeContextStateUnloaded || entry.cause != RuntimeContextCauseReplacing {
-		return nil, fmt.Errorf("runtime context %s is not unavailable for replacement", existingHash)
-	}
-	installed, _, err := m.validateProcessAdmissionCandidateLocked(existingHash, contextDef, survivingTargets, state)
-	if err != nil {
-		return nil, err
-	}
-	publication, err := m.prepareReplacementPublicationLocked(existingHash, contextDef, entry)
-	if err != nil {
-		return nil, err
-	}
-	publication.survivingContexts = make(map[string]*BundleContext, len(survivingTargets))
-	publication.predecessorSurvivors = make(map[string]*BundleContext, len(survivingTargets))
-	for bundleHash, targets := range survivingTargets {
-		if surviving := m.contexts[strings.TrimSpace(bundleHash)]; surviving != nil && runtimeContextEntryLoaded(surviving) {
-			previous := *surviving.context
-			publication.predecessorSurvivors[strings.TrimSpace(bundleHash)] = &previous
-			copied := *surviving.context
-			copied.StandingTargets = append([]StandingTarget(nil), targets...)
-			publication.survivingContexts[strings.TrimSpace(bundleHash)] = &copied
-		}
-	}
-	publication.admissionGeneration = state.Generation
-	publication.installedSubjects = installed
-	return &PreparedRuntimeContextReplacement{manager: m, publication: publication}, nil
-}
-
-func (m *RuntimeContextManager) validateProcessAdmissionCandidateLocked(existingHash string, contextDef BundleContext, survivingTargets map[string][]StandingTarget, state ProcessAdmissionState) ([]packs.Subject, []packs.Subject, error) {
-	generation := state.Generation
-	if !generation.Valid() {
-		return nil, nil, fmt.Errorf("candidate provider-trigger catalog generation is required")
-	}
-	installed, err := packs.NormalizeSubjects(state.InstalledSubjects)
-	if err != nil {
-		return nil, nil, fmt.Errorf("normalize candidate installed provider trigger subjects: %w", err)
-	}
-	contexts := make([]BundleContext, 0, len(m.contexts))
-	seenUpdates := map[string]struct{}{}
-	for _, bundleHash := range m.order {
-		if bundleHash == existingHash {
-			continue
-		}
-		entry := m.contexts[bundleHash]
-		if !runtimeContextEntryLoaded(entry) {
-			continue
-		}
-		targets, ok := survivingTargets[bundleHash]
-		if !ok {
-			return nil, nil, fmt.Errorf("candidate provider-trigger catalog generation %q did not recompile loaded runtime context %s", generation.Diagnostic(), bundleHash)
-		}
-		seenUpdates[bundleHash] = struct{}{}
-		copied := *entry.context
-		copied.StandingTargets = append([]StandingTarget(nil), targets...)
-		if err := validateRuntimeContextStandingTargets(copied); err != nil {
-			return nil, nil, err
-		}
-		if err := validateTargetsGeneration(copied, generation); err != nil {
-			return nil, nil, err
-		}
-		contexts = append(contexts, copied)
-	}
-	for bundleHash := range survivingTargets {
-		if _, ok := seenUpdates[strings.TrimSpace(bundleHash)]; !ok {
-			return nil, nil, fmt.Errorf("candidate provider-trigger target update names non-surviving runtime context %s", bundleHash)
-		}
-	}
-	if err := validateTargetsGeneration(contextDef, generation); err != nil {
-		return nil, nil, err
-	}
-	contexts = append(contexts, contextDef)
-	if err := validateContextSetCollisions(contexts); err != nil {
-		return nil, nil, err
-	}
-	subjects := append([]packs.Subject(nil), installed...)
-	for _, candidateContext := range contexts {
-		for _, target := range candidateContext.StandingTargets {
-			subject, err := target.CapabilitySubject()
-			if err != nil {
-				return nil, nil, fmt.Errorf("derive candidate standing ingress capability subject: %w", err)
-			}
-			subjects = append(subjects, subject)
-		}
-	}
-	normalized, err := packs.NormalizeSubjects(subjects)
-	if err != nil {
-		return nil, nil, fmt.Errorf("normalize candidate process provider capability subjects: %w", err)
-	}
-	return installed, normalized, nil
+	return packs.NormalizeSubjects(append(projected, subjects...))
 }
 
 func validateTargetsGeneration(contextDef BundleContext, generation triggergeneration.Generation) error {
+	if (len(contextDef.StandingTargets) > 0 || len(contextDef.InstalledTriggerSubjects) > 0) && !generation.Valid() {
+		return fmt.Errorf("runtime context %s provider-trigger catalog generation is required", contextDef.BundleHash())
+	}
 	for _, target := range contextDef.StandingTargets {
 		if !target.AdmissionPlan.Generation().Equal(generation) {
-			return fmt.Errorf("runtime context %s standing target %q/%q admission generation %q does not match candidate process generation %q", contextDef.BundleHash(), target.Alias, target.Provider, target.AdmissionPlan.Generation().Diagnostic(), generation.Diagnostic())
+			return fmt.Errorf("runtime context %s standing target %q/%q admission generation %q does not match its bundle generation %q", contextDef.BundleHash(), target.Alias, target.Provider, target.AdmissionPlan.Generation().Diagnostic(), generation.Diagnostic())
 		}
 	}
 	return nil

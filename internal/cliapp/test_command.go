@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -280,17 +281,15 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 			return returnScenarioTestValidationError(errOut, fmt.Errorf("no scenario files found under contracts/tests or contracts/flows/<flow>/tests"))
 		}
 	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(RepoRoot, contractsDir, platformSpec)
+	platformPackBase, err := LoadConfiguredPlatformPackBase(RepoRoot, configResult)
+	if err != nil {
+		return returnScenarioTestValidationError(errOut, fmt.Errorf("load platform pack base: %w", err))
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(RepoRoot, contractsDir, platformSpec, runtimecontracts.WorkflowContractLoadOptions{
+		PlatformPackBase: platformPackBase, AdmitPackInventory: packadmission.AdmitInventory,
+	})
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("load contract bundle: %w", err))
-	}
-	providerPacks, err := LoadConfiguredProviderTriggerPacks(RepoRoot, configResult)
-	if err != nil {
-		return returnScenarioTestValidationError(errOut, fmt.Errorf("load provider trigger packs: %w", err))
-	}
-	channelSpec, err := loadChannelPlatformSpecDocument(platformSpec)
-	if err != nil {
-		return returnScenarioTestValidationError(errOut, fmt.Errorf("load channel platform spec: %w", err))
 	}
 	providerCredentials, err := BuildProviderCredentialStore()
 	if err != nil {
@@ -300,10 +299,12 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("configure managed credentials: %w", err))
 	}
-	channelPacks, err := LoadConfiguredChannelPacks(ctx, RepoRoot, configResult, channelSpec, providerPacks.Catalog, providerCredentials, managedCredentials)
+	packRuntime, err := LoadBundlePackRuntime(ctx, configResult, bundle, providerCredentials, managedCredentials)
 	if err != nil {
-		return returnScenarioTestValidationError(errOut, fmt.Errorf("load channel packs: %w", err))
+		return returnScenarioTestValidationError(errOut, fmt.Errorf("load bundle pack runtime: %w", err))
 	}
+	providerPacks := packRuntime.ProviderTriggers
+	channelPacks := packRuntime.Channels
 	bundleHash, err := runtimecontracts.BundleHash(bundle)
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("compute bundle_hash: %w", err))

@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
@@ -31,6 +32,16 @@ type serveLifecycleIngressFact struct {
 	Subject    packs.Subject
 }
 
+type serveLifecyclePackFact struct {
+	BundleHash      string
+	BaseMode        packartifact.SelectionMode
+	BaseDigest      string
+	BaseDirectories []string
+	EffectiveDigest string
+	PackCount       int
+	ProjectPacks    []string
+}
+
 type serveLifecycleReadyFacts struct {
 	ProjectName string
 	BundleCount int
@@ -41,6 +52,7 @@ type serveLifecycleReadyFacts struct {
 	MCPListener string
 	ReadyAfter  time.Duration
 	Standing    []serveLifecycleIngressFact
+	Packs       []serveLifecyclePackFact
 }
 
 type serveLifecycleNoticeKind string
@@ -564,6 +576,29 @@ func (p *serveLifecyclePresenter) writeResolvedFactsLocked(facts serveLifecycleR
 		recovery += " · " + detail
 	}
 	p.writeResolvedFactLocked("recovery", recovery)
+	for index, fact := range facts.Packs {
+		label := "packs"
+		if len(facts.Packs) > 1 {
+			label = fmt.Sprintf("packs %d", index+1)
+		}
+		detail := fmt.Sprintf("%s · %d packs", fact.BaseMode, fact.PackCount)
+		if fact.BaseMode == packartifact.SelectionDevelopmentOverride {
+			detail = fmt.Sprintf("development override active: %d packs (replacing the embedded inventory)", fact.PackCount)
+		}
+		if p.verbose {
+			detail += fmt.Sprintf(" · base %s · effective %s", fact.BaseDigest, fact.EffectiveDigest)
+			if fact.BaseMode == packartifact.SelectionDevelopmentOverride {
+				detail += " · directories " + strings.Join(fact.BaseDirectories, ", ")
+			}
+		}
+		if len(fact.ProjectPacks) > 0 {
+			detail += " · project " + strings.Join(fact.ProjectPacks, ",")
+		}
+		if hash := strings.TrimSpace(fact.BundleHash); p.verbose && hash != "" && len(facts.Packs) > 1 {
+			detail += " · bundle " + hash
+		}
+		p.writeResolvedFactLocked(label, detail)
+	}
 	p.writeResolvedFactLocked("listeners", "api "+strings.TrimSpace(facts.APIListener)+" · mcp "+strings.TrimSpace(facts.MCPListener))
 	for _, notice := range p.notices {
 		p.writeResolvedFactLocked("recovery action", serveLifecycleNoticeDetail(notice))

@@ -34,6 +34,7 @@ type BundleBuildRequest struct {
 	PlatformSpecPath string
 	OutputRoot       string
 	Steps            []BundleBuildStep
+	LoadOptions      WorkflowContractLoadOptions
 }
 
 type BundleBuildStep interface {
@@ -134,7 +135,7 @@ func BuildBundleMaterialization(ctx context.Context, req BundleBuildRequest) (Bu
 	if err != nil {
 		return BundleBuildReport{}, err
 	}
-	bundle, err := LoadWorkflowContractBundleWithOverrides(req.RepoRoot, contractsRoot, req.PlatformSpecPath)
+	bundle, err := LoadWorkflowContractBundleWithOptions(req.RepoRoot, contractsRoot, req.PlatformSpecPath, req.LoadOptions)
 	if err != nil {
 		return BundleBuildReport{}, err
 	}
@@ -214,7 +215,7 @@ func BuildBundleMaterialization(ctx context.Context, req BundleBuildRequest) (Bu
 	if err := writeDeterministicJSONFile(manifestPath, manifest); err != nil {
 		return BundleBuildReport{}, fmt.Errorf("write build manifest: %w", err)
 	}
-	materialized, err := LoadWorkflowContractBundleWithOverrides(req.RepoRoot, tmp, req.PlatformSpecPath)
+	materialized, err := LoadWorkflowContractBundleWithOptions(req.RepoRoot, tmp, req.PlatformSpecPath, req.LoadOptions)
 	if err != nil {
 		return BundleBuildReport{}, fmt.Errorf("validate materialized contracts root: %w", err)
 	}
@@ -336,8 +337,11 @@ func bundleBuildInputs(entries []bundleHashEntry) ([]BundleBuildInput, error) {
 		if err := validateBundleBuildReservedArtifactPath("bundle build input", rel); err != nil {
 			return nil, err
 		}
-		sizeBytes := int64(len(entry.ExpectedExact))
-		if entry.ExpectedExact == nil {
+		sizeBytes := int64(len(entry.SourceExact))
+		if entry.SourceExact == nil && entry.ExpectedExact != nil {
+			sizeBytes = int64(len(entry.ExpectedExact))
+		}
+		if entry.SourceExact == nil && entry.ExpectedExact == nil {
 			info, err := os.Stat(entry.Path)
 			if err != nil {
 				return nil, fmt.Errorf("stat bundle build input %s: %w", rel, err)
@@ -370,7 +374,7 @@ func materializeBundleInputs(entries []bundleHashEntry, outputDir string) error 
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return fmt.Errorf("create materialized input dir %s: %w", filepath.Dir(dst), err)
 		}
-		raw, err := os.ReadFile(entry.Path)
+		raw, err := bundleHashEntryRawContent(entry)
 		if err != nil {
 			return fmt.Errorf("read bundle build input %s: %w", rel, err)
 		}

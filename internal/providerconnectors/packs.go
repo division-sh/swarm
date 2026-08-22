@@ -1,24 +1,16 @@
 package providerconnectors
 
 import (
-	"embed"
 	"fmt"
 	"io/fs"
-	"path"
 	"sort"
 	"strings"
-	"sync"
 
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/platform"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
-
-//go:embed packs/*/pack.yaml packs/*/connector.yaml catalog/generated-packs.yaml catalog/generator-profiles/*.yaml
-var builtinConnectorPackFS embed.FS
-
-const connectorPackRoot = "packs"
 
 type ConnectorManifest struct {
 	Provider   string                                      `yaml:"provider"`
@@ -78,83 +70,20 @@ type InstalledTool struct {
 	Pack     LoadedPack
 }
 
-var (
-	defaultPackRegistryOnce sync.Once
-	defaultPackRegistry     *PackRegistry
-)
-
-func DefaultPackRegistry() *PackRegistry {
-	defaultPackRegistryOnce.Do(func() {
-		defaultPackRegistry = mustDefaultPackRegistry()
-	})
-	return defaultPackRegistry
-}
-
-func BuiltinTool(provider, toolID string) (runtimecontracts.ToolSchemaEntry, bool) {
-	pack, ok := DefaultPackRegistry().Lookup(provider, toolID)
-	if !ok {
-		return runtimecontracts.ToolSchemaEntry{}, false
+func NewPackRegistryFromInventory(inventory *packartifact.EffectivePackInventory, runningPlatformVersion string) (*PackRegistry, error) {
+	if inventory == nil {
+		return nil, fmt.Errorf("effective pack inventory is required")
 	}
-	tool, ok := pack.Manifest.Tools[strings.TrimSpace(toolID)]
-	return tool, ok
-}
-
-func mustDefaultPackRegistry() *PackRegistry {
-	runningVersion, err := platform.PlatformVersion()
-	if err != nil {
-		panic(err)
-	}
-	registry, err := LoadBuiltinPackRegistry(runningVersion)
-	if err != nil {
-		panic(err)
-	}
-	return registry
-}
-
-func LoadBuiltinPackRegistry(runningPlatformVersion string) (*PackRegistry, error) {
-	return loadBuiltinPackRegistryFS(builtinConnectorPackFS, runningPlatformVersion)
-}
-
-func loadBuiltinPackRegistryFS(fsys fs.FS, runningPlatformVersion string) (*PackRegistry, error) {
-	index, err := loadGeneratedPackIndex(fsys)
-	if err != nil {
-		return nil, err
-	}
-	expectedGenerated := index.BuiltinByID()
-	entries, err := fs.ReadDir(fsys, connectorPackRoot)
-	if err != nil {
-		return nil, fmt.Errorf("read built-in provider connector packs: %w", err)
-	}
+	entries := inventory.EntriesByType(packartifact.TypeConnector)
 	loaded := make([]LoadedPack, 0, len(entries))
 	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		dir := path.Join(connectorPackRoot, entry.Name())
-		pack, err := LoadPackFS(fsys, dir, runningPlatformVersion)
+		pack, err := LoadPackFS(entry.FileSystem(), ".", runningPlatformVersion)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("load effective connector pack %q: %w", entry.ID(), err)
 		}
+		pack.Directory = entry.Directory()
+		pack.Source = entry.Source() + ":" + entry.ID()
 		loaded = append(loaded, pack)
-	}
-	seenGenerated := map[string]struct{}{}
-	for _, pack := range loaded {
-		expected, indexed := expectedGenerated[strings.TrimSpace(pack.Envelope.ID)]
-		if indexed {
-			if err := validateGeneratedPackIdentity(fsys, pack, expected); err != nil {
-				return nil, err
-			}
-			seenGenerated[strings.TrimSpace(pack.Envelope.ID)] = struct{}{}
-			continue
-		}
-		if pack.Manifest.Generation != nil {
-			return nil, fmt.Errorf("builtin connector pack %q carries generation evidence but is not in the generated pack index", pack.Envelope.ID)
-		}
-	}
-	for packID := range expectedGenerated {
-		if _, exists := seenGenerated[packID]; !exists {
-			return nil, fmt.Errorf("generated connector pack index references unknown builtin pack id %q", packID)
-		}
 	}
 	return NewPackRegistry(loaded...)
 }
@@ -405,11 +334,7 @@ func DerivedRequires(manifest ConnectorManifest) packs.Requires {
 	return packs.Requires{Secrets: secrets, ManagedCredentials: managedCredentials}
 }
 
-func SourceWithConnectorPackImports(source semanticview.Source) (semanticview.Source, error) {
-	return SourceWithConnectorPackImportsFromRegistry(source, DefaultPackRegistry())
-}
-
-func SourceWithConnectorPackImportsFromRegistry(source semanticview.Source, registry *PackRegistry) (semanticview.Source, error) {
+func SourceWithConnectorPackImports(source semanticview.Source, registry *PackRegistry) (semanticview.Source, error) {
 	if source == nil {
 		return nil, nil
 	}

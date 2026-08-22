@@ -33,6 +33,8 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/packartifact"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
@@ -91,6 +93,37 @@ func (servedNoopLLMRuntime) ProviderContract() runtimellm.ProviderContract {
 }
 
 const serveRuntimeTestBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
+func TestLoadServeRuntimeBundleRejectsMalformedPackBodiesBeforePublication(t *testing.T) {
+	base, err := packartifact.LoadEmbeddedPlatformPackInventory("0.7.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name, id, bodyFile, wantErr string
+	}{
+		{name: "trigger", id: "provider.telegram", bodyFile: packartifact.TriggerManifestFileName, wantErr: "admit provider trigger packs"},
+		{name: "connector", id: "provider.telegram.connector", bodyFile: packartifact.ConnectorManifestFileName, wantErr: "admit provider connector packs"},
+		{name: "channel", id: "provider.telegram.hitl_channel", bodyFile: packartifact.ChannelManifestFileName, wantErr: "admit channel packs"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			project := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
+			if changed, err := packartifact.ImportEmbeddedPack(project, tc.id, base); err != nil || !changed {
+				t.Fatalf("import %s changed=%t err=%v", tc.id, changed, err)
+			}
+			if err := os.WriteFile(filepath.Join(project, "packs", tc.id, tc.bodyFile), []byte("unknown_field: true\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := loadServeRuntimeBundle(context.Background(), cliapp.RepoRoot(), storeBundle{}, cliapp.CLIContractPlatformSpecPaths{
+				ContractsPath: project, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot()),
+			}, cliapp.ServeOptions{}, testPlatformPackBaseGenerations(t))
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("serve malformed %s error = %v, want %q", tc.name, err, tc.wantErr)
+			}
+		})
+	}
+}
 
 func servedRuntimeRootIdentity(t testing.TB, agentID string) runtimeagentidentity.Identity {
 	t.Helper()
@@ -649,7 +682,7 @@ func TestLoadServeRuntimeBundleFromCatalogLoadsPersistedRuntimeSource(t *testing
 		t.Fatalf("UpsertBundleCatalog: %v", err)
 	}
 	runningPlatformSpecPath := runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot())
-	if _, err := loadServeRuntimeBundleFromCatalog(ctx, cliapp.RepoRoot(), storeBundle{}, projection.BundleHash, runningPlatformSpecPath); err == nil || !strings.Contains(err.Error(), "requires selected bundle catalog store") {
+	if _, err := loadServeRuntimeBundleFromCatalog(ctx, cliapp.RepoRoot(), storeBundle{}, projection.BundleHash, runningPlatformSpecPath, testPlatformPackBaseGenerations(t)); err == nil || !strings.Contains(err.Error(), "requires selected bundle catalog store") {
 		t.Fatalf("loadServeRuntimeBundleFromCatalog without selected catalog err = %v, want selected-owner failure", err)
 	}
 
@@ -657,7 +690,7 @@ func TestLoadServeRuntimeBundleFromCatalogLoadsPersistedRuntimeSource(t *testing
 	if stores.InboundStore == nil || stores.runtimeDeps().InboundStore == nil {
 		t.Fatal("selected Postgres store bundle missing InboundStore for served webhook ingress")
 	}
-	loaded, err := loadServeRuntimeBundleFromCatalog(ctx, cliapp.RepoRoot(), stores, projection.BundleHash, runningPlatformSpecPath)
+	loaded, err := loadServeRuntimeBundleFromCatalog(ctx, cliapp.RepoRoot(), stores, projection.BundleHash, runningPlatformSpecPath, testPlatformPackBaseGenerations(t))
 	if err != nil {
 		t.Fatalf("loadServeRuntimeBundleFromCatalog: %v", err)
 	}
@@ -9187,15 +9220,23 @@ func assertServePreflightStaleGatewayWarning(t *testing.T, opts cliapp.ServeOpti
 	if err != nil {
 		t.Fatalf("resolve workspace backend for preflight proof: %v", err)
 	}
-	providerPacks, err := cliapp.LoadConfiguredProviderTriggerPacks(cliapp.RepoRoot(), cfgResult)
+	platformPackBase, err := cliapp.LoadConfiguredPlatformPackBase(cliapp.RepoRoot(), cfgResult)
 	if err != nil {
-		t.Fatalf("load provider packs for preflight proof: %v", err)
+		t.Fatalf("load platform pack base for preflight proof: %v", err)
+	}
+	_, bundle, err := cliapp.NewSwarmWorkflowModuleWithPackBase(cliapp.RepoRoot(), resolvedPaths.ContractsPath, resolvedPaths.PlatformSpecPath, platformPackBase)
+	if err != nil {
+		t.Fatalf("load workflow bundle for preflight proof: %v", err)
 	}
 	providerCredentials, err := cliapp.BuildProviderCredentialStore()
 	if err != nil {
 		t.Fatal(err)
 	}
-	report := cliapp.RunServeLocalClaudeCLIPreflight(context.Background(), cliapp.RepoRoot(), opts, cfgResult.Config, resolvedPaths, workspaceBackend, cliapp.WorkspaceMountSources{DataSource: t.TempDir(), DataSourceSource: "test"}, providerPacks.Loaded, providerPacks.Catalog, providerCredentials, cliapp.ChannelPackLoad{})
+	packRuntime, err := cliapp.LoadBundlePackRuntime(context.Background(), cfgResult, bundle, providerCredentials, nil)
+	if err != nil {
+		t.Fatalf("load bundle pack runtime for preflight proof: %v", err)
+	}
+	report := cliapp.RunServeLocalClaudeCLIPreflight(context.Background(), cliapp.RepoRoot(), opts, cfgResult.Config, resolvedPaths, workspaceBackend, cliapp.WorkspaceMountSources{DataSource: t.TempDir(), DataSourceSource: "test"}, platformPackBase, packRuntime.ProviderTriggers.Loaded, packRuntime.ProviderTriggers.Catalog, providerCredentials, packRuntime.Channels)
 	if report.Mode != wantMode {
 		t.Fatalf("preflight mode = %q, want %q", report.Mode, wantMode)
 	}
@@ -9207,8 +9248,8 @@ func assertServePreflightStaleGatewayWarning(t *testing.T, opts cliapp.ServeOpti
 	if report.HasBlockers() {
 		t.Fatalf("stale local gateway URL env produced blockers, want warnings only:\n%#v", report)
 	}
-	if len(report.CapabilitySubjects) != 18 {
-		t.Fatalf("%s capability subjects = %#v, want eight triggers plus ten connector actions", wantMode, report.CapabilitySubjects)
+	if len(report.CapabilitySubjects) != 19 {
+		t.Fatalf("%s capability subjects = %#v, want eight triggers, ten connector actions, and one channel", wantMode, report.CapabilitySubjects)
 	}
 }
 
@@ -9775,7 +9816,12 @@ func loadWorkflowValidationFixtureBundle(t *testing.T, relativeRoot string) *run
 	RepoRoot := runtimepipeline.WorkflowRepoRoot()
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(RepoRoot)
 	fixtureRoot := filepath.Join(RepoRoot, relativeRoot)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(RepoRoot, fixtureRoot, platformSpec)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(
+		RepoRoot,
+		fixtureRoot,
+		platformSpec,
+		runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory},
+	)
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides(%s): %v", fixtureRoot, err)
 	}
@@ -9786,7 +9832,12 @@ func loadWorkflowValidationBundleAt(t *testing.T, fixtureRoot string) *runtimeco
 	t.Helper()
 	RepoRoot := runtimepipeline.WorkflowRepoRoot()
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(RepoRoot)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(RepoRoot, fixtureRoot, platformSpec)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(
+		RepoRoot,
+		fixtureRoot,
+		platformSpec,
+		runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory},
+	)
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides(%s): %v", fixtureRoot, err)
 	}

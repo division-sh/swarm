@@ -102,13 +102,13 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			if err != nil {
 				t.Fatalf("selected standing capability subjects: %v", err)
 			}
-			manager, err := runtimepkg.NewRuntimeContextManagerWithAdmission(nil, runtimepkg.ProcessAdmissionState{
-				Generation: catalog.Generation(), InstalledSubjects: installed,
-			}, runtimepkg.BundleContext{
+			manager, err := runtimepkg.NewRuntimeContextManager(nil, completeServeTestPackContext(t, runtimepkg.BundleContext{
 				BundleSourceFact: primaryFact, Source: primaryModule.SemanticSource(), Runtime: primary, WorkOwner: primary.WorkOccurrence(),
-			}, runtimepkg.BundleContext{
+				ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: installed,
+			}), completeServeTestPackContext(t, runtimepkg.BundleContext{
 				BundleSourceFact: selectedFact, Source: selectedModule.SemanticSource(), Runtime: selected, WorkOwner: selected.WorkOccurrence(), StandingTargets: targets,
-			})
+				ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: installed,
+			}))
 			if err != nil {
 				t.Fatalf("build standing runtime-context manager: %v", err)
 			}
@@ -263,7 +263,7 @@ func newStandingRuntimeContextRuntime(
 		"telegram_bot_token":       "standing-owner-token",
 		"webhook_signing.telegram": "standing-owner-signing-secret",
 	}
-	deps := runtimeDepsForServeTest(stores, &config.Config{}, runtimepkg.RuntimeOptions{
+	deps := runtimeDepsForServeTest(t, stores, &config.Config{}, runtimepkg.RuntimeOptions{
 		WorkflowModule: module, BundleSourceFact: fact, RuntimeInstanceID: runtimeInstanceID,
 		ProcessWorkOwner: process, ProviderTriggerCatalog: catalog,
 		Credentials: credentials, ProviderCredentials: credentials,

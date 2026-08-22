@@ -414,16 +414,16 @@ func githubAppIssueCommentSource(t *testing.T, baseURL, flowInstance string) sem
 			},
 		},
 	}
-	source, err := providerconnectors.SourceWithConnectorPackImportsFromRegistry(importSource, githubAppIssueCommentPackRegistry(t, baseURL))
+	source, err := providerconnectors.SourceWithConnectorPackImports(importSource, githubAppIssueCommentPackRegistry(t, baseURL))
 	if err != nil {
-		t.Fatalf("SourceWithConnectorPackImportsFromRegistry: %v", err)
+		t.Fatalf("SourceWithConnectorPackImports: %v", err)
 	}
 	return source
 }
 
 func githubAppIssueCommentPackRegistry(t *testing.T, baseURL string) *providerconnectors.PackRegistry {
 	t.Helper()
-	tool, ok := providerconnectors.BuiltinTool("github", "github.create_issue_comment")
+	tool, ok := embeddedConnectorTool(t, "github", "github.create_issue_comment")
 	if !ok {
 		t.Fatal("provider connector pack github.create_issue_comment not found")
 	}

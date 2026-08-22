@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
+	"github.com/division-sh/swarm/internal/packadmission"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 )
 
@@ -63,11 +64,17 @@ type bundleRegisterCommandOptions struct {
 	RepoRoot          string
 }
 
+type bundleRegisterPreparation struct {
+	params    map[string]any
+	cliConfig *cliCommandConfig
+}
+
 type bundleBuildCommandOptions struct {
 	contractsDir string
 	outputRoot   string
 	report       string
 	RepoRoot     string
+	root         rootCommandOptions
 }
 
 type bundleDeleteCommandOptions struct {
@@ -177,7 +184,7 @@ func newBundleCommand(RepoRoot string, opts rootCommandOptions) *cobra.Command {
 		newBundleListCommand(opts),
 		newBundleShowCommand(opts),
 		newBundleAgentsCommand(opts),
-		newBundleBuildCommand(RepoRoot),
+		newBundleBuildCommand(RepoRoot, opts),
 		newBundleRegisterCommand(RepoRoot, opts),
 		newBundleDeleteCommand(opts),
 	)
@@ -249,8 +256,8 @@ func newBundleAgentsCommand(opts rootCommandOptions) *cobra.Command {
 	return cmd
 }
 
-func newBundleBuildCommand(RepoRoot string) *cobra.Command {
-	buildOpts := bundleBuildCommandOptions{RepoRoot: RepoRoot}
+func newBundleBuildCommand(RepoRoot string, root rootCommandOptions) *cobra.Command {
+	buildOpts := bundleBuildCommandOptions{RepoRoot: RepoRoot, root: root}
 	cmd := &cobra.Command{
 		Use:   "build",
 		Short: "Materialize a local contract bundle for explicit consumption.",
@@ -449,16 +456,21 @@ func runBundleBuildCommand(ctx context.Context, out, errOut io.Writer, opts bund
 }
 
 func runBundleRegisterCommand(ctx context.Context, out, errOut io.Writer, opts bundleRegisterCommandOptions, args []string) error {
-	params, err := opts.params(args)
+	prepared, err := opts.params(args)
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
-	client, err := newCLIAPIClient(opts.apiOptions)
+	var client *cliAPIClient
+	if prepared.cliConfig != nil {
+		client, err = newCLIAPIClientFromConfig(opts.apiOptions, *prepared.cliConfig)
+	} else {
+		client, err = newCLIAPIClient(opts.apiOptions)
+	}
 	if err != nil {
 		return returnCLIAPIError(errOut, err, bundleAPIErrorClassifier())
 	}
 	var result bundleRegistrationResult
-	if err := client.call(ctx, bundleRegisterMethod, params, &result); err != nil {
+	if err := client.call(ctx, bundleRegisterMethod, prepared.params, &result); err != nil {
 		return returnCLIAPIError(errOut, err, bundleAPIErrorClassifier())
 	}
 	if err := validateBundleRegistrationResult(result); err != nil {
@@ -558,9 +570,13 @@ func (opts bundleBuildCommandOptions) request() (runtimecontracts.BundleBuildReq
 		}
 		RepoRoot = cwd
 	}
-	resolvedPaths, err := ResolveCLIContractPlatformSpecPaths(RepoRoot, CLIContractPlatformSpecPathOptions{
+	cfgResult, err := loadPackInventoryConfig(RepoRoot, rootConfigPath(opts.root))
+	if err != nil {
+		return runtimecontracts.BundleBuildRequest{}, false, fmt.Errorf("load pack inventory config: %w", err)
+	}
+	resolvedPaths, err := resolveCLIContractPlatformSpecPathsFromConfig(RepoRoot, CLIContractPlatformSpecPathOptions{
 		ContractsPath: opts.contractsDir,
-	})
+	}, cfgResult.cli)
 	if err != nil {
 		return runtimecontracts.BundleBuildRequest{}, false, err
 	}
@@ -574,22 +590,30 @@ func (opts bundleBuildCommandOptions) request() (runtimecontracts.BundleBuildReq
 	} else {
 		outputRoot = ResolvePath(RepoRoot, outputRoot)
 	}
+	packBase, err := LoadConfiguredPlatformPackBase(RepoRoot, cfgResult)
+	if err != nil {
+		return runtimecontracts.BundleBuildRequest{}, false, fmt.Errorf("load platform pack base: %w", err)
+	}
 	return runtimecontracts.BundleBuildRequest{
 		RepoRoot:         RepoRoot,
 		ContractsRoot:    contractsRoot,
 		PlatformSpecPath: resolvedPaths.PlatformSpecPath,
 		OutputRoot:       outputRoot,
+		LoadOptions: runtimecontracts.WorkflowContractLoadOptions{
+			PlatformPackBase: packBase, AdmitPackInventory: packadmission.AdmitInventory,
+		},
 	}, reportJSON, nil
 }
 
-func (opts bundleRegisterCommandOptions) params(args []string) (map[string]any, error) {
+func (opts bundleRegisterCommandOptions) params(args []string) (bundleRegisterPreparation, error) {
 	if opts.contractsSet {
 		return opts.contractsDirectoryParams(args)
 	}
 	if len(args) != 1 {
-		return nil, argcount.NewDiagnosticFromUse("swarm bundle register", "register", bundleRegisterUse, args, argcount.Rule{Exact: 1}, "")
+		return bundleRegisterPreparation{}, argcount.NewDiagnosticFromUse("swarm bundle register", "register", bundleRegisterUse, args, argcount.Rule{Exact: 1}, "")
 	}
-	return opts.preparedEnvelopeParams(args[0])
+	params, err := opts.preparedEnvelopeParams(args[0])
+	return bundleRegisterPreparation{params: params}, err
 }
 
 func (opts bundleRegisterCommandOptions) preparedEnvelopeParams(envelopePath string) (map[string]any, error) {
@@ -613,16 +637,16 @@ func (opts bundleRegisterCommandOptions) preparedEnvelopeParams(envelopePath str
 	return params, nil
 }
 
-func (opts bundleRegisterCommandOptions) contractsDirectoryParams(args []string) (map[string]any, error) {
+func (opts bundleRegisterCommandOptions) contractsDirectoryParams(args []string) (bundleRegisterPreparation, error) {
 	if len(args) != 0 {
-		return nil, argcount.NewDiagnosticFromUse("swarm bundle register", "register", bundleRegisterUse, args, argcount.Rule{Max: 0}, "")
+		return bundleRegisterPreparation{}, argcount.NewDiagnosticFromUse("swarm bundle register", "register", bundleRegisterUse, args, argcount.Rule{Max: 0}, "")
 	}
 	if opts.dataBlobSet {
-		return nil, fmt.Errorf("--data-blob cannot be used with --contracts")
+		return bundleRegisterPreparation{}, fmt.Errorf("--data-blob cannot be used with --contracts")
 	}
 	contractsDir, err := optionalNonEmptyFlag("--contracts", opts.contractsDir, opts.contractsSet)
 	if err != nil {
-		return nil, err
+		return bundleRegisterPreparation{}, err
 	}
 	RepoRoot := strings.TrimSpace(opts.RepoRoot)
 	if RepoRoot == "" {
@@ -631,34 +655,48 @@ func (opts bundleRegisterCommandOptions) contractsDirectoryParams(args []string)
 	if RepoRoot == "" {
 		cwd, err := os.Getwd()
 		if err != nil {
-			return nil, fmt.Errorf("resolve repo root: %w", err)
+			return bundleRegisterPreparation{}, fmt.Errorf("resolve repo root: %w", err)
 		}
 		RepoRoot = cwd
 	}
-	paths, err := ResolveCLIContractPlatformSpecPaths(RepoRoot, CLIContractPlatformSpecPathOptions{
-		ContractsPath: contractsDir,
-	})
+	configPath := ""
+	if opts.apiOptions.rootFlags != nil && opts.apiOptions.rootFlags.configPathSet {
+		configPath = opts.apiOptions.rootFlags.configPath
+	}
+	cfgResult, err := loadPackInventoryConfig(RepoRoot, configPath)
 	if err != nil {
-		return nil, err
+		return bundleRegisterPreparation{}, fmt.Errorf("load pack inventory config: %w", err)
+	}
+	paths, err := resolveCLIContractPlatformSpecPathsFromConfig(RepoRoot, CLIContractPlatformSpecPathOptions{
+		ContractsPath: contractsDir,
+	}, cfgResult.cli)
+	if err != nil {
+		return bundleRegisterPreparation{}, err
 	}
 	contractsRoot, err := NormalizeContractsRoot(paths.ContractsPath)
 	if err != nil {
-		return nil, fmt.Errorf("resolve contracts: %w", err)
+		return bundleRegisterPreparation{}, fmt.Errorf("resolve contracts: %w", err)
 	}
-	upload, err := runtimecontracts.BuildBundleRegistrationDirectoryUpload(RepoRoot, contractsRoot, paths.PlatformSpecPath)
+	packBase, err := LoadConfiguredPlatformPackBase(RepoRoot, cfgResult)
 	if err != nil {
-		return nil, fmt.Errorf("package contracts directory: %w", err)
+		return bundleRegisterPreparation{}, fmt.Errorf("load platform pack base: %w", err)
+	}
+	upload, err := runtimecontracts.BuildBundleRegistrationDirectoryUploadWithOptions(RepoRoot, contractsRoot, paths.PlatformSpecPath, runtimecontracts.WorkflowContractLoadOptions{
+		PlatformPackBase: packBase, AdmitPackInventory: packadmission.AdmitInventory,
+	})
+	if err != nil {
+		return bundleRegisterPreparation{}, fmt.Errorf("package contracts directory: %w", err)
 	}
 	params := map[string]any{"content_yaml": upload.ContentYAML}
 	if upload.DataBlob != nil && len(upload.DataBlob.Entries) > 0 {
 		params["data_blob"] = upload.DataBlob
 	}
 	if idempotencyKey, err := optionalNonEmptyFlag("--idempotency-key", opts.idempotencyKey, opts.idempotencyKeySet); err != nil {
-		return nil, err
+		return bundleRegisterPreparation{}, err
 	} else if idempotencyKey != "" {
 		params["idempotency_key"] = idempotencyKey
 	}
-	return params, nil
+	return bundleRegisterPreparation{params: params, cliConfig: &cfgResult.cli}, nil
 }
 
 func (opts bundleDeleteCommandOptions) params(rawBundleHash string) (map[string]any, string, error) {

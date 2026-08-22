@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/bundlecatalog"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -159,6 +160,7 @@ type selectedAPICapabilityRequest struct {
 	ProviderCredentials     runtimecredentials.Store
 	ExecutionPosture        executionposture.Posture
 	ProcessCapability       runtimestartupownership.ProcessCapability
+	PlatformPackBases       *packartifact.PlatformPackBaseGenerationOwner
 }
 
 type selectedAPIOptionalCapabilityBuilder func(selectedAPICapabilityRequest) (selectedAPICapabilities, error)

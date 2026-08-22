@@ -13,14 +13,13 @@ import (
 	"io/fs"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
@@ -227,51 +226,22 @@ func NewCatalogSnapshot(entries ...CatalogEntry) (*CatalogSnapshot, error) {
 	return snapshot, nil
 }
 
-func LoadPlatformPackDirs(runningPlatformVersion string, dirs ...string) ([]LoadedPack, error) {
-	return loadPackDirs(runningPlatformVersion, packs.ProvenancePlatform, dirs...)
-}
-
-func LoadExternalPackDirs(runningPlatformVersion string, dirs ...string) ([]LoadedPack, error) {
-	return loadPackDirs(runningPlatformVersion, packs.ProvenanceExternal, dirs...)
-}
-
-func loadPackDirs(runningPlatformVersion, expectedProvenance string, dirs ...string) ([]LoadedPack, error) {
-	loaded := make([]LoadedPack, 0, len(dirs))
-	for _, dir := range dirs {
-		dir = filepath.Clean(strings.TrimSpace(dir))
-		if dir == "" || dir == "." {
-			return nil, fmt.Errorf("%s provider trigger pack directory is required", expectedProvenance)
-		}
-		pack, err := LoadPackFS(os.DirFS(dir), ".", runningPlatformVersion)
+func NewCatalogSnapshotFromInventory(inventory *packartifact.EffectivePackInventory, runningPlatformVersion string) (*CatalogSnapshot, []LoadedPack, error) {
+	if inventory == nil {
+		return nil, nil, fmt.Errorf("effective pack inventory is required")
+	}
+	entries := inventory.EntriesByType(packartifact.TypeTrigger)
+	loaded := make([]LoadedPack, 0, len(entries))
+	for _, entry := range entries {
+		pack, err := LoadPackFS(entry.FileSystem(), ".", runningPlatformVersion)
 		if err != nil {
-			return nil, fmt.Errorf("load %s provider trigger pack %q: %w", expectedProvenance, dir, err)
+			return nil, nil, fmt.Errorf("load effective provider trigger pack %q: %w", entry.ID(), err)
 		}
-		if pack.Envelope.Provenance.Source != expectedProvenance {
-			return nil, fmt.Errorf("%s provider trigger pack %q at %q declares provenance %q; expected %q", expectedProvenance, pack.Envelope.ID, dir, pack.Envelope.Provenance.Source, expectedProvenance)
-		}
-		pack.Directory = dir
-		pack.SourcePath = dir
-		pack.Source = loadedPackSource(pack)
+		pack.Directory = entry.Directory()
+		pack.SourcePath = entry.Directory()
+		pack.Source = entry.Source() + ":" + entry.ID()
 		loaded = append(loaded, pack)
 	}
-	return loaded, nil
-}
-
-func NewCatalogSnapshotFromPackDirs(runningPlatformVersion string, platformDirs, externalDirs []string) (*CatalogSnapshot, []LoadedPack, error) {
-	if err := rejectDuplicatePackDirectories(platformDirs, externalDirs); err != nil {
-		return nil, nil, err
-	}
-	platformPacks, err := LoadPlatformPackDirs(runningPlatformVersion, platformDirs...)
-	if err != nil {
-		return nil, nil, err
-	}
-	externalPacks, err := LoadExternalPackDirs(runningPlatformVersion, externalDirs...)
-	if err != nil {
-		return nil, nil, err
-	}
-	loaded := make([]LoadedPack, 0, len(platformPacks)+len(externalPacks))
-	loaded = append(loaded, platformPacks...)
-	loaded = append(loaded, externalPacks...)
 	if err := validateLoadedPackIdentities(loaded); err != nil {
 		return nil, nil, err
 	}
@@ -280,36 +250,6 @@ func NewCatalogSnapshotFromPackDirs(runningPlatformVersion string, platformDirs,
 		return nil, nil, err
 	}
 	return snapshot, loaded, nil
-}
-
-func rejectDuplicatePackDirectories(platformDirs, externalDirs []string) error {
-	type source struct {
-		provenance string
-	}
-	seen := map[string]source{}
-	for _, group := range []struct {
-		provenance string
-		dirs       []string
-	}{
-		{provenance: packs.ProvenancePlatform, dirs: platformDirs},
-		{provenance: packs.ProvenanceExternal, dirs: externalDirs},
-	} {
-		for _, dir := range group.dirs {
-			cleaned := filepath.Clean(strings.TrimSpace(dir))
-			canonical, err := filepath.Abs(cleaned)
-			if err != nil {
-				canonical = cleaned
-			}
-			if resolved, err := filepath.EvalSymlinks(canonical); err == nil {
-				canonical = resolved
-			}
-			if previous, ok := seen[canonical]; ok {
-				return fmt.Errorf("duplicate provider trigger pack directory %q declared as provenance %q and %q", cleaned, previous.provenance, group.provenance)
-			}
-			seen[canonical] = source{provenance: group.provenance}
-		}
-	}
-	return nil
 }
 
 func validateLoadedPackIdentities(loaded []LoadedPack) error {

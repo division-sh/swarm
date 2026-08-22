@@ -19,6 +19,8 @@ import (
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime"
@@ -61,6 +63,7 @@ import (
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -216,14 +219,16 @@ func selectedPostgresAPIOptionalCapabilityBuilder(pg *store.PostgresStore, store
 			},
 		}
 		runForkSourceLoader := runtimerunforkexecution.SelectedContractSourceLoader(runtimerunforkexecution.ContractBundleSourceLoader{
-			RepoRoot:         req.RepoRoot,
-			PlatformSpecPath: req.PlatformSpecPath,
+			RepoRoot:          req.RepoRoot,
+			PlatformSpecPath:  req.PlatformSpecPath,
+			PlatformPackBases: req.PlatformPackBases,
 		})
 		if req.LoadedBundle.dbLoaded {
 			runForkSourceLoader = runtimerunforkexecution.BundleCatalogSelectedContractSourceLoader{
-				RepoRoot:         req.RepoRoot,
-				PlatformSpecPath: req.RunningPlatformSpecPath,
-				Store:            pg,
+				RepoRoot:          req.RepoRoot,
+				PlatformSpecPath:  req.RunningPlatformSpecPath,
+				PlatformPackBases: req.PlatformPackBases,
+				Store:             pg,
 			}
 		}
 		runFork := apiv1.SelectedContractRunForkExecutor{
@@ -608,6 +613,9 @@ type serveRuntimeBundleContext struct {
 	workspaces                 cliapp.ServeWorkspaceLifecycle
 	validation                 runtime.WorkflowContractValidationResult
 	runtime                    *runtime.Runtime
+	providerTriggerGeneration  triggergeneration.Generation
+	installedTriggerSubjects   []packs.Subject
+	packInventoryDigest        string
 	startupStandingTargets     []runtime.StandingTarget
 	startupStandingActivations []runtime.StandingActivation
 }
@@ -755,7 +763,7 @@ func servePreCatalogPlatformSpecPath(resolvedPaths cliapp.CLIContractPlatformSpe
 	return resolvedPaths.PlatformSpecPath, nil
 }
 
-func loadServeRuntimeBundles(ctx context.Context, repo string, stores storeBundle, resolvedPaths cliapp.CLIContractPlatformSpecPaths, opts cliapp.ServeOptions) ([]serveRuntimeBundle, error) {
+func loadServeRuntimeBundles(ctx context.Context, repo string, stores storeBundle, resolvedPaths cliapp.CLIContractPlatformSpecPaths, opts cliapp.ServeOptions, packBases *packartifact.PlatformPackBaseGenerationOwner) ([]serveRuntimeBundle, error) {
 	hashes, err := cliapp.ServeBundleHashes(opts)
 	if err != nil {
 		return nil, err
@@ -767,7 +775,7 @@ func loadServeRuntimeBundles(ctx context.Context, repo string, stores storeBundl
 			return nil, fmt.Errorf("resolve embedded platform spec for bundle catalog admission: %w", err)
 		}
 		for _, hash := range hashes {
-			loaded, err := loadServeRuntimeBundleFromCatalog(ctx, repo, stores, hash, runningPlatformSpecPath)
+			loaded, err := loadServeRuntimeBundleFromCatalog(ctx, repo, stores, hash, runningPlatformSpecPath, packBases)
 			if err != nil {
 				for _, prior := range out {
 					if prior.cleanup != nil {
@@ -780,14 +788,14 @@ func loadServeRuntimeBundles(ctx context.Context, repo string, stores storeBundl
 		}
 		return out, nil
 	}
-	loaded, err := loadServeRuntimeBundle(ctx, repo, stores, resolvedPaths, opts)
+	loaded, err := loadServeRuntimeBundle(ctx, repo, stores, resolvedPaths, opts, packBases)
 	if err != nil {
 		return nil, err
 	}
 	return []serveRuntimeBundle{loaded}, nil
 }
 
-func loadServeRuntimeBundle(ctx context.Context, repo string, stores storeBundle, resolvedPaths cliapp.CLIContractPlatformSpecPaths, opts cliapp.ServeOptions) (serveRuntimeBundle, error) {
+func loadServeRuntimeBundle(ctx context.Context, repo string, stores storeBundle, resolvedPaths cliapp.CLIContractPlatformSpecPaths, opts cliapp.ServeOptions, packBases *packartifact.PlatformPackBaseGenerationOwner) (serveRuntimeBundle, error) {
 	hashes, err := cliapp.ServeBundleHashes(opts)
 	if err != nil {
 		return serveRuntimeBundle{}, err
@@ -800,13 +808,17 @@ func loadServeRuntimeBundle(ctx context.Context, repo string, stores storeBundle
 		if err != nil {
 			return serveRuntimeBundle{}, fmt.Errorf("resolve embedded platform spec for bundle catalog admission: %w", err)
 		}
-		return loadServeRuntimeBundleFromCatalog(ctx, repo, stores, hashes[0], runningPlatformSpecPath)
+		return loadServeRuntimeBundleFromCatalog(ctx, repo, stores, hashes[0], runningPlatformSpecPath, packBases)
 	}
 	contractsRoot, err := cliapp.NormalizeContractsRoot(resolvedPaths.ContractsPath)
 	if err != nil {
 		return serveRuntimeBundle{}, err
 	}
-	module, bundle, err := cliapp.NewSwarmWorkflowModule(repo, contractsRoot, resolvedPaths.PlatformSpecPath)
+	packBase, err := packBases.CurrentPlatformPackBase()
+	if err != nil {
+		return serveRuntimeBundle{}, err
+	}
+	module, bundle, err := cliapp.NewSwarmWorkflowModuleWithPackBase(repo, contractsRoot, resolvedPaths.PlatformSpecPath, packBase)
 	if err != nil {
 		return serveRuntimeBundle{}, err
 	}
@@ -825,7 +837,7 @@ func loadServeRuntimeBundle(ctx context.Context, repo string, stores storeBundle
 	}, nil
 }
 
-func loadServeRuntimeBundleFromCatalog(ctx context.Context, repo string, stores storeBundle, bundleHash, runningPlatformSpecPath string) (serveRuntimeBundle, error) {
+func loadServeRuntimeBundleFromCatalog(ctx context.Context, repo string, stores storeBundle, bundleHash, runningPlatformSpecPath string, packBases *packartifact.PlatformPackBaseGenerationOwner) (serveRuntimeBundle, error) {
 	catalog := stores.facade().bundleRuntimeCatalogStore()
 	if catalog == nil {
 		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_UNAVAILABLE: swarm serve --bundle-hash requires selected bundle catalog store")
@@ -845,6 +857,8 @@ func loadServeRuntimeBundleFromCatalog(ctx context.Context, repo string, stores 
 		ContentYAML:             record.ContentYAML,
 		DataBlob:                record.DataBlob,
 		RunningPlatformSpecPath: strings.TrimSpace(runningPlatformSpecPath),
+		PlatformPackBases:       packBases,
+		AdmitPackInventory:      packadmission.AdmitInventory,
 	})
 	if err != nil {
 		return serveRuntimeBundle{}, err
@@ -1038,15 +1052,25 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("retain admitted runtime source: %w", err)
 	}
+	installedTriggerSubjects, err := req.ProviderTriggerCatalog.InstalledCapabilitySubjects()
+	if err != nil {
+		return serveRuntimeBundleContext{}, fmt.Errorf("derive installed provider trigger subjects: %w", err)
+	}
+	if loaded.bundle == nil || loaded.bundle.PackInventory == nil {
+		return serveRuntimeBundleContext{}, fmt.Errorf("bundle-specific effective pack inventory is required")
+	}
 	return serveRuntimeBundleContext{
-		loaded:            loaded,
-		stateStoreSummary: stateStoreSummary,
-		bundleSourceFact:  bundleSourceFact,
-		bootIdentity:      bootIdentity,
-		workspaceBackend:  req.WorkspaceBackend,
-		workspaces:        workspaces,
-		validation:        validation,
-		runtime:           rt,
+		loaded:                    loaded,
+		stateStoreSummary:         stateStoreSummary,
+		bundleSourceFact:          bundleSourceFact,
+		bootIdentity:              bootIdentity,
+		workspaceBackend:          req.WorkspaceBackend,
+		workspaces:                workspaces,
+		validation:                validation,
+		runtime:                   rt,
+		providerTriggerGeneration: req.ProviderTriggerCatalog.Generation(),
+		installedTriggerSubjects:  installedTriggerSubjects,
+		packInventoryDigest:       loaded.bundle.PackInventory.Digest(),
 	}, nil
 }
 
@@ -1151,7 +1175,12 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	}
 	cfg := cfgResult.Config
 	presenter.boot(2, "config_load", "ok", serveConfigLoadDetail(cfgResult.Detail(), resolvedPaths, opts))
-	providerPackLoad, err := cliapp.LoadConfiguredProviderTriggerPacks(repo, cfgResult)
+	platformPackBase, err := cliapp.LoadConfiguredPlatformPackBase(repo, cfgResult)
+	if err != nil {
+		presenter.fail(2, "config_load", err)
+		return 1
+	}
+	platformPackBases, err := packartifact.NewPlatformPackBaseGenerationOwner(platformPackBase)
 	if err != nil {
 		presenter.fail(2, "config_load", err)
 		return 1
@@ -1213,7 +1242,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 			return 1
 		}
 	}
-	loadedBundles, err := loadServeRuntimeBundles(ctx, repo, stores, resolvedPaths, opts)
+	loadedBundles, err := loadServeRuntimeBundles(ctx, repo, stores, resolvedPaths, opts, platformPackBases)
 	if err != nil {
 		detail := err.Error()
 		if _, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
@@ -1271,13 +1300,17 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		presenter.fail(5, "provider_credentials", err)
 		return 1
 	}
-	channelPacks, err := cliapp.LoadConfiguredChannelPacks(ctx, repo, cfgResult, source.PlatformSpec(), providerPackLoad.Catalog, providerCredentialStore, managedCredentialStore)
-	if err != nil {
-		presenter.fail(5, "channel_packs", err)
-		return 1
+	bundlePackLoads := make([]cliapp.BundlePackRuntimeLoad, len(loadedBundles))
+	for i := range loadedBundles {
+		bundlePackLoads[i], err = cliapp.LoadBundlePackRuntime(ctx, cfgResult, loadedBundles[i].bundle, providerCredentialStore, managedCredentialStore)
+		if err != nil {
+			presenter.fail(5, "pack_inventory", fmt.Errorf("bundle %s: %w", loadedBundles[i].serveIdentityDetail(), err))
+			return 1
+		}
 	}
+	primaryPackLoad := bundlePackLoads[0]
 	if cliapp.ShouldRunServeLocalClaudeCLIPreflight(opts) {
-		preflight := cliapp.RunServeLocalClaudeCLIPreflight(ctx, repo, opts, cfg, resolvedPaths, workspaceBackendPreference, mountSources, providerPackLoad.Loaded, providerPackLoad.Catalog, providerCredentialStore, channelPacks)
+		preflight := cliapp.RunServeLocalClaudeCLIPreflight(ctx, repo, opts, cfg, resolvedPaths, workspaceBackendPreference, mountSources, platformPackBase, primaryPackLoad.ProviderTriggers.Loaded, primaryPackLoad.ProviderTriggers.Catalog, providerCredentialStore, primaryPackLoad.Channels)
 		if preflight.HasBlockers() {
 			detail := preflight.BlockerSummary()
 			presenter.failWithDiagnostic(5, "local_preflight", errors.New(detail), func(out io.Writer) bool {
@@ -1357,6 +1390,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		if i == 0 {
 			bootProgress = presenter.runtimeSink()
 		}
+		packLoad := bundlePackLoads[i]
 		contextDef, err := buildServeRuntimeBundleContext(serveRuntimeBundleContextRequest{
 			Ctx:                    ctx,
 			Stores:                 stores,
@@ -1369,9 +1403,9 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 			Credentials:            credentialStore,
 			ManagedCredentials:     managedCredentialStore,
 			ProviderCredentials:    providerCredentialStore,
-			ProviderTriggerCatalog: providerPackLoad.Catalog,
-			ChannelPlans:           channelPacks.Plans,
-			ChannelBindings:        channelPacks.Bindings,
+			ProviderTriggerCatalog: packLoad.ProviderTriggers.Catalog,
+			ChannelPlans:           packLoad.Channels.Plans,
+			ChannelBindings:        packLoad.Channels.Bindings,
 			BootStartedAt:          bootStartedAt,
 			BootProgress:           bootProgress,
 			EnableToolGateway:      i == 0,
@@ -1444,13 +1478,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		presenter.fail(5, "runtime_context", err)
 		return 1
 	}
-	installedTriggerSubjects, err := providerPackLoad.Catalog.InstalledCapabilitySubjects()
-	if err != nil {
-		presenter.fail(5, "runtime_context", err)
-		return 1
-	}
-	admissionState := runtime.ProcessAdmissionState{Generation: providerPackLoad.Catalog.Generation(), InstalledSubjects: installedTriggerSubjects}
-	if err := runtime.ValidateRuntimeContextSetWithAdmission(admissionState, preflightContexts...); err != nil {
+	if err := runtime.ValidateRuntimeContextSet(preflightContexts...); err != nil {
 		presenter.fail(5, "runtime_context", err)
 		return 1
 	}
@@ -1487,7 +1515,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		presenter.fail(5, "bundle_match_admission", err)
 		return 3
 	}
-	runtimeContextManager, err := runtime.NewRuntimeContextManagerWithAdmission(runtimeContextAvailabilityReader(stores), admissionState)
+	runtimeContextManager, err := runtime.NewRuntimeContextManager(runtimeContextAvailabilityReader(stores))
 	if err != nil {
 		presenter.fail(5, "runtime_context", err)
 		return 1
@@ -1504,19 +1532,16 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	}
 
 	ready := runtimepublicingress.NewReadinessOwner(publicIngressEnabled)
-	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, ready, mountSources, workspaceBackendPreference, credentialStore, providerCredentialStore, providerPackLoad.Catalog, contractsRoot, bundle, source, rt, opts.Dev)
+	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, ready, mountSources, workspaceBackendPreference, credentialStore, providerCredentialStore, primaryPackLoad.ProviderTriggers.Catalog, platformPackBase, contractsRoot, bundle, source, rt, opts.Dev)
+	supervisor.SetPlatformPackBaseGenerationOwner(platformPackBases)
 	supervisor.SetProcessCapability(processCapability)
-	supervisor.loadProviderCatalog = func() (*providertriggers.CatalogSnapshot, error) {
-		return providerPackLoad.Reload()
-	}
-	supervisor.SetChannelPackLoader(func(loadCtx context.Context, candidateSource semanticview.Source, candidateCatalog *providertriggers.CatalogSnapshot) (cliapp.ChannelPackLoad, error) {
-		freshConfig, err := cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{
+	supervisor.SetRuntimeConfigLoader(func() (cliapp.RuntimeConfigLoadResult, error) {
+		return cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{
 			RepoRoot: repo, ExplicitPath: opts.ConfigPath, BackendOverride: opts.Backend,
 		})
-		if err != nil {
-			return cliapp.ChannelPackLoad{}, err
-		}
-		return cliapp.LoadConfiguredChannelPacks(loadCtx, repo, freshConfig, candidateSource.PlatformSpec(), candidateCatalog, providerCredentialStore, managedCredentialStore)
+	})
+	supervisor.SetBundlePackRuntimeLoader(func(loadCtx context.Context, candidateConfig cliapp.RuntimeConfigLoadResult, candidateBundle *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
+		return cliapp.LoadBundlePackRuntime(loadCtx, candidateConfig, candidateBundle, providerCredentialStore, managedCredentialStore)
 	})
 	supervisor.replacementShutdown = runtime.ShutdownOptions{Grace: opts.ShutdownGrace}
 	supervisor.runtimeLifetime = ctx
@@ -1577,6 +1602,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		ProviderCredentials:     providerCredentialStore,
 		ExecutionPosture:        rt.ExecutionPosture,
 		ProcessCapability:       processCapability,
+		PlatformPackBases:       platformPackBases,
 		RuntimeContextManager:   runtimeContextManager,
 		RuntimeSupervisor:       supervisor,
 	})
@@ -1607,7 +1633,11 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		apiv1.OperatorAgentConversationHandlers(apiv1.AgentConversationHandlerOptions{Agents: apiStoreCaps.Agents, Conversations: apiStoreCaps.Conversations, DeliveryLifecycle: stores.AgentDeliveryLifecycleStore, Usage: stores.AgentUsageStore}),
 		apiv1.OperatorBundleCatalogHandlers(apiv1.BundleCatalogHandlerOptions{Catalog: apiStoreCaps.BundleCatalog}),
 		apiv1.OperatorAgentFrameHandlers(apiv1.AgentFrameHandlerOptions{Catalog: apiStoreCaps.BundleCatalog, Effective: rt.Manager}),
-		apiv1.OperatorBundleRegisterHandlers(apiv1.BundleRegisterHandlerOptions{RepoRoot: repo, PlatformSpecPath: resolvedPlatformSpecPath, Register: apiStoreCaps.BundleRegister, Idempotency: stores.IdempotencyStore}),
+		apiv1.OperatorBundleRegisterHandlers(apiv1.BundleRegisterHandlerOptions{
+			RepoRoot: repo, PlatformSpecPath: resolvedPlatformSpecPath,
+			PlatformPackBases: platformPackBases, AdmitPackInventory: packadmission.AdmitInventory,
+			Register: apiStoreCaps.BundleRegister, Idempotency: stores.IdempotencyStore,
+		}),
 		apiv1.OperatorBundleDeleteHandlers(apiv1.BundleDeleteHandlerOptions{Executor: apiStoreCaps.BundleDelete, Idempotency: stores.IdempotencyStore}),
 		apiv1.OperatorConversationForkHandlers(apiv1.ConversationForkHandlerOptions{Reads: apiStoreCaps.ConversationForks, Lifecycle: apiStoreCaps.ConversationForkLifecycle, Chat: cliapp.NewWorkspaceAdmittedForkChatExecutor(apiv1.NewLLMForkChatExecutor(forkChatLLM), forkChatLLM, primaryWorkspaceBackend), Idempotency: stores.IdempotencyStore, ExecutionPosture: rt.ExecutionPosture}),
 		apiv1.OperatorMailboxHandlers(apiv1.MailboxHandlerOptions{Mailbox: stores.MailboxAPIStore}),
@@ -1828,6 +1858,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		MCPListener: addrString(mcpListener.Addr()),
 		ReadyAfter:  readyAfter,
 		Standing:    standing,
+		Packs:       serveLifecyclePackFacts(runtimeContexts),
 	}, func() { ready.Store(true) }) {
 		return 1
 	}
@@ -1846,6 +1877,31 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	<-ctx.Done()
 	ready.Store(false)
 	return 0
+}
+
+func serveLifecyclePackFacts(contexts []serveRuntimeBundleContext) []serveLifecyclePackFact {
+	facts := make([]serveLifecyclePackFact, 0, len(contexts))
+	for _, contextDef := range contexts {
+		if contextDef.loaded.bundle == nil || contextDef.loaded.bundle.PackInventory == nil {
+			continue
+		}
+		inventory := contextDef.loaded.bundle.PackInventory
+		fact := serveLifecyclePackFact{
+			BundleHash:      contextDef.bundleSourceFact.BundleHash(),
+			BaseMode:        inventory.BaseSelectionMode(),
+			BaseDigest:      inventory.BaseDigest(),
+			BaseDirectories: inventory.BaseDirectories(),
+			EffectiveDigest: inventory.Digest(),
+			PackCount:       len(inventory.Entries()),
+		}
+		for _, entry := range inventory.Entries() {
+			if entry.Source() == packartifact.ProvenanceProject {
+				fact.ProjectPacks = append(fact.ProjectPacks, entry.ID())
+			}
+		}
+		facts = append(facts, fact)
+	}
+	return facts
 }
 
 type standingServiceSetReconciler interface {
@@ -2201,14 +2257,17 @@ func plannedServeRuntimeContexts(contexts []serveRuntimeBundleContext) ([]runtim
 			return nil, err
 		}
 		planned = append(planned, runtime.BundleContext{
-			BundleSourceFact: contextDef.bundleSourceFact,
-			BundleIdentity:   contextDef.bootIdentity,
-			Source:           contextDef.loaded.source,
-			ContractsRoot:    contextDef.loaded.contractsRoot,
-			PlatformSpecPath: contextDef.loaded.platformSpecPath,
-			Runtime:          contextDef.runtime,
-			WorkOwner:        contextDef.runtime.WorkOccurrence(),
-			StandingTargets:  targets,
+			BundleSourceFact:          contextDef.bundleSourceFact,
+			BundleIdentity:            contextDef.bootIdentity,
+			Source:                    contextDef.loaded.source,
+			ContractsRoot:             contextDef.loaded.contractsRoot,
+			PlatformSpecPath:          contextDef.loaded.platformSpecPath,
+			Runtime:                   contextDef.runtime,
+			WorkOwner:                 contextDef.runtime.WorkOccurrence(),
+			StandingTargets:           targets,
+			ProviderTriggerGeneration: contextDef.providerTriggerGeneration,
+			InstalledTriggerSubjects:  contextDef.installedTriggerSubjects,
+			PackInventoryDigest:       contextDef.packInventoryDigest,
 		})
 	}
 	return planned, nil
@@ -2443,14 +2502,17 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 				}
 			}
 			if err := manager.Register(runtime.BundleContext{
-				BundleSourceFact: contextDef.bundleSourceFact,
-				BundleIdentity:   contextDef.bootIdentity,
-				Source:           contextDef.loaded.source,
-				ContractsRoot:    contextDef.loaded.contractsRoot,
-				PlatformSpecPath: contextDef.loaded.platformSpecPath,
-				Runtime:          contextDef.runtime,
-				WorkOwner:        contextDef.runtime.WorkOccurrence(),
-				StandingTargets:  targets,
+				BundleSourceFact:          contextDef.bundleSourceFact,
+				BundleIdentity:            contextDef.bootIdentity,
+				Source:                    contextDef.loaded.source,
+				ContractsRoot:             contextDef.loaded.contractsRoot,
+				PlatformSpecPath:          contextDef.loaded.platformSpecPath,
+				Runtime:                   contextDef.runtime,
+				WorkOwner:                 contextDef.runtime.WorkOccurrence(),
+				StandingTargets:           targets,
+				ProviderTriggerGeneration: contextDef.providerTriggerGeneration,
+				InstalledTriggerSubjects:  contextDef.installedTriggerSubjects,
+				PackInventoryDigest:       contextDef.packInventoryDigest,
 			}); err != nil {
 				rollback()
 				return err

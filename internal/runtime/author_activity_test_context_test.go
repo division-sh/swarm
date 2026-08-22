@@ -10,11 +10,13 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/packadmission"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -576,6 +578,11 @@ func testAuthorActivityContextForBundle(ctx context.Context, bundleHash string) 
 
 func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps) (*Runtime, error) {
 	t.Helper()
+	if deps.Options.WorkflowModule != nil {
+		if bundle, ok := semanticview.Bundle(deps.Options.WorkflowModule.SemanticSource()); ok {
+			admitRuntimeTestBundle(t, bundle)
+		}
+	}
 	if deps.Config != nil && !deps.Config.Runtime.ExecutionPosture.Valid() {
 		deps.Config.Runtime.ExecutionPosture = executionposture.Live
 	}
@@ -661,6 +668,18 @@ func newScopedTestRuntime(t testing.TB, ctx context.Context, deps RuntimeDeps) (
 		})
 	}
 	return runtime, err
+}
+
+func admitRuntimeTestBundle(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle) {
+	t.Helper()
+	if bundle == nil || bundle.PackInventory == nil || bundle.PackAdmission != nil {
+		return
+	}
+	projection, err := packadmission.Admit(bundle.PackInventory, bundle.Platform)
+	if err != nil {
+		t.Fatalf("admit runtime test pack projection: %v", err)
+	}
+	bundle.PackAdmission = projection
 }
 
 func testBundleSourceFact(t testing.TB, bundleHash string) runtimecorrelation.BundleSourceFact {

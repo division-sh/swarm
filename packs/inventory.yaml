@@ -1,0 +1,44 @@
+version: 1
+packs:
+  - id: provider.github
+    type: trigger
+    path: provider-triggers/github
+  - id: provider.intercom
+    type: trigger
+    path: provider-triggers/intercom
+  - id: provider.shopify
+    type: trigger
+    path: provider-triggers/shopify
+  - id: provider.slack
+    type: trigger
+    path: provider-triggers/slack
+  - id: provider.stripe
+    type: trigger
+    path: provider-triggers/stripe
+  - id: provider.telegram
+    type: trigger
+    path: provider-triggers/telegram
+  - id: provider.twilio
+    type: trigger
+    path: provider-triggers/twilio
+  - id: provider.typeform
+    type: trigger
+    path: provider-triggers/typeform
+  - id: provider.github.connector
+    type: connector
+    path: provider-connectors/github
+  - id: provider.microsoft_graph.connector
+    type: connector
+    path: provider-connectors/microsoft_graph
+  - id: provider.notion.connector
+    type: connector
+    path: provider-connectors/notion
+  - id: provider.slack.connector
+    type: connector
+    path: provider-connectors/slack
+  - id: provider.telegram.connector
+    type: connector
+    path: provider-connectors/telegram
+  - id: provider.telegram.hitl_channel
+    type: channel
+    path: channels/telegram

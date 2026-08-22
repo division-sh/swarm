@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -59,12 +60,15 @@ func AdmitEffectiveSourceProjection(request EffectiveSourceProjectionRequest) (A
 		return AdmittedEffectiveSourceProjection{}, fmt.Errorf("effective semantic source is required")
 	}
 
-	var err error
-	source, err = providerconnectors.SourceWithConnectorPackImports(source)
+	connectorRegistry, triggerCatalog, err := packProjectionsForEffectiveSource(source, request.ProviderTriggerCatalog)
+	if err != nil {
+		return AdmittedEffectiveSourceProjection{}, err
+	}
+	source, err = providerconnectors.SourceWithConnectorPackImports(source, connectorRegistry)
 	if err != nil {
 		return AdmittedEffectiveSourceProjection{}, fmt.Errorf("provider connector pack import failed: %w", err)
 	}
-	source, err = SourceWithProviderTriggerEvents(source, request.ProviderTriggerCatalog)
+	source, err = SourceWithProviderTriggerEvents(source, triggerCatalog)
 	if err != nil {
 		return AdmittedEffectiveSourceProjection{}, fmt.Errorf("provider trigger event import failed: %w", err)
 	}
@@ -104,6 +108,23 @@ func AdmitEffectiveSourceProjection(request EffectiveSourceProjectionRequest) (A
 		module = connectorPackWorkflowModule{WorkflowModule: module, source: source}
 	}
 	return AdmittedEffectiveSourceProjection{source: source, module: module, identity: identity}, nil
+}
+
+func packProjectionsForEffectiveSource(source semanticview.Source, suppliedTriggers *providertriggers.CatalogSnapshot) (*providerconnectors.PackRegistry, *providertriggers.CatalogSnapshot, error) {
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil || bundle.PackInventory == nil {
+		return nil, suppliedTriggers, nil
+	}
+	projection, err := packadmission.FromBundle(bundle)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load admitted pack projection for effective source: %w", err)
+	}
+	connectors := projection.ProviderConnectors
+	triggers := projection.ProviderTriggers
+	if suppliedTriggers != nil && !suppliedTriggers.Generation().Equal(triggers.Generation()) {
+		return nil, nil, fmt.Errorf("supplied provider trigger catalog generation %s contradicts bundle effective inventory generation %s", suppliedTriggers.Generation().Diagnostic(), triggers.Generation().Diagnostic())
+	}
+	return connectors, triggers, nil
 }
 
 func effectiveSourceIdentityValue(source semanticview.Source, sourceFact runtimecorrelation.BundleSourceFact, channelPlans []packs.SatisfactionPlan, bindings []packs.OutboundBindingPlan) (map[string]any, error) {

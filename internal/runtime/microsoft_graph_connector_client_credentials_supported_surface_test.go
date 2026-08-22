@@ -410,16 +410,16 @@ func microsoftGraphConnectorSource(t *testing.T, baseURL, flowInstance string) s
 			},
 		},
 	}
-	source, err := providerconnectors.SourceWithConnectorPackImportsFromRegistry(importSource, microsoftGraphConnectorPackRegistry(t, baseURL))
+	source, err := providerconnectors.SourceWithConnectorPackImports(importSource, microsoftGraphConnectorPackRegistry(t, baseURL))
 	if err != nil {
-		t.Fatalf("SourceWithConnectorPackImportsFromRegistry: %v", err)
+		t.Fatalf("SourceWithConnectorPackImports: %v", err)
 	}
 	return source
 }
 
 func microsoftGraphConnectorPackRegistry(t *testing.T, baseURL string) *providerconnectors.PackRegistry {
 	t.Helper()
-	tool, ok := providerconnectors.BuiltinTool("microsoft_graph", "microsoft_graph.send_mail")
+	tool, ok := embeddedConnectorTool(t, "microsoft_graph", "microsoft_graph.send_mail")
 	if !ok {
 		t.Fatal("provider connector pack microsoft_graph.send_mail not found")
 	}

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -194,11 +195,7 @@ func TestRuntimeContextManagerLookupIngressDistinguishesAliasAndProvider(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	installed, err := catalog.InstalledCapabilitySubjects()
-	if err != nil {
-		t.Fatal(err)
-	}
-	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, ProcessAdmissionState{Generation: catalog.Generation(), InstalledSubjects: installed}, BundleContext{
+	contextDef := BundleContext{
 		BundleSourceFact: testBundleSourceFact(t, hash),
 		Source:           source,
 		Runtime:          &Runtime{Bus: bus, workOccurrence: workOwner},
@@ -208,7 +205,9 @@ func TestRuntimeContextManagerLookupIngressDistinguishesAliasAndProvider(t *test
 			RunID: "run", Generation: 1, FlowInstance: "coordinator/a", EntityID: "entity", SigningSecret: "webhook_signing.telegram",
 			AdmissionPlan: plan,
 		}},
-	})
+	}
+	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
+	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
@@ -232,18 +231,16 @@ func TestRuntimeContextManagerSuppressesAndRepublishesCommittedStandingGeneratio
 	if err != nil {
 		t.Fatal(err)
 	}
-	installed, err := catalog.InstalledCapabilitySubjects()
-	if err != nil {
-		t.Fatal(err)
-	}
 	target := StandingTarget{
 		BundleHash: hash, ServiceID: "service-1", FlowID: "coordinator", Alias: "chat", Provider: "telegram",
 		RunID: "run-1", Generation: 1, PublicationSequence: 1, InstanceID: "instance-1",
 		FlowInstance: "coordinator/a", EntityID: "entity", SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
 	}
-	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, ProcessAdmissionState{Generation: catalog.Generation(), InstalledSubjects: installed}, BundleContext{
+	contextDef := BundleContext{
 		BundleSourceFact: testBundleSourceFact(t, hash), Source: source, Runtime: &Runtime{Bus: bus, workOccurrence: workOwner}, WorkOwner: workOwner, StandingTargets: []StandingTarget{target},
-	})
+	}
+	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
+	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
@@ -290,25 +287,23 @@ func TestRuntimeContextManagerDoesNotCreateProcessOccurrenceForSuspendedStartupT
 	if err != nil {
 		t.Fatal(err)
 	}
-	installed, err := catalog.InstalledCapabilitySubjects()
-	if err != nil {
-		t.Fatal(err)
-	}
 	target := StandingTarget{
 		BundleHash: hash, ServiceID: "service-suspended", FlowID: "coordinator", Alias: "chat", Provider: "telegram",
 		RunID: "run-1", Generation: 1, PublicationSequence: 1, InstanceID: "instance-1",
 		FlowInstance: "coordinator/a", EntityID: "entity", SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
 	}
-	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, ProcessAdmissionState{Generation: catalog.Generation(), InstalledSubjects: installed})
+	manager, err := newTestRuntimeContextManager(t, nil)
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
 	if err := manager.SuppressStandingServiceTargets(target.ServiceID); err != nil {
 		t.Fatalf("SuppressStandingServiceTargets: %v", err)
 	}
-	if err := manager.Register(BundleContext{
+	contextDef := BundleContext{
 		BundleSourceFact: testBundleSourceFact(t, hash), Source: source, Runtime: &Runtime{Bus: bus, workOccurrence: workOwner}, WorkOwner: workOwner, StandingTargets: []StandingTarget{target},
-	}); err != nil {
+	}
+	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
+	if err := manager.Register(contextDef); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	if err := manager.PublishStandingServiceTargets(target.ServiceID, []StandingTarget{target}); err != nil {
@@ -418,13 +413,18 @@ func standingProviderDeclarationSource(t testing.TB, provider, inputEvent string
 		t.Fatalf("write schema: %v", err)
 	}
 	repoRoot := filepath.Join("..", "..")
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(
+		repoRoot,
+		root,
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+		runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory},
+	)
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
-	registry, _, err := providertriggers.NewCatalogSnapshotFromPackDirs("0.7.0", []string{filepath.Join(repoRoot, "packs", "provider-triggers", provider)}, nil)
+	projection, err := packadmission.FromBundle(bundle)
 	if err != nil {
-		t.Fatalf("load %s pack: %v", provider, err)
+		t.Fatalf("load admitted pack projection: %v", err)
 	}
-	return semanticview.Wrap(bundle), registry
+	return semanticview.Wrap(bundle), projection.ProviderTriggers
 }

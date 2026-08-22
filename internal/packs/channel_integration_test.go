@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -30,6 +29,7 @@ import (
 	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
 	"github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
@@ -1241,30 +1241,26 @@ func loadTelegramChannelPlan(t *testing.T) packs.SatisfactionPlan {
 
 func loadTelegramChannelCompilerInputs(t *testing.T) (*packs.InterfaceRegistry, packs.LoadedChannelPack, packs.TriggerPackDescriptor, packs.ConnectorPackDescriptor) {
 	t.Helper()
-	repo := filepath.Clean(filepath.Join("..", ".."))
 	registry := loadChannelInterfaceRegistry(t)
-	version, err := platform.PlatformVersion()
-	if err != nil {
-		t.Fatalf("PlatformVersion: %v", err)
-	}
-	triggerCatalog, _, err := providertriggers.NewCatalogSnapshotFromPackDirs(version, []string{filepath.Join(repo, "packs", "provider-triggers", "telegram")}, nil)
-	if err != nil {
-		t.Fatalf("load Telegram trigger: %v", err)
-	}
-	channels, err := packs.LoadChannelPackDirs(version, "platform", filepath.Join(repo, "packs", "channels", "telegram"))
-	if err != nil {
-		t.Fatalf("load Telegram channel: %v", err)
-	}
+	triggerCatalog := packfixture.TriggerCatalog(t)
+	channels := packfixture.ChannelPacks(t)
 	if len(channels) != 1 {
 		t.Fatalf("Telegram channel packs = %#v, want one", channels)
 	}
-	triggerDescriptors := triggerCatalog.PackDescriptors()
-	if len(triggerDescriptors) != 1 {
-		t.Fatalf("Telegram trigger descriptors = %#v, want one", triggerDescriptors)
+	triggerID := channels[0].Envelope.Requires.Packs[packs.TypeTrigger]
+	var trigger packs.TriggerPackDescriptor
+	for _, candidate := range triggerCatalog.PackDescriptors() {
+		if candidate.Identity.ID() == triggerID {
+			trigger = candidate
+			break
+		}
+	}
+	if trigger.Identity.ID() == "" {
+		t.Fatalf("Telegram trigger descriptor %q is missing", triggerID)
 	}
 	connectorID := channels[0].Envelope.Requires.Packs[packs.TypeConnector]
 	var connector packs.ConnectorPackDescriptor
-	for _, candidate := range providerconnectors.DefaultPackRegistry().PackDescriptors() {
+	for _, candidate := range packfixture.ConnectorRegistry(t).PackDescriptors() {
 		if candidate.Identity.ID() == connectorID {
 			connector = candidate
 			break
@@ -1273,7 +1269,7 @@ func loadTelegramChannelCompilerInputs(t *testing.T) (*packs.InterfaceRegistry, 
 	if connector.Identity.ID() == "" {
 		t.Fatalf("Telegram connector descriptor %q is missing", connectorID)
 	}
-	return registry, channels[0], triggerDescriptors[0], connector
+	return registry, channels[0], trigger, connector
 }
 
 func loadChannelInterfaceRegistry(t *testing.T) *packs.InterfaceRegistry {

@@ -311,7 +311,11 @@ func trimSecretInputTerminator(value string) string {
 }
 
 func loadSecretsSource(cmd *cobra.Command, repo, contractsPath, platformSpecPath string, required bool) (semanticview.Source, error) {
-	source, err := loadSecretsSourceRequired(repo, contractsPath, platformSpecPath)
+	configPath, _, configErr := effectiveCommandConfigPath(cmd, "", false)
+	if configErr != nil {
+		return nil, configErr
+	}
+	source, err := loadSecretsSourceRequired(repo, contractsPath, platformSpecPath, configPath)
 	if err == nil {
 		return source, nil
 	}
@@ -321,19 +325,12 @@ func loadSecretsSource(cmd *cobra.Command, repo, contractsPath, platformSpecPath
 	return nil, nil
 }
 
-func loadSecretsSourceRequired(repo, contractsPath, platformSpecPath string) (semanticview.Source, error) {
-	resolvedPaths, err := ResolveCLIContractPlatformSpecPaths(assetCommandRepoRoot(repo), CLIContractPlatformSpecPathOptions{
+func loadSecretsSourceRequired(repo, contractsPath, platformSpecPath, configPath string) (semanticview.Source, error) {
+	_, bundle, _, err := loadConfiguredCLIWorkflowModule(assetCommandRepoRoot(repo), CLIContractPlatformSpecPathOptions{
 		ContractsPath:    contractsPath,
 		PlatformSpecPath: platformSpecPath,
+		ConfigPath:       configPath,
 	})
-	if err != nil {
-		return nil, fmt.Errorf("resolve path config: %w", err)
-	}
-	contractsRoot, err := NormalizeContractsRoot(resolvedPaths.ContractsPath)
-	if err != nil {
-		return nil, fmt.Errorf("resolve contracts: %w", err)
-	}
-	_, bundle, err := NewSwarmWorkflowModule(assetCommandRepoRoot(repo), contractsRoot, resolvedPaths.PlatformSpecPath)
 	if err != nil {
 		return nil, fmt.Errorf("load Swarm contracts: %w", err)
 	}

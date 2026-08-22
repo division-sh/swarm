@@ -6,36 +6,33 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
 
 func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *testing.T) {
 	repo := RepoRoot()
 	cfg := &config.Config{
-		ProviderTriggers: config.ProviderTriggersConfig{Packs: config.ProviderTriggerPacksConfig{
-			PlatformDirs: []string{"packs/provider-triggers/telegram"},
-		}},
 		Channels: config.ChannelsConfig{
-			Packs: config.ChannelPacksConfig{PlatformDirs: []string{"packs/channels/telegram"}},
 			Bindings: map[string]config.ChannelBindingConfig{
 				"ops": {Pack: "provider.telegram.hitl_channel", Destination: "-100123"},
 			},
 		},
 	}
 	cfgResult := RuntimeConfigLoadResult{Config: cfg, KeyOrigins: map[string]unifiedConfigKeyOrigin{}}
-	triggers, err := LoadConfiguredProviderTriggerPacks(repo, cfgResult)
-	if err != nil {
-		t.Fatalf("LoadConfiguredProviderTriggerPacks: %v", err)
-	}
 	spec, err := loadChannelPlatformSpecDocument(filepath.Join(repo, defaultPlatformSpecPath))
 	if err != nil {
 		t.Fatalf("loadChannelPlatformSpecDocument: %v", err)
 	}
+	projection, err := packadmission.Admit(packfixture.EmbeddedInventory(t), spec)
+	if err != nil {
+		t.Fatalf("admit embedded packs: %v", err)
+	}
 
-	withoutCredential, err := LoadConfiguredChannelPacks(context.Background(), repo, cfgResult, spec, triggers.Catalog, nil, nil)
+	withoutCredential, err := LoadConfiguredChannelPacks(context.Background(), cfgResult, projection, nil, nil)
 	if err != nil {
 		t.Fatalf("LoadConfiguredChannelPacks without credential: %v", err)
 	}
@@ -52,7 +49,7 @@ func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *tes
 	}
 
 	credentials := channelTestCredentialStore{"telegram_bot_token": "secret"}
-	ready, err := LoadConfiguredChannelPacks(context.Background(), repo, cfgResult, spec, triggers.Catalog, credentials, nil)
+	ready, err := LoadConfiguredChannelPacks(context.Background(), cfgResult, projection, credentials, nil)
 	if err != nil {
 		t.Fatalf("LoadConfiguredChannelPacks with credential: %v", err)
 	}
@@ -67,25 +64,25 @@ func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *tes
 		t.Fatalf("preflight channel subjects = %#v, want structural and outbound", report.CapabilitySubjects)
 	}
 
-	connectors := providerconnectors.DefaultPackRegistry().PackDescriptors()
-	for index := range connectors {
-		if connectors[index].Identity.ID() != "provider.telegram.connector" {
+	connectorDescriptors := projection.ProviderConnectors.PackDescriptors()
+	for index := range connectorDescriptors {
+		if connectorDescriptors[index].Identity.ID() != "provider.telegram.connector" {
 			continue
 		}
 		for toolID, scope := range map[string]string{"telegram.send_interactive": "deliver", "telegram.edit_message": "edit"} {
-			tool := connectors[index].Tools[toolID]
+			tool := connectorDescriptors[index].Tools[toolID]
 			tool, err = tool.WithManagedCredential(runtimecontracts.ManagedCredentialRef{Key: "shared-channel-auth", Scopes: []string{scope}})
 			if err != nil {
 				t.Fatalf("derive conflicting connector tool %q: %v", toolID, err)
 			}
-			connectors[index].Tools[toolID] = tool
+			connectorDescriptors[index].Tools[toolID] = tool
 		}
 	}
 	registry, err := packs.NewInterfaceRegistry(spec)
 	if err != nil {
 		t.Fatalf("NewInterfaceRegistry: %v", err)
 	}
-	conflicting, err := packs.CompileChannelInventory(registry, ready.Loaded, triggers.Catalog.PackDescriptors(), connectors)
+	conflicting, err := packs.CompileChannelInventory(registry, ready.Loaded, projection.ProviderTriggers.PackDescriptors(), connectorDescriptors)
 	if err != nil {
 		t.Fatalf("CompileChannelInventory: %v", err)
 	}
@@ -97,11 +94,7 @@ func TestConfiguredChannelPackDrivesAvailableAndOutboundReadinessSurfaces(t *tes
 func TestConfiguredChannelRegistrationRequiresOneExactBindingDeclaration(t *testing.T) {
 	repo := RepoRoot()
 	base := &config.Config{
-		ProviderTriggers: config.ProviderTriggersConfig{Packs: config.ProviderTriggerPacksConfig{
-			PlatformDirs: []string{"packs/provider-triggers/telegram"},
-		}},
 		Channels: config.ChannelsConfig{
-			Packs: config.ChannelPacksConfig{PlatformDirs: []string{"packs/channels/telegram"}},
 			Bindings: map[string]config.ChannelBindingConfig{
 				"hitl": {
 					Pack: "provider.telegram.hitl_channel", Destination: "-100123",
@@ -114,15 +107,15 @@ func TestConfiguredChannelRegistrationRequiresOneExactBindingDeclaration(t *test
 	load := func(t *testing.T, cfg *config.Config) (ChannelPackLoad, error) {
 		t.Helper()
 		result := RuntimeConfigLoadResult{Config: cfg, KeyOrigins: map[string]unifiedConfigKeyOrigin{}}
-		triggers, err := LoadConfiguredProviderTriggerPacks(repo, result)
-		if err != nil {
-			t.Fatalf("LoadConfiguredProviderTriggerPacks: %v", err)
-		}
 		spec, err := loadChannelPlatformSpecDocument(filepath.Join(repo, defaultPlatformSpecPath))
 		if err != nil {
 			t.Fatalf("loadChannelPlatformSpecDocument: %v", err)
 		}
-		return LoadConfiguredChannelPacks(context.Background(), repo, result, spec, triggers.Catalog, channelTestCredentialStore{"telegram_hitl_bot": "secret"}, nil)
+		projection, err := packadmission.Admit(packfixture.EmbeddedInventory(t), spec)
+		if err != nil {
+			t.Fatalf("admit embedded packs: %v", err)
+		}
+		return LoadConfiguredChannelPacks(context.Background(), result, projection, channelTestCredentialStore{"telegram_hitl_bot": "secret"}, nil)
 	}
 
 	loaded, err := load(t, base)

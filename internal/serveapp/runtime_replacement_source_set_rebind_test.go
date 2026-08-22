@@ -325,7 +325,7 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 				}
 				source := semanticview.Wrap(bundle)
 				fact := mustServeTestEphemeralBundleSourceFact(hash)
-				rt, err := runtimepkg.NewRuntime(ctx, runtimeDepsForServeTest(stores, cfg, runtimepkg.RuntimeOptions{
+				rt, err := runtimepkg.NewRuntime(ctx, runtimeDepsForServeTest(t, stores, cfg, runtimepkg.RuntimeOptions{
 					SelfCheck: false, WorkflowModule: stubWorkflowModule{source: source},
 					LLMRuntime: servedNoopLLMRuntime{}, DisablePersistentStartupRecovery: true,
 					ProviderTriggerCatalog: providerCatalog, ProcessWorkOwner: processWorkOwner,
@@ -393,14 +393,14 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			}
 
 			contexts, err := runtimepkg.NewRuntimeContextManager(nil,
-				runtimepkg.BundleContext{
+				completeServeTestPackContext(t, runtimepkg.BundleContext{
 					BundleSourceFact: predecessor.rt.Options.BundleSourceFact, Source: predecessor.source,
 					Runtime: predecessor.rt, WorkOwner: predecessor.rt.WorkOccurrence(),
-				},
-				runtimepkg.BundleContext{
+				}),
+				completeServeTestPackContext(t, runtimepkg.BundleContext{
 					BundleSourceFact: survivor.rt.Options.BundleSourceFact, Source: survivor.source,
 					Runtime: survivor.rt, WorkOwner: survivor.rt.WorkOccurrence(),
-				},
+				}),
 			)
 			if err != nil {
 				t.Fatalf("NewRuntimeContextManager: %v", err)
@@ -427,9 +427,10 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 				replacementShutdown: runtimepkg.ShutdownOptions{Grace: 5 * time.Second},
 			}
 			supervisor.SetProcessCapability(capability)
-			status, err := supervisor.replaceCurrentRuntimeWithSource(
+			status, err := supervisor.replaceCurrentRuntimeWithSourceAndPacks(
 				ctx, candidate.root, candidate.source, candidate.bundle, candidate.rt.Options.BundleSourceFact,
 				runtimecontracts.BundleIdentity{BundleHash: candidate.hash}, candidate.rt, candidate.rt.WorkOccurrence(),
+				serveTestBundlePackCandidate(t, candidate.bundle),
 			)
 			if err != nil {
 				t.Fatalf("replace predecessor while survivor remains loaded: %v", err)
@@ -491,9 +492,10 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			supervisor.cloneRuntime = func(context.Context, *runtimepkg.Runtime) (*runtimepkg.Runtime, *worklifetime.RuntimeOccurrence, error) {
 				return restoredCandidate.rt, restoredCandidate.rt.WorkOccurrence(), nil
 			}
-			_, replacementErr := supervisor.replaceCurrentRuntimeWithSource(
+			_, replacementErr := supervisor.replaceCurrentRuntimeWithSourceAndPacks(
 				ctx, failedCandidate.root, failedCandidate.source, failedCandidate.bundle, failedCandidate.rt.Options.BundleSourceFact,
 				runtimecontracts.BundleIdentity{BundleHash: failedCandidate.hash}, failedCandidate.rt, failedCandidate.rt.WorkOccurrence(),
+				serveTestBundlePackCandidate(t, failedCandidate.bundle),
 			)
 			if replacementErr == nil || !strings.Contains(replacementErr.Error(), "public ingress reconciliation failed") ||
 				!strings.Contains(replacementErr.Error(), "injected transient replacement withdrawal failure") {
@@ -587,9 +589,10 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			supervisor.cloneRuntime = func(context.Context, *runtimepkg.Runtime) (*runtimepkg.Runtime, *worklifetime.RuntimeOccurrence, error) {
 				return commitFailureRestored.rt, commitFailureRestored.rt.WorkOccurrence(), nil
 			}
-			_, commitFailureErr := supervisor.replaceCurrentRuntimeWithSource(
+			_, commitFailureErr := supervisor.replaceCurrentRuntimeWithSourceAndPacks(
 				ctx, commitFailureCandidate.root, commitFailureCandidate.source, commitFailureCandidate.bundle, commitFailureCandidate.rt.Options.BundleSourceFact,
 				runtimecontracts.BundleIdentity{BundleHash: commitFailureCandidate.hash}, commitFailureCandidate.rt, commitFailureCandidate.rt.WorkOccurrence(),
+				serveTestBundlePackCandidate(t, commitFailureCandidate.bundle),
 			)
 			if commitFailureErr == nil || !strings.Contains(commitFailureErr.Error(), "public ingress reconciliation failed before survivor commit retry") {
 				t.Fatalf("survivor commit retry replacement error = %v", commitFailureErr)
@@ -634,9 +637,10 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			supervisor.cloneRuntime = func(context.Context, *runtimepkg.Runtime) (*runtimepkg.Runtime, *worklifetime.RuntimeOccurrence, error) {
 				return retainedFailureRestored.rt, retainedFailureRestored.rt.WorkOccurrence(), nil
 			}
-			_, retainedFailureErr := supervisor.replaceCurrentRuntimeWithSource(
+			_, retainedFailureErr := supervisor.replaceCurrentRuntimeWithSourceAndPacks(
 				ctx, retainedFailureCandidate.root, retainedFailureCandidate.source, retainedFailureCandidate.bundle, retainedFailureCandidate.rt.Options.BundleSourceFact,
 				runtimecontracts.BundleIdentity{BundleHash: retainedFailureCandidate.hash}, retainedFailureCandidate.rt, retainedFailureCandidate.rt.WorkOccurrence(),
+				serveTestBundlePackCandidate(t, retainedFailureCandidate.bundle),
 			)
 			if retainedFailureErr == nil || !strings.Contains(retainedFailureErr.Error(), "recover pending predecessor source-set survivors") {
 				t.Fatalf("retained survivor recovery error = %v, want second adopted commit failure", retainedFailureErr)
@@ -702,9 +706,10 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 				t.Fatal("retained predecessor publication was reconstructed instead of resumed")
 				return nil, nil, nil
 			}
-			_, publicationFailureErr := supervisor.replaceCurrentRuntimeWithSource(
+			_, publicationFailureErr := supervisor.replaceCurrentRuntimeWithSourceAndPacks(
 				ctx, recoveryCandidate.root, recoveryCandidate.source, recoveryCandidate.bundle, recoveryCandidate.rt.Options.BundleSourceFact,
 				runtimecontracts.BundleIdentity{BundleHash: recoveryCandidate.hash}, recoveryCandidate.rt, recoveryCandidate.rt.WorkOccurrence(),
+				serveTestBundlePackCandidate(t, recoveryCandidate.bundle),
 			)
 			if publicationFailureErr == nil || !strings.Contains(publicationFailureErr.Error(), "injected retained predecessor publication failure") {
 				t.Fatalf("retained predecessor publication failure = %v", publicationFailureErr)
@@ -720,9 +725,10 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 				t.Fatalf("transient predecessor publication lost exact continuation: rollback:%p/%p publication:%p/%p retained:%p", stillPendingRollback, pendingRollback, stillPendingPublication, retainedPublication, pendingRollback.predecessorPublication)
 			}
 
-			_, predecessorIngressErr := supervisor.replaceCurrentRuntimeWithSource(
+			_, predecessorIngressErr := supervisor.replaceCurrentRuntimeWithSourceAndPacks(
 				ctx, recoveryCandidate.root, recoveryCandidate.source, recoveryCandidate.bundle, recoveryCandidate.rt.Options.BundleSourceFact,
 				runtimecontracts.BundleIdentity{BundleHash: recoveryCandidate.hash}, recoveryCandidate.rt, recoveryCandidate.rt.WorkOccurrence(),
+				serveTestBundlePackCandidate(t, recoveryCandidate.bundle),
 			)
 			if predecessorIngressErr == nil || !strings.Contains(predecessorIngressErr.Error(), "retained predecessor public ingress reconciliation failed") {
 				t.Fatalf("retained predecessor ingress reconciliation failure = %v", predecessorIngressErr)
@@ -746,9 +752,10 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 				return nil
 			})
 
-			recoveryStatus, recoveryErr := supervisor.replaceCurrentRuntimeWithSource(
+			recoveryStatus, recoveryErr := supervisor.replaceCurrentRuntimeWithSourceAndPacks(
 				ctx, recoveryCandidate.root, recoveryCandidate.source, recoveryCandidate.bundle, recoveryCandidate.rt.Options.BundleSourceFact,
 				runtimecontracts.BundleIdentity{BundleHash: recoveryCandidate.hash}, recoveryCandidate.rt, recoveryCandidate.rt.WorkOccurrence(),
+				serveTestBundlePackCandidate(t, recoveryCandidate.bundle),
 			)
 			if recoveryErr != nil {
 				t.Fatalf("replacement boundary did not finalize retained predecessor ingress recovery: %v", recoveryErr)
@@ -797,9 +804,10 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			supervisor.cloneRuntime = func(context.Context, *runtimepkg.Runtime) (*runtimepkg.Runtime, *worklifetime.RuntimeOccurrence, error) {
 				return blockedRestored.rt, blockedRestored.rt.WorkOccurrence(), nil
 			}
-			_, blockedErr := supervisor.replaceCurrentRuntimeWithSource(
+			_, blockedErr := supervisor.replaceCurrentRuntimeWithSourceAndPacks(
 				ctx, blockedCandidate.root, blockedCandidate.source, blockedCandidate.bundle, blockedCandidate.rt.Options.BundleSourceFact,
 				runtimecontracts.BundleIdentity{BundleHash: blockedCandidate.hash}, blockedCandidate.rt, blockedCandidate.rt.WorkOccurrence(),
+				serveTestBundlePackCandidate(t, blockedCandidate.bundle),
 			)
 			survivor.rt.Manager = survivorManager
 			if blockedErr == nil || !strings.Contains(blockedErr.Error(), "prepare predecessor source-set survivor restoration") {
@@ -881,10 +889,11 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			supervisor.cloneRuntime = func(context.Context, *runtimepkg.Runtime) (*runtimepkg.Runtime, *worklifetime.RuntimeOccurrence, error) {
 				return directFailureRestored.rt, directFailureRestored.rt.WorkOccurrence(), nil
 			}
-			_, directFailureErr := supervisor.replaceCurrentRuntimeWithSource(
+			_, directFailureErr := supervisor.replaceCurrentRuntimeWithSourceAndPacks(
 				ctx, directFailureCandidate.root, directFailureCandidate.source, directFailureCandidate.bundle,
 				directFailureCandidate.rt.Options.BundleSourceFact,
 				runtimecontracts.BundleIdentity{BundleHash: directFailureCandidate.hash}, directFailureCandidate.rt, directFailureCandidate.rt.WorkOccurrence(),
+				serveTestBundlePackCandidate(t, directFailureCandidate.bundle),
 			)
 			survivor.rt.Manager = survivorManager
 			if directFailureErr == nil || !strings.Contains(directFailureErr.Error(), "injected predecessor survivor grant failure") ||
@@ -916,9 +925,10 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 				finalHooks.Add(1)
 				return nil
 			})
-			finalStatus, finalErr := supervisor.replaceCurrentRuntimeWithSource(
+			finalStatus, finalErr := supervisor.replaceCurrentRuntimeWithSourceAndPacks(
 				ctx, finalCandidate.root, finalCandidate.source, finalCandidate.bundle, finalCandidate.rt.Options.BundleSourceFact,
 				runtimecontracts.BundleIdentity{BundleHash: finalCandidate.hash}, finalCandidate.rt, finalCandidate.rt.WorkOccurrence(),
+				serveTestBundlePackCandidate(t, finalCandidate.bundle),
 			)
 			if finalErr != nil {
 				t.Fatalf("replacement boundary did not recover direct survivor rollback: %v", finalErr)
@@ -958,10 +968,11 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			supervisor.cloneRuntime = func(context.Context, *runtimepkg.Runtime) (*runtimepkg.Runtime, *worklifetime.RuntimeOccurrence, error) {
 				return earlyFailureRestored.rt, earlyFailureRestored.rt.WorkOccurrence(), nil
 			}
-			_, earlyFailureErr := supervisor.replaceCurrentRuntimeWithSource(
+			_, earlyFailureErr := supervisor.replaceCurrentRuntimeWithSourceAndPacks(
 				ctx, earlyFailureCandidate.root, earlyFailureCandidate.source, earlyFailureCandidate.bundle,
 				earlyFailureCandidate.rt.Options.BundleSourceFact,
 				runtimecontracts.BundleIdentity{BundleHash: earlyFailureCandidate.hash}, earlyFailureCandidate.rt, earlyFailureCandidate.rt.WorkOccurrence(),
+				serveTestBundlePackCandidate(t, earlyFailureCandidate.bundle),
 			)
 			if earlyFailureErr == nil || !strings.Contains(earlyFailureErr.Error(), "injected early candidate generation failure") ||
 				!strings.Contains(earlyFailureErr.Error(), "injected early source-set restoration failure") {

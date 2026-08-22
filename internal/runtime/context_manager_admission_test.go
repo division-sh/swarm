@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"net/http"
+	"os"
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
@@ -13,15 +15,21 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 )
 
 type blockingCredentialSnapshotStore struct {
@@ -45,7 +53,7 @@ func TestRuntimeContextManagerEvaluatesExactTargetCredentialAtReadTime(t *testin
 	ctx := context.Background()
 	catalog := runtimeAdmissionTestCatalog(t, "a")
 	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
-	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, catalog), contextDef)
+	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +107,7 @@ func TestRuntimeContextManagerRejectsCredentialProjectionStaleAfterSuppression(t
 	ctx := context.Background()
 	catalog := runtimeAdmissionTestCatalog(t, "a")
 	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
-	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, catalog), contextDef)
+	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +142,7 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossOrdinaryUnloa
 	ctx := context.Background()
 	catalog := runtimeAdmissionTestCatalog(t, "a")
 	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
-	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, catalog), contextDef)
+	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +171,7 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossReplacementWi
 	ctx := context.Background()
 	catalog := runtimeAdmissionTestCatalog(t, "a")
 	predecessor := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
-	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, catalog), predecessor)
+	manager, err := newTestRuntimeContextManager(t, nil, predecessor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,13 +247,33 @@ func TestRuntimeContextManagerInvalidatesCredentialProjectionAcrossSourceSetFenc
 		t.Fatalf("source-set coordinates = %#v, want exact runtime coordinate", plan.Sources)
 	}
 
-	catalog := runtimeAdmissionTestCatalog(t, "a")
-	contextDef := runtimeAdmissionTestContext(t, runtimeTestBundleHash, "primary", catalog)
+	bundle, ok := semanticview.Bundle(module.source)
+	if !ok || bundle == nil || bundle.PackInventory == nil {
+		t.Fatal("runtime bundle effective pack inventory is required")
+	}
+	catalog, _, err := providertriggers.NewCatalogSnapshotFromInventory(bundle.PackInventory, bundle.Platform.Platform.Version)
+	if err != nil {
+		t.Fatalf("derive runtime bundle provider-trigger catalog: %v", err)
+	}
+	planAdmission, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
+		Alias: "primary", Provider: "telegram", SigningSecret: "webhook_signing.telegram",
+	})
+	if err != nil {
+		t.Fatalf("compile bundle-owned admission: %v", err)
+	}
+	contextDef := testBundleContext(t, runtimeTestBundleHash, "inbound.telegram")
 	contextDef.BundleSourceFact = fact
 	contextDef.Source = module.source
 	contextDef.Runtime = rt
 	contextDef.WorkOwner = rt.WorkOccurrence()
-	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, catalog), contextDef)
+	contextDef.StandingTargets = []StandingTarget{{
+		BundleHash: runtimeTestBundleHash, ServiceID: "service-primary", FlowID: "telegram-flow", Alias: "primary", Provider: "telegram",
+		RunID: "run-primary", Generation: 1, FlowInstance: "telegram-flow/primary", EntityID: "entity-primary",
+		SigningSecret: "webhook_signing.telegram", AdmissionPlan: planAdmission,
+	}}
+	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
+	contextDef.PackInventoryDigest = bundle.PackInventory.Digest()
+	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,125 +349,77 @@ func assertRuntimeAdmissionEffectiveSubjectCount(t *testing.T, subjects []packs.
 	}
 }
 
-func TestValidateRuntimeContextSetWithAdmissionDoesNotActivateStandingOccurrences(t *testing.T) {
+func TestValidateRuntimeContextSetDoesNotActivateStandingOccurrences(t *testing.T) {
 	catalog := runtimeAdmissionTestCatalog(t, "a")
 	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
 	owner := contextDef.Runtime.WorkOccurrence()
 	before := owner.ActiveCount()
 
-	if err := ValidateRuntimeContextSetWithAdmission(runtimeAdmissionTestState(t, catalog), contextDef); err != nil {
-		t.Fatalf("ValidateRuntimeContextSetWithAdmission: %v", err)
+	if err := ValidateRuntimeContextSet(contextDef); err != nil {
+		t.Fatalf("ValidateRuntimeContextSet: %v", err)
 	}
 	if got := owner.ActiveCount(); got != before {
 		t.Fatalf("validation activated %d runtime lease(s), want unchanged count %d", got, before)
 	}
 }
 
-func TestRuntimeContextManagerPublishesOneAdmissionGenerationAcrossAllContexts(t *testing.T) {
+func TestRuntimeContextManagerReplacementRetainsEachBundleAdmissionGeneration(t *testing.T) {
 	oldCatalog := runtimeAdmissionTestCatalog(t, "a")
 	newCatalog := runtimeAdmissionTestCatalog(t, "b")
-	oldState := runtimeAdmissionTestState(t, oldCatalog)
-	newState := runtimeAdmissionTestState(t, newCatalog)
 
 	primary := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", oldCatalog)
 	survivor := runtimeAdmissionTestContext(t, runtimeContextTestHashB, "survivor", oldCatalog)
-	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, oldState, primary, survivor)
+	manager, err := newTestRuntimeContextManager(t, nil, primary, survivor)
 	if err != nil {
-		t.Fatalf("NewRuntimeContextManagerWithAdmission: %v", err)
+		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
 	candidate := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", newCatalog)
-	survivingTargets := map[string][]StandingTarget{
-		runtimeContextTestHashB: runtimeAdmissionTestContext(t, runtimeContextTestHashB, "survivor", newCatalog).StandingTargets,
-	}
-	if err := manager.ValidateProcessAdmissionReplacement(runtimeContextTestHashA, candidate, survivingTargets, newState); err != nil {
-		t.Fatalf("ValidateProcessAdmissionReplacement: %v", err)
-	}
-
-	stop := make(chan struct{})
-	errCh := make(chan error, 1)
-	var readers sync.WaitGroup
-	readers.Add(1)
-	go func() {
-		defer readers.Done()
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			subjects := manager.BaseCapabilitySubjects()
-			lookup := manager.LookupIngress("survivor", "acme")
-			if !lookup.Loaded() {
-				select {
-				case errCh <- &mixedAdmissionGenerationError{first: "loaded", second: "missing lookup"}:
-				default:
-				}
-				return
-			}
-			lookupGeneration := lookup.Target.AdmissionPlan.Generation()
-			if !lookupGeneration.Equal(oldCatalog.Generation()) && !lookupGeneration.Equal(newCatalog.Generation()) {
-				select {
-				case errCh <- &mixedAdmissionGenerationError{first: oldCatalog.Generation().Diagnostic() + " or " + newCatalog.Generation().Diagnostic(), second: lookupGeneration.Diagnostic()}:
-				default:
-				}
-				return
-			}
-			generation := ""
-			for _, subject := range subjects {
-				if subject.TriggerAdmission == nil {
-					continue
-				}
-				got := subject.TriggerAdmission.CatalogGeneration
-				if generation == "" {
-					generation = got
-				}
-				if got != generation {
-					select {
-					case errCh <- &mixedAdmissionGenerationError{first: generation, second: got}:
-					default:
-					}
-					return
-				}
-			}
-		}
-	}()
 
 	if _, err := manager.BeginBundleHashReplacement(context.Background(), runtimeContextTestHashA, candidate); err != nil {
 		t.Fatalf("BeginBundleHashReplacement: %v", err)
 	}
-	if err := manager.PublishBundleHashReplacementWithAdmission(runtimeContextTestHashA, candidate, survivingTargets, newState); err != nil {
-		t.Fatalf("PublishBundleHashReplacementWithAdmission: %v", err)
+	if err := manager.PublishBundleHashReplacement(runtimeContextTestHashA, candidate); err != nil {
+		t.Fatalf("PublishBundleHashReplacement: %v", err)
 	}
-	close(stop)
-	readers.Wait()
-	select {
-	case err := <-errCh:
-		t.Fatal(err)
-	default:
-	}
-
-	if got := manager.AdmissionState().Generation; !got.Equal(newCatalog.Generation()) {
-		t.Fatalf("process generation = %q, want %q", got.Diagnostic(), newCatalog.Generation().Diagnostic())
-	}
-	for _, alias := range []string{"primary", "survivor"} {
+	for alias, want := range map[string]triggergeneration.Generation{
+		"primary":  newCatalog.Generation(),
+		"survivor": oldCatalog.Generation(),
+	} {
 		lookup := manager.LookupIngress(alias, "acme")
-		if !lookup.Loaded() || !lookup.Target.AdmissionPlan.Generation().Equal(newCatalog.Generation()) {
-			t.Fatalf("lookup %q = %#v, want loaded new generation", alias, lookup)
-		}
-	}
-	subjects := manager.BaseCapabilitySubjects()
-	assertRuntimeAdmissionSubjectGeneration(t, subjects, newCatalog.Generation(), 2)
-	for _, subject := range subjects {
-		if subject.Applicability != "effective" || subject.TriggerAdmission == nil {
-			continue
-		}
-		if subject.TriggerAdmission.Pack == nil || subject.TriggerAdmission.Pack.ManifestHash != "sha256:"+strings.Repeat("b", 64) {
-			t.Fatalf("effective subject retained stale pack identity: %#v", subject)
+		if !lookup.Loaded() || !lookup.Target.AdmissionPlan.Generation().Equal(want) {
+			t.Fatalf("lookup %q = %#v, want loaded generation %s", alias, lookup, want.Diagnostic())
 		}
 	}
 }
 
-func TestRuntimeContextManagerAdmissionReplacementPublishesExactExecutableCandidate(t *testing.T) {
+func TestRuntimeContextManagerKeepsProjectLocalSameIDBehaviorBundleScopedAcrossReplacement(t *testing.T) {
+	primary := projectTelegramAdmissionContext(t, runtimeContextTestHashA, "primary", "primary project payload required")
+	survivor := projectTelegramAdmissionContext(t, runtimeContextTestHashB, "survivor", "survivor project payload required")
+	manager, err := newTestRuntimeContextManager(t, nil, primary, survivor)
+	if err != nil {
+		t.Fatalf("NewRuntimeContextManager: %v", err)
+	}
+	assertProjectTelegramAdmissionMessage(t, manager, "primary", "primary project payload required")
+	assertProjectTelegramAdmissionMessage(t, manager, "survivor", "survivor project payload required")
+	survivorDigest := survivor.PackInventoryDigest
+	survivorGeneration := survivor.ProviderTriggerGeneration
+
+	candidate := projectTelegramAdmissionContext(t, runtimeContextTestHashA, "primary", "replacement project payload required")
+	if _, err := manager.BeginBundleHashReplacement(context.Background(), runtimeContextTestHashA, candidate); err != nil {
+		t.Fatalf("BeginBundleHashReplacement: %v", err)
+	}
+	if err := manager.PublishBundleHashReplacement(runtimeContextTestHashA, candidate); err != nil {
+		t.Fatalf("PublishBundleHashReplacement: %v", err)
+	}
+	assertProjectTelegramAdmissionMessage(t, manager, "primary", "replacement project payload required")
+	assertProjectTelegramAdmissionMessage(t, manager, "survivor", "survivor project payload required")
+	loaded, ok := manager.LookupBundleHash(runtimeContextTestHashB)
+	if !ok || loaded == nil || loaded.PackInventoryDigest != survivorDigest || !loaded.ProviderTriggerGeneration.Equal(survivorGeneration) {
+		t.Fatalf("surviving project pack generation = %#v, want digest=%s generation=%s", loaded, survivorDigest, survivorGeneration.Diagnostic())
+	}
+}
+
+func TestRuntimeContextManagerReplacementPublishesExactExecutableCandidate(t *testing.T) {
 	for _, changedHash := range []bool{false, true} {
 		changedHash := changedHash
 		name := "same_hash"
@@ -451,8 +431,8 @@ func TestRuntimeContextManagerAdmissionReplacementPublishesExactExecutableCandid
 			newCatalog := runtimeAdmissionTestCatalog(t, "b")
 			predecessor := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", oldCatalog)
 			survivor := runtimeAdmissionTestContext(t, runtimeContextTestHashB, "survivor", oldCatalog)
-			manager, err := newTestRuntimeContextManagerWithAdmission(
-				t, nil, runtimeAdmissionTestState(t, oldCatalog), predecessor, survivor,
+			manager, err := newTestRuntimeContextManager(
+				t, nil, predecessor, survivor,
 			)
 			if err != nil {
 				t.Fatal(err)
@@ -463,18 +443,12 @@ func TestRuntimeContextManagerAdmissionReplacementPublishesExactExecutableCandid
 				candidateHash = "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 			}
 			candidate := runtimeAdmissionTestContext(t, candidateHash, "primary", newCatalog)
-			updates := map[string][]StandingTarget{
-				runtimeContextTestHashB: runtimeAdmissionTestContext(t, runtimeContextTestHashB, "survivor", newCatalog).StandingTargets,
-			}
-			state := runtimeAdmissionTestState(t, newCatalog)
 			if _, err := manager.BeginBundleHashReplacement(context.Background(), runtimeContextTestHashA, candidate); err != nil {
 				t.Fatalf("BeginBundleHashReplacement: %v", err)
 			}
-			prepared, err := manager.PrepareBundleHashReplacementPublicationWithAdmission(
-				runtimeContextTestHashA, candidate, updates, state,
-			)
+			prepared, err := manager.PrepareBundleHashReplacementPublication(runtimeContextTestHashA, candidate)
 			if err != nil {
-				t.Fatalf("PrepareBundleHashReplacementPublicationWithAdmission: %v", err)
+				t.Fatalf("PrepareBundleHashReplacementPublication: %v", err)
 			}
 			if err := prepared.Publish(); err != nil {
 				t.Fatalf("Publish: %v", err)
@@ -508,9 +482,6 @@ func TestRuntimeContextManagerAdmissionReplacementPublishesExactExecutableCandid
 					t.Fatalf("withdrawn changed-hash candidate still registered: %#v", stale)
 				}
 			}
-			if got := manager.AdmissionState().Generation; !got.Equal(oldCatalog.Generation()) {
-				t.Fatalf("restored process generation = %q, want %q", got.Diagnostic(), oldCatalog.Generation().Diagnostic())
-			}
 			survivorLookup := manager.LookupIngress("survivor", "acme")
 			if !survivorLookup.Loaded() || !survivorLookup.Target.AdmissionPlan.Generation().Equal(oldCatalog.Generation()) {
 				t.Fatalf("restored survivor admission = %#v, want old generation", survivorLookup)
@@ -541,7 +512,7 @@ func TestRuntimeContextManagerReplacementParksAndRehydratesStandingSchedules(t *
 			catalog := runtimeAdmissionTestCatalog(t, "a")
 			predecessor := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
 			predecessor.Runtime.Scheduler = runtimeContextTestScheduler(t, predecessor.WorkOwner, nil)
-			manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, catalog), predecessor)
+			manager, err := newTestRuntimeContextManager(t, nil, predecessor)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -664,9 +635,7 @@ func TestRuntimeContextManagerReplacementParksAndRehydratesStandingSchedules(t *
 			if err := route.RetireAndWait(context.Background()); err != nil {
 				t.Fatalf("retire replacement route: %v", err)
 			}
-			prepared, err := manager.PrepareBundleHashReplacementPublicationWithAdmission(
-				runtimeContextTestHashA, candidate, nil, runtimeAdmissionTestState(t, catalog),
-			)
+			prepared, err := manager.PrepareBundleHashReplacementPublication(runtimeContextTestHashA, candidate)
 			if err != nil {
 				t.Fatalf("prepare replacement publication: %v", err)
 			}
@@ -718,11 +687,11 @@ func TestRuntimeContextManagerReplacementParksAndRehydratesStandingSchedules(t *
 
 func TestRuntimeContextReplacementAggregateFailureLeavesNoPartialCandidateAndRetries(t *testing.T) {
 	catalog := runtimeAdmissionTestCatalog(t, "a")
-	state := runtimeAdmissionTestState(t, catalog)
 	predecessor := testBundleContext(t, runtimeContextTestHashA, "standing.aggregate")
 	predecessor.Runtime.Scheduler = runtimeContextTestScheduler(t, predecessor.WorkOwner, nil)
 	predecessor.StandingTargets = aggregateReplacementStandingTargets(t, runtimeContextTestHashA, catalog)
-	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, state, predecessor)
+	applyRuntimeAdmissionCatalog(t, &predecessor, catalog)
+	manager, err := newTestRuntimeContextManager(t, nil, predecessor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -739,10 +708,11 @@ func TestRuntimeContextReplacementAggregateFailureLeavesNoPartialCandidateAndRet
 	failedCandidate := testBundleContext(t, runtimeContextTestHashA, "standing.aggregate")
 	failedCandidate.Runtime.Scheduler = runtimeContextTestScheduler(t, failedCandidate.WorkOwner, nil)
 	failedCandidate.StandingTargets = aggregateReplacementStandingTargets(t, runtimeContextTestHashA, catalog)
+	applyRuntimeAdmissionCatalog(t, &failedCandidate, catalog)
 	if _, err := manager.BeginBundleHashReplacement(context.Background(), runtimeContextTestHashA, failedCandidate); err != nil {
 		t.Fatalf("begin aggregate replacement: %v", err)
 	}
-	failedPublication, err := manager.PrepareBundleHashReplacementPublicationWithAdmission(runtimeContextTestHashA, failedCandidate, nil, state)
+	failedPublication, err := manager.PrepareBundleHashReplacementPublication(runtimeContextTestHashA, failedCandidate)
 	if err != nil {
 		t.Fatalf("prepare failed candidate publication: %v", err)
 	}
@@ -768,7 +738,8 @@ func TestRuntimeContextReplacementAggregateFailureLeavesNoPartialCandidateAndRet
 	retryCandidate := testBundleContext(t, runtimeContextTestHashA, "standing.aggregate")
 	retryCandidate.Runtime.Scheduler = runtimeContextTestScheduler(t, retryCandidate.WorkOwner, nil)
 	retryCandidate.StandingTargets = aggregateReplacementStandingTargets(t, runtimeContextTestHashA, catalog)
-	retryPublication, err := manager.PrepareBundleHashReplacementPublicationWithAdmission(runtimeContextTestHashA, retryCandidate, nil, state)
+	applyRuntimeAdmissionCatalog(t, &retryCandidate, catalog)
+	retryPublication, err := manager.PrepareBundleHashReplacementPublication(runtimeContextTestHashA, retryCandidate)
 	if err != nil {
 		t.Fatalf("prepare fresh-candidate retry: %v", err)
 	}
@@ -812,7 +783,7 @@ func TestStandingServiceTransitionRollbackRestoresExactOwnerSchedulesBeforeAdmis
 	catalog := runtimeAdmissionTestCatalog(t, "a")
 	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
 	contextDef.Runtime.Scheduler = runtimeContextTestScheduler(t, contextDef.WorkOwner, nil)
-	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, catalog), contextDef)
+	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -877,7 +848,7 @@ func TestStandingServiceTransitionRollbackFailsClosedWhenOriginalManagerRetires(
 	catalog := runtimeAdmissionTestCatalog(t, "a")
 	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
 	contextDef.Runtime.Scheduler = runtimeContextTestScheduler(t, contextDef.WorkOwner, nil)
-	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, catalog), contextDef)
+	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -929,7 +900,7 @@ func TestPreparedStandingSuccessorOwnsSchedulesBeforePublication(t *testing.T) {
 	catalog := runtimeAdmissionTestCatalog(t, "a")
 	contextDef := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
 	contextDef.Runtime.Scheduler = runtimeContextTestScheduler(t, contextDef.WorkOwner, nil)
-	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, catalog), contextDef)
+	manager, err := newTestRuntimeContextManager(t, nil, contextDef)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1006,8 +977,8 @@ func runtimeContextTestWakeup(t *testing.T, key string, dueAt time.Time) runtime
 func TestRuntimeContextManagerBlockedStandingDescendantLeavesReplacementUnavailable(t *testing.T) {
 	catalog := runtimeAdmissionTestCatalog(t, "a")
 	predecessor := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
-	manager, err := newTestRuntimeContextManagerWithAdmission(
-		t, nil, runtimeAdmissionTestState(t, catalog), predecessor,
+	manager, err := newTestRuntimeContextManager(
+		t, nil, predecessor,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -1044,210 +1015,6 @@ func TestRuntimeContextManagerBlockedStandingDescendantLeavesReplacementUnavaila
 	if err := standing.RetireAndWait(context.Background()); err != nil {
 		t.Fatalf("retire timed-out predecessor standing occurrence: %v", err)
 	}
-}
-
-func TestRuntimeContextManagerRejectsIncompleteAdmissionGenerationWithoutMutation(t *testing.T) {
-	oldCatalog := runtimeAdmissionTestCatalog(t, "a")
-	newCatalog := runtimeAdmissionTestCatalog(t, "b")
-	primary := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", oldCatalog)
-	survivor := runtimeAdmissionTestContext(t, runtimeContextTestHashB, "survivor", oldCatalog)
-	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, oldCatalog), primary, survivor)
-	if err != nil {
-		t.Fatal(err)
-	}
-	candidate := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", newCatalog)
-	err = manager.ValidateProcessAdmissionReplacement(runtimeContextTestHashA, candidate, nil, runtimeAdmissionTestState(t, newCatalog))
-	if err == nil || !strings.Contains(err.Error(), "did not recompile loaded runtime context") {
-		t.Fatalf("validation error = %v", err)
-	}
-	if got := manager.AdmissionState().Generation; !got.Equal(oldCatalog.Generation()) {
-		t.Fatalf("failed candidate changed generation to %q", got.Diagnostic())
-	}
-	for _, alias := range []string{"primary", "survivor"} {
-		lookup := manager.LookupIngress(alias, "acme")
-		if !lookup.Loaded() || !lookup.Target.AdmissionPlan.Generation().Equal(oldCatalog.Generation()) {
-			t.Fatalf("failed candidate changed lookup %q: %#v", alias, lookup)
-		}
-	}
-	assertRuntimeAdmissionSubjectGeneration(t, manager.BaseCapabilitySubjects(), oldCatalog.Generation(), 2)
-}
-
-func TestRuntimeContextManagerAdmissionGenerationDoesNotDependOnPrimaryPackUse(t *testing.T) {
-	oldCatalog := runtimeAdmissionTestCatalog(t, "a")
-	newCatalog := runtimeAdmissionTestCatalog(t, "b")
-	primary := testBundleContext(t, runtimeContextTestHashA, "primary.event")
-	survivor := runtimeAdmissionTestContext(t, runtimeContextTestHashB, "survivor", oldCatalog)
-	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, oldCatalog), primary, survivor)
-	if err != nil {
-		t.Fatal(err)
-	}
-	candidatePrimary := testBundleContext(t, runtimeContextTestHashA, "primary.event")
-	newSurvivor := runtimeAdmissionTestContext(t, runtimeContextTestHashB, "survivor", newCatalog)
-	updates := map[string][]StandingTarget{runtimeContextTestHashB: newSurvivor.StandingTargets}
-	state := runtimeAdmissionTestState(t, newCatalog)
-	if err := manager.ValidateProcessAdmissionReplacement(runtimeContextTestHashA, candidatePrimary, updates, state); err != nil {
-		t.Fatalf("primary-without-pack validation: %v", err)
-	}
-	if _, err := manager.BeginBundleHashReplacement(context.Background(), runtimeContextTestHashA, candidatePrimary); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.PublishBundleHashReplacementWithAdmission(runtimeContextTestHashA, candidatePrimary, updates, state); err != nil {
-		t.Fatal(err)
-	}
-	if got := manager.LookupIngress("survivor", "acme"); !got.Loaded() || !got.Target.AdmissionPlan.Generation().Equal(newCatalog.Generation()) {
-		t.Fatalf("surviving pack target = %#v", got)
-	}
-	if primary, ok := manager.LookupBundleHash(runtimeContextTestHashA); !ok || len(primary.StandingTargets) != 0 {
-		t.Fatalf("primary context unexpectedly acquired pack target: %#v/%t", primary, ok)
-	}
-}
-
-func TestRuntimeContextManagerRejectsCandidatePackRemovalAcrossContexts(t *testing.T) {
-	source, oldCatalog := standingTelegramDeclarationSource(t, "inbound.telegram")
-	emptyCatalog, err := providertriggers.NewCatalogSnapshot()
-	if err != nil {
-		t.Fatal(err)
-	}
-	primary := testBundleContext(t, runtimeContextTestHashA, "primary.event")
-	survivor := testBundleContext(t, runtimeContextTestHashB, "inbound.telegram")
-	survivor.Source = source
-	plan, err := oldCatalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
-		Alias: "chat", Provider: "telegram", SigningSecret: "webhook_signing.telegram",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	survivor.StandingTargets = []StandingTarget{{
-		BundleHash: runtimeContextTestHashB, ServiceID: "service-chat", FlowID: "coordinator", Alias: "chat", Provider: "telegram",
-		RunID: "run-chat", Generation: 1, FlowInstance: "coordinator/chat", EntityID: "entity-chat",
-		SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
-	}}
-	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, oldCatalog), primary, survivor)
-	if err != nil {
-		t.Fatal(err)
-	}
-	candidatePrimary := testBundleContext(t, runtimeContextTestHashA, "primary.event")
-	if _, err = RecompileStandingTargetAdmissions(survivor.Source, emptyCatalog, survivor.StandingTargets); err == nil || !strings.Contains(err.Error(), `provider "telegram" is pack-required`) {
-		t.Fatalf("actual pack removal recompile error = %v", err)
-	}
-	if got := manager.AdmissionState().Generation; !got.Equal(oldCatalog.Generation()) {
-		t.Fatalf("pack removal changed process generation to %q", got.Diagnostic())
-	}
-	if got := manager.LookupIngress("chat", "telegram"); !got.Loaded() || !got.Target.AdmissionPlan.Generation().Equal(oldCatalog.Generation()) {
-		t.Fatalf("pack removal changed survivor: %#v", got)
-	}
-	if _, ok := manager.LookupBundleHash(candidatePrimary.BundleHash()); !ok {
-		t.Fatal("pack removal failure withdrew unchanged primary context")
-	}
-}
-
-func TestRuntimeContextManagerRejectsTwoContextIngressCollisionWithoutMutation(t *testing.T) {
-	oldCatalog := runtimeAdmissionTestCatalog(t, "a")
-	newCatalog := runtimeAdmissionTestCatalog(t, "b")
-	primary := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", oldCatalog)
-	survivor := runtimeAdmissionTestContext(t, runtimeContextTestHashB, "survivor", oldCatalog)
-	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, oldCatalog), primary, survivor)
-	if err != nil {
-		t.Fatal(err)
-	}
-	candidate := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "survivor", newCatalog)
-	updates := map[string][]StandingTarget{
-		runtimeContextTestHashB: runtimeAdmissionTestContext(t, runtimeContextTestHashB, "survivor", newCatalog).StandingTargets,
-	}
-	err = manager.ValidateProcessAdmissionReplacement(runtimeContextTestHashA, candidate, updates, runtimeAdmissionTestState(t, newCatalog))
-	if err == nil || !strings.Contains(err.Error(), `duplicate standing ingress alias "survivor"`) {
-		t.Fatalf("collision validation error = %v", err)
-	}
-	if got := manager.AdmissionState().Generation; !got.Equal(oldCatalog.Generation()) {
-		t.Fatalf("collision changed generation to %q", got.Diagnostic())
-	}
-	for alias, hash := range map[string]string{"primary": runtimeContextTestHashA, "survivor": runtimeContextTestHashB} {
-		lookup := manager.LookupIngress(alias, "acme")
-		if !lookup.Loaded() || lookup.Context.BundleHash() != hash || !lookup.Target.AdmissionPlan.Generation().Equal(oldCatalog.Generation()) {
-			t.Fatalf("collision changed %s lookup: %#v", alias, lookup)
-		}
-	}
-}
-
-func TestRuntimeContextManagerSignedToUnsignedTransitionRequiresAcknowledgedRecompileAcrossContexts(t *testing.T) {
-	signed := runtimeAdmissionTestCatalog(t, "a")
-	unsigned := runtimeAdmissionUnsignedTestCatalog(t, "b")
-	primary := testBundleContext(t, runtimeContextTestHashA, "primary.event")
-	survivor := runtimeAdmissionTestContext(t, runtimeContextTestHashB, "survivor", signed)
-	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, signed), primary, survivor)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := unsigned.CompileAdmission(providertriggers.CompileAdmissionRequest{Alias: "survivor", Provider: "acme"}); err == nil || !strings.Contains(err.Error(), "admission.acknowledge: unsigned_webhook") {
-		t.Fatalf("unacknowledged transition compile error = %v", err)
-	}
-	if got := manager.LookupIngress("survivor", "acme"); !got.Loaded() || got.Target.AdmissionPlan.RequestAuthentication() != providertriggers.RequestAuthenticationTokenEquality {
-		t.Fatalf("failed transition changed predecessor: %#v", got)
-	}
-
-	unsignedPlan, err := unsigned.CompileAdmission(providertriggers.CompileAdmissionRequest{
-		Alias: "survivor", Provider: "acme",
-		Declaration: providertriggers.AdmissionDeclaration{Acknowledge: providertriggers.UnsignedWebhookAcknowledgement},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	newSurvivor := survivor
-	newSurvivor.StandingTargets = append([]StandingTarget(nil), survivor.StandingTargets...)
-	newSurvivor.StandingTargets[0].SigningSecret = ""
-	newSurvivor.StandingTargets[0].AdmissionPlan = unsignedPlan
-	candidatePrimary := testBundleContext(t, runtimeContextTestHashA, "primary.event")
-	updates := map[string][]StandingTarget{runtimeContextTestHashB: newSurvivor.StandingTargets}
-	state := runtimeAdmissionTestState(t, unsigned)
-	if err := manager.ValidateProcessAdmissionReplacement(runtimeContextTestHashA, candidatePrimary, updates, state); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := manager.BeginBundleHashReplacement(context.Background(), runtimeContextTestHashA, candidatePrimary); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.PublishBundleHashReplacementWithAdmission(runtimeContextTestHashA, candidatePrimary, updates, state); err != nil {
-		t.Fatal(err)
-	}
-	lookup := manager.LookupIngress("survivor", "acme")
-	if !lookup.Loaded() || lookup.Target.AdmissionPlan.RequestAuthentication() != providertriggers.RequestAuthenticationNone || !lookup.Target.AdmissionPlan.Generation().Equal(unsigned.Generation()) {
-		t.Fatalf("acknowledged transition lookup = %#v", lookup)
-	}
-	for _, subject := range manager.BaseCapabilitySubjects() {
-		if subject.TriggerAdmission != nil && subject.Applicability == "effective" && subject.TriggerAdmission.RequestAuthentication != "UNAUTHENTICATED" {
-			t.Fatalf("transition readback retained stale authentication: %#v", subject)
-		}
-	}
-}
-
-func TestRuntimeContextManagerRejectsAdmissionTargetsOnLegacyPublishAndRestoresPredecessor(t *testing.T) {
-	catalog := runtimeAdmissionTestCatalog(t, "a")
-	predecessor := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
-	manager, err := newTestRuntimeContextManagerWithAdmission(t, nil, runtimeAdmissionTestState(t, catalog), predecessor)
-	if err != nil {
-		t.Fatal(err)
-	}
-	restored := runtimeAdmissionTestContext(t, runtimeContextTestHashA, "primary", catalog)
-	if _, err := manager.BeginBundleHashReplacement(context.Background(), runtimeContextTestHashA, restored); err != nil {
-		t.Fatal(err)
-	}
-	err = manager.PublishBundleHashReplacement(runtimeContextTestHashA, restored)
-	if err == nil || !strings.Contains(err.Error(), "PublishBundleHashReplacementWithAdmission") {
-		t.Fatalf("legacy publish error = %v", err)
-	}
-	if err := manager.PublishRestoredBundleHashReplacement(runtimeContextTestHashA, restored); err != nil {
-		t.Fatalf("PublishRestoredBundleHashReplacement: %v", err)
-	}
-	lookup := manager.LookupIngress("primary", "acme")
-	if !lookup.Loaded() || !lookup.Target.AdmissionPlan.Generation().Equal(catalog.Generation()) {
-		t.Fatalf("restored lookup = %#v", lookup)
-	}
-	assertRuntimeAdmissionSubjectGeneration(t, manager.BaseCapabilitySubjects(), catalog.Generation(), 1)
-}
-
-type mixedAdmissionGenerationError struct{ first, second string }
-
-func (e *mixedAdmissionGenerationError) Error() string {
-	return "capability snapshot mixed admission generations " + e.first + " and " + e.second
 }
 
 func runtimeAdmissionTestCatalog(t *testing.T, hashToken string) *providertriggers.CatalogSnapshot {
@@ -1293,15 +1060,6 @@ func runtimeAdmissionUnsignedTestCatalog(t *testing.T, hashToken string) *provid
 	return catalog
 }
 
-func runtimeAdmissionTestState(t *testing.T, catalog *providertriggers.CatalogSnapshot) ProcessAdmissionState {
-	t.Helper()
-	installed, err := catalog.InstalledCapabilitySubjects()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return ProcessAdmissionState{Generation: catalog.Generation(), InstalledSubjects: installed}
-}
-
 func runtimeAdmissionTestContext(t *testing.T, hash, alias string, catalog *providertriggers.CatalogSnapshot) BundleContext {
 	t.Helper()
 	contextDef := testBundleContext(t, hash, "inbound.acme")
@@ -1316,7 +1074,115 @@ func runtimeAdmissionTestContext(t *testing.T, hash, alias string, catalog *prov
 		Generation: 1, FlowInstance: "acme-flow/" + alias, EntityID: "entity-" + alias,
 		SigningSecret: "webhook_signing.acme", AdmissionPlan: plan,
 	}}
+	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
 	return contextDef
+}
+
+func applyRuntimeAdmissionCatalog(t testing.TB, contextDef *BundleContext, catalog *providertriggers.CatalogSnapshot) {
+	t.Helper()
+	contextDef.ProviderTriggerGeneration = catalog.Generation()
+	installed, err := catalog.InstalledCapabilitySubjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextDef.InstalledTriggerSubjects = installed
+	if bundle, ok := semanticview.Bundle(contextDef.Source); ok && bundle != nil && bundle.PackInventory != nil {
+		contextDef.PackInventoryDigest = bundle.PackInventory.Digest()
+	}
+}
+
+func projectTelegramAdmissionContext(t *testing.T, hash, alias, payloadObjectError string) BundleContext {
+	t.Helper()
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "package.yaml"), []byte("name: same-id-pack-proof\nversion: 1.0.0\nplatform_version: '>=0.7.0 <0.8.0'\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	base := packfixture.EmbeddedBase(t)
+	if changed, err := packartifact.ImportEmbeddedPack(project, "provider.telegram", base); err != nil || !changed {
+		t.Fatalf("import Telegram pack changed=%t: %v", changed, err)
+	}
+	manifestPath := filepath.Join(project, packartifact.ProjectPackDirectory, "provider.telegram", packartifact.TriggerManifestFileName)
+	body, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edited := strings.Replace(string(body), "telegram update object is required", payloadObjectError, 1)
+	if edited == string(body) {
+		t.Fatal("Telegram payload error edit found no canonical field")
+	}
+	if err := os.WriteFile(manifestPath, []byte(edited), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	projectPacks, err := packartifact.LoadProjectPackSet(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := packartifact.NewEffectivePackInventory(base, projectPacks.Sources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Semantics:     runtimecontracts.WorkflowSemanticView{Name: "same_id_pack", Version: "1.0.0"},
+		Events:        map[string]runtimecontracts.EventCatalogEntry{"inbound.telegram": {}, "inbound.telegram.text_message": {}},
+		PackInventory: inventory,
+	}
+	platformBody, err := os.ReadFile(runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Unmarshal(platformBody, &bundle.Platform); err != nil {
+		t.Fatal(err)
+	}
+	admitRuntimeTestBundle(t, bundle)
+	projection, err := packadmission.FromBundle(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := projection.ProviderTriggers
+	plan, err := catalog.CompileAdmission(providertriggers.CompileAdmissionRequest{
+		Alias: alias, Provider: "telegram", SigningSecret: "webhook_signing.telegram",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contextDef := testBundleContext(t, hash, "inbound.telegram")
+	contextDef.Source = semanticview.Wrap(bundle)
+	contextDef.StandingTargets = []StandingTarget{{
+		BundleHash: hash, ServiceID: "service-" + alias, FlowID: "telegram-flow", Alias: alias, Provider: "telegram",
+		RunID: "run-" + alias, Generation: 1, FlowInstance: "telegram-flow/" + alias, EntityID: "entity-" + alias,
+		SigningSecret: "webhook_signing.telegram", AdmissionPlan: plan,
+	}}
+	applyRuntimeAdmissionCatalog(t, &contextDef, catalog)
+	return contextDef
+}
+
+func assertProjectTelegramAdmissionMessage(t *testing.T, manager *RuntimeContextManager, alias, want string) {
+	t.Helper()
+	lookup := manager.LookupIngress(alias, "telegram")
+	if !lookup.Loaded() {
+		t.Fatalf("lookup %s = %#v", alias, lookup)
+	}
+	identity, ok := lookup.Target.AdmissionPlan.PackIdentity()
+	if !ok || identity.ID != "provider.telegram" || identity.Provenance != packartifact.ProvenanceProject {
+		t.Fatalf("%s admission identity = %#v, present=%t", alias, identity, ok)
+	}
+	subject, err := lookup.Target.CapabilitySubject()
+	if err != nil {
+		t.Fatalf("%s capability subject: %v", alias, err)
+	}
+	if subject.Provenance != packartifact.ProvenanceProject || subject.TriggerAdmission == nil || subject.TriggerAdmission.Pack == nil ||
+		subject.TriggerAdmission.Pack.ID != identity.ID || subject.TriggerAdmission.Pack.Version != identity.Version ||
+		subject.TriggerAdmission.Pack.ManifestHash != identity.ManifestHash || subject.TriggerAdmission.Pack.Provenance != identity.Provenance {
+		t.Fatalf("%s capability subject identity = %#v, want %#v", alias, subject, identity)
+	}
+	_, err = lookup.Target.AdmissionPlan.Accept(providertriggers.Request{
+		Provider: "telegram", Target: providertriggers.Target{EntityID: "entity-" + alias, WebhookSecret: "telegram-secret"},
+		Method: http.MethodPost, Headers: http.Header{"X-Telegram-Bot-Api-Secret-Token": []string{"telegram-secret"}},
+		Payload: []any{}, Body: []byte(`[]`), ContentType: "application/json",
+	})
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("%s project admission error = %v, want containing %q", alias, err, want)
+	}
 }
 
 func assertRuntimeAdmissionSubjectGeneration(t *testing.T, subjects []packs.Subject, generation triggergeneration.Generation, wantEffective int) {

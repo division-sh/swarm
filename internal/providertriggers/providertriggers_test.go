@@ -18,18 +18,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
+	platformpacks "github.com/division-sh/swarm/packs"
 )
 
-func TestFilesystemRegistryLoadsFirstPartyProvidersFromVerifiedPlatformPacks(t *testing.T) {
+func TestEmbeddedInventoryLoadsFirstPartyProvidersFromVerifiedPlatformPacks(t *testing.T) {
 	registry := testPlatformRegistry(t)
 	for _, provider := range []string{"github", "intercom", "shopify", "slack", "stripe", "telegram", "twilio", "typeform"} {
 		entry, _ := registry.EntryByProvider(provider)
-		got := entry.Source
-		for _, want := range []string{"provenance=platform", "provider." + provider, filepath.Join("packs", "provider-triggers", provider)} {
-			if !strings.Contains(got, want) {
-				t.Fatalf("%s source = %q, want containing %q", provider, got, want)
-			}
+		if entry.Source != "embedded:provider."+provider || entry.Identity.Provenance != packs.ProvenancePlatform || entry.SourcePath != "provider-triggers/"+provider {
+			t.Fatalf("%s embedded source = %#v", provider, entry)
 		}
 	}
 }
@@ -98,13 +97,12 @@ func TestPlatformPackInventoryIsCompleteFilesystemOnlyAndFreshlyStamped(t *testi
 }
 
 func TestConfiguredPlatformPackInventoryHasNoHardCodedCompletenessAuthority(t *testing.T) {
-	dirs := testPlatformPackDirs(t)
-	registry, loaded, err := NewCatalogSnapshotFromPackDirs("0.7.0", dirs[:1], nil)
+	registry, loaded, err := NewCatalogSnapshotFromInventory(testEmbeddedPackInventory(t), "0.7.0")
 	if err != nil {
-		t.Fatalf("load configured platform inventory: %v", err)
+		t.Fatalf("load explicit embedded inventory: %v", err)
 	}
-	if registry == nil || len(loaded) != 1 {
-		t.Fatalf("configured platform inventory result = registry:%v loaded:%d", registry != nil, len(loaded))
+	if registry == nil || len(loaded) != 8 {
+		t.Fatalf("embedded platform inventory result = registry:%v loaded:%d", registry != nil, len(loaded))
 	}
 	body, err := os.ReadFile("providertriggers.go")
 	if err != nil {
@@ -235,61 +233,6 @@ func TestProviderTriggerPackRejectsShadowingAndNamesSources(t *testing.T) {
 	}
 }
 
-func TestProviderTriggerCatalogLoadsExternalPackDirs(t *testing.T) {
-
-	dir := copyBuiltinPackToTemp(t, "stripe")
-	replaceInFile(t, filepath.Join(dir, "trigger.yaml"), "provider: stripe", "provider: acme")
-	replaceInFile(t, filepath.Join(dir, "trigger.yaml"), "literal: inbound.stripe", "literal: inbound.acme")
-	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "id: provider.stripe", "id: provider.acme")
-	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "source: platform", "source: external")
-	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "/webhooks/{alias}/stripe", "/webhooks/{alias}/acme")
-	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "webhook_signing.stripe", "webhook_signing.acme")
-	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "webhook_signing.stripe", "webhook_signing.acme")
-	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "inbound.stripe", "inbound.acme")
-	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "providertriggers/stripe", "providertriggers/acme")
-	rewritePackHash(t, dir)
-
-	registry, loaded, err := NewCatalogSnapshotFromPackDirs("0.7.0", testPlatformPackDirs(t), []string{dir})
-	if err != nil {
-		t.Fatalf("NewCatalogSnapshotFromPackDirs: %v", err)
-	}
-	acme, _ := registry.EntryByProvider("acme")
-	if got := acme.Source; !strings.Contains(got, "provenance=external") || !strings.Contains(got, dir) {
-		t.Fatalf("acme source = %q, want external dir source %q", got, dir)
-	}
-	stripe, _ := registry.EntryByProvider("stripe")
-	if got := stripe.Source; !strings.Contains(got, "provenance=platform") || !strings.Contains(got, "provider.stripe") {
-		t.Fatalf("stripe source = %q, want platform pack source", got)
-	}
-	foundExternal := false
-	for _, pack := range loaded {
-		if pack.Manifest.Provider == "acme" && strings.Contains(pack.Source, "provenance=external") && strings.Contains(pack.Source, dir) {
-			foundExternal = true
-			break
-		}
-	}
-	if !foundExternal {
-		t.Fatalf("loaded packs = %+v, want external acme pack", loaded)
-	}
-}
-
-func TestProviderTriggerCatalogRejectsExternalShadowingAgainstPlatformPack(t *testing.T) {
-
-	dir := copyBuiltinPackToTemp(t, "github")
-	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "source: platform", "source: external")
-	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "id: provider.github", "id: provider.github.external")
-
-	_, _, err := NewCatalogSnapshotFromPackDirs("0.7.0", testPlatformPackDirs(t), []string{dir})
-	if err == nil {
-		t.Fatal("NewCatalogSnapshotFromPackDirs succeeded, want duplicate provider failure")
-	}
-	for _, want := range []string{`duplicate provider trigger manifest for "github"`, "provenance=platform", "provenance=external", dir} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("duplicate error = %q, want containing %q", err.Error(), want)
-		}
-	}
-}
-
 func TestProviderTriggerPackRequiresReadbackDoesNotRequireBoundSecretAtLoad(t *testing.T) {
 	dir := copyBuiltinPackToTemp(t, "stripe")
 	pack, err := LoadPackFS(os.DirFS(dir), ".", "0.7.0")
@@ -320,56 +263,6 @@ func TestProviderTriggerPackRequiresReadbackDoesNotRequireBoundSecretAtLoad(t *t
 		Target:   Target{EntitySlug: "customer-a"},
 	})
 	requireProviderTriggerError(t, err, http.StatusUnauthorized)
-}
-
-func TestExternalProviderTriggerPackUsesSameVerifier(t *testing.T) {
-
-	dir := copyBuiltinPackToTemp(t, "stripe")
-	if _, err := LoadExternalPackDirs("0.7.0", dir); err == nil || !strings.Contains(err.Error(), `expected "external"`) {
-		t.Fatalf("LoadExternalPackDirs platform provenance error = %v, want external provenance rejection", err)
-	}
-	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "source: platform", "source: external")
-	loaded, err := LoadExternalPackDirs("0.7.0", dir)
-	if err != nil {
-		t.Fatalf("LoadExternalPackDirs: %v", err)
-	}
-	if len(loaded) != 1 || loaded[0].Manifest.Provider != "stripe" {
-		t.Fatalf("loaded external packs = %+v, want stripe", loaded)
-	}
-	subject, err := loaded[0].CapabilitySubject()
-	if err != nil {
-		t.Fatalf("CapabilitySubject: %v", err)
-	}
-	if subject.Provenance != packs.ProvenanceExternal || subject.SourcePath != dir || subject.Status != packs.StatusAvailable {
-		t.Fatalf("external capability subject = %#v", subject)
-	}
-}
-
-func TestExternalTelegramProviderTriggerPackUsesSameTokenEqualityVerifier(t *testing.T) {
-
-	dir := copyBuiltinPackToTemp(t, "telegram")
-	replaceInFile(t, filepath.Join(dir, "pack.yaml"), "source: platform", "source: external")
-
-	loaded, err := LoadExternalPackDirs("0.7.0", dir)
-	if err != nil {
-		t.Fatalf("LoadExternalPackDirs: %v", err)
-	}
-	registry, err := NewCatalogSnapshot(CatalogEntriesFromLoadedPacks(loaded...)...)
-	if err != nil {
-		t.Fatalf("NewRegistryFromSources: %v", err)
-	}
-
-	body := []byte(`{"update_id":123456789,"message":{"message_id":7,"chat":{"id":42},"text":"hello"}}`)
-	delivery, err := acceptInstalled(registry, telegramRequest("telegram-secret", body, map[string]any{
-		"update_id": float64(123456789),
-		"message":   map[string]any{"message_id": float64(7), "chat": map[string]any{"id": float64(42)}, "text": "hello"},
-	}))
-	if err != nil {
-		t.Fatalf("Accept external Telegram webhook: %v", err)
-	}
-	if delivery.ProviderEventID != "123456789" || delivery.ProviderEventType != "update" || delivery.Events[0].Name != "inbound.telegram" {
-		t.Fatalf("delivery = %+v, want Telegram manifest identity", delivery)
-	}
 }
 
 func TestManifestInterpreterHostileProviderRejectsBoundaryAttacks(t *testing.T) {
@@ -1659,11 +1552,24 @@ func copyBuiltinPackToTemp(t *testing.T, provider string) string {
 
 func testPlatformRegistry(t *testing.T) *CatalogSnapshot {
 	t.Helper()
-	registry, _, err := NewCatalogSnapshotFromPackDirs("0.7.0", testPlatformPackDirs(t), nil)
+	registry, _, err := NewCatalogSnapshotFromInventory(testEmbeddedPackInventory(t), "0.7.0")
 	if err != nil {
-		t.Fatalf("load filesystem provider trigger registry: %v", err)
+		t.Fatalf("load embedded provider trigger registry: %v", err)
 	}
 	return registry
+}
+
+func testEmbeddedPackInventory(t testing.TB) *packartifact.EffectivePackInventory {
+	t.Helper()
+	base, err := packartifact.LoadPlatformPackInventoryFS(platformpacks.FS(), packartifact.InventoryManifestFileName, "0.7.0", packartifact.SelectionEmbedded)
+	if err != nil {
+		t.Fatalf("load embedded pack base: %v", err)
+	}
+	inventory, err := packartifact.NewEffectivePackInventory(base, nil)
+	if err != nil {
+		t.Fatalf("build embedded effective pack inventory: %v", err)
+	}
+	return inventory
 }
 
 func newTestCatalogSnapshot(manifests ...Manifest) (*CatalogSnapshot, error) {

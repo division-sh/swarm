@@ -10,9 +10,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/packs"
-	"github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/providerconnectors"
-	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -21,6 +19,7 @@ import (
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -40,6 +39,7 @@ func TestAdmittedEffectiveSourceProjectionBindsBaseProvenanceAndIsStable(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
+	admitRuntimeTestBundle(t, bundle)
 	bundleHash, err := runtimecontracts.BundleHash(bundle)
 	if err != nil {
 		t.Fatal(err)
@@ -77,6 +77,7 @@ func TestEffectiveSourceIdentityChangesWithExternalSemanticGenerations(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
+	admitRuntimeTestBundle(t, bundle)
 	bundleHash, err := runtimecontracts.BundleHash(bundle)
 	if err != nil {
 		t.Fatal(err)
@@ -135,6 +136,7 @@ func TestProjectedConnectorPackSourceAdmitsOneMockResponseAcrossEveryScope(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
+	admitRuntimeTestBundle(t, bundle)
 	bundleHash, _ := runtimecontracts.BundleHash(bundle)
 	fact, _ := runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
 	projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{Source: semanticview.Wrap(bundle), BundleSourceFact: fact})
@@ -335,22 +337,18 @@ func effectiveSourceTestChannelPlans(t *testing.T, repoRoot string) (packs.Satis
 	if err != nil {
 		t.Fatal(err)
 	}
-	version, err := platform.PlatformVersion()
-	if err != nil {
-		t.Fatal(err)
+	triggerCatalog := packfixture.TriggerCatalog(t)
+	channels := packfixture.ChannelPacks(t)
+	var trigger packs.TriggerPackDescriptor
+	for _, candidate := range triggerCatalog.PackDescriptors() {
+		if candidate.Provider == "telegram" {
+			trigger = candidate
+			break
+		}
 	}
-	triggerCatalog, _, err := providertriggers.NewCatalogSnapshotFromPackDirs(version, []string{filepath.Join(repoRoot, "packs", "provider-triggers", "telegram")}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	channels, err := packs.LoadChannelPackDirs(version, "platform", filepath.Join(repoRoot, "packs", "channels", "telegram"))
-	if err != nil || len(channels) != 1 {
-		t.Fatalf("load Telegram channel: packs=%d err=%v", len(channels), err)
-	}
-	trigger := triggerCatalog.PackDescriptors()[0]
 	var connector packs.ConnectorPackDescriptor
 	connectorID := channels[0].Envelope.Requires.Packs[packs.TypeConnector]
-	for _, candidate := range providerconnectors.DefaultPackRegistry().PackDescriptors() {
+	for _, candidate := range packfixture.ConnectorRegistry(t).PackDescriptors() {
 		if candidate.Identity.ID() == connectorID {
 			connector = candidate
 			break
