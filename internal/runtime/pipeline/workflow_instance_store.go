@@ -29,6 +29,7 @@ import (
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	runtimeworkflowroute "github.com/division-sh/swarm/internal/runtime/workflowroute"
+	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
 
@@ -86,6 +87,7 @@ const (
 	workflowEntityStateSelectionCardinalityUnknown workflowEntityStateSelectionCardinality = iota
 	workflowEntityStateSelectionExact
 	workflowEntityStateSelectionTemplate
+	workflowEntityStateSelectionRunRoot
 )
 
 type workflowEntityStateSemanticOwner struct {
@@ -104,6 +106,9 @@ func (o workflowEntityStateSemanticOwner) owns(instancePath string) bool {
 		}
 		instanceID := strings.TrimPrefix(instancePath, o.scopeKey+"/")
 		return instanceID != "" && !strings.Contains(instanceID, "/")
+	case workflowEntityStateSelectionRunRoot:
+		_, err := uuid.Parse(instancePath)
+		return err == nil
 	default:
 		return false
 	}
@@ -123,8 +128,9 @@ func AdmitWorkflowEntityStateSelectionOwner(source semanticview.Source, flowID s
 	if source == nil || flowID == "" {
 		return WorkflowEntityStateSelectionOwner{}, fmt.Errorf("workflow entity state selection owner requires source and flow identity")
 	}
+	runRoot := flowID == strings.TrimSpace(source.WorkflowName())
 	_, ok := source.FlowScopeByID(flowID)
-	if !ok {
+	if !ok && !runRoot {
 		return WorkflowEntityStateSelectionOwner{}, fmt.Errorf("workflow entity state selection owner flow %s is not declared", flowID)
 	}
 	scopeKey := strings.Trim(strings.TrimSpace(runtimeflowidentity.ScopeKey(source, flowID)), "/")
@@ -132,6 +138,11 @@ func AdmitWorkflowEntityStateSelectionOwner(source semanticview.Source, flowID s
 		return WorkflowEntityStateSelectionOwner{}, fmt.Errorf("workflow entity state selection owner flow %s has no canonical scope", flowID)
 	}
 	owner := WorkflowEntityStateSelectionOwner{flowID: flowID, scopeKey: scopeKey}
+	if runRoot {
+		owner.candidates = append(owner.candidates, workflowEntityStateSemanticOwner{
+			flowID: flowID, scopeKey: scopeKey, cardinality: workflowEntityStateSelectionRunRoot,
+		})
+	}
 	for _, candidate := range source.FlowScopes() {
 		candidateID := strings.TrimSpace(candidate.ID)
 		if candidateID == "" {
@@ -184,7 +195,7 @@ func (o WorkflowEntityStateSelectionOwner) Owns(instancePath string) bool {
 		if !candidate.owns(instancePath) {
 			continue
 		}
-		if matchedFlowID != "" {
+		if matchedFlowID != "" && matchedFlowID != candidate.flowID {
 			return false
 		}
 		matchedFlowID = candidate.flowID

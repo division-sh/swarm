@@ -1346,8 +1346,9 @@ contract_formats:
             owner. Every candidate route is classified against the complete admitted authored-flow set and is accepted only
             when exactly one authored flow grammar claims it and that flow is the receiver. Static and singleton flows admit
             only their exact authored scope. Template flows admit exactly one scalar concrete instance segment under their
-            authored scope. An overlap between a template instance spelling and an authored child scope is ambiguous and fails
-            closed. A nested child row never becomes a parent candidate even when it shares the declared key and has no
+            authored scope. The bundle root additionally admits its exact run UUID as the canonical run-root instance grammar.
+            An overlap between a template instance spelling and an authored child scope is ambiguous and fails closed. A
+            nested child row never becomes a parent candidate even when it shares the declared key and has no
             lifecycle companion. Broad selection, exact select_or_create appearance, target application, and engine preparation
             all consume this same classifier before assigning workflow identity; caller relabeling is forbidden.
             A matching active state row remains selectable before its flow_instances lifecycle companion exists; when a
