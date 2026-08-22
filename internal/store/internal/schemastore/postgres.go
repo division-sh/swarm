@@ -1,6 +1,7 @@
 package schemastore
 
 import (
+	"context"
 	"fmt"
 
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
@@ -9,6 +10,17 @@ import (
 type Postgres struct {
 	backend         *postgresbackend.Backend
 	schemaAdmission schemaAdmission
+}
+
+func (s *Postgres) CatalogEmpty(ctx context.Context) (bool, error) {
+	if s == nil || s.backend == nil {
+		return false, fmt.Errorf("postgres schema owner is required")
+	}
+	tables, err := postgresPublicTables(ctx, s.backend)
+	if err != nil {
+		return false, err
+	}
+	return len(tables) == 0, nil
 }
 
 func NewPostgres(backend *postgresbackend.Backend) (*Postgres, error) {

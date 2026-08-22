@@ -51,6 +51,23 @@ func (p *sqliteSessionTerminalProbe) SelectedStoreSessionTerminal(result runtime
 	p.results <- result
 }
 
+func TestTerminalAuthorityReadbackUsesBoundedDeadline(t *testing.T) {
+	const deadline = 10 * time.Millisecond
+	started := time.Now()
+	result := boundedTerminalResult(deadline, func(ctx context.Context) runtimestartupownership.TerminalResult {
+		<-ctx.Done()
+		return runtimestartupownership.TerminalResult{
+			Cause: runtimestartupownership.TerminalOwnershipSuperseded, SuccessorAuthorityID: uuid.NewString(),
+		}
+	})
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("terminal authority readback took %s, want bounded completion", elapsed)
+	}
+	if result.Cause != runtimestartupownership.TerminalOwnershipUnprovable {
+		t.Fatalf("terminal result = %#v, want ownership_unprovable", result)
+	}
+}
+
 func TestSQLiteSessionMonitorCancellationPreservesPossessionUntilDurableRelease(t *testing.T) {
 	for _, phase := range []string{"before proof", "os proof", "sql proof"} {
 		t.Run(phase, func(t *testing.T) {
@@ -124,7 +141,7 @@ func proveSQLiteSessionCancellationPreservesPossessionUntilDurableRelease(t *tes
 	owner := &StartupSQLiteOwner{backend: backend, path: path, schemaGuard: func() error { return nil }}
 	session := &sqliteSession{owner: owner, authority: authority, possession: blocking}
 	terminal := &sqliteSessionTerminalProbe{results: make(chan runtimestartupownership.TerminalResult, 1)}
-	if err := session.InstallTerminalOwner(terminal); err != nil {
+	if err := session.InstallTerminalOwner(terminal, time.Minute); err != nil {
 		t.Fatalf("install terminal owner: %v", err)
 	}
 
