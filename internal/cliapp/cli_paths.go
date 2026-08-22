@@ -29,6 +29,14 @@ func ResolveCLIContractPlatformSpecPaths(RepoRoot string, opts CLIContractPlatfo
 	if err != nil {
 		return CLIContractPlatformSpecPaths{}, err
 	}
+	return resolveCLIContractPlatformSpecPathsFromConfig(RepoRoot, opts, cfg)
+}
+
+func resolveCLIContractPlatformSpecPathsFromConfig(RepoRoot string, opts CLIContractPlatformSpecPathOptions, cfg cliCommandConfig) (CLIContractPlatformSpecPaths, error) {
+	RepoRoot = strings.TrimSpace(RepoRoot)
+	if RepoRoot == "" {
+		RepoRoot = DiscoverRepoRoot()
+	}
 	contractsPath := firstNonEmpty(
 		opts.ContractsPath,
 		os.Getenv(cliContractsPathEnv),

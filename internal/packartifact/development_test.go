@@ -103,6 +103,37 @@ func TestDevelopmentOverrideDigestIsIndependentOfDirectoryOrderAndRejectsIncompl
 	}
 }
 
+func TestDevelopmentOverrideEntriesRetainTheirConfiguredDirectories(t *testing.T) {
+	embedded, err := LoadEmbeddedPlatformPackInventory(testPlatformVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dirs := materializeDevelopmentInventory(t, embedded, nil)
+	wantByID := make(map[string]string, len(dirs))
+	for _, dir := range dirs {
+		envelopeBody, err := os.ReadFile(filepath.Join(dir, EnvelopeFileName))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var envelope Envelope
+		if err := yaml.Unmarshal(envelopeBody, &envelope); err != nil {
+			t.Fatal(err)
+		}
+		wantByID[envelope.ID] = dir
+	}
+	slices.Reverse(dirs)
+
+	development, err := LoadDevelopmentPlatformPackInventory(testPlatformVersion, dirs, embedded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range development.Entries() {
+		if got, want := entry.Directory(), wantByID[entry.ID()]; got != want {
+			t.Errorf("pack %q directory = %q, want configured directory %q", entry.ID(), got, want)
+		}
+	}
+}
+
 func TestDevelopmentOverrideRejectsSymlinkedConfiguredRoot(t *testing.T) {
 	embedded, err := LoadEmbeddedPlatformPackInventory(testPlatformVersion)
 	if err != nil {

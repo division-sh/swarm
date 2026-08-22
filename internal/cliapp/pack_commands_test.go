@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/packartifact"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
 
 func TestPacksListAndShowUseEmbeddedInventoryOutsideProject(t *testing.T) {
@@ -59,6 +60,39 @@ func TestPacksListDoesNotRequireRuntimeExecutionPosture(t *testing.T) {
 	list := decodeOutputJSON[packInventoryReadback](t, stdout)
 	if list.BaseMode != "embedded" || len(list.Packs) != 14 {
 		t.Fatalf("bare embedded list = %#v", list)
+	}
+}
+
+func TestPacksReadbackReportsConfiguredDevelopmentDirectories(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	_, dirs := packfixture.DevelopmentBase(t, nil)
+	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
+	configLines := []string{"platform:", "  packs:", "    platform_dirs:"}
+	wantByID := make(map[string]string, len(dirs))
+	for _, dir := range dirs {
+		configLines = append(configLines, "      - "+dir)
+		wantByID[filepath.Base(dir)] = dir
+	}
+	writeRuntimeConfigText(t, configPath, strings.Join(configLines, "\n")+"\n")
+
+	code, stdout, stderr := runPacksCommand(t, RepoRoot(), "packs", "list", "--config", configPath, "--json")
+	if code != 0 || stderr != "" {
+		t.Fatalf("development list code=%d stderr=%q stdout=%s", code, stderr, stdout)
+	}
+	list := decodeOutputJSON[packInventoryReadback](t, stdout)
+	for _, entry := range list.Packs {
+		if got, want := entry.Directory, wantByID[entry.ID]; got != want {
+			t.Errorf("list pack %q directory = %q, want %q", entry.ID, got, want)
+		}
+	}
+
+	code, stdout, stderr = runPacksCommand(t, RepoRoot(), "packs", "show", "provider.telegram", "--config", configPath, "--json")
+	if code != 0 || stderr != "" {
+		t.Fatalf("development show code=%d stderr=%q stdout=%s", code, stderr, stdout)
+	}
+	show := decodeOutputJSON[packShowReadback](t, stdout)
+	if got, want := show.Pack.Directory, wantByID[show.Pack.ID]; got != want {
+		t.Fatalf("show pack %q directory = %q, want %q", show.Pack.ID, got, want)
 	}
 }
 

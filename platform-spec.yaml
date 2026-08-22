@@ -9871,6 +9871,8 @@ tool_model:
         selected base receipt. Missing, extra, malformed, incompatible, tampered, colliding, traversing, symlinked, or
         digest-mismatched inputs fail before publication. No executable-relative, current-directory, source-checkout,
         machine-global, package-global, nil, per-kind-directory, or independent archive-scan fallback exists.
+        Development inventory readback retains the exact configured absolute directory associated with each admitted pack;
+        synthetic paths used to validate the complete replacement are not source provenance.
       admitted_projection: >
         `internal/packadmission` is the sole body-admission orchestrator for an exact EffectivePackInventory. It parses and
         validates every trigger, connector, and channel body and compiles their cross-kind channel satisfaction plans into
@@ -17234,7 +17236,9 @@ multi_bundle_persistence:
         `--contracts` value is an explicit operator input: it MUST name either the selected contracts directory itself
         or that directory's `package.yaml` file shorthand, and MUST NOT fall back to a parent bundle when the supplied
         path is a typo/non-root child. It is distinct from `swarm bundle build` materialization. Archive packaging remains
-        split until archive format and extraction safety rules are promoted.
+        split until archive format and extraction safety rules are promoted. This packaging-only command may load pack
+        selection config when `runtime.execution_posture` is omitted because it cannot execute a bundle; an explicitly
+        authored invalid posture still fails closed.
     bundle_build_materialization:
       owner: internal/runtime/contracts.BuildBundleMaterialization
       status: implemented_wasm_and_python_slice_b
