@@ -384,6 +384,49 @@ func TestProcessCapabilityReleaseDoesNotDeadlockWhenGrantPersistenceTerminalizes
 	}
 }
 
+func TestProcessCapabilityReleaseRetirementFailureKeepsPossessionMonitorLive(t *testing.T) {
+	session, plan := testRetainedSession(t)
+	capability, err := newProcessCapability(session, time.Millisecond, 10*time.Millisecond)
+	if err != nil {
+		t.Fatalf("newProcessCapability: %v", err)
+	}
+	grant, err := capability.IssueGenerationGrant(context.Background(), GrantRequest{
+		BundleHash: startupBundleHashA, BundleSource: "ephemeral", RuntimeInstanceID: session.authority.RuntimeInstanceID,
+		RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
+	})
+	if err != nil {
+		t.Fatalf("IssueGenerationGrant: %v", err)
+	}
+	injected := context.Canceled
+	session.mu.Lock()
+	session.recordErr = injected
+	session.mu.Unlock()
+	if err := capability.Release(context.Background()); !errors.Is(err, injected) {
+		t.Fatalf("Release error = %v, want canceled grant retirement", err)
+	}
+	if result, terminal := capability.TerminalResult(); terminal {
+		t.Fatalf("neutral retirement failure terminalized capability: %#v", result)
+	}
+
+	session.mu.Lock()
+	session.proveErr = errors.New("retained backend session disappeared after aborted release")
+	session.mu.Unlock()
+	select {
+	case <-capability.Done():
+	case <-time.After(time.Second):
+		t.Fatal("possession monitor did not detect loss after aborted release")
+	}
+	result, terminal := capability.TerminalResult()
+	if !terminal || result.Cause != TerminalOwnershipUnprovable {
+		t.Fatalf("terminal result = %#v ok=%v, want ownership_unprovable", result, terminal)
+	}
+	select {
+	case <-grant.Done():
+	case <-time.After(time.Second):
+		t.Fatal("terminal possession loss did not finish retiring the retained grant")
+	}
+}
+
 func TestProcessCapabilityMonitorTerminalizesIdleBackendFailure(t *testing.T) {
 	session, _ := testRetainedSession(t)
 	entered := make(chan struct{})

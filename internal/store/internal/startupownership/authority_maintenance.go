@@ -100,7 +100,7 @@ func inspectAuthorityHead(ctx context.Context, queryer authorityQueryer, backend
 	if err != nil {
 		return runtimestartupownership.AuthorityInspection{}, err
 	}
-	return classifyAuthorityHead(record, exists, backend)
+	return classifyAuthorityHead(ctx, queryer, record, exists, backend, sqlite)
 }
 
 func loadAuthorityHeadRecord(ctx context.Context, queryer authorityQueryer, sqlite, lock bool) (authorityHeadRecord, bool, error) {
@@ -111,11 +111,45 @@ func loadAuthorityHeadRecord(ctx context.Context, queryer authorityQueryer, sqli
 			query += ` FOR UPDATE`
 		}
 	}
+	record, exists, err := scanAuthorityRecord(queryer.QueryRowContext(ctx, query))
+	if err != nil {
+		return authorityHeadRecord{}, false, fmt.Errorf("inspect process authority head: %w", err)
+	}
+	return record, exists, nil
+}
+
+func loadAuthorityRecord(ctx context.Context, queryer authorityQueryer, authorityID string, ordinal *uint64, sqlite bool) (authorityHeadRecord, bool, error) {
+	query := `SELECT authority_id,authority_generation,transition_ordinal,state_version,state,owner_id,boot_id,runtime_instance_id,backend,acquisition_id,acquisition_request_hash,acquisition_kind,predecessor_authority_id,successor_authority_id,snapshot,created_at FROM runtime_startup_authority_facts WHERE authority_id = ?`
+	args := []any{authorityID}
+	if ordinal == nil {
+		query += ` ORDER BY transition_ordinal DESC LIMIT 1`
+	} else {
+		query += ` AND transition_ordinal = ?`
+		args = append(args, *ordinal)
+	}
+	if !sqlite {
+		args = []any{authorityID}
+		query = `SELECT authority_id::text,authority_generation,transition_ordinal,state_version,state,owner_id,boot_id::text,runtime_instance_id::text,backend,acquisition_id::text,acquisition_request_hash,acquisition_kind,predecessor_authority_id::text,successor_authority_id::text,snapshot,created_at FROM runtime_startup_authority_facts WHERE authority_id = $1::uuid`
+		if ordinal == nil {
+			query += ` ORDER BY transition_ordinal DESC LIMIT 1`
+		} else {
+			query += ` AND transition_ordinal = $2`
+			args = append(args, *ordinal)
+		}
+	}
+	record, exists, err := scanAuthorityRecord(queryer.QueryRowContext(ctx, query, args...))
+	if err != nil {
+		return authorityHeadRecord{}, false, fmt.Errorf("load process authority lineage: %w", err)
+	}
+	return record, exists, nil
+}
+
+func scanAuthorityRecord(row *sql.Row) (authorityHeadRecord, bool, error) {
 	var record authorityHeadRecord
 	var predecessor, successor sql.NullString
 	var raw []byte
 	var createdAt any
-	err := queryer.QueryRowContext(ctx, query).Scan(
+	err := row.Scan(
 		&record.AuthorityID, &record.AuthorityGeneration, &record.TransitionOrdinal,
 		&record.StateVersion, &record.State, &record.OwnerID, &record.BootID,
 		&record.RuntimeInstanceID, &record.Backend, &record.AcquisitionID,
@@ -126,7 +160,7 @@ func loadAuthorityHeadRecord(ctx context.Context, queryer authorityQueryer, sqli
 		return authorityHeadRecord{}, false, nil
 	}
 	if err != nil {
-		return authorityHeadRecord{}, false, fmt.Errorf("inspect process authority head: %w", err)
+		return authorityHeadRecord{}, false, err
 	}
 	record.PredecessorAuthorityID = predecessor.String
 	record.SuccessorAuthorityID = successor.String
@@ -161,7 +195,7 @@ func authorityRecordTimestamp(value any) (string, bool) {
 	return fmt.Sprint(value), false
 }
 
-func classifyAuthorityHead(record authorityHeadRecord, exists bool, backend string) (runtimestartupownership.AuthorityInspection, error) {
+func classifyAuthorityHead(ctx context.Context, queryer authorityQueryer, record authorityHeadRecord, exists bool, backend string, sqlite bool) (runtimestartupownership.AuthorityInspection, error) {
 	if !exists {
 		digest, err := canonicaljson.Hash(struct {
 			Backend string `json:"backend"`
@@ -184,8 +218,8 @@ func classifyAuthorityHead(record authorityHeadRecord, exists bool, backend stri
 		Status: runtimestartupownership.AuthorityInspectionCorrupt, Backend: backend,
 		FindingsDigest: digest, Detail: "The recorded project session is inconsistent and must be repaired before serving.",
 	}
-	var authority runtimestartupownership.Authority
-	if record.createdAtValid && json.Unmarshal(record.Snapshot, &authority) == nil && authority.Validate() == nil && authority.Backend == backend && authorityMatchesRecord(authority, record) {
+	authority, lineageErr := validateAuthorityLineage(ctx, queryer, record, backend, sqlite, make(map[string]struct{}))
+	if lineageErr == nil {
 		result.Status = runtimestartupownership.AuthorityInspectionValid
 		result.State = authority.State
 		result.OwnerID = authority.OwnerID
@@ -195,6 +229,112 @@ func classifyAuthorityHead(record authorityHeadRecord, exists bool, backend stri
 		result.Detail = "The recorded project session is internally consistent; its current liveness is not inferred by inspection."
 	}
 	return result, result.Validate()
+}
+
+func validateAuthorityLineage(
+	ctx context.Context,
+	queryer authorityQueryer,
+	record authorityHeadRecord,
+	backend string,
+	sqlite bool,
+	visited map[string]struct{},
+) (runtimestartupownership.Authority, error) {
+	var authority runtimestartupownership.Authority
+	if !record.createdAtValid || json.Unmarshal(record.Snapshot, &authority) != nil || authority.Validate() != nil ||
+		authority.Backend != backend || !authorityMatchesRecord(authority, record) {
+		return runtimestartupownership.Authority{}, errors.New("process authority record is invalid")
+	}
+	key := authority.AuthorityID + ":" + fmt.Sprint(authority.TransitionOrdinal)
+	if _, duplicate := visited[key]; duplicate {
+		return runtimestartupownership.Authority{}, errors.New("process authority lineage contains a cycle")
+	}
+	visited[key] = struct{}{}
+	defer delete(visited, key)
+
+	if authority.TransitionOrdinal > 1 {
+		previousOrdinal := authority.TransitionOrdinal - 1
+		previousRecord, exists, err := loadAuthorityRecord(ctx, queryer, authority.AuthorityID, &previousOrdinal, sqlite)
+		if err != nil {
+			return runtimestartupownership.Authority{}, fmt.Errorf("load process authority terminal predecessor: %w", err)
+		}
+		if !exists {
+			return runtimestartupownership.Authority{}, errors.New("process authority terminal transition has no exact predecessor")
+		}
+		previous, err := validateAuthorityLineage(ctx, queryer, previousRecord, backend, sqlite, visited)
+		if err != nil || runtimestartupownership.ValidateTransition(&previous, authority) != nil {
+			return runtimestartupownership.Authority{}, errors.New("process authority terminal transition lineage is invalid")
+		}
+		return authority, nil
+	}
+
+	switch authority.AcquisitionKind {
+	case runtimestartupownership.AcquisitionCold:
+		if authority.AuthorityGeneration != 1 || authority.PredecessorAuthorityID != "" {
+			return runtimestartupownership.Authority{}, errors.New("cold process authority lineage is invalid")
+		}
+		return authority, nil
+	case runtimestartupownership.AcquisitionRepair:
+		if err := validateAuthorityRepairRoot(ctx, queryer, authority, backend, sqlite); err != nil {
+			return runtimestartupownership.Authority{}, err
+		}
+		return authority, nil
+	case runtimestartupownership.AcquisitionCleanHandoff, runtimestartupownership.AcquisitionCrashTakeover:
+	default:
+		return runtimestartupownership.Authority{}, errors.New("process authority acquisition kind is invalid")
+	}
+
+	predecessorRecord, exists, err := loadAuthorityRecord(ctx, queryer, authority.PredecessorAuthorityID, nil, sqlite)
+	if err != nil {
+		return runtimestartupownership.Authority{}, fmt.Errorf("load process authority acquisition predecessor: %w", err)
+	}
+	if !exists {
+		return runtimestartupownership.Authority{}, errors.New("process authority acquisition predecessor is missing")
+	}
+	predecessor, err := validateAuthorityLineage(ctx, queryer, predecessorRecord, backend, sqlite, visited)
+	if err != nil || predecessor.AuthorityGeneration == ^uint64(0) || predecessor.AuthorityGeneration+1 != authority.AuthorityGeneration {
+		return runtimestartupownership.Authority{}, errors.New("process authority acquisition generation is not contiguous")
+	}
+	if authority.AcquisitionKind == runtimestartupownership.AcquisitionCleanHandoff {
+		if predecessor.State != runtimestartupownership.StateReleased || predecessor.SuccessorAuthorityID != "" {
+			return runtimestartupownership.Authority{}, errors.New("clean process authority handoff has invalid predecessor evidence")
+		}
+		return authority, nil
+	}
+	if predecessor.State != runtimestartupownership.StateSuperseded || predecessor.SuccessorAuthorityID != authority.AuthorityID {
+		return runtimestartupownership.Authority{}, errors.New("crash process authority takeover has invalid predecessor evidence")
+	}
+	return authority, nil
+}
+
+func validateAuthorityRepairRoot(ctx context.Context, queryer authorityQueryer, authority runtimestartupownership.Authority, backend string, sqlite bool) error {
+	query := `SELECT operation_id,findings_digest,backend,repaired_authority_id,authority_generation,result FROM runtime_startup_authority_repairs WHERE repaired_authority_id = ? AND authority_generation = ?`
+	if !sqlite {
+		query = `SELECT operation_id::text,findings_digest,backend,repaired_authority_id::text,authority_generation,result FROM runtime_startup_authority_repairs WHERE repaired_authority_id = $1::uuid AND authority_generation = $2`
+	}
+	var operationID, findingsDigest, storedBackend, repairedAuthorityID string
+	var generation uint64
+	var raw []byte
+	if err := queryer.QueryRowContext(ctx, query, authority.AuthorityID, authority.AuthorityGeneration).Scan(
+		&operationID, &findingsDigest, &storedBackend, &repairedAuthorityID, &generation, &raw,
+	); err != nil {
+		return errors.New("process authority repair lineage is not journaled")
+	}
+	var result runtimestartupownership.AuthorityRepairResult
+	if json.Unmarshal(raw, &result) != nil || result.Validate() != nil || storedBackend != backend ||
+		result.OperationID != operationID || result.FindingsDigest != findingsDigest ||
+		result.RepairedAuthorityID != repairedAuthorityID || result.AuthorityGeneration != generation {
+		return errors.New("process authority repair journal is invalid")
+	}
+	runtimeID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("swarm-authority-repair-runtime-v1\x00"+operationID)).String()
+	predecessorID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("swarm-authority-repair-predecessor-v1\x00"+findingsDigest)).String()
+	expected, err := runtimestartupownership.NewAuthority(runtimestartupownership.AcquireRequest{
+		OwnerID: "operator-authority-repair", BootID: operationID, RuntimeInstanceID: runtimeID,
+	}, backend, generation, predecessorID, runtimestartupownership.AcquisitionRepair)
+	if err != nil || expected.AuthorityID != authority.AuthorityID || expected.AcquisitionID != authority.AcquisitionID ||
+		expected.AcquisitionRequestHash != authority.AcquisitionRequestHash || expected.PredecessorAuthorityID != authority.PredecessorAuthorityID {
+		return errors.New("process authority repair binding is invalid")
+	}
+	return nil
 }
 
 func authorityMatchesRecord(authority runtimestartupownership.Authority, record authorityHeadRecord) bool {
@@ -227,7 +367,7 @@ func repairAuthorityTx(ctx context.Context, tx *sql.Tx, req runtimestartupowners
 	if err != nil {
 		return runtimestartupownership.AuthorityRepairResult{}, err
 	}
-	inspection, err := classifyAuthorityHead(record, exists, backend)
+	inspection, err := classifyAuthorityHead(ctx, tx, record, exists, backend, sqlite)
 	if err != nil {
 		return runtimestartupownership.AuthorityRepairResult{}, err
 	}

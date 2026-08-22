@@ -1,6 +1,7 @@
 package runtimepersistence
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -1841,6 +1842,107 @@ func TestAuthorityRepairParity(t *testing.T) {
 	}
 }
 
+func TestProcessCapabilityOperationCancellationPreservesPossessionParity(t *testing.T) {
+	tests := []struct {
+		name   string
+		store  func(*testing.T) (startupAuthorityParityStore, *sql.DB)
+		sqlite bool
+	}{
+		{name: "postgres", store: func(t *testing.T) (startupAuthorityParityStore, *sql.DB) {
+			_, db, _ := testutil.StartPostgres(t)
+			return admitTestPostgresStore(t, db), db
+		}},
+		{name: "sqlite", sqlite: true, store: func(t *testing.T) (startupAuthorityParityStore, *sql.DB) {
+			selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
+			return selected, selected.backend.ConstructionHandle()
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := testAuthorActivityContext()
+			selected, db := tc.store(t)
+			capability, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("cancellation-owner"))
+			if err != nil {
+				t.Fatalf("acquire process capability: %v", err)
+			}
+			t.Cleanup(func() { _ = capability.Release(context.Background()) })
+
+			cancelledBeforeProof, cancelBeforeProof := context.WithCancel(ctx)
+			cancelBeforeProof()
+			if _, _, err := capability.CurrentSourceSet(cancelledBeforeProof); !errors.Is(err, context.Canceled) {
+				t.Fatalf("pre-proof cancellation error=%v, want context.Canceled", err)
+			}
+			if result, terminal := capability.TerminalResult(); terminal {
+				t.Fatalf("pre-proof cancellation terminalized capability: %#v", result)
+			}
+
+			lockTx, err := db.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatalf("begin backend I/O barrier: %v", err)
+			}
+			lockReleased := false
+			t.Cleanup(func() {
+				if !lockReleased {
+					_ = lockTx.Rollback()
+				}
+			})
+			if tc.sqlite {
+				_, err = lockTx.ExecContext(ctx, `UPDATE runtime_store_metadata SET created_at=created_at WHERE id=1`)
+			} else {
+				_, err = lockTx.ExecContext(ctx, `LOCK TABLE agent_topology_source_set_head IN ACCESS EXCLUSIVE MODE`)
+			}
+			if err != nil {
+				t.Fatalf("establish backend I/O barrier: %v", err)
+			}
+
+			plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{
+				BundleHash: testCanonicalBundleHash, BundleSource: "ephemeral",
+			}}, nil)
+			if err != nil {
+				t.Fatalf("construct cancellation source set: %v", err)
+			}
+			operationCtx, cancelOperation := context.WithTimeout(ctx, 500*time.Millisecond)
+			_, err = capability.InstallCompleteSourceSet(operationCtx, runtimeagenttopology.SourceSetCommitRequest{
+				OperationID: uuid.NewString(), Plan: plan,
+			})
+			cancelOperation()
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("backend I/O cancellation error=%v, want context.DeadlineExceeded", err)
+			}
+			if result, terminal := capability.TerminalResult(); terminal {
+				t.Fatalf("backend I/O cancellation terminalized capability: %#v", result)
+			}
+
+			contender, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("cancelled-operation-contender"))
+			var acquisitionErr *runtimestartupownership.AcquisitionError
+			if contender != nil || !errors.As(err, &acquisitionErr) || acquisitionErr.Failure != runtimestartupownership.AcquisitionTakeoverRequired {
+				t.Fatalf("contender after cancellation capability=%#v err=%v, want live-owner refusal", contender, err)
+			}
+			if err := lockTx.Rollback(); err != nil {
+				t.Fatalf("release backend I/O barrier: %v", err)
+			}
+			lockReleased = true
+
+			if _, _, err := capability.CurrentSourceSet(ctx); err != nil {
+				t.Fatalf("process capability after caller cancellation: %v", err)
+			}
+			if err := capability.Release(ctx); err != nil {
+				t.Fatalf("clean release after caller cancellation: %v", err)
+			}
+			if result, terminal := capability.TerminalResult(); !terminal || result.Cause != runtimestartupownership.TerminalReleased {
+				t.Fatalf("clean release terminal result=%#v terminal=%v", result, terminal)
+			}
+			successor, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("post-cancellation-successor"))
+			if err != nil {
+				t.Fatalf("acquire successor after clean release: %v", err)
+			}
+			if err := successor.Release(ctx); err != nil {
+				t.Fatalf("release successor after caller cancellation proof: %v", err)
+			}
+		})
+	}
+}
+
 func TestAuthorityInspectionRejectsSynchronizedBindingForgeryParity(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -1860,19 +1962,23 @@ func TestAuthorityInspectionRejectsSynchronizedBindingForgeryParity(t *testing.T
 			ctx := testAuthorActivityContext()
 			selected, db := tc.store(t)
 			for _, forgery := range []struct {
-				name   string
-				mutate func(*testing.T, *runtimestartupownership.Authority)
+				name                string
+				synchronizeSnapshot bool
+				mutate              func(*testing.T, *runtimestartupownership.Authority)
 			}{
-				{name: "acquisition id", mutate: func(_ *testing.T, authority *runtimestartupownership.Authority) {
+				{name: "acquisition id", synchronizeSnapshot: true, mutate: func(_ *testing.T, authority *runtimestartupownership.Authority) {
 					authority.AcquisitionID = uuid.NewString()
 				}},
-				{name: "request hash", mutate: func(_ *testing.T, authority *runtimestartupownership.Authority) {
+				{name: "request hash", synchronizeSnapshot: true, mutate: func(_ *testing.T, authority *runtimestartupownership.Authority) {
 					authority.AcquisitionRequestHash = strings.Repeat("f", 64)
 				}},
-				{name: "authority id", mutate: func(_ *testing.T, authority *runtimestartupownership.Authority) {
+				{name: "authority id", synchronizeSnapshot: true, mutate: func(_ *testing.T, authority *runtimestartupownership.Authority) {
 					authority.AuthorityID = uuid.NewString()
 				}},
-				{name: "selected backend", mutate: func(t *testing.T, authority *runtimestartupownership.Authority) {
+				{name: "row only acquisition id", mutate: func(_ *testing.T, authority *runtimestartupownership.Authority) {
+					authority.AcquisitionID = uuid.NewString()
+				}},
+				{name: "selected backend", synchronizeSnapshot: true, mutate: func(t *testing.T, authority *runtimestartupownership.Authority) {
 					wrongBackend := "sqlite_retained_owner"
 					if tc.name == "sqlite" {
 						wrongBackend = "postgres_retained_session"
@@ -1888,6 +1994,14 @@ func TestAuthorityInspectionRejectsSynchronizedBindingForgeryParity(t *testing.T
 					authority.AuthorityID = binding.AuthorityID
 					if err := authority.Validate(); err != nil {
 						t.Fatalf("wrong-backend authority should remain internally valid: %v", err)
+					}
+				}},
+				{name: "raised generation without persisted predecessor", synchronizeSnapshot: true, mutate: func(t *testing.T, authority *runtimestartupownership.Authority) {
+					authority.AuthorityGeneration += 10
+					authority.AcquisitionKind = runtimestartupownership.AcquisitionCleanHandoff
+					authority.PredecessorAuthorityID = uuid.NewString()
+					if err := authority.Validate(); err != nil {
+						t.Fatalf("forged authority should remain valid in isolation: %v", err)
 					}
 				}},
 			} {
@@ -1908,14 +2022,17 @@ func TestAuthorityInspectionRejectsSynchronizedBindingForgeryParity(t *testing.T
 						t.Fatalf("decode authority snapshot: %v", err)
 					}
 					forgery.mutate(t, &authority)
-					forgedSnapshot, err := json.Marshal(authority)
-					if err != nil {
-						t.Fatalf("encode forged authority snapshot: %v", err)
+					forgedSnapshot := snapshot
+					if forgery.synchronizeSnapshot {
+						forgedSnapshot, err = json.Marshal(authority)
+						if err != nil {
+							t.Fatalf("encode forged authority snapshot: %v", err)
+						}
 					}
 					if tc.name == "postgres" {
-						_, err = db.ExecContext(ctx, `UPDATE runtime_startup_authority_facts SET authority_id=$1::uuid,backend=$2,acquisition_id=$3::uuid,acquisition_request_hash=$4,snapshot=$5::jsonb WHERE authority_generation=(SELECT MAX(authority_generation) FROM runtime_startup_authority_facts) AND transition_ordinal=(SELECT MAX(transition_ordinal) FROM runtime_startup_authority_facts WHERE authority_generation=(SELECT MAX(authority_generation) FROM runtime_startup_authority_facts))`, authority.AuthorityID, authority.Backend, authority.AcquisitionID, authority.AcquisitionRequestHash, forgedSnapshot)
+						_, err = db.ExecContext(ctx, `UPDATE runtime_startup_authority_facts SET authority_id=$1::uuid,authority_generation=$2,backend=$3,acquisition_id=$4::uuid,acquisition_request_hash=$5,acquisition_kind=$6,predecessor_authority_id=$7::uuid,snapshot=$8::jsonb WHERE authority_generation=(SELECT MAX(authority_generation) FROM runtime_startup_authority_facts) AND transition_ordinal=(SELECT MAX(transition_ordinal) FROM runtime_startup_authority_facts WHERE authority_generation=(SELECT MAX(authority_generation) FROM runtime_startup_authority_facts))`, authority.AuthorityID, authority.AuthorityGeneration, authority.Backend, authority.AcquisitionID, authority.AcquisitionRequestHash, authority.AcquisitionKind, nullableAuthorityTestString(authority.PredecessorAuthorityID), forgedSnapshot)
 					} else {
-						_, err = db.ExecContext(ctx, `UPDATE runtime_startup_authority_facts SET authority_id=?,backend=?,acquisition_id=?,acquisition_request_hash=?,snapshot=? WHERE authority_generation=(SELECT MAX(authority_generation) FROM runtime_startup_authority_facts) AND transition_ordinal=(SELECT MAX(transition_ordinal) FROM runtime_startup_authority_facts WHERE authority_generation=(SELECT MAX(authority_generation) FROM runtime_startup_authority_facts))`, authority.AuthorityID, authority.Backend, authority.AcquisitionID, authority.AcquisitionRequestHash, string(forgedSnapshot))
+						_, err = db.ExecContext(ctx, `UPDATE runtime_startup_authority_facts SET authority_id=?,authority_generation=?,backend=?,acquisition_id=?,acquisition_request_hash=?,acquisition_kind=?,predecessor_authority_id=?,snapshot=? WHERE authority_generation=(SELECT MAX(authority_generation) FROM runtime_startup_authority_facts) AND transition_ordinal=(SELECT MAX(transition_ordinal) FROM runtime_startup_authority_facts WHERE authority_generation=(SELECT MAX(authority_generation) FROM runtime_startup_authority_facts))`, authority.AuthorityID, authority.AuthorityGeneration, authority.Backend, authority.AcquisitionID, authority.AcquisitionRequestHash, authority.AcquisitionKind, nullableAuthorityTestString(authority.PredecessorAuthorityID), string(forgedSnapshot))
 					}
 					if err != nil {
 						t.Fatalf("persist synchronized authority forgery: %v", err)
@@ -1924,14 +2041,39 @@ func TestAuthorityInspectionRejectsSynchronizedBindingForgeryParity(t *testing.T
 					if err != nil || inspection.Status != runtimestartupownership.AuthorityInspectionCorrupt {
 						t.Fatalf("forged inspection=%#v err=%v, want corrupt", inspection, err)
 					}
+					if _, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("reject-synchronized-forgery-before-repair")); err == nil {
+						t.Fatal("acquisition accepted corrupt synchronized authority before repair")
+					} else {
+						var acquisitionErr *runtimestartupownership.AcquisitionError
+						if !errors.As(err, &acquisitionErr) || acquisitionErr.Failure != runtimestartupownership.AcquisitionPriorOwnerAmbiguous {
+							t.Fatalf("acquisition error = %v, want prior_owner_ambiguous", err)
+						}
+					}
+					operationID := uuid.NewString()
 					result, err := selected.RepairAuthority(ctx, runtimestartupownership.AuthorityRepairRequest{
-						OperationID: uuid.NewString(), FindingsDigest: inspection.FindingsDigest, Confirmed: true,
+						OperationID: operationID, FindingsDigest: inspection.FindingsDigest, Confirmed: true,
 					})
 					if err != nil {
 						t.Fatalf("repair synchronized authority forgery: %v", err)
 					}
 					if err := result.Validate(); err != nil {
 						t.Fatalf("validate synchronized forgery repair: %v", err)
+					}
+					journalQuery := `SELECT before_snapshot FROM runtime_startup_authority_repairs WHERE operation_id=?`
+					if tc.name == "postgres" {
+						journalQuery = `SELECT before_snapshot FROM runtime_startup_authority_repairs WHERE operation_id=$1::uuid`
+					}
+					var beforeSnapshot []byte
+					if err := db.QueryRowContext(ctx, journalQuery, operationID).Scan(&beforeSnapshot); err != nil {
+						t.Fatalf("load synchronized forgery repair journal: %v", err)
+					}
+					for _, want := range []string{
+						authority.AuthorityID, authority.Backend, authority.AcquisitionID,
+						authority.AcquisitionRequestHash, string(authority.AcquisitionKind), authority.PredecessorAuthorityID,
+					} {
+						if want != "" && !bytes.Contains(beforeSnapshot, []byte(want)) {
+							t.Fatalf("repair journal did not preserve forged value %q: %s", want, beforeSnapshot)
+						}
 					}
 					successor, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("after-synchronized-forgery-repair"))
 					if err != nil {
@@ -1944,6 +2086,13 @@ func TestAuthorityInspectionRejectsSynchronizedBindingForgeryParity(t *testing.T
 			}
 		})
 	}
+}
+
+func nullableAuthorityTestString(value string) any {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return value
 }
 
 func TestSQLiteAuthorityRepairClosesMalformedRecordFieldClass(t *testing.T) {

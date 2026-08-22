@@ -555,6 +555,49 @@ func TestPostgresProcessCapabilityUsesRetainedSessionWithPoolSizeOne(t *testing.
 	}
 }
 
+func TestPostgresAdvisoryProofCallerCancellationPreservesExactSession(t *testing.T) {
+	dsn, db, _ := testutil.StartPostgres(t)
+	ctx := testAuthorActivityContext()
+	lockKey := "test:cancelled-advisory-proof:" + uuid.NewString()
+	lease, acquired, err := postgresbackend.AcquireAdvisoryLockLease(ctx, db, lockKey)
+	if err != nil || !acquired || lease == nil {
+		t.Fatalf("acquire advisory lease=%#v acquired=%v err=%v", lease, acquired, err)
+	}
+	t.Cleanup(func() { _ = lease.Release(context.Background()) })
+
+	entered := make(chan struct{})
+	lease.SetProveForTest(func(proofCtx context.Context, authority *postgresbackend.SessionAuthority, _ string) (bool, error) {
+		close(entered)
+		var held bool
+		err := authority.QueryRowContext(proofCtx, `SELECT false FROM pg_sleep(60)`).Scan(&held)
+		return held, err
+	})
+	proofCtx, cancel := context.WithCancel(ctx)
+	proofDone := make(chan error, 1)
+	go func() { proofDone <- lease.ProveCurrent(proofCtx) }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("retained-session proof did not enter backend I/O")
+	}
+	cancel()
+	if err := <-proofDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled retained-session proof error=%v, want context.Canceled", err)
+	}
+	if !lease.Current() {
+		t.Fatal("caller cancellation discarded the retained advisory-lock session")
+	}
+
+	lease.SetProveForTest(nil)
+	if err := lease.ProveCurrent(ctx); err != nil {
+		t.Fatalf("prove retained session after caller cancellation: %v", err)
+	}
+	if err := lease.Release(ctx); err != nil {
+		t.Fatalf("clean release after caller cancellation: %v", err)
+	}
+	assertIndependentAdvisoryLockAvailable(t, dsn, lockKey)
+}
+
 func TestPostgresDestructiveResetLockReleasesExactSession(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	selected := newTestPostgresStore(t, db)

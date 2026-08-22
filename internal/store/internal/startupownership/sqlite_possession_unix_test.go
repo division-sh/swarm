@@ -79,7 +79,7 @@ func TestSQLiteProcessCapabilityFileIdentityReplacement(t *testing.T) {
 	}
 }
 
-func TestSQLiteProcessCapabilityLockIdentityReplacement(t *testing.T) {
+func TestSQLiteProcessCapabilityFormerSidecarReplacementCannotSplitPossession(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "runtime.db")
 	if err := os.WriteFile(path, []byte("sqlite-identity"), 0o600); err != nil {
@@ -91,16 +91,21 @@ func TestSQLiteProcessCapabilityLockIdentityReplacement(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = possession.Release() })
 	lockPath := path + ".swarm-owner.lock"
-	if err := os.Rename(lockPath, lockPath+".retired"); err != nil {
+	if err := os.Remove(lockPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(lockPath, nil, 0o600); err != nil {
+	if err := os.WriteFile(lockPath, []byte("non-authoritative"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	err = possession.ProveCurrent(context.Background())
-	var possessionErr *runtimestartupownership.PossessionError
-	if !errors.As(err, &possessionErr) || possessionErr.Cause != runtimestartupownership.TerminalOwnershipUnprovable {
-		t.Fatalf("replacement proof error=%v, want ownership_unprovable", err)
+	if err := possession.ProveCurrent(context.Background()); err != nil {
+		t.Fatalf("former sidecar replacement changed canonical possession: %v", err)
+	}
+	contender, err := acquireSQLiteFilePossession(path)
+	if contender != nil {
+		_ = contender.Release()
+	}
+	if !isSQLitePossessionFailure(err, runtimestartupownership.AcquisitionTakeoverRequired) {
+		t.Fatalf("contender after former sidecar replacement error=%v, want takeover_required", err)
 	}
 }
 

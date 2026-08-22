@@ -1456,7 +1456,8 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	}
 	ownershipWatchCtx, cancelOwnershipWatch := context.WithCancel(ctx)
 	defer cancelOwnershipWatch()
-	if err := startServeOwnershipWatch(ownershipWatchCtx, processWorkOwner, processCapability, presenter, cancelServe); err != nil {
+	ownershipLoss, err := startServeOwnershipWatch(ownershipWatchCtx, processWorkOwner, processCapability, presenter, cancelServe)
+	if err != nil {
 		presenter.fail(5, "startup_ownership_lease", err)
 		return 3
 	}
@@ -1891,7 +1892,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 
 	<-ctx.Done()
 	ready.Store(false)
-	return 0
+	return serveCancellationExitCode(ownershipLoss)
 }
 
 func serveLifecyclePackFacts(contexts []serveRuntimeBundleContext) []serveLifecyclePackFact {
@@ -1960,19 +1961,29 @@ func startServeOwnershipWatch(
 	capability runtimestartupownership.ProcessCapability,
 	presenter *serveLifecyclePresenter,
 	cancel context.CancelFunc,
-) error {
+) (<-chan runtimestartupownership.TerminalResult, error) {
 	if workOwner == nil || capability == nil || presenter == nil || cancel == nil {
-		return errors.New("serve ownership watcher requires process work, capability, presenter, and cancellation")
+		return nil, errors.New("serve ownership watcher requires process work, capability, presenter, and cancellation")
 	}
 	lease, err := workOwner.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("admit serve ownership watcher: %w", err)
+		return nil, fmt.Errorf("admit serve ownership watcher: %w", err)
 	}
+	ownershipLoss := make(chan runtimestartupownership.TerminalResult, 1)
 	go func() {
-		defer func() { _ = lease.Done() }()
+		settled := false
+		defer func() {
+			if !settled {
+				_ = lease.Done()
+			}
+		}()
 		select {
 		case <-ctx.Done():
-			return
+			select {
+			case <-capability.Done():
+			default:
+				return
+			}
 		case <-capability.Done():
 		}
 		result, ok := capability.TerminalResult()
@@ -1980,9 +1991,23 @@ func startServeOwnershipWatch(
 			return
 		}
 		presenter.ownershipLost(result)
+		_ = lease.Done()
+		settled = true
+		ownershipLoss <- result
 		cancel()
 	}()
-	return nil
+	return ownershipLoss, nil
+}
+
+func serveCancellationExitCode(ownershipLoss <-chan runtimestartupownership.TerminalResult) int {
+	select {
+	case result := <-ownershipLoss:
+		if result.Cause == runtimestartupownership.TerminalOwnershipUnprovable || result.Cause == runtimestartupownership.TerminalOwnershipSuperseded {
+			return 1
+		}
+	default:
+	}
+	return 0
 }
 
 type standingServiceSetReconciler interface {

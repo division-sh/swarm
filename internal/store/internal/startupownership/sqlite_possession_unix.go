@@ -20,9 +20,6 @@ type sqliteFilePossession struct {
 	mu           sync.Mutex
 	database     *os.File
 	databaseInfo os.FileInfo
-	lock         *os.File
-	lockInfo     os.FileInfo
-	lockPath     string
 	path         string
 	released     bool
 }
@@ -47,7 +44,7 @@ func acquireSQLiteFilePossession(selectedPath string) (sqlitePossession, error) 
 	if err := requireSupportedLocalFilesystem(resolved); err != nil {
 		return nil, err
 	}
-	database, err := os.Open(resolved)
+	database, err := os.OpenFile(resolved, os.O_RDWR, 0)
 	if err != nil {
 		return nil, fmt.Errorf("open SQLite selected-store identity: %w", err)
 	}
@@ -63,28 +60,7 @@ func acquireSQLiteFilePossession(selectedPath string) (sqlitePossession, error) 
 			Detail:  "SQLite selected-store hard-link aliases cannot prove one canonical ownership coordinate",
 		}
 	}
-	lockPath := resolved + ".swarm-owner.lock"
-	lock, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		_ = database.Close()
-		return nil, fmt.Errorf("open SQLite selected-store possession file: %w", err)
-	}
-	lockInfo, err := lock.Stat()
-	if err != nil {
-		_ = lock.Close()
-		_ = database.Close()
-		return nil, fmt.Errorf("stat SQLite selected-store possession file: %w", err)
-	}
-	if !isSingleLinkRegularFile(lockInfo) {
-		_ = lock.Close()
-		_ = database.Close()
-		return nil, &runtimestartupownership.AcquisitionError{
-			Failure: runtimestartupownership.AcquisitionPriorOwnerAmbiguous,
-			Detail:  "SQLite selected-store possession identity is aliased",
-		}
-	}
-	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
-		_ = lock.Close()
+	if err := unix.Flock(int(database.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		_ = database.Close()
 		if errors.Is(err, unix.EWOULDBLOCK) || errors.Is(err, unix.EAGAIN) {
 			return nil, &runtimestartupownership.AcquisitionError{
@@ -94,10 +70,7 @@ func acquireSQLiteFilePossession(selectedPath string) (sqlitePossession, error) 
 		}
 		return nil, fmt.Errorf("acquire SQLite selected-store possession: %w", err)
 	}
-	possession := &sqliteFilePossession{
-		database: database, databaseInfo: databaseInfo,
-		lock: lock, lockInfo: lockInfo, lockPath: lockPath, path: resolved,
-	}
+	possession := &sqliteFilePossession{database: database, databaseInfo: databaseInfo, path: resolved}
 	if err := possession.ProveCurrent(context.Background()); err != nil {
 		return nil, errors.Join(err, possession.Release())
 	}
@@ -123,30 +96,17 @@ func (p *sqliteFilePossession) ProveCurrent(ctx context.Context) error {
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.released || p.database == nil || p.lock == nil {
+	if p.released || p.database == nil {
 		return errors.New("SQLite selected-store possession is released")
 	}
 	current, err := os.Stat(p.path)
 	if err != nil {
 		return fmt.Errorf("prove SQLite selected-store identity: %w", err)
 	}
-	if !os.SameFile(p.databaseInfo, current) {
+	if !isSingleLinkRegularFile(current) || !os.SameFile(p.databaseInfo, current) {
 		return &runtimestartupownership.PossessionError{
 			Cause: runtimestartupownership.TerminalOwnershipUnprovable,
 			Err:   errors.New("SQLite selected-store file identity changed"),
-		}
-	}
-	currentLock, err := os.Lstat(p.lockPath)
-	if err != nil {
-		return &runtimestartupownership.PossessionError{
-			Cause: runtimestartupownership.TerminalOwnershipUnprovable,
-			Err:   fmt.Errorf("prove SQLite selected-store possession identity: %w", err),
-		}
-	}
-	if currentLock.Mode()&os.ModeSymlink != 0 || !isSingleLinkRegularFile(currentLock) || !os.SameFile(p.lockInfo, currentLock) {
-		return &runtimestartupownership.PossessionError{
-			Cause: runtimestartupownership.TerminalOwnershipUnprovable,
-			Err:   errors.New("SQLite selected-store possession identity changed"),
 		}
 	}
 	return nil
@@ -162,16 +122,11 @@ func (p *sqliteFilePossession) Release() error {
 		return nil
 	}
 	p.released = true
-	var unlockErr, lockCloseErr, databaseCloseErr error
-	if p.lock != nil {
-		unlockErr = unix.Flock(int(p.lock.Fd()), unix.LOCK_UN)
-		lockCloseErr = p.lock.Close()
-	}
+	var unlockErr, databaseCloseErr error
 	if p.database != nil {
+		unlockErr = unix.Flock(int(p.database.Fd()), unix.LOCK_UN)
 		databaseCloseErr = p.database.Close()
 	}
-	p.lock = nil
-	p.lockInfo = nil
 	p.database = nil
-	return errors.Join(unlockErr, lockCloseErr, databaseCloseErr)
+	return errors.Join(unlockErr, databaseCloseErr)
 }

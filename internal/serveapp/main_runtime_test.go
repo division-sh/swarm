@@ -7195,7 +7195,8 @@ func TestPostgresIdleSessionLossStopsServe(t *testing.T) {
 	defer cancelServe()
 	var stdout, stderr bytes.Buffer
 	presenter := newServeLifecyclePresenter(cliapp.ServeOptions{Output: &stdout, ErrorOutput: &stderr})
-	if err := startServeOwnershipWatch(watchCtx, workOwner, capability, presenter, cancelServe); err != nil {
+	ownershipLoss, err := startServeOwnershipWatch(watchCtx, workOwner, capability, presenter, cancelServe)
+	if err != nil {
 		t.Fatalf("startServeOwnershipWatch: %v", err)
 	}
 
@@ -7204,8 +7205,11 @@ func TestPostgresIdleSessionLossStopsServe(t *testing.T) {
 		SELECT pid FROM pg_locks
 		WHERE locktype = 'advisory' AND granted
 		  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+		  AND classid::bigint = CASE WHEN hashtext($1) < 0 THEN 4294967295::bigint ELSE 0::bigint END
+		  AND objid::bigint = (hashtext($1)::bigint & 4294967295::bigint)
+		  AND objsubid = 1
 		ORDER BY pid LIMIT 1
-	`).Scan(&retainedPID); err != nil {
+	`, "swarm:runtime:shared-store-owner").Scan(&retainedPID); err != nil {
 		t.Fatalf("find retained process session: %v", err)
 	}
 	var terminated bool
@@ -7216,6 +7220,9 @@ func TestPostgresIdleSessionLossStopsServe(t *testing.T) {
 	case <-serveCtx.Done():
 	case <-time.After(4 * time.Second):
 		t.Fatal("serve was not cancelled after its retained session was lost")
+	}
+	if code := serveCancellationExitCode(ownershipLoss); code != 1 {
+		t.Fatalf("ownership-loss cancellation exit code = %d, want 1", code)
 	}
 	presenter.finish()
 	if got := stderr.String(); got != "This serve can no longer verify project ownership and is shutting down.\n" {
@@ -7229,6 +7236,71 @@ func TestPostgresIdleSessionLossStopsServe(t *testing.T) {
 	if _, err := workOwner.Join(context.Background()); err != nil {
 		t.Fatalf("join ownership watcher: %v", err)
 	}
+}
+
+func TestPostgresIdleSessionLossReturnsFailureFromRun(t *testing.T) {
+	_, db, _ := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
+		return serveRuntimeWorkspaceStub{}
+	})
+	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
+		ConfigPath:         writeServeRuntimeTestConfig(t),
+		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		StoreMode:          "postgres",
+		StoreModeSet:       true,
+		APIListenAddr:      "127.0.0.1:0",
+		MCPListenAddr:      "127.0.0.1:0",
+		SelfCheck:          true,
+		RequireBundleMatch: true,
+	})
+	serve.waitForReadyLine()
+
+	var retainedPID int
+	if err := db.QueryRowContext(context.Background(), `
+		SELECT pid FROM pg_locks
+		WHERE locktype = 'advisory' AND granted
+		  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+		  AND classid::bigint = CASE WHEN hashtext($1) < 0 THEN 4294967295::bigint ELSE 0::bigint END
+		  AND objid::bigint = (hashtext($1)::bigint & 4294967295::bigint)
+		  AND objsubid = 1
+		ORDER BY pid LIMIT 1
+	`, "swarm:runtime:shared-store-owner").Scan(&retainedPID); err != nil {
+		t.Fatalf("find serve retained process session: %v", err)
+	}
+	var terminated bool
+	if err := db.QueryRowContext(context.Background(), `SELECT pg_terminate_backend($1)`, retainedPID).Scan(&terminated); err != nil || !terminated {
+		t.Fatalf("terminate serve retained process session pid=%d terminated=%v err=%v", retainedPID, terminated, err)
+	}
+	code, ok := serve.waitForExit(serveRuntimeStopTimeout)
+	if !ok {
+		t.Fatalf("serve did not exit after ownership loss\noutput:\n%s", serve.outputString())
+	}
+	if code == 0 {
+		t.Fatalf("serve ownership-loss exit code = 0, want failure\noutput:\n%s", serve.outputString())
+	}
+	if !strings.Contains(serve.outputString(), "This serve can no longer verify project ownership and is shutting down.") {
+		t.Fatalf("serve output omitted ownership-loss diagnosis:\n%s", serve.outputString())
+	}
+}
+
+func TestServeCancellationExitCodeDistinguishesOwnershipLoss(t *testing.T) {
+	for _, cause := range []runtimestartupownership.TerminalCause{
+		runtimestartupownership.TerminalOwnershipUnprovable,
+		runtimestartupownership.TerminalOwnershipSuperseded,
+	} {
+		t.Run(string(cause), func(t *testing.T) {
+			terminal := make(chan runtimestartupownership.TerminalResult, 1)
+			terminal <- runtimestartupownership.TerminalResult{Cause: cause}
+			if code := serveCancellationExitCode(terminal); code != 1 {
+				t.Fatalf("serve cancellation exit code = %d, want 1", code)
+			}
+		})
+	}
+	t.Run("external cancellation", func(t *testing.T) {
+		if code := serveCancellationExitCode(make(chan runtimestartupownership.TerminalResult)); code != 0 {
+			t.Fatalf("external cancellation exit code = %d, want 0", code)
+		}
+	})
 }
 
 func TestNonDevServeOwnershipParity(t *testing.T) {
