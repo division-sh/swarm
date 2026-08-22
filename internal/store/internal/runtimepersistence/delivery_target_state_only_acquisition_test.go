@@ -390,7 +390,10 @@ func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores
 					t.Fatal(err)
 				}
 				otherRunID := uuid.NewString()
-				if !owner.Owns(runID) || !owner.Owns(flowID) || owner.Owns(flowID+"/child") || owner.Owns(otherRunID) {
+				if owner.ScopeKey() != runID {
+					t.Fatalf("root owner query scope = %q, want exact run %q", owner.ScopeKey(), runID)
+				}
+				if !owner.Owns(runID) || owner.Owns(flowID) || owner.Owns(flowID+"/child") || owner.Owns(otherRunID) {
 					t.Fatalf("root owner route classification: run=%t authored=%t child=%t other_run=%t", owner.Owns(runID), owner.Owns(flowID), owner.Owns(flowID+"/child"), owner.Owns(otherRunID))
 				}
 			})
@@ -401,6 +404,7 @@ func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores
 				accountID := "root-select-key-" + uuid.NewString()
 				entityID := uuid.NewString()
 				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), flowID+"/child", "active", accountID)
+				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), flowID, "active", accountID)
 				seedStateOnlyAcquisitionEntity(t, backend, db, runID, entityID, runID, "active", accountID)
 				evt := newEvent(accountID)
 				bus := newBusForSource(t, stateOnlyRootAcquisitionSource(workflowName, flowID), flowID, "selector")
@@ -418,11 +422,25 @@ func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores
 				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 1, 1)
 			})
 
+			t.Run("root select rejects authored scope without exact run owner", func(t *testing.T) {
+				workflowName := "root-select-authored-only-bundle-" + uuid.NewString()
+				flowID := "root-select-authored-only-" + uuid.NewString()
+				accountID := "root-select-authored-only-key-" + uuid.NewString()
+				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), flowID, "active", accountID)
+				evt := newEvent(accountID)
+				bus := newBusForSource(t, stateOnlyRootAcquisitionSource(workflowName, flowID), flowID, "selector")
+				if err := bus.Publish(ctx, evt); err == nil || !strings.Contains(err.Error(), "select_entity_no_match") {
+					t.Fatalf("root authored-only selection error = %v", err)
+				}
+				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 0, 0)
+			})
+
 			t.Run("root select or create materializes exact run route when authored id differs", func(t *testing.T) {
 				workflowName := "root-upsert-bundle-" + uuid.NewString()
 				flowID := "root-upsert-owner-" + uuid.NewString()
 				accountID := "root-upsert-key-" + uuid.NewString()
 				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), flowID+"/child", "active", accountID)
+				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), flowID, "active", accountID)
 				evt := newEvent(accountID)
 				bus := newBusForSource(t, stateOnlyRootAcquisitionSource(workflowName, flowID), flowID, "upserter")
 				plan, err := bus.CheckPublishRecipientPlan(ctx, evt)
@@ -435,6 +453,28 @@ func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores
 				}
 				if err := bus.Publish(ctx, evt); err != nil {
 					t.Fatalf("publish run-root select-or-create: %v", err)
+				}
+				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 1, 1)
+			})
+
+			t.Run("root select or create preserves exact run owner over authored scope", func(t *testing.T) {
+				workflowName := "root-upsert-existing-bundle-" + uuid.NewString()
+				flowID := "root-upsert-existing-owner-" + uuid.NewString()
+				accountID := "root-upsert-existing-key-" + uuid.NewString()
+				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), flowID, "active", accountID)
+				seedStateOnlyAcquisitionEntity(t, backend, db, runID, runID, runID, "active", accountID)
+				evt := newEvent(accountID)
+				bus := newBusForSource(t, stateOnlyRootAcquisitionSource(workflowName, flowID), flowID, "upserter")
+				plan, err := bus.CheckPublishRecipientPlan(ctx, evt)
+				if err != nil {
+					t.Fatalf("plan existing run-root select-or-create: %v", err)
+				}
+				want := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: flowID, FlowInstance: runID, EntityID: runID})
+				if len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Target != want {
+					t.Fatalf("existing run-root select-or-create routes = %#v, want %#v", plan.DeliveryRoutes, want)
+				}
+				if err := bus.Publish(ctx, evt); err != nil {
+					t.Fatalf("publish existing run-root select-or-create: %v", err)
 				}
 				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 1, 1)
 			})

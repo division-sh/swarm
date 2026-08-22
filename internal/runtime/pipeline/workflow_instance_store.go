@@ -138,6 +138,7 @@ func AdmitWorkflowEntityStateSelectionOwner(source semanticview.Source, flowID, 
 		if err != nil {
 			return WorkflowEntityStateSelectionOwner{}, err
 		}
+		owner.scopeKey = coordinate.RunID()
 		owner.candidates = append(owner.candidates, workflowEntityStateSemanticOwner{
 			flowID: flowID, scopeKey: coordinate.RunID(), cardinality: workflowEntityStateSelectionExact,
 		})
@@ -145,6 +146,12 @@ func AdmitWorkflowEntityStateSelectionOwner(source semanticview.Source, flowID, 
 	for _, candidate := range source.FlowScopes() {
 		candidateID := strings.TrimSpace(candidate.ID)
 		if candidateID == "" {
+			continue
+		}
+		// A selected root run is owned only at its exact run coordinate. The
+		// authored root scope describes the declaration, not another runtime
+		// instance eligible for declared-key selection.
+		if runRoot && candidateID == flowID {
 			continue
 		}
 		candidateScope := strings.Trim(strings.TrimSpace(runtimeflowidentity.ScopeKey(source, candidateID)), "/")
