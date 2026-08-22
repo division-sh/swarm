@@ -211,8 +211,8 @@ func TestDevelopmentOverrideRejectsNonRegularEnvelopeBeforeRead(t *testing.T) {
 				t.Fatal(err)
 			}
 			tc.replace(t, envelopePath)
-			if _, err := LoadDevelopmentPlatformPackInventory(testPlatformVersion, dirs, embedded); err == nil || !strings.Contains(err.Error(), "contains unsupported entry \"pack.yaml\"") {
-				t.Fatalf("non-regular envelope error = %v, want pre-read unsupported-entry rejection", err)
+			if _, err := LoadDevelopmentPlatformPackInventory(testPlatformVersion, dirs, embedded); err == nil || !strings.Contains(err.Error(), "pack.yaml") {
+				t.Fatalf("non-regular envelope error = %v, want rooted same-handle rejection", err)
 			}
 		})
 	}
@@ -229,6 +229,42 @@ func TestDevelopmentPackFileReaderRejectsSymlinkReplacement(t *testing.T) {
 	}
 	if _, err := readRegularDevelopmentPackFile(dir, EnvelopeFileName); err == nil {
 		t.Fatal("same-handle development artifact reader followed a symlink replacement")
+	}
+}
+
+func TestAdmittedArtifactRootRetainsValidatedDirectoryAcrossPathReplacement(t *testing.T) {
+	parent := t.TempDir()
+	configured := filepath.Join(parent, "configured")
+	if err := os.Mkdir(configured, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configured, EnvelopeFileName), []byte("anchored: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	root, err := openAdmittedArtifactRoot(configured)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.close()
+
+	moved := filepath.Join(parent, "moved")
+	if err := os.Rename(configured, moved); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, EnvelopeFileName), []byte("outside: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, configured); err != nil {
+		t.Skipf("symlink replacement is unavailable: %v", err)
+	}
+
+	body, err := root.readRegularFile(EnvelopeFileName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(body), "anchored: true\n"; got != want {
+		t.Fatalf("rooted artifact body = %q, want %q", got, want)
 	}
 }
 
