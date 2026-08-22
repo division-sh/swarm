@@ -968,6 +968,21 @@ func TestBundleHashV1LabelValidation(t *testing.T) {
 	}
 }
 
+func TestPackSelectionInputRejectsCaseCollidingCanonicalLabel(t *testing.T) {
+	builder := &bundleHashEntryBuilder{
+		seenPaths:    map[string]struct{}{},
+		labels:       map[string]string{},
+		foldedLabels: map[string]string{},
+	}
+	if err := builder.addEntry("/tmp/policy", "bundle/.SWARM/PACK-SELECTION.YAML", bundleHashRaw); err != nil {
+		t.Fatalf("add colliding authored input: %v", err)
+	}
+	err := builder.addPackSelectionInput("", []byte("version: 1\n"))
+	if err == nil || !strings.Contains(err.Error(), "case-colliding") {
+		t.Fatalf("addPackSelectionInput error = %v, want case-colliding label rejection", err)
+	}
+}
+
 func writeEquivalentBundleHashFixture(t *testing.T, lineEnding, packageYAML string) (string, string) {
 	t.Helper()
 	root := t.TempDir()
