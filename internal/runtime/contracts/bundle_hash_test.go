@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/packartifact"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 )
@@ -94,6 +96,124 @@ func TestBundleHashV1AcceptsCurrentPlatformSpec(t *testing.T) {
 	}
 	if !regexp.MustCompile(`^bundle-v1:sha256:[a-f0-9]{64}$`).MatchString(got) {
 		t.Fatalf("BundleHash = %q, want v1 bundle hash shape", got)
+	}
+}
+
+func TestProjectPackManifestUsesCanonicalYAMLAndPackBytesRemainExact(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := t.TempDir()
+	writeBundleRegistrationUploadFixture(t, root)
+	platform := DefaultPlatformSpecFile(repo)
+	base, err := packartifact.LoadEmbeddedPlatformPackInventory("0.7.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := packartifact.ImportEmbeddedPack(root, "provider.telegram", base); err != nil || !changed {
+		t.Fatalf("import Telegram changed=%t err=%v", changed, err)
+	}
+	load := func() *WorkflowContractBundle {
+		t.Helper()
+		bundle, err := LoadWorkflowContractBundleWithOptions(repo, root, platform, WorkflowContractLoadOptions{
+			PlatformPackBase:   base,
+			AdmitPackInventory: admitPackInventoryForRegistrationTest,
+		})
+		if err != nil {
+			t.Fatalf("load project pack bundle: %v", err)
+		}
+		return bundle
+	}
+
+	initialBundle := load()
+	initialHash, err := BundleHash(initialBundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := bundleHashEntries(initialBundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policies := make(map[string]bundleHashContentPolicy, len(entries))
+	for _, entry := range entries {
+		policies[entry.Label] = entry.Policy
+	}
+	if got := policies["bundle/"+packartifact.ProjectPackManifestLabel]; got != bundleHashYAML {
+		t.Fatalf("project membership policy = %d, want YAML", got)
+	}
+	for _, label := range []string{
+		"bundle/packs/provider.telegram/" + packartifact.EnvelopeFileName,
+		"bundle/packs/provider.telegram/" + packartifact.TriggerManifestFileName,
+	} {
+		if got := policies[label]; got != bundleHashRaw {
+			t.Fatalf("project pack policy for %s = %d, want raw", label, got)
+		}
+	}
+
+	manifestPath := filepath.Join(root, filepath.FromSlash(packartifact.ProjectPackManifestLabel))
+	manifestBody, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := packartifact.ParseProjectPackManifest(manifestBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared := manifest.Imports[0]
+	equivalent := fmt.Sprintf(`# formatting and map-key order are not identity
+imports:
+  - origin:
+      manifest_hash: %q
+      version: %q
+      id: %q
+      source: %q
+    path: %q
+    type: %q
+    id: %q
+version: 1
+`, declared.Origin.ManifestHash, declared.Origin.Version, declared.Origin.ID, declared.Origin.Source, declared.Path, declared.Type, declared.ID)
+	if err := os.WriteFile(manifestPath, []byte(equivalent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := BundleHash(initialBundle); err == nil || !strings.Contains(err.Error(), "changed after project pack manifest admission") {
+		t.Fatalf("post-load membership mutation error = %v", err)
+	}
+	equivalentHash, err := BundleHash(load())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if equivalentHash != initialHash {
+		t.Fatalf("equivalent project membership changed identity: before=%s after=%s", initialHash, equivalentHash)
+	}
+
+	envelopePath := filepath.Join(root, "packs", "provider.telegram", packartifact.EnvelopeFileName)
+	envelopeBody, err := os.ReadFile(envelopePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(envelopePath, append(envelopeBody, []byte("# exact envelope byte\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	envelopeHash, err := BundleHash(load())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if envelopeHash == equivalentHash {
+		t.Fatal("project pack envelope byte change did not change identity")
+	}
+
+	bodyPath := filepath.Join(root, "packs", "provider.telegram", packartifact.TriggerManifestFileName)
+	body, err := os.ReadFile(bodyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bodyPath, append(body, []byte("# exact body byte\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bodyHash, err := BundleHash(load())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bodyHash == envelopeHash {
+		t.Fatal("project pack body byte change did not change identity")
 	}
 }
 

@@ -191,6 +191,42 @@ func TestProjectPackBytesAndBaseReceiptSurviveCatalogReconstruction(t *testing.T
 	if err != nil {
 		t.Fatalf("load project pack bundle: %v", err)
 	}
+	upload, err := BuildBundleRegistrationDirectoryUploadWithOptions(repo, root, platform, WorkflowContractLoadOptions{
+		PlatformPackBase:   base,
+		AdmitPackInventory: admitPackInventoryForRegistrationTest,
+	})
+	if err != nil {
+		t.Fatalf("build project pack registration upload: %v", err)
+	}
+	var uploadEnvelope bundleRegistrationEnvelopeUploadV1
+	if err := yaml.Unmarshal([]byte(upload.ContentYAML), &uploadEnvelope); err != nil {
+		t.Fatal(err)
+	}
+	textPaths := make(map[string]struct{}, len(uploadEnvelope.Files))
+	for _, file := range uploadEnvelope.Files {
+		textPaths[file.Path] = struct{}{}
+	}
+	if _, ok := textPaths[packartifact.ProjectPackManifestLabel]; !ok {
+		t.Fatalf("registration text upload omitted canonical membership: %#v", uploadEnvelope.Files)
+	}
+	if upload.DataBlob == nil {
+		t.Fatal("registration upload omitted exact project pack data")
+	}
+	rawPaths := make(map[string]struct{}, len(upload.DataBlob.Entries))
+	for _, file := range upload.DataBlob.Entries {
+		rawPaths[file.Path] = struct{}{}
+	}
+	for _, path := range []string{
+		"packs/provider.telegram/" + packartifact.EnvelopeFileName,
+		"packs/provider.telegram/" + packartifact.TriggerManifestFileName,
+	} {
+		if _, ok := rawPaths[path]; !ok {
+			t.Fatalf("registration data upload omitted exact %s: %#v", path, upload.DataBlob.Entries)
+		}
+	}
+	if _, ok := rawPaths[packartifact.ProjectPackManifestLabel]; ok {
+		t.Fatalf("registration data upload treated membership as raw: %#v", upload.DataBlob.Entries)
+	}
 	projection, err := BuildBundleCatalogProjection(bundle)
 	if err != nil {
 		t.Fatalf("project pack catalog projection: %v", err)

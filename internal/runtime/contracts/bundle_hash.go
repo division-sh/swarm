@@ -191,7 +191,13 @@ func (b *bundleHashEntryBuilder) addPackInputs(bundle *WorkflowContractBundle) e
 		return err
 	}
 	for _, file := range bundle.ProjectPacks.Files {
-		if err := b.addExactBundleInput(file.AbsolutePath, file.RelativePath, file.Body, "project pack manifest admission"); err != nil {
+		var err error
+		if file.RelativePath == packartifact.ProjectPackManifestLabel {
+			err = b.addExactYAMLBundleInput(file.AbsolutePath, file.RelativePath, file.Body, "project pack manifest admission")
+		} else {
+			err = b.addExactBundleInput(file.AbsolutePath, file.RelativePath, file.Body, "project pack admission")
+		}
+		if err != nil {
 			return err
 		}
 	}
@@ -224,6 +230,14 @@ func (b *bundleHashEntryBuilder) addPackSelectionInput(filePath string, source [
 }
 
 func (b *bundleHashEntryBuilder) addExactBundleInput(filePath, relative string, expected []byte, owner string) error {
+	return b.addExactBundleInputWithPolicy(filePath, relative, expected, owner, bundleHashRaw)
+}
+
+func (b *bundleHashEntryBuilder) addExactYAMLBundleInput(filePath, relative string, expected []byte, owner string) error {
+	return b.addExactBundleInputWithPolicy(filePath, relative, expected, owner, bundleHashYAML)
+}
+
+func (b *bundleHashEntryBuilder) addExactBundleInputWithPolicy(filePath, relative string, expected []byte, owner string, policy bundleHashContentPolicy) error {
 	relative = filepath.ToSlash(strings.TrimSpace(relative))
 	if relative == "" || len(expected) == 0 {
 		return fmt.Errorf("%s requires a relative path and exact bytes", owner)
@@ -252,10 +266,13 @@ func (b *bundleHashEntryBuilder) addExactBundleInput(filePath, relative string, 
 	}
 	b.labels[label] = filePath
 	b.foldedLabels[folded] = label
-	b.entries = append(b.entries, bundleHashEntry{
-		Label: label, Path: filePath, Policy: bundleHashRaw,
-		ExpectedExact: append([]byte(nil), expected...), ExactOwner: owner,
-	})
+	entry := bundleHashEntry{Label: label, Path: filePath, Policy: policy, ExactOwner: owner}
+	if policy == bundleHashYAML {
+		entry.SourceExact = append([]byte(nil), expected...)
+	} else {
+		entry.ExpectedExact = append([]byte(nil), expected...)
+	}
+	b.entries = append(b.entries, entry)
 	return nil
 }
 

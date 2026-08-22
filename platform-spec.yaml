@@ -9885,6 +9885,14 @@ tool_model:
         rejected candidate does not change the current base or predecessor runtime. Same-process survivor reconstruction,
         recovery, and fork resolve their receipt against the retained exact generation. This retention is not an archive,
         migration, or compatibility promise across binary starts.
+      project_inventory_transaction: >
+        Project pack mutation and validated reads share one project-scoped cross-process transaction/snapshot lock outside
+        the strict `packs/` namespace. Import acquires the lock before its first inventory path or manifest read and retains
+        it through directory and manifest publication; validation holds the corresponding snapshot lock through every
+        manifest, envelope, body, and unexpected-entry read. Temporary import and manifest artifacts remain outside reader-
+        visible inventory. Successful concurrent imports preserve every committed membership row and directory, and a
+        reader observes only a complete predecessor or successor snapshot. Ordinary publication failures roll back their
+        candidate. No unlocked reader, process-local mutex, compare/retry fallback, repair, or migration path is authoritative.
       envelope_fields:
         id: >
           Required stable pack identity. Values must be normalized ASCII identifiers and must not be inferred from directory
@@ -23569,7 +23577,8 @@ cli_specification:
       behavior: >
         Copies one exact embedded pack into the selected project, records strict membership and immutable embedded origin in
         `packs/manifest.yaml`, returns idempotently for an identical import, and refuses every conflicting existing path or
-        row without overwriting project edits.
+        row without overwriting project edits. The project inventory transaction serializes cross-process imports and
+        validated readers so successful concurrent imports preserve all rows and readers never observe partial publication.
     packs:
       command: swarm packs
       group: author_validate
