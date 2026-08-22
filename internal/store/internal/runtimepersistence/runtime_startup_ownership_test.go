@@ -1853,6 +1853,7 @@ func TestSQLiteAuthorityRepairClosesMalformedRecordFieldClass(t *testing.T) {
 		{name: "predecessor id", assignment: `predecessor_authority_id='not-a-uuid'`, wantRaw: `not-a-uuid`},
 		{name: "successor id", assignment: `state='superseded', successor_authority_id='not-a-uuid'`, wantRaw: `not-a-uuid`},
 		{name: "snapshot", assignment: `snapshot='{}'`, wantRaw: `"snapshot":{} `},
+		{name: "created at", assignment: `created_at='not-a-time'`, wantRaw: `"created_at":"not-a-time"`},
 	} {
 		t.Run(malformed.name, func(t *testing.T) {
 			ctx := testAuthorActivityContext()
