@@ -95,7 +95,7 @@ func TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning(t *testing.
 	if err != nil {
 		t.Fatalf("build ephemeral topology admission: %v", err)
 	}
-	if err := agentfixture.Upsert(ctx, pg, rec); err != nil {
+	if err := agentfixture.Upsert(t, ctx, pg, rec); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
 	if err := manager.MaterializeAdmittedAgentForExecution(ctx, rec); err != nil {

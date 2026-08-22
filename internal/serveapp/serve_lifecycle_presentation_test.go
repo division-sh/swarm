@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"gopkg.in/yaml.v3"
@@ -312,6 +313,67 @@ func TestServeLifecyclePresenterFailureUsesDiagnosticChannel(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "ERROR: serve failed · http listener bind · address already in use") {
 		t.Fatalf("stderr missing canonical failure:\n%s", stderr.String())
+	}
+}
+
+func TestServeOwnershipTranscriptUsesOnlyHumanProjectLanguage(t *testing.T) {
+	t.Run("automatic recovery", func(t *testing.T) {
+		var out bytes.Buffer
+		presenter := newServeLifecyclePresenter(cliapp.ServeOptions{Output: &out})
+		presenter.recordRecoveredPreviousSession()
+		presenter.recordRecoveredPreviousSession()
+		presenter.readyPresentation(serveLifecycleReadyFacts{ProjectName: "project"})
+		if got := strings.Count(out.String(), "✓ Recovered previous session"); got != 1 {
+			t.Fatalf("recovery line count = %d, want 1\n%s", got, out.String())
+		}
+	})
+
+	for _, test := range []struct {
+		name   string
+		result runtimestartupownership.TerminalResult
+		want   string
+	}{
+		{
+			name: "exact successor",
+			result: runtimestartupownership.TerminalResult{
+				Cause: runtimestartupownership.TerminalOwnershipSuperseded, SuccessorAuthorityID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+			},
+			want: "This serve lost ownership to a newer serve and is shutting down.\n",
+		},
+		{
+			name:   "unprovable ownership",
+			result: runtimestartupownership.TerminalResult{Cause: runtimestartupownership.TerminalOwnershipUnprovable},
+			want:   "This serve can no longer verify project ownership and is shutting down.\n",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			presenter := newServeLifecyclePresenter(cliapp.ServeOptions{Output: &stdout, ErrorOutput: &stderr})
+			presenter.ownershipLost(test.result)
+			presenter.finish()
+			if stderr.String() != test.want || stdout.Len() != 0 {
+				t.Fatalf("ownership transcript = stdout:%q stderr:%q, want stderr %q", stdout.String(), stderr.String(), test.want)
+			}
+			for _, forbidden := range []string{"lease", "grant", "generation", "authority", "fencing"} {
+				if strings.Contains(strings.ToLower(stderr.String()), forbidden) {
+					t.Fatalf("ownership transcript exposed %q: %s", forbidden, stderr.String())
+				}
+			}
+		})
+	}
+}
+
+func TestServeOwnershipAcquisitionTranscriptNamesOnlyRealResolution(t *testing.T) {
+	err := serveOwnershipAcquisitionError(&runtimestartupownership.AcquisitionError{
+		Failure:    runtimestartupownership.AcquisitionTakeoverRequired,
+		RecordedAt: time.Now().Add(-2*time.Hour - time.Minute),
+	})
+	want := "Another swarm serve is already running for this project (started 2h ago). Stop it first, or serve a different project."
+	if err == nil || err.Error() != want {
+		t.Fatalf("acquisition transcript = %v, want %q", err, want)
+	}
+	if strings.Contains(err.Error(), "--context") {
+		t.Fatalf("same-store refusal advertised context as a store selector: %v", err)
 	}
 }
 

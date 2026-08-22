@@ -234,7 +234,7 @@ func seedProviderTriggerSmokeRuntime(
 		"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
 		fixtureBundleHash,
 	))
-	if err := storetest.UpsertAgentFixture(agentContext, sqliteStore, runtimemanager.PersistedAgent{
+	if err := storetest.UpsertAgentFixture(t, agentContext, sqliteStore, runtimemanager.PersistedAgent{
 		Config: serveTestAgentConfig(runtimeactors.AgentConfig{
 			ID:                 agentID,
 			Identity:           servedRuntimeRootIdentity(t, agentID),

@@ -201,6 +201,7 @@ func (s *staticStartupReconcileStore) CommitAgentLifecycleTransition(_ context.C
 		PreviousGeneration: req.ExpectedGeneration, Generation: req.TargetGeneration,
 		PreviousPhase: req.ExpectedPhase, Phase: req.TargetPhase,
 		ConfigRevision: req.ConfigRevision, RunMode: req.RunMode, Topology: req.Topology,
+		ProcessBinding: lifecycleProbeProcessBinding(),
 	}, nil
 }
 

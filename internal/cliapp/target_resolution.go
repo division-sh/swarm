@@ -9,15 +9,18 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/config"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/spf13/cobra"
 )
 
 const (
-	localTargetOwner = "platform-spec.yaml#cli_specification.foundations.local_target_resolution_authority"
+	localTargetOwner         = "platform-spec.yaml#cli_specification.foundations.local_target_resolution_authority"
+	selectedStoreOwnerReader = "platform-spec.yaml#agent_topology_authority.process_capability.repair"
 )
 
 type cliSwarmDirOptions struct {
@@ -82,6 +85,7 @@ type doctorTargetReport struct {
 	Project         doctorTargetProject        `json:"project"`
 	API             doctorTargetAPI            `json:"api"`
 	Context         doctorTargetContext        `json:"context"`
+	ProjectOwner    doctorTargetPendingFact    `json:"project_owner"`
 	RuntimeIdentity doctorTargetPendingFact    `json:"runtime_identity"`
 	Store           doctorTargetPath           `json:"store"`
 	Data            doctorTargetPath           `json:"data"`
@@ -173,7 +177,7 @@ func runDoctorTargetCommand(repo string, cmd *cobra.Command, opts doctorOptions)
 		addUnifiedConfigDiagnosticsToReport(&configReport, diagnostics)
 	}
 	configReport = configReport.finalize()
-	report, err := buildDoctorTargetReport(cmd.Context(), repo, opts, cfg, swarmDir, runtimeCfgResult.Config)
+	report, err := buildDoctorTargetReport(cmd.Context(), repo, cmd, opts, cfg, swarmDir, runtimeCfgResult.Config)
 	if err != nil {
 		return returnCLIValidationError(cmd.ErrOrStderr(), err)
 	}
@@ -199,7 +203,7 @@ func doctorTargetEnvReport(findings []swarmEnvFinding) LocalPreflightReport {
 	return report.finalize()
 }
 
-func buildDoctorTargetReport(ctx context.Context, repo string, opts doctorOptions, cfg cliCommandConfig, swarmDir CLISwarmDirResolution, runtimeCfg *config.Config) (doctorTargetReport, error) {
+func buildDoctorTargetReport(ctx context.Context, repo string, cmd *cobra.Command, opts doctorOptions, cfg cliCommandConfig, swarmDir CLISwarmDirResolution, runtimeCfg *config.Config) (doctorTargetReport, error) {
 	api, err := resolveDoctorTargetAPI(repo, opts, cfg, swarmDir)
 	if err != nil {
 		return doctorTargetReport{}, err
@@ -214,6 +218,7 @@ func buildDoctorTargetReport(ctx context.Context, repo string, opts doctorOption
 	if err != nil {
 		return doctorTargetReport{}, err
 	}
+	projectOwner := doctorTargetProjectOwner(ctx, repo, cmd, opts, store)
 	data := resolveDoctorTargetData(repo, opts, localStateProject, runtimeCfg)
 	return doctorTargetReport{
 		Owner:    localTargetOwner,
@@ -231,12 +236,42 @@ func buildDoctorTargetReport(ctx context.Context, repo string, opts doctorOption
 			},
 			Registry: registryReport,
 		},
+		ProjectOwner:    projectOwner,
 		RuntimeIdentity: doctorTargetRuntimeIdentityFact(registryReport),
 		Store:           store,
 		Data:            data,
 		CommandClasses:  doctorTargetCommandClasses(),
 		SplitSiblings:   doctorTargetSplitSiblings(),
 	}, nil
+}
+
+func doctorTargetProjectOwner(ctx context.Context, repo string, cmd *cobra.Command, opts doctorOptions, selectedPath doctorTargetPath) doctorTargetPendingFact {
+	if selectedPath.Status == "legacy_conflict" {
+		return doctorTargetPendingFact{Status: "unavailable", Owner: selectedStoreOwnerReader, Detail: "Project owner: unavailable because the selected store conflicts with a retired path."}
+	}
+	if strings.TrimSpace(selectedPath.Path) != "" {
+		if _, err := os.Stat(selectedPath.Path); errors.Is(err, os.ErrNotExist) {
+			return doctorTargetPendingFact{Status: "empty", Owner: selectedStoreOwnerReader, Detail: "Project owner: no previous session is recorded."}
+		} else if err != nil {
+			return doctorTargetPendingFact{Status: "unavailable", Owner: selectedStoreOwnerReader, Detail: "Project owner: unavailable because the selected store cannot be inspected: " + err.Error()}
+		}
+	}
+	inspectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	selected, closeStore, err := openAuthorityInspectionStore(inspectCtx, repo, cmd, opts)
+	if err != nil {
+		return doctorTargetPendingFact{Status: "unavailable", Owner: selectedStoreOwnerReader, Detail: "Project owner: unavailable because the selected store cannot be inspected: " + err.Error()}
+	}
+	defer closeStore()
+	inspection, err := selected.InspectAuthority(inspectCtx)
+	if err != nil {
+		return doctorTargetPendingFact{Status: "unavailable", Owner: selectedStoreOwnerReader, Detail: "Project owner: unavailable because the selected store cannot be inspected: " + err.Error()}
+	}
+	status := string(inspection.Status)
+	if inspection.Status == runtimestartupownership.AuthorityInspectionValid {
+		status = string(inspection.State)
+	}
+	return doctorTargetPendingFact{Status: status, Owner: selectedStoreOwnerReader, Detail: authorityInspectionLine(inspection)}
 }
 
 func doctorTargetProjectContextFact(ctx context.Context, registry localContextRegistry, project doctorTargetProject) doctorTargetPendingFact {
@@ -694,6 +729,11 @@ func writeDoctorTargetText(out io.Writer, report doctorTargetReport) {
 	fmt.Fprintln(out, ")")
 	fmt.Fprintf(out, "target_reason: %s\n", report.API.Reason)
 	fmt.Fprintf(out, "project_context: %s (%s)\n", report.Context.ProjectScoped.Status, report.Context.ProjectScoped.Owner)
+	if strings.TrimSpace(report.ProjectOwner.Detail) != "" {
+		fmt.Fprintln(out, report.ProjectOwner.Detail)
+	} else {
+		fmt.Fprintln(out, "Project owner: unavailable.")
+	}
 	fmt.Fprintf(out, "selected_global_context: %s (%s)\n", report.Context.SelectedGlobal.Status, report.Context.SelectedGlobal.Owner)
 	fmt.Fprintf(out, "descriptor_registry: %s (%s", report.Context.Registry.Status, report.Context.Registry.Owner)
 	if len(report.Context.Registry.Entries) > 0 {

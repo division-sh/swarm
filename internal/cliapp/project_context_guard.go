@@ -63,5 +63,5 @@ func guardServeProjectContext(ctx context.Context, registry localContextRegistry
 		}
 		parts = append(parts, fmt.Sprintf("%s=%s", name, entry.Status))
 	}
-	return fmt.Errorf("project %s already has context descriptors (%s); refusing bare `swarm serve --dev` to avoid orphaning a runtime; run `swarm context prune` for stale entries or pass --context for an intentional second runtime", project.canonicalProjectRoot, strings.Join(parts, ", "))
+	return fmt.Errorf("project %s already has context descriptors (%s); refusing bare `swarm serve --dev` to avoid orphaning a runtime; stop the existing runtime or run `swarm context prune` after confirming every listed entry is stale", project.canonicalProjectRoot, strings.Join(parts, ", "))
 }

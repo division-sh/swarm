@@ -143,6 +143,17 @@ func testAuthorActivityRuntimeOptions(t testing.TB, opts runtimepkg.RuntimeOptio
 
 func installConformanceRuntimeStartupGrant(t testing.TB, ctx context.Context, selected any, rt *runtimepkg.Runtime) runtimestartupownership.ProcessCapability {
 	t.Helper()
+	capability, _ := installConformanceRuntimeStartupGeneration(t, ctx, selected, rt)
+	return capability
+}
+
+func installConformanceRuntimeStartupGeneration(
+	t testing.TB,
+	ctx context.Context,
+	selected any,
+	rt *runtimepkg.Runtime,
+) (runtimestartupownership.ProcessCapability, runtimestartupownership.GenerationGrant) {
+	t.Helper()
 	store, ok := selected.(runtimestartupownership.Store)
 	if !ok {
 		t.Fatalf("conformance selected store %T lacks process capability acquisition", selected)
@@ -222,7 +233,7 @@ func installConformanceRuntimeStartupGrant(t testing.TB, ctx context.Context, se
 		}
 	})
 	release = false
-	return capability
+	return capability, grant
 }
 
 type testAuthorActivityCatalogRegistrar interface {

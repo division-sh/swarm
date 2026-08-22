@@ -56,7 +56,7 @@ func TestServeProjectContextRegistrationWritesFinalDescriptor(t *testing.T) {
 	}
 }
 
-func TestServeProjectContextRegistrationGuardsBareDoubleServe(t *testing.T) {
+func TestServeDevLiveProjectContextRefusal(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	project := writeCLIAPIProjectFixture(t)
 	swarmDir := t.TempDir()
@@ -75,6 +75,9 @@ func TestServeProjectContextRegistrationGuardsBareDoubleServe(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "already has context descriptors") {
 		t.Fatalf("err = %q, want double-serve guard", err.Error())
+	}
+	if strings.Contains(err.Error(), "--context") {
+		t.Fatalf("same-project refusal advertised context as a store selector: %v", err)
 	}
 }
 

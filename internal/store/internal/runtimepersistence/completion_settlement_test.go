@@ -9,9 +9,12 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -19,6 +22,7 @@ import (
 type completionSettlementTestStore interface {
 	completionControllerTestStore
 	runtimeeffects.RecoveryStore
+	agentfixture.Store
 }
 
 type completionControllerTestStore interface {
@@ -33,6 +37,8 @@ func newCompletionControllerForTest(store completionControllerTestStore) *runtim
 
 type completionSettlementFixture struct {
 	store       completionSettlementTestStore
+	lifecycle   runtimemanager.AgentLifecyclePersistence
+	agentOwner  testing.TB
 	db          *sql.DB
 	sqlite      bool
 	authority   runtimeeffects.Authority
@@ -258,7 +264,8 @@ func proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t *testing.T, fixture
 	requireExternalAttemptState(t, fixture.db, fixture.sqlite, authorized.Attempt().AttemptID, runtimeeffects.StateAuthorized)
 	requireCompletionRecoveryRows(t, fixture, authorized.Attempt().AttemptID, 0, 0, 1)
 
-	setCompletionFixtureGeneration(t, fixture, 2)
+	initialGeneration := int(fixture.authority.Normal.Generation)
+	setCompletionFixtureGeneration(t, fixture, initialGeneration+1)
 	summary, err = fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now.Add(time.Second)))
 	if err == nil {
 		t.Fatal("reconcile stale prelaunch completion without a lifecycle drain succeeded")
@@ -272,7 +279,7 @@ func proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t *testing.T, fixture
 	requireExternalAttemptState(t, fixture.db, fixture.sqlite, authorized.Attempt().AttemptID, runtimeeffects.StateAuthorized)
 	requireCompletionRecoveryRows(t, fixture, authorized.Attempt().AttemptID, 0, 0, 1)
 
-	setCompletionFixtureGeneration(t, fixture, 1)
+	setCompletionFixtureGeneration(t, fixture, initialGeneration)
 	failure := runtimefailures.FromError(context.Canceled, "completion-test", "cleanup")
 	cleanup := completionSettlementForTest(t, authorized.Attempt().Authority.Target, fixture, "anthropic_api", "", "")
 	cleanup.ProviderHead = nil
@@ -293,7 +300,7 @@ func proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t *testing.T, fixture
 	if err := launched.MarkLaunched(ctx); err != nil {
 		t.Fatalf("mark completion launched: %v", err)
 	}
-	setCompletionFixtureGeneration(t, fixture, 2)
+	setCompletionFixtureGeneration(t, fixture, initialGeneration+1)
 	summary, err = fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now.Add(2*time.Second)))
 	if err == nil {
 		t.Fatal("reconcile stale launched completion without a lifecycle drain succeeded")
@@ -338,13 +345,22 @@ func newCompletionSettlementFixture(t *testing.T, store completionSettlementTest
 	if err != nil {
 		t.Fatalf("completion agent identity: %v", err)
 	}
+	if err := agentfixture.Upsert(t, ctx, store, runtimemanager.PersistedAgent{
+		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+			ExecutionMode: "live", ID: agentID, Identity: identity, Role: "worker", Type: "managed",
+			Model: "regular", LLMBackend: "claude_cli", ResolvedLLMBackend: "claude_cli",
+			Memory: agentmemory.Authored(true), FlowID: "global", FlowPath: flowInstance,
+		}),
+		Status: "active", StartedAt: now,
+	}); err != nil {
+		t.Fatalf("admit completion agent: %v", err)
+	}
+	lifecycle, found, err := store.LoadAgentLifecycleState(ctx, identity)
+	if err != nil || !found {
+		t.Fatalf("load admitted completion agent lifecycle: found=%v err=%v", found, err)
+	}
 	if sqlite {
 		requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(db), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
-		if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,role,model,llm_backend,memory_enabled,memory_source,status,lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,created_at,topology_authority_kind,topology_admission,execution_lifetime) VALUES (?,?,?,?,?,?,?,'worker','regular','claude_cli',1,'authored','active',1,1,'running',?,'static_declaration_plan',?,'durable_managed')`,
-			identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence,
-			identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath, now, testAgentTopologyJSON(t)); err != nil {
-			t.Fatalf("seed completion agent: %v", err)
-		}
 		if _, err := db.ExecContext(ctx, `INSERT INTO agent_sessions (session_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,memory_enabled,memory_source,conversation,turn_count,runtime_state,lease_holder,lease_expires_at,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,1,'authored','[]',0,?,?,?,'active',?,?)`,
 			sessionID, runID, identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource,
 			identityFields.RoutePresence, identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath,
@@ -353,11 +369,6 @@ func newCompletionSettlementFixture(t *testing.T, store completionSettlementTest
 		}
 	} else {
 		requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
-		if _, err := db.ExecContext(ctx, `INSERT INTO agents (agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,role,model,llm_backend,memory_enabled,memory_source,status,lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,created_at,topology_authority_kind,topology_admission,execution_lifetime) VALUES ($1,$2,$3,$4,$5,$6,$7,'worker','regular','claude_cli',TRUE,'authored','active',1,1,'running',$8,'static_declaration_plan',$9::jsonb,'durable_managed')`,
-			identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence,
-			identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath, now, testAgentTopologyJSON(t)); err != nil {
-			t.Fatalf("seed completion agent: %v", err)
-		}
 		if _, err := db.ExecContext(ctx, `INSERT INTO agent_sessions (session_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,memory_enabled,memory_source,conversation,turn_count,runtime_state,lease_holder,lease_expires_at,status,created_at,updated_at) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'authored','[]'::jsonb,0,$10::jsonb,$11,$12,'active',$13,$13)`,
 			sessionID, runID, identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource,
 			identityFields.RoutePresence, identityFields.FlowScopeKey, identityFields.FlowInstanceID, identityFields.FlowInstancePath,
@@ -365,7 +376,7 @@ func newCompletionSettlementFixture(t *testing.T, store completionSettlementTest
 			t.Fatalf("seed completion session: %v", err)
 		}
 	}
-	token := runtimeeffects.LifecycleToken{RuntimeEpoch: 1, Identity: identity, AgentID: agentID, Generation: 1}
+	token := runtimeeffects.LifecycleToken{RuntimeEpoch: lifecycle.RuntimeEpoch, Identity: identity, AgentID: agentID, Generation: lifecycle.Generation}
 	authority := runtimeeffects.NormalAgentAuthority(token, leaseHolder, now.Add(10*time.Minute))
 	authority.Target = runtimeeffects.UsageTarget{
 		Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), AgentID: agentID, AgentIdentity: identity,
@@ -375,7 +386,7 @@ func newCompletionSettlementFixture(t *testing.T, store completionSettlementTest
 	origin := claimCompletionOriginForTest(t, ctx, store, authority, now)
 	completionCtx := runtimedelivery.WithClaim(runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, authority), newCompletionControllerForTest(store)), origin)
 	return completionSettlementFixture{
-		store: store, db: db, sqlite: sqlite, authority: authority, origin: origin, context: completionCtx,
+		store: store, lifecycle: agentfixture.Lifecycle(t, store), agentOwner: t, db: db, sqlite: sqlite, authority: authority, origin: origin, context: completionCtx,
 		sessionID: sessionID, agentID: agentID, leaseHolder: leaseHolder,
 	}
 }

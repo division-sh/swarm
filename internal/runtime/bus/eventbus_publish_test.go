@@ -1053,7 +1053,7 @@ func assertSortedStringsEqual(t *testing.T, got, want []string) {
 func seedActiveRuntimeBusAgent(t *testing.T, ctx context.Context, pg *store.PostgresStore, agentID string) runtimeagentidentity.Identity {
 	t.Helper()
 	identity := runtimebustest.Identity(t, agentID, "")
-	if err := storetest.UpsertAgentFixture(ctx, pg, runtimemanager.PersistedAgent{
+	if err := storetest.UpsertAgentFixture(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config: busTestAgentConfig(t, runtimeactors.AgentConfig{
 			ID:                 agentID,
 			Identity:           identity,
@@ -2684,7 +2684,7 @@ func TestEventBusPublishDirect_StampsBundleSourceFactOnRunRow(t *testing.T) {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	agentIdentity := runtimebustest.Identity(t, "agent-a", "bundle-source-test")
-	if err := storetest.UpsertAgentFixture(context.Background(), pg, runtimemanager.PersistedAgent{
+	if err := storetest.UpsertAgentFixture(t, context.Background(), pg, runtimemanager.PersistedAgent{
 		Config: busTestAgentConfig(t, runtimeactors.AgentConfig{
 			ID: "agent-a", Identity: agentIdentity, FlowID: "bundle-source-test", FlowPath: "bundle-source-test",
 			Role: "worker", Model: "regular", Type: "stub", ExecutionMode: "live", ResolvedLLMBackend: "anthropic", Config: []byte(`{}`),

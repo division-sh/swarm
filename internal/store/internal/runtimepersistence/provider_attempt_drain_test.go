@@ -10,6 +10,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -109,7 +111,7 @@ func TestProviderAttemptDrainLaunchSupersessionRaceParity(t *testing.T) {
 		go func() {
 			ready.Done()
 			<-start
-			result, err := commitProviderDrainTransition(fixture, "teardown", runtimemanager.AgentLifecycleTerminated)
+			result, err := commitProviderDrainTransition(t, fixture, "teardown", runtimemanager.AgentLifecycleTerminated)
 			transitionResult <- struct {
 				result runtimemanager.AgentLifecycleTransitionResult
 				err    error
@@ -175,7 +177,7 @@ func TestProviderAttemptDrainLifecycleTransitionRollbackParity(t *testing.T) {
 					}
 				}
 				installProviderDrainFailureBoundary(t, fixture, candidate.boundary)
-				if _, err := commitProviderDrainTransition(fixture, "teardown", runtimemanager.AgentLifecycleTerminated); err == nil {
+				if _, err := commitProviderDrainTransition(t, fixture, "teardown", runtimemanager.AgentLifecycleTerminated); err == nil {
 					t.Fatalf("%s transition did not roll back", candidate.name)
 				}
 				requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, candidate.wantState)
@@ -623,12 +625,8 @@ func TestProviderAttemptDrainRejectsTransitionWhilePendingParity(t *testing.T) {
 		ctx := providerDrainContext(t, fixture, "pending-drain-transition-fence")
 		handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "pending-drain-transition-fence")
 		transition := supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleTerminated)
-		selected, ok := fixture.store.(agentfixture.Store)
-		if !ok {
-			t.Fatalf("completion store %T does not support lifecycle transitions", fixture.store)
-		}
 		for _, operation := range []string{"restart", "reconfigure"} {
-			_, err := agentfixture.Commit(testAuthorActivityContext(), selected, runtimemanager.AgentLifecycleTransition{
+			_, err := fixture.lifecycle.CommitAgentLifecycleTransition(testAuthorActivityContext(), runtimemanager.AgentLifecycleTransition{
 				OperationID: uuid.NewString(), OperationKind: operation, RequestHash: "pending-drain-" + operation,
 				Identity: fixture.authority.Normal.Identity, AgentID: fixture.agentID, Trigger: "provider_drain_test",
 				ExpectedEpoch: fixture.authority.Normal.RuntimeEpoch, ExpectedGeneration: transition.Generation,
@@ -763,23 +761,23 @@ func supersedeProviderDrainFixture(t *testing.T, fixture completionSettlementFix
 
 func supersedeProviderDrainFixtureWithKind(t *testing.T, fixture completionSettlementFixture, kind string, phase runtimemanager.AgentLifecyclePhase) runtimemanager.AgentLifecycleTransitionResult {
 	t.Helper()
-	result, err := commitProviderDrainTransition(fixture, kind, phase)
+	result, err := commitProviderDrainTransition(t, fixture, kind, phase)
 	if err != nil {
 		t.Fatalf("supersede provider attempt (%s): %v", kind, err)
 	}
 	return result
 }
 
-func commitProviderDrainTransition(fixture completionSettlementFixture, kind string, phase runtimemanager.AgentLifecyclePhase) (runtimemanager.AgentLifecycleTransitionResult, error) {
-	selected, ok := fixture.store.(agentfixture.Store)
-	if !ok {
-		return runtimemanager.AgentLifecycleTransitionResult{}, fmt.Errorf("completion store %T does not support lifecycle transitions", fixture.store)
+func commitProviderDrainTransition(t testing.TB, fixture completionSettlementFixture, kind string, phase runtimemanager.AgentLifecyclePhase) (runtimemanager.AgentLifecycleTransitionResult, error) {
+	t.Helper()
+	if fixture.lifecycle == nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, fmt.Errorf("completion store %T has no lifecycle owner", fixture.store)
 	}
 	runMode := runtimemanager.AgentRunModeStopped
 	if phase == runtimemanager.AgentLifecycleRunning {
 		runMode = runtimemanager.AgentRunModeStandard
 	}
-	return agentfixture.Commit(testAuthorActivityContext(), selected, runtimemanager.AgentLifecycleTransition{
+	return fixture.lifecycle.CommitAgentLifecycleTransition(testAuthorActivityContext(), runtimemanager.AgentLifecycleTransition{
 		OperationID: uuid.NewString(), OperationKind: kind, RequestHash: "provider-drain-" + kind,
 		Identity: fixture.authority.Normal.Identity, AgentID: fixture.agentID, Trigger: "provider_drain_test",
 		ExpectedEpoch: fixture.authority.Normal.RuntimeEpoch, ExpectedGeneration: fixture.authority.Normal.Generation,
@@ -1056,12 +1054,24 @@ func newProviderDrainSiblingFixture(t *testing.T, fixture completionSettlementFi
 		t.Fatalf("same-slug sibling identity: %v", err)
 	}
 	now := time.Now().UTC()
+	if err := agentfixture.Upsert(fixture.agentOwner, testAuthorActivityContext(), fixture.store, runtimemanager.PersistedAgent{
+		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+			ExecutionMode: "live", ID: fields.AgentID, Identity: sibling.authority.Normal.Identity,
+			Role: "worker", Type: "managed", Model: "regular", LLMBackend: "claude_cli",
+			ResolvedLLMBackend: "claude_cli", Memory: agentmemory.Authored(true), FlowPath: fields.FlowInstancePath,
+		}),
+		Status: "active", StartedAt: now,
+	}); err != nil {
+		t.Fatalf("admit provider-drain sibling agent: %v", err)
+	}
+	lifecycle, found, err := fixture.store.LoadAgentLifecycleState(testAuthorActivityContext(), sibling.authority.Normal.Identity)
+	if err != nil || !found {
+		t.Fatalf("load provider-drain sibling lifecycle: found=%v err=%v", found, err)
+	}
+	sibling.authority.Normal.RuntimeEpoch = lifecycle.RuntimeEpoch
+	sibling.authority.Normal.Generation = lifecycle.Generation
+	sibling.authority.FenceGeneration = lifecycle.Generation
 	if fixture.sqlite {
-		if _, err := fixture.db.Exec(`INSERT INTO agents (agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,role,model,llm_backend,memory_enabled,memory_source,status,lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,created_at,topology_authority_kind,topology_admission,execution_lifetime) VALUES (?,?,?,?,?,?,?,'worker','regular','claude_cli',1,'authored','active',1,1,'running',?,'static_declaration_plan',?,'durable_managed')`,
-			fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
-			fields.FlowInstanceID, fields.FlowInstancePath, now, testAgentTopologyJSON(t)); err != nil {
-			t.Fatalf("seed SQLite provider-drain sibling agent: %v", err)
-		}
 		if _, err := fixture.db.Exec(`INSERT INTO agent_sessions (session_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,memory_enabled,memory_source,conversation,turn_count,runtime_state,lease_holder,lease_expires_at,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,1,'authored','[]',0,?,?,?,'active',?,?)`,
 			sibling.sessionID, sibling.authority.Target.RunID, fields.AgentID, fields.NameOwner, fields.NameSource,
 			fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
@@ -1069,11 +1079,6 @@ func newProviderDrainSiblingFixture(t *testing.T, fixture completionSettlementFi
 			t.Fatalf("seed SQLite provider-drain sibling session: %v", err)
 		}
 	} else {
-		if _, err := fixture.db.Exec(`INSERT INTO agents (agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,role,model,llm_backend,memory_enabled,memory_source,status,lifecycle_runtime_epoch,lifecycle_generation,lifecycle_phase,created_at,topology_authority_kind,topology_admission,execution_lifetime) VALUES ($1,$2,$3,$4,$5,$6,$7,'worker','regular','claude_cli',TRUE,'authored','active',1,1,'running',$8,'static_declaration_plan',$9::jsonb,'durable_managed')`,
-			fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
-			fields.FlowInstanceID, fields.FlowInstancePath, now, testAgentTopologyJSON(t)); err != nil {
-			t.Fatalf("seed PostgreSQL provider-drain sibling agent: %v", err)
-		}
 		if _, err := fixture.db.Exec(`INSERT INTO agent_sessions (session_id,run_id,agent_id,agent_name_owner,agent_name_source,agent_route_presence,flow_scope_key,flow_instance_id,flow_instance,memory_enabled,memory_source,conversation,turn_count,runtime_state,lease_holder,lease_expires_at,status,created_at,updated_at) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'authored','[]'::jsonb,0,$10::jsonb,$11,$12,'active',$13,$13)`,
 			sibling.sessionID, sibling.authority.Target.RunID, fields.AgentID, fields.NameOwner, fields.NameSource,
 			fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,

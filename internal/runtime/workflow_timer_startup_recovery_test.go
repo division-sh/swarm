@@ -383,7 +383,7 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 			restarted, restartedProcess := newRuntime(flakyManagerStore)
 			capability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, restarted)
 			err = restarted.Start(ctx)
-			if err == nil || !strings.Contains(err.Error(), "reconcile static declaration topology") {
+			if err == nil || !strings.Contains(err.Error(), "prepare static declaration topology") {
 				shutdown("unexpected successful restart", restarted, restartedProcess)
 				t.Fatalf("Start error = %v, want topology reconciliation failure before workflow-timer restoration", err)
 			}

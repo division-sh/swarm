@@ -257,8 +257,19 @@ func selectedContractAgentRouteAdmission(t *testing.T, agentID string, subscript
 }
 
 type selectedContractSelfReleaseScopeProbe struct {
-	want runtimeauthoractivity.Scope
-	seen chan runtimeauthoractivity.Scope
+	want    runtimeauthoractivity.Scope
+	seen    chan runtimeauthoractivity.Scope
+	binding runtimemanager.ProcessExecutionBinding
+}
+
+func (p *selectedContractSelfReleaseScopeProbe) ProcessExecutionBinding() (runtimemanager.ProcessExecutionBinding, error) {
+	if p == nil {
+		return runtimemanager.ProcessExecutionBinding{}, fmt.Errorf("selected-contract self-release probe is required")
+	}
+	if err := p.binding.Validate(); err != nil {
+		return runtimemanager.ProcessExecutionBinding{}, err
+	}
+	return p.binding, nil
 }
 
 func (p *selectedContractSelfReleaseScopeProbe) CommitAgentLifecycleTransition(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
@@ -279,6 +290,7 @@ func (p *selectedContractSelfReleaseScopeProbe) CommitAgentLifecycleTransition(c
 		OperationID:        req.OperationID,
 		TransitionID:       req.OperationID + "-transition",
 		AgentID:            req.AgentID,
+		Identity:           req.Identity,
 		PreviousEpoch:      req.ExpectedEpoch,
 		RuntimeEpoch:       req.TargetEpoch,
 		PreviousGeneration: req.ExpectedGeneration,
@@ -287,6 +299,8 @@ func (p *selectedContractSelfReleaseScopeProbe) CommitAgentLifecycleTransition(c
 		Phase:              req.TargetPhase,
 		ConfigRevision:     req.ConfigRevision,
 		RunMode:            req.RunMode,
+		Topology:           req.Topology,
+		ProcessBinding:     p.binding,
 	}, nil
 }
 
@@ -435,7 +449,20 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkSc
 	if err != nil {
 		t.Fatalf("NewEventBus: %v", err)
 	}
-	probe := &selectedContractSelfReleaseScopeProbe{want: wantScope, seen: make(chan runtimeauthoractivity.Scope, 1)}
+	probe := &selectedContractSelfReleaseScopeProbe{
+		want: wantScope,
+		seen: make(chan runtimeauthoractivity.Scope, 1),
+		binding: runtimemanager.ProcessExecutionBinding{
+			ProcessAuthorityID: "00000000-0000-0000-0000-000000000314",
+			ProcessOwnerID:     "selected-contract-self-release-test",
+			ProcessBootID:      "00000000-0000-0000-0000-000000000315",
+			GenerationGrantID:  "00000000-0000-0000-0000-000000000316",
+			BundleHash:         wantScope.BundleHash,
+			BundleSource:       "ephemeral",
+			RuntimeInstanceID:  wantScope.RuntimeInstanceID,
+			RuntimeGeneration:  1,
+		},
+	}
 
 	runtime, _, err := startSelectedContractAgentRuntime(ctx, publishSelectedContractForkEventsRequest{
 		Owner: selectedContractExecutionOwnerForTest(t, selected),
@@ -443,7 +470,7 @@ func TestStartSelectedContractAgentRuntimeDetachesCancellationAndPreservesForkSc
 			Records: []runtimemanager.PersistedAgent{{Config: selectedContractTestAgentConfig(t, runtimeactors.AgentConfig{
 				ID: "fork-agent", Identity: selectedContractTestRootAgentIdentity(t, "fork-agent"),
 				Role: "worker", ExecutionMode: "live", Subscriptions: []string{"item.received"},
-			}), Topology: selectedContractTestDeclarationTopology(t)}},
+			}), Topology: selectedContractTestDeclarationTopology(t), ProcessBinding: probe.binding}},
 			Options: SelectedContractAgentRuntimeOptions{
 				ExecutionPosture: executionposture.Live,
 				AgentFactory: func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {

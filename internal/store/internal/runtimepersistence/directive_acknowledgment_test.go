@@ -495,7 +495,7 @@ func newDirectiveAmbiguityHarness(t *testing.T, backend directiveAmbiguityBacken
 		}),
 		Status: "active",
 	}
-	if err := agentfixture.Upsert(testAuthorActivityContext(), backend.store, rec); err != nil {
+	if err := agentfixture.Upsert(t, testAuthorActivityContext(), backend.store, rec); err != nil {
 		t.Fatalf("persist agent: %v", err)
 	}
 	rec.Topology, err = runtimeagenttopology.NewEphemeralAdmission(uuid.NewString(), "runtime_shard")

@@ -68,15 +68,23 @@ func TestFreshAgentsSchemaRejectsEnabledPlatformDefaultMemory(t *testing.T) {
 			name: "postgres",
 			exec: func() error {
 				_, err := postgresDB.ExecContext(ctx, `
-					INSERT INTO agents (
+						INSERT INTO agents (
 						agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 						flow_scope_key, flow_instance_id, flow_instance,
-						role, model, memory_enabled, memory_source,
-						topology_authority_kind, topology_admission, execution_lifetime
-					)
-					VALUES ('invalid-memory-postgres', 'schema-negative-test', 'runtime_created', 'present',
-						'review', 'one', 'review/one', 'reviewer', 'regular', TRUE, 'platform_default',
-						'static_declaration_plan', $1::jsonb, 'durable_managed')
+							role, model, memory_enabled, memory_source,
+							lifecycle_process_authority_id, lifecycle_process_owner_id,
+							lifecycle_process_boot_id, lifecycle_generation_grant_id,
+							lifecycle_bundle_hash, lifecycle_bundle_source,
+							lifecycle_runtime_instance_id, lifecycle_runtime_generation,
+							topology_authority_kind, topology_admission, execution_lifetime
+						)
+						VALUES ('invalid-memory-postgres', 'schema-negative-test', 'runtime_created', 'present',
+							'review', 'one', 'review/one', 'reviewer', 'regular', TRUE, 'platform_default',
+							'00000000-0000-4000-8000-000000000001'::uuid, 'schema-negative-test',
+							'00000000-0000-4000-8000-000000000002'::uuid, '00000000-0000-4000-8000-000000000003'::uuid,
+							'bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'ephemeral',
+							'00000000-0000-4000-8000-000000000004'::uuid, 1,
+							'static_declaration_plan', $1::jsonb, 'durable_managed')
 				`, testAgentTopologyJSON(t))
 				return err
 			},
@@ -88,12 +96,20 @@ func TestFreshAgentsSchemaRejectsEnabledPlatformDefaultMemory(t *testing.T) {
 					INSERT INTO agents (
 						agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 						flow_scope_key, flow_instance_id, flow_instance,
-						role, model, memory_enabled, memory_source,
-						topology_authority_kind, topology_admission, execution_lifetime
-					)
-					VALUES ('invalid-memory-sqlite', 'schema-negative-test', 'runtime_created', 'present',
-						'review', 'one', 'review/one', 'reviewer', 'regular', 1, 'platform_default',
-						'static_declaration_plan', ?, 'durable_managed')
+							role, model, memory_enabled, memory_source,
+							lifecycle_process_authority_id, lifecycle_process_owner_id,
+							lifecycle_process_boot_id, lifecycle_generation_grant_id,
+							lifecycle_bundle_hash, lifecycle_bundle_source,
+							lifecycle_runtime_instance_id, lifecycle_runtime_generation,
+							topology_authority_kind, topology_admission, execution_lifetime
+						)
+						VALUES ('invalid-memory-sqlite', 'schema-negative-test', 'runtime_created', 'present',
+							'review', 'one', 'review/one', 'reviewer', 'regular', 1, 'platform_default',
+							'00000000-0000-4000-8000-000000000001', 'schema-negative-test',
+							'00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000003',
+							'bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'ephemeral',
+							'00000000-0000-4000-8000-000000000004', 1,
+							'static_declaration_plan', ?, 'durable_managed')
 				`, testAgentTopologyJSON(t))
 				return err
 			},
@@ -160,12 +176,20 @@ func TestManagerStore_LoadAgents_FailsClosedOnMalformedRuntimeDescriptor(t *test
 					role, model, llm_backend, memory_enabled, memory_source,
 					parent_agent_id, entity_id, config, subscriptions, emit_events, tools, permissions,
 					runtime_descriptor, status,
+					lifecycle_process_authority_id, lifecycle_process_owner_id,
+					lifecycle_process_boot_id, lifecycle_generation_grant_id,
+					lifecycle_bundle_hash, lifecycle_bundle_source,
+					lifecycle_runtime_instance_id, lifecycle_runtime_generation,
 					topology_authority_kind, topology_admission, execution_lifetime
 				) VALUES (
 					$1, $2, $3, $4, $5, $6, $7,
 					'reviewer', 'regular', 'anthropic', FALSE, 'platform_default',
 					NULL, NULL, '{}'::jsonb, '["review.ready"]'::jsonb, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
 					$8::jsonb, 'active',
+					'00000000-0000-4000-8000-000000000001'::uuid, 'runtime-descriptor-test',
+					'00000000-0000-4000-8000-000000000002'::uuid, '00000000-0000-4000-8000-000000000003'::uuid,
+					'bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'ephemeral',
+					'00000000-0000-4000-8000-000000000004'::uuid, 1,
 					'static_declaration_plan', $9::jsonb, 'durable_managed'
 				)
 			`, identityFields.AgentID, identityFields.NameOwner, identityFields.NameSource, identityFields.RoutePresence,
