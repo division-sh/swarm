@@ -33,6 +33,11 @@ type lifecycleSourceSetRebindStore interface {
 	runtimemanager.AgentLifecycleStateReader
 }
 
+type lifecycleCensusDriftStore interface {
+	lifecycleSourceSetRebindStore
+	runtimestartupownership.Store
+}
+
 func TestAgentLifecycleSourceSetRebindParity(t *testing.T) {
 	t.Run("sqlite", func(t *testing.T) {
 		proveAgentLifecycleSourceSetRebind(t, newBootstrappedSQLiteRuntimeStoreForTest(t))
@@ -51,6 +56,98 @@ func TestAgentLifecycleProcessBindingReadbackParity(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
 		proveAgentLifecycleProcessBindingReadback(t, admitTestPostgresStore(t, db))
 	})
+}
+
+func TestAgentLifecycleCensusRejectsCanonicalAdmissionDriftParity(t *testing.T) {
+	for _, backend := range []string{"postgres", "sqlite"} {
+		for _, drift := range []string{"json execution lifetime", "canonical authority kind"} {
+			t.Run(backend+"/"+drift, func(t *testing.T) {
+				ctx := testAuthorActivityContext()
+				var store lifecycleCensusDriftStore
+				var db *sql.DB
+				postgres := backend == "postgres"
+				if postgres {
+					_, db, _ = testutil.StartPostgres(t)
+					store = admitTestPostgresStore(t, db)
+				} else {
+					selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
+					store = selected
+					db = selected.backend.ConstructionHandle()
+				}
+				identity := testAgentIdentity(t, "census-drift-agent", "")
+				seedTestAgentRow(t, ctx, db, postgres, identity, "active")
+				fields := testAgentIdentityStorageFields(t, identity)
+
+				switch drift {
+				case "json execution lifetime":
+					admission := testAgentTopologyAdmission(t)
+					admission.Lifetime = runtimeagenttopology.LifetimeEphemeral
+					raw, err := canonicaljson.Bytes(admission)
+					if err != nil {
+						t.Fatalf("encode drifted topology admission: %v", err)
+					}
+					if postgres {
+						_, err = db.ExecContext(ctx, `UPDATE agents SET topology_admission=$1::jsonb WHERE agent_id=$2`, string(raw), fields.AgentID)
+					} else {
+						_, err = db.ExecContext(ctx, `UPDATE agents SET topology_admission=? WHERE agent_id=?`, string(raw), fields.AgentID)
+					}
+					if err != nil {
+						t.Fatalf("persist execution-lifetime drift: %v", err)
+					}
+				case "canonical authority kind":
+					if _, err := db.ExecContext(ctx, `UPDATE agents SET topology_authority_kind='flow_readiness_plan' WHERE agent_id=`+map[bool]string{true: "$1", false: "?"}[postgres], fields.AgentID); err != nil {
+						t.Fatalf("persist authority-kind drift: %v", err)
+					}
+				}
+
+				var predecessorBinding string
+				bindingQuery := `SELECT lifecycle_process_authority_id FROM agents WHERE agent_id=?`
+				if postgres {
+					bindingQuery = `SELECT lifecycle_process_authority_id::text FROM agents WHERE agent_id=$1`
+				}
+				if err := db.QueryRowContext(ctx, bindingQuery, fields.AgentID).Scan(&predecessorBinding); err != nil {
+					t.Fatalf("read predecessor lifecycle binding: %v", err)
+				}
+
+				request := testStartupAcquireRequest("census-drift-successor")
+				capability, err := store.AcquireProcessCapability(ctx, request)
+				if err != nil {
+					t.Fatalf("acquire census-drift capability: %v", err)
+				}
+				t.Cleanup(func() { _ = capability.Release(context.Background()) })
+				plan, err := runtimeagenttopology.NewSourceSetPlan([]runtimeagenttopology.SourceCoordinate{{
+					BundleHash: testAgentTopologyBundleHash, BundleSource: "ephemeral",
+				}}, nil)
+				if err != nil {
+					t.Fatalf("construct census-drift source set: %v", err)
+				}
+				if _, err := capability.InstallCompleteSourceSet(ctx, runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}); err != nil {
+					t.Fatalf("install census-drift source set: %v", err)
+				}
+				grant, err := capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+					BundleHash: testAgentTopologyBundleHash, BundleSource: "ephemeral",
+					RuntimeInstanceID: request.RuntimeInstanceID, RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
+				})
+				if err != nil {
+					t.Fatalf("issue census-drift successor grant: %v", err)
+				}
+				manager := runtimemanager.NewAgentManagerWithOptions(nil, nil, runtimemanager.AgentManagerOptions{
+					LifecycleStore: grant, ReceiverExecution: eventreceiver.NormalExecution(),
+					PersistenceRoles: runtimemanager.PersistenceRoles{LifecycleCensus: store, LifecycleState: store},
+				}, store)
+				if err := manager.RebindLifecycleExecutionForStartup(ctx); err == nil || !strings.Contains(err.Error(), "differs from topology admission") {
+					t.Fatalf("startup reconciliation error = %v, want canonical/admission drift refusal", err)
+				}
+				var afterBinding string
+				if err := db.QueryRowContext(ctx, bindingQuery, fields.AgentID).Scan(&afterBinding); err != nil {
+					t.Fatalf("read lifecycle binding after failed census: %v", err)
+				}
+				if afterBinding != predecessorBinding {
+					t.Fatalf("failed census rebound predecessor cell: before=%q after=%q", predecessorBinding, afterBinding)
+				}
+			})
+		}
+	}
 }
 
 func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSourceSetRebindStore) {

@@ -14289,7 +14289,8 @@ platform_tables:
         the canonical acquisition fields and rejects evidence whose backend differs from the
         selected adapter. A crash takeover atomically supersedes the exact active predecessor, retires that predecessor's
         new-work grants, and appends its successor after backend-exclusive possession has already
-        been proved. Runtime generations consume revocable grants and cannot acquire, release,
+        been proved. Operator authority repair atomically retires every current nonterminal new-work grant before
+        recording completion, while delivery continuations and provider drains remain unchanged. Runtime generations consume revocable grants and cannot acquire, release,
         copy, infer, or replace this authority.
       possession_loss_contract:
         operation_error_recheck: >-
@@ -14342,7 +14343,8 @@ platform_tables:
         Immutable operator repair journal for corrupt process-authority evidence. Repair first
         proves exclusive selected-store possession, refuses live holders and unprovable SQLite
         filesystems, verifies the exact findings digest, and appends a terminal monotonic repair
-        authority. It never mutates flows, runs, events, topology, continuations, drains, or user
+        authority while atomically retiring every current nonterminal runtime-generation new-work grant.
+        It never mutates flows, runs, events, topology, continuations, drains, or user
         data. This table is not a serve takeover or compatibility surface.
       ddl: |
         CREATE TABLE runtime_startup_authority_repairs (
@@ -34542,14 +34544,21 @@ agent_topology_authority:
       translated into ownership_unprovable. PostgreSQL arms retained-session backend cancellation before
       transaction startup and uses a caller-cancellable startup context, so cancellation cannot miss or
       indefinitely strand BEGIN. A successfully started transaction is detached from the caller and remains
-      owned by the retained session until synchronous commit or rollback settlement.
+      owned by the retained session until synchronous commit or rollback settlement. Retained-session release
+      is terminal only after the durable release and backend-possession release both succeed. If release fails,
+      one independent proof bounded by the capability's configured monitor deadline decides the outcome: exact
+      current possession keeps the same capability live and re-arms its monitor while already committed grant
+      retirements remain retired; failed or unprovable possession terminalizes as ownership_unprovable. A release
+      error can never publish released.
     lifecycle_reconciliation: >-
       Every durable static and flow-readiness lifecycle cell carries the exact process authority, owner, boot,
       generation grant, bundle source coordinate, runtime instance, and runtime generation allowed to execute it.
       After takeover, process_takeover advances and rebinds every predecessor-bound cell before any runtime context
       hydrates. Reconciliation consumes a complete durable lifecycle-cell census owned by lifecycle persistence;
       execution-hydration projections and status filters cannot define that census, so terminated cells remain in
-      scope while ephemeral cells remain excluded. Source-set replacement uses source_set_rebind for survivors and one atomic source_set_retire for a
+      scope while ephemeral cells remain excluded. The census enumerates canonical persisted lifecycle rows rather
+      than filtering duplicated admission JSON, reads both topology_authority_kind and execution_lifetime, and fails
+      closed unless each exactly equals the decoded topology admission. Source-set replacement uses source_set_rebind for survivors and one atomic source_set_retire for a
       removed source cell whose execution grant changes at terminalization. A complete source-set rebind publishes
       each survivor's topology and process binding together under the lifecycle coordinator only after every durable
       rebind commits; a later commit failure leaves every process-local survivor projection unchanged. Reconciliation
@@ -34572,7 +34581,8 @@ agent_topology_authority:
         Inspection reads exact durable evidence without inferring liveness. Repair is a separate journaled operator
         operation, never a serve flag. It requires exclusive retained backend possession plus the exact confirmed
         findings digest, refuses a proven live holder and unprovable SQLite identity, appends one monotonic terminal
-        authority repair and immutable repair journal atomically, and cannot mutate source sets, lifecycle topology,
+        authority repair and immutable repair journal atomically, and retires every current nonterminal runtime
+        generation new-work grant in that same transaction without relying on corrupt authority identity. It cannot mutate source sets, lifecycle topology,
         deliveries, drains, flows, runs, events, or user data.
         Repair lineage is derived from the trusted repair operation and findings digest, never from malformed
         authority, boot, runtime, predecessor, successor, or snapshot fields; the exact untrusted row survives only
