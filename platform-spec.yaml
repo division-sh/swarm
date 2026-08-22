@@ -9876,13 +9876,15 @@ tool_model:
       admitted_projection: >
         `internal/packadmission` is the sole body-admission orchestrator for an exact EffectivePackInventory. It parses and
         validates every trigger, connector, and channel body and compiles their cross-kind channel satisfaction plans into
-        one bundle-owned admitted projection. Inventory readback, hashing, bundle build and registration, verify, describe,
+        one bundle-owned admitted projection. Pack import path resolution, inventory readback, hashing, bundle build and
+        registration, verify, describe,
         describe routes, doctor schema inventory, secrets requirement discovery, serve, effective-source compilation,
         replacement, recovery, and fork must receive that projection from the exact configured base before publishing,
         executing, or reporting the inventory. CLI workflow-module consumers must resolve the selected base through runtime
         configuration; a nil or default-base selector is not an authoritative fallback. Downstream consumers retrieve the
         stored projection and must not independently reparse an inventory body. Credential binding and deployment activation
-        remain later, different semantic concepts.
+        remain later, different semantic concepts. Pack import is non-executing packaging: omitted execution posture cannot
+        block it, while an explicitly authored invalid posture still fails closed.
       inventory_immutability: >
         Platform and effective inventories own immutable envelope, envelope-body, and manifest-body snapshots. Every lookup,
         enumeration, and envelope accessor returns defensive copies of all nested slices, maps, and byte collections. A

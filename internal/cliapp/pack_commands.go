@@ -136,7 +136,11 @@ func newImportPackCommand(repo string, root rootCommandOptions) *cobra.Command {
 			if err := opts.output.validate(); err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
-			paths, err := ResolveCLIContractPlatformSpecPaths(opts.repoRoot, CLIContractPlatformSpecPathOptions{ContractsPath: opts.contractsPath, PlatformSpecPath: opts.platformSpecPath, ConfigPath: rootConfigPath(opts.root)})
+			cfgResult, err := loadPackInventoryConfig(opts.repoRoot, rootConfigPath(opts.root))
+			if err != nil {
+				return returnCLIValidationError(cmd.ErrOrStderr(), err)
+			}
+			paths, err := resolvePackInventoryPaths(opts, cfgResult)
 			if err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
