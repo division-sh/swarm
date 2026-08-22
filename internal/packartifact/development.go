@@ -37,12 +37,8 @@ func LoadDevelopmentPlatformPackInventory(runningPlatformVersion string, dirs []
 			return nil, fmt.Errorf("resolve development platform pack %q: %w", dir, err)
 		}
 		dir = absoluteDir
-		rootInfo, err := os.Lstat(dir)
-		if err != nil {
-			return nil, fmt.Errorf("inspect development platform pack %q: %w", dir, err)
-		}
-		if rootInfo.Mode()&os.ModeSymlink != 0 || !rootInfo.IsDir() {
-			return nil, fmt.Errorf("development platform pack %q must be a real directory", dir)
+		if err := requireRealDevelopmentPackPath(dir); err != nil {
+			return nil, err
 		}
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -116,6 +112,29 @@ func LoadDevelopmentPlatformPackInventory(runningPlatformVersion string, dirs []
 	inventory.embeddedImportOrigins = cloneImportOrigins(embedded.embeddedImportOrigins)
 	inventory.sourceDirectories = append([]string(nil), resolvedDirs...)
 	return inventory, nil
+}
+
+func requireRealDevelopmentPackPath(target string) error {
+	root := filepath.VolumeName(target) + string(filepath.Separator)
+	relative, err := filepath.Rel(root, target)
+	if err != nil || relative == "." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || relative == ".." {
+		return fmt.Errorf("development platform pack %q must be an absolute real directory", target)
+	}
+	current := root
+	for _, segment := range strings.Split(relative, string(filepath.Separator)) {
+		if segment == "" || segment == "." {
+			continue
+		}
+		current = filepath.Join(current, segment)
+		info, statErr := os.Lstat(current)
+		if statErr != nil {
+			return fmt.Errorf("inspect development platform pack %q component %q: %w", target, current, statErr)
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			return fmt.Errorf("development platform pack %q must be a real directory with no symlinked ancestors", target)
+		}
+	}
+	return nil
 }
 
 func cloneImportOrigins(origins map[string]ImportOrigin) map[string]ImportOrigin {

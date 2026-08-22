@@ -151,15 +151,32 @@ func TestDevelopmentOverrideRejectsSymlinkedConfiguredRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dirs := materializeDevelopmentInventory(t, embedded, nil)
-	target := dirs[0]
-	symlink := filepath.Join(t.TempDir(), "pack-root")
-	if err := os.Symlink(target, symlink); err != nil {
-		t.Fatal(err)
-	}
-	dirs[0] = symlink
-	if _, err := LoadDevelopmentPlatformPackInventory(testPlatformVersion, dirs, embedded); err == nil || !strings.Contains(err.Error(), "must be a real directory") {
-		t.Fatalf("symlinked development root error = %v", err)
+	for _, tc := range []struct {
+		name       string
+		selectPath func(t *testing.T, target string) string
+	}{
+		{name: "direct root", selectPath: func(t *testing.T, target string) string {
+			symlink := filepath.Join(t.TempDir(), "pack-root")
+			if err := os.Symlink(target, symlink); err != nil {
+				t.Fatal(err)
+			}
+			return symlink
+		}},
+		{name: "ancestor", selectPath: func(t *testing.T, target string) string {
+			symlink := filepath.Join(t.TempDir(), "packs-root")
+			if err := os.Symlink(filepath.Dir(target), symlink); err != nil {
+				t.Fatal(err)
+			}
+			return filepath.Join(symlink, filepath.Base(target))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs := materializeDevelopmentInventory(t, embedded, nil)
+			dirs[0] = tc.selectPath(t, dirs[0])
+			if _, err := LoadDevelopmentPlatformPackInventory(testPlatformVersion, dirs, embedded); err == nil || !strings.Contains(err.Error(), "must be a real directory") {
+				t.Fatalf("symlinked development root error = %v", err)
+			}
+		})
 	}
 }
 
