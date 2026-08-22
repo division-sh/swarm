@@ -94,7 +94,7 @@ func TestPostgresBundleDeleteCloseRecoversPendingSurvivorRefreshBeforeReplay(t *
 	newRuntime := func(root, bundleHash string) runtimeFixture {
 		bundle := loadWorkflowValidationBundleAt(t, root)
 		source := semanticview.Wrap(bundle)
-		rt, err := runtimepkg.NewRuntime(ctx, runtimeDepsForServeTest(stores, cfg, runtimepkg.RuntimeOptions{
+		rt, err := runtimepkg.NewRuntime(ctx, runtimeDepsForServeTest(t, stores, cfg, runtimepkg.RuntimeOptions{
 			SelfCheck: false, WorkflowModule: stubWorkflowModule{source: source},
 			LLMRuntime: servedNoopLLMRuntime{}, DisablePersistentStartupRecovery: true,
 			ProviderTriggerCatalog: providerCatalog, ProcessWorkOwner: processWorkOwner,

@@ -74,6 +74,7 @@ type WorkflowContractBundle struct {
 	FlowTree              FlowTree
 	URIRegistry           ContractURIRegistry
 	PackInventory         *packartifact.EffectivePackInventory
+	PackAdmission         PackAdmissionProjection
 	ProjectPacks          packartifact.ProjectPackSet
 	PackSelectionPath     string
 	PackSelectionBody     []byte

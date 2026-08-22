@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -198,13 +199,26 @@ func loadEffectivePackInventory(opts packCommandOptions) (*packartifact.Effectiv
 		return nil, err
 	}
 	if strings.TrimSpace(paths.ContractsPath) == "" {
-		return packartifact.NewEffectivePackInventory(base, nil)
+		inventory, err := packartifact.NewEffectivePackInventory(base, nil)
+		if err != nil {
+			return nil, err
+		}
+		platformSpec, err := loadChannelPlatformSpecDocument(paths.PlatformSpecPath)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := packadmission.Admit(inventory, platformSpec); err != nil {
+			return nil, err
+		}
+		return inventory, nil
 	}
 	contractsRoot, err := NormalizeContractsRoot(paths.ContractsPath)
 	if err != nil {
 		return nil, err
 	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(opts.repoRoot, contractsRoot, paths.PlatformSpecPath, runtimecontracts.WorkflowContractLoadOptions{PlatformPackBase: base})
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(opts.repoRoot, contractsRoot, paths.PlatformSpecPath, runtimecontracts.WorkflowContractLoadOptions{
+		PlatformPackBase: base, AdmitPackInventory: packadmission.AdmitInventory,
+	})
 	if err != nil {
 		return nil, err
 	}

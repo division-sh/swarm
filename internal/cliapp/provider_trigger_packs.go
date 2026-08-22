@@ -11,7 +11,6 @@ import (
 	"github.com/division-sh/swarm/internal/platform"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/division-sh/swarm/internal/runtime"
-	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -40,18 +39,6 @@ func LoadConfiguredPlatformPackBase(repo string, cfgResult RuntimeConfigLoadResu
 	}
 	dirs := resolvePlatformPackDirs(repo, packConfigOrigin(cfgResult, "platform.packs.platform_dirs"), configured)
 	return packartifact.LoadDevelopmentPlatformPackInventory(runningVersion, dirs, embedded)
-}
-
-func LoadBundleProviderTriggerPacks(bundle *runtimecontracts.WorkflowContractBundle) (ProviderTriggerPackLoad, error) {
-	if bundle == nil || bundle.PackInventory == nil {
-		return ProviderTriggerPackLoad{}, fmt.Errorf("workflow bundle effective pack inventory is required")
-	}
-	runningVersion := strings.TrimSpace(bundle.Platform.Platform.Version)
-	catalog, loaded, err := providertriggers.NewCatalogSnapshotFromInventory(bundle.PackInventory, runningVersion)
-	if err != nil {
-		return ProviderTriggerPackLoad{}, err
-	}
-	return ProviderTriggerPackLoad{Catalog: catalog, Loaded: loaded, Inventory: bundle.PackInventory}, nil
 }
 
 func packConfigOrigin(cfgResult RuntimeConfigLoadResult, key string) string {

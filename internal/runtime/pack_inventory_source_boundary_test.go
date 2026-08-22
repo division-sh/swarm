@@ -22,7 +22,10 @@ func TestPlatformPackInventoryHasOneSourceAndFiniteProductionConsumers(t *testin
 			"internal/cliapp/provider_trigger_packs.go",
 			"internal/runtime/contracts/workflow_contract_loading.go",
 		),
-		"LoadDevelopmentPlatformPackInventory": pathSet("internal/cliapp/provider_trigger_packs.go"),
+		"LoadDevelopmentPlatformPackInventory": pathSet(
+			"internal/cliapp/provider_trigger_packs.go",
+			"internal/testutil/packfixture/packfixture.go",
+		),
 		"LoadProjectPackSet": pathSet(
 			"internal/cliapp/doctor.go",
 			"internal/packartifact/project.go",
@@ -35,19 +38,17 @@ func TestPlatformPackInventoryHasOneSourceAndFiniteProductionConsumers(t *testin
 			"internal/testutil/packfixture/packfixture.go",
 		),
 		"NewPackRegistryFromInventory": pathSet(
-			"internal/cliapp/bundle_packs.go",
-			"internal/cliapp/provider_connector_tools.go",
-			"internal/runtime/effective_source.go",
+			"internal/packadmission/admission.go",
 			"internal/testutil/packfixture/packfixture.go",
 		),
 		"NewCatalogSnapshotFromInventory": pathSet(
-			"internal/cliapp/doctor.go",
-			"internal/cliapp/provider_trigger_packs.go",
-			"internal/runtime/context_manager.go",
-			"internal/runtime/effective_source.go",
+			"internal/packadmission/admission.go",
 			"internal/testutil/packfixture/packfixture.go",
 		),
-		"LoadChannelPacks": pathSet("internal/cliapp/channel_packs.go", "internal/testutil/packfixture/packfixture.go"),
+		"LoadChannelPacks": pathSet(
+			"internal/packadmission/admission.go",
+			"internal/testutil/packfixture/packfixture.go",
+		),
 	}
 	forbiddenOwners := map[string]struct{}{
 		"BuiltinTool": {}, "DefaultPackRegistry": {}, "LoadBuiltinPackRegistry": {},
@@ -102,6 +103,56 @@ func TestPlatformPackInventoryHasOneSourceAndFiniteProductionConsumers(t *testin
 			t.Errorf("pack inventory consumer census for %s has stale entries: %s", name, strings.Join(missing, ", "))
 		}
 	}
+}
+
+func TestPackPublishingSurfacesCarryExplicitBaseAndAdmissionOwners(t *testing.T) {
+	emptyLoadOptionOwners := pathSet(
+		"internal/runtime/contracts/bundle_registration_upload.go",
+		"internal/runtime/contracts/workflow_contract_loading.go",
+	)
+	inspectProductionGo(t, func(path string, file *ast.File) {
+		ast.Inspect(file, func(node ast.Node) bool {
+			literal, ok := node.(*ast.CompositeLit)
+			if !ok {
+				return true
+			}
+			name := calledFunctionName(literal.Type)
+			fields := compositeLiteralFields(literal)
+			switch name {
+			case "WorkflowContractLoadOptions":
+				if len(fields) == 0 {
+					if _, allowed := emptyLoadOptionOwners[path]; !allowed {
+						t.Errorf("%s constructs empty workflow pack load options outside the pure contract-loader owners", path)
+					}
+					return true
+				}
+				if _, ok := fields["AdmitPackInventory"]; !ok {
+					t.Errorf("%s workflow pack load options omit canonical body admission", path)
+				}
+				_, hasBase := fields["PlatformPackBase"]
+				_, hasBases := fields["PlatformPackBases"]
+				if !hasBase && !hasBases {
+					t.Errorf("%s workflow pack load options omit an explicit selected-base owner", path)
+				}
+			case "BundleCatalogRuntimeLoadRequest", "BundleRegisterHandlerOptions":
+				if len(fields) == 0 {
+					return true
+				}
+				for _, required := range []string{"PlatformPackBases", "AdmitPackInventory"} {
+					if _, ok := fields[required]; !ok {
+						t.Errorf("%s %s omits %s", path, name, required)
+					}
+				}
+			case "BundleBuildRequest":
+				if len(fields) > 0 {
+					if _, ok := fields["LoadOptions"]; !ok {
+						t.Errorf("%s bundle build request omits explicit pack load options", path)
+					}
+				}
+			}
+			return true
+		})
+	})
 }
 
 func TestPlatformPackBodiesHaveOneEmbedOwnerAndNoRetiredTeachingConfig(t *testing.T) {
@@ -187,6 +238,21 @@ func missingPaths(want, got map[string]struct{}) []string {
 	}
 	sort.Strings(missing)
 	return missing
+}
+
+func compositeLiteralFields(literal *ast.CompositeLit) map[string]struct{} {
+	fields := make(map[string]struct{}, len(literal.Elts))
+	for _, element := range literal.Elts {
+		keyed, ok := element.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		identifier, ok := keyed.Key.(*ast.Ident)
+		if ok {
+			fields[identifier.Name] = struct{}{}
+		}
+	}
+	return fields
 }
 
 func assertNoRetiredPackConfig(t *testing.T, path, body string) {

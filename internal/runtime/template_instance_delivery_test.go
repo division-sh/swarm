@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/packadmission"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -695,6 +696,13 @@ type runtimeTestWorkflowModule struct {
 
 func newRuntimeTestWorkflowModule(t *testing.T, source semanticview.Source) runtimepipeline.WorkflowModule {
 	t.Helper()
+	if bundle, ok := semanticview.Bundle(source); ok && bundle != nil && bundle.PackInventory != nil && bundle.PackAdmission == nil {
+		projection, err := packadmission.Admit(bundle.PackInventory, bundle.Platform)
+		if err != nil {
+			t.Fatalf("admit runtime test pack projection: %v", err)
+		}
+		bundle.PackAdmission = projection
+	}
 	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)
 	if err != nil {
 		t.Fatalf("LoadWorkflowDefinition: %v", err)
@@ -740,7 +748,12 @@ func loadRuntimeTempBundle(t *testing.T, files map[string]string) *runtimecontra
 	}
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, platformSpec)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(
+		repoRoot,
+		root,
+		platformSpec,
+		runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory},
+	)
 	if err != nil {
 		t.Fatalf("load temp bundle: %v", err)
 	}
@@ -750,10 +763,11 @@ func loadRuntimeTempBundle(t *testing.T, files map[string]string) *runtimecontra
 func loadRuntimeBundleRoot(t *testing.T, root string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(
 		repoRoot,
 		root,
 		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+		runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory},
 	)
 	if err != nil {
 		t.Fatalf("load canonical routing bundle: %v", err)

@@ -18,7 +18,8 @@ type BundleCatalogRuntimeLoadRequest struct {
 	ContentYAML             string
 	DataBlob                []byte
 	RunningPlatformSpecPath string
-	PlatformPackBase        *packartifact.PlatformPackInventory
+	PlatformPackBases       packartifact.PlatformPackBaseResolver
+	AdmitPackInventory      func(*packartifact.EffectivePackInventory, PlatformSpecDocument) (PackAdmissionProjection, error)
 }
 
 type BundleCatalogRuntimeSource struct {
@@ -83,7 +84,9 @@ func LoadBundleCatalogRuntimeSource(repoRoot string, req BundleCatalogRuntimeLoa
 		return BundleCatalogRuntimeSource{}, fmt.Errorf("bundle catalog runtime source missing platform/platform-spec.yaml: %w", err)
 	}
 
-	bundle, err := LoadWorkflowContractBundleWithOptions(repoRoot, contractsRoot, platformSpecPath, WorkflowContractLoadOptions{PlatformPackBase: req.PlatformPackBase})
+	bundle, err := LoadWorkflowContractBundleWithOptions(repoRoot, contractsRoot, platformSpecPath, WorkflowContractLoadOptions{
+		PlatformPackBases: req.PlatformPackBases, AdmitPackInventory: req.AdmitPackInventory,
+	})
 	if err != nil {
 		return BundleCatalogRuntimeSource{}, fmt.Errorf("load bundle catalog runtime source: %w", err)
 	}

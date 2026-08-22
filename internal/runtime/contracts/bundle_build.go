@@ -34,6 +34,7 @@ type BundleBuildRequest struct {
 	PlatformSpecPath string
 	OutputRoot       string
 	Steps            []BundleBuildStep
+	LoadOptions      WorkflowContractLoadOptions
 }
 
 type BundleBuildStep interface {
@@ -134,7 +135,7 @@ func BuildBundleMaterialization(ctx context.Context, req BundleBuildRequest) (Bu
 	if err != nil {
 		return BundleBuildReport{}, err
 	}
-	bundle, err := LoadWorkflowContractBundleWithOverrides(req.RepoRoot, contractsRoot, req.PlatformSpecPath)
+	bundle, err := LoadWorkflowContractBundleWithOptions(req.RepoRoot, contractsRoot, req.PlatformSpecPath, req.LoadOptions)
 	if err != nil {
 		return BundleBuildReport{}, err
 	}
@@ -214,7 +215,7 @@ func BuildBundleMaterialization(ctx context.Context, req BundleBuildRequest) (Bu
 	if err := writeDeterministicJSONFile(manifestPath, manifest); err != nil {
 		return BundleBuildReport{}, fmt.Errorf("write build manifest: %w", err)
 	}
-	materialized, err := LoadWorkflowContractBundleWithOverrides(req.RepoRoot, tmp, req.PlatformSpecPath)
+	materialized, err := LoadWorkflowContractBundleWithOptions(req.RepoRoot, tmp, req.PlatformSpecPath, req.LoadOptions)
 	if err != nil {
 		return BundleBuildReport{}, fmt.Errorf("validate materialized contracts root: %w", err)
 	}

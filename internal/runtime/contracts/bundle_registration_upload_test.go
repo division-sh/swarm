@@ -14,6 +14,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type testPackAdmissionProjection string
+
+func (p testPackAdmissionProjection) EffectivePackInventoryDigest() string { return string(p) }
+
+func admitPackInventoryForRegistrationTest(inventory *packartifact.EffectivePackInventory, _ PlatformSpecDocument) (PackAdmissionProjection, error) {
+	return testPackAdmissionProjection(inventory.Digest()), nil
+}
+
 func TestBuildBundleRegistrationDirectoryUploadPackagesTextAndData(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := t.TempDir()
@@ -156,6 +164,10 @@ func TestProjectPackBytesAndBaseReceiptSurviveCatalogReconstruction(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
+	baseGenerations, err := packartifact.NewPlatformPackBaseGenerationOwner(base)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if changed, err := packartifact.ImportEmbeddedPack(root, "provider.telegram", base); err != nil || !changed {
 		t.Fatalf("import telegram changed=%t error=%v", changed, err)
 	}
@@ -172,7 +184,10 @@ func TestProjectPackBytesAndBaseReceiptSurviveCatalogReconstruction(t *testing.T
 		t.Fatal(err)
 	}
 
-	bundle, err := LoadWorkflowContractBundleWithOptions(repo, root, platform, WorkflowContractLoadOptions{PlatformPackBase: base})
+	bundle, err := LoadWorkflowContractBundleWithOptions(repo, root, platform, WorkflowContractLoadOptions{
+		PlatformPackBase:   base,
+		AdmitPackInventory: admitPackInventoryForRegistrationTest,
+	})
 	if err != nil {
 		t.Fatalf("load project pack bundle: %v", err)
 	}
@@ -188,7 +203,8 @@ func TestProjectPackBytesAndBaseReceiptSurviveCatalogReconstruction(t *testing.T
 
 	loaded, err := LoadBundleCatalogRuntimeSource(repo, BundleCatalogRuntimeLoadRequest{
 		BundleHash: projection.BundleHash, ContentYAML: projection.ContentYAML, DataBlob: projection.DataBlob,
-		RunningPlatformSpecPath: platform, PlatformPackBase: base,
+		RunningPlatformSpecPath: platform, PlatformPackBases: baseGenerations,
+		AdmitPackInventory: admitPackInventoryForRegistrationTest,
 	})
 	if err != nil {
 		t.Fatalf("reconstruct project pack bundle: %v", err)
@@ -236,7 +252,8 @@ func TestProjectPackBytesAndBaseReceiptSurviveCatalogReconstruction(t *testing.T
 	}
 	_, err = LoadBundleCatalogRuntimeSource(repo, BundleCatalogRuntimeLoadRequest{
 		BundleHash: projection.BundleHash, ContentYAML: string(tamperedProjectionBody), DataBlob: projection.DataBlob,
-		RunningPlatformSpecPath: platform, PlatformPackBase: base,
+		RunningPlatformSpecPath: platform, PlatformPackBases: baseGenerations,
+		AdmitPackInventory: admitPackInventoryForRegistrationTest,
 	})
 	if err == nil || !strings.Contains(err.Error(), "pack selection receipt requires embedded base "+tamperedDigest) {
 		t.Fatalf("tampered base receipt error = %v", err)

@@ -20,6 +20,7 @@ import (
 	dashboardserver "github.com/division-sh/swarm/internal/dashboard/server"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/packadmission"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagentframe "github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
@@ -941,7 +942,12 @@ func loadConformanceRuntimeWorkflowModule(t *testing.T) conformanceSemanticOnlyW
 	t.Helper()
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", "test-boot-success")
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(
+		repoRoot,
+		fixtureRoot,
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+		runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory},
+	)
 	if err != nil {
 		t.Fatalf("load bundle: %v", err)
 	}
@@ -951,7 +957,12 @@ func loadConformanceRuntimeWorkflowModule(t *testing.T) conformanceSemanticOnlyW
 func loadConformanceWorkflowFixtureModule(t *testing.T, fixtureRoot string) conformanceLoadedWorkflowModule {
 	t.Helper()
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(
+		repoRoot,
+		fixtureRoot,
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+		runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory},
+	)
 	if err != nil {
 		t.Fatalf("load bundle: %v", err)
 	}

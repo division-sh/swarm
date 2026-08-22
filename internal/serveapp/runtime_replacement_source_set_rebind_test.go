@@ -325,7 +325,7 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 				}
 				source := semanticview.Wrap(bundle)
 				fact := mustServeTestEphemeralBundleSourceFact(hash)
-				rt, err := runtimepkg.NewRuntime(ctx, runtimeDepsForServeTest(stores, cfg, runtimepkg.RuntimeOptions{
+				rt, err := runtimepkg.NewRuntime(ctx, runtimeDepsForServeTest(t, stores, cfg, runtimepkg.RuntimeOptions{
 					SelfCheck: false, WorkflowModule: stubWorkflowModule{source: source},
 					LLMRuntime: servedNoopLLMRuntime{}, DisablePersistentStartupRecovery: true,
 					ProviderTriggerCatalog: providerCatalog, ProcessWorkOwner: processWorkOwner,

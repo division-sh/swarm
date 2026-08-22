@@ -1,6 +1,7 @@
 package cliapp
 
 import (
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -21,7 +22,9 @@ func NewSwarmWorkflowModule(RepoRoot, contractsRoot, platformSpecPath string) (r
 }
 
 func NewSwarmWorkflowModuleWithPackBase(RepoRoot, contractsRoot, platformSpecPath string, base *packartifact.PlatformPackInventory) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(RepoRoot, contractsRoot, platformSpecPath, runtimecontracts.WorkflowContractLoadOptions{PlatformPackBase: base})
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(RepoRoot, contractsRoot, platformSpecPath, runtimecontracts.WorkflowContractLoadOptions{
+		PlatformPackBase: base, AdmitPackInventory: packadmission.AdmitInventory,
+	})
 	if err != nil {
 		return nil, nil, err
 	}

@@ -3,8 +3,8 @@ package cliapp
 import (
 	"context"
 	"fmt"
-	"strings"
 
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -21,17 +21,22 @@ func LoadBundlePackRuntime(ctx context.Context, cfgResult RuntimeConfigLoadResul
 	if bundle == nil || bundle.PackInventory == nil {
 		return BundlePackRuntimeLoad{}, fmt.Errorf("workflow bundle effective pack inventory is required")
 	}
-	triggers, err := LoadBundleProviderTriggerPacks(bundle)
-	if err != nil {
-		return BundlePackRuntimeLoad{}, fmt.Errorf("load provider trigger packs: %w", err)
+	if cfgResult.Config == nil {
+		return BundlePackRuntimeLoad{}, fmt.Errorf("runtime config is required")
 	}
-	connectors, err := providerconnectors.NewPackRegistryFromInventory(bundle.PackInventory, strings.TrimSpace(bundle.Platform.Platform.Version))
+	projection, err := packadmission.FromBundle(bundle)
 	if err != nil {
-		return BundlePackRuntimeLoad{}, fmt.Errorf("load provider connector packs: %w", err)
+		return BundlePackRuntimeLoad{}, err
 	}
-	channels, err := LoadConfiguredChannelPacks(ctx, cfgResult, bundle.Platform, bundle.PackInventory, triggers.Catalog, connectors, staticCredentials, managedCredentials)
+	bindings, err := compileChannelBindings(ctx, cfgResult.Config, projection.ChannelPlans, staticCredentials, managedCredentials)
 	if err != nil {
-		return BundlePackRuntimeLoad{}, fmt.Errorf("load channel packs: %w", err)
+		return BundlePackRuntimeLoad{}, fmt.Errorf("load channel bindings: %w", err)
 	}
-	return BundlePackRuntimeLoad{ProviderTriggers: triggers, Connectors: connectors, Channels: channels}, nil
+	triggers := ProviderTriggerPackLoad{
+		Catalog: projection.ProviderTriggers, Loaded: projection.LoadedProviderPacks, Inventory: bundle.PackInventory,
+	}
+	channels := ChannelPackLoad{
+		Loaded: projection.LoadedChannelPacks, Plans: projection.ChannelPlans, Bindings: bindings,
+	}
+	return BundlePackRuntimeLoad{ProviderTriggers: triggers, Connectors: projection.ProviderConnectors, Channels: channels}, nil
 }

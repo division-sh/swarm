@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -20,7 +21,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/singletoncoordinatorpilot"
-	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
 
 func TestDeriveStandingTargets_HarnessSourceCreatesNoTarget(t *testing.T) {
@@ -413,10 +413,18 @@ func standingProviderDeclarationSource(t testing.TB, provider, inputEvent string
 		t.Fatalf("write schema: %v", err)
 	}
 	repoRoot := filepath.Join("..", "..")
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(
+		repoRoot,
+		root,
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+		runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory},
+	)
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}
-	registry := packfixture.TriggerCatalog(t)
-	return semanticview.Wrap(bundle), registry
+	projection, err := packadmission.FromBundle(bundle)
+	if err != nil {
+		t.Fatalf("load admitted pack projection: %v", err)
+	}
+	return semanticview.Wrap(bundle), projection.ProviderTriggers
 }

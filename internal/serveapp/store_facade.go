@@ -160,7 +160,7 @@ type selectedAPICapabilityRequest struct {
 	ProviderCredentials     runtimecredentials.Store
 	ExecutionPosture        executionposture.Posture
 	ProcessCapability       runtimestartupownership.ProcessCapability
-	PlatformPackBase        *packartifact.PlatformPackInventory
+	PlatformPackBases       *packartifact.PlatformPackBaseGenerationOwner
 }
 
 type selectedAPIOptionalCapabilityBuilder func(selectedAPICapabilityRequest) (selectedAPICapabilities, error)

@@ -4,13 +4,69 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/packadmission"
+	"github.com/division-sh/swarm/internal/packartifact"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 )
+
+func TestBundleRegistrationUsesExactSelectedDevelopmentBase(t *testing.T) {
+	repo := repoRoot(t)
+	embedded := packfixture.EmbeddedBase(t)
+	telegram, ok := embedded.Lookup("provider.telegram")
+	if !ok {
+		t.Fatal("embedded Telegram pack is missing")
+	}
+	modified := []byte(strings.Replace(string(telegram.ManifestBody()), "telegram update object is required", "registration development telegram update object is required", 1))
+	if string(modified) == string(telegram.ManifestBody()) {
+		t.Fatal("Telegram registration fixture changed")
+	}
+	development, _ := packfixture.DevelopmentBase(t, map[string][]byte{"provider.telegram": modified})
+	developmentOwner, err := packartifact.NewPlatformPackBaseGenerationOwner(development)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contractsRoot := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
+	upload, err := runtimecontracts.BuildBundleRegistrationDirectoryUploadWithOptions(
+		repo,
+		contractsRoot,
+		runtimecontracts.DefaultPlatformSpecFile(repo),
+		runtimecontracts.WorkflowContractLoadOptions{PlatformPackBase: development, AdmitPackInventory: packadmission.AdmitInventory},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projection, err := buildBundleRegistrationProjection(bundleRegistrationParams{ContentYAML: upload.ContentYAML}, bundleRegistrationRuntimeContext{
+		RepoRoot: repo, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
+		PlatformPackBases: developmentOwner, AdmitPackInventory: packadmission.AdmitInventory,
+	})
+	if err != nil {
+		t.Fatalf("register development-base bundle: %v", err)
+	}
+	if projection.BundleHash == "" {
+		t.Fatal("development-base registration projection has no bundle hash")
+	}
+
+	embeddedOwner, err := packartifact.NewPlatformPackBaseGenerationOwner(embedded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = buildBundleRegistrationProjection(bundleRegistrationParams{ContentYAML: upload.ContentYAML}, bundleRegistrationRuntimeContext{
+		RepoRoot: repo, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
+		PlatformPackBases: embeddedOwner, AdmitPackInventory: packadmission.AdmitInventory,
+	})
+	var invalid *InvalidParamsError
+	if err == nil || !errors.As(err, &invalid) || !strings.Contains(fmt.Sprint(invalid.Details), "not retained by this process") {
+		t.Fatalf("registration with unavailable selected base error = %v", err)
+	}
+}
 
 func TestBundleRegistrationAcceptsDeclaredMockModuleDataEntry(t *testing.T) {
 	repo := repoRoot(t)

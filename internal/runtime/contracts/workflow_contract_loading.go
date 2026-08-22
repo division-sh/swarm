@@ -11,7 +11,13 @@ import (
 )
 
 type WorkflowContractLoadOptions struct {
-	PlatformPackBase *packartifact.PlatformPackInventory
+	PlatformPackBase   *packartifact.PlatformPackInventory
+	PlatformPackBases  packartifact.PlatformPackBaseResolver
+	AdmitPackInventory func(*packartifact.EffectivePackInventory, PlatformSpecDocument) (PackAdmissionProjection, error)
+}
+
+type PackAdmissionProjection interface {
+	EffectivePackInventoryDigest() string
 }
 
 func rootWorkflowPolicy(bundle *WorkflowContractBundle) PolicyDocument {
@@ -153,15 +159,19 @@ func loadWorkflowContractBundleForPaths(paths ContractPaths, options WorkflowCon
 	if err := loadYAMLFile(paths.PlatformSpecFile, &bundle.Platform); err != nil {
 		return nil, err
 	}
-	base := options.PlatformPackBase
-	if base == nil {
-		var err error
-		base, err = packartifact.LoadEmbeddedPlatformPackInventory(strings.TrimSpace(bundle.Platform.Platform.Version))
-		if err != nil {
-			return nil, fmt.Errorf("load embedded platform pack inventory: %w", err)
-		}
-	}
 	projectPacks, err := packartifact.LoadProjectPackSet(paths.ContractsRoot)
+	if err != nil {
+		return nil, err
+	}
+	receiptPath := ""
+	if strings.TrimSpace(paths.ContractsRoot) != "" {
+		receiptPath = filepath.Join(paths.ContractsRoot, filepath.FromSlash(packartifact.PackSelectionRelativePath))
+	}
+	persistedReceipt, receipt, err := loadWorkflowPackSelectionReceipt(receiptPath)
+	if err != nil {
+		return nil, err
+	}
+	base, err := resolveWorkflowPlatformPackBase(options, strings.TrimSpace(bundle.Platform.Platform.Version), receipt)
 	if err != nil {
 		return nil, err
 	}
@@ -173,33 +183,28 @@ func loadWorkflowContractBundleForPaths(paths ContractPaths, options WorkflowCon
 	if err != nil {
 		return nil, err
 	}
-	receiptPath := ""
-	if strings.TrimSpace(paths.ContractsRoot) != "" {
-		receiptPath = filepath.Join(paths.ContractsRoot, filepath.FromSlash(packartifact.PackSelectionRelativePath))
+	if receipt != nil {
+		if !receipt.Matches(base, effective) {
+			return nil, fmt.Errorf(
+				"pack selection receipt requires %s base %s and effective inventory %s but reconstruction selected %s base %s and effective inventory %s",
+				receipt.BaseMode, receipt.BaseDigest, receipt.EffectiveDigest,
+				base.SelectionMode(), base.Digest(), effective.Digest(),
+			)
+		}
+		bundle.PackSelectionPath = receiptPath
+		receiptBody = persistedReceipt
 	}
-	if receiptPath != "" {
-		info, statErr := os.Lstat(receiptPath)
-		if statErr != nil && !os.IsNotExist(statErr) {
-			return nil, fmt.Errorf("inspect pack selection receipt: %w", statErr)
+	if options.AdmitPackInventory != nil {
+		admission, err := options.AdmitPackInventory(effective, bundle.Platform)
+		if err != nil {
+			return nil, fmt.Errorf("admit effective pack inventory: %w", err)
 		}
-		if statErr == nil {
-			if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-				return nil, fmt.Errorf("pack selection receipt %s must be a regular file", packartifact.PackSelectionRelativePath)
-			}
-			persisted, readErr := os.ReadFile(receiptPath)
-			if readErr != nil {
-				return nil, fmt.Errorf("read pack selection receipt: %w", readErr)
-			}
-			receipt, parseErr := packartifact.ParsePackSelectionReceipt(persisted)
-			if parseErr != nil {
-				return nil, parseErr
-			}
-			if !receipt.Matches(base) {
-				return nil, fmt.Errorf("pack selection receipt requires %s base %s but current selection is %s base %s", receipt.BaseMode, receipt.BaseDigest, base.SelectionMode(), base.Digest())
-			}
-			bundle.PackSelectionPath = receiptPath
-			receiptBody = persisted
+		if admission == nil || strings.TrimSpace(admission.EffectivePackInventoryDigest()) != effective.Digest() {
+			return nil, fmt.Errorf("admitted pack projection does not own effective inventory %s", effective.Digest())
 		}
+		bundle.PackAdmission = admission
+	} else if base.SelectionMode() == packartifact.SelectionDevelopmentOverride || len(projectPacks.Sources) > 0 {
+		return nil, fmt.Errorf("body-specific pack admission is required for development or project pack inventory")
 	}
 	bundle.PackSelectionBody = receiptBody
 	bundle.ProjectPacks = projectPacks
@@ -209,6 +214,57 @@ func loadWorkflowContractBundleForPaths(paths ContractPaths, options WorkflowCon
 		return nil, err
 	}
 	return bundle, nil
+}
+
+func loadWorkflowPackSelectionReceipt(receiptPath string) ([]byte, *packartifact.PackSelectionReceipt, error) {
+	if strings.TrimSpace(receiptPath) == "" {
+		return nil, nil, nil
+	}
+	info, err := os.Lstat(receiptPath)
+	if os.IsNotExist(err) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("inspect pack selection receipt: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, nil, fmt.Errorf("pack selection receipt %s must be a regular file", packartifact.PackSelectionRelativePath)
+	}
+	body, err := os.ReadFile(receiptPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read pack selection receipt: %w", err)
+	}
+	receipt, err := packartifact.ParsePackSelectionReceipt(body)
+	if err != nil {
+		return nil, nil, err
+	}
+	return body, &receipt, nil
+}
+
+func resolveWorkflowPlatformPackBase(options WorkflowContractLoadOptions, runningVersion string, receipt *packartifact.PackSelectionReceipt) (*packartifact.PlatformPackInventory, error) {
+	if options.PlatformPackBase != nil && options.PlatformPackBases != nil {
+		return nil, fmt.Errorf("workflow contract load must not provide competing platform pack base owners")
+	}
+	if options.PlatformPackBase != nil {
+		if receipt != nil && !receipt.MatchesBase(options.PlatformPackBase) {
+			return nil, fmt.Errorf("pack selection receipt requires %s base %s but selected base is %s base %s", receipt.BaseMode, receipt.BaseDigest, options.PlatformPackBase.SelectionMode(), options.PlatformPackBase.Digest())
+		}
+		return options.PlatformPackBase, nil
+	}
+	if options.PlatformPackBases != nil {
+		if receipt != nil {
+			return options.PlatformPackBases.ResolvePlatformPackBase(*receipt)
+		}
+		return options.PlatformPackBases.CurrentPlatformPackBase()
+	}
+	base, err := packartifact.LoadEmbeddedPlatformPackInventory(runningVersion)
+	if err != nil {
+		return nil, fmt.Errorf("load embedded platform pack inventory: %w", err)
+	}
+	if receipt != nil && !receipt.MatchesBase(base) {
+		return nil, fmt.Errorf("pack selection receipt requires %s base %s but default embedded selection is %s", receipt.BaseMode, receipt.BaseDigest, base.Digest())
+	}
+	return base, nil
 }
 func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundle) error {
 	if bundle == nil {

@@ -14,6 +14,7 @@ import (
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -517,7 +518,12 @@ terminal_states:
 	writeStoreBackendSelectionFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 	writeStoreBackendSelectionFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
 	RepoRoot := runtimepipeline.WorkflowRepoRoot()
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(RepoRoot, root, runtimecontracts.DefaultPlatformSpecFile(RepoRoot))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(
+		RepoRoot,
+		root,
+		runtimecontracts.DefaultPlatformSpecFile(RepoRoot),
+		runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory},
+	)
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 	}

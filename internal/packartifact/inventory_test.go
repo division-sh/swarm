@@ -189,6 +189,38 @@ func TestEffectivePackInventoryProjectShadowUsesCurrentBodyIdentity(t *testing.T
 	}
 }
 
+func TestProjectPackModifiedIncludesVersionOnlyEdits(t *testing.T) {
+	base, err := LoadPlatformPackInventoryFS(
+		testInventoryFS(t, "provider.demo", TypeTrigger, "provider-triggers/demo", ProvenancePlatform, []byte("provider: demo\n")),
+		InventoryManifestFileName,
+		testPlatformVersion,
+		SelectionEmbedded,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseEntry, _ := base.Lookup("provider.demo")
+	projectEnvelope := baseEntry.Envelope()
+	projectEnvelope.Version = "0.1.1"
+	projectEnvelope.Provenance.Source = ProvenanceProject
+	projectEnvelope.ManifestHash = ManifestHashDerived
+	envelopeBody, err := yaml.Marshal(projectEnvelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effective, err := NewEffectivePackInventory(base, []ProjectPackSource{{
+		Path: "provider.demo", EnvelopeBody: envelopeBody, ManifestBody: baseEntry.ManifestBody(),
+		Origin: ImportOrigin{Source: ProvenanceEmbedded, ID: baseEntry.ID(), Version: baseEntry.Version(), ManifestHash: baseEntry.ManifestHash()},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, ok := effective.Lookup("provider.demo")
+	if !ok || !entry.Modified() {
+		t.Fatalf("version-only project edit = %#v present=%t, want modified", entry, ok)
+	}
+}
+
 func TestEffectivePackInventoryDigestBindsSelectedBase(t *testing.T) {
 	firstFS := testInventoryFS(t, "provider.demo", TypeTrigger, "provider-triggers/demo", "platform", []byte("provider: demo\nrevision: one\n"))
 	secondFS := testInventoryFS(t, "provider.demo", TypeTrigger, "provider-triggers/demo", "platform", []byte("provider: demo\nrevision: two\n"))

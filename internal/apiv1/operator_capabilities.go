@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -121,11 +122,13 @@ type EventReplayHandlerOptions struct {
 }
 
 type BundleRegisterHandlerOptions struct {
-	Now              func() time.Time
-	RepoRoot         string
-	PlatformSpecPath string
-	Register         BundleCatalogRegisterStore
-	Idempotency      APIIdempotencyStore
+	Now                func() time.Time
+	RepoRoot           string
+	PlatformSpecPath   string
+	PlatformPackBases  packartifact.PlatformPackBaseResolver
+	AdmitPackInventory func(*packartifact.EffectivePackInventory, runtimecontracts.PlatformSpecDocument) (runtimecontracts.PackAdmissionProjection, error)
+	Register           BundleCatalogRegisterStore
+	Idempotency        APIIdempotencyStore
 }
 
 type BundleDeleteHandlerOptions struct {

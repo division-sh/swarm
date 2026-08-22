@@ -8,11 +8,9 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/config"
-	"github.com/division-sh/swarm/internal/packartifact"
-	"github.com/division-sh/swarm/internal/packruntime"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providerconnectors"
-	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
@@ -20,44 +18,24 @@ import (
 )
 
 type ChannelPackLoad struct {
-	Loaded       []packs.LoadedChannelPack
-	Plans        []packs.SatisfactionPlan
-	Bindings     []packs.OutboundBindingPlan
-	PlatformSpec runtimecontracts.PlatformSpecDocument
+	Loaded   []packs.LoadedChannelPack
+	Plans    []packs.SatisfactionPlan
+	Bindings []packs.OutboundBindingPlan
 }
 
-func LoadConfiguredChannelPacks(ctx context.Context, cfgResult RuntimeConfigLoadResult, platformSpec runtimecontracts.PlatformSpecDocument, inventory *packartifact.EffectivePackInventory, triggerCatalog *providertriggers.CatalogSnapshot, connectorRegistry *providerconnectors.PackRegistry, staticCredentials runtimecredentials.Store, managedCredentials runtimemanagedcredentials.Store) (ChannelPackLoad, error) {
+func LoadConfiguredChannelPacks(ctx context.Context, cfgResult RuntimeConfigLoadResult, projection packadmission.Projection, staticCredentials runtimecredentials.Store, managedCredentials runtimemanagedcredentials.Store) (ChannelPackLoad, error) {
 	if cfgResult.Config == nil {
 		return ChannelPackLoad{}, fmt.Errorf("runtime config is required")
 	}
-	if triggerCatalog == nil {
-		return ChannelPackLoad{}, fmt.Errorf("provider trigger catalog is required for channel satisfaction")
+	if projection.EffectivePackInventoryDigest() == "" || projection.ProviderTriggers == nil || projection.ProviderConnectors == nil {
+		return ChannelPackLoad{}, fmt.Errorf("admitted pack projection is required for channel satisfaction")
 	}
-	if inventory == nil {
-		return ChannelPackLoad{}, fmt.Errorf("effective pack inventory is required for channel satisfaction")
-	}
-	if connectorRegistry == nil {
-		return ChannelPackLoad{}, fmt.Errorf("provider connector registry is required for channel satisfaction")
-	}
-	loaded, err := packruntime.LoadChannelPacks(inventory, strings.TrimSpace(platformSpec.Platform.Version))
-	if err != nil {
-		return ChannelPackLoad{}, err
-	}
-	registry, err := packs.NewInterfaceRegistry(platformSpec)
-	if err != nil {
-		return ChannelPackLoad{}, err
-	}
-	plans, err := packs.CompileChannelInventory(registry, loaded, triggerCatalog.PackDescriptors(), connectorRegistry.PackDescriptors())
-	if err != nil {
-		return ChannelPackLoad{}, err
-	}
-	bindings, err := compileChannelBindings(ctx, cfgResult.Config, plans, staticCredentials, managedCredentials)
+	bindings, err := compileChannelBindings(ctx, cfgResult.Config, projection.ChannelPlans, staticCredentials, managedCredentials)
 	if err != nil {
 		return ChannelPackLoad{}, err
 	}
 	return ChannelPackLoad{
-		Loaded: loaded, Plans: plans, Bindings: bindings,
-		PlatformSpec: platformSpec,
+		Loaded: projection.LoadedChannelPacks, Plans: projection.ChannelPlans, Bindings: bindings,
 	}, nil
 }
 

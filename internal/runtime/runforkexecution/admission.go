@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
@@ -76,9 +77,9 @@ func (m selectedContractWorkflowModule) ActionRegistry() runtimepipeline.ActionR
 }
 
 type ContractBundleSourceLoader struct {
-	RepoRoot         string
-	PlatformSpecPath string
-	PlatformPackBase *packartifact.PlatformPackInventory
+	RepoRoot          string
+	PlatformSpecPath  string
+	PlatformPackBases packartifact.PlatformPackBaseResolver
 }
 
 type BundleCatalogSelectedContractSourceStore interface {
@@ -87,10 +88,10 @@ type BundleCatalogSelectedContractSourceStore interface {
 }
 
 type BundleCatalogSelectedContractSourceLoader struct {
-	RepoRoot         string
-	PlatformSpecPath string
-	PlatformPackBase *packartifact.PlatformPackInventory
-	Store            BundleCatalogSelectedContractSourceStore
+	RepoRoot          string
+	PlatformSpecPath  string
+	PlatformPackBases packartifact.PlatformPackBaseResolver
+	Store             BundleCatalogSelectedContractSourceStore
 }
 
 func (l ContractBundleSourceLoader) LoadRunForkSelectedContractSource(ctx context.Context, selection runfork.RunForkContractSelection) (LoadedSelectedContractSource, error) {
@@ -111,7 +112,9 @@ func (l ContractBundleSourceLoader) LoadRunForkSelectedContractSource(ctx contex
 	if platformSpecPath == "" {
 		platformSpecPath = runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	}
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repoRoot, strings.TrimSpace(selection.ContractsRoot), platformSpecPath, runtimecontracts.WorkflowContractLoadOptions{PlatformPackBase: l.PlatformPackBase})
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repoRoot, strings.TrimSpace(selection.ContractsRoot), platformSpecPath, runtimecontracts.WorkflowContractLoadOptions{
+		PlatformPackBases: l.PlatformPackBases, AdmitPackInventory: packadmission.AdmitInventory,
+	})
 	if err != nil {
 		return LoadedSelectedContractSource{}, err
 	}
@@ -229,7 +232,8 @@ func (l BundleCatalogSelectedContractSourceLoader) LoadRunForkSelectedContractSo
 		ContentYAML:             record.ContentYAML,
 		DataBlob:                record.DataBlob,
 		RunningPlatformSpecPath: strings.TrimSpace(l.PlatformSpecPath),
-		PlatformPackBase:        l.PlatformPackBase,
+		PlatformPackBases:       l.PlatformPackBases,
+		AdmitPackInventory:      packadmission.AdmitInventory,
 	})
 	if err != nil {
 		return LoadedSelectedContractSource{}, fmt.Errorf("%s: load DB-backed selected-contract source %s: %w", runbundle.CodeBundleDataIntegrityError, bundleHash, err)

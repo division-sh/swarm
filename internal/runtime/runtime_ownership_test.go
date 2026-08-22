@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/packadmission"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -81,7 +82,12 @@ func loadRuntimeOwnershipWorkflowModule(t *testing.T) semanticOnlyWorkflowRuntim
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", "test-boot-success")
 	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, platformSpec)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(
+		repoRoot,
+		fixtureRoot,
+		platformSpec,
+		runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory},
+	)
 	if err != nil {
 		t.Fatalf("load bundle: %v", err)
 	}

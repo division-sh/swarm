@@ -19,8 +19,11 @@ import (
 
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	bundlecatalog "github.com/division-sh/swarm/internal/bundlecatalog"
+	"github.com/division-sh/swarm/internal/packartifact"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/store/storetest"
+	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"gopkg.in/yaml.v3"
 )
 
@@ -611,6 +614,51 @@ func TestBundleBuildMaterializesContractsAndJSONReport(t *testing.T) {
 		report.Steps[1].Name != "python_policy_modules" ||
 		report.Steps[1].Status != "passed" {
 		t.Fatalf("report steps = %#v", report.Steps)
+	}
+}
+
+func TestBundleBuildUsesConfiguredDevelopmentPackBase(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	embedded := packfixture.EmbeddedBase(t)
+	telegram, ok := embedded.Lookup("provider.telegram")
+	if !ok {
+		t.Fatal("embedded Telegram pack is missing")
+	}
+	modified := []byte(strings.Replace(string(telegram.ManifestBody()), "telegram update object is required", "development telegram update object is required", 1))
+	if string(modified) == string(telegram.ManifestBody()) {
+		t.Fatal("Telegram development fixture changed")
+	}
+	development, dirs := packfixture.DevelopmentBase(t, map[string][]byte{"provider.telegram": modified})
+	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
+	configLines := []string{"runtime:", "  execution_posture: live", "llm:", "  backend: anthropic", "platform:", "  packs:", "    platform_dirs:"}
+	for _, dir := range dirs {
+		configLines = append(configLines, "      - "+dir)
+	}
+	writeRuntimeConfigText(t, configPath, strings.Join(configLines, "\n")+"\n")
+
+	contractsDir := writeBundleBuildCLIContractsFixture(t)
+	outputRoot := filepath.Join(t.TempDir(), "build-output")
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{
+		"bundle", "build", "--contracts", contractsDir, "--output", outputRoot, "--report", "json", "--config", configPath,
+	}, &stdout, &stderr, defaultRootCommandOptions())
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("development build code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	var report runtimecontracts.BundleBuildReport
+	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	receiptBody, err := os.ReadFile(filepath.Join(report.OutputPath, filepath.FromSlash(packartifact.PackSelectionRelativePath)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := packartifact.ParsePackSelectionReceipt(receiptBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.BaseMode != packartifact.SelectionDevelopmentOverride || receipt.BaseDigest != development.Digest() || receipt.EffectiveDigest == "" {
+		t.Fatalf("materialized development receipt = %#v, want base %s", receipt, development.Digest())
 	}
 }
 

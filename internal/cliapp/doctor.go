@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
-	"github.com/division-sh/swarm/internal/providertriggers"
 	"github.com/spf13/cobra"
 )
 
@@ -274,11 +274,11 @@ func appendDoctorPackInventoryReadback(report *LocalPreflightReport, platformSpe
 	if err != nil {
 		return
 	}
-	_, triggerPacks, err := providertriggers.NewCatalogSnapshotFromInventory(inventory, strings.TrimSpace(platformSpec.Platform.Version))
+	projection, err := packadmission.Admit(inventory, platformSpec)
 	if err != nil {
 		return
 	}
-	appendProviderTriggerCapabilitySubjects(report, triggerPacks)
+	appendProviderTriggerCapabilitySubjects(report, projection.LoadedProviderPacks)
 	packReadback := packInventoryReadbackFromInventory(inventory)
 	report.PackInventory = &packReadback
 }
