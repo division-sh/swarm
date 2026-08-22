@@ -232,6 +232,34 @@ func TestImportEmbeddedPackOwnsProjectBytesAndBundleIdentity(t *testing.T) {
 	}
 }
 
+func TestImportEmbeddedPackDoesNotRequireRuntimeExecutionPosture(t *testing.T) {
+	t.Setenv("SWARM_CONFIG", "")
+	t.Setenv("SWARM_API_SERVER", "")
+	t.Setenv("SWARM_API_TOKEN", "")
+	t.Setenv("SWARM_API_TOKEN_FILE", "")
+	t.Setenv("SWARM_CONTRACTS_PATH", "")
+	t.Setenv("SWARM_CONTRACTS_DIR", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+
+	project := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
+	code, stdout, stderr := runPacksCommand(t, RepoRoot(), "import", "provider.telegram", "--contracts", project, "--json")
+	if code != 0 || stderr != "" {
+		t.Fatalf("import without runtime posture code=%d stderr=%q stdout=%s", code, stderr, stdout)
+	}
+	if result := decodeOutputJSON[packImportReadback](t, stdout); !result.Changed || result.ID != "provider.telegram" {
+		t.Fatalf("import without runtime posture = %#v", result)
+	}
+
+	invalidProject := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
+	invalidConfig := filepath.Join(t.TempDir(), "swarm.yaml")
+	writeRuntimeConfigText(t, invalidConfig, "runtime:\n  execution_posture: invalid\n")
+	code, stdout, stderr = runPacksCommand(t, RepoRoot(), "import", "provider.telegram", "--contracts", invalidProject, "--config", invalidConfig, "--json")
+	if code == 0 || !strings.Contains(stderr, "runtime.execution_posture") {
+		t.Fatalf("import with invalid authored posture code=%d stderr=%q stdout=%s", code, stderr, stdout)
+	}
+}
+
 func TestPackReadbackMarksEnvelopeOnlyProjectEditsModified(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	base, err := packartifact.LoadEmbeddedPlatformPackInventory("0.7.0")
