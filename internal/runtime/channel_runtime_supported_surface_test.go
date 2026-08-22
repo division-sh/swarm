@@ -46,7 +46,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestProjectImportedChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *testing.T) {
+func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedStores(t *testing.T) {
 	const bundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	for _, selected := range []string{"postgres", "sqlite"} {
 		t.Run(selected, func(t *testing.T) {
@@ -54,7 +54,8 @@ func TestProjectImportedChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *t
 			runID := uuid.NewString()
 			entityID := uuid.NewString()
 			flowInstanceID := "channel-runtime-" + selected
-			flowInstance := "global/" + flowInstanceID
+			flowPath := "gateway/global"
+			flowInstance := flowPath + "/" + flowInstanceID
 			var (
 				db                  *sql.DB
 				eventStore          runtimebus.EventStore
@@ -116,7 +117,7 @@ func TestProjectImportedChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *t
 					ID: "global", Flow: "global", Mode: runtimecontracts.FlowModeTemplate,
 					PackageKey: "channel-runtime", AgentsFile: "/contracts/channel-runtime/flows/global/agents.yaml",
 				},
-				Path:   "global",
+				Path:   flowPath,
 				Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
 				Agents: map[string]runtimecontracts.AgentRegistryEntry{
 					"channel-sender": runtimecontracts.EffectiveAgentRegistryEntry("channel-sender", runtimecontracts.AgentRegistryEntry{ID: "channel-sender", Role: "worker"}),
@@ -183,7 +184,7 @@ func TestProjectImportedChannelRuntimeDispatchesDurablyAcrossSelectedStores(t *t
 			stopActivityNode := startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db)
 			executor := configuredChannelExecutor(source, binding, credentialStore, coordinator)
 			actor := models.AgentConfig{
-				ExecutionMode: "live", ID: "channel-sender", Identity: agentidentitytest.Declared(t, "channel-sender", agentOwner, "global", flowInstanceID, flowInstance), Role: "worker", FlowID: "global",
+				ExecutionMode: "live", ID: "channel-sender", Identity: agentidentitytest.Declared(t, "channel-sender", agentOwner, flowPath, flowInstanceID, flowInstance), Role: "worker", FlowID: "global",
 				FlowPath: flowInstance, EntityID: entityID, Tools: []string{"channel.ops.deliver"},
 			}
 			input := map[string]any{

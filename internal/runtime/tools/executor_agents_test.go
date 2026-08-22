@@ -119,7 +119,8 @@ func (m *concreteManagerStub) ResolveAgentConfig(agentID, flowInstance string) (
 	return matches[0], nil
 }
 
-func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
+func TestExecAgentMessagePreservesImportedTemplateSourceWhenAuthorityPermits(t *testing.T) {
+	const flowPath = "parent/review"
 	agents := map[string]runtimecontracts.AgentRegistryEntry{
 		"control": {
 			ID:    "control",
@@ -133,8 +134,8 @@ func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
 		},
 	}
 	reviewFlow := &runtimecontracts.FlowContractView{
-		Paths:  runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
-		Path:   "review",
+		Paths:  runtimecontracts.FlowContractPaths{ID: "review", Flow: "review", PackageKey: "review-package"},
+		Path:   flowPath,
 		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
 		Agents: agents,
 	}
@@ -152,10 +153,10 @@ func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
 		agents: map[string]models.AgentConfig{
 			"target-1": {
 				ID:              "target-1",
-				Identity:        agentidentitytest.Runtime(t, "target-1", "runtime-tools-test", "review", "inst-1", "review/inst-1"),
+				Identity:        agentidentitytest.Runtime(t, "target-1", "runtime-tools-test", flowPath, "inst-1", flowPath+"/inst-1"),
 				Role:            "reviewer",
 				EntityID:        "entity-b",
-				FlowPath:        "review/inst-1",
+				FlowPath:        flowPath + "/inst-1",
 				ManagerFallback: "control",
 			},
 		},
@@ -164,12 +165,12 @@ func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
 	actor := models.AgentConfig{
 		ExecutionMode: "mock",
 		ID:            "control",
-		Identity:      toolTestAgentIdentity(t, "control", "review", "review/inst-1"),
+		Identity:      agentidentitytest.Declared(t, "control", "swarm-test://review/control", flowPath, "inst-1", flowPath+"/inst-1"),
 		Role:          "control",
 		Permissions:   []string{"message_flow"},
 		EntityID:      "entity-a",
 		FlowID:        "review",
-		FlowPath:      "review/inst-1",
+		FlowPath:      flowPath + "/inst-1",
 	}
 	ctx := runtimeeffects.WithExecutionMode(WithActor(toolEventTestContext(actor), actor), runtimeeffects.ExecutionModeMock)
 
@@ -188,7 +189,7 @@ func TestExecAgentMessage_AllowsCrossEntityWhenAuthorityPermits(t *testing.T) {
 	if bus.event.ExecutionMode() != runtimeeffects.ExecutionModeMock {
 		t.Fatalf("agent_message event execution mode = %q, want mock", bus.event.ExecutionMode())
 	}
-	wantSourceRoute := events.RouteIdentity{FlowID: "review", FlowInstance: "review/inst-1", EntityID: "entity-a"}
+	wantSourceRoute := events.RouteIdentity{FlowID: "review", FlowInstance: flowPath + "/inst-1", EntityID: "entity-a"}
 	if got := bus.event.RoutingSource().Route().Normalized(); got != wantSourceRoute {
 		t.Fatalf("agent_message routing source = %#v, want %#v", got, wantSourceRoute)
 	}
