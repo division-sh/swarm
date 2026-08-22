@@ -126,20 +126,20 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		report.add(localPreflightBackendPrerequisite, "path_resolution_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix --contracts or --platform-spec")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
+	platformPackBase, err := LoadConfiguredPlatformPackBase(repo, cfgResult)
+	if err != nil {
+		report := configReport
+		report.add(localPreflightProviderPackPrerequisite, "platform_pack_load_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix platform.packs.platform_dirs or the referenced platform pack inventory")
+		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
+	}
 	if opts.schemaInventory {
-		inventory, err := buildDoctorSchemaInventory(repo, resolvedPaths)
+		inventory, err := buildDoctorSchemaInventory(repo, resolvedPaths, platformPackBase)
 		if err != nil {
 			report := configReport
 			report.add(localPreflightBackendPrerequisite, "schema_inventory_unavailable", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix --contracts or --platform-spec so the generated schema can be derived")
 			return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 		}
 		configReport.SchemaInventory = &inventory
-	}
-	platformPackBase, err := LoadConfiguredPlatformPackBase(repo, cfgResult)
-	if err != nil {
-		report := configReport
-		report.add(localPreflightProviderPackPrerequisite, "platform_pack_load_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix platform.packs.platform_dirs or the referenced platform pack inventory")
-		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
 	contractsRoot, err := NormalizeContractsRoot(resolvedPaths.ContractsPath)
 	if err != nil {

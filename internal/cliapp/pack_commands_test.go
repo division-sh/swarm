@@ -3,6 +3,7 @@ package cliapp
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,6 +94,74 @@ func TestPacksReadbackReportsConfiguredDevelopmentDirectories(t *testing.T) {
 	show := decodeOutputJSON[packShowReadback](t, stdout)
 	if got, want := show.Pack.Directory, wantByID[show.Pack.ID]; got != want {
 		t.Fatalf("show pack %q directory = %q, want %q", show.Pack.ID, got, want)
+	}
+}
+
+func TestCLIWorkflowModuleConsumersUseConfiguredDevelopmentBase(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	development, dirs := packfixture.DevelopmentBase(t, nil)
+	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
+	configLines := []string{"runtime:", "  execution_posture: live", "llm:", "  backend: anthropic", "platform:", "  packs:", "    platform_dirs:"}
+	for _, dir := range dirs {
+		configLines = append(configLines, "      - "+dir)
+	}
+	writeRuntimeConfigText(t, configPath, strings.Join(configLines, "\n")+"\n")
+
+	outputRoot := filepath.Join(t.TempDir(), "bundle-output")
+	contractsRoot := writeBundleBuildCLIContractsFixture(t)
+	code, stdout, stderr := runPacksCommand(t, RepoRoot(),
+		"bundle", "build", "--contracts", contractsRoot, "--output", outputRoot, "--report", "json", "--config", configPath,
+	)
+	if code != 0 || stderr != "" {
+		t.Fatalf("materialize development bundle code=%d stderr=%q stdout=%s", code, stderr, stdout)
+	}
+	var buildReport runtimecontracts.BundleBuildReport
+	if err := json.Unmarshal([]byte(stdout), &buildReport); err != nil {
+		t.Fatalf("decode bundle build report: %v\n%s", err, stdout)
+	}
+
+	_, bundle, paths, err := loadConfiguredCLIWorkflowModule(RepoRoot(), CLIContractPlatformSpecPathOptions{
+		ContractsPath: buildReport.OutputPath, ConfigPath: configPath,
+	})
+	if err != nil {
+		t.Fatalf("load configured CLI workflow module: %v", err)
+	}
+	if bundle.PackInventory.BaseDigest() != development.Digest() {
+		t.Fatalf("CLI workflow base digest = %q, want development %q", bundle.PackInventory.BaseDigest(), development.Digest())
+	}
+	if paths.ContractsPath != buildReport.OutputPath {
+		t.Fatalf("normalized contracts path = %q, want %q", paths.ContractsPath, buildReport.OutputPath)
+	}
+
+	commands := []struct {
+		name string
+		args []string
+	}{
+		{name: "describe", args: []string{"describe", "--contracts", buildReport.OutputPath, "--config", configPath, "--json"}},
+		{name: "describe routes", args: []string{"describe", "routes", "--contracts", buildReport.OutputPath, "--config", configPath, "--json"}},
+		{name: "secrets list", args: []string{"secrets", "list", "--contracts", buildReport.OutputPath, "--config", configPath, "--json"}},
+	}
+	for _, tc := range commands {
+		t.Run(tc.name, func(t *testing.T) {
+			code, stdout, stderr := runPacksCommand(t, RepoRoot(), tc.args...)
+			if code != 0 || stderr != "" {
+				t.Fatalf("%s code=%d stderr=%q stdout=%s", tc.name, code, stderr, stdout)
+			}
+		})
+	}
+
+	code, stdout, stderr = runPacksCommand(t, RepoRoot(),
+		"doctor", "--contracts", buildReport.OutputPath, "--config", configPath, "--schema-inventory", "--json",
+	)
+	if code == CLIExitValidation || stderr != "" {
+		t.Fatalf("doctor schema inventory code=%d stderr=%q stdout=%s", code, stderr, stdout)
+	}
+	var doctorReport LocalPreflightReport
+	if err := json.Unmarshal([]byte(stdout), &doctorReport); err != nil {
+		t.Fatalf("decode doctor report: %v\n%s", err, stdout)
+	}
+	if doctorReport.SchemaInventory == nil || doctorReport.SchemaInventory.Owner != doctorSchemaInventoryOwner {
+		t.Fatalf("doctor schema inventory = %#v", doctorReport.SchemaInventory)
 	}
 }
 

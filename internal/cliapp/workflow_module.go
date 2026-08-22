@@ -43,6 +43,31 @@ func NewSwarmWorkflowModuleWithRuntimeConfig(repoRoot, contractsRoot, platformSp
 	return NewSwarmWorkflowModuleWithPackBase(repoRoot, contractsRoot, platformSpecPath, base)
 }
 
+func loadConfiguredCLIWorkflowModule(repoRoot string, opts CLIContractPlatformSpecPathOptions) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, CLIContractPlatformSpecPaths, error) {
+	cfgResult, err := loadPackInventoryConfig(repoRoot, opts.ConfigPath)
+	if err != nil {
+		return nil, nil, CLIContractPlatformSpecPaths{}, err
+	}
+	paths, err := resolveCLIContractPlatformSpecPathsFromConfig(repoRoot, opts, cfgResult.cli)
+	if err != nil {
+		return nil, nil, CLIContractPlatformSpecPaths{}, err
+	}
+	contractsRoot, err := NormalizeContractsRoot(paths.ContractsPath)
+	if err != nil {
+		return nil, nil, CLIContractPlatformSpecPaths{}, err
+	}
+	base, err := LoadConfiguredPlatformPackBase(repoRoot, cfgResult)
+	if err != nil {
+		return nil, nil, CLIContractPlatformSpecPaths{}, err
+	}
+	module, bundle, err := NewSwarmWorkflowModuleWithPackBase(repoRoot, contractsRoot, paths.PlatformSpecPath, base)
+	if err != nil {
+		return nil, nil, CLIContractPlatformSpecPaths{}, err
+	}
+	paths.ContractsPath = contractsRoot
+	return module, bundle, paths, nil
+}
+
 func NewSwarmWorkflowModuleForBundle(bundle *runtimecontracts.WorkflowContractBundle) (runtimepipeline.WorkflowModule, semanticview.Source, error) {
 	source := semanticview.Wrap(bundle)
 	workflow, err := runtimepipeline.LoadWorkflowDefinition(source)

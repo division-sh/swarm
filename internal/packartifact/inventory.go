@@ -180,7 +180,7 @@ func (e Entry) Modified() bool {
 			e.ManifestHash() != strings.TrimSpace(e.origin.ManifestHash) ||
 			importedEnvelopeHash(e.envelopeBody) != strings.TrimSpace(e.origin.EnvelopeHash))
 }
-func (e Entry) Envelope() Envelope   { return e.envelope }
+func (e Entry) Envelope() Envelope   { return cloneEnvelope(e.envelope) }
 func (e Entry) EnvelopeBody() []byte { return append([]byte(nil), e.envelopeBody...) }
 func (e Entry) ManifestBody() []byte { return append([]byte(nil), e.manifestBody...) }
 
@@ -196,9 +196,28 @@ func (e Entry) FileSystem() fs.FS {
 }
 
 func cloneEntry(e Entry) Entry {
+	e.envelope = cloneEnvelope(e.envelope)
 	e.envelopeBody = append([]byte(nil), e.envelopeBody...)
 	e.manifestBody = append([]byte(nil), e.manifestBody...)
 	return e
+}
+
+func cloneEnvelope(envelope Envelope) Envelope {
+	envelope.Implements = append([]string(nil), envelope.Implements...)
+	envelope.Capabilities.Can.EmitEvents = append([]string(nil), envelope.Capabilities.Can.EmitEvents...)
+	envelope.Capabilities.Can.CallProviderActions = append([]string(nil), envelope.Capabilities.Can.CallProviderActions...)
+	envelope.Capabilities.Cannot = append([]string(nil), envelope.Capabilities.Cannot...)
+	envelope.Requires.Secrets = append([]string(nil), envelope.Requires.Secrets...)
+	envelope.Requires.ManagedCredentials = append([]string(nil), envelope.Requires.ManagedCredentials...)
+	if envelope.Requires.Packs != nil {
+		requiredPacks := envelope.Requires.Packs
+		envelope.Requires.Packs = make(map[string]string, len(requiredPacks))
+		for id, version := range requiredPacks {
+			envelope.Requires.Packs[id] = version
+		}
+	}
+	envelope.Tests = append([]string(nil), envelope.Tests...)
+	return envelope
 }
 
 type PlatformPackInventory struct {

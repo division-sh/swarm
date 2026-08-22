@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/division-sh/swarm/internal/packartifact"
 )
 
 const doctorSchemaInventoryOwner = "platform-spec.yaml#cli_specification.command_catalog.doctor.schema_inventory"
@@ -15,8 +17,8 @@ type doctorSchemaInventory struct {
 	Tables      []serveSchemaTableSummary `json:"tables"`
 }
 
-func buildDoctorSchemaInventory(repo string, paths CLIContractPlatformSpecPaths) (doctorSchemaInventory, error) {
-	_, bundle, err := NewSwarmWorkflowModule(repo, paths.ContractsPath, paths.PlatformSpecPath)
+func buildDoctorSchemaInventory(repo string, paths CLIContractPlatformSpecPaths, base *packartifact.PlatformPackInventory) (doctorSchemaInventory, error) {
+	_, bundle, err := NewSwarmWorkflowModuleWithPackBase(repo, paths.ContractsPath, paths.PlatformSpecPath, base)
 	if err != nil {
 		return doctorSchemaInventory{}, fmt.Errorf("load contract schema source: %w", err)
 	}
