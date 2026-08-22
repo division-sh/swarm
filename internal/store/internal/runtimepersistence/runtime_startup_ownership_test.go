@@ -1853,6 +1853,111 @@ func TestAuthorityRepairParity(t *testing.T) {
 	}
 }
 
+func TestAuthorityInspectionRejectsSynchronizedBindingForgeryParity(t *testing.T) {
+	tests := []struct {
+		name  string
+		store func(*testing.T) (startupAuthorityParityStore, *sql.DB)
+	}{
+		{name: "postgres", store: func(t *testing.T) (startupAuthorityParityStore, *sql.DB) {
+			_, db, _ := testutil.StartPostgres(t)
+			return admitTestPostgresStore(t, db), db
+		}},
+		{name: "sqlite", store: func(t *testing.T) (startupAuthorityParityStore, *sql.DB) {
+			selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
+			return selected, selected.backend.ConstructionHandle()
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := testAuthorActivityContext()
+			selected, db := tc.store(t)
+			for _, forgery := range []struct {
+				name   string
+				mutate func(*testing.T, *runtimestartupownership.Authority)
+			}{
+				{name: "acquisition id", mutate: func(_ *testing.T, authority *runtimestartupownership.Authority) {
+					authority.AcquisitionID = uuid.NewString()
+				}},
+				{name: "request hash", mutate: func(_ *testing.T, authority *runtimestartupownership.Authority) {
+					authority.AcquisitionRequestHash = strings.Repeat("f", 64)
+				}},
+				{name: "authority id", mutate: func(_ *testing.T, authority *runtimestartupownership.Authority) {
+					authority.AuthorityID = uuid.NewString()
+				}},
+				{name: "selected backend", mutate: func(t *testing.T, authority *runtimestartupownership.Authority) {
+					wrongBackend := "sqlite_retained_owner"
+					if tc.name == "sqlite" {
+						wrongBackend = "postgres_retained_session"
+					}
+					binding, err := runtimestartupownership.NewAuthority(runtimestartupownership.AcquireRequest{
+						OwnerID: authority.OwnerID, BootID: authority.BootID, RuntimeInstanceID: authority.RuntimeInstanceID,
+					}, wrongBackend, authority.AuthorityGeneration, authority.PredecessorAuthorityID, authority.AcquisitionKind)
+					if err != nil {
+						t.Fatalf("construct internally valid wrong-backend binding: %v", err)
+					}
+					authority.Backend = binding.Backend
+					authority.AcquisitionRequestHash = binding.AcquisitionRequestHash
+					authority.AuthorityID = binding.AuthorityID
+					if err := authority.Validate(); err != nil {
+						t.Fatalf("wrong-backend authority should remain internally valid: %v", err)
+					}
+				}},
+			} {
+				t.Run(forgery.name, func(t *testing.T) {
+					capability, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("synchronized-forgery-"+strings.ReplaceAll(forgery.name, " ", "-")))
+					if err != nil {
+						t.Fatalf("acquire authority to forge: %v", err)
+					}
+					if err := capability.Release(ctx); err != nil {
+						t.Fatalf("release authority to forge: %v", err)
+					}
+					var snapshot []byte
+					if err := db.QueryRowContext(ctx, `SELECT snapshot FROM runtime_startup_authority_facts ORDER BY authority_generation DESC, transition_ordinal DESC LIMIT 1`).Scan(&snapshot); err != nil {
+						t.Fatalf("load authority snapshot: %v", err)
+					}
+					var authority runtimestartupownership.Authority
+					if err := json.Unmarshal(snapshot, &authority); err != nil {
+						t.Fatalf("decode authority snapshot: %v", err)
+					}
+					forgery.mutate(t, &authority)
+					forgedSnapshot, err := json.Marshal(authority)
+					if err != nil {
+						t.Fatalf("encode forged authority snapshot: %v", err)
+					}
+					if tc.name == "postgres" {
+						_, err = db.ExecContext(ctx, `UPDATE runtime_startup_authority_facts SET authority_id=$1::uuid,backend=$2,acquisition_id=$3::uuid,acquisition_request_hash=$4,snapshot=$5::jsonb WHERE authority_generation=(SELECT MAX(authority_generation) FROM runtime_startup_authority_facts) AND transition_ordinal=(SELECT MAX(transition_ordinal) FROM runtime_startup_authority_facts WHERE authority_generation=(SELECT MAX(authority_generation) FROM runtime_startup_authority_facts))`, authority.AuthorityID, authority.Backend, authority.AcquisitionID, authority.AcquisitionRequestHash, forgedSnapshot)
+					} else {
+						_, err = db.ExecContext(ctx, `UPDATE runtime_startup_authority_facts SET authority_id=?,backend=?,acquisition_id=?,acquisition_request_hash=?,snapshot=? WHERE authority_generation=(SELECT MAX(authority_generation) FROM runtime_startup_authority_facts) AND transition_ordinal=(SELECT MAX(transition_ordinal) FROM runtime_startup_authority_facts WHERE authority_generation=(SELECT MAX(authority_generation) FROM runtime_startup_authority_facts))`, authority.AuthorityID, authority.Backend, authority.AcquisitionID, authority.AcquisitionRequestHash, string(forgedSnapshot))
+					}
+					if err != nil {
+						t.Fatalf("persist synchronized authority forgery: %v", err)
+					}
+					inspection, err := selected.InspectAuthority(ctx)
+					if err != nil || inspection.Status != runtimestartupownership.AuthorityInspectionCorrupt {
+						t.Fatalf("forged inspection=%#v err=%v, want corrupt", inspection, err)
+					}
+					result, err := selected.RepairAuthority(ctx, runtimestartupownership.AuthorityRepairRequest{
+						OperationID: uuid.NewString(), FindingsDigest: inspection.FindingsDigest, Confirmed: true,
+					})
+					if err != nil {
+						t.Fatalf("repair synchronized authority forgery: %v", err)
+					}
+					if err := result.Validate(); err != nil {
+						t.Fatalf("validate synchronized forgery repair: %v", err)
+					}
+					successor, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("after-synchronized-forgery-repair"))
+					if err != nil {
+						t.Fatalf("acquire successor after synchronized forgery repair: %v", err)
+					}
+					if err := successor.Release(ctx); err != nil {
+						t.Fatalf("release successor after synchronized forgery repair: %v", err)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestSQLiteAuthorityRepairClosesMalformedRecordFieldClass(t *testing.T) {
 	for _, malformed := range []struct {
 		name       string

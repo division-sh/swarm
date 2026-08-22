@@ -19,6 +19,34 @@ import (
 const startupBundleHashA = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 const startupBundleHashB = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
+func TestAuthorityValidateRecomputesAcquisitionBinding(t *testing.T) {
+	req := AcquireRequest{OwnerID: "owner-a", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString()}
+	valid, err := NewColdAuthority(req, "sqlite_retained_owner")
+	if err != nil {
+		t.Fatalf("NewColdAuthority: %v", err)
+	}
+	tests := []struct {
+		name   string
+		mutate func(*Authority)
+	}{
+		{name: "acquisition id", mutate: func(a *Authority) { a.AcquisitionID = uuid.NewString() }},
+		{name: "request hash", mutate: func(a *Authority) { a.AcquisitionRequestHash = strings.Repeat("f", 64) }},
+		{name: "authority id", mutate: func(a *Authority) { a.AuthorityID = uuid.NewString() }},
+		{name: "owner", mutate: func(a *Authority) { a.OwnerID = "owner-b" }},
+		{name: "runtime instance", mutate: func(a *Authority) { a.RuntimeInstanceID = uuid.NewString() }},
+		{name: "backend", mutate: func(a *Authority) { a.Backend = "postgres_retained_session" }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			forged := valid
+			tc.mutate(&forged)
+			if err := forged.Validate(); err == nil || !strings.Contains(err.Error(), "acquisition binding is invalid") {
+				t.Fatalf("Validate() error = %v, want acquisition-binding rejection", err)
+			}
+		})
+	}
+}
+
 type retainedSessionProbe struct {
 	mu             sync.Mutex
 	authority      Authority
