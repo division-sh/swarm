@@ -102,6 +102,7 @@ func conformanceManagerPersistenceRoles(selected any, eventBus *runtimebus.Event
 		RouteRestorer: eventBus, RouteRetirer: eventBus, RouteRemover: eventBus,
 		FlowTermination: pipeline, CreationPublisher: eventBus, DeliveryRuntime: eventBus,
 	}
+	roles.LifecycleCensus, _ = selected.(runtimemanager.AgentLifecycleCellCensus)
 	roles.LifecycleState, _ = selected.(runtimemanager.AgentLifecycleStateReader)
 	roles.LifecycleEffects, _ = selected.(runtimeeffects.Store)
 	roles.LifecycleDiagnostics, _ = selected.(runtimemanager.AgentLifecycleDiagnosticPersistence)

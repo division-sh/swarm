@@ -896,6 +896,51 @@ func TestPostgresProcessCapabilityReleaseAllowsCleanSuccessor(t *testing.T) {
 	}
 }
 
+func TestProcessAuthorityDiagnosticTimestampDoesNotInvalidateHeadParity(t *testing.T) {
+	for _, backend := range []string{"postgres", "sqlite"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := testAuthorActivityContext()
+			var selected startupAuthorityParityStore
+			var db *sql.DB
+			if backend == "postgres" {
+				_, db, _ = testutil.StartPostgres(t)
+				selected = admitTestPostgresStore(t, db)
+			} else {
+				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+				selected = store
+				db = store.backend.ConstructionHandle()
+			}
+			first, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("diagnostic-time-predecessor"))
+			if err != nil {
+				t.Fatalf("acquire predecessor: %v", err)
+			}
+			if err := first.Release(ctx); err != nil {
+				t.Fatalf("release predecessor: %v", err)
+			}
+			diagnosticTime := time.Now().UTC().Add(24 * time.Hour)
+			if backend == "postgres" {
+				_, err = db.ExecContext(ctx, `UPDATE runtime_startup_authority_facts SET created_at=$1 WHERE authority_generation=(SELECT MAX(authority_generation) FROM runtime_startup_authority_facts) AND transition_ordinal=(SELECT MAX(transition_ordinal) FROM runtime_startup_authority_facts WHERE authority_generation=(SELECT MAX(authority_generation) FROM runtime_startup_authority_facts))`, diagnosticTime)
+			} else {
+				_, err = db.ExecContext(ctx, `UPDATE runtime_startup_authority_facts SET created_at=? WHERE authority_generation=(SELECT MAX(authority_generation) FROM runtime_startup_authority_facts) AND transition_ordinal=(SELECT MAX(transition_ordinal) FROM runtime_startup_authority_facts WHERE authority_generation=(SELECT MAX(authority_generation) FROM runtime_startup_authority_facts))`, diagnosticTime.Format(time.RFC3339Nano))
+			}
+			if err != nil {
+				t.Fatalf("change diagnostic authority timestamp: %v", err)
+			}
+			inspection, err := selected.InspectAuthority(ctx)
+			if err != nil || inspection.Status != runtimestartupownership.AuthorityInspectionValid {
+				t.Fatalf("inspection after diagnostic timestamp drift=%#v err=%v", inspection, err)
+			}
+			successor, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("diagnostic-time-successor"))
+			if err != nil {
+				t.Fatalf("acquire successor after diagnostic timestamp drift: %v", err)
+			}
+			if err := successor.Release(ctx); err != nil {
+				t.Fatalf("release successor: %v", err)
+			}
+		})
+	}
+}
+
 func TestRuntimeProcessCapabilityClosedSourceSetOperationsPersistWithBackendParity(t *testing.T) {
 	const secondBundleHash = "bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222"
 	tests := []struct {
@@ -1791,6 +1836,73 @@ func TestAuthorityRepairParity(t *testing.T) {
 			}
 			if err := successor.Release(ctx); err != nil {
 				t.Fatalf("release after repair successor: %v", err)
+			}
+		})
+	}
+}
+
+func TestSQLiteAuthorityRepairClosesMalformedRecordFieldClass(t *testing.T) {
+	for _, malformed := range []struct {
+		name       string
+		assignment string
+		wantRaw    string
+	}{
+		{name: "authority id", assignment: `authority_id='not-a-uuid'`, wantRaw: `not-a-uuid`},
+		{name: "boot id", assignment: `boot_id='not-a-uuid'`, wantRaw: `not-a-uuid`},
+		{name: "runtime id", assignment: `runtime_instance_id='not-a-uuid'`, wantRaw: `not-a-uuid`},
+		{name: "predecessor id", assignment: `predecessor_authority_id='not-a-uuid'`, wantRaw: `not-a-uuid`},
+		{name: "successor id", assignment: `state='superseded', successor_authority_id='not-a-uuid'`, wantRaw: `not-a-uuid`},
+		{name: "snapshot", assignment: `snapshot='{}'`, wantRaw: `"snapshot":{} `},
+	} {
+		t.Run(malformed.name, func(t *testing.T) {
+			ctx := testAuthorActivityContext()
+			selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
+			db := selected.backend.ConstructionHandle()
+			capability, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("malformed-repair-predecessor"))
+			if err != nil {
+				t.Fatalf("acquire predecessor: %v", err)
+			}
+			if err := capability.Release(ctx); err != nil {
+				t.Fatalf("release predecessor: %v", err)
+			}
+			current, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("malformed-repair-current"))
+			if err != nil {
+				t.Fatalf("acquire current generation: %v", err)
+			}
+			if err := current.Release(ctx); err != nil {
+				t.Fatalf("release current generation: %v", err)
+			}
+			query := `UPDATE runtime_startup_authority_facts SET ` + malformed.assignment + ` WHERE authority_generation=(SELECT MAX(authority_generation) FROM runtime_startup_authority_facts) AND transition_ordinal=(SELECT MAX(transition_ordinal) FROM runtime_startup_authority_facts WHERE authority_generation=(SELECT MAX(authority_generation) FROM runtime_startup_authority_facts))`
+			if _, err := db.ExecContext(ctx, query); err != nil {
+				t.Fatalf("corrupt %s: %v", malformed.name, err)
+			}
+			inspection, err := selected.InspectAuthority(ctx)
+			if err != nil || inspection.Status != runtimestartupownership.AuthorityInspectionCorrupt {
+				t.Fatalf("inspect malformed %s=%#v err=%v", malformed.name, inspection, err)
+			}
+			operationID := uuid.NewString()
+			result, err := selected.RepairAuthority(ctx, runtimestartupownership.AuthorityRepairRequest{
+				OperationID: operationID, FindingsDigest: inspection.FindingsDigest, Confirmed: true,
+			})
+			if err != nil {
+				t.Fatalf("repair malformed %s: %v", malformed.name, err)
+			}
+			if err := result.Validate(); err != nil {
+				t.Fatalf("validate malformed %s repair: %v", malformed.name, err)
+			}
+			var before string
+			if err := db.QueryRowContext(ctx, `SELECT before_snapshot FROM runtime_startup_authority_repairs WHERE operation_id=?`, operationID).Scan(&before); err != nil {
+				t.Fatalf("read malformed %s repair journal: %v", malformed.name, err)
+			}
+			if !strings.Contains(before, strings.TrimSpace(malformed.wantRaw)) {
+				t.Fatalf("malformed %s evidence missing from repair journal: %s", malformed.name, before)
+			}
+			successor, err := selected.AcquireProcessCapability(ctx, testStartupAcquireRequest("after-malformed-repair"))
+			if err != nil {
+				t.Fatalf("acquire after malformed %s repair: %v", malformed.name, err)
+			}
+			if err := successor.Release(ctx); err != nil {
+				t.Fatalf("release after malformed %s repair: %v", malformed.name, err)
 			}
 		})
 	}

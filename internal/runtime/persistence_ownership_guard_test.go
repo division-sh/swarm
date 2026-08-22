@@ -142,6 +142,7 @@ func TestAgentManagerPersistenceRolesAreExplicit(t *testing.T) {
 	typesSource := readOwnershipSource(t, root, "internal/runtime/manager/types.go")
 	assertOwnershipSourceContains(t, typesSource,
 		"type PersistenceRoles struct",
+		"LifecycleCensus      AgentLifecycleCellCensus",
 		"LifecycleState       AgentLifecycleStateReader",
 		"LifecycleEffects     runtimeeffects.Store",
 		"EffectsRecovery      runtimeeffects.RecoveryStore",

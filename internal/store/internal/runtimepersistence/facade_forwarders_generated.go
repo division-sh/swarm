@@ -466,6 +466,10 @@ func (s *PostgresStore) ListDueHumanTaskExpiryEvents(ctx context.Context, now ti
 	return s.decisionPostgresOwner.ListDueHumanTaskExpiryEvents(ctx, now, limit)
 }
 
+func (s *PostgresStore) ListDurableAgentLifecycleStates(ctx context.Context) ([]manager.AgentLifecycleState, error) {
+	return s.agentPostgresOwner.ListDurableAgentLifecycleStates(ctx)
+}
+
 func (s *PostgresStore) ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]pipeline.DynamicFlowRuntimeReadiness, error) {
 	return s.pipelinePostgresOwner.ListDynamicFlowRuntimeReadiness(ctx)
 }
@@ -1540,6 +1544,10 @@ func (s *SQLiteRuntimeStore) ListDecisionCards(ctx context.Context, opts decisio
 
 func (s *SQLiteRuntimeStore) ListDueHumanTaskExpiryEvents(ctx context.Context, now time.Time, limit int) ([]events.Event, error) {
 	return s.decisionSQLiteOwner.ListDueHumanTaskExpiryEvents(ctx, now, limit)
+}
+
+func (s *SQLiteRuntimeStore) ListDurableAgentLifecycleStates(ctx context.Context) ([]manager.AgentLifecycleState, error) {
+	return s.agentSQLiteOwner.ListDurableAgentLifecycleStates(ctx)
 }
 
 func (s *SQLiteRuntimeStore) ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]pipeline.DynamicFlowRuntimeReadiness, error) {

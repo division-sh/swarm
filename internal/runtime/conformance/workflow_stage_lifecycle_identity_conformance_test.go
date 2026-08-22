@@ -243,7 +243,7 @@ func stageLifecycleIdentityPostgresDeps(deps runtimepkg.RuntimeDeps, selected *s
 	deps.ManagerStore = selected
 	deps.ManagerLifecycleDiagnostics = selected
 	deps.ManagerPersistenceRoles = runtimemanager.PersistenceRoles{
-		LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected,
+		LifecycleCensus: selected, LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected,
 		EffectsRecovery: selected, DeliveryQuiescence: selected, EventExistence: selected,
 		DirectiveOperations: selected, DirectiveTargets: selected, FlowRoutes: selected,
 	}
@@ -287,7 +287,7 @@ func stageLifecycleIdentitySQLiteDeps(deps runtimepkg.RuntimeDeps, selected *sto
 	deps.ManagerStore = selected
 	deps.ManagerLifecycleDiagnostics = selected
 	deps.ManagerPersistenceRoles = runtimemanager.PersistenceRoles{
-		LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected,
+		LifecycleCensus: selected, LifecycleState: selected, LifecycleEffects: selected, LifecycleDiagnostics: selected,
 		EffectsRecovery: selected, DeliveryQuiescence: selected, EventExistence: selected,
 		DirectiveOperations: selected, DirectiveTargets: selected, FlowRoutes: selected,
 	}
