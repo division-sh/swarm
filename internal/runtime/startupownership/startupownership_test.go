@@ -60,6 +60,7 @@ type retainedSessionProbe struct {
 	loadSourceErr  error
 	terminalRecord bool
 	recordErr      error
+	releaseErr     error
 }
 
 func (s *retainedSessionProbe) Authority() (Authority, error) {
@@ -148,12 +149,14 @@ func (s *retainedSessionProbe) CommitAgentLifecycleTransition(ctx context.Contex
 
 func (s *retainedSessionProbe) Release(context.Context) error {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.released {
-		s.mu.Unlock()
 		return nil
 	}
+	if s.releaseErr != nil {
+		return s.releaseErr
+	}
 	s.released = true
-	s.mu.Unlock()
 	return nil
 }
 
@@ -425,6 +428,71 @@ func TestProcessCapabilityReleaseRetirementFailureKeepsPossessionMonitorLive(t *
 	case <-grant.Done():
 	case <-time.After(time.Second):
 		t.Fatal("terminal possession loss did not finish retiring the retained grant")
+	}
+}
+
+func TestProcessCapabilityReleaseFailureUsesBoundedPossessionProof(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		proofErr error
+		terminal bool
+	}{
+		{name: "current possession remains live"},
+		{name: "unprovable possession terminalizes", proofErr: errors.New("backend possession cannot be proved"), terminal: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			session, _ := testRetainedSession(t)
+			const deadline = 17 * time.Millisecond
+			seenDeadline := make(chan time.Duration, 1)
+			injected := errors.New("durable release transition failed")
+			session.mu.Lock()
+			session.releaseErr = injected
+			session.monitorProve = func(_ context.Context, got time.Duration) error {
+				seenDeadline <- got
+				return tc.proofErr
+			}
+			session.mu.Unlock()
+			capability, err := newProcessCapability(session, time.Hour, deadline)
+			if err != nil {
+				t.Fatalf("newProcessCapability: %v", err)
+			}
+
+			if err := capability.Release(context.Background()); !errors.Is(err, injected) {
+				t.Fatalf("Release error = %v, want injected transition failure", err)
+			}
+			select {
+			case got := <-seenDeadline:
+				if got != deadline {
+					t.Fatalf("release-failure proof deadline = %s, want %s", got, deadline)
+				}
+			default:
+				t.Fatal("release failure did not perform an independent possession proof")
+			}
+
+			result, terminal := capability.TerminalResult()
+			if terminal != tc.terminal {
+				t.Fatalf("terminal result = %#v ok=%v, want terminal=%v", result, terminal, tc.terminal)
+			}
+			if tc.terminal {
+				if result.Cause != TerminalOwnershipUnprovable {
+					t.Fatalf("terminal cause = %q, want ownership_unprovable", result.Cause)
+				}
+				return
+			}
+			if _, err := capability.Evidence(); err != nil {
+				t.Fatalf("current possession did not preserve capability evidence: %v", err)
+			}
+			session.mu.Lock()
+			session.releaseErr = nil
+			session.mu.Unlock()
+			if err := capability.Release(context.Background()); err != nil {
+				t.Fatalf("retry clean release: %v", err)
+			}
+			result, terminal = capability.TerminalResult()
+			if !terminal || result.Cause != TerminalReleased {
+				t.Fatalf("clean retry terminal result = %#v ok=%v, want released", result, terminal)
+			}
+		})
 	}
 }
 

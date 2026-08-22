@@ -382,7 +382,20 @@ func (p *processCapability) Release(ctx context.Context) error {
 		}
 	}
 	err := p.session.Release(ctx)
-	p.terminalize(TerminalResult{Cause: TerminalReleased})
+	if err == nil {
+		p.terminalize(TerminalResult{Cause: TerminalReleased})
+		return nil
+	}
+	if p.requireLive() != nil {
+		return err
+	}
+	if proveErr := p.session.MonitorProveCurrent(context.Background(), p.monitorDeadline); proveErr != nil {
+		p.terminalize(TerminalResult{Cause: TerminalOwnershipUnprovable})
+		return err
+	}
+	if p.requireLive() == nil {
+		p.startPossessionMonitor()
+	}
 	return err
 }
 

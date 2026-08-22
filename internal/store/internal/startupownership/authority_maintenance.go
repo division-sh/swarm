@@ -402,6 +402,9 @@ func repairAuthorityTx(ctx context.Context, tx *sql.Tx, req runtimestartupowners
 		return runtimestartupownership.AuthorityRepairResult{}, err
 	}
 	repair.RecordedAt = time.Now().UTC()
+	if err := retireAllGenerationGrantsTx(ctx, tx, sqlite); err != nil {
+		return runtimestartupownership.AuthorityRepairResult{}, err
+	}
 	if err := recordAuthorityTransitionTx(ctx, tx, nil, repair, sqlite); err != nil {
 		return runtimestartupownership.AuthorityRepairResult{}, err
 	}

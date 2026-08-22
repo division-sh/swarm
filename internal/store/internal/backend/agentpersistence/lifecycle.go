@@ -164,9 +164,8 @@ func (s *AgentPostgresOwner) ListDurableAgentLifecycleStates(ctx context.Context
 		       lifecycle_process_boot_id::text, lifecycle_generation_grant_id::text,
 		       lifecycle_bundle_hash, lifecycle_bundle_source,
 		       lifecycle_runtime_instance_id::text, lifecycle_runtime_generation,
-		       topology_admission
+		       topology_authority_kind, topology_admission, execution_lifetime
 		FROM agents
-		WHERE topology_admission ->> 'execution_lifetime' = 'durable_managed'
 		ORDER BY agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 		         flow_scope_key, flow_instance_id, flow_instance
 	`)
@@ -190,9 +189,8 @@ func (s *AgentSQLiteOwner) ListDurableAgentLifecycleStates(ctx context.Context) 
 		       lifecycle_process_boot_id, lifecycle_generation_grant_id,
 		       lifecycle_bundle_hash, lifecycle_bundle_source,
 		       lifecycle_runtime_instance_id, lifecycle_runtime_generation,
-		       topology_admission
+		       topology_authority_kind, topology_admission, execution_lifetime
 		FROM agents
-		WHERE json_extract(topology_admission, '$.execution_lifetime') = 'durable_managed'
 		ORDER BY agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 		         flow_scope_key, flow_instance_id, flow_instance
 	`)
@@ -208,6 +206,7 @@ func scanDurableAgentLifecycleStates(rows *sql.Rows) ([]runtimemanager.AgentLife
 	for rows.Next() {
 		var state runtimemanager.AgentLifecycleState
 		var nameOwner, nameSource, routePresence, flowScopeKey, flowInstanceID, flowInstance string
+		var topologyAuthorityKind, executionLifetime string
 		var generation int64
 		var topologyRaw []byte
 		if err := rows.Scan(
@@ -223,7 +222,7 @@ func scanDurableAgentLifecycleStates(rows *sql.Rows) ([]runtimemanager.AgentLife
 			&state.ProcessBinding.BundleSource,
 			&state.ProcessBinding.RuntimeInstanceID,
 			&state.ProcessBinding.RuntimeGeneration,
-			&topologyRaw,
+			&topologyAuthorityKind, &topologyRaw, &executionLifetime,
 		); err != nil {
 			return nil, fmt.Errorf("scan durable lifecycle cell census: %w", err)
 		}
@@ -245,7 +244,15 @@ func scanDurableAgentLifecycleStates(rows *sql.Rows) ([]runtimemanager.AgentLife
 		if err := state.Topology.Validate(); err != nil {
 			return nil, err
 		}
-		if state.Topology.Lifetime != runtimeagenttopology.LifetimeDurableManaged {
+		persistedLifetime := runtimeagenttopology.ExecutionLifetime(strings.TrimSpace(executionLifetime))
+		if persistedLifetime != state.Topology.Lifetime {
+			return nil, errors.New("durable lifecycle execution lifetime differs from topology admission")
+		}
+		persistedAuthorityKind := runtimeagenttopology.AuthorityKind(strings.TrimSpace(topologyAuthorityKind))
+		if persistedAuthorityKind != state.Topology.Authority.Kind {
+			return nil, errors.New("durable lifecycle authority kind differs from topology admission")
+		}
+		if persistedLifetime != runtimeagenttopology.LifetimeDurableManaged {
 			return nil, errors.New("durable lifecycle census returned a non-durable cell")
 		}
 		switch state.Topology.Authority.Kind {
