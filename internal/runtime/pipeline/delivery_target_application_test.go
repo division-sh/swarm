@@ -11,7 +11,10 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
 
@@ -148,6 +151,94 @@ func TestDeliveryTargetApplicationRejectsMissingExactExistingTargetWithoutMutati
 			}
 		})
 	}
+}
+
+func TestDeliveryTargetApplicationRejectsStateOnlyChildRelabeledAsParentOnBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			db, store := openHandlerEntityRequirementStore(t, backend)
+			source := deliveryTargetNestedOwnershipSource()
+			pc := newDurablePipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
+				Module:              staticSemanticWorkflowModule{source: source},
+				Persistence:         workflowPersistenceForTest(store),
+				PipelineObligations: unavailablePipelineTestObligationOwner{},
+			})
+			var ctx context.Context
+			if backend == "sqlite" {
+				ctx = sqliteExactOnceRunContext(t, db)
+			} else {
+				ctx = testPipelineRunContext(t, db)
+			}
+
+			instancePath := "review/child/instance"
+			entityID := eventtest.UUID("state-only-child-relabeled-as-parent-" + backend)
+			now := time.Now().UTC().Truncate(time.Microsecond)
+			query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?, ?, ?, 'review_item', 'active', '{}', '{"marker":"unchanged"}', '{}', '{}', 1, ?, ?, ?)`
+			args := []any{testPipelineRunID, entityID, instancePath, now, now, now}
+			if backend == "postgres" {
+				query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'review_item', 'active', '{}'::jsonb, '{"marker":"unchanged"}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, $4, $4, $4)`
+				args = []any{testPipelineRunID, entityID, instancePath, now}
+			}
+			if _, err := db.ExecContext(ctx, query, args...); err != nil {
+				t.Fatalf("seed state-only child target: %v", err)
+			}
+
+			node := pipelineNode(t, "review", "existing")
+			handlerFact, err := AdmitDeliveryTargetHandler(source, node)
+			if err != nil {
+				t.Fatal(err)
+			}
+			handlerFact = handlerFact.ForEvent("work.ready")
+			handler, ok := handlerFact.resolve(source, "work.ready")
+			if !ok {
+				t.Fatal("resolve parent delivery handler")
+			}
+			hostile := events.RouteIdentity{FlowID: "review", FlowInstance: instancePath, EntityID: entityID}
+			evt := handlerTestRootIngress(
+				uuid.NewString(), "work.ready", "", "", nil, 0, testPipelineRunID, "",
+				handlerTestWorkflowEnvelope("review", instancePath, entityID), now,
+			)
+			if _, err := pc.prepareDeliveryTargetApplication(ctx, node.Key(), handlerFact, handler, evt, events.MustExistingEntityTarget(hostile)); err == nil || !strings.Contains(err.Error(), "not owned by flow review") {
+				t.Fatalf("state-only child relabeling error = %v", err)
+			}
+
+			route := runtimeflowidentity.StoredRoute("review", runtimeflowidentity.LogicalInstanceID(instancePath), instancePath)
+			persisted, found, err := store.LoadEntityState(ctx, route, runtimeidentity.NormalizeEntityID(entityID))
+			var fields map[string]any
+			fieldsErr := json.Unmarshal(persisted.Fields, &fields)
+			if err != nil || !found || persisted.CurrentState != "active" || persisted.Revision != 1 || fieldsErr != nil || fields["marker"] != "unchanged" {
+				t.Fatalf("rejected child state changed: found=%t err=%v state=%#v", found, err, persisted)
+			}
+		})
+	}
+}
+
+func deliveryTargetNestedOwnershipSource() semanticview.Source {
+	source := deliveryTargetOwnershipSource()
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil || bundle.FlowTree.Root == nil {
+		panic("delivery target ownership source has no bundle")
+	}
+	parent := bundle.FlowTree.ByID["review"]
+	if parent == nil {
+		panic("delivery target ownership source has no review flow")
+	}
+	child := runtimecontracts.FlowContractView{
+		Path:  "review/child",
+		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", Mode: runtimecontracts.FlowModeTemplate},
+		Schema: runtimecontracts.FlowSchemaDocument{
+			Name: "child", Mode: runtimecontracts.FlowModeTemplate, InitialState: "active",
+			States: []string{"active", "done"}, TerminalStates: []string{"done"},
+		},
+	}
+	parent.Children = append(parent.Children, child)
+	childView := &parent.Children[len(parent.Children)-1]
+	bundle.FlowTree.ByID["child"] = childView
+	if bundle.FlowSchemas == nil {
+		bundle.FlowSchemas = make(map[string]runtimecontracts.FlowSchemaDocument)
+	}
+	bundle.FlowSchemas["child"] = childView.Schema
+	return semanticview.Wrap(bundle)
 }
 
 func TestDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycleWithoutMutation(t *testing.T) {

@@ -594,6 +594,13 @@ func acquireSelectOrCreateMaterializingTarget(ctx context.Context, reader Workfl
 }
 
 func decodeDeliveryTargetWorkflowEntityState(source semanticview.Source, flowID string, record WorkflowEntityStatePersistenceRecord) (WorkflowInstance, error) {
+	selectionOwner, err := AdmitWorkflowEntityStateSelectionOwner(source, flowID)
+	if err != nil {
+		return WorkflowInstance{}, fmt.Errorf("decode declared-key entity state owner: %w", err)
+	}
+	if !selectionOwner.Owns(record.FlowInstance) {
+		return WorkflowInstance{}, fmt.Errorf("decode declared-key entity state route %q is not owned by flow %s", strings.TrimSpace(record.FlowInstance), strings.TrimSpace(flowID))
+	}
 	route, err := workflowInstanceRouteForExecution(source, flowID, record.FlowInstance)
 	if err != nil {
 		return WorkflowInstance{}, fmt.Errorf("decode declared-key entity state route: %w", err)
