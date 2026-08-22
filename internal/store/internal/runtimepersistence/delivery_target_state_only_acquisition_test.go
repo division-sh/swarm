@@ -520,13 +520,14 @@ func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores
 				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 0, 0)
 			})
 
-			t.Run("terminal state and terminated lifecycle are excluded", func(t *testing.T) {
+			t.Run("terminal state and non-active lifecycle are excluded", func(t *testing.T) {
 				for _, excluded := range []struct {
 					name           string
 					state          string
 					lifecycleState string
 				}{
 					{name: "terminal-state", state: "done"},
+					{name: "draining-lifecycle", state: "active", lifecycleState: "draining"},
 					{name: "terminated-lifecycle", state: "active", lifecycleState: "terminated"},
 				} {
 					t.Run(excluded.name, func(t *testing.T) {
@@ -805,10 +806,14 @@ func seedStateOnlyAcquisitionLifecycle(t *testing.T, backend string, db *sql.DB,
 	t.Helper()
 	query := `INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, terminated_at, created_at) VALUES (?, 'review', 'static', '{}', ?, ?, ?)`
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	args := []any{instancePath, status, now, now}
+	var terminatedAt any
+	if status == "terminated" {
+		terminatedAt = now
+	}
+	args := []any{instancePath, status, terminatedAt, now}
 	if backend == "postgres" {
-		query = `INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, terminated_at, created_at) VALUES ($1, 'review', 'static', '{}'::jsonb, $2, $3, $3)`
-		args = []any{instancePath, status, now}
+		query = `INSERT INTO flow_instances (instance_id, flow_template, mode, config, status, terminated_at, created_at) VALUES ($1, 'review', 'static', '{}'::jsonb, $2, $3, $4)`
+		args = []any{instancePath, status, terminatedAt, now}
 	}
 	if _, err := db.ExecContext(context.Background(), query, args...); err != nil {
 		t.Fatalf("seed state-only acquisition lifecycle: %v", err)

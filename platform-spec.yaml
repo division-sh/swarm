@@ -1365,9 +1365,11 @@ contract_formats:
             lifecycle companion. Broad selection, exact select_or_create appearance, target application, and engine preparation
             all consume this same classifier before assigning workflow identity; caller relabeling is forbidden.
             A matching active state row remains selectable before its flow_instances lifecycle companion exists; when a
-            companion exists, terminated or inactive lifecycle excludes that row. Joining through lifecycle as a prerequisite
+            companion exists, any non-active lifecycle (including draining or terminated) excludes that row. Joining through lifecycle as a prerequisite
             for selected ownership is forbidden.
-            Once committed, later matching rows cannot redirect the delivery. Pipeline computes one immutable
+            Once committed, later matching rows cannot redirect the delivery. Any non-active lifecycle companion, including
+            draining or terminated, makes that exact receiver unavailable to delayed, retry, replay, and restart execution even when its
+            entity stage is non-terminal; every execution path fails before state, effect, or settlement mutation. Pipeline computes one immutable
             DeliveryTargetApplication from the stamped target and passes it through state preload, both production engines,
             mutation ownership, and producer-source projection. Those consumers validate availability and agreement but do not
             select ownership. An exact selected entity_state row may predate its flow_instances lifecycle companion, including

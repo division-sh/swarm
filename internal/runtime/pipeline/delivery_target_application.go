@@ -207,9 +207,9 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 			return DeliveryTargetApplication{}, fmt.Errorf("validate exact admitted delivery target: %w", err)
 		}
 		owned := workflowInstanceOwnedByFlow(source, instance, flowID, evt.RunID())
-		terminal := deliveryTargetWorkflowInstanceTerminal(source, flowID, instance)
-		if !owned || terminal {
-			return DeliveryTargetApplication{}, fmt.Errorf("exact admitted delivery target lifecycle descriptor or status conflicts with compiled receiver: flow=%q workflow=%q route=%q state=%q status=%q owned=%t terminal=%t", flowID, instance.WorkflowName, instance.StorageRef, instance.CurrentState, instance.Status, owned, terminal)
+		unavailable := deliveryTargetWorkflowInstanceUnavailable(source, flowID, instance)
+		if !owned || unavailable {
+			return DeliveryTargetApplication{}, fmt.Errorf("exact admitted delivery target lifecycle descriptor or status conflicts with compiled receiver: flow=%q workflow=%q route=%q state=%q status=%q owned=%t unavailable=%t", flowID, instance.WorkflowName, instance.StorageRef, instance.CurrentState, instance.Status, owned, unavailable)
 		}
 		if err := validateDeliveryTargetDeclaredKey(source, flowID, nodeID, handler, executionEvent, policy.Acquisition, instance); err != nil {
 			return DeliveryTargetApplication{}, err
@@ -225,7 +225,7 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 		if _, err := requireWorkflowInstanceIdentity(route, identity.NormalizeEntityID(application.entityID), instance); err != nil {
 			return DeliveryTargetApplication{}, fmt.Errorf("validate exact admitted delivery target state: %w", err)
 		}
-		if !workflowInstanceOwnedByFlow(source, instance, flowID, evt.RunID()) || deliveryTargetWorkflowInstanceTerminal(source, flowID, instance) {
+		if !workflowInstanceOwnedByFlow(source, instance, flowID, evt.RunID()) || deliveryTargetWorkflowInstanceUnavailable(source, flowID, instance) {
 			return DeliveryTargetApplication{}, fmt.Errorf("exact admitted delivery target state conflicts with compiled receiver: flow=%q workflow=%q route=%q status=%q", flowID, instance.WorkflowName, instance.StorageRef, instance.Status)
 		}
 		if err := validateDeliveryTargetDeclaredKey(source, flowID, nodeID, handler, executionEvent, policy.Acquisition, instance); err != nil {
@@ -293,7 +293,7 @@ func validateDeliveryTargetDeclaredKey(source semanticview.Source, flowID, nodeI
 	if err != nil {
 		return fmt.Errorf("%s_invalid: node %s flow %s: %w", deliveryTargetAcquisitionCode(acquisition), strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
 	}
-	if !workflowInstanceOwnedByFlow(source, instance, flowID, evt.RunID()) || deliveryTargetWorkflowInstanceTerminal(source, flowID, instance) || !selectEntityCandidateMatches(instance, expected) {
+	if !workflowInstanceOwnedByFlow(source, instance, flowID, evt.RunID()) || deliveryTargetWorkflowInstanceUnavailable(source, flowID, instance) || !selectEntityCandidateMatches(instance, expected) {
 		return fmt.Errorf("%s_conflict: stamped target %q does not satisfy the committed declared key", deliveryTargetAcquisitionCode(acquisition), strings.TrimSpace(instance.StorageRef))
 	}
 	return nil
