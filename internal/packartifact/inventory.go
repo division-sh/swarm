@@ -226,6 +226,7 @@ type PlatformPackInventory struct {
 	runningPlatformVersion string
 	sourceDirectories      []string
 	entries                map[string]Entry
+	embeddedImportOrigins  map[string]ImportOrigin
 }
 
 func (i *PlatformPackInventory) SelectionMode() SelectionMode {
@@ -325,7 +326,20 @@ func LoadPlatformPackInventoryFS(fsys fs.FS, manifestPath, runningPlatformVersio
 	if err != nil {
 		return nil, err
 	}
-	return &PlatformPackInventory{mode: mode, digest: digest, runningPlatformVersion: runningPlatformVersion, entries: entries}, nil
+	inventory := &PlatformPackInventory{
+		mode: mode, digest: digest, runningPlatformVersion: runningPlatformVersion, entries: entries,
+	}
+	if mode == SelectionEmbedded {
+		inventory.embeddedImportOrigins = make(map[string]ImportOrigin, len(entries))
+		for id, entry := range entries {
+			_, origin, err := importedProjectArtifact(entry)
+			if err != nil {
+				return nil, fmt.Errorf("derive embedded pack %q import baseline: %w", id, err)
+			}
+			inventory.embeddedImportOrigins[id] = origin
+		}
+	}
+	return inventory, nil
 }
 
 type EffectivePackInventory struct {
@@ -355,6 +369,13 @@ func NewEffectivePackInventory(base *PlatformPackInventory, projects []ProjectPa
 		}
 		if !source.Origin.Valid() {
 			return nil, fmt.Errorf("project pack %q import origin is invalid", projectPath)
+		}
+		expectedOrigin, ok := base.embeddedImportOrigins[strings.TrimSpace(source.Origin.ID)]
+		if !ok {
+			return nil, fmt.Errorf("project pack %q import origin id %q has no embedded import baseline", projectPath, source.Origin.ID)
+		}
+		if source.Origin != expectedOrigin {
+			return nil, fmt.Errorf("project pack %q import origin contradicts the embedded import baseline for %q", projectPath, source.Origin.ID)
 		}
 		envelope, err := basepacks.ParseEnvelope(source.EnvelopeBody)
 		if err != nil {

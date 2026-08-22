@@ -65,6 +65,15 @@ func TestDevelopmentOverrideAndProjectPrecedenceAreFailClosed(t *testing.T) {
 	if !projectEntry.Modified() || string(projectEntry.ManifestBody()) != string(projectBody) {
 		t.Fatalf("project entry = modified:%t body:%q", projectEntry.Modified(), projectEntry.ManifestBody())
 	}
+	forgedDevelopmentOrigin := ImportOrigin{
+		Source: ProvenanceEmbedded, ID: developmentEntry.ID(), Version: developmentEntry.Version(), ManifestHash: developmentEntry.ManifestHash(),
+		EnvelopeHash: importedEnvelopeHash(projectEnvelopeBody),
+	}
+	if _, err := NewEffectivePackInventory(development, []ProjectPackSource{{
+		Path: "provider.demo", EnvelopeBody: projectEnvelopeBody, ManifestBody: projectBody, Origin: forgedDevelopmentOrigin,
+	}}); err == nil || !strings.Contains(err.Error(), "contradicts the embedded import baseline") {
+		t.Fatalf("development-selected forged origin error = %v, want embedded import baseline rejection", err)
+	}
 
 	if _, err := LoadDevelopmentPlatformPackInventory(testPlatformVersion, nil, embedded); err == nil {
 		t.Fatal("empty development override fell back to embedded inventory")

@@ -265,20 +265,14 @@ func importEmbeddedPackLocked(root, id string, entry Entry, transaction *project
 		return false, fmt.Errorf("inspect project pack directory: %w", statErr)
 	}
 
-	envelope := entry.Envelope()
-	envelope.Provenance.Source = ProvenanceProject
-	envelope.ManifestHash = ManifestHashDerived
-	envelopeBody, err := yaml.Marshal(envelope)
+	envelopeBody, origin, err := importedProjectArtifact(entry)
 	if err != nil {
-		return false, fmt.Errorf("marshal project pack %q envelope: %w", id, err)
+		return false, fmt.Errorf("derive project pack %q import artifact: %w", id, err)
 	}
 	manifestFile := packmodel.ManifestFileNameForType(entry.Type())
 	declared := ProjectPackManifestImport{
 		ID: id, Type: entry.Type(), Path: id,
-		Origin: ImportOrigin{
-			Source: ProvenanceEmbedded, ID: entry.ID(), Version: entry.Version(), ManifestHash: entry.ManifestHash(),
-			EnvelopeHash: importedEnvelopeHash(envelopeBody),
-		},
+		Origin: origin,
 	}
 	expectedManifest := ProjectPackManifest{Version: ProjectPackManifestVersion, Imports: []ProjectPackManifestImport{declared}}
 	manifestPath := filepath.Join(packsRoot, ProjectPackManifestFileName)
@@ -376,6 +370,20 @@ func importEmbeddedPackLocked(root, id string, entry Entry, transaction *project
 		return false, fmt.Errorf("publish project pack manifest: %w", err)
 	}
 	return true, nil
+}
+
+func importedProjectArtifact(entry Entry) ([]byte, ImportOrigin, error) {
+	envelope := entry.Envelope()
+	envelope.Provenance.Source = ProvenanceProject
+	envelope.ManifestHash = ManifestHashDerived
+	envelopeBody, err := yaml.Marshal(envelope)
+	if err != nil {
+		return nil, ImportOrigin{}, err
+	}
+	return envelopeBody, ImportOrigin{
+		Source: ProvenanceEmbedded, ID: entry.ID(), Version: entry.Version(), ManifestHash: entry.ManifestHash(),
+		EnvelopeHash: importedEnvelopeHash(envelopeBody),
+	}, nil
 }
 
 func projectImportEqual(a, b ProjectPackManifestImport) bool {

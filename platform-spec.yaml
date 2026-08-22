@@ -9926,7 +9926,9 @@ tool_model:
           their immutable receipt separately preserves embedded source/id/version/body-digest origin plus the exact project
           envelope digest emitted at import. Provenance and effective selection (`embedded`, `development_override`, or
           `project`) change readback classification but never create a verification shortcut. A receipt missing either
-          digest is invalid; no legacy reconstruction or fallback is permitted.
+          digest is invalid. Effective-inventory construction MUST require the complete receipt tuple to equal the baseline
+          derived from the binary's exact embedded artifact for that id; syntactic digest validity or agreement with edited
+          project bytes cannot establish embedded provenance. No legacy reconstruction or fallback is permitted.
         capabilities: >
           Required declared capability surface. The loader derives canonical capabilities mechanically from the accepted
           body manifest and requires the declared block to equal the derived block in canonical form. Drift, extra
