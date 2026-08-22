@@ -4045,6 +4045,54 @@ func TestStaticAgentMaterialization_SoleParentFlowPackageAgentsStartWithOwningFl
 	}
 }
 
+func TestFlowInstanceAgentRecordsMaterializeProjectDeclarationOwnedByFlow(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		mode         string
+		instanceID   string
+		instancePath string
+	}{
+		{name: "template", mode: runtimecontracts.FlowModeTemplate, instanceID: "inst-1", instancePath: "support/inst-1"},
+		{name: "singleton", mode: runtimecontracts.FlowModeSingleton, instanceID: "support", instancePath: "support"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source := loadSoleParentFlowAgentSource(t, tc.mode)
+			declarations := semanticview.AgentDeclarations(source)
+			if len(declarations) != 1 || declarations[0].Source.Layer != "project" || declarations[0].OwnerFlowID != "support" {
+				t.Fatalf("declarations = %#v, want one project declaration owned by support", declarations)
+			}
+			bundle, ok := semanticview.Bundle(source)
+			if !ok {
+				t.Fatal("loaded source does not expose its contract bundle")
+			}
+			scope, ok := source.FlowScopeByID("support")
+			if !ok {
+				t.Fatal("support flow scope missing")
+			}
+			schema, ok := source.FlowSchemaByID("support")
+			if !ok {
+				t.Fatal("support flow schema missing")
+			}
+			req := testActivationRequest(bundle, "support", tc.instanceID, "ent-1", tc.instancePath)
+			am := newFlowActivationManager(t, &flowActivationTestBus{}, &flowActivationTestInstanceStore{})
+			records, err := am.flowInstanceAgentRecords(req, schema, scope)
+			if err != nil {
+				t.Fatalf("flowInstanceAgentRecords: %v", err)
+			}
+			if len(records) != 1 {
+				t.Fatalf("materialized records = %#v, want project-owned agent exactly once", records)
+			}
+			cfg := records[0].Config
+			if cfg.ID != "backend" || cfg.FlowID != "support" || cfg.FlowPath != tc.instancePath {
+				t.Fatalf("materialized config = %#v, want backend on exact support instance %q", cfg, tc.instancePath)
+			}
+			if cfg.Identity.Name.Owner != declarations[0].OwnerURI {
+				t.Fatalf("materialized owner = %q, want canonical declaration owner %q", cfg.Identity.Name.Owner, declarations[0].OwnerURI)
+			}
+		})
+	}
+}
+
 func TestActivateFlowInstanceFailsWithoutWorkflowInstanceStore(t *testing.T) {
 	bus := &flowActivationTestBus{}
 	am := newTestAgentManagerWithOptions(t, bus, nil, AgentManagerOptions{WorkOwner: newTestManagerWorkOwner(t)})
@@ -4183,10 +4231,15 @@ backend:
 
 func loadSoleParentFlowStaticAgentSource(t *testing.T) semanticview.Source {
 	t.Helper()
+	return loadSoleParentFlowAgentSource(t, runtimecontracts.FlowModeStatic)
+}
+
+func loadSoleParentFlowAgentSource(t *testing.T, mode string) semanticview.Source {
+	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	root := t.TempDir()
 
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "package.yaml"), `
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "package.yaml"), fmt.Sprintf(`
 name: session-scope-validation
 version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
@@ -4195,8 +4248,8 @@ packages:
 flows:
   - id: support
     flow: support
-    mode: static
-`)
+    mode: %s
+`, mode))
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 item:
   item_id: string
