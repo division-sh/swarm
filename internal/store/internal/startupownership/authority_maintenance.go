@@ -31,7 +31,8 @@ type authorityHeadRecord struct {
 	PredecessorAuthorityID string          `json:"predecessor_authority_id,omitempty"`
 	SuccessorAuthorityID   string          `json:"successor_authority_id,omitempty"`
 	Snapshot               json.RawMessage `json:"snapshot"`
-	CreatedAt              time.Time       `json:"created_at"`
+	CreatedAt              string          `json:"created_at"`
+	createdAtValid         bool
 }
 
 func (s *StartupPostgresOwner) InspectAuthority(ctx context.Context) (runtimestartupownership.AuthorityInspection, error) {
@@ -130,17 +131,14 @@ func loadAuthorityHeadRecord(ctx context.Context, queryer authorityQueryer, sqli
 	record.PredecessorAuthorityID = predecessor.String
 	record.SuccessorAuthorityID = successor.String
 	record.Snapshot = append(json.RawMessage(nil), raw...)
-	record.CreatedAt, err = authorityRecordTime(createdAt)
-	if err != nil {
-		return authorityHeadRecord{}, false, err
-	}
+	record.CreatedAt, record.createdAtValid = authorityRecordTimestamp(createdAt)
 	return record, true, nil
 }
 
-func authorityRecordTime(value any) (time.Time, error) {
+func authorityRecordTimestamp(value any) (string, bool) {
 	switch typed := value.(type) {
 	case time.Time:
-		return typed.UTC(), nil
+		return typed.UTC().Format(time.RFC3339Nano), true
 	case string:
 		for _, layout := range []string{
 			time.RFC3339Nano,
@@ -153,13 +151,14 @@ func authorityRecordTime(value any) (time.Time, error) {
 			"2006-01-02 15:04:05",
 		} {
 			if parsed, err := time.Parse(layout, typed); err == nil {
-				return parsed.UTC(), nil
+				return parsed.UTC().Format(time.RFC3339Nano), true
 			}
 		}
+		return typed, false
 	case []byte:
-		return authorityRecordTime(string(typed))
+		return authorityRecordTimestamp(string(typed))
 	}
-	return time.Time{}, fmt.Errorf("inspect process authority created_at: unsupported value %T", value)
+	return fmt.Sprint(value), false
 }
 
 func classifyAuthorityHead(record authorityHeadRecord, exists bool, backend string) (runtimestartupownership.AuthorityInspection, error) {
@@ -186,7 +185,7 @@ func classifyAuthorityHead(record authorityHeadRecord, exists bool, backend stri
 		FindingsDigest: digest, Detail: "The recorded project session is inconsistent and must be repaired before serving.",
 	}
 	var authority runtimestartupownership.Authority
-	if json.Unmarshal(record.Snapshot, &authority) == nil && authority.Validate() == nil && authorityMatchesRecord(authority, record) {
+	if record.createdAtValid && json.Unmarshal(record.Snapshot, &authority) == nil && authority.Validate() == nil && authorityMatchesRecord(authority, record) {
 		result.Status = runtimestartupownership.AuthorityInspectionValid
 		result.State = authority.State
 		result.OwnerID = authority.OwnerID
