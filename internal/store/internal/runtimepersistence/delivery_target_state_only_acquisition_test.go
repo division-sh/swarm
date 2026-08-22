@@ -382,17 +382,15 @@ func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores
 				}
 			})
 
-			t.Run("root handler cannot borrow a workflow entity row", func(t *testing.T) {
+			t.Run("root flow admits only explicit run identity", func(t *testing.T) {
 				flowID := "root-owner-" + uuid.NewString()
-				accountID := "root-key-" + uuid.NewString()
-				entityID := uuid.NewString()
-				seedStateOnlyAcquisitionEntity(t, backend, db, runID, entityID, flowID, "active", accountID)
-				evt := newEvent(accountID)
-				if err := newBusForSource(t, stateOnlyRootAcquisitionSource(flowID), flowID, "selector").Publish(ctx, evt); err == nil || !strings.Contains(err.Error(), "target owner is missing") {
-					t.Fatalf("root handler borrowed workflow entity row: %v", err)
+				owner, err := runtimepipeline.AdmitWorkflowEntityStateSelectionOwner(stateOnlyRootAcquisitionSource(flowID), flowID)
+				if err != nil {
+					t.Fatal(err)
 				}
-				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 0, 0)
-				assertStateOnlyAcquisitionLifecycleCount(t, backend, db, flowID, 0)
+				if !owner.Owns(runID) || owner.Owns(flowID+"/child") {
+					t.Fatalf("root owner route classification: run=%t child=%t", owner.Owns(runID), owner.Owns(flowID+"/child"))
+				}
 			})
 
 			t.Run("select or create chooses established state-only owner", func(t *testing.T) {
