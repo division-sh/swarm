@@ -4597,6 +4597,26 @@ func materializeSelectedExecutionForkForTest(
 	if err != nil {
 		t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 	}
+	db := storetest.DatabaseForTest(pg)
+	for _, state := range workflowStates {
+		routePath := state.Route.InstancePath
+		if state.AddressKind == runfork.RunForkSelectedContractWorkflowStateRunScope {
+			routePath = materialized.ForkRunID
+		}
+		var workflowName, mode, status string
+		var rows int
+		if err := db.QueryRowContext(ctx, `
+			SELECT COUNT(*), COALESCE(MAX(fi.flow_template), ''), COALESCE(MAX(fi.mode), ''), COALESCE(MAX(fi.status), '')
+			FROM entity_state es
+			JOIN flow_instances fi ON fi.instance_id = es.flow_instance
+			WHERE es.run_id = $1::uuid AND es.entity_id = $2::uuid AND es.flow_instance = $3
+		`, materialized.ForkRunID, state.EntityID, routePath).Scan(&rows, &workflowName, &mode, &status); err != nil {
+			t.Fatalf("load selected-contract workflow state companion: %v", err)
+		}
+		if rows != 1 || workflowName != state.FlowID || mode != state.Mode || status != "active" {
+			t.Fatalf("selected-contract workflow state companion = rows:%d workflow:%q mode:%q status:%q", rows, workflowName, mode, status)
+		}
+	}
 	return materialized
 }
 

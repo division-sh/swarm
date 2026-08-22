@@ -23,6 +23,61 @@ type EnginePublicationPlanner interface {
 	FinalizeEnginePublications(context.Context, []runtimeengine.CommittedDurablePublication) error
 }
 
+// WorkflowEngineStateTransition is the closed atomic relation between the
+// selected entity_state row and its exact flow_instances companion.
+type WorkflowEngineStateTransition uint8
+
+const (
+	WorkflowEngineStateTransitionUnknown WorkflowEngineStateTransition = iota
+	WorkflowEngineStateTransitionCreateStateAndCompanion
+	WorkflowEngineStateTransitionUpdateStateAndCompanion
+	WorkflowEngineStateTransitionUpdateStateCreateCompanion
+)
+
+func (t WorkflowEngineStateTransition) Valid() bool {
+	switch t {
+	case WorkflowEngineStateTransitionCreateStateAndCompanion,
+		WorkflowEngineStateTransitionUpdateStateAndCompanion,
+		WorkflowEngineStateTransitionUpdateStateCreateCompanion:
+		return true
+	default:
+		return false
+	}
+}
+
+func (t WorkflowEngineStateTransition) CreatesState() bool {
+	return t == WorkflowEngineStateTransitionCreateStateAndCompanion
+}
+
+func (t WorkflowEngineStateTransition) UpdatesState() bool {
+	return t == WorkflowEngineStateTransitionUpdateStateAndCompanion ||
+		t == WorkflowEngineStateTransitionUpdateStateCreateCompanion
+}
+
+func (t WorkflowEngineStateTransition) CreatesLifecycleCompanion() bool {
+	return t == WorkflowEngineStateTransitionCreateStateAndCompanion ||
+		t == WorkflowEngineStateTransitionUpdateStateCreateCompanion
+}
+
+func (t WorkflowEngineStateTransition) UpdatesLifecycleCompanion() bool {
+	return t == WorkflowEngineStateTransitionUpdateStateAndCompanion
+}
+
+func WorkflowEngineStateTransitionForPresence(presence WorkflowTargetPersistencePresence) (WorkflowEngineStateTransition, error) {
+	switch presence {
+	case WorkflowTargetPersistenceAbsent:
+		return WorkflowEngineStateTransitionCreateStateAndCompanion, nil
+	case WorkflowTargetPersistenceStateOnly:
+		return WorkflowEngineStateTransitionUpdateStateCreateCompanion, nil
+	case WorkflowTargetPersistenceComplete:
+		return WorkflowEngineStateTransitionUpdateStateAndCompanion, nil
+	case WorkflowTargetPersistenceLifecycleOnly:
+		return WorkflowEngineStateTransitionUnknown, fmt.Errorf("workflow engine mutation rejects lifecycle companion without state")
+	default:
+		return WorkflowEngineStateTransitionUnknown, fmt.Errorf("workflow engine mutation requires closed target persistence presence")
+	}
+}
+
 // WorkflowEngineStateRecord is the complete selected-store projection for one
 // workflow state mutation. Runtime owns semantic projection; private adapters
 // own SQL representation and compare-and-write mechanics.
@@ -50,7 +105,7 @@ type WorkflowEngineStateRecord struct {
 	TerminatedAt     time.Time
 	ExpectedState    string
 	ExpectedRevision int64
-	Create           bool
+	Transition       WorkflowEngineStateTransition
 }
 
 func (r WorkflowEngineStateRecord) Validate() error {
@@ -87,7 +142,10 @@ func (r WorkflowEngineStateRecord) Validate() error {
 	} else if !r.TerminatedAt.IsZero() {
 		return fmt.Errorf("non-terminal workflow engine state cannot carry termination time")
 	}
-	if r.Create {
+	if !r.Transition.Valid() {
+		return fmt.Errorf("workflow engine state record requires a closed persistence transition")
+	}
+	if r.Transition.CreatesState() {
 		if r.ExpectedRevision != 0 || strings.TrimSpace(r.ExpectedState) != "" {
 			return fmt.Errorf("workflow engine state creation cannot carry an expected existing revision")
 		}
@@ -203,7 +261,7 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 	}
 	if retirement := c.RouteRetirement; retirement != nil {
 		route := runtimeflowidentity.StoredRoute(retirement.Route.ScopeKey, retirement.Route.InstanceID, retirement.Route.InstancePath)
-		if !route.Valid() || route != c.State.Route || c.State.Create || strings.TrimSpace(c.State.Status) != "terminated" {
+		if !route.Valid() || route != c.State.Route || c.State.Transition.CreatesState() || strings.TrimSpace(c.State.Status) != "terminated" {
 			return fmt.Errorf("workflow engine route retirement requires the exact terminal state route")
 		}
 	}
@@ -223,7 +281,7 @@ func workflowEngineStateRecordEmpty(record WorkflowEngineStateRecord) bool {
 		strings.TrimSpace(record.EntityType) == "" && strings.TrimSpace(record.Slug) == "" && strings.TrimSpace(record.Name) == "" &&
 		len(record.Fields) == 0 && len(record.Bookkeeping) == 0 && len(record.Gates) == 0 && len(record.Accumulator) == 0 && len(record.Config) == 0 && len(record.InitialFields) == 0 &&
 		record.EnteredStageAt.IsZero() && record.CreatedAt.IsZero() && record.UpdatedAt.IsZero() && record.TerminatedAt.IsZero() &&
-		strings.TrimSpace(record.ExpectedState) == "" && record.ExpectedRevision == 0 && !record.Create
+		strings.TrimSpace(record.ExpectedState) == "" && record.ExpectedRevision == 0 && record.Transition == WorkflowEngineStateTransitionUnknown
 }
 
 func workflowEngineStateRecord(
@@ -232,7 +290,7 @@ func workflowEngineStateRecord(
 	instance WorkflowInstance,
 	expectedState string,
 	expectedRevision int64,
-	create bool,
+	transition WorkflowEngineStateTransition,
 	updatedAt time.Time,
 ) (WorkflowEngineStateRecord, error) {
 	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
@@ -285,7 +343,7 @@ func workflowEngineStateRecord(
 		CreatedAt:      canonicalWorkflowInstancePersistedTime(instance.CreatedAt),
 		UpdatedAt:      canonicalWorkflowInstancePersistedTime(updatedAt),
 		TerminatedAt:   canonicalWorkflowInstanceOptionalPersistedTime(instance.TerminatedAt),
-		ExpectedState:  strings.TrimSpace(expectedState), ExpectedRevision: expectedRevision, Create: create,
+		ExpectedState:  strings.TrimSpace(expectedState), ExpectedRevision: expectedRevision, Transition: transition,
 	}
 	if err := record.Validate(); err != nil {
 		return WorkflowEngineStateRecord{}, err

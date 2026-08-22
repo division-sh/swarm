@@ -750,6 +750,10 @@ func (s *PostgresStore) LoadWorkflowInstance(ctx context.Context, route flowiden
 	return s.pipelinePostgresOwner.LoadWorkflowInstance(ctx, route)
 }
 
+func (s *PostgresStore) LoadWorkflowTargetPersistence(ctx context.Context, route flowidentity.Route, entityID identity.EntityID) (pipeline.WorkflowTargetPersistenceRecord, error) {
+	return s.pipelinePostgresOwner.LoadWorkflowTargetPersistence(ctx, route, entityID)
+}
+
 func (s *PostgresStore) LoadWorkflowTimerActivation(ctx context.Context, activationID string) (pipeline.WorkflowTimerActivation, bool, error) {
 	return s.pipelinePostgresOwner.LoadWorkflowTimerActivation(ctx, activationID)
 }
@@ -1752,6 +1756,10 @@ func (s *SQLiteRuntimeStore) LoadWorkflowEntityState(ctx context.Context, route 
 
 func (s *SQLiteRuntimeStore) LoadWorkflowInstance(ctx context.Context, route flowidentity.Route) (pipeline.WorkflowInstance, bool, error) {
 	return s.pipelineSQLiteOwner.LoadWorkflowInstance(ctx, route)
+}
+
+func (s *SQLiteRuntimeStore) LoadWorkflowTargetPersistence(ctx context.Context, route flowidentity.Route, entityID identity.EntityID) (pipeline.WorkflowTargetPersistenceRecord, error) {
+	return s.pipelineSQLiteOwner.LoadWorkflowTargetPersistence(ctx, route, entityID)
 }
 
 func (s *SQLiteRuntimeStore) LoadWorkflowTimerActivation(ctx context.Context, activationID string) (pipeline.WorkflowTimerActivation, bool, error) {

@@ -68,6 +68,11 @@ func newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db *sql.DB, run
 	} else {
 		store.instanceReader = pipelineTestWorkflowInstanceReader{db: db, dialect: workflowStoreDialectSQLite}
 	}
+	if owner, ok := runner.(WorkflowTargetPersistenceReader); ok {
+		store.targetReader = owner
+	} else {
+		store.targetReader = pipelineTestWorkflowInstanceReader{db: db, dialect: workflowStoreDialectSQLite}
+	}
 	if owner, ok := runner.(WorkflowEngineMutationOwner); ok {
 		store.engineMutations = owner
 	}
@@ -116,6 +121,9 @@ func newWorkflowPersistenceFixtureStore(runner *recordingRuntimeMutationRunner) 
 	}
 	if owner, ok := any(runner).(WorkflowEntityStatePersistenceReader); ok {
 		store.entityStateReader = owner
+	}
+	if owner, ok := any(runner).(WorkflowTargetPersistenceReader); ok {
+		store.targetReader = owner
 	}
 	if owner, ok := any(runner).(WorkflowInitialMaterializationCommitOwner); ok {
 		store.initialCommits = owner

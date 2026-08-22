@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 
@@ -39,23 +40,29 @@ func TestWorkflowInstanceStore_RunScopedCurrentStateRowsDoNotBleed(t *testing.T)
 	}
 	ctxA := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runA)
 	ctxB := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runB)
-	for _, tc := range []struct {
-		ctx   context.Context
-		state string
-	}{
-		{ctx: ctxA, state: "source_state"},
-		{ctx: ctxB, state: "fork_state"},
-	} {
-		if err := store.upsert(tc.ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
-			InstanceID:      "run-scope",
-			StorageRef:      "run-scope",
-			EntityID:        entityID,
-			WorkflowName:    "run-scope",
-			WorkflowVersion: "1.0.0",
-			CurrentState:    tc.state,
-		})); err != nil {
-			t.Fatalf("upsert %s: %v", tc.state, err)
-		}
+	if err := store.upsert(ctxA, materializedWorkflowInstanceForTest(WorkflowInstance{
+		InstanceID:      "run-scope",
+		StorageRef:      "run-scope",
+		EntityID:        entityID,
+		WorkflowName:    "run-scope",
+		WorkflowVersion: "1.0.0",
+		CurrentState:    "source_state",
+	})); err != nil {
+		t.Fatalf("upsert source state: %v", err)
+	}
+	// flow_instances is global while entity_state is run-scoped. This read
+	// isolation proof establishes a complete second-run pair directly instead
+	// of asking the runtime mutation path to repair lifecycle-only persistence.
+	now := time.Now().UTC()
+	if _, err := db.ExecContext(ctxB, `
+		INSERT INTO entity_state (
+			run_id, entity_id, flow_instance, entity_type, current_state,
+			gates, fields, bookkeeping, accumulator, revision,
+			entered_state_at, created_at, updated_at
+		) VALUES ($1::uuid, $2::uuid, 'run-scope', 'run-scope', 'fork_state',
+			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, $3, $3, $3)
+	`, runB, entityID, now); err != nil {
+		t.Fatalf("seed complete fork-run state: %v", err)
 	}
 	gotA, ok, err := store.Load(ctxA, testWorkflowInstanceRoute("run-scope"))
 	if err != nil || !ok {

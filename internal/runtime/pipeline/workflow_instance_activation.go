@@ -95,7 +95,7 @@ func (r FlowInstanceActivationRecord) Validate() error {
 	if err := r.State.Validate(); err != nil {
 		return fmt.Errorf("flow instance activation state: %w", err)
 	}
-	if !r.State.Create {
+	if !r.State.Transition.CreatesState() {
 		return fmt.Errorf("flow instance activation requires a creating state record")
 	}
 	r.Route = runtimeflowidentity.StoredRoute(r.Route.ScopeKey, r.Route.InstanceID, r.Route.InstancePath)
@@ -189,7 +189,7 @@ func (p FlowInstanceActivationPlan) PersistenceRecord() (FlowInstanceActivationR
 	if err != nil {
 		return FlowInstanceActivationRecord{}, err
 	}
-	state, err := workflowEngineStateRecord(normalized.Readiness.RunID, normalized.Identity.Route(), instance, "", 0, true, normalized.OccurredAt)
+	state, err := workflowEngineStateRecord(normalized.Readiness.RunID, normalized.Identity.Route(), instance, "", 0, WorkflowEngineStateTransitionCreateStateAndCompanion, normalized.OccurredAt)
 	if err != nil {
 		return FlowInstanceActivationRecord{}, err
 	}

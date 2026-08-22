@@ -19,6 +19,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -708,6 +709,14 @@ func TestRunForkSelectedContractBinding_MaterializesDurableForkRunBinding(t *tes
 		activated.SelectedContractBinding.ForkRunID != materialized.ForkRunID {
 		t.Fatalf("activated selected binding = %#v", activated.SelectedContractBinding)
 	}
+	forkState := stateOnlyWorkflowEngineMutationRecord(
+		t, materialized.ForkRunID, "flow-a", "flow-a/1", entityID, "ready", 1, at,
+	)
+	forkExecutionCtx := runtimecorrelation.WithRunID(ctx, materialized.ForkRunID)
+	if _, err := pg.CommitWorkflowEngineMutation(forkExecutionCtx, runtimepipeline.WorkflowEngineMutationCommand{State: forkState}); err != nil {
+		t.Fatalf("execute activated state-only fork target: %v", err)
+	}
+	assertWorkflowTargetTransitionRows(t, "postgres", db, materialized.ForkRunID, entityID, "flow-a/1", "flow-a", "done", 2, 1)
 
 	var forkEventCount, forkDeliveryCount int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid`, materialized.ForkRunID).Scan(&forkEventCount); err != nil {

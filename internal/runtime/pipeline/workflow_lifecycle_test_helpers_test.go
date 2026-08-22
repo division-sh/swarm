@@ -214,7 +214,7 @@ func commitTestWorkflowLifecycleMutation(
 	if updatedAt.Before(instance.CreatedAt) {
 		updatedAt = instance.CreatedAt
 	}
-	state, err := workflowEngineStateRecord(runID, route, instance, expectedState, instance.Revision, false, updatedAt)
+	state, err := workflowEngineStateRecord(runID, route, instance, expectedState, instance.Revision, WorkflowEngineStateTransitionUpdateStateAndCompanion, updatedAt)
 	if err != nil {
 		return err
 	}
