@@ -81,7 +81,7 @@ func (s *PipelinePostgresOwner) LoadWorkflowTargetPersistence(ctx context.Contex
 	return assembleWorkflowTargetPersistence(route, entityID, state, stateExists, companion, companionExists)
 }
 
-func (s *PipelinePostgresOwner) SelectActiveWorkflowEntityStates(ctx context.Context, scopeKey string, selectors []runtimepipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
+func (s *PipelinePostgresOwner) SelectActiveWorkflowEntityStates(ctx context.Context, owner runtimepipeline.WorkflowEntityStateSelectionOwner, selectors []runtimepipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
 	if s == nil || s.backend == nil {
 		return nil, fmt.Errorf("postgres workflow entity state reader is required")
 	}
@@ -89,7 +89,7 @@ func (s *PipelinePostgresOwner) SelectActiveWorkflowEntityStates(ctx context.Con
 	if err != nil {
 		return nil, err
 	}
-	scopeKey = strings.Trim(strings.TrimSpace(scopeKey), "/")
+	scopeKey := owner.ScopeKey()
 	selectors = runtimepipeline.NormalizeWorkflowInstanceFieldSelectors(selectors)
 	if scopeKey == "" || len(selectors) == 0 {
 		return nil, nil
@@ -114,7 +114,7 @@ func (s *PipelinePostgresOwner) SelectActiveWorkflowEntityStates(ctx context.Con
 	if err != nil {
 		return nil, err
 	}
-	return runtimepipeline.FilterWorkflowEntityStatePersistenceRecords(records, selectors, excludedStates)
+	return runtimepipeline.FilterWorkflowEntityStatePersistenceRecords(records, owner, selectors, excludedStates)
 }
 
 func (s *PipelinePostgresOwner) ListWorkflowInstances(ctx context.Context) ([]runtimepipeline.WorkflowInstance, error) {
@@ -501,7 +501,7 @@ func loadSQLiteWorkflowLifecycleCompanion(ctx context.Context, db interface {
 	return record, true, nil
 }
 
-func (s *PipelineSQLiteOwner) SelectActiveWorkflowEntityStates(ctx context.Context, scopeKey string, selectors []runtimepipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
+func (s *PipelineSQLiteOwner) SelectActiveWorkflowEntityStates(ctx context.Context, owner runtimepipeline.WorkflowEntityStateSelectionOwner, selectors []runtimepipeline.WorkflowInstanceFieldSelector, excludedStates []string) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
 	if s == nil || s.backend == nil {
 		return nil, fmt.Errorf("sqlite workflow entity state reader is required")
 	}
@@ -509,7 +509,7 @@ func (s *PipelineSQLiteOwner) SelectActiveWorkflowEntityStates(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	scopeKey = strings.Trim(strings.TrimSpace(scopeKey), "/")
+	scopeKey := owner.ScopeKey()
 	selectors = runtimepipeline.NormalizeWorkflowInstanceFieldSelectors(selectors)
 	if scopeKey == "" || len(selectors) == 0 {
 		return nil, nil
@@ -534,7 +534,7 @@ func (s *PipelineSQLiteOwner) SelectActiveWorkflowEntityStates(ctx context.Conte
 	if err != nil {
 		return nil, err
 	}
-	return runtimepipeline.FilterWorkflowEntityStatePersistenceRecords(records, selectors, excludedStates)
+	return runtimepipeline.FilterWorkflowEntityStatePersistenceRecords(records, owner, selectors, excludedStates)
 }
 
 func (s *PipelineSQLiteOwner) ListWorkflowInstances(ctx context.Context) ([]runtimepipeline.WorkflowInstance, error) {

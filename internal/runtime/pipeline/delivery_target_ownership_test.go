@@ -529,7 +529,7 @@ func (r deliveryTargetWorkflowReader) LoadWorkflowEntityState(_ context.Context,
 	return deliveryTargetStateRecord(instance), true, nil
 }
 
-func (r deliveryTargetWorkflowReader) SelectActiveWorkflowEntityStates(context.Context, string, []WorkflowInstanceFieldSelector, []string) ([]WorkflowEntityStatePersistenceRecord, error) {
+func (r deliveryTargetWorkflowReader) SelectActiveWorkflowEntityStates(context.Context, WorkflowEntityStateSelectionOwner, []WorkflowInstanceFieldSelector, []string) ([]WorkflowEntityStatePersistenceRecord, error) {
 	if r.selectedStates != nil {
 		return append([]WorkflowEntityStatePersistenceRecord(nil), r.selectedStates...), nil
 	}
@@ -760,9 +760,9 @@ func TestHandlerExecutionEntityRequirementIgnoresUnevaluatedFields(t *testing.T)
 
 func deliveryTargetOwnershipSource() semanticview.Source {
 	flow := runtimecontracts.FlowContractView{
-		Path: "review", Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
+		Path: "review", Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review", Mode: runtimecontracts.FlowModeTemplate},
 		Schema: runtimecontracts.FlowSchemaDocument{
-			InitialState: "active", States: []string{"active", "done"},
+			Mode: runtimecontracts.FlowModeTemplate, InitialState: "active", States: []string{"active", "done"},
 			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{
 				{Name: "work_created", Event: "work.created", Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeCreate}},
 				{Name: "work_selected", Event: "work.selected", Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeSelect}},

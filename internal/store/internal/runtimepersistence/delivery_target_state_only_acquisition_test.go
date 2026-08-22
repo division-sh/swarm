@@ -26,9 +26,8 @@ func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			selected, db, ctx, runID := openStateOnlyAcquisitionStore(t, backend)
-			newBus := func(t *testing.T, flowID, nodeID string) *runtimebus.EventBus {
+			newBusForSource := func(t *testing.T, source semanticview.Source, flowID, nodeID string) *runtimebus.EventBus {
 				t.Helper()
-				source := stateOnlyAcquisitionSource(flowID)
 				node, err := runtimeidentity.AdmitExecutableNodeDeclaration(runtimeidentity.RootPackageKey, flowID, nodeID)
 				if err != nil {
 					t.Fatal(err)
@@ -51,6 +50,10 @@ func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores
 					t.Fatal(err)
 				}
 				return bus
+			}
+			newBus := func(t *testing.T, flowID, nodeID string) *runtimebus.EventBus {
+				t.Helper()
+				return newBusForSource(t, stateOnlyAcquisitionSource(flowID), flowID, nodeID)
 			}
 			newEvent := func(accountID string) events.Event {
 				payload, err := json.Marshal(map[string]any{"account_id": accountID})
@@ -148,6 +151,86 @@ func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores
 					t.Fatalf("publish state-only select: %v", err)
 				}
 				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 1, 1)
+			})
+
+			t.Run("select excludes nested child template owner", func(t *testing.T) {
+				parentID := "parent-singleton-" + uuid.NewString()
+				childID := "child-template-" + uuid.NewString()
+				accountID := "nested-template-key-" + uuid.NewString()
+				childPath := parentID + "/" + childID + "/instance"
+				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), childPath, "active", accountID)
+				evt := newEvent(accountID)
+				source := stateOnlyNestedAcquisitionSource(parentID, runtimecontracts.FlowModeSingleton, childID, runtimecontracts.FlowModeTemplate)
+				if err := newBusForSource(t, source, parentID, "selector").Publish(ctx, evt); err == nil || !strings.Contains(err.Error(), "select_entity_no_match") {
+					t.Fatalf("nested child template selection error = %v", err)
+				}
+				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 0, 0)
+				assertStateOnlyAcquisitionLifecycleCount(t, backend, db, childPath, 0)
+			})
+
+			t.Run("select or create ignores nested child and materializes parent", func(t *testing.T) {
+				parentID := "parent-upsert-" + uuid.NewString()
+				childID := "child-upsert-" + uuid.NewString()
+				accountID := "nested-upsert-key-" + uuid.NewString()
+				childPath := parentID + "/" + childID + "/instance"
+				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), childPath, "active", accountID)
+				evt := newEvent(accountID)
+				source := stateOnlyNestedAcquisitionSource(parentID, runtimecontracts.FlowModeSingleton, childID, runtimecontracts.FlowModeTemplate)
+				bus := newBusForSource(t, source, parentID, "upserter")
+				plan, err := bus.CheckPublishRecipientPlan(ctx, evt)
+				if err != nil {
+					t.Fatalf("plan parent select-or-create: %v", err)
+				}
+				if len(plan.DeliveryRoutes) != 1 || !plan.DeliveryRoutes[0].Target.MaterializingEntity() || plan.DeliveryRoutes[0].Target.Route().FlowInstance != parentID {
+					t.Fatalf("parent select-or-create routes = %#v, want materializing parent %q and never child %q", plan.DeliveryRoutes, parentID, childPath)
+				}
+				if err := bus.Publish(ctx, evt); err != nil {
+					t.Fatalf("publish parent select-or-create: %v", err)
+				}
+				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 1, 1)
+				assertStateOnlyAcquisitionLifecycleCount(t, backend, db, childPath, 0)
+			})
+
+			t.Run("select excludes nested child singleton from parent template", func(t *testing.T) {
+				parentID := "parent-template-" + uuid.NewString()
+				childID := "child-singleton-" + uuid.NewString()
+				accountID := "nested-singleton-key-" + uuid.NewString()
+				childPath := parentID + "/" + childID
+				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), childPath, "active", accountID)
+				evt := newEvent(accountID)
+				source := stateOnlyNestedAcquisitionSource(parentID, runtimecontracts.FlowModeTemplate, childID, runtimecontracts.FlowModeSingleton)
+				if err := newBusForSource(t, source, parentID, "selector").Publish(ctx, evt); err == nil || !strings.Contains(err.Error(), "select_entity_no_match") {
+					t.Fatalf("nested child singleton selection error = %v", err)
+				}
+				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 0, 0)
+				assertStateOnlyAcquisitionLifecycleCount(t, backend, db, childPath, 0)
+			})
+
+			t.Run("select preserves direct parent template owner beside nested child", func(t *testing.T) {
+				parentID := "parent-template-valid-" + uuid.NewString()
+				childID := "child-template-competing-" + uuid.NewString()
+				accountID := "parent-template-key-" + uuid.NewString()
+				parentEntityID := uuid.NewString()
+				parentPath := parentID + "/instance"
+				childPath := parentID + "/" + childID + "/instance"
+				seedStateOnlyAcquisitionEntity(t, backend, db, runID, uuid.NewString(), childPath, "active", accountID)
+				seedStateOnlyAcquisitionEntity(t, backend, db, runID, parentEntityID, parentPath, "active", accountID)
+				evt := newEvent(accountID)
+				source := stateOnlyNestedAcquisitionSource(parentID, runtimecontracts.FlowModeTemplate, childID, runtimecontracts.FlowModeTemplate)
+				bus := newBusForSource(t, source, parentID, "selector")
+				plan, err := bus.CheckPublishRecipientPlan(ctx, evt)
+				if err != nil {
+					t.Fatalf("plan parent template owner: %v", err)
+				}
+				want := events.MustExistingEntityTarget(events.RouteIdentity{FlowID: parentID, FlowInstance: parentPath, EntityID: parentEntityID})
+				if len(plan.DeliveryRoutes) != 1 || plan.DeliveryRoutes[0].Target != want {
+					t.Fatalf("parent template routes = %#v, want %#v and never child %q", plan.DeliveryRoutes, want, childPath)
+				}
+				if err := bus.Publish(ctx, evt); err != nil {
+					t.Fatalf("publish parent template owner: %v", err)
+				}
+				assertStateOnlyAcquisitionMutationCounts(t, backend, db, evt.ID(), 1, 1)
+				assertStateOnlyAcquisitionLifecycleCount(t, backend, db, childPath, 0)
 			})
 
 			t.Run("select or create chooses established state-only owner", func(t *testing.T) {
@@ -260,6 +343,39 @@ func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores
 	}
 }
 
+func TestWorkflowEntityStateSelectionOwnerUsesExactAuthoredScope(t *testing.T) {
+	parentID := "parent"
+	childID := "child"
+	tests := []struct {
+		name       string
+		parentMode string
+		path       string
+		want       bool
+	}{
+		{name: "singleton exact", parentMode: runtimecontracts.FlowModeSingleton, path: "parent", want: true},
+		{name: "singleton rejects concrete suffix", parentMode: runtimecontracts.FlowModeSingleton, path: "parent/instance"},
+		{name: "singleton rejects nested template", parentMode: runtimecontracts.FlowModeSingleton, path: "parent/child/instance"},
+		{name: "template direct instance", parentMode: runtimecontracts.FlowModeTemplate, path: "parent/instance", want: true},
+		{name: "template rejects authored child singleton", parentMode: runtimecontracts.FlowModeTemplate, path: "parent/child"},
+		{name: "template rejects authored child instance", parentMode: runtimecontracts.FlowModeTemplate, path: "parent/child/instance"},
+		{name: "template rejects unrelated", parentMode: runtimecontracts.FlowModeTemplate, path: "sibling/instance"},
+		{name: "template rejects nested arbitrary path", parentMode: runtimecontracts.FlowModeTemplate, path: "parent/arbitrary/instance"},
+		{name: "template rejects trailing slash alias", parentMode: runtimecontracts.FlowModeTemplate, path: "parent/instance/"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source := stateOnlyNestedAcquisitionSource(parentID, test.parentMode, childID, runtimecontracts.FlowModeSingleton)
+			owner, err := runtimepipeline.AdmitWorkflowEntityStateSelectionOwner(source, parentID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := owner.Owns(test.path); got != test.want {
+				t.Fatalf("owner.Owns(%q) = %t, want %t", test.path, got, test.want)
+			}
+		})
+	}
+}
+
 type stateOnlyAcquisitionStore interface {
 	storeTestDurableEventBusStore
 }
@@ -312,6 +428,54 @@ func stateOnlyAcquisitionSource(flowID string) semanticview.Source {
 			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{flowID: &root.Children[0]},
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{flowID: flow.Schema},
+	}
+	return semanticview.Wrap(bundle)
+}
+
+func stateOnlyNestedAcquisitionSource(parentID, parentMode, childID, childMode string) semanticview.Source {
+	binding := []runtimecontracts.SelectEntityKeyBinding{{Field: "account_id", Ref: "payload.account_id", RefPath: runtimepaths.Parse("payload.account_id")}}
+	flow := func(id, path, mode string) runtimecontracts.FlowContractView {
+		return runtimecontracts.FlowContractView{
+			Path: path, Paths: runtimecontracts.FlowContractPaths{ID: id, Flow: id, Mode: mode},
+			Schema: runtimecontracts.FlowSchemaDocument{
+				Name: id, Mode: mode, InitialState: "active",
+				States: []string{"active", "done"}, TerminalStates: []string{"done"},
+			},
+			Events: map[string]runtimecontracts.EventCatalogEntry{"test.node_emitted": {}},
+			Nodes: map[string]runtimecontracts.SystemNodeContract{
+				"selector": {
+					ID: "selector", SubscribesTo: []string{"test.node_emitted"},
+					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"test.node_emitted": {SelectEntity: &runtimecontracts.SelectEntitySpec{Bindings: binding}}},
+				},
+				"upserter": {
+					ID: "upserter", SubscribesTo: []string{"test.node_emitted"},
+					EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"test.node_emitted": {SelectOrCreateEntity: &runtimecontracts.SelectOrCreateEntitySpec{Bindings: binding}}},
+				},
+			},
+		}
+	}
+	parent := flow(parentID, parentID, parentMode)
+	child := flow(childID, parentID+"/"+childID, childMode)
+	parent.Children = []runtimecontracts.FlowContractView{child}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{parent}}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name: "state-only-nested-acquisition", Version: "1",
+			FlowInitial:  map[string]string{parentID: "active", childID: "active"},
+			FlowStates:   map[string][]string{parentID: {"active", "done"}, childID: {"active", "done"}},
+			FlowTerminal: map[string][]string{parentID: {"done"}, childID: {"done"}},
+		},
+		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{
+				parentID: &root.Children[0],
+				childID:  &root.Children[0].Children[0],
+			},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			parentID: root.Children[0].Schema,
+			childID:  root.Children[0].Children[0].Schema,
+		},
 	}
 	return semanticview.Wrap(bundle)
 }
@@ -370,5 +534,20 @@ func assertStateOnlyAcquisitionMutationCounts(t *testing.T, backend string, db *
 		if count != check.want {
 			t.Fatalf("%s rows = %d, want %d", check.name, count, check.want)
 		}
+	}
+}
+
+func assertStateOnlyAcquisitionLifecycleCount(t *testing.T, backend string, db *sql.DB, instancePath string, want int) {
+	t.Helper()
+	query := "SELECT COUNT(*) FROM flow_instances WHERE instance_id = ?"
+	if backend == "postgres" {
+		query = "SELECT COUNT(*) FROM flow_instances WHERE instance_id = $1"
+	}
+	var count int
+	if err := db.QueryRowContext(context.Background(), query, instancePath).Scan(&count); err != nil {
+		t.Fatalf("count lifecycle rows for %s: %v", instancePath, err)
+	}
+	if count != want {
+		t.Fatalf("lifecycle rows for %s = %d, want %d", instancePath, count, want)
 	}
 }

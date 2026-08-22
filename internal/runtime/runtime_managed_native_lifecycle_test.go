@@ -160,7 +160,7 @@ func (managedNativeDurableRoles) SelectActiveWorkflowInstances(context.Context, 
 func (managedNativeDurableRoles) LoadWorkflowEntityState(context.Context, runtimeflowidentity.Route, runtimeidentity.EntityID) (runtimepipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
 	return runtimepipeline.WorkflowEntityStatePersistenceRecord{}, false, nil
 }
-func (managedNativeDurableRoles) SelectActiveWorkflowEntityStates(context.Context, string, []runtimepipeline.WorkflowInstanceFieldSelector, []string) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
+func (managedNativeDurableRoles) SelectActiveWorkflowEntityStates(context.Context, runtimepipeline.WorkflowEntityStateSelectionOwner, []runtimepipeline.WorkflowInstanceFieldSelector, []string) ([]runtimepipeline.WorkflowEntityStatePersistenceRecord, error) {
 	return nil, nil
 }
 func (managedNativeDurableRoles) ListEventDeliveryRoutes(context.Context, string) ([]events.DeliveryRoute, error) {

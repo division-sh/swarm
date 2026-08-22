@@ -8,7 +8,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -513,9 +512,13 @@ func acquireDeliveryTargetByDeclaredKey(
 	if err != nil {
 		return events.DeliveryTargetOwnership{}, fmt.Errorf("%s_invalid: node %s flow %s: %w", deliveryTargetAcquisitionCode(acquisition), strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
 	}
+	selectionOwner, err := AdmitWorkflowEntityStateSelectionOwner(source, flowID)
+	if err != nil {
+		return events.DeliveryTargetOwnership{}, fmt.Errorf("%s_lookup_failed: node %s flow %s: %w", deliveryTargetAcquisitionCode(acquisition), strings.TrimSpace(nodeID), strings.TrimSpace(flowID), err)
+	}
 	stateRecords, err := reader.SelectActiveWorkflowEntityStates(
 		ctx,
-		runtimeflowidentity.ScopeKey(source, flowID),
+		selectionOwner,
 		selectEntityFieldSelectors(expected),
 		source.FlowTerminalStages(flowID),
 	)

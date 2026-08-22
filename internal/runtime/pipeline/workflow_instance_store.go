@@ -14,6 +14,7 @@ import (
 	runtimeactivityresult "github.com/division-sh/swarm/internal/runtime/activityresult"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -76,7 +77,98 @@ type WorkflowInstance struct {
 // selects this authority directly rather than inferring state from lifecycle.
 type WorkflowEntityStatePersistenceReader interface {
 	LoadWorkflowEntityState(context.Context, runtimeflowidentity.Route, runtimeidentity.EntityID) (WorkflowEntityStatePersistenceRecord, bool, error)
-	SelectActiveWorkflowEntityStates(context.Context, string, []WorkflowInstanceFieldSelector, []string) ([]WorkflowEntityStatePersistenceRecord, error)
+	SelectActiveWorkflowEntityStates(context.Context, WorkflowEntityStateSelectionOwner, []WorkflowInstanceFieldSelector, []string) ([]WorkflowEntityStatePersistenceRecord, error)
+}
+
+type workflowEntityStateSelectionCardinality uint8
+
+const (
+	workflowEntityStateSelectionCardinalityUnknown workflowEntityStateSelectionCardinality = iota
+	workflowEntityStateSelectionExact
+	workflowEntityStateSelectionTemplate
+)
+
+// WorkflowEntityStateSelectionOwner is the admitted source-backed owner of
+// state-only rows eligible for declared-key acquisition. Authored descendant
+// scopes are reserved so their rows cannot be interpreted as parent instances.
+type WorkflowEntityStateSelectionOwner struct {
+	scopeKey         string
+	cardinality      workflowEntityStateSelectionCardinality
+	descendantScopes []string
+}
+
+func AdmitWorkflowEntityStateSelectionOwner(source semanticview.Source, flowID string) (WorkflowEntityStateSelectionOwner, error) {
+	flowID = strings.TrimSpace(flowID)
+	if source == nil || flowID == "" {
+		return WorkflowEntityStateSelectionOwner{}, fmt.Errorf("workflow entity state selection owner requires source and flow identity")
+	}
+	scope, ok := source.FlowScopeByID(flowID)
+	if !ok {
+		return WorkflowEntityStateSelectionOwner{}, fmt.Errorf("workflow entity state selection owner flow %s is not declared", flowID)
+	}
+	scopeKey := strings.Trim(strings.TrimSpace(runtimeflowidentity.ScopeKey(source, flowID)), "/")
+	if scopeKey == "" {
+		return WorkflowEntityStateSelectionOwner{}, fmt.Errorf("workflow entity state selection owner flow %s has no canonical scope", flowID)
+	}
+	owner := WorkflowEntityStateSelectionOwner{scopeKey: scopeKey}
+	switch strings.ToLower(strings.TrimSpace(scope.Mode)) {
+	case runtimecontracts.FlowModeStatic, runtimecontracts.FlowModeSingleton:
+		owner.cardinality = workflowEntityStateSelectionExact
+	case runtimecontracts.FlowModeTemplate:
+		owner.cardinality = workflowEntityStateSelectionTemplate
+	default:
+		return WorkflowEntityStateSelectionOwner{}, fmt.Errorf("workflow entity state selection owner flow %s has unsupported mode %q", flowID, strings.TrimSpace(scope.Mode))
+	}
+	for _, candidate := range source.FlowScopes() {
+		candidateID := strings.TrimSpace(candidate.ID)
+		if candidateID == "" || candidateID == flowID {
+			continue
+		}
+		candidateScope := strings.Trim(strings.TrimSpace(runtimeflowidentity.ScopeKey(source, candidateID)), "/")
+		if strings.HasPrefix(candidateScope, scopeKey+"/") {
+			owner.descendantScopes = append(owner.descendantScopes, candidateScope)
+		}
+	}
+	sort.Strings(owner.descendantScopes)
+	return owner, nil
+}
+
+func (o WorkflowEntityStateSelectionOwner) Valid() bool {
+	return strings.TrimSpace(o.scopeKey) != "" &&
+		(o.cardinality == workflowEntityStateSelectionExact || o.cardinality == workflowEntityStateSelectionTemplate)
+}
+
+func (o WorkflowEntityStateSelectionOwner) ScopeKey() string {
+	if !o.Valid() {
+		return ""
+	}
+	return o.scopeKey
+}
+
+func (o WorkflowEntityStateSelectionOwner) Owns(instancePath string) bool {
+	if !o.Valid() {
+		return false
+	}
+	instancePath = strings.TrimSpace(instancePath)
+	if instancePath == "" || instancePath != strings.Trim(instancePath, "/") {
+		return false
+	}
+	if o.cardinality == workflowEntityStateSelectionExact {
+		return instancePath == o.scopeKey
+	}
+	if !strings.HasPrefix(instancePath, o.scopeKey+"/") {
+		return false
+	}
+	instanceID := strings.TrimPrefix(instancePath, o.scopeKey+"/")
+	if instanceID == "" || strings.Contains(instanceID, "/") {
+		return false
+	}
+	for _, descendantScope := range o.descendantScopes {
+		if instancePath == descendantScope || strings.HasPrefix(instancePath, descendantScope+"/") {
+			return false
+		}
+	}
+	return true
 }
 
 // WorkflowTargetPersistencePresence is the closed selected-store truth for an
@@ -224,7 +316,10 @@ type WorkflowEntityStatePersistenceRecord struct {
 // FilterWorkflowEntityStatePersistenceRecords applies the backend-neutral
 // terminal-state and declared-key semantics after a selected store has bounded
 // rows to the active run, flow scope, and lifecycle companion state.
-func FilterWorkflowEntityStatePersistenceRecords(records []WorkflowEntityStatePersistenceRecord, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowEntityStatePersistenceRecord, error) {
+func FilterWorkflowEntityStatePersistenceRecords(records []WorkflowEntityStatePersistenceRecord, owner WorkflowEntityStateSelectionOwner, selectors []WorkflowInstanceFieldSelector, excludedStates []string) ([]WorkflowEntityStatePersistenceRecord, error) {
+	if !owner.Valid() {
+		return nil, fmt.Errorf("workflow entity state selection requires an admitted flow owner")
+	}
 	selectors = NormalizeWorkflowInstanceFieldSelectors(selectors)
 	excluded := make(map[string]struct{})
 	for _, state := range NormalizeWorkflowInstanceExcludedStates(excludedStates) {
@@ -232,6 +327,9 @@ func FilterWorkflowEntityStatePersistenceRecords(records []WorkflowEntityStatePe
 	}
 	out := make([]WorkflowEntityStatePersistenceRecord, 0, len(records))
 	for _, record := range records {
+		if !owner.Owns(record.FlowInstance) {
+			continue
+		}
 		if _, skip := excluded[strings.ToLower(strings.TrimSpace(record.CurrentState))]; skip {
 			continue
 		}
