@@ -54,12 +54,20 @@ func (p *sqliteSessionTerminalProbe) SelectedStoreSessionTerminal(result runtime
 func TestSQLiteSessionMonitorCancellationPreservesPossessionUntilDurableRelease(t *testing.T) {
 	for _, phase := range []string{"before proof", "os proof", "sql proof"} {
 		t.Run(phase, func(t *testing.T) {
-			proveSQLiteSessionMonitorCancellationPreservesPossessionUntilDurableRelease(t, phase)
+			proveSQLiteSessionCancellationPreservesPossessionUntilDurableRelease(t, phase, true)
 		})
 	}
 }
 
-func proveSQLiteSessionMonitorCancellationPreservesPossessionUntilDurableRelease(t *testing.T, phase string) {
+func TestSQLiteSessionOrdinaryCancellationPreservesPossessionUntilDurableRelease(t *testing.T) {
+	for _, phase := range []string{"before proof", "os proof", "sql proof"} {
+		t.Run(phase, func(t *testing.T) {
+			proveSQLiteSessionCancellationPreservesPossessionUntilDurableRelease(t, phase, false)
+		})
+	}
+}
+
+func proveSQLiteSessionCancellationPreservesPossessionUntilDurableRelease(t *testing.T, phase string, monitor bool) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "runtime.db")
 	db, err := sql.Open("sqlite", path)
@@ -126,7 +134,13 @@ func proveSQLiteSessionMonitorCancellationPreservesPossessionUntilDurableRelease
 	if phase == "before proof" {
 		cancelMonitor()
 	}
-	go func() { monitorDone <- session.MonitorProveCurrent(monitorCtx, time.Minute) }()
+	go func() {
+		if monitor {
+			monitorDone <- session.MonitorProveCurrent(monitorCtx, time.Minute)
+			return
+		}
+		monitorDone <- session.ProveCurrent(monitorCtx)
+	}()
 	if phase != "before proof" {
 		select {
 		case <-blocking.entered:

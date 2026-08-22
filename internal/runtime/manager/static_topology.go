@@ -465,7 +465,8 @@ func (p *PreparedStaticTopologySourceSetRebind) Commit(ctx context.Context, stor
 	if err != nil {
 		return err
 	}
-	for _, item := range p.bindings {
+	committedBindings := make([]ProcessExecutionBinding, len(p.bindings))
+	for index, item := range p.bindings {
 		operationID := uuid.NewSHA1(uuid.NameSpaceURL, []byte(strings.Join([]string{
 			"agent-static-source-set-rebind-v1", strings.TrimSpace(operationScopeID), p.plan.Revision, item.identityKey,
 			fmt.Sprint(item.epoch), fmt.Sprint(item.generation), string(item.phase), item.revision,
@@ -489,7 +490,7 @@ func (p *PreparedStaticTopologySourceSetRebind) Commit(ctx context.Context, stor
 		if err := result.ProcessBinding.Validate(); err != nil {
 			return fmt.Errorf("rebind static topology for %s returned invalid process binding: %w", item.identity.Description(), err)
 		}
-		item.cell.processBinding = result.ProcessBinding
+		committedBindings[index] = result.ProcessBinding
 	}
 
 	p.manager.lifecycle.replacePersistence(store)
@@ -500,7 +501,10 @@ func (p *PreparedStaticTopologySourceSetRebind) Commit(ctx context.Context, stor
 			p.manager.lifecycle.mu.Unlock()
 			return fmt.Errorf("static topology source-set rebind projection changed for %s", item.identity.Description())
 		}
-		cell.topology = p.admission
+	}
+	for index, item := range p.bindings {
+		item.cell.topology = p.admission
+		item.cell.processBinding = committedBindings[index]
 	}
 	p.manager.lifecycle.mu.Unlock()
 	p.manager.mu.Lock()

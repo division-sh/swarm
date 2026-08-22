@@ -340,17 +340,33 @@ func (s *runtimeProjectSupervisor) CloseProject(ctx context.Context) (builderpkg
 func (s *runtimeProjectSupervisor) CloseProjectWithShutdownOptions(ctx context.Context, opts runtime.ShutdownOptions) (builderpkg.ProjectStatus, error) {
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
+	var finalizationErr error
 	if err := s.completePendingReplacementRollback(ctx); err != nil {
-		return s.CurrentProject(), fmt.Errorf("finalize pending runtime replacement rollback before close: %w", err)
+		finalizationErr = fmt.Errorf("finalize pending runtime replacement rollback before close: %w", err)
 	}
-	if err := s.completePendingSourceSetRollback(ctx); err != nil {
-		return s.CurrentProject(), fmt.Errorf("finalize pending runtime source-set rollback before close: %w", err)
+	if finalizationErr == nil {
+		if err := s.completePendingSourceSetRollback(ctx); err != nil {
+			finalizationErr = fmt.Errorf("finalize pending runtime source-set rollback before close: %w", err)
+		}
 	}
-	if err := s.completePendingReplacement(); err != nil {
-		return s.CurrentProject(), fmt.Errorf("finalize pending runtime replacement before close: %w", err)
+	if finalizationErr == nil {
+		if err := s.completePendingReplacement(); err != nil {
+			finalizationErr = fmt.Errorf("finalize pending runtime replacement before close: %w", err)
+		}
 	}
-	if err := s.completePendingRuntimeSourceSetRefresh(ctx); err != nil {
-		return s.CurrentProject(), fmt.Errorf("finalize pending runtime source-set refresh before close: %w", err)
+	if finalizationErr == nil {
+		if err := s.completePendingRuntimeSourceSetRefresh(ctx); err != nil {
+			finalizationErr = fmt.Errorf("finalize pending runtime source-set refresh before close: %w", err)
+		}
+	}
+	if finalizationErr != nil {
+		ownershipTerminal := false
+		if s.processCapability != nil {
+			_, ownershipTerminal = s.processCapability.TerminalResult()
+		}
+		if !ownershipTerminal {
+			return s.CurrentProject(), finalizationErr
+		}
 	}
 	s.mu.RLock()
 	manager := s.runtimeContexts
@@ -359,16 +375,16 @@ func (s *runtimeProjectSupervisor) CloseProjectWithShutdownOptions(ctx context.C
 	if manager != nil && bundleHash != "" {
 		result := manager.DeactivateBundleHashWithOptions(bundleHash, runtime.RuntimeContextCauseUnloaded, opts)
 		_ = s.detachCurrentRuntime()
-		return builderpkg.ProjectStatus{}, result.ShutdownErr
+		return builderpkg.ProjectStatus{}, errors.Join(finalizationErr, result.ShutdownErr)
 	}
 	oldRT := s.detachCurrentRuntime()
 
 	if oldRT != nil {
 		if err := s.shutdownCurrentRuntimeWithOptions(ctx, oldRT, opts); err != nil {
-			return builderpkg.ProjectStatus{}, err
+			return builderpkg.ProjectStatus{}, errors.Join(finalizationErr, err)
 		}
 	}
-	return builderpkg.ProjectStatus{}, nil
+	return builderpkg.ProjectStatus{}, finalizationErr
 }
 
 func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir string) (builderpkg.ProjectStatus, error) {

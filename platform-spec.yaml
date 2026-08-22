@@ -34336,12 +34336,18 @@ agent_topology_authority:
     owner: one retained selected-store session acquired only by process composition
     acquisition: >-
       Acquisition first proves exact backend-exclusive possession: one retained PostgreSQL advisory-lock session or
-      one retained SQLite OS lock bound to the canonical open database file on a supported local filesystem. Only
+      one retained SQLite OS lock applied directly to the canonical open database file on a supported local filesystem.
+      A replaceable sidecar, path marker, or independently recreated inode is never SQLite possession authority. Only
       then may the same retained capability lock and classify the global durable authority head. A valid active
       predecessor with absent backend possession is atomically superseded, every predecessor new-work grant is
       retired, and one monotonic successor authority generation is appended in the same transaction. Source-set
       topology, durable delivery continuations, and provider drains are distinct facts and remain unchanged.
-      Exact acquisition replay is idempotent; conflicting replay and corrupt or contradictory evidence fail closed.
+      Inspection, acquisition, terminal successor readback, and repair revalidation consume one selected-store
+      authority decoder. It requires the authority backend to equal the active adapter, every terminal row to follow
+      its exact active row, every clean-handoff or crash-takeover generation to follow the immediately preceding
+      persisted generation with the declared released or superseded state, and every repair generation to match its
+      immutable repair journal. Isolated row validity, synchronized row/snapshot agreement, or a raised generation
+      is never lineage proof. Exact acquisition replay is idempotent; conflicting replay and corrupt or contradictory evidence fail closed.
       PIDs, descriptors, endpoints, hostnames, heartbeats, timestamps, and elapsed time never authorize takeover.
       SQLite aliases, replaced file identity, and unsupported or unprovable filesystems fail closed without mutation.
     grants: >-
@@ -34349,7 +34355,15 @@ agent_topology_authority:
       and source-set revision. Readiness, grant-state changes, execution admission, and every
       durable lifecycle mutation re-prove the retained session and that the grant's source-set
       revision is still the complete current head. Retained-session failure retires the process
-      capability, every grant, and runtime readiness before return.
+      capability, every grant, and runtime readiness before return. Caller cancellation or deadline
+      of an ordinary proof or operation is control-flow evidence only: the operation returns the exact
+      caller error, rolls back any current transaction, and preserves the retained backend possession,
+      session, process capability, and grants. An independent exact proof or the separately owned
+      possession monitor decides whether ownership was actually lost; caller cancellation is never
+      translated into ownership_unprovable. PostgreSQL arms retained-session backend cancellation before
+      transaction startup and uses a caller-cancellable startup context, so cancellation cannot miss or
+      indefinitely strand BEGIN. A successfully started transaction is detached from the caller and remains
+      owned by the retained session until synchronous commit or rollback settlement.
     lifecycle_reconciliation: >-
       Every durable static and flow-readiness lifecycle cell carries the exact process authority, owner, boot,
       generation grant, bundle source coordinate, runtime instance, and runtime generation allowed to execute it.
@@ -34357,14 +34371,20 @@ agent_topology_authority:
       hydrates. Reconciliation consumes a complete durable lifecycle-cell census owned by lifecycle persistence;
       execution-hydration projections and status filters cannot define that census, so terminated cells remain in
       scope while ephemeral cells remain excluded. Source-set replacement uses source_set_rebind for survivors and one atomic source_set_retire for a
-      removed source cell whose execution grant changes at terminalization. Reconciliation is deterministic,
-      idempotent, and resumable after partial progress; no predecessor-bound cell may be hydrated or selected.
+      removed source cell whose execution grant changes at terminalization. A complete source-set rebind publishes
+      each survivor's topology and process binding together under the lifecycle coordinator only after every durable
+      rebind commits; a later commit failure leaves every process-local survivor projection unchanged. Reconciliation
+      is deterministic, idempotent, and resumable after partial progress; no predecessor-bound cell may be hydrated or selected.
     monitor: >-
       One process-work-owned monitor proves only the exact retained backend capability. Probe serialization is shared
       with canonical operations, so waiting behind an in-flight operation is neutral and the bounded backend deadline
       starts only after serialization. Release cancellation is checked after serialization and before backend I/O;
       a probe already in I/O is cancelled and joined before unlock. Cancellation before or during a proof is a
-      neutral monitor outcome: it cannot terminalize the retained adapter or release possession. The first failed proof terminalizes exactly once
+      neutral monitor outcome: it cannot terminalize the retained adapter or release possession. Release first
+      cancels and joins the current monitor so an in-flight proof cannot block serialized durable grant retirement.
+      If retirement aborts and exact proof retains live possession, release re-arms the same capability's monitor
+      before relinquishing the operation boundary; otherwise it releases the retained session terminally. An aborted
+      release therefore retains loss observation. The first failed proof terminalizes exactly once
       as ownership_unprovable. ownership_superseded requires exact durable successor authority evidence and is never
       inferred from probe failure. Monitor failure cannot append or authorize a successor.
     repair:
@@ -34383,7 +34403,11 @@ agent_topology_authority:
       swarm serve is running, includes its durable recorded start age when available, and tells the operator to stop
       it or serve a different project. Exact successor loss says `This serve lost ownership to a newer serve and is
       shutting down.` Unprovable ownership says `This serve can no longer verify project ownership and is shutting
-      down.` Lease, grant, generation, authority, and fencing vocabulary is never exposed on these human surfaces.
+      down.` Either proven ownership-loss outcome cancels serve and returns a nonzero process status; ordinary
+      external cancellation remains a successful shutdown. Ownership loss may make durable finalization unprovable,
+      but it cannot skip process-local runtime deactivation and join; finalization and shutdown errors are retained
+      together, and the selected store remains open unless the process work owner joins successfully. Lease, grant,
+      generation, authority, and fencing vocabulary is never exposed on these human surfaces.
       `--context` owns endpoint registration only and never selects a store or resolves same-store ownership.
     forbidden: >-
       Runtime acquisition or release, memory fallback, copied-evidence authority, borrowed
