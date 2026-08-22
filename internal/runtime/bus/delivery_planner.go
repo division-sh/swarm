@@ -17,7 +17,6 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/google/uuid"
 )
 
 type deliveryRoutingResult struct {
@@ -150,14 +149,13 @@ func (p deliveryRecipientPolicy) Evaluate(ctx context.Context, evt events.Event,
 		}
 		return manifest, nil
 	}
-	return filterDeliveryRecipientCandidates(evt, recipients, descriptors, targetDescriptors), nil
+	return filterDeliveryRecipientCandidates(p.semanticSource, evt, recipients, descriptors, targetDescriptors), nil
 }
 
 type deliveryPlanner struct {
 	routeResolver   deliveryRouteResolver
 	recipientPolicy deliveryRecipientPolicy
 	connectPlanner  connectRoutePlanResolver
-	rootFlowID      string
 }
 
 func newDeliveryPlanner(routeResolver deliveryRouteResolver, recipientPolicy deliveryRecipientPolicy, connectPlanners ...connectRoutePlanResolver) deliveryPlanner {
@@ -172,11 +170,14 @@ func newDeliveryPlanner(routeResolver deliveryRouteResolver, recipientPolicy del
 }
 
 func (p deliveryPlanner) Plan(ctx context.Context, evt events.Event) (RoutePlan, error) {
+	if err := validateEventRootTargetCoordinates(p.recipientPolicy.semanticSource, evt); err != nil {
+		return RoutePlan{}, err
+	}
 	plan, err := p.planForRecipientMaterialization(ctx, evt)
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	if err := validateRoutedNodeDeliveryAuthority(ctx, evt, plan.RoutedRecipients, plan); err != nil {
+	if err := validateRoutedNodeDeliveryAuthority(ctx, p.recipientPolicy.semanticSource, evt, plan.RoutedRecipients, plan); err != nil {
 		return RoutePlan{}, err
 	}
 	return plan, nil
@@ -277,14 +278,14 @@ func (p deliveryPlanner) planIndependentPubsubBranch(ctx context.Context, evt ev
 		return RoutePlan{}, err
 	}
 	routePlan := routePlanFromManifest(localEvent, manifest, routeIntentProducerAgentPolicy)
-	routePlan.AddDeliveryIntents(routedRootNodeDeliveryIntentsForNoTargetEvent(localEvent, routing.RoutedRecipients, p.rootFlowID)...)
+	routePlan.AddDeliveryIntents(routedRootNodeDeliveryIntentsForNoTargetEvent(p.recipientPolicy.semanticSource, localEvent, routing.RoutedRecipients)...)
 	routePlan.AddDeliveryIntents(routedRootInputFlowNodeDeliveryIntentsForNoTargetEvent(localEvent, routing.RoutedRecipients)...)
-	routePlan.AddDeliveryIntents(routedAPIEventPublicationNodeDeliveryIntents(ctx, evt, routing.RoutedRecipients)...)
+	routePlan.AddDeliveryIntents(routedAPIEventPublicationNodeDeliveryIntents(ctx, p.recipientPolicy.semanticSource, evt, routing.RoutedRecipients)...)
 	routePlan.AddDeliveryIntents(routedExactSameInstanceNoTargetNodeDeliveryIntents(p.recipientPolicy.semanticSource, localEvent, routing.RoutedRecipients)...)
 	routePlan.AddDeliveryIntents(routedImportBoundaryNoTargetNodeDeliveryIntents(localEvent, routing.RoutedRecipients)...)
-	routePlan.AddDeliveryIntents(targetedRoutedNodeDeliveryIntents(evt, routing.RoutedRecipients)...)
+	routePlan.AddDeliveryIntents(targetedRoutedNodeDeliveryIntents(p.recipientPolicy.semanticSource, evt, routing.RoutedRecipients)...)
 	extraDetail := cloneAnyMap(routing.ExtraDetail)
-	if !routePlan.TargetFailure.Empty() && hasInternalRoutedSubscriberForTarget(evt, routing.RoutedRecipients) {
+	if !routePlan.TargetFailure.Empty() && hasInternalRoutedSubscriberForTarget(p.recipientPolicy.semanticSource, evt, routing.RoutedRecipients) {
 		routePlan.TargetFailure = 0
 	}
 	routePlan.RoutedRecipients = routing.RoutedRecipients
@@ -537,9 +538,6 @@ func (eb *EventBus) newEventBusDeliveryPlanner() deliveryPlanner {
 		},
 		eb.connectRoutePlanner,
 	)
-	if eb.semanticSource != nil {
-		planner.rootFlowID = strings.TrimSpace(eb.semanticSource.WorkflowName())
-	}
 	return planner
 }
 
@@ -758,6 +756,7 @@ func persistedDeliveryRecipientCandidates(in []deliveryRecipientCandidate) []del
 }
 
 func filterDeliveryRecipientCandidates(
+	source semanticview.Source,
 	evt events.Event,
 	recipients []deliveryRecipientCandidate,
 	descriptors map[agentidentity.Identity]ActiveAgentDescriptor,
@@ -778,6 +777,7 @@ func filterDeliveryRecipientCandidates(
 	allowedCandidates := make([]deliveryRecipientCandidate, 0, len(recipients))
 	persisted := make([]string, 0, len(recipients))
 	deliveryRoutes := make([]events.DeliveryRoute, 0, len(recipients))
+	root := rootExecutionCoordinate(source, evt.RunID())
 	for _, recipient := range recipients {
 		if !recipient.PersistAsDelivery {
 			allowed = append(allowed, recipient.ID)
@@ -793,7 +793,7 @@ func filterDeliveryRecipientCandidates(
 					}
 				}
 			}
-			target, targetOK := deliveryTargetForDescriptor(descriptor, singularTarget, targets)
+			target, targetOK := deliveryTargetForDescriptor(descriptor, singularTarget, targets, root)
 			if len(targets) > 0 && !targetOK {
 				continue
 			}
@@ -878,15 +878,15 @@ func agentDeliveryRoutesForCandidates(
 	return events.NormalizeDeliveryRoutes(out)
 }
 
-func targetedRoutedNodeDeliveryIntents(evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
-	routes := targetedRoutedNodeDeliveryRoutes(evt, routed)
+func targetedRoutedNodeDeliveryIntents(source semanticview.Source, evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
+	routes := targetedRoutedNodeDeliveryRoutes(source, evt, routed)
 	if len(routes) == 0 {
 		return nil
 	}
 	return routePlanDeliveryIntentsFromRoutes(routes, routeIntentProducerInternalTargetRoute)
 }
 
-func targetedRoutedNodeDeliveryRoutes(evt events.Event, routed []Subscriber) []plannedDeliveryRoute {
+func targetedRoutedNodeDeliveryRoutes(source semanticview.Source, evt events.Event, routed []Subscriber) []plannedDeliveryRoute {
 	targets := eventDeliveryTargetRoutes(evt)
 	if len(targets) == 0 || len(routed) == 0 {
 		return nil
@@ -901,7 +901,7 @@ func targetedRoutedNodeDeliveryRoutes(evt events.Event, routed []Subscriber) []p
 			if !subscriber.Recipient.IsNode() {
 				continue
 			}
-			if !routeMatchesInternalSubscriber(target, subscriber) {
+			if !routeMatchesInternalSubscriber(target, subscriber, rootExecutionCoordinate(source, evt.RunID())) {
 				continue
 			}
 			out = append(out, plannedDeliveryRoute{
@@ -967,7 +967,7 @@ func routedImportBoundaryNoTargetNodeDeliveryIntents(evt events.Event, routed []
 	return routePlanDeliveryIntentsFromRoutes(out, routeIntentProducerScopedNodeRoute)
 }
 
-func validateRoutedNodeDeliveryAuthority(ctx context.Context, evt events.Event, routed []Subscriber, plan RoutePlan) error {
+func validateRoutedNodeDeliveryAuthority(ctx context.Context, source semanticview.Source, evt events.Event, routed []Subscriber, plan RoutePlan) error {
 	if len(routed) == 0 {
 		return nil
 	}
@@ -978,7 +978,7 @@ func validateRoutedNodeDeliveryAuthority(ctx context.Context, evt events.Event, 
 		if !subscriber.Recipient.IsNode() {
 			continue
 		}
-		key := newRoutedSubscriberAuthorityKey(evt, subscriber)
+		key := newRoutedSubscriberAuthorityKey(source, evt, subscriber)
 		for _, intent := range plan.DeliveryIntents {
 			if !routePlanIntentAuthorizesRoutedSubscriber(intent, key, subscriber) {
 				continue
@@ -993,13 +993,13 @@ func validateRoutedNodeDeliveryAuthority(ctx context.Context, evt events.Event, 
 		if !subscriber.Recipient.IsNode() {
 			continue
 		}
-		key := newRoutedSubscriberAuthorityKey(evt, subscriber)
-		selectedByExplicitTarget := !hasExplicitTargets || eventTargetsRoutedSubscriber(evt, subscriber)
+		key := newRoutedSubscriberAuthorityKey(source, evt, subscriber)
+		selectedByExplicitTarget := !hasExplicitTargets || eventTargetsRoutedSubscriber(source, evt, subscriber)
 		if subscriber.routeSource == subscriberRouteSourceRootInputFlow && evt.AdmissionClass() != events.EventAdmissionRootIngress {
 			if !selectedByExplicitTarget {
 				continue
 			}
-			if routedAPIEventPublicationAuthorizesSubscriber(ctx, evt, subscriber) {
+			if routedAPIEventPublicationAuthorizesSubscriber(ctx, source, evt, subscriber) {
 				if _, ok := apiAuthorized[key]; ok {
 					continue
 				}
@@ -1031,14 +1031,16 @@ type routedSubscriberAuthorityKey struct {
 	path        string
 	routeSource subscriberRouteSource
 	handler     runtimepipeline.DeliveryTargetHandler
+	root        semanticview.RootExecutionCoordinate
 }
 
-func newRoutedSubscriberAuthorityKey(evt events.Event, subscriber Subscriber) routedSubscriberAuthorityKey {
+func newRoutedSubscriberAuthorityKey(source semanticview.Source, evt events.Event, subscriber Subscriber) routedSubscriberAuthorityKey {
 	return routedSubscriberAuthorityKey{
 		recipient:   subscriber.Recipient,
 		path:        strings.Trim(strings.TrimSpace(subscriber.Path), "/"),
 		routeSource: subscriber.routeSource,
 		handler:     routedSubscriberTargetHandler(subscriber, evt.Type()),
+		root:        rootExecutionCoordinate(source, evt.RunID()),
 	}
 }
 
@@ -1057,7 +1059,7 @@ func routePlanIntentAuthorizesRoutedSubscriber(
 	if target.Empty() {
 		target = intent.TargetOwnership.Route().Normalized()
 	}
-	if routeMatchesInternalSubscriber(target, subscriber) {
+	if routeMatchesInternalSubscriber(target, subscriber, key.root) {
 		return true
 	}
 	return resolvedSelectedRunRootIntentMatchesSubscriber(intent, key, subscriber, target)
@@ -1081,9 +1083,10 @@ func resolvedSelectedRunRootIntentMatchesSubscriber(
 		key.handler.Node().Equal(subscriber.handlerNode) && target.FlowID == handlerFlowID
 }
 
-func eventTargetsRoutedSubscriber(evt events.Event, subscriber Subscriber) bool {
+func eventTargetsRoutedSubscriber(source semanticview.Source, evt events.Event, subscriber Subscriber) bool {
+	root := rootExecutionCoordinate(source, evt.RunID())
 	for _, target := range eventDeliveryTargetRoutes(evt) {
-		if routeMatchesInternalSubscriber(target, subscriber) {
+		if routeMatchesInternalSubscriber(target, subscriber, root) {
 			return true
 		}
 	}
@@ -1096,19 +1099,23 @@ func routedNodeTargetRoute(targetFlowInstance string) events.RouteIdentity {
 	}.Normalized()
 }
 
-func routedRootNodeDeliveryIntentsForNoTargetEvent(evt events.Event, routed []Subscriber, rootFlowID string) []RoutePlanDeliveryIntent {
+func routedRootNodeDeliveryIntentsForNoTargetEvent(source semanticview.Source, evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
 	if len(routed) == 0 || len(eventDeliveryTargetRoutes(evt)) > 0 {
+		return nil
+	}
+	root, err := semanticview.AdmitRootExecutionCoordinate(source, evt.RunID())
+	if err != nil {
 		return nil
 	}
 	out := make([]plannedDeliveryRoute, 0, len(routed))
 	for _, subscriber := range routed {
-		if !routedRootNodeMatchesNoTargetEvent(evt, subscriber, rootFlowID) {
+		if !routedRootNodeMatchesNoTargetEvent(evt, subscriber, root.FlowID()) {
 			continue
 		}
 		out = append(out, plannedDeliveryRoute{
 			Recipient: subscriber.Recipient,
 			Target: events.RouteIdentity{
-				FlowID: strings.TrimSpace(rootFlowID), FlowInstance: strings.TrimSpace(evt.RunID()),
+				FlowID: root.FlowID(), FlowInstance: root.RunID(),
 			},
 			Handler: routedSubscriberTargetHandler(subscriber, evt.Type()),
 		})
@@ -1136,13 +1143,13 @@ func routedRootInputFlowNodeDeliveryIntentsForNoTargetEvent(evt events.Event, ro
 	return normalizeRoutePlanDeliveryIntents(out)
 }
 
-func routedAPIEventPublicationNodeDeliveryIntents(ctx context.Context, evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
+func routedAPIEventPublicationNodeDeliveryIntents(ctx context.Context, source semanticview.Source, evt events.Event, routed []Subscriber) []RoutePlanDeliveryIntent {
 	if len(routed) == 0 {
 		return nil
 	}
 	out := make([]RoutePlanDeliveryIntent, 0, len(routed))
 	for _, subscriber := range routed {
-		if !routedAPIEventPublicationAuthorizesSubscriber(ctx, evt, subscriber) {
+		if !routedAPIEventPublicationAuthorizesSubscriber(ctx, source, evt, subscriber) {
 			continue
 		}
 		path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
@@ -1160,7 +1167,7 @@ func routedAPIEventPublicationNodeDeliveryIntents(ctx context.Context, evt event
 	return normalizeRoutePlanDeliveryIntents(out)
 }
 
-func routedAPIEventPublicationAuthorizesSubscriber(ctx context.Context, evt events.Event, subscriber Subscriber) bool {
+func routedAPIEventPublicationAuthorizesSubscriber(ctx context.Context, source semanticview.Source, evt events.Event, subscriber Subscriber) bool {
 	if !subscriber.Recipient.IsNode() {
 		return false
 	}
@@ -1168,7 +1175,7 @@ func routedAPIEventPublicationAuthorizesSubscriber(ctx context.Context, evt even
 	if !ok || admission.eventType != evt.Type() {
 		return false
 	}
-	if len(eventDeliveryTargetRoutes(evt)) > 0 && !eventTargetsRoutedSubscriber(evt, subscriber) {
+	if len(eventDeliveryTargetRoutes(evt)) > 0 && !eventTargetsRoutedSubscriber(source, evt, subscriber) {
 		return false
 	}
 	path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
@@ -1323,18 +1330,19 @@ func routedNodeConcreteEventKey(evt events.Event, subscriber Subscriber) string 
 	return concreteFlowInstanceEventKey(evt)
 }
 
-func matchedInternalDeliveryTargets(evt events.Event, subscribers []Subscriber) []events.RouteIdentity {
+func matchedInternalDeliveryTargets(source semanticview.Source, evt events.Event, subscribers []Subscriber) []events.RouteIdentity {
 	targets := eventDeliveryTargetRoutes(evt)
 	if len(targets) == 0 {
 		return nil
 	}
 	out := make([]events.RouteIdentity, 0, len(targets))
+	root := rootExecutionCoordinate(source, evt.RunID())
 	for _, target := range targets {
 		for _, subscriber := range subscribers {
 			if !subscriber.Recipient.IsNode() {
 				continue
 			}
-			if routeMatchesInternalSubscriber(target, subscriber) {
+			if routeMatchesInternalSubscriber(target, subscriber, root) {
 				out = append(out, target.Normalized())
 				break
 			}
@@ -1363,8 +1371,9 @@ func uniqueRouteIdentities(in []events.RouteIdentity) []events.RouteIdentity {
 	return out
 }
 
-func hasInternalRoutedSubscriberForTarget(evt events.Event, subscribers []Subscriber) bool {
+func hasInternalRoutedSubscriberForTarget(source semanticview.Source, evt events.Event, subscribers []Subscriber) bool {
 	targets := eventDeliveryTargetRoutes(evt)
+	root := rootExecutionCoordinate(source, evt.RunID())
 	for _, subscriber := range subscribers {
 		if !subscriber.Recipient.IsNode() {
 			continue
@@ -1373,7 +1382,7 @@ func hasInternalRoutedSubscriberForTarget(evt events.Event, subscribers []Subscr
 			return true
 		}
 		for _, target := range targets {
-			if routeMatchesInternalSubscriber(target, subscriber) {
+			if routeMatchesInternalSubscriber(target, subscriber, root) {
 				return true
 			}
 		}
@@ -1381,14 +1390,37 @@ func hasInternalRoutedSubscriberForTarget(evt events.Event, subscribers []Subscr
 	return false
 }
 
-func routeMatchesInternalSubscriber(route events.RouteIdentity, subscriber Subscriber) bool {
+func rootExecutionCoordinate(source semanticview.Source, runID string) semanticview.RootExecutionCoordinate {
+	coordinate, _ := semanticview.AdmitRootExecutionCoordinate(source, runID)
+	return coordinate
+}
+
+func validateEventRootTargetCoordinates(source semanticview.Source, evt events.Event) error {
+	rootFlowID := strings.TrimSpace(semanticview.RootExecutionFlowID(source))
+	for _, route := range eventDeliveryTargetRoutes(evt) {
+		route = route.Normalized()
+		if rootFlowID == "" || route.FlowID != rootFlowID {
+			continue
+		}
+		coordinate, err := semanticview.AdmitRootExecutionCoordinate(source, evt.RunID())
+		if err != nil {
+			return err
+		}
+		if !coordinate.Matches(route.FlowID, route.FlowInstance) {
+			return fmt.Errorf("event root target (%q, %q) disagrees with current root coordinate (%q, %q)", route.FlowID, route.FlowInstance, coordinate.FlowID(), coordinate.RunID())
+		}
+	}
+	return nil
+}
+
+func routeMatchesInternalSubscriber(route events.RouteIdentity, subscriber Subscriber, root semanticview.RootExecutionCoordinate) bool {
 	route = route.Normalized()
 	if route.Empty() {
 		return false
 	}
 	path := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
 	if path == "" {
-		return exactRootTarget(route) || entityOnlyRootTarget(route)
+		return exactRootTarget(route, root)
 	}
 	if route.FlowInstance == "" {
 		return false
@@ -1396,18 +1428,9 @@ func routeMatchesInternalSubscriber(route events.RouteIdentity, subscriber Subsc
 	return route.FlowInstance == path || runtimeflowidentity.SemanticScopeFromInstancePath(route.FlowInstance) == path
 }
 
-func exactRootTarget(route events.RouteIdentity) bool {
+func exactRootTarget(route events.RouteIdentity, root semanticview.RootExecutionCoordinate) bool {
 	route = route.Normalized()
-	if route.FlowID == "" || route.FlowInstance == "" || route.EntityID == "" {
-		return false
-	}
-	_, err := uuid.Parse(route.FlowInstance)
-	return err == nil
-}
-
-func entityOnlyRootTarget(route events.RouteIdentity) bool {
-	route = route.Normalized()
-	return route.FlowID == "" && route.FlowInstance == "" && route.EntityID != ""
+	return root.Matches(route.FlowID, route.FlowInstance)
 }
 
 func targetDeliveryFailure(evt events.Event, descriptors []ActiveTargetDescriptor) runtimepinrouting.TargetFailure {
@@ -1450,26 +1473,26 @@ func allTargetsHaveLiveDescriptor(targets []events.RouteIdentity, descriptors []
 	return true
 }
 
-func deliveryTargetForDescriptor(descriptor ActiveAgentDescriptor, singular events.RouteIdentity, targets []events.RouteIdentity) (events.RouteIdentity, bool) {
+func deliveryTargetForDescriptor(descriptor ActiveAgentDescriptor, singular events.RouteIdentity, targets []events.RouteIdentity, root semanticview.RootExecutionCoordinate) (events.RouteIdentity, bool) {
 	descriptor = descriptor.Normalized()
 	if !singular.Empty() {
-		return singular, routeMatchesAgentDescriptor(singular, descriptor)
+		return singular, routeMatchesAgentDescriptor(singular, descriptor, root)
 	}
 	if len(targets) == 0 {
 		return events.RouteIdentity{}, true
 	}
 	for _, target := range targets {
-		if routeMatchesAgentDescriptor(target, descriptor) {
+		if routeMatchesAgentDescriptor(target, descriptor, root) {
 			return target.Normalized(), true
 		}
 	}
 	return events.RouteIdentity{}, false
 }
 
-func routeMatchesAgentDescriptor(route events.RouteIdentity, descriptor ActiveAgentDescriptor) bool {
+func routeMatchesAgentDescriptor(route events.RouteIdentity, descriptor ActiveAgentDescriptor, root semanticview.RootExecutionCoordinate) bool {
 	descriptor = descriptor.Normalized()
 	if descriptor.Identity.Route.Presence == agentidentity.RouteRoot {
-		return (exactRootTarget(route) || entityOnlyRootTarget(route)) && descriptor.EntityID != "" && descriptor.EntityID == route.Normalized().EntityID
+		return exactRootTarget(route, root) && descriptor.EntityID != "" && descriptor.EntityID == route.Normalized().EntityID
 	}
 	return routeMatchesTargetDescriptor(route, descriptor.TargetDescriptor())
 }

@@ -543,6 +543,7 @@ func activityBoringFullFlowBundle(serverURL string) *runtimecontracts.WorkflowCo
 		},
 		Path: "research",
 	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
 	return &runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name:         "activity-boring-proof",
@@ -568,7 +569,7 @@ func activityBoringFullFlowBundle(serverURL string) *runtimecontracts.WorkflowCo
 			},
 		},
 		FlowTree: runtimecontracts.FlowTree{
-			Root:   &flow,
+			Root:   &root,
 			ByPath: map[string]*runtimecontracts.FlowContractView{"research": &flow},
 			ByID:   map[string]*runtimecontracts.FlowContractView{"research": &flow},
 		},

@@ -385,12 +385,13 @@ func TestEventBusDeclaredKeyAcquisitionIncludesStateWithoutLifecycleOnBothStores
 			t.Run("root flow admits authored mode and explicit run identity", func(t *testing.T) {
 				workflowName := "root-bundle-" + uuid.NewString()
 				flowID := "root-owner-" + uuid.NewString()
-				owner, err := runtimepipeline.AdmitWorkflowEntityStateSelectionOwner(stateOnlyRootAcquisitionSource(workflowName, flowID), flowID)
+				owner, err := runtimepipeline.AdmitWorkflowEntityStateSelectionOwner(stateOnlyRootAcquisitionSource(workflowName, flowID), flowID, runID)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if !owner.Owns(runID) || !owner.Owns(flowID) || owner.Owns(flowID+"/child") {
-					t.Fatalf("root owner route classification: run=%t authored=%t child=%t", owner.Owns(runID), owner.Owns(flowID), owner.Owns(flowID+"/child"))
+				otherRunID := uuid.NewString()
+				if !owner.Owns(runID) || !owner.Owns(flowID) || owner.Owns(flowID+"/child") || owner.Owns(otherRunID) {
+					t.Fatalf("root owner route classification: run=%t authored=%t child=%t other_run=%t", owner.Owns(runID), owner.Owns(flowID), owner.Owns(flowID+"/child"), owner.Owns(otherRunID))
 				}
 			})
 
@@ -570,7 +571,7 @@ func TestWorkflowEntityStateSelectionOwnerUsesExactAuthoredScope(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			source := stateOnlyNestedAcquisitionSource(parentID, test.parentMode, childID, runtimecontracts.FlowModeSingleton)
-			owner, err := runtimepipeline.AdmitWorkflowEntityStateSelectionOwner(source, parentID)
+			owner, err := runtimepipeline.AdmitWorkflowEntityStateSelectionOwner(source, parentID, "")
 			if err != nil {
 				t.Fatal(err)
 			}

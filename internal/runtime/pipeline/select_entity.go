@@ -44,7 +44,7 @@ func (pc *PipelineCoordinator) selectHandlerEntityForFlow(ctx context.Context, f
 	if err != nil {
 		return selectedHandlerEntity{}, fmt.Errorf("select_entity_invalid: node %s flow %s: %w", nodeID, flowID, err)
 	}
-	matches, err := pc.matchHandlerEntitiesForFlow(ctx, flowID, expected)
+	matches, err := pc.matchHandlerEntitiesForFlow(ctx, flowID, evt.RunID(), expected)
 	if err != nil {
 		return selectedHandlerEntity{}, fmt.Errorf("select_entity_lookup_failed: node %s flow %s: %w", nodeID, flowID, err)
 	}
@@ -77,7 +77,7 @@ func (pc *PipelineCoordinator) selectOrCreateHandlerEntityForFlow(ctx context.Co
 	if err != nil {
 		return selectedHandlerEntity{}, fmt.Errorf("select_or_create_entity_invalid: node %s flow %s: %w", nodeID, flowID, err)
 	}
-	matches, err := pc.matchHandlerEntitiesForFlow(ctx, flowID, expected)
+	matches, err := pc.matchHandlerEntitiesForFlow(ctx, flowID, evt.RunID(), expected)
 	if err != nil {
 		return selectedHandlerEntity{}, fmt.Errorf("select_or_create_entity_lookup_failed: node %s flow %s: %w", nodeID, flowID, err)
 	}
@@ -91,7 +91,7 @@ func (pc *PipelineCoordinator) selectOrCreateHandlerEntityForFlow(ctx context.Co
 	}
 }
 
-func (pc *PipelineCoordinator) matchHandlerEntitiesForFlow(ctx context.Context, flowID string, expected map[string]any) ([]WorkflowInstance, error) {
+func (pc *PipelineCoordinator) matchHandlerEntitiesForFlow(ctx context.Context, flowID, runID string, expected map[string]any) ([]WorkflowInstance, error) {
 	candidates, err := pc.workflowStore.selectActiveByFields(
 		ctx,
 		runtimeflowidentity.ScopeKey(pc.SemanticSource(), flowID),
@@ -103,7 +103,7 @@ func (pc *PipelineCoordinator) matchHandlerEntitiesForFlow(ctx context.Context, 
 	}
 	matches := make([]WorkflowInstance, 0, 1)
 	for _, candidate := range candidates {
-		if !workflowInstanceOwnedByFlow(pc.SemanticSource(), candidate, flowID) {
+		if !workflowInstanceOwnedByFlow(pc.SemanticSource(), candidate, flowID, runID) {
 			continue
 		}
 		if !selectEntityCandidateMatches(candidate, expected) {
@@ -191,7 +191,7 @@ func (pc *PipelineCoordinator) createdHandlerEntityForDeclaredKey(ctx context.Co
 	if existing, ok, err := pc.workflowStore.Load(ctx, instance.Route()); err != nil {
 		return selectedHandlerEntity{}, fmt.Errorf("select_or_create_entity_lookup_failed: node %s flow %s: %w", nodeID, flowID, err)
 	} else if ok {
-		if !workflowInstanceOwnedByFlow(source, existing, flowID) || !selectEntityCandidateMatches(existing, expected) || workflowInstanceInTerminalState(pc, flowID, existing) {
+		if !workflowInstanceOwnedByFlow(source, existing, flowID, evt.RunID()) || !selectEntityCandidateMatches(existing, expected) || workflowInstanceInTerminalState(pc, flowID, existing) {
 			return selectedHandlerEntity{}, fmt.Errorf("select_or_create_entity_conflict: node %s flow %s deterministic entity %s exists but does not match declared active key", nodeID, flowID, entityID)
 		}
 		return pc.selectedHandlerEntityFromInstance(ctx, flowID, nodeID, evt, existing, "select_or_create_entity")

@@ -201,14 +201,14 @@ func (p selectedRunTargetOwnerProjection) sameFlowAgentTargetBlueprint(evt event
 	instance := identity.FlowInstance()
 	flowID := runtimeflowidentity.SemanticScopeFromFlowInstanceRef(instance)
 	if instance == "" {
-		instance = strings.TrimSpace(evt.RunID())
-		if instance == "" {
-			return events.RouteIdentity{}, false, nil
-		}
 		if p.source == nil {
 			return events.RouteIdentity{}, false, nil
 		}
-		flowID = strings.TrimSpace(p.source.WorkflowName())
+		coordinate, err := semanticview.AdmitRootExecutionCoordinate(p.source, evt.RunID())
+		if err != nil {
+			return events.RouteIdentity{}, false, err
+		}
+		flowID, instance = coordinate.FlowID(), coordinate.RunID()
 	}
 	if flowID == "" {
 		return events.RouteIdentity{}, false, nil

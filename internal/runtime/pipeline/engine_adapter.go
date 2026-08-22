@@ -23,7 +23,6 @@ import (
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/google/uuid"
 )
 
 type pipelineEngineEvaluator struct {
@@ -434,9 +433,6 @@ func (r pipelineEngineStateRepo) prepareMutation(
 	if entityID.IsZero() || !address.Route.Valid() {
 		return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation requires exact entity and instance route")
 	}
-	if err := r.ensureFlowOwnsEntity(ctx, address); err != nil {
-		return preparedWorkflowEngineState{}, err
-	}
 	runID, err := runtimecurrentstate.RequireRunID(ctx)
 	if err != nil {
 		return preparedWorkflowEngineState{}, err
@@ -444,6 +440,19 @@ func (r pipelineEngineStateRepo) prepareMutation(
 	flowID := strings.TrimSpace(address.FlowID.String())
 	if flowID == "" {
 		flowID = semanticview.RootExecutionFlowID(r.coordinator.SemanticSource())
+	}
+	semanticSource := r.coordinator.SemanticSource()
+	if semanticSource != nil && flowID == strings.TrimSpace(semanticview.RootExecutionFlowID(semanticSource)) {
+		coordinate, err := semanticview.AdmitRootExecutionCoordinate(semanticSource, runID)
+		if err != nil {
+			return preparedWorkflowEngineState{}, err
+		}
+		if !coordinate.Matches(flowID, address.Route.InstancePath) {
+			return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine root route (%q, %q) disagrees with current root coordinate (%q, %q)", flowID, address.Route.InstancePath, coordinate.FlowID(), coordinate.RunID())
+		}
+	}
+	if err := r.ensureFlowOwnsEntity(ctx, address, flowID, runID); err != nil {
+		return preparedWorkflowEngineState{}, err
 	}
 	if len(targetApplications) > 1 {
 		return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation accepts at most one delivery target application")
@@ -471,7 +480,7 @@ func (r pipelineEngineStateRepo) prepareMutation(
 		case WorkflowTargetPersistenceComplete:
 			current, err = target.DecodeComplete(address.Route, entityID)
 		case WorkflowTargetPersistenceStateOnly:
-			current, err = decodeDeliveryTargetWorkflowEntityState(r.coordinator.SemanticSource(), flowID, target.State)
+			current, err = decodeDeliveryTargetWorkflowEntityState(r.coordinator.SemanticSource(), flowID, runID, target.State)
 		case WorkflowTargetPersistenceAbsent:
 		case WorkflowTargetPersistenceLifecycleOnly:
 			return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation rejects lifecycle companion without state")
@@ -496,7 +505,7 @@ func (r pipelineEngineStateRepo) prepareMutation(
 		workflowName := flowID
 		workflowVersion := ""
 		if source != nil {
-			workflowName = firstNonEmptyString(workflowName, source.WorkflowName())
+			workflowName = firstNonEmptyString(workflowName, semanticview.RootExecutionFlowID(source))
 			workflowVersion = source.WorkflowVersion()
 		}
 		initialState := strings.TrimSpace(firstNonEmptyString(workflowInitialStateForFlow(source, flowID), "pending"))
@@ -692,11 +701,10 @@ func (r pipelineEngineStateRepo) VerifyEmitPersistence(ctx context.Context, addr
 	return fmt.Errorf("%w: %s", runtimeengine.ErrEmitPersistencePrerequisite, strings.Join(details, "; "))
 }
 
-func (r pipelineEngineStateRepo) ensureFlowOwnsEntity(ctx context.Context, address runtimeengine.StateAddress) error {
+func (r pipelineEngineStateRepo) ensureFlowOwnsEntity(ctx context.Context, address runtimeengine.StateAddress, flowID, runID string) error {
 	if r.coordinator == nil || r.coordinator.workflowStore == nil || !r.coordinator.workflowStore.enabled() {
 		return nil
 	}
-	flowID := strings.TrimSpace(address.FlowID.String())
 	if flowID == "" {
 		return nil
 	}
@@ -707,7 +715,7 @@ func (r pipelineEngineStateRepo) ensureFlowOwnsEntity(ctx context.Context, addre
 	if err != nil || !ok {
 		return err
 	}
-	if workflowInstanceOwnedByFlow(r.coordinator.SemanticSource(), instance, flowID) {
+	if workflowInstanceOwnedByFlow(r.coordinator.SemanticSource(), instance, flowID, runID) {
 		return nil
 	}
 	return runtimefailures.New(runtimefailures.ClassAuthorizationDenied, "cross_flow_write_forbidden", "pipeline-engine", "write_entity", map[string]any{
@@ -1177,7 +1185,7 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 	if strings.TrimSpace(instance.WorkflowName) == "" {
 		defaultWorkflowName := strings.TrimSpace(flowID)
 		if defaultWorkflowName == "" && source != nil {
-			defaultWorkflowName = strings.TrimSpace(source.WorkflowName())
+			defaultWorkflowName = strings.TrimSpace(semanticview.RootExecutionFlowID(source))
 		}
 		instance.WorkflowName = defaultWorkflowName
 	}
@@ -1333,15 +1341,15 @@ func workflowStateFromEngine(snapshot runtimeengine.StateSnapshot) *WorkflowStat
 	return state
 }
 
-func workflowInstanceOwnedByFlow(source semanticview.Source, instance WorkflowInstance, flowID string) bool {
+func workflowInstanceOwnedByFlow(source semanticview.Source, instance WorkflowInstance, flowID, runID string) bool {
 	flowID = strings.TrimSpace(flowID)
 	if flowID == "" {
 		return true
 	}
-	if strings.TrimSpace(instance.WorkflowName) == flowID {
-		if _, err := uuid.Parse(strings.TrimSpace(instance.StorageRef)); err == nil {
-			return true
-		}
+	if flowID == strings.TrimSpace(semanticview.RootExecutionFlowID(source)) {
+		coordinate, err := semanticview.AdmitRootExecutionCoordinate(source, runID)
+		return err == nil && strings.TrimSpace(instance.WorkflowName) == coordinate.FlowID() &&
+			coordinate.Matches(flowID, strings.TrimSpace(instance.StorageRef))
 	}
 	ownerScope := runtimeflowidentity.ScopeKey(source, flowID)
 	targetRoute, err := workflowInstanceRouteForPersisted(source, instance)

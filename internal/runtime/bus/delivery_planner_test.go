@@ -580,7 +580,6 @@ func TestDeliveryPlanner_ComposesRoutingPolicyAndManifest(t *testing.T) {
 			requireTargetOwners: true,
 		},
 	)
-	planner.rootFlowID = "root"
 
 	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress("", "task.completed", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}))
 	if err != nil {
@@ -641,7 +640,7 @@ func TestDeliveryPlanner_DoesNotDeadLetterExactlyTargetedRootWorkflowNodeSubscri
 		"",
 		nil,
 		0,
-		"",
+		rootRunID,
 		"",
 		events.EnvelopeForTargetRoute(events.EventEnvelope{}, rootTarget),
 		time.Time{},
@@ -1089,7 +1088,6 @@ func TestDeliveryPlanner_NoTargetRootRoutedNodeUsesSemanticNodeDeliveryRoute(t *
 			ID: "root-owner", FlowInstance: runID, EntityID: "ent-root",
 		}),
 	)
-	planner.rootFlowID = "root"
 
 	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress("", "opco.spinup_requested", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}))
 	if err != nil {
@@ -1137,7 +1135,6 @@ func TestDeliveryPlanner_NoTargetRootLocalEventWithFlowInstanceUsesRootNodeRoute
 			ID: "root-owner", FlowInstance: runID, EntityID: "ent-root",
 		}),
 	)
-	planner.rootFlowID = "root"
 
 	plan, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress(
 		"",
@@ -1404,7 +1401,6 @@ func TestDeliveryPlanner_NoTargetMixedRootAndUnrelatedScopedNodeFailsClosed(t *t
 			ActiveTargetDescriptor{ID: "child-owner", FlowInstance: "child", EntityID: "ent-child-owner"},
 		),
 	)
-	planner.rootFlowID = "root"
 
 	wantNode := testFlowNode(t, "child", "child-intake")
 	if _, err := planner.Plan(context.Background(), eventtest.RunCreatingRootIngress("", "child/child.start", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{})); err == nil || !strings.Contains(err.Error(), `routed node "`+wantNode.Key()+`"`) {
@@ -1705,7 +1701,7 @@ func TestRoutedRootNodeDeliveryIntentsRejectEmptyPathFromAnotherFlow(t *testing.
 	event := eventtest.RunCreatingRootIngress(
 		"", "step.begin", "", "", nil, 0, "run-one", "", events.EventEnvelope{}, time.Time{},
 	)
-	rootNode := testFlowNode(t, "root-flow", "root-handler")
+	rootNode := testRootNode(t, "root-handler")
 	childNode := testFlowNode(t, "child-flow", "child-handler")
 	root := Subscriber{
 		Recipient:      events.MustNodeDeliveryRecipient(rootNode),
@@ -1723,8 +1719,8 @@ func TestRoutedRootNodeDeliveryIntentsRejectEmptyPathFromAnotherFlow(t *testing.
 		targetHandler:  runtimepipeline.MustDeliveryTargetHandler(childNode),
 		LocalizedEvent: "step.begin",
 	}
-	intents := routedRootNodeDeliveryIntentsForNoTargetEvent(event, []Subscriber{child, root}, "root-flow")
-	if len(intents) != 1 || intents[0].Recipient.LocalID() != "root-handler" || intents[0].Handler.FlowID() != "root-flow" {
-		t.Fatalf("root intents = %#v, want only exact root-flow handler", intents)
+	intents := routedRootNodeDeliveryIntentsForNoTargetEvent(deliveryPlannerHandlerSource(false), event, []Subscriber{child, root})
+	if len(intents) != 1 || intents[0].Recipient.LocalID() != "root-handler" || intents[0].TargetBlueprint.FlowID != "root" {
+		t.Fatalf("root intents = %#v, want only exact authored-root handler", intents)
 	}
 }

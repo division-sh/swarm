@@ -1089,9 +1089,9 @@ func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, run
 		DecisionCards: tc.cards, BundleSourceFact: mustAuthorActivityTestBundleSourceFactForHash(gateRecoveryBundle),
 	})
 	if _, err := setupCoordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-		InstanceID: "launch", StorageRef: "launch", EntityID: entityID, WorkflowName: "launch", WorkflowVersion: "1",
+		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "launch", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: at,
-		Fields: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": "launch", "instance_id": "launch"},
+		Fields: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
 	}, at); err != nil {
 		t.Fatal(err)
 	}
@@ -1226,9 +1226,9 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 	matching := newCoordinator(gateRecoveryBundle)
 	enteredAt := time.Now().UTC().Add(-25 * time.Hour)
 	if _, err := matching.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-		InstanceID: "launch", StorageRef: "launch", EntityID: entityID, WorkflowName: "launch", WorkflowVersion: "1",
+		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "launch", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: enteredAt,
-		Fields: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": "launch", "instance_id": "launch"},
+		Fields: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
 	}, enteredAt); err != nil {
 		t.Fatal(err)
 	}
@@ -1325,9 +1325,9 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 
 	scenarioAt := time.Now().UTC().Add(-25 * time.Hour)
 	if _, err := matching.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-		InstanceID: "launch", StorageRef: "launch", EntityID: entityID, WorkflowName: "launch", WorkflowVersion: "1",
+		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "launch", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: scenarioAt,
-		Fields: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": "launch", "instance_id": "launch"},
+		Fields: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
 	}, scenarioAt); err != nil {
 		t.Fatalf("materialize workflow instance: %v", err)
 	}
@@ -1647,7 +1647,7 @@ func insertGateRecoveryRun(t *testing.T, tc gateRecoveryStoreCase, runID string)
 
 func assertGateRecoveryActivation(t *testing.T, workflowStore *runtimepipeline.PipelineCoordinator, ctx context.Context, entityID, stage string, status gateruntime.Status) {
 	t.Helper()
-	instance, ok, err := workflowStore.Load(ctx, testWorkflowInstanceRoute("launch"))
+	instance, ok, err := workflowStore.Load(ctx, testWorkflowInstanceRoute(runtimecorrelation.RunIDFromContext(ctx)))
 	if err != nil || !ok {
 		t.Fatalf("Load workflow instance = %#v, %v, %v", instance, ok, err)
 	}

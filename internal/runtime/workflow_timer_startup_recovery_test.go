@@ -356,16 +356,16 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 			seedRuntime, seedProcess := newRuntime(selected)
 			seedCtx := testLiveExecutionContext(worklifetime.WithRuntimeOccurrence(ctx, seedRuntime.WorkOccurrence()))
 			result, err := seedRuntime.Pipeline.MaterializeInitialEntry(seedCtx, runtimepipeline.WorkflowInstance{
-				InstanceID:      "workflow-timer-startup",
-				StorageRef:      "workflow-timer-startup",
+				InstanceID:      runID,
+				StorageRef:      runID,
 				WorkflowName:    "workflow-timer-startup",
 				WorkflowVersion: "1",
 				CurrentState:    "waiting",
 				Fields: map[string]any{
 					"run_id":      runID,
 					"entity_id":   entityID,
-					"flow_path":   "workflow-timer-startup",
-					"instance_id": "workflow-timer-startup",
+					"flow_path":   runID,
+					"instance_id": runID,
 				},
 			}, time.Now().UTC())
 			if err != nil {
@@ -392,7 +392,7 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 				t.Fatalf("release failed-restart process capability: %v", err)
 			}
 
-			instance, found, err := restarted.Pipeline.Load(ctx, runtimeflowidentity.RouteForInstancePath("workflow-timer-startup"))
+			instance, found, err := restarted.Pipeline.Load(ctx, runtimeflowidentity.RouteForInstancePath(runID))
 			if err != nil {
 				t.Fatalf("load workflow instance after failed restart: %v", err)
 			}
@@ -498,16 +498,16 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 			occurredAt := time.Now().UTC().Add(-time.Second)
 			seedCtx := testLiveExecutionContext(worklifetime.WithRuntimeOccurrence(ctx, seedRuntime.WorkOccurrence()))
 			result, err := seedRuntime.Pipeline.MaterializeInitialEntry(seedCtx, runtimepipeline.WorkflowInstance{
-				InstanceID:      "workflow-timer-startup",
-				StorageRef:      "workflow-timer-startup",
+				InstanceID:      runID,
+				StorageRef:      runID,
 				WorkflowName:    "workflow-timer-startup",
 				WorkflowVersion: "1",
 				CurrentState:    "waiting",
 				Fields: map[string]any{
 					"run_id":      runID,
 					"entity_id":   entityID,
-					"flow_path":   "workflow-timer-startup",
-					"instance_id": "workflow-timer-startup",
+					"flow_path":   runID,
+					"instance_id": runID,
 				},
 			}, occurredAt)
 			if err != nil {
@@ -559,7 +559,7 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 
 			deadline := time.Now().Add(8 * time.Second)
 			for {
-				instance, found, err := restarted.Pipeline.Load(ctx, runtimeflowidentity.RouteForInstancePath("workflow-timer-startup"))
+				instance, found, err := restarted.Pipeline.Load(ctx, runtimeflowidentity.RouteForInstancePath(runID))
 				if err != nil {
 					t.Fatalf("load restored workflow instance: %v", err)
 				}

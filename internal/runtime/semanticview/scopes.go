@@ -1,6 +1,7 @@
 package semanticview
 
 import (
+	"fmt"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -76,6 +77,45 @@ func RootExecutionFlowID(source Source) string {
 		}
 	}
 	return strings.TrimSpace(source.WorkflowName())
+}
+
+// RootExecutionCoordinate is the exact root receiver identity for one run.
+// The authored flow ID and run ID are independent facts and must agree
+// together; UUID shape alone never establishes root ownership.
+type RootExecutionCoordinate struct {
+	flowID string
+	runID  string
+}
+
+func AdmitRootExecutionCoordinate(source Source, runID string) (RootExecutionCoordinate, error) {
+	flowID := strings.TrimSpace(RootExecutionFlowID(source))
+	runID = strings.TrimSpace(runID)
+	if flowID == "" || runID == "" {
+		return RootExecutionCoordinate{}, fmt.Errorf("root execution coordinate requires authored flow and current run identity")
+	}
+	return RootExecutionCoordinate{flowID: flowID, runID: runID}, nil
+}
+
+func (c RootExecutionCoordinate) Valid() bool {
+	return strings.TrimSpace(c.flowID) != "" && strings.TrimSpace(c.runID) != ""
+}
+
+func (c RootExecutionCoordinate) FlowID() string {
+	if !c.Valid() {
+		return ""
+	}
+	return c.flowID
+}
+
+func (c RootExecutionCoordinate) RunID() string {
+	if !c.Valid() {
+		return ""
+	}
+	return c.runID
+}
+
+func (c RootExecutionCoordinate) Matches(flowID, runID string) bool {
+	return c.Valid() && strings.TrimSpace(flowID) == c.flowID && strings.TrimSpace(runID) == c.runID
 }
 
 func flowModeFromView(view runtimecontracts.FlowContractView) string {

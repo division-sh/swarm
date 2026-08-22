@@ -685,6 +685,45 @@ func TestPipelineEngineMutationOwnerRejectsForeignFlowWrite(t *testing.T) {
 	}
 }
 
+func TestPipelineEngineMutationOwnerRejectsWrongRunRootAddressBeforeMutationOnBothStores(t *testing.T) {
+	const wrongRunID = "88888888-8888-8888-8888-888888888888"
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			db, store := openHandlerEntityRequirementStore(t, backend)
+			source := handlerEntityRequirementExecutionSource()
+			coordinator := newDurablePipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
+				Module:              staticSemanticWorkflowModule{source: source},
+				Persistence:         workflowPersistenceForTest(store),
+				PipelineObligations: unavailablePipelineTestObligationOwner{},
+			})
+			var ctx context.Context
+			if backend == "sqlite" {
+				ctx = sqliteExactOnceRunContext(t, db)
+			} else {
+				ctx = testPipelineRunContext(t, db)
+			}
+			entityID := eventtest.UUID("wrong-run-root-engine-" + backend)
+			address := testEngineStateAddress("review", wrongRunID, entityID)
+			mutation := testEngineStateMutation(map[string]any{"marker": "must-not-persist"}, nil, nil)
+			mutation.TriggeredAt = time.Date(2026, time.August, 22, 12, 0, 0, 0, time.UTC)
+
+			_, err := (pipelineEngineMutationOwner{
+				store: store,
+				state: pipelineEngineStateRepo{coordinator: coordinator},
+			}).CommitEngineMutation(ctx, runtimeengine.EngineMutation{Address: address, State: mutation})
+			if err == nil || !strings.Contains(err.Error(), "disagrees with current root coordinate") {
+				t.Fatalf("wrong-run root mutation error = %v", err)
+			}
+			for _, table := range []string{"entity_state", "flow_instances"} {
+				var count int
+				if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil || count != 0 {
+					t.Fatalf("%s rows after wrong-run root mutation = %d, err=%v", table, count, err)
+				}
+			}
+		})
+	}
+}
+
 func TestPipelineEngineStateRepoLoadStateMissingEntityDoesNotMaterializeDefaults(t *testing.T) {
 	source := loadWorkflowTempSource(t, map[string]string{
 		"package.yaml": `

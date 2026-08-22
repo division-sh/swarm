@@ -145,10 +145,10 @@ func TestWorkflowInstanceOwnedByFlow_UsesExactSemanticScope(t *testing.T) {
 		InstanceID:   "inst-1",
 	}
 
-	if workflowInstanceOwnedByFlow(source, instance, "child") {
+	if workflowInstanceOwnedByFlow(source, instance, "child", "") {
 		t.Fatal("did not expect child to own child/grandchild/inst-1")
 	}
-	if !workflowInstanceOwnedByFlow(source, instance, "grandchild") {
+	if !workflowInstanceOwnedByFlow(source, instance, "grandchild", "") {
 		t.Fatal("expected grandchild to own child/grandchild/inst-1")
 	}
 }

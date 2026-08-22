@@ -480,11 +480,16 @@ func (r connectRoutePlanResolver) materializeReplyResponse(ctx context.Context, 
 
 func (r connectRoutePlanResolver) materializeConnectRoutePlan(ctx context.Context, evt events.Event, plan runtimepinrouting.ConnectRoutePlan, values map[string]string, descriptors []runtimepinrouting.Descriptor) (runtimepinrouting.ConnectRoutePlanMaterialization, TemplateInstanceLifecycleDecision, error) {
 	if plan.ReceiverEndpoint().IsRoot() {
-		rootFlowID := strings.TrimSpace(r.source.WorkflowName())
 		rootInstance := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
-		if rootFlowID == "" || rootInstance == "" {
+		coordinate, err := semanticview.AdmitRootExecutionCoordinate(r.source, rootInstance)
+		if err != nil {
 			return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, errors.New("root connect receiver requires canonical workflow identity")
 		}
+		if eventRunID := strings.TrimSpace(evt.RunID()); eventRunID != coordinate.RunID() {
+			return runtimepinrouting.ConnectRoutePlanMaterialization{}, TemplateInstanceLifecycleDecision{}, errors.New("root connect receiver event and context run identities disagree")
+		}
+		rootFlowID := coordinate.FlowID()
+		rootInstance = coordinate.RunID()
 		if projection, ok := selectedRunTargetOwnerProjectionFromContext(ctx); ok && projection.required {
 			owner, err := projection.resolveSelectedRoute(events.RouteIdentity{
 				FlowID: rootFlowID, FlowInstance: rootInstance,
@@ -675,6 +680,7 @@ func (r connectRoutePlanResolver) resolveAgentCarrierIdentity(
 	agentID := subscriber.Recipient.ID()
 	matches := make([]agentidentity.Identity, 0, 1)
 	available := false
+	root := rootExecutionCoordinate(r.source, runtimecorrelation.RunIDFromContext(ctx))
 	if r.loadAgents != nil {
 		descriptors, loaded, err := r.loadAgents(ctx)
 		if err != nil {
@@ -691,7 +697,7 @@ func (r connectRoutePlanResolver) resolveAgentCarrierIdentity(
 					if identity.Route.Presence != agentidentity.RouteRoot {
 						continue
 					}
-				} else if !routeMatchesAgentDescriptor(target, descriptor) {
+				} else if !routeMatchesAgentDescriptor(target, descriptor, root) {
 					continue
 				}
 				matches = append(matches, identity)
@@ -705,7 +711,7 @@ func (r connectRoutePlanResolver) resolveAgentCarrierIdentity(
 	case 1:
 		return matches[0], true, nil
 	case 0:
-		if identity, planned, err := plannedCreateAgentCarrierIdentity(subscriber, target, decision, routeCreatedInPlan); planned || err != nil {
+		if identity, planned, err := plannedCreateAgentCarrierIdentity(subscriber, target, decision, routeCreatedInPlan, root); planned || err != nil {
 			return identity, false, err
 		}
 		if r.loadAgents == nil {
@@ -733,6 +739,7 @@ func plannedCreateAgentCarrierIdentity(
 	target events.RouteIdentity,
 	decision TemplateInstanceLifecycleDecision,
 	routeCreatedInPlan bool,
+	root semanticview.RootExecutionCoordinate,
 ) (agentidentity.Identity, bool, error) {
 	if !routeCreatedInPlan {
 		return agentidentity.Identity{}, false, nil
@@ -760,7 +767,7 @@ func plannedCreateAgentCarrierIdentity(
 			route.InstancePath,
 		)
 	}
-	if !target.Empty() && !routeMatchesAgentDescriptor(target, ActiveAgentDescriptor{Identity: identity, EntityID: target.EntityID}) {
+	if !target.Empty() && !routeMatchesAgentDescriptor(target, ActiveAgentDescriptor{Identity: identity, EntityID: target.EntityID}, root) {
 		return agentidentity.Identity{}, true, fmt.Errorf("created connect agent carrier %q identity does not match target %#v", subscriber.Recipient.ID(), target.Normalized())
 	}
 	return identity, true, nil

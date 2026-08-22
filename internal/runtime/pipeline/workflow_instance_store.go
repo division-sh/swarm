@@ -29,7 +29,6 @@ import (
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	runtimeworkflowroute "github.com/division-sh/swarm/internal/runtime/workflowroute"
-	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
 
@@ -87,7 +86,6 @@ const (
 	workflowEntityStateSelectionCardinalityUnknown workflowEntityStateSelectionCardinality = iota
 	workflowEntityStateSelectionExact
 	workflowEntityStateSelectionTemplate
-	workflowEntityStateSelectionRunRoot
 )
 
 type workflowEntityStateSemanticOwner struct {
@@ -106,9 +104,6 @@ func (o workflowEntityStateSemanticOwner) owns(instancePath string) bool {
 		}
 		instanceID := strings.TrimPrefix(instancePath, o.scopeKey+"/")
 		return instanceID != "" && !strings.Contains(instanceID, "/")
-	case workflowEntityStateSelectionRunRoot:
-		_, err := uuid.Parse(instancePath)
-		return err == nil
 	default:
 		return false
 	}
@@ -123,7 +118,7 @@ type WorkflowEntityStateSelectionOwner struct {
 	candidates []workflowEntityStateSemanticOwner
 }
 
-func AdmitWorkflowEntityStateSelectionOwner(source semanticview.Source, flowID string) (WorkflowEntityStateSelectionOwner, error) {
+func AdmitWorkflowEntityStateSelectionOwner(source semanticview.Source, flowID, runID string) (WorkflowEntityStateSelectionOwner, error) {
 	flowID = strings.TrimSpace(flowID)
 	if source == nil || flowID == "" {
 		return WorkflowEntityStateSelectionOwner{}, fmt.Errorf("workflow entity state selection owner requires source and flow identity")
@@ -139,8 +134,12 @@ func AdmitWorkflowEntityStateSelectionOwner(source semanticview.Source, flowID s
 	}
 	owner := WorkflowEntityStateSelectionOwner{flowID: flowID, scopeKey: scopeKey}
 	if runRoot {
+		coordinate, err := semanticview.AdmitRootExecutionCoordinate(source, runID)
+		if err != nil {
+			return WorkflowEntityStateSelectionOwner{}, err
+		}
 		owner.candidates = append(owner.candidates, workflowEntityStateSemanticOwner{
-			flowID: flowID, scopeKey: scopeKey, cardinality: workflowEntityStateSelectionRunRoot,
+			flowID: flowID, scopeKey: coordinate.RunID(), cardinality: workflowEntityStateSelectionExact,
 		})
 	}
 	for _, candidate := range source.FlowScopes() {
