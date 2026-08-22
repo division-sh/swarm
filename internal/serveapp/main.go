@@ -1220,6 +1220,11 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	storeSelection := localState.StoreSelection
 	stores, err := buildStoresForServe(ctx, storeSelection, cfg)
 	if err != nil {
+		var acquisitionErr *runtimestartupownership.AcquisitionError
+		if errors.As(err, &acquisitionErr) {
+			presenter.fail(3, "startup_ownership_lease", serveOwnershipAcquisitionError(err))
+			return 3
+		}
 		presenter.fail(3, "db_connection", err)
 		return 1
 	}
@@ -2746,7 +2751,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 		}
 		return bundle, nil
 	case storebackend.BackendSQLite:
-		sqliteStore, constructionDB, err := storeconstruction.OpenSQLiteRuntime(selection.SQLitePath)
+		sqliteStore, constructionDB, err := storeconstruction.OpenSQLiteRuntimeWithOwnershipBinding(selection.SQLitePath)
 		if err != nil {
 			return storeBundle{}, err
 		}

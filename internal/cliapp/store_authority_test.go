@@ -13,9 +13,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
+	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	storeconstruction "github.com/division-sh/swarm/internal/store/construction"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/google/uuid"
@@ -65,6 +68,27 @@ func TestStoreStatusReadsCurrentSQLiteStoreWithoutMutationBootstrap(t *testing.T
 	}
 	if beforeInfo.Size() != afterInfo.Size() || !beforeInfo.ModTime().Equal(afterInfo.ModTime()) {
 		t.Fatalf("store status mutated selected SQLite database: before=(%d,%s) after=(%d,%s)", beforeInfo.Size(), beforeInfo.ModTime(), afterInfo.Size(), afterInfo.ModTime())
+	}
+}
+
+func TestSQLiteAuthorityMaintenanceConstructionRetainsBackendPossession(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "maintenance.db")
+	selected, err := constructAuthorityMaintenanceStore(context.Background(), storebackend.Selection{
+		Backend: storebackend.BackendSQLite, SQLitePath: path,
+	}, &config.Config{})
+	if err != nil {
+		t.Fatalf("construct SQLite authority maintenance store: %v", err)
+	}
+	t.Cleanup(func() { _ = selected.Close() })
+
+	contender, _, err := storeconstruction.OpenSQLiteRuntimeWithOwnershipBinding(path)
+	if contender != nil {
+		_ = contender.Close()
+		t.Fatal("authority maintenance construction released SQLite possession before repair")
+	}
+	var acquisitionErr *runtimestartupownership.AcquisitionError
+	if !errors.As(err, &acquisitionErr) || acquisitionErr.Failure != runtimestartupownership.AcquisitionTakeoverRequired {
+		t.Fatalf("authority maintenance contender error=%v, want takeover_required", err)
 	}
 }
 
@@ -151,6 +175,7 @@ func TestPlatformSpecBindsOwnershipLossDeadlinesAndReadOnlyStatus(t *testing.T) 
 		} `yaml:"platform_tables"`
 		AgentTopologyAuthority struct {
 			ProcessCapability struct {
+				Acquisition             string `yaml:"acquisition"`
 				Grants                  string `yaml:"grants"`
 				LifecycleReconciliation string `yaml:"lifecycle_reconciliation"`
 				Repair                  struct {
@@ -174,6 +199,11 @@ func TestPlatformSpecBindsOwnershipLossDeadlinesAndReadOnlyStatus(t *testing.T) 
 		}
 	}
 	process := spec.AgentTopologyAuthority.ProcessCapability
+	if !strings.Contains(process.Acquisition, "backend-file identity") ||
+		!strings.Contains(process.Acquisition, "pool bound to one inode") ||
+		!strings.Contains(process.Acquisition, "acquisition or repair") {
+		t.Fatalf("process acquisition contract does not bind the SQLite pool and retained possession: %q", process.Acquisition)
+	}
 	if !strings.Contains(process.Grants, "release error can never publish released") || !strings.Contains(process.Grants, "configured monitor deadline") {
 		t.Fatalf("process grant contract does not bind failed release classification: %q", process.Grants)
 	}

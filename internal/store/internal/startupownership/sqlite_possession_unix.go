@@ -130,3 +130,11 @@ func (p *sqliteFilePossession) Release() error {
 	p.database = nil
 	return errors.Join(unlockErr, databaseCloseErr)
 }
+
+func sameSQLitePossessionResource(left, right sqlitePossession) bool {
+	leftFile, leftOK := left.(*sqliteFilePossession)
+	rightFile, rightOK := right.(*sqliteFilePossession)
+	return leftOK && rightOK && leftFile != nil && rightFile != nil &&
+		leftFile.databaseInfo != nil && rightFile.databaseInfo != nil &&
+		os.SameFile(leftFile.databaseInfo, rightFile.databaseInfo)
+}

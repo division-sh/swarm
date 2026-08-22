@@ -21,8 +21,11 @@ import (
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	storeconstruction "github.com/division-sh/swarm/internal/store/construction"
+	"github.com/google/uuid"
 )
 
 func TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction(t *testing.T) {
@@ -276,6 +279,84 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("sqlite runtime store did not create file-backed db at %s: %v", path, err)
+	}
+}
+
+func TestBuildStoresSQLiteBindsOwnershipToConstructedBackendIdentity(t *testing.T) {
+	for _, operation := range []string{"acquire", "repair"} {
+		t.Run(operation, func(t *testing.T) {
+			ctx := context.Background()
+			path := filepath.Join(t.TempDir(), "runtime.db")
+			stores, err := buildStores(ctx, storebackend.Selection{
+				Backend: storebackend.BackendSQLite, SQLitePath: path,
+			}, &config.Config{})
+			if err != nil {
+				t.Fatalf("buildStores(sqlite): %v", err)
+			}
+			t.Cleanup(func() { _ = stores.facade().closeWithError() })
+			if _, err := initializeServePlatformStateStores(ctx, stores, filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath)); err != nil {
+				t.Fatalf("bootstrap SQLite selected store: %v", err)
+			}
+
+			retiredPath := path + ".retired"
+			if err := os.Rename(path, retiredPath); err != nil {
+				t.Fatalf("replace constructed SQLite identity: %v", err)
+			}
+			if err := os.WriteFile(path, nil, 0o600); err != nil {
+				t.Fatalf("create replacement SQLite identity: %v", err)
+			}
+			contender, _, contenderErr := storeconstruction.OpenSQLiteRuntimeWithOwnershipBinding(retiredPath)
+			if contender != nil {
+				_ = contender.Close()
+				t.Fatal("renamed constructed SQLite backend admitted a concurrent process constructor")
+			}
+			var contenderAcquisitionErr *runtimestartupownership.AcquisitionError
+			if !errors.As(contenderErr, &contenderAcquisitionErr) || contenderAcquisitionErr.Failure != runtimestartupownership.AcquisitionTakeoverRequired {
+				t.Fatalf("renamed backend contender error=%v, want takeover_required", contenderErr)
+			}
+
+			switch operation {
+			case "acquire":
+				capability, err := stores.StartupOwnership.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+					OwnerID: "backend-identity-proof", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
+				})
+				if capability != nil {
+					_ = capability.Release(ctx)
+					t.Fatal("SQLite acquisition returned a capability for a different backend inode")
+				}
+				requireSQLiteBackendIdentityRefusal(t, err)
+			case "repair":
+				maintenance, ok := stores.StartupOwnership.(interface {
+					RepairAuthority(context.Context, runtimestartupownership.AuthorityRepairRequest) (runtimestartupownership.AuthorityRepairResult, error)
+				})
+				if !ok {
+					t.Fatalf("SQLite startup owner %T does not expose repair", stores.StartupOwnership)
+				}
+				_, err := maintenance.RepairAuthority(ctx, runtimestartupownership.AuthorityRepairRequest{
+					OperationID: uuid.NewString(), FindingsDigest: "sha256:" + strings.Repeat("0", 64), Confirmed: true,
+				})
+				requireSQLiteBackendIdentityRefusal(t, err)
+			}
+
+			var authorityRows int
+			if err := stores.SQLDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_startup_authority_facts`).Scan(&authorityRows); err != nil {
+				t.Fatalf("read constructed SQLite authority rows: %v", err)
+			}
+			if authorityRows != 0 {
+				t.Fatalf("constructed SQLite backend gained %d authority rows after identity replacement", authorityRows)
+			}
+			if info, err := os.Stat(path); err != nil || info.Size() != 0 {
+				t.Fatalf("replacement SQLite identity was mutated: info=%#v err=%v", info, err)
+			}
+		})
+	}
+}
+
+func requireSQLiteBackendIdentityRefusal(t testing.TB, err error) {
+	t.Helper()
+	var possessionErr *runtimestartupownership.PossessionError
+	if !errors.As(err, &possessionErr) || possessionErr.Cause != runtimestartupownership.TerminalOwnershipUnprovable {
+		t.Fatalf("SQLite backend identity error=%v, want ownership_unprovable", err)
 	}
 }
 

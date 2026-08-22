@@ -1206,6 +1206,9 @@ func requireChangedStandingColdStartReconciled(t *testing.T, opts cliapp.ServeOp
 		t.Fatalf("changed standing bundle exit = %d\n%s", code, process.outputString())
 	}
 	output := process.outputString()
+	if !strings.Contains(output, "shutdown · complete") {
+		t.Fatalf("changed standing bundle did not release its selected-store authority:\n%s", output)
+	}
 	for _, want := range wantOutput {
 		if !strings.Contains(output, want) {
 			t.Fatalf("changed standing bundle output omitted %q:\n%s", want, output)

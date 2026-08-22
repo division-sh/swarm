@@ -45,9 +45,9 @@ import (
 )
 
 // SQLiteRuntimeStore is the file-backed SQLite implementation of the selected
-// runtime persistence contracts. SQLite is a local-dev backend: process-local
-// mutexes provide startup/session serialization while persisted rows remain the
-// canonical state consumed by the runtime.
+// runtime persistence contracts. SQLite is a local-dev backend: a retained OS
+// file possession owner serializes process startup while persisted rows remain
+// the canonical state consumed by the runtime.
 type SQLiteRuntimeStore struct {
 	agentSQLiteOwner             *storeagent.AgentSQLiteOwner
 	activitySQLiteOwner          *storeactivityjournal.ActivitySQLiteOwner
@@ -105,10 +105,17 @@ func (s *SQLiteRuntimeStore) Path() string {
 }
 
 func (s *SQLiteRuntimeStore) Close() error {
-	if s == nil || s.schema == nil {
+	if s == nil {
 		return nil
 	}
-	return s.schema.Close()
+	var possessionErr, schemaErr error
+	if s.startupSQLiteOwner != nil {
+		possessionErr = s.startupSQLiteOwner.ReleaseConstructionPossession()
+	}
+	if s.schema != nil {
+		schemaErr = s.schema.Close()
+	}
+	return errors.Join(possessionErr, schemaErr)
 }
 
 func (s *SQLiteRuntimeStore) Ping(ctx context.Context) error {

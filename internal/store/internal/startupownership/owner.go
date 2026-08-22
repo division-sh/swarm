@@ -35,12 +35,13 @@ type StartupPostgresOwner struct {
 }
 
 type StartupSQLiteOwner struct {
-	backend      *sqlitebackend.Backend
-	path         string
-	schemaGuard  func() error
-	catalogEmpty func(context.Context) (bool, error)
-	agents       *storeagent.AgentSQLiteOwner
-	ownerMu      sync.Mutex
+	backend         *sqlitebackend.Backend
+	path            string
+	backendIdentity *SQLiteBackendIdentity
+	schemaGuard     func() error
+	catalogEmpty    func(context.Context) (bool, error)
+	agents          *storeagent.AgentSQLiteOwner
+	ownerMu         sync.Mutex
 }
 
 func NewPostgres(backend *postgresbackend.Backend, schemaGuard func() error, catalogEmpty func(context.Context) (bool, error), agents *storeagent.AgentPostgresOwner, bundleDelete *storeadmin.BundleDeletePostgresOwner, destructiveReset *storeadmin.DestructiveResetPostgresOwner) (*StartupPostgresOwner, error) {
@@ -51,10 +52,14 @@ func NewPostgres(backend *postgresbackend.Backend, schemaGuard func() error, cat
 }
 
 func NewSQLite(backend *sqlitebackend.Backend, path string, schemaGuard func() error, catalogEmpty func(context.Context) (bool, error), agents *storeagent.AgentSQLiteOwner) (*StartupSQLiteOwner, error) {
+	return NewSQLiteWithBackendIdentity(backend, path, nil, schemaGuard, catalogEmpty, agents)
+}
+
+func NewSQLiteWithBackendIdentity(backend *sqlitebackend.Backend, path string, identity *SQLiteBackendIdentity, schemaGuard func() error, catalogEmpty func(context.Context) (bool, error), agents *storeagent.AgentSQLiteOwner) (*StartupSQLiteOwner, error) {
 	if backend == nil || !backend.Valid() || schemaGuard == nil || catalogEmpty == nil || agents == nil {
 		return nil, errors.New("startup/topology SQLite owner requires backend, schema guard, and agent lifecycle owner")
 	}
-	return &StartupSQLiteOwner{backend: backend, path: strings.TrimSpace(path), schemaGuard: schemaGuard, catalogEmpty: catalogEmpty, agents: agents}, nil
+	return &StartupSQLiteOwner{backend: backend, path: strings.TrimSpace(path), backendIdentity: identity, schemaGuard: schemaGuard, catalogEmpty: catalogEmpty, agents: agents}, nil
 }
 
 func (s *StartupPostgresOwner) AcquireProcessCapability(ctx context.Context, req runtimestartupownership.AcquireRequest) (runtimestartupownership.ProcessCapability, error) {
@@ -101,7 +106,7 @@ func (s *StartupSQLiteOwner) AcquireProcessCapability(ctx context.Context, req r
 	if err := s.schemaGuard(); err != nil {
 		return nil, err
 	}
-	possession, err := s.acquirePossession()
+	possession, err := s.acquirePossession(ctx)
 	if err != nil {
 		var acquisitionErr *runtimestartupownership.AcquisitionError
 		if errors.As(err, &acquisitionErr) && acquisitionErr.Failure == runtimestartupownership.AcquisitionTakeoverRequired {

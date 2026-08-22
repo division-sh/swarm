@@ -39,7 +39,7 @@ func NewSQLiteRuntimeStore(path string) (*SQLiteRuntimeStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	store, err := newSQLiteStoreComposition(schema, backend)
+	store, err := newSQLiteStoreComposition(schema, backend, nil)
 	if err != nil {
 		_ = schema.Close()
 		return nil, err

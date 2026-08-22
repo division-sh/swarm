@@ -3,10 +3,14 @@ package serveapp
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"path/filepath"
 	"testing"
 	"time"
 
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	storeconstruction "github.com/division-sh/swarm/internal/store/construction"
 )
 
 func TestSelectedStoreOwnerRequiresExactProcessJoinBeforeActivatedClose(t *testing.T) {
@@ -73,5 +77,29 @@ func TestSelectedStoreOwnerClosesUnactivatedConstruction(t *testing.T) {
 	}
 	if err := db.PingContext(context.Background()); err == nil {
 		t.Fatal("unactivated selected store remained usable after close")
+	}
+}
+
+func TestSelectedStoreOwnerClosesUnactivatedSQLiteConstructionPossession(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.db")
+	selected, db, err := storeconstruction.OpenSQLiteRuntimeWithOwnershipBinding(path)
+	if err != nil {
+		t.Fatalf("open bound SQLite construction: %v", err)
+	}
+	owner := newSelectedStoreOwner(storeBundle{SQLDB: db, StartupOwnership: selected}.facade())
+	if err := owner.CloseUnactivated(); err != nil {
+		t.Fatalf("close unactivated bound SQLite construction: %v", err)
+	}
+
+	contender, _, err := storeconstruction.OpenSQLiteRuntimeWithOwnershipBinding(path)
+	if err != nil {
+		var acquisitionErr *runtimestartupownership.AcquisitionError
+		if errors.As(err, &acquisitionErr) {
+			t.Fatalf("unactivated construction retained process possession: %v", err)
+		}
+		t.Fatalf("reopen bound SQLite construction: %v", err)
+	}
+	if err := contender.Close(); err != nil {
+		t.Fatalf("close replacement bound SQLite construction: %v", err)
 	}
 }
