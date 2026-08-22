@@ -170,7 +170,7 @@ func openAuthorityMaintenanceStore(ctx context.Context, repo string, cmd *cobra.
 	if err != nil {
 		return nil, func() {}, err
 	}
-	_, bundle, err := NewSwarmWorkflowModule(repo, paths.ContractsPath, paths.PlatformSpecPath)
+	_, bundle, err := NewSwarmWorkflowModuleWithRuntimeConfig(repo, paths.ContractsPath, paths.PlatformSpecPath, cfgResult)
 	if err != nil {
 		return nil, func() {}, fmt.Errorf("load selected-store schema source: %w", err)
 	}
