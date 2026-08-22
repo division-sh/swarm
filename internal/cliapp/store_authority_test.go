@@ -149,6 +149,15 @@ func TestPlatformSpecBindsOwnershipLossDeadlinesAndReadOnlyStatus(t *testing.T) 
 				DiagnosticInspectionContract string `yaml:"diagnostic_inspection_contract"`
 			} `yaml:"tables"`
 		} `yaml:"platform_tables"`
+		AgentTopologyAuthority struct {
+			ProcessCapability struct {
+				Grants                  string `yaml:"grants"`
+				LifecycleReconciliation string `yaml:"lifecycle_reconciliation"`
+				Repair                  struct {
+					Rule string `yaml:"rule"`
+				} `yaml:"repair"`
+			} `yaml:"process_capability"`
+		} `yaml:"agent_topology_authority"`
 	}
 	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(RepoRoot(), defaultPlatformSpecPath), &spec)
 	authority := spec.PlatformTables.Tables["runtime_startup_authority_facts"]
@@ -163,6 +172,18 @@ func TestPlatformSpecBindsOwnershipLossDeadlinesAndReadOnlyStatus(t *testing.T) 
 		if name == "diagnostic inspection" && (!strings.Contains(value, "read-only") || !strings.Contains(value, "never creates")) {
 			t.Fatalf("diagnostic inspection contract does not prohibit bootstrap mutation: %q", value)
 		}
+	}
+	process := spec.AgentTopologyAuthority.ProcessCapability
+	if !strings.Contains(process.Grants, "release error can never publish released") || !strings.Contains(process.Grants, "configured monitor deadline") {
+		t.Fatalf("process grant contract does not bind failed release classification: %q", process.Grants)
+	}
+	if !strings.Contains(process.LifecycleReconciliation, "topology_authority_kind") ||
+		!strings.Contains(process.LifecycleReconciliation, "execution_lifetime") ||
+		!strings.Contains(process.LifecycleReconciliation, "fails closed") {
+		t.Fatalf("lifecycle reconciliation contract does not bind canonical-column cross-checking: %q", process.LifecycleReconciliation)
+	}
+	if !strings.Contains(process.Repair.Rule, "every current nonterminal runtime") || !strings.Contains(process.Repair.Rule, "same transaction") {
+		t.Fatalf("authority repair contract does not bind atomic grant retirement: %q", process.Repair.Rule)
 	}
 }
 

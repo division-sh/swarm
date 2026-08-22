@@ -819,6 +819,22 @@ func retireAuthorityGenerationGrantsTx(ctx context.Context, tx *sql.Tx, authorit
 	if err != nil {
 		return err
 	}
+	return retireGenerationGrantRowsTx(ctx, tx, rows, sqlite)
+}
+
+func retireAllGenerationGrantsTx(ctx context.Context, tx *sql.Tx, sqlite bool) error {
+	query := `SELECT g.snapshot FROM runtime_generation_grants g WHERE NOT EXISTS (SELECT 1 FROM runtime_generation_grants newer WHERE newer.grant_id = g.grant_id AND newer.state_version > g.state_version) AND g.state <> 'retired' ORDER BY g.grant_id`
+	if !sqlite {
+		query += ` FOR UPDATE`
+	}
+	rows, err := tx.QueryContext(ctx, query)
+	if err != nil {
+		return err
+	}
+	return retireGenerationGrantRowsTx(ctx, tx, rows, sqlite)
+}
+
+func retireGenerationGrantRowsTx(ctx context.Context, tx *sql.Tx, rows *sql.Rows, sqlite bool) error {
 	var grants []runtimestartupownership.GrantEvidence
 	for rows.Next() {
 		var raw []byte
@@ -832,6 +848,10 @@ func retireAuthorityGenerationGrantsTx(ctx context.Context, tx *sql.Tx, authorit
 			return &runtimestartupownership.AcquisitionError{Failure: runtimestartupownership.AcquisitionPriorOwnerAmbiguous, Detail: "predecessor generation grant is invalid"}
 		}
 		grants = append(grants, grant)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
 	}
 	if err := rows.Close(); err != nil {
 		return err
