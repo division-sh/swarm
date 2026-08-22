@@ -208,7 +208,7 @@ func authorityMatchesRecord(authority runtimestartupownership.Authority, record 
 		authority.AcquisitionID == record.AcquisitionID && authority.AcquisitionRequestHash == record.AcquisitionRequestHash &&
 		string(authority.AcquisitionKind) == record.AcquisitionKind &&
 		authority.PredecessorAuthorityID == record.PredecessorAuthorityID &&
-		authority.SuccessorAuthorityID == record.SuccessorAuthorityID && authority.RecordedAt.Equal(record.CreatedAt)
+		authority.SuccessorAuthorityID == record.SuccessorAuthorityID
 }
 
 func repairAuthorityTx(ctx context.Context, tx *sql.Tx, req runtimestartupownership.AuthorityRepairRequest, backend string, sqlite bool) (runtimestartupownership.AuthorityRepairResult, error) {
@@ -241,10 +241,15 @@ func repairAuthorityTx(ctx context.Context, tx *sql.Tx, req runtimestartupowners
 	if record.AuthorityGeneration == ^uint64(0) {
 		return runtimestartupownership.AuthorityRepairResult{}, errors.New("authority repair generation is exhausted")
 	}
+	repairGeneration := record.AuthorityGeneration + 1
+	if repairGeneration < 2 {
+		repairGeneration = 2
+	}
 	runtimeID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("swarm-authority-repair-runtime-v1\x00"+req.OperationID)).String()
+	predecessorID := uuid.NewSHA1(uuid.NameSpaceURL, []byte("swarm-authority-repair-predecessor-v1\x00"+inspection.FindingsDigest)).String()
 	repair, err := runtimestartupownership.NewAuthority(runtimestartupownership.AcquireRequest{
 		OwnerID: "operator-authority-repair", BootID: req.OperationID, RuntimeInstanceID: runtimeID,
-	}, backend, record.AuthorityGeneration+1, record.AuthorityID, runtimestartupownership.AcquisitionRepair)
+	}, backend, repairGeneration, predecessorID, runtimestartupownership.AcquisitionRepair)
 	if err != nil {
 		return runtimestartupownership.AuthorityRepairResult{}, err
 	}

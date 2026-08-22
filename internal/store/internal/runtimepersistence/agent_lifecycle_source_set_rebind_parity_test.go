@@ -20,6 +20,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -28,6 +29,7 @@ import (
 
 type lifecycleSourceSetRebindStore interface {
 	agentfixture.Store
+	runtimemanager.AgentLifecycleCellCensus
 	runtimemanager.AgentLifecycleStateReader
 }
 
@@ -140,6 +142,24 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	}); err != nil {
 		t.Fatalf("seed readiness lifecycle cell: %v", err)
 	}
+	readinessState, found, err := store.LoadAgentLifecycleState(ctx, readinessIdentity)
+	if err != nil || !found {
+		t.Fatalf("load readiness lifecycle before termination: found=%v err=%v", found, err)
+	}
+	terminateLifecycleReadinessOwnerForTest(t, ctx, store, readinessPlan.Identity.InstancePath)
+	if _, err := readinessGrant.CommitAgentLifecycleTransition(ctx, runtimemanager.AgentLifecycleTransition{
+		OperationID: uuid.NewString(), OperationKind: "teardown", RequestHash: uuid.NewString(),
+		Identity: readinessIdentity, AgentID: readinessIdentity.AgentID(), Trigger: "terminated_census_fixture",
+		ExpectedEpoch: readinessState.RuntimeEpoch, ExpectedGeneration: readinessState.Generation, ExpectedPhase: readinessState.Phase,
+		TargetEpoch: readinessState.RuntimeEpoch, TargetGeneration: readinessState.Generation + 1, TargetPhase: runtimemanager.AgentLifecycleTerminated,
+		ConfigRevision: readinessState.ConfigRevision, RunMode: runtimemanager.AgentRunModeStopped,
+		Subordinate: runtimesessions.LifecycleMutationPlan{
+			Action: runtimesessions.LifecycleMutationTerminateCurrentSet, TerminationReason: runtimesessions.TerminationReasonCancelled,
+		},
+		Topology: readinessState.Topology, Now: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("terminate readiness lifecycle cell: %v", err)
+	}
 
 	before := make(map[string]runtimemanager.AgentLifecycleState, 2)
 	for _, identity := range []runtimeagentidentity.Identity{staticIdentity, readinessIdentity} {
@@ -177,7 +197,8 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 		LifecycleStore:    grant,
 		ReceiverExecution: eventreceiver.NormalExecution(),
 		PersistenceRoles: runtimemanager.PersistenceRoles{
-			LifecycleState: store,
+			LifecycleCensus: store,
+			LifecycleState:  store,
 		},
 	}, store)
 	if err := manager.RebindLifecycleExecutionForStartup(ctx); err != nil {
@@ -205,13 +226,34 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	if err != nil {
 		t.Fatalf("load persisted agents after lifecycle rebind: %v", err)
 	}
-	if len(records) != 2 {
-		t.Fatalf("persisted agents after lifecycle rebind=%d, want 2", len(records))
+	if len(records) != 1 {
+		t.Fatalf("hydration projection after lifecycle rebind=%d, want only the active static cell", len(records))
 	}
 	for _, record := range records {
 		if !record.ProcessBinding.Equal(target) {
 			t.Fatalf("persisted agent %s binding=%#v, want %#v", record.Config.ID, record.ProcessBinding, target)
 		}
+		if record.Config.ID == readinessIdentity.AgentID() {
+			t.Fatalf("terminated readiness cell leaked into hydration projection: %#v", record)
+		}
+	}
+}
+
+func terminateLifecycleReadinessOwnerForTest(t testing.TB, ctx context.Context, store lifecycleSourceSetRebindStore, instancePath string) {
+	t.Helper()
+	var db *sql.DB
+	placeholder := "?"
+	switch selected := store.(type) {
+	case *PostgresStore:
+		db = selected.backend.ConstructionHandle()
+		placeholder = "$1"
+	case *SQLiteRuntimeStore:
+		db = selected.backend.ConstructionHandle()
+	default:
+		t.Fatalf("unsupported lifecycle readiness fixture store %T", store)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE flow_instances SET status='terminated' WHERE instance_id=`+placeholder, instancePath); err != nil {
+		t.Fatalf("terminate lifecycle readiness owner: %v", err)
 	}
 }
 

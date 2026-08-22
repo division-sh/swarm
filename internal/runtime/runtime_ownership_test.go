@@ -8,7 +8,10 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packadmission"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	"github.com/google/uuid"
 )
 
 func TestRuntimeRequiresProcessGenerationGrant(t *testing.T) {
@@ -41,8 +44,18 @@ func TestRuntimeShutdownRetiresGrantWithoutReleasingProcessCapability(t *testing
 	cfg := &config.Config{}
 	cfg.Runtime.ExecutionPosture = "live"
 	fact := testBundleSourceFact(t, runtimeTestBundleHash)
+	authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
+		OwnerID: "runtime-test-process", BootID: uuid.NewString(), RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+	}, "runtime_test")
+	if err != nil {
+		t.Fatalf("new cold authority: %v", err)
+	}
+	selected := &runtimeTestRetainedSession{authority: authority, agents: map[string]runtimemanager.PersistedAgent{}}
 	rt, err := NewRuntime(testAuthorActivityContext(context.Background()), RuntimeDeps{
 		Config: cfg,
+		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
+			LifecycleCensus: selected,
+		},
 		Options: RuntimeOptions{
 			SelfCheck: false, WorkflowModule: module, LLMRuntime: noopLLMRuntime{},
 			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
@@ -52,7 +65,7 @@ func TestRuntimeShutdownRetiresGrantWithoutReleasingProcessCapability(t *testing
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
 	}
-	capability, grant, err := newRuntimeTestProcessCapability(t, rt.Manager, module.source, fact, authorActivityTestRuntimeInstanceID)
+	capability, grant, err := newRuntimeTestProcessCapabilityWithSession(t, rt.Manager, module.source, fact, authorActivityTestRuntimeInstanceID, selected)
 	if err != nil {
 		t.Fatalf("new process capability: %v", err)
 	}

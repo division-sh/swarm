@@ -47,6 +47,10 @@ func (s *recoveryGuardManagerStore) LoadAgents(context.Context) ([]runtimemanage
 	return append([]runtimemanager.PersistedAgent(nil), s.agents...), nil
 }
 
+func (s *recoveryGuardManagerStore) ListDurableAgentLifecycleStates(context.Context) ([]runtimemanager.AgentLifecycleState, error) {
+	return runtimeTestDurableAgentLifecycleStates(s.agents)
+}
+
 func (*recoveryGuardManagerStore) EnsureEntitySchema(context.Context, string) error { return nil }
 
 type recoveryGuardEventStore struct {
@@ -358,12 +362,15 @@ func TestRuntimeStart_AllowsRecoveryDisabledWhenNoRecoverableWorkExists(t *testi
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	scheduleStore := &recoveryDisabledScheduleStore{}
 	eventStore := &recoveryGuardEventStore{}
+	managerStore := &recoveryGuardManagerStore{}
 	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),
-		GenericScheduleStore:    scheduleStore,
-		TimerObligationReader:   scheduleStore,
-		EventStore:              eventStore,
-		ManagerStore:            &recoveryGuardManagerStore{},
-		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{DirectiveOperations: eventStore},
+		GenericScheduleStore:  scheduleStore,
+		TimerObligationReader: scheduleStore,
+		EventStore:            eventStore,
+		ManagerStore:          managerStore,
+		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
+			LifecycleCensus: managerStore, DirectiveOperations: eventStore,
+		},
 		Options: RuntimeOptions{
 			SelfCheck:      false,
 			WorkflowModule: module,
@@ -384,11 +391,15 @@ func TestRuntimeStart_AllowsRecoveryDisabledWhenNoRecoverableWorkExists(t *testi
 func TestRuntimeStart_AllowsRecoveryDisabledWithNonReplayEventStore(t *testing.T) {
 	module := loadRuntimeOwnershipWorkflowModule(t)
 	scheduleStore := &recoveryDisabledScheduleStore{}
+	managerStore := &recoveryGuardManagerStore{}
 	rt, err := newScopedTestRuntime(t, testAuthorActivityContext(context.Background()), RuntimeDeps{Config: testOperationalRuntimeConfig(),
 		EventStore:            &minimalRuntimeEventStore{},
 		GenericScheduleStore:  scheduleStore,
 		TimerObligationReader: scheduleStore,
-		ManagerStore:          &recoveryGuardManagerStore{},
+		ManagerStore:          managerStore,
+		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
+			LifecycleCensus: managerStore,
+		},
 		Options: RuntimeOptions{
 			SelfCheck:      false,
 			WorkflowModule: module,

@@ -355,6 +355,7 @@ func externalRuntimeTestManagerBusRoles(bus *runtimebus.EventBus) runtimemanager
 
 func externalRuntimeTestSelectedManagerRoles(selected any) runtimemanager.PersistenceRoles {
 	var roles runtimemanager.PersistenceRoles
+	roles.LifecycleCensus, _ = selected.(runtimemanager.AgentLifecycleCellCensus)
 	roles.LifecycleState, _ = selected.(runtimemanager.AgentLifecycleStateReader)
 	roles.LifecycleEffects, _ = selected.(runtimeeffects.Store)
 	roles.LifecycleDiagnostics, _ = selected.(runtimemanager.AgentLifecycleDiagnosticPersistence)
