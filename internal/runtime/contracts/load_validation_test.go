@@ -955,7 +955,8 @@ func TestLoadWorkflowContractBundleRejectsTier8DialectFixtures(t *testing.T) {
 	}{
 		{name: "advances_to list", fixture: "test-boot-advances-to-list", contains: "DIALECT-ADV-LIST"},
 		{name: "guard scalar", fixture: "test-boot-dialect-guard", contains: "DIALECT-GUARD"},
-		{name: "ambiguous on_complete mapping", fixture: "test-boot-on-complete-dict", contains: "AMBIGUOUS-RULE-GRAMMAR"},
+		{name: "unordered on_complete mapping", fixture: "test-boot-on-complete-dict", contains: "DIALECT-OC-ORDER"},
+		{name: "empty authored handler rule", fixture: "test-boot-empty-authored-rule", contains: "EMPTY-AUTHORED-RULE"},
 		{name: "undefined handler field", fixture: "test-boot-handler-field-undefined", contains: "handler field \"custom_logic\" is not supported"},
 		{name: "deprecated handler field", fixture: "test-boot-deprecated-field", contains: "DEPRECATED"},
 	}

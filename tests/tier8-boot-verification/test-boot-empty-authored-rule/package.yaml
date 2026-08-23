@@ -1,0 +1,5 @@
+name: test-boot-empty-authored-rule
+version: 1.0.0
+description: Boot verification rejects an empty authored handler rule before execution.
+platform_version: ">=0.7.0 <0.8.0"
+flows: []

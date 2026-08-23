@@ -165,8 +165,10 @@ func mintEventHandlerRuleElementIDs(handlers *yaml.Node) (int, error) {
 			var minted int
 			var err error
 			switch key {
-			case "rules", "on_complete":
-				minted, err = mintRuleCollectionElementIDs(value)
+			case "rules":
+				minted, err = mintRuleCollectionElementIDs(value, handlerRuleDecodeContextRules)
+			case "on_complete":
+				minted, err = mintRuleCollectionElementIDs(value, handlerRuleDecodeContextOnComplete)
 			case "join":
 				minted, err = mintJoinOutcomeElementIDs(value)
 			}
@@ -179,10 +181,15 @@ func mintEventHandlerRuleElementIDs(handlers *yaml.Node) (int, error) {
 	return count, nil
 }
 
-func mintRuleCollectionElementIDs(node *yaml.Node) (int, error) {
+func mintRuleCollectionElementIDs(node *yaml.Node, context handlerRuleDecodeContext) (int, error) {
 	if node == nil || node.Kind == 0 || yamlNodeIsNull(node) {
 		return 0, nil
 	}
+	resolved, err := resolveHandlerRuleCollectionNode(node, context)
+	if err != nil {
+		return 0, err
+	}
+	node = resolved
 	switch node.Kind {
 	case yaml.SequenceNode:
 		count := 0
@@ -242,10 +249,17 @@ func mintJoinOutcomeElementIDs(join *yaml.Node) (int, error) {
 }
 
 func ensureRuleElementID(row *yaml.Node, ignored map[string]struct{}) (int, error) {
-	if row == nil || row.Kind != yaml.MappingNode {
+	resolved, err := resolveHandlerRuleYAMLNode(row)
+	if err != nil {
+		return 0, err
+	}
+	if resolved == nil || resolved.Kind != yaml.MappingNode {
 		return 0, fmt.Errorf("authored rule must be a mapping")
 	}
-	semanticFields := 0
+	row = resolved
+	if len(row.Content) == 0 {
+		return 0, fmt.Errorf("EMPTY-AUTHORED-RULE: authored handler rule mapping must not be empty")
+	}
 	hasElementID := false
 	for index := 0; index+1 < len(row.Content); index += 2 {
 		key := strings.TrimSpace(row.Content[index].Value)
@@ -269,12 +283,8 @@ func ensureRuleElementID(row *yaml.Node, ignored map[string]struct{}) (int, erro
 		if _, supported := ruleFieldOptions[key]; !supported {
 			return 0, fmt.Errorf("unsupported handler rule field %q", key)
 		}
-		semanticFields++
 	}
 	if hasElementID {
-		return 0, nil
-	}
-	if semanticFields == 0 {
 		return 0, nil
 	}
 	id := contractelementidentity.MintContractElementID()

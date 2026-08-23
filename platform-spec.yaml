@@ -2995,8 +2995,7 @@ handler_specification:
       after this transaction commits).
   on_complete_vs_rules:
     description: Mutually exclusive. A handler uses on_complete OR rules, never both.
-    on_complete: Ordered list or keyed map of {condition, advances_to, emit} rows — first match wins. Keyed map keys are
-      optional non-authoritative display labels. Used after computation on handlers that do not declare accumulate.
+    on_complete: Ordered list of {condition, advances_to, emit} rows — first match wins. Used after computation on handlers that do not declare accumulate.
       `accumulate` and handler-level `on_complete` are mutually incompatible because stream accumulation never owns finite completion.
     rules: Current concrete spelling of the ordered policy-sheet authoring construct for handler-phase selection. Existing
       condition rules and typed selection rows lower to the canonical selected-branch owner. Retired `handler.branch`
@@ -3004,11 +3003,12 @@ handler_specification:
   authored_rule_element_identity:
     canonical_owner: internal/runtime/core/contractelementidentity.ContractElementRef
     grammar: >-
-      Every non-empty authored HandlerRuleEntry mapping carries a mandatory sibling `element_id` containing one canonical,
-      non-zero, lowercase UUID. This applies to handler.rules selection and policy rows, handler.on_complete rows,
-      join.on_complete, and join.timeout outcomes in sequence, single-mapping, and keyed-mapping decoder shapes. A keyed
-      mapping key and optional `id` remain local display labels only; ordering remains evaluation order only. Missing,
-      malformed, noncanonical, or duplicate-within-package element IDs hard-fail strict loading. The explicit
+      Every authored HandlerRuleEntry mapping carries a mandatory sibling `element_id` containing one canonical, non-zero,
+      lowercase UUID. Empty authored rows are invalid. Handler.rules admits ordered sequence, singleton mapping, and keyed
+      mapping shapes; handler.on_complete admits only an ordered sequence; join.on_complete and join.timeout each admit one
+      outcome mapping. A keyed rules mapping key and optional `id` remain local display labels only; ordering remains
+      evaluation order only. Aliases are resolved before rule-shape classification and recursive aliases fail closed.
+      Missing, malformed, noncanonical, or duplicate-within-package element IDs hard-fail strict loading. The explicit
       `swarm mint-element-ids` command is the only old-corpus minting surface; load never derives, backfills, aliases, or
       guesses an identity from a key, label, index, path, event, transition, or content.
     typed_identity: >-
@@ -8181,10 +8181,11 @@ engine:
     - id: dialect_compliance
       severity: error
       scope: per-node
-      trigger: A rules or on_complete mapping is structurally ambiguous between one singleton rule and keyed rule rows. Or
-        a handler uses both on_complete and rules on the same handler. Or uses both accumulate and handler-level on_complete.
-        Or uses both create_entity and accumulate on the same handler. Or combines more than one entity acquisition mode on
-        the same handler (create_entity, select_entity, select_or_create_entity).
+      trigger: A handler uses on_complete as a map instead of an ordered list. Or a rules mapping is structurally ambiguous
+        between one singleton rule and keyed rule rows. Or a handler uses both on_complete and rules on the same handler. Or
+        uses both accumulate and handler-level on_complete. Or uses both create_entity and accumulate on the same handler.
+        Or combines more than one entity acquisition mode on the same handler (create_entity, select_entity,
+        select_or_create_entity).
       when: boot-only
     - id: single_node_per_event
       severity: error

@@ -8,24 +8,75 @@ import (
 )
 
 func (r *HandlerRuleEntry) UnmarshalYAML(node *yaml.Node) error {
-	if node.Kind == yaml.ScalarNode {
+	resolved, err := resolveHandlerRuleYAMLNode(node)
+	if err != nil {
+		return err
+	}
+	if resolved == nil || resolved.Kind != yaml.MappingNode {
 		return fmt.Errorf("handler rule must be a mapping with element_id; run `swarm mint-element-ids --contracts <path>`")
 	}
-	if err := validateRuleFieldNodes(node); err != nil {
+	if len(resolved.Content) == 0 {
+		return fmt.Errorf("EMPTY-AUTHORED-RULE: authored handler rule mapping must not be empty")
+	}
+	if err := validateRuleFieldNodes(resolved); err != nil {
 		return err
 	}
 	type alias HandlerRuleEntry
 	var aux alias
-	if err := node.Decode(&aux); err != nil {
+	if err := resolved.Decode(&aux); err != nil {
 		return err
 	}
 	*r = HandlerRuleEntry(aux)
-	if len(node.Content) > 0 {
-		r.authored = true
-	}
-	if err := lowerPolicySheetRuleNode(node, r); err != nil {
+	r.authored = true
+	if err := lowerPolicySheetRuleNode(resolved, r); err != nil {
 		return err
 	}
+	return nil
+}
+
+// resolveHandlerRuleYAMLNode makes aliases presentation-only for rule grammar.
+// The graph walk rejects recursive aliases before yaml.v3 can recurse through
+// them while decoding a semantic row.
+func resolveHandlerRuleYAMLNode(node *yaml.Node) (*yaml.Node, error) {
+	if node == nil {
+		return nil, nil
+	}
+	if err := validateHandlerRuleYAMLAliasGraph(node, map[*yaml.Node]bool{}, map[*yaml.Node]bool{}); err != nil {
+		return nil, err
+	}
+	for node.Kind == yaml.AliasNode {
+		if node.Alias == nil {
+			return nil, fmt.Errorf("YAML-ALIAS: handler rule alias has no target")
+		}
+		node = node.Alias
+	}
+	return node, nil
+}
+
+func validateHandlerRuleYAMLAliasGraph(node *yaml.Node, visiting, visited map[*yaml.Node]bool) error {
+	if node == nil || visited[node] {
+		return nil
+	}
+	if visiting[node] {
+		return fmt.Errorf("YAML-ALIAS-CYCLE: handler rule aliases must not be recursive")
+	}
+	visiting[node] = true
+	if node.Kind == yaml.AliasNode {
+		if node.Alias == nil {
+			return fmt.Errorf("YAML-ALIAS: handler rule alias has no target")
+		}
+		if err := validateHandlerRuleYAMLAliasGraph(node.Alias, visiting, visited); err != nil {
+			return err
+		}
+	} else {
+		for _, child := range node.Content {
+			if err := validateHandlerRuleYAMLAliasGraph(child, visiting, visited); err != nil {
+				return err
+			}
+		}
+	}
+	delete(visiting, node)
+	visited[node] = true
 	return nil
 }
 

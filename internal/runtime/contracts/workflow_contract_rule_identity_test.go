@@ -21,6 +21,9 @@ func TestPlatformSpecPolicyRowsUseCanonicalElementIdentity(t *testing.T) {
 			OnCompleteVsRules struct {
 				OnComplete string `yaml:"on_complete"`
 			} `yaml:"on_complete_vs_rules"`
+			AuthoredRuleElementIdentity struct {
+				Grammar string `yaml:"grammar"`
+			} `yaml:"authored_rule_element_identity"`
 			HandlerFields struct {
 				Rules struct {
 					Type                     string `yaml:"type"`
@@ -51,15 +54,21 @@ func TestPlatformSpecPolicyRowsUseCanonicalElementIdentity(t *testing.T) {
 			t.Fatalf("%s retains local-id identity authority: %q", field, text)
 		}
 	}
-	if text := spec.HandlerSpecification.OnCompleteVsRules.OnComplete; !strings.Contains(text, "keyed map") || !strings.Contains(text, "non-authoritative display") {
-		t.Fatalf("handler_specification.on_complete = %q, want keyed-map display-label contract", text)
+	if text := spec.HandlerSpecification.OnCompleteVsRules.OnComplete; !strings.Contains(text, "Ordered list") || strings.Contains(text, "keyed map") {
+		t.Fatalf("handler_specification.on_complete = %q, want ordered-list-only contract", text)
+	}
+	grammar := spec.HandlerSpecification.AuthoredRuleElementIdentity.Grammar
+	for _, required := range []string{"Empty authored rows are invalid", "handler.on_complete admits only an ordered sequence", "Aliases are resolved before rule-shape classification", "recursive aliases fail closed"} {
+		if !strings.Contains(grammar, required) {
+			t.Fatalf("authored_rule_element_identity.grammar = %q, want %q", grammar, required)
+		}
 	}
 	for _, check := range spec.Engine.BootVerification.Checks {
 		if check.ID != "dialect_compliance" {
 			continue
 		}
-		if !strings.Contains(check.Trigger, "structurally ambiguous") || strings.Contains(check.Trigger, "instead of a list") {
-			t.Fatalf("dialect_compliance trigger = %q, want ambiguity rejection without list-only authority", check.Trigger)
+		if !strings.Contains(check.Trigger, "on_complete as a map") || !strings.Contains(check.Trigger, "structurally ambiguous") {
+			t.Fatalf("dialect_compliance trigger = %q, want list-only completion and rules ambiguity rejection", check.Trigger)
 		}
 		return
 	}

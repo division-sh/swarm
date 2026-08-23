@@ -194,6 +194,7 @@ groups:
       - tests/tier8-boot-verification/test-boot-event-cycle
       - tests/tier8-boot-verification/test-boot-event-no-producer
       - tests/tier8-boot-verification/test-boot-event-no-schema
+      - tests/tier8-boot-verification/test-boot-empty-authored-rule
       - tests/tier8-boot-verification/test-boot-handler-field-undefined
       - tests/tier8-boot-verification/test-boot-missing-pin
       - tests/tier8-boot-verification/test-boot-on-complete-and-rules-mutual-exclusion

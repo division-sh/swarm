@@ -1458,6 +1458,23 @@ func TestExecutor_AccumulatorProjectionMaterializesWithoutOnComplete(t *testing.
 	}
 }
 
+func TestExecutor_AuthoredEmptyRuleCannotReachSelection(t *testing.T) {
+	for _, raw := range []string{
+		"rules:\n  - {}\n",
+		"rules:\n  selected: {}\n",
+		"on_complete:\n  - {}\n",
+	} {
+		var handler runtimecontracts.SystemNodeEventHandler
+		err := yaml.Unmarshal([]byte(raw), &handler)
+		if err == nil || !strings.Contains(err.Error(), "EMPTY-AUTHORED-RULE") {
+			t.Fatalf("yaml.Unmarshal error = %v, want pre-execution authored-row rejection for %s", err, raw)
+		}
+		if len(handler.Rules) != 0 || len(handler.OnComplete) != 0 {
+			t.Fatalf("rejected authored row reached executable handler: %#v", handler)
+		}
+	}
+}
+
 func TestExecutor_AccumulatorProjectionMaterializesWithRulesBeforeEmitFields(t *testing.T) {
 	exec := newAccumulatorProjectionTestExecutor(t, nil)
 	handler := runtimecontracts.SystemNodeEventHandler{

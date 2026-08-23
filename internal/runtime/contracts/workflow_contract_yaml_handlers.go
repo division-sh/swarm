@@ -1164,6 +1164,11 @@ func validateHandlerFieldNodes(node *yaml.Node) error {
 		case "payload_transform":
 			return fmt.Errorf("RETIRED: handler field %q is retired; move payload ownership into emit.fields at the active emit site", key)
 		}
+		if key == "on_complete" {
+			if _, err := resolveHandlerRuleCollectionNode(node.Content[i+1], handlerRuleDecodeContextOnComplete); err != nil {
+				return err
+			}
+		}
 		if _, ok := handlerFieldOptions[key]; !ok {
 			return NewUndefinedFieldDiagnostic("handler", key, handlerFieldOptions)
 		}
@@ -1222,8 +1227,12 @@ func decodeHandlerRuleEntryNode(node *yaml.Node, context handlerRuleDecodeContex
 	if node == nil || node.Kind == 0 {
 		return nil, nil
 	}
+	resolved, err := resolveHandlerRuleYAMLNode(node)
+	if err != nil {
+		return nil, err
+	}
 	var rule HandlerRuleEntry
-	if err := node.Decode(&rule); err != nil {
+	if err := resolved.Decode(&rule); err != nil {
 		return nil, err
 	}
 	if err := rejectRuleActionOutsideRules(rule, context); err != nil {
@@ -1239,6 +1248,11 @@ func decodeHandlerRuleEntriesNode(node *yaml.Node, context handlerRuleDecodeCont
 	if node == nil || node.Kind == 0 {
 		return nil, nil
 	}
+	resolved, err := resolveHandlerRuleCollectionNode(node, context)
+	if err != nil {
+		return nil, err
+	}
+	node = resolved
 	switch node.Kind {
 	case yaml.SequenceNode:
 		var rules []HandlerRuleEntry
@@ -1273,11 +1287,12 @@ func decodeHandlerRuleEntriesNode(node *yaml.Node, context handlerRuleDecodeCont
 		rules := make([]HandlerRuleEntry, 0, len(node.Content)/2)
 		for i := 0; i+1 < len(node.Content); i += 2 {
 			id := strings.TrimSpace(node.Content[i].Value)
-			if id == "" {
-				continue
+			row, err := resolveHandlerRuleYAMLNode(node.Content[i+1])
+			if err != nil {
+				return nil, err
 			}
 			var rule HandlerRuleEntry
-			if err := node.Content[i+1].Decode(&rule); err != nil {
+			if err := row.Decode(&rule); err != nil {
 				return nil, err
 			}
 			if err := rejectRuleActionOutsideRules(rule, context); err != nil {
@@ -1297,6 +1312,17 @@ func decodeHandlerRuleEntriesNode(node *yaml.Node, context handlerRuleDecodeCont
 	}
 }
 
+func resolveHandlerRuleCollectionNode(node *yaml.Node, context handlerRuleDecodeContext) (*yaml.Node, error) {
+	resolved, err := resolveHandlerRuleYAMLNode(node)
+	if err != nil {
+		return nil, err
+	}
+	if context == handlerRuleDecodeContextOnComplete && resolved != nil && resolved.Kind != yaml.SequenceNode {
+		return nil, fmt.Errorf("DIALECT-OC-ORDER: on_complete is dict, must be ordered list")
+	}
+	return resolved, nil
+}
+
 type handlerRuleMappingShape uint8
 
 const (
@@ -1307,59 +1333,92 @@ const (
 // classifyHandlerRuleMapping resolves grammar from both the outer field names
 // and child row shape. Keyed display labels are never reserved grammar tokens.
 func classifyHandlerRuleMapping(node *yaml.Node) (handlerRuleMappingShape, error) {
-	if node == nil || node.Kind != yaml.MappingNode {
+	resolved, err := resolveHandlerRuleYAMLNode(node)
+	if err != nil {
+		return 0, err
+	}
+	if resolved == nil || resolved.Kind != yaml.MappingNode {
 		return 0, fmt.Errorf("rule mapping must be a mapping")
 	}
-	if !mappingHasHandlerRuleFieldLabel(node) {
-		return handlerRuleMappingKeyed, nil
+	node = resolved
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if strings.TrimSpace(node.Content[i].Value) == "" {
+			return 0, fmt.Errorf("keyed handler rule label must not be empty")
+		}
 	}
 
 	singletonErr := decodeSingletonHandlerRuleShape(node)
-	keyedErr := decodeKeyedHandlerRuleShape(node)
+	keyedStructureErr := validateKeyedHandlerRuleStructure(node)
+	keyedErr := keyedStructureErr
+	if keyedStructureErr == nil {
+		keyedErr = decodeKeyedHandlerRuleShape(node)
+	}
 	switch {
 	case singletonErr == nil && keyedErr == nil:
 		return 0, fmt.Errorf("AMBIGUOUS-RULE-GRAMMAR: mapping is valid as both one handler rule and keyed handler rules; use sequence form to state the row boundary explicitly")
 	case singletonErr == nil:
 		return handlerRuleMappingSingleton, nil
-	case keyedErr == nil:
+	case keyedStructureErr == nil:
 		return handlerRuleMappingKeyed, nil
 	default:
 		return 0, fmt.Errorf("invalid handler rule mapping (singleton: %v; keyed: %v)", singletonErr, keyedErr)
 	}
 }
 
-func mappingHasHandlerRuleFieldLabel(node *yaml.Node) bool {
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		if _, ok := ruleFieldOptions[key]; ok {
-			return true
-		}
-		switch key {
-		case "emits", "payload_transform", "switch", "threshold", "policy", "temporal", "join", "loop", "collection", "schedule":
-			return true
-		}
-	}
-	return false
-}
-
 func decodeSingletonHandlerRuleShape(node *yaml.Node) error {
+	resolved, err := resolveHandlerRuleYAMLNode(node)
+	if err != nil {
+		return err
+	}
 	var rule HandlerRuleEntry
-	return node.Decode(&rule)
+	return resolved.Decode(&rule)
 }
 
 func decodeKeyedHandlerRuleShape(node *yaml.Node) error {
+	if err := validateKeyedHandlerRuleStructure(node); err != nil {
+		return err
+	}
+	resolved, err := resolveHandlerRuleYAMLNode(node)
+	if err != nil {
+		return err
+	}
+	for i := 0; i+1 < len(resolved.Content); i += 2 {
+		label := strings.TrimSpace(resolved.Content[i].Value)
+		row, err := resolveHandlerRuleYAMLNode(resolved.Content[i+1])
+		if err != nil {
+			return err
+		}
+		var rule HandlerRuleEntry
+		if err := row.Decode(&rule); err != nil {
+			return fmt.Errorf("keyed handler rule %q: %w", label, err)
+		}
+	}
+	return nil
+}
+
+func validateKeyedHandlerRuleStructure(node *yaml.Node) error {
+	resolved, err := resolveHandlerRuleYAMLNode(node)
+	if err != nil {
+		return err
+	}
+	if resolved == nil || resolved.Kind != yaml.MappingNode {
+		return fmt.Errorf("keyed handler rules must be a mapping")
+	}
+	node = resolved
+	if len(node.Content) == 0 {
+		return fmt.Errorf("keyed handler rules must contain at least one row")
+	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		label := strings.TrimSpace(node.Content[i].Value)
 		if label == "" {
 			return fmt.Errorf("keyed handler rule label must not be empty")
 		}
-		row := node.Content[i+1]
+		row, err := resolveHandlerRuleYAMLNode(node.Content[i+1])
+		if err != nil {
+			return fmt.Errorf("keyed handler rule %q: %w", label, err)
+		}
 		if row.Kind != yaml.MappingNode {
 			return fmt.Errorf("keyed handler rule %q must be a mapping", label)
-		}
-		var rule HandlerRuleEntry
-		if err := row.Decode(&rule); err != nil {
-			return fmt.Errorf("keyed handler rule %q: %w", label, err)
 		}
 	}
 	return nil

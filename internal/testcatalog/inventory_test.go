@@ -25,14 +25,14 @@ func TestCatalogRequiredInventory(t *testing.T) {
 			verifyCounts[fixture.Metadata.Verify]++
 		}
 	}
-	if got := len(inventory.Fixtures); got != 155 {
-		t.Fatalf("fixture count = %d, want 155", got)
+	if got := len(inventory.Fixtures); got != 156 {
+		t.Fatalf("fixture count = %d, want 156", got)
 	}
-	if counts[DispositionRuntime] != 98 || counts[DispositionVerifyOnly] != 35 || counts[DispositionRetired] != 22 {
-		t.Fatalf("disposition counts = %#v, want runtime=98 verify-only=35 retired=22", counts)
+	if counts[DispositionRuntime] != 98 || counts[DispositionVerifyOnly] != 36 || counts[DispositionRetired] != 22 {
+		t.Fatalf("disposition counts = %#v, want runtime=98 verify-only=36 retired=22", counts)
 	}
-	if verifyCounts[VerifyPass] != 2 || verifyCounts[VerifyWarning] != 9 || verifyCounts[VerifyReject] != 24 {
-		t.Fatalf("verify-only counts = %#v, want pass=2 warning=9 reject=24", verifyCounts)
+	if verifyCounts[VerifyPass] != 2 || verifyCounts[VerifyWarning] != 9 || verifyCounts[VerifyReject] != 25 {
+		t.Fatalf("verify-only counts = %#v, want pass=2 warning=9 reject=25", verifyCounts)
 	}
 	if got := len(inventory.PublicCompanions()); got != 87 {
 		t.Fatalf("public companion count = %d, want 87", got)
