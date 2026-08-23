@@ -721,36 +721,39 @@ const (
 	templateValid
 )
 
-func (m *Manager) inspectTemplate(ctx context.Context, adminDB databaseRowQueryer) (templateState, error) {
+func (m *Manager) inspectTemplate(ctx context.Context, adminDB databaseRowQueryer) (templateState, bool, error) {
+	intent, hasIntent, err := m.intent(ctx, m.templateName)
+	if err != nil {
+		return templateAbsent, false, fmt.Errorf("inspect postgres template intent %q: %w", m.templateName, err)
+	}
+	if hasIntent && (!m.intentMatchesName(intent) || intent.Kind != "template" || intent.Identity != m.templateID) {
+		return templateAbsent, false, fmt.Errorf("template database %q durable intent mismatch; left untouched", m.templateName)
+	}
 	var comment, owner string
-	err := adminDB.QueryRowContext(ctx, `
+	err = adminDB.QueryRowContext(ctx, `
 		SELECT COALESCE(shobj_description(d.oid, 'pg_database'), ''), r.rolname
 		FROM pg_database d JOIN pg_roles r ON r.oid=d.datdba
 		WHERE d.datname=$1`, m.templateName).Scan(&comment, &owner)
 	if err == sql.ErrNoRows {
-		return templateAbsent, nil
+		return templateAbsent, hasIntent, nil
 	}
 	if err != nil {
-		return templateAbsent, fmt.Errorf("inspect postgres template %q: %w", m.templateName, err)
+		return templateAbsent, false, fmt.Errorf("inspect postgres template %q: %w", m.templateName, err)
 	}
 	if owner != m.role {
-		return templateAbsent, fmt.Errorf("template database %q owner %q does not match authenticated role %q; left untouched", m.templateName, owner, m.role)
+		return templateAbsent, false, fmt.Errorf("template database %q owner %q does not match authenticated role %q; left untouched", m.templateName, owner, m.role)
 	}
 	metadata, parseErr := parseResourceMetadata(comment)
 	if parseErr == nil {
 		if metadata.Kind != "template" || metadata.Identity != m.templateID {
-			return templateAbsent, fmt.Errorf("template database %q metadata mismatch; left untouched", m.templateName)
+			return templateAbsent, false, fmt.Errorf("template database %q metadata mismatch; left untouched", m.templateName)
 		}
-		return templateValid, nil
+		return templateValid, hasIntent, nil
 	}
-	intent, found, intentErr := m.intent(ctx, m.templateName)
-	if intentErr != nil {
-		return templateAbsent, intentErr
+	if strings.TrimSpace(comment) != "" || !hasIntent {
+		return templateAbsent, false, fmt.Errorf("template database %q lacks valid stamped metadata or matching durable pre-create intent; left untouched", m.templateName)
 	}
-	if strings.TrimSpace(comment) != "" || !found || !m.intentMatchesName(intent) || intent.Kind != "template" || intent.Identity != m.templateID {
-		return templateAbsent, fmt.Errorf("template database %q lacks valid stamped metadata or matching durable pre-create intent; left untouched", m.templateName)
-	}
-	return templateIncomplete, nil
+	return templateIncomplete, true, nil
 }
 
 func (m *Manager) acquireTemplatePossession(ctx context.Context, adminDB *sql.DB, mode templateLockMode) (*templatePossession, error) {
@@ -816,12 +819,18 @@ func (m *Manager) ensureTemplateForClone(ctx context.Context, adminDB *sql.DB) (
 	if err != nil {
 		return nil, err
 	}
-	state, err := m.inspectTemplate(ctx, adminDB)
+	state, hasIntent, err := m.inspectTemplate(ctx, adminDB)
 	if err != nil {
 		shared.release()
 		return nil, err
 	}
 	if state == templateValid {
+		if hasIntent {
+			if err := m.deleteIntent(ctx, m.templateName); err != nil {
+				shared.release()
+				return nil, fmt.Errorf("retire matching intent for valid postgres template %q: %w", m.templateName, err)
+			}
+		}
 		return shared, nil
 	}
 	shared.release()
@@ -839,11 +848,16 @@ func (m *Manager) ensureTemplateForClone(ctx context.Context, adminDB *sql.DB) (
 
 	// The template may have changed while the non-authoritative shared probe
 	// yielded to exclusive mutation authority, so classify it again.
-	state, err = m.inspectTemplate(ctx, adminDB)
+	state, hasIntent, err = m.inspectTemplate(ctx, adminDB)
 	if err != nil {
 		return nil, err
 	}
 	if state == templateValid {
+		if hasIntent {
+			if err := m.deleteIntent(ctx, m.templateName); err != nil {
+				return nil, fmt.Errorf("retire matching intent for valid postgres template %q: %w", m.templateName, err)
+			}
+		}
 		if err := exclusive.handoffToShared(ctx); err != nil {
 			return nil, err
 		}
@@ -855,6 +869,11 @@ func (m *Manager) ensureTemplateForClone(ctx context.Context, adminDB *sql.DB) (
 			return nil, fmt.Errorf("recover incomplete intended template %q: %w", m.templateName, err)
 		}
 		if err := m.deleteIntent(ctx, m.templateName); err != nil {
+			return nil, err
+		}
+	}
+	if state == templateAbsent && hasIntent {
+		if err := m.retireIntentIfDatabaseAbsent(ctx, adminDB, m.templateName); err != nil {
 			return nil, err
 		}
 	}

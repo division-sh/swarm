@@ -97,6 +97,51 @@ func TestManagerTemplateDropSQLHasNoAuthorityBypass(t *testing.T) {
 			return true
 		})
 	}
+	testFiles, err := filepath.Glob("*_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, testName := range testFiles {
+		testFile, err := parser.ParseFile(token.NewFileSet(), testName, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, declaration := range testFile.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || function.Body == nil {
+				continue
+			}
+			ast.Inspect(function.Body, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				switch callee := call.Fun.(type) {
+				case *ast.Ident:
+					if callee.Name == "dropDatabase" && function.Name.Name != "dropTestDatabase" {
+						t.Errorf("test dropDatabase bypass in %s:%s; destructive fixtures must use the test-owned boundary", testName, function.Name.Name)
+					}
+				case *ast.SelectorExpr:
+					if callee.Sel.Name == "dropTemplate" && !isTestOwnedTemplateDrop(function) {
+						t.Errorf("test dropTemplate bypass in %s:%s; destructive fixtures must use the test-owned boundary", testName, function.Name.Name)
+					}
+				}
+				return true
+			})
+		}
+	}
+}
+
+func isTestOwnedTemplateDrop(function *ast.FuncDecl) bool {
+	if function.Name.Name != "drop" || function.Recv == nil || len(function.Recv.List) != 1 {
+		return false
+	}
+	receiver, ok := function.Recv.List[0].Type.(*ast.StarExpr)
+	if !ok {
+		return false
+	}
+	name, ok := receiver.X.(*ast.Ident)
+	return ok && name.Name == "testOwnedTemplate"
 }
 
 func TestManagerLifecycleSupportedRepresentations(t *testing.T) {
@@ -210,7 +255,7 @@ func TestManagerLeavesUnprovableSandboxUntouched(t *testing.T) {
 	if err := createDatabase(ctx, db, name); err != nil {
 		t.Fatal(err)
 	}
-	defer dropDatabase(context.Background(), db, name)
+	defer dropTestDatabase(context.Background(), manager, db, name)
 	if err := manager.Reconcile(ctx); err == nil || !strings.Contains(err.Error(), "unprovable") {
 		t.Fatalf("Reconcile() error = %v, want unprovable blocker", err)
 	}
@@ -234,7 +279,7 @@ func TestManagerLeavesSignedUnstampedSandboxWithoutIntentUntouched(t *testing.T)
 	if err := createDatabase(ctx, db, name); err != nil {
 		t.Fatal(err)
 	}
-	defer dropDatabase(context.Background(), db, name)
+	defer dropTestDatabase(context.Background(), manager, db, name)
 	if err := manager.Reconcile(ctx); err == nil || !strings.Contains(err.Error(), "durable pre-create intent") {
 		t.Fatalf("Reconcile() error = %v, want durable-intent blocker", err)
 	}
@@ -339,7 +384,8 @@ func TestManagerReclaimsSandboxInterruptedBetweenCreateAndMetadata(t *testing.T)
 }
 
 func TestManagerReclaimsTemplateInterruptedBetweenCreateAndMetadata(t *testing.T) {
-	manager := integrationManager(t)
+	fixture := newTestOwnedTemplate(t, integrationManager(t), "interrupted")
+	manager := fixture.manager
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	db, err := manager.admin.Open()
@@ -347,8 +393,8 @@ func TestManagerReclaimsTemplateInterruptedBetweenCreateAndMetadata(t *testing.T
 		t.Fatal(err)
 	}
 	defer db.Close()
-	identity := "interrupted" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
-	name := manager.signedResourceName(templateNamePrefix, "template", identity)
+	identity := manager.templateID
+	name := manager.templateName
 	intent := resourceIntent{Name: name, Kind: "template", Identity: identity}
 	// Same interrupted-between-create-and-metadata shape as the sandbox twin:
 	// write the intent under the lock, hold through create, release (session
@@ -462,7 +508,8 @@ func TestManagerCreateBeforeMetadataCrashHelper(t *testing.T) {
 }
 
 func TestManagerRetainsStampedTemplateFromOlderSchemaDigest(t *testing.T) {
-	manager := integrationManager(t)
+	fixture := newTestOwnedTemplate(t, integrationManager(t), "oldschema")
+	manager := fixture.manager
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	db, err := manager.admin.Open()
@@ -470,12 +517,11 @@ func TestManagerRetainsStampedTemplateFromOlderSchemaDigest(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	identity := "oldschema" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
-	name := manager.signedResourceName(templateNamePrefix, "template", identity)
+	identity := manager.templateID
+	name := manager.templateName
 	if err := createDatabase(ctx, db, name); err != nil {
 		t.Fatal(err)
 	}
-	defer dropDatabase(context.Background(), db, name)
 	if err := setDatabaseMetadata(ctx, db, name, resourceMetadata{Version: 1, Kind: "template", Identity: identity}); err != nil {
 		t.Fatal(err)
 	}
@@ -497,27 +543,13 @@ func TestManagerRecoversIncompleteTemplateInSingleAcquire(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	identity := "recovery" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
-	manager := managerWithTemplateIdentity(canonicalManager, identity)
-	if manager.templateName == canonicalManager.templateName {
-		t.Fatal("recovery fixture must own a unique template identity")
-	}
+	fixture := newTestOwnedTemplate(t, canonicalManager, "recovery")
+	manager := fixture.manager
 	db, err := manager.admin.Open()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	defer func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cleanupCancel()
-		possession, lockErr := manager.acquireTemplatePossession(cleanupCtx, db, templateLockExclusive)
-		if lockErr == nil {
-			_ = manager.dropTemplate(cleanupCtx, db, possession)
-			possession.release()
-		}
-		_ = manager.deleteIntent(cleanupCtx, manager.templateName)
-	}()
-
 	// Crash-state fixture: the template database exists with an empty comment
 	// (create completed, metadata never stamped) and a matching durable intent.
 	// ensureTemplate must drop the incomplete template, delete its intent, and
@@ -534,7 +566,7 @@ func TestManagerRecoversIncompleteTemplateInSingleAcquire(t *testing.T) {
 	// prior ensureTemplate on this server; clear it so the crash state below is
 	// the only template. Holding the template advisory lock during setup keeps
 	// concurrent managers' ensureTemplate out.
-	if err := manager.dropTemplate(ctx, db, creator); err != nil {
+	if err := fixture.drop(ctx, db, creator); err != nil {
 		t.Fatal(err)
 	}
 	if err := manager.putIntent(ctx, intent); err != nil {
@@ -573,12 +605,145 @@ func TestManagerRecoversIncompleteTemplateInSingleAcquire(t *testing.T) {
 	}
 }
 
+func TestManagerRetiresMatchingIntentForValidTemplate(t *testing.T) {
+	fixture := newTestOwnedTemplate(t, integrationManager(t), "validintent")
+	manager := fixture.manager
+	ensureOwnedTemplate(t, manager)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	db, err := manager.admin.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	possession, err := manager.acquireTemplatePossession(ctx, db, templateLockExclusive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent := resourceIntent{Name: manager.templateName, Kind: "template", Identity: manager.templateID}
+	if err := manager.putIntent(ctx, intent); err != nil {
+		possession.release()
+		t.Fatal(err)
+	}
+	possession.release()
+
+	sandbox, err := manager.Acquire(ctx, true)
+	if err != nil {
+		t.Fatalf("reuse valid template with matching stale intent: %v", err)
+	}
+	defer sandbox.Release(context.Background())
+	if _, found, err := manager.intent(ctx, manager.templateName); err != nil || found {
+		t.Fatalf("valid template intent found=%v err=%v, want retired", found, err)
+	}
+}
+
+func TestManagerReconstructsAbsentTemplateWithMatchingIntent(t *testing.T) {
+	fixture := newTestOwnedTemplate(t, integrationManager(t), "absentintent")
+	manager := fixture.manager
+	fixture.remove(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	db, err := manager.admin.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	possession, err := manager.acquireTemplatePossession(ctx, db, templateLockExclusive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent := resourceIntent{Name: manager.templateName, Kind: "template", Identity: manager.templateID}
+	if err := manager.putIntent(ctx, intent); err != nil {
+		possession.release()
+		t.Fatal(err)
+	}
+	possession.release()
+
+	sandbox, err := manager.Acquire(ctx, true)
+	if err != nil {
+		t.Fatalf("reconstruct absent template with matching stale intent: %v", err)
+	}
+	defer sandbox.Release(context.Background())
+	assertDatabaseExists(t, manager.admin, manager.templateName)
+	if _, found, err := manager.intent(ctx, manager.templateName); err != nil || found {
+		t.Fatalf("reconstructed template intent found=%v err=%v, want retired", found, err)
+	}
+}
+
+func TestManagerReplaysTemplateDropBeforeIntentRetirement(t *testing.T) {
+	fixture := newTestOwnedTemplate(t, integrationManager(t), "droppedintent")
+	manager := fixture.manager
+	ensureOwnedTemplate(t, manager)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	db, err := manager.admin.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	possession, err := manager.acquireTemplatePossession(ctx, db, templateLockExclusive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent := resourceIntent{Name: manager.templateName, Kind: "template", Identity: manager.templateID}
+	if err := manager.putIntent(ctx, intent); err != nil {
+		possession.release()
+		t.Fatal(err)
+	}
+	if err := fixture.drop(ctx, db, possession); err != nil {
+		possession.release()
+		t.Fatal(err)
+	}
+	possession.release() // Simulate process death before deleteIntent.
+	assertDatabaseAbsent(t, manager.admin, manager.templateName)
+
+	sandbox, err := manager.Acquire(ctx, true)
+	if err != nil {
+		t.Fatalf("replay after template drop before intent retirement: %v", err)
+	}
+	defer sandbox.Release(context.Background())
+	assertDatabaseExists(t, manager.admin, manager.templateName)
+	if _, found, err := manager.intent(ctx, manager.templateName); err != nil || found {
+		t.Fatalf("replayed template intent found=%v err=%v, want retired", found, err)
+	}
+}
+
+func TestManagerRejectsMismatchedTemplateIntentForValidAndAbsentState(t *testing.T) {
+	for _, state := range []string{"valid", "absent"} {
+		t.Run(state, func(t *testing.T) {
+			fixture := newTestOwnedTemplate(t, integrationManager(t), "mismatch"+state)
+			manager := fixture.manager
+			if state == "valid" {
+				ensureOwnedTemplate(t, manager)
+			} else {
+				fixture.remove(t)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			controlDB, err := manager.control.Open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer controlDB.Close()
+			if _, err := controlDB.ExecContext(ctx, `INSERT INTO `+quoteIdent(intentTableName)+`
+				(resource_name, kind, identity, lease_key, template_name) VALUES ($1,'template','mismatched',0,'')`, manager.templateName); err != nil {
+				t.Fatal(err)
+			}
+			if sandbox, err := manager.Acquire(ctx, true); err == nil || !strings.Contains(err.Error(), "durable intent mismatch") {
+				if sandbox != nil {
+					_ = sandbox.Release(ctx)
+				}
+				t.Fatalf("Acquire with mismatched %s template intent error = %v, want fail-closed mismatch", state, err)
+			}
+		})
+	}
+}
+
 func TestManagerConcurrentFirstConstructionAndClones(t *testing.T) {
 	base := integrationManager(t)
-	identity := "concurrent" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
-	manager := managerWithTemplateIdentity(base, identity)
-	cleanupOwnedTemplate(t, manager)
-	removeOwnedTemplate(t, manager)
+	fixture := newTestOwnedTemplate(t, base, "concurrent")
+	manager := fixture.manager
+	fixture.remove(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -640,9 +805,9 @@ func TestManagerConcurrentFirstConstructionAndClones(t *testing.T) {
 
 func TestManagerTemplateDeletionWaitsForActiveCloneProcess(t *testing.T) {
 	base := integrationManager(t)
-	identity := "activeclone" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
-	manager := managerWithTemplateIdentity(base, identity)
-	cleanupOwnedTemplate(t, manager)
+	fixture := newTestOwnedTemplate(t, base, "activeclone")
+	manager := fixture.manager
+	identity := manager.templateID
 	ensureOwnedTemplate(t, manager)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -686,7 +851,7 @@ func TestManagerTemplateDeletionWaitsForActiveCloneProcess(t *testing.T) {
 		close(attempted)
 		possession, err := manager.acquireTemplatePossession(ctx, db, templateLockExclusive)
 		if err == nil {
-			err = manager.dropTemplate(ctx, db, possession)
+			err = fixture.drop(ctx, db, possession)
 			possession.release()
 		}
 		deleted <- err
@@ -717,9 +882,9 @@ func TestManagerTemplateDeletionWaitsForActiveCloneProcess(t *testing.T) {
 
 func TestManagerTemplateDeletionRequiresHeldExclusivePossession(t *testing.T) {
 	base := integrationManager(t)
-	identity := "deleteauthority" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
-	manager := managerWithTemplateIdentity(base, identity)
-	cleanupOwnedTemplate(t, manager)
+	fixture := newTestOwnedTemplate(t, base, "deleteauthority")
+	manager := fixture.manager
+	identity := manager.templateID
 	ensureOwnedTemplate(t, manager)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -733,7 +898,7 @@ func TestManagerTemplateDeletionRequiresHeldExclusivePossession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := manager.dropTemplate(ctx, db, shared); err == nil || !strings.Contains(err.Error(), "exclusive") {
+	if err := fixture.drop(ctx, db, shared); err == nil || !strings.Contains(err.Error(), "exclusive") {
 		t.Fatalf("drop with shared template possession error = %v, want exclusive-authority blocker", err)
 	}
 	shared.release()
@@ -746,7 +911,7 @@ func TestManagerTemplateDeletionRequiresHeldExclusivePossession(t *testing.T) {
 	defer conn.Close()
 	key := resourceLockKey(resourceIntent{Name: manager.templateName, Kind: "template", Identity: identity})
 	fabricated := &templatePossession{manager: manager, conn: conn, name: manager.templateName, key: key, mode: templateLockExclusive}
-	if err := manager.dropTemplate(ctx, db, fabricated); err == nil || !strings.Contains(err.Error(), "held exclusive") {
+	if err := fixture.drop(ctx, db, fabricated); err == nil || !strings.Contains(err.Error(), "held exclusive") {
 		t.Fatalf("drop with fabricated template possession error = %v, want held-authority blocker", err)
 	}
 	assertDatabaseExists(t, manager.admin, manager.templateName)
@@ -754,9 +919,8 @@ func TestManagerTemplateDeletionRequiresHeldExclusivePossession(t *testing.T) {
 
 func TestManagerTemplateInitializationFailureCleansUpWithExclusivePossession(t *testing.T) {
 	base := integrationManager(t)
-	identity := "failedinit" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
-	manager := managerWithTemplateIdentity(base, identity)
-	cleanupOwnedTemplate(t, manager)
+	fixture := newTestOwnedTemplate(t, base, "failedinit")
+	manager := fixture.manager
 	manager.ddlPlans = append([]platformschema.TableDDL(nil), manager.ddlPlans...)
 	manager.ddlPlans[0].Statements = []string{`SELECT missing_template_initialization_owner()`}
 
@@ -774,9 +938,9 @@ func TestManagerTemplateInitializationFailureCleansUpWithExclusivePossession(t *
 
 func TestManagerCrashedClonerReleasesIdentityAndFencesBusyDDLProcess(t *testing.T) {
 	base := integrationManager(t)
-	identity := "crashedclone" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
-	manager := managerWithTemplateIdentity(base, identity)
-	cleanupOwnedTemplate(t, manager)
+	fixture := newTestOwnedTemplate(t, base, "crashedclone")
+	manager := fixture.manager
+	identity := manager.templateID
 	ensureOwnedTemplate(t, manager)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -824,7 +988,7 @@ func TestManagerCrashedClonerReleasesIdentityAndFencesBusyDDLProcess(t *testing.
 		possession, err := manager.acquireTemplatePossession(ctx, db, templateLockExclusive)
 		if err == nil {
 			close(exclusiveAcquired)
-			err = manager.dropTemplate(ctx, db, possession)
+			err = fixture.drop(ctx, db, possession)
 			possession.release()
 		}
 		deleted <- err
@@ -1065,7 +1229,7 @@ func TestManagerReconcileRefreshesCreateWindowAfterTakingLease(t *testing.T) {
 	if err := createDatabase(ctx, db, name); err != nil {
 		t.Fatal(err)
 	}
-	defer dropDatabase(context.Background(), db, name)
+	defer dropTestDatabase(context.Background(), manager, db, name)
 	candidate := databaseCandidate{name: name, owner: manager.role, comment: ""}
 	if err := setDatabaseMetadata(ctx, db, name, resourceMetadata{Version: 1, Kind: "sandbox", Identity: identity, LeaseKey: leaseKey}); err != nil {
 		t.Fatal(err)
@@ -1119,7 +1283,7 @@ func TestManagerReconcileRefreshesIntentSnapshotAfterTakingLease(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer manager.deleteIntent(context.Background(), name)
-			defer dropDatabase(context.Background(), adminDB, name)
+			defer dropTestDatabase(context.Background(), manager, adminDB, name)
 
 			snapshotReady := make(chan struct{})
 			resume := make(chan struct{})
@@ -1198,7 +1362,7 @@ func TestManagerRetiresFailedCreateIntentOnlyAfterExactAbsence(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer manager.deleteIntent(context.Background(), name)
-			defer dropDatabase(context.Background(), db, name)
+			defer dropTestDatabase(context.Background(), manager, db, name)
 			if err := createDatabase(ctx, db, name); err != nil {
 				t.Fatal(err)
 			}
@@ -1208,7 +1372,7 @@ func TestManagerRetiresFailedCreateIntentOnlyAfterExactAbsence(t *testing.T) {
 			if _, found, err := manager.intent(ctx, name); err != nil || !found {
 				t.Fatalf("existing database intent found=%v err=%v, want retained", found, err)
 			}
-			if err := dropDatabase(ctx, db, name); err != nil {
+			if err := dropTestDatabase(ctx, manager, db, name); err != nil {
 				t.Fatal(err)
 			}
 			if err := manager.retireIntentIfDatabaseAbsent(ctx, db, name); err != nil {
@@ -1246,6 +1410,88 @@ func managerWithTemplateIdentity(manager *Manager, identity string) *Manager {
 	copy.templateName = copy.signedResourceName(templateNamePrefix, "template", identity)
 	copy.beforeTemplateClone = nil
 	return &copy
+}
+
+type testOwnedTemplate struct {
+	manager       *Manager
+	canonicalName string
+}
+
+func newTestOwnedTemplate(t *testing.T, canonical *Manager, purpose string) *testOwnedTemplate {
+	t.Helper()
+	identity := purpose + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
+	manager := managerWithTemplateIdentity(canonical, identity)
+	if manager.templateName == canonical.templateName {
+		t.Fatal("test-owned template fixture must not use the canonical manager identity")
+	}
+	fixture := &testOwnedTemplate{manager: manager, canonicalName: canonical.templateName}
+	t.Cleanup(func() { fixture.cleanup(t) })
+	return fixture
+}
+
+func (f *testOwnedTemplate) drop(ctx context.Context, db *sql.DB, possession *templatePossession) error {
+	if f == nil || f.manager == nil || f.manager.templateName == f.canonicalName {
+		return fmt.Errorf("test-owned template deletion refuses the canonical manager identity")
+	}
+	return f.manager.dropTemplate(ctx, db, possession)
+}
+
+func (f *testOwnedTemplate) remove(t *testing.T) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	db, err := f.manager.admin.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	possession, err := f.manager.acquireTemplatePossession(ctx, db, templateLockExclusive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer possession.release()
+	if err := f.drop(ctx, db, possession); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.manager.deleteIntent(ctx, f.manager.templateName); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (f *testOwnedTemplate) cleanup(t *testing.T) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	db, err := f.manager.admin.Open()
+	if err != nil {
+		t.Errorf("open template cleanup database: %v", err)
+		return
+	}
+	defer db.Close()
+	possession, err := f.manager.acquireTemplatePossession(ctx, db, templateLockExclusive)
+	if err != nil {
+		t.Errorf("acquire template cleanup possession: %v", err)
+		return
+	}
+	defer possession.release()
+	if err := f.drop(ctx, db, possession); err != nil {
+		t.Errorf("drop test-owned template: %v", err)
+	}
+	if err := f.manager.deleteIntent(ctx, f.manager.templateName); err != nil {
+		t.Errorf("delete test-owned template intent: %v", err)
+	}
+}
+
+func dropTestDatabase(ctx context.Context, canonical *Manager, db databaseExecer, name string) error {
+	if strings.HasPrefix(name, templateNamePrefix) {
+		if _, ok := canonical.verifyResourceName(name, templateNamePrefix, "template"); !ok {
+			return fmt.Errorf("test database cleanup refuses unsigned template %q", name)
+		}
+		if name == canonical.templateName {
+			return fmt.Errorf("test database cleanup refuses canonical template %q", name)
+		}
+	}
+	return dropDatabase(ctx, db, name)
 }
 
 func templateCloneHelperCommand(identity, mode, ready, resume string) (*exec.Cmd, *bytes.Buffer) {
@@ -1317,54 +1563,6 @@ func ensureOwnedTemplate(t *testing.T, manager *Manager) {
 	if err := sandbox.Release(ctx); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func removeOwnedTemplate(t *testing.T, manager *Manager) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	db, err := manager.admin.Open()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	possession, err := manager.acquireTemplatePossession(ctx, db, templateLockExclusive)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer possession.release()
-	if err := manager.dropTemplate(ctx, db, possession); err != nil {
-		t.Fatal(err)
-	}
-	if err := manager.deleteIntent(ctx, manager.templateName); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func cleanupOwnedTemplate(t *testing.T, manager *Manager) {
-	t.Helper()
-	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		db, err := manager.admin.Open()
-		if err != nil {
-			t.Errorf("open template cleanup database: %v", err)
-			return
-		}
-		defer db.Close()
-		possession, err := manager.acquireTemplatePossession(ctx, db, templateLockExclusive)
-		if err != nil {
-			t.Errorf("acquire template cleanup possession: %v", err)
-			return
-		}
-		defer possession.release()
-		if err := manager.dropTemplate(ctx, db, possession); err != nil {
-			t.Errorf("drop owned template: %v", err)
-		}
-		if err := manager.deleteIntent(ctx, manager.templateName); err != nil {
-			t.Errorf("delete owned template intent: %v", err)
-		}
-	})
 }
 
 func assertDatabaseAbsent(t *testing.T, connection Connection, name string) {
