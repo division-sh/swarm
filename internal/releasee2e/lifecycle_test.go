@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,6 +21,10 @@ import (
 )
 
 func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
+	const (
+		runID    = "98eb3399-f6bb-48a6-a3e2-8d3feaf85083"
+		apiToken = "release-e2e-api-token"
+	)
 	repo := releaseE2ERepoRoot(t)
 	releaseRoot := t.TempDir()
 	binaryPath := filepath.Join(releaseRoot, "swarm")
@@ -39,7 +44,11 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 	if err := os.Rename(payloadSource, payloadPath); err != nil {
 		t.Fatalf("move release payload: %v", err)
 	}
+	apiTokenFile := filepath.Join(releaseRoot, "api-token")
+	home := filepath.Join(releaseRoot, "home")
+	writeReleaseFile(t, apiTokenFile, apiToken+"\n")
 	writeReleaseFile(t, filepath.Join(releaseRoot, "swarm.yaml"), "runtime:\n  execution_posture: live\n")
+	writeReleaseFile(t, filepath.Join(home, ".config", "swarm", "swarm.yaml"), fmt.Sprintf("serve:\n  api_token_file: %s\nconnection:\n  api_token_file: %s\n", apiTokenFile, apiTokenFile))
 
 	fakeRoot := filepath.Join(releaseRoot, "fake-docker-state")
 	fakeBin := filepath.Join(releaseRoot, "fake-bin")
@@ -56,7 +65,6 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 	dockerScript := fmt.Sprintf("#!/bin/sh\n%s=1 exec %s -- \"$@\"\n", fakeDockerHelperEnv, shellQuote(testBinary))
 	writeExecutable(t, filepath.Join(fakeBin, "docker"), dockerScript)
 
-	home := filepath.Join(releaseRoot, "home")
 	env := releaseProcessEnv(fakeBin, fakeRoot, home)
 	verify := runReleaseCommand(t, 45*time.Second, releaseRoot, env, "", binaryPath, "verify")
 	if verify.err != nil {
@@ -76,17 +84,63 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 	defer releaseLock()
 	requireDefaultMCPPortAvailable(t)
 	apiPort := freeReleaseTCPPort(t)
-	run := runReleaseCommand(t, 90*time.Second, releaseRoot, env, "",
-		binaryPath,
+	emitGate := filepath.Join(fakeRoot, "release-mcp-emit")
+	env = append(env, fakeDockerMCPEmitGateEnv+"="+emitGate)
+	runCtx, cancelRun := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancelRun()
+	runOutputPath := filepath.Join(releaseRoot, "run-output.log")
+	runOutput, err := os.Create(runOutputPath)
+	if err != nil {
+		t.Fatalf("create release run output: %v", err)
+	}
+	cmd := exec.CommandContext(runCtx, binaryPath,
 		"run", "start",
 		"--backend", "claude_cli",
 		"--api-port", fmt.Sprint(apiPort),
 		"--event", "worker/task.assigned",
 		"--payload", payloadPath,
+		"--run-id", runID,
 	)
-	if run.err != nil {
-		t.Fatalf("release foreground run failed: %v\n%s\nDocker calls:\n%s", run.err, run.output, fakeDockerLogText(t, fakeRoot))
+	cmd.Dir = releaseRoot
+	cmd.Env = env
+	cmd.Stdout = runOutput
+	cmd.Stderr = runOutput
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start release foreground run: %v", err)
 	}
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- cmd.Wait() }()
+	defer func() {
+		_ = os.WriteFile(emitGate, []byte("release\n"), 0o600)
+		cancelRun()
+	}()
+	if err := waitForReleasePath(runCtx, emitGate+".ready"); err != nil {
+		_ = runOutput.Sync()
+		raw, _ := os.ReadFile(runOutputPath)
+		t.Fatalf("wait for committed release notice: %v\n%s\nDocker calls:\n%s", err, raw, fakeDockerLogText(t, fakeRoot))
+	}
+	recordsAtNotice := readFakeDockerRecords(t, fakeRoot)
+	noticeRecord := exactReleaseDockerRecord(t, recordsAtNotice, "mcp_notify")
+	if noticeRecord.ToolStatus != "queued" || strings.TrimSpace(noticeRecord.MailboxID) == "" {
+		t.Fatalf("MCP notify result evidence = %#v, want exact queued mailbox id", noticeRecord)
+	}
+	assertReleasePublicMailboxReadback(t, apiPort, apiToken, runID, noticeRecord.MailboxID)
+	if err := os.WriteFile(emitGate, []byte("release\n"), 0o600); err != nil {
+		t.Fatalf("release managed Claude emit gate: %v", err)
+	}
+	if err := <-waitDone; err != nil {
+		_ = runOutput.Sync()
+		raw, _ := os.ReadFile(runOutputPath)
+		t.Fatalf("release foreground run failed: %v\n%s\nDocker calls:\n%s", err, raw, fakeDockerLogText(t, fakeRoot))
+	}
+	if err := runOutput.Close(); err != nil {
+		t.Fatalf("close release run output: %v", err)
+	}
+	runRaw, err := os.ReadFile(runOutputPath)
+	if err != nil {
+		t.Fatalf("read release run output: %v", err)
+	}
+	run := releaseCommandResult{output: string(runRaw)}
 	for _, want := range []string{
 		"run started:",
 		"trace ",
@@ -118,6 +172,103 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 	assertReleaseDockerEvidence(t, records)
 	assertReleaseExternalProcessesExited(t, fakeRoot)
 	assertReleasePersistentWorkspacesPreserved(t, fakeRoot)
+}
+
+func exactReleaseDockerRecord(t *testing.T, records []fakeDockerRecord, class string) fakeDockerRecord {
+	t.Helper()
+	var matched []fakeDockerRecord
+	for _, record := range records {
+		if record.Class == class {
+			matched = append(matched, record)
+		}
+	}
+	if len(matched) != 1 {
+		t.Fatalf("Docker records for %s = %#v, want exactly one", class, matched)
+	}
+	return matched[0]
+}
+
+func assertReleasePublicMailboxReadback(t *testing.T, apiPort int, token, runID, mailboxID string) {
+	t.Helper()
+	endpoint := fmt.Sprintf("http://127.0.0.1:%d/v1/rpc", apiPort)
+	listed := releaseJSONRPC(t, endpoint, token, "mailbox.list", map[string]any{"run_id": runID, "status": "pending"})
+	if listed["unread_informational_notices"] != float64(1) {
+		t.Fatalf("public mailbox.list unread count = %#v, want 1", listed["unread_informational_notices"])
+	}
+	items, _ := listed["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("public mailbox.list items = %#v, want one notice", items)
+	}
+	projection, _ := items[0].(map[string]any)
+	if projection["kind"] != "notice" {
+		t.Fatalf("public mailbox.list projection = %#v, want notice", projection)
+	}
+	notice, _ := projection["notice"].(map[string]any)
+	if notice["mailbox_id"] != mailboxID || notice["type"] != "operator_notice" || notice["status"] != "pending" || notice["priority"] != "normal" {
+		t.Fatalf("public mailbox.list notice = %#v, want exact committed notice", notice)
+	}
+	if strings.TrimSpace(fmt.Sprint(notice["source_event_id"])) == "" || strings.TrimSpace(fmt.Sprint(notice["source_flow"])) == "" {
+		t.Fatalf("public mailbox.list notice provenance = %#v, want source event and flow", notice)
+	}
+
+	detail := releaseJSONRPC(t, endpoint, token, "mailbox.get", map[string]any{"mailbox_id": mailboxID})
+	if detail["kind"] != "notice" {
+		t.Fatalf("public mailbox.get = %#v, want notice", detail)
+	}
+	readback, _ := detail["notice"].(map[string]any)
+	item, _ := readback["item"].(map[string]any)
+	payload, _ := readback["payload"].(map[string]any)
+	if item["mailbox_id"] != mailboxID || item["source_flow"] != "worker" {
+		t.Fatalf("public mailbox.get notice = %#v, want exact worker notice", readback)
+	}
+	if payload["company"] != "Example Labs" || payload["job_title"] != "Senior Platform Engineer" || payload["posting_url"] != "https://example.test/jobs/senior-platform-engineer" {
+		t.Fatalf("public mailbox.get payload = %#v, want exact strong-match context", payload)
+	}
+	history, _ := readback["history"].([]any)
+	if len(history) != 1 {
+		t.Fatalf("public mailbox.get history = %#v, want one creation provenance row", history)
+	}
+	created, _ := history[0].(map[string]any)
+	if created["action"] != "created" || created["actor_token_id"] != "release-worker" {
+		t.Fatalf("public mailbox.get creation provenance = %#v, want release-worker", created)
+	}
+}
+
+func releaseJSONRPC(t *testing.T, endpoint, token, method string, params map[string]any) map[string]any {
+	t.Helper()
+	body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": method, "method": method, "params": params})
+	if err != nil {
+		t.Fatalf("marshal %s request: %v", method, err)
+	}
+	request, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatalf("create %s request: %v", method, err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+token)
+	response, err := (&http.Client{Timeout: 10 * time.Second}).Do(request)
+	if err != nil {
+		t.Fatalf("call public %s: %v", method, err)
+	}
+	defer response.Body.Close()
+	raw, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read public %s: %v", method, err)
+	}
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("public %s status = %d: %s", method, response.StatusCode, raw)
+	}
+	var envelope struct {
+		Result map[string]any `json:"result"`
+		Error  any            `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatalf("decode public %s: %v: %s", method, err, raw)
+	}
+	if envelope.Error != nil || envelope.Result == nil {
+		t.Fatalf("public %s envelope = %#v", method, envelope)
+	}
+	return envelope.Result
 }
 
 type releaseCommandResult struct {
@@ -214,6 +365,9 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 			}
 			if record.RawMCPURL != releaseE2ERawMCPURL || record.MCPURL != releaseE2EHostMCPURL {
 				return fmt.Errorf("MCP notice endpoints = %q/%q, want raw container and translated host defaults", record.RawMCPURL, record.MCPURL)
+			}
+			if record.ToolStatus != "queued" || strings.TrimSpace(record.MailboxID) == "" {
+				return fmt.Errorf("MCP notice result = status %q mailbox_id %q, want exact queued result", record.ToolStatus, record.MailboxID)
 			}
 		}
 	}

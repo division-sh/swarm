@@ -34940,7 +34940,7 @@ managed_agent_capability_surface:
     candidate_definition_owner:
       emit_definition_owner: EmitRegistry.GenerateEmitToolsForActor owns actor/flow-aware emit definition generation. GenerateEmitToolsForRole is only its fallback when the actor declares no emit_events.
       live_catalog_owner: Executor.ToolDefinitionsForActorInContext owns the live actor/context-aware candidate catalog, with ToolDefinitionsForActor as the context-free fallback.
-      hitl_owner: The bounded platform HITL descriptor contributes notify_human universally and ask_human only under its exact permission. agent_message and both retired HITL spellings contribute no candidate.
+      hitl_owner: The bounded platform HITL descriptor contributes notify_human universally and ask_human only under its exact permission. Root, discovered MCP, project, and flow source declarations MUST NOT redefine either managed HITL name under any handler disposition. agent_message and both retired HITL spellings contribute no candidate.
       transport_rule: Normal-runtime and selected-contract-fork transports MUST consume the executor catalog unchanged and preserve executor order and cardinality for the authorized projected subset. Empty, non-canonical, or duplicate canonical definition names fail closed before delivery. Gateways, provider adapters, and test harnesses MUST NOT merge, regenerate, reorder, or fall back to side-channel actor, role, global, hook, or stored definition producers.
     forkchat_exclusion: conversation.fork_chat remains governed by ConversationForkSandboxPolicy and conversation_fork_turns. It never acquires, persists, or authorizes through this managed-agent surface.
   managed_execution_admission:

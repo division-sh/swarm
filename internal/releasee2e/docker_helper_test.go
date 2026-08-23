@@ -54,13 +54,15 @@ type fakeDockerState struct {
 }
 
 type fakeDockerRecord struct {
-	Class     string   `json:"class"`
-	Args      []string `json:"args,omitempty"`
-	SessionID string   `json:"session_id,omitempty"`
-	ToolName  string   `json:"tool_name,omitempty"`
-	RawMCPURL string   `json:"raw_mcp_url,omitempty"`
-	MCPURL    string   `json:"mcp_url,omitempty"`
-	Reason    string   `json:"reason,omitempty"`
+	Class      string   `json:"class"`
+	Args       []string `json:"args,omitempty"`
+	SessionID  string   `json:"session_id,omitempty"`
+	ToolName   string   `json:"tool_name,omitempty"`
+	ToolStatus string   `json:"tool_status,omitempty"`
+	MailboxID  string   `json:"mailbox_id,omitempty"`
+	RawMCPURL  string   `json:"raw_mcp_url,omitempty"`
+	MCPURL     string   `json:"mcp_url,omitempty"`
+	Reason     string   `json:"reason,omitempty"`
 }
 
 type fakeClaudeInvocation struct {
@@ -942,9 +944,6 @@ func runFakeClaudeTurn(root string, invocation fakeClaudeInvocation) int {
 	}
 
 	writeClaudeInit(invocation.sessionID, splitAllowedTools(dockerOptionValue(invocation.commandArgs, "--allowedTools")))
-	if err := waitForFakeDockerMCPEmitGate(os.Getenv(fakeDockerMCPEmitGateEnv)); err != nil {
-		return fakeDockerUnexpected(root, invocation.commandArgs, err.Error())
-	}
 	noticeResult, err := fakeMCPCall(client, invocation.hostMCPURL, invocation.headers, "tools/call", map[string]any{
 		"name": "notify_human",
 		"arguments": map[string]any{
@@ -962,10 +961,18 @@ func runFakeClaudeTurn(root string, invocation fakeClaudeInvocation) int {
 	if isError, _ := noticeResult["isError"].(bool); isError {
 		return fakeDockerUnexpected(root, invocation.commandArgs, fmt.Sprintf("MCP notify_human returned an error result: %#v", noticeResult))
 	}
+	noticeStatus, mailboxID, err := exactReleaseNoticeToolResult(noticeResult)
+	if err != nil {
+		return fakeDockerUnexpected(root, invocation.commandArgs, err.Error())
+	}
 	if !recordUniqueFakeDocker(root, fakeDockerRecord{
-		Class: "mcp_notify", ToolName: "notify_human", RawMCPURL: invocation.rawMCPURL, MCPURL: invocation.hostMCPURL,
+		Class: "mcp_notify", ToolName: "notify_human", ToolStatus: noticeStatus, MailboxID: mailboxID,
+		RawMCPURL: invocation.rawMCPURL, MCPURL: invocation.hostMCPURL,
 	}) {
 		return fakeDockerUnexpected(root, invocation.commandArgs, "duplicate mcp_notify attempt")
+	}
+	if err := waitForFakeDockerMCPEmitGate(os.Getenv(fakeDockerMCPEmitGateEnv)); err != nil {
+		return fakeDockerUnexpected(root, invocation.commandArgs, err.Error())
 	}
 	result, err := fakeMCPCall(client, invocation.hostMCPURL, invocation.headers, "tools/call", map[string]any{
 		"name":      toolName,
@@ -993,6 +1000,33 @@ func runFakeClaudeTurn(root string, invocation fakeClaudeInvocation) int {
 		"result":     "release-e2e-flow-complete",
 	})
 	return 0
+}
+
+func exactReleaseNoticeToolResult(result map[string]any) (string, string, error) {
+	var payload map[string]any
+	if structured, ok := result["structuredContent"].(map[string]any); ok {
+		payload = structured
+	}
+	if payload == nil {
+		content, _ := result["content"].([]any)
+		if len(content) != 1 {
+			return "", "", fmt.Errorf("MCP notify_human result content = %#v, want one exact result", result["content"])
+		}
+		entry, _ := content[0].(map[string]any)
+		if entry["type"] != "text" {
+			return "", "", fmt.Errorf("MCP notify_human result entry = %#v, want text", entry)
+		}
+		text, _ := entry["text"].(string)
+		if err := json.Unmarshal([]byte(text), &payload); err != nil {
+			return "", "", fmt.Errorf("decode MCP notify_human result %q: %w", text, err)
+		}
+	}
+	status, _ := payload["status"].(string)
+	mailboxID, _ := payload["mailbox_id"].(string)
+	if status != "queued" || strings.TrimSpace(mailboxID) == "" || len(payload) != 2 {
+		return "", "", fmt.Errorf("MCP notify_human result = %#v, want exact queued/mailbox_id", payload)
+	}
+	return status, mailboxID, nil
 }
 
 func waitForFakeDockerMCPEmitGate(gatePath string) error {
