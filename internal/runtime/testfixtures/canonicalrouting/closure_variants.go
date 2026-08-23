@@ -9,7 +9,7 @@ type RuntimeAgentMemoryVariant uint8
 
 const (
 	RuntimeAgentMemoryPackageBacked RuntimeAgentMemoryVariant = iota + 1
-	RuntimeAgentMemorySoleParent
+	RuntimeAgentMemoryNestedProject
 )
 
 func CopyRuntimeAgentMemory(t testing.TB, variant RuntimeAgentMemoryVariant) string {
@@ -17,8 +17,8 @@ func CopyRuntimeAgentMemory(t testing.TB, variant RuntimeAgentMemoryVariant) str
 	root := CopyExample(t, RootIngress)
 	removeInheritedScenarios(t, root)
 	packageBody := "name: session-scope-validation\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n  - id: support\n    flow: support\n    mode: static\n"
-	if variant == RuntimeAgentMemorySoleParent {
-		packageBody = "name: session-scope-validation\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\npackages:\n  - path: extras\nflows:\n  - id: support\n    flow: support\n    mode: static\n"
+	if variant == RuntimeAgentMemoryNestedProject {
+		packageBody = "name: session-scope-validation\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\npackages:\n  - path: flows/support/extras\nflows:\n  - id: support\n    flow: support\n    mode: static\n"
 	} else if variant != RuntimeAgentMemoryPackageBacked {
 		t.Fatalf("unsupported runtime agent-memory variant %d", variant)
 	}
@@ -38,9 +38,9 @@ func CopyRuntimeAgentMemory(t testing.TB, variant RuntimeAgentMemoryVariant) str
 		writeClosedVariantFile(t, root, "flows/support/prompts/backend.md", "Handle support events.\n")
 		writeClosedVariantFile(t, root, "flows/support/agents.yaml", agentBody)
 	} else {
-		writeClosedVariantFile(t, root, "extras/package.yaml", "name: extras\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n")
-		writeClosedVariantFile(t, root, "extras/prompts/backend.md", "Handle support events.\n")
-		writeClosedVariantFile(t, root, "extras/agents.yaml", agentBody)
+		writeClosedVariantFile(t, root, "flows/support/extras/package.yaml", "name: extras\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n")
+		writeClosedVariantFile(t, root, "flows/support/extras/prompts/backend.md", "Handle support events.\n")
+		writeClosedVariantFile(t, root, "flows/support/extras/agents.yaml", agentBody)
 	}
 	return root
 }

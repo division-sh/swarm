@@ -17,8 +17,8 @@ func TestRuntimeStart_PackageBackedFlowOwnedStaticAgentsCarryCanonicalMemoryIden
 	assertRuntimeStartCarriesMemoryIdentity(t, source)
 }
 
-func TestRuntimeStart_SoleParentFlowPackageAgentsCarryCanonicalMemoryIdentity(t *testing.T) {
-	source := loadSoleParentFlowRuntimeAgentMemorySource(t)
+func TestRuntimeStart_StructurallyNestedProjectAgentsCarryCanonicalMemoryIdentity(t *testing.T) {
+	source := loadNestedProjectRuntimeAgentMemorySource(t)
 	assertRuntimeStartCarriesMemoryIdentity(t, source)
 }
 
@@ -68,10 +68,10 @@ func loadPackageBackedRuntimeAgentMemorySource(t *testing.T) semanticview.Source
 	return semanticview.Wrap(bundle)
 }
 
-func loadSoleParentFlowRuntimeAgentMemorySource(t *testing.T) semanticview.Source {
+func loadNestedProjectRuntimeAgentMemorySource(t *testing.T) semanticview.Source {
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
-	root := canonicalrouting.CopyRuntimeAgentMemory(t, canonicalrouting.RuntimeAgentMemorySoleParent)
+	root := canonicalrouting.CopyRuntimeAgentMemory(t, canonicalrouting.RuntimeAgentMemoryNestedProject)
 
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

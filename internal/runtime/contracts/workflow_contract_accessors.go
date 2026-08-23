@@ -1123,8 +1123,10 @@ func (b *WorkflowContractBundle) FlowRequiredAgentFacts(flowID string) []Require
 		return nil
 	}
 	if schema, ok := b.FlowSchemas[flowID]; ok {
-		agents, agentsFile := b.flowRequiredAgentScope(flowID)
-		return EffectiveRequiredAgentFacts(schema, agents, b.flowRequiredAgentSchemaFile(flowID), agentsFile)
+		if RequiredAgentsDeclared(schema) {
+			return explicitRequiredAgentFacts(schema.RequiredAgents, b.flowRequiredAgentSchemaFile(flowID))
+		}
+		return b.inferredRequiredAgentFacts(flowID)
 	}
 	if facts := b.Semantics.FlowAgentFacts[flowID]; len(facts) > 0 {
 		return cloneRequiredAgentFacts(facts)
@@ -1138,34 +1140,36 @@ func (b *WorkflowContractBundle) RootRequiredAgentFacts() []RequiredAgentFact {
 	if b == nil || b.RootSchema == nil {
 		return nil
 	}
-	agents, agentsFile := b.rootRequiredAgentScope()
-	return EffectiveRequiredAgentFacts(*b.RootSchema, agents, b.Paths.RootSchemaFile, agentsFile)
+	if RequiredAgentsDeclared(*b.RootSchema) {
+		return explicitRequiredAgentFacts(b.RootSchema.RequiredAgents, b.Paths.RootSchemaFile)
+	}
+	return b.inferredRequiredAgentFacts("")
 }
-func (b *WorkflowContractBundle) rootRequiredAgentScope() (map[string]AgentRegistryEntry, string) {
+
+func (b *WorkflowContractBundle) inferredRequiredAgentFacts(ownerFlowID string) []RequiredAgentFact {
+	ownerFlowID = strings.TrimSpace(ownerFlowID)
 	if b == nil {
-		return nil, ""
+		return nil
 	}
-	for _, view := range b.ProjectViews() {
-		if strings.TrimSpace(view.Paths.ParentKey) == "" && view.Paths.Depth == 0 {
-			return EffectiveAgentRegistryEntries(view.Agents), strings.TrimSpace(view.Paths.ProjectAgentsFile)
+	records := b.AgentDeclarationRecords()
+	out := make([]RequiredAgentFact, 0, len(records))
+	for _, record := range records {
+		if strings.TrimSpace(record.OwnerFlowID) != ownerFlowID {
+			continue
 		}
-	}
-	for _, view := range b.ProjectViews() {
-		if strings.TrimSpace(view.Paths.ParentKey) == "" {
-			return EffectiveAgentRegistryEntries(view.Agents), strings.TrimSpace(view.Paths.ProjectAgentsFile)
+		role := strings.TrimSpace(record.LogicalID)
+		if role == "" {
+			continue
 		}
+		out = append(out, RequiredAgentFact{
+			Role:         role,
+			SubscribesTo: normalizeStrings(record.Entry.Subscriptions),
+			Emits:        normalizeStrings(record.Entry.EmitEvents),
+			Source:       RequiredAgentSourceInferred,
+			SourceFile:   strings.TrimSpace(record.Source.File),
+		})
 	}
-	return EffectiveAgentRegistryEntries(b.Agents), strings.TrimSpace(b.Paths.ProjectAgentsFile)
-}
-func (b *WorkflowContractBundle) flowRequiredAgentScope(flowID string) (map[string]AgentRegistryEntry, string) {
-	flowID = strings.TrimSpace(flowID)
-	if b == nil || flowID == "" {
-		return nil, ""
-	}
-	if view, ok := b.FlowViewByID(flowID); ok && view != nil {
-		return EffectiveAgentRegistryEntries(view.Agents), strings.TrimSpace(view.Paths.AgentsFile)
-	}
-	return nil, ""
+	return out
 }
 func (b *WorkflowContractBundle) flowRequiredAgentSchemaFile(flowID string) string {
 	flowID = strings.TrimSpace(flowID)

@@ -19,8 +19,84 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/flowownedprojectagent"
 	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 )
+
+func TestFlowOwnedProjectAgentTemplateRoutesFollowCanonicalOwnerLifecycle(t *testing.T) {
+	source := flowownedprojectagent.LoadSource(t, runtimecontracts.FlowModeTemplate, false)
+	declarations := semanticview.AgentDeclarationsForOwner(source, "support")
+	if len(declarations) != 1 || declarations[0].Source.Layer != "project" {
+		t.Fatalf("support declarations = %#v, want one project-layer declaration", declarations)
+	}
+	req := runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("support", "one")}
+	routes, err := runtimebus.DeriveRouteTable(source)
+	if err != nil {
+		t.Fatalf("DeriveRouteTable: %v", err)
+	}
+	assert := func(want int) {
+		t.Helper()
+		got := routes.Resolve("support/one/work.requested")
+		if len(got) != want {
+			t.Fatalf("resolved project-agent routes = %#v, want %d", got, want)
+		}
+		if want == 1 && (got[0].Recipient.ID() != "public-worker-left" || got[0].AgentIdentity.Name.Owner != declarations[0].OwnerURI) {
+			t.Fatalf("resolved project-agent route = %#v, want exact canonical declaration %#v", got[0], declarations[0])
+		}
+	}
+	if err := routes.AddFlowInstanceRoute(req); err != nil {
+		t.Fatalf("AddFlowInstanceRoute: %v", err)
+	}
+	assert(1)
+	if err := routes.RemoveFlowInstanceRoute(req.Identity); err != nil {
+		t.Fatalf("RemoveFlowInstanceRoute: %v", err)
+	}
+	assert(0)
+	if err := routes.AddFlowInstanceRoute(req); err != nil {
+		t.Fatalf("re-add FlowInstanceRoute: %v", err)
+	}
+	assert(1)
+
+	restarted, err := newScopedTestEventBus(&routePersistenceTestStore{}, runtimebus.EventBusOptions{ContractBundle: source})
+	if err != nil {
+		t.Fatalf("restart EventBus: %v", err)
+	}
+	if err := restarted.PublishPersistedFlowInstanceRoute(req); err != nil {
+		t.Fatalf("restore persisted flow-instance route: %v", err)
+	}
+	got := restarted.RouteTable().Resolve("support/one/work.requested")
+	if len(got) != 1 || got[0].AgentIdentity.Name.Owner != declarations[0].OwnerURI {
+		t.Fatalf("restored project-agent route = %#v, want exact canonical owner", got)
+	}
+}
+
+func TestFlowOwnedProjectAgentTemplateRoutesPreserveDistinctPhysicalDeclarations(t *testing.T) {
+	source := flowownedprojectagent.LoadSource(t, runtimecontracts.FlowModeTemplate, true)
+	declarations := semanticview.AgentDeclarationsForOwner(source, "support")
+	if len(declarations) != 2 || declarations[0].OwnerURI == declarations[1].OwnerURI {
+		t.Fatalf("support declarations = %#v, want two distinct physical owners", declarations)
+	}
+	routes, err := runtimebus.DeriveRouteTable(source)
+	if err != nil {
+		t.Fatalf("DeriveRouteTable: %v", err)
+	}
+	if err := routes.AddFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: runtimeflowidentity.DeriveRoute("support", "one")}); err != nil {
+		t.Fatalf("AddFlowInstanceRoute: %v", err)
+	}
+	got := routes.Resolve("support/one/work.requested")
+	if len(got) != 2 {
+		t.Fatalf("resolved project-agent routes = %#v, want both physical declarations", got)
+	}
+	owners := map[string]bool{}
+	ids := map[string]bool{}
+	for _, subscriber := range got {
+		owners[subscriber.AgentIdentity.Name.Owner] = true
+		ids[subscriber.Recipient.ID()] = true
+	}
+	if len(owners) != 2 || !ids["public-worker-left"] || !ids["public-worker-right"] {
+		t.Fatalf("resolved owners/ids = %#v/%#v, want both exact declarations", owners, ids)
+	}
+}
 
 func TestEventBusRemoveFlowInstanceDropsDerivedRoutes(t *testing.T) {
 	source := routeMaterializationNodeSource("review", runtimecontracts.SystemNodeContract{

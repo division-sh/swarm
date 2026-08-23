@@ -23,7 +23,6 @@ import (
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimerequiredagents "github.com/division-sh/swarm/internal/runtime/requiredagents"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/google/uuid"
@@ -738,11 +737,7 @@ func staticAgentsForDeclarations(source semanticview.Source, group staticAgentFl
 		right := strings.TrimSpace(declarations[j].OwnerURI) + "\x00" + strings.TrimSpace(declarations[j].LocalID)
 		return left < right
 	})
-	agents := make(map[string]runtimecontracts.AgentRegistryEntry, len(declarations))
-	for index, declaration := range declarations {
-		agents[fmt.Sprintf("%06d", index)] = declaration.Entry
-	}
-	localEvents := staticFlowLocalEventSet(agents)
+	localEvents := staticFlowLocalEventSetForDeclarations(declarations)
 	records := make([]PersistedAgent, 0, len(declarations))
 	for _, declaration := range declarations {
 		namePlan, err := semanticview.ScopedAgentNamePlan(source, declaration)
@@ -1045,35 +1040,29 @@ func staticRequiredAgentsForDeclarations(
 	if len(required) == 0 {
 		return nil, nil
 	}
-	agents := map[string]runtimecontracts.AgentRegistryEntry{}
-	namePlans := map[string]semanticview.AgentNamePlan{}
-	for _, declaration := range semanticview.AgentDeclarations(source) {
-		if !staticRequiredAgentDeclarationMatchesFlow(declaration, flowID) {
-			continue
+	declarations := semanticview.AgentDeclarationsForOwner(source, flowID)
+	localEvents := staticFlowLocalEventSetForDeclarations(declarations)
+	records := make([]PersistedAgent, 0, len(required))
+	for _, requiredAgent := range required {
+		logicalID := strings.TrimSpace(requiredAgent.Role)
+		matches := make([]semanticview.AgentDeclaration, 0, 1)
+		for _, declaration := range declarations {
+			if strings.TrimSpace(declaration.LocalID) == logicalID {
+				matches = append(matches, declaration)
+			}
 		}
-		logicalID := strings.TrimSpace(declaration.LocalID)
-		if _, exists := agents[logicalID]; exists {
+		if len(matches) == 0 {
+			return nil, fmt.Errorf("required agent %q missing from scope %q", strings.TrimSpace(requiredAgent.Role), flowID)
+		}
+		if len(matches) > 1 {
 			return nil, fmt.Errorf("required agent declaration %q in scope %q is ambiguous", logicalID, flowID)
 		}
+		declaration := matches[0]
 		namePlan, err := semanticview.ScopedAgentNamePlan(source, declaration)
 		if err != nil {
 			return nil, fmt.Errorf("required agent declaration %q in scope %q: %w", logicalID, flowID, err)
 		}
-		agents[logicalID] = declaration.Entry
-		namePlans[logicalID] = namePlan
-	}
-	localEvents := staticFlowLocalEventSet(agents)
-	records := make([]PersistedAgent, 0, len(required))
-	for _, requiredAgent := range required {
-		logicalID, entry, ok := runtimerequiredagents.ResolveAgent(agents, requiredAgent)
-		if !ok {
-			return nil, fmt.Errorf("required agent %q missing from scope %q", strings.TrimSpace(requiredAgent.Role), flowID)
-		}
-		namePlan, exists := namePlans[logicalID]
-		if !exists {
-			return nil, fmt.Errorf("required agent %q in scope %q has no exact scoped declaration name", logicalID, flowID)
-		}
-		cfg, err := buildStaticFlowAgentConfig(source, namePlan, flowID, flowPath, logicalID, entry, localEvents)
+		cfg, err := buildStaticFlowAgentConfig(source, namePlan, flowID, flowPath, logicalID, declaration.Entry, localEvents)
 		if err != nil {
 			return nil, err
 		}
@@ -1085,17 +1074,6 @@ func staticRequiredAgentsForDeclarations(
 		})
 	}
 	return records, nil
-}
-
-func staticRequiredAgentDeclarationMatchesFlow(declaration semanticview.AgentDeclaration, flowID string) bool {
-	if strings.TrimSpace(declaration.OwnerFlowID) != strings.TrimSpace(flowID) {
-		return false
-	}
-	if strings.TrimSpace(flowID) != "" {
-		return true
-	}
-	packageKey := strings.Trim(strings.TrimSpace(declaration.Source.PackageKey), "/")
-	return packageKey == "" || packageKey == "."
 }
 
 func buildStaticFlowAgentConfig(
@@ -1230,9 +1208,17 @@ func localEventList(localEvents map[string]struct{}) []string {
 	return out
 }
 
-func staticFlowLocalEventSet(agents map[string]runtimecontracts.AgentRegistryEntry) map[string]struct{} {
+func staticFlowLocalEventSetForDeclarations(declarations []semanticview.AgentDeclaration) map[string]struct{} {
+	entries := make([]runtimecontracts.AgentRegistryEntry, 0, len(declarations))
+	for _, declaration := range declarations {
+		entries = append(entries, declaration.Entry)
+	}
+	return staticFlowLocalEventSetForEntries(entries)
+}
+
+func staticFlowLocalEventSetForEntries(entries []runtimecontracts.AgentRegistryEntry) map[string]struct{} {
 	out := map[string]struct{}{}
-	for _, entry := range agents {
+	for _, entry := range entries {
 		for _, eventType := range entry.Subscriptions {
 			eventType = strings.TrimSpace(eventType)
 			if eventType != "" && !strings.Contains(eventType, "/") {

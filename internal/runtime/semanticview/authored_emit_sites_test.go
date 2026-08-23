@@ -31,8 +31,8 @@ func TestAuthoredEmitSites_EnumeratesRootAndFlowOwnedScopes(t *testing.T) {
 	if countAuthoredEmitSites(sites, "support", "flow-node", "support.ready") != 1 {
 		t.Fatalf("expected one flow authored emit site, got %#v", authoredEmitSiteSummaries(sites))
 	}
-	if countAuthoredEmitSites(sites, "support", "extras-node", "support.ready") != 1 {
-		t.Fatalf("expected one sole-parent package authored emit site, got %#v", authoredEmitSiteSummaries(sites))
+	if countAuthoredEmitSites(sites, "", "extras-node", "support.ready") != 1 {
+		t.Fatalf("expected unrelated package authored emit site to remain root-owned, got %#v", authoredEmitSiteSummaries(sites))
 	}
 }
 
@@ -134,12 +134,12 @@ func TestAuthoredEmitSites_LowersEmitFromToCanonicalFields(t *testing.T) {
 
 func TestAuthoredEmitSites_DeduplicatesPackageProjectionWithoutCollapsingDistinctSources(t *testing.T) {
 	source := loadAuthoredEmitSiteFixture(t, authoredEmitSiteFixture{
-		rootNodeID:   "root-node",
-		rootEmit:     "root.ready",
-		flowNodeID:   "support-node",
-		flowEmit:     "support.ready",
-		extrasNodeID: "support-node",
-		extrasEmit:   "support.ready",
+		rootNodeID:          "root-node",
+		rootEmit:            "root.ready",
+		flowNodeID:          "support-node",
+		flowEmit:            "support.ready",
+		nestedPackageNodeID: "support-node",
+		nestedPackageEmit:   "support.ready",
 	})
 
 	sites := AuthoredEmitSites(source)
@@ -149,8 +149,8 @@ func TestAuthoredEmitSites_DeduplicatesPackageProjectionWithoutCollapsingDistinc
 	}
 	keys := []string{matches[0].SourceScopeKey, matches[1].SourceScopeKey}
 	sort.Strings(keys)
-	if strings.Join(keys, ",") != "extras,flows/support" {
-		t.Fatalf("source scope keys = %v, want sealed flow package and extras; sites=%#v", keys, authoredEmitSiteSummaries(matches))
+	if strings.Join(keys, ",") != "flows/support,flows/support/addon" {
+		t.Fatalf("source scope keys = %v, want sealed flow package and structurally nested addon; sites=%#v", keys, authoredEmitSiteSummaries(matches))
 	}
 }
 
@@ -167,8 +167,8 @@ func TestAuthoredEmitSites_OutsidePackageDoesNotSuppressGenericFlowScope(t *test
 	if countAuthoredEmitSites(sites, "support", "flow-node", "support.ready") != 1 {
 		t.Fatalf("expected generic flow scope site, got %#v", authoredEmitSiteSummaries(sites))
 	}
-	if countAuthoredEmitSites(sites, "support", "extras-node", "support.ready") != 1 {
-		t.Fatalf("expected outside package site, got %#v", authoredEmitSiteSummaries(sites))
+	if countAuthoredEmitSites(sites, "", "extras-node", "support.ready") != 1 {
+		t.Fatalf("expected outside package site to remain root-owned, got %#v", authoredEmitSiteSummaries(sites))
 	}
 }
 

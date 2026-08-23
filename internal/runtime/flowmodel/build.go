@@ -140,7 +140,6 @@ func AssemblePackageTree[T any, P any, F any](
 	packageNodes := map[string]*BuildNode[T]{}
 	packagesByKey := map[string]P{}
 	packageFlowNodes := map[string]map[string]*BuildNode[T]{}
-	packageFlowOrder := map[string][]*BuildNode[T]{}
 
 	for _, pkg := range packages {
 		key := strings.TrimSpace(packageKey(pkg))
@@ -174,7 +173,6 @@ func AssemblePackageTree[T any, P any, F any](
 			if ref := strings.TrimSpace(flowRef(flow)); ref != "" {
 				packageFlowNodes[key][ref] = child
 			}
-			packageFlowOrder[key] = append(packageFlowOrder[key], child)
 		}
 	}
 
@@ -201,7 +199,6 @@ func AssemblePackageTree[T any, P any, F any](
 			pkg,
 			packageNodes[parent],
 			packageFlowNodes[parent],
-			packageFlowOrder[parent],
 			packageDir,
 			packageFlows,
 			flowDir,
@@ -223,7 +220,6 @@ func ResolvePackageParentNode[T any, P any, F any](
 	childPkg P,
 	parentPackageNode *BuildNode[T],
 	parentFlowNodes map[string]*BuildNode[T],
-	orderedParentFlows []*BuildNode[T],
 	packageDir func(P) string,
 	packageFlows func(P) []F,
 	flowDir func(F) string,
@@ -243,9 +239,6 @@ func ResolvePackageParentNode[T any, P any, F any](
 				return node
 			}
 		}
-	}
-	if len(orderedParentFlows) == 1 {
-		return orderedParentFlows[0]
 	}
 	return parentPackageNode
 }

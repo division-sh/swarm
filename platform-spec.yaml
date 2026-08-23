@@ -16683,6 +16683,17 @@ agent_identity_model:
         is root-owned or flow-owned. A project package nested under a declared flow retains its exact package identity
         and the loader-established owning flow, and activation plus source admission consume that owning-flow fact; a
         flow projection of the same physical declaration is not a second declaration.
+      ownership_derivation: >
+        Package ownership is established only by exact structural containment beneath a declared flow directory or by
+        an already-established parent package owning-flow fact. The number of flows declared by a parent package is not
+        ownership evidence: an unrelated child package remains root-owned even when its parent declares exactly one flow.
+      owner_grouped_consumption: >
+        EventBus route templates and static routes, inferred required-agent facts, explicit required-agent fulfillment,
+        and generated authoring projections consume the complete canonical declaration set grouped by exact OwnerFlowID.
+        They preserve each declaration's physical package, owner URI, local key, effective public name, and source file.
+        They MUST NOT select declarations by physical source layer, flatten distinct physical declarations into a map
+        keyed only by local ID, or substitute a flow-local agents.yaml map. Multiple declarations for one required-agent
+        role are ambiguous and fail closed; they are never resolved by package order or a preferred source layer.
       execution_agreement: >
         Source admission combines one declared record with one concrete live identity. The declared name and owner URI,
         owning flow presence or explicit root absence, flow mode, and concrete route MUST agree exactly. Static and

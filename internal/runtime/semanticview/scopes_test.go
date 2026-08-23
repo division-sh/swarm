@@ -132,7 +132,7 @@ func TestRootExecutionCoordinateBindsAuthoredRootAndExactRun(t *testing.T) {
 	}
 }
 
-func TestProjectScopes_SoleParentFlowCarriesOwningFlowIDOutsideFlowDir(t *testing.T) {
+func TestProjectScopes_SoleParentFlowDoesNotOwnUnrelatedSiblingPackage(t *testing.T) {
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
@@ -203,8 +203,12 @@ flow-agent:
 	if !found {
 		t.Fatalf("expected extras project scope, got %#v", source.ProjectScopes())
 	}
-	if packageScope.OwningFlowID != "support" {
-		t.Fatalf("OwningFlowID = %q, want support", packageScope.OwningFlowID)
+	if packageScope.OwningFlowID != "" {
+		t.Fatalf("OwningFlowID = %q, want explicit root ownership", packageScope.OwningFlowID)
+	}
+	declarations := AgentDeclarations(source)
+	if len(declarations) != 1 || declarations[0].OwnerFlowID != "" {
+		t.Fatalf("declarations = %#v, want unrelated package declaration to remain root-owned", declarations)
 	}
 }
 

@@ -60,6 +60,20 @@ func AgentDeclarations(source Source) []AgentDeclaration {
 	return entries
 }
 
+// AgentDeclarationsForOwner returns the complete declaration set owned by one
+// semantic flow, or by the explicit root when ownerFlowID is empty.
+func AgentDeclarationsForOwner(source Source, ownerFlowID string) []AgentDeclaration {
+	ownerFlowID = strings.TrimSpace(ownerFlowID)
+	declarations := AgentDeclarations(source)
+	out := make([]AgentDeclaration, 0, len(declarations))
+	for _, declaration := range declarations {
+		if strings.TrimSpace(declaration.OwnerFlowID) == ownerFlowID {
+			out = append(out, declaration)
+		}
+	}
+	return out
+}
+
 func SourceDeclaresAgents(source Source) bool {
 	return len(AgentDeclarations(source)) > 0
 }
