@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"gopkg.in/yaml.v3"
 )
 
@@ -878,15 +879,23 @@ func (c *FlowPackageConnect) UnmarshalYAML(node *yaml.Node) error {
 			return NewUndefinedFieldDiagnostic("connect", key, flowPackageConnectFieldOptions)
 		}
 	}
-	out = out.normalized()
-	if out.Event == "" {
+	event := strings.TrimSpace(out.Event)
+	rename := strings.TrimSpace(out.Rename)
+	if event == "" {
 		return fmt.Errorf("RETIRED: endpoint-centric connect rows are no longer supported; declare event plus flow-only from and to endpoints")
 	}
+	if event != out.Event || !eventidentity.IsValidName(out.Event) {
+		return fmt.Errorf("connect.event %q must be an exact canonical event identity", out.Event)
+	}
+	if rename != "" && eventidentity.Normalize(rename) == eventidentity.Normalize(event) {
+		return fmt.Errorf("connect.rename %q is redundant with event; remove rename", out.Rename)
+	}
+	if rename != out.Rename || (rename != "" && !eventidentity.IsValidName(out.Rename)) {
+		return fmt.Errorf("connect.rename %q must be an exact canonical event identity", out.Rename)
+	}
+	out = out.normalized()
 	if out.From == "" || out.To == "" {
 		return fmt.Errorf("connect entry requires non-empty event, from, and to")
-	}
-	if out.Rename != "" && out.Rename == out.Event {
-		return fmt.Errorf("connect.rename %q is redundant with event; remove rename", out.Rename)
 	}
 	*c = out
 	return nil

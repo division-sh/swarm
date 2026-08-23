@@ -19,6 +19,19 @@ import (
 
 const canonicalFormsRegistryPath = "internal/runtime/conformance/testdata/canonical_forms_registry.yaml"
 
+var canonicalGoConnectClassifications = map[string]struct{}{
+	"mutation_base":      {},
+	"non_authoring_text": {},
+	"positive_producer":  {},
+	"positive_producer_and_explicit_retired_negative": {},
+	"positive_producer_and_mutation_base":             {},
+}
+
+var canonicalGoCorpusExcludedDirectories = map[string]string{
+	".git":   "version-control metadata",
+	"vendor": "vendored source is not repository-owned production code",
+}
+
 type canonicalFormsRegistry struct {
 	Kind            string                         `yaml:"kind"`
 	RegistryVersion int                            `yaml:"registry_version"`
@@ -112,12 +125,39 @@ func TestCanonicalFormsRegistryOwnsCompleteDecoderInventory(t *testing.T) {
 			}
 		}
 	}
-	actual := collectCustomYAMLDecoders(t, root)
+	actual, err := collectCustomYAMLDecoders(root)
+	if err != nil {
+		t.Fatalf("collect custom YAML decoders: %v", err)
+	}
 	if record.Inventory.CustomUnmarshalTotal != 101 || len(expected) != 101 || len(actual) != 101 {
 		t.Fatalf("decoder inventory registry/coverage/source = %d/%d/%d, want 101/101/101", record.Inventory.CustomUnmarshalTotal, len(expected), len(actual))
 	}
-	if missing, extra := mapKeyDifference(expected, actual), mapKeyDifference(actual, expected); len(missing) > 0 || len(extra) > 0 {
-		t.Fatalf("decoder inventory drift\nmissing from source: %v\nunmapped source decoders: %v", missing, extra)
+	if err := validateCustomYAMLDecoderInventory(expected, actual); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCanonicalFormsRegistryRejectsNestedRuntimeDecoderUntilRegistered(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "internal/runtime/gate2313probe/probe.go")
+	writeRegistryMutationFile(t, path, `package gate2313probe
+
+import "gopkg.in/yaml.v3"
+
+type Probe struct{}
+
+func (*Probe) UnmarshalYAML(*yaml.Node) error { return nil }
+`)
+	actual, err := collectCustomYAMLDecoders(root)
+	if err != nil {
+		t.Fatalf("collect custom YAML decoders: %v", err)
+	}
+	if err := validateCustomYAMLDecoderInventory(map[string]string{}, actual); err == nil || !strings.Contains(err.Error(), "gate2313probe/probe.go:Probe") {
+		t.Fatalf("unregistered decoder validation error = %v, want nested decoder identity", err)
+	}
+	registered := map[string]string{"gate2313probe/probe.go:Probe": "mutation.probe"}
+	if err := validateCustomYAMLDecoderInventory(registered, actual); err != nil {
+		t.Fatalf("registered decoder validation: %v", err)
 	}
 }
 
@@ -217,38 +257,7 @@ func TestCanonicalFormsRegistryPinsWave1CorpusLedger(t *testing.T) {
 		t.Fatalf("checked-in package corpus = %#v, registry = %#v", counts, record.Wave1.CheckedInPackageCorpus)
 	}
 
-	goFiles := make(map[string]string)
-	canonicalRoutingOccurrences := 0
-	err = filepath.WalkDir(filepath.Join(root, "internal"), func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
-			return nil
-		}
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		connectMarker := []byte("connect" + ":")
-		if !bytes.Contains(raw, connectMarker) {
-			return nil
-		}
-		relative, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		relative = filepath.ToSlash(relative)
-		classification, ok := record.Wave1.GoConnectCorpus.Files[relative]
-		if !ok {
-			return fmt.Errorf("connect-shaped Go file %s is not classified", relative)
-		}
-		goFiles[relative] = classification
-		if strings.Contains(relative, "/testfixtures/canonicalrouting/") {
-			canonicalRoutingOccurrences += bytes.Count(raw, connectMarker)
-		}
-		return nil
-	})
+	goFiles, canonicalRoutingOccurrences, err := collectGoConnectCorpus(root, record.Wave1.GoConnectCorpus.Files)
 	if err != nil {
 		t.Fatalf("scan connect-shaped Go corpus: %v", err)
 	}
@@ -257,6 +266,27 @@ func TestCanonicalFormsRegistryPinsWave1CorpusLedger(t *testing.T) {
 	}
 	if canonicalRoutingOccurrences != record.Wave1.GoConnectCorpus.CanonicalRoutingOccurrences {
 		t.Fatalf("canonicalrouting connect occurrences = %d, want %d", canonicalRoutingOccurrences, record.Wave1.GoConnectCorpus.CanonicalRoutingOccurrences)
+	}
+}
+
+func TestCanonicalFormsRegistryRejectsOutsideInternalConnectProducerUntilRegistered(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "cmd/gate2313probe/main.go")
+	writeRegistryMutationFile(t, path, "package main\n\nvar packageDocument = `"+"connect"+": []`\n")
+	if _, _, err := collectGoConnectCorpus(root, map[string]string{}); err == nil || !strings.Contains(err.Error(), "cmd/gate2313probe/main.go") {
+		t.Fatalf("unregistered producer validation error = %v, want outside-internal producer path", err)
+	}
+	registered := map[string]string{"cmd/gate2313probe/main.go": "positive_producer"}
+	files, _, err := collectGoConnectCorpus(root, registered)
+	if err != nil {
+		t.Fatalf("registered producer validation: %v", err)
+	}
+	if !reflect.DeepEqual(files, registered) {
+		t.Fatalf("registered producer files = %#v, want %#v", files, registered)
+	}
+	registered["cmd/gate2313probe/main.go"] = "open_ended_classification"
+	if _, _, err := collectGoConnectCorpus(root, registered); err == nil || !strings.Contains(err.Error(), "unsupported classification") {
+		t.Fatalf("open classification validation error = %v, want closed-set rejection", err)
 	}
 }
 
@@ -273,43 +303,118 @@ func loadCanonicalFormsRegistry(t testing.TB, root string) canonicalFormsRegistr
 	return record
 }
 
-func collectCustomYAMLDecoders(t testing.TB, root string) map[string]string {
-	t.Helper()
+func collectCustomYAMLDecoders(root string) (map[string]string, error) {
 	out := make(map[string]string)
-	for _, dir := range []string{"contracts", "flowmodel", "agentintent"} {
-		base := filepath.Join(root, "internal/runtime", dir)
-		entries, err := os.ReadDir(base)
-		if err != nil {
-			t.Fatalf("read decoder directory %s: %v", dir, err)
+	runtimeRoot := filepath.Join(root, "internal/runtime")
+	err := filepath.WalkDir(runtimeRoot, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
 		}
-		for _, entry := range entries {
-			if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if !bytes.Contains(raw, []byte("UnmarshalYAML")) {
+			return nil
+		}
+		parsed, err := parser.ParseFile(token.NewFileSet(), path, raw, 0)
+		if err != nil {
+			return fmt.Errorf("parse %s: %w", path, err)
+		}
+		relative, err := filepath.Rel(runtimeRoot, path)
+		if err != nil {
+			return err
+		}
+		key := filepath.ToSlash(relative)
+		key = strings.TrimPrefix(key, "contracts/")
+		for _, decl := range parsed.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Name.Name != "UnmarshalYAML" || fn.Recv == nil || len(fn.Recv.List) != 1 {
 				continue
 			}
-			path := filepath.Join(base, entry.Name())
-			parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
-			if err != nil {
-				t.Fatalf("parse %s: %v", path, err)
+			receiverType := yamlReceiverType(fn.Recv.List[0].Type)
+			if receiverType == "" {
+				return fmt.Errorf("unsupported UnmarshalYAML receiver in %s", path)
 			}
-			for _, decl := range parsed.Decls {
-				fn, ok := decl.(*ast.FuncDecl)
-				if !ok || fn.Name.Name != "UnmarshalYAML" || fn.Recv == nil || len(fn.Recv.List) != 1 {
-					continue
-				}
-				receiverType := yamlReceiverType(fn.Recv.List[0].Type)
-				if receiverType == "" {
-					t.Fatalf("unsupported UnmarshalYAML receiver in %s", path)
-				}
-				key := entry.Name()
-				if dir != "contracts" {
-					key = dir + "/" + key
-				}
-				identity := canonicalDecoderIdentity(key, receiverType)
-				out[identity] = path
-			}
+			identity := canonicalDecoderIdentity(key, receiverType)
+			out[identity] = path
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func validateCustomYAMLDecoderInventory(expected, actual map[string]string) error {
+	missing, extra := mapKeyDifference(expected, actual), mapKeyDifference(actual, expected)
+	if len(missing) > 0 || len(extra) > 0 {
+		return fmt.Errorf("decoder inventory drift\nmissing from source: %v\nunmapped source decoders: %v", missing, extra)
+	}
+	return nil
+}
+
+func collectGoConnectCorpus(root string, classifications map[string]string) (map[string]string, int, error) {
+	for path, classification := range classifications {
+		if _, ok := canonicalGoConnectClassifications[classification]; !ok {
+			return nil, 0, fmt.Errorf("connect-shaped Go file %s has unsupported classification %q", path, classification)
 		}
 	}
-	return out
+	files := make(map[string]string)
+	canonicalRoutingOccurrences := 0
+	connectMarker := []byte("connect" + ":")
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if path != root {
+				if _, excluded := canonicalGoCorpusExcludedDirectories[entry.Name()]; excluded {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		if !strings.HasSuffix(entry.Name(), ".go") {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if !bytes.Contains(raw, connectMarker) {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		relative = filepath.ToSlash(relative)
+		classification, ok := classifications[relative]
+		if !ok {
+			return fmt.Errorf("connect-shaped Go file %s is not classified", relative)
+		}
+		files[relative] = classification
+		if strings.Contains(relative, "/testfixtures/canonicalrouting/") {
+			canonicalRoutingOccurrences += bytes.Count(raw, connectMarker)
+		}
+		return nil
+	})
+	return files, canonicalRoutingOccurrences, err
+}
+
+func writeRegistryMutationFile(t testing.TB, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create mutation fixture directory: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write mutation fixture: %v", err)
+	}
 }
 
 func yamlReceiverType(expr ast.Expr) string {

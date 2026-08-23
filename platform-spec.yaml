@@ -11887,10 +11887,16 @@ flow_model:
             and payload adapter choices. `from` and `to` contain exact package-visible flow IDs; `.` is the sole sentinel
             for the current package root. They never contain pin names, runtime instance paths, or guessed event spellings.
           fields:
-            event: Required source event identity visible in the package authoring this row.
+            event: >
+              Required exact canonical source event identity visible in the package authoring this row. It must pass
+              the canonical event-name grammar as authored; leading or trailing slash aliases are invalid and are
+              never normalized into acceptance.
             from: Required exact producer flow ID, or `.` for this row's current package root.
             to: Required exact receiver flow ID, or `.` for this row's current package root.
-            rename: Optional exact receiver-visible event identity when it differs from `event`. A value equal to `event` is hard-invalid redundancy.
+            rename: >
+              Optional exact canonical receiver-visible event identity when it differs from `event`. It follows the
+              same admission grammar as `event`; a value equal after canonical event normalization is hard-invalid
+              redundancy rather than an accepted alternate spelling.
             adapter: Optional named payload transformation. It cannot select a pin or rename an event.
           retired_fields:
             endpoint_centric_from_to: Retired on presence. `{flow}.{pin}` and `.{root_pin}` endpoints are invalid; author `event` plus flow-only `from` and `to`.
