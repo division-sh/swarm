@@ -42,6 +42,25 @@ type Manager struct {
 	ddlPlans     []platformschema.TableDDL
 
 	afterCandidateSnapshot func()
+	beforeTemplateClone    func(context.Context, *sql.Conn) error
+}
+
+type templateLockMode uint8
+
+const (
+	templateLockShared templateLockMode = iota + 1
+	templateLockExclusive
+)
+
+// templatePossession is the exact template-identity authority retained from
+// validation through clone. Exclusive possession is also required for every
+// production template deletion.
+type templatePossession struct {
+	manager *Manager
+	conn    *sql.Conn
+	name    string
+	key     int64
+	mode    templateLockMode
 }
 
 type Sandbox struct {
@@ -147,8 +166,17 @@ func (m *Manager) Acquire(ctx context.Context, withTemplate bool) (*Sandbox, err
 	}
 	defer adminDB.Close()
 
+	var template *templatePossession
+	releaseTemplate := func() {
+		if template != nil {
+			template.release()
+			template = nil
+		}
+	}
+	defer releaseTemplate()
 	if withTemplate {
-		if err := m.ensureTemplate(ctx, adminDB); err != nil {
+		template, err = m.ensureTemplateForClone(ctx, adminDB)
+		if err != nil {
 			return nil, err
 		}
 	}
@@ -183,8 +211,14 @@ func (m *Manager) Acquire(ctx context.Context, withTemplate bool) (*Sandbox, err
 
 	if withTemplate {
 		err = m.withDDLAdmission(ctx, adminDB, "clone sandbox "+name, func(conn *sql.Conn) error {
+			if m.beforeTemplateClone != nil {
+				if err := m.beforeTemplateClone(ctx, conn); err != nil {
+					return err
+				}
+			}
 			return createDatabaseFromTemplate(ctx, conn, name, m.templateName)
 		})
+		releaseTemplate()
 	} else {
 		err = m.withDDLAdmission(ctx, adminDB, "create empty sandbox "+name, func(conn *sql.Conn) error {
 			return createDatabase(ctx, conn, name)
@@ -199,7 +233,7 @@ func (m *Manager) Acquire(ctx context.Context, withTemplate bool) (*Sandbox, err
 		metadata.Template = m.templateName
 	}
 	if err := setDatabaseMetadata(ctx, adminDB, name, metadata); err != nil {
-		cleanupErr := m.dropIntendedDatabase(context.Background(), adminDB, name)
+		cleanupErr := m.dropIntendedSandbox(context.Background(), adminDB, name)
 		return nil, errors.Join(err, cleanupErr)
 	}
 	if err := m.deleteIntent(ctx, name); err != nil {
@@ -451,11 +485,21 @@ func (m *Manager) retireIntentIfDatabaseAbsent(ctx context.Context, db databaseR
 	return nil
 }
 
-func (m *Manager) dropIntendedDatabase(ctx context.Context, db *sql.DB, name string) error {
+func (m *Manager) dropIntendedSandbox(ctx context.Context, db *sql.DB, name string) error {
 	if err := m.dropSandbox(ctx, db, name); err != nil {
-		return fmt.Errorf("drop intended postgres test database %q: %w", name, err)
+		return fmt.Errorf("drop intended postgres test sandbox %q: %w", name, err)
 	}
 	return m.retireIntentIfDatabaseAbsent(ctx, db, name)
+}
+
+func (m *Manager) dropIntendedTemplate(ctx context.Context, db *sql.DB, possession *templatePossession) error {
+	if possession == nil {
+		return fmt.Errorf("drop intended postgres test template requires exact exclusive possession")
+	}
+	if err := m.dropTemplate(ctx, db, possession); err != nil {
+		return fmt.Errorf("drop intended postgres test template %q: %w", possession.name, err)
+	}
+	return m.retireIntentIfDatabaseAbsent(ctx, db, possession.name)
 }
 
 func (m *Manager) intentMatchesName(intent resourceIntent) bool {
@@ -540,7 +584,7 @@ func (m *Manager) Reconcile(ctx context.Context) error {
 		if refreshErr != nil {
 			err = refreshErr
 		} else if exists {
-			err = m.reconcileDatabaseCandidateLocked(ctx, db, candidate)
+			err = m.reconcileDatabaseCandidateLocked(ctx, db, lockConn, candidate)
 		} else {
 			err = m.deleteIntent(ctx, intent.Name)
 		}
@@ -576,7 +620,7 @@ func (m *Manager) reconcileDatabaseCandidate(ctx context.Context, db *sql.DB, ca
 	if err != nil || !exists {
 		return err
 	}
-	return m.reconcileDatabaseCandidateLocked(ctx, db, refreshed)
+	return m.reconcileDatabaseCandidateLocked(ctx, db, lockConn, refreshed)
 }
 
 func databaseCandidateByName(ctx context.Context, db databaseRowQueryer, name string) (databaseCandidate, bool, error) {
@@ -594,7 +638,7 @@ func databaseCandidateByName(ctx context.Context, db databaseRowQueryer, name st
 	return candidate, true, nil
 }
 
-func (m *Manager) reconcileDatabaseCandidateLocked(ctx context.Context, db *sql.DB, candidate databaseCandidate) error {
+func (m *Manager) reconcileDatabaseCandidateLocked(ctx context.Context, db *sql.DB, lockConn *sql.Conn, candidate databaseCandidate) error {
 	if candidate.owner != m.role {
 		return fmt.Errorf("unprovable postgres test resource %q left untouched: owner %q does not match authenticated role %q", candidate.name, candidate.owner, m.role)
 	}
@@ -633,8 +677,20 @@ func (m *Manager) reconcileDatabaseCandidateLocked(ctx context.Context, db *sql.
 			return nil
 		}
 	}
-	if err := m.dropSandbox(ctx, db, candidate.name); err != nil {
-		return fmt.Errorf("reconcile stale postgres test %s %q: %w", kind, candidate.name, err)
+	var dropErr error
+	if kind == "template" {
+		dropErr = m.dropTemplate(ctx, db, &templatePossession{
+			manager: m,
+			conn:    lockConn,
+			name:    candidate.name,
+			key:     resourceLockKey(resourceIntent{Name: candidate.name, Kind: kind, Identity: identity}),
+			mode:    templateLockExclusive,
+		})
+	} else {
+		dropErr = m.dropSandbox(ctx, db, candidate.name)
+	}
+	if dropErr != nil {
+		return fmt.Errorf("reconcile stale postgres test %s %q: %w", kind, candidate.name, dropErr)
 	}
 	return m.deleteIntent(ctx, candidate.name)
 }
@@ -657,89 +713,194 @@ func (m *Manager) validResourceMetadata(metadata resourceMetadata) bool {
 	}
 }
 
-func (m *Manager) ensureTemplate(ctx context.Context, adminDB *sql.DB) error {
-	lockConn, err := adminDB.Conn(ctx)
-	if err != nil {
-		return err
-	}
-	defer lockConn.Close()
-	intent := resourceIntent{Name: m.templateName, Kind: "template", Identity: m.templateID}
-	lockKey := resourceLockKey(intent)
-	if err := acquireAdvisoryLock(ctx, lockConn, lockKey, "template "+m.templateName); err != nil {
-		return err
-	}
-	defer func() { _, _ = lockConn.ExecContext(context.Background(), `SELECT pg_advisory_unlock($1)`, lockKey) }()
+type templateState uint8
 
+const (
+	templateAbsent templateState = iota
+	templateIncomplete
+	templateValid
+)
+
+func (m *Manager) inspectTemplate(ctx context.Context, adminDB databaseRowQueryer) (templateState, error) {
 	var comment, owner string
-	err = adminDB.QueryRowContext(ctx, `
+	err := adminDB.QueryRowContext(ctx, `
 		SELECT COALESCE(shobj_description(d.oid, 'pg_database'), ''), r.rolname
 		FROM pg_database d JOIN pg_roles r ON r.oid=d.datdba
 		WHERE d.datname=$1`, m.templateName).Scan(&comment, &owner)
-	if err != nil && err != sql.ErrNoRows {
-		return fmt.Errorf("inspect postgres template %q: %w", m.templateName, err)
+	if err == sql.ErrNoRows {
+		return templateAbsent, nil
 	}
-	if err == nil {
-		if owner != m.role {
-			return fmt.Errorf("template database %q owner %q does not match authenticated role %q; left untouched", m.templateName, owner, m.role)
+	if err != nil {
+		return templateAbsent, fmt.Errorf("inspect postgres template %q: %w", m.templateName, err)
+	}
+	if owner != m.role {
+		return templateAbsent, fmt.Errorf("template database %q owner %q does not match authenticated role %q; left untouched", m.templateName, owner, m.role)
+	}
+	metadata, parseErr := parseResourceMetadata(comment)
+	if parseErr == nil {
+		if metadata.Kind != "template" || metadata.Identity != m.templateID {
+			return templateAbsent, fmt.Errorf("template database %q metadata mismatch; left untouched", m.templateName)
 		}
-		metadata, parseErr := parseResourceMetadata(comment)
-		if parseErr != nil {
-			intent, found, intentErr := m.intent(ctx, m.templateName)
-			if intentErr != nil {
-				return intentErr
-			}
-			if strings.TrimSpace(comment) != "" || !found || !m.intentMatchesName(intent) || intent.Kind != "template" || intent.Identity != m.templateID {
-				return fmt.Errorf("template database %q lacks valid stamped metadata or matching durable pre-create intent; left untouched", m.templateName)
-			}
-			if err := m.dropSandbox(ctx, adminDB, m.templateName); err != nil {
-				return fmt.Errorf("recover incomplete intended template %q: %w", m.templateName, err)
-			}
-			if err := m.deleteIntent(ctx, m.templateName); err != nil {
-				return err
-			}
-		} else if metadata.Kind != "template" || metadata.Identity != m.templateID {
-			return fmt.Errorf("template database %q metadata mismatch; left untouched", m.templateName)
-		} else {
-			if err := m.deleteIntent(ctx, m.templateName); err != nil {
-				return err
-			}
-			return nil
+		return templateValid, nil
+	}
+	intent, found, intentErr := m.intent(ctx, m.templateName)
+	if intentErr != nil {
+		return templateAbsent, intentErr
+	}
+	if strings.TrimSpace(comment) != "" || !found || !m.intentMatchesName(intent) || intent.Kind != "template" || intent.Identity != m.templateID {
+		return templateAbsent, fmt.Errorf("template database %q lacks valid stamped metadata or matching durable pre-create intent; left untouched", m.templateName)
+	}
+	return templateIncomplete, nil
+}
+
+func (m *Manager) acquireTemplatePossession(ctx context.Context, adminDB *sql.DB, mode templateLockMode) (*templatePossession, error) {
+	conn, err := adminDB.Conn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("open template possession connection: %w", err)
+	}
+	intent := resourceIntent{Name: m.templateName, Kind: "template", Identity: m.templateID}
+	key := resourceLockKey(intent)
+	var query string
+	switch mode {
+	case templateLockShared:
+		query = `SELECT pg_try_advisory_lock_shared($1)`
+	case templateLockExclusive:
+		query = `SELECT pg_try_advisory_lock($1)`
+	default:
+		_ = conn.Close()
+		return nil, fmt.Errorf("unknown template possession mode %d", mode)
+	}
+	if err := acquireAdvisoryLockQuery(ctx, conn, key, "template "+m.templateName, query); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return &templatePossession{manager: m, conn: conn, name: m.templateName, key: key, mode: mode}, nil
+}
+
+func (p *templatePossession) handoffToShared(ctx context.Context) error {
+	if p == nil || p.conn == nil || p.mode != templateLockExclusive {
+		return fmt.Errorf("template shared handoff requires exact exclusive possession")
+	}
+	var acquired bool
+	if err := p.conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock_shared($1)`, p.key).Scan(&acquired); err != nil {
+		return fmt.Errorf("acquire shared template possession for %q: %w", p.name, err)
+	}
+	if !acquired {
+		return fmt.Errorf("acquire shared template possession for %q: lock unexpectedly unavailable", p.name)
+	}
+	var released bool
+	if err := p.conn.QueryRowContext(ctx, `SELECT pg_advisory_unlock($1)`, p.key).Scan(&released); err != nil {
+		return fmt.Errorf("release exclusive template possession for %q: %w", p.name, err)
+	}
+	if !released {
+		return fmt.Errorf("release exclusive template possession for %q: lock was not held", p.name)
+	}
+	p.mode = templateLockShared
+	return nil
+}
+
+func (p *templatePossession) release() {
+	if p == nil || p.conn == nil {
+		return
+	}
+	// Release both modes so an interrupted exclusive-to-shared handoff cannot
+	// leave a session lock behind.
+	_, _ = p.conn.ExecContext(context.Background(), `SELECT pg_advisory_unlock_shared($1)`, p.key)
+	_, _ = p.conn.ExecContext(context.Background(), `SELECT pg_advisory_unlock($1)`, p.key)
+	_ = p.conn.Close()
+	p.conn = nil
+}
+
+func (m *Manager) ensureTemplateForClone(ctx context.Context, adminDB *sql.DB) (*templatePossession, error) {
+	shared, err := m.acquireTemplatePossession(ctx, adminDB, templateLockShared)
+	if err != nil {
+		return nil, err
+	}
+	state, err := m.inspectTemplate(ctx, adminDB)
+	if err != nil {
+		shared.release()
+		return nil, err
+	}
+	if state == templateValid {
+		return shared, nil
+	}
+	shared.release()
+
+	exclusive, err := m.acquireTemplatePossession(ctx, adminDB, templateLockExclusive)
+	if err != nil {
+		return nil, err
+	}
+	keepPossession := false
+	defer func() {
+		if !keepPossession {
+			exclusive.release()
+		}
+	}()
+
+	// The template may have changed while the non-authoritative shared probe
+	// yielded to exclusive mutation authority, so classify it again.
+	state, err = m.inspectTemplate(ctx, adminDB)
+	if err != nil {
+		return nil, err
+	}
+	if state == templateValid {
+		if err := exclusive.handoffToShared(ctx); err != nil {
+			return nil, err
+		}
+		keepPossession = true
+		return exclusive, nil
+	}
+	if state == templateIncomplete {
+		if err := m.dropTemplate(ctx, adminDB, exclusive); err != nil {
+			return nil, fmt.Errorf("recover incomplete intended template %q: %w", m.templateName, err)
+		}
+		if err := m.deleteIntent(ctx, m.templateName); err != nil {
+			return nil, err
 		}
 	}
+
+	intent := resourceIntent{Name: m.templateName, Kind: "template", Identity: m.templateID}
 	if err := m.putIntent(ctx, intent); err != nil {
-		return err
+		return nil, err
 	}
 	if err := m.withExclusiveDDLAdmission(ctx, adminDB, "create template "+m.templateName, func(conn *sql.Conn) error {
 		return createDatabase(ctx, conn, m.templateName)
 	}); err != nil {
 		cleanupErr := m.retireIntentIfDatabaseAbsent(context.Background(), adminDB, m.templateName)
-		return errors.Join(fmt.Errorf("create postgres template %q: %w", m.templateName, err), cleanupErr)
+		return nil, errors.Join(fmt.Errorf("create postgres template %q: %w", m.templateName, err), cleanupErr)
 	}
 	projected, err := m.admin.WithDatabase(m.templateName)
 	if err != nil {
-		_ = m.dropSandbox(context.Background(), adminDB, m.templateName)
-		return err
+		cleanupErr := m.dropIntendedTemplate(context.Background(), adminDB, exclusive)
+		return nil, errors.Join(err, cleanupErr)
 	}
 	templateDB, err := projected.Open()
 	if err != nil {
-		_ = m.dropSandbox(context.Background(), adminDB, m.templateName)
-		return err
+		cleanupErr := m.dropIntendedTemplate(context.Background(), adminDB, exclusive)
+		return nil, errors.Join(err, cleanupErr)
 	}
 	if err := initializeDatabase(ctx, templateDB, m.role, m.spec, m.ddlPlans); err != nil {
 		_ = templateDB.Close()
-		_ = m.dropSandbox(context.Background(), adminDB, m.templateName)
-		return err
+		cleanupErr := m.dropIntendedTemplate(context.Background(), adminDB, exclusive)
+		return nil, errors.Join(err, cleanupErr)
 	}
 	if err := templateDB.Close(); err != nil {
-		_ = m.dropSandbox(context.Background(), adminDB, m.templateName)
-		return err
+		cleanupErr := m.dropIntendedTemplate(context.Background(), adminDB, exclusive)
+		return nil, errors.Join(err, cleanupErr)
 	}
 	metadata := resourceMetadata{Version: 1, Kind: "template", Identity: m.templateID}
 	if err := setDatabaseMetadata(ctx, adminDB, m.templateName, metadata); err != nil {
-		cleanupErr := m.dropIntendedDatabase(context.Background(), adminDB, m.templateName)
-		return errors.Join(err, cleanupErr)
+		cleanupErr := m.dropIntendedTemplate(context.Background(), adminDB, exclusive)
+		return nil, errors.Join(err, cleanupErr)
 	}
-	return m.deleteIntent(ctx, m.templateName)
+	if err := m.deleteIntent(ctx, m.templateName); err != nil {
+		return nil, err
+	}
+	if err := exclusive.handoffToShared(ctx); err != nil {
+		return nil, err
+	}
+	keepPossession = true
+	return exclusive, nil
 }
 
 func initializeDatabase(ctx context.Context, db *sql.DB, role string, spec runtimecontracts.PlatformSpecDocument, plans []platformschema.TableDDL) error {
@@ -936,12 +1097,41 @@ func releaseDDLAdmission(conn *sql.Conn, key int64, shared bool) {
 }
 
 func (m *Manager) dropSandbox(ctx context.Context, db *sql.DB, name string) error {
-	admit := m.withDDLAdmission
-	if strings.HasPrefix(name, templateNamePrefix) || strings.HasPrefix(name, controlNamePrefix) {
-		admit = m.withExclusiveDDLAdmission
+	if _, ok := m.verifyResourceName(name, sandboxNamePrefix, "sandbox"); !ok {
+		return fmt.Errorf("refuse non-sandbox database deletion for %q", name)
 	}
-	return admit(ctx, db, "drop database "+name, func(conn *sql.Conn) error {
+	return m.withDDLAdmission(ctx, db, "drop sandbox "+name, func(conn *sql.Conn) error {
 		return dropDatabase(ctx, conn, name)
+	})
+}
+
+func (m *Manager) dropTemplate(ctx context.Context, db *sql.DB, possession *templatePossession) error {
+	if possession == nil || possession.manager != m || possession.conn == nil || possession.mode != templateLockExclusive {
+		return fmt.Errorf("template deletion requires exact exclusive template possession")
+	}
+	identity, ok := m.verifyResourceName(possession.name, templateNamePrefix, "template")
+	if !ok {
+		return fmt.Errorf("refuse unprovable template database deletion for %q", possession.name)
+	}
+	expectedKey := resourceLockKey(resourceIntent{Name: possession.name, Kind: "template", Identity: identity})
+	if possession.key != expectedKey {
+		return fmt.Errorf("template deletion possession key mismatch for %q", possession.name)
+	}
+	var held bool
+	if err := possession.conn.QueryRowContext(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM pg_locks
+			WHERE locktype='advisory' AND granted
+			  AND pid=pg_backend_pid() AND mode='ExclusiveLock'
+			  AND `+advisoryLockKeyReconstructionSQL+`=$1
+		)`, possession.key).Scan(&held); err != nil {
+		return fmt.Errorf("verify exclusive template possession for %q: %w", possession.name, err)
+	}
+	if !held {
+		return fmt.Errorf("template deletion requires held exclusive possession for %q", possession.name)
+	}
+	return m.withExclusiveDDLAdmission(ctx, db, "drop template "+possession.name, func(conn *sql.Conn) error {
+		return dropDatabase(ctx, conn, possession.name)
 	})
 }
 
