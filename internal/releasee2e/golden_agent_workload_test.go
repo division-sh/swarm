@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/lib/pq"
 	"gopkg.in/yaml.v3"
 )
@@ -1066,7 +1067,15 @@ func goldenDeliveryFor(t *testing.T, event goldenEvent, subscriberType, subscrib
 	t.Helper()
 	var matches []goldenEventDelivery
 	for _, delivery := range event.Deliveries {
-		if delivery.SubscriberType == subscriberType && delivery.SubscriberID == subscriberID {
+		actualSubscriberID := delivery.SubscriberID
+		if delivery.SubscriberType == "node" {
+			node, err := runtimeidentity.ParseExecutableNodeKey(actualSubscriberID)
+			if err != nil {
+				t.Fatalf("event %s returned invalid canonical node subscriber %q: %v", event.EventName, actualSubscriberID, err)
+			}
+			actualSubscriberID = node.NodeID()
+		}
+		if delivery.SubscriberType == subscriberType && actualSubscriberID == subscriberID {
 			matches = append(matches, delivery)
 		}
 	}
