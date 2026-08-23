@@ -551,6 +551,71 @@ func TestLifecycleCoordinatorTeardownPersistenceFailureLeavesLoopOwned(t *testin
 	}
 }
 
+func TestLifecycleCoordinatorSelfRetirementCommitsAfterAcceptedLoopSettles(t *testing.T) {
+	probe := newLifecyclePersistenceProbe()
+	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
+	rec := lifecycleTestPersistedAgent(t)
+	if err := coordinator.register(testAuthorActivityContext(context.Background()), rec, true); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	beginCoordinatorRun(t, coordinator, managedExecutionTestContext(t, testAuthorActivityContext(context.Background())), AgentRunModeStandard)
+	loopCtx, token, done, err := replaceCoordinatorLoop(coordinator, testAuthorActivityContext(context.Background()), rec, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	coordinator.mu.Lock()
+	cell := coordinator.cells[token.Identity.Normalize()]
+	cell.execution.routeToken = token
+	stopAfterAccepted := cell.execution.stopAfterAccepted
+	coordinator.mu.Unlock()
+
+	if _, err := coordinator.terminateIdentityWithTopologyExpected(
+		testAuthorActivityContext(context.Background()),
+		rec.Config.Identity,
+		"flow_instance_terminal",
+		AgentLifecycleTerminated,
+		nil,
+		nil,
+		true,
+	); err != nil {
+		t.Fatalf("defer self retirement: %v", err)
+	}
+	if got := len(probe.requestsFor("teardown")); got != 0 {
+		t.Fatalf("terminal writes before accepted loop settlement = %d, want 0", got)
+	}
+	select {
+	case <-loopCtx.Done():
+		t.Fatal("self retirement cancelled accepted generation before loop settlement")
+	default:
+	}
+	select {
+	case <-stopAfterAccepted:
+	default:
+		t.Fatal("self retirement did not request loop stop after accepted work")
+	}
+	if current, ok := coordinator.tokenIdentity(rec.Config.Identity); !ok || current != token {
+		t.Fatalf("current token before settlement = %+v ok=%v, want %+v", current, ok, token)
+	}
+
+	if err := releaseCoordinatorLoop(coordinator, token, done); err != nil {
+		t.Fatalf("release accepted loop: %v", err)
+	}
+	requests := probe.requestsFor("teardown")
+	if len(requests) != 1 || requests[0].Trigger != "flow_instance_terminal" || requests[0].ExpectedGeneration != token.Generation {
+		t.Fatalf("deferred terminal writes = %#v, want one exact flow terminalization", requests)
+	}
+	if got := len(probe.requestsFor("self_release")); got != 0 {
+		t.Fatalf("self-release writes after deferred terminalization = %d, want 0", got)
+	}
+	coordinator.mu.Lock()
+	cell = coordinator.cells[token.Identity.Normalize()]
+	phase, generation := cell.phase, cell.generation
+	coordinator.mu.Unlock()
+	if phase != AgentLifecycleTerminated || generation != token.Generation+1 {
+		t.Fatalf("final lifecycle = %s/%d, want terminated/%d", phase, generation, token.Generation+1)
+	}
+}
+
 func TestLifecycleCoordinatorRestartVersusTeardownNeverResurrectsLoop(t *testing.T) {
 	probe := newLifecyclePersistenceProbe()
 	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
