@@ -428,23 +428,16 @@ func validateExternalProofs(repoRoot string, proofs []ExternalProof, claims map[
 }
 
 func validateExternalProofRecord(repoRoot string, policy testplanning.Policy, index int, proof ExternalProof) error {
-	if proof.Source == "" || proof.Source != strings.TrimSpace(proof.Source) || filepath.IsAbs(proof.Source) || filepath.Clean(proof.Source) != filepath.FromSlash(proof.Source) || strings.HasPrefix(proof.Source, ".."+string(filepath.Separator)) {
-		return fmt.Errorf("external proof at index %d has invalid repository-relative source %q", index, proof.Source)
-	}
-	info, err := os.Stat(filepath.Join(repoRoot, filepath.FromSlash(proof.Source)))
-	if err != nil {
-		return fmt.Errorf("external proof source %s: %w", proof.Source, err)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("external proof source %s is not a directory", proof.Source)
+	if err := validateExistingContainedDirectory(repoRoot, proof.Source); err != nil {
+		return fmt.Errorf("external proof source %q at index %d is an invalid repository-relative source: %w", proof.Source, index, err)
 	}
 	modulePrefix := strings.TrimSuffix(policy.Module, "/") + "/"
 	if proof.Executor == "" || proof.Executor != strings.TrimSpace(proof.Executor) || !strings.HasPrefix(proof.Executor, modulePrefix) {
 		return fmt.Errorf("external proof %s has invalid executor %q", proof.Source, proof.Executor)
 	}
 	executorDir := strings.TrimPrefix(proof.Executor, modulePrefix)
-	if info, err := os.Stat(filepath.Join(repoRoot, filepath.FromSlash(executorDir))); err != nil || !info.IsDir() {
-		return fmt.Errorf("external proof %s executor %s has no package directory", proof.Source, proof.Executor)
+	if err := validateExistingContainedDirectory(repoRoot, executorDir); err != nil {
+		return fmt.Errorf("external proof %s has invalid executor %q: %w", proof.Source, proof.Executor, err)
 	}
 	if len(proof.Proves) == 0 {
 		return fmt.Errorf("external proof %s proves no canonical claim", proof.Source)
@@ -471,6 +464,45 @@ func validateExternalProofRecord(repoRoot string, policy testplanning.Policy, in
 		}
 	}
 	return nil
+}
+
+func validateExistingContainedDirectory(repoRoot, relative string) error {
+	relative = filepath.FromSlash(relative)
+	if relative == "" || relative != strings.TrimSpace(relative) || filepath.IsAbs(relative) || filepath.Clean(relative) != relative {
+		return fmt.Errorf("path must be a clean nonempty relative path")
+	}
+	root, err := filepath.Abs(repoRoot)
+	if err != nil {
+		return fmt.Errorf("resolve repository root: %w", err)
+	}
+	candidate := filepath.Join(root, relative)
+	if !pathContainedBy(root, candidate) {
+		return fmt.Errorf("path escapes repository")
+	}
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return fmt.Errorf("resolve repository root symlinks: %w", err)
+	}
+	realCandidate, err := filepath.EvalSymlinks(candidate)
+	if err != nil {
+		return fmt.Errorf("resolve path symlinks: %w", err)
+	}
+	if !pathContainedBy(realRoot, realCandidate) {
+		return fmt.Errorf("resolved path escapes repository")
+	}
+	info, err := os.Stat(realCandidate)
+	if err != nil {
+		return fmt.Errorf("stat path: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("path is not a directory")
+	}
+	return nil
+}
+
+func pathContainedBy(root, candidate string) bool {
+	relative, err := filepath.Rel(root, candidate)
+	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
 func containsCatalogString(values []string, want string) bool {
