@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	swarmassets "github.com/division-sh/swarm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -98,6 +99,11 @@ func ExampleRoot(t testing.TB, id ArtifactID) string {
 func CopyExample(t testing.TB, id ArtifactID) string {
 	t.Helper()
 	target := t.TempDir()
+	if root, ok := canonicalExamplePath(id); ok && root == telegramAgentExamplePath {
+		// Consume release bytes so ignored runtime state cannot enter test fixtures.
+		copyFS(t, swarmassets.EmbeddedTelegramAgentExample(), ".", target)
+		return target
+	}
 	copyTree(t, ExampleRoot(t, id), target)
 	return target
 }
@@ -174,7 +180,7 @@ func canonicalExamplePath(id ArtifactID) (string, bool) {
 		FanInStream:             "examples/routing/fan-in/stream",
 		FanInBarrier:            "examples/routing/fan-in/barrier",
 		HarnessInjection:        "examples/routing/harness-injection",
-		TelegramAgent:           "examples/integrations/telegram-agent",
+		TelegramAgent:           telegramAgentExamplePath,
 	}
 	for canonical, root := range paths {
 		if requested == string(canonical) || requested == root {
@@ -182,6 +188,33 @@ func canonicalExamplePath(id ArtifactID) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+const telegramAgentExamplePath = "examples/integrations/telegram-agent"
+
+func copyFS(t testing.TB, source fs.FS, sourceRoot, target string) {
+	t.Helper()
+	err := fs.WalkDir(source, sourceRoot, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		relative, err := filepath.Rel(filepath.FromSlash(sourceRoot), filepath.FromSlash(path))
+		if err != nil || relative == "." {
+			return err
+		}
+		destination := filepath.Join(target, relative)
+		if entry.IsDir() {
+			return os.MkdirAll(destination, 0o755)
+		}
+		contents, err := fs.ReadFile(source, path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(destination, contents, 0o644)
+	})
+	if err != nil {
+		t.Fatalf("copy embedded routing example %s: %v", sourceRoot, err)
+	}
 }
 
 func copyTree(t testing.TB, source, target string) {
