@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/operatorread"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -28,102 +30,13 @@ import (
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
-	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 )
 
 const standingMemoryAsyncProofTimeout = 30 * time.Second
 
-type standingMemoryProviderMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type standingMemoryProviderRequest struct {
-	Messages []standingMemoryProviderMessage `json:"messages"`
-}
-
-type standingMemoryProviderRecorder struct {
-	t        testing.TB
-	mu       sync.Mutex
-	requests []standingMemoryProviderRequest
-}
-
-func (r *standingMemoryProviderRecorder) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	if req.URL.Path != "/v1/chat/completions" {
-		r.t.Errorf("OpenAI-compatible path = %q, want /v1/chat/completions", req.URL.Path)
-		http.Error(w, "unexpected path", http.StatusNotFound)
-		return
-	}
-	if got := req.Header.Get("Authorization"); got != "Bearer compatible-key" {
-		r.t.Errorf("OpenAI-compatible authorization = %q, want stored credential", got)
-		http.Error(w, "bad credential", http.StatusUnauthorized)
-		return
-	}
-	var recorded standingMemoryProviderRequest
-	if err := json.NewDecoder(req.Body).Decode(&recorded); err != nil {
-		r.t.Errorf("decode OpenAI-compatible request: %v", err)
-		http.Error(w, "bad request", http.StatusBadRequest)
-		return
-	}
-	r.mu.Lock()
-	r.requests = append(r.requests, recorded)
-	r.mu.Unlock()
-
-	w.Header().Set("content-type", "application/json")
-	last := standingMemoryLastMessage(recorded.Messages)
-	if standingMemoryRequestContains(recorded, "Remember each singleton ping") ||
-		standingMemoryRequestContains(recorded, "Observe every raw Telegram update") ||
-		last.Role == "tool" {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"model":   "gpt-compatible",
-			"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "observed"}}},
-			"usage":   map[string]any{"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
-		})
-		return
-	}
-	payload, err := standingMemoryLatestEventPayload(recorded.Messages)
-	if err != nil {
-		r.t.Errorf("resolve Telegram event payload from provider request: %v", err)
-		http.Error(w, "missing event payload", http.StatusBadRequest)
-		return
-	}
-	chatID := strings.TrimSpace(fmt.Sprint(payload["conversation_reference"]))
-	text := strings.TrimSpace(fmt.Sprint(payload["text"]))
-	arguments, _ := json.Marshal(map[string]any{"chat_id": chatID, "text": "Swarm heard: " + text})
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"model": "gpt-compatible",
-		"choices": []any{map[string]any{"message": map[string]any{
-			"role": "assistant",
-			"tool_calls": []any{map[string]any{
-				"id": "reply-" + chatID, "type": "function",
-				"function": map[string]any{"name": "emit_telegram_reply_requested", "arguments": string(arguments)},
-			}},
-		}}},
-		"usage": map[string]any{"prompt_tokens": 12, "completion_tokens": 4, "total_tokens": 16},
-	})
-}
-
-func (r *standingMemoryProviderRecorder) snapshot() []standingMemoryProviderRequest {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	out := make([]standingMemoryProviderRequest, len(r.requests))
-	copy(out, r.requests)
-	return out
-}
-
-func (r *standingMemoryProviderRecorder) waitForCount(t testing.TB, want int) {
-	t.Helper()
-	deadline := time.Now().Add(standingMemoryAsyncProofTimeout)
-	for time.Now().Before(deadline) {
-		if len(r.snapshot()) >= want {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("OpenAI-compatible requests = %d, want at least %d", len(r.snapshot()), want)
-}
-
-func TestStandingTelegramMemoryAndTargetOwnershipSupportedSurfaceSQLitePostgres(t *testing.T) {
+func TestCanonicalTelegramAgentSupportedSurfaceSQLitePostgres(t *testing.T) {
+	canonicalrouting.Prove(t, canonicalrouting.TelegramAgent)
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			runStandingTelegramMemorySupportedSurface(t, backend)
@@ -131,26 +44,356 @@ func TestStandingTelegramMemoryAndTargetOwnershipSupportedSurfaceSQLitePostgres(
 	}
 }
 
-func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
-	t.Helper()
-	isolateCLIAPIConfigEnv(t)
-	recorder := &standingMemoryProviderRecorder{t: t}
-	provider := httptest.NewServer(recorder)
-	defer provider.Close()
+type standingLiveAnthropicRecorder struct {
+	t testing.TB
 
+	mu              sync.Mutex
+	initialRequests [][]byte
+}
+
+func (r *standingLiveAnthropicRecorder) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	if req.URL.Path != "/v1/messages" {
+		r.t.Errorf("Anthropic path = %q, want /v1/messages", req.URL.Path)
+		http.Error(w, "unexpected path", http.StatusNotFound)
+		return
+	}
+	if got := req.Header.Get("x-api-key"); got != "anthropic-key" {
+		r.t.Errorf("Anthropic x-api-key = %q, want stored live credential", got)
+		http.Error(w, "bad credential", http.StatusUnauthorized)
+		return
+	}
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		r.t.Errorf("read Anthropic request: %v", err)
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if !bytes.Contains(body, []byte(`"emit_telegram_reply_requested"`)) {
+		r.t.Errorf("Anthropic request omits exact reply tool: %s", body)
+		http.Error(w, "missing reply tool", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("content-type", "application/json")
+	if bytes.Contains(body, []byte(`"kind":"tool_continuation"`)) {
+		_, _ = w.Write([]byte(`{"model":"claude-test","usage":{"input_tokens":8,"output_tokens":2},"content":[{"type":"text","text":"Telegram reply requested."}]}`))
+		return
+	}
+
+	r.mu.Lock()
+	ordinal := len(r.initialRequests) + 1
+	r.initialRequests = append(r.initialRequests, append([]byte(nil), body...))
+	r.mu.Unlock()
+
+	wantCurrent := fmt.Sprintf("hello %d", 200+ordinal)
+	if !bytes.Contains(body, []byte(wantCurrent)) {
+		r.t.Errorf("Anthropic initial request %d omits current event %q: %s", ordinal, wantCurrent, body)
+	}
+	if ordinal == 2 && !bytes.Contains(body, []byte("hello 201")) {
+		r.t.Errorf("Anthropic second request omits prior same-chat memory: %s", body)
+	}
+	reply := map[string]any{
+		"model": "claude-test",
+		"usage": map[string]any{"input_tokens": 12, "output_tokens": 4},
+		"content": []any{map[string]any{
+			"type": "tool_use",
+			"id":   fmt.Sprintf("reply-%d", ordinal),
+			"name": "emit_telegram_reply_requested",
+			"input": map[string]any{
+				"chat_id": "42",
+				"text":    fmt.Sprintf("Live turn %d: %s", ordinal, wantCurrent),
+			},
+		}},
+	}
+	if err := json.NewEncoder(w).Encode(reply); err != nil {
+		r.t.Errorf("encode Anthropic response: %v", err)
+	}
+}
+
+func (r *standingLiveAnthropicRecorder) waitForInitialCount(t testing.TB, want int) {
+	t.Helper()
+	deadline := time.Now().Add(standingMemoryAsyncProofTimeout)
+	for time.Now().Before(deadline) {
+		r.mu.Lock()
+		got := len(r.initialRequests)
+		r.mu.Unlock()
+		if got >= want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	r.mu.Lock()
+	got := len(r.initialRequests)
+	r.mu.Unlock()
+	t.Fatalf("Anthropic initial requests = %d, want at least %d", got, want)
+}
+
+func TestCanonicalTelegramAgentExplicitLiveGraduation(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	unsetStoreSelectorEnv(t)
+	stubServeRuntimeWorkspaceLifecycle(t)
+
+	contractsRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+	removeExactCanonicalTelegramAgentMock(t, contractsRoot)
+	configPath := filepath.Join(contractsRoot, "swarm.live.yaml")
+	sqlitePath := filepath.Join(contractsRoot, ".swarm", "swarm.db")
+	bundleHash := servedEventPublishFixtureBundleHash(t, contractsRoot)
+
+	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
+	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	credentialStore, err := runtimecredentials.NewFileStore(credentialPath)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	for key, value := range map[string]string{
+		"webhook_signing.telegram": "telegram-secret",
+		"telegram_bot_token":       "bot-token",
+		"ANTHROPIC_API_KEY":        "anthropic-key",
+	} {
+		if err := credentialStore.Set(context.Background(), key, value); err != nil {
+			t.Fatalf("set live graduation credential %s: %v", key, err)
+		}
+	}
+
+	var verifyOut, verifyErr bytes.Buffer
+	if code := cliapp.Execute(context.Background(), contractsRoot, []string{
+		"verify", "--config", configPath, "--contracts", contractsRoot,
+	}, &verifyOut, &verifyErr, Run); code != 0 {
+		t.Fatalf("explicit live graduation verify exit=%d\nstdout:\n%s\nstderr:\n%s", code, verifyOut.String(), verifyErr.String())
+	}
+
+	providerRecorder := &standingLiveAnthropicRecorder{t: t}
+	provider := httptest.NewServer(providerRecorder)
+	defer provider.Close()
 	telegramCalls := make(chan map[string]any, 4)
 	telegram := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path != "/botbot-token/sendMessage" {
+			t.Errorf("Telegram path = %q, want credential-bearing bot route", req.URL.Path)
+			http.Error(w, "unexpected path", http.StatusNotFound)
+			return
+		}
 		var body map[string]any
 		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-			t.Errorf("decode Telegram connector request: %v", err)
+			t.Errorf("decode Telegram live request: %v", err)
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
 		}
 		telegramCalls <- body
 		w.Header().Set("content-type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1}}`))
 	}))
 	defer telegram.Close()
+	redirectExternalHosts(t, map[string]string{
+		"api.anthropic.com": provider.URL,
+		"api.telegram.org":  telegram.URL,
+	})
 
-	contractsRoot := writeStandingMemoryServeFixture(t, telegram.URL)
+	opts := cliapp.ServeOptions{
+		ConfigPath: configPath, ContractsPath: contractsRoot, PlatformSpecPath: filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath),
+		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		SelfCheck: true, RequireBundleMatch: false, Dev: true, Verbose: true,
+		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+	}
+	process := startTelegramAgentServeRuntimeTestProcess(t, contractsRoot, opts)
+	process.waitForReadyLine()
+	baseURL := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString())
+	diagnostics := func() string {
+		return process.outputString() + "\ndiagnostics: " + standingSQLiteDiagnostics(sqlitePath)
+	}
+	entityID := sendStandingTelegramUpdate(t, baseURL, 201, 42, diagnostics)
+	if entityID == "" {
+		t.Fatal("live graduation returned an empty standing entity")
+	}
+	if got := sendStandingTelegramUpdate(t, baseURL, 202, 42, diagnostics); got != entityID {
+		t.Fatalf("live graduation second entity = %q, want same conversation owner %q", got, entityID)
+	}
+	providerRecorder.waitForInitialCount(t, 2)
+	waitForStandingMemoryCompletion(t, "sqlite", sqlitePath, "live", 2)
+	requireStandingLiveTelegramCalls(t, telegramCalls,
+		"Live turn 1: hello 201",
+		"Live turn 2: hello 202",
+	)
+	requireStandingPayloadOnlyTargetReadback(t, baseURL, bundleHash, "live", 1, []string{
+		"Live turn 1: hello 201",
+		"Live turn 2: hello 202",
+	})
+	if code := process.stop(); code != 0 {
+		t.Fatalf("live graduation serve exit = %d\n%s", code, process.outputString())
+	}
+	sessions := loadStandingMemorySessions(t, "sqlite", sqlitePath)
+	if len(sessions) != 1 {
+		t.Fatalf("live graduation memory sessions = %#v, want one conversation owner", sessions)
+	}
+	for _, session := range sessions {
+		if session.AgentID != "phrase-bot" || session.FlowTemplate != "telegram-chat" || session.TurnCount != 2 {
+			t.Fatalf("live graduation memory session = %#v, want phrase-bot telegram-chat with two turns", session)
+		}
+	}
+}
+
+func startTelegramAgentServeRuntimeTestProcess(t *testing.T, repo string, opts cliapp.ServeOptions) *serveRuntimeTestProcess {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	out := &lockedBuffer{}
+	opts.Output = out
+	done := make(chan int, 1)
+	process := &serveRuntimeTestProcess{
+		t:      t,
+		cancel: cancel,
+		done:   done,
+		out:    out,
+	}
+	priorRuntimeReadyHook := opts.TestRuntimeReadyHook
+	opts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) {
+		process.mu.Lock()
+		process.runtime = rt
+		process.mu.Unlock()
+		if priorRuntimeReadyHook != nil {
+			priorRuntimeReadyHook(rt)
+		}
+	}
+	t.Cleanup(process.cleanup)
+	go func() {
+		done <- Run(ctx, repo, opts)
+	}()
+	return process
+}
+
+func requireStandingLiveTelegramCalls(t testing.TB, calls <-chan map[string]any, wantTexts ...string) {
+	t.Helper()
+	for _, wantText := range wantTexts {
+		select {
+		case call := <-calls:
+			if got := strings.TrimSpace(fmt.Sprint(call["chat_id"])); got != "42" {
+				t.Fatalf("live Telegram chat_id = %q, want 42", got)
+			}
+			if got := strings.TrimSpace(fmt.Sprint(call["text"])); got != wantText {
+				t.Fatalf("live Telegram text = %q, want %q", got, wantText)
+			}
+		case <-time.After(standingMemoryAsyncProofTimeout):
+			t.Fatalf("timed out waiting for live Telegram call with text %q", wantText)
+		}
+	}
+}
+
+func removeExactCanonicalTelegramAgentMock(t testing.TB, contractsRoot string) {
+	t.Helper()
+	canonicalPath := filepath.Join(canonicalrouting.ExampleRoot(t, canonicalrouting.TelegramAgent), "bot", "flows", "telegram-chat", "agents.yaml")
+	derivedPath := filepath.Join(contractsRoot, "bot", "flows", "telegram-chat", "agents.yaml")
+	if got := countCanonicalTelegramAgentMocks(t, canonicalPath); got != 1 {
+		t.Fatalf("checked canonical phrase-bot mock count = %d, want 1", got)
+	}
+
+	body, err := os.ReadFile(derivedPath)
+	if err != nil {
+		t.Fatalf("read copied Telegram agents: %v", err)
+	}
+	var document yaml.Node
+	if err := yaml.Unmarshal(body, &document); err != nil {
+		t.Fatalf("parse copied Telegram agents: %v", err)
+	}
+	if len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
+		t.Fatalf("copied Telegram agents root must be one mapping")
+	}
+	root := document.Content[0]
+	var phraseBot *yaml.Node
+	phraseBotCount := 0
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		if root.Content[i].Value == "phrase-bot" {
+			phraseBotCount++
+			phraseBot = root.Content[i+1]
+		}
+	}
+	if phraseBotCount != 1 || phraseBot == nil || phraseBot.Kind != yaml.MappingNode {
+		t.Fatalf("copied Telegram phrase-bot declarations = %d, want one mapping", phraseBotCount)
+	}
+	mockIndex := -1
+	mockCount := 0
+	var mock *yaml.Node
+	for i := 0; i+1 < len(phraseBot.Content); i += 2 {
+		if phraseBot.Content[i].Value == "mock" {
+			mockCount++
+			mockIndex = i
+			mock = phraseBot.Content[i+1]
+		}
+	}
+	if mockCount != 1 || mock == nil || mock.Kind != yaml.MappingNode || len(mock.Content) != 4 {
+		t.Fatalf("copied Telegram phrase-bot mock shape = count:%d node:%#v, want one two-field mapping", mockCount, mock)
+	}
+	wantMock := map[string]string{"kind": "python", "module": "mocks/phrase-bot.py"}
+	seenMock := map[string]string{}
+	for i := 0; i+1 < len(mock.Content); i += 2 {
+		if mock.Content[i].Kind != yaml.ScalarNode || mock.Content[i+1].Kind != yaml.ScalarNode {
+			t.Fatalf("copied Telegram phrase-bot mock entry must be scalar: %#v", mock.Content[i:i+2])
+		}
+		seenMock[mock.Content[i].Value] = mock.Content[i+1].Value
+	}
+	if !equalStringValues(seenMock, wantMock) {
+		t.Fatalf("copied Telegram phrase-bot mock = %#v, want exact %#v", seenMock, wantMock)
+	}
+	phraseBot.Content = append(append([]*yaml.Node(nil), phraseBot.Content[:mockIndex]...), phraseBot.Content[mockIndex+2:]...)
+	updated, err := yaml.Marshal(&document)
+	if err != nil {
+		t.Fatalf("encode graduated Telegram agents: %v", err)
+	}
+	if err := os.WriteFile(derivedPath, updated, 0o644); err != nil {
+		t.Fatalf("write graduated Telegram agents: %v", err)
+	}
+	if got := countCanonicalTelegramAgentMocks(t, canonicalPath); got != 1 {
+		t.Fatalf("graduation mutated checked canonical mock count to %d, want 1", got)
+	}
+	if got := countCanonicalTelegramAgentMocks(t, derivedPath); got != 0 {
+		t.Fatalf("graduated copied phrase-bot mock count = %d, want 0", got)
+	}
+}
+
+func countCanonicalTelegramAgentMocks(t testing.TB, path string) int {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read Telegram agents %s: %v", path, err)
+	}
+	var document yaml.Node
+	if err := yaml.Unmarshal(body, &document); err != nil {
+		t.Fatalf("parse Telegram agents %s: %v", path, err)
+	}
+	if len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
+		return 0
+	}
+	count := 0
+	for i := 0; i+1 < len(document.Content[0].Content); i += 2 {
+		if document.Content[0].Content[i].Value != "phrase-bot" || document.Content[0].Content[i+1].Kind != yaml.MappingNode {
+			continue
+		}
+		for j := 0; j+1 < len(document.Content[0].Content[i+1].Content); j += 2 {
+			if document.Content[0].Content[i+1].Content[j].Value == "mock" {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+func equalStringValues(left, right map[string]string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for key, value := range left {
+		if right[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
+func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
+	t.Helper()
+	isolateCLIAPIConfigEnv(t)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENAI_COMPATIBLE_API_KEY", "")
+	t.Setenv("TELEGRAM_BOT_TOKEN", "")
+	contractsRoot := writeStandingMemoryServeFixture(t, "")
 	bundleHash := servedEventPublishFixtureBundleHash(t, contractsRoot)
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
@@ -158,14 +401,8 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
 	}
-	for key, value := range map[string]string{
-		"webhook_signing.telegram":  "telegram-secret",
-		"telegram_bot_token":        "bot-token",
-		"OPENAI_COMPATIBLE_API_KEY": "compatible-key",
-	} {
-		if err := credentialStore.Set(context.Background(), key, value); err != nil {
-			t.Fatalf("set credential %s: %v", key, err)
-		}
+	if err := credentialStore.Set(context.Background(), "webhook_signing.telegram", "telegram-secret"); err != nil {
+		t.Fatalf("set webhook signing credential: %v", err)
 	}
 
 	var storeLocation string
@@ -181,7 +418,7 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 		unsetStoreSelectorEnv(t)
 		stubServeRuntimeWorkspaceLifecycle(t)
 		storeLocation = filepath.Join(t.TempDir(), "memory.sqlite")
-		opts.ConfigPath = writeStandingMemoryRuntimeConfig(t, "sqlite", storeLocation, provider.URL)
+		opts.ConfigPath = writeStandingMockRuntimeConfig(t, "sqlite", storeLocation)
 		opts.StoreMode = "sqlite"
 	case "postgres":
 		dsn, _, cleanup := testutil.StartPostgres(t)
@@ -210,7 +447,7 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 			cliapp.ConfiguredWorkspaceLifecycleForServe = oldWorkspace
 		})
 		prepareRestart = openStore
-		opts.ConfigPath = writeStandingMemoryRuntimeConfig(t, "postgres", "", provider.URL)
+		opts.ConfigPath = writeStandingMockRuntimeConfig(t, "postgres", "")
 		opts.StoreMode = "postgres"
 		opts.StoreModeSet = true
 	default:
@@ -220,38 +457,32 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 	first := startServeRuntimeTestProcess(t, opts)
 	first.waitForReadyLine()
 	firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
-	singletonTarget := loadStandingMemoryTarget(t, backend, storeLocation, "memory-singleton")
 	firstDiagnostics := func() string {
 		return first.outputString() + "\ndiagnostics: " + standingMemoryStoreDiagnostics(backend, storeLocation)
 	}
+	requireStandingTelegramSignatureRejection(t, firstURL)
+	requireStandingTelegramEvidenceCounts(t, backend, storeLocation, standingTelegramEvidenceCounts{}, "rejected signatures")
+	sendStandingTelegramUnmatchedUpdate(t, firstURL, 100)
+	waitForStandingTelegramRawCount(t, backend, storeLocation, 1)
+	requireStandingTelegramEvidenceCounts(t, backend, storeLocation, standingTelegramEvidenceCounts{Raw: 1}, "unmatched raw-only update")
 	entity := sendStandingTelegramUpdate(t, firstURL, 101, 42, firstDiagnostics)
-	requireStandingTelegramCalls(t, telegramCalls, standingMemoryDiagnosticsLocation(backend, storeLocation), 42)
-	providerCalls := len(recorder.snapshot())
+	waitForStandingMemoryCompletion(t, backend, storeLocation, "mock", 1)
 	if got := sendStandingTelegramDuplicate(t, firstURL, 101, 42); got != entity {
 		t.Fatalf("exact duplicate entity = %q, want %q", got, entity)
 	}
-	requireNoStandingTelegramCall(t, telegramCalls, "same-process exact duplicate")
-	if got := len(recorder.snapshot()); got != providerCalls {
-		t.Fatalf("same-process exact duplicate provider calls = %d, want %d", got, providerCalls)
-	}
+	requireStandingMemoryAttemptCount(t, backend, storeLocation, "mock", 1, "same-process exact duplicate")
 	if got := sendStandingTelegramUpdate(t, firstURL, 102, 42, firstDiagnostics); got != entity {
 		t.Fatalf("A2 entity = %q, want A1 entity %q", got, entity)
 	}
-	requireStandingTelegramCalls(t, telegramCalls, standingMemoryDiagnosticsLocation(backend, storeLocation), 42)
 	if got := sendStandingTelegramUpdate(t, firstURL, 103, 84, firstDiagnostics); got != entity {
 		t.Fatalf("B1 entity = %q, want standing entity %q", got, entity)
 	}
-	requireStandingTelegramCalls(t, telegramCalls, standingMemoryDiagnosticsLocation(backend, storeLocation), 84)
-	recorder.waitForCount(t, 3)
-	publishStandingSingletonMemoryEvent(t, firstURL, bundleHash, singletonTarget, "singleton one", "first")
-	recorder.waitForCount(t, 4)
-	singletonSecond := publishStandingSingletonMemoryEvent(t, firstURL, bundleHash, singletonTarget, "singleton two", "second")
-	if singletonSecond.RunID != singletonTarget.RunID || singletonSecond.NewRunCreated {
-		t.Fatalf("singleton second publish = %#v, want existing run %s", singletonSecond, singletonTarget.RunID)
-	}
-	recorder.waitForCount(t, 5)
-	waitForStandingMemoryCompletion(t, backend, storeLocation, 3)
-	requireStandingPayloadOnlyTargetReadback(t, firstURL, bundleHash, 3)
+	waitForStandingMemoryCompletion(t, backend, storeLocation, "mock", 3)
+	requireStandingPayloadOnlyTargetReadback(t, firstURL, bundleHash, "mock", 2, []string{
+		"Mock turn 1: hello 101",
+		"Mock turn 2: hello 102",
+		"Mock turn 1: hello 103",
+	})
 	before := loadStandingMemorySessions(t, backend, storeLocation)
 	requireStandingMemorySessionShape(t, before)
 	if code := first.stop(); code != 0 {
@@ -264,41 +495,135 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 	second := startServeRuntimeTestProcess(t, opts)
 	second.waitForReadyLine()
 	secondURL := "http://" + serveRuntimeAPIListenerFromOutput(t, second.outputString())
-	providerCalls = len(recorder.snapshot())
 	if got := sendStandingTelegramDuplicate(t, secondURL, 101, 42); got != entity {
 		t.Fatalf("post-restart exact duplicate entity = %q, want %q", got, entity)
 	}
-	requireNoStandingTelegramCall(t, telegramCalls, "post-restart exact duplicate")
-	if got := len(recorder.snapshot()); got != providerCalls {
-		t.Fatalf("post-restart exact duplicate provider calls = %d, want %d", got, providerCalls)
-	}
+	requireStandingMemoryAttemptCount(t, backend, storeLocation, "mock", 3, "post-restart exact duplicate")
 	if got := sendStandingTelegramUpdate(t, secondURL, 104, 42); got != entity {
 		t.Fatalf("A3 entity = %q, want standing entity %q", got, entity)
 	}
-	requireStandingMemoryTelegramCall(t, second, telegramCalls, standingMemoryDiagnosticsLocation(backend, storeLocation), 42)
-	recorder.waitForCount(t, 6)
-	singletonThird := publishStandingSingletonMemoryEvent(t, secondURL, bundleHash, singletonTarget, "singleton three", "third")
-	if singletonThird.RunID != singletonTarget.RunID || singletonThird.NewRunCreated {
-		t.Fatalf("singleton third publish = %#v, want recovered run %s", singletonThird, singletonTarget.RunID)
-	}
-	recorder.waitForCount(t, 7)
-	waitForStandingMemoryCompletion(t, backend, storeLocation, 4)
-	requireStandingPayloadOnlyTargetReadback(t, secondURL, bundleHash, 4)
+	waitForStandingMemoryCompletion(t, backend, storeLocation, "mock", 4)
+	requireStandingPayloadOnlyTargetReadback(t, secondURL, bundleHash, "mock", 2, []string{
+		"Mock turn 1: hello 101",
+		"Mock turn 2: hello 102",
+		"Mock turn 1: hello 103",
+		"Mock turn 3: hello 104",
+	})
 	if code := second.stop(); code != 0 {
 		t.Fatalf("second serve exit = %d", code)
 	}
 	after := loadStandingMemorySessions(t, backend, storeLocation)
 	assertStandingMemorySessionContinuity(t, before, after)
-	assertStandingMemoryProviderHistory(t, recorder.snapshot())
 }
 
-func requireNoStandingTelegramCall(t testing.TB, calls <-chan map[string]any, label string) {
+type standingTelegramEvidenceCounts struct {
+	Raw        int
+	Normalized int
+	Replies    int
+	Activities int
+}
+
+func requireStandingTelegramSignatureRejection(t testing.TB, baseURL string) {
 	t.Helper()
-	select {
-	case call := <-calls:
-		t.Fatalf("%s produced duplicate Telegram side effect: %#v", label, call)
-	case <-time.After(250 * time.Millisecond):
+	body := []byte(`{"update_id":90,"message":{"message_id":90,"from":{"id":42},"chat":{"id":42,"type":"private"},"text":"must not publish"}}`)
+	for _, tc := range []struct {
+		name   string
+		secret string
+	}{
+		{name: "missing"},
+		{name: "invalid", secret: "wrong-secret"},
+	} {
+		req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/webhooks/chat/telegram", bytes.NewReader(body))
+		if err != nil {
+			t.Fatalf("new %s-signature Telegram request: %v", tc.name, err)
+		}
+		req.Header.Set("content-type", "application/json")
+		if tc.secret != "" {
+			req.Header.Set("X-Telegram-Bot-Api-Secret-Token", tc.secret)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("send %s-signature Telegram request: %v", tc.name, err)
+		}
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("%s-signature Telegram status = %d, want %d", tc.name, resp.StatusCode, http.StatusUnauthorized)
+		}
 	}
+}
+
+func sendStandingTelegramUnmatchedUpdate(t testing.TB, baseURL string, updateID int) {
+	t.Helper()
+	body := []byte(fmt.Sprintf(`{"update_id":%d,"channel_post":{"message_id":%d,"chat":{"id":-100,"type":"channel"},"text":"raw only"}}`, updateID, updateID))
+	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/webhooks/chat/telegram", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("new unmatched Telegram request: %v", err)
+	}
+	req.Header.Set("content-type", "application/json")
+	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("send unmatched Telegram request: %v", err)
+	}
+	defer resp.Body.Close()
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read unmatched Telegram response: %v", err)
+	}
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("unmatched Telegram status = %d body=%q, want %d", resp.StatusCode, strings.TrimSpace(string(responseBody)), http.StatusAccepted)
+	}
+}
+
+func waitForStandingTelegramRawCount(t testing.TB, backend, location string, want int) {
+	t.Helper()
+	deadline := time.Now().Add(standingMemoryAsyncProofTimeout)
+	for time.Now().Before(deadline) {
+		if got := loadStandingTelegramEvidenceCounts(t, backend, location).Raw; got == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("%s raw Telegram events did not reach %d", backend, want)
+}
+
+func requireStandingTelegramEvidenceCounts(t testing.TB, backend, location string, want standingTelegramEvidenceCounts, label string) {
+	t.Helper()
+	time.Sleep(250 * time.Millisecond)
+	if got := loadStandingTelegramEvidenceCounts(t, backend, location); got != want {
+		t.Fatalf("%s %s evidence = %#v, want %#v", backend, label, got, want)
+	}
+}
+
+func loadStandingTelegramEvidenceCounts(t testing.TB, backend, location string) standingTelegramEvidenceCounts {
+	t.Helper()
+	driver, dsn := "sqlite", location
+	if backend == "postgres" {
+		driver, dsn = "postgres", location
+	}
+	db, err := sql.Open(driver, dsn)
+	if err != nil {
+		t.Fatalf("open %s Telegram evidence store: %v", backend, err)
+	}
+	defer db.Close()
+	var counts standingTelegramEvidenceCounts
+	queries := []struct {
+		label string
+		query string
+		out   *int
+	}{
+		{label: "raw events", query: `SELECT COUNT(*) FROM events WHERE event_name = 'inbound.telegram'`, out: &counts.Raw},
+		{label: "normalized events", query: `SELECT COUNT(*) FROM events WHERE event_name = 'inbound.telegram.text_message'`, out: &counts.Normalized},
+		{label: "reply events", query: `SELECT COUNT(*) FROM events WHERE event_name = 'telegram.reply_requested' OR event_name LIKE '%/telegram.reply_requested'`, out: &counts.Replies},
+		{label: "Telegram activities", query: `SELECT COUNT(*) FROM activity_attempts WHERE tool = 'telegram.send_message'`, out: &counts.Activities},
+	}
+	for _, query := range queries {
+		if err := db.QueryRow(query.query).Scan(query.out); err != nil {
+			t.Fatalf("query %s %s: %v", backend, query.label, err)
+		}
+	}
+	return counts
 }
 
 func sendStandingTelegramDuplicate(t testing.TB, baseURL string, updateID, chatID int) string {
@@ -329,7 +654,7 @@ func sendStandingTelegramDuplicate(t testing.TB, baseURL string, updateID, chatI
 	return strings.TrimSpace(fmt.Sprint(payload["entity_id"]))
 }
 
-func requireStandingPayloadOnlyTargetReadback(t *testing.T, baseURL, bundleHash string, wantEvents int) {
+func requireStandingPayloadOnlyTargetReadback(t *testing.T, baseURL, bundleHash, executionMode string, wantOwners int, wantTexts []string) {
 	t.Helper()
 	endpoint := strings.TrimRight(baseURL, "/") + "/v1/rpc"
 	var runs struct {
@@ -339,12 +664,13 @@ func requireStandingPayloadOnlyTargetReadback(t *testing.T, baseURL, bundleHash 
 		"bundle_hash": bundleHash,
 		"limit":       500,
 	}, &runs)
-	responder, err := runtimeidentity.AdmitExecutableNodeDeclaration(".", "telegram-chat", "telegram-responder")
+	responder, err := runtimeidentity.AdmitExecutableNodeDeclaration("bot", "telegram-chat", "telegram-responder")
 	if err != nil {
 		t.Fatalf("admit package-backed responder identity: %v", err)
 	}
 	owners := map[string]string{}
 	seen := 0
+	texts := map[string]int{}
 	for _, run := range runs.Runs {
 		var result operatorread.OperatorEventListResult
 		requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{
@@ -356,6 +682,10 @@ func requireStandingPayloadOnlyTargetReadback(t *testing.T, baseURL, bundleHash 
 				continue
 			}
 			seen++
+			if string(event.ExecutionMode) != executionMode {
+				t.Fatalf("reply event %s execution mode = %q, want %q", event.EventID, event.ExecutionMode, executionMode)
+			}
+			texts[strings.TrimSpace(fmt.Sprint(event.Payload["text"]))]++
 			if event.NoDelivery != nil || len(event.DeadLetters) != 0 {
 				t.Fatalf("reply event %s settlement = no_delivery:%#v dead_letters:%#v", event.EventID, event.NoDelivery, event.DeadLetters)
 			}
@@ -380,8 +710,12 @@ func requireStandingPayloadOnlyTargetReadback(t *testing.T, baseURL, bundleHash 
 			}
 		}
 	}
-	if seen != wantEvents || len(owners) != 2 {
-		t.Fatalf("reply readback = events:%d owners:%#v, want %d events over two exact chat owners", seen, owners, wantEvents)
+	wantTextCounts := map[string]int{}
+	for _, value := range wantTexts {
+		wantTextCounts[value]++
+	}
+	if seen != len(wantTexts) || len(owners) != wantOwners || !equalStringCounts(texts, wantTextCounts) {
+		t.Fatalf("reply readback = events:%d owners:%#v texts:%#v, want %d events over %d exact chat owners with texts %#v", seen, owners, texts, len(wantTexts), wantOwners, wantTextCounts)
 	}
 }
 
@@ -433,11 +767,13 @@ func loadStandingMemorySessions(t testing.TB, backend, location string) map[stri
 	return out
 }
 
-func waitForStandingMemoryCompletion(t testing.TB, backend, location string, wantAttempts int) {
+func waitForStandingMemoryCompletion(t testing.TB, backend, location, executionMode string, wantAttempts int) {
 	t.Helper()
 	driver, dsn := "sqlite", location
+	modeQuery := `SELECT COUNT(*) FROM activity_attempts WHERE tool = 'telegram.send_message' AND execution_mode = ? AND status = 'succeeded'`
 	if backend == "postgres" {
 		driver, dsn = "postgres", location
+		modeQuery = `SELECT COUNT(*) FROM activity_attempts WHERE tool = 'telegram.send_message' AND execution_mode = $1 AND status = 'succeeded'`
 	}
 	db, err := sql.Open(driver, dsn)
 	if err != nil {
@@ -447,7 +783,7 @@ func waitForStandingMemoryCompletion(t testing.TB, backend, location string, wan
 	deadline := time.Now().Add(standingMemoryAsyncProofTimeout)
 	for time.Now().Before(deadline) {
 		var succeeded, unfinishedDeliveries int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM activity_attempts WHERE tool = 'telegram.send_message' AND status = 'succeeded'`).Scan(&succeeded); err != nil {
+		if err := db.QueryRow(modeQuery, executionMode).Scan(&succeeded); err != nil {
 			t.Fatalf("query %s completed Telegram attempts: %v", backend, err)
 		}
 		if err := db.QueryRow(`SELECT COUNT(*) FROM event_deliveries WHERE (subscriber_id LIKE 'phrase-bot%' OR subscriber_id = 'memory-bot') AND status <> 'delivered'`).Scan(&unfinishedDeliveries); err != nil {
@@ -461,14 +797,49 @@ func waitForStandingMemoryCompletion(t testing.TB, backend, location string, wan
 	t.Fatalf("%s supported path did not settle after %d Telegram attempts", backend, wantAttempts)
 }
 
+func requireStandingMemoryAttemptCount(t testing.TB, backend, location, executionMode string, want int, label string) {
+	t.Helper()
+	time.Sleep(250 * time.Millisecond)
+	driver, dsn := "sqlite", location
+	query := `SELECT COUNT(*) FROM activity_attempts WHERE tool = 'telegram.send_message' AND execution_mode = ? AND status = 'succeeded'`
+	if backend == "postgres" {
+		driver, dsn = "postgres", location
+		query = `SELECT COUNT(*) FROM activity_attempts WHERE tool = 'telegram.send_message' AND execution_mode = $1 AND status = 'succeeded'`
+	}
+	db, err := sql.Open(driver, dsn)
+	if err != nil {
+		t.Fatalf("open %s activity store: %v", backend, err)
+	}
+	defer db.Close()
+	var got int
+	if err := db.QueryRow(query, executionMode).Scan(&got); err != nil {
+		t.Fatalf("query %s %s activity attempts: %v", backend, label, err)
+	}
+	if got != want {
+		t.Fatalf("%s %s Telegram attempts = %d, want %d", backend, label, got, want)
+	}
+}
+
+func equalStringCounts(left, right map[string]int) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for key, value := range left {
+		if right[key] != value {
+			return false
+		}
+	}
+	return true
+}
+
 func requireStandingMemorySessionShape(t testing.TB, sessions map[string]standingMemorySession) {
 	t.Helper()
 	counts := map[string]int{}
 	for _, row := range sessions {
 		counts[row.FlowTemplate]++
 	}
-	if len(sessions) != 3 || counts["telegram-chat"] != 2 || counts["memory-singleton"] != 1 {
-		t.Fatalf("memory sessions = %#v, want two isolated template owners and one singleton owner", sessions)
+	if len(sessions) != 2 || counts["telegram-chat"] != 2 {
+		t.Fatalf("memory sessions = %#v, want two isolated Telegram chat owners", sessions)
 	}
 }
 
@@ -476,7 +847,6 @@ func assertStandingMemorySessionContinuity(t testing.TB, before, after map[strin
 	t.Helper()
 	requireStandingMemorySessionShape(t, after)
 	advancedTemplates := 0
-	advancedSingletons := 0
 	for key, prior := range before {
 		current, ok := after[key]
 		if !ok || current.SessionID != prior.SessionID {
@@ -486,167 +856,57 @@ func assertStandingMemorySessionContinuity(t testing.TB, before, after map[strin
 		switch delta {
 		case 0:
 		case 1:
-			switch current.FlowTemplate {
-			case "telegram-chat":
-				advancedTemplates++
-			case "memory-singleton":
-				advancedSingletons++
-			default:
+			if current.FlowTemplate != "telegram-chat" {
 				t.Fatalf("memory owner %q has unexpected flow template %q", key, current.FlowTemplate)
 			}
+			advancedTemplates++
 		default:
 			t.Fatalf("memory owner %q turn delta = %d, want unchanged or one post-restart provider turn", key, delta)
 		}
 	}
-	if advancedTemplates != 1 || advancedSingletons != 1 {
-		t.Fatalf("advanced memory owners = template:%d singleton:%d, want A3 and singleton third only", advancedTemplates, advancedSingletons)
+	if advancedTemplates != 1 {
+		t.Fatalf("advanced Telegram memory owners = %d, want only chat A after restart", advancedTemplates)
 	}
 }
 
-func assertStandingMemoryProviderHistory(t testing.TB, requests []standingMemoryProviderRequest) {
+type telegramAgentRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f telegramAgentRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func redirectExternalHosts(t testing.TB, targets map[string]string) {
 	t.Helper()
-	if len(requests) != 7 {
-		t.Fatalf("OpenAI-compatible requests = %d, want 7 exact provider turns", len(requests))
-	}
-	a2 := requireStandingMemoryUserRequest(t, requests, "Reply to each Telegram message", "hello 102")
-	assertStandingMemoryContains(t, a2, []string{"hello 101", "hello 102"}, nil)
-	b1 := requireStandingMemoryUserRequest(t, requests, "Reply to each Telegram message", "hello 103")
-	assertStandingMemoryContains(t, b1, []string{"hello 103"}, []string{"hello 101", "hello 102"})
-	a3 := requireStandingMemoryUserRequest(t, requests, "Reply to each Telegram message", "hello 104")
-	assertStandingMemoryContains(t, a3, []string{"hello 101", "hello 102", "hello 104"}, []string{"hello 103"})
-	singletonSecond := requireStandingMemoryUserRequest(t, requests, "Remember each singleton ping", "singleton two")
-	assertStandingMemoryContains(t, singletonSecond, []string{"singleton one", "singleton two"}, []string{"hello 101", "hello 103"})
-	singletonThird := requireStandingMemoryUserRequest(t, requests, "Remember each singleton ping", "singleton three")
-	assertStandingMemoryContains(t, singletonThird, []string{"singleton one", "singleton two", "singleton three"}, []string{"hello 101", "hello 103"})
-}
-
-type standingMemoryTarget struct {
-	RunID        string
-	FlowInstance string
-	EntityID     string
-}
-
-func loadStandingMemoryTarget(t testing.TB, backend, location, flowTemplate string) standingMemoryTarget {
-	t.Helper()
-	driver, dsn, query := "sqlite", location, `
-		SELECT es.run_id, es.flow_instance, es.entity_id
-		FROM entity_state es
-		JOIN flow_instances fi ON fi.instance_id = es.flow_instance
-		WHERE fi.flow_template = ? AND fi.status = 'active' AND fi.terminated_at IS NULL`
-	if backend == "postgres" {
-		driver, dsn, query = "postgres", location, `
-			SELECT es.run_id::text, es.flow_instance, es.entity_id::text
-			FROM entity_state es
-			JOIN flow_instances fi ON fi.instance_id = es.flow_instance
-			WHERE fi.flow_template = $1 AND fi.status = 'active' AND fi.terminated_at IS NULL`
-	}
-	db, err := sql.Open(driver, dsn)
-	if err != nil {
-		t.Fatalf("open %s standing target store: %v", backend, err)
-	}
-	defer db.Close()
-	var target standingMemoryTarget
-	if err := db.QueryRow(query, flowTemplate).Scan(&target.RunID, &target.FlowInstance, &target.EntityID); err != nil {
-		t.Fatalf("load %s standing target %s: %v", backend, flowTemplate, err)
-	}
-	return target
-}
-
-func publishStandingSingletonMemoryEvent(t *testing.T, baseURL, bundleHash string, target standingMemoryTarget, text, suffix string) servedEventPublishRPCResult {
-	t.Helper()
-	params := map[string]any{
-		"event_name":      "memory-singleton/memory.ping",
-		"payload":         map[string]any{"text": text},
-		"idempotency_key": "memory-singleton-" + suffix + "-" + uuid.NewString(),
-		"bundle_hash":     bundleHash,
-		"run_id":          target.RunID,
-		"target": map[string]any{
-			"flow_instance": target.FlowInstance,
-			"entity_id":     target.EntityID,
-		},
-	}
-	result := requireServedEventPublishRPCResult(t, strings.TrimRight(baseURL, "/")+"/v1/rpc", params)
-	if result.EventID == "" || result.RunID != target.RunID || result.NewRunCreated {
-		t.Fatalf("singleton event.publish result = %#v, want existing standing run %s", result, target.RunID)
-	}
-	assertServedEventPublishDeliveriesContainStatus(t, result.Deliveries, "agent", "memory-bot", "pending", "in_progress", "delivered")
-	return result
-}
-
-func requireStandingMemoryUserRequest(t testing.TB, requests []standingMemoryProviderRequest, systemMarker, userMarker string) standingMemoryProviderRequest {
-	t.Helper()
-	for i := len(requests) - 1; i >= 0; i-- {
-		request := requests[i]
-		last := standingMemoryLastMessage(request.Messages)
-		if last.Role == "user" && strings.Contains(last.Content, userMarker) && standingMemoryRequestContains(request, systemMarker) {
-			return request
+	parsed := make(map[string]*url.URL, len(targets))
+	for host, target := range targets {
+		targetURL, err := url.Parse(target)
+		if err != nil {
+			t.Fatalf("parse %s test endpoint: %v", host, err)
 		}
+		parsed[strings.ToLower(strings.TrimSpace(host))] = targetURL
 	}
-	t.Fatalf("provider request missing system=%q user=%q", systemMarker, userMarker)
-	return standingMemoryProviderRequest{}
+	base := http.DefaultTransport
+	http.DefaultTransport = telegramAgentRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		targetURL := parsed[strings.ToLower(req.URL.Hostname())]
+		if targetURL == nil {
+			return base.RoundTrip(req)
+		}
+		clone := req.Clone(req.Context())
+		redirected := *req.URL
+		redirected.Scheme = targetURL.Scheme
+		redirected.Host = targetURL.Host
+		clone.URL = &redirected
+		clone.Host = targetURL.Host
+		return base.RoundTrip(clone)
+	})
+	t.Cleanup(func() { http.DefaultTransport = base })
 }
 
-func assertStandingMemoryContains(t testing.TB, request standingMemoryProviderRequest, includes, excludes []string) {
-	t.Helper()
-	raw, _ := json.Marshal(request.Messages)
-	text := string(raw)
-	for _, want := range includes {
-		if !strings.Contains(text, want) {
-			t.Fatalf("provider history missing %q: %s", want, text)
-		}
-	}
-	for _, forbidden := range excludes {
-		if strings.Contains(text, forbidden) {
-			t.Fatalf("provider history crossed memory owner with %q: %s", forbidden, text)
-		}
-	}
-}
-
-func standingMemoryLastMessage(messages []standingMemoryProviderMessage) standingMemoryProviderMessage {
-	if len(messages) == 0 {
-		return standingMemoryProviderMessage{}
-	}
-	return messages[len(messages)-1]
-}
-
-func standingMemoryRequestContains(request standingMemoryProviderRequest, marker string) bool {
-	for _, message := range request.Messages {
-		if strings.Contains(message.Content, marker) {
-			return true
-		}
-	}
-	return false
-}
-
-func standingMemoryLatestEventPayload(messages []standingMemoryProviderMessage) (map[string]any, error) {
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role != "user" {
-			continue
-		}
-		var input struct {
-			Event struct {
-				Payload json.RawMessage `json:"payload"`
-			} `json:"event"`
-		}
-		if err := json.Unmarshal([]byte(messages[i].Content), &input); err != nil || len(input.Event.Payload) == 0 {
-			continue
-		}
-		var payload map[string]any
-		decoder := json.NewDecoder(strings.NewReader(string(input.Event.Payload)))
-		decoder.UseNumber()
-		if err := decoder.Decode(&payload); err != nil {
-			return nil, err
-		}
-		return payload, nil
-	}
-	return nil, fmt.Errorf("no event payload found")
-}
-
-func writeStandingMemoryRuntimeConfig(t *testing.T, backend, sqlitePath, providerURL string) string {
+func writeStandingMockRuntimeConfig(t *testing.T, backend, sqlitePath string) string {
 	t.Helper()
 	lines := []string{
 		"runtime:",
-		"  execution_posture: live",
+		"  execution_posture: mock_only",
 		"  recovery_on_startup: true",
 		"workspace:",
 		"  data_source: " + t.TempDir(),
@@ -658,32 +918,23 @@ func writeStandingMemoryRuntimeConfig(t *testing.T, backend, sqlitePath, provide
 	}
 	lines = append(lines,
 		"llm:",
-		"  backend: openai_compatible",
-		"  openai_compatible:",
-		"    base_url: "+providerURL,
+		"  backend: anthropic",
 		"  session:",
 		"    lock_ttl: 10s",
 		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
 	)
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
-	text := withTestProviderTriggerPlatformInventory(t, strings.Join(lines, "\n")+"\n")
-	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
-		t.Fatalf("write standing memory runtime config: %v", err)
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatalf("write standing mock runtime config: %v", err)
 	}
 	return path
 }
 
 func writeStandingMemoryServeFixture(t testing.TB, telegramBaseURL string) string {
 	t.Helper()
-	return canonicalrouting.CopyStandingTelegramMemoryServe(t, telegramBaseURL)
-}
-
-func standingMemoryDiagnosticsLocation(backend, location string) string {
-	if backend == "postgres" {
-		return "postgres:" + location
-	}
-	return location
+	_ = telegramBaseURL
+	return canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
 }
 
 func standingMemoryStoreDiagnostics(backend, location string) string {
@@ -691,38 +942,4 @@ func standingMemoryStoreDiagnostics(backend, location string) string {
 		return standingPostgresDiagnostics(location)
 	}
 	return standingSQLiteDiagnostics(location)
-}
-
-func requireStandingMemoryTelegramCall(t testing.TB, process *serveRuntimeTestProcess, calls <-chan map[string]any, storeLocation string, chatID int) {
-	t.Helper()
-	select {
-	case call := <-calls:
-		if got := strings.TrimSpace(fmt.Sprint(call["chat_id"])); got != fmt.Sprint(chatID) {
-			t.Fatalf("Telegram chat_id = %v, want %d", call["chat_id"], chatID)
-		}
-	case <-time.After(standingMemoryAsyncProofTimeout):
-		diagnostics := standingSQLiteDiagnostics(storeLocation)
-		if strings.HasPrefix(storeLocation, "postgres:") {
-			diagnostics = standingPostgresDiagnostics(strings.TrimPrefix(storeLocation, "postgres:"))
-		}
-		t.Fatalf("timed out waiting for post-restart Telegram reply; recovery mailbox: %s; serve output:\n%s\ndiagnostics: %s", standingMemoryRecoveryMailbox(storeLocation), process.outputString(), diagnostics)
-	}
-}
-
-func standingMemoryRecoveryMailbox(storeLocation string) string {
-	driver, dsn, query := "sqlite", storeLocation, `SELECT COALESCE(summary, ''), COALESCE(payload, '') FROM mailbox ORDER BY created_at DESC LIMIT 1`
-	if strings.HasPrefix(storeLocation, "postgres:") {
-		driver, dsn = "postgres", strings.TrimPrefix(storeLocation, "postgres:")
-		query = `SELECT COALESCE(summary, ''), COALESCE(payload::text, '') FROM mailbox ORDER BY created_at DESC LIMIT 1`
-	}
-	db, err := sql.Open(driver, dsn)
-	if err != nil {
-		return err.Error()
-	}
-	defer db.Close()
-	var summary, payload string
-	if err := db.QueryRow(query).Scan(&summary, &payload); err != nil {
-		return err.Error()
-	}
-	return summary + " " + payload
 }

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/testplanning"
 	"gopkg.in/yaml.v3"
 )
 
@@ -67,6 +68,12 @@ type Fixture struct {
 	Metadata     Metadata
 }
 
+type ExternalProof struct {
+	Source   string   `yaml:"source"`
+	Executor string   `yaml:"executor"`
+	Proves   []string `yaml:"proves"`
+}
+
 func (f Fixture) HasClaim(claimID string) bool {
 	for _, candidate := range f.Metadata.Proves {
 		if candidate == claimID {
@@ -77,8 +84,9 @@ func (f Fixture) HasClaim(claimID string) bool {
 }
 
 type Inventory struct {
-	Fixtures []Fixture
-	Claims   map[string]Claim
+	Fixtures       []Fixture
+	Claims         map[string]Claim
+	ExternalProofs []ExternalProof
 }
 
 func Load(repoRoot string) (*Inventory, error) {
@@ -86,7 +94,7 @@ func Load(repoRoot string) (*Inventory, error) {
 	if repoRoot == "." || repoRoot == "" {
 		return nil, fmt.Errorf("catalog inventory requires a repository root")
 	}
-	claims, err := loadClaims(filepath.Join(repoRoot, "platform-spec.yaml"))
+	claims, externalProofs, err := loadCatalogContract(filepath.Join(repoRoot, "platform-spec.yaml"))
 	if err != nil {
 		return nil, err
 	}
@@ -94,10 +102,10 @@ func Load(repoRoot string) (*Inventory, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := validateCoverage(fixtures, claims); err != nil {
+	if err := validateCoverage(repoRoot, fixtures, claims, externalProofs); err != nil {
 		return nil, err
 	}
-	return &Inventory{Fixtures: fixtures, Claims: claims}, nil
+	return &Inventory{Fixtures: fixtures, Claims: claims, ExternalProofs: externalProofs}, nil
 }
 
 func (i *Inventory) Select(claimID string, disposition Disposition) []Fixture {
@@ -261,65 +269,85 @@ func validateFixture(fixture Fixture) error {
 	return nil
 }
 
-func loadClaims(path string) (map[string]Claim, error) {
+func loadCatalogContract(path string) (map[string]Claim, []ExternalProof, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read platform spec: %w", err)
+		return nil, nil, fmt.Errorf("read platform spec: %w", err)
 	}
 	var doc yaml.Node
 	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("parse platform spec: %w", err)
+		return nil, nil, fmt.Errorf("parse platform spec: %w", err)
 	}
 	root, err := documentMapping(&doc)
 	if err != nil {
-		return nil, fmt.Errorf("platform spec: %w", err)
+		return nil, nil, fmt.Errorf("platform spec: %w", err)
 	}
 	testSpecification, err := requiredMapping(root, "test_specification")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	conformance, err := requiredMapping(testSpecification, "internal_catalog_conformance")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	claimsNode, err := requiredMapping(conformance, "claims")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	claims := make(map[string]Claim, len(claimsNode.Content)/2)
 	for index := 0; index+1 < len(claimsNode.Content); index += 2 {
 		claimID := strings.TrimSpace(claimsNode.Content[index].Value)
 		if claimID == "" {
-			return nil, fmt.Errorf("platform spec catalog claim has empty id")
+			return nil, nil, fmt.Errorf("platform spec catalog claim has empty id")
 		}
 		if _, duplicate := claims[claimID]; duplicate {
-			return nil, fmt.Errorf("platform spec repeats catalog claim %q", claimID)
+			return nil, nil, fmt.Errorf("platform spec repeats catalog claim %q", claimID)
 		}
 		encoded, err := yaml.Marshal(claimsNode.Content[index+1])
 		if err != nil {
-			return nil, fmt.Errorf("encode catalog claim %s: %w", claimID, err)
+			return nil, nil, fmt.Errorf("encode catalog claim %s: %w", claimID, err)
 		}
 		decoder := yaml.NewDecoder(bytes.NewReader(encoded))
 		decoder.KnownFields(true)
 		claim := Claim{ID: claimID}
 		if err := decoder.Decode(&claim); err != nil {
-			return nil, fmt.Errorf("decode catalog claim %s: %w", claimID, err)
+			return nil, nil, fmt.Errorf("decode catalog claim %s: %w", claimID, err)
 		}
 		if claim.Status != "active" || strings.TrimSpace(claim.Scope) == "" {
-			return nil, fmt.Errorf("catalog claim %s must be active with a nonempty scope", claimID)
+			return nil, nil, fmt.Errorf("catalog claim %s must be active with a nonempty scope", claimID)
 		}
 		if claim.RequiredDisposition != DispositionRuntime && claim.RequiredDisposition != DispositionVerifyOnly {
-			return nil, fmt.Errorf("catalog claim %s has invalid required disposition %q", claimID, claim.RequiredDisposition)
+			return nil, nil, fmt.Errorf("catalog claim %s has invalid required disposition %q", claimID, claim.RequiredDisposition)
 		}
 		claims[claimID] = claim
 	}
 	if len(claims) == 0 {
-		return nil, fmt.Errorf("platform spec declares no catalog claims")
+		return nil, nil, fmt.Errorf("platform spec declares no catalog claims")
 	}
-	return claims, nil
+	externalNode, err := uniqueMappingValue(conformance, "external_proofs")
+	if err != nil {
+		return nil, nil, err
+	}
+	if externalNode == nil {
+		return claims, nil, nil
+	}
+	if externalNode.Kind != yaml.SequenceNode || len(externalNode.Content) == 0 {
+		return nil, nil, fmt.Errorf("platform spec external_proofs must be a nonempty sequence")
+	}
+	encoded, err := yaml.Marshal(externalNode)
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode external proofs: %w", err)
+	}
+	decoder := yaml.NewDecoder(bytes.NewReader(encoded))
+	decoder.KnownFields(true)
+	var proofs []ExternalProof
+	if err := decoder.Decode(&proofs); err != nil {
+		return nil, nil, fmt.Errorf("decode external proofs: %w", err)
+	}
+	return claims, proofs, nil
 }
 
-func validateCoverage(fixtures []Fixture, claims map[string]Claim) error {
+func validateCoverage(repoRoot string, fixtures []Fixture, claims map[string]Claim, externalProofs []ExternalProof) error {
 	covered := map[string]int{}
 	for _, fixture := range fixtures {
 		for _, claimID := range fixture.Metadata.Proves {
@@ -336,12 +364,122 @@ func validateCoverage(fixtures []Fixture, claims map[string]Claim) error {
 			covered[claimID]++
 		}
 	}
+	if err := validateExternalProofs(repoRoot, externalProofs, claims, covered); err != nil {
+		return err
+	}
+	for _, proof := range externalProofs {
+		for _, claimID := range proof.Proves {
+			covered[claimID]++
+		}
+	}
 	for claimID := range claims {
 		if covered[claimID] == 0 {
 			return fmt.Errorf("active catalog claim %s has no non-retired proof fixture", claimID)
 		}
 	}
 	return nil
+}
+
+func validateExternalProofs(repoRoot string, proofs []ExternalProof, claims map[string]Claim, covered map[string]int) error {
+	if len(proofs) == 0 {
+		return nil
+	}
+	policyFile, err := os.Open(filepath.Join(repoRoot, ".github", "test-proof-plan.yaml"))
+	if err != nil {
+		return fmt.Errorf("external proof executor policy: %w", err)
+	}
+	defer policyFile.Close()
+	policy, err := testplanning.LoadPolicy(policyFile)
+	if err != nil {
+		return fmt.Errorf("external proof executor policy: %w", err)
+	}
+
+	seenSources := map[string]struct{}{}
+	seenClaims := map[string]string{}
+	for index, proof := range proofs {
+		if err := validateExternalProofRecord(repoRoot, policy, index, proof); err != nil {
+			return err
+		}
+		if _, duplicate := seenSources[proof.Source]; duplicate {
+			return fmt.Errorf("external proofs repeat source %q", proof.Source)
+		}
+		seenSources[proof.Source] = struct{}{}
+		for claimIndex, claimID := range proof.Proves {
+			if claimID == "" || claimID != strings.TrimSpace(claimID) {
+				return fmt.Errorf("external proof %s has invalid claim at index %d", proof.Source, claimIndex)
+			}
+			claim, ok := claims[claimID]
+			if !ok {
+				return fmt.Errorf("external proof %s references unknown claim %q", proof.Source, claimID)
+			}
+			if claim.RequiredDisposition != DispositionRuntime {
+				return fmt.Errorf("external proof %s cannot prove %s, which requires %q", proof.Source, claimID, claim.RequiredDisposition)
+			}
+			if owner, duplicate := seenClaims[claimID]; duplicate {
+				return fmt.Errorf("external claim %s has multiple runtime-credit owners %s and %s", claimID, owner, proof.Source)
+			}
+			if covered[claimID] != 0 {
+				return fmt.Errorf("external claim %s has multiple runtime-credit owners including tier fixtures", claimID)
+			}
+			seenClaims[claimID] = proof.Source
+		}
+	}
+	return nil
+}
+
+func validateExternalProofRecord(repoRoot string, policy testplanning.Policy, index int, proof ExternalProof) error {
+	if proof.Source == "" || proof.Source != strings.TrimSpace(proof.Source) || filepath.IsAbs(proof.Source) || filepath.Clean(proof.Source) != filepath.FromSlash(proof.Source) || strings.HasPrefix(proof.Source, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("external proof at index %d has invalid repository-relative source %q", index, proof.Source)
+	}
+	info, err := os.Stat(filepath.Join(repoRoot, filepath.FromSlash(proof.Source)))
+	if err != nil {
+		return fmt.Errorf("external proof source %s: %w", proof.Source, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("external proof source %s is not a directory", proof.Source)
+	}
+	modulePrefix := strings.TrimSuffix(policy.Module, "/") + "/"
+	if proof.Executor == "" || proof.Executor != strings.TrimSpace(proof.Executor) || !strings.HasPrefix(proof.Executor, modulePrefix) {
+		return fmt.Errorf("external proof %s has invalid executor %q", proof.Source, proof.Executor)
+	}
+	executorDir := strings.TrimPrefix(proof.Executor, modulePrefix)
+	if info, err := os.Stat(filepath.Join(repoRoot, filepath.FromSlash(executorDir))); err != nil || !info.IsDir() {
+		return fmt.Errorf("external proof %s executor %s has no package directory", proof.Source, proof.Executor)
+	}
+	if len(proof.Proves) == 0 {
+		return fmt.Errorf("external proof %s proves no canonical claim", proof.Source)
+	}
+	if !containsCatalogString(policy.SpecialPackages, proof.Executor) {
+		return fmt.Errorf("external proof %s executor %s is not a special CI package", proof.Source, proof.Executor)
+	}
+	var selectedUnit string
+	for _, profileName := range []string{testplanning.ProfilePRCommon, testplanning.ProfilePREscalated, testplanning.ProfileFull, testplanning.ProfileNightly} {
+		profile := policy.Profiles[profileName]
+		owners := make([]string, 0, 1)
+		for _, unitID := range profile.Units {
+			if containsCatalogString(policy.Units[unitID].Packages, proof.Executor) {
+				owners = append(owners, unitID)
+			}
+		}
+		if len(owners) != 1 {
+			return fmt.Errorf("external proof %s executor %s has %d CI owners in profile %s, want exactly one", proof.Source, proof.Executor, len(owners), profileName)
+		}
+		if selectedUnit == "" {
+			selectedUnit = owners[0]
+		} else if selectedUnit != owners[0] {
+			return fmt.Errorf("external proof %s executor %s changes CI owner from %s to %s", proof.Source, proof.Executor, selectedUnit, owners[0])
+		}
+	}
+	return nil
+}
+
+func containsCatalogString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func documentMapping(doc *yaml.Node) (*yaml.Node, error) {

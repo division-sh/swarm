@@ -1012,6 +1012,7 @@ func canonicalArtifactConstant(name string) (ArtifactID, bool) {
 		"FanInStream":             "examples/routing/fan-in/stream",
 		"FanInBarrier":            "examples/routing/fan-in/barrier",
 		"HarnessInjection":        "examples/routing/harness-injection",
+		"TelegramAgent":           "examples/integrations/telegram-agent",
 	}
 	id, ok := ids[name]
 	return id, ok

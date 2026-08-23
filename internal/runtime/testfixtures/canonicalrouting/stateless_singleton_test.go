@@ -8,14 +8,8 @@ import (
 )
 
 func TestStatelessSingletonFixturesContainNoCoordinatorCeremony(t *testing.T) {
-	standing := CopyStandingTelegramServe(t, "https://telegram.example.test")
+	standing := CopyExample(t, TelegramAgent)
 	assertCanonicalFileExcludes(t, filepath.Join(standing, "flows", "telegram-ingress", "entities.yaml"), "active_chats")
-
-	memory := CopyStandingTelegramMemoryServe(t, "https://telegram.example.test")
-	memoryEntities := readCanonicalFixtureFile(t, filepath.Join(memory, "flows", "memory-singleton", "entities.yaml"))
-	if strings.TrimSpace(memoryEntities) != "memory_state: {}" {
-		t.Fatalf("memory singleton entities = %q, want exactly empty primary entity", memoryEntities)
-	}
 
 	matrix := CopyInboundAdmissionPolicyMatrix(t)
 	assertCanonicalFileExcludes(t, filepath.Join(matrix, "flows", "matrix", "entities.yaml"), "records")

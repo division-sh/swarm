@@ -91,7 +91,7 @@ units:
   catalog-required-inventory:
     packages:
       - github.com/division-sh/swarm/internal/testcatalog
-    run: ^TestCatalog(RequiredInventory|InventoryFailsClosed|OwnershipHasNoLegacyClassifierOrSimulator|FixturesUseCanonicalCreateFlowInstanceAuthoring|RequiredCIProofSelection|RequiredCensusArtifacts)$
+    run: ^TestCatalog(RequiredInventory|InventoryFailsClosed|ExternalProofsFailClosed|OwnershipHasNoLegacyClassifierOrSimulator|FixturesUseCanonicalCreateFlowInstanceAuthoring|RequiredCIProofSelection|RequiredCensusArtifacts)$
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: broad

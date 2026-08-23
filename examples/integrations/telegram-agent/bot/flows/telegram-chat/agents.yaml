@@ -2,7 +2,7 @@ phrase-bot:
   role: phrase_bot
   intent: prompts/phrase-bot.md
   model: regular
-  memory: false
+  memory: true
   subscriptions: [inbound.telegram.text_message]
   emit_events: [telegram.reply_requested]
   mock:

@@ -21,7 +21,8 @@ import (
 
 func writeStandingTelegramServeFixture(t testing.TB, telegramBaseURL string) string {
 	t.Helper()
-	return canonicalrouting.CopyStandingTelegramServe(t, telegramBaseURL)
+	_ = telegramBaseURL
+	return canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
 }
 
 func TestDescribeCommandJSONRendersExpandedAuthoringView(t *testing.T) {

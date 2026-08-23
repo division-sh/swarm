@@ -759,7 +759,7 @@ func TestBuildShowsSingletonContainedOperations(t *testing.T) {
 
 func TestBuildShowsStatelessSingletonWithoutCoordinatorError(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
-	root := canonicalrouting.CopyStandingTelegramServe(t, "https://telegram.example.test")
+	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("load stateless standing singleton: %v", err)
@@ -802,13 +802,9 @@ func TestBuildShowsIntrinsicJoinCoordinatorFailureWithExactProvenance(t *testing
 
 func TestBuildDoesNotInferCoordinatorFromUnusedContainedField(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
-	root := canonicalrouting.CopyStandingTelegramServe(t, "https://telegram.example.test")
+	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
 	entitiesPath := filepath.Join(root, "flows", "telegram-ingress", "entities.yaml")
-	entities, err := os.ReadFile(entitiesPath)
-	if err != nil {
-		t.Fatalf("read standing singleton entities: %v", err)
-	}
-	entities = append(entities, []byte("  unused_index:\n    type: map[text]json\n    initial: {}\n")...)
+	entities := []byte("telegram_service:\n  unused_index:\n    type: map[text]json\n    initial: {}\n")
 	if err := os.WriteFile(entitiesPath, entities, 0o644); err != nil {
 		t.Fatalf("write standing singleton entities: %v", err)
 	}

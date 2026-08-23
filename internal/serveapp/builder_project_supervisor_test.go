@@ -199,7 +199,7 @@ func TestRuntimeProjectSupervisorRejectsExecutionPostureChangeBeforeQuiesceOrPub
 }
 
 func TestRuntimeProjectSupervisorReloadRecompilesAndInstallsChannelPlans(t *testing.T) {
-	projectRoot := canonicalrouting.CopyStandingTelegramServe(t, "http://127.0.0.1:1")
+	projectRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
 	module, bundle, err := cliapp.NewSwarmWorkflowModule(cliapp.RepoRoot(), projectRoot, runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot()))
 	if err != nil {
 		t.Fatalf("NewSwarmWorkflowModule: %v", err)
@@ -1478,7 +1478,7 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 						t.Fatalf("NewRuntimeContextManager: %v", err)
 					}
 					if changedHash {
-						writeStandingCandidateFile(t, filepath.Join(contractsRoot, "flows", "telegram-chat", "prompts", "phrase-bot.md"), "Reply to each Telegram message by emitting telegram.reply_requested with chat_id set to the event conversation_reference. Keep the response concise.\n")
+						writeStandingCandidateFile(t, filepath.Join(contractsRoot, "bot", "flows", "telegram-chat", "prompts", "phrase-bot.md"), "Reply to each Telegram message by emitting telegram.reply_requested with chat_id set to the event conversation_reference. Keep the response concise.\n")
 						candidateModule, candidateBundle, err = cliapp.NewSwarmWorkflowModule(repoRoot, contractsRoot, cliapp.ResolvePath(repoRoot, defaultPlatformSpecPath))
 						if err != nil {
 							t.Fatalf("load changed-hash standing workflow module: %v", err)
@@ -2436,7 +2436,7 @@ func TestRuntimeProjectSupervisorLoadProjectUsesResolvedWorkspaceMountSources(t 
 }
 
 func TestRuntimeProjectSupervisorReverifiesProviderCatalogAndPublishesAdmittedSource(t *testing.T) {
-	projectRoot := canonicalrouting.CopyStandingTelegramServe(t, "http://127.0.0.1:1")
+	projectRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
 	module, bundle, err := cliapp.NewSwarmWorkflowModule(cliapp.RepoRoot(), projectRoot, runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot()))
 	if err != nil {
 		t.Fatalf("NewSwarmWorkflowModule: %v", err)

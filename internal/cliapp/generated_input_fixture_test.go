@@ -196,15 +196,14 @@ func TestGeneratedInputFixturePublishesResolvedEventThroughPublicRPC(t *testing.
 func TestGeneratedInputFixtureLoadsComposedTelegramSchemaAndPublishesNormalizedEvent(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
-	contractsPath := canonicalrouting.CopyStandingTelegramServe(t, "https://example.test")
+	exampleRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+	contractsPath := filepath.Join(exampleRoot, "bot")
 	bundle := loadWorkflowValidationBundleAt(t, contractsPath)
 	const eventName = "inbound.telegram.text_message"
 	if bare := semanticview.ResolveEventSchema(semanticview.Wrap(bundle), "telegram-chat", eventName); bare.HasSchema {
 		t.Fatalf("bare authored bundle unexpectedly owns imported schema: %#v", bare)
 	}
 
-	configPath := contractsPath + "/swarm.yaml"
-	writeRuntimeConfigText(t, configPath, withTestProviderTriggerPlatformInventory(t, "llm:\n  backend: mock\n"))
 	source, err := runtimeroot.SourceWithProviderTriggerEvents(semanticview.Wrap(bundle), packfixture.TriggerCatalog(t))
 	if err != nil {
 		t.Fatalf("compose effective provider source: %v", err)
@@ -262,10 +261,9 @@ func TestGeneratedInputFixtureLoadsComposedTelegramSchemaAndPublishesNormalizedE
 func TestAuthoredTelegramInputFixturesUseEffectivePublishSchemaAndPublicRPC(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
-	contractsPath := canonicalrouting.CopyStandingTelegramServe(t, "https://example.test")
+	exampleRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+	contractsPath := filepath.Join(exampleRoot, "bot")
 	bundle := loadWorkflowValidationBundleAt(t, contractsPath)
-	configPath := contractsPath + "/swarm.yaml"
-	writeRuntimeConfigText(t, configPath, withTestProviderTriggerPlatformInventory(t, "llm:\n  backend: mock\n"))
 	source, err := runtimeroot.SourceWithProviderTriggerEvents(semanticview.Wrap(bundle), packfixture.TriggerCatalog(t))
 	if err != nil {
 		t.Fatalf("compose effective provider source: %v", err)
@@ -345,9 +343,9 @@ text: authored fixture
 func TestSwarmTestGeneratesConfiguredTelegramInputThroughProductionCommand(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
-	contractsPath := canonicalrouting.CopyStandingTelegramServe(t, "https://example.test")
+	exampleRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+	contractsPath := filepath.Join(exampleRoot, "bot")
 	configPath := filepath.Join(contractsPath, "swarm.yaml")
-	writeRuntimeConfigText(t, configPath, withTestProviderTriggerPlatformInventory(t, "llm:\n  backend: mock\n"))
 	scenarioPath := filepath.Join(contractsPath, "flows", "telegram-chat", "tests", "generated-telegram.yaml")
 	writeWorkflowValidationFixtureFile(t, scenarioPath, `
 name: generated Telegram normalized input
