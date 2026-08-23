@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
@@ -12,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/google/uuid"
 )
 
 type ToolDefinition struct {
@@ -88,6 +90,64 @@ type ToolCall struct {
 	Arguments any    `json:"arguments,omitempty"`
 }
 
+// ToolOutputAuthority is the immutable occurrence coordinate minted by a
+// successful provider settlement for its post-provider tool outputs.
+type ToolOutputAuthority struct {
+	ProviderOperationID string    `json:"provider_operation_id"`
+	SettledAt           time.Time `json:"settled_at"`
+}
+
+func (a ToolOutputAuthority) Validate() error {
+	if _, err := uuid.Parse(strings.TrimSpace(a.ProviderOperationID)); err != nil {
+		return fmt.Errorf("tool output authority requires a canonical provider operation id: %w", err)
+	}
+	if a.SettledAt.IsZero() || a.SettledAt.Location() != time.UTC || a.SettledAt != a.SettledAt.Truncate(time.Microsecond) {
+		return fmt.Errorf("tool output authority requires a UTC microsecond settlement time")
+	}
+	return nil
+}
+
+// ToolOutputEventIdentity is a sealed, valid-by-construction event occurrence
+// identity. Only a validated ToolOutputAuthority can mint one.
+type ToolOutputEventIdentity struct {
+	eventID   string
+	createdAt time.Time
+}
+
+func (i ToolOutputEventIdentity) EventID() string      { return i.eventID }
+func (i ToolOutputEventIdentity) CreatedAt() time.Time { return i.createdAt }
+
+func (i ToolOutputEventIdentity) Validate() error {
+	if _, err := uuid.Parse(strings.TrimSpace(i.eventID)); err != nil {
+		return fmt.Errorf("tool output event identity requires a canonical event id: %w", err)
+	}
+	if i.createdAt.IsZero() || i.createdAt.Location() != time.UTC || i.createdAt != i.createdAt.Truncate(time.Microsecond) {
+		return fmt.Errorf("tool output event identity requires a UTC microsecond creation time")
+	}
+	return nil
+}
+
+func (a ToolOutputAuthority) eventIdentity(callIdentity string) (ToolOutputEventIdentity, error) {
+	if err := a.Validate(); err != nil {
+		return ToolOutputEventIdentity{}, err
+	}
+	callIdentity = strings.TrimSpace(callIdentity)
+	if callIdentity == "" {
+		return ToolOutputEventIdentity{}, fmt.Errorf("tool output event identity requires a call identity")
+	}
+	identity := ToolOutputEventIdentity{
+		eventID:   uuid.NewSHA1(uuid.NameSpaceURL, []byte("swarm-managed-tool-output-event-v1\x00"+a.ProviderOperationID+"\x00"+callIdentity)).String(),
+		createdAt: a.SettledAt,
+	}
+	return identity, identity.Validate()
+}
+
+// ToolOutputEventExecutor is the only managed terminal-output boundary. It
+// prevents an ordinary tool call from inventing persisted event identity.
+type ToolOutputEventExecutor interface {
+	ExecuteOutputEvent(context.Context, string, any, ToolOutputEventIdentity) (any, error)
+}
+
 type Response struct {
 	Message              Message                      `json:"message"`
 	ToolCalls            []ToolCall                   `json:"tool_calls,omitempty"`
@@ -99,6 +159,7 @@ type Response struct {
 	MCPServers           map[string]string            `json:"mcp_servers,omitempty"`
 	MCPVisibleTools      []string                     `json:"mcp_visible_tools,omitempty"`
 	CapabilitySurface    *managedcapabilities.Surface `json:"capability_surface,omitempty"`
+	ToolOutputAuthority  *ToolOutputAuthority         `json:"tool_output_authority,omitempty"`
 }
 
 type Session struct {

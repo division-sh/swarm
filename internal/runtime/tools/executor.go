@@ -382,7 +382,21 @@ func (e *Executor) RoleScopedEntityToolsEnabledForActor(actor models.AgentConfig
 }
 
 func (e *Executor) Execute(ctx context.Context, name string, input any) (any, error) {
+	return e.execute(ctx, name, input, nil)
+}
+
+func (e *Executor) ExecuteOutputEvent(ctx context.Context, name string, input any, identity llm.ToolOutputEventIdentity) (any, error) {
+	if err := identity.Validate(); err != nil {
+		return nil, failures.Wrap(failures.ClassSchemaInvalid, "tool_output_event_identity_invalid", "tool-executor", "execute.output_event", nil, err)
+	}
+	return e.execute(ctx, name, input, &identity)
+}
+
+func (e *Executor) execute(ctx context.Context, name string, input any, outputIdentity *llm.ToolOutputEventIdentity) (any, error) {
 	name = normalizeNativeToolName(strings.TrimSpace(name))
+	if outputIdentity != nil && !isEmitToolName(name) {
+		return nil, failures.New(failures.ClassAuthorizationDenied, "tool_output_event_kind_invalid", "tool-executor", "execute.output_event", map[string]any{"tool": name})
+	}
 	actor, ok := ActorFromContext(ctx)
 	if !ok {
 		err := failures.New(failures.ClassInternalFailure, "tool_actor_context_missing", "tool-executor", "execute.context", map[string]any{"tool": strings.TrimSpace(name)})
@@ -411,7 +425,13 @@ func (e *Executor) Execute(ctx context.Context, name string, input any) (any, er
 	input = normalizeRuntimeToolInput(name, input)
 	start := time.Now()
 	dispatchCtx := withExternalDispatchAdmissionCollector(ctx)
-	out, err := e.dispatchTool(dispatchCtx, actor, name, input)
+	var out any
+	var err error
+	if outputIdentity != nil {
+		out, err = e.handleEmitToolWithIdentity(dispatchCtx, actor, name, input, outputIdentity.EventID(), outputIdentity.CreatedAt())
+	} else {
+		out, err = e.dispatchTool(dispatchCtx, actor, name, input)
+	}
 	if isEmitToolName(name) {
 		return out, err
 	}

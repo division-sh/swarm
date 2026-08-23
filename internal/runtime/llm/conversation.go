@@ -344,7 +344,7 @@ func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) 
 		} else {
 			ctx = withConversationForkSandboxToolsForTurn(ctx, c.turnToolDefinitions(), resp)
 		}
-		toolPayload, executed, err := c.executeToolCalls(ctx, resp.ToolCalls)
+		toolPayload, executed, err := c.executeToolResponse(ctx, resp)
 		if err != nil {
 			return nil, err
 		}
@@ -382,6 +382,14 @@ func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) 
 }
 
 func (c *Conversation) executeToolCalls(ctx context.Context, calls []ToolCall) (string, []executedToolCall, error) {
+	return c.executeToolResponse(ctx, &Response{ToolCalls: calls})
+}
+
+func (c *Conversation) executeToolResponse(ctx context.Context, response *Response) (string, []executedToolCall, error) {
+	if response == nil {
+		return "", nil, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "tool_response_missing", "llm-conversation", "execute_tool", nil)
+	}
+	calls := response.ToolCalls
 	if managedAgentExecutionContext(ctx) {
 		surface, ok := managedcapabilities.FromContext(ctx)
 		if !ok {
@@ -396,7 +404,20 @@ func (c *Conversation) executeToolCalls(ctx context.Context, calls []ToolCall) (
 		terminal := toolIsTerminalInContext(ctx, tc.Name)
 		callIdentity := fmt.Sprintf("tool_call:%d:%d:%s:%s", c.TurnCount, callIndex, strings.TrimSpace(tc.ID), strings.TrimSpace(tc.Name))
 		callCtx := runtimeeffects.WithLogicalOperationIdentitySegment(ctx, callIdentity)
-		out, err := c.safeExecuteTool(callCtx, tc.Name, tc.Arguments)
+		var out any
+		var err error
+		if terminal && response.ToolOutputAuthority != nil {
+			identity, identityErr := response.ToolOutputAuthority.eventIdentity(callIdentity)
+			if identityErr != nil {
+				err = runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "tool_output_event_identity_invalid", "llm-conversation", "execute_tool", map[string]any{"tool": strings.TrimSpace(tc.Name)}, identityErr)
+			} else {
+				out, err = c.safeExecuteOutputEvent(callCtx, tc.Name, tc.Arguments, identity)
+			}
+		} else if terminal && managedAgentExecutionContext(ctx) {
+			err = runtimefailures.New(runtimefailures.ClassLifecycleConflict, "tool_output_authority_missing", "llm-conversation", "execute_tool", map[string]any{"tool": strings.TrimSpace(tc.Name)})
+		} else {
+			out, err = c.safeExecuteTool(callCtx, tc.Name, tc.Arguments)
+		}
 		entry := map[string]any{
 			"name": tc.Name,
 		}
@@ -447,6 +468,21 @@ func (c *Conversation) executeToolCalls(ctx context.Context, calls []ToolCall) (
 		})
 	}
 	return strings.TrimSpace(string(b)), executed, nil
+}
+
+func (c *Conversation) safeExecuteOutputEvent(ctx context.Context, name string, input any, identity ToolOutputEventIdentity) (out any, err error) {
+	defer func() {
+		if recover() != nil {
+			err = runtimefailures.New(runtimefailures.ClassInternalFailure, "tool_executor_panic", "llm-conversation", "execute_tool", map[string]any{"tool": strings.TrimSpace(name)})
+			out = nil
+		}
+	}()
+	executor, ok := c.toolExecutor.(ToolOutputEventExecutor)
+	if !ok || executor == nil {
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "tool_output_event_executor_missing", "llm-conversation", "execute_tool", map[string]any{"tool": strings.TrimSpace(name)})
+	}
+	ctx = c.withToolCapabilities(ctx)
+	return executor.ExecuteOutputEvent(ctx, name, input, identity)
 }
 
 func (c *Conversation) projectToolResult(ctx context.Context, name string, input any, result any) (any, error) {
