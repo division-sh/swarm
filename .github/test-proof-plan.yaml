@@ -19,8 +19,10 @@ escalation_paths:
   - ^cmd/swarm-test-timing/
 special_packages:
   - github.com/division-sh/swarm/internal/cliapp
+  - github.com/division-sh/swarm/internal/releasee2e
   - github.com/division-sh/swarm/internal/runtime/cataloge2e
   - github.com/division-sh/swarm/internal/runtime
+  - github.com/division-sh/swarm/internal/runtime/llm
   - github.com/division-sh/swarm/internal/serveapp
   - github.com/division-sh/swarm/internal/store
   - github.com/division-sh/swarm/internal/testcatalog
@@ -34,6 +36,8 @@ profiles:
       - catalog-required-inventory
       - catalog-required-verify
       - catalog-required-smoke
+      - hitl-llm-full
+      - hitl-releasee2e-full
       - runtime-full
       - serveapp-full
       - store-full
@@ -49,6 +53,8 @@ profiles:
       - catalog-required-inventory
       - catalog-required-verify
       - catalog-full
+      - hitl-llm-full
+      - hitl-releasee2e-full
       - runtime-full
       - serveapp-full
       - store-full
@@ -64,6 +70,8 @@ profiles:
       - catalog-required-inventory
       - catalog-required-verify
       - catalog-full
+      - hitl-llm-full
+      - hitl-releasee2e-full
       - runtime-full
       - serveapp-full
       - store-full
@@ -79,6 +87,8 @@ profiles:
       - catalog-required-inventory
       - catalog-required-verify
       - catalog-full
+      - hitl-llm-full
+      - hitl-releasee2e-full
       - runtime-full
       - serveapp-full
       - store-full
@@ -111,6 +121,18 @@ units:
   catalog-full:
     packages:
       - github.com/division-sh/swarm/internal/runtime/cataloge2e
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: full
+  hitl-llm-full:
+    packages:
+      - github.com/division-sh/swarm/internal/runtime/llm
+    count_mode: count-1
+    environment_id: ci-postgres-gateway-empty-v1
+    budget_class: broad
+  hitl-releasee2e-full:
+    packages:
+      - github.com/division-sh/swarm/internal/releasee2e
     count_mode: count-1
     environment_id: ci-postgres-gateway-empty-v1
     budget_class: full

@@ -55,9 +55,13 @@ func admitBuiltinExecutionTool(name string, entry builtinToolDraft) (ExecutionTo
 }
 
 func builtinRuntimeContractSchemas(source semanticview.Source, actor *models.AgentConfig) map[string]builtinToolDraft {
+	hitl := hitlRuntimeContractSchemas()
 	if actor != nil {
 		out := flowDataToolSchemaEntriesForActor(source, *actor)
 		out["schedule"] = scheduleContractSchema()
+		for name, entry := range hitl {
+			out[name] = entry
+		}
 		if contract, ok := resolveEntityToolContract(source, actor); ok {
 			for name, entry := range roleScopedEntityToolSchemaEntriesForActor(source, *actor, contract) {
 				out[name] = entry
@@ -68,7 +72,9 @@ func builtinRuntimeContractSchemas(source semanticview.Source, actor *models.Age
 	readContracts := actorOwnedReadTargetContracts(source, actor)
 	readTargetSchema := entityReadTargetInputSchemaForContracts(readContracts)
 	out := genericEntityRuntimeContractSchemas(readTargetSchema)
-	out["human_task_request"] = humanTaskRequestContractSchema()
+	for name, entry := range hitl {
+		out[name] = entry
+	}
 	out["schedule"] = scheduleContractSchema()
 	if contract, ok := resolveEntityToolContract(source, actor); ok {
 		if len(readContracts) == 0 {
@@ -115,7 +121,7 @@ func scheduleContractSchema() builtinToolDraft {
 	}
 }
 
-func humanTaskRequestContractSchema() builtinToolDraft {
+func askHumanContractSchema() builtinToolDraft {
 	return builtinToolDraft{
 		Category:    "human_decision",
 		Description: "Create a typed decision card when admitted work requires a human verdict.",
@@ -139,6 +145,20 @@ func humanTaskRequestContractSchema() builtinToolDraft {
 			"card_id": map[string]any{"type": "string", "format": "uuid"},
 			"status":  map[string]any{"type": "string", "enum": []any{"pending"}},
 		}, "card_id", "status"),
+	}
+}
+
+func notifyHumanContractSchema() builtinToolDraft {
+	return builtinToolDraft{
+		Category: "platform",
+		InputSchema: ObjectSchema(map[string]any{
+			"summary": map[string]any{"type": "string", "minLength": 1},
+			"context": map[string]any{},
+		}, "summary"),
+		OutputSchema: ObjectSchema(map[string]any{
+			"status":     map[string]any{"type": "string", "enum": []any{"queued"}},
+			"mailbox_id": map[string]any{"type": "string", "format": "uuid"},
+		}, "status", "mailbox_id"),
 	}
 }
 

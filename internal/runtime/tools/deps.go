@@ -39,6 +39,15 @@ type Manager interface {
 
 type ManagerProvider func() Manager
 
+type CommittedInformationalNotice struct {
+	MailboxID   string
+	UnreadCount int
+}
+
+type InformationalNoticePresentationSink interface {
+	PresentCommittedInformationalNotice(CommittedInformationalNotice)
+}
+
 type ExecutorOptions struct {
 	Manager            Manager
 	ManagerProvider    ManagerProvider
@@ -46,6 +55,7 @@ type ExecutorOptions struct {
 	Credentials        runtimecredentials.Store
 	ManagedCredentials runtimemanagedcredentials.Store
 	MailboxStore       MailboxPersistence
+	NoticePresentation InformationalNoticePresentationSink
 	EntityStore        EntityPersistence
 	HumanTaskStore     HumanTaskCardStore
 	WorkflowInstances  WorkflowInstanceLoader

@@ -96,8 +96,9 @@ type mailboxDecisionCard struct {
 }
 
 type mailboxListResult struct {
-	Items      []mailboxProjection `json:"items"`
-	NextCursor string              `json:"next_cursor,omitempty"`
+	Items                      []mailboxProjection `json:"items"`
+	NextCursor                 string              `json:"next_cursor,omitempty"`
+	UnreadInformationalNotices int                 `json:"unread_informational_notices"`
 }
 
 type mailboxMutationResult struct {
@@ -305,6 +306,9 @@ func validateMailboxListResult(result mailboxListResult) error {
 	if result.Items == nil {
 		return fmt.Errorf("malformed mailbox.list result: items is required")
 	}
+	if result.UnreadInformationalNotices < 0 {
+		return fmt.Errorf("malformed mailbox.list result: unread_informational_notices must be non-negative")
+	}
 	for i, item := range result.Items {
 		if err := validateMailboxProjection(item); err != nil {
 			return fmt.Errorf("malformed mailbox.list result: items[%d]: %w", i, err)
@@ -401,6 +405,7 @@ func writeMailboxListResult(out io.Writer, result mailboxListResult) {
 	if out == nil {
 		return
 	}
+	fmt.Fprintf(out, "⚠ %d unread operator notices\n\n", result.UnreadInformationalNotices)
 	rows := make([][]string, 0, len(result.Items))
 	for _, projection := range result.Items {
 		if projection.Kind == "notice" {

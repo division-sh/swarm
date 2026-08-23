@@ -29,16 +29,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func TestRun_MapsMissingToolToToolResolutionWarning(t *testing.T) {
+func TestRun_MapsMissingToolToToolResolutionHardInvalidity(t *testing.T) {
 	source := loadTier8Fixture(t, "test-boot-tool-missing")
 
 	report := Run(context.Background(), source, Options{})
 
-	if report.HasErrors() {
-		t.Fatalf("expected warning-only report, got errors: %#v", report.Errors())
-	}
-	if !reportContains(report.Warnings(), "tool_resolution", "nonexistent_tool") {
-		t.Fatalf("expected tool_resolution warning, got %#v", report.Warnings())
+	if !reportContains(report.Errors(), "tool_resolution", "nonexistent_tool") {
+		t.Fatalf("expected tool_resolution hard invalidity, got %#v", report.Errors())
 	}
 }
 

@@ -13,17 +13,15 @@ var defaultPlatformPermissions = []string{
 	"approve_spend",
 	"configure_routing",
 	"create_flow_instance",
-	"human_task_request",
-	"mailbox_send",
+	"ask_human",
 	"message_flow",
 	"message_peers",
 	"schedule",
 }
 
 var toolPermissionRequirements = map[string]string{
-	"configure_routing":  "configure_routing",
-	"human_task_request": "human_task_request",
-	"schedule":           "schedule",
+	"configure_routing": "configure_routing",
+	"schedule":          "schedule",
 }
 
 func agentHasPermission(agent models.AgentConfig, perm string) bool {
@@ -80,7 +78,7 @@ func ValidateAgentPermissions(source semanticview.Source) (int, []error) {
 			if IsRetiredDynamicAgentToolName(toolName) {
 				continue
 			}
-			requiredPerm, ok := toolPermissionRequirements[toolName]
+			requiredPerm, ok := requiredPermissionForTool(toolName)
 			if !ok {
 				continue
 			}

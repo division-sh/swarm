@@ -50,6 +50,7 @@ type SelectedContractAgentRuntimeOptions struct {
 	SessionRegistry     runtimesessions.Registry
 	ConversationStore   runtimellm.ConversationPersistence
 	MailboxStore        runtimetools.MailboxPersistence
+	NoticePresentation  runtimetools.InformationalNoticePresentationSink
 	Workspace           workspace.Lifecycle
 	Credentials         runtimecredentials.Store
 	ManagedCredentials  runtimemanagedcredentials.Store
@@ -442,6 +443,7 @@ func buildSelectedContractAgentRuntimeFactory(req publishSelectedContractForkEve
 		Credentials:        credentials,
 		ManagedCredentials: options.ManagedCredentials,
 		MailboxStore:       options.MailboxStore,
+		NoticePresentation: options.NoticePresentation,
 		MCPClient:          options.MCPClient,
 		EntityStore:        options.EntityStore,
 		HumanTaskStore:     options.HumanTaskStore,

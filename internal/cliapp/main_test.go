@@ -4753,7 +4753,8 @@ func TestVerifyBundle_AgreesWithRuntimeValidationOnTouchedToolAndEventClasses(t 
 				addTestAgentOwners(bundle)
 				return bundle
 			}(),
-			wantErr: false,
+			errContains: "unfulfillable tool missing_tool",
+			wantErr:     true,
 		},
 		{
 			name: "builtin runtime tool reference",
@@ -4817,10 +4818,6 @@ func TestVerifyBundle_AgreesWithRuntimeValidationOnTouchedToolAndEventClasses(t 
 				t.Fatalf("ValidateWorkflowContractSurface error = %v, want nil", runtimeErr)
 			}
 			switch tc.name {
-			case "missing tool reference":
-				if warnings := result.BootReport.Warnings(); len(warnings) == 0 || !strings.Contains(warnings[0].Message, "missing tool missing_tool") {
-					t.Fatalf("BootReport warnings = %#v, want tool_resolution warning", warnings)
-				}
 			case "builtin runtime tool reference":
 				for _, warning := range result.BootReport.Warnings() {
 					if strings.TrimSpace(warning.CheckID) == "tool_resolution" && strings.Contains(warning.Message, "schedule") {

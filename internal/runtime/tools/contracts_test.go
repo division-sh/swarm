@@ -15,7 +15,7 @@ import (
 func TestContractDefinitionsForSource_UsesProvidedSource(t *testing.T) {
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"agent_message": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("platform"), runtimecontracts.WithToolDescription("source-backed agent messaging schema"), runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerPlatformBuiltin), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaDescription("source-backed agent messaging schema"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
+			"workflow_custom_tool": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("platform"), runtimecontracts.WithToolDescription("source-backed custom tool schema"), runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerPlatformBuiltin), runtimecontracts.WithToolSchemas(runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("object"), runtimecontracts.ToolSchemaDescription("source-backed custom tool schema"), runtimecontracts.ToolSchemaProperties(map[string]runtimecontracts.ToolInputSchema{
 				"to": runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
 			}), runtimecontracts.ToolSchemaRequired("to")), runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
 		},
@@ -27,15 +27,15 @@ func TestContractDefinitionsForSource_UsesProvidedSource(t *testing.T) {
 	}
 
 	for _, def := range defs {
-		if def.Name != "agent_message" {
+		if def.Name != "workflow_custom_tool" {
 			continue
 		}
-		if def.Description != "source-backed agent messaging schema" {
-			t.Fatalf("agent_message description = %q", def.Description)
+		if def.Description != "source-backed custom tool schema" {
+			t.Fatalf("workflow_custom_tool description = %q", def.Description)
 		}
 		return
 	}
-	t.Fatal("expected source-backed agent_message definition")
+	t.Fatal("expected source-backed workflow_custom_tool definition")
 }
 
 func TestContractDefinitionsForSource_AttachesPlatformUsageHints(t *testing.T) {
@@ -109,7 +109,7 @@ required: [mode]
 
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		Tools: map[string]runtimecontracts.ToolSchemaEntry{
-			"agent_message": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("platform"), runtimecontracts.WithToolDescription("canonical schema test"), runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerPlatformBuiltin), runtimecontracts.WithToolSchemas(schema, runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
+			"workflow_custom_tool": runtimecontracts.MustToolSchemaEntry(runtimecontracts.WithToolCategory("platform"), runtimecontracts.WithToolDescription("canonical schema test"), runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerPlatformBuiltin), runtimecontracts.WithToolSchemas(schema, runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject))),
 		},
 	}
 
@@ -120,17 +120,17 @@ required: [mode]
 
 	var schemaMap map[string]any
 	for _, def := range defs {
-		if def.Name == "agent_message" {
+		if def.Name == "workflow_custom_tool" {
 			var ok bool
 			schemaMap, ok = def.Schema.(map[string]any)
 			if !ok {
-				t.Fatalf("agent_message schema type = %T", def.Schema)
+				t.Fatalf("workflow_custom_tool schema type = %T", def.Schema)
 			}
 			break
 		}
 	}
 	if schemaMap == nil {
-		t.Fatal("expected agent_message definition")
+		t.Fatal("expected workflow_custom_tool definition")
 	}
 	raw := stringify(schemaMap)
 	if strings.Contains(raw, "AdditionalProperties") || strings.Contains(raw, "\"Node\"") || strings.Contains(raw, "\"Type\"") {

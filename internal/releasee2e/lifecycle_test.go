@@ -160,9 +160,10 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 		"network_connect":  0,
 		"claude_startup":   0,
 		"claude_live":      0,
+		"mcp_notify":       0,
 		"mcp_emit":         0,
 	}
-	startupIndex, liveIndex, emitIndex := -1, -1, -1
+	startupIndex, liveIndex, notifyIndex, emitIndex := -1, -1, -1, -1
 	startupSession, liveSession := "", ""
 	for index, record := range records {
 		if record.Class == "unexpected" {
@@ -206,6 +207,14 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 			if record.RawMCPURL != releaseE2ERawMCPURL || record.MCPURL != releaseE2EHostMCPURL {
 				return fmt.Errorf("MCP emit endpoints = %q/%q, want raw container and translated host defaults", record.RawMCPURL, record.MCPURL)
 			}
+		case "mcp_notify":
+			notifyIndex = index
+			if record.ToolName != "notify_human" {
+				return fmt.Errorf("MCP notice tool = %q, want notify_human", record.ToolName)
+			}
+			if record.RawMCPURL != releaseE2ERawMCPURL || record.MCPURL != releaseE2EHostMCPURL {
+				return fmt.Errorf("MCP notice endpoints = %q/%q, want raw container and translated host defaults", record.RawMCPURL, record.MCPURL)
+			}
 		}
 	}
 	var missing []string
@@ -218,7 +227,7 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 	if len(missing) > 0 {
 		return fmt.Errorf("release lifecycle is missing Docker/Claude evidence %v; records=%#v", missing, records)
 	}
-	for _, class := range []string{"claude_startup", "claude_live", "mcp_emit"} {
+	for _, class := range []string{"claude_startup", "claude_live", "mcp_notify", "mcp_emit"} {
 		if required[class] != 1 {
 			return fmt.Errorf("release lifecycle %s count = %d, want exactly 1", class, required[class])
 		}
@@ -226,8 +235,8 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 	if startupIndex >= liveIndex || startupIndex < 0 {
 		return fmt.Errorf("startup/live ordering = %d/%d, want startup before post-readiness live delivery", startupIndex, liveIndex)
 	}
-	if liveIndex >= emitIndex {
-		return fmt.Errorf("live/emit ordering = %d/%d, want provider attempt before authored emit", liveIndex, emitIndex)
+	if liveIndex >= notifyIndex || notifyIndex >= emitIndex {
+		return fmt.Errorf("live/notice/emit ordering = %d/%d/%d, want provider attempt then notice then authored emit", liveIndex, notifyIndex, emitIndex)
 	}
 	if startupSession == "" || liveSession == "" || startupSession == liveSession {
 		return fmt.Errorf("startup/live attempt identities = %q/%q, want distinct non-empty identities", startupSession, liveSession)
@@ -236,7 +245,7 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 }
 
 func releaseE2EStartupAllowedTools() []string {
-	return []string{"ExitPlanMode", "WebFetch", "WebSearch", "mcp__runtime-tools__emit_agent_completed"}
+	return []string{"ExitPlanMode", "WebFetch", "WebSearch", "mcp__runtime-tools__emit_agent_completed", "mcp__runtime-tools__notify_human"}
 }
 
 func releaseE2ELiveAllowedTools() []string {
@@ -245,6 +254,7 @@ func releaseE2ELiveAllowedTools() []string {
 		"WebFetch",
 		"WebSearch",
 		"mcp__runtime-tools__emit_agent_completed",
+		"mcp__runtime-tools__notify_human",
 		"mcp__runtime-tools__read_worker_state",
 		"mcp__runtime-tools__read_worker_state_requests",
 	}

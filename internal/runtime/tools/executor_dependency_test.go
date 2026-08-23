@@ -18,7 +18,7 @@ func (allowMailboxAuthority) ProducerEventsForRole(string) []string {
 	return nil
 }
 func (allowMailboxAuthority) HasMessageAuthority(actor, target models.AgentConfig) bool { return false }
-func (allowMailboxAuthority) AuthorizeMailboxSend(actor models.AgentConfig) error       { return nil }
+func (allowMailboxAuthority) AuthorizeNotifyHuman(actor models.AgentConfig) error       { return nil }
 
 type mailboxStoreStub struct {
 	last MailboxItem
@@ -36,6 +36,9 @@ func (*mailboxStoreStub) ListMailboxItems(context.Context, string, int) ([]Mailb
 	return nil, nil
 }
 func (*mailboxStoreStub) CountMailboxItems(context.Context, string) (int, error) { return 0, nil }
+func (*mailboxStoreStub) CountUnreadInformationalNotices(context.Context) (int, error) {
+	return 0, nil
+}
 func (*mailboxStoreStub) GetMailboxItem(context.Context, string) (MailboxItem, error) {
 	return MailboxItem{}, nil
 }
@@ -72,37 +75,36 @@ func (*humanTaskPersistenceStub) CompleteHumanTaskOutcome(context.Context, strin
 	return decisioncard.HumanTaskContinuation{}, nil
 }
 
-func TestExecutorMailboxSendFailsWithoutMailboxStore(t *testing.T) {
+func TestExecutorNotifyHumanFailsWithoutMailboxStore(t *testing.T) {
 	exec := NewExecutorWithOptions(nil, ExecutorOptions{AuthorityProvider: allowMailboxAuthority{}})
 
-	_, err := exec.execMailboxSend(unmanagedToolTestContext(), models.AgentConfig{ExecutionMode: "live", ID: "agent-1", EntityID: "entity-1"}, map[string]any{
-		"type": "approval",
+	_, err := exec.execNotifyHuman(unmanagedToolTestContext(), models.AgentConfig{ExecutionMode: "live", ID: "agent-1", EntityID: "entity-1"}, map[string]any{
+		"summary": "Need review",
 	})
 	if err == nil || !strings.Contains(err.Error(), "mailbox store is not configured") {
-		t.Fatalf("execMailboxSend err = %v, want mailbox store error", err)
+		t.Fatalf("execNotifyHuman err = %v, want mailbox store error", err)
 	}
 }
 
-func TestExecutorMailboxSendUsesConstructorOwnedMailboxStore(t *testing.T) {
+func TestExecutorNotifyHumanUsesConstructorOwnedMailboxStore(t *testing.T) {
 	store := &mailboxStoreStub{id: "mailbox-42"}
 	exec := NewExecutorWithOptions(nil, ExecutorOptions{
 		MailboxStore:      store,
 		AuthorityProvider: allowMailboxAuthority{},
 	})
 
-	out, err := exec.execMailboxSend(unmanagedToolTestContext(), models.AgentConfig{ExecutionMode: "live", ID: "agent-1", EntityID: "entity-1"}, map[string]any{
-		"type":    "approval",
+	out, err := exec.execNotifyHuman(unmanagedToolTestContext(), models.AgentConfig{ExecutionMode: "live", ID: "agent-1", EntityID: "entity-1"}, map[string]any{
 		"summary": "Need review",
 	})
 	if err != nil {
-		t.Fatalf("execMailboxSend: %v", err)
+		t.Fatalf("execNotifyHuman: %v", err)
 	}
 	result, ok := out.(map[string]any)
 	if !ok || strings.TrimSpace(asString(result["mailbox_id"])) != "mailbox-42" {
-		t.Fatalf("execMailboxSend output = %#v, want mailbox_id mailbox-42", out)
+		t.Fatalf("execNotifyHuman output = %#v, want mailbox_id mailbox-42", out)
 	}
-	if got := strings.TrimSpace(store.last.Type); got != "approval" {
-		t.Fatalf("stored mailbox type = %q, want approval", got)
+	if got := strings.TrimSpace(store.last.Type); got != NotifyHumanMailboxItemType {
+		t.Fatalf("stored mailbox type = %q, want %s", got, NotifyHumanMailboxItemType)
 	}
 	if got := strings.TrimSpace(store.last.EntityID); got != "entity-1" {
 		t.Fatalf("stored mailbox entity_id = %q, want entity-1", got)

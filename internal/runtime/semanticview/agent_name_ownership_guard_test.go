@@ -253,11 +253,10 @@ func agentNameGuardIsAgentSourceAdmission(call *ast.CallExpr, info *types.Info) 
 
 func agentNameGuardAgentSourceAdmissionAllowed(path, enclosing string) bool {
 	allowed := map[string]struct{}{
-		"internal/runtime/tools/channel_runtime.go::(*Executor).execChannelOperation":      {},
-		"internal/runtime/tools/executor_agents.go::(*Executor).execAgentMessage":          {},
-		"internal/runtime/tools/executor_agents.go::(*Executor).execSchedule":              {},
-		"internal/runtime/tools/executor_emit.go::(*Executor).handleEmitTool":              {},
-		"internal/runtime/tools/executor_human_tasks.go::(*Executor).execHumanTaskRequest": {},
+		"internal/runtime/tools/channel_runtime.go::(*Executor).execChannelOperation": {},
+		"internal/runtime/tools/executor_agents.go::(*Executor).execSchedule":         {},
+		"internal/runtime/tools/executor_emit.go::(*Executor).handleEmitTool":         {},
+		"internal/runtime/tools/executor_human_tasks.go::(*Executor).execAskHuman":    {},
 	}
 	_, ok := allowed[path+"::"+enclosing]
 	return ok

@@ -12,12 +12,18 @@ func (e *Executor) buildToolHandlers() map[string]ToolHandler {
 }
 
 func (e *Executor) registerAgentHandlers(handlers map[string]ToolHandler) {
-	handlers["agent_message"] = e.execAgentMessage
 	handlers["schedule"] = e.execSchedule
 }
 
 func (e *Executor) registerMailboxHandlers(handlers map[string]ToolHandler) {
-	handlers["mailbox_send"] = e.execMailboxSend
+	for _, descriptor := range managedHITLToolDescriptors() {
+		switch descriptor.name {
+		case NotifyHumanToolName:
+			handlers[descriptor.name] = e.execNotifyHuman
+		case AskHumanToolName:
+			handlers[descriptor.name] = e.execAskHuman
+		}
+	}
 }
 
 func (e *Executor) registerEntityHandlers(handlers map[string]ToolHandler) {
@@ -30,7 +36,6 @@ func (e *Executor) registerEntityHandlers(handlers map[string]ToolHandler) {
 }
 
 func (e *Executor) registerHumanTaskHandlers(handlers map[string]ToolHandler) {
-	handlers["human_task_request"] = e.execHumanTaskRequest
 }
 
 func (e *Executor) registerFlowDataHandlers(handlers map[string]ToolHandler) {

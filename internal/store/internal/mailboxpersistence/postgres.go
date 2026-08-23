@@ -101,6 +101,27 @@ func (s *MailboxPostgresOwner) CountMailboxItems(ctx context.Context, status str
 	return n, nil
 }
 
+func (s *MailboxPostgresOwner) CountUnreadInformationalNotices(ctx context.Context) (int, error) {
+	if s == nil || s.backend == nil {
+		return 0, fmt.Errorf("postgres store is required")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return 0, err
+	}
+	var count int
+	err := s.backend.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM mailbox
+		WHERE item_type = $1
+		  AND status = 'pending'
+		  AND COALESCE(notified, false) = false
+	`, runtimetools.NotifyHumanMailboxItemType).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count unread informational notices: %w", err)
+	}
+	return count, nil
+}
+
 func (s *MailboxPostgresOwner) GetMailboxItem(ctx context.Context, id string) (runtimetools.MailboxItem, error) {
 	if s == nil || s.backend == nil {
 		return runtimetools.MailboxItem{}, fmt.Errorf("postgres store is required")

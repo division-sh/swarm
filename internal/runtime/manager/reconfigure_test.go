@@ -137,7 +137,7 @@ func TestReconfigureAgent_MemoryEnabledConfigChangeRotatesExactIdentity(t *testi
 	}
 	lease := acquireReconfigureMemory(t, am, registry, cfg)
 
-	if err := reconfigureAgentThroughLifecycleForTest(t, am, cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Tools: []string{"agent_message"}}); err != nil {
+	if err := reconfigureAgentThroughLifecycleForTest(t, am, cfg.ID, cfg.FlowPath, models.AgentConfig{ExecutionMode: "live", Tools: []string{"schedule"}, Permissions: []string{"schedule"}}); err != nil {
 		t.Fatalf("ReconfigureAgent: %v", err)
 	}
 	rec, ok := registry.Snapshot(reconfigureMemoryIdentity(t, am, cfg.ID, cfg.FlowPath))

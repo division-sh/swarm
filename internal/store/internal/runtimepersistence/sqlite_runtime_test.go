@@ -106,8 +106,8 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 		EventID:   evtID,
 		EntityID:  entityID,
 		FromAgent: "agent-1",
-		Type:      "review_notice",
-		Priority:  "critical",
+		Type:      runtimetools.NotifyHumanMailboxItemType,
+		Priority:  "normal",
 		Status:    "pending",
 		Summary:   "needs decision",
 		Context:   json.RawMessage(`{"reason":"test"}`),
@@ -122,12 +122,21 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("pending mailbox count = %d, want 1", count)
 	}
+	if unread, err := store.CountUnreadInformationalNotices(ctx); err != nil || unread != 1 {
+		t.Fatalf("unread informational notices = %d, want 1: %v", unread, err)
+	}
 	item, err := store.GetMailboxItem(ctx, itemID)
 	if err != nil {
 		t.Fatalf("GetMailboxItem: %v", err)
 	}
-	if item.Status != "pending" || item.Type != "review_notice" {
-		t.Fatalf("mailbox item status=%q type=%q, want pending review notice", item.Status, item.Type)
+	if item.Status != "pending" || item.Type != runtimetools.NotifyHumanMailboxItemType {
+		t.Fatalf("mailbox item status=%q type=%q, want pending operator notice", item.Status, item.Type)
+	}
+	if err := store.MarkMailboxItemNotified(ctx, itemID); err != nil {
+		t.Fatalf("acknowledge informational notice: %v", err)
+	}
+	if unread, err := store.CountUnreadInformationalNotices(ctx); err != nil || unread != 0 {
+		t.Fatalf("unread informational notices after acknowledgment = %d, want 0: %v", unread, err)
 	}
 
 	command := testAgentGenericScheduleCommand(t, runID, "agent-1", "test-flow/instance", entityID, "task-1", runtimegenericschedule.AbsoluteDue(time.Now().UTC().Add(time.Hour)))
@@ -228,6 +237,45 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 	})
 	if !errors.Is(err, apiidempotency.ErrConflict) {
 		t.Fatalf("idempotency conflict err = %v, want apiidempotency.ErrConflict", err)
+	}
+}
+
+func TestSQLiteRuntimeStoreInformationalNoticeSurvivesReopenAndAcknowledgment(t *testing.T) {
+	ctx := testAuthorActivityContext()
+	dbPath := filepath.Join(t.TempDir(), "notice-reopen.db")
+	store := newBootstrappedSQLiteRuntimeStoreForPath(t, dbPath)
+	noticeID, err := store.InsertMailboxItem(ctx, runtimetools.MailboxItem{
+		FromAgent: "reviewer", Type: runtimetools.NotifyHumanMailboxItemType,
+		Priority: "normal", Status: "pending", Summary: "strong match found",
+	})
+	if err != nil {
+		t.Fatalf("insert informational notice: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close selected SQLite store before reopen: %v", err)
+	}
+
+	reopened, err := NewSQLiteRuntimeStore(dbPath)
+	if err != nil {
+		t.Fatalf("reopen selected SQLite store: %v", err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	if unread, countErr := reopened.CountUnreadInformationalNotices(ctx); countErr != nil || unread != 1 {
+		t.Fatalf("reopened unread informational notices = %d, want 1: %v", unread, countErr)
+	}
+	notice, err := reopened.GetMailboxItem(ctx, noticeID)
+	if err != nil || notice.Type != runtimetools.NotifyHumanMailboxItemType || notice.Summary != "strong match found" {
+		t.Fatalf("reopened informational notice = %#v, err=%v", notice, err)
+	}
+	listed, err := reopened.ListMailboxItems(ctx, "pending", 10)
+	if err != nil || len(listed) != 1 || listed[0].ID != noticeID {
+		t.Fatalf("reopened pending informational notices = %#v, err=%v", listed, err)
+	}
+	if err := reopened.MarkMailboxItemNotified(ctx, noticeID); err != nil {
+		t.Fatalf("acknowledge reopened informational notice: %v", err)
+	}
+	if unread, countErr := reopened.CountUnreadInformationalNotices(ctx); countErr != nil || unread != 0 {
+		t.Fatalf("reopened unread informational notices after acknowledgment = %d, want 0: %v", unread, countErr)
 	}
 }
 

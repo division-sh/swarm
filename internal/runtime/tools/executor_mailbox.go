@@ -3,57 +3,40 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
-	"github.com/division-sh/swarm/internal/runtime/failures"
 )
 
-func (e *Executor) execMailboxSend(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
+func (e *Executor) execNotifyHuman(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	store, err := e.mailboxStoreDependency()
 	if err != nil {
 		return nil, err
 	}
-	if err := authorizeMailboxSend(e.authority, actor); err != nil {
+	if err := authorizeNotifyHuman(e.authority, actor); err != nil {
 		return nil, err
+	}
+	payload := map[string]any{}
+	if err := decodeToolInput(input, &payload); err != nil {
+		return nil, err
+	}
+	if err := ValidatePayloadAgainstSchema(notifyHumanContractSchema().InputSchema, payload); err != nil {
+		return nil, fmt.Errorf("validate notify_human input: %w", err)
 	}
 	var in struct {
-		EventID   string `json:"event_id"`
-		EntityID  string `json:"entity_id"`
-		Type      string `json:"type"`
-		Priority  string `json:"priority"`
-		Summary   string `json:"summary"`
-		Context   any    `json:"context"`
-		TimeoutAt string `json:"timeout_at"`
+		Summary string `json:"summary"`
+		Context any    `json:"context"`
 	}
-	if err := decodeToolInput(input, &in); err != nil {
+	if err := decodeToolInput(payload, &in); err != nil {
 		return nil, err
 	}
-	entityID := strings.TrimSpace(coalesce(in.EntityID, actor.EffectiveEntityID()))
-	in.EntityID = entityID
-	if actorEntityID := actor.EffectiveEntityID(); entityID != "" && actorEntityID != "" && entityID != actorEntityID {
-		return nil, failures.New(failures.ClassAuthorizationDenied, "cross_entity_mailbox_forbidden", "tool-executor", "mailbox_send.authorize", map[string]any{"action": "mailbox_send", "actor_id": actor.ID, "entity_id": entityID})
+	in.Summary = strings.TrimSpace(in.Summary)
+	if in.Summary == "" {
+		return nil, fmt.Errorf("notify_human summary is required")
 	}
-	if strings.TrimSpace(in.Type) == "" {
-		return nil, errors.New("mailbox type is required")
-	}
-	normalizedType, err := NormalizeMailboxType(in.Type)
-	if err != nil {
-		return nil, err
-	}
-	in.Type = normalizedType
-	if strings.TrimSpace(in.Priority) == "" {
-		in.Priority = "normal"
-	}
-	normalizedPriority, err := NormalizeMailboxPriority(in.Priority)
-	if err != nil {
-		return nil, err
-	}
-	in.Priority = normalizedPriority
 	ctxJSON, err := json.Marshal(in.Context)
 	if err != nil {
 		return nil, fmt.Errorf("marshal mailbox context: %w", err)
@@ -61,29 +44,36 @@ func (e *Executor) execMailboxSend(ctx context.Context, actor models.AgentConfig
 	if len(ctxJSON) == 0 || string(ctxJSON) == "null" {
 		ctxJSON = []byte("{}")
 	}
-	var timeout time.Time
-	if strings.TrimSpace(in.TimeoutAt) != "" {
-		parsed, err := time.Parse(time.RFC3339, in.TimeoutAt)
-		if err != nil {
-			return nil, fmt.Errorf("invalid timeout_at: %w", err)
-		}
-		timeout = parsed
+	eventID := ""
+	if inbound, ok := runtimebus.InboundEventFromContext(ctx); ok {
+		eventID = inbound.ID()
 	}
 
 	id, err := store.InsertMailboxItem(ctx, MailboxItem{
-		EventID:        in.EventID,
-		EntityID:       in.EntityID,
+		EventID:        eventID,
+		EntityID:       actor.EffectiveEntityID(),
+		FlowInstance:   actor.CanonicalFlowPath(),
 		FromAgent:      actor.ID,
-		Type:           in.Type,
-		Priority:       in.Priority,
+		Type:           NotifyHumanMailboxItemType,
+		Priority:       "normal",
 		Status:         "pending",
 		Context:        ctxJSON,
 		Summary:        in.Summary,
-		TimeoutAt:      timeout,
 		ReplyContextID: events.DeliveryContextFromContext(ctx).ReplyContextID(),
 	})
 	if err != nil {
 		return nil, err
+	}
+	if e.noticePresentation != nil {
+		unread, countErr := store.CountUnreadInformationalNotices(ctx)
+		if countErr != nil {
+			processWarn("tool-executor", "count committed informational notices: %v", countErr)
+		} else {
+			e.noticePresentation.PresentCommittedInformationalNotice(CommittedInformationalNotice{
+				MailboxID:   id,
+				UnreadCount: unread,
+			})
+		}
 	}
 	return map[string]any{"status": "queued", "mailbox_id": id}, nil
 }

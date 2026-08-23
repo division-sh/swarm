@@ -204,7 +204,7 @@ func TestReleaseEvidenceRejectsDuplicateClosureAttempts(t *testing.T) {
 	if err := validateReleaseDockerEvidence(base); err != nil {
 		t.Fatalf("valid evidence rejected: %v", err)
 	}
-	for _, class := range []string{"claude_startup", "claude_live", "mcp_emit"} {
+	for _, class := range []string{"claude_startup", "claude_live", "mcp_notify", "mcp_emit"} {
 		t.Run(class, func(t *testing.T) {
 			records := append([]fakeDockerRecord(nil), base...)
 			for _, record := range base {
@@ -310,6 +310,12 @@ func validReleaseEvidence() []fakeDockerRecord {
 			Class:     "claude_live",
 			Args:      []string{"claude", "--tools", strings.Join(releaseE2EBuiltinTools(), ","), "--allowedTools", strings.Join(releaseE2ELiveAllowedTools(), ","), "--model", releaseE2EManagedModel},
 			SessionID: "22222222-2222-2222-2222-222222222222",
+			RawMCPURL: releaseE2ERawMCPURL,
+			MCPURL:    releaseE2EHostMCPURL,
+		},
+		{
+			Class:     "mcp_notify",
+			ToolName:  "notify_human",
 			RawMCPURL: releaseE2ERawMCPURL,
 			MCPURL:    releaseE2EHostMCPURL,
 		},

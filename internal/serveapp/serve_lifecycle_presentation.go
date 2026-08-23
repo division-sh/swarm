@@ -44,16 +44,17 @@ type serveLifecyclePackFact struct {
 }
 
 type serveLifecycleReadyFacts struct {
-	ProjectName string
-	BundleCount int
-	FlowCount   int
-	AgentCount  int
-	ToolCount   int
-	APIListener string
-	MCPListener string
-	ReadyAfter  time.Duration
-	Standing    []serveLifecycleIngressFact
-	Packs       []serveLifecyclePackFact
+	ProjectName                string
+	BundleCount                int
+	FlowCount                  int
+	AgentCount                 int
+	ToolCount                  int
+	APIListener                string
+	MCPListener                string
+	ReadyAfter                 time.Duration
+	Standing                   []serveLifecycleIngressFact
+	Packs                      []serveLifecyclePackFact
+	UnreadInformationalNotices int
 }
 
 type serveLifecycleNoticeKind string
@@ -641,6 +642,7 @@ func (p *serveLifecyclePresenter) writeResolvedFactsLocked(facts serveLifecycleR
 		p.writeResolvedFactLocked(label, detail)
 	}
 	p.writeResolvedFactLocked("listeners", "api "+strings.TrimSpace(facts.APIListener)+" · mcp "+strings.TrimSpace(facts.MCPListener))
+	p.writeResolvedFactLocked("operator notices", fmt.Sprintf("⚠ %d unread", facts.UnreadInformationalNotices))
 	for _, notice := range p.notices {
 		p.writeResolvedFactLocked("recovery action", serveLifecycleNoticeDetail(notice))
 	}

@@ -22,21 +22,20 @@ func TestBuiltinToolParityInvariant_SupportedSurfacesShareRuntimeToolTruth_V2(t 
 	t.Setenv("SWARM_BOOT_WARNINGS_FATAL", "true")
 
 	cases := []struct {
-		name               string
-		configuredTool     string
-		permissions        []string
-		wantToolResolution bool
+		name           string
+		configuredTool string
+		permissions    []string
+		wantReject     bool
 	}{
 		{
-			name:               "builtin runtime tool stays accepted across verify and boot",
-			configuredTool:     "schedule",
-			permissions:        []string{"schedule"},
-			wantToolResolution: false,
+			name:           "builtin runtime tool stays accepted across verify and boot",
+			configuredTool: "schedule",
+			permissions:    []string{"schedule"},
 		},
 		{
-			name:               "truly missing tool still warns across boot surfaces",
-			configuredTool:     "missing_tool",
-			wantToolResolution: true,
+			name:           "truly missing tool rejects across boot surfaces",
+			configuredTool: "missing_tool",
+			wantReject:     true,
 		},
 	}
 
@@ -67,16 +66,27 @@ func TestBuiltinToolParityInvariant_SupportedSurfacesShareRuntimeToolTruth_V2(t 
 			source := semanticviewtest.WrapRootAgents(bundle)
 
 			directReport := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
-			assertToolResolutionWarning(t, directReport.Warnings(), tc.configuredTool, tc.wantToolResolution)
+			assertToolResolutionFinding(t, directReport.Errors(), tc.configuredTool, tc.wantReject)
 
 			result, runtimeErr := runtimepkg.ValidateWorkflowContractSurface(context.Background(), source, runtimepkg.DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
-			if runtimeErr != nil {
+			if tc.wantReject {
+				if runtimeErr == nil || !strings.Contains(runtimeErr.Error(), tc.configuredTool) {
+					t.Fatalf("ValidateWorkflowContractSurface error = %v, want tool rejection", runtimeErr)
+				}
+			} else if runtimeErr != nil {
 				t.Fatalf("ValidateWorkflowContractSurface: %v", runtimeErr)
 			}
-			assertToolResolutionWarning(t, result.BootReport.Warnings(), tc.configuredTool, tc.wantToolResolution)
+			assertToolResolutionFinding(t, result.BootReport.Errors(), tc.configuredTool, tc.wantReject)
 
-			if err := cliapp.VerifyBundle(context.Background(), source, executionposture.Live); err != nil {
-				t.Fatalf("cliapp.VerifyBundle: %v", err)
+			verifyErr := cliapp.VerifyBundle(context.Background(), source, executionposture.Live)
+			if tc.wantReject {
+				if verifyErr == nil || !strings.Contains(verifyErr.Error(), tc.configuredTool) {
+					t.Fatalf("cliapp.VerifyBundle error = %v, want tool rejection", verifyErr)
+				}
+				return
+			}
+			if verifyErr != nil {
+				t.Fatalf("cliapp.VerifyBundle: %v", verifyErr)
 			}
 
 			assertBootProgressUsesRuntimeToolInventory(t, source)
@@ -84,20 +94,20 @@ func TestBuiltinToolParityInvariant_SupportedSurfacesShareRuntimeToolTruth_V2(t 
 	}
 }
 
-func assertToolResolutionWarning(t *testing.T, warnings []runtimebootverify.Finding, toolID string, want bool) {
+func assertToolResolutionFinding(t *testing.T, findings []runtimebootverify.Finding, toolID string, want bool) {
 	t.Helper()
 	found := false
-	for _, warning := range warnings {
-		if strings.TrimSpace(warning.CheckID) != "tool_resolution" {
+	for _, finding := range findings {
+		if strings.TrimSpace(finding.CheckID) != "tool_resolution" {
 			continue
 		}
-		if strings.Contains(warning.Message, toolID) {
+		if strings.Contains(finding.Message, toolID) {
 			found = true
 			break
 		}
 	}
 	if found != want {
-		t.Fatalf("tool_resolution warning mismatch for %q: found=%v want=%v warnings=%#v", toolID, found, want, warnings)
+		t.Fatalf("tool_resolution finding mismatch for %q: found=%v want=%v findings=%#v", toolID, found, want, findings)
 	}
 }
 

@@ -239,7 +239,7 @@ func TestEnsureWorkflowBootWiring_RejectsTouchedValidationDriftThroughSharedPath
 		wantErr     bool
 	}{
 		{
-			name: "tool resolution warning",
+			name: "unfulfillable authored tool rejection",
 			source: func() semanticview.Source {
 				bundle := testRuntimeWorkflowValidationBundle()
 				bundle.Agents = map[string]runtimecontracts.AgentRegistryEntry{
@@ -251,7 +251,8 @@ func TestEnsureWorkflowBootWiring_RejectsTouchedValidationDriftThroughSharedPath
 				}
 				return semanticviewtest.WrapRootAgents(bundle)
 			}(),
-			wantErr: false,
+			errContains: "agent agent-1 references unfulfillable tool missing_tool",
+			wantErr:     true,
 		},
 		{
 			name: "missing emitted event schema warning",

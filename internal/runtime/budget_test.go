@@ -290,6 +290,10 @@ func (*budgetMailboxCapture) CountMailboxItems(context.Context, string) (int, er
 	return 0, nil
 }
 
+func (*budgetMailboxCapture) CountUnreadInformationalNotices(context.Context) (int, error) {
+	return 0, nil
+}
+
 func (*budgetMailboxCapture) GetMailboxItem(context.Context, string) (runtimetools.MailboxItem, error) {
 	return runtimetools.MailboxItem{}, nil
 }

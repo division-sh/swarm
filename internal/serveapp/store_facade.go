@@ -22,6 +22,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimestartuprecovery "github.com/division-sh/swarm/internal/runtime/startuprecovery"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
@@ -161,6 +162,7 @@ type selectedAPICapabilityRequest struct {
 	ExecutionPosture        executionposture.Posture
 	ProcessCapability       runtimestartupownership.ProcessCapability
 	PlatformPackBases       *packartifact.PlatformPackBaseGenerationOwner
+	NoticePresentation      runtimetools.InformationalNoticePresentationSink
 }
 
 type selectedAPIOptionalCapabilityBuilder func(selectedAPICapabilityRequest) (selectedAPICapabilities, error)

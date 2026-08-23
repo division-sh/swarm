@@ -88,6 +88,7 @@ type RuntimeOptions struct {
 	ManagedCredentials               runtimemanagedcredentials.Store
 	ProviderCredentials              runtimecredentials.Store
 	ProviderTriggerCatalog           *providertriggers.CatalogSnapshot
+	NoticePresentation               runtimetools.InformationalNoticePresentationSink
 	ChannelPlans                     []packs.SatisfactionPlan
 	ChannelOutboundBindings          []packs.OutboundBindingPlan
 	ScenarioDeclarations             []scenarioderivation.Declaration
@@ -1220,6 +1221,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		Credentials:        rt.Credentials,
 		ManagedCredentials: rt.ManagedCredentials,
 		MailboxStore:       runtimeDeps.MailboxStore,
+		NoticePresentation: opts.NoticePresentation,
 		EntityStore:        runtimeDeps.ToolEntityStore,
 		HumanTaskStore:     runtimeDeps.HumanTaskStore,
 		WorkflowInstances:  rt.Pipeline,

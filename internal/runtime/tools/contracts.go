@@ -19,17 +19,14 @@ type builtinToolDraft struct {
 }
 
 var supportedRuntimeToolNames = map[string]struct{}{
-	"agent_message":      {},
-	"schedule":           {},
-	"get_entity":         {},
-	"save_entity_field":  {},
-	"create_entity":      {},
-	"query_entities":     {},
-	"search_entities":    {},
-	"query_metrics":      {},
-	"mailbox_send":       {},
-	"human_task_request": {},
-	"read_flow_data":     {},
+	"schedule":          {},
+	"get_entity":        {},
+	"save_entity_field": {},
+	"create_entity":     {},
+	"query_entities":    {},
+	"search_entities":   {},
+	"query_metrics":     {},
+	"read_flow_data":    {},
 }
 
 // This is the canonical builtin/non-MCP runtime tool inventory for supported
@@ -43,6 +40,9 @@ func RuntimeAvailableToolNamesForSource(source semanticview.Source) []string {
 			continue
 		}
 		names[name] = struct{}{}
+	}
+	for _, descriptor := range managedHITLToolDescriptors() {
+		names[descriptor.name] = struct{}{}
 	}
 	if source != nil {
 		for name, entry := range source.ToolEntries() {

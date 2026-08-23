@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 )
 
@@ -24,43 +23,19 @@ func (c *checkerContext) toolResolution() []Finding {
 		return c.toolFindings
 	}
 	c.toolLoaded = true
-	discoveredTools := c.mcpDiscovered()
-	// Boot tool warnings must consume the same runtime inventory truth that the
-	// generic runtime ships, then layer MCP discovery on top of it.
-	runtimeToolNames := c.runtimeAvailableToolNames()
-	for _, declaration := range semanticview.AgentDeclarations(c.source) {
-		plan, err := semanticview.ScopedAgentNamePlan(c.source, declaration)
-		if err != nil {
-			continue
+	for _, finding := range runtimetools.ValidateConfiguredToolFulfillability(c.source, c.mcpDiscovered()) {
+		toolName := strings.TrimSpace(finding.ToolName)
+		message := finding.Reason
+		if toolName != "" {
+			message = fmt.Sprintf("agent %s references unfulfillable tool %s: %s", finding.AgentID, toolName, finding.Reason)
 		}
-		projection, projected := semanticview.ScopedAgentContractProjection(c.source, declaration)
-		agent := declaration.Entry
-		for _, toolID := range agent.ConfiguredTools() {
-			toolID = strings.TrimSpace(toolID)
-			if toolID == "" {
-				continue
-			}
-			if runtimetools.IsAgentRequiredMCPToolReference(c.source, declaration, toolID) {
-				continue
-			}
-			if projected {
-				if _, ok := projection.ToolEntry(toolID); ok {
-					continue
-				}
-			}
-			if runtimetools.MCPToolDiscovered(toolID, discoveredTools) {
-				continue
-			}
-			if _, ok := runtimeToolNames[toolID]; ok {
-				continue
-			}
-			c.toolFindings = append(c.toolFindings, Finding{
-				CheckID:  "tool_resolution",
-				Severity: "warning",
-				Message:  fmt.Sprintf("agent %s references missing tool %s", plan.AgentID, toolID),
-				Location: plan.AgentID,
-			})
-		}
+		c.toolFindings = append(c.toolFindings, Finding{
+			CheckID:     "tool_resolution",
+			Severity:    SeverityHardInvalidity,
+			Message:     message,
+			Location:    finding.AgentID,
+			Remediation: "Declare an executable tool candidate and its required permission for this exact agent, or remove the tool reference.",
+		})
 	}
 	return c.toolFindings
 }
@@ -119,16 +94,4 @@ func (c *checkerContext) generatedToolSchemaClosure() []Finding {
 		})
 	}
 	return c.generatedToolSchemaClosureFindings
-}
-
-func (c *checkerContext) runtimeAvailableToolNames() map[string]struct{} {
-	if c.runtimeToolNamesLoaded {
-		return c.runtimeToolNames
-	}
-	c.runtimeToolNamesLoaded = true
-	c.runtimeToolNames = make(map[string]struct{})
-	for _, name := range runtimetools.RuntimeAvailableToolNamesForSource(c.source) {
-		c.runtimeToolNames[strings.TrimSpace(name)] = struct{}{}
-	}
-	return c.runtimeToolNames
 }

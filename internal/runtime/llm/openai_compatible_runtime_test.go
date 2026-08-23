@@ -42,15 +42,15 @@ func TestOpenAICompatibleManagedRequestEncodesCanonicalExecutionFrame(t *testing
 			if req.Model != "test-model" {
 				t.Fatalf("first request model = %q, want sealed frame model", req.Model)
 			}
-			if len(req.Tools) != 1 || req.Tools[0].Type != "function" || req.Tools[0].Function.Name != "lookup" {
-				t.Fatalf("tools = %#v, want lookup function tool", req.Tools)
+			if len(req.Tools) != 1 || req.Tools[0].Type != "function" || req.Tools[0].Function.Name != "notify_human" {
+				t.Fatalf("tools = %#v, want notify_human function tool", req.Tools)
 			}
 			if !openAICompatibleRequestHasFrame(req.Messages, `"kind":"initial"`) {
 				t.Fatalf("first request does not contain canonical initial execution frame: %#v", req.Messages)
 			}
 			_, _ = w.Write([]byte(`{
 				"model":"gpt-compatible-mini",
-				"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{\"query\":\"status\"}"}}]}}],
+				"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"notify_human","arguments":"{\"summary\":\"Strong match found\"}"}}]}}],
 				"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}
 			}`))
 		case 2:
@@ -108,17 +108,7 @@ func TestOpenAICompatibleManagedRequestEncodesCanonicalExecutionFrame(t *testing
 	actor.ResolvedLLMTransport = "hostile-transport"
 	actor.EntityID = "entity-1"
 	ctx = runtimeactors.WithActor(ctx, actor)
-	tools := []ToolDefinition{{
-		Name:        "lookup",
-		Description: "Lookup status",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"query": map[string]any{"type": "string"},
-			},
-			"required": []any{"query"},
-		},
-	}}
+	tools := []ToolDefinition{notifyHumanTestToolDefinition()}
 	conv := newTestManagedConversation(t, "agent-1", "support/inst-1", "support", tools, testMemory(), 5, runtime)
 	conv.SetToolExecutor(openAIToolExecutor{})
 
@@ -162,10 +152,13 @@ func TestAnthropicManagedRequestEncodesCanonicalExecutionFrame(t *testing.T) {
 			if req.Model != "test-model" {
 				t.Fatalf("first request model = %q, want sealed frame model", req.Model)
 			}
+			if len(req.Tools) != 1 || req.Tools[0].Name != "notify_human" {
+				t.Fatalf("tools = %#v, want notify_human", req.Tools)
+			}
 			if !anthropicRequestHasFrame(req.Messages, `"kind":"initial"`) {
 				t.Fatalf("first request does not contain canonical initial frame: %#v", req.Messages)
 			}
-			_, _ = w.Write([]byte(`{"model":"claude-test","usage":{"input_tokens":7,"output_tokens":3},"content":[{"type":"tool_use","id":"call_1","name":"lookup","input":{"query":"status"}}]}`))
+			_, _ = w.Write([]byte(`{"model":"claude-test","usage":{"input_tokens":7,"output_tokens":3},"content":[{"type":"tool_use","id":"call_1","name":"notify_human","input":{"summary":"Strong match found"}}]}`))
 		case 2:
 			if req.Model != "test-model" {
 				t.Fatalf("second request model = %q, want sealed frame model", req.Model)
@@ -198,10 +191,7 @@ func TestAnthropicManagedRequestEncodesCanonicalExecutionFrame(t *testing.T) {
 	actor.ResolvedLLMProvider = "hostile-provider"
 	actor.ResolvedLLMTransport = "hostile-transport"
 	ctx = runtimeactors.WithActor(ctx, actor)
-	tools := []ToolDefinition{{
-		Name: "lookup", Description: "Lookup status",
-		Schema: map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}, "required": []any{"query"}},
-	}}
+	tools := []ToolDefinition{notifyHumanTestToolDefinition()}
 	conversation := newTestManagedConversation(t, "agent-1", "support/inst-1", "support", tools, testMemory(), 5, runtime)
 	conversation.SetToolExecutor(openAIToolExecutor{})
 	response, err := conversation.RunManaged(ctx, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: testManagedEvent("agent-1")})
@@ -428,9 +418,8 @@ func (openAIToolExecutor) Execute(context.Context, string, any) (any, error) {
 }
 
 func (openAIToolExecutor) ToolCapabilitiesForActor(runtimeactors.AgentConfig, []string, map[string]struct{}) toolcapabilities.Set {
-	return toolcapabilities.NewSet([]toolcapabilities.Capability{{
-		Name:     "lookup",
-		Visible:  true,
-		Callable: true,
-	}})
+	return toolcapabilities.NewSet([]toolcapabilities.Capability{
+		{Name: "lookup", Visible: true, Callable: true},
+		{Name: "notify_human", Visible: true, Callable: true},
+	})
 }

@@ -14,7 +14,7 @@ type Provider interface {
 	ProducerRoles() []string
 	ProducerEventsForRole(role string) []string
 	HasMessageAuthority(actor, target models.AgentConfig) bool
-	AuthorizeMailboxSend(actor models.AgentConfig) error
+	AuthorizeNotifyHuman(actor models.AgentConfig) error
 }
 
 type noopProvider struct{}
@@ -35,7 +35,7 @@ func (noopProvider) HasMessageAuthority(actor, target models.AgentConfig) bool {
 	return err == nil && same
 }
 
-func (noopProvider) AuthorizeMailboxSend(actor models.AgentConfig) error {
+func (noopProvider) AuthorizeNotifyHuman(actor models.AgentConfig) error {
 	return failures.NewDetail("dependency_unavailable", "runtime-authority", "authorize_mailbox", map[string]any{"dependency": "mailbox_authority_provider"})
 }
 

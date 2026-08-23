@@ -1453,7 +1453,7 @@ func TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames(t *testing
 				if request["model"] != tc.model {
 					t.Errorf("%s provider request model = %#v, want sealed frame model %q", tc.name, request["model"], tc.model)
 				}
-				if !jsonValueContains(request, "emit_task_completed") || !jsonValueContains(request, "lookup_data") {
+				if !jsonValueContains(request, "emit_task_completed") || !jsonValueContains(request, "lookup_data") || !jsonValueContains(request, "notify_human") {
 					t.Errorf("%s provider request omits exact delivered tools: %s", tc.name, requestJSON)
 				}
 				wantKind := `"kind":"initial"`
@@ -1731,8 +1731,8 @@ func assertSelectedForkProviderCapabilityEvidence(t testing.TB, ctx context.Cont
 		if surface.ID != attemptSurfaceID || surface.ActorID != "test-agent" || surface.Authority.ExecutionKind != managedcapabilities.ExecutionSelectedContractFork || surface.Authority.ExecutionAuthorityID != proof.RuntimeExecutionID || surface.Authority.RunID != result.Materialization.ForkRunID {
 			t.Fatalf("selected completion capability surface = %#v", surface)
 		}
-		if names := surface.EffectiveNames(); !slices.Equal(names, []string{"emit_task_completed", "lookup_data"}) {
-			t.Fatalf("selected completion effective tools = %#v, want [emit_task_completed lookup_data]", names)
+		if names := surface.EffectiveNames(); !slices.Equal(names, []string{"emit_task_completed", "lookup_data", "notify_human"}) {
+			t.Fatalf("selected completion effective tools = %#v, want [emit_task_completed lookup_data notify_human]", names)
 		}
 		wantFingerprint, err := surface.PlanFingerprint()
 		if err != nil {
@@ -1811,9 +1811,19 @@ for payload in [
             responses.append(json.loads(raw))
 listed = responses[-1]["result"]["tools"]
 listed_names = [tool.get("name") for tool in listed]
-if listed_names != ["emit_task_completed"]:
+if sorted(listed_names) != ["emit_task_completed", "notify_human"]:
     raise SystemExit(f"selected-fork MCP tools/list names = {listed_names!r}, want exact executor projection")
 emit = next((tool for tool in listed if tool["name"] == "emit_task_completed"), None)
+notify = next((tool for tool in listed if tool["name"] == "notify_human"), None)
+expected_notify_schema = {
+    "type": "object",
+    "properties": {"summary": {"type": "string", "minLength": 1}, "context": {}},
+    "required": ["summary"],
+    "additionalProperties": False,
+}
+expected_notify_description = "Sends an informational notice to the human operator. Does NOT request approval and does not pause the flow - to ask for a decision that gates the flow, use ask_human.\n\nUsage:\nUse for an informational operator notice only. Provide summary and optional context. The flow continues without waiting for a reply; use ask_human when a human verdict must gate the flow."
+if notify is None or notify.get("description") != expected_notify_description or notify.get("inputSchema") != expected_notify_schema:
+    raise SystemExit(f"selected-fork notify_human mismatch: {notify!r}")
 expected_schema = {
     "type": "object",
     "properties": {"fork_result": {"type": "string"}},
@@ -1840,7 +1850,7 @@ if result.get("error") is not None or result.get("result", {}).get("isError") is
     raise SystemExit(f"selected-fork MCP call failed: {result!r}")
 PY
 fi
-printf '%s\n' "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"$session_id\",\"mcp_servers\":[{\"name\":\"runtime-tools\",\"status\":\"connected\"}],\"tools\":[\"WebFetch\",\"WebSearch\",\"mcp__runtime-tools__emit_task_completed\"]}"
+printf '%s\n' "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"$session_id\",\"mcp_servers\":[{\"name\":\"runtime-tools\",\"status\":\"connected\"}],\"tools\":[\"WebFetch\",\"WebSearch\",\"mcp__runtime-tools__emit_task_completed\",\"mcp__runtime-tools__notify_human\"]}"
 if [ "$count" -gt 1 ]; then
   printf '%s\n' "{\"type\":\"result\",\"subtype\":\"success\",\"session_id\":\"$session_id\",\"model\":\"claude-selected-fork\",\"result\":\"selected-fork-flow-complete\",\"total_cost_usd\":0.001,\"usage\":{\"input_tokens\":7,\"output_tokens\":2}}"
 fi
@@ -1924,7 +1934,7 @@ fi
 		}
 		allowed := strings.Split(capturedSelectedForkArgValue(t, args, "--allowedTools"), ",")
 		slices.Sort(allowed)
-		if want := []string{"ExitPlanMode", "WebFetch", "WebSearch", "mcp__runtime-tools__emit_task_completed"}; !slices.Equal(allowed, want) {
+		if want := []string{"ExitPlanMode", "WebFetch", "WebSearch", "mcp__runtime-tools__emit_task_completed", "mcp__runtime-tools__notify_human"}; !slices.Equal(allowed, want) {
 			t.Fatalf("Claude invocation %s allowed tools = %v, want %v", invocation, allowed, want)
 		}
 		selected := strings.Split(capturedSelectedForkArgValue(t, args, "--tools"), ",")
@@ -2110,14 +2120,14 @@ func assertSelectedForkClaudeManagedSurface(t testing.TB, surface managedcapabil
 		surface.Authority.RunID != runID {
 		t.Fatalf("selected Claude %s authority = %#v", authorityKind, surface.Authority)
 	}
-	if got := surface.EffectiveNames(); !slices.Equal(got, []string{"emit_task_completed", "web_search"}) {
+	if got := surface.EffectiveNames(); !slices.Equal(got, []string{"emit_task_completed", "notify_human", "web_search"}) {
 		t.Fatalf("selected Claude %s effective capabilities = %v", authorityKind, got)
 	}
 	if got := surface.PlannedBindingNames(managedcapabilities.BindingProviderBuiltin); !slices.Equal(got, []string{"WebFetch", "WebSearch"}) {
 		t.Fatalf("selected Claude %s provider bindings = %v", authorityKind, got)
 	}
 	for _, kind := range []managedcapabilities.BindingKind{managedcapabilities.BindingMCPTool, managedcapabilities.BindingMCPProvider} {
-		if got := surface.PlannedBindingNames(kind); !slices.Equal(got, []string{"mcp__runtime-tools__emit_task_completed"}) {
+		if got := surface.PlannedBindingNames(kind); !slices.Equal(got, []string{"mcp__runtime-tools__emit_task_completed", "mcp__runtime-tools__notify_human"}) {
 			t.Fatalf("selected Claude %s %s bindings = %v", authorityKind, kind, got)
 		}
 	}

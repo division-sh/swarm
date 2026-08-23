@@ -3658,7 +3658,7 @@ func TestActivateFlowInstanceResolvesAgentPermissions(t *testing.T) {
 		"permission_bundles": {
 			Value: map[string]any{
 				"ops": map[string]any{
-					"permissions": []any{"human_task_request"},
+					"permissions": []any{"ask_human"},
 				},
 			},
 		},
@@ -3678,8 +3678,8 @@ func TestActivateFlowInstanceResolvesAgentPermissions(t *testing.T) {
 	if !ok {
 		t.Fatal("expected activated flow agent config")
 	}
-	if len(cfg.Permissions) != 2 || cfg.Permissions[0] != "human_task_request" || cfg.Permissions[1] != "schedule" {
-		t.Fatalf("permissions = %#v, want [human_task_request schedule]", cfg.Permissions)
+	if len(cfg.Permissions) != 2 || cfg.Permissions[0] != "ask_human" || cfg.Permissions[1] != "schedule" {
+		t.Fatalf("permissions = %#v, want [ask_human schedule]", cfg.Permissions)
 	}
 }
 
@@ -3911,7 +3911,7 @@ func TestStaticAndTemplateAgentMaterializationDefaultRoleToEffectiveName(t *test
 		if cfg.ID != "public-reviewer" || cfg.Role != "public-reviewer" {
 			t.Fatalf("materialized actor = id %q role %q, want effective public role", cfg.ID, cfg.Role)
 		}
-		if err := runtimeauthority.NewSourceProvider(source).AuthorizeMailboxSend(cfg); err != nil {
+		if err := runtimeauthority.NewSourceProvider(source).AuthorizeNotifyHuman(cfg); err != nil {
 			t.Fatalf("materialized actor mailbox authority: %v", err)
 		}
 	}

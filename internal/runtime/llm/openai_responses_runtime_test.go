@@ -44,8 +44,8 @@ func TestOpenAIResponsesManagedRequestEncodesCanonicalExecutionFrame(t *testing.
 			if !strings.Contains(req.Instructions, "Complete the admitted business work") {
 				t.Fatalf("instructions = %q, want canonical provider prompt", req.Instructions)
 			}
-			if len(req.Tools) != 1 || req.Tools[0].Type != "function" || req.Tools[0].Name != "lookup" {
-				t.Fatalf("tools = %#v, want lookup function tool", req.Tools)
+			if len(req.Tools) != 1 || req.Tools[0].Type != "function" || req.Tools[0].Name != "notify_human" {
+				t.Fatalf("tools = %#v, want notify_human function tool", req.Tools)
 			}
 			if !openAIResponsesRequestHasMessage(req.Input, "user", `"kind":"initial"`) {
 				t.Fatalf("first request input missing canonical initial execution frame: %#v", req.Input)
@@ -53,7 +53,7 @@ func TestOpenAIResponsesManagedRequestEncodesCanonicalExecutionFrame(t *testing.
 			_, _ = w.Write([]byte(`{
 				"id":"resp_1",
 				"model":"gpt-5.4-nano",
-				"output":[{"id":"fc_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":"{\"query\":\"status\"}"}],
+				"output":[{"id":"fc_1","type":"function_call","call_id":"call_1","name":"notify_human","arguments":"{\"summary\":\"Strong match found\"}"}],
 				"usage":{"input_tokens":11,"output_tokens":7,"total_tokens":18}
 			}`))
 		case 2:
@@ -112,17 +112,7 @@ func TestOpenAIResponsesManagedRequestEncodesCanonicalExecutionFrame(t *testing.
 	actor.ResolvedLLMTransport = "hostile-transport"
 	actor.EntityID = "entity-1"
 	ctx = runtimeactors.WithActor(ctx, actor)
-	tools := []ToolDefinition{{
-		Name:        "lookup",
-		Description: "Lookup status",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"query": map[string]any{"type": "string"},
-			},
-			"required": []any{"query"},
-		},
-	}}
+	tools := []ToolDefinition{notifyHumanTestToolDefinition()}
 	conv := newTestManagedConversation(t, "agent-1", "support/inst-1", "support", tools, testMemory(), 5, runtime)
 	conv.SetToolExecutor(openAIToolExecutor{})
 

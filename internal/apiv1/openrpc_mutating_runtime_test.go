@@ -1632,6 +1632,10 @@ func (s *mutatingProbeMailboxStore) GetV1MailboxItem(_ context.Context, mailboxI
 	return mailbox.V1ItemDetail{Item: s.item, Payload: s.item.Payload}, nil
 }
 
+func (*mutatingProbeMailboxStore) CountUnreadInformationalNotices(context.Context) (int, error) {
+	return 0, nil
+}
+
 func (s *mutatingProbeMailboxStore) MarkMailboxItemNotified(_ context.Context, mailboxID string) error {
 	if s.notifyErr != nil {
 		return s.notifyErr

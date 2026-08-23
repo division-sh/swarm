@@ -239,7 +239,8 @@ func selectedPostgresAPIOptionalCapabilityBuilder(pg *store.PostgresStore, store
 				Config: req.Config, ExecutionPosture: req.ExecutionPosture, EntityStore: stores.ToolEntityStore, HumanTaskStore: stores.HumanTaskStore,
 				SessionRegistry: stores.SessionRegistry, ConversationStore: stores.ConversationStore,
 				MailboxStore: stores.MailboxStore, Workspace: req.Workspaces,
-				Credentials: req.Credentials, ManagedCredentials: req.ManagedCredentials, ProviderCredentials: req.ProviderCredentials,
+				NoticePresentation: req.NoticePresentation,
+				Credentials:        req.Credentials, ManagedCredentials: req.ManagedCredentials, ProviderCredentials: req.ProviderCredentials,
 				ProcessCapability: req.ProcessCapability,
 			},
 		}
@@ -643,6 +644,7 @@ type serveRuntimeBundleContextRequest struct {
 	RequireBundleScopeName bool
 	RuntimeInstanceID      string
 	ProcessWorkOwner       *worklifetime.Process
+	NoticePresentation     runtimetools.InformationalNoticePresentationSink
 }
 
 func (b serveRuntimeBundle) serveIdentityDetail() string {
@@ -1025,6 +1027,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 		ManagedCredentials:               req.ManagedCredentials,
 		ProviderCredentials:              req.ProviderCredentials,
 		ProviderTriggerCatalog:           req.ProviderTriggerCatalog,
+		NoticePresentation:               req.NoticePresentation,
 		ChannelPlans:                     req.ChannelPlans,
 		ChannelOutboundBindings:          req.ChannelBindings,
 		ScenarioDeclarations:             scenarioDeclarations,
@@ -1107,6 +1110,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	ctx = runtimecorrelation.WithRuntimeInstanceID(ctx, runtimeInstanceID)
 	ctx = runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.RuntimeScope(runtimeInstanceID))
 	presenter := newServeLifecyclePresenter(opts)
+	noticePresentation := newServeNoticePresentationSink(presenter)
 	defer presenter.finish()
 	shutdownGrace, err := runtimemanager.ResolveShutdownGrace(opts.ShutdownGrace)
 	if err != nil {
@@ -1419,6 +1423,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 			RequireBundleScopeName: len(loadedBundles) > 1,
 			RuntimeInstanceID:      runtimeInstanceID,
 			ProcessWorkOwner:       processWorkOwner,
+			NoticePresentation:     noticePresentation,
 		})
 		if err != nil {
 			presenter.failWithDiagnostic(5, "runtime_context", err, func(out io.Writer) bool {
@@ -1553,6 +1558,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 
 	ready := runtimepublicingress.NewReadinessOwner(publicIngressEnabled)
 	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, ready, mountSources, workspaceBackendPreference, credentialStore, providerCredentialStore, primaryPackLoad.ProviderTriggers.Catalog, platformPackBase, contractsRoot, bundle, source, rt, opts.Dev)
+	supervisor.noticePresentation = noticePresentation
 	supervisor.SetPlatformPackBaseGenerationOwner(platformPackBases)
 	supervisor.SetProcessCapability(processCapability)
 	supervisor.SetRuntimeConfigLoader(func() (cliapp.RuntimeConfigLoadResult, error) {
@@ -1626,6 +1632,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		PlatformPackBases:       platformPackBases,
 		RuntimeContextManager:   runtimeContextManager,
 		RuntimeSupervisor:       supervisor,
+		NoticePresentation:      noticePresentation,
 	})
 	if err != nil {
 		presenter.fail(5, "runtime_context", err)
@@ -1869,17 +1876,23 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 			feedEnabled = false
 		}
 	}
+	unreadInformationalNotices, err := stores.MailboxStore.CountUnreadInformationalNotices(ctx)
+	if err != nil {
+		presenter.fail(22, "ready", fmt.Errorf("count unread informational notices: %w", err))
+		return 1
+	}
 	if !presenter.commitReady(serveLifecycleReadyFacts{
-		ProjectName: serveLifecycleProjectName(localState, loadedBundles),
-		BundleCount: len(loadedBundles),
-		FlowCount:   flowCount,
-		AgentCount:  agentCount,
-		ToolCount:   toolCount,
-		APIListener: addrString(apiListener.Addr()),
-		MCPListener: addrString(mcpListener.Addr()),
-		ReadyAfter:  readyAfter,
-		Standing:    standing,
-		Packs:       serveLifecyclePackFacts(runtimeContexts),
+		ProjectName:                serveLifecycleProjectName(localState, loadedBundles),
+		BundleCount:                len(loadedBundles),
+		FlowCount:                  flowCount,
+		AgentCount:                 agentCount,
+		ToolCount:                  toolCount,
+		APIListener:                addrString(apiListener.Addr()),
+		MCPListener:                addrString(mcpListener.Addr()),
+		ReadyAfter:                 readyAfter,
+		Standing:                   standing,
+		Packs:                      serveLifecyclePackFacts(runtimeContexts),
+		UnreadInformationalNotices: unreadInformationalNotices,
 	}, func() { ready.Store(true) }) {
 		return 1
 	}
