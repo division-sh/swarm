@@ -20472,7 +20472,10 @@ test_specification:
       and external proof records only declare which canonical claims their sole
       executor is intended to prove.
     inventory:
-      discovery: Every directory matching tests/tier*/* is a fixture.
+      discovery: >
+        Every directory matching tests/tier*/* is a classified fixture. Every package.yaml below examples/ and every
+        admitted scaffold archetype is additionally a required passing bundle; nested example packages are included
+        rather than inferred through their parent.
       metadata_owner: Each fixture's expected.yaml top-level conformance block.
       fail_closed: >
         A missing expected.yaml or conformance block, an invalid disposition,
@@ -20481,7 +20484,10 @@ test_specification:
         proof records additionally fail on missing or duplicate sources, missing
         executor packages, absence of exactly one unfiltered package owner in
         every required CI profile, unknown or multiply credited claims, and
-        malformed repository-relative paths.
+        malformed repository-relative paths. The required verify/boot gate runs
+        every classified tier fixture, discovered example package, and admitted
+        archetype through the supported verifier, reports every failing bundle in
+        one pass, and is mutation-proven to name a newly broken bundle.
       dispositions:
         runtime: >
           The fixture must pass supported swarm verify and execute its exact
