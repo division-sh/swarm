@@ -112,6 +112,8 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/shutdown_admission.go:BeginContext:http_do:1":                                                       ownerRuntimeDependency,
 	"internal/runtime/testfixtures/notifyallchildren/fixture.go:copyTree:filesystem_write:1":                              ownerBuildTest,
 	"internal/runtime/testfixtures/notifyallchildren/fixture.go:copyTree:filesystem_write:2":                              ownerBuildTest,
+	"internal/runtime/testfixtures/flowownedprojectagent/fixture.go:write:filesystem_write:1":                             ownerBuildTest,
+	"internal/runtime/testfixtures/flowownedprojectagent/fixture.go:write:filesystem_write:2":                             ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/fixture.go:AddOverlayFile:filesystem_write:1":                         ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/fixture.go:AddOverlayFile:filesystem_write:2":                         ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/fixture.go:SetOverlayFile:filesystem_write:1":                         ownerBuildTest,
