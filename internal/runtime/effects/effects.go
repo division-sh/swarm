@@ -1,6 +1,7 @@
 package effects
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -251,17 +252,61 @@ type AuthorizeRequest struct {
 }
 
 type Attempt struct {
-	OperationID  string
-	AttemptID    string
-	Token        LifecycleToken
-	Authority    Authority
-	Kind         Kind
-	Class        EffectClass
-	Adapter      string
-	Transport    string
-	Ordinal      int
-	AuthorizedAt time.Time
-	Origin       CompletionOrigin
+	OperationID      string
+	AttemptID        string
+	Token            LifecycleToken
+	Authority        Authority
+	Kind             Kind
+	Class            EffectClass
+	Adapter          string
+	Transport        string
+	Ordinal          int
+	AuthorizedAt     time.Time
+	Origin           CompletionOrigin
+	completionReplay json.RawMessage
+}
+
+const completionReplayEvidenceKey = "completion_replay_v1"
+
+// AttachCompletionReplayEvidence records one canonical parsed provider
+// response in the immutable settlement evidence for exact continuation.
+func AttachCompletionReplayEvidence(evidence map[string]any, payload json.RawMessage) error {
+	if evidence == nil {
+		return fmt.Errorf("completion replay evidence map is required")
+	}
+	payload = bytes.TrimSpace(payload)
+	if len(payload) == 0 || !json.Valid(payload) {
+		return fmt.Errorf("completion replay payload must be valid JSON")
+	}
+	evidence[completionReplayEvidenceKey] = append(json.RawMessage(nil), payload...)
+	return nil
+}
+
+// AdmitCompletionReplay projects immutable settled evidence onto the current
+// fenced delivery authority. The selected store must prove the operation,
+// request, plan, source bundle, and durable delivery identity before calling.
+func AdmitCompletionReplay(attempt Attempt, evidence json.RawMessage) (Attempt, error) {
+	if attempt.Kind != KindProviderTurn || attempt.Authority.Kind != AuthorityNormalAgent ||
+		attempt.Origin.Kind != CompletionOriginDelivery {
+		return Attempt{}, fmt.Errorf("completion replay requires a normal provider delivery attempt")
+	}
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(evidence, &document); err != nil {
+		return Attempt{}, fmt.Errorf("decode completion replay evidence: %w", err)
+	}
+	payload := bytes.TrimSpace(document[completionReplayEvidenceKey])
+	if len(payload) == 0 || !json.Valid(payload) {
+		return Attempt{}, fmt.Errorf("settled completion replay evidence is missing or invalid")
+	}
+	attempt.completionReplay = append(json.RawMessage(nil), payload...)
+	return attempt, nil
+}
+
+func (a Attempt) CompletionReplay() (json.RawMessage, bool) {
+	if len(a.completionReplay) == 0 {
+		return nil, false
+	}
+	return append(json.RawMessage(nil), a.completionReplay...), true
 }
 
 type Settlement struct {
@@ -748,12 +793,22 @@ func (h *Handle) Attempt() Attempt {
 	return h.attempt
 }
 
+func (h *Handle) CompletionReplay() (json.RawMessage, bool) {
+	if h == nil {
+		return nil, false
+	}
+	return h.attempt.CompletionReplay()
+}
+
 func (h *Handle) MarkLaunched(ctx context.Context) error {
 	if h == nil {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_effect_handle_missing", "external-effects", "launch_attempt", nil)
 	}
 	if h.differentOwner != "" {
 		return nil
+	}
+	if _, replay := h.attempt.CompletionReplay(); replay {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_replay_dispatch_forbidden", "external-effects", "launch_attempt", map[string]any{"attempt_id": h.attempt.AttemptID})
 	}
 	return h.controller.MarkLaunched(ctx, h.attempt)
 }
@@ -764,6 +819,9 @@ func (h *Handle) Heartbeat(ctx context.Context, lease time.Duration) error {
 	}
 	if lease <= 0 {
 		return runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_heartbeat_lease_invalid", "llm-completion-authority", "heartbeat_attempt", map[string]any{"attempt_id": h.attempt.AttemptID})
+	}
+	if _, replay := h.attempt.CompletionReplay(); replay {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_replay_heartbeat_forbidden", "external-effects", "heartbeat_attempt", map[string]any{"attempt_id": h.attempt.AttemptID})
 	}
 	store := h.controller.completionHeartbeatStore
 	if store == nil {
@@ -779,6 +837,9 @@ func (h *Handle) MarkResponseObserved(ctx context.Context, evidence map[string]a
 	if h.differentOwner != "" {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_execution_authority_missing", "external-effects", "observe_response", nil)
 	}
+	if _, replay := h.attempt.CompletionReplay(); replay {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_replay_observation_forbidden", "external-effects", "observe_response", map[string]any{"attempt_id": h.attempt.AttemptID})
+	}
 	return h.controller.MarkResponseObserved(ctx, h.attempt, evidence)
 }
 
@@ -788,6 +849,9 @@ func (h *Handle) Settle(ctx context.Context, state State, failure *runtimefailur
 	}
 	if h.differentOwner != "" {
 		return nil
+	}
+	if _, replay := h.attempt.CompletionReplay(); replay {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_replay_settlement_forbidden", "external-effects", "settle_attempt", map[string]any{"attempt_id": h.attempt.AttemptID})
 	}
 	return h.controller.Settle(ctx, Settlement{
 		OperationID: h.attempt.OperationID, AttemptID: h.attempt.AttemptID,
@@ -807,6 +871,9 @@ func (h *Handle) SettleCompletion(ctx context.Context, settlement CompletionSett
 	store := h.controller.completionStore
 	if store == nil {
 		return CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "completion_settlement_store_missing", "llm-completion-authority", "settle_completion", nil)
+	}
+	if _, replay := h.attempt.CompletionReplay(); replay {
+		return CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_replay_resettlement_forbidden", "llm-completion-authority", "settle_completion", map[string]any{"attempt_id": h.attempt.AttemptID})
 	}
 	settlement.Settlement.OperationID = h.attempt.OperationID
 	settlement.Settlement.AttemptID = h.attempt.AttemptID

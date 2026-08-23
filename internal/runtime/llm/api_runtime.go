@@ -455,6 +455,17 @@ func (r *AnthropicAPIRuntime) sendRequest(ctx context.Context, payload []byte, m
 		return nil, anthropicResponse{}, nil, err
 	}
 	dispatch := newCompletionDispatch(attempt, runtimeeffects.StateOutcomeUncertain)
+	if replay, err := completionReplayForHandle(attempt, "anthropic_api"); err != nil {
+		return nil, anthropicResponse{}, dispatch, err
+	} else if replay != nil {
+		var parsed anthropicResponse
+		if err := json.Unmarshal(replay.Response.Raw, &parsed); err != nil {
+			return nil, anthropicResponse{}, dispatch, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_replay_provider_payload_invalid", "anthropic-adapter", "replay_completion", nil, err)
+		}
+		dispatch.replay = replay
+		dispatch.state = runtimeeffects.StateSettled
+		return append([]byte(nil), replay.Response.Raw...), parsed, dispatch, nil
+	}
 	heartbeatCtx, heartbeat, err := startCompletionAttemptHeartbeat(ctx, attempt)
 	if err != nil {
 		dispatch.state = runtimeeffects.StateTerminalFailure

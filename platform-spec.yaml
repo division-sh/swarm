@@ -5786,7 +5786,10 @@ engine:
         subsystem constructors, tests, or service-locator returns. When any required closed selected-store operation
         is absent, WorkflowPersistence is invalid and pipeline construction fails closed. Durable coordinator construction validates every required
         workflow role before returning a reachable coordinator. Postgres remains authoritative for
-        production cross-runtime transaction and claim semantics.
+        production cross-runtime transaction and claim semantics. Workflow state revision compare-and-set is the
+        cross-process concurrency owner. A lost comparison returns the typed retryable
+        workflow_engine_state_revision_conflict classification only after every paired mutation fact has rolled back;
+        the executable-delivery lifecycle then retries from newly loaded state.
       instance_identity:
         owner: runtimeflowidentity.Route
         rule: >
@@ -6031,7 +6034,10 @@ engine:
         excludes renewal while the transaction commits, records the exact committed claim without canceling handler context,
         and stops and joins only after declared post-commit dispatch returns. Missing or mismatched settlement evidence fails
         closed; mutation-free handled outcomes retain their named delivery-only settlement. Missing publication evidence fails
-        closed; continuation dispatch never re-appends or reconstructs the child publication. When an accepted agent delivery emits the event that terminalizes its own flow
+        closed; continuation dispatch never re-appends or reconstructs the child publication. A workflow engine revision
+        compare-and-set loss is a typed retryable lifecycle conflict: its complete node mutation rolls back and the exact
+        inbound delivery returns to the durable lifecycle owner for a fresh state read. It is never normalized into a
+        terminal handler failure or repaired by process-local route serialization. When an accepted agent delivery emits the event that terminalizes its own flow
         instance, lifecycle ownership fences that exact route before returning from terminalization but retains the current
         durable generation until the accepted route carrier settles. The agent loop then commits the terminal lifecycle
         transition and removes the route from its finalizer. Terminal authority cannot overtake tool-follow-up effects that
@@ -14119,6 +14125,8 @@ platform_tables:
         One actual transport/process/write attempt under a durable external-effect operation. A normal-provider origin
         is exactly one closed delivery or directive-operation snapshot rather than a foreign key: destructive reset may
         delete mutable origin history only after all provider authority is terminal, while no-redispatch evidence survives.
+        Successful normal-provider settlement evidence also owns the canonical parsed response required to continue the
+        exact durable delivery after a crash between completion settlement and delivery settlement.
       ddl: |
         CREATE TABLE runtime_external_effect_attempts (
             attempt_id         UUID PRIMARY KEY,
@@ -35678,7 +35686,7 @@ managed_agent_capability_surface:
   enforcement:
     mcp: tools/list exposes only planned surface tools whose exact delivered name, description, and schema match the canonical candidate definition identity for the same typed concrete actor, provider-turn, and managed-execution authority; any difference records a typed mismatch and denies the complete surface. tools/call settles exact provider-turn MCP visibility from the provider-owned call occurrence before authorization and rejects missing, mismatched, unavailable, unplanned, differently authorized, cross-identity, missing-coordinate, or replayed calls before executor dispatch.
     executor_relay: Tool executor, local runtime, and relay paths consume the exact provider-turn surface and managed-execution admission. They cannot recompute a broader set from actor declarations, names, prompts, or provider defaults.
-    managed_effects: Every normal-agent, selected-contract-fork, or startup-probe managed effect attempt other than the separately owned forkchat sandbox persists its exact capability_surface_id. Normal-agent admission requires exact equality among lifecycle identity, usage-target identity, and capability-surface identity. The logical operation persists the authority-independent capability_plan_fingerprint, so an eligible retry may bind a new preallocated turn surface but cannot widen or otherwise replace the callable plan. Forkchat attempts carry neither value.
+    managed_effects: Every normal-agent, selected-contract-fork, or startup-probe managed effect attempt other than the separately owned forkchat sandbox persists its exact capability_surface_id. Normal-agent admission requires exact equality among lifecycle identity, usage-target identity, and capability-surface identity. The logical operation persists the authority-independent capability_plan_fingerprint, so an eligible retry may bind a new preallocated turn surface but cannot widen or otherwise replace the callable plan. For a normal provider delivery continuation, this fingerprint excludes only the process-generation execution authority and stateless session UUID; it retains exact actor, run, turn ordinal, provider contract, tool definitions, bindings, and effective callability. Selected-fork surfaces retain their exact execution coordinates. Forkchat attempts carry neither value.
   persistence:
     rule: agent_turns references exactly one provider-turn capability_surface_id. PostgreSQL and SQLite persist the same integrity-checked surface with its complete typed concrete actor identity; actor_id columns are derived index projections only. Settlement and recovery independently compare the persisted surface identity with the exact usage-target and turn identities. Flat available_tools, mcp_servers, mcp_tools_listed, mcp_tools_visible, compatibility views, dual writes, tolerant readers, and reconstruction from transcripts are forbidden.
     migration: Any non-current selected-store shape fails closed before runtime access. Empty or populated legacy tables are not upgraded, migrated, adopted, or interpreted as capability evidence.
@@ -35704,7 +35712,7 @@ managed_external_effect_authority:
     different_owner: Runtime dependency, pipeline activity, credential lifecycle, operator infrastructure, and build/test infrastructure calls use a closed typed different-owner context. Unknown owner labels and missing lifecycle context fail closed.
   logical_operation:
     identity: For normal agents, a deterministic operation_id is derived from the stable complete typed concrete agent identity, typed inbound/explicit logical identity, deterministic provider-turn or provider-owned tool-call occurrence coordinate, adapter, and declared lineage. Same-slug concrete siblings are distinct. Exact replay and successor lifecycle generations of the same concrete identity remain stable. Selected-contract-fork, conversation-fork-chat, and startup-probe authority derivations remain owned by their exact execution authorities. Runtime epoch and generation are deliberately excluded so the same logical work cannot redispatch after restart; they remain fenced evidence on the original operation/attempt. Request bytes are excluded from identity and stored as a separate fingerprint.
-    replay: Authorization loads the existing operation and latest attempt under the same operation_id. Exact replay is refused without dispatch; launched, response-observed, settled, or uncertain replay never dispatches; changed request or registration fields return a fingerprint conflict.
+    replay: Authorization loads the existing operation and latest attempt under the same operation_id. Exact replay is refused without dispatch; launched, response-observed, or uncertain replay never dispatches; changed request or registration fields return a fingerprint conflict. One settled normal-provider exception is closed over the same durable delivery identity after lease-fenced reclaim. When operation/request/callable-plan/bundle/actor/run/route/subscriber facts match exactly and immutable settlement evidence contains the canonical parsed provider response, authorization projects that response onto the current claim without creating an operation, attempt, reservation, spend, or provider dispatch. Claim token/version and process/session coordinates must be current but are not durable work identity. The normal adapter tool/output loop consumes the response and the Manager later settles the current delivery. Missing/corrupt evidence, directive origins, foreign delivery facts, or any semantic mismatch fail closed.
     attempts: One actual attempt is authorized for each logical operation except Claude CLI may allocate the next ordinal after the preceding attempt has exact durable zero-process-launch proof, and provider_registration may allocate the next ordinal only after the preceding attempt settled terminal_failure with exact launch_rejected=true and zero provider dispatch. The attempt ID is deterministically derived from operation_id and ordinal. No adapter creates a later ordinal after launch, response observation, settlement, or outcome uncertainty.
   effect_classes:
     read_only: The platform contract proves the operation cannot mutate business, workspace, or provider state.
@@ -35725,6 +35733,10 @@ managed_external_effect_authority:
       mutable projection, and atomic provider-head settlement failure, settles the attempt platform.outcome_uncertain with
       adapter-specific evidence while preserving the original failure as the returned classification; automatic redispatch is forbidden.
     current_completion: Successor-facing session, conversation, watchdog, provider-head, turn-count, and rotation projection is lifecycle-token validated at the same selected-store mutation boundary as immutable completion evidence. Current projection and evidence commit together.
+    current_delivery_response_continuation:
+      owner: settled runtime_external_effect_attempt evidence plus selected-store authorization and the normal provider adapter loop
+      rule: A crash after atomic completion settlement but before delivery settlement reuses the canonical parsed response only for the same reclaimed normal-agent delivery. Every provider transport/process launch, heartbeat, response observation, completion resettlement, budget reservation, and spend write is structurally unavailable on this projection. Tool calls and output publication execute through their existing exact domain-idempotency owners before the current delivery can settle.
+      forbidden: [provider redispatch, inferred latest turn, raw transcript reconstruction, claim-token reuse, cross-delivery replay, current-plan widening, direct delivery settlement before response consumption]
     predecessor_drain:
       owner: runtime_provider_attempt_drains plus one named selected-store drained completion operation
       capture: A lifecycle transition captures every exact normal-agent provider attempt in launched or response_observed under the lifecycle-cell lock. The row binds the complete predecessor token, successor generation, lifecycle transition, target phase, operation/attempt, expiry, and exact closed delivery or directive-operation origin.
@@ -35754,6 +35766,14 @@ managed_external_effect_authority:
       owner: selected-store external-effect recovery before delivery recovery
       rule: Every captured or crash-stranded provider attempt converges to exact terminal evidence and origin outcome without provider dispatch, and repeated recovery is idempotent.
       negative_proof: TestProviderAttemptDrainStartupRecoveryParity, TestProviderAttemptDrainTerminalRunRecoveryParity, TestProviderDirectiveOriginRecoveryParity, and TestClaudeProviderHeadCommitFailureSettlesUncertain
+    runtime.provider_attempt.settled_delivery_response_continuation:
+      owner: immutable settled attempt evidence plus exact selected-store delivery authorization
+      rule: A reclaimed normal-agent delivery whose provider attempt already settled may consume only its canonical parsed response under a current claim after exact operation, request, callable-plan, bundle, actor, run, route, subscriber, and delivery identity verification. It cannot launch, observe, resettle, reserve budget, record spend, or cross a delivery or directive boundary.
+      negative_proof: TestSettledProviderResponseContinuesExactReclaimedDeliverySQLite, TestSettledProviderResponseContinuesExactReclaimedDeliveryPostgres, TestCompletionReplayCannotDispatchOrResettle, and TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends
+    runtime.workflow_engine.state_revision_retry:
+      owner: workflow engine state compare-and-set plus executable delivery lifecycle
+      rule: A workflow state revision compare-and-set loss rolls back the complete paired mutation and returns a typed retryable lifecycle conflict so the exact delivery reloads current state; it is never terminalized as handler failure.
+      negative_proof: TestWorkflowEngineStateRevisionConflictIsRetryable and TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends
     runtime.provider_attempt.tail_lease_coupled:
       owner: selected-store completion heartbeat plus the exact generation-to-process renewal handoff
       rule: A live normal-provider tail retains its effect attempt, exact delivery claim or directive execution lease, and pending drain through one atomic heartbeat; no generation-owned origin heartbeat concurrently interprets liveness during that tail.

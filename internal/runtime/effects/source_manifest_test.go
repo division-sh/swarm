@@ -59,6 +59,8 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/bus/eventbus.go:acquire:http_do:1":                                                                  ownerRuntimeDependency,
 	"internal/runtime/bus/eventbus.go:Done:http_do:1":                                                                     ownerRuntimeDependency,
 	"internal/runtime/deliverylifecycle/heartbeat.go:Finish:http_do:1":                                                    ownerRuntimeDependency,
+	"internal/runtime/deliverylifecycle/heartbeat.go:Abort:http_do:1":                                                     ownerRuntimeDependency,
+	"internal/runtime/deliverylifecycle/heartbeat.go:MarkCommitted:http_do:1":                                             ownerRuntimeDependency,
 	"internal/runtime/deliverylifecycle/heartbeat.go:Stop:http_do:1":                                                      ownerRuntimeDependency,
 	"internal/runtime/bus/eventbus_routing.go:Complete:http_do:1":                                                         ownerRuntimeDependency,
 	"internal/runtime/bus/eventbus_routing.go:MarkReady:http_do:1":                                                        ownerRuntimeDependency,

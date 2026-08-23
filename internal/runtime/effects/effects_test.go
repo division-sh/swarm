@@ -178,6 +178,46 @@ func TestCompletionControllerRequiresSettlementProjectionOwner(t *testing.T) {
 	}
 }
 
+func TestCompletionReplayCannotDispatchOrResettle(t *testing.T) {
+	store := &completionStoreProbe{}
+	attempt, err := AdmitCompletionReplay(Attempt{
+		OperationID: "operation", AttemptID: "attempt", Kind: KindProviderTurn,
+		Authority: Authority{Kind: AuthorityNormalAgent},
+		Origin:    CompletionOrigin{Kind: CompletionOriginDelivery},
+	}, []byte(`{"completion_replay_v1":{"version":1}}`))
+	if err != nil {
+		t.Fatalf("admit completion replay: %v", err)
+	}
+	handle := &Handle{
+		controller: NewCompletionController(store, store, store, completionProjectionProbe{}),
+		attempt:    attempt,
+	}
+
+	checks := []struct {
+		name string
+		call func() error
+	}{
+		{name: "launch", call: func() error { return handle.MarkLaunched(context.Background()) }},
+		{name: "heartbeat", call: func() error { return handle.Heartbeat(context.Background(), time.Second) }},
+		{name: "response observation", call: func() error { return handle.MarkResponseObserved(context.Background(), nil) }},
+		{name: "generic settlement", call: func() error { return handle.Succeed(context.Background(), nil) }},
+		{name: "completion settlement", call: func() error {
+			_, settleErr := handle.SettleCompletion(context.Background(), CompletionSettlement{})
+			return settleErr
+		}},
+	}
+	for _, check := range checks {
+		t.Run(check.name, func(t *testing.T) {
+			if err := check.call(); err == nil {
+				t.Fatal("replay handle reached a forbidden provider-attempt mutation")
+			}
+		})
+	}
+	if store.launches != 0 {
+		t.Fatalf("provider launches = %d, want 0", store.launches)
+	}
+}
+
 func TestBeginCompletionRejectsCapabilitySurfaceFromDifferentRun(t *testing.T) {
 	token := effectLifecycleToken(t, 7, "agent-a", 3)
 	admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "test-execution-authority", 1, "", "test-actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)

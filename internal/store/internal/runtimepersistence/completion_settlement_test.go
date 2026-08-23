@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -195,6 +196,89 @@ func loadCompletionFrameBytes(t *testing.T, fixture completionSettlementFixture,
 		t.Fatalf("load %s frame bytes: %v", table, err)
 	}
 	return got
+}
+
+func TestSettledProviderResponseContinuesExactReclaimedDeliverySQLite(t *testing.T) {
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	proveSettledProviderResponseContinuesExactReclaimedDelivery(t, newCompletionSettlementFixture(t, store, store.backend.ConstructionHandle(), true))
+}
+
+func TestSettledProviderResponseContinuesExactReclaimedDeliveryPostgres(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	proveSettledProviderResponseContinuesExactReclaimedDelivery(t, newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false))
+}
+
+func proveSettledProviderResponseContinuesExactReclaimedDelivery(t *testing.T, fixture completionSettlementFixture) {
+	t.Helper()
+	const operation = "settled-provider-response-continuation"
+	const request = "stable-provider-request"
+	ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, operation)
+	handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", request)
+	settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "anthropic_api", "", "")
+	settlement.ProviderHead = nil
+	if err := runtimeeffects.AttachCompletionReplayEvidence(settlement.Settlement.Evidence, []byte(`{"version":"test-replay"}`)); err != nil {
+		t.Fatalf("attach completion replay evidence: %v", err)
+	}
+	if _, err := handle.SettleCompletion(ctx, settlement); err != nil {
+		t.Fatalf("settle original completion: %v", err)
+	}
+
+	expireProviderOriginLease(t, fixture, fixture.origin)
+	deliveryStore := fixture.store.(deliveryFixtureStore)
+	snapshot, err := deliveryStore.Snapshot(testAuthorActivityContext(), fixture.origin.DeliveryID())
+	if err != nil {
+		t.Fatalf("load expired origin snapshot: %v", err)
+	}
+	event := loadCompletionOriginEvent(t, fixture, snapshot.EventID)
+	claimed, err := deliveryStore.ClaimDelivery(testAuthorActivityContext(), snapshot.Authority, event, snapshot.Route)
+	if err != nil {
+		t.Fatalf("reclaim exact completion origin: %v", err)
+	}
+	reclaimed, ok := claimed.Acquired()
+	if !ok {
+		t.Fatalf("completion origin reclaim disposition=%s, want acquired", claimed.Disposition)
+	}
+
+	successor := fixture.authority
+	successor.Normal.Generation++
+	successor.FenceGeneration = successor.Normal.Generation
+	successor.ExecutionOwner = "completion-successor"
+	successor.Target.ID = uuid.NewString()
+	successor.Target.SessionID = uuid.NewString()
+	setCompletionFixtureGeneration(t, fixture, int(successor.Normal.Generation))
+	successorCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(testAuthorActivityContext(), successor), newCompletionControllerForTest(fixture.store))
+	successorCtx = runtimedelivery.WithClaim(successorCtx, reclaimed.Claim)
+	successorCtx = runtimeeffects.WithLogicalOperationIdentity(successorCtx, operation)
+	successorCtx = withManagedCompletionTestSurface(t, successorCtx, successor, "anthropic_api")
+	replay, err := runtimeeffects.BeginCompletion(successorCtx, "anthropic_api", []byte(request), nil)
+	if err != nil {
+		t.Fatalf("authorize settled completion continuation: %v", err)
+	}
+	payload, ok := replay.CompletionReplay()
+	var replayDocument map[string]string
+	if !ok || json.Unmarshal(payload, &replayDocument) != nil || replayDocument["version"] != "test-replay" {
+		t.Fatalf("completion replay payload=%s present=%v", string(payload), ok)
+	}
+	if replay.Attempt().AttemptID != handle.Attempt().AttemptID || !replay.Attempt().Origin.Same(runtimeeffects.CompletionOrigin{Kind: runtimeeffects.CompletionOriginDelivery, Delivery: reclaimed.Claim}) {
+		t.Fatalf("completion replay attempt=%+v does not carry current exact origin", replay.Attempt())
+	}
+	if err := replay.MarkLaunched(successorCtx); err == nil {
+		t.Fatal("completion replay admitted a second provider launch")
+	}
+	requireProviderAttemptCount(t, fixture, 1)
+	requireCompletionSettlementRows(t, fixture, handle.Attempt().AttemptID, settlement.AgentTurn.TurnID, runtimeeffects.StateSettled, 1, 0)
+
+	if _, err := runtimeeffects.BeginCompletion(successorCtx, "anthropic_api", []byte("changed-request"), nil); err == nil {
+		t.Fatal("settled completion replay accepted changed request bytes")
+	}
+}
+
+func loadCompletionOriginEvent(t *testing.T, fixture completionSettlementFixture, eventID string) events.Event {
+	t.Helper()
+	if fixture.sqlite {
+		return loadSQLiteDeliveryFixtureEvent(t, testAuthorActivityContext(), fixture.db, eventID)
+	}
+	return loadPostgresDeliveryFixtureEvent(t, testAuthorActivityContext(), fixture.db, eventID)
 }
 
 func proveCompletionProviderHeadSettlement(t *testing.T, fixture completionSettlementFixture) {

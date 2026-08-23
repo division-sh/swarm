@@ -2521,12 +2521,13 @@ func (e *Executor) persist(ctx context.Context, frame executionFrame) (Committed
 		prerequisites = e.emitPersistencePrerequisites(frame)
 	}
 	return e.deps.MutationOwner.CommitEngineMutation(ctx, EngineMutation{
-		Address:           frame.req.StateAddress(),
-		State:             frame.result.StateMutation,
-		LifecycleEffects:  effects,
-		ActivityIntents:   append([]ActivityIntent(nil), frame.result.ActivityIntents...),
-		EmitIntents:       append([]EmitIntent(nil), frame.result.EmitIntents...),
-		EmitPrerequisites: prerequisites,
+		Address:              frame.req.StateAddress(),
+		State:                frame.result.StateMutation,
+		HandlerRuleSelection: frame.result.HandlerRuleSelection,
+		LifecycleEffects:     effects,
+		ActivityIntents:      append([]ActivityIntent(nil), frame.result.ActivityIntents...),
+		EmitIntents:          append([]EmitIntent(nil), frame.result.EmitIntents...),
+		EmitPrerequisites:    prerequisites,
 	})
 }
 

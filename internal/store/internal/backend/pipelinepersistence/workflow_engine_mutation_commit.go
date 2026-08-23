@@ -12,6 +12,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -131,7 +132,7 @@ func commitPostgresWorkflowEngineState(ctx context.Context, tx *sql.Tx, record r
 		return fmt.Errorf("read workflow engine state update: %w", err)
 	}
 	if rows != 1 {
-		return fmt.Errorf("workflow engine state changed before commit: route=%s revision=%d state=%s", record.Route.InstancePath, record.ExpectedRevision, record.ExpectedState)
+		return workflowEngineStateRevisionConflict(record)
 	}
 	if record.Transition == runtimepipeline.WorkflowEngineStateTransitionUpdateStateCreateCompanion {
 		if _, err := tx.ExecContext(ctx, `
@@ -239,7 +240,7 @@ func commitSQLiteWorkflowEngineState(ctx context.Context, tx *sql.Tx, record run
 		return fmt.Errorf("read workflow engine state update: %w", err)
 	}
 	if rows != 1 {
-		return fmt.Errorf("workflow engine state changed before commit: route=%s revision=%d state=%s", record.Route.InstancePath, record.ExpectedRevision, record.ExpectedState)
+		return workflowEngineStateRevisionConflict(record)
 	}
 	if record.Transition == runtimepipeline.WorkflowEngineStateTransitionUpdateStateCreateCompanion {
 		if _, err := tx.ExecContext(ctx, `
@@ -270,6 +271,19 @@ func commitSQLiteWorkflowEngineState(ctx context.Context, tx *sql.Tx, record run
 		return fmt.Errorf("workflow engine flow instance is missing: %s", record.Route.InstancePath)
 	}
 	return nil
+}
+
+func workflowEngineStateRevisionConflict(record runtimepipeline.WorkflowEngineStateRecord) error {
+	return runtimefailures.New(
+		runtimefailures.ClassLifecycleConflict,
+		"workflow_engine_state_revision_conflict",
+		"workflow-engine-persistence",
+		"commit_state",
+		map[string]any{
+			"route": record.Route.InstancePath, "expected_revision": record.ExpectedRevision,
+			"expected_state": record.ExpectedState,
+		},
+	)
 }
 
 func verifyWorkflowEngineFlowDescriptor(ctx context.Context, tx *sql.Tx, postgres bool, record runtimepipeline.WorkflowEngineStateRecord) error {
@@ -600,6 +614,7 @@ func commitWorkflowEngineMutation(
 				success.Claim,
 				append([]string(nil), success.SideEffects...),
 				success.Duration,
+				success.RuleSelection,
 			); err != nil {
 				return fmt.Errorf("settle workflow node delivery with engine mutation: %w", err)
 			}

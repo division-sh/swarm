@@ -175,9 +175,10 @@ type WorkflowEngineMutationCommand struct {
 // WorkflowEngineDeliverySuccess declares the exact inbound node claim that
 // must become terminal in the same transaction as its successful mutation.
 type WorkflowEngineDeliverySuccess struct {
-	Claim       runtimedelivery.Claim
-	SideEffects []string
-	Duration    time.Duration
+	Claim         runtimedelivery.Claim
+	SideEffects   []string
+	Duration      time.Duration
+	RuleSelection runtimedelivery.HandlerRuleSelectionFact
 }
 
 func (s WorkflowEngineDeliverySuccess) Validate(runID string) error {
@@ -192,6 +193,9 @@ func (s WorkflowEngineDeliverySuccess) Validate(runID string) error {
 	}
 	if s.Duration < 0 {
 		return fmt.Errorf("workflow engine delivery success duration cannot be negative")
+	}
+	if err := s.RuleSelection.Validate(); err != nil {
+		return fmt.Errorf("workflow engine delivery success rule selection: %w", err)
 	}
 	if len(s.SideEffects) != 1 || strings.TrimSpace(s.SideEffects[0]) != "handler_completed" {
 		return fmt.Errorf("workflow engine delivery success requires the exact handler_completed effect")

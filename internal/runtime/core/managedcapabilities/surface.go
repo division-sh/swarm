@@ -173,6 +173,17 @@ type Plan struct {
 // PlanFingerprint identifies the exact callable plan independently of the
 // preallocated per-attempt authority and provider-observation evidence.
 func (s Surface) PlanFingerprint() (string, error) {
+	return s.planFingerprint(false)
+}
+
+// ContinuationFingerprint identifies the durable callable plan for a normal
+// provider turn. Process-generation and stateless-session coordinates are
+// deliberately excluded; actor, run, turn, provider, and tool facts remain.
+func (s Surface) ContinuationFingerprint() (string, error) {
+	return s.planFingerprint(true)
+}
+
+func (s Surface) planFingerprint(continuation bool) (string, error) {
 	if err := s.Validate(); err != nil {
 		return "", err
 	}
@@ -191,6 +202,10 @@ func (s Surface) PlanFingerprint() (string, error) {
 	}
 	authority := s.Authority
 	authority.ID = ""
+	if continuation && authority.Kind == AuthorityProviderTurn && authority.ExecutionKind == ExecutionNormalAgent {
+		authority.ExecutionAuthorityID = ""
+		authority.SessionID = ""
+	}
 	return hashValue(struct {
 		Version          string
 		ActorIdentity    agentidentity.Identity

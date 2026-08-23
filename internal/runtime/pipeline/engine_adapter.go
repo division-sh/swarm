@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
@@ -91,7 +92,7 @@ type pipelineEngineMutationOwner struct {
 	activities  runtimeengine.ActivityIntentWriter
 }
 
-func beginWorkflowEngineDeliverySuccess(ctx context.Context) (*WorkflowEngineDeliverySuccess, *runtimedelivery.ClaimSettlementGuard, error) {
+func beginWorkflowEngineDeliverySuccess(ctx context.Context, selection handlerselection.HandlerRuleSelectionFact) (*WorkflowEngineDeliverySuccess, *runtimedelivery.ClaimSettlementGuard, error) {
 	claim, hasClaim := runtimedelivery.ClaimFromContext(ctx)
 	heartbeat, hasHeartbeat := runtimedelivery.ClaimHeartbeatFromContext(ctx)
 	if !hasClaim && !hasHeartbeat {
@@ -109,6 +110,7 @@ func beginWorkflowEngineDeliverySuccess(ctx context.Context) (*WorkflowEngineDel
 	}
 	return &WorkflowEngineDeliverySuccess{
 		Claim: claim, SideEffects: []string{"handler_completed"}, Duration: heartbeat.ExecutionDuration(),
+		RuleSelection: admittedHandlerRuleSelection(selection),
 	}, guard, nil
 }
 
@@ -229,7 +231,7 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 		postCommit := WorkflowEnginePostCommitPlan{FlowDeactivation: &WorkflowEngineFlowDeactivation{
 			Route: mutation.Address.Route, EntityID: mutation.Address.EntityID.String(), NextState: state.CurrentState,
 		}}
-		deliverySuccess, settlementGuard, err := beginWorkflowEngineDeliverySuccess(ctx)
+		deliverySuccess, settlementGuard, err := beginWorkflowEngineDeliverySuccess(ctx, mutation.HandlerRuleSelection)
 		if err != nil {
 			if o.publication != nil {
 				err = errors.Join(err, o.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), publications))
@@ -360,7 +362,7 @@ func (o pipelineEngineMutationOwner) commitEntitylessEngineMutation(ctx context.
 	if err != nil {
 		return runtimeengine.CommittedEngineMutation{}, err
 	}
-	deliverySuccess, settlementGuard, err := beginWorkflowEngineDeliverySuccess(ctx)
+	deliverySuccess, settlementGuard, err := beginWorkflowEngineDeliverySuccess(ctx, mutation.HandlerRuleSelection)
 	if err != nil {
 		if o.publication != nil {
 			err = errors.Join(err, o.publication.ReleaseEnginePublications(context.WithoutCancel(ctx), publications))

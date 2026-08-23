@@ -303,6 +303,14 @@ func executeMockCompletionWithExecutor(ctx context.Context, actor runtimeactors.
 	}
 	dispatch := newCompletionDispatch(attempt, runtimeeffects.StateTerminalFailure)
 	dispatch.providerModel = providerModel
+	if replay, err := completionReplayForHandle(attempt, "mock_python"); err != nil {
+		return nil, nil, estimatedMockUsage(request, nil, model), dispatch, err
+	} else if replay != nil {
+		response := replay.Response
+		dispatch.replay = replay
+		dispatch.state = runtimeeffects.StateSettled
+		return &response, append([]byte(nil), response.Raw...), replay.Usage, dispatch, nil
+	}
 	heartbeatCtx, heartbeat, err := startCompletionAttemptHeartbeat(ctx, attempt)
 	if err != nil {
 		return nil, nil, estimatedMockUsage(request, nil, model), dispatch, err
