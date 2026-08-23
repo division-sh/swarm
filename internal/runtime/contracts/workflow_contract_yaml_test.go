@@ -109,6 +109,12 @@ func TestFlowPackageConnectDecodePinsCanonicalEventCentricShape(t *testing.T) {
 	if connect.Event != "work.ready" || connect.From != "producer" || connect.To != "consumer" || connect.Rename != "work.accepted" || connect.Adapter != "ready_to_accepted" {
 		t.Fatalf("canonical connect = %#v", connect)
 	}
+	if err := yaml.Unmarshal([]byte("event: producer/work.ready\nfrom: producer\nto: consumer\nrename: consumer/work.accepted\n"), &connect); err != nil {
+		t.Fatalf("decode canonical slash-qualified connect row: %v", err)
+	}
+	if connect.Event != "producer/work.ready" || connect.Rename != "consumer/work.accepted" {
+		t.Fatalf("slash-qualified connect = %#v", connect)
+	}
 
 	tests := []struct {
 		name string
@@ -119,6 +125,10 @@ func TestFlowPackageConnectDecodePinsCanonicalEventCentricShape(t *testing.T) {
 		{name: "missing source", yaml: "event: work.ready\nto: consumer\n", want: "requires non-empty event, from, and to"},
 		{name: "missing receiver", yaml: "event: work.ready\nfrom: producer\n", want: "requires non-empty event, from, and to"},
 		{name: "redundant rename", yaml: "event: work.ready\nfrom: producer\nto: consumer\nrename: work.ready\n", want: "redundant with event"},
+		{name: "leading slash event", yaml: "event: /work.ready\nfrom: producer\nto: consumer\n", want: "exact canonical event identity"},
+		{name: "trailing slash event", yaml: "event: work.ready/\nfrom: producer\nto: consumer\n", want: "exact canonical event identity"},
+		{name: "normalized equal rename", yaml: "event: work.ready\nfrom: producer\nto: consumer\nrename: /work.ready/\n", want: "redundant with event"},
+		{name: "non-canonical rename", yaml: "event: work.ready\nfrom: producer\nto: consumer\nrename: work.accepted/\n", want: "exact canonical event identity"},
 		{name: "duplicate event equal", yaml: "event: work.ready\nevent: work.ready\nfrom: producer\nto: consumer\n", want: "repeats key"},
 		{name: "duplicate endpoint conflicting", yaml: "event: work.ready\nfrom: producer\nfrom: other\nto: consumer\n", want: "repeats key"},
 	}

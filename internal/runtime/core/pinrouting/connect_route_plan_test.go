@@ -654,6 +654,61 @@ func TestCompileConnectPlansFromLoadedPackageFixture(t *testing.T) {
 	}
 }
 
+func TestCompileConnectPlansLoadedPackagePinsExactCanonicalEventIdentity(t *testing.T) {
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", "..", ".."))
+
+	for _, tc := range []struct {
+		name        string
+		connectLine string
+		want        string
+	}{
+		{name: "leading slash", connectLine: "  - event: /work.ready", want: "exact canonical event identity"},
+		{name: "trailing slash", connectLine: "  - event: work.ready/", want: "exact canonical event identity"},
+		{name: "normalized equal rename", connectLine: "  - event: work.ready\n    rename: /work.ready/", want: "redundant with event"},
+		{name: "non-canonical rename", connectLine: "  - event: work.ready\n    rename: work.accepted/", want: "exact canonical event identity"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := writeConnectRoutePlanPackageFixture(t)
+			replaceFixtureText(t, filepath.Join(root, "package.yaml"), "  - event: work.ready", tc.connectLine)
+			if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot)); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+
+	root := writeConnectRoutePlanPackageFixture(t)
+	for _, relative := range []string{
+		"package.yaml",
+		"tests/full-path.yaml",
+		"flows/producer/events.yaml",
+		"flows/producer/nodes.yaml",
+		"flows/producer/schema.yaml",
+		"flows/consumer/events.yaml",
+		"flows/consumer/nodes.yaml",
+		"flows/consumer/schema.yaml",
+	} {
+		replaceFixtureText(t, filepath.Join(root, relative), "work.ready", "work/ready")
+	}
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("load slash-qualified package: %v", err)
+	}
+	plans, issues := compileConnectPlans(semanticview.Wrap(bundle))
+	if len(issues) != 0 || len(plans) != 1 {
+		t.Fatalf("slash-qualified plans/issues = %#v/%#v, want one plan and no issues", plans, issues)
+	}
+	if got, want := plans[0].source.resolvedEvent.value, events.EventType("work/ready"); got != want {
+		t.Fatalf("source resolved event = %q, want %q", got, want)
+	}
+	if got, want := plans[0].receiver.resolvedEvent.value, events.EventType("work/ready"); got != want {
+		t.Fatalf("receiver resolved event = %q, want %q", got, want)
+	}
+}
+
 func TestLowerCompositionConnectRoutePlanWithLocationRejectsOtherwiseValidConnectWithoutSourceLocation(t *testing.T) {
 	repoRoot, err := os.Getwd()
 	if err != nil {
@@ -1832,6 +1887,21 @@ func outputEventNames(pins []runtimecontracts.FlowOutputEventPin) []string {
 func writeConnectRoutePlanPackageFixture(t *testing.T) string {
 	t.Helper()
 	return canonicalrouting.CopyExample(t, canonicalrouting.ParentConnect)
+}
+
+func replaceFixtureText(t testing.TB, path, old, replacement string) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read fixture %s: %v", path, err)
+	}
+	if !strings.Contains(string(raw), old) {
+		t.Fatalf("fixture %s does not contain %q", path, old)
+	}
+	raw = []byte(strings.ReplaceAll(string(raw), old, replacement))
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatalf("write fixture %s: %v", path, err)
+	}
 }
 
 func writeCreateResolutionConnectRoutePlanPackageFixture(t *testing.T, source string) string {
