@@ -172,7 +172,7 @@ func (r *recordingRuntimeMutationRunner) CommitWorkflowEngineMutation(ctx contex
 			if !ok {
 				return fmt.Errorf("pipeline test engine delivery settlement requires its author activity mutation")
 			}
-			if _, err := adapter.Adapter.SettleSuccess(txctx, tx, story, success.Claim, success.SideEffects, success.Duration); err != nil {
+			if _, err := adapter.Adapter.SettleSuccess(txctx, tx, story, success.Claim, success.SideEffects, success.Duration, success.RuleSelection); err != nil {
 				return err
 			}
 			claim := success.Claim

@@ -29,6 +29,7 @@ type completionDispatch struct {
 	evidence      map[string]any
 	providerModel llmselection.ResolvedModel
 	invocation    completionProviderInvocation
+	replay        *completionReplayEnvelope
 }
 
 type completionProviderInvocation uint8
@@ -51,6 +52,38 @@ func (d *completionDispatch) markProviderInvocationStarted() {
 	if d != nil {
 		d.invocation = completionProviderInvocationStarted
 	}
+}
+
+const completionReplayVersion = "provider-response.v1"
+
+type completionReplayEnvelope struct {
+	Version  string                         `json:"version"`
+	Adapter  string                         `json:"adapter"`
+	Response Response                       `json:"response"`
+	Usage    runtimeeffects.CompletionUsage `json:"usage"`
+}
+
+func completionReplayForHandle(handle *runtimeeffects.Handle, adapter string) (*completionReplayEnvelope, error) {
+	if handle == nil {
+		return nil, nil
+	}
+	raw, ok := handle.CompletionReplay()
+	if !ok {
+		return nil, nil
+	}
+	var replay completionReplayEnvelope
+	if err := json.Unmarshal(raw, &replay); err != nil {
+		return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_replay_decode_failed", "llm-completion-authority", "replay_completion", nil, err)
+	}
+	if replay.Version != completionReplayVersion || replay.Adapter != strings.TrimSpace(adapter) ||
+		strings.TrimSpace(replay.Response.Message.Role) == "" || len(replay.Response.Raw) == 0 {
+		return nil, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_replay_payload_invalid", "llm-completion-authority", "replay_completion", map[string]any{"adapter": strings.TrimSpace(adapter), "version": replay.Version})
+	}
+	if err := replay.Usage.Validate(); err != nil {
+		return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_replay_usage_invalid", "llm-completion-authority", "replay_completion", nil, err)
+	}
+	replay.Response.CapabilitySurface = nil
+	return &replay, nil
 }
 
 const (
@@ -234,7 +267,7 @@ func prepareCompletionContext(ctx context.Context, controller *runtimeeffects.Co
 	if session == nil {
 		return ctx, "", runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_session_missing", "llm-completion-authority", "prepare_completion", nil)
 	}
-	ctx = runtimeeffects.WithLogicalOperationIdentitySegment(ctx, fmt.Sprintf("completion:%s:%d", strings.TrimSpace(session.ID), session.TurnCount+1))
+	ctx = runtimeeffects.WithLogicalOperationIdentitySegment(ctx, fmt.Sprintf("completion:%d", session.TurnCount+1))
 	ctx = runtimeeffects.WithController(ctx, controller)
 	authority, ok := runtimeeffects.CompletionAuthorityFromContext(ctx)
 	if !ok {
@@ -316,6 +349,21 @@ func settleCompletionTurnWithProviderHead(ctx context.Context, dispatch *complet
 	if dispatch == nil || dispatch.handle == nil {
 		return runtimeeffects.CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_effect_handle_missing", "llm-completion-authority", "settle_completion", nil)
 	}
+	if dispatch.providerModel.ModelAlias == "" || dispatch.providerModel.ConcreteModel == "" ||
+		dispatch.providerModel.Backend != profile.ID || dispatch.providerModel.Provider != profile.Provider ||
+		dispatch.providerModel.Transport != profile.Transport || dispatch.providerModel.RuntimeMode != profile.RuntimeMode {
+		return runtimeeffects.CompletionSettlementResult{}, fmt.Errorf("completion dispatch provider selection is incomplete or does not match profile %q", profile.ID)
+	}
+	if dispatch.replay != nil {
+		if state != runtimeeffects.StateSettled || failure != nil || response == nil {
+			return runtimeeffects.CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_replay_terminal_shape_invalid", "llm-completion-authority", "settle_completion", map[string]any{"attempt_id": dispatch.handle.Attempt().AttemptID})
+		}
+		attempt := dispatch.handle.Attempt()
+		return runtimeeffects.CompletionSettlementResult{
+			Committed: true, Disposition: runtimeeffects.CompletionSettlementCurrent,
+			AttemptID: attempt.AttemptID, EntityID: strings.TrimSpace(turn.EntityID), Origin: attempt.Origin,
+		}, nil
+	}
 	// The dispatch state can narrow a provider-call failure to a proven
 	// prelaunch failure. A successful transport does not make later response
 	// conversion, usage validation, or target persistence successful.
@@ -358,6 +406,23 @@ func settleCompletionTurnWithProviderHead(ctx context.Context, dispatch *complet
 	if state != runtimeeffects.StateSettled && failure == nil {
 		envelope := runtimefailures.FromError(fmt.Errorf("completion failed without provider failure detail"), "llm-completion-authority", "settle_completion")
 		failure = &envelope.Failure
+	}
+	if state == runtimeeffects.StateSettled && response != nil {
+		if evidence == nil {
+			evidence = map[string]any{}
+		}
+		replayResponse := *response
+		replayResponse.CapabilitySurface = nil
+		raw, err := json.Marshal(completionReplayEnvelope{
+			Version: completionReplayVersion, Adapter: dispatch.handle.Attempt().Adapter,
+			Response: replayResponse, Usage: usage,
+		})
+		if err != nil {
+			return runtimeeffects.CompletionSettlementResult{}, fmt.Errorf("marshal completion replay evidence: %w", err)
+		}
+		if err := runtimeeffects.AttachCompletionReplayEvidence(evidence, raw); err != nil {
+			return runtimeeffects.CompletionSettlementResult{}, err
+		}
 	}
 	turn.Failure = failure
 	settlement := runtimeeffects.CompletionSettlement{

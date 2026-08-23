@@ -303,8 +303,9 @@ func (s *DeliveryPostgresOwner) SettleWorkflowNodeSuccessTx(
 	claim runtimedelivery.Claim,
 	sideEffects []string,
 	duration time.Duration,
+	selection runtimedelivery.HandlerRuleSelectionFact,
 ) (runtimedelivery.Snapshot, error) {
-	return postgresDeliveryAdapter.SettleSuccess(ctx, tx, story, claim, sideEffects, duration)
+	return postgresDeliveryAdapter.SettleSuccess(ctx, tx, story, claim, sideEffects, duration, selection)
 }
 
 // SettleWorkflowNodeSuccessTx terminally settles the exact inbound node claim
@@ -316,8 +317,9 @@ func (s *DeliverySQLiteOwner) SettleWorkflowNodeSuccessTx(
 	claim runtimedelivery.Claim,
 	sideEffects []string,
 	duration time.Duration,
+	selection runtimedelivery.HandlerRuleSelectionFact,
 ) (runtimedelivery.Snapshot, error) {
-	return sqliteDeliveryAdapter.SettleSuccess(ctx, tx, story, claim, sideEffects, duration)
+	return sqliteDeliveryAdapter.SettleSuccess(ctx, tx, story, claim, sideEffects, duration, selection)
 }
 
 func (s *DeliveryPostgresOwner) SettleProviderOriginFailureTx(

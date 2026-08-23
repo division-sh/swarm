@@ -285,3 +285,58 @@ func TestPlanFingerprintSeparatesAttemptAuthorityFromCallablePlan(t *testing.T) 
 		t.Fatal("callability change preserved operation plan fingerprint")
 	}
 }
+
+func TestContinuationFingerprintIgnoresOnlyNormalRuntimeEphemera(t *testing.T) {
+	plan := Plan{
+		ActorIdentity: managedCapabilityTestIdentity("worker"), RuntimeMode: "session", Provider: "anthropic", Transport: "api",
+		ProviderContract: "messages.v1", CreatedAt: time.Unix(1, 0).UTC(),
+		Authority: Authority{
+			Kind: AuthorityProviderTurn, ID: "00000000-0000-0000-0000-000000000501",
+			ExecutionKind: ExecutionNormalAgent, ExecutionAuthorityID: "runtime-generation-one",
+			RunID: "00000000-0000-0000-0000-000000000502", SessionID: "00000000-0000-0000-0000-000000000503", TurnOrdinal: 1,
+		},
+		Tools: []PlannedTool{{
+			Name: "event.publish", DefinitionHash: "definition-hash",
+			Capability: toolcapabilities.Capability{Name: "event.publish", Visible: true, Callable: true},
+			Bindings: []DeliveryBinding{{
+				Kind: BindingAPIDefinition, ExactName: "event.publish", RequiredEvidenceKind: "definition_attached",
+			}},
+		}},
+	}
+	first, err := New(plan)
+	if err != nil {
+		t.Fatalf("build first continuation surface: %v", err)
+	}
+	firstFingerprint, err := first.ContinuationFingerprint()
+	if err != nil {
+		t.Fatalf("fingerprint first continuation: %v", err)
+	}
+	plan.Authority.ID = "00000000-0000-0000-0000-000000000504"
+	plan.Authority.ExecutionAuthorityID = "runtime-generation-two"
+	plan.Authority.SessionID = "00000000-0000-0000-0000-000000000505"
+	second, err := New(plan)
+	if err != nil {
+		t.Fatalf("build successor continuation surface: %v", err)
+	}
+	secondFingerprint, err := second.ContinuationFingerprint()
+	if err != nil {
+		t.Fatalf("fingerprint successor continuation: %v", err)
+	}
+	if secondFingerprint != firstFingerprint {
+		t.Fatalf("successor continuation fingerprint = %q, want %q", secondFingerprint, firstFingerprint)
+	}
+
+	plan.Tools[0].Capability.Callable = false
+	plan.Tools[0].Capability.DenialReason = "policy_denied"
+	narrowed, err := New(plan)
+	if err != nil {
+		t.Fatalf("build narrowed continuation surface: %v", err)
+	}
+	narrowedFingerprint, err := narrowed.ContinuationFingerprint()
+	if err != nil {
+		t.Fatalf("fingerprint narrowed continuation: %v", err)
+	}
+	if narrowedFingerprint == firstFingerprint {
+		t.Fatal("callability change preserved continuation fingerprint")
+	}
+}

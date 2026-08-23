@@ -466,6 +466,17 @@ func (r *OpenAIResponsesRuntime) sendRequest(ctx context.Context, payload []byte
 		return nil, openAIResponsesResponse{}, nil, err
 	}
 	dispatch := newCompletionDispatch(attempt, runtimeeffects.StateOutcomeUncertain)
+	if replay, err := completionReplayForHandle(attempt, "openai_responses"); err != nil {
+		return nil, openAIResponsesResponse{}, dispatch, err
+	} else if replay != nil {
+		var parsed openAIResponsesResponse
+		if err := json.Unmarshal(replay.Response.Raw, &parsed); err != nil {
+			return nil, openAIResponsesResponse{}, dispatch, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_replay_provider_payload_invalid", "openai-responses-adapter", "replay_completion", nil, err)
+		}
+		dispatch.replay = replay
+		dispatch.state = runtimeeffects.StateSettled
+		return append([]byte(nil), replay.Response.Raw...), parsed, dispatch, nil
+	}
 	heartbeatCtx, heartbeat, err := startCompletionAttemptHeartbeat(ctx, attempt)
 	if err != nil {
 		dispatch.state = runtimeeffects.StateTerminalFailure

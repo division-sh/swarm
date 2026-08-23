@@ -7,6 +7,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -67,12 +68,13 @@ type EmitPersistenceVerifier interface {
 }
 
 type EngineMutation struct {
-	Address           StateAddress
-	State             StateMutation
-	LifecycleEffects  []runtimeworkflowlifecycle.Effect
-	ActivityIntents   []ActivityIntent
-	EmitIntents       []EmitIntent
-	EmitPrerequisites EmitPersistencePrerequisites
+	Address              StateAddress
+	State                StateMutation
+	HandlerRuleSelection handlerselection.HandlerRuleSelectionFact
+	LifecycleEffects     []runtimeworkflowlifecycle.Effect
+	ActivityIntents      []ActivityIntent
+	EmitIntents          []EmitIntent
+	EmitPrerequisites    EmitPersistencePrerequisites
 }
 
 // DurablePublicationPlan is an immutable, already-admitted publication plan.

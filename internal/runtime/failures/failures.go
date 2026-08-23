@@ -766,6 +766,10 @@ func decisions(def Definition, detail Detail) (bool, bool) {
 		}
 	case ClassComputeFailure:
 		deterministic = true
+	case ClassLifecycleConflict:
+		if detail.Code == "workflow_engine_state_revision_conflict" {
+			retryable = true
+		}
 	case ClassInternalFailure:
 		if detail.Code == "typed_read_result_marshal_failed" || detail.Code == "directive_execution_not_admitted" {
 			deterministic = true

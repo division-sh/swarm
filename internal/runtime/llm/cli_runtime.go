@@ -319,6 +319,12 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	}
 	dispatch := newCompletionDispatch(attempt, "")
 	dispatch.providerModel = providerModel
+	if replay, err := completionReplayForHandle(attempt, claudeCLICompletionAdapter); err != nil {
+		return nil, err
+	} else if replay != nil {
+		dispatch.replay = replay
+		dispatch.state = runtimeeffects.StateSettled
+	}
 	childSessionID := strings.TrimSpace(attempt.Attempt().AttemptID)
 	if childSessionID == "" {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "claude_attempt_identity_missing", "claude-cli-adapter", "prepare_turn", nil)
@@ -379,7 +385,14 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 			return target.Container
 		}(),
 	}
-	resp, fallback, err := r.runWithPreparedPrompt(ctx, args, target, prompt, monitorMeta, dispatch, profile, providerModel)
+	var resp *Response
+	var fallback promptTransportFallback
+	if dispatch.replay != nil {
+		replayed := dispatch.replay.Response
+		resp = &replayed
+	} else {
+		resp, fallback, err = r.runWithPreparedPrompt(ctx, args, target, prompt, monitorMeta, dispatch, profile, providerModel)
+	}
 	if mcpContextToken != "" {
 		if listedSurface, ok := r.mcpTurns.ResolveManagedCapabilitySurface(mcpContextToken); ok {
 			ctx = managedcapabilities.WithContext(ctx, listedSurface)

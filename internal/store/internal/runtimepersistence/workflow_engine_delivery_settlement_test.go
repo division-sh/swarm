@@ -55,7 +55,7 @@ func TestWorkflowEngineMutationSettlesExactNodeDeliveryAtomicallyOnBothStores(t 
 						t.Fatalf("claim workflow engine delivery fixture: %v", err)
 					}
 					if test.preSettle {
-						if _, err := selected.SettleSuccess(ctx, claimed.Claim, []string{"fixture_pre_settled"}, time.Millisecond); err != nil {
+						if _, err := selected.SettleSuccess(ctx, claimed.Claim, []string{"fixture_pre_settled"}, time.Millisecond, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 							t.Fatalf("pre-settle workflow engine delivery fixture: %v", err)
 						}
 					}
@@ -65,6 +65,7 @@ func TestWorkflowEngineMutationSettlesExactNodeDeliveryAtomicallyOnBothStores(t 
 						State: record,
 						DeliverySuccess: &runtimepipeline.WorkflowEngineDeliverySuccess{
 							Claim: claimed.Claim, SideEffects: []string{"handler_completed"}, Duration: time.Second,
+							RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 						},
 					})
 					if test.wantCommitError {

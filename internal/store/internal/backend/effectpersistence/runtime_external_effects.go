@@ -142,13 +142,14 @@ func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, auth
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
 	}
-	reservations, err := prepareCompletionBudgetReservationsPostgres(ctx, tx, authority, req.Now.UTC())
-	if err != nil {
-		return runtimeeffects.Attempt{}, err
-	}
 	if existing, found, err := loadExistingExternalAttemptPostgres(ctx, tx, req.OperationID); err != nil {
 		return runtimeeffects.Attempt{}, err
 	} else if found {
+		if attempt, replayed, err := authorizeSettledDeliveryReplay(ctx, authority, req, existing); err != nil {
+			return runtimeeffects.Attempt{}, err
+		} else if replayed {
+			return attempt, nil
+		}
 		if attempt, resumed := resumeProviderRegistrationAuthorization(authority, req, existing); resumed {
 			return attempt, nil
 		}
@@ -159,6 +160,10 @@ func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, auth
 		if !retry {
 			return runtimeeffects.Attempt{}, externalEffectReplayRefusal(authority, req, existing)
 		}
+		reservations, err := prepareCompletionBudgetReservationsPostgres(ctx, tx, authority, req.Now.UTC())
+		if err != nil {
+			return runtimeeffects.Attempt{}, err
+		}
 		if err := insertCompletionBudgetReservationsPostgres(ctx, tx, attempt.AttemptID, reservations, req.Now.UTC()); err != nil {
 			return runtimeeffects.Attempt{}, err
 		}
@@ -166,6 +171,10 @@ func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, auth
 			return runtimeeffects.Attempt{}, fmt.Errorf("authorize external retry commit: %w", err)
 		}
 		return attempt, nil
+	}
+	reservations, err := prepareCompletionBudgetReservationsPostgres(ctx, tx, authority, req.Now.UTC())
+	if err != nil {
+		return runtimeeffects.Attempt{}, err
 	}
 	attempt, err := insertExternalAttemptPostgres(ctx, tx, authority, req)
 	if err != nil {
@@ -199,13 +208,15 @@ func (s *EffectSQLiteOwner) AuthorizeExternalAttempt(ctx context.Context, author
 		if err != nil {
 			return err
 		}
-		reservations, err := prepareCompletionBudgetReservationsSQLite(txctx, tx, authority, req.Now.UTC())
-		if err != nil {
-			return err
-		}
 		if existing, found, err := loadExistingExternalAttemptSQLite(txctx, tx, req.OperationID); err != nil {
 			return err
 		} else if found {
+			if replayed, ok, replayErr := authorizeSettledDeliveryReplay(txctx, authority, req, existing); replayErr != nil {
+				return replayErr
+			} else if ok {
+				attempt = replayed
+				return nil
+			}
 			if resumed, ok := resumeProviderRegistrationAuthorization(authority, req, existing); ok {
 				attempt = resumed
 				return nil
@@ -216,9 +227,17 @@ func (s *EffectSQLiteOwner) AuthorizeExternalAttempt(ctx context.Context, author
 				return err
 			}
 			if retry {
+				reservations, reserveErr := prepareCompletionBudgetReservationsSQLite(txctx, tx, authority, req.Now.UTC())
+				if reserveErr != nil {
+					return reserveErr
+				}
 				return insertCompletionBudgetReservationsSQLite(txctx, tx, attempt.AttemptID, reservations, req.Now.UTC())
 			}
 			return externalEffectReplayRefusal(authority, req, existing)
+		}
+		reservations, err := prepareCompletionBudgetReservationsSQLite(txctx, tx, authority, req.Now.UTC())
+		if err != nil {
+			return err
 		}
 		attempt, err = insertExternalAttemptSQLiteTx(txctx, tx, authority, req)
 		if err != nil {
@@ -322,9 +341,15 @@ type existingExternalAttempt struct {
 	capabilityPlan       string
 	agentFrame           []byte
 	capabilitySurfaceID  string
+	bundleHash           string
+	evidenceJSON         string
 	originDeliveryID     string
+	originRunID          string
+	originRouteIdentity  string
 	originClaimVersion   int64
 	originClaimToken     string
+	originSubscriberType string
+	originSubscriberID   string
 	originKind           string
 	originDirectiveID    string
 	originDirectiveOwner string
@@ -704,7 +729,37 @@ func managedCapabilityPlanFingerprint(surface *managedcapabilities.Surface) (str
 	if surface == nil {
 		return "", nil
 	}
+	if surface.Authority.Kind == managedcapabilities.AuthorityProviderTurn &&
+		surface.Authority.ExecutionKind == managedcapabilities.ExecutionNormalAgent {
+		return surface.ContinuationFingerprint()
+	}
 	return surface.PlanFingerprint()
+}
+
+func authorizeSettledDeliveryReplay(ctx context.Context, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, existing existingExternalAttempt) (runtimeeffects.Attempt, bool, error) {
+	if authority.Kind != runtimeeffects.AuthorityNormalAgent || req.Kind != runtimeeffects.KindProviderTurn ||
+		req.Origin.Kind != runtimeeffects.CompletionOriginDelivery ||
+		existing.operationState != string(runtimeeffects.StateSettled) || existing.attemptState != string(runtimeeffects.StateSettled) {
+		return runtimeeffects.Attempt{}, false, nil
+	}
+	bundleHash, err := requiredExternalEffectBundleHash(ctx, authority)
+	if err != nil {
+		return runtimeeffects.Attempt{}, false, err
+	}
+	claim := req.Origin.Delivery
+	if !existing.matchesAuthorityIdentity(authority) || !existing.matchesOperationRequest(req) || existing.bundleHash != bundleHash ||
+		existing.originKind != string(runtimeeffects.CompletionOriginDelivery) ||
+		existing.originDeliveryID != claim.DeliveryID() || existing.originRunID != claim.RunID() ||
+		existing.originRouteIdentity != claim.RouteIdentity() || existing.originSubscriberType != string(claim.SubscriberClass()) ||
+		existing.originSubscriberID != claim.SubscriberID() {
+		return runtimeeffects.Attempt{}, false, nil
+	}
+	attempt := externalAuthorizedAttempt(authority, req, existing.attemptID, existing.attemptOrdinal)
+	replay, err := runtimeeffects.AdmitCompletionReplay(attempt, json.RawMessage(existing.evidenceJSON))
+	if err != nil {
+		return runtimeeffects.Attempt{}, false, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_replay_evidence_invalid", "external-effects", "authorize_attempt", map[string]any{"operation_id": req.OperationID, "attempt_id": existing.attemptID}, err)
+	}
+	return replay, true, nil
 }
 
 func persistManagedCapabilitySurfacePostgres(ctx context.Context, tx *sql.Tx, surface *managedcapabilities.Surface) (string, string, error) {
@@ -787,9 +842,9 @@ func loadExistingExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, operat
 		       COALESCE(o.agent_route_presence,''), COALESCE(o.flow_scope_key,''),
 		       COALESCE(o.flow_instance_id,''), COALESCE(o.flow_instance,''),
 		       COALESCE(o.runtime_epoch,0), o.generation,
-		       o.request_fingerprint, COALESCE(o.capability_plan_fingerprint,''), o.agent_frame_bytes, o.state, a.attempt_id::text, a.adapter, a.transport, a.state,
-		       a.attempt_ordinal, (a.launched_at IS NOT NULL), COALESCE(a.failure, '{}'::jsonb)::text, COALESCE(a.capability_surface_id::text,''),
-		       COALESCE(a.origin_kind,''),COALESCE(a.origin_delivery_id::text,''),COALESCE(a.origin_claim_token::text,''),COALESCE(a.origin_claim_version,0),
+		       o.request_fingerprint, COALESCE(o.capability_plan_fingerprint,''), o.agent_frame_bytes, o.bundle_hash, o.state, a.attempt_id::text, a.adapter, a.transport, a.state,
+		       a.attempt_ordinal, (a.launched_at IS NOT NULL), COALESCE(a.failure, '{}'::jsonb)::text, COALESCE(a.evidence, '{}'::jsonb)::text, COALESCE(a.capability_surface_id::text,''),
+		       COALESCE(a.origin_kind,''),COALESCE(a.origin_delivery_id::text,''),COALESCE(a.origin_run_id::text,''),COALESCE(a.origin_route_identity,''),COALESCE(a.origin_claim_token::text,''),COALESCE(a.origin_claim_version,0),COALESCE(a.origin_subscriber_type,''),COALESCE(a.origin_subscriber_id,''),
 		       COALESCE(a.origin_directive_operation_id::text,''),COALESCE(a.origin_directive_owner_id,'')
 		FROM runtime_external_effect_operations o
 		JOIN runtime_external_effect_attempts a ON a.operation_id = o.operation_id
@@ -799,9 +854,9 @@ func loadExistingExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, operat
 	`, operationID).Scan(&existing.authorityKind, &existing.authorityID, &existing.operationMode, &existing.attemptMode, &existing.kind, &existing.class,
 		&existing.agentID, &existing.agentNameOwner, &existing.agentNameSource, &existing.agentRoutePresence,
 		&existing.flowScopeKey, &existing.flowInstanceID, &existing.flowInstance, &existing.epoch, &existing.generation,
-		&existing.fingerprint, &existing.capabilityPlan, &existing.agentFrame, &existing.operationState, &existing.attemptID, &existing.adapter, &existing.transport, &existing.attemptState,
-		&existing.attemptOrdinal, &existing.launched, &existing.failureJSON, &existing.capabilitySurfaceID,
-		&existing.originKind, &existing.originDeliveryID, &existing.originClaimToken, &existing.originClaimVersion, &existing.originDirectiveID, &existing.originDirectiveOwner)
+		&existing.fingerprint, &existing.capabilityPlan, &existing.agentFrame, &existing.bundleHash, &existing.operationState, &existing.attemptID, &existing.adapter, &existing.transport, &existing.attemptState,
+		&existing.attemptOrdinal, &existing.launched, &existing.failureJSON, &existing.evidenceJSON, &existing.capabilitySurfaceID,
+		&existing.originKind, &existing.originDeliveryID, &existing.originRunID, &existing.originRouteIdentity, &existing.originClaimToken, &existing.originClaimVersion, &existing.originSubscriberType, &existing.originSubscriberID, &existing.originDirectiveID, &existing.originDirectiveOwner)
 	if err == sql.ErrNoRows {
 		return existingExternalAttempt{}, false, nil
 	}
@@ -820,9 +875,9 @@ func loadExistingExternalAttemptSQLite(ctx context.Context, tx *sql.Tx, operatio
 		       COALESCE(o.agent_route_presence,''), COALESCE(o.flow_scope_key,''),
 		       COALESCE(o.flow_instance_id,''), COALESCE(o.flow_instance,''),
 		       COALESCE(o.runtime_epoch,0), o.generation,
-		       o.request_fingerprint, COALESCE(o.capability_plan_fingerprint,''), o.agent_frame_bytes, o.state, a.attempt_id, a.adapter, a.transport, a.state,
-		       a.attempt_ordinal, (a.launched_at IS NOT NULL), COALESCE(a.failure, '{}'), COALESCE(a.capability_surface_id,''),
-		       COALESCE(a.origin_kind,''),COALESCE(a.origin_delivery_id,''),COALESCE(a.origin_claim_token,''),COALESCE(a.origin_claim_version,0),
+		       o.request_fingerprint, COALESCE(o.capability_plan_fingerprint,''), o.agent_frame_bytes, o.bundle_hash, o.state, a.attempt_id, a.adapter, a.transport, a.state,
+		       a.attempt_ordinal, (a.launched_at IS NOT NULL), COALESCE(a.failure, '{}'), COALESCE(a.evidence, '{}'), COALESCE(a.capability_surface_id,''),
+		       COALESCE(a.origin_kind,''),COALESCE(a.origin_delivery_id,''),COALESCE(a.origin_run_id,''),COALESCE(a.origin_route_identity,''),COALESCE(a.origin_claim_token,''),COALESCE(a.origin_claim_version,0),COALESCE(a.origin_subscriber_type,''),COALESCE(a.origin_subscriber_id,''),
 		       COALESCE(a.origin_directive_operation_id,''),COALESCE(a.origin_directive_owner_id,'')
 		FROM runtime_external_effect_operations o
 		JOIN runtime_external_effect_attempts a ON a.operation_id = o.operation_id
@@ -832,9 +887,9 @@ func loadExistingExternalAttemptSQLite(ctx context.Context, tx *sql.Tx, operatio
 	`, operationID).Scan(&existing.authorityKind, &existing.authorityID, &existing.operationMode, &existing.attemptMode, &existing.kind, &existing.class,
 		&existing.agentID, &existing.agentNameOwner, &existing.agentNameSource, &existing.agentRoutePresence,
 		&existing.flowScopeKey, &existing.flowInstanceID, &existing.flowInstance, &existing.epoch, &existing.generation,
-		&existing.fingerprint, &existing.capabilityPlan, &existing.agentFrame, &existing.operationState, &existing.attemptID, &existing.adapter, &existing.transport, &existing.attemptState,
-		&existing.attemptOrdinal, &existing.launched, &existing.failureJSON, &existing.capabilitySurfaceID,
-		&existing.originKind, &existing.originDeliveryID, &existing.originClaimToken, &existing.originClaimVersion, &existing.originDirectiveID, &existing.originDirectiveOwner)
+		&existing.fingerprint, &existing.capabilityPlan, &existing.agentFrame, &existing.bundleHash, &existing.operationState, &existing.attemptID, &existing.adapter, &existing.transport, &existing.attemptState,
+		&existing.attemptOrdinal, &existing.launched, &existing.failureJSON, &existing.evidenceJSON, &existing.capabilitySurfaceID,
+		&existing.originKind, &existing.originDeliveryID, &existing.originRunID, &existing.originRouteIdentity, &existing.originClaimToken, &existing.originClaimVersion, &existing.originSubscriberType, &existing.originSubscriberID, &existing.originDirectiveID, &existing.originDirectiveOwner)
 	if err == sql.ErrNoRows {
 		return existingExternalAttempt{}, false, nil
 	}
