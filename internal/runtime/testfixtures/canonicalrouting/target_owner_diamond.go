@@ -22,12 +22,15 @@ flows:
     flow: unrelated/worker/result
     mode: static
 connect:
-  - from: .branch_start
-    to: branch.branch_start
-  - from: branch.branch_done
-    to: .branch_done
-  - from: decoy.work_ready
-    to: hostile.work_ready
+  - event: branch.start
+    from: .
+    to: branch
+  - event: branch.done
+    from: branch
+    to: .
+  - event: work.ready
+    from: decoy
+    to: hostile
 `,
 		"schema.yaml": `name: target-owner-diamond
 pins:
@@ -93,10 +96,12 @@ flows:
     flow: worker/result
     mode: singleton
 connect:
-  - from: .work_ready
-    to: static-result.work_ready
-  - from: .work_ready
-    to: singleton-result.work_ready
+  - event: work.ready
+    from: .
+    to: static-result
+  - event: work.ready
+    from: .
+    to: singleton-result
 `,
 		"flows/branch/flows/worker/result-static/schema.yaml": `name: static-result
 mode: static

@@ -546,8 +546,9 @@ func testContractFrontierSource(nodeID string) semanticview.Source {
 			CompositionConnects: []runtimecontracts.FlowPackageConnect{{
 				SourceFile: "package.yaml",
 				SourceLine: 1,
-				From:       "producer.scan_requested",
-				To:         "consumer.scan_requested",
+				Event:      "scan.requested",
+				From:       "producer",
+				To:         "consumer",
 			}},
 		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
@@ -632,7 +633,7 @@ func testContractFrontierRootConnectSource() semanticview.Source {
 				"consumer": {{Name: "ready", Event: "root.ready"}},
 			},
 			CompositionConnects: []runtimecontracts.FlowPackageConnect{{
-				SourceFile: "package.yaml", SourceLine: 1, From: ".root_ready", To: "consumer.ready",
+				SourceFile: "package.yaml", SourceLine: 1, Event: "root.ready", From: ".", To: "consumer",
 			}},
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"consumer": consumer.Schema},
@@ -700,8 +701,9 @@ func testContractFrontierConnectSource(producerMode string) semanticview.Source 
 			CompositionConnects: []runtimecontracts.FlowPackageConnect{{
 				SourceFile: "package.yaml",
 				SourceLine: 1,
-				From:       "producer.scan_requested",
-				To:         "consumer.scan_requested",
+				Event:      "scan.requested",
+				From:       "producer",
+				To:         "consumer",
 			}},
 		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{

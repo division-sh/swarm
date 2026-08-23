@@ -92,8 +92,9 @@ func WriteVariant(t testing.TB, opts Options) string {
 	accountEvents := filepath.Join(root, "flows", ChildFlowID, "events.yaml")
 	accountSchema := filepath.Join(root, "flows", ChildFlowID, "schema.yaml")
 	if opts.OmitConnect {
-		replaceFile(t, packageFile, `  - from: portfolio.account_notify_requested
-    to: account.account_notify_requested
+		replaceFile(t, packageFile, `  - event: account.notify.requested
+    from: portfolio
+    to: account
 `, "")
 	}
 	if opts.OmitOutputPin {

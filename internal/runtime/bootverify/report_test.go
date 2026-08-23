@@ -6494,7 +6494,7 @@ func TestRun_ReportsCrossFlowPinAmbiguityForOverlappingBoundarySources(t *testin
 		Name: "task.feedback", Event: "task.feedback",
 	})
 	bundle.Semantics.CompositionConnects = append(bundle.Semantics.CompositionConnects, runtimecontracts.FlowPackageConnect{
-		From: ".task.feedback", To: "child.task.feedback", SourceFile: "package.yaml", SourceLine: 1,
+		Event: "task.feedback", From: ".", To: "child", SourceFile: "package.yaml", SourceLine: 1,
 	})
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})

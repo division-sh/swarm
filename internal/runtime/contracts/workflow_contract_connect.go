@@ -116,14 +116,6 @@ func (p FlowOutputEventPin) normalized() FlowOutputEventPin {
 	return out
 }
 
-func (c FlowPackageConnect) FromRef() (FlowPackagePinRef, error) {
-	return parseFlowPackagePinRef(c.From)
-}
-
-func (c FlowPackageConnect) ToRef() (FlowPackagePinRef, error) {
-	return parseFlowPackagePinRef(c.To)
-}
-
 func (c FlowPackageConnect) WithPackageKey(packageKey string) FlowPackageConnect {
 	out := c.normalized()
 	out.PackageKey = strings.TrimSpace(packageKey)
@@ -149,8 +141,10 @@ func (c FlowPackageConnect) normalized() FlowPackageConnect {
 		PackageKey: strings.TrimSpace(c.PackageKey),
 		SourceFile: strings.TrimSpace(c.SourceFile),
 		SourceLine: c.SourceLine,
+		Event:      strings.TrimSpace(c.Event),
 		From:       strings.TrimSpace(c.From),
 		To:         strings.TrimSpace(c.To),
+		Rename:     strings.TrimSpace(c.Rename),
 		Adapter:    strings.TrimSpace(c.Adapter),
 	}
 }
@@ -166,35 +160,6 @@ func normalizeStringListPreserveOrder(values []string) []string {
 		}
 	}
 	return out
-}
-
-func parseFlowPackagePinRef(raw string) (FlowPackagePinRef, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return FlowPackagePinRef{}, fmt.Errorf("pin reference is required")
-	}
-	if strings.HasPrefix(raw, ".") {
-		pin := strings.TrimSpace(strings.TrimPrefix(raw, "."))
-		if pin == "" {
-			return FlowPackagePinRef{}, fmt.Errorf("pin reference %q must use .{root_pin_name} or {flow_id}.{pin_name}", raw)
-		}
-		return FlowPackagePinRef{
-			Root: true,
-			Pin:  pin,
-		}, nil
-	}
-	idx := strings.Index(raw, ".")
-	if idx <= 0 || idx >= len(raw)-1 {
-		return FlowPackagePinRef{}, fmt.Errorf("pin reference %q must use .{root_pin_name} or {flow_id}.{pin_name}", raw)
-	}
-	ref := FlowPackagePinRef{
-		FlowID: strings.TrimSpace(raw[:idx]),
-		Pin:    strings.TrimSpace(raw[idx+1:]),
-	}
-	if ref.FlowID == "" || ref.Pin == "" {
-		return FlowPackagePinRef{}, fmt.Errorf("pin reference %q must use .{root_pin_name} or non-empty flow and pin names", raw)
-	}
-	return ref, nil
 }
 
 func inputEventPinsFromEvents(events []string) []FlowInputEventPin {

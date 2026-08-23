@@ -9,5 +9,6 @@ flows:
     flow: child
     mode: static
 connect:
-  - from: child.validation_done
-    to: .validation_done
+  - event: validation.done
+    from: child
+    to: .

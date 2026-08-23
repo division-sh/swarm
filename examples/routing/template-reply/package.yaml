@@ -12,11 +12,15 @@ flows:
     flow: provider
     mode: static
 connect:
-  - from: initiator.requester_setup
-    to: requester.requester_setup
-  - from: initiator.request_submitted
-    to: requester.request_submitted
-  - from: requester.provider_requested
-    to: provider.provider_requested
-  - from: provider.provider_replied
-    to: requester.provider_replied
+  - event: requester.setup
+    from: initiator
+    to: requester
+  - event: requester.requested
+    from: initiator
+    to: requester
+  - event: provider.requested
+    from: requester
+    to: provider
+  - event: provider.replied
+    from: provider
+    to: requester

@@ -7,6 +7,8 @@ flows:
   flow: worker
   mode: template
 connect:
-  - from: .work_assign
-    to: worker.work_assign
+  - event: worker/work.assign
+    from: .
+    to: worker
+    rename: work.assign
     adapter: root_work_assign_to_worker_work_assign

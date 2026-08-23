@@ -333,25 +333,6 @@ func eventMetadataAddFlowRole(names eventMetadataNameIndex, flowID, pinName, rol
 	}
 }
 
-func eventMetadataAddFlowPinRefRole(names eventMetadataNameIndex, ref runtimecontracts.FlowPackagePinRef, rawRef, role string) {
-	flowID := strings.TrimSpace(ref.FlowID)
-	pinName := strings.TrimSpace(ref.Pin)
-	role = strings.TrimSpace(role)
-	label := eventMetadataFlowLabel(flowID)
-	if pinName != "" {
-		label += fmt.Sprintf(" pin %s", pinName)
-	}
-	if role != "" {
-		label += " " + role
-	}
-	names.add(rawRef, label)
-	names.add(flowID, label)
-	names.add(pinName, label)
-	if ref.Root && pinName != "" {
-		names.add("."+pinName, label)
-	}
-}
-
 func eventMetadataFlowLabel(flowID string) string {
 	flowID = strings.TrimSpace(flowID)
 	if flowID == "" {

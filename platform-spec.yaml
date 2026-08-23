@@ -4507,7 +4507,7 @@ engine:
         5. Persist or expose the lowered parent-connect route facts; do not treat a topology match as permission to broadcast
            to every instance.'
       ambiguity: 'If an input pin event name matches output pins from multiple flows, boot MUST fail
-        unless parent connect or its typed alias/adapter input disambiguates the route.'
+        unless an explicit event-centric parent connect disambiguates the producer and receiver flows.'
       static_pairs: Static-to-static pairs may resolve to a single instance pair at boot.
       template_pairs: Template or dynamic-instance pairs require lowered parent connect route facts from the receiver's
         scalar instance field, same-named typed carry source, and explicit resolution mode. Structural ParentRoute binding
@@ -11570,13 +11570,13 @@ flow_model:
         - requires
         - flows
         - packages
-        - children
-        - subpackages
         - connect
         - connector_packs
         - provider_trigger_events
         - handoffs
         retired_fields:
+          children: package.yaml.children is retired on presence; imported child packages are declared only under packages.
+          subpackages: package.yaml.subpackages is retired on presence; imported child packages are declared only under packages.
           entity_schema: >
             package.yaml.entity_schema is retired and must fail with the retired-field migration error instead of
             being accepted as a manifest self-fact. Authoritative entity contracts live in entities.yaml.
@@ -11587,6 +11587,9 @@ flow_model:
         - tools
         - backends
       fields:
+        packages: >
+          Sole imported child-package collection. Each row declares `id`, `path`, and optional `bind`.
+          `path` is the sole child-package location spelling; retired row fields `package` and `dir` fail on presence.
         keywords: >
           Optional list of unique package keyword slugs. Each item MUST be a string using lowercase ASCII letters,
           digits, and hyphen with no leading/trailing whitespace. Duplicate keywords fail closed.
@@ -11629,11 +11632,20 @@ flow_model:
       - package.yaml.repository does not implement update or fetch behavior.
       - package.yaml.extra does not authorize runtime behavior, capability selection, tool binding, backend selection, or category taxonomy.
       - package.yaml self-facts do not change platform_version compatibility semantics.
+    grammar_derivation_stability:
+      status: merge_bearing
+      registry: internal/runtime/conformance/testdata/canonical_forms_registry.yaml
+      rule: >
+        A canonical derived authoring form is grammar law. Changing its derivation is a breaking contract change and
+        requires the full retirement/migration mechanics. Runtime and read models consume one compiled effective fact;
+        they do not independently rederive authored defaults. Retired duplicate spellings fail closed with a teaching
+        error and have no compatibility decoder. Every custom YAML decoder reachable from LoadWorkflowContractBundle is
+        mapped to a ruled canonical-forms registry row; an unmapped decoder fails conformance.
     import_boundary:
       description: >
         Imported flow packages declare their required public interface and dependency surface in their own package.yaml
         `requires` block. The parent import site in package.yaml must satisfy those declarations with an explicit `bind`
-        block on the corresponding `flows[]`, `packages[]`, `children[]`, or `subpackages[]` entry. This is the canonical
+        block on the corresponding `flows[]` or `packages[]` entry. This is the canonical
         source authority for import-boundary completeness; raw same-name pins, ambient parent policy inheritance, flat
         credential names, and wildcard reachability are not proof that a declared import requirement is satisfied.
       requires_manifest:
@@ -11658,8 +11670,6 @@ flow_model:
         locations:
         - flows[]
         - packages[]
-        - children[]
-        - subpackages[]
         fields:
           inputs: Map keyed by imported package `requires.inputs` item. Each value names the parent-facing event binding.
           outputs: Map keyed by imported package `requires.outputs` item. Each value names the parent-facing event binding.
@@ -11872,16 +11882,18 @@ flow_model:
         parent_connect:
           location: parent package.yaml connect
           canonical_form: >
-            `connect` is a list of structured connections. Each entry binds one producer output pin to one receiver
-            input pin and optionally names an alias/adapter. `from` uses either
-            flow-id plus local pin name or the explicit package-root endpoint form `.{root_output_pin_name}`. `to` uses
-            flow-id plus local input pin name or the explicit package-root endpoint form
-            `.{root_input_pin_name}`. Connect refs are not handler keys and not runtime instance paths.
+            `connect` is a list of event-centric structured connections. Each entry names one source event as visible
+            in the package authoring the row, one producer flow, one receiver flow, and optional receiver-event rename
+            and payload adapter choices. `from` and `to` contain exact package-visible flow IDs; `.` is the sole sentinel
+            for the current package root. They never contain pin names, runtime instance paths, or guessed event spellings.
           fields:
-            from: Required producer reference `{producer_flow_id}.{output_pin_name}` or package-root producer reference `.{root_output_pin_name}`.
-            to: Required receiver reference `{receiver_flow_id}.{input_pin_name}` or package-root receiver reference `.{root_input_pin_name}`.
-            adapter: Optional named payload/event adapter when producer output and receiver input names or payload keys differ.
+            event: Required source event identity visible in the package authoring this row.
+            from: Required exact producer flow ID, or `.` for this row's current package root.
+            to: Required exact receiver flow ID, or `.` for this row's current package root.
+            rename: Optional exact receiver-visible event identity when it differs from `event`. A value equal to `event` is hard-invalid redundancy.
+            adapter: Optional named payload transformation. It cannot select a pin or rename an event.
           retired_fields:
+            endpoint_centric_from_to: Retired on presence. `{flow}.{pin}` and `.{root_pin}` endpoints are invalid; author `event` plus flow-only `from` and `to`.
             delivery: Retired on presence. Cardinality and instance selection belong to the receiver input; static fan-out is authored as multiple connect rows.
             reply: >
               Retired on presence. Reply routing belongs to receiver input
@@ -11890,26 +11902,39 @@ flow_model:
             using: Retired on presence. `using.instance` is not a receiver identity adapter.
           example: |
             connect:
-              - from: holding_devops.deploy_completed
-                to: operating.deploy_completed
-              - from: .root_ready
-                to: operating.root_ready
+              - event: deploy.completed
+                from: holding_devops
+                to: operating
+              - event: work.ready
+                from: producer
+                to: consumer
+                rename: work.accepted
+                adapter: work_ready_to_accepted
       ownership_split:
         output_pins: Output pins own producer event identity and public producer key/carries interface evidence, never receiver identity.
         input_pins: Input pins own receiver interface, typed identity source, and resolution mode.
-        parent_connect: Parent connect owns only the directed inter-flow edge and optional payload/event adaptation.
+        parent_connect: Parent connect owns the directed inter-flow event edge, optional receiver-event rename, and optional payload adaptation.
         receiver_input_resolution: Receiver input pins own instance selection, lifecycle, cardinality, fan-in, and reply resolution.
-        analyzer: Analyzer owns validation, safe inference, alias/adapter expansion, and lowering to concrete route-plan facts.
+        analyzer: Analyzer owns validation, bind-visible event projection, explicit rename/payload-adapter application, and lowering to concrete route-plan facts.
         route_plan: Runtime RoutePlan owns publish-time concrete recipient authority after lowering; it consumes authored topology and MUST NOT reconstruct it from live subscribers.
         producer_emit: Producer emit owns event identity and payload construction only. emit.target and emit.broadcast are retired on presence.
       analyzer_verify_requirements:
-        producer_flow_exists: The `from` flow must exist in the loaded package registry unless `from` is the explicit
-          package-root endpoint form `.{root_output_pin_name}`.
-        producer_output_pin_exists: The `from` pin must exist in the producer schema output event pins; for package-root
-          endpoints it must exist in root schema.yaml pins.outputs.events.
-        receiver_flow_exists: The `to` flow must exist in the loaded package registry unless `to` is the explicit package-root endpoint form `.{root_input_pin_name}`.
-        receiver_input_pin_exists: The `to` pin must exist in the receiver schema input event pins; for package-root endpoints it must exist in root schema.yaml pins.inputs.events.
-        event_alias_or_adapter_valid: Differing local event names or payload keys require an explicit alias/adapter or unambiguous bind-derived alias; raw same-name fallback is not valid for declared imported package pins.
+        producer_flow_exists: >
+          The `from` flow must exist in the package-visible flow registry; `.` must resolve to the root of the package authoring the row.
+        producer_output_pin_exists: >
+          Exactly one output pin on `from` must expose `event` to the authoring package. A root pin exposes its local
+          event. An imported child pin with authoritative `bind.outputs` exposes the mapped parent event; otherwise it
+          exposes its local event. Zero or multiple candidates fail with package, endpoint, requested event, and candidate pin names.
+        receiver_flow_exists: >
+          The `to` flow must exist in the package-visible flow registry; `.` must resolve to the root of the package authoring the row.
+        receiver_input_pin_exists: >
+          Exactly one input pin on `to` must expose `rename` when present, otherwise `event`, to the authoring package.
+          A root pin exposes its local event. An imported child pin with authoritative `bind.inputs` exposes the mapped
+          parent event; otherwise it exposes its local event. Zero or multiple candidates fail with complete candidate evidence.
+        event_rename_valid: >
+          `rename` is the sole explicit receiver-event change. Bind projections may supply boundary-visible names without redundant rename authoring.
+        adapter_valid: >
+          `adapter` transforms payload only and cannot make mismatched event identities compatible.
         output_carries_instance_field: Producer output key/carries declarations are interface/type evidence only; they never select the receiver.
         receiver_route_key_present: Template receivers must resolve one valid scalar instance field, same-named typed carry source,
           and explicit resolution mode. Stateful/static receivers that
@@ -11919,17 +11944,26 @@ flow_model:
           route-plan lowering. Integer sources may widen to numeric receiver fields;
           numeric sources MUST NOT narrow to integer receiver fields.
         receiver_resolution_valid: Receiver-owned typed resolution mode, scalar instance source, fan-in, and reply facts must be internally valid and unambiguous.
-        inference_unambiguous: Analyzer inference is allowed only when exactly one producer, receiver, key, adapter, and topology match is possible.
+        inference_unambiguous: >
+          Compiler resolution is allowed only when exactly one producer output and receiver input match their package-visible
+          event identities. There is no first-match, pin-name fallback, suffix/leaf match, dot-to-underscore guess, or global resolved-event search.
         lowered_route_plan_concrete: Accepted connections must lower to concrete route-plan inputs; no runtime path may recover by broadcasting or reinterpreting raw pin names.
       route_plan_lowering:
         owner: platform-spec.yaml#flow_model.flow_package.composition_routing.route_plan_lowering
+        syntax_owner: internal/runtime/contracts.FlowPackageConnect.UnmarshalYAML
+        compiler_owner: internal/runtime/core/pinrouting.CompileConnectGraph
+        ownership_rule: >
+          Syntax admission normalizes only `event`, `from`, `to`, `rename`, and `adapter`. A private helper called only
+          by CompileConnectGraph resolves package roots, bind-visible event identities, and exact pins once. Downstream
+          verification, topology, describe, EventBus, fork/replay, and execution consume compiled graph/evaluation
+          projections and never reinterpret the authored fields or expose a second effective endpoint-string DTO.
         consumes:
         - parent package.yaml connect entries
-        - producer output pin event identity and verified interface evidence, including explicit package-root `.pin_name` output endpoints
+        - producer output pin event identity and verified interface evidence resolved from event-centric flow endpoints
         - receiver scalar template instance identity from WorkflowContractBundle.ResolveFlowTemplateInstance
         - receiver input same-named typed carry source and resolution mode
         - import-boundary pin alias bindings
-        - explicit event-name adapter entries
+        - explicit receiver-event rename and payload-adapter entries
         produces:
         - semantic producer scope and local output pin identity
         - producer output interface evidence on connect plans
@@ -12018,7 +12052,7 @@ flow_model:
             package_key: Parent package key that authored the connect entry when available.
             producer_endpoint: Producer semantic flow id/path or package-root marker, output pin name, local output event identity, and scoped resolved event identity.
             receiver_endpoint: Receiver semantic flow id/path/mode, input pin name, local receiver event identity, and scoped resolved event identity.
-            adapter: Optional event-name adapter.
+            adapter: Optional payload adapter; receiver event identity is a separate compiled fact derived from `rename` or `event`.
             target_kind: target for singular receiver resolution or target_set for receiver-owned set cardinality.
             resolution_kind: |
               static, instance_key, or reply; materialization MUST
@@ -12581,28 +12615,24 @@ flow_model:
           status: merge_bearing_runtime_behavior
           canonical_code_owner: internal/runtime/contracts.FlowPackageConnect plus internal/runtime/core/pinrouting.ConnectRoutePlan and ProducerRouteCommonPathFailure
           rule: |
-            Parent connect may name a package-root producer output pin with
-            `from: .{root_output_pin_name}`. That root endpoint is a first-class
-            source-authority fact: contracts parsing, semanticview connect lookups,
-            bootverify composition validation, pin target resolution, EventBus
-            lowered ConnectRoutePlan consumption, and delivery persistence MUST all
-            consume the same explicit connect owner. Authored producer routing is
-            retired independently and cannot repair or override the canonical root
-            connect decision. Parent connect may symmetrically name a package-root receiver
-            input pin with `to: .{root_input_pin_name}`. Nested package connects
-            resolve that endpoint to the owning package root; top-level connects
-            resolve it to the global root. Runtime source-endpoint matching treats
+            Parent connect names the current package root with `from: .` or `to: .` and names the
+            package-visible event separately in `event` or `rename`. CompileConnectGraph resolves that event to exactly
+            one root output or input pin and materializes the concrete private pin identity. Nested package connects
+            resolve `.` to the owning package root; top-level connects resolve it to the global root. Contracts parsing,
+            semanticview projections, boot verification, EventBus lowering, and delivery persistence consume this one
+            compiled owner. Authored producer routing is retired independently and cannot repair or override it.
+            Runtime source-endpoint matching treats
             the event envelope `source` route as authoritative. When that route is
             absent, an event `flow_instance` that identifies semantic child-flow
             ownership makes a package-root source match ambiguous and MUST fail
             closed; a UUID root instance remains valid root context. Runtime MUST
             NOT reconstruct source ownership from the event name or `flow_instance`.
           root_endpoint_syntax:
-            producer: '`.{root_output_pin_name}` in connect.from names root schema.yaml pins.outputs.events only.'
-            receiver: '`.{root_input_pin_name}` in connect.to names the owning package root schema.yaml pins.inputs.events only.'
+            producer: '`from: .` selects the current package root; `event` must identify exactly one visible root output pin.'
+            receiver: '`to: .` selects the current package root; `rename` or `event` must identify exactly one visible root input pin.'
           consumes:
           - root schema.yaml pins.outputs.events
-          - parent package.yaml connect.from `.{root_output_pin_name}` entries
+          - 'event-centric parent package.yaml connect entries with `from: .` or `to: .`'
           - receiver flow or owning package-root input pin declarations and canonical route-plan lowering
           produces:
           - typed root ConnectRoutePlan producer endpoints
@@ -20134,12 +20164,11 @@ static_analyzer:
       - producer emit.target and emit.broadcast, which strict loading retires before this check
     validation_requirements:
       producer_flow_exists: connect.from flow id must exist in the loaded flow registry.
-      producer_output_pin_exists: connect.from pin must exist in the producer schema output event pins.
+      producer_output_pin_exists: connect.event must select exactly one package-visible producer output pin, including authoritative bind.outputs projection.
       receiver_flow_exists: connect.to flow id must exist in the loaded flow registry.
-      receiver_input_pin_exists: connect.to pin must exist in the receiver schema input event pins.
-      event_alias_or_adapter_valid: Differing producer and receiver event identities require an explicit adapter or an
-        import-boundary alias from requires/bind on either the producer output side or receiver input side; alias/bind
-        adapts names only and does not own topology.
+      receiver_input_pin_exists: connect.rename when present, otherwise connect.event, must select exactly one package-visible receiver input pin, including authoritative bind.inputs projection.
+      event_rename_valid: Differing package-visible source and receiver event identities require connect.rename; equal rename is redundant and hard-invalid.
+      payload_adapter_valid: connect.adapter transforms payload only and cannot select a pin or change event identity.
       output_interface_evidence_valid: Producer output key/carries declarations, when present, must agree with event schema and emitted payload; they never own receiver identity.
       receiver_instance_resolution_present: Template receivers must declare one scalar instance field, a same-named typed carry source, and an explicit supported resolution mode.
       key_types_compatible: >

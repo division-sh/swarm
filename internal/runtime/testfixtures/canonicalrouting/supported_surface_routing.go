@@ -214,8 +214,9 @@ flows:
     flow: producer
     mode: template
 connect:
-  - from: producer.deploy_done
-    to: .deploy_completed
+  - event: deploy.done
+    from: producer
+    to: .
 `)
 	writeClosedVariantFile(t, root, "schema.yaml", `name: root
 pins:

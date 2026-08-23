@@ -1,0 +1,825 @@
+kind: canonical_forms_registry
+registry_version: 1
+matrix_version: 1
+status: checked_merge_bearing
+census_head: 25ad370da
+scope:
+  loader_root: LoadWorkflowContractBundle
+  included:
+    - package.yaml
+    - schema.yaml
+    - types.yaml
+    - entities.yaml
+    - events.yaml
+    - nodes.yaml
+    - agents.yaml
+    - tools.yaml
+    - policy.yaml
+    - project pack inventory/envelope/connector/channel YAML admitted by the bundle loader
+    - embedded packs
+    - CLI archetype contract YAML
+    - authoritative platform-spec fields consumed while compiling those contracts
+  excluded:
+    - deployment swarm.yaml
+    - prompt content
+    - opaque authored data values
+    - API DTO JSON
+  declared_second_wave:
+    - provider-trigger manifest YAML
+    - scenario/test YAML
+  note: >-
+    Provider-trigger import declarations in package.yaml are included. The provider-trigger
+    manifest grammar itself is the explicitly ruled second-wave census.
+
+classification_tests:
+  fact: "If removed, no total spec-defined function of the remaining admitted contract reconstructs the same identity or semantic content."
+  choice: "Two values are valid and select different allowed behavior; neither is mechanically implied by other admitted facts."
+  derived_projection: "A total, deterministic, spec-anchored function of admitted facts/choices reconstructs the value."
+  annotation: "Changing it cannot alter identity, admission, routing, execution, persistence, or observable outcome."
+  boundary_snapshot: "A frozen copy is required only because the contract crosses a package/world boundary. Intra-package copies never qualify."
+  semantically_distinct_override: "The alternate changes the derived result and is required for a non-default case."
+  retired_duplicate_spelling: "The alternate carries no information not present in the canonical spelling."
+  f2_bug: "An accepted spelling changes, disappears, or is independently reinterpreted after decode."
+
+inventory:
+  custom_unmarshal_total: 101
+  custom_unmarshal_breakdown:
+    contracts: 89
+    flowmodel_policy: 11
+    agentintent: 1
+  yaml_node_functions_in_contracts: 215
+  yaml_tagged_fields_in_contracts_flowmodel_agentintent: 926
+  yaml_tagged_fields_in_reachable_pack_layers: 167
+  enumeration_method:
+    - traced every file opened by LoadWorkflowContractBundle and its pack-admission callback
+    - enumerated every UnmarshalYAML and every yaml.Node shape helper transitively reached by those files
+    - mapped strict struct-only fields into the same rows
+    - searched callers to mark accepted-but-unreachable legacy decoders
+    - measured positive corpus separately from rejection fixtures
+
+corpus:
+  workflow_files: 241
+  roots: [examples, internal/cliapp/archetypes]
+  embedded_pack_yaml_files: 29
+  excluded_from_positive_counts: [testdata, tests, invalid fixtures, deployment swarm.yaml]
+  validation_packages: [internal/runtime/contracts, internal/runtime/flowmodel, internal/runtime/agentintent, internal/packs, internal/packartifact]
+
+rows:
+  - id: package.metadata
+    ruled: mechanical-ratified
+    paths: "package.name, package.version, package.platform_version, package.author, package.description, package.keywords, package.license, package.repository, package.extra"
+    owner: ProjectPackageDocument.UnmarshalYAML
+    information:
+      fact: [name, version, platform_version, license, repository]
+      annotation: [author, description, keywords, extra]
+    spelling: {canonical: mapping_fields, distinct_overrides: [], retired_duplicates: []}
+    presence: {missing: field_specific_default_or_verify, null: currently_partly_zero_collapsed, empty: currently_partly_zero_collapsed}
+
+  - id: package.child_collection
+    ruled: mechanical-ratified
+    paths: "package.packages, package.children, package.subpackages"
+    owners: [ProjectPackageDocument.UnmarshalYAML, ProjectPackageDocument.ChildPackages]
+    information: {fact: [child membership and order]}
+    spelling:
+      canonical_candidate: packages
+      retired_duplicates: [children, subpackages]
+    corpus: {packages: 0, children: 0, subpackages: 0}
+
+  - id: package.child_reference
+    ruled: mechanical-ratified
+    paths: "package.packages[].id, package.packages[].path, package.packages[].package, package.packages[].dir, package.packages[].bind"
+    owners: [ProjectPackageDocument.UnmarshalYAML, ProjectPackageRef.ResolveLocation]
+    information:
+      fact: [id]
+      choice: [path, bind]
+    spelling:
+      canonical_candidate: path
+      retired_duplicates: [package, dir]
+      distinct_overrides: [path_different_from_id]
+    corpus: {rows: 0}
+
+  - id: package.flow_reference
+    ruled: mechanical-ratified
+    paths: "package.flows[].id, package.flows[].flow, package.flows[].namespace, package.flows[].mode, package.flows[].activation, package.flows[].ingress, package.flows[].bind"
+    owner: ProjectFlowRef.UnmarshalYAML
+    information:
+      fact: [id]
+      derived_projection: [flow_when_equal_to_id]
+      choice: [flow_override, namespace, mode, activation, ingress, bind]
+    spelling:
+      canonical_candidate: omit_flow_when_flow_equals_id
+      retired_duplicates: [explicit_flow_equal_to_id]
+      distinct_overrides: [flow_path_different_from_id]
+    corpus: {rows: 22, default_would_suffice: 20, override_required: 2, mode_explicit: 22}
+
+  - id: package.requires_bind_observe
+    ruled: mechanical-ratified
+    paths: "package.requires.inputs, package.requires.outputs, package.requires.policy, package.requires.credentials, package.requires.platform_version, package.flows[].bind.inputs, package.flows[].bind.outputs, package.flows[].bind.policy, package.flows[].bind.credentials, package.flows[].bind.observe, package.packages[].bind"
+    owners: [FlowPackageRequires.UnmarshalYAML, FlowPackageBind.UnmarshalYAML]
+    information:
+      boundary_snapshot: [requires.inputs, requires.outputs, requires.policy, requires.credentials, requires.platform_version]
+      choice: [bind.inputs, bind.outputs, bind.policy, bind.credentials, bind.observe]
+    spelling:
+      canonical_candidate: requires.policy_mapping
+      retired_duplicates: [requires.policy_sequence_when_every_mapping_value_is_empty]
+      distinct_overrides: [requires.policy_mapping_with_default_or_type_or_required_or_description]
+    corpus: {requires_policy_sequence: 0, requires_policy_mapping: 0}
+
+  - id: package.connect
+    ruled: mechanical-ratified
+    paths: "package.connect[].event, package.connect[].from, package.connect[].to, package.connect[].rename, package.connect[].adapter"
+    owners: [FlowPackageConnect.UnmarshalYAML, CompileConnectGraph]
+    information:
+      fact: [event_and_endpoint_ownership]
+      derived_projection: [default_pin_names]
+      choice: [rename_override, adapter]
+    spelling:
+      canonical_candidate: "{event, from, to} with endpoint flow IDs and optional one rename override"
+      retired_duplicates: ["{from: flow.pin, to: flow.pin} when both pins are derivable"]
+      distinct_overrides: [rename]
+    corpus: {legacy_from_to_rows: 0, event_centric_rows: 29, adapters: 4, derivable_pin_pairs: 29}
+
+  - id: package.pack_imports
+    ruled: mechanical-ratified
+    paths: "package.connector_packs.imports[].provider, package.connector_packs.imports[].tool, package.provider_trigger_events.imports[].provider, package.provider_trigger_events.imports[].event"
+    owners: [ConnectorPackImports.UnmarshalYAML, ConnectorPackImport.UnmarshalYAML, ProviderTriggerEventImports.UnmarshalYAML, ProviderTriggerEventImport.UnmarshalYAML]
+    information: {choice: [selected provider/tool and provider/event capability imports]}
+    spelling:
+      canonical_candidate: normalized_underscore_token
+      retired_duplicates: [hyphenated_token, space_separated_token]
+    corpus: {connector_imports: 2, trigger_event_imports: 1, alternate_token_spellings: 0}
+
+  - id: package.ingress_handoff
+    ruled: mechanical-ratified
+    paths: "package.flows[].ingress.*, package.handoffs[].event, package.handoffs[].creates_flow, package.handoffs[].namespace"
+    owners: [ProjectFlowIngress.UnmarshalYAML, ProjectFlowIngressProvider.UnmarshalYAML, ProjectFlowIngressAdmission.UnmarshalYAML, ProjectFlowIngressAdmissionPack.UnmarshalYAML, ProjectFlowIngressAuthentication.UnmarshalYAML, ProjectFlowIngressDeliveryID.UnmarshalYAML]
+    information:
+      fact: [ingress alias/provider/pack/event/delivery extraction and handoff event/flow]
+      choice: [acknowledge, authentication, payload, namespace]
+    spelling: {canonical: strict_mappings, distinct_overrides: [], retired_duplicates: []}
+    corpus: {ingress_blocks: 0, handoffs: 0}
+
+  - id: flow.identity_mode
+    ruled: mechanical-ratified
+    paths: "schema.name, schema.mode, schema.entity, schema.instance"
+    owner: FlowSchemaDocument.UnmarshalYAML
+    information:
+      fact: [name]
+      choice: [mode, instance]
+      derived_projection: [entity]
+    spelling:
+      canonical_candidate: omit_entity_and_derive_single_primary_entity
+      retired_duplicates: [explicit_entity]
+      already_retired: [template_instance_mapping]
+    corpus: {schemas: 34, entity_explicit: 0, instance_scalar: 7}
+
+  - id: flow.lifecycle
+    ruled: R1
+    paths: "schema.initial_state, schema.states, schema.terminal_states, schema.stages"
+    owners: [FlowSchemaDocument.UnmarshalYAML, FlowStageDeclarations.UnmarshalYAML, FlowStageDeclaration.UnmarshalYAML]
+    information:
+      fact: [stage IDs]
+      choice: [initial and terminal membership]
+      annotation: [stage description]
+    spelling:
+      canonical_candidate: stages_keyed_mapping
+      retired_duplicates: [initial_state_plus_states_plus_terminal_states]
+      distinct_overrides: []
+    presence: {stages_missing: legacy_lifecycle_path, stages_null: reject, stages_empty_sequence: explicit_stateless, stages_empty_mapping: currently_zero_collapsed}
+    corpus: {legacy_schemas: 7, stage_schemas: 1, stage_rows: 4}
+
+  - id: flow.stage_timer
+    ruled: mechanical-ratified
+    paths: "schema.stages.<stage>.timers[].id, schema.stages.<stage>.timers[].after, schema.stages.<stage>.timers[].emit, schema.stages.<stage>.timers[].advances_to"
+    owner: FlowStageTimerDeclaration.UnmarshalYAML
+    information:
+      derived_projection: [id]
+      choice: [after, emit, advances_to]
+    spelling:
+      canonical_candidate: omit_id_when_stage_plus_outcome_is_unique
+      retired_duplicates: [explicit_id_equal_to_derived_id]
+      distinct_overrides: [explicit_id_required_to_resolve_collision]
+    corpus: {rows: 0}
+
+  - id: flow.stage_gate
+    ruled: mechanical-ratified
+    paths: "schema.stages.<stage>.gate.decision, schema.stages.<stage>.gate.title, schema.stages.<stage>.gate.context, schema.stages.<stage>.gate.outcomes.<verdict>.label, schema.stages.<stage>.gate.outcomes.<verdict>.input, schema.stages.<stage>.gate.outcomes.<verdict>.advances_to, schema.stages.<stage>.gate.outcomes.<verdict>.emit"
+    owners: [FlowStageGateDeclaration.UnmarshalYAML, FlowStageGateOutcomeDeclaration.UnmarshalYAML, WorkflowGateInputField.UnmarshalYAML]
+    information:
+      fact: [decision and verdict IDs]
+      choice: [context, input type/required, advances_to, emit]
+      annotation: [title, outcome label, input label]
+      derived_projection: [default title and labels]
+    spelling:
+      canonical_candidate: omit_derived_title_and_labels
+      retired_duplicates: [explicit_title_or_label_equal_to_display_derivation]
+      distinct_overrides: [authored_title_or_label_different_from_default]
+    corpus: {gates: 0}
+
+  - id: flow.loop
+    ruled: mechanical-ratified
+    paths: "schema.loops.<loop>.revision_field, schema.loops.<loop>.max_attempts, schema.loops.<loop>.escape, handler.loop.start, handler.loop.admit, handler.loop.repeat, handler.loop.close, handler.loop.from"
+    owners: [FlowLoopDeclarations.UnmarshalYAML, FlowLoopDeclaration.UnmarshalYAML, LoopAttemptLimit.UnmarshalYAML, LoopEscapeSpec.UnmarshalYAML, LoopOperationSpec.UnmarshalYAML]
+    information:
+      fact: [loop ID and revision field]
+      choice: [literal or policy max attempts, escape outcome, operation and source]
+    spelling: {canonical: keyed_loop_plus_typed_operation, distinct_overrides: [literal_vs_policy_attempt_limit], retired_duplicates: []}
+    corpus: {loops: 0}
+
+  - id: flow.pin_event_entry
+    ruled: mechanical-ratified
+    paths: "schema.pins.inputs.events[], schema.pins.outputs.events[]"
+    owners: [decodeFlowInputPinEventNode, decodeFlowOutputPinEventNode]
+    information:
+      fact: [event]
+      derived_projection: [name]
+      choice: [source, sink]
+    spelling:
+      canonical_candidate: mapping_with_event_and_only_non_default_fields
+      retired_duplicates: [scalar_event, explicit_name_equal_to_derived_name]
+      distinct_overrides: [name_different_from_derived_name]
+    corpus:
+      input: {rows: 35, mapping: 35, scalar: 0, derived_name_would_suffice: 28, rename_override_required: 7}
+      output: {rows: 17, mapping: 17, scalar: 0, derived_name_would_suffice: 16, rename_override_required: 1}
+
+  - id: flow.input_pin_carries_resolution
+    ruled: mechanical-ratified
+    paths: "schema.pins.inputs.events[].carries.<field>.from, schema.pins.inputs.events[].carries.<field>.type, schema.pins.inputs.events[].carries.<field>.optional, schema.pins.inputs.events[].carries.<field>.convert, schema.pins.inputs.events[].resolution.*"
+    owners: [FlowInputPinCarries.UnmarshalYAML, FlowInputPinCarry.UnmarshalYAML, FlowInputPinResolution.UnmarshalYAML]
+    information:
+      derived_projection: [same_named_payload_from, producer_schema_type]
+      choice: [from_override, optional, convert, resolution mode/aggregation/window/dedup/singleton/replies_to/correlation_key]
+    spelling:
+      canonical_candidate: carry_key_with_only_non_default_fields
+      retired_duplicates: [scalar_carry, explicit_from_equal_to_payload_field, explicit_type_equal_to_producer_schema, scalar_dedup_by_when_one_item]
+      distinct_overrides: [different_from, optional, convert, multi_item_dedup_by]
+    corpus: {carry_rows: 15, same_named_payload_from: 11, from_override: 4, explicit_derived_type: 15, scalar_carries: 0, mapping_carries: 15}
+
+  - id: flow.output_pin_route_projection
+    ruled: mechanical-ratified
+    paths: "schema.pins.outputs.events[].key, schema.pins.outputs.events[].carries"
+    owner: decodeFlowOutputPinCarriesNode
+    information: {derived_projection: [receiver-specific route key and carries]}
+    spelling:
+      canonical_candidate: omitted_and_compiled_on_route_edge
+      retired_duplicates: [output_pin_key, output_pin_carries, scalar_carries, one_item_carries_sequence]
+    corpus: {authored_key_rows: 3, authored_carries_rows: 3, one_item_sequences: 2, defaults_would_suffice: 3}
+
+  - id: flow.pin_entity_fields
+    ruled: mechanical-ratified
+    paths: "schema.pins.inputs.reads, schema.pins.outputs.writes"
+    owner: decodeFlowPinFieldNamesNode
+    information: {choice: [declared readable and writable entity fields]}
+    spelling:
+      canonical_candidate: scalar_field_sequence
+      retired_duplicates: [sequence_of_field_mappings]
+    corpus: {scalar_entries: 0, mapping_entries: 0}
+
+  - id: flow.other_surface
+    ruled: mechanical-ratified
+    paths: "schema.tool_surface.role_scoped_entity_tools, schema.required_agents, schema.instance_variables.description, schema.instance_variables.variables.<name>, schema.auto_emit_on_create.event, schema.auto_emit_on_create.description"
+    owners: [FlowVariable.UnmarshalYAML, FlowSchemaDocument.UnmarshalYAML]
+    information:
+      choice: [tool_surface, variable declarations, auto_emit_on_create]
+      derived_projection: [required_agents]
+      annotation: [descriptions]
+    spelling:
+      canonical_candidate: omit_required_agents_when_equal_to_agents_catalog
+      retired_duplicates: [explicit_required_agents_equal_to_derived_catalog, scalar_variable_description]
+      distinct_overrides: []
+    corpus: {required_agents_explicit: 0, variables: 0, auto_emit: 0}
+
+  - id: type.scalar_enum_named
+    ruled: mechanical-ratified
+    paths: "types.scalars.<name>, types.enums.<name>, types.types.<name>._description"
+    owners: [TypeCatalogDocument.UnmarshalYAML, ScalarTypeDecl.UnmarshalYAML, EnumTypeDecl.UnmarshalYAML, NamedTypeDecl.UnmarshalYAML]
+    information:
+      fact: [type names, scalar bases, enum members/default]
+      annotation: [_description]
+    spelling:
+      canonical_candidate: enum_mapping_with_values_and_explicit_default
+      already_retired: [enum_sequence, enum_scalar]
+      retired_duplicates: []
+    corpus: {nonempty_type_catalogs: 0}
+
+  - id: typed_field
+    ruled: mechanical-ratified
+    paths: "types.types.<type>.<field>, entities.<entity>.<field>, events.<event>.<field>"
+    owners: [TypeFieldSpec.UnmarshalYAML, EntityFieldDecl.UnmarshalYAML, EventFieldSpec.UnmarshalYAML, decodeWave1FieldNode]
+    information:
+      fact: [type, initial, refinements, materialize_from, project]
+      choice: [indexed, immutable]
+      annotation: [description, citation, _unused_reason, _unused_reader_reason]
+    spelling:
+      canonical_candidate: scalar_type_when_no_non_type_fields_else_mapping
+      retired_duplicates: [mapping_with_type_only, one_item_sequence_type, "mapping {type: list, of: T} versus [T]"]
+      distinct_overrides: [mapping_with_non_type_fields]
+    f2_bug: "type:list plus of remains accepted although it is the same semantic type as [T]"
+    corpus: {event_scalar: 83, event_one_item_sequence: 1, event_mapping: 0, entity_scalar: 4, entity_type_only_mapping: 5, entity_mapping_with_metadata: 7}
+
+  - id: entity_document
+    ruled: mechanical-ratified
+    paths: "entities.<entity>._description, entities.<entity>._owner, entities.<entity>.<field>"
+    owners: [EntityContractsDocument.UnmarshalYAML, EntityContract.UnmarshalYAML]
+    information:
+      fact: [entity and field map keys]
+      choice: [_owner]
+      annotation: [_description]
+    spelling: {canonical: keyed_entity_and_field_maps, already_retired: [_state_model, state_field], retired_duplicates: []}
+    corpus: {entities: 6, fields: 16}
+
+  - id: event.schema_ownership
+    ruled: mechanical-ratified
+    paths: "events.<event>, events.<event>.<payload_field>, events.<event>.required"
+    owners: [EventCatalogEntry.UnmarshalYAML, buildFlatEventPayloadSpec]
+    information:
+      fact: [producer-owned event ID and payload schema]
+      derived_projection: [intra-package consumer schema]
+      boundary_snapshot: [cross-package consumer schema]
+    spelling:
+      canonical_candidate: producer_declaration_only_with_compiled_intra_package_projection
+      retired_duplicates: [intra_package_consumer_restatement, nested_payload_block]
+      distinct_overrides: []
+    f2_bug: "3 intra-package duplicate event declarations disagree instead of consuming one producer projection"
+    corpus: {event_declarations: 54, intra_package_duplicate_declarations: 16, exact_duplicate_restatements: 13, divergent_restatements: 3}
+    divergent_manifestations:
+      - fan-in/barrier:operating.report.requested
+      - fan-in/stream:operating.report.requested
+      - template-create-minted-key:validation.requested
+
+  - id: event.metadata_roles
+    ruled: mechanical-ratified
+    paths: "events.<event>.swarm.note, events.<event>.swarm.source, events.<event>.swarm.producer, events.<event>.swarm.consumer, events.<event>.swarm.status, events.<event>._note, events.<event>.consumer_type, events.<event>._consumer_type, events.<event>.emitter, events.<event>.alternate_emitters, events.<event>.emitter_type, events.<event>.intercepted, events.<event>.passthrough, events.<event>.runtime_handling, events.<event>.owning_node, events.<event>.delivery_channel, events.<event>.author_summary_field"
+    owner: EventCatalogEntry.UnmarshalYAML
+    information:
+      derived_projection: [internal producer, internal consumer, owning_node]
+      fact: [external producer/consumer/source/status, emitter identity, delivery channel]
+      choice: [consumer_type, emitter_type, intercepted, passthrough, runtime_handling]
+      annotation: [note, author_summary_field]
+    spelling:
+      canonical_candidate: swarm_metadata_plus_mapping_emitter
+      retired_duplicates: [_note, _consumer_type, scalar_emitter, one_item_emitter_sequence, emitter_sequence_alternates, scalar_string_list, yes_on_no_off_boolean_spellings]
+      already_retired: [producer, _producer, consumer, _consumer, _source, _status]
+      distinct_overrides: [alternate_emitters, external role facts]
+    f2_bug: "consumer_type and _consumer_type are unioned without contradiction checking; action-local alternate emitters and top-level alternates are also merged"
+    corpus: {metadata_alias_uses: 0, emitter_uses: 0}
+
+  - id: node.identity_defaults_projections
+    ruled: mechanical-ratified
+    paths: "nodes.<node>.id, nodes.<node>.execution_type, nodes.<node>.subscribes_to, nodes.<node>.produces"
+    owner: SystemNodeContract.UnmarshalYAML
+    information:
+      fact: [node map key]
+      derived_projection: [id, execution_type, exact handler subscriptions, exact emitted events]
+      choice: [wildcard_or_extra_runtime_subscription]
+    spelling:
+      canonical_candidate: omit_all_exact_projections
+      retired_duplicates: [id_equal_to_map_key, execution_type_system_node, subscribes_to_equal_to_handler_keys, produces_equal_to_emit_sites]
+      distinct_overrides: [wildcard_or_extra_subscription]
+    f2_bug: "a templated authored id may pass admission but EffectiveSystemNodeID discards it in favor of the map key"
+    corpus: {nodes: 24, redundant_id: 24, redundant_execution_type: 24, exact_subscriptions: 24, wildcard_or_extra_subscriptions: 0, exact_produces: 13, divergent_produces: 0}
+
+  - id: node.state_schema
+    ruled: mechanical-ratified
+    paths: "nodes.<node>.state_schema.description, nodes.<node>.state_schema.fields, nodes.<node>.gate_state"
+    owners: [NodeStateSchema.UnmarshalYAML, NodeGateStateSchema.UnmarshalYAML, decodeNodeStateFields, decodeNodeGateFields]
+    information:
+      fact: [state/gate names, types, defaults, storage]
+      annotation: [descriptions]
+    spelling:
+      canonical_candidate: keyed_mapping
+      retired_duplicates: [sequence_with_name, scalar_type_value, gate_sequence, direct_gate_map_without_wrapper, scalar_gate_description, explicit_gate_name_equal_to_key]
+      distinct_overrides: [mapping_with_default_or_description, gate_storage]
+    corpus: {state_schema: 0, gate_state: 0}
+
+  - id: node.timer
+    ruled: mechanical-ratified
+    paths: "nodes.<node>.timers[].id, nodes.<node>.timers[].event, nodes.<node>.timers[].owner, nodes.<node>.timers[].action, nodes.<node>.timers[].cancellation, nodes.<node>.timers[].delay, nodes.<node>.timers[].start_on, nodes.<node>.timers[].cancel_on, nodes.<node>.timers[].recurring"
+    owner: WorkflowTimerContract.UnmarshalYAML
+    information:
+      fact: [id, event, owner]
+      choice: [action, cancellation, delay, start_on, cancel_on, recurring]
+    spelling:
+      canonical_candidate: mapping
+      retired_duplicates: [scalar_id]
+      already_retired: [delay_seconds, delay_minutes, delay_hours, delay_days]
+    corpus: {rows: 0}
+
+  - id: handler.container
+    ruled: mechanical-ratified
+    paths: "nodes.<node>.event_handlers.<event>.*"
+    owner: SystemNodeEventHandler.UnmarshalYAML
+    information:
+      choice: [action, activity, create_entity, select_entity, select_or_create_entity, emit, on_success, guard, advances_to, sets_gate, clear_gates, data_accumulation, loop, on_complete, rules, accumulate, join, compute, query, fan_out, group_by, filter, reduce, count, clear, template, instance_id_from, config_from, from, dedup_by]
+      annotation: [description, _note, evidence_target]
+    spelling:
+      canonical_candidate: effect_owned_nested_mapping
+      retired_duplicates: [action_options_repeated_as_handler_siblings]
+      already_retired: [condition, logic, branch, emits, payload_transform, on_below_threshold, on_dedup, on_pass]
+    f2_bug: "template/instance_id_from/config_from can be authored both inside action and beside action; action-local silently wins on conflict"
+    corpus: {handlers: 31, duplicate_action_option_uses: 0}
+
+  - id: handler.rules_shape
+    ruled: mechanical-ratified
+    paths: "handler.rules, handler.on_complete, join.on_complete, join.timeout"
+    owners: [HandlerRuleEntry.UnmarshalYAML, decodeHandlerRuleEntriesNode]
+    information:
+      fact: [stable row identity when trace-addressable]
+      choice: [ordered row behavior]
+      annotation: [description]
+    spelling:
+      canonical_candidate: ordered_sequence_of_mappings
+      retired_duplicates: [scalar_description, single_rule_mapping, keyed_rule_mapping]
+      distinct_overrides: []
+    corpus: {rules_sequences: 1, rules_mappings: 0, scalar_rows: 0}
+
+  - id: handler.policy_selection_rows
+    ruled: mechanical-ratified
+    paths: "rule.condition, rule.when, rule.case.selector, rule.case.selectors, rule.case.equals, rule.range.*, rule.lookup.*, rule.validate.*, rule.compute_module.*, rule.else, rule.default"
+    owner: lowerPolicySheetRuleNode
+    information:
+      choice: [predicate, case/range/lookup/validation/module selection, default branch]
+      fact: [stable row id, module and validation references]
+      annotation: [description]
+    spelling:
+      canonical_candidate: typed_policy_sheet_rows
+      retired_duplicates: [condition_when_predicate, else_default, selector_one_item_selectors, scalar_one_item_equals]
+      distinct_overrides: [multi_selector_case, literal_and_typed_lookup_values]
+    f2_bug: "condition and when can express the same predicate but only when retains PolicyRow metadata and typed-row validation"
+    corpus: {condition: 1, when: 0, else: 0, default: 0}
+
+  - id: handler.emit_action_activity
+    ruled: mechanical-ratified
+    paths: "emit, action, activity, activity.approval, on_success.emit"
+    owners: [EmitSpec.UnmarshalYAML, ActionSpec.UnmarshalYAML, ActivitySpec.UnmarshalYAML, HandlerOnSuccessSpec.UnmarshalYAML]
+    information:
+      fact: [event/tool/action/decision identity]
+      choice: [from, fields, input, approval]
+    spelling:
+      canonical_candidate: mapping_when_payload_or_options_exist_else_scalar
+      retired_duplicates: [emit_mapping_with_event_only, action_mapping_with_id_only]
+      distinct_overrides: [mapping_with_fields_or_options]
+    corpus: {emit_scalar: 0, emit_mapping: 19, action_rows: 2, activity_rows: 0}
+
+  - id: handler.guard_gate_clear
+    ruled: mechanical-ratified
+    paths: "guard, guard.on_fail, guard.on_fail.escalate, sets_gate, clear_gates"
+    owners: [GuardSpec.UnmarshalYAML, GateSpec.UnmarshalYAML, decodeClearGatesNode]
+    information:
+      fact: [guard/check IDs and policy refs]
+      choice: [failure behavior, gate value, clear targets]
+    spelling:
+      canonical_candidate: typed_mapping_and_explicit_clear_list
+      retired_duplicates: [sets_gate_scalar_equals_name_true, clear_gates_true_equals_star, clear_gates_scalar_equals_one_item_list]
+      already_retired: [guard_scalar_id, deprecated_guard_id_only_fallback]
+    corpus: {rows: 0}
+
+  - id: handler.expression
+    ruled: R2
+    paths: "emit.fields.*, activity.input.*, mailbox.*, artifact_repo expression fields, stage_gate.context.*, data_accumulation.writes[].value, data_accumulation.writes[].expression"
+    owners: [ExpressionValue.UnmarshalYAML, decodeEmitFieldValueNode, decodeWorkflowDataWriteValueNode]
+    information:
+      fact: [literal values and references]
+      choice: [literal, ref, CEL]
+    spelling:
+      canonical_candidate: context_specific_scalar_plus_explicit_ref_or_cel_mapping
+      retired_duplicates: ["{expression: X} versus {cel: X}", "{literal: X} versus literal scalar/sequence/map", "stage-gate scalar rewritten to CEL versus {cel: X}"]
+      distinct_overrides: [literal_vs_ref_vs_cel]
+    f2_bug: "the same scalar is literal in ExpressionValue, CEL in emit/mailbox, and rewritten from literal to CEL in gate context"
+    corpus: {expression_alias_uses: 0}
+
+  - id: handler.data_write
+    ruled: mechanical-ratified
+    paths: "data_accumulation.writes[], data_accumulation.source_event"
+    owners: [WorkflowDataWrite.UnmarshalYAML, WorkflowDataAccumulation.UnmarshalYAML]
+    information:
+      fact: [source and target paths]
+      choice: [operation, value, key, index]
+    spelling:
+      canonical_candidate: scalar_for_direct_same_field_else_operation_mapping
+      retired_duplicates: ["scalar field versus {field: field}", "expression versus value:{cel:...}"]
+      distinct_overrides: [source_to_different_target, operation_mapping]
+    corpus: {write_lists: 7, scalar_write_rows: 19, mapping_write_rows: 0}
+
+  - id: handler.collection_compute
+    ruled: mechanical-ratified
+    paths: "accumulate.*, compute.*, fan_out.*, group_by.*, filter.*, reduce.*, count.*, query.*, clear.targets"
+    owners: [AccumulateSpec.UnmarshalYAML, ComputeSpec.UnmarshalYAML, FanOutSpec.UnmarshalYAML, GroupBySpec.UnmarshalYAML, FilterSpec.UnmarshalYAML, ReduceSpec.UnmarshalYAML, CountSpec.UnmarshalYAML, QuerySpec.UnmarshalYAML]
+    information:
+      fact: [source/target paths, fan-out identity expression, compute module/set IDs]
+      choice: [operation, params, bounds, aggregation/filter/reduce/count/query behavior]
+      annotation: [description]
+      derived_projection: [fan-out index, platform max-items ceiling]
+    spelling:
+      canonical_candidate: strict_typed_mapping
+      retired_duplicates: [query_mapping_equals_one_item_sequence]
+      already_retired: [fan_out.target, fan_out.emit_per_item, fan_out.emit_mapping, clear.target, config_from.policy_keys]
+    corpus: {fan_out: 0, compute: 0, query: 0}
+
+  - id: handler.join
+    ruled: mechanical-ratified
+    paths: "join.id, join.stage, join.members.*, join.window.*, join.output, join.complete_when, join.remaining, join.on_complete, join.timeout.*"
+    owners: [JoinSpec.UnmarshalYAML, JoinMembersSpec.UnmarshalYAML, JoinWindowSpec.UnmarshalYAML]
+    information:
+      derived_projection: [id_when_equal_to_stage]
+      fact: [member and window correlation]
+      choice: [completion predicate, output, outcomes, timeout]
+    spelling:
+      canonical_candidate: omit_id_when_equal_to_stage
+      retired_duplicates: [explicit_id_equal_to_stage]
+      distinct_overrides: [explicit_unique_id]
+    corpus: {joins: 0}
+
+  - id: handler.mailbox_artifact_repo
+    ruled: mechanical-ratified
+    paths: "mailbox.*, artifact_repo.*"
+    owners: [MailboxWriteSpec.UnmarshalYAML, ArtifactRepoSpec.UnmarshalYAML, ArtifactRepoFileSpec.UnmarshalYAML, ArtifactRepoSchemaSpec.UnmarshalYAML, ArtifactRepoOutputSpec.UnmarshalYAML, ArtifactRepoLimitsSpec.UnmarshalYAML]
+    information:
+      fact: [provider/repo/request/file/schema/output identity and content]
+      choice: [limits, allowed paths, success/failure events and payloads]
+    spelling: {canonical: strict_mapping, distinct_overrides: [], retired_duplicates: []}
+    corpus: {mailbox: 0, artifact_repo: 0}
+
+  - id: agent.identity_defaults
+    ruled: mechanical-ratified
+    paths: "agents.<agent>.id, agents.<agent>.type, agents.<agent>.memory, agents.<agent>.max_turns_per_task, agents.<agent>.workspace_class"
+    owner: AgentRegistryEntry.UnmarshalYAML
+    information:
+      fact: [agent map key]
+      derived_projection: [id, type=generic, memory=false, max_turns_per_task=100, empty workspace_class]
+    spelling:
+      canonical_candidate: omit_values_equal_to_platform_defaults
+      retired_duplicates: [explicit_id_equal_to_key, type_generic, memory_false, max_turns_per_task_100, empty_workspace_class]
+      distinct_overrides: [non_default_values]
+    corpus: {agents: 2, id_explicit: 0, type_generic: 1, memory_false: 2, max_turns_explicit: 0}
+
+  - id: agent.behavior
+    ruled: mechanical-ratified
+    paths: "agents.<agent>.role, intent, entity_writes, permissions, permissions_bundle, manager_fallback, node_type, model, mock, subscriptions, tools, native_tools, flow_data_access, criteria, emit_events, implementation"
+    owners: [AgentRegistryEntry.UnmarshalYAML, agentintent.Source.UnmarshalYAML, AgentEntityWriteRule.UnmarshalYAML]
+    information:
+      fact: [intent source/content, mock module, implementation]
+      choice: [role, write grants, permissions, fallback, node/model, subscriptions, tools, access, criteria, emit grants]
+      boundary_snapshot: [resolved local/import intent content and mock source bytes]
+    spelling:
+      canonical_candidate: "intent scalar for local; typed mapping for inline/import; entity writes scalar all or explicit list"
+      distinct_overrides: [local_vs_inline_vs_import, all_vs_field_list]
+      already_retired: [model_tier, mode, conversation_mode, session_scope, session_scope_authority, tools_tier2, subscriptions_bootstrap, subscribes_to, prompt_ref, prompt_inputs]
+      retired_duplicates: []
+    corpus: {intent_local_scalar: 2, intent_mapping: 0}
+
+  - id: tool.schema_entry
+    ruled: mechanical-ratified
+    paths: "tools.<tool>.category, description, handler_type, effect_class, permission, rate_limit, rate_limit_max_wait, input_schema, output_schema, http, response_mapping, response_success, credentials, managed_credential"
+    owner: ToolSchemaEntry.UnmarshalYAML
+    information:
+      fact: [tool map key, handler/effect/schema/transport contract]
+      choice: [permission, rate limit, credentials]
+      annotation: [category, description]
+      derived_projection: [empty object input/output schema defaults]
+    spelling:
+      canonical_candidate: strict_mapping_with_omitted_default_empty_schemas
+      retired_duplicates: [explicit_empty_object_schema_equal_to_default]
+      already_retired: [parameters, returns, endpoint, type, required_permission]
+    corpus: {project_tool_entries: 0}
+
+  - id: tool.schema_value
+    ruled: mechanical-ratified
+    paths: "tool.input_schema.*, tool.output_schema.*, pack_interface.schemas.*, channel.opaque_types.*"
+    owner: ToolInputSchema.UnmarshalYAML
+    information:
+      fact: [type, properties, required, items, enum, numeric/string/array constraints, equalTo]
+      choice: [additionalProperties boolean versus schema]
+      annotation: [description]
+    spelling: {canonical: JSON_Schema_shaped_mapping, distinct_overrides: [additionalProperties_boolean_or_schema], retired_duplicates: []}
+    presence: {null_any_field: reject, empty_mapping: explicit_any_schema, missing_schema_at_tool_boundary: derive_empty_object}
+
+  - id: platform.pack_interface
+    ruled: mechanical-ratified
+    paths: "platform-spec.interfaces.<kind>.<id>.kind, schemas, operations, events, operation.effect_class, operation.input, operation.context, operation.output, event.required_fields, field.schema, field.opaque"
+    owners: [PackInterfaceDefinition.UnmarshalYAML, PackInterfaceOperation.UnmarshalYAML, PackInterfaceEvent.UnmarshalYAML, PackInterfaceField.UnmarshalYAML]
+    information:
+      fact: [interface identity and exact operation/event schemas]
+      annotation: [schema descriptions]
+    spelling: {canonical: strict_mapping, distinct_overrides: [schema_vs_opaque_closed_union], retired_duplicates: []}
+
+  - id: policy.value
+    ruled: R3
+    paths: "policy.<key>"
+    owners: [PolicyDocument.UnmarshalYAML, PolicyValue.UnmarshalYAML]
+    information:
+      fact: [value]
+      choice: [override]
+      annotation: [description]
+    spelling:
+      canonical_candidate: bare_value_when_no_metadata_else_wrapper
+      retired_duplicates: ["bare scalar/sequence/object versus {value: ...} when metadata absent"]
+      distinct_overrides: [wrapper_with_description_or_override]
+    f2_bug: "a literal object containing value, description, or override is reinterpreted as wrapper metadata"
+    corpus: {nonempty_policy_documents: 0}
+
+  - id: policy.criteria_validation
+    ruled: R3
+    paths: "policy.criteria.*, policy.validation.*"
+    owners: [PolicyCriteriaParam.UnmarshalYAML, PolicyValidationSet.UnmarshalYAML, PolicyValidationClass.UnmarshalYAML, PolicyValidationRule.UnmarshalYAML, PolicyValidationCheck.UnmarshalYAML, PolicyValidationEqualCheck.UnmarshalYAML]
+    information:
+      fact: [set/class/rule IDs, classes, params, inputs, check operands]
+      choice: [disposition, pin_candidate]
+      annotation: [text]
+    spelling: {canonical: strict_mapping, distinct_overrides: [], retired_duplicates: []}
+    corpus: {rows: 0}
+
+  - id: policy.module
+    ruled: R3
+    paths: "policy.modules.<id>.path, kind, abi, entry, digest, source_path, source_hash, runtime.*, input_schema, output_schema, limits.*"
+    owners: [PolicyModule.UnmarshalYAML, PolicyModuleRuntime.UnmarshalYAML, PolicyModuleLimits.UnmarshalYAML]
+    information:
+      fact: [module ID/path/kind/abi/entry and schemas]
+      boundary_snapshot: [digest, source_hash, interpreter_digest, snapshot_digest, harness_abi]
+      choice: [runtime interpreter and limits]
+    spelling: {canonical: strict_mapping, distinct_overrides: [], retired_duplicates: []}
+    corpus: {rows: 0}
+
+  - id: pack.inventory_envelope
+    ruled: mechanical-ratified
+    paths: "packs/inventory.yaml.*, packs/manifest.yaml.*, packs/*/pack.yaml.*"
+    owners: [packartifact.LoadInventoryManifest, packartifact.ParseProjectPackManifest, packmodel.ParseEnvelope]
+    information:
+      fact: [pack IDs/types/versions/platform ranges/capabilities/requirements]
+      boundary_snapshot: [manifest hash, import origin hashes, effective/base selection digests]
+      annotation: [tests]
+    spelling: {canonical: strict_known_fields_mapping, distinct_overrides: [], retired_duplicates: []}
+
+  - id: pack.channel
+    ruled: mechanical-ratified
+    paths: "channel.provider, channel.opaque_types, channel.operations, channel.events, channel.registration"
+    owners: [packs.LoadChannelPackFS, ChannelMapping.UnmarshalYAML]
+    information:
+      boundary_snapshot: [provider operation/event schemas and opaque types]
+      fact: [tool, source path, event, field mapping, registration slot]
+      choice: [registration credential bindings]
+    spelling:
+      canonical_candidate: scalar_source_path_for_direct_mapping
+      retired_duplicates: ["{from: path} when no recursive mapping"]
+      distinct_overrides: ["{each, item} recursive mapping"]
+    corpus: {direct_scalar_mappings: 6, from_only_mappings: 0, recursive_each_mappings: 2}
+
+  - id: pack.connector
+    ruled: mechanical-ratified
+    paths: "connector.provider, connector.generation, connector.tools"
+    owner: providerconnectors.NewPackRegistryFromInventory
+    information:
+      boundary_snapshot: [provider and generated tool schemas/evidence]
+      fact: [tool IDs and operation bindings]
+    spelling: {canonical: strict_mapping, distinct_overrides: [], retired_duplicates: []}
+
+  - id: platform.spec_consumed_law
+    ruled: mechanical-ratified
+    paths: "platform-spec.platform, platform_events, permissions_model, interfaces, vocabulary, contract_formats, workflow_state, platform_tables, builtin_hooks, api_specification, compliance_rules, file_layout"
+    owner: PlatformSpecDocument
+    information:
+      fact: [authoritative platform law and registries]
+      annotation: [descriptions and migration notes]
+    spelling: {canonical: authoritative_spec_shape, distinct_overrides: [], retired_duplicates: []}
+    note: "Included because the loader consumes it; it is governing law, not project-authored duplication."
+
+  - id: future.contract_element_id
+    ruled: mechanical-ratified
+    paths: "handler.rules[].element_id and the closed future #1976 adoption registry"
+    owner: "#1976 mint/codemod"
+    information: {fact: [tool-authored stable identity minted once and persisted visibly]}
+    spelling: {canonical: explicit_minted_element_id, distinct_overrides: [], retired_duplicates: [load_time_derivation_or_backfill]}
+    corpus: {current_rows: 0}
+    note: "Answer to the ruling probe: once minted, an element ID is a fact, not a projection."
+
+  - id: unreachable_retired_decoders
+    ruled: mechanical-ratified
+    paths: "package.entity_schema, events.<event>.payload_object, EventEmission, scalar_guard"
+    owners: [EntitySchema.UnmarshalYAML, EventPayloadSpec.UnmarshalYAML, EventEmission.UnmarshalYAML, GuardSpec.UnmarshalYAML]
+    information: {derived_projection: [legacy internal entity-schema projection], fact: [none on live authored surface]}
+    spelling:
+      canonical_candidate: no_live_authored_form
+      already_retired: [package.entity_schema, nested_event_payload, emits, scalar_guard]
+      retired_duplicates: [all accepted shapes reachable only by direct decoder tests]
+    corpus: {live_rows: 0}
+
+presence_findings:
+  preserve_until_admission:
+    - all optional mapping/sequence/scalar fields currently decoded through Go zero values
+    - policy values where null and omitted are currently both PolicyValue zero-ish states
+    - expression values where null and empty scalar become zero expression
+    - event metadata booleans where null/empty/no/off collapse to false
+    - stages, loops, rules, carries, schemas, and input/output maps where missing and explicit empty currently often collapse
+  required_substrate_outcome: "presence-aware authored node -> admitted effective value with authored/derived/boundary_snapshot provenance"
+
+f2_priority_rows:
+  - event.schema_ownership
+  - handler.policy_selection_rows
+  - policy.value
+  - node.identity_defaults_projections
+  - handler.container
+  - handler.expression
+  - event.metadata_roles
+
+decoder_coverage:
+  workflow_contract_yaml_wave1.go:
+    package.metadata: [ProjectPackageDocument]
+    package.flow_reference: [ProjectFlowRef]
+    package.ingress_handoff: [ProjectFlowIngress, ProjectFlowIngressProvider, ProjectFlowIngressAdmission, ProjectFlowIngressAdmissionPack, ProjectFlowIngressAuthentication, ProjectFlowIngressDeliveryID]
+    package.requires_bind_observe: [FlowPackageRequires, FlowPackageBind]
+    package.pack_imports: [ConnectorPackImports, ConnectorPackImport, ProviderTriggerEventImports, ProviderTriggerEventImport]
+    package.connect: [FlowPackageConnect]
+    type.scalar_enum_named: [TypeCatalogDocument, ScalarTypeDecl, EnumTypeDecl, NamedTypeDecl]
+    typed_field: [TypeFieldSpec, EntityFieldDecl]
+    entity_document: [EntityContractsDocument, EntityContract]
+  workflow_contract_yaml_schema.go:
+    unreachable_retired_decoders: [EntitySchema, EventPayloadSpec]
+    node.state_schema: [NodeStateSchema, NodeGateStateSchema]
+    typed_field: [EventFieldSpec]
+    tool.schema_value: [ToolInputSchema]
+    platform.pack_interface: [PackInterfaceDefinition, PackInterfaceOperation, PackInterfaceEvent, PackInterfaceField]
+    tool.schema_entry: [ToolSchemaEntry]
+  workflow_contract_yaml_flow.go:
+    handler.rules_shape: [HandlerRuleEntry]
+    flow.pin_event_entry: [FlowInputPins, FlowOutputPins]
+    flow.identity_mode: [TemplateInstanceField]
+    flow.input_pin_carries_resolution: [FlowInputPinCarries, FlowInputPinCarry, FlowInputPinResolution]
+    handler.collection_compute: [ComputeSpec]
+    flow.other_surface: [FlowVariable]
+    flow.lifecycle: [WorkflowTransitionContract]
+  workflow_contract_yaml_handlers.go:
+    node.timer: [WorkflowTimerContract]
+    unreachable_retired_decoders: [EventEmission]
+    handler.emit_action_activity: [EmitSpec, HandlerOnSuccessSpec, ActivitySpec, ActionSpec]
+    handler.mailbox_artifact_repo: [MailboxWriteSpec, ArtifactRepoSpec, ArtifactRepoFileSpec, ArtifactRepoSchemaSpec, ArtifactRepoOutputSpec, ArtifactRepoLimitsSpec]
+    handler.container: [SystemNodeEventHandler]
+    event.schema_ownership: [EventCatalogEntry]
+  workflow_contract_yaml_rules.go:
+    handler.guard_gate_clear: [GuardSpec, GateSpec]
+    handler.collection_compute: [AccumulateSpec, FanOutSpec, GroupBySpec, FilterSpec, ReduceSpec, CountSpec, QuerySpec]
+    handler.data_write: [WorkflowDataWrite, WorkflowDataAccumulation]
+    handler.expression: [ExpressionValue]
+  workflow_contract_yaml.go:
+    flow.identity_mode: [FlowSchemaDocument]
+    node.identity_defaults_projections: [SystemNodeContract]
+  workflow_contract_stages.go:
+    flow.lifecycle: [FlowStageDeclarations, FlowStageDeclaration]
+    flow.stage_timer: [FlowStageTimerDeclaration]
+    flow.stage_gate: [FlowStageGateDeclaration, FlowStageGateOutcomeDeclaration, WorkflowGateInputField]
+  workflow_contract_loops.go:
+    flow.loop: [FlowLoopDeclarations, FlowLoopDeclaration, LoopAttemptLimit, LoopEscapeSpec, LoopOperationSpec]
+  workflow_contract_join.go:
+    handler.join: [JoinSpec, JoinMembersSpec, JoinWindowSpec]
+  workflow_contract_agent_writes.go:
+    agent.behavior: [AgentEntityWriteRule]
+  workflow_contract_types.go:
+    agent.identity_defaults: [AgentRegistryEntry]
+  enums.go:
+    handler.collection_compute: [ComputeOperation]
+  flowmodel/model.go:
+    policy.value: [PolicyDocument, PolicyValue]
+    policy.criteria_validation: [PolicyCriteriaParam, PolicyValidationSet, PolicyValidationClass, PolicyValidationRule, PolicyValidationCheck, PolicyValidationEqualCheck]
+    policy.module: [PolicyModule, PolicyModuleRuntime, PolicyModuleLimits]
+  agentintent/model.go:
+    agent.behavior: [Source]
+
+registry_result:
+  completeness: "all 101 custom unmarshallers plus strict reachable structs mapped"
+  wave_1_status: closed
+  later_wave_gate: "presence-sensitive retirements remain blocked on the effective-model/presence-substrate design gate"
+
+wave_1:
+  issue: 2309
+  rows: [package.child_collection, package.child_reference, package.connect]
+  checked_in_package_corpus:
+    examples: {files: 8, rows: 16}
+    tests_and_testdata: {files: 11, rows: 13}
+    total: {files: 19, rows: 29}
+  go_connect_corpus:
+    total_files: 23
+    canonicalrouting_occurrences: 35
+    files:
+      internal/cliapp/describe.go: non_authoring_text
+      internal/cliapp/describe_test.go: non_authoring_text
+      internal/cliapp/local_context_registry.go: non_authoring_text
+      internal/cliapp/main_test.go: non_authoring_text
+      internal/runtime/authoringview/view_test.go: non_authoring_text
+      internal/runtime/bootverify/workflow_accumulator_safety_checks.go: non_authoring_text
+      internal/runtime/bootverify/workflow_flow_boundary_checks.go: non_authoring_text
+      internal/runtime/bus/eventbus_target_routes_test.go: non_authoring_text
+      internal/runtime/core/pinrouting/connect_route_plan.go: non_authoring_text
+      internal/runtime/core/pinrouting/connect_route_plan_test.go: non_authoring_text
+      internal/runtime/testfixtures/canonicalrouting/composition_connect_variants.go: positive_producer_and_mutation_base
+      internal/runtime/testfixtures/canonicalrouting/import_boundary_variants.go: positive_producer_and_mutation_base
+      internal/runtime/testfixtures/canonicalrouting/legacy_instance_routes.go: positive_producer_and_mutation_base
+      internal/runtime/testfixtures/canonicalrouting/ownership_guard_test.go: non_authoring_text
+      internal/runtime/testfixtures/canonicalrouting/parser_snippets.go: positive_producer_and_explicit_retired_negative
+      internal/runtime/testfixtures/canonicalrouting/remaining_variants.go: positive_producer_and_mutation_base
+      internal/runtime/testfixtures/canonicalrouting/resolution_variants.go: mutation_base
+      internal/runtime/testfixtures/canonicalrouting/root_connect.go: positive_producer_and_mutation_base
+      internal/runtime/testfixtures/canonicalrouting/sealed_package.go: positive_producer_and_mutation_base
+      internal/runtime/testfixtures/canonicalrouting/select_entity_demotion.go: positive_producer_and_mutation_base
+      internal/runtime/testfixtures/canonicalrouting/supported_surface_routing.go: positive_producer
+      internal/runtime/testfixtures/canonicalrouting/target_owner_diamond.go: positive_producer_and_mutation_base
+      internal/store/internal/runtimepersistence/delivery_route_equality_parity_test.go: non_authoring_text
+  closure: "all three rows reject retired spellings and admit only canonical forms"

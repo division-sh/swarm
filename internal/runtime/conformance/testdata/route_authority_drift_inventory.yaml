@@ -592,12 +592,13 @@ seam_families:
       - internal/runtime/bootverify/workflow_composition_connect_checks.go
       - internal/runtime/bootverify/workflow_composition_connect_checks_test.go
       - internal/runtime/testfixtures/canonicalrouting/import_boundary_variants.go
+      - internal/runtime/conformance/testdata/canonical_forms_registry.yaml
     search_dimensions: [import_boundary_pin_alias_route_authority, connect_route_plan]
     notes: >
-      Binding input/output pins remains canonical interface and event-name
-      adaptation evidence. Under the #1786 ruling for #2085, a bind may validate
-      or adapt an explicit FlowPackageConnect lowered to ConnectRoutePlan, but
-      cannot create an inter-flow route by itself.
+      Binding input/output pins remains canonical package-visible event-name
+      evidence. Under #2309, CompileConnectGraph consumes that projection while
+      resolving an explicit event-centric FlowPackageConnect. A bind cannot
+      create an inter-flow route by itself.
   - id: import_boundary_pin_alias_route_engines
     layer: invalid_old_authority
     classification: invalid_old_authority_path

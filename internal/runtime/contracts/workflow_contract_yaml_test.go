@@ -61,11 +61,75 @@ func TestProjectPackageDocumentDecode_PreservesRequiresAndImportBinds(t *testing
 	if len(doc.Connect) != 1 {
 		t.Fatalf("Connect len = %d, want 1", len(doc.Connect))
 	}
-	if got, want := doc.Connect[0].From, "worker.work.completed"; got != want {
+	if got, want := doc.Connect[0].Event, "parent.work_completed"; got != want {
+		t.Fatalf("Connect[0].Event = %q, want %q", got, want)
+	}
+	if got, want := doc.Connect[0].From, "worker"; got != want {
 		t.Fatalf("Connect[0].From = %q, want %q", got, want)
 	}
-	if got, want := doc.Connect[0].To, "worker.work.requested"; got != want {
+	if got, want := doc.Connect[0].To, "worker"; got != want {
 		t.Fatalf("Connect[0].To = %q, want %q", got, want)
+	}
+	if got, want := doc.Connect[0].Rename, "parent.work_requested"; got != want {
+		t.Fatalf("Connect[0].Rename = %q, want %q", got, want)
+	}
+}
+
+func TestProjectPackageDocumentDecodeRejectsRetiredChildPackageSpellings(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{name: "children only", yaml: "children: []\n", want: "children is no longer supported"},
+		{name: "subpackages only", yaml: "subpackages: []\n", want: "subpackages is no longer supported"},
+		{name: "equal dual collection", yaml: "packages: [{id: child, path: child}]\nchildren: [{id: child, path: child}]\n", want: "children is no longer supported"},
+		{name: "conflicting dual collection", yaml: "packages: [{id: child, path: child}]\nsubpackages: [{id: other, path: other}]\n", want: "subpackages is no longer supported"},
+		{name: "package location", yaml: "packages: [{id: child, package: child}]\n", want: "child reference package is no longer supported"},
+		{name: "dir location", yaml: "packages: [{id: child, dir: child}]\n", want: "child reference dir is no longer supported"},
+		{name: "equal dual location", yaml: "packages: [{id: child, path: child, package: child}]\n", want: "child reference package is no longer supported"},
+		{name: "conflicting dual location", yaml: "packages: [{id: child, path: child, dir: other}]\n", want: "child reference dir is no longer supported"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var doc ProjectPackageDocument
+			err := yaml.Unmarshal([]byte("name: test\n"+tc.yaml), &doc)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestFlowPackageConnectDecodePinsCanonicalEventCentricShape(t *testing.T) {
+	var connect FlowPackageConnect
+	if err := yaml.Unmarshal([]byte("event: work.ready\nfrom: producer\nto: consumer\nrename: work.accepted\nadapter: ready_to_accepted\n"), &connect); err != nil {
+		t.Fatalf("decode canonical connect row: %v", err)
+	}
+	if connect.Event != "work.ready" || connect.From != "producer" || connect.To != "consumer" || connect.Rename != "work.accepted" || connect.Adapter != "ready_to_accepted" {
+		t.Fatalf("canonical connect = %#v", connect)
+	}
+
+	tests := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{name: "old row without event", yaml: "from: producer.work_ready\nto: consumer.work_ready\n", want: "endpoint-centric connect rows"},
+		{name: "missing source", yaml: "event: work.ready\nto: consumer\n", want: "requires non-empty event, from, and to"},
+		{name: "missing receiver", yaml: "event: work.ready\nfrom: producer\n", want: "requires non-empty event, from, and to"},
+		{name: "redundant rename", yaml: "event: work.ready\nfrom: producer\nto: consumer\nrename: work.ready\n", want: "redundant with event"},
+		{name: "duplicate event equal", yaml: "event: work.ready\nevent: work.ready\nfrom: producer\nto: consumer\n", want: "repeats key"},
+		{name: "duplicate endpoint conflicting", yaml: "event: work.ready\nfrom: producer\nfrom: other\nto: consumer\n", want: "repeats key"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var invalid FlowPackageConnect
+			err := yaml.Unmarshal([]byte(tc.yaml), &invalid)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.want)
+			}
+		})
 	}
 }
 
@@ -1052,7 +1116,7 @@ func TestFlowPackageConnectDecodeRejectsRetiredDeliveryAndReplyOnPresence(t *tes
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			var connect FlowPackageConnect
-			err := yaml.Unmarshal([]byte("from: producer.ready\nto: consumer.ready\n"+tc.field+"\n"), &connect)
+			err := yaml.Unmarshal([]byte("event: work.ready\nfrom: producer\nto: consumer\n"+tc.field+"\n"), &connect)
 			if err == nil {
 				t.Fatal("yaml.Unmarshal succeeded, want retired connect field rejection")
 			}

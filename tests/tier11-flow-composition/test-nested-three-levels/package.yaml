@@ -7,8 +7,11 @@ flows:
   flow: child
   mode: static
 connect:
-  - from: .step_begin
-    to: child.step_begin
-  - from: child.micro_relayed
-    to: .micro_done
+  - event: step.begin
+    from: .
+    to: child
+  - event: micro.relayed
+    from: child
+    to: .
+    rename: micro.done
     adapter: child_micro_relayed_to_root_micro_done

@@ -32,8 +32,6 @@ var projectPackageDocumentFields = map[string]struct{}{
 	"requires":                {},
 	"flows":                   {},
 	"packages":                {},
-	"children":                {},
-	"subpackages":             {},
 	"connect":                 {},
 	"connector_packs":         {},
 	"provider_trigger_events": {},
@@ -48,6 +46,12 @@ var projectFlowRefFields = map[string]struct{}{
 	"activation": {},
 	"ingress":    {},
 	"bind":       {},
+}
+
+var projectPackageRefFields = map[string]struct{}{
+	"id":   {},
+	"path": {},
+	"bind": {},
 }
 
 var projectFlowIngressFields = map[string]struct{}{
@@ -91,6 +95,9 @@ func (p *ProjectPackageDocument) UnmarshalYAML(node *yaml.Node) error {
 	if err := validateProjectPackageDocumentFields(node); err != nil {
 		return err
 	}
+	if err := validateProjectPackageRefs(yamlMappingValue(node, "packages")); err != nil {
+		return err
+	}
 	var aux struct {
 		Name                  string                      `yaml:"name"`
 		Version               string                      `yaml:"version"`
@@ -100,8 +107,6 @@ func (p *ProjectPackageDocument) UnmarshalYAML(node *yaml.Node) error {
 		Requires              FlowPackageRequires         `yaml:"requires"`
 		Flows                 []ProjectFlowRef            `yaml:"flows"`
 		Packages              []ProjectPackageRef         `yaml:"packages"`
-		Children              []ProjectPackageRef         `yaml:"children"`
-		Subpackages           []ProjectPackageRef         `yaml:"subpackages"`
 		Connect               []FlowPackageConnect        `yaml:"connect"`
 		ConnectorPacks        ConnectorPackImports        `yaml:"connector_packs"`
 		ProviderTriggerEvents ProviderTriggerEventImports `yaml:"provider_trigger_events"`
@@ -109,6 +114,11 @@ func (p *ProjectPackageDocument) UnmarshalYAML(node *yaml.Node) error {
 	}
 	if err := node.Decode(&aux); err != nil {
 		return err
+	}
+	for i := range aux.Packages {
+		aux.Packages[i].ID = strings.TrimSpace(aux.Packages[i].ID)
+		aux.Packages[i].Path = strings.TrimSpace(aux.Packages[i].Path)
+		aux.Packages[i].Bind = aux.Packages[i].Bind.normalized()
 	}
 	keywords, err := decodePackageKeywordsYAML(yamlMappingValue(node, "keywords"))
 	if err != nil {
@@ -139,8 +149,6 @@ func (p *ProjectPackageDocument) UnmarshalYAML(node *yaml.Node) error {
 		Requires:              aux.Requires.normalized(),
 		Flows:                 append([]ProjectFlowRef(nil), aux.Flows...),
 		Packages:              append([]ProjectPackageRef(nil), aux.Packages...),
-		Children:              append([]ProjectPackageRef(nil), aux.Children...),
-		Subpackages:           append([]ProjectPackageRef(nil), aux.Subpackages...),
 		Connect:               cloneFlowPackageConnects(aux.Connect),
 		ConnectorPacks:        aux.ConnectorPacks.normalized(),
 		ProviderTriggerEvents: aux.ProviderTriggerEvents.normalized(),
@@ -161,8 +169,37 @@ func validateProjectPackageDocumentFields(node *yaml.Node) error {
 		if key == "" {
 			continue
 		}
+		switch key {
+		case "children", "subpackages":
+			return fmt.Errorf("RETIRED: package.yaml %s is no longer supported; declare imported child packages under packages", key)
+		}
 		if _, ok := projectPackageDocumentFields[key]; !ok {
 			return NewUndefinedFieldDiagnostic("package.yaml", key, projectPackageDocumentFields)
+		}
+	}
+	return nil
+}
+
+func validateProjectPackageRefs(node *yaml.Node) error {
+	if node == nil || node.Kind == 0 || node.Tag == "!!null" {
+		return nil
+	}
+	if node.Kind != yaml.SequenceNode {
+		return fmt.Errorf("package.yaml packages must be a sequence")
+	}
+	for index, entry := range node.Content {
+		if entry == nil || entry.Kind != yaml.MappingNode {
+			return fmt.Errorf("package.yaml packages[%d] must be a mapping", index)
+		}
+		for i := 0; i+1 < len(entry.Content); i += 2 {
+			key := strings.TrimSpace(entry.Content[i].Value)
+			switch key {
+			case "package", "dir":
+				return fmt.Errorf("RETIRED: package child reference %s is no longer supported; declare the child location with path", key)
+			}
+		}
+		if err := validateKnownMappingFields(entry, fmt.Sprintf("package.yaml packages[%d]", index), projectPackageRefFields); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -353,8 +390,10 @@ var flowPackageRequiresPolicyFieldOptions = map[string]struct{}{
 }
 
 var flowPackageConnectFieldOptions = map[string]struct{}{
+	"event":   {},
 	"from":    {},
 	"to":      {},
+	"rename":  {},
 	"adapter": {},
 }
 
@@ -796,12 +835,21 @@ func (c *FlowPackageConnect) UnmarshalYAML(node *yaml.Node) error {
 		return fmt.Errorf("connect entry must be a mapping")
 	}
 	out := FlowPackageConnect{SourceLine: node.Line}
+	seen := map[string]struct{}{}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
 		value := node.Content[i+1]
+		if _, duplicate := seen[key]; duplicate {
+			return fmt.Errorf("connect entry repeats key %q", key)
+		}
+		seen[key] = struct{}{}
 		switch key {
 		case "":
 			continue
+		case "event":
+			if err := value.Decode(&out.Event); err != nil {
+				return fmt.Errorf("connect.event: %w", err)
+			}
 		case "from":
 			if err := value.Decode(&out.From); err != nil {
 				return fmt.Errorf("connect.from: %w", err)
@@ -809,6 +857,10 @@ func (c *FlowPackageConnect) UnmarshalYAML(node *yaml.Node) error {
 		case "to":
 			if err := value.Decode(&out.To); err != nil {
 				return fmt.Errorf("connect.to: %w", err)
+			}
+		case "rename":
+			if err := value.Decode(&out.Rename); err != nil {
+				return fmt.Errorf("connect.rename: %w", err)
 			}
 		case "adapter":
 			if err := value.Decode(&out.Adapter); err != nil {
@@ -826,7 +878,17 @@ func (c *FlowPackageConnect) UnmarshalYAML(node *yaml.Node) error {
 			return NewUndefinedFieldDiagnostic("connect", key, flowPackageConnectFieldOptions)
 		}
 	}
-	*c = out.normalized()
+	out = out.normalized()
+	if out.Event == "" {
+		return fmt.Errorf("RETIRED: endpoint-centric connect rows are no longer supported; declare event plus flow-only from and to endpoints")
+	}
+	if out.From == "" || out.To == "" {
+		return fmt.Errorf("connect entry requires non-empty event, from, and to")
+	}
+	if out.Rename != "" && out.Rename == out.Event {
+		return fmt.Errorf("connect.rename %q is redundant with event; remove rename", out.Rename)
+	}
+	*c = out
 	return nil
 }
 

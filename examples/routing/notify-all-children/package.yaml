@@ -9,7 +9,9 @@ flows:
     flow: account
     mode: template
 connect:
-  - from: portfolio.account_registered
-    to: account.account_registered
-  - from: portfolio.account_notify_requested
-    to: account.account_notify_requested
+  - event: account.registered
+    from: portfolio
+    to: account
+  - event: account.notify.requested
+    from: portfolio
+    to: account

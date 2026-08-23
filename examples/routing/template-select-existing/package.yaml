@@ -9,7 +9,9 @@ flows:
     flow: account
     mode: template
 connect:
-  - from: producer.account_setup
-    to: account.account_setup
-  - from: producer.account_ready
-    to: account.account_ready
+  - event: account.setup
+    from: producer
+    to: account
+  - event: account.ready
+    from: producer
+    to: account

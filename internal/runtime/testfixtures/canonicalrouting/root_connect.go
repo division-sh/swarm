@@ -22,8 +22,9 @@ flows:
     flow: consumer
     mode: static
 connect:
-  - from: .root_ready
-    to: consumer.ready
+  - event: root.ready
+    from: .
+    to: consumer
 `)
 	rootInput := ""
 	rootNodes := "{}\n"
@@ -65,8 +66,9 @@ flows:
     flow: consumer
     mode: singleton
 connect:
-  - from: .root_ready
-    to: consumer.ready
+  - event: root.ready
+    from: .
+    to: consumer
 `)
 	writeLegacyInstanceFlow(t, root, "consumer", `name: consumer
 mode: singleton
@@ -99,8 +101,9 @@ flows:
     flow: scout
     mode: singleton
 connect:
-  - from: scout.completed
-    to: .scout_completed
+  - event: scout.completed
+    from: scout
+    to: .
 `)
 	writeClosedVariantFile(t, root, "schema.yaml", `name: singleton-output-root-connect
 pins:
@@ -143,10 +146,12 @@ flows:
     flow: boomerang
     mode: singleton
 connect:
-  - from: .ping
-    to: boomerang.ping
-  - from: boomerang.pong
-    to: .pong
+  - event: work.ping
+    from: .
+    to: boomerang
+  - event: work.pong
+    from: boomerang
+    to: .
 `)
 	writeClosedVariantFile(t, root, "schema.yaml", `name: root-singleton-boomerang
 pins:
@@ -207,8 +212,9 @@ flows:
     flow: consumer
     mode: static
 connect:
-  - from: .root_ready
-    to: consumer.ready
+  - event: root.ready
+    from: .
+    to: consumer
 `)
 	writeClosedVariantFile(t, root, "schema.yaml", `name: root-auto-emit-key-carries
 auto_emit_on_create:

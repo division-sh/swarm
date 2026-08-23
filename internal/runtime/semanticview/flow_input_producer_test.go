@@ -56,8 +56,9 @@ func TestResolveNonConnectFlowInputProducer_DoesNotInterpretRootConnect(t *testi
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			CompositionConnects: []runtimecontracts.FlowPackageConnect{{
-				From: "worker.work_completed",
-				To:   ".work_requested",
+				Event: "work.requested",
+				From:  "worker",
+				To:    ".",
 			}},
 		},
 	}
@@ -96,8 +97,9 @@ func TestResolveFlowInputProducer_NestedPackageRootConnectDoesNotSuppressReposit
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"child": child.Schema},
 		Semantics: runtimecontracts.WorkflowSemanticView{CompositionConnects: []runtimecontracts.FlowPackageConnect{{
 			PackageKey: "flows/child",
-			From:       "producer.work_completed",
-			To:         ".work_requested",
+			Event:      "work.requested",
+			From:       "producer",
+			To:         ".",
 		}}},
 	}
 	source := Wrap(bundle)
@@ -120,7 +122,7 @@ func TestResolveNonConnectFlowInputProducer_DoesNotClassifyParentConnect(t *test
 	source := flowInputProducerFixture(runtimecontracts.FlowInputEventPin{
 		Name:  "work.requested",
 		Event: "work.requested",
-	}, []runtimecontracts.FlowPackageConnect{{From: ".work.requested", To: "worker.work.requested"}})
+	}, []runtimecontracts.FlowPackageConnect{{Event: "work.requested", From: ".", To: "worker"}})
 
 	resolution := ResolveNonConnectFlowInputProducer(source, "worker", "work.requested")
 

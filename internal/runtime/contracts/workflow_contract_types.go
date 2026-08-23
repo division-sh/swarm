@@ -1184,8 +1184,6 @@ type ProjectPackageDocument struct {
 	Requires              FlowPackageRequires         `yaml:"requires"`
 	Flows                 []ProjectFlowRef            `yaml:"flows"`
 	Packages              []ProjectPackageRef         `yaml:"packages"`
-	Children              []ProjectPackageRef         `yaml:"children"`
-	Subpackages           []ProjectPackageRef         `yaml:"subpackages"`
 	Connect               []FlowPackageConnect        `yaml:"connect"`
 	ConnectorPacks        ConnectorPackImports        `yaml:"connector_packs"`
 	ProviderTriggerEvents ProviderTriggerEventImports `yaml:"provider_trigger_events"`
@@ -1278,11 +1276,9 @@ type EntityFieldDecl struct {
 	UnusedReaderReason string            `yaml:"_unused_reader_reason"`
 }
 type ProjectPackageRef struct {
-	ID      string          `yaml:"id"`
-	Path    string          `yaml:"path"`
-	Package string          `yaml:"package"`
-	Dir     string          `yaml:"dir"`
-	Bind    FlowPackageBind `yaml:"bind"`
+	ID   string          `yaml:"id"`
+	Path string          `yaml:"path"`
+	Bind FlowPackageBind `yaml:"bind"`
 }
 type ProjectFlowRef struct {
 	ID         string              `yaml:"id"`
@@ -1578,14 +1574,11 @@ type FlowPackageConnect struct {
 	PackageKey string `yaml:"-"`
 	SourceFile string `yaml:"-"`
 	SourceLine int    `yaml:"-"`
+	Event      string `yaml:"event"`
 	From       string `yaml:"from"`
 	To         string `yaml:"to"`
+	Rename     string `yaml:"rename"`
 	Adapter    string `yaml:"adapter"`
-}
-type FlowPackagePinRef struct {
-	Root   bool
-	FlowID string
-	Pin    string
 }
 type FlowRequiredAgent struct {
 	Role         string   `yaml:"role"`

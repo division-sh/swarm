@@ -9,5 +9,6 @@ flows:
   flow: child
   mode: static
 connect:
-  - from: child.child_done
-    to: .child_done
+  - event: child.done
+    from: child
+    to: .

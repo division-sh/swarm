@@ -26,11 +26,11 @@ func CopySealedParentConnect(t testing.TB, opts SealedParentConnectOptions) stri
 		"  - id: consumer\n    flow: consumer\n    mode: static\n",
 		sealedConsumerFlow(opts))
 	applyClosedReplacement(t, packageFile,
-		"connect:\n  - from: producer.work_ready\n    to: consumer.work_ready\n",
-		"connect:\n  - from: .producer_start\n    to: producer.work_requested\n  - from: producer.work_ready\n    to: consumer.work_ready\n  - from: .consumer_start\n    to: consumer.control_start\n")
+		"connect:\n  - event: work.ready\n    from: producer\n    to: consumer\n",
+		"connect:\n  - event: parent.producer_start\n    from: .\n    to: producer\n  - event: parent.producer_done\n    from: producer\n    to: consumer\n    rename: work.ready\n  - event: parent.consumer_start\n    from: .\n    to: consumer\n")
 	applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "schema.yaml"), "        source: external\n", "")
 	if opts.InvalidConnectReceiver {
-		applyClosedReplacement(t, packageFile, "    to: consumer.work_ready\n", "    to: consumer.missing_work_ready\n")
+		applyClosedReplacement(t, packageFile, "    rename: work.ready\n", "    rename: missing.work.ready\n")
 	}
 	addSealedRootDependencies(t, root)
 	addSealedProducerDependencies(t, root)

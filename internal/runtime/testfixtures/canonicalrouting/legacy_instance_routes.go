@@ -69,12 +69,12 @@ func CopyTemplateInstanceRoute(t testing.TB, opts TemplateInstanceRouteOptions) 
 	secondEventSchema := ""
 	secondHandler := ""
 	if opts.SecondPin == TemplateInstanceSecondPinDuplicateEdge {
-		secondConnect = "  - from: producer.deploy_done\n    to: consumer.deploy_completed\n"
+		secondConnect = "  - event: deploy.done\n    from: producer\n    to: consumer\n"
 	} else if opts.SecondPin != TemplateInstanceNoSecondPin {
-		secondConnect = "  - from: producer.deploy_done\n    to: consumer.deploy_audited\n"
+		secondConnect = "  - event: deploy.done\n    from: producer\n    to: consumer\n"
 		secondEvent := "deploy.done"
 		if opts.SecondPin == TemplateInstanceSecondPinDistinctEvent {
-			secondConnect += "    adapter: deploy_done_to_deploy_audited\n"
+			secondConnect += "    rename: deploy.audited\n    adapter: deploy_done_to_deploy_audited\n"
 			secondEvent = "deploy.audited"
 			secondEventSchema = "deploy.audited:\n  " + producerField + ": string\n"
 			secondHandler = "    " + secondEvent + ": {}\n"
@@ -95,8 +95,9 @@ flows:
     flow: consumer
     mode: template
 connect:
-  - from: producer.deploy_done
-    to: consumer.deploy_completed
+  - event: deploy.done
+    from: producer
+    to: consumer
 `+secondConnect)
 	writeClosedVariantFile(t, root, "schema.yaml", "name: template-instance-route\n")
 	for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml", "events.yaml", "nodes.yaml"} {

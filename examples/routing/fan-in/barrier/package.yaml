@@ -12,7 +12,9 @@ flows:
     flow: portfolio/default
     mode: singleton
 connect:
-  - from: ingress.operating_report_requested
-    to: operating.operating_report_requested
-  - from: operating.operating_reported
-    to: portfolio.operating_reported
+  - event: operating.report.requested
+    from: ingress
+    to: operating
+  - event: operating.reported
+    from: operating
+    to: portfolio

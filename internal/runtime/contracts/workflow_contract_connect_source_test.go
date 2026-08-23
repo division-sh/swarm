@@ -20,7 +20,7 @@ func TestFlowPackageConnectCapturesMappingLineAndPreservesStrictFields(t *testin
 	}
 
 	var connect FlowPackageConnect
-	err := yaml.Unmarshal([]byte("from: producer.done\nto: consumer.done\nfuture_route: forbidden\n"), &connect)
+	err := yaml.Unmarshal([]byte("event: work.done\nfrom: producer\nto: consumer\nfuture_route: forbidden\n"), &connect)
 	if err == nil || !strings.Contains(err.Error(), "future_route") {
 		t.Fatalf("yaml.Unmarshal error = %v, want strict unknown-field rejection", err)
 	}
@@ -31,12 +31,12 @@ func TestPopulateWorkflowSemanticsAttachesRootAndNestedConnectSource(t *testing.
 		{
 			Key:      ".",
 			Paths:    ProjectPackagePaths{PackageFile: "/contracts/package.yaml"},
-			Manifest: ProjectPackageDocument{Connect: []FlowPackageConnect{{SourceLine: 8, From: "producer.done", To: "consumer.done"}}},
+			Manifest: ProjectPackageDocument{Connect: []FlowPackageConnect{{SourceLine: 8, Event: "work.done", From: "producer", To: "consumer"}}},
 		},
 		{
 			Key:      "packages/child",
 			Paths:    ProjectPackagePaths{PackageFile: "/contracts/packages/child/package.yaml"},
-			Manifest: ProjectPackageDocument{Connect: []FlowPackageConnect{{SourceLine: 12, From: "worker.done", To: "sink.done"}}},
+			Manifest: ProjectPackageDocument{Connect: []FlowPackageConnect{{SourceLine: 12, Event: "work.done", From: "worker", To: "sink"}}},
 		},
 	}}
 	populateWorkflowSemantics(bundle)

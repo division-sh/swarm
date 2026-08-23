@@ -187,7 +187,7 @@ func TestMixedPubsubConnectCompositionNodeAgentConnect(t *testing.T) {
 				},
 			},
 		},
-	}, []runtimecontracts.FlowPackageConnect{{From: "producer.done", To: "consumer.accepted", Adapter: "done_to_accepted"}}))
+	}, []runtimecontracts.FlowPackageConnect{{Event: eventName, From: "producer", To: "consumer", Rename: "deploy.accepted", Adapter: "done_to_accepted"}}))
 	owners := mixedStaticOwners("producer", "consumer")
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwners(owners...)
@@ -324,10 +324,10 @@ func mixedFanoutToFanoutSource(reverse bool) semanticview.Source {
 		},
 	}
 	connects := []runtimecontracts.FlowPackageConnect{
-		{From: "producer.ready", To: "left.accepted", Adapter: "ready_to_left"},
-		{From: "producer.ready", To: "right.accepted", Adapter: "ready_to_right"},
-		{From: "left.done", To: "left-sink.final", Adapter: "left_to_sink"},
-		{From: "right.done", To: "right-sink.final", Adapter: "right_to_sink"},
+		{Event: "branch.ready", From: "producer", To: "left", Rename: "branch.accepted", Adapter: "ready_to_left"},
+		{Event: "branch.ready", From: "producer", To: "right", Rename: "branch.accepted", Adapter: "ready_to_right"},
+		{Event: "branch.done", From: "left", To: "left-sink", Rename: "branch.final", Adapter: "left_to_sink"},
+		{Event: "branch.done", From: "right", To: "right-sink", Rename: "branch.final", Adapter: "right_to_sink"},
 	}
 	if reverse {
 		for left, right := 0, len(connects)-1; left < right; left, right = left+1, right-1 {

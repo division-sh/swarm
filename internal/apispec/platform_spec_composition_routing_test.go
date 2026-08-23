@@ -36,9 +36,12 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 
 	connect := mustMappingValue(t, authored, "parent_connect")
 	assertScalarValue(t, mustMappingValue(t, connect, "location"), "parent package.yaml connect")
-	assertScalarContains(t, mustMappingValue(t, connect, "canonical_form"), "`connect` is a list")
-	assertScalarContains(t, mustYAMLPath(t, connect, "fields", "from"), "producer")
-	assertScalarContains(t, mustYAMLPath(t, connect, "fields", "to"), "receiver")
+	assertScalarContains(t, mustMappingValue(t, connect, "canonical_form"), "event-centric structured connections")
+	assertScalarContains(t, mustYAMLPath(t, connect, "fields", "event"), "source event identity")
+	assertScalarContains(t, mustYAMLPath(t, connect, "fields", "from"), "producer flow ID")
+	assertScalarContains(t, mustYAMLPath(t, connect, "fields", "to"), "receiver flow ID")
+	assertScalarContains(t, mustYAMLPath(t, connect, "fields", "rename"), "receiver-visible event identity")
+	assertScalarContains(t, mustYAMLPath(t, connect, "fields", "adapter"), "payload transformation")
 	if hasMappingKey(mustMappingValue(t, connect, "fields"), "delivery") || hasMappingKey(mustMappingValue(t, connect, "fields"), "reply") {
 		t.Fatal("parent connect fields retain retired delivery/reply authoring")
 	}
@@ -48,7 +51,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustYAMLPath(t, connect, "retired_fields", "using"), "Retired on presence")
 
 	ownership := mustMappingValue(t, composition, "ownership_split")
-	assertScalarContains(t, mustMappingValue(t, ownership, "parent_connect"), "owns only the directed inter-flow edge")
+	assertScalarContains(t, mustMappingValue(t, ownership, "parent_connect"), "owns the directed inter-flow event edge")
 	assertScalarContains(t, mustMappingValue(t, ownership, "receiver_input_resolution"), "cardinality")
 	assertScalarContains(t, mustMappingValue(t, ownership, "output_pins"), "never receiver identity")
 	assertScalarContains(t, mustMappingValue(t, ownership, "input_pins"), "typed identity source")
@@ -60,7 +63,8 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 		"producer_output_pin_exists",
 		"receiver_flow_exists",
 		"receiver_input_pin_exists",
-		"event_alias_or_adapter_valid",
+		"event_rename_valid",
+		"adapter_valid",
 		"output_carries_instance_field",
 		"receiver_route_key_present",
 		"key_types_compatible",
@@ -77,10 +81,11 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarValue(t, mustMappingValue(t, lowering, "owner"), "platform-spec.yaml#flow_model.flow_package.composition_routing.route_plan_lowering")
 	for _, want := range []string{
 		"parent package.yaml connect entries",
-		"producer output pin event identity and verified interface evidence, including explicit package-root `.pin_name` output endpoints",
+		"producer output pin event identity and verified interface evidence resolved from event-centric flow endpoints",
 		"receiver scalar template instance identity from WorkflowContractBundle.ResolveFlowTemplateInstance",
 		"receiver input same-named typed carry source and resolution mode",
 		"import-boundary pin alias bindings",
+		"explicit receiver-event rename and payload-adapter entries",
 	} {
 		if !sequenceContainsScalar(mustMappingValue(t, lowering, "consumes"), want) {
 			t.Fatalf("route_plan_lowering consumes missing %q", want)
@@ -331,7 +336,7 @@ func TestPlatformSpecE1aRetirementCloseoutIsCanonicalOnly(t *testing.T) {
 	assertScalarContains(t, mustMappingValue(t, resolutionRules, "handler_lookup_localizes"), "governed import-boundary wildcard observation")
 
 	crossFlow := mustYAMLPath(t, root, "engine", "cross_flow_routing")
-	assertScalarContains(t, mustYAMLPath(t, crossFlow, "auto_wiring", "ambiguity"), "parent connect or its typed alias/adapter input")
+	assertScalarContains(t, mustYAMLPath(t, crossFlow, "auto_wiring", "ambiguity"), "explicit event-centric parent connect")
 	subscriptionBoundary := mustMappingValue(t, crossFlow, "subscription_boundary")
 	assertScalarContains(t, mustMappingValue(t, subscriptionBoundary, "exact"), "hard invalidity")
 	assertScalarContains(t, mustMappingValue(t, subscriptionBoundary, "same_scope_agent_identity"), "same-scope route carrier")

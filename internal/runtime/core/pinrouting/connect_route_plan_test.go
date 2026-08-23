@@ -1334,8 +1334,10 @@ func TestCompileConnectPlansOneToOneStatic(t *testing.T) {
 			}},
 		},
 	}, []runtimecontracts.FlowPackageConnect{{
-		From:    "producer.deploy_done",
-		To:      "consumer.deploy_completed",
+		Event:   "deploy.done",
+		From:    "producer",
+		To:      "consumer",
+		Rename:  "deploy.completed",
 		Adapter: "deploy_done_to_completed",
 	}})
 
@@ -1396,8 +1398,9 @@ func TestCompileConnectPlansRootProducerToStaticReceiver(t *testing.T) {
 			}},
 		},
 	}, []runtimecontracts.FlowPackageConnect{{
-		From: ".root_ready",
-		To:   "consumer.ready",
+		Event: "root.ready",
+		From:  ".",
+		To:    "consumer",
 	}})
 
 	plans, issues := compileConnectPlans(source)
@@ -1442,8 +1445,9 @@ func TestCompileConnectPlansSupportsRootReceiverEndpoint(t *testing.T) {
 			}},
 		},
 	}, []runtimecontracts.FlowPackageConnect{{
-		From: "producer.ready",
-		To:   ".root_ready",
+		Event: "root.ready",
+		From:  "producer",
+		To:    ".",
 	}})
 
 	plans, issues := compileConnectPlans(source)
@@ -1468,7 +1472,7 @@ func TestCompiledConnectProducerEvidenceOwnsConnectedRootInput(t *testing.T) {
 	}}, []connectRoutePlanFlow{{
 		id: "producer", mode: "static",
 		outputs: []runtimecontracts.FlowOutputEventPin{{Name: "work_completed", Event: "work.requested"}},
-	}}, []runtimecontracts.FlowPackageConnect{{From: "producer.work_completed", To: ".work_requested"}})
+	}}, []runtimecontracts.FlowPackageConnect{{Event: "work.requested", From: "producer", To: "."}})
 
 	resolution := ResolveFlowInputProducer(source, "", "work.requested")
 	if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryParentConnect) {
@@ -1483,7 +1487,7 @@ func TestCompiledConnectProducerEvidenceOwnsConnectedChildInput(t *testing.T) {
 	source := testConnectRoutePlanSource([]connectRoutePlanFlow{
 		{id: "producer", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Name: "work_ready", Event: "work.requested"}}},
 		{id: "worker", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Name: "work_requested", Event: "work.requested"}}},
-	}, []runtimecontracts.FlowPackageConnect{{From: "producer.work_ready", To: "worker.work_requested"}})
+	}, []runtimecontracts.FlowPackageConnect{{Event: "work.requested", From: "producer", To: "worker"}})
 
 	resolution := ResolveFlowInputProducer(source, "worker", "work.requested")
 	if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryParentConnect) {
@@ -1513,8 +1517,10 @@ func TestLowerCompositionConnectRoutePlanWithLocationDoesNotDependOnRawPinNamesO
 			}},
 		},
 	}, []runtimecontracts.FlowPackageConnect{{
-		From:    "producer.public_done",
-		To:      "consumer.accept_completed",
+		Event:   "internal.done",
+		From:    "producer",
+		To:      "consumer",
+		Rename:  "external.completed",
 		Adapter: "public_done_to_accept_completed",
 	}})
 
@@ -1551,7 +1557,7 @@ func TestLowerCompositionConnectRoutePlanWithLocationFailsClosedForInvalidInputs
 	}{
 		{
 			name:    "missing output pin",
-			connect: runtimecontracts.FlowPackageConnect{From: "producer.missing", To: "consumer.deploy_completed"},
+			connect: runtimecontracts.FlowPackageConnect{Event: "missing.event", From: "producer", To: "consumer", Rename: "deploy.completed"},
 			want:    ConnectFailureProducerOutputPinMissing,
 		},
 	}
@@ -1583,11 +1589,139 @@ func TestLowerCompositionConnectRoutePlanWithLocationFailsClosedForInvalidInputs
 	}
 }
 
+func TestCompileConnectGraphFailsClosedForNonUniqueEventCandidates(t *testing.T) {
+	tests := []struct {
+		name       string
+		outputs    []runtimecontracts.FlowOutputEventPin
+		inputs     []runtimecontracts.FlowInputEventPin
+		connect    runtimecontracts.FlowPackageConnect
+		want       ConnectRoutePlanFailure
+		wantDetail []string
+	}{
+		{
+			name:       "zero source candidates",
+			outputs:    []runtimecontracts.FlowOutputEventPin{{Name: "only_output", Event: "other.event"}},
+			inputs:     []runtimecontracts.FlowInputEventPin{{Name: "work_input", Event: "work.ready"}},
+			connect:    runtimecontracts.FlowPackageConnect{Event: "work.ready", From: "producer", To: "consumer"},
+			want:       ConnectFailureProducerOutputPinMissing,
+			wantDetail: []string{"source endpoint \"producer\"", "visible event \"work.ready\"", "matched 0 pins", "candidate pins: only_output"},
+		},
+		{
+			name: "multiple source candidates",
+			outputs: []runtimecontracts.FlowOutputEventPin{
+				{Name: "work_primary", Event: "work.ready"},
+				{Name: "work_secondary", Event: "work.ready"},
+			},
+			inputs:     []runtimecontracts.FlowInputEventPin{{Name: "work_input", Event: "work.ready"}},
+			connect:    runtimecontracts.FlowPackageConnect{Event: "work.ready", From: "producer", To: "consumer"},
+			want:       ConnectFailureProducerOutputPinMissing,
+			wantDetail: []string{"source endpoint \"producer\"", "matched 2 pins", "candidate pins: work_primary, work_secondary"},
+		},
+		{
+			name:       "zero receiver candidates",
+			outputs:    []runtimecontracts.FlowOutputEventPin{{Name: "work_output", Event: "work.ready"}},
+			inputs:     []runtimecontracts.FlowInputEventPin{{Name: "other_input", Event: "other.event"}},
+			connect:    runtimecontracts.FlowPackageConnect{Event: "work.ready", From: "producer", To: "consumer"},
+			want:       ConnectFailureReceiverInputPinMissing,
+			wantDetail: []string{"receiver endpoint \"consumer\"", "visible event \"work.ready\"", "matched 0 pins", "candidate pins: other_input"},
+		},
+		{
+			name:    "multiple receiver candidates",
+			outputs: []runtimecontracts.FlowOutputEventPin{{Name: "work_output", Event: "work.ready"}},
+			inputs: []runtimecontracts.FlowInputEventPin{
+				{Name: "work_primary", Event: "work.ready"},
+				{Name: "work_secondary", Event: "work.ready"},
+			},
+			connect:    runtimecontracts.FlowPackageConnect{Event: "work.ready", From: "producer", To: "consumer"},
+			want:       ConnectFailureReceiverInputPinMissing,
+			wantDetail: []string{"receiver endpoint \"consumer\"", "matched 2 pins", "candidate pins: work_primary, work_secondary"},
+		},
+		{
+			name:       "adapter cannot rename receiver event",
+			outputs:    []runtimecontracts.FlowOutputEventPin{{Name: "work_output", Event: "work.ready"}},
+			inputs:     []runtimecontracts.FlowInputEventPin{{Name: "accepted_input", Event: "work.accepted"}},
+			connect:    runtimecontracts.FlowPackageConnect{Event: "work.ready", From: "producer", To: "consumer", Adapter: "ready_to_accepted"},
+			want:       ConnectFailureReceiverInputPinMissing,
+			wantDetail: []string{"visible event \"work.ready\"", "matched 0 pins", "candidate pins: accepted_input"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			source := testConnectRoutePlanSource([]connectRoutePlanFlow{
+				{id: "producer", mode: "static", outputs: tc.outputs},
+				{id: "consumer", mode: "static", inputs: tc.inputs},
+			}, []runtimecontracts.FlowPackageConnect{tc.connect})
+			plans, issues := compileConnectPlans(source)
+			if len(plans) != 0 || len(issues) != 1 || issues[0].Failure != tc.want {
+				t.Fatalf("plans/issues = %#v/%#v, want no plan and %s", plans, issues, tc.want.Code())
+			}
+			for _, want := range tc.wantDetail {
+				if !strings.Contains(issues[0].Detail, want) {
+					t.Fatalf("issue detail = %q, want %q", issues[0].Detail, want)
+				}
+			}
+		})
+	}
+}
+
+func TestCompileConnectGraphRejectsFlowOutsideAuthoringPackage(t *testing.T) {
+	source := testConnectRoutePlanSource([]connectRoutePlanFlow{
+		{id: "producer", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Name: "work_output", Event: "work.ready"}}},
+		{id: "unrelated", packageKey: "packages/other", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Name: "work_input", Event: "work.ready"}}},
+	}, []runtimecontracts.FlowPackageConnect{{Event: "work.ready", From: "producer", To: "unrelated"}})
+
+	plans, issues := compileConnectPlans(source)
+	if len(plans) != 0 || len(issues) != 1 || issues[0].Failure != ConnectFailureReceiverFlowMissing {
+		t.Fatalf("plans/issues = %#v/%#v, want package-visible receiver rejection", plans, issues)
+	}
+	for _, want := range []string{`package "."`, `endpoint "unrelated"`, "does not name a visible flow"} {
+		if !strings.Contains(issues[0].Detail, want) {
+			t.Fatalf("issue detail = %q, want %q", issues[0].Detail, want)
+		}
+	}
+}
+
+func TestCompileConnectGraphTreatsEndpointsAsExactFlowIDs(t *testing.T) {
+	t.Run("retired source pin spelling is not a flow", func(t *testing.T) {
+		source := testConnectRoutePlanSource([]connectRoutePlanFlow{
+			{id: "producer", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Name: "work_output", Event: "work.ready"}}},
+			{id: "consumer", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Name: "work_input", Event: "work.ready"}}},
+		}, []runtimecontracts.FlowPackageConnect{{Event: "work.ready", From: "producer.work_output", To: "consumer"}})
+		plans, issues := compileConnectPlans(source)
+		if len(plans) != 0 || len(issues) != 1 || issues[0].Failure != ConnectFailureProducerFlowMissing {
+			t.Fatalf("plans/issues = %#v/%#v, want exact source-flow rejection", plans, issues)
+		}
+	})
+
+	t.Run("retired receiver pin spelling is not a flow", func(t *testing.T) {
+		source := testConnectRoutePlanSource([]connectRoutePlanFlow{
+			{id: "producer", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Name: "work_output", Event: "work.ready"}}},
+			{id: "consumer", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Name: "work_input", Event: "work.ready"}}},
+		}, []runtimecontracts.FlowPackageConnect{{Event: "work.ready", From: "producer", To: "consumer.work_input"}})
+		plans, issues := compileConnectPlans(source)
+		if len(plans) != 0 || len(issues) != 1 || issues[0].Failure != ConnectFailureReceiverFlowMissing {
+			t.Fatalf("plans/issues = %#v/%#v, want exact receiver-flow rejection", plans, issues)
+		}
+	})
+
+	t.Run("declared dotted flow ID remains exact", func(t *testing.T) {
+		source := testConnectRoutePlanSource([]connectRoutePlanFlow{
+			{id: "producer.v2", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Name: "work_output", Event: "work.ready"}}},
+			{id: "consumer", mode: "static", inputs: []runtimecontracts.FlowInputEventPin{{Name: "work_input", Event: "work.ready"}}},
+		}, []runtimecontracts.FlowPackageConnect{{Event: "work.ready", From: "producer.v2", To: "consumer"}})
+		plans, issues := compileConnectPlans(source)
+		if len(plans) != 1 || len(issues) != 0 {
+			t.Fatalf("plans/issues = %#v/%#v, want exact dotted flow ID accepted", plans, issues)
+		}
+	})
+}
+
 type connectRoutePlanFlow struct {
-	id      string
-	mode    string
-	inputs  []runtimecontracts.FlowInputEventPin
-	outputs []runtimecontracts.FlowOutputEventPin
+	id         string
+	packageKey string
+	mode       string
+	inputs     []runtimecontracts.FlowInputEventPin
+	outputs    []runtimecontracts.FlowOutputEventPin
 }
 
 func testConnectRoutePlanSource(flows []connectRoutePlanFlow, connects []runtimecontracts.FlowPackageConnect) semanticview.Source {
@@ -1618,8 +1752,9 @@ func testRootInputOutputConnectRoutePlanSource(rootInputs []runtimecontracts.Flo
 	for _, flow := range flows {
 		view := runtimecontracts.FlowContractView{
 			Paths: runtimecontracts.FlowContractPaths{
-				ID:   flow.id,
-				Flow: flow.id,
+				ID:         flow.id,
+				Flow:       flow.id,
+				PackageKey: flow.packageKey,
 			},
 			Schema: runtimecontracts.FlowSchemaDocument{
 				Mode: flow.mode,

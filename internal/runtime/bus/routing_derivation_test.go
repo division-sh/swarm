@@ -1784,6 +1784,11 @@ func TestDeriveRouteTable_NestedPackageConnectLocalizesWithinParentFlow(t *testi
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		PackageTree: []runtimecontracts.LoadedProjectPackage{{
+			Key:       "flows/child/flows/grandchild",
+			ParentKey: "flows/child",
+			Paths:     runtimecontracts.ProjectPackagePaths{OwningFlowID: "grandchild"},
+		}},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
@@ -1799,8 +1804,9 @@ func TestDeriveRouteTable_NestedPackageConnectLocalizesWithinParentFlow(t *testi
 			PackageKey: "flows/child",
 			SourceFile: "flows/child/package.yaml",
 			SourceLine: 10,
-			From:       "grandchild.micro_done",
-			To:         ".micro_done",
+			Event:      "micro.done",
+			From:       "grandchild",
+			To:         ".",
 		}}},
 	}
 	plans, issues := compiledConnectPlans(semanticview.Wrap(bundle))
