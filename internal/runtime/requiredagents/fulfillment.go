@@ -10,9 +10,9 @@ import (
 )
 
 type Scope struct {
-	ID       string
-	Agents   map[string]runtimecontracts.AgentRegistryEntry
-	Required []runtimecontracts.FlowRequiredAgent
+	ID           string
+	Declarations []semanticview.AgentDeclaration
+	Required     []runtimecontracts.FlowRequiredAgent
 }
 
 type FindingKind string
@@ -20,16 +20,18 @@ type FindingKind string
 const (
 	FindingMissingRole          FindingKind = "missing_role"
 	FindingMissingAgent         FindingKind = "missing_agent"
+	FindingAmbiguousAgent       FindingKind = "ambiguous_agent"
 	FindingMissingSubscriptions FindingKind = "missing_subscriptions"
 	FindingMissingEmits         FindingKind = "missing_emits"
 )
 
 type Finding struct {
-	Kind    FindingKind
-	ScopeID string
-	Role    string
-	AgentID string
-	Missing []string
+	Kind       FindingKind
+	ScopeID    string
+	Role       string
+	AgentID    string
+	Missing    []string
+	Candidates []string
 }
 
 func RootScope(source semanticview.Source) (Scope, bool) {
@@ -40,19 +42,7 @@ func RootScope(source semanticview.Source) (Scope, bool) {
 		ID:       "root",
 		Required: source.RequiredAgents(),
 	}
-	for _, projectScope := range source.ProjectScopes() {
-		if strings.TrimSpace(projectScope.OwningFlowID) == "" && projectScope.Depth == 0 {
-			scope.Agents = projectScope.Agents
-			return scope, true
-		}
-	}
-	for _, projectScope := range source.ProjectScopes() {
-		if strings.TrimSpace(projectScope.OwningFlowID) == "" {
-			scope.Agents = projectScope.Agents
-			return scope, true
-		}
-	}
-	scope.Agents = map[string]runtimecontracts.AgentRegistryEntry{}
+	scope.Declarations = semanticview.AgentDeclarationsForOwner(source, "")
 	return scope, true
 }
 
@@ -68,9 +58,9 @@ func FlowScopes(source semanticview.Source) []Scope {
 			continue
 		}
 		out = append(out, Scope{
-			ID:       flowID,
-			Agents:   flowScope.Agents,
-			Required: source.FlowRequiredAgents(flowID),
+			ID:           flowID,
+			Declarations: semanticview.AgentDeclarationsForOwner(source, flowID),
+			Required:     source.FlowRequiredAgents(flowID),
 		})
 	}
 	return out
@@ -103,8 +93,17 @@ func CheckScope(scope Scope) []Finding {
 			})
 			continue
 		}
-		agentID, agent, ok := ResolveAgent(scope.Agents, required)
-		if !ok {
+		declaration, candidates := resolveAgentDeclaration(scope.Declarations, role)
+		if len(candidates) > 1 {
+			findings = append(findings, Finding{
+				Kind:       FindingAmbiguousAgent,
+				ScopeID:    scope.ID,
+				Role:       role,
+				Candidates: candidates,
+			})
+			continue
+		}
+		if len(candidates) == 0 {
 			findings = append(findings, Finding{
 				Kind:    FindingMissingAgent,
 				ScopeID: scope.ID,
@@ -112,6 +111,8 @@ func CheckScope(scope Scope) []Finding {
 			})
 			continue
 		}
+		agentID := strings.TrimSpace(declaration.LocalID)
+		agent := declaration.Entry
 		if missing := missingStrings(required.SubscribesTo, AgentSubscriptions(agent)); len(missing) > 0 {
 			findings = append(findings, Finding{
 				Kind:    FindingMissingSubscriptions,
@@ -134,16 +135,26 @@ func CheckScope(scope Scope) []Finding {
 	return findings
 }
 
-func ResolveAgent(agents map[string]runtimecontracts.AgentRegistryEntry, required runtimecontracts.FlowRequiredAgent) (string, runtimecontracts.AgentRegistryEntry, bool) {
-	role := strings.TrimSpace(required.Role)
+func resolveAgentDeclaration(declarations []semanticview.AgentDeclaration, role string) (semanticview.AgentDeclaration, []string) {
+	role = strings.TrimSpace(role)
 	if role == "" {
-		return "", runtimecontracts.AgentRegistryEntry{}, false
+		return semanticview.AgentDeclaration{}, nil
 	}
-	agent, ok := agents[role]
-	if !ok {
-		return "", runtimecontracts.AgentRegistryEntry{}, false
+	var matched semanticview.AgentDeclaration
+	candidates := make([]string, 0, 1)
+	for _, declaration := range declarations {
+		if strings.TrimSpace(declaration.LocalID) != role {
+			continue
+		}
+		matched = declaration
+		label := strings.TrimSpace(declaration.Source.File)
+		if label == "" {
+			label = declaration.Label(true)
+		}
+		candidates = append(candidates, label)
 	}
-	return role, agent, true
+	sort.Strings(candidates)
+	return matched, candidates
 }
 
 func AgentSubscriptions(agent runtimecontracts.AgentRegistryEntry) []string {

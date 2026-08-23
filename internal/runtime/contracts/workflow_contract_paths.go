@@ -299,9 +299,6 @@ func projectChildOwningFlowID(parent ProjectPackagePaths, childPackageFile strin
 			return flowID
 		}
 	}
-	if len(parent.Flows) == 1 {
-		return strings.TrimSpace(parent.Flows[0].ID)
-	}
 	return strings.TrimSpace(parent.OwningFlowID)
 }
 func validateDiscoveredPackageTree(pkgs []LoadedProjectPackage) error {

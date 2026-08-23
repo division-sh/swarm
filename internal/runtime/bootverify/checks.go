@@ -800,6 +800,12 @@ func requiredAgentBootFinding(finding runtimerequiredagents.Finding) Finding {
 		} else {
 			message = fmt.Sprintf("flow %s required agent role %s missing from agents.yaml", scopeID, finding.Role)
 		}
+	case runtimerequiredagents.FindingAmbiguousAgent:
+		if scopeID == "root" {
+			message = fmt.Sprintf("root required agent role %s is ambiguous across declarations %v", finding.Role, finding.Candidates)
+		} else {
+			message = fmt.Sprintf("flow %s required agent role %s is ambiguous across declarations %v", scopeID, finding.Role, finding.Candidates)
+		}
 	case runtimerequiredagents.FindingMissingSubscriptions:
 		if scopeID == "root" {
 			message = fmt.Sprintf("root required agent %s subscriptions mismatch (%s)", finding.AgentID, runtimerequiredagents.MissingList(finding.Missing))

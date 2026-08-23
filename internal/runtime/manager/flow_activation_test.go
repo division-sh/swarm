@@ -3813,7 +3813,7 @@ func TestStaticAndTemplateAgentMaterializationDefaultRoleToEffectiveName(t *test
 	source := semanticview.Wrap(bundle)
 	namePlan := managerTestFlowAgentNamePlan(t, source, "review", "reviewer")
 
-	staticCfg, err := buildStaticFlowAgentConfig(source, namePlan, "review", "review", "reviewer", entry, staticFlowLocalEventSet(review.Agents))
+	staticCfg, err := buildStaticFlowAgentConfig(source, namePlan, "review", "review", "reviewer", entry, staticFlowLocalEventSetForTest(review.Agents))
 	if err != nil {
 		t.Fatalf("buildStaticFlowAgentConfig: %v", err)
 	}
@@ -3827,7 +3827,7 @@ func TestStaticAndTemplateAgentMaterializationDefaultRoleToEffectiveName(t *test
 		"reviewer",
 		entry,
 		nil,
-		staticFlowLocalEventSet(review.Agents),
+		staticFlowLocalEventSetForTest(review.Agents),
 		nil,
 	)
 	if err != nil {
@@ -3954,6 +3954,25 @@ func TestStaticFlowRequiredAgentMaterializationInfersFromOmittedRequiredAgents(t
 	}
 }
 
+func TestStaticFlowRequiredAgentMaterializationUsesFlowOwnedProjectDeclaration(t *testing.T) {
+	source := loadNestedProjectStaticAgentSource(t)
+	declarations := semanticview.AgentDeclarationsForOwner(source, "support")
+	if len(declarations) != 1 || declarations[0].Source.Layer != "project" {
+		t.Fatalf("support declarations = %#v, want one project declaration", declarations)
+	}
+	records, err := StaticFlowRequiredAgentMaterializationRecords(source)
+	if err != nil {
+		t.Fatalf("StaticFlowRequiredAgentMaterializationRecords: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("materialized agents = %#v, want flow-owned project agent", records)
+	}
+	cfg := records[0].Config
+	if cfg.ID != "backend" || cfg.FlowID != "support" || cfg.FlowPath != "support" || cfg.Identity.Name.Owner != declarations[0].OwnerURI {
+		t.Fatalf("materialized agent = %#v, want exact canonical support declaration", cfg)
+	}
+}
+
 func TestStaticRequiredAgentsForScopeRejectsRoleFallbackWithoutMapKey(t *testing.T) {
 	bundle := testStaticFlowBundle()
 	flow := bundle.FlowTree.ByID["analyzer-flow"]
@@ -4024,8 +4043,8 @@ func TestStaticAgentMaterialization_PackageBackedFlowOwnedAgentsCarryCanonicalFl
 	}
 }
 
-func TestStaticAgentMaterialization_SoleParentFlowPackageAgentsStartWithOwningFlowPath(t *testing.T) {
-	source := loadSoleParentFlowStaticAgentSource(t)
+func TestStaticAgentMaterialization_StructurallyNestedProjectAgentsStartWithOwningFlowPath(t *testing.T) {
+	source := loadNestedProjectStaticAgentSource(t)
 	records, err := StaticAgentMaterializationRecords(source)
 	if err != nil {
 		t.Fatalf("StaticAgentMaterializationRecords: %v", err)
@@ -4056,7 +4075,7 @@ func TestFlowInstanceAgentRecordsMaterializeProjectDeclarationOwnedByFlow(t *tes
 		{name: "singleton", mode: runtimecontracts.FlowModeSingleton, instanceID: "support", instancePath: "support"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			source := loadSoleParentFlowAgentSource(t, tc.mode)
+			source := loadNestedProjectAgentSource(t, tc.mode)
 			declarations := semanticview.AgentDeclarations(source)
 			if len(declarations) != 1 || declarations[0].Source.Layer != "project" || declarations[0].OwnerFlowID != "support" {
 				t.Fatalf("declarations = %#v, want one project declaration owned by support", declarations)
@@ -4229,12 +4248,12 @@ backend:
 	return semanticview.Wrap(bundle)
 }
 
-func loadSoleParentFlowStaticAgentSource(t *testing.T) semanticview.Source {
+func loadNestedProjectStaticAgentSource(t *testing.T) semanticview.Source {
 	t.Helper()
-	return loadSoleParentFlowAgentSource(t, runtimecontracts.FlowModeStatic)
+	return loadNestedProjectAgentSource(t, runtimecontracts.FlowModeStatic)
 }
 
-func loadSoleParentFlowAgentSource(t *testing.T, mode string) semanticview.Source {
+func loadNestedProjectAgentSource(t *testing.T, mode string) semanticview.Source {
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	root := t.TempDir()
@@ -4244,7 +4263,7 @@ name: session-scope-validation
 version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 packages:
-  - path: extras
+  - path: flows/support/extras
 flows:
   - id: support
     flow: support
@@ -4274,12 +4293,12 @@ states:
 support/item.created:
   entity_id: string
 `)
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "extras", "package.yaml"), `
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "support", "extras", "package.yaml"), `
 name: extras
 version: "1.0.0"
 flows: []
 `)
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "extras", "agents.yaml"), `
+	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "support", "extras", "agents.yaml"), `
 backend:
   type: generic
   role: backend
@@ -4305,6 +4324,14 @@ func writeFlowActivationFixtureFile(t *testing.T, path, contents string) {
 	if err := os.WriteFile(path, []byte(strings.TrimLeft(contents, "\n")), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
+}
+
+func staticFlowLocalEventSetForTest(agents map[string]runtimecontracts.AgentRegistryEntry) map[string]struct{} {
+	entries := make([]runtimecontracts.AgentRegistryEntry, 0, len(agents))
+	for _, entry := range agents {
+		entries = append(entries, entry)
+	}
+	return staticFlowLocalEventSetForEntries(entries)
 }
 
 func managerTestFlowAgentNamePlan(t *testing.T, source semanticview.Source, flowID, logicalID string) semanticview.AgentNamePlan {
@@ -4457,7 +4484,7 @@ func TestStaticAndTemplateAgentMaterializationConsumeEffectivePlatformDefaults(t
 		t.Fatal("static_support flow scope missing")
 	}
 	staticEntry := staticScope.Agents["worker"]
-	staticCfg, err := buildStaticFlowAgentConfig(source, managerTestFlowAgentNamePlan(t, source, "static_support", "worker"), "static_support", "static_support", "worker", staticEntry, staticFlowLocalEventSet(staticScope.Agents))
+	staticCfg, err := buildStaticFlowAgentConfig(source, managerTestFlowAgentNamePlan(t, source, "static_support", "worker"), "static_support", "static_support", "worker", staticEntry, staticFlowLocalEventSetForTest(staticScope.Agents))
 	if err != nil {
 		t.Fatalf("buildStaticFlowAgentConfig: %v", err)
 	}
@@ -4478,7 +4505,7 @@ func TestStaticAndTemplateAgentMaterializationConsumeEffectivePlatformDefaults(t
 		"worker",
 		templateEntry,
 		map[string]string{"instance_id": "inst-1"},
-		staticFlowLocalEventSet(templateScope.Agents),
+		staticFlowLocalEventSetForTest(templateScope.Agents),
 		map[string]any{},
 	)
 	if err != nil {

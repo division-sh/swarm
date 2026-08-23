@@ -273,6 +273,14 @@ func TestWorkflowContractBundleEffectiveRequiredAgentsInferWhenOmitted(t *testin
 		},
 		FlowTree: FlowTree{ByID: map[string]*FlowContractView{"analysis": flowView}},
 	}
+	bundle.FlowTree.Root = flowView
+	bundle.projectContracts = map[string]ProjectContractView{
+		".": {
+			Paths:     ProjectPackagePaths{Key: ".", ProjectAgentsFile: "agents.yaml"},
+			Agents:    bundle.Agents,
+			AgentURIs: map[string]string{"root-agent": "swarm://root/agent/root-agent"},
+		},
+	}
 
 	rootFacts := bundle.RootRequiredAgentFacts()
 	if len(rootFacts) != 1 || rootFacts[0].Role != "root-agent" || rootFacts[0].Source != RequiredAgentSourceInferred {

@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/finalflowinstanceauthoring"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/flowownedprojectagent"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/singletoncoordinatorpilot"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templateflowpilot"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/templatereply"
@@ -308,6 +309,36 @@ func TestBuildShowsRequiredAgentProvenance(t *testing.T) {
 	}
 	if len(analysis.RequiredAgents.Agents) != 0 {
 		t.Fatalf("flow required_agents agents = %#v, want explicit empty boundary", analysis.RequiredAgents.Agents)
+	}
+}
+
+func TestBuildProjectsFlowOwnedProjectAgentAndInferredProvenance(t *testing.T) {
+	source := flowownedprojectagent.LoadSource(t, runtimecontracts.FlowModeTemplate, false)
+	view := mustBuild(t, source, nil)
+	support := flowByID(t, view, "support")
+	if len(support.Agents) != 1 || support.Agents[0].ID != "public-worker-left" || !strings.HasSuffix(filepath.ToSlash(support.Agents[0].SourceFile), "flows/support/left/agents.yaml") {
+		t.Fatalf("support agents = %#v, want exact project declaration and source", support.Agents)
+	}
+	if len(support.RequiredAgents.Agents) != 1 || support.RequiredAgents.Agents[0].Role != "worker" || !strings.HasSuffix(filepath.ToSlash(support.RequiredAgents.Agents[0].SourceFile), "flows/support/left/agents.yaml") {
+		t.Fatalf("support required agents = %#v, want inferred project declaration provenance", support.RequiredAgents)
+	}
+	if len(view.Root.Agents) != 0 {
+		t.Fatalf("root agents = %#v, project declaration must remain flow-owned", view.Root.Agents)
+	}
+}
+
+func TestBuildPreservesDistinctFlowOwnedProjectDeclarations(t *testing.T) {
+	source := flowownedprojectagent.LoadSource(t, runtimecontracts.FlowModeTemplate, true)
+	view := mustBuild(t, source, nil)
+	support := flowByID(t, view, "support")
+	if len(support.Agents) != 2 || support.Agents[0].ID != "public-worker-left" || support.Agents[1].ID != "public-worker-right" || support.Agents[0].SourceFile == support.Agents[1].SourceFile {
+		t.Fatalf("support agents = %#v, want both distinct physical declarations", support.Agents)
+	}
+	if len(support.RequiredAgents.Agents) != 2 || support.RequiredAgents.Agents[0].SourceFile == support.RequiredAgents.Agents[1].SourceFile {
+		t.Fatalf("support required agents = %#v, want both declaration sources", support.RequiredAgents)
+	}
+	if support.RequiredAgents.SourceFile != "" {
+		t.Fatalf("aggregate required-agent source = %q, want no lossy singular source for multiple files", support.RequiredAgents.SourceFile)
 	}
 }
 
