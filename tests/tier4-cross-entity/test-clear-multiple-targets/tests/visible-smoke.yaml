@@ -2,7 +2,7 @@ name: test-clear-multiple-targets setup visible smoke
 setup:
   entities:
   - as: entity
-    type: default
+    type: test_entity
 steps:
 - publish: state.reset_requested
   payload: {}

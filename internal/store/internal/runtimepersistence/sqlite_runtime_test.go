@@ -407,7 +407,7 @@ func TestSQLiteDynamicFlowActivationRequiredAgentsUseClosedSelectedOperation(t *
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(sqliteStore.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	bus := &sqliteFlowActivationBus{}
-	bundle := sqliteFlowActivationBundle()
+	bundle := sqliteFlowActivationBundle(t)
 	workflowStore := configureSQLiteFlowActivationLifecycle(t, sqliteStore, bus, bundle)
 	manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		ExecutionPosture:  executionposture.Live,
@@ -461,7 +461,7 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 	sqliteStore := newBootstrappedSQLiteRuntimeStoreForTest(t)
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(sqliteStore.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
 	bus := &sqliteFlowActivationBus{}
-	bundle := sqliteFlowActivationBundle()
+	bundle := sqliteFlowActivationBundle(t)
 	workflowStore := configureSQLiteFlowActivationLifecycle(t, sqliteStore, bus, bundle)
 	manager := ownStoreTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(bus, nil, runtimemanager.AgentManagerOptions{
 		ExecutionPosture:  executionposture.Live,
@@ -769,7 +769,8 @@ func (b *sqliteFlowActivationBus) materializationRequests() []runtimebus.FlowIns
 	return out
 }
 
-func sqliteFlowActivationBundle() *runtimecontracts.WorkflowContractBundle {
+func sqliteFlowActivationBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
 	const owner = "test://review/reviewer"
 	reviewFlow := &runtimecontracts.FlowContractView{
 		Path:  "review",
@@ -788,7 +789,7 @@ func sqliteFlowActivationBundle() *runtimecontracts.WorkflowContractBundle {
 		},
 		AgentURIs: map[string]string{"reviewer": owner},
 	}
-	return &runtimecontracts.WorkflowContractBundle{
+	base := &runtimecontracts.WorkflowContractBundle{
 		URIRegistry: runtimecontracts.ContractURIRegistry{
 			Agents: map[string]runtimecontracts.ContractURIRef{
 				"review/reviewer": {
@@ -818,6 +819,7 @@ func sqliteFlowActivationBundle() *runtimecontracts.WorkflowContractBundle {
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{Version: "v-test"},
 	}
+	return admitStateOnlyAcquisitionEntityContracts(t, base, []string{"review"})
 }
 
 func sqliteFlowActivationRequest(bundle *runtimecontracts.WorkflowContractBundle, templateID, instanceID, parentEntityID, flowPath string) runtimepipeline.FlowInstanceActivationRequest {

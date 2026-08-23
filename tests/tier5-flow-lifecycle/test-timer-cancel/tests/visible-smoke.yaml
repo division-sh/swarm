@@ -8,5 +8,5 @@ expect:
   events:
     include: [timer.cancelled]
   entities:
-    - type: default
+    - type: test_entity
       current_state: cancelled

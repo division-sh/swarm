@@ -125,7 +125,8 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 				if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 					InstanceID: instanceID, StorageRef: path, WorkflowName: workflowName, WorkflowVersion: "1.0.0",
 					EntityID: entityID, CurrentState: "awaiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-					Fields: map[string]any{"expected": []any{"a", "b"}},
+					Fields:     map[string]any{"expected": []any{"a", "b"}},
+					EntityType: "join_state",
 				}, createdAt); err != nil {
 					t.Fatalf("materialize exact join owner: %v", err)
 				}
@@ -305,7 +306,8 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 				if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 					InstanceID: instanceID, StorageRef: path, WorkflowName: workflowName, WorkflowVersion: "1.0.0",
 					EntityID: entityID, CurrentState: "awaiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-					Fields: map[string]any{"expected": []any{}},
+					Fields:     map[string]any{"expected": []any{}},
+					EntityType: "join_state",
 				}, createdAt); err != nil {
 					t.Fatalf("materialize immediate join owner: %v", err)
 				}

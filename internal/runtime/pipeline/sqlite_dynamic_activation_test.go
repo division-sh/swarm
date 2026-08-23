@@ -125,7 +125,7 @@ func TestSQLiteFanOutCreateFlowInstanceDeliveriesPersistWithoutDeadLetter(t *tes
 func newSQLiteDynamicActivationCoordinator(t *testing.T, db *sql.DB, workflowStore *workflowInstanceStore) (*PipelineCoordinator, *recordingPipelineBus) {
 	t.Helper()
 	bus := &recordingPipelineBus{}
-	bundle := sqliteDynamicActivationBundle()
+	bundle := sqliteDynamicActivationBundle(t)
 	deliveryStore := newPipelineTestDeliveryOwnerForDB(t, db)
 	bus.configurePipelineTestDeliveryOwner(deliveryStore)
 	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
@@ -150,6 +150,7 @@ func newSQLiteDynamicActivationCoordinator(t *testing.T, db *sql.DB, workflowSto
 				Bookkeeping:        map[string]any{"last_source_event": strings.TrimSpace(req.TriggerEvent.ID())},
 				CreatedAt:          time.Now().UTC(),
 				UpdatedAt:          time.Now().UTC(),
+				EntityType:         "test_entity",
 			}))
 			if err != nil {
 				return fmt.Errorf("activate %s entity %s: %w", req.Instance.InstancePath, req.Instance.EntityID, err)
@@ -178,7 +179,8 @@ func newSQLiteDynamicActivationCoordinator(t *testing.T, db *sql.DB, workflowSto
 	return pc, bus
 }
 
-func sqliteDynamicActivationBundle() *runtimecontracts.WorkflowContractBundle {
+func sqliteDynamicActivationBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
 	reviewFlow := &runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "review"},
 	}
@@ -260,7 +262,7 @@ func sqliteDynamicActivationBundle() *runtimecontracts.WorkflowContractBundle {
 	}
 	bundle.FlowTree.Root.Nodes = bundle.Nodes
 	bundle.Events = bundle.FlowTree.Root.Events
-	return bundle
+	return admitSyntheticEntityContractsForTest(t, bundle, "parent", map[string]string{"review": "test_entity"})
 }
 
 func assertSQLiteWorkflowInstancePersisted(t *testing.T, store *workflowInstanceStore, ctx context.Context, storageRef string) {

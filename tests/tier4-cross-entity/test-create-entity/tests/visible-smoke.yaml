@@ -7,5 +7,5 @@ expect:
   events:
     include: [entity.created]
   entities:
-    - type: default
+    - type: test_entity
       current_state: creating

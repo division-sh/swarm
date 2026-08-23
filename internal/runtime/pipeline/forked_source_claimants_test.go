@@ -87,7 +87,8 @@ func TestForkedSourceWorkflowInstanceMutationsRefuseAndSelectorsExclude(t *testi
 			instance := WorkflowInstance{
 				InstanceID: instanceID, StorageRef: storageRef, EntityID: entityID, WorkflowName: "freeze", WorkflowVersion: "1",
 				CurrentState: "active", EnteredStageAt: fixture.frozenAt.Add(-time.Minute),
-				Fields: map[string]any{"marker": "source"},
+				Fields:     map[string]any{"marker": "source"},
+				EntityType: "test_entity",
 			}
 			if err := fixture.store.create(fixture.ctx, instance); err != nil {
 				t.Fatal(err)

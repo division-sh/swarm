@@ -22,6 +22,7 @@ func TestUpdateEntityState_LogsMutationRowForStateTransition(t *testing.T) {
 		workflowStore: newPostgresWorkflowInstanceStoreForTest(db),
 		module: &previewWorkflowModule{
 			bundle: &runtimecontracts.WorkflowContractBundle{
+				RootEntities: testEntityContractsForType("test_entity"),
 				Semantics: runtimecontracts.WorkflowSemanticView{
 					Name:    "mutation-flow",
 					Version: "1.0.0",
@@ -36,6 +37,7 @@ func TestUpdateEntityState_LogsMutationRowForStateTransition(t *testing.T) {
 		WorkflowName:    "mutation-flow",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "queued",
+		EntityType:      "test_entity",
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -106,6 +108,7 @@ func TestWorkflowInstanceStore_UpsertTracksFieldsGatesAndAccumulatorInMutationLo
 		StateBuckets: map[string]any{
 			"evidence": map[string]any{"score": 1},
 		},
+		EntityType: "test_entity",
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -126,6 +129,7 @@ func TestWorkflowInstanceStore_UpsertTracksFieldsGatesAndAccumulatorInMutationLo
 			"evidence": map[string]any{"score": 2},
 			"notes":    map[string]any{"count": 1},
 		},
+		EntityType: "test_entity",
 	})); err != nil {
 		t.Fatalf("update workflow instance: %v", err)
 	}
@@ -171,6 +175,7 @@ func TestWorkflowInstanceStore_ReplaysContainedStateMapListProjection(t *testing
 			},
 			"tags": []any{"new"},
 		},
+		EntityType: "test_entity",
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -194,6 +199,7 @@ func TestWorkflowInstanceStore_ReplaysContainedStateMapListProjection(t *testing
 			"verticals": contained,
 			"tags":      []any{"new", "vip"},
 		},
+		EntityType: "test_entity",
 	})); err != nil {
 		t.Fatalf("update workflow instance: %v", err)
 	}
@@ -333,6 +339,7 @@ func testMutationLoggingCoordinator(db *sql.DB) *PipelineCoordinator {
 		workflowStore: newPostgresWorkflowInstanceStoreForTest(db),
 		module: &previewWorkflowModule{
 			bundle: &runtimecontracts.WorkflowContractBundle{
+				RootEntities: testEntityContractsForType("test_entity"),
 				Semantics: runtimecontracts.WorkflowSemanticView{
 					Name:    "mutation-flow",
 					Version: "1.0.0",
@@ -351,6 +358,7 @@ func seedMutationLoggingInstance(t *testing.T, store *workflowInstanceStore, ent
 		WorkflowName:    "mutation-flow",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "queued",
+		EntityType:      "test_entity",
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}

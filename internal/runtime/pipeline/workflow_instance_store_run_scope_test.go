@@ -23,6 +23,7 @@ func TestWorkflowInstanceStore_RequiresRunContext(t *testing.T) {
 		WorkflowName:    "run-scope",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "queued",
+		EntityType:      "test_entity",
 	}))
 	if err == nil || !strings.Contains(err.Error(), "run_id is required") {
 		t.Fatalf("Upsert error = %v, want missing run_id", err)
@@ -47,6 +48,7 @@ func TestWorkflowInstanceStore_RunScopedCurrentStateRowsDoNotBleed(t *testing.T)
 		WorkflowName:    "run-scope",
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "source_state",
+		EntityType:      "test_entity",
 	})); err != nil {
 		t.Fatalf("upsert source state: %v", err)
 	}

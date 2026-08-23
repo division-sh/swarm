@@ -62,7 +62,8 @@ func TestWorkflowTimerServedLifecycleConvergesOnBothStores(t *testing.T) {
 			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "timer-proof", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-				Fields: map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID},
+				Fields:     map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID},
+				EntityType: "test_entity",
 			}, createdAt); err != nil {
 				t.Fatalf("materialize workflow instance: %v", err)
 			}
@@ -145,7 +146,8 @@ func TestAuthoredWorkflowTimerExecutesCompiledConnectRouteOnBothStores(t *testin
 			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: "producer", StorageRef: "producer", EntityID: entityID, WorkflowName: "producer", WorkflowVersion: "1.0.0",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-				Fields: map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": "producer", "instance_id": "producer"},
+				Fields:     map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": "producer", "instance_id": "producer"},
+				EntityType: "test_entity",
 			}, createdAt); err != nil {
 				t.Fatalf("materialize producer workflow instance: %v", err)
 			}
@@ -219,7 +221,8 @@ func TestRecurringWorkflowTimerDoesNotReregisterAfterSynchronousTransitionCancel
 			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "timer-proof", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-				Fields: map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID},
+				Fields:     map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID},
+				EntityType: "test_entity",
 			}, createdAt); err != nil {
 				t.Fatalf("materialize workflow instance: %v", err)
 			}
@@ -296,7 +299,8 @@ func TestWorkflowTimerOneShotRestoresBeforeFireAndStaysTerminalAfterRestartOnBot
 			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "timer-proof", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-				Fields: map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID},
+				Fields:     map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID},
+				EntityType: "test_entity",
 			}, createdAt); err != nil {
 				t.Fatalf("materialize timer before restart: %v", err)
 			}
@@ -427,7 +431,8 @@ func TestRecurringWorkflowTimerFiresRestoresAndCancelsOnBothStores(t *testing.T)
 			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "timer-proof", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-				Fields: map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID},
+				Fields:     map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID},
+				EntityType: "timer_state",
 			}, createdAt); err != nil {
 				t.Fatalf("materialize workflow instance: %v", err)
 			}
@@ -588,7 +593,8 @@ func TestWorkflowTimerRealPublishRollbackRetriesPersistedOccurrenceOnBothStores(
 			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "timer-proof", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-				Fields: map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID},
+				Fields:     map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID},
+				EntityType: "test_entity",
 			}, createdAt); err != nil {
 				t.Fatalf("materialize workflow instance: %v", err)
 			}
@@ -671,7 +677,8 @@ func TestWorkflowTimerAcceptedEventReceiptRecoveryIsIdempotentOnBothStores(t *te
 			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "timer-proof", WorkflowVersion: "1",
 				CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-				Fields: map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID},
+				Fields:     map[string]any{"run_id": runID, "entity_id": entityID, "flow_path": runID, "instance_id": runID},
+				EntityType: "test_entity",
 			}, createdAt); err != nil {
 				t.Fatalf("materialize workflow instance: %v", err)
 			}
@@ -901,14 +908,17 @@ func workflowTimerTestParseTime(raw string) (time.Time, error) {
 }
 
 func workflowTimerServedLifecycleBundle(recurring bool) *runtimecontracts.WorkflowContractBundle {
-	return &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
-		Name: "timer-proof", Version: "1", InitialStage: "waiting", TerminalStages: []string{"done"},
-		Timers: []runtimecontracts.WorkflowTimerContract{{
-			ID: "waiting.timeout", Stage: "waiting", StageOwned: true, AdvancesTo: "done",
-			Owner: "runtime", Event: runtimecontracts.WorkflowStageTimerInternalEvent,
-			StartOn: "state:waiting", Delay: "40ms", Recurring: recurring,
-		}},
-	}}
+	return &runtimecontracts.WorkflowContractBundle{
+		RootEntities: runtimecontracts.EntityContractsDocument{"test_entity": {}},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name: "timer-proof", Version: "1", InitialStage: "waiting", TerminalStages: []string{"done"},
+			Timers: []runtimecontracts.WorkflowTimerContract{{
+				ID: "waiting.timeout", Stage: "waiting", StageOwned: true, AdvancesTo: "done",
+				Owner: "runtime", Event: runtimecontracts.WorkflowStageTimerInternalEvent,
+				StartOn: "state:waiting", Delay: "40ms", Recurring: recurring,
+			}},
+		},
+	}
 }
 
 func workflowTimerRecurringCancellationSource(t *testing.T) semanticview.Source {

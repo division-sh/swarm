@@ -8,7 +8,7 @@ expect:
   events:
     include: [review.approved]
   entities:
-    - type: default
+    - type: test_entity
       current_state: approved
       gates:
         g_reviewed: true

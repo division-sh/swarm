@@ -7,5 +7,5 @@ expect:
   events:
     include: [check.passed]
   entities:
-    - type: default
+    - type: test_entity
       current_state: done

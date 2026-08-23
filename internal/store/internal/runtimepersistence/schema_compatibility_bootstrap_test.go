@@ -376,7 +376,7 @@ func legacyPostgresEntityStateShape() []string {
 	return []string{
 		`ALTER TABLE entity_state ADD COLUMN subject_id TEXT`,
 		`INSERT INTO runs (run_id, status, bundle_hash, bundle_source, origin_kind) VALUES ('00000000-0000-0000-0000-000000002055'::uuid, 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral', 'scenario_setup')`,
-		`INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state, subject_id) VALUES ('00000000-0000-0000-0000-000000002055'::uuid, '00000000-0000-0000-0000-000000002056'::uuid, 'legacy/one', 'active', 'subject-1')`,
+		`INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, subject_id) VALUES ('00000000-0000-0000-0000-000000002055'::uuid, '00000000-0000-0000-0000-000000002056'::uuid, 'legacy/one', 'legacy_entity', 'active', 'subject-1')`,
 	}
 }
 
@@ -384,7 +384,7 @@ func legacySQLiteEntityStateShape() []string {
 	return []string{
 		`ALTER TABLE entity_state ADD COLUMN subject_id TEXT`,
 		`INSERT INTO runs (run_id, status, bundle_hash, bundle_source, origin_kind) VALUES ('00000000-0000-0000-0000-000000002055', 'running', 'bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', 'ephemeral', 'scenario_setup')`,
-		`INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state, subject_id) VALUES ('00000000-0000-0000-0000-000000002055', '00000000-0000-0000-0000-000000002056', 'legacy/one', 'active', 'subject-1')`,
+		`INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, subject_id) VALUES ('00000000-0000-0000-0000-000000002055', '00000000-0000-0000-0000-000000002056', 'legacy/one', 'legacy_entity', 'active', 'subject-1')`,
 	}
 }
 

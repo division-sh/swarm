@@ -136,6 +136,7 @@ func proveFanInStreamProducerPath(t *testing.T, source semanticview.Source) {
 		EnteredStageAt:  enteredAt,
 		CreatedAt:       enteredAt,
 		Fields:          map[string]any{"portfolio_id": "portfolio-default"},
+		EntityType:      "portfolio_state",
 	}, enteredAt); err != nil {
 		t.Fatalf("seed fan-in stream singleton: %v", err)
 	}

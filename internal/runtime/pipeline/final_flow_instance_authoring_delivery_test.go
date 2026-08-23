@@ -35,6 +35,7 @@ func TestFinalFlowInstanceAuthoringFixturePipelineDispatchLocalizesTemplateInput
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "pending",
 		Fields:          map[string]any{"account_id": "acct-42"},
+		EntityType:      "account_state",
 	})); err != nil {
 		t.Fatalf("seed account_case workflow instance: %v", err)
 	}

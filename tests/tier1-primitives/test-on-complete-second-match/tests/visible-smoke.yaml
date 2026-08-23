@@ -7,5 +7,5 @@ expect:
   events:
     include: [item.failed]
   entities:
-    - type: default
+    - type: test_entity
       current_state: failed

@@ -374,7 +374,7 @@ func githubAppIssueCommentSource(t *testing.T, baseURL, flowInstance string) sem
 			"inbound.github.issue_comment": handler,
 		},
 	}
-	base := semanticview.Wrap(boundedStandingConnectorBundle(flowInstance, &runtimecontracts.WorkflowContractBundle{
+	base := semanticview.Wrap(boundedStandingConnectorBundle(t, flowInstance, &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{

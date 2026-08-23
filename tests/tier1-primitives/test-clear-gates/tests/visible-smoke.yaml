@@ -2,7 +2,7 @@ name: test-clear-gates setup visible smoke
 setup:
   entities:
   - as: entity
-    type: default
+    type: test_entity
 steps:
 - publish: gates.clear_requested
   payload: {}

@@ -104,7 +104,7 @@ func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRunt
 			}
 
 			process := worklifetime.NewProcess()
-			source := semanticview.Wrap(workflowTimerStartupRecoveryBundle())
+			source := semanticview.Wrap(workflowTimerStartupRecoveryBundle(t))
 			rt, err := swarmruntime.NewRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
 				Config: &config.Config{
 					Runtime: config.RuntimeConfig{RecoveryOnStartup: true},
@@ -306,7 +306,7 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 				runlifecyclefixture.RequireSQLite(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, Source: authorActivityTestBundleSourceFact})
 			}
 
-			source := semanticview.Wrap(workflowTimerStartupRecoveryBundle())
+			source := semanticview.Wrap(workflowTimerStartupRecoveryBundle(t))
 			module := newRuntimeTestWorkflowModule(t, source)
 			newRuntime := func(managerStore runtimemanager.ManagerPersistence) (*swarmruntime.Runtime, *worklifetime.Process) {
 				process := worklifetime.NewProcess()
@@ -368,6 +368,7 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 					"flow_path":   runID,
 					"instance_id": runID,
 				},
+				EntityType: "test_entity",
 			}, time.Now().UTC())
 			if err != nil {
 				t.Fatalf("materialize workflow timer before restart: %v", err)
@@ -443,7 +444,7 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 
 			// This proof owns restoration through Runtime.Start, not the separate
 			// overdue-timer versus pipeline-recovery ordering tracked by #2234.
-			source := semanticview.Wrap(workflowTimerStartupRecoveryBundleWithDelay("3s"))
+			source := semanticview.Wrap(workflowTimerStartupRecoveryBundleWithDelay(t, "3s"))
 			module := newRuntimeTestWorkflowModule(t, source)
 			bootProgress := make([]swarmruntime.BootProgressEvent, 0, swarmruntime.BootProgressTotalSteps)
 			newRuntime := func() (*swarmruntime.Runtime, *worklifetime.Process) {
@@ -510,6 +511,7 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 					"flow_path":   runID,
 					"instance_id": runID,
 				},
+				EntityType: "test_entity",
 			}, occurredAt)
 			if err != nil {
 				t.Fatalf("materialize workflow timer before restart: %v", err)
@@ -582,12 +584,19 @@ func (workflowTimerStartupLLM) ProviderContract() llm.ProviderContract {
 	return llm.AnthropicAPIProviderContract()
 }
 
-func workflowTimerStartupRecoveryBundle() *runtimecontracts.WorkflowContractBundle {
-	return workflowTimerStartupRecoveryBundleWithDelay("25ms")
+func workflowTimerStartupRecoveryBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	return workflowTimerStartupRecoveryBundleWithDelay(t, "25ms")
 }
 
-func workflowTimerStartupRecoveryBundleWithDelay(delay string) *runtimecontracts.WorkflowContractBundle {
-	bundle := &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
+func workflowTimerStartupRecoveryBundleWithDelay(t *testing.T, delay string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	bundle := loadRuntimeTempBundle(t, map[string]string{
+		"package.yaml":  "name: workflow-timer-startup\nversion: 1\nplatform_version: '>=0.7.0 <0.8.0'\n",
+		"schema.yaml":   "name: workflow-timer-startup\ninitial_state: waiting\nstates: [waiting, done]\nterminal_states: [done]\n",
+		"entities.yaml": "test_entity: {}\n",
+	})
+	bundle.Semantics = runtimecontracts.WorkflowSemanticView{
 		Name: "workflow-timer-startup", Version: "1", InitialStage: "waiting",
 		Stages: []runtimecontracts.WorkflowStageContract{{ID: "waiting"}, {ID: "done"}}, TerminalStages: []string{"done"},
 		Timers: []runtimecontracts.WorkflowTimerContract{{
@@ -595,7 +604,8 @@ func workflowTimerStartupRecoveryBundleWithDelay(delay string) *runtimecontracts
 			Owner: "runtime", Event: runtimecontracts.WorkflowStageTimerInternalEvent,
 			StartOn: "state:waiting", Delay: delay,
 		}},
-	}, Events: map[string]runtimecontracts.EventCatalogEntry{"generic.tick": {}}}
+	}
+	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{"generic.tick": {}}
 	bundle.Platform.Platform.Name = "swarm"
 	bundle.Platform.Platform.Version = "0.7.0"
 	return bundle

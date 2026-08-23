@@ -230,7 +230,8 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	result, err := workflow.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID: "inst-1", StorageRef: identity.InstancePath, EntityID: identity.EntityID, WorkflowName: identity.TemplateID,
 		WorkflowVersion: "1.0.0", RuntimeReadiness: &plan, CurrentState: "pending",
-		Config: map[string]any{"name": "alpha"},
+		Config:     map[string]any{"name": "alpha"},
+		EntityType: "test_entity",
 	}, occurredAt)
 	if err != nil || result != runtimepipeline.WorkflowInitialMaterializationCreated {
 		t.Fatalf("materialize readiness: result=%d err=%v", result, err)

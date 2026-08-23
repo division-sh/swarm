@@ -210,6 +210,7 @@ pins:
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "policy.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "agents.yaml"), "{}\n")
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "entities.yaml"), "test_entity: {}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), "task.done: {}\n")
 	nodes := "{}\n"
 	if listener {

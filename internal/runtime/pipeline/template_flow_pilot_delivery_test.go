@@ -37,7 +37,8 @@ func TestTemplateFlowPilotPipelineDispatchUpdatesSelectedTemplateInstance(t *tes
 		Config: map[string]any{
 			"account_id": "acct-1",
 		},
-		Fields: map[string]any{},
+		Fields:     map[string]any{},
+		EntityType: "account_state",
 	})); err != nil {
 		t.Fatalf("seed scoring workflow instance: %v", err)
 	}

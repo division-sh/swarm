@@ -7,5 +7,5 @@ expect:
   events:
     include: [check.escalated]
   entities:
-    - type: default
+    - type: test_entity
       current_state: pending

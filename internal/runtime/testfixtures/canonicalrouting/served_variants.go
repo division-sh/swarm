@@ -348,7 +348,7 @@ pins:
     events: []
 `)
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "      advances_to: processed\n", "      advances_to: waiting\n")
-	applyClosedReplacement(t, filepath.Join(root, "entities.yaml"), "{}\n", `portfolio:
+	applyClosedReplacement(t, filepath.Join(root, "entities.yaml"), "item: {}\n", `portfolio:
   owner: text
 `)
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), `item.processed:

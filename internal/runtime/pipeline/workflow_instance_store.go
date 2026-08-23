@@ -274,6 +274,9 @@ func (r WorkflowTargetPersistenceRecord) Validate(route runtimeflowidentity.Rout
 		if strings.TrimSpace(r.State.FlowInstance) != route.InstancePath || runtimeidentity.NormalizeEntityID(r.State.EntityID) != entityID {
 			return fmt.Errorf("workflow target state disagrees with exact receiver identity")
 		}
+		if strings.TrimSpace(r.State.EntityType) == "" {
+			return fmt.Errorf("workflow target state requires exact entity contract")
+		}
 		if strings.TrimSpace(r.State.CurrentState) == "" || r.State.Revision <= 0 || r.State.CreatedAt.IsZero() || r.State.UpdatedAt.IsZero() {
 			return fmt.Errorf("workflow target state requires persisted state, revision, and times")
 		}
@@ -955,13 +958,15 @@ func normalizeWorkflowInstanceForPersistence(instance WorkflowInstance) (Workflo
 	instance.WorkflowName = strings.TrimSpace(instance.WorkflowName)
 	instance.WorkflowVersion = strings.TrimSpace(instance.WorkflowVersion)
 	instance.CurrentState = strings.TrimSpace(instance.CurrentState)
-	if instance.InstanceID == "" || instance.WorkflowName == "" || instance.WorkflowVersion == "" || instance.CurrentState == "" {
+	instance.EntityType = strings.TrimSpace(instance.EntityType)
+	if instance.InstanceID == "" || instance.WorkflowName == "" || instance.WorkflowVersion == "" || instance.CurrentState == "" || instance.EntityType == "" {
 		return WorkflowInstance{}, runtimeflowidentity.Persisted{}, false, fmt.Errorf(
-			"workflow instance requires instance_id, workflow_name, workflow_version, and current_state (id=%q workflow=%q version=%q state=%q)",
+			"workflow instance requires instance_id, workflow_name, workflow_version, current_state, and entity_type (id=%q workflow=%q version=%q state=%q entity_type=%q)",
 			instance.InstanceID,
 			instance.WorkflowName,
 			instance.WorkflowVersion,
 			instance.CurrentState,
+			instance.EntityType,
 		)
 	}
 	if instance.EnteredStageAt.IsZero() {
@@ -1142,7 +1147,7 @@ func decodeWorkflowInstancePersistedProjection(
 		return workflowInstancePersistedProjection{}, err
 	}
 	if strings.TrimSpace(control.EntityType) == "" {
-		control.EntityType = "default"
+		return workflowInstancePersistedProjection{}, fmt.Errorf("entity_state.entity_type is required")
 	}
 	return workflowInstancePersistedProjection{
 		Fields:      fields,
@@ -1181,7 +1186,7 @@ func workflowInstancePersistedProjectionFromInstance(instance WorkflowInstance, 
 		control.FlowPath = strings.TrimSpace(persistedIdentity.InstancePath)
 	}
 	if control.EntityType == "" {
-		control.EntityType = "default"
+		return workflowInstancePersistedProjection{}, fmt.Errorf("workflow instance entity_type is required")
 	}
 	return workflowInstancePersistedProjection{
 		Fields:      cloneStringAnyMap(instance.Fields),

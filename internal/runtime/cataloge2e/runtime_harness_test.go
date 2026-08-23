@@ -27,6 +27,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -1273,6 +1274,7 @@ func (h *runtimeHarness) seedInitialState(entityID string) {
 	if initialState == "" {
 		return
 	}
+	entityType := h.requireRootEntityType()
 	ctx := worklifetime.WithOccurrence(h.ctx, h.rt.WorkOccurrence())
 	ctx = runtimeeffects.WithExecutionMode(ctx, executionmode.Live)
 	if _, err := h.workflow.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
@@ -1284,6 +1286,7 @@ func (h *runtimeHarness) seedInitialState(entityID string) {
 		CurrentState:    initialState,
 		EnteredStageAt:  h.startedAt,
 		CreatedAt:       h.startedAt,
+		EntityType:      entityType,
 	}, h.startedAt); err != nil {
 		h.t.Fatalf("seed initial workflow state for %s: %v", entityID, err)
 	}
@@ -1347,6 +1350,7 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 		h.t.Fatalf("load workflow instance for entity field seeding %s: %v", entityID, err)
 	}
 	if !ok {
+		entityType := h.requireRootEntityType()
 		instance = runtimepipeline.WorkflowInstance{
 			InstanceID:      catalogRuntimeRunID,
 			StorageRef:      catalogRuntimeRunID,
@@ -1356,6 +1360,7 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 			CurrentState:    h.initialState,
 			EnteredStageAt:  h.startedAt,
 			CreatedAt:       h.startedAt,
+			EntityType:      entityType,
 		}
 	}
 	if strings.TrimSpace(instance.InstanceID) == "" {
@@ -1413,6 +1418,15 @@ func (h *runtimeHarness) seedEntityFields(expected catalogExpectedDocument) {
 	if _, err := h.workflow.MaterializeInitialEntry(materializeCtx, instance, h.startedAt); err != nil {
 		h.t.Fatalf("seed entity_fields_before for %s: %v", entityID, err)
 	}
+}
+
+func (h *runtimeHarness) requireRootEntityType() string {
+	h.t.Helper()
+	contract, ok := entityruntime.ResolveForFlow(semanticview.Wrap(h.bundle), "")
+	if !ok || strings.TrimSpace(contract.EntityType) == "" {
+		h.t.Fatalf("catalog stateful fixture %s requires one canonical root entity contract", h.bundle.WorkflowName())
+	}
+	return strings.TrimSpace(contract.EntityType)
 }
 
 func (h *runtimeHarness) catalogGateKey(flowID, key string) string {

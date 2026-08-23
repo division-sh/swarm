@@ -58,6 +58,7 @@ import (
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/gateruntime"
@@ -3627,9 +3628,11 @@ func seedServedDecisionCardFixture(t *testing.T, rt servedControlProofRuntime) s
 	if rootFlowID == "" {
 		t.Fatal("served decision-card fixture requires canonical root flow identity")
 	}
+	entityType := servedRequiredRootEntityType(t, workflow)
 	if _, err := workflow.MaterializeInitialEntry(materializeCtx, runtimepipeline.WorkflowInstance{
 		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: rootFlowID, WorkflowVersion: "1.0.0",
 		CurrentState: "awaiting_review", EnteredStageAt: now, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
+		EntityType: entityType,
 	}, now); err != nil {
 		t.Fatalf("seed gated workflow instance: %v", err)
 	}
@@ -4854,9 +4857,11 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 	if rootFlowID == "" {
 		t.Fatal("served run-control fixture requires canonical root flow identity")
 	}
+	entityType := servedRequiredRootEntityType(t, workflow)
 	if _, err := workflow.MaterializeInitialEntry(runtimeeffects.WithExecutionMode(ctx, executionmode.Live), runtimepipeline.WorkflowInstance{
 		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: rootFlowID, WorkflowVersion: "1.0.0",
 		CurrentState: "awaiting_review", EnteredStageAt: now, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
+		EntityType: entityType,
 	}, now); err != nil {
 		t.Fatalf("seed %s run.stop gated workflow instance: %v", rt.Backend, err)
 	}
@@ -4888,6 +4893,18 @@ func seedServedRunControlDecisionCard(t *testing.T, rt servedControlProofRuntime
 		t.Fatalf("seed %s run.stop decision card: %v", rt.Backend, err)
 	}
 	return entityID, card.CardID
+}
+
+func servedRequiredRootEntityType(t testing.TB, workflow *runtimepipeline.PipelineCoordinator) string {
+	t.Helper()
+	if workflow == nil {
+		t.Fatal("served fixture requires a workflow coordinator")
+	}
+	contract, ok := entityruntime.ResolveForFlow(workflow.SemanticSource(), "")
+	if !ok || strings.TrimSpace(contract.EntityType) == "" {
+		t.Fatal("served stateful fixture requires one canonical root entity contract")
+	}
+	return strings.TrimSpace(contract.EntityType)
 }
 
 func requireServedTerminalDecisionCardStateChangeOnly(t *testing.T, rt servedControlProofRuntime, runID, entityID, cardID string) {

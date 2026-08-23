@@ -71,7 +71,7 @@ func newExactWorkflowJoinHarness(
 ) *exactWorkflowJoinHarness {
 	t.Helper()
 	store, ctx := storeCase.open(t)
-	bundle := workflowJoinLifecycleBundle()
+	bundle := workflowJoinLifecycleBundle(t)
 	plan := bundle.Semantics.Joins[0]
 	plan.Node = mustPipelineNode(flowID, "join-node")
 	source := exactWorkflowJoinSource{
@@ -94,7 +94,8 @@ func newExactWorkflowJoinHarness(
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: uuid.NewString(), StorageRef: harness.path, WorkflowName: workflowName, WorkflowVersion: "1.0.0",
 		EntityID: harness.entityID, CurrentState: initialState, EnteredStageAt: time.Now().UTC(),
-		Fields: map[string]any{"expected": append([]any{}, members...)},
+		Fields:     map[string]any{"expected": append([]any{}, members...)},
+		EntityType: "test_entity",
 	})); err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +242,8 @@ func seedExactJoinScope(t *testing.T, store *workflowInstanceStore, ctx context.
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: route.InstanceID, StorageRef: path, WorkflowName: executionFlowID, WorkflowVersion: "1.0.0",
 		EntityID: entityID, CurrentState: "awaiting", EnteredStageAt: time.Now().UTC(),
-		Fields: map[string]any{"expected": []any{"a", "b"}},
+		Fields:     map[string]any{"expected": []any{"a", "b"}},
+		EntityType: "test_entity",
 	})); err != nil {
 		t.Fatal(err)
 	}
@@ -303,7 +305,7 @@ func persistExactJoinEvent(t testing.TB, store *workflowInstanceStore, ctx conte
 }
 
 func TestJoinScheduleFactsAreDerivedOnlyFromTypedDeclarationHandle(t *testing.T) {
-	source := workflowJoinLifecycleSource(workflowJoinLifecycleBundle())
+	source := workflowJoinLifecycleSource(workflowJoinLifecycleBundle(t))
 	now := time.Date(2026, 8, 14, 12, 0, 0, 0, time.UTC)
 	entityID := uuid.NewString()
 	instanceRoute := testWorkflowInstanceRoute("orders/order-1")
@@ -338,7 +340,7 @@ func TestJoinScheduleFactsAreDerivedOnlyFromTypedDeclarationHandle(t *testing.T)
 }
 
 func TestJoinLifecycleHandlerResolutionRequiresExactDeclarationRef(t *testing.T) {
-	bundle := workflowJoinLifecycleBundle()
+	bundle := workflowJoinLifecycleBundle(t)
 	base := workflowJoinLifecycleRootAndFlowSource(bundle)
 	plan := bundle.Semantics.Joins[0]
 	rootPlan := plan
@@ -427,7 +429,7 @@ func TestJoinLifecycleHandlerResolutionRequiresExactDeclarationRef(t *testing.T)
 }
 
 func TestWorkflowJoinDeclarationRefUsesExactExecutionScope(t *testing.T) {
-	bundle := workflowJoinLifecycleBundle()
+	bundle := workflowJoinLifecycleBundle(t)
 	plan := bundle.Semantics.Joins[0]
 	rootPlan := plan
 	rootPlan.Node = mustPipelineNode("", "join-node")
@@ -466,7 +468,7 @@ func TestRootAndFlowWorkflowJoinArrivalCompletionCancelsExactScheduleOnBothStore
 		} {
 			t.Run(storeCase.name+"/"+scope.name, func(t *testing.T) {
 				store, ctx := storeCase.open(t)
-				bundle := workflowJoinLifecycleBundle()
+				bundle := workflowJoinLifecycleBundle(t)
 				plan := bundle.Semantics.Joins[0]
 				plan.Node = mustPipelineNode(scope.flowID, "join-node")
 				source := exactWorkflowJoinSource{
@@ -491,7 +493,8 @@ func TestRootAndFlowWorkflowJoinArrivalCompletionCancelsExactScheduleOnBothStore
 				if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 					InstanceID: uuid.NewString(), StorageRef: path, WorkflowName: workflowName, WorkflowVersion: "1.0.0",
 					EntityID: entityID, CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(),
-					Fields: map[string]any{"expected": []any{"a", "b"}},
+					Fields:     map[string]any{"expected": []any{"a", "b"}},
+					EntityType: "test_entity",
 				})); err != nil {
 					t.Fatal(err)
 				}
@@ -570,7 +573,7 @@ func TestSameFlowPackageJoinDeclarationsStayIndependentAcrossRestartOnBothStores
 		}{{name: "a_then_b"}, {name: "b_then_a", reverse: true}} {
 			t.Run(storeCase.name+"/"+order.name, func(t *testing.T) {
 				store, ctx := storeCase.open(t)
-				bundle := workflowJoinLifecycleBundle()
+				bundle := workflowJoinLifecycleBundle(t)
 				orders := bundle.FlowTree.ByID["orders"]
 				handler := orders.Nodes["join-node"].EventHandlers["item.completed"]
 				first := pipelinePackageNode(t, "packages/a", "orders", "shared")
@@ -604,6 +607,7 @@ func TestSameFlowPackageJoinDeclarationsStayIndependentAcrossRestartOnBothStores
 					EntityID: entityID, CurrentState: "dispatching", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{
 						"flow_path": path, "instance_id": route.InstanceID, "expected": []any{"a", "b"},
 					},
+					EntityType: "test_entity",
 				})); err != nil {
 					t.Fatal(err)
 				}
@@ -910,7 +914,7 @@ func TestNestedFanOutDiamondJoinsRetainIndependentDeclarationHandles(t *testing.
 	for _, storeCase := range workflowJoinStoreCases() {
 		t.Run(storeCase.name, func(t *testing.T) {
 			store, ctx := storeCase.open(t)
-			bundle := workflowJoinLifecycleBundle()
+			bundle := workflowJoinLifecycleBundle(t)
 			source := exactRootAndFlowJoinSource(bundle)
 			schedules := &recordingGenericScheduleWakeupOwner{}
 			newCoordinator := func() *PipelineCoordinator {
@@ -1105,7 +1109,7 @@ func TestConcurrentRootAndFlowSameLeafJoinsRemainDistinctAcrossRestart(t *testin
 			}
 			t.Run(storeCase.name+"/"+name, func(t *testing.T) {
 				store, ctx := storeCase.open(t)
-				bundle := workflowJoinLifecycleBundle()
+				bundle := workflowJoinLifecycleBundle(t)
 				source := exactRootAndFlowJoinSource(bundle)
 				schedules := &recordingGenericScheduleWakeupOwner{}
 				newCoordinator := func() *PipelineCoordinator {

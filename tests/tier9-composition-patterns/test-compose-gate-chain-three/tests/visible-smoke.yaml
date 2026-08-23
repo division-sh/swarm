@@ -10,7 +10,7 @@ expect:
   events:
     include: [release.ready]
   entities:
-    - type: default
+    - type: test_entity
       current_state: released
       gates:
         g_a: true
