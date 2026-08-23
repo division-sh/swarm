@@ -865,12 +865,12 @@ func seedDurableReplyConformanceTargetOwners(t *testing.T, ctx context.Context, 
 		t.Fatal("reply conformance run identity is required before seeding target owners")
 	}
 	db := replyConformanceDB(t, backend)
-	query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state)
-		VALUES ($1::uuid, $2::uuid, $3, 'active')
+	query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state)
+		VALUES ($1::uuid, $2::uuid, $3, 'requester_state', 'active')
 		ON CONFLICT (run_id, entity_id) DO NOTHING`
 	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `INSERT OR IGNORE INTO entity_state (run_id, entity_id, flow_instance, current_state)
-			VALUES (?, ?, ?, 'active')`
+		query = `INSERT OR IGNORE INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state)
+			VALUES (?, ?, ?, 'requester_state', 'active')`
 	}
 	for _, owner := range replyConformanceTargetOwners() {
 		if _, err := db.ExecContext(ctx, query, runID, owner.EntityID, owner.FlowInstance); err != nil {

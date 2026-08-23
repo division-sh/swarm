@@ -1,0 +1,3 @@
+item:
+  item_id: string
+  status: string

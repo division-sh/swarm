@@ -116,6 +116,9 @@ func (r WorkflowEngineStateRecord) Validate() error {
 	if strings.TrimSpace(r.WorkflowName) == "" || strings.TrimSpace(r.CurrentState) == "" {
 		return fmt.Errorf("workflow engine state record requires workflow and current state")
 	}
+	if strings.TrimSpace(r.EntityType) == "" {
+		return fmt.Errorf("workflow engine state record requires exact entity contract")
+	}
 	if strings.TrimSpace(r.Mode) == "" || strings.TrimSpace(r.Status) == "" {
 		return fmt.Errorf("workflow engine state record requires mode and status")
 	}

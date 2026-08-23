@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -188,12 +189,31 @@ func workflowMaterializeEntityFields(source semanticview.Source, flowID string, 
 	return out
 }
 
-func workflowEntityType(source semanticview.Source, flowID string) string {
+func requireWorkflowEntityType(source semanticview.Source, flowID string) (string, error) {
 	contract, ok := workflowEntityContract(source, flowID)
 	if !ok {
-		return ""
+		return "", fmt.Errorf("flow %s requires one canonical entity contract", strings.TrimSpace(flowID))
 	}
-	return strings.TrimSpace(contract.EntityType)
+	entityType := strings.TrimSpace(contract.EntityType)
+	if entityType == "" {
+		return "", fmt.Errorf("flow %s canonical entity contract has empty entity_type", strings.TrimSpace(flowID))
+	}
+	return entityType, nil
+}
+
+func validateWorkflowEntityType(source semanticview.Source, flowID, actual string) error {
+	expected, err := requireWorkflowEntityType(source, flowID)
+	if err != nil {
+		return err
+	}
+	actual = strings.TrimSpace(actual)
+	if actual == "" {
+		return fmt.Errorf("flow %s entity-bearing state requires canonical entity_type %q", strings.TrimSpace(flowID), expected)
+	}
+	if actual != expected {
+		return fmt.Errorf("flow %s entity_type %q disagrees with canonical contract %q", strings.TrimSpace(flowID), actual, expected)
+	}
+	return nil
 }
 
 func cloneWorkflowSchemaValue(value any) any {

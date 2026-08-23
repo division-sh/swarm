@@ -47,6 +47,7 @@ func TestSQLiteWorkflowInstanceStore_PreservesCreateEntityInitialValueMutationRo
 			"region": "west",
 			"tier":   float64(1),
 		},
+		EntityType: "test_entity",
 	})); err != nil {
 		t.Fatalf("Create workflow instance: %v", err)
 	}
@@ -134,6 +135,7 @@ func TestSQLiteWorkflowInstanceStore_PreservesParentRouteControlMetadata(t *test
 		CurrentState:       "created",
 		EnteredStageAt:     time.Now().UTC(),
 		Fields:             map[string]any{},
+		EntityType:         "test_entity",
 	})); err != nil {
 		t.Fatalf("Create workflow instance: %v", err)
 	}
@@ -170,6 +172,7 @@ func TestSQLiteWorkflowInstanceStore_MarkTerminatedUsesRuntimeMutationRunner(t *
 	if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: "terminated", StorageRef: storageRef, EntityID: entityID, WorkflowName: "root", WorkflowVersion: "1",
 		CurrentState: "running", EnteredStageAt: time.Now().UTC(), Fields: map[string]any{},
+		EntityType: "test_entity",
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -245,7 +248,8 @@ func TestSQLiteWorkflowInstanceStore_MutateERollsBackCallbackFailure(t *testing.
 	runID := uuid.NewString()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID)
 	ensurePipelineTestRun(t, store, runID)
-	instance := materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: "item", StorageRef: "root/item", WorkflowName: "root", WorkflowVersion: "1.0.0", CurrentState: "queued", Fields: map[string]any{}})
+	instance := materializedWorkflowInstanceForTest(WorkflowInstance{InstanceID: "item", StorageRef: "root/item", WorkflowName: "root", WorkflowVersion: "1.0.0", CurrentState: "queued", Fields: map[string]any{},
+		EntityType: "test_entity"})
 	if err := store.upsert(ctx, instance); err != nil {
 		t.Fatalf("seed: %v", err)
 	}

@@ -6,7 +6,7 @@ expect:
   events:
     include: [gate.set]
   entities:
-    - type: default
+    - type: test_entity
       current_state: pending
       gates:
         g1_check: true

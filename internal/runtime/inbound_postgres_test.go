@@ -1120,7 +1120,7 @@ func seedPostgresInboundGatewayRuntime(
 			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
 			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, $3, 'default', $4, 'Customer A', 'active',
+			$1::uuid, $2::uuid, $3, 'bounded_entity', $4, 'Customer A', 'active',
 			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, now(), now(), now()
 		)
 		ON CONFLICT (run_id, entity_id) DO NOTHING
@@ -1229,7 +1229,7 @@ func seedSQLiteInboundGatewayRuntime(
 		INSERT INTO entity_state (
 			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
 			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-		) VALUES (?, ?, ?, 'default', ?, 'Customer A', 'active',
+		) VALUES (?, ?, ?, 'bounded_entity', ?, 'Customer A', 'active',
 			'{}', '{}', '{}', 1, ?, ?, ?)
 	`, runID, entityID, flowInstance, entitySlug, now, now, now); err != nil {
 		t.Fatalf("seed sqlite entity state: %v", err)

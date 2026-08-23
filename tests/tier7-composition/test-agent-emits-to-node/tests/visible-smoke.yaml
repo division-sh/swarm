@@ -6,5 +6,5 @@ expect:
   events:
     include: [task.acknowledged, task.completed, task.finalized]
   entities:
-    - type: default
+    - type: test_entity
       current_state: done

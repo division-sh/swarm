@@ -22,7 +22,7 @@ func TestDeliveryTargetApplicationPreservesCommittedSelectOrCreateTargetOnSQLite
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			db, store := openHandlerEntityRequirementStore(t, backend)
-			source := deliveryTargetOwnershipSource()
+			source := deliveryTargetOwnershipSource(t)
 			pc := newDurablePipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
 				Module:              staticSemanticWorkflowModule{source: source},
 				Persistence:         workflowPersistenceForTest(store),
@@ -69,6 +69,7 @@ func TestDeliveryTargetApplicationPreservesCommittedSelectOrCreateTargetOnSQLite
 			exact := materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: instanceID, StorageRef: identity.InstancePath, EntityID: identity.EntityID,
 				WorkflowName: "review", WorkflowVersion: "1", CurrentState: "active", Fields: expected,
+				EntityType: "review_entity",
 			})
 			if err := store.upsert(ctx, exact); err != nil {
 				t.Fatalf("seed exact appearing target: %v", err)
@@ -87,6 +88,7 @@ func TestDeliveryTargetApplicationPreservesCommittedSelectOrCreateTargetOnSQLite
 			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 				InstanceID: siblingID, StorageRef: siblingPath, EntityID: siblingEntityID,
 				WorkflowName: "review", WorkflowVersion: "1", CurrentState: "active", Fields: expected,
+				EntityType: "review_entity",
 			})); err != nil {
 				t.Fatalf("seed later matching sibling: %v", err)
 			}
@@ -193,14 +195,15 @@ func TestDeliveryTargetApplicationRejectsWrongRunRootTargetsBeforeMutationOnBoth
 						InstanceID: wrongRunID, StorageRef: wrongRunID, EntityID: entityID,
 						WorkflowName: "review", WorkflowVersion: "1", Mode: runtimecontracts.FlowModeStatic,
 						CurrentState: "active", Fields: map[string]any{"marker": "unchanged"},
+						EntityType: "test_entity",
 					})); err != nil {
 						t.Fatalf("seed complete wrong-run root: %v", err)
 					}
 				case "state-only":
-					query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?, ?, ?, 'review_item', 'active', '{}', '{"marker":"unchanged"}', '{}', '{}', 1, ?, ?, ?)`
+					query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?, ?, ?, 'test_entity', 'active', '{}', '{"marker":"unchanged"}', '{}', '{}', 1, ?, ?, ?)`
 					args := []any{testPipelineRunID, entityID, wrongRunID, now, now, now}
 					if backend == "postgres" {
-						query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'review_item', 'active', '{}'::jsonb, '{"marker":"unchanged"}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, $4, $4, $4)`
+						query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'test_entity', 'active', '{}'::jsonb, '{"marker":"unchanged"}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, $4, $4, $4)`
 						args = []any{testPipelineRunID, entityID, wrongRunID, now}
 					}
 					if _, err := db.ExecContext(ctx, query, args...); err != nil {
@@ -255,7 +258,7 @@ func TestDeliveryTargetApplicationRejectsStateOnlyChildRelabeledAsParentOnBothSt
 	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			db, store := openHandlerEntityRequirementStore(t, backend)
-			source := deliveryTargetNestedOwnershipSource()
+			source := deliveryTargetNestedOwnershipSource(t)
 			pc := newDurablePipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
 				Module:              staticSemanticWorkflowModule{source: source},
 				Persistence:         workflowPersistenceForTest(store),
@@ -311,8 +314,9 @@ func TestDeliveryTargetApplicationRejectsStateOnlyChildRelabeledAsParentOnBothSt
 	}
 }
 
-func deliveryTargetNestedOwnershipSource() semanticview.Source {
-	source := deliveryTargetOwnershipSource()
+func deliveryTargetNestedOwnershipSource(t *testing.T) semanticview.Source {
+	t.Helper()
+	source := deliveryTargetOwnershipSource(t)
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil || bundle.FlowTree.Root == nil {
 		panic("delivery target ownership source has no bundle")
@@ -367,7 +371,8 @@ func TestDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycleW
 					if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 						InstanceID: "wrong-descriptor", StorageRef: instancePath, EntityID: entityID,
 						WorkflowName: "other-flow", WorkflowVersion: "1", Mode: "template", CurrentState: "active",
-						Fields: map[string]any{"marker": "unchanged"},
+						Fields:     map[string]any{"marker": "unchanged"},
+						EntityType: "test_entity",
 					})); err != nil {
 						t.Fatalf("seed wrong-descriptor target: %v", err)
 					}
@@ -380,7 +385,8 @@ func TestDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycleW
 					instance := materializedWorkflowInstanceForTest(WorkflowInstance{
 						InstanceID: "terminated-status", StorageRef: instancePath, EntityID: entityID,
 						WorkflowName: "review", WorkflowVersion: "1", Mode: "template", CurrentState: "active",
-						Fields: map[string]any{"marker": "unchanged"},
+						Fields:     map[string]any{"marker": "unchanged"},
+						EntityType: "test_entity",
 					})
 					if err := store.upsert(ctx, instance); err != nil {
 						t.Fatalf("seed terminated target: %v", err)
@@ -402,7 +408,8 @@ func TestDeliveryTargetApplicationRejectsInvalidPersistencePresenceAndLifecycleW
 					instance := materializedWorkflowInstanceForTest(WorkflowInstance{
 						InstanceID: "draining-status", StorageRef: instancePath, EntityID: entityID,
 						WorkflowName: "review", WorkflowVersion: "1", Mode: "template", CurrentState: "active",
-						Fields: map[string]any{"marker": "unchanged"},
+						Fields:     map[string]any{"marker": "unchanged"},
+						EntityType: "test_entity",
 					})
 					if err := store.upsert(ctx, instance); err != nil {
 						t.Fatalf("seed draining target: %v", err)
@@ -493,7 +500,8 @@ func TestNonActiveDeliveryTargetRejectsDelayedAndReplayedExecutionBeforeMutation
 				if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
 					InstanceID: instancePath, StorageRef: instancePath, EntityID: entityID,
 					WorkflowName: "review", WorkflowVersion: "1", Mode: "static", CurrentState: "active",
-					Fields: map[string]any{"marker": "unchanged"},
+					Fields:     map[string]any{"marker": "unchanged"},
+					EntityType: "test_entity",
 				})); err != nil {
 					t.Fatalf("seed delayed target: %v", err)
 				}
@@ -583,9 +591,9 @@ func TestDeliveryTargetApplicationCarriesScenarioPreStateThroughFirstMutationOnS
 			instancePath := testPipelineRunID
 			entityID := eventtest.UUID("scenario-seeded-existing-target")
 			occurredAt := time.Date(2026, time.January, 4, 12, 0, 0, 0, time.UTC)
-			query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?, ?, ?, 'review_item', 'active', '{"approved":true}', '{"marker":"preserved"}', '{}', '{}', 1, ?, ?, ?)`
+			query := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?, ?, ?, 'test_entity', 'active', '{"approved":true}', '{"marker":"preserved"}', '{}', '{}', 1, ?, ?, ?)`
 			if backend == "postgres" {
-				query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'review_item', 'active', '{"approved":true}'::jsonb, '{"marker":"preserved"}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, $4, $4, $4)`
+				query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, bookkeeping, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'test_entity', 'active', '{"approved":true}'::jsonb, '{"marker":"preserved"}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, $4, $4, $4)`
 			}
 			args := []any{testPipelineRunID, entityID, instancePath, occurredAt}
 			if backend == "sqlite" {
@@ -649,6 +657,7 @@ func TestDeliveryTargetApplicationProjectsScopedGatesWithoutMutatingPersistenceO
 				InstanceID: "scoped-gates", StorageRef: instancePath, EntityID: entityID,
 				WorkflowName: "review", WorkflowVersion: "1", Mode: "template", CurrentState: "active",
 				Fields: map[string]any{"marker": "durable"}, Gates: map[string]bool{"review/approved": true},
+				EntityType: "test_entity",
 			})
 			if err := store.upsert(ctx, persisted); err != nil {
 				t.Fatalf("seed exact scoped-gate target: %v", err)

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -3178,8 +3179,35 @@ func exactEventBusWorkflowFixtures(instances []runtimepipeline.WorkflowInstance)
 	for i := range instances {
 		instances[i].EnteredStageAt = enteredAt
 		instances[i].CreatedAt = enteredAt
+		if strings.TrimSpace(instances[i].EntityType) == "" {
+			instances[i].EntityType = "test_entity"
+		}
 	}
 	return instances
+}
+
+func loadEventBusTempBundle(t *testing.T, files map[string]string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	root := t.TempDir()
+	for name, source := range files {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("create event bus fixture directory: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+			t.Fatalf("write event bus fixture %s: %v", name, err)
+		}
+	}
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		root,
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load event bus fixture: %v", err)
+	}
+	return bundle
 }
 
 func newEventBusWorkflowCoordinator(
@@ -3596,6 +3624,18 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 			"child":       child.Schema,
 		},
 	}
+	admitted := loadEventBusTempBundle(t, map[string]string{
+		"package.yaml":              "name: mixed-route\nversion: v-test\nflows:\n  - id: child\n    flow: child\n    mode: static\n",
+		"schema.yaml":               "name: mixed-route\nmode: static\ninitial_state: active\nstates: [active]\n",
+		"entities.yaml":             "test_entity: {}\n",
+		"flows/child/schema.yaml":   "name: child\nmode: static\ninitial_state: active\nstates: [active]\n",
+		"flows/child/entities.yaml": "test_entity: {}\n",
+	})
+	admitted.Nodes = bundle.Nodes
+	admitted.Semantics = bundle.Semantics
+	admitted.FlowTree = bundle.FlowTree
+	admitted.FlowSchemas = bundle.FlowSchemas
+	bundle = admitted
 	source := semanticview.Wrap(bundle)
 	return &fixtureWorkflowModule{
 		source: source,

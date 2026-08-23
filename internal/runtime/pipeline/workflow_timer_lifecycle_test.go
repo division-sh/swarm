@@ -149,6 +149,7 @@ func TestExecuteNodeHandlerPlan_DoesNotRunOtherNodeHandler(t *testing.T) {
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "waiting",
 		Fields:          map[string]any{"entity_id": entityID, "flow_path": runID, "instance_id": runID},
+		EntityType:      "test_entity",
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -238,6 +239,7 @@ func TestExecuteNodeHandlerPlan_PreservesRootStateForChildFlowTransitions(t *tes
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "ready",
 		Fields:          map[string]any{"entity_id": entityID, "flow_path": testPipelineRunID, "instance_id": testPipelineRunID},
+		EntityType:      "test_entity",
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -359,6 +361,7 @@ func TestPipelineIntercept_HandlesChildFlowOutputForRootListener(t *testing.T) {
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "ready",
 		Fields:          map[string]any{"entity_id": entityID, "flow_path": testPipelineRunID, "instance_id": testPipelineRunID},
+		EntityType:      "test_entity",
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -425,6 +428,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "idle",
 		Fields:          map[string]any{"entity_id": rootEntityID, "flow_path": bundle.WorkflowName(), "instance_id": bundle.WorkflowName()},
+		EntityType:      "test_entity",
 	})); err != nil {
 		t.Fatalf("seed root instance: %v", err)
 	}
@@ -439,6 +443,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 			"flow_path":        "child/inst-1",
 			"parent_entity_id": rootEntityID,
 		},
+		EntityType: "test_entity",
 	})); err != nil {
 		t.Fatalf("seed child instance: %v", err)
 	}
@@ -453,6 +458,7 @@ func TestPipelineCoordinatorIntercept_NestedDescendantCompletionDoesNotEmitChild
 			"flow_path":        "child/grandchild/inst-1",
 			"parent_entity_id": childEntityID,
 		},
+		EntityType: "test_entity",
 	})); err != nil {
 		t.Fatalf("seed grandchild instance: %v", err)
 	}
@@ -527,6 +533,7 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectDoesNotAuthorizeRo
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "idle",
+		EntityType:      "test_entity",
 	})); err != nil {
 		t.Fatalf("seed root instance: %v", err)
 	}
@@ -541,6 +548,7 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectDoesNotAuthorizeRo
 			"flow_path":        childFlowPath,
 			"parent_entity_id": rootEntityID,
 		},
+		EntityType: "test_entity",
 	})); err != nil {
 		t.Fatalf("seed child instance: %v", err)
 	}
@@ -621,6 +629,7 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectInsideOuterSQLTxDo
 		WorkflowName:    bundle.WorkflowName(),
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "idle",
+		EntityType:      "test_entity",
 	})); err != nil {
 		t.Fatalf("seed root instance: %v", err)
 	}
@@ -635,6 +644,7 @@ func TestPipelineCoordinatorIntercept_NestedPackageRootConnectInsideOuterSQLTxDo
 			"flow_path":        childFlowPath,
 			"parent_entity_id": rootEntityID,
 		},
+		EntityType: "test_entity",
 	})); err != nil {
 		t.Fatalf("seed child instance: %v", err)
 	}

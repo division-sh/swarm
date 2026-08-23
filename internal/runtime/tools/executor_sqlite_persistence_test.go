@@ -167,6 +167,57 @@ accounts:
 	}
 }
 
+func TestEntityTools_CreateEntityPersistsCanonicalEntityContractOnBothStores(t *testing.T) {
+	actor := models.AgentConfig{
+		ExecutionMode: "live",
+		ID:            "tester",
+		Type:          "internal",
+		Role:          "operator",
+		Tools:         []string{"create_entity", "get_entity"},
+	}
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			bundle := loadWave1EntityToolBundle(t, actor, "review", "account_record", "types: {}\n", "account_record:\n  status: text\n")
+			var entityStore runtimetools.EntityPersistence
+			var query string
+			if backend == "sqlite" {
+				selected := newSQLiteRuntimeToolStoreForTest(t)
+				ensureSQLiteEntityToolTestRun(t, selected)
+				entityStore = selected
+				query = `SELECT entity_type FROM entity_state WHERE run_id = ? AND entity_id = ?`
+			} else {
+				selected := newPostgresHumanTaskToolStoreForTest(t)
+				ensureEntityToolTestRun(t, storetest.DatabaseForTest(selected))
+				entityStore = selected
+				query = `SELECT entity_type FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`
+			}
+			ctx := runtimetools.WithActor(runtimecorrelation.WithRunID(unmanagedToolTestContext(), entityToolTestRunID), actor)
+			exec := runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
+				EntityStore: entityStore, WorkflowSource: semanticview.Wrap(bundle), AllowInternalLegacyEntityTools: true,
+			})
+			entityID := mustCreateEntityID(t, ctx, exec, map[string]any{
+				"flow_instance": "review/inst-1",
+				"fields":        map[string]any{"status": "open"},
+			})
+			var persistedType string
+			if err := storetest.DatabaseForTest(entityStore).QueryRowContext(ctx, query, entityToolTestRunID, entityID).Scan(&persistedType); err != nil {
+				t.Fatalf("load persisted entity contract: %v", err)
+			}
+			if persistedType != "account_record" {
+				t.Fatalf("persisted entity type = %q, want account_record", persistedType)
+			}
+			out, err := exec.Execute(ctx, "get_entity", map[string]any{"entity_id": entityID})
+			if err != nil {
+				t.Fatalf("get created entity: %v", err)
+			}
+			if got := strings.TrimSpace(out.(map[string]any)["entity_type"].(string)); got != "account_record" {
+				t.Fatalf("tool readback entity type = %q, want account_record", got)
+			}
+		})
+	}
+}
+
 func TestSQLiteEntityPersistence_MarshalsStructuredFilterValues(t *testing.T) {
 	sqliteStore := newSQLiteRuntimeToolStoreForTest(t)
 	ensureSQLiteEntityToolTestRun(t, sqliteStore)

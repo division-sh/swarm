@@ -2,10 +2,13 @@ package apiv1
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -133,21 +136,11 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromPostgres(t *testing.T
 
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	runID := "11111111-1111-1111-1111-111111111111"
+	ctx = runtimecorrelation.WithRunID(testAuthorActivityContext(ctx), runID)
 	entityA := "22222222-2222-2222-2222-222222222222"
 	entityB := "33333333-3333-3333-3333-333333333333"
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID})
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-		) VALUES
-			($1::uuid, $2::uuid, 'scoring/vertical-a', 'vertical', 'discovered',
-			 '{}'::jsonb, '{"vertical_name":"Healthcare"}'::jsonb, '{}'::jsonb, 1, now(), now(), now()),
-			($1::uuid, $3::uuid, 'scoring/vertical-b', 'vertical', 'pending',
-			 '{}'::jsonb, '{"vertical_name":"Manufacturing"}'::jsonb, '{}'::jsonb, 1, now(), now(), now())
-	`, runID, entityA, entityB); err != nil {
-		t.Fatalf("seed entity_state: %v", err)
-	}
+	createOperatorReadbackEntities(t, ctx, pg, runID, entityA, entityB, time.Now().UTC())
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
@@ -204,22 +197,12 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromSQLite(t *testing.T) 
 	ctx := context.Background()
 	sqliteStore := storetest.StartSQLiteRuntimeStore(t)
 	runID := "11111111-1111-1111-1111-111111111111"
+	ctx = runtimecorrelation.WithRunID(testAuthorActivityContext(ctx), runID)
 	entityA := "22222222-2222-2222-2222-222222222222"
 	entityB := "33333333-3333-3333-3333-333333333333"
 	now := time.Unix(1700000000, 0).UTC()
 	storetest.RequireSQLiteRun(t, ctx, storetest.DatabaseForTest(sqliteStore), storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now})
-	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-		) VALUES
-			(?, ?, 'scoring/vertical-a', 'vertical', 'discovered',
-			 '{}', '{"vertical_name":"Healthcare"}', '{}', 1, ?, ?, ?),
-			(?, ?, 'scoring/vertical-b', 'vertical', 'pending',
-			 '{}', '{"vertical_name":"Manufacturing"}', '{}', 1, ?, ?, ?)
-	`, runID, entityA, now, now, now, runID, entityB, now, now, now); err != nil {
-		t.Fatalf("seed sqlite entity_state: %v", err)
-	}
+	createOperatorReadbackEntities(t, ctx, sqliteStore, runID, entityA, entityB, now)
 	handler := testHandler(t, Options{
 		AuthTokens: []string{testToken},
 		Handlers: testOperatorHandlers(testOperatorCapabilities{
@@ -262,6 +245,26 @@ func TestOperatorEntityHandlersServeContractEntityTypesFromSQLite(t *testing.T) 
 		t.Fatalf("entity_type counts = %#v", typeCounts)
 	}
 
+}
+
+func createOperatorReadbackEntities(t *testing.T, ctx context.Context, selected runtimetools.EntityPersistence, runID, entityA, entityB string, at time.Time) {
+	t.Helper()
+	for _, record := range []runtimetools.EntityCreateRecord{
+		{
+			RunID: runID, EntityID: entityA, FlowInstance: "scoring/vertical-a", EntityType: "vertical",
+			CurrentState: "discovered", FieldsJSON: json.RawMessage(`{"vertical_name":"Healthcare"}`), CreatedAt: at,
+			Writer: runtimetools.EntityMutationWriter{Type: "platform", ID: "operator-readback-proof", HandlerStep: "create_entity"},
+		},
+		{
+			RunID: runID, EntityID: entityB, FlowInstance: "scoring/vertical-b", EntityType: "vertical",
+			CurrentState: "pending", FieldsJSON: json.RawMessage(`{"vertical_name":"Manufacturing"}`), CreatedAt: at,
+			Writer: runtimetools.EntityMutationWriter{Type: "platform", ID: "operator-readback-proof", HandlerStep: "create_entity"},
+		},
+	} {
+		if err := selected.CreateEntity(ctx, record); err != nil {
+			t.Fatalf("create materialized entity %s: %v", record.EntityID, err)
+		}
+	}
 }
 
 func TestOperatorEntityHandlersTypedErrors(t *testing.T) {

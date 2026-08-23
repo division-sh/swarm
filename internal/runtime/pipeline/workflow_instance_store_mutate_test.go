@@ -55,6 +55,7 @@ func TestWorkflowEngineCompleteCarrierPreservesBookkeepingOnBothStores(t *testin
 				EnteredStageAt: time.Now().UTC(), Fields: map[string]any{"status": "before"},
 				Bookkeeping: map[string]any{}, Gates: map[string]bool{"ready": true},
 				StateBuckets: map[string]any{"join": map[string]any{"count": float64(1)}},
+				EntityType:   "test_entity",
 			})
 			if err := store.create(ctx, instance); err != nil {
 				t.Fatalf("create workflow instance: %v", err)
@@ -219,6 +220,7 @@ func TestWorkflowInstanceStoreAddressesRowsOnlyByExactRouteOnBothStores(t *testi
 						CurrentState:    "active",
 						EnteredStageAt:  time.Now().UTC(),
 						Fields:          map[string]any{},
+						EntityType:      "test_entity",
 					})); err != nil {
 						t.Fatalf("create workflow instance: %v", err)
 					}
@@ -422,6 +424,7 @@ func TestWorkflowInstanceStoreMutate_IgnoresSchedulerOwnedTimerRows(t *testing.T
 		CurrentState:    "queued",
 		Fields:          map[string]any{},
 		StateBuckets:    map[string]any{},
+		EntityType:      "test_entity",
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -480,6 +483,7 @@ func seedWorkflowInstanceForMutationTest(t *testing.T, store *workflowInstanceSt
 		CurrentState:    "queued",
 		Fields:          map[string]any{},
 		StateBuckets:    map[string]any{},
+		EntityType:      "test_entity",
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}

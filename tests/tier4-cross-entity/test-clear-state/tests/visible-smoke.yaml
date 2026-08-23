@@ -2,7 +2,7 @@ name: test-clear-state setup visible smoke
 setup:
   entities:
   - as: entity
-    type: default
+    type: test_entity
 steps:
 - publish: state.clear_requested
   payload: {}

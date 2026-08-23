@@ -55,7 +55,8 @@ func TestWorkflowInitialMaterializationRejectsUnownedLifecycleEmissions(t *testi
 	instance := WorkflowInstance{
 		InstanceID: "inst-1", StorageRef: "review/inst-1", WorkflowName: "review",
 		WorkflowVersion: "1.0.0", CurrentState: "pending",
-		Fields: map[string]any{},
+		Fields:     map[string]any{},
+		EntityType: "test_entity",
 	}
 	if _, err := store.MaterializeInitialEntry(ctx, instance, time.Date(2026, time.July, 29, 12, 0, 0, 0, time.UTC)); err == nil {
 		t.Fatal("initial materialization accepted lifecycle emissions outside its atomic commit")
@@ -157,6 +158,7 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 					"priority": 2,
 					"routing":  map[string]any{"shards": []any{1, 4}},
 				},
+				EntityType: "test_entity",
 			}
 
 			first, err := store.MaterializeInitialEntry(ctx, instance, occurredAt)
@@ -226,6 +228,16 @@ func TestWorkflowInitialMaterializationReportsExactReplayWithoutReapplyingEffect
 			} else if failure, ok := runtimefailures.As(err); !ok || failure.Failure.Class != runtimefailures.ClassConflictingDuplicate {
 				t.Fatalf("conflicting replay failure = %#v, want conflicting duplicate", failure)
 			}
+			contractConflict := instance
+			contractConflict.EntityType = "different_entity_contract"
+			if _, err := store.MaterializeInitialEntry(ctx, contractConflict, occurredAt); err == nil {
+				t.Fatal("conflicting entity contract replay succeeded")
+			} else if failure, ok := runtimefailures.As(err); !ok || failure.Failure.Class != runtimefailures.ClassConflictingDuplicate {
+				t.Fatalf("conflicting entity contract replay failure = %#v, want conflicting duplicate", failure)
+			}
+			if owner.effects != 1 {
+				t.Fatalf("conflicting entity contract replay reapplied effects: %d", owner.effects)
+			}
 
 			deleteEntityQuery := `DELETE FROM entity_state WHERE run_id = ? AND flow_instance = ?`
 			if !store.isSQLite() {
@@ -277,6 +289,7 @@ func TestWorkflowInitialMaterializationConcurrentExactReplayPostgres(t *testing.
 			CurrentState:    "pending",
 			Config:          map[string]any{"attempt_limit": 3},
 			Fields:          map[string]any{},
+			EntityType:      "test_entity",
 		}
 	}
 
@@ -455,9 +468,10 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			instance := WorkflowInstance{
 				InstanceID: "inst-1", StorageRef: "review/inst-1", WorkflowName: "review",
 				WorkflowVersion: "1.0.0", RuntimeReadiness: &plan, CurrentState: "pending",
-				Config:   map[string]any{"name": "alpha"},
-				EntityID: plan.Identity.EntityID,
-				Fields:   map[string]any{},
+				Config:     map[string]any{"name": "alpha"},
+				EntityID:   plan.Identity.EntityID,
+				Fields:     map[string]any{},
+				EntityType: "test_entity",
 			}
 
 			result, err := store.MaterializeInitialEntry(ctx, instance, occurredAt)
@@ -810,6 +824,7 @@ func TestCreateFlowInstancePreservesMockAuthorityInInitialStageTimers(t *testing
 				WorkflowVersion: "1.0.0",
 				CurrentState:    "awaiting_review",
 				Fields:          map[string]any{},
+				EntityType:      "test_entity",
 			}, req.OccurredAt)
 			return err
 		},
@@ -1386,6 +1401,7 @@ flows:
     flow: operating
     mode: template
 `,
+		"flows/operating/entities.yaml": "test_entity: {}\n",
 		"flows/operating/schema.yaml": `name: operating
 initial_state: initializing
 terminal_states: [ready]
@@ -1445,6 +1461,7 @@ opco.ceo_ready:
 	if err := pc.workflowStore.upsert(testPipelineCoordinatorRunContext(t, pc), materializedWorkflowInstanceForTest(WorkflowInstance{
 		InstanceID: "inst-1", StorageRef: "operating/inst-1", EntityID: "11111111-1111-1111-1111-111111111111",
 		WorkflowName: "operating", WorkflowVersion: "1.0.0", CurrentState: "initializing", Fields: map[string]any{},
+		EntityType: "test_entity",
 	})); err != nil {
 		t.Fatalf("seed exact selected template owner: %v", err)
 	}
@@ -1473,6 +1490,7 @@ flows:
     flow: operating
     mode: template
 `,
+		"flows/operating/entities.yaml": "test_entity: {}\n",
 		"flows/operating/schema.yaml": `name: operating
 initial_state: initializing
 terminal_states: [ready]
@@ -1539,6 +1557,7 @@ states: [initializing, ready]
 		CurrentState:    "initializing",
 		Fields:          map[string]any{},
 		StateBuckets:    map[string]any{},
+		EntityType:      "test_entity",
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}

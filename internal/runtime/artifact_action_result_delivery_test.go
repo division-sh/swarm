@@ -321,6 +321,7 @@ func artifactActionResultWorkflowInstance() runtimepipeline.WorkflowInstance {
 		EnteredStageAt:  enteredAt,
 		CreatedAt:       enteredAt,
 		Fields:          fields,
+		EntityType:      "test_entity",
 	}
 }
 
@@ -497,6 +498,7 @@ initial_state: ready
 terminal_states: [done]
 states: [ready, done]
 `,
+		"flows/repo-scaffold/entities.yaml": "test_entity: {}\n",
 		"flows/repo-scaffold/types.yaml": `types:
   ArtifactProvenance:
     artifact_type: text

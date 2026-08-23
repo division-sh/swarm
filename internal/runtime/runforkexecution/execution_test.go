@@ -135,6 +135,7 @@ func TestExecuteSelectedContractRunForkRejectsDeferredWorkBeforeMutation(t *test
 				sourceEventID,
 				test.eventName,
 				at,
+				"test_entity",
 				selectedExecutionTestAgentRoute(t, "source-agent-that-must-not-route", "flow-a/1"),
 				nil,
 			)
@@ -307,6 +308,7 @@ func TestActivateSelectedContractRunForkRejectsDeferredWorkBeforeExecutableMutat
 					sourceEventID,
 					test.eventName,
 					at,
+					"test_entity",
 					selectedExecutionTestAgentRoute(t, "source-agent-that-must-not-route", "flow-a/1"),
 					nil,
 					loaded.BundleSourceFact,
@@ -520,6 +522,7 @@ func TestExecuteSelectedContractRunForkWritesForkLocalExecutionAndLineage(t *tes
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002200, 0).UTC()
 	seedSelectedExecutionSourceRunWithPrimaryRouteAndMode(t, db, sourceRunID, entityID, sourceEventID, "item.received", at,
+		"test_entity",
 		executionmode.Mock,
 		selectedExecutionEntitylessNodeRoute("source-only-node"), nil, loaded.BundleSourceFact)
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
@@ -750,6 +753,7 @@ func TestExecuteSelectedContractRunForkAdmitsExactSourceModeBeforeMaterializatio
 		sourceEventID,
 		"item.received",
 		at,
+		"test_entity",
 		executionmode.Live,
 		selectedExecutionEntitylessNodeRoute("source-only-node"),
 		nil,
@@ -1020,7 +1024,7 @@ func TestExecuteSelectedContractRunForkLoadsDBBackedSourceAndStampsPersistedIden
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002202, 0).UTC()
-	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at)
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at, "test_entity")
 	persistedSource, err := runtimecorrelation.NewPersistedBundleSourceFact(projection.BundleHash)
 	if err != nil {
 		t.Fatalf("construct persisted source run bundle identity: %v", err)
@@ -1106,7 +1110,7 @@ func TestExecuteSelectedContractRunForkDispatchesSourceEventsInPersistedChronolo
 	laterEventID := "00000000-0000-4000-8000-000000000001"
 	earlierAt := time.Unix(1700002201, 0).UTC()
 	laterAt := earlierAt.Add(time.Second)
-	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, earlierEventID, "item.received", earlierAt, loaded.BundleSourceFact)
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, earlierEventID, "item.received", earlierAt, "test_entity", loaded.BundleSourceFact)
 	payload, _ := json.Marshal(map[string]any{"entity_id": entityID})
 	laterEvent := eventtest.PersistedChildForProducer(laterEventID, events.EventType("item.received"),
 		eventtest.Producer(events.EventProducerNode, "source-node"), "", payload, 0, sourceRunID, earlierEventID,
@@ -1150,7 +1154,7 @@ func TestExecuteSelectedContractRunForkFailsClosedBeforeMaterializationForAgentR
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002201, 0).UTC()
-	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at, loaded.BundleSourceFact)
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at, "test_entity", loaded.BundleSourceFact)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
@@ -1205,7 +1209,7 @@ func TestExecuteSelectedContractRunForkMaterializesAndExecutesForkLocalAgentRunt
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002202, 0).UTC()
-	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at, loaded.BundleSourceFact)
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at, "test_entity", loaded.BundleSourceFact)
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
@@ -1494,7 +1498,7 @@ func TestSelectedContractForkProviderTurnsUseCanonicalExecutionFrames(t *testing
 			entityID := uuid.NewString()
 			sourceEventID := uuid.NewString()
 			at := time.Unix(1700002203, 0).UTC()
-			seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at, loaded.BundleSourceFact)
+			seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at, "test_entity", loaded.BundleSourceFact)
 			seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 			captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 			result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
@@ -1867,7 +1871,7 @@ fi
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002303, 0).UTC()
-	seedSelectedExecutionRootSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at, loaded.BundleSourceFact)
+	seedSelectedExecutionRootSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at, "test_entity", loaded.BundleSourceFact)
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
@@ -2559,7 +2563,7 @@ func TestExecuteSelectedContractRunForkProviderFailurePreservesEvidenceThroughCl
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002403, 0).UTC()
-	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at, loaded.BundleSourceFact)
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "task.assigned", at, "test_entity", loaded.BundleSourceFact)
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
@@ -3036,7 +3040,7 @@ func TestExecuteSelectedContractRunForkTreatsDiagnosticPlatformOutcomeAsLineage(
 	sourceEventID := uuid.NewString()
 	diagnosticEventID := uuid.NewString()
 	at := time.Unix(1700002215, 0).UTC()
-	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at, loaded.BundleSourceFact)
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at, "test_entity", loaded.BundleSourceFact)
 	seedSelectedExecutionDiagnosticPlatformDeadLetter(t, db, sourceRunID, diagnosticEventID, at.Add(-time.Second))
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
@@ -3129,6 +3133,7 @@ func TestActivateSelectedContractRunForkExecutesReplayReadyContractSwapThroughSe
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002600, 0).UTC()
 	seedSelectedExecutionSourceRunWithPrimaryRoute(t, db, sourceRunID, entityID, sourceEventID, "item.received", at,
+		"test_entity",
 		selectedExecutionTestAgentRoute(t, "source-agent-that-must-not-route", "flow-a/1"), nil, loaded.BundleSourceFact)
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
@@ -3239,6 +3244,7 @@ func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMar
 	afterEventID := uuid.NewString()
 	at := time.Unix(1700002605, 0).UTC()
 	seedSelectedExecutionSourceRunWithPrimaryRoute(t, db, sourceRunID, entityID, sourceEventID, "item.received", at,
+		"test_entity",
 		selectedExecutionTestAgentRoute(t, "source-agent-that-must-not-route", "flow-a/1"), nil, loaded.BundleSourceFact)
 	seedSourceOutcomeThatMustNotSuppressFork(t, db, sourceEventID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
@@ -3290,7 +3296,7 @@ func TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage(
 	auditID := uuid.NewString()
 	turnID := uuid.NewString()
 	at := time.Unix(1700002300, 0).UTC()
-	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at, loaded.BundleSourceFact)
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at, "test_entity", loaded.BundleSourceFact)
 	agentIdentity := selectedContractTestAgentIdentity(t, "agent-a", "flow-a/1")
 	agentFields := selectedExecutionTestAgentFields(t, agentIdentity)
 	seedSelectedExecutionTestAgent(t, ctx, pg, agentIdentity, at)
@@ -3409,7 +3415,7 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 	at := time.Unix(1700002303, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
 	agentRoute := selectedExecutionTestAgentRoute(t, "validation-coordinator", "flow-a/1")
-	sourceEvent := seedSelectedExecutionSourceRunWithRoutes(t, db, sourceRunID, entityID, sourceEventID, "item.received", at, []events.DeliveryRoute{agentRoute}, loaded.BundleSourceFact)
+	sourceEvent := seedSelectedExecutionSourceRunWithRoutes(t, db, sourceRunID, entityID, sourceEventID, "item.received", at, "test_entity", []events.DeliveryRoute{agentRoute}, loaded.BundleSourceFact)
 	agentIdentity := agentRoute.AgentIdentity
 	agentFields := selectedExecutionTestAgentFields(t, agentIdentity)
 	seedSelectedExecutionTestAgent(t, ctx, pg, agentIdentity, at)
@@ -3552,7 +3558,7 @@ func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBra
 	turnID := uuid.NewString()
 	at := time.Unix(1700002305, 0).UTC()
 	after := at.Add(time.Minute)
-	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at, loaded.BundleSourceFact)
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at, "test_entity", loaded.BundleSourceFact)
 	agentIdentity := selectedContractTestAgentIdentity(t, "agent-a", "flow-a/1")
 	agentFields := selectedExecutionTestAgentFields(t, agentIdentity)
 	seedSelectedExecutionTestAgent(t, ctx, pg, agentIdentity, at)
@@ -3686,7 +3692,7 @@ func TestExecuteSelectedContractRunForkTreatsSourceReplayScopeMarkerAsLineage(t 
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002315, 0).UTC()
-	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at, loaded.BundleSourceFact)
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at, "test_entity", loaded.BundleSourceFact)
 	seedSelectedExecutionSourceReplayScopeMarker(t, db, sourceRunID, sourceEventID, "replay_scope_subscribed", at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
@@ -3757,7 +3763,7 @@ func TestExecuteSelectedContractRunForkRejectsSameEventReplayScopeWriteSkew(t *t
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002320, 0).UTC()
-	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at, loaded.BundleSourceFact)
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at, "test_entity", loaded.BundleSourceFact)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 	if _, err := db.ExecContext(ctx, `
 		CREATE OR REPLACE FUNCTION seed_conflicting_replay_scope_after_event_insert()
@@ -3817,7 +3823,7 @@ func TestExecuteSelectedContractRunForkRejectsUnresolvedFrontierBeforeMaterializ
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002325, 0).UTC()
-	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "ghost.event", at, loaded.BundleSourceFact)
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "ghost.event", at, "test_entity", loaded.BundleSourceFact)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
@@ -3882,7 +3888,7 @@ func TestExecuteSelectedContractRunForkCleansUpBeforeActivationOnPublishFailure(
 	entityID := uuid.NewString()
 	sourceEventID := uuid.NewString()
 	at := time.Unix(1700002335, 0).UTC()
-	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at, loaded.BundleSourceFact)
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at, "test_entity", loaded.BundleSourceFact)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
@@ -3935,7 +3941,7 @@ func TestExecuteSelectedContractRunForkBranchesWhenNonReplaySourceFactsAdvancedA
 	sourceEventID := uuid.NewString()
 	afterEventID := uuid.NewString()
 	at := time.Unix(1700002350, 0).UTC()
-	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at, loaded.BundleSourceFact)
+	seedSelectedExecutionSourceRun(t, db, sourceRunID, entityID, sourceEventID, "item.received", at, "test_entity", loaded.BundleSourceFact)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 	seedSelectedExecutionDiagnosticPlatformDeadLetter(t, db, sourceRunID, afterEventID, at.Add(time.Second))
 	if _, _, err := storetest.TerminalizeRun(ctx, pg, storerunlifecycle.TerminalRequest{
@@ -4625,9 +4631,10 @@ func seedSelectedExecutionSourceRun(
 	db *sql.DB,
 	sourceRunID, entityID, sourceEventID, eventName string,
 	at time.Time,
+	entityType string,
 	sourceFacts ...runtimecorrelation.BundleSourceFact,
 ) {
-	seedSelectedExecutionSourceRunWithRoutes(t, db, sourceRunID, entityID, sourceEventID, eventName, at, nil, sourceFacts...)
+	seedSelectedExecutionSourceRunWithRoutes(t, db, sourceRunID, entityID, sourceEventID, eventName, at, entityType, nil, sourceFacts...)
 }
 
 func selectedExecutionTestAgentRoute(t testing.TB, agentID, flowInstance string) events.DeliveryRoute {
@@ -4711,10 +4718,11 @@ func seedSelectedExecutionSourceRunWithRoutes(
 	db *sql.DB,
 	sourceRunID, entityID, sourceEventID, eventName string,
 	at time.Time,
+	entityType string,
 	extraRoutes []events.DeliveryRoute,
 	sourceFacts ...runtimecorrelation.BundleSourceFact,
 ) events.Event {
-	return seedSelectedExecutionSourceRunWithPrimaryRoute(t, db, sourceRunID, entityID, sourceEventID, eventName, at,
+	return seedSelectedExecutionSourceRunWithPrimaryRoute(t, db, sourceRunID, entityID, sourceEventID, eventName, at, entityType,
 		selectedExecutionEntitylessNodeRoute("test-node"), extraRoutes, sourceFacts...)
 }
 
@@ -4732,6 +4740,7 @@ func seedSelectedExecutionRootSourceRun(
 	db *sql.DB,
 	sourceRunID, entityID, sourceEventID, eventName string,
 	at time.Time,
+	entityType string,
 	sourceFacts ...runtimecorrelation.BundleSourceFact,
 ) events.Event {
 	agentRoute := selectedExecutionTestAgentRoute(t, "test-agent", "worker")
@@ -4739,7 +4748,7 @@ func seedSelectedExecutionRootSourceRun(
 		FlowID: "worker", FlowInstance: "worker", EntityID: entityID,
 	})
 	event := seedSelectedExecutionSourceRunWithPrimaryRouteAndSource(
-		t, db, sourceRunID, entityID, sourceEventID, eventName, at,
+		t, db, sourceRunID, entityID, sourceEventID, eventName, at, entityType,
 		agentRoute, nil,
 		eventtest.RootRoutingSource(entityID), events.EventEnvelope{Scope: events.EventScopeGlobal}, sourceFacts...,
 	)
@@ -4758,6 +4767,7 @@ func seedSelectedExecutionSourceRunWithPrimaryRoute(
 	db *sql.DB,
 	sourceRunID, entityID, sourceEventID, eventName string,
 	at time.Time,
+	entityType string,
 	primaryRoute events.DeliveryRoute,
 	extraRoutes []events.DeliveryRoute,
 	sourceFacts ...runtimecorrelation.BundleSourceFact,
@@ -4765,7 +4775,7 @@ func seedSelectedExecutionSourceRunWithPrimaryRoute(
 	routingSource := eventtest.ConcreteTemplateRoutingSource("flow_a", "flow-a/1", entityID)
 	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1")
 	return seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
-		t, db, sourceRunID, entityID, sourceEventID, eventName, at,
+		t, db, sourceRunID, entityID, sourceEventID, eventName, at, entityType,
 		executionmode.Live, primaryRoute, extraRoutes, routingSource, envelope, sourceFacts...,
 	)
 }
@@ -4775,6 +4785,7 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteAndMode(
 	db *sql.DB,
 	sourceRunID, entityID, sourceEventID, eventName string,
 	at time.Time,
+	entityType string,
 	mode executionmode.Mode,
 	primaryRoute events.DeliveryRoute,
 	extraRoutes []events.DeliveryRoute,
@@ -4783,7 +4794,7 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteAndMode(
 	routingSource := eventtest.ConcreteTemplateRoutingSource("flow_a", "flow-a/1", entityID)
 	envelope := events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow-a/1")
 	return seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
-		t, db, sourceRunID, entityID, sourceEventID, eventName, at,
+		t, db, sourceRunID, entityID, sourceEventID, eventName, at, entityType,
 		mode, primaryRoute, extraRoutes, routingSource, envelope, sourceFacts...,
 	)
 }
@@ -4793,6 +4804,7 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteAndSource(
 	db *sql.DB,
 	sourceRunID, entityID, sourceEventID, eventName string,
 	at time.Time,
+	entityType string,
 	primaryRoute events.DeliveryRoute,
 	extraRoutes []events.DeliveryRoute,
 	routingSource events.RoutingSource,
@@ -4800,7 +4812,7 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteAndSource(
 	sourceFacts ...runtimecorrelation.BundleSourceFact,
 ) events.Event {
 	return seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
-		t, db, sourceRunID, entityID, sourceEventID, eventName, at,
+		t, db, sourceRunID, entityID, sourceEventID, eventName, at, entityType,
 		executionmode.Live, primaryRoute, extraRoutes, routingSource, envelope, sourceFacts...,
 	)
 }
@@ -4810,6 +4822,7 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 	db *sql.DB,
 	sourceRunID, entityID, sourceEventID, eventName string,
 	at time.Time,
+	entityType string,
 	mode executionmode.Mode,
 	primaryRoute events.DeliveryRoute,
 	extraRoutes []events.DeliveryRoute,
@@ -4818,6 +4831,10 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 	sourceFacts ...runtimecorrelation.BundleSourceFact,
 ) events.Event {
 	t.Helper()
+	entityType = strings.TrimSpace(entityType)
+	if entityType == "" {
+		t.Fatal("selected-execution source fixture requires an exact entity type")
+	}
 	ctx := runForkTestContext(t)
 	sourceFact := testEphemeralBundleSourceFact(runForkTestBundleHash)
 	if len(sourceFacts) > 0 {
@@ -4853,11 +4870,11 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 			entered_state_at, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, 'flow-a/1', 'default', 'Selected Execution Entity',
+			$1::uuid, $2::uuid, 'flow-a/1', $3, 'Selected Execution Entity',
 			'pending', '{}'::jsonb, '{"name":"Selected Execution Entity"}'::jsonb, '{}'::jsonb, 1,
-			$3, $3, $3
+			$4, $4, $4
 		)
-	`, sourceRunID, entityID, at); err != nil {
+	`, sourceRunID, entityID, entityType, at); err != nil {
 		t.Fatalf("seed source entity_state: %v", err)
 	}
 	return event

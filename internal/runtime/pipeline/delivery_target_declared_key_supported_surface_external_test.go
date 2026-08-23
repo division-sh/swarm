@@ -3,6 +3,8 @@ package pipeline_test
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -80,11 +82,13 @@ func TestTargetedDeclaredKeyAgreementAndConflictExecuteThroughDurableEventBusOnB
 							InstanceID: exactRoute.InstanceID, StorageRef: exactPath, EntityID: exactEntityID,
 							WorkflowName: "review", WorkflowVersion: "1", Mode: "template", CurrentState: "active",
 							EnteredStageAt: createdAt, CreatedAt: createdAt, Fields: map[string]any{"account_id": exactKey, "owner": "exact"},
+							EntityType: "review_entity",
 						},
 						{
 							InstanceID: competingRoute.InstanceID, StorageRef: competingPath, EntityID: competingEntityID,
 							WorkflowName: "review", WorkflowVersion: "1", Mode: "template", CurrentState: "active",
 							EnteredStageAt: createdAt, CreatedAt: createdAt, Fields: map[string]any{"account_id": payloadKey, "owner": "competing"},
+							EntityType: "review_entity",
 						},
 					} {
 						readiness := runtimepipeline.DynamicFlowRuntimeReadinessPlan{
@@ -223,9 +227,39 @@ func targetedDeclaredKeyExecutionSource(t *testing.T, acquisition string) (seman
 		FlowTree:    runtimeflowmodelTree(root),
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"review": flow.Schema},
 	}
+	bundle = admitTargetedDeclaredKeyContract(t, bundle)
 	source := semanticview.Wrap(bundle)
 	node := externalPipelineSourceNode(t, source, "review", "key-consumer")
 	return source, node
+}
+
+func admitTargetedDeclaredKeyContract(t *testing.T, base *runtimecontracts.WorkflowContractBundle) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	root := t.TempDir()
+	files := map[string]string{
+		"package.yaml":               "name: declared-key-execution\nversion: \"1\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n  - id: review\n    flow: review\n    mode: template\n",
+		"schema.yaml":                "name: declared-key-execution\n",
+		"flows/review/schema.yaml":   "name: review\nmode: template\ninitial_state: active\nstates: [active, done]\n",
+		"flows/review/entities.yaml": "review_entity: {}\n",
+	}
+	for relative, body := range files {
+		path := filepath.Join(root, relative)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("create declared-key contract directory: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatalf("write declared-key contract: %v", err)
+		}
+	}
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	admitted, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("load declared-key contract: %v", err)
+	}
+	admitted.Semantics = base.Semantics
+	admitted.FlowTree = base.FlowTree
+	admitted.FlowSchemas = base.FlowSchemas
+	return admitted
 }
 
 func runtimeflowmodelTree(root runtimecontracts.FlowContractView) flowmodel.Tree[runtimecontracts.FlowContractView] {

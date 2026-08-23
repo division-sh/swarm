@@ -74,7 +74,7 @@ func TestOperatorRunCompletionSystemNodeFlowConvergesSupportedSurfaces(t *testin
 	assertPipelineReceiptSucceeded(t, db, eventID)
 	assertSystemNodeOutcomePersisted(t, db, eventID, pipelineNodeID)
 	assertSystemNodeDeliverySettled(t, db, eventID, pipelineNodeID)
-	assertFlowEntityTerminal(t, db, runID, runtimepipeline.FlowInstanceEntityID("discovery"), "discovery", "done")
+	assertFlowEntityTerminal(t, db, runID, runtimepipeline.FlowInstanceEntityID("discovery"), "discovery", "discovery", "done")
 
 	diagnose := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"diagnose","method":"run.diagnose","params":{"run_id":%q}}`, runID))
 	if diagnose.Error != nil {
@@ -296,17 +296,20 @@ func assertPipelineReceiptSucceeded(t *testing.T, db *sql.DB, eventID string) {
 	}
 }
 
-func assertFlowEntityTerminal(t *testing.T, db *sql.DB, runID, entityID, flowInstance, wantState string) {
+func assertFlowEntityTerminal(t *testing.T, db *sql.DB, runID, entityID, flowInstance, wantEntityType, wantState string) {
 	t.Helper()
-	var state string
+	var entityType, state string
 	if err := db.QueryRow(`
-		SELECT COALESCE(current_state, '')
+		SELECT entity_type, COALESCE(current_state, '')
 		FROM entity_state
 		WHERE run_id = $1::uuid
 		  AND entity_id = $2::uuid
 		  AND flow_instance = $3
-	`, runID, entityID, flowInstance).Scan(&state); err != nil {
+	`, runID, entityID, flowInstance).Scan(&entityType, &state); err != nil {
 		t.Fatalf("load flow entity terminal state: %v", err)
+	}
+	if entityType != wantEntityType {
+		t.Fatalf("flow entity entity_type = %q, want %q", entityType, wantEntityType)
 	}
 	if state != wantState {
 		t.Fatalf("flow entity current_state = %q, want %q", state, wantState)
@@ -362,6 +365,9 @@ pins:
   inputs:
     events:
       - flow.started
+`)
+	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "discovery", "entities.yaml"), `
+discovery: {}
 `)
 	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "discovery", "events.yaml"), `
 flow.started:

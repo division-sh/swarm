@@ -7,5 +7,5 @@ expect:
   events:
     include: [worker/worker-001/auto.started, worker/auto.processed]
   entities:
-    - type: default
+    - type: test_entity
       current_state: spawned

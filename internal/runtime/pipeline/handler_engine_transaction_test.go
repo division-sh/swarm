@@ -114,7 +114,8 @@ type recordingPipelineBus struct {
 
 func handlerEngineProjectNodeModule() *previewWorkflowModule {
 	return &previewWorkflowModule{bundle: &runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{Name: "handler-engine-test"},
+		Semantics:    runtimecontracts.WorkflowSemanticView{Name: "handler-engine-test"},
+		RootEntities: testEntityContractsForType("test_entity"),
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"node-a": {ID: "node-a", ExecutionType: "system_node"},
 		},
@@ -699,6 +700,7 @@ func TestExecuteNodeContractHandlerRejectsEmitWhenPersistencePrerequisiteFieldIs
 		WorkflowVersion: "v-test",
 		CurrentState:    "researching",
 		Fields:          map[string]any{},
+		EntityType:      "test_entity",
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -764,6 +766,7 @@ func TestExecuteNodeContractHandlerPublishesAfterPersistencePrerequisiteFieldSuc
 		WorkflowVersion: "v-test",
 		CurrentState:    "researching",
 		Fields:          map[string]any{},
+		EntityType:      "test_entity",
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -827,6 +830,7 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 
 	pc := newPostgresPipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{bundle: &runtimecontracts.WorkflowContractBundle{
+			RootEntities: testEntityContractsForType("test_entity"),
 			Nodes: map[string]runtimecontracts.SystemNodeContract{
 				"node-a": {ID: "node-a", ExecutionType: "system_node"},
 			},
@@ -855,6 +859,7 @@ func TestExecuteNodeContractHandlerPersistsArithmeticDataAccumulationExpression(
 		WorkflowVersion: "v-test",
 		CurrentState:    "queued",
 		Fields:          map[string]any{"revision_count": 0},
+		EntityType:      "test_entity",
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -903,6 +908,7 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 
 	pc := newPostgresPipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{bundle: &runtimecontracts.WorkflowContractBundle{
+			RootEntities: testEntityContractsForType("test_entity"),
 			Nodes: map[string]runtimecontracts.SystemNodeContract{
 				"node-a": {ID: "node-a", ExecutionType: "system_node"},
 			},
@@ -931,6 +937,7 @@ func TestExecuteNodeContractHandlerFailsClosedOnDataAccumulationCELRuntimeError(
 		WorkflowVersion: "v-test",
 		CurrentState:    "queued",
 		Fields:          map[string]any{},
+		EntityType:      "test_entity",
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -973,6 +980,7 @@ func TestExecuteNodeContractHandlerPersistsNullPresenceCheckDataAccumulationExpr
 
 	pc := newPostgresPipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{bundle: &runtimecontracts.WorkflowContractBundle{
+			RootEntities: testEntityContractsForType("test_entity"),
 			Nodes: map[string]runtimecontracts.SystemNodeContract{
 				"node-a": {ID: "node-a", ExecutionType: "system_node"},
 			},
@@ -1002,6 +1010,7 @@ func TestExecuteNodeContractHandlerPersistsNullPresenceCheckDataAccumulationExpr
 		WorkflowVersion: "v-test",
 		CurrentState:    "queued",
 		Fields:          map[string]any{},
+		EntityType:      "test_entity",
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -1088,6 +1097,7 @@ func TestResolveHandlerEntityIDForFlowKeepsSameFlowEntity(t *testing.T) {
 func newEmitPersistenceTestCoordinator(db *sql.DB) (*PipelineCoordinator, *recordingPipelineBus) {
 	bus := &recordingPipelineBus{}
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootEntities: testEntityContractsForType("test_entity"),
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"node-a": {ID: "node-a", ExecutionType: "system_node"},
 		},
@@ -1428,8 +1438,12 @@ func TestHandlerExecutionStateSnapshotCreateEntityIncludesInitialStateAndDefault
 func TestResolveHandlerEntityIDForFlowCreateEntityDoesNotSeedSubjectID(t *testing.T) {
 	handler := runtimecontracts.SystemNodeEventHandler{CreateEntity: true}
 	state := WorkflowState{}
+	source := semanticview.Wrap(admitSyntheticEntityContractsForTest(t, &runtimecontracts.WorkflowContractBundle{}, "", map[string]string{"scoring": "scoring_entity"}))
 
-	gotID, _, _ := resolveHandlerEntityIDForFlow(nil, "scoring", handler, "", handlerTestRootIngress("", events.EventType("vertical.discovered"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), &state)
+	gotID, _, err := resolveHandlerEntityIDForFlow(source, "scoring", handler, "", handlerTestRootIngress("", events.EventType("vertical.discovered"), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}), &state)
+	if err != nil {
+		t.Fatalf("resolve handler entity identity: %v", err)
+	}
 
 	if want := FlowInstanceEntityID("scoring/scoring"); gotID != want {
 		t.Fatalf("entityID = %q, want canonical flow primary %q", gotID, want)
@@ -1688,6 +1702,7 @@ func seedQueryEntitiesGuardInstance(t *testing.T, store *workflowInstanceStore, 
 		WorkflowVersion: "1.0.0",
 		CurrentState:    "queued",
 		Fields:          map[string]any{"request_id": requestID},
+		EntityType:      "test_entity",
 	})); err != nil {
 		t.Fatalf("seed query_entities guard instance %s: %v", entityID, err)
 	}
@@ -2275,6 +2290,7 @@ func TestExecuteNodeHandlerPlanResult_NestedPackageRootConnectDoesNotAuthorizeRe
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "waiting",
 		Fields:          map[string]any{},
+		EntityType:      "test_entity",
 	})); err != nil {
 		t.Fatalf("seed child instance: %v", err)
 	}
@@ -2287,6 +2303,7 @@ func TestExecuteNodeHandlerPlanResult_NestedPackageRootConnectDoesNotAuthorizeRe
 		WorkflowVersion: bundle.WorkflowVersion(),
 		CurrentState:    "finished",
 		Fields:          map[string]any{},
+		EntityType:      "test_entity",
 	})); err != nil {
 		t.Fatalf("seed grandchild instance: %v", err)
 	}

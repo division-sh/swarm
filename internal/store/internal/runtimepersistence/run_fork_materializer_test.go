@@ -142,7 +142,7 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 			entered_state_at, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, 'flow-a/1', 'default', 'before-slug', 'Before Name',
+			$1::uuid, $2::uuid, 'flow-a/1', 'historical_entity', 'before-slug', 'Before Name',
 				'queued', '{"review": true}'::jsonb,
 				'{"title":"before-title","slug":"before-slug","name":"Before Name","gates":{"review":"authored-review"},"accumulator":{"total":"authored-total"},"bookkeeping":{"activation":"manual"}}'::jsonb,
 				'{"activation":"standing"}'::jsonb, '{"total":7}'::jsonb, 1,
@@ -320,8 +320,8 @@ func TestRunForkMaterializer_CreatesPausedForkRunAndSnapshotWithoutResuming(t *t
 	`, result.ForkRunID, entityID).Scan(&forkFlow, &forkType, &forkSlug, &forkName); err != nil {
 		t.Fatalf("load fork display metadata: %v", err)
 	}
-	if forkFlow != "flow-a/1" || forkType != "default" {
-		t.Fatalf("fork owner metadata = flow:%s type:%s, want flow-a/1/default", forkFlow, forkType)
+	if forkFlow != "flow-a/1" || forkType != "historical_entity" {
+		t.Fatalf("fork owner metadata = flow:%s type:%s, want flow-a/1/historical_entity", forkFlow, forkType)
 	}
 	if forkSlug != "before-slug" || forkName != "Before Name" {
 		t.Fatalf("fork display metadata = %s/%s, want before-slug/Before Name", forkSlug, forkName)
@@ -712,6 +712,7 @@ func TestRunForkSelectedContractBinding_MaterializesDurableForkRunBinding(t *tes
 	forkState := stateOnlyWorkflowEngineMutationRecord(
 		t, materialized.ForkRunID, "flow-a", "flow-a/1", entityID, "ready", 1, at,
 	)
+	forkState.EntityType = "fork_entity"
 	forkExecutionCtx := runtimecorrelation.WithRunID(ctx, materialized.ForkRunID)
 	if _, err := pg.CommitWorkflowEngineMutation(forkExecutionCtx, runtimepipeline.WorkflowEngineMutationCommand{State: forkState}); err != nil {
 		t.Fatalf("execute activated state-only fork target: %v", err)
@@ -2112,7 +2113,7 @@ func seedActivationReadySourceRun(t *testing.T, db *sql.DB, sourceRunID, entityI
 			entered_state_at, created_at, updated_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, 'flow-a/1', 'default', 'Activation Entity',
+			$1::uuid, $2::uuid, 'flow-a/1', 'fork_entity', 'Activation Entity',
 			'ready', '{}'::jsonb, '{"name":"Activation Entity"}'::jsonb, '{}'::jsonb, 1,
 			$3, $3, $3
 		)

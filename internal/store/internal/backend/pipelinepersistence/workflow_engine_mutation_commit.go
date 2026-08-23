@@ -105,24 +105,24 @@ func commitPostgresWorkflowEngineState(ctx context.Context, tx *sql.Tx, record r
 	}
 	result, err := tx.ExecContext(ctx, `
 		UPDATE entity_state
-		SET entity_type = $1,
-		    slug = NULLIF($2, ''),
-		    name = NULLIF($3, ''),
-		    current_state = $4,
-		    gates = $5::jsonb,
-		    fields = $6::jsonb,
-		    bookkeeping = $7::jsonb,
-		    accumulator = $8::jsonb,
+		SET slug = NULLIF($1, ''),
+		    name = NULLIF($2, ''),
+		    current_state = $3,
+		    gates = $4::jsonb,
+		    fields = $5::jsonb,
+		    bookkeeping = $6::jsonb,
+		    accumulator = $7::jsonb,
 		    revision = revision + 1,
-		    entered_state_at = $9,
-		    updated_at = $10
-		WHERE run_id = $11::uuid
-		  AND entity_id = $12::uuid
-		  AND flow_instance = $13
-		  AND revision = $14
-		  AND current_state = $15
-	`, record.EntityType, record.Slug, record.Name, record.CurrentState, string(record.Gates), string(record.Fields), string(record.Bookkeeping), string(record.Accumulator),
-		record.EnteredStageAt, record.UpdatedAt, record.RunID, record.EntityID, record.Route.InstancePath, record.ExpectedRevision, record.ExpectedState)
+		    entered_state_at = $8,
+		    updated_at = $9
+		WHERE run_id = $10::uuid
+		  AND entity_id = $11::uuid
+		  AND flow_instance = $12
+		  AND revision = $13
+		  AND current_state = $14
+		  AND entity_type = $15
+	`, record.Slug, record.Name, record.CurrentState, string(record.Gates), string(record.Fields), string(record.Bookkeeping), string(record.Accumulator),
+		record.EnteredStageAt, record.UpdatedAt, record.RunID, record.EntityID, record.Route.InstancePath, record.ExpectedRevision, record.ExpectedState, record.EntityType)
 	if err != nil {
 		return fmt.Errorf("update workflow engine entity state: %w", err)
 	}
@@ -213,8 +213,7 @@ func commitSQLiteWorkflowEngineState(ctx context.Context, tx *sql.Tx, record run
 	}
 	result, err := tx.ExecContext(ctx, `
 		UPDATE entity_state
-		SET entity_type = ?,
-		    slug = NULLIF(?, ''),
+		SET slug = NULLIF(?, ''),
 		    name = NULLIF(?, ''),
 		    current_state = ?,
 		    gates = ?,
@@ -229,8 +228,9 @@ func commitSQLiteWorkflowEngineState(ctx context.Context, tx *sql.Tx, record run
 		  AND flow_instance = ?
 		  AND revision = ?
 		  AND current_state = ?
-	`, record.EntityType, record.Slug, record.Name, record.CurrentState, string(record.Gates), string(record.Fields), string(record.Bookkeeping), string(record.Accumulator),
-		record.EnteredStageAt, record.UpdatedAt, record.RunID, record.EntityID, record.Route.InstancePath, record.ExpectedRevision, record.ExpectedState)
+		  AND entity_type = ?
+	`, record.Slug, record.Name, record.CurrentState, string(record.Gates), string(record.Fields), string(record.Bookkeeping), string(record.Accumulator),
+		record.EnteredStageAt, record.UpdatedAt, record.RunID, record.EntityID, record.Route.InstancePath, record.ExpectedRevision, record.ExpectedState, record.EntityType)
 	if err != nil {
 		return fmt.Errorf("update workflow engine entity state: %w", err)
 	}

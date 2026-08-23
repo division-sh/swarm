@@ -82,9 +82,9 @@ func TestWorkflowInstanceStoreLoadRouteRecoveryProjection(t *testing.T) {
 			if _, err := db.ExecContext(ctx, insert, instancePath, "review", "template", string(configRaw), "active"); err != nil {
 				t.Fatalf("seed active flow instance: %v", err)
 			}
-			entityInsert := "INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state) VALUES (?, ?, ?, 'active')"
+			entityInsert := "INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state) VALUES (?, ?, ?, 'test_entity', 'active')"
 			if tc.name == "postgres" {
-				entityInsert = "INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state) VALUES ($1::uuid, $2::uuid, $3, 'active')"
+				entityInsert = "INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state) VALUES ($1::uuid, $2::uuid, $3, 'test_entity', 'active')"
 			}
 			if _, err := db.ExecContext(ctx, entityInsert, runID, entityID, instancePath); err != nil {
 				t.Fatalf("seed active flow entity: %v", err)

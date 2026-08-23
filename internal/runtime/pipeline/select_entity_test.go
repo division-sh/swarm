@@ -56,6 +56,58 @@ func TestExecuteNodeContractHandlerSelectEntityUpdatesTargetOwnedEntity(t *testi
 	assertEntityStateRowCount(t, db, 1)
 }
 
+func TestMatchHandlerEntitiesForFlowFiltersDescendantsBeforeContractValidation(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			db, store := openHandlerEntityRequirementStore(t, backend)
+			pc, source := newNestedSelectEntityTestCoordinatorWithStore(t, store)
+			var ctx context.Context
+			if store.isSQLite() {
+				ctx = sqliteExactOnceRunContext(t, db)
+			} else {
+				ctx = testPipelineRunContext(t, db)
+			}
+
+			seedSelectEntityBudget(t, store, ctx, source, "vertical-1", 0)
+			descendantIdentity := DeriveFlowInstanceIdentity(source, "treasury/detail", "detail-1")
+			descendant := materializedWorkflowInstanceForTest(WorkflowInstance{
+				InstanceID:      descendantIdentity.InstanceID,
+				StorageRef:      descendantIdentity.InstancePath,
+				EntityID:        descendantIdentity.EntityID,
+				EntityType:      "detail_record",
+				WorkflowName:    "treasury/detail",
+				WorkflowVersion: "1.0.0",
+				CurrentState:    "active",
+				Fields:          map[string]any{"vertical_id": "vertical-1"},
+			})
+			if err := store.upsert(ctx, descendant); err != nil {
+				t.Fatalf("seed descendant entity: %v", err)
+			}
+			if workflowInstanceOwnedByFlow(source, descendant, "treasury", testPipelineRunID) {
+				t.Fatal("descendant fixture unexpectedly belongs to the parent flow")
+			}
+
+			matches, err := pc.matchHandlerEntitiesForFlow(ctx, "treasury", testPipelineRunID, map[string]any{"vertical_id": "vertical-1"})
+			if err != nil {
+				t.Fatalf("match parent entities: %v", err)
+			}
+			if len(matches) != 1 || matches[0].EntityType != "opco_budget" {
+				t.Fatalf("parent matches = %#v, want only opco_budget", matches)
+			}
+
+			ownedInvalid := matches[0]
+			ownedInvalid.EntityType = "detail_record"
+			if err := store.upsert(ctx, ownedInvalid); err != nil {
+				t.Fatalf("seed invalid parent contract: %v", err)
+			}
+			_, err = pc.matchHandlerEntitiesForFlow(ctx, "treasury", testPipelineRunID, map[string]any{"vertical_id": "vertical-1"})
+			if err == nil || !strings.Contains(err.Error(), "select_entity_invalid_persisted_contract") {
+				t.Fatalf("invalid owned contract error = %v, want select_entity_invalid_persisted_contract", err)
+			}
+		})
+	}
+}
+
 func TestExecuteNodeContractHandlerSelectEntityReplayUsesSameTargetEntity(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
@@ -468,9 +520,7 @@ func TestExecuteNodeContractHandlerSelectEntityFailsClosedOnAmbiguousMatch(t *te
 	}
 }
 
-func newSelectEntityTestCoordinator(t *testing.T, db *sql.DB) (*PipelineCoordinator, semanticview.Source) {
-	t.Helper()
-	return newSelectEntityTestCoordinatorWithNodes(t, db, `
+const selectEntityTestNodes = `
 treasury-orchestrator:
   id: treasury-orchestrator
   execution_type: system_node
@@ -484,7 +534,11 @@ treasury-orchestrator:
         writes:
           - source_field: amount_usd
             target_field: spent_usd
-`)
+`
+
+func newSelectEntityTestCoordinator(t *testing.T, db *sql.DB) (*PipelineCoordinator, semanticview.Source) {
+	t.Helper()
+	return newSelectEntityTestCoordinatorWithNodes(t, db, selectEntityTestNodes)
 }
 
 func newSelectOrCreateEntityTestCoordinator(t *testing.T, db *sql.DB) (*PipelineCoordinator, semanticview.Source) {
@@ -536,7 +590,22 @@ func persistedSelectEntityIngress(t *testing.T, ctx context.Context, db *sql.DB,
 
 func newSelectEntityTestCoordinatorWithNodes(t *testing.T, db *sql.DB, treasuryNodes string) (*PipelineCoordinator, semanticview.Source) {
 	t.Helper()
-	source := loadWorkflowTempSource(t, map[string]string{
+	return newSelectEntityTestCoordinatorWithStoreAndNodes(t, newPostgresWorkflowInstanceStoreForTest(db), treasuryNodes)
+}
+
+func newSelectEntityTestCoordinatorWithStoreAndNodes(t *testing.T, store *workflowInstanceStore, treasuryNodes string) (*PipelineCoordinator, semanticview.Source) {
+	t.Helper()
+	return newSelectEntityTestCoordinatorFixture(t, store, treasuryNodes, false)
+}
+
+func newNestedSelectEntityTestCoordinatorWithStore(t *testing.T, store *workflowInstanceStore) (*PipelineCoordinator, semanticview.Source) {
+	t.Helper()
+	return newSelectEntityTestCoordinatorFixture(t, store, selectEntityTestNodes, true)
+}
+
+func newSelectEntityTestCoordinatorFixture(t *testing.T, store *workflowInstanceStore, treasuryNodes string, nested bool) (*PipelineCoordinator, semanticview.Source) {
+	t.Helper()
+	files := map[string]string{
 		"package.yaml": `
 name: runtime-test
 version: "1.0.0"
@@ -585,14 +654,44 @@ opco_budget:
     type: text
 `,
 		"flows/treasury/nodes.yaml": treasuryNodes,
-	})
+	}
+	if nested {
+		files["flows/treasury/package.yaml"] = `
+name: treasury
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: detail
+    flow: detail
+    mode: template
+`
+		files["flows/treasury/flows/detail/package.yaml"] = `
+name: detail
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows: []
+`
+		files["flows/treasury/flows/detail/schema.yaml"] = `
+name: detail
+mode: template
+initial_state: active
+states: [active, archived]
+terminal_states: [archived]
+`
+		files["flows/treasury/flows/detail/entities.yaml"] = `
+detail_record:
+  vertical_id:
+    type: text
+`
+	}
+	source := loadWorkflowTempSource(t, files)
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
 		t.Fatal("expected temp workflow bundle")
 	}
 	pc := &PipelineCoordinator{
 		bus:            &recordingPipelineBus{},
-		workflowStore:  newPostgresWorkflowInstanceStoreForTest(db),
+		workflowStore:  store,
 		expressionEval: newWorkflowExpressionEvaluator(),
 		entityLocks:    map[string]*sync.Mutex{},
 		module: &previewWorkflowModule{
@@ -603,7 +702,9 @@ opco_budget:
 		},
 		runBundleAvailability: selectEntityTestRunBundleAvailability{},
 	}
-	pc.workflowStore.deliveryStore = newPipelineTestDeliveryOwnerForDB(t, db)
+	if !store.isSQLite() {
+		pc.workflowStore.deliveryStore = newPipelineTestDeliveryOwnerForDB(t, store.testDB())
+	}
 	return pc, source
 }
 

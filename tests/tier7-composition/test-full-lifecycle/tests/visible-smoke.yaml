@@ -7,7 +7,7 @@ expect:
   events:
     include: [order.validated, order.finalized]
   entities:
-    - type: default
+    - type: test_entity
       current_state: complete
       gates:
         validation_passed: true

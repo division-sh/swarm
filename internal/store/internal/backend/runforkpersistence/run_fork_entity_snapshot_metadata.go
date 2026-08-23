@@ -96,9 +96,6 @@ func loadRunForkSourceEntityStateMetadata(snapshot *runForkRevisionSnapshot, ent
 			continue
 		}
 		entityType := strings.TrimSpace(fact.EntityType)
-		if entityType == "" {
-			entityType = "default"
-		}
 		return runForkSourceEntityStateMetadata{
 			FlowInstance: strings.TrimSpace(fact.FlowInstance),
 			EntityType:   entityType,

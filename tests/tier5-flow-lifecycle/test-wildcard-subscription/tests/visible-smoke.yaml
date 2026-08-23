@@ -6,5 +6,5 @@ expect:
   events:
     include: [match.found]
   entities:
-    - type: default
+    - type: test_entity
       current_state: matched

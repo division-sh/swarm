@@ -773,6 +773,7 @@ func seedFanInBarrierPortfolioShell(t *testing.T, ctx context.Context, pipeline 
 		EnteredStageAt:  enteredAt,
 		CreatedAt:       enteredAt,
 		Fields:          map[string]any{"portfolio_id": "portfolio"},
+		EntityType:      "portfolio_state",
 	}, enteredAt); err != nil {
 		t.Fatalf("seed portfolio singleton identity shell: %v", err)
 	}

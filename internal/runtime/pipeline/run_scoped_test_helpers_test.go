@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeactivityresult "github.com/division-sh/swarm/internal/runtime/activityresult"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -19,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	runtimeworkflowroute "github.com/division-sh/swarm/internal/runtime/workflowroute"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
@@ -481,9 +484,6 @@ func materializedWorkflowInstanceForTest(instance WorkflowInstance) WorkflowInst
 	if strings.TrimSpace(instance.EntityID) == "" && storageRef != "" {
 		instance.EntityID = FlowInstanceEntityID(storageRef)
 	}
-	if strings.TrimSpace(instance.EntityType) == "" {
-		instance.EntityType = "default"
-	}
 	if instance.EnteredStageAt.IsZero() {
 		instance.EnteredStageAt = occurredAt
 	}
@@ -491,6 +491,72 @@ func materializedWorkflowInstanceForTest(instance WorkflowInstance) WorkflowInst
 		instance.CreatedAt = occurredAt
 	}
 	return instance
+}
+
+func testEntityContractsForType(entityType string) runtimecontracts.EntityContractsDocument {
+	return runtimecontracts.EntityContractsDocument{
+		strings.TrimSpace(entityType): {Fields: map[string]runtimecontracts.EntityFieldDecl{}},
+	}
+}
+
+func testRootEntityContractSource(workflowName, entityType string) semanticview.Source {
+	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics:    runtimecontracts.WorkflowSemanticView{Name: strings.TrimSpace(workflowName)},
+		RootEntities: testEntityContractsForType(entityType),
+	})
+}
+
+func admitSyntheticEntityContractsForTest(
+	t *testing.T,
+	base *runtimecontracts.WorkflowContractBundle,
+	rootEntityType string,
+	flowEntityTypes map[string]string,
+) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
+	if base == nil {
+		t.Fatal("synthetic contract bundle is required")
+	}
+	flowIDs := make([]string, 0, len(flowEntityTypes))
+	for flowID := range flowEntityTypes {
+		flowIDs = append(flowIDs, strings.TrimSpace(flowID))
+	}
+	sort.Strings(flowIDs)
+	var packageFlows strings.Builder
+	files := map[string]string{
+		"schema.yaml": "name: synthetic-contract\n",
+	}
+	for _, flowID := range flowIDs {
+		entityType := strings.TrimSpace(flowEntityTypes[flowID])
+		if flowID == "" || entityType == "" {
+			t.Fatalf("synthetic flow entity contract requires nonblank flow and entity type: flow=%q type=%q", flowID, entityType)
+		}
+		fmt.Fprintf(&packageFlows, "  - id: %s\n    flow: %s\n    mode: template\n", flowID, flowID)
+		files["flows/"+flowID+"/schema.yaml"] = fmt.Sprintf("name: %s\nmode: template\ninitial_state: active\nstates: [active]\n", flowID)
+		files["flows/"+flowID+"/entities.yaml"] = fmt.Sprintf("%s: {}\n", entityType)
+	}
+	files["package.yaml"] = fmt.Sprintf("name: synthetic-contract\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n%s", packageFlows.String())
+	if rootEntityType = strings.TrimSpace(rootEntityType); rootEntityType != "" {
+		files["entities.yaml"] = fmt.Sprintf("%s: {}\n", rootEntityType)
+	}
+
+	admitted := loadWorkflowTempBundle(t, files)
+	admitted.Semantics = base.Semantics
+	admitted.Nodes = base.Nodes
+	admitted.Events = base.Events
+	admitted.Agents = base.Agents
+	admitted.Tools = base.Tools
+	admitted.Policy = base.Policy
+	admitted.Platform = base.Platform
+	if base.RootSchema != nil {
+		admitted.RootSchema = base.RootSchema
+	}
+	if base.FlowSchemas != nil {
+		admitted.FlowSchemas = base.FlowSchemas
+	}
+	if base.FlowTree.Root != nil {
+		admitted.FlowTree = base.FlowTree
+	}
+	return admitted
 }
 
 func configureWorkflowLifecycleForTest(t testing.TB, pc *PipelineCoordinator) {

@@ -4,5 +4,5 @@ steps:
     payload: {}
 expect:
   entities:
-    - type: default
+    - type: test_entity
       current_state: pending

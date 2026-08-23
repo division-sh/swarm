@@ -1246,7 +1246,7 @@ expect:
     include: [item.received, item.processed]
   no_dead_letters: true
   entities:
-    - type: default
+    - type: item
       current_state: done
 `)
 	return contractsPath

@@ -791,6 +791,7 @@ states: [initializing, ready]
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,
+		"flows/operating/entities.yaml": "operating_state: {}\n",
 		"flows/operating/events.yaml": `opco.product_initialization_requested:
   entity_id: string
 opco.ceo_ready:
@@ -841,6 +842,7 @@ states: [initializing, ready]
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,
+		"flows/operating/entities.yaml": "operating_state: {}\n",
 		"flows/operating/events.yaml": `opco.product_initialization_requested:
   product_id: string
 component_scaffold.spawn_requested:
@@ -895,6 +897,7 @@ states: [initializing, ready]
 auto_emit_on_create:
   event: opco.product_initialization_requested
 `,
+		"flows/operating/entities.yaml": "operating_state: {}\n",
 		"flows/operating/events.yaml": `opco.product_initialization_requested:
   instance_id: string
   template_id: string

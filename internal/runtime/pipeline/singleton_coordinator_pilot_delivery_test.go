@@ -169,6 +169,7 @@ func seedSingletonCoordinatorPilotInstance(t *testing.T, store *workflowInstance
 				map[string]any{"ref": "seed", "action": "seed"},
 			},
 		},
+		EntityType: "coordinator_state",
 	})); err != nil {
 		t.Fatalf("seed singleton coordinator workflow instance: %v", err)
 	}

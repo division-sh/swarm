@@ -238,6 +238,7 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 			baseBus := &recordingPipelineBus{}
 			bus := &failOnceRetryPipelineBus{recordingPipelineBus: baseBus}
 			bundle := &runtimecontracts.WorkflowContractBundle{
+				RootEntities: testEntityContractsForType("test_entity"),
 				Nodes: map[string]runtimecontracts.SystemNodeContract{
 					"node-a": {ID: "node-a", ExecutionType: "system_node"},
 				},
@@ -297,6 +298,7 @@ func TestWorkflowNodeRetryWaitSurvivesHeartbeatSettlementParity(t *testing.T) {
 				InstanceID: runID, StorageRef: runID, WorkflowName: "delivery-retry", WorkflowVersion: "v-test", CurrentState: "queued",
 				EntityID:       entityID,
 				EnteredStageAt: evt.CreatedAt(), CreatedAt: evt.CreatedAt(),
+				EntityType: "test_entity",
 			})); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
@@ -395,10 +397,12 @@ func newDeliveryAuthorityCoordinator(t *testing.T, db *sql.DB) (*PipelineCoordin
 	t.Helper()
 	bus := &recordingPipelineBus{}
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootEntities: testEntityContractsForType("test_entity"),
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"node-a": {ID: "node-a", ExecutionType: "system_node"},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
+			Name: "delivery-authority", Version: "v-test",
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 				"node-a": {
 					"source.evt": {
@@ -469,6 +473,7 @@ func seedDeliveryAuthorityWorkflowInstance(t *testing.T, pc *PipelineCoordinator
 		WorkflowVersion: "v-test",
 		CurrentState:    "queued",
 		Fields:          map[string]any{},
+		EntityType:      "test_entity",
 	})); err != nil {
 		t.Fatalf("seed delivery authority workflow instance: %v", err)
 	}

@@ -328,6 +328,7 @@ func runInboundPublicationStandingGenerationRebindProof(t *testing.T, db *sql.DB
 		WorkflowVersion: "v1",
 		CurrentState:    "created",
 		EnteredStageAt:  time.Now().UTC(),
+		EntityType:      "test_entity",
 	}
 	if _, err := workflowStore.MaterializeInitialEntry(runtimecorrelation.WithRunID(ctx, first.RunID), child, child.EnteredStageAt); err != nil {
 		t.Fatalf("seed first-generation child: %v", err)

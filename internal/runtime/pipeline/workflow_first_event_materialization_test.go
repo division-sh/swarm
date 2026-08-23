@@ -39,6 +39,7 @@ func TestDeclarativeFirstEventTransitionsFromCanonicalInitialStateOnBothStores(t
 	}})
 	module := handlerTestWorkflowModule("first-event-transition", "acceptor").(*previewWorkflowModule)
 	module.bundle.Semantics = bundle.Semantics
+	module.bundle.RootEntities = testEntityContractsForType("first_event_entity")
 	module.workflow = workflow
 
 	for _, tc := range workflowJoinStoreCases() {
@@ -94,6 +95,9 @@ func TestDeclarativeFirstEventTransitionsFromCanonicalInitialStateOnBothStores(t
 			}
 			if instance.CurrentState != "done" {
 				t.Fatalf("current state = %q, want done", instance.CurrentState)
+			}
+			if instance.EntityType != "first_event_entity" {
+				t.Fatalf("entity type = %q, want first_event_entity", instance.EntityType)
 			}
 			if len(instance.TransitionHistory) != 1 {
 				t.Fatalf("transition history = %#v, want one transition", instance.TransitionHistory)

@@ -79,9 +79,9 @@ func TestActiveWorkflowRouteRecoveryUsesOnlyCurrentRunOwnersOnBothStores(t *test
 
 			insertOwner := func(runID, entityID string) {
 				t.Helper()
-				query := "INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state) VALUES (?, ?, ?, 'active')"
+				query := "INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state) VALUES (?, ?, ?, 'review_entity', 'active')"
 				if !tc.sqlite {
-					query = "INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state) VALUES ($1::uuid, $2::uuid, $3, 'active')"
+					query = "INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state) VALUES ($1::uuid, $2::uuid, $3, 'review_entity', 'active')"
 				}
 				if _, err := db.ExecContext(ctx, query, runID, entityID, instancePath); err != nil {
 					t.Fatalf("seed route owner %s/%s: %v", runID, entityID, err)
@@ -112,6 +112,45 @@ func TestActiveWorkflowRouteRecoveryUsesOnlyCurrentRunOwnersOnBothStores(t *test
 			}
 			if _, err := selected.LoadActiveWorkflowRoute(ctx, instancePath); err == nil || !strings.Contains(err.Error(), "exactly one current persisted entity owner") {
 				t.Fatalf("missing current owner error = %v", err)
+			}
+		})
+	}
+}
+
+func TestEntityStateSchemaRequiresExplicitNonblankEntityContractOnBothStores(t *testing.T) {
+	tests := []struct {
+		name   string
+		open   func(*testing.T) (activeWorkflowRouteReader, *sql.DB)
+		sqlite bool
+	}{
+		{name: "sqlite", sqlite: true, open: func(t *testing.T) (activeWorkflowRouteReader, *sql.DB) {
+			selected := storetest.StartSQLiteRuntimeStore(t)
+			return selected, storetest.Database(selected)
+		}},
+		{name: "postgres", open: func(t *testing.T) (activeWorkflowRouteReader, *sql.DB) {
+			_, db, _ := testutil.StartPostgres(t)
+			return storetest.AdmitPostgresRuntimeStore(t, db), db
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			selected, db := tc.open(t)
+			ctx := testAuthorActivityContext()
+			runID := uuid.NewString()
+			storetest.RequireRun(t, ctx, selected, storetest.RunFixture{
+				Origin: storetest.ScenarioSetupOrigin(), RunID: runID, State: runtimerunlifecycle.StateRunning,
+			})
+			omitted := `INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state) VALUES (?, ?, 'review/one', 'active')`
+			blank := `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state) VALUES (?, ?, 'review/two', '   ', 'active')`
+			if !tc.sqlite {
+				omitted = `INSERT INTO entity_state (run_id, entity_id, flow_instance, current_state) VALUES ($1::uuid, $2::uuid, 'review/one', 'active')`
+				blank = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state) VALUES ($1::uuid, $2::uuid, 'review/two', '   ', 'active')`
+			}
+			if _, err := db.ExecContext(ctx, omitted, runID, uuid.NewString()); err == nil {
+				t.Fatal("fresh schema accepted omitted entity_type")
+			}
+			if _, err := db.ExecContext(ctx, blank, runID, uuid.NewString()); err == nil {
+				t.Fatal("fresh schema accepted blank entity_type")
 			}
 		})
 	}

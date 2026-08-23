@@ -119,6 +119,7 @@ func (o *testFlowInstanceActivationOwner) PrepareFlowInstanceActivation(_ contex
 		EnteredStageAt:   req.OccurredAt,
 		CreatedAt:        req.OccurredAt,
 		RuntimeReadiness: &readiness,
+		EntityType:       "test_entity",
 	}
 	plan := runtimepipeline.FlowInstanceActivationPlan{
 		Instance: instance, Identity: req.Instance, Readiness: readiness,

@@ -111,6 +111,9 @@ func (pc *PipelineCoordinator) matchHandlerEntitiesForFlow(ctx context.Context, 
 		if !workflowInstanceOwnedByFlow(source, candidate, flowID, runID) {
 			continue
 		}
+		if err := validateWorkflowEntityType(source, flowID, candidate.EntityType); err != nil {
+			return nil, fmt.Errorf("select_entity_invalid_persisted_contract: flow %s: %w", flowID, err)
+		}
 		if !selectEntityCandidateMatches(candidate, expected) {
 			continue
 		}
@@ -120,6 +123,9 @@ func (pc *PipelineCoordinator) matchHandlerEntitiesForFlow(ctx context.Context, 
 }
 
 func (pc *PipelineCoordinator) selectedHandlerEntityFromInstance(ctx context.Context, flowID, nodeID string, evt events.Event, selected WorkflowInstance, label string) (selectedHandlerEntity, error) {
+	if err := validateWorkflowEntityType(pc.SemanticSource(), flowID, selected.EntityType); err != nil {
+		return selectedHandlerEntity{}, fmt.Errorf("%s_invalid_persisted_contract: node %s flow %s: %w", label, nodeID, flowID, err)
+	}
 	route, err := workflowInstanceRouteForPersisted(pc.SemanticSource(), selected)
 	if err != nil {
 		return selectedHandlerEntity{}, err
@@ -201,11 +207,15 @@ func (pc *PipelineCoordinator) createdHandlerEntityForDeclaredKey(ctx context.Co
 		}
 		return pc.selectedHandlerEntityFromInstance(ctx, flowID, nodeID, evt, existing, "select_or_create_entity")
 	}
+	entityType, err := requireWorkflowEntityType(source, flowID)
+	if err != nil {
+		return selectedHandlerEntity{}, fmt.Errorf("select_or_create_entity_invalid: node %s flow %s: %w", nodeID, flowID, err)
+	}
 	state := WorkflowState{
 		EntityID: entityID,
 		Stage:    NormalizeWorkflowStateID(workflowInitialStateForFlow(source, flowID)),
 		Metadata: workflowCreateEntityFields(source, flowID),
-		Control:  workflowStateControlFromIdentity(instance),
+		Control:  workflowStateControlFromIdentity(instance, entityType),
 	}
 	if state.Metadata == nil {
 		state.Metadata = map[string]any{}
