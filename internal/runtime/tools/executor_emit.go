@@ -25,6 +25,10 @@ type publishRecipientPlanner interface {
 }
 
 func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig, toolName string, input any) (any, error) {
+	return e.handleEmitToolWithIdentity(ctx, actor, toolName, input, "", time.Time{})
+}
+
+func (e *Executor) handleEmitToolWithIdentity(ctx context.Context, actor models.AgentConfig, toolName string, input any, eventID string, createdAt time.Time) (any, error) {
 	eventType, eventSchema, ok := e.emitRegistry.EventSchemaForActorTool(actor, toolName)
 	if !ok {
 		err := failures.NewDetail(
@@ -119,11 +123,17 @@ func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig,
 		envelope = events.EnvelopeForSourceRoute(envelope, routingSource.Route())
 	}
 	taskID := asString(payloadMap["task_id"])
+	if strings.TrimSpace(eventID) == "" {
+		eventID = uuid.NewString()
+	}
+	if createdAt.IsZero() {
+		createdAt = time.Now()
+	}
 	emitted, err := events.NewChildEvent(events.ChildEventInput{
 		Facts: events.EventFacts{
-			ID: uuid.NewString(), Type: events.EventType(eventType), Producer: events.ProducerClaim{Type: events.EventProducerAgent, ID: actor.ID},
+			ID: eventID, Type: events.EventType(eventType), Producer: events.ProducerClaim{Type: events.EventProducerAgent, ID: actor.ID},
 			TaskID: taskID, Payload: mustJSON(payloadMap), Envelope: envelope, RoutingSource: routingSource,
-			CreatedAt: time.Now(), ExecutionMode: executionMode,
+			CreatedAt: createdAt, ExecutionMode: executionMode,
 		},
 		Lineage: emitLineage,
 	})

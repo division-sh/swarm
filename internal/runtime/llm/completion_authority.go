@@ -82,6 +82,9 @@ func completionReplayForHandle(handle *runtimeeffects.Handle, adapter string) (*
 	if err := replay.Usage.Validate(); err != nil {
 		return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_replay_usage_invalid", "llm-completion-authority", "replay_completion", nil, err)
 	}
+	if replay.Response.ToolOutputAuthority == nil || replay.Response.ToolOutputAuthority.Validate() != nil {
+		return nil, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_replay_tool_output_authority_invalid", "llm-completion-authority", "replay_completion", map[string]any{"adapter": strings.TrimSpace(adapter)})
+	}
 	replay.Response.CapabilitySurface = nil
 	return &replay, nil
 }
@@ -354,10 +357,17 @@ func settleCompletionTurnWithProviderHead(ctx context.Context, dispatch *complet
 		dispatch.providerModel.Transport != profile.Transport || dispatch.providerModel.RuntimeMode != profile.RuntimeMode {
 		return runtimeeffects.CompletionSettlementResult{}, fmt.Errorf("completion dispatch provider selection is incomplete or does not match profile %q", profile.ID)
 	}
+	settledAt := time.Now().UTC().Truncate(time.Microsecond)
 	if dispatch.replay != nil {
 		if state != runtimeeffects.StateSettled || failure != nil || response == nil {
 			return runtimeeffects.CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_replay_terminal_shape_invalid", "llm-completion-authority", "settle_completion", map[string]any{"attempt_id": dispatch.handle.Attempt().AttemptID})
 		}
+		authority := dispatch.replay.Response.ToolOutputAuthority
+		if authority == nil || authority.Validate() != nil {
+			return runtimeeffects.CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_replay_tool_output_authority_invalid", "llm-completion-authority", "settle_completion", map[string]any{"attempt_id": dispatch.handle.Attempt().AttemptID})
+		}
+		copied := *authority
+		response.ToolOutputAuthority = &copied
 		attempt := dispatch.handle.Attempt()
 		return runtimeeffects.CompletionSettlementResult{
 			Committed: true, Disposition: runtimeeffects.CompletionSettlementCurrent,
@@ -411,6 +421,11 @@ func settleCompletionTurnWithProviderHead(ctx context.Context, dispatch *complet
 		if evidence == nil {
 			evidence = map[string]any{}
 		}
+		authority := ToolOutputAuthority{ProviderOperationID: dispatch.handle.Attempt().OperationID, SettledAt: settledAt}
+		if err := authority.Validate(); err != nil {
+			return runtimeeffects.CompletionSettlementResult{}, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_tool_output_authority_invalid", "llm-completion-authority", "settle_completion", nil, err)
+		}
+		response.ToolOutputAuthority = &authority
 		replayResponse := *response
 		replayResponse.CapabilitySurface = nil
 		raw, err := json.Marshal(completionReplayEnvelope{
@@ -430,7 +445,7 @@ func settleCompletionTurnWithProviderHead(ctx context.Context, dispatch *complet
 		Usage:        usage,
 		Spend:        completionSpendForContext(ctx, profile, turn, usage, dispatch.providerModel),
 		ProviderHead: providerHead,
-		Now:          time.Now().UTC(),
+		Now:          settledAt,
 	}
 	if authority := dispatch.handle.Attempt().Authority; authority.Target.Kind == runtimeeffects.UsageTargetAgentTurn {
 		settlement.AgentTurn = completionAgentTurn(targetID, turn)
