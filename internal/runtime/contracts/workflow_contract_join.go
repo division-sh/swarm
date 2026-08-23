@@ -72,6 +72,7 @@ var joinWindowFieldOptions = map[string]struct{}{
 }
 
 var joinTimeoutFieldOptions = map[string]struct{}{
+	"element_id":        {},
 	"after":             {},
 	"data_accumulation": {},
 	"emit":              {},
@@ -79,6 +80,7 @@ var joinTimeoutFieldOptions = map[string]struct{}{
 }
 
 var joinOutcomeFieldOptions = map[string]struct{}{
+	"element_id":        {},
 	"data_accumulation": {},
 	"emit":              {},
 	"advances_to":       {},

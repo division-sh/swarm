@@ -6,7 +6,8 @@ test-node:
   event_handlers:
     item.evaluated:
       on_complete:
-        - condition: "entity.priority == 'high'"
+        - element_id: 9c85e8fa-42af-47bf-b77f-6fa4db8a15f8
+          condition: "entity.priority == 'high'"
           emit:
             event: item.expedited
           advances_to: done

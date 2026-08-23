@@ -432,6 +432,7 @@ func authoredEmitSiteRulesSuccessNodeYAML(nodeID, trigger, ruleEventType, succes
         emit: ` + successEventType + `
       rules:
         routed:
+          element_id: 00000000-0000-4000-8000-000000000002
           condition: "else"
           emit: ` + ruleEventType + `
 `
@@ -452,11 +453,13 @@ func authoredEmitSiteTemplateNodeYAML(nodeID, trigger, eventType string) string 
           shared: payload.shared
       rules:
         high:
+          element_id: 00000000-0000-4000-8000-000000000003
           condition: "payload.score >= 80"
           emit:
             fields:
               bucket: '"high"'
         low:
+          element_id: 00000000-0000-4000-8000-000000000004
           condition: "else"
           emit:
             fields:

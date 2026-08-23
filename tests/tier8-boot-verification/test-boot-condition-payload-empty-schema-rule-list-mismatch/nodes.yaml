@@ -6,6 +6,7 @@ test-node:
   event_handlers:
     check.requested:
       rules:
-        - id: empty_schema_rule
+        - element_id: ca73fc41-fa9d-4388-8878-23fa914231e4
+          id: empty_schema_rule
           condition: "payload.empty_schema_rule == true"
           advances_to: done

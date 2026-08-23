@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
@@ -25,6 +26,7 @@ type AuthoredEmitSite struct {
 	Site           string
 	SiteKey        string
 	RuleID         string
+	RuleRef        contractelementidentity.ContractElementRef
 	Spec           runtimecontracts.EmitSpec
 	Handler        runtimecontracts.SystemNodeEventHandler
 }
@@ -61,6 +63,7 @@ func AuthoredEmitSites(source Source) []AuthoredEmitSite {
 		flowPath := executableNodeFlowPath(source, node)
 		for _, handlerEvent := range sortedAuthoredHandlerEvents(record.Entry.EventHandlers) {
 			handler := runtimecontracts.DefaultSystemNodeHandlerSourceEvent(record.Entry.EventHandlers[handlerEvent], handlerEvent)
+			handler, _ = runtimecontracts.QualifySystemNodeHandlerRuleRefs(node, handler)
 			builder.appendHandlerSites(kind, node.PackageKey(), flowPath, node, handlerEvent, handler)
 		}
 	}
@@ -83,7 +86,7 @@ type authoredEmitSiteBuilder struct {
 }
 
 func (b *authoredEmitSiteBuilder) appendHandlerSites(kind AuthoredEmitSiteSourceKind, scopeKey, flowPath string, node runtimeidentity.ExecutableNode, handlerEvent string, handler runtimecontracts.SystemNodeEventHandler) {
-	add := func(site, siteKey, ruleID string, spec runtimecontracts.EmitSpec) {
+	add := func(site, siteKey, ruleID string, ruleRef contractelementidentity.ContractElementRef, spec runtimecontracts.EmitSpec) {
 		if spec.Empty() {
 			return
 		}
@@ -111,16 +114,17 @@ func (b *authoredEmitSiteBuilder) appendHandlerSites(kind AuthoredEmitSiteSource
 			Site:           site,
 			SiteKey:        siteKey,
 			RuleID:         strings.TrimSpace(ruleID),
+			RuleRef:        ruleRef,
 			Spec:           spec,
 			Handler:        handler,
 		})
 	}
 	for _, site := range runtimecontracts.HandlerDeclarativeEmitSites(handler) {
-		add(site.Source, site.SiteKey, site.RuleID, site.Spec)
+		add(site.Source, site.SiteKey, site.RuleID, site.RuleRef, site.Spec)
 	}
 	if handler.Guard != nil {
 		if emitSpec := authoredGuardEscalationEmitSpec(handler.Guard); !emitSpec.Empty() {
-			add("handler.guard.on_fail.escalate", "handler.guard.on_fail.escalate", handler.Guard.ID, emitSpec)
+			add("handler.guard.on_fail.escalate", "handler.guard.on_fail.escalate", handler.Guard.ID, contractelementidentity.ContractElementRef{}, emitSpec)
 		}
 	}
 }

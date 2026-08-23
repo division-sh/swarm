@@ -100,6 +100,7 @@ var systemNodeEventHandlerExecutableReaderCensus = map[string]handlerExecutableR
 }
 
 var handlerRuleEntryExecutableReaderCensus = map[string]handlerRuleExecutableReaderCollector{
+	"ElementID":   noHandlerRuleExecutableReaders,
 	"ID":          noHandlerRuleExecutableReaders,
 	"Description": noHandlerRuleExecutableReaders,
 	"Condition": func(out *[]expressionReference, _ executableReaderContext, prefix string, rule runtimecontracts.HandlerRuleEntry) {
@@ -123,6 +124,8 @@ var handlerRuleEntryExecutableReaderCensus = map[string]handlerRuleExecutableRea
 	"FanOut": func(out *[]expressionReference, _ executableReaderContext, prefix string, rule runtimecontracts.HandlerRuleEntry) {
 		appendFanOutExecutableReaders(out, prefix+".fan_out", rule.FanOut, runtimepipeline.WorkflowEntityFieldLifecycleRule)
 	},
+	"elementRef": noHandlerRuleExecutableReaders,
+	"authored":   noHandlerRuleExecutableReaders,
 }
 
 func handlerExecutableReaderExpressionsForSource(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string, handler runtimecontracts.SystemNodeEventHandler) []expressionReference {

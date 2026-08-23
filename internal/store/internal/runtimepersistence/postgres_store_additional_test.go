@@ -184,7 +184,7 @@ func TestPostgresStore_NormalCompletionUsesCanonicalCountersAndRejectsActiveDeli
 	if err != nil {
 		t.Fatalf("claim delivery: %v", err)
 	}
-	if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, 0); err != nil {
+	if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 		t.Fatalf("deliver completion: %v", err)
 	}
 
@@ -2815,7 +2815,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	retrying, err := pg.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
 		Disposition: runtimedelivery.FailureRetry,
 		Failure:     testRetryableFailure(),
-		RetryBase:   time.Second,
+		RetryBase:   time.Second, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 	})
 	if err != nil || retrying.Status != runtimedelivery.StatusFailed || !retrying.RetryScheduled {
 		t.Fatalf("SettleFailure retry snapshot=%#v err=%v", retrying, err)

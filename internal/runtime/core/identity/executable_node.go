@@ -12,6 +12,46 @@ import (
 
 const RootPackageKey = "."
 
+// PackageKey is the canonical package coordinate shared by package-qualified
+// declaration identities. Its value can only be admitted through the package
+// path grammar below.
+type PackageKey struct {
+	value string
+}
+
+func AdmitPackageKey(raw string) (PackageKey, error) {
+	value, err := normalizePackageKey(raw)
+	if err != nil {
+		return PackageKey{}, err
+	}
+	return PackageKey{value: value}, nil
+}
+
+func ParsePackageKey(raw string) (PackageKey, error) {
+	key, err := AdmitPackageKey(raw)
+	if err != nil {
+		return PackageKey{}, err
+	}
+	if raw != key.value {
+		return PackageKey{}, fmt.Errorf("package key is not canonical")
+	}
+	return key, nil
+}
+
+func (k PackageKey) Valid() bool {
+	value, err := normalizePackageKey(k.value)
+	return err == nil && value == k.value
+}
+
+func (k PackageKey) String() string {
+	if !k.Valid() {
+		return ""
+	}
+	return k.value
+}
+
+func (k PackageKey) Equal(other PackageKey) bool { return k == other }
+
 // ExecutableNode identifies one authored node declaration. Node IDs are local
 // to their package and owning flow; none of the three coordinates may be
 // interpreted independently after admission.
@@ -30,12 +70,12 @@ type executableNodeWire struct {
 // AdmitExecutableNodeDeclaration is the declaration-origin constructor. The
 // contracts owner calls it after preserving the exact authored scope.
 func AdmitExecutableNodeDeclaration(packageKey, flowID, nodeID string) (ExecutableNode, error) {
-	packageKey, err := normalizePackageKey(packageKey)
+	admittedPackage, err := AdmitPackageKey(packageKey)
 	if err != nil {
 		return ExecutableNode{}, err
 	}
 	ref := ExecutableNode{
-		packageKey: packageKey,
+		packageKey: admittedPackage.String(),
 		flowID:     strings.TrimSpace(flowID),
 		nodeID:     strings.TrimSpace(nodeID),
 	}

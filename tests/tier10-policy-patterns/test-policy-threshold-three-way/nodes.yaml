@@ -9,11 +9,14 @@ classifier:
         writes:
           - score
       on_complete:
-        - condition: "payload.score >= policy.high_mark"
+        - element_id: b54d7c49-1474-408e-b253-f9151b2a2010
+          condition: "payload.score >= policy.high_mark"
           advances_to: tier_a
-        - condition: "payload.score >= policy.low_mark"
+        - element_id: 1e89f35e-eae2-4c0a-b7d0-d2649808548b
+          condition: "payload.score >= policy.low_mark"
           advances_to: tier_b
           emit:
             event: eval.tier_b
-        - condition: "else"
+        - element_id: 35125f03-b997-40d8-872a-6b92e73c1fff
+          condition: "else"
           advances_to: tier_c

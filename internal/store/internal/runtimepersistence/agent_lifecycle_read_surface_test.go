@@ -92,7 +92,7 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_CoversEveryCurrentStateLa
 				if _, err := pg.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
 					Disposition: runtimedelivery.FailureRetry,
 					Failure:     testRetryableFailure(),
-					RetryBase:   time.Hour,
+					RetryBase:   time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 				}); err != nil {
 					t.Fatalf("settle retry for %s: %v", tc.agentID, err)
 				}
@@ -101,7 +101,7 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_CoversEveryCurrentStateLa
 				if _, err := pg.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
 					Disposition: runtimedelivery.FailureDeadLetter,
 					ReasonCode:  "lifecycle_exhausted",
-					Failure:     &failure,
+					Failure:     &failure, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 				}); err != nil {
 					t.Fatalf("settle exhaustion for %s: %v", tc.agentID, err)
 				}
@@ -151,7 +151,7 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalLiveLifecycl
 		t.Fatalf("claim old delivery: %v", err)
 	}
 	deadLetterFailure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "old_exhausted", nil)
-	if _, err := pg.SettleFailure(ctx, deadLetterClaim.Claim, runtimedelivery.Settlement{Disposition: runtimedelivery.FailureDeadLetter, ReasonCode: "old_exhausted", Failure: &deadLetterFailure}); err != nil {
+	if _, err := pg.SettleFailure(ctx, deadLetterClaim.Claim, runtimedelivery.Settlement{Disposition: runtimedelivery.FailureDeadLetter, ReasonCode: "old_exhausted", Failure: &deadLetterFailure, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection()}); err != nil {
 		t.Fatalf("settle old delivery: %v", err)
 	}
 	activeClaim, err := claimDeliveryFixture(ctx, pg, activeEvent, activeRoute)
@@ -197,7 +197,7 @@ func TestPostgresStore_ListAgentDeliveryLifecycleFacts_UsesCanonicalTerminalLife
 		t.Fatalf("claim terminal delivery: %v", err)
 	}
 	failure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "terminal_exhausted", nil)
-	if _, err := pg.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{Disposition: runtimedelivery.FailureDeadLetter, ReasonCode: "terminal_exhausted", Failure: &failure}); err != nil {
+	if _, err := pg.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{Disposition: runtimedelivery.FailureDeadLetter, ReasonCode: "terminal_exhausted", Failure: &failure, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection()}); err != nil {
 		t.Fatalf("settle terminal delivery: %v", err)
 	}
 

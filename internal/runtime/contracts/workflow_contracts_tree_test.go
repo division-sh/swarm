@@ -634,6 +634,7 @@ validation-orchestrator:
     vertical.shortlisted:
       rules:
         accepted:
+          element_id: 00000000-0000-4000-8000-000000000001
           condition: "else"
           emit: validation.rule
       on_success:

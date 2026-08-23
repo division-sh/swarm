@@ -3000,6 +3000,42 @@ handler_specification:
     rules: Current concrete spelling of the ordered policy-sheet authoring construct for handler-phase selection. Existing
       condition rules and typed selection rows lower to the canonical selected-branch owner. Retired `handler.branch`
       syntax is unsupported and must fail closed instead of being interpreted, lowered, or preserved as compatibility syntax.
+  authored_rule_element_identity:
+    canonical_owner: internal/runtime/core/contractelementidentity.ContractElementRef
+    grammar: >-
+      Every non-empty authored HandlerRuleEntry mapping carries a mandatory sibling `element_id` containing one canonical,
+      non-zero, lowercase UUID. This applies to handler.rules selection and policy rows, handler.on_complete rows,
+      join.on_complete, and join.timeout outcomes in sequence, single-mapping, and keyed-mapping decoder shapes. A keyed
+      mapping key and optional `id` remain local display labels only; ordering remains evaluation order only. Missing,
+      malformed, noncanonical, or duplicate-within-package element IDs hard-fail strict loading. The explicit
+      `swarm mint-element-ids` command is the only old-corpus minting surface; load never derives, backfills, aliases, or
+      guesses an identity from a key, label, index, path, event, transition, or content.
+    typed_identity: >-
+      ContractElementID owns UUID admission and equality. ContractElementRef is the immutable pair of the exact admitted
+      package coordinate and ContractElementID. Package coordinate and element ID remain distinct typed facts; no public
+      concatenated key or parsing fallback exists. Local labels may be rendered in diagnostics but cannot select, compare,
+      qualify, persist, reconstruct, or filter semantic rule identity.
+    first_adoption_registry:
+      adopted_now:
+      - handler.rules executable selection rows and policy lookup/validate/compute-module rows
+      - handler.on_complete rows
+      - join.on_complete outcome
+      - join.timeout outcome
+      deferred: timer, activity, join declaration, node, agent, stage, loop, pin, emit, transition, and resource element families
+      synthetic_loop_escape: >-
+        The runtime-created loop-escape HandlerRuleEntry is not authored, cannot fabricate a ContractElementRef, and records
+        none/not_applicable when its delivery settles.
+    execution_fact: >-
+      Each concrete handler delivery commits exactly one immutable HandlerRuleSelectionFact keyed by delivery_id in the
+      same selected-store transaction as settlement. Its closed context is handler_rules, handler_on_complete,
+      join_on_complete, join_timeout, or none. Its closed disposition is selected, no_match, or not_applicable. Selected
+      requires the typed package coordinate and element ID; no_match and not_applicable forbid them. Display label is
+      optional presentation. Run, event, route, node, subscriber, and handler-event identity remain owned by canonical
+      delivery/event rows and are not duplicated. Same-delivery retry must agree exactly or fail closed without settlement
+      mutation. There is no ordinal, set, nullable absence, current-contract lookup, compatibility reader, or old-store migration.
+    public_projection: >-
+      RunDebugTraceRow exposes one typed handler_rule_selection projection sourced only from the persisted delivery fact.
+      It distinguishes selected, no_match, and not_applicable after restart without consulting current contract text.
   short_circuits:
     guard_fail: If guard fails, handler stops. on_fail action executes (reject/kill/discard/escalate). No further steps.
   handler_fields:
@@ -12962,6 +12998,7 @@ platform_tables:
       retain_directive_authority:
         - agent_directive_operations
       delete_mixed_row_policy:
+        - event_delivery_handler_rule_selections
         - event_delivery_outcomes
         - event_delivery_attempts
         - event_deliveries
@@ -14072,6 +14109,25 @@ platform_tables:
         CREATE INDEX idx_deliveries_agent_lifecycle_page ON event_deliveries (subscriber_type, subscriber_id, created_at DESC, delivery_id DESC);
         CREATE INDEX idx_deliveries_agent_failure_page ON event_deliveries (subscriber_type, subscriber_id, status, updated_at DESC, delivery_id DESC);
         CREATE INDEX idx_deliveries_agent_dead_letter_page ON event_deliveries (subscriber_type, subscriber_id, status, settled_at DESC, delivery_id DESC);
+    event_delivery_handler_rule_selections:
+      description: >-
+        Singular durable handler-rule evaluation fact for one exact executable delivery. The delivery row remains the
+        canonical owner of run, event, route, node, and handler-event identity; this projection is keyed only by
+        delivery_id and records whether the delivery selected one authored handler rule, evaluated an executable rule
+        context without a match, or did not execute an authored rule context. Authored identity is the package-qualified
+        immutable element_id and display_label is presentation only. The lifecycle settlement transaction writes this
+        row exactly once and exact replay must agree with it. Existing stores are unsupported; no ordinal, ordered fact
+        set, current-contract lookup, label authority, fallback, or compatibility interpretation exists.
+      ddl: |
+        CREATE TABLE event_delivery_handler_rule_selections (
+            delivery_id        UUID PRIMARY KEY REFERENCES event_deliveries(delivery_id),
+            selection_context  TEXT NOT NULL CHECK (selection_context IN ('none', 'handler_rules', 'handler_on_complete', 'join_on_complete', 'join_timeout')),
+            disposition        TEXT NOT NULL CHECK (disposition IN ('selected', 'no_match', 'not_applicable')),
+            package_coordinate TEXT,
+            element_id         UUID,
+            display_label      TEXT NOT NULL DEFAULT '',
+            CHECK ((disposition = 'selected' AND selection_context <> 'none' AND NULLIF(TRIM(COALESCE(package_coordinate, '')), '') IS NOT NULL AND element_id IS NOT NULL) OR (disposition = 'no_match' AND selection_context IN ('handler_rules', 'handler_on_complete') AND package_coordinate IS NULL AND element_id IS NULL AND display_label = '') OR (disposition = 'not_applicable' AND selection_context = 'none' AND package_coordinate IS NULL AND element_id IS NULL AND display_label = ''))
+        );
     event_delivery_attempts:
       description: >-
         Immutable-fence execution attempt ledger for exact executable deliveries. Each claim version has one random token
@@ -22545,6 +22601,13 @@ cli_specification:
               json_shape: object with package_file and removed
               quiet_values:
               - number of removed connect.delivery one declarations
+            mint_element_ids:
+              command: swarm mint-element-ids
+              classification: shared_output
+              fact_owner: explicit authored contract-element identity codemod
+              json_shape: object with contracts_path, files_changed, and ids_minted
+              quiet_values:
+              - number of minted element IDs
             migrate_producer_routing:
               command: swarm migrate-producer-routing
               classification: shared_output
@@ -24937,6 +25000,16 @@ cli_specification:
       tier: must_have
       implementation_status: implemented
       behavior: local contract-file validation carve-out
+    mint_element_ids:
+      command: swarm mint-element-ids --contracts <bundle-root-or-corpus>
+      group: author_validate
+      tier: must_have
+      implementation_status: implemented
+      owner: platform-spec.yaml#handler_specification.authored_rule_element_identity
+      behavior: >
+        Explicitly mint canonical UUID element_id values only for adopted authored handler rules,
+        handler on_complete outcomes, and join complete/timeout outcomes that lack one. Preflight the full
+        selected tree and leave every file unchanged on malformed or ambiguous grammar; existing IDs are immutable.
     migrate_connect_delivery_one:
       command: swarm migrate-connect-delivery-one --contracts <bundle-root>
       group: author_validate

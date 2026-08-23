@@ -17,6 +17,8 @@ import (
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -113,14 +115,14 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				if bound.ActiveSessionID != sessionID {
 					t.Fatalf("bound session = %q, want %q", bound.ActiveSessionID, sessionID)
 				}
-				settled, err := backend.store.SettleSuccess(ctx, claimed.Claim, []string{"message.sent"}, 25*time.Millisecond)
+				settled, err := backend.store.SettleSuccess(ctx, claimed.Claim, []string{"message.sent"}, 25*time.Millisecond, runtimedelivery.NotApplicableHandlerRuleSelection())
 				if err != nil {
 					t.Fatalf("settle agent success: %v", err)
 				}
 				if settled.Status != runtimedelivery.StatusDelivered || !settled.Terminal() {
 					t.Fatalf("settled status = %q", settled.Status)
 				}
-				if _, err := backend.store.SettleSuccess(ctx, claimed.Claim, nil, 0); !errors.Is(err, runtimedelivery.ErrConflict) {
+				if _, err := backend.store.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); !errors.Is(err, runtimedelivery.ErrConflict) {
 					t.Fatalf("stale settlement error = %v, want ErrConflict", err)
 				}
 				outcomes, err := backend.store.Outcomes(ctx, agentProof.DeliveryID())
@@ -139,6 +141,74 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				}
 				if afterDuplicate.Status != runtimedelivery.StatusDelivered || afterDuplicate.ClaimVersion != claimed.Claim.Version() {
 					t.Fatalf("exact duplicate changed lifecycle: %#v", afterDuplicate)
+				}
+			})
+
+			t.Run("singular_handler_rule_selection_persists_and_replay_must_agree", func(t *testing.T) {
+				facts := []handlerselection.HandlerRuleSelectionFact{
+					deliveryLifecycleSelectedRuleFact(t, handlerselection.ContextRules, "00000000-0000-4000-8000-000000000101", "rules-label"),
+					deliveryLifecycleSelectedRuleFact(t, handlerselection.ContextOnComplete, "00000000-0000-4000-8000-000000000102", "complete-label"),
+					deliveryLifecycleSelectedRuleFact(t, handlerselection.ContextJoinComplete, "00000000-0000-4000-8000-000000000103", "join-complete"),
+					deliveryLifecycleSelectedRuleFact(t, handlerselection.ContextJoinTimeout, "00000000-0000-4000-8000-000000000104", "join-timeout"),
+					mustHandlerSelectionNoMatch(t, handlerselection.ContextRules),
+					mustHandlerSelectionNoMatch(t, handlerselection.ContextOnComplete),
+					handlerselection.NotApplicable(),
+				}
+				for index, fact := range facts {
+					event := deliveryLifecycleEvent(fmt.Sprintf("rule-fact-%s-%d", backend.name, index))
+					route := deliveryLifecycleConformanceRoute(t, "node", fmt.Sprintf("rule-node-%d", index))
+					storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
+					claimed, err := storetest.ClaimDelivery(ctx, backend.store, event, route)
+					if err != nil {
+						t.Fatalf("claim fact %d: %v", index, err)
+					}
+					if _, err := backend.store.SettleSuccess(ctx, claimed.Claim, nil, 0, fact); err != nil {
+						t.Fatalf("settle fact %d: %v", index, err)
+					}
+					if got := loadDeliveryHandlerRuleSelectionFact(t, ctx, backend, claimed.Snapshot.DeliveryID); !got.Equal(fact) {
+						t.Fatalf("persisted fact %d = %#v, want %#v", index, got, fact)
+					}
+					restarted, err := backend.restart.Snapshot(ctx, claimed.Snapshot.DeliveryID)
+					if err != nil || restarted.Status != runtimedelivery.StatusDelivered {
+						t.Fatalf("restart snapshot %d = %#v, %v", index, restarted, err)
+					}
+				}
+
+				event := deliveryLifecycleEvent("rule-conflict-" + backend.name)
+				route := deliveryLifecycleConformanceRoute(t, "node", "rule-conflict")
+				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, event, []events.DeliveryRoute{route}, runtimepipelineobligation.ScopeSubscribed)
+				firstClaim, err := storetest.ClaimDelivery(ctx, backend.store, event, route)
+				if err != nil {
+					t.Fatal(err)
+				}
+				firstFact := deliveryLifecycleSelectedRuleFact(t, handlerselection.ContextRules, "00000000-0000-4000-8000-000000000105", "original")
+				failed, err := backend.store.SettleFailure(ctx, firstClaim.Claim, runtimedelivery.Settlement{
+					Disposition:   runtimedelivery.FailureRetry,
+					Failure:       testFailure("selection_retry"),
+					RetryBase:     time.Nanosecond,
+					RuleSelection: firstFact,
+				})
+				if err != nil || failed.Status != runtimedelivery.StatusFailed {
+					t.Fatalf("first selection settlement = %#v, %v", failed, err)
+				}
+				makeDeliveryImmediatelyEligible(t, ctx, backend, firstClaim.Snapshot.DeliveryID)
+				secondClaim, err := storetest.ClaimDelivery(ctx, backend.restart, event, route)
+				if err != nil {
+					t.Fatal(err)
+				}
+				contradiction := deliveryLifecycleSelectedRuleFact(t, handlerselection.ContextRules, "00000000-0000-4000-8000-000000000106", "changed")
+				if _, err := backend.restart.SettleSuccess(ctx, secondClaim.Claim, nil, 0, contradiction); !errors.Is(err, runtimedelivery.ErrConflict) {
+					t.Fatalf("contradictory replay error = %v, want ErrConflict", err)
+				}
+				if got := loadDeliveryHandlerRuleSelectionFact(t, ctx, backend, firstClaim.Snapshot.DeliveryID); !got.Equal(firstFact) {
+					t.Fatalf("contradictory replay replaced fact: %#v", got)
+				}
+				outcomes, err := backend.restart.Outcomes(ctx, firstClaim.Snapshot.DeliveryID)
+				if err != nil || len(outcomes) != 1 || outcomes[0].Outcome != "retry_scheduled" {
+					t.Fatalf("contradictory replay outcomes = %#v, %v", outcomes, err)
+				}
+				if _, err := backend.restart.SettleSuccess(ctx, secondClaim.Claim, nil, 0, firstFact); err != nil {
+					t.Fatalf("exact replay agreement: %v", err)
 				}
 			})
 
@@ -245,7 +315,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				if !ok {
 					t.Fatalf("reclaim result has no exact claim: %#v", reclaimed)
 				}
-				delivered, err := backend.restart.SettleSuccess(ctx, reclaimedObligation.Claim, nil, 0)
+				delivered, err := backend.restart.SettleSuccess(ctx, reclaimedObligation.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection())
 				if err != nil || !delivered.Terminal() {
 					t.Fatalf("settle reclaimed delivery = %#v, err=%v", delivered, err)
 				}
@@ -264,7 +334,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				deferredSnapshot, err := backend.store.SettleFailure(ctx, deferredClaim.Claim, runtimedelivery.Settlement{
 					Disposition: runtimedelivery.FailureRetry,
 					Failure:     testFailure("handler_failed"),
-					RetryBase:   time.Hour,
+					RetryBase:   time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 				})
 				if err != nil || deferredSnapshot.Status != runtimedelivery.StatusFailed {
 					t.Fatalf("schedule deferred retry = %#v, err=%v", deferredSnapshot, err)
@@ -355,7 +425,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				failedSnapshot, err := backend.store.SettleFailure(ctx, failedClaim.Claim, runtimedelivery.Settlement{
 					Disposition: runtimedelivery.FailureRetry,
 					Failure:     testFailure("inventory_retry"),
-					RetryBase:   10 * time.Second,
+					RetryBase:   10 * time.Second, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 				})
 				if err != nil {
 					t.Fatalf("schedule inventory retry: %v", err)
@@ -511,7 +581,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					longRetry, err := adapter.SettleFailure(txctx, tx, longRetryClaim.Claim, runtimedelivery.Settlement{
 						Disposition: runtimedelivery.FailureRetry,
 						Failure:     testFailure("long_transaction_retry"),
-						RetryBase:   10 * time.Second,
+						RetryBase:   10 * time.Second, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 					})
 					if err != nil {
 						t.Fatalf("settle retry in long PostgreSQL transaction: %v", err)
@@ -707,7 +777,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				if _, err := backend.store.RenewClaim(ctx, claimed.Claim); !errors.Is(err, runtimedelivery.ErrConflict) {
 					t.Fatalf("superseded claim renewal = %v, want ErrConflict", err)
 				}
-				settled, err := backend.restart.SettleSuccess(ctx, reclaimed.Claim, []string{"renewal.proven"}, time.Millisecond)
+				settled, err := backend.restart.SettleSuccess(ctx, reclaimed.Claim, []string{"renewal.proven"}, time.Millisecond, runtimedelivery.NotApplicableHandlerRuleSelection())
 				if err != nil || settled.Status != runtimedelivery.StatusDelivered {
 					t.Fatalf("settle renewed lifecycle = %#v, err=%v", settled, err)
 				}
@@ -739,7 +809,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				if current.ClaimVersion != claimed.Claim.Version()+1 || current.Failure == nil || current.Failure.Detail.Code != "delivery_parent_terminalized" {
 					t.Fatalf("terminalized snapshot = %#v, want new exact fence and typed parent failure", current)
 				}
-				if _, err := backend.store.SettleSuccess(ctx, claimed.Claim, nil, 0); !errors.Is(err, runtimedelivery.ErrConflict) {
+				if _, err := backend.store.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); !errors.Is(err, runtimedelivery.ErrConflict) {
 					t.Fatalf("late settlement error = %v, want ErrConflict", err)
 				}
 				outcomes, err := backend.store.Outcomes(ctx, transitions[0].Current.DeliveryID)
@@ -812,10 +882,10 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				if reclaimed.Claim.Version() != winner.Claim.Version()+1 || reclaimed.Snapshot.DeliveryID != winner.Snapshot.DeliveryID {
 					t.Fatalf("reclaimed delivery = %#v, first = %#v", reclaimed, winner)
 				}
-				if _, err := backend.store.SettleSuccess(ctx, winner.Claim, nil, 0); !errors.Is(err, runtimedelivery.ErrConflict) {
+				if _, err := backend.store.SettleSuccess(ctx, winner.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); !errors.Is(err, runtimedelivery.ErrConflict) {
 					t.Fatalf("expired claimant settlement error = %v, want ErrConflict", err)
 				}
-				settled, err := backend.restart.SettleSuccess(ctx, reclaimed.Claim, []string{"race.proven"}, time.Millisecond)
+				settled, err := backend.restart.SettleSuccess(ctx, reclaimed.Claim, []string{"race.proven"}, time.Millisecond, runtimedelivery.NotApplicableHandlerRuleSelection())
 				if err != nil || settled.Status != runtimedelivery.StatusDelivered {
 					t.Fatalf("current claimant settlement = %#v, err=%v", settled, err)
 				}
@@ -888,7 +958,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 						settlement := runtimedelivery.Settlement{
 							Disposition: runtimedelivery.FailureDeadLetter,
 							ReasonCode:  "terminal_test_failure",
-							Failure:     testFailure("terminal_test_failure"),
+							Failure:     testFailure("terminal_test_failure"), RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 						}
 						if _, err := backend.store.SettleFailure(ctx, claimed.Claim, settlement); err == nil {
 							t.Fatal("terminal settlement succeeded while required diagnostic writer was faulted")
@@ -1190,7 +1260,7 @@ func assertDeliveryRetryBudget(t *testing.T, ctx context.Context, backend delive
 			Disposition: runtimedelivery.FailureRetry,
 			Failure:     testFailure("handler_failed"),
 			Duration:    time.Duration(attempt) * time.Millisecond,
-			RetryBase:   time.Nanosecond,
+			RetryBase:   time.Nanosecond, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 		})
 		if settleErr != nil {
 			t.Fatalf("settle %s attempt %d: %v", class, attempt, settleErr)
@@ -1482,6 +1552,45 @@ func deliveryLifecycleConformanceBackends(t *testing.T) []deliveryLifecycleConfo
 		{name: "sqlite", store: sqlite, restart: sqliteRestart, selected: sqlite, db: storetest.DatabaseForTest(sqlite)},
 		{name: "postgres", store: postgres, restart: postgresRestart, selected: postgres, db: storetest.DatabaseForTest(postgres), postgres: true},
 	}
+}
+
+func deliveryLifecycleSelectedRuleFact(t testing.TB, context handlerselection.Context, elementID, label string) handlerselection.HandlerRuleSelectionFact {
+	t.Helper()
+	ref, err := contractelementidentity.ParseContractElementRef("flows/conformance", elementID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fact, err := handlerselection.Selected(context, ref, label)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fact
+}
+
+func mustHandlerSelectionNoMatch(t testing.TB, context handlerselection.Context) handlerselection.HandlerRuleSelectionFact {
+	t.Helper()
+	fact, err := handlerselection.NoMatch(context)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fact
+}
+
+func loadDeliveryHandlerRuleSelectionFact(t testing.TB, ctx context.Context, backend deliveryLifecycleConformanceBackend, deliveryID string) handlerselection.HandlerRuleSelectionFact {
+	t.Helper()
+	query := `SELECT selection_context, disposition, COALESCE(package_coordinate, ''), COALESCE(element_id::text, ''), display_label FROM event_delivery_handler_rule_selections WHERE delivery_id=$1::uuid`
+	if !backend.postgres {
+		query = `SELECT selection_context, disposition, COALESCE(package_coordinate, ''), COALESCE(element_id, ''), display_label FROM event_delivery_handler_rule_selections WHERE delivery_id=?`
+	}
+	var contextRaw, dispositionRaw, packageRaw, elementRaw, labelRaw string
+	if err := backend.db.QueryRowContext(ctx, query, deliveryID).Scan(&contextRaw, &dispositionRaw, &packageRaw, &elementRaw, &labelRaw); err != nil {
+		t.Fatalf("load handler rule selection %s: %v", deliveryID, err)
+	}
+	fact, err := handlerselection.Hydrate(contextRaw, dispositionRaw, packageRaw, elementRaw, labelRaw)
+	if err != nil {
+		t.Fatalf("hydrate handler rule selection %s: %v", deliveryID, err)
+	}
+	return fact
 }
 
 func requireCanonicalDeliveryLifecycleSurface(t *testing.T, ctx context.Context, pg *store.PostgresStore) {

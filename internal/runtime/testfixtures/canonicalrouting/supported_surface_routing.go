@@ -5,6 +5,10 @@ import "testing"
 // CopyExactJoinEventBusProof owns the route-bearing contract for the durable
 // root and template-flow join proofs.
 func CopyExactJoinEventBusProof(t testing.TB, flowID string) string {
+	return CopyExactJoinEventBusProofWithTimeout(t, flowID, "1h")
+}
+
+func CopyExactJoinEventBusProofWithTimeout(t testing.TB, flowID, timeout string) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 
@@ -48,8 +52,8 @@ pins:
         stage: awaiting
         members: {from: entity.expected, by: payload.member_id}
         output: payload.result
-        on_complete: {advances_to: ready}
-        timeout: {after: 1h, advances_to: attention}
+        on_complete: {element_id: 00000000-0000-4000-8000-000000000013, advances_to: ready}
+        timeout: {element_id: 00000000-0000-4000-8000-000000000014, after: ` + timeout + `, advances_to: attention}
 `
 
 	switch flowID {

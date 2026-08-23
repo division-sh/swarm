@@ -64,6 +64,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 	assertCleanupTableResult(t, result, "events", 5, 5)
 	assertCleanupTableResult(t, result, "event_receipts", 1, 1)
 	assertCleanupTableResult(t, result, "dead_letters", 2, 2)
+	assertCleanupTableResult(t, result, "event_delivery_handler_rule_selections", 1, 1)
 	assertCleanupTableResult(t, result, "timers", 3, 3)
 	assertCleanupTableResult(t, result, "conversation_forks", 1, 1)
 	assertCleanupTableResult(t, result, "human_task_continuations", 1, 1)
@@ -73,6 +74,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 
 	for _, table := range []string{
 		"runs",
+		"event_delivery_handler_rule_selections",
 		"event_deliveries",
 		"run_fork_delivery_event_replays",
 		"run_fork_selected_contract_executions",
@@ -206,7 +208,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_ProviderAuthorityMatrix(t *t
 					if !ok {
 						t.Fatalf("completion store %T does not expose delivery settlement", fixture.store)
 					}
-					if _, err := deliveryStore.SettleSuccess(testAuthorActivityContext(), fixture.origin, nil, 0); err != nil {
+					if _, err := deliveryStore.SettleSuccess(testAuthorActivityContext(), fixture.origin, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 						t.Fatalf("settle current provider origin before reset: %v", err)
 					}
 				}

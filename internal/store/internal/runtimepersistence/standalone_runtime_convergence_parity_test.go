@@ -86,7 +86,7 @@ func TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity(t *testing
 							if err != nil {
 								t.Fatalf("ClaimAgentDelivery: %v", err)
 							}
-							if _, err := fixture.store.SettleSuccess(ctx, claimed.Claim, nil, 0); err != nil {
+							if _, err := fixture.store.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 								t.Fatalf("SettleSuccess: %v", err)
 							}
 						}
@@ -287,7 +287,7 @@ func TestConcurrentTerminalReceiptsConvergeAdmittedStandaloneRuntimeRun(t *testi
 	for _, claim := range claims {
 		claim := claim
 		go func() {
-			_, err := pg.SettleSuccess(ctx, claim, nil, 0)
+			_, err := pg.SettleSuccess(ctx, claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection())
 			errCh <- err
 		}()
 	}

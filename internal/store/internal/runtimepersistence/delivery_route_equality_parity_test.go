@@ -200,7 +200,7 @@ func TestMixedPubsubConnectCompositionPublicReadbackOnBothBackends(t *testing.T)
 			if err != nil {
 				t.Fatalf("claim local branch: %v", err)
 			}
-			if _, err := selected.SettleSuccess(ctx, localClaim.Claim, nil, 0); err != nil {
+			if _, err := selected.SettleSuccess(ctx, localClaim.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 				t.Fatalf("settle local branch: %v", err)
 			}
 			if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, routes); err != nil {
@@ -217,7 +217,7 @@ func TestMixedPubsubConnectCompositionPublicReadbackOnBothBackends(t *testing.T)
 			if err != nil {
 				t.Fatalf("claim connect branch: %v", err)
 			}
-			if _, err := selected.SettleSuccess(ctx, connectClaimed.Claim, nil, 0); err != nil {
+			if _, err := selected.SettleSuccess(ctx, connectClaimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 				t.Fatalf("settle connect branch: %v", err)
 			}
 			assertMixedEventReadback(t, ctx, selected, event.ID(), producerTarget, consumerTarget, 2)

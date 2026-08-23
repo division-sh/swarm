@@ -329,14 +329,14 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 		var snapshot runtimedelivery.Snapshot
 		switch state {
 		case runtimedelivery.StateDelivered:
-			snapshot, err = sqliteStore.SettleSuccess(ctx, claimed.Claim, nil, time.Millisecond)
+			snapshot, err = sqliteStore.SettleSuccess(ctx, claimed.Claim, nil, time.Millisecond, runtimedelivery.NotApplicableHandlerRuleSelection())
 		case runtimedelivery.StateRetrying:
 			failure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "trace_failure", nil)
 			snapshot, err = sqliteStore.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
 				Disposition: runtimedelivery.FailureRetry,
 				ReasonCode:  "handler_error",
 				Failure:     &failure,
-				RetryBase:   time.Hour,
+				RetryBase:   time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 			})
 		default:
 			t.Fatalf("trace fixture state %q is unsupported", state)

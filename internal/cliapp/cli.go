@@ -145,6 +145,7 @@ with 'swarm run trace', 'swarm event list', and 'swarm mailbox'.`,
 	)
 	addToGroup(commandGroupAuthor,
 		newVerifyCommand(ctx, repo, opts),
+		newMintElementIDsCommand(repo),
 		newMigrateConnectDeliveryOneCommand(repo),
 		newMigrateProducerRoutingCommand(repo),
 		newTestCommand(repo, opts),

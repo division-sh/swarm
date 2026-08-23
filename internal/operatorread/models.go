@@ -6,6 +6,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
@@ -951,6 +952,7 @@ type RunDebugTraceRow struct {
 	DeliveryCreatedAt         *time.Time                        `json:"delivery_created_at,omitempty"`
 	DeliveryStartedAt         *time.Time                        `json:"delivery_started_at,omitempty"`
 	DeliveryDeliveredAt       *time.Time                        `json:"delivery_delivered_at,omitempty"`
+	HandlerRuleSelection      *HandlerRuleSelectionProjection   `json:"handler_rule_selection,omitempty"`
 	SessionID                 string                            `json:"session_id,omitempty"`
 	SessionKind               string                            `json:"session_kind,omitempty"`
 	SessionMemory             bool                              `json:"session_memory"`
@@ -969,6 +971,28 @@ type RunDebugTraceRow struct {
 	TurnRetryCount            int                               `json:"turn_retry_count,omitempty"`
 	TurnFailure               *runtimefailures.Envelope         `json:"turn_failure,omitempty"`
 	TurnCreatedAt             *time.Time                        `json:"turn_created_at,omitempty"`
+}
+
+type HandlerRuleSelectionProjection struct {
+	Context           handlerselection.Context     `json:"context"`
+	Disposition       handlerselection.Disposition `json:"disposition"`
+	PackageCoordinate string                       `json:"package_coordinate,omitempty"`
+	ElementID         string                       `json:"element_id,omitempty"`
+	DisplayLabel      string                       `json:"display_label,omitempty"`
+}
+
+func ProjectHandlerRuleSelection(fact handlerselection.HandlerRuleSelectionFact) (HandlerRuleSelectionProjection, error) {
+	if err := fact.Validate(); err != nil {
+		return HandlerRuleSelectionProjection{}, err
+	}
+	projection := HandlerRuleSelectionProjection{
+		Context: fact.Context(), Disposition: fact.Disposition(), DisplayLabel: fact.DisplayLabel(),
+	}
+	if ref := fact.Ref(); ref.Valid() {
+		projection.PackageCoordinate = ref.PackageKey().String()
+		projection.ElementID = ref.ElementID().String()
+	}
+	return projection, nil
 }
 
 type RunOperationalStatus struct {

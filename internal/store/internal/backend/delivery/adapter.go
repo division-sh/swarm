@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	. "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -837,8 +838,10 @@ func (a *Adapter) RenewClaim(ctx context.Context, tx *sql.Tx, claim Claim, lease
 	return updated.Snapshot, err
 }
 
-func (a *Adapter) SettleSuccess(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, claim Claim, sideEffects []string, duration time.Duration) (Snapshot, error) {
-	return a.settle(ctx, tx, story, claim, Settlement{Disposition: "success", SideEffects: sideEffects, Duration: duration})
+func (a *Adapter) SettleSuccess(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, claim Claim, sideEffects []string, duration time.Duration, selection handlerselection.HandlerRuleSelectionFact) (Snapshot, error) {
+	return a.settle(ctx, tx, story, claim, Settlement{
+		Disposition: "success", SideEffects: sideEffects, Duration: duration, RuleSelection: selection,
+	})
 }
 
 func (a *Adapter) ValidateCurrentClaim(ctx context.Context, tx *sql.Tx, claim Claim) error {
@@ -1031,8 +1034,14 @@ func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, story runtimeauthoract
 	if settlement.Duration < 0 {
 		return Snapshot{}, fmt.Errorf("delivery settlement duration cannot be negative")
 	}
+	if err := settlement.RuleSelection.Validate(); err != nil {
+		return Snapshot{}, fmt.Errorf("delivery handler rule selection: %w", err)
+	}
 	record, now, err := a.requireCurrentClaim(ctx, tx, claim)
 	if err != nil {
+		return Snapshot{}, err
+	}
+	if err := a.persistHandlerRuleSelection(ctx, tx, claim.DeliveryID(), settlement.RuleSelection); err != nil {
 		return Snapshot{}, err
 	}
 	status := StatusDelivered
@@ -1113,6 +1122,71 @@ func (a *Adapter) settle(ctx context.Context, tx *sql.Tx, story runtimeauthoract
 		return Snapshot{}, err
 	}
 	return snapshotAt(updated, now), nil
+}
+
+func (a *Adapter) persistHandlerRuleSelection(ctx context.Context, tx *sql.Tx, deliveryID string, fact handlerselection.HandlerRuleSelectionFact) error {
+	var packageKey, elementID any
+	if ref := fact.Ref(); ref.Valid() {
+		packageKey = ref.PackageKey().String()
+		elementID = ref.ElementID().String()
+	}
+	query := `
+		INSERT INTO event_delivery_handler_rule_selections
+			(delivery_id, selection_context, disposition, package_coordinate, element_id, display_label)
+		VALUES ($1::uuid, $2, $3, $4, $5::uuid, $6)
+		ON CONFLICT (delivery_id) DO NOTHING`
+	if a.dialect == DialectSQLite {
+		query = `
+			INSERT INTO event_delivery_handler_rule_selections
+				(delivery_id, selection_context, disposition, package_coordinate, element_id, display_label)
+			VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT (delivery_id) DO NOTHING`
+	}
+	if _, err := tx.ExecContext(ctx, query, deliveryID, string(fact.Context()), string(fact.Disposition()), packageKey, elementID, fact.DisplayLabel()); err != nil {
+		return fmt.Errorf("persist delivery handler rule selection: %w", err)
+	}
+	load := `
+		SELECT selection_context, disposition, COALESCE(package_coordinate, ''),
+			COALESCE(element_id::text, ''), display_label
+		FROM event_delivery_handler_rule_selections WHERE delivery_id=$1::uuid`
+	if a.dialect == DialectSQLite {
+		load = `
+			SELECT selection_context, disposition, COALESCE(package_coordinate, ''),
+				COALESCE(element_id, ''), display_label
+			FROM event_delivery_handler_rule_selections WHERE delivery_id=?`
+	}
+	var contextRaw, dispositionRaw, packageRaw, elementRaw, labelRaw string
+	if err := tx.QueryRowContext(ctx, load, deliveryID).Scan(&contextRaw, &dispositionRaw, &packageRaw, &elementRaw, &labelRaw); err != nil {
+		return fmt.Errorf("load delivery handler rule selection: %w", err)
+	}
+	persisted, err := handlerselection.Hydrate(contextRaw, dispositionRaw, packageRaw, elementRaw, labelRaw)
+	if err != nil {
+		return fmt.Errorf("hydrate delivery handler rule selection: %w", err)
+	}
+	if !persisted.Equal(fact) {
+		return fmt.Errorf("%w: delivery handler rule selection contradicts the canonical fact", ErrConflict)
+	}
+	return nil
+}
+
+func (a *Adapter) persistTerminalizationRuleSelection(ctx context.Context, tx *sql.Tx, deliveryID string) error {
+	fact := handlerselection.NotApplicable()
+	query := `
+		INSERT INTO event_delivery_handler_rule_selections
+			(delivery_id, selection_context, disposition, package_coordinate, element_id, display_label)
+		VALUES ($1::uuid, $2, $3, NULL, NULL, '')
+		ON CONFLICT (delivery_id) DO NOTHING`
+	if a.dialect == DialectSQLite {
+		query = `
+			INSERT INTO event_delivery_handler_rule_selections
+				(delivery_id, selection_context, disposition, package_coordinate, element_id, display_label)
+			VALUES (?, ?, ?, NULL, NULL, '')
+			ON CONFLICT (delivery_id) DO NOTHING`
+	}
+	if _, err := tx.ExecContext(ctx, query, deliveryID, string(fact.Context()), string(fact.Disposition())); err != nil {
+		return fmt.Errorf("persist terminalized delivery handler rule selection: %w", err)
+	}
+	return nil
 }
 
 func (a *Adapter) retryExhaustedFailure(ctx context.Context, tx *sql.Tx, record deliveryRecord, claim Claim, current *runtimefailures.Envelope) (*runtimefailures.Envelope, error) {
@@ -1989,6 +2063,9 @@ func (a *Adapter) ActiveRunSnapshots(ctx context.Context, tx *sql.Tx, runID stri
 	for _, id := range ids {
 		record, err := a.loadByID(ctx, tx, id, true)
 		if err != nil {
+			return nil, err
+		}
+		if err := a.persistTerminalizationRuleSelection(ctx, tx, id); err != nil {
 			return nil, err
 		}
 		out = append(out, record.Snapshot)

@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -89,6 +90,11 @@ type gateRecoveryStoreCase struct {
 	lifecycle   runtimerunlifecycle.CandidateStore
 	cards       gateRecoveryDecisionStore
 	persistence runtimepipeline.WorkflowPersistence
+	trace       gateRecoveryTraceStore
+}
+
+type gateRecoveryTraceStore interface {
+	LoadRunDebugTracePage(context.Context, string, operatorread.RunDebugTraceQueryOptions) ([]operatorread.RunDebugTraceRow, string, error)
 }
 
 type gateRecoverySelectedStore interface {
@@ -1425,11 +1431,11 @@ func makeGateRecoveryRouteDue(t *testing.T, tc gateRecoveryStoreCase, eventID st
 }
 
 func openSQLiteGateRecoveryStore(t *testing.T) gateRecoveryStoreCase {
-	selected := storetest.StartSQLiteRuntimeStore(t)
+	selected, reconstructed := storetest.StartSQLiteRuntimeStorePair(t)
 	persistence := runtimepipeline.NewWorkflowPersistence(selected)
 	result := gateRecoveryStoreCase{
 		name: "sqlite", db: storetest.Database(selected), events: selected, cards: selected,
-		lifecycle: selected, persistence: persistence,
+		lifecycle: selected, persistence: persistence, trace: reconstructed,
 	}
 	return result
 }
@@ -1438,10 +1444,11 @@ func openPostgresGateRecoveryStore(t *testing.T) gateRecoveryStoreCase {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	selected := storetest.AdmitPostgresRuntimeStore(t, db)
+	reconstructed := storetest.AdmitPostgresRuntimeStore(t, db)
 	persistence := runtimepipeline.NewWorkflowPersistence(selected)
 	result := gateRecoveryStoreCase{
 		name: "postgres", postgres: true, db: db, events: selected, cards: selected,
-		lifecycle: selected, persistence: persistence,
+		lifecycle: selected, persistence: persistence, trace: reconstructed,
 	}
 	return result
 }

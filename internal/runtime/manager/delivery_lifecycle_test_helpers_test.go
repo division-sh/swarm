@@ -371,9 +371,9 @@ func (s *managerDeliveryTestStore) RenewClaim(ctx context.Context, claim runtime
 	return snapshot, err
 }
 
-func (s *managerDeliveryTestStore) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, sideEffects []string, duration time.Duration) (snapshot runtimedelivery.Snapshot, err error) {
+func (s *managerDeliveryTestStore) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, sideEffects []string, duration time.Duration, selection runtimedelivery.HandlerRuleSelectionFact) (snapshot runtimedelivery.Snapshot, err error) {
 	err = s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
-		snapshot, err = s.adapter.SettleSuccess(story, tx, claim, sideEffects, duration)
+		snapshot, err = s.adapter.SettleSuccess(story, tx, claim, sideEffects, duration, selection)
 		return err
 	})
 	return snapshot, err
@@ -421,7 +421,7 @@ func (s *managerDeliveryTestStore) markDelivered(t *testing.T, evt events.Event,
 	if claimed.Claim.DeliveryID() == "" || claimed.Claim.Version() == 0 {
 		t.Fatalf("claim delivered manager fixture event %s returned an empty capability: %#v", evt.ID(), claimed)
 	}
-	if _, err := s.SettleSuccess(ctx, claimed.Claim, nil, 0); err != nil {
+	if _, err := s.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 		t.Fatalf("settle delivered manager fixture event %s: %v", evt.ID(), err)
 	}
 }

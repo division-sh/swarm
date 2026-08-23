@@ -543,7 +543,7 @@ func destructiveResetCleanupStatementsForTable(table string, runIDs []string, in
 	case "event_receipts":
 		statements.count = `SELECT COUNT(*) FROM event_receipts r WHERE EXISTS (SELECT 1 FROM events e WHERE e.event_id = r.event_id AND e.run_id = ANY($1::uuid[]))`
 		statements.delete = `DELETE FROM event_receipts r USING events e WHERE r.event_id = e.event_id AND e.run_id = ANY($1::uuid[])`
-	case "event_delivery_attempts", "event_delivery_outcomes":
+	case "event_delivery_handler_rule_selections", "event_delivery_attempts", "event_delivery_outcomes":
 		statements.count = fmt.Sprintf(`SELECT COUNT(*) FROM %s child WHERE EXISTS (SELECT 1 FROM event_deliveries d LEFT JOIN events e ON e.event_id = d.event_id WHERE d.delivery_id = child.delivery_id AND (d.run_id = ANY($1::uuid[]) OR e.run_id = ANY($1::uuid[])))`, quoteIdent(table))
 		statements.delete = fmt.Sprintf(`DELETE FROM %s child WHERE EXISTS (SELECT 1 FROM event_deliveries d LEFT JOIN events e ON e.event_id = d.event_id WHERE d.delivery_id = child.delivery_id AND (d.run_id = ANY($1::uuid[]) OR e.run_id = ANY($1::uuid[])))`, quoteIdent(table))
 	case "dead_letters":

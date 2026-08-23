@@ -4,12 +4,15 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 )
 
 type HandlerDeclarativeEmitSite struct {
 	Source    string
 	SiteKey   string
 	RuleID    string
+	RuleRef   contractelementidentity.ContractElementRef
 	RuleIndex int
 	Spec      EmitSpec
 	ItemAlias string
@@ -62,7 +65,7 @@ func HandlerEmitEvents(handler SystemNodeEventHandler) []string {
 
 func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler) []HandlerDeclarativeEmitSite {
 	out := make([]HandlerDeclarativeEmitSite, 0, 8)
-	add := func(source, siteKey, ruleID string, ruleIndex int, spec EmitSpec, itemAlias ...string) {
+	add := func(source, siteKey, ruleID string, ruleRef contractelementidentity.ContractElementRef, ruleIndex int, spec EmitSpec, itemAlias ...string) {
 		if spec.Empty() {
 			return
 		}
@@ -74,48 +77,54 @@ func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler) []HandlerDeclar
 			Source:    strings.TrimSpace(source),
 			SiteKey:   strings.TrimSpace(siteKey),
 			RuleID:    strings.TrimSpace(ruleID),
+			RuleRef:   ruleRef,
 			RuleIndex: ruleIndex,
 			Spec:      cloneEmitSpec(spec),
 			ItemAlias: alias,
 		})
 	}
-	addAction := func(source, siteKey, ruleID string, ruleIndex int, action ActionSpec) {
+	addAction := func(source, siteKey, ruleID string, ruleRef contractelementidentity.ContractElementRef, ruleIndex int, action ActionSpec) {
 		if strings.TrimSpace(action.ID) != "artifact_repo_commit" || action.ArtifactRepo == nil {
 			return
 		}
-		add(source+".success", siteKey+".success", ruleID, ruleIndex, EmitSpec{Event: action.ArtifactRepo.SuccessEvent, Fields: action.ArtifactRepo.SuccessPayload})
-		add(source+".failure", siteKey+".failure", ruleID, ruleIndex, EmitSpec{Event: action.ArtifactRepo.FailureEvent, Fields: action.ArtifactRepo.FailurePayload})
+		add(source+".success", siteKey+".success", ruleID, ruleRef, ruleIndex, EmitSpec{Event: action.ArtifactRepo.SuccessEvent, Fields: action.ArtifactRepo.SuccessPayload})
+		add(source+".failure", siteKey+".failure", ruleID, ruleRef, ruleIndex, EmitSpec{Event: action.ArtifactRepo.FailureEvent, Fields: action.ArtifactRepo.FailurePayload})
 	}
-	addAction("handler.action", "handler.action", "", -1, handler.Action)
+	addAction("handler.action", "handler.action", "", contractelementidentity.ContractElementRef{}, -1, handler.Action)
 	templateSites := HandlerRuleEmitTemplateSites(handler)
 	if len(templateSites) == 0 {
-		add("handler.emit", "handler.emit", "", -1, handler.Emit)
+		add("handler.emit", "handler.emit", "", contractelementidentity.ContractElementRef{}, -1, handler.Emit)
 		for idx, rule := range handler.Rules {
-			add("handler.rules.emit", indexedHandlerEmitSiteKey("handler.rules", idx, "emit"), rule.ID, idx, rule.Emit)
-			addAction("handler.rules.action", indexedHandlerEmitSiteKey("handler.rules", idx, "action"), rule.ID, idx, rule.Action)
+			ruleRef, _ := rule.ContractElementRef()
+			add("handler.rules.emit", indexedHandlerEmitSiteKey("handler.rules", idx, "emit"), rule.ID, ruleRef, idx, rule.Emit)
+			addAction("handler.rules.action", indexedHandlerEmitSiteKey("handler.rules", idx, "action"), rule.ID, ruleRef, idx, rule.Action)
 			if rule.FanOut != nil {
-				add("handler.rules.fan_out.emit", indexedHandlerEmitSiteKey("handler.rules", idx, "fan_out.emit"), rule.ID, idx, rule.FanOut.Emit, rule.FanOut.As)
+				add("handler.rules.fan_out.emit", indexedHandlerEmitSiteKey("handler.rules", idx, "fan_out.emit"), rule.ID, ruleRef, idx, rule.FanOut.Emit, rule.FanOut.As)
 			}
 		}
 	} else {
 		out = append(out, templateSites...)
 		for idx, rule := range handler.Rules {
-			addAction("handler.rules.action", indexedHandlerEmitSiteKey("handler.rules", idx, "action"), rule.ID, idx, rule.Action)
+			ruleRef, _ := rule.ContractElementRef()
+			addAction("handler.rules.action", indexedHandlerEmitSiteKey("handler.rules", idx, "action"), rule.ID, ruleRef, idx, rule.Action)
 		}
 	}
-	add("handler.on_success.emit", "handler.on_success.emit", "", -1, handler.OnSuccess.Emit)
+	add("handler.on_success.emit", "handler.on_success.emit", "", contractelementidentity.ContractElementRef{}, -1, handler.OnSuccess.Emit)
 	for idx, rule := range handler.OnComplete {
-		add("handler.on_complete.emit", indexedHandlerEmitSiteKey("handler.on_complete", idx, "emit"), rule.ID, idx, rule.Emit)
+		ruleRef, _ := rule.ContractElementRef()
+		add("handler.on_complete.emit", indexedHandlerEmitSiteKey("handler.on_complete", idx, "emit"), rule.ID, ruleRef, idx, rule.Emit)
 		if rule.FanOut != nil {
-			add("handler.on_complete.fan_out.emit", indexedHandlerEmitSiteKey("handler.on_complete", idx, "fan_out.emit"), rule.ID, idx, rule.FanOut.Emit, rule.FanOut.As)
+			add("handler.on_complete.fan_out.emit", indexedHandlerEmitSiteKey("handler.on_complete", idx, "fan_out.emit"), rule.ID, ruleRef, idx, rule.FanOut.Emit, rule.FanOut.As)
 		}
 	}
 	if handler.Join != nil {
-		add("handler.join.on_complete.emit", "handler.join.on_complete.emit", handler.Join.EffectiveID(), 0, handler.Join.OnComplete.Emit)
-		add("handler.join.timeout.emit", "handler.join.timeout.emit", handler.Join.EffectiveID(), 0, handler.Join.Timeout.Outcome.Emit)
+		completeRef, _ := handler.Join.OnComplete.ContractElementRef()
+		timeoutRef, _ := handler.Join.Timeout.Outcome.ContractElementRef()
+		add("handler.join.on_complete.emit", "handler.join.on_complete.emit", handler.Join.EffectiveID(), completeRef, 0, handler.Join.OnComplete.Emit)
+		add("handler.join.timeout.emit", "handler.join.timeout.emit", handler.Join.EffectiveID(), timeoutRef, 0, handler.Join.Timeout.Outcome.Emit)
 	}
 	if handler.FanOut != nil {
-		add("handler.fan_out.emit", "handler.fan_out.emit", "", -1, handler.FanOut.Emit, handler.FanOut.As)
+		add("handler.fan_out.emit", "handler.fan_out.emit", "", contractelementidentity.ContractElementRef{}, -1, handler.FanOut.Emit, handler.FanOut.As)
 	}
 	return out
 }
@@ -130,10 +139,12 @@ func HandlerRuleEmitTemplateSites(handler SystemNodeEventHandler) []HandlerDecla
 		if !ok {
 			return nil
 		}
+		ruleRef, _ := rule.ContractElementRef()
 		out = append(out, HandlerDeclarativeEmitSite{
 			Source:    "handler.rules.emit_template",
 			SiteKey:   indexedHandlerEmitSiteKey("handler.rules", idx, "emit_template"),
 			RuleID:    strings.TrimSpace(rule.ID),
+			RuleRef:   ruleRef,
 			RuleIndex: idx,
 			Spec:      spec,
 		})

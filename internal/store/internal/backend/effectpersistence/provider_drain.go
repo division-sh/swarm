@@ -537,10 +537,11 @@ func settleProviderDrainOrigin(
 		reason = settlement.Settlement.Failure.Detail.Code
 	}
 	return delivery.SettleProviderOriginFailureTx(ctx, tx, story, origin.Delivery, runtimedelivery.Settlement{
-		Disposition: runtimedelivery.FailureDeadLetter,
-		ReasonCode:  reason,
-		Failure:     settlement.Settlement.Failure,
-		Duration:    duration,
+		Disposition:   runtimedelivery.FailureDeadLetter,
+		ReasonCode:    reason,
+		Failure:       settlement.Settlement.Failure,
+		Duration:      duration,
+		RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 	})
 }
 
@@ -574,10 +575,11 @@ func settleProviderDrainOriginRecovery(
 		reason = code
 	}
 	return delivery.SettleProviderOriginRecoveryFailureTx(ctx, tx, story, origin.Delivery, runtimedelivery.Settlement{
-		Disposition: runtimedelivery.FailureDeadLetter,
-		ReasonCode:  reason,
-		Failure:     settlement.Settlement.Failure,
-		Duration:    duration,
+		Disposition:   runtimedelivery.FailureDeadLetter,
+		ReasonCode:    reason,
+		Failure:       settlement.Settlement.Failure,
+		Duration:      duration,
+		RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 	})
 }
 
@@ -871,6 +873,7 @@ func abandonPrelaunchProviderAttempt(
 		}
 	} else if err := delivery.SettleProviderOriginFailureTx(ctx, tx, story, origin.Delivery, runtimedelivery.Settlement{
 		Disposition: runtimedelivery.FailureDeadLetter, ReasonCode: "provider_attempt_superseded_before_launch", Failure: &failure,
+		RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 	}); err != nil {
 		return fmt.Errorf("settle superseded prelaunch delivery origin: %w", err)
 	}

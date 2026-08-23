@@ -49,7 +49,7 @@ func TestPendingAgentDeliveryRetryEligibilityPreservesSubsecondStoreParity(t *te
 			snapshot, err := selected.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
 				Disposition: runtimedelivery.FailureRetry,
 				Failure:     testRetryableFailure(),
-				RetryBase:   retryBase,
+				RetryBase:   retryBase, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 			})
 			if err != nil {
 				t.Fatalf("settle retry delivery: %v", err)

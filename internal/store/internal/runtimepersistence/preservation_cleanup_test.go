@@ -76,7 +76,7 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 		if snapshot, err := pg.SettleFailure(ctx, retryClaim, runtimedelivery.Settlement{
 			Disposition: runtimedelivery.FailureRetry,
 			Failure:     testRetryableFailure(),
-			RetryBase:   time.Hour,
+			RetryBase:   time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 		}); err != nil || snapshot.Status != runtimedelivery.StatusFailed {
 			t.Fatalf("seed retryable delivery %s: snapshot=%#v err=%v", source, snapshot, err)
 		}

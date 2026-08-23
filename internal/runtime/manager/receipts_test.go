@@ -774,7 +774,7 @@ func (s *failingSettlementManagerDeliveryStore) managerTestDeliveryAuthority() r
 	}).managerTestDeliveryAuthority()
 }
 
-func (*failingSettlementManagerDeliveryStore) SettleSuccess(context.Context, runtimedelivery.Claim, []string, time.Duration) (runtimedelivery.Snapshot, error) {
+func (*failingSettlementManagerDeliveryStore) SettleSuccess(context.Context, runtimedelivery.Claim, []string, time.Duration, runtimedelivery.HandlerRuleSelectionFact) (runtimedelivery.Snapshot, error) {
 	return runtimedelivery.Snapshot{}, errors.New("injected settlement failure")
 }
 

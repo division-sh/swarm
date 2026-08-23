@@ -228,8 +228,8 @@ shared-node:
         stage: missing
         members: {from: entity.expected, by: payload.member_id}
         output: payload.result
-        on_complete: {advances_to: done}
-        timeout: {after: 1h, advances_to: failed}
+        on_complete: {element_id: 00000000-0000-4000-8000-000000000405, advances_to: done}
+        timeout: {element_id: 00000000-0000-4000-8000-000000000406, after: 1h, advances_to: failed}
 `)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

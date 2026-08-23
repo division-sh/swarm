@@ -705,6 +705,16 @@ func (s *RunForkPostgresOwner) DiscardMaterializedSelectedContractExecutionFork(
 		return fmt.Errorf("delete selected-contract fork replay lineage: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM event_delivery_handler_rule_selections
+		WHERE delivery_id IN (
+			SELECT delivery_id FROM event_deliveries
+			WHERE run_id = $1::uuid
+			   OR event_id IN (SELECT event_id FROM events WHERE run_id = $1::uuid)
+		)
+	`, forkRunID); err != nil {
+		return fmt.Errorf("delete selected-contract fork handler rule selections: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM event_delivery_outcomes
 		WHERE delivery_id IN (
 			SELECT delivery_id FROM event_deliveries

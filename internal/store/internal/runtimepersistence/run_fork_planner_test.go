@@ -700,14 +700,14 @@ func TestRunForkPlanner_DoesNotReportPostForkCompletionAsCompletedAtFork(t *test
 		t.Fatalf("seed selected-revision pending route: %v", err)
 	}
 	captureRunForkTestRevision(t, db, runID)
-	if _, err := pg.SettleSuccess(ctx, completedClaim.Claim, nil, 0); err != nil {
+	if _, err := pg.SettleSuccess(ctx, completedClaim.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 		t.Fatalf("complete claimed delivery after selected revision: %v", err)
 	}
 	pendingClaim, err := claimDeliveryFixture(ctx, pg, event, pendingRoute)
 	if err != nil {
 		t.Fatalf("claim pending delivery after selected revision: %v", err)
 	}
-	if _, err := pg.SettleSuccess(ctx, pendingClaim.Claim, nil, 0); err != nil {
+	if _, err := pg.SettleSuccess(ctx, pendingClaim.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 		t.Fatalf("complete pending delivery after selected revision: %v", err)
 	}
 	captureRunForkTestRevision(t, db, runID)
@@ -765,7 +765,7 @@ func TestRunForkPlanner_SuppressesPostForkTerminalMetadata(t *testing.T) {
 	}
 	captureRunForkTestRevision(t, db, runID)
 	failure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "retry_after_fork", nil)
-	settlement := runtimedelivery.Settlement{Disposition: runtimedelivery.FailureRetry, Failure: &failure, RetryBase: time.Hour}
+	settlement := runtimedelivery.Settlement{Disposition: runtimedelivery.FailureRetry, Failure: &failure, RetryBase: time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection()}
 	if _, err := pg.SettleFailure(ctx, failedClaim.Claim, settlement); err != nil {
 		t.Fatalf("fail claimed delivery after selected revision: %v", err)
 	}

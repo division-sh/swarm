@@ -72,7 +72,7 @@ func ApplyFanInNegativeMutation(t testing.TB, root string, mutation FanInNegativ
 		applyClosedReplacement(t, receiverNodes, "          from: entity.period_id\n", "          from: entity.period_id\n          by: payload.period_id\n")
 	case FanInMissingJoinRow:
 		applyClosedReplacement(t, receiverNodes,
-			"    operating.reported:\n      join:\n        stage: awaiting\n        members:\n          from: entity.expected_operating_ids\n        window:\n          from: entity.period_id\n        output: payload.revenue\n        on_complete:\n          advances_to: complete\n        timeout:\n          after: 5m\n          advances_to: failed\n",
+			"    operating.reported:\n      join:\n        stage: awaiting\n        members:\n          from: entity.expected_operating_ids\n        window:\n          from: entity.period_id\n        output: payload.revenue\n        on_complete:\n          element_id: 445e8fbd-e8f7-4b4b-81f0-08ebec2e1b70\n          advances_to: complete\n        timeout:\n          element_id: cc68292e-a6af-47bc-8785-472465db0d81\n          after: 5m\n          advances_to: failed\n",
 			"    operating.reported:\n      advances_to: awaiting\n")
 	case FanInMultipleJoinRows:
 		t.Fatal("FanInMultipleJoinRows is a post-load semantic mutation")
@@ -91,7 +91,7 @@ func ApplyFanInNegativeMutation(t testing.TB, root string, mutation FanInNegativ
 	case FanInHandlerOnComplete:
 		applyClosedReplacement(t, receiverNodes,
 			"      accumulate:\n        into: operating_reports\n        from: payload\n",
-			"      accumulate:\n        into: operating_reports\n        from: payload\n      on_complete:\n        - advances_to: active\n")
+			"      accumulate:\n        into: operating_reports\n        from: payload\n      on_complete:\n        - element_id: 00000000-0000-4000-8000-000000000012\n          advances_to: active\n")
 	default:
 		t.Fatalf("unsupported fan-in negative mutation %d", mutation)
 	}

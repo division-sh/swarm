@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -166,7 +167,7 @@ func TestPostgresStore_Smoke_ManagerEventsMailboxInboundScanCampaigns(t *testing
 	if gotActiveSession != activeSessionID {
 		t.Fatalf("active_session_id = %q, want %q", gotActiveSession, activeSessionID)
 	}
-	if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, 0); err != nil {
+	if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 		t.Fatalf("settle delivery: %v", err)
 	}
 	var deliveryStatus, deliveryReason, receiptReason, clearedActiveSession string

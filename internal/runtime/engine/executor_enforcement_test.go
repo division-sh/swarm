@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -430,6 +431,9 @@ func TestExecutor_OnCompleteRuleComputeAppliesValue(t *testing.T) {
 	}
 	if result.NextState != "passed" {
 		t.Fatalf("NextState = %q", result.NextState)
+	}
+	if result.HandlerRuleSelection.Context() != handlerselection.ContextOnComplete || result.HandlerRuleSelection.Disposition() != handlerselection.DispositionSelected || !result.HandlerRuleSelection.Ref().Valid() {
+		t.Fatalf("on_complete selection = %#v", result.HandlerRuleSelection)
 	}
 	state, ok, err := repo.LoadState(context.Background(), StateAddress{EntityID: "ent-1"})
 	if err != nil || !ok {

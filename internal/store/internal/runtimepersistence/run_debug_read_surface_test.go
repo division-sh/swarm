@@ -311,7 +311,7 @@ func TestRunDebugReadSurface_LoadRunDebugReport_ProjectsTestQuiescenceCounts(t *
 	if err != nil {
 		t.Fatalf("claim ready delivery: %v", err)
 	}
-	if _, err := pg.SettleSuccess(ctx, readyClaim.Claim, nil, 0); err != nil {
+	if _, err := pg.SettleSuccess(ctx, readyClaim.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 		t.Fatalf("settle ready delivery: %v", err)
 	}
 	seedPostgresSemanticEventRecordFixture(t, ctx, db, inboundEvidenceEventID, readyRunID, events.EventTypePlatformInboundRecord, events.EventProducerPlatform, "test", "", "", now.Add(-20*time.Second))
@@ -430,7 +430,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 		Disposition: runtimedelivery.FailureRetry,
 		ReasonCode:  "handler_error",
 		Failure:     &failure,
-		RetryBase:   time.Hour,
+		RetryBase:   time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 	})
 	if err != nil {
 		t.Fatalf("settle delivery failure: %v", err)

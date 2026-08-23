@@ -28,11 +28,13 @@ processing-node:
             weight: 1.0
       rules:
         approve:
+          element_id: 8954a7f7-21eb-4502-8ef8-bd353627d194
           condition: payload.score >= 80
           advances_to: approved
           emit:
             event: item.completed
         reject:
+          element_id: 8eaee0b2-0c6f-4c16-8b50-cb06fb094427
           condition: else
           advances_to: rejected
           emit:

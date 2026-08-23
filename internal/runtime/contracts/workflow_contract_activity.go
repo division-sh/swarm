@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -26,6 +27,7 @@ type ActivitySite struct {
 	HandlerEventKey string
 	Source          string
 	RuleID          string
+	RuleRef         contractelementidentity.ContractElementRef
 	RuleIndex       int
 	Spec            ActivitySpec
 	RevisionField   string
@@ -113,11 +115,13 @@ func ActivitySitesForNode(node runtimeidentity.ExecutableNode, handlers map[stri
 			if rule.Activity.Empty() {
 				continue
 			}
+			ruleRef, _ := rule.ContractElementRef()
 			out = append(out, ActivitySite{
 				Node:            node,
 				HandlerEventKey: handlerEventKey,
 				Source:          indexedHandlerEmitSiteKey("handler.rules", idx, "activity"),
 				RuleID:          strings.TrimSpace(rule.ID),
+				RuleRef:         ruleRef,
 				RuleIndex:       idx,
 				Spec:            rule.Activity,
 			})

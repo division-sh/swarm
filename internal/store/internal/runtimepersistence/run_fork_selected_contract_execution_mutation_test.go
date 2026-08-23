@@ -681,7 +681,7 @@ func TestSelectedContractExecutionMaterializationDoesNotTreatTerminalDeliveryAsA
 	if _, err := pg.SettleFailure(ctx, terminalClaim.Claim, runtimedelivery.Settlement{
 		Disposition: runtimedelivery.FailureDeadLetter,
 		ReasonCode:  "terminal_source_delivery",
-		Failure:     &failure,
+		Failure:     &failure, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 	}); err != nil {
 		t.Fatalf("settle terminal delivery: %v", err)
 	}
@@ -1510,7 +1510,7 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 	forkRoute := testAgentDeliveryRoute(t, "agent-a", "flow-a/1")
 	forkEvent := commitPostgresDeliveryFixture(t, ctx, db, forkEventID, forkRoute)
 	forkClaim := claimPostgresDeliveryFixture(t, ctx, db, forkEvent, forkRoute)
-	if _, err := pg.SettleSuccess(ctx, forkClaim.Claim, nil, time.Second); err != nil {
+	if _, err := pg.SettleSuccess(ctx, forkClaim.Claim, nil, time.Second, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 		t.Fatalf("settle selected agent delivery: %v", err)
 	}
 	followUp := eventtest.PersistedChildForProducer(
@@ -1630,7 +1630,7 @@ func TestSelectedContractActivationAllowsCausalForkLocalRuntimePlatformControlEv
 	forkRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a")}
 	forkEvent := commitPostgresDeliveryFixture(t, ctx, db, forkEventID, forkRoute)
 	forkClaim := claimPostgresDeliveryFixture(t, ctx, db, forkEvent, forkRoute)
-	if _, err := pg.SettleSuccess(ctx, forkClaim.Claim, nil, time.Second); err != nil {
+	if _, err := pg.SettleSuccess(ctx, forkClaim.Claim, nil, time.Second, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 		t.Fatalf("settle selected agent delivery: %v", err)
 	}
 	seedPostgresChildEventRecordFixture(t, ctx, db, uuid.NewString(), materialized.ForkRunID, forkEventID,

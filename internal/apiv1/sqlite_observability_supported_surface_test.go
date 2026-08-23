@@ -199,7 +199,7 @@ func TestSQLiteRunTraceAPISurfacePaginatesAndUsesMaterializationWindow(t *testin
 		if err != nil {
 			t.Fatalf("claim sqlite delivery %s: %v", fixture.id, err)
 		}
-		if _, err := sqliteStore.SettleSuccess(ctx, claimed.Claim, nil, 0); err != nil {
+		if _, err := sqliteStore.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 			t.Fatalf("settle sqlite delivery %s: %v", fixture.id, err)
 		}
 	}

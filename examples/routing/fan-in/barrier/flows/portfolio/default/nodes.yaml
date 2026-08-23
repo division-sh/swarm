@@ -25,7 +25,9 @@ portfolio-collector:
           from: entity.period_id
         output: payload.revenue
         on_complete:
+          element_id: 445e8fbd-e8f7-4b4b-81f0-08ebec2e1b70
           advances_to: complete
         timeout:
+          element_id: cc68292e-a6af-47bc-8785-472465db0d81
           after: 5m
           advances_to: failed

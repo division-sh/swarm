@@ -270,7 +270,7 @@ func TestEventBusExactDuplicateIsOperationNoOpPostgres(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, time.Millisecond); err != nil {
+		if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, time.Millisecond, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 			return err
 		}
 		_, _, err = storetest.TerminalizeRun(ctx, pg, runtimerunlifecycle.TerminalRequest{
@@ -318,7 +318,7 @@ func TestEventBusExactDuplicateIsOperationNoOpSQLite(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if _, err := sqliteStore.SettleSuccess(ctx, claimed.Claim, nil, time.Millisecond); err != nil {
+		if _, err := sqliteStore.SettleSuccess(ctx, claimed.Claim, nil, time.Millisecond, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 			return err
 		}
 		_, _, err = storetest.TerminalizeRun(ctx, sqliteStore, runtimerunlifecycle.TerminalRequest{
@@ -2971,7 +2971,7 @@ func TestEventBusPublish_RuntimeOwnedStandalonePlatformRunsConvergeAfterFinalRec
 			if err != nil {
 				t.Fatalf("ClaimAgentDelivery(%s): %v", tc.eventType, err)
 			}
-			if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, 0); err != nil {
+			if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 				t.Fatalf("SettleSuccess(%s): %v", tc.eventType, err)
 			}
 			executeStandaloneCompletionCandidate(t, ctx, db, pg, tc.eventID)

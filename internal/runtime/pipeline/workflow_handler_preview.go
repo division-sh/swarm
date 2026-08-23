@@ -133,7 +133,7 @@ func PreviewContractHandlerExecution(ctx context.Context, bundle *runtimecontrac
 		status = result.Outcome.Status
 		actions = append(actions, result.Outcome.ActionsExecuted...)
 		guards = append(guards, result.Outcome.GuardsEvaluated...)
-		ruleID = strings.TrimSpace(result.Outcome.RuleID)
+		ruleID = strings.TrimSpace(result.RuleSelection.DisplayLabel())
 		setsGate = strings.TrimSpace(result.Outcome.SetsGate)
 		clearGates = append(clearGates, result.Outcome.ClearGates...)
 		fanOutCount = result.Outcome.FanOutCount

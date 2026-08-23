@@ -270,9 +270,9 @@ func (s *runtimeShutdownDeliveryStore) ScanDeliveryContinuations(
 	return page, nil
 }
 
-func (s *runtimeShutdownDeliveryStore) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, effects []string, duration time.Duration) (snapshot runtimedelivery.Snapshot, err error) {
+func (s *runtimeShutdownDeliveryStore) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, effects []string, duration time.Duration, selection runtimedelivery.HandlerRuleSelectionFact) (snapshot runtimedelivery.Snapshot, err error) {
 	err = s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
-		snapshot, err = s.adapter.SettleSuccess(story, tx, claim, effects, duration)
+		snapshot, err = s.adapter.SettleSuccess(story, tx, claim, effects, duration, selection)
 		return err
 	})
 	return snapshot, err

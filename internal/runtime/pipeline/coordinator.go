@@ -681,7 +681,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 				_ = heartbeat.Stop()
 				return false, fmt.Errorf("prepare workflow node delivery settlement: %w", settleErr)
 			}
-			_, settleErr = deliveryStore.SettleSuccess(executionCtx, claim, sideEffects, time.Since(started))
+			_, settleErr = deliveryStore.SettleSuccess(executionCtx, claim, sideEffects, time.Since(started), admittedHandlerRuleSelection(result.RuleSelection))
 			finishErr := settlementGuard.Finish(settleErr == nil)
 			var releaseErr error
 			if settleErr == nil {
@@ -721,6 +721,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 		snapshot, settleErr := deliveryStore.SettleFailure(executionCtx, claim, runtimedelivery.Settlement{
 			Disposition: disposition, ReasonCode: reason, Failure: &failure.Failure,
 			Duration: time.Since(started), RetryBase: semanticview.HandlerRetryBase(source),
+			RuleSelection: admittedHandlerRuleSelection(result.RuleSelection),
 		})
 		finishErr := settlementGuard.Finish(settleErr == nil)
 		var releaseErr error

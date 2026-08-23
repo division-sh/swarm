@@ -2,18 +2,21 @@ package operatorsurface
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
 type runDebugTraceInputs struct {
-	events   map[string]operatorread.RunDebugTraceRow
-	turns    map[string]runDebugTraceTurn
-	sessions map[string]runDebugTraceSession
+	events     map[string]operatorread.RunDebugTraceRow
+	turns      map[string]runDebugTraceTurn
+	sessions   map[string]runDebugTraceSession
+	selections map[string]operatorread.HandlerRuleSelectionProjection
 }
 
 type runDebugTraceTurn struct {
@@ -107,7 +110,7 @@ func runDebugTracePageQuery(runID string, opts operatorread.RunDebugTraceQueryOp
 }
 
 func loadPostgresRunDebugTraceInputs(ctx context.Context, db eventReadQueryer, runID string, references []runtimedelivery.RunTraceReference) (runDebugTraceInputs, error) {
-	inputs := runDebugTraceInputs{events: map[string]operatorread.RunDebugTraceRow{}, turns: map[string]runDebugTraceTurn{}, sessions: map[string]runDebugTraceSession{}}
+	inputs := runDebugTraceInputs{events: map[string]operatorread.RunDebugTraceRow{}, turns: map[string]runDebugTraceTurn{}, sessions: map[string]runDebugTraceSession{}, selections: map[string]operatorread.HandlerRuleSelectionProjection{}}
 	for _, reference := range references {
 		if _, loaded := inputs.events[reference.EventID]; loaded {
 			continue
@@ -122,6 +125,9 @@ func loadPostgresRunDebugTraceInputs(ctx context.Context, db eventReadQueryer, r
 			return runDebugTraceInputs{}, fmt.Errorf("load referenced run debug trace event %s: %w", reference.EventID, err)
 		}
 		inputs.events[reference.EventID] = row
+	}
+	if err := loadPostgresRunDebugTraceSelections(ctx, db, references, inputs.selections); err != nil {
+		return runDebugTraceInputs{}, err
 	}
 	for _, reference := range references {
 		if reference.TurnID == "" {
@@ -194,7 +200,7 @@ func loadPostgresRunDebugTraceInputs(ctx context.Context, db eventReadQueryer, r
 }
 
 func loadSQLiteRunDebugTraceInputs(ctx context.Context, db eventReadQueryer, runID string, references []runtimedelivery.RunTraceReference) (runDebugTraceInputs, error) {
-	inputs := runDebugTraceInputs{events: map[string]operatorread.RunDebugTraceRow{}, turns: map[string]runDebugTraceTurn{}, sessions: map[string]runDebugTraceSession{}}
+	inputs := runDebugTraceInputs{events: map[string]operatorread.RunDebugTraceRow{}, turns: map[string]runDebugTraceTurn{}, sessions: map[string]runDebugTraceSession{}, selections: map[string]operatorread.HandlerRuleSelectionProjection{}}
 	for _, reference := range references {
 		if _, loaded := inputs.events[reference.EventID]; loaded {
 			continue
@@ -218,6 +224,9 @@ func loadSQLiteRunDebugTraceInputs(ctx context.Context, db eventReadQueryer, run
 		}
 		row.EventCreatedAt = createdAt
 		inputs.events[reference.EventID] = row
+	}
+	if err := loadSQLiteRunDebugTraceSelections(ctx, db, references, inputs.selections); err != nil {
+		return runDebugTraceInputs{}, err
 	}
 
 	for _, reference := range references {
@@ -306,6 +315,61 @@ func loadSQLiteRunDebugTraceInputs(ctx context.Context, db eventReadQueryer, run
 	return inputs, nil
 }
 
+func loadPostgresRunDebugTraceSelections(ctx context.Context, db eventReadQueryer, references []runtimedelivery.RunTraceReference, out map[string]operatorread.HandlerRuleSelectionProjection) error {
+	return loadRunDebugTraceSelections(references, out, func(deliveryID string) (handlerselection.HandlerRuleSelectionFact, error) {
+		var contextRaw, dispositionRaw, packageRaw, elementRaw, labelRaw string
+		err := db.QueryRowContext(ctx, `
+			SELECT selection_context, disposition, COALESCE(package_coordinate, ''),
+			       COALESCE(element_id::text, ''), display_label
+			FROM event_delivery_handler_rule_selections WHERE delivery_id=$1::uuid
+		`, deliveryID).Scan(&contextRaw, &dispositionRaw, &packageRaw, &elementRaw, &labelRaw)
+		if err != nil {
+			return handlerselection.HandlerRuleSelectionFact{}, err
+		}
+		return handlerselection.Hydrate(contextRaw, dispositionRaw, packageRaw, elementRaw, labelRaw)
+	})
+}
+
+func loadSQLiteRunDebugTraceSelections(ctx context.Context, db eventReadQueryer, references []runtimedelivery.RunTraceReference, out map[string]operatorread.HandlerRuleSelectionProjection) error {
+	return loadRunDebugTraceSelections(references, out, func(deliveryID string) (handlerselection.HandlerRuleSelectionFact, error) {
+		var contextRaw, dispositionRaw, packageRaw, elementRaw, labelRaw string
+		err := db.QueryRowContext(ctx, `
+			SELECT selection_context, disposition, COALESCE(package_coordinate, ''),
+			       COALESCE(element_id, ''), display_label
+			FROM event_delivery_handler_rule_selections WHERE delivery_id=?
+		`, deliveryID).Scan(&contextRaw, &dispositionRaw, &packageRaw, &elementRaw, &labelRaw)
+		if err != nil {
+			return handlerselection.HandlerRuleSelectionFact{}, err
+		}
+		return handlerselection.Hydrate(contextRaw, dispositionRaw, packageRaw, elementRaw, labelRaw)
+	})
+}
+
+func loadRunDebugTraceSelections(references []runtimedelivery.RunTraceReference, out map[string]operatorread.HandlerRuleSelectionProjection, load func(string) (handlerselection.HandlerRuleSelectionFact, error)) error {
+	for _, reference := range references {
+		if reference.Delivery == nil || reference.Delivery.DeliveryID == "" {
+			continue
+		}
+		deliveryID := reference.Delivery.DeliveryID
+		if _, loaded := out[deliveryID]; loaded {
+			continue
+		}
+		fact, err := load(deliveryID)
+		if err != nil {
+			if err == sql.ErrNoRows && reference.Delivery.Status != runtimedelivery.StatusFailed && !reference.Delivery.Terminal() {
+				continue
+			}
+			return fmt.Errorf("load run debug trace handler rule selection %s: %w", deliveryID, err)
+		}
+		projection, err := operatorread.ProjectHandlerRuleSelection(fact)
+		if err != nil {
+			return fmt.Errorf("project run debug trace handler rule selection %s: %w", deliveryID, err)
+		}
+		out[deliveryID] = projection
+	}
+	return nil
+}
+
 func referencedRunDebugTraceSessions(references []runtimedelivery.RunTraceReference, turns map[string]runDebugTraceTurn) map[string]struct{} {
 	sessions := map[string]struct{}{}
 	for _, reference := range references {
@@ -340,7 +404,8 @@ func projectRunDebugTrace(inputs runDebugTraceInputs, page runtimedelivery.RunTr
 				return nil, "", fmt.Errorf("run debug trace turn %s was not hydrated", reference.TurnID)
 			}
 		}
-		out = appendProjectedTraceRow(out, event, snapshot, turn, inputs.sessions)
+		selection, hasSelection := inputs.selections[snapshot.DeliveryID]
+		out = appendProjectedTraceRow(out, event, snapshot, turn, inputs.sessions, selection, hasSelection)
 		if !projectedRunDebugTraceRowStillMatches(out[len(out)-1], opts) {
 			return nil, "", fmt.Errorf("run debug trace row %s changed while its bounded page was hydrated", reference.EventID)
 		}
@@ -386,7 +451,7 @@ func traceStringAllowed(value string, allowed []string) bool {
 	return false
 }
 
-func appendProjectedTraceRow(out []operatorread.RunDebugTraceRow, event operatorread.RunDebugTraceRow, snapshot runtimedelivery.Snapshot, turn runDebugTraceTurn, sessions map[string]runDebugTraceSession) []operatorread.RunDebugTraceRow {
+func appendProjectedTraceRow(out []operatorread.RunDebugTraceRow, event operatorread.RunDebugTraceRow, snapshot runtimedelivery.Snapshot, turn runDebugTraceTurn, sessions map[string]runDebugTraceSession, selection operatorread.HandlerRuleSelectionProjection, hasSelection bool) []operatorread.RunDebugTraceRow {
 	row := event
 	if snapshot.DeliveryID != "" {
 		row.DeliveryID = snapshot.DeliveryID
@@ -406,6 +471,9 @@ func appendProjectedTraceRow(out []operatorread.RunDebugTraceRow, event operator
 		row.DeliveryCreatedAt = TraceTimePtr(snapshot.CreatedAt)
 		row.DeliveryStartedAt = TraceTimePtr(snapshot.StartedAt)
 		row.DeliveryDeliveredAt = TraceTimePtr(snapshot.SettledAt)
+		if hasSelection {
+			row.HandlerRuleSelection = &selection
+		}
 	}
 	if turn.row.TurnID != "" {
 		row.TurnID = turn.row.TurnID

@@ -59,9 +59,9 @@ func (a *Adapter) ClaimExactResult(ctx context.Context, tx *sql.Tx, authority ru
 	return result, err
 }
 
-func (a *Adapter) SettleSuccess(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim, sideEffects []string, duration time.Duration) (snapshot runtimedelivery.Snapshot, err error) {
+func (a *Adapter) SettleSuccess(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim, sideEffects []string, duration time.Duration, selection runtimedelivery.HandlerRuleSelectionFact) (snapshot runtimedelivery.Snapshot, err error) {
 	err = a.withStory(ctx, tx, func(story *privateauthoractivity.Mutation) error {
-		snapshot, err = a.Adapter.SettleSuccess(ctx, tx, story, claim, sideEffects, duration)
+		snapshot, err = a.Adapter.SettleSuccess(ctx, tx, story, claim, sideEffects, duration, selection)
 		return err
 	})
 	return snapshot, err

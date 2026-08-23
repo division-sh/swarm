@@ -7,6 +7,7 @@ test-node:
     item.received:
       rules:
         type_a:
+          element_id: 4227efbc-a950-47be-b5b4-c0de71470603
           condition: "payload.kind == 'a'"
           data_accumulation:
             writes:

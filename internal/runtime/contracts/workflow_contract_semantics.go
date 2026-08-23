@@ -106,6 +106,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 		node, _ := record.Identity()
 		flowID := strings.TrimSpace(record.Source.FlowID)
 		for eventType, handler := range record.Entry.EventHandlers {
+			handler, _ = QualifySystemNodeHandlerRuleRefs(node, handler)
 			eventType = strings.TrimSpace(eventType)
 			handler = DefaultSystemNodeHandlerSourceEvent(handler, eventType)
 			if handler.Join == nil {
@@ -139,6 +140,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 		}
 		handlers := make(map[string]SystemNodeEventHandler, len(node.EventHandlers))
 		for eventType, handler := range node.EventHandlers {
+			handler, _ = QualifySystemNodeHandlerRuleRefs(nodeRef, handler)
 			rawEventType := strings.TrimSpace(eventType)
 			if rawEventType == "" {
 				continue

@@ -857,6 +857,7 @@ var systemNodeEventHandlerEntityClassifiers = map[string]handlerEntityFieldClass
 type handlerRuleEntityFieldClassifier func(semanticview.Source, string, runtimecontracts.HandlerRuleEntry) DeliveryTargetEntityDependency
 
 var handlerRuleEntryEntityClassifiers = map[string]handlerRuleEntityFieldClassifier{
+	"ElementID":   noHandlerRuleEntityRequirement,
 	"ID":          noHandlerRuleEntityRequirement,
 	"Description": noHandlerRuleEntityRequirement,
 	"Condition": func(_ semanticview.Source, _ string, rule runtimecontracts.HandlerRuleEntry) DeliveryTargetEntityDependency {
@@ -890,6 +891,8 @@ var handlerRuleEntryEntityClassifiers = map[string]handlerRuleEntityFieldClassif
 	"FanOut": func(_ semanticview.Source, _ string, rule runtimecontracts.HandlerRuleEntry) DeliveryTargetEntityDependency {
 		return fanOutEntityRequirement(rule.FanOut)
 	},
+	"elementRef": noHandlerRuleEntityRequirement,
+	"authored":   noHandlerRuleEntityRequirement,
 }
 
 func handlerExecutionEntityRequirement(source semanticview.Source, flowID string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {

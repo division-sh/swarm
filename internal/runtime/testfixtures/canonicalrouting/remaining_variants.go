@@ -259,8 +259,8 @@ join-node:
         members: {from: entity.expected, by: payload.member_id}
         window: {from: entity.dispatch_id, by: payload.dispatch_id}
         output: payload.result
-        on_complete: {advances_to: ready}
-        timeout: {after: 1h, advances_to: attention}
+        on_complete: {element_id: 00000000-0000-4000-8000-000000000015, advances_to: ready}
+        timeout: {element_id: 00000000-0000-4000-8000-000000000016, after: 1h, advances_to: attention}
 fork-probe:
   id: fork-probe
   execution_type: system_node
