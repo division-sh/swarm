@@ -31,7 +31,7 @@ func beginClaudeTestCompletion(t *testing.T, parent context.Context, request str
 	if actor, ok := runtimeactors.ActorFromContext(parent); ok {
 		ctx = runtimeactors.WithActor(ctx, actor)
 	}
-	attempt, err := runtimeeffects.BeginCompletion(ctx, "claude_cli", []byte(request), nil)
+	attempt, err := beginManagedTestCompletion(t, ctx, "claude_cli", []byte(request))
 	if err != nil {
 		t.Fatalf("authorize claude completion: %v", err)
 	}

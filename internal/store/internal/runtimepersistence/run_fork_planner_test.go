@@ -7,9 +7,11 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -891,23 +893,24 @@ func TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers(t *testing.T
 		at.Add(-time.Second)); err != nil {
 		t.Fatalf("seed active session: %v", err)
 	}
-	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(
-		t, pg, runID, identity,
-		sessionID, turnID, "session", "global",
-	)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
-			agent_route_presence, flow_scope_key, flow_instance_id,
-			session_id, flow_instance, memory_enabled, memory_source,
-			trigger_event_id, trigger_event_type, capability_surface_id, execution_mode, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8,
-			$9::uuid, $10, TRUE, 'authored', $11::uuid, 'fork.session', $12::uuid, 'live', $13)
-	`, turnID, runID, fields.AgentID, fields.NameOwner, fields.NameSource,
-		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, sessionID,
-		fields.FlowInstancePath, eventID, capabilitySurfaceID, at); err != nil {
+	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
+	route := testAgentDeliveryRoute(t, identity.AgentID(), identity.FlowInstance())
+	if err := commitDeliveryObligationFixture(ctx, pg, event, route); err != nil {
+		t.Fatalf("commit active turn origin: %v", err)
+	}
+	claimed, err := claimDeliveryFixture(ctx, pg, event, route)
+	if err != nil {
+		t.Fatalf("claim active turn origin: %v", err)
+	}
+	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, runtimedelivery.WithClaim(ctx, claimed.Claim), pg, runtimellm.AgentTurnRecord{
+		AgentID: identity.AgentID(), Identity: agentmemory.Identity{RunID: runID, Agent: identity},
+		RunID: runID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Authored(true), SessionID: sessionID,
+		TriggerEventID: eventID, TriggerEventType: "fork.session", ParseOK: true,
+	}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: at, OriginEvent: &event}); err != nil {
 		t.Fatalf("seed active turn: %v", err)
+	}
+	if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, time.Millisecond); err != nil {
+		t.Fatalf("settle active turn origin: %v", err)
 	}
 
 	captureRunForkTestRevision(t, db, runID)

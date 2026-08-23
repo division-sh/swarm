@@ -16,6 +16,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
+	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -141,17 +143,21 @@ type drainedCompletionObservationAgent struct {
 func (a drainedCompletionObservationAgent) ID() string                      { return a.id }
 func (drainedCompletionObservationAgent) Type() string                      { return "llm" }
 func (drainedCompletionObservationAgent) Subscriptions() []events.EventType { return nil }
-func (a drainedCompletionObservationAgent) OnEvent(ctx context.Context, _ events.Event) ([]events.Event, error) {
-	handle, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte("manager-drain-observation"), nil)
+func (a drainedCompletionObservationAgent) OnEvent(ctx context.Context, event events.Event) ([]events.Event, error) {
+	surface, ok := managedcapabilities.FromContext(ctx)
+	if !ok {
+		return nil, errors.New("managed capability surface missing")
+	}
+	frame, err := managerDrainedCompletionFrame(ctx, event, surface)
+	if err != nil {
+		return nil, err
+	}
+	handle, err := runtimeeffects.BeginManagedCompletion(ctx, "anthropic_api", []byte("manager-drain-observation"), frame, nil)
 	if err != nil {
 		return nil, err
 	}
 	if err := handle.MarkLaunched(ctx); err != nil {
 		return nil, err
-	}
-	surface, ok := managedcapabilities.FromContext(ctx)
-	if !ok {
-		return nil, errors.New("managed capability surface missing")
 	}
 	surfaceJSON, err := json.Marshal(surface)
 	if err != nil {
@@ -169,6 +175,7 @@ func (a drainedCompletionObservationAgent) OnEvent(ctx context.Context, _ events
 			TurnID: target.ID, RunID: target.RunID, AgentID: target.AgentID, SessionID: target.SessionID,
 			Identity: agentmemory.Identity{RunID: target.RunID, Agent: target.AgentIdentity},
 			Memory:   target.Memory, FlowInstance: target.FlowInstance,
+			TriggerEventID: frame.Turn.Event.ID, TriggerEventType: frame.Turn.Event.Type,
 			CapabilitySurfaceID: surface.ID, CapabilitySurface: surfaceJSON,
 		},
 		Spend: runtimeeffects.CompletionSpend{
@@ -190,6 +197,33 @@ func (a drainedCompletionObservationAgent) OnEvent(ctx context.Context, _ events
 	return []events.Event{eventtest.RunCreatingRootIngress(
 		uuid.NewString(), "late.output", a.id, "", nil, 0, target.RunID, "", events.EventEnvelope{}, time.Now().UTC(),
 	)}, nil
+}
+
+func managerDrainedCompletionFrame(ctx context.Context, event events.Event, surface managedcapabilities.Surface) (agentframe.Frame, error) {
+	intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "agents.yaml#agents.manager-drain.intent", "Exercise drained completion observation.")
+	if err != nil {
+		return agentframe.Frame{}, err
+	}
+	derived, err := runtimeagentintent.IntentOnlyPrompt(intent)
+	if err != nil {
+		return agentframe.Frame{}, err
+	}
+	prompt, err := runtimeagentintent.AssembleProviderPrompt(intent, nil, derived, runtimeagentintent.RuntimeEnvironmentContext())
+	if err != nil {
+		return agentframe.Frame{}, err
+	}
+	bundle, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	if !ok {
+		return agentframe.Frame{}, errors.New("manager drain frame requires bundle source")
+	}
+	bundleHash, bundleSource := bundle.StorageValues()
+	return agentframe.Complete(agentframe.SessionSeed{
+		AgentIdentity: surface.ActorIdentity, Role: "manager-drain", FlowID: surface.ActorIdentity.FlowInstance(),
+		Intent: intent, ProviderPrompt: prompt, RuntimeMode: surface.RuntimeMode, Provider: surface.Provider, Transport: surface.Transport,
+		ModelAlias: "regular", Model: "test-model",
+	}, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: event}, agentframe.Completion{
+		BundleHash: bundleHash, BundleSource: bundleSource, Surface: surface,
+	})
 }
 
 func TestProcessEventConsumesDrainedCompletionObservationWithoutSecondReceiptOrOutput(t *testing.T) {

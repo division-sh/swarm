@@ -27,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	swaruntime "github.com/division-sh/swarm/internal/runtime"
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
@@ -1695,7 +1696,7 @@ func assertSelectedForkProviderCapabilityEvidence(t testing.TB, ctx context.Cont
 
 	rows, err := db.QueryContext(ctx, `
 		SELECT a.capability_surface_id::text, t.capability_surface_id::text, s.surface::text,
-		       o.capability_plan_fingerprint
+		       o.capability_plan_fingerprint, t.turn_id::text, o.agent_frame_bytes, t.agent_frame_bytes
 		FROM runtime_external_effect_attempts a
 		JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
 		JOIN agent_turns t ON t.completion_attempt_id = a.attempt_id
@@ -1715,12 +1716,25 @@ func assertSelectedForkProviderCapabilityEvidence(t testing.TB, ctx context.Cont
 	}
 	defer rows.Close()
 	turnCount := 0
+	frames := make([]agentframe.Frame, 0, wantTurns)
 	for rows.Next() {
 		turnCount++
-		var attemptSurfaceID, turnSurfaceID, rawSurface, planFingerprint string
-		if err := rows.Scan(&attemptSurfaceID, &turnSurfaceID, &rawSurface, &planFingerprint); err != nil {
+		var attemptSurfaceID, turnSurfaceID, rawSurface, planFingerprint, turnID string
+		var operationFrameBytes, turnFrameBytes []byte
+		if err := rows.Scan(&attemptSurfaceID, &turnSurfaceID, &rawSurface, &planFingerprint, &turnID, &operationFrameBytes, &turnFrameBytes); err != nil {
 			t.Fatalf("scan selected completion capability evidence: %v", err)
 		}
+		if !slices.Equal(operationFrameBytes, turnFrameBytes) {
+			t.Fatalf("selected completion operation/turn frame bytes differ for turn %s", turnID)
+		}
+		frame, err := agentframe.DecodeDurable(turnFrameBytes)
+		if err != nil {
+			t.Fatalf("decode selected completion frame for turn %s: %v", turnID, err)
+		}
+		if frame.FrameID != "agent-frame:v1:"+turnID {
+			t.Fatalf("selected completion frame ID = %q, want fresh occurrence for turn %s", frame.FrameID, turnID)
+		}
+		frames = append(frames, frame)
 		if attemptSurfaceID == "" || attemptSurfaceID != turnSurfaceID {
 			t.Fatalf("capability surface attempt=%q turn=%q, want one exact identity", attemptSurfaceID, turnSurfaceID)
 		}
@@ -1747,6 +1761,20 @@ func assertSelectedForkProviderCapabilityEvidence(t testing.TB, ctx context.Cont
 	}
 	if turnCount != wantTurns {
 		t.Fatalf("selected completion evidence rows = %d, want %d", turnCount, wantTurns)
+	}
+	if wantTurns == 2 {
+		var initialID, continuationParent string
+		for _, frame := range frames {
+			switch frame.Turn.Kind {
+			case agentframe.TurnInitial:
+				initialID = frame.FrameID
+			case agentframe.TurnToolContinuation:
+				continuationParent = frame.Turn.ParentFrameID
+			}
+		}
+		if initialID == "" || continuationParent != initialID || frames[0].FrameID == frames[1].FrameID {
+			t.Fatalf("selected fork frames are not fresh parent-bound occurrences: %#v", frames)
+		}
 	}
 	assertSelectedForkCompletionModelAlias(t, ctx, db, proof.RuntimeExecutionID, adapter, wantTurns)
 }
@@ -2805,7 +2833,8 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		t.Fatalf("build winning %s capability surface: %v", winner.surface, err)
 	}
 	providerCtx = managedcapabilities.WithContext(providerCtx, capabilitySurface)
-	handle, err := runtimeeffects.BeginCompletion(providerCtx, "openai_compatible", []byte("request"), nil)
+	frame := selectedForkAuthorityRaceFrame(t, authority, capabilitySurface, baseRequest.LoadedSource.BundleSourceFact.BundleHash())
+	handle, err := runtimeeffects.BeginManagedCompletion(providerCtx, "openai_compatible", []byte("request"), frame, nil)
 	if err != nil {
 		t.Fatalf("winning %s authorize provider completion: %v", winner.surface, err)
 	}
@@ -2834,7 +2863,7 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 			TurnID: authority.Target.ID, RunID: forkRunID, AgentID: authority.Target.AgentID,
 			Identity:  agentmemory.Identity{RunID: forkRunID, Agent: targetIdentity},
 			SessionID: authority.Target.SessionID, Memory: authority.Target.Memory,
-			FlowInstance: authority.Target.FlowInstance, ParseOK: true,
+			FlowInstance: authority.Target.FlowInstance, TriggerEventID: frame.Turn.Event.ID, TriggerEventType: frame.Turn.Event.Type, ParseOK: true,
 			CapabilitySurfaceID: capabilitySurface.ID, CapabilitySurface: capabilitySurfaceJSON,
 		},
 		Spend: runtimeeffects.CompletionSpend{
@@ -2871,6 +2900,38 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	if authorities != 1 || attempts != 1 || reservations != 0 {
 		t.Fatalf("served/standalone authority evidence authorities=%d attempts=%d reservations=%d, want 1/1/0", authorities, attempts, reservations)
 	}
+}
+
+func selectedForkAuthorityRaceFrame(t testing.TB, authority runtimeeffects.Authority, surface managedcapabilities.Surface, bundleHash string) agentframe.Frame {
+	t.Helper()
+	intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "agents.yaml#agents.selected-agent.intent", "Exercise the selected-fork authority race.")
+	if err != nil {
+		t.Fatalf("resolve selected-fork race intent: %v", err)
+	}
+	derived, err := runtimeagentintent.IntentOnlyPrompt(intent)
+	if err != nil {
+		t.Fatalf("derive selected-fork race prompt: %v", err)
+	}
+	prompt, err := runtimeagentintent.AssembleProviderPrompt(intent, nil, derived, runtimeagentintent.RuntimeEnvironmentContext())
+	if err != nil {
+		t.Fatalf("assemble selected-fork race prompt: %v", err)
+	}
+	event := eventtest.RunCreatingRootIngress(
+		uuid.NewString(), "selected_fork.provider_turn.requested", "operator", "selected-agent",
+		json.RawMessage(`{"request":"authority-race"}`), 0, authority.Target.RunID, "",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, uuid.NewString()), time.Unix(1, 0).UTC(),
+	)
+	frame, err := agentframe.Complete(agentframe.SessionSeed{
+		AgentIdentity: authority.Target.AgentIdentity, Role: "selected-agent", FlowID: "selected-authority-race",
+		Intent: intent, ProviderPrompt: prompt, RuntimeMode: surface.RuntimeMode, Provider: surface.Provider, Transport: surface.Transport,
+		ModelAlias: "regular", Model: "test-model",
+	}, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: event}, agentframe.Completion{
+		BundleHash: bundleHash, BundleSource: "ephemeral", Surface: surface,
+	})
+	if err != nil {
+		t.Fatalf("complete selected-fork race frame: %v", err)
+	}
+	return frame
 }
 
 func TestStartSelectedContractAgentRuntimeGatewayReturnsGeneratedBinding(t *testing.T) {
@@ -3283,6 +3344,15 @@ func TestActivateSelectedContractRunForkFailsBeforePublishForPostTReplayScopeMar
 	assertNoForkExecutionRowsForRun(t, db, materialized.ForkRunID)
 }
 
+func persistRunForkManagedTurn(t testing.TB, ctx context.Context, selected *store.PostgresStore, event events.Event, identity agentidentity.Identity, runID, sessionID, turnID, entityID string, at time.Time) {
+	t.Helper()
+	storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{
+		Store: selected, Selected: selected, Identity: identity,
+		RunID: runID, SessionID: sessionID, TurnID: turnID, Memory: agentmemory.Authored(true),
+		EntityID: entityID, TaskID: "task-a", Event: event, ParseOK: true, CreatedAt: at,
+	})
+}
+
 func TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
@@ -3334,22 +3404,8 @@ func TestExecuteSelectedContractRunForkTreatsSourceConversationHistoryAsLineage(
 		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, entityID, agentFields.FlowInstancePath, at); err != nil {
 		t.Fatalf("seed source conversation audit: %v", err)
 	}
-	capabilitySurfaceID := seedRunForkAgentTurnCapabilitySurface(t, ctx, pg, sourceRunID, turnID, sessionID, agentIdentity, "session_per_entity")
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
-			agent_route_presence, flow_scope_key, flow_instance_id,
-			session_id, flow_instance, memory_enabled, memory_source, entity_id,
-			trigger_event_id, trigger_event_type, task_id, capability_surface_id, execution_mode, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8,
-			$9::uuid, $10, TRUE, 'authored', $11::uuid,
-			$12::uuid, 'item.received', 'task-a', $13::uuid, 'live', $14)
-	`, turnID, sourceRunID, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
-		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID,
-		sessionID, agentFields.FlowInstancePath, entityID, sourceEventID, capabilitySurfaceID, at); err != nil {
-		t.Fatalf("seed source turn: %v", err)
-	}
+	sourceEvent := storetest.LoadCanonicalEventRecord(t, ctx, pg, sourceEventID)
+	persistRunForkManagedTurn(t, ctx, pg, sourceEvent, agentIdentity, sourceRunID, sessionID, turnID, entityID, at)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID)
 
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{
@@ -3453,22 +3509,11 @@ func TestExecuteSelectedContractRunForkAdmitsSameSourceActiveDeliveryForkPointEm
 		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, entityID, agentFields.FlowInstancePath, at); err != nil {
 		t.Fatalf("seed source conversation audit: %v", err)
 	}
-	capabilitySurfaceID := seedRunForkAgentTurnCapabilitySurface(t, ctx, pg, sourceRunID, turnID, sessionID, agentIdentity, "session_per_entity")
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
-			agent_route_presence, flow_scope_key, flow_instance_id,
-			session_id, flow_instance, memory_enabled, memory_source, entity_id,
-			trigger_event_id, trigger_event_type, task_id, capability_surface_id, execution_mode, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8,
-			$9::uuid, $10, TRUE, 'authored', $11::uuid,
-			$12::uuid, 'item.received', 'task-a', $13::uuid, 'live', $14)
-	`, turnID, sourceRunID, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
-		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID,
-		sessionID, agentFields.FlowInstancePath, entityID, sourceEventID, capabilitySurfaceID, at); err != nil {
-		t.Fatalf("seed source turn: %v", err)
-	}
+	turnEvent := storetest.InsertExistingRunRootEventRecord(
+		t, ctx, db, authoractivityfixture.DialectPostgres, uuid.NewString(), sourceRunID, "turn.fixture",
+		eventtest.Producer(events.EventProducerExternal, "run-fork-turn-fixture"), []byte(`{}`), events.EventEnvelope{}, at,
+	)
+	persistRunForkManagedTurn(t, ctx, pg, turnEvent, agentIdentity, sourceRunID, sessionID, turnID, entityID, at)
 	claimed, err := storetest.ClaimDelivery(ctx, pg, sourceEvent, agentRoute)
 	if err != nil {
 		t.Fatalf("claim in-progress source delivery: %v", err)
@@ -3597,26 +3642,13 @@ func TestExecuteSelectedContractRunForkTreatsPostTSourceConversationHistoryAsBra
 		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, entityID, agentFields.FlowInstancePath, after); err != nil {
 		t.Fatalf("seed post-T source conversation audit: %v", err)
 	}
-	capabilitySurfaceID := seedRunForkAgentTurnCapabilitySurface(t, ctx, pg, sourceRunID, turnID, sessionID, agentIdentity, "session_per_entity")
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
-			agent_route_presence, flow_scope_key, flow_instance_id,
-			session_id, flow_instance, memory_enabled, memory_source, entity_id,
-			trigger_event_id, trigger_event_type, task_id, capability_surface_id, execution_mode, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8,
-			$9::uuid, $10, TRUE, 'authored', $11::uuid,
-			$12::uuid, 'item.received', 'task-a', $13::uuid, 'live', $14)
-	`, turnID, sourceRunID, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
-		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID,
-		sessionID, agentFields.FlowInstancePath, entityID, sourceEventID, capabilitySurfaceID, after); err != nil {
-		t.Fatalf("seed post-T source turn: %v", err)
-	}
+	sourceEvent := storetest.LoadCanonicalEventRecord(t, ctx, pg, sourceEventID)
+	persistRunForkManagedTurn(t, ctx, pg, sourceEvent, agentIdentity, sourceRunID, sessionID, turnID, entityID, after)
 	captureSelectedExecutionSourceRevision(t, db, sourceRunID,
 		runforkrevision.FamilyAgentSessions,
 		runforkrevision.FamilyAgentConversationAudits,
 		runforkrevision.FamilyAgentTurns,
+		runforkrevision.FamilyEventDeliveries,
 	)
 
 	result, err := executeLiveSelectedContractRunFork(ctx, SelectedContractExecutionRequest{

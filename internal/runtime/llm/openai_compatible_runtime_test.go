@@ -247,7 +247,7 @@ func TestOpenAICompatibleRuntimeFailsClosedWhenUsageMissing(t *testing.T) {
 		t.Fatalf("StartSession: %v", err)
 	}
 	ctx = managedProviderTestContext(t, ctx, runtime, session, nil)
-	_, err = runtime.continueSession(ctx, session, Message{Role: "user", Content: "hello"}, nil)
+	_, err = runtime.continueSession(ctx, session, Message{Role: "user", Content: "hello"}, managedProviderCallForEffectTest(t, ctx))
 	if err == nil || !strings.Contains(err.Error(), "missing usage") {
 		t.Fatalf("ContinueSession error = %v, want missing usage", err)
 	}
@@ -280,7 +280,7 @@ func TestAnthropicAPIRuntimeFailsClosedWhenUsageMissingForBudgetAccounting(t *te
 		t.Fatalf("StartSession: %v", err)
 	}
 	ctx = managedProviderTestContext(t, ctx, runtime, session, nil)
-	_, err = runtime.continueSession(ctx, session, Message{Role: "user", Content: "hello"}, nil)
+	_, err = runtime.continueSession(ctx, session, Message{Role: "user", Content: "hello"}, managedProviderCallForEffectTest(t, ctx))
 	if err == nil || !strings.Contains(err.Error(), "missing usage") {
 		t.Fatalf("ContinueSession error = %v, want missing usage", err)
 	}

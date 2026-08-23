@@ -133,7 +133,7 @@ func (r *managedRoundRuntime) ContinueManagedSession(ctx context.Context, sessio
 	if err != nil {
 		return nil, err
 	}
-	handle, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte(fmt.Sprintf("turn-%d", r.calls+1)), nil)
+	handle, err := runtimeeffects.BeginManagedCompletion(ctx, "anthropic_api", []byte(fmt.Sprintf("turn-%d", r.calls+1)), call.Frame(), nil)
 	if err != nil {
 		return nil, err
 	}

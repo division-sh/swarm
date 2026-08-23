@@ -71,7 +71,11 @@ func newTestManagedConversation(t testing.TB, agentID, flowInstance, role string
 }
 
 func testManagedEvent(agentID string) events.Event {
-	return eventtest.ExistingRunRootIngress(
+	return testManagedEventWithMode(agentID, runtimeeffects.ExecutionModeLive)
+}
+
+func testManagedEventWithMode(agentID string, mode runtimeeffects.ExecutionMode) events.Event {
+	return eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(
 		eventtest.UUID("managed-frame-event:"+agentID),
 		events.EventType("work.requested"),
 		"operator",
@@ -80,7 +84,9 @@ func testManagedEvent(agentID string) events.Event {
 		0,
 		testMemoryRunID,
 		events.EventEnvelope{},
+		events.RoutingSource{},
 		time.Unix(1, 0).UTC(),
+		mode,
 	)
 }
 

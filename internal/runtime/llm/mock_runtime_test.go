@@ -71,7 +71,7 @@ def handle(input):
 		Mock: mockperformance.Performance{Kind: "python", SourcePath: "mocks/assistant.py", Source: source, Digest: pythonSourceDigest(source)},
 	}
 	request := []byte(`{"messages":[{"role":"user","content":"{\"event\":{\"type\":\"message.received\"}}"}],"tools":[{"name":"notify_human","schema":{"type":"object","required":["summary"],"properties":{"summary":{"type":"string"},"context":{}},"additionalProperties":false}}],"tool_results":[],"round":1}`)
-	response, _, usage, _, err := executeMockCompletion(ctx, actor, []ToolDefinition{notifyHumanTestToolDefinition()}, request, llmselection.ResolvedModel{ModelAlias: "regular", ConcreteModel: "mock-frame-model"}, false)
+	response, _, usage, _, err := executeMockCompletion(ctx, actor, []ToolDefinition{notifyHumanTestToolDefinition()}, request, llmselection.ResolvedModel{ModelAlias: "regular", ConcreteModel: "mock-frame-model"}, false, managedProviderCallForEffectTest(t, ctx))
 	if err != nil {
 		t.Fatalf("execute mock completion: %v", err)
 	}
@@ -112,7 +112,7 @@ def handle(input):
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeMock)
 	conversation := newTestManagedConversation(t, "mock-agent", "mock/inst-1", "worker", nil, testMemory(), 2, runtime)
 	conversation.SetToolExecutor(openAIToolExecutor{})
-	response, err := conversation.RunManaged(ctx, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: testManagedEvent("mock-agent")})
+	response, err := conversation.RunManaged(ctx, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: testManagedEventWithMode("mock-agent", runtimeeffects.ExecutionModeMock)})
 	if err != nil {
 		t.Fatalf("RunManaged: %v", err)
 	}

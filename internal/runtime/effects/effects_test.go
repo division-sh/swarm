@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
@@ -412,6 +413,133 @@ func TestBeginSelectedEffectRejectsMissingOrCrossActorTurnBeforeAuthorization(t 
 			}
 		})
 	}
+}
+
+func TestAgentExecutionFrameOwnershipFailsClosedBeforeAuthorization(t *testing.T) {
+	executionID := uuid.NewString()
+	forkRunID := uuid.NewString()
+	selectedAuthority := Authority{
+		Kind: AuthoritySelectedContractFork, ID: executionID,
+		SelectedFork: SelectedContractForkAuthority{
+			ExecutionID: executionID, ForkRunID: forkRunID, Generation: 1,
+			AdmissionFingerprint: "test-admission", ContainerPlanFingerprint: "test-container",
+			ActorCensusFingerprint: "test-actors", EffectiveConfigFingerprint: "test-config",
+		},
+		ExecutionOwner: "test-selected-owner", LeaseExpiresAt: time.Now().UTC().Add(time.Minute), FenceGeneration: 1,
+		ExecutionMode: ExecutionModeLive,
+	}
+	admission, err := managedexecution.New(
+		managedexecution.KindSelectedContractFork, executionID, 1, forkRunID,
+		"test-actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil,
+	)
+	if err != nil {
+		t.Fatalf("build selected managed execution admission: %v", err)
+	}
+	target := UsageTarget{
+		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: forkRunID, AgentID: "agent-a",
+		AgentIdentity: effectLifecycleToken(t, 1, "agent-a", 1).Identity,
+		SessionID:     uuid.NewString(), Memory: agentmemory.PlatformDefault(), FlowInstance: "effects-test/instance",
+	}
+	selectedAuthority.Target = target
+	surface := selectedManagedEffectSurface(t, admission, target, target.AgentID)
+
+	t.Run("managed agent turn requires frame", func(t *testing.T) {
+		store := &completionStoreProbe{}
+		controller := NewCompletionController(store, store, store, completionProjectionProbe{}).WithExecutionPosture(executionposture.Live)
+		ctx := WithExecutionMode(WithController(WithAuthority(context.Background(), selectedAuthority), controller), ExecutionModeLive)
+		ctx = WithLogicalOperationIdentity(ctx, "missing-agent-frame")
+		ctx = managedexecution.WithAdmission(ctx, admission)
+		ctx = managedcapabilities.WithContext(ctx, surface)
+		if _, err := BeginCompletion(ctx, "anthropic_api", []byte("request"), nil); err == nil {
+			t.Fatal("managed agent turn was authorized without an execution frame")
+		} else if failure, ok := runtimefailures.EnvelopeFromError(err); !ok || failure.Detail.Code != "agent_execution_frame_missing_or_mismatched" {
+			t.Fatalf("failure = %#v ok=%v, want agent_execution_frame_missing_or_mismatched", failure, ok)
+		}
+		if len(store.authorizations) != 0 {
+			t.Fatalf("frame-less managed turn reached store authorization %d times", len(store.authorizations))
+		}
+	})
+
+	t.Run("tool effect forbids frame", func(t *testing.T) {
+		probe := &effectStoreProbe{}
+		controller := NewController(probe).WithExecutionPosture(executionposture.Live)
+		ctx := managedexecution.WithAdmission(WithAuthority(context.Background(), selectedAuthority), admission)
+		frame := agentframe.Frame{}
+		_, err := controller.Authorize(ctx, AuthorizeRequest{
+			OperationID: uuid.NewString(), Adapter: "authored_http_tool", RequestFingerprint: "request-fingerprint",
+			CapabilitySurface: &surface, AgentFrame: &frame,
+		})
+		if failure, ok := runtimefailures.EnvelopeFromError(err); !ok || failure.Detail.Code != "agent_execution_frame_owner_mismatch" {
+			t.Fatalf("failure = %#v ok=%v, want agent_execution_frame_owner_mismatch", failure, ok)
+		}
+		if len(probe.authorizations) != 0 {
+			t.Fatalf("tool frame reached store authorization %d times", len(probe.authorizations))
+		}
+	})
+
+	t.Run("forkchat completion forbids frame", func(t *testing.T) {
+		probe := &effectStoreProbe{}
+		controller := NewController(probe).WithExecutionPosture(executionposture.Live)
+		forkTurnID := uuid.NewString()
+		authority := Authority{
+			Kind: AuthorityConversationForkChat, ID: forkTurnID,
+			ExecutionOwner: "forkchat-owner", LeaseExpiresAt: time.Now().UTC().Add(time.Minute), FenceGeneration: 1,
+			ExecutionMode: ExecutionModeLive,
+			ForkChat: ConversationForkChatAuthority{
+				ForkTurnID: forkTurnID, ForkID: uuid.NewString(), BundleHash: "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+				ActorTokenID: "actor-token", RequestOccurrenceID: uuid.NewString(), RequestHash: "request-hash",
+			},
+			Target: UsageTarget{Kind: UsageTargetConversationForkCompletion, ID: forkTurnID, Ordinal: 1},
+		}
+		frame := agentframe.Frame{}
+		_, err := controller.Authorize(WithAuthority(context.Background(), authority), AuthorizeRequest{
+			OperationID: uuid.NewString(), Adapter: "anthropic_api", RequestFingerprint: "request-fingerprint", AgentFrame: &frame,
+		})
+		if failure, ok := runtimefailures.EnvelopeFromError(err); !ok || failure.Detail.Code != "managed_capability_surface_owner_mismatch" {
+			t.Fatalf("failure = %#v ok=%v, want managed_capability_surface_owner_mismatch", failure, ok)
+		}
+		if len(probe.authorizations) != 0 {
+			t.Fatalf("forkchat frame reached store authorization %d times", len(probe.authorizations))
+		}
+	})
+
+	t.Run("startup probe forbids frame", func(t *testing.T) {
+		probe := &effectStoreProbe{}
+		controller := NewController(probe).WithExecutionPosture(executionposture.Live)
+		probeID := uuid.NewString()
+		executionAuthorityID := uuid.NewString()
+		startupSurface, err := managedcapabilities.New(managedcapabilities.Plan{
+			ActorIdentity: target.AgentIdentity, RuntimeMode: "task", Provider: "claude_cli", Transport: "cli", ProviderContract: "claude_cli",
+			Authority: managedcapabilities.Authority{
+				Kind: managedcapabilities.AuthorityStartupProbe, ID: probeID,
+				ExecutionKind: managedcapabilities.ExecutionNormalAgent, ExecutionAuthorityID: executionAuthorityID,
+				StartupOwnerID: "startup-owner", StartupGeneration: 1,
+			},
+			CreatedAt: time.Now().UTC(),
+		})
+		if err != nil {
+			t.Fatalf("build startup surface: %v", err)
+		}
+		authority := Authority{
+			Kind: AuthorityStartupProbe, ID: probeID, ExecutionOwner: "startup-owner",
+			LeaseExpiresAt: time.Now().UTC().Add(time.Minute), FenceGeneration: 1, ExecutionMode: ExecutionModeLive,
+			StartupProbe: StartupProbeAuthority{
+				ProbeID: probeID, StartupAuthorityID: uuid.NewString(), StartupStateVersion: 1,
+				ActorID: startupSurface.ActorID, ExecutionKind: string(managedcapabilities.ExecutionNormalAgent), ExecutionAuthorityID: executionAuthorityID,
+			},
+		}
+		frame := agentframe.Frame{}
+		_, err = controller.Authorize(WithAuthority(context.Background(), authority), AuthorizeRequest{
+			OperationID: uuid.NewString(), Adapter: "claude_cli_startup_probe", RequestFingerprint: "request-fingerprint",
+			CapabilitySurface: &startupSurface, AgentFrame: &frame,
+		})
+		if failure, ok := runtimefailures.EnvelopeFromError(err); !ok || failure.Detail.Code != "startup_probe_authority_invalid" {
+			t.Fatalf("failure = %#v ok=%v, want startup_probe_authority_invalid", failure, ok)
+		}
+		if len(probe.authorizations) != 0 {
+			t.Fatalf("startup frame reached store authorization %d times", len(probe.authorizations))
+		}
+	})
 }
 
 func TestCompletionSettlementRejectsTurnCoordinateMismatch(t *testing.T) {

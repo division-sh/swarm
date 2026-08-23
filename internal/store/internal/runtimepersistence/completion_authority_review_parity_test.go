@@ -96,7 +96,7 @@ func proveSelectedCurrentAuthorityTransition(t *testing.T, sqlite bool) {
 		"review:selected-live-attempt",
 	)
 	providerCtx = withManagedCompletionTestSurface(t, providerCtx, providerAuthority, "anthropic_api")
-	handle, err := runtimeeffects.BeginCompletion(providerCtx, "anthropic_api", []byte("review-selected"), nil)
+	handle, err := beginManagedCompletionForTest(t, providerCtx, "anthropic_api", []byte("review-selected"))
 	if err != nil {
 		t.Fatalf("authorize selected live attempt: %v", err)
 	}
@@ -155,7 +155,7 @@ func proveClaudeRetryGenerationAuthority(t *testing.T, sqlite bool) {
 	logicalID := "review:claude-generation"
 	ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, logicalID)
 	ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, "claude_cli")
-	handle, err := runtimeeffects.BeginCompletion(ctx, "claude_cli", []byte("retry-generation"), nil)
+	handle, err := beginManagedCompletionForTest(t, ctx, "claude_cli", []byte("retry-generation"))
 	if err != nil {
 		t.Fatalf("authorize generation-1 Claude attempt: %v", err)
 	}
@@ -182,7 +182,7 @@ func proveClaudeRetryGenerationAuthority(t *testing.T, sqlite bool) {
 		logicalID,
 	)
 	nextCtx = withManagedCompletionTestSurface(t, nextCtx, nextAuthority, "claude_cli")
-	if _, err := runtimeeffects.BeginCompletion(nextCtx, "claude_cli", []byte("retry-generation"), nil); err == nil {
+	if _, err := beginManagedCompletionForTest(t, nextCtx, "claude_cli", []byte("retry-generation")); err == nil {
 		t.Fatal("generation-2 authority retried a generation-1 operation")
 	}
 	if _, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(time.Now().UTC().Add(time.Minute))); err != nil {

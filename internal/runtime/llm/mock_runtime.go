@@ -181,7 +181,7 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 		return nil, err
 	}
 	start := time.Now()
-	response, raw, usage, dispatch, executeErr := executeMockCompletion(ctx, actor, session.Tools, requestJSON, providerModel, len(request.ToolResults) != 0)
+	response, raw, usage, dispatch, executeErr := executeMockCompletion(ctx, actor, session.Tools, requestJSON, providerModel, len(request.ToolResults) != 0, managed)
 	latency := time.Since(start)
 	if response != nil {
 		if surface, ok := managedcapabilities.FromContext(ctx); ok {
@@ -289,9 +289,9 @@ type mockUsage struct {
 	OutputTokens int `json:"output_tokens"`
 }
 
-func executeMockCompletion(ctx context.Context, actor runtimeactors.AgentConfig, tools []ToolDefinition, request []byte, providerModel llmselection.ResolvedModel, postToolRound bool) (*Response, []byte, runtimeeffects.CompletionUsage, *completionDispatch, error) {
+func executeMockCompletion(ctx context.Context, actor runtimeactors.AgentConfig, tools []ToolDefinition, request []byte, providerModel llmselection.ResolvedModel, postToolRound bool, managed *managedProviderCall) (*Response, []byte, runtimeeffects.CompletionUsage, *completionDispatch, error) {
 	model := strings.TrimSpace(providerModel.ConcreteModel)
-	attempt, err := runtimeeffects.BeginCompletion(ctx, "mock_python", request, nil)
+	attempt, err := beginProviderCompletion(ctx, "mock_python", request, managed)
 	if err != nil {
 		return nil, nil, estimatedMockUsage(request, nil, model), nil, err
 	}

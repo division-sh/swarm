@@ -3,7 +3,6 @@ package runtimepersistence
 import (
 	"context"
 	"encoding/json"
-	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"strings"
 	"testing"
 	"time"
@@ -16,10 +15,12 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
@@ -399,7 +400,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 		)
 		VALUES (
 			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
-			'[]'::jsonb, 1, '{}'::jsonb,
+			'[]'::jsonb, 0, '{}'::jsonb,
 			NULL, NULL, 'active', $10, $11
 		)
 	`, sessionID, runID, fields.AgentID, fields.NameOwner, fields.NameSource,
@@ -425,6 +426,14 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	if _, err := pg.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
 		t.Fatalf("bind delivery session: %v", err)
 	}
+	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, runtimedelivery.WithClaim(ctx, claimed.Claim), pg, runtimellm.AgentTurnRecord{
+		AgentID: identity.AgentID(), Identity: agentmemory.Identity{RunID: runID, Agent: identity},
+		RunID: runID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Authored(true), SessionID: sessionID,
+		EntityID: entityID, TriggerEventID: eventID, TriggerEventType: "scan.requested", TaskID: "task-1",
+		RequestPayload: []byte(`{}`), ResponseRaw: []byte(`{}`), ParseOK: true, Latency: 12 * time.Millisecond, RetryCount: 1,
+	}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: now.Add(2 * time.Second), OriginEvent: &event}); err != nil {
+		t.Fatalf("seed turn: %v", err)
+	}
 	failure := testFailureEnvelope(runtimefailures.ClassConnectorFailure, "trace_failure", nil)
 	failedDelivery, err := pg.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
 		Disposition: runtimedelivery.FailureRetry,
@@ -437,31 +446,6 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_JoinsEventDeliverySessionAndTurn(
 	}
 	setPostgresDeliveryFixtureTimes(t, ctx, db, failedDelivery, now.Add(500*time.Millisecond), now.Add(1*time.Second))
 	deliveryID := failedDelivery.DeliveryID
-	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(
-		t, pg, runID, identity,
-		sessionID, turnID, "session", "entity:"+entityID,
-	)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
-			agent_route_presence, flow_scope_key, flow_instance_id,
-			session_id, flow_instance, memory_enabled, memory_source, entity_id,
-			trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls,
-			emitted_events,
-			request_payload, response_payload, parse_ok, latency_ms, retry_count, failure, execution_mode, created_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8,
-			$9::uuid, $10, TRUE, 'authored', $11::uuid,
-			$12::uuid, 'scan.requested', 'task-1', $13::uuid, '[]'::jsonb,
-			'[]'::jsonb, '{}'::jsonb, '{}'::jsonb, true, 12, 1, NULL, 'live', $14
-		)
-	`, turnID, runID, fields.AgentID, fields.NameOwner, fields.NameSource,
-		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, sessionID,
-		fields.FlowInstancePath, entityID, eventID, capabilitySurfaceID, now.Add(2*time.Second)); err != nil {
-		t.Fatalf("seed turn: %v", err)
-	}
-
 	rows, err := pg.LoadRunDebugTrace(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 10})
 	if err != nil {
 		t.Fatalf("LoadRunDebugTrace: %v", err)
@@ -528,7 +512,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 		)
 		VALUES (
 			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
-			'[]'::jsonb, 1, '{}'::jsonb,
+			'[]'::jsonb, 0, '{}'::jsonb,
 			NULL, NULL, 'active', $10, $11
 		)
 	`, sessionID, runID, fields.AgentID, fields.NameOwner, fields.NameSource,
@@ -548,32 +532,16 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_SinceUsesRowMaterializationWaterm
 	if err != nil {
 		t.Fatalf("bind late delivery session: %v", err)
 	}
-	setPostgresDeliveryFixtureTimes(t, ctx, db, lateDelivery, base.Add(2*time.Second), base.Add(2*time.Second))
-	deliveryID := lateDelivery.DeliveryID
-	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(
-		t, pg, runID, identity,
-		sessionID, turnID, "session", "entity:"+entityID,
-	)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
-			agent_route_presence, flow_scope_key, flow_instance_id,
-			session_id, flow_instance, memory_enabled, memory_source, entity_id,
-			trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls,
-			emitted_events,
-			request_payload, response_payload, parse_ok, latency_ms, retry_count, failure, execution_mode, created_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8,
-			$9::uuid, $10, TRUE, 'authored', $11::uuid,
-			$12::uuid, 'scan.requested', 'task-late', $13::uuid, '[]'::jsonb,
-			'[]'::jsonb, '{}'::jsonb, '{}'::jsonb, true, 12, 0, NULL, 'live', $14
-		)
-	`, turnID, runID, fields.AgentID, fields.NameOwner, fields.NameSource,
-		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, sessionID,
-		fields.FlowInstancePath, entityID, eventID, capabilitySurfaceID, base.Add(3*time.Second)); err != nil {
+	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, runtimedelivery.WithClaim(ctx, claimed.Claim), pg, runtimellm.AgentTurnRecord{
+		AgentID: identity.AgentID(), Identity: agentmemory.Identity{RunID: runID, Agent: identity},
+		RunID: runID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Authored(true), SessionID: sessionID,
+		EntityID: entityID, TriggerEventID: eventID, TriggerEventType: "scan.requested", TaskID: "task-late",
+		RequestPayload: []byte(`{}`), ResponseRaw: []byte(`{}`), ParseOK: true, Latency: 12 * time.Millisecond,
+	}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: base.Add(3 * time.Second), OriginEvent: &event}); err != nil {
 		t.Fatalf("seed late turn: %v", err)
 	}
+	setPostgresDeliveryFixtureTimes(t, ctx, db, lateDelivery, base.Add(2*time.Second), base.Add(2*time.Second))
+	deliveryID := lateDelivery.DeliveryID
 
 	rows, err := pg.LoadRunDebugTrace(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 10, Since: &since})
 	if err != nil {
@@ -615,42 +583,34 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 		)
 		VALUES (
 			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10::uuid,
-			FALSE, 'platform_default', '[]'::jsonb, 1, '{}'::jsonb, 'active', $11, $12
+			FALSE, 'platform_default', '[]'::jsonb, 0, '{}'::jsonb, 'active', $11, $12
 		)
 	`, sessionID, runID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
 		entityID, now.Add(1*time.Second), now.Add(2*time.Second)); err != nil {
 		t.Fatalf("seed audit session: %v", err)
 	}
-	delivered := seedDeliveryStateFixture(
-		t, ctx, pg, event, testAgentDeliveryRoute(t, "agent-task", "flow-a"),
-		runtimedelivery.StateDelivered, nil,
-	)
-	setPostgresDeliveryFixtureTimes(t, ctx, db, delivered, now.Add(500*time.Millisecond), now.Add(500*time.Millisecond))
-	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(
-		t, pg, runID, identity,
-		sessionID, turnID, "task", "entity:"+entityID,
-	)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
-			agent_route_presence, flow_scope_key, flow_instance_id,
-			session_id, flow_instance, memory_enabled, memory_source, entity_id,
-			trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls,
-			emitted_events,
-			request_payload, response_payload, parse_ok, latency_ms, retry_count, failure, execution_mode, created_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8,
-			$9::uuid, $10, FALSE, 'platform_default', $11::uuid,
-			$12::uuid, 'task.started', 'task-2', $13::uuid, '[]'::jsonb,
-			'[]'::jsonb, '{}'::jsonb, '{}'::jsonb, true, 8, 0, NULL, 'live', $14
-		)
-	`, turnID, runID, fields.AgentID, fields.NameOwner, fields.NameSource,
-		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, sessionID,
-		fields.FlowInstancePath, entityID, eventID, capabilitySurfaceID, now.Add(3*time.Second)); err != nil {
+	route := testAgentDeliveryRoute(t, "agent-task", "flow-a")
+	if err := commitDeliveryObligationFixture(ctx, pg, event, route); err != nil {
+		t.Fatalf("commit task delivery: %v", err)
+	}
+	claimed, err := claimDeliveryFixture(ctx, pg, event, route)
+	if err != nil {
+		t.Fatalf("claim task delivery: %v", err)
+	}
+	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, runtimedelivery.WithClaim(ctx, claimed.Claim), pg, runtimellm.AgentTurnRecord{
+		AgentID: identity.AgentID(), Identity: agentmemory.Identity{RunID: runID, Agent: identity},
+		RunID: runID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.PlatformDefault(), SessionID: sessionID,
+		EntityID: entityID, TriggerEventID: eventID, TriggerEventType: "task.started", TaskID: "task-2",
+		RequestPayload: []byte(`{}`), ResponseRaw: []byte(`{}`), ParseOK: true, Latency: 8 * time.Millisecond,
+	}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: now.Add(3 * time.Second), OriginEvent: &event}); err != nil {
 		t.Fatalf("seed turn: %v", err)
 	}
+	delivered, err := pg.SettleSuccess(ctx, claimed.Claim, nil, 8*time.Millisecond)
+	if err != nil {
+		t.Fatalf("settle task delivery: %v", err)
+	}
+	setPostgresDeliveryFixtureTimes(t, ctx, db, delivered, now.Add(500*time.Millisecond), now.Add(500*time.Millisecond))
 
 	rows, err := pg.LoadRunDebugTrace(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 10})
 	if err != nil {

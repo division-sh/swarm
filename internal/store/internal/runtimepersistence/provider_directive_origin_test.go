@@ -73,7 +73,7 @@ func TestProviderDirectiveOriginRejectsMissingAmbiguousAndForeignParity(t *testi
 		} {
 			t.Run(candidate.name, func(t *testing.T) {
 				ctx := candidate.ctx(providerDirectiveBaseContext(t, fixture, "closed-origin-"+candidate.name))
-				if _, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte(candidate.name), nil); err == nil {
+				if _, err := beginManagedCompletionForTest(t, ctx, "anthropic_api", []byte(candidate.name)); err == nil {
 					t.Fatalf("%s directive origin authorized provider completion", candidate.name)
 				}
 				requireProviderAttemptCount(t, fixture, 0)
@@ -143,7 +143,7 @@ func TestProviderDirectiveOriginPrelaunchAbandonmentParity(t *testing.T) {
 		origin, operation := admitProviderDirectiveOrigin(t, fixture, store, "prelaunch")
 		beforeDeliveries := providerDirectiveDeliveryCount(t, fixture)
 		ctx := providerDirectiveContext(t, fixture, origin, "prelaunch")
-		handle, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte("prelaunch"), nil)
+		handle, err := beginManagedCompletionForTest(t, ctx, "anthropic_api", []byte("prelaunch"))
 		if err != nil {
 			t.Fatalf("authorize directive completion: %v", err)
 		}

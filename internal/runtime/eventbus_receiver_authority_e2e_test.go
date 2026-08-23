@@ -228,7 +228,7 @@ func (r *closedReceiverManagedLLM) ContinueManagedSession(ctx context.Context, s
 	ctx = runtimeeffects.WithLogicalOperationIdentitySegment(ctx, "closed-receiver-e2e")
 	ctx = runtimeeffects.WithUsageTarget(ctx, target)
 	ctx = runtimeeffects.WithController(ctx, r.controller)
-	handle, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte(message.Content), nil)
+	handle, err := runtimeeffects.BeginManagedCompletion(ctx, "anthropic_api", []byte(message.Content), call.Frame(), nil)
 	if err != nil {
 		return nil, err
 	}

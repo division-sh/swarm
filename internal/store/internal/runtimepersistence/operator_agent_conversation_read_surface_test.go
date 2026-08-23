@@ -176,6 +176,18 @@ func (s fakeAgentConversationReadSource) LoadOperatorPublicConversationTurn(_ co
 	return operatorread.OperatorPublicConversationTurnDetail{}, operatorread.ErrTurnNotFound
 }
 
+func (s fakeAgentConversationReadSource) LoadLatestPublicConversationTurn(_ context.Context, sessionID string) (*operatorread.OperatorPublicConversationTurn, error) {
+	if s.turnErr != nil {
+		return nil, s.turnErr
+	}
+	turns := s.turns[strings.TrimSpace(sessionID)]
+	if len(turns) == 0 {
+		return nil, nil
+	}
+	turn := turns[0]
+	return &turn, nil
+}
+
 func TestOperatorAgentSummaryPublishesCanonicalMemoryFacts(t *testing.T) {
 	memorySummary := storeoperatorsurface.OperatorAgentSummaryFromPersisted(runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{ExecutionMode: "live", ID: "memory-agent",

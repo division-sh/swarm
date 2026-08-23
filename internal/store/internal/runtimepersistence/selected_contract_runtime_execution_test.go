@@ -164,7 +164,7 @@ func proveSelectedForkCompletionAuthorityIssuance(t *testing.T, fixture selected
 			stale.Target = selectedAgentTurnTarget(fixture.forkRun)
 			attemptCtx := runtimeeffects.WithLogicalOperationIdentity(runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, stale), newCompletionControllerForTest(fixture.store)), "stale:"+tc.name)
 			attemptCtx = withManagedCompletionTestSurface(t, attemptCtx, stale, "anthropic_api")
-			if _, err := runtimeeffects.BeginCompletion(attemptCtx, "anthropic_api", []byte("request"), nil); err == nil {
+			if _, err := beginManagedCompletionForTest(t, attemptCtx, "anthropic_api", []byte("request")); err == nil {
 				t.Fatalf("authorize accepted stale %s", tc.name)
 			}
 		})
@@ -192,7 +192,7 @@ func proveSelectedForkCompletionAuthorityIssuance(t *testing.T, fixture selected
 			t.Fatalf("selected non-provider adapter %s terminal failure returned no failure evidence", registration.Adapter)
 		}
 	}
-	handle, err := runtimeeffects.BeginCompletion(providerCtx, "anthropic_api", []byte("request"), nil)
+	handle, err := beginManagedCompletionForTest(t, providerCtx, "anthropic_api", []byte("request"))
 	if err != nil {
 		t.Fatalf("authorize selected provider completion: %v", err)
 	}
@@ -208,7 +208,7 @@ func proveSelectedForkCompletionAuthorityIssuance(t *testing.T, fixture selected
 	if err := fixture.store.QuiesceRunForkSelectedContractRuntimeExecution(ctx, authority); err != nil {
 		t.Fatalf("quiesce selected authority: %v", err)
 	}
-	if _, err := runtimeeffects.BeginCompletion(providerCtx, "anthropic_api", []byte("new request"), nil); err == nil {
+	if _, err := beginManagedCompletionForTest(t, providerCtx, "anthropic_api", []byte("new request")); err == nil {
 		t.Fatal("quiesced selected authority admitted a new provider call")
 	}
 	if err := fixture.store.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); err != nil {
@@ -319,7 +319,7 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 		attemptCtx := runtimeeffects.WithLogicalOperationIdentity(runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, attemptAuthority), controller), "recover:"+tc.name)
 		attemptCtx = managedSelectedExecutionStoreTestContext(t, attemptCtx, attemptAuthority)
 		attemptCtx = withManagedCompletionTestSurface(t, attemptCtx, attemptAuthority, "openai_responses")
-		handle, err := runtimeeffects.BeginCompletion(attemptCtx, "openai_responses", []byte(tc.name), nil)
+		handle, err := beginManagedCompletionForTest(t, attemptCtx, "openai_responses", []byte(tc.name))
 		if err != nil {
 			t.Fatalf("authorize %s: %v", tc.name, err)
 		}
@@ -391,7 +391,7 @@ func TestSelectedForkCompletionAuthorityCleanupPreservesEvidencePostgres(t *test
 	)
 	completionCtx = managedSelectedExecutionStoreTestContext(t, completionCtx, authority)
 	completionCtx = withManagedCompletionTestSurface(t, completionCtx, authority, "openai_compatible")
-	handle, err := runtimeeffects.BeginCompletion(completionCtx, "openai_compatible", []byte("cleanup-preservation"), nil)
+	handle, err := beginManagedCompletionForTest(t, completionCtx, "openai_compatible", []byte("cleanup-preservation"))
 	if err != nil {
 		t.Fatalf("authorize selected completion: %v", err)
 	}

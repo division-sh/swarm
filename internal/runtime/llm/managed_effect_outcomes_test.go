@@ -49,7 +49,7 @@ func TestManagedProviderEffectOutcomes(t *testing.T) {
 			name: "anthropic_api", adapter: "anthropic_api",
 			send: func(ctx context.Context, client *http.Client) (*completionDispatch, error) {
 				runtime := &AnthropicAPIRuntime{httpClient: client, apiURL: "http://effect.test", apiKey: "test"}
-				_, _, dispatch, err := runtime.sendRequest(ctx, []byte(`{"model":"test"}`))
+				_, _, dispatch, err := runtime.sendRequest(ctx, []byte(`{"model":"test"}`), managedProviderCallForEffectTest(t, ctx))
 				return dispatch, err
 			},
 		},
@@ -57,7 +57,7 @@ func TestManagedProviderEffectOutcomes(t *testing.T) {
 			name: "openai_compatible", adapter: "openai_compatible",
 			send: func(ctx context.Context, client *http.Client) (*completionDispatch, error) {
 				runtime := &OpenAICompatibleRuntime{httpClient: client, baseURL: "http://effect.test", apiKey: "test"}
-				_, _, dispatch, err := runtime.sendRequest(ctx, []byte(`{"model":"test"}`))
+				_, _, dispatch, err := runtime.sendRequest(ctx, []byte(`{"model":"test"}`), managedProviderCallForEffectTest(t, ctx))
 				return dispatch, err
 			},
 		},
@@ -65,7 +65,7 @@ func TestManagedProviderEffectOutcomes(t *testing.T) {
 			name: "openai_responses", adapter: "openai_responses",
 			send: func(ctx context.Context, client *http.Client) (*completionDispatch, error) {
 				runtime := &OpenAIResponsesRuntime{httpClient: client, baseURL: "http://effect.test", apiKey: "test"}
-				_, _, dispatch, err := runtime.sendRequest(ctx, []byte(`{"model":"test"}`))
+				_, _, dispatch, err := runtime.sendRequest(ctx, []byte(`{"model":"test"}`), managedProviderCallForEffectTest(t, ctx))
 				return dispatch, err
 			},
 		},
@@ -103,7 +103,7 @@ func TestManagedProviderEffectOutcomes(t *testing.T) {
 func TestManagedClaudeCLIEffectOutcomes(t *testing.T) {
 	harness := effecttest.New()
 	ctx := llmTestWorkContext(t, harness.CompletionContext("claude-cli-start"))
-	attempt, err := runtimeeffects.BeginCompletion(ctx, "claude_cli", []byte("request"), nil)
+	attempt, err := beginManagedTestCompletion(t, ctx, "claude_cli", []byte("request"))
 	if err != nil {
 		t.Fatalf("authorize claude attempt: %v", err)
 	}
@@ -134,7 +134,8 @@ func TestManagedClaudeCLIEffectOutcomes(t *testing.T) {
 	stale := effecttest.New()
 	stale.AuthorizeErr = errors.New("superseded generation")
 	marker := t.TempDir() + "/started"
-	if _, err := runtimeeffects.BeginCompletion(stale.CompletionContext("claude-cli-stale"), "claude_cli", []byte("request"), nil); err == nil {
+	staleCtx := stale.CompletionContext("claude-cli-stale")
+	if _, err := beginManagedTestCompletion(t, staleCtx, "claude_cli", []byte("request")); err == nil {
 		t.Fatal("stale CLI process was admitted")
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
@@ -145,7 +146,7 @@ func TestManagedClaudeCLIEffectOutcomes(t *testing.T) {
 func TestManagedClaudeCLIStreamingSetupFailureSettlesPrelaunch(t *testing.T) {
 	harness := effecttest.New()
 	ctx := llmTestWorkContext(t, harness.CompletionContext("claude-cli-monitor-prelaunch"))
-	attempt, err := runtimeeffects.BeginCompletion(ctx, "claude_cli", []byte("request"), nil)
+	attempt, err := beginManagedTestCompletion(t, ctx, "claude_cli", []byte("request"))
 	if err != nil {
 		t.Fatalf("authorize claude attempt: %v", err)
 	}

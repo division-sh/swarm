@@ -11,8 +11,10 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 )
 
 func TestSQLiteRunDebugTracePagePaginationWindowAndFilterParity(t *testing.T) {
@@ -203,24 +205,30 @@ func TestSQLiteRunDebugTracePageIncludesStatelessAuditSessionsInWatermark(t *tes
 			conversation, turn_count, runtime_state, status, created_at, updated_at
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, 'platform_default',
-			'[]', 1, '{}', 'active', ?, ?
+			'[]', 0, '{}', 'active', ?, ?
 		)
 	`, sessionID, runID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
 		base.Add(time.Second), base.Add(5*time.Second)); err != nil {
 		t.Fatalf("seed task audit: %v", err)
 	}
-	delivered := seedDeliveryStateFixture(
-		t,
-		ctx,
-		sqliteStore,
-		event,
-		testAgentDeliveryRoute(t, agentID, "flow-a"),
-		runtimedelivery.StateDelivered,
-		nil,
-	)
+	route := testAgentDeliveryRoute(t, agentID, "flow-a")
+	if err := commitDeliveryObligationFixture(ctx, sqliteStore, event, route); err != nil {
+		t.Fatalf("commit task delivery: %v", err)
+	}
+	claimed, err := claimDeliveryFixture(ctx, sqliteStore, event, route)
+	if err != nil {
+		t.Fatalf("claim task delivery: %v", err)
+	}
+	insertSQLiteTraceTurnWithMemory(t, ctx, sqliteStore, claimed.Claim, event, turnID, runID, agentID, sessionID, false, base.Add(2*time.Second))
+	delivered, err := sqliteStore.SettleSuccess(ctx, claimed.Claim, nil, time.Millisecond)
+	if err != nil {
+		t.Fatalf("settle task delivery: %v", err)
+	}
 	setSQLiteDeliveryFixtureTimes(t, ctx, sqliteStore.backend.ConstructionHandle(), delivered, base.Add(time.Second), base.Add(2*time.Second))
-	insertSQLiteTraceTurnWithMemory(t, ctx, sqliteStore, turnID, runID, agentID, sessionID, eventID, "trace.task_audit", false, base.Add(2*time.Second))
+	if _, err := sqliteStore.backend.ExecContext(ctx, `UPDATE agent_conversation_audits SET updated_at = ? WHERE session_id = ?`, base.Add(5*time.Second), sessionID); err != nil {
+		t.Fatalf("restore task audit watermark: %v", err)
+	}
 
 	rows, _, err := sqliteStore.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 10})
 	if err != nil {
@@ -311,6 +319,20 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 	insertSQLiteTraceSession(t, ctx, sqliteStore, "00000000-0000-0000-0000-000000000303", fixture.runID, "agent-second", base.Add(6*time.Second))
 	insertSQLiteTraceSession(t, ctx, sqliteStore, "00000000-0000-0000-0000-000000000304", fixture.runID, "agent-a", base.Add(11*time.Second))
 	insertSQLiteTraceSession(t, ctx, sqliteStore, "00000000-0000-0000-0000-000000000305", fixture.runID, "agent-b", base.Add(11*time.Second))
+	type traceTurn struct {
+		id string
+		at time.Time
+	}
+	turnsByDelivery := map[string][]traceTurn{
+		fixture.lateDeliveredID + "\x00agent-late":     {{id: "00000000-0000-0000-0000-000000000401", at: base.Add(5 * time.Second)}},
+		fixture.failedID + "\x00agent-failed":          {{id: "00000000-0000-0000-0000-000000000402", at: base.Add(3 * time.Second)}},
+		fixture.secondDeliveredID + "\x00agent-second": {{id: "00000000-0000-0000-0000-000000000403", at: base.Add(6 * time.Second)}},
+		"00000000-0000-0000-0000-000000000005\x00agent-a": {
+			{id: fixture.tieTurnA1ID, at: base.Add(11 * time.Second)},
+			{id: fixture.tieTurnA2ID, at: base.Add(11 * time.Second)},
+		},
+		"00000000-0000-0000-0000-000000000005\x00agent-b": {{id: fixture.tieTurnBID, at: base.Add(11 * time.Second)}},
+	}
 
 	seedDelivery := func(eventID, agentID, sessionID string, state runtimedelivery.State, createdAt, transitionAt time.Time) runtimedelivery.Snapshot {
 		t.Helper()
@@ -325,6 +347,9 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 		}
 		if _, err := sqliteStore.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
 			t.Fatalf("bind trace delivery %s/%s: %v", eventID, agentID, err)
+		}
+		for _, turn := range turnsByDelivery[eventID+"\x00"+agentID] {
+			insertSQLiteTraceTurnWithMemory(t, ctx, sqliteStore, claimed.Claim, event, turn.id, fixture.runID, agentID, sessionID, true, turn.at)
 		}
 		var snapshot runtimedelivery.Snapshot
 		switch state {
@@ -354,12 +379,6 @@ func seedSQLiteRunTraceParityRows(t *testing.T, ctx context.Context, sqliteStore
 	tieB := seedDelivery("00000000-0000-0000-0000-000000000005", "agent-b", "00000000-0000-0000-0000-000000000305", runtimedelivery.StateDelivered, base.Add(10*time.Second), base.Add(10*time.Second))
 	fixture.tieDeliveryAID = tieA.DeliveryID
 	fixture.tieDeliveryBID = tieB.DeliveryID
-	insertSQLiteTraceTurn(t, ctx, sqliteStore, "00000000-0000-0000-0000-000000000401", fixture.runID, "agent-late", "00000000-0000-0000-0000-000000000301", fixture.lateDeliveredID, "trace.late_delivered", base.Add(5*time.Second))
-	insertSQLiteTraceTurn(t, ctx, sqliteStore, "00000000-0000-0000-0000-000000000402", fixture.runID, "agent-failed", "00000000-0000-0000-0000-000000000302", fixture.failedID, "trace.failed", base.Add(3*time.Second))
-	insertSQLiteTraceTurn(t, ctx, sqliteStore, "00000000-0000-0000-0000-000000000403", fixture.runID, "agent-second", "00000000-0000-0000-0000-000000000303", fixture.secondDeliveredID, "trace.second_delivered", base.Add(6*time.Second))
-	insertSQLiteTraceTurn(t, ctx, sqliteStore, fixture.tieTurnA1ID, fixture.runID, "agent-a", "00000000-0000-0000-0000-000000000304", "00000000-0000-0000-0000-000000000005", "trace.tie", base.Add(11*time.Second))
-	insertSQLiteTraceTurn(t, ctx, sqliteStore, fixture.tieTurnA2ID, fixture.runID, "agent-a", "00000000-0000-0000-0000-000000000304", "00000000-0000-0000-0000-000000000005", "trace.tie", base.Add(11*time.Second))
-	insertSQLiteTraceTurn(t, ctx, sqliteStore, fixture.tieTurnBID, fixture.runID, "agent-b", "00000000-0000-0000-0000-000000000305", "00000000-0000-0000-0000-000000000005", "trace.tie", base.Add(11*time.Second))
 	return fixture
 }
 
@@ -379,7 +398,7 @@ func insertSQLiteTraceSession(t *testing.T, ctx context.Context, sqliteStore *SQ
 			conversation, turn_count, runtime_state, status, created_at, updated_at
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored',
-			'[]', 1, '{}', 'active', ?, ?
+			'[]', 0, '{}', 'active', ?, ?
 		)
 	`, sessionID, runID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
@@ -388,42 +407,19 @@ func insertSQLiteTraceSession(t *testing.T, ctx context.Context, sqliteStore *SQ
 	}
 }
 
-func insertSQLiteTraceTurn(t *testing.T, ctx context.Context, sqliteStore *SQLiteRuntimeStore, turnID, runID, agentID, sessionID, eventID, eventName string, createdAt time.Time) {
+func insertSQLiteTraceTurnWithMemory(t *testing.T, ctx context.Context, sqliteStore *SQLiteRuntimeStore, claim runtimedelivery.Claim, event events.Event, turnID, runID, agentID, sessionID string, memoryEnabled bool, createdAt time.Time) {
 	t.Helper()
-	insertSQLiteTraceTurnWithMemory(t, ctx, sqliteStore, turnID, runID, agentID, sessionID, eventID, eventName, true, createdAt)
-}
-
-func insertSQLiteTraceTurnWithMemory(t *testing.T, ctx context.Context, sqliteStore *SQLiteRuntimeStore, turnID, runID, agentID, sessionID, eventID, eventName string, memoryEnabled bool, createdAt time.Time) {
-	t.Helper()
-	memorySource := "platform_default"
-	runtimeMode := "task"
+	memory := agentmemory.PlatformDefault()
 	if memoryEnabled {
-		memorySource = "authored"
-		runtimeMode = "session"
+		memory = agentmemory.Authored(true)
 	}
 	identity := testAgentIdentity(t, agentID, "flow-a")
-	fields := testAgentIdentityStorageFields(t, identity)
-	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(
-		t, sqliteStore, runID, identity, sessionID, turnID, runtimeMode, "global",
-	)
-	if _, err := sqliteStore.backend.ExecContext(ctx, `
-		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
-			agent_route_presence, flow_scope_key, flow_instance_id,
-			session_id, flow_instance, memory_enabled, memory_source, entity_id,
-			trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls,
-			emitted_events,
-			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, failure, execution_mode, created_at
-		) VALUES (
-			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL,
-			?, ?, 'task-1', ?, '[]',
-			'[]',
-			'{}', '{}', '[]', 1, 0, 0, NULL, 'live', ?
-		)
-	`, turnID, runID, fields.AgentID, fields.NameOwner, fields.NameSource,
-		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, sessionID,
-		fields.FlowInstancePath, memoryEnabled, memorySource, eventID, eventName,
-		capabilitySurfaceID, createdAt); err != nil {
+	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, runtimedelivery.WithClaim(ctx, claim), sqliteStore, runtimellm.AgentTurnRecord{
+		AgentID: agentID, Identity: agentmemory.Identity{RunID: runID, Agent: identity}, RunID: runID,
+		FlowInstance: identity.FlowInstance(), Memory: memory, SessionID: sessionID,
+		TriggerEventID: event.ID(), TriggerEventType: string(event.Type()), TaskID: "task-1",
+		RequestPayload: []byte(`{}`), ResponseRaw: []byte(`{}`), ParseOK: true,
+	}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: createdAt, OriginEvent: &event}); err != nil {
 		t.Fatalf("seed turn %s/%s: %v", agentID, turnID, err)
 	}
 }

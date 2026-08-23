@@ -92,8 +92,10 @@ func TestCLILoggingForSharedOutputConsumers(t *testing.T) {
 			result: validConversationDetail("sess-1"),
 		},
 		{
-			name:   "conversation turn",
-			args:   func(*testing.T) []string { return []string{"conversation", "turn", "sess-1", "turn-2"} },
+			name: "conversation turn",
+			args: func(*testing.T) []string {
+				return []string{"conversation", "turn", "sess-1", "00000000-0000-4000-8000-000000000002"}
+			},
 			method: conversationGetTurnMethod,
 			result: validConversationTurnDetail("sess-1", 2),
 		},

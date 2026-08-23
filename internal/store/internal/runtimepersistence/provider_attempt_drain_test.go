@@ -43,7 +43,7 @@ func TestProviderAttemptDrainRejectsMissingOrForeignOriginClaimParity(t *testing
 		} {
 			t.Run(candidate.name, func(t *testing.T) {
 				ctx := candidate.ctx(providerDrainContext(t, fixture, "origin-"+candidate.name))
-				if _, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte(candidate.name), nil); err == nil {
+				if _, err := beginManagedCompletionForTest(t, ctx, "anthropic_api", []byte(candidate.name)); err == nil {
 					t.Fatalf("%s origin claim authorized provider completion", candidate.name)
 				}
 				requireProviderAttemptCount(t, fixture, 0)
@@ -56,7 +56,7 @@ func TestProviderAttemptLaunchVersusLifecycleSupersessionParity(t *testing.T) {
 	forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
 		t.Run("transition_wins", func(t *testing.T) {
 			ctx := providerDrainContext(t, fixture, "transition-wins")
-			handle, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte("transition-wins"), nil)
+			handle, err := beginManagedCompletionForTest(t, ctx, "anthropic_api", []byte("transition-wins"))
 			if err != nil {
 				t.Fatalf("authorize completion: %v", err)
 			}
@@ -90,7 +90,7 @@ func TestProviderAttemptLaunchVersusLifecycleSupersessionParity(t *testing.T) {
 func TestProviderAttemptDrainLaunchSupersessionRaceParity(t *testing.T) {
 	forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
 		ctx := providerDrainContext(t, fixture, "launch-race")
-		handle, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte("launch-race"), nil)
+		handle, err := beginManagedCompletionForTest(t, ctx, "anthropic_api", []byte("launch-race"))
 		if err != nil {
 			t.Fatalf("authorize raced completion: %v", err)
 		}
@@ -164,7 +164,7 @@ func TestProviderAttemptDrainLifecycleTransitionRollbackParity(t *testing.T) {
 			t.Run(candidate.name, func(t *testing.T) {
 				fixture := freshProviderDrainFixture(t, base.sqlite)
 				ctx := providerDrainContext(t, fixture, "transition-rollback-"+candidate.name)
-				handle, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte(candidate.name), nil)
+				handle, err := beginManagedCompletionForTest(t, ctx, "anthropic_api", []byte(candidate.name))
 				if err != nil {
 					t.Fatalf("authorize transition rollback completion: %v", err)
 				}
@@ -208,6 +208,7 @@ func TestProviderAttemptDrainLifecycleSupersessionParity(t *testing.T) {
 				fixture := freshProviderDrainFixture(t, fixture.sqlite)
 				ctx := providerDrainContext(t, fixture, "supersession-"+target.name)
 				handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", target.name)
+				wantFrame := loadCompletionFrameBytes(t, fixture, "runtime_external_effect_operations", "operation_id", handle.Attempt().OperationID)
 				result := supersedeProviderDrainFixtureWithKind(t, fixture, target.name, target.phase)
 				if result.ProviderDrainCount != 1 || result.Phase != target.wantDuring {
 					t.Fatalf("transition result=%+v, want one drain in %s", result, target.wantDuring)
@@ -229,6 +230,7 @@ func TestProviderAttemptDrainLifecycleSupersessionParity(t *testing.T) {
 				requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateSettled)
 				requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "settled")
 				requireCompletionSettlementRows(t, fixture, handle.Attempt().AttemptID, settlement.AgentTurn.TurnID, runtimeeffects.StateSettled, 1, 0)
+				assertCompletionFrameBytes(t, fixture, "agent_turns", "turn_id", settlement.AgentTurn.TurnID, wantFrame)
 				requireOriginDeliveryOutcome(t, fixture, "delivered", "")
 				requireAgentLifecycleState(t, fixture, target.wantAfter, result.Generation)
 				requireProviderHead(t, fixture.db, fixture.sqlite, fixture.sessionID, "provider-head-current")
@@ -539,10 +541,11 @@ func TestProviderAttemptDrainStartupRecoveryParity(t *testing.T) {
 			t.Run(candidate.name, func(t *testing.T) {
 				fixture := freshProviderDrainFixture(t, fixture.sqlite)
 				ctx := providerDrainContext(t, fixture, "recovery-"+candidate.name)
-				handle, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte(candidate.name), nil)
+				handle, err := beginManagedCompletionForTest(t, ctx, "anthropic_api", []byte(candidate.name))
 				if err != nil {
 					t.Fatalf("authorize completion: %v", err)
 				}
+				wantFrame := loadCompletionFrameBytes(t, fixture, "runtime_external_effect_operations", "operation_id", handle.Attempt().OperationID)
 				if err := handle.MarkLaunched(ctx); err != nil {
 					t.Fatalf("launch completion: %v", err)
 				}
@@ -573,6 +576,7 @@ func TestProviderAttemptDrainStartupRecoveryParity(t *testing.T) {
 				}
 				requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateOutcomeUncertain)
 				requireCompletionRecoveryRows(t, fixture, handle.Attempt().AttemptID, 1, 1, 0)
+				assertCompletionFrameBytes(t, fixture, "agent_turns", "turn_id", handle.Attempt().Authority.Target.ID, wantFrame)
 				requireOriginDeliveryOutcome(t, fixture, "dead_letter", candidate.wantCode)
 				if candidate.capture {
 					wantDrain := "settled"
@@ -595,6 +599,7 @@ func TestProviderAttemptDrainPreTopologyRecoveryParity(t *testing.T) {
 	forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
 		ctx := providerDrainContext(t, fixture, "pre-topology-recovery")
 		handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "pre-topology-recovery")
+		wantFrame := loadCompletionFrameBytes(t, fixture, "runtime_external_effect_operations", "operation_id", handle.Attempt().OperationID)
 		transition := supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleTerminated)
 
 		requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleDraining, transition.Generation)
@@ -610,6 +615,7 @@ func TestProviderAttemptDrainPreTopologyRecoveryParity(t *testing.T) {
 		}
 		requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateOutcomeUncertain)
 		requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "settled")
+		assertCompletionFrameBytes(t, fixture, "agent_turns", "turn_id", handle.Attempt().Authority.Target.ID, wantFrame)
 		requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleTerminated, transition.Generation)
 		requireAgentCoarseStatus(t, fixture, "terminated")
 
@@ -652,6 +658,7 @@ func TestProviderAttemptDrainTerminalRunRecoveryParity(t *testing.T) {
 	forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
 		ctx := providerDrainContext(t, fixture, "terminal-run-recovery")
 		handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "terminal-run-recovery")
+		wantFrame := loadCompletionFrameBytes(t, fixture, "runtime_external_effect_operations", "operation_id", handle.Attempt().OperationID)
 		transition := supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleRunning)
 		selected, ok := fixture.store.(runQuiescenceStore)
 		if !ok {
@@ -674,6 +681,7 @@ func TestProviderAttemptDrainTerminalRunRecoveryParity(t *testing.T) {
 		}
 		requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateOutcomeUncertain)
 		requireProviderDrainState(t, fixture, handle.Attempt().AttemptID, "settled")
+		assertCompletionFrameBytes(t, fixture, "agent_turns", "turn_id", handle.Attempt().Authority.Target.ID, wantFrame)
 		requireAgentLifecycleState(t, fixture, runtimemanager.AgentLifecycleRunning, transition.Generation)
 		requireTerminalizedOriginDelivery(t, fixture, runtimerunquiescence.ServeAbandonReasonCode)
 		again, err := fixture.store.ReconcileExternalEffectAttempts(testAuthorActivityContext(), liveExternalEffectRecoveryRequest(now.Add(time.Second)))

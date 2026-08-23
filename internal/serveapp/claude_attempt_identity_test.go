@@ -226,6 +226,13 @@ func TestClaudeAttemptStartRejectionRetriesThroughSelectedStore(t *testing.T) {
 			if first.RetryCount != 1 || first.Failure == nil || first.Failure.Detail.Code != "claude_cli_process_start_failed" {
 				t.Fatalf("first receipt = %#v, want retryable start rejection", first)
 			}
+			attempts := loadClaudeAttemptProofAttempts(t, backend)
+			if len(attempts) != 1 || attempts[0].ordinal != 1 || attempts[0].state != string(runtimeeffects.StateTerminalFailure) {
+				t.Fatalf("attempts after start rejection = %#v, want one terminal attempt", attempts)
+			}
+			if turns, spend := loadClaudeAttemptProofCompletionRows(t, backend, attempts[0].id); turns != 0 || spend != 0 {
+				t.Fatalf("start rejection materialized completion rows turns=%d spend=%d, want 0/0", turns, spend)
+			}
 			writeClaudeAttemptProofDocker(t, dockerBin)
 			makeClaudeAttemptProofDeliveryDueNow(t, backend, eventID)
 			eventBus.SignalDeliveryContinuations()
@@ -234,7 +241,7 @@ func TestClaudeAttemptStartRejectionRetriesThroughSelectedStore(t *testing.T) {
 				t.Fatalf("processed receipt=%#v agent_calls=%d, want one real retry", processed, calls.Load())
 			}
 
-			attempts := loadClaudeAttemptProofAttempts(t, backend)
+			attempts = loadClaudeAttemptProofAttempts(t, backend)
 			if len(attempts) != 2 || attempts[0].ordinal != 1 || attempts[0].state != string(runtimeeffects.StateTerminalFailure) || attempts[1].ordinal != 2 || attempts[1].state != string(runtimeeffects.StateSettled) || attempts[0].id == attempts[1].id {
 				t.Fatalf("attempts = %#v, want terminal ordinal 1 and settled fresh ordinal 2", attempts)
 			}

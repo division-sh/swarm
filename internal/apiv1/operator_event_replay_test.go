@@ -17,6 +17,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -24,6 +25,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -334,7 +336,20 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				storetest.CommitSemanticEventWithRoutes(t, ctx, f.store, original,
 					originalRoutes,
 					runtimepipelineobligation.ScopeSubscribed)
+				frameStore, ok := f.store.(storetest.ManagedAgentTurnFixtureStore)
+				if !ok {
+					t.Fatalf("%T does not support managed-turn replay proof", f.store)
+				}
+				sourceTurnID := uuid.NewString()
+				sourceFrame := storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{
+					Store: frameStore, Selected: f.store, Identity: agentIdentity, RunID: runID,
+					SessionID: uuid.NewString(), TurnID: sourceTurnID, Memory: agentmemory.Authored(false),
+					Event: original, DeliveryRoute: &originalRoute, DeliveryCommitted: true, ParseOK: true, CreatedAt: createdAt.Add(time.Minute), ExecutionMode: executionmode.Mock, Adapter: "mock_python",
+				})
 				for _, route := range originalRoutes {
+					if route.Recipient.ID() == agentID {
+						continue
+					}
 					markOperatorReplayDeliveryTerminal(t, ctx, f.store, f.db, f.sqlite, original, route)
 				}
 				persistedOriginal, err := f.store.LoadOperatorEvent(ctx, originalID)
@@ -418,6 +433,28 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 					t.Fatalf("EventSnapshot replay: %v", err)
 				}
 				assertOperatorReplaySnapshot(t, persistedSnapshot, persistedWant)
+				var replayRoute events.DeliveryRoute
+				for _, delivery := range persisted.Deliveries {
+					if delivery.SubscriberID == agentID {
+						replayRoute = delivery.Route.Normalized()
+						break
+					}
+				}
+				if replayRoute.Recipient.ID() != agentID {
+					t.Fatalf("replay event is missing exact managed-agent route: %#v", persisted.Deliveries)
+				}
+				replayTurnID := uuid.NewString()
+				replayFrame := storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{
+					Store: frameStore, Selected: f.store, Identity: agentIdentity, RunID: runID,
+					SessionID: uuid.NewString(), TurnID: replayTurnID, Memory: agentmemory.Authored(false),
+					Event: persistedSnapshot, DeliveryRoute: &replayRoute, DeliveryCommitted: true, ParseOK: true, CreatedAt: replayAt.Add(time.Minute), ExecutionMode: executionmode.Mock, Adapter: "mock_python",
+				})
+				if sourceFrame.Frame.FrameID != "agent-frame:v1:"+sourceTurnID || replayFrame.Frame.FrameID != "agent-frame:v1:"+replayTurnID {
+					t.Fatalf("replay frame occurrence IDs source=%q replay=%q", sourceFrame.Frame.FrameID, replayFrame.Frame.FrameID)
+				}
+				if sourceFrame.Frame.FrameID == replayFrame.Frame.FrameID || sourceFrame.Frame.ContentHash == replayFrame.Frame.ContentHash {
+					t.Fatalf("public replay reused source frame identity: source=%#v replay=%#v", sourceFrame.Frame, replayFrame.Frame)
+				}
 			})
 		}
 	}

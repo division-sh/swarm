@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -25,6 +26,7 @@ type completionRecoveryAttempt struct {
 	AuthorityKind        string
 	AuthorityID          string
 	AuthorityEvidence    string
+	AgentFrame           []byte
 	OperationMode        string
 	AttemptMode          string
 	Adapter              string
@@ -82,7 +84,7 @@ type CompletionRecoveryAuthorityEvidence = completionRecoveryAuthorityEvidence
 
 func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *storellm.LLMPostgresOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, story *privateauthoractivity.Mutation, now time.Time) (runtimeeffects.RecoverySummary, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT o.operation_id::text,a.attempt_id::text,o.authority_kind,o.authority_id,o.authority_evidence::text,
+		SELECT o.operation_id::text,a.attempt_id::text,o.authority_kind,o.authority_id,o.authority_evidence::text,o.agent_frame_bytes,
 		       o.execution_mode,a.execution_mode,
 		       a.adapter,a.transport,a.state,a.usage_target_kind,a.usage_target_id::text,COALESCE(a.target_ordinal,0),
 		       COALESCE(a.capability_surface_id::text,''),COALESCE(s.surface::text,''),
@@ -134,7 +136,7 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *s
 
 func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, story *privateauthoractivity.Mutation, now time.Time) (runtimeeffects.RecoverySummary, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT o.operation_id,a.attempt_id,o.authority_kind,o.authority_id,o.authority_evidence,
+		SELECT o.operation_id,a.attempt_id,o.authority_kind,o.authority_id,o.authority_evidence,o.agent_frame_bytes,
 		       o.execution_mode,a.execution_mode,
 		       a.adapter,a.transport,a.state,a.usage_target_kind,a.usage_target_id,COALESCE(a.target_ordinal,0),
 		       COALESCE(a.capability_surface_id,''),COALESCE(s.surface,''),
@@ -190,7 +192,7 @@ func scanCompletionRecoveryAttempts(rows *sql.Rows) ([]completionRecoveryAttempt
 		var attempt completionRecoveryAttempt
 		var lease conversationForkTimeValue
 		if err := rows.Scan(&attempt.OperationID, &attempt.AttemptID, &attempt.AuthorityKind, &attempt.AuthorityID,
-			&attempt.AuthorityEvidence, &attempt.OperationMode, &attempt.AttemptMode, &attempt.Adapter, &attempt.Transport, &attempt.State,
+			&attempt.AuthorityEvidence, &attempt.AgentFrame, &attempt.OperationMode, &attempt.AttemptMode, &attempt.Adapter, &attempt.Transport, &attempt.State,
 			&attempt.TargetKind, &attempt.TargetID, &attempt.TargetOrdinal,
 			&attempt.CapabilitySurfaceID, &attempt.CapabilitySurface,
 			&attempt.ExecutionOwner, &attempt.FenceGeneration, &lease,
@@ -410,10 +412,18 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 			!runtimeeffects.ProviderTurnTargetMatchesCapabilitySurface(target, surface) {
 			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery capability surface for attempt %s is invalid or mismatched: %w", recovered.AttemptID, err)
 		}
+		frame, err := agentframe.DecodeDurable(recovered.AgentFrame)
+		if err != nil {
+			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery frame for attempt %s: %w", recovered.AttemptID, err)
+		}
+		if err := runtimeeffects.ValidateManagedAgentFrame(frame, authority, surface); err != nil {
+			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery frame for attempt %s is mismatched: %w", recovered.AttemptID, err)
+		}
 		settlement.AgentTurn = &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, RunID: target.RunID, AgentID: agentID, SessionID: target.SessionID,
 			Identity: agentmemory.Identity{RunID: target.RunID, Agent: target.AgentIdentity},
 			Memory:   target.Memory, FlowInstance: target.FlowInstance, EntityID: target.EntityID,
+			TriggerEventID: frame.Turn.Event.ID, TriggerEventType: frame.Turn.Event.Type,
 			CapabilitySurfaceID: surface.ID, CapabilitySurface: json.RawMessage(recovered.CapabilitySurface), Failure: failure,
 		}
 		settlement.Spend.AgentIdentity = target.AgentIdentity

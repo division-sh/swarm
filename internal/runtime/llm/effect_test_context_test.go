@@ -2,9 +2,14 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
+	"github.com/division-sh/swarm/internal/runtime/agentintent"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
@@ -76,4 +81,50 @@ func managedProviderTestContext(t *testing.T, ctx context.Context, runtime Runti
 		t.Fatalf("managedCapabilityPlanForTurn: %v", err)
 	}
 	return managedcapabilities.WithContext(ctx, surface)
+}
+
+func managedProviderCallForEffectTest(t testing.TB, ctx context.Context) *managedProviderCall {
+	t.Helper()
+	surface, ok := managedcapabilities.FromContext(ctx)
+	if !ok {
+		t.Fatal("effect test requires managed capability surface")
+	}
+	intent, err := agentintent.Resolve(agentintent.SourceInline, "inline", "agents.yaml#agents.effect-test.intent", "Process the admitted effect test.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt, err := agentintent.IntentOnlyPrompt(intent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	providerPrompt, err := agentintent.AssembleProviderPrompt(intent, nil, prompt, agentintent.RuntimeEnvironmentContext())
+	if err != nil {
+		t.Fatal(err)
+	}
+	mode, ok := runtimeeffects.ExecutionModeFromContext(ctx)
+	if !ok {
+		mode = runtimeeffects.ExecutionModeLive
+	}
+	event := eventtest.RunCreatingRootIngressWithMode(
+		"66666666-6666-4666-8666-666666666666", "effect.test.requested", "operator", "effect-test",
+		json.RawMessage(`{ "effect": "test" }`), 0, surface.Authority.RunID, "",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "77777777-7777-4777-8777-777777777777"), time.Unix(1, 0).UTC(), mode,
+	)
+	frame, err := agentframe.Complete(agentframe.SessionSeed{
+		AgentIdentity: surface.ActorIdentity, Role: "effect-test", Intent: intent, ProviderPrompt: providerPrompt,
+		RuntimeMode: surface.RuntimeMode, Provider: surface.Provider, Transport: surface.Transport,
+		ModelAlias: "regular", Model: "effect-test-model",
+	}, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: event}, agentframe.Completion{
+		BundleHash:   "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		BundleSource: "persisted", Surface: surface,
+	})
+	if err != nil {
+		t.Fatalf("complete effect-test frame: %v", err)
+	}
+	return &managedProviderCall{frame: frame, provider: frame.Session.Provider}
+}
+
+func beginManagedTestCompletion(t testing.TB, ctx context.Context, adapter string, request []byte) (*runtimeeffects.Handle, error) {
+	t.Helper()
+	return runtimeeffects.BeginManagedCompletion(ctx, adapter, request, managedProviderCallForEffectTest(t, ctx).frame, nil)
 }

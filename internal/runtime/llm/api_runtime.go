@@ -248,7 +248,7 @@ func (r *AnthropicAPIRuntime) continueSession(ctx context.Context, s *Session, m
 	}
 
 	start := time.Now()
-	rawResp, parsed, dispatch, lastErr := r.sendAdmittedRequest(ctx, profile, resolvedModel, reqJSON)
+	rawResp, parsed, dispatch, lastErr := r.sendAdmittedRequest(ctx, profile, resolvedModel, reqJSON, managed)
 	latency := time.Since(start)
 
 	if lastErr != nil {
@@ -345,13 +345,13 @@ func (r *AnthropicAPIRuntime) continueSession(ctx context.Context, s *Session, m
 	return &resp, nil
 }
 
-func (r *AnthropicAPIRuntime) sendAdmittedRequest(ctx context.Context, profile llmselection.Profile, model llmselection.ResolvedModel, payload []byte) ([]byte, anthropicResponse, *completionDispatch, error) {
+func (r *AnthropicAPIRuntime) sendAdmittedRequest(ctx context.Context, profile llmselection.Profile, model llmselection.ResolvedModel, payload []byte, managed *managedProviderCall) ([]byte, anthropicResponse, *completionDispatch, error) {
 	release, err := admitProviderRequest(ctx, r.providerAdmission, profile, model)
 	if err != nil {
 		return nil, anthropicResponse{}, nil, err
 	}
 	defer release()
-	raw, response, dispatch, err := r.sendRequest(ctx, payload)
+	raw, response, dispatch, err := r.sendRequest(ctx, payload, managed)
 	if dispatch != nil {
 		dispatch.providerModel = model
 	}
@@ -437,7 +437,7 @@ func toAnthropicMessage(m Message) (anthropicMessage, bool) {
 	}
 }
 
-func (r *AnthropicAPIRuntime) sendRequest(ctx context.Context, payload []byte) ([]byte, anthropicResponse, *completionDispatch, error) {
+func (r *AnthropicAPIRuntime) sendRequest(ctx context.Context, payload []byte, managed *managedProviderCall) ([]byte, anthropicResponse, *completionDispatch, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.apiURL, bytes.NewReader(payload))
 	if err != nil {
 		return nil, anthropicResponse{}, nil, fmt.Errorf("build anthropic request: %w", err)
@@ -445,7 +445,12 @@ func (r *AnthropicAPIRuntime) sendRequest(ctx context.Context, payload []byte) (
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("x-api-key", r.apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
-	attempt, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", payload, nil)
+	var attempt *runtimeeffects.Handle
+	if managed == nil {
+		attempt, err = runtimeeffects.BeginCompletion(ctx, "anthropic_api", payload, nil)
+	} else {
+		attempt, err = runtimeeffects.BeginManagedCompletion(ctx, "anthropic_api", payload, managed.frame, nil)
+	}
 	if err != nil {
 		return nil, anthropicResponse{}, nil, err
 	}

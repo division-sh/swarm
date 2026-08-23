@@ -27,6 +27,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -1456,7 +1457,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	if _, err := store.BindAgentSession(ctx, claimed.Claim, lease.SessionID); err != nil {
 		t.Fatalf("BindAgentSession trace event: %v", err)
 	}
-	if err := persistManagedAgentTurnReadbackFixture(t, ctx, store, runtimellm.AgentTurnRecord{
+	if err := persistManagedAgentTurnReadbackFixture(t, runtimedelivery.WithClaim(ctx, claimed.Claim), store, runtimellm.AgentTurnRecord{
 		AgentID:          "agent-1",
 		Memory:           agentmemory.Authored(true),
 		SessionID:        lease.SessionID,
@@ -1510,6 +1511,7 @@ func TestSQLiteRuntimeStore_StatelessAuditUsesExplicitMemoryPlan(t *testing.T) {
 	runID := uuid.NewString()
 	sessionID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	seedManagedTurnFixtureAgent(t, ctx, store, "task-agent", "")
 
 	if err := persistManagedAgentTurnReadbackFixture(t, ctx, store, runtimellm.AgentTurnRecord{
 		AgentID:        "task-agent",
@@ -1569,6 +1571,7 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsEntityMetadata(t *testing.T) {
 	sessionID := uuid.NewString()
 	entityID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	seedManagedTurnFixtureAgent(t, ctx, store, "task-agent", "")
 
 	if err := persistManagedAgentTurnReadbackFixture(t, ctx, store, runtimellm.AgentTurnRecord{
 		AgentID:        "task-agent",
@@ -1625,6 +1628,7 @@ func TestSQLiteRuntimeStore_StatelessAuditPersistsFlowInstanceMetadata(t *testin
 	sessionID := uuid.NewString()
 	flowInstance := "review/inst-1"
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID})
+	seedManagedTurnFixtureAgent(t, ctx, store, "task-agent", flowInstance)
 
 	if err := persistManagedAgentTurnReadbackFixture(t, ctx, store, runtimellm.AgentTurnRecord{
 		AgentID:        "task-agent",

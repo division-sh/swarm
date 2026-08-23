@@ -91,6 +91,15 @@ type OperatorPublicConversationTurn struct {
 type OperatorPublicConversationTurnDetail struct {
 	Session OperatorConversationSummary    `json:"session"`
 	Turn    OperatorPublicConversationTurn `json:"turn"`
+	Frame   OperatorConversationFrameFacts `json:"frame"`
+}
+
+type OperatorConversationFrameFacts struct {
+	Version       string `json:"version"`
+	FrameID       string `json:"frame_id"`
+	ContentHash   string `json:"content_hash"`
+	TurnKind      string `json:"turn_kind"`
+	ParentFrameID string `json:"parent_frame_id,omitempty"`
 }
 
 type OperatorEntityListOptions struct {

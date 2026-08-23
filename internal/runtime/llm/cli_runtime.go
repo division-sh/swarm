@@ -313,7 +313,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 		"tools":                   s.Tools,
 		"turn_count":              s.TurnCount,
 	})
-	attempt, err := runtimeeffects.BeginCompletion(ctx, claudeCLICompletionAdapter, requestFingerprintInput, nil)
+	attempt, err := beginProviderCompletion(ctx, claudeCLICompletionAdapter, requestFingerprintInput, managed)
 	if err != nil {
 		return nil, err
 	}
@@ -395,10 +395,17 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 		"prompt_arg_fallback_used":      transportFallback.Used,
 	})
 	if err != nil {
-		turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, nil, false, latency, agentTurnFailure(err, "claude_cli_turn")), nil)
-		state := claudeCompletionFailureState(err)
-		if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableCompletionUsage(usageModel), state, turn.Failure, map[string]any{"stage": "provider_call"}); settleErr != nil {
-			return nil, errors.Join(err, settleErr)
+		if attemptFailure := claudeNoProviderInvocationFailure(err); attemptFailure != nil {
+			failure := runtimefailures.FromError(err, "claude-cli-adapter", attemptFailure.operation)
+			if settleErr := dispatch.handle.Settle(ctx, attemptFailure.state, &failure.Failure, attemptFailure.evidence); settleErr != nil {
+				return nil, errors.Join(err, settleErr)
+			}
+		} else {
+			turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, nil, false, latency, agentTurnFailure(err, "claude_cli_turn")), nil)
+			state := claudeCompletionFailureState(err)
+			if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableCompletionUsage(usageModel), state, turn.Failure, map[string]any{"stage": "provider_call"}); settleErr != nil {
+				return nil, errors.Join(err, settleErr)
+			}
 		}
 		projectionErr := requireCurrentProviderProjection(ctx, s.AgentID)
 		if projectionErr == nil {

@@ -220,6 +220,7 @@ func validateManagedCall(ctx context.Context, session *Session, call ManagedCall
 type managedProviderCall struct {
 	message  Message
 	provider agentframe.Provider
+	frame    agentframe.Frame
 }
 
 func validateManagedProviderCall(ctx context.Context, session *Session, call ManagedCall, contract ProviderContract) (managedProviderCall, error) {
@@ -234,7 +235,7 @@ func validateManagedProviderCall(ctx context.Context, session *Session, call Man
 	if provider.RuntimeMode != contract.RuntimeMode || provider.Provider != contract.Provider || provider.Transport != string(contract.Transport) {
 		return managedProviderCall{}, fmt.Errorf("managed call frame provider contract does not match adapter")
 	}
-	return managedProviderCall{message: message, provider: provider}, nil
+	return managedProviderCall{message: message, provider: provider, frame: call.Frame()}, nil
 }
 
 func (c managedProviderCall) resolvedModel(profile llmselection.Profile) (llmselection.ResolvedModel, error) {
@@ -255,6 +256,13 @@ func (c managedProviderCall) resolvedModel(profile llmselection.Profile) (llmsel
 		Transport:     c.provider.Transport,
 		RuntimeMode:   c.provider.RuntimeMode,
 	}, nil
+}
+
+func beginProviderCompletion(ctx context.Context, adapter string, request []byte, managed *managedProviderCall) (*runtimeeffects.Handle, error) {
+	if managed == nil {
+		return runtimeeffects.BeginCompletion(ctx, adapter, request, nil)
+	}
+	return runtimeeffects.BeginManagedCompletion(ctx, adapter, request, managed.frame, nil)
 }
 
 func validateForkChatCall(ctx context.Context, session *Session, call ForkChatCall) (Message, error) {

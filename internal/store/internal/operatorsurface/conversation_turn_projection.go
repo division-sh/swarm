@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -133,6 +134,14 @@ func (s *ConversationPostgres) LoadOperatorPublicConversationTurn(ctx context.Co
 
 func (s *ConversationSQLite) LoadOperatorPublicConversationTurn(ctx context.Context, sessionID, turnID string) (operatorread.OperatorPublicConversationTurnDetail, error) {
 	return s.projection().loadOperatorConversationTurn(ctx, sessionID, turnID)
+}
+
+func (s *ConversationPostgres) LoadLatestPublicConversationTurn(ctx context.Context, sessionID string) (*operatorread.OperatorPublicConversationTurn, error) {
+	return s.projection().loadLatestPublicConversationTurn(ctx, sessionID)
+}
+
+func (s *ConversationSQLite) LoadLatestPublicConversationTurn(ctx context.Context, sessionID string) (*operatorread.OperatorPublicConversationTurn, error) {
+	return s.projection().loadLatestPublicConversationTurn(ctx, sessionID)
 }
 
 func (s *ConversationPostgres) LoadConversationForkSource(ctx context.Context, sessionID string) (runtimerunfork.ConversationForkSource, error) {
@@ -402,17 +411,17 @@ func (s conversationProjection) loadOperatorConversationTurn(ctx context.Context
 				COALESCE(task_id, '') AS task_id, COALESCE(CAST(turn_blocks AS TEXT), '[]') AS turn_blocks,
 				parse_ok, COALESCE(latency_ms, 0) AS latency_ms, COALESCE(retry_count, 0) AS retry_count,
 				COALESCE(usage_exactness, '') AS usage_exactness, execution_mode, input_tokens, output_tokens,
-				COALESCE(CAST(failure AS TEXT), 'null') AS failure, created_at
+				COALESCE(CAST(failure AS TEXT), 'null') AS failure, created_at, agent_frame_bytes
 			FROM agent_turns
 			WHERE session_id = ?
 		)
 		SELECT ordinal, turn_id, run_id, agent_id, session_id, entity_id, trigger_event_id,
 			trigger_event_type, task_id, turn_blocks, parse_ok, latency_ms, retry_count,
-			usage_exactness, execution_mode, input_tokens, output_tokens, failure, created_at
+			usage_exactness, execution_mode, input_tokens, output_tokens, failure, created_at, agent_frame_bytes
 		FROM ordered
 		WHERE turn_id = ?
 	`, runIDProjection), sessionID, turnID)
-	record, err := scanConversationTurnRecord(row)
+	record, frameBytes, err := scanConversationTurnDetailRecord(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return operatorread.OperatorPublicConversationTurnDetail{}, operatorread.ErrTurnNotFound
 	}
@@ -423,7 +432,11 @@ func (s conversationProjection) loadOperatorConversationTurn(ctx context.Context
 	if err != nil {
 		return operatorread.OperatorPublicConversationTurnDetail{}, err
 	}
-	return operatorread.OperatorPublicConversationTurnDetail{Session: summary, Turn: turn}, nil
+	frame, err := projectConversationFrameFacts(frameBytes, turn)
+	if err != nil {
+		return operatorread.OperatorPublicConversationTurnDetail{}, err
+	}
+	return operatorread.OperatorPublicConversationTurnDetail{Session: summary, Turn: turn, Frame: frame}, nil
 }
 
 func (s conversationProjection) loadLatestPublicConversationTurn(ctx context.Context, sessionID string) (*operatorread.OperatorPublicConversationTurn, error) {
@@ -551,6 +564,54 @@ func scanConversationTurnRecord(scanner operatorRowScanner) (conversationTurnRec
 	}
 	record.CreatedAt = createdAt.UTC()
 	return record, nil
+}
+
+func scanConversationTurnDetailRecord(scanner operatorRowScanner) (conversationTurnRecord, []byte, error) {
+	var (
+		record       conversationTurnRecord
+		failureRaw   []byte
+		createdAtRaw any
+		frameBytes   []byte
+	)
+	if err := scanner.Scan(
+		&record.Ordinal, &record.TurnID, &record.RunID, &record.AgentID, &record.SessionID,
+		&record.EntityID, &record.TriggerEventID, &record.TriggerEventType, &record.TaskID,
+		&record.TurnBlocksRaw, &record.ParseOK, &record.LatencyMS, &record.RetryCount,
+		&record.UsageExactness, &record.ExecutionMode, &record.InputTokens, &record.OutputTokens,
+		&failureRaw, &createdAtRaw, &frameBytes,
+	); err != nil {
+		return conversationTurnRecord{}, nil, err
+	}
+	failure, err := decodeStoredFailure(failureRaw)
+	if err != nil {
+		return conversationTurnRecord{}, nil, fmt.Errorf("decode conversation turn failure: %w", err)
+	}
+	record.Failure = failure
+	createdAt, valid, err := sqliteTimeValue(createdAtRaw)
+	if err != nil || !valid {
+		if err == nil {
+			err = fmt.Errorf("created_at is required")
+		}
+		return conversationTurnRecord{}, nil, fmt.Errorf("decode conversation turn created_at: %w", err)
+	}
+	record.CreatedAt = createdAt.UTC()
+	return record, append([]byte(nil), frameBytes...), nil
+}
+
+func projectConversationFrameFacts(raw []byte, turn operatorread.OperatorPublicConversationTurn) (operatorread.OperatorConversationFrameFacts, error) {
+	frame, err := agentframe.DecodeDurable(raw)
+	if err != nil {
+		return operatorread.OperatorConversationFrameFacts{}, fmt.Errorf("hydrate public conversation frame facts: %w", err)
+	}
+	if frame.FrameID != "agent-frame:v1:"+strings.TrimSpace(turn.TurnID) || frame.Turn.Event.ID != strings.TrimSpace(turn.TriggerEventID) ||
+		frame.Turn.Event.Type != strings.TrimSpace(turn.TriggerEventType) || frame.Turn.Event.RunID != strings.TrimSpace(turn.RunID) ||
+		frame.Session.AgentIdentity.AgentID() != strings.TrimSpace(turn.AgentID) {
+		return operatorread.OperatorConversationFrameFacts{}, fmt.Errorf("persisted execution frame does not match public turn identity")
+	}
+	return operatorread.OperatorConversationFrameFacts{
+		Version: frame.Version, FrameID: frame.FrameID, ContentHash: frame.ContentHash,
+		TurnKind: string(frame.Turn.Kind), ParentFrameID: frame.Turn.ParentFrameID,
+	}, nil
 }
 
 func projectPublicConversationTurn(record conversationTurnRecord) (operatorread.OperatorPublicConversationTurn, error) {
