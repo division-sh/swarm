@@ -26,6 +26,11 @@ type pendingOutboxOperation struct {
 	deliveryHandoffs []runtimedelivery.DurableHandoffProof
 }
 
+type pendingOutboxDispatch struct {
+	handled                     bool
+	deliveryHandoffsTransferred bool
+}
+
 // EnginePublicationPlan is immutable publication data prepared before the
 // selected-store engine mutation begins. The private store adapter can inspect
 // the closed command but cannot invoke EventBus or acquire runtime authority.
@@ -213,11 +218,11 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 		return nil
 	}
 	for _, intent := range intents {
-		handled, err := d.dispatchPendingOutboxOperation(ctx, intent)
+		result, err := d.dispatchPendingOutboxOperation(ctx, intent)
 		if err != nil {
 			return err
 		}
-		if handled {
+		if result.handled {
 			continue
 		}
 		if err := d.dispatchAndRecord(ctx, intent, nil); err != nil {
@@ -227,32 +232,57 @@ func (d engineDispatcher) DispatchPostCommit(ctx context.Context, intents []runt
 	return nil
 }
 
-func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fallback runtimeengine.EmitIntent) (handled bool, err error) {
+// dispatchCommittedInterceptorPublications consumes only exact post-commit
+// operations staged by the selected-store mutation that ran the interceptor.
+// A continuation must never reinterpret a missing operation as permission to
+// append or dispatch a fresh event.
+func (d engineDispatcher) dispatchCommittedInterceptorPublications(ctx context.Context, events []events.Event) error {
+	for _, event := range events {
+		result, err := d.dispatchPendingOutboxOperation(ctx, runtimeengine.EmitIntent{
+			Event:   event,
+			Context: event.DeliveryContext(),
+		})
+		if err != nil {
+			if result.deliveryHandoffsTransferred && errors.Is(err, errAuthoritativeDeliveryIncomplete) {
+				continue
+			}
+			return err
+		}
+		if !result.handled {
+			return fmt.Errorf("deferred interceptor publication %s has no committed post-commit operation", strings.TrimSpace(event.ID()))
+		}
+	}
+	return nil
+}
+
+func (d engineDispatcher) dispatchPendingOutboxOperation(ctx context.Context, fallback runtimeengine.EmitIntent) (result pendingOutboxDispatch, err error) {
 	ctx, err = d.bus.admitBundleSourceFact(ctx)
 	if err != nil {
-		return false, err
+		return result, err
 	}
 	operation, ok := d.bus.takePendingOutboxOperation(fallback.Event.ID())
 	if !ok {
-		return false, nil
+		return result, nil
 	}
+	result.handled = true
 	defer func() {
 		err = errors.Join(err, operation.publicationClaim.Release(ctx))
 	}()
 	if operation.intent.Event.Type() != fallback.Event.Type() {
-		return true, fmt.Errorf("pending outbox event type mismatch for %s: persisted=%s dispatch=%s", fallback.Event.ID(), operation.intent.Event.Type(), fallback.Event.Type())
+		return result, fmt.Errorf("pending outbox event type mismatch for %s: persisted=%s dispatch=%s", fallback.Event.ID(), operation.intent.Event.Type(), fallback.Event.Type())
 	}
 	if operation.outcome == EventAppendExactDuplicate {
-		return true, nil
+		return result, nil
 	}
 	if operation.outcome != EventAppendInserted {
-		return true, errors.New("pending outbox operation has invalid append outcome")
+		return result, errors.New("pending outbox operation has invalid append outcome")
 	}
 	handoffs := append([]runtimedelivery.DurableHandoffProof(nil), operation.deliveryHandoffs...)
 	if err := d.bus.AcceptCommittedDeliveryHandoffs(handoffs); err != nil {
-		return true, err
+		return result, err
 	}
-	return true, d.dispatchAndRecord(ctx, operation.intent, operation.publicationClaim)
+	result.deliveryHandoffsTransferred = len(handoffs) > 0
+	return result, d.dispatchAndRecord(ctx, operation.intent, operation.publicationClaim)
 }
 
 func (d engineDispatcher) dispatchAndRecord(ctx context.Context, intent runtimeengine.EmitIntent, publicationClaim *pipelinePublicationClaim) (err error) {

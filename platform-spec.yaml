@@ -6022,7 +6022,12 @@ engine:
         exhaustion. Exact continuation dispatch is separately closed over transferred, terminally settled, deferred under
         one named live agent-route/internal-subscription/carrier-return wake authority, and fatal. A materializing node
         route executes through its exact compiled receiver and cannot defer behind topology that only its own execution
-        creates. Generic errors, free-form blockage classification, and fixed dispatch or scan retry intervals are not
+        creates. Child publications emitted while an exact node continuation executes are committed by that node mutation's
+        selected-store owner and dispatched only by consuming its exact staged post-commit evidence before the continuation
+        reports transfer or terminal settlement. Missing evidence fails closed; continuation dispatch never re-appends or
+        reconstructs the child publication. Once the exact child's nonempty durable delivery handoff is accepted by the
+        generation coordinator, an unavailable immediate carrier is transferred work rather than a fatal parent failure;
+        no-handoff or pre-transfer failure remains fatal. Generic errors, free-form blockage classification, and fixed dispatch or scan retry intervals are not
         continuation authority. Corrupt or missing durable facts and fatal dispatch results fail closed. Activating a
         successor normal authority atomically shortens any exact predecessor open-attempt lease in the same bundle source
         using selected-store time; the ordinary fenced claim path then reports it reclaimable, and the stale predecessor
