@@ -6,5 +6,5 @@ expect:
   events:
     include: [filter.completed]
   entities:
-    - type: default
+    - type: items
       current_state: filtered
