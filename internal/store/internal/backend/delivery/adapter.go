@@ -2065,9 +2065,6 @@ func (a *Adapter) ActiveRunSnapshots(ctx context.Context, tx *sql.Tx, runID stri
 		if err != nil {
 			return nil, err
 		}
-		if err := a.persistTerminalizationRuleSelection(ctx, tx, id); err != nil {
-			return nil, err
-		}
 		out = append(out, record.Snapshot)
 	}
 	return out, nil
@@ -2166,6 +2163,9 @@ func (a *Adapter) TerminalizeRun(ctx context.Context, tx *sql.Tx, story runtimea
 			return nil, fmt.Errorf("terminalize run delivery: %w", err)
 		} else if affected, _ := result.RowsAffected(); affected != 1 {
 			return nil, fmt.Errorf("%w: run terminalization lost delivery claim fence", ErrConflict)
+		}
+		if err := a.persistTerminalizationRuleSelection(ctx, tx, id); err != nil {
+			return nil, err
 		}
 		if record.claimToken != "" && record.ClaimVersion > 0 {
 			claim, err := AdmitPersistedClaim(id, record.RunID, events.EncodeDeliveryRouteIdentity(record.RouteIdentity), record.claimToken, record.ClaimVersion, record.SubscriberClass, record.SubscriberID)

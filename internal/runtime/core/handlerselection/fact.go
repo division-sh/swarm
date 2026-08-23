@@ -33,15 +33,16 @@ func ParseContext(raw string) (Context, error) {
 type Disposition string
 
 const (
-	DispositionSelected      Disposition = "selected"
-	DispositionNoMatch       Disposition = "no_match"
-	DispositionNotApplicable Disposition = "not_applicable"
+	DispositionSelected         Disposition = "selected"
+	DispositionNoMatch          Disposition = "no_match"
+	DispositionEvaluationFailed Disposition = "evaluation_failed"
+	DispositionNotApplicable    Disposition = "not_applicable"
 )
 
 func ParseDisposition(raw string) (Disposition, error) {
 	disposition := Disposition(raw)
 	switch disposition {
-	case DispositionSelected, DispositionNoMatch, DispositionNotApplicable:
+	case DispositionSelected, DispositionNoMatch, DispositionEvaluationFailed, DispositionNotApplicable:
 		return disposition, nil
 	default:
 		return "", fmt.Errorf("handler rule selection disposition %q is invalid", raw)
@@ -62,6 +63,11 @@ func Selected(context Context, ref contractelementidentity.ContractElementRef, d
 
 func NoMatch(context Context) (HandlerRuleSelectionFact, error) {
 	fact := HandlerRuleSelectionFact{context: context, disposition: DispositionNoMatch}
+	return fact, fact.Validate()
+}
+
+func EvaluationFailed(context Context, ref contractelementidentity.ContractElementRef, displayLabel string) (HandlerRuleSelectionFact, error) {
+	fact := HandlerRuleSelectionFact{context: context, disposition: DispositionEvaluationFailed, ref: ref, displayLabel: strings.TrimSpace(displayLabel)}
 	return fact, fact.Validate()
 }
 
@@ -96,9 +102,12 @@ func (f HandlerRuleSelectionFact) Validate() error {
 		return err
 	}
 	switch f.disposition {
-	case DispositionSelected:
+	case DispositionSelected, DispositionEvaluationFailed:
 		if f.context == ContextNone || !f.ref.Valid() {
-			return fmt.Errorf("selected handler rule fact requires a concrete context and contract element reference")
+			return fmt.Errorf("%s handler rule fact requires a concrete context and contract element reference", f.disposition)
+		}
+		if f.disposition == DispositionEvaluationFailed && f.context != ContextRules && f.context != ContextOnComplete {
+			return fmt.Errorf("failed-evaluation handler rule fact requires rules or on-complete context")
 		}
 	case DispositionNoMatch:
 		if f.context != ContextRules && f.context != ContextOnComplete {

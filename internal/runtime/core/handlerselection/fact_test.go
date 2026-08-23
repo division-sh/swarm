@@ -26,6 +26,14 @@ func TestHandlerRuleSelectionFactClosedMatrix(t *testing.T) {
 		if err != nil || fact.Disposition() != DispositionNoMatch || fact.Ref().Valid() {
 			t.Fatalf("NoMatch(%s) = %#v, %v", context, fact, err)
 		}
+		failed, err := EvaluationFailed(context, ref, "attempted")
+		if err != nil || failed.Disposition() != DispositionEvaluationFailed || !failed.Ref().Equal(ref) {
+			t.Fatalf("EvaluationFailed(%s) = %#v, %v", context, failed, err)
+		}
+		hydrated, err := Hydrate(string(context), string(DispositionEvaluationFailed), "flows/scout", ref.ElementID().String(), "attempted")
+		if err != nil || !hydrated.Equal(failed) {
+			t.Fatalf("Hydrate evaluation failure (%s) = %#v, %v; want %#v", context, hydrated, err, failed)
+		}
 	}
 	if fact := NotApplicable(); fact.Validate() != nil || fact.Context() != ContextNone || fact.Disposition() != DispositionNotApplicable {
 		t.Fatalf("NotApplicable() = %#v, validation=%v", fact, fact.Validate())
@@ -35,12 +43,14 @@ func TestHandlerRuleSelectionFactClosedMatrix(t *testing.T) {
 func TestHandlerRuleSelectionFactRejectsContradictoryWireFacts(t *testing.T) {
 	const element = "d8fe3c3e-55c6-4f27-8eb4-dcd76a07982c"
 	for name, wire := range map[string][5]string{
-		"selected without ref":      {string(ContextRules), string(DispositionSelected), "", "", "label"},
-		"no match with ref":         {string(ContextRules), string(DispositionNoMatch), ".", element, ""},
-		"no match join":             {string(ContextJoinComplete), string(DispositionNoMatch), "", "", ""},
-		"not applicable with label": {string(ContextNone), string(DispositionNotApplicable), "", "", "label"},
-		"selected none":             {string(ContextNone), string(DispositionSelected), ".", element, ""},
-		"unknown context":           {"handler_branch", string(DispositionSelected), ".", element, ""},
+		"selected without ref":           {string(ContextRules), string(DispositionSelected), "", "", "label"},
+		"no match with ref":              {string(ContextRules), string(DispositionNoMatch), ".", element, ""},
+		"no match join":                  {string(ContextJoinComplete), string(DispositionNoMatch), "", "", ""},
+		"not applicable with label":      {string(ContextNone), string(DispositionNotApplicable), "", "", "label"},
+		"selected none":                  {string(ContextNone), string(DispositionSelected), ".", element, ""},
+		"evaluation failure without ref": {string(ContextRules), string(DispositionEvaluationFailed), "", "", "label"},
+		"evaluation failure join":        {string(ContextJoinComplete), string(DispositionEvaluationFailed), ".", element, "label"},
+		"unknown context":                {"handler_branch", string(DispositionSelected), ".", element, ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := Hydrate(wire[0], wire[1], wire[2], wire[3], wire[4]); err == nil {
