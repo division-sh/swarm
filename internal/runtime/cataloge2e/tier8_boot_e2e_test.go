@@ -40,6 +40,7 @@ func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {
 		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-event-no-consumer"),
 		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-event-no-producer"),
 		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-event-no-schema"),
+		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-empty-authored-rule"),
 		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-handler-field-undefined"),
 		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-missing-pin"),
 		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-boot-on-complete-and-rules-mutual-exclusion"),
@@ -63,8 +64,8 @@ func TestTier8BootCatalogFixtures_RealRuntimeBoot(t *testing.T) {
 		canonicalrouting.ArtifactID("tests/tier8-boot-verification/test-platform-mailbox-event-subscription"),
 	)
 	fixtures := catalogInventory(t).Select("catalog.verify.boot_diagnostics", testcatalog.DispositionVerifyOnly)
-	if len(fixtures) != 35 {
-		t.Fatalf("boot diagnostic fixtures = %d, want 35", len(fixtures))
+	if len(fixtures) != 36 {
+		t.Fatalf("boot diagnostic fixtures = %d, want 36", len(fixtures))
 	}
 	for _, fixture := range fixtures {
 		fixtureName, fixtureRoot := fixture.Name, fixture.Root

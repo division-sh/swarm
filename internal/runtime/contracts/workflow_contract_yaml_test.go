@@ -1957,7 +1957,7 @@ func TestSystemNodeEventHandlerDecode_KeyedLabelsNeverBecomeSingletonGrammar(t *
 		"element_id", "id", "description", "condition", "when", "case", "range", "lookup", "validate", "compute_module",
 		"else", "default", "advances_to", "emit", "emits", "action", "activity", "data_accumulation", "compute", "fan_out",
 	}
-	for _, context := range []string{"rules", "on_complete"} {
+	for _, context := range []string{"rules"} {
 		for _, label := range labels {
 			t.Run(context+"/"+label, func(t *testing.T) {
 				raw := fmt.Sprintf(`%s:
@@ -1983,7 +1983,7 @@ func TestSystemNodeEventHandlerDecode_KeyedLabelsNeverBecomeSingletonGrammar(t *
 }
 
 func TestSystemNodeEventHandlerDecode_RejectsAmbiguousRuleMapping(t *testing.T) {
-	for _, context := range []string{"rules", "on_complete"} {
+	for _, context := range []string{"rules"} {
 		t.Run(context, func(t *testing.T) {
 			var handler SystemNodeEventHandler
 			err := yaml.Unmarshal([]byte(context+`: {activity: {id: ambiguous}}
@@ -1992,6 +1992,100 @@ func TestSystemNodeEventHandlerDecode_RejectsAmbiguousRuleMapping(t *testing.T) 
 				t.Fatalf("yaml.Unmarshal error = %v, want ambiguous grammar rejection", err)
 			}
 		})
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_RejectsMappingOnComplete(t *testing.T) {
+	for _, raw := range []string{
+		"on_complete: {selected: {condition: else}}\n",
+		"on_complete: {activity: {id: ambiguous}}\n",
+	} {
+		var handler SystemNodeEventHandler
+		err := yaml.Unmarshal([]byte(raw), &handler)
+		if err == nil || !strings.Contains(err.Error(), "DIALECT-OC-ORDER") {
+			t.Fatalf("yaml.Unmarshal error = %v, want ordered-list rejection for %s", err, raw)
+		}
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_RejectsEmptyAuthoredRows(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+	}{
+		{name: "rules sequence", raw: "rules:\n  - {}\n"},
+		{name: "rules keyed", raw: "rules:\n  selected: {}\n"},
+		{name: "on complete sequence", raw: "on_complete:\n  - {}\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var handler SystemNodeEventHandler
+			err := yaml.Unmarshal([]byte(tc.raw), &handler)
+			if err == nil || !strings.Contains(err.Error(), "EMPTY-AUTHORED-RULE") {
+				t.Fatalf("yaml.Unmarshal error = %v, want empty authored row rejection", err)
+			}
+		})
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_RejectsInvalidKeyedRuleShape(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "empty label", raw: "rules:\n  \"\": {condition: else}\n", want: "label must not be empty"},
+		{name: "whitespace label", raw: "rules:\n  \"   \": {condition: else}\n", want: "label must not be empty"},
+		{name: "scalar child", raw: "rules:\n  selected: else\n", want: "must be a mapping"},
+		{name: "empty collection", raw: "rules: {}\n", want: "must contain at least one row"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var handler SystemNodeEventHandler
+			err := yaml.Unmarshal([]byte(tc.raw), &handler)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_ResolvesAliasedRowsIndependentOfKeyLabel(t *testing.T) {
+	labels := []string{
+		"selected", "element_id", "id", "description", "condition", "when", "case", "range", "lookup", "validate",
+		"compute_module", "else", "default", "advances_to", "emit", "emits", "action", "activity", "data_accumulation", "compute", "fan_out",
+	}
+	for _, label := range labels {
+		t.Run(label, func(t *testing.T) {
+			raw := fmt.Sprintf(`template: &rule
+  element_id: 00000000-0000-4000-8000-000000000437
+  condition: else
+  advances_to: done
+handler:
+  rules:
+    %q: *rule
+`, label)
+			var document struct {
+				Handler SystemNodeEventHandler `yaml:"handler"`
+			}
+			if err := yaml.Unmarshal([]byte(raw), &document); err != nil {
+				t.Fatal(err)
+			}
+			rules := document.Handler.Rules
+			if len(rules) != 1 || rules[0].ID != label || !rules[0].ElementID.Valid() || rules[0].AdvancesTo != "done" {
+				t.Fatalf("aliased keyed row = %#v", rules)
+			}
+		})
+	}
+}
+
+func TestHandlerRuleMappingClassifierRejectsAliasCycles(t *testing.T) {
+	mapping := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	alias := &yaml.Node{Kind: yaml.AliasNode, Alias: mapping}
+	mapping.Content = []*yaml.Node{
+		{Kind: yaml.ScalarNode, Tag: "!!str", Value: "selected"},
+		alias,
+	}
+	if _, err := classifyHandlerRuleMapping(mapping); err == nil || !strings.Contains(err.Error(), "YAML-ALIAS-CYCLE") {
+		t.Fatalf("classifyHandlerRuleMapping error = %v, want alias-cycle rejection", err)
 	}
 }
 

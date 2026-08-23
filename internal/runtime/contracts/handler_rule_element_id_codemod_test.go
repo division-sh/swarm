@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -188,12 +189,9 @@ func TestMintHandlerRuleElementIDsTreatsGrammarFieldNamesAsKeyedLabels(t *testin
 		"else", "default", "advances_to", "emit", "emits", "action", "activity", "data_accumulation", "compute", "fan_out",
 	}
 	var raw strings.Builder
-	raw.WriteString("node:\n  event_handlers:\n")
-	for _, context := range []string{"rules", "on_complete"} {
-		raw.WriteString("    " + context + ".event:\n      " + context + ":\n")
-		for _, label := range labels {
-			raw.WriteString("        " + label + ": {condition: else}\n")
-		}
+	raw.WriteString("node:\n  event_handlers:\n    rules.event:\n      rules:\n")
+	for _, label := range labels {
+		raw.WriteString("        " + label + ": {condition: else}\n")
 	}
 	root := t.TempDir()
 	path := filepath.Join(root, "nodes.yaml")
@@ -204,7 +202,7 @@ func TestMintHandlerRuleElementIDsTreatsGrammarFieldNamesAsKeyedLabels(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := len(labels) * 2
+	want := len(labels)
 	if result.FilesChanged != 1 || result.IDsMinted != want {
 		t.Fatalf("mint result = %#v, want %d keyed rows", result, want)
 	}
@@ -218,6 +216,94 @@ func TestMintHandlerRuleElementIDsTreatsGrammarFieldNamesAsKeyedLabels(t *testin
 	second, err := MintHandlerRuleElementIDs(root)
 	if err != nil || second != (HandlerRuleElementIDMintResult{}) {
 		t.Fatalf("idempotent keyed-label mint = %#v, %v", second, err)
+	}
+}
+
+func TestMintHandlerRuleElementIDsResolvesAliasedRowsIndependentOfKeyLabel(t *testing.T) {
+	labels := []string{
+		"selected", "element_id", "id", "description", "condition", "when", "case", "range", "lookup", "validate",
+		"compute_module", "else", "default", "advances_to", "emit", "emits", "action", "activity", "data_accumulation", "compute", "fan_out",
+	}
+	var raw strings.Builder
+	raw.WriteString("templates:\n")
+	for index := range labels {
+		fmt.Fprintf(&raw, "  row%d: &row%d {condition: else}\n", index, index)
+	}
+	raw.WriteString("node:\n  event_handlers:\n")
+	for index, label := range labels {
+		fmt.Fprintf(&raw, "    event%d:\n      rules:\n        %q: *row%d\n", index, label, index)
+	}
+
+	root := t.TempDir()
+	path := filepath.Join(root, "nodes.yaml")
+	if err := os.WriteFile(path, []byte(raw.String()), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	result, err := MintHandlerRuleElementIDs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FilesChanged != 1 || result.IDsMinted != len(labels) {
+		t.Fatalf("alias mint result = %#v, want %d rows", result, len(labels))
+	}
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(updated), "element_id:"); got != len(labels) {
+		t.Fatalf("aliased element IDs = %d, want %d\n%s", got, len(labels), updated)
+	}
+	second, err := MintHandlerRuleElementIDs(root)
+	if err != nil || second != (HandlerRuleElementIDMintResult{}) {
+		t.Fatalf("idempotent alias mint = %#v, %v", second, err)
+	}
+}
+
+func TestMintHandlerRuleElementIDsRejectsInvalidAuthoredShapesWithoutPartialWrite(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "empty sequence row", body: "rules:\n        - {}", want: "EMPTY-AUTHORED-RULE"},
+		{name: "empty keyed row", body: "rules:\n        selected: {}", want: "EMPTY-AUTHORED-RULE"},
+		{name: "empty completion row", body: "on_complete:\n        - {}", want: "EMPTY-AUTHORED-RULE"},
+		{name: "mapping completion", body: "on_complete:\n        selected: {condition: else}", want: "DIALECT-OC-ORDER"},
+		{name: "empty keyed label", body: "rules:\n        \"\": {condition: else}", want: "label must not be empty"},
+		{name: "whitespace keyed label", body: "rules:\n        \"   \": {condition: else}", want: "label must not be empty"},
+		{name: "scalar keyed child", body: "rules:\n        selected: else", want: "must be a mapping"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			goodPath := filepath.Join(root, "a", "nodes.yaml")
+			badPath := filepath.Join(root, "z", "nodes.yaml")
+			if err := os.MkdirAll(filepath.Dir(goodPath), 0o750); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Dir(badPath), 0o750); err != nil {
+				t.Fatal(err)
+			}
+			good := []byte("node:\n  event_handlers:\n    event:\n      rules:\n        selected: {condition: else}\n")
+			bad := []byte("node:\n  event_handlers:\n    event:\n      " + tc.body + "\n")
+			if err := os.WriteFile(goodPath, good, 0o640); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(badPath, bad, 0o640); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := MintHandlerRuleElementIDs(root); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("mint error = %v, want %q", err, tc.want)
+			}
+			for path, want := range map[string][]byte{goodPath: good, badPath: bad} {
+				got, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if string(got) != string(want) {
+					t.Fatalf("%s changed after failed preflight", path)
+				}
+			}
+		})
 	}
 }
 

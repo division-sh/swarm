@@ -669,8 +669,8 @@ func TestCatalogReplayCleanCensus(t *testing.T) {
 func catalogReplayCleanFixtures(t testing.TB) []testcatalog.Fixture {
 	t.Helper()
 	inventory := catalogInventory(t)
-	if len(inventory.Fixtures) != 155 {
-		t.Fatalf("catalog fixtures = %d, want 155", len(inventory.Fixtures))
+	if len(inventory.Fixtures) != 156 {
+		t.Fatalf("catalog fixtures = %d, want 156", len(inventory.Fixtures))
 	}
 
 	runtimeCount := 0
