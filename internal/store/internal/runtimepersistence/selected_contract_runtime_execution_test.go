@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -456,7 +457,7 @@ func TestSelectedForkDiscardDeletesClaimedAndSettledDeliveryHistoryPostgres(t *t
 	if err != nil {
 		t.Fatalf("claim selected-fork settled delivery: %v", err)
 	}
-	if _, err := store.SettleSuccess(ctx, settled.Claim, nil, 0); err != nil {
+	if _, err := store.SettleSuccess(ctx, settled.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 		t.Fatalf("settle selected-fork delivery: %v", err)
 	}
 	if claimed.Claim.DeliveryID() == "" {
@@ -471,9 +472,10 @@ func TestSelectedForkDiscardDeletesClaimedAndSettledDeliveryHistoryPostgres(t *t
 		t.Fatalf("discard selected fork with delivery history: %v", err)
 	}
 	for label, query := range map[string]string{
-		"deliveries": `SELECT COUNT(*) FROM event_deliveries WHERE delivery_id IN ($1::uuid, $2::uuid)`,
-		"attempts":   `SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id IN ($1::uuid, $2::uuid)`,
-		"outcomes":   `SELECT COUNT(*) FROM event_delivery_outcomes WHERE delivery_id IN ($1::uuid, $2::uuid)`,
+		"deliveries":      `SELECT COUNT(*) FROM event_deliveries WHERE delivery_id IN ($1::uuid, $2::uuid)`,
+		"rule selections": `SELECT COUNT(*) FROM event_delivery_handler_rule_selections WHERE delivery_id IN ($1::uuid, $2::uuid)`,
+		"attempts":        `SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id IN ($1::uuid, $2::uuid)`,
+		"outcomes":        `SELECT COUNT(*) FROM event_delivery_outcomes WHERE delivery_id IN ($1::uuid, $2::uuid)`,
 	} {
 		var count int
 		if err := db.QueryRowContext(ctx, query, claimed.Snapshot.DeliveryID, settled.Snapshot.DeliveryID).Scan(&count); err != nil {

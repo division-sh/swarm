@@ -9,12 +9,14 @@ dispatcher:
         items_from: payload.items
         store_as: entity.dispatch_count
       rules:
-        - id: parallel
+        - element_id: 3b904190-d776-4c26-8f6e-5ece29833581
+          id: parallel
           condition: "payload.mode == 'parallel'"
           advances_to: dispatched
           emit:
             event: batch.dispatched
-        - id: sequential
+        - element_id: 3bda287d-e344-4302-aec4-9447c3e4e2ed
+          id: sequential
           condition: "payload.mode == 'sequential'"
           data_accumulation:
             writes:
@@ -23,7 +25,8 @@ dispatcher:
           advances_to: dispatched
           emit:
             event: batch.dispatched
-        - id: fallback
+        - element_id: abee0baa-393d-4ffe-b2b5-65e857b2b36d
+          id: fallback
           condition: "else"
           data_accumulation:
             writes:

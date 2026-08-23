@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
@@ -474,26 +475,26 @@ type RuleMatch struct {
 }
 
 type ExecutionResult struct {
-	Status              OutcomeStatus
-	Failure             *failures.Envelope
-	FailureDisposition  FailureDisposition
-	ExecutedSteps       []Step
-	CurrentState        string
-	NextState           string
-	GuardsEvaluated     []string
-	ActionsExecuted     []string
-	ClearGates          []string
-	SetsGate            string
-	RuleID              string
-	FanOutCount         int
-	Computed            map[string]any
-	StateMutation       StateMutation
-	EmitIntents         []EmitIntent
-	ActivityIntents     []ActivityIntent
-	ComputeModuleTraces []ComputeModuleTrace
-	DeadLetterIntents   []EmitIntent
-	ChainDepth          int
-	LoopTrace           *LoopExecutionTrace
+	Status               OutcomeStatus
+	Failure              *failures.Envelope
+	FailureDisposition   FailureDisposition
+	ExecutedSteps        []Step
+	CurrentState         string
+	NextState            string
+	GuardsEvaluated      []string
+	ActionsExecuted      []string
+	ClearGates           []string
+	SetsGate             string
+	HandlerRuleSelection handlerselection.HandlerRuleSelectionFact
+	FanOutCount          int
+	Computed             map[string]any
+	StateMutation        StateMutation
+	EmitIntents          []EmitIntent
+	ActivityIntents      []ActivityIntent
+	ComputeModuleTraces  []ComputeModuleTrace
+	DeadLetterIntents    []EmitIntent
+	ChainDepth           int
+	LoopTrace            *LoopExecutionTrace
 }
 
 type LoopExecutionTrace struct {

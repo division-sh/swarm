@@ -77,7 +77,7 @@ func TestOperatorDeadLetterEvidenceIsScopedToExactDeliveryParity(t *testing.T) {
 				snapshot, err := selected.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
 					Disposition: runtimedelivery.FailureDeadLetter,
 					ReasonCode:  failure.Detail.Code,
-					Failure:     &failure,
+					Failure:     &failure, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 				})
 				if err != nil {
 					t.Fatalf("dead-letter %s: %v", route.Recipient.ID(), err)

@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
@@ -95,6 +96,9 @@ func TestExecutorBoundedLoopEscapesAtStampedCapAndRejectsPriorRevision(t *testin
 	}
 	if len(result.EmitIntents) != 0 {
 		t.Fatalf("cap escape emitted ordinary repeat work: %#v", result.EmitIntents)
+	}
+	if result.HandlerRuleSelection.Context() != handlerselection.ContextNone || result.HandlerRuleSelection.Disposition() != handlerselection.DispositionNotApplicable || result.HandlerRuleSelection.Ref().Valid() {
+		t.Fatalf("synthetic loop escape fabricated authored rule identity: %#v", result.HandlerRuleSelection)
 	}
 	closedState := loopTestNextState(result)
 	_, err = exec.ExecuteSemanticFixture(context.Background(), loopTestRequest(t, closedState, repeat, "00000000-0000-0000-0000-000000000108", map[string]any{"revision_id": secondRevision}))

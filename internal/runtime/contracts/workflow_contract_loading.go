@@ -271,6 +271,7 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 		return nil
 	}
 	errs := make([]error, 0, 8)
+	elementOwners := map[string]string{}
 	for _, record := range bundle.ScopedNodeRecords() {
 		node, identityErr := record.Identity()
 		if identityErr != nil {
@@ -278,6 +279,26 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 			continue
 		}
 		nodeID := node.Key()
+		for eventType, handler := range record.Entry.EventHandlers {
+			qualified, qualifyErr := QualifySystemNodeHandlerRuleRefs(node, handler)
+			if qualifyErr != nil {
+				errs = append(errs, fmt.Errorf("%w: node %s handler %s: %v", ErrInvalidField, nodeID, strings.TrimSpace(eventType), qualifyErr))
+				continue
+			}
+			for _, rule := range HandlerRuleEntries(qualified) {
+				ref, ok := rule.ContractElementRef()
+				if !ok {
+					continue
+				}
+				key := ref.PackageKey().String() + "|" + ref.ElementID().String()
+				owner := nodeID + ":" + strings.TrimSpace(eventType)
+				if previous, exists := elementOwners[key]; exists {
+					errs = append(errs, fmt.Errorf("%w: contract element_id %s is duplicated in package %s by %s and %s", ErrInvalidField, ref.ElementID().String(), ref.PackageKey().String(), previous, owner))
+				} else {
+					elementOwners[key] = owner
+				}
+			}
+		}
 		if _, scopeErr := bundle.ExecutableNodeSemanticScope(node); scopeErr != nil {
 			errs = append(errs, fmt.Errorf("%w: node %s semantic scope: %v", ErrInvalidField, nodeID, scopeErr))
 			continue

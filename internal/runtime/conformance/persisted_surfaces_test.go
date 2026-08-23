@@ -357,7 +357,7 @@ func TestReusedLiveSessionKeepsDeliveryFrontierBoundToCanonicalSession(t *testin
 		t.Fatalf("RunManaged(first): %v", err)
 	}
 	session := conversation.Session
-	if _, err := pg.SettleSuccess(newTurnContext(event1), firstClaim.Claim, nil, 0); err != nil {
+	if _, err := pg.SettleSuccess(newTurnContext(event1), firstClaim.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 		t.Fatalf("settle first delivery: %v", err)
 	}
 
@@ -1551,7 +1551,7 @@ func TestStartupPipelineReplayAftermathSurface_RoundTripsThroughObservabilityRea
 		if resolution, err := carrier.Consume(nil); err != nil || resolution != worklifetime.DeliveryContinuationConsumed {
 			t.Fatalf("transfer continued local delivery into attempt: %v", err)
 		}
-		if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, 0); err != nil {
+		if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 			t.Fatalf("settle continued local delivery: %v", err)
 		}
 		if _, err := carrier.Complete(nil); err != nil {

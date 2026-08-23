@@ -184,8 +184,10 @@ line_item.requested:
           by: payload.line_item_id
         output: payload.result
         on_complete:
+          element_id: 00000000-0000-4000-8000-000000000008
           advances_to: review
         timeout:
+          element_id: 00000000-0000-4000-8000-000000000009
           after: 1h
           advances_to: timed_out
 `)

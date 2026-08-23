@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -30,6 +31,7 @@ func checkPolicySheetValidationValueRows(c *checkerContext) []Finding {
 					EventType: eventType,
 					RuleIndex: idx,
 					RuleID:    strings.TrimSpace(rule.ID),
+					RuleRef:   policyRuleElementRef(rule),
 				}
 				findings = append(findings, validatePolicySheetValidationValueRow(c.source, ref, handler, rule)...)
 			}
@@ -43,6 +45,7 @@ type policySheetValidationRef struct {
 	EventType string
 	RuleIndex int
 	RuleID    string
+	RuleRef   contractelementidentity.ContractElementRef
 }
 
 func policySheetValidationFinding(ref policySheetValidationRef, detail string) Finding {

@@ -334,6 +334,11 @@ func (s bundleSource) ExecutableNodeEventHandlers(node runtimeidentity.Executabl
 	}
 	out := make(map[string]runtimecontracts.SystemNodeEventHandler, len(record.Entry.EventHandlers))
 	for eventType, handler := range record.Entry.EventHandlers {
+		qualified, err := runtimecontracts.QualifySystemNodeHandlerRuleRefs(node, handler)
+		if err != nil {
+			continue
+		}
+		handler = qualified
 		handler = runtimecontracts.DefaultSystemNodeHandlerSourceEvent(handler, eventType)
 		out[eventType] = s.bundle.ExternalizeExecutableNodeHandler(node, handler)
 	}

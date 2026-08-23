@@ -352,9 +352,9 @@ func (s *pipelineTestDeliveryOwner) RenewClaim(ctx context.Context, claim runtim
 	return out, err
 }
 
-func (s *pipelineTestDeliveryOwner) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, effects []string, duration time.Duration) (out runtimedelivery.Snapshot, err error) {
+func (s *pipelineTestDeliveryOwner) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, effects []string, duration time.Duration, selection runtimedelivery.HandlerRuleSelectionFact) (out runtimedelivery.Snapshot, err error) {
 	err = s.mutate(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		out, err = s.adapter.SettleSuccess(ctx, tx, claim, effects, duration)
+		out, err = s.adapter.SettleSuccess(ctx, tx, claim, effects, duration, selection)
 		return err
 	})
 	return out, err

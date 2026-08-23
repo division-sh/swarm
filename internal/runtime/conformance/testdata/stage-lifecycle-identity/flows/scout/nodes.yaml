@@ -20,7 +20,9 @@ scout-coordinator:
           from: entity.batch_id
         output: payload.value
         on_complete:
+          element_id: fd905dd3-c6d4-43d5-977a-0a66af2aaf40
           advances_to: complete
         timeout:
+          element_id: d9aa95f1-5dd8-4f2b-9257-d0acc4f68b32
           after: 10m
           advances_to: timed_out

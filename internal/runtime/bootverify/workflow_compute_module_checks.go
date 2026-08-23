@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
@@ -37,6 +38,7 @@ func checkComputeModuleValueRows(c *checkerContext) []Finding {
 					EventType: eventType,
 					RuleIndex: idx,
 					RuleID:    strings.TrimSpace(rule.ID),
+					RuleRef:   policyRuleElementRef(rule),
 				}
 				findings = append(findings, validateComputeModuleValueRow(ctx, c.source, ref, handler, rule)...)
 			}
@@ -50,6 +52,7 @@ type computeModuleRef struct {
 	EventType string
 	RuleIndex int
 	RuleID    string
+	RuleRef   contractelementidentity.ContractElementRef
 }
 
 func computeModuleFinding(ref computeModuleRef, detail string) Finding {

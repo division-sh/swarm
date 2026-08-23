@@ -4,12 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/google/uuid"
 )
 
@@ -33,7 +37,7 @@ func TestRunDebugTracePageBoundsCanonicalHydrationParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("claim filtered delivery: %v", err)
 			}
-			if _, err := selected.SettleSuccess(ctx, filteredClaim.Claim, nil, 0); err != nil {
+			if _, err := selected.SettleSuccess(ctx, filteredClaim.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 				t.Fatalf("settle filtered delivery: %v", err)
 			}
 
@@ -71,6 +75,58 @@ func TestRunDebugTracePageBoundsCanonicalHydrationParity(t *testing.T) {
 				t.Fatalf("load second bounded trace page: %v", err)
 			}
 			assertBoundedRunDebugTracePage(t, second, next, targetEvents[1].ID(), targetDeliveries[1])
+		})
+	}
+}
+
+func TestRunDebugTraceProjectsPersistedHandlerRuleSelectionWithoutContractLookupParity(t *testing.T) {
+	for _, backend := range eventRecordContractBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			selected := fixture.store.(boundedRunDebugTraceStore)
+			ctx := testAuthorActivityContext()
+			runID := uuid.NewString()
+			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
+			event := eventtest.PersistedProjection(
+				uuid.NewString(), "trace.rule_selected", "runtime", "", json.RawMessage(`{"proof":true}`), 0,
+				runID, "", events.EventEnvelope{}, time.Date(2026, 8, 23, 15, 0, 0, 0, time.UTC),
+			)
+			route := testEntitylessNodeDeliveryRoute("rule-trace-node")
+			if err := commitSemanticEventFixtureWithRoutes(ctx, selected, event, []events.DeliveryRoute{route}); err != nil {
+				t.Fatal(err)
+			}
+			claimed, err := claimDeliveryFixture(ctx, selected, event, route)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ref, err := contractelementidentity.ParseContractElementRef("flows/scout", "00000000-0000-4000-8000-000000000201")
+			if err != nil {
+				t.Fatal(err)
+			}
+			fact, err := handlerselection.Selected(handlerselection.ContextRules, ref, "renamable-label")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := selected.SettleSuccess(ctx, claimed.Claim, nil, 0, fact); err != nil {
+				t.Fatal(err)
+			}
+
+			rows, _, err := selected.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 10})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rows) != 1 || rows[0].HandlerRuleSelection == nil {
+				t.Fatalf("trace rows = %#v, want one persisted selection", rows)
+			}
+			projection := rows[0].HandlerRuleSelection
+			if projection.Context != handlerselection.ContextRules || projection.Disposition != handlerselection.DispositionSelected ||
+				projection.PackageCoordinate != "flows/scout" || projection.ElementID != ref.ElementID().String() || projection.DisplayLabel != "renamable-label" {
+				t.Fatalf("trace selection = %#v", projection)
+			}
+			encoded, err := json.Marshal(rows[0])
+			if err != nil || !strings.Contains(string(encoded), `"handler_rule_selection"`) || !strings.Contains(string(encoded), ref.ElementID().String()) {
+				t.Fatalf("public JSON = %s, %v", encoded, err)
+			}
 		})
 	}
 }

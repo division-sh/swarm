@@ -1086,8 +1086,8 @@ func (s *PostgresStore) SettleFailure(ctx context.Context, claim deliverylifecyc
 	return s.deliveryPostgresOwner.SettleFailure(ctx, claim, settlement)
 }
 
-func (s *PostgresStore) SettleSuccess(ctx context.Context, claim deliverylifecycle.Claim, sideEffects []string, duration time.Duration) (deliverylifecycle.Snapshot, error) {
-	return s.deliveryPostgresOwner.SettleSuccess(ctx, claim, sideEffects, duration)
+func (s *PostgresStore) SettleSuccess(ctx context.Context, claim deliverylifecycle.Claim, sideEffects []string, duration time.Duration, selection deliverylifecycle.HandlerRuleSelectionFact) (deliverylifecycle.Snapshot, error) {
+	return s.deliveryPostgresOwner.SettleSuccess(ctx, claim, sideEffects, duration, selection)
 }
 
 func (s *PostgresStore) SetupScenarioEntities(ctx context.Context, req pipeline.ScenarioSetupRequest) (pipeline.ScenarioSetupResult, error) {
@@ -1930,6 +1930,10 @@ func (s *SQLiteRuntimeStore) Release(ctx context.Context, lease *sessions.Lease)
 	return s.lLMSQLiteOwner.Release(ctx, lease)
 }
 
+func (s *SQLiteRuntimeStore) ReleaseConstructionPossession() error {
+	return s.startupSQLiteOwner.ReleaseConstructionPossession()
+}
+
 func (s *SQLiteRuntimeStore) RenewClaim(ctx context.Context, claim deliverylifecycle.Claim) (deliverylifecycle.Snapshot, error) {
 	return s.deliverySQLiteOwner.RenewClaim(ctx, claim)
 }
@@ -2078,8 +2082,8 @@ func (s *SQLiteRuntimeStore) SettleFailure(ctx context.Context, claim deliveryli
 	return s.deliverySQLiteOwner.SettleFailure(ctx, claim, settlement)
 }
 
-func (s *SQLiteRuntimeStore) SettleSuccess(ctx context.Context, claim deliverylifecycle.Claim, sideEffects []string, duration time.Duration) (deliverylifecycle.Snapshot, error) {
-	return s.deliverySQLiteOwner.SettleSuccess(ctx, claim, sideEffects, duration)
+func (s *SQLiteRuntimeStore) SettleSuccess(ctx context.Context, claim deliverylifecycle.Claim, sideEffects []string, duration time.Duration, selection deliverylifecycle.HandlerRuleSelectionFact) (deliverylifecycle.Snapshot, error) {
+	return s.deliverySQLiteOwner.SettleSuccess(ctx, claim, sideEffects, duration, selection)
 }
 
 func (s *SQLiteRuntimeStore) SetupScenarioEntities(ctx context.Context, req pipeline.ScenarioSetupRequest) (pipeline.ScenarioSetupResult, error) {

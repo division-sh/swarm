@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
@@ -215,7 +216,7 @@ func TestSQLiteRuntimeStoreConvergeNormalRunCompletionFailsClosedWhileDeliveryAc
 	if err != nil {
 		t.Fatalf("claim sqlite active delivery: %v", err)
 	}
-	if _, err := store.SettleSuccess(ctx, claimed.Claim, nil, 0); err != nil {
+	if _, err := store.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 		t.Fatalf("settle sqlite active delivery: %v", err)
 	}
 	if err := executeRunCompletionCandidateForEvent(ctx, store, fixture.EventID, []string{"done"}, nil); err != nil {

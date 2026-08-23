@@ -7,8 +7,10 @@ test-node:
     item.received:
       rules:
         type_a:
+          element_id: 37fcbc4b-f109-4d5e-b06c-45f56518290d
           condition: "payload.kind == 'a'"
           emit:
             event: routed.a
         type_b:
+          element_id: fa77db8f-f48a-41d4-8785-ef1a2437ec05
           condition: "payload.kind == 'b'"

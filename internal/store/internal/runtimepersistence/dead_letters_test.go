@@ -243,7 +243,7 @@ func TestRecordDeadLetterExactDuplicateAndConflictParity(t *testing.T) {
 			settled, err := selected.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
 				Disposition: runtimedelivery.FailureDeadLetter,
 				ReasonCode:  failure.Detail.Code,
-				Failure:     &failure,
+				Failure:     &failure, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 			})
 			if err != nil {
 				t.Fatalf("settle delivery as dead letter: %v", err)

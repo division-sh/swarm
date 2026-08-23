@@ -249,8 +249,8 @@ coordinator-node:
         stage: active
         members: {from: payload.job, by: payload.vertical_id}
         output: payload.job
-        on_complete: {advances_to: done}
-        timeout: {after: 1h, advances_to: failed}
+        on_complete: {element_id: 00000000-0000-4000-8000-000000000407, advances_to: done}
+        timeout: {element_id: 00000000-0000-4000-8000-000000000408, after: 1h, advances_to: failed}
 `,
 			wantKind:   "workflow_join",
 			wantTarget: "active",
@@ -529,7 +529,8 @@ func TestBuildSingletonCoordinatorDemandProjection_DoesNotTreatUnevaluatedFields
 		{
 			name: "on complete activity input",
 			operator: `on_complete:
-        - condition: "true"
+        - element_id: 00000000-0000-4000-8000-000000000409
+          condition: "true"
           activity:
             tool: review
             input:
@@ -641,8 +642,8 @@ coordinator-node:
         stage: active
         members: {from: payload.job, by: payload.vertical_id}
         output: payload.job
-        on_complete: {advances_to: done}
-        timeout: {after: 1h, advances_to: failed}
+        on_complete: {element_id: 00000000-0000-4000-8000-000000000410, advances_to: done}
+        timeout: {element_id: 00000000-0000-4000-8000-000000000411, after: 1h, advances_to: failed}
 `
 	tests := []struct {
 		name       string

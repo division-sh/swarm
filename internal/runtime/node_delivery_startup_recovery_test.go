@@ -102,7 +102,7 @@ func (d *settlingDeliveryContinuationDispatcher) DispatchDeliveryContinuation(
 	if !ok {
 		return fmt.Errorf("continuation dispatch disposition = %s", result.Disposition)
 	}
-	snapshot, err := d.store.SettleSuccess(ctx, claimed.Claim, nil, 0)
+	snapshot, err := d.store.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection())
 	if err != nil {
 		return err
 	}
@@ -385,7 +385,7 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 							if _, settleErr := selected.SettleFailure(eventCtx, claimed.Claim, runtimedelivery.Settlement{
 								Disposition: runtimedelivery.FailureRetry,
 								Failure:     &failure.Failure,
-								RetryBase:   time.Hour,
+								RetryBase:   time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 							}); settleErr != nil {
 								t.Fatalf("settle future-failed startup delivery: %v", settleErr)
 							}
@@ -1094,7 +1094,7 @@ func TestPipelineCoordinatorStandingRecoveryClaimsNewlyEligibleNodeDeliveries(t 
 			retrying, err := selected.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
 				Disposition: runtimedelivery.FailureRetry,
 				Failure:     &failure.Failure,
-				RetryBase:   time.Hour,
+				RetryBase:   time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 			})
 			if err != nil || retrying.Status != runtimedelivery.StatusFailed {
 				t.Fatalf("schedule node retry = %#v, err=%v", retrying, err)

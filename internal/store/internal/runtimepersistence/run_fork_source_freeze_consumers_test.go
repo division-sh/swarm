@@ -116,7 +116,7 @@ func TestForkedSourceEventDeliveryAndReplayConsumersRefuseAndSelectorsExclude(t 
 					t.Fatal(err)
 				}
 				claim = claimed.Claim
-				if _, err := fixture.postgres.SettleSuccess(ctx, claim, nil, 0); err != nil {
+				if _, err := fixture.postgres.SettleSuccess(ctx, claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 					t.Fatalf("settle source delivery before freeze: %v", err)
 				}
 			} else {
@@ -128,7 +128,7 @@ func TestForkedSourceEventDeliveryAndReplayConsumersRefuseAndSelectorsExclude(t 
 					t.Fatal(err)
 				}
 				claim = claimed.Claim
-				if _, err := fixture.sqlite.SettleSuccess(ctx, claim, nil, 0); err != nil {
+				if _, err := fixture.sqlite.SettleSuccess(ctx, claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 					t.Fatalf("settle source delivery before freeze: %v", err)
 				}
 			}
@@ -166,7 +166,7 @@ func assertForkedEventConsumerRefusals(t *testing.T, store any, event events.Eve
 	}
 	_, err = s.ClaimDelivery(ctx, snapshot.Authority, event, route)
 	requireForkedSourceRefusal(t, "delivery claim", err)
-	_, err = s.SettleSuccess(ctx, claim, nil, 0)
+	_, err = s.SettleSuccess(ctx, claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection())
 	requireForkedSourceRefusal(t, "delivery settlement", err)
 	if _, err := s.PipelineObligations().ClaimEvent(ctx, event.ID(), runtimepipelineobligation.PurposeRecovery); !errors.Is(err, runtimepipelineobligation.ErrIneligible) {
 		t.Fatalf("pipeline recovery claim error = %v, want ineligible", err)

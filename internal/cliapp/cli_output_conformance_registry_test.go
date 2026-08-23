@@ -39,6 +39,7 @@ var cliOutputSharedOwnerProofs = map[string]cliOutputSharedOwnerProof{
 	"swarm packs list":                   {Constructor: "newPacksListCommand", Runner: "newPacksListCommand"},
 	"swarm packs show":                   {Constructor: "newPacksShowCommand", Runner: "newPacksShowCommand"},
 	"swarm verify":                       {Constructor: "newVerifyCommand", Runner: "runVerifyCommandWithOutput"},
+	"swarm mint-element-ids":             {Constructor: "newMintElementIDsCommand", Runner: "runMintElementIDsCommand"},
 	"swarm migrate-connect-delivery-one": {Constructor: "newMigrateConnectDeliveryOneCommand", Runner: "runMigrateConnectDeliveryOneCommand"},
 	"swarm migrate-producer-routing":     {Constructor: "newMigrateProducerRoutingCommand", Runner: "runMigrateProducerRoutingCommand"},
 	"swarm run list":                     {Constructor: "newRunsCommand", Runner: "runDiagnosticRunListCommand"},

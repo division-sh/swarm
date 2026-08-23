@@ -538,7 +538,7 @@ func seedDeliveryAuthorityTerminalNodeDelivery(t *testing.T, db *sql.DB, eventID
 	if _, err := owner.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
 		Disposition: runtimedelivery.FailureDeadLetter,
 		ReasonCode:  "terminal_delivery_fixture",
-		Failure:     &failure,
+		Failure:     &failure, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 	}); err != nil {
 		t.Fatalf("settle terminal delivery authority: %v", err)
 	}

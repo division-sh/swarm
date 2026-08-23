@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -33,6 +34,7 @@ func checkPolicySheetLookupValueRows(c *checkerContext) []Finding {
 					EventType: eventType,
 					RuleIndex: idx,
 					RuleID:    strings.TrimSpace(rule.ID),
+					RuleRef:   policyRuleElementRef(rule),
 				}
 				findings = append(findings, validatePolicySheetLookupValueRow(c.source, ref, handler, rule)...)
 			}
@@ -46,6 +48,7 @@ type policySheetLookupRef struct {
 	EventType string
 	RuleIndex int
 	RuleID    string
+	RuleRef   contractelementidentity.ContractElementRef
 }
 
 func policySheetLookupFinding(ref policySheetLookupRef, detail string) Finding {

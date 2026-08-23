@@ -47,11 +47,11 @@ func CopyGeneratedActivity(t testing.TB, nested, subscribeResults bool) string {
 	if subscribeResults {
 		prefix := ""
 		resultSubscriptions = ", " + prefix + "send.succeeded, " + prefix + "send.failed"
-		resultHandlers = "    " + prefix + "send.succeeded:\n      rules:\n        - id: observe_success\n          condition: payload.result != null\n    " + prefix + "send.failed:\n      rules:\n        - id: observe_failure\n          condition: payload.failure != null\n"
+		resultHandlers = "    " + prefix + "send.succeeded:\n      rules:\n        - element_id: 00000000-0000-4000-8000-000000000019\n          id: observe_success\n          condition: payload.result != null\n    " + prefix + "send.failed:\n      rules:\n        - element_id: 00000000-0000-4000-8000-000000000020\n          id: observe_failure\n          condition: payload.failure != null\n"
 	}
 	nodes := "activity-node:\n  id: activity-node\n  execution_type: system_node\n  subscribes_to: [request" + resultSubscriptions + "]\n  event_handlers:\n    request:\n      activity:\n        id: send\n        tool: send\n        input:\n          message:\n            ref: payload.message\n" + resultHandlers
 	if nested {
-		nodes += "observer-node:\n  id: observer-node\n  execution_type: system_node\n  subscribes_to: [send.succeeded, send.failed]\n  event_handlers:\n    send.succeeded:\n      rules:\n        - id: observe_success\n          condition: payload.result.delivered == true\n    send.failed:\n      rules:\n        - id: observe_failure\n          condition: payload.failure != null\n"
+		nodes += "observer-node:\n  id: observer-node\n  execution_type: system_node\n  subscribes_to: [send.succeeded, send.failed]\n  event_handlers:\n    send.succeeded:\n      rules:\n        - element_id: 00000000-0000-4000-8000-000000000021\n          id: observe_success\n          condition: payload.result.delivered == true\n    send.failed:\n      rules:\n        - element_id: 00000000-0000-4000-8000-000000000022\n          id: observe_failure\n          condition: payload.failure != null\n"
 	}
 	writeClosedVariantFile(t, root, flowRoot+"nodes.yaml", nodes)
 	return root

@@ -344,7 +344,7 @@ func TestProviderAttemptCompletionAfterOriginalOriginExpiryParity(t *testing.T) 
 				}
 				if !candidate.drained {
 					deliveryStore := fixture.store.(runtimedelivery.Store)
-					if _, err := deliveryStore.SettleSuccess(testAuthorActivityContext(), fixture.origin, nil, 0); err != nil {
+					if _, err := deliveryStore.SettleSuccess(testAuthorActivityContext(), fixture.origin, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 						t.Fatalf("settle renewed current origin: %v", err)
 					}
 				}

@@ -9,10 +9,10 @@ phase-one:
         writes:
           - batch_id
       on_complete:
-        - condition: "payload.ready == true"
+        - element_id: 54a53c03-e728-4e11-b186-9f6e90b139b4
+          condition: "payload.ready == true"
           advances_to: processing
           emit: phase.advanced
-
 phase-two:
   id: phase-two
   execution_type: system_node

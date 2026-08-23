@@ -60,7 +60,7 @@ func TestAuthorActivityDuplicateTerminalReceiptIsNoOpParity(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ClaimAgentDelivery: %v", err)
 			}
-			if _, err := fixture.store.SettleSuccess(ctx, claimed.Claim, nil, 0); err != nil {
+			if _, err := fixture.store.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 				t.Fatalf("first SettleSuccess: %v", err)
 			}
 
@@ -82,7 +82,7 @@ func TestAuthorActivityDuplicateTerminalReceiptIsNoOpParity(t *testing.T) {
 			beforeStamp := fixture.stamp(ctx, eventID, agentID)
 			fixture.advance()
 
-			if _, err := fixture.store.SettleSuccess(ctx, claimed.Claim, nil, 0); !errors.Is(err, runtimedelivery.ErrConflict) {
+			if _, err := fixture.store.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); !errors.Is(err, runtimedelivery.ErrConflict) {
 				t.Fatalf("duplicate SettleSuccess error = %v, want conflict", err)
 			}
 			after := listAuthorActivityForReceiptParity(t, fixture, ctx)

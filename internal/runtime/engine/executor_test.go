@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -1492,8 +1493,11 @@ func TestExecutor_AccumulatorProjectionMaterializesWithRulesBeforeEmitFields(t *
 	}
 	result := executeAccumulatorProjectionTestEvent(t, exec, handler, testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}))
 	requireProjectedScore(t, result, "scores")
-	if got := result.RuleID; got != "matched" {
+	if got := result.HandlerRuleSelection.DisplayLabel(); got != "matched" {
 		t.Fatalf("RuleID = %q, want matched", got)
+	}
+	if result.HandlerRuleSelection.Context() != handlerselection.ContextRules || result.HandlerRuleSelection.Disposition() != handlerselection.DispositionSelected || !result.HandlerRuleSelection.Ref().Valid() {
+		t.Fatalf("selected rules fact = %#v", result.HandlerRuleSelection)
 	}
 	if got := result.StateMutation.Fields["handler_marker"]; got != "top-level" {
 		t.Fatalf("handler_marker = %#v, want top-level", got)
@@ -1542,8 +1546,11 @@ func TestExecutor_AccumulatorProjectionMaterializesWhenRulesDoNotMatch(t *testin
 	}
 	result := executeAccumulatorProjectionTestEvent(t, exec, handler, testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}))
 	requireProjectedScore(t, result, "scores")
-	if got := strings.TrimSpace(result.RuleID); got != "" {
+	if got := strings.TrimSpace(result.HandlerRuleSelection.DisplayLabel()); got != "" {
 		t.Fatalf("RuleID = %q, want empty when rules do not match", got)
+	}
+	if result.HandlerRuleSelection.Context() != handlerselection.ContextRules || result.HandlerRuleSelection.Disposition() != handlerselection.DispositionNoMatch || result.HandlerRuleSelection.Ref().Valid() {
+		t.Fatalf("no-match rules fact = %#v", result.HandlerRuleSelection)
 	}
 	if _, ok := result.StateMutation.Fields["rule_marker"]; ok {
 		t.Fatalf("rule_marker unexpectedly written: %#v", result.StateMutation.Fields)
@@ -1931,6 +1938,74 @@ func TestFanInBarrierExecutorConsumesEffectiveJoinPlan(t *testing.T) {
 	if result.StateMutation.NextState != "complete" {
 		t.Fatalf("barrier next state = %q, want complete", result.StateMutation.NextState)
 	}
+	if result.HandlerRuleSelection.Context() != handlerselection.ContextJoinComplete || result.HandlerRuleSelection.Disposition() != handlerselection.DispositionSelected || !result.HandlerRuleSelection.Ref().Valid() {
+		t.Fatalf("join completion selection = %#v", result.HandlerRuleSelection)
+	}
+	if got := result.HandlerRuleSelection.Ref().ElementID().String(); got != "445e8fbd-e8f7-4b4b-81f0-08ebec2e1b70" {
+		t.Fatalf("join completion element ID = %q", got)
+	}
+}
+
+func TestFanInBarrierExecutorRecordsAuthoredJoinTimeoutSelection(t *testing.T) {
+	repoRoot := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		canonicalrouting.ExampleRoot(t, canonicalrouting.FanInBarrier),
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := semanticview.Wrap(bundle)
+	node := testFlowExecutableNode(t, "portfolio", "portfolio-collector")
+	plan, ok := semanticview.WorkflowJoinPlanForHandler(source, node, "operating.reported")
+	if !ok {
+		t.Fatal("effective join plan is unavailable")
+	}
+	handler, ok := source.ExecutableNodeEventHandler(node, "operating.reported")
+	if !ok {
+		t.Fatal("authored join handler is unavailable")
+	}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 23, 15, 30, 0, 0, time.UTC)
+	activation, err := newEngineTestJoinActivation(node, "operating.reported", plan.Spec, "2026-Q3", []string{"operating-a"}, now, now.Add(5*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	buckets := map[string]map[string]any{}
+	if err := joinruntime.Store(buckets, activation); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(activation.TimerHandle().PayloadMetadata())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+		EntityID: "portfolio/portfolio", Node: node, HandlerEventKey: "operating.reported", Handler: handler,
+		JoinDeclaration: activation.JoinRef().Declaration(),
+		Event: eventtest.RunCreatingRootIngress(
+			"evt-join-timeout", events.EventType(activation.TimerEventType()), "runtime", activation.TimerTaskID(), payload, 0,
+			"", "", events.EnvelopeForEntityID(events.EventEnvelope{}, "portfolio/portfolio"), now.Add(5*time.Minute),
+		),
+		State: testStateSnapshot("awaiting", map[string]any{"expected_operating_ids": []any{"operating-a"}, "period_id": "2026-Q3"}, nil, buckets),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.StateMutation.NextState != "failed" {
+		t.Fatalf("timeout next state = %q, want failed", result.StateMutation.NextState)
+	}
+	if result.HandlerRuleSelection.Context() != handlerselection.ContextJoinTimeout || result.HandlerRuleSelection.Disposition() != handlerselection.DispositionSelected || !result.HandlerRuleSelection.Ref().Valid() {
+		t.Fatalf("join timeout selection = %#v", result.HandlerRuleSelection)
+	}
+	if got := result.HandlerRuleSelection.Ref().ElementID().String(); got != "cc68292e-a6af-47bc-8785-472465db0d81" {
+		t.Fatalf("join timeout element ID = %q", got)
+	}
 }
 
 func TestExecutor_JoinCompletionConsumesCatalogResultType(t *testing.T) {
@@ -2232,7 +2307,7 @@ func TestExecutor_PolicySheetComputeModuleRowFeedsSelectionRow(t *testing.T) {
 			t.Fatalf("rendered content missing %q: %s", want, content)
 		}
 	}
-	if got := result.RuleID; got != "rendered_yaml" {
+	if got := result.HandlerRuleSelection.DisplayLabel(); got != "rendered_yaml" {
 		t.Fatalf("selected rule = %q, want rendered_yaml", got)
 	}
 	if got := len(result.EmitIntents); got != 1 {
@@ -2268,7 +2343,7 @@ func TestExecutor_PolicySheetPythonModuleRowFeedsSelectionRow(t *testing.T) {
 			t.Fatalf("rendered content missing %q: %s", want, content)
 		}
 	}
-	if got := result.RuleID; got != "rendered_yaml" {
+	if got := result.HandlerRuleSelection.DisplayLabel(); got != "rendered_yaml" {
 		t.Fatalf("selected rule = %q, want rendered_yaml", got)
 	}
 	if got := len(result.ComputeModuleTraces); got != 1 {
@@ -2630,7 +2705,7 @@ func TestExecutor_PolicySheetValidateRowFeedsSelectionRow(t *testing.T) {
 	if len(violations) != 1 {
 		t.Fatalf("violations len = %d, want 1: %#v", len(violations), deployResult["violations"])
 	}
-	if got := result.RuleID; got != "invalid_manifest" {
+	if got := result.HandlerRuleSelection.DisplayLabel(); got != "invalid_manifest" {
 		t.Fatalf("selected rule = %q, want invalid_manifest", got)
 	}
 	if got := len(result.EmitIntents); got != 1 {
@@ -2747,7 +2822,7 @@ func TestExecutor_PolicySheetValidateNumericEqualityCanonicalizesRuntimeValues(t
 	if len(violations) != 0 {
 		t.Fatalf("violations len = %d, want 0: %#v", len(violations), countResult["violations"])
 	}
-	if got := result.RuleID; got != "valid_count" {
+	if got := result.HandlerRuleSelection.DisplayLabel(); got != "valid_count" {
 		t.Fatalf("selected rule = %q, want valid_count", got)
 	}
 }
@@ -3270,8 +3345,8 @@ func TestExecutor_RulesUseFirstMatchAndSkipLaterEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if result.RuleID != "rule-1" {
-		t.Fatalf("RuleID = %q", result.RuleID)
+	if result.HandlerRuleSelection.DisplayLabel() != "rule-1" {
+		t.Fatalf("RuleID = %q", result.HandlerRuleSelection.DisplayLabel())
 	}
 	if result.NextState != "approved" {
 		t.Fatalf("NextState = %q", result.NextState)
@@ -3315,7 +3390,7 @@ rules:
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if got := result.RuleID; got != "deep_scan" {
+	if got := result.HandlerRuleSelection.DisplayLabel(); got != "deep_scan" {
 		t.Fatalf("RuleID = %q, want deep_scan", got)
 	}
 	if got := result.NextState; got != "deep_scan" {
@@ -3352,8 +3427,8 @@ func TestExecutor_RulesUseHandlerAdvancesToDefaultWhenRuleOmitsTarget(t *testing
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if result.RuleID != "rule-1" {
-		t.Fatalf("RuleID = %q", result.RuleID)
+	if result.HandlerRuleSelection.DisplayLabel() != "rule-1" {
+		t.Fatalf("RuleID = %q", result.HandlerRuleSelection.DisplayLabel())
 	}
 	if result.NextState != "default" {
 		t.Fatalf("NextState = %q, want handler-level default", result.NextState)
@@ -3389,8 +3464,8 @@ func TestExecutor_HandlerSetsGateAppliesWithMatchedRule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if result.RuleID != "rule-1" {
-		t.Fatalf("RuleID = %q", result.RuleID)
+	if result.HandlerRuleSelection.DisplayLabel() != "rule-1" {
+		t.Fatalf("RuleID = %q", result.HandlerRuleSelection.DisplayLabel())
 	}
 	if result.SetsGate != "approved" {
 		t.Fatalf("SetsGate = %q, want handler-level gate with matched rule", result.SetsGate)
@@ -3574,7 +3649,7 @@ func TestExecutor_RulesEmitTemplateSpecializationQueuesOneMergedEvent(t *testing
 			if err != nil {
 				t.Fatalf("Execute error: %v", err)
 			}
-			if got := result.RuleID; got != tc.ruleID {
+			if got := result.HandlerRuleSelection.DisplayLabel(); got != tc.ruleID {
 				t.Fatalf("RuleID = %q, want %q", got, tc.ruleID)
 			}
 			if got := len(result.EmitIntents); got != 1 {
@@ -3730,7 +3805,7 @@ func TestExecutor_OnSuccessEmitWithMatchedRuleQueuesRuleThenSuccess(t *testing.T
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if got := result.RuleID; got != "rule-1" {
+	if got := result.HandlerRuleSelection.DisplayLabel(); got != "rule-1" {
 		t.Fatalf("RuleID = %q, want rule-1", got)
 	}
 	if got := len(result.EmitIntents); got != 2 {
@@ -3820,8 +3895,11 @@ func TestExecutor_OnSuccessEmitFiresWhenRulesDoNotMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if got := result.RuleID; got != "" {
+	if got := result.HandlerRuleSelection.DisplayLabel(); got != "" {
 		t.Fatalf("RuleID = %q, want empty on no-match success", got)
+	}
+	if result.HandlerRuleSelection.Context() != handlerselection.ContextRules || result.HandlerRuleSelection.Disposition() != handlerselection.DispositionNoMatch {
+		t.Fatalf("rules no-match selection = %#v", result.HandlerRuleSelection)
 	}
 	if got := len(result.EmitIntents); got != 1 {
 		t.Fatalf("EmitIntents len = %d, want 1", got)
@@ -4043,7 +4121,7 @@ func TestExecutor_RulesDoNotSeeCurrentHandlerTopLevelWritesBeforeSelection(t *te
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if got := strings.TrimSpace(result.RuleID); got != "" {
+	if got := strings.TrimSpace(result.HandlerRuleSelection.DisplayLabel()); got != "" {
 		t.Fatalf("rule_id = %q, want empty when branch selection cannot see top-level writes", got)
 	}
 	if _, exists := result.StateMutation.Fields["rule_selected"]; exists {
@@ -4091,8 +4169,11 @@ func TestExecutor_OnCompleteDoesNotSeeCurrentHandlerTopLevelWritesBeforeSelectio
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if got := strings.TrimSpace(result.RuleID); got != "" {
+	if got := strings.TrimSpace(result.HandlerRuleSelection.DisplayLabel()); got != "" {
 		t.Fatalf("rule_id = %q, want empty when on_complete selection cannot see top-level writes", got)
+	}
+	if result.HandlerRuleSelection.Context() != handlerselection.ContextOnComplete || result.HandlerRuleSelection.Disposition() != handlerselection.DispositionNoMatch {
+		t.Fatalf("on_complete no-match selection = %#v", result.HandlerRuleSelection)
 	}
 	if got := len(result.EmitIntents); got != 0 {
 		t.Fatalf("emit intents = %d, want 0 when on_complete branch is not selected early", got)
@@ -6064,7 +6145,7 @@ func TestExecutor_RuleActionRunsOnlyForSelectedRule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if got := result.RuleID; got != "needs-human" {
+	if got := result.HandlerRuleSelection.DisplayLabel(); got != "needs-human" {
 		t.Fatalf("RuleID = %q, want needs-human", got)
 	}
 	if got := runner.called; !reflect.DeepEqual(got, []string{"human_action"}) {

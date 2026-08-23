@@ -278,7 +278,7 @@ func (s *DeliveryPostgresOwner) SettleProviderOriginSuccessTx(
 	sideEffects []string,
 	duration time.Duration,
 ) error {
-	_, err := postgresDeliveryAdapter.SettleSuccess(ctx, tx, story, claim, sideEffects, duration)
+	_, err := postgresDeliveryAdapter.SettleSuccess(ctx, tx, story, claim, sideEffects, duration, runtimedelivery.NotApplicableHandlerRuleSelection())
 	return err
 }
 
@@ -290,7 +290,7 @@ func (s *DeliverySQLiteOwner) SettleProviderOriginSuccessTx(
 	sideEffects []string,
 	duration time.Duration,
 ) error {
-	_, err := sqliteDeliveryAdapter.SettleSuccess(ctx, tx, story, claim, sideEffects, duration)
+	_, err := sqliteDeliveryAdapter.SettleSuccess(ctx, tx, story, claim, sideEffects, duration, runtimedelivery.NotApplicableHandlerRuleSelection())
 	return err
 }
 
@@ -381,13 +381,13 @@ func (s *DeliverySQLiteOwner) BindAgentSession(ctx context.Context, claim runtim
 	})
 }
 
-func (s *DeliveryPostgresOwner) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, sideEffects []string, duration time.Duration) (runtimedelivery.Snapshot, error) {
+func (s *DeliveryPostgresOwner) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, sideEffects []string, duration time.Duration, selection runtimedelivery.HandlerRuleSelectionFact) (runtimedelivery.Snapshot, error) {
 	return runhandoff.WithCandidateHandoffResult(ctx, func(handoff *runhandoff.CandidateHandoff) (runtimedelivery.Snapshot, error) {
 		return postgresDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) (runtimedelivery.Snapshot, error) {
 			if err := runstate.RequirePostgresActiveTx(txctx, tx, claim.RunID()); err != nil {
 				return runtimedelivery.Snapshot{}, err
 			}
-			snapshot, err := postgresDeliveryAdapter.SettleSuccess(txctx, tx, story, claim, sideEffects, duration)
+			snapshot, err := postgresDeliveryAdapter.SettleSuccess(txctx, tx, story, claim, sideEffects, duration, selection)
 			if err != nil {
 				return runtimedelivery.Snapshot{}, err
 			}
@@ -399,13 +399,13 @@ func (s *DeliveryPostgresOwner) SettleSuccess(ctx context.Context, claim runtime
 	})
 }
 
-func (s *DeliverySQLiteOwner) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, sideEffects []string, duration time.Duration) (runtimedelivery.Snapshot, error) {
+func (s *DeliverySQLiteOwner) SettleSuccess(ctx context.Context, claim runtimedelivery.Claim, sideEffects []string, duration time.Duration, selection runtimedelivery.HandlerRuleSelectionFact) (runtimedelivery.Snapshot, error) {
 	return runhandoff.WithCandidateHandoffResult(ctx, func(handoff *runhandoff.CandidateHandoff) (runtimedelivery.Snapshot, error) {
 		return sqliteDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) (runtimedelivery.Snapshot, error) {
 			if err := runstate.RequireSQLiteActiveTx(txctx, tx, claim.RunID()); err != nil {
 				return runtimedelivery.Snapshot{}, err
 			}
-			snapshot, err := sqliteDeliveryAdapter.SettleSuccess(txctx, tx, story, claim, sideEffects, duration)
+			snapshot, err := sqliteDeliveryAdapter.SettleSuccess(txctx, tx, story, claim, sideEffects, duration, selection)
 			if err != nil {
 				return runtimedelivery.Snapshot{}, err
 			}

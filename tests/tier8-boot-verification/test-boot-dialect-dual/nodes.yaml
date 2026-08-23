@@ -6,9 +6,11 @@ dual-dialect-node:
   event_handlers:
     check.requested:
       on_complete:
-        - condition: "payload.score >= 70"
+        - element_id: bdcbc29a-bef2-4315-be80-d4c83661c5ea
+          condition: "payload.score >= 70"
           advances_to: done
       rules:
-        - id: high_score
+        - element_id: c186863f-ed08-4d4f-9f03-50b61814b9ce
+          id: high_score
           condition: "payload.score >= 70"
       advances_to: done

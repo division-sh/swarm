@@ -512,19 +512,22 @@ func (am *AgentManager) writeReceipt(ctx context.Context, evt events.Event, stat
 	}
 	switch status {
 	case ReceiptStatusProcessed:
-		snapshot, err = am.deliveryStore.SettleSuccess(writeCtx, claim, nil, 0)
+		snapshot, err = am.deliveryStore.SettleSuccess(writeCtx, claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection())
 	case ReceiptStatusError:
 		snapshot, err = am.deliveryStore.SettleFailure(writeCtx, claim, runtimedelivery.Settlement{
 			Disposition: runtimedelivery.FailureRetry, ReasonCode: "handler_failure",
 			Failure: failure, RetryBase: semanticview.HandlerRetryBase(am.semanticSource),
+			RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 		})
 	case ReceiptStatusDeadLetter:
 		snapshot, err = am.deliveryStore.SettleFailure(writeCtx, claim, runtimedelivery.Settlement{
 			Disposition: runtimedelivery.FailureDeadLetter, ReasonCode: "dead_letter", Failure: failure,
+			RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 		})
 	case ReceiptStatusTerminal:
 		snapshot, err = am.deliveryStore.SettleFailure(writeCtx, claim, runtimedelivery.Settlement{
 			Disposition: runtimedelivery.FailureDeadLetter, ReasonCode: "terminal_failure", Failure: failure,
+			RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 		})
 	default:
 		err = fmt.Errorf("delivery receipt status %q is invalid", status)

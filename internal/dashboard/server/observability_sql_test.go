@@ -99,7 +99,7 @@ func TestObservabilityProjection_ListEvents_UsesCanonicalDeliveryLifecycle(t *te
 	if err != nil {
 		t.Fatalf("claim delivered delivery: %v", err)
 	}
-	if _, err := pg.SettleSuccess(ctx, delivered.Claim, nil, time.Second); err != nil {
+	if _, err := pg.SettleSuccess(ctx, delivered.Claim, nil, time.Second, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 		t.Fatalf("settle delivered delivery: %v", err)
 	}
 	failed, err := storetest.ClaimDelivery(ctx, pg, event, routes[3])
@@ -108,7 +108,7 @@ func TestObservabilityProjection_ListEvents_UsesCanonicalDeliveryLifecycle(t *te
 	}
 	if _, err := pg.SettleFailure(ctx, failed.Claim, runtimedelivery.Settlement{
 		Disposition: runtimedelivery.FailureRetry,
-		Failure:     testFailure("delivery-failed"),
+		Failure:     testFailure("delivery-failed"), RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 	}); err != nil {
 		t.Fatalf("settle retryable delivery: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestObservabilityProjection_ListEvents_UsesCanonicalDeliveryLifecycle(t *te
 	if _, err := pg.SettleFailure(ctx, dead.Claim, runtimedelivery.Settlement{
 		Disposition: runtimedelivery.FailureDeadLetter,
 		ReasonCode:  "delivery-dead",
-		Failure:     testFailure("delivery-dead"),
+		Failure:     testFailure("delivery-dead"), RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 	}); err != nil {
 		t.Fatalf("settle dead-letter delivery: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestObservabilityProjection_GetEvent_UsesCanonicalDeliveryRows(t *testing.T
 	}
 	if _, err := pg.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
 		Disposition: runtimedelivery.FailureRetry,
-		Failure:     testFailure("delivery_wins"),
+		Failure:     testFailure("delivery_wins"), RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 	}); err != nil {
 		t.Fatalf("settle delivery retry: %v", err)
 	}

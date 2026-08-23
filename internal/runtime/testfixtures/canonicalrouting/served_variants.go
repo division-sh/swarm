@@ -29,9 +29,11 @@ states: [new, waiting, done]
 `, `    item.received:
       rules:
         initialize:
+          element_id: 00000000-0000-4000-8000-000000000005
           condition: "payload.item_id != 'emit'"
           advances_to: waiting
         emit_processed:
+          element_id: 00000000-0000-4000-8000-000000000006
           condition: "payload.item_id == 'emit'"
           emit:
             event: item.processed
@@ -53,6 +55,7 @@ states: [new, waiting, done]
     item.processed:
       rules:
         complete:
+          element_id: 00000000-0000-4000-8000-000000000007
           condition: "payload.item_id == 'review'"
           advances_to: done
 `)

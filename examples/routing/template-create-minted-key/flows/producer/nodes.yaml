@@ -11,5 +11,6 @@ producer-node:
           candidate: payload.candidate
     validation.started:
       rules:
-        - id: observe_validation_started
+        - element_id: 12afbe01-dbd3-4327-be3b-2c0940def196
+          id: observe_validation_started
           condition: payload.validation_case_id != ""

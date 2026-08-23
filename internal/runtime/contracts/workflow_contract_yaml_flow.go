@@ -9,8 +9,7 @@ import (
 
 func (r *HandlerRuleEntry) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind == yaml.ScalarNode {
-		r.Description = strings.TrimSpace(node.Value)
-		return nil
+		return fmt.Errorf("handler rule must be a mapping with element_id; run `swarm mint-element-ids --contracts <path>`")
 	}
 	if err := validateRuleFieldNodes(node); err != nil {
 		return err
@@ -21,6 +20,9 @@ func (r *HandlerRuleEntry) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	*r = HandlerRuleEntry(aux)
+	if len(node.Content) > 0 {
+		r.authored = true
+	}
 	if err := lowerPolicySheetRuleNode(node, r); err != nil {
 		return err
 	}
@@ -56,6 +58,7 @@ func validateRuleFieldNodes(node *yaml.Node) error {
 }
 
 var ruleFieldOptions = map[string]struct{}{
+	"element_id":        {},
 	"id":                {},
 	"description":       {},
 	"condition":         {},

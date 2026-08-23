@@ -50,7 +50,7 @@ func TestRevisionProjectedSourceRouteDrivesFrontierAndHistoryAcrossReceiverConte
 	if err != nil {
 		t.Fatalf("claim completed delivery: %v", err)
 	}
-	if _, err := pg.SettleSuccess(ctx, completedClaim.Claim, nil, time.Second); err != nil {
+	if _, err := pg.SettleSuccess(ctx, completedClaim.Claim, nil, time.Second, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 		t.Fatalf("settle completed delivery: %v", err)
 	}
 
@@ -230,7 +230,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 					if err != nil {
 						t.Fatalf("claim completed delivery: %v", err)
 					}
-					if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, time.Second); err != nil {
+					if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, time.Second, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 						t.Fatalf("settle completed delivery: %v", err)
 					}
 				}

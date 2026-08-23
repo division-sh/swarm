@@ -511,7 +511,7 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 			if err != nil {
 				t.Fatalf("claim delivered route: %v", err)
 			}
-			if _, err := f.store.SettleSuccess(ctx, firstClaim.Claim, nil, time.Millisecond); err != nil {
+			if _, err := f.store.SettleSuccess(ctx, firstClaim.Claim, nil, time.Millisecond, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 				t.Fatalf("settle delivered route: %v", err)
 			}
 			secondClaim, err := storetest.ClaimDelivery(ctx, f.store, original, routes[1])
@@ -519,7 +519,7 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 				t.Fatalf("claim failed route: %v", err)
 			}
 			if snapshot, err := f.store.SettleFailure(ctx, secondClaim.Claim, runtimedelivery.Settlement{
-				Disposition: runtimedelivery.FailureRetry, Failure: testFailure("handler_failed"), RetryBase: time.Hour,
+				Disposition: runtimedelivery.FailureRetry, Failure: testFailure("handler_failed"), RetryBase: time.Hour, RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 			}); err != nil || snapshot.Status != runtimedelivery.StatusFailed || snapshot.Terminal() {
 				t.Fatalf("settle retryable failed route snapshot=%#v err=%v", snapshot, err)
 			}
@@ -728,7 +728,7 @@ func markOperatorReplayDeliveryTerminal(t *testing.T, ctx context.Context, owner
 	if _, err := owner.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
 		t.Fatalf("bind original delivery session: %v", err)
 	}
-	if _, err := owner.SettleSuccess(ctx, claimed.Claim, nil, 0); err != nil {
+	if _, err := owner.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 		t.Fatalf("settle original delivery: %v", err)
 	}
 }
@@ -1517,7 +1517,7 @@ func seedReplayableOperatorEvent(t *testing.T, ctx context.Context, pg *store.Po
 				t.Fatalf("bind original delivery %s %s: %v", eventID, subscriber, err)
 			}
 			if status == runtimedelivery.StatusDelivered {
-				if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, 0); err != nil {
+				if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 					t.Fatalf("settle original delivery %s %s: %v", eventID, subscriber, err)
 				}
 			}

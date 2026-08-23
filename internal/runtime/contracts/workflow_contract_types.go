@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/packartifact"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
@@ -325,17 +326,26 @@ type HandlerTransitionSemantic struct {
 	Clear                *ClearSpec
 }
 type HandlerRuleEntry struct {
-	ID               string                   `yaml:"id"`
-	Description      string                   `yaml:"description"`
-	Condition        string                   `yaml:"condition"`
-	PolicyRow        PolicySheetRowMetadata   `yaml:"-"`
-	AdvancesTo       string                   `yaml:"advances_to"`
-	Emit             EmitSpec                 `yaml:"emit"`
-	Action           ActionSpec               `yaml:"action"`
-	Activity         ActivitySpec             `yaml:"activity"`
-	DataAccumulation WorkflowDataAccumulation `yaml:"data_accumulation"`
-	Compute          *ComputeSpec             `yaml:"compute"`
-	FanOut           *FanOutSpec              `yaml:"fan_out"`
+	ElementID        contractelementidentity.ContractElementID `yaml:"element_id"`
+	ID               string                                    `yaml:"id"`
+	Description      string                                    `yaml:"description"`
+	Condition        string                                    `yaml:"condition"`
+	PolicyRow        PolicySheetRowMetadata                    `yaml:"-"`
+	AdvancesTo       string                                    `yaml:"advances_to"`
+	Emit             EmitSpec                                  `yaml:"emit"`
+	Action           ActionSpec                                `yaml:"action"`
+	Activity         ActivitySpec                              `yaml:"activity"`
+	DataAccumulation WorkflowDataAccumulation                  `yaml:"data_accumulation"`
+	Compute          *ComputeSpec                              `yaml:"compute"`
+	FanOut           *FanOutSpec                               `yaml:"fan_out"`
+	elementRef       contractelementidentity.ContractElementRef
+	authored         bool
+}
+
+func (r HandlerRuleEntry) Authored() bool { return r.authored }
+
+func (r HandlerRuleEntry) ContractElementRef() (contractelementidentity.ContractElementRef, bool) {
+	return r.elementRef, r.authored && r.elementRef.Valid()
 }
 
 type WorkflowJoinPlan struct {

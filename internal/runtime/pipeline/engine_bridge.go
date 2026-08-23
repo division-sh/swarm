@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -37,7 +38,7 @@ type handlerExecutionOutcome struct {
 	ClearGates       []string
 	DataAccumulation runtimecontracts.WorkflowDataAccumulation
 	Emits            []string
-	RuleID           string
+	RuleSelection    handlerselection.HandlerRuleSelectionFact
 	FanOutCount      int
 	Computed         map[string]any
 	InterceptedEmits []runtimeengine.EmitIntent
@@ -52,6 +53,7 @@ type contractHandlerExecutionResult struct {
 	InitialValuesMaterialized map[string]any
 	Emissions                 []events.Event
 	Handled                   bool
+	RuleSelection             handlerselection.HandlerRuleSelectionFact
 }
 
 func (pc *PipelineCoordinator) executeAuthoritativeNodeHandler(ctx context.Context, evt events.Event, triggerCtx workflowTriggerContext) (contractHandlerExecutionResult, error) {
@@ -229,6 +231,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		outcome := &handlerExecutionOutcome{
 			Status:          HandlerOutcomeTerminalReject,
 			GuardsEvaluated: []string{"not_in_terminal_state"},
+			RuleSelection:   handlerselection.NotApplicable(),
 		}
 		plan := handlerExecutionPlanFromNodeHandler(node, strings.TrimSpace(string(triggerCtx.Event.Type())), handler)
 		return contractHandlerExecutionResult{
@@ -238,6 +241,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 			GuardsEvaluated: append([]string{}, outcome.GuardsEvaluated...),
 			PreviewMetadata: cloneStringAnyMap(triggerCtx.State.Metadata),
 			Handled:         true,
+			RuleSelection:   handlerselection.NotApplicable(),
 		}, nil
 	}
 	ctx = withPipelineFlowScope(ctx, flowID)
@@ -306,7 +310,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		logLoopExecution(ctx, pc.bus, node.Key(), triggerCtx.Event, result.LoopTrace)
 	}
 	if err != nil {
-		return contractHandlerExecutionResult{}, err
+		return contractHandlerExecutionResult{RuleSelection: admittedHandlerRuleSelection(result.HandlerRuleSelection)}, err
 	}
 	if handler.CreateEntity && result.StateMutation.StateCarrier.Fields == nil {
 		result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(stateSnapshot.StateCarrier.Fields)
@@ -336,7 +340,10 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	}
 	handled := runtimeengine.IsHandledOutcome(result.Status)
 	if result.Status == runtimeengine.OutcomeUnknown {
-		return contractHandlerExecutionResult{Handled: handled, Emissions: emissions.immutableEvents()}, nil
+		return contractHandlerExecutionResult{
+			Handled: handled, Emissions: emissions.immutableEvents(),
+			RuleSelection: admittedHandlerRuleSelection(result.HandlerRuleSelection),
+		}, nil
 	}
 	outcome := handlerOutcomeFromExecutionResult(result)
 	plan := handlerExecutionPlanFromNodeHandler(node, strings.TrimSpace(string(triggerCtx.Event.Type())), handler)
@@ -360,6 +367,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		InitialValuesMaterialized: initialValuesMaterialized,
 		Emissions:                 emissions.immutableEvents(),
 		Handled:                   handled,
+		RuleSelection:             admittedHandlerRuleSelection(result.HandlerRuleSelection),
 	}, nil
 }
 
@@ -529,7 +537,7 @@ func handlerOutcomeFromExecutionResult(result runtimeengine.ExecutionResult) *ha
 		SetsGate:         strings.TrimSpace(result.SetsGate),
 		ClearGates:       append([]string{}, result.ClearGates...),
 		DataAccumulation: result.StateMutation.DataAccumulation,
-		RuleID:           strings.TrimSpace(result.RuleID),
+		RuleSelection:    admittedHandlerRuleSelection(result.HandlerRuleSelection),
 		FanOutCount:      result.FanOutCount,
 		Computed:         cloneStringAnyMap(result.Computed),
 		InterceptedEmits: append([]runtimeengine.EmitIntent(nil), result.DeadLetterIntents...),
@@ -543,6 +551,13 @@ func handlerOutcomeFromExecutionResult(result runtimeengine.ExecutionResult) *ha
 		}
 	}
 	return out
+}
+
+func admittedHandlerRuleSelection(fact handlerselection.HandlerRuleSelectionFact) handlerselection.HandlerRuleSelectionFact {
+	if fact.Empty() {
+		return handlerselection.NotApplicable()
+	}
+	return fact
 }
 
 func handlerOutcomeStatusFromEngine(status runtimeengine.OutcomeStatus) HandlerOutcomeStatus {

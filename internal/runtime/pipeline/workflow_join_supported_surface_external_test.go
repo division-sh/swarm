@@ -2,6 +2,8 @@ package pipeline_test
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -10,11 +12,13 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
-	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
@@ -41,6 +45,24 @@ func (joinProofGenericScheduleWakeups) ReconcileWakeupWithRecovery(context.Conte
 }
 
 type exactJoinScheduleLogger struct{ t *testing.T }
+
+type exactJoinRuntimeLogger struct {
+	mu      sync.Mutex
+	details []string
+}
+
+func (l *exactJoinRuntimeLogger) Log(_ context.Context, _ diaglog.Level, _, _, _ string, _ string, _ string, _ string, _ string, _ string, _ map[string]string, detail any, _ *runtimefailures.Envelope, _ int) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.details = append(l.details, fmt.Sprint(detail))
+	return nil
+}
+
+func (l *exactJoinRuntimeLogger) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return fmt.Sprint(l.details)
+}
 
 func (l exactJoinScheduleLogger) GenericScheduleFailure(_ context.Context, action, activationID string, err error) {
 	l.t.Helper()
@@ -210,12 +232,33 @@ func TestWorkflowJoinDurableEventBusDeliveryClaimPreservesExactDeclarationOnBoth
 					t.Fatalf("replay mutated workflow = found:%v before:%d after:%d err:%v", found, beforeReplayRevision, afterReplay.Revision, err)
 				}
 				assertExactJoinDeliveryCount(t, selected, ctx, eventsByMember[1].ID(), joinNode.Key(), 1)
+				assertPersistedHandlerRuleSelectionInPackage(
+					t, selected, ctx, eventsByMember[1].ID(), handlerselection.ContextJoinComplete,
+					handlerselection.DispositionSelected, ".", "00000000-0000-4000-8000-000000000013", "",
+				)
+				assertTraceHandlerRuleSelectionInPackage(
+					t, selected, ctx, runID, eventsByMember[1].ID(), handlerselection.ContextJoinComplete,
+					handlerselection.DispositionSelected, ".", "00000000-0000-4000-8000-000000000013", "",
+				)
 			})
 		}
 	}
 }
 
 func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEventBusOnBothStores(t *testing.T) {
+	outcomes := []struct {
+		name          string
+		expected      []any
+		timeout       string
+		eventName     string
+		terminalState string
+		closeReason   joinruntime.CloseReason
+		context       handlerselection.Context
+		elementID     string
+	}{
+		{name: "completion", expected: []any{}, timeout: "1h", eventName: "platform.join_complete", terminalState: "ready", closeReason: joinruntime.CloseReasonComplete, context: handlerselection.ContextJoinComplete, elementID: "00000000-0000-4000-8000-000000000013"},
+		{name: "timeout", expected: []any{"a"}, timeout: "20ms", eventName: "platform.join_timeout", terminalState: "attention", closeReason: joinruntime.CloseReasonTimeout, context: handlerselection.ContextJoinTimeout, elementID: "00000000-0000-4000-8000-000000000014"},
+	}
 	for _, storeCase := range []struct {
 		name string
 		open func(*testing.T) gateRecoveryStoreCase
@@ -223,164 +266,185 @@ func TestWorkflowJoinScheduleOccurrencePreservesExactDeclarationThroughDurableEv
 		{name: "sqlite", open: openSQLiteGateRecoveryStore},
 		{name: "postgres", open: openPostgresGateRecoveryStore},
 	} {
-		for _, flowID := range []string{"", "orders"} {
-			scope := "root"
-			if flowID != "" {
-				scope = "flow"
+		for _, outcome := range outcomes {
+			for _, flowID := range []string{"", "orders"} {
+				scope := "root"
+				if flowID != "" {
+					scope = "flow"
+				}
+				t.Run(storeCase.name+"/"+outcome.name+"/"+scope, func(t *testing.T) {
+					selected := storeCase.open(t)
+					runtimeLogger := &exactJoinRuntimeLogger{}
+					store, ok := selected.events.(interface {
+						runtimegenericschedule.Store
+						runtimebus.PreparedPublishEventReader
+					})
+					if !ok {
+						t.Fatalf("selected store %T lacks generic schedule or event readback ownership", selected.events)
+					}
+					runID := uuid.NewString()
+					insertGateRecoveryRun(t, selected, runID)
+					ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
+					source := exactExternalWorkflowJoinSourceWithTimeout(t, flowID, outcome.timeout)
+					joinNode := externalPipelineSourceNode(t, source, flowID, "join-node")
+					path := runID
+					workflowName := source.WorkflowName()
+					instanceID := runID
+					if flowID != "" {
+						instanceID = uuid.NewString()
+						path = flowID + "/" + instanceID
+						workflowName = flowID
+					}
+
+					module := proposedEffectProofModule{
+						source: source,
+						workflow: runtimepipeline.NewWorkflowDefinition(workflowName, []runtimepipeline.WorkflowStage{
+							{Name: "awaiting"},
+							{Name: "ready", Terminal: true},
+							{Name: "attention", Terminal: true},
+						}, []runtimepipeline.WorkflowTransition{
+							{
+								Name: "complete-join", From: []runtimepipeline.WorkflowStateID{"awaiting"}, To: "ready",
+								Trigger: "item.completed", Node: joinNode,
+							},
+							{
+								Name: "timeout-join", From: []runtimepipeline.WorkflowStateID{"awaiting"}, To: "attention",
+								Trigger: "item.completed", Node: joinNode,
+							},
+						}),
+						nodes: []runtimepipeline.WorkflowNode{{
+							Node: joinNode, ExecutionType: runtimecontracts.SystemNodeExecutionType,
+							Subscriptions: []events.EventType{"item.completed"},
+							Policies: map[string]runtimepipeline.WorkflowEventPolicy{
+								"item.completed": {Consume: true},
+							},
+						}},
+					}
+					probe := runtimelifecycleprobe.New()
+					eventBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
+						ContractBundle: source, TestLifecycleProbe: probe, Logger: runtimeLogger,
+					}, outcome.eventName)
+					if err != nil {
+						t.Fatalf("new schedule occurrence EventBus: %v", err)
+					}
+					workOwner, ok := worklifetime.OccurrenceFromContext(ctx)
+					if !ok {
+						t.Fatal("join occurrence proof context lacks work owner")
+					}
+					scheduler := runtimepipeline.NewSchedulerWithWorkOwner(workOwner)
+					lifecycle, err := runtimegenericschedule.NewLifecycle(
+						store, scheduler, eventBus, eventBus.EngineDispatcher(), exactJoinScheduleLogger{t: t}, executionposture.Live,
+					)
+					if err != nil {
+						t.Fatalf("new generic schedule lifecycle: %v", err)
+					}
+					t.Cleanup(func() {
+						stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+						defer cancel()
+						if err := lifecycle.Stop(stopCtx); err != nil {
+							t.Errorf("stop generic schedule lifecycle: %v", err)
+						}
+					})
+					coordinator := newGateRecoveryCoordinator(eventBus, selected, runtimepipeline.PipelineCoordinatorOptions{
+						Module: module, Persistence: selected.persistence,
+						GenericSchedules: lifecycle, TestLifecycleProbe: probe,
+					})
+					eventBus.SetInterceptors(coordinator)
+
+					route := runtimeflowidentity.RouteForInstancePath(path)
+					entityID := runtimeflowidentity.EntityID(path)
+					createdAt := time.Now().UTC()
+					if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
+						InstanceID: instanceID, StorageRef: path, WorkflowName: workflowName, WorkflowVersion: "1.0.0",
+						EntityID: entityID, CurrentState: "awaiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
+						Fields:     map[string]any{"expected": outcome.expected},
+						EntityType: "join_state",
+					}, createdAt); err != nil {
+						t.Fatalf("materialize immediate join owner: %v", err)
+					}
+					if flowID != "" {
+						if err := eventBus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route}); err != nil {
+							t.Fatalf("add flow join route: %v", err)
+						}
+					}
+
+					eventID := exactJoinOccurrenceEventID(t, selected, ctx, runID, outcome.eventName)
+					startedCtx, cancelStarted := context.WithTimeout(ctx, 5*time.Second)
+					handlerStarted, startedErr := probe.Wait(startedCtx, runtimelifecycleprobe.Signal{
+						Kind: runtimelifecycleprobe.HandlerStarted, EventID: eventID,
+					})
+					cancelStarted()
+					if startedErr != nil {
+						t.Fatalf("wait exact join occurrence handler start = %#v err=%v", handlerStarted, startedErr)
+					}
+					handlerCtx, cancelHandler := context.WithTimeout(ctx, 5*time.Second)
+					handlerCompletion, handlerErr := probe.WaitForHandlerCompleted(handlerCtx, eventID, joinNode.Key())
+					cancelHandler()
+					if handlerErr != nil || handlerCompletion.Status != "completed" {
+						t.Fatalf("wait exact join occurrence handler = %#v err=%v logs=%s", handlerCompletion, handlerErr, runtimeLogger.String())
+					}
+					waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+					if err := eventBus.WaitForQuiescence(waitCtx); err != nil {
+						cancel()
+						t.Fatalf("wait occurrence delivery quiescence: %v", err)
+					}
+					cancel()
+					assertExactJoinDeliveryStatus(t, selected, ctx, eventID, joinNode.Key(), "delivered")
+					instance := waitForExactJoinState(t, ctx, coordinator, route, outcome.terminalState)
+					carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.Gates, instance.StateBuckets)
+					if err != nil {
+						t.Fatal(err)
+					}
+					joins, err := joinruntime.List(carrier.StateBuckets)
+					if err != nil || len(joins) != 1 {
+						t.Fatalf("join occurrence readback = %#v err=%v", joins, err)
+					}
+					if joins[0].Status != joinruntime.StatusClosed || joins[0].FlowID() != flowID ||
+						joins[0].CloseReason != outcome.closeReason || !joins[0].OutcomeFired {
+						t.Fatalf("fired join occurrence = %#v", joins[0])
+					}
+					assertPersistedHandlerRuleSelectionInPackage(
+						t, selected, ctx, eventID, outcome.context, handlerselection.DispositionSelected,
+						".", outcome.elementID, "",
+					)
+					assertTraceHandlerRuleSelectionInPackage(
+						t, selected, ctx, runID, eventID, outcome.context, handlerselection.DispositionSelected,
+						".", outcome.elementID, "",
+					)
+
+					prepared, found, err := store.LoadPreparedPublishEvent(ctx, eventID)
+					if err != nil || !found {
+						t.Fatalf("load persisted join occurrence = found:%v err:%v", found, err)
+					}
+					beforeReplayRevision := instance.Revision
+					if err := eventBus.PublishAcknowledged(ctx, prepared.Event.Event()); err != nil {
+						t.Fatalf("replay persisted join occurrence: %v", err)
+					}
+					waitCtx, cancel = context.WithTimeout(ctx, 5*time.Second)
+					if err := eventBus.WaitForQuiescence(waitCtx); err != nil {
+						cancel()
+						t.Fatalf("wait occurrence replay quiescence: %v", err)
+					}
+					cancel()
+					afterReplay, found, err := coordinator.Load(ctx, route)
+					if err != nil || !found || afterReplay.Revision != beforeReplayRevision {
+						t.Fatalf("occurrence replay mutated workflow = found:%v before:%d after:%d err:%v", found, beforeReplayRevision, afterReplay.Revision, err)
+					}
+					assertExactJoinDeliveryCount(t, selected, ctx, eventID, joinNode.Key(), 1)
+				})
 			}
-			t.Run(storeCase.name+"/"+scope, func(t *testing.T) {
-				selected := storeCase.open(t)
-				store, ok := selected.events.(interface {
-					runtimegenericschedule.Store
-					runtimebus.PreparedPublishEventReader
-				})
-				if !ok {
-					t.Fatalf("selected store %T lacks generic schedule or event readback ownership", selected.events)
-				}
-				runID := uuid.NewString()
-				insertGateRecoveryRun(t, selected, runID)
-				ctx := withLiveGateExecution(runtimecorrelation.WithRunID(testAuthorActivityContext(t, context.Background()), runID))
-				source := exactExternalWorkflowJoinSource(t, flowID)
-				joinNode := externalPipelineSourceNode(t, source, flowID, "join-node")
-				path := runID
-				workflowName := source.WorkflowName()
-				instanceID := runID
-				if flowID != "" {
-					instanceID = uuid.NewString()
-					path = flowID + "/" + instanceID
-					workflowName = flowID
-				}
-
-				module := proposedEffectProofModule{
-					source: source,
-					workflow: runtimepipeline.NewWorkflowDefinition(workflowName, []runtimepipeline.WorkflowStage{
-						{Name: "awaiting"},
-						{Name: "ready", Terminal: true},
-						{Name: "attention", Terminal: true},
-					}, []runtimepipeline.WorkflowTransition{{
-						Name: "complete-join", From: []runtimepipeline.WorkflowStateID{"awaiting"}, To: "ready",
-						Trigger: "item.completed", Node: joinNode,
-					}}),
-					nodes: []runtimepipeline.WorkflowNode{{
-						Node: joinNode, ExecutionType: runtimecontracts.SystemNodeExecutionType,
-						Subscriptions: []events.EventType{"item.completed"},
-						Policies: map[string]runtimepipeline.WorkflowEventPolicy{
-							"item.completed": {Consume: true},
-						},
-					}},
-				}
-				probe := runtimelifecycleprobe.New()
-				eventBus, err := newScopedTestEventBus(t, selected.events, runtimebus.EventBusOptions{
-					ContractBundle: source, TestLifecycleProbe: probe,
-				}, "platform.join_complete")
-				if err != nil {
-					t.Fatalf("new schedule occurrence EventBus: %v", err)
-				}
-				workOwner, ok := worklifetime.OccurrenceFromContext(ctx)
-				if !ok {
-					t.Fatal("join occurrence proof context lacks work owner")
-				}
-				scheduler := runtimepipeline.NewSchedulerWithWorkOwner(workOwner)
-				lifecycle, err := runtimegenericschedule.NewLifecycle(
-					store, scheduler, eventBus, eventBus.EngineDispatcher(), exactJoinScheduleLogger{t: t}, executionposture.Live,
-				)
-				if err != nil {
-					t.Fatalf("new generic schedule lifecycle: %v", err)
-				}
-				t.Cleanup(func() {
-					stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-					defer cancel()
-					if err := lifecycle.Stop(stopCtx); err != nil {
-						t.Errorf("stop generic schedule lifecycle: %v", err)
-					}
-				})
-				coordinator := newGateRecoveryCoordinator(eventBus, selected, runtimepipeline.PipelineCoordinatorOptions{
-					Module: module, Persistence: selected.persistence,
-					GenericSchedules: lifecycle, TestLifecycleProbe: probe,
-				})
-				eventBus.SetInterceptors(coordinator)
-
-				route := runtimeflowidentity.RouteForInstancePath(path)
-				entityID := runtimeflowidentity.EntityID(path)
-				createdAt := time.Now().UTC()
-				if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
-					InstanceID: instanceID, StorageRef: path, WorkflowName: workflowName, WorkflowVersion: "1.0.0",
-					EntityID: entityID, CurrentState: "awaiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
-					Fields:     map[string]any{"expected": []any{}},
-					EntityType: "join_state",
-				}, createdAt); err != nil {
-					t.Fatalf("materialize immediate join owner: %v", err)
-				}
-				if flowID != "" {
-					if err := eventBus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{Identity: route}); err != nil {
-						t.Fatalf("add flow join route: %v", err)
-					}
-				}
-
-				eventID := exactJoinOccurrenceEventID(t, selected, ctx, runID)
-				startedCtx, cancelStarted := context.WithTimeout(ctx, 5*time.Second)
-				handlerStarted, startedErr := probe.Wait(startedCtx, runtimelifecycleprobe.Signal{
-					Kind: runtimelifecycleprobe.HandlerStarted, EventID: eventID,
-				})
-				cancelStarted()
-				if startedErr != nil {
-					t.Fatalf("wait exact join occurrence handler start = %#v err=%v", handlerStarted, startedErr)
-				}
-				handlerCtx, cancelHandler := context.WithTimeout(ctx, 5*time.Second)
-				handlerCompletion, handlerErr := probe.WaitForHandlerCompleted(handlerCtx, eventID, joinNode.Key())
-				cancelHandler()
-				if handlerErr != nil || handlerCompletion.Status != "completed" {
-					t.Fatalf("wait exact join occurrence handler = %#v err=%v", handlerCompletion, handlerErr)
-				}
-				waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-				if err := eventBus.WaitForQuiescence(waitCtx); err != nil {
-					cancel()
-					t.Fatalf("wait occurrence delivery quiescence: %v", err)
-				}
-				cancel()
-				assertExactJoinDeliveryStatus(t, selected, ctx, eventID, joinNode.Key(), "delivered")
-				instance := waitForExactJoinState(t, ctx, coordinator, route, "ready")
-				carrier, err := runtimeengine.StateCarrierFromPersisted(instance.Fields, instance.Bookkeeping, instance.Gates, instance.StateBuckets)
-				if err != nil {
-					t.Fatal(err)
-				}
-				joins, err := joinruntime.List(carrier.StateBuckets)
-				if err != nil || len(joins) != 1 {
-					t.Fatalf("join occurrence readback = %#v err=%v", joins, err)
-				}
-				if joins[0].Status != joinruntime.StatusClosed || joins[0].FlowID() != flowID ||
-					joins[0].CloseReason != joinruntime.CloseReasonComplete || !joins[0].OutcomeFired {
-					t.Fatalf("fired join occurrence = %#v", joins[0])
-				}
-
-				prepared, found, err := store.LoadPreparedPublishEvent(ctx, eventID)
-				if err != nil || !found {
-					t.Fatalf("load persisted join occurrence = found:%v err:%v", found, err)
-				}
-				beforeReplayRevision := instance.Revision
-				if err := eventBus.PublishAcknowledged(ctx, prepared.Event.Event()); err != nil {
-					t.Fatalf("replay persisted join occurrence: %v", err)
-				}
-				waitCtx, cancel = context.WithTimeout(ctx, 5*time.Second)
-				if err := eventBus.WaitForQuiescence(waitCtx); err != nil {
-					cancel()
-					t.Fatalf("wait occurrence replay quiescence: %v", err)
-				}
-				cancel()
-				afterReplay, found, err := coordinator.Load(ctx, route)
-				if err != nil || !found || afterReplay.Revision != beforeReplayRevision {
-					t.Fatalf("occurrence replay mutated workflow = found:%v before:%d after:%d err:%v", found, beforeReplayRevision, afterReplay.Revision, err)
-				}
-				assertExactJoinDeliveryCount(t, selected, ctx, eventID, joinNode.Key(), 1)
-			})
 		}
 	}
 }
 
 func exactExternalWorkflowJoinSource(t *testing.T, flowID string) semanticview.Source {
+	return exactExternalWorkflowJoinSourceWithTimeout(t, flowID, "1h")
+}
+
+func exactExternalWorkflowJoinSourceWithTimeout(t *testing.T, flowID, timeout string) semanticview.Source {
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
-	fixtureRoot := canonicalrouting.CopyExactJoinEventBusProof(t, flowID)
+	fixtureRoot := canonicalrouting.CopyExactJoinEventBusProofWithTimeout(t, flowID, timeout)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 		repoRoot,
 		fixtureRoot,
@@ -389,25 +453,10 @@ func exactExternalWorkflowJoinSource(t *testing.T, flowID string) semanticview.S
 	if err != nil {
 		t.Fatalf("load exact join EventBus fixture: %v", err)
 	}
-	spec := runtimecontracts.JoinSpec{
-		ID: "awaiting", Stage: "awaiting",
-		Members: runtimecontracts.JoinMembersSpec{
-			From: "entity.expected", FromPath: runtimepaths.Parse("entity.expected"),
-			By: "payload.member_id", ByPath: runtimepaths.Parse("payload.member_id"),
-		},
-		Output: "payload.result", OutputPath: runtimepaths.Parse("payload.result"),
-		OnCompleteFound: true, OnComplete: runtimecontracts.HandlerRuleEntry{AdvancesTo: "ready"},
-		TimeoutFound: true, Timeout: runtimecontracts.JoinTimeoutSpec{
-			After: "1h", Outcome: runtimecontracts.HandlerRuleEntry{AdvancesTo: "attention"},
-		},
+	plans := append([]runtimecontracts.WorkflowJoinPlan(nil), bundle.Semantics.Joins...)
+	if len(plans) != 1 {
+		t.Fatalf("loaded exact join plans = %#v", plans)
 	}
-	baseSource := semanticview.Wrap(bundle)
-	joinNode := externalPipelineSourceNode(t, baseSource, flowID, "join-node")
-	plans := []runtimecontracts.WorkflowJoinPlan{{
-		Node: joinNode, HandlerEvent: "item.completed", Spec: spec,
-		ResultType: runtimecontracts.CatalogTypeReference{Type: "jsonb"},
-	}}
-	bundle.Semantics.Joins = plans
 	return exactExternalJoinSource{Source: semanticview.Wrap(bundle), flowID: flowID, plans: plans}
 }
 
@@ -468,16 +517,16 @@ func waitForExactJoinState(
 	return runtimepipeline.WorkflowInstance{}
 }
 
-func exactJoinOccurrenceEventID(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, runID string) string {
+func exactJoinOccurrenceEventID(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, runID, eventName string) string {
 	t.Helper()
-	query := `SELECT event_id FROM events WHERE run_id = ? AND event_name = 'platform.join_complete'`
+	query := `SELECT event_id FROM events WHERE run_id = ? AND event_name = ?`
 	if selected.postgres {
-		query = `SELECT event_id::text FROM events WHERE run_id = $1::uuid AND event_name = 'platform.join_complete'`
+		query = `SELECT event_id::text FROM events WHERE run_id = $1::uuid AND event_name = $2`
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		var eventID string
-		if err := selected.db.QueryRowContext(ctx, query, runID).Scan(&eventID); err == nil {
+		if err := selected.db.QueryRowContext(ctx, query, runID, eventName).Scan(&eventID); err == nil {
 			return eventID
 		}
 		time.Sleep(10 * time.Millisecond)

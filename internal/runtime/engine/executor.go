@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
@@ -105,6 +106,7 @@ type executionFrame struct {
 	result                    ExecutionResult
 	rule                      *runtimecontracts.HandlerRuleEntry
 	ruleSource                handlerRuleSource
+	ruleIndex                 int
 	payload                   map[string]any
 	accumulatorBucketRef      timeridentity.AccumulatorBucketRef
 	hasAccumulatorBucketRef   bool
@@ -490,7 +492,7 @@ func (e *Executor) SupportsStep(step Step) bool {
 
 func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (ExecutionResult, error) {
 	if err := e.ValidateRequest(req); err != nil {
-		result := ExecutionResult{Status: OutcomeRejected}
+		result := ExecutionResult{Status: OutcomeRejected, HandlerRuleSelection: handlerselection.NotApplicable()}
 		SetExecutionFailure(&result, err, "runtime.engine", "validate_request")
 		return result, err
 	}
@@ -645,11 +647,13 @@ func (e *Executor) newExecutionFrame(ctx context.Context, req ExecutionRequest) 
 			Transformed: map[string]any{},
 		},
 		result: ExecutionResult{
-			Status:       OutcomeCompleted,
-			CurrentState: currentState,
-			NextState:    currentState,
-			Computed:     map[string]any{},
+			Status:               OutcomeCompleted,
+			CurrentState:         currentState,
+			NextState:            currentState,
+			Computed:             map[string]any{},
+			HandlerRuleSelection: handlerselection.NotApplicable(),
 		},
+		ruleIndex: -1,
 	}, nil
 }
 
@@ -784,7 +788,9 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 		if err := e.storeJoinActivation(frame, activation); err != nil {
 			return false, err
 		}
-		e.selectJoinOutcome(frame, &spec.OnComplete, handlerRuleSourceJoinOnComplete, activation)
+		if err := e.selectJoinOutcome(frame, &spec.OnComplete, handlerRuleSourceJoinOnComplete, activation); err != nil {
+			return false, err
+		}
 		return false, nil
 	}
 	if activation.Status == joinruntime.StatusClosed {
@@ -803,7 +809,9 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 			return false, err
 		}
 		timeout := spec.Timeout.Outcome
-		e.selectJoinOutcome(frame, &timeout, handlerRuleSourceJoinTimeout, activation)
+		if err := e.selectJoinOutcome(frame, &timeout, handlerRuleSourceJoinTimeout, activation); err != nil {
+			return false, err
+		}
 		return false, nil
 	}
 	if internal {
@@ -857,7 +865,9 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 	if err := e.storeJoinActivation(frame, activation); err != nil {
 		return false, err
 	}
-	e.selectJoinOutcome(frame, &spec.OnComplete, handlerRuleSourceJoinOnComplete, activation)
+	if err := e.selectJoinOutcome(frame, &spec.OnComplete, handlerRuleSourceJoinOnComplete, activation); err != nil {
+		return false, err
+	}
 	return false, nil
 }
 
@@ -873,11 +883,12 @@ func (e *Executor) storeJoinActivation(frame *executionFrame, activation joinrun
 	return nil
 }
 
-func (e *Executor) selectJoinOutcome(frame *executionFrame, rule *runtimecontracts.HandlerRuleEntry, source handlerRuleSource, activation joinruntime.Activation) {
+func (e *Executor) selectJoinOutcome(frame *executionFrame, rule *runtimecontracts.HandlerRuleEntry, source handlerRuleSource, activation joinruntime.Activation) error {
 	frame.state.Join = activation.Context()
 	frame.rule = rule
 	frame.ruleSource = source
-	e.applyRule(frame, rule)
+	frame.ruleIndex = 0
+	return e.applyRule(frame, rule)
 }
 
 func (e *Executor) joinArrivalFailure(frame *executionFrame, class failures.Class, code string, spec *runtimecontracts.JoinSpec, window, member string) error {
@@ -1793,14 +1804,17 @@ func (e *Executor) stepOnComplete(frame *executionFrame) error {
 	}
 	topLevelRules := frame.req.Handler.OnComplete
 	ruleSource := handlerRuleSourceOnComplete
-	rule, err := e.selectRule(frame, topLevelRules)
+	rule, ruleIndex, err := e.selectRule(frame, topLevelRules, ruleSource)
 	if err != nil {
 		return err
 	}
 	if rule != nil {
 		frame.rule = rule
 		frame.ruleSource = ruleSource
-		e.applyRule(frame, rule)
+		frame.ruleIndex = ruleIndex
+		if err := e.applyRule(frame, rule); err != nil {
+			return err
+		}
 		if rule.FanOut != nil {
 			if _, err := e.stepFanOut(frame); err != nil {
 				return err
@@ -1817,14 +1831,17 @@ func (e *Executor) stepRules(frame *executionFrame) error {
 	if frame.rule != nil {
 		return nil
 	}
-	rule, err := e.selectRule(frame, frame.req.Handler.Rules)
+	rule, ruleIndex, err := e.selectRule(frame, frame.req.Handler.Rules, handlerRuleSourceRules)
 	if err != nil {
 		return err
 	}
 	if rule != nil {
 		frame.rule = rule
 		frame.ruleSource = handlerRuleSourceRules
-		e.applyRule(frame, rule)
+		frame.ruleIndex = ruleIndex
+		if err := e.applyRule(frame, rule); err != nil {
+			return err
+		}
 		if rule.FanOut != nil {
 			if _, err := e.stepFanOut(frame); err != nil {
 				return err
@@ -2295,7 +2312,7 @@ func (e *Executor) stepActivity(frame *executionFrame) error {
 	ruleIndex := -1
 	if frame.rule != nil {
 		ruleID = strings.TrimSpace(frame.rule.ID)
-		ruleIndex = selectedRuleIndex(frame.req.Handler, frame.rule)
+		ruleIndex = frame.ruleIndex
 	}
 	site := runtimecontracts.ActivitySite{
 		Node:            frame.req.Node,
@@ -2830,7 +2847,8 @@ func (e *Executor) evaluateGuardCheck(frame *executionFrame, id, check, policyRe
 	return false, []string{id}, fmt.Errorf("guard %q is not executable", id)
 }
 
-func (e *Executor) selectRule(frame *executionFrame, rules []runtimecontracts.HandlerRuleEntry) (*runtimecontracts.HandlerRuleEntry, error) {
+func (e *Executor) selectRule(frame *executionFrame, rules []runtimecontracts.HandlerRuleEntry, source handlerRuleSource) (*runtimecontracts.HandlerRuleEntry, int, error) {
+	hasExecutableRow := false
 	for idx := range rules {
 		rule := &rules[idx]
 		if rule.PolicyRow.Kind == runtimecontracts.PolicySheetRowKindLookup ||
@@ -2838,30 +2856,71 @@ func (e *Executor) selectRule(frame *executionFrame, rules []runtimecontracts.Ha
 			rule.PolicyRow.Kind == runtimecontracts.PolicySheetRowKindModule {
 			continue
 		}
+		hasExecutableRow = true
 		condition := strings.TrimSpace(rule.Condition)
 		if condition == "" || strings.EqualFold(condition, "else") {
-			return rule, nil
+			return rule, idx, nil
 		}
 		passed, err := e.evaluator.EvalBool(condition, e.currentContext(frame))
 		if err == ErrNotImplemented {
 			continue
 		}
 		if err != nil {
-			return nil, err
+			return nil, -1, err
 		}
 		if passed {
-			return rule, nil
+			return rule, idx, nil
 		}
 	}
-	return nil, nil
+	if hasExecutableRow {
+		context, err := handlerSelectionContext(source)
+		if err != nil {
+			return nil, -1, err
+		}
+		fact, err := handlerselection.NoMatch(context)
+		if err != nil {
+			return nil, -1, err
+		}
+		frame.result.HandlerRuleSelection = fact
+	}
+	return nil, -1, nil
 }
 
-func (e *Executor) applyRule(frame *executionFrame, rule *runtimecontracts.HandlerRuleEntry) {
+func (e *Executor) applyRule(frame *executionFrame, rule *runtimecontracts.HandlerRuleEntry) error {
 	if rule == nil {
-		return
+		return nil
 	}
-	if id := strings.TrimSpace(rule.ID); id != "" {
-		frame.result.RuleID = id
+	ref, qualified := rule.ContractElementRef()
+	if !qualified {
+		if rule.Authored() {
+			return fmt.Errorf("selected authored handler rule %q lacks its admitted contract element reference", strings.TrimSpace(rule.ID))
+		}
+		return nil
+	}
+	context, err := handlerSelectionContext(frame.ruleSource)
+	if err != nil {
+		return err
+	}
+	fact, err := handlerselection.Selected(context, ref, rule.ID)
+	if err != nil {
+		return err
+	}
+	frame.result.HandlerRuleSelection = fact
+	return nil
+}
+
+func handlerSelectionContext(source handlerRuleSource) (handlerselection.Context, error) {
+	switch source {
+	case handlerRuleSourceRules:
+		return handlerselection.ContextRules, nil
+	case handlerRuleSourceOnComplete:
+		return handlerselection.ContextOnComplete, nil
+	case handlerRuleSourceJoinOnComplete:
+		return handlerselection.ContextJoinComplete, nil
+	case handlerRuleSourceJoinTimeout:
+		return handlerselection.ContextJoinTimeout, nil
+	default:
+		return "", fmt.Errorf("handler rule source %q has no authored selection context", source)
 	}
 }
 
@@ -3030,22 +3089,6 @@ func selectedActivitySpec(handler runtimecontracts.SystemNodeEventHandler, rule 
 		return rule.Activity
 	}
 	return handler.Activity
-}
-
-func selectedRuleIndex(handler runtimecontracts.SystemNodeEventHandler, selected *runtimecontracts.HandlerRuleEntry) int {
-	if selected == nil {
-		return -1
-	}
-	selectedID := strings.TrimSpace(selected.ID)
-	for idx, rule := range handler.Rules {
-		if selectedID != "" && strings.TrimSpace(rule.ID) == selectedID {
-			return idx
-		}
-		if reflect.DeepEqual(rule, *selected) {
-			return idx
-		}
-	}
-	return -1
 }
 
 func (e *Executor) shapeEmitPayload(frame *executionFrame, eventType string, payload map[string]any) (map[string]any, error) {

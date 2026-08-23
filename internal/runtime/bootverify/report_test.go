@@ -2804,7 +2804,8 @@ stages:
 func TestRun_DoesNotWarnWhenOnCompleteBranchReachesDeclaredState(t *testing.T) {
 	root := writeStateReachabilityFixtureWithClosedHandler(t, `      advances_to: done
       on_complete:
-        - condition: "true"
+        - element_id: 00000000-0000-4000-8000-000000000401
+          condition: "true"
           advances_to: review`)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
@@ -2818,7 +2819,8 @@ func TestRun_DoesNotWarnWhenOnCompleteBranchReachesDeclaredState(t *testing.T) {
 func TestRun_DoesNotWarnWhenRuleBranchReachesDeclaredState(t *testing.T) {
 	root := writeStateReachabilityFixtureWithClosedHandler(t, `      advances_to: done
       rules:
-        - id: review
+        - element_id: 00000000-0000-4000-8000-000000000402
+          id: review
           condition: "true"
           advances_to: review`)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
@@ -2833,10 +2835,12 @@ func TestRun_DoesNotWarnWhenRuleBranchReachesDeclaredState(t *testing.T) {
 func TestRun_PreservesStateMachineCoherenceErrorWhenInvalidTargetExists(t *testing.T) {
 	root := writeStateReachabilityFixtureWithClosedHandler(t, `      advances_to: done
       rules:
-        - id: review
+        - element_id: 00000000-0000-4000-8000-000000000403
+          id: review
           condition: "true"
           advances_to: review
-        - id: invalid
+        - element_id: 00000000-0000-4000-8000-000000000404
+          id: invalid
           condition: "true"
           advances_to: bogus_state`)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))

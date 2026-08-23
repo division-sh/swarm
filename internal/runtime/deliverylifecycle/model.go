@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -751,13 +752,20 @@ const (
 	FailureDeadLetter FailureDisposition = "dead_letter"
 )
 
+type HandlerRuleSelectionFact = handlerselection.HandlerRuleSelectionFact
+
+func NotApplicableHandlerRuleSelection() HandlerRuleSelectionFact {
+	return handlerselection.NotApplicable()
+}
+
 type Settlement struct {
-	Disposition FailureDisposition
-	ReasonCode  string
-	Failure     *runtimefailures.Envelope
-	SideEffects []string
-	Duration    time.Duration
-	RetryBase   time.Duration
+	Disposition   FailureDisposition
+	ReasonCode    string
+	Failure       *runtimefailures.Envelope
+	SideEffects   []string
+	Duration      time.Duration
+	RetryBase     time.Duration
+	RuleSelection HandlerRuleSelectionFact
 }
 
 type Outcome struct {
@@ -826,7 +834,7 @@ type Store interface {
 	ObserveDeliveryContinuation(context.Context, ExecutionAuthority, string) (ContinuationObservation, error)
 	RenewClaim(context.Context, Claim) (Snapshot, error)
 	BindAgentSession(context.Context, Claim, string) (Snapshot, error)
-	SettleSuccess(context.Context, Claim, []string, time.Duration) (Snapshot, error)
+	SettleSuccess(context.Context, Claim, []string, time.Duration, HandlerRuleSelectionFact) (Snapshot, error)
 	SettleFailure(context.Context, Claim, Settlement) (Snapshot, error)
 	Snapshot(context.Context, string) (Snapshot, error)
 	Outcomes(context.Context, string) ([]Outcome, error)
