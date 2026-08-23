@@ -218,6 +218,23 @@ func TestReleaseEvidenceRejectsDuplicateClosureAttempts(t *testing.T) {
 			}
 		})
 	}
+	for name, mutate := range map[string]func(*fakeDockerRecord){
+		"wrong notice status": func(record *fakeDockerRecord) { record.ToolStatus = "ok" },
+		"missing mailbox id":  func(record *fakeDockerRecord) { record.MailboxID = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			records := append([]fakeDockerRecord(nil), base...)
+			for index := range records {
+				if records[index].Class == "mcp_notify" {
+					mutate(&records[index])
+					break
+				}
+			}
+			if err := validateReleaseDockerEvidence(records); err == nil || !strings.Contains(err.Error(), "want exact queued result") {
+				t.Fatalf("mutated notice-result validation error = %v, want exact-result rejection", err)
+			}
+		})
+	}
 }
 
 func TestReleaseEmulatorRejectsDuplicateAttemptBeforeRecording(t *testing.T) {
@@ -314,10 +331,12 @@ func validReleaseEvidence() []fakeDockerRecord {
 			MCPURL:    releaseE2EHostMCPURL,
 		},
 		{
-			Class:     "mcp_notify",
-			ToolName:  "notify_human",
-			RawMCPURL: releaseE2ERawMCPURL,
-			MCPURL:    releaseE2EHostMCPURL,
+			Class:      "mcp_notify",
+			ToolName:   "notify_human",
+			ToolStatus: "queued",
+			MailboxID:  "33333333-3333-3333-3333-333333333333",
+			RawMCPURL:  releaseE2ERawMCPURL,
+			MCPURL:     releaseE2EHostMCPURL,
 		},
 		{
 			Class:     "mcp_emit",

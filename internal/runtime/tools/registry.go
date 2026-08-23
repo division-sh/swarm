@@ -238,13 +238,49 @@ func runtimeToolHiddenFromAgents(name string) bool {
 	}
 }
 
+type executionToolOwner string
+
+const (
+	executionToolOwnerPlatformBuiltin executionToolOwner = "platform builtin"
+	executionToolOwnerRoot            executionToolOwner = "root source declaration"
+	executionToolOwnerDiscovered      executionToolOwner = "discovered MCP declaration"
+	executionToolOwnerScoped          executionToolOwner = "scoped source declaration"
+	executionToolOwnerNativeFallback  executionToolOwner = "native fallback"
+)
+
+func mergeExecutionTool(entries map[string]ExecutionTool, name string, execution ExecutionTool, include bool, owner executionToolOwner) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil
+	}
+	if _, managed := hitlToolDescriptorForName(name); managed {
+		if owner != executionToolOwnerPlatformBuiltin || !include || execution.Handler() != runtimecontracts.ToolHandlerPlatformBuiltin {
+			return fmt.Errorf("tool %s is owned by the platform HITL contract and cannot be redefined by %s", name, owner)
+		}
+	}
+	if !include {
+		return nil
+	}
+	if existing, ok := entries[name]; ok && existing.Handler() == runtimecontracts.ToolHandlerPlatformBuiltin && execution.Handler() == runtimecontracts.ToolHandlerPlatformBuiltin {
+		return nil
+	}
+	entries[name] = execution
+	return nil
+}
+
 func executionToolsForRuntime(source semanticview.Source, discovered map[string]runtimemcp.DiscoveredTool) (map[string]ExecutionTool, error) {
 	if retired := ValidateRetiredDynamicAgentToolReferences(source); len(retired) > 0 {
 		return nil, errors.Join(retired...)
 	}
-	entries, err := builtinExecutionTools(source, nil)
+	builtins, err := builtinExecutionTools(source, nil)
 	if err != nil {
 		return nil, err
+	}
+	entries := make(map[string]ExecutionTool, len(builtins))
+	for name, execution := range builtins {
+		if err := mergeExecutionTool(entries, name, execution, true, executionToolOwnerPlatformBuiltin); err != nil {
+			return nil, err
+		}
 	}
 	if source != nil {
 		for name, entry := range source.ToolEntries() {
@@ -256,21 +292,9 @@ func executionToolsForRuntime(source semanticview.Source, discovered map[string]
 				return nil, fmt.Errorf("tool %s %s", name, agentMessageUnavailableTeaching)
 			}
 			execution, include := executionToolFromAdmitted(name, entry)
-			if !include {
-				continue
+			if err := mergeExecutionTool(entries, name, execution, include, executionToolOwnerRoot); err != nil {
+				return nil, err
 			}
-			if existing, ok := entries[name]; ok && existing.Handler() == runtimecontracts.ToolHandlerPlatformBuiltin {
-				if _, managed := hitlToolDescriptorForName(name); managed {
-					if execution.Handler() != runtimecontracts.ToolHandlerPlatformBuiltin {
-						return nil, fmt.Errorf("tool %s is owned by the platform HITL contract and cannot be redefined", name)
-					}
-					continue
-				}
-				if execution.Handler() == runtimecontracts.ToolHandlerPlatformBuiltin {
-					continue
-				}
-			}
-			entries[name] = execution
 		}
 	}
 	for name, tool := range discovered {
@@ -279,10 +303,12 @@ func executionToolsForRuntime(source semanticview.Source, discovered map[string]
 			continue
 		}
 		execution, include := executionToolFromAdmitted(name, tool.Contract)
+		if err := mergeExecutionTool(entries, name, execution, include, executionToolOwnerDiscovered); err != nil {
+			return nil, err
+		}
 		if !include {
 			return nil, fmt.Errorf("discovered MCP tool %s has no admitted execution binding", name)
 		}
-		entries[name] = execution
 	}
 	return entries, nil
 }
@@ -298,7 +324,9 @@ func executionToolsForActor(source semanticview.Source, actor models.AgentConfig
 		return nil, err
 	}
 	for name, entry := range builtins {
-		entries[name] = entry
+		if err := mergeExecutionTool(entries, name, entry, true, executionToolOwnerPlatformBuiltin); err != nil {
+			return nil, err
+		}
 	}
 	candidates := map[string]struct{}{}
 	for name := range entries {
@@ -320,13 +348,9 @@ func executionToolsForActor(source semanticview.Source, actor models.AgentConfig
 				continue
 			}
 			execution, include := executionToolFromAdmitted(strings.TrimSpace(name), entry)
-			if !include {
-				continue
+			if err := mergeExecutionTool(entries, name, execution, include, executionToolOwnerScoped); err != nil {
+				return nil, err
 			}
-			if existing, ok := entries[strings.TrimSpace(name)]; ok && existing.Handler() == runtimecontracts.ToolHandlerPlatformBuiltin && execution.Handler() == runtimecontracts.ToolHandlerPlatformBuiltin {
-				continue
-			}
-			entries[strings.TrimSpace(name)] = execution
 		}
 	}
 	for _, name := range []string{"bash", "web_search", "read_file", "write_file"} {
@@ -337,7 +361,9 @@ func executionToolsForActor(source semanticview.Source, actor models.AgentConfig
 		if !ok {
 			continue
 		}
-		entries[name] = tool
+		if err := mergeExecutionTool(entries, name, tool, true, executionToolOwnerNativeFallback); err != nil {
+			return nil, err
+		}
 	}
 	removeLegacyEntityToolSurface(entries)
 	return entries, nil

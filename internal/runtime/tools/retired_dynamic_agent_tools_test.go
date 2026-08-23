@@ -113,24 +113,38 @@ func retiredToolSourceForScope(
 ) semanticview.Source {
 	bundle := &runtimecontracts.WorkflowContractBundle{}
 	source := retiredDynamicAgentToolSource{}
+	ownerURI := "test://retired-tool-scope/worker"
+	registerRootAgent := func() {
+		bundle.Paths.ProjectAgentsFile = "/contracts/agents.yaml"
+		bundle.URIRegistry = runtimecontracts.ContractURIRegistry{
+			Agents: map[string]runtimecontracts.ContractURIRef{"worker": {Kind: "agent", LocalID: "worker", Full: ownerURI}},
+			ByURI:  map[string]runtimecontracts.ContractURIRef{ownerURI: {Kind: "agent", LocalID: "worker", Full: ownerURI}},
+		}
+	}
 	switch scope {
 	case "root":
 		bundle.Agents = agents
-		source.projects = []semanticview.ProjectScope{{Key: ".", Agents: agents}}
+		registerRootAgent()
+		source.projects = []semanticview.ProjectScope{{Key: ".", Agents: agents, AgentURIs: map[string]string{"worker": ownerURI}}}
 		source.rootTools, source.rootPolicy = tools, policy
 	case "project":
 		bundle.Agents = agents
-		source.projects = []semanticview.ProjectScope{{Key: "project-fixture", Agents: agents, Tools: tools, Policy: policy}}
+		registerRootAgent()
+		source.projects = []semanticview.ProjectScope{{Key: ".", Agents: agents, AgentURIs: map[string]string{"worker": ownerURI}, Tools: tools, Policy: policy}}
 	case "flow":
 		flow := &runtimecontracts.FlowContractView{
-			Paths:  runtimecontracts.FlowContractPaths{ID: "flow-fixture", Flow: "flow-fixture", AgentsFile: "flow-fixture/agents.yaml", PackageKey: "."},
-			Path:   "flow-fixture",
-			Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
-			Agents: agents,
+			Paths:     runtimecontracts.FlowContractPaths{ID: "flow-fixture", Flow: "flow-fixture", AgentsFile: "flow-fixture/agents.yaml", PackageKey: "."},
+			Path:      "flow-fixture",
+			Schema:    runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic},
+			Agents:    agents,
+			AgentURIs: map[string]string{"worker": ownerURI},
 		}
 		bundle.FlowTree.Root = flow
 		bundle.FlowTree.ByID = map[string]*runtimecontracts.FlowContractView{"flow-fixture": flow}
-		source.flows = []semanticview.FlowScope{{ID: "flow-fixture", Agents: agents, Tools: tools, Policy: policy}}
+		bundle.URIRegistry = runtimecontracts.ContractURIRegistry{ByURI: map[string]runtimecontracts.ContractURIRef{
+			ownerURI: {Kind: "agent", FlowID: "flow-fixture", LocalID: "worker", Full: ownerURI},
+		}}
+		source.flows = []semanticview.FlowScope{{ID: "flow-fixture", Agents: agents, AgentURIs: map[string]string{"worker": ownerURI}, Tools: tools, Policy: policy}}
 	default:
 		panic("unsupported test scope: " + scope)
 	}
