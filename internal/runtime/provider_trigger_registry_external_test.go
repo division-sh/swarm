@@ -102,7 +102,8 @@ const boundedProviderFlowID = "bounded_inbound"
 // boundedStandingConnectorBundle puts connector consumers in the exact static
 // flow path targeted by the bounded standing-ingress fixture. Process-served
 // tests separately prove real standing singleton materialization.
-func boundedStandingConnectorBundle(flowInstance string, bundle *runtimecontracts.WorkflowContractBundle) *runtimecontracts.WorkflowContractBundle {
+func boundedStandingConnectorBundle(t *testing.T, flowInstance string, bundle *runtimecontracts.WorkflowContractBundle) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
 	flowInstance = strings.Trim(strings.TrimSpace(flowInstance), "/")
 	if bundle == nil || flowInstance == "" {
 		return bundle
@@ -141,7 +142,20 @@ func boundedStandingConnectorBundle(flowInstance string, bundle *runtimecontract
 		bundle.Semantics.FlowInputs = map[string][]string{}
 	}
 	bundle.Semantics.FlowInputs[boundedProviderFlowID] = append([]string(nil), inputs...)
-	return bundle
+	admitted := loadRuntimeTempBundle(t, map[string]string{
+		"package.yaml":                        "name: bounded-standing-connector\nversion: 1.0.0\nflows:\n  - id: bounded_inbound\n    flow: bounded_inbound\n    mode: static\n",
+		"flows/bounded_inbound/schema.yaml":   "name: bounded_inbound\nmode: static\ninitial_state: active\nstates: [active]\n",
+		"flows/bounded_inbound/entities.yaml": "bounded_entity: {}\n",
+	})
+	admitted.RootSchema = bundle.RootSchema
+	admitted.Nodes = bundle.Nodes
+	admitted.Events = bundle.Events
+	admitted.Agents = bundle.Agents
+	admitted.Tools = bundle.Tools
+	admitted.Semantics = bundle.Semantics
+	admitted.FlowTree = bundle.FlowTree
+	admitted.FlowSchemas = bundle.FlowSchemas
+	return admitted
 }
 
 func insertPostgresStandingFixture(t *testing.T, ctx context.Context, db *sql.DB, serviceID, packageKey, flowID, instanceID, entityID, runID, bundleHash, bundleSource string) {

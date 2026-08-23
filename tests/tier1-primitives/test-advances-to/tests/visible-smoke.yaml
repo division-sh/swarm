@@ -6,5 +6,5 @@ expect:
   events:
     include: [task.progressed]
   entities:
-    - type: default
+    - type: test_entity
       current_state: processing

@@ -7,5 +7,5 @@ expect:
   events:
     include: [task.timed_out]
   entities:
-    - type: default
+    - type: test_entity
       current_state: timed_out

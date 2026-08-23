@@ -563,9 +563,17 @@ func prepareHandlerMaterializationState(source semanticview.Source, flowID strin
 	if existing := strings.TrimSpace(state.Control.InstanceID); existing != "" && existing != route.InstanceID {
 		return fmt.Errorf("materializing handler instance_id %q disagrees with exact value %q", existing, route.InstanceID)
 	}
+	entityType, err := requireWorkflowEntityType(source, flowID)
+	if err != nil {
+		return err
+	}
+	if existing := strings.TrimSpace(state.Control.EntityType); existing != "" && existing != entityType {
+		return fmt.Errorf("materializing handler entity_type %q disagrees with canonical contract %q", existing, entityType)
+	}
 	state.Control.FlowPath = route.InstancePath
 	state.Control.StorageRef = route.InstancePath
 	state.Control.InstanceID = route.InstanceID
+	state.Control.EntityType = entityType
 	state.EntityID = strings.TrimSpace(entityID)
 	if strings.TrimSpace(string(state.Stage)) == "" {
 		state.Stage = NormalizeWorkflowStateID(workflowInitialStateForFlow(source, flowID))

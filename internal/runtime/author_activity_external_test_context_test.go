@@ -84,6 +84,7 @@ func (o *externalTestFlowInstanceActivationOwner) PrepareFlowInstanceActivation(
 		WorkflowName: req.Instance.TemplateID, WorkflowVersion: req.ContractBundle.WorkflowVersion(),
 		CurrentState: req.InitialState, Config: req.Config, Fields: fields, Bookkeeping: req.Bookkeeping,
 		EnteredStageAt: req.OccurredAt, CreatedAt: req.OccurredAt, RuntimeReadiness: &readiness,
+		EntityType: "test_entity",
 	}
 	plan := runtimepipeline.FlowInstanceActivationPlan{
 		Instance: instance, Identity: req.Instance, Readiness: readiness, OccurredAt: req.OccurredAt,

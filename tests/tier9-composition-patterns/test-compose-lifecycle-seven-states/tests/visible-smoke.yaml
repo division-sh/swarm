@@ -16,5 +16,5 @@ expect:
   events:
     include: [lifecycle.complete]
   entities:
-    - type: default
+    - type: test_entity
       current_state: closed

@@ -468,7 +468,7 @@ func newActivityBoringFullFlowCoordinator(t *testing.T, db *sql.DB, kind activit
 	if kind == activityBoringStoreSQLite {
 		store = newSQLiteWorkflowInstanceStoreForTest(t, db)
 	}
-	bundle := activityBoringFullFlowBundle(serverURL)
+	bundle := activityBoringFullFlowBundle(t, serverURL)
 	deliveryStore := newPipelineTestDeliveryOwnerForDB(t, db)
 	pc := newDurablePipelineCoordinatorForTest(bus, db, PipelineCoordinatorOptions{
 		Module: &previewWorkflowModule{
@@ -504,11 +504,8 @@ func activityBoringSource(serverURL string) semanticview.Source {
 	})
 }
 
-func activityBoringFullFlowSource(serverURL string) semanticview.Source {
-	return semanticview.Wrap(activityBoringFullFlowBundle(serverURL))
-}
-
-func activityBoringFullFlowBundle(serverURL string) *runtimecontracts.WorkflowContractBundle {
+func activityBoringFullFlowBundle(t *testing.T, serverURL string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
 	handler := runtimecontracts.SystemNodeEventHandler{
 		Activity: runtimecontracts.ActivitySpec{
 			Tool: "source_scrape",
@@ -544,7 +541,7 @@ func activityBoringFullFlowBundle(serverURL string) *runtimecontracts.WorkflowCo
 		Path: "research",
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
-	return &runtimecontracts.WorkflowContractBundle{
+	base := &runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name:         "activity-boring-proof",
 			Version:      "v-test",
@@ -586,6 +583,7 @@ func activityBoringFullFlowBundle(serverURL string) *runtimecontracts.WorkflowCo
 			})),
 		},
 	}
+	return admitSyntheticEntityContractsForTest(t, base, "", map[string]string{"research": "test_entity"})
 }
 
 func newActivityBoringSourceEvent(entityID, runID, inputURL string) events.Event {
@@ -840,6 +838,7 @@ func seedActivityBoringSourceFlow(t *testing.T, fixture activityBoringFixture, k
 		EnteredStageAt:  evt.CreatedAt(),
 		CreatedAt:       evt.CreatedAt(),
 		Fields:          map[string]any{},
+		EntityType:      "test_entity",
 	})
 	target, err := fixture.pc.workflowStore.LoadTargetPersistence(ctx, testWorkflowInstanceRoute(instance.StorageRef), identity.NormalizeEntityID(entityID))
 	if err != nil {
@@ -861,7 +860,7 @@ func seedActivityBoringRunScopedState(t *testing.T, fixture activityBoringFixtur
 			run_id, entity_id, flow_instance, entity_type, current_state,
 			gates, fields, bookkeeping, accumulator, revision,
 			entered_state_at, created_at, updated_at
-		) VALUES (?, ?, ?, 'research_item', ?, '{}', '{}', '{}', '{}', 1, ?, ?, ?)
+		) VALUES (?, ?, ?, 'test_entity', ?, '{}', '{}', '{}', '{}', 1, ?, ?, ?)
 	`
 	args := []any{evt.RunID(), instance.EntityID, instance.StorageRef, instance.CurrentState, instance.EnteredStageAt, instance.CreatedAt, instance.CreatedAt}
 	if kind == activityBoringStorePostgres {
@@ -870,7 +869,7 @@ func seedActivityBoringRunScopedState(t *testing.T, fixture activityBoringFixtur
 				run_id, entity_id, flow_instance, entity_type, current_state,
 				gates, fields, bookkeeping, accumulator, revision,
 				entered_state_at, created_at, updated_at
-			) VALUES ($1::uuid, $2::uuid, $3, 'research_item', $4,
+			) VALUES ($1::uuid, $2::uuid, $3, 'test_entity', $4,
 				'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, $5, $6, $6)
 		`
 		args = []any{evt.RunID(), instance.EntityID, instance.StorageRef, instance.CurrentState, instance.EnteredStageAt, instance.CreatedAt}

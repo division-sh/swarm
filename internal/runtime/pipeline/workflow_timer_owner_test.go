@@ -139,6 +139,7 @@ func TestWorkflowTimerLifecyclePreservesSameFlowPackageDeclarationsAcrossRestart
 				if err := store.upsert(ctx, workflowTimerMaterializedInstance(ctx, entityID, route.InstancePath, WorkflowInstance{
 					WorkflowName: "workflow-timer-package-identity", WorkflowVersion: "1.0.0",
 					CurrentState: "waiting", EnteredStageAt: createdAt, CreatedAt: createdAt,
+					EntityType: "test_entity",
 				})); err != nil {
 					t.Fatal(err)
 				}
@@ -242,6 +243,7 @@ func TestWorkflowTimerLifecycleFirstRevisedInitialTimerUsesDynamicReadinessModeO
 			result, err := pcA.MaterializeInitialEntry(mockCtx, workflowTimerMaterializedInstance(mockCtx, entityID, route.InstancePath, WorkflowInstance{
 				WorkflowName: "workflow-timer-first-revision", WorkflowVersion: "1.0.0",
 				RuntimeReadiness: &readiness, CurrentState: "waiting", CreatedAt: createdAt,
+				EntityType: "test_entity",
 			}), createdAt)
 			if err != nil || result != WorkflowInitialMaterializationCreated {
 				t.Fatalf("materialize timer-free dynamic instance: result=%v err=%v", result, err)
@@ -296,6 +298,7 @@ func TestWorkflowTimerLifecycleReconcilesInitialDeclarationRevisionOnBothStores(
 			result, err := pcA.MaterializeInitialEntry(ctx, workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
 				WorkflowName: "workflow-timer-source-revision", WorkflowVersion: "1.0.0",
 				CurrentState: "waiting", CreatedAt: createdAt,
+				EntityType: "test_entity",
 			}), createdAt)
 			if err != nil || result != WorkflowInitialMaterializationCreated {
 				t.Fatalf("materialize source A: result=%v err=%v", result, err)
@@ -443,6 +446,7 @@ func TestWorkflowTimerLifecycleReconcilesProgressedInitialDeclarationsProspectiv
 			result, err := pcA.MaterializeInitialEntry(ctx, workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
 				WorkflowName: "workflow-timer-progressed-revision", WorkflowVersion: "1.0.0",
 				CurrentState: "waiting", CreatedAt: createdAt,
+				EntityType: "test_entity",
 			}), createdAt)
 			if err != nil || result != WorkflowInitialMaterializationCreated {
 				t.Fatalf("materialize source A: result=%v err=%v", result, err)
@@ -551,6 +555,7 @@ func TestWorkflowTimerInitialWakeupProjectionIsCauseScopedOnBothStores(t *testin
 			result, err := pc.MaterializeInitialEntry(ctx, workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
 				WorkflowName: "workflow-timer-initial-event", WorkflowVersion: "1.0.0",
 				CurrentState: "waiting", CreatedAt: createdAt,
+				EntityType: "test_entity",
 			}), createdAt)
 			if err != nil || result != WorkflowInitialMaterializationCreated {
 				t.Fatalf("materialize initial/event timers: result=%v err=%v", result, err)
@@ -631,6 +636,7 @@ func TestWorkflowTimerLifecycleScopesDeclarationsToOwningFlowOnBothStores(t *tes
 				result, err := pc.MaterializeInitialEntry(ctx, workflowTimerMaterializedInstance(ctx, entityID, instancePath, WorkflowInstance{
 					WorkflowName: instanceFlow, WorkflowVersion: "1.0.0",
 					CurrentState: "waiting", CreatedAt: createdAt,
+					EntityType: "test_entity",
 				}), createdAt)
 				if err != nil || result != WorkflowInitialMaterializationCreated {
 					t.Fatalf("materialize %s: result=%v err=%v", instanceFlow, result, err)
@@ -968,7 +974,8 @@ func TestWorkflowTimerLifecycleEventOnlyHandlerDoesNotReplayStateEntryOnBothStor
 			if err := store.upsert(ctx, workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
 				WorkflowName:    "workflow-timer-owner-test",
 				WorkflowVersion: "1.0.0", CurrentState: "waiting", EnteredStageAt: createdAt,
-				CreatedAt: createdAt,
+				CreatedAt:  createdAt,
+				EntityType: "test_entity",
 			})); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
@@ -1064,7 +1071,8 @@ func TestWorkflowTimerLifecycleReconcilesOnlyHandledOutcomesOnBothStores(t *test
 			if err := store.upsert(ctx, workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
 				WorkflowName:    "workflow-timer-owner-test",
 				WorkflowVersion: "1.0.0", CurrentState: "waiting", EnteredStageAt: createdAt,
-				CreatedAt: createdAt,
+				CreatedAt:  createdAt,
+				EntityType: "test_entity",
 			})); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
@@ -1179,6 +1187,7 @@ func TestWorkflowTimerLifecycleEventHandlerFencesLoopGenerationOnBothStores(t *t
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "workflow-timer-owner-test",
 				WorkflowVersion: "1.0.0", CurrentState: "waiting", EnteredStageAt: createdAt,
 				CreatedAt: createdAt, Fields: carrier.PersistedFields(), Bookkeeping: carrier.PersistedBookkeeping(), Gates: carrier.Gates, StateBuckets: carrier.PersistedStateBuckets(),
+				EntityType: "test_entity",
 			})); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
@@ -1278,7 +1287,8 @@ func TestWorkflowTimerLifecycleInitialAndEventEntrancesDoNotDuplicateOnBothStore
 			if err := store.upsert(ctx, workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
 				WorkflowName:    "workflow-timer-owner-test",
 				WorkflowVersion: "1.0.0", CurrentState: "waiting", EnteredStageAt: createdAt,
-				CreatedAt: createdAt,
+				CreatedAt:  createdAt,
+				EntityType: "test_entity",
 			})); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
@@ -2066,6 +2076,7 @@ func TestWorkflowTimerInitialEntryStaysDormantUntilExplicitArmOnBothStores(t *te
 			result, err := pc.MaterializeInitialEntry(ctx, workflowTimerMaterializedInstance(ctx, entityID, rootRoute.InstancePath, WorkflowInstance{
 				WorkflowName:    "workflow-timer-owner-test",
 				WorkflowVersion: "1.0.0", CurrentState: "waiting",
+				EntityType: "test_entity",
 			}), createdAt)
 			if err != nil {
 				t.Fatalf("MaterializeInitialEntry: %v", err)
@@ -2408,7 +2419,8 @@ func seedWorkflowTimerOwnerActivationAt(
 	if err := store.upsert(ctx, workflowTimerMaterializedInstance(ctx, entityID, workflowTimerRootRoute(ctx).InstancePath, WorkflowInstance{
 		WorkflowName:    "workflow-timer-owner-test",
 		WorkflowVersion: "1.0.0", CurrentState: "waiting", EnteredStageAt: createdAt,
-		CreatedAt: createdAt,
+		CreatedAt:  createdAt,
+		EntityType: "test_entity",
 	})); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}
@@ -2539,7 +2551,7 @@ func workflowTimerOwnerBundle(recurring bool) *runtimecontracts.WorkflowContract
 }
 
 func workflowTimerOwnerBundleWithDelay(recurring bool, delay string) *runtimecontracts.WorkflowContractBundle {
-	return &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
+	return &runtimecontracts.WorkflowContractBundle{RootEntities: testEntityContractsForType("test_entity"), Semantics: runtimecontracts.WorkflowSemanticView{
 		Name: "workflow-timer-owner-test", Version: "1.0.0", InitialStage: "waiting",
 		Timers: []runtimecontracts.WorkflowTimerContract{{
 			ID: "waiting.timeout", Stage: "waiting", StageOwned: true, Owner: "runtime",
@@ -2659,7 +2671,7 @@ func workflowTimerFlowScopedBundle() *runtimecontracts.WorkflowContractBundle {
 }
 
 func workflowTimerEventOnlyStateTriggerBundle() *runtimecontracts.WorkflowContractBundle {
-	return &runtimecontracts.WorkflowContractBundle{Nodes: map[string]runtimecontracts.SystemNodeContract{
+	return &runtimecontracts.WorkflowContractBundle{RootEntities: testEntityContractsForType("test_entity"), Nodes: map[string]runtimecontracts.SystemNodeContract{
 		"observer": {ID: "observer", ExecutionType: "system_node"},
 	}, Events: map[string]runtimecontracts.EventCatalogEntry{
 		"timer.state_entry": {}, "timer.event_armed": {},
@@ -2679,7 +2691,7 @@ func workflowTimerEventOnlyStateTriggerBundle() *runtimecontracts.WorkflowContra
 }
 
 func workflowTimerLoopEventBundle() *runtimecontracts.WorkflowContractBundle {
-	return &runtimecontracts.WorkflowContractBundle{Nodes: map[string]runtimecontracts.SystemNodeContract{
+	return &runtimecontracts.WorkflowContractBundle{RootEntities: testEntityContractsForType("test_entity"), Nodes: map[string]runtimecontracts.SystemNodeContract{
 		"observer": {ID: "observer", ExecutionType: "system_node"},
 	}, Events: map[string]runtimecontracts.EventCatalogEntry{
 		"timer.event_armed": {},
@@ -2716,7 +2728,7 @@ func workflowTimerHandledOutcomeBundle() *runtimecontracts.WorkflowContractBundl
 	for _, declaration := range timers {
 		events[declaration.Event] = runtimecontracts.EventCatalogEntry{}
 	}
-	return &runtimecontracts.WorkflowContractBundle{Nodes: map[string]runtimecontracts.SystemNodeContract{
+	return &runtimecontracts.WorkflowContractBundle{RootEntities: testEntityContractsForType("test_entity"), Nodes: map[string]runtimecontracts.SystemNodeContract{
 		"observer": {ID: "observer", ExecutionType: "system_node"},
 	}, Events: events, Semantics: runtimecontracts.WorkflowSemanticView{
 		Name: "workflow-timer-owner-test", Version: "1.0.0", InitialStage: "waiting",

@@ -1743,6 +1743,7 @@ func TestCanonicalMutationSurface_ReconstructsTrackedEntityStateForWorkflowWrite
 			"evidence": map[string]any{"score": 2},
 			"notes":    map[string]any{"count": 1},
 		},
+		EntityType: "test_entity",
 	}, enteredAt); err != nil {
 		t.Fatalf("seed workflow instance: %v", err)
 	}

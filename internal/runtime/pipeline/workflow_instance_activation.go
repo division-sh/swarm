@@ -108,6 +108,9 @@ func (r FlowInstanceActivationRecord) Validate() error {
 	if strings.TrimSpace(r.WorkflowName) == "" || strings.TrimSpace(r.WorkflowVersion) == "" || strings.TrimSpace(r.CurrentState) == "" {
 		return fmt.Errorf("flow instance activation record requires exact workflow and initial state")
 	}
+	if strings.TrimSpace(r.EntityType) == "" || strings.TrimSpace(r.State.EntityType) != strings.TrimSpace(r.EntityType) {
+		return fmt.Errorf("flow instance activation record requires one exact entity contract")
+	}
 	if r.InitialProjectionVersion != workflowInitialMaterializationProjectionVersion {
 		return fmt.Errorf("flow instance activation record requires initial projection version %d", workflowInitialMaterializationProjectionVersion)
 	}
@@ -221,6 +224,7 @@ func (p FlowInstanceActivationPlan) Normalized() (FlowInstanceActivationPlan, er
 	p.Readiness = readiness
 	p.Identity = readiness.Identity
 	p.Instance.RuntimeReadiness = &p.Readiness
+	p.Instance.EntityType = strings.TrimSpace(p.Instance.EntityType)
 	p.ActivationVariables = cloneStringMap(p.ActivationVariables)
 	p.OccurredAt = p.OccurredAt.UTC()
 	return p, nil
@@ -234,6 +238,9 @@ func (p FlowInstanceActivationPlan) Validate() error {
 	}
 	if !p.Identity.Route().Valid() || p.Instance.StorageRef == "" || p.Instance.InstanceID == "" {
 		return fmt.Errorf("flow instance activation plan requires exact instance identity")
+	}
+	if p.Instance.EntityType == "" {
+		return fmt.Errorf("flow instance activation plan requires exact entity contract")
 	}
 	if p.Instance.StorageRef != p.Identity.InstancePath || p.Instance.InstanceID != p.Identity.InstanceID {
 		return fmt.Errorf("flow instance activation plan identity does not match workflow instance")

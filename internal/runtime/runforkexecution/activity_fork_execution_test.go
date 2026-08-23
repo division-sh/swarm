@@ -109,6 +109,7 @@ func TestExecuteSelectedContractRunForkExecutesOrReusesLoopActivityThroughRuntim
 			}
 			seedSelectedExecutionSourceRunWithPrimaryRouteAndSource(
 				t, db, sourceRunID, entityID, sourceRequestEventID, "platform.activity_requested", at,
+				"test_entity",
 				activityRoute, nil,
 				routingSource,
 				events.EnvelopeForSourceRoute(events.EnvelopeForFlowInstance(events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), "flow_a"), routingSource.Route()),
@@ -268,6 +269,7 @@ func selectedContractActivitySourceWithMode(serverURL string, effectClass runtim
 		Nodes:  map[string]runtimecontracts.SystemNodeContract{"test-node": node}, Path: "flow_a",
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootEntities: runtimecontracts.EntityContractsDocument{"test_entity": {}},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name: "activity-fork-proof", Version: "v1", InitialStage: "pending",
 			FlowInitial: map[string]string{"flow_a": "pending"}, FlowStates: map[string][]string{"flow_a": {"pending"}},

@@ -147,7 +147,8 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 				InstanceID: rootRoute, StorageRef: rootRoute,
 				WorkflowName: bundle.WorkflowName(), WorkflowVersion: bundle.WorkflowVersion(),
 				CurrentState: "pending", EnteredStageAt: startedAt, CreatedAt: startedAt,
-				Fields: map[string]any{"flow_path": rootRoute, "instance_id": rootRoute, "entity_id": entityID},
+				Fields:     map[string]any{"flow_path": rootRoute, "instance_id": rootRoute, "entity_id": entityID},
+				EntityType: "test_entity",
 			}, startedAt); err != nil {
 				t.Fatalf("materialize receiver authority workflow: %v", err)
 			}
@@ -548,6 +549,7 @@ pins:
   inputs:
     events: [task.assigned]
 `,
+		"entities.yaml": "test_entity: {}\n",
 		"events.yaml": `task.assigned: {}
 task.completed: {}
 task.finalized: {}

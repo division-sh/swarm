@@ -134,21 +134,21 @@ func workflowInitialMaterializationSnapshotExists(
 		), EXISTS (
 			SELECT 1
 			FROM entity_state
-			WHERE run_id = ? AND entity_id = ? AND flow_instance = ?
+			WHERE run_id = ? AND entity_id = ? AND flow_instance = ? AND entity_type = ?
 		)
 	`
-	args := []any{record.State.Route.InstancePath, record.State.RunID, record.State.EntityID, record.State.Route.InstancePath}
+	args := []any{record.State.Route.InstancePath, record.State.RunID, record.State.EntityID, record.State.Route.InstancePath, record.State.EntityType}
 	if postgres {
 		query = `
 			SELECT EXISTS (
 				SELECT 1 FROM flow_instances WHERE instance_id = $1
 			), EXISTS (
-				SELECT 1
+			SELECT 1
 				FROM entity_state
-				WHERE run_id = $2::uuid AND entity_id = $3::uuid AND flow_instance = $1
+				WHERE run_id = $2::uuid AND entity_id = $3::uuid AND flow_instance = $1 AND entity_type = $4
 			)
 		`
-		args = []any{record.State.Route.InstancePath, record.State.RunID, record.State.EntityID}
+		args = []any{record.State.Route.InstancePath, record.State.RunID, record.State.EntityID, record.State.EntityType}
 	}
 	var flow, entity bool
 	if err := tx.QueryRowContext(ctx, query, args...).Scan(&flow, &entity); err != nil {

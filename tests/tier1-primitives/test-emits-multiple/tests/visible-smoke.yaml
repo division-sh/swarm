@@ -6,5 +6,5 @@ expect:
   events:
     include: [item.processed]
   entities:
-    - type: default
+    - type: test_entity
       current_state: done

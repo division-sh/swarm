@@ -205,6 +205,7 @@ func executeExistingOwnerBehavior(
 		CurrentState:    "active",
 		Fields:          seedMetadata,
 		StateBuckets:    stateBuckets,
+		EntityType:      "test_entity",
 	})); err != nil {
 		t.Fatalf("seed %s workflow instance: %v", name, err)
 	}
@@ -270,8 +271,9 @@ func handlerEntityRequirementExecutionSource() semanticview.Source {
 		},
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		Semantics:  runtimecontracts.WorkflowSemanticView{Name: "review", Version: "1"},
-		RootSchema: &flow.Schema,
+		Semantics:    runtimecontracts.WorkflowSemanticView{Name: "review", Version: "1"},
+		RootSchema:   &flow.Schema,
+		RootEntities: testEntityContractsForType("test_entity"),
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &flow, ByID: map[string]*runtimecontracts.FlowContractView{"review": &flow},
 		},

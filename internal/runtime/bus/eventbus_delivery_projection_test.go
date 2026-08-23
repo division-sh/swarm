@@ -296,7 +296,7 @@ func TestPrepareSelectedForkPublishProjectsExactTargetedRoutes(t *testing.T) {
 	store.setTargetOwnerRoutes(target)
 	eb, err := newScopedTestEventBus(store, EventBusOptions{
 		ContractBundle: semanticview.Wrap(materializedTargetBundleWithHandler(
-			"worker", "target-node", "work.started", existingOwnerHandlerFixture(),
+			t, "worker", "target-node", "work.started", existingOwnerHandlerFixture(),
 		)),
 		RouteTable: routeTable,
 		RecipientPlanMaterializer: func(context.Context, events.Event, PublishRecipientPlan) ([]DeliveryRouteBlueprint, error) {

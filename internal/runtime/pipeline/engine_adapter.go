@@ -495,6 +495,11 @@ func (r pipelineEngineStateRepo) prepareMutation(
 	if err != nil {
 		return preparedWorkflowEngineState{}, err
 	}
+	if presence.HasState() {
+		if err := validateWorkflowEntityType(semanticSource, flowID, current.EntityType); err != nil {
+			return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine persisted entity contract: %w", err)
+		}
+	}
 	expectedState := ""
 	expectedRevision := int64(0)
 	if transition.CreatesState() {
@@ -513,10 +518,17 @@ func (r pipelineEngineStateRepo) prepareMutation(
 		if mode == "" {
 			return preparedWorkflowEngineState{}, fmt.Errorf("workflow initial materialization rejects unsupported persistence mode for flow %s", flowID)
 		}
+		entityType, err := requireWorkflowEntityType(source, flowID)
+		if err != nil {
+			return preparedWorkflowEngineState{}, fmt.Errorf("workflow initial materialization entity contract: %w", err)
+		}
+		if carried := strings.TrimSpace(mutation.StateCarrier.Control.EntityType); carried != entityType {
+			return preparedWorkflowEngineState{}, fmt.Errorf("workflow initial materialization carried entity_type %q disagrees with canonical contract %q", carried, entityType)
+		}
 		current = WorkflowInstance{
 			InstanceID: address.Route.InstanceID, StorageRef: address.Route.InstancePath, EntityID: entityID.String(),
 			WorkflowName: workflowName, WorkflowVersion: workflowVersion, Mode: mode, Status: "active", CurrentState: initialState,
-			EntityType:   firstNonEmptyString(mutation.StateCarrier.Control.EntityType, workflowEntityType(source, flowID)),
+			EntityType:   entityType,
 			InstanceKind: mutation.StateCarrier.Control.InstanceKind, TemplateVersion: mutation.StateCarrier.Control.TemplateVersion,
 			ParentFlowID: mutation.StateCarrier.Control.ParentFlowID, ParentFlowInstance: mutation.StateCarrier.Control.ParentFlowInstance,
 			ParentEntityID: mutation.StateCarrier.Control.ParentEntityID,

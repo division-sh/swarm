@@ -397,7 +397,8 @@ func TestApprovedActivityHoldsThenDispatchesExactFrozenInputOnBothStores(t *test
 			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "support", WorkflowVersion: "1", CurrentState: "drafting",
 				EnteredStageAt: enteredAt, CreatedAt: enteredAt,
-				Fields: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
+				Fields:     map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
+				EntityType: "test_entity",
 			}, enteredAt); err != nil {
 				t.Fatal(err)
 			}
@@ -826,7 +827,8 @@ func TestApprovedActivityProposalCreationRollsBackWorkflowCardAndContinuationOnB
 			if _, err := coordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 				InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "support", WorkflowVersion: "1", CurrentState: "drafting",
 				EnteredStageAt: enteredAt, CreatedAt: enteredAt,
-				Fields: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
+				Fields:     map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
+				EntityType: "test_entity",
 			}, enteredAt); err != nil {
 				t.Fatal(err)
 			}
@@ -1091,7 +1093,8 @@ func seedGateRecoveryForegroundRoute(t *testing.T, tc gateRecoveryStoreCase, run
 	if _, err := setupCoordinator.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "launch", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: at,
-		Fields: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
+		Fields:     map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
+		EntityType: "test_entity",
 	}, at); err != nil {
 		t.Fatal(err)
 	}
@@ -1228,7 +1231,8 @@ func testWorkflowGateStartupTerminalRecovery(t *testing.T, tc gateRecoveryStoreC
 	if _, err := matching.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "launch", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: enteredAt,
-		Fields: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
+		Fields:     map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
+		EntityType: "test_entity",
 	}, enteredAt); err != nil {
 		t.Fatal(err)
 	}
@@ -1327,7 +1331,8 @@ func testWorkflowGateUnavailablePinRecovery(t *testing.T, tc gateRecoveryStoreCa
 	if _, err := matching.MaterializeInitialEntry(ctx, runtimepipeline.WorkflowInstance{
 		InstanceID: runID, StorageRef: runID, EntityID: entityID, WorkflowName: "launch", WorkflowVersion: "1",
 		CurrentState: "awaiting_review", EnteredStageAt: scenarioAt,
-		Fields: map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
+		Fields:     map[string]any{"entity_id": entityID, "run_id": runID, "flow_path": runID, "instance_id": runID},
+		EntityType: "test_entity",
 	}, scenarioAt); err != nil {
 		t.Fatalf("materialize workflow instance: %v", err)
 	}
@@ -1451,6 +1456,7 @@ func proposedEffectProofBundle(serverURL string) *runtimecontracts.WorkflowContr
 		Approval: &runtimecontracts.ActivityApprovalSpec{Decision: "support_reply"},
 	}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootEntities: runtimecontracts.EntityContractsDocument{"test_entity": {Fields: map[string]runtimecontracts.EntityFieldDecl{}}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"support": {
 				ID: "support", ExecutionType: runtimecontracts.SystemNodeExecutionType,
@@ -1607,7 +1613,8 @@ func loadProposedEffectProofRequest(t *testing.T, selected gateRecoveryStoreCase
 
 func gateRecoveryContractBundle() *runtimecontracts.WorkflowContractBundle {
 	return &runtimecontracts.WorkflowContractBundle{
-		RootSchema: nil,
+		RootSchema:   nil,
+		RootEntities: runtimecontracts.EntityContractsDocument{"test_entity": {Fields: map[string]runtimecontracts.EntityFieldDecl{}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"launch.approved": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{}}},
 		},
@@ -1625,7 +1632,8 @@ func gateRecoveryContractBundle() *runtimecontracts.WorkflowContractBundle {
 
 func gateRecoveryTerminalContractBundle() *runtimecontracts.WorkflowContractBundle {
 	return &runtimecontracts.WorkflowContractBundle{
-		RootSchema: nil,
+		RootSchema:   nil,
+		RootEntities: runtimecontracts.EntityContractsDocument{"test_entity": {Fields: map[string]runtimecontracts.EntityFieldDecl{}}},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name: "launch", Version: "1", InitialStage: "awaiting_review", TerminalStages: []string{"completed"},
 			Gates: []runtimecontracts.WorkflowGatePlan{{

@@ -397,11 +397,11 @@ func TestSwarmTestRunsCatalogSmokeCompanionVisibleBehavior(t *testing.T) {
 			processed["event_name"] = "item.processed"
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"trace": []map[string]any{received, processed}})
 		case entityListMethod:
-			if req.Params["run_id"] != "run-1" || req.Params["type"] != "default" {
+			if req.Params["run_id"] != "run-1" || req.Params["type"] != "item" {
 				t.Fatalf("entity.list params = %#v", req.Params)
 			}
 			entity := validEntitySummary("entity-1")
-			entity["entity_type"] = "default"
+			entity["entity_type"] = "item"
 			entity["current_state"] = "done"
 			writeJSONRPCResult(t, w, req.ID, map[string]any{"entities": []map[string]any{entity}})
 		case entityGetMethod:
@@ -410,7 +410,7 @@ func TestSwarmTestRunsCatalogSmokeCompanionVisibleBehavior(t *testing.T) {
 			}
 			result := validEntityFullResult("entity-1")
 			entity := result["entity"].(map[string]any)
-			entity["entity_type"] = "default"
+			entity["entity_type"] = "item"
 			entity["current_state"] = "done"
 			writeJSONRPCResult(t, w, req.ID, result)
 		default:

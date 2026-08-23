@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -195,6 +196,10 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 	if !ok {
 		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("flow schema not found: %s", templateID)
 	}
+	entityContract, ok := entityruntime.ResolveForFlow(req.ContractBundle, templateID)
+	if !ok || strings.TrimSpace(entityContract.EntityType) == "" {
+		return runtimepipeline.FlowInstanceActivationRequest{}, runtimepipeline.FlowInstanceActivationPlan{}, fmt.Errorf("flow %s activation requires one canonical entity contract", templateID)
+	}
 	initialState := strings.TrimSpace(schema.LoweredInitialState())
 	if initialState == "" {
 		initialState = strings.TrimSpace(req.InitialState)
@@ -252,7 +257,7 @@ func (am *AgentManager) prepareFlowInstanceActivation(
 			InstanceID:         instanceID,
 			StorageRef:         flowPath,
 			EntityID:           flowEntityID,
-			EntityType:         strings.TrimSpace(schema.Entity),
+			EntityType:         strings.TrimSpace(entityContract.EntityType),
 			InstanceKind:       strings.TrimSpace(schema.Mode),
 			ParentFlowID:       strings.TrimSpace(instance.ParentRoute.FlowID),
 			ParentFlowInstance: strings.Trim(instance.ParentRoute.FlowInstance, "/"),

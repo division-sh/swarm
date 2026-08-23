@@ -18,16 +18,17 @@ import (
 // admitted durable target. Engines consume this value; they do not reinterpret
 // the stamped target or perform broad entity selection.
 type DeliveryTargetApplication struct {
-	owner    events.DeliveryTargetOwnership
-	policy   DeliveryTargetCompatibilityPolicy
-	flowID   string
-	route    runtimeflowidentity.Route
-	entityID string
-	event    events.Event
-	state    WorkflowState
-	instance WorkflowInstance
-	snapshot runtimeengine.StateSnapshot
-	presence WorkflowTargetPersistencePresence
+	owner      events.DeliveryTargetOwnership
+	policy     DeliveryTargetCompatibilityPolicy
+	flowID     string
+	entityType string
+	route      runtimeflowidentity.Route
+	entityID   string
+	event      events.Event
+	state      WorkflowState
+	instance   WorkflowInstance
+	snapshot   runtimeengine.StateSnapshot
+	presence   WorkflowTargetPersistencePresence
 }
 
 func (a DeliveryTargetApplication) Owner() events.DeliveryTargetOwnership { return a.owner }
@@ -67,9 +68,15 @@ func (a DeliveryTargetApplication) Validate() error {
 	if strings.TrimSpace(a.entityID) == "" || a.entityID != a.owner.Route().EntityID || strings.TrimSpace(a.state.EntityID) != a.entityID {
 		return fmt.Errorf("delivery target application entity disagrees with admitted owner")
 	}
+	if strings.TrimSpace(a.entityType) == "" || strings.TrimSpace(a.state.Control.EntityType) != a.entityType {
+		return fmt.Errorf("delivery target application requires exact canonical entity contract")
+	}
 	if a.presence.HasState() {
 		if _, err := requireWorkflowInstanceIdentity(a.route, identity.NormalizeEntityID(a.entityID), a.instance); err != nil {
 			return fmt.Errorf("delivery target application persisted state disagrees with admitted owner: %w", err)
+		}
+		if strings.TrimSpace(a.instance.EntityType) != a.entityType {
+			return fmt.Errorf("delivery target application persisted entity contract disagrees with admitted owner")
 		}
 	}
 	return nil
@@ -170,6 +177,11 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 		}
 		return application, nil
 	}
+	entityType, err := requireWorkflowEntityType(source, flowID)
+	if err != nil {
+		return DeliveryTargetApplication{}, fmt.Errorf("resolve delivery target entity contract: %w", err)
+	}
+	application.entityType = entityType
 	application.entityID = owner.Route().EntityID
 	if len(previewState) > 0 {
 		if len(previewState) != 1 {
@@ -180,7 +192,7 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 			application.state.EntityID = application.entityID
 		}
 		if application.state.Control.FlowPath == "" {
-			application.state.Control = runtimeStateControlForDeliveryTarget(route)
+			application.state.Control = runtimeStateControlForDeliveryTarget(route, entityType)
 		}
 		if err := application.Validate(); err != nil {
 			return DeliveryTargetApplication{}, fmt.Errorf("validate delivery target preview state: %w", err)
@@ -205,6 +217,9 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 		}
 		if _, err := requireWorkflowInstanceIdentity(route, identity.NormalizeEntityID(application.entityID), instance); err != nil {
 			return DeliveryTargetApplication{}, fmt.Errorf("validate exact admitted delivery target: %w", err)
+		}
+		if err := validateWorkflowEntityType(source, flowID, instance.EntityType); err != nil {
+			return DeliveryTargetApplication{}, fmt.Errorf("validate exact admitted delivery target entity contract: %w", err)
 		}
 		owned := workflowInstanceOwnedByFlow(source, instance, flowID, evt.RunID())
 		unavailable := deliveryTargetWorkflowInstanceUnavailable(source, flowID, instance)
@@ -240,7 +255,7 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 		if owner.ExistingEntity() {
 			return DeliveryTargetApplication{}, fmt.Errorf("existing_entity target %q is missing at execution", owner.Route().FlowInstance)
 		} else {
-			application.state, err = materializingDeliveryTargetState(source, flowID, handler, executionEvent, owner, policy)
+			application.state, err = materializingDeliveryTargetState(source, flowID, entityType, handler, executionEvent, owner, policy)
 			if err != nil {
 				return DeliveryTargetApplication{}, err
 			}
@@ -299,7 +314,7 @@ func validateDeliveryTargetDeclaredKey(source semanticview.Source, flowID, nodeI
 	return nil
 }
 
-func materializingDeliveryTargetState(source semanticview.Source, flowID string, handler SystemNodeEventHandler, evt events.Event, owner events.DeliveryTargetOwnership, policy DeliveryTargetCompatibilityPolicy) (WorkflowState, error) {
+func materializingDeliveryTargetState(source semanticview.Source, flowID, entityType string, handler SystemNodeEventHandler, evt events.Event, owner events.DeliveryTargetOwnership, policy DeliveryTargetCompatibilityPolicy) (WorkflowState, error) {
 	route, err := workflowInstanceRouteForExecution(source, flowID, owner.Route().FlowInstance)
 	if err != nil {
 		return WorkflowState{}, err
@@ -308,7 +323,7 @@ func materializingDeliveryTargetState(source semanticview.Source, flowID string,
 		EntityID: owner.Route().EntityID,
 		Stage:    NormalizeWorkflowStateID(workflowInitialStateForFlow(source, flowID)),
 		Metadata: workflowMaterializeEntityFields(source, flowID, nil),
-		Control:  runtimeStateControlForDeliveryTarget(route),
+		Control:  runtimeStateControlForDeliveryTarget(route, entityType),
 	}
 	if policy.Acquisition == DeliveryTargetAcquisitionCreate {
 		state.Metadata = workflowCreateEntityFields(source, flowID)
@@ -344,9 +359,10 @@ func workflowStateForDeliveryTargetInstance(instance WorkflowInstance) WorkflowS
 	return state
 }
 
-func runtimeStateControlForDeliveryTarget(route runtimeflowidentity.Route) runtimeengine.StateControl {
+func runtimeStateControlForDeliveryTarget(route runtimeflowidentity.Route, entityType string) runtimeengine.StateControl {
 	return runtimeengine.StateControl{
 		FlowPath: route.InstancePath, StorageRef: route.InstancePath, InstanceID: route.InstanceID,
+		EntityType: strings.TrimSpace(entityType),
 	}
 }
 

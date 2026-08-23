@@ -143,6 +143,7 @@ func TestWorkflowInstanceOwnedByFlow_UsesExactSemanticScope(t *testing.T) {
 		WorkflowName: "grandchild",
 		StorageRef:   "child/grandchild/inst-1",
 		InstanceID:   "inst-1",
+		EntityType:   "test_entity",
 	}
 
 	if workflowInstanceOwnedByFlow(source, instance, "child", "") {
@@ -159,6 +160,7 @@ func TestWorkflowInstanceRouteForPersistedUsesAuthoredNestedSingletonScope(t *te
 		WorkflowName: "grandchild",
 		StorageRef:   "child/grandchild",
 		InstanceID:   "grandchild",
+		EntityType:   "test_entity",
 	}
 
 	route, err := workflowInstanceRouteForPersisted(source, instance)
@@ -178,6 +180,7 @@ func TestRequireWorkflowInstanceIdentityRejectsMissingAndMismatchedFacts(t *test
 		StorageRef: "review/instance-1",
 		InstanceID: "instance-1",
 		EntityID:   entityID.String(),
+		EntityType: "test_entity",
 	}
 	if _, err := requireWorkflowInstanceIdentity(route, entityID, valid); err != nil {
 		t.Fatalf("exact identity rejected: %v", err)

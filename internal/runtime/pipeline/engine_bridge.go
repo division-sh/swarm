@@ -422,11 +422,15 @@ func resolveHandlerEntityIDForFlow(
 		instance.ParentEntityID = sourceEntityID
 		entityID = instance.EntityID
 		if state != nil {
+			entityType, err := requireWorkflowEntityType(source, flowID)
+			if err != nil {
+				return "", evt, err
+			}
 			state.EntityID = entityID
 			state.Stage = NormalizeWorkflowStateID(workflowInitialStateForFlow(source, flowID))
 			state.Status = ""
 			state.Metadata = workflowCreateEntityFields(source, flowID)
-			state.Control = workflowStateControlFromIdentity(instance)
+			state.Control = workflowStateControlFromIdentity(instance, entityType)
 		}
 		envelope := events.EnvelopeForFlowInstance(evt.NormalizedEnvelope(), instance.InstancePath)
 		resolved, err := events.ResolveEnvelope(evt, envelope)
@@ -493,9 +497,10 @@ func workflowCreateEntityFields(source semanticview.Source, flowID string) map[s
 	return fields
 }
 
-func workflowStateControlFromIdentity(instance FlowInstanceIdentity) runtimeengine.StateControl {
+func workflowStateControlFromIdentity(instance FlowInstanceIdentity, entityType string) runtimeengine.StateControl {
 	return runtimeengine.StateControl{
 		FlowPath: instance.InstancePath, StorageRef: instance.InstancePath, InstanceID: instance.InstanceID,
+		EntityType:   strings.TrimSpace(entityType),
 		ParentFlowID: instance.ParentRoute.FlowID, ParentFlowInstance: instance.ParentRoute.FlowInstance,
 		ParentEntityID: instance.ParentEntityID,
 	}

@@ -19,7 +19,7 @@ import (
 )
 
 func TestClassifyDeliveryTargetOwnershipClosedUnion(t *testing.T) {
-	source := deliveryTargetOwnershipSource()
+	source := deliveryTargetOwnershipSource(t)
 	evt := eventtest.RunCreatingRootIngress(
 		eventtest.UUID("delivery-target-classification"), events.EventType("review/one/work.ready"),
 		"", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{},
@@ -86,7 +86,7 @@ func TestClassifyDeliveryTargetOwnershipClosedUnion(t *testing.T) {
 }
 
 func TestClassifyDeliveryTargetOwnershipFailsClosedOnMissingOrContradictoryEvidence(t *testing.T) {
-	source := deliveryTargetOwnershipSource()
+	source := deliveryTargetOwnershipSource(t)
 	evt := eventtest.RunCreatingRootIngress(
 		eventtest.UUID("delivery-target-hostile"), events.EventType("review/one/work.ready"),
 		"", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{},
@@ -164,7 +164,7 @@ func TestClassifyDeliveryTargetOwnershipFailsClosedOnMissingOrContradictoryEvide
 }
 
 func TestClassifyDeliveryTargetOwnershipNeverPromotesSameFlowSibling(t *testing.T) {
-	source := deliveryTargetOwnershipSource()
+	source := deliveryTargetOwnershipSource(t)
 	evt := eventtest.RunCreatingRootIngress(
 		eventtest.UUID("delivery-target-handler-flow"), events.EventType("review/one/work.ready"),
 		"", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{},
@@ -208,7 +208,7 @@ func TestClassifyDeliveryTargetOwnershipNeverPromotesSameFlowSibling(t *testing.
 }
 
 func TestClassifyDeliveryTargetOwnershipPreservesExactOwnerForEntityOptionalHandler(t *testing.T) {
-	source := deliveryTargetOwnershipSource()
+	source := deliveryTargetOwnershipSource(t)
 	evt := eventtest.RunCreatingRootIngress(
 		eventtest.UUID("delivery-target-optional-owner"), events.EventType("review/one/work.ready"),
 		"", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{},
@@ -292,7 +292,7 @@ func TestClassifyDeliveryTargetOwnershipProjectsRootHandlerOntoSelectedRun(t *te
 }
 
 func TestClassifyDeliveryTargetOwnershipConsumesExactInputAcquisitionMode(t *testing.T) {
-	source := deliveryTargetOwnershipSource()
+	source := deliveryTargetOwnershipSource(t)
 	entityID := eventtest.UUID("selected-input-owner")
 	tests := []struct {
 		name       string
@@ -369,7 +369,7 @@ func TestClassifyDeliveryTargetOwnershipConsumesExactInputAcquisitionMode(t *tes
 }
 
 func TestClassifyDeliveryTargetOwnershipDeclaredKeyAcquisitionMatrix(t *testing.T) {
-	source := deliveryTargetOwnershipSource()
+	source := deliveryTargetOwnershipSource(t)
 	evt := eventtest.RunCreatingRootIngress(
 		eventtest.UUID("declared-key-target"), events.EventType("review/work.keyed"),
 		"", "", mustJSON(map[string]any{"account_id": "account-1"}), 0, "", "", events.EventEnvelope{}, time.Time{},
@@ -377,6 +377,7 @@ func TestClassifyDeliveryTargetOwnershipDeclaredKeyAcquisitionMatrix(t *testing.
 	instance := WorkflowInstance{
 		EntityID: eventtest.UUID("declared-key-existing"), WorkflowName: "review", InstanceID: "one",
 		StorageRef: "review/one", Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": "account-1"},
+		EntityType: "review_entity",
 	}
 	tests := []struct {
 		name      string
@@ -426,13 +427,14 @@ func TestClassifyDeliveryTargetOwnershipDeclaredKeyAcquisitionMatrix(t *testing.
 }
 
 func TestClassifyDeliveryTargetOwnershipTargetedEventPreservesExactOwnerBeforeDeclaredKeyAcquisition(t *testing.T) {
-	source := deliveryTargetOwnershipSource()
+	source := deliveryTargetOwnershipSource(t)
 	exact := events.RouteIdentity{
 		FlowID: "review", FlowInstance: "review/exact", EntityID: eventtest.UUID("declared-key-explicit-target"),
 	}.Normalized()
 	competing := WorkflowInstance{
 		EntityID: eventtest.UUID("declared-key-competing-owner"), WorkflowName: "review", InstanceID: "competing",
 		StorageRef: "review/competing", Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": "account-1"},
+		EntityType: "review_entity",
 	}
 	for _, nodeID := range []string{"key-selector", "key-upserter"} {
 		t.Run(nodeID, func(t *testing.T) {
@@ -463,7 +465,7 @@ func TestClassifyDeliveryTargetOwnershipTargetedEventPreservesExactOwnerBeforeDe
 }
 
 func TestClassifyDeliveryTargetOwnershipSelectOrCreateAcceptsExactSameKeyAppearanceAndRejectsConflict(t *testing.T) {
-	source := deliveryTargetOwnershipSource()
+	source := deliveryTargetOwnershipSource(t)
 	evt := eventtest.RunCreatingRootIngress(
 		eventtest.UUID("declared-key-race"), events.EventType("review/work.keyed"),
 		"", "", mustJSON(map[string]any{"account_id": "account-1"}), 0, "", "", events.EventEnvelope{}, time.Time{},
@@ -476,6 +478,7 @@ func TestClassifyDeliveryTargetOwnershipSelectOrCreateAcceptsExactSameKeyAppeara
 	matching := WorkflowInstance{
 		EntityID: identity.EntityID, WorkflowName: "review", InstanceID: identity.InstanceID, StorageRef: identity.InstancePath,
 		Status: "active", CurrentState: "active", Fields: map[string]any{"account_id": "account-1"},
+		EntityType: "review_entity",
 	}
 	node := pipelineNode(t, "review", "key-upserter")
 	handler, err := AdmitDeliveryTargetHandler(source, node)
@@ -550,8 +553,9 @@ func deliveryTargetStateRecord(instance WorkflowInstance) WorkflowEntityStatePer
 		return raw
 	}
 	return WorkflowEntityStatePersistenceRecord{
-		EntityID: instance.EntityID, FlowInstance: instance.StorageRef, EntityType: instance.EntityType,
-		Slug: instance.Slug, Name: instance.Name, CurrentState: instance.CurrentState, Revision: instance.Revision,
+		EntityID: instance.EntityID, FlowInstance: instance.StorageRef,
+		EntityType: instance.EntityType,
+		Slug:       instance.Slug, Name: instance.Name, CurrentState: instance.CurrentState, Revision: instance.Revision,
 		EnteredStageAt: instance.EnteredStageAt, Gates: marshal(instance.Gates), Fields: marshal(instance.Fields),
 		Bookkeeping: marshal(instance.Bookkeeping), Accumulator: marshal(instance.StateBuckets),
 		CreatedAt: instance.CreatedAt, UpdatedAt: instance.UpdatedAt,
@@ -566,7 +570,7 @@ func withDeliveryTargetInstanceIdentity(instance WorkflowInstance, instanceID, e
 }
 
 func TestValidateStampedDeliveryTargetOwnershipRejectsWrongAcquisitionFutureID(t *testing.T) {
-	source := deliveryTargetOwnershipSource()
+	source := deliveryTargetOwnershipSource(t)
 	evt := eventtest.RunCreatingRootIngress(
 		eventtest.UUID("stamped-acquisition-owner"), events.EventType("review/one/work.created"),
 		"", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{},
@@ -778,7 +782,8 @@ func TestDeliveryTargetWorkflowInstanceAvailabilityIsActiveOnly(t *testing.T) {
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			instance := WorkflowInstance{Status: testCase.status, CurrentState: testCase.state, TerminatedAt: testCase.terminated}
+			instance := WorkflowInstance{Status: testCase.status, CurrentState: testCase.state, TerminatedAt: testCase.terminated,
+				EntityType: "review_entity"}
 			if got := deliveryTargetWorkflowInstanceUnavailable(source, "review", instance); got != testCase.unavailable {
 				t.Fatalf("delivery target unavailable = %t, want %t for status=%q state=%q", got, testCase.unavailable, testCase.status, testCase.state)
 			}
@@ -786,7 +791,8 @@ func TestDeliveryTargetWorkflowInstanceAvailabilityIsActiveOnly(t *testing.T) {
 	}
 }
 
-func deliveryTargetOwnershipSource() semanticview.Source {
+func deliveryTargetOwnershipSource(t *testing.T) semanticview.Source {
+	t.Helper()
 	flow := runtimecontracts.FlowContractView{
 		Path: "review", Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review", Mode: runtimecontracts.FlowModeTemplate},
 		Schema: runtimecontracts.FlowSchemaDocument{
@@ -818,12 +824,12 @@ func deliveryTargetOwnershipSource() semanticview.Source {
 		},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
-	bundle := &runtimecontracts.WorkflowContractBundle{
+	bundle := admitSyntheticEntityContractsForTest(t, &runtimecontracts.WorkflowContractBundle{
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{"review": &root.Children[0]},
 		},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"review": flow.Schema},
-	}
+	}, "", map[string]string{"review": "review_entity"})
 	return semanticview.Wrap(bundle)
 }
 

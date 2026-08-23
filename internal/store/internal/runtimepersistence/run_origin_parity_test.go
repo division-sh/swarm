@@ -199,6 +199,7 @@ func TestStandingGenerationRunOriginNamedOperationParity(t *testing.T) {
 				"serving", 4, time.Date(2026, 7, 29, 18, 0, 0, 0, time.UTC),
 			)
 			standingRecord.CurrentState = "serving"
+			standingRecord.EntityType = "standing_service"
 			standingRecord.Fields = json.RawMessage(`{"name":"standing"}`)
 			standingRecord.Bookkeeping = json.RawMessage(`{"generation":2}`)
 			standingRecord.Gates = json.RawMessage(`{"ready":true}`)
@@ -278,16 +279,19 @@ func seedStandingRepairEntityState(t *testing.T, ctx context.Context, db *sql.DB
 func requireStandingRepairMutationProjection(t *testing.T, ctx context.Context, db *sql.DB, backend, runID, entityID string) {
 	t.Helper()
 	postgres := backend == "postgres"
-	stateQuery := `SELECT current_state, gates, fields, bookkeeping, accumulator FROM entity_state WHERE run_id = ? AND entity_id = ?`
+	stateQuery := `SELECT entity_type, current_state, gates, fields, bookkeeping, accumulator FROM entity_state WHERE run_id = ? AND entity_id = ?`
 	mutationQuery := `SELECT domain, path, new_value, writer_type, writer_id, COALESCE(handler_step, '') FROM entity_mutations WHERE run_id = ? AND entity_id = ? ORDER BY created_at, mutation_id`
 	if postgres {
-		stateQuery = `SELECT current_state, gates, fields, bookkeeping, accumulator FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`
+		stateQuery = `SELECT entity_type, current_state, gates, fields, bookkeeping, accumulator FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`
 		mutationQuery = `SELECT domain, path, new_value, writer_type, writer_id, COALESCE(handler_step, '') FROM entity_mutations WHERE run_id = $1::uuid AND entity_id = $2::uuid ORDER BY created_at, mutation_id`
 	}
-	var currentState string
+	var entityType, currentState string
 	var gatesRaw, fieldsRaw, bookkeepingRaw, accumulatorRaw any
-	if err := db.QueryRowContext(ctx, stateQuery, runID, entityID).Scan(&currentState, &gatesRaw, &fieldsRaw, &bookkeepingRaw, &accumulatorRaw); err != nil {
+	if err := db.QueryRowContext(ctx, stateQuery, runID, entityID).Scan(&entityType, &currentState, &gatesRaw, &fieldsRaw, &bookkeepingRaw, &accumulatorRaw); err != nil {
 		t.Fatalf("load repaired standing entity state: %v", err)
+	}
+	if entityType != "standing_service" {
+		t.Fatalf("repaired standing entity type = %q, want standing_service", entityType)
 	}
 	live := runtimemutationlog.EntityStateProjection{
 		CurrentState: strings.TrimSpace(currentState),

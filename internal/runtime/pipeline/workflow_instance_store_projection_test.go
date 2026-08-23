@@ -12,6 +12,30 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestWorkflowInstanceStoreProjectionRejectsMissingEntityContract(t *testing.T) {
+	instance := materializedWorkflowInstanceForTest(WorkflowInstance{
+		InstanceID: "inst-1", StorageRef: "review/inst-1", EntityID: uuid.NewString(),
+		WorkflowName: "review", WorkflowVersion: "1", CurrentState: "active", Fields: map[string]any{},
+	})
+	if _, err := workflowInstancePersistedProjectionFromInstance(instance, instance.StorageRef); err == nil || !strings.Contains(err.Error(), "entity_type is required") {
+		t.Fatalf("missing entity contract projection error = %v", err)
+	}
+}
+
+func TestWorkflowInstanceReadRejectsBlankEntityContract(t *testing.T) {
+	now := time.Date(2026, time.August, 23, 4, 10, 0, 0, time.UTC)
+	record := WorkflowInstancePersistenceRecord{
+		EntityID: uuid.NewString(), WorkflowName: "review", WorkflowVersion: "1", Mode: "template", Status: "active",
+		CurrentState: "active", Revision: 1, EnteredStageAt: now,
+		Gates: []byte(`{}`), Fields: []byte(`{}`), Bookkeeping: []byte(`{}`), Accumulator: []byte(`{}`),
+		Config:       []byte(`{"workflow_version":"1","instance_id":"inst-1","flow_path":"review/inst-1"}`),
+		FlowInstance: "review/inst-1", EntityType: "   ", CreatedAt: now, UpdatedAt: now,
+	}
+	if _, err := DecodeWorkflowInstancePersistenceRecord(record); err == nil || !strings.Contains(err.Error(), "entity_state.entity_type is required") {
+		t.Fatalf("blank entity contract read error = %v", err)
+	}
+}
+
 func TestWorkflowInstanceStoreProjection_RoundTripPreservesCanonicalState(t *testing.T) {
 	_, db, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
@@ -321,6 +345,7 @@ func TestWorkflowInstanceStoreProjection_StaticRowsPersistCanonicalFlowPathOnRou
 		CurrentState:    "queued",
 		Fields:          map[string]any{},
 		StateBuckets:    map[string]any{},
+		EntityType:      "test_entity",
 	})
 
 	if err := store.upsert(testWorkflowStoreRunContext(t, store), instance); err != nil {
@@ -424,6 +449,7 @@ func TestWorkflowInstanceStoreProjection_RejectsMalformedPersistedShapes(t *test
 				CurrentState:    "queued",
 				Fields:          map[string]any{},
 				StateBuckets:    map[string]any{},
+				EntityType:      "test_entity",
 			})); err != nil {
 				t.Fatalf("seed workflow instance: %v", err)
 			}
