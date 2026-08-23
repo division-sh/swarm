@@ -1,0 +1,14 @@
+search.requested:
+  query: text
+scout.requested:
+  query: text
+scout.completed:
+  batch_id: text
+  candidate_ids: "[text]"
+candidate.requested:
+  batch_id: text
+  candidate_id: text
+candidate.completed:
+  batch_id: text
+  candidate_id: text
+  summary: text

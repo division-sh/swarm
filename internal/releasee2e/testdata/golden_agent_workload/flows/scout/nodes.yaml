@@ -1,0 +1,25 @@
+scout-intake:
+  id: scout-intake
+  execution_type: system_node
+  subscribes_to: [scout.requested]
+  produces: [scout.work.requested]
+  event_handlers:
+    scout.requested:
+      create_entity: true
+      advances_to: active
+      emit:
+        event: scout.work.requested
+        fields:
+          query: payload.query
+
+scout-completion:
+  id: scout-completion
+  execution_type: system_node
+  subscribes_to: [scout.completed]
+  event_handlers:
+    scout.completed:
+      advances_to: complete
+      data_accumulation:
+        writes:
+          - source_field: candidate_ids
+            target_field: candidate_ids

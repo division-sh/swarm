@@ -1,0 +1,3 @@
+search_batch:
+  batch_id: text
+  candidate_ids: "[text]"

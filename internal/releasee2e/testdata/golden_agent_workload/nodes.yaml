@@ -1,0 +1,58 @@
+search-intake:
+  id: search-intake
+  execution_type: system_node
+  subscribes_to: [search.requested]
+  produces: [scout.requested]
+  event_handlers:
+    search.requested:
+      create_entity: true
+      advances_to: scouting
+      emit:
+        event: scout.requested
+        fields:
+          query: payload.query
+
+scout-collector:
+  id: scout-collector
+  execution_type: system_node
+  subscribes_to: [scout.completed]
+  produces: [candidate.requested]
+  event_handlers:
+    scout.completed:
+      advances_to: collecting
+      data_accumulation:
+        writes:
+          - source_field: batch_id
+            target_field: batch_id
+          - source_field: candidate_ids
+            target_field: candidate_ids
+      fan_out:
+        items_from: payload.candidate_ids
+        as: candidate_id
+        max_items: 8
+        emit:
+          event: candidate.requested
+          fields:
+            batch_id: payload.batch_id
+            candidate_id: candidate_id
+
+candidate-collector:
+  id: candidate-collector
+  execution_type: system_node
+  subscribes_to: [candidate.completed]
+  event_handlers:
+    candidate.completed:
+      join:
+        stage: collecting
+        members:
+          from: entity.candidate_ids
+          by: payload.candidate_id
+        window:
+          from: entity.batch_id
+          by: payload.batch_id
+        output: payload.summary
+        on_complete:
+          advances_to: complete
+        timeout:
+          after: 2m
+          advances_to: failed

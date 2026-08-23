@@ -1,0 +1,11 @@
+candidate-worker:
+  type: generic
+  role: golden_candidate
+  intent: prompts/candidate-worker.md
+  model: regular
+  memory: false
+  subscriptions: [candidate.work.requested]
+  emit_events: [candidate.analyzed]
+  mock:
+    kind: python
+    module: mocks/candidate.py
