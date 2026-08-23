@@ -162,6 +162,40 @@ func TestClaimHeartbeatRenewalHandoffPausesAndResumesGenerationOwner(t *testing.
 	}
 }
 
+func TestClaimHeartbeatCommittedSettlementKeepsHandlerContextUntilPostCommitJoin(t *testing.T) {
+	owner := newHeartbeatTestOwner(t)
+	store := &heartbeatTestStore{}
+	claim := heartbeatTestClaim()
+	heartbeat, err := startClaimHeartbeat(context.Background(), owner, store, claim, DefaultLeaseTTL-time.Minute)
+	if err != nil {
+		t.Fatalf("start heartbeat: %v", err)
+	}
+	contextClaim, ok := ClaimFromContext(heartbeat.Context())
+	if !ok || !contextClaim.Same(claim) {
+		t.Fatal("heartbeat handler context did not retain the exact claim")
+	}
+	guard, err := heartbeat.BeginSettlement()
+	if err != nil {
+		t.Fatalf("begin settlement: %v", err)
+	}
+	if err := guard.MarkCommitted(); err != nil {
+		t.Fatalf("mark committed settlement: %v", err)
+	}
+	select {
+	case <-heartbeat.Context().Done():
+		t.Fatal("committed settlement canceled handler before post-commit work returned")
+	case <-time.After(20 * time.Millisecond):
+	}
+	if err := heartbeat.Stop(); err != nil {
+		t.Fatalf("join committed heartbeat: %v", err)
+	}
+	select {
+	case <-heartbeat.Context().Done():
+	case <-time.After(time.Second):
+		t.Fatal("joined heartbeat left handler context live")
+	}
+}
+
 func newHeartbeatTestOwner(t *testing.T) *worklifetime.RuntimeOccurrence {
 	t.Helper()
 	process := worklifetime.NewProcess()

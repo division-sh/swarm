@@ -544,10 +544,17 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 		}
 		result = frame.result
 		committed, err := e.persist(lockCtx, frame)
+		result = frame.result
+		if committed.SettledDeliveryClaim != nil {
+			if claimErr := committed.SettledDeliveryClaim.Validate(); claimErr != nil {
+				return fmt.Errorf("committed engine delivery settlement: %w", claimErr)
+			}
+			claim := *committed.SettledDeliveryClaim
+			result.SettledDeliveryClaim = &claim
+		}
 		if err != nil {
 			return err
 		}
-		result = frame.result
 		intents = append([]EmitIntent(nil), committed.EmitIntents...)
 		activityIntents = append([]ActivityIntent(nil), committed.ActivityIntents...)
 		return nil

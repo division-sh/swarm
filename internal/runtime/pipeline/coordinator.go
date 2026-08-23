@@ -670,11 +670,37 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 			HandlerEventKey: handlerEventKey,
 			State:           application.State(),
 		}, false, emissions != nil)
+		if result.SettledDeliveryClaim != nil && !result.SettledDeliveryClaim.Same(claim) {
+			return false, fmt.Errorf("workflow node engine settled a different delivery claim")
+		}
+		if result.SettledDeliveryClaim != nil && err != nil {
+			pc.notifyTestLifecycleHandlerCompleted(executionCtx, node.Key(), evt, "completed")
+			stopErr := heartbeat.Stop()
+			releaser := pc.deliveryRuntime
+			if releaser == nil {
+				return false, errors.Join(err, stopErr, errors.New("terminal workflow node delivery continuation owner is required"))
+			}
+			releaseErr := releaser.ReleaseDeliveryContinuation(claim.DeliveryID())
+			pc.notifyTestLifecycleDeliveryStatus(attemptCtx, node.Key(), evt, "delivered")
+			return result.Handled, errors.Join(err, stopErr, releaseErr)
+		}
 		if err == nil {
 			for _, emitted := range result.Emissions {
 				emissions.appendEvent(emitted)
 			}
 			pc.notifyTestLifecycleHandlerCompleted(executionCtx, node.Key(), evt, "completed")
+			if result.SettledDeliveryClaim != nil {
+				stopErr := heartbeat.Stop()
+				releaser := pc.deliveryRuntime
+				if releaser == nil {
+					return false, errors.Join(stopErr, errors.New("terminal workflow node delivery continuation owner is required"))
+				}
+				if err := errors.Join(stopErr, releaser.ReleaseDeliveryContinuation(claim.DeliveryID())); err != nil {
+					return false, fmt.Errorf("finish settled workflow node delivery continuation: %w", err)
+				}
+				pc.notifyTestLifecycleDeliveryStatus(attemptCtx, node.Key(), evt, "delivered")
+				return result.Handled, nil
+			}
 			sideEffects := []string{"handler_completed"}
 			settlementGuard, settleErr := heartbeat.BeginSettlement()
 			if settleErr != nil {
@@ -716,7 +742,7 @@ func (pc *PipelineCoordinator) executeNodeHandlerPlanResultWithEmissionPlan(ctx 
 		settlementGuard, settleErr := heartbeat.BeginSettlement()
 		if settleErr != nil {
 			_ = heartbeat.Stop()
-			return false, fmt.Errorf("prepare failed workflow node delivery settlement: %w", settleErr)
+			return false, errors.Join(err, fmt.Errorf("prepare failed workflow node delivery settlement: %w", settleErr))
 		}
 		snapshot, settleErr := deliveryStore.SettleFailure(executionCtx, claim, runtimedelivery.Settlement{
 			Disposition: disposition, ReasonCode: reason, Failure: &failure.Failure,

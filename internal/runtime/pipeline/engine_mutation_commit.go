@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 )
 
@@ -167,7 +168,35 @@ type WorkflowEngineMutationCommand struct {
 	ProposedEffects         []WorkflowEngineProposedEffect
 	Publications            []runtimeengine.DurablePublicationPlan
 	RouteRetirement         *WorkflowEngineRouteRetirement
+	DeliverySuccess         *WorkflowEngineDeliverySuccess
 	PostCommit              WorkflowEnginePostCommitPlan
+}
+
+// WorkflowEngineDeliverySuccess declares the exact inbound node claim that
+// must become terminal in the same transaction as its successful mutation.
+type WorkflowEngineDeliverySuccess struct {
+	Claim       runtimedelivery.Claim
+	SideEffects []string
+	Duration    time.Duration
+}
+
+func (s WorkflowEngineDeliverySuccess) Validate(runID string) error {
+	if err := s.Claim.Validate(); err != nil {
+		return fmt.Errorf("workflow engine delivery success: %w", err)
+	}
+	if s.Claim.SubscriberClass() != runtimedelivery.SubscriberNode {
+		return fmt.Errorf("workflow engine delivery success requires a node claim")
+	}
+	if s.Claim.RunID() != strings.TrimSpace(runID) {
+		return fmt.Errorf("workflow engine delivery run %s disagrees with mutation run %s", s.Claim.RunID(), strings.TrimSpace(runID))
+	}
+	if s.Duration < 0 {
+		return fmt.Errorf("workflow engine delivery success duration cannot be negative")
+	}
+	if len(s.SideEffects) != 1 || strings.TrimSpace(s.SideEffects[0]) != "handler_completed" {
+		return fmt.Errorf("workflow engine delivery success requires the exact handler_completed effect")
+	}
+	return nil
 }
 
 // WorkflowEngineRouteRetirement declares that the exact persisted route must
@@ -243,6 +272,11 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 	for index, effect := range c.ProposedEffects {
 		if err := effect.Validate(); err != nil {
 			return fmt.Errorf("workflow engine proposed effect %d: %w", index, err)
+		}
+	}
+	if c.DeliverySuccess != nil {
+		if err := c.DeliverySuccess.Validate(runID); err != nil {
+			return err
 		}
 	}
 	seen := make(map[string]struct{}, len(c.Publications))
@@ -365,6 +399,7 @@ type CommittedWorkflowEngineMutation struct {
 	Publications    []runtimeengine.CommittedDurablePublication
 	Lifecycle       CommittedWorkflowLifecycleMutation
 	RouteRetirement *WorkflowEngineRouteRetirement
+	DeliverySuccess *runtimedelivery.Claim
 	PostCommit      WorkflowEnginePostCommitPlan
 }
 
@@ -384,6 +419,14 @@ func (r CommittedWorkflowEngineMutation) Validate() error {
 		route := runtimeflowidentity.StoredRoute(retirement.Route.ScopeKey, retirement.Route.InstanceID, retirement.Route.InstancePath)
 		if !route.Valid() {
 			return fmt.Errorf("committed workflow engine route retirement requires exact identity")
+		}
+	}
+	if r.DeliverySuccess != nil {
+		if err := r.DeliverySuccess.Validate(); err != nil {
+			return fmt.Errorf("committed workflow engine delivery success: %w", err)
+		}
+		if r.DeliverySuccess.SubscriberClass() != runtimedelivery.SubscriberNode {
+			return fmt.Errorf("committed workflow engine delivery success requires a node claim")
 		}
 	}
 	if deactivation := r.PostCommit.FlowDeactivation; deactivation != nil {

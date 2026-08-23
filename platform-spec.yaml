@@ -6024,8 +6024,14 @@ engine:
         route executes through its exact compiled receiver and cannot defer behind topology that only its own execution
         creates. Child publications emitted while an exact node continuation executes are committed by that node mutation's
         selected-store owner and dispatched only by consuming its exact staged post-commit evidence before the continuation
-        reports transfer or terminal settlement. Missing evidence fails closed; continuation dispatch never re-appends or
-        reconstructs the child publication. When an accepted agent delivery emits the event that terminalizes its own flow
+        reports transfer or terminal settlement. A successful workflow-node mutation commits its state/lifecycle facts,
+        proposed effects, child publications, and the exact inbound node-delivery success in one selected-store transaction;
+        it also requests run-completion evaluation in that transaction. No runtime caller may settle that successful claim
+        in a later transaction. Any publication or settlement conflict rolls back every mutation fact. The claim heartbeat
+        excludes renewal while the transaction commits, records the exact committed claim without canceling handler context,
+        and stops and joins only after declared post-commit dispatch returns. Missing or mismatched settlement evidence fails
+        closed; mutation-free handled outcomes retain their named delivery-only settlement. Missing publication evidence fails
+        closed; continuation dispatch never re-appends or reconstructs the child publication. When an accepted agent delivery emits the event that terminalizes its own flow
         instance, lifecycle ownership fences that exact route before returning from terminalization but retains the current
         durable generation until the accepted route carrier settles. The agent loop then commits the terminal lifecycle
         transition and removes the route from its finalizer. Terminal authority cannot overtake tool-follow-up effects that

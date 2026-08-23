@@ -294,6 +294,32 @@ func (s *DeliverySQLiteOwner) SettleProviderOriginSuccessTx(
 	return err
 }
 
+// SettleWorkflowNodeSuccessTx terminally settles the exact inbound node claim
+// inside the selected workflow-engine mutation transaction.
+func (s *DeliveryPostgresOwner) SettleWorkflowNodeSuccessTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	story runtimeauthoractivity.Mutation,
+	claim runtimedelivery.Claim,
+	sideEffects []string,
+	duration time.Duration,
+) (runtimedelivery.Snapshot, error) {
+	return postgresDeliveryAdapter.SettleSuccess(ctx, tx, story, claim, sideEffects, duration)
+}
+
+// SettleWorkflowNodeSuccessTx terminally settles the exact inbound node claim
+// inside the selected workflow-engine mutation transaction.
+func (s *DeliverySQLiteOwner) SettleWorkflowNodeSuccessTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	story runtimeauthoractivity.Mutation,
+	claim runtimedelivery.Claim,
+	sideEffects []string,
+	duration time.Duration,
+) (runtimedelivery.Snapshot, error) {
+	return sqliteDeliveryAdapter.SettleSuccess(ctx, tx, story, claim, sideEffects, duration)
+}
+
 func (s *DeliveryPostgresOwner) SettleProviderOriginFailureTx(
 	ctx context.Context,
 	tx *sql.Tx,

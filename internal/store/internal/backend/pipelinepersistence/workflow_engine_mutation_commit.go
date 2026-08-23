@@ -592,16 +592,37 @@ func commitWorkflowEngineMutation(
 			}
 			result.Publications = append(result.Publications, evidence)
 		}
+		if success := command.DeliverySuccess; success != nil {
+			if _, err := store.SettleWorkflowNodeSuccessTx(
+				txctx,
+				tx,
+				runtimeStory,
+				success.Claim,
+				append([]string(nil), success.SideEffects...),
+				success.Duration,
+			); err != nil {
+				return fmt.Errorf("settle workflow node delivery with engine mutation: %w", err)
+			}
+			candidate, err := requestCandidate(txctx, tx, success.Claim.RunID())
+			if err != nil {
+				return err
+			}
+			if err := prepare(handoff, candidate); err != nil {
+				return err
+			}
+			claim := success.Claim
+			result.DeliverySuccess = &claim
+		}
 		return nil
 	})
 	if err != nil {
 		return runtimepipeline.CommittedWorkflowEngineMutation{}, err
 	}
 	if err := result.Validate(); err != nil {
-		return runtimepipeline.CommittedWorkflowEngineMutation{}, err
+		return result, err
 	}
 	if err := handoff.Commit(); err != nil {
-		return runtimepipeline.CommittedWorkflowEngineMutation{}, err
+		return result, err
 	}
 	return result, nil
 }

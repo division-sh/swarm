@@ -55,6 +55,7 @@ type eventCommitTxStore interface {
 	workflowDecisionLifecycleOwner() workflowDecisionLifecycleTxOwner
 	genericScheduleTxOwner() GenericScheduleTxOwner
 	commitPublicationTx(context.Context, *sql.Tx, *privateauthoractivity.Mutation, runtimebus.PublicationCommand, *runLifecycleCandidateHandoffReservation) (runtimebus.CommittedPublication, error)
+	SettleWorkflowNodeSuccessTx(context.Context, *sql.Tx, authoractivity.Mutation, runtimedelivery.Claim, []string, time.Duration) (runtimedelivery.Snapshot, error)
 }
 
 type GenericScheduleTxOwner interface {

@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/core/values"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
@@ -495,6 +496,7 @@ type ExecutionResult struct {
 	DeadLetterIntents    []EmitIntent
 	ChainDepth           int
 	LoopTrace            *LoopExecutionTrace
+	SettledDeliveryClaim *runtimedelivery.Claim
 }
 
 type LoopExecutionTrace struct {
