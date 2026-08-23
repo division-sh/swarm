@@ -9,6 +9,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 )
@@ -92,8 +93,9 @@ type CommittedDurablePublication interface {
 }
 
 type CommittedEngineMutation struct {
-	ActivityIntents []ActivityIntent
-	EmitIntents     []EmitIntent
+	ActivityIntents      []ActivityIntent
+	EmitIntents          []EmitIntent
+	SettledDeliveryClaim *runtimedelivery.Claim
 }
 
 type EngineMutationOwner interface {

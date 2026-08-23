@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -52,6 +53,7 @@ type contractHandlerExecutionResult struct {
 	PreviewMetadata           map[string]any
 	InitialValuesMaterialized map[string]any
 	Emissions                 []events.Event
+	SettledDeliveryClaim      *runtimedelivery.Claim
 	Handled                   bool
 	RuleSelection             handlerselection.HandlerRuleSelectionFact
 }
@@ -310,7 +312,11 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		logLoopExecution(ctx, pc.bus, node.Key(), triggerCtx.Event, result.LoopTrace)
 	}
 	if err != nil {
-		return contractHandlerExecutionResult{RuleSelection: admittedHandlerRuleSelection(result.HandlerRuleSelection)}, err
+		return contractHandlerExecutionResult{
+			SettledDeliveryClaim: result.SettledDeliveryClaim,
+			Handled:              runtimeengine.IsHandledOutcome(result.Status),
+			RuleSelection:        admittedHandlerRuleSelection(result.HandlerRuleSelection),
+		}, err
 	}
 	if handler.CreateEntity && result.StateMutation.StateCarrier.Fields == nil {
 		result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(stateSnapshot.StateCarrier.Fields)
@@ -341,8 +347,10 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	handled := runtimeengine.IsHandledOutcome(result.Status)
 	if result.Status == runtimeengine.OutcomeUnknown {
 		return contractHandlerExecutionResult{
-			Handled: handled, Emissions: emissions.immutableEvents(),
-			RuleSelection: admittedHandlerRuleSelection(result.HandlerRuleSelection),
+			Handled:              handled,
+			Emissions:            emissions.immutableEvents(),
+			SettledDeliveryClaim: result.SettledDeliveryClaim,
+			RuleSelection:        admittedHandlerRuleSelection(result.HandlerRuleSelection),
 		}, nil
 	}
 	outcome := handlerOutcomeFromExecutionResult(result)
@@ -366,6 +374,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		PreviewMetadata:           previewMetadata,
 		InitialValuesMaterialized: initialValuesMaterialized,
 		Emissions:                 emissions.immutableEvents(),
+		SettledDeliveryClaim:      result.SettledDeliveryClaim,
 		Handled:                   handled,
 		RuleSelection:             admittedHandlerRuleSelection(result.HandlerRuleSelection),
 	}, nil

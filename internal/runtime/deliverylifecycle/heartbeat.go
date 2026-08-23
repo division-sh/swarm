@@ -23,6 +23,7 @@ type ClaimHeartbeat struct {
 	workLease *worklifetime.Lease
 	store     Store
 	claim     Claim
+	startedAt time.Time
 	settled   bool
 }
 
@@ -42,6 +43,29 @@ type ClaimRenewalHandoff struct {
 type ClaimSettlementGuard struct {
 	heartbeat *ClaimHeartbeat
 	once      sync.Once
+}
+
+// MarkCommitted records terminal selected-store settlement and releases the
+// renewal exclusion without canceling the handler context. The caller stops
+// and joins the heartbeat after all declared post-commit work returns.
+func (g *ClaimSettlementGuard) MarkCommitted() error {
+	if g == nil || g.heartbeat == nil {
+		return fmt.Errorf("delivery claim settlement guard is required")
+	}
+	g.once.Do(func() {
+		g.heartbeat.settled = true
+		g.heartbeat.renewMu.Unlock()
+	})
+	return nil
+}
+
+// Abort releases settlement exclusion after a transaction rollback so the
+// heartbeat can retain the claim for the caller's failure settlement.
+func (g *ClaimSettlementGuard) Abort() {
+	if g == nil || g.heartbeat == nil {
+		return
+	}
+	g.once.Do(func() { g.heartbeat.renewMu.Unlock() })
 }
 
 func StartClaimHeartbeat(ctx context.Context, owner worklifetime.Occurrence, store Store, claim Claim) (*ClaimHeartbeat, error) {
@@ -85,9 +109,9 @@ func startClaimHeartbeat(ctx context.Context, owner worklifetime.Occurrence, sto
 	heartbeatCtx, cancel := context.WithCancelCause(worklifetime.WithOccurrence(workLease.Context(), owner))
 	h := &ClaimHeartbeat{
 		ctx: heartbeatCtx, cancel: cancel, stop: make(chan struct{}), done: make(chan struct{}), workLease: workLease,
-		store: store, claim: claim,
+		store: store, claim: claim, startedAt: time.Now(),
 	}
-	h.ctx = context.WithValue(h.ctx, claimHeartbeatContextKey{}, h)
+	h.ctx = WithClaim(context.WithValue(h.ctx, claimHeartbeatContextKey{}, h), claim)
 	go h.run(store, claim, interval)
 	return h, nil
 }
@@ -100,6 +124,20 @@ func ClaimHeartbeatFromContext(ctx context.Context) (*ClaimHeartbeat, bool) {
 	}
 	heartbeat, ok := ctx.Value(claimHeartbeatContextKey{}).(*ClaimHeartbeat)
 	return heartbeat, ok && heartbeat != nil
+}
+
+// Owns reports whether this heartbeat protects the exact fenced claim.
+func (h *ClaimHeartbeat) Owns(claim Claim) bool {
+	return h != nil && h.claim.Same(claim)
+}
+
+// ExecutionDuration reports process-local handler time for delivery outcome
+// diagnostics. Durable settlement does not use it for ordering or authority.
+func (h *ClaimHeartbeat) ExecutionDuration() time.Duration {
+	if h == nil || h.startedAt.IsZero() {
+		return 0
+	}
+	return time.Since(h.startedAt)
 }
 
 // BeginRenewalHandoff excludes the generation-owned renewal loop until Finish.

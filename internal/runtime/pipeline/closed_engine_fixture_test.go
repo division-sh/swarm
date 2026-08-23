@@ -19,6 +19,7 @@ import (
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
+	"github.com/division-sh/swarm/internal/store/testutil/deliveryfixture"
 	"github.com/division-sh/swarm/internal/store/testutil/mutationlogfixture"
 	"github.com/google/uuid"
 )
@@ -122,6 +123,10 @@ func (r *recordingRuntimeMutationRunner) CommitWorkflowEngineMutation(ctx contex
 	result := CommittedWorkflowEngineMutation{}
 	err := r.RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
 		store := workflowStoreForRecordingRunner(r)
+		tx, ok := sqlTxFromContext(txctx)
+		if !ok || tx == nil {
+			return fmt.Errorf("pipeline test engine commit requires its private transaction")
+		}
 		if command.EntitylessTarget.Empty() {
 			if err := commitPipelineTestWorkflowState(txctx, store, command.State); err != nil {
 				return err
@@ -144,10 +149,6 @@ func (r *recordingRuntimeMutationRunner) CommitWorkflowEngineMutation(ctx contex
 			if r.dialect == workflowStoreDialectPostgres {
 				dialect = authoractivityfixture.DialectPostgres
 			}
-			tx, ok := sqlTxFromContext(txctx)
-			if !ok || tx == nil {
-				return fmt.Errorf("pipeline test engine commit requires its private transaction")
-			}
 			if plan.commitHook != nil {
 				if err := plan.commitHook(txctx, plan.intent.Event); err != nil {
 					return err
@@ -157,6 +158,25 @@ func (r *recordingRuntimeMutationRunner) CommitWorkflowEngineMutation(ctx contex
 				return err
 			}
 			result.Publications = append(result.Publications, pipelineTestCommittedPublication{eventID: plan.intent.Event.ID(), intent: plan.intent})
+		}
+		if success := command.DeliverySuccess; success != nil {
+			dialect := deliveryfixture.DialectSQLite
+			if r.dialect == workflowStoreDialectPostgres {
+				dialect = deliveryfixture.DialectPostgres
+			}
+			adapter, err := deliveryfixture.NewAdapter(dialect)
+			if err != nil {
+				return err
+			}
+			story, ok := authoractivityfixture.Mutation(txctx)
+			if !ok {
+				return fmt.Errorf("pipeline test engine delivery settlement requires its author activity mutation")
+			}
+			if _, err := adapter.Adapter.SettleSuccess(txctx, tx, story, success.Claim, success.SideEffects, success.Duration); err != nil {
+				return err
+			}
+			claim := success.Claim
+			result.DeliverySuccess = &claim
 		}
 		return nil
 	})
