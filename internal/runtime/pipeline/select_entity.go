@@ -108,11 +108,11 @@ func (pc *PipelineCoordinator) matchHandlerEntitiesForFlow(ctx context.Context, 
 	}
 	matches := make([]WorkflowInstance, 0, 1)
 	for _, candidate := range candidates {
-		if err := validateWorkflowEntityType(source, flowID, candidate.EntityType); err != nil {
-			return nil, fmt.Errorf("select_entity_invalid_persisted_contract: flow %s: %w", flowID, err)
-		}
 		if !workflowInstanceOwnedByFlow(source, candidate, flowID, runID) {
 			continue
+		}
+		if err := validateWorkflowEntityType(source, flowID, candidate.EntityType); err != nil {
+			return nil, fmt.Errorf("select_entity_invalid_persisted_contract: flow %s: %w", flowID, err)
 		}
 		if !selectEntityCandidateMatches(candidate, expected) {
 			continue
