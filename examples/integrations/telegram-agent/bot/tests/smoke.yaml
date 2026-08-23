@@ -1,4 +1,4 @@
-name: webhook responder smoke
+name: Telegram bot smoke
 derive:
   flow: telegram-chat
   input: telegram_text_message

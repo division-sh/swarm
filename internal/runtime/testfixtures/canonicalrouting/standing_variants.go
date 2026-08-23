@@ -12,13 +12,17 @@ func WithoutStandingIngressPins(t testing.TB, schema string) string {
 	standingPins := `pins:
   inputs:
     events:
-      - {name: telegram_update, event: inbound.telegram, source: external}
-  outputs: {events: []}
+      - name: telegram_update
+        event: inbound.telegram
+        source: external
+  outputs:
+    events: []
 `
 	nonStandingPins := `pins:
   inputs:
     events: []
-  outputs: {events: []}
+  outputs:
+    events: []
 `
 	result := strings.Replace(schema, standingPins, nonStandingPins, 1)
 	if result == schema {

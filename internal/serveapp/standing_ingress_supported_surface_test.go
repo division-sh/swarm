@@ -813,7 +813,7 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		t.Fatalf("normalized routing = chat_instances:%d events:%d wrong_run:%d, want 2/3/0", chatInstances, normalizedEvents, wrongNormalizedRuns)
 	}
 	var pendingCards int
-	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE anchor_kind = 'stage_gate' AND json_extract(anchor, '$.entity_id') = ? AND status = 'pending' AND json_extract(snapshot, '$.decision') = 'standing_review'`, firstEntity).Scan(&pendingCards); err != nil || pendingCards != 1 {
+	if err := storetest.DatabaseForTest(sqliteStore).QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE anchor_kind = 'stage_gate' AND json_extract(anchor, '$.entity_id') = ? AND status = 'pending' AND json_extract(snapshot, '$.decision') = 'retire_service'`, firstEntity).Scan(&pendingCards); err != nil || pendingCards != 1 {
 		t.Fatalf("standing initial gate cards = %d, %v, want one persisted card across restart", pendingCards, err)
 	}
 	var entityEvents, wrongRunEvents int
@@ -1046,7 +1046,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 		t.Fatalf("normalized routing = chat_instances:%d events:%d wrong_run:%d, want 2/3/0", chatInstances, normalizedEvents, wrongNormalizedRuns)
 	}
 	var pendingCards int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE anchor_kind = 'stage_gate' AND anchor->>'entity_id' = $1 AND status = 'pending' AND snapshot->>'decision' = 'standing_review'`, entity).Scan(&pendingCards); err != nil || pendingCards != 1 {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM decision_cards WHERE anchor_kind = 'stage_gate' AND anchor->>'entity_id' = $1 AND status = 'pending' AND snapshot->>'decision' = 'retire_service'`, entity).Scan(&pendingCards); err != nil || pendingCards != 1 {
 		t.Fatalf("standing initial gate cards = %d, %v, want one persisted card across restart", pendingCards, err)
 	}
 	var entityEvents, wrongRunEvents int
@@ -1126,7 +1126,7 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 			writeStandingCandidateFile(t, packagePath, strings.Replace(string(basePackage), `version: "1.0.0"`, `version: "1.0.3"`, 1))
 		}, wantOutput: []string{" revised run=" + originalRunID}},
 		{name: "package manifest name revised", apply: func(t *testing.T) {
-			writeStandingCandidateFile(t, packagePath, strings.Replace(string(basePackage), "name: standing-telegram-proof", "name: renamed-standing-proof", 1))
+			writeStandingCandidateFile(t, packagePath, strings.Replace(string(basePackage), "name: telegram-agent", "name: renamed-telegram-agent", 1))
 		}, wantOutput: []string{" revised run=" + originalRunID}},
 		{name: "standing declaration removed", apply: func(t *testing.T) {
 			before := string(basePackage)
@@ -1149,12 +1149,6 @@ func requireChangedStandingColdStartMatrix(t *testing.T, opts cliapp.ServeOption
 			if changed == before {
 				t.Fatal("standing activation block not found")
 			}
-			chatDeclaration := "  - {id: telegram-chat, flow: telegram-chat, mode: template}\n"
-			withoutChat := strings.Replace(changed, chatDeclaration, "", 1)
-			if withoutChat == changed {
-				t.Fatal("telegram-chat declaration not found")
-			}
-			changed = withoutChat
 			writeStandingCandidateFile(t, packagePath, changed)
 			nonStandingSchema := canonicalrouting.WithoutStandingIngressPins(t, string(baseFlowSchema))
 			writeStandingCandidateFile(t, flowSchemaPath, nonStandingSchema)
@@ -1408,7 +1402,10 @@ func standingSQLiteDiagnostics(path string) string {
 
 func writeStandingTelegramServeFixture(t testing.TB, telegramBaseURL string) string {
 	t.Helper()
-	return canonicalrouting.CopyStandingTelegramServe(t, telegramBaseURL)
+	root := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+	removeExactCanonicalTelegramAgentMock(t, root)
+	redirectExternalHosts(t, map[string]string{"api.telegram.org": telegramBaseURL})
+	return root
 }
 
 func commitReadinessHandoffAuthorActivity(sqlitePath string, rt *runtimepkg.Runtime) error {

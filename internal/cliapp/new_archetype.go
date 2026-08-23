@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	swarmassets "github.com/division-sh/swarm"
 	"github.com/division-sh/swarm/internal/cli/argcount"
 	"github.com/spf13/cobra"
 )
@@ -17,9 +18,19 @@ import (
 //go:embed all:archetypes
 var archetypeFiles embed.FS
 
-var admittedArchetypes = map[string]string{
-	"zero-agent-automation": "archetypes/zero-agent-automation",
-	"webhook-responder":     "archetypes/webhook-responder",
+type admittedArchetype struct {
+	Files      fs.FS
+	SourceRoot string
+	WorkingDir string
+}
+
+var admittedArchetypes = map[string]admittedArchetype{
+	"zero-agent-automation": {
+		Files: archetypeFiles, SourceRoot: "archetypes/zero-agent-automation", WorkingDir: ".",
+	},
+	"webhook-responder": {
+		Files: swarmassets.EmbeddedTelegramAgentExample(), SourceRoot: ".", WorkingDir: "./bot",
+	},
 }
 
 func newArchetypeCommand() *cobra.Command {
@@ -38,7 +49,7 @@ func newArchetypeCommand() *cobra.Command {
 
 func scaffoldArchetype(out io.Writer, rawName, rawOutput string) error {
 	name := strings.TrimSpace(rawName)
-	sourceRoot, ok := admittedArchetypes[name]
+	source, ok := admittedArchetypes[name]
 	if !ok {
 		ids := make([]string, 0, len(admittedArchetypes))
 		for id := range admittedArchetypes {
@@ -69,11 +80,11 @@ func scaffoldArchetype(out io.Writer, rawName, rawOutput string) error {
 			_ = os.RemoveAll(absDestination)
 		}
 	}()
-	if err := fs.WalkDir(archetypeFiles, sourceRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+	if err := fs.WalkDir(source.Files, source.SourceRoot, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
-		relative, err := filepath.Rel(filepath.FromSlash(sourceRoot), filepath.FromSlash(path))
+		relative, err := filepath.Rel(filepath.FromSlash(source.SourceRoot), filepath.FromSlash(path))
 		if err != nil || relative == "." {
 			return err
 		}
@@ -81,7 +92,7 @@ func scaffoldArchetype(out io.Writer, rawName, rawOutput string) error {
 		if entry.IsDir() {
 			return os.MkdirAll(target, 0o755)
 		}
-		body, err := archetypeFiles.ReadFile(path)
+		body, err := fs.ReadFile(source.Files, path)
 		if err != nil {
 			return err
 		}
@@ -93,7 +104,10 @@ func scaffoldArchetype(out io.Writer, rawName, rawOutput string) error {
 	display := filepath.Clean(destination)
 	fmt.Fprintf(out, "Created %s in %s\n\nNext:\n", name, display)
 	fmt.Fprintf(out, "  cd %s\n", display)
-	fmt.Fprintln(out, "  swarm verify --contracts .")
+	if source.WorkingDir != "." {
+		fmt.Fprintf(out, "  cd %s\n", source.WorkingDir)
+	}
+	fmt.Fprintln(out, "  swarm verify --config ./swarm.yaml --contracts .")
 	fmt.Fprintln(out, "  swarm serve --config ./swarm.yaml --contracts .")
 	fmt.Fprintln(out, "  swarm test --config ./swarm.yaml --contracts . ./tests/smoke.yaml")
 	return nil

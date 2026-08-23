@@ -37,8 +37,15 @@ func TestCatalogRequiredInventory(t *testing.T) {
 	if got := len(inventory.PublicCompanions()); got != 87 {
 		t.Fatalf("public companion count = %d, want 87", got)
 	}
-	if got := len(inventory.Claims); got != 12 {
-		t.Fatalf("canonical claim count = %d, want 12", got)
+	if got := len(inventory.Claims); got != 17 {
+		t.Fatalf("canonical claim count = %d, want 17", got)
+	}
+	if got := len(inventory.ExternalProofs); got != 1 {
+		t.Fatalf("external proof count = %d, want 1", got)
+	}
+	proof := inventory.ExternalProofs[0]
+	if proof.Source != "examples/integrations/telegram-agent" || proof.Executor != "github.com/division-sh/swarm/internal/serveapp" || !equalCatalogStrings(proof.Proves, telegramAgentClaims()) {
+		t.Fatalf("Telegram external proof = %#v", proof)
 	}
 }
 
@@ -66,6 +73,52 @@ func TestCatalogInventoryFailsClosed(t *testing.T) {
 				t.Fatalf("Load error = %v, want %q", err, test.want)
 			}
 		})
+	}
+}
+
+func TestCatalogExternalProofsFailClosed(t *testing.T) {
+	valid := externalProofSpec("examples/external", "github.com/division-sh/swarm/internal/executor", []string{"claim.external"})
+	tests := []struct {
+		name     string
+		proof    string
+		expected string
+		want     string
+	}{
+		{name: "missing record", want: "claim.external has no non-retired proof fixture"},
+		{name: "duplicate record", proof: valid + valid, want: "duplicate top-level external_proofs"},
+		{name: "empty source", proof: externalProofSpec("", "github.com/division-sh/swarm/internal/executor", []string{"claim.external"}), want: "invalid repository-relative source"},
+		{name: "missing source", proof: externalProofSpec("examples/missing", "github.com/division-sh/swarm/internal/executor", []string{"claim.external"}), want: "external proof source"},
+		{name: "missing executor", proof: externalProofSpec("examples/external", "", []string{"claim.external"}), want: "invalid executor"},
+		{name: "unknown claim", proof: externalProofSpec("examples/external", "github.com/division-sh/swarm/internal/executor", []string{"claim.unknown"}), want: "references unknown claim"},
+		{name: "duplicate claim", proof: externalProofSpec("examples/external", "github.com/division-sh/swarm/internal/executor", []string{"claim.external", "claim.external"}), want: "multiple runtime-credit owners"},
+		{name: "multiple credit", proof: valid, expected: fixtureMetadata("runtime", "pass", "claim.external"), want: "multiple runtime-credit owners"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := writeExternalProofInventory(t, test.proof, test.expected)
+			_, err := Load(root)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Load error = %v, want %q", err, test.want)
+			}
+		})
+	}
+
+	t.Run("missing executor CI owner", func(t *testing.T) {
+		root := writeExternalProofInventory(t, valid, "")
+		writeCatalogTestFile(t, filepath.Join(root, ".github", "test-proof-plan.yaml"), externalProofPolicy("github.com/division-sh/swarm/internal/other"))
+		_, err := Load(root)
+		if err == nil || !strings.Contains(err.Error(), "is not a special CI package") {
+			t.Fatalf("Load error = %v, want missing executor proof", err)
+		}
+	})
+
+	root := writeExternalProofInventory(t, valid, "")
+	inventory, err := Load(root)
+	if err != nil {
+		t.Fatalf("load valid external proof: %v", err)
+	}
+	if len(inventory.ExternalProofs) != 1 || inventory.ExternalProofs[0].Source != "examples/external" {
+		t.Fatalf("valid external proofs = %#v", inventory.ExternalProofs)
 	}
 }
 
@@ -251,6 +304,28 @@ func containsString(values []string, want string) bool {
 	return false
 }
 
+func equalCatalogStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for index := range got {
+		if got[index] != want[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func telegramAgentClaims() []string {
+	return []string{
+		"catalog.authoring.webhook_responder_first_user_journey",
+		"catalog.runtime.provider_normalized_template_selection",
+		"catalog.runtime.standing_ingress_identity_recovery",
+		"catalog.runtime.agent_memory_instance_continuity",
+		"catalog.runtime.provider_connector_reply",
+	}
+}
+
 func catalogRepoRoot(t testing.TB) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
@@ -274,6 +349,62 @@ func writeInventoryFixture(t *testing.T, claims, expected string, companion bool
 		writeCatalogTestFile(t, filepath.Join(fixtureRoot, "tests", "visible-smoke.yaml"), "name: smoke\n")
 	}
 	return root
+}
+
+func writeExternalProofInventory(t *testing.T, proof, expected string) string {
+	t.Helper()
+	root := t.TempDir()
+	claims := claimSpec("claim.runtime", "runtime") + claimSpec("claim.external", "runtime")
+	spec := "test_specification:\n  internal_catalog_conformance:\n    claims:\n" + claims + proof
+	writeCatalogTestFile(t, filepath.Join(root, "platform-spec.yaml"), spec)
+	if expected == "" {
+		expected = fixtureMetadata("runtime", "pass", "claim.runtime")
+	}
+	writeCatalogTestFile(t, filepath.Join(root, "tests", "tier1", "test-case", "expected.yaml"), expected)
+	if err := os.MkdirAll(filepath.Join(root, "examples", "external"), 0o755); err != nil {
+		t.Fatalf("create external source: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "internal", "executor"), 0o755); err != nil {
+		t.Fatalf("create executor package: %v", err)
+	}
+	writeCatalogTestFile(t, filepath.Join(root, ".github", "test-proof-plan.yaml"), externalProofPolicy("github.com/division-sh/swarm/internal/executor"))
+	return root
+}
+
+func externalProofSpec(source, executor string, proves []string) string {
+	var out strings.Builder
+	out.WriteString("    external_proofs:\n")
+	out.WriteString("    - source: " + source + "\n")
+	out.WriteString("      executor: " + executor + "\n")
+	out.WriteString("      proves:\n")
+	for _, claimID := range proves {
+		out.WriteString("      - " + claimID + "\n")
+	}
+	return out.String()
+}
+
+func externalProofPolicy(executor string) string {
+	return `version: 1
+module: github.com/division-sh/swarm
+planning:
+  target_seconds: 1
+  max_shards: 1
+  unknown_package_seconds: 1
+escalation_paths: []
+special_packages: [` + executor + `]
+profiles:
+  pr-common: {count_mode: cache-default, environment_id: test, units: [external-proof]}
+  pr-escalated: {count_mode: count-1, environment_id: test, units: [external-proof]}
+  full: {count_mode: count-1, environment_id: test, units: [external-proof]}
+  nightly: {count_mode: count-1, environment_id: test, units: [external-proof]}
+units:
+  external-proof:
+    packages: [` + executor + `]
+    count_mode: count-1
+    environment_id: test
+    budget_class: broad
+projections: {}
+`
 }
 
 func claimSpec(id, disposition string) string {

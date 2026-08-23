@@ -1,0 +1,20 @@
+name: telegram-ingress
+mode: singleton
+stages:
+  active:
+    initial: true
+    gate:
+      decision: retire_service
+      outcomes:
+        retire:
+          advances_to: done
+  done:
+    terminal: true
+pins:
+  inputs:
+    events:
+      - name: telegram_update
+        event: inbound.telegram
+        source: external
+  outputs:
+    events: []

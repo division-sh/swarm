@@ -20373,20 +20373,24 @@ test_specification:
   internal_catalog_conformance:
     id: testing.internal_catalog_claim_inventory
     promoted_by: '#2143'
-    implementation_status: implemented_current_corpus_replay_clean
+    implementation_status: implemented_current_corpus_replay_clean_and_external_proofs
     owner: platform-spec.yaml#test_specification.internal_catalog_conformance
     purpose: >
       Define the claim-indexed proof contract for the private tests/tier*
-      conformance corpus while it remains transitional internal evidence.
-      Claim identity and governing semantics live here; fixture metadata only
-      declares which canonical claims a discovered fixture is intended to prove.
+      conformance corpus and explicitly registered external supported-surface
+      sources. Claim identity and governing semantics live here; fixture metadata
+      and external proof records only declare which canonical claims their sole
+      executor is intended to prove.
     inventory:
       discovery: Every directory matching tests/tier*/* is a fixture.
       metadata_owner: Each fixture's expected.yaml top-level conformance block.
       fail_closed: >
         A missing expected.yaml or conformance block, an invalid disposition,
         an unknown or duplicate claim, an unproved active claim, or companion
-        metadata that disagrees with the filesystem is a test failure.
+        metadata that disagrees with the filesystem is a test failure. External
+        proof records additionally fail on missing or duplicate sources, missing
+        executor packages or required CI selection, unknown or multiply credited
+        claims, and malformed repository-relative paths.
       dispositions:
         runtime: >
           The fixture must pass supported swarm verify and execute its exact
@@ -20426,6 +20430,15 @@ test_specification:
         golden workload, and convergence on the public deterministic scenario
         format remain the catalog_convergence tail. They do not weaken or duplicate
         the current-corpus replay-clean owner.
+    external_proofs:
+    - source: examples/integrations/telegram-agent
+      executor: github.com/division-sh/swarm/internal/serveapp
+      proves:
+      - catalog.authoring.webhook_responder_first_user_journey
+      - catalog.runtime.provider_normalized_template_selection
+      - catalog.runtime.standing_ingress_identity_recovery
+      - catalog.runtime.agent_memory_instance_continuity
+      - catalog.runtime.provider_connector_reply
     replay_clean:
       promoted_by: '#2143'
       transcript:
@@ -20586,6 +20599,26 @@ test_specification:
         status: active
         required_disposition: runtime
         scope: Declared flow-data tool exposure, reads, and fail-closed isolation.
+      catalog.authoring.webhook_responder_first_user_journey:
+        status: active
+        required_disposition: runtime
+        scope: Exact checked-source scaffold, isolated verification, and zero-credential public mock journey under sixty seconds.
+      catalog.runtime.provider_normalized_template_selection:
+        status: active
+        required_disposition: runtime
+        scope: Pack-normalized Telegram text input selecting the exact conversation-owned template instance without authored normalization.
+      catalog.runtime.standing_ingress_identity_recovery:
+        status: active
+        required_disposition: runtime
+        scope: Signed standing Telegram ingress preserving its run, service, and selected conversation identities across selected-store restart.
+      catalog.runtime.agent_memory_instance_continuity:
+        status: active
+        required_disposition: runtime
+        scope: Memory-enabled agent continuity and isolation by exact flow instance across multiple conversations and restart.
+      catalog.runtime.provider_connector_reply:
+        status: active
+        required_disposition: runtime
+        scope: Imported Telegram connector reply execution through generated mock response and live selected transport boundaries.
   deterministic_scenario_runner:
     id: testing.deterministic_scenario_runner_source_authority
     promoted_by: '#1646'

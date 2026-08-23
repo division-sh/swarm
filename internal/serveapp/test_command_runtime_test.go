@@ -582,8 +582,11 @@ func runScaffoldArchetypeSQLiteProof(t *testing.T, archetype string) {
 	t.Setenv("TELEGRAM_BOT_TOKEN", "")
 	credentialPath := filepath.Join(t.TempDir(), "credentials.json")
 	t.Setenv("SWARM_CREDENTIALS_FILE", credentialPath)
-	contractsPath := scaffoldConformanceArchetype(t, archetype)
-	writeArchetypeOperatorPackInventory(t, contractsPath)
+	scaffoldRoot := scaffoldConformanceArchetype(t, archetype)
+	contractsPath := scaffoldRoot
+	if archetype == "webhook-responder" {
+		contractsPath = filepath.Join(scaffoldRoot, "bot")
+	}
 	configPath := filepath.Join(contractsPath, "swarm.yaml")
 
 	var verifyOut, verifyErr bytes.Buffer
@@ -636,23 +639,6 @@ func scaffoldConformanceArchetype(t *testing.T, archetype string) string {
 		t.Fatalf("scaffold %s code=%d stdout=%s stderr=%s", archetype, code, stdout.String(), stderr.String())
 	}
 	return destination
-}
-
-func writeArchetypeOperatorPackInventory(t *testing.T, contractsPath string) {
-	t.Helper()
-	localDir := filepath.Join(contractsPath, ".swarm")
-	if err := os.MkdirAll(localDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	operatorConfigPath := filepath.Join(localDir, "swarm.yaml")
-	body, err := os.ReadFile(operatorConfigPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := withTestProviderTriggerPlatformInventory(t, string(body))
-	if err := os.WriteFile(operatorConfigPath, []byte(text), 0o644); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func scenarioExecutionProfileCount(t *testing.T, db *sql.DB, backend servedparity.Backend) int {
@@ -891,7 +877,9 @@ func runServedGeneratedInputFixtureBackendProof(t *testing.T, backend servedpari
 
 func writeGeneratedTelegramScenarioFixture(t *testing.T, providerURL string) string {
 	t.Helper()
-	root := canonicalrouting.CopyStandingTelegramServe(t, providerURL)
+	_ = providerURL
+	exampleRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+	root := filepath.Join(exampleRoot, "bot")
 	for _, name := range []string{
 		"flows/telegram-chat/agents.yaml",
 		"flows/telegram-chat/events.yaml",
@@ -918,25 +906,29 @@ steps:
 
 func writePublicTelegramMockApprovalScenarioFixture(t *testing.T) string {
 	t.Helper()
-	root := canonicalrouting.CopyStandingTelegramMockServe(t, "https://example.invalid")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
-name: public-telegram-mock-approval
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-connector_packs:
-  imports:
-    - {provider: telegram, tool: telegram.send_message}
-provider_trigger_events:
-  imports:
-    - {provider: telegram, event: inbound.telegram.text_message}
-flows:
-  - {id: telegram-chat, flow: telegram-chat, mode: template}
+	exampleRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
+	root := filepath.Join(exampleRoot, "bot")
+	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "telegram-chat", "nodes.yaml"), `
+telegram-responder:
+  id: telegram-responder
+  execution_type: system_node
+  subscribes_to: [telegram.reply_requested]
+  event_handlers:
+    telegram.reply_requested:
+      activity:
+        id: telegram_send_message
+        tool: telegram.send_message
+        approval: {decision: send_telegram_message}
+        input:
+          chat_id: {cel: payload.chat_id}
+          text: {cel: payload.text}
+telegram-revision:
+  id: telegram-revision
+  execution_type: system_node
+  subscribes_to: [telegram_send_message.revision_requested]
+  event_handlers:
+    telegram_send_message.revision_requested: {}
 `)
-	for _, flow := range []string{"telegram-ingress", "memory-singleton"} {
-		if err := os.RemoveAll(filepath.Join(root, "flows", flow)); err != nil {
-			t.Fatalf("remove unrelated %s fixture flow: %v", flow, err)
-		}
-	}
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "telegram-chat", "tests", "public-mock-approval.yaml"), `
 name: public generated Telegram mock approval
 steps:

@@ -24,6 +24,7 @@ const (
 	FanInStream             ArtifactID = "fan-in/stream"
 	FanInBarrier            ArtifactID = "fan-in/barrier"
 	HarnessInjection        ArtifactID = "harness-injection"
+	TelegramAgent           ArtifactID = "telegram-agent"
 )
 
 // ArtifactID is a checked-in routing artifact identity. The ownership guard
@@ -163,18 +164,19 @@ func checkedArtifactRoot(t testing.TB, id ArtifactID) string {
 
 func canonicalExamplePath(id ArtifactID) (string, bool) {
 	requested := filepath.ToSlash(filepath.Clean(strings.TrimSpace(string(id))))
-	for _, canonical := range []ArtifactID{
-		RootIngress,
-		ParentConnect,
-		TemplateSelectExisting,
-		TemplateSelectOrCreate,
-		TemplateReply,
-		TemplateCreateMintedKey,
-		FanInStream,
-		FanInBarrier,
-		HarnessInjection,
-	} {
-		root := filepath.ToSlash(filepath.Join("examples", "routing", string(canonical)))
+	paths := map[ArtifactID]string{
+		RootIngress:             "examples/routing/root-ingress",
+		ParentConnect:           "examples/routing/parent-connect",
+		TemplateSelectExisting:  "examples/routing/template-select-existing",
+		TemplateSelectOrCreate:  "examples/routing/template-select-or-create",
+		TemplateReply:           "examples/routing/template-reply",
+		TemplateCreateMintedKey: "examples/routing/template-create-minted-key",
+		FanInStream:             "examples/routing/fan-in/stream",
+		FanInBarrier:            "examples/routing/fan-in/barrier",
+		HarnessInjection:        "examples/routing/harness-injection",
+		TelegramAgent:           "examples/integrations/telegram-agent",
+	}
+	for canonical, root := range paths {
 		if requested == string(canonical) || requested == root {
 			return root, true
 		}
