@@ -3,8 +3,6 @@ package pipeline_test
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -18,6 +16,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/google/uuid"
 )
 
@@ -111,64 +110,7 @@ func TestHandlerRuleSelectionRunsThroughDurableEventBusAndReconstructedTraceOnBo
 
 func handlerRuleSelectionSupportedSource(t *testing.T) semanticview.Source {
 	t.Helper()
-	root := t.TempDir()
-	files := map[string]string{
-		"package.yaml": "name: handler-rule-selection-proof\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\n",
-		"schema.yaml": `name: handler-rule-selection-proof
-pins:
-  inputs:
-    events:
-      - {name: rules_selected, event: rules.selected, source: external}
-      - {name: rules_no_match, event: rules.no_match, source: external}
-      - {name: complete_selected, event: complete.selected, source: external}
-      - {name: complete_no_match, event: complete.no_match, source: external}
-      - {name: direct, event: direct, source: external}
-  outputs:
-    events: []
-`,
-		"events.yaml": `rules.selected: {swarm: {source: external}}
-rules.no_match: {swarm: {source: external}}
-complete.selected: {swarm: {source: external}}
-complete.no_match: {swarm: {source: external}}
-direct: {swarm: {source: external}}
-`,
-		"nodes.yaml": `selection-node:
-  id: selection-node
-  execution_type: system_node
-  subscribes_to: [rules.selected, rules.no_match, complete.selected, complete.no_match, direct]
-  event_handlers:
-    rules.selected:
-      rules:
-        selected:
-          element_id: 00000000-0000-4000-8000-000000000421
-          id: rules-label
-          condition: else
-    rules.no_match:
-      rules:
-        - element_id: 00000000-0000-4000-8000-000000000422
-          id: never-rules
-          condition: "false"
-    complete.selected:
-      on_complete:
-        - element_id: 00000000-0000-4000-8000-000000000423
-          id: complete-label
-          condition: else
-    complete.no_match:
-      on_complete:
-        - element_id: 00000000-0000-4000-8000-000000000424
-          id: never-complete
-          condition: "false"
-    direct: {}
-`,
-	}
-	for _, name := range []string{"entities.yaml", "policy.yaml", "tools.yaml", "agents.yaml", "types.yaml"} {
-		files[name] = "{}\n"
-	}
-	for name, body := range files {
-		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o644); err != nil {
-			t.Fatalf("write %s: %v", name, err)
-		}
-	}
+	root := canonicalrouting.CopyHandlerRuleSelectionProof(t)
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

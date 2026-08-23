@@ -2,6 +2,67 @@ package canonicalrouting
 
 import "testing"
 
+// CopyHandlerRuleSelectionProof owns the complete routing bundle used to prove
+// stable handler-rule selection through the durable EventBus surface.
+func CopyHandlerRuleSelectionProof(t testing.TB) string {
+	t.Helper()
+	root := CopyExample(t, RootIngress)
+	writeClosedVariantFile(t, root, "package.yaml", `name: handler-rule-selection-proof
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+`)
+	writeClosedVariantFile(t, root, "schema.yaml", `name: handler-rule-selection-proof
+pins:
+  inputs:
+    events:
+      - {name: rules_selected, event: rules.selected, source: external}
+      - {name: rules_no_match, event: rules.no_match, source: external}
+      - {name: complete_selected, event: complete.selected, source: external}
+      - {name: complete_no_match, event: complete.no_match, source: external}
+      - {name: direct, event: direct, source: external}
+  outputs:
+    events: []
+`)
+	writeClosedVariantFile(t, root, "events.yaml", `rules.selected: {swarm: {source: external}}
+rules.no_match: {swarm: {source: external}}
+complete.selected: {swarm: {source: external}}
+complete.no_match: {swarm: {source: external}}
+direct: {swarm: {source: external}}
+`)
+	writeClosedVariantFile(t, root, "nodes.yaml", `selection-node:
+  id: selection-node
+  execution_type: system_node
+  subscribes_to: [rules.selected, rules.no_match, complete.selected, complete.no_match, direct]
+  event_handlers:
+    rules.selected:
+      rules:
+        selected:
+          element_id: 00000000-0000-4000-8000-000000000421
+          id: rules-label
+          condition: else
+    rules.no_match:
+      rules:
+        - element_id: 00000000-0000-4000-8000-000000000422
+          id: never-rules
+          condition: "false"
+    complete.selected:
+      on_complete:
+        - element_id: 00000000-0000-4000-8000-000000000423
+          id: complete-label
+          condition: else
+    complete.no_match:
+      on_complete:
+        - element_id: 00000000-0000-4000-8000-000000000424
+          id: never-complete
+          condition: "false"
+    direct: {}
+`)
+	for _, file := range []string{"entities.yaml", "policy.yaml", "tools.yaml", "agents.yaml", "types.yaml"} {
+		writeClosedVariantFile(t, root, file, "{}\n")
+	}
+	return root
+}
+
 // CopyExactJoinEventBusProof owns the route-bearing contract for the durable
 // root and template-flow join proofs.
 func CopyExactJoinEventBusProof(t testing.TB, flowID string) string {

@@ -928,9 +928,11 @@ func loadMailboxWriteSupportedSurfaceBundle(t *testing.T, conditional bool) *run
             target_field: who
       rules:
         auto_approve:
+          element_id: 00000000-0000-4000-8000-000000005101
           condition: payload.amount < 100
           advances_to: approved
         needs_human:
+          element_id: 00000000-0000-4000-8000-000000005102
           condition: payload.amount >= 100
           advances_to: awaiting_human
           action:
