@@ -1595,6 +1595,56 @@ func TestExecutor_RuleEvaluationFailureCarriesExactAttemptedIdentity(t *testing.
 	}
 }
 
+func TestExecutor_UnsupportedConditionIsExactFailedEvaluation(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		field       string
+		elementID   string
+		wantContext handlerselection.Context
+	}{
+		{name: "rules", field: "rules", elementID: "00000000-0000-4000-8000-000000000427", wantContext: handlerselection.ContextRules},
+		{name: "on_complete", field: "on_complete", elementID: "00000000-0000-4000-8000-000000000428", wantContext: handlerselection.ContextOnComplete},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var handler runtimecontracts.SystemNodeEventHandler
+			raw := fmt.Sprintf(`%s:
+  - element_id: %s
+    id: unsupported-condition
+    condition: unsupported.condition
+`, tc.field, tc.elementID)
+			if err := yaml.Unmarshal([]byte(raw), &handler); err != nil {
+				t.Fatal(err)
+			}
+			node := testRootExecutableNode(t, "unsupported-condition-node")
+			qualified, err := runtimecontracts.QualifySystemNodeHandlerRuleRefs(node, handler)
+			if err != nil {
+				t.Fatal(err)
+			}
+			exec := newAccumulatorProjectionTestExecutor(t, stubEvaluator{errs: map[string]error{"unsupported.condition": ErrNotImplemented}})
+			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+				EntityID: "entity-1",
+				Node:     node,
+				Event: eventtest.RunCreatingRootIngress(
+					"evt-unsupported-"+tc.name, "score.dimension_complete", "", "", json.RawMessage(`{"score":87}`),
+					0, "", "", events.EventEnvelope{}, time.Time{},
+				),
+				Handler: qualified,
+				State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+			})
+			if !errors.Is(err, ErrNotImplemented) {
+				t.Fatalf("Execute error = %v, want %v", err, ErrNotImplemented)
+			}
+			fact := result.HandlerRuleSelection
+			if fact.Context() != tc.wantContext || fact.Disposition() != handlerselection.DispositionEvaluationFailed || fact.DisplayLabel() != "unsupported-condition" {
+				t.Fatalf("unsupported evaluation fact = %#v", fact)
+			}
+			if got := fact.Ref().ElementID().String(); got != tc.elementID {
+				t.Fatalf("attempted element ID = %q, want %q", got, tc.elementID)
+			}
+		})
+	}
+}
+
 func TestExecutor_AccumulatorProjectionMaterializesBeforeTopLevelFanOutEmitFields(t *testing.T) {
 	exec := newAccumulatorProjectionTestExecutor(t, nil)
 	handler := runtimecontracts.SystemNodeEventHandler{

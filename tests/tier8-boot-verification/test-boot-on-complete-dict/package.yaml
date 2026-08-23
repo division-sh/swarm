@@ -1,7 +1,8 @@
 name: test-boot-on-complete-dict
 version: 1.0.0
 description: >
-  Boot verification: on_complete is a dict instead of an ordered list.
-  Platform must catch DIALECT-OC-ORDER error.
+  Boot verification: on_complete mapping is ambiguous between a singleton
+  activity and a keyed rule whose display label is activity.
+  Platform must catch AMBIGUOUS-RULE-GRAMMAR before execution or codemod.
 platform_version: ">=0.7.0 <0.8.0"
 flows: []

@@ -2995,7 +2995,8 @@ handler_specification:
       after this transaction commits).
   on_complete_vs_rules:
     description: Mutually exclusive. A handler uses on_complete OR rules, never both.
-    on_complete: Ordered list of {condition, advances_to, emit} — first match wins. Used after computation on handlers that do not declare accumulate.
+    on_complete: Ordered list or keyed map of {condition, advances_to, emit} rows — first match wins. Keyed map keys are
+      optional non-authoritative display labels. Used after computation on handlers that do not declare accumulate.
       `accumulate` and handler-level `on_complete` are mutually incompatible because stream accumulation never owns finite completion.
     rules: Current concrete spelling of the ordered policy-sheet authoring construct for handler-phase selection. Existing
       condition rules and typed selection rows lower to the canonical selected-branch owner. Retired `handler.branch`
@@ -3525,7 +3526,7 @@ handler_specification:
       field: rules
       type: ordered list of rules, or a keyed map that is decoded into ordered rules. `rules` is the current policy-sheet
         spelling; it is enhanced in place rather than adding a co-authorable `policy` field. Every typed policy-sheet
-        selection row must have a stable `id` that acts as trace-addressable contract identity.
+        selection row must have a canonical authored `element_id`; optional local `id` is non-authoritative display text.
       purpose: Type-based routing and policy-sheet selection. Match rule conditions or typed selection rows over the
         rule-condition handler context; common dispatch reads payload fields, but selection is not payload-only.
       rule_fields:
@@ -3583,8 +3584,9 @@ handler_specification:
         scope: Selection rows are `when`, `case`, `range`, and explicit else/default rows. Lookup value rows are specified
           under `policy_sheet_value_rows`; validate value rows are governed by policy_validation_contracts. Arithmetic/expression
           derivation and temporal/join/loop/collection/schedule rows are separate future gates.
-        stable_identity: Typed policy-sheet rows require stable IDs. The selected row ID is trace-addressable contract
-          identity and must survive authoring edits.
+        stable_identity: Typed policy-sheet rows require canonical authored `element_id` values. The package-qualified
+          ContractElementRef is trace-addressable contract identity and must survive authoring edits. Optional local `id`
+          is non-authoritative display text and may be absent or duplicated.
         lowering: Accepted selection rows lower before runtime execution into ordinary selected `HandlerRuleEntry` branches.
           Runtime must not contain a second switch/table/range interpreter.
         default_requirement: A rules block containing typed policy-sheet rows must include an else/default selected branch
@@ -8179,10 +8181,10 @@ engine:
     - id: dialect_compliance
       severity: error
       scope: per-node
-      trigger: A handler uses on_complete as a map (dict) instead of a list (ordered). Or uses both on_complete and rules
-        on the same handler. Or uses both accumulate and handler-level on_complete. Or uses both create_entity and accumulate
-        on the same handler. Or combines more than one entity acquisition mode on the same handler (create_entity,
-        select_entity, select_or_create_entity).
+      trigger: A rules or on_complete mapping is structurally ambiguous between one singleton rule and keyed rule rows. Or
+        a handler uses both on_complete and rules on the same handler. Or uses both accumulate and handler-level on_complete.
+        Or uses both create_entity and accumulate on the same handler. Or combines more than one entity acquisition mode on
+        the same handler (create_entity, select_entity, select_or_create_entity).
       when: boot-only
     - id: single_node_per_event
       severity: error

@@ -151,6 +151,76 @@ func TestMintHandlerRuleElementIDsPreflightsEverySingletonFormWithoutPartialWrit
 	}
 }
 
+func TestMintHandlerRuleElementIDsRejectsAmbiguousGrammarWithoutPartialWrite(t *testing.T) {
+	root := t.TempDir()
+	goodPath := filepath.Join(root, "a", "nodes.yaml")
+	badPath := filepath.Join(root, "z", "nodes.yaml")
+	if err := os.MkdirAll(filepath.Dir(goodPath), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(badPath), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	good := []byte("node:\n  event_handlers:\n    event:\n      rules:\n        selected: {condition: else}\n")
+	bad := []byte("node:\n  event_handlers:\n    event:\n      rules: {activity: {id: ambiguous}}\n")
+	for path, raw := range map[string][]byte{goodPath: good, badPath: bad} {
+		if err := os.WriteFile(path, raw, 0o640); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := MintHandlerRuleElementIDs(root); err == nil || !strings.Contains(err.Error(), "AMBIGUOUS-RULE-GRAMMAR") {
+		t.Fatalf("MintHandlerRuleElementIDs error = %v, want ambiguous grammar rejection", err)
+	}
+	for path, want := range map[string][]byte{goodPath: good, badPath: bad} {
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != string(want) {
+			t.Fatalf("%s changed after ambiguous preflight\n got: %s\nwant: %s", path, got, want)
+		}
+	}
+}
+
+func TestMintHandlerRuleElementIDsTreatsGrammarFieldNamesAsKeyedLabels(t *testing.T) {
+	labels := []string{
+		"element_id", "id", "description", "condition", "when", "case", "range", "lookup", "validate", "compute_module",
+		"else", "default", "advances_to", "emit", "emits", "action", "activity", "data_accumulation", "compute", "fan_out",
+	}
+	var raw strings.Builder
+	raw.WriteString("node:\n  event_handlers:\n")
+	for _, context := range []string{"rules", "on_complete"} {
+		raw.WriteString("    " + context + ".event:\n      " + context + ":\n")
+		for _, label := range labels {
+			raw.WriteString("        " + label + ": {condition: else}\n")
+		}
+	}
+	root := t.TempDir()
+	path := filepath.Join(root, "nodes.yaml")
+	if err := os.WriteFile(path, []byte(raw.String()), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	result, err := MintHandlerRuleElementIDs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := len(labels) * 2
+	if result.FilesChanged != 1 || result.IDsMinted != want {
+		t.Fatalf("mint result = %#v, want %d keyed rows", result, want)
+	}
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(updated), "{element_id:"); got != want {
+		t.Fatalf("element_id count = %d, want %d\n%s", got, want, updated)
+	}
+	second, err := MintHandlerRuleElementIDs(root)
+	if err != nil || second != (HandlerRuleElementIDMintResult{}) {
+		t.Fatalf("idempotent keyed-label mint = %#v, %v", second, err)
+	}
+}
+
 func TestMintHandlerRuleElementIDsRejectsInvalidExistingRowBeforeWriting(t *testing.T) {
 	for _, tc := range []struct {
 		name string

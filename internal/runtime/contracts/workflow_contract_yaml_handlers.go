@@ -1164,9 +1164,6 @@ func validateHandlerFieldNodes(node *yaml.Node) error {
 		case "payload_transform":
 			return fmt.Errorf("RETIRED: handler field %q is retired; move payload ownership into emit.fields at the active emit site", key)
 		}
-		if key == "on_complete" && node.Content[i+1].Kind == yaml.MappingNode {
-			return fmt.Errorf("DIALECT-OC-ORDER: on_complete is dict, must be ordered list")
-		}
 		if _, ok := handlerFieldOptions[key]; !ok {
 			return NewUndefinedFieldDiagnostic("handler", key, handlerFieldOptions)
 		}
@@ -1258,7 +1255,11 @@ func decodeHandlerRuleEntriesNode(node *yaml.Node, context handlerRuleDecodeCont
 		}
 		return rules, nil
 	case yaml.MappingNode:
-		if mappingIsSingleHandlerRuleEntry(node) {
+		shape, err := classifyHandlerRuleMapping(node)
+		if err != nil {
+			return nil, err
+		}
+		if shape == handlerRuleMappingSingleton {
 			rule, err := decodeHandlerRuleEntryNode(node, context)
 			if err != nil || rule == nil {
 				return nil, err
@@ -1296,29 +1297,72 @@ func decodeHandlerRuleEntriesNode(node *yaml.Node, context handlerRuleDecodeCont
 	}
 }
 
-func mappingIsSingleHandlerRuleEntry(node *yaml.Node) bool {
-	if hasAnyYAMLMappingKey(node, "element_id", "id", "description", "condition", "advances_to", "emit", "emits", "action", "activity", "data_accumulation", "compute", "fan_out") {
-		return true
+type handlerRuleMappingShape uint8
+
+const (
+	handlerRuleMappingSingleton handlerRuleMappingShape = iota + 1
+	handlerRuleMappingKeyed
+)
+
+// classifyHandlerRuleMapping resolves grammar from both the outer field names
+// and child row shape. Keyed display labels are never reserved grammar tokens.
+func classifyHandlerRuleMapping(node *yaml.Node) (handlerRuleMappingShape, error) {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return 0, fmt.Errorf("rule mapping must be a mapping")
 	}
-	if !hasAnyYAMLMappingKey(node, "when", "case", "range", "lookup", "validate", "compute_module", "else", "default") {
-		return false
+	if !mappingHasHandlerRuleFieldLabel(node) {
+		return handlerRuleMappingKeyed, nil
 	}
-	return !mappingCanBeKeyedHandlerRules(node)
+
+	singletonErr := decodeSingletonHandlerRuleShape(node)
+	keyedErr := decodeKeyedHandlerRuleShape(node)
+	switch {
+	case singletonErr == nil && keyedErr == nil:
+		return 0, fmt.Errorf("AMBIGUOUS-RULE-GRAMMAR: mapping is valid as both one handler rule and keyed handler rules; use sequence form to state the row boundary explicitly")
+	case singletonErr == nil:
+		return handlerRuleMappingSingleton, nil
+	case keyedErr == nil:
+		return handlerRuleMappingKeyed, nil
+	default:
+		return 0, fmt.Errorf("invalid handler rule mapping (singleton: %v; keyed: %v)", singletonErr, keyedErr)
+	}
 }
 
-func mappingCanBeKeyedHandlerRules(node *yaml.Node) bool {
-	if node == nil || node.Kind != yaml.MappingNode {
-		return false
-	}
+func mappingHasHandlerRuleFieldLabel(node *yaml.Node) bool {
 	for i := 0; i+1 < len(node.Content); i += 2 {
-		if strings.TrimSpace(node.Content[i].Value) == "" {
-			continue
+		key := strings.TrimSpace(node.Content[i].Value)
+		if _, ok := ruleFieldOptions[key]; ok {
+			return true
 		}
-		if node.Content[i+1].Kind != yaml.MappingNode {
-			return false
+		switch key {
+		case "emits", "payload_transform", "switch", "threshold", "policy", "temporal", "join", "loop", "collection", "schedule":
+			return true
 		}
 	}
-	return true
+	return false
+}
+
+func decodeSingletonHandlerRuleShape(node *yaml.Node) error {
+	var rule HandlerRuleEntry
+	return node.Decode(&rule)
+}
+
+func decodeKeyedHandlerRuleShape(node *yaml.Node) error {
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		label := strings.TrimSpace(node.Content[i].Value)
+		if label == "" {
+			return fmt.Errorf("keyed handler rule label must not be empty")
+		}
+		row := node.Content[i+1]
+		if row.Kind != yaml.MappingNode {
+			return fmt.Errorf("keyed handler rule %q must be a mapping", label)
+		}
+		var rule HandlerRuleEntry
+		if err := row.Decode(&rule); err != nil {
+			return fmt.Errorf("keyed handler rule %q: %w", label, err)
+		}
+	}
+	return nil
 }
 
 func rejectRuleActionOutsideRules(rule HandlerRuleEntry, context handlerRuleDecodeContext) error {
