@@ -1689,7 +1689,7 @@ func (eb *EventBus) publishDeferred(ctx context.Context, evt events.Event) (err 
 		return err
 	}
 	evt = admitted.Event()
-	if handled, err := (engineDispatcher{bus: eb}).dispatchPendingOutboxOperation(ctx, runtimeengine.EmitIntent{Event: evt, Context: evt.DeliveryContext()}); handled {
+	if result, err := (engineDispatcher{bus: eb}).dispatchPendingOutboxOperation(ctx, runtimeengine.EmitIntent{Event: evt, Context: evt.DeliveryContext()}); result.handled {
 		return err
 	}
 	return eb.Publish(ctx, evt)

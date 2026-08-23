@@ -56,6 +56,24 @@ type continuationPassthroughInterceptor struct{}
 
 type continuationEventPassthroughInterceptor struct{}
 
+type continuationCommittedDeferredInterceptor struct {
+	triggerEventID string
+	event          events.Event
+}
+
+type continuationCommittedHandoffOwner struct {
+	permissiveTestDeliveryOwner
+	proofs []runtimedelivery.DurableHandoffProof
+}
+
+func (o *continuationCommittedHandoffOwner) AcceptCommitted(proofs []runtimedelivery.DurableHandoffProof) error {
+	if err := o.permissiveTestDeliveryOwner.AcceptCommitted(proofs); err != nil {
+		return err
+	}
+	o.proofs = append(o.proofs, proofs...)
+	return nil
+}
+
 func (continuationEventPassthroughInterceptor) Intercept(context.Context, events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	return true, nil, runtimepipelineobligation.Continue(), nil
 }
@@ -66,6 +84,17 @@ func (continuationPassthroughInterceptor) Intercept(context.Context, events.Even
 
 func (continuationPassthroughInterceptor) InterceptDeliveryRoute(context.Context, events.DeliveryEvent, events.DeliveryRoute) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	return true, nil, runtimepipelineobligation.Continue(), nil
+}
+
+func (continuationCommittedDeferredInterceptor) Intercept(context.Context, events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
+	return true, nil, runtimepipelineobligation.Continue(), nil
+}
+
+func (i continuationCommittedDeferredInterceptor) InterceptDeliveryRoute(_ context.Context, delivery events.DeliveryEvent, _ events.DeliveryRoute) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
+	if i.triggerEventID != "" && delivery.Event().ID() != i.triggerEventID {
+		return true, nil, runtimepipelineobligation.Continue(), nil
+	}
+	return false, []events.Event{i.event}, runtimepipelineobligation.Continue(), nil
 }
 
 func TestEventBusWithOptionsRejectsUnconfiguredReceiverExecution(t *testing.T) {
@@ -273,6 +302,127 @@ func TestDeliveryContinuationDispatchTransfersToExactInternalCarrier(t *testing.
 		}
 	case <-time.After(time.Second):
 		t.Fatal("exact internal carrier was not enqueued")
+	}
+}
+
+func TestDeliveryContinuationDispatchConsumesOnlyCommittedDeferredPublications(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		outcome EventAppendOutcome
+	}{
+		{name: "inserted", outcome: EventAppendInserted},
+		{name: "exact_duplicate", outcome: EventAppendExactDuplicate},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := newTargetRouteMemoryStore()
+			deferred := receiverProjectionEvent("continuation-committed-deferred-" + test.name)
+			seedCommittedNoDeliveryForTest(t, store, deferred)
+			eventBus, err := newScopedTestEventBus(store, EventBusOptions{Interceptors: []EventInterceptor{
+				continuationCommittedDeferredInterceptor{event: deferred},
+			}})
+			if err != nil {
+				t.Fatalf("create event bus: %v", err)
+			}
+			claim, err := eventBus.claimPipelinePublication(context.Background(), deferred.ID())
+			if err != nil {
+				t.Fatalf("claim committed deferred publication: %v", err)
+			}
+			eventBus.stageCommittedOutboxOperation(runtimeengine.EmitIntent{Event: deferred}, test.outcome, claim, nil)
+
+			parent := deliveryContinuationProjectionEvent("continuation-parent-"+test.name, events.EventType("custom.continuation_parent"))
+			route := events.DeliveryRoute{
+				Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "workflow-node")),
+				Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: "root"}),
+			}
+			result := eventBus.DispatchDeliveryContinuation(hostilePublisherContext(t), parent, route)
+			if err := result.Validate(); err != nil || result.Disposition() != runtimedeliverycontinuation.DispatchTransferred {
+				t.Fatalf("dispatch result = %d, failure=%v, err=%v", result.Disposition(), result.Failure(), err)
+			}
+			eventBus.mu.RLock()
+			pending := len(eventBus.pendingOutboxByID[deferred.ID()])
+			eventBus.mu.RUnlock()
+			if pending != 0 {
+				t.Fatalf("pending committed deferred operations = %d, want 0", pending)
+			}
+		})
+	}
+}
+
+func TestDeliveryContinuationDispatchRejectsDeferredPublicationWithoutCommitEvidence(t *testing.T) {
+	deferred := receiverProjectionEvent("continuation-uncommitted-deferred")
+	eventBus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{Interceptors: []EventInterceptor{
+		continuationCommittedDeferredInterceptor{event: deferred},
+	}})
+	if err != nil {
+		t.Fatalf("create event bus: %v", err)
+	}
+	parent := deliveryContinuationProjectionEvent("continuation-uncommitted-parent", events.EventType("custom.continuation_parent"))
+	route := events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "workflow-node")),
+		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: "root"}),
+	}
+	result := eventBus.DispatchDeliveryContinuation(hostilePublisherContext(t), parent, route)
+	if err := result.Validate(); err != nil || result.Disposition() != runtimedeliverycontinuation.DispatchFatal {
+		t.Fatalf("dispatch result = %d, failure=%v, err=%v", result.Disposition(), result.Failure(), err)
+	}
+	if failure := result.Failure(); failure == nil || !strings.Contains(failure.Error(), "has no committed post-commit operation") {
+		t.Fatalf("dispatch failure = %v, want missing commit evidence", failure)
+	}
+}
+
+func TestDeliveryContinuationDispatchTransfersCommittedDeferredHandoffBeforeCarrier(t *testing.T) {
+	store := newTargetRouteMemoryStore()
+	deferred := receiverProjectionEvent("continuation-deferred-handoff")
+	seedCommittedNoDeliveryForTest(t, store, deferred)
+	childRoute := events.DeliveryRoute{
+		Recipient:     events.MustAgentDeliveryRecipient("deferred-child-agent"),
+		AgentIdentity: testAgentRouteIdentity(t, "deferred-child-agent", ""),
+	}
+	ledger, err := events.NewConnectEvaluationLedger(nil)
+	if err != nil {
+		t.Fatalf("admit child delivery ledger: %v", err)
+	}
+	settlement, err := events.NewDeliverySettlement(events.EventWriteNormalPublication, ledger)
+	if err != nil {
+		t.Fatalf("admit child delivery settlement: %v", err)
+	}
+	store.settlements[deferred.ID()] = settlement
+	store.routes[deferred.ID()] = []events.DeliveryRoute{childRoute}
+	parent := deliveryContinuationProjectionEvent("continuation-handoff-parent", events.EventType("custom.continuation_parent"))
+	eventBus, err := newScopedTestEventBus(store, EventBusOptions{Interceptors: []EventInterceptor{
+		continuationCommittedDeferredInterceptor{triggerEventID: parent.ID(), event: deferred},
+	}})
+	if err != nil {
+		t.Fatalf("create event bus: %v", err)
+	}
+	owner := &continuationCommittedHandoffOwner{}
+	if err := eventBus.SetDeliveryContinuationOwner(owner); err != nil {
+		t.Fatalf("set continuation owner: %v", err)
+	}
+	routeIdentity, err := childRoute.Identity()
+	if err != nil {
+		t.Fatalf("child route identity: %v", err)
+	}
+	proof, err := runtimedelivery.AdmitDurableHandoffProof(uuid.NewString(), deferred.ID(), events.EncodeDeliveryRouteIdentity(routeIdentity), eventBus.deliveryAuthority)
+	if err != nil {
+		t.Fatalf("admit child handoff proof: %v", err)
+	}
+	claim, err := eventBus.claimPipelinePublication(context.Background(), deferred.ID())
+	if err != nil {
+		t.Fatalf("claim committed deferred publication: %v", err)
+	}
+	eventBus.stageCommittedOutboxOperation(runtimeengine.EmitIntent{Event: deferred}, EventAppendInserted, claim, []runtimedelivery.DurableHandoffProof{proof})
+
+	parentRoute := events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient(testRootNode(t, "workflow-node")),
+		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowInstance: "root"}),
+	}
+	result := eventBus.DispatchDeliveryContinuation(hostilePublisherContext(t), parent, parentRoute)
+	if err := result.Validate(); err != nil || result.Disposition() != runtimedeliverycontinuation.DispatchTransferred {
+		t.Fatalf("dispatch result = %d, failure=%v, err=%v", result.Disposition(), result.Failure(), err)
+	}
+	if len(owner.proofs) != 1 || owner.proofs[0].DeliveryID() != proof.DeliveryID() {
+		t.Fatalf("accepted handoffs = %#v, want exact child proof", owner.proofs)
 	}
 }
 

@@ -818,7 +818,9 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 			return runtimedeliverycontinuation.Fatal(err)
 		}
 		if len(interception.Deferred) > 0 {
-			return runtimedeliverycontinuation.Fatal(errors.New("delivery continuation cannot create uncommitted deferred publications"))
+			if err := (engineDispatcher{bus: eb}).dispatchCommittedInterceptorPublications(ctx, interception.Deferred); err != nil {
+				return runtimedeliverycontinuation.Fatal(err)
+			}
 		}
 		if _, retry := interception.Outcome.RetryRelease(); retry {
 			return runtimedeliverycontinuation.Fatal(errors.New("delivery continuation route requested event-level retry release"))
