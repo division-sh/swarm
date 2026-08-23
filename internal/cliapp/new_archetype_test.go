@@ -25,6 +25,8 @@ func TestScaffoldAdmittedArchetypesAndTeachNextCommands(t *testing.T) {
 			if err := scaffoldArchetype(&out, archetype, destination); err != nil {
 				t.Fatal(err)
 			}
+			source := admittedArchetypes[archetype]
+			assertArchetypeTreeEqual(t, source.Files, source.SourceRoot, destination)
 			requiredFiles := []string{"package.yaml"}
 			if archetype == "webhook-responder" {
 				requiredFiles = append(requiredFiles, "swarm.live.yaml", "bot/swarm.yaml", "bot/.swarm/swarm.yaml", "bot/tests/smoke.yaml")
@@ -37,7 +39,6 @@ func TestScaffoldAdmittedArchetypesAndTeachNextCommands(t *testing.T) {
 				}
 			}
 			if archetype == "webhook-responder" {
-				assertArchetypeTreeEqual(t, canonicalrouting.ExampleRoot(t, canonicalrouting.TelegramAgent), destination)
 				if !strings.Contains(out.String(), "cd ./bot") {
 					t.Fatalf("output %q does not enter the runnable bot package", out.String())
 				}
@@ -113,18 +114,18 @@ func TestScaffoldEmbedsOnlyCheckedHiddenConfig(t *testing.T) {
 	}
 }
 
-func assertArchetypeTreeEqual(t *testing.T, wantRoot, gotRoot string) {
+func assertArchetypeTreeEqual(t *testing.T, wantFS fs.FS, wantRoot, gotRoot string) {
 	t.Helper()
 	want := map[string][]byte{}
-	err := filepath.WalkDir(wantRoot, func(path string, entry fs.DirEntry, err error) error {
+	err := fs.WalkDir(wantFS, wantRoot, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
 			return err
 		}
-		rel, err := filepath.Rel(wantRoot, path)
+		rel, err := filepath.Rel(filepath.FromSlash(wantRoot), filepath.FromSlash(path))
 		if err != nil {
 			return err
 		}
-		want[filepath.ToSlash(rel)], err = os.ReadFile(path)
+		want[filepath.ToSlash(rel)], err = fs.ReadFile(wantFS, path)
 		return err
 	})
 	if err != nil {

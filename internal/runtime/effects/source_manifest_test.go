@@ -119,6 +119,8 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/testfixtures/canonicalrouting/fixture.go:SetOverlayFile:filesystem_write:1":                         ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/fixture.go:SetOverlayFile:filesystem_write:2":                         ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/fixture.go:applyClosedReplacement:filesystem_write:1":                 ownerBuildTest,
+	"internal/runtime/testfixtures/canonicalrouting/fixture.go:copyFS:filesystem_write:1":                                 ownerBuildTest,
+	"internal/runtime/testfixtures/canonicalrouting/fixture.go:copyFS:filesystem_write:2":                                 ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/fixture.go:copyTree:filesystem_write:1":                               ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/fixture.go:copyTree:filesystem_write:2":                               ownerBuildTest,
 	"internal/runtime/testfixtures/canonicalrouting/fixture.go:writeClosedNegativeFile:filesystem_write:1":                ownerBuildTest,
