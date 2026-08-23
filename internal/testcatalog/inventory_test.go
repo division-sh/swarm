@@ -87,8 +87,10 @@ func TestCatalogExternalProofsFailClosed(t *testing.T) {
 		{name: "missing record", want: "claim.external has no non-retired proof fixture"},
 		{name: "duplicate record", proof: valid + valid, want: "duplicate top-level external_proofs"},
 		{name: "empty source", proof: externalProofSpec("", "github.com/division-sh/swarm/internal/executor", []string{"claim.external"}), want: "invalid repository-relative source"},
+		{name: "parent source", proof: externalProofSpec("..", "github.com/division-sh/swarm/internal/executor", []string{"claim.external"}), want: "path escapes repository"},
 		{name: "missing source", proof: externalProofSpec("examples/missing", "github.com/division-sh/swarm/internal/executor", []string{"claim.external"}), want: "external proof source"},
 		{name: "missing executor", proof: externalProofSpec("examples/external", "", []string{"claim.external"}), want: "invalid executor"},
+		{name: "parent executor", proof: externalProofSpec("examples/external", "github.com/division-sh/swarm/../outside-executor", []string{"claim.external"}), want: "path escapes repository"},
 		{name: "unknown claim", proof: externalProofSpec("examples/external", "github.com/division-sh/swarm/internal/executor", []string{"claim.unknown"}), want: "references unknown claim"},
 		{name: "duplicate claim", proof: externalProofSpec("examples/external", "github.com/division-sh/swarm/internal/executor", []string{"claim.external", "claim.external"}), want: "multiple runtime-credit owners"},
 		{name: "multiple credit", proof: valid, expected: fixtureMetadata("runtime", "pass", "claim.external"), want: "multiple runtime-credit owners"},
@@ -102,6 +104,56 @@ func TestCatalogExternalProofsFailClosed(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("source symlink escape", func(t *testing.T) {
+		root := writeExternalProofInventory(t, valid, "")
+		source := filepath.Join(root, "examples", "external")
+		if err := os.RemoveAll(source); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(t.TempDir(), source); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load(root)
+		if err == nil || !strings.Contains(err.Error(), "resolved path escapes repository") {
+			t.Fatalf("Load error = %v, want source symlink containment rejection", err)
+		}
+	})
+
+	t.Run("executor symlink escape", func(t *testing.T) {
+		root := writeExternalProofInventory(t, valid, "")
+		executor := filepath.Join(root, "internal", "executor")
+		if err := os.RemoveAll(executor); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(t.TempDir(), executor); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load(root)
+		if err == nil || !strings.Contains(err.Error(), "resolved path escapes repository") {
+			t.Fatalf("Load error = %v, want executor symlink containment rejection", err)
+		}
+	})
+
+	t.Run("contained symlinks", func(t *testing.T) {
+		const source = "examples/external-link"
+		const executor = "github.com/division-sh/swarm/internal/executor-link"
+		root := writeExternalProofInventory(t, externalProofSpec(source, executor, []string{"claim.external"}), "")
+		if err := os.Symlink("external", filepath.Join(root, "examples", "external-link")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("executor", filepath.Join(root, "internal", "executor-link")); err != nil {
+			t.Fatal(err)
+		}
+		writeCatalogTestFile(t, filepath.Join(root, ".github", "test-proof-plan.yaml"), externalProofPolicy(executor))
+		inventory, err := Load(root)
+		if err != nil {
+			t.Fatalf("load contained symlink proof: %v", err)
+		}
+		if len(inventory.ExternalProofs) != 1 || inventory.ExternalProofs[0].Source != source {
+			t.Fatalf("contained symlink proof = %#v", inventory.ExternalProofs)
+		}
+	})
 
 	t.Run("missing executor CI owner", func(t *testing.T) {
 		root := writeExternalProofInventory(t, valid, "")
