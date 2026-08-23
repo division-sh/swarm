@@ -10,8 +10,12 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -24,8 +28,10 @@ type operatorConversationProjectionTestBackend struct {
 	owner interface {
 		ResolveConversationForkPoint(context.Context, string, runfork.ConversationForkPointSelector) (runfork.ConversationForkPointDescriptor, error)
 	}
-	db     *sql.DB
-	sqlite bool
+	settlement completionSettlementTestStore
+	claims     map[string]runtimedelivery.Claim
+	db         *sql.DB
+	sqlite     bool
 }
 
 type operatorConversationProjectionFixture struct {
@@ -57,14 +63,13 @@ type operatorConversationProjectionTurnSeed struct {
 	triggerEventID string
 	triggerType    string
 	taskID         string
-	capabilityID   string
 	turnBlocks     string
 	parseOK        bool
 	latencyMS      int
 	retryCount     int
 	usageExactness string
-	inputTokens    any
-	outputTokens   any
+	inputTokens    int64
+	outputTokens   int64
 	failure        string
 	createdAt      time.Time
 }
@@ -92,11 +97,11 @@ func newOperatorConversationProjectionTestBackend(t *testing.T, name string) ope
 	switch name {
 	case "sqlite":
 		store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-		return operatorConversationProjectionTestBackend{store: store, owner: store, db: store.backend.ConstructionHandle(), sqlite: true}
+		return operatorConversationProjectionTestBackend{store: store, owner: store, settlement: store, claims: map[string]runtimedelivery.Claim{}, db: store.backend.ConstructionHandle(), sqlite: true}
 	case "postgres":
 		_, db, _ := testutil.StartPostgres(t)
 		store := admitTestPostgresStore(t, db)
-		return operatorConversationProjectionTestBackend{store: store, owner: store, db: db}
+		return operatorConversationProjectionTestBackend{store: store, owner: store, settlement: store, claims: map[string]runtimedelivery.Claim{}, db: db}
 	default:
 		t.Fatalf("unknown projection backend %q", name)
 		return operatorConversationProjectionTestBackend{}
@@ -131,13 +136,14 @@ func seedOperatorConversationProjectionFixture(t *testing.T, backend operatorCon
 	privateBlocks := `[
 		{"kind":"reasoning","text":"private-reasoning"},
 		{"kind":"progress","text":"private-progress"},
-		{"kind":"runtime_log","data":{"message":"private-runtime-log","details":{"secret":"private-log-detail"}}},
+		{"kind":"runtime_log","data":{"log_level":"info","message":"private-runtime-log","details":{"component":"projection-test","action":"record-private-log","secret":"private-log-detail"}}},
 		{"kind":"assistant_text","text":"author-visible-one"},
 		{"kind":"unknown_private","text":"private-unknown"}
 	]`
 	toolBlocks := `[
 		{"kind":"tool_use","tool_name":"inspect","input":{"secret":"private-tool-input"},"data":{"tool_use_id":"tool-use-2"}},
 		{"kind":"tool_result","tool_name":"inspect","output":{"secret":"private-tool-output"},"data":{"tool_use_id":"tool-use-2"}},
+		{"kind":"assistant_text","text":"author-visible-two"},
 		{"kind":"turn_summary","data":{"assistant_visible_output":"author-visible-two","outcome":"completed","reasoning_blocks":["private-summary-reasoning"],"progress_updates":["private-summary-progress"],"tool_results":[{"tool_name":"inspect","tool_use_id":"tool-use-2","output":{"secret":"private-summary-output"}}]}}
 	]`
 	mixedBlocks := `[
@@ -146,58 +152,32 @@ func seedOperatorConversationProjectionFixture(t *testing.T, backend operatorCon
 		{"kind":"tool_result","tool_name":"deliver","output":{"secret":"private-mixed-output"},"data":{"tool_use_id":"tool-use-4"}},
 		{"kind":"publish","title":"task.done","data":{"event_id":"` + publishEventID + `","entity_id":"` + entityID + `","routed_recipients":[{"subscriber_id":"private-recipient"}]}},
 		{"kind":"assistant_text","text":"author-visible-mixed"},
+		{"kind":"outcome","text":"failed"},
 		{"kind":"turn_summary","data":{"assistant_visible_output":"author-visible-mixed","outcome":"failed"}}
 	]`
 	mixedFailure := mustMarshalTestFailure(t, testFailureEnvelope(runtimefailures.ClassInternalFailure, "mixed_failure", nil))
 	malformedBlocks := `[{"kind":"tool_use","input":{"secret":"private-malformed-input"}}]`
+	validMalformedSeedBlocks := `[{"kind":"tool_use","tool_name":"inspect","input":{"secret":"private-malformed-input"},"data":{"tool_use_id":"tool-use-malformed"}}]`
 	identity := testAgentIdentity(t, agentID, "conversation")
 	malformedIdentity := testAgentIdentity(t, malformedAgentID, "conversation-malformed")
-	capabilityStore, ok := backend.store.(managedCapabilityTestStore)
-	if !ok {
-		t.Fatal("operator conversation projection backend lacks managed capability persistence")
-	}
-	seedCapabilities := func() []string {
-		out := make([]string, len(turnIDs))
-		for i, turnID := range turnIDs {
-			turnSessionID := sessionID
-			turnIdentity := identity
-			if i == len(turnIDs)-1 {
-				turnSessionID = malformedSessionID
-				turnIdentity = malformedIdentity
-			}
-			out[i] = seedManagedAgentTurnCapabilitySurface(
-				t, capabilityStore, runID, turnIdentity, turnSessionID, turnID, "session", "global",
-			)
-		}
-		return out
-	}
-
 	requireRunFixtureForTest(t, context.Background(), backend.store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(),
 		RunID: runID, StartedAt: base,
 	})
-	if backend.sqlite {
-		capabilityIDs := seedCapabilities()
-		seedTestAgentRow(t, testAuthorActivityContext(), backend.db, false, identity, "active")
-		seedTestAgentRow(t, testAuthorActivityContext(), backend.db, false, malformedIdentity, "active")
-		seedOperatorConversationProjectionSession(t, backend, runID, sessionID, identity, 4, base, lastAt)
-		seedOperatorConversationProjectionSession(t, backend, runID, malformedSessionID, malformedIdentity, 1, base, lastAt)
-		seedOperatorConversationProjectionTurn(t, backend, operatorConversationProjectionTurnSeed{identity: identity, turnID: turnIDs[0], runID: runID, sessionID: sessionID, entityID: entityID, triggerEventID: turnIDs[0], triggerType: "task.one", taskID: "task-1", capabilityID: capabilityIDs[0], turnBlocks: privateBlocks, parseOK: true, latencyMS: 101, createdAt: firstAt})
-		seedOperatorConversationProjectionTurn(t, backend, operatorConversationProjectionTurnSeed{identity: identity, turnID: turnIDs[1], runID: runID, sessionID: sessionID, entityID: entityID, triggerEventID: sharedEventID, triggerType: "task.shared", taskID: "task-2", capabilityID: capabilityIDs[1], turnBlocks: toolBlocks, parseOK: true, latencyMS: 202, retryCount: 1, usageExactness: "exact", inputTokens: 12, outputTokens: 4, createdAt: tieAt})
-		seedOperatorConversationProjectionTurn(t, backend, operatorConversationProjectionTurnSeed{identity: identity, turnID: turnIDs[2], runID: runID, sessionID: sessionID, entityID: entityID, triggerEventID: sharedEventID, triggerType: "task.shared", taskID: "task-3", capabilityID: capabilityIDs[2], turnBlocks: "[]", parseOK: true, latencyMS: 303, usageExactness: "unavailable", createdAt: tieAt})
-		seedOperatorConversationProjectionTurn(t, backend, operatorConversationProjectionTurnSeed{identity: identity, turnID: turnIDs[3], runID: runID, sessionID: sessionID, entityID: entityID, triggerEventID: publishEventID, triggerType: "task.done", taskID: "task-4", capabilityID: capabilityIDs[3], turnBlocks: mixedBlocks, latencyMS: 404, failure: mixedFailure, createdAt: lastAt})
-		seedOperatorConversationProjectionTurn(t, backend, operatorConversationProjectionTurnSeed{identity: malformedIdentity, turnID: turnIDs[4], runID: runID, sessionID: malformedSessionID, triggerEventID: malformedEventID, triggerType: "task.malformed", taskID: "task-malformed", capabilityID: capabilityIDs[4], turnBlocks: malformedBlocks, parseOK: true, latencyMS: 1, createdAt: lastAt})
-	} else {
-		capabilityIDs := seedCapabilities()
-		seedTestAgentRow(t, testAuthorActivityContext(), backend.db, true, identity, "active")
-		seedTestAgentRow(t, testAuthorActivityContext(), backend.db, true, malformedIdentity, "active")
-		seedOperatorConversationProjectionSession(t, backend, runID, sessionID, identity, 4, base, lastAt)
-		seedOperatorConversationProjectionSession(t, backend, runID, malformedSessionID, malformedIdentity, 1, base, lastAt)
-		seedOperatorConversationProjectionTurn(t, backend, operatorConversationProjectionTurnSeed{identity: identity, turnID: turnIDs[0], runID: runID, sessionID: sessionID, entityID: entityID, triggerEventID: turnIDs[0], triggerType: "task.one", taskID: "task-1", capabilityID: capabilityIDs[0], turnBlocks: privateBlocks, parseOK: true, latencyMS: 101, createdAt: firstAt})
-		seedOperatorConversationProjectionTurn(t, backend, operatorConversationProjectionTurnSeed{identity: identity, turnID: turnIDs[1], runID: runID, sessionID: sessionID, entityID: entityID, triggerEventID: sharedEventID, triggerType: "task.shared", taskID: "task-2", capabilityID: capabilityIDs[1], turnBlocks: toolBlocks, parseOK: true, latencyMS: 202, retryCount: 1, usageExactness: "exact", inputTokens: 12, outputTokens: 4, createdAt: tieAt})
-		seedOperatorConversationProjectionTurn(t, backend, operatorConversationProjectionTurnSeed{identity: identity, turnID: turnIDs[2], runID: runID, sessionID: sessionID, entityID: entityID, triggerEventID: sharedEventID, triggerType: "task.shared", taskID: "task-3", capabilityID: capabilityIDs[2], turnBlocks: "[]", parseOK: true, latencyMS: 303, usageExactness: "unavailable", createdAt: tieAt})
-		seedOperatorConversationProjectionTurn(t, backend, operatorConversationProjectionTurnSeed{identity: identity, turnID: turnIDs[3], runID: runID, sessionID: sessionID, entityID: entityID, triggerEventID: publishEventID, triggerType: "task.done", taskID: "task-4", capabilityID: capabilityIDs[3], turnBlocks: mixedBlocks, latencyMS: 404, failure: mixedFailure, createdAt: lastAt})
-		seedOperatorConversationProjectionTurn(t, backend, operatorConversationProjectionTurnSeed{identity: malformedIdentity, turnID: turnIDs[4], runID: runID, sessionID: malformedSessionID, triggerEventID: malformedEventID, triggerType: "task.malformed", taskID: "task-malformed", capabilityID: capabilityIDs[4], turnBlocks: malformedBlocks, parseOK: true, latencyMS: 1, createdAt: lastAt})
+	seedTestAgentRow(t, testAuthorActivityContext(), backend.db, !backend.sqlite, identity, "active")
+	seedTestAgentRow(t, testAuthorActivityContext(), backend.db, !backend.sqlite, malformedIdentity, "active")
+	seedOperatorConversationProjectionSession(t, backend, runID, sessionID, identity, 0, base, lastAt)
+	seedOperatorConversationProjectionSession(t, backend, runID, malformedSessionID, malformedIdentity, 0, base, lastAt)
+	seedOperatorConversationProjectionTurn(t, backend, operatorConversationProjectionTurnSeed{identity: identity, turnID: turnIDs[0], runID: runID, sessionID: sessionID, entityID: entityID, triggerEventID: turnIDs[0], triggerType: "task.one", taskID: "task-1", turnBlocks: privateBlocks, parseOK: true, latencyMS: 101, createdAt: firstAt})
+	seedOperatorConversationProjectionTurn(t, backend, operatorConversationProjectionTurnSeed{identity: identity, turnID: turnIDs[1], runID: runID, sessionID: sessionID, entityID: entityID, triggerEventID: sharedEventID, triggerType: "task.shared", taskID: "task-2", turnBlocks: toolBlocks, parseOK: true, latencyMS: 202, retryCount: 1, usageExactness: "exact", inputTokens: 12, outputTokens: 4, createdAt: tieAt})
+	seedOperatorConversationProjectionTurn(t, backend, operatorConversationProjectionTurnSeed{identity: identity, turnID: turnIDs[2], runID: runID, sessionID: sessionID, entityID: entityID, triggerEventID: sharedEventID, triggerType: "task.shared", taskID: "task-3", turnBlocks: "[]", parseOK: true, latencyMS: 303, usageExactness: "unavailable", createdAt: tieAt})
+	seedOperatorConversationProjectionTurn(t, backend, operatorConversationProjectionTurnSeed{identity: identity, turnID: turnIDs[3], runID: runID, sessionID: sessionID, entityID: entityID, triggerEventID: publishEventID, triggerType: "task.done", taskID: "task-4", turnBlocks: mixedBlocks, latencyMS: 404, failure: mixedFailure, createdAt: lastAt})
+	seedOperatorConversationProjectionTurn(t, backend, operatorConversationProjectionTurnSeed{identity: malformedIdentity, turnID: turnIDs[4], runID: runID, sessionID: malformedSessionID, triggerEventID: malformedEventID, triggerType: "task.malformed", taskID: "task-malformed", turnBlocks: validMalformedSeedBlocks, parseOK: true, latencyMS: 1, createdAt: lastAt})
+	for _, claim := range backend.claims {
+		if _, err := backend.settlement.SettleSuccess(testAuthorActivityContext(), claim, nil, time.Millisecond); err != nil {
+			t.Fatalf("settle projection fixture delivery: %v", err)
+		}
 	}
+	corruptOperatorConversationProjectionTurn(t, backend, turnIDs[4], malformedBlocks)
 
 	return operatorConversationProjectionFixture{
 		sessionID:          sessionID,
@@ -207,6 +187,15 @@ func seedOperatorConversationProjectionFixture(t *testing.T, backend operatorCon
 		firstAt:            firstAt,
 		tieAt:              tieAt,
 	}
+}
+
+func corruptOperatorConversationProjectionTurn(t *testing.T, backend operatorConversationProjectionTestBackend, turnID, turnBlocks string) {
+	t.Helper()
+	query := `UPDATE agent_turns SET turn_blocks = ? WHERE turn_id = ?`
+	if !backend.sqlite {
+		query = `UPDATE agent_turns SET turn_blocks = $1::jsonb WHERE turn_id = $2::uuid`
+	}
+	operatorConversationProjectionExec(t, backend.db, query, turnBlocks, turnID)
 }
 
 func operatorConversationProjectionExec(t *testing.T, db *sql.DB, query string, args ...any) {
@@ -272,72 +261,70 @@ func seedOperatorConversationProjectionTurn(
 	seed operatorConversationProjectionTurnSeed,
 ) {
 	t.Helper()
-	fields, err := seed.identity.StorageFields()
-	if err != nil {
-		t.Fatalf("seed operator conversation turn identity: %v", err)
+	var blocks []runtimellm.TurnBlock
+	if err := json.Unmarshal([]byte(seed.turnBlocks), &blocks); err != nil {
+		t.Fatalf("decode projection fixture turn blocks: %v", err)
 	}
-	entityID := any(sqliteNullUUID(seed.entityID))
-	usageExactness := any(sqliteNullString(seed.usageExactness))
-	failure := any(sqliteNullString(seed.failure))
-	query := `
-		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
-			agent_route_presence, flow_scope_key, flow_instance_id,
-			session_id, flow_instance, memory_enabled, memory_source,
-			entity_id, trigger_event_id, trigger_event_type, task_id,
-			capability_surface_id, turn_blocks, parse_ok, latency_ms, retry_count,
-			usage_exactness, input_tokens, output_tokens, failure, execution_mode, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'live', ?)
-	`
-	if !backend.sqlite {
-		query = `
-			INSERT INTO agent_turns (
-				turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
-				agent_route_presence, flow_scope_key, flow_instance_id,
-				session_id, flow_instance, memory_enabled, memory_source,
-				entity_id, trigger_event_id, trigger_event_type, task_id,
-				capability_surface_id, turn_blocks, parse_ok, latency_ms, retry_count,
-				usage_exactness, input_tokens, output_tokens, failure, execution_mode, created_at
-			) VALUES (
-				$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8,
-				$9::uuid, $10, TRUE, 'authored',
-				$11::uuid, $12::uuid, $13, $14, $15::uuid, $16::jsonb,
-				$17, $18, $19, $20, $21, $22, $23::jsonb, 'live', $24
-			)
-		`
-		entityID = sqliteNullUUID(seed.entityID)
-		usageExactness = sqliteNullString(seed.usageExactness)
-		failure = sqliteNullString(seed.failure)
+	var failure *runtimefailures.Envelope
+	if strings.TrimSpace(seed.failure) != "" {
+		failure = &runtimefailures.Envelope{}
+		if err := json.Unmarshal([]byte(seed.failure), failure); err != nil {
+			t.Fatalf("decode projection fixture failure: %v", err)
+		}
 	}
-	operatorConversationProjectionExec(
-		t,
-		backend.db,
-		query,
-		seed.turnID,
-		seed.runID,
-		fields.AgentID,
-		fields.NameOwner,
-		fields.NameSource,
-		fields.RoutePresence,
-		fields.FlowScopeKey,
-		fields.FlowInstanceID,
-		seed.sessionID,
-		fields.FlowInstancePath,
-		entityID,
-		seed.triggerEventID,
-		seed.triggerType,
-		seed.taskID,
-		seed.capabilityID,
-		seed.turnBlocks,
-		seed.parseOK,
-		seed.latencyMS,
-		seed.retryCount,
-		usageExactness,
-		seed.inputTokens,
-		seed.outputTokens,
-		failure,
-		seed.createdAt,
-	)
+	claim, ok := backend.claims[seed.triggerEventID]
+	if !ok {
+		lifecycle, found, err := backend.settlement.LoadAgentLifecycleState(testAuthorActivityContext(), seed.identity)
+		if err != nil {
+			t.Fatalf("load projection fixture lifecycle: %v", err)
+		}
+		if !found {
+			t.Fatal("projection fixture lifecycle is missing")
+		}
+		authority := runtimeeffects.NormalAgentAuthority(runtimeeffects.LifecycleToken{
+			RuntimeEpoch: lifecycle.RuntimeEpoch,
+			Identity:     seed.identity,
+			AgentID:      seed.identity.AgentID(),
+			Generation:   lifecycle.Generation,
+		}, "store-test-owner", seed.createdAt.Add(time.Hour))
+		authority.Target = runtimeeffects.UsageTarget{
+			Kind:          runtimeeffects.UsageTargetAgentTurn,
+			ID:            seed.turnID,
+			RunID:         seed.runID,
+			AgentID:       seed.identity.AgentID(),
+			AgentIdentity: seed.identity,
+			SessionID:     seed.sessionID,
+			Memory:        agentmemory.Authored(true),
+			FlowInstance:  seed.identity.FlowInstance(),
+			EntityID:      seed.entityID,
+		}
+		event := managedCompletionTestEventWithIdentity(authority, seed.triggerEventID, seed.triggerType)
+		claim = claimCompletionOriginEventForTest(t, testAuthorActivityContext(), backend.settlement, authority, event)
+		backend.claims[seed.triggerEventID] = claim
+	}
+	ctx := runtimedelivery.WithClaim(testAuthorActivityContext(), claim)
+	usage := runtimeeffects.CompletionUsage{
+		ResolvedModel: "store-test-model",
+		Exactness:     runtimeeffects.CompletionUsageExact,
+		InputTokens:   &seed.inputTokens,
+		OutputTokens:  &seed.outputTokens,
+	}
+	if seed.usageExactness != "exact" {
+		usage = runtimeeffects.CompletionUsage{
+			ResolvedModel: "store-test-model",
+			Exactness:     runtimeeffects.CompletionUsageUnavailable,
+		}
+	}
+	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, ctx, backend.settlement, runtimellm.AgentTurnRecord{
+		AgentID: seed.identity.AgentID(), Identity: agentmemory.Identity{RunID: seed.runID, Agent: seed.identity},
+		Memory: agentmemory.Authored(true), SessionID: seed.sessionID, RunID: seed.runID,
+		FlowInstance: seed.identity.FlowInstance(), EntityID: seed.entityID,
+		TriggerEventID: seed.triggerEventID, TriggerEventType: seed.triggerType, TaskID: seed.taskID,
+		TurnBlocks: blocks, ParseOK: seed.parseOK, Latency: time.Duration(seed.latencyMS) * time.Millisecond,
+		RetryCount: seed.retryCount, Failure: failure,
+	}, managedAgentTurnFixtureOptions{TurnID: seed.turnID, Now: seed.createdAt, Usage: &usage}); err != nil {
+		t.Fatalf("seed operator conversation projection turn: %v", err)
+	}
 }
 
 func proveOperatorConversationProjectionBackend(t *testing.T, backend operatorConversationProjectionTestBackend, fixture operatorConversationProjectionFixture) operatorConversationProjectionParityResult {
@@ -392,7 +379,7 @@ func proveOperatorConversationProjectionBackend(t *testing.T, backend operatorCo
 	if err != nil {
 		t.Fatalf("load exact turn: %v", err)
 	}
-	if detail.Turn.TurnID != fixture.turnIDs[1] || detail.Turn.Ordinal != 2 || detail.Turn.AssistantVisibleOutput != "author-visible-two" || detail.Turn.Outcome != "completed" || len(detail.Turn.Activity) != 2 {
+	if detail.Turn.TurnID != fixture.turnIDs[1] || detail.Turn.Ordinal != 2 || detail.Turn.AssistantVisibleOutput != "author-visible-two" || detail.Turn.Outcome != "author-visible-two" || len(detail.Turn.Activity) != 3 {
 		t.Fatalf("exact turn detail = %#v", detail.Turn)
 	}
 	mixed, err := backend.store.LoadOperatorPublicConversationTurn(ctx, fixture.sessionID, fixture.turnIDs[3])

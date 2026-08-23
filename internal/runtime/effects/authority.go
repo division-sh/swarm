@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
@@ -80,6 +81,32 @@ func ProviderTurnTargetMatchesCapabilitySurface(target UsageTarget, surface mana
 		surface.Authority.Kind == managedcapabilities.AuthorityProviderTurn &&
 		surface.Authority.ID == target.ID && surface.ActorID == target.AgentID &&
 		surface.Authority.SessionID == target.SessionID && surface.Authority.RunID == target.RunID
+}
+
+func ValidateManagedAgentFrame(frame agentframe.Frame, authority Authority, surface managedcapabilities.Surface) error {
+	if authority.Target.Kind != UsageTargetAgentTurn || !ProviderTurnTargetMatchesCapabilitySurface(authority.Target, surface) {
+		return fmt.Errorf("managed execution frame requires an exact agent-turn target and capability surface")
+	}
+	if !frame.MatchesSurface(surface) {
+		return fmt.Errorf("managed execution frame does not match capability surface")
+	}
+	authorityID, err := frame.ProviderTurnAuthorityID()
+	if err != nil || authorityID != authority.Target.ID {
+		return fmt.Errorf("managed execution frame does not match provider-turn authority")
+	}
+	sameActor, err := agentidentity.Equal(frame.Session.AgentIdentity, authority.Target.AgentIdentity)
+	if err != nil || !sameActor || frame.Session.AgentIdentity.AgentID() != authority.Target.AgentID {
+		return fmt.Errorf("managed execution frame does not match target actor")
+	}
+	if frame.Turn.Event.RunID != authority.Target.RunID {
+		return fmt.Errorf("managed execution frame does not match target run")
+	}
+	// Event mode is causal input truth; authority mode is the provider-effect
+	// posture and may legitimately narrow a live event to a mock agent.
+	if frame.Session.Provider.RuntimeMode != surface.RuntimeMode || frame.Session.Provider.Provider != surface.Provider || frame.Session.Provider.Transport != surface.Transport {
+		return fmt.Errorf("managed execution frame does not match provider contract")
+	}
+	return nil
 }
 
 type SelectedContractForkAuthority struct {

@@ -27,6 +27,7 @@ import (
 const readOnlyRuntimeProbeTestName = "TestOpenRPCReadOnlyHTTPRuntimeProbes"
 const readOnlyProbeBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 const readOnlyProbeMissingBundleHash = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+const readOnlyProbeTurnID = "00000000-0000-4000-8000-000000000401"
 
 func TestOpenRPCReadOnlyHTTPRuntimeProbes(t *testing.T) {
 	root := repoRoot(t)
@@ -294,7 +295,7 @@ func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 		"bundle.list":                {Params: map[string]any{}, ResultKeys: []string{"bundles"}},
 		"conversation.fork_list":     {Params: map[string]any{}, ResultKeys: []string{"forks"}},
 		"conversation.fork_view":     {Params: map[string]any{"fork_id": "00000000-0000-0000-0000-000000000301"}, ResultKeys: []string{"fork_id", "source_session_id", "source_agent_id", "fork_point", "created_by", "created_at", "expires_at", "state", "turns"}},
-		"conversation.get_turn":      {Params: map[string]any{"session_id": "sess-1", "turn_id": "turn-1"}, ResultKeys: []string{"session", "turn"}},
+		"conversation.get_turn":      {Params: map[string]any{"session_id": "sess-1", "turn_id": readOnlyProbeTurnID}, ResultKeys: []string{"session", "turn", "frame"}},
 		"conversation.list":          {Params: map[string]any{}, ResultKeys: []string{"conversations"}},
 		"conversation.list_turns":    {Params: map[string]any{"session_id": "sess-1"}, ResultKeys: []string{"conversation", "turns"}},
 		"entity.aggregate":           {Params: map[string]any{}, ResultKeys: []string{"counts"}},
@@ -885,8 +886,13 @@ func readOnlyRuntimeProbeOptions(t *testing.T) testOperatorCapabilities {
 			},
 			conversationTurnResult: operatorread.OperatorPublicConversationTurnDetail{
 				Session: operatorread.OperatorConversationSummary{SessionID: sessionID, AgentID: "agent-1", RunID: runID, StartedAt: now, Status: "active"},
-				Turn: operatorread.OperatorPublicConversationTurn{TurnID: "turn-1", ExecutionMode: "live", Ordinal: 1, CompletedAt: now.Add(time.Second), DurationMS: 25,
+				Turn: operatorread.OperatorPublicConversationTurn{TurnID: readOnlyProbeTurnID, ExecutionMode: "live", Ordinal: 1, CompletedAt: now.Add(time.Second), DurationMS: 25,
 					TriggerEventID: eventID, TriggerEventType: "scan.requested", ParseOK: true, Activity: []operatorread.OperatorConversationActivity{}},
+				Frame: operatorread.OperatorConversationFrameFacts{
+					Version: "agent-execution-frame.v1", FrameID: "agent-frame:v1:" + readOnlyProbeTurnID,
+					ContentHash: "agent-frame-content:v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+					TurnKind:    "initial",
+				},
 			},
 		},
 		AgentDeliveryLifecycle: &fakeAgentConversationReadStore{

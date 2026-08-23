@@ -14,11 +14,13 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
@@ -1870,13 +1872,13 @@ func TestRunForkActivation_FailsClosedForForkReplayStateWithTaxonomy(t *testing.
 func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
-		seed      func(context.Context, *sql.DB, string, time.Time) error
+		seed      func(context.Context, *PostgresStore, *sql.DB, string, string, string, time.Time) error
 		wantCode  string
 		wantError string
 	}{
 		{
 			name: "fork session",
-			seed: func(ctx context.Context, db *sql.DB, forkRunID string, at time.Time) error {
+			seed: func(ctx context.Context, _ *PostgresStore, db *sql.DB, _, _, forkRunID string, at time.Time) error {
 				fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, "agent-a", "fork-state"))
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_sessions (
@@ -1894,7 +1896,7 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 		},
 		{
 			name: "fork conversation audit",
-			seed: func(ctx context.Context, db *sql.DB, forkRunID string, at time.Time) error {
+			seed: func(ctx context.Context, _ *PostgresStore, db *sql.DB, _, _, forkRunID string, at time.Time) error {
 				fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, "agent-task", "fork-state"))
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_conversation_audits (
@@ -1912,28 +1914,45 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 		},
 		{
 			name: "fork turn",
-			seed: func(ctx context.Context, db *sql.DB, forkRunID string, at time.Time) error {
+			seed: func(ctx context.Context, pg *PostgresStore, db *sql.DB, _, _, forkRunID string, at time.Time) error {
 				turnID := uuid.NewString()
 				sessionID := uuid.NewString()
+				originRunID := uuid.NewString()
 				identity := testAgentIdentity(t, "agent-a", "fork-state")
 				fields := testAgentIdentityStorageFields(t, identity)
-				capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(
-					t, admitTestPostgresStore(t, db), forkRunID, identity,
-					sessionID, turnID, "session", "global",
+				requireRunFixtureForTest(t, ctx, pg, semanticRunFixture{
+					Origin: semanticScenarioSetupRunOriginForTest(), RunID: originRunID, StartedAt: at.Add(-time.Minute),
+				})
+				if _, err := db.ExecContext(ctx, `
+					INSERT INTO agent_sessions (
+						session_id, run_id, agent_id, agent_name_owner, agent_name_source,
+						agent_route_presence, flow_scope_key, flow_instance_id, flow_instance,
+						memory_enabled, memory_source, status, created_at, updated_at
+					) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,TRUE,'authored','active',$10,$10)
+				`, sessionID, originRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
+					fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, at); err != nil {
+					return err
+				}
+				event := eventtest.ExistingRunRootIngress(
+					uuid.NewString(), "fork.turn.fixture", "operator", "", []byte(`{}`), 0,
+					originRunID, events.EventEnvelope{}, at,
 				)
-				_, err := db.ExecContext(ctx, `
-					INSERT INTO agent_turns (
-						turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
-						agent_route_presence, flow_scope_key, flow_instance_id,
-						session_id, flow_instance, memory_enabled, memory_source,
-						capability_surface_id, execution_mode, created_at
-					)
-					VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8,
-						$9::uuid, $10, FALSE, 'platform_default', $11::uuid, 'live', $12)
-				`, turnID, forkRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
-					fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, sessionID,
-					fields.FlowInstancePath, capabilitySurfaceID, at)
-				return err
+				if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, ctx, pg, runtimellm.AgentTurnRecord{
+					AgentID: identity.AgentID(), Identity: agentmemory.Identity{RunID: originRunID, Agent: identity},
+					RunID: originRunID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Authored(true), SessionID: sessionID,
+					TriggerEventID: event.ID(), TriggerEventType: string(event.Type()), ParseOK: true,
+				}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: at, OriginEvent: &event}); err != nil {
+					return err
+				}
+				// Isolate the activation guard without reintroducing a frame-less
+				// writer: create a valid source turn, then move only its replay-state
+				// classification coordinate into the fork run.
+				if _, err := db.ExecContext(ctx, `UPDATE agent_turns SET run_id=$1::uuid WHERE turn_id=$2::uuid`, forkRunID, turnID); err != nil {
+					return err
+				}
+				captureRunForkTestRevision(t, db, originRunID, runforkrevision.FamilyAgentTurns)
+				captureRunForkTestRevision(t, db, forkRunID, runforkrevision.FamilyAgentTurns)
+				return nil
 			},
 			wantCode:  "fork_turns_already_exist",
 			wantError: "fork_turns_already_exist",
@@ -1955,7 +1974,7 @@ func TestRunForkActivation_FailsClosedForForkSessionAndTurnReplayState(t *testin
 				t.Fatalf("MaterializeRunFork: %v", err)
 			}
 			seedTestAgentRow(t, ctx, db, true, testAgentIdentity(t, "agent-a", "fork-state"), "active")
-			if err := tc.seed(ctx, db, materialized.ForkRunID, at.Add(time.Second)); err != nil {
+			if err := tc.seed(ctx, pg, db, sourceRunID, eventID, materialized.ForkRunID, at.Add(time.Second)); err != nil {
 				t.Fatalf("seed %s: %v", tc.name, err)
 			}
 

@@ -45,9 +45,26 @@ func TestProviderTurnAuthorityRequiresExactActorLifecycleAndSessionIdentity(t *t
 	}
 
 	exactCtx := contextFor(identityA, identityA)
-	exactCtx, _, err = withProviderTurnAuthority(exactCtx, sessionA)
+	exactCtx = runtimeeffects.WithLogicalOperationIdentity(exactCtx, "event-1\x00provider_turn:1")
+	exactCtx, authority, err := withProviderTurnAuthority(exactCtx, sessionA)
 	if err != nil {
 		t.Fatalf("exact provider-turn authority: %v", err)
+	}
+	retryCtx := runtimeeffects.WithLogicalOperationIdentity(contextFor(identityA, identityA), "event-1\x00provider_turn:1")
+	_, retryAuthority, err := withProviderTurnAuthority(retryCtx, sessionA)
+	if err != nil {
+		t.Fatalf("same-turn retry provider authority: %v", err)
+	}
+	if retryAuthority.ID != authority.ID {
+		t.Fatalf("same-turn retry authority = %q, want %q", retryAuthority.ID, authority.ID)
+	}
+	replayCtx := runtimeeffects.WithLogicalOperationIdentity(contextFor(identityA, identityA), "event-2\x00provider_turn:1")
+	_, replayAuthority, err := withProviderTurnAuthority(replayCtx, sessionA)
+	if err != nil {
+		t.Fatalf("fresh replay provider authority: %v", err)
+	}
+	if replayAuthority.ID == authority.ID {
+		t.Fatalf("fresh replay reused provider-turn authority %q", authority.ID)
 	}
 	surface, err := managedCapabilityPlanForTurn(
 		exactCtx,
@@ -85,6 +102,7 @@ func TestProviderTurnAuthorityRequiresExactActorLifecycleAndSessionIdentity(t *t
 		},
 	} {
 		t.Run(hostile.name, func(t *testing.T) {
+			hostile.ctx = runtimeeffects.WithLogicalOperationIdentity(hostile.ctx, "event-1\x00provider_turn:1")
 			if _, _, err := withProviderTurnAuthority(hostile.ctx, hostile.session); err == nil {
 				t.Fatal("same-slug sibling provider-turn authority was admitted")
 			}

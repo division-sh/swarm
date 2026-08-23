@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -201,6 +202,13 @@ func TestConversationViewRequiresActivityCountsPresence(t *testing.T) {
 }
 
 func TestConversationTurnIdentifierResolutionUsesCanonicalSessionScopedPages(t *testing.T) {
+	const (
+		turnAlpha  = "00000000-0000-4000-8000-0000000000a1"
+		turnAlpine = "00000000-0000-4000-8000-0000000000a2"
+		turnBeta   = "00000000-0000-4000-8000-0000000000b1"
+		turnPrefix = "00000000-0000-4000-8000-0000000000a"
+		noMatch    = "00000000-0000-4000-8000-0000000000c"
+	)
 	for _, tc := range []struct {
 		name        string
 		input       string
@@ -208,12 +216,12 @@ func TestConversationTurnIdentifierResolutionUsesCanonicalSessionScopedPages(t *
 		wantMethods string
 		wantStderr  string
 	}{
-		{name: "exact", input: "turn-alpha", wantCode: cliExitOK, wantMethods: "conversation.get_turn"},
-		{name: "unique prefix across pages", input: "turn-al", wantCode: cliExitOK, wantMethods: "conversation.get_turn,conversation.list_turns,conversation.list_turns,conversation.get_turn"},
-		{name: "no match", input: "turn-no", wantCode: CLIExitValidation, wantMethods: "conversation.get_turn,conversation.list_turns", wantStderr: `no turn ID matches "turn-no"`},
-		{name: "ambiguous", input: "turn-al", wantCode: CLIExitValidation, wantMethods: "conversation.get_turn,conversation.list_turns", wantStderr: `turn ID prefix "turn-al" is ambiguous`},
-		{name: "repeated cursor", input: "turn-al", wantCode: CLIExitRuntime, wantMethods: "conversation.get_turn,conversation.list_turns,conversation.list_turns", wantStderr: `repeated next_cursor "same-page"`},
-		{name: "list failure", input: "turn-al", wantCode: CLIExitRuntime, wantMethods: "conversation.get_turn,conversation.list_turns", wantStderr: "RUNTIME_UNAVAILABLE"},
+		{name: "exact", input: turnAlpha, wantCode: cliExitOK, wantMethods: "conversation.get_turn"},
+		{name: "unique prefix across pages", input: turnPrefix, wantCode: cliExitOK, wantMethods: "conversation.get_turn,conversation.list_turns,conversation.list_turns,conversation.get_turn"},
+		{name: "no match", input: noMatch, wantCode: CLIExitValidation, wantMethods: "conversation.get_turn,conversation.list_turns", wantStderr: `no turn ID matches "` + noMatch + `"`},
+		{name: "ambiguous", input: turnPrefix, wantCode: CLIExitValidation, wantMethods: "conversation.get_turn,conversation.list_turns", wantStderr: `turn ID prefix "` + turnPrefix + `" is ambiguous`},
+		{name: "repeated cursor", input: turnPrefix, wantCode: CLIExitRuntime, wantMethods: "conversation.get_turn,conversation.list_turns,conversation.list_turns", wantStderr: `repeated next_cursor "same-page"`},
+		{name: "list failure", input: turnPrefix, wantCode: CLIExitRuntime, wantMethods: "conversation.get_turn,conversation.list_turns", wantStderr: "RUNTIME_UNAVAILABLE"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			setCLIAPITestToken(t, "test-token")
@@ -227,12 +235,13 @@ func TestConversationTurnIdentifierResolutionUsesCanonicalSessionScopedPages(t *
 				switch request.Method {
 				case conversationGetTurnMethod:
 					turnID, _ := request.Params["turn_id"].(string)
-					if turnID != "turn-alpha" {
+					if turnID != turnAlpha {
 						writeIdentifierRPCError(t, w, request.ID, "TURN_NOT_FOUND")
 						return
 					}
 					result := validConversationTurnDetail("sess-1", 1)
 					result["turn"].(map[string]any)["turn_id"] = turnID
+					result["frame"].(map[string]any)["frame_id"] = "agent-frame:v1:" + turnID
 					writeJSONRPCResult(t, w, request.ID, result)
 				case conversationListTurnsMethod:
 					if request.Params["session_id"] != "sess-1" || request.Params["limit"] != float64(500) {
@@ -242,18 +251,18 @@ func TestConversationTurnIdentifierResolutionUsesCanonicalSessionScopedPages(t *
 					switch tc.name {
 					case "unique prefix across pages":
 						if request.Params["cursor"] == nil {
-							page["turns"] = []map[string]any{validConversationTurn(2, "turn-beta", "event-2", "task.progress")}
+							page["turns"] = []map[string]any{validConversationTurn(2, turnBeta, "event-2", "task.progress")}
 							page["next_cursor"] = "page-2"
 						} else {
-							page["turns"] = []map[string]any{validConversationTurn(1, "turn-alpha", "event-1", "task.started")}
+							page["turns"] = []map[string]any{validConversationTurn(1, turnAlpha, "event-1", "task.started")}
 						}
 					case "ambiguous":
 						page["turns"] = []map[string]any{
-							validConversationTurn(1, "turn-alpha", "event-1", "task.started"),
-							validConversationTurn(2, "turn-alpine", "event-2", "task.progress"),
+							validConversationTurn(1, turnAlpha, "event-1", "task.started"),
+							validConversationTurn(2, turnAlpine, "event-2", "task.progress"),
 						}
 					case "repeated cursor":
-						page["turns"] = []map[string]any{validConversationTurn(1, "turn-beta", "event-1", "task.started")}
+						page["turns"] = []map[string]any{validConversationTurn(1, turnBeta, "event-1", "task.started")}
 						page["next_cursor"] = "same-page"
 					case "list failure":
 						writeIdentifierRPCError(t, w, request.ID, "RUNTIME_UNAVAILABLE")
@@ -274,11 +283,90 @@ func TestConversationTurnIdentifierResolutionUsesCanonicalSessionScopedPages(t *
 			if got := strings.Join(methods, ","); got != tc.wantMethods {
 				t.Fatalf("methods = %s, want %s", got, tc.wantMethods)
 			}
-			if tc.wantCode == cliExitOK && !strings.Contains(stdout.String(), "turn-alpha") {
+			if tc.wantCode == cliExitOK && !strings.Contains(stdout.String(), turnAlpha) {
 				t.Fatalf("stdout = %q, want canonical turn id", stdout.String())
 			}
 			if tc.wantStderr != "" && !strings.Contains(stderr.String(), tc.wantStderr) {
 				t.Fatalf("stderr = %q, want %q", stderr.String(), tc.wantStderr)
+			}
+		})
+	}
+}
+
+func TestConversationTurnOutputsOnlyAuthorSafeFrameFacts(t *testing.T) {
+	setCLIAPITestToken(t, "test-token")
+	const (
+		turnID        = "00000000-0000-4000-8000-0000000000d1"
+		parentFrameID = "agent-frame:v1:00000000-0000-4000-8000-0000000000d0"
+		contentHash   = "agent-frame-content:v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+		privateValue  = "private-frame-evidence-must-not-escape"
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if request.Method != conversationGetTurnMethod {
+			t.Fatalf("method = %q, want %s", request.Method, conversationGetTurnMethod)
+		}
+		result := validConversationTurnDetail("sess-1", 1)
+		result["turn"].(map[string]any)["turn_id"] = turnID
+		frame := result["frame"].(map[string]any)
+		frame["frame_id"] = "agent-frame:v1:" + turnID
+		frame["content_hash"] = contentHash
+		frame["turn_kind"] = "tool_continuation"
+		frame["parent_frame_id"] = parentFrameID
+		frame["system_prompt"] = privateValue
+		frame["tools"] = []any{privateValue}
+		frame["event_payload_bytes"] = privateValue
+		frame["tool_result_bytes"] = privateValue
+		frame["memory_context"] = privateValue
+		frame["provider"] = privateValue
+		writeJSONRPCResult(t, w, request.ID, result)
+	}))
+	defer server.Close()
+
+	for _, tc := range []struct {
+		name string
+		args []string
+		json bool
+	}{
+		{name: "human", args: []string{"conversation", "turn", "sess-1", turnID}},
+		{name: "json", args: []string{"conversation", "turn", "sess-1", turnID, "--json"}, json: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, testRootCommandOptions(server))
+			if code != cliExitOK {
+				t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+			}
+			if strings.Contains(stdout.String(), privateValue) {
+				t.Fatalf("private frame evidence escaped in output: %s", stdout.String())
+			}
+			if !tc.json {
+				for _, want := range []string{"Frame version", "agent-execution-frame.v1", "agent-frame:v1:" + turnID, contentHash, "tool_continuation", parentFrameID} {
+					if !strings.Contains(stdout.String(), want) {
+						t.Fatalf("human output missing %q:\n%s", want, stdout.String())
+					}
+				}
+				return
+			}
+			var result map[string]any
+			if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+				t.Fatalf("decode JSON output: %v\n%s", err, stdout.String())
+			}
+			frame, ok := result["frame"].(map[string]any)
+			if !ok {
+				t.Fatalf("JSON frame = %#v", result["frame"])
+			}
+			gotKeys := make([]string, 0, len(frame))
+			for key := range frame {
+				gotKeys = append(gotKeys, key)
+			}
+			sort.Strings(gotKeys)
+			wantKeys := []string{"content_hash", "frame_id", "parent_frame_id", "turn_kind", "version"}
+			if !reflect.DeepEqual(gotKeys, wantKeys) {
+				t.Fatalf("JSON frame keys = %v, want exact safe whitelist %v", gotKeys, wantKeys)
 			}
 		})
 	}
@@ -407,9 +495,16 @@ func validConversationTurnFull(index int, turnID, eventID, eventType string) map
 }
 
 func validConversationTurnDetail(sessionID string, index int) map[string]any {
+	turnID := "00000000-0000-4000-8000-000000000002"
 	return map[string]any{
 		"session": validConversationSummary(sessionID),
-		"turn":    validConversationTurnFull(index, "turn-2", "event-2", "task.completed"),
+		"turn":    validConversationTurnFull(index, turnID, "event-2", "task.completed"),
+		"frame": map[string]any{
+			"version":      "agent-execution-frame.v1",
+			"frame_id":     "agent-frame:v1:" + turnID,
+			"content_hash": "agent-frame-content:v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"turn_kind":    "initial",
+		},
 	}
 }
 

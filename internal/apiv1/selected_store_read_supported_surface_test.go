@@ -9,10 +9,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
-	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/manager"
-	storepkg "github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -99,7 +98,7 @@ func TestPostgresAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 			conversation, turn_count, runtime_state, status, created_at, updated_at
 		) VALUES (
 			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
-			'[{"role":"assistant","content":"ready"}]'::jsonb, 1, '{}'::jsonb, 'active', $10, $11
+			'[{"role":"assistant","content":"ready"}]'::jsonb, 0, '{}'::jsonb, 'active', $10, $11
 		)
 	`, sessionID, runID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, base.Add(-5*time.Minute), base); err != nil {
@@ -108,22 +107,11 @@ func TestPostgresAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 	storetest.InsertExistingRunRootEventRecord(t, ctx, db, "postgres", eventID, runID, events.EventType("operator.read"),
 		eventtest.Producer(events.EventProducerExternal, "operator-read-fixture"), []byte(`{}`),
 		events.EventEnvelope{Scope: events.EventScopeGlobal}, base.Add(-4*time.Minute))
-	capabilitySurfaceID := seedPostgresOperatorReadCapabilitySurface(t, ctx, selected, runID, turnID, sessionID, agentID)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
-			trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls, emitted_events,
-			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, failure, execution_mode, created_at
-		) VALUES (
-			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9::uuid, $10, TRUE, 'authored', NULL,
-			$11::uuid, 'operator.read', 'task-operator-read', $12, '[]'::jsonb, '[]'::jsonb,
-			'{}'::jsonb, '{}'::jsonb, '[]'::jsonb, TRUE, 10, 0, NULL, 'live', $13
-		)
-	`, turnID, runID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-		fields.FlowScopeKey, fields.FlowInstanceID, sessionID, fields.FlowInstancePath, eventID, capabilitySurfaceID, base); err != nil {
-		t.Fatalf("seed postgres turn: %v", err)
-	}
+	storetest.PersistManagedAgentTurnFixture(t, ctx, storetest.ManagedAgentTurnFixture{
+		Store: selected, Selected: selected, Identity: identity, RunID: runID, SessionID: sessionID, TurnID: turnID,
+		Memory: agentmemory.Authored(true), Event: storetest.LoadCanonicalEventRecord(t, ctx, selected, eventID),
+		TaskID: "task-operator-read", ParseOK: true, Latency: 10 * time.Millisecond, CreatedAt: base,
+	})
 
 	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{
 		AgentConversations:     selected,
@@ -148,27 +136,53 @@ func TestPostgresAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 		if resp.Error != nil {
 			t.Fatalf("%s postgres error = %#v", tc.method, resp.Error)
 		}
+		assertConversationFrameSupportedSurface(t, tc.method, resp.Result, turnID)
 	}
 }
 
-func seedPostgresOperatorReadCapabilitySurface(t *testing.T, ctx context.Context, selected *storepkg.PostgresStore, runID, turnID, sessionID, agentID string) string {
+func assertConversationFrameSupportedSurface(t *testing.T, method string, result any, turnID string) {
 	t.Helper()
-	surface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorIdentity: sqliteAgentUsageIdentity(t, agentID), RuntimeMode: "session", Provider: "test", Transport: "api", ProviderContract: "postgres-operator-read-test",
-		Authority: managedcapabilities.Authority{
-			Kind: managedcapabilities.AuthorityProviderTurn, ID: turnID,
-			ExecutionKind: managedcapabilities.ExecutionNormalAgent, ExecutionAuthorityID: "postgres-operator-read-runtime",
-			RunID: runID, SessionID: sessionID, TurnOrdinal: 1,
-		},
-		CreatedAt: time.Unix(1, 0).UTC(),
-	})
-	if err != nil {
-		t.Fatalf("build postgres operator-read capability surface: %v", err)
+	switch method {
+	case "conversation.get_turn":
+		frame := asMap(t, asMap(t, result)["frame"])
+		wantKeys := map[string]bool{"version": true, "frame_id": true, "content_hash": true, "turn_kind": true}
+		if len(frame) != len(wantKeys) {
+			t.Fatalf("conversation.get_turn frame keys = %v, want exact initial-turn safe whitelist", frame)
+		}
+		for key := range frame {
+			if !wantKeys[key] {
+				t.Fatalf("conversation.get_turn exposed non-whitelisted frame key %q", key)
+			}
+		}
+		if frame["version"] != "agent-execution-frame.v1" || frame["frame_id"] != "agent-frame:v1:"+turnID {
+			t.Fatalf("conversation.get_turn frame identity = %#v", frame)
+		}
+	case "conversation.list", "conversation.list_turns":
+		if jsonValueHasKey(result, "frame") {
+			t.Fatalf("%s exposed historical frame detail: %#v", method, result)
+		}
 	}
-	if err := selected.SaveManagedCapabilitySurface(ctx, surface); err != nil {
-		t.Fatalf("persist postgres operator-read capability surface: %v", err)
+}
+
+func jsonValueHasKey(value any, want string) bool {
+	switch typed := value.(type) {
+	case map[string]any:
+		if _, ok := typed[want]; ok {
+			return true
+		}
+		for _, child := range typed {
+			if jsonValueHasKey(child, want) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range typed {
+			if jsonValueHasKey(child, want) {
+				return true
+			}
+		}
 	}
-	return surface.ID
+	return false
 }
 
 func TestPostgresBundleCatalogOwnerBacksSupportedAPISurface(t *testing.T) {

@@ -118,6 +118,15 @@ type conversationTurn struct {
 type conversationTurnDetail struct {
 	Session conversationSummary `json:"session"`
 	Turn    conversationTurn    `json:"turn"`
+	Frame   conversationFrame   `json:"frame"`
+}
+
+type conversationFrame struct {
+	Version       string `json:"version"`
+	FrameID       string `json:"frame_id"`
+	ContentHash   string `json:"content_hash"`
+	TurnKind      string `json:"turn_kind"`
+	ParentFrameID string `json:"parent_frame_id,omitempty"`
 }
 
 type conversationActivity struct {
@@ -137,6 +146,11 @@ type conversationTokenUsage struct {
 }
 
 var conversationOpaqueIDPattern = regexp.MustCompile(`^[A-Za-z0-9_:.-]+$`)
+
+var (
+	conversationFrameIDPattern      = regexp.MustCompile(`^agent-frame:v1:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+	conversationFrameContentPattern = regexp.MustCompile(`^agent-frame-content:v1:sha256:[0-9a-f]{64}$`)
+)
 
 func newConversationsCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
@@ -456,7 +470,30 @@ func validateConversationTurnDetailResult(result conversationTurnDetail) error {
 	if err := validateConversationSummary("conversation.get_turn result.session", result.Session); err != nil {
 		return err
 	}
-	return validateConversationTurn("conversation.get_turn result.turn", result.Turn)
+	if err := validateConversationTurn("conversation.get_turn result.turn", result.Turn); err != nil {
+		return err
+	}
+	return validateConversationFrame(result.Frame, result.Turn.TurnID)
+}
+
+func validateConversationFrame(frame conversationFrame, turnID string) error {
+	if frame.Version != "agent-execution-frame.v1" || frame.FrameID != "agent-frame:v1:"+strings.TrimSpace(turnID) ||
+		!conversationFrameIDPattern.MatchString(frame.FrameID) || !conversationFrameContentPattern.MatchString(frame.ContentHash) {
+		return fmt.Errorf("malformed conversation.get_turn result.frame: canonical version, identity, and content hash are required")
+	}
+	switch frame.TurnKind {
+	case "initial", "board_directive":
+		if frame.ParentFrameID != "" {
+			return fmt.Errorf("malformed conversation.get_turn result.frame: %s turn cannot have parent_frame_id", frame.TurnKind)
+		}
+	case "tool_continuation", "remediation":
+		if !conversationFrameIDPattern.MatchString(frame.ParentFrameID) {
+			return fmt.Errorf("malformed conversation.get_turn result.frame: %s turn requires parent_frame_id", frame.TurnKind)
+		}
+	default:
+		return fmt.Errorf("malformed conversation.get_turn result.frame: turn_kind=%q is invalid", frame.TurnKind)
+	}
+	return nil
 }
 
 func validateConversationSummary(prefix string, item conversationSummary) error {
@@ -721,6 +758,11 @@ func writeConversationTurnDetailResult(out io.Writer, result conversationTurnDet
 			{Label: "Tokens", Value: conversationTokenSummary(turn.Tokens)},
 			{Label: "Outcome", Value: conversationOutcomeSummary(turn)},
 			{Label: "Retries", Value: fmt.Sprintf("%d", turn.RetryCount)},
+			{Label: "Frame version", Value: result.Frame.Version},
+			{Label: "Frame", Value: result.Frame.FrameID},
+			{Label: "Frame hash", Value: result.Frame.ContentHash},
+			{Label: "Frame kind", Value: result.Frame.TurnKind},
+			{Label: "Parent frame", Value: result.Frame.ParentFrameID},
 		},
 		Sections: sections,
 	})

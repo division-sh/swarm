@@ -79,7 +79,7 @@ func TestMockCompletionSpendDoesNotConsumeLiveAdmissionCap(t *testing.T) {
 			mockCtx = runtimeeffects.WithExecutionMode(mockCtx, runtimeeffects.ExecutionModeMock)
 			mockCtx = withManagedCompletionTestSurface(t, mockCtx, mockAuthority, "mock_python")
 			mockCtx = runtimeeffects.WithLogicalOperationIdentity(mockCtx, "mock-spend-before-live-cap")
-			mockHandle, err := runtimeeffects.BeginCompletion(mockCtx, "mock_python", []byte("mock spend"), nil)
+			mockHandle, err := beginManagedCompletionForTest(t, mockCtx, "mock_python", []byte("mock spend"))
 			if err != nil {
 				t.Fatalf("authorize mock completion: %v", err)
 			}
@@ -102,7 +102,7 @@ func TestMockCompletionSpendDoesNotConsumeLiveAdmissionCap(t *testing.T) {
 			liveCtx = runtimeeffects.WithExecutionMode(liveCtx, runtimeeffects.ExecutionModeLive)
 			liveCtx = withManagedCompletionTestSurface(t, liveCtx, liveAuthority, "openai_compatible")
 			liveCtx = runtimeeffects.WithLogicalOperationIdentity(liveCtx, "live-cap-after-mock-spend")
-			liveHandle, err := runtimeeffects.BeginCompletion(liveCtx, "openai_compatible", []byte("live admission"), nil)
+			liveHandle, err := beginManagedCompletionForTest(t, liveCtx, "openai_compatible", []byte("live admission"))
 			if err != nil {
 				t.Fatalf("mock estimate consumed live admission cap: %v", err)
 			}
@@ -153,7 +153,13 @@ func proveCompletionBudgetAdmissionRace(t *testing.T, fixture completionBudgetRa
 				ctx = withManagedCompletionTestSurface(t, ctx, candidate.authority, "openai_responses")
 			}
 			ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, fmt.Sprintf("budget-race:%s:%d", candidate.identity, i))
-			handle, err := runtimeeffects.BeginCompletion(ctx, "openai_responses", []byte(candidate.identity), nil)
+			var handle *runtimeeffects.Handle
+			var err error
+			if candidate.authority.Target.Kind == runtimeeffects.UsageTargetAgentTurn {
+				handle, err = beginManagedCompletionForTest(t, ctx, "openai_responses", []byte(candidate.identity))
+			} else {
+				handle, err = runtimeeffects.BeginCompletion(ctx, "openai_responses", []byte(candidate.identity), nil)
+			}
 			results <- result{handle: handle, err: err, label: candidate.identity}
 		}()
 	}
@@ -179,7 +185,11 @@ func proveCompletionBudgetAdmissionRace(t *testing.T, fixture completionBudgetRa
 		}
 	}
 	var operations, reservations int
-	if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM runtime_external_effect_operations WHERE effect_kind='provider_turn'`).Scan(&operations); err != nil {
+	operationQuery := `SELECT COUNT(*) FROM runtime_external_effect_operations WHERE effect_kind='provider_turn' AND request_fingerprint IN (?, ?)`
+	if !fixture.sqlite {
+		operationQuery = `SELECT COUNT(*) FROM runtime_external_effect_operations WHERE effect_kind='provider_turn' AND request_fingerprint IN ($1, $2)`
+	}
+	if err := fixture.db.QueryRow(operationQuery, runtimeeffects.Fingerprint([]byte("left")), runtimeeffects.Fingerprint([]byte("right"))).Scan(&operations); err != nil {
 		t.Fatalf("count budget race operations: %v", err)
 	}
 	if err := fixture.db.QueryRow(`SELECT COUNT(*) FROM runtime_effect_budget_reservations`).Scan(&reservations); err != nil {
@@ -299,7 +309,7 @@ func proveCompletionBudgetSettlementAccounting(t *testing.T, sqlite bool, exactn
 	ctx := fixture.contextFor(authority)
 	ctx = withManagedCompletionTestSurface(t, ctx, authority, "openai_compatible")
 	ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "budget-accounting:"+string(exactness)+":"+string(state))
-	handle, err := runtimeeffects.BeginCompletion(ctx, "openai_compatible", []byte("budget accounting"), nil)
+	handle, err := beginManagedCompletionForTest(t, ctx, "openai_compatible", []byte("budget accounting"))
 	if err != nil {
 		t.Fatalf("authorize budget-accounted completion: %v", err)
 	}

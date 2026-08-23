@@ -2,21 +2,26 @@ package runtimepersistence
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
+	"github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
-	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
-	storefailurecodec "github.com/division-sh/swarm/internal/store/internal/failurecodec"
+	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/google/uuid"
 )
 
@@ -57,6 +62,81 @@ func managedCompletionTestSurface(t testing.TB, authority runtimeeffects.Authori
 		t.Fatalf("build managed completion test surface: %v", err)
 	}
 	return surface
+}
+
+func managedCompletionTestFrame(t testing.TB, authority runtimeeffects.Authority, adapter string) agentframe.Frame {
+	return managedCompletionTestFrameWithEvent(t, authority, adapter, managedCompletionTestEvent(authority))
+}
+
+func managedCompletionTestFrameWithEvent(t testing.TB, authority runtimeeffects.Authority, adapter string, event events.Event) agentframe.Frame {
+	t.Helper()
+	surface := managedCompletionTestSurface(t, authority, adapter)
+	intent, err := agentintent.Resolve(
+		agentintent.SourceInline,
+		"inline",
+		"agents.yaml#agents.store-test.intent",
+		"Complete the admitted store persistence test.",
+	)
+	if err != nil {
+		t.Fatalf("resolve managed completion test intent: %v", err)
+	}
+	prompt, err := agentintent.IntentOnlyPrompt(intent)
+	if err != nil {
+		t.Fatalf("render managed completion test prompt: %v", err)
+	}
+	providerPrompt, err := agentintent.AssembleProviderPrompt(intent, nil, prompt, agentintent.RuntimeEnvironmentContext())
+	if err != nil {
+		t.Fatalf("assemble managed completion test provider prompt: %v", err)
+	}
+	frame, err := agentframe.Complete(agentframe.SessionSeed{
+		AgentIdentity:  authority.Target.AgentIdentity,
+		Role:           "store-test",
+		Intent:         intent,
+		ProviderPrompt: providerPrompt,
+		RuntimeMode:    surface.RuntimeMode,
+		Provider:       surface.Provider,
+		Transport:      surface.Transport,
+		ModelAlias:     "regular",
+		Model:          "store-test-model",
+	}, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: event}, agentframe.Completion{
+		BundleHash:   "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		BundleSource: "persisted",
+		Surface:      surface,
+	})
+	if err != nil {
+		t.Fatalf("complete managed completion test frame: %v", err)
+	}
+	return frame
+}
+
+func managedCompletionTestEvent(authority runtimeeffects.Authority) events.Event {
+	eventID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("managed-completion-event:"+authority.Target.ID)).String()
+	return managedCompletionTestEventWithIdentity(authority, eventID, "completion.test.requested")
+}
+
+func managedCompletionTestEventWithIdentity(authority runtimeeffects.Authority, eventID, eventType string) events.Event {
+	return eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(
+		eventID,
+		events.EventType(eventType),
+		"operator",
+		"store-test",
+		json.RawMessage(`{ "request": "store-test" }`),
+		0,
+		authority.Target.RunID,
+		events.EventEnvelope{},
+		events.RoutingSource{},
+		time.Unix(1, 0).UTC(),
+		authority.ExecutionMode,
+	)
+}
+
+func beginManagedCompletionForTest(t testing.TB, ctx context.Context, adapter string, request []byte) (*runtimeeffects.Handle, error) {
+	t.Helper()
+	authority, ok := runtimeeffects.AuthorityFromContext(ctx)
+	if !ok {
+		t.Fatal("managed completion test authority is missing")
+	}
+	return runtimeeffects.BeginManagedCompletion(ctx, adapter, request, managedCompletionTestFrame(t, authority, adapter), nil)
 }
 
 func managedExecutionStoreTestContext(t testing.TB, ctx context.Context) context.Context {
@@ -130,38 +210,49 @@ func managedSelectedExecutionStoreTestContext(t testing.TB, ctx context.Context,
 	return managedexecution.WithAdmission(ctx, admission)
 }
 
-func managedAgentTurnRecordForTest(t testing.TB, rec runtimellm.AgentTurnRecord) runtimellm.AgentTurnRecord {
-	t.Helper()
-	if rec.Identity == (agentmemory.Identity{}) {
-		rec.Identity = testAgentMemoryIdentity(t, rec.RunID, rec.AgentID, rec.FlowInstance)
-	}
-	authority := runtimeeffects.NormalAgentAuthority(
-		runtimeeffects.LifecycleToken{Identity: rec.Identity.Agent, RuntimeEpoch: 1, AgentID: rec.AgentID, Generation: 1},
-		"store-test-owner",
-		time.Unix(1, 0).UTC().Add(time.Hour),
-	)
-	authority.Target = runtimeeffects.UsageTarget{
-		Kind: runtimeeffects.UsageTargetAgentTurn, ID: uuid.NewString(), RunID: rec.RunID,
-		AgentID: rec.AgentID, AgentIdentity: rec.Identity.Agent, SessionID: rec.SessionID,
-		Memory: rec.Memory, FlowInstance: rec.FlowInstance, EntityID: rec.EntityID,
-	}
-	surface := managedCompletionTestSurface(t, authority, "anthropic_api")
-	rec.CapabilitySurface = &surface
-	return rec
+// persistManagedAgentTurnReadbackFixture creates reader evidence through the
+// production authorization and settlement owners. Positive frameless rows are
+// not a supported fixture surface.
+func persistManagedAgentTurnReadbackFixture(t testing.TB, ctx context.Context, store completionSettlementTestStore, rec runtimellm.AgentTurnRecord) error {
+	return persistManagedAgentTurnReadbackFixtureWithOptions(t, ctx, store, rec, managedAgentTurnFixtureOptions{})
 }
 
-type managedAgentTurnFixtureStore interface {
-	SaveManagedCapabilitySurface(context.Context, managedcapabilities.Surface) error
+type managedAgentTurnFixtureOptions struct {
+	TurnID      string
+	Now         time.Time
+	Usage       *runtimeeffects.CompletionUsage
+	OriginEvent *events.Event
 }
 
-// persistManagedAgentTurnReadbackFixture seeds append-only evidence for reader
-// tests. Production writers must use the completion settlement owner.
-func persistManagedAgentTurnReadbackFixture(t testing.TB, ctx context.Context, store managedAgentTurnFixtureStore, rec runtimellm.AgentTurnRecord) error {
+func seedManagedTurnFixtureAgent(t testing.TB, ctx context.Context, store completionSettlementTestStore, agentID, flowInstance string) agentmemory.Identity {
 	t.Helper()
-	rec = managedAgentTurnRecordForTest(t, rec)
+	identity := testAgentMemoryIdentity(t, uuid.NewString(), agentID, flowInstance)
+	memory := agentmemory.PlatformDefault()
+	if strings.TrimSpace(flowInstance) != "" {
+		memory = agentmemory.Authored(true)
+	}
+	if err := agentfixture.Upsert(t, ctx, store, runtimemanager.PersistedAgent{
+		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
+			ExecutionMode: "live", ID: agentID, Identity: identity.Agent, Role: "worker", Type: "managed",
+			Model: "regular", LLMBackend: "anthropic", ResolvedLLMBackend: "anthropic",
+			Memory: memory, FlowID: "global", FlowPath: flowInstance,
+		}),
+		Status: "active", StartedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed managed turn fixture agent: %v", err)
+	}
+	return identity
+}
+
+func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context.Context, store completionSettlementTestStore, rec runtimellm.AgentTurnRecord, options managedAgentTurnFixtureOptions) error {
+	t.Helper()
+	fixtureCtx := testAuthorActivityContext()
 	plan, err := rec.Memory.Normalize()
 	if err != nil {
 		return err
+	}
+	if rec.Identity == (agentmemory.Identity{}) {
+		rec.Identity = testAgentMemoryIdentity(t, rec.RunID, rec.AgentID, rec.FlowInstance)
 	}
 	identity := rec.Identity.Normalize()
 	if strings.TrimSpace(rec.SessionID) == "" {
@@ -184,199 +275,145 @@ func persistManagedAgentTurnReadbackFixture(t testing.TB, ctx context.Context, s
 	if _, err := runtimellm.DecodeCanonicalRuntimeLogTurnBlocks(rec.TurnBlocks); err != nil {
 		return fmt.Errorf("validate canonical runtime_log turn_blocks: %w", err)
 	}
-	if rec.CapabilitySurface == nil {
-		return fmt.Errorf("managed turn fixture requires exact capability surface")
-	}
-	if err := store.SaveManagedCapabilitySurface(ctx, *rec.CapabilitySurface); err != nil {
-		return err
-	}
-	fields, err := storeagent.IdentityFields(identity.Agent)
+	lifecycle, found, err := store.LoadAgentLifecycleState(fixtureCtx, identity.Agent)
 	if err != nil {
 		return err
+	}
+	if !found {
+		return fmt.Errorf("managed turn fixture agent lifecycle is missing")
+	}
+	now := options.Now.UTC()
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	turnID := strings.TrimSpace(options.TurnID)
+	if turnID == "" {
+		turnID = uuid.NewString()
+	}
+	authority := runtimeeffects.NormalAgentAuthority(runtimeeffects.LifecycleToken{
+		Identity: identity.Agent, AgentID: rec.AgentID,
+		RuntimeEpoch: lifecycle.RuntimeEpoch, Generation: lifecycle.Generation,
+	}, "store-test-owner", now.Add(time.Hour))
+	authority.Target = runtimeeffects.UsageTarget{
+		Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID, RunID: rec.RunID,
+		AgentID: rec.AgentID, AgentIdentity: identity.Agent, SessionID: rec.SessionID,
+		Memory: plan, FlowInstance: rec.FlowInstance, EntityID: rec.EntityID,
+	}
+	adapter := "anthropic_api"
+	surface := managedCompletionTestSurface(t, authority, adapter)
+	rec.CapabilitySurface = &surface
+	eventID := strings.TrimSpace(rec.TriggerEventID)
+	if eventID == "" {
+		eventID = uuid.NewString()
+	}
+	eventType := strings.TrimSpace(rec.TriggerEventType)
+	if eventType == "" {
+		eventType = "completion.test.requested"
+	}
+	originEvent := managedCompletionTestEventWithIdentity(authority, eventID, eventType)
+	if options.OriginEvent != nil {
+		originEvent = *options.OriginEvent
+		if originEvent.ID() != eventID || string(originEvent.Type()) != eventType || originEvent.RunID() != rec.RunID {
+			return fmt.Errorf("managed turn fixture origin event does not match turn coordinates")
+		}
+	}
+	origin, hasOrigin := runtimedelivery.ClaimFromContext(ctx)
+	if !hasOrigin {
+		origin = claimCompletionOriginEventForTest(t, fixtureCtx, store, authority, originEvent)
+	}
+	completionCtx := runtimeeffects.WithController(runtimeeffects.WithAuthority(fixtureCtx, authority), newCompletionControllerForTest(store))
+	completionCtx = runtimedelivery.WithClaim(completionCtx, origin)
+	completionCtx = runtimeeffects.WithLogicalOperationIdentity(completionCtx, "managed-turn-fixture:"+authority.Target.ID)
+	completionCtx = withManagedCompletionTestSurface(t, completionCtx, authority, adapter)
+	frame := managedCompletionTestFrameWithEvent(t, authority, adapter, originEvent)
+	handle, err := runtimeeffects.BeginManagedCompletion(completionCtx, adapter, rec.RequestPayload, frame, nil)
+	if err != nil {
+		return err
+	}
+	if err := handle.MarkLaunched(completionCtx); err != nil {
+		return err
+	}
+	if err := handle.MarkResponseObserved(completionCtx, map[string]any{"fixture": authority.Target.ID}); err != nil {
+		return err
+	}
+	if rec.ToolCalls == nil {
+		rec.ToolCalls = []runtimellm.ToolCall{}
+	}
+	if rec.EmittedEvents == nil {
+		rec.EmittedEvents = []string{}
+	}
+	if rec.TurnBlocks == nil {
+		rec.TurnBlocks = []runtimellm.TurnBlock{}
 	}
 	toolCalls, err := json.Marshal(rec.ToolCalls)
 	if err != nil {
 		return err
 	}
-	toolCalls = normalizeManagedTurnFixtureJSONArray(toolCalls)
 	emittedEvents, err := json.Marshal(rec.EmittedEvents)
 	if err != nil {
 		return err
 	}
-	emittedEvents = normalizeManagedTurnFixtureJSONArray(emittedEvents)
 	turnBlocks, err := json.Marshal(rec.TurnBlocks)
 	if err != nil {
 		return err
-	}
-	turnBlocks = normalizeManagedTurnFixtureJSONArray(turnBlocks)
-	failurePayload := ""
-	if encoded, err := storefailurecodec.Encode(rec.Failure); err != nil {
-		return err
-	} else if encoded != nil {
-		failurePayload = encoded.(string)
 	}
 	latencyMS := int(rec.Latency / time.Millisecond)
 	if latencyMS < 0 {
 		latencyMS = 0
 	}
-	now := time.Now().UTC()
-
-	switch selected := store.(type) {
-	case *PostgresStore:
-		return persistPostgresManagedAgentTurnReadbackFixture(ctx, selected.backend.ConstructionHandle(), rec, plan.Enabled, string(plan.Source), fields, string(toolCalls), string(emittedEvents), string(turnBlocks), failurePayload, latencyMS)
-	case *SQLiteRuntimeStore:
-		return persistSQLiteManagedAgentTurnReadbackFixture(ctx, selected.backend.ConstructionHandle(), rec, plan.Enabled, string(plan.Source), fields, string(toolCalls), string(emittedEvents), string(turnBlocks), failurePayload, latencyMS, now)
-	default:
-		return fmt.Errorf("unsupported managed turn fixture store %T", store)
+	zero := int64(0)
+	usage := runtimeeffects.CompletionUsage{
+		ResolvedModel: "store-test-model", Exactness: runtimeeffects.CompletionUsageExact,
+		InputTokens: &zero, OutputTokens: &zero,
 	}
-}
-
-func persistPostgresManagedAgentTurnReadbackFixture(
-	ctx context.Context,
-	db *sql.DB,
-	rec runtimellm.AgentTurnRecord,
-	memoryEnabled bool,
-	memorySource string,
-	fields agentidentity.StorageFields,
-	toolCalls, emittedEvents, turnBlocks, failurePayload string,
-	latencyMS int,
-) error {
-	tx, err := db.BeginTx(ctx, nil)
+	if options.Usage != nil {
+		usage = *options.Usage
+	}
+	state := runtimeeffects.StateSettled
+	settlementFailure := rec.Failure
+	if settlementFailure != nil {
+		state = runtimeeffects.StateTerminalFailure
+		usage = runtimeeffects.CompletionUsage{ResolvedModel: "store-test-model", Exactness: runtimeeffects.CompletionUsageUnavailable}
+	}
+	capabilityJSON, err := json.Marshal(surface)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
-	if memoryEnabled {
-		result, err := tx.ExecContext(ctx, `
-			UPDATE agent_sessions SET updated_at=now()
-			WHERE session_id=$1::uuid AND run_id=$2::uuid AND agent_id=$3
-			  AND agent_name_owner=$4 AND agent_name_source=$5 AND agent_route_presence=$6
-			  AND flow_scope_key=$7 AND flow_instance_id=$8 AND flow_instance=$9
-			  AND memory_enabled=TRUE AND status='active'
-		`, rec.SessionID, rec.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath)
-		if err != nil {
-			return err
-		}
-		if rows, _ := result.RowsAffected(); rows != 1 {
-			return fmt.Errorf("no exact active memory row found for run=%s agent=%s flow_instance=%s session=%s", rec.RunID, rec.AgentID, rec.FlowInstance, rec.SessionID)
-		}
-	} else if _, err := tx.ExecContext(ctx, `
-		INSERT INTO agent_conversation_audits (
-			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source, entity_id,
-			conversation, turn_count, runtime_state, status, created_at, updated_at
-		) VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9,FALSE,$10,NULLIF($11,'')::uuid,'[]'::jsonb,1,'{}'::jsonb,'active',now(),now())
-		ON CONFLICT (session_id) DO UPDATE SET
-			run_id=EXCLUDED.run_id, agent_id=EXCLUDED.agent_id,
-			agent_name_owner=EXCLUDED.agent_name_owner, agent_name_source=EXCLUDED.agent_name_source,
-			agent_route_presence=EXCLUDED.agent_route_presence, flow_scope_key=EXCLUDED.flow_scope_key,
-			flow_instance_id=EXCLUDED.flow_instance_id, flow_instance=EXCLUDED.flow_instance,
-			memory_enabled=FALSE, memory_source=EXCLUDED.memory_source, entity_id=EXCLUDED.entity_id,
-			turn_count=agent_conversation_audits.turn_count + 1, status='active', updated_at=now()
-	`, rec.SessionID, rec.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, memorySource, strings.TrimSpace(rec.EntityID)); err != nil {
-		return err
+	settlement := runtimeeffects.CompletionSettlement{
+		Settlement: runtimeeffects.Settlement{State: state},
+		Usage:      usage,
+		AgentTurn: &runtimeeffects.CompletionAgentTurn{
+			TurnID: authority.Target.ID, RunID: rec.RunID, AgentID: rec.AgentID, Identity: identity,
+			SessionID: rec.SessionID, Memory: plan, FlowInstance: rec.FlowInstance, EntityID: rec.EntityID,
+			TriggerEventID: eventID, TriggerEventType: eventType, TaskID: rec.TaskID,
+			CapabilitySurfaceID: surface.ID, CapabilitySurface: capabilityJSON,
+			ToolCalls: toolCalls, EmittedEvents: emittedEvents, RequestPayload: rec.RequestPayload,
+			ResponsePayload: rec.ResponseRaw, TurnBlocks: turnBlocks, ParseOK: rec.ParseOK,
+			LatencyMS: latencyMS, RetryCount: rec.RetryCount, Failure: settlementFailure,
+		},
+		Spend: runtimeeffects.CompletionSpend{
+			EntityID: rec.EntityID, FlowInstance: rec.FlowInstance, AgentID: rec.AgentID, AgentIdentity: identity.Agent,
+			Model: "regular", ModelAlias: "regular", BackendProfile: "store-test", Provider: adapter,
+			Transport: surface.Transport, ResolvedModel: "store-test-model", CostUSD: 0, InvocationType: "agent_turn",
+		},
+		Now: now,
 	}
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
-			trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls, emitted_events,
-			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, execution_mode, failure, created_at
-		) VALUES (
-			$1::uuid,$2::uuid,$3,$4,$5,$6,$7,$8,$9::uuid,$10,$11,$12,NULLIF($13,'')::uuid,
-			NULLIF($14,'')::uuid,NULLIF($15,''),NULLIF($16,''),$17::uuid,$18::jsonb,$19::jsonb,
-			CASE WHEN $20='' THEN NULL ELSE $20::jsonb END,CASE WHEN $21='' THEN NULL ELSE $21::jsonb END,
-			$22::jsonb,$23,$24,$25,'live',CASE WHEN $26='' THEN NULL ELSE $26::jsonb END,now()
-		)
-	`, rec.CapabilitySurface.Authority.ID, rec.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-		fields.FlowScopeKey, fields.FlowInstanceID, rec.SessionID, fields.FlowInstancePath, memoryEnabled, memorySource,
-		strings.TrimSpace(rec.EntityID), strings.TrimSpace(rec.TriggerEventID), strings.TrimSpace(rec.TriggerEventType), strings.TrimSpace(rec.TaskID),
-		rec.CapabilitySurface.ID, toolCalls, emittedEvents, storeagent.NormalizeJSONPayload(rec.RequestPayload), storeagent.NormalizeJSONPayload(rec.ResponseRaw),
-		turnBlocks, rec.ParseOK, latencyMS, rec.RetryCount, failurePayload)
-	if err != nil {
-		return fmt.Errorf("insert agent turn readback fixture: %w", err)
+	if settlementFailure != nil {
+		settlement.Settlement.Failure = settlementFailure
 	}
-	return tx.Commit()
-}
-
-func persistSQLiteManagedAgentTurnReadbackFixture(
-	ctx context.Context,
-	db *sql.DB,
-	rec runtimellm.AgentTurnRecord,
-	memoryEnabled bool,
-	memorySource string,
-	fields agentidentity.StorageFields,
-	toolCalls, emittedEvents, turnBlocks, failurePayload string,
-	latencyMS int,
-	now time.Time,
-) error {
-	tx, err := db.BeginTx(ctx, nil)
+	result, err := handle.SettleCompletion(completionCtx, settlement)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = tx.Rollback() }()
-	if memoryEnabled {
-		result, err := tx.ExecContext(ctx, `
-			UPDATE agent_sessions SET updated_at=?
-			WHERE session_id=? AND run_id=? AND agent_id=? AND agent_name_owner=?
-			  AND agent_name_source=? AND agent_route_presence=? AND flow_scope_key=?
-			  AND flow_instance_id=? AND flow_instance=? AND memory_enabled=1 AND status='active'
-		`, now, rec.SessionID, rec.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath)
-		if err != nil {
-			return err
+	if !result.Committed {
+		return fmt.Errorf("managed turn fixture settlement did not commit")
+	}
+	if !hasOrigin {
+		if _, err := store.SettleSuccess(fixtureCtx, origin, nil, time.Millisecond); err != nil {
+			return fmt.Errorf("settle managed turn fixture origin: %w", err)
 		}
-		if rows, _ := result.RowsAffected(); rows != 1 {
-			return fmt.Errorf("no exact active memory row found for run=%s agent=%s flow_instance=%s session=%s", rec.RunID, rec.AgentID, rec.FlowInstance, rec.SessionID)
-		}
-	} else if _, err := tx.ExecContext(ctx, `
-		INSERT INTO agent_conversation_audits (
-			session_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, flow_instance, memory_enabled, memory_source, entity_id,
-			conversation, turn_count, runtime_state, status, created_at, updated_at
-		) VALUES (?,?,?,?,?,?,?,?,?,0,?,NULLIF(?,''),'[]',1,'{}','active',?,?)
-		ON CONFLICT(session_id) DO UPDATE SET
-			run_id=excluded.run_id, agent_id=excluded.agent_id,
-			agent_name_owner=excluded.agent_name_owner, agent_name_source=excluded.agent_name_source,
-			agent_route_presence=excluded.agent_route_presence, flow_scope_key=excluded.flow_scope_key,
-			flow_instance_id=excluded.flow_instance_id, flow_instance=excluded.flow_instance,
-			memory_enabled=0, memory_source=excluded.memory_source, entity_id=excluded.entity_id,
-			turn_count=agent_conversation_audits.turn_count + 1, status='active', updated_at=excluded.updated_at
-	`, rec.SessionID, rec.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, memorySource, strings.TrimSpace(rec.EntityID), now, now); err != nil {
-		return err
 	}
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, session_id, flow_instance, memory_enabled, memory_source, entity_id,
-			trigger_event_id, trigger_event_type, task_id, capability_surface_id, tool_calls, emitted_events,
-			request_payload, response_payload, turn_blocks, parse_ok, latency_ms, retry_count, execution_mode, failure, created_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-	`, rec.CapabilitySurface.Authority.ID, rec.RunID, fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
-		fields.FlowScopeKey, fields.FlowInstanceID, rec.SessionID, fields.FlowInstancePath, memoryEnabled, memorySource,
-		nullStringForManagedTurnFixture(rec.EntityID), nullStringForManagedTurnFixture(rec.TriggerEventID), nullStringForManagedTurnFixture(rec.TriggerEventType),
-		nullStringForManagedTurnFixture(rec.TaskID), rec.CapabilitySurface.ID, toolCalls, emittedEvents,
-		nullStringForManagedTurnFixture(storeagent.NormalizeJSONPayload(rec.RequestPayload)), nullStringForManagedTurnFixture(storeagent.NormalizeJSONPayload(rec.ResponseRaw)),
-		turnBlocks, rec.ParseOK, latencyMS, rec.RetryCount, "live", nullStringForManagedTurnFixture(failurePayload), now)
-	if err != nil {
-		return fmt.Errorf("insert SQLite agent turn readback fixture: %w", err)
-	}
-	return tx.Commit()
-}
-
-func nullStringForManagedTurnFixture(value string) any {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil
-	}
-	return value
-}
-
-func normalizeManagedTurnFixtureJSONArray(raw []byte) []byte {
-	normalized := storeagent.NormalizeJSONPayload(raw)
-	if normalized == "" || normalized == "null" {
-		return []byte("[]")
-	}
-	return []byte(normalized)
+	return nil
 }
 
 func withManagedCompletionTestSurface(t testing.TB, ctx context.Context, authority runtimeeffects.Authority, adapter string) context.Context {
@@ -419,6 +456,9 @@ func applyManagedCompletionTestSurface(t testing.TB, turn *runtimeeffects.Comple
 	}
 	turn.CapabilitySurfaceID = surface.ID
 	turn.CapabilitySurface = raw
+	event := managedCompletionTestEvent(authority)
+	turn.TriggerEventID = event.ID()
+	turn.TriggerEventType = string(event.Type())
 }
 
 func applyManagedCompletionContextSurface(t testing.TB, ctx context.Context, turn *runtimeeffects.CompletionAgentTurn) {
@@ -436,6 +476,13 @@ func applyManagedCompletionContextSurface(t testing.TB, ctx context.Context, tur
 	}
 	turn.CapabilitySurfaceID = surface.ID
 	turn.CapabilitySurface = raw
+	authority, ok := runtimeeffects.AuthorityFromContext(ctx)
+	if !ok {
+		t.Fatal("managed completion test authority is missing")
+	}
+	event := managedCompletionTestEvent(authority)
+	turn.TriggerEventID = event.ID()
+	turn.TriggerEventType = string(event.Type())
 }
 
 type managedCapabilityTestStore interface {
@@ -522,6 +569,11 @@ func TestCompletionRecoveryRejectsSameSlugSiblingCapabilityPrincipal(t *testing.
 		Adapter: "anthropic_api", Transport: "api", State: string(runtimeeffects.StateAuthorized),
 		TargetKind: string(targetA.Kind), TargetID: targetA.ID,
 	}
+	frameBytes, err := agentframe.EncodeDurable(managedCompletionTestFrame(t, authorityFor(identityA), "anthropic_api"))
+	if err != nil {
+		t.Fatalf("encode recovery execution frame: %v", err)
+	}
+	recovered.AgentFrame = frameBytes
 	identityFields, err := identityA.StorageFields()
 	if err != nil {
 		t.Fatalf("encode recovery identity: %v", err)

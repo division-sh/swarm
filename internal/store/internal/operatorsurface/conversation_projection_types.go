@@ -11,25 +11,14 @@ import (
 type operatorPublicConversationProjectionSource interface {
 	ListOperatorConversationTurns(context.Context, operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error)
 	LoadOperatorPublicConversationTurn(context.Context, string, string) (operatorread.OperatorPublicConversationTurnDetail, error)
+	LoadLatestPublicConversationTurn(context.Context, string) (*operatorread.OperatorPublicConversationTurn, error)
 }
 
 func loadOperatorLatestConversationTurn(ctx context.Context, source operatorPublicConversationProjectionSource, sessionID string) (*operatorread.OperatorPublicConversationTurn, error) {
 	if source == nil || strings.TrimSpace(sessionID) == "" {
 		return nil, nil
 	}
-	page, err := source.ListOperatorConversationTurns(ctx, operatorread.OperatorConversationTurnListOptions{SessionID: sessionID, Limit: 1})
-	if err != nil {
-		return nil, err
-	}
-	if len(page.Turns) == 0 {
-		return nil, nil
-	}
-	detail, err := source.LoadOperatorPublicConversationTurn(ctx, sessionID, page.Turns[0].TurnID)
-	if err != nil {
-		return nil, err
-	}
-	turn := detail.Turn
-	return &turn, nil
+	return source.LoadLatestPublicConversationTurn(ctx, sessionID)
 }
 
 func operatorLiveTurnFromPublic(turn *operatorread.OperatorPublicConversationTurn) *operatorread.OperatorLiveTurn {

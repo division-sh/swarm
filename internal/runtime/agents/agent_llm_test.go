@@ -580,7 +580,7 @@ func (r *drainedDirectiveProviderRuntime) StartSession(_ context.Context, agentI
 	return &llm.Session{ID: "drained-directive", AgentID: agentID, SystemPrompt: systemPrompt, Tools: tools}, nil
 }
 
-func (r *drainedDirectiveProviderRuntime) ContinueManagedSession(ctx context.Context, session *llm.Session, _ llm.ManagedCall) (*llm.Response, error) {
+func (r *drainedDirectiveProviderRuntime) ContinueManagedSession(ctx context.Context, session *llm.Session, call llm.ManagedCall) (*llm.Response, error) {
 	r.calls++
 	surface, ok := managedcapabilities.FromContext(ctx)
 	if !ok {
@@ -595,7 +595,7 @@ func (r *drainedDirectiveProviderRuntime) ContinueManagedSession(ctx context.Con
 		return nil, fmt.Errorf("directive provider usage target is invalid: %+v", usageTarget)
 	}
 	ctx = runtimeeffects.WithUsageTarget(ctx, usageTarget)
-	handle, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte("directive"), nil)
+	handle, err := runtimeeffects.BeginManagedCompletion(ctx, "anthropic_api", []byte("directive"), call.Frame(), nil)
 	if err != nil {
 		return nil, err
 	}

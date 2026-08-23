@@ -257,7 +257,7 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 	}
 
 	start := time.Now()
-	rawResp, parsed, dispatch, err := r.sendAdmittedRequest(ctx, profile, resolvedModel, reqJSON)
+	rawResp, parsed, dispatch, err := r.sendAdmittedRequest(ctx, profile, resolvedModel, reqJSON, managed)
 	latency := time.Since(start)
 	if err != nil {
 		turn := enrichTurnRecord(ctx, s, AgentTurnRecord{
@@ -376,13 +376,13 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 	return &resp, nil
 }
 
-func (r *OpenAICompatibleRuntime) sendAdmittedRequest(ctx context.Context, profile llmselection.Profile, model llmselection.ResolvedModel, payload []byte) ([]byte, openAICompatibleResponse, *completionDispatch, error) {
+func (r *OpenAICompatibleRuntime) sendAdmittedRequest(ctx context.Context, profile llmselection.Profile, model llmselection.ResolvedModel, payload []byte, managed *managedProviderCall) ([]byte, openAICompatibleResponse, *completionDispatch, error) {
 	release, err := admitProviderRequest(ctx, r.providerAdmission, profile, model)
 	if err != nil {
 		return nil, openAICompatibleResponse{}, nil, err
 	}
 	defer release()
-	raw, response, dispatch, err := r.sendRequest(ctx, payload)
+	raw, response, dispatch, err := r.sendRequest(ctx, payload, managed)
 	if dispatch != nil {
 		dispatch.providerModel = model
 	}
@@ -452,14 +452,19 @@ func (r *OpenAICompatibleRuntime) buildRequest(s *Session, input Message, model 
 	}, nil
 }
 
-func (r *OpenAICompatibleRuntime) sendRequest(ctx context.Context, payload []byte) ([]byte, openAICompatibleResponse, *completionDispatch, error) {
+func (r *OpenAICompatibleRuntime) sendRequest(ctx context.Context, payload []byte, managed *managedProviderCall) ([]byte, openAICompatibleResponse, *completionDispatch, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, openAICompatibleChatCompletionsURL(r.baseURL), bytes.NewReader(payload))
 	if err != nil {
 		return nil, openAICompatibleResponse{}, nil, fmt.Errorf("build openai-compatible request: %w", err)
 	}
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("authorization", "Bearer "+r.apiKey)
-	attempt, err := runtimeeffects.BeginCompletion(ctx, "openai_compatible", payload, nil)
+	var attempt *runtimeeffects.Handle
+	if managed == nil {
+		attempt, err = runtimeeffects.BeginCompletion(ctx, "openai_compatible", payload, nil)
+	} else {
+		attempt, err = runtimeeffects.BeginManagedCompletion(ctx, "openai_compatible", payload, managed.frame, nil)
+	}
 	if err != nil {
 		return nil, openAICompatibleResponse{}, nil, err
 	}

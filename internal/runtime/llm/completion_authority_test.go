@@ -238,7 +238,7 @@ func TestCompletionAttemptHeartbeatLossCancelsExecutionAndForcesUncertainty(t *t
 	harness.HeartbeatErr = injected
 	harness.HeartbeatFailAfter = 1
 	ctx := llmTestWorkContext(t, harness.CompletionContext("heartbeat-loss"))
-	handle, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte("heartbeat"), nil)
+	handle, err := beginManagedTestCompletion(t, ctx, "anthropic_api", []byte("heartbeat"))
 	if err != nil {
 		t.Fatalf("authorize completion: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestCompletionHeartbeatRetirementHandoff(t *testing.T) {
 	}
 	ctx := worklifetime.WithOccurrence(worklifetime.WithProcess(harness.CompletionContext("retirement"), process), owner)
 	processBaseline := process.ActiveCount()
-	handle, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte("heartbeat"), nil)
+	handle, err := beginManagedTestCompletion(t, ctx, "anthropic_api", []byte("heartbeat"))
 	if err != nil {
 		t.Fatalf("authorize completion: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestCompletionHeartbeatYieldsExactOriginRenewal(t *testing.T) {
 		t.Fatalf("start origin heartbeat: %v", err)
 	}
 	ctx = deliveryHeartbeat.Context()
-	handle, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte("heartbeat"), nil)
+	handle, err := beginManagedTestCompletion(t, ctx, "anthropic_api", []byte("heartbeat"))
 	if err != nil {
 		t.Fatalf("authorize completion: %v", err)
 	}
@@ -372,7 +372,7 @@ func TestCompletionHeartbeatUsesProcessRootForOperatorWork(t *testing.T) {
 	harness := effecttest.New()
 	process := worklifetime.NewProcess()
 	ctx := worklifetime.WithProcess(harness.CompletionContext("operator-process"), process)
-	handle, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte("heartbeat"), nil)
+	handle, err := beginManagedTestCompletion(t, ctx, "anthropic_api", []byte("heartbeat"))
 	if err != nil {
 		t.Fatalf("authorize completion: %v", err)
 	}

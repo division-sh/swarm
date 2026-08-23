@@ -140,12 +140,13 @@ func seedTestAgentRow(
 			flow_scope_key, flow_instance_id, flow_instance,
 			role, model, llm_backend, memory_enabled, memory_source,
 			runtime_descriptor, status, created_at,
+			lifecycle_phase, lifecycle_generation, lifecycle_runtime_epoch, lifecycle_run_mode,
 			lifecycle_process_authority_id, lifecycle_process_owner_id,
 			lifecycle_process_boot_id, lifecycle_generation_grant_id,
 			lifecycle_bundle_hash, lifecycle_bundle_source,
 			lifecycle_runtime_instance_id, lifecycle_runtime_generation,
 			topology_authority_kind, topology_admission, execution_lifetime
-		) VALUES (?, ?, ?, ?, ?, ?, ?, 'worker', 'regular', 'claude_cli', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'static_declaration_plan', ?, 'durable_managed')
+		) VALUES (?, ?, ?, ?, ?, ?, ?, 'worker', 'regular', 'claude_cli', ?, ?, ?, ?, ?, 'running', 1, 1, 'standard', ?, ?, ?, ?, ?, ?, ?, 1, 'static_declaration_plan', ?, 'durable_managed')
 	`
 	args := []any{
 		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
@@ -161,12 +162,13 @@ func seedTestAgentRow(
 				flow_scope_key, flow_instance_id, flow_instance,
 				role, model, llm_backend, memory_enabled, memory_source,
 				runtime_descriptor, status, created_at,
+				lifecycle_phase, lifecycle_generation, lifecycle_runtime_epoch, lifecycle_run_mode,
 				lifecycle_process_authority_id, lifecycle_process_owner_id,
 				lifecycle_process_boot_id, lifecycle_generation_grant_id,
 				lifecycle_bundle_hash, lifecycle_bundle_source,
 				lifecycle_runtime_instance_id, lifecycle_runtime_generation,
 				topology_authority_kind, topology_admission, execution_lifetime
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, 'worker', 'regular', 'claude_cli', $8, $9, $10::jsonb, $11, $12, $13::uuid, $14, $15::uuid, $16::uuid, $17, $18, $19::uuid, 1, 'static_declaration_plan', $20::jsonb, 'durable_managed')
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, 'worker', 'regular', 'claude_cli', $8, $9, $10::jsonb, $11, $12, 'running', 1, 1, 'standard', $13::uuid, $14, $15::uuid, $16::uuid, $17, $18, $19::uuid, 1, 'static_declaration_plan', $20::jsonb, 'durable_managed')
 		`
 	}
 	if _, err := db.ExecContext(ctx, query, args...); err != nil {

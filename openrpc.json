@@ -2953,7 +2953,7 @@
     },
     {
       "name": "conversation.get_turn",
-      "description": "Read one closed author-safe turn projection by exact canonical full turn ID within a conversation. Raw provider payloads, private reasoning, unmarked progress, tool payloads, capability telemetry, and automatic runtime-log joins are not part of this contract.\n",
+      "description": "Read one closed author-safe turn projection by exact canonical full turn ID within a conversation. The required frame sibling contains only version, identity, content hash, turn kind, and conditional parent identity derived from validated private evidence. Raw provider payloads, private reasoning, unmarked progress, event/tool payloads, capability telemetry, provider contract/prompt, directive/remediation content, and automatic runtime-log joins are not part of this contract.\n",
       "params": [
         {
           "name": "session_id",
@@ -9715,6 +9715,82 @@
         ],
         "type": "object"
       },
+      "AgentExecutionFrameFacts": {
+        "description": "Required author-safe identity projection derived from the validated private frame persisted with this exact turn. It never contains provider input, event/tool payloads, capability evidence, directive/remediation content, or private reasoning.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "content_hash": {
+                "pattern": "^agent-frame-content:v1:sha256:[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "frame_id": {
+                "pattern": "^agent-frame:v1:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              "turn_kind": {
+                "enum": [
+                  "initial",
+                  "board_directive"
+                ],
+                "type": "string"
+              },
+              "version": {
+                "enum": [
+                  "agent-execution-frame.v1"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "version",
+              "frame_id",
+              "content_hash",
+              "turn_kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "content_hash": {
+                "pattern": "^agent-frame-content:v1:sha256:[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "frame_id": {
+                "pattern": "^agent-frame:v1:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              "parent_frame_id": {
+                "pattern": "^agent-frame:v1:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                "type": "string"
+              },
+              "turn_kind": {
+                "enum": [
+                  "tool_continuation",
+                  "remediation"
+                ],
+                "type": "string"
+              },
+              "version": {
+                "enum": [
+                  "agent-execution-frame.v1"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "version",
+              "frame_id",
+              "content_hash",
+              "turn_kind",
+              "parent_frame_id"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "AgentExecutionFrameInspection": {
         "additionalProperties": false,
         "properties": {
@@ -11804,6 +11880,9 @@
       "ConversationTurnDetail": {
         "additionalProperties": false,
         "properties": {
+          "frame": {
+            "$ref": "#/components/schemas/AgentExecutionFrameFacts"
+          },
           "session": {
             "$ref": "#/components/schemas/ConversationSummary"
           },
@@ -11813,7 +11892,8 @@
         },
         "required": [
           "session",
-          "turn"
+          "turn",
+          "frame"
         ],
         "type": "object"
       },

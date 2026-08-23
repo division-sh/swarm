@@ -307,7 +307,7 @@ func TestAnthropicProviderAdmissionNeverRedispatchesAmbiguousFailure(t *testing.
 		t.Fatalf("StartSession: %v", err)
 	}
 	ctx = managedProviderTestContext(t, ctx, runtime, session, nil)
-	if _, err := runtime.continueSession(ctx, session, Message{Role: "user", Content: "hello"}, nil); err == nil {
+	if _, err := runtime.continueSession(ctx, session, Message{Role: "user", Content: "hello"}, managedProviderCallForEffectTest(t, ctx)); err == nil {
 		t.Fatal("ContinueSession succeeded after ambiguous provider status")
 	}
 	if got := requests.Load(); got != 1 {
@@ -346,12 +346,14 @@ func TestOpenAICompatibleProviderAdmissionRejectsBeforeHTTPDispatch(t *testing.T
 	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
 	firstErr := make(chan error, 1)
 	go func() {
-		_, _, _, err := runtime.sendAdmittedRequest(llmTestWorkContext(t, harness.CompletionContext("openai-compatible-admission-first")), profile, model, []byte(`{"model":"gpt-compatible","messages":[{"role":"user","content":"hello"}]}`))
+		ctx := llmTestWorkContext(t, harness.CompletionContext("openai-compatible-admission-first"))
+		_, _, _, err := runtime.sendAdmittedRequest(ctx, profile, model, []byte(`{"model":"gpt-compatible","messages":[{"role":"user","content":"hello"}]}`), managedProviderCallForEffectTest(t, ctx))
 		firstErr <- err
 	}()
 	<-entered
 
-	_, _, _, err := runtime.sendAdmittedRequest(llmTestWorkContext(t, harness.CompletionContext("openai-compatible-admission-second")), profile, model, []byte(`{"model":"gpt-compatible","messages":[{"role":"user","content":"second"}]}`))
+	secondCtx := llmTestWorkContext(t, harness.CompletionContext("openai-compatible-admission-second"))
+	_, _, _, err := runtime.sendAdmittedRequest(secondCtx, profile, model, []byte(`{"model":"gpt-compatible","messages":[{"role":"user","content":"second"}]}`), managedProviderCallForEffectTest(t, secondCtx))
 	requireProviderAdmissionRateLimited(t, err)
 	if got := requests.Load(); got != 1 {
 		t.Fatalf("requests = %d, want second request rejected before HTTP dispatch", got)
@@ -394,12 +396,14 @@ func TestOpenAIResponsesProviderAdmissionRejectsBeforeHTTPDispatch(t *testing.T)
 	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
 	firstErr := make(chan error, 1)
 	go func() {
-		_, _, _, err := runtime.sendAdmittedRequest(llmTestWorkContext(t, harness.CompletionContext("openai-responses-admission-first")), profile, model, []byte(`{"model":"gpt-5.4","input":[{"role":"user","content":"hello"}]}`))
+		ctx := llmTestWorkContext(t, harness.CompletionContext("openai-responses-admission-first"))
+		_, _, _, err := runtime.sendAdmittedRequest(ctx, profile, model, []byte(`{"model":"gpt-5.4","input":[{"role":"user","content":"hello"}]}`), managedProviderCallForEffectTest(t, ctx))
 		firstErr <- err
 	}()
 	<-entered
 
-	_, _, _, err := runtime.sendAdmittedRequest(llmTestWorkContext(t, harness.CompletionContext("openai-responses-admission-second")), profile, model, []byte(`{"model":"gpt-5.4","input":[{"role":"user","content":"second"}]}`))
+	secondCtx := llmTestWorkContext(t, harness.CompletionContext("openai-responses-admission-second"))
+	_, _, _, err := runtime.sendAdmittedRequest(secondCtx, profile, model, []byte(`{"model":"gpt-5.4","input":[{"role":"user","content":"second"}]}`), managedProviderCallForEffectTest(t, secondCtx))
 	requireProviderAdmissionRateLimited(t, err)
 	if got := requests.Load(); got != 1 {
 		t.Fatalf("requests = %d, want second request rejected before HTTP dispatch", got)

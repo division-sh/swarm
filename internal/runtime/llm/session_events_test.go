@@ -693,7 +693,7 @@ func TestAnthropicAPIRuntime_ContinueSessionReMarksInboundDeliveryForReusedSessi
 	publisher.marks = nil
 	ctx = managedProviderTestContext(t, ctx, runtime, s, nil)
 
-	if _, err := runtime.continueSession(ctx, s, Message{Role: "user", Content: "hello"}, nil); err != nil {
+	if _, err := runtime.continueSession(ctx, s, Message{Role: "user", Content: "hello"}, managedProviderCallForEffectTest(t, ctx)); err != nil {
 		t.Fatalf("ContinueSession: %v", err)
 	}
 	if len(publisher.marks) != 1 {

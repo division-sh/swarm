@@ -11,11 +11,13 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
@@ -469,11 +471,8 @@ func TestSelectedContractExecutionMaterializationKeepsActiveDeliverySessionCoupl
 	at := time.Unix(1700002420, 0).UTC()
 	seedSelectedContractExecutionStoreSourceUnpublished(t, db, sourceRunID, entityID, eventID, at)
 	sessionID := uuid.NewString()
-	seedSelectedContractSourceConversationHistory(t, db, sourceRunID, entityID, eventID, sessionID, uuid.NewString(), uuid.NewString(), at)
-	activeRoute := testAgentDeliveryRoute(t, "agent-a", "flow-a/1")
-	event := commitPostgresDeliveryFixture(t, ctx, db, eventID, activeRoute)
-	claimed := claimPostgresDeliveryFixture(t, ctx, db, event, activeRoute)
-	if _, err := pg.BindAgentSession(ctx, claimed.Claim, sessionID); err != nil {
+	activeClaim := seedSelectedContractSourceConversationHistoryWithActiveDelivery(t, db, sourceRunID, entityID, eventID, sessionID, uuid.NewString(), uuid.NewString(), at)
+	if _, err := pg.BindAgentSession(ctx, activeClaim, sessionID); err != nil {
 		t.Fatalf("bind active delivery session: %v", err)
 	}
 	captureRunForkTestRevision(t, db, sourceRunID)
@@ -1254,12 +1253,12 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 	for _, tc := range []struct {
 		name string
 		code string
-		seed func(context.Context, *sql.DB, string, string, string, time.Time) error
+		seed func(context.Context, *PostgresStore, *sql.DB, string, string, string, time.Time) error
 	}{
 		{
 			name: "session",
 			code: "source_sessions_advanced_after_fork_point",
-			seed: func(ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) error {
+			seed: func(ctx context.Context, _ *PostgresStore, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) error {
 				fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, "agent-a", "flow-a/1"))
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_sessions (
@@ -1279,7 +1278,7 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 		{
 			name: "conversation audit",
 			code: "source_conversation_audits_advanced_after_fork_point",
-			seed: func(ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) error {
+			seed: func(ctx context.Context, _ *PostgresStore, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) error {
 				fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, "agent-a", "flow-a/1"))
 				_, err := db.ExecContext(ctx, `
 					INSERT INTO agent_conversation_audits (
@@ -1299,27 +1298,27 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 		{
 			name: "turn",
 			code: "source_turns_advanced_after_fork_point",
-			seed: func(ctx context.Context, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) error {
+			seed: func(ctx context.Context, pg *PostgresStore, db *sql.DB, sourceRunID, entityID, eventID string, at time.Time) error {
 				turnID := uuid.NewString()
 				sessionID := uuid.NewString()
 				identity := testAgentIdentity(t, "agent-a", "flow-a/1")
-				fields := testAgentIdentityStorageFields(t, identity)
-				capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(
-					t, admitTestPostgresStore(t, db), sourceRunID, identity, sessionID, turnID, "task", entityID,
-				)
-				_, err := db.ExecContext(ctx, `
-					INSERT INTO agent_turns (
-						turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
-						agent_route_presence, flow_scope_key, flow_instance_id,
-						session_id, flow_instance, memory_enabled, memory_source, entity_id,
-						trigger_event_id, trigger_event_type, task_id, capability_surface_id, execution_mode, created_at
-					)
-					VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8,
-						$9::uuid, $10, FALSE, 'authored', $11::uuid,
-						$12::uuid, 'item.received', 'task-a', $13::uuid, 'live', $14)
-				`, turnID, sourceRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
-					fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, sessionID,
-					fields.FlowInstancePath, entityID, eventID, capabilitySurfaceID, at.Add(time.Minute))
+				event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
+				route := testAgentDeliveryRoute(t, identity.AgentID(), identity.FlowInstance())
+				if err := commitDeliveryObligationFixture(ctx, pg, event, route); err != nil {
+					return err
+				}
+				claimed, err := claimDeliveryFixture(ctx, pg, event, route)
+				if err != nil {
+					return err
+				}
+				if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, runtimedelivery.WithClaim(ctx, claimed.Claim), pg, runtimellm.AgentTurnRecord{
+					AgentID: identity.AgentID(), Identity: agentmemory.Identity{RunID: sourceRunID, Agent: identity},
+					RunID: sourceRunID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Authored(false), SessionID: sessionID,
+					EntityID: entityID, TriggerEventID: eventID, TriggerEventType: string(event.Type()), TaskID: "task-a", ParseOK: true,
+				}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: at.Add(time.Minute), OriginEvent: &event}); err != nil {
+					return err
+				}
+				_, err = pg.SettleSuccess(ctx, claimed.Claim, nil, time.Millisecond)
 				return err
 			},
 		},
@@ -1349,7 +1348,7 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 				t.Fatalf("MaterializeRunForkForSelectedContractExecution: %v", err)
 			}
 			seedSelectedContractExecutionForkLineage(t, pg, db, sourceRunID, materialized.ForkRunID, eventID, entityID, at)
-			if err := tc.seed(ctx, db, sourceRunID, entityID, eventID, at); err != nil {
+			if err := tc.seed(ctx, pg, db, sourceRunID, entityID, eventID, at); err != nil {
 				t.Fatalf("seed post-T %s: %v", tc.name, err)
 			}
 			captureRunForkTestRevision(t, db, sourceRunID)
@@ -1542,7 +1541,7 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 		)
 		VALUES (
 			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, TRUE, 'authored',
-			'[]'::jsonb, 1, '{}'::jsonb, 'active', $10, $10
+			'[]'::jsonb, 0, '{}'::jsonb, 'active', $10, $10
 		)
 	`, sessionID, materialized.ForkRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
@@ -1566,28 +1565,24 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 		t.Fatalf("seed fork conversation audit: %v", err)
 	}
 	turnID := uuid.NewString()
-	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(
-		t, pg, materialized.ForkRunID, identity, sessionID, turnID, "task", "agent-a:entity",
-	)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
-			agent_route_presence, flow_scope_key, flow_instance_id,
-			session_id, flow_instance, memory_enabled, memory_source, entity_id,
-			trigger_event_id, trigger_event_type, capability_surface_id, tool_calls, emitted_events,
-			parse_ok, latency_ms, retry_count, execution_mode, created_at
-		)
-		VALUES (
-			$1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8,
-			$9::uuid, $10, TRUE, 'authored', $11::uuid,
-			$12::uuid, 'item.received', $13::uuid, '[]'::jsonb, '[]'::jsonb,
-			true, 1, 0, 'live', $14
-		)
-	`, turnID, materialized.ForkRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
-		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, sessionID,
-		fields.FlowInstancePath, entityID, forkEventID, capabilitySurfaceID,
-		at.Add(3*time.Second)); err != nil {
+	turnEvent := loadPostgresDeliveryFixtureEvent(t, ctx, db, followUp.ID())
+	turnRoute := testAgentDeliveryRoute(t, identity.AgentID(), identity.FlowInstance())
+	if err := commitDeliveryObligationFixture(ctx, pg, turnEvent, turnRoute); err != nil {
+		t.Fatalf("commit fork turn origin: %v", err)
+	}
+	turnClaim, err := claimDeliveryFixture(ctx, pg, turnEvent, turnRoute)
+	if err != nil {
+		t.Fatalf("claim fork turn origin: %v", err)
+	}
+	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, runtimedelivery.WithClaim(ctx, turnClaim.Claim), pg, runtimellm.AgentTurnRecord{
+		AgentID: identity.AgentID(), Identity: agentmemory.Identity{RunID: materialized.ForkRunID, Agent: identity},
+		RunID: materialized.ForkRunID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Authored(true), SessionID: sessionID,
+		EntityID: entityID, TriggerEventID: turnEvent.ID(), TriggerEventType: string(turnEvent.Type()), ParseOK: true, Latency: time.Millisecond,
+	}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: at.Add(3 * time.Second), OriginEvent: &turnEvent}); err != nil {
 		t.Fatalf("seed fork turn: %v", err)
+	}
+	if _, err := pg.SettleSuccess(ctx, turnClaim.Claim, nil, time.Millisecond); err != nil {
+		t.Fatalf("settle fork turn origin: %v", err)
 	}
 
 	activation, err := pg.ActivateRunForkForSelectedContractExecution(ctx, runfork.RunForkSelectedContractExecutionActivateRequest{
@@ -2016,8 +2011,17 @@ func seedSelectedContractExecutionStoreSourceRawWithPayload(t *testing.T, db *sq
 }
 
 func seedSelectedContractSourceConversationHistory(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID, sessionID, auditID, turnID string, at time.Time) {
+	seedSelectedContractSourceConversationHistoryWithDelivery(t, db, sourceRunID, entityID, eventID, sessionID, auditID, turnID, at, false)
+}
+
+func seedSelectedContractSourceConversationHistoryWithActiveDelivery(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID, sessionID, auditID, turnID string, at time.Time) runtimedelivery.Claim {
+	return seedSelectedContractSourceConversationHistoryWithDelivery(t, db, sourceRunID, entityID, eventID, sessionID, auditID, turnID, at, true)
+}
+
+func seedSelectedContractSourceConversationHistoryWithDelivery(t *testing.T, db *sql.DB, sourceRunID, entityID, eventID, sessionID, auditID, turnID string, at time.Time, keepDelivery bool) runtimedelivery.Claim {
 	t.Helper()
 	ctx := testAuthorActivityContext()
+	pg := admitTestPostgresStore(t, db)
 	identity := testAgentIdentity(t, "agent-a", "flow-a/1")
 	fields := testAgentIdentityStorageFields(t, identity)
 	seedTestAgentRow(t, ctx, db, true, identity, "active")
@@ -2048,25 +2052,28 @@ func seedSelectedContractSourceConversationHistory(t *testing.T, db *sql.DB, sou
 		entityID, at); err != nil {
 		t.Fatalf("seed source conversation audit: %v", err)
 	}
-	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(
-		t, admitTestPostgresStore(t, db), sourceRunID, identity,
-		sessionID, turnID, "session_per_entity", entityID,
-	)
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
-			agent_route_presence, flow_scope_key, flow_instance_id,
-			session_id, flow_instance, memory_enabled, memory_source, entity_id,
-			trigger_event_id, trigger_event_type, task_id, capability_surface_id, execution_mode, created_at
-		)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8,
-			$9::uuid, $10, TRUE, 'authored', $11::uuid,
-			$12::uuid, 'item.received', 'task-a', $13::uuid, 'live', $14)
-	`, turnID, sourceRunID, fields.AgentID, fields.NameOwner, fields.NameSource,
-		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, sessionID,
-		fields.FlowInstancePath, entityID, eventID, capabilitySurfaceID, at); err != nil {
+	event := loadPostgresDeliveryFixtureEvent(t, ctx, db, eventID)
+	route := testAgentDeliveryRoute(t, identity.AgentID(), identity.FlowInstance())
+	if err := commitDeliveryObligationFixture(ctx, pg, event, route); err != nil {
+		t.Fatalf("commit source turn origin: %v", err)
+	}
+	claimed, err := claimDeliveryFixture(ctx, pg, event, route)
+	if err != nil {
+		t.Fatalf("claim source turn origin: %v", err)
+	}
+	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, runtimedelivery.WithClaim(ctx, claimed.Claim), pg, runtimellm.AgentTurnRecord{
+		AgentID: identity.AgentID(), Identity: agentmemory.Identity{RunID: sourceRunID, Agent: identity},
+		RunID: sourceRunID, FlowInstance: identity.FlowInstance(), Memory: agentmemory.Authored(true), SessionID: sessionID,
+		EntityID: entityID, TriggerEventID: eventID, TriggerEventType: string(event.Type()), TaskID: "task-a", ParseOK: true,
+	}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: at, OriginEvent: &event}); err != nil {
 		t.Fatalf("seed source turn: %v", err)
 	}
+	if !keepDelivery {
+		if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, time.Millisecond); err != nil {
+			t.Fatalf("settle source turn origin: %v", err)
+		}
+	}
+	return claimed.Claim
 }
 
 func seedSelectedContractSourceReplayScopeMarker(t *testing.T, db execContextDB, sourceRunID, eventID, reasonCode string, at time.Time) {

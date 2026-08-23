@@ -1567,7 +1567,7 @@ func TestManagerStore_ManagedTurnReadbackFixture_PersistsObservedToolCalls(t *te
 	if len(calls) != 2 {
 		t.Fatalf("tool_calls count = %d, want 2 in %s", len(calls), raw)
 	}
-	if calls[0]["name"] != redactName("query_entities") || calls[1]["name"] != redactName("web_search") {
+	if calls[0]["name"] != "query_entities" || calls[1]["name"] != "web_search" {
 		t.Fatalf("tool_calls = %#v", calls)
 	}
 	args0, ok := calls[0]["arguments"].(map[string]any)
@@ -2266,6 +2266,7 @@ func TestManagerStore_AppendStatelessTurnPersistsEntityAsAuditMetadata(t *testin
 	entityID := uuid.NewString()
 	runID := uuid.NewString()
 	seedManagerRun(t, ctx, db, runID)
+	seedManagedTurnFixtureAgent(t, ctx, pg, "a1", "")
 	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID:        "a1",
 		SessionID:      sessionID,
@@ -2337,6 +2338,7 @@ func TestManagerStore_AppendStatelessTurnPersistsFlowInstanceAuditIdentity(t *te
 	flowInstance := "review/inst-1"
 	runID := uuid.NewString()
 	seedManagerRun(t, ctx, db, runID)
+	seedManagedTurnFixtureAgent(t, ctx, pg, "a1", flowInstance)
 	if err := persistManagedAgentTurnReadbackFixture(t, ctx, pg, runtimellm.AgentTurnRecord{
 		AgentID:        "a1",
 		SessionID:      sessionID,

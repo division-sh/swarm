@@ -194,24 +194,47 @@ func settleClaudeAttemptFailure(ctx context.Context, attempt *runtimeeffects.Han
 }
 
 type claudeCompletionAttemptFailure struct {
-	state runtimeeffects.State
-	err   error
+	state                runtimeeffects.State
+	err                  error
+	noProviderInvocation bool
+	operation            string
+	evidence             map[string]any
 }
 
 func (e *claudeCompletionAttemptFailure) Error() string { return e.err.Error() }
 func (e *claudeCompletionAttemptFailure) Unwrap() error { return e.err }
 
 func claudeCompletionFailureState(err error) runtimeeffects.State {
-	var attemptFailure *claudeCompletionAttemptFailure
-	if errors.As(err, &attemptFailure) {
+	if attemptFailure := claudeAttemptFailure(err); attemptFailure != nil {
 		return attemptFailure.state
 	}
 	return runtimeeffects.StateTerminalFailure
 }
 
+func claudeAttemptFailure(err error) *claudeCompletionAttemptFailure {
+	var attemptFailure *claudeCompletionAttemptFailure
+	if !errors.As(err, &attemptFailure) {
+		return nil
+	}
+	return attemptFailure
+}
+
+func claudeNoProviderInvocationFailure(err error) *claudeCompletionAttemptFailure {
+	attemptFailure := claudeAttemptFailure(err)
+	if attemptFailure == nil || !attemptFailure.noProviderInvocation {
+		return nil
+	}
+	return attemptFailure
+}
+
 func returnClaudeAttemptFailure(ctx context.Context, attempt *runtimeeffects.Handle, state runtimeeffects.State, original error, operation string, evidence map[string]any) error {
 	if attempt != nil && attempt.Attempt().Authority.Target.Valid() {
-		return &claudeCompletionAttemptFailure{state: state, err: original}
+		prelaunch, _ := evidence["prelaunch"].(bool)
+		launchRejected, _ := evidence["launch_rejected"].(bool)
+		return &claudeCompletionAttemptFailure{
+			state: state, err: original, noProviderInvocation: prelaunch || launchRejected,
+			operation: operation, evidence: evidence,
+		}
 	}
 	return settleClaudeAttemptFailure(ctx, attempt, state, original, operation, evidence)
 }
@@ -224,10 +247,17 @@ func finishClaudeCompletionAttemptHeartbeat(heartbeat *completionAttemptHeartbea
 	if heartbeatErr == nil {
 		return response, prior
 	}
-	return nil, &claudeCompletionAttemptFailure{
+	priorFailure := claudeNoProviderInvocationFailure(prior)
+	attemptFailure := &claudeCompletionAttemptFailure{
 		state: runtimeeffects.StateOutcomeUncertain,
 		err:   errors.Join(prior, completionAttemptHeartbeatLoss(heartbeatErr)),
 	}
+	if priorFailure != nil {
+		attemptFailure.noProviderInvocation = true
+		attemptFailure.operation = priorFailure.operation
+		attemptFailure.evidence = priorFailure.evidence
+	}
+	return nil, attemptFailure
 }
 
 func (r *ClaudeCLIRuntime) openMonitorTurn(ctx context.Context, meta MonitorTurnMeta) (MonitorTurnWriter, error) {

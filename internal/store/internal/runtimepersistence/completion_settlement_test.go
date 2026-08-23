@@ -1,6 +1,7 @@
 package runtimepersistence
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"testing"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -21,6 +23,7 @@ import (
 
 type completionSettlementTestStore interface {
 	completionControllerTestStore
+	deliveryFixtureStore
 	runtimeeffects.RecoveryStore
 	agentfixture.Store
 }
@@ -57,6 +60,122 @@ func TestCompletionProviderHeadSettlementSQLite(t *testing.T) {
 func TestCompletionProviderHeadSettlementPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	proveCompletionProviderHeadSettlement(t, newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false))
+}
+
+func TestCompletionOperationOwnsExactAgentFrameSQLite(t *testing.T) {
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	proveCompletionOperationOwnsExactAgentFrame(t, newCompletionSettlementFixture(t, store, store.backend.ConstructionHandle(), true))
+}
+
+func TestCompletionOperationOwnsExactAgentFramePostgres(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	proveCompletionOperationOwnsExactAgentFrame(t, newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false))
+}
+
+func proveCompletionOperationOwnsExactAgentFrame(t *testing.T, fixture completionSettlementFixture) {
+	t.Helper()
+	const adapter = "claude_cli"
+	authority := fixture.authority
+	authority.BudgetScopes = nil
+	ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.contextFor(authority), "agent-frame:exact-owner")
+	ctx = withManagedCompletionTestSurface(t, ctx, authority, adapter)
+	event := managedCompletionTestEvent(authority)
+	frame := managedCompletionTestFrameWithEvent(t, authority, adapter, event)
+	want, err := agentframe.EncodeDurable(frame)
+	if err != nil {
+		t.Fatalf("encode expected operation frame: %v", err)
+	}
+	handle, err := runtimeeffects.BeginManagedCompletion(ctx, adapter, []byte("exact-frame-request"), frame, nil)
+	if err != nil {
+		t.Fatalf("authorize exact-frame completion: %v", err)
+	}
+	assertCompletionFrameBytes(t, fixture, "runtime_external_effect_operations", "operation_id", handle.Attempt().OperationID, want)
+
+	failureErr := runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "agent_frame_retry_prelaunch", "completion-test", "launch", map[string]any{"launch_rejected": true})
+	failure, _ := runtimefailures.EnvelopeFromError(failureErr)
+	settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, adapter, "", "")
+	settlement.ProviderHead = nil
+	settlement.Settlement = runtimeeffects.Settlement{State: runtimeeffects.StateTerminalFailure, Failure: &failure, Evidence: map[string]any{"launch_rejected": true}}
+	settlement.Usage = runtimeeffects.CompletionUsage{ResolvedModel: "claude-test", Exactness: runtimeeffects.CompletionUsageUnavailable}
+	settlement.AgentTurn.Failure = &failure
+	if _, err := handle.SettleCompletion(ctx, settlement); err != nil {
+		t.Fatalf("settle retryable prelaunch completion: %v", err)
+	}
+	assertCompletionFrameBytes(t, fixture, "agent_turns", "turn_id", settlement.AgentTurn.TurnID, want)
+
+	retry, err := runtimeeffects.BeginManagedCompletion(ctx, adapter, []byte("exact-frame-request"), frame, nil)
+	if err != nil {
+		t.Fatalf("authorize byte-identical retry: %v", err)
+	}
+	if retry.Attempt().OperationID != handle.Attempt().OperationID || retry.Attempt().AttemptID == handle.Attempt().AttemptID || retry.Attempt().Ordinal != 2 {
+		t.Fatalf("byte-identical retry did not reuse the operation with a second attempt: first=%+v retry=%+v", handle.Attempt(), retry.Attempt())
+	}
+
+	changedEvent := eventtest.ExistingRunRootIngress(
+		event.ID(), event.Type(), "gateway", "", []byte(`{ "request": "byte-distinct" }`), 0,
+		event.RunID(), events.EventEnvelope{}, time.Unix(1, 0).UTC(),
+	)
+	changedFrame := managedCompletionTestFrameWithEvent(t, authority, adapter, changedEvent)
+	if _, err := runtimeeffects.BeginManagedCompletion(ctx, adapter, []byte("exact-frame-request"), changedFrame, nil); err == nil {
+		t.Fatal("same-operation retry accepted byte-distinct frame evidence")
+	}
+	assertCompletionFrameBytes(t, fixture, "runtime_external_effect_operations", "operation_id", handle.Attempt().OperationID, want)
+}
+
+func TestCompletionCorruptOperationFrameFailsClosedSQLite(t *testing.T) {
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	proveCompletionCorruptOperationFrameFailsClosed(t, newCompletionSettlementFixture(t, store, store.backend.ConstructionHandle(), true))
+}
+
+func TestCompletionCorruptOperationFrameFailsClosedPostgres(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	proveCompletionCorruptOperationFrameFailsClosed(t, newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false))
+}
+
+func proveCompletionCorruptOperationFrameFailsClosed(t *testing.T, fixture completionSettlementFixture) {
+	t.Helper()
+	ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "agent-frame:corrupt-owner")
+	handle := beginObservedCompletionForSettlementTest(t, ctx, "claude_cli", "corrupt-frame")
+	query := `UPDATE runtime_external_effect_operations SET agent_frame_bytes=? WHERE operation_id=?`
+	if !fixture.sqlite {
+		query = `UPDATE runtime_external_effect_operations SET agent_frame_bytes=$1 WHERE operation_id=$2::uuid`
+	}
+	if _, err := fixture.db.Exec(query, []byte(`{"corrupt":true}`), handle.Attempt().OperationID); err != nil {
+		t.Fatalf("corrupt operation frame: %v", err)
+	}
+	settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "claude_cli", "provider-head-current", "provider-head-next")
+	if _, err := handle.SettleCompletion(ctx, settlement); err == nil {
+		t.Fatal("corrupt operation frame settled an agent turn")
+	}
+	requireCompletionSettlementRows(t, fixture, handle.Attempt().AttemptID, settlement.AgentTurn.TurnID, runtimeeffects.StateResponseObserved, 0, 1)
+}
+
+func assertCompletionFrameBytes(t *testing.T, fixture completionSettlementFixture, table, idColumn, id string, want []byte) {
+	t.Helper()
+	got := loadCompletionFrameBytes(t, fixture, table, idColumn, id)
+	if !bytes.Equal(got, want) {
+		t.Fatalf("%s frame bytes changed: got %q want %q", table, got, want)
+	}
+	hydrated, err := agentframe.DecodeDurable(got)
+	if err != nil {
+		t.Fatalf("hydrate %s frame bytes: %v", table, err)
+	}
+	if hydrated.FrameID == "" {
+		t.Fatalf("%s hydrated frame identity is empty", table)
+	}
+}
+
+func loadCompletionFrameBytes(t *testing.T, fixture completionSettlementFixture, table, idColumn, id string) []byte {
+	t.Helper()
+	placeholder := "?"
+	if !fixture.sqlite {
+		placeholder = "$1::uuid"
+	}
+	var got []byte
+	if err := fixture.db.QueryRow(`SELECT agent_frame_bytes FROM `+table+` WHERE `+idColumn+`=`+placeholder, id).Scan(&got); err != nil {
+		t.Fatalf("load %s frame bytes: %v", table, err)
+	}
+	return got
 }
 
 func proveCompletionProviderHeadSettlement(t *testing.T, fixture completionSettlementFixture) {
@@ -140,7 +259,7 @@ func proveCompletionPrelaunchFailureDoesNotSpend(t *testing.T, fixture completio
 	t.Helper()
 	ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "completion-prelaunch-failure")
 	ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, "claude_cli")
-	handle, err := runtimeeffects.BeginCompletion(ctx, "claude_cli", []byte("prelaunch"), nil)
+	handle, err := beginManagedCompletionForTest(t, ctx, "claude_cli", []byte("prelaunch"))
 	if err != nil {
 		t.Fatalf("authorize prelaunch completion: %v", err)
 	}
@@ -181,7 +300,7 @@ func proveCompletionAttemptHeartbeatFencesRecovery(t *testing.T, fixture complet
 	t.Helper()
 	ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "completion-heartbeat")
 	ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, "anthropic_api")
-	handle, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte("heartbeat"), nil)
+	handle, err := beginManagedCompletionForTest(t, ctx, "anthropic_api", []byte("heartbeat"))
 	if err != nil {
 		t.Fatalf("authorize heartbeat completion: %v", err)
 	}
@@ -249,7 +368,7 @@ func proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t *testing.T, fixture
 	t.Helper()
 	ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "ordinary-recovery:authorized")
 	ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, "anthropic_api")
-	authorized, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte("authorized"), nil)
+	authorized, err := beginManagedCompletionForTest(t, ctx, "anthropic_api", []byte("authorized"))
 	if err != nil {
 		t.Fatalf("authorize live completion: %v", err)
 	}
@@ -293,7 +412,7 @@ func proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t *testing.T, fixture
 	secondAuthority.Target.ID = uuid.NewString()
 	ctx = runtimeeffects.WithLogicalOperationIdentity(runtimeeffects.WithAuthority(fixture.context, secondAuthority), "ordinary-recovery:launched")
 	ctx = withManagedCompletionTestSurface(t, ctx, secondAuthority, "anthropic_api")
-	launched, err := runtimeeffects.BeginCompletion(ctx, "anthropic_api", []byte("launched"), nil)
+	launched, err := beginManagedCompletionForTest(t, ctx, "anthropic_api", []byte("launched"))
 	if err != nil {
 		t.Fatalf("authorize launched completion: %v", err)
 	}
@@ -397,6 +516,11 @@ func claimCompletionOriginForTest(t testing.TB, ctx context.Context, store compl
 		uuid.NewString(), "completion.origin", "gateway", "", []byte(`{}`), 0,
 		authority.Target.RunID, events.EventEnvelope{}, now,
 	)
+	return claimCompletionOriginEventForTest(t, ctx, store, authority, originEvent)
+}
+
+func claimCompletionOriginEventForTest(t testing.TB, ctx context.Context, store completionSettlementTestStore, authority runtimeeffects.Authority, originEvent events.Event) runtimedelivery.Claim {
+	t.Helper()
 	route := events.DeliveryRoute{
 		Recipient:     events.MustAgentDeliveryRecipient(authority.Normal.Identity.AgentID()),
 		AgentIdentity: authority.Normal.Identity,
@@ -423,7 +547,7 @@ func beginObservedCompletionForSettlementTest(t *testing.T, ctx context.Context,
 		t.Fatal("managed completion test authority is missing")
 	}
 	ctx = withManagedCompletionTestSurface(t, ctx, authority, adapter)
-	handle, err := runtimeeffects.BeginCompletion(ctx, adapter, []byte(request), nil)
+	handle, err := beginManagedCompletionForTest(t, ctx, adapter, []byte(request))
 	if err != nil {
 		t.Fatalf("authorize completion: %v", err)
 	}
@@ -465,6 +589,9 @@ func completionSettlementForTest(t testing.TB, target runtimeeffects.UsageTarget
 	}
 	authority := fixture.authority
 	authority.Target = target
+	event := managedCompletionTestEvent(authority)
+	settlement.AgentTurn.TriggerEventID = event.ID()
+	settlement.AgentTurn.TriggerEventType = string(event.Type())
 	applyManagedCompletionTestSurface(t, settlement.AgentTurn, authority, adapter)
 	return settlement
 }

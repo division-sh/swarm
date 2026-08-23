@@ -6,6 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/effects"
 	runtimegates "github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
@@ -326,34 +330,57 @@ func insertCompletionBlockerEffect(
 	conflictingRun bool,
 ) {
 	t.Helper()
-	fields := testAgentIdentityStorageFields(t, testAgentIdentity(t, "completion-matrix-agent", semanticRunFixtureFlow))
+	identity := testAgentIdentity(t, "completion-matrix-agent", semanticRunFixtureFlow)
+	fields := testAgentIdentityStorageFields(t, identity)
 	operationID := uuid.NewString()
 	targetID := uuid.NewString()
+	sessionID := uuid.NewString()
 	authorityRunID := runID
 	if conflictingRun {
 		authorityRunID = uuid.NewString()
 	}
-	authority, _ := json.Marshal(map[string]any{
-		"usage_target": map[string]any{
-			"kind": "conversation_fork_turn_completion", "id": targetID,
-			"ordinal": 1, "run_id": authorityRunID, "entity_id": runID,
-		},
-	})
+	authority := effects.NormalAgentAuthority(effects.LifecycleToken{
+		RuntimeEpoch: 1, Identity: identity, AgentID: identity.AgentID(), Generation: 1,
+	}, "matrix-worker", time.Date(2026, 7, 29, 13, 0, 0, 0, time.UTC))
+	authority.Target = effects.UsageTarget{
+		Kind: effects.UsageTargetAgentTurn, ID: targetID, RunID: runID,
+		AgentID: identity.AgentID(), AgentIdentity: identity, SessionID: sessionID,
+		Memory: agentmemory.PlatformDefault(), FlowInstance: identity.FlowInstance(), EntityID: runID,
+	}
+	surface := managedCompletionTestSurface(t, authority, "mock_python")
+	if err := fixture.store.(interface {
+		SaveManagedCapabilitySurface(context.Context, managedcapabilities.Surface) error
+	}).SaveManagedCapabilitySurface(ctx, surface); err != nil {
+		t.Fatalf("persist completion blocker capability: %v", err)
+	}
+	planFingerprint, err := surface.PlanFingerprint()
+	if err != nil {
+		t.Fatalf("fingerprint completion blocker capability: %v", err)
+	}
+	frameBytes, err := agentframe.EncodeDurable(managedCompletionTestFrame(t, authority, "mock_python"))
+	if err != nil {
+		t.Fatalf("encode completion blocker frame: %v", err)
+	}
+	evidence := authority.Evidence()
+	if conflictingRun {
+		evidence["usage_target"].(map[string]any)["run_id"] = authorityRunID
+	}
+	authorityEvidence, _ := json.Marshal(evidence)
 	lineage, _ := json.Marshal(map[string]any{"run_id": runID})
 	query := `
 		INSERT INTO runtime_external_effect_operations (
 			operation_id, effect_kind, effect_class, execution_mode, bundle_hash,
 			authority_kind, authority_id, agent_id, agent_name_owner, agent_name_source,
 			agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, runtime_epoch, generation,
-			capability_plan_fingerprint, authority_evidence, lineage, request_fingerprint, state
+			capability_plan_fingerprint, agent_frame_bytes, authority_evidence, lineage, request_fingerprint, state
 		) VALUES (?, 'provider_turn', 'write_or_unknown', 'live', ?,
 		          'normal_agent', 'completion-matrix-agent', ?, ?, ?, ?, ?, ?, ?, 1, 1,
-		          'matrix-plan', ?, ?, 'matrix-request', ?)`
+		          ?, ?, ?, ?, 'matrix-request', ?)`
 	args := []any{
 		operationID, runLifecycleCandidateParityBundleHash,
 		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence,
 		fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath,
-		string(authority), string(lineage), operationState,
+		planFingerprint, frameBytes, string(authorityEvidence), string(lineage), operationState,
 	}
 	if fixture.postgres {
 		query = `
@@ -361,10 +388,10 @@ func insertCompletionBlockerEffect(
 				operation_id, effect_kind, effect_class, execution_mode, bundle_hash,
 				authority_kind, authority_id, agent_id, agent_name_owner, agent_name_source,
 				agent_route_presence, flow_scope_key, flow_instance_id, flow_instance, runtime_epoch, generation,
-				capability_plan_fingerprint, authority_evidence, lineage, request_fingerprint, state
+				capability_plan_fingerprint, agent_frame_bytes, authority_evidence, lineage, request_fingerprint, state
 			) VALUES ($1::uuid, 'provider_turn', 'write_or_unknown', 'live', $2,
 			          'normal_agent', 'completion-matrix-agent', $3, $4, $5, $6, $7, $8, $9, 1, 1,
-			          'matrix-plan', $10::jsonb, $11::jsonb, 'matrix-request', $12)`
+			          $10, $11, $12::jsonb, $13::jsonb, 'matrix-request', $14)`
 	}
 	if _, err := fixture.db.ExecContext(ctx, query, args...); err != nil {
 		t.Fatalf("insert completion blocker operation: %v", err)
@@ -377,19 +404,19 @@ func insertCompletionBlockerEffect(
 			INSERT INTO runtime_external_effect_attempts (
 				attempt_id, operation_id, attempt_ordinal, adapter, transport,
 				execution_mode, generation, execution_owner, lease_expires_at, fence_generation,
-				usage_target_kind, usage_target_id, target_ordinal, state, authorized_at
+				usage_target_kind, usage_target_id, target_ordinal, capability_surface_id, state, authorized_at
 			) VALUES (?, ?, ?, 'matrix', 'in_process', 'live', 1, 'matrix-worker', ?, 1,
-			          'conversation_fork_turn_completion', ?, 1, ?, ?)`
+			          'agent_turn', ?, NULL, ?, ?, ?)`
 		now := time.Date(2026, 7, 29, 11, 0, 0, 0, time.UTC)
-		args = []any{latestAttemptID, operationID, ordinal, now.Add(time.Hour), targetID, state, now}
+		args = []any{latestAttemptID, operationID, ordinal, now.Add(time.Hour), targetID, surface.ID, state, now}
 		if fixture.postgres {
 			query = `
 				INSERT INTO runtime_external_effect_attempts (
 					attempt_id, operation_id, attempt_ordinal, adapter, transport,
 					execution_mode, generation, execution_owner, lease_expires_at, fence_generation,
-					usage_target_kind, usage_target_id, target_ordinal, state, authorized_at
+					usage_target_kind, usage_target_id, target_ordinal, capability_surface_id, state, authorized_at
 				) VALUES ($1::uuid, $2::uuid, $3, 'matrix', 'in_process', 'live', 1, 'matrix-worker', $4, 1,
-				          'conversation_fork_turn_completion', $5::uuid, 1, $6, $7)`
+				          'agent_turn', $5::uuid, NULL, $6::uuid, $7, $8)`
 		}
 		if _, err := fixture.db.ExecContext(ctx, query, args...); err != nil {
 			t.Fatalf("insert completion blocker attempt: %v", err)

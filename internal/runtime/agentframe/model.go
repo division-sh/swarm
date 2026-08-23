@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
 
 const (
@@ -577,6 +578,9 @@ func (f Frame) Validate() error {
 	if !f.Turn.Kind.Valid() || f.Turn.Capability.SurfaceID == "" || f.Turn.Capability.PlanFingerprint == "" {
 		return fmt.Errorf("execution frame turn is incomplete")
 	}
+	if strings.TrimSpace(f.Turn.Event.ID) == "" || strings.TrimSpace(f.Turn.Event.Type) == "" || strings.TrimSpace(f.Turn.Event.RunID) == "" || !executionmode.Mode(f.Turn.Event.ExecutionMode).Valid() {
+		return fmt.Errorf("execution frame event identity or causal execution mode is incomplete")
+	}
 	if !json.Valid(f.Turn.Event.Payload) {
 		return fmt.Errorf("execution frame event payload is not valid JSON")
 	}
@@ -648,6 +652,13 @@ func validateFrameID(frameID string) error {
 		return fmt.Errorf("execution frame id authority coordinate: %w", err)
 	}
 	return nil
+}
+
+func (f Frame) ProviderTurnAuthorityID() (string, error) {
+	if err := validateFrameID(f.FrameID); err != nil {
+		return "", err
+	}
+	return strings.TrimPrefix(f.FrameID, frameIDPrefix), nil
 }
 
 func (f Frame) MatchesSurface(surface managedcapabilities.Surface) bool {

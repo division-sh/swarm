@@ -99,9 +99,13 @@ func withProviderTurnAuthority(ctx context.Context, session *Session) (context.C
 		runID = strings.TrimSpace(session.MemoryIdentity.RunID)
 	}
 	turnOrdinal := session.TurnCount + 1
+	authorityID, err := providerTurnAuthorityID(ctx, actorIdentity, executionKind, executionID, runID, session.ID, turnOrdinal)
+	if err != nil {
+		return ctx, managedcapabilities.Authority{}, err
+	}
 	authority := managedcapabilities.Authority{
 		Kind:                 managedcapabilities.AuthorityProviderTurn,
-		ID:                   uuid.NewString(),
+		ID:                   authorityID,
 		ExecutionKind:        executionKind,
 		ExecutionAuthorityID: executionID,
 		RunID:                runID,
@@ -112,6 +116,28 @@ func withProviderTurnAuthority(ctx context.Context, session *Session) (context.C
 		return ctx, managedcapabilities.Authority{}, err
 	}
 	return context.WithValue(ctx, providerTurnAuthorityKey{}, authority), authority, nil
+}
+
+func providerTurnAuthorityID(ctx context.Context, actorIdentity runtimeagentidentity.Identity, executionKind managedcapabilities.ExecutionKind, executionID, runID, sessionID string, turnOrdinal int) (string, error) {
+	logicalIdentity, ok := runtimeeffects.LogicalOperationIdentityFromContext(ctx)
+	if !ok {
+		return "", fmt.Errorf("managed capability provider turn requires logical operation identity")
+	}
+	actorFingerprint, err := actorIdentity.Fingerprint()
+	if err != nil {
+		return "", fmt.Errorf("managed capability provider turn actor fingerprint: %w", err)
+	}
+	seed := strings.Join([]string{
+		"provider-turn-authority-v1",
+		string(executionKind),
+		strings.TrimSpace(executionID),
+		actorFingerprint,
+		strings.TrimSpace(runID),
+		strings.TrimSpace(sessionID),
+		fmt.Sprintf("%d", turnOrdinal),
+		logicalIdentity,
+	}, "\x00")
+	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(seed)).String(), nil
 }
 
 func providerTurnAuthorityFromContext(ctx context.Context) (managedcapabilities.Authority, bool) {

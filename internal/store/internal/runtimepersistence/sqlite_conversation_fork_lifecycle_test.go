@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/google/uuid"
 )
@@ -290,24 +292,21 @@ func seedSQLiteConversationForkSource(t *testing.T, s *SQLiteRuntimeStore, base 
 			t.Fatalf("seed SQLite conversation fork source: %v\nquery: %s", err, statement.query)
 		}
 	}
-	capability1 := seedManagedAgentTurnCapabilitySurface(t, s, source.runID, identity, source.sessionID, source.turn1ID, "session", "global")
-	capability2 := seedManagedAgentTurnCapabilitySurface(t, s, source.runID, identity, source.sessionID, source.turn2ID, "session", "global")
-	query := `INSERT INTO agent_turns (
-		turn_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-		flow_scope_key, flow_instance_id, session_id, flow_instance, memory_enabled, memory_source,
-		trigger_event_id, trigger_event_type, capability_surface_id, parse_ok, execution_mode, created_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', ?, 'task.ready', ?, true, 'live', ?),
-		(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 'authored', ?, 'task.done', ?, true, 'live', ?)`
-	args := []any{
-		source.turn1ID, source.runID, fields.AgentID, fields.NameOwner, fields.NameSource,
-		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, source.sessionID, fields.FlowInstancePath,
-		source.event1ID, capability1, source.turn1At,
-		source.turn2ID, source.runID, fields.AgentID, fields.NameOwner, fields.NameSource,
-		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, source.sessionID, fields.FlowInstancePath,
-		source.event2ID, capability2, source.turn2At,
-	}
-	if _, err := s.backend.ExecContext(ctx, query, args...); err != nil {
-		t.Fatalf("seed SQLite conversation fork source: %v\nquery: %s", err, query)
+	for _, turn := range []struct {
+		id, eventID, eventType string
+		at                     time.Time
+	}{
+		{source.turn1ID, source.event1ID, "task.ready", source.turn1At},
+		{source.turn2ID, source.event2ID, "task.done", source.turn2At},
+	} {
+		if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, ctx, s, runtimellm.AgentTurnRecord{
+			AgentID: source.agentID, Identity: testAgentMemoryIdentity(t, source.runID, source.agentID, conversationForkSourceFlowInstance),
+			Memory: agentmemory.Authored(true), SessionID: source.sessionID, RunID: source.runID,
+			FlowInstance: conversationForkSourceFlowInstance, TriggerEventID: turn.eventID,
+			TriggerEventType: turn.eventType, ParseOK: true,
+		}, managedAgentTurnFixtureOptions{TurnID: turn.id, Now: turn.at}); err != nil {
+			t.Fatalf("seed SQLite conversation fork turn %s: %v", turn.id, err)
+		}
 	}
 	return source
 }

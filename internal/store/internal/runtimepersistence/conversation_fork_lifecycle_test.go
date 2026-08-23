@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -636,7 +638,8 @@ func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time) conver
 		turn2At:    base.Add(-1 * time.Minute),
 	}
 	ctx := testAuthorActivityContext()
-	requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(db)), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: source.runID, StartedAt: base.Add(-3 * time.Minute), BundleHash: source.bundleHash})
+	store := admitTestPostgresStore(t, db)
+	requireRunFixtureForTest(t, ctx, store, semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: source.runID, StartedAt: base.Add(-3 * time.Minute), BundleHash: source.bundleHash})
 	identity := testAgentIdentity(t, source.agentID, conversationForkSourceFlowInstance)
 	fields, err := identity.StorageFields()
 	if err != nil {
@@ -655,21 +658,21 @@ func seedConversationForkSource(t *testing.T, db *sql.DB, base time.Time) conver
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, base.Add(-3*time.Minute)); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
-	capability1 := seedManagedAgentTurnCapabilitySurface(t, admitTestPostgresStore(t, db), source.runID, identity, source.sessionID, source.turn1ID, "session", "global")
-	capability2 := seedManagedAgentTurnCapabilitySurface(t, admitTestPostgresStore(t, db), source.runID, identity, source.sessionID, source.turn2ID, "session", "global")
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, agent_name_owner, agent_name_source, agent_route_presence,
-			flow_scope_key, flow_instance_id, session_id, flow_instance, memory_enabled, memory_source,
-			trigger_event_id, trigger_event_type, capability_surface_id, parse_ok, execution_mode, created_at
-		)
-		VALUES
-			($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9::uuid, $10, TRUE, 'authored', $11::uuid, 'task.ready', $12::uuid, true, 'live', $13),
-			($14::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9::uuid, $10, TRUE, 'authored', $15::uuid, 'task.done', $16::uuid, true, 'live', $17)
-	`, source.turn1ID, source.runID, fields.AgentID, fields.NameOwner, fields.NameSource,
-		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, source.sessionID, fields.FlowInstancePath,
-		source.event1ID, capability1, source.turn1At, source.turn2ID, source.event2ID, capability2, source.turn2At); err != nil {
-		t.Fatalf("seed turns: %v", err)
+	for _, turn := range []struct {
+		id, eventID, eventType string
+		at                     time.Time
+	}{
+		{source.turn1ID, source.event1ID, "task.ready", source.turn1At},
+		{source.turn2ID, source.event2ID, "task.done", source.turn2At},
+	} {
+		if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, ctx, store, runtimellm.AgentTurnRecord{
+			AgentID: source.agentID, Identity: testAgentMemoryIdentity(t, source.runID, source.agentID, conversationForkSourceFlowInstance),
+			Memory: agentmemory.Authored(true), SessionID: source.sessionID, RunID: source.runID,
+			FlowInstance: conversationForkSourceFlowInstance, TriggerEventID: turn.eventID,
+			TriggerEventType: turn.eventType, ParseOK: true,
+		}, managedAgentTurnFixtureOptions{TurnID: turn.id, Now: turn.at}); err != nil {
+			t.Fatalf("seed turn %s: %v", turn.id, err)
+		}
 	}
 	return source
 }

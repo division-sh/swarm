@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -18,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -61,7 +63,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 		t.Fatalf("cleanup run IDs = %#v, want two runs", result.RunIDs)
 	}
 	assertCleanupTableResult(t, result, "runs", 2, 2)
-	assertCleanupTableResult(t, result, "events", 5, 5)
+	assertCleanupTableResult(t, result, "events", 6, 6)
 	assertCleanupTableResult(t, result, "event_receipts", 1, 1)
 	assertCleanupTableResult(t, result, "dead_letters", 2, 2)
 	assertCleanupTableResult(t, result, "event_delivery_handler_rule_selections", 2, 2)
@@ -110,13 +112,15 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 		"flow_instances",
 		"routing_rules",
 		"mailbox",
-		"spend_ledger",
 		"generated_entity_fixture",
 		"generated_node_state_fixture",
 	} {
 		if got := countRows(t, ctx, pg, table); got != 1 {
 			t.Fatalf("%s rows after cleanup = %d, want 1 preserved row", table, got)
 		}
+	}
+	if got := countRows(t, ctx, pg, "spend_ledger"); got != 2 {
+		t.Fatalf("spend_ledger rows after cleanup = %d, want 2 preserved immutable rows", got)
 	}
 }
 
@@ -150,7 +154,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunCountsWithoutMutation(
 		t.Fatal("cleanup result DryRun = false, want true")
 	}
 	assertCleanupTableResult(t, result, "runs", 2, 0)
-	assertCleanupTableResult(t, result, "events", 5, 0)
+	assertCleanupTableResult(t, result, "events", 6, 0)
 	assertCleanupTableResult(t, result, "conversation_forks", 1, 0)
 	assertCleanupTableResult(t, result, "human_task_continuations", 1, 0)
 	assertCleanupTableResult(t, result, "decision_cards", 1, 0)
@@ -158,8 +162,8 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunCountsWithoutMutation(
 	if got := countRows(t, ctx, pg, "runs"); got != 2 {
 		t.Fatalf("runs after dry-run = %d, want 2", got)
 	}
-	if got := countRows(t, ctx, pg, "events"); got != 6 {
-		t.Fatalf("events after dry-run = %d, want 6 including preserved no-run event", got)
+	if got := countRows(t, ctx, pg, "events"); got != 7 {
+		t.Fatalf("events after dry-run = %d, want 7 including preserved no-run event", got)
 	}
 	if got := countRows(t, ctx, pg, "mailbox"); got != 1 {
 		t.Fatalf("mailbox after dry-run = %d, want preserved", got)
@@ -1391,18 +1395,12 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		t.Fatalf("seed conversation forks: %v", err)
 	}
 	turnID := uuid.NewString()
-	capabilitySurfaceID := seedManagedAgentTurnCapabilitySurface(
-		t, pg, runA, agentIdentity, sessionID, turnID, "session", "agent-a:global",
-	)
-	if _, err := pg.backend.ExecContext(ctx, `
-		INSERT INTO agent_turns (
-			turn_id, run_id, agent_id, agent_name_owner, agent_name_source,
-			agent_route_presence, flow_scope_key, flow_instance_id,
-			session_id, flow_instance, memory_enabled, memory_source, capability_surface_id, execution_mode
-		)
-		VALUES ($1::uuid, $2::uuid, $5, $6, $7, $8, $9, $10, $3::uuid, $11, TRUE, 'authored', $4::uuid, 'live')
-	`, turnID, runA, sessionID, capabilitySurfaceID, agentFields.AgentID, agentFields.NameOwner, agentFields.NameSource,
-		agentFields.RoutePresence, agentFields.FlowScopeKey, agentFields.FlowInstanceID, agentFields.FlowInstancePath); err != nil {
+	if err := persistManagedAgentTurnReadbackFixtureWithOptions(t, ctx, pg, runtimellm.AgentTurnRecord{
+		AgentID: agentIdentity.AgentID(), Identity: agentmemory.Identity{RunID: runA, Agent: agentIdentity},
+		RunID: runA, FlowInstance: agentIdentity.FlowInstance(), Memory: agentmemory.Authored(true), SessionID: sessionID,
+		EntityID:       entityID,
+		RequestPayload: []byte(`{}`), ResponseRaw: []byte(`{}`), ParseOK: true,
+	}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: seededAt}); err != nil {
 		t.Fatalf("seed agent turn: %v", err)
 	}
 	if _, err := pg.backend.ExecContext(ctx, `

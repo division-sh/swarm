@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
@@ -243,6 +244,7 @@ type AuthorizeRequest struct {
 	Transport          string
 	RequestFingerprint string
 	CapabilitySurface  *managedcapabilities.Surface
+	AgentFrame         *agentframe.Frame
 	Origin             CompletionOrigin
 	Lineage            map[string]string
 	Now                time.Time
@@ -566,6 +568,14 @@ func managedEffectCapabilitySurface(ctx context.Context, authority Authority) (m
 }
 
 func BeginCompletion(ctx context.Context, adapter string, request []byte, lineage map[string]string) (*Handle, error) {
+	return beginCompletion(ctx, adapter, request, nil, lineage)
+}
+
+func BeginManagedCompletion(ctx context.Context, adapter string, request []byte, frame agentframe.Frame, lineage map[string]string) (*Handle, error) {
+	return beginCompletion(ctx, adapter, request, &frame, lineage)
+}
+
+func beginCompletion(ctx context.Context, adapter string, request []byte, frame *agentframe.Frame, lineage map[string]string) (*Handle, error) {
 	if err := admitExecutionMode(ctx, adapter); err != nil {
 		return nil, err
 	}
@@ -621,7 +631,7 @@ func BeginCompletion(ctx context.Context, adapter string, request []byte, lineag
 	}
 	attempt, err := controller.Authorize(ctx, AuthorizeRequest{
 		OperationID: operationID, Adapter: adapter, RequestFingerprint: Fingerprint(request),
-		CapabilitySurface: capabilitySurface, Origin: origin, Lineage: lineage,
+		CapabilitySurface: capabilitySurface, AgentFrame: frame, Origin: origin, Lineage: lineage,
 	})
 	if err != nil {
 		return nil, err
@@ -901,6 +911,14 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 				return Attempt{}, err
 			}
 			req.CapabilitySurface = &validated
+			if req.AgentFrame == nil {
+				return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "agent_execution_frame_missing_or_mismatched", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})
+			}
+			if err := ValidateManagedAgentFrame(*req.AgentFrame, authority, validated); err != nil {
+				return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "agent_execution_frame_authority_mismatch", "external-effects", "authorize_attempt", map[string]any{
+					"adapter": req.Adapter, "validation_error": err.Error(),
+				})
+			}
 			if authority.Kind == AuthorityNormalAgent {
 				if err := req.Origin.Validate(); err != nil {
 					return Attempt{}, runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "completion_origin_missing_or_ambiguous", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter}, err)
@@ -912,18 +930,21 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 			} else if req.Origin.Validate() == nil {
 				return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_origin_delivery_claim_owner_mismatch", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter, "authority_kind": authority.Kind})
 			}
-		} else if req.CapabilitySurface != nil {
+		} else if req.CapabilitySurface != nil || req.AgentFrame != nil {
 			return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_capability_surface_owner_mismatch", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter, "target_kind": authority.Target.Kind})
 		}
 	} else if registration.Kind == KindProviderStartupProbe {
-		if req.CapabilitySurface == nil || !startupProbeSurfaceMatchesAuthority(*req.CapabilitySurface, authority) {
+		if req.AgentFrame != nil || req.CapabilitySurface == nil || !startupProbeSurfaceMatchesAuthority(*req.CapabilitySurface, authority) {
 			return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "startup_probe_authority_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})
 		}
 	} else if registration.Kind == KindServeRegistration {
-		if authority.Kind != AuthorityServeRegistration || req.CapabilitySurface != nil {
+		if authority.Kind != AuthorityServeRegistration || req.CapabilitySurface != nil || req.AgentFrame != nil {
 			return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "serve_registration_authority_invalid", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})
 		}
 	} else {
+		if req.AgentFrame != nil {
+			return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "agent_execution_frame_owner_mismatch", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})
+		}
 		if req.CapabilitySurface == nil {
 			return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_effect_capability_surface_missing", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter, "authority_kind": authority.Kind})
 		}

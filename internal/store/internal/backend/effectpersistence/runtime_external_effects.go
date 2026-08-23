@@ -1,6 +1,7 @@
 package effectpersistence
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
@@ -318,6 +320,7 @@ type existingExternalAttempt struct {
 	generation           uint64
 	fingerprint          string
 	capabilityPlan       string
+	agentFrame           []byte
 	capabilitySurfaceID  string
 	originDeliveryID     string
 	originClaimVersion   int64
@@ -745,8 +748,20 @@ func (e existingExternalAttempt) matchesOperationRequest(req runtimeeffects.Auth
 	if err != nil {
 		return false
 	}
+	frameBytes, err := encodeAuthorizeAgentFrame(req)
+	if err != nil {
+		return false
+	}
 	return e.kind == string(req.Kind) && e.class == string(req.Class) && e.adapter == req.Adapter &&
-		e.transport == req.Transport && e.fingerprint == req.RequestFingerprint && e.capabilityPlan == planFingerprint
+		e.transport == req.Transport && e.fingerprint == req.RequestFingerprint && e.capabilityPlan == planFingerprint &&
+		bytes.Equal(e.agentFrame, frameBytes)
+}
+
+func encodeAuthorizeAgentFrame(req runtimeeffects.AuthorizeRequest) ([]byte, error) {
+	if req.AgentFrame == nil {
+		return nil, nil
+	}
+	return agentframe.EncodeDurable(*req.AgentFrame)
 }
 
 func existingOriginMatches(existing existingExternalAttempt, origin runtimeeffects.CompletionOrigin) bool {
@@ -772,7 +787,7 @@ func loadExistingExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, operat
 		       COALESCE(o.agent_route_presence,''), COALESCE(o.flow_scope_key,''),
 		       COALESCE(o.flow_instance_id,''), COALESCE(o.flow_instance,''),
 		       COALESCE(o.runtime_epoch,0), o.generation,
-		       o.request_fingerprint, COALESCE(o.capability_plan_fingerprint,''), o.state, a.attempt_id::text, a.adapter, a.transport, a.state,
+		       o.request_fingerprint, COALESCE(o.capability_plan_fingerprint,''), o.agent_frame_bytes, o.state, a.attempt_id::text, a.adapter, a.transport, a.state,
 		       a.attempt_ordinal, (a.launched_at IS NOT NULL), COALESCE(a.failure, '{}'::jsonb)::text, COALESCE(a.capability_surface_id::text,''),
 		       COALESCE(a.origin_kind,''),COALESCE(a.origin_delivery_id::text,''),COALESCE(a.origin_claim_token::text,''),COALESCE(a.origin_claim_version,0),
 		       COALESCE(a.origin_directive_operation_id::text,''),COALESCE(a.origin_directive_owner_id,'')
@@ -784,7 +799,7 @@ func loadExistingExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, operat
 	`, operationID).Scan(&existing.authorityKind, &existing.authorityID, &existing.operationMode, &existing.attemptMode, &existing.kind, &existing.class,
 		&existing.agentID, &existing.agentNameOwner, &existing.agentNameSource, &existing.agentRoutePresence,
 		&existing.flowScopeKey, &existing.flowInstanceID, &existing.flowInstance, &existing.epoch, &existing.generation,
-		&existing.fingerprint, &existing.capabilityPlan, &existing.operationState, &existing.attemptID, &existing.adapter, &existing.transport, &existing.attemptState,
+		&existing.fingerprint, &existing.capabilityPlan, &existing.agentFrame, &existing.operationState, &existing.attemptID, &existing.adapter, &existing.transport, &existing.attemptState,
 		&existing.attemptOrdinal, &existing.launched, &existing.failureJSON, &existing.capabilitySurfaceID,
 		&existing.originKind, &existing.originDeliveryID, &existing.originClaimToken, &existing.originClaimVersion, &existing.originDirectiveID, &existing.originDirectiveOwner)
 	if err == sql.ErrNoRows {
@@ -805,7 +820,7 @@ func loadExistingExternalAttemptSQLite(ctx context.Context, tx *sql.Tx, operatio
 		       COALESCE(o.agent_route_presence,''), COALESCE(o.flow_scope_key,''),
 		       COALESCE(o.flow_instance_id,''), COALESCE(o.flow_instance,''),
 		       COALESCE(o.runtime_epoch,0), o.generation,
-		       o.request_fingerprint, COALESCE(o.capability_plan_fingerprint,''), o.state, a.attempt_id, a.adapter, a.transport, a.state,
+		       o.request_fingerprint, COALESCE(o.capability_plan_fingerprint,''), o.agent_frame_bytes, o.state, a.attempt_id, a.adapter, a.transport, a.state,
 		       a.attempt_ordinal, (a.launched_at IS NOT NULL), COALESCE(a.failure, '{}'), COALESCE(a.capability_surface_id,''),
 		       COALESCE(a.origin_kind,''),COALESCE(a.origin_delivery_id,''),COALESCE(a.origin_claim_token,''),COALESCE(a.origin_claim_version,0),
 		       COALESCE(a.origin_directive_operation_id,''),COALESCE(a.origin_directive_owner_id,'')
@@ -817,7 +832,7 @@ func loadExistingExternalAttemptSQLite(ctx context.Context, tx *sql.Tx, operatio
 	`, operationID).Scan(&existing.authorityKind, &existing.authorityID, &existing.operationMode, &existing.attemptMode, &existing.kind, &existing.class,
 		&existing.agentID, &existing.agentNameOwner, &existing.agentNameSource, &existing.agentRoutePresence,
 		&existing.flowScopeKey, &existing.flowInstanceID, &existing.flowInstance, &existing.epoch, &existing.generation,
-		&existing.fingerprint, &existing.capabilityPlan, &existing.operationState, &existing.attemptID, &existing.adapter, &existing.transport, &existing.attemptState,
+		&existing.fingerprint, &existing.capabilityPlan, &existing.agentFrame, &existing.operationState, &existing.attemptID, &existing.adapter, &existing.transport, &existing.attemptState,
 		&existing.attemptOrdinal, &existing.launched, &existing.failureJSON, &existing.capabilitySurfaceID,
 		&existing.originKind, &existing.originDeliveryID, &existing.originClaimToken, &existing.originClaimVersion, &existing.originDirectiveID, &existing.originDirectiveOwner)
 	if err == sql.ErrNoRows {
@@ -1005,6 +1020,10 @@ func insertExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, authority ru
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
 	}
+	agentFrame, err := encodeAuthorizeAgentFrame(req)
+	if err != nil {
+		return runtimeeffects.Attempt{}, err
+	}
 	attemptArgs := []any{req.AttemptID, req.OperationID, req.Adapter, req.Transport, authority.RuntimeEpoch(), authority.ExecutionMode, authority.Generation(),
 		authority.ExecutionOwner, authority.LeaseExpiresAt.UTC(), authority.FenceGeneration,
 		string(authority.Target.Kind), authority.Target.ID, authority.Target.Ordinal, capabilitySurfaceID}
@@ -1016,13 +1035,13 @@ func insertExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, authority ru
 			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, flow_instance,
 			runtime_epoch, generation, selected_execution_id, fork_turn_id, startup_authority_id,
-			capability_plan_fingerprint, authority_evidence, lineage, request_fingerprint, state, created_at, updated_at
+			capability_plan_fingerprint, agent_frame_bytes, authority_evidence, lineage, request_fingerprint, state, created_at, updated_at
 		) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NULLIF($15,0), $16,
-		          NULLIF($17,'')::uuid, NULLIF($18,'')::uuid, NULLIF($19,'')::uuid, NULLIF($20,''), $21::jsonb, $22::jsonb, $23, 'authorized', $24, $24)
+		          NULLIF($17,'')::uuid, NULLIF($18,'')::uuid, NULLIF($19,'')::uuid, NULLIF($20,''), $21, $22::jsonb, $23::jsonb, $24, 'authorized', $25, $25)
 	`, req.OperationID, string(req.Kind), string(req.Class), authority.ExecutionMode, bundleHash, string(authority.Kind), authority.ID,
 		agentIdentity[0], agentIdentity[1], agentIdentity[2], agentIdentity[3], agentIdentity[4], agentIdentity[5], agentIdentity[6],
 		authority.RuntimeEpoch(), authority.Generation(), authority.SelectedFork.ExecutionID, authority.ForkChat.ForkTurnID,
-		externalEffectStartupAuthorityID(authority), capabilityPlan, string(authorityEvidence), string(lineage), req.RequestFingerprint, req.Now.UTC()); err != nil {
+		externalEffectStartupAuthorityID(authority), capabilityPlan, agentFrame, string(authorityEvidence), string(lineage), req.RequestFingerprint, req.Now.UTC()); err != nil {
 		return runtimeeffects.Attempt{}, fmt.Errorf("insert external effect operation: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -1058,6 +1077,10 @@ func insertExternalAttemptSQLiteTx(ctx context.Context, tx *sql.Tx, authority ru
 	if err != nil {
 		return runtimeeffects.Attempt{}, err
 	}
+	agentFrame, err := encodeAuthorizeAgentFrame(req)
+	if err != nil {
+		return runtimeeffects.Attempt{}, err
+	}
 	attemptArgs := []any{req.AttemptID, req.OperationID, req.Adapter, req.Transport, authority.RuntimeEpoch(), authority.ExecutionMode, authority.Generation(),
 		authority.ExecutionOwner, authority.LeaseExpiresAt.UTC(), authority.FenceGeneration,
 		string(authority.Target.Kind), authority.Target.ID, authority.Target.Ordinal, capabilitySurfaceID}
@@ -1069,12 +1092,12 @@ func insertExternalAttemptSQLiteTx(ctx context.Context, tx *sql.Tx, authority ru
 			agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 			flow_scope_key, flow_instance_id, flow_instance,
 			runtime_epoch, generation, selected_execution_id, fork_turn_id, startup_authority_id,
-			capability_plan_fingerprint, authority_evidence, lineage, request_fingerprint, state, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?,0), ?, NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), ?, ?, ?, 'authorized', ?, ?)
+			capability_plan_fingerprint, agent_frame_bytes, authority_evidence, lineage, request_fingerprint, state, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?,0), ?, NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), NULLIF(?,''), ?, ?, ?, ?, 'authorized', ?, ?)
 	`, req.OperationID, string(req.Kind), string(req.Class), authority.ExecutionMode, bundleHash, string(authority.Kind), authority.ID,
 		agentIdentity[0], agentIdentity[1], agentIdentity[2], agentIdentity[3], agentIdentity[4], agentIdentity[5], agentIdentity[6],
 		authority.RuntimeEpoch(), authority.Generation(), authority.SelectedFork.ExecutionID, authority.ForkChat.ForkTurnID,
-		externalEffectStartupAuthorityID(authority), capabilityPlan, string(authorityEvidence), string(lineage), req.RequestFingerprint, req.Now.UTC(), req.Now.UTC()); err != nil {
+		externalEffectStartupAuthorityID(authority), capabilityPlan, agentFrame, string(authorityEvidence), string(lineage), req.RequestFingerprint, req.Now.UTC(), req.Now.UTC()); err != nil {
 		return runtimeeffects.Attempt{}, fmt.Errorf("insert sqlite external effect operation: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -1400,6 +1423,9 @@ func (s *EffectPostgresOwner) SettleExternalAttempt(ctx context.Context, settlem
 			if err != nil {
 				return err
 			}
+			if _, err := tx.ExecContext(txctx, `DELETE FROM runtime_effect_budget_reservations WHERE attempt_id=$1::uuid`, settlement.AttemptID); err != nil {
+				return fmt.Errorf("release external-effect budget reservations: %w", err)
+			}
 			if changed {
 				runID, err := externalEffectOperationRunID(txctx, tx, settlement.OperationID, true)
 				if err != nil {
@@ -1430,6 +1456,9 @@ func (s *EffectSQLiteOwner) SettleExternalAttempt(ctx context.Context, settlemen
 			changed, err := settleExternalAttemptSQLiteTx(txctx, tx, settlement)
 			if err != nil {
 				return err
+			}
+			if _, err := tx.ExecContext(txctx, `DELETE FROM runtime_effect_budget_reservations WHERE attempt_id=?`, settlement.AttemptID); err != nil {
+				return fmt.Errorf("release sqlite external-effect budget reservations: %w", err)
 			}
 			if changed {
 				runID, err := externalEffectOperationRunID(txctx, tx, settlement.OperationID, false)

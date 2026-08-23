@@ -10644,6 +10644,47 @@ agent_execution_frame:
   - complete and validate AgentExecutionFrame
   - invoke one typed managed adapter call
   - record provider/call/effect evidence outside the immutable frame
+  durable_persistence:
+    promoted_by: '#2033'
+    codec_owner: internal/runtime/agentframe.EncodeDurable + internal/runtime/agentframe.DecodeDurable
+    encoding_version: agent-execution-frame-durable.v1
+    operation_owner: >
+      A fresh-schema managed provider-turn operation whose usage target is `agent_turn` persists the one validated frame
+      before provider launch. The operation is the sole durable private-frame owner. Attempts, provider-drain rows, and
+      recovery scans reference that operation and MUST NOT copy, reconstruct, normalize, or independently hash the frame.
+      Provider turns for forkchat and startup probes, tools, and every non-agent-turn effect forbid frame bytes.
+    byte_rule: >
+      The canonical private codec preserves the exact event payload and tool-result byte sequences admitted by the live
+      frame. SQLite BLOB and PostgreSQL BYTEA are the only selected-store representations. JSONB, semantic JSON equality,
+      request/response payloads, capability evidence, mutable contracts, and provider projections are not byte authority.
+      Decoding rejects unknown fields, trailing bytes, non-canonical envelopes, invalid frame content hashes, and any
+      restored-payload mismatch.
+    retry_rule: >
+      Re-authorization of one existing operation accepts only byte-identical canonical frame evidence. Missing, corrupt,
+      or byte-distinct evidence fails closed before a second provider attempt; request or semantic-JSON equality cannot
+      weaken this comparison.
+    settlement_rule: >
+      Current, drained, racing, startup-recovered, and terminal-run-recovered settlement hydrate the same operation bytes,
+      validate operation/attempt/authority/turn/capability/event binding, and atomically copy those exact bytes to the one
+      `agent_turns` row. `agent_turns.completion_attempt_id` is required and unique; its attempt resolves to that operation.
+      A definitive CLI prelaunch or process-start rejection settles only the attempt and releases its budget reservation;
+      it cannot materialize a provider turn that never executed. A retry of that logical turn reuses the exact
+      operation-owned frame and materializes the single immutable turn only from terminal provider evidence.
+    public_projection: >
+      `conversation.get_turn` is the sole historical projection owner and derives only version, frame_id, content_hash,
+      turn_kind, and the conditionally required parent_frame_id from the persisted private frame. Compact list, latest,
+      session, dashboard, activity, trace, forkchat, and static/effective `agent.frame` surfaces do not select or hydrate
+      private frame bytes. Raw event/tool payloads, prompt/intent/criteria, capabilities, directives, remediation reasons,
+      lifecycle, pack, and provider evidence remain private.
+    occurrence_rule: >
+      Same-authority retry and crash recovery reuse the operation-owned frame exactly. Public event/agent replay and
+      selected-fork execution create fresh events, provider-turn authorities, and frames from their admitted selected
+      inputs. Source frame identity/bytes are lineage only and ambient current master is never a regeneration source.
+      Conversation forkchat and startup probes remain separate frame-free concepts.
+    fresh_store_policy: >
+      Exact frame evidence is mandatory for every current managed operation and `agent_turns` producer. Old selected stores,
+      optional rows, absent sentinels, reconstruction, migration, compatibility readers, dual writers, and alternate codecs
+      are unsupported.
   inspection:
     owner: api_specification.method_catalog.agent.frame
     static_selector: Exact bundle_hash, authored flow (`root` for root), and agent_id. Runtime identity, bundle source,
@@ -13773,6 +13814,7 @@ platform_tables:
             fork_turn_id       UUID REFERENCES conversation_fork_turns(fork_turn_id),
             startup_authority_id UUID,
             capability_plan_fingerprint TEXT,
+            agent_frame_bytes BYTEA,
             authority_evidence JSONB NOT NULL DEFAULT '{}',
             lineage            JSONB NOT NULL DEFAULT '{}',
             request_fingerprint TEXT NOT NULL,
@@ -13782,6 +13824,7 @@ platform_tables:
             completed_at       TIMESTAMPTZ,
             CHECK (authority_kind IN ('conversation_fork_chat', 'serve_registration') OR NULLIF(TRIM(COALESCE(capability_plan_fingerprint, '')), '') IS NOT NULL),
             CHECK (authority_kind <> 'conversation_fork_chat' OR capability_plan_fingerprint IS NULL),
+            CHECK ((effect_kind <> 'provider_turn' OR authority_kind NOT IN ('normal_agent', 'selected_contract_fork') OR agent_frame_bytes IS NOT NULL) AND (agent_frame_bytes IS NULL OR (effect_kind = 'provider_turn' AND authority_kind IN ('normal_agent', 'selected_contract_fork')))),
             CHECK ((authority_kind = 'normal_agent' AND agent_id IS NOT NULL AND agent_name_owner IS NOT NULL AND agent_name_source IS NOT NULL AND agent_route_presence IS NOT NULL AND flow_scope_key IS NOT NULL AND flow_instance_id IS NOT NULL AND flow_instance IS NOT NULL AND runtime_epoch > 0 AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL) OR (authority_kind = 'selected_contract_fork' AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NOT NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL) OR (authority_kind = 'conversation_fork_chat' AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NOT NULL AND startup_authority_id IS NULL) OR (authority_kind = 'startup_probe' AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NOT NULL) OR (authority_kind = 'serve_registration' AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NOT NULL)),
             FOREIGN KEY (agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance) REFERENCES agents (agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance),
             UNIQUE (authority_kind, authority_id, operation_id),
@@ -14535,7 +14578,8 @@ platform_tables:
             parse_ok                        BOOLEAN NOT NULL DEFAULT FALSE,
             latency_ms                      INTEGER NOT NULL DEFAULT 0,
             retry_count                     INTEGER NOT NULL DEFAULT 0,
-            completion_attempt_id           UUID UNIQUE REFERENCES runtime_external_effect_attempts(attempt_id),
+            agent_frame_bytes                BYTEA NOT NULL,
+            completion_attempt_id           UUID NOT NULL UNIQUE REFERENCES runtime_external_effect_attempts(attempt_id),
             execution_mode                  TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
             resolved_model                  TEXT,
             usage_exactness                 TEXT CHECK (usage_exactness IS NULL OR usage_exactness IN ('exact', 'estimated', 'unavailable')),
@@ -26033,7 +26077,7 @@ cli_specification:
         api_param: turn_id
         validation: OpaqueId; prefix resolution is read-only, session-scoped, exact-first, and exhaustively paged.
       output:
-        success_detail: Conversation and display ordinal header, canonical full turn ID, timing, trigger/entity/task, token fact when known, outcome, ordered author-safe activity, and assistant-visible output when present.
+        success_detail: Conversation and display ordinal header, canonical full turn ID, timing, trigger/entity/task, token fact when known, outcome, required safe frame identity/hash/kind/parent facts, ordered author-safe activity, and assistant-visible output when present.
       exit_codes:
         success: 0
         cli_validation: 2
@@ -26047,7 +26091,7 @@ cli_specification:
       - exact-first /v1/rpc conversation.get_turn with session_id and turn_id; prefix fallback pages conversation.list_turns completely and retries one canonical full ID
       - missing/blank/invalid identifiers and missing explicit token for non-loopback API targets make zero API calls
       - exact, unique-prefix, no-match, ambiguity, repeated-cursor, and list-failure paths are fail-closed
-      - success output renders only ConversationTurnDetail; no raw blocks, payloads, capability telemetry, private reasoning, progress, or runtime logs
+      - success output renders only ConversationTurnDetail including its safe frame whitelist; no raw blocks, event/tool payloads, capability telemetry, provider contract/prompt, directive/remediation content, private reasoning, progress, or runtime logs
       - SESSION_NOT_FOUND, TURN_NOT_FOUND, malformed results, auth/HTTP/RPC failures, and transport failures fail closed with tested exit codes
       - no direct DB/store/runtime/EventBus/dashboard/Builder reads and no legacy /api/*, /rpc, /api/rpc, /ws, /api/ws, conversation.current_for_agent, runtime.logs, run.trace, or forkchat usage
     bundle:
@@ -30273,11 +30317,52 @@ api_specification:
         required:
         - session
         - turn
+        - frame
         properties:
           session:
             $ref: '#/components/schemas/ConversationSummary'
           turn:
             $ref: '#/components/schemas/Turn'
+          frame:
+            $ref: '#/components/schemas/AgentExecutionFrameFacts'
+      AgentExecutionFrameFacts:
+        description: Required author-safe identity projection derived from the validated private frame persisted with this exact turn. It never contains provider input, event/tool payloads, capability evidence, directive/remediation content, or private reasoning.
+        oneOf:
+        - type: object
+          additionalProperties: false
+          required: [version, frame_id, content_hash, turn_kind]
+          properties:
+            version:
+              type: string
+              enum: [agent-execution-frame.v1]
+            frame_id:
+              type: string
+              pattern: '^agent-frame:v1:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+            content_hash:
+              type: string
+              pattern: '^agent-frame-content:v1:sha256:[0-9a-f]{64}$'
+            turn_kind:
+              type: string
+              enum: [initial, board_directive]
+        - type: object
+          additionalProperties: false
+          required: [version, frame_id, content_hash, turn_kind, parent_frame_id]
+          properties:
+            version:
+              type: string
+              enum: [agent-execution-frame.v1]
+            frame_id:
+              type: string
+              pattern: '^agent-frame:v1:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+            content_hash:
+              type: string
+              pattern: '^agent-frame-content:v1:sha256:[0-9a-f]{64}$'
+            turn_kind:
+              type: string
+              enum: [tool_continuation, remediation]
+            parent_frame_id:
+              type: string
+              pattern: '^agent-frame:v1:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
       ConversationTurnListPage:
         type: object
         additionalProperties: false
@@ -33694,8 +33779,11 @@ api_specification:
       tier: should_have
       description: >
         Read one closed author-safe turn projection by exact canonical full turn
-        ID within a conversation. Raw provider payloads, private reasoning,
-        unmarked progress, tool payloads, capability telemetry, and automatic
+        ID within a conversation. The required frame sibling contains only
+        version, identity, content hash, turn kind, and conditional parent identity
+        derived from validated private evidence. Raw provider payloads, private
+        reasoning, unmarked progress, event/tool payloads, capability telemetry,
+        provider contract/prompt, directive/remediation content, and automatic
         runtime-log joins are not part of this contract.
       scope:
         required:
