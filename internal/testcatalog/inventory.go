@@ -457,6 +457,9 @@ func validateExternalProofRecord(repoRoot string, policy testplanning.Policy, in
 		if len(owners) != 1 {
 			return fmt.Errorf("external proof %s executor %s has %d CI owners in profile %s, want exactly one", proof.Source, proof.Executor, len(owners), profileName)
 		}
+		if run := policy.Units[owners[0]].Run; run != "" {
+			return fmt.Errorf("external proof %s executor %s has filtered CI owner %s in profile %s with run %q; external proofs require full-package execution", proof.Source, proof.Executor, owners[0], profileName, run)
+		}
 		if selectedUnit == "" {
 			selectedUnit = owners[0]
 		} else if selectedUnit != owners[0] {

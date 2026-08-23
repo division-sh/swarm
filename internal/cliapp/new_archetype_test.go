@@ -5,9 +5,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
+	swarmassets "github.com/division-sh/swarm"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
@@ -47,6 +49,65 @@ func TestScaffoldAdmittedArchetypesAndTeachNextCommands(t *testing.T) {
 			}
 			if err := scaffoldArchetype(&out, archetype, destination); err == nil || !strings.Contains(err.Error(), "already exists") {
 				t.Fatalf("existing destination error = %v", err)
+			}
+		})
+	}
+}
+
+func TestScaffoldEmbedsOnlyCheckedHiddenConfig(t *testing.T) {
+	_, sourceFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve scaffold test source")
+	}
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(sourceFile), "..", ".."))
+	for path, forbidden := range map[string]string{
+		"platform_artifacts.go":            "all:examples/integrations/telegram-agent",
+		"internal/cliapp/new_archetype.go": "all:archetypes",
+	} {
+		raw, err := os.ReadFile(filepath.Join(repoRoot, path))
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if strings.Contains(string(raw), forbidden) {
+			t.Fatalf("%s restores ignored-file embedding through %q", path, forbidden)
+		}
+	}
+
+	for _, test := range []struct {
+		name string
+		fs   fs.FS
+		root string
+		want string
+	}{
+		{
+			name: "telegram-agent",
+			fs:   swarmassets.EmbeddedTelegramAgentExample(),
+			root: ".",
+			want: "bot/.swarm/swarm.yaml",
+		},
+		{
+			name: "zero-agent-automation",
+			fs:   archetypeFiles,
+			root: "archetypes/zero-agent-automation",
+			want: "archetypes/zero-agent-automation/.swarm/swarm.yaml",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var hidden []string
+			err := fs.WalkDir(test.fs, test.root, func(path string, entry fs.DirEntry, err error) error {
+				if err != nil || entry.IsDir() {
+					return err
+				}
+				if strings.Contains("/"+path+"/", "/.swarm/") {
+					hidden = append(hidden, path)
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(hidden) != 1 || hidden[0] != test.want {
+				t.Fatalf("embedded .swarm files = %v, want [%s]", hidden, test.want)
 			}
 		})
 	}

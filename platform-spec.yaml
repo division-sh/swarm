@@ -20389,8 +20389,9 @@ test_specification:
         an unknown or duplicate claim, an unproved active claim, or companion
         metadata that disagrees with the filesystem is a test failure. External
         proof records additionally fail on missing or duplicate sources, missing
-        executor packages or required CI selection, unknown or multiply credited
-        claims, and malformed repository-relative paths.
+        executor packages, absence of exactly one unfiltered package owner in
+        every required CI profile, unknown or multiply credited claims, and
+        malformed repository-relative paths.
       dispositions:
         runtime: >
           The fixture must pass supported swarm verify and execute its exact

@@ -164,6 +164,15 @@ func TestCatalogExternalProofsFailClosed(t *testing.T) {
 		}
 	})
 
+	t.Run("filtered executor CI owner", func(t *testing.T) {
+		root := writeExternalProofInventory(t, valid, "")
+		writeCatalogTestFile(t, filepath.Join(root, ".github", "test-proof-plan.yaml"), externalProofPolicyWithRun("github.com/division-sh/swarm/internal/executor", "^TestUnrelated$"))
+		_, err := Load(root)
+		if err == nil || !strings.Contains(err.Error(), "filtered CI owner") {
+			t.Fatalf("Load error = %v, want filtered executor proof rejection", err)
+		}
+	})
+
 	root := writeExternalProofInventory(t, valid, "")
 	inventory, err := Load(root)
 	if err != nil {
@@ -436,6 +445,14 @@ func externalProofSpec(source, executor string, proves []string) string {
 }
 
 func externalProofPolicy(executor string) string {
+	return externalProofPolicyWithRun(executor, "")
+}
+
+func externalProofPolicyWithRun(executor, run string) string {
+	runLine := ""
+	if run != "" {
+		runLine = "    run: " + run + "\n"
+	}
 	return `version: 1
 module: github.com/division-sh/swarm
 planning:
@@ -452,7 +469,7 @@ profiles:
 units:
   external-proof:
     packages: [` + executor + `]
-    count_mode: count-1
+` + runLine + `    count_mode: count-1
     environment_id: test
     budget_class: broad
 projections: {}

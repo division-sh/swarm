@@ -11,7 +11,7 @@ var platformSpecYAML []byte
 //go:embed Dockerfile.workspace
 var workspaceDockerfile []byte
 
-//go:embed all:examples/integrations/telegram-agent
+//go:embed examples/integrations/telegram-agent examples/integrations/telegram-agent/bot/.swarm/swarm.yaml
 var telegramAgentExample embed.FS
 
 func EmbeddedPlatformSpecYAML() []byte {
