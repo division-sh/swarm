@@ -15,7 +15,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-//go:embed all:archetypes
+//go:embed archetypes archetypes/zero-agent-automation/.swarm/swarm.yaml
 var archetypeFiles embed.FS
 
 type admittedArchetype struct {
