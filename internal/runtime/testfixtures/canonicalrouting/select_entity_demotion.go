@@ -36,14 +36,14 @@ func CopySelectEntityDemotion(t testing.TB, opts SelectEntityDemotionOptions) st
 	connect := ""
 	if opts.WithProducer {
 		targetFlow := "consumer"
-		targetPin := "deploy_done"
 		if opts.ConnectProducerToOther {
 			targetFlow = "other_consumer"
 		}
+		rename := ""
 		if opts.RenameReceiverPin && targetFlow == "consumer" {
-			targetPin = "deploy_completed"
+			rename = "\n    rename: deploy.completed"
 		}
-		connect = "\nconnect:\n  - from: producer.deploy_done\n    to: " + targetFlow + "." + targetPin
+		connect = "\nconnect:\n  - event: deploy.done\n    from: producer\n    to: " + targetFlow + rename
 	}
 	writeClosedVariantFile(t, root, "package.yaml", "name: select-entity-demotion\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:"+flows+connect+"\n")
 	for _, name := range []string{"schema.yaml", "policy.yaml", "tools.yaml", "agents.yaml", "events.yaml", "entities.yaml"} {

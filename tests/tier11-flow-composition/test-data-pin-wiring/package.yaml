@@ -7,5 +7,6 @@ flows:
   flow: processor
   mode: static
 connect:
-  - from: processor.process_done
-    to: .process_done
+  - event: process.done
+    from: processor
+    to: .

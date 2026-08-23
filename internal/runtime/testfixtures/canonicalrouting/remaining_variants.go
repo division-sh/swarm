@@ -349,7 +349,7 @@ flows:
   - {id: producer, flow: producer, mode: static}
   - {id: consumer, flow: consumer, mode: template}
 connect:
-  - {from: producer.deploy_done, to: consumer.deploy_completed}
+  - {event: deploy.done, from: producer, to: consumer}
 `,
 		"schema.yaml": "name: test\n", "policy.yaml": "{}\n", "tools.yaml": "{}\n", "agents.yaml": "{}\n", "events.yaml": "{}\n", "nodes.yaml": "{}\n",
 		"flows/producer/schema.yaml": `name: producer

@@ -6,5 +6,6 @@ flows:
     flow: worker
     mode: static
 connect:
-  - from: .task_assigned
-    to: worker.task_assigned
+  - event: task.assigned
+    from: .
+    to: worker

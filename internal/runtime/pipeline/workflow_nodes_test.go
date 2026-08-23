@@ -718,7 +718,7 @@ func testWorkflowNodeConnectedInputSource(producerMode string) semanticview.Sour
 				"receiver": {{Name: "deploy_requested", Event: "deploy.requested"}},
 			},
 			CompositionConnects: []runtimecontracts.FlowPackageConnect{{
-				SourceFile: "package.yaml", SourceLine: 1, From: "producer.deploy_done", To: "receiver.deploy_requested", Adapter: "deploy_done_to_deploy_requested",
+				SourceFile: "package.yaml", SourceLine: 1, Event: "deploy.done", From: "producer", To: "receiver", Rename: "deploy.requested", Adapter: "deploy_done_to_deploy_requested",
 			}},
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
 				"receiver-node": {"deploy.requested": {}},
@@ -792,8 +792,8 @@ func testWorkflowNodeConnectedInputCollisionSource() semanticview.Source {
 			},
 			FlowInputEventPins: map[string][]runtimecontracts.FlowInputEventPin{"receiver": receiverInputs},
 			CompositionConnects: []runtimecontracts.FlowPackageConnect{
-				{SourceFile: "package.yaml", SourceLine: 1, From: "producer.deploy_done", To: "receiver.deploy_accepted", Adapter: "deploy_done_to_deploy_accepted"},
-				{SourceFile: "package.yaml", SourceLine: 2, From: "producer.deploy_done", To: "receiver.deploy_audited", Adapter: "deploy_done_to_deploy_audited"},
+				{SourceFile: "package.yaml", SourceLine: 1, Event: "deploy.done", From: "producer", To: "receiver", Rename: "deploy.accepted", Adapter: "deploy_done_to_deploy_accepted"},
+				{SourceFile: "package.yaml", SourceLine: 2, Event: "deploy.done", From: "producer", To: "receiver", Rename: "deploy.audited", Adapter: "deploy_done_to_deploy_audited"},
 			},
 			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{"receiver-node": receiverHandlers},
 		},

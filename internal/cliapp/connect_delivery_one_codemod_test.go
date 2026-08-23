@@ -44,8 +44,8 @@ func TestMigrateConnectDeliveryOneCommandRewritesLoadableEquivalentEdge(t *testi
 		t.Fatalf("load rewritten bundle: %v", err)
 	}
 	connects := bundle.CompositionConnects()
-	if len(connects) != 1 || connects[0].From != "producer.work_ready" || connects[0].To != "consumer.work_ready" {
-		t.Fatalf("rewritten connects = %#v, want unchanged producer.work_ready -> consumer.work_ready edge", connects)
+	if len(connects) != 1 || connects[0].Event != "work.ready" || connects[0].From != "producer" || connects[0].To != "consumer" {
+		t.Fatalf("rewritten connects = %#v, want unchanged event-centric producer -> consumer edge", connects)
 	}
 	graph := pinrouting.CompileConnectGraph(semanticview.Wrap(bundle))
 	plans, issues := graph.Plans(), graph.Issues()

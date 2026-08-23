@@ -44,7 +44,7 @@ const (
 
 func PackageConnectSourceSnippet(t testing.TB) ParserSnippet {
 	t.Helper()
-	return NewParserSnippet(t, "name: test\nversion: 1.0.0\nconnect:\n  - from: producer.done\n    to: consumer.done\n")
+	return NewParserSnippet(t, "name: test\nversion: 1.0.0\nconnect:\n  - event: work.done\n    from: producer\n    to: consumer\n")
 }
 
 func PackageRequiresBindConnectSnippet(t testing.TB) ParserSnippet {
@@ -83,8 +83,10 @@ packages:
       credentials:
         child_token: parent_child_token
 connect:
-  - from: worker.work.completed
-    to: worker.work.requested
+  - event: parent.work_completed
+    from: worker
+    to: worker
+    rename: parent.work_requested
 `)
 }
 
@@ -93,8 +95,9 @@ func InvalidPackageConnectFieldSnippet(t testing.TB) ParserSnippet {
 	return NewParserSnippet(t, `
 name: invalid
 connect:
-  - from: producer.ready
-    to: consumer.ready
+  - event: work.ready
+    from: producer
+    to: consumer
     topic: unsupported
 `)
 }
@@ -231,23 +234,23 @@ func RetiredReceiverRoutingParserSnippet(t testing.TB, id RetiredReceiverRouting
 	case RetiredInputAddressUnsupportedNested:
 		source = "name: retired-address\npins: {inputs: {events: [{name: requested, event: work.requested, address: {by: work_id, unsupported: nope}}]}}\n"
 	case RetiredConnectMapEmpty:
-		source = "name: retired-map\nconnect: [{from: producer.done, to: consumer.done, map: {}}]\n"
+		source = "name: retired-map\nconnect: [{event: work.done, from: producer, to: consumer, map: {}}]\n"
 	case RetiredConnectMapMalformed:
-		source = "name: retired-map\nconnect: [{from: producer.done, to: consumer.done, map: unsupported}]\n"
+		source = "name: retired-map\nconnect: [{event: work.done, from: producer, to: consumer, map: unsupported}]\n"
 	case RetiredConnectMapPopulated:
-		source = "name: retired-map\nconnect: [{from: producer.done, to: consumer.done, map: {work_id: {source: payload.work_id, target: entity.work_id}}}]\n"
+		source = "name: retired-map\nconnect: [{event: work.done, from: producer, to: consumer, map: {work_id: {source: payload.work_id, target: entity.work_id}}}]\n"
 	case RetiredConnectMapMixed:
-		source = "name: retired-map\nconnect: [{from: producer.done, to: consumer.done, map: {work_id: {source: payload.work_id}, resolution: {mode: select}}}]\n"
+		source = "name: retired-map\nconnect: [{event: work.done, from: producer, to: consumer, map: {work_id: {source: payload.work_id}, resolution: {mode: select}}}]\n"
 	case RetiredConnectUsingEmpty:
-		source = "name: retired-using\nconnect: [{from: producer.done, to: consumer.done, using: {}}]\n"
+		source = "name: retired-using\nconnect: [{event: work.done, from: producer, to: consumer, using: {}}]\n"
 	case RetiredConnectUsingMalformed:
-		source = "name: retired-using\nconnect: [{from: producer.done, to: consumer.done, using: unsupported}]\n"
+		source = "name: retired-using\nconnect: [{event: work.done, from: producer, to: consumer, using: unsupported}]\n"
 	case RetiredConnectUsingPopulated:
-		source = "name: retired-using\nconnect: [{from: producer.done, to: consumer.done, using: {instance: {source: payload.account_id, target: account_id}}}]\n"
+		source = "name: retired-using\nconnect: [{event: work.done, from: producer, to: consumer, using: {instance: {source: payload.account_id, target: account_id}}}]\n"
 	case RetiredConnectUsingComposite:
-		source = "name: retired-using\nconnect: [{from: producer.done, to: consumer.done, using: {instance: {source: [payload.scope, payload.account_id], target: [scope, account_id]}}}]\n"
+		source = "name: retired-using\nconnect: [{event: work.done, from: producer, to: consumer, using: {instance: {source: [payload.scope, payload.account_id], target: [scope, account_id]}}}]\n"
 	case RetiredConnectUsingMixed:
-		source = "name: retired-using\nconnect: [{from: producer.done, to: consumer.done, using: {instance: {source: payload.account_id}, map: {account_id: payload.account_id}}}]\n"
+		source = "name: retired-using\nconnect: [{event: work.done, from: producer, to: consumer, using: {instance: {source: payload.account_id}, map: {account_id: payload.account_id}}}]\n"
 	default:
 		t.Fatalf("unsupported retired receiver routing parser snippet %q", id)
 	}

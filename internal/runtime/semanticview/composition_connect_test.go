@@ -58,10 +58,13 @@ func TestCompositionConnectFactsExposeCanonicalReceiverResolution(t *testing.T) 
 		t.Fatalf("CompositionConnects = %#v, want two", connects)
 	}
 	connect := connects[1]
-	if got, want := connect.From, "producer.account_ready"; got != want {
+	if got, want := connect.Event, "account.ready"; got != want {
+		t.Fatalf("connect event = %q, want %q", got, want)
+	}
+	if got, want := connect.From, "producer"; got != want {
 		t.Fatalf("connect from = %q, want %q", got, want)
 	}
-	if got, want := connect.To, "account.account_ready"; got != want {
+	if got, want := connect.To, "account"; got != want {
 		t.Fatalf("connect to = %q, want %q", got, want)
 	}
 }
@@ -91,12 +94,11 @@ func TestCompositionConnectFactsExposeRootProducerEndpoint(t *testing.T) {
 	if len(connects) != 1 {
 		t.Fatalf("CompositionConnects = %#v, want one", connects)
 	}
-	from, err := connects[0].FromRef()
-	if err != nil {
-		t.Fatalf("FromRef: %v", err)
+	if got, want := connects[0].Event, "root.ready"; got != want {
+		t.Fatalf("connect event = %q, want %q", got, want)
 	}
-	if !from.Root || from.FlowID != "" || from.Pin != "root_ready" {
-		t.Fatalf("FromRef = %#v, want root root_ready", from)
+	if got, want := connects[0].From, "."; got != want {
+		t.Fatalf("connect from = %q, want root sentinel", got)
 	}
 }
 

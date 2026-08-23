@@ -7,5 +7,6 @@ flows:
   flow: child
   mode: static
 connect:
-  - from: child.task_done
-    to: .task_done
+  - event: task.done
+    from: child
+    to: .

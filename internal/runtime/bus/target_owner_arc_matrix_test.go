@@ -408,7 +408,7 @@ func targetOwnerArcFixture(
 	}
 	if test.sourceKind == targetOwnerArcRoot {
 		bundle = connectRoutePlanTestBundle([]connectRoutePlanTestFlow{receiver}, []runtimecontracts.FlowPackageConnect{{
-			From: ".work_ready", To: "receiver.work_ready",
+			Event: localEvent, From: ".", To: "receiver",
 		}})
 		bundle.Semantics.Name = "root-workflow"
 		bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{
@@ -431,7 +431,7 @@ func targetOwnerArcFixture(
 			outputs: []runtimecontracts.FlowOutputEventPin{{Name: "work_ready", Event: localEvent}},
 		}
 		bundle = connectRoutePlanTestBundle([]connectRoutePlanTestFlow{producer, receiver}, []runtimecontracts.FlowPackageConnect{{
-			From: "producer.work_ready", To: "receiver.work_ready",
+			Event: localEvent, From: "producer", To: "receiver",
 		}})
 		bundle.Semantics.Name = "root-workflow"
 		instancePath := test.sourcePath
@@ -634,7 +634,7 @@ func TestEventBusPoisonedMixedOwnerFanOutFailsAtomicallyThenLegalOwnersAgree(t *
 	entityless := receiver("entityless", runtimecontracts.FlowModeStatic, runtimecontracts.SystemNodeEventHandler{})
 	poison := receiver("poison", runtimecontracts.FlowModeStatic, existingOwnerHandlerFixture())
 	connect := func(id string) runtimecontracts.FlowPackageConnect {
-		return runtimecontracts.FlowPackageConnect{From: "producer.ready", To: id + ".ready"}
+		return runtimecontracts.FlowPackageConnect{Event: eventName, From: "producer", To: id}
 	}
 	sourceRoute := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("mixed-owner-source")}.Normalized()
 	existingRoute := events.RouteIdentity{FlowID: "existing", FlowInstance: "fanout/existing", EntityID: eventtest.UUID("mixed-owner-existing")}.Normalized()

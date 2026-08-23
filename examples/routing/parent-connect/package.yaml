@@ -9,5 +9,6 @@ flows:
     flow: consumer
     mode: static
 connect:
-  - from: producer.work_ready
-    to: consumer.work_ready
+  - event: work.ready
+    from: producer
+    to: consumer

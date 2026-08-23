@@ -698,7 +698,7 @@ func TestBuildShowsRouteIssueAndAuthoredDiagnosticLocation(t *testing.T) {
 	if diag.AuthoredLocation == "" {
 		t.Fatalf("diagnostic authored location empty: %#v", diag)
 	}
-	if !strings.Contains(diag.Message, "connect producer.deploy_done -> consumer.missing_pin") {
+	if !strings.Contains(diag.Message, "connect event deploy.done from producer to consumer rename missing.event") {
 		t.Fatalf("diagnostic message = %q, want connect context", diag.Message)
 	}
 }

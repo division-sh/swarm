@@ -9,5 +9,6 @@ flows:
   flow: child
   mode: static
 connect:
-  - from: child.task_result
-    to: .task_result
+  - event: task.result
+    from: child
+    to: .

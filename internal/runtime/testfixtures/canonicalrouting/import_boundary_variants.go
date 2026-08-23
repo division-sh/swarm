@@ -48,10 +48,12 @@ func CopyImportBoundaryAlias(t testing.TB, variant ImportBoundaryAliasVariant) s
 	if connected {
 		connect = `
 connect:
-  - from: .lead_captured
-    to: worker.work_requested
-  - from: worker.work_completed
-    to: .lead_enriched
+  - event: parent.lead_captured
+    from: .
+    to: worker
+  - event: parent.lead_enriched
+    from: worker
+    to: .
 `
 		rootSchema = `
 name: import-boundary-alias

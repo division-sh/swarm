@@ -543,7 +543,7 @@ func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
 		{name: "missing producer output pin", variant: canonicalrouting.CompositionConnectMissingProducerPin, want: "producer_output_pin_missing"},
 		{name: "missing receiver flow", variant: canonicalrouting.CompositionConnectMissingReceiverFlow, want: "receiver_flow_missing"},
 		{name: "missing receiver input pin", variant: canonicalrouting.CompositionConnectMissingReceiverPin, want: "receiver_input_pin_missing"},
-		{name: "event names differ without adapter", variant: canonicalrouting.CompositionConnectMissingAdapter, want: "event_alias_or_adapter_invalid"},
+		{name: "adapter cannot rename event", variant: canonicalrouting.CompositionConnectAdapterWithoutRename, want: "receiver_input_pin_missing"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

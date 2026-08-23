@@ -1251,8 +1251,10 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNode(t *testing.
 
 func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t *testing.T) {
 	source := emitRoutePlanStaticSource(t, runtimecontracts.FlowPackageConnect{
-		From:    "producer.deploy_done",
-		To:      "consumer.deploy_completed",
+		Event:   "deploy.done",
+		From:    "producer",
+		To:      "consumer",
+		Rename:  "deploy.completed",
 		Adapter: "deploy_done_to_completed",
 	})
 	store := newEmitRoutePlanStore()

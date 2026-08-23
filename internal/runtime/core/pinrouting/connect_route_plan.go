@@ -365,7 +365,6 @@ type ConnectRoutePlanFailure uint8
 const (
 	ConnectFailureSourceMissing ConnectRoutePlanFailure = iota + 1
 	ConnectFailureSourceLocationMissing
-	ConnectFailurePinRefInvalid
 	ConnectFailureProducerFlowMissing
 	ConnectFailureProducerOutputPinMissing
 	ConnectFailureReceiverFlowMissing
@@ -392,8 +391,6 @@ func (f ConnectRoutePlanFailure) Code() string {
 		return "source_missing"
 	case ConnectFailureSourceLocationMissing:
 		return "connect_source_location_missing"
-	case ConnectFailurePinRefInvalid:
-		return "connect_pin_ref_invalid"
 	case ConnectFailureProducerFlowMissing:
 		return "producer_flow_missing"
 	case ConnectFailureProducerOutputPinMissing:
@@ -1226,12 +1223,17 @@ func (i ConnectRoutePlanIssue) ProviderOutputAuthorization() *runtimeproviderout
 // DiagnosticContext is a one-way authored-location projection. Runtime
 // matching and application cannot consume this display text.
 func (i ConnectRoutePlanIssue) DiagnosticContext() string {
+	event := strings.TrimSpace(i.Connect.Event)
 	from := strings.TrimSpace(i.Connect.From)
 	to := strings.TrimSpace(i.Connect.To)
-	if from == "" && to == "" {
+	if event == "" && from == "" && to == "" {
 		return ""
 	}
-	return strings.TrimSpace("connect " + from + " -> " + to)
+	context := strings.TrimSpace("connect event " + event + " from " + from + " to " + to)
+	if rename := strings.TrimSpace(i.Connect.Rename); rename != "" {
+		context += " rename " + rename
+	}
+	return context
 }
 
 func admitConnectRoutePlanIssueEndpoints(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, issue ConnectRoutePlanIssue) ConnectRoutePlanIssue {
@@ -1239,22 +1241,15 @@ func admitConnectRoutePlanIssueEndpoints(source semanticview.Source, connect run
 		return issue
 	}
 	issue.Connect = connect
-	if from, err := connect.FromRef(); err == nil {
-		if from.Root {
-			if flowID, ok := semanticview.PackageRootFlowID(source, connect.PackageKey); ok {
-				from.FlowID, from.Root = flowID, flowID == ""
-			}
-		}
-		if endpoint, _, endpointIssue := connectRoutePlanSourceEndpoint(source, from, connect); endpointIssue.Failure.Empty() {
+	from, sourceIssue := resolveCompositionConnectSource(source, connect)
+	if sourceIssue.Failure.Empty() {
+		endpoint, _, endpointIssue := connectRoutePlanSourceEndpoint(source, from, connect)
+		if endpointIssue.Failure.Empty() {
 			issue.sourceEndpoint = endpoint
 		}
 	}
-	if to, err := connect.ToRef(); err == nil {
-		if to.Root {
-			if flowID, ok := semanticview.PackageRootFlowID(source, connect.PackageKey); ok {
-				to.FlowID, to.Root = flowID, flowID == ""
-			}
-		}
+	to, receiverIssue := resolveCompositionConnectReceiver(source, connect)
+	if receiverIssue.Failure.Empty() {
 		if endpoint, ok := connectRoutePlanReceiverEndpointRole(source, to); ok {
 			issue.receiverEndpoint = endpoint
 		}
@@ -2228,7 +2223,7 @@ func lowerTargetFreeInputRoutePlans(source semanticview.Source, authorizations [
 func lowerTargetFreeInputRoutePlan(source semanticview.Source, scope semanticview.FlowScope, inputPin runtimecontracts.FlowInputEventPin, authorization *runtimeprovideroutput.Authorization) (ConnectRoutePlan, ConnectRoutePlanIssue) {
 	flowID := strings.TrimSpace(scope.ID)
 	resolved := eventidentity.Normalize(source.ResolveFlowEventReference(flowID, inputPin.EventType()))
-	connect := runtimecontracts.FlowPackageConnect{To: flowID + "." + inputPin.PinName()}
+	connect := runtimecontracts.FlowPackageConnect{Event: resolved, From: ".", To: flowID}
 	sourceEndpoint := newConnectRoutePlanEndpoint(ConnectEndpointRoleProducer, true, "", "", "external", inputPin.PinName(), resolved, resolved, "", nil)
 	receiverEndpoint := newConnectRoutePlanEndpoint(ConnectEndpointRoleConsumer, false, flowID, scope.Path, scope.Mode,
 		inputPin.PinName(), inputPin.EventType(), resolved, "", nil)
@@ -2292,32 +2287,213 @@ func lowerCompositionConnectRoutePlanWithLocation(source semanticview.Source, co
 	return plan, issue
 }
 
+type compositionConnectPinRef struct {
+	Root   bool
+	FlowID string
+	Pin    string
+}
+
+type resolvedCompositionConnect struct {
+	connect runtimecontracts.FlowPackageConnect
+	from    compositionConnectPinRef
+	to      compositionConnectPinRef
+}
+
+func resolveAuthoredCompositionConnect(source semanticview.Source, connect runtimecontracts.FlowPackageConnect) (resolvedCompositionConnect, ConnectRoutePlanIssue) {
+	from, issue := resolveCompositionConnectSource(source, connect)
+	if !issue.Failure.Empty() {
+		return resolvedCompositionConnect{}, issue
+	}
+	to, issue := resolveCompositionConnectReceiver(source, connect)
+	if !issue.Failure.Empty() {
+		return resolvedCompositionConnect{}, issue
+	}
+	return resolvedCompositionConnect{connect: connect, from: from, to: to}, ConnectRoutePlanIssue{}
+}
+
+func resolveCompositionConnectSource(source semanticview.Source, connect runtimecontracts.FlowPackageConnect) (compositionConnectPinRef, ConnectRoutePlanIssue) {
+	from, issue := resolveCompositionConnectFlow(source, connect, connect.From, true)
+	if !issue.Failure.Empty() {
+		return compositionConnectPinRef{}, issue
+	}
+
+	sourcePins := source.FlowOutputEventPins(from.FlowID)
+	sourceCandidates := make([]runtimecontracts.FlowOutputEventPin, 0, len(sourcePins))
+	for _, pin := range sourcePins {
+		if compositionOutputPinVisibleAs(source, connect.PackageKey, from.FlowID, pin, connect.Event) {
+			sourceCandidates = append(sourceCandidates, pin)
+		}
+	}
+	if len(sourceCandidates) != 1 {
+		return compositionConnectPinRef{}, compositionConnectCandidateIssue(connect, true, connect.From, connect.Event, outputPinNames(sourcePins), len(sourceCandidates))
+	}
+	from.Pin = sourceCandidates[0].PinName()
+	return from, ConnectRoutePlanIssue{}
+}
+
+func resolveCompositionConnectReceiver(source semanticview.Source, connect runtimecontracts.FlowPackageConnect) (compositionConnectPinRef, ConnectRoutePlanIssue) {
+	to, issue := resolveCompositionConnectFlow(source, connect, connect.To, false)
+	if !issue.Failure.Empty() {
+		return compositionConnectPinRef{}, issue
+	}
+	receiverEvent := strings.TrimSpace(connect.Rename)
+	if receiverEvent == "" {
+		receiverEvent = strings.TrimSpace(connect.Event)
+	}
+	receiverPins := source.FlowInputEventPins(to.FlowID)
+	receiverCandidates := make([]runtimecontracts.FlowInputEventPin, 0, len(receiverPins))
+	for _, pin := range receiverPins {
+		if compositionInputPinVisibleAs(source, connect.PackageKey, to.FlowID, pin, receiverEvent) {
+			receiverCandidates = append(receiverCandidates, pin)
+		}
+	}
+	if len(receiverCandidates) != 1 {
+		return compositionConnectPinRef{}, compositionConnectCandidateIssue(connect, false, connect.To, receiverEvent, inputPinNames(receiverPins), len(receiverCandidates))
+	}
+	to.Pin = receiverCandidates[0].PinName()
+	return to, ConnectRoutePlanIssue{}
+}
+
+func resolveCompositionConnectFlow(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, endpoint string, producer bool) (compositionConnectPinRef, ConnectRoutePlanIssue) {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "." {
+		flowID, ok := semanticview.PackageRootFlowID(source, connect.PackageKey)
+		if !ok {
+			failure := ConnectFailureReceiverFlowMissing
+			if producer {
+				failure = ConnectFailureProducerFlowMissing
+			}
+			return compositionConnectPinRef{}, ConnectRoutePlanIssue{Connect: connect, Failure: failure, Detail: fmt.Sprintf("package %q has no resolvable root flow", compositionConnectPackageKey(connect.PackageKey))}
+		}
+		return compositionConnectPinRef{Root: flowID == "", FlowID: strings.TrimSpace(flowID)}, ConnectRoutePlanIssue{}
+	}
+	if !compositionConnectFlowVisibleToPackage(source, connect.PackageKey, endpoint) {
+		failure := ConnectFailureReceiverFlowMissing
+		if producer {
+			failure = ConnectFailureProducerFlowMissing
+		}
+		return compositionConnectPinRef{}, ConnectRoutePlanIssue{Connect: connect, Failure: failure, Detail: fmt.Sprintf("package %q endpoint %q does not name a visible flow", compositionConnectPackageKey(connect.PackageKey), endpoint)}
+	}
+	return compositionConnectPinRef{FlowID: endpoint}, ConnectRoutePlanIssue{}
+}
+
+func compositionConnectFlowVisibleToPackage(source semanticview.Source, packageKey, flowID string) bool {
+	packageKey = compositionConnectPackageKey(packageKey)
+	flowID = strings.TrimSpace(flowID)
+	if source == nil || flowID == "" {
+		return false
+	}
+	scope, ok := source.FlowScopeByID(flowID)
+	if !ok {
+		return false
+	}
+	if compositionConnectPackageKey(scope.PackageKey) == packageKey {
+		return true
+	}
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		return false
+	}
+	for _, childPackage := range bundle.PackageTree {
+		if compositionConnectPackageKey(childPackage.ParentKey) == packageKey && strings.TrimSpace(childPackage.Paths.OwningFlowID) == flowID {
+			return true
+		}
+	}
+	return false
+}
+
+func compositionConnectPackageKey(packageKey string) string {
+	packageKey = strings.Trim(strings.TrimSpace(packageKey), "/")
+	if packageKey == "" {
+		return "."
+	}
+	return packageKey
+}
+
+func compositionOutputPinVisibleAs(source semanticview.Source, packageKey, flowID string, pin runtimecontracts.FlowOutputEventPin, want string) bool {
+	want = eventidentity.Normalize(want)
+	local := eventidentity.Normalize(pin.EventType())
+	aliases := semanticview.ImportBoundaryOutputAliasesForParent(source, packageKey, "")
+	visibleAliases := make(map[string]struct{})
+	for _, alias := range aliases {
+		if strings.TrimSpace(alias.FlowID) != strings.TrimSpace(flowID) || eventidentity.Normalize(alias.Pin) != local {
+			continue
+		}
+		if visible := eventidentity.Normalize(alias.ParentEvent); visible != "" {
+			visibleAliases[visible] = struct{}{}
+		}
+	}
+	if len(visibleAliases) == 0 {
+		return local == want
+	}
+	_, ok := visibleAliases[want]
+	return ok
+}
+
+func compositionInputPinVisibleAs(source semanticview.Source, packageKey, flowID string, pin runtimecontracts.FlowInputEventPin, want string) bool {
+	want = eventidentity.Normalize(want)
+	aliases := append(
+		semanticview.ImportBoundaryInputAliases(source, flowID, pin.PinName()),
+		semanticview.ImportBoundaryInputAliases(source, flowID, pin.EventType())...,
+	)
+	visibleAliases := make(map[string]struct{})
+	for _, alias := range aliases {
+		if strings.TrimSpace(alias.ParentPackageKey) != strings.TrimSpace(packageKey) {
+			continue
+		}
+		if visible := eventidentity.Normalize(alias.ParentEvent); visible != "" {
+			visibleAliases[visible] = struct{}{}
+		}
+	}
+	if len(visibleAliases) == 0 {
+		return eventidentity.Normalize(pin.EventType()) == want
+	}
+	_, ok := visibleAliases[want]
+	return ok
+}
+
+func compositionConnectCandidateIssue(connect runtimecontracts.FlowPackageConnect, producer bool, endpoint, event string, pins []string, matches int) ConnectRoutePlanIssue {
+	role := "receiver"
+	failure := ConnectFailureReceiverInputPinMissing
+	if producer {
+		role = "source"
+		failure = ConnectFailureProducerOutputPinMissing
+	}
+	return ConnectRoutePlanIssue{
+		Connect: connect,
+		Failure: failure,
+		Detail: fmt.Sprintf("package %q %s endpoint %q visible event %q matched %d pins; candidate pins: %s",
+			compositionConnectPackageKey(connect.PackageKey), role, strings.TrimSpace(endpoint), eventidentity.Normalize(event), matches, strings.Join(pins, ", ")),
+	}
+}
+
+func outputPinNames(pins []runtimecontracts.FlowOutputEventPin) []string {
+	out := make([]string, 0, len(pins))
+	for _, pin := range pins {
+		out = append(out, pin.PinName())
+	}
+	sort.Strings(out)
+	return out
+}
+
+func inputPinNames(pins []runtimecontracts.FlowInputEventPin) []string {
+	out := make([]string, 0, len(pins))
+	for _, pin := range pins {
+		out = append(out, pin.PinName())
+	}
+	sort.Strings(out)
+	return out
+}
+
 func lowerCompositionConnectRoutePlan(source semanticview.Source, connect runtimecontracts.FlowPackageConnect) (ConnectRoutePlan, ConnectRoutePlanIssue) {
 	if source == nil {
 		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureSourceMissing, Detail: "semantic source is required"}
 	}
-	from, err := connect.FromRef()
-	if err != nil {
-		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailurePinRefInvalid, Detail: err.Error()}
+	resolved, resolveIssue := resolveAuthoredCompositionConnect(source, connect)
+	if !resolveIssue.Failure.Empty() {
+		return ConnectRoutePlan{}, resolveIssue
 	}
-	to, err := connect.ToRef()
-	if err != nil {
-		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailurePinRefInvalid, Detail: err.Error()}
-	}
-	if from.Root {
-		flowID, ok := semanticview.PackageRootFlowID(source, connect.PackageKey)
-		if !ok {
-			return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureProducerFlowMissing, Detail: strings.TrimSpace(connect.PackageKey)}
-		}
-		from.FlowID, from.Root = flowID, flowID == ""
-	}
-	if to.Root {
-		flowID, ok := semanticview.PackageRootFlowID(source, connect.PackageKey)
-		if !ok {
-			return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReceiverFlowMissing, Detail: strings.TrimSpace(connect.PackageKey)}
-		}
-		to.FlowID, to.Root = flowID, flowID == ""
-	}
+	from, to := resolved.from, resolved.to
 	sourceEndpoint, _, sourceIssue := connectRoutePlanSourceEndpoint(source, from, connect)
 	if !sourceIssue.Failure.Empty() {
 		return ConnectRoutePlan{}, sourceIssue
@@ -2326,9 +2502,6 @@ func lowerCompositionConnectRoutePlan(source semanticview.Source, connect runtim
 		inputPin, ok := source.FlowInputEventPin("", to.Pin)
 		if !ok {
 			return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReceiverInputPinMissing, Detail: connect.To}
-		}
-		if !connectEventsCompatible(source, connect, from, to, sourceEndpoint, inputPin) {
-			return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureEventAliasAdapterInvalid, Detail: to.Pin}
 		}
 		if !inputPin.Resolution.Empty() {
 			return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureRootReceiverResolution, Detail: to.Pin}
@@ -2351,9 +2524,6 @@ func lowerCompositionConnectRoutePlan(source semanticview.Source, connect runtim
 	inputPin, ok := source.FlowInputEventPin(to.FlowID, to.Pin)
 	if !ok {
 		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureReceiverInputPinMissing, Detail: connect.To}
-	}
-	if !connectEventsCompatible(source, connect, from, to, sourceEndpoint, inputPin) {
-		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureEventAliasAdapterInvalid, Detail: to.FlowID}
 	}
 	if detail := connectSyntheticCarryCollision(source, from, sourceEndpoint, inputPin); detail != "" {
 		return ConnectRoutePlan{}, ConnectRoutePlanIssue{Connect: connect, Failure: ConnectFailureSyntheticCarryCollision, Detail: detail}
@@ -2403,41 +2573,7 @@ func lowerCompositionConnectRoutePlan(source semanticview.Source, connect runtim
 	return plan, ConnectRoutePlanIssue{}
 }
 
-func connectEventsCompatible(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, from, to runtimecontracts.FlowPackagePinRef, sourceEndpoint ConnectRoutePlanEndpoint, inputPin runtimecontracts.FlowInputEventPin) bool {
-	outputEvent := string(sourceEndpoint.event.value)
-	inputEvent := eventidentity.Normalize(inputPin.EventType())
-	if outputEvent == "" || inputEvent == "" || outputEvent == inputEvent || strings.TrimSpace(connect.Adapter) != "" {
-		return true
-	}
-	candidates := map[string]struct{}{
-		outputEvent: {},
-		eventidentity.Normalize(source.ResolveFlowEventReference(from.FlowID, outputEvent)): {},
-	}
-	for candidate := range candidates {
-		for _, parentEvent := range semanticview.ImportBoundaryOutputParentEventsForEvent(source, connect.PackageKey, "", candidate) {
-			if parentEvent = eventidentity.Normalize(parentEvent); parentEvent != "" {
-				candidates[parentEvent] = struct{}{}
-			}
-		}
-	}
-	if _, ok := candidates[inputEvent]; ok {
-		return true
-	}
-	for _, alias := range append(
-		semanticview.ImportBoundaryInputAliases(source, to.FlowID, inputPin.PinName()),
-		semanticview.ImportBoundaryInputAliases(source, to.FlowID, inputPin.EventType())...,
-	) {
-		if _, ok := candidates[eventidentity.Normalize(alias.ParentEvent)]; ok {
-			return true
-		}
-		if _, ok := candidates[eventidentity.Normalize(alias.EventPattern)]; ok {
-			return true
-		}
-	}
-	return false
-}
-
-func connectSyntheticCarryCollision(source semanticview.Source, from runtimecontracts.FlowPackagePinRef, sourceEndpoint ConnectRoutePlanEndpoint, inputPin runtimecontracts.FlowInputEventPin) string {
+func connectSyntheticCarryCollision(source semanticview.Source, from compositionConnectPinRef, sourceEndpoint ConnectRoutePlanEndpoint, inputPin runtimecontracts.FlowInputEventPin) string {
 	if from.Root || inputPin.Resolution.Mode != runtimecontracts.FlowInputResolutionModeCreate {
 		return ""
 	}
@@ -2466,7 +2602,7 @@ func connectSyntheticCarryCollision(source semanticview.Source, from runtimecont
 	return ""
 }
 
-func connectRoutePlanSourceEndpoint(source semanticview.Source, from runtimecontracts.FlowPackagePinRef, connect runtimecontracts.FlowPackageConnect) (ConnectRoutePlanEndpoint, runtimecontracts.FlowOutputEventPin, ConnectRoutePlanIssue) {
+func connectRoutePlanSourceEndpoint(source semanticview.Source, from compositionConnectPinRef, connect runtimecontracts.FlowPackageConnect) (ConnectRoutePlanEndpoint, runtimecontracts.FlowOutputEventPin, ConnectRoutePlanIssue) {
 	if from.Root {
 		outputPin, ok := source.FlowOutputEventPin("", from.Pin)
 		if !ok {
@@ -2488,7 +2624,7 @@ func connectRoutePlanSourceEndpoint(source semanticview.Source, from runtimecont
 		normalizedPinCarries(outputPin.Carries)), outputPin, ConnectRoutePlanIssue{}
 }
 
-func connectRoutePlanReceiverEndpointRole(source semanticview.Source, to runtimecontracts.FlowPackagePinRef) (ConnectRoutePlanEndpoint, bool) {
+func connectRoutePlanReceiverEndpointRole(source semanticview.Source, to compositionConnectPinRef) (ConnectRoutePlanEndpoint, bool) {
 	flowID := strings.TrimSpace(to.FlowID)
 	inputPin, ok := source.FlowInputEventPin(flowID, to.Pin)
 	if !ok {
@@ -2678,7 +2814,7 @@ func connectResolutionInstanceKey(source semanticview.Source, connect runtimecon
 	}
 }
 
-func connectReplyResolution(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, sourceEndpoint ConnectRoutePlanEndpoint, receiverRef runtimecontracts.FlowPackagePinRef, inputPin runtimecontracts.FlowInputEventPin) (*ConnectRoutePlanReplyResolution, ConnectRoutePlanIssue) {
+func connectReplyResolution(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, sourceEndpoint ConnectRoutePlanEndpoint, receiverRef compositionConnectPinRef, inputPin runtimecontracts.FlowInputEventPin) (*ConnectRoutePlanReplyResolution, ConnectRoutePlanIssue) {
 	if inputPin.Resolution.Mode == runtimecontracts.FlowInputResolutionModeReply {
 		resolution := inputPin.Resolution
 		if resolution.Aggregation != "" || resolution.Window != "" || len(resolution.DedupBy) > 0 || resolution.Singleton != "" {
@@ -2747,12 +2883,6 @@ func connectReplyResolution(source semanticview.Source, connect runtimecontracts
 	return nil, ConnectRoutePlanIssue{}
 }
 
-type resolvedCompositionConnect struct {
-	connect runtimecontracts.FlowPackageConnect
-	from    runtimecontracts.FlowPackagePinRef
-	to      runtimecontracts.FlowPackagePinRef
-}
-
 func resolvedCompositionConnectsTo(source semanticview.Source, flowID, pinName string) []resolvedCompositionConnect {
 	return resolvedCompositionConnects(source, flowID, pinName, false)
 }
@@ -2770,47 +2900,20 @@ func resolvedCompositionConnects(source semanticview.Source, flowID, pinName str
 	pinName = strings.TrimSpace(pinName)
 	var out []resolvedCompositionConnect
 	for _, connect := range bundle.CompositionConnects() {
-		from, err := connect.FromRef()
-		if err != nil {
+		resolved, issue := resolveAuthoredCompositionConnect(source, connect)
+		if !issue.Failure.Empty() {
 			continue
 		}
-		to, err := connect.ToRef()
-		if err != nil {
-			continue
-		}
-		from, ok = resolveCompositionConnectEndpoint(source, connect.PackageKey, from)
-		if !ok {
-			continue
-		}
-		to, ok = resolveCompositionConnectEndpoint(source, connect.PackageKey, to)
-		if !ok {
-			continue
-		}
-		endpoint := to
+		endpoint := resolved.to
 		if matchSource {
-			endpoint = from
+			endpoint = resolved.from
 		}
 		if endpoint.Root != (flowID == "") || strings.TrimSpace(endpoint.FlowID) != flowID || strings.TrimSpace(endpoint.Pin) != pinName {
 			continue
 		}
-		out = append(out, resolvedCompositionConnect{connect: connect, from: from, to: to})
+		out = append(out, resolved)
 	}
 	return out
-}
-
-func resolveCompositionConnectEndpoint(source semanticview.Source, packageKey string, ref runtimecontracts.FlowPackagePinRef) (runtimecontracts.FlowPackagePinRef, bool) {
-	ref.FlowID = strings.TrimSpace(ref.FlowID)
-	ref.Pin = strings.TrimSpace(ref.Pin)
-	if !ref.Root {
-		return ref, ref.FlowID != "" && ref.Pin != ""
-	}
-	flowID, ok := semanticview.PackageRootFlowID(source, packageKey)
-	if !ok {
-		return runtimecontracts.FlowPackagePinRef{}, false
-	}
-	ref.FlowID = flowID
-	ref.Root = flowID == ""
-	return ref, ref.Pin != ""
 }
 
 func connectFanIn(source semanticview.Source, connect runtimecontracts.FlowPackageConnect, inputPin runtimecontracts.FlowInputEventPin, receiverFlowID string) (*ConnectRoutePlanFanIn, ConnectRoutePlanIssue) {

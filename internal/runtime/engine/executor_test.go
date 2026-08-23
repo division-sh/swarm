@@ -5341,7 +5341,7 @@ func sourceWithChildOutputPinAndRootConnect() semanticview.Source {
 		Path:   "child",
 	}
 	rootInput := runtimecontracts.FlowInputEventPin{Name: "child_done", Event: "child.done"}
-	connect := runtimecontracts.FlowPackageConnect{From: "child.child_done", To: ".child_done", SourceFile: "package.yaml", SourceLine: 1}
+	connect := runtimecontracts.FlowPackageConnect{Event: "child.done", From: "child", To: ".", SourceFile: "package.yaml", SourceLine: 1}
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		RootSchema:  &runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{rootInput}}}},
 		Events:      map[string]runtimecontracts.EventCatalogEntry{"child.done": {}},

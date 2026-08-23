@@ -175,7 +175,7 @@ func TestConnectRoutePlanEventConsumersEnforceProducerMode(t *testing.T) {
 			source := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{{
 				id: "producer", mode: tc.mode,
 				outputs: []runtimecontracts.FlowOutputEventPin{{Name: "deploy_done", Event: "deploy.done"}},
-			}}, []runtimecontracts.FlowPackageConnect{{From: "producer.deploy_done", To: "missing.ready"}}))
+			}}, []runtimecontracts.FlowPackageConnect{{Event: "deploy.done", From: "producer", To: "missing"}}))
 			graph := runtimepinrouting.CompileConnectGraph(source)
 			issues := graph.Issues()
 			if len(issues) != 1 || issues[0].Failure != runtimepinrouting.ConnectFailureReceiverFlowMissing {
@@ -188,7 +188,7 @@ func TestConnectRoutePlanEventConsumersEnforceProducerMode(t *testing.T) {
 		})
 	}
 	diagnosticOnlyIssue := runtimepinrouting.ConnectRoutePlanIssue{
-		Connect: runtimecontracts.FlowPackageConnect{From: "producer.deploy_done", To: "missing.ready"},
+		Connect: runtimecontracts.FlowPackageConnect{Event: "deploy.done", From: "producer", To: "missing"},
 		Failure: runtimepinrouting.ConnectFailureReceiverFlowMissing,
 	}
 	diagnosticEvent := connectRoutePlanStaticProducerEvent("", "producer/deploy.done", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{
@@ -207,7 +207,7 @@ func TestConnectRoutePlanEventConsumersEnforceProducerMode(t *testing.T) {
 	if !ok {
 		t.Fatal("root source has no contract bundle")
 	}
-	invalidRootConnect := runtimecontracts.FlowPackageConnect{From: ".root_ready", To: "missing.ready", SourceFile: "package.yaml", SourceLine: 1}
+	invalidRootConnect := runtimecontracts.FlowPackageConnect{Event: "root.ready", From: ".", To: "missing", SourceFile: "package.yaml", SourceLine: 1}
 	rootBundle.Package.Connect = []runtimecontracts.FlowPackageConnect{invalidRootConnect}
 	rootBundle.Semantics.CompositionConnects = []runtimecontracts.FlowPackageConnect{invalidRootConnect}
 	rootGraph := runtimepinrouting.CompileConnectGraph(rootSource)
@@ -606,7 +606,7 @@ func mixedPubsubConnectStaticSource() semanticview.Source {
 			},
 		},
 	}, []runtimecontracts.FlowPackageConnect{{
-		From: "producer.deploy_done", To: "consumer.deploy_completed", Adapter: "deploy_done_to_completed",
+		Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed", Adapter: "deploy_done_to_completed",
 	}}))
 }
 
@@ -636,7 +636,7 @@ func mixedPubsubConnectNoMatchSource() semanticview.Source {
 			},
 		},
 	}, []runtimecontracts.FlowPackageConnect{{
-		From: "producer.deploy_done", To: "consumer.deploy_completed", Adapter: "deploy_done_to_completed",
+		Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed", Adapter: "deploy_done_to_completed",
 	}}))
 }
 
@@ -654,7 +654,7 @@ func mixedPubsubConnectFailureSource() semanticview.Source {
 		},
 		{id: "consumer", mode: "static"},
 	}, []runtimecontracts.FlowPackageConnect{{
-		From: "producer.deploy_done", To: "consumer.missing", Adapter: "deploy_done_to_completed",
+		Event: "deploy.done", From: "producer", To: "consumer", Rename: "missing", Adapter: "deploy_done_to_completed",
 	}}))
 }
 
@@ -730,8 +730,8 @@ func connectReceiverPinCollisionSource(producerMode string, rootReceiver bool, s
 		outputs: []runtimecontracts.FlowOutputEventPin{{Name: "work_ready", Event: "work.ready"}},
 	}
 	connects := []runtimecontracts.FlowPackageConnect{
-		{From: "producer.work_ready", To: "consumer.work_accepted", Adapter: "work_ready_to_accepted"},
-		{From: "producer.work_ready", To: "consumer.work_audited", Adapter: "work_ready_to_audited"},
+		{Event: "work.ready", From: "producer", To: "consumer", Rename: "work.accepted", Adapter: "work_ready_to_accepted"},
+		{Event: "work.ready", From: "producer", To: "consumer", Rename: "work.audited", Adapter: "work_ready_to_audited"},
 	}
 	consumer := connectRoutePlanTestFlow{id: "consumer", mode: "static", inputs: inputs}
 	if subscriberType == "agent" {
@@ -756,8 +756,8 @@ func connectReceiverPinCollisionSource(producerMode string, rootReceiver bool, s
 		return semanticview.Wrap(bundle)
 	}
 	bundle.Semantics.Name = "root"
-	bundle.Semantics.CompositionConnects[0].To = ".work_accepted"
-	bundle.Semantics.CompositionConnects[1].To = ".work_audited"
+	bundle.Semantics.CompositionConnects[0].To = "."
+	bundle.Semantics.CompositionConnects[1].To = "."
 	bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{Events: connectRoutePlanInputEvents(inputs), EventPins: inputs}}}
 	bundle.Semantics.FlowInputs[""] = connectRoutePlanInputEvents(inputs)
 	bundle.Semantics.FlowInputEventPins[""] = inputs
@@ -791,8 +791,8 @@ func connectReceiverPinLegalSource(shape string) semanticview.Source {
 		{Name: "work_audited", Event: "work.audited"},
 	}
 	connects := []runtimecontracts.FlowPackageConnect{
-		{From: "producer.work_ready", To: "consumer.work_accepted", Adapter: "work_ready_to_accepted"},
-		{From: "producer.work_ready", To: "consumer.work_audited", Adapter: "work_ready_to_audited"},
+		{Event: "work.ready", From: "producer", To: "consumer", Rename: "work.accepted", Adapter: "work_ready_to_accepted"},
+		{Event: "work.ready", From: "producer", To: "consumer", Rename: "work.audited", Adapter: "work_ready_to_audited"},
 	}
 	nodes := map[string]runtimecontracts.SystemNodeContract{
 		"accept-node": {ID: "accept-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.accepted": existingOwnerHandlerFixture()}},
@@ -960,8 +960,10 @@ func (s *targetRouteMemoryStore) UpsertCommittedReplayScope(_ context.Context, e
 
 func TestStaticConnectRouteUsesExactPersistedTargetOwner(t *testing.T) {
 	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
-		From: "producer.deploy_done",
-		To:   "consumer.deploy_completed",
+		Event:  "deploy.done",
+		From:   "producer",
+		To:     "consumer",
+		Rename: "deploy.completed",
 	})
 	store := newConnectRoutePlanStaticStore()
 	interceptor := &connectRoutePlanNodeInterceptor{}
@@ -1037,8 +1039,10 @@ func TestStaticConnectRouteUsesExactPersistedTargetOwner(t *testing.T) {
 
 func TestEventBusPublish_ConnectRoutePlanRejectsConflictingAdmittedTargetBeforePersistence(t *testing.T) {
 	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
-		From: "producer.deploy_done",
-		To:   "consumer.deploy_completed",
+		Event:  "deploy.done",
+		From:   "producer",
+		To:     "consumer",
+		Rename: "deploy.completed",
 	})
 	store := newConnectRoutePlanStaticStore()
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
@@ -1100,8 +1104,10 @@ func TestEventBusConnectRouteDeliversToLiveAgentCarrier(t *testing.T) {
 			},
 		},
 	}, []runtimecontracts.FlowPackageConnect{{
-		From:    "producer.deploy_done",
-		To:      "consumer.deploy_completed",
+		Event:   "deploy.done",
+		From:    "producer",
+		To:      "consumer",
+		Rename:  "deploy.completed",
 		Adapter: "deploy_done_to_completed",
 	}}))
 	store := newConnectRoutePlanStaticStore()
@@ -1636,8 +1642,10 @@ func TestEventBusPublish_RootConnectRoutePlanDoesNotCaptureChildScopedSameNameEv
 
 func TestEventBusCheckPublishRecipientPlan_ConnectRoutePlanUsesSelectedOwner(t *testing.T) {
 	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
-		From: "producer.deploy_done",
-		To:   "consumer.deploy_completed",
+		Event:  "deploy.done",
+		From:   "producer",
+		To:     "consumer",
+		Rename: "deploy.completed",
 	})
 	store := newConnectRoutePlanStaticStore()
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
@@ -1667,7 +1675,7 @@ func TestEventBusCheckPublishRecipientPlan_ConnectRoutePlanUsesSelectedOwner(t *
 }
 
 func TestConnectRecipientEvaluationUsesCompiledReceiverPin(t *testing.T) {
-	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{From: "producer.deploy_done", To: "consumer.deploy_completed"})
+	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed"})
 	graph := runtimepinrouting.CompileConnectGraph(source)
 	plans := graph.Plans()
 	if len(plans) != 1 {
@@ -1736,7 +1744,7 @@ func TestConnectRecipientEvaluationRejectsUnrelatedTemplateSameLeaf(t *testing.T
 }
 
 func TestCompiledRoutingProducerKindMatrix(t *testing.T) {
-	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{From: "producer.deploy_done", To: "consumer.deploy_completed"})
+	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed"})
 	route := events.RouteIdentity{FlowID: "producer", FlowInstance: "producer", EntityID: eventtest.UUID("producer-kind-matrix")}
 	staticSource, err := events.NewStaticFlowRoutingSource(route)
 	if err != nil {
@@ -1816,8 +1824,8 @@ func TestEventBusMultiPlanMatchedEmptyPersistsEveryPlanOutcome(t *testing.T) {
 			"consumer-b-node": {ID: "consumer-b-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"work.done": {}}},
 		}},
 	}, []runtimecontracts.FlowPackageConnect{
-		{From: "producer.done", To: "consumer-a.completed"},
-		{From: "producer.done", To: "consumer-b.completed"},
+		{Event: "work.done", From: "producer", To: "consumer-a"},
+		{Event: "work.done", From: "producer", To: "consumer-b"},
 	}))
 	graph := runtimepinrouting.CompileConnectGraph(source)
 	if got := len(graph.Plans()); got != 2 {
@@ -1903,7 +1911,7 @@ func TestEventBusConnectRecipientRegistrationExpandsWildcardOverDeclaredInputs(t
 			},
 		},
 	}, []runtimecontracts.FlowPackageConnect{{
-		From: "producer.deploy_done", To: "consumer.deploy_completed", Adapter: "deploy_done_to_completed",
+		Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed", Adapter: "deploy_done_to_completed",
 	}}))
 	store := newConnectRoutePlanStaticStore()
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
@@ -1939,7 +1947,7 @@ func TestConnectRoutePlanDescriptorsLoadOnlyForRuntimeResolution(t *testing.T) {
 	}
 
 	staticPlans := runtimepinrouting.CompileConnectGraph(connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
-		From: "producer.deploy_done", To: "consumer.deploy_completed",
+		Event: "deploy.done", From: "producer", To: "consumer", Rename: "deploy.completed",
 	})).Plans()
 	if len(staticPlans) != 1 {
 		t.Fatalf("static plans = %#v, want one", staticPlans)
@@ -1962,8 +1970,10 @@ func TestConnectRoutePlanDescriptorsLoadOnlyForRuntimeResolution(t *testing.T) {
 
 func TestEventBusPublish_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
-		From: "producer.deploy_done",
-		To:   "consumer.deploy_completed",
+		Event:  "deploy.done",
+		From:   "producer",
+		To:     "consumer",
+		Rename: "deploy.completed",
 	})
 	store := &connectRoutePlanMutationStore{targetRouteMemoryStore: newConnectRoutePlanStaticStore()}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
@@ -1994,8 +2004,10 @@ func TestEventBusPublish_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 
 func TestEnginePublication_ConnectRoutePlanPersistsSharedRoutePlan(t *testing.T) {
 	source := connectRoutePlanStaticSource(runtimecontracts.FlowPackageConnect{
-		From: "producer.deploy_done",
-		To:   "consumer.deploy_completed",
+		Event:  "deploy.done",
+		From:   "producer",
+		To:     "consumer",
+		Rename: "deploy.completed",
 	})
 	store := &connectRoutePlanMutationStore{targetRouteMemoryStore: newConnectRoutePlanStaticStore()}
 	eb, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: source})
@@ -3389,6 +3401,19 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleCollisionFailsBeforeActivation
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			source := connectRoutePlanTemplateInstanceMultiInputSource(t, canonicalrouting.TemplateInstanceRouteSelectOrCreate, tc.secondPin, tc.consumer)
+			graphIssues := runtimepinrouting.CompileConnectGraph(source).Issues()
+			if tc.secondPin == canonicalrouting.TemplateInstanceSecondPinSameEvent {
+				if len(graphIssues) != 2 {
+					t.Fatalf("ambiguous event-centric connect issues = %#v, want two", graphIssues)
+				}
+				for _, issue := range graphIssues {
+					if issue.Failure != runtimepinrouting.ConnectFailureReceiverInputPinMissing || !strings.Contains(issue.Detail, "matched 2 pins") {
+						t.Fatalf("ambiguous event-centric connect issue = %#v", issue)
+					}
+				}
+			} else if len(graphIssues) != 0 {
+				t.Fatalf("distinct event-centric connects have issues: %#v", graphIssues)
+			}
 			store := &connectRoutePlanLifecycleStore{
 				connectRoutePlanDescriptorStore: &connectRoutePlanDescriptorStore{
 					targetRouteMemoryStore: newTargetRouteMemoryStore(),
@@ -3402,7 +3427,7 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleCollisionFailsBeforeActivation
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			store.bus = eb
-			if tc.consumer == canonicalrouting.TemplateInstanceAgentConsumer {
+			if tc.consumer == canonicalrouting.TemplateInstanceAgentConsumer && tc.secondPin != canonicalrouting.TemplateInstanceSecondPinSameEvent {
 				identity, admission, entityID := connectRoutePlanLifecycleAgentRoute(t, source, tc.secondPin)
 				subscribeTestAgentAdmissionWithIdentity(t, eb, admission, identity, entityID)
 			}
@@ -3413,8 +3438,12 @@ func TestEventBusPublish_ConnectRoutePlanLifecycleCollisionFailsBeforeActivation
 			if err != nil {
 				t.Fatalf("CheckPublishRecipientPlan: %v", err)
 			}
-			if got, want := preflight.TargetFailure, runtimepinrouting.ConnectFailureDeliveryTopologyInvalid.Code(); got != want {
-				t.Fatalf("preflight target failure = %q, want %q; plan=%#v", got, want, preflight)
+			wantFailure := runtimepinrouting.ConnectFailureDeliveryTopologyInvalid.Code()
+			if tc.secondPin == canonicalrouting.TemplateInstanceSecondPinSameEvent {
+				wantFailure = runtimepinrouting.ConnectFailureReceiverInputPinMissing.Code()
+			}
+			if got := preflight.TargetFailure; got != wantFailure {
+				t.Fatalf("preflight target failure = %q, want %q; plan=%#v", got, wantFailure, preflight)
 			}
 			if len(preflight.DeliveryRoutes) != 0 {
 				t.Fatalf("preflight delivery routes = %#v, want none", preflight.DeliveryRoutes)
@@ -4090,8 +4119,10 @@ func TestMixedPubsubConnectCompositionMatchedZeroConnectRecipientsPreservesLocal
 			}},
 		},
 	}, []runtimecontracts.FlowPackageConnect{{
-		From:    "producer.deploy_done",
-		To:      "consumer.deploy_completed",
+		Event:   "deploy.done",
+		From:    "producer",
+		To:      "consumer",
+		Rename:  "deploy.completed",
 		Adapter: "deploy_done_to_completed",
 	}}))
 	store := newConnectRoutePlanStaticStore()
@@ -4168,8 +4199,10 @@ func TestEventBusPublish_ConnectRoutePlanFailsClosedForInvalidLoweredPlan(t *tes
 			inputs: []runtimecontracts.FlowInputEventPin{{Name: "deploy_completed", Event: "deploy.completed"}},
 		},
 	}, []runtimecontracts.FlowPackageConnect{{
-		From: "producer.deploy_done",
-		To:   "consumer.missing_input",
+		Event:  "deploy.done",
+		From:   "producer",
+		To:     "consumer",
+		Rename: "missing.input",
 	}}))
 	eb, err := newScopedTestEventBus(newTargetRouteMemoryStore(), EventBusOptions{ContractBundle: source})
 	if err != nil {
@@ -4220,8 +4253,10 @@ func TestEventBusPublish_ConnectRoutePlanFailureSkipsRecipientPlanMaterializer(t
 			inputs: []runtimecontracts.FlowInputEventPin{{Name: "deploy_completed", Event: "deploy.completed"}},
 		},
 	}, []runtimecontracts.FlowPackageConnect{{
-		From: "producer.deploy_done",
-		To:   "consumer.missing_input",
+		Event:  "deploy.done",
+		From:   "producer",
+		To:     "consumer",
+		Rename: "missing.input",
 	}}))
 	materializerCalled := false
 	eb, err := newScopedTestEventBus(newTargetRouteMemoryStore(), EventBusOptions{
@@ -4797,8 +4832,9 @@ func connectRoutePlanRootProducerStaticSource() semanticview.Source {
 			},
 		},
 	}, []runtimecontracts.FlowPackageConnect{{
-		From: ".root_ready",
-		To:   "consumer.ready",
+		Event: "root.ready",
+		From:  ".",
+		To:    "consumer",
 	}})
 	bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{
 		Pins: runtimecontracts.FlowPins{
@@ -4829,7 +4865,7 @@ func connectRoutePlanRootProducerSingletonSource() semanticview.Source {
 				},
 			},
 		},
-	}, []runtimecontracts.FlowPackageConnect{{From: ".root_ready", To: "scout.ready"}})
+	}, []runtimecontracts.FlowPackageConnect{{Event: "root.ready", From: ".", To: "scout"}})
 	bundle.Semantics.Name = "root"
 	bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{
 		Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Name: "root_ready", Event: "root.ready"}}},

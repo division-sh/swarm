@@ -166,19 +166,10 @@ func existingDir(path string) string {
 	return ""
 }
 func (p ProjectPackageDocument) ChildPackages() []ProjectPackageRef {
-	out := make([]ProjectPackageRef, 0, len(p.Packages)+len(p.Children)+len(p.Subpackages))
-	out = append(out, p.Packages...)
-	out = append(out, p.Children...)
-	out = append(out, p.Subpackages...)
-	return out
+	return append([]ProjectPackageRef(nil), p.Packages...)
 }
 func (p ProjectPackageRef) ResolveLocation() string {
-	for _, candidate := range []string{p.Path, p.Package, p.Dir} {
-		if resolved := strings.TrimSpace(candidate); resolved != "" {
-			return resolved
-		}
-	}
-	return ""
+	return strings.TrimSpace(p.Path)
 }
 func discoverProjectPackagePaths(packageFile, workflowDir string) []ProjectPackagePaths {
 	rootFile := existingFile(packageFile)

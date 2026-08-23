@@ -53,15 +53,12 @@ func CopyTemplateSelectOrCreatePilot(t testing.TB) string {
 func CopyTemplateCreateThenSelectSameEvent(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, TemplateSelectExisting)
-	applyClosedReplacement(t, filepath.Join(root, "package.yaml"),
-		"    to: account.account_setup\n",
-		"    to: account.account_create\n")
 	applyClosedReplacement(t, filepath.Join(root, "flows/account/schema.yaml"),
 		"      - name: account_setup\n",
 		"      - name: account_create\n")
 	applyClosedReplacement(t, filepath.Join(root, "package.yaml"),
-		"  - from: producer.account_ready\n    to: account.account_ready\n",
-		"  - from: producer.account_setup\n    to: account.account_ready\n    adapter: account_setup_to_account_ready\n")
+		"  - event: account.ready\n    from: producer\n    to: account\n",
+		"  - event: account.setup\n    from: producer\n    to: account\n    rename: account.ready\n    adapter: account_setup_to_account_ready\n")
 	writeClosedVariantFile(t, root, "flows/account/nodes.yaml", `account-setup-node:
   id: account-setup-node-{instance_id}
   execution_type: system_node
@@ -149,7 +146,7 @@ func CopyTemplateSelectResolution(t testing.TB, opts TemplateSelectResolutionOpt
 	accountSchema := filepath.Join(root, "flows", "account", "schema.yaml")
 	applyClosedReplacement(t, filepath.Join(root, "flows", "account", "nodes.yaml"),
 		"  id: account-node\n", "  id: account-node-{instance_id}\n")
-	applyClosedReplacement(t, packageFile, "  - from: producer.account_setup\n    to: account.account_setup\n", "")
+	applyClosedReplacement(t, packageFile, "  - event: account.setup\n    from: producer\n    to: account\n", "")
 	// The historical lowering matrix deliberately exercises the accepted
 	// string/text alias while keeping the checked example's entity type.
 	selectedPin := "      - name: account_ready\n        event: account.ready\n        resolution:\n          mode: " + mode + "\n        carries:\n          account_id:\n            from: payload.account_id\n            type: string\n"

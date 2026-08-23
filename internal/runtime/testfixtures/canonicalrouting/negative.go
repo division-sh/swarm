@@ -73,7 +73,7 @@ func ApplyCompositionConnectReceiverPinCollisionMutation(t testing.TB, root stri
 	t.Helper()
 	applyClosedReplacement(t, filepath.Join(root, "package.yaml"),
 		"    adapter: deploy_done_to_completed\n",
-		"    adapter: deploy_done_to_completed\n  - from: producer.deploy_done\n    to: consumer.deploy_audited\n    adapter: deploy_done_to_audited\n")
+		"    adapter: deploy_done_to_completed\n  - event: deploy.done\n    from: producer\n    to: consumer\n    rename: deploy.audited\n    adapter: deploy_done_to_audited\n")
 	applyClosedReplacement(t, filepath.Join(root, "flows", "consumer", "schema.yaml"),
 		"        event: deploy.completed\n",
 		"        event: deploy.completed\n      - name: deploy_audited\n        event: deploy.audited\n")
@@ -93,8 +93,8 @@ func ApplyCompositionConnectReceiverPinCollisionMutation(t testing.TB, root stri
 func ApplyRetiredConnectDeliveryOneMutation(t testing.TB, root string) {
 	t.Helper()
 	applyClosedReplacement(t, filepath.Join(root, "package.yaml"),
-		"  - from: producer.work_ready\n    to: consumer.work_ready\n",
-		"  - from: producer.work_ready\n    to: consumer.work_ready\n    delivery: one\n")
+		"  - event: work.ready\n    from: producer\n    to: consumer\n",
+		"  - event: work.ready\n    from: producer\n    to: consumer\n    delivery: one\n")
 }
 
 // ApplyRetiredConnectDeliveryOnePairMutation creates two independently
@@ -102,8 +102,8 @@ func ApplyRetiredConnectDeliveryOneMutation(t testing.TB, root string) {
 func ApplyRetiredConnectDeliveryOnePairMutation(t testing.TB, root string) {
 	t.Helper()
 	applyClosedReplacement(t, filepath.Join(root, "package.yaml"),
-		"  - from: producer.work_ready\n    to: consumer.work_ready\n",
-		"  - from: producer.work_ready\n    to: consumer.work_ready\n    delivery: one\n  - from: producer.work_ready\n    to: consumer.work_ready\n    delivery: one\n")
+		"  - event: work.ready\n    from: producer\n    to: consumer\n",
+		"  - event: work.ready\n    from: producer\n    to: consumer\n    delivery: one\n  - event: work.ready\n    from: producer\n    to: consumer\n    delivery: one\n")
 }
 
 type RetiredConnectMigrationBlocker uint8
@@ -119,8 +119,8 @@ func ApplyRetiredConnectMigrationBlocker(t testing.TB, root string, blocker Reti
 	t.Helper()
 	field := retiredConnectMigrationBlockerField(t, blocker)
 	applyClosedReplacement(t, filepath.Join(root, "package.yaml"),
-		"  - from: producer.work_ready\n    to: consumer.work_ready\n",
-		"  - from: producer.work_ready\n    to: consumer.work_ready\n"+field)
+		"  - event: work.ready\n    from: producer\n    to: consumer\n",
+		"  - event: work.ready\n    from: producer\n    to: consumer\n"+field)
 }
 
 // ApplyRetiredConnectDeliveryOneThenBlockerMutation proves that a later manual
@@ -129,8 +129,8 @@ func ApplyRetiredConnectDeliveryOneThenBlockerMutation(t testing.TB, root string
 	t.Helper()
 	field := retiredConnectMigrationBlockerField(t, blocker)
 	applyClosedReplacement(t, filepath.Join(root, "package.yaml"),
-		"  - from: producer.work_ready\n    to: consumer.work_ready\n",
-		"  - from: producer.work_ready\n    to: consumer.work_ready\n    delivery: one\n  - from: producer.work_ready\n    to: consumer.work_ready\n"+field)
+		"  - event: work.ready\n    from: producer\n    to: consumer\n",
+		"  - event: work.ready\n    from: producer\n    to: consumer\n    delivery: one\n  - event: work.ready\n    from: producer\n    to: consumer\n"+field)
 }
 
 func retiredConnectMigrationBlockerField(t testing.TB, blocker RetiredConnectMigrationBlocker) string {
@@ -212,15 +212,15 @@ func ApplyTemplateReplyNegativeMutation(t testing.TB, root string, mutation Temp
 		applyClosedReplacement(t, requesterSchema, "        carries: [provider_request_id]\n", "")
 	case TemplateReplyAmbiguousRequestEdge:
 		applyClosedReplacement(t, packageFile,
-			"  - from: requester.provider_requested\n    to: provider.provider_requested\n",
-			"  - from: requester.provider_requested\n    to: provider.provider_requested\n  - from: requester.provider_requested\n    to: provider.provider_requested\n")
+			"  - event: provider.requested\n    from: requester\n    to: provider\n",
+			"  - event: provider.requested\n    from: requester\n    to: provider\n  - event: provider.requested\n    from: requester\n    to: provider\n")
 	case TemplateReplyMismatchedProvider:
 		applyClosedReplacement(t, packageFile,
 			"  - id: provider\n    flow: provider\n    mode: static\n",
 			"  - id: provider\n    flow: provider\n    mode: static\n  - id: other-provider\n    flow: other-provider\n    mode: static\n")
 		applyClosedReplacement(t, packageFile,
-			"  - from: provider.provider_replied\n    to: requester.provider_replied\n",
-			"  - from: other-provider.provider_replied\n    to: requester.provider_replied\n")
+			"  - event: provider.replied\n    from: provider\n    to: requester\n",
+			"  - event: provider.replied\n    from: other-provider\n    to: requester\n")
 		duplicateFlowForNegativeMutation(t, root, "provider", "other-provider")
 		applyClosedReplacement(t, filepath.Join(root, "flows", "other-provider", "schema.yaml"), "name: provider\n", "name: other-provider\n")
 	default:

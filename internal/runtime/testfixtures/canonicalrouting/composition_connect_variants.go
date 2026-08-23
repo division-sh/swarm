@@ -16,7 +16,7 @@ const (
 	CompositionConnectMissingReceiverFlow
 	CompositionConnectMissingReceiverPin
 	CompositionConnectRootReceiver
-	CompositionConnectMissingAdapter
+	CompositionConnectAdapterWithoutRename
 	CompositionConnectMissingOutputKey
 	CompositionConnectMissingOutputCarries
 	CompositionConnectKeyNotCarried
@@ -40,17 +40,17 @@ func CopyCompositionConnect(t testing.TB, variant CompositionConnectVariant) str
 	case CompositionConnectTemplateInstance:
 		opts.consumerMode, opts.consumerScalarInput, opts.consumerTemplateInstance = "template", true, true
 	case CompositionConnectMissingProducerFlow:
-		opts.connectFrom = "missing.deploy_done"
+		opts.connectFrom = "missing"
 	case CompositionConnectMissingProducerPin:
-		opts.connectFrom = "producer.missing_pin"
+		opts.connectEvent = "missing.event"
 	case CompositionConnectMissingReceiverFlow:
-		opts.connectTo = "missing.deploy_completed"
+		opts.connectTo = "missing"
 	case CompositionConnectMissingReceiverPin:
-		opts.connectTo = "consumer.missing_pin"
+		opts.connectRename = "missing.event"
 	case CompositionConnectRootReceiver:
-		opts.connectTo, opts.rootReceiver = ".deploy_completed", true
-	case CompositionConnectMissingAdapter:
-		opts.noAdapter = true
+		opts.connectTo, opts.rootReceiver = ".", true
+	case CompositionConnectAdapterWithoutRename:
+		opts.omitRename = true
 	case CompositionConnectMissingOutputKey:
 		opts.omitProducerOutputKey = true
 	case CompositionConnectMissingOutputCarries:
@@ -75,10 +75,10 @@ func CopyCompositionConnect(t testing.TB, variant CompositionConnectVariant) str
 		opts.producerTimer = true
 	case CompositionConnectInputAlias:
 		opts.consumerRequiresInput, opts.consumerScalarInput, opts.noAdapter = true, true, true
-		opts.consumerInputBind, opts.connectTo = "deploy.done", "consumer.deploy.completed"
+		opts.consumerInputBind, opts.omitRename = "deploy.done", true
 	case CompositionConnectOutputAlias:
 		opts.producerRequiresOutput, opts.consumerScalarInput, opts.noAdapter = true, true, true
-		opts.producerOutputBind = "deploy.completed"
+		opts.producerOutputBind, opts.connectEvent, opts.omitRename = "deploy.completed", "deploy.completed", true
 	default:
 		t.Fatalf("unsupported composition-connect variant %d", variant)
 	}
@@ -126,15 +126,18 @@ flows:
     flow: consumer
     mode: static
 connect:
-  - from: producer.work_ready
-    to: .work_ready
-  - from: producer.work_ready
-    to: consumer.work_ready
+  - event: work.ready
+    from: producer
+    to: .
+  - event: work.ready
+    from: producer
+    to: consumer
+    rename: consumer.work.ready
     adapter: work_ready_to_consumer
 `
 	if includeRuntimeReceiver {
 		packageBody = strings.Replace(packageBody, "connect:\n", "  - id: dynamic\n    flow: dynamic\n    mode: template\nconnect:\n", 1)
-		packageBody += "  - from: producer.work_ready\n    to: dynamic.work_ready\n    adapter: work_ready_to_dynamic\n"
+		packageBody += "  - event: work.ready\n    from: producer\n    to: dynamic\n    rename: dynamic.work.ready\n    adapter: work_ready_to_dynamic\n"
 	}
 	writeClosedVariantFile(t, root, "package.yaml", packageBody)
 	writeClosedVariantFile(t, root, "schema.yaml", `name: composition-connect-receiver-fanout
@@ -201,8 +204,11 @@ pins:
 }
 
 type compositionConnectFixtureOptions struct {
+	connectEvent               string
 	connectFrom                string
 	connectTo                  string
+	connectRename              string
+	omitRename                 bool
 	noAdapter                  bool
 	consumerMode               string
 	consumerScalarInput        bool
@@ -227,8 +233,13 @@ type compositionConnectFixtureOptions struct {
 func writeCompositionConnectBootverifyFixture(t testing.TB, opts compositionConnectFixtureOptions) string {
 	t.Helper()
 	root := CopyExample(t, ParentConnect)
-	connectFrom := firstTestValue(opts.connectFrom, "producer.deploy_done")
-	connectTo := firstTestValue(opts.connectTo, "consumer.deploy_completed")
+	connectEvent := firstTestValue(opts.connectEvent, "deploy.done")
+	connectFrom := firstTestValue(opts.connectFrom, "producer")
+	connectTo := firstTestValue(opts.connectTo, "consumer")
+	rename := "    rename: " + firstTestValue(opts.connectRename, "deploy.completed") + "\n"
+	if opts.omitRename {
+		rename = ""
+	}
 	adapter := "    adapter: deploy_done_to_completed\n"
 	if opts.noAdapter {
 		adapter = ""
@@ -261,9 +272,10 @@ flows:
     flow: consumer
     mode: `+firstTestValue(opts.consumerMode, "static")+flowBind+`
 connect:
-  - from: `+connectFrom+`
+  - event: `+connectEvent+`
+    from: `+connectFrom+`
     to: `+connectTo+`
-`+adapter+`
+`+rename+adapter+`
 `)
 	rootSchema := "name: composition-connect-bootverify\n"
 	if opts.rootReceiver {
@@ -298,8 +310,10 @@ func writeCompositionConnectTopologyFixture(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, ParentConnect)
 	writeCompositionConnectRootPackage(t, root, "composition-connect-topology", `
-  - from: producer.deploy_done
-    to: consumer.deploy_completed
+  - event: deploy.done
+    from: producer
+    to: consumer
+    rename: deploy.completed
     adapter: deploy_done_to_completed
 `)
 	writeCompositionConnectProducerSchemaOnlyFlow(t, root)
@@ -325,8 +339,9 @@ flows:
     flow: consumer
     mode: static
 connect:
-  - from: producer_a.ticket.ready
-    to: consumer.ticket.ready
+  - event: ticket.ready
+    from: producer_a
+    to: consumer
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: composition-connect-ambiguity\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")

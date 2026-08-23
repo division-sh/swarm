@@ -175,7 +175,7 @@ func TestBuildProjectsSelectAndSelectOrCreateModes(t *testing.T) {
 }
 
 func TestBuildProjectsRunnableStaticConnect(t *testing.T) {
-	connect := runtimecontracts.FlowPackageConnect{SourceFile: "package.yaml", SourceLine: 1, From: "producer.ready", To: "consumer.ready"}
+	connect := runtimecontracts.FlowPackageConnect{SourceFile: "package.yaml", SourceLine: 1, Event: "work.ready", From: "producer", To: "consumer"}
 	producer := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{Mode: "static", Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
@@ -288,11 +288,12 @@ func TestBuildDoesNotReconstructMissingConnectSourceFromBundlePaths(t *testing.T
 	}
 	found := false
 	for idx := range bundle.Semantics.CompositionConnects {
-		if bundle.Semantics.CompositionConnects[idx].From != "operating.operating_reported" {
+		connect := &bundle.Semantics.CompositionConnects[idx]
+		if connect.Event != "operating.reported" || connect.From != "operating" || connect.To != "portfolio" {
 			continue
 		}
-		bundle.Semantics.CompositionConnects[idx].SourceFile = ""
-		bundle.Semantics.CompositionConnects[idx].SourceLine = 0
+		connect.SourceFile = ""
+		connect.SourceLine = 0
 		found = true
 	}
 	if !found {
