@@ -1763,6 +1763,11 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 		}()
 		consecutivePanics := 0
 		for {
+			select {
+			case <-execution.stopAfterAccepted:
+				return
+			default:
+			}
 			panicked := false
 			panicCtx := loopCtx
 			panicText := ""
@@ -1779,6 +1784,8 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 				for {
 					select {
 					case <-executionCtx.Done():
+						return
+					case <-execution.stopAfterAccepted:
 						return
 					case delivery, ok := <-ch:
 						if !ok {

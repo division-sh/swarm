@@ -71,23 +71,31 @@ type agentLifecycleCell struct {
 }
 
 type agentExecutionProjection struct {
-	agent            Agent
-	config           models.AgentConfig
-	subscriptions    []events.EventType
-	admission        semanticview.FlowOwnedAgentSubscriptionAdmission
-	startedAt        time.Time
-	token            runtimeeffects.LifecycleToken
-	standingOwner    *worklifetime.StandingOccurrence
-	generationCtx    context.Context
-	cancelGeneration context.CancelFunc
-	loopCancel       context.CancelFunc
-	loopDone         chan struct{}
-	loopSettled      chan struct{}
-	route            <-chan *worklifetime.EventDelivery
-	routeToken       runtimeeffects.LifecycleToken
-	fenced           bool
-	leases           int
-	leaseDrained     chan struct{}
+	agent             Agent
+	config            models.AgentConfig
+	subscriptions     []events.EventType
+	admission         semanticview.FlowOwnedAgentSubscriptionAdmission
+	startedAt         time.Time
+	token             runtimeeffects.LifecycleToken
+	standingOwner     *worklifetime.StandingOccurrence
+	generationCtx     context.Context
+	cancelGeneration  context.CancelFunc
+	loopCancel        context.CancelFunc
+	loopDone          chan struct{}
+	loopSettled       chan struct{}
+	stopAfterAccepted chan struct{}
+	route             <-chan *worklifetime.EventDelivery
+	routeToken        runtimeeffects.LifecycleToken
+	fenced            bool
+	leases            int
+	leaseDrained      chan struct{}
+	deferredTerminal  *deferredAgentTermination
+}
+
+type deferredAgentTermination struct {
+	trigger  string
+	target   AgentLifecyclePhase
+	topology runtimeagenttopology.Admission
 }
 
 type AgentRouteBus interface {
@@ -1530,8 +1538,10 @@ func (c *agentLifecycleCoordinator) replaceLoopLocked(
 	}
 	done := make(chan struct{})
 	settled := make(chan struct{})
+	stopAfterAccepted := make(chan struct{})
 	nextExecution.loopCancel, nextExecution.loopDone = cancelGeneration, done
 	nextExecution.loopSettled = settled
+	nextExecution.stopAfterAccepted = stopAfterAccepted
 	return loopCtx, token, done, nil
 }
 
@@ -1577,7 +1587,26 @@ func (c *agentLifecycleCoordinator) releaseLoop(token runtimeeffects.LifecycleTo
 		return nil
 	}
 	store := c.persistence()
-	if cell.phase == AgentLifecycleRunning && store != nil {
+	if execution.deferredTerminal != nil {
+		pending := *execution.deferredTerminal
+		result, err := c.commitDeferredAgentTerminationLocked(c.context(), cell, pending)
+		if err != nil {
+			cell.phase = AgentLifecycleFailed
+			cell.runMode = AgentRunModeStopped
+			cell.execution.loopCancel = nil
+			cell.execution.loopDone = nil
+			cell.execution.route = nil
+			cell.execution.routeToken = runtimeeffects.LifecycleToken{}
+			return fmt.Errorf("persist deferred agent termination: %w", err)
+		}
+		cell.epoch = result.RuntimeEpoch
+		cell.generation = result.Generation
+		cell.phase = result.Phase
+		cell.runMode = result.RunMode
+		cell.topology = result.Topology
+		cell.processBinding = result.ProcessBinding
+		execution.deferredTerminal = nil
+	} else if cell.phase == AgentLifecycleRunning && store != nil {
 		plan, planHash, err := normalizedLifecycleSubordinate(runtimesessions.LifecycleMutationPlan{})
 		if err != nil {
 			return err
@@ -1621,9 +1650,77 @@ func (c *agentLifecycleCoordinator) releaseLoop(token runtimeeffects.LifecycleTo
 	}
 	cell.execution.loopCancel = nil
 	cell.execution.loopDone = nil
+	cell.execution.stopAfterAccepted = nil
 	cell.execution.route = nil
 	cell.execution.routeToken = runtimeeffects.LifecycleToken{}
 	return nil
+}
+
+func (c *agentLifecycleCoordinator) commitDeferredAgentTerminationLocked(
+	ctx context.Context,
+	cell *agentLifecycleCell,
+	pending deferredAgentTermination,
+) (AgentLifecycleTransitionResult, error) {
+	if cell == nil || cell.phase != AgentLifecycleRunning {
+		return AgentLifecycleTransitionResult{}, errors.New("deferred agent termination requires the exact running lifecycle cell")
+	}
+	if err := pending.topology.Validate(); err != nil {
+		return AgentLifecycleTransitionResult{}, fmt.Errorf("deferred agent termination topology: %w", err)
+	}
+	operationKind, err := lifecycleTerminationOperationKind(pending.target)
+	if err != nil {
+		return AgentLifecycleTransitionResult{}, err
+	}
+	plan, planHash, err := normalizedLifecycleSubordinate(runtimesessions.LifecycleMutationPlan{
+		Action:            runtimesessions.LifecycleMutationTerminateCurrentSet,
+		TerminationReason: runtimesessions.TerminationReasonNormal,
+		TerminationDetail: pending.trigger,
+	})
+	if err != nil {
+		return AgentLifecycleTransitionResult{}, err
+	}
+	nextEpoch, nextGeneration := runtimebus.CurrentRuntimeEpoch(), cell.generation+1
+	operationID := uuid.NewString()
+	store := c.persistence()
+	if store != nil {
+		targetBinding := cell.processBinding
+		operationKind, targetBinding, err = lifecycleMutationExecutionAuthority(store, cell.processBinding, operationKind, true)
+		if err != nil {
+			return AgentLifecycleTransitionResult{}, err
+		}
+		requestHash := lifecycleRequestHashForIdentity(
+			cell.identity, pending.topology, operationKind, pending.trigger, cell.configRevision, planHash,
+			cell.processBinding.ProcessAuthorityID, cell.processBinding.ProcessBootID,
+			targetBinding.ProcessAuthorityID, targetBinding.ProcessBootID, targetBinding.GenerationGrantID,
+		)
+		return store.CommitAgentLifecycleTransition(context.WithoutCancel(ctx), AgentLifecycleTransition{
+			OperationID: operationID, OperationKind: operationKind, RequestHash: requestHash,
+			Identity: cell.identity, AgentID: cell.identity.AgentID(), Trigger: pending.trigger,
+			ExpectedEpoch: cell.epoch, ExpectedGeneration: cell.generation, ExpectedPhase: cell.phase,
+			TargetEpoch: nextEpoch, TargetGeneration: nextGeneration, TargetPhase: pending.target,
+			ConfigRevision: cell.configRevision, RunMode: AgentRunModeStopped, Subordinate: plan,
+			Topology: pending.topology, Now: time.Now().UTC(),
+		})
+	}
+	if c.sessions != nil {
+		requestHash := lifecycleRequestHashForIdentity(cell.identity, pending.topology, pending.trigger, cell.configRevision, planHash)
+		if _, _, err := c.sessions.ApplyLifecycleProjection(context.WithoutCancel(ctx), runtimesessions.LifecycleProjectionRequest{
+			OperationID: operationID, RequestHash: requestHash,
+			Expected:    lifecycleToken(cell.identity, cell.epoch, cell.generation),
+			Target:      lifecycleToken(cell.identity, nextEpoch, nextGeneration),
+			TargetPhase: string(pending.target), Plan: plan, Now: time.Now().UTC(),
+		}); err != nil {
+			return AgentLifecycleTransitionResult{}, err
+		}
+	}
+	return AgentLifecycleTransitionResult{
+		OperationID: operationID, Identity: cell.identity, AgentID: cell.identity.AgentID(),
+		PreviousEpoch: cell.epoch, RuntimeEpoch: nextEpoch,
+		PreviousGeneration: cell.generation, Generation: nextGeneration,
+		PreviousPhase: cell.phase, Phase: pending.target,
+		ConfigRevision: cell.configRevision, RunMode: AgentRunModeStopped,
+		Topology: pending.topology, ProcessBinding: cell.processBinding,
+	}, nil
 }
 
 func (c *agentLifecycleCoordinator) abortUnlaunchedLoopLocked(ctx context.Context, identity runtimeagentidentity.Identity, token runtimeeffects.LifecycleToken, done chan struct{}, lockedCell *agentLifecycleCell) error {
@@ -1784,6 +1881,25 @@ func (c *agentLifecycleCoordinator) terminateIdentityWithTopologyExpected(
 			c.mu.Unlock()
 			return models.AgentConfig{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "agent_config_changed", "agent-lifecycle", trigger, map[string]any{"agent_id": agentID})
 		}
+	}
+	if deferRouteRetirement && execution != nil {
+		if target != AgentLifecycleTerminated || execution.loopDone == nil || execution.stopAfterAccepted == nil || !routeToken.Valid() {
+			c.mu.Unlock()
+			return models.AgentConfig{}, errors.New("deferred route retirement requires one running terminal agent execution")
+		}
+		if execution.deferredTerminal != nil {
+			c.mu.Unlock()
+			return models.AgentConfig{}, errors.New("agent execution already has a deferred terminal transition")
+		}
+		execution.fenced = true
+		execution.deferredTerminal = &deferredAgentTermination{trigger: trigger, target: target, topology: transitionTopology}
+		stopAfterAccepted := execution.stopAfterAccepted
+		c.mu.Unlock()
+		if c.routes != nil {
+			c.routes.FenceAgentRoute(routeToken)
+		}
+		close(stopAfterAccepted)
+		return previousConfig, nil
 	}
 	store := c.persistence()
 	effectivePhase := target
