@@ -35,6 +35,14 @@ func TestDeclaredAgentNameOwnershipBoundary(t *testing.T) {
 
 func TestDeclaredAgentNameOwnershipBoundaryRejectsHostileBypasses(t *testing.T) {
 	root := agentNameGuardRepoRoot(t)
+	flowBoundaryPath := "internal/runtime/bootverify/workflow_flow_boundary_checks.go"
+	flowBoundaryFunction := "flowHasScopedInputEscapeHatch"
+	if agentNameGuardRawAgentScopeMapAllowed(flowBoundaryPath, flowBoundaryFunction) || agentNameGuardAgentMapRangeAllowed(flowBoundaryPath, flowBoundaryFunction) {
+		t.Fatal("retired flow-boundary agent-map interpreter remains exempt from ownership guard")
+	}
+	if agentNameGuardAgentMapRangeAllowed("internal/runtime/manager/flow_activation.go", "(*AgentManager).flowInstanceAgentRecords") {
+		t.Fatal("canonical flow-instance agent consumer remains exempt from ownership guard")
+	}
 	path := filepath.Join(root, "internal", "runtime", "semanticview", "agent_name_guard_hostile.go")
 	overlay := map[string][]byte{path: []byte(`package semanticview
 
@@ -283,7 +291,6 @@ func agentNameGuardIsRawAgentScopeMap(selector *ast.SelectorExpr, info *types.In
 
 func agentNameGuardRawAgentScopeMapAllowed(path, enclosing string) bool {
 	allowed := map[string]struct{}{
-		"internal/runtime/bootverify/workflow_flow_boundary_checks.go::flowHasScopedInputEscapeHatch":            {},
 		"internal/runtime/contracts/agent_registry_resolution.go::bundleAgentRecords":                            {},
 		"internal/runtime/contracts/agent_intent_resolution.go::materializeAgentIntents":                         {},
 		"internal/runtime/contracts/criteria_validation.go::validateAgentCriteriaCitationConsumption":            {},
@@ -359,7 +366,6 @@ func agentNameGuardAgentMapRangeAllowed(path, enclosing string) bool {
 	// coordinate, or ignore it while inspecting non-identity entry fields. Any
 	// new range over the wire map must be classified here or consume a name plan.
 	allowed := map[string]struct{}{
-		"internal/runtime/bootverify/workflow_flow_boundary_checks.go::flowHasScopedInputEscapeHatch":            {},
 		"internal/runtime/contracts/agent_intent_resolution.go::materializeAgentIntents":                         {},
 		"internal/runtime/contracts/criteria_validation.go::validateAgentCriteriaCitationConsumption":            {},
 		"internal/runtime/contracts/criteria_validation.go::validateAgentCriteriaReferences":                     {},
@@ -367,7 +373,6 @@ func agentNameGuardAgentMapRangeAllowed(path, enclosing string) bool {
 		"internal/runtime/contracts/workflow_contract_effective.go::EffectiveAgentRegistryEntries":               {},
 		"internal/runtime/contracts/workflow_contract_merging.go::mergeAgentContracts":                           {},
 		"internal/runtime/contracts/workflow_contract_paths.go::cloneAgentRegistryEntryMap":                      {},
-		"internal/runtime/manager/flow_activation.go::(*AgentManager).flowInstanceAgentRecords":                  {},
 		"internal/runtime/semanticview/import_boundary_wildcards.go::importBoundaryFlowWildcardSubscriptions":    {},
 		"internal/runtime/semanticview/import_boundary_wildcards.go::importBoundaryProjectWildcardSubscriptions": {},
 		"internal/runtime/semanticviewtest/source.go::WrapRootAgents":                                            {},
