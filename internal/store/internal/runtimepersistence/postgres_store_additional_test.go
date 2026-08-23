@@ -1118,6 +1118,42 @@ func TestPostgresStore_Mailbox_CRUD_Expire_Notify(t *testing.T) {
 	if !foundPending {
 		t.Fatalf("expected inserted pending mailbox item %q in list", id)
 	}
+	if unread, err := s.CountUnreadInformationalNotices(ctx); err != nil || unread != 0 {
+		t.Fatalf("non-informational pending row changed unread notice count: count=%d err=%v", unread, err)
+	}
+	noticeID, err := s.InsertMailboxItem(ctx, runtimetools.MailboxItem{
+		EntityID: entityID, FromAgent: "control-plane", Type: runtimetools.NotifyHumanMailboxItemType,
+		Priority: "normal", Status: "pending", Summary: "strong match found",
+	})
+	if err != nil {
+		t.Fatalf("insert informational notice: %v", err)
+	}
+	if unread, err := s.CountUnreadInformationalNotices(ctx); err != nil || unread != 1 {
+		t.Fatalf("unread informational notices = %d, want 1: %v", unread, err)
+	}
+	reopened := admitTestPostgresStore(t, db)
+	if notice, err := reopened.GetMailboxItem(ctx, noticeID); err != nil || notice.Type != runtimetools.NotifyHumanMailboxItemType {
+		t.Fatalf("reopened informational notice = %#v, err=%v", notice, err)
+	}
+	listed, err := reopened.ListMailboxItems(ctx, "pending", 10)
+	if err != nil {
+		t.Fatalf("list reopened informational notices: %v", err)
+	}
+	foundNotice := false
+	for _, item := range listed {
+		if item.ID == noticeID && item.Type == runtimetools.NotifyHumanMailboxItemType {
+			foundNotice = true
+		}
+	}
+	if !foundNotice {
+		t.Fatalf("reopened pending mailbox list omitted informational notice %s: %#v", noticeID, listed)
+	}
+	if err := reopened.MarkMailboxItemNotified(ctx, noticeID); err != nil {
+		t.Fatalf("acknowledge informational notice: %v", err)
+	}
+	if unread, err := reopened.CountUnreadInformationalNotices(ctx); err != nil || unread != 0 {
+		t.Fatalf("unread informational notices after acknowledgment = %d, want 0: %v", unread, err)
+	}
 
 	expID, err := s.InsertMailboxItem(ctx, runtimetools.MailboxItem{
 		EntityID:  entityID,
@@ -2482,8 +2518,8 @@ func TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership(t *test
 			MaxTurnsPerTask: 7,
 			Subscriptions:   []string{"review.ready"},
 			EmitEvents:      []string{"review.completed"},
-			Tools:           []string{"agent_message"},
-			Permissions:     []string{"agent_message"},
+			Tools:           []string{"schedule"},
+			Permissions:     []string{"schedule"},
 			NativeTools:     runtimeactors.NativeToolConfig{FileIO: true},
 			WorkspaceClass:  "shared_flow",
 			ManagerFallback: "control-plane",

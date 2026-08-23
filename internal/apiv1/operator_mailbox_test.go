@@ -24,7 +24,11 @@ func TestOperatorMailboxHandlersSupportedRPCPath(t *testing.T) {
 	if listed.Error != nil {
 		t.Fatalf("mailbox.list error = %#v", listed.Error)
 	}
-	items := asSlice(t, asMap(t, listed.Result)["items"])
+	result := asMap(t, listed.Result)
+	if result["unread_informational_notices"] != float64(0) {
+		t.Fatalf("mailbox.list unread informational count = %#v, want 0", result["unread_informational_notices"])
+	}
+	items := asSlice(t, result["items"])
 	if len(items) != 2 {
 		t.Fatalf("mailbox.list items = %#v, want one notice and one decision card", items)
 	}

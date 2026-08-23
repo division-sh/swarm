@@ -11,7 +11,7 @@ import (
 )
 
 type sourceProvider struct {
-	mailboxSendRoles []string
+	notifyHumanRoles []string
 	producerRoles    []string
 	agentEvents      map[string][]string
 }
@@ -25,7 +25,7 @@ func buildSourceProvider(source semanticview.Source) Provider {
 		return noopProvider{}
 	}
 	allRoles := sourceRoles(source)
-	mailboxSendRoles := append([]string(nil), allRoles...)
+	notifyHumanRoles := append([]string(nil), allRoles...)
 
 	agentEvents := buildProducerRegistry(source)
 	producerRoles := make([]string, 0, len(agentEvents))
@@ -35,7 +35,7 @@ func buildSourceProvider(source semanticview.Source) Provider {
 	sort.Strings(producerRoles)
 
 	return &sourceProvider{
-		mailboxSendRoles: cloneRoles(mailboxSendRoles),
+		notifyHumanRoles: cloneRoles(notifyHumanRoles),
 		producerRoles:    producerRoles,
 		agentEvents:      agentEvents,
 	}
@@ -94,11 +94,11 @@ func (p *sourceProvider) HasMessageAuthority(actor, target models.AgentConfig) b
 	}
 }
 
-func (p *sourceProvider) AuthorizeMailboxSend(actor models.AgentConfig) error {
-	if containsCanonical(p.mailboxSendRoles, actor.Role) {
+func (p *sourceProvider) AuthorizeNotifyHuman(actor models.AgentConfig) error {
+	if containsCanonical(p.notifyHumanRoles, actor.Role) {
 		return nil
 	}
-	return authorizationDenied("mailbox_send", actor, models.AgentConfig{})
+	return authorizationDenied("notify_human", actor, models.AgentConfig{})
 }
 
 func authorizationDenied(action string, actor, target models.AgentConfig) error {

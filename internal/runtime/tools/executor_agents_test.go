@@ -2,20 +2,17 @@ package tools
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
-	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -33,24 +30,6 @@ func toolTestAgentIdentity(t testing.TB, agentID, flowID, flowPath string) agent
 		return toolTestRootAgentIdentity(t, agentID)
 	}
 	return agentidentitytest.Declared(t, agentID, "swarm-test://"+flowID+"/"+strings.TrimSpace(agentID), flowID, "test-instance", flowPath)
-}
-
-type managerStub struct {
-	agents map[string]models.AgentConfig
-}
-
-func (m managerStub) ResolveAgentConfig(agentID, flowInstance string) (models.AgentConfig, error) {
-	cfg, ok := m.agents[agentID]
-	if !ok || (flowInstance != "" && cfg.CanonicalFlowPath() != flowInstance) {
-		return models.AgentConfig{}, fmt.Errorf("agent not found")
-	}
-	return cfg, nil
-}
-
-type publishDirectBusStub struct {
-	recipients []string
-	routes     []events.DeliveryRoute
-	event      events.Event
 }
 
 type captureScheduleScheduler struct {
@@ -82,117 +61,6 @@ func (s *captureScheduleScheduler) Admit(_ context.Context, command runtimegener
 	s.command = command
 	s.calls++
 	return runtimegenericschedule.AdmissionResult{Outcome: runtimegenericschedule.AdmissionCreated, Activation: activation}, nil
-}
-
-func (b *publishDirectBusStub) Publish(context.Context, events.Event) error { return nil }
-
-func (b *publishDirectBusStub) PublishDirect(_ context.Context, event events.Event, recipients []string) error {
-	b.recipients = append([]string{}, recipients...)
-	b.event = event
-	return nil
-}
-
-func (b *publishDirectBusStub) PublishDirectRoutes(_ context.Context, event events.Event, routes []events.DeliveryRoute) error {
-	b.routes = append([]events.DeliveryRoute(nil), routes...)
-	b.event = event
-	return nil
-}
-
-type concreteManagerStub struct {
-	agents map[agentidentity.Identity]models.AgentConfig
-}
-
-func (m *concreteManagerStub) ResolveAgentConfig(agentID, flowInstance string) (models.AgentConfig, error) {
-	matches := make([]models.AgentConfig, 0, 2)
-	for identity, cfg := range m.agents {
-		if identity.AgentID() != strings.TrimSpace(agentID) {
-			continue
-		}
-		if flowInstance != "" && identity.FlowInstance() != strings.Trim(strings.TrimSpace(flowInstance), "/") {
-			continue
-		}
-		matches = append(matches, cfg)
-	}
-	if len(matches) != 1 {
-		return models.AgentConfig{}, fmt.Errorf("agent resolution matched %d concrete identities", len(matches))
-	}
-	return matches[0], nil
-}
-
-func TestExecAgentMessagePreservesImportedTemplateSourceWhenAuthorityPermits(t *testing.T) {
-	const flowPath = "parent/review"
-	agents := map[string]runtimecontracts.AgentRegistryEntry{
-		"control": {
-			ID:    "control",
-			Role:  "control",
-			Tools: []string{"message_flow"},
-		},
-		"reviewer": {
-			ID:    "reviewer",
-			Role:  "reviewer",
-			Tools: []string{"message_peers"},
-		},
-	}
-	reviewFlow := &runtimecontracts.FlowContractView{
-		Paths:  runtimecontracts.FlowContractPaths{ID: "review", Flow: "review", PackageKey: "review-package"},
-		Path:   flowPath,
-		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
-		Agents: agents,
-	}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: reviewFlow,
-			ByID: map[string]*runtimecontracts.FlowContractView{"review": reviewFlow},
-		},
-	}
-	source := toolTestSourceWithDeclaredAgent(t, bundle, "control", "review")
-	provider := runtimeauthority.NewSourceProvider(source)
-
-	bus := &publishDirectBusStub{}
-	manager := managerStub{
-		agents: map[string]models.AgentConfig{
-			"target-1": {
-				ID:              "target-1",
-				Identity:        agentidentitytest.Runtime(t, "target-1", "runtime-tools-test", flowPath, "inst-1", flowPath+"/inst-1"),
-				Role:            "reviewer",
-				EntityID:        "entity-b",
-				FlowPath:        flowPath + "/inst-1",
-				ManagerFallback: "control",
-			},
-		},
-	}
-	exec := NewExecutorWithOptions(bus, ExecutorOptions{Manager: manager, AuthorityProvider: provider, WorkflowSource: source})
-	actor := models.AgentConfig{
-		ExecutionMode: "mock",
-		ID:            "control",
-		Identity:      agentidentitytest.Declared(t, "control", "swarm-test://review/control", flowPath, "inst-1", flowPath+"/inst-1"),
-		Role:          "control",
-		Permissions:   []string{"message_flow"},
-		EntityID:      "entity-a",
-		FlowID:        "review",
-		FlowPath:      flowPath + "/inst-1",
-	}
-	ctx := runtimeeffects.WithExecutionMode(WithActor(toolEventTestContext(actor), actor), runtimeeffects.ExecutionModeMock)
-
-	if _, err := exec.execAgentMessage(ctx, actor, map[string]any{
-		"target_agent_id": "target-1",
-		"message":         "hello",
-	}); err != nil {
-		t.Fatalf("expected cross-entity agent_message to be allowed, got %v", err)
-	}
-	if len(bus.recipients) != 0 {
-		t.Fatalf("slug-only recipients = %#v, want none", bus.recipients)
-	}
-	if len(bus.routes) != 1 || bus.routes[0].AgentIdentity != manager.agents["target-1"].Identity {
-		t.Fatalf("exact routes = %#v, want target concrete identity", bus.routes)
-	}
-	if bus.event.ExecutionMode() != runtimeeffects.ExecutionModeMock {
-		t.Fatalf("agent_message event execution mode = %q, want mock", bus.event.ExecutionMode())
-	}
-	wantSourceRoute := events.RouteIdentity{FlowID: "review", FlowInstance: flowPath + "/inst-1", EntityID: "entity-a"}
-	if got := bus.event.RoutingSource().Route().Normalized(); got != wantSourceRoute {
-		t.Fatalf("agent_message routing source = %#v, want %#v", got, wantSourceRoute)
-	}
 }
 
 func TestExecSchedulePreservesRootAgentRoutingSource(t *testing.T) {
@@ -466,97 +334,5 @@ func TestScheduleBuiltinContractDeliversValidatesAndDispatches(t *testing.T) {
 	}
 	if scheduler.calls != 1 {
 		t.Fatalf("rejected legacy requests reached admission: calls=%d", scheduler.calls)
-	}
-}
-
-func TestExecAgentMessage_PublishesOnlyResolvedSameSlugRoute(t *testing.T) {
-	t.Parallel()
-
-	agents := map[string]runtimecontracts.AgentRegistryEntry{
-		"manager": {ID: "manager", Role: "manager", Tools: []string{"message_flow"}},
-		"worker":  {ID: "worker", Role: "worker"},
-	}
-	reviewFlow := &runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},
-		Path:  "review", Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate}, Agents: agents,
-	}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: reviewFlow,
-			ByID: map[string]*runtimecontracts.FlowContractView{"review": reviewFlow},
-		},
-	}
-	source := toolTestSourceWithDeclaredAgent(t, bundle, "manager", "review")
-	workerA := models.AgentConfig{
-		ID: "worker", Identity: agentidentitytest.Runtime(t, "worker", "runtime-tools-test", "review", "inst-a", "review/inst-a"),
-		Role: "worker", EntityID: "entity-a", FlowPath: "review/inst-a",
-	}
-	workerB := models.AgentConfig{
-		ID: "worker", Identity: agentidentitytest.Runtime(t, "worker", "runtime-tools-test", "review", "inst-b", "review/inst-b"),
-		Role: "worker", EntityID: "entity-b", FlowPath: "review/inst-b",
-	}
-	manager := &concreteManagerStub{agents: map[agentidentity.Identity]models.AgentConfig{
-		workerA.Identity: workerA,
-		workerB.Identity: workerB,
-	}}
-	bus := &publishDirectBusStub{}
-	exec := NewExecutorWithOptions(bus, ExecutorOptions{
-		Manager: manager, AuthorityProvider: runtimeauthority.NewSourceProvider(source), WorkflowSource: source,
-	})
-	actor := models.AgentConfig{
-		ExecutionMode: "mock",
-		ID:            "manager",
-		Identity:      toolTestAgentIdentity(t, "manager", "review", "review/inst-b"),
-		Role:          "manager",
-		Permissions:   []string{"message_flow"},
-		EntityID:      "entity-manager",
-		FlowID:        "review",
-		FlowPath:      "review/inst-b",
-	}
-	ctx := runtimeeffects.WithExecutionMode(WithActor(toolEventTestContext(actor), actor), runtimeeffects.ExecutionModeMock)
-
-	if _, err := exec.execAgentMessage(ctx, actor, map[string]any{
-		"target_agent_id": "worker",
-		"flow_instance":   "review/inst-b",
-		"message":         "exact sibling",
-	}); err != nil {
-		t.Fatalf("send exact same-slug agent message: %v", err)
-	}
-	if len(bus.recipients) != 0 {
-		t.Fatalf("slug-only recipients = %#v, want none", bus.recipients)
-	}
-	if len(bus.routes) != 1 || bus.routes[0].AgentIdentity != workerB.Identity {
-		t.Fatalf("published routes = %#v, want second concrete worker only", bus.routes)
-	}
-	if bus.routes[0].AgentIdentity == workerA.Identity {
-		t.Fatal("message route crossed to unrelated same-slug sibling")
-	}
-}
-
-func TestAuthorizeAgentMessageSelfRequiresExactConcreteIdentity(t *testing.T) {
-	t.Parallel()
-
-	workerA := models.AgentConfig{
-		ID:       "worker",
-		Identity: agentidentitytest.Runtime(t, "worker", "runtime-tools-test", "review", "inst-a", "review/inst-a"),
-		Role:     "worker",
-		FlowPath: "review/inst-a",
-	}
-	workerB := models.AgentConfig{
-		ID:       "worker",
-		Identity: agentidentitytest.Runtime(t, "worker", "runtime-tools-test", "review", "inst-b", "review/inst-b"),
-		Role:     "worker",
-		FlowPath: "review/inst-b",
-	}
-	if err := authorizeAgentMessage(runtimeauthority.NoopProvider(), workerA, workerA, nil); err != nil {
-		t.Fatalf("exact self authorization: %v", err)
-	}
-	if err := authorizeAgentMessage(runtimeauthority.NoopProvider(), workerA, workerB, nil); err == nil {
-		t.Fatal("same-slug sibling bypassed message authorization")
-	}
-	malformed := workerA
-	malformed.Identity = agentidentity.Identity{}
-	if err := authorizeAgentMessage(runtimeauthority.NoopProvider(), malformed, malformed, nil); err == nil {
-		t.Fatal("malformed identity bypassed message authorization")
 	}
 }

@@ -21,6 +21,7 @@ func TestMailboxListUsesTaggedNoticeAndDecisionCardProjection(t *testing.T) {
 			t.Fatalf("decode request: %v", err)
 		}
 		writeJSONRPCResult(t, w, captured.ID, map[string]any{
+			"unread_informational_notices": 3,
 			"items": []any{
 				map[string]any{"kind": "notice", "notice": mailboxNoticeResult("notice-1")},
 				map[string]any{"kind": "decision_card", "decision_card": mailboxCardSummaryResult("card-1")},
@@ -46,7 +47,7 @@ func TestMailboxListUsesTaggedNoticeAndDecisionCardProjection(t *testing.T) {
 	if !reflect.DeepEqual(captured.Params, wantParams) {
 		t.Fatalf("params = %#v, want %#v", captured.Params, wantParams)
 	}
-	for _, want := range []string{"MAILBOX_ID", "notice-1", "notice", "card-1", "decision_card", "launch_review", "human-card-1", "human_task:strategic_decision", "effect-card-1", "proposed_effect:support_reply", "next_cursor=cursor-2"} {
+	for _, want := range []string{"⚠ 3 unread operator notices", "MAILBOX_ID", "notice-1", "notice", "card-1", "decision_card", "launch_review", "human-card-1", "human_task:strategic_decision", "effect-card-1", "proposed_effect:support_reply", "next_cursor=cursor-2"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("stdout missing %q:\n%s", want, stdout.String())
 		}

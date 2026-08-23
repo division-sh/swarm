@@ -29,6 +29,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/scenarioderivation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/google/uuid"
@@ -46,6 +47,7 @@ type runtimeProjectSupervisor struct {
 	credentials          runtimecredentials.Store
 	providerCredentials  runtimecredentials.Store
 	providerTriggers     *providertriggers.CatalogSnapshot
+	noticePresentation   runtimetools.InformationalNoticePresentationSink
 	platformPackBase     *packartifact.PlatformPackInventory
 	platformPackBases    *packartifact.PlatformPackBaseGenerationOwner
 	processWorkOwner     *worklifetime.Process
@@ -577,6 +579,7 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 		ManagedCredentials:      managedCredentialStore,
 		ProviderCredentials:     s.providerCredentials,
 		ProviderTriggerCatalog:  candidateCatalog,
+		NoticePresentation:      s.noticePresentation,
 		ChannelPlans:            candidateChannelPlans,
 		ChannelOutboundBindings: candidateChannelBindings,
 		ScenarioDeclarations:    scenarioDeclarations,

@@ -742,6 +742,35 @@ func TestBoardDirectiveToolSuccessRequiresCanonicalContinuationProjection(t *tes
 	}
 }
 
+func TestHumanTaskOutcomeInjectsCanonicalAskHumanToolResult(t *testing.T) {
+	agent := mustBuildLLMAgent(t, models.AgentConfig{ExecutionMode: "live", ID: "reviewer"}, nil, nil, nil)
+	evt := eventtest.RunCreatingRootIngress(
+		"00000000-0000-0000-0000-000000000401",
+		events.EventType("human_task.approved"),
+		"runtime",
+		"",
+		[]byte(`{"card_id":"00000000-0000-0000-0000-000000000402","decision":"approved"}`),
+		0,
+		"00000000-0000-0000-0000-000000000403",
+		"",
+		events.EventEnvelope{},
+		time.Date(2026, 8, 23, 0, 0, 0, 0, time.UTC),
+	)
+	if err := agent.injectHumanTaskToolResult(context.Background(), evt); err != nil {
+		t.Fatalf("inject human-task result: %v", err)
+	}
+	if len(agent.conversation.Messages) != 1 {
+		t.Fatalf("conversation messages = %#v, want one async tool result", agent.conversation.Messages)
+	}
+	var result []map[string]any
+	if err := json.Unmarshal([]byte(agent.conversation.Messages[0].Content), &result); err != nil {
+		t.Fatalf("decode async tool result: %v", err)
+	}
+	if len(result) != 1 || result[0]["name"] != runtimetools.AskHumanToolName || result[0]["ok"] != true {
+		t.Fatalf("async tool result = %#v, want canonical ask_human success", result)
+	}
+}
+
 func TestLLMAgentOnEvent_FiltersRoleScopedToolsByTurnEntityEligibility(t *testing.T) {
 	rt := &boardTestRuntime{
 		steps: []*llm.Response{
@@ -955,6 +984,9 @@ func TestBoardStep_FactoryCreatedDirectiveTurnPreservesRoleScopedEmitToolSurface
 	}
 	if !containsString(rt.startTools, "emit_scan_requested") {
 		t.Fatalf("session tools = %v, want emit_scan_requested", rt.startTools)
+	}
+	if !containsString(rt.startTools, runtimetools.NotifyHumanToolName) {
+		t.Fatalf("BoardStep session tools = %v, want canonical %s", rt.startTools, runtimetools.NotifyHumanToolName)
 	}
 	if len(rt.inputs) == 0 || strings.Contains(rt.inputs[0], "Available emit tools") {
 		t.Fatalf("directive input retained prompt-owned emit capability truth: %q", firstOrEmpty(rt.inputs))

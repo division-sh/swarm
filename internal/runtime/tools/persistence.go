@@ -15,6 +15,7 @@ type MailboxPersistence interface {
 	InsertMailboxItem(ctx context.Context, item MailboxItem) (string, error)
 	ListMailboxItems(ctx context.Context, status string, limit int) ([]MailboxItem, error)
 	CountMailboxItems(ctx context.Context, status string) (int, error)
+	CountUnreadInformationalNotices(ctx context.Context) (int, error)
 	GetMailboxItem(ctx context.Context, id string) (MailboxItem, error)
 	ExpireMailboxItems(ctx context.Context, limit int) ([]MailboxItem, error)
 	ListUnnotifiedCriticalMailboxItems(ctx context.Context, limit int) ([]MailboxItem, error)

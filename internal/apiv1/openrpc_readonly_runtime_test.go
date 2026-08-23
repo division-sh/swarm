@@ -1316,4 +1316,8 @@ func (s *readOnlyMailboxProbeStore) GetV1MailboxItem(_ context.Context, mailboxI
 	return detail, nil
 }
 
+func (*readOnlyMailboxProbeStore) CountUnreadInformationalNotices(context.Context) (int, error) {
+	return 0, nil
+}
+
 var _ MailboxAPIStore = (*readOnlyMailboxProbeStore)(nil)

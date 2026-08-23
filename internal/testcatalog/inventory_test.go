@@ -31,21 +31,35 @@ func TestCatalogRequiredInventory(t *testing.T) {
 	if counts[DispositionRuntime] != 98 || counts[DispositionVerifyOnly] != 36 || counts[DispositionRetired] != 22 {
 		t.Fatalf("disposition counts = %#v, want runtime=98 verify-only=36 retired=22", counts)
 	}
-	if verifyCounts[VerifyPass] != 2 || verifyCounts[VerifyWarning] != 9 || verifyCounts[VerifyReject] != 25 {
-		t.Fatalf("verify-only counts = %#v, want pass=2 warning=9 reject=25", verifyCounts)
+	if verifyCounts[VerifyPass] != 2 || verifyCounts[VerifyWarning] != 8 || verifyCounts[VerifyReject] != 26 {
+		t.Fatalf("verify-only counts = %#v, want pass=2 warning=8 reject=26", verifyCounts)
 	}
 	if got := len(inventory.PublicCompanions()); got != 87 {
 		t.Fatalf("public companion count = %d, want 87", got)
 	}
-	if got := len(inventory.Claims); got != 17 {
-		t.Fatalf("canonical claim count = %d, want 17", got)
+	if got := len(inventory.Claims); got != 20 {
+		t.Fatalf("canonical claim count = %d, want 20", got)
 	}
-	if got := len(inventory.ExternalProofs); got != 1 {
-		t.Fatalf("external proof count = %d, want 1", got)
+	if got := len(inventory.ExternalProofs); got != 3 {
+		t.Fatalf("external proof count = %d, want 3", got)
 	}
-	proof := inventory.ExternalProofs[0]
-	if proof.Source != "examples/integrations/telegram-agent" || proof.Executor != "github.com/division-sh/swarm/internal/serveapp" || !equalCatalogStrings(proof.Proves, telegramAgentClaims()) {
-		t.Fatalf("Telegram external proof = %#v", proof)
+	wantProofs := map[string]struct {
+		executor string
+		claims   []string
+	}{
+		"examples/integrations/telegram-agent": {executor: "github.com/division-sh/swarm/internal/serveapp", claims: telegramAgentClaims()},
+		"internal/runtime/llm":                 {executor: "github.com/division-sh/swarm/internal/runtime/llm", claims: []string{"catalog.runtime.managed_hitl_api_transport", "catalog.runtime.managed_hitl_inprocess_transport"}},
+		"internal/releasee2e":                  {executor: "github.com/division-sh/swarm/internal/releasee2e", claims: []string{"catalog.runtime.managed_hitl_cli_mcp_transport"}},
+	}
+	for _, proof := range inventory.ExternalProofs {
+		want, ok := wantProofs[proof.Source]
+		if !ok || proof.Executor != want.executor || !equalCatalogStrings(proof.Proves, want.claims) {
+			t.Fatalf("external proof = %#v", proof)
+		}
+		delete(wantProofs, proof.Source)
+	}
+	if len(wantProofs) != 0 {
+		t.Fatalf("missing external proofs = %#v", wantProofs)
 	}
 }
 

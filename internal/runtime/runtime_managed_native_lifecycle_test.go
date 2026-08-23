@@ -3,7 +3,10 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -27,6 +30,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/google/uuid"
 )
@@ -239,6 +243,8 @@ func TestRuntimeStart_RecoveryHydratesManagedNativePreflightBeforeReplayAdmissio
 	)
 	deps.Config = cfg
 	deps.Options = managedNativeLifecycleOptions(t, "recovered-native-agent", probeRuntime, module)
+	gatewayBinding, installGateway := startManagedNativeLifecycleGateway(t)
+	deps.Options.ToolGatewayBinding = gatewayBinding
 	rt, err := newScopedTestRuntime(t, ctx, deps)
 	if err != nil {
 		t.Fatalf("NewRuntime: %v", err)
@@ -246,6 +252,7 @@ func TestRuntimeStart_RecoveryHydratesManagedNativePreflightBeforeReplayAdmissio
 	if err := rt.PrepareAuthorActivityCatalog(); err != nil {
 		t.Fatalf("PrepareAuthorActivityCatalog: %v", err)
 	}
+	installGateway(rt.ToolGateway.Handler())
 
 	delivery.onClaim = func(claimCtx context.Context) error {
 		admission, ok := managedexecution.FromContext(claimCtx)
@@ -330,6 +337,8 @@ func TestRuntimeStart_ReplacementGrantSettlesManagedNativePreflightBeforeAdmissi
 	)
 	candidateDeps.Config = managedNativeLifecycleConfig(true)
 	candidateDeps.Options = managedNativeLifecycleOptions(t, "replacement-native-agent", probeRuntime, module)
+	gatewayBinding, installGateway := startManagedNativeLifecycleGateway(t)
+	candidateDeps.Options.ToolGatewayBinding = gatewayBinding
 	candidate, err := newScopedTestRuntime(t, ctx, candidateDeps)
 	if err != nil {
 		t.Fatalf("NewRuntime(candidate): %v", err)
@@ -337,6 +346,7 @@ func TestRuntimeStart_ReplacementGrantSettlesManagedNativePreflightBeforeAdmissi
 	if err := candidate.PrepareAuthorActivityCatalog(); err != nil {
 		t.Fatalf("PrepareAuthorActivityCatalog(candidate): %v", err)
 	}
+	installGateway(candidate.ToolGateway.Handler())
 	if err := candidate.Start(ctx); err != nil {
 		t.Fatalf("Start(candidate): %v", err)
 	}
@@ -383,13 +393,41 @@ func managedNativeLifecycleOptions(t *testing.T, agentID string, modelRuntime ll
 		WorkspaceLifecycle: claudeStartupWorkspaceStub{
 			target: &workspace.Target{Container: "swarm-agent-" + agentID, Workdir: "/workspace"},
 		},
-		EnableToolGateway:  true,
-		ToolGatewayBinding: testToolGatewayBinding("http://127.0.0.1:18081", "http://host.docker.internal:18081", "gateway-token"),
+		EnableToolGateway: true,
 		ProviderCredentials: testProviderCredentialStore(
 			t,
 			"CLAUDE_CODE_OAUTH_TOKEN",
 			"oauth-token",
 		),
+	}
+}
+
+type managedNativeLifecycleGateway struct {
+	mu      sync.RWMutex
+	handler http.Handler
+}
+
+func (g *managedNativeLifecycleGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	g.mu.RLock()
+	handler := g.handler
+	g.mu.RUnlock()
+	if handler == nil {
+		http.Error(w, "runtime gateway is not installed", http.StatusServiceUnavailable)
+		return
+	}
+	handler.ServeHTTP(w, r)
+}
+
+func startManagedNativeLifecycleGateway(t *testing.T) (toolgateway.Binding, func(http.Handler)) {
+	t.Helper()
+	forwarder := &managedNativeLifecycleGateway{}
+	server := httptest.NewServer(forwarder)
+	t.Cleanup(server.Close)
+	binding := testToolGatewayBinding(server.URL, server.URL, "gateway-token")
+	return binding, func(handler http.Handler) {
+		forwarder.mu.Lock()
+		forwarder.handler = handler
+		forwarder.mu.Unlock()
 	}
 }
 
@@ -473,8 +511,8 @@ func validateManagedNativeLifecycleSurface(
 		surface.Authority.StartupGeneration != authority.RuntimeGeneration {
 		return fmt.Errorf("startup surface authority = %#v, want grant id %s owner %s generation %d", surface.Authority, authority.GrantID, authority.ProcessOwnerID, authority.RuntimeGeneration)
 	}
-	if got := surface.EffectiveNames(); !slices.Equal(got, []string{"web_search"}) {
-		return fmt.Errorf("effective startup capabilities = %v, want [web_search]", got)
+	if got := surface.EffectiveNames(); !slices.Equal(got, []string{"notify_human", "web_search"}) {
+		return fmt.Errorf("effective startup capabilities = %v, want [notify_human web_search]", got)
 	}
 	if got := surface.PlannedBindingNames(managedcapabilities.BindingProviderBuiltin); !slices.Equal(got, []string{"WebFetch", "WebSearch"}) {
 		return fmt.Errorf("provider builtin bindings = %v, want [WebFetch WebSearch]", got)
@@ -482,11 +520,14 @@ func validateManagedNativeLifecycleSurface(
 	for _, kind := range []managedcapabilities.BindingKind{
 		managedcapabilities.BindingAPIDefinition,
 		managedcapabilities.BindingLocalRuntime,
-		managedcapabilities.BindingMCPTool,
-		managedcapabilities.BindingMCPProvider,
 	} {
 		if got := surface.PlannedBindingNames(kind); len(got) != 0 {
 			return fmt.Errorf("startup surface contains forbidden %s fallback bindings %v", kind, got)
+		}
+	}
+	for _, kind := range []managedcapabilities.BindingKind{managedcapabilities.BindingMCPTool, managedcapabilities.BindingMCPProvider} {
+		if got := surface.PlannedBindingNames(kind); !slices.Equal(got, []string{"mcp__runtime-tools__notify_human"}) {
+			return fmt.Errorf("startup surface %s bindings = %v, want [mcp__runtime-tools__notify_human]", kind, got)
 		}
 	}
 	return nil

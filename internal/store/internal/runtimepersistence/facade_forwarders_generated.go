@@ -254,6 +254,10 @@ func (s *PostgresStore) CountMailboxItems(ctx context.Context, status string) (i
 	return s.mailboxPostgresOwner.CountMailboxItems(ctx, status)
 }
 
+func (s *PostgresStore) CountUnreadInformationalNotices(ctx context.Context) (int, error) {
+	return s.mailboxPostgresOwner.CountUnreadInformationalNotices(ctx)
+}
+
 func (s *PostgresStore) CountWorkflowEntities(ctx context.Context, request entityquery.Request) (int, error) {
 	return s.pipelinePostgresOwner.CountWorkflowEntities(ctx, request)
 }
@@ -1340,6 +1344,10 @@ func (s *SQLiteRuntimeStore) ContinueRunControl(ctx context.Context, req runcont
 
 func (s *SQLiteRuntimeStore) CountMailboxItems(ctx context.Context, status string) (int, error) {
 	return s.mailboxSQLiteOwner.CountMailboxItems(ctx, status)
+}
+
+func (s *SQLiteRuntimeStore) CountUnreadInformationalNotices(ctx context.Context) (int, error) {
+	return s.mailboxSQLiteOwner.CountUnreadInformationalNotices(ctx)
 }
 
 func (s *SQLiteRuntimeStore) CountWorkflowEntities(ctx context.Context, request entityquery.Request) (int, error) {

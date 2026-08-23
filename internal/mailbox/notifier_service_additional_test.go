@@ -127,6 +127,16 @@ func (m *fakeMailboxStore) CountMailboxItems(_ context.Context, status string) (
 	return n, nil
 }
 
+func (m *fakeMailboxStore) CountUnreadInformationalNotices(_ context.Context) (int, error) {
+	n := 0
+	for _, item := range m.items {
+		if item.Type == runtimetools.NotifyHumanMailboxItemType && item.Status == "pending" && !item.Notified {
+			n++
+		}
+	}
+	return n, nil
+}
+
 func (m *fakeMailboxStore) GetMailboxItem(_ context.Context, id string) (runtimetools.MailboxItem, error) {
 	it, ok := m.items[id]
 	if !ok {

@@ -35,7 +35,7 @@ func TestToolAuthorizer_PermissionGatedTools(t *testing.T) {
 		err := NewToolAuthorizer(nil, nil).Authorize(unmanagedToolTestContext(), models.AgentConfig{
 			ExecutionMode: "live",
 			ID:            "ops-5",
-		}, "agent_message")
+		}, "notify_human")
 		if err != nil {
 			t.Fatalf("expected universal tool to be allowed: %v", err)
 		}
@@ -89,7 +89,7 @@ func TestResolveAgentPermissions_ExpandsBundleAndDedupes(t *testing.T) {
 			"permission_bundles": {
 				Value: map[string]any{
 					"ops": map[string]any{
-						"permissions": []any{"human_task_request", "schedule"},
+						"permissions": []any{"ask_human", "schedule"},
 					},
 				},
 			},
@@ -97,12 +97,12 @@ func TestResolveAgentPermissions_ExpandsBundleAndDedupes(t *testing.T) {
 	})
 	perms, err := ResolveAgentPermissions(source, "", runtimecontracts.AgentRegistryEntry{
 		PermissionsBundle: "ops",
-		Permissions:       []string{"human_task_request", "schedule"},
+		Permissions:       []string{"ask_human", "schedule"},
 	})
 	if err != nil {
 		t.Fatalf("ResolveAgentPermissions: %v", err)
 	}
-	want := []string{"human_task_request", "schedule"}
+	want := []string{"ask_human", "schedule"}
 	if len(perms) != len(want) {
 		t.Fatalf("expected %v, got %v", want, perms)
 	}

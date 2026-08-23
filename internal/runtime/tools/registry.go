@@ -252,12 +252,23 @@ func executionToolsForRuntime(source semanticview.Source, discovered map[string]
 			if name == "" {
 				continue
 			}
+			if isWithheldAgentMessage(name) {
+				return nil, fmt.Errorf("tool %s %s", name, agentMessageUnavailableTeaching)
+			}
 			execution, include := executionToolFromAdmitted(name, entry)
 			if !include {
 				continue
 			}
-			if existing, ok := entries[name]; ok && existing.Handler() == runtimecontracts.ToolHandlerPlatformBuiltin && execution.Handler() == runtimecontracts.ToolHandlerPlatformBuiltin {
-				continue
+			if existing, ok := entries[name]; ok && existing.Handler() == runtimecontracts.ToolHandlerPlatformBuiltin {
+				if _, managed := hitlToolDescriptorForName(name); managed {
+					if execution.Handler() != runtimecontracts.ToolHandlerPlatformBuiltin {
+						return nil, fmt.Errorf("tool %s is owned by the platform HITL contract and cannot be redefined", name)
+					}
+					continue
+				}
+				if execution.Handler() == runtimecontracts.ToolHandlerPlatformBuiltin {
+					continue
+				}
 			}
 			entries[name] = execution
 		}

@@ -1,12 +1,77 @@
 package tools
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
 	"reflect"
+	"runtime"
+	"strconv"
+	"strings"
 	"testing"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
+
+func TestHITLSourceBoundaryRetiresOldInterpreters(t *testing.T) {
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve current test file")
+	}
+	runtimeRoot := filepath.Clean(filepath.Join(filepath.Dir(currentFile), ".."))
+	allowedAgentMessageFiles := map[string]struct{}{
+		"effective_tool_verification.go": {},
+		"hitl_tools.go":                  {},
+		"registry.go":                    {},
+		"tool_capability_policy.go":      {},
+	}
+
+	err := filepath.WalkDir(runtimeRoot, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if err != nil {
+			return err
+		}
+		ast.Inspect(parsed, func(node ast.Node) bool {
+			switch typed := node.(type) {
+			case *ast.BasicLit:
+				if typed.Kind != token.STRING {
+					return true
+				}
+				literal, unquoteErr := strconv.Unquote(typed.Value)
+				if unquoteErr != nil {
+					t.Errorf("unquote %s: %v", path, unquoteErr)
+					return true
+				}
+				if literal == "mailbox_send" || literal == "human_task_request" {
+					t.Errorf("%s restores retired HITL tool literal %q", path, literal)
+				}
+				if literal == "agent_message" {
+					if _, allowed := allowedAgentMessageFiles[filepath.Base(path)]; !allowed {
+						t.Errorf("%s restores agent_message outside the fail-closed owner", path)
+					}
+				}
+			case *ast.FuncDecl:
+				if strings.EqualFold(typed.Name.Name, "execAgentMessage") {
+					t.Errorf("%s restores executable agent_message interpreter %s", path, typed.Name.Name)
+				}
+			}
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan runtime sources: %v", err)
+	}
+}
 
 func TestNormalizeNativeToolNameCanonicalAliases(t *testing.T) {
 	t.Parallel()
@@ -53,28 +118,8 @@ func TestRuntimeAndValidatorNormalizationStayAligned(t *testing.T) {
 			input: map[string]any{"file_path": "/tmp/a.txt", "content": "x"},
 		},
 		{
-			name: "agent_message_target_aliases",
-			tool: "agent_message",
-			input: map[string]any{
-				"to":              "agent-b",
-				"payload":         map[string]any{"message": "hello"},
-				"target_agent_id": "",
-				"message":         "",
-			},
-		},
-		{
-			name: "mailbox_send_aliases",
-			tool: "mailbox_send",
-			input: map[string]any{
-				"type":     "approval",
-				"priority": "critical",
-				"subject":  "Need review",
-				"payload":  map[string]any{"x": 1},
-			},
-		},
-		{
-			name: "human_task_request_explicit_deadline",
-			tool: "human_task_request",
+			name: "ask_human_explicit_deadline",
+			tool: "ask_human",
 			input: map[string]any{
 				"entity_id":   "entity-1",
 				"deadline_at": "2026-01-02T03:04:05Z",

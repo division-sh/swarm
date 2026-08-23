@@ -1943,8 +1943,8 @@ contract_formats:
       No separate fulfills: field. Inferred facts use the agents.yaml map key as the role and MUST NOT fall back to
       agent-authored role or id fields.'
     note_on_empty: 'required_agents entries with empty subscriptions and emits are valid. They declare that the flow needs
-      this agent role to exist, even if the agent only uses the universal communication/mailbox tools (agent_message,
-      mailbox_send). Common for managerial roles that coordinate via messages rather than event subscriptions. An explicit
+      this agent role to exist, even if the agent only uses the universal notify_human tool. Common for managerial roles
+      that coordinate through operator notices rather than event subscriptions. An explicit
       required_agents: [] declares an explicit no-role boundary and MUST NOT infer agents from agents.yaml.'
     generated_view: The generated/expanded authoring view MUST expose each effective required-agent fact and whether it
       was explicitly authored or inferred from same-scope agents.yaml. It MUST also expose explicit empty boundaries.
@@ -4549,9 +4549,9 @@ engine:
           carrying an open reply context fail closed.
         child: FlowInstanceActivationRequest.Context preserves the ref through activation, child input/auto-emit, and completion;
           no instance-global metadata copy is permitted.
-        mailbox: mailbox.reply_context_id is populated by system mailbox_write and agent mailbox_send. Defer and terminal
+        mailbox: mailbox.reply_context_id is populated by system mailbox_write and agent notify_human. Defer and terminal
           decision updates restore it into the transactional decision-event publication context and do not claim the reply.
-        human_task: human_task_request atomically stores a typed decision card and human_task_continuations row with source_event_id,
+        human_task: ask_human atomically stores a typed decision card and human_task_continuations row with source_event_id,
           typed scope, requester identity, and the opaque reply_context_id. Defer and terminal outcomes restore the ref from the
           continuation, persist a direct requester route independently of event payload fields, and do not claim the reply.
       persistence:
@@ -5840,7 +5840,7 @@ engine:
         executor behavior owner used by Postgres. Backend-specific SQL belongs to the store implementations; the runtime tool executor must
         not receive a raw SQLite SQL handle as a compatibility seam for these surfaces.
       excludes:
-      - typed human_task_request card creation and continuation owned by engine.persistence_schema.decision_cards and human_task_continuations
+      - typed ask_human card creation and continuation owned by engine.persistence_schema.decision_cards and human_task_continuations
       - public operator mailbox API decisions owned by api_specification.method_catalog.mailbox.*
       - public operator agent.usage reads over spend_ledger owned by operator_agent_usage_read_rows
       - runtime diagnostics/logging owned by #1150
@@ -6973,8 +6973,8 @@ engine:
         failure. When no canonical lowered route applies, typed same-flow consumers, structural ParentRoute,
         static child-flow delivery-entity routing, and accepted external boundaries remain governed by
         handler_specification.handler_fields.emit and engine.cross_flow_routing.
-      universal_tools: 'The following tools are auto-granted to all agents without explicit tools listing: agent_message
-        and mailbox_send. Generated emit tools are derived from emit_events. Entity tools are governed by
+      universal_tools: 'notify_human is auto-granted to all agents without explicit tools listing. Generated emit tools
+        are derived from emit_events. Entity tools are governed by
         contract_formats.persistence_model.role_scoped_entity_tools and tool_model.agent_tool_filtering, not by prompt prose.'
     stateless_memory_audit: 'Agents with memory false do NOT create agent_sessions rows. Stateless execution has
       no live memory lookup or persistence. The conversation transcript
@@ -8530,21 +8530,20 @@ compliance:
   boot_enforcement: All boot checks are defined in engine.boot_verification.checks. This is the single authoritative list.
 permissions_model:
   description: Agents have a permissions list controlling what capabilities they can exercise. The platform enforces permissions
-    at tool execution time and message routing time. Workflows define permissions per agent in their agent registry. Optional
+    at tool execution time. Workflows define permissions per agent in their agent registry. Optional
     permission_bundles in policy files provide shorthand for common sets.
   enforcement: Before executing a platform builtin tool call from tools, the platform checks the calling agent's permissions
     list. If the tool requires a permission the agent lacks, the call is rejected. MCP and HTTP tools are authorized by the
     tool registry and credential store, not by agent permissions. Native tools (bash, web_search, file_io) are authorized by
-    the native_tools field on the agent contract. Message scope is enforced at agent_message delivery per the scoping rules
-    defined in permission_scoping.
+    the native_tools field on the agent contract. agent_message has no current candidate, grant, source admission, handler,
+    or execution path; typed recipient authority remains tracked by #2154.
   workflow_extensions: 'Workflows may define additional permissions beyond the platform set. The platform passes unrecognized
     permissions to workflow-registered handlers. Example: a product workflow might define approve_deployment or override_scoring.'
   permissions:
   - approve_spend
   - configure_routing
   - create_flow_instance
-  - human_task_request
-  - mailbox_send
+  - ask_human
   - message_flow
   - message_peers
   - schedule
@@ -8555,14 +8554,14 @@ permissions_model:
     description: Defines the target scope for each permission. The platform enforces these constraints at tool execution time.
       All scoping is flow-instance-local — no permission grants cross-flow access. Cross-flow communication is via events only.
     messaging:
+      status: reserved_unavailable_pending_typed_recipient_authority_2154
       message_peers:
         scope: Agents sharing the same manager_fallback value, within the same flow instance.
         rule: Caller and target must be in the same flow instance AND target.manager_fallback == caller.manager_fallback.
       message_flow:
         scope: Any agent in the same flow instance.
         rule: Caller and target must be in the same flow instance. No further constraint.
-      cross_flow: Not supported. agent_message delivery is rejected if target is in a different flow instance. Cross-flow communication
-        uses events (emit + subscribe).
+      cross_flow: Direct agent messaging is unavailable. Cross-flow communication uses events (emit + subscribe).
     routing:
       description: configure_routing is reserved authored vocabulary and has no generic runtime tool or dynamic-agent authority implementation.
       scope: No provider-callable runtime scope is defined.
@@ -8618,13 +8617,19 @@ tool_model:
     description: Authoritative list of platform-provided tools. Defined here only. This list is exhaustive. The runtime MUST
       ship a Go handler for each of these. Any tool not on this list MUST NOT have a Go handler in the generic runtime.
     tools:
-      agent_message: Send a message to another agent. Auto-granted to all agents (universal tool).
       create_entity: Create a new entity row in entity_state. Legacy trusted runtime-internal compatibility surface; not
         provider-visible or callable for normal agents.
       get_entity: Read an entity by ID. Legacy trusted runtime-internal compatibility surface; not provider-visible or
         callable for normal agents in favor of generated read_{entity_type} tools.
-      human_task_request: Create a typed human-task decision card. Requires human_task_request permission; verdicts are admitted only through authenticated mailbox decision APIs.
-      mailbox_send: Send an item to the human mailbox for decision. Auto-granted to all agents (universal tool).
+      ask_human:
+        description: Create a typed decision card when admitted work requires a human verdict.
+        grant: Requires the exact ask_human permission.
+        semantics: Creates the existing typed decision card and continuation; work waits until an authenticated mailbox decision settles it.
+      notify_human:
+        description: Sends an informational notice to the human operator. Does NOT request approval and does not pause the flow - to ask for a decision that gates the flow, use ask_human.
+        grant: Auto-granted to every managed agent.
+        input: Closed object with required non-empty summary and optional context only.
+        semantics: Persists an operator_notice with fixed normal priority, no timeout, and runtime-stamped actor, run, flow, entity, event, and reply provenance; returns exact status queued and mailbox_id without waiting.
       read_flow_data: Read a declared immutable reference-data file from the current agent's owning flow data root. Generated
         only from flow_data_access declarations; not universal, not tools:-granted, and not native file I/O.
       query_entities: Query entities by state, fields, or aggregation. Legacy trusted runtime-internal compatibility surface;
@@ -8636,6 +8641,25 @@ tool_model:
       schedule: Schedule a future action or timer. Requires schedule permission.
       search_entities: Query entities by stage, field values, or metadata. Legacy trusted runtime-internal compatibility
         surface; not provider-visible or callable for normal agents.
+    hitl_projection:
+      owner: One bounded runtime HITL descriptor projects the exact names, reviewed descriptions, closed schemas, grant kinds, permission requirement, usage guidance, and handlers into the existing catalog and policy owners.
+      consumers: [actor_candidate_catalog, structural_verifier, tool_capability_policy, universal_grants, permission_requirements, provider_descriptions, handler_registry]
+      rule: A consumer may not maintain a second HITL name or grant list. Descriptor presence alone is not fulfillability; verification consumes the exact scoped actor candidate and grant selected for execution.
+    unavailable_agent_message:
+      status: unavailable_pending_2154
+      rule: >-
+        agent_message is absent from universal grants, candidates, managed surfaces, authored-source admission, handlers,
+        and execution. Authored use fails with the exact teaching reason "not available: agent-to-agent messaging ships
+        with typed recipient authority (#2154)".
+    retired_author_model_names:
+      mailbox_send: Rejected with no alias, fallback, compatibility reader, migration, or dual registration. Use notify_human.
+      human_task_request: Rejected with no alias, fallback, compatibility reader, migration, or dual registration. Use ask_human.
+    informational_notice_readback:
+      count_owner: The selected mailbox read model owns one global count of pending, unacknowledged operator_notice rows produced by notify_human. Decision cards, acknowledged notices, list filters, and page length are excluded.
+      projections: The same count is returned by mailbox.list, rendered by swarm mailbox list, and rendered in initial serve ready output. Renderers never recount pages or query raw tables.
+      process_presentation: One process-scoped sink is created beside the serve lifecycle presenter and shared by initial, replacement, and selected-fork runtimes. After a durable notify_human commit it receives only mailbox_id and the exact count and emits the channel-less teaching note at most once per serve process generation.
+      delivery_readiness: Until #2079 provides an exact connected operator-delivery fact, delivery is unavailable and the first committed notice teaching note is unconditional. Ingress packs, provider bindings, credentials, and authored config never infer readiness.
+      failure_rule: Presentation failure never rolls back, duplicates, or reinterprets the committed notice. Process restart may emit the teaching note again; runtime replacement may not.
     handler_actions:
       description: These are handler/rules-branch ACTION field values, not agent-callable tools. They are invoked via the
         action field in node handlers without rules or in selected handler.rules branches. The platform ships the handler code.
@@ -8749,7 +8773,7 @@ tool_model:
       catalog from any source into an agent session. This controls LLM context cost.
     rule: When constructing an agent session, the platform resolves tools entries against the merged tool registry
       (platform_builtin + mcp + http). Only resolved tools are included in the LLM tool definitions. Unresolvable non-MCP
-      entries log a warning per the tool_resolution boot check. Unresolvable MCP-backed entries that can become visible
+      entries are hard invalidity under the tool_resolution boot check. Unresolvable MCP-backed entries that can become visible
       or callable for an agent turn fail closed per required_mcp_tool_availability and MUST NOT be delivered from a
       declared prefix or authored handler_type:mcp schema without exact discovered catalog proof.
     usage_hints: Provider-facing tool definitions for platform-owned delivered tools and generated emit tools MUST include
@@ -8758,9 +8782,10 @@ tool_model:
     generated_schema_closure: Generated platform-owned emit/entity tool schemas MUST be recursively closed, require every
       declared property, reject undeclared required properties, and declare non-empty enums. Boot verification and workflow
       validation report this through generated_tool_schema_closure and consume the shared runtime tool-schema owner.
-    universal_tools: 'The following tools are included in every agent session without listing in tools: agent_message
-      and mailbox_send. Emit tools (emit_{event_name}) are auto-generated from emit_events. Neither universal communication
-      tools nor emit tools require explicit tools entry.'
+    universal_tools: 'notify_human is included in every agent session without listing in tools. Emit tools
+      (emit_{event_name}) are auto-generated from emit_events. Neither notify_human nor emit tools require an explicit
+      tools entry. agent_message is unavailable and authored use fails with: not available: agent-to-agent messaging ships
+      with typed recipient authority (#2154).'
     role_scoped_entity_tools: 'When a normal actor resolves to a flow-owned entity contract, the platform generates
       current-entity read/save/update tools from that contract and the actor''s entity_writes declaration. The generated
       tools are eligible for the agent-visible/provider-visible surface without explicit tools entries, then filtered per
@@ -8769,7 +8794,7 @@ tool_model:
       denied by runtime authorization as defense-in-depth. Normal actors without an entity contract receive no entity tools.'
     context_cost: An agent with 4 tools in tools pays for 4 tool schemas in LLM context, regardless of how many tools
       exist in the registry or how many tools an MCP server exposes. The filter is the contract, not the source.
-    default_deny: If an agent calls a tool that is not in its tools list, not a universal communication tool, not an emit
+    default_deny: If an agent calls a tool that is not in its tools list, not the universal notify_human tool, not an emit
       tool, not a generated role-scoped entity tool for an actor with an entity contract, and not a native_tools capability — the call is
       rejected. There is no default-allow policy for unrecognized tools.
   mcp_client:
@@ -16768,7 +16793,7 @@ agent_identity_model:
         declaration FlowID, and a runtime-created name never borrows declaration, tool, or source authority even when its
         text and route collide with an authored declaration.
       producer_consumption: >
-        Generated emit, channel activity, agent_message, schedule/control, and human-task publication are the complete
+        Generated emit, channel activity, schedule/control, notify_human, and ask_human publication are the complete
         contract-backed producer set. Each consumes the admitted execution scope and copies its RoutingSource through
         EventBus, persistence, settlement, recovery, replay, and public readback without reinterpretation.
       unsupported_forms: >
@@ -20504,6 +20529,15 @@ test_specification:
       - catalog.runtime.standing_ingress_identity_recovery
       - catalog.runtime.agent_memory_instance_continuity
       - catalog.runtime.provider_connector_reply
+    - source: internal/runtime/llm
+      executor: github.com/division-sh/swarm/internal/runtime/llm
+      proves:
+      - catalog.runtime.managed_hitl_api_transport
+      - catalog.runtime.managed_hitl_inprocess_transport
+    - source: internal/releasee2e
+      executor: github.com/division-sh/swarm/internal/releasee2e
+      proves:
+      - catalog.runtime.managed_hitl_cli_mcp_transport
     replay_clean:
       promoted_by: '#2143'
       transcript:
@@ -20684,6 +20718,18 @@ test_specification:
         status: active
         required_disposition: runtime
         scope: Imported Telegram connector reply execution through generated mock response and live selected transport boundaries.
+      catalog.runtime.managed_hitl_api_transport:
+        status: active
+        required_disposition: runtime
+        scope: Exact notify_human definition and call execution through Anthropic API, OpenAI-compatible API, and OpenAI Responses managed transports.
+      catalog.runtime.managed_hitl_cli_mcp_transport:
+        status: active
+        required_disposition: runtime
+        scope: Exact notify_human MCP tools/list definition and tools/call execution through the strict release-binary Claude CLI transport.
+      catalog.runtime.managed_hitl_inprocess_transport:
+        status: active
+        required_disposition: runtime
+        scope: Exact notify_human local-runtime delivery and execution through the deterministic mock managed transport.
   deterministic_scenario_runner:
     id: testing.deterministic_scenario_runner_source_authority
     promoted_by: '#1646'
@@ -32842,11 +32888,16 @@ api_specification:
           additionalProperties: false
           required:
           - items
+          - unread_informational_notices
           properties:
             items:
               type: array
               items:
                 $ref: '#/components/schemas/MailboxProjection'
+            unread_informational_notices:
+              type: integer
+              minimum: 0
+              description: Global count of unacknowledged notify_human informational notices. This is independent of list filters and pagination.
             next_cursor:
               $ref: '#/components/schemas/Cursor'
       errors: []
@@ -34889,6 +34940,7 @@ managed_agent_capability_surface:
     candidate_definition_owner:
       emit_definition_owner: EmitRegistry.GenerateEmitToolsForActor owns actor/flow-aware emit definition generation. GenerateEmitToolsForRole is only its fallback when the actor declares no emit_events.
       live_catalog_owner: Executor.ToolDefinitionsForActorInContext owns the live actor/context-aware candidate catalog, with ToolDefinitionsForActor as the context-free fallback.
+      hitl_owner: The bounded platform HITL descriptor contributes notify_human universally and ask_human only under its exact permission. agent_message and both retired HITL spellings contribute no candidate.
       transport_rule: Normal-runtime and selected-contract-fork transports MUST consume the executor catalog unchanged and preserve executor order and cardinality for the authorized projected subset. Empty, non-canonical, or duplicate canonical definition names fail closed before delivery. Gateways, provider adapters, and test harnesses MUST NOT merge, regenerate, reorder, or fall back to side-channel actor, role, global, hook, or stored definition producers.
     forkchat_exclusion: conversation.fork_chat remains governed by ConversationForkSandboxPolicy and conversation_fork_turns. It never acquires, persists, or authorizes through this managed-agent surface.
   managed_execution_admission:

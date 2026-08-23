@@ -1,8 +1,6 @@
 package tools
 
 import (
-	"strings"
-
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
@@ -23,12 +21,15 @@ func classifyToolAuthorization(actor models.AgentConfig, toolName string, provid
 		ownership: toolOwnershipForName(toolName),
 		class:     toolAuthorizationDenied,
 	}
+	if isWithheldAgentMessage(toolName) {
+		return decision
+	}
 	if IsUniversal(toolName) {
 		decision.class = toolAuthorizationUniversal
 		decision.allowed = true
 		return decision
 	}
-	if requiredPerm, ok := toolPermissionRequirements[strings.TrimSpace(toolName)]; ok {
+	if requiredPerm, ok := requiredPermissionForTool(toolName); ok {
 		decision.class = toolAuthorizationPermission
 		if agentHasPermission(actor, requiredPerm) {
 			decision.allowed = true

@@ -6042,10 +6042,16 @@
             },
             "next_cursor": {
               "$ref": "#/components/schemas/Cursor"
+            },
+            "unread_informational_notices": {
+              "description": "Global count of unacknowledged notify_human informational notices. This is independent of list filters and pagination.",
+              "minimum": 0,
+              "type": "integer"
             }
           },
           "required": [
-            "items"
+            "items",
+            "unread_informational_notices"
           ],
           "type": "object"
         }

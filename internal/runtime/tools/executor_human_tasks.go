@@ -19,7 +19,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
+func (e *Executor) execAskHuman(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
 	store, err := e.humanTaskStoreDependency()
 	if err != nil {
 		return nil, err
@@ -88,19 +88,19 @@ func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentC
 
 	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
 	if runID == "" {
-		return nil, errors.New("human_task_request requires an admitted run")
+		return nil, errors.New("ask_human requires an admitted run")
 	}
 	operationID, ok := runtimeeffects.LogicalOperationIdentityFromContext(ctx)
 	if !ok {
-		return nil, errors.New("human_task_request requires canonical logical tool-operation identity")
+		return nil, errors.New("ask_human requires canonical logical tool-operation identity")
 	}
 	bundleFact, ok := runtimecorrelation.BundleSourceFactFromContext(ctx)
 	if !ok {
-		return nil, errors.New("human_task_request requires pinned bundle identity")
+		return nil, errors.New("ask_human requires pinned bundle identity")
 	}
 	bundleHash := strings.TrimSpace(bundleFact.BundleHash())
 	if bundleHash == "" {
-		return nil, errors.New("human_task_request requires pinned bundle hash")
+		return nil, errors.New("ask_human requires pinned bundle hash")
 	}
 
 	flowInstance := strings.Trim(actor.CanonicalFlowPath(), "/")
@@ -121,10 +121,10 @@ func (e *Executor) execHumanTaskRequest(ctx context.Context, actor models.AgentC
 		}
 	}
 	if sourceEventID == "" || createdAt.IsZero() {
-		return nil, errors.New("human_task_request requires an admitted source event with a durable timestamp")
+		return nil, errors.New("ask_human requires an admitted source event with a durable timestamp")
 	}
 	if flowInstance == "" && in.Scope != string(decisioncard.ScopeGlobal) {
-		return nil, errors.New("human_task_request flow scope requires an admitted flow instance")
+		return nil, errors.New("ask_human flow scope requires an admitted flow instance")
 	}
 	scope := decisioncard.Scope{Kind: decisioncard.ScopeKind(in.Scope)}
 	switch scope.Kind {

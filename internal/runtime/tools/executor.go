@@ -34,6 +34,7 @@ type Executor struct {
 	bus                            EventPublisher
 	genericSchedules               GenericScheduleAdmission
 	mailboxStore                   MailboxPersistence
+	noticePresentation             InformationalNoticePresentationSink
 	entityStore                    EntityPersistence
 	humanTaskStore                 HumanTaskCardStore
 	workflowInstances              WorkflowInstanceLoader
@@ -74,6 +75,7 @@ func NewExecutorWithOptions(bus EventPublisher, opts ExecutorOptions) *Executor 
 		bus:                            bus,
 		genericSchedules:               opts.GenericSchedules,
 		mailboxStore:                   opts.MailboxStore,
+		noticePresentation:             opts.NoticePresentation,
 		entityStore:                    opts.EntityStore,
 		humanTaskStore:                 opts.HumanTaskStore,
 		workflowInstances:              opts.WorkflowInstances,
@@ -432,42 +434,6 @@ func runtimeToolSchemaForName(defs []llm.ToolDefinition, name string) (map[strin
 	return nil, false
 }
 
-func payloadTouchesSchemaProps(payload map[string]any, schema map[string]any) bool {
-	if len(payload) == 0 || schema == nil {
-		return false
-	}
-	props := schemaProperties(schema["properties"])
-	for key := range payload {
-		if _, ok := props[key]; ok {
-			return true
-		}
-	}
-	return false
-}
-
-func payloadHasLegacyOnlyProps(payload map[string]any, schema map[string]any) bool {
-	if len(payload) == 0 || schema == nil {
-		return false
-	}
-	props := schemaProperties(schema["properties"])
-	for key := range payload {
-		if _, ok := props[key]; !ok {
-			return true
-		}
-	}
-	return false
-}
-
-func toolAllowsLegacySubsetFallback(name string) bool {
-	switch strings.TrimSpace(name) {
-	case "agent_message",
-		"mailbox_send":
-		return true
-	default:
-		return false
-	}
-}
-
 func normalizeRuntimeToolInput(name string, input any) any {
 	return canonicalRuntimeToolInput(name, input)
 }
@@ -716,28 +682,24 @@ func (e *Executor) ValidateRuntimeToolInputForTest(name string, input any) error
 	return e.validateRuntimeToolInput(models.AgentConfig{}, name, input)
 }
 
-func (e *Executor) ExecAgentMessageDirect(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	return e.execAgentMessage(ctx, actor, input)
-}
-
 func (e *Executor) ExecScheduleDirect(actor models.AgentConfig, input any) (any, error) {
 	return e.execSchedule(context.Background(), actor, input)
 }
 
-func (e *Executor) ExecMailboxSendDirect(actor models.AgentConfig, input any) (any, error) {
-	return e.execMailboxSend(context.Background(), actor, input)
+func (e *Executor) ExecNotifyHumanDirect(actor models.AgentConfig, input any) (any, error) {
+	return e.execNotifyHuman(context.Background(), actor, input)
 }
 
-func (e *Executor) ExecMailboxSendDirectContext(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	return e.execMailboxSend(ctx, actor, input)
+func (e *Executor) ExecNotifyHumanDirectContext(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
+	return e.execNotifyHuman(ctx, actor, input)
 }
 
-func (e *Executor) ExecHumanTaskRequestDirect(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
-	return e.execHumanTaskRequest(ctx, actor, input)
+func (e *Executor) ExecAskHumanDirect(ctx context.Context, actor models.AgentConfig, input any) (any, error) {
+	return e.execAskHuman(ctx, actor, input)
 }
 
-func authorizeMailboxSend(provider runtimeauthority.Provider, actor models.AgentConfig) error {
-	return runtimeauthority.ProviderOrNoop(provider).AuthorizeMailboxSend(actor)
+func authorizeNotifyHuman(provider runtimeauthority.Provider, actor models.AgentConfig) error {
+	return runtimeauthority.ProviderOrNoop(provider).AuthorizeNotifyHuman(actor)
 }
 
 func coalesce(values ...string) string {

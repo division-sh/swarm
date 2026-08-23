@@ -1,6 +1,10 @@
 lookup_data:
   description: Looks up external data
   permission: external_api_access
+  handler_type: http
+  http:
+    method: GET
+    url: https://example.test/lookup
   input_schema:
     type: object
     properties:

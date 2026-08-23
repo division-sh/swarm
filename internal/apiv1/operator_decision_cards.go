@@ -26,8 +26,9 @@ type MailboxNoticeAcknowledgmentStore interface {
 }
 
 type mailboxProjectionListResult struct {
-	Items      []any  `json:"items"`
-	NextCursor string `json:"next_cursor,omitempty"`
+	Items                      []any  `json:"items"`
+	NextCursor                 string `json:"next_cursor,omitempty"`
+	UnreadInformationalNotices int    `json:"unread_informational_notices"`
 }
 
 type mailboxProjectionCursor struct {
@@ -209,7 +210,11 @@ func listMailboxProjection(ctx context.Context, req Request, opts DecisionCardHa
 	if len(entries) > limit || noticeNext != "" || cardNext != "" {
 		next = encodeMailboxProjectionCursor(nextState)
 	}
-	return mailboxProjectionListResult{Items: items, NextCursor: next}, nil
+	unread, err := opts.Mailbox.CountUnreadInformationalNotices(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return mailboxProjectionListResult{Items: items, NextCursor: next, UnreadInformationalNotices: unread}, nil
 }
 
 func decisionCardProjection(ctx context.Context, proposedEffects decisioncard.ProposedEffectStore, card any, kind decisioncard.AnchorKind) (map[string]any, error) {

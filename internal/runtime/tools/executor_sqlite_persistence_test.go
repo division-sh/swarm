@@ -47,7 +47,7 @@ func (allowHumanTaskAuthority) ProducerEventsForRole(string) []string {
 func (allowHumanTaskAuthority) HasMessageAuthority(actor, target models.AgentConfig) bool {
 	return false
 }
-func (allowHumanTaskAuthority) AuthorizeMailboxSend(actor models.AgentConfig) error {
+func (allowHumanTaskAuthority) AuthorizeNotifyHuman(actor models.AgentConfig) error {
 	return nil
 }
 
@@ -332,7 +332,7 @@ func TestRoleScopedEntityTools_SQLiteCurrentEntityPersistence(t *testing.T) {
 	}
 }
 
-func TestHumanTaskRequestCreatesTypedCardAndContinuationForImportedAgentOnBothStores(t *testing.T) {
+func TestAskHumanCreatesTypedCardAndContinuationForImportedAgentOnBothStores(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		store humanTaskToolStore
@@ -351,7 +351,7 @@ func TestHumanTaskRequestCreatesTypedCardAndContinuationForImportedAgentOnBothSt
 				ExecutionMode: "live",
 				ID:            "requester",
 				Role:          "worker", FlowID: "provider", FlowPath: flowPath, EntityID: uuid.NewString(),
-				Tools: []string{"human_task_request"}, Permissions: []string{"human_task_request"},
+				Tools: []string{"ask_human"}, Permissions: []string{"ask_human"},
 			}
 			bundle := loadWave1EntityToolBundle(t, requester, "provider", "provider_record", "types: {}\n", "provider_record:\n  status: text\n")
 			bundle.FlowTree.ByID["provider"].Path = flowPath
@@ -377,9 +377,9 @@ func TestHumanTaskRequestCreatesTypedCardAndContinuationForImportedAgentOnBothSt
 				"scope": "flow", "category": "review", "description": "Review provider response",
 				"talking_points": []string{"Check source evidence"}, "expected_value": "approval", "priority": "high",
 			}
-			created, err := exec.Execute(ctx, "human_task_request", input)
+			created, err := exec.Execute(ctx, "ask_human", input)
 			if err != nil {
-				t.Fatalf("human_task_request: %v", err)
+				t.Fatalf("ask_human: %v", err)
 			}
 			cardID := strings.TrimSpace(asString(created.(map[string]any)["card_id"]))
 			card, err := tc.store.GetDecisionCard(context.Background(), cardID)
@@ -411,7 +411,7 @@ func TestHumanTaskRequestCreatesTypedCardAndContinuationForImportedAgentOnBothSt
 				t.Fatalf("default expiry = %s, want 48h", got)
 			}
 
-			replayed, err := exec.Execute(ctx, "human_task_request", input)
+			replayed, err := exec.Execute(ctx, "ask_human", input)
 			if err != nil || strings.TrimSpace(asString(replayed.(map[string]any)["card_id"])) != cardID {
 				t.Fatalf("idempotent replay = %#v, %v", replayed, err)
 			}
@@ -420,7 +420,7 @@ func TestHumanTaskRequestCreatesTypedCardAndContinuationForImportedAgentOnBothSt
 				changed[key] = value
 			}
 			changed["description"] = "Changed request under the same operation"
-			if _, err := exec.Execute(ctx, "human_task_request", changed); err == nil {
+			if _, err := exec.Execute(ctx, "ask_human", changed); err == nil {
 				t.Fatal("changed content under the same operation identity was accepted")
 			}
 
@@ -428,9 +428,9 @@ func TestHumanTaskRequestCreatesTypedCardAndContinuationForImportedAgentOnBothSt
 			forkCtx = runtimeeffects.WithLogicalOperationIdentity(forkCtx, "provider-turn/tool-call-1")
 			forkCtx = runtimecorrelation.WithBundleSourceFact(forkCtx, authorActivityTestBundleSourceFact)
 			forkCtx = runtimetools.WithActor(forkCtx, requester)
-			forked, err := exec.Execute(forkCtx, "human_task_request", input)
+			forked, err := exec.Execute(forkCtx, "ask_human", input)
 			if err != nil {
-				t.Fatalf("fork-local human_task_request: %v", err)
+				t.Fatalf("fork-local ask_human: %v", err)
 			}
 			if forkedCardID := strings.TrimSpace(asString(forked.(map[string]any)["card_id"])); forkedCardID == "" || forkedCardID == cardID {
 				t.Fatalf("fork-local card id = %q, source card id = %q", forkedCardID, cardID)

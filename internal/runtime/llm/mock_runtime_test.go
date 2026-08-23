@@ -60,8 +60,8 @@ def handle(input):
     assert input["round"] == 1
     frame = json.loads(input["messages"][-1]["content"])
     assert frame["event"]["type"] == "message.received"
-    assert input["tools"][0]["name"] == "echo"
-    return {"calls": [{"name": "echo", "arguments": {"text": "hello"}}], "usage": {"input_tokens": 7, "output_tokens": 3}}
+    assert input["tools"][0]["name"] == "notify_human"
+    return {"calls": [{"name": "notify_human", "arguments": {"summary": "Strong match found"}}], "usage": {"input_tokens": 7, "output_tokens": 3}}
 `)
 	harness := effecttest.New()
 	ctx := llmTestWorkContext(t, harness.CompletionContext("mock-turn"))
@@ -70,14 +70,12 @@ def handle(input):
 		ID: "effect-test-agent", ExecutionMode: runtimeeffects.ExecutionModeMock,
 		Mock: mockperformance.Performance{Kind: "python", SourcePath: "mocks/assistant.py", Source: source, Digest: pythonSourceDigest(source)},
 	}
-	request := []byte(`{"messages":[{"role":"user","content":"{\"event\":{\"type\":\"message.received\"}}"}],"tools":[{"name":"echo","schema":{"type":"object","required":["text"],"properties":{"text":{"type":"string"}},"additionalProperties":false}}],"tool_results":[],"round":1}`)
-	response, _, usage, _, err := executeMockCompletion(ctx, actor, []ToolDefinition{{
-		Name: "echo", Schema: map[string]any{"type": "object", "required": []any{"text"}, "properties": map[string]any{"text": map[string]any{"type": "string"}}, "additionalProperties": false},
-	}}, request, llmselection.ResolvedModel{ModelAlias: "regular", ConcreteModel: "mock-frame-model"}, false)
+	request := []byte(`{"messages":[{"role":"user","content":"{\"event\":{\"type\":\"message.received\"}}"}],"tools":[{"name":"notify_human","schema":{"type":"object","required":["summary"],"properties":{"summary":{"type":"string"},"context":{}},"additionalProperties":false}}],"tool_results":[],"round":1}`)
+	response, _, usage, _, err := executeMockCompletion(ctx, actor, []ToolDefinition{notifyHumanTestToolDefinition()}, request, llmselection.ResolvedModel{ModelAlias: "regular", ConcreteModel: "mock-frame-model"}, false)
 	if err != nil {
 		t.Fatalf("execute mock completion: %v", err)
 	}
-	if len(response.ToolCalls) != 1 || response.ToolCalls[0].Name != "echo" || usage.InputTokens == nil || *usage.InputTokens != 7 {
+	if len(response.ToolCalls) != 1 || response.ToolCalls[0].Name != "notify_human" || usage.InputTokens == nil || *usage.InputTokens != 7 {
 		t.Fatalf("response=%#v usage=%#v", response, usage)
 	}
 	if err := harness.RequireState("mock_python", runtimeeffects.StateResponseObserved); err != nil {

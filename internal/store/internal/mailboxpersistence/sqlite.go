@@ -91,6 +91,24 @@ func (s *MailboxSQLiteOwner) CountMailboxItems(ctx context.Context, status strin
 	return n, nil
 }
 
+func (s *MailboxSQLiteOwner) CountUnreadInformationalNotices(ctx context.Context) (int, error) {
+	if s == nil || s.backend == nil {
+		return 0, fmt.Errorf("sqlite store is required")
+	}
+	var count int
+	err := s.backend.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM mailbox
+		WHERE item_type = ?
+		  AND status = 'pending'
+		  AND COALESCE(notified, false) = false
+	`, runtimetools.NotifyHumanMailboxItemType).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count unread informational notices: %w", err)
+	}
+	return count, nil
+}
+
 func (s *MailboxSQLiteOwner) GetMailboxItem(ctx context.Context, id string) (runtimetools.MailboxItem, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {

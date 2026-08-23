@@ -14,6 +14,9 @@ func (fakeStore) InsertMailboxItem(context.Context, runtimetools.MailboxItem) (s
 	return "m1", nil
 }
 func (fakeStore) CountMailboxItems(context.Context, string) (int, error) { return 2, nil }
+func (fakeStore) CountUnreadInformationalNotices(context.Context) (int, error) {
+	return 0, nil
+}
 func (fakeStore) GetMailboxItem(_ context.Context, id string) (runtimetools.MailboxItem, error) {
 	return runtimetools.MailboxItem{ID: id, Type: "spend_request", Status: "pending"}, nil
 }

@@ -34,6 +34,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
+	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -359,6 +360,16 @@ func TestSelectedContractAgentRuntimeBuildsCanonicalMockAdapter(t *testing.T) {
 			Kind: mockperformance.KindPython, Module: "mocks/mock-agent.py", SourcePath: "mocks/mock-agent.py",
 			Source: []byte("def handle(input):\n    return {'text': 'selected mock'}\n"), Digest: "sha256:selected-contract-mock-agent",
 		},
+	}
+	foundNotify := false
+	for _, definition := range builder.preflight.tools.ToolDefinitionsForActor(actor) {
+		if definition.Name == runtimetools.NotifyHumanToolName {
+			foundNotify = true
+			break
+		}
+	}
+	if !foundNotify {
+		t.Fatalf("selected-contract fork executor omitted canonical %s", runtimetools.NotifyHumanToolName)
 	}
 	resolved, err := builder.preflight.runtimes.ResolveAgentRuntime(actor)
 	if err != nil {

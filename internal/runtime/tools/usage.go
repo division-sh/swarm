@@ -15,17 +15,14 @@ import (
 const maxUsageHintRunes = 1200
 
 var builtinToolUsageHints = map[string]string{
-	"agent_message":      "Use for agent-to-agent messages only. Provide the exact target agent ID and message content. Do not use this to publish workflow events; use emit_* tools for events.",
-	"mailbox_send":       "Use for human mailbox items only. Provide the task kind, subject/summary, priority when relevant, and structured context. Do not use this for agent-to-agent messages.",
-	"schedule":           "Create a durable event schedule for the current actor. Use exactly one typed mode: absolute with RFC3339 at, delay with a duration, cron with a UTC cron expression, or every with a duration.",
-	"get_entity":         "Read one existing entity by entity_id. Use flow_instance only as the owning-flow guard/address when needed; it must match the entity's owning flow root or instance. Returns envelope fields plus declared entity fields.",
-	"create_entity":      "Create a new entity in the inferred flow-owned contract. Do not provide entity_id, entity_type, subject_id, or other envelope fields. Put authored contract fields under fields using declared field names and declared value shapes.",
-	"save_entity_field":  "Write exactly one delivered writable field on an entity owned by your current flow. Do not write upstream/root/source entities from triggering events. Use only field names from this tool's enum/session writable-path summary. Value must match the declared field shape; lists require arrays and objects require objects.",
-	"query_entities":     "Read/query entity_state rows. entity_type, select, group_by, and filter paths must use delivered enum/declared scalar or enum leaf names. filter is CEL, so equality is ==, strings are quoted, and assignment = is invalid.",
-	"search_entities":    "Search entity_state rows with object field filters. entity_type and filter keys must use delivered declared field names for the target entity contract. Use query_entities when you need CEL, select, or group_by.",
-	"query_metrics":      "Aggregate entity_state rows. metric must be one of the delivered enum values. field and group_by must use delivered scalar or enum selector names. filter is CEL, so equality is == and strings are quoted.",
-	"human_task_request": "Create a typed human decision card only when human input is required. Provide an explicit entity, flow, or global scope and the single deadline_at spelling when overriding the stamped expiry policy.",
-	"read_flow_data":     "Read only declared deploy-time reference files from your owning flow data root. Provide one filename from the delivered enum; do not use host paths or this tool for mutable artifacts.",
+	"schedule":          "Create a durable event schedule for the current actor. Use exactly one typed mode: absolute with RFC3339 at, delay with a duration, cron with a UTC cron expression, or every with a duration.",
+	"get_entity":        "Read one existing entity by entity_id. Use flow_instance only as the owning-flow guard/address when needed; it must match the entity's owning flow root or instance. Returns envelope fields plus declared entity fields.",
+	"create_entity":     "Create a new entity in the inferred flow-owned contract. Do not provide entity_id, entity_type, subject_id, or other envelope fields. Put authored contract fields under fields using declared field names and declared value shapes.",
+	"save_entity_field": "Write exactly one delivered writable field on an entity owned by your current flow. Do not write upstream/root/source entities from triggering events. Use only field names from this tool's enum/session writable-path summary. Value must match the declared field shape; lists require arrays and objects require objects.",
+	"query_entities":    "Read/query entity_state rows. entity_type, select, group_by, and filter paths must use delivered enum/declared scalar or enum leaf names. filter is CEL, so equality is ==, strings are quoted, and assignment = is invalid.",
+	"search_entities":   "Search entity_state rows with object field filters. entity_type and filter keys must use delivered declared field names for the target entity contract. Use query_entities when you need CEL, select, or group_by.",
+	"query_metrics":     "Aggregate entity_state rows. metric must be one of the delivered enum values. field and group_by must use delivered scalar or enum selector names. filter is CEL, so equality is == and strings are quoted.",
+	"read_flow_data":    "Read only declared deploy-time reference files from your owning flow data root. Provide one filename from the delivered enum; do not use host paths or this tool for mutable artifacts.",
 }
 
 var nativeFallbackUsageHints = map[string]string{
@@ -39,6 +36,9 @@ var emitToolUsageHint = "Call this emit_* tool only to publish the named workflo
 
 func runtimeOwnedToolUsage(name string) string {
 	name = strings.TrimSpace(name)
+	if descriptor, ok := hitlToolDescriptorForName(name); ok {
+		return descriptor.usage
+	}
 	if usage := strings.TrimSpace(builtinToolUsageHints[name]); usage != "" {
 		return usage
 	}

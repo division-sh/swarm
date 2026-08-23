@@ -945,6 +945,28 @@ func runFakeClaudeTurn(root string, invocation fakeClaudeInvocation) int {
 	if err := waitForFakeDockerMCPEmitGate(os.Getenv(fakeDockerMCPEmitGateEnv)); err != nil {
 		return fakeDockerUnexpected(root, invocation.commandArgs, err.Error())
 	}
+	noticeResult, err := fakeMCPCall(client, invocation.hostMCPURL, invocation.headers, "tools/call", map[string]any{
+		"name": "notify_human",
+		"arguments": map[string]any{
+			"summary": "Strong job match found",
+			"context": map[string]any{
+				"company": "Example Labs", "job_title": "Senior Platform Engineer",
+				"posting_url": "https://example.test/jobs/senior-platform-engineer",
+			},
+		},
+		"_meta": map[string]any{"claudecode/toolUseId": "toolu-release-e2e-notice"},
+	}, "release-e2e-notice-call", true)
+	if err != nil {
+		return fakeDockerUnexpected(root, invocation.commandArgs, err.Error())
+	}
+	if isError, _ := noticeResult["isError"].(bool); isError {
+		return fakeDockerUnexpected(root, invocation.commandArgs, fmt.Sprintf("MCP notify_human returned an error result: %#v", noticeResult))
+	}
+	if !recordUniqueFakeDocker(root, fakeDockerRecord{
+		Class: "mcp_notify", ToolName: "notify_human", RawMCPURL: invocation.rawMCPURL, MCPURL: invocation.hostMCPURL,
+	}) {
+		return fakeDockerUnexpected(root, invocation.commandArgs, "duplicate mcp_notify attempt")
+	}
 	result, err := fakeMCPCall(client, invocation.hostMCPURL, invocation.headers, "tools/call", map[string]any{
 		"name":      toolName,
 		"arguments": map[string]any{"flow_result": "release-e2e-flow-complete"},
@@ -1056,13 +1078,29 @@ func fakeMCPCall(client *http.Client, endpoint string, headers map[string]string
 
 func exactReleaseFlowEmitTool(result map[string]any) (string, error) {
 	tools, _ := result["tools"].([]any)
-	wantNames := []string{"read_worker_state", "read_worker_state_requests", "emit_agent_completed"}
-	if names := listedToolNames(tools); !equalStrings(names, wantNames) {
+	wantNames := []string{"emit_agent_completed", "notify_human", "read_worker_state", "read_worker_state_requests"}
+	names := listedToolNames(tools)
+	sort.Strings(names)
+	if !equalStrings(names, wantNames) {
 		return "", fmt.Errorf("MCP tools/list names = %#v, want exact contextual surface %#v", names, wantNames)
 	}
+	notifyValidated := false
+	emitName := ""
 	for _, raw := range tools {
 		tool, _ := raw.(map[string]any)
 		name, _ := tool["name"].(string)
+		if name == "notify_human" {
+			wantSchema := map[string]any{
+				"type": "object", "additionalProperties": false, "required": []any{"summary"},
+				"properties": map[string]any{"summary": map[string]any{"type": "string", "minLength": float64(1)}, "context": map[string]any{}},
+			}
+			wantDescription := "Sends an informational notice to the human operator. Does NOT request approval and does not pause the flow - to ask for a decision that gates the flow, use ask_human.\n\nUsage:\nUse for an informational operator notice only. Provide summary and optional context. The flow continues without waiting for a reply; use ask_human when a human verdict must gate the flow."
+			if tool["description"] != wantDescription || !jsonValuesEqual(tool["inputSchema"], wantSchema) {
+				return "", fmt.Errorf("MCP notify_human definition = %#v, want exact description/schema", tool)
+			}
+			notifyValidated = true
+			continue
+		}
 		if name != "emit_agent_completed" {
 			continue
 		}
@@ -1081,9 +1119,15 @@ func exactReleaseFlowEmitTool(result map[string]any) (string, error) {
 		if !jsonValuesEqual(tool["inputSchema"], wantSchema) {
 			return "", fmt.Errorf("MCP flow emit schema = %#v, want %#v", tool["inputSchema"], wantSchema)
 		}
-		return name, nil
+		emitName = name
 	}
-	return "", fmt.Errorf("MCP tools/list has no exact flow-scoped emit_agent_completed tool: %#v", listedToolNames(tools))
+	if !notifyValidated {
+		return "", fmt.Errorf("MCP tools/list has no exact notify_human definition")
+	}
+	if emitName == "" {
+		return "", fmt.Errorf("MCP tools/list has no exact flow-scoped emit_agent_completed tool: %#v", listedToolNames(tools))
+	}
+	return emitName, nil
 }
 
 const releaseE2EEmitToolUsage = "Call this emit_* tool only to publish the named workflow event. Provide concrete JSON payload values matching the input schema. Do not include envelope-owned fields unless the schema declares them. Arguments are concrete payload values, not workflow expressions."

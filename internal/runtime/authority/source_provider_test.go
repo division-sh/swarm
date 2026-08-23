@@ -63,10 +63,10 @@ func TestNewSourceProvider_UsesEffectiveDeclaredNameForMailboxRole(t *testing.T)
 		},
 	}))
 
-	if err := provider.AuthorizeMailboxSend(models.AgentConfig{Role: "public-worker"}); err != nil {
+	if err := provider.AuthorizeNotifyHuman(models.AgentConfig{Role: "public-worker"}); err != nil {
 		t.Fatalf("effective declared name mailbox authority: %v", err)
 	}
-	if err := provider.AuthorizeMailboxSend(models.AgentConfig{Role: "local-worker"}); err == nil {
+	if err := provider.AuthorizeNotifyHuman(models.AgentConfig{Role: "local-worker"}); err == nil {
 		t.Fatal("local declaration coordinate retained mailbox authority")
 	}
 }
@@ -105,7 +105,7 @@ func TestNewSourceProvider_AuthorityMatrix(t *testing.T) {
 	controlPlane := testAgentConfig(
 		"control-plane",
 		"control-plane",
-		[]string{"message_flow", "mailbox_send"},
+		[]string{"message_flow", "notify_human"},
 		"",
 		"review/inst-1",
 		"",
@@ -113,7 +113,7 @@ func TestNewSourceProvider_AuthorityMatrix(t *testing.T) {
 	reviewer := testAgentConfig(
 		"reviewer",
 		"reviewer",
-		[]string{"message_peers", "mailbox_send"},
+		[]string{"message_peers", "notify_human"},
 		"",
 		"review/inst-1",
 		"control-plane",
@@ -144,7 +144,7 @@ func TestNewSourceProvider_AuthorityMatrix(t *testing.T) {
 	if provider.HasMessageAuthority(worker, otherFlowWorker) {
 		t.Fatal("expected cross-flow peer messaging to be denied")
 	}
-	if err := provider.AuthorizeMailboxSend(reviewer); err != nil {
+	if err := provider.AuthorizeNotifyHuman(reviewer); err != nil {
 		t.Fatalf("expected reviewer mailbox permission: %v", err)
 	}
 }

@@ -15,6 +15,7 @@ import (
 type MailboxAPIStore interface {
 	ListV1MailboxItems(context.Context, mailbox.V1ListOptions) ([]mailbox.V1Item, string, error)
 	GetV1MailboxItem(context.Context, string) (mailbox.V1ItemDetail, error)
+	CountUnreadInformationalNotices(context.Context) (int, error)
 }
 
 type APIIdempotencyStore interface {
@@ -30,8 +31,9 @@ type EventPublisher interface {
 }
 
 type mailboxListResult struct {
-	Items      []mailbox.V1Item `json:"items"`
-	NextCursor string           `json:"next_cursor,omitempty"`
+	Items                      []mailbox.V1Item `json:"items"`
+	NextCursor                 string           `json:"next_cursor,omitempty"`
+	UnreadInformationalNotices int              `json:"unread_informational_notices"`
 }
 
 func OperatorMailboxHandlers(opts MailboxHandlerOptions) map[string]MethodHandler {
@@ -54,7 +56,11 @@ func OperatorMailboxHandlers(opts MailboxHandlerOptions) map[string]MethodHandle
 			if items == nil {
 				items = []mailbox.V1Item{}
 			}
-			return mailboxListResult{Items: items, NextCursor: nextCursor}, nil
+			unread, err := opts.Mailbox.CountUnreadInformationalNotices(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return mailboxListResult{Items: items, NextCursor: nextCursor, UnreadInformationalNotices: unread}, nil
 		},
 		"mailbox.get": func(ctx context.Context, req Request) (any, error) {
 			detail, err := opts.Mailbox.GetV1MailboxItem(ctx, stringParam(req.Params, "mailbox_id"))

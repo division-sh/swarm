@@ -418,7 +418,7 @@ func TestRecoverRestoresPersistedFlowInstanceRoutes(t *testing.T) {
 				EntityID: "ent-1",
 				FlowID:   "review",
 				FlowPath: "review/inst-1",
-				Config:   mustRecoveryJSON(t, map[string]any{"tools": []string{"agent_message"}}),
+				Config:   mustRecoveryJSON(t, map[string]any{"tools": []string{"schedule"}, "permissions": []string{"schedule"}}),
 			}),
 			StartedAt: time.Now().UTC(),
 		}},

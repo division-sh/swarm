@@ -300,7 +300,7 @@ func (a *LLMAgent) injectHumanTaskToolResult(ctx context.Context, evt events.Eve
 		}
 	}
 
-	return a.conversation.InjectAsyncToolResult(ctx, "human_task_request", outcomeOK, result, errText)
+	return a.conversation.InjectAsyncToolResult(ctx, "ask_human", outcomeOK, result, errText)
 }
 
 func (a *LLMAgent) BoardStep(ctx context.Context, directive runtimeagentcontrol.BoardDirective) (string, error) {
