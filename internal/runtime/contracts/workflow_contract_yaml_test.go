@@ -1952,6 +1952,49 @@ func TestSystemNodeEventHandlerDecode_RecognizesEverySingletonRuleFieldFamily(t 
 	}
 }
 
+func TestSystemNodeEventHandlerDecode_KeyedLabelsNeverBecomeSingletonGrammar(t *testing.T) {
+	labels := []string{
+		"element_id", "id", "description", "condition", "when", "case", "range", "lookup", "validate", "compute_module",
+		"else", "default", "advances_to", "emit", "emits", "action", "activity", "data_accumulation", "compute", "fan_out",
+	}
+	for _, context := range []string{"rules", "on_complete"} {
+		for _, label := range labels {
+			t.Run(context+"/"+label, func(t *testing.T) {
+				raw := fmt.Sprintf(`%s:
+  %s:
+    element_id: 00000000-0000-4000-8000-000000000436
+    condition: else
+    advances_to: done
+`, context, label)
+				var handler SystemNodeEventHandler
+				if err := yaml.Unmarshal([]byte(raw), &handler); err != nil {
+					t.Fatal(err)
+				}
+				rows := handler.Rules
+				if context == "on_complete" {
+					rows = handler.OnComplete
+				}
+				if len(rows) != 1 || rows[0].ID != label || rows[0].Condition != "else" || rows[0].AdvancesTo != "done" || !rows[0].ElementID.Valid() {
+					t.Fatalf("decoded keyed row = %#v", rows)
+				}
+			})
+		}
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_RejectsAmbiguousRuleMapping(t *testing.T) {
+	for _, context := range []string{"rules", "on_complete"} {
+		t.Run(context, func(t *testing.T) {
+			var handler SystemNodeEventHandler
+			err := yaml.Unmarshal([]byte(context+`: {activity: {id: ambiguous}}
+`), &handler)
+			if err == nil || !strings.Contains(err.Error(), "AMBIGUOUS-RULE-GRAMMAR") {
+				t.Fatalf("yaml.Unmarshal error = %v, want ambiguous grammar rejection", err)
+			}
+		})
+	}
+}
+
 func TestSystemNodeEventHandlerDecode_RejectsRetiredClearTarget(t *testing.T) {
 	var handler SystemNodeEventHandler
 	err := yaml.Unmarshal([]byte(`

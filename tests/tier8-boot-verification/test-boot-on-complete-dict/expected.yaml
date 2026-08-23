@@ -4,5 +4,5 @@ conformance:
   proves:
     - catalog.verify.boot_diagnostics
   diagnostic:
-    category: "DIALECT-OC-ORDER"
-    contains: "on_complete is dict, must be ordered list"
+    category: "AMBIGUOUS-RULE-GRAMMAR"
+    contains: "mapping is valid as both one handler rule and keyed handler rules"

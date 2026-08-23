@@ -195,7 +195,11 @@ func mintRuleCollectionElementIDs(node *yaml.Node) (int, error) {
 		}
 		return count, nil
 	case yaml.MappingNode:
-		if mappingIsSingleHandlerRuleEntry(node) {
+		shape, err := classifyHandlerRuleMapping(node)
+		if err != nil {
+			return 0, err
+		}
+		if shape == handlerRuleMappingSingleton {
 			return ensureRuleElementID(node, nil)
 		}
 		count := 0

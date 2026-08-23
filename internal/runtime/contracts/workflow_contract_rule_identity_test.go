@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -8,6 +9,62 @@ import (
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"gopkg.in/yaml.v3"
 )
+
+func TestPlatformSpecPolicyRowsUseCanonicalElementIdentity(t *testing.T) {
+	repo := handlerRuleIdentityGuardRepoRoot(t)
+	raw, err := os.ReadFile(DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec struct {
+		HandlerSpecification struct {
+			OnCompleteVsRules struct {
+				OnComplete string `yaml:"on_complete"`
+			} `yaml:"on_complete_vs_rules"`
+			HandlerFields struct {
+				Rules struct {
+					Type                     string `yaml:"type"`
+					PolicySheetSelectionRows struct {
+						StableIdentity string `yaml:"stable_identity"`
+					} `yaml:"policy_sheet_selection_rows"`
+				} `yaml:"rules"`
+			} `yaml:"handler_fields"`
+		} `yaml:"handler_specification"`
+		Engine struct {
+			BootVerification struct {
+				Checks []struct {
+					ID      string `yaml:"id"`
+					Trigger string `yaml:"trigger"`
+				} `yaml:"checks"`
+			} `yaml:"boot_verification"`
+		} `yaml:"engine"`
+	}
+	if err := yaml.Unmarshal(raw, &spec); err != nil {
+		t.Fatal(err)
+	}
+	rules := spec.HandlerSpecification.HandlerFields.Rules
+	for field, text := range map[string]string{"rules.type": rules.Type, "policy_sheet_selection_rows.stable_identity": rules.PolicySheetSelectionRows.StableIdentity} {
+		if !strings.Contains(text, "element_id") || !strings.Contains(text, "non-authoritative display") {
+			t.Fatalf("%s = %q, want canonical element_id and non-authoritative display contract", field, text)
+		}
+		if strings.Contains(text, "stable `id`") || strings.Contains(text, "selected row ID") {
+			t.Fatalf("%s retains local-id identity authority: %q", field, text)
+		}
+	}
+	if text := spec.HandlerSpecification.OnCompleteVsRules.OnComplete; !strings.Contains(text, "keyed map") || !strings.Contains(text, "non-authoritative display") {
+		t.Fatalf("handler_specification.on_complete = %q, want keyed-map display-label contract", text)
+	}
+	for _, check := range spec.Engine.BootVerification.Checks {
+		if check.ID != "dialect_compliance" {
+			continue
+		}
+		if !strings.Contains(check.Trigger, "structurally ambiguous") || strings.Contains(check.Trigger, "instead of a list") {
+			t.Fatalf("dialect_compliance trigger = %q, want ambiguity rejection without list-only authority", check.Trigger)
+		}
+		return
+	}
+	t.Fatal("dialect_compliance spec check is missing")
+}
 
 func TestHandlerRuleIdentityIgnoresKeyLabelAndPosition(t *testing.T) {
 	const elementID = "00000000-0000-4000-8000-000000000301"

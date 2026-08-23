@@ -6,7 +6,5 @@ test-node:
   event_handlers:
     task.requested:
       on_complete:
-        branch_a:
-          element_id: ecab7ff6-f17e-4bd7-ad3e-49355457b1d4
-          condition: "payload.score >= 70"
-          advances_to: done
+        activity:
+          id: ambiguous

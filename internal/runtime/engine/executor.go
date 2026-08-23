@@ -2862,9 +2862,6 @@ func (e *Executor) selectRule(frame *executionFrame, rules []runtimecontracts.Ha
 			return rule, idx, nil
 		}
 		passed, err := e.evaluator.EvalBool(condition, e.currentContext(frame))
-		if err == ErrNotImplemented {
-			continue
-		}
 		if err != nil {
 			context, contextErr := handlerSelectionContext(source)
 			if contextErr != nil {
