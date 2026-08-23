@@ -7,7 +7,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
@@ -331,33 +330,6 @@ func (c *checkerContext) crossFlowPinAmbiguityValidation() []Finding {
 		}
 	}
 	return c.crossFlowPinAmbiguityFindings
-}
-
-func flowHasScopedInputEscapeHatch(source semanticview.Source, flowID, eventType string) bool {
-	flowID = strings.TrimSpace(flowID)
-	eventType = strings.TrimSpace(eventType)
-	if source == nil || flowID == "" || eventType == "" {
-		return false
-	}
-	scope, ok := source.FlowScopeByID(flowID)
-	if !ok {
-		return false
-	}
-	for _, node := range scope.Nodes {
-		for _, sub := range eventidentity.NormalizeList(runtimecontracts.EffectiveSystemNodeSubscriptions(node)) {
-			if strings.Contains(sub, "/") && strings.HasSuffix(sub, "/"+eventType) {
-				return true
-			}
-		}
-	}
-	for _, agent := range scope.Agents {
-		for _, sub := range eventidentity.NormalizeList(agent.Subscriptions) {
-			if strings.Contains(sub, "/") && strings.HasSuffix(sub, "/"+eventType) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func (c *checkerContext) selectEntityValidation() []Finding {
