@@ -1,0 +1,7 @@
+scout.requested:
+  query: text
+scout.work.requested:
+  query: text
+scout.completed:
+  batch_id: text
+  candidate_ids: "[text]"

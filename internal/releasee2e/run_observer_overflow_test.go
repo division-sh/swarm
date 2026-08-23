@@ -25,12 +25,7 @@ func TestRunStartForegroundObserverOverflowFromReleaseBinary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve release root: %v", err)
 	}
-	binaryPath := filepath.Join(releaseRoot, "swarm")
-	build := exec.Command("go", "build", "-o", binaryPath, "./cmd/swarm")
-	build.Dir = repo
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build release binary: %v\n%s", err, output)
-	}
+	binaryPath := buildReleaseBinary(t, releaseRoot)
 	writeReleaseObserverOverflowFixture(t, repo, releaseRoot, 24)
 
 	releaseLock := acquireReleaseMCPPortLock(t)

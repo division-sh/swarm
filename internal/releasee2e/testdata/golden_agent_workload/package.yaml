@@ -1,0 +1,19 @@
+name: golden-agent-workload
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: scout
+    flow: scout
+    mode: singleton
+  - id: candidate
+    flow: candidate
+    mode: template
+connect:
+  - from: .scout_requested
+    to: scout.scout_requested
+  - from: scout.scout_completed
+    to: .scout_completed
+  - from: .candidate_requested
+    to: candidate.candidate_requested
+  - from: candidate.candidate_completed
+    to: .candidate_completed

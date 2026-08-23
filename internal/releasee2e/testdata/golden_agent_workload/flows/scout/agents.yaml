@@ -1,0 +1,11 @@
+scout-worker:
+  type: generic
+  role: golden_scout
+  intent: prompts/scout-worker.md
+  model: regular
+  memory: false
+  subscriptions: [scout.work.requested]
+  emit_events: [scout.completed]
+  mock:
+    kind: python
+    module: mocks/scout.py
