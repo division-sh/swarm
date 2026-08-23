@@ -1232,7 +1232,7 @@ func decodeHandlerRuleEntryNode(node *yaml.Node, context handlerRuleDecodeContex
 	if err := rejectRuleActionOutsideRules(rule, context); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(rule.ID) == "" && strings.TrimSpace(rule.Description) == "" && strings.TrimSpace(rule.Condition) == "" && strings.TrimSpace(rule.AdvancesTo) == "" && rule.Emit.Empty() && strings.TrimSpace(rule.Action.ID) == "" && !rule.DataAccumulation.HasWrites() && rule.Compute == nil && rule.FanOut == nil {
+	if !rule.ElementID.Valid() && strings.TrimSpace(rule.ID) == "" && strings.TrimSpace(rule.Description) == "" && strings.TrimSpace(rule.Condition) == "" && strings.TrimSpace(rule.AdvancesTo) == "" && rule.Emit.Empty() && strings.TrimSpace(rule.Action.ID) == "" && rule.Activity.Empty() && !rule.DataAccumulation.HasWrites() && rule.Compute == nil && rule.FanOut == nil {
 		return nil, nil
 	}
 	return &rule, nil
@@ -1297,7 +1297,7 @@ func decodeHandlerRuleEntriesNode(node *yaml.Node, context handlerRuleDecodeCont
 }
 
 func mappingIsSingleHandlerRuleEntry(node *yaml.Node) bool {
-	if hasAnyYAMLMappingKey(node, "condition", "advances_to", "emit", "emits", "action", "data_accumulation", "compute", "fan_out") {
+	if hasAnyYAMLMappingKey(node, "element_id", "id", "description", "condition", "advances_to", "emit", "emits", "action", "activity", "data_accumulation", "compute", "fan_out") {
 		return true
 	}
 	if !hasAnyYAMLMappingKey(node, "when", "case", "range", "lookup", "validate", "compute_module", "else", "default") {

@@ -2866,6 +2866,19 @@ func (e *Executor) selectRule(frame *executionFrame, rules []runtimecontracts.Ha
 			continue
 		}
 		if err != nil {
+			context, contextErr := handlerSelectionContext(source)
+			if contextErr != nil {
+				return nil, -1, contextErr
+			}
+			ref, qualified := rule.ContractElementRef()
+			if !qualified {
+				return nil, -1, fmt.Errorf("handler rule %q evaluation failed without canonical element identity: %w", strings.TrimSpace(rule.ID), err)
+			}
+			fact, factErr := handlerselection.EvaluationFailed(context, ref, rule.ID)
+			if factErr != nil {
+				return nil, -1, factErr
+			}
+			frame.result.HandlerRuleSelection = fact
 			return nil, -1, err
 		}
 		if passed {

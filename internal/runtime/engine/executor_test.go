@@ -1557,6 +1557,44 @@ func TestExecutor_AccumulatorProjectionMaterializesWhenRulesDoNotMatch(t *testin
 	}
 }
 
+func TestExecutor_RuleEvaluationFailureCarriesExactAttemptedIdentity(t *testing.T) {
+	var handler runtimecontracts.SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte(`rules:
+  - element_id: 00000000-0000-4000-8000-000000000425
+    id: attempted-rule
+    condition: evaluator.failure
+`), &handler); err != nil {
+		t.Fatal(err)
+	}
+	node := testRootExecutableNode(t, "scoring-node")
+	qualified, err := runtimecontracts.QualifySystemNodeHandlerRuleRefs(node, handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantErr := errors.New("condition evaluator failed")
+	exec := newAccumulatorProjectionTestExecutor(t, stubEvaluator{errs: map[string]error{"evaluator.failure": wantErr}})
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+		EntityID: "entity-1",
+		Node:     node,
+		Event: eventtest.RunCreatingRootIngress(
+			"evt-evaluation-failure", "score.dimension_complete", "", "", json.RawMessage(`{"score":87}`),
+			0, "", "", events.EventEnvelope{}, time.Time{},
+		),
+		Handler: qualified,
+		State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Execute error = %v, want %v", err, wantErr)
+	}
+	fact := result.HandlerRuleSelection
+	if fact.Context() != handlerselection.ContextRules || fact.Disposition() != handlerselection.DispositionEvaluationFailed || fact.DisplayLabel() != "attempted-rule" {
+		t.Fatalf("failed evaluation fact = %#v", fact)
+	}
+	if got := fact.Ref().ElementID().String(); got != "00000000-0000-4000-8000-000000000425" {
+		t.Fatalf("attempted element ID = %q", got)
+	}
+}
+
 func TestExecutor_AccumulatorProjectionMaterializesBeforeTopLevelFanOutEmitFields(t *testing.T) {
 	exec := newAccumulatorProjectionTestExecutor(t, nil)
 	handler := runtimecontracts.SystemNodeEventHandler{

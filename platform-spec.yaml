@@ -3028,14 +3028,17 @@ handler_specification:
     execution_fact: >-
       Each concrete handler delivery commits exactly one immutable HandlerRuleSelectionFact keyed by delivery_id in the
       same selected-store transaction as settlement. Its closed context is handler_rules, handler_on_complete,
-      join_on_complete, join_timeout, or none. Its closed disposition is selected, no_match, or not_applicable. Selected
-      requires the typed package coordinate and element ID; no_match and not_applicable forbid them. Display label is
-      optional presentation. Run, event, route, node, subscriber, and handler-event identity remain owned by canonical
-      delivery/event rows and are not duplicated. Same-delivery retry must agree exactly or fail closed without settlement
-      mutation. There is no ordinal, set, nullable absence, current-contract lookup, compatibility reader, or old-store migration.
+      join_on_complete, join_timeout, or none. Its closed disposition is selected, no_match, evaluation_failed, or
+      not_applicable. Selected and evaluation_failed require the typed package coordinate and element ID;
+      evaluation_failed additionally requires handler_rules or handler_on_complete context. No_match and not_applicable
+      forbid identity fields. Display label is optional presentation. Run, event, route, node, subscriber, and
+      handler-event identity remain owned by canonical delivery/event rows and are not duplicated. Same-delivery retry
+      must agree exactly or fail closed without settlement mutation. TerminalizeRun inserts none/not_applicable only when
+      no evaluation fact exists and preserves any prior fact; read and dry-run paths never write one. There is no ordinal,
+      set, nullable absence, current-contract lookup, compatibility reader, or old-store migration.
     public_projection: >-
       RunDebugTraceRow exposes one typed handler_rule_selection projection sourced only from the persisted delivery fact.
-      It distinguishes selected, no_match, and not_applicable after restart without consulting current contract text.
+      It distinguishes selected, no_match, evaluation_failed, and not_applicable after restart without consulting current contract text.
   short_circuits:
     guard_fail: If guard fails, handler stops. on_fail action executes (reject/kill/discard/escalate). No further steps.
   handler_fields:
@@ -14114,19 +14117,19 @@ platform_tables:
         Singular durable handler-rule evaluation fact for one exact executable delivery. The delivery row remains the
         canonical owner of run, event, route, node, and handler-event identity; this projection is keyed only by
         delivery_id and records whether the delivery selected one authored handler rule, evaluated an executable rule
-        context without a match, or did not execute an authored rule context. Authored identity is the package-qualified
-        immutable element_id and display_label is presentation only. The lifecycle settlement transaction writes this
-        row exactly once and exact replay must agree with it. Existing stores are unsupported; no ordinal, ordered fact
+        context without a match, failed while evaluating one exact authored rule, or did not execute an authored rule context. Authored identity is the package-qualified
+        immutable element_id and display_label is presentation only. The lifecycle settlement or terminalization transaction writes this
+        row exactly once and exact replay must agree with it. Inspection and dry-run paths never write it. Existing stores are unsupported; no ordinal, ordered fact
         set, current-contract lookup, label authority, fallback, or compatibility interpretation exists.
       ddl: |
         CREATE TABLE event_delivery_handler_rule_selections (
             delivery_id        UUID PRIMARY KEY REFERENCES event_deliveries(delivery_id),
             selection_context  TEXT NOT NULL CHECK (selection_context IN ('none', 'handler_rules', 'handler_on_complete', 'join_on_complete', 'join_timeout')),
-            disposition        TEXT NOT NULL CHECK (disposition IN ('selected', 'no_match', 'not_applicable')),
+            disposition        TEXT NOT NULL CHECK (disposition IN ('selected', 'no_match', 'evaluation_failed', 'not_applicable')),
             package_coordinate TEXT,
             element_id         UUID,
             display_label      TEXT NOT NULL DEFAULT '',
-            CHECK ((disposition = 'selected' AND selection_context <> 'none' AND NULLIF(TRIM(COALESCE(package_coordinate, '')), '') IS NOT NULL AND element_id IS NOT NULL) OR (disposition = 'no_match' AND selection_context IN ('handler_rules', 'handler_on_complete') AND package_coordinate IS NULL AND element_id IS NULL AND display_label = '') OR (disposition = 'not_applicable' AND selection_context = 'none' AND package_coordinate IS NULL AND element_id IS NULL AND display_label = ''))
+            CHECK ((disposition = 'selected' AND selection_context <> 'none' AND NULLIF(TRIM(COALESCE(package_coordinate, '')), '') IS NOT NULL AND element_id IS NOT NULL) OR (disposition = 'evaluation_failed' AND selection_context IN ('handler_rules', 'handler_on_complete') AND NULLIF(TRIM(COALESCE(package_coordinate, '')), '') IS NOT NULL AND element_id IS NOT NULL) OR (disposition = 'no_match' AND selection_context IN ('handler_rules', 'handler_on_complete') AND package_coordinate IS NULL AND element_id IS NULL AND display_label = '') OR (disposition = 'not_applicable' AND selection_context = 'none' AND package_coordinate IS NULL AND element_id IS NULL AND display_label = ''))
         );
     event_delivery_attempts:
       description: >-

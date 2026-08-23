@@ -97,7 +97,7 @@ func validatePolicySheetValidationValueRow(source semanticview.Source, ref polic
 	if !ok {
 		findings = append(findings, policySheetValidationFinding(ref, fmt.Sprintf("validate.set %q does not resolve in policy.validation", strings.TrimSpace(spec.Set))))
 	} else {
-		findings = append(findings, validatePolicySheetValidationDispositionConsumer(ref, handler, rule, storeAs, set)...)
+		findings = append(findings, validatePolicySheetValidationDispositionConsumer(ref, handler, storeAs, set)...)
 	}
 	if !policySheetLookupBindingConsumed(source, ref.Node, ref.EventType, handler, ref.RuleIndex, storeAs) {
 		findings = append(findings, policySheetValidationFinding(ref, fmt.Sprintf("validate.into %q is not consumed by a supported downstream condition, emit field, activity input, fan_out, or expression", storeAs)))
@@ -105,7 +105,7 @@ func validatePolicySheetValidationValueRow(source semanticview.Source, ref polic
 	return findings
 }
 
-func validatePolicySheetValidationDispositionConsumer(ref policySheetValidationRef, handler runtimecontracts.SystemNodeEventHandler, validateRule runtimecontracts.HandlerRuleEntry, target string, set runtimecontracts.PolicyValidationSet) []Finding {
+func validatePolicySheetValidationDispositionConsumer(ref policySheetValidationRef, handler runtimecontracts.SystemNodeEventHandler, target string, set runtimecontracts.PolicyValidationSet) []Finding {
 	dispositions := map[string]struct{}{}
 	for _, class := range set.Classes {
 		disposition := strings.TrimSpace(class.Disposition)
@@ -119,8 +119,8 @@ func validatePolicySheetValidationDispositionConsumer(ref policySheetValidationR
 	}
 	matched := false
 	findings := make([]Finding, 0)
-	for _, rule := range handler.Rules {
-		if strings.TrimSpace(rule.ID) == strings.TrimSpace(validateRule.ID) && rule.Compute == validateRule.Compute {
+	for index, rule := range handler.Rules {
+		if index == ref.RuleIndex {
 			continue
 		}
 		if !policySheetValidationConditionConsumesInvalidResult(rule.Condition, target) {

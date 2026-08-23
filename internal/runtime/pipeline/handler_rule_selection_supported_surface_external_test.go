@@ -30,6 +30,7 @@ func TestHandlerRuleSelectionRunsThroughDurableEventBusAndReconstructedTraceOnBo
 	}{
 		{event: "rules.selected", context: handlerselection.ContextRules, disposition: handlerselection.DispositionSelected, elementID: "00000000-0000-4000-8000-000000000421", label: "rules-label"},
 		{event: "rules.no_match", context: handlerselection.ContextRules, disposition: handlerselection.DispositionNoMatch},
+		{event: "rules.evaluation_failed", context: handlerselection.ContextRules, disposition: handlerselection.DispositionEvaluationFailed, elementID: "00000000-0000-4000-8000-000000000426", label: "failed-rules"},
 		{event: "complete.selected", context: handlerselection.ContextOnComplete, disposition: handlerselection.DispositionSelected, elementID: "00000000-0000-4000-8000-000000000423", label: "complete-label"},
 		{event: "complete.no_match", context: handlerselection.ContextOnComplete, disposition: handlerselection.DispositionNoMatch},
 		{event: "direct", context: handlerselection.ContextNone, disposition: handlerselection.DispositionNotApplicable},
@@ -140,11 +141,11 @@ WHERE d.event_id = $1::uuid AND d.subscriber_type = 'node'`
 	if gotContext != string(wantContext) || gotDisposition != string(wantDisposition) || gotElementID != wantElementID || gotLabel != wantLabel {
 		t.Fatalf("persisted selection = %s/%s/%s/%s/%s, want %s/%s/%s/%s/%s", gotContext, gotDisposition, gotPackage, gotElementID, gotLabel, wantContext, wantDisposition, wantPackage, wantElementID, wantLabel)
 	}
-	if wantDisposition == handlerselection.DispositionSelected && gotPackage != wantPackage {
-		t.Fatalf("selected package coordinate = %q, want %q", gotPackage, wantPackage)
+	if handlerRuleSelectionDispositionCarriesIdentity(wantDisposition) && gotPackage != wantPackage {
+		t.Fatalf("identity-bearing package coordinate = %q, want %q", gotPackage, wantPackage)
 	}
-	if wantDisposition != handlerselection.DispositionSelected && gotPackage != "" {
-		t.Fatalf("non-selected package coordinate = %q, want empty", gotPackage)
+	if !handlerRuleSelectionDispositionCarriesIdentity(wantDisposition) && gotPackage != "" {
+		t.Fatalf("identity-free package coordinate = %q, want empty", gotPackage)
 	}
 }
 
@@ -154,7 +155,7 @@ func assertTraceHandlerRuleSelection(t *testing.T, selected gateRecoveryStoreCas
 
 func assertTraceHandlerRuleSelectionInPackage(t *testing.T, selected gateRecoveryStoreCase, ctx context.Context, runID, eventID string, wantContext handlerselection.Context, wantDisposition handlerselection.Disposition, wantPackage, wantElementID, wantLabel string) {
 	t.Helper()
-	if wantDisposition != handlerselection.DispositionSelected {
+	if !handlerRuleSelectionDispositionCarriesIdentity(wantDisposition) {
 		wantPackage = ""
 	}
 	rows, _, err := selected.trace.LoadRunDebugTracePage(ctx, runID, operatorread.RunDebugTraceQueryOptions{Limit: 100})
@@ -175,4 +176,8 @@ func assertTraceHandlerRuleSelectionInPackage(t *testing.T, selected gateRecover
 		return
 	}
 	t.Fatalf("trace omitted event %s; rows=%s", eventID, fmt.Sprint(rows))
+}
+
+func handlerRuleSelectionDispositionCarriesIdentity(disposition handlerselection.Disposition) bool {
+	return disposition == handlerselection.DispositionSelected || disposition == handlerselection.DispositionEvaluationFailed
 }

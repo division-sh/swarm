@@ -1564,19 +1564,6 @@ rules:
 			contains: "require an else/default row",
 		},
 		{
-			name: "duplicate row ids",
-			body: `
-rules:
-  - id: duplicate
-    when: "payload.ok"
-    advances_to: ok
-  - id: duplicate
-    default: true
-    advances_to: fallback
-`,
-			contains: "duplicate stable row id",
-		},
-		{
 			name: "duplicate case key",
 			body: `
 rules:
@@ -1887,6 +1874,80 @@ switch:
 			if err == nil || !strings.Contains(err.Error(), tt.contains) {
 				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tt.contains)
 			}
+		})
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_AllowsAbsentAndDuplicatePolicyDisplayLabels(t *testing.T) {
+	var handler SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte(`rules:
+  - element_id: 00000000-0000-4000-8000-000000000431
+    when: payload.ok
+    advances_to: ok
+  - element_id: 00000000-0000-4000-8000-000000000432
+    id: repeated-label
+    when: payload.retry
+    advances_to: retry
+  - element_id: 00000000-0000-4000-8000-000000000433
+    id: repeated-label
+    default: true
+    advances_to: fallback
+`), &handler); err != nil {
+		t.Fatal(err)
+	}
+	if len(handler.Rules) != 3 || handler.Rules[0].ID != "" || handler.Rules[1].ID != handler.Rules[2].ID {
+		t.Fatalf("decoded labels = %#v", handler.Rules)
+	}
+	for index, rule := range handler.Rules {
+		if !rule.ElementID.Valid() {
+			t.Fatalf("rule %d lost authored element identity", index)
+		}
+	}
+}
+
+func TestSystemNodeEventHandlerDecode_RecognizesEverySingletonRuleFieldFamily(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		raw    string
+		assert func(testing.TB, HandlerRuleEntry)
+	}{
+		{
+			name: "activity only",
+			raw:  "rules: {activity: {tool: notify}}\n",
+			assert: func(t testing.TB, rule HandlerRuleEntry) {
+				if rule.Activity.Tool != "notify" {
+					t.Fatalf("activity = %#v", rule.Activity)
+				}
+			},
+		},
+		{
+			name: "identity plus activity",
+			raw:  "rules: {element_id: 00000000-0000-4000-8000-000000000434, activity: {tool: notify}}\n",
+			assert: func(t testing.TB, rule HandlerRuleEntry) {
+				if !rule.ElementID.Valid() || rule.Activity.Tool != "notify" {
+					t.Fatalf("identity/activity = %#v", rule)
+				}
+			},
+		},
+		{
+			name: "presentation only",
+			raw:  "rules: {id: display-only, description: presentation}\n",
+			assert: func(t testing.TB, rule HandlerRuleEntry) {
+				if rule.ID != "display-only" || rule.Description != "presentation" {
+					t.Fatalf("presentation = %#v", rule)
+				}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var handler SystemNodeEventHandler
+			if err := yaml.Unmarshal([]byte(tc.raw), &handler); err != nil {
+				t.Fatal(err)
+			}
+			if len(handler.Rules) != 1 {
+				t.Fatalf("rules = %#v, want one singleton", handler.Rules)
+			}
+			tc.assert(t, handler.Rules[0])
 		})
 	}
 }

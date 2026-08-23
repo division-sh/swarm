@@ -181,7 +181,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				firstFact := deliveryLifecycleSelectedRuleFact(t, handlerselection.ContextRules, "00000000-0000-4000-8000-000000000105", "original")
+				firstFact := deliveryLifecycleEvaluationFailedFact(t, handlerselection.ContextRules, "00000000-0000-4000-8000-000000000105", "failed-evaluation")
 				failed, err := backend.store.SettleFailure(ctx, firstClaim.Claim, runtimedelivery.Settlement{
 					Disposition:   runtimedelivery.FailureRetry,
 					Failure:       testFailure("selection_retry"),
@@ -207,8 +207,16 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				if err != nil || len(outcomes) != 1 || outcomes[0].Outcome != "retry_scheduled" {
 					t.Fatalf("contradictory replay outcomes = %#v, %v", outcomes, err)
 				}
-				if _, err := backend.restart.SettleSuccess(ctx, secondClaim.Claim, nil, 0, firstFact); err != nil {
+				if _, err := backend.restart.SettleFailure(ctx, secondClaim.Claim, runtimedelivery.Settlement{
+					Disposition:   runtimedelivery.FailureDeadLetter,
+					ReasonCode:    "selection_evaluation_failed",
+					Failure:       testFailure("selection_evaluation_failed"),
+					RuleSelection: firstFact,
+				}); err != nil {
 					t.Fatalf("exact replay agreement: %v", err)
+				}
+				if got := loadDeliveryHandlerRuleSelectionFact(t, ctx, backend, firstClaim.Snapshot.DeliveryID); !got.Equal(firstFact) {
+					t.Fatalf("terminal failed-evaluation fact = %#v, want %#v", got, firstFact)
 				}
 			})
 
@@ -797,6 +805,7 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					t.Fatal("run terminalization succeeded while required diagnostic writer was faulted")
 				}
 				assertDeliverySettlementRolledBack(t, ctx, backend, claimed)
+				assertDeliveryHandlerRuleSelectionMissing(t, ctx, backend, claimed.Snapshot.DeliveryID)
 				removeFault()
 				transitions, err := backend.store.TerminalizeRun(ctx, event.RunID(), "run_terminal")
 				if err != nil {
@@ -817,6 +826,47 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 					t.Fatalf("terminalization outcomes = %#v, err=%v", outcomes, err)
 				}
 				assertExactDeliveryDeadLetter(t, ctx, backend, event, current)
+				if got := loadDeliveryHandlerRuleSelectionFact(t, ctx, backend, current.DeliveryID); !got.Equal(handlerselection.NotApplicable()) {
+					t.Fatalf("terminalization fact = %#v, want not-applicable", got)
+				}
+			})
+
+			t.Run("parent_terminalization_owns_pending_and_preserves_failed_selection", func(t *testing.T) {
+				pendingEvent := deliveryLifecycleEvent("terminalize-pending-" + backend.name)
+				pendingRoute := deliveryLifecycleConformanceRoute(t, "node", "terminal-pending")
+				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, pendingEvent, []events.DeliveryRoute{pendingRoute}, runtimepipelineobligation.ScopeSubscribed)
+				pendingID, err := runtimedelivery.DeliveryID(pendingEvent.ID(), pendingRoute)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := backend.store.TerminalizeRun(ctx, pendingEvent.RunID(), "run_terminal"); err != nil {
+					t.Fatalf("terminalize pending delivery: %v", err)
+				}
+				if got := loadDeliveryHandlerRuleSelectionFact(t, ctx, backend, pendingID); !got.Equal(handlerselection.NotApplicable()) {
+					t.Fatalf("pending terminalization fact = %#v", got)
+				}
+
+				failedEvent := deliveryLifecycleEvent("terminalize-failed-" + backend.name)
+				failedRoute := deliveryLifecycleConformanceRoute(t, "node", "terminal-failed")
+				storetest.CommitSemanticEventWithRoutes(t, ctx, backend.selected, failedEvent, []events.DeliveryRoute{failedRoute}, runtimepipelineobligation.ScopeSubscribed)
+				claimed, err := storetest.ClaimDelivery(ctx, backend.store, failedEvent, failedRoute)
+				if err != nil {
+					t.Fatal(err)
+				}
+				fact := deliveryLifecycleSelectedRuleFact(t, handlerselection.ContextRules, "00000000-0000-4000-8000-000000000107", "preserved")
+				failed, err := backend.store.SettleFailure(ctx, claimed.Claim, runtimedelivery.Settlement{
+					Disposition: runtimedelivery.FailureRetry, Failure: testFailure("retry_before_terminalization"),
+					RetryBase: time.Hour, RuleSelection: fact,
+				})
+				if err != nil || failed.Status != runtimedelivery.StatusFailed {
+					t.Fatalf("settle retry before terminalization = %#v, %v", failed, err)
+				}
+				if _, err := backend.restart.TerminalizeRun(ctx, failedEvent.RunID(), "run_terminal"); err != nil {
+					t.Fatalf("terminalize failed delivery: %v", err)
+				}
+				if got := loadDeliveryHandlerRuleSelectionFact(t, ctx, backend, claimed.Snapshot.DeliveryID); !got.Equal(fact) {
+					t.Fatalf("terminalization replaced prior selection = %#v, want %#v", got, fact)
+				}
 			})
 
 			t.Run("concurrent_claim_and_restart_reclaim_are_fenced", func(t *testing.T) {
@@ -1567,6 +1617,19 @@ func deliveryLifecycleSelectedRuleFact(t testing.TB, context handlerselection.Co
 	return fact
 }
 
+func deliveryLifecycleEvaluationFailedFact(t testing.TB, context handlerselection.Context, elementID, label string) handlerselection.HandlerRuleSelectionFact {
+	t.Helper()
+	ref, err := contractelementidentity.ParseContractElementRef("flows/conformance", elementID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fact, err := handlerselection.EvaluationFailed(context, ref, label)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fact
+}
+
 func mustHandlerSelectionNoMatch(t testing.TB, context handlerselection.Context) handlerselection.HandlerRuleSelectionFact {
 	t.Helper()
 	fact, err := handlerselection.NoMatch(context)
@@ -1591,6 +1654,21 @@ func loadDeliveryHandlerRuleSelectionFact(t testing.TB, ctx context.Context, bac
 		t.Fatalf("hydrate handler rule selection %s: %v", deliveryID, err)
 	}
 	return fact
+}
+
+func assertDeliveryHandlerRuleSelectionMissing(t testing.TB, ctx context.Context, backend deliveryLifecycleConformanceBackend, deliveryID string) {
+	t.Helper()
+	query := `SELECT COUNT(*) FROM event_delivery_handler_rule_selections WHERE delivery_id=$1::uuid`
+	if !backend.postgres {
+		query = `SELECT COUNT(*) FROM event_delivery_handler_rule_selections WHERE delivery_id=?`
+	}
+	var count int
+	if err := backend.db.QueryRowContext(ctx, query, deliveryID).Scan(&count); err != nil {
+		t.Fatalf("count handler rule selection %s: %v", deliveryID, err)
+	}
+	if count != 0 {
+		t.Fatalf("handler rule selection %s count = %d, want 0", deliveryID, count)
+	}
 }
 
 func requireCanonicalDeliveryLifecycleSurface(t *testing.T, ctx context.Context, pg *store.PostgresStore) {

@@ -101,6 +101,56 @@ func TestMintHandlerRuleElementIDsPreflightsWholeTreeBeforeWriting(t *testing.T)
 	}
 }
 
+func TestMintHandlerRuleElementIDsPreflightsEverySingletonFormWithoutPartialWrite(t *testing.T) {
+	root := t.TempDir()
+	goodPath := filepath.Join(root, "a", "nodes.yaml")
+	badPath := filepath.Join(root, "z", "nodes.yaml")
+	if err := os.MkdirAll(filepath.Dir(goodPath), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(badPath), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	good := []byte(`node:
+  event_handlers:
+    activity.event:
+      rules: {activity: {tool: notify}}
+    identity_activity.event:
+      rules: {element_id: 00000000-0000-4000-8000-000000000435, activity: {tool: notify}}
+    presentation.event:
+      rules: {id: display-only, description: presentation}
+`)
+	bad := []byte("node:\n  event_handlers:\n    bad.event:\n      rules: retired-scalar\n")
+	for path, raw := range map[string][]byte{goodPath: good, badPath: bad} {
+		if err := os.WriteFile(path, raw, 0o640); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := MintHandlerRuleElementIDs(root); err == nil {
+		t.Fatal("MintHandlerRuleElementIDs succeeded with hostile sibling file")
+	}
+	if got, err := os.ReadFile(goodPath); err != nil || string(got) != string(good) {
+		t.Fatalf("valid singleton file changed after failed preflight: %v\n%s", err, got)
+	}
+	if err := os.Remove(badPath); err != nil {
+		t.Fatal(err)
+	}
+	result, err := MintHandlerRuleElementIDs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IDsMinted != 2 || result.FilesChanged != 1 {
+		t.Fatalf("singleton mint result = %#v", result)
+	}
+	updated, err := os.ReadFile(goodPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(updated), "element_id:"); got != 3 {
+		t.Fatalf("singleton element IDs = %d, want 3\n%s", got, updated)
+	}
+}
+
 func TestMintHandlerRuleElementIDsRejectsInvalidExistingRowBeforeWriting(t *testing.T) {
 	for _, tc := range []struct {
 		name string

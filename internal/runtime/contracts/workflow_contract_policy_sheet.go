@@ -209,20 +209,11 @@ func validatePolicySheetRows(rules []HandlerRuleEntry, context handlerRuleDecode
 	if context != handlerRuleDecodeContextRules {
 		return fmt.Errorf("POLICY-SHEET-ROW: typed policy-sheet rows are only supported under handler.rules")
 	}
-	seenIDs := map[string]int{}
 	hasSelectionRow := false
 	hasDefault := false
 	caseKeys := map[string]int{}
 	rangesByValue := map[string][]policySheetRangeForValidation{}
 	for idx, rule := range rules {
-		id := strings.TrimSpace(rule.ID)
-		if id == "" {
-			return fmt.Errorf("POLICY-SHEET-ROW: rules[%d] requires stable id when policy-sheet rows are present", idx)
-		}
-		if prev, ok := seenIDs[id]; ok {
-			return fmt.Errorf("POLICY-SHEET-ROW: duplicate stable row id %q at rules[%d] and rules[%d]", id, prev, idx)
-		}
-		seenIDs[id] = idx
 		if strings.EqualFold(strings.TrimSpace(rule.Condition), "else") {
 			hasDefault = true
 		}

@@ -112,11 +112,11 @@ func newManagerDeliveryTestStore(t *testing.T) *managerDeliveryTestStore {
 		`CREATE TABLE event_delivery_handler_rule_selections (
 			delivery_id TEXT PRIMARY KEY REFERENCES event_deliveries(delivery_id),
 			selection_context TEXT NOT NULL CHECK (selection_context IN ('none', 'handler_rules', 'handler_on_complete', 'join_on_complete', 'join_timeout')),
-			disposition TEXT NOT NULL CHECK (disposition IN ('selected', 'no_match', 'not_applicable')),
+			disposition TEXT NOT NULL CHECK (disposition IN ('selected', 'no_match', 'evaluation_failed', 'not_applicable')),
 			package_coordinate TEXT,
 			element_id TEXT,
 			display_label TEXT NOT NULL DEFAULT '',
-			CHECK ((disposition = 'selected' AND selection_context <> 'none' AND NULLIF(TRIM(COALESCE(package_coordinate, '')), '') IS NOT NULL AND element_id IS NOT NULL) OR (disposition = 'no_match' AND selection_context IN ('handler_rules', 'handler_on_complete') AND package_coordinate IS NULL AND element_id IS NULL AND display_label = '') OR (disposition = 'not_applicable' AND selection_context = 'none' AND package_coordinate IS NULL AND element_id IS NULL AND display_label = ''))
+			CHECK ((disposition = 'selected' AND selection_context <> 'none' AND NULLIF(TRIM(COALESCE(package_coordinate, '')), '') IS NOT NULL AND element_id IS NOT NULL) OR (disposition = 'evaluation_failed' AND selection_context IN ('handler_rules', 'handler_on_complete') AND NULLIF(TRIM(COALESCE(package_coordinate, '')), '') IS NOT NULL AND element_id IS NOT NULL) OR (disposition = 'no_match' AND selection_context IN ('handler_rules', 'handler_on_complete') AND package_coordinate IS NULL AND element_id IS NULL AND display_label = '') OR (disposition = 'not_applicable' AND selection_context = 'none' AND package_coordinate IS NULL AND element_id IS NULL AND display_label = ''))
 		)`,
 		`CREATE TABLE event_delivery_attempts (
 			delivery_id TEXT NOT NULL,
