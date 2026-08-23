@@ -117,9 +117,16 @@ func (r telegramPhraseBotLLMRuntime) ContinueManagedSession(ctx context.Context,
 			"text":    "Swarm heard: " + messageText,
 		},
 	}
+	toolOutputAuthority := runtimellm.ToolOutputAuthority{
+		ProviderOperationID: uuid.NewSHA1(uuid.NameSpaceURL, []byte("standing-phrase-bot-provider-operation:"+managedCall.Frame().FrameID)).String(),
+		SettledAt:           time.Date(2026, 8, 23, 0, 0, 0, 0, time.UTC),
+	}
 	return &runtimellm.Response{
-		Message:   runtimellm.Message{Role: "assistant", ToolCalls: []runtimellm.ToolCall{call}},
-		ToolCalls: []runtimellm.ToolCall{call}, SessionID: session.ID, CapabilitySurface: &observed,
+		Message:             runtimellm.Message{Role: "assistant", ToolCalls: []runtimellm.ToolCall{call}},
+		ToolCalls:           []runtimellm.ToolCall{call},
+		SessionID:           session.ID,
+		CapabilitySurface:   &observed,
+		ToolOutputAuthority: &toolOutputAuthority,
 	}, nil
 }
 

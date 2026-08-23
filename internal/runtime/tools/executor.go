@@ -428,7 +428,7 @@ func (e *Executor) execute(ctx context.Context, name string, input any, outputId
 	var out any
 	var err error
 	if outputIdentity != nil {
-		out, err = e.handleEmitToolWithIdentity(dispatchCtx, actor, name, input, outputIdentity.EventID(), outputIdentity.CreatedAt())
+		out, err = e.handleEmitTool(dispatchCtx, actor, name, input, *outputIdentity)
 	} else {
 		out, err = e.dispatchTool(dispatchCtx, actor, name, input)
 	}
