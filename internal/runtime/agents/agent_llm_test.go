@@ -132,6 +132,10 @@ func (r *agentTestRuntimeAdapter) ContinueManagedSession(ctx context.Context, se
 			return nil, observeErr
 		}
 		response.CapabilitySurface = &observed
+		response.ToolOutputAuthority = &llm.ToolOutputAuthority{
+			ProviderOperationID: eventtest.UUID("agent-test-provider-operation:" + observed.ID),
+			SettledAt:           time.Date(2026, 8, 23, 0, 0, 0, 0, time.UTC),
+		}
 	}
 	return response, nil
 }
@@ -424,6 +428,13 @@ func (boardEmitExecutor) Execute(ctx context.Context, name string, input any) (a
 		rec.Append(eventtest.RunCreatingRootIngress("", events.EventType(strings.TrimPrefix(name, "emit_")), "", "", nil, 0, "", "", events.EventEnvelope{}, time.Time{}))
 	}
 	return map[string]any{"ok": true, "name": name, "input": input}, nil
+}
+
+func (executor boardEmitExecutor) ExecuteOutputEvent(ctx context.Context, name string, input any, identity llm.ToolOutputEventIdentity) (any, error) {
+	if err := identity.Validate(); err != nil {
+		return nil, err
+	}
+	return executor.Execute(ctx, name, input)
 }
 
 func (boardEmitExecutor) ToolDefinitionsForActor(models.AgentConfig) []llm.ToolDefinition {

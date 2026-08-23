@@ -243,6 +243,10 @@ func (r *closedReceiverManagedLLM) ContinueManagedSession(ctx context.Context, s
 	response := &llm.Response{
 		Message:           llm.Message{Role: "assistant"},
 		CapabilitySurface: &observed,
+		ToolOutputAuthority: &llm.ToolOutputAuthority{
+			ProviderOperationID: handle.Attempt().OperationID,
+			SettledAt:           time.Now().UTC().Truncate(time.Microsecond),
+		},
 	}
 	if session.AgentID == "upstream-agent" && callCount == 1 {
 		response.ToolCalls = []llm.ToolCall{{

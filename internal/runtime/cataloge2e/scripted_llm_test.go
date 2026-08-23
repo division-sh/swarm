@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
@@ -133,6 +134,12 @@ func (r *scriptedLLMRuntime) ContinueManagedSession(ctx context.Context, session
 			return nil, err
 		}
 		response.CapabilitySurface = &observed
+	}
+	if len(response.ToolCalls) > 0 {
+		response.ToolOutputAuthority = &llm.ToolOutputAuthority{
+			ProviderOperationID: uuid.NewSHA1(uuid.NameSpaceURL, []byte("catalog-scripted-provider-operation:"+frame.FrameID)).String(),
+			SettledAt:           time.Date(2026, 8, 23, 0, 0, 0, 0, time.UTC),
+		}
 	}
 	return &response, nil
 }

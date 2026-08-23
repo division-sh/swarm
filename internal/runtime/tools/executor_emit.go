@@ -16,6 +16,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -24,11 +25,15 @@ type publishRecipientPlanner interface {
 	CheckPublishRecipientPlan(context.Context, events.Event) (runtimebus.PublishRecipientPlan, error)
 }
 
-func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig, toolName string, input any) (any, error) {
-	return e.handleEmitToolWithIdentity(ctx, actor, toolName, input, "", time.Time{})
-}
-
-func (e *Executor) handleEmitToolWithIdentity(ctx context.Context, actor models.AgentConfig, toolName string, input any, eventID string, createdAt time.Time) (any, error) {
+func (e *Executor) handleEmitTool(ctx context.Context, actor models.AgentConfig, toolName string, input any, outputIdentity ...llm.ToolOutputEventIdentity) (any, error) {
+	if len(outputIdentity) > 1 {
+		return nil, failures.New(failures.ClassSchemaInvalid, "tool_output_event_identity_ambiguous", "tool-executor", "handle_emit_tool.identity", nil)
+	}
+	if len(outputIdentity) == 1 {
+		if err := outputIdentity[0].Validate(); err != nil {
+			return nil, failures.Wrap(failures.ClassSchemaInvalid, "tool_output_event_identity_invalid", "tool-executor", "handle_emit_tool.identity", nil, err)
+		}
+	}
 	eventType, eventSchema, ok := e.emitRegistry.EventSchemaForActorTool(actor, toolName)
 	if !ok {
 		err := failures.NewDetail(
@@ -123,6 +128,12 @@ func (e *Executor) handleEmitToolWithIdentity(ctx context.Context, actor models.
 		envelope = events.EnvelopeForSourceRoute(envelope, routingSource.Route())
 	}
 	taskID := asString(payloadMap["task_id"])
+	var eventID string
+	var createdAt time.Time
+	if len(outputIdentity) == 1 {
+		eventID = outputIdentity[0].EventID()
+		createdAt = outputIdentity[0].CreatedAt()
+	}
 	if strings.TrimSpace(eventID) == "" {
 		eventID = uuid.NewString()
 	}
