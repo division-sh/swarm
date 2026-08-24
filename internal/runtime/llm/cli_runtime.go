@@ -317,7 +317,8 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	if err != nil {
 		return nil, err
 	}
-	dispatch := &completionDispatch{handle: attempt, providerModel: providerModel}
+	dispatch := newCompletionDispatch(attempt, "")
+	dispatch.providerModel = providerModel
 	childSessionID := strings.TrimSpace(attempt.Attempt().AttemptID)
 	if childSessionID == "" {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "claude_attempt_identity_missing", "claude-cli-adapter", "prepare_turn", nil)
@@ -401,6 +402,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 				return nil, errors.Join(err, settleErr)
 			}
 		} else {
+			dispatch.markProviderInvocationStarted()
 			turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, nil, false, latency, agentTurnFailure(err, "claude_cli_turn")), nil)
 			state := claudeCompletionFailureState(err)
 			if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableCompletionUsage(usageModel), state, turn.Failure, map[string]any{"stage": "provider_call"}); settleErr != nil {
@@ -421,6 +423,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 		}
 		return nil, err
 	}
+	dispatch.markProviderInvocationStarted()
 	usage, usageErr := claudeCompletionUsageFromRaw(resp.Raw, usageModel)
 	if usageErr != nil {
 		usage = unavailableCompletionUsage(usageModel)

@@ -274,6 +274,67 @@ func TestCompletionPrelaunchFailureDoesNotSpendPostgres(t *testing.T) {
 	proveCompletionPrelaunchFailureDoesNotSpend(t, newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false))
 }
 
+func TestCompletionLaunchBoundaryFailureRemainsAttemptOnlySQLite(t *testing.T) {
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	proveCompletionLaunchBoundaryFailureRemainsAttemptOnly(t, newCompletionSettlementFixture(t, store, store.backend.ConstructionHandle(), true))
+}
+
+func TestCompletionLaunchBoundaryFailureRemainsAttemptOnlyPostgres(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	proveCompletionLaunchBoundaryFailureRemainsAttemptOnly(t, newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false))
+}
+
+func proveCompletionLaunchBoundaryFailureRemainsAttemptOnly(t *testing.T, fixture completionSettlementFixture) {
+	t.Helper()
+	adapters := []string{"anthropic_api", "openai_compatible", "openai_responses", "mock_python"}
+	launchStates := []struct {
+		name            string
+		durablyLaunched bool
+	}{
+		{name: "error_before_commit"},
+		{name: "commit_then_error", durablyLaunched: true},
+	}
+	for _, adapter := range adapters {
+		for _, launchState := range launchStates {
+			t.Run(adapter+"/"+launchState.name, func(t *testing.T) {
+				authority := fixture.authority
+				authority.Target.ID = uuid.NewString()
+				ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.contextFor(authority), "no-provider-invocation:"+adapter+":"+launchState.name)
+				ctx = withManagedCompletionTestSurface(t, ctx, authority, adapter)
+				request := []byte("no-provider-invocation:" + adapter)
+				handle, err := beginManagedCompletionForTest(t, ctx, adapter, request)
+				if err != nil {
+					t.Fatalf("authorize launch-boundary completion: %v", err)
+				}
+				if launchState.durablyLaunched {
+					if err := handle.MarkLaunched(ctx); err != nil {
+						t.Fatalf("commit launch marker before acknowledgement loss: %v", err)
+					}
+				}
+				failureErr := runtimefailures.New(
+					runtimefailures.ClassDependencyUnavailable,
+					"provider_launch_marker_failed",
+					"completion-test",
+					"launch_provider",
+					map[string]any{"launch_rejected": true},
+				)
+				failure, _ := runtimefailures.EnvelopeFromError(failureErr)
+				if err := handle.Settle(ctx, runtimeeffects.StateTerminalFailure, &failure, map[string]any{"launch_rejected": true}); err != nil {
+					t.Fatalf("settle no-invocation attempt: %v", err)
+				}
+				requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateTerminalFailure)
+				requireCompletionRecoveryRows(t, fixture, handle.Attempt().AttemptID, 0, 0, 0)
+				requireCompletionOperationAttemptCount(t, fixture, handle.Attempt().OperationID, 1)
+
+				if _, err := beginManagedCompletionForTest(t, ctx, adapter, request); err == nil {
+					t.Fatal("non-allowlisted provider admitted a retry after proven zero invocation")
+				}
+				requireCompletionOperationAttemptCount(t, fixture, handle.Attempt().OperationID, 1)
+			})
+		}
+	}
+}
+
 func proveCompletionPrelaunchFailureDoesNotSpend(t *testing.T, fixture completionSettlementFixture) {
 	t.Helper()
 	ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "completion-prelaunch-failure")
@@ -654,5 +715,20 @@ func requireCompletionRecoveryRows(t *testing.T, fixture completionSettlementFix
 	}
 	if turns != wantTurns || spend != wantSpend || reservations != wantReservations {
 		t.Fatalf("completion recovery rows turns=%d spend=%d reservations=%d, want %d/%d/%d", turns, spend, reservations, wantTurns, wantSpend, wantReservations)
+	}
+}
+
+func requireCompletionOperationAttemptCount(t *testing.T, fixture completionSettlementFixture, operationID string, want int) {
+	t.Helper()
+	query := `SELECT COUNT(*) FROM runtime_external_effect_attempts WHERE operation_id=?`
+	if !fixture.sqlite {
+		query = `SELECT COUNT(*) FROM runtime_external_effect_attempts WHERE operation_id=$1::uuid`
+	}
+	var got int
+	if err := fixture.db.QueryRow(query, operationID).Scan(&got); err != nil {
+		t.Fatalf("count completion operation attempts: %v", err)
+	}
+	if got != want {
+		t.Fatalf("completion operation attempts = %d, want %d", got, want)
 	}
 }

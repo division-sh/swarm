@@ -25,13 +25,16 @@ type Harness struct {
 	HeartbeatErr          error
 	HeartbeatFailAfter    int
 	MarkErr               error
+	MarkCommitThenErr     bool
 	SettleErr             error
 	SettleOrigin          bool
 	CompletionDisposition runtimeeffects.CompletionSettlementDisposition
 	Heartbeats            map[string]int
 	Attempts              map[string]runtimeeffects.Attempt
 	States                map[string]runtimeeffects.State
+	Settlements           map[string]runtimeeffects.Settlement
 	Completions           map[string]runtimeeffects.CompletionSettlement
+	ProjectedSpend        int
 }
 
 func New() *Harness {
@@ -49,7 +52,8 @@ func New() *Harness {
 	}
 	return &Harness{
 		Token:      runtimeeffects.LifecycleToken{Identity: identity, RuntimeEpoch: 17, AgentID: "effect-test-agent", Generation: 4},
-		Heartbeats: map[string]int{}, Attempts: map[string]runtimeeffects.Attempt{}, States: map[string]runtimeeffects.State{}, Completions: map[string]runtimeeffects.CompletionSettlement{},
+		Heartbeats: map[string]int{}, Attempts: map[string]runtimeeffects.Attempt{}, States: map[string]runtimeeffects.State{},
+		Settlements: map[string]runtimeeffects.Settlement{}, Completions: map[string]runtimeeffects.CompletionSettlement{},
 	}
 }
 
@@ -184,6 +188,9 @@ func (h *Harness) MarkExternalAttemptLaunched(_ context.Context, attempt runtime
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.MarkErr != nil {
+		if h.MarkCommitThenErr && h.States[attempt.AttemptID] == runtimeeffects.StateAuthorized {
+			h.States[attempt.AttemptID] = runtimeeffects.StateLaunched
+		}
 		return h.MarkErr
 	}
 	if h.States[attempt.AttemptID] != runtimeeffects.StateAuthorized {
@@ -219,6 +226,7 @@ func (h *Harness) SettleExternalAttempt(_ context.Context, settlement runtimeeff
 	if _, ok := h.States[settlement.AttemptID]; !ok {
 		return fmt.Errorf("attempt %s is absent", settlement.AttemptID)
 	}
+	h.Settlements[settlement.AttemptID] = settlement
 	h.States[settlement.AttemptID] = settlement.State
 	return nil
 }
@@ -248,6 +256,21 @@ func (h *Harness) completionDisposition() runtimeeffects.CompletionSettlementDis
 }
 
 func (h *Harness) ProjectCommittedCompletionSpend(context.Context, runtimeeffects.CompletionSpendProjection) {
+	h.mu.Lock()
+	h.ProjectedSpend++
+	h.mu.Unlock()
+}
+
+func (h *Harness) CompletionCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.Completions)
+}
+
+func (h *Harness) ProjectedSpendCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.ProjectedSpend
 }
 
 func (h *Harness) StateForAdapter(adapter string) (runtimeeffects.State, bool) {

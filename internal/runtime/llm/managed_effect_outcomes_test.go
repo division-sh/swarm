@@ -7,15 +7,19 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
@@ -27,8 +31,15 @@ type effectRoundTripper struct {
 
 type failingMonitorSink struct{ err error }
 
+type noInvocationRoundTripper struct{ calls *atomic.Int32 }
+
 func (s failingMonitorSink) OpenTurn(context.Context, MonitorTurnMeta) (MonitorTurnWriter, error) {
 	return nil, s.err
+}
+
+func (r noInvocationRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
+	r.calls.Add(1)
+	return nil, errors.New("provider primitive must remain unreachable")
 }
 
 func (r effectRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
@@ -97,6 +108,122 @@ func TestManagedProviderEffectOutcomes(t *testing.T) {
 				t.Fatal("stale provider effect reached its primitive")
 			}
 		})
+	}
+}
+
+func TestManagedProviderLaunchBoundaryFailureSettlesAttemptOnly(t *testing.T) {
+	type transportCase struct {
+		name    string
+		backend string
+		invoke  func(context.Context, llmselection.Profile, llmselection.ResolvedModel, *atomic.Int32) (*completionDispatch, error)
+	}
+	transports := []transportCase{
+		{
+			name: "anthropic", backend: llmselection.BackendAnthropic,
+			invoke: func(ctx context.Context, profile llmselection.Profile, model llmselection.ResolvedModel, calls *atomic.Int32) (*completionDispatch, error) {
+				runtime := &AnthropicAPIRuntime{httpClient: &http.Client{Transport: noInvocationRoundTripper{calls: calls}}, apiURL: "http://unreachable.test", apiKey: "test"}
+				_, _, dispatch, err := runtime.sendAdmittedRequest(ctx, profile, model, []byte(`{"model":"test"}`), managedProviderCallForEffectTest(t, ctx))
+				return dispatch, err
+			},
+		},
+		{
+			name: "openai_compatible", backend: llmselection.BackendOpenAICompatible,
+			invoke: func(ctx context.Context, profile llmselection.Profile, model llmselection.ResolvedModel, calls *atomic.Int32) (*completionDispatch, error) {
+				runtime := &OpenAICompatibleRuntime{httpClient: &http.Client{Transport: noInvocationRoundTripper{calls: calls}}, baseURL: "http://unreachable.test", apiKey: "test"}
+				_, _, dispatch, err := runtime.sendAdmittedRequest(ctx, profile, model, []byte(`{"model":"test"}`), managedProviderCallForEffectTest(t, ctx))
+				return dispatch, err
+			},
+		},
+		{
+			name: "openai_responses", backend: llmselection.BackendOpenAIResponses,
+			invoke: func(ctx context.Context, profile llmselection.Profile, model llmselection.ResolvedModel, calls *atomic.Int32) (*completionDispatch, error) {
+				runtime := &OpenAIResponsesRuntime{httpClient: &http.Client{Transport: noInvocationRoundTripper{calls: calls}}, baseURL: "http://unreachable.test", apiKey: "test"}
+				_, _, dispatch, err := runtime.sendAdmittedRequest(ctx, profile, model, []byte(`{"model":"test"}`), managedProviderCallForEffectTest(t, ctx))
+				return dispatch, err
+			},
+		},
+		{
+			name: "mock", backend: llmselection.BackendMock,
+			invoke: func(ctx context.Context, _ llmselection.Profile, model llmselection.ResolvedModel, calls *atomic.Int32) (*completionDispatch, error) {
+				actor := runtimeactors.AgentConfig{ID: "effect-test-agent", ExecutionMode: runtimeeffects.ExecutionModeMock}
+				_, _, _, dispatch, err := executeMockCompletionWithExecutor(
+					ctx, actor, nil, []byte(`{"round":1}`), model, false, managedProviderCallForEffectTest(t, ctx),
+					func(context.Context, pythonmodule.Request) (pythonmodule.Result, error) {
+						calls.Add(1)
+						return pythonmodule.Result{}, errors.New("provider primitive must remain unreachable")
+					},
+				)
+				return dispatch, err
+			},
+		},
+	}
+	modes := []struct {
+		name      string
+		configure func(*effecttest.Harness)
+	}{
+		{
+			name: "initial_heartbeat_rejected",
+			configure: func(h *effecttest.Harness) {
+				h.HeartbeatErr = errors.New("injected initial heartbeat rejection")
+			},
+		},
+		{
+			name: "launch_marker_error_before_commit",
+			configure: func(h *effecttest.Harness) {
+				h.MarkErr = errors.New("injected launch marker rejection")
+			},
+		},
+		{
+			name: "launch_marker_commit_then_error",
+			configure: func(h *effecttest.Harness) {
+				h.MarkErr = errors.New("injected launch marker acknowledgement loss")
+				h.MarkCommitThenErr = true
+			},
+		},
+	}
+
+	for _, transport := range transports {
+		for _, mode := range modes {
+			t.Run(transport.name+"/"+mode.name, func(t *testing.T) {
+				harness := effecttest.New()
+				mode.configure(harness)
+				ctx := managedEffectHarnessContext(t, harness, "no-invocation-"+transport.name+"-"+mode.name)
+				if transport.backend == llmselection.BackendMock {
+					ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeMock)
+				}
+				ctx = llmTestWorkContext(t, ctx)
+				profile := mustAdmissionProfile(t, transport.backend)
+				model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
+				var calls atomic.Int32
+				dispatch, invokeErr := transport.invoke(ctx, profile, model, &calls)
+				if invokeErr == nil {
+					t.Fatal("launch-boundary failure returned nil")
+				}
+				if calls.Load() != 0 {
+					t.Fatalf("provider primitive invocations = %d, want 0", calls.Load())
+				}
+				if dispatch == nil || dispatch.handle == nil || dispatch.invocation != completionProviderInvocationNotStarted {
+					t.Fatalf("dispatch = %#v, want exact not-started disposition", dispatch)
+				}
+				failure := runtimefailures.FromError(invokeErr, "managed-provider-test", "launch_boundary")
+				if _, err := settleCompletionTurn(
+					ctx, dispatch, dispatch.handle.Attempt().Authority.Target.ID, AgentTurnRecord{}, nil, profile,
+					unavailableCompletionUsage(model.ConcreteModel), runtimeeffects.StateTerminalFailure, &failure.Failure,
+					map[string]any{"stage": "launch_boundary"},
+				); err != nil {
+					t.Fatalf("settle no-invocation attempt: %v", err)
+				}
+				if err := harness.RequireState(dispatch.handle.Attempt().Adapter, runtimeeffects.StateTerminalFailure); err != nil {
+					t.Fatal(err)
+				}
+				if got := harness.CompletionCount(); got != 0 {
+					t.Fatalf("turn-bearing settlements = %d, want 0", got)
+				}
+				if got := harness.ProjectedSpendCount(); got != 0 {
+					t.Fatalf("projected spend settlements = %d, want 0", got)
+				}
+			})
+		}
 	}
 }
 

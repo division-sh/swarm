@@ -289,13 +289,20 @@ type mockUsage struct {
 	OutputTokens int `json:"output_tokens"`
 }
 
+type mockCompletionExecutor func(context.Context, pythonmodule.Request) (pythonmodule.Result, error)
+
 func executeMockCompletion(ctx context.Context, actor runtimeactors.AgentConfig, tools []ToolDefinition, request []byte, providerModel llmselection.ResolvedModel, postToolRound bool, managed *managedProviderCall) (*Response, []byte, runtimeeffects.CompletionUsage, *completionDispatch, error) {
+	return executeMockCompletionWithExecutor(ctx, actor, tools, request, providerModel, postToolRound, managed, pythonmodule.Execute)
+}
+
+func executeMockCompletionWithExecutor(ctx context.Context, actor runtimeactors.AgentConfig, tools []ToolDefinition, request []byte, providerModel llmselection.ResolvedModel, postToolRound bool, managed *managedProviderCall, execute mockCompletionExecutor) (*Response, []byte, runtimeeffects.CompletionUsage, *completionDispatch, error) {
 	model := strings.TrimSpace(providerModel.ConcreteModel)
 	attempt, err := beginProviderCompletion(ctx, "mock_python", request, managed)
 	if err != nil {
 		return nil, nil, estimatedMockUsage(request, nil, model), nil, err
 	}
-	dispatch := &completionDispatch{handle: attempt, state: runtimeeffects.StateTerminalFailure, providerModel: providerModel}
+	dispatch := newCompletionDispatch(attempt, runtimeeffects.StateTerminalFailure)
+	dispatch.providerModel = providerModel
 	heartbeatCtx, heartbeat, err := startCompletionAttemptHeartbeat(ctx, attempt)
 	if err != nil {
 		return nil, nil, estimatedMockUsage(request, nil, model), dispatch, err
@@ -303,7 +310,11 @@ func executeMockCompletion(ctx context.Context, actor runtimeactors.AgentConfig,
 	if err := attempt.MarkLaunched(heartbeatCtx); err != nil {
 		return nil, nil, estimatedMockUsage(request, nil, model), dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
-	result, err := pythonmodule.Execute(heartbeatCtx, pythonmodule.Request{
+	if execute == nil {
+		return nil, nil, estimatedMockUsage(request, nil, model), dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "mock_provider_executor_missing", "mock-python-adapter", "execute_completion", nil))
+	}
+	dispatch.markProviderInvocationStarted()
+	result, err := execute(heartbeatCtx, pythonmodule.Request{
 		ModuleID: "agent.mock." + actor.ID, RowID: actor.Mock.SourcePath, Digest: actor.Mock.Digest,
 		Entry: mockperformance.EntryHandle, Source: actor.Mock.Source, Input: request,
 		Fuel: mockperformance.ExecutionFuel, MemoryPages: mockperformance.ExecutionMemoryPages, OutputBytes: mockperformance.ExecutionOutputBytes,

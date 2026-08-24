@@ -262,6 +262,8 @@ typed-process-local	callback-type	typed	internal/runtime/lifecycleprobe/lifecycl
 typed-process-local	callback-type	typed	internal/runtime/llm/cli_runtime.go	(*github.com/division-sh/swarm/internal/runtime/llm.ClaudeCLIRuntime).admitProviderDispatch	result:#1	func()
 typed-process-local	callback-type	typed	internal/runtime/llm/cli_runtime.go	ClaudeCLIRuntime	field:execWorkspaceFn	func(ctx context.Context, target *github.com/division-sh/swarm/internal/runtime/workspace.Target, stdin string, args ...string) ([]byte, []byte, int, error)
 typed-process-local	callback-type	typed	internal/runtime/llm/completion_authority.go	completionAttemptHeartbeat	field:cancel	context.CancelCauseFunc
+typed-process-local	callback-type	typed	internal/runtime/llm/mock_runtime.go	executeMockCompletionWithExecutor	param:execute	github.com/division-sh/swarm/internal/runtime/llm.mockCompletionExecutor
+typed-process-local	callback-type	typed	internal/runtime/llm/mock_runtime.go	mockCompletionExecutor	named-function-type	func(context.Context, github.com/division-sh/swarm/internal/runtime/pythonmodule.Request) (github.com/division-sh/swarm/internal/runtime/pythonmodule.Result, error)
 typed-process-local	callback-type	typed	internal/runtime/llm/provider_admission.go	(*github.com/division-sh/swarm/internal/runtime/llm.ProviderAdmissionRegistry).Admit	result:#1	func()
 typed-process-local	callback-type	typed	internal/runtime/llm/provider_admission.go	(*github.com/division-sh/swarm/internal/runtime/llm.llmProviderAdmissionController).Admit	result:#1	func()
 typed-process-local	callback-type	typed	internal/runtime/llm/provider_admission.go	(*github.com/division-sh/swarm/internal/runtime/llm.llmProviderAdmissionController).acquireConcurrency	result:#1	func()
