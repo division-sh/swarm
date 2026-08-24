@@ -52,6 +52,9 @@ func (d *ToolDispatcher) Dispatch(ctx context.Context, actor models.AgentConfig,
 		return nil, fmt.Errorf("tool dispatcher is not configured")
 	}
 	name = normalizeNativeToolName(name)
+	if err := hitlIdentityExecutionError(name); err != nil {
+		return nil, err
+	}
 	if toolKindPolicy(name) == toolcapabilities.KindEmit {
 		if d.emitHandler == nil {
 			return nil, fmt.Errorf("emit tool handler is not configured")

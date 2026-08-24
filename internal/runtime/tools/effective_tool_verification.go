@@ -2,6 +2,7 @@ package tools
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
@@ -20,6 +21,22 @@ type ConfiguredToolFinding struct {
 // deliberately insufficient evidence.
 func ValidateConfiguredToolFulfillability(source semanticview.Source, discovered map[string]runtimemcp.DiscoveredTool) []ConfiguredToolFinding {
 	var findings []ConfiguredToolFinding
+	for _, err := range ValidateHITLIdentityLifecycleReferences(source) {
+		findings = append(findings, ConfiguredToolFinding{Reason: err.Error()})
+	}
+	discoveredNames := make([]string, 0, len(discovered))
+	for name := range discovered {
+		discoveredNames = append(discoveredNames, name)
+	}
+	sort.Strings(discoveredNames)
+	for _, name := range discoveredNames {
+		if err := hitlIdentityDefinitionError(name, "discovered MCP tool "+strings.TrimSpace(name)); err != nil {
+			findings = append(findings, ConfiguredToolFinding{ToolName: strings.TrimSpace(name), Reason: err.Error()})
+		}
+	}
+	if len(findings) > 0 {
+		return findings
+	}
 	for _, declaration := range semanticview.AgentDeclarations(source) {
 		plan, err := semanticview.ScopedAgentNamePlan(source, declaration)
 		if err != nil {
@@ -46,8 +63,8 @@ func ValidateConfiguredToolFulfillability(source semanticview.Source, discovered
 			if name == "" || IsAgentRequiredMCPToolReference(source, declaration, name) {
 				continue
 			}
-			if isWithheldAgentMessage(name) {
-				findings = append(findings, ConfiguredToolFinding{AgentID: plan.AgentID, ToolName: name, Reason: agentMessageUnavailableTeaching})
+			if err := hitlIdentityReferenceError(name, "configured tool"); err != nil {
+				findings = append(findings, ConfiguredToolFinding{AgentID: plan.AgentID, ToolName: name, Reason: err.Error()})
 				continue
 			}
 			if _, ok := candidates[name]; !ok {

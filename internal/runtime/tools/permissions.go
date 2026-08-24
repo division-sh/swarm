@@ -49,6 +49,10 @@ func ValidateAgentPermissions(source semanticview.Source) (int, []error) {
 	agents, errs := scopedAgentEntries(source)
 	known := knownPermissionNames(source)
 	errs = append(errs, ValidateRetiredDynamicAgentToolReferences(source)...)
+	if lifecycleErrors := ValidateHITLIdentityLifecycleReferences(source); len(lifecycleErrors) > 0 {
+		errs = append(errs, lifecycleErrors...)
+		return len(agents), errs
+	}
 	for _, agent := range agents {
 		policy := agent.policy
 		if len(policy.Values) == 0 && source != nil {
@@ -133,7 +137,17 @@ func resolveAgentPermissionsFromPolicy(entry runtimecontracts.AgentRegistryEntry
 		if !ok {
 			return nil, fmt.Errorf("unknown permissions_bundle %q", bundleName)
 		}
+		for _, permission := range bundlePerms {
+			if err := hitlIdentityReferenceError(permission, fmt.Sprintf("permission_bundles.%s.permissions", bundleName)); err != nil {
+				return nil, err
+			}
+		}
 		perms = append(perms, bundlePerms...)
+	}
+	for _, permission := range entry.Permissions {
+		if err := hitlIdentityReferenceError(permission, "permissions"); err != nil {
+			return nil, err
+		}
 	}
 	perms = append(perms, entry.Permissions...)
 	return dedupePermissionList(perms), nil

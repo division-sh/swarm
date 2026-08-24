@@ -22,12 +22,7 @@ func TestHITLSourceBoundaryRetiresOldInterpreters(t *testing.T) {
 		t.Fatal("resolve current test file")
 	}
 	runtimeRoot := filepath.Clean(filepath.Join(filepath.Dir(currentFile), ".."))
-	allowedAgentMessageFiles := map[string]struct{}{
-		"effective_tool_verification.go": {},
-		"hitl_tools.go":                  {},
-		"registry.go":                    {},
-		"tool_capability_policy.go":      {},
-	}
+	const lifecycleOwnerFile = "hitl_tools.go"
 
 	err := filepath.WalkDir(runtimeRoot, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
@@ -51,12 +46,9 @@ func TestHITLSourceBoundaryRetiresOldInterpreters(t *testing.T) {
 					t.Errorf("unquote %s: %v", path, unquoteErr)
 					return true
 				}
-				if literal == "mailbox_send" || literal == "human_task_request" {
-					t.Errorf("%s restores retired HITL tool literal %q", path, literal)
-				}
-				if literal == "agent_message" {
-					if _, allowed := allowedAgentMessageFiles[filepath.Base(path)]; !allowed {
-						t.Errorf("%s restores agent_message outside the fail-closed owner", path)
+				if literal == "mailbox_send" || literal == "human_task_request" || literal == "agent_message" {
+					if filepath.Base(path) != lifecycleOwnerFile {
+						t.Errorf("%s restores HITL identity %q outside the lifecycle owner", path, literal)
 					}
 				}
 			case *ast.FuncDecl:

@@ -1,6 +1,13 @@
 package tools
 
-import "strings"
+import (
+	"fmt"
+	"sort"
+	"strings"
+
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+)
 
 const (
 	NotifyHumanToolName        = "notify_human"
@@ -10,6 +17,151 @@ const (
 )
 
 const agentMessageUnavailableTeaching = "not available: agent-to-agent messaging ships with typed recipient authority (#2154)"
+
+type hitlIdentityLifecycle uint8
+
+const (
+	hitlIdentityActive hitlIdentityLifecycle = iota + 1
+	hitlIdentityWithheld
+	hitlIdentityRetired
+)
+
+type hitlIdentityLifecycleDescriptor struct {
+	name        string
+	lifecycle   hitlIdentityLifecycle
+	replacement string
+}
+
+func hitlIdentityLifecycleForName(name string) (hitlIdentityLifecycleDescriptor, bool) {
+	switch strings.TrimSpace(name) {
+	case NotifyHumanToolName:
+		return hitlIdentityLifecycleDescriptor{name: NotifyHumanToolName, lifecycle: hitlIdentityActive}, true
+	case AskHumanToolName:
+		return hitlIdentityLifecycleDescriptor{name: AskHumanToolName, lifecycle: hitlIdentityActive}, true
+	case WithheldAgentMessageTool:
+		return hitlIdentityLifecycleDescriptor{name: WithheldAgentMessageTool, lifecycle: hitlIdentityWithheld}, true
+	case "mailbox_send":
+		return hitlIdentityLifecycleDescriptor{name: "mailbox_send", lifecycle: hitlIdentityRetired, replacement: NotifyHumanToolName}, true
+	case "human_task_request":
+		return hitlIdentityLifecycleDescriptor{name: "human_task_request", lifecycle: hitlIdentityRetired, replacement: AskHumanToolName}, true
+	default:
+		return hitlIdentityLifecycleDescriptor{}, false
+	}
+}
+
+func hitlIdentityReferenceError(name, location string) error {
+	descriptor, ok := hitlIdentityLifecycleForName(name)
+	if !ok || descriptor.lifecycle == hitlIdentityActive {
+		return nil
+	}
+	location = strings.TrimSpace(location)
+	if location == "" {
+		location = "tool reference"
+	}
+	switch descriptor.lifecycle {
+	case hitlIdentityWithheld:
+		return fmt.Errorf("%s: tool %s %s", location, descriptor.name, agentMessageUnavailableTeaching)
+	case hitlIdentityRetired:
+		return fmt.Errorf("%s: RETIRED: %s is unsupported; use %s", location, descriptor.name, descriptor.replacement)
+	default:
+		return nil
+	}
+}
+
+func hitlIdentityDefinitionError(name, location string) error {
+	descriptor, ok := hitlIdentityLifecycleForName(name)
+	if !ok {
+		return nil
+	}
+	if descriptor.lifecycle != hitlIdentityActive {
+		return hitlIdentityReferenceError(name, location)
+	}
+	return fmt.Errorf("%s: tool %s is owned by the platform HITL contract and cannot be redefined", strings.TrimSpace(location), descriptor.name)
+}
+
+func hitlIdentityMergeError(name, owner string, canonicalPlatformBuiltin bool) error {
+	descriptor, ok := hitlIdentityLifecycleForName(name)
+	if !ok {
+		return nil
+	}
+	if descriptor.lifecycle != hitlIdentityActive {
+		return hitlIdentityReferenceError(name, strings.TrimSpace(owner))
+	}
+	if canonicalPlatformBuiltin {
+		return nil
+	}
+	return fmt.Errorf("tool %s is owned by the platform HITL contract and cannot be redefined by %s", descriptor.name, strings.TrimSpace(owner))
+}
+
+func hitlIdentityExecutionError(name string) error {
+	return hitlIdentityReferenceError(name, "tool execution")
+}
+
+// ValidateHITLIdentityLifecycleReferences rejects declarations and references
+// from every authored scope, including scopes with no current agent.
+func ValidateHITLIdentityLifecycleReferences(source semanticview.Source) []error {
+	if source == nil {
+		return nil
+	}
+	type authoredScope struct {
+		label  string
+		tools  map[string]runtimecontracts.ToolSchemaEntry
+		policy runtimecontracts.PolicyDocument
+	}
+	scopes := []authoredScope{{label: "root", tools: source.ToolEntries(), policy: source.ResolvedPolicyForFlow("")}}
+	for _, project := range semanticview.ProjectScopes(source) {
+		scopes = append(scopes, authoredScope{
+			label:  "project " + strings.TrimSpace(project.Key),
+			tools:  project.Tools,
+			policy: project.Policy,
+		})
+	}
+	for _, flow := range semanticview.FlowScopes(source) {
+		scopes = append(scopes, authoredScope{
+			label:  "flow " + strings.TrimSpace(flow.ID),
+			tools:  flow.Tools,
+			policy: flow.Policy,
+		})
+	}
+
+	errs := make([]error, 0)
+	seen := map[string]struct{}{}
+	add := func(err error) {
+		if err == nil {
+			return
+		}
+		key := err.Error()
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		errs = append(errs, err)
+	}
+	for _, declaration := range semanticview.AgentDeclarations(source) {
+		label := declaration.Label(true)
+		if strings.TrimSpace(declaration.ScopeKind) == "" {
+			label = "root agent " + strings.TrimSpace(declaration.LocalID)
+		}
+		for _, name := range declaration.Entry.ConfiguredTools() {
+			add(hitlIdentityReferenceError(name, label+" tools"))
+		}
+		for _, name := range declaration.Entry.Permissions {
+			add(hitlIdentityReferenceError(name, label+" permissions"))
+		}
+	}
+	for _, scope := range scopes {
+		for name := range scope.tools {
+			add(hitlIdentityDefinitionError(name, scope.label+" tool entry"))
+		}
+		for bundle, names := range permissionBundles(scope.policy) {
+			for _, name := range names {
+				add(hitlIdentityReferenceError(name, fmt.Sprintf("%s permission_bundles.%s.permissions", scope.label, bundle)))
+			}
+		}
+	}
+	sort.Slice(errs, func(i, j int) bool { return errs[i].Error() < errs[j].Error() })
+	return errs
+}
 
 type hitlGrantKind uint8
 
@@ -55,10 +207,6 @@ func hitlToolDescriptorForName(name string) (hitlToolDescriptor, bool) {
 		}
 	}
 	return hitlToolDescriptor{}, false
-}
-
-func isWithheldAgentMessage(name string) bool {
-	return strings.TrimSpace(name) == WithheldAgentMessageTool
 }
 
 func hitlRuntimeContractSchemas() map[string]builtinToolDraft {

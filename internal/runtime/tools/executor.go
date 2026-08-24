@@ -389,6 +389,10 @@ func (e *Executor) Execute(ctx context.Context, name string, input any) (any, er
 		e.emitToolExecutionEvent(ctx, models.AgentConfig{}, name, input, nil, err, 0, "context")
 		return nil, err
 	}
+	if err := hitlIdentityExecutionError(name); err != nil {
+		e.emitToolExecutionEvent(ctx, actor, name, input, nil, err, 0, "admission")
+		return nil, err
+	}
 	if err := e.authorizeToolUsage(ctx, actor, name); err != nil {
 		e.emitToolExecutionEvent(ctx, actor, name, input, nil, err, 0, "authorize")
 		return nil, err
