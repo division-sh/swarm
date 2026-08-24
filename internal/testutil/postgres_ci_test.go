@@ -46,7 +46,7 @@ func TestCIPostgresJobsShareOwnedRunner(t *testing.T) {
 		}
 		hasRunner := false
 		for _, step := range job.Steps {
-			hasRunner = hasRunner || strings.Contains(step.Run, "go run ./cmd/swarm-test-postgres -- go test")
+			hasRunner = hasRunner || strings.Contains(step.Run, "go run ./cmd/swarm-test --")
 			if strings.Contains(step.Run, "start-postgres-ci.sh") || strings.Contains(step.Run, "docker run") || strings.Contains(step.Run, "docker rm") {
 				t.Fatalf("job %s retains a competing Docker lifecycle in step %q", jobName, step.Name)
 			}
@@ -57,6 +57,28 @@ func TestCIPostgresJobsShareOwnedRunner(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "internal", "testutil", "start-postgres-ci.sh")); !os.IsNotExist(err) {
 		t.Fatalf("legacy CI launcher survives: %v", err)
+	}
+}
+
+func TestCanonicalTestRunnerHasNoRemovedBinaryAlias(t *testing.T) {
+	root := testRepoRoot(t)
+	newPath := filepath.Join(root, "cmd", "swarm-test", "main.go")
+	if _, err := os.Stat(newPath); err != nil {
+		t.Fatalf("canonical test runner is missing: %v", err)
+	}
+	oldRel := filepath.Join("cmd", "swarm-test-"+"postgres", "main.go")
+	if _, err := os.Stat(filepath.Join(root, oldRel)); !os.IsNotExist(err) {
+		t.Fatalf("removed test runner alias survives: %v", err)
+	}
+	oldReference := filepath.ToSlash(oldRel)
+	for _, rel := range []string{"README.md", "CONTRIBUTING.md", ".github/workflows/ci.yml", "internal/testutil/POSTGRES.md"} {
+		raw, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), oldReference) {
+			t.Fatalf("removed binary path survives in %s", rel)
+		}
 	}
 }
 
@@ -196,7 +218,7 @@ func TestPostgresContributorGuideIsCanonicalAndQuarantined(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read README.md: %v", err)
 	}
-	const runnerCommand = "go run ./cmd/swarm-test-postgres -- go test ./..."
+	const runnerCommand = "go run ./cmd/swarm-test"
 	if !strings.Contains(string(readme), runnerCommand) || !strings.Contains(string(contributing), runnerCommand) {
 		t.Fatal("README and CONTRIBUTING must consume the canonical Postgres runner")
 	}

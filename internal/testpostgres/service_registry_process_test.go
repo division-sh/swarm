@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -27,18 +28,19 @@ func TestCreatorFenceSurvivesRunnerDeathUntilTerminalHandoff(t *testing.T) {
 	}
 	dockerBin := filepath.Join(root, "docker")
 	writeFakeDocker(t, dockerBin, python, dockerState)
-	runner := filepath.Join(root, "swarm-test-postgres")
+	runner := filepath.Join(root, "swarm-test")
 	_, thisFile, _, _ := runtime.Caller(0)
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
-	build := exec.Command("go", "build", "-o", runner, "./cmd/swarm-test-postgres")
+	build := exec.Command("go", "build", "-o", runner, "./cmd/swarm-test")
 	build.Dir = repoRoot
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build runner: %v\n%s", err, out)
 	}
 
 	stateHome := filepath.Join(root, "state-home")
-	run := exec.Command(runner, "--", "true")
-	run.Env = append(os.Environ(), "PATH="+root+string(os.PathListSeparator)+os.Getenv("PATH"), "XDG_STATE_HOME="+stateHome)
+	run := exec.Command(runner, "--", "./internal/testpostgres", "-run", "^TestRunCapacityFromEnvironment$", "-count=1")
+	run.Dir = repoRoot
+	run.Env = append(withoutPostgresConnectionEnv(os.Environ()), "PATH="+root+string(os.PathListSeparator)+os.Getenv("PATH"), "XDG_STATE_HOME="+stateHome)
 	if out, err := os.Create(filepath.Join(root, "runner.log")); err != nil {
 		t.Fatal(err)
 	} else {
@@ -85,7 +87,7 @@ func TestCreatorFenceSurvivesRunnerDeathUntilTerminalHandoff(t *testing.T) {
 	}
 }
 
-func TestServiceRegistryConcurrentLiveRunnersRemainUntouched(t *testing.T) {
+func TestSwarmTestDockerRunnersQueueBeforeSecondProvision(t *testing.T) {
 	docker, err := exec.LookPath("docker")
 	if err != nil {
 		t.Skip("Docker is required for the concurrent supported-path proof")
@@ -95,22 +97,21 @@ func TestServiceRegistryConcurrentLiveRunnersRemainUntouched(t *testing.T) {
 		t.Skipf("Docker daemon is unavailable: %v (%s)", err, strings.TrimSpace(string(output)))
 	}
 	root := t.TempDir()
-	runner := filepath.Join(root, "swarm-test-postgres")
+	runner := filepath.Join(root, "swarm-test")
 	_, thisFile, _, _ := runtime.Caller(0)
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
-	build := exec.Command("go", "build", "-o", runner, "./cmd/swarm-test-postgres")
+	build := exec.Command("go", "build", "-o", runner, "./cmd/swarm-test")
 	build.Dir = repoRoot
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build runner: %v\n%s", err, output)
 	}
-	blocker := filepath.Join(root, "block-child")
-	if err := os.WriteFile(blocker, []byte("#!/bin/sh\nset -eu\nprintf '%s\\n' \"$SWARM_TEST_POSTGRES_DSN\" > \"$1.dsn\"\ntouch \"$1.started\"\nwhile [ ! -f \"$1.release\" ]; do sleep .02; done\n"), 0o700); err != nil {
+	goBin := filepath.Join(root, "go")
+	if err := os.WriteFile(goBin, []byte("#!/bin/sh\nset -eu\ntest \"$1\" = test\nprintf '%s\\n' \"$SWARM_TEST_POSTGRES_DSN\" > \"$SWARM_TEST_PROCESS_PREFIX.dsn\"\ntouch \"$SWARM_TEST_PROCESS_PREFIX.started\"\nwhile [ ! -f \"$SWARM_TEST_PROCESS_PREFIX.release\" ]; do sleep .02; done\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	registry, err := DefaultServiceRegistry()
-	if err != nil {
-		t.Fatal(err)
-	}
+	stateHome := filepath.Join(root, "state-home")
+	stateRoot := filepath.Join(stateHome, "swarm", "test-postgres")
+	registry := NewServiceRegistry(stateRoot, docker)
 	if err := registry.initialize(); err != nil {
 		t.Fatal(err)
 	}
@@ -120,8 +121,12 @@ func TestServiceRegistryConcurrentLiveRunnersRemainUntouched(t *testing.T) {
 	finished := make([]bool, len(prefixes))
 	logPaths := make([]string, 0, len(prefixes))
 	for index, prefix := range prefixes {
-		command := exec.Command(runner, "--", blocker, prefix)
-		command.Env = withoutPostgresConnectionEnv(os.Environ())
+		command := exec.Command(runner, "--", "./internal/testpostgres", "-run", "^TestRunCapacityFromEnvironment$", "-count=1")
+		command.Env = append(withoutPostgresConnectionEnv(os.Environ()),
+			"PATH="+root+string(os.PathListSeparator)+os.Getenv("PATH"),
+			"XDG_STATE_HOME="+stateHome,
+			"SWARM_TEST_PROCESS_PREFIX="+prefix,
+		)
 		logPath := filepath.Join(root, fmt.Sprintf("runner-%d.log", index))
 		logPaths = append(logPaths, logPath)
 		logFile, err := os.Create(logPath)
@@ -137,6 +142,18 @@ func TestServiceRegistryConcurrentLiveRunnersRemainUntouched(t *testing.T) {
 		result := make(chan error, 1)
 		done = append(done, result)
 		go func() { result <- command.Wait() }()
+		if index == 0 {
+			waitForRunnerPath(t, prefix+".started", done[index], logPaths, 2*time.Minute)
+		} else {
+			waitForWaitingRuns(t, NewRunAdmission(stateRoot, nil), 1)
+			if _, err := os.Stat(prefix + ".started"); !os.IsNotExist(err) {
+				t.Fatalf("second child started before admission: %v", err)
+			}
+			doc, err := registry.loadRegistry()
+			if err != nil || len(doc.Services) != 1 {
+				t.Fatalf("services while second queued = %d err=%v, want one", len(doc.Services), err)
+			}
+		}
 	}
 	defer func() {
 		for _, prefix := range prefixes {
@@ -153,21 +170,6 @@ func TestServiceRegistryConcurrentLiveRunnersRemainUntouched(t *testing.T) {
 		}
 		_ = registry.Reconcile(context.Background())
 	}()
-	for index, prefix := range prefixes {
-		waitForRunnerPath(t, prefix+".started", done[index], logPaths, 2*time.Minute)
-	}
-	records := make([]ServiceRecord, 0, len(prefixes))
-	for _, prefix := range prefixes {
-		record := waitForRunnerServiceRecord(t, registry, prefix+".dsn", 2*time.Minute)
-		if _, err := registry.inspectExact(context.Background(), record); err != nil {
-			t.Fatalf("live runner %s lacks exact container identity: %v", record.LeaseID, err)
-		}
-		records = append(records, record)
-	}
-	if records[0].LeaseID == records[1].LeaseID {
-		t.Fatalf("concurrent runners resolved to the same lease %s", records[0].LeaseID)
-	}
-
 	if err := os.WriteFile(prefixes[0]+".release", []byte("release\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -175,16 +177,10 @@ func TestServiceRegistryConcurrentLiveRunnersRemainUntouched(t *testing.T) {
 		t.Fatalf("first runner: %v", err)
 	}
 	finished[0] = true
-	waitForServiceRecordAbsent(t, registry, records[0].LeaseID, time.Minute)
-	remaining, err := registry.record(records[1].LeaseID)
-	if err != nil {
-		t.Fatalf("second runner record was disturbed by first teardown: %v", err)
-	}
-	if remaining.State != ServiceChildRunning {
-		t.Fatalf("second runner state after first teardown = %q, want %q", remaining.State, ServiceChildRunning)
-	}
-	if _, err := registry.inspectExact(context.Background(), remaining); err != nil {
-		t.Fatalf("second runner was disturbed by first teardown: %v", err)
+	waitForRunnerPath(t, prefixes[1]+".started", done[1], logPaths, 2*time.Minute)
+	doc, err := registry.loadRegistry()
+	if err != nil || len(doc.Services) != 1 {
+		t.Fatalf("services after FIFO handoff = %d err=%v, want one", len(doc.Services), err)
 	}
 
 	if err := os.WriteFile(prefixes[1]+".release", []byte("release\n"), 0o600); err != nil {
@@ -194,7 +190,22 @@ func TestServiceRegistryConcurrentLiveRunnersRemainUntouched(t *testing.T) {
 		t.Fatalf("second runner: %v", err)
 	}
 	finished[1] = true
-	waitForServiceRecordAbsent(t, registry, records[1].LeaseID, time.Minute)
+}
+
+func TestSwarmTestProcessFixture(t *testing.T) {
+	if os.Getenv("SWARM_TEST_PROCESS_FIXTURE_FAIL") == "1" {
+		t.Fatal("requested child failure")
+	}
+	pidPath := os.Getenv("SWARM_TEST_PROCESS_FIXTURE_PID")
+	if pidPath == "" {
+		return
+	}
+	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		time.Sleep(time.Hour)
+	}
 }
 
 func waitForRunnerPath(t *testing.T, path string, result <-chan error, logs []string, timeout time.Duration) {
@@ -365,7 +376,9 @@ func waitForPath(t *testing.T, path string, timeout time.Duration) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("timed out waiting for %s", path)
+	log, _ := os.ReadFile(filepath.Join(filepath.Dir(filepath.Dir(path)), "runner.log"))
+	commands, _ := os.ReadFile(filepath.Join(filepath.Dir(path), "commands.log"))
+	t.Fatalf("timed out waiting for %s: runner_log=%s docker_commands=%s", path, log, commands)
 }
 
 func waitForSingleServiceState(t *testing.T, registry *ServiceRegistry, state ServiceState, timeout time.Duration) ServiceRecord {

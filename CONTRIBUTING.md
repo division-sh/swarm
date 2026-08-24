@@ -28,7 +28,7 @@ command it reports:
 go build ./cmd/swarm
 go run ./cmd/swarm-test-changed
 go run ./cmd/swarm-test-changed -dry-run
-go run ./cmd/swarm-test-postgres -- go test ./...
+go run ./cmd/swarm-test
 go run ./cmd/swarm-openrpc-gen --check
 ```
 
@@ -37,14 +37,21 @@ named package families required by the touched surface; CI remains responsible
 for the full-truth push/manual/scheduled runs. Do not habitually force
 `-count=1` for every local iteration because it defeats Go's local test cache.
 High-risk semantic/runtime migrations still require full local
-`go run ./cmd/swarm-test-postgres -- go test ./... -count=1` when the issue
+`go run ./cmd/swarm-test -- -count=1 ./...` when the issue
 gate or reviewer asks for it.
 
 Postgres-backed tests should use the supported host setup in
 [internal/testutil/POSTGRES.md](internal/testutil/POSTGRES.md). Keep the test
-DSN invocation-scoped. For a disposable Docker-backed full suite, use the
-canonical `swarm-test-postgres` runner shown above; package tests never launch
+DSN invocation-scoped. Whole-suite and coordinated shared-host runs must use
+the canonical `swarm-test` runner shown above. Focused direct `go test ./pkg`
+remains the expected small-blast-radius development loop. For a disposable
+Docker-backed suite, omit `SWARM_TEST_POSTGRES_DSN`; package tests never launch
 Docker directly.
+
+`swarm-test` is single-flight per host/account by default. Deliberate local
+experiments may set `SWARM_TEST_RUN_SLOTS` to one positive integer, but every
+live wrapper must agree on that value and capacities above one carry no
+reliability or performance guarantee.
 
 If you change API/spec authority, update the authoritative root artifact in the
 same pull request as the implementation that makes it true.

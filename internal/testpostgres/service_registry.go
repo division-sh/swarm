@@ -82,11 +82,12 @@ func (d commandDocker) CombinedOutput(ctx context.Context, args ...string) ([]by
 }
 
 type Service struct {
-	registry   *ServiceRegistry
-	record     ServiceRecord
-	lease      *fileLock
-	Connection Connection
-	closed     bool
+	registry       *ServiceRegistry
+	record         ServiceRecord
+	lease          *fileLock
+	leaseInherited bool
+	Connection     Connection
+	closed         bool
 }
 
 type dockerInspect struct {
@@ -261,11 +262,38 @@ func (s *Service) MarkChildRunning() error {
 	return nil
 }
 
+// InheritLeaseTo keeps the exact Docker service lease alive in the child.
+func (s *Service) InheritLeaseTo(cmd *exec.Cmd) error {
+	if s == nil || s.closed || s.lease == nil {
+		return fmt.Errorf("active Postgres service lease is required")
+	}
+	if err := inheritFileLock(cmd, s.lease); err != nil {
+		return err
+	}
+	s.leaseInherited = true
+	return nil
+}
+
 func (s *Service) Close(ctx context.Context) error {
 	if s == nil || s.closed {
 		return nil
 	}
 	s.closed = true
+	if s.leaseInherited && s.lease != nil {
+		if err := s.lease.Drop(); err != nil {
+			return err
+		}
+		s.lease = nil
+		lease, acquired, err := acquireFileLock(s.registry.leasePath(s.record.LeaseID), true)
+		if err != nil {
+			return err
+		}
+		if !acquired {
+			return fmt.Errorf("Postgres test work still owns service lease %s after the supervisor child exited; reconciliation deferred", s.record.LeaseID)
+		}
+		s.lease = lease
+		s.leaseInherited = false
+	}
 	var errs []error
 	retired := false
 	if err := s.registry.initialize(); err != nil {

@@ -209,7 +209,7 @@ jobs:
 
           start=$(date +%s)
           set +e
-          go run ./cmd/swarm-test-postgres -- go test "${packages[@]}" "${run_args[@]}" "${count_args[@]}" -json | tee "$primary_json"
+          go run ./cmd/swarm-test -- "${packages[@]}" "${run_args[@]}" "${count_args[@]}" -json | tee "$primary_json"
           status=${PIPESTATUS[0]}
           set -e
           elapsed=$(( $(date +%s) - start ))
@@ -227,7 +227,7 @@ jobs:
               confirmation_evidence="test-results/evidence/${UNIT_ID}-confirmation-evidence.json"
               confirmation_start=$(date +%s)
               set +e
-              go run ./cmd/swarm-test-postgres -- go test "${packages[@]}" "${run_args[@]}" -count=1 -json | tee "$confirmation_json"
+              go run ./cmd/swarm-test -- "${packages[@]}" "${run_args[@]}" -count=1 -json | tee "$confirmation_json"
               confirmation_status=${PIPESTATUS[0]}
               set -e
               confirmation_elapsed=$(( $(date +%s) - confirmation_start ))
@@ -271,30 +271,30 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Prove explicit Postgres opt-in selector
-        run: go run ./cmd/swarm-test-postgres -- go test ./internal/serveapp -run '^TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction$' -count=1 -v
+        run: go run ./cmd/swarm-test -- ./internal/serveapp -run '^TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction$' -count=1 -v
       - name: Prove runner-owned Docker service
-        run: go run ./cmd/swarm-test-postgres -- go test ./internal/testutil -run '^TestStartPostgres_Smoke$' -count=1
+        run: go run ./cmd/swarm-test -- ./internal/testutil -run '^TestStartPostgres_Smoke$' -count=1
       - name: Prove runner failure, interrupt, and hard-death reconciliation
         shell: bash
         run: |
           set -euo pipefail
-          runner="$RUNNER_TEMP/swarm-test-postgres"
-          go build -o "$runner" ./cmd/swarm-test-postgres
+          runner="$RUNNER_TEMP/swarm-test"
+          go build -o "$runner" ./cmd/swarm-test
           set +e
-          "$runner" -- sh -c 'exit 17'; child_status=$?
+          SWARM_TEST_PROCESS_FIXTURE_FAIL=1 "$runner" -- ./internal/testpostgres -run '^TestSwarmTestProcessFixture$' -count=1; child_status=$?
           set -e
-          test "$child_status" -eq 17
+          test "$child_status" -eq 1
           interrupt_pid="$RUNNER_TEMP/interrupt.pid"
-          "$runner" -- sh -c 'echo $$ > "$1"; exec sleep 300' sh "$interrupt_pid" & runner_pid=$!
+          SWARM_TEST_PROCESS_FIXTURE_PID="$interrupt_pid" "$runner" -- ./internal/testpostgres -run '^TestSwarmTestProcessFixture$' -count=1 & runner_pid=$!
           for _ in $(seq 1 120); do test -s "$interrupt_pid" && break; sleep 0.25; done
           kill -TERM "$runner_pid"; wait "$runner_pid" || true
           test -z "$(docker ps -aq --filter label=com.division.swarm.test-postgres.managed=1)"
           hard_pid="$RUNNER_TEMP/hard.pid"
-          "$runner" -- sh -c 'echo $$ > "$1"; exec sleep 300' sh "$hard_pid" & runner_pid=$!
+          SWARM_TEST_PROCESS_FIXTURE_PID="$hard_pid" "$runner" -- ./internal/testpostgres -run '^TestSwarmTestProcessFixture$' -count=1 & runner_pid=$!
           for _ in $(seq 1 120); do test -s "$hard_pid" && break; sleep 0.25; done
           kill -KILL "$runner_pid"; wait "$runner_pid" || true
           kill -TERM "$(cat "$hard_pid")" 2>/dev/null || true
-          "$runner" -- true
+          "$runner" -- ./internal/testpostgres -run '^TestRunCapacityFromEnvironment$' -count=1
           test -z "$(docker ps -aq --filter label=com.division.swarm.test-postgres.managed=1)"
 
   timing-budget:

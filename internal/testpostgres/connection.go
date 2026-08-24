@@ -156,11 +156,28 @@ func (d Connection) Parameters() Parameters {
 }
 
 func ConnectionFromEnvironment() (Connection, error) {
-	raw := strings.TrimSpace(os.Getenv(SourceEnv))
-	if raw == "" {
-		return Connection{}, fmt.Errorf("%s is not set; use `go run ./cmd/swarm-test-postgres -- <command>` or configure host Postgres using internal/testutil/POSTGRES.md", SourceEnv)
+	connection, set, err := ConnectionFromEnvironmentIfSet()
+	if err != nil {
+		return Connection{}, err
 	}
-	return ParseConnection(raw)
+	if !set {
+		return Connection{}, fmt.Errorf("%s is not set; use `go run ./cmd/swarm-test` or configure host Postgres using internal/testutil/POSTGRES.md", SourceEnv)
+	}
+	return connection, nil
+}
+
+// ConnectionFromEnvironmentIfSet distinguishes explicit source selection from
+// the runner-owned Docker mode. A present but invalid value fails closed.
+func ConnectionFromEnvironmentIfSet() (Connection, bool, error) {
+	raw, set := os.LookupEnv(SourceEnv)
+	if !set {
+		return Connection{}, false, nil
+	}
+	connection, err := ParseConnection(raw)
+	if err != nil {
+		return Connection{}, true, err
+	}
+	return connection, true, nil
 }
 
 func withoutPostgresConnectionEnv(env []string) []string {
