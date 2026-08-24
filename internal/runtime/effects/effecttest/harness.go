@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -103,6 +104,10 @@ func (h *Harness) CompletionContext(identity string) context.Context {
 	if err != nil {
 		panic(err)
 	}
+	bundleSource, err := runtimecorrelation.NewPersistedBundleSourceFact("bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
+	if err != nil {
+		panic(err)
+	}
 	claim, err := runtimedelivery.AdmitPersistedClaim(
 		"44444444-4444-4444-8444-444444444444", target.RunID, "effect-test-agent-route",
 		"55555555-5555-4555-8555-555555555555", 1, runtimedelivery.SubscriberAgent, h.Token.AgentID,
@@ -111,7 +116,8 @@ func (h *Harness) CompletionContext(identity string) context.Context {
 		panic(err)
 	}
 	ctx = runtimedelivery.WithClaim(ctx, claim)
-	return managedcapabilities.WithContext(ctx, surface)
+	ctx = managedcapabilities.WithContext(ctx, surface)
+	return runtimecorrelation.WithBundleSourceFact(ctx, bundleSource)
 }
 
 func (h *Harness) StartupProbeContext(ctx context.Context, surface managedcapabilities.Surface) context.Context {

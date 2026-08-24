@@ -219,6 +219,7 @@ func scanCompletionRecoveryAttempts(rows *sql.Rows) ([]completionRecoveryAttempt
 func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *storellm.LLMPostgresOwner, sqliteLLM *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, story *privateauthoractivity.Mutation, postgres bool, attempts []completionRecoveryAttempt, now time.Time) (runtimeeffects.RecoverySummary, error) {
 	var summary runtimeeffects.RecoverySummary
 	for _, recovered := range attempts {
+		prelaunch := recovered.State == string(runtimeeffects.StateAuthorized)
 		state := runtimeeffects.StateTerminalFailure
 		failureClass := runtimefailures.ClassLifecycleConflict
 		failureCode := "effect_recovery_prelaunch_abandoned"
@@ -261,13 +262,13 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *s
 		}
 		projectCurrent := resolution.Kind == completionSettlementCurrent
 		if postgres {
-			if err := insertCompletionTargetPostgres(ctx, tx, postgresLLM, attempt, settlement, projectCurrent); err != nil {
-				return runtimeeffects.RecoverySummary{}, err
-			}
-			if err := postgresLLM.RecordCompletionTurnAuthorActivityTx(ctx, story, attempt, settlement); err != nil {
-				return runtimeeffects.RecoverySummary{}, err
-			}
-			if state != runtimeeffects.StateTerminalFailure {
+			if !prelaunch {
+				if err := insertCompletionTargetPostgres(ctx, tx, postgresLLM, attempt, settlement, projectCurrent); err != nil {
+					return runtimeeffects.RecoverySummary{}, err
+				}
+				if err := postgresLLM.RecordCompletionTurnAuthorActivityTx(ctx, story, attempt, settlement); err != nil {
+					return runtimeeffects.RecoverySummary{}, err
+				}
 				if _, err := insertCompletionSpendPostgres(ctx, tx, attempt, settlement); err != nil {
 					return runtimeeffects.RecoverySummary{}, err
 				}
@@ -280,13 +281,13 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *s
 				return runtimeeffects.RecoverySummary{}, err
 			}
 		} else {
-			if err := insertCompletionTargetSQLite(ctx, tx, sqliteLLM, attempt, settlement, projectCurrent); err != nil {
-				return runtimeeffects.RecoverySummary{}, err
-			}
-			if err := sqliteLLM.RecordCompletionTurnAuthorActivityTx(ctx, story, attempt, settlement); err != nil {
-				return runtimeeffects.RecoverySummary{}, err
-			}
-			if state != runtimeeffects.StateTerminalFailure {
+			if !prelaunch {
+				if err := insertCompletionTargetSQLite(ctx, tx, sqliteLLM, attempt, settlement, projectCurrent); err != nil {
+					return runtimeeffects.RecoverySummary{}, err
+				}
+				if err := sqliteLLM.RecordCompletionTurnAuthorActivityTx(ctx, story, attempt, settlement); err != nil {
+					return runtimeeffects.RecoverySummary{}, err
+				}
 				if _, err := insertCompletionSpendSQLite(ctx, tx, attempt, settlement); err != nil {
 					return runtimeeffects.RecoverySummary{}, err
 				}
@@ -418,6 +419,9 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 		}
 		if err := runtimeeffects.ValidateManagedAgentFrame(frame, authority, surface); err != nil {
 			return runtimeeffects.Attempt{}, runtimeeffects.CompletionSettlement{}, fmt.Errorf("completion recovery frame for attempt %s is mismatched: %w", recovered.AttemptID, err)
+		}
+		if recovered.State == string(runtimeeffects.StateAuthorized) {
+			return attempt, settlement, nil
 		}
 		settlement.AgentTurn = &runtimeeffects.CompletionAgentTurn{
 			TurnID: target.ID, RunID: target.RunID, AgentID: agentID, SessionID: target.SessionID,

@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -26,13 +27,13 @@ type providerDirectiveTestStore interface {
 func TestProviderDirectiveOriginCurrentSuccessParity(t *testing.T) {
 	forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
 		store := requireProviderDirectiveStore(t, fixture)
-		origin, operation := admitProviderDirectiveOrigin(t, fixture, store, "current-success")
+		origin, operation, event := admitProviderDirectiveOrigin(t, fixture, store, "current-success")
 		beforeDeliveries := providerDirectiveDeliveryCount(t, fixture)
-		ctx := providerDirectiveContext(t, fixture, origin, "current-success")
+		ctx := providerDirectiveContext(t, fixture, origin, event, "current-success")
 		handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "current-success")
 		requirePersistedProviderDirectiveOrigin(t, fixture, handle.Attempt().AttemptID, origin)
 
-		settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "anthropic_api", "provider-head-current", "provider-head-next")
+		settlement := completionDirectiveSettlementForTest(t, handle.Attempt().Authority.Target, fixture, event, "anthropic_api", "provider-head-current", "provider-head-next")
 		result, err := handle.SettleCompletion(ctx, settlement)
 		if err != nil {
 			t.Fatalf("settle current directive completion: %v", err)
@@ -56,7 +57,7 @@ func TestProviderDirectiveOriginCurrentSuccessParity(t *testing.T) {
 func TestProviderDirectiveOriginRejectsMissingAmbiguousAndForeignParity(t *testing.T) {
 	forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
 		store := requireProviderDirectiveStore(t, fixture)
-		origin, _ := admitProviderDirectiveOrigin(t, fixture, store, "closed-origin")
+		origin, _, event := admitProviderDirectiveOrigin(t, fixture, store, "closed-origin")
 		foreign := origin
 		foreign.ExecutionOwnerID = uuid.NewString()
 		for _, candidate := range []struct {
@@ -72,7 +73,7 @@ func TestProviderDirectiveOriginRejectsMissingAmbiguousAndForeignParity(t *testi
 			}},
 		} {
 			t.Run(candidate.name, func(t *testing.T) {
-				ctx := candidate.ctx(providerDirectiveBaseContext(t, fixture, "closed-origin-"+candidate.name))
+				ctx := candidate.ctx(providerDirectiveBaseContext(t, fixture, event, "closed-origin-"+candidate.name))
 				if _, err := beginManagedCompletionForTest(t, ctx, "anthropic_api", []byte(candidate.name)); err == nil {
 					t.Fatalf("%s directive origin authorized provider completion", candidate.name)
 				}
@@ -98,16 +99,16 @@ func TestProviderDirectiveOriginSupersessionParity(t *testing.T) {
 				t.Run(target.name+"/"+outcome, func(t *testing.T) {
 					fixture := freshProviderDrainFixture(t, base.sqlite)
 					store := requireProviderDirectiveStore(t, fixture)
-					origin, operation := admitProviderDirectiveOrigin(t, fixture, store, target.name+"-"+outcome)
+					origin, operation, event := admitProviderDirectiveOrigin(t, fixture, store, target.name+"-"+outcome)
 					beforeDeliveries := providerDirectiveDeliveryCount(t, fixture)
-					ctx := providerDirectiveContext(t, fixture, origin, target.name+"-"+outcome)
+					ctx := providerDirectiveContext(t, fixture, origin, event, target.name+"-"+outcome)
 					handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", target.name+"-"+outcome)
 					transition := supersedeProviderDrainFixtureWithKind(t, fixture, target.name, target.phase)
 					if transition.ProviderDrainCount != 1 {
 						t.Fatalf("directive supersession transition=%+v, want one drain", transition)
 					}
 
-					settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "anthropic_api", "provider-head-current", "forbidden-head")
+					settlement := completionDirectiveSettlementForTest(t, handle.Attempt().Authority.Target, fixture, event, "anthropic_api", "provider-head-current", "forbidden-head")
 					wantCode := "provider_attempt_drained_before_directive_completion"
 					if outcome == "error" {
 						failureErr := runtimefailures.New(runtimefailures.ClassConnectorFailure, "directive_provider_failed", "provider-directive-test", "complete", nil)
@@ -140,9 +141,9 @@ func TestProviderDirectiveOriginSupersessionParity(t *testing.T) {
 func TestProviderDirectiveOriginPrelaunchAbandonmentParity(t *testing.T) {
 	forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
 		store := requireProviderDirectiveStore(t, fixture)
-		origin, operation := admitProviderDirectiveOrigin(t, fixture, store, "prelaunch")
+		origin, operation, event := admitProviderDirectiveOrigin(t, fixture, store, "prelaunch")
 		beforeDeliveries := providerDirectiveDeliveryCount(t, fixture)
-		ctx := providerDirectiveContext(t, fixture, origin, "prelaunch")
+		ctx := providerDirectiveContext(t, fixture, origin, event, "prelaunch")
 		handle, err := beginManagedCompletionForTest(t, ctx, "anthropic_api", []byte("prelaunch"))
 		if err != nil {
 			t.Fatalf("authorize directive completion: %v", err)
@@ -172,9 +173,9 @@ func TestProviderDirectiveOriginRecoveryParity(t *testing.T) {
 			t.Run(candidate.name, func(t *testing.T) {
 				fixture := freshProviderDrainFixture(t, base.sqlite)
 				store := requireProviderDirectiveStore(t, fixture)
-				origin, operation := admitProviderDirectiveOrigin(t, fixture, store, candidate.name)
+				origin, operation, event := admitProviderDirectiveOrigin(t, fixture, store, candidate.name)
 				beforeDeliveries := providerDirectiveDeliveryCount(t, fixture)
-				ctx := providerDirectiveContext(t, fixture, origin, candidate.name)
+				ctx := providerDirectiveContext(t, fixture, origin, event, candidate.name)
 				handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", candidate.name)
 				transition := supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleTerminated)
 				if candidate.terminalRun {
@@ -206,7 +207,7 @@ func TestProviderDirectiveOriginRecoveryParity(t *testing.T) {
 	})
 }
 
-func admitProviderDirectiveOrigin(t *testing.T, fixture completionSettlementFixture, store providerDirectiveTestStore, label string) (runtimeagentcontrol.DirectiveExecutionOrigin, runtimeagentcontrol.DirectiveOperation) {
+func admitProviderDirectiveOrigin(t *testing.T, fixture completionSettlementFixture, store providerDirectiveTestStore, label string) (runtimeagentcontrol.DirectiveExecutionOrigin, runtimeagentcontrol.DirectiveOperation, events.Event) {
 	t.Helper()
 	now := time.Now().UTC()
 	operationID, eventID := uuid.NewString(), uuid.NewString()
@@ -251,21 +252,30 @@ func admitProviderDirectiveOrigin(t *testing.T, fixture completionSettlementFixt
 	if err != nil {
 		t.Fatalf("construct directive provider origin: %v", err)
 	}
-	return origin, reservation.Operation
+	return origin, reservation.Operation, admittedEvent.Event()
 }
 
-func providerDirectiveContext(t *testing.T, fixture completionSettlementFixture, origin runtimeagentcontrol.DirectiveExecutionOrigin, operation string) context.Context {
+func providerDirectiveContext(t *testing.T, fixture completionSettlementFixture, origin runtimeagentcontrol.DirectiveExecutionOrigin, event events.Event, operation string) context.Context {
 	t.Helper()
-	return runtimeeffects.WithDirectiveCompletionOrigin(providerDirectiveBaseContext(t, fixture, operation), origin)
+	return runtimeeffects.WithDirectiveCompletionOrigin(providerDirectiveBaseContext(t, fixture, event, operation), origin)
 }
 
-func providerDirectiveBaseContext(t *testing.T, fixture completionSettlementFixture, operation string) context.Context {
+func providerDirectiveBaseContext(t *testing.T, fixture completionSettlementFixture, event events.Event, operation string) context.Context {
 	t.Helper()
 	ctx := runtimeeffects.WithExecutionMode(testAuthorActivityContext(), fixture.authority.ExecutionMode)
 	controller := runtimeeffects.NewCompletionController(fixture.store, fixture.store, fixture.store, nil).WithExecutionPosture(executionposture.Live)
 	ctx = runtimeeffects.WithController(runtimeeffects.WithAuthority(ctx, fixture.authority), controller)
 	ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, "provider-directive:"+operation)
-	return withManagedCompletionTestSurface(t, ctx, fixture.authority, "anthropic_api")
+	ctx = withManagedCompletionTestSurface(t, ctx, fixture.authority, "anthropic_api")
+	return runtimecorrelation.WithInboundEvent(ctx, event)
+}
+
+func completionDirectiveSettlementForTest(t *testing.T, target runtimeeffects.UsageTarget, fixture completionSettlementFixture, event events.Event, adapter, expectedHead, newHead string) runtimeeffects.CompletionSettlement {
+	t.Helper()
+	settlement := completionSettlementForTest(t, target, fixture, adapter, expectedHead, newHead)
+	settlement.AgentTurn.TriggerEventID = event.ID()
+	settlement.AgentTurn.TriggerEventType = string(event.Type())
+	return settlement
 }
 
 func requireProviderDirectiveStore(t *testing.T, fixture completionSettlementFixture) providerDirectiveTestStore {

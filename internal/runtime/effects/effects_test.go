@@ -2,15 +2,22 @@ package effects
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
+	"github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/google/uuid"
@@ -540,6 +547,203 @@ func TestAgentExecutionFrameOwnershipFailsClosedBeforeAuthorization(t *testing.T
 			t.Fatalf("startup frame reached store authorization %d times", len(probe.authorizations))
 		}
 	})
+}
+
+func TestManagedAgentFramePrelaunchBindingFailsClosedBeforeAuthorization(t *testing.T) {
+	const (
+		bundleE = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+		bundleF = "bundle-v1:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+	)
+	tests := []struct {
+		name          string
+		origin        string
+		admissionHash string
+		bundleSource  string
+		frameHash     string
+		frameSource   string
+		missingBundle bool
+		missingEvent  bool
+		mutateCausal  func(Authority, events.Event) events.Event
+	}{
+		{name: "missing bundle coordinate", origin: "delivery", admissionHash: bundleE, frameHash: bundleE, frameSource: "persisted", missingBundle: true},
+		{name: "missing event coordinate", origin: "delivery", admissionHash: bundleE, bundleSource: "persisted", frameHash: bundleE, frameSource: "persisted", missingEvent: true},
+		{name: "normal bundle hash", origin: "delivery", admissionHash: bundleF, bundleSource: "persisted", frameHash: bundleE, frameSource: "persisted"},
+		{name: "normal bundle source", origin: "delivery", admissionHash: bundleE, bundleSource: "ephemeral", frameHash: bundleE, frameSource: "persisted"},
+		{name: "selected bundle hash", origin: "selected", admissionHash: bundleF, bundleSource: "persisted", frameHash: bundleE, frameSource: "persisted"},
+		{name: "selected bundle source", origin: "selected", admissionHash: bundleE, bundleSource: "ephemeral", frameHash: bundleE, frameSource: "persisted"},
+		{name: "delivery event identity", origin: "delivery", admissionHash: bundleE, bundleSource: "persisted", frameHash: bundleE, frameSource: "persisted", mutateCausal: func(authority Authority, event events.Event) events.Event {
+			return managedFrameBindingEvent(authority, uuid.NewString(), event.Type(), event.Payload())
+		}},
+		{name: "directive event type", origin: "directive", admissionHash: bundleE, bundleSource: "persisted", frameHash: bundleE, frameSource: "persisted", mutateCausal: func(authority Authority, event events.Event) events.Event {
+			return managedFrameBindingEvent(authority, event.ID(), "effect.directive.changed", event.Payload())
+		}},
+		{name: "selected event run", origin: "selected", admissionHash: bundleE, bundleSource: "persisted", frameHash: bundleE, frameSource: "persisted", mutateCausal: func(authority Authority, event events.Event) events.Event {
+			authority.Target.RunID = uuid.NewString()
+			return managedFrameBindingEvent(authority, event.ID(), event.Type(), event.Payload())
+		}},
+		{name: "byte-distinct payload", origin: "delivery", admissionHash: bundleE, bundleSource: "persisted", frameHash: bundleE, frameSource: "persisted", mutateCausal: func(authority Authority, event events.Event) events.Event {
+			return managedFrameBindingEvent(authority, event.ID(), event.Type(), json.RawMessage(`{"request":"effects"}`))
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, frame, probe := managedFrameBindingContext(t, tc.origin, tc.admissionHash, tc.bundleSource, tc.frameHash, tc.frameSource, !tc.missingBundle, !tc.missingEvent)
+			if tc.mutateCausal != nil {
+				authority, ok := AuthorityFromContext(ctx)
+				if !ok {
+					t.Fatal("binding fixture authority is missing")
+				}
+				causal, ok := correlation.InboundEventFromContext(ctx)
+				if !ok {
+					t.Fatal("binding fixture causal event is missing")
+				}
+				ctx = correlation.WithInboundEvent(ctx, tc.mutateCausal(authority, causal))
+			}
+			dispatches := 0
+			handle, err := BeginManagedCompletion(ctx, "anthropic_api", []byte("request"), frame, nil)
+			if err == nil {
+				if launchErr := handle.MarkLaunched(ctx); launchErr != nil {
+					t.Fatalf("hostile frame reached launch with error: %v", launchErr)
+				}
+				dispatches++
+			}
+			if failure, ok := runtimefailures.EnvelopeFromError(err); !ok || failure.Detail.Code != "agent_execution_frame_authority_mismatch" {
+				t.Fatalf("failure = %#v ok=%v, want agent_execution_frame_authority_mismatch", failure, ok)
+			}
+			if len(probe.authorizations) != 0 || probe.launches != 0 || dispatches != 0 {
+				t.Fatalf("hostile frame authorizations=%d launches=%d dispatches=%d, want zero", len(probe.authorizations), probe.launches, dispatches)
+			}
+		})
+	}
+}
+
+func TestManagedAgentFramePrelaunchBindingAcceptsExactNormalAndSelectedAuthority(t *testing.T) {
+	const bundle = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	for _, origin := range []string{"delivery", "selected"} {
+		t.Run(origin, func(t *testing.T) {
+			ctx, frame, probe := managedFrameBindingContext(t, origin, bundle, "persisted", bundle, "persisted", true, true)
+			handle, err := BeginManagedCompletion(ctx, "anthropic_api", []byte("request"), frame, nil)
+			if err != nil {
+				t.Fatalf("authorize exact %s frame: %v", origin, err)
+			}
+			if err := handle.MarkLaunched(ctx); err != nil {
+				t.Fatalf("launch exact %s frame: %v", origin, err)
+			}
+			if len(probe.authorizations) != 1 || probe.launches != 1 {
+				t.Fatalf("exact %s frame authorizations=%d launches=%d, want 1/1", origin, len(probe.authorizations), probe.launches)
+			}
+		})
+	}
+}
+
+func managedFrameBindingContext(t testing.TB, origin, admissionHash, bundleSource, frameHash, frameSource string, includeBundle, includeEvent bool) (context.Context, agentframe.Frame, *completionStoreProbe) {
+	t.Helper()
+	selected := origin == "selected"
+	runID := uuid.NewString()
+	token := effectLifecycleToken(t, 7, "binding-agent", 3)
+	authority := NormalAgentAuthority(token, "binding-owner", time.Now().UTC().Add(time.Minute))
+	admissionKind := managedexecution.KindNormalRuntime
+	executionID := "binding-execution"
+	if selected {
+		executionID = uuid.NewString()
+		authority = Authority{
+			Kind: AuthoritySelectedContractFork, ID: executionID,
+			SelectedFork: SelectedContractForkAuthority{
+				ExecutionID: executionID, ForkRunID: runID, Generation: 1,
+				AdmissionFingerprint: "binding-admission", ContainerPlanFingerprint: "binding-container",
+				ActorCensusFingerprint: "binding-actors", EffectiveConfigFingerprint: "binding-config",
+			},
+			ExecutionOwner: "binding-selected-owner", LeaseExpiresAt: time.Now().UTC().Add(time.Minute),
+			FenceGeneration: 1, ExecutionMode: ExecutionModeLive,
+		}
+		admissionKind = managedexecution.KindSelectedContractFork
+	}
+	target := UsageTarget{
+		Kind: UsageTargetAgentTurn, ID: uuid.NewString(), RunID: runID, AgentID: token.AgentID,
+		AgentIdentity: token.Identity, SessionID: uuid.NewString(), Memory: agentmemory.PlatformDefault(),
+		FlowInstance: token.Identity.FlowInstance(),
+	}
+	authority.Target = target
+	admissionRunID := ""
+	if selected {
+		admissionRunID = runID
+	}
+	admission, err := managedexecution.New(admissionKind, executionID, 1, admissionRunID, "binding-actors", admissionHash, nil)
+	if err != nil {
+		t.Fatalf("build binding admission: %v", err)
+	}
+	var surface managedcapabilities.Surface
+	if selected {
+		surface = selectedManagedEffectSurface(t, admission, target, target.AgentID)
+	} else {
+		surface = normalManagedEffectSurface(t, admission, target, target.AgentID)
+	}
+	event := managedFrameBindingEvent(authority, uuid.NewString(), "effect.binding.requested", json.RawMessage(`{ "request": "effects" }`))
+	frame := managedFrameBindingFrame(t, authority, surface, event, frameHash, frameSource)
+	probe := &completionStoreProbe{}
+	ctx := WithExecutionMode(WithAuthority(context.Background(), authority), ExecutionModeLive)
+	ctx = WithController(ctx, NewCompletionController(probe, probe, probe, completionProjectionProbe{}).WithExecutionPosture(executionposture.Live))
+	ctx = WithLogicalOperationIdentity(ctx, "binding:"+origin)
+	ctx = managedexecution.WithAdmission(ctx, admission)
+	ctx = managedcapabilities.WithContext(ctx, surface)
+	if includeBundle {
+		fact, err := correlation.DecodeBundleSourceFact(admissionHash, bundleSource)
+		if err != nil {
+			t.Fatalf("build binding bundle source: %v", err)
+		}
+		ctx = correlation.WithBundleSourceFact(ctx, fact)
+	}
+	if includeEvent {
+		ctx = correlation.WithInboundEvent(ctx, event)
+	}
+	switch origin {
+	case "delivery":
+		claim, err := deliverylifecycle.AdmitPersistedClaim(uuid.NewString(), runID, "binding-route", uuid.NewString(), 1, deliverylifecycle.SubscriberAgent, target.AgentID)
+		if err != nil {
+			t.Fatalf("build binding delivery claim: %v", err)
+		}
+		ctx = deliverylifecycle.WithClaim(ctx, claim)
+	case "directive":
+		ctx = WithDirectiveCompletionOrigin(ctx, agentcontrol.DirectiveExecutionOrigin{OperationID: uuid.NewString(), ExecutionOwnerID: uuid.NewString()})
+	case "selected":
+	default:
+		t.Fatalf("unknown binding origin %q", origin)
+	}
+	return ctx, frame, probe
+}
+
+func managedFrameBindingEvent(authority Authority, eventID string, eventType events.EventType, payload json.RawMessage) events.Event {
+	return eventtest.ExistingRunRootIngressWithRoutingSourceAndMode(
+		eventID, eventType, "operator", "binding-test", payload, 0, authority.Target.RunID,
+		events.EventEnvelope{}, events.RoutingSource{}, time.Unix(1, 0).UTC(), authority.ExecutionMode,
+	)
+}
+
+func managedFrameBindingFrame(t testing.TB, authority Authority, surface managedcapabilities.Surface, event events.Event, bundleHash, bundleSource string) agentframe.Frame {
+	t.Helper()
+	intent, err := agentintent.Resolve(agentintent.SourceInline, "inline", "agents.yaml#agents.binding.intent", "Process the admitted binding test.")
+	if err != nil {
+		t.Fatalf("resolve binding intent: %v", err)
+	}
+	prompt, err := agentintent.IntentOnlyPrompt(intent)
+	if err != nil {
+		t.Fatalf("render binding intent: %v", err)
+	}
+	providerPrompt, err := agentintent.AssembleProviderPrompt(intent, nil, prompt, agentintent.RuntimeEnvironmentContext())
+	if err != nil {
+		t.Fatalf("assemble binding provider prompt: %v", err)
+	}
+	frame, err := agentframe.Complete(agentframe.SessionSeed{
+		AgentIdentity: authority.Target.AgentIdentity, Role: "binding-test", Intent: intent, ProviderPrompt: providerPrompt,
+		RuntimeMode: surface.RuntimeMode, Provider: surface.Provider, Transport: surface.Transport,
+		ModelAlias: "regular", Model: "binding-model",
+	}, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: event}, agentframe.Completion{
+		BundleHash: bundleHash, BundleSource: bundleSource, Surface: surface,
+	})
+	if err != nil {
+		t.Fatalf("complete binding frame: %v", err)
+	}
+	return frame
 }
 
 func TestCompletionSettlementRejectsTurnCoordinateMismatch(t *testing.T) {

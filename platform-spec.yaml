@@ -10568,7 +10568,12 @@ agent_execution_frame:
     pre-dispatch capability planning, and bundle-source admission, and before any provider adapter is invoked. The frame is
     the single transport-neutral semantic input to API, CLI, OpenAI-compatible, Responses, and mock adapters. Adapters may
     render their transport request from the frame but may not reconstruct intent, event, capability, provenance, directive,
-    remediation, lifecycle, or provider facts from mutable stores, payload heuristics, prompt text, or pack sidecars.
+    remediation, lifecycle, or provider facts from mutable stores, payload heuristics, prompt text, or pack sidecars. Before
+    operation persistence or launch, the shared authority boundary requires the frame bundle hash to equal both the managed
+    execution admission bundle hash and canonical BundleSourceFact hash, requires the frame source to equal that fact's
+    persisted-or-ephemeral source, and requires the frame event id, type, run id, and exact payload bytes to equal the typed
+    inbound causal event. Delivery, directive, and selected-fork execution supply that exact event; missing or mismatched
+    coordinates fail closed without authorizing an operation or attempt.
   identity:
     frame_id: '`agent-frame:v1:<provider-turn-authority UUID>`; one provider-turn authority creates one frame occurrence.'
     content_hash: >
@@ -10667,6 +10672,9 @@ agent_execution_frame:
       Current, drained, racing, startup-recovered, and terminal-run-recovered settlement hydrate the same operation bytes,
       validate operation/attempt/authority/turn/capability/event binding, and atomically copy those exact bytes to the one
       `agent_turns` row. `agent_turns.completion_attempt_id` is required and unique; its attempt resolves to that operation.
+      Turn-bearing settlement is valid only from an attempt with durable `launched` or `response_observed` evidence; an
+      `authorized` attempt has not executed and cannot create an agent turn or spend row. Startup recovery of an authorized
+      attempt likewise settles only the attempt and releases any reservation without synthesizing provider execution.
       A definitive CLI prelaunch or process-start rejection settles only the attempt and releases its budget reservation;
       it cannot materialize a provider turn that never executed. A retry of that logical turn reuses the exact
       operation-owned frame and materializes the single immutable turn only from terminal provider evidence.

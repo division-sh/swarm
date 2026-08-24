@@ -237,7 +237,7 @@ func TestCompletionAttemptHeartbeatLossCancelsExecutionAndForcesUncertainty(t *t
 	injected := errors.New("injected completion heartbeat failure")
 	harness.HeartbeatErr = injected
 	harness.HeartbeatFailAfter = 1
-	ctx := llmTestWorkContext(t, harness.CompletionContext("heartbeat-loss"))
+	ctx := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, "heartbeat-loss"))
 	handle, err := beginManagedTestCompletion(t, ctx, "anthropic_api", []byte("heartbeat"))
 	if err != nil {
 		t.Fatalf("authorize completion: %v", err)
@@ -275,7 +275,7 @@ func TestCompletionHeartbeatRetirementHandoff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new runtime occurrence: %v", err)
 	}
-	ctx := worklifetime.WithOccurrence(worklifetime.WithProcess(harness.CompletionContext("retirement"), process), owner)
+	ctx := worklifetime.WithOccurrence(worklifetime.WithProcess(managedEffectHarnessContext(t, harness, "retirement"), process), owner)
 	processBaseline := process.ActiveCount()
 	handle, err := beginManagedTestCompletion(t, ctx, "anthropic_api", []byte("heartbeat"))
 	if err != nil {
@@ -323,7 +323,7 @@ func (s *completionOriginHeartbeatStore) RenewClaim(context.Context, runtimedeli
 
 func TestCompletionHeartbeatYieldsExactOriginRenewal(t *testing.T) {
 	harness := effecttest.New()
-	ctx := llmTestWorkContext(t, harness.CompletionContext("origin-renewal-handoff"))
+	ctx := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, "origin-renewal-handoff"))
 	owner, ok := worklifetime.OccurrenceFromContext(ctx)
 	if !ok {
 		t.Fatal("completion context has no runtime occurrence")
@@ -371,7 +371,7 @@ func TestCompletionHeartbeatYieldsExactOriginRenewal(t *testing.T) {
 func TestCompletionHeartbeatUsesProcessRootForOperatorWork(t *testing.T) {
 	harness := effecttest.New()
 	process := worklifetime.NewProcess()
-	ctx := worklifetime.WithProcess(harness.CompletionContext("operator-process"), process)
+	ctx := worklifetime.WithProcess(managedEffectHarnessContext(t, harness, "operator-process"), process)
 	handle, err := beginManagedTestCompletion(t, ctx, "anthropic_api", []byte("heartbeat"))
 	if err != nil {
 		t.Fatalf("authorize completion: %v", err)

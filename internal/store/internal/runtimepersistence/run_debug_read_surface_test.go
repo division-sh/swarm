@@ -606,7 +606,7 @@ func TestRunDebugReadSurface_LoadRunDebugTrace_UsesTaskAuditSessionWhenLiveSessi
 	}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: now.Add(3 * time.Second), OriginEvent: &event}); err != nil {
 		t.Fatalf("seed turn: %v", err)
 	}
-	delivered, err := pg.SettleSuccess(ctx, claimed.Claim, nil, 8*time.Millisecond)
+	delivered, err := pg.SettleSuccess(ctx, claimed.Claim, nil, 8*time.Millisecond, runtimedelivery.NotApplicableHandlerRuleSelection())
 	if err != nil {
 		t.Fatalf("settle task delivery: %v", err)
 	}

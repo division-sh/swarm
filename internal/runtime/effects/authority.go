@@ -10,6 +10,8 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/google/uuid"
 )
@@ -105,6 +107,34 @@ func ValidateManagedAgentFrame(frame agentframe.Frame, authority Authority, surf
 	// posture and may legitimately narrow a live event to a mock agent.
 	if frame.Session.Provider.RuntimeMode != surface.RuntimeMode || frame.Session.Provider.Provider != surface.Provider || frame.Session.Provider.Transport != surface.Transport {
 		return fmt.Errorf("managed execution frame does not match provider contract")
+	}
+	return nil
+}
+
+func validateManagedAgentFramePrelaunch(ctx context.Context, frame agentframe.Frame, authority Authority, surface managedcapabilities.Surface) error {
+	if err := ValidateManagedAgentFrame(frame, authority, surface); err != nil {
+		return err
+	}
+	admission, ok := managedexecution.FromContext(ctx)
+	if !ok {
+		return fmt.Errorf("managed execution frame requires execution admission")
+	}
+	bundleSource, ok := correlation.BundleSourceFactFromContext(ctx)
+	if !ok {
+		return fmt.Errorf("managed execution frame requires authoritative bundle source")
+	}
+	bundleHash, source := bundleSource.StorageValues()
+	if admission.BundleHash != bundleHash ||
+		frame.Session.Bundle.Hash != bundleHash ||
+		frame.Session.Bundle.Source != source {
+		return fmt.Errorf("managed execution frame does not match admitted bundle source")
+	}
+	causalEvent, ok := correlation.InboundEventFromContext(ctx)
+	if !ok {
+		return fmt.Errorf("managed execution frame requires causal event")
+	}
+	if err := frame.ValidateCausalEvent(causalEvent); err != nil {
+		return err
 	}
 	return nil
 }

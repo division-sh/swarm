@@ -675,6 +675,7 @@ func TestBoardStep_DrainedDirectiveStopsBeforeRemediation(t *testing.T) {
 		RunIDResolution: runtimeagentcontrol.RunResolutionSpecified,
 		Source:          runtimeagentcontrol.DirectiveSourceV1RPC,
 	}
+	ctx = runtimecorrelation.WithInboundEvent(ctx, directive.Event)
 	if _, err := agent.BoardStep(ctx, directive); !errors.Is(err, runtimeagentcontrol.ErrDirectiveProviderDrained) {
 		if failure, ok := runtimefailures.EnvelopeFromError(err); ok {
 			t.Fatalf("drained directive BoardStep error=%v attributes=%v", err, failure.Detail.Attributes)

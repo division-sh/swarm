@@ -465,6 +465,21 @@ func projectEvent(event events.Event) (Event, error) {
 	}, nil
 }
 
+// ValidateCausalEvent proves that the frame retains the exact admitted event
+// occurrence that owns this provider turn.
+func (f Frame) ValidateCausalEvent(event events.Event) error {
+	if f.Turn.Event.ID != event.ID() ||
+		f.Turn.Event.Type != string(event.Type()) ||
+		f.Turn.Event.RunID != event.RunID() {
+		return fmt.Errorf("execution frame event identity does not match causal event")
+	}
+	exactPayload, err := base64.StdEncoding.DecodeString(f.Turn.Event.PayloadBytesBase64)
+	if err != nil || !bytes.Equal(exactPayload, event.Payload()) {
+		return fmt.Errorf("execution frame event payload bytes do not match causal event")
+	}
+	return nil
+}
+
 func projectRoute(route events.RouteIdentity) Route {
 	route = route.Normalized()
 	return Route{FlowInstance: route.FlowInstance, EntityID: route.EntityID, FlowID: route.FlowID}

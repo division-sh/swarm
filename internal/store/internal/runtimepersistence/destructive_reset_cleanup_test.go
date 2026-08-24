@@ -66,7 +66,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 	assertCleanupTableResult(t, result, "events", 6, 6)
 	assertCleanupTableResult(t, result, "event_receipts", 1, 1)
 	assertCleanupTableResult(t, result, "dead_letters", 2, 2)
-	assertCleanupTableResult(t, result, "event_delivery_handler_rule_selections", 2, 2)
+	assertCleanupTableResult(t, result, "event_delivery_handler_rule_selections", 3, 3)
 	assertCleanupTableResult(t, result, "timers", 3, 3)
 	assertCleanupTableResult(t, result, "conversation_forks", 1, 1)
 	assertCleanupTableResult(t, result, "human_task_continuations", 1, 1)

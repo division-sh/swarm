@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
@@ -95,6 +96,12 @@ func testManagedConversationContext(t testing.TB, harness *effecttest.Harness, a
 	setEffectHarnessAgent(t, harness, agentID, flowInstance)
 	identity := testAgentIdentity(agentID, flowInstance)
 	ctx := harness.CompletionContext("managed-frame:" + agentID)
+	admission, ok := managedexecution.FromContext(ctx)
+	if !ok {
+		t.Fatal("managed frame test admission is missing")
+	}
+	admission.BundleHash = testAgentFrameBundleHash
+	ctx = managedexecution.WithAdmission(ctx, admission)
 	ctx = models.WithActor(ctx, models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            agentID,
@@ -109,6 +116,7 @@ func testManagedConversationContext(t testing.TB, harness *effecttest.Harness, a
 		t.Fatalf("test bundle source: %v", err)
 	}
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
+	ctx = runtimecorrelation.WithInboundEvent(ctx, testManagedEvent(agentID))
 	return llmTestWorkContext(t, ctx)
 }
 

@@ -346,13 +346,13 @@ func TestOpenAICompatibleProviderAdmissionRejectsBeforeHTTPDispatch(t *testing.T
 	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
 	firstErr := make(chan error, 1)
 	go func() {
-		ctx := llmTestWorkContext(t, harness.CompletionContext("openai-compatible-admission-first"))
+		ctx := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, "openai-compatible-admission-first"))
 		_, _, _, err := runtime.sendAdmittedRequest(ctx, profile, model, []byte(`{"model":"gpt-compatible","messages":[{"role":"user","content":"hello"}]}`), managedProviderCallForEffectTest(t, ctx))
 		firstErr <- err
 	}()
 	<-entered
 
-	secondCtx := llmTestWorkContext(t, harness.CompletionContext("openai-compatible-admission-second"))
+	secondCtx := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, "openai-compatible-admission-second"))
 	_, _, _, err := runtime.sendAdmittedRequest(secondCtx, profile, model, []byte(`{"model":"gpt-compatible","messages":[{"role":"user","content":"second"}]}`), managedProviderCallForEffectTest(t, secondCtx))
 	requireProviderAdmissionRateLimited(t, err)
 	if got := requests.Load(); got != 1 {
@@ -396,13 +396,13 @@ func TestOpenAIResponsesProviderAdmissionRejectsBeforeHTTPDispatch(t *testing.T)
 	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
 	firstErr := make(chan error, 1)
 	go func() {
-		ctx := llmTestWorkContext(t, harness.CompletionContext("openai-responses-admission-first"))
+		ctx := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, "openai-responses-admission-first"))
 		_, _, _, err := runtime.sendAdmittedRequest(ctx, profile, model, []byte(`{"model":"gpt-5.4","input":[{"role":"user","content":"hello"}]}`), managedProviderCallForEffectTest(t, ctx))
 		firstErr <- err
 	}()
 	<-entered
 
-	secondCtx := llmTestWorkContext(t, harness.CompletionContext("openai-responses-admission-second"))
+	secondCtx := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, "openai-responses-admission-second"))
 	_, _, _, err := runtime.sendAdmittedRequest(secondCtx, profile, model, []byte(`{"model":"gpt-5.4","input":[{"role":"user","content":"second"}]}`), managedProviderCallForEffectTest(t, secondCtx))
 	requireProviderAdmissionRateLimited(t, err)
 	if got := requests.Load(); got != 1 {

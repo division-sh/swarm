@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -98,10 +99,14 @@ func proveCompletionOperationOwnsExactAgentFrame(t *testing.T, fixture completio
 	settlement.Settlement = runtimeeffects.Settlement{State: runtimeeffects.StateTerminalFailure, Failure: &failure, Evidence: map[string]any{"launch_rejected": true}}
 	settlement.Usage = runtimeeffects.CompletionUsage{ResolvedModel: "claude-test", Exactness: runtimeeffects.CompletionUsageUnavailable}
 	settlement.AgentTurn.Failure = &failure
-	if _, err := handle.SettleCompletion(ctx, settlement); err != nil {
-		t.Fatalf("settle retryable prelaunch completion: %v", err)
+	if _, err := handle.SettleCompletion(ctx, settlement); err == nil {
+		t.Fatal("authorized attempt materialized a completion turn")
 	}
-	assertCompletionFrameBytes(t, fixture, "agent_turns", "turn_id", settlement.AgentTurn.TurnID, want)
+	requireCompletionRecoveryRows(t, fixture, handle.Attempt().AttemptID, 0, 0, 0)
+	if err := handle.Settle(ctx, runtimeeffects.StateTerminalFailure, &failure, map[string]any{"launch_rejected": true}); err != nil {
+		t.Fatalf("settle retryable prelaunch attempt: %v", err)
+	}
+	requireCompletionRecoveryRows(t, fixture, handle.Attempt().AttemptID, 0, 0, 0)
 
 	retry, err := runtimeeffects.BeginManagedCompletion(ctx, adapter, []byte("exact-frame-request"), frame, nil)
 	if err != nil {
@@ -110,13 +115,27 @@ func proveCompletionOperationOwnsExactAgentFrame(t *testing.T, fixture completio
 	if retry.Attempt().OperationID != handle.Attempt().OperationID || retry.Attempt().AttemptID == handle.Attempt().AttemptID || retry.Attempt().Ordinal != 2 {
 		t.Fatalf("byte-identical retry did not reuse the operation with a second attempt: first=%+v retry=%+v", handle.Attempt(), retry.Attempt())
 	}
+	if err := retry.MarkLaunched(ctx); err != nil {
+		t.Fatalf("launch byte-identical retry: %v", err)
+	}
+	if err := retry.MarkResponseObserved(ctx, map[string]any{"response_fingerprint": "exact-frame-response"}); err != nil {
+		t.Fatalf("observe byte-identical retry response: %v", err)
+	}
+	settlement = completionSettlementForTest(t, retry.Attempt().Authority.Target, fixture, adapter, "", "")
+	settlement.ProviderHead = nil
+	if _, err := retry.SettleCompletion(ctx, settlement); err != nil {
+		t.Fatalf("settle byte-identical retry completion: %v", err)
+	}
+	assertCompletionFrameBytes(t, fixture, "agent_turns", "turn_id", settlement.AgentTurn.TurnID, want)
+	requireCompletionRecoveryRows(t, fixture, retry.Attempt().AttemptID, 1, 1, 0)
 
 	changedEvent := eventtest.ExistingRunRootIngress(
 		event.ID(), event.Type(), "gateway", "", []byte(`{ "request": "byte-distinct" }`), 0,
 		event.RunID(), events.EventEnvelope{}, time.Unix(1, 0).UTC(),
 	)
 	changedFrame := managedCompletionTestFrameWithEvent(t, authority, adapter, changedEvent)
-	if _, err := runtimeeffects.BeginManagedCompletion(ctx, adapter, []byte("exact-frame-request"), changedFrame, nil); err == nil {
+	changedCtx := runtimecorrelation.WithInboundEvent(ctx, changedEvent)
+	if _, err := runtimeeffects.BeginManagedCompletion(changedCtx, adapter, []byte("exact-frame-request"), changedFrame, nil); err == nil {
 		t.Fatal("same-operation retry accepted byte-distinct frame evidence")
 	}
 	assertCompletionFrameBytes(t, fixture, "runtime_external_effect_operations", "operation_id", handle.Attempt().OperationID, want)
@@ -264,16 +283,11 @@ func proveCompletionPrelaunchFailureDoesNotSpend(t *testing.T, fixture completio
 		t.Fatalf("authorize prelaunch completion: %v", err)
 	}
 	failure := runtimefailures.FromError(context.Canceled, "completion-test", "launch_rejected")
-	settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "claude_cli", "", "")
-	settlement.Settlement = runtimeeffects.Settlement{State: runtimeeffects.StateTerminalFailure, Failure: &failure.Failure}
-	settlement.Usage = runtimeeffects.CompletionUsage{ResolvedModel: "claude-test", Exactness: runtimeeffects.CompletionUsageUnavailable}
-	settlement.AgentTurn.Failure = &failure.Failure
-	settlement.ProviderHead = nil
-	if _, err := handle.SettleCompletion(ctx, settlement); err != nil {
-		t.Fatalf("settle prelaunch completion: %v", err)
+	if err := handle.Settle(ctx, runtimeeffects.StateTerminalFailure, &failure.Failure, map[string]any{"prelaunch": true}); err != nil {
+		t.Fatalf("settle prelaunch attempt: %v", err)
 	}
 	requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateTerminalFailure)
-	requireCompletionRecoveryRows(t, fixture, handle.Attempt().AttemptID, 1, 0, 0)
+	requireCompletionRecoveryRows(t, fixture, handle.Attempt().AttemptID, 0, 0, 0)
 }
 
 func TestCompletionRecoveryPreservesLiveOrdinaryAuthoritySQLite(t *testing.T) {
@@ -400,13 +414,8 @@ func proveCompletionRecoveryPreservesLiveOrdinaryAuthority(t *testing.T, fixture
 
 	setCompletionFixtureGeneration(t, fixture, initialGeneration)
 	failure := runtimefailures.FromError(context.Canceled, "completion-test", "cleanup")
-	cleanup := completionSettlementForTest(t, authorized.Attempt().Authority.Target, fixture, "anthropic_api", "", "")
-	cleanup.ProviderHead = nil
-	cleanup.Settlement = runtimeeffects.Settlement{State: runtimeeffects.StateTerminalFailure, Failure: &failure.Failure}
-	cleanup.Usage = runtimeeffects.CompletionUsage{ResolvedModel: "claude-test", Exactness: runtimeeffects.CompletionUsageUnavailable}
-	cleanup.AgentTurn.Failure = &failure.Failure
-	if _, err := authorized.SettleCompletion(ctx, cleanup); err != nil {
-		t.Fatalf("settle restored prelaunch completion: %v", err)
+	if err := authorized.Settle(ctx, runtimeeffects.StateTerminalFailure, &failure.Failure, map[string]any{"prelaunch": true}); err != nil {
+		t.Fatalf("settle restored prelaunch attempt: %v", err)
 	}
 	secondAuthority := fixture.authority
 	secondAuthority.Target.ID = uuid.NewString()
@@ -510,12 +519,9 @@ func newCompletionSettlementFixture(t *testing.T, store completionSettlementTest
 	}
 }
 
-func claimCompletionOriginForTest(t testing.TB, ctx context.Context, store completionSettlementTestStore, authority runtimeeffects.Authority, now time.Time) runtimedelivery.Claim {
+func claimCompletionOriginForTest(t testing.TB, ctx context.Context, store completionSettlementTestStore, authority runtimeeffects.Authority, _ time.Time) runtimedelivery.Claim {
 	t.Helper()
-	originEvent := eventtest.ExistingRunRootIngress(
-		uuid.NewString(), "completion.origin", "gateway", "", []byte(`{}`), 0,
-		authority.Target.RunID, events.EventEnvelope{}, now,
-	)
+	originEvent := managedCompletionTestEvent(authority)
 	return claimCompletionOriginEventForTest(t, ctx, store, authority, originEvent)
 }
 

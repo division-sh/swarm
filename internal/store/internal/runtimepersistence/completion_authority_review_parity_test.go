@@ -161,14 +161,10 @@ func proveClaudeRetryGenerationAuthority(t *testing.T, sqlite bool) {
 	}
 	failureErr := runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "claude_cli_process_start_failed", "review", "start", map[string]any{"launch_rejected": true})
 	failure, _ := runtimefailures.EnvelopeFromError(failureErr)
-	settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, "claude_cli", "", "")
-	settlement.ProviderHead = nil
-	settlement.Settlement = runtimeeffects.Settlement{State: runtimeeffects.StateTerminalFailure, Failure: &failure, Evidence: map[string]any{"launch_rejected": true}}
-	settlement.Usage = runtimeeffects.CompletionUsage{ResolvedModel: "claude-test", Exactness: runtimeeffects.CompletionUsageUnavailable}
-	settlement.AgentTurn.Failure = &failure
-	if _, err := handle.SettleCompletion(ctx, settlement); err != nil {
+	if err := handle.Settle(ctx, runtimeeffects.StateTerminalFailure, &failure, map[string]any{"launch_rejected": true}); err != nil {
 		t.Fatalf("settle generation-1 prelaunch failure: %v", err)
 	}
+	requireCompletionRecoveryRows(t, fixture, handle.Attempt().AttemptID, 0, 0, 0)
 
 	initialGeneration := int(fixture.authority.Normal.Generation)
 	nextGeneration := initialGeneration + 1

@@ -2833,7 +2833,9 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 		t.Fatalf("build winning %s capability surface: %v", winner.surface, err)
 	}
 	providerCtx = managedcapabilities.WithContext(providerCtx, capabilitySurface)
-	frame := selectedForkAuthorityRaceFrame(t, authority, capabilitySurface, baseRequest.LoadedSource.BundleSourceFact.BundleHash())
+	frame, causalEvent := selectedForkAuthorityRaceFrame(t, authority, capabilitySurface, baseRequest.LoadedSource.BundleSourceFact)
+	providerCtx = runtimecorrelation.WithBundleSourceFact(providerCtx, baseRequest.LoadedSource.BundleSourceFact)
+	providerCtx = runtimecorrelation.WithInboundEvent(providerCtx, causalEvent)
 	handle, err := runtimeeffects.BeginManagedCompletion(providerCtx, "openai_compatible", []byte("request"), frame, nil)
 	if err != nil {
 		t.Fatalf("winning %s authorize provider completion: %v", winner.surface, err)
@@ -2902,8 +2904,9 @@ func TestSelectedContractServedAndStandaloneContainersCompeteForOnePostgresAutho
 	}
 }
 
-func selectedForkAuthorityRaceFrame(t testing.TB, authority runtimeeffects.Authority, surface managedcapabilities.Surface, bundleHash string) agentframe.Frame {
+func selectedForkAuthorityRaceFrame(t testing.TB, authority runtimeeffects.Authority, surface managedcapabilities.Surface, source runtimecorrelation.BundleSourceFact) (agentframe.Frame, events.Event) {
 	t.Helper()
+	bundleHash, bundleSource := source.StorageValues()
 	intent, err := runtimeagentintent.Resolve(runtimeagentintent.SourceInline, "inline", "agents.yaml#agents.selected-agent.intent", "Exercise the selected-fork authority race.")
 	if err != nil {
 		t.Fatalf("resolve selected-fork race intent: %v", err)
@@ -2926,12 +2929,12 @@ func selectedForkAuthorityRaceFrame(t testing.TB, authority runtimeeffects.Autho
 		Intent: intent, ProviderPrompt: prompt, RuntimeMode: surface.RuntimeMode, Provider: surface.Provider, Transport: surface.Transport,
 		ModelAlias: "regular", Model: "test-model",
 	}, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: event}, agentframe.Completion{
-		BundleHash: bundleHash, BundleSource: "ephemeral", Surface: surface,
+		BundleHash: bundleHash, BundleSource: bundleSource, Surface: surface,
 	})
 	if err != nil {
 		t.Fatalf("complete selected-fork race frame: %v", err)
 	}
-	return frame
+	return frame, event
 }
 
 func TestStartSelectedContractAgentRuntimeGatewayReturnsGeneratedBinding(t *testing.T) {

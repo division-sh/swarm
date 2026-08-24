@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -100,7 +101,7 @@ func managedCompletionTestFrameWithEvent(t testing.TB, authority runtimeeffects.
 		Model:          "store-test-model",
 	}, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: event}, agentframe.Completion{
 		BundleHash:   "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-		BundleSource: "persisted",
+		BundleSource: "ephemeral",
 		Surface:      surface,
 	})
 	if err != nil {
@@ -136,7 +137,11 @@ func beginManagedCompletionForTest(t testing.TB, ctx context.Context, adapter st
 	if !ok {
 		t.Fatal("managed completion test authority is missing")
 	}
-	return runtimeeffects.BeginManagedCompletion(ctx, adapter, request, managedCompletionTestFrame(t, authority, adapter), nil)
+	event := managedCompletionTestEvent(authority)
+	if causal, ok := runtimecorrelation.InboundEventFromContext(ctx); ok {
+		event = causal
+	}
+	return runtimeeffects.BeginManagedCompletion(ctx, adapter, request, managedCompletionTestFrameWithEvent(t, authority, adapter, event), nil)
 }
 
 func managedExecutionStoreTestContext(t testing.TB, ctx context.Context) context.Context {
@@ -325,6 +330,7 @@ func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context
 	completionCtx = runtimedelivery.WithClaim(completionCtx, origin)
 	completionCtx = runtimeeffects.WithLogicalOperationIdentity(completionCtx, "managed-turn-fixture:"+authority.Target.ID)
 	completionCtx = withManagedCompletionTestSurface(t, completionCtx, authority, adapter)
+	completionCtx = runtimecorrelation.WithInboundEvent(completionCtx, originEvent)
 	frame := managedCompletionTestFrameWithEvent(t, authority, adapter, originEvent)
 	handle, err := runtimeeffects.BeginManagedCompletion(completionCtx, adapter, rec.RequestPayload, frame, nil)
 	if err != nil {
@@ -409,7 +415,7 @@ func persistManagedAgentTurnReadbackFixtureWithOptions(t testing.TB, ctx context
 		return fmt.Errorf("managed turn fixture settlement did not commit")
 	}
 	if !hasOrigin {
-		if _, err := store.SettleSuccess(fixtureCtx, origin, nil, time.Millisecond); err != nil {
+		if _, err := store.SettleSuccess(fixtureCtx, origin, nil, time.Millisecond, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 			return fmt.Errorf("settle managed turn fixture origin: %w", err)
 		}
 	}
@@ -441,7 +447,11 @@ func withManagedCompletionTestSurface(t testing.TB, ctx context.Context, authori
 		t.Fatalf("build managed completion test admission: %v", err)
 	}
 	ctx = managedexecution.WithAdmission(ctx, admission)
-	return managedcapabilities.WithContext(ctx, managedCompletionTestSurface(t, authority, adapter))
+	ctx = managedcapabilities.WithContext(ctx, managedCompletionTestSurface(t, authority, adapter))
+	if _, ok := runtimecorrelation.InboundEventFromContext(ctx); !ok {
+		ctx = runtimecorrelation.WithInboundEvent(ctx, managedCompletionTestEvent(authority))
+	}
+	return ctx
 }
 
 func applyManagedCompletionTestSurface(t testing.TB, turn *runtimeeffects.CompletionAgentTurn, authority runtimeeffects.Authority, adapter string) {
@@ -616,7 +626,16 @@ func TestCompletionRecoveryRejectsSameSlugSiblingCapabilityPrincipal(t *testing.
 		recovered, runtimeeffects.StateTerminalFailure, nil, time.Now().UTC(),
 	); err != nil {
 		t.Fatalf("completion recovery rejected exact capability principal: %v", err)
+	} else if settlement.AgentTurn != nil {
+		t.Fatalf("authorized recovery materialized agent turn = %#v", settlement.AgentTurn)
+	}
+
+	recovered.State = string(runtimeeffects.StateLaunched)
+	if _, settlement, err := completionRecoverySettlement(
+		recovered, runtimeeffects.StateOutcomeUncertain, nil, time.Now().UTC(),
+	); err != nil {
+		t.Fatalf("launched completion recovery rejected exact capability principal: %v", err)
 	} else if settlement.AgentTurn == nil || settlement.AgentTurn.Identity.Agent != identityA {
-		t.Fatalf("recovered exact agent turn = %#v", settlement.AgentTurn)
+		t.Fatalf("recovered launched agent turn = %#v", settlement.AgentTurn)
 	}
 }
