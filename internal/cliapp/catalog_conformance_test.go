@@ -17,8 +17,9 @@ import (
 )
 
 type requiredConformanceBundle struct {
-	ID   string
-	Root string
+	ID         string
+	Root       string
+	ConfigPath string
 }
 
 func TestCatalogRequiredVerifyAll(t *testing.T) {
@@ -61,19 +62,13 @@ func TestCatalogRequiredVerifyAll(t *testing.T) {
 		t.Fatalf("supported verify executions = %d, want %d", verified, len(inventory.Fixtures))
 	}
 
-	exampleBundles, err := discoverRequiredExampleBundles(repoRoot)
+	exampleBundles, err := discoverRequiredExampleBundles(repoRoot, configPath)
 	if err != nil {
 		t.Fatalf("discover required example bundles: %v", err)
 	}
-	if got, want := len(exampleBundles), 12; got != want {
-		t.Fatalf("required example bundle count = %d, want %d", got, want)
-	}
 	archetypeBundles := materializeRequiredArchetypeBundles(t)
-	if got, want := len(archetypeBundles), 2; got != want {
-		t.Fatalf("required archetype bundle count = %d, want %d", got, want)
-	}
 	passingBundles := append(exampleBundles, archetypeBundles...)
-	for _, failure := range verifyRequiredPassingBundles(context.Background(), repoRoot, configPath, passingBundles) {
+	for _, failure := range verifyRequiredPassingBundles(context.Background(), repoRoot, passingBundles) {
 		t.Error(failure)
 	}
 }
@@ -91,25 +86,70 @@ func setRequiredConformanceCredentials(t testing.TB) {
 	}
 }
 
-func TestCatalogRequiredVerifyGateMutationNamesBrokenBundle(t *testing.T) {
+func TestCatalogRequiredVerifyGateMutationDiscoversAndNamesBrokenBundles(t *testing.T) {
+	setRequiredConformanceCredentials(t)
 	repoRoot := RepoRoot()
-	root := filepath.Join(t.TempDir(), "broken-example")
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		t.Fatalf("create broken bundle: %v", err)
+	corpusRoot := t.TempDir()
+	mutations := []struct {
+		path     string
+		field    string
+		identity string
+	}{
+		{path: "broken-first", field: "unknown_wave0_first", identity: "examples/broken-first"},
+		{path: filepath.Join("nested", "broken-second"), field: "unknown_wave0_second", identity: "examples/nested/broken-second"},
 	}
-	if err := os.WriteFile(filepath.Join(root, "package.yaml"), []byte("name: broken-example\nunknown_wave0_field: true\n"), 0o600); err != nil {
-		t.Fatalf("write broken bundle: %v", err)
+	for _, mutation := range mutations {
+		root := filepath.Join(corpusRoot, "examples", mutation.path)
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			t.Fatalf("create broken bundle %s: %v", mutation.identity, err)
+		}
+		body := fmt.Sprintf("name: broken-example\n%s: true\n", mutation.field)
+		if err := os.WriteFile(filepath.Join(root, "package.yaml"), []byte(body), 0o600); err != nil {
+			t.Fatalf("write broken bundle %s: %v", mutation.identity, err)
+		}
 	}
-	failures := verifyRequiredPassingBundles(context.Background(), repoRoot, writeTestVerifyRuntimeConfig(t), []requiredConformanceBundle{{
-		ID: "examples/broken-example", Root: root,
-	}})
-	if len(failures) != 1 || !strings.Contains(failures[0], "examples/broken-example") || !strings.Contains(failures[0], "unknown_wave0_field") {
-		t.Fatalf("mutation failures = %#v, want named broken bundle and exact loader evidence", failures)
+	configPath := writeTestVerifyRuntimeConfig(t)
+	bundles, err := discoverRequiredExampleBundles(corpusRoot, configPath)
+	if err != nil {
+		t.Fatalf("discover mutated bundles: %v", err)
+	}
+	failures := verifyRequiredPassingBundles(context.Background(), repoRoot, bundles)
+	if len(failures) != len(mutations) {
+		t.Fatalf("mutation failures = %#v, want %d discovered failures", failures, len(mutations))
+	}
+	joined := strings.Join(failures, "\n")
+	for _, mutation := range mutations {
+		if !strings.Contains(joined, mutation.identity) || !strings.Contains(joined, mutation.field) {
+			t.Fatalf("mutation failures = %#v, want %s and exact loader evidence %s", failures, mutation.identity, mutation.field)
+		}
 	}
 }
 
-func discoverRequiredExampleBundles(repoRoot string) ([]requiredConformanceBundle, error) {
-	examplesRoot := filepath.Join(repoRoot, "examples")
+func TestCatalogRequiredVerifyGateRejectsInvalidGeneratedArchetypeConfig(t *testing.T) {
+	setRequiredConformanceCredentials(t)
+	repoRoot := RepoRoot()
+	bundles := materializeRequiredArchetypeBundles(t)
+	var mutated *requiredConformanceBundle
+	for i := range bundles {
+		if bundles[i].ID == "archetypes/zero-agent-automation" {
+			mutated = &bundles[i]
+			break
+		}
+	}
+	if mutated == nil {
+		t.Fatal("zero-agent-automation is missing from admittedArchetypes")
+	}
+	if err := os.WriteFile(mutated.ConfigPath, []byte("runtime:\n  execution_posture: invalid\n"), 0o600); err != nil {
+		t.Fatalf("mutate generated archetype config: %v", err)
+	}
+	failures := verifyRequiredPassingBundles(context.Background(), repoRoot, []requiredConformanceBundle{*mutated})
+	if len(failures) != 1 || !strings.Contains(failures[0], mutated.ID) || !strings.Contains(failures[0], `runtime.execution_posture must be exactly live or mock_only`) {
+		t.Fatalf("generated-config mutation failures = %#v, want named archetype and exact config evidence", failures)
+	}
+}
+
+func discoverRequiredExampleBundles(corpusRoot, configPath string) ([]requiredConformanceBundle, error) {
+	examplesRoot := filepath.Join(corpusRoot, "examples")
 	var bundles []requiredConformanceBundle
 	err := filepath.WalkDir(examplesRoot, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -119,11 +159,15 @@ func discoverRequiredExampleBundles(repoRoot string) ([]requiredConformanceBundl
 			return nil
 		}
 		root := filepath.Dir(path)
-		relative, err := filepath.Rel(repoRoot, root)
+		relative, err := filepath.Rel(corpusRoot, root)
 		if err != nil {
 			return err
 		}
-		bundles = append(bundles, requiredConformanceBundle{ID: filepath.ToSlash(relative), Root: root})
+		bundles = append(bundles, requiredConformanceBundle{
+			ID:         filepath.ToSlash(relative),
+			Root:       root,
+			ConfigPath: configPath,
+		})
 		return nil
 	})
 	sort.Slice(bundles, func(i, j int) bool { return bundles[i].ID < bundles[j].ID })
@@ -144,19 +188,20 @@ func materializeRequiredArchetypeBundles(t testing.TB) []requiredConformanceBund
 			t.Fatalf("materialize required archetype %s: %v", id, err)
 		}
 		bundles = append(bundles, requiredConformanceBundle{
-			ID:   "archetypes/" + id,
-			Root: filepath.Clean(filepath.Join(destination, admittedArchetypes[id].WorkingDir)),
+			ID:         "archetypes/" + id,
+			Root:       filepath.Clean(filepath.Join(destination, admittedArchetypes[id].WorkingDir)),
+			ConfigPath: filepath.Clean(filepath.Join(destination, admittedArchetypes[id].WorkingDir, "swarm.yaml")),
 		})
 	}
 	return bundles
 }
 
-func verifyRequiredPassingBundles(ctx context.Context, repoRoot, configPath string, bundles []requiredConformanceBundle) []string {
+func verifyRequiredPassingBundles(ctx context.Context, repoRoot string, bundles []requiredConformanceBundle) []string {
 	var failures []string
 	for _, bundle := range bundles {
 		opts := defaultVerifyCommandOptions()
 		opts.contractsPath = bundle.Root
-		opts.configPath = configPath
+		opts.configPath = bundle.ConfigPath
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
 		code := runVerifyCommandWithOutput(ctx, repoRoot, opts, &stdout, &stderr)

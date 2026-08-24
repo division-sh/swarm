@@ -20475,7 +20475,10 @@ test_specification:
       discovery: >
         Every directory matching tests/tier*/* is a classified fixture. Every package.yaml below examples/ and every
         admitted scaffold archetype is additionally a required passing bundle; nested example packages are included
-        rather than inferred through their parent.
+        rather than inferred through their parent. Filesystem discovery and the admitted-archetype registry are the
+        live denominators; no hard-coded cardinality may preempt bundle verification. Examples verify against the
+        canonical conformance runtime config, while each materialized archetype verifies against the exact generated
+        <working-dir>/swarm.yaml taught by its scaffold command.
       metadata_owner: Each fixture's expected.yaml top-level conformance block.
       fail_closed: >
         A missing expected.yaml or conformance block, an invalid disposition,
@@ -20487,7 +20490,10 @@ test_specification:
         malformed repository-relative paths. The required verify/boot gate runs
         every classified tier fixture, discovered example package, and admitted
         archetype through the supported verifier, reports every failing bundle in
-        one pass, and is mutation-proven to name a newly broken bundle.
+        one pass, and is mutation-proven through live recursive discovery to name
+        every newly broken bundle with loader evidence. A generated archetype
+        config mutation must also fail through that archetype's exact supported
+        config path; a shared synthetic config receives no archetype credit.
       dispositions:
         runtime: >
           The fixture must pass supported swarm verify and execute its exact
