@@ -129,8 +129,8 @@ func TestCanonicalFormsRegistryOwnsCompleteDecoderInventory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("collect custom YAML decoders: %v", err)
 	}
-	if record.Inventory.CustomUnmarshalTotal != 101 || len(expected) != 101 || len(actual) != 101 {
-		t.Fatalf("decoder inventory registry/coverage/source = %d/%d/%d, want 101/101/101", record.Inventory.CustomUnmarshalTotal, len(expected), len(actual))
+	if record.Inventory.CustomUnmarshalTotal != 102 || len(expected) != 102 || len(actual) != 102 {
+		t.Fatalf("decoder inventory registry/coverage/source = %d/%d/%d, want 102/102/102", record.Inventory.CustomUnmarshalTotal, len(expected), len(actual))
 	}
 	if err := validateCustomYAMLDecoderInventory(expected, actual); err != nil {
 		t.Fatal(err)
