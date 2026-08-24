@@ -42,11 +42,12 @@ classification_tests:
   f2_bug: "An accepted spelling changes, disappears, or is independently reinterpreted after decode."
 
 inventory:
-  custom_unmarshal_total: 101
+  custom_unmarshal_total: 102
   custom_unmarshal_breakdown:
     contracts: 89
     flowmodel_policy: 11
     agentintent: 1
+    contract_element_identity: 1
   yaml_node_functions_in_contracts: 215
   yaml_tagged_fields_in_contracts_flowmodel_agentintent: 926
   yaml_tagged_fields_in_reachable_pack_layers: 167
@@ -782,9 +783,11 @@ decoder_coverage:
     policy.module: [PolicyModule, PolicyModuleRuntime, PolicyModuleLimits]
   agentintent/model.go:
     agent.behavior: [Source]
+  core/contractelementidentity/identity.go:
+    handler.rules_shape: [ContractElementID]
 
 registry_result:
-  completeness: "all 101 custom unmarshallers plus strict reachable structs mapped"
+  completeness: "all 102 custom unmarshallers plus strict reachable structs mapped"
   wave_1_status: closed
   later_wave_gate: "presence-sensitive retirements remain blocked on the effective-model/presence-substrate design gate"
 
