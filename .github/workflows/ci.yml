@@ -274,6 +274,8 @@ jobs:
         run: go run ./cmd/swarm-test -- ./internal/serveapp -run '^TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction$' -count=1 -v
       - name: Prove runner-owned Docker service
         run: go run ./cmd/swarm-test -- ./internal/testutil -run '^TestStartPostgres_Smoke$' -count=1
+      - name: Prove real Docker queue before second provisioning
+        run: go test ./internal/testpostgres -run '^TestSwarmTestDockerRunnersQueueBeforeSecondProvision$' -count=1 -v
       - name: Prove runner failure, interrupt, and hard-death reconciliation
         shell: bash
         run: |
@@ -284,11 +286,20 @@ jobs:
           SWARM_TEST_PROCESS_FIXTURE_FAIL=1 "$runner" -- ./internal/testpostgres -run '^TestSwarmTestProcessFixture$' -count=1; child_status=$?
           set -e
           test "$child_status" -eq 1
-          interrupt_pid="$RUNNER_TEMP/interrupt.pid"
-          SWARM_TEST_PROCESS_FIXTURE_PID="$interrupt_pid" "$runner" -- ./internal/testpostgres -run '^TestSwarmTestProcessFixture$' -count=1 & runner_pid=$!
-          for _ in $(seq 1 120); do test -s "$interrupt_pid" && break; sleep 0.25; done
-          kill -TERM "$runner_pid"; wait "$runner_pid" || true
-          test -z "$(docker ps -aq --filter label=com.division.swarm.test-postgres.managed=1)"
+          for signal in INT TERM; do
+            expected=130; if [ "$signal" = TERM ]; then expected=143; fi
+            signal_pid="$RUNNER_TEMP/${signal,,}.pid"
+            SWARM_TEST_PROCESS_FIXTURE_PID="$signal_pid" "$runner" -- ./internal/testpostgres -run '^TestSwarmTestProcessFixture$' -count=1 & runner_pid=$!
+            for _ in $(seq 1 120); do test -s "$signal_pid" && break; sleep 0.25; done
+            kill -"$signal" "$runner_pid"
+            set +e; wait "$runner_pid"; signal_status=$?; set -e
+            test "$signal_status" -eq "$expected"
+            signal_child=$(cat "$signal_pid")
+            for _ in $(seq 1 120); do ! kill -0 "$signal_child" 2>/dev/null && break; sleep 0.25; done
+            ! kill -0 "$signal_child" 2>/dev/null
+            "$runner" -- ./internal/testpostgres -run '^TestRunCapacityFromEnvironment$' -count=1
+            test -z "$(docker ps -aq --filter label=com.division.swarm.test-postgres.managed=1)"
+          done
           hard_pid="$RUNNER_TEMP/hard.pid"
           SWARM_TEST_PROCESS_FIXTURE_PID="$hard_pid" "$runner" -- ./internal/testpostgres -run '^TestSwarmTestProcessFixture$' -count=1 & runner_pid=$!
           for _ in $(seq 1 120); do test -s "$hard_pid" && break; sleep 0.25; done

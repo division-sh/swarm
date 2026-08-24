@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -44,6 +45,7 @@ func run(args []string) int {
 
 	queueCtx, cancelQueue := context.WithCancel(context.Background())
 	defer cancelQueue()
+	var receivedSignal atomic.Int32
 	signals := make(chan os.Signal, 2)
 	forwardSignals := make(chan os.Signal, 2)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
@@ -60,6 +62,9 @@ func run(args []string) int {
 		for {
 			select {
 			case sig := <-signals:
+				if value, ok := sig.(syscall.Signal); ok {
+					receivedSignal.CompareAndSwap(0, int32(value))
+				}
 				cancelQueue()
 				select {
 				case forwardSignals <- sig:
@@ -77,7 +82,7 @@ func run(args []string) int {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		if errors.Is(err, context.Canceled) {
-			return 130
+			return receivedSignalExitCode(receivedSignal.Load())
 		}
 		return 1
 	}
@@ -92,7 +97,7 @@ func run(args []string) int {
 		if code := completeLease(false); code != 0 {
 			return code
 		}
-		return 130
+		return receivedSignalExitCode(receivedSignal.Load())
 	}
 
 	connection, explicit, err := testpostgres.ConnectionFromEnvironmentIfSet()
@@ -142,6 +147,9 @@ func run(args []string) int {
 		} else {
 			fmt.Fprintf(os.Stderr, "%s: %v\n", message, err)
 		}
+		if value := receivedSignal.Load(); value != 0 {
+			return receivedSignalExitCode(value)
+		}
 		return 1
 	}
 
@@ -149,11 +157,15 @@ func run(args []string) int {
 	if err != nil {
 		return failBeforeStart("build child Postgres environment", err)
 	}
+	childEnv = append(childEnv, testpostgres.RunWrapperEnv+"=1")
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Env = childEnv
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	if err := prepareChildProcessTree(cmd); err != nil {
+		return failBeforeStart("prepare test process tree", err)
+	}
 	if err := lease.InheritTo(cmd); err != nil {
 		return failBeforeStart("attach test slot to child", err)
 	}
@@ -179,7 +191,9 @@ func run(args []string) int {
 		for {
 			select {
 			case sig := <-forwardSignals:
-				_ = cmd.Process.Signal(sig)
+				if err := signalChildProcessTree(cmd, sig); err != nil && !errors.Is(err, os.ErrProcessDone) {
+					fmt.Fprintf(os.Stderr, "signal test process tree: %v\n", err)
+				}
 			case <-done:
 				return
 			}
@@ -199,6 +213,9 @@ func run(args []string) int {
 		fmt.Fprintf(os.Stderr, "release test slot: %v (child result: %v)\n", leaseErr, waitErr)
 		return 1
 	}
+	if value := receivedSignal.Load(); value != 0 {
+		return receivedSignalExitCode(value)
+	}
 	if waitErr == nil {
 		return 0
 	}
@@ -208,6 +225,13 @@ func run(args []string) int {
 	}
 	fmt.Fprintf(os.Stderr, "wait for go test: %v\n", waitErr)
 	return 1
+}
+
+func receivedSignalExitCode(value int32) int {
+	if value <= 0 {
+		return 1
+	}
+	return 128 + int(value)
 }
 
 func parseTestArgs(args []string) ([]string, error) {

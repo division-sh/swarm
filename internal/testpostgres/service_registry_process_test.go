@@ -88,6 +88,9 @@ func TestCreatorFenceSurvivesRunnerDeathUntilTerminalHandoff(t *testing.T) {
 }
 
 func TestSwarmTestDockerRunnersQueueBeforeSecondProvision(t *testing.T) {
+	if os.Getenv(RunWrapperEnv) == "1" {
+		t.Skip("wrapper-of-wrapper Docker proof runs only from the unwrapped semantic-smoke topology")
+	}
 	docker, err := exec.LookPath("docker")
 	if err != nil {
 		t.Skip("Docker is required for the concurrent supported-path proof")
