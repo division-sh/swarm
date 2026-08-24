@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -62,6 +63,7 @@ func TestManagedProvidersExecuteCanonicalNotifyHumanThroughSelectedStore(t *test
 				eventtest.UUID("managed-hitl-provider:"+backend), events.EventType("work.requested"), "operator", "task-1",
 				json.RawMessage(`{"candidate":"case-7"}`), 0, hitlProviderTestRunID, events.EventEnvelope{}, time.Unix(1, 0).UTC(),
 			)
+			ctx = runtimecorrelation.WithInboundEvent(ctx, event)
 
 			withoutExecutor, err := llm.NewManagedConversation(seed, "mutation", definitions, agentmemory.Authored(false), 4, provider.runtime)
 			if err != nil {
@@ -316,6 +318,12 @@ func managedHITLProviderSeed(t *testing.T, actor models.AgentConfig, runtime llm
 func managedHITLProviderContext(t *testing.T, harness *effecttest.Harness, actor models.AgentConfig) context.Context {
 	t.Helper()
 	ctx := harness.CompletionContext("managed-hitl-provider:" + actor.ID)
+	admission, ok := managedexecution.FromContext(ctx)
+	if !ok {
+		t.Fatal("managed HITL provider context requires execution admission")
+	}
+	admission.BundleHash = hitlProviderTestBundleHash
+	ctx = managedexecution.WithAdmission(ctx, admission)
 	ctx = models.WithActor(ctx, actor)
 	ctx = runtimecorrelation.WithRunID(ctx, hitlProviderTestRunID)
 	ctx = agentmemory.WithExecution(ctx, agentmemory.Authored(false), agentmemory.Identity{RunID: hitlProviderTestRunID, Agent: actor.Identity})
