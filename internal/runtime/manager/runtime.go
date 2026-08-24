@@ -1793,22 +1793,12 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 						}
 						evt := delivery.Event()
 						stop := func() (stop bool) {
-							carrier, carrierErr := worklifetime.NewEventDeliveryCarrierGuard(delivery)
-							if carrierErr != nil {
+							carrier, executionLease, admissionErr := am.admitDequeuedAgentDelivery(loopCtx, delivery, token, agent.ID(), evt)
+							if admissionErr != nil {
 								return true
 							}
-							reportCarrierFailure := func(err error) {
-								if am.bus != nil {
-									am.bus.LogRuntime(loopCtx, runtimepipeline.RuntimeLogEntry{
-										Level: "error", Component: "agent-manager", Action: "delivery_carrier_transfer_failed",
-										EventID: strings.TrimSpace(evt.ID()), EventType: strings.TrimSpace(string(evt.Type())), AgentID: agent.ID(),
-										Failure: failureEnvelope(err, "agent-manager", "settle_delivery_carrier"),
-									})
-									return
-								}
-								diaglog.ProcessLog(diaglog.LevelError, "agent-manager", "delivery carrier transfer failed",
-									"agent_id", agent.ID(), "event_id", evt.ID(), "error", err.Error())
-							}
+							defer executionLease.Release()
+							reportCarrierFailure := func(err error) { am.reportDeliveryCarrierFailure(loopCtx, agent.ID(), evt, err) }
 							defer func() {
 								if _, completionErr := carrier.Complete(reportCarrierFailure); completionErr != nil {
 									stop = true
@@ -1817,7 +1807,7 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 							if am.shutdownAdmissionClosed() {
 								return true
 							}
-							eventWork, err := am.lifecycle.beginWork(delivery.Context(), eventWorkOwner)
+							eventWork, err := am.lifecycle.beginWork(executionLease.Context, eventWorkOwner)
 							if err != nil {
 								return true
 							}
@@ -1841,7 +1831,7 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 							}
 							route := delivery.HandoffRoute()
 							evtCtx, closeEvtCtx, contextErr := agentDeliveryExecutionContext(
-								eventWork.Context(), loopCtx, token, deliveryOwner, evt, route, am.receiverExecution,
+								eventWork.Context(), executionLease.Context, token, deliveryOwner, evt, route, am.receiverExecution,
 								am.bus.AdmitBundleSourceFact,
 							)
 							if contextErr != nil {
@@ -2024,6 +2014,40 @@ func (am *AgentManager) launchExecutionLoop(parent context.Context, execution *a
 			}
 		}
 	}()
+}
+
+func (am *AgentManager) admitDequeuedAgentDelivery(
+	loopCtx context.Context,
+	delivery *worklifetime.EventDelivery,
+	token runtimeeffects.LifecycleToken,
+	agentID string,
+	evt events.Event,
+) (*worklifetime.DeliveryCarrierGuard, *agentExecutionLease, error) {
+	carrier, err := worklifetime.NewEventDeliveryCarrierGuard(delivery)
+	if err != nil {
+		return nil, nil, err
+	}
+	lease, err := am.lifecycle.acquireDeliveryExecution(delivery.Context(), token)
+	if err == nil {
+		return carrier, lease, nil
+	}
+	_, completionErr := carrier.Complete(func(completeErr error) {
+		am.reportDeliveryCarrierFailure(loopCtx, agentID, evt, completeErr)
+	})
+	return nil, nil, errors.Join(err, completionErr)
+}
+
+func (am *AgentManager) reportDeliveryCarrierFailure(ctx context.Context, agentID string, evt events.Event, err error) {
+	if am.bus != nil {
+		am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+			Level: "error", Component: "agent-manager", Action: "delivery_carrier_transfer_failed",
+			EventID: strings.TrimSpace(evt.ID()), EventType: strings.TrimSpace(string(evt.Type())), AgentID: agentID,
+			Failure: failureEnvelope(err, "agent-manager", "settle_delivery_carrier"),
+		})
+		return
+	}
+	diaglog.ProcessLog(diaglog.LevelError, "agent-manager", "delivery carrier transfer failed",
+		"agent_id", agentID, "event_id", evt.ID(), "error", err.Error())
 }
 
 func agentDeliveryExecutionContext(

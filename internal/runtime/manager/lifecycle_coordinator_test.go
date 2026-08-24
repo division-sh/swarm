@@ -616,6 +616,149 @@ func TestLifecycleCoordinatorSelfRetirementCommitsAfterAcceptedLoopSettles(t *te
 	}
 }
 
+func TestLifecycleCoordinatorDeliveryAdmissionFenceWins(t *testing.T) {
+	probe := newLifecyclePersistenceProbe()
+	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
+	rec := lifecycleTestPersistedAgent(t)
+	if err := coordinator.registerExecution(
+		testAuthorActivityContext(context.Background()), rec, true,
+		reconfigureTestAgent{id: rec.Config.ID}, testManagerSubscriptionAdmission(t, rec.Config),
+	); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	beginCoordinatorRun(t, coordinator, testAuthorActivityContext(context.Background()), AgentRunModeStandard)
+	loopCtx, token, done, err := replaceCoordinatorLoop(coordinator, testAuthorActivityContext(context.Background()), rec, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	coordinator.mu.Lock()
+	coordinator.cells[token.Identity.Normalize()].execution.routeToken = token
+	coordinator.mu.Unlock()
+
+	if _, err := coordinator.terminateIdentityWithTopologyExpected(
+		testAuthorActivityContext(context.Background()), rec.Config.Identity, "flow_instance_terminal",
+		AgentLifecycleTerminated, nil, nil, true,
+	); err != nil {
+		t.Fatalf("fence execution: %v", err)
+	}
+	if lease, err := coordinator.acquireDeliveryExecution(loopCtx, token); err == nil {
+		lease.Release()
+		t.Fatal("fenced execution admitted a delivery")
+	}
+	if err := releaseCoordinatorLoop(coordinator, token, done); err != nil {
+		t.Fatalf("release fenced loop: %v", err)
+	}
+}
+
+func TestLifecycleCoordinatorDeliveryAdmissionWinsBeforeDeferredFence(t *testing.T) {
+	probe := newLifecyclePersistenceProbe()
+	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
+	rec := lifecycleTestPersistedAgent(t)
+	if err := coordinator.registerExecution(
+		testAuthorActivityContext(context.Background()), rec, true,
+		reconfigureTestAgent{id: rec.Config.ID}, testManagerSubscriptionAdmission(t, rec.Config),
+	); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	beginCoordinatorRun(t, coordinator, testAuthorActivityContext(context.Background()), AgentRunModeStandard)
+	loopCtx, token, done, err := replaceCoordinatorLoop(coordinator, testAuthorActivityContext(context.Background()), rec, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	coordinator.mu.Lock()
+	coordinator.cells[token.Identity.Normalize()].execution.routeToken = token
+	coordinator.mu.Unlock()
+
+	lease, err := coordinator.acquireDeliveryExecution(loopCtx, token)
+	if err != nil {
+		t.Fatalf("admit delivery before fence: %v", err)
+	}
+	if _, err := coordinator.terminateIdentityWithTopologyExpected(
+		testAuthorActivityContext(context.Background()), rec.Config.Identity, "flow_instance_terminal",
+		AgentLifecycleTerminated, nil, nil, true,
+	); err != nil {
+		t.Fatalf("defer execution fence: %v", err)
+	}
+	select {
+	case <-lease.Context.Done():
+		t.Fatal("deferred fence cancelled already-admitted delivery work")
+	default:
+	}
+	if second, err := coordinator.acquireDeliveryExecution(loopCtx, token); err == nil {
+		second.Release()
+		t.Fatal("deferred fence admitted a second delivery")
+	}
+	lease.Release()
+	if err := releaseCoordinatorLoop(coordinator, token, done); err != nil {
+		t.Fatalf("release accepted loop: %v", err)
+	}
+}
+
+func TestLifecycleCoordinatorReplacementRejectsPredecessorDeliveryAdmission(t *testing.T) {
+	tests := []struct {
+		name    string
+		trigger string
+		mutate  func(*PersistedAgent)
+	}{
+		{name: "restart", trigger: "restart"},
+		{name: "reconfigure", trigger: "reconfigure", mutate: func(rec *PersistedAgent) { rec.Config.Role = "replacement-worker" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			probe := newLifecyclePersistenceProbe()
+			coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
+			rec := lifecycleTestPersistedAgent(t)
+			if err := coordinator.registerExecution(
+				testAuthorActivityContext(context.Background()), rec, true,
+				reconfigureTestAgent{id: rec.Config.ID}, testManagerSubscriptionAdmission(t, rec.Config),
+			); err != nil {
+				t.Fatalf("register: %v", err)
+			}
+			beginCoordinatorRun(t, coordinator, testAuthorActivityContext(context.Background()), AgentRunModeStandard)
+			oldCtx, oldToken, oldDone, err := replaceCoordinatorLoop(coordinator, testAuthorActivityContext(context.Background()), rec, "start", uuid.NewString(), nil, runtimesessions.LifecycleMutationPlan{})
+			if err != nil {
+				t.Fatalf("start: %v", err)
+			}
+			coordinator.mu.Lock()
+			coordinator.cells[oldToken.Identity.Normalize()].execution.routeToken = oldToken
+			coordinator.mu.Unlock()
+			go func() {
+				<-oldCtx.Done()
+				_ = releaseCoordinatorLoop(coordinator, oldToken, oldDone)
+			}()
+
+			replacement := rec
+			var replacementRecord *PersistedAgent
+			if test.mutate != nil {
+				test.mutate(&replacement)
+				replacementRecord = &replacement
+			}
+			newCtx, newToken, newDone, err := replaceCoordinatorLoop(coordinator, testAuthorActivityContext(context.Background()), rec, test.trigger, uuid.NewString(), replacementRecord, runtimesessions.LifecycleMutationPlan{})
+			if err != nil {
+				t.Fatalf("replace execution: %v", err)
+			}
+			coordinator.mu.Lock()
+			coordinator.cells[newToken.Identity.Normalize()].execution.routeToken = newToken
+			coordinator.mu.Unlock()
+			if lease, err := coordinator.acquireDeliveryExecution(context.Background(), oldToken); err == nil {
+				lease.Release()
+				t.Fatal("replacement admitted predecessor delivery token")
+			}
+			lease, err := coordinator.acquireDeliveryExecution(newCtx, newToken)
+			if err != nil {
+				t.Fatalf("replacement token delivery admission: %v", err)
+			}
+			lease.Release()
+
+			coordinator.cancelShutdownWork()
+			<-newCtx.Done()
+			if err := releaseCoordinatorLoop(coordinator, newToken, newDone); err != nil {
+				t.Fatalf("release replacement loop: %v", err)
+			}
+		})
+	}
+}
+
 func TestLifecycleCoordinatorRestartVersusTeardownNeverResurrectsLoop(t *testing.T) {
 	probe := newLifecyclePersistenceProbe()
 	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)

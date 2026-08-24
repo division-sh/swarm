@@ -16,6 +16,7 @@ import (
 	runtimeagentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -206,10 +207,25 @@ func (b *projectionTestBus) ReplaceAgentRoute(token runtimeeffects.LifecycleToke
 func (b *projectionTestBus) FenceAgentRoute(runtimeeffects.LifecycleToken) {}
 func (b *projectionTestBus) RemoveAgentRoute(token runtimeeffects.LifecycleToken) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	b.removed = append(b.removed, token)
+	var retired projectionTestRoute
 	if route, ok := b.routes[token.AgentID]; ok && route.token == token {
+		retired = route
 		delete(b.routes, token.AgentID)
+	}
+	b.mu.Unlock()
+	for retired.channel != nil {
+		select {
+		case delivery, ok := <-retired.channel:
+			if !ok {
+				return
+			}
+			if delivery != nil {
+				_ = delivery.Complete()
+			}
+		default:
+			return
+		}
 	}
 }
 func (b *projectionTestBus) send(agentID string, event events.Event) error {
@@ -272,11 +288,29 @@ type projectionBacklogAgent struct {
 	eventRelease <-chan struct{}
 }
 
+type projectionSelfRetiringAgent struct {
+	projectionTestAgent
+	identity runtimeagentidentity.Identity
+	started  chan<- struct{}
+	release  <-chan struct{}
+	retire   func(context.Context, runtimeagentidentity.Identity) error
+	handled  atomic.Int32
+}
+
 func (a *projectionBacklogAgent) OnEvent(ctx context.Context, _ events.Event) ([]events.Event, error) {
 	token, _ := runtimeeffects.LifecycleTokenFromContext(ctx)
 	a.eventStarted <- token
 	<-a.eventRelease
 	return nil, nil
+}
+
+func (a *projectionSelfRetiringAgent) OnEvent(ctx context.Context, _ events.Event) ([]events.Event, error) {
+	if a.handled.Add(1) != 1 {
+		return nil, nil
+	}
+	a.started <- struct{}{}
+	<-a.release
+	return nil, a.retire(ctx, a.identity)
 }
 
 func (a *projectionDirectiveAgent) BoardStep(ctx context.Context, _ runtimeagentcontrol.BoardDirective) (string, error) {
@@ -842,6 +876,7 @@ type projectionResolutionOwner struct {
 	resolved   chan projectionCarrierResolution
 	released   chan struct{}
 	releases   atomic.Int32
+	resolves   atomic.Int32
 }
 
 func (*projectionResolutionOwner) AcceptCommitted([]runtimedelivery.DurableHandoffProof) error {
@@ -870,6 +905,7 @@ type projectionResolutionContinuation struct {
 
 func (c *projectionResolutionContinuation) DeliveryID() string { return c.deliveryID }
 func (c *projectionResolutionContinuation) Resolve(_ context.Context, intent worklifetime.DeliveryContinuationIntent) (worklifetime.DeliveryContinuationResolution, error) {
+	c.owner.resolves.Add(1)
 	resolution := c.owner.resolution
 	if resolution == 0 {
 		if intent == worklifetime.DeliveryContinuationReturn {
@@ -889,9 +925,13 @@ type projectionScriptedClaimStore struct {
 	result   runtimedelivery.ClaimResult
 	err      error
 	delegate bool
+	claims   *atomic.Int32
 }
 
 func (s projectionScriptedClaimStore) ClaimDelivery(ctx context.Context, authority runtimedelivery.ExecutionAuthority, evt events.Event, route events.DeliveryRoute) (runtimedelivery.ClaimResult, error) {
+	if s.claims != nil {
+		s.claims.Add(1)
+	}
 	if s.delegate {
 		return s.Store.ClaimDelivery(ctx, authority, evt, route)
 	}
@@ -1087,5 +1127,145 @@ func TestRunningManagerDeliveryCarrierDispositionMatrix(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestAgentManagerFenceWinsDequeuedDeliveryAdmissionReturnsContinuationOnce(t *testing.T) {
+	bus := newProjectionTestBus()
+	handled := make(chan int, 1)
+	am := newProjectionTestManager(t, bus, func(cfg models.AgentConfig) (Agent, error) {
+		return &projectionTestAgent{id: cfg.ID, subs: []events.EventType{"test.old"}, handled: handled}, nil
+	})
+	const agentID = "fenced-dequeued-agent"
+	identity := runtimeagentidentitytest.RootRuntime(t, agentID, "fenced-dequeued-test")
+	if err := spawnManagerTestAgent(am, managerTestAgentConfig(models.AgentConfig{
+		ExecutionMode: "live", ID: agentID, Identity: identity, Subscriptions: []string{"test.old"},
+	})); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))
+	defer cancelRun()
+	if err := am.Run(managedExecutionTestContext(t, runCtx)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	route, ok := bus.current(agentID)
+	if !ok {
+		t.Fatal("running route missing")
+	}
+	if err := am.teardownIdentityAfterTerminalEvent(runCtx, identity, "test_fence", true); err != nil {
+		t.Fatalf("fence execution: %v", err)
+	}
+
+	evt := projectionRuntimeEvent("fenced-dequeued-event", "test.old")
+	deliveryRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID), AgentIdentity: identity}
+	delivery, err := bus.owner.NewRoutedEventDelivery(testAuthorActivityContext(context.Background()), evt, deliveryRoute)
+	if err != nil {
+		t.Fatalf("construct dequeued carrier: %v", err)
+	}
+	owner := &projectionResolutionOwner{resolved: make(chan projectionCarrierResolution, 1), released: make(chan struct{}, 1)}
+	continuation, err := owner.Acquire(eventtest.UUID("fenced-dequeued-delivery"))
+	if err != nil {
+		t.Fatalf("acquire continuation: %v", err)
+	}
+	if err := delivery.AttachContinuation(continuation); err != nil {
+		t.Fatalf("attach continuation: %v", err)
+	}
+	var claims atomic.Int32
+	am.deliveryStore = projectionScriptedClaimStore{Store: am.deliveryStore, delegate: true, claims: &claims}
+	carrier, lease, err := am.admitDequeuedAgentDelivery(runCtx, delivery, route.token, agentID, evt)
+	if err == nil || carrier != nil || lease != nil {
+		t.Fatalf("fenced admission = carrier %v lease %v err %v, want rejected", carrier != nil, lease != nil, err)
+	}
+	select {
+	case resolution := <-owner.resolved:
+		if resolution.intent != worklifetime.DeliveryContinuationReturn || resolution.resolution != worklifetime.DeliveryContinuationReturned {
+			t.Fatalf("fenced continuation = %+v, want one return", resolution)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("fenced dequeued carrier was not returned")
+	}
+	if got := owner.resolves.Load(); got != 1 {
+		t.Fatalf("continuation resolutions = %d, want exactly 1", got)
+	}
+	if got := claims.Load(); got != 0 {
+		t.Fatalf("delivery claims after fence = %d, want 0", got)
+	}
+	select {
+	case <-handled:
+		t.Fatal("fenced dequeued delivery reached handler")
+	default:
+	}
+	if err := am.ShutdownWithOptions(ShutdownOptions{Grace: 2 * time.Second}); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+}
+
+func TestAgentManagerDeferredSelfRetirementSettlesAcceptedAndReturnsBufferedDelivery(t *testing.T) {
+	bus := newProjectionTestBus()
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var am *AgentManager
+	var retiring *projectionSelfRetiringAgent
+	am = newProjectionTestManager(t, bus, func(cfg models.AgentConfig) (Agent, error) {
+		retiring = &projectionSelfRetiringAgent{
+			projectionTestAgent: projectionTestAgent{id: cfg.ID, subs: []events.EventType{"test.old"}},
+			identity:            cfg.Identity, started: started, release: release,
+			retire: func(ctx context.Context, identity runtimeagentidentity.Identity) error {
+				return am.teardownIdentityAfterTerminalEvent(ctx, identity, "flow_instance_terminal", true)
+			},
+		}
+		return retiring, nil
+	})
+	const agentID = "self-retiring-buffered-agent"
+	if err := spawnManagerTestAgent(am, managerTestAgentConfig(models.AgentConfig{
+		ExecutionMode: "live", ID: agentID,
+		Identity:      runtimeagentidentitytest.RootRuntime(t, agentID, "self-retiring-buffered-test"),
+		Subscriptions: []string{"test.old"},
+	})); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	runCtx, cancelRun := context.WithCancel(testAuthorActivityContext(context.Background()))
+	defer cancelRun()
+	if err := am.Run(managedExecutionTestContext(t, runCtx)); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	authority := projectionDeliveryAuthorities(t)["normal"]
+	bus.authority = authority
+	owner := &projectionResolutionOwner{resolved: make(chan projectionCarrierResolution, 4), released: make(chan struct{}, 1)}
+	bus.continuations = owner
+
+	if err := bus.send(agentID, projectionRuntimeEvent("self-retiring-first", "test.old")); err != nil {
+		t.Fatalf("send accepted delivery: %v", err)
+	}
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("accepted delivery did not reach handler")
+	}
+	if err := bus.send(agentID, projectionRuntimeEvent("self-retiring-second", "test.old")); err != nil {
+		t.Fatalf("buffer second delivery: %v", err)
+	}
+	close(release)
+
+	intents := map[worklifetime.DeliveryContinuationIntent]int{}
+	for len(intents) < 2 || intents[worklifetime.DeliveryContinuationConsume]+intents[worklifetime.DeliveryContinuationReturn] < 2 {
+		select {
+		case resolution := <-owner.resolved:
+			intents[resolution.intent]++
+		case <-time.After(2 * time.Second):
+			t.Fatalf("continuation dispositions = %#v, want one consume and one return", intents)
+		}
+	}
+	if intents[worklifetime.DeliveryContinuationConsume] != 1 || intents[worklifetime.DeliveryContinuationReturn] != 1 {
+		t.Fatalf("continuation dispositions = %#v, want one consume and one return", intents)
+	}
+	if got := retiring.handled.Load(); got != 1 {
+		t.Fatalf("handled deliveries = %d, want exactly 1", got)
+	}
+	if got := owner.resolves.Load(); got != 2 {
+		t.Fatalf("continuation resolutions = %d, want exactly 2", got)
+	}
+	if err := am.ShutdownWithOptions(ShutdownOptions{Grace: 2 * time.Second}); err != nil {
+		t.Fatalf("shutdown: %v", err)
 	}
 }
