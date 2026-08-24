@@ -64,7 +64,7 @@ def handle(input):
     return {"calls": [{"name": "notify_human", "arguments": {"summary": "Strong match found"}}], "usage": {"input_tokens": 7, "output_tokens": 3}}
 `)
 	harness := effecttest.New()
-	ctx := llmTestWorkContext(t, harness.CompletionContext("mock-turn"))
+	ctx := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, "mock-turn"))
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeMock)
 	actor := runtimeactors.AgentConfig{
 		ID: "effect-test-agent", ExecutionMode: runtimeeffects.ExecutionModeMock,

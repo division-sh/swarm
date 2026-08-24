@@ -1318,7 +1318,7 @@ func TestPostTSourceConversationHistoryActivatesAsBranchDivergence(t *testing.T)
 				}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: at.Add(time.Minute), OriginEvent: &event}); err != nil {
 					return err
 				}
-				_, err = pg.SettleSuccess(ctx, claimed.Claim, nil, time.Millisecond)
+				_, err = pg.SettleSuccess(ctx, claimed.Claim, nil, time.Millisecond, runtimedelivery.NotApplicableHandlerRuleSelection())
 				return err
 			},
 		},
@@ -1581,7 +1581,7 @@ func TestSelectedContractActivationAllowsFreshForkConversationRows(t *testing.T)
 	}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: at.Add(3 * time.Second), OriginEvent: &turnEvent}); err != nil {
 		t.Fatalf("seed fork turn: %v", err)
 	}
-	if _, err := pg.SettleSuccess(ctx, turnClaim.Claim, nil, time.Millisecond); err != nil {
+	if _, err := pg.SettleSuccess(ctx, turnClaim.Claim, nil, time.Millisecond, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 		t.Fatalf("settle fork turn origin: %v", err)
 	}
 
@@ -2069,7 +2069,7 @@ func seedSelectedContractSourceConversationHistoryWithDelivery(t *testing.T, db 
 		t.Fatalf("seed source turn: %v", err)
 	}
 	if !keepDelivery {
-		if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, time.Millisecond); err != nil {
+		if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, time.Millisecond, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 			t.Fatalf("settle source turn origin: %v", err)
 		}
 	}

@@ -173,7 +173,7 @@ func seedOperatorConversationProjectionFixture(t *testing.T, backend operatorCon
 	seedOperatorConversationProjectionTurn(t, backend, operatorConversationProjectionTurnSeed{identity: identity, turnID: turnIDs[3], runID: runID, sessionID: sessionID, entityID: entityID, triggerEventID: publishEventID, triggerType: "task.done", taskID: "task-4", turnBlocks: mixedBlocks, latencyMS: 404, failure: mixedFailure, createdAt: lastAt})
 	seedOperatorConversationProjectionTurn(t, backend, operatorConversationProjectionTurnSeed{identity: malformedIdentity, turnID: turnIDs[4], runID: runID, sessionID: malformedSessionID, triggerEventID: malformedEventID, triggerType: "task.malformed", taskID: "task-malformed", turnBlocks: validMalformedSeedBlocks, parseOK: true, latencyMS: 1, createdAt: lastAt})
 	for _, claim := range backend.claims {
-		if _, err := backend.settlement.SettleSuccess(testAuthorActivityContext(), claim, nil, time.Millisecond); err != nil {
+		if _, err := backend.settlement.SettleSuccess(testAuthorActivityContext(), claim, nil, time.Millisecond, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 			t.Fatalf("settle projection fixture delivery: %v", err)
 		}
 	}

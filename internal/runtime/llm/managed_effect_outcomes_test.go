@@ -74,7 +74,7 @@ func TestManagedProviderEffectOutcomes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			harness := effecttest.New()
 			client := &http.Client{Transport: effectRoundTripper{t: t, harness: harness, adapter: tt.adapter}}
-			ctx := llmTestWorkContext(t, harness.CompletionContext("provider-"+tt.name))
+			ctx := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, "provider-"+tt.name))
 			dispatch, err := tt.send(ctx, client)
 			if err == nil {
 				t.Fatal("provider transport failure returned nil")
@@ -90,7 +90,7 @@ func TestManagedProviderEffectOutcomes(t *testing.T) {
 			stale := effecttest.New()
 			stale.AuthorizeErr = errors.New("superseded generation")
 			staleClient := &http.Client{Transport: effectRoundTripper{t: t, harness: stale, adapter: tt.adapter}}
-			if _, err := tt.send(stale.CompletionContext("provider-stale-"+tt.name), staleClient); err == nil {
+			if _, err := tt.send(managedEffectHarnessContext(t, stale, "provider-stale-"+tt.name), staleClient); err == nil {
 				t.Fatal("stale provider effect was admitted")
 			}
 			if _, launched := stale.StateForAdapter(tt.adapter); launched {
@@ -102,7 +102,7 @@ func TestManagedProviderEffectOutcomes(t *testing.T) {
 
 func TestManagedClaudeCLIEffectOutcomes(t *testing.T) {
 	harness := effecttest.New()
-	ctx := llmTestWorkContext(t, harness.CompletionContext("claude-cli-start"))
+	ctx := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, "claude-cli-start"))
 	attempt, err := beginManagedTestCompletion(t, ctx, "claude_cli", []byte("request"))
 	if err != nil {
 		t.Fatalf("authorize claude attempt: %v", err)
@@ -134,7 +134,7 @@ func TestManagedClaudeCLIEffectOutcomes(t *testing.T) {
 	stale := effecttest.New()
 	stale.AuthorizeErr = errors.New("superseded generation")
 	marker := t.TempDir() + "/started"
-	staleCtx := stale.CompletionContext("claude-cli-stale")
+	staleCtx := managedEffectHarnessContext(t, stale, "claude-cli-stale")
 	if _, err := beginManagedTestCompletion(t, staleCtx, "claude_cli", []byte("request")); err == nil {
 		t.Fatal("stale CLI process was admitted")
 	}
@@ -145,7 +145,7 @@ func TestManagedClaudeCLIEffectOutcomes(t *testing.T) {
 
 func TestManagedClaudeCLIStreamingSetupFailureSettlesPrelaunch(t *testing.T) {
 	harness := effecttest.New()
-	ctx := llmTestWorkContext(t, harness.CompletionContext("claude-cli-monitor-prelaunch"))
+	ctx := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, "claude-cli-monitor-prelaunch"))
 	attempt, err := beginManagedTestCompletion(t, ctx, "claude_cli", []byte("request"))
 	if err != nil {
 		t.Fatalf("authorize claude attempt: %v", err)

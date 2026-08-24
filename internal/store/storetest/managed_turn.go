@@ -32,7 +32,7 @@ type ManagedAgentTurnFixtureStore interface {
 	runtimeeffects.CompletionHeartbeatStore
 	DeliveryLifecycleStore
 	LoadAgentLifecycleState(context.Context, agentidentity.Identity) (runtimemanager.AgentLifecycleState, bool, error)
-	SettleSuccess(context.Context, runtimedelivery.Claim, []string, time.Duration) (runtimedelivery.Snapshot, error)
+	SettleSuccess(context.Context, runtimedelivery.Claim, []string, time.Duration, runtimedelivery.HandlerRuleSelectionFact) (runtimedelivery.Snapshot, error)
 }
 
 type ManagedAgentTurnFixture struct {
@@ -129,7 +129,7 @@ func PersistManagedAgentTurnFixture(t testing.TB, ctx context.Context, fixture M
 		adapter = "anthropic_api"
 	}
 	surface := managedTurnFixtureSurface(t, authority, adapter)
-	frame := managedTurnFixtureFrame(t, authority, surface, fixture.Event)
+	frame := managedTurnFixtureFrame(t, authority, surface, fixture.Event, bundleSource)
 
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}
 	if fixture.DeliveryRoute != nil {
@@ -159,6 +159,7 @@ func PersistManagedAgentTurnFixture(t testing.TB, ctx context.Context, fixture M
 	executionCtx = runtimeeffects.WithExecutionMode(executionCtx, mode)
 	executionCtx = runtimeeffects.WithLogicalOperationIdentity(executionCtx, "storetest-managed-turn:"+fixture.TurnID)
 	executionCtx = runtimedelivery.WithClaim(executionCtx, claimed.Claim)
+	executionCtx = runtimecorrelation.WithInboundEvent(executionCtx, fixture.Event)
 	executionCtx = managedexecution.WithAdmission(executionCtx, admission)
 	executionCtx = managedcapabilities.WithContext(executionCtx, surface)
 	handle, err := runtimeeffects.BeginManagedCompletion(executionCtx, adapter, []byte(`{"fixture":"managed-turn"}`), frame, nil)
@@ -204,7 +205,7 @@ func PersistManagedAgentTurnFixture(t testing.TB, ctx context.Context, fixture M
 		t.Fatalf("settle managed turn fixture: committed=%v err=%v", result.Committed, err)
 	}
 	if !fixture.KeepDelivery {
-		if _, err := fixture.Store.SettleSuccess(ctx, claimed.Claim, nil, fixture.Latency); err != nil {
+		if _, err := fixture.Store.SettleSuccess(ctx, claimed.Claim, nil, fixture.Latency, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 			t.Fatalf("settle managed turn fixture delivery: %v", err)
 		}
 	}
@@ -237,8 +238,9 @@ func managedTurnFixtureSurface(t testing.TB, authority runtimeeffects.Authority,
 	return surface
 }
 
-func managedTurnFixtureFrame(t testing.TB, authority runtimeeffects.Authority, surface managedcapabilities.Surface, event events.Event) agentframe.Frame {
+func managedTurnFixtureFrame(t testing.TB, authority runtimeeffects.Authority, surface managedcapabilities.Surface, event events.Event, source runtimecorrelation.BundleSourceFact) agentframe.Frame {
 	t.Helper()
+	bundleHash, bundleSource := source.StorageValues()
 	intent, err := agentintent.Resolve(agentintent.SourceInline, "inline", "agents.yaml#agents.storetest.intent", "Persist the admitted managed turn fixture.")
 	if err != nil {
 		t.Fatalf("resolve managed turn fixture intent: %v", err)
@@ -256,7 +258,7 @@ func managedTurnFixtureFrame(t testing.TB, authority runtimeeffects.Authority, s
 		RuntimeMode: surface.RuntimeMode, Provider: surface.Provider, Transport: surface.Transport,
 		ModelAlias: "regular", Model: "storetest-model",
 	}, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: event}, agentframe.Completion{
-		BundleHash: managedTurnFixtureBundleHash, BundleSource: "persisted", Surface: surface,
+		BundleHash: bundleHash, BundleSource: bundleSource, Surface: surface,
 	})
 	if err != nil {
 		t.Fatalf("complete managed turn fixture frame: %v", err)

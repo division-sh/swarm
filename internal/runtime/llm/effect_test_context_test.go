@@ -12,9 +12,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentintent"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
+	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 )
 
 func unmanagedLLMTestContext() context.Context {
@@ -80,7 +83,45 @@ func managedProviderTestContext(t *testing.T, ctx context.Context, runtime Runti
 	if err != nil {
 		t.Fatalf("managedCapabilityPlanForTurn: %v", err)
 	}
-	return managedcapabilities.WithContext(ctx, surface)
+	ctx = managedcapabilities.WithContext(ctx, surface)
+	admission, ok := managedexecution.FromContext(ctx)
+	if !ok {
+		t.Fatal("managed provider test context requires execution admission")
+	}
+	if _, ok := runtimecorrelation.BundleSourceFactFromContext(ctx); !ok {
+		fact, err := runtimecorrelation.NewPersistedBundleSourceFact(admission.BundleHash)
+		if err != nil {
+			t.Fatalf("managed provider test bundle source: %v", err)
+		}
+		ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
+	}
+	mode, ok := runtimeeffects.ExecutionModeFromContext(ctx)
+	if !ok {
+		mode = runtimeeffects.ExecutionModeLive
+	}
+	return runtimecorrelation.WithInboundEvent(ctx, managedProviderEffectTestEvent(surface.Authority.RunID, mode))
+}
+
+func managedProviderEffectTestEvent(runID string, mode runtimeeffects.ExecutionMode) events.Event {
+	return eventtest.RunCreatingRootIngressWithMode(
+		"66666666-6666-4666-8666-666666666666", "effect.test.requested", "operator", "effect-test",
+		json.RawMessage(`{ "effect": "test" }`), 0, runID, "",
+		events.EnvelopeForEntityID(events.EventEnvelope{}, "77777777-7777-4777-8777-777777777777"), time.Unix(1, 0).UTC(), mode,
+	)
+}
+
+func managedEffectHarnessContext(t testing.TB, harness *effecttest.Harness, identity string) context.Context {
+	t.Helper()
+	ctx := harness.CompletionContext(identity)
+	surface, ok := managedcapabilities.FromContext(ctx)
+	if !ok {
+		t.Fatal("managed effect test context requires capability surface")
+	}
+	mode, ok := runtimeeffects.ExecutionModeFromContext(ctx)
+	if !ok {
+		mode = runtimeeffects.ExecutionModeLive
+	}
+	return runtimecorrelation.WithInboundEvent(ctx, managedProviderEffectTestEvent(surface.Authority.RunID, mode))
 }
 
 func managedProviderCallForEffectTest(t testing.TB, ctx context.Context) *managedProviderCall {
@@ -105,18 +146,21 @@ func managedProviderCallForEffectTest(t testing.TB, ctx context.Context) *manage
 	if !ok {
 		mode = runtimeeffects.ExecutionModeLive
 	}
-	event := eventtest.RunCreatingRootIngressWithMode(
-		"66666666-6666-4666-8666-666666666666", "effect.test.requested", "operator", "effect-test",
-		json.RawMessage(`{ "effect": "test" }`), 0, surface.Authority.RunID, "",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, "77777777-7777-4777-8777-777777777777"), time.Unix(1, 0).UTC(), mode,
-	)
+	event, ok := runtimecorrelation.InboundEventFromContext(ctx)
+	if !ok {
+		event = managedProviderEffectTestEvent(surface.Authority.RunID, mode)
+	}
+	bundleHash := "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	bundleSource := "persisted"
+	if fact, found := runtimecorrelation.BundleSourceFactFromContext(ctx); found {
+		bundleHash, bundleSource = fact.StorageValues()
+	}
 	frame, err := agentframe.Complete(agentframe.SessionSeed{
 		AgentIdentity: surface.ActorIdentity, Role: "effect-test", Intent: intent, ProviderPrompt: providerPrompt,
 		RuntimeMode: surface.RuntimeMode, Provider: surface.Provider, Transport: surface.Transport,
 		ModelAlias: "regular", Model: "effect-test-model",
 	}, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: event}, agentframe.Completion{
-		BundleHash:   "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-		BundleSource: "persisted", Surface: surface,
+		BundleHash: bundleHash, BundleSource: bundleSource, Surface: surface,
 	})
 	if err != nil {
 		t.Fatalf("complete effect-test frame: %v", err)

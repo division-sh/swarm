@@ -914,7 +914,7 @@ func (c *Controller) Authorize(ctx context.Context, req AuthorizeRequest) (Attem
 			if req.AgentFrame == nil {
 				return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "agent_execution_frame_missing_or_mismatched", "external-effects", "authorize_attempt", map[string]any{"adapter": req.Adapter})
 			}
-			if err := ValidateManagedAgentFrame(*req.AgentFrame, authority, validated); err != nil {
+			if err := validateManagedAgentFramePrelaunch(ctx, *req.AgentFrame, authority, validated); err != nil {
 				return Attempt{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "agent_execution_frame_authority_mismatch", "external-effects", "authorize_attempt", map[string]any{
 					"adapter": req.Adapter, "validation_error": err.Error(),
 				})

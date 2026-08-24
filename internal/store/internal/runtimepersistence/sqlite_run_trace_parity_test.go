@@ -221,7 +221,7 @@ func TestSQLiteRunDebugTracePageIncludesStatelessAuditSessionsInWatermark(t *tes
 		t.Fatalf("claim task delivery: %v", err)
 	}
 	insertSQLiteTraceTurnWithMemory(t, ctx, sqliteStore, claimed.Claim, event, turnID, runID, agentID, sessionID, false, base.Add(2*time.Second))
-	delivered, err := sqliteStore.SettleSuccess(ctx, claimed.Claim, nil, time.Millisecond)
+	delivered, err := sqliteStore.SettleSuccess(ctx, claimed.Claim, nil, time.Millisecond, runtimedelivery.NotApplicableHandlerRuleSelection())
 	if err != nil {
 		t.Fatalf("settle task delivery: %v", err)
 	}

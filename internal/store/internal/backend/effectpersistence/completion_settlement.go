@@ -278,8 +278,13 @@ func validateCompletionAttemptRow(attempt runtimeeffects.Attempt, settlement run
 		return fmt.Errorf("completion attempt capability surface does not match settlement")
 	}
 	switch runtimeeffects.State(state) {
-	case runtimeeffects.StateAuthorized, runtimeeffects.StateLaunched, runtimeeffects.StateResponseObserved:
+	case runtimeeffects.StateLaunched, runtimeeffects.StateResponseObserved:
 		return nil
+	case runtimeeffects.StateAuthorized:
+		if settlement.AgentTurn == nil {
+			return nil
+		}
+		return fmt.Errorf("completion attempt cannot materialize an agent turn from state %s", state)
 	default:
 		return fmt.Errorf("completion attempt is already terminal in state %s", state)
 	}

@@ -254,6 +254,12 @@ func TestClaudeAttemptStartRejectionRetriesThroughSelectedStore(t *testing.T) {
 			if got := readClaudeAttemptProofCount(t, captureDir); got != 1 {
 				t.Fatalf("provider process count = %d, want one started process", got)
 			}
+			if turns, spend := loadClaudeAttemptProofCompletionRows(t, backend, attempts[0].id); turns != 0 || spend != 0 {
+				t.Fatalf("prelaunch attempt materialized completion rows turns=%d spend=%d, want 0/0", turns, spend)
+			}
+			if turns, spend := loadClaudeAttemptProofCompletionRows(t, backend, attempts[1].id); turns != 1 || spend != 1 {
+				t.Fatalf("successful retry completion rows turns=%d spend=%d, want exactly 1/1", turns, spend)
+			}
 		})
 	}
 }
@@ -606,7 +612,7 @@ func claudeAttemptProofAdmissionContextForGeneration(t testing.TB, generation ui
 		generation,
 		"",
 		"claude-attempt-proof-actors",
-		"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		claudeAttemptProofBundleHash,
 		nil,
 	)
 	if err != nil {

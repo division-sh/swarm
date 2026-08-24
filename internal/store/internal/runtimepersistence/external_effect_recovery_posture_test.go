@@ -74,6 +74,20 @@ func TestExternalEffectRecoveryPostureAdmissionGenericSQLiteAndPostgres(t *testi
 	}
 }
 
+func assertProviderRecoveryCompletionRows(t *testing.T, db *sql.DB, sqlite bool, attempts []recoveryPostureAttempt) {
+	t.Helper()
+	for _, attempt := range attempts {
+		snapshot := readExternalEffectRecoverySnapshot(t, db, sqlite, attempt)
+		wantTurns := 1
+		if attempt.Initial == runtimeeffects.StateAuthorized {
+			wantTurns = 0
+		}
+		if snapshot.AgentTurns != wantTurns || snapshot.SpendRows != 0 {
+			t.Fatalf("recovered provider attempt %s from %s has turns/spend=%d/%d, want %d/0", attempt.AttemptID, attempt.Initial, snapshot.AgentTurns, snapshot.SpendRows, wantTurns)
+		}
+	}
+}
+
 func TestExternalEffectRecoveryPostureAdmissionProviderTurnSQLiteAndPostgres(t *testing.T) {
 	for _, backend := range []struct {
 		name string
@@ -111,6 +125,7 @@ func TestExternalEffectRecoveryPostureAdmissionProviderTurnSQLiteAndPostgres(t *
 				t.Fatalf("mock provider recovery summary = %#v, want 1/2", summary)
 			}
 			assertRecoveredPostureMatrix(t, fixture.db, fixture.sqlite, mock)
+			assertProviderRecoveryCompletionRows(t, fixture.db, fixture.sqlite, mock)
 
 			live := beginProviderRecoveryPostureMatrix(t, fixture, executionmode.Live, now.Add(time.Minute))
 			before := snapshotExternalEffectRecoveryMatrix(t, fixture.db, fixture.sqlite, live)

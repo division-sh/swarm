@@ -909,7 +909,7 @@ func TestRunForkPlanner_RunScopedActiveSessionAndTurnRemainBlockers(t *testing.T
 	}, managedAgentTurnFixtureOptions{TurnID: turnID, Now: at, OriginEvent: &event}); err != nil {
 		t.Fatalf("seed active turn: %v", err)
 	}
-	if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, time.Millisecond); err != nil {
+	if _, err := pg.SettleSuccess(ctx, claimed.Claim, nil, time.Millisecond, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 		t.Fatalf("settle active turn origin: %v", err)
 	}
 
