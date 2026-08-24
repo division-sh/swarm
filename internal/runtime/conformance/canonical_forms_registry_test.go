@@ -9,11 +9,14 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"gopkg.in/yaml.v3"
 )
 
@@ -32,17 +35,26 @@ var canonicalGoCorpusExcludedDirectories = map[string]string{
 	"vendor": "vendored source is not repository-owned production code",
 }
 
+var canonicalDecoderExclusionClassifications = map[string]struct{}{
+	"deployment.swarm_yaml": {},
+}
+
+var unquotedConnectYAMLKey = regexp.MustCompile(`(?m)^[\t ]*(?:-[\t ]+)?connect[\t ]*:`)
+
 type canonicalFormsRegistry struct {
-	Kind            string                         `yaml:"kind"`
-	RegistryVersion int                            `yaml:"registry_version"`
-	Inventory       canonicalFormsInventory        `yaml:"inventory"`
-	Rows            []canonicalFormsRow            `yaml:"rows"`
-	DecoderCoverage map[string]map[string][]string `yaml:"decoder_coverage"`
-	Wave1           canonicalFormsWave1            `yaml:"wave_1"`
+	Kind              string                         `yaml:"kind"`
+	RegistryVersion   int                            `yaml:"registry_version"`
+	Inventory         canonicalFormsInventory        `yaml:"inventory"`
+	Rows              []canonicalFormsRow            `yaml:"rows"`
+	DecoderCoverage   map[string]map[string][]string `yaml:"decoder_coverage"`
+	DecoderExclusions map[string]map[string][]string `yaml:"decoder_exclusions"`
+	Wave1             canonicalFormsWave1            `yaml:"wave_1"`
 }
 
 type canonicalFormsInventory struct {
-	CustomUnmarshalTotal int `yaml:"custom_unmarshal_total"`
+	CustomUnmarshalTotal     int `yaml:"custom_unmarshal_total"`
+	CustomUnmarshalReachable int `yaml:"custom_unmarshal_reachable"`
+	CustomUnmarshalExcluded  int `yaml:"custom_unmarshal_excluded"`
 }
 
 type canonicalFormsRow struct {
@@ -110,7 +122,7 @@ func TestCanonicalFormsRegistryOwnsCompleteDecoderInventory(t *testing.T) {
 		t.Fatalf("wave 1 registry = %#v", record.Wave1)
 	}
 
-	expected := make(map[string]string)
+	expectedReachable := make(map[string]string)
 	for file, rowMappings := range record.DecoderCoverage {
 		for rowID, receiverTypes := range rowMappings {
 			if _, ok := rows[rowID]; !ok {
@@ -118,10 +130,28 @@ func TestCanonicalFormsRegistryOwnsCompleteDecoderInventory(t *testing.T) {
 			}
 			for _, receiverType := range receiverTypes {
 				identity := canonicalDecoderIdentity(file, receiverType)
-				if previous, exists := expected[identity]; exists {
+				if previous, exists := expectedReachable[identity]; exists {
 					t.Fatalf("decoder %s is mapped by both %s and %s", identity, previous, rowID)
 				}
-				expected[identity] = rowID
+				expectedReachable[identity] = rowID
+			}
+		}
+	}
+	expectedExcluded := make(map[string]string)
+	for file, surfaceMappings := range record.DecoderExclusions {
+		for surface, receiverTypes := range surfaceMappings {
+			if _, ok := canonicalDecoderExclusionClassifications[surface]; !ok {
+				t.Fatalf("decoder exclusion %s has unsupported surface %q", file, surface)
+			}
+			for _, receiverType := range receiverTypes {
+				identity := canonicalDecoderIdentity(file, receiverType)
+				if owner, exists := expectedReachable[identity]; exists {
+					t.Fatalf("decoder %s is both reachable through %s and excluded as %s", identity, owner, surface)
+				}
+				if previous, exists := expectedExcluded[identity]; exists {
+					t.Fatalf("decoder %s is excluded by both %s and %s", identity, previous, surface)
+				}
+				expectedExcluded[identity] = surface
 			}
 		}
 	}
@@ -129,10 +159,10 @@ func TestCanonicalFormsRegistryOwnsCompleteDecoderInventory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("collect custom YAML decoders: %v", err)
 	}
-	if record.Inventory.CustomUnmarshalTotal != 102 || len(expected) != 102 || len(actual) != 102 {
-		t.Fatalf("decoder inventory registry/coverage/source = %d/%d/%d, want 102/102/102", record.Inventory.CustomUnmarshalTotal, len(expected), len(actual))
+	if record.Inventory.CustomUnmarshalTotal != 104 || record.Inventory.CustomUnmarshalReachable != 103 || record.Inventory.CustomUnmarshalExcluded != 1 || len(expectedReachable) != 103 || len(expectedExcluded) != 1 || len(actual) != 104 {
+		t.Fatalf("decoder inventory total/reachable/excluded/coverage/exclusion/source = %d/%d/%d/%d/%d/%d, want 104/103/1/103/1/104", record.Inventory.CustomUnmarshalTotal, record.Inventory.CustomUnmarshalReachable, record.Inventory.CustomUnmarshalExcluded, len(expectedReachable), len(expectedExcluded), len(actual))
 	}
-	if err := validateCustomYAMLDecoderInventory(expected, actual); err != nil {
+	if err := validateCustomYAMLDecoderInventory(expectedReachable, expectedExcluded, actual); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -152,12 +182,74 @@ func (*Probe) UnmarshalYAML(*yaml.Node) error { return nil }
 	if err != nil {
 		t.Fatalf("collect custom YAML decoders: %v", err)
 	}
-	if err := validateCustomYAMLDecoderInventory(map[string]string{}, actual); err == nil || !strings.Contains(err.Error(), "gate2313probe/probe.go:Probe") {
+	if err := validateCustomYAMLDecoderInventory(map[string]string{}, map[string]string{}, actual); err == nil || !strings.Contains(err.Error(), "gate2313probe/probe.go:Probe") {
 		t.Fatalf("unregistered decoder validation error = %v, want nested decoder identity", err)
 	}
 	registered := map[string]string{"gate2313probe/probe.go:Probe": "mutation.probe"}
-	if err := validateCustomYAMLDecoderInventory(registered, actual); err != nil {
+	if err := validateCustomYAMLDecoderInventory(registered, map[string]string{}, actual); err != nil {
 		t.Fatalf("registered decoder validation: %v", err)
+	}
+}
+
+func TestCanonicalFormsRegistryRejectsNonRuntimeDecoderUntilClassified(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "internal/packs/nested/gate2313probe/probe.go")
+	writeRegistryMutationFile(t, path, `package gate2313probe
+
+import "gopkg.in/yaml.v3"
+
+type Probe struct{}
+
+func (*Probe) UnmarshalYAML(*yaml.Node) error { return nil }
+`)
+	actual, err := collectCustomYAMLDecoders(root)
+	if err != nil {
+		t.Fatalf("collect custom YAML decoders: %v", err)
+	}
+	identity := "internal/packs/nested/gate2313probe/probe.go:Probe"
+	if err := validateCustomYAMLDecoderInventory(map[string]string{}, map[string]string{}, actual); err == nil || !strings.Contains(err.Error(), identity) {
+		t.Fatalf("unregistered decoder validation error = %v, want non-runtime decoder identity", err)
+	}
+	registered := map[string]string{identity: "mutation.probe"}
+	if err := validateCustomYAMLDecoderInventory(registered, map[string]string{}, actual); err != nil {
+		t.Fatalf("registered decoder validation: %v", err)
+	}
+}
+
+func TestCanonicalFormsRegistryPinsCurrentConnectFailureCodes(t *testing.T) {
+	root := conformanceRepoRoot(t)
+	raw, err := os.ReadFile(filepath.Join(root, "platform-spec.yaml"))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	var spec struct {
+		FlowModel struct {
+			FlowPackage struct {
+				CompositionRouting struct {
+					RoutePlanLowering struct {
+						ImplementationSlice1545 struct {
+							FailureReasons []string `yaml:"failure_reasons"`
+						} `yaml:"implementation_slice_1545"`
+					} `yaml:"route_plan_lowering"`
+				} `yaml:"composition_routing"`
+			} `yaml:"flow_package"`
+		} `yaml:"flow_model"`
+	}
+	if err := yaml.Unmarshal(raw, &spec); err != nil {
+		t.Fatalf("decode platform spec: %v", err)
+	}
+	got := append([]string(nil), spec.FlowModel.FlowPackage.CompositionRouting.RoutePlanLowering.ImplementationSlice1545.FailureReasons...)
+	want := make([]string, 0, int(runtimepinrouting.ConnectFailureLifecycleUnavailable))
+	for failure := runtimepinrouting.ConnectFailureSourceMissing; failure <= runtimepinrouting.ConnectFailureLifecycleUnavailable; failure++ {
+		want = append(want, failure.Code())
+	}
+	sort.Strings(got)
+	sort.Strings(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("platform connect failure reasons = %v, runtime owner = %v", got, want)
+	}
+	if _, err := runtimepinrouting.ParseTargetFailure("connect_pin_ref_invalid"); err == nil {
+		t.Fatal("retired connect_pin_ref_invalid remains API-admissible")
 	}
 }
 
@@ -262,7 +354,7 @@ func TestCanonicalFormsRegistryPinsWave1CorpusLedger(t *testing.T) {
 		t.Fatalf("scan connect-shaped Go corpus: %v", err)
 	}
 	if len(goFiles) != record.Wave1.GoConnectCorpus.TotalFiles || !reflect.DeepEqual(goFiles, record.Wave1.GoConnectCorpus.Files) {
-		t.Fatalf("classified connect-shaped Go corpus = %d files, registry = %d; actual=%v", len(goFiles), record.Wave1.GoConnectCorpus.TotalFiles, mapKeyDifference(goFiles, record.Wave1.GoConnectCorpus.Files))
+		t.Fatalf("classified connect-shaped Go corpus = %d files, registry = %d; unregistered=%v stale=%v", len(goFiles), record.Wave1.GoConnectCorpus.TotalFiles, mapKeyDifference(goFiles, record.Wave1.GoConnectCorpus.Files), mapKeyDifference(record.Wave1.GoConnectCorpus.Files, goFiles))
 	}
 	if canonicalRoutingOccurrences != record.Wave1.GoConnectCorpus.CanonicalRoutingOccurrences {
 		t.Fatalf("canonicalrouting connect occurrences = %d, want %d", canonicalRoutingOccurrences, record.Wave1.GoConnectCorpus.CanonicalRoutingOccurrences)
@@ -272,7 +364,7 @@ func TestCanonicalFormsRegistryPinsWave1CorpusLedger(t *testing.T) {
 func TestCanonicalFormsRegistryRejectsOutsideInternalConnectProducerUntilRegistered(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "cmd/gate2313probe/main.go")
-	writeRegistryMutationFile(t, path, "package main\n\nvar packageDocument = `"+"connect"+": []`\n")
+	writeRegistryMutationFile(t, path, "package main\n\nvar packageDocument = `"+"con"+"nect : []`\n")
 	if _, _, err := collectGoConnectCorpus(root, map[string]string{}); err == nil || !strings.Contains(err.Error(), "cmd/gate2313probe/main.go") {
 		t.Fatalf("unregistered producer validation error = %v, want outside-internal producer path", err)
 	}
@@ -305,10 +397,17 @@ func loadCanonicalFormsRegistry(t testing.TB, root string) canonicalFormsRegistr
 
 func collectCustomYAMLDecoders(root string) (map[string]string, error) {
 	out := make(map[string]string)
-	runtimeRoot := filepath.Join(root, "internal/runtime")
-	err := filepath.WalkDir(runtimeRoot, func(path string, entry os.DirEntry, walkErr error) error {
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
+		}
+		if entry.IsDir() {
+			if path != root {
+				if _, excluded := canonicalGoCorpusExcludedDirectories[entry.Name()]; excluded {
+					return filepath.SkipDir
+				}
+			}
+			return nil
 		}
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
 			return nil
@@ -324,12 +423,11 @@ func collectCustomYAMLDecoders(root string) (map[string]string, error) {
 		if err != nil {
 			return fmt.Errorf("parse %s: %w", path, err)
 		}
-		relative, err := filepath.Rel(runtimeRoot, path)
+		relative, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
 		}
-		key := filepath.ToSlash(relative)
-		key = strings.TrimPrefix(key, "contracts/")
+		key := canonicalDecoderFileKey(filepath.ToSlash(relative))
 		for _, decl := range parsed.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok || fn.Name.Name != "UnmarshalYAML" || fn.Recv == nil || len(fn.Recv.List) != 1 {
@@ -350,7 +448,17 @@ func collectCustomYAMLDecoders(root string) (map[string]string, error) {
 	return out, nil
 }
 
-func validateCustomYAMLDecoderInventory(expected, actual map[string]string) error {
+func validateCustomYAMLDecoderInventory(reachable, excluded, actual map[string]string) error {
+	expected := make(map[string]string, len(reachable)+len(excluded))
+	for identity, classification := range reachable {
+		expected[identity] = classification
+	}
+	for identity, classification := range excluded {
+		if previous, exists := expected[identity]; exists {
+			return fmt.Errorf("decoder %s is classified as both %s and %s", identity, previous, classification)
+		}
+		expected[identity] = classification
+	}
 	missing, extra := mapKeyDifference(expected, actual), mapKeyDifference(actual, expected)
 	if len(missing) > 0 || len(extra) > 0 {
 		return fmt.Errorf("decoder inventory drift\nmissing from source: %v\nunmapped source decoders: %v", missing, extra)
@@ -366,7 +474,6 @@ func collectGoConnectCorpus(root string, classifications map[string]string) (map
 	}
 	files := make(map[string]string)
 	canonicalRoutingOccurrences := 0
-	connectMarker := []byte("connect" + ":")
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -386,7 +493,11 @@ func collectGoConnectCorpus(root string, classifications map[string]string) (map
 		if err != nil {
 			return err
 		}
-		if !bytes.Contains(raw, connectMarker) {
+		occurrences, err := countGoStringLiteralConnectKeys(path, raw)
+		if err != nil {
+			return err
+		}
+		if occurrences == 0 {
 			return nil
 		}
 		relative, err := filepath.Rel(root, path)
@@ -400,11 +511,32 @@ func collectGoConnectCorpus(root string, classifications map[string]string) (map
 		}
 		files[relative] = classification
 		if strings.Contains(relative, "/testfixtures/canonicalrouting/") {
-			canonicalRoutingOccurrences += bytes.Count(raw, connectMarker)
+			canonicalRoutingOccurrences += occurrences
 		}
 		return nil
 	})
 	return files, canonicalRoutingOccurrences, err
+}
+
+func countGoStringLiteralConnectKeys(path string, raw []byte) (int, error) {
+	parsed, err := parser.ParseFile(token.NewFileSet(), path, raw, 0)
+	if err != nil {
+		return 0, fmt.Errorf("parse %s: %w", path, err)
+	}
+	count := 0
+	ast.Inspect(parsed, func(node ast.Node) bool {
+		literal, ok := node.(*ast.BasicLit)
+		if !ok || literal.Kind != token.STRING {
+			return true
+		}
+		content, err := strconv.Unquote(literal.Value)
+		if err != nil {
+			return true
+		}
+		count += len(unquotedConnectYAMLKey.FindAllStringIndex(content, -1))
+		return true
+	})
+	return count, nil
 }
 
 func writeRegistryMutationFile(t testing.TB, path, content string) {
@@ -425,6 +557,16 @@ func yamlReceiverType(expr ast.Expr) string {
 		return identifier.Name
 	}
 	return ""
+}
+
+func canonicalDecoderFileKey(relative string) string {
+	if key, ok := strings.CutPrefix(relative, "internal/runtime/contracts/"); ok {
+		return key
+	}
+	if key, ok := strings.CutPrefix(relative, "internal/runtime/"); ok {
+		return key
+	}
+	return relative
 }
 
 func canonicalDecoderIdentity(file, receiverType string) string {

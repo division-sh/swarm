@@ -42,12 +42,16 @@ classification_tests:
   f2_bug: "An accepted spelling changes, disappears, or is independently reinterpreted after decode."
 
 inventory:
-  custom_unmarshal_total: 102
+  custom_unmarshal_total: 104
+  custom_unmarshal_reachable: 103
+  custom_unmarshal_excluded: 1
   custom_unmarshal_breakdown:
     contracts: 89
     flowmodel_policy: 11
     agentintent: 1
     contract_element_identity: 1
+    channel_pack: 1
+    deployment_config_excluded: 1
   yaml_node_functions_in_contracts: 215
   yaml_tagged_fields_in_contracts_flowmodel_agentintent: 926
   yaml_tagged_fields_in_reachable_pack_layers: 167
@@ -785,9 +789,15 @@ decoder_coverage:
     agent.behavior: [Source]
   core/contractelementidentity/identity.go:
     handler.rules_shape: [ContractElementID]
+  internal/packs/channel.go:
+    pack.channel: [ChannelMapping]
+
+decoder_exclusions:
+  internal/config/config.go:
+    deployment.swarm_yaml: [WorkspaceConfig]
 
 registry_result:
-  completeness: "all 102 custom unmarshallers plus strict reachable structs mapped"
+  completeness: "all 104 production custom unmarshallers classified as 103 bundle-reachable row owners and 1 deployment swarm.yaml exclusion, plus strict reachable structs mapped"
   wave_1_status: closed
   later_wave_gate: "presence-sensitive retirements remain blocked on the effective-model/presence-substrate design gate"
 
@@ -799,19 +809,12 @@ wave_1:
     tests_and_testdata: {files: 11, rows: 13}
     total: {files: 19, rows: 29}
   go_connect_corpus:
-    total_files: 23
+    total_files: 15
     canonicalrouting_occurrences: 35
     files:
       internal/cliapp/describe.go: non_authoring_text
       internal/cliapp/describe_test.go: non_authoring_text
       internal/cliapp/local_context_registry.go: non_authoring_text
-      internal/cliapp/main_test.go: non_authoring_text
-      internal/runtime/authoringview/view_test.go: non_authoring_text
-      internal/runtime/bootverify/workflow_accumulator_safety_checks.go: non_authoring_text
-      internal/runtime/bootverify/workflow_flow_boundary_checks.go: non_authoring_text
-      internal/runtime/bus/eventbus_target_routes_test.go: non_authoring_text
-      internal/runtime/core/pinrouting/connect_route_plan.go: non_authoring_text
-      internal/runtime/core/pinrouting/connect_route_plan_test.go: non_authoring_text
       internal/runtime/testfixtures/canonicalrouting/composition_connect_variants.go: positive_producer_and_mutation_base
       internal/runtime/testfixtures/canonicalrouting/import_boundary_variants.go: positive_producer_and_mutation_base
       internal/runtime/testfixtures/canonicalrouting/legacy_instance_routes.go: positive_producer_and_mutation_base
@@ -824,5 +827,4 @@ wave_1:
       internal/runtime/testfixtures/canonicalrouting/select_entity_demotion.go: positive_producer_and_mutation_base
       internal/runtime/testfixtures/canonicalrouting/supported_surface_routing.go: positive_producer
       internal/runtime/testfixtures/canonicalrouting/target_owner_diamond.go: positive_producer_and_mutation_base
-      internal/store/internal/runtimepersistence/delivery_route_equality_parity_test.go: non_authoring_text
   closure: "all three rows reject retired spellings and admit only canonical forms"
