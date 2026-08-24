@@ -3,6 +3,7 @@ package testpostgres
 import (
 	"crypto/tls"
 	"net/netip"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -357,6 +358,32 @@ func TestWithoutPostgresConnectionEnv(t *testing.T) {
 	want := []string{"PATH=/bin", "SWARM_CONFIG=/tmp/swarm.yaml"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("withoutPostgresConnectionEnv() = %v, want %v", got, want)
+	}
+}
+
+func TestConnectionFromEnvironmentIfSetIsTypedAndFailClosed(t *testing.T) {
+	previous, existed := os.LookupEnv(SourceEnv)
+	if err := os.Unsetenv(SourceEnv); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if existed {
+			_ = os.Setenv(SourceEnv, previous)
+		} else {
+			_ = os.Unsetenv(SourceEnv)
+		}
+	})
+	if _, set, err := ConnectionFromEnvironmentIfSet(); err != nil || set {
+		t.Fatalf("unset source = set=%v err=%v", set, err)
+	}
+	t.Setenv(SourceEnv, " ")
+	if _, set, err := ConnectionFromEnvironmentIfSet(); err == nil || !set {
+		t.Fatalf("empty explicit source = set=%v err=%v, want fail closed", set, err)
+	}
+	t.Setenv(SourceEnv, "postgres://tester:secret@127.0.0.1:5432/postgres?sslmode=disable")
+	connection, set, err := ConnectionFromEnvironmentIfSet()
+	if err != nil || !set || connection.Parameters().User != "tester" {
+		t.Fatalf("typed explicit source = set=%v params=%+v err=%v", set, connection.Parameters(), err)
 	}
 }
 

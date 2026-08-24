@@ -79,7 +79,7 @@ func TestPlanChangedDeletedGoFileWithoutCurrentPackageFallsBackToFullSuite(t *te
 	if !plan.FullSuite {
 		t.Fatalf("FullSuite = false, want true")
 	}
-	if got, want := TestCommand(plan, nil), []string{"go", "test", "./..."}; !reflect.DeepEqual(got, want) {
+	if got, want := TestCommand(plan, nil), []string{"go", "run", "./cmd/swarm-test", "--", "./..."}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("command = %#v, want %#v", got, want)
 	}
 }
@@ -121,7 +121,7 @@ func TestPlanChangedRootDocsFallBackToFullSuite(t *testing.T) {
 	if !reflect.DeepEqual(plan.FullSuiteReasons, wantReasons) {
 		t.Fatalf("full suite reasons = %#v, want %#v", plan.FullSuiteReasons, wantReasons)
 	}
-	if got, want := TestCommand(plan, nil), []string{"go", "test", "./..."}; !reflect.DeepEqual(got, want) {
+	if got, want := TestCommand(plan, nil), []string{"go", "run", "./cmd/swarm-test", "--", "./..."}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("command = %#v, want %#v", got, want)
 	}
 }
@@ -156,7 +156,7 @@ func TestPlanChangedExecutableMarkdownFixtureFallsBackToFullSuite(t *testing.T) 
 	if got, want := plan.FullSuiteReasons, []string{path + " has no owning Go package"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("full suite reasons = %#v, want %#v", got, want)
 	}
-	if got, want := TestCommand(plan, nil), []string{"go", "test", "./..."}; !reflect.DeepEqual(got, want) {
+	if got, want := TestCommand(plan, nil), []string{"go", "run", "./cmd/swarm-test", "--", "./..."}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("command = %#v, want %#v", got, want)
 	}
 }

@@ -49,7 +49,7 @@ Run tests with an invocation-scoped DSN instead of a persistent shell export:
 
 ```bash
 SWARM_TEST_POSTGRES_DSN='host=127.0.0.1 port=5432 user=swarm_test password=swarm-test dbname=postgres sslmode=disable' \
-  go test ./...
+  go run ./cmd/swarm-test
 ```
 
 URL DSNs are equally supported:
@@ -99,7 +99,7 @@ When a dedicated host instance is not available, run the suite through the
 single-service owner:
 
 ```bash
-go run ./cmd/swarm-test-postgres -- go test ./...
+go run ./cmd/swarm-test
 ```
 
 The runner requires an already-running Docker daemon; it does not start Docker

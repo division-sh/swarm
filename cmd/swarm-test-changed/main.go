@@ -119,7 +119,7 @@ func printPlan(w io.Writer, plan testchanged.Plan, extraArgs []string) {
 		fmt.Fprintln(w, "  <none>")
 		return
 	}
-	fmt.Fprintln(w, "go test command:")
+	fmt.Fprintln(w, "test command:")
 	fmt.Fprintf(w, "  %s\n", shellCommand(command))
 }
 
