@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -160,6 +161,242 @@ func TestManagedHITLNamesRejectDiscoveredMCPRedefinition(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHITLIdentityLifecycleRejectsSourceDefinitionsWithoutAgents(t *testing.T) {
+	var transportCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		transportCalls.Add(1)
+	}))
+	defer server.Close()
+
+	identities := []struct {
+		name     string
+		teaching string
+	}{
+		{name: NotifyHumanToolName, teaching: "owned by the platform HITL contract"},
+		{name: AskHumanToolName, teaching: "owned by the platform HITL contract"},
+		{name: WithheldAgentMessageTool, teaching: agentMessageUnavailableTeaching},
+		{name: "mailbox_send", teaching: "use notify_human"},
+		{name: "human_task_request", teaching: "use ask_human"},
+	}
+	for _, identity := range identities {
+		for _, scope := range []string{"root", "project", "flow"} {
+			t.Run(identity.name+"/"+scope, func(t *testing.T) {
+				source := retiredToolSourceForScope(scope, nil, map[string]runtimecontracts.ToolSchemaEntry{
+					identity.name: retiredToolEntry(
+						runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerHTTP),
+						runtimecontracts.WithToolHTTP(runtimecontracts.HTTPToolSpec{Method: http.MethodPost, URL: server.URL}),
+					),
+				}, runtimecontracts.PolicyDocument{})
+
+				if declarations := semanticview.AgentDeclarations(source); len(declarations) != 0 {
+					t.Fatalf("agent declarations = %#v, want zero", declarations)
+				}
+				if _, err := ValidateToolImplementations(source); err == nil || !strings.Contains(err.Error(), identity.teaching) {
+					t.Fatalf("implementation validation error = %v, want %q", err, identity.teaching)
+				}
+				findings := ValidateConfiguredToolFulfillability(source, nil)
+				if len(findings) != 1 || !strings.Contains(findings[0].Reason, identity.teaching) {
+					t.Fatalf("configured-tool findings = %#v, want one %q rejection", findings, identity.teaching)
+				}
+				if _, err := toolDefinitionsForRuntime(source, nil); err == nil || !strings.Contains(err.Error(), identity.teaching) {
+					t.Fatalf("provider catalog error = %v, want %q", err, identity.teaching)
+				}
+				exec := NewExecutorWithOptions(nil, ExecutorOptions{WorkflowSource: source})
+				actor := models.AgentConfig{ExecutionMode: "live", ID: "hostile", Tools: []string{identity.name}}
+				if _, err := exec.dispatchTool(WithActor(context.Background(), actor), actor, identity.name, map[string]any{}); err == nil || !strings.Contains(err.Error(), identity.teaching) {
+					t.Fatalf("dispatch error = %v, want %q", err, identity.teaching)
+				}
+			})
+		}
+	}
+	if got := transportCalls.Load(); got != 0 {
+		t.Fatalf("invalid HITL source definitions reached external transport %d time(s)", got)
+	}
+}
+
+func TestHITLIdentityLifecycleRejectsDiscoveredCandidates(t *testing.T) {
+	identities := []struct {
+		name     string
+		teaching string
+	}{
+		{name: NotifyHumanToolName, teaching: "owned by the platform HITL contract"},
+		{name: AskHumanToolName, teaching: "owned by the platform HITL contract"},
+		{name: WithheldAgentMessageTool, teaching: agentMessageUnavailableTeaching},
+		{name: "mailbox_send", teaching: "use notify_human"},
+		{name: "human_task_request", teaching: "use ask_human"},
+	}
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+	for _, identity := range identities {
+		t.Run(identity.name, func(t *testing.T) {
+			discovered := map[string]runtimemcp.DiscoveredTool{
+				identity.name: {
+					Name: identity.name,
+					Contract: retiredToolEntry(
+						runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerMCP),
+						runtimecontracts.WithToolMCP(runtimecontracts.MustToolMCPBinding("hostile", "send")),
+					),
+				},
+			}
+			if _, err := executionToolsForRuntime(source, discovered); err == nil || !strings.Contains(err.Error(), identity.teaching) {
+				t.Fatalf("runtime catalog error = %v, want %q", err, identity.teaching)
+			}
+			findings := ValidateConfiguredToolFulfillability(source, discovered)
+			if len(findings) != 1 || findings[0].ToolName != identity.name || !strings.Contains(findings[0].Reason, identity.teaching) {
+				t.Fatalf("discovered findings = %#v, want one %q rejection", findings, identity.teaching)
+			}
+		})
+	}
+}
+
+func TestHITLIdentityLifecycleRejectsWithheldAndRetiredReferences(t *testing.T) {
+	identities := []struct {
+		name     string
+		teaching string
+	}{
+		{name: WithheldAgentMessageTool, teaching: agentMessageUnavailableTeaching},
+		{name: "mailbox_send", teaching: "use notify_human"},
+		{name: "human_task_request", teaching: "use ask_human"},
+	}
+	for _, identity := range identities {
+		for _, scope := range []string{"root", "project", "flow"} {
+			for _, surface := range []string{"configured_tool", "direct_permission", "permission_bundle"} {
+				t.Run(identity.name+"/"+scope+"/"+surface, func(t *testing.T) {
+					entry := runtimecontracts.AgentRegistryEntry{ID: "worker"}
+					policy := runtimecontracts.PolicyDocument{}
+					agents := map[string]runtimecontracts.AgentRegistryEntry{"worker": entry}
+					switch surface {
+					case "configured_tool":
+						entry.Tools = []string{identity.name}
+						agents["worker"] = entry
+					case "direct_permission":
+						entry.Permissions = []string{identity.name}
+						agents["worker"] = entry
+					case "permission_bundle":
+						agents = nil
+						policy = hitlLifecyclePermissionBundle(identity.name)
+					}
+					source := retiredToolSourceForScope(scope, agents, nil, policy)
+					errs := ValidateHITLIdentityLifecycleReferences(source)
+					if len(errs) != 1 || !strings.Contains(errs[0].Error(), identity.teaching) {
+						t.Fatalf("lifecycle errors = %v, want one %q rejection", errs, identity.teaching)
+					}
+					if findings := ValidateConfiguredToolFulfillability(source, nil); len(findings) != 1 || !strings.Contains(findings[0].Reason, identity.teaching) {
+						t.Fatalf("configured-tool findings = %#v, want one %q rejection", findings, identity.teaching)
+					}
+					_, permissionErrors := ValidateAgentPermissions(source)
+					if len(permissionErrors) != 1 || !strings.Contains(permissionErrors[0].Error(), identity.teaching) {
+						t.Fatalf("permission errors = %v, want one %q rejection", permissionErrors, identity.teaching)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestHITLIdentityLifecycleRejectsDirectDispatchBeforeResolution(t *testing.T) {
+	for _, identity := range []struct {
+		name     string
+		teaching string
+	}{
+		{name: WithheldAgentMessageTool, teaching: agentMessageUnavailableTeaching},
+		{name: "mailbox_send", teaching: "use notify_human"},
+		{name: "human_task_request", teaching: "use ask_human"},
+	} {
+		t.Run(identity.name, func(t *testing.T) {
+			var resolverCalls atomic.Int32
+			var mcpCalls atomic.Int32
+			dispatcher := NewToolDispatcher(nil,
+				func(models.AgentConfig, string) (ExecutionTool, bool, error) {
+					resolverCalls.Add(1)
+					entry := retiredToolEntry(
+						runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerMCP),
+						runtimecontracts.WithToolMCP(runtimecontracts.MustToolMCPBinding("hostile", "send")),
+					)
+					tool, _ := executionToolFromAdmitted(identity.name, entry)
+					return tool, true, nil
+				}, nil,
+				func(context.Context, models.AgentConfig, ExecutionTool, any) (any, error) {
+					mcpCalls.Add(1)
+					return map[string]any{"mutated": true}, nil
+				}, nil, nil, nil,
+			)
+			if _, err := dispatcher.Dispatch(context.Background(), models.AgentConfig{ID: "hostile"}, identity.name, map[string]any{}); err == nil || !strings.Contains(err.Error(), identity.teaching) {
+				t.Fatalf("Dispatch error = %v, want %q", err, identity.teaching)
+			}
+			if resolverCalls.Load() != 0 || mcpCalls.Load() != 0 {
+				t.Fatalf("invalid identity reached resolver=%d mcp=%d", resolverCalls.Load(), mcpCalls.Load())
+			}
+
+			mailbox := &mailboxStoreStub{}
+			exec := NewExecutorWithOptions(nil, ExecutorOptions{MailboxStore: mailbox})
+			actor := models.AgentConfig{ExecutionMode: "live", ID: "hostile", Tools: []string{identity.name}, Permissions: []string{identity.name}}
+			if _, err := exec.Execute(WithActor(context.Background(), actor), identity.name, map[string]any{}); err == nil || !strings.Contains(err.Error(), identity.teaching) {
+				t.Fatalf("Execute error = %v, want %q", err, identity.teaching)
+			}
+			if mailbox.last.Type != "" {
+				t.Fatalf("invalid identity mutated mailbox: %#v", mailbox.last)
+			}
+		})
+	}
+}
+
+func TestHITLIdentityLifecycleRejectsPermissionExpansion(t *testing.T) {
+	for _, identity := range []struct {
+		name     string
+		teaching string
+	}{
+		{name: WithheldAgentMessageTool, teaching: agentMessageUnavailableTeaching},
+		{name: "mailbox_send", teaching: "use notify_human"},
+		{name: "human_task_request", teaching: "use ask_human"},
+	} {
+		for _, surface := range []string{"direct", "bundle"} {
+			t.Run(identity.name+"/"+surface, func(t *testing.T) {
+				entry := runtimecontracts.AgentRegistryEntry{ID: "worker"}
+				policy := runtimecontracts.PolicyDocument{}
+				if surface == "direct" {
+					entry.Permissions = []string{identity.name}
+				} else {
+					entry.PermissionsBundle = "operators"
+					policy = hitlLifecyclePermissionBundle(identity.name)
+				}
+				if _, err := resolveAgentPermissionsFromPolicy(entry, policy); err == nil || !strings.Contains(err.Error(), identity.teaching) {
+					t.Fatalf("permission expansion error = %v, want %q", err, identity.teaching)
+				}
+			})
+		}
+	}
+}
+
+func TestHITLIdentityLifecyclePreservesActiveReferencesAndAskHumanPermission(t *testing.T) {
+	entry := runtimecontracts.AgentRegistryEntry{
+		ID:          "worker",
+		Tools:       []string{NotifyHumanToolName, AskHumanToolName},
+		Permissions: []string{AskHumanToolName},
+	}
+	source := retiredToolSourceForScope("root", map[string]runtimecontracts.AgentRegistryEntry{"worker": entry}, nil, runtimecontracts.PolicyDocument{})
+	if errs := ValidateHITLIdentityLifecycleReferences(source); len(errs) != 0 {
+		t.Fatalf("active references rejected: %v", errs)
+	}
+	if findings := ValidateConfiguredToolFulfillability(source, nil); len(findings) != 0 {
+		t.Fatalf("active references unfulfillable: %#v", findings)
+	}
+	permissions, err := ResolveAgentPermissions(source, "", entry)
+	if err != nil {
+		t.Fatalf("ResolveAgentPermissions: %v", err)
+	}
+	if got := fmt.Sprint(permissions); got != "[ask_human]" {
+		t.Fatalf("permissions = %s, want [ask_human]", got)
+	}
+}
+
+func hitlLifecyclePermissionBundle(name string) runtimecontracts.PolicyDocument {
+	return runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+		"permission_bundles": {Value: map[string]any{
+			"operators": map[string]any{"permissions": []any{name}},
+		}},
+	}}
 }
 
 func managedHITLTestActor(t *testing.T, source semanticview.Source) models.AgentConfig {

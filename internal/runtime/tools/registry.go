@@ -253,10 +253,9 @@ func mergeExecutionTool(entries map[string]ExecutionTool, name string, execution
 	if name == "" {
 		return nil
 	}
-	if _, managed := hitlToolDescriptorForName(name); managed {
-		if owner != executionToolOwnerPlatformBuiltin || !include || execution.Handler() != runtimecontracts.ToolHandlerPlatformBuiltin {
-			return fmt.Errorf("tool %s is owned by the platform HITL contract and cannot be redefined by %s", name, owner)
-		}
+	canonicalPlatformBuiltin := owner == executionToolOwnerPlatformBuiltin && include && execution.Handler() == runtimecontracts.ToolHandlerPlatformBuiltin
+	if err := hitlIdentityMergeError(name, string(owner), canonicalPlatformBuiltin); err != nil {
+		return err
 	}
 	if !include {
 		return nil
@@ -269,8 +268,9 @@ func mergeExecutionTool(entries map[string]ExecutionTool, name string, execution
 }
 
 func executionToolsForRuntime(source semanticview.Source, discovered map[string]runtimemcp.DiscoveredTool) (map[string]ExecutionTool, error) {
-	if retired := ValidateRetiredDynamicAgentToolReferences(source); len(retired) > 0 {
-		return nil, errors.Join(retired...)
+	authoredErrors := append(ValidateRetiredDynamicAgentToolReferences(source), ValidateHITLIdentityLifecycleReferences(source)...)
+	if len(authoredErrors) > 0 {
+		return nil, errors.Join(authoredErrors...)
 	}
 	builtins, err := builtinExecutionTools(source, nil)
 	if err != nil {
@@ -288,16 +288,19 @@ func executionToolsForRuntime(source semanticview.Source, discovered map[string]
 			if name == "" {
 				continue
 			}
-			if isWithheldAgentMessage(name) {
-				return nil, fmt.Errorf("tool %s %s", name, agentMessageUnavailableTeaching)
-			}
 			execution, include := executionToolFromAdmitted(name, entry)
 			if err := mergeExecutionTool(entries, name, execution, include, executionToolOwnerRoot); err != nil {
 				return nil, err
 			}
 		}
 	}
-	for name, tool := range discovered {
+	discoveredNames := make([]string, 0, len(discovered))
+	for name := range discovered {
+		discoveredNames = append(discoveredNames, name)
+	}
+	sort.Strings(discoveredNames)
+	for _, name := range discoveredNames {
+		tool := discovered[name]
 		name = strings.TrimSpace(name)
 		if name == "" {
 			continue

@@ -21,7 +21,7 @@ func classifyToolAuthorization(actor models.AgentConfig, toolName string, provid
 		ownership: toolOwnershipForName(toolName),
 		class:     toolAuthorizationDenied,
 	}
-	if isWithheldAgentMessage(toolName) {
+	if hitlIdentityReferenceError(toolName, "tool authorization") != nil {
 		return decision
 	}
 	if IsUniversal(toolName) {

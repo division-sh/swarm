@@ -8645,6 +8645,7 @@ tool_model:
       owner: One bounded runtime HITL descriptor projects the exact names, reviewed descriptions, closed schemas, grant kinds, permission requirement, usage guidance, and handlers into the existing catalog and policy owners.
       consumers: [actor_candidate_catalog, structural_verifier, tool_capability_policy, universal_grants, permission_requirements, provider_descriptions, handler_registry]
       rule: A consumer may not maintain a second HITL name or grant list. Descriptor presence alone is not fulfillability; verification consumes the exact scoped actor candidate and grant selected for execution.
+      identity_lifecycle: One bounded lifecycle owner classifies notify_human and ask_human as active platform-owned identities, agent_message as withheld, and mailbox_send and human_task_request as retired. Root, project, and flow tool declarations are validated source-wide even when no agent references them. Configured tools, direct permissions, permission bundles, discovered MCP admission, execution-map merge, candidate construction, and dispatch consume the same lifecycle classification; source artifact presence never changes an identity's lifecycle or grants execution authority.
     unavailable_agent_message:
       status: unavailable_pending_2154
       rule: >-
