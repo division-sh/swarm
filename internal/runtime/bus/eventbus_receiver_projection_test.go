@@ -103,6 +103,56 @@ func TestEventBusWithOptionsRejectsUnconfiguredReceiverExecution(t *testing.T) {
 	}
 }
 
+func TestAcceptedReceiverDispatchDoesNotReadmitAfterOwnerFence(t *testing.T) {
+	process := worklifetime.NewProcess()
+	owner := newReceiverProjectionRuntimeOwner(t, process, "accepted-dispatch")
+	eventBus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{WorkOwner: owner})
+	if err != nil {
+		t.Fatalf("create event bus: %v", err)
+	}
+	evt := receiverProjectionEvent("accepted-before-fence")
+	acceptedCtx, lease, err := eventBus.beginRuntimeWork(hostilePublisherContext(t))
+	if err != nil {
+		t.Fatalf("accept receiver dispatch work: %v", err)
+	}
+	executionCtx, closeExecution, err := acceptedWorkExecutionContext(acceptedCtx)
+	if err != nil {
+		t.Fatalf("project accepted dispatch execution context: %v", err)
+	}
+	defer closeExecution()
+	projection, err := eventBus.receiverProjection(acceptedCtx, evt.DeliveryContext())
+	if err != nil {
+		t.Fatalf("project accepted receiver dispatch: %v", err)
+	}
+	if err := owner.Fence(); err != nil {
+		t.Fatalf("fence receiver owner: %v", err)
+	}
+
+	receiver, closeReceiver, err := eventBus.beginReceiverDispatch(executionCtx, projection, evt)
+	if err != nil {
+		t.Fatalf("continue accepted receiver dispatch after fence: %v", err)
+	}
+	if err := validateClosedReceiverContext(receiver.Context, evt); err != nil {
+		t.Fatal(err)
+	}
+	if err := closeReceiver(); err != nil {
+		t.Fatalf("close accepted receiver dispatch: %v", err)
+	}
+	if _, _, err := eventBus.beginReceiverDispatch(hostilePublisherContext(t), projection, evt); err == nil {
+		t.Fatal("unaccepted receiver dispatch entered after owner fence")
+	}
+	if err := lease.Done(); err != nil {
+		t.Fatalf("settle accepted receiver work: %v", err)
+	}
+	if _, err := owner.RetireAndWait(context.Background()); err != nil {
+		t.Fatalf("retire receiver owner: %v", err)
+	}
+	process.Retire()
+	if _, err := process.Join(context.Background()); err != nil {
+		t.Fatalf("join receiver process: %v", err)
+	}
+}
+
 func (i *receiverProjectionInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	i.eventErr = validateClosedReceiverContext(ctx, evt)
 	return true, nil, runtimepipelineobligation.Continue(), i.eventErr

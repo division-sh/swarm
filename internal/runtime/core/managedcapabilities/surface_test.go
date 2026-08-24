@@ -340,3 +340,43 @@ func TestContinuationFingerprintIgnoresOnlyNormalRuntimeEphemera(t *testing.T) {
 		t.Fatal("callability change preserved continuation fingerprint")
 	}
 }
+
+func TestProjectNormalContinuationChangesOnlyExcludedCoordinates(t *testing.T) {
+	plan := Plan{
+		ActorIdentity: managedCapabilityTestIdentity("worker"), RuntimeMode: "task", Provider: "test", Transport: "api", ProviderContract: "test-contract",
+		Authority: Authority{
+			Kind: AuthorityProviderTurn, ID: "00000000-0000-4000-8000-000000000601",
+			ExecutionKind: ExecutionNormalAgent, ExecutionAuthorityID: "runtime-generation-one",
+			RunID: "00000000-0000-4000-8000-000000000602", SessionID: "00000000-0000-4000-8000-000000000603", TurnOrdinal: 1,
+		},
+		CreatedAt: time.Unix(1, 0).UTC(),
+	}
+	original, err := New(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantFingerprint, err := original.ContinuationFingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	projected, err := original.ProjectNormalContinuation("runtime-generation-two", "00000000-0000-4000-8000-000000000604")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotFingerprint, err := projected.ContinuationFingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotFingerprint != wantFingerprint {
+		t.Fatalf("continuation fingerprint changed from %q to %q", wantFingerprint, gotFingerprint)
+	}
+	if projected.Authority.ExecutionAuthorityID != "runtime-generation-two" || projected.Authority.SessionID != "00000000-0000-4000-8000-000000000604" {
+		t.Fatalf("projected authority = %#v", projected.Authority)
+	}
+	if projected.Authority.ID != original.Authority.ID || projected.Authority.RunID != original.Authority.RunID || projected.Authority.TurnOrdinal != original.Authority.TurnOrdinal {
+		t.Fatalf("projected durable authority changed: before=%#v after=%#v", original.Authority, projected.Authority)
+	}
+	if original.Authority.ExecutionAuthorityID != "runtime-generation-one" || original.Authority.SessionID != "00000000-0000-4000-8000-000000000603" {
+		t.Fatalf("original surface mutated: %#v", original.Authority)
+	}
+}

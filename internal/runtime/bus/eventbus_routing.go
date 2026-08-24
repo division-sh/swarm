@@ -802,7 +802,7 @@ func (eb *EventBus) DispatchDeliveryContinuation(ctx context.Context, evt events
 	if err != nil {
 		return runtimedeliverycontinuation.Fatal(err)
 	}
-	receiverCtx, closeReceiver, err := eb.beginReceiverDispatch(projection, evt)
+	receiverCtx, closeReceiver, err := eb.beginReceiverDispatch(ctx, projection, evt)
 	if err != nil {
 		return runtimedeliverycontinuation.Fatal(err)
 	}

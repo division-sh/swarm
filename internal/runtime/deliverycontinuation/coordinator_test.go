@@ -381,6 +381,7 @@ func TestCoordinatorSynchronizationReturnsExactFatalScanResult(t *testing.T) {
 	if repeated := coordinator.Synchronize(context.Background()); repeated == nil || !strings.Contains(repeated.Error(), "synchronized selected-store failure") {
 		t.Fatalf("repeated Synchronize() error = %v, want retained fatal result", repeated)
 	}
+	requireCoordinatorRejectsPostFailureAdmission(t, coordinator, authority)
 }
 
 func TestCoordinatorStopsAfterUnownedStoreFailure(t *testing.T) {
@@ -512,6 +513,24 @@ func TestCoordinatorStopsAfterFatalDispatchWithoutPolling(t *testing.T) {
 	}
 	if calls := dispatcher.callCount(); calls != 1 {
 		t.Fatalf("fatal dispatch calls = %d, want 1", calls)
+	}
+	requireCoordinatorRejectsPostFailureAdmission(t, coordinator, authority)
+}
+
+func requireCoordinatorRejectsPostFailureAdmission(t *testing.T, coordinator *Coordinator, authority runtimedelivery.ExecutionAuthority) {
+	t.Helper()
+	proof, err := runtimedelivery.AdmitDurableHandoffProof("later-delivery", "later-event", "later-route", authority)
+	if err != nil {
+		t.Fatalf("build later committed handoff: %v", err)
+	}
+	if err := coordinator.AcceptCommitted([]runtimedelivery.DurableHandoffProof{proof}); err == nil || !strings.Contains(err.Error(), "retired") {
+		t.Fatalf("post-failure committed handoff error = %v, want retired", err)
+	}
+	if err := coordinator.Retain(runtimedelivery.Snapshot{DeliveryID: "later-retry", Status: runtimedelivery.StatusFailed, Authority: authority}); err == nil || !strings.Contains(err.Error(), "retired") {
+		t.Fatalf("post-failure retry retention error = %v, want retired", err)
+	}
+	if _, err := coordinator.Acquire("later-delivery"); err == nil || !strings.Contains(err.Error(), "retired") {
+		t.Fatalf("post-failure carrier acquisition error = %v, want retired", err)
 	}
 }
 

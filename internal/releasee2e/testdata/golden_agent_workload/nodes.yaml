@@ -11,7 +11,6 @@ search-intake:
         event: scout.requested
         fields:
           query: payload.query
-
 scout-collector:
   id: scout-collector
   execution_type: system_node
@@ -35,7 +34,6 @@ scout-collector:
           fields:
             batch_id: payload.batch_id
             candidate_id: candidate_id
-
 candidate-collector:
   id: candidate-collector
   execution_type: system_node
@@ -52,7 +50,9 @@ candidate-collector:
           by: payload.batch_id
         output: payload.summary
         on_complete:
+          element_id: 12369ea1-7b08-49af-a4da-9d931cb00e30
           advances_to: complete
         timeout:
+          element_id: 2866c26f-a18a-4b4f-8bf6-aa26104d448a
           after: 2m
           advances_to: failed

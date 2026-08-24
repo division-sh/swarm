@@ -1138,7 +1138,7 @@ func (eb *EventBus) dispatchPreparedPublishBody(ctx context.Context, prepared Pr
 		eb.logPublished(ctx, prepared.Event, 0)
 		return nil
 	}
-	return eb.completeCommittedPublishDispatch(prepared.Event, prepared.plan, prepared.publicationClaim, prepared.receiver)
+	return eb.completeCommittedPublishDispatch(ctx, prepared.Event, prepared.plan, prepared.publicationClaim, prepared.receiver)
 }
 
 // AcceptCommittedDeliveryHandoffs transfers exact selected-store commit
@@ -1182,7 +1182,12 @@ func (eb *EventBus) DispatchPreparedPublishAsync(ctx context.Context, prepared P
 	if err != nil {
 		return releaseOnFailure(fmt.Errorf("admit asynchronous event dispatch: %w", err))
 	}
-	dispatchCtx, closeDispatchContext := eventreceiver.NewContext(lease.Context())
+	acceptedCtx := bindWorkContext(dispatchCtx, lease, owner)
+	dispatchCtx, closeDispatchContext, err := acceptedWorkExecutionContext(acceptedCtx)
+	if err != nil {
+		_ = lease.Done()
+		return releaseOnFailure(err)
+	}
 	dispatchCtx, err = eb.admitBundleSourceFact(dispatchCtx)
 	if err != nil {
 		closeDispatchContext()
@@ -1211,13 +1216,13 @@ func (eb *EventBus) reportLocalDispatchFailure(action string, evt events.Event, 
 	)
 }
 
-func (eb *EventBus) completeCommittedPublishDispatch(evt events.Event, inboundPlan RoutePlan, publicationClaim *pipelinePublicationClaim, projection receiverDispatchProjection) (err error) {
-	receiverCtx, closeReceiver, err := eb.beginReceiverDispatch(projection, evt)
+func (eb *EventBus) completeCommittedPublishDispatch(ctx context.Context, evt events.Event, inboundPlan RoutePlan, publicationClaim *pipelinePublicationClaim, projection receiverDispatchProjection) (err error) {
+	receiverCtx, closeReceiver, err := eb.beginReceiverDispatch(ctx, projection, evt)
 	if err != nil {
 		return err
 	}
 	defer func() { err = errors.Join(err, closeReceiver()) }()
-	ctx := receiverCtx.Context
+	ctx = receiverCtx.Context
 	workCtx := receiverCtx.Context
 	eb.notifyTestPostCommitDispatchStarted(workCtx, evt)
 	defer eb.notifyTestPostCommitDispatchCompleted(workCtx, evt)
@@ -2065,7 +2070,37 @@ func bindWorkContext(ctx context.Context, lease *worklifetime.Lease, owner workl
 	if runtimeID, ok := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); ok {
 		workCtx = runtimecorrelation.WithRuntimeInstanceID(workCtx, runtimeID)
 	}
-	return workCtx
+	return context.WithValue(workCtx, runtimeWorkAdmissionContextKey{}, runtimeWorkAdmission{
+		owner: owner, context: workCtx,
+	})
+}
+
+type runtimeWorkAdmissionContextKey struct{}
+
+type runtimeWorkAdmission struct {
+	owner   worklifetime.Occurrence
+	context context.Context
+}
+
+func runtimeWorkAdmissionFromContext(ctx context.Context) (runtimeWorkAdmission, bool) {
+	if ctx == nil {
+		return runtimeWorkAdmission{}, false
+	}
+	admission, ok := ctx.Value(runtimeWorkAdmissionContextKey{}).(runtimeWorkAdmission)
+	return admission, ok && admission.owner != nil && admission.context != nil
+}
+
+// acceptedWorkExecutionContext keeps only the opaque work admission while
+// constructing the empty receiver value tree. The accepted lease, rather than
+// a second Begin inside spawned dispatch, remains the execution authority.
+func acceptedWorkExecutionContext(accepted context.Context) (context.Context, func(), error) {
+	admission, ok := runtimeWorkAdmissionFromContext(accepted)
+	if !ok {
+		return nil, nil, errors.New("accepted runtime work admission is required")
+	}
+	ctx, closeContext := eventreceiver.NewContext(accepted)
+	ctx = context.WithValue(ctx, runtimeWorkAdmissionContextKey{}, admission)
+	return ctx, closeContext, nil
 }
 
 // CheckDirectRoutes applies the same exact-route policy used by
@@ -2244,7 +2279,7 @@ func (eb *EventBus) publishPersistedRecipientsWithScope(ctx context.Context, evt
 	if err != nil {
 		return runtimepipelineobligation.Continue(), err
 	}
-	receiverCtx, closeReceiver, err := eb.beginReceiverDispatch(projection, evt)
+	receiverCtx, closeReceiver, err := eb.beginReceiverDispatch(ctx, projection, evt)
 	if err != nil {
 		return runtimepipelineobligation.Continue(), err
 	}

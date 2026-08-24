@@ -378,7 +378,7 @@ func (d engineDispatcher) dispatchIntent(ctx context.Context, intent runtimeengi
 	if err != nil {
 		return false, runtimepipelineobligation.Continue(), err
 	}
-	receiverCtx, closeReceiver, err := d.bus.beginReceiverDispatch(projection, intent.Event)
+	receiverCtx, closeReceiver, err := d.bus.beginReceiverDispatch(ctx, projection, intent.Event)
 	if err != nil {
 		return false, runtimepipelineobligation.Continue(), err
 	}

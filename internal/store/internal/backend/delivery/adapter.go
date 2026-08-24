@@ -133,7 +133,10 @@ func (a *Adapter) ActivateNormalAuthority(ctx context.Context, tx *sql.Tx, autho
 	// successor generation, but reclaim must continue through the ordinary
 	// lease-fenced claim path. The selected-store timestamp preserves the exact
 	// attempt evidence while making that claim immediately reclaimable.
-	reclaimAt := now
+	// The attempt schema requires a lease end strictly after its start. SQLite's
+	// selected-store clock has millisecond resolution, so activation in the same
+	// clock tick must use the first representable instant after that tick.
+	reclaimAt := now.Add(time.Millisecond)
 	bundleHash, bundleSource := authority.BundleSource().StorageValues()
 	expireQuery := `
 		UPDATE event_delivery_attempts AS attempt

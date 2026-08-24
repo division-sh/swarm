@@ -2,6 +2,7 @@ package effecttest
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"sync"
@@ -31,6 +32,7 @@ type Harness struct {
 	CompletionDisposition runtimeeffects.CompletionSettlementDisposition
 	Heartbeats            map[string]int
 	Attempts              map[string]runtimeeffects.Attempt
+	Authorizations        map[string]runtimeeffects.AuthorizeRequest
 	States                map[string]runtimeeffects.State
 	Settlements           map[string]runtimeeffects.Settlement
 	Completions           map[string]runtimeeffects.CompletionSettlement
@@ -52,8 +54,9 @@ func New() *Harness {
 	}
 	return &Harness{
 		Token:      runtimeeffects.LifecycleToken{Identity: identity, RuntimeEpoch: 17, AgentID: "effect-test-agent", Generation: 4},
-		Heartbeats: map[string]int{}, Attempts: map[string]runtimeeffects.Attempt{}, States: map[string]runtimeeffects.State{},
-		Settlements: map[string]runtimeeffects.Settlement{}, Completions: map[string]runtimeeffects.CompletionSettlement{},
+		Heartbeats: map[string]int{}, Attempts: map[string]runtimeeffects.Attempt{}, Authorizations: map[string]runtimeeffects.AuthorizeRequest{},
+		States: map[string]runtimeeffects.State{}, Settlements: map[string]runtimeeffects.Settlement{},
+		Completions: map[string]runtimeeffects.CompletionSettlement{},
 	}
 }
 
@@ -170,6 +173,7 @@ func (h *Harness) AuthorizeExternalAttempt(_ context.Context, authority runtimee
 		Ordinal: 1, AuthorizedAt: req.Now, Origin: req.Origin,
 	}
 	h.Attempts[attempt.AttemptID] = attempt
+	h.Authorizations[attempt.AttemptID] = req
 	h.States[attempt.AttemptID] = runtimeeffects.StateAuthorized
 	return attempt, nil
 }
@@ -242,10 +246,38 @@ func (h *Harness) SettleCompletion(_ context.Context, attempt runtimeeffects.Att
 	}
 	h.Completions[attempt.AttemptID] = settlement
 	h.States[attempt.AttemptID] = settlement.Settlement.State
-	return runtimeeffects.CompletionSettlementResult{
+	result := runtimeeffects.CompletionSettlementResult{
 		Committed: true, Disposition: h.completionDisposition(), SpendRecorded: true, AttemptID: attempt.AttemptID, EntityID: settlement.Spend.EntityID,
 		Origin: attempt.Origin, OriginSettled: h.SettleOrigin,
-	}, nil
+	}
+	if settlement.Settlement.CompletionProjectionPhase == runtimeeffects.CompletionProjectionResponseSettled && result.Disposition == runtimeeffects.CompletionSettlementCurrent {
+		authorization := h.Authorizations[attempt.AttemptID]
+		if authorization.CapabilitySurface == nil {
+			return runtimeeffects.CompletionSettlementResult{}, fmt.Errorf("attempt %s has no capability surface", attempt.AttemptID)
+		}
+		evidence, err := json.Marshal(settlement.Settlement.Evidence)
+		if err != nil {
+			return runtimeeffects.CompletionSettlementResult{}, err
+		}
+		admitted, err := runtimeeffects.AdmitCompletionContinuation(attempt, evidence, authorization.RequestFingerprint, *authorization.CapabilitySurface, settlement.Settlement.CompletionProjectionPhase)
+		if err != nil {
+			return runtimeeffects.CompletionSettlementResult{}, err
+		}
+		return runtimeeffects.AdmitCommittedCompletionContinuation(result, admitted)
+	}
+	return result, nil
+}
+
+func (*Harness) RecoverCompletionContinuation(context.Context, runtimeeffects.CompletionContinuationRequest) (runtimeeffects.Attempt, bool, error) {
+	return runtimeeffects.Attempt{}, false, nil
+}
+
+func (*Harness) ProjectCompletionConversation(context.Context, runtimeeffects.Attempt, runtimeeffects.CompletionConversationProjection) error {
+	return nil
+}
+
+func (*Harness) ConsumeCompletionResponse(context.Context, runtimeeffects.Attempt) error {
+	return nil
 }
 
 func (h *Harness) completionDisposition() runtimeeffects.CompletionSettlementDisposition {

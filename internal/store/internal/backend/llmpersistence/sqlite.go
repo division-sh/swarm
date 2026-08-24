@@ -110,6 +110,46 @@ func (s *LLMSQLiteOwner) UpsertConversation(ctx context.Context, rec runtimellm.
 	})
 }
 
+func (s *LLMSQLiteOwner) ProjectCompletionConversationTx(ctx context.Context, tx *sql.Tx, rec runtimellm.ConversationRecord, expectedTurnCount int, now time.Time) error {
+	plan, identity, err := validateConversationMemory(rec)
+	if err != nil {
+		return err
+	}
+	if expectedTurnCount < 0 || rec.TurnCount != expectedTurnCount+1 {
+		return fmt.Errorf("completion conversation projection requires one exact turn transition")
+	}
+	messages, state, err := conversationPayloads(rec)
+	if err != nil {
+		return err
+	}
+	fields, err := storeagent.IdentityFields(identity.Agent)
+	if err != nil {
+		return err
+	}
+	if err := storerunstate.RequireSQLiteActiveTx(ctx, tx, identity.RunID); err != nil {
+		return err
+	}
+	if _, err := requireSQLiteLiveSessionAuthority(ctx, tx, identity.Agent, "project_completion_conversation", false); err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `
+		UPDATE agent_sessions SET conversation=?,turn_count=?,runtime_state=json_patch(COALESCE(runtime_state,'{}'),?),updated_at=?
+		WHERE session_id=? AND run_id=? AND agent_id=? AND agent_name_owner=?
+		  AND agent_name_source=? AND agent_route_presence=? AND flow_scope_key=?
+		  AND flow_instance_id=? AND flow_instance=?
+		  AND memory_enabled=? AND memory_source=? AND status='active' AND turn_count=?
+	`, string(messages), rec.TurnCount, state, now.UTC(), strings.TrimSpace(rec.SessionID), identity.RunID,
+		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
+		fields.FlowInstanceID, fields.FlowInstancePath, plan.Enabled, string(plan.Source), expectedTurnCount)
+	if err != nil {
+		return fmt.Errorf("project exact sqlite completion conversation: %w", err)
+	}
+	if rows, _ := res.RowsAffected(); rows != 1 {
+		return fmt.Errorf("sqlite completion conversation projection turn conflict: run=%s agent=%s session=%s expected_turn=%d", identity.RunID, identity.AgentID(), rec.SessionID, expectedTurnCount)
+	}
+	return nil
+}
+
 func (s *LLMSQLiteOwner) LoadActiveConversation(ctx context.Context, identity agentmemory.Identity) (runtimellm.ConversationRecord, bool, error) {
 	identity = identity.Normalize()
 	if err := identity.Validate(); err != nil {

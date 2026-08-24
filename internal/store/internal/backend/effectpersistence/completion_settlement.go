@@ -29,6 +29,7 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 	var originSettled bool
 	var finalization *runtimeeffects.ProviderDrainFinalization
 	var disposition runtimeeffects.CompletionSettlementDisposition
+	var continuation *runtimeeffects.Attempt
 	err := withRunLifecycleCandidateHandoff(ctx, func(handoff *runLifecycleCandidateHandoffReservation) error {
 		return s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 			providerHeadErr = nil
@@ -36,6 +37,7 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 			originSettled = false
 			finalization = nil
 			disposition = ""
+			continuation = nil
 			attemptSettlement := settlement
 			permit, err := resolveCompletionSettlementPermitPostgres(txctx, tx, attempt)
 			if err != nil {
@@ -80,6 +82,13 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 			if err != nil {
 				return err
 			}
+			if attemptSettlement.Settlement.CompletionProjectionPhase == runtimeeffects.CompletionProjectionResponseSettled {
+				admitted, err := loadSettledCompletionContinuationPostgres(txctx, tx, attempt)
+				if err != nil {
+					return err
+				}
+				continuation = &admitted
+			}
 			if permit.Kind == completionSettlementDrained {
 				finalization, err = s.settleProviderDrainTx(txctx, tx, story, attempt, attemptSettlement, permit.Drain)
 				if err != nil {
@@ -101,10 +110,18 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 	if err != nil {
 		return runtimeeffects.CompletionSettlementResult{}, err
 	}
-	return runtimeeffects.CompletionSettlementResult{
+	result := runtimeeffects.CompletionSettlementResult{
 		Committed: true, Disposition: disposition, SpendRecorded: spendRecorded, AttemptID: attempt.AttemptID, EntityID: settlement.Spend.EntityID,
 		Origin: attempt.Origin, OriginSettled: originSettled, Finalization: finalization,
-	}, providerHeadErr
+	}
+	if continuation != nil {
+		var err error
+		result, err = runtimeeffects.AdmitCommittedCompletionContinuation(result, *continuation)
+		if err != nil {
+			return result, err
+		}
+	}
+	return result, providerHeadErr
 }
 
 func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement) (runtimeeffects.CompletionSettlementResult, error) {
@@ -113,6 +130,7 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 	var originSettled bool
 	var finalization *runtimeeffects.ProviderDrainFinalization
 	var disposition runtimeeffects.CompletionSettlementDisposition
+	var continuation *runtimeeffects.Attempt
 	err := withRunLifecycleCandidateHandoff(ctx, func(handoff *runLifecycleCandidateHandoffReservation) error {
 		return s.runPrivateAuthorActivityMutation(ctx, "sqlite settle completion", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 			providerHeadErr = nil
@@ -120,6 +138,7 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 			originSettled = false
 			finalization = nil
 			disposition = ""
+			continuation = nil
 			attemptSettlement := settlement
 			permit, err := resolveCompletionSettlementPermitSQLite(txctx, tx, attempt)
 			if err != nil {
@@ -164,6 +183,13 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 			if err != nil {
 				return err
 			}
+			if attemptSettlement.Settlement.CompletionProjectionPhase == runtimeeffects.CompletionProjectionResponseSettled {
+				admitted, err := loadSettledCompletionContinuationSQLite(txctx, tx, attempt)
+				if err != nil {
+					return err
+				}
+				continuation = &admitted
+			}
 			if permit.Kind == completionSettlementDrained {
 				finalization, err = s.settleProviderDrainTx(txctx, tx, story, attempt, attemptSettlement, permit.Drain)
 				if err != nil {
@@ -185,16 +211,25 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 	if err != nil {
 		return runtimeeffects.CompletionSettlementResult{}, err
 	}
-	return runtimeeffects.CompletionSettlementResult{
+	result := runtimeeffects.CompletionSettlementResult{
 		Committed: true, Disposition: disposition, SpendRecorded: spendRecorded, AttemptID: attempt.AttemptID, EntityID: settlement.Spend.EntityID,
 		Origin: attempt.Origin, OriginSettled: originSettled, Finalization: finalization,
-	}, providerHeadErr
+	}
+	if continuation != nil {
+		var err error
+		result, err = runtimeeffects.AdmitCommittedCompletionContinuation(result, *continuation)
+		if err != nil {
+			return result, err
+		}
+	}
+	return result, providerHeadErr
 }
 
 func completionProviderHeadUncertainty(settlement runtimeeffects.CompletionSettlement, cause error) runtimeeffects.CompletionSettlement {
 	failure := runtimefailures.FromError(cause, "llm-completion-authority", "settle_provider_head")
 	settlement.ProviderHead = nil
 	settlement.Settlement.State = runtimeeffects.StateOutcomeUncertain
+	settlement.Settlement.CompletionProjectionPhase = ""
 	settlement.Settlement.Failure = &failure.Failure
 	if settlement.Settlement.Evidence == nil {
 		settlement.Settlement.Evidence = map[string]any{}

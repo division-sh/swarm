@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
@@ -29,7 +31,9 @@ type completionDispatch struct {
 	evidence      map[string]any
 	providerModel llmselection.ResolvedModel
 	invocation    completionProviderInvocation
-	replay        *completionReplayEnvelope
+	request       []byte
+	projection    *completionProjection
+	continuation  json.RawMessage
 }
 
 type completionProviderInvocation uint8
@@ -54,39 +58,177 @@ func (d *completionDispatch) markProviderInvocationStarted() {
 	}
 }
 
-const completionReplayVersion = "provider-response.v1"
+const completionContinuationVersion = "provider-response-continuation.v1"
 
-type completionReplayEnvelope struct {
-	Version  string                         `json:"version"`
-	Adapter  string                         `json:"adapter"`
-	Response Response                       `json:"response"`
-	Usage    runtimeeffects.CompletionUsage `json:"usage"`
+type completionProjection struct {
+	SessionID         string               `json:"session_id"`
+	ExpectedTurnCount int                  `json:"expected_turn_count"`
+	TurnCount         int                  `json:"turn_count"`
+	Messages          []Message            `json:"messages"`
+	Identity          agentmemory.Identity `json:"identity"`
+	Memory            agentmemory.Plan     `json:"memory"`
+	FrameID           string               `json:"frame_id,omitempty"`
 }
 
-func completionReplayForHandle(handle *runtimeeffects.Handle, adapter string) (*completionReplayEnvelope, error) {
+type completionContinuationEnvelope struct {
+	Version    string                         `json:"version"`
+	Adapter    string                         `json:"adapter"`
+	Response   Response                       `json:"response"`
+	Usage      runtimeeffects.CompletionUsage `json:"usage"`
+	Projection completionProjection           `json:"projection"`
+}
+
+func bindCompletionProjection(dispatch *completionDispatch, session *Session, input Message, managed *managedProviderCall) error {
+	if dispatch == nil || dispatch.handle == nil || session == nil {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_projection_input_missing", "llm-completion-authority", "bind_projection", nil)
+	}
+	frameID := ""
+	if managed != nil {
+		frameID = strings.TrimSpace(managed.frame.FrameID)
+	}
+	dispatch.projection = &completionProjection{
+		SessionID:         strings.TrimSpace(session.ID),
+		ExpectedTurnCount: session.TurnCount,
+		TurnCount:         session.TurnCount + 1,
+		Messages:          append(append([]Message(nil), session.Messages...), input),
+		Identity:          session.MemoryIdentity.Normalize(),
+		Memory:            session.Memory,
+		FrameID:           frameID,
+	}
+	return nil
+}
+
+func completionContinuationForHandle(handle *runtimeeffects.Handle, adapter string) (*completionContinuationEnvelope, error) {
 	if handle == nil {
 		return nil, nil
 	}
-	raw, ok := handle.CompletionReplay()
+	snapshot, ok := handle.CompletionContinuation()
 	if !ok {
 		return nil, nil
 	}
-	var replay completionReplayEnvelope
-	if err := json.Unmarshal(raw, &replay); err != nil {
-		return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_replay_decode_failed", "llm-completion-authority", "replay_completion", nil, err)
+	return completionContinuationForPayload(snapshot.Payload, adapter)
+}
+
+func completionContinuationForPayload(payload json.RawMessage, adapter string) (*completionContinuationEnvelope, error) {
+	var continuation completionContinuationEnvelope
+	if err := json.Unmarshal(payload, &continuation); err != nil {
+		return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_continuation_decode_failed", "llm-completion-authority", "recover_completion", nil, err)
 	}
-	if replay.Version != completionReplayVersion || replay.Adapter != strings.TrimSpace(adapter) ||
-		strings.TrimSpace(replay.Response.Message.Role) == "" || len(replay.Response.Raw) == 0 {
-		return nil, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_replay_payload_invalid", "llm-completion-authority", "replay_completion", map[string]any{"adapter": strings.TrimSpace(adapter), "version": replay.Version})
+	if err := validateCompletionContinuation(continuation, adapter); err != nil {
+		return nil, err
 	}
-	if err := replay.Usage.Validate(); err != nil {
-		return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_replay_usage_invalid", "llm-completion-authority", "replay_completion", nil, err)
+	continuation.Response.CapabilitySurface = nil
+	return &continuation, nil
+}
+
+func validateCompletionContinuation(continuation completionContinuationEnvelope, adapter string) error {
+	projection := continuation.Projection
+	if continuation.Version != completionContinuationVersion || continuation.Adapter != strings.TrimSpace(adapter) ||
+		strings.TrimSpace(continuation.Response.Message.Role) == "" || len(continuation.Response.Raw) == 0 ||
+		strings.TrimSpace(projection.SessionID) == "" || projection.ExpectedTurnCount < 0 ||
+		projection.TurnCount != projection.ExpectedTurnCount+1 || len(projection.Messages) < 2 {
+		return runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_continuation_payload_invalid", "llm-completion-authority", "recover_completion", map[string]any{"adapter": strings.TrimSpace(adapter), "version": continuation.Version})
 	}
-	if replay.Response.ToolOutputAuthority == nil || replay.Response.ToolOutputAuthority.Validate() != nil {
-		return nil, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_replay_tool_output_authority_invalid", "llm-completion-authority", "replay_completion", map[string]any{"adapter": strings.TrimSpace(adapter)})
+	if !reflect.DeepEqual(projection.Messages[len(projection.Messages)-1], continuation.Response.Message) {
+		return runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_continuation_projection_mismatch", "llm-completion-authority", "recover_completion", map[string]any{"adapter": strings.TrimSpace(adapter)})
 	}
-	replay.Response.CapabilitySurface = nil
-	return &replay, nil
+	if err := continuation.Usage.Validate(); err != nil {
+		return runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_continuation_usage_invalid", "llm-completion-authority", "recover_completion", nil, err)
+	}
+	if continuation.Response.ToolOutputAuthority == nil || continuation.Response.ToolOutputAuthority.Validate() != nil {
+		return runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_continuation_tool_output_authority_invalid", "llm-completion-authority", "recover_completion", map[string]any{"adapter": strings.TrimSpace(adapter)})
+	}
+	if _, err := projection.Memory.Normalize(); err != nil {
+		return runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_continuation_memory_invalid", "llm-completion-authority", "recover_completion", nil, err)
+	}
+	return nil
+}
+
+func recoverCompletionContinuation(ctx context.Context, controller *runtimeeffects.Controller, session *Session, adapter string) (*Response, bool, error) {
+	if controller == nil || session == nil {
+		return nil, false, nil
+	}
+	handle, found, err := controller.RecoverCompletionContinuation(ctx, session.ID, session.Memory)
+	if err != nil || !found {
+		return nil, found, err
+	}
+	continuation, err := completionContinuationForHandle(handle, adapter)
+	if err != nil {
+		return nil, true, err
+	}
+	projection := continuation.Projection
+	if projection.Identity.Normalize() != session.MemoryIdentity.Normalize() || projection.Memory != session.Memory ||
+		(projection.Memory.Enabled && projection.SessionID != strings.TrimSpace(session.ID)) {
+		return nil, true, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_continuation_session_stale", "llm-completion-authority", "recover_completion", map[string]any{"session_id": strings.TrimSpace(session.ID)})
+	}
+	if !projection.Memory.Enabled {
+		projection.SessionID = strings.TrimSpace(session.ID)
+	}
+	messages, err := json.Marshal(projection.Messages)
+	if err != nil {
+		return nil, true, fmt.Errorf("marshal completion continuation projection: %w", err)
+	}
+	snapshot, _ := handle.CompletionContinuation()
+	if err := handle.ProjectCompletionConversation(ctx, runtimeeffects.CompletionConversationProjection{
+		Payload: snapshot.Payload, SessionID: projection.SessionID, Identity: projection.Identity,
+		Memory: projection.Memory, ExpectedTurnCount: projection.ExpectedTurnCount,
+		TurnCount: projection.TurnCount, Messages: messages,
+	}); err != nil {
+		return nil, true, err
+	}
+	session.Messages = append([]Message(nil), projection.Messages...)
+	session.TurnCount = projection.TurnCount
+	session.ParseFailures = 0
+	if providerSessionID := strings.TrimSpace(continuation.Response.SessionID); providerSessionID != "" {
+		session.ProviderSessionID = providerSessionID
+	}
+	response := continuation.Response
+	response.CapabilitySurface = &snapshot.Surface
+	response.completionHandle = handle
+	response.completionFrameID = projection.FrameID
+	return &response, true, nil
+}
+
+func projectCompletionContinuation(ctx context.Context, dispatch *completionDispatch, session *Session, response *Response) (bool, error) {
+	if dispatch == nil || dispatch.handle == nil || session == nil || response == nil {
+		return false, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_projection_input_missing", "llm-completion-authority", "project_completion", nil)
+	}
+	attempt := dispatch.handle.Attempt()
+	if attempt.Authority.Kind != runtimeeffects.AuthorityNormalAgent || attempt.Origin.Kind != runtimeeffects.CompletionOriginDelivery {
+		return false, nil
+	}
+	continuation, err := completionContinuationForPayload(dispatch.continuation, attempt.Adapter)
+	if err != nil {
+		return true, err
+	}
+	if continuation == nil {
+		return true, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_continuation_missing", "llm-completion-authority", "project_completion", nil)
+	}
+	projection := continuation.Projection
+	messages, err := json.Marshal(projection.Messages)
+	if err != nil {
+		return true, fmt.Errorf("marshal completion conversation projection: %w", err)
+	}
+	if err := dispatch.handle.ProjectCompletionConversation(ctx, runtimeeffects.CompletionConversationProjection{
+		Payload: dispatch.continuation, SessionID: projection.SessionID, Identity: projection.Identity,
+		Memory: projection.Memory, ExpectedTurnCount: projection.ExpectedTurnCount,
+		TurnCount: projection.TurnCount, Messages: messages,
+	}); err != nil {
+		return true, err
+	}
+	session.Messages = append([]Message(nil), projection.Messages...)
+	session.TurnCount = projection.TurnCount
+	session.ParseFailures = 0
+	response.completionHandle = dispatch.handle
+	response.completionFrameID = projection.FrameID
+	return true, nil
+}
+
+func consumeCompletionContinuation(ctx context.Context, response *Response) error {
+	if response == nil || response.completionHandle == nil {
+		return nil
+	}
+	return response.completionHandle.ConsumeCompletionResponse(ctx)
 }
 
 const (
@@ -358,22 +500,6 @@ func settleCompletionTurnWithProviderHead(ctx context.Context, dispatch *complet
 		return runtimeeffects.CompletionSettlementResult{}, fmt.Errorf("completion dispatch provider selection is incomplete or does not match profile %q", profile.ID)
 	}
 	settledAt := time.Now().UTC().Truncate(time.Microsecond)
-	if dispatch.replay != nil {
-		if state != runtimeeffects.StateSettled || failure != nil || response == nil {
-			return runtimeeffects.CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_replay_terminal_shape_invalid", "llm-completion-authority", "settle_completion", map[string]any{"attempt_id": dispatch.handle.Attempt().AttemptID})
-		}
-		authority := dispatch.replay.Response.ToolOutputAuthority
-		if authority == nil || authority.Validate() != nil {
-			return runtimeeffects.CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_replay_tool_output_authority_invalid", "llm-completion-authority", "settle_completion", map[string]any{"attempt_id": dispatch.handle.Attempt().AttemptID})
-		}
-		copied := *authority
-		response.ToolOutputAuthority = &copied
-		attempt := dispatch.handle.Attempt()
-		return runtimeeffects.CompletionSettlementResult{
-			Committed: true, Disposition: runtimeeffects.CompletionSettlementCurrent,
-			AttemptID: attempt.AttemptID, EntityID: strings.TrimSpace(turn.EntityID), Origin: attempt.Origin,
-		}, nil
-	}
 	// The dispatch state can narrow a provider-call failure to a proven
 	// prelaunch failure. A successful transport does not make later response
 	// conversion, usage validation, or target persistence successful.
@@ -426,17 +552,31 @@ func settleCompletionTurnWithProviderHead(ctx context.Context, dispatch *complet
 			return runtimeeffects.CompletionSettlementResult{}, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_tool_output_authority_invalid", "llm-completion-authority", "settle_completion", nil, err)
 		}
 		response.ToolOutputAuthority = &authority
-		replayResponse := *response
-		replayResponse.CapabilitySurface = nil
-		raw, err := json.Marshal(completionReplayEnvelope{
-			Version: completionReplayVersion, Adapter: dispatch.handle.Attempt().Adapter,
-			Response: replayResponse, Usage: usage,
-		})
-		if err != nil {
-			return runtimeeffects.CompletionSettlementResult{}, fmt.Errorf("marshal completion replay evidence: %w", err)
-		}
-		if err := runtimeeffects.AttachCompletionReplayEvidence(evidence, raw); err != nil {
-			return runtimeeffects.CompletionSettlementResult{}, err
+		attempt := dispatch.handle.Attempt()
+		if attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent && attempt.Origin.Kind == runtimeeffects.CompletionOriginDelivery {
+			if dispatch.projection == nil || len(bytes.TrimSpace(dispatch.request)) == 0 {
+				return runtimeeffects.CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_projection_input_missing", "llm-completion-authority", "settle_completion", map[string]any{"attempt_id": attempt.AttemptID})
+			}
+			projection := *dispatch.projection
+			projection.Messages = append(append([]Message(nil), projection.Messages...), response.Message)
+			continuationResponse := *response
+			continuationResponse.CapabilitySurface = nil
+			continuationResponse.completionHandle = nil
+			continuationResponse.completionFrameID = ""
+			raw, err := json.Marshal(completionContinuationEnvelope{
+				Version: completionContinuationVersion, Adapter: attempt.Adapter,
+				Response: continuationResponse, Usage: usage, Projection: projection,
+			})
+			if err != nil {
+				return runtimeeffects.CompletionSettlementResult{}, fmt.Errorf("marshal completion continuation evidence: %w", err)
+			}
+			if _, err := completionContinuationForPayload(raw, attempt.Adapter); err != nil {
+				return runtimeeffects.CompletionSettlementResult{}, err
+			}
+			if err := runtimeeffects.AttachCompletionContinuationEvidence(evidence, dispatch.request, raw); err != nil {
+				return runtimeeffects.CompletionSettlementResult{}, err
+			}
+			dispatch.continuation = raw
 		}
 	}
 	turn.Failure = failure
@@ -450,7 +590,17 @@ func settleCompletionTurnWithProviderHead(ctx context.Context, dispatch *complet
 	if authority := dispatch.handle.Attempt().Authority; authority.Target.Kind == runtimeeffects.UsageTargetAgentTurn {
 		settlement.AgentTurn = completionAgentTurn(targetID, turn)
 	}
-	return dispatch.handle.SettleCompletion(ctx, settlement)
+	result, err := dispatch.handle.SettleCompletion(ctx, settlement)
+	if result.Committed && err == nil && result.Disposition == runtimeeffects.CompletionSettlementCurrent && state == runtimeeffects.StateSettled && response != nil &&
+		dispatch.handle.Attempt().Authority.Kind == runtimeeffects.AuthorityNormalAgent &&
+		dispatch.handle.Attempt().Origin.Kind == runtimeeffects.CompletionOriginDelivery {
+		snapshot, ok := dispatch.handle.CompletionContinuation()
+		if !ok {
+			return result, errors.Join(err, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_continuation_commit_result_missing", "llm-completion-authority", "settle_completion", map[string]any{"attempt_id": dispatch.handle.Attempt().AttemptID}))
+		}
+		dispatch.continuation = snapshot.Payload
+	}
+	return result, err
 }
 
 func completionAgentTurn(targetID string, turn AgentTurnRecord) *runtimeeffects.CompletionAgentTurn {

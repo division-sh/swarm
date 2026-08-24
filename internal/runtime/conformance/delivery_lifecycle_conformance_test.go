@@ -329,10 +329,10 @@ func TestExecutableDeliveryLifecycleParity(t *testing.T) {
 				if _, ok := reclaimed.Acquired(); !ok || reclaimed.Previous != runtimedelivery.ClaimReclaimable {
 					t.Fatalf("successor claim = %#v, want acquired from reclaimable", reclaimed)
 				}
-				if _, err := backend.store.SettleSuccess(ctx, claimed.Claim, nil, 0); !errors.Is(err, runtimedelivery.ErrConflict) {
+				if _, err := backend.store.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); !errors.Is(err, runtimedelivery.ErrConflict) {
 					t.Fatalf("predecessor settlement error = %v, want stale claim conflict", err)
 				}
-				if _, err := backend.restart.SettleSuccess(ctx, reclaimed.Claimed.Claim, nil, 0); err != nil {
+				if _, err := backend.restart.SettleSuccess(ctx, reclaimed.Claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
 					t.Fatalf("settle successor delivery: %v", err)
 				}
 			})

@@ -319,6 +319,9 @@ func (c *Coordinator) Acquire(deliveryID string) (worklifetime.DeliveryContinuat
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.retired {
+		return nil, errors.New("delivery continuation coordinator is retired")
+	}
 	current, exists := c.entries[deliveryID]
 	if !exists || current.state != ownershipCoordinator {
 		return nil, fmt.Errorf("delivery %s is not coordinator-owned", deliveryID)
@@ -383,6 +386,7 @@ func (c *Coordinator) recordFailure(err error) {
 	if c.failure == nil {
 		c.failure = err
 	}
+	c.retired = true
 	c.mu.Unlock()
 }
 
