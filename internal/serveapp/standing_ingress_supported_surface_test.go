@@ -74,6 +74,10 @@ func (authorActivityHeadFailureEventStore) ListAuthorActivity(context.Context, r
 	return runtimeauthoractivity.ListResult{}, errors.New("author activity list must not run after head failure")
 }
 
+func (telegramPhraseBotLLMRuntime) PrepareManagedSession(context.Context, *runtimellm.Session) error {
+	return nil
+}
+
 func (r telegramPhraseBotLLMRuntime) ContinueManagedSession(ctx context.Context, session *runtimellm.Session, managedCall runtimellm.ManagedCall) (*runtimellm.Response, error) {
 	message, err := managedCall.ProviderMessage(ctx, session)
 	if err != nil {

@@ -154,6 +154,8 @@ func (NoopRuntime) StartSession(_ context.Context, agentID, systemPrompt string,
 	}, nil
 }
 
+func (NoopRuntime) PrepareManagedSession(context.Context, *Session) error { return nil }
+
 func (NoopRuntime) ContinueManagedSession(_ context.Context, _ *Session, call ManagedCall) (*Response, error) {
 	message, err := call.providerMessage()
 	if err != nil {

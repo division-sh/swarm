@@ -95,6 +95,13 @@ func (r *agentTestRuntimeAdapter) StartSession(ctx context.Context, agentID, sys
 	return session, nil
 }
 
+func (r *agentTestRuntimeAdapter) PrepareManagedSession(ctx context.Context, session *llm.Session) error {
+	if typed, ok := r.Runtime.(llm.ManagedSessionRuntime); ok {
+		return typed.PrepareManagedSession(ctx, session)
+	}
+	return nil
+}
+
 func (r *agentTestRuntimeAdapter) ContinueManagedSession(ctx context.Context, session *llm.Session, call llm.ManagedCall) (*llm.Response, error) {
 	if typed, ok := r.Runtime.(llm.ManagedSessionRuntime); ok {
 		return typed.ContinueManagedSession(ctx, session, call)
@@ -589,6 +596,10 @@ type drainedDirectiveProviderRuntime struct {
 
 func (r *drainedDirectiveProviderRuntime) StartSession(_ context.Context, agentID, systemPrompt string, tools []llm.ToolDefinition) (*llm.Session, error) {
 	return &llm.Session{ID: "drained-directive", AgentID: agentID, SystemPrompt: systemPrompt, Tools: tools}, nil
+}
+
+func (*drainedDirectiveProviderRuntime) PrepareManagedSession(context.Context, *llm.Session) error {
+	return nil
 }
 
 func (r *drainedDirectiveProviderRuntime) ContinueManagedSession(ctx context.Context, session *llm.Session, call llm.ManagedCall) (*llm.Response, error) {

@@ -181,6 +181,10 @@ func (r *OpenAIResponsesRuntime) recoverManagedCompletionContinuation(ctx contex
 	return recoverCompletionContinuation(ctx, r.completionController, session, "openai_responses")
 }
 
+func (r *OpenAIResponsesRuntime) PrepareManagedSession(ctx context.Context, session *Session) error {
+	return prepareManagedSessionForTurn(ctx, session, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns, r.events)
+}
+
 func (r *OpenAIResponsesRuntime) ContinueForkChatSession(ctx context.Context, s *Session, call ForkChatCall) (*Response, error) {
 	message, err := validateForkChatCall(ctx, s, call)
 	if err != nil {
@@ -378,12 +382,6 @@ func (r *OpenAIResponsesRuntime) continueSession(ctx context.Context, s *Session
 			}
 		}
 		r.persistConversation(ctx, s)
-	}
-
-	if resolved.Enabled() {
-		if rotated, rotateErr := MaybeRotateAfterTurn(ctx, s, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns, r.events); rotateErr == nil && rotated != nil {
-			lease = rotated
-		}
 	}
 
 	return &resp, nil

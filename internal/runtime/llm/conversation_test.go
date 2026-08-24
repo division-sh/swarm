@@ -105,6 +105,7 @@ type managedRoundRuntime struct {
 	recoveredMessages []Message
 	recoveredTurn     int
 	recoveryCalls     int
+	preparationCalls  int
 	resumeTerminal    bool
 }
 
@@ -128,6 +129,11 @@ func (r *managedRoundRuntime) recoverManagedCompletionContinuation(_ context.Con
 	session.Messages = append([]Message(nil), r.recoveredMessages...)
 	session.TurnCount = r.recoveredTurn
 	return r.recovered, true, nil
+}
+
+func (r *managedRoundRuntime) PrepareManagedSession(context.Context, *Session) error {
+	r.preparationCalls++
+	return nil
 }
 
 func (r *managedRoundRuntime) ContinueManagedSession(ctx context.Context, session *Session, call ManagedCall) (*Response, error) {
@@ -477,8 +483,8 @@ func TestManagedConversationExecutionFrameInitialAndContinuationChronology(t *te
 	if err != nil {
 		t.Fatalf("RunManaged: %v", err)
 	}
-	if response.Message.Content != "done" || runtime.calls != 2 || tools.calls != 1 {
-		t.Fatalf("composed execution = response %#v provider_calls=%d tool_calls=%d", response, runtime.calls, tools.calls)
+	if response.Message.Content != "done" || runtime.calls != 2 || runtime.preparationCalls != 1 || tools.calls != 1 {
+		t.Fatalf("composed execution = response %#v preparations=%d provider_calls=%d tool_calls=%d", response, runtime.preparationCalls, runtime.calls, tools.calls)
 	}
 	if len(harness.Attempts) != 3 {
 		t.Fatalf("managed attempts = %d, want one per provider turn and tool call", len(harness.Attempts))
@@ -516,8 +522,8 @@ func TestManagedConversationRootResumesExactConsumedToolContinuation(t *testing.
 	if err != nil {
 		t.Fatalf("RunManaged recovered successor: %v", err)
 	}
-	if response == nil || response.Message.Content != "resumed" || runtime.recoveryCalls != 1 || runtime.calls != 1 || tools.calls != 0 {
-		t.Fatalf("recovered execution response=%#v recovery=%d provider=%d tools=%d", response, runtime.recoveryCalls, runtime.calls, tools.calls)
+	if response == nil || response.Message.Content != "resumed" || runtime.recoveryCalls != 1 || runtime.preparationCalls != 0 || runtime.calls != 1 || tools.calls != 0 {
+		t.Fatalf("recovered execution response=%#v recovery=%d preparations=%d provider=%d tools=%d", response, runtime.recoveryCalls, runtime.preparationCalls, runtime.calls, tools.calls)
 	}
 	if len(runtime.frames) != 1 || runtime.frames[0].Turn.Kind != agentframe.TurnToolContinuation ||
 		runtime.frames[0].Turn.ParentFrameID != parentFrame || string(runtime.frames[0].Turn.ToolResult) != string(continuation.ToolResult()) {
@@ -545,8 +551,8 @@ func TestManagedConversationRootDoesNotRepeatConsumedTerminalTool(t *testing.T) 
 	if err != nil {
 		t.Fatalf("RunManaged recovered terminal response: %v", err)
 	}
-	if response == nil || response.Message.Content != "terminal complete" || len(response.ToolCalls) != 0 || runtime.recoveryCalls != 1 || runtime.calls != 0 || tools.calls != 0 {
-		t.Fatalf("recovered terminal response=%#v recovery=%d provider=%d tools=%d", response, runtime.recoveryCalls, runtime.calls, tools.calls)
+	if response == nil || response.Message.Content != "terminal complete" || len(response.ToolCalls) != 0 || runtime.recoveryCalls != 1 || runtime.preparationCalls != 0 || runtime.calls != 0 || tools.calls != 0 {
+		t.Fatalf("recovered terminal response=%#v recovery=%d preparations=%d provider=%d tools=%d", response, runtime.recoveryCalls, runtime.preparationCalls, runtime.calls, tools.calls)
 	}
 }
 

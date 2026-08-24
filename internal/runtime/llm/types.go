@@ -194,6 +194,7 @@ type Runtime interface {
 
 type ManagedSessionRuntime interface {
 	Runtime
+	PrepareManagedSession(context.Context, *Session) error
 	ContinueManagedSession(context.Context, *Session, ManagedCall) (*Response, error)
 }
 
