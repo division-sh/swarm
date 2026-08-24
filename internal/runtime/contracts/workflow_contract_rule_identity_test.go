@@ -58,7 +58,7 @@ func TestPlatformSpecPolicyRowsUseCanonicalElementIdentity(t *testing.T) {
 		t.Fatalf("handler_specification.on_complete = %q, want ordered-list-only contract", text)
 	}
 	grammar := spec.HandlerSpecification.AuthoredRuleElementIdentity.Grammar
-	for _, required := range []string{"Empty authored rows are invalid", "handler.on_complete admits only an ordered sequence", "Aliases are resolved before rule-shape classification", "recursive aliases fail closed"} {
+	for _, required := range []string{"Empty authored rows are invalid", "handler.on_complete admits only an ordered sequence", "Aliases are resolved before rule-shape classification", "recursive aliases fail closed", "reuse across authored row occurrences fails closed", "Explicit null collections and duplicate normalized keys are invalid"} {
 		if !strings.Contains(grammar, required) {
 			t.Fatalf("authored_rule_element_identity.grammar = %q, want %q", grammar, required)
 		}

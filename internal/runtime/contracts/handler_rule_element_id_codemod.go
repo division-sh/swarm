@@ -25,6 +25,11 @@ type handlerRuleElementIDRewrite struct {
 	ids  int
 }
 
+type handlerRuleElementIDMintState struct {
+	// Alias occurrences resolve to the same node; one node cannot own two rows.
+	rows map[*yaml.Node]struct{}
+}
+
 // MintHandlerRuleElementIDs performs the explicit one-time authored corpus
 // migration. It recognizes rule rows only beneath node event_handlers and
 // never derives an ID from labels, indexes, paths, or declaration content.
@@ -117,6 +122,10 @@ func prepareHandlerRuleElementIDRewrite(path string) (handlerRuleElementIDRewrit
 }
 
 func mintHandlerRuleElementIDsInNode(node *yaml.Node) (int, error) {
+	return mintHandlerRuleElementIDsInNodeWithState(node, &handlerRuleElementIDMintState{rows: map[*yaml.Node]struct{}{}})
+}
+
+func mintHandlerRuleElementIDsInNodeWithState(node *yaml.Node, state *handlerRuleElementIDMintState) (int, error) {
 	if node == nil {
 		return 0, nil
 	}
@@ -125,14 +134,14 @@ func mintHandlerRuleElementIDsInNode(node *yaml.Node) (int, error) {
 		for index := 0; index+1 < len(node.Content); index += 2 {
 			key, value := strings.TrimSpace(node.Content[index].Value), node.Content[index+1]
 			if key == "event_handlers" {
-				minted, err := mintEventHandlerRuleElementIDs(value)
+				minted, err := mintEventHandlerRuleElementIDs(value, state)
 				if err != nil {
 					return 0, err
 				}
 				count += minted
 				continue
 			}
-			minted, err := mintHandlerRuleElementIDsInNode(value)
+			minted, err := mintHandlerRuleElementIDsInNodeWithState(value, state)
 			if err != nil {
 				return 0, err
 			}
@@ -141,7 +150,7 @@ func mintHandlerRuleElementIDsInNode(node *yaml.Node) (int, error) {
 		return count, nil
 	}
 	for _, child := range node.Content {
-		minted, err := mintHandlerRuleElementIDsInNode(child)
+		minted, err := mintHandlerRuleElementIDsInNodeWithState(child, state)
 		if err != nil {
 			return 0, err
 		}
@@ -150,9 +159,12 @@ func mintHandlerRuleElementIDsInNode(node *yaml.Node) (int, error) {
 	return count, nil
 }
 
-func mintEventHandlerRuleElementIDs(handlers *yaml.Node) (int, error) {
+func mintEventHandlerRuleElementIDs(handlers *yaml.Node, state *handlerRuleElementIDMintState) (int, error) {
 	if handlers == nil || handlers.Kind != yaml.MappingNode {
 		return 0, fmt.Errorf("event_handlers must be a mapping")
+	}
+	if err := validateUniqueNormalizedMappingKeys(handlers, "event_handlers"); err != nil {
+		return 0, err
 	}
 	count := 0
 	for index := 0; index+1 < len(handlers.Content); index += 2 {
@@ -160,17 +172,20 @@ func mintEventHandlerRuleElementIDs(handlers *yaml.Node) (int, error) {
 		if handler.Kind != yaml.MappingNode {
 			return 0, fmt.Errorf("event handler %q must be a mapping", strings.TrimSpace(handlers.Content[index].Value))
 		}
+		if err := validateUniqueNormalizedMappingKeys(handler, "event handler"); err != nil {
+			return 0, fmt.Errorf("handler %q: %w", strings.TrimSpace(handlers.Content[index].Value), err)
+		}
 		for field := 0; field+1 < len(handler.Content); field += 2 {
 			key, value := strings.TrimSpace(handler.Content[field].Value), handler.Content[field+1]
 			var minted int
 			var err error
 			switch key {
 			case "rules":
-				minted, err = mintRuleCollectionElementIDs(value, handlerRuleDecodeContextRules)
+				minted, err = mintRuleCollectionElementIDs(value, handlerRuleDecodeContextRules, state)
 			case "on_complete":
-				minted, err = mintRuleCollectionElementIDs(value, handlerRuleDecodeContextOnComplete)
+				minted, err = mintRuleCollectionElementIDs(value, handlerRuleDecodeContextOnComplete, state)
 			case "join":
-				minted, err = mintJoinOutcomeElementIDs(value)
+				minted, err = mintJoinOutcomeElementIDs(value, state)
 			}
 			if err != nil {
 				return 0, fmt.Errorf("handler %q %s: %w", strings.TrimSpace(handlers.Content[index].Value), key, err)
@@ -181,8 +196,8 @@ func mintEventHandlerRuleElementIDs(handlers *yaml.Node) (int, error) {
 	return count, nil
 }
 
-func mintRuleCollectionElementIDs(node *yaml.Node, context handlerRuleDecodeContext) (int, error) {
-	if node == nil || node.Kind == 0 || yamlNodeIsNull(node) {
+func mintRuleCollectionElementIDs(node *yaml.Node, context handlerRuleDecodeContext, state *handlerRuleElementIDMintState) (int, error) {
+	if node == nil || node.Kind == 0 {
 		return 0, nil
 	}
 	resolved, err := resolveHandlerRuleCollectionNode(node, context)
@@ -194,7 +209,7 @@ func mintRuleCollectionElementIDs(node *yaml.Node, context handlerRuleDecodeCont
 	case yaml.SequenceNode:
 		count := 0
 		for index, row := range node.Content {
-			minted, err := ensureRuleElementID(row, nil)
+			minted, err := ensureRuleElementID(row, nil, state)
 			if err != nil {
 				return 0, fmt.Errorf("row %d: %w", index, err)
 			}
@@ -202,16 +217,19 @@ func mintRuleCollectionElementIDs(node *yaml.Node, context handlerRuleDecodeCont
 		}
 		return count, nil
 	case yaml.MappingNode:
+		if err := validateUniqueNormalizedMappingKeys(node, "handler rule collection"); err != nil {
+			return 0, err
+		}
 		shape, err := classifyHandlerRuleMapping(node)
 		if err != nil {
 			return 0, err
 		}
 		if shape == handlerRuleMappingSingleton {
-			return ensureRuleElementID(node, nil)
+			return ensureRuleElementID(node, nil, state)
 		}
 		count := 0
 		for index := 0; index+1 < len(node.Content); index += 2 {
-			minted, err := ensureRuleElementID(node.Content[index+1], nil)
+			minted, err := ensureRuleElementID(node.Content[index+1], nil, state)
 			if err != nil {
 				return 0, fmt.Errorf("row %q: %w", strings.TrimSpace(node.Content[index].Value), err)
 			}
@@ -223,22 +241,25 @@ func mintRuleCollectionElementIDs(node *yaml.Node, context handlerRuleDecodeCont
 	}
 }
 
-func mintJoinOutcomeElementIDs(join *yaml.Node) (int, error) {
+func mintJoinOutcomeElementIDs(join *yaml.Node, state *handlerRuleElementIDMintState) (int, error) {
 	if join == nil || join.Kind != yaml.MappingNode {
 		return 0, nil
+	}
+	if err := validateUniqueNormalizedMappingKeys(join, "join"); err != nil {
+		return 0, err
 	}
 	count := 0
 	for index := 0; index+1 < len(join.Content); index += 2 {
 		key, value := strings.TrimSpace(join.Content[index].Value), join.Content[index+1]
 		switch key {
 		case "on_complete":
-			minted, err := ensureRuleElementID(value, nil)
+			minted, err := ensureRuleElementID(value, nil, state)
 			if err != nil {
 				return 0, err
 			}
 			count += minted
 		case "timeout":
-			minted, err := ensureRuleElementID(value, map[string]struct{}{"after": {}})
+			minted, err := ensureRuleElementID(value, map[string]struct{}{"after": {}}, state)
 			if err != nil {
 				return 0, err
 			}
@@ -248,7 +269,7 @@ func mintJoinOutcomeElementIDs(join *yaml.Node) (int, error) {
 	return count, nil
 }
 
-func ensureRuleElementID(row *yaml.Node, ignored map[string]struct{}) (int, error) {
+func ensureRuleElementID(row *yaml.Node, ignored map[string]struct{}, state *handlerRuleElementIDMintState) (int, error) {
 	resolved, err := resolveHandlerRuleYAMLNode(row)
 	if err != nil {
 		return 0, err
@@ -257,8 +278,15 @@ func ensureRuleElementID(row *yaml.Node, ignored map[string]struct{}) (int, erro
 		return 0, fmt.Errorf("authored rule must be a mapping")
 	}
 	row = resolved
+	if _, exists := state.rows[row]; exists {
+		return 0, fmt.Errorf("YAML-ALIAS-REUSE: one YAML mapping cannot represent multiple authored handler rules; expand the alias into distinct mappings")
+	}
+	state.rows[row] = struct{}{}
 	if len(row.Content) == 0 {
 		return 0, fmt.Errorf("EMPTY-AUTHORED-RULE: authored handler rule mapping must not be empty")
+	}
+	if err := validateUniqueNormalizedMappingKeys(row, "authored handler rule"); err != nil {
+		return 0, err
 	}
 	hasElementID := false
 	for index := 0; index+1 < len(row.Content); index += 2 {

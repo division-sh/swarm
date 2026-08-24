@@ -18,6 +18,9 @@ func (r *HandlerRuleEntry) UnmarshalYAML(node *yaml.Node) error {
 	if len(resolved.Content) == 0 {
 		return fmt.Errorf("EMPTY-AUTHORED-RULE: authored handler rule mapping must not be empty")
 	}
+	if err := validateUniqueNormalizedMappingKeys(resolved, "authored handler rule"); err != nil {
+		return err
+	}
 	if err := validateRuleFieldNodes(resolved); err != nil {
 		return err
 	}
