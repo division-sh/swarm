@@ -1288,15 +1288,33 @@ func (c *agentLifecycleCoordinator) acquireExecutionIdentity(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
-	return c.acquireExecutionLocked(ctx, cell, identity.Description(), purpose, requireRunning)
+	return c.acquireExecutionLocked(ctx, cell, identity.Description(), purpose, requireRunning, runtimeeffects.LifecycleToken{})
 }
 
-func (c *agentLifecycleCoordinator) acquireExecutionLocked(ctx context.Context, cell *agentLifecycleCell, target, purpose string, requireRunning bool) (*agentExecutionLease, error) {
+func (c *agentLifecycleCoordinator) acquireDeliveryExecution(ctx context.Context, token runtimeeffects.LifecycleToken) (*agentExecutionLease, error) {
+	if !token.Valid() {
+		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "delivery_execution_token_invalid", "agent-lifecycle", "admit_delivery_execution", nil)
+	}
+	cell, err := c.lockIdentityOperation(token.Identity)
+	if err != nil {
+		return nil, err
+	}
+	return c.acquireExecutionLocked(ctx, cell, token.Identity.Description(), "admit_delivery_execution", true, token)
+}
+
+func (c *agentLifecycleCoordinator) acquireExecutionLocked(
+	ctx context.Context,
+	cell *agentLifecycleCell,
+	target, purpose string,
+	requireRunning bool,
+	exactRouteToken runtimeeffects.LifecycleToken,
+) (*agentExecutionLease, error) {
 	defer cell.opMu.Unlock()
 	c.mu.Lock()
 	execution := cell.execution
 	running := cell.phase == AgentLifecycleRunning
-	if execution == nil || execution.agent == nil || execution.fenced || (requireRunning && !running) {
+	exactRoute := !exactRouteToken.Valid() || (execution != nil && execution.token == exactRouteToken && execution.routeToken == exactRouteToken)
+	if execution == nil || execution.agent == nil || execution.fenced || (requireRunning && !running) || !exactRoute {
 		c.mu.Unlock()
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_generation_not_running", "agent-lifecycle", purpose, map[string]any{"agent": strings.TrimSpace(target)})
 	}
