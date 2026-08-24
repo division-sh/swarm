@@ -18,6 +18,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -229,6 +230,194 @@ func TestSettledProviderResponseContinuationAdvancesExactActiveTurnPostgres(t *t
 	proveSettledProviderResponseContinuationAdvancesExactActiveTurn(t, newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false))
 }
 
+func TestCompletionResponseSuccessorCheckpointMatrixSQLite(t *testing.T) {
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	proveCompletionResponseSuccessorCheckpointMatrix(t, store, store.backend.ConstructionHandle(), true)
+}
+
+func TestCompletionResponseSuccessorCheckpointMatrixPostgres(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	proveCompletionResponseSuccessorCheckpointMatrix(t, admitTestPostgresStore(t, db), db, false)
+}
+
+func proveCompletionResponseSuccessorCheckpointMatrix(t *testing.T, store completionSettlementTestStore, db *sql.DB, sqlite bool) {
+	t.Helper()
+	adapters := []string{"anthropic_api", "openai_compatible", "openai_responses", "claude_cli", "mock_python"}
+	memoryPlans := []struct {
+		name string
+		plan agentmemory.Plan
+	}{
+		{name: "memory", plan: agentmemory.Authored(true)},
+		{name: "stateless", plan: agentmemory.PlatformDefault()},
+	}
+	for _, memoryPlan := range memoryPlans {
+		for adapterIndex, adapter := range adapters {
+			t.Run(memoryPlan.name+"/"+adapter, func(t *testing.T) {
+				fixture := newCompletionSettlementFixtureWithMemory(t, store, db, sqlite, memoryPlan.plan)
+				fixture.authority.BudgetScopes = []runtimeeffects.BudgetAdmissionScope{{Kind: "system", CapUSD: 100}}
+				fixture.context = fixture.contextFor(fixture.authority)
+				request := "successor-checkpoint:" + memoryPlan.name + ":" + adapter
+				ctx := runtimeeffects.WithLifecycleToken(fixture.context, fixture.authority.Normal)
+				ctx = runtimeeffects.WithLogicalOperationIdentity(ctx, request)
+				handle := beginObservedCompletionForSettlementTest(t, ctx, adapter, request)
+				settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, adapter, "", "")
+				settlement.ProviderHead = nil
+				frameID := "agent-frame:v1:" + uuid.NewString()
+				payload, messages := completionSuccessorPayload(t, adapter, fixture, settlement, frameID)
+				if err := runtimeeffects.AttachCompletionContinuationEvidence(settlement.Settlement.Evidence, []byte(request), payload); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := handle.SettleCompletion(ctx, settlement); err != nil {
+					t.Fatalf("settle completion: %v", err)
+				}
+				controller := newCompletionControllerForTest(store)
+				recoveryCtx := managedExecutionStoreTestContext(t, fixture.context)
+				settled, found, err := controller.RecoverCompletionContinuation(recoveryCtx, fixture.sessionID, settlement.AgentTurn.Memory)
+				if err != nil || !found {
+					t.Fatalf("recover settled response: found=%v err=%v", found, err)
+				}
+				snapshot, ok := settled.CompletionContinuation()
+				if !ok {
+					t.Fatal("settled completion continuation missing")
+				}
+				if settled.Attempt().AttemptID != handle.Attempt().AttemptID || snapshot.Phase != runtimeeffects.CompletionProjectionResponseSettled {
+					t.Fatalf("settled recovery attempt=%s phase=%s", settled.Attempt().AttemptID, snapshot.Phase)
+				}
+				projectionMessages, err := json.Marshal(messages)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := settled.ProjectCompletionConversation(ctx, runtimeeffects.CompletionConversationProjection{
+					Payload: snapshot.Payload, SessionID: fixture.sessionID, Identity: settlement.AgentTurn.Identity,
+					Memory: settlement.AgentTurn.Memory, ExpectedTurnCount: 0, TurnCount: 1, Messages: projectionMessages,
+				}); err != nil {
+					t.Fatalf("project completion: %v", err)
+				}
+				projected, found, err := controller.RecoverCompletionContinuation(recoveryCtx, fixture.sessionID, settlement.AgentTurn.Memory)
+				if err != nil || !found {
+					t.Fatalf("recover projected response: found=%v err=%v", found, err)
+				}
+				projectedSnapshot, ok := projected.CompletionContinuation()
+				if !ok || projectedSnapshot.Phase != runtimeeffects.CompletionProjectionConversationProjected {
+					t.Fatalf("projected recovery=%+v present=%v", projectedSnapshot, ok)
+				}
+				toolResult := json.RawMessage(`[{"name":"echo","ok":true,"result":{"value":"stable"}}]`)
+				if adapterIndex%2 == 1 {
+					toolResult = json.RawMessage(`[{"name":"read","ok":true,"result":{"value":1}},{"name":"write","ok":false,"failure":{"class":"dependency_unavailable","detail":{"code":"tool_failed"}}}]`)
+				}
+				successor, err := agentframe.NewToolContinuation(frameID, toolResult)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := projected.ConsumeCompletionResponse(ctx, &successor); err != nil {
+					t.Fatalf("consume response with exact successor: %v", err)
+				}
+
+				recovered, found, err := controller.RecoverCompletionContinuation(recoveryCtx, fixture.sessionID, settlement.AgentTurn.Memory)
+				if err != nil || !found {
+					t.Fatalf("recover consumed successor: found=%v err=%v", found, err)
+				}
+				recoveredSnapshot, ok := recovered.CompletionContinuation()
+				committed, hasSuccessor := recoveredSnapshot.ToolContinuation()
+				if recovered.Attempt().AttemptID != handle.Attempt().AttemptID || !ok || recoveredSnapshot.Phase != runtimeeffects.CompletionProjectionResponseConsumed || !hasSuccessor ||
+					committed.ParentFrameID() != successor.ParentFrameID() || string(committed.ToolResult()) != string(successor.ToolResult()) {
+					t.Fatalf("recovered checkpoint=%+v successor=%s present=%v", recoveredSnapshot, committed.ToolResult(), hasSuccessor)
+				}
+				if err := recovered.ConsumeCompletionResponse(ctx, &successor); err != nil {
+					t.Fatalf("repeat exact successor consumption: %v", err)
+				}
+				foreign, err := agentframe.NewToolContinuation("agent-frame:v1:"+uuid.NewString(), successor.ToolResult())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := recovered.ConsumeCompletionResponse(ctx, &foreign); err == nil {
+					t.Fatal("consumed response accepted a different successor frame")
+				}
+				if err := requireCompletionPhaseDDLRejectsSuccessorRollback(fixture, handle.Attempt().AttemptID); err == nil {
+					t.Fatal("fresh schema accepted a successor outside consumed phase")
+				}
+
+				successorAuthority := fixture.authority
+				successorAuthority.Target.ID = uuid.NewString()
+				successorCtx := runtimeeffects.WithLifecycleToken(fixture.contextFor(successorAuthority), successorAuthority.Normal)
+				successorCtx = runtimeeffects.WithLogicalOperationIdentity(successorCtx, request+":successor")
+				successorHandle := beginObservedCompletionForSettlementTest(t, successorCtx, adapter, request+":successor")
+				successorSettlement := completionSettlementForTest(t, successorHandle.Attempt().Authority.Target, fixture, adapter, "", "")
+				successorSettlement.ProviderHead = nil
+				successorFrameID := "agent-frame:v1:" + uuid.NewString()
+				successorPayload, _ := completionSuccessorPayload(t, adapter, fixture, successorSettlement, successorFrameID)
+				if err := runtimeeffects.AttachCompletionContinuationEvidence(successorSettlement.Settlement.Evidence, []byte(request+":successor"), successorPayload); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := successorHandle.SettleCompletion(successorCtx, successorSettlement); err != nil {
+					t.Fatalf("settle exact successor frame: %v", err)
+				}
+				next, found, err := controller.RecoverCompletionContinuation(recoveryCtx, fixture.sessionID, successorSettlement.AgentTurn.Memory)
+				if err != nil || !found {
+					t.Fatalf("recover successor settlement: found=%v err=%v", found, err)
+				}
+				if next.Attempt().AttemptID != successorHandle.Attempt().AttemptID {
+					t.Fatalf("recovered successor attempt=%s, want %s", next.Attempt().AttemptID, successorHandle.Attempt().AttemptID)
+				}
+				requireActiveCompletionContinuation(t, fixture, handle.Attempt().AttemptID, false)
+				requireActiveCompletionContinuation(t, fixture, successorHandle.Attempt().AttemptID, true)
+			})
+		}
+	}
+}
+
+func completionSuccessorPayload(t testing.TB, adapter string, fixture completionSettlementFixture, settlement runtimeeffects.CompletionSettlement, frameID string) (json.RawMessage, []runtimellm.Message) {
+	t.Helper()
+	assistant := runtimellm.Message{
+		Role: "assistant", Content: "use tool",
+		ToolCalls: []runtimellm.ToolCall{{ID: "call-1", Name: "echo", Arguments: map[string]any{"value": "stable"}}},
+	}
+	messages := []runtimellm.Message{{Role: "user", Content: "start"}, assistant}
+	document := struct {
+		Version    string                         `json:"version"`
+		Adapter    string                         `json:"adapter"`
+		Response   runtimellm.Response            `json:"response"`
+		Usage      runtimeeffects.CompletionUsage `json:"usage"`
+		Projection struct {
+			SessionID         string               `json:"session_id"`
+			ExpectedTurnCount int                  `json:"expected_turn_count"`
+			TurnCount         int                  `json:"turn_count"`
+			Messages          []runtimellm.Message `json:"messages"`
+			Identity          agentmemory.Identity `json:"identity"`
+			Memory            agentmemory.Plan     `json:"memory"`
+			FrameID           string               `json:"frame_id"`
+		} `json:"projection"`
+	}{
+		Version: "provider-response-continuation.v1", Adapter: adapter,
+		Response: runtimellm.Response{
+			Message: assistant, ToolCalls: assistant.ToolCalls, Raw: []byte(`{"response":"settled"}`),
+			ToolOutputAuthority: &runtimellm.ToolOutputAuthority{ProviderOperationID: uuid.NewString(), SettledAt: time.Unix(10, 0).UTC()},
+		},
+		Usage: runtimeeffects.CompletionUsage{ResolvedModel: "test-model", Exactness: runtimeeffects.CompletionUsageUnavailable},
+	}
+	document.Projection.SessionID = fixture.sessionID
+	document.Projection.ExpectedTurnCount = 0
+	document.Projection.TurnCount = 1
+	document.Projection.Messages = messages
+	document.Projection.Identity = settlement.AgentTurn.Identity
+	document.Projection.Memory = settlement.AgentTurn.Memory
+	document.Projection.FrameID = frameID
+	raw, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw, messages
+}
+
+func requireCompletionPhaseDDLRejectsSuccessorRollback(fixture completionSettlementFixture, attemptID string) error {
+	if fixture.sqlite {
+		_, err := fixture.db.Exec(`UPDATE runtime_external_effect_attempts SET completion_projection_phase='conversation_projected' WHERE attempt_id=?`, attemptID)
+		return err
+	}
+	_, err := fixture.db.Exec(`UPDATE runtime_external_effect_attempts SET completion_projection_phase='conversation_projected' WHERE attempt_id=$1::uuid`, attemptID)
+	return err
+}
+
 func proveSettledProviderResponseContinuationAdvancesExactActiveTurn(t *testing.T, fixture completionSettlementFixture) {
 	t.Helper()
 	const adapter = "anthropic_api"
@@ -257,7 +446,7 @@ func proveSettledProviderResponseContinuationAdvancesExactActiveTurn(t *testing.
 	}); err != nil {
 		t.Fatalf("project first completion continuation: %v", err)
 	}
-	if err := first.ConsumeCompletionResponse(firstCtx); err != nil {
+	if err := first.ConsumeCompletionResponse(firstCtx, nil); err != nil {
 		t.Fatalf("consume first completion continuation: %v", err)
 	}
 
@@ -355,7 +544,7 @@ func proveSettledProviderResponseRebindsStatelessSession(t *testing.T, fixture c
 	if err := continuation.ProjectCompletionConversation(successorCtx, projection); err != nil {
 		t.Fatalf("project stateless completion continuation: %v", err)
 	}
-	if err := continuation.ConsumeCompletionResponse(successorCtx); err != nil {
+	if err := continuation.ConsumeCompletionResponse(successorCtx, nil); err != nil {
 		t.Fatalf("consume stateless completion continuation: %v", err)
 	}
 	requireCompletionProjectionPhase(t, fixture, handle.Attempt().AttemptID, runtimeeffects.CompletionProjectionResponseConsumed)
@@ -433,7 +622,7 @@ func proveSettledProviderResponseContinuesExactReclaimedDelivery(t *testing.T, f
 		Identity: settlement.AgentTurn.Identity, Memory: settlement.AgentTurn.Memory,
 		ExpectedTurnCount: 0, TurnCount: 1, Messages: messages,
 	}
-	if err := continuation.ConsumeCompletionResponse(successorCtx); err == nil {
+	if err := continuation.ConsumeCompletionResponse(successorCtx, nil); err == nil {
 		t.Fatal("completion response was consumed before conversation projection")
 	}
 	hostileProjection := projection
@@ -456,10 +645,10 @@ func proveSettledProviderResponseContinuesExactReclaimedDelivery(t *testing.T, f
 	if !ok || projectedSnapshot.Phase != runtimeeffects.CompletionProjectionConversationProjected {
 		t.Fatalf("projected continuation=%+v present=%v", projectedSnapshot, ok)
 	}
-	if err := recovered.ConsumeCompletionResponse(successorCtx); err != nil {
+	if err := recovered.ConsumeCompletionResponse(successorCtx, nil); err != nil {
 		t.Fatalf("consume settled completion response: %v", err)
 	}
-	if err := recovered.ConsumeCompletionResponse(successorCtx); err != nil {
+	if err := recovered.ConsumeCompletionResponse(successorCtx, nil); err != nil {
 		t.Fatalf("repeat settled completion response consumption: %v", err)
 	}
 	requireCompletionProjectionState(t, fixture, handle.Attempt().AttemptID, runtimeeffects.CompletionProjectionResponseConsumed, 1, messages)

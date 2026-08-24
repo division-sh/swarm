@@ -45,7 +45,7 @@ func (p *settledContinuationProbe) ProjectCompletionConversation(_ context.Conte
 	return nil
 }
 
-func (p *settledContinuationProbe) ConsumeCompletionResponse(context.Context, runtimeeffects.Attempt) error {
+func (p *settledContinuationProbe) ConsumeCompletionResponse(context.Context, runtimeeffects.Attempt, *agentframe.ToolContinuation) error {
 	p.consumed++
 	return nil
 }
@@ -99,7 +99,7 @@ func TestSettledCompletionRecoveryUsesImmutableProjectedTurn(t *testing.T) {
 		OperationID: uuid.NewString(), AttemptID: uuid.NewString(), Kind: runtimeeffects.KindProviderTurn,
 		Class: runtimeeffects.EffectReadOnly, Adapter: "anthropic_api", Transport: "api",
 		Authority: authority, Origin: origin, Ordinal: 1, AuthorizedAt: time.Unix(9, 0).UTC(),
-	}, rawEvidence, runtimeeffects.Fingerprint([]byte("exact-original-request")), surface, runtimeeffects.CompletionProjectionConversationProjected)
+	}, rawEvidence, runtimeeffects.Fingerprint([]byte("exact-original-request")), surface, runtimeeffects.CompletionProjectionConversationProjected, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestSettledCompletionRecoveryUsesImmutableProjectedTurn(t *testing.T) {
 	if len(probe.projections) != 1 || probe.projections[0].ExpectedTurnCount != 0 || probe.projections[0].TurnCount != 1 || probe.projections[0].SessionID != session.ID {
 		t.Fatalf("canonical projection calls=%#v", probe.projections)
 	}
-	if err := consumeCompletionContinuation(ctx, response); err != nil {
+	if err := consumeCompletionContinuation(ctx, response, nil); err != nil {
 		t.Fatal(err)
 	}
 	if probe.consumed != 1 {
@@ -130,17 +130,26 @@ func TestSettledCompletionRecoveryUsesImmutableProjectedTurn(t *testing.T) {
 	}
 }
 
-func TestAllManagedAdaptersRecoverContinuationBeforeProviderConstruction(t *testing.T) {
+func TestAllManagedAdaptersDelegateRecoveryOnlyToConversationRoot(t *testing.T) {
+	conversationRaw, err := os.ReadFile("conversation.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	conversationSource := string(conversationRaw)
+	recovery := strings.Index(conversationSource, "c.recoverManagedCompletionContinuation(ctx)")
+	frameConstruction := strings.Index(conversationSource, "c.continueManagedOnce(ctx, draft)")
+	if recovery < 0 || frameConstruction < 0 || recovery >= frameConstruction {
+		t.Fatalf("conversation root recovery ordering recovery=%d frame-construction=%d", recovery, frameConstruction)
+	}
 	for _, candidate := range []struct {
-		file     string
-		adapter  string
-		boundary string
+		file    string
+		adapter string
 	}{
-		{file: "api_runtime.go", adapter: "\"anthropic_api\"", boundary: "resolveProviderModelForCall("},
-		{file: "openai_compatible_runtime.go", adapter: "\"openai_compatible\"", boundary: "resolveProviderModelForCall("},
-		{file: "openai_responses_runtime.go", adapter: "\"openai_responses\"", boundary: "resolveProviderModelForCall("},
-		{file: "cli_runtime.go", adapter: "claudeCLICompletionAdapter", boundary: "resolveProviderModelForCall("},
-		{file: "mock_runtime.go", adapter: "\"mock_python\"", boundary: "resolveProviderModelForCall("},
+		{file: "api_runtime.go", adapter: "\"anthropic_api\""},
+		{file: "openai_compatible_runtime.go", adapter: "\"openai_compatible\""},
+		{file: "openai_responses_runtime.go", adapter: "\"openai_responses\""},
+		{file: "cli_runtime.go", adapter: "claudeCLICompletionAdapter"},
+		{file: "mock_runtime.go", adapter: "\"mock_python\""},
 	} {
 		t.Run(candidate.file, func(t *testing.T) {
 			raw, err := os.ReadFile(candidate.file)
@@ -148,11 +157,14 @@ func TestAllManagedAdaptersRecoverContinuationBeforeProviderConstruction(t *test
 				t.Fatal(err)
 			}
 			source := string(raw)
-			recovery := strings.Index(source, "recoverCompletionContinuation(ctx, ")
-			adapter := strings.Index(source[recovery:], candidate.adapter)
-			boundary := strings.Index(source, candidate.boundary)
-			if recovery < 0 || adapter < 0 || boundary < 0 || recovery >= boundary {
-				t.Fatalf("adapter recovery ordering recovery=%d adapter=%d provider-boundary=%d", recovery, adapter, boundary)
+			if strings.Count(source, "recoverCompletionContinuation(ctx, ") != 1 ||
+				!strings.Contains(source, "recoverManagedCompletionContinuation(ctx context.Context, session *Session)") ||
+				!strings.Contains(source, candidate.adapter) {
+				t.Fatalf("adapter does not expose exactly one root recovery delegate")
+			}
+			continueStart := strings.LastIndex(source, ") continueSession(")
+			if continueStart < 0 || strings.Contains(source[continueStart:], "recoverCompletionContinuation(ctx, ") {
+				t.Fatalf("adapter provider-frame path still performs delivery recovery")
 			}
 		})
 	}

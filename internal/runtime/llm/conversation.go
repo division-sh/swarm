@@ -171,7 +171,25 @@ func (c *Conversation) stepManaged(ctx context.Context, draft agentframe.TurnDra
 	if err := c.ensureSession(ctx); err != nil {
 		return nil, err
 	}
-	resp, err := c.continueManagedOnce(ctx, draft)
+	resp, found, err := c.recoverManagedCompletionContinuation(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		c.adoptRecoveredCompletion(resp)
+		if resp.completionSuccessor != nil {
+			if c.causalEvent == nil {
+				return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_causal_event_missing", "llm-conversation", "resume_tool_continuation", nil)
+			}
+			resp, err = c.continueManagedOnce(ctx, resp.completionSuccessor.Draft(*c.causalEvent))
+		} else if resp.completionConsumed {
+			terminal := *resp
+			terminal.ToolCalls = nil
+			return &terminal, nil
+		}
+	} else {
+		resp, err = c.continueManagedOnce(ctx, draft)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -180,13 +198,30 @@ func (c *Conversation) stepManaged(ctx context.Context, draft agentframe.TurnDra
 	}
 
 	if c.toolExecutor == nil || len(resp.ToolCalls) == 0 {
-		if err := consumeCompletionContinuation(ctx, resp); err != nil {
+		if err := consumeCompletionContinuation(ctx, resp, nil); err != nil {
 			return nil, err
 		}
 		return resp, nil
 	}
 
 	return c.resolveToolCalls(ctx, resp)
+}
+
+func (c *Conversation) recoverManagedCompletionContinuation(ctx context.Context) (*Response, bool, error) {
+	runtime, ok := c.runtime.(managedCompletionContinuationRuntime)
+	if !ok {
+		return nil, false, nil
+	}
+	return runtime.recoverManagedCompletionContinuation(ctx, c.Session)
+}
+
+func (c *Conversation) adoptRecoveredCompletion(response *Response) {
+	if c == nil || c.Session == nil || response == nil {
+		return
+	}
+	c.Messages = append([]Message(nil), c.Session.Messages...)
+	c.TurnCount = c.Session.TurnCount
+	c.lastFrameID = strings.TrimSpace(response.completionFrameID)
 }
 
 func (c *Conversation) stepForkChat(ctx context.Context, msg Message) (*Response, error) {
@@ -360,10 +395,19 @@ func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) 
 		if err != nil {
 			return nil, err
 		}
-		if err := consumeCompletionContinuation(ctx, resp); err != nil {
+		terminal := shouldTerminateAfterToolCalls(executed)
+		var successor *agentframe.ToolContinuation
+		if !terminal && c.kind == conversationManaged {
+			continuation, continuationErr := agentframe.NewToolContinuation(c.lastFrameID, json.RawMessage(toolPayload))
+			if continuationErr != nil {
+				return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "managed_tool_continuation_invalid", "llm-conversation", "continue_tool_round", nil, continuationErr)
+			}
+			successor = &continuation
+		}
+		if err := consumeCompletionContinuation(ctx, resp, successor); err != nil {
 			return nil, err
 		}
-		if shouldTerminateAfterToolCalls(executed) {
+		if terminal {
 			terminal := *resp
 			terminal.ToolCalls = nil
 			return &terminal, nil
@@ -374,10 +418,7 @@ func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) 
 			if c.causalEvent == nil {
 				return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_causal_event_missing", "llm-conversation", "continue_tool_round", nil)
 			}
-			next, err = c.continueManagedOnce(ctx, agentframe.TurnDraft{
-				Kind: agentframe.TurnToolContinuation, Event: *c.causalEvent, ParentFrameID: c.lastFrameID,
-				InputRole: "tool", InputContent: toolPayload,
-			})
+			next, err = c.continueManagedOnce(ctx, successor.Draft(*c.causalEvent))
 		} else {
 			next, err = c.continueForkChatOnce(ctx, toolMsg)
 		}

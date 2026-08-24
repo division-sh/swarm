@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
@@ -259,7 +260,7 @@ func (h *Harness) SettleCompletion(_ context.Context, attempt runtimeeffects.Att
 		if err != nil {
 			return runtimeeffects.CompletionSettlementResult{}, err
 		}
-		admitted, err := runtimeeffects.AdmitCompletionContinuation(attempt, evidence, authorization.RequestFingerprint, *authorization.CapabilitySurface, settlement.Settlement.CompletionProjectionPhase)
+		admitted, err := runtimeeffects.AdmitCompletionContinuation(attempt, evidence, authorization.RequestFingerprint, *authorization.CapabilitySurface, settlement.Settlement.CompletionProjectionPhase, nil)
 		if err != nil {
 			return runtimeeffects.CompletionSettlementResult{}, err
 		}
@@ -276,7 +277,7 @@ func (*Harness) ProjectCompletionConversation(context.Context, runtimeeffects.At
 	return nil
 }
 
-func (*Harness) ConsumeCompletionResponse(context.Context, runtimeeffects.Attempt) error {
+func (*Harness) ConsumeCompletionResponse(context.Context, runtimeeffects.Attempt, *agentframe.ToolContinuation) error {
 	return nil
 }
 

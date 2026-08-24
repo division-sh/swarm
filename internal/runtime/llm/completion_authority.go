@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/runtime/agentframe"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -144,6 +145,18 @@ func validateCompletionContinuation(continuation completionContinuationEnvelope,
 	return nil
 }
 
+func ValidateCompletionToolContinuation(payload json.RawMessage, adapter string, successor agentframe.ToolContinuation) error {
+	continuation, err := completionContinuationForPayload(payload, adapter)
+	if err != nil {
+		return err
+	}
+	if continuation == nil || successor.Validate() != nil || strings.TrimSpace(continuation.Projection.FrameID) == "" ||
+		successor.ParentFrameID() != strings.TrimSpace(continuation.Projection.FrameID) {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_successor_frame_mismatch", "llm-completion-authority", "consume_completion", map[string]any{"adapter": strings.TrimSpace(adapter)})
+	}
+	return nil
+}
+
 func recoverCompletionContinuation(ctx context.Context, controller *runtimeeffects.Controller, session *Session, adapter string) (*Response, bool, error) {
 	if controller == nil || session == nil {
 		return nil, false, nil
@@ -186,6 +199,10 @@ func recoverCompletionContinuation(ctx context.Context, controller *runtimeeffec
 	response.CapabilitySurface = &snapshot.Surface
 	response.completionHandle = handle
 	response.completionFrameID = projection.FrameID
+	response.completionConsumed = snapshot.Phase == runtimeeffects.CompletionProjectionResponseConsumed
+	if successor, ok := snapshot.ToolContinuation(); ok {
+		response.completionSuccessor = &successor
+	}
 	return &response, true, nil
 }
 
@@ -224,11 +241,11 @@ func projectCompletionContinuation(ctx context.Context, dispatch *completionDisp
 	return true, nil
 }
 
-func consumeCompletionContinuation(ctx context.Context, response *Response) error {
+func consumeCompletionContinuation(ctx context.Context, response *Response, successor *agentframe.ToolContinuation) error {
 	if response == nil || response.completionHandle == nil {
 		return nil
 	}
-	return response.completionHandle.ConsumeCompletionResponse(ctx)
+	return response.completionHandle.ConsumeCompletionResponse(ctx, successor)
 }
 
 const (

@@ -174,6 +174,10 @@ func (r *AnthropicAPIRuntime) ContinueManagedSession(ctx context.Context, s *Ses
 	return r.continueSession(ctx, s, managed.message, &managed)
 }
 
+func (r *AnthropicAPIRuntime) recoverManagedCompletionContinuation(ctx context.Context, session *Session) (*Response, bool, error) {
+	return recoverCompletionContinuation(ctx, r.completionController, session, "anthropic_api")
+}
+
 func (r *AnthropicAPIRuntime) ContinueForkChatSession(ctx context.Context, s *Session, call ForkChatCall) (*Response, error) {
 	message, err := validateForkChatCall(ctx, s, call)
 	if err != nil {
@@ -212,14 +216,6 @@ func (r *AnthropicAPIRuntime) continueSession(ctx context.Context, s *Session, m
 	}, entityID); err != nil {
 		return nil, fmt.Errorf("mark inbound delivery active for reused api session: %w", err)
 	}
-	if managed != nil {
-		if response, found, err := recoverCompletionContinuation(ctx, r.completionController, s, "anthropic_api"); err != nil {
-			return nil, err
-		} else if found {
-			return response, nil
-		}
-	}
-
 	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendAnthropic)
 	resolvedModel, err := resolveProviderModelForCall(ctx, r.cfg, profile, managed)
 	if err != nil {

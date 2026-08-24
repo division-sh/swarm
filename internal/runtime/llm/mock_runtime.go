@@ -119,6 +119,10 @@ func (r *MockRuntime) ContinueManagedSession(ctx context.Context, session *Sessi
 	return r.continueSession(ctx, session, managed.message, &managed)
 }
 
+func (r *MockRuntime) recoverManagedCompletionContinuation(ctx context.Context, session *Session) (*Response, bool, error) {
+	return recoverCompletionContinuation(ctx, r.completionController, session, "mock_python")
+}
+
 func (r *MockRuntime) ContinueForkChatSession(ctx context.Context, session *Session, call ForkChatCall) (*Response, error) {
 	message, err := validateForkChatCall(ctx, session, call)
 	if err != nil {
@@ -153,13 +157,6 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 	}
 	if err := requireInboundDeliveryActiveForSession(ctx, r.events, session, "error", "Marking the reused mock agent delivery in progress failed", map[string]any{"memory_enabled": resolved.Enabled()}, entityID); err != nil {
 		return nil, fmt.Errorf("mark inbound delivery active for reused mock session: %w", err)
-	}
-	if managed != nil {
-		if response, found, err := recoverCompletionContinuation(ctx, r.completionController, session, "mock_python"); err != nil {
-			return nil, err
-		} else if found {
-			return response, nil
-		}
 	}
 	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendMock)
 	providerModel, err := resolveProviderModelForCall(ctx, r.cfg, profile, managed)

@@ -98,9 +98,14 @@ type fakeToolExec struct {
 }
 
 type managedRoundRuntime struct {
-	harness *effecttest.Harness
-	calls   int
-	frames  []agentframe.Frame
+	harness           *effecttest.Harness
+	calls             int
+	frames            []agentframe.Frame
+	recovered         *Response
+	recoveredMessages []Message
+	recoveredTurn     int
+	recoveryCalls     int
+	resumeTerminal    bool
 }
 
 func (r *managedRoundRuntime) StartSession(_ context.Context, agentID, systemPrompt string, tools []ToolDefinition) (*Session, error) {
@@ -115,6 +120,16 @@ func (r *managedRoundRuntime) ProviderContract() ProviderContract {
 	return AnthropicAPIProviderContract()
 }
 
+func (r *managedRoundRuntime) recoverManagedCompletionContinuation(_ context.Context, session *Session) (*Response, bool, error) {
+	r.recoveryCalls++
+	if r.recovered == nil {
+		return nil, false, nil
+	}
+	session.Messages = append([]Message(nil), r.recoveredMessages...)
+	session.TurnCount = r.recoveredTurn
+	return r.recovered, true, nil
+}
+
 func (r *managedRoundRuntime) ContinueManagedSession(ctx context.Context, session *Session, call ManagedCall) (*Response, error) {
 	if _, err := validateManagedCall(ctx, session, call); err != nil {
 		return nil, err
@@ -123,6 +138,11 @@ func (r *managedRoundRuntime) ContinueManagedSession(ctx context.Context, sessio
 	surface, ok := managedcapabilities.FromContext(ctx)
 	if !ok {
 		return nil, errors.New("managed test runtime capability surface missing")
+	}
+	if r.resumeTerminal {
+		r.calls++
+		session.TurnCount++
+		return &Response{Message: Message{Role: "assistant", Content: "resumed"}, CapabilitySurface: &surface}, nil
 	}
 	observed, err := ObserveAPIRequestCapabilitySurface(surface, []ToolDefinition{{Name: "echo"}})
 	if err != nil {
@@ -471,6 +491,62 @@ func TestManagedConversationExecutionFrameInitialAndContinuationChronology(t *te
 	}
 	if runtime.frames[1].Turn.ParentFrameID != runtime.frames[0].FrameID || runtime.frames[0].FrameID == runtime.frames[1].FrameID {
 		t.Fatalf("execution frame chronology = first %q second parent %q second %q", runtime.frames[0].FrameID, runtime.frames[1].Turn.ParentFrameID, runtime.frames[1].FrameID)
+	}
+}
+
+func TestManagedConversationRootResumesExactConsumedToolContinuation(t *testing.T) {
+	parentFrame := "agent-frame:v1:00000000-0000-4000-8000-000000000099"
+	continuation, err := agentframe.NewToolContinuation(parentFrame, json.RawMessage(`[{"name":"echo","ok":true,"result":{"value":"stable"}}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := &managedRoundRuntime{
+		harness:           effecttest.New(),
+		recovered:         &Response{Message: Message{Role: "assistant", Content: "predecessor"}, completionFrameID: parentFrame, completionSuccessor: &continuation},
+		recoveredMessages: []Message{{Role: "user", Content: "start"}, {Role: "assistant", Content: "predecessor"}},
+		recoveredTurn:     1,
+		resumeTerminal:    true,
+	}
+	tools := &managedEffectToolExecutor{harness: runtime.harness}
+	conversation := newTestManagedConversation(t, "effect-test-agent", "effect-test/instance", "analysis", []ToolDefinition{{Name: "echo"}}, testMemory(), 10, runtime)
+	conversation.SetToolExecutor(tools)
+	ctx := testManagedConversationContext(t, runtime.harness, "effect-test-agent", "effect-test/instance", "analysis")
+
+	response, err := conversation.RunManaged(ctx, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: testManagedEvent("effect-test-agent")})
+	if err != nil {
+		t.Fatalf("RunManaged recovered successor: %v", err)
+	}
+	if response == nil || response.Message.Content != "resumed" || runtime.recoveryCalls != 1 || runtime.calls != 1 || tools.calls != 0 {
+		t.Fatalf("recovered execution response=%#v recovery=%d provider=%d tools=%d", response, runtime.recoveryCalls, runtime.calls, tools.calls)
+	}
+	if len(runtime.frames) != 1 || runtime.frames[0].Turn.Kind != agentframe.TurnToolContinuation ||
+		runtime.frames[0].Turn.ParentFrameID != parentFrame || string(runtime.frames[0].Turn.ToolResult) != string(continuation.ToolResult()) {
+		t.Fatalf("resumed frame=%#v continuation=%s", runtime.frames, continuation.ToolResult())
+	}
+}
+
+func TestManagedConversationRootDoesNotRepeatConsumedTerminalTool(t *testing.T) {
+	runtime := &managedRoundRuntime{
+		harness: effecttest.New(),
+		recovered: &Response{
+			Message:            Message{Role: "assistant", Content: "terminal complete"},
+			ToolCalls:          []ToolCall{{ID: "terminal-call", Name: "echo", Arguments: map[string]any{"value": "must-not-repeat"}}},
+			completionConsumed: true,
+		},
+		recoveredMessages: []Message{{Role: "user", Content: "start"}, {Role: "assistant", Content: "terminal complete"}},
+		recoveredTurn:     1,
+	}
+	tools := &managedEffectToolExecutor{harness: runtime.harness}
+	conversation := newTestManagedConversation(t, "effect-test-agent", "effect-test/instance", "analysis", []ToolDefinition{{Name: "echo"}}, testMemory(), 10, runtime)
+	conversation.SetToolExecutor(tools)
+	ctx := testManagedConversationContext(t, runtime.harness, "effect-test-agent", "effect-test/instance", "analysis")
+
+	response, err := conversation.RunManaged(ctx, agentframe.TurnDraft{Kind: agentframe.TurnInitial, Event: testManagedEvent("effect-test-agent")})
+	if err != nil {
+		t.Fatalf("RunManaged recovered terminal response: %v", err)
+	}
+	if response == nil || response.Message.Content != "terminal complete" || len(response.ToolCalls) != 0 || runtime.recoveryCalls != 1 || runtime.calls != 0 || tools.calls != 0 {
+		t.Fatalf("recovered terminal response=%#v recovery=%d provider=%d tools=%d", response, runtime.recoveryCalls, runtime.calls, tools.calls)
 	}
 }
 
