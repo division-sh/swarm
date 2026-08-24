@@ -92,7 +92,7 @@ func proveCompletionOperationOwnsExactAgentFrame(t *testing.T, fixture completio
 	}
 	assertCompletionFrameBytes(t, fixture, "runtime_external_effect_operations", "operation_id", handle.Attempt().OperationID, want)
 
-	failureErr := runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "agent_frame_retry_prelaunch", "completion-test", "launch", map[string]any{"launch_rejected": true})
+	failureErr := runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "claude_cli_process_start_failed", "completion-test", "start", map[string]any{"launch_rejected": true})
 	failure, _ := runtimefailures.EnvelopeFromError(failureErr)
 	settlement := completionSettlementForTest(t, handle.Attempt().Authority.Target, fixture, adapter, "", "")
 	settlement.ProviderHead = nil
@@ -286,7 +286,7 @@ func TestCompletionLaunchBoundaryFailureRemainsAttemptOnlyPostgres(t *testing.T)
 
 func proveCompletionLaunchBoundaryFailureRemainsAttemptOnly(t *testing.T, fixture completionSettlementFixture) {
 	t.Helper()
-	adapters := []string{"anthropic_api", "openai_compatible", "openai_responses", "mock_python"}
+	adapters := []string{"anthropic_api", "openai_compatible", "openai_responses", "claude_cli", "mock_python"}
 	launchStates := []struct {
 		name            string
 		durablyLaunched bool
@@ -312,14 +312,14 @@ func proveCompletionLaunchBoundaryFailureRemainsAttemptOnly(t *testing.T, fixtur
 					}
 				}
 				failureErr := runtimefailures.New(
-					runtimefailures.ClassDependencyUnavailable,
+					runtimefailures.ClassLifecycleConflict,
 					"provider_launch_marker_failed",
 					"completion-test",
 					"launch_provider",
-					map[string]any{"launch_rejected": true},
+					map[string]any{"prelaunch": true},
 				)
 				failure, _ := runtimefailures.EnvelopeFromError(failureErr)
-				if err := handle.Settle(ctx, runtimeeffects.StateTerminalFailure, &failure, map[string]any{"launch_rejected": true}); err != nil {
+				if err := handle.Settle(ctx, runtimeeffects.StateTerminalFailure, &failure, map[string]any{"prelaunch": true}); err != nil {
 					t.Fatalf("settle no-invocation attempt: %v", err)
 				}
 				requireExternalAttemptState(t, fixture.db, fixture.sqlite, handle.Attempt().AttemptID, runtimeeffects.StateTerminalFailure)

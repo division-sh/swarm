@@ -36,10 +36,11 @@ func requireClaudeExecutionTarget(target *workspace.Target) (workspace.Execution
 	return execTarget, fmt.Errorf("%w: %s", ErrClaudeWorkspaceRequired, execTarget.UnsupportedMessage(workspace.ExecutionCapabilityClaudeCLI))
 }
 
-func (r *ClaudeCLIRuntime) runWithPreparedInput(ctx context.Context, args []string, target *workspace.Target, input string, meta MonitorTurnMeta, attempt *runtimeeffects.Handle, profile llmselection.Profile, model llmselection.ResolvedModel) (resp *Response, retErr error) {
-	if attempt == nil {
+func (r *ClaudeCLIRuntime) runWithPreparedInput(ctx context.Context, args []string, target *workspace.Target, input string, meta MonitorTurnMeta, dispatch *completionDispatch, profile llmselection.Profile, model llmselection.ResolvedModel) (resp *Response, retErr error) {
+	if dispatch == nil || dispatch.handle == nil {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_effect_handle_missing", "claude-cli-adapter", "run", nil)
 	}
+	attempt := dispatch.handle
 	timeout := r.effectiveCLITimeout(ctx)
 	if _, err := requireClaudeExecutionTarget(target); err != nil {
 		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateTerminalFailure, err, "resolve_execution_target", map[string]any{"prelaunch": true})
@@ -54,7 +55,10 @@ func (r *ClaudeCLIRuntime) runWithPreparedInput(ctx context.Context, args []stri
 		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateTerminalFailure, err, "heartbeat_attempt", map[string]any{"prelaunch": true})
 	}
 	defer func() {
-		resp, retErr = finishClaudeCompletionAttemptHeartbeat(heartbeat, resp, retErr)
+		retErr = finishCompletionDispatchHeartbeat(dispatch, heartbeat, retErr)
+		if retErr != nil {
+			resp = nil
+		}
 	}()
 
 	runCtx, cancel := context.WithTimeout(heartbeatCtx, timeout)
@@ -68,7 +72,7 @@ func (r *ClaudeCLIRuntime) runWithPreparedInput(ctx context.Context, args []stri
 		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateTerminalFailure, err, "build_command", map[string]any{"prelaunch": true})
 	}
 	if configuredCLIOutputFormat(r.cfg) == "stream-json" {
-		return r.runStreamingPrepared(runCtx, cmd, target, timeout, input, meta, attempt)
+		return r.runStreamingPrepared(runCtx, cmd, target, timeout, input, meta, dispatch)
 	}
 
 	var stdout bytes.Buffer
@@ -88,6 +92,7 @@ func (r *ClaudeCLIRuntime) runWithPreparedInput(ctx context.Context, args []stri
 		failureErr := runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "claude_cli_process_start_failed", "claude-cli-adapter", "start", map[string]any{"launch_rejected": true}, err)
 		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateTerminalFailure, failureErr, "start", map[string]any{"launch_rejected": true})
 	}
+	dispatch.markProviderInvocationStarted()
 	if err := cmd.Wait(); err != nil {
 		stderrText := strings.TrimSpace(stderr.String())
 		stdoutText := strings.TrimSpace(stdout.String())
@@ -107,10 +112,11 @@ func (r *ClaudeCLIRuntime) runWithPreparedInput(ctx context.Context, args []stri
 	return resp, nil
 }
 
-func (r *ClaudeCLIRuntime) runStreamingPrepared(ctx context.Context, cmd *exec.Cmd, target *workspace.Target, timeout time.Duration, input string, meta MonitorTurnMeta, attempt *runtimeeffects.Handle) (*Response, error) {
-	if attempt == nil {
+func (r *ClaudeCLIRuntime) runStreamingPrepared(ctx context.Context, cmd *exec.Cmd, target *workspace.Target, timeout time.Duration, input string, meta MonitorTurnMeta, dispatch *completionDispatch) (*Response, error) {
+	if dispatch == nil || dispatch.handle == nil {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_effect_handle_missing", "claude-cli-adapter", "run_streaming", nil)
 	}
+	attempt := dispatch.handle
 	if err := requireCompletionAttemptHeartbeat(ctx); err != nil {
 		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateTerminalFailure, err, "heartbeat_attempt", map[string]any{"prelaunch": true})
 	}
@@ -142,6 +148,7 @@ func (r *ClaudeCLIRuntime) runStreamingPrepared(ctx context.Context, cmd *exec.C
 		failureErr := runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, "claude_cli_process_start_failed", "claude-cli-adapter", "start", map[string]any{"launch_rejected": true}, err)
 		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateTerminalFailure, failureErr, "start", map[string]any{"launch_rejected": true})
 	}
+	dispatch.markProviderInvocationStarted()
 
 	stdoutCh := make(chan [][]byte, 1)
 	stderrCh := make(chan [][]byte, 1)
@@ -194,11 +201,10 @@ func settleClaudeAttemptFailure(ctx context.Context, attempt *runtimeeffects.Han
 }
 
 type claudeCompletionAttemptFailure struct {
-	state                runtimeeffects.State
-	err                  error
-	noProviderInvocation bool
-	operation            string
-	evidence             map[string]any
+	state     runtimeeffects.State
+	err       error
+	operation string
+	evidence  map[string]any
 }
 
 func (e *claudeCompletionAttemptFailure) Error() string { return e.err.Error() }
@@ -219,45 +225,13 @@ func claudeAttemptFailure(err error) *claudeCompletionAttemptFailure {
 	return attemptFailure
 }
 
-func claudeNoProviderInvocationFailure(err error) *claudeCompletionAttemptFailure {
-	attemptFailure := claudeAttemptFailure(err)
-	if attemptFailure == nil || !attemptFailure.noProviderInvocation {
-		return nil
-	}
-	return attemptFailure
-}
-
 func returnClaudeAttemptFailure(ctx context.Context, attempt *runtimeeffects.Handle, state runtimeeffects.State, original error, operation string, evidence map[string]any) error {
 	if attempt != nil && attempt.Attempt().Authority.Target.Valid() {
-		prelaunch, _ := evidence["prelaunch"].(bool)
-		launchRejected, _ := evidence["launch_rejected"].(bool)
 		return &claudeCompletionAttemptFailure{
-			state: state, err: original, noProviderInvocation: prelaunch || launchRejected,
-			operation: operation, evidence: evidence,
+			state: state, err: original, operation: operation, evidence: evidence,
 		}
 	}
 	return settleClaudeAttemptFailure(ctx, attempt, state, original, operation, evidence)
-}
-
-func finishClaudeCompletionAttemptHeartbeat(heartbeat *completionAttemptHeartbeat, response *Response, prior error) (*Response, error) {
-	if heartbeat == nil {
-		return response, prior
-	}
-	heartbeatErr := heartbeat.Stop()
-	if heartbeatErr == nil {
-		return response, prior
-	}
-	priorFailure := claudeNoProviderInvocationFailure(prior)
-	attemptFailure := &claudeCompletionAttemptFailure{
-		state: runtimeeffects.StateOutcomeUncertain,
-		err:   errors.Join(prior, completionAttemptHeartbeatLoss(heartbeatErr)),
-	}
-	if priorFailure != nil {
-		attemptFailure.noProviderInvocation = true
-		attemptFailure.operation = priorFailure.operation
-		attemptFailure.evidence = priorFailure.evidence
-	}
-	return nil, attemptFailure
 }
 
 func (r *ClaudeCLIRuntime) openMonitorTurn(ctx context.Context, meta MonitorTurnMeta) (MonitorTurnWriter, error) {

@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
@@ -24,7 +26,7 @@ type workspaceResolverStub struct {
 	err    error
 }
 
-func beginClaudeTestCompletion(t *testing.T, parent context.Context, request string) (*effecttest.Harness, context.Context, *runtimeeffects.Handle) {
+func beginClaudeTestCompletion(t *testing.T, parent context.Context, request string) (*effecttest.Harness, context.Context, *completionDispatch) {
 	t.Helper()
 	harness := effecttest.New()
 	ctx := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, t.Name()))
@@ -35,10 +37,13 @@ func beginClaudeTestCompletion(t *testing.T, parent context.Context, request str
 	if err != nil {
 		t.Fatalf("authorize claude completion: %v", err)
 	}
-	return harness, ctx, attempt
+	_, model := testClaudeProviderSelection(t)
+	dispatch := newCompletionDispatch(attempt, "")
+	dispatch.providerModel = model
+	return harness, ctx, dispatch
 }
 
-func settleClaudeTestCompletionFailure(t *testing.T, harness *effecttest.Harness, ctx context.Context, attempt *runtimeeffects.Handle, err error) {
+func settleClaudeTestCompletionFailure(t *testing.T, harness *effecttest.Harness, ctx context.Context, dispatch *completionDispatch, err error) {
 	t.Helper()
 	if err == nil {
 		t.Fatal("claude completion unexpectedly succeeded")
@@ -47,7 +52,34 @@ func settleClaudeTestCompletionFailure(t *testing.T, harness *effecttest.Harness
 	if !ok || state == runtimeeffects.StateSettled || state == runtimeeffects.StateTerminalFailure || state == runtimeeffects.StateOutcomeUncertain {
 		t.Fatalf("low-level completion primitive settled independently: state=%q present=%t", state, ok)
 	}
-	settleEffectTestCompletionFailure(t, ctx, &completionDispatch{handle: attempt}, err, claudeCompletionFailureState(err))
+	profile, model := testClaudeProviderSelection(t)
+	failure := runtimefailures.FromError(err, "claude-cli-test", "settle_completion")
+	target := dispatch.handle.Attempt().Authority.Target
+	surface, ok := managedcapabilities.FromContext(ctx)
+	if !ok {
+		t.Fatal("managed capability surface is missing from Claude completion context")
+	}
+	turn := AgentTurnRecord{
+		AgentID: target.AgentID, Identity: agentmemory.Identity{RunID: target.RunID, Agent: target.AgentIdentity},
+		Memory: target.Memory, SessionID: target.SessionID, RunID: target.RunID, EntityID: target.EntityID,
+		FlowInstance: target.FlowInstance, CapabilitySurface: &surface, Failure: &failure.Failure,
+	}
+	settlementCtx := harness.CompletionContext("claude-shared-settlement")
+	if _, settleErr := settleCompletionTurn(
+		settlementCtx, dispatch, target.ID, turn, nil, profile, unavailableCompletionUsage(model.ConcreteModel),
+		claudeCompletionFailureState(err), &failure.Failure, nil,
+	); settleErr != nil {
+		settlementFailure, _ := runtimefailures.As(settleErr)
+		t.Fatalf("settle Claude completion: %#v", settlementFailure)
+	}
+	if dispatch.invocation == completionProviderInvocationNotStarted {
+		if got := harness.CompletionCount(); got != 0 {
+			t.Fatalf("turn-bearing settlements = %d, want 0", got)
+		}
+		if got := harness.ProjectedSpendCount(); got != 0 {
+			t.Fatalf("projected spend settlements = %d, want 0", got)
+		}
+	}
 }
 
 func (s workspaceResolverStub) ResolveWorkspace(context.Context, runtimeactors.AgentConfig) (*workspace.Target, error) {
@@ -90,10 +122,10 @@ func TestClaudeCLIRuntimeContinueSession_RejectsHostFallbackWhenTargetMissing(t 
 		AgentID: "campaign-coordinator",
 	}
 
-	harness, ctx, attempt := beginClaudeTestCompletion(t, unmanagedLLMTestContext(), "hello")
+	harness, ctx, dispatch := beginClaudeTestCompletion(t, unmanagedLLMTestContext(), "hello")
 	profile, model := testClaudeProviderSelection(t)
-	_, err := runtime.runWithPreparedInput(ctx, nil, nil, "hello", MonitorTurnMeta{}, attempt, profile, model)
-	settleClaudeTestCompletionFailure(t, harness, ctx, attempt, err)
+	_, err := runtime.runWithPreparedInput(ctx, nil, nil, "hello", MonitorTurnMeta{}, dispatch, profile, model)
+	settleClaudeTestCompletionFailure(t, harness, ctx, dispatch, err)
 	if !errors.Is(err, ErrClaudeWorkspaceRequired) {
 		t.Fatalf("expected ErrClaudeWorkspaceRequired, got %v", err)
 	}
@@ -108,10 +140,10 @@ func TestClaudeCLIRuntimeRejectsHostWorkspaceBackend(t *testing.T) {
 		Backend: workspace.BackendHost,
 	}
 
-	harness, ctx, attempt := beginClaudeTestCompletion(t, unmanagedLLMTestContext(), "hello")
+	harness, ctx, dispatch := beginClaudeTestCompletion(t, unmanagedLLMTestContext(), "hello")
 	profile, model := testClaudeProviderSelection(t)
-	_, err := runtime.runWithPreparedInput(ctx, nil, target, "hello", MonitorTurnMeta{}, attempt, profile, model)
-	settleClaudeTestCompletionFailure(t, harness, ctx, attempt, err)
+	_, err := runtime.runWithPreparedInput(ctx, nil, target, "hello", MonitorTurnMeta{}, dispatch, profile, model)
+	settleClaudeTestCompletionFailure(t, harness, ctx, dispatch, err)
 	if !errors.Is(err, ErrClaudeWorkspaceRequired) {
 		t.Fatalf("runWithInput error = %v, want ErrClaudeWorkspaceRequired", err)
 	}
@@ -198,10 +230,10 @@ exit 127
 	runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil)
 	runtime.providerCredentials = testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 
-	harness, ctx, attempt := beginClaudeTestCompletion(t, unmanagedLLMTestContext(), "hello")
+	harness, ctx, dispatch := beginClaudeTestCompletion(t, unmanagedLLMTestContext(), "hello")
 	profile, model := testClaudeProviderSelection(t)
-	_, err := runtime.runWithPreparedInput(ctx, nil, &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}, "hello", MonitorTurnMeta{}, attempt, profile, model)
-	settleClaudeTestCompletionFailure(t, harness, ctx, attempt, err)
+	_, err := runtime.runWithPreparedInput(ctx, nil, &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}, "hello", MonitorTurnMeta{}, dispatch, profile, model)
+	settleClaudeTestCompletionFailure(t, harness, ctx, dispatch, err)
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Class != runtimefailures.ClassConnectorFailure || failure.Failure.Detail.Code != "claude_cli_process_failed" {
 		t.Fatalf("runWithInput failure = %#v, want generic connector failure", failure)
@@ -253,10 +285,10 @@ exit 1
 			runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil)
 			runtime.providerCredentials = testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
 
-			harness, ctx, attempt := beginClaudeTestCompletion(t, unmanagedLLMTestContext(), "hello")
+			harness, ctx, dispatch := beginClaudeTestCompletion(t, unmanagedLLMTestContext(), "hello")
 			profile, model := testClaudeProviderSelection(t)
-			_, err := runtime.runWithPreparedInput(ctx, nil, &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}, "hello", MonitorTurnMeta{}, attempt, profile, model)
-			settleClaudeTestCompletionFailure(t, harness, ctx, attempt, err)
+			_, err := runtime.runWithPreparedInput(ctx, nil, &workspace.Target{Container: "swarm-agent-market-research", Workdir: "/workspace"}, "hello", MonitorTurnMeta{}, dispatch, profile, model)
+			settleClaudeTestCompletionFailure(t, harness, ctx, dispatch, err)
 			assertClaudeAuthenticationFailure(t, err)
 		})
 	}
