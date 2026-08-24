@@ -12118,12 +12118,15 @@ flow_model:
             producer_target_broadcast_retirement: '#2086'
           failure_reasons:
           - source_missing
-          - connect_pin_ref_invalid
+          - connect_source_location_missing
           - producer_flow_missing
           - producer_output_pin_missing
           - receiver_flow_missing
           - receiver_input_pin_missing
           - receiver_resolution_missing
+          - event_alias_or_adapter_invalid
+          - synthetic_carry_payload_collision
+          - root_receiver_resolution_invalid
           - delivery_topology_invalid
           - reply_lineage_missing
           - route_plan_instance_source_value_missing
@@ -12131,6 +12134,7 @@ flow_model:
           - route_plan_target_ambiguous
           - route_plan_instance_resolution_invalid
           - route_plan_instance_conflict
+          - route_plan_lifecycle_unavailable
           stage_boundary:
             produces: Typed lowered connect route artifacts and optional descriptor-materialized target/target_set facts.
             does_not_produce:
