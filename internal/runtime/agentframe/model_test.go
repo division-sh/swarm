@@ -17,6 +17,46 @@ import (
 
 const testBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
+func TestToolContinuationIsCanonicalAndValidByConstruction(t *testing.T) {
+	parent := "agent-frame:v1:00000000-0000-4000-8000-000000000099"
+	continuation, err := NewToolContinuation(parent, json.RawMessage(`[{"result":{"b":2,"a":1},"ok":true,"name":"echo"}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := continuation.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeToolContinuation(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.ParentFrameID() != parent || string(decoded.ToolResult()) != `[{"name":"echo","ok":true,"result":{"a":1,"b":2}}]` {
+		t.Fatalf("decoded continuation parent=%q result=%s", decoded.ParentFrameID(), decoded.ToolResult())
+	}
+	for _, hostile := range []json.RawMessage{
+		json.RawMessage(`{"version":"agent-tool-continuation.v1","parent_frame_id":"bad","tool_result":[{"ok":true}]}`),
+		json.RawMessage(`{"version":"agent-tool-continuation.v1","parent_frame_id":"` + parent + `","tool_result":[]}`),
+		json.RawMessage(`{"version":"foreign","parent_frame_id":"` + parent + `","tool_result":[{"ok":true}]}`),
+	} {
+		if _, err := DecodeToolContinuation(hostile); err == nil {
+			t.Fatalf("hostile continuation accepted: %s", hostile)
+		}
+	}
+}
+
+func TestToolContinuationDecodeRejectsNonCanonicalEnvelope(t *testing.T) {
+	parent := "agent-frame:v1:00000000-0000-4000-8000-000000000099"
+	for _, raw := range []json.RawMessage{
+		json.RawMessage(`{"version":"agent-tool-continuation.v1","parent_frame_id":"` + parent + `","tool_result":[{"name":"echo","ok":true}],"extra":true}`),
+		json.RawMessage(`{"version":"agent-tool-continuation.v1","parent_frame_id":"` + parent + `","tool_result":[{"name":"echo","ok":true}]} {}`),
+	} {
+		if _, err := DecodeToolContinuation(raw); err == nil {
+			t.Fatalf("decoded hostile continuation %s", raw)
+		}
+	}
+}
+
 func TestExecutionFrameCapabilityProjectionUsesPlanNotObservedEvidence(t *testing.T) {
 	seed, event, surface := testExecutionFrameInputs(t)
 	frame, err := Complete(seed, TurnDraft{Kind: TurnInitial, Event: event}, Completion{

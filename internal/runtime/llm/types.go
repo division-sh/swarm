@@ -162,6 +162,8 @@ type Response struct {
 	ToolOutputAuthority  *ToolOutputAuthority         `json:"tool_output_authority,omitempty"`
 	completionHandle     *runtimeeffects.Handle
 	completionFrameID    string
+	completionSuccessor  *agentframe.ToolContinuation
+	completionConsumed   bool
 }
 
 type Session struct {
@@ -193,6 +195,10 @@ type Runtime interface {
 type ManagedSessionRuntime interface {
 	Runtime
 	ContinueManagedSession(context.Context, *Session, ManagedCall) (*Response, error)
+}
+
+type managedCompletionContinuationRuntime interface {
+	recoverManagedCompletionContinuation(context.Context, *Session) (*Response, bool, error)
 }
 
 type ForkChatSessionRuntime interface {

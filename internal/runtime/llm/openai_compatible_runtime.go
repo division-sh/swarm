@@ -176,6 +176,10 @@ func (r *OpenAICompatibleRuntime) ContinueManagedSession(ctx context.Context, s 
 	return r.continueSession(ctx, s, managed.message, &managed)
 }
 
+func (r *OpenAICompatibleRuntime) recoverManagedCompletionContinuation(ctx context.Context, session *Session) (*Response, bool, error) {
+	return recoverCompletionContinuation(ctx, r.completionController, session, "openai_compatible")
+}
+
 func (r *OpenAICompatibleRuntime) ContinueForkChatSession(ctx context.Context, s *Session, call ForkChatCall) (*Response, error) {
 	message, err := validateForkChatCall(ctx, s, call)
 	if err != nil {
@@ -214,14 +218,6 @@ func (r *OpenAICompatibleRuntime) continueSession(ctx context.Context, s *Sessio
 	}, entityID); err != nil {
 		return nil, fmt.Errorf("mark inbound delivery active for reused openai-compatible session: %w", err)
 	}
-	if managed != nil {
-		if response, found, err := recoverCompletionContinuation(ctx, r.completionController, s, "openai_compatible"); err != nil {
-			return nil, err
-		} else if found {
-			return response, nil
-		}
-	}
-
 	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendOpenAICompatible)
 	resolvedModel, err := resolveProviderModelForCall(ctx, r.cfg, profile, managed)
 	if err != nil {

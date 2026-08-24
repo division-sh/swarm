@@ -100,7 +100,9 @@ func (*completionStoreProbe) ProjectCompletionConversation(context.Context, Atte
 	return nil
 }
 
-func (*completionStoreProbe) ConsumeCompletionResponse(context.Context, Attempt) error { return nil }
+func (*completionStoreProbe) ConsumeCompletionResponse(context.Context, Attempt, *agentframe.ToolContinuation) error {
+	return nil
+}
 
 type completionProjectionProbe struct{}
 
@@ -211,7 +213,7 @@ func TestCompletionContinuationCannotDispatchOrResettle(t *testing.T) {
 	attempt, err := AdmitCompletionContinuation(Attempt{
 		OperationID: "operation", AttemptID: "attempt", Kind: KindProviderTurn, Authority: authority,
 		Origin: CompletionOrigin{Kind: CompletionOriginDelivery},
-	}, rawEvidence, Fingerprint([]byte("request")), surface, CompletionProjectionResponseSettled)
+	}, rawEvidence, Fingerprint([]byte("request")), surface, CompletionProjectionResponseSettled, nil)
 	if err != nil {
 		t.Fatalf("admit completion continuation: %v", err)
 	}

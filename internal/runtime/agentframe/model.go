@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 
@@ -245,6 +246,91 @@ type TurnDraft struct {
 	InputContent  string
 	Directive     *Directive
 	Remediation   *Remediation
+}
+
+const toolContinuationVersion = "agent-tool-continuation.v1"
+
+// ToolContinuation is the exact durable input to the provider frame that
+// follows a nonterminal tool response.
+type ToolContinuation struct {
+	parentFrameID string
+	toolResult    json.RawMessage
+}
+
+type toolContinuationDocument struct {
+	Version       string          `json:"version"`
+	ParentFrameID string          `json:"parent_frame_id"`
+	ToolResult    json.RawMessage `json:"tool_result"`
+}
+
+func NewToolContinuation(parentFrameID string, toolResult json.RawMessage) (ToolContinuation, error) {
+	continuation := ToolContinuation{parentFrameID: strings.TrimSpace(parentFrameID)}
+	if err := validateFrameID(continuation.parentFrameID); err != nil {
+		return ToolContinuation{}, fmt.Errorf("tool continuation parent frame: %w", err)
+	}
+	canonical, err := canonicalPayload(toolResult)
+	if err != nil {
+		return ToolContinuation{}, fmt.Errorf("tool continuation result: %w", err)
+	}
+	var entries []map[string]any
+	if err := json.Unmarshal(canonical, &entries); err != nil || len(entries) == 0 {
+		return ToolContinuation{}, fmt.Errorf("tool continuation result requires a non-empty canonical result batch")
+	}
+	continuation.toolResult = canonical
+	return continuation, nil
+}
+
+func DecodeToolContinuation(raw json.RawMessage) (ToolContinuation, error) {
+	var document toolContinuationDocument
+	decoder := json.NewDecoder(bytes.NewReader(bytes.TrimSpace(raw)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&document); err != nil {
+		return ToolContinuation{}, fmt.Errorf("decode tool continuation: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return ToolContinuation{}, fmt.Errorf("decode tool continuation: trailing JSON is invalid")
+	}
+	if document.Version != toolContinuationVersion {
+		return ToolContinuation{}, fmt.Errorf("tool continuation version %q is invalid", document.Version)
+	}
+	return NewToolContinuation(document.ParentFrameID, document.ToolResult)
+}
+
+func (c ToolContinuation) Encode() (json.RawMessage, error) {
+	if err := c.Validate(); err != nil {
+		return nil, err
+	}
+	raw, err := json.Marshal(toolContinuationDocument{
+		Version: toolContinuationVersion, ParentFrameID: c.parentFrameID, ToolResult: c.toolResult,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("encode tool continuation: %w", err)
+	}
+	return raw, nil
+}
+
+func (c ToolContinuation) Validate() error {
+	validated, err := NewToolContinuation(c.parentFrameID, c.toolResult)
+	if err != nil {
+		return err
+	}
+	if validated.parentFrameID != c.parentFrameID || !bytes.Equal(validated.toolResult, c.toolResult) {
+		return fmt.Errorf("tool continuation is not canonical")
+	}
+	return nil
+}
+
+func (c ToolContinuation) ParentFrameID() string { return c.parentFrameID }
+
+func (c ToolContinuation) ToolResult() json.RawMessage {
+	return append(json.RawMessage(nil), c.toolResult...)
+}
+
+func (c ToolContinuation) Draft(event events.Event) TurnDraft {
+	return TurnDraft{
+		Kind: TurnToolContinuation, Event: event, ParentFrameID: c.parentFrameID,
+		InputRole: "tool", InputContent: string(c.toolResult),
+	}
 }
 
 type Completion struct {

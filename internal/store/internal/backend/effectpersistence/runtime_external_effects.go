@@ -1674,6 +1674,7 @@ func settleExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, settlement r
 		UPDATE runtime_external_effect_attempts
 		SET state = $3, evidence = $4::jsonb, failure = $5::jsonb,
 		    completed_at = $6, updated_at = $6, completion_projection_phase = $7,
+		    completion_successor_turn = NULL,
 		    completion_continuation_active = COALESCE($7 = 'response_settled', FALSE)
 		WHERE attempt_id = $1::uuid AND operation_id = $2::uuid
 		  AND state IN ('authorized', 'launched', 'response_observed')
@@ -1702,6 +1703,7 @@ func settleExternalAttemptSQLiteTx(ctx context.Context, tx *sql.Tx, settlement r
 	res, err := tx.ExecContext(ctx, `
 		UPDATE runtime_external_effect_attempts
 		SET state = ?, evidence = ?, failure = ?, completed_at = ?, updated_at = ?, completion_projection_phase = ?,
+		    completion_successor_turn = NULL,
 		    completion_continuation_active = CASE WHEN ? = 'response_settled' THEN 1 ELSE 0 END
 		WHERE attempt_id = ? AND operation_id = ?
 		  AND state IN ('authorized', 'launched', 'response_observed')

@@ -13,6 +13,7 @@ import (
 	runtime "github.com/division-sh/swarm/internal/runtime"
 	activityresult "github.com/division-sh/swarm/internal/runtime/activityresult"
 	agentcontrol "github.com/division-sh/swarm/internal/runtime/agentcontrol"
+	agentframe "github.com/division-sh/swarm/internal/runtime/agentframe"
 	agentmemory "github.com/division-sh/swarm/internal/runtime/agentmemory"
 	authoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	budgetspend "github.com/division-sh/swarm/internal/runtime/budgetspend"
@@ -263,8 +264,8 @@ func (s *PostgresStore) ConfirmChannelBinding(ctx context.Context, req operatorc
 	return s.operatorChannelPostgresOwner.ConfirmChannelBinding(ctx, req)
 }
 
-func (s *PostgresStore) ConsumeCompletionResponse(ctx context.Context, attempt effects.Attempt) error {
-	return s.effectPostgresOwner.ConsumeCompletionResponse(ctx, attempt)
+func (s *PostgresStore) ConsumeCompletionResponse(ctx context.Context, attempt effects.Attempt, successor *agentframe.ToolContinuation) error {
+	return s.effectPostgresOwner.ConsumeCompletionResponse(ctx, attempt, successor)
 }
 
 func (s *PostgresStore) ContinueRunControl(ctx context.Context, req runcontrol.TransitionRequest) (runcontrol.State, error) {
@@ -1407,8 +1408,8 @@ func (s *SQLiteRuntimeStore) ConfirmChannelBinding(ctx context.Context, req oper
 	return s.operatorChannelSQLiteOwner.ConfirmChannelBinding(ctx, req)
 }
 
-func (s *SQLiteRuntimeStore) ConsumeCompletionResponse(ctx context.Context, attempt effects.Attempt) error {
-	return s.effectSQLiteOwner.ConsumeCompletionResponse(ctx, attempt)
+func (s *SQLiteRuntimeStore) ConsumeCompletionResponse(ctx context.Context, attempt effects.Attempt, successor *agentframe.ToolContinuation) error {
+	return s.effectSQLiteOwner.ConsumeCompletionResponse(ctx, attempt, successor)
 }
 
 func (s *SQLiteRuntimeStore) ContinueRunControl(ctx context.Context, req runcontrol.TransitionRequest) (runcontrol.State, error) {

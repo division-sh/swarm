@@ -217,6 +217,10 @@ func (r *ClaudeCLIRuntime) ContinueManagedSession(ctx context.Context, s *Sessio
 	return r.continueSession(ctx, s, managed.message, &managed)
 }
 
+func (r *ClaudeCLIRuntime) recoverManagedCompletionContinuation(ctx context.Context, session *Session) (*Response, bool, error) {
+	return recoverCompletionContinuation(ctx, r.completionController, session, claudeCLICompletionAdapter)
+}
+
 func (r *ClaudeCLIRuntime) ContinueForkChatSession(ctx context.Context, s *Session, call ForkChatCall) (*Response, error) {
 	message, err := validateForkChatCall(ctx, s, call)
 	if err != nil {
@@ -257,13 +261,6 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 		"memory_enabled": resolved.Enabled(), "run_id": resolved.Identity.RunID, "flow_instance": resolved.Identity.FlowInstance(),
 	}, entityID); err != nil {
 		return nil, fmt.Errorf("mark inbound delivery active for reused cli session: %w", err)
-	}
-	if managed != nil {
-		if response, found, err := recoverCompletionContinuation(ctx, r.completionController, s, claudeCLICompletionAdapter); err != nil {
-			return nil, err
-		} else if found {
-			return response, nil
-		}
 	}
 	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
 	providerModel, err := resolveProviderModelForCall(ctx, r.cfg, profile, managed)

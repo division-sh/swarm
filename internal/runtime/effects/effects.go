@@ -253,21 +253,22 @@ type AuthorizeRequest struct {
 }
 
 type Attempt struct {
-	OperationID       string
-	AttemptID         string
-	Token             LifecycleToken
-	Authority         Authority
-	Kind              Kind
-	Class             EffectClass
-	Adapter           string
-	Transport         string
-	Ordinal           int
-	AuthorizedAt      time.Time
-	Origin            CompletionOrigin
-	completionRequest []byte
-	completionPayload json.RawMessage
-	completionSurface *managedcapabilities.Surface
-	completionPhase   CompletionProjectionPhase
+	OperationID         string
+	AttemptID           string
+	Token               LifecycleToken
+	Authority           Authority
+	Kind                Kind
+	Class               EffectClass
+	Adapter             string
+	Transport           string
+	Ordinal             int
+	AuthorizedAt        time.Time
+	Origin              CompletionOrigin
+	completionRequest   []byte
+	completionPayload   json.RawMessage
+	completionSurface   *managedcapabilities.Surface
+	completionPhase     CompletionProjectionPhase
+	completionSuccessor *agentframe.ToolContinuation
 }
 
 type CompletionProjectionPhase string
@@ -317,7 +318,7 @@ func AttachCompletionContinuationEvidence(evidence map[string]any, request []byt
 // AdmitCompletionContinuation projects immutable settled evidence onto the
 // current fenced delivery authority. Only the selected store may call this
 // after proving the operation, request, plan, source bundle, and delivery.
-func AdmitCompletionContinuation(attempt Attempt, evidence json.RawMessage, requestFingerprint string, surface managedcapabilities.Surface, phase CompletionProjectionPhase) (Attempt, error) {
+func AdmitCompletionContinuation(attempt Attempt, evidence json.RawMessage, requestFingerprint string, surface managedcapabilities.Surface, phase CompletionProjectionPhase, successorRaw json.RawMessage) (Attempt, error) {
 	if attempt.Kind != KindProviderTurn || attempt.Authority.Kind != AuthorityNormalAgent ||
 		attempt.Origin.Kind != CompletionOriginDelivery || !phase.Valid() {
 		return Attempt{}, fmt.Errorf("completion continuation requires a normal provider delivery attempt and phase")
@@ -345,14 +346,26 @@ func AdmitCompletionContinuation(attempt Attempt, evidence json.RawMessage, requ
 	cloned := surface.Clone()
 	attempt.completionSurface = &cloned
 	attempt.completionPhase = phase
+	successorRaw = bytes.TrimSpace(successorRaw)
+	if len(successorRaw) > 0 {
+		if phase != CompletionProjectionResponseConsumed {
+			return Attempt{}, fmt.Errorf("completion successor requires consumed response phase")
+		}
+		successor, err := agentframe.DecodeToolContinuation(successorRaw)
+		if err != nil {
+			return Attempt{}, fmt.Errorf("completion successor: %w", err)
+		}
+		attempt.completionSuccessor = &successor
+	}
 	return attempt, nil
 }
 
 type CompletionContinuationSnapshot struct {
-	Request []byte
-	Payload json.RawMessage
-	Surface managedcapabilities.Surface
-	Phase   CompletionProjectionPhase
+	Request   []byte
+	Payload   json.RawMessage
+	Surface   managedcapabilities.Surface
+	Phase     CompletionProjectionPhase
+	successor *agentframe.ToolContinuation
 }
 
 func (a Attempt) CompletionContinuation() (CompletionContinuationSnapshot, bool) {
@@ -360,11 +373,19 @@ func (a Attempt) CompletionContinuation() (CompletionContinuationSnapshot, bool)
 		return CompletionContinuationSnapshot{}, false
 	}
 	return CompletionContinuationSnapshot{
-		Request: append([]byte(nil), a.completionRequest...),
-		Payload: append(json.RawMessage(nil), a.completionPayload...),
-		Surface: a.completionSurface.Clone(),
-		Phase:   a.completionPhase,
+		Request:   append([]byte(nil), a.completionRequest...),
+		Payload:   append(json.RawMessage(nil), a.completionPayload...),
+		Surface:   a.completionSurface.Clone(),
+		Phase:     a.completionPhase,
+		successor: a.completionSuccessor,
 	}, true
+}
+
+func (s CompletionContinuationSnapshot) ToolContinuation() (agentframe.ToolContinuation, bool) {
+	if s.successor == nil {
+		return agentframe.ToolContinuation{}, false
+	}
+	return *s.successor, true
 }
 
 type Settlement struct {
@@ -411,7 +432,7 @@ type CompletionConversationProjection struct {
 type CompletionContinuationStore interface {
 	RecoverCompletionContinuation(context.Context, CompletionContinuationRequest) (Attempt, bool, error)
 	ProjectCompletionConversation(context.Context, Attempt, CompletionConversationProjection) error
-	ConsumeCompletionResponse(context.Context, Attempt) error
+	ConsumeCompletionResponse(context.Context, Attempt, *agentframe.ToolContinuation) error
 }
 
 type CompletionHeartbeatStore interface {
@@ -1036,11 +1057,11 @@ func (h *Handle) ProjectCompletionConversation(ctx context.Context, projection C
 	return h.controller.completionContinuationStore.ProjectCompletionConversation(context.WithoutCancel(ctx), h.attempt, projection)
 }
 
-func (h *Handle) ConsumeCompletionResponse(ctx context.Context) error {
+func (h *Handle) ConsumeCompletionResponse(ctx context.Context, successor *agentframe.ToolContinuation) error {
 	if h == nil || h.controller == nil || h.controller.completionContinuationStore == nil {
 		return runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "completion_continuation_store_missing", "external-effects", "consume_completion", nil)
 	}
-	return h.controller.completionContinuationStore.ConsumeCompletionResponse(context.WithoutCancel(ctx), h.attempt)
+	return h.controller.completionContinuationStore.ConsumeCompletionResponse(context.WithoutCancel(ctx), h.attempt, successor)
 }
 
 func (h *Handle) Fail(ctx context.Context, state State, class runtimefailures.Class, code, component, operation string, attributes map[string]any, cause error) error {
