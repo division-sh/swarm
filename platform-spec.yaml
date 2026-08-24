@@ -3008,6 +3008,8 @@ handler_specification:
       mapping shapes; handler.on_complete admits only an ordered sequence; join.on_complete and join.timeout each admit one
       outcome mapping. A keyed rules mapping key and optional `id` remain local display labels only; ordering remains
       evaluation order only. Aliases are resolved before rule-shape classification and recursive aliases fail closed.
+      One alias target may represent at most one adopted authored row; reuse across authored row occurrences fails closed
+      instead of sharing one semantic identity. Explicit null collections and duplicate normalized keys are invalid.
       Missing, malformed, noncanonical, or duplicate-within-package element IDs hard-fail strict loading. The explicit
       `swarm mint-element-ids` command is the only old-corpus minting surface; load never derives, backfills, aliases, or
       guesses an identity from a key, label, index, path, event, transition, or content.

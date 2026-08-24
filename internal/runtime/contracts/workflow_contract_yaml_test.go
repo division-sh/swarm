@@ -2037,6 +2037,9 @@ func TestSystemNodeEventHandlerDecode_RejectsInvalidKeyedRuleShape(t *testing.T)
 		{name: "whitespace label", raw: "rules:\n  \"   \": {condition: else}\n", want: "label must not be empty"},
 		{name: "scalar child", raw: "rules:\n  selected: else\n", want: "must be a mapping"},
 		{name: "empty collection", raw: "rules: {}\n", want: "must contain at least one row"},
+		{name: "null rules", raw: "rules: null\n", want: "rules handler rule collection must not be null"},
+		{name: "null on complete", raw: "on_complete: null\n", want: "on_complete handler rule collection must not be null"},
+		{name: "duplicate keyed label", raw: "rules:\n  selected: {condition: else}\n  selected: {condition: else}\n", want: "duplicate normalized key"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var handler SystemNodeEventHandler

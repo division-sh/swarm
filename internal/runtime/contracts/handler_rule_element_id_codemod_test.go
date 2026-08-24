@@ -259,6 +259,77 @@ func TestMintHandlerRuleElementIDsResolvesAliasedRowsIndependentOfKeyLabel(t *te
 	}
 }
 
+func TestMintHandlerRuleElementIDsRejectsReusedAliasRowsWithoutPartialWrite(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+	}{
+		{name: "keyed rules", raw: `template: &shared {condition: else}
+node:
+  event_handlers:
+    first.event:
+      rules:
+        first: *shared
+    second.event:
+      rules:
+        second: *shared
+`},
+		{name: "sequence rules", raw: `template: &shared {condition: else}
+node:
+  event_handlers:
+    event:
+      rules: [*shared, *shared]
+`},
+		{name: "handler completion", raw: `template: &shared {condition: else}
+node:
+  event_handlers:
+    first.event:
+      on_complete: [*shared]
+    second.event:
+      on_complete: [*shared]
+`},
+		{name: "join completion", raw: `template: &shared {advances_to: done}
+node:
+  event_handlers:
+    first.event:
+      join:
+        on_complete: *shared
+    second.event:
+      join:
+        on_complete: *shared
+`},
+		{name: "join timeout", raw: `template: &shared {after: 1h, advances_to: attention}
+node:
+  event_handlers:
+    first.event:
+      join:
+        timeout: *shared
+    second.event:
+      join:
+        timeout: *shared
+`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, "nodes.yaml")
+			raw := []byte(tc.raw)
+			if err := os.WriteFile(path, raw, 0o640); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := MintHandlerRuleElementIDs(root); err == nil || !strings.Contains(err.Error(), "YAML-ALIAS-REUSE") {
+				t.Fatalf("mint error = %v, want reused authored alias rejection", err)
+			}
+			updated, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(updated) != string(raw) {
+				t.Fatalf("failed alias preflight changed file\n got: %s\nwant: %s", updated, raw)
+			}
+		})
+	}
+}
+
 func TestMintHandlerRuleElementIDsRejectsInvalidAuthoredShapesWithoutPartialWrite(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -272,6 +343,10 @@ func TestMintHandlerRuleElementIDsRejectsInvalidAuthoredShapesWithoutPartialWrit
 		{name: "empty keyed label", body: "rules:\n        \"\": {condition: else}", want: "label must not be empty"},
 		{name: "whitespace keyed label", body: "rules:\n        \"   \": {condition: else}", want: "label must not be empty"},
 		{name: "scalar keyed child", body: "rules:\n        selected: else", want: "must be a mapping"},
+		{name: "null rules", body: "rules: null", want: "rules handler rule collection must not be null"},
+		{name: "null completion", body: "on_complete: null", want: "on_complete handler rule collection must not be null"},
+		{name: "duplicate keyed label", body: "rules:\n        selected: {condition: else}\n        selected: {condition: else}", want: "duplicate normalized key"},
+		{name: "duplicate handler rules", body: "rules: [{condition: else}]\n      rules: [{condition: else}]", want: "duplicate normalized key"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -316,7 +391,7 @@ func TestMintHandlerRuleElementIDsRejectsInvalidExistingRowBeforeWriting(t *test
 		{
 			name: "duplicate element identity",
 			row:  "{element_id: 00000000-0000-4000-8000-000000000413, element_id: 00000000-0000-4000-8000-000000000414, condition: else}",
-			want: "element_id may appear only once",
+			want: "duplicate normalized key",
 		},
 		{
 			name: "retired field after identity",

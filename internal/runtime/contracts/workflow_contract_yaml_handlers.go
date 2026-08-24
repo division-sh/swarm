@@ -1317,6 +1317,9 @@ func resolveHandlerRuleCollectionNode(node *yaml.Node, context handlerRuleDecode
 	if err != nil {
 		return nil, err
 	}
+	if resolved != nil && yamlNodeIsNull(resolved) {
+		return nil, fmt.Errorf("%s handler rule collection must not be null", context)
+	}
 	if context == handlerRuleDecodeContextOnComplete && resolved != nil && resolved.Kind != yaml.SequenceNode {
 		return nil, fmt.Errorf("DIALECT-OC-ORDER: on_complete is dict, must be ordered list")
 	}
@@ -1405,6 +1408,9 @@ func validateKeyedHandlerRuleStructure(node *yaml.Node) error {
 		return fmt.Errorf("keyed handler rules must be a mapping")
 	}
 	node = resolved
+	if err := validateUniqueNormalizedMappingKeys(node, "keyed handler rules"); err != nil {
+		return err
+	}
 	if len(node.Content) == 0 {
 		return fmt.Errorf("keyed handler rules must contain at least one row")
 	}
