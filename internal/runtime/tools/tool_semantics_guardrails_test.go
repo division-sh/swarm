@@ -46,7 +46,8 @@ func TestHITLSourceBoundaryRetiresOldInterpreters(t *testing.T) {
 					t.Errorf("unquote %s: %v", path, unquoteErr)
 					return true
 				}
-				if literal == "mailbox_send" || literal == "human_task_request" || literal == "agent_message" {
+				canonical := normalizeNativeToolName(literal)
+				if canonical == "mailbox_send" || canonical == "human_task_request" || canonical == "agent_message" {
 					if filepath.Base(path) != lifecycleOwnerFile {
 						t.Errorf("%s restores HITL identity %q outside the lifecycle owner", path, literal)
 					}

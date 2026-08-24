@@ -250,6 +250,36 @@ func TestHITLIdentityLifecycleRejectsDiscoveredCandidates(t *testing.T) {
 	}
 }
 
+func TestHITLIdentityLifecycleRejectsRuntimeMCPAliases(t *testing.T) {
+	identities := []struct {
+		name     string
+		teaching string
+	}{
+		{name: NotifyHumanToolName, teaching: "owned by the platform HITL contract"},
+		{name: AskHumanToolName, teaching: "owned by the platform HITL contract"},
+		{name: WithheldAgentMessageTool, teaching: agentMessageUnavailableTeaching},
+		{name: "mailbox_send", teaching: "use notify_human"},
+		{name: "human_task_request", teaching: "use ask_human"},
+	}
+	for _, identity := range identities {
+		t.Run(identity.name, func(t *testing.T) {
+			alias := "mcp__runtime-tools__" + identity.name
+			entry := retiredToolEntry(
+				runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerMCP),
+				runtimecontracts.WithToolMCP(runtimecontracts.MustToolMCPBinding("hostile", "send")),
+			)
+			source := retiredToolSourceForScope("root", nil, map[string]runtimecontracts.ToolSchemaEntry{alias: entry}, runtimecontracts.PolicyDocument{})
+			if errs := ValidateHITLIdentityLifecycleReferences(source); len(errs) != 1 || !strings.Contains(errs[0].Error(), identity.teaching) {
+				t.Fatalf("source lifecycle errors = %v, want one %q rejection", errs, identity.teaching)
+			}
+			discovered := map[string]runtimemcp.DiscoveredTool{alias: {Name: alias, Contract: entry}}
+			if _, err := executionToolsForRuntime(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), discovered); err == nil || !strings.Contains(err.Error(), identity.teaching) {
+				t.Fatalf("discovered alias error = %v, want %q", err, identity.teaching)
+			}
+		})
+	}
+}
+
 func TestHITLIdentityLifecycleRejectsWithheldAndRetiredReferences(t *testing.T) {
 	identities := []struct {
 		name     string
@@ -304,41 +334,43 @@ func TestHITLIdentityLifecycleRejectsDirectDispatchBeforeResolution(t *testing.T
 		{name: "mailbox_send", teaching: "use notify_human"},
 		{name: "human_task_request", teaching: "use ask_human"},
 	} {
-		t.Run(identity.name, func(t *testing.T) {
-			var resolverCalls atomic.Int32
-			var mcpCalls atomic.Int32
-			dispatcher := NewToolDispatcher(nil,
-				func(models.AgentConfig, string) (ExecutionTool, bool, error) {
-					resolverCalls.Add(1)
-					entry := retiredToolEntry(
-						runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerMCP),
-						runtimecontracts.WithToolMCP(runtimecontracts.MustToolMCPBinding("hostile", "send")),
-					)
-					tool, _ := executionToolFromAdmitted(identity.name, entry)
-					return tool, true, nil
-				}, nil,
-				func(context.Context, models.AgentConfig, ExecutionTool, any) (any, error) {
-					mcpCalls.Add(1)
-					return map[string]any{"mutated": true}, nil
-				}, nil, nil, nil,
-			)
-			if _, err := dispatcher.Dispatch(context.Background(), models.AgentConfig{ID: "hostile"}, identity.name, map[string]any{}); err == nil || !strings.Contains(err.Error(), identity.teaching) {
-				t.Fatalf("Dispatch error = %v, want %q", err, identity.teaching)
-			}
-			if resolverCalls.Load() != 0 || mcpCalls.Load() != 0 {
-				t.Fatalf("invalid identity reached resolver=%d mcp=%d", resolverCalls.Load(), mcpCalls.Load())
-			}
+		for _, name := range []string{identity.name, "mcp__runtime-tools__" + identity.name} {
+			t.Run(name, func(t *testing.T) {
+				var resolverCalls atomic.Int32
+				var mcpCalls atomic.Int32
+				dispatcher := NewToolDispatcher(nil,
+					func(models.AgentConfig, string) (ExecutionTool, bool, error) {
+						resolverCalls.Add(1)
+						entry := retiredToolEntry(
+							runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerMCP),
+							runtimecontracts.WithToolMCP(runtimecontracts.MustToolMCPBinding("hostile", "send")),
+						)
+						tool, _ := executionToolFromAdmitted(identity.name, entry)
+						return tool, true, nil
+					}, nil,
+					func(context.Context, models.AgentConfig, ExecutionTool, any) (any, error) {
+						mcpCalls.Add(1)
+						return map[string]any{"mutated": true}, nil
+					}, nil, nil, nil,
+				)
+				if _, err := dispatcher.Dispatch(context.Background(), models.AgentConfig{ID: "hostile"}, name, map[string]any{}); err == nil || !strings.Contains(err.Error(), identity.teaching) {
+					t.Fatalf("Dispatch error = %v, want %q", err, identity.teaching)
+				}
+				if resolverCalls.Load() != 0 || mcpCalls.Load() != 0 {
+					t.Fatalf("invalid identity reached resolver=%d mcp=%d", resolverCalls.Load(), mcpCalls.Load())
+				}
 
-			mailbox := &mailboxStoreStub{}
-			exec := NewExecutorWithOptions(nil, ExecutorOptions{MailboxStore: mailbox})
-			actor := models.AgentConfig{ExecutionMode: "live", ID: "hostile", Tools: []string{identity.name}, Permissions: []string{identity.name}}
-			if _, err := exec.Execute(WithActor(context.Background(), actor), identity.name, map[string]any{}); err == nil || !strings.Contains(err.Error(), identity.teaching) {
-				t.Fatalf("Execute error = %v, want %q", err, identity.teaching)
-			}
-			if mailbox.last.Type != "" {
-				t.Fatalf("invalid identity mutated mailbox: %#v", mailbox.last)
-			}
-		})
+				mailbox := &mailboxStoreStub{}
+				exec := NewExecutorWithOptions(nil, ExecutorOptions{MailboxStore: mailbox})
+				actor := models.AgentConfig{ExecutionMode: "live", ID: "hostile", Tools: []string{identity.name}, Permissions: []string{identity.name}}
+				if _, err := exec.Execute(WithActor(context.Background(), actor), name, map[string]any{}); err == nil || !strings.Contains(err.Error(), identity.teaching) {
+					t.Fatalf("Execute error = %v, want %q", err, identity.teaching)
+				}
+				if mailbox.last.Type != "" {
+					t.Fatalf("invalid identity mutated mailbox: %#v", mailbox.last)
+				}
+			})
+		}
 	}
 }
 
