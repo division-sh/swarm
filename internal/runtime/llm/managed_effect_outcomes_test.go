@@ -20,6 +20,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
+	"github.com/division-sh/swarm/internal/runtime/sessions"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 )
 
@@ -143,6 +144,39 @@ func TestManagedProviderLaunchBoundaryFailureSettlesAttemptOnly(t *testing.T) {
 			},
 		},
 		{
+			name: "claude_cli", backend: llmselection.BackendClaudeCLI,
+			invoke: func(ctx context.Context, profile llmselection.Profile, model llmselection.ResolvedModel, calls *atomic.Int32) (*completionDispatch, error) {
+				dir := t.TempDir()
+				marker := dir + "/provider-invoked"
+				docker := dir + "/docker"
+				if err := os.WriteFile(docker, []byte("#!/bin/sh\n: >"+marker+"\nexit 97\n"), 0o755); err != nil {
+					t.Fatalf("write Claude invocation marker: %v", err)
+				}
+				cfg := &config.Config{}
+				cfg.Workspace.DockerBin = docker
+				cfg.LLM.ClaudeCLI.Command = "claude"
+				cfg.LLM.ClaudeCLI.OutputFormat = "json"
+				runtime := NewClaudeCLIRuntime(cfg, sessions.NewInMemoryRegistry(0), "effect-test", nil, nil, nil)
+				runtime.providerCredentials = testProviderCredentialResolver(t, "CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
+				attempt, err := beginManagedTestCompletion(t, ctx, claudeCLICompletionAdapter, []byte("request"))
+				if err != nil {
+					return nil, err
+				}
+				dispatch := newCompletionDispatch(attempt, "")
+				dispatch.providerModel = model
+				_, err = runtime.runWithPreparedInput(
+					ctx, nil, &workspace.Target{Backend: workspace.BackendDocker, Container: "effect-test", Workdir: "/workspace"},
+					"request", MonitorTurnMeta{}, dispatch, profile, model,
+				)
+				if _, statErr := os.Stat(marker); statErr == nil {
+					calls.Add(1)
+				} else if !os.IsNotExist(statErr) {
+					t.Fatalf("inspect Claude invocation marker: %v", statErr)
+				}
+				return dispatch, err
+			},
+		},
+		{
 			name: "mock", backend: llmselection.BackendMock,
 			invoke: func(ctx context.Context, _ llmselection.Profile, model llmselection.ResolvedModel, calls *atomic.Int32) (*completionDispatch, error) {
 				actor := runtimeactors.AgentConfig{ID: "effect-test-agent", ExecutionMode: runtimeeffects.ExecutionModeMock}
@@ -236,11 +270,13 @@ func TestManagedClaudeCLIEffectOutcomes(t *testing.T) {
 	}
 	runtime := &ClaudeCLIRuntime{}
 	cmd := exec.Command("/definitely/missing/swarm-claude-cli")
+	dispatch := newCompletionDispatch(attempt, "")
+	_, dispatch.providerModel = testClaudeProviderSelection(t)
 	heartbeatCtx, heartbeat, err := startCompletionAttemptHeartbeat(ctx, attempt)
 	if err != nil {
 		t.Fatalf("start claude attempt heartbeat: %v", err)
 	}
-	_, runErr := runtime.runStreamingPrepared(heartbeatCtx, cmd, nil, time.Second, "request", MonitorTurnMeta{}, attempt)
+	_, runErr := runtime.runStreamingPrepared(heartbeatCtx, cmd, nil, time.Second, "request", MonitorTurnMeta{}, dispatch)
 	if heartbeatErr := heartbeat.Stop(); heartbeatErr != nil {
 		t.Fatalf("stop claude attempt heartbeat: %v", heartbeatErr)
 	}
@@ -253,7 +289,14 @@ func TestManagedClaudeCLIEffectOutcomes(t *testing.T) {
 	if err := harness.RequireState("claude_cli", runtimeeffects.StateLaunched); err != nil {
 		t.Fatalf("low-level completion primitive settled independently: %v", err)
 	}
-	settleEffectTestCompletionFailure(t, ctx, &completionDispatch{handle: attempt}, runErr, claudeCompletionFailureState(runErr))
+	if dispatch.invocation != completionProviderInvocationNotStarted {
+		t.Fatalf("Claude start rejection invocation=%d, want not started", dispatch.invocation)
+	}
+	failure, ok := runtimefailures.As(runErr)
+	if !ok || failure.Failure.Detail.Code != "claude_cli_process_start_failed" || !failure.Failure.Retryable {
+		t.Fatalf("Claude start rejection failure=%#v, want retryable exact launch rejection", failure)
+	}
+	settleClaudeTestCompletionFailure(t, harness, ctx, dispatch, runErr)
 	if err := harness.RequireState("claude_cli", runtimeeffects.StateTerminalFailure); err != nil {
 		t.Fatal(err)
 	}
@@ -279,11 +322,13 @@ func TestManagedClaudeCLIStreamingSetupFailureSettlesPrelaunch(t *testing.T) {
 	}
 	runtime := &ClaudeCLIRuntime{monitor: failingMonitorSink{err: errors.New("injected monitor open failure")}}
 	cmd := exec.Command("sh", "-lc", "true")
+	dispatch := newCompletionDispatch(attempt, "")
+	_, dispatch.providerModel = testClaudeProviderSelection(t)
 	heartbeatCtx, heartbeat, err := startCompletionAttemptHeartbeat(ctx, attempt)
 	if err != nil {
 		t.Fatalf("start claude attempt heartbeat: %v", err)
 	}
-	_, runErr := runtime.runStreamingPrepared(heartbeatCtx, cmd, nil, time.Second, "request", MonitorTurnMeta{AgentID: harness.Token.AgentID}, attempt)
+	_, runErr := runtime.runStreamingPrepared(heartbeatCtx, cmd, nil, time.Second, "request", MonitorTurnMeta{AgentID: harness.Token.AgentID}, dispatch)
 	if heartbeatErr := heartbeat.Stop(); heartbeatErr != nil {
 		t.Fatalf("stop claude attempt heartbeat: %v", heartbeatErr)
 	}
@@ -293,9 +338,46 @@ func TestManagedClaudeCLIStreamingSetupFailureSettlesPrelaunch(t *testing.T) {
 	if err := harness.RequireState("claude_cli", runtimeeffects.StateAuthorized); err != nil {
 		t.Fatalf("low-level completion primitive settled independently: %v", err)
 	}
-	settleEffectTestCompletionFailure(t, ctx, &completionDispatch{handle: attempt}, runErr, runtimeeffects.StateTerminalFailure)
+	settleClaudeTestCompletionFailure(t, harness, ctx, dispatch, runErr)
 	if err := harness.RequireState("claude_cli", runtimeeffects.StateTerminalFailure); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestManagedClaudeCLIStartedProcessIsTurnEligible(t *testing.T) {
+	harness := effecttest.New()
+	ctx := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, "claude-cli-started"))
+	attempt, err := beginManagedTestCompletion(t, ctx, "claude_cli", []byte("request"))
+	if err != nil {
+		t.Fatalf("authorize Claude attempt: %v", err)
+	}
+	dispatch := newCompletionDispatch(attempt, "")
+	_, dispatch.providerModel = testClaudeProviderSelection(t)
+	heartbeatCtx, heartbeat, err := startCompletionAttemptHeartbeat(ctx, attempt)
+	if err != nil {
+		t.Fatalf("start Claude attempt heartbeat: %v", err)
+	}
+	_, runErr := (&ClaudeCLIRuntime{}).runStreamingPrepared(
+		heartbeatCtx, exec.Command("sh", "-lc", "exit 23"), nil, time.Second, "request", MonitorTurnMeta{}, dispatch,
+	)
+	if heartbeatErr := heartbeat.Stop(); heartbeatErr != nil {
+		t.Fatalf("stop Claude attempt heartbeat: %v", heartbeatErr)
+	}
+	if runErr == nil {
+		t.Fatal("failing started Claude process returned nil")
+	}
+	if dispatch.invocation != completionProviderInvocationStarted {
+		t.Fatalf("Claude process invocation=%d, want started", dispatch.invocation)
+	}
+	settleClaudeTestCompletionFailure(t, harness, ctx, dispatch, runErr)
+	if err := harness.RequireState("claude_cli", runtimeeffects.StateOutcomeUncertain); err != nil {
+		t.Fatal(err)
+	}
+	if got := harness.CompletionCount(); got != 1 {
+		t.Fatalf("turn-bearing settlements = %d, want 1", got)
+	}
+	if got := harness.ProjectedSpendCount(); got != 1 {
+		t.Fatalf("projected spend settlements = %d, want 1", got)
 	}
 }
 

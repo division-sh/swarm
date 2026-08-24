@@ -448,9 +448,9 @@ printf '%s\n' '{"result":"done"}'
 	}
 	defer release()
 
-	harness, completionCtx, attempt := beginClaudeTestCompletion(t, ctx, "hello")
-	_, err = runtime.runWithPreparedInput(completionCtx, nil, target, "hello", MonitorTurnMeta{}, attempt, profile, model)
-	settleClaudeTestCompletionFailure(t, harness, completionCtx, attempt, err)
+	harness, completionCtx, dispatch := beginClaudeTestCompletion(t, ctx, "hello")
+	_, err = runtime.runWithPreparedInput(completionCtx, nil, target, "hello", MonitorTurnMeta{}, dispatch, profile, model)
+	settleClaudeTestCompletionFailure(t, harness, completionCtx, dispatch, err)
 	requireProviderAdmissionRateLimited(t, err)
 	if got := readProviderAdmissionFakeDockerInvocations(t, countFile); got != 0 {
 		t.Fatalf("fake docker invocations = %d, want admission rejection before subprocess dispatch", got)
@@ -488,9 +488,9 @@ printf '%s\n' '{"result":"done"}'
 	profile := mustAdmissionProfile(t, llmselection.BackendClaudeCLI)
 	model := mustAdmissionModel(t, profile, llmselection.ModelAliasRegular)
 
-	harness, completionCtx, attempt := beginClaudeTestCompletion(t, ctx, "hello")
-	_, fallback, err := runtime.runWithPreparedPrompt(completionCtx, []string{"--print"}, target, "hello", MonitorTurnMeta{}, attempt, profile, model)
-	settleClaudeTestCompletionFailure(t, harness, completionCtx, attempt, err)
+	harness, completionCtx, dispatch := beginClaudeTestCompletion(t, ctx, "hello")
+	_, fallback, err := runtime.runWithPreparedPrompt(completionCtx, []string{"--print"}, target, "hello", MonitorTurnMeta{}, dispatch, profile, model)
+	settleClaudeTestCompletionFailure(t, harness, completionCtx, dispatch, err)
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Class != runtimefailures.ClassConnectorFailure || failure.Failure.Detail.Code != "claude_cli_process_failed" {
 		t.Fatalf("failure = %#v, want generic connector failure", failure)

@@ -208,7 +208,7 @@ func shouldUseMCPBridge() bool {
 	return v == "1" || v == "true" || v == "yes"
 }
 
-func (r *ClaudeCLIRuntime) runWithPreparedPrompt(ctx context.Context, args []string, target *workspace.Target, prompt string, meta MonitorTurnMeta, attempt *runtimeeffects.Handle, profile llmselection.Profile, model llmselection.ResolvedModel) (*Response, promptTransportFallback, error) {
-	resp, err := r.runWithPreparedInput(ctx, args, target, prompt, meta, attempt, profile, model)
+func (r *ClaudeCLIRuntime) runWithPreparedPrompt(ctx context.Context, args []string, target *workspace.Target, prompt string, meta MonitorTurnMeta, dispatch *completionDispatch, profile llmselection.Profile, model llmselection.ResolvedModel) (*Response, promptTransportFallback, error) {
+	resp, err := r.runWithPreparedInput(ctx, args, target, prompt, meta, dispatch, profile, model)
 	return resp, promptTransportFallback{}, err
 }

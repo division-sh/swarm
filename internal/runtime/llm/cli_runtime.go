@@ -379,7 +379,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 			return target.Container
 		}(),
 	}
-	resp, fallback, err := r.runWithPreparedPrompt(ctx, args, target, prompt, monitorMeta, attempt, profile, providerModel)
+	resp, fallback, err := r.runWithPreparedPrompt(ctx, args, target, prompt, monitorMeta, dispatch, profile, providerModel)
 	if mcpContextToken != "" {
 		if listedSurface, ok := r.mcpTurns.ResolveManagedCapabilitySurface(mcpContextToken); ok {
 			ctx = managedcapabilities.WithContext(ctx, listedSurface)
@@ -396,18 +396,17 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 		"prompt_arg_fallback_used":      transportFallback.Used,
 	})
 	if err != nil {
-		if attemptFailure := claudeNoProviderInvocationFailure(err); attemptFailure != nil {
-			failure := runtimefailures.FromError(err, "claude-cli-adapter", attemptFailure.operation)
-			if settleErr := dispatch.handle.Settle(ctx, attemptFailure.state, &failure.Failure, attemptFailure.evidence); settleErr != nil {
-				return nil, errors.Join(err, settleErr)
+		turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, nil, false, latency, agentTurnFailure(err, "claude_cli_turn")), nil)
+		state := claudeCompletionFailureState(err)
+		evidence := map[string]any{"stage": "provider_call"}
+		if attemptFailure := claudeAttemptFailure(err); attemptFailure != nil {
+			evidence["operation"] = attemptFailure.operation
+			for key, value := range attemptFailure.evidence {
+				evidence[key] = value
 			}
-		} else {
-			dispatch.markProviderInvocationStarted()
-			turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, nil, false, latency, agentTurnFailure(err, "claude_cli_turn")), nil)
-			state := claudeCompletionFailureState(err)
-			if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableCompletionUsage(usageModel), state, turn.Failure, map[string]any{"stage": "provider_call"}); settleErr != nil {
-				return nil, errors.Join(err, settleErr)
-			}
+		}
+		if _, settleErr := settleCompletionTurn(ctx, dispatch, completionTargetID, turn, nil, profile, unavailableCompletionUsage(usageModel), state, turn.Failure, evidence); settleErr != nil {
+			return nil, errors.Join(err, settleErr)
 		}
 		projectionErr := requireCurrentProviderProjection(ctx, s.AgentID)
 		if projectionErr == nil {
@@ -423,7 +422,6 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 		}
 		return nil, err
 	}
-	dispatch.markProviderInvocationStarted()
 	usage, usageErr := claudeCompletionUsageFromRaw(resp.Raw, usageModel)
 	if usageErr != nil {
 		usage = unavailableCompletionUsage(usageModel)

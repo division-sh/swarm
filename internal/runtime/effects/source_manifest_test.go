@@ -353,7 +353,7 @@ func verifyManagedPrimitiveOrdering(root, primitiveKey string, requiresCompletio
 		matchedFunction = true
 		commandVars := commandVariables(fn.Body)
 		fileVars := fileVariables(fn.Body)
-		typedAttempt := hasRuntimeEffectsHandleParameter(fn)
+		typedAttempt := hasManagedAttemptParameter(fn)
 		var beginPos, heartbeatPos, launchPos, primitivePos token.Pos
 		primitiveCount := 0
 		ast.Inspect(fn.Body, func(node ast.Node) bool {
@@ -398,7 +398,7 @@ func verifyManagedPrimitiveOrdering(root, primitiveKey string, requiresCompletio
 	return fmt.Errorf("function %s not found", parts[1])
 }
 
-func hasRuntimeEffectsHandleParameter(fn *ast.FuncDecl) bool {
+func hasManagedAttemptParameter(fn *ast.FuncDecl) bool {
 	if fn == nil || fn.Type == nil || fn.Type.Params == nil {
 		return false
 	}
@@ -409,6 +409,10 @@ func hasRuntimeEffectsHandleParameter(fn *ast.FuncDecl) bool {
 		}
 		selector, ok := pointer.X.(*ast.SelectorExpr)
 		if ok && selectorRoot(selector.X) == "runtimeeffects" && selector.Sel.Name == "Handle" {
+			return true
+		}
+		identifier, ok := pointer.X.(*ast.Ident)
+		if ok && identifier.Name == "completionDispatch" {
 			return true
 		}
 	}
