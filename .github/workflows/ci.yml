@@ -293,8 +293,14 @@ jobs:
           SWARM_TEST_PROCESS_FIXTURE_PID="$hard_pid" "$runner" -- ./internal/testpostgres -run '^TestSwarmTestProcessFixture$' -count=1 & runner_pid=$!
           for _ in $(seq 1 120); do test -s "$hard_pid" && break; sleep 0.25; done
           kill -KILL "$runner_pid"; wait "$runner_pid" || true
+          contender_log="$RUNNER_TEMP/hard-contender.log"
+          "$runner" -- ./internal/testpostgres -run '^TestRunCapacityFromEnvironment$' -count=1 >"$contender_log" 2>&1 & contender_pid=$!
+          for _ in $(seq 1 120); do grep -q 'Test capacity is busy.' "$contender_log" && break; sleep 0.25; done
+          grep -q 'Test capacity is busy.' "$contender_log"
+          kill -0 "$contender_pid"
+          test "$(docker ps -q --filter label=com.division.swarm.test-postgres.managed=1 | wc -l)" -eq 1
           kill -TERM "$(cat "$hard_pid")" 2>/dev/null || true
-          "$runner" -- ./internal/testpostgres -run '^TestRunCapacityFromEnvironment$' -count=1
+          wait "$contender_pid"
           test -z "$(docker ps -aq --filter label=com.division.swarm.test-postgres.managed=1)"
 
   timing-budget:

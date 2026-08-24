@@ -178,6 +178,40 @@ func TestRunAdmissionReportsPositionETAAndDoesNotRewriteWhilePolling(t *testing.
 			t.Fatalf("queue output missing %q:\n%s", want, text)
 		}
 	}
+	if strings.Contains(text, "Estimated start: unknown") || strings.Contains(text, "Estimated completion: unknown") {
+		t.Fatalf("known fallback produced unknown ETA:\n%s", text)
+	}
+	if strings.Count(text, "Test capacity is busy.") < 2 {
+		t.Fatalf("queue status did not refresh:\n%s", text)
+	}
+}
+
+func TestRunAdmissionSnapshotUsesDeterministicClock(t *testing.T) {
+	admission := testRunAdmission(t.TempDir(), nil)
+	now := time.Date(2026, 8, 24, 12, 1, 0, 0, time.UTC)
+	admission.now = func() time.Time { return now }
+	activeCommand := []string{"go", "test", "./active"}
+	waitingCommand := []string{"go", "test", "./waiting"}
+	doc := runRegistryDocument{
+		Version: runRegistryVersion, Capacity: 1, NextSequence: 2,
+		Active: []runActiveRecord{{
+			ID: "11111111-1111-4111-8111-111111111111", Sequence: 1, PID: os.Getpid(), Slot: 0,
+			Command: activeCommand, CommandKey: normalizedCommandKey(activeCommand),
+			StartedAtUTC: now.Add(-time.Minute).Format(time.RFC3339Nano), ExpectedSeconds: 120,
+		}},
+		Waiting: []runWaitingRecord{{
+			ID: "22222222-2222-4222-8222-222222222222", Sequence: 2, PID: os.Getpid(),
+			Command: waitingCommand, CommandKey: normalizedCommandKey(waitingCommand),
+			EnqueuedAtUTC: now.Format(time.RFC3339Nano), ExpectedSeconds: 180,
+		}},
+	}
+	snapshot := admission.snapshot(doc, doc.Waiting[0].ID, []bool{true})
+	if !snapshot.StartKnown || snapshot.EstimatedStart != time.Minute {
+		t.Fatalf("estimated start = %s known=%v, want 1m", snapshot.EstimatedStart, snapshot.StartKnown)
+	}
+	if !snapshot.CompletionKnown || snapshot.EstimatedCompletion != 4*time.Minute {
+		t.Fatalf("estimated completion = %s known=%v, want 4m", snapshot.EstimatedCompletion, snapshot.CompletionKnown)
+	}
 }
 
 func TestRunAdmissionReconcilesFreeStaleActiveAndWaitingRecords(t *testing.T) {
@@ -231,6 +265,20 @@ func TestRunAdmissionFailsClosedOnCorruptRegistry(t *testing.T) {
 }
 
 func TestRunCapacityFromEnvironment(t *testing.T) {
+	previous, existed := os.LookupEnv(RunCapacityEnv)
+	if err := os.Unsetenv(RunCapacityEnv); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if existed {
+			_ = os.Setenv(RunCapacityEnv, previous)
+		} else {
+			_ = os.Unsetenv(RunCapacityEnv)
+		}
+	})
+	if got, err := RunCapacityFromEnvironment(); err != nil || got != 1 {
+		t.Fatalf("default capacity = %d err=%v", got, err)
+	}
 	t.Setenv(RunCapacityEnv, "3")
 	if got, err := RunCapacityFromEnvironment(); err != nil || got != 3 {
 		t.Fatalf("capacity = %d err=%v", got, err)
