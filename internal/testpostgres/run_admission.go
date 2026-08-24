@@ -24,6 +24,7 @@ import (
 const (
 	runRegistryVersion = 1
 	RunCapacityEnv     = "SWARM_TEST_RUN_SLOTS"
+	RunWrapperEnv      = "SWARM_TEST_RUN_WRAPPER_ACTIVE"
 	defaultRunCapacity = 1
 	maxRunHistory      = 10
 	maxRunHistoryTotal = 100
@@ -616,6 +617,9 @@ func validateRunRegistry(doc runRegistryDocument) error {
 	}
 	if doc.Capacity < 0 {
 		return fmt.Errorf("run registry capacity must not be negative")
+	}
+	if doc.Capacity == 0 && (doc.NextSequence != 0 || len(doc.Waiting) != 0 || len(doc.Active) != 0 || len(doc.History) != 0) {
+		return fmt.Errorf("zero-capacity run registry must be empty")
 	}
 	ids := make(map[string]bool)
 	sequences := make(map[uint64]bool)

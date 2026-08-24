@@ -3,6 +3,7 @@ package testpostgres
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -214,6 +215,31 @@ func TestRunAdmissionSnapshotUsesDeterministicClock(t *testing.T) {
 	}
 }
 
+func TestRunAdmissionReportsUnknownETAWhenEvidenceIsMissing(t *testing.T) {
+	root := t.TempDir()
+	active := acquireTestRun(t, testRunAdmission(root, nil), context.Background(), "active", 1)
+	defer active.Complete(false)
+
+	var output bytes.Buffer
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, err := testRunAdmission(root, &output).Acquire(ctx, testRunCommand("waiting"), 1)
+		result <- err
+	}()
+	waitForWaitingRuns(t, testRunAdmission(root, nil), 1)
+	cancel()
+	if err := <-result; !errors.Is(err, context.Canceled) {
+		t.Fatalf("queued result = %v", err)
+	}
+	text := output.String()
+	for _, want := range []string{"Estimated start: unknown", "Estimated completion: unknown"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("queue output missing %q:\n%s", want, text)
+		}
+	}
+}
+
 func TestRunAdmissionReconcilesFreeStaleActiveAndWaitingRecords(t *testing.T) {
 	root := t.TempDir()
 	admission := testRunAdmission(root, nil)
@@ -250,17 +276,65 @@ func TestRunAdmissionReconcilesFreeStaleActiveAndWaitingRecords(t *testing.T) {
 }
 
 func TestRunAdmissionFailsClosedOnCorruptRegistry(t *testing.T) {
-	root := t.TempDir()
-	admission := testRunAdmission(root, nil)
-	if err := admission.initialize(); err != nil {
-		t.Fatal(err)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	command := []string{"go", "test", "./corrupt"}
+	waiting := func(id string, sequence uint64) runWaitingRecord {
+		return runWaitingRecord{ID: id, Sequence: sequence, PID: os.Getpid(), Command: command, CommandKey: normalizedCommandKey(command), EnqueuedAtUTC: now}
 	}
-	if err := os.WriteFile(filepath.Join(root, "runs-v1.json"), []byte(`{"version":1,"unknown":true}`), 0o600); err != nil {
-		t.Fatal(err)
+	active := func(id string, sequence uint64, slot int) runActiveRecord {
+		return runActiveRecord{ID: id, Sequence: sequence, PID: os.Getpid(), Slot: slot, Command: command, CommandKey: normalizedCommandKey(command), StartedAtUTC: now}
 	}
-	_, err := admission.Acquire(context.Background(), testRunCommand("corrupt"), 1)
-	if err == nil || !strings.Contains(err.Error(), "unknown field") {
-		t.Fatalf("Acquire() error = %v, want fail-closed decode", err)
+	id1 := "11111111-1111-4111-8111-111111111111"
+	id2 := "22222222-2222-4222-8222-222222222222"
+	tests := []struct {
+		name string
+		doc  runRegistryDocument
+		raw  string
+		want string
+	}{
+		{name: "zero capacity with live waiter", doc: runRegistryDocument{Version: 1, NextSequence: 1, Waiting: []runWaitingRecord{waiting(id1, 1)}}, want: "zero-capacity"},
+		{name: "waiting sequence out of order", doc: runRegistryDocument{Version: 1, Capacity: 1, NextSequence: 2, Waiting: []runWaitingRecord{waiting(id1, 2), waiting(id2, 1)}}, want: "out of order"},
+		{name: "sequence beyond frontier", doc: runRegistryDocument{Version: 1, Capacity: 1, NextSequence: 1, Waiting: []runWaitingRecord{waiting(id1, 2)}}, want: "beyond next_sequence"},
+		{name: "invalid active slot", doc: runRegistryDocument{Version: 1, Capacity: 1, NextSequence: 1, Active: []runActiveRecord{active(id1, 1, 1)}}, want: "invalid slot"},
+		{name: "duplicate identity", doc: runRegistryDocument{Version: 1, Capacity: 2, NextSequence: 2, Active: []runActiveRecord{active(id1, 1, 0), active(id1, 2, 1)}}, want: "duplicate active"},
+		{name: "duplicate slot", doc: runRegistryDocument{Version: 1, Capacity: 2, NextSequence: 2, Active: []runActiveRecord{active(id1, 1, 0), active(id2, 2, 0)}}, want: "duplicate active"},
+		{name: "unsupported version", doc: runRegistryDocument{Version: 2}, want: "unsupported run registry version"},
+		{name: "unknown field", raw: `{"version":1,"unknown":true}`, want: "unknown field"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			admission := testRunAdmission(root, nil)
+			if err := admission.initialize(); err != nil {
+				t.Fatal(err)
+			}
+			raw := []byte(test.raw)
+			if test.raw == "" {
+				var err error
+				raw, err = json.Marshal(test.doc)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(root, "runs-v1.json"), raw, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var held []*fileLock
+			for _, record := range test.doc.Waiting {
+				lock, acquired, err := acquireFileLock(admission.ticketPath(record.ID), false)
+				if err != nil || !acquired {
+					t.Fatalf("hold corrupt waiter authority: acquired=%v err=%v", acquired, err)
+				}
+				held = append(held, lock)
+			}
+			for _, lock := range held {
+				defer lock.Close()
+			}
+			_, err := admission.Acquire(context.Background(), testRunCommand("new"), 1)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Acquire() error = %v, want %q", err, test.want)
+			}
+		})
 	}
 }
 
