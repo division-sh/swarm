@@ -1602,7 +1602,7 @@ func TestEventBusCommittedPublishDispatch_NodeOnlyRouteDoesNotRequireAgentChanne
 	if err != nil {
 		t.Fatalf("project committed receiver: %v", err)
 	}
-	if err := eb.completeCommittedPublishDispatch(evt, nodeOnlyDeliveryPlan(t, evt, "workflow-node"), publication, receiver); err != nil {
+	if err := eb.completeCommittedPublishDispatch(context.Background(), evt, nodeOnlyDeliveryPlan(t, evt, "workflow-node"), publication, receiver); err != nil {
 		t.Fatalf("dispatch committed node-only publication: %v", err)
 	}
 

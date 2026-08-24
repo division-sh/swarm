@@ -553,7 +553,13 @@ func (r pipelineEngineStateRepo) prepareMutation(
 		if address.Route != application.Route() || entityID.String() != application.EntityID() {
 			return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation state disagrees with admitted delivery target application")
 		}
-		current, presence = application.persistedInstance()
+		if application.previewOnly() {
+			return preparedWorkflowEngineState{}, fmt.Errorf("workflow engine mutation rejects preview-only delivery target application")
+		}
+		current, presence, err = r.coordinator.loadCurrentDeliveryTargetState(ctx, application)
+		if err != nil {
+			return preparedWorkflowEngineState{}, err
+		}
 	} else {
 		target, err := r.coordinator.workflowStore.LoadTargetPersistence(ctx, address.Route, entityID)
 		if err != nil {
@@ -684,7 +690,17 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, address runtimee
 		if address.Route != application.Route() || entityID.String() != application.EntityID() {
 			return runtimeengine.StateSnapshot{}, false, fmt.Errorf("engine state lookup disagrees with admitted delivery target application")
 		}
-		return application.persistedSnapshot()
+		if application.previewOnly() {
+			return runtimeengine.StateSnapshot{}, false, nil
+		}
+		instance, presence, err := r.coordinator.loadCurrentDeliveryTargetState(ctx, application)
+		if err != nil {
+			return runtimeengine.StateSnapshot{}, false, err
+		}
+		if !presence.HasState() {
+			return runtimeengine.StateSnapshot{}, false, nil
+		}
+		return workflowInstanceEngineStateSnapshot(r.coordinator.SemanticSource(), flowID, entityID, instance)
 	}
 	if r.coordinator.workflowStore != nil && r.coordinator.workflowStore.enabled() {
 		if !address.Route.Valid() {
@@ -698,24 +714,7 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, address runtimee
 			if _, err := requireWorkflowInstanceIdentity(address.Route, entityID, instance); err != nil {
 				return runtimeengine.StateSnapshot{}, false, fmt.Errorf("validate engine state identity: %w", err)
 			}
-			carrier, err := workflowInstanceStateCarrier(instance)
-			if err != nil {
-				return runtimeengine.StateSnapshot{}, false, err
-			}
-			out := runtimeengine.StateSnapshot{
-				EntityID:        entityID,
-				WorkflowName:    strings.TrimSpace(instance.WorkflowName),
-				WorkflowVersion: strings.TrimSpace(instance.WorkflowVersion),
-				CurrentState:    strings.TrimSpace(instance.CurrentState),
-				StateCarrier:    carrier,
-				EnteredStateAt:  instance.EnteredStageAt,
-			}
-			out.StateCarrier.Gates = workflowStateGatesForScope(
-				r.coordinator.SemanticSource(),
-				flowID,
-				out.StateCarrier.Gates,
-			)
-			return out, true, nil
+			return workflowInstanceEngineStateSnapshot(r.coordinator.SemanticSource(), flowID, entityID, instance)
 		}
 		return runtimeengine.StateSnapshot{}, false, nil
 	}
@@ -735,6 +734,27 @@ func (r pipelineEngineStateRepo) LoadState(ctx context.Context, address runtimee
 		EntityID:     entityID,
 		CurrentState: strings.TrimSpace(string(state.Stage)),
 		StateCarrier: carrier,
+	}, true, nil
+}
+
+func workflowInstanceEngineStateSnapshot(
+	source semanticview.Source,
+	flowID string,
+	entityID identity.EntityID,
+	instance WorkflowInstance,
+) (runtimeengine.StateSnapshot, bool, error) {
+	carrier, err := workflowInstanceStateCarrier(instance)
+	if err != nil {
+		return runtimeengine.StateSnapshot{}, false, err
+	}
+	carrier.Gates = workflowStateGatesForScope(source, flowID, carrier.Gates)
+	return runtimeengine.StateSnapshot{
+		EntityID:        entityID,
+		WorkflowName:    strings.TrimSpace(instance.WorkflowName),
+		WorkflowVersion: strings.TrimSpace(instance.WorkflowVersion),
+		CurrentState:    strings.TrimSpace(instance.CurrentState),
+		StateCarrier:    carrier,
+		EnteredStateAt:  instance.EnteredStageAt,
 	}, true, nil
 }
 

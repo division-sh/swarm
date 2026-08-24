@@ -110,6 +110,7 @@ type claudeAttemptProofStore interface {
 	storetest.AgentFixtureStore
 	runtimeeffects.Store
 	runtimeeffects.CompletionStore
+	runtimeeffects.CompletionContinuationStore
 	runtimeeffects.CompletionHeartbeatStore
 	runtimeeffects.RecoveryStore
 	runtimesessions.Resetter
@@ -359,7 +360,7 @@ func TestClaudeProviderHeadCommitFailureSettlesUncertain(t *testing.T) {
 			eventID := publishClaudeAttemptProofEvent(t, eventBus)
 			receipt := waitClaudeAttemptProofReceipt(t, backend, eventID, runtimemanager.ReceiptStatusDeadLetter, calls)
 			if receipt.RetryCount != 0 || receipt.Failure == nil || receipt.Failure.Detail.Code != "provider_head_commit_injected" {
-				t.Fatalf("provider-head fault receipt = %#v, want original terminal failure", receipt)
+				t.Fatalf("provider-head fault status=%s reason=%s retries=%d failure=%+v calls=%d, want original terminal failure", receipt.Status, receipt.ReasonCode, receipt.RetryCount, receipt.Failure, calls.Load())
 			}
 			attempts := loadClaudeAttemptProofAttempts(t, backend)
 			if len(attempts) != 1 || attempts[0].state != string(runtimeeffects.StateResponseObserved) {

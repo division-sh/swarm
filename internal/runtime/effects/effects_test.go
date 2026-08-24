@@ -92,6 +92,16 @@ func (*completionStoreProbe) SettleCompletion(context.Context, Attempt, Completi
 	return CompletionSettlementResult{}, nil
 }
 
+func (*completionStoreProbe) RecoverCompletionContinuation(context.Context, CompletionContinuationRequest) (Attempt, bool, error) {
+	return Attempt{}, false, nil
+}
+
+func (*completionStoreProbe) ProjectCompletionConversation(context.Context, Attempt, CompletionConversationProjection) error {
+	return nil
+}
+
+func (*completionStoreProbe) ConsumeCompletionResponse(context.Context, Attempt) error { return nil }
+
 type completionProjectionProbe struct{}
 
 func (completionProjectionProbe) ProjectCommittedCompletionSpend(context.Context, CompletionSpendProjection) {
@@ -178,15 +188,32 @@ func TestCompletionControllerRequiresSettlementProjectionOwner(t *testing.T) {
 	}
 }
 
-func TestCompletionReplayCannotDispatchOrResettle(t *testing.T) {
+func TestCompletionContinuationCannotDispatchOrResettle(t *testing.T) {
 	store := &completionStoreProbe{}
-	attempt, err := AdmitCompletionReplay(Attempt{
-		OperationID: "operation", AttemptID: "attempt", Kind: KindProviderTurn,
-		Authority: Authority{Kind: AuthorityNormalAgent},
-		Origin:    CompletionOrigin{Kind: CompletionOriginDelivery},
-	}, []byte(`{"completion_replay_v1":{"version":1}}`))
+	token := effectLifecycleToken(t, 7, "agent-a", 3)
+	ctx := managedEffectTestContext(t, WithLifecycleToken(context.Background(), token), token.AgentID)
+	authority, ok := CompletionAuthorityFromContext(ctx)
+	if !ok {
+		t.Fatal("completion authority missing")
+	}
+	surface, ok := managedcapabilities.FromContext(ctx)
+	if !ok {
+		t.Fatal("capability surface missing")
+	}
+	evidence := map[string]any{}
+	if err := AttachCompletionContinuationEvidence(evidence, []byte("request"), json.RawMessage(`{"version":"continuation"}`)); err != nil {
+		t.Fatalf("attach completion continuation: %v", err)
+	}
+	rawEvidence, err := json.Marshal(evidence)
 	if err != nil {
-		t.Fatalf("admit completion replay: %v", err)
+		t.Fatalf("marshal completion continuation evidence: %v", err)
+	}
+	attempt, err := AdmitCompletionContinuation(Attempt{
+		OperationID: "operation", AttemptID: "attempt", Kind: KindProviderTurn, Authority: authority,
+		Origin: CompletionOrigin{Kind: CompletionOriginDelivery},
+	}, rawEvidence, Fingerprint([]byte("request")), surface, CompletionProjectionResponseSettled)
+	if err != nil {
+		t.Fatalf("admit completion continuation: %v", err)
 	}
 	handle := &Handle{
 		controller: NewCompletionController(store, store, store, completionProjectionProbe{}),
@@ -209,7 +236,7 @@ func TestCompletionReplayCannotDispatchOrResettle(t *testing.T) {
 	for _, check := range checks {
 		t.Run(check.name, func(t *testing.T) {
 			if err := check.call(); err == nil {
-				t.Fatal("replay handle reached a forbidden provider-attempt mutation")
+				t.Fatal("continuation handle reached a forbidden provider-attempt mutation")
 			}
 		})
 	}

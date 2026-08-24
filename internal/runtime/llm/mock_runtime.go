@@ -154,6 +154,13 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 	if err := requireInboundDeliveryActiveForSession(ctx, r.events, session, "error", "Marking the reused mock agent delivery in progress failed", map[string]any{"memory_enabled": resolved.Enabled()}, entityID); err != nil {
 		return nil, fmt.Errorf("mark inbound delivery active for reused mock session: %w", err)
 	}
+	if managed != nil {
+		if response, found, err := recoverCompletionContinuation(ctx, r.completionController, session, "mock_python"); err != nil {
+			return nil, err
+		} else if found {
+			return response, nil
+		}
+	}
 	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendMock)
 	providerModel, err := resolveProviderModelForCall(ctx, r.cfg, profile, managed)
 	if err != nil {
@@ -205,6 +212,9 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 		}
 		return nil, executeErr
 	}
+	if err := bindCompletionProjection(dispatch, session, message, managed); err != nil {
+		return nil, err
+	}
 	settled, err := settleCompletionTurn(ctx, dispatch, targetID, turn, response, profile, usage, runtimeeffects.StateSettled, nil, map[string]any{
 		"execution_mode": runtimeeffects.ExecutionModeMock, "module_digest": actor.Mock.Digest,
 	})
@@ -217,15 +227,21 @@ func (r *MockRuntime) continueSession(ctx context.Context, session *Session, mes
 	if err := requireCurrentProviderProjection(ctx, session.AgentID); err != nil {
 		return nil, err
 	}
-	session.Messages = append(session.Messages, message, response.Message)
-	session.TurnCount++
-	session.ParseFailures = 0
-	if resolved.Enabled() {
-		if err := r.sessions.IncrementTurn(ctx, resolved.Identity, session.ID); err != nil {
-			return nil, err
-		}
+	projected, err := projectCompletionContinuation(ctx, dispatch, session, response)
+	if err != nil {
+		return nil, err
 	}
-	r.persistConversation(ctx, session)
+	if !projected {
+		session.Messages = append(session.Messages, message, response.Message)
+		session.TurnCount++
+		session.ParseFailures = 0
+		if resolved.Enabled() {
+			if err := r.sessions.IncrementTurn(ctx, resolved.Identity, session.ID); err != nil {
+				return nil, err
+			}
+		}
+		r.persistConversation(ctx, session)
+	}
 	if resolved.Enabled() {
 		if rotated, rotateErr := MaybeRotateAfterTurn(ctx, session, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns, r.events); rotateErr == nil && rotated != nil {
 			lease = rotated
@@ -303,14 +319,7 @@ func executeMockCompletionWithExecutor(ctx context.Context, actor runtimeactors.
 	}
 	dispatch := newCompletionDispatch(attempt, runtimeeffects.StateTerminalFailure)
 	dispatch.providerModel = providerModel
-	if replay, err := completionReplayForHandle(attempt, "mock_python"); err != nil {
-		return nil, nil, estimatedMockUsage(request, nil, model), dispatch, err
-	} else if replay != nil {
-		response := replay.Response
-		dispatch.replay = replay
-		dispatch.state = runtimeeffects.StateSettled
-		return &response, append([]byte(nil), response.Raw...), replay.Usage, dispatch, nil
-	}
+	dispatch.request = append([]byte(nil), request...)
 	heartbeatCtx, heartbeat, err := startCompletionAttemptHeartbeat(ctx, attempt)
 	if err != nil {
 		return nil, nil, estimatedMockUsage(request, nil, model), dispatch, err

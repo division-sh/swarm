@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
@@ -252,71 +253,129 @@ type AuthorizeRequest struct {
 }
 
 type Attempt struct {
-	OperationID      string
-	AttemptID        string
-	Token            LifecycleToken
-	Authority        Authority
-	Kind             Kind
-	Class            EffectClass
-	Adapter          string
-	Transport        string
-	Ordinal          int
-	AuthorizedAt     time.Time
-	Origin           CompletionOrigin
-	completionReplay json.RawMessage
+	OperationID       string
+	AttemptID         string
+	Token             LifecycleToken
+	Authority         Authority
+	Kind              Kind
+	Class             EffectClass
+	Adapter           string
+	Transport         string
+	Ordinal           int
+	AuthorizedAt      time.Time
+	Origin            CompletionOrigin
+	completionRequest []byte
+	completionPayload json.RawMessage
+	completionSurface *managedcapabilities.Surface
+	completionPhase   CompletionProjectionPhase
 }
 
-const completionReplayEvidenceKey = "completion_replay_v1"
+type CompletionProjectionPhase string
 
-// AttachCompletionReplayEvidence records one canonical parsed provider
-// response in the immutable settlement evidence for exact continuation.
-func AttachCompletionReplayEvidence(evidence map[string]any, payload json.RawMessage) error {
+const (
+	CompletionProjectionResponseSettled       CompletionProjectionPhase = "response_settled"
+	CompletionProjectionConversationProjected CompletionProjectionPhase = "conversation_projected"
+	CompletionProjectionResponseConsumed      CompletionProjectionPhase = "response_consumed"
+)
+
+func (p CompletionProjectionPhase) Valid() bool {
+	return p == CompletionProjectionResponseSettled ||
+		p == CompletionProjectionConversationProjected ||
+		p == CompletionProjectionResponseConsumed
+}
+
+type completionContinuationEvidence struct {
+	Version string          `json:"version"`
+	Request []byte          `json:"request"`
+	Payload json.RawMessage `json:"payload"`
+}
+
+const (
+	completionContinuationEvidenceKey     = "completion_continuation_v1"
+	completionContinuationEvidenceVersion = "completion-continuation.v1"
+)
+
+// AttachCompletionContinuationEvidence records the exact provider request and
+// its adapter-neutral settled response projection in immutable evidence.
+func AttachCompletionContinuationEvidence(evidence map[string]any, request []byte, payload json.RawMessage) error {
 	if evidence == nil {
-		return fmt.Errorf("completion replay evidence map is required")
+		return fmt.Errorf("completion continuation evidence map is required")
 	}
+	request = bytes.TrimSpace(request)
 	payload = bytes.TrimSpace(payload)
-	if len(payload) == 0 || !json.Valid(payload) {
-		return fmt.Errorf("completion replay payload must be valid JSON")
+	if len(request) == 0 || len(payload) == 0 || !json.Valid(payload) {
+		return fmt.Errorf("completion continuation requires exact request bytes and valid payload JSON")
 	}
-	evidence[completionReplayEvidenceKey] = append(json.RawMessage(nil), payload...)
+	evidence[completionContinuationEvidenceKey] = completionContinuationEvidence{
+		Version: completionContinuationEvidenceVersion,
+		Request: append([]byte(nil), request...),
+		Payload: append(json.RawMessage(nil), payload...),
+	}
 	return nil
 }
 
-// AdmitCompletionReplay projects immutable settled evidence onto the current
-// fenced delivery authority. The selected store must prove the operation,
-// request, plan, source bundle, and durable delivery identity before calling.
-func AdmitCompletionReplay(attempt Attempt, evidence json.RawMessage) (Attempt, error) {
+// AdmitCompletionContinuation projects immutable settled evidence onto the
+// current fenced delivery authority. Only the selected store may call this
+// after proving the operation, request, plan, source bundle, and delivery.
+func AdmitCompletionContinuation(attempt Attempt, evidence json.RawMessage, requestFingerprint string, surface managedcapabilities.Surface, phase CompletionProjectionPhase) (Attempt, error) {
 	if attempt.Kind != KindProviderTurn || attempt.Authority.Kind != AuthorityNormalAgent ||
-		attempt.Origin.Kind != CompletionOriginDelivery {
-		return Attempt{}, fmt.Errorf("completion replay requires a normal provider delivery attempt")
+		attempt.Origin.Kind != CompletionOriginDelivery || !phase.Valid() {
+		return Attempt{}, fmt.Errorf("completion continuation requires a normal provider delivery attempt and phase")
 	}
 	var document map[string]json.RawMessage
 	if err := json.Unmarshal(evidence, &document); err != nil {
-		return Attempt{}, fmt.Errorf("decode completion replay evidence: %w", err)
+		return Attempt{}, fmt.Errorf("decode completion continuation evidence: %w", err)
 	}
-	payload := bytes.TrimSpace(document[completionReplayEvidenceKey])
-	if len(payload) == 0 || !json.Valid(payload) {
-		return Attempt{}, fmt.Errorf("settled completion replay evidence is missing or invalid")
+	var continuation completionContinuationEvidence
+	if err := json.Unmarshal(document[completionContinuationEvidenceKey], &continuation); err != nil {
+		return Attempt{}, fmt.Errorf("decode settled completion continuation: %w", err)
 	}
-	attempt.completionReplay = append(json.RawMessage(nil), payload...)
+	continuation.Request = bytes.TrimSpace(continuation.Request)
+	continuation.Payload = bytes.TrimSpace(continuation.Payload)
+	if continuation.Version != completionContinuationEvidenceVersion || len(continuation.Request) == 0 ||
+		len(continuation.Payload) == 0 || !json.Valid(continuation.Payload) ||
+		Fingerprint(continuation.Request) != strings.TrimSpace(requestFingerprint) {
+		return Attempt{}, fmt.Errorf("settled completion continuation evidence is missing, invalid, or request-mismatched")
+	}
+	if err := surface.Validate(); err != nil {
+		return Attempt{}, fmt.Errorf("settled completion continuation capability surface: %w", err)
+	}
+	attempt.completionRequest = append([]byte(nil), continuation.Request...)
+	attempt.completionPayload = append(json.RawMessage(nil), continuation.Payload...)
+	cloned := surface.Clone()
+	attempt.completionSurface = &cloned
+	attempt.completionPhase = phase
 	return attempt, nil
 }
 
-func (a Attempt) CompletionReplay() (json.RawMessage, bool) {
-	if len(a.completionReplay) == 0 {
-		return nil, false
+type CompletionContinuationSnapshot struct {
+	Request []byte
+	Payload json.RawMessage
+	Surface managedcapabilities.Surface
+	Phase   CompletionProjectionPhase
+}
+
+func (a Attempt) CompletionContinuation() (CompletionContinuationSnapshot, bool) {
+	if len(a.completionPayload) == 0 || a.completionSurface == nil || !a.completionPhase.Valid() {
+		return CompletionContinuationSnapshot{}, false
 	}
-	return append(json.RawMessage(nil), a.completionReplay...), true
+	return CompletionContinuationSnapshot{
+		Request: append([]byte(nil), a.completionRequest...),
+		Payload: append(json.RawMessage(nil), a.completionPayload...),
+		Surface: a.completionSurface.Clone(),
+		Phase:   a.completionPhase,
+	}, true
 }
 
 type Settlement struct {
-	OperationID string
-	AttemptID   string
-	Authority   Authority
-	State       State
-	Failure     *runtimefailures.Envelope
-	Evidence    map[string]any
-	Now         time.Time
+	OperationID               string
+	AttemptID                 string
+	Authority                 Authority
+	State                     State
+	Failure                   *runtimefailures.Envelope
+	Evidence                  map[string]any
+	CompletionProjectionPhase CompletionProjectionPhase
+	Now                       time.Time
 }
 
 type Store interface {
@@ -329,6 +388,30 @@ type Store interface {
 
 type CompletionStore interface {
 	SettleCompletion(context.Context, Attempt, CompletionSettlement) (CompletionSettlementResult, error)
+}
+
+type CompletionContinuationRequest struct {
+	Authority            Authority
+	Origin               CompletionOrigin
+	ExecutionAuthorityID string
+	SessionID            string
+	Memory               agentmemory.Plan
+}
+
+type CompletionConversationProjection struct {
+	Payload           json.RawMessage
+	SessionID         string
+	Identity          agentmemory.Identity
+	Memory            agentmemory.Plan
+	ExpectedTurnCount int
+	TurnCount         int
+	Messages          json.RawMessage
+}
+
+type CompletionContinuationStore interface {
+	RecoverCompletionContinuation(context.Context, CompletionContinuationRequest) (Attempt, bool, error)
+	ProjectCompletionConversation(context.Context, Attempt, CompletionConversationProjection) error
+	ConsumeCompletionResponse(context.Context, Attempt) error
 }
 
 type CompletionHeartbeatStore interface {
@@ -370,11 +453,12 @@ type RecoveryStore interface {
 }
 
 type Controller struct {
-	store                    Store
-	completionStore          CompletionStore
-	completionHeartbeatStore CompletionHeartbeatStore
-	completionSpendProjector CompletionSpendProjector
-	executionPosture         executionposture.Posture
+	store                       Store
+	completionStore             CompletionStore
+	completionContinuationStore CompletionContinuationStore
+	completionHeartbeatStore    CompletionHeartbeatStore
+	completionSpendProjector    CompletionSpendProjector
+	executionPosture            executionposture.Posture
 }
 
 type controllerContextKey struct{}
@@ -384,11 +468,13 @@ func NewController(store Store) *Controller {
 }
 
 func NewCompletionController(store Store, completionStore CompletionStore, heartbeatStore CompletionHeartbeatStore, projector CompletionSpendProjector) *Controller {
+	continuationStore, _ := completionStore.(CompletionContinuationStore)
 	return &Controller{
-		store:                    store,
-		completionStore:          completionStore,
-		completionHeartbeatStore: heartbeatStore,
-		completionSpendProjector: projector,
+		store:                       store,
+		completionStore:             completionStore,
+		completionContinuationStore: continuationStore,
+		completionHeartbeatStore:    heartbeatStore,
+		completionSpendProjector:    projector,
 	}
 }
 
@@ -423,6 +509,36 @@ func (c *Controller) CompletionEnabled() bool {
 		return false
 	}
 	return c.completionHeartbeatStore != nil && c.completionStore != nil && c.completionSpendProjector != nil
+}
+
+func (c *Controller) RecoverCompletionContinuation(ctx context.Context, sessionID string, memory agentmemory.Plan) (*Handle, bool, error) {
+	if c == nil || c.completionContinuationStore == nil {
+		return nil, false, runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "completion_continuation_store_missing", "external-effects", "recover_completion", nil)
+	}
+	authority, ok := completionAuthorityFromContext(ctx)
+	if !ok || authority.Kind != AuthorityNormalAgent {
+		return nil, false, nil
+	}
+	claim, ok := runtimedelivery.ClaimFromContext(ctx)
+	if !ok {
+		return nil, false, nil
+	}
+	admission, ok := managedexecution.FromContext(ctx)
+	if !ok || !admission.AuthorizesNormal() {
+		return nil, false, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_continuation_execution_authority_missing", "external-effects", "recover_completion", nil)
+	}
+	origin, err := DeliveryCompletionOrigin(claim)
+	if err != nil {
+		return nil, false, err
+	}
+	attempt, found, err := c.completionContinuationStore.RecoverCompletionContinuation(context.WithoutCancel(ctx), CompletionContinuationRequest{
+		Authority: authority, Origin: origin, ExecutionAuthorityID: admission.ExecutionAuthorityID,
+		SessionID: strings.TrimSpace(sessionID), Memory: memory,
+	})
+	if err != nil || !found {
+		return nil, found, err
+	}
+	return &Handle{controller: c, attempt: attempt}, true, nil
 }
 
 func (c *Controller) ExecutionPosture() executionposture.Posture {
@@ -793,11 +909,11 @@ func (h *Handle) Attempt() Attempt {
 	return h.attempt
 }
 
-func (h *Handle) CompletionReplay() (json.RawMessage, bool) {
+func (h *Handle) CompletionContinuation() (CompletionContinuationSnapshot, bool) {
 	if h == nil {
-		return nil, false
+		return CompletionContinuationSnapshot{}, false
 	}
-	return h.attempt.CompletionReplay()
+	return h.attempt.CompletionContinuation()
 }
 
 func (h *Handle) MarkLaunched(ctx context.Context) error {
@@ -807,8 +923,8 @@ func (h *Handle) MarkLaunched(ctx context.Context) error {
 	if h.differentOwner != "" {
 		return nil
 	}
-	if _, replay := h.attempt.CompletionReplay(); replay {
-		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_replay_dispatch_forbidden", "external-effects", "launch_attempt", map[string]any{"attempt_id": h.attempt.AttemptID})
+	if _, continuation := h.attempt.CompletionContinuation(); continuation {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_continuation_dispatch_forbidden", "external-effects", "launch_attempt", map[string]any{"attempt_id": h.attempt.AttemptID})
 	}
 	return h.controller.MarkLaunched(ctx, h.attempt)
 }
@@ -820,8 +936,8 @@ func (h *Handle) Heartbeat(ctx context.Context, lease time.Duration) error {
 	if lease <= 0 {
 		return runtimefailures.New(runtimefailures.ClassSchemaInvalid, "completion_heartbeat_lease_invalid", "llm-completion-authority", "heartbeat_attempt", map[string]any{"attempt_id": h.attempt.AttemptID})
 	}
-	if _, replay := h.attempt.CompletionReplay(); replay {
-		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_replay_heartbeat_forbidden", "external-effects", "heartbeat_attempt", map[string]any{"attempt_id": h.attempt.AttemptID})
+	if _, continuation := h.attempt.CompletionContinuation(); continuation {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_continuation_heartbeat_forbidden", "external-effects", "heartbeat_attempt", map[string]any{"attempt_id": h.attempt.AttemptID})
 	}
 	store := h.controller.completionHeartbeatStore
 	if store == nil {
@@ -837,8 +953,8 @@ func (h *Handle) MarkResponseObserved(ctx context.Context, evidence map[string]a
 	if h.differentOwner != "" {
 		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_execution_authority_missing", "external-effects", "observe_response", nil)
 	}
-	if _, replay := h.attempt.CompletionReplay(); replay {
-		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_replay_observation_forbidden", "external-effects", "observe_response", map[string]any{"attempt_id": h.attempt.AttemptID})
+	if _, continuation := h.attempt.CompletionContinuation(); continuation {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_continuation_observation_forbidden", "external-effects", "observe_response", map[string]any{"attempt_id": h.attempt.AttemptID})
 	}
 	return h.controller.MarkResponseObserved(ctx, h.attempt, evidence)
 }
@@ -850,8 +966,8 @@ func (h *Handle) Settle(ctx context.Context, state State, failure *runtimefailur
 	if h.differentOwner != "" {
 		return nil
 	}
-	if _, replay := h.attempt.CompletionReplay(); replay {
-		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_replay_settlement_forbidden", "external-effects", "settle_attempt", map[string]any{"attempt_id": h.attempt.AttemptID})
+	if _, continuation := h.attempt.CompletionContinuation(); continuation {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_continuation_settlement_forbidden", "external-effects", "settle_attempt", map[string]any{"attempt_id": h.attempt.AttemptID})
 	}
 	return h.controller.Settle(ctx, Settlement{
 		OperationID: h.attempt.OperationID, AttemptID: h.attempt.AttemptID,
@@ -872,8 +988,8 @@ func (h *Handle) SettleCompletion(ctx context.Context, settlement CompletionSett
 	if store == nil {
 		return CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "completion_settlement_store_missing", "llm-completion-authority", "settle_completion", nil)
 	}
-	if _, replay := h.attempt.CompletionReplay(); replay {
-		return CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_replay_resettlement_forbidden", "llm-completion-authority", "settle_completion", map[string]any{"attempt_id": h.attempt.AttemptID})
+	if _, continuation := h.attempt.CompletionContinuation(); continuation {
+		return CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_continuation_resettlement_forbidden", "llm-completion-authority", "settle_completion", map[string]any{"attempt_id": h.attempt.AttemptID})
 	}
 	settlement.Settlement.OperationID = h.attempt.OperationID
 	settlement.Settlement.AttemptID = h.attempt.AttemptID
@@ -882,6 +998,12 @@ func (h *Handle) SettleCompletion(ctx context.Context, settlement CompletionSett
 		settlement.Now = time.Now().UTC()
 	}
 	settlement.Settlement.Now = settlement.Now
+	if settlement.Settlement.State == StateSettled && h.attempt.Authority.Kind == AuthorityNormalAgent &&
+		h.attempt.Origin.Kind == CompletionOriginDelivery {
+		if _, ok := settlement.Settlement.Evidence[completionContinuationEvidenceKey]; ok {
+			settlement.Settlement.CompletionProjectionPhase = CompletionProjectionResponseSettled
+		}
+	}
 	if err := settlement.Validate(h.attempt); err != nil {
 		return CompletionSettlementResult{}, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_settlement_invalid", "llm-completion-authority", "settle_completion", map[string]any{"validation_error": err.Error()}, err)
 	}
@@ -901,7 +1023,24 @@ func (h *Handle) SettleCompletion(ctx context.Context, settlement CompletionSett
 			EntityID:  result.EntityID,
 		})
 	}
+	if result.Committed && result.continuation != nil {
+		h.attempt = *result.continuation
+	}
 	return result, err
+}
+
+func (h *Handle) ProjectCompletionConversation(ctx context.Context, projection CompletionConversationProjection) error {
+	if h == nil || h.controller == nil || h.controller.completionContinuationStore == nil {
+		return runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "completion_continuation_store_missing", "external-effects", "project_completion", nil)
+	}
+	return h.controller.completionContinuationStore.ProjectCompletionConversation(context.WithoutCancel(ctx), h.attempt, projection)
+}
+
+func (h *Handle) ConsumeCompletionResponse(ctx context.Context) error {
+	if h == nil || h.controller == nil || h.controller.completionContinuationStore == nil {
+		return runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "completion_continuation_store_missing", "external-effects", "consume_completion", nil)
+	}
+	return h.controller.completionContinuationStore.ConsumeCompletionResponse(context.WithoutCancel(ctx), h.attempt)
 }
 
 func (h *Handle) Fail(ctx context.Context, state State, class runtimefailures.Class, code, component, operation string, attributes map[string]any, cause error) error {

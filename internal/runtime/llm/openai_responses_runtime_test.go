@@ -137,8 +137,8 @@ func TestOpenAIResponsesManagedRequestEncodesCanonicalExecutionFrame(t *testing.
 	if settlements[0].AgentTurn == nil || !strings.Contains(string(settlements[0].AgentTurn.ResponsePayload), `"resp_1"`) {
 		t.Fatalf("first completion raw response = %s, want raw Responses payload", string(settlements[0].AgentTurn.ResponsePayload))
 	}
-	if conversations.record.SessionID == "" || conversations.record.Identity != testMemoryIdentity("agent-1", "support/inst-1") {
-		t.Fatalf("conversation record = %#v, want exact reusable-memory snapshot", conversations.record)
+	if conv.Session == nil || conv.Session.ID == "" || conv.Session.MemoryIdentity != testMemoryIdentity("agent-1", "support/inst-1") || conv.Session.TurnCount != 2 {
+		t.Fatalf("projected session = %#v, want exact reusable-memory snapshot", conv.Session)
 	}
 	if settlements[1].Usage.InputTokens == nil || *settlements[1].Usage.InputTokens != 13 || settlements[1].Usage.OutputTokens == nil || *settlements[1].Usage.OutputTokens != 5 || settlements[1].Usage.ResolvedModel != "test-model" {
 		t.Fatalf("final completion usage = %#v", settlements[1].Usage)

@@ -27,8 +27,8 @@ type DeliveryTargetApplication struct {
 	event      events.Event
 	state      WorkflowState
 	instance   WorkflowInstance
-	snapshot   runtimeengine.StateSnapshot
 	presence   WorkflowTargetPersistencePresence
+	preview    bool
 }
 
 func (a DeliveryTargetApplication) Owner() events.DeliveryTargetOwnership { return a.owner }
@@ -42,6 +42,8 @@ func (a DeliveryTargetApplication) Event() events.Event              { return a.
 func (a DeliveryTargetApplication) State() WorkflowState {
 	return cloneDeliveryTargetApplicationState(a.state)
 }
+
+func (a DeliveryTargetApplication) previewOnly() bool { return a.preview }
 
 func (a DeliveryTargetApplication) Validate() error {
 	if err := a.owner.Validate(); err != nil {
@@ -62,6 +64,9 @@ func (a DeliveryTargetApplication) Validate() error {
 		}
 		return nil
 	}
+	if a.preview && a.presence != WorkflowTargetPersistenceAbsent {
+		return fmt.Errorf("delivery target preview cannot carry persisted state authority")
+	}
 	if !a.presence.Valid() || a.presence == WorkflowTargetPersistenceLifecycleOnly {
 		return fmt.Errorf("delivery target application carries invalid persistence presence")
 	}
@@ -80,38 +85,6 @@ func (a DeliveryTargetApplication) Validate() error {
 		}
 	}
 	return nil
-}
-
-func (a DeliveryTargetApplication) persistedInstance() (WorkflowInstance, WorkflowTargetPersistencePresence) {
-	if !a.presence.HasState() {
-		return WorkflowInstance{}, a.presence
-	}
-	return cloneWorkflowInstanceForEngineMutation(a.instance), a.presence
-}
-
-func (a DeliveryTargetApplication) persistencePresence() WorkflowTargetPersistencePresence {
-	return a.presence
-}
-
-func (a DeliveryTargetApplication) persistedSnapshot() (runtimeengine.StateSnapshot, bool, error) {
-	if !a.presence.HasState() {
-		return runtimeengine.StateSnapshot{}, false, nil
-	}
-	carrier, err := runtimeengine.StateCarrierFromPersisted(
-		a.snapshot.StateCarrier.PersistedFields(),
-		a.snapshot.StateCarrier.PersistedBookkeeping(),
-		a.snapshot.StateCarrier.Gates,
-		a.snapshot.StateCarrier.PersistedStateBuckets(),
-	)
-	if err != nil {
-		return runtimeengine.StateSnapshot{}, false, err
-	}
-	carrier.Control = a.snapshot.StateCarrier.Control
-	return runtimeengine.StateSnapshot{
-		EntityID: a.snapshot.EntityID, WorkflowName: a.snapshot.WorkflowName,
-		WorkflowVersion: a.snapshot.WorkflowVersion, CurrentState: a.snapshot.CurrentState,
-		StateCarrier: carrier, EnteredStateAt: a.snapshot.EnteredStateAt,
-	}, true, nil
 }
 
 type deliveryTargetApplicationContextKey struct{}
@@ -188,6 +161,7 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 			return DeliveryTargetApplication{}, fmt.Errorf("delivery target application accepts at most one exact preview state")
 		}
 		application.state = cloneDeliveryTargetApplicationState(previewState[0])
+		application.preview = true
 		if strings.TrimSpace(application.state.EntityID) == "" {
 			application.state.EntityID = application.entityID
 		}
@@ -229,7 +203,7 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 		if err := validateDeliveryTargetDeclaredKey(source, flowID, nodeID, handler, executionEvent, policy.Acquisition, instance); err != nil {
 			return DeliveryTargetApplication{}, err
 		}
-		if err := application.applyPersistedInstance(source, flowID, instance, target.Presence); err != nil {
+		if err := application.applyPersistedInstance(instance, target.Presence); err != nil {
 			return DeliveryTargetApplication{}, err
 		}
 	case WorkflowTargetPersistenceStateOnly:
@@ -246,7 +220,7 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 		if err := validateDeliveryTargetDeclaredKey(source, flowID, nodeID, handler, executionEvent, policy.Acquisition, instance); err != nil {
 			return DeliveryTargetApplication{}, err
 		}
-		if err := application.applyPersistedInstance(source, flowID, instance, target.Presence); err != nil {
+		if err := application.applyPersistedInstance(instance, target.Presence); err != nil {
 			return DeliveryTargetApplication{}, err
 		}
 	case WorkflowTargetPersistenceLifecycleOnly:
@@ -269,27 +243,79 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 	return application, nil
 }
 
-func (a *DeliveryTargetApplication) applyPersistedInstance(source semanticview.Source, flowID string, instance WorkflowInstance, presence WorkflowTargetPersistencePresence) error {
+func (a *DeliveryTargetApplication) applyPersistedInstance(instance WorkflowInstance, presence WorkflowTargetPersistencePresence) error {
 	if a == nil {
 		return fmt.Errorf("delivery target application is required")
 	}
 	if !presence.HasState() {
 		return fmt.Errorf("delivery target application persisted state requires state presence")
 	}
-	carrier, err := workflowInstanceStateCarrier(instance)
-	if err != nil {
-		return fmt.Errorf("project exact admitted delivery target state: %w", err)
-	}
-	carrier.Gates = workflowStateGatesForScope(source, flowID, carrier.Gates)
 	a.instance = cloneWorkflowInstanceForEngineMutation(instance)
-	a.snapshot = runtimeengine.StateSnapshot{
-		EntityID: identity.NormalizeEntityID(instance.EntityID), WorkflowName: strings.TrimSpace(instance.WorkflowName),
-		WorkflowVersion: strings.TrimSpace(instance.WorkflowVersion), CurrentState: strings.TrimSpace(instance.CurrentState),
-		StateCarrier: carrier, EnteredStateAt: instance.EnteredStageAt,
-	}
 	a.state = workflowStateForDeliveryTargetInstance(instance)
 	a.presence = presence
 	return nil
+}
+
+// loadCurrentDeliveryTargetState reloads mutable execution state while the
+// engine entity lock is held. DeliveryTargetApplication remains the immutable
+// identity/policy owner; its pre-lock projection is never mutation authority.
+func (pc *PipelineCoordinator) loadCurrentDeliveryTargetState(
+	ctx context.Context,
+	application DeliveryTargetApplication,
+) (WorkflowInstance, WorkflowTargetPersistencePresence, error) {
+	if pc == nil || pc.workflowStore == nil || !pc.workflowStore.enabled() {
+		return WorkflowInstance{}, WorkflowTargetPersistencePresenceUnknown, fmt.Errorf("delivery target state requires workflow persistence")
+	}
+	if err := application.Validate(); err != nil {
+		return WorkflowInstance{}, WorkflowTargetPersistencePresenceUnknown, err
+	}
+	if application.Owner().EntitylessReceiver() {
+		return WorkflowInstance{}, WorkflowTargetPersistenceAbsent, nil
+	}
+	entityID := identity.NormalizeEntityID(application.EntityID())
+	target, err := pc.workflowStore.LoadTargetPersistence(ctx, application.Route(), entityID)
+	if err != nil {
+		return WorkflowInstance{}, WorkflowTargetPersistencePresenceUnknown, fmt.Errorf("reload exact admitted delivery target persistence: %w", err)
+	}
+	if err := target.Validate(application.Route(), entityID); err != nil {
+		return WorkflowInstance{}, WorkflowTargetPersistencePresenceUnknown, fmt.Errorf("validate reloaded admitted delivery target persistence: %w", err)
+	}
+
+	var current WorkflowInstance
+	switch target.Presence {
+	case WorkflowTargetPersistenceComplete:
+		current, err = target.DecodeComplete(application.Route(), entityID)
+	case WorkflowTargetPersistenceStateOnly:
+		current, err = decodeDeliveryTargetWorkflowEntityState(
+			pc.SemanticSource(), application.FlowID(), application.Event().RunID(), target.State,
+		)
+	case WorkflowTargetPersistenceAbsent:
+		if application.Owner().ExistingEntity() {
+			return WorkflowInstance{}, target.Presence, fmt.Errorf("existing_entity target %q disappeared before execution", application.Route().InstancePath)
+		}
+		return WorkflowInstance{}, target.Presence, nil
+	case WorkflowTargetPersistenceLifecycleOnly:
+		return WorkflowInstance{}, target.Presence, fmt.Errorf("exact admitted delivery target has lifecycle companion without state")
+	default:
+		return WorkflowInstance{}, target.Presence, fmt.Errorf("exact admitted delivery target has unknown persistence presence")
+	}
+	if err != nil {
+		return WorkflowInstance{}, target.Presence, fmt.Errorf("decode reloaded admitted delivery target: %w", err)
+	}
+	if _, err := requireWorkflowInstanceIdentity(application.Route(), entityID, current); err != nil {
+		return WorkflowInstance{}, target.Presence, fmt.Errorf("validate reloaded admitted delivery target identity: %w", err)
+	}
+	if err := validateWorkflowEntityType(pc.SemanticSource(), application.FlowID(), current.EntityType); err != nil {
+		return WorkflowInstance{}, target.Presence, fmt.Errorf("validate reloaded admitted delivery target entity contract: %w", err)
+	}
+	if !workflowInstanceOwnedByFlow(pc.SemanticSource(), current, application.FlowID(), application.Event().RunID()) ||
+		deliveryTargetWorkflowInstanceUnavailable(pc.SemanticSource(), application.FlowID(), current) {
+		return WorkflowInstance{}, target.Presence, fmt.Errorf(
+			"reloaded admitted delivery target conflicts with compiled receiver: flow=%q workflow=%q route=%q status=%q",
+			application.FlowID(), current.WorkflowName, current.StorageRef, current.Status,
+		)
+	}
+	return current, target.Presence, nil
 }
 
 func validateDeliveryTargetDeclaredKey(source semanticview.Source, flowID, nodeID string, handler SystemNodeEventHandler, evt events.Event, acquisition DeliveryTargetAcquisition, instance WorkflowInstance) error {

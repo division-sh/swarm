@@ -148,6 +148,47 @@ func (s *LLMPostgresOwner) UpsertConversation(ctx context.Context, rec runtimell
 	})
 }
 
+func (s *LLMPostgresOwner) ProjectCompletionConversationTx(ctx context.Context, tx *sql.Tx, rec runtimellm.ConversationRecord, expectedTurnCount int) error {
+	plan, identity, err := validateConversationMemory(rec)
+	if err != nil {
+		return err
+	}
+	if expectedTurnCount < 0 || rec.TurnCount != expectedTurnCount+1 {
+		return fmt.Errorf("completion conversation projection requires one exact turn transition")
+	}
+	messages, state, err := conversationPayloads(rec)
+	if err != nil {
+		return err
+	}
+	fields, err := storeagent.IdentityFields(identity.Agent)
+	if err != nil {
+		return err
+	}
+	if err := storerunstate.RequirePostgresActiveTx(ctx, tx, identity.RunID); err != nil {
+		return err
+	}
+	if _, err := requirePostgresLiveSessionAuthority(ctx, tx, identity.Agent, "project_completion_conversation", false); err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `
+		UPDATE agent_sessions SET conversation=$1::jsonb, turn_count=$2,
+			runtime_state=COALESCE(runtime_state,'{}'::jsonb) || $3::jsonb, updated_at=now()
+		WHERE session_id=$4::uuid AND run_id=$5::uuid AND agent_id=$6
+		  AND agent_name_owner=$7 AND agent_name_source=$8 AND agent_route_presence=$9
+		  AND flow_scope_key=$10 AND flow_instance_id=$11 AND flow_instance=$12
+		  AND memory_enabled=$13 AND memory_source=$14 AND status='active' AND turn_count=$15
+	`, string(messages), rec.TurnCount, state, strings.TrimSpace(rec.SessionID), identity.RunID,
+		fields.AgentID, fields.NameOwner, fields.NameSource, fields.RoutePresence, fields.FlowScopeKey,
+		fields.FlowInstanceID, fields.FlowInstancePath, plan.Enabled, string(plan.Source), expectedTurnCount)
+	if err != nil {
+		return fmt.Errorf("project exact completion conversation: %w", err)
+	}
+	if rows, _ := res.RowsAffected(); rows != 1 {
+		return fmt.Errorf("completion conversation projection turn conflict: run=%s agent=%s session=%s expected_turn=%d", identity.RunID, identity.AgentID(), rec.SessionID, expectedTurnCount)
+	}
+	return nil
+}
+
 func validateConversationMemory(rec runtimellm.ConversationRecord) (agentmemory.Plan, agentmemory.Identity, error) {
 	plan, err := rec.Memory.Normalize()
 	if err != nil {

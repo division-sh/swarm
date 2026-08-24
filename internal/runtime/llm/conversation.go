@@ -180,6 +180,9 @@ func (c *Conversation) stepManaged(ctx context.Context, draft agentframe.TurnDra
 	}
 
 	if c.toolExecutor == nil || len(resp.ToolCalls) == 0 {
+		if err := consumeCompletionContinuation(ctx, resp); err != nil {
+			return nil, err
+		}
 		return resp, nil
 	}
 
@@ -269,9 +272,18 @@ func (c *Conversation) continueManagedOnce(ctx context.Context, draft agentframe
 	if err != nil {
 		return nil, err
 	}
-	c.Messages = append(c.Messages, msg, resp.Message)
-	c.TurnCount++
-	c.lastFrameID = frame.FrameID
+	if resp.completionHandle != nil {
+		c.Messages = append([]Message(nil), c.Session.Messages...)
+		c.TurnCount = c.Session.TurnCount
+		c.lastFrameID = strings.TrimSpace(resp.completionFrameID)
+		if c.lastFrameID == "" {
+			c.lastFrameID = frame.FrameID
+		}
+	} else {
+		c.Messages = append(c.Messages, msg, resp.Message)
+		c.TurnCount++
+		c.lastFrameID = frame.FrameID
+	}
 	return resp, nil
 }
 
@@ -346,6 +358,9 @@ func (c *Conversation) resolveToolCalls(ctx context.Context, initial *Response) 
 		}
 		toolPayload, executed, err := c.executeToolResponse(ctx, resp)
 		if err != nil {
+			return nil, err
+		}
+		if err := consumeCompletionContinuation(ctx, resp); err != nil {
 			return nil, err
 		}
 		if shouldTerminateAfterToolCalls(executed) {

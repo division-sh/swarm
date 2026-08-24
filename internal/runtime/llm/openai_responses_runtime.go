@@ -215,6 +215,13 @@ func (r *OpenAIResponsesRuntime) continueSession(ctx context.Context, s *Session
 	}, entityID); err != nil {
 		return nil, fmt.Errorf("mark inbound delivery active for reused openai-responses session: %w", err)
 	}
+	if managed != nil {
+		if response, found, err := recoverCompletionContinuation(ctx, r.completionController, s, "openai_responses"); err != nil {
+			return nil, err
+		} else if found {
+			return response, nil
+		}
+	}
 
 	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendOpenAIResponses)
 	resolvedModel, err := resolveProviderModelForCall(ctx, r.cfg, profile, managed)
@@ -337,6 +344,9 @@ func (r *OpenAIResponsesRuntime) continueSession(ctx context.Context, s *Session
 	if surface, ok := managedcapabilities.FromContext(ctx); ok {
 		resp.CapabilitySurface = &surface
 	}
+	if err := bindCompletionProjection(dispatch, s, message, managed); err != nil {
+		return nil, err
+	}
 
 	turn := enrichTurnRecord(ctx, s, AgentTurnRecord{
 		AgentID:        s.AgentID,
@@ -358,15 +368,21 @@ func (r *OpenAIResponsesRuntime) continueSession(ctx context.Context, s *Session
 	if err := requireCurrentProviderProjection(ctx, s.AgentID); err != nil {
 		return nil, err
 	}
-	s.Messages = append(s.Messages, message, resp.Message)
-	s.TurnCount++
-	s.ParseFailures = 0
-	if resolved.Enabled() {
-		if err := r.sessions.IncrementTurn(ctx, resolved.Identity, s.ID); err != nil {
-			return nil, err
-		}
+	projected, err := projectCompletionContinuation(ctx, dispatch, s, &resp)
+	if err != nil {
+		return nil, err
 	}
-	r.persistConversation(ctx, s)
+	if !projected {
+		s.Messages = append(s.Messages, message, resp.Message)
+		s.TurnCount++
+		s.ParseFailures = 0
+		if resolved.Enabled() {
+			if err := r.sessions.IncrementTurn(ctx, resolved.Identity, s.ID); err != nil {
+				return nil, err
+			}
+		}
+		r.persistConversation(ctx, s)
+	}
 
 	if resolved.Enabled() {
 		if rotated, rotateErr := MaybeRotateAfterTurn(ctx, s, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns, r.events); rotateErr == nil && rotated != nil {
@@ -466,17 +482,7 @@ func (r *OpenAIResponsesRuntime) sendRequest(ctx context.Context, payload []byte
 		return nil, openAIResponsesResponse{}, nil, err
 	}
 	dispatch := newCompletionDispatch(attempt, runtimeeffects.StateOutcomeUncertain)
-	if replay, err := completionReplayForHandle(attempt, "openai_responses"); err != nil {
-		return nil, openAIResponsesResponse{}, dispatch, err
-	} else if replay != nil {
-		var parsed openAIResponsesResponse
-		if err := json.Unmarshal(replay.Response.Raw, &parsed); err != nil {
-			return nil, openAIResponsesResponse{}, dispatch, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_replay_provider_payload_invalid", "openai-responses-adapter", "replay_completion", nil, err)
-		}
-		dispatch.replay = replay
-		dispatch.state = runtimeeffects.StateSettled
-		return append([]byte(nil), replay.Response.Raw...), parsed, dispatch, nil
-	}
+	dispatch.request = append([]byte(nil), payload...)
 	heartbeatCtx, heartbeat, err := startCompletionAttemptHeartbeat(ctx, attempt)
 	if err != nil {
 		dispatch.state = runtimeeffects.StateTerminalFailure

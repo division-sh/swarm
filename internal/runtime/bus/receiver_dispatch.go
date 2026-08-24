@@ -56,18 +56,33 @@ func (eb *EventBus) receiverProjection(ctx context.Context, deliveryContext even
 	return projection, projection.validate()
 }
 
-func (eb *EventBus) beginReceiverDispatch(projection receiverDispatchProjection, evt events.Event) (receiverDispatchContext, func() error, error) {
+func (eb *EventBus) beginReceiverDispatch(parent context.Context, projection receiverDispatchProjection, evt events.Event) (receiverDispatchContext, func() error, error) {
 	if err := projection.validate(); err != nil {
 		return receiverDispatchContext{}, nil, err
 	}
-	lease, err := projection.occurrence.Begin(context.Background())
-	if err != nil {
-		return receiverDispatchContext{}, nil, err
-	}
-	ctx, closeContext := eventreceiver.NewContext(lease.Context())
-	closeReceiver := func() error {
-		closeContext()
-		return lease.Done()
+	var (
+		ctx           context.Context
+		closeReceiver func() error
+		err           error
+	)
+	if admission, ok := runtimeWorkAdmissionFromContext(parent); ok && admission.owner == projection.occurrence {
+		var closeContext func()
+		ctx, closeContext = eventreceiver.NewContext(admission.context)
+		closeReceiver = func() error {
+			closeContext()
+			return nil
+		}
+	} else {
+		lease, err := projection.occurrence.Begin(context.Background())
+		if err != nil {
+			return receiverDispatchContext{}, nil, err
+		}
+		var closeContext func()
+		ctx, closeContext = eventreceiver.NewContext(lease.Context())
+		closeReceiver = func() error {
+			closeContext()
+			return lease.Done()
+		}
 	}
 	ctx = worklifetime.WithOccurrence(ctx, projection.occurrence)
 	ctx = withReceiverBundleSource(ctx, projection.runtimeInstanceID, projection.bundleSourceFact)

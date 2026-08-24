@@ -258,6 +258,13 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	}, entityID); err != nil {
 		return nil, fmt.Errorf("mark inbound delivery active for reused cli session: %w", err)
 	}
+	if managed != nil {
+		if response, found, err := recoverCompletionContinuation(ctx, r.completionController, s, claudeCLICompletionAdapter); err != nil {
+			return nil, err
+		} else if found {
+			return response, nil
+		}
+	}
 	profile, _ := llmselection.ResolveActiveBackend(llmselection.BackendClaudeCLI)
 	providerModel, err := resolveProviderModelForCall(ctx, r.cfg, profile, managed)
 	if err != nil {
@@ -319,12 +326,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	}
 	dispatch := newCompletionDispatch(attempt, "")
 	dispatch.providerModel = providerModel
-	if replay, err := completionReplayForHandle(attempt, claudeCLICompletionAdapter); err != nil {
-		return nil, err
-	} else if replay != nil {
-		dispatch.replay = replay
-		dispatch.state = runtimeeffects.StateSettled
-	}
+	dispatch.request = append([]byte(nil), requestFingerprintInput...)
 	childSessionID := strings.TrimSpace(attempt.Attempt().AttemptID)
 	if childSessionID == "" {
 		return nil, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "claude_attempt_identity_missing", "claude-cli-adapter", "prepare_turn", nil)
@@ -387,12 +389,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	}
 	var resp *Response
 	var fallback promptTransportFallback
-	if dispatch.replay != nil {
-		replayed := dispatch.replay.Response
-		resp = &replayed
-	} else {
-		resp, fallback, err = r.runWithPreparedPrompt(ctx, args, target, prompt, monitorMeta, dispatch, profile, providerModel)
-	}
+	resp, fallback, err = r.runWithPreparedPrompt(ctx, args, target, prompt, monitorMeta, dispatch, profile, providerModel)
 	if mcpContextToken != "" {
 		if listedSurface, ok := r.mcpTurns.ResolveManagedCapabilitySurface(mcpContextToken); ok {
 			ctx = managedcapabilities.WithContext(ctx, listedSurface)
@@ -496,6 +493,9 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 		settlementEvidence["usage_exactness"] = string(runtimeeffects.CompletionUsageUnavailable)
 	}
 	turn := enrichTurnRecord(ctx, s, completionTurnBase(ctx, s, requestPayload, resp.Raw, true, latency, nil), resp)
+	if err := bindCompletionProjection(dispatch, s, message, managed); err != nil {
+		return nil, err
+	}
 	var settled runtimeeffects.CompletionSettlementResult
 	if !resolved.Enabled() {
 		settled, err = settleCompletionTurn(ctx, dispatch, completionTargetID, turn, resp, profile, usage, runtimeeffects.StateSettled, nil, settlementEvidence)
@@ -514,21 +514,25 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 	if settled.Drained() {
 		return nil, nil
 	}
-	s.Messages = append(s.Messages, message, resp.Message)
+	projected, err := projectCompletionContinuation(ctx, dispatch, s, resp)
+	if err != nil {
+		return nil, err
+	}
 	s.ProviderSessionID = childSessionID
 	if resolved.Enabled() {
 		LogSessionAdoptedForRun(ctx, r.events, resolved.Identity, confirmedHead, childSessionID)
 	}
-	s.TurnCount++
-	s.ParseFailures = 0
-
-	if resolved.Enabled() {
-		if err := r.sessions.IncrementTurn(ctx, resolved.Identity, s.ID); err != nil {
-			return nil, err
+	if !projected {
+		s.Messages = append(s.Messages, message, resp.Message)
+		s.TurnCount++
+		s.ParseFailures = 0
+		if resolved.Enabled() {
+			if err := r.sessions.IncrementTurn(ctx, resolved.Identity, s.ID); err != nil {
+				return nil, err
+			}
 		}
+		r.persistConversation(ctx, s)
 	}
-
-	r.persistConversation(ctx, s)
 
 	if resolved.Enabled() {
 		if rotated, rotateErr := MaybeRotateAfterTurn(ctx, s, r.sessions, r.lockOwner, r.cfg.LLM.Session.RotateAfterTurns, r.events); rotateErr == nil && rotated != nil {

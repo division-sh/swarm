@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/runtime/agentframe"
+	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -25,6 +28,135 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/google/uuid"
 )
+
+type settledContinuationProbe struct {
+	*effecttest.Harness
+	attempt     runtimeeffects.Attempt
+	projections []runtimeeffects.CompletionConversationProjection
+	consumed    int
+}
+
+func (p *settledContinuationProbe) RecoverCompletionContinuation(context.Context, runtimeeffects.CompletionContinuationRequest) (runtimeeffects.Attempt, bool, error) {
+	return p.attempt, true, nil
+}
+
+func (p *settledContinuationProbe) ProjectCompletionConversation(_ context.Context, _ runtimeeffects.Attempt, projection runtimeeffects.CompletionConversationProjection) error {
+	p.projections = append(p.projections, projection)
+	return nil
+}
+
+func (p *settledContinuationProbe) ConsumeCompletionResponse(context.Context, runtimeeffects.Attempt) error {
+	p.consumed++
+	return nil
+}
+
+func TestSettledCompletionRecoveryUsesImmutableProjectedTurn(t *testing.T) {
+	harness := effecttest.New()
+	ctx := harness.CompletionContext("settled-continuation")
+	authority, ok := runtimeeffects.AuthorityFromContext(ctx)
+	if !ok {
+		t.Fatal("completion authority missing")
+	}
+	claim, ok := runtimedelivery.ClaimFromContext(ctx)
+	if !ok {
+		t.Fatal("completion delivery claim missing")
+	}
+	origin, err := runtimeeffects.DeliveryCompletionOrigin(claim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	surface, ok := managedcapabilities.FromContext(ctx)
+	if !ok {
+		t.Fatal("completion capability surface missing")
+	}
+	identity := agentmemory.Identity{RunID: authority.Target.RunID, Agent: authority.Target.AgentIdentity}.Normalize()
+	messages := []Message{{Role: "user", Content: "hello"}, {Role: "assistant", Content: "done"}}
+	payload, err := json.Marshal(completionContinuationEnvelope{
+		Version: completionContinuationVersion,
+		Adapter: "anthropic_api",
+		Response: Response{
+			Message: messages[1], Raw: json.RawMessage(`{"content":"done"}`),
+			ToolOutputAuthority: &ToolOutputAuthority{ProviderOperationID: uuid.NewString(), SettledAt: time.Unix(10, 0).UTC()},
+		},
+		Usage: runtimeeffects.CompletionUsage{ResolvedModel: "test-model", Exactness: runtimeeffects.CompletionUsageUnavailable},
+		Projection: completionProjection{
+			SessionID: authority.Target.SessionID, ExpectedTurnCount: 0, TurnCount: 1,
+			Messages: messages, Identity: identity, Memory: authority.Target.Memory, FrameID: "frame-original",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := map[string]any{}
+	if err := runtimeeffects.AttachCompletionContinuationEvidence(evidence, []byte("exact-original-request"), payload); err != nil {
+		t.Fatal(err)
+	}
+	rawEvidence, err := json.Marshal(evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempt, err := runtimeeffects.AdmitCompletionContinuation(runtimeeffects.Attempt{
+		OperationID: uuid.NewString(), AttemptID: uuid.NewString(), Kind: runtimeeffects.KindProviderTurn,
+		Class: runtimeeffects.EffectReadOnly, Adapter: "anthropic_api", Transport: "api",
+		Authority: authority, Origin: origin, Ordinal: 1, AuthorizedAt: time.Unix(9, 0).UTC(),
+	}, rawEvidence, runtimeeffects.Fingerprint([]byte("exact-original-request")), surface, runtimeeffects.CompletionProjectionConversationProjected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe := &settledContinuationProbe{Harness: harness, attempt: attempt}
+	controller := runtimeeffects.NewCompletionController(probe, probe, probe, probe)
+	session := &Session{
+		ID: authority.Target.SessionID, AgentID: authority.Target.AgentID, Memory: authority.Target.Memory,
+		MemoryIdentity: identity, Messages: append([]Message(nil), messages...), TurnCount: 1,
+	}
+	response, found, err := recoverCompletionContinuation(ctx, controller, session, "anthropic_api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || response == nil || !reflect.DeepEqual(response.Message, messages[1]) {
+		t.Fatalf("recovered response=%#v found=%v", response, found)
+	}
+	if session.TurnCount != 1 || !reflect.DeepEqual(session.Messages, messages) {
+		t.Fatalf("recovery duplicated projected conversation: turn=%d messages=%#v", session.TurnCount, session.Messages)
+	}
+	if len(probe.projections) != 1 || probe.projections[0].ExpectedTurnCount != 0 || probe.projections[0].TurnCount != 1 || probe.projections[0].SessionID != session.ID {
+		t.Fatalf("canonical projection calls=%#v", probe.projections)
+	}
+	if err := consumeCompletionContinuation(ctx, response); err != nil {
+		t.Fatal(err)
+	}
+	if probe.consumed != 1 {
+		t.Fatalf("completion consumes=%d, want 1", probe.consumed)
+	}
+}
+
+func TestAllManagedAdaptersRecoverContinuationBeforeProviderConstruction(t *testing.T) {
+	for _, candidate := range []struct {
+		file     string
+		adapter  string
+		boundary string
+	}{
+		{file: "api_runtime.go", adapter: "\"anthropic_api\"", boundary: "resolveProviderModelForCall("},
+		{file: "openai_compatible_runtime.go", adapter: "\"openai_compatible\"", boundary: "resolveProviderModelForCall("},
+		{file: "openai_responses_runtime.go", adapter: "\"openai_responses\"", boundary: "resolveProviderModelForCall("},
+		{file: "cli_runtime.go", adapter: "claudeCLICompletionAdapter", boundary: "resolveProviderModelForCall("},
+		{file: "mock_runtime.go", adapter: "\"mock_python\"", boundary: "resolveProviderModelForCall("},
+	} {
+		t.Run(candidate.file, func(t *testing.T) {
+			raw, err := os.ReadFile(candidate.file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := string(raw)
+			recovery := strings.Index(source, "recoverCompletionContinuation(ctx, ")
+			adapter := strings.Index(source[recovery:], candidate.adapter)
+			boundary := strings.Index(source, candidate.boundary)
+			if recovery < 0 || adapter < 0 || boundary < 0 || recovery >= boundary {
+				t.Fatalf("adapter recovery ordering recovery=%d adapter=%d provider-boundary=%d", recovery, adapter, boundary)
+			}
+		})
+	}
+}
 
 func TestAnthropicDrainedCompletionStopsBeforeMutableProjection(t *testing.T) {
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

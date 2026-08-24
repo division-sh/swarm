@@ -263,6 +263,10 @@ func (s *PostgresStore) ConfirmChannelBinding(ctx context.Context, req operatorc
 	return s.operatorChannelPostgresOwner.ConfirmChannelBinding(ctx, req)
 }
 
+func (s *PostgresStore) ConsumeCompletionResponse(ctx context.Context, attempt effects.Attempt) error {
+	return s.effectPostgresOwner.ConsumeCompletionResponse(ctx, attempt)
+}
+
 func (s *PostgresStore) ContinueRunControl(ctx context.Context, req runcontrol.TransitionRequest) (runcontrol.State, error) {
 	return s.runLifecyclePostgresOwner.ContinueRunControl(ctx, req)
 }
@@ -883,6 +887,10 @@ func (s *PostgresStore) PrepareOperatorConversationForkChat(ctx context.Context,
 	return s.runForkPostgresOwner.PrepareOperatorConversationForkChat(ctx, req)
 }
 
+func (s *PostgresStore) ProjectCompletionConversation(ctx context.Context, attempt effects.Attempt, projection effects.CompletionConversationProjection) error {
+	return s.effectPostgresOwner.ProjectCompletionConversation(ctx, attempt, projection)
+}
+
 func (s *PostgresStore) ProposedEffectReadback(ctx context.Context, cardID string) (decisioncard.ProposedEffectReadback, error) {
 	return s.decisionPostgresOwner.ProposedEffectReadback(ctx, cardID)
 }
@@ -961,6 +969,10 @@ func (s *PostgresStore) RecordRunForkSelectedContractRouteRecovery(ctx context.C
 
 func (s *PostgresStore) RecordSpend(ctx context.Context, rec budgetspend.SpendRecord) error {
 	return s.budgetPostgresOwner.RecordSpend(ctx, rec)
+}
+
+func (s *PostgresStore) RecoverCompletionContinuation(ctx context.Context, req effects.CompletionContinuationRequest) (effects.Attempt, bool, error) {
+	return s.effectPostgresOwner.RecoverCompletionContinuation(ctx, req)
 }
 
 func (s *PostgresStore) RegisterAuthorActivityEventCatalog(scope authoractivity.Scope, descriptors []authoractivity.EventDescriptor) (*authoractivity.EventCatalogLease, error) {
@@ -1393,6 +1405,10 @@ func (s *SQLiteRuntimeStore) CompleteProposedEffectRoute(ctx context.Context, ca
 
 func (s *SQLiteRuntimeStore) ConfirmChannelBinding(ctx context.Context, req operatorchannel.ConfirmRequest) (operatorchannel.Operation, operatorchannel.Binding, error) {
 	return s.operatorChannelSQLiteOwner.ConfirmChannelBinding(ctx, req)
+}
+
+func (s *SQLiteRuntimeStore) ConsumeCompletionResponse(ctx context.Context, attempt effects.Attempt) error {
+	return s.effectSQLiteOwner.ConsumeCompletionResponse(ctx, attempt)
 }
 
 func (s *SQLiteRuntimeStore) ContinueRunControl(ctx context.Context, req runcontrol.TransitionRequest) (runcontrol.State, error) {
@@ -1931,6 +1947,10 @@ func (s *SQLiteRuntimeStore) PrepareOperatorConversationForkChat(ctx context.Con
 	return s.runForkSQLiteOwner.PrepareOperatorConversationForkChat(ctx, req)
 }
 
+func (s *SQLiteRuntimeStore) ProjectCompletionConversation(ctx context.Context, attempt effects.Attempt, projection effects.CompletionConversationProjection) error {
+	return s.effectSQLiteOwner.ProjectCompletionConversation(ctx, attempt, projection)
+}
+
 func (s *SQLiteRuntimeStore) ProposedEffectReadback(ctx context.Context, cardID string) (decisioncard.ProposedEffectReadback, error) {
 	return s.decisionSQLiteOwner.ProposedEffectReadback(ctx, cardID)
 }
@@ -2001,6 +2021,10 @@ func (s *SQLiteRuntimeStore) RecordOperatorConversationForkChat(ctx context.Cont
 
 func (s *SQLiteRuntimeStore) RecordSpend(ctx context.Context, rec budgetspend.SpendRecord) error {
 	return s.budgetSQLiteOwner.RecordSpend(ctx, rec)
+}
+
+func (s *SQLiteRuntimeStore) RecoverCompletionContinuation(ctx context.Context, req effects.CompletionContinuationRequest) (effects.Attempt, bool, error) {
+	return s.effectSQLiteOwner.RecoverCompletionContinuation(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) RegisterAuthorActivityEventCatalog(scope authoractivity.Scope, descriptors []authoractivity.EventDescriptor) (*authoractivity.EventCatalogLease, error) {

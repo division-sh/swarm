@@ -183,6 +183,48 @@ func (s Surface) ContinuationFingerprint() (string, error) {
 	return s.planFingerprint(true)
 }
 
+// ProjectNormalContinuation binds an admitted normal-runtime continuation to
+// the current process authority. The durable callable plan remains unchanged;
+// only coordinates excluded by ContinuationFingerprint may change.
+func (s Surface) ProjectNormalContinuation(executionAuthorityID, sessionID string) (Surface, error) {
+	if err := s.Validate(); err != nil {
+		return Surface{}, err
+	}
+	if s.Authority.Kind != AuthorityProviderTurn || s.Authority.ExecutionKind != ExecutionNormalAgent {
+		return Surface{}, fmt.Errorf("only normal provider-turn surfaces can be projected for continuation")
+	}
+	executionAuthorityID = strings.TrimSpace(executionAuthorityID)
+	sessionID = strings.TrimSpace(sessionID)
+	if executionAuthorityID == "" {
+		return Surface{}, fmt.Errorf("normal continuation execution authority is required")
+	}
+	if _, err := uuid.Parse(sessionID); err != nil {
+		return Surface{}, fmt.Errorf("normal continuation session id is invalid: %w", err)
+	}
+	before, err := s.ContinuationFingerprint()
+	if err != nil {
+		return Surface{}, err
+	}
+	out := s.Clone()
+	out.Authority.ExecutionAuthorityID = executionAuthorityID
+	out.Authority.SessionID = sessionID
+	out.ID, err = out.planID()
+	if err != nil {
+		return Surface{}, err
+	}
+	if err := out.refreshIntegrityHash(); err != nil {
+		return Surface{}, err
+	}
+	after, err := out.ContinuationFingerprint()
+	if err != nil {
+		return Surface{}, err
+	}
+	if after != before {
+		return Surface{}, fmt.Errorf("normal continuation projection changed the callable plan")
+	}
+	return out, out.Validate()
+}
+
 func (s Surface) planFingerprint(continuation bool) (string, error) {
 	if err := s.Validate(); err != nil {
 		return "", err

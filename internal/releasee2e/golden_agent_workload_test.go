@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -15,7 +16,6 @@ import (
 	"testing"
 	"time"
 
-	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/lib/pq"
 	"gopkg.in/yaml.v3"
 )
@@ -551,7 +551,7 @@ func assertGoldenPublicProof(t *testing.T, rpc *releaseRPCClient, runID string, 
 
 	entities := listGoldenEntities(t, ctx, rpc, runID)
 	entitySet := assertGoldenEntities(t, ctx, rpc, runID, entities)
-	agents := listGoldenAgents(t, ctx, rpc)
+	agents := waitForGoldenAgentTeardown(t, ctx, rpc)
 	assertGoldenAgentTeardown(t, agents)
 
 	events, err := listGoldenEvents(ctx, rpc, runID)
@@ -755,15 +755,28 @@ func assertGoldenEntities(t *testing.T, ctx context.Context, rpc *releaseRPCClie
 	return result
 }
 
-func listGoldenAgents(t *testing.T, ctx context.Context, rpc *releaseRPCClient) []goldenAgentSummary {
+func waitForGoldenAgentTeardown(t *testing.T, ctx context.Context, rpc *releaseRPCClient) []goldenAgentSummary {
 	t.Helper()
-	var result struct {
-		Agents []goldenAgentSummary `json:"agents"`
+	var agents []goldenAgentSummary
+	err := pollReleaseCondition(ctx, 10*time.Millisecond, func() (bool, error) {
+		var result struct {
+			Agents []goldenAgentSummary `json:"agents"`
+		}
+		if err := rpc.call(ctx, "agent.list", map[string]any{}, &result); err != nil {
+			return false, err
+		}
+		agents = result.Agents
+		if len(agents) != 1 {
+			return false, nil
+		}
+		agent := agents[0]
+		return agent.AgentID == "scout-worker" && agent.Role == "golden_scout" &&
+			agent.FlowInstance == "scout" && agent.ExecutionMode == "mock" && agent.Status == "idle", nil
+	})
+	if err != nil {
+		t.Fatalf("wait for terminal child-agent teardown: %v; last agent.list=%#v", err, agents)
 	}
-	if err := rpc.call(ctx, "agent.list", map[string]any{}, &result); err != nil {
-		t.Fatal(err)
-	}
-	return result.Agents
+	return agents
 }
 
 func assertGoldenAgentTeardown(t *testing.T, agents []goldenAgentSummary) {
@@ -1056,7 +1069,12 @@ func assertGoldenSingleTargetlessAgentDelivery(t *testing.T, event goldenEvent, 
 
 func assertGoldenDeliveryToEntity(t *testing.T, event goldenEvent, subscriberType, subscriberID, kind, flowID string, entity goldenEntitySummary) {
 	t.Helper()
-	delivery := goldenDeliveryFor(t, event, subscriberType, subscriberID)
+	var delivery goldenEventDelivery
+	if subscriberType == "node" {
+		delivery = goldenNodeDeliveryForTarget(t, event, subscriberID, kind, flowID, entity)
+	} else {
+		delivery = goldenDeliveryFor(t, event, subscriberType, subscriberID)
+	}
 	target := delivery.Target
 	if target.Kind != kind || target.FlowID != flowID || target.FlowInstance != entity.FlowInstance || target.EntityID != entity.EntityID {
 		t.Errorf("event %s %s/%s target = %#v, want %s %s/%s/%s", event.EventName, subscriberType, subscriberID, target, kind, flowID, entity.FlowInstance, entity.EntityID)
@@ -1067,15 +1085,7 @@ func goldenDeliveryFor(t *testing.T, event goldenEvent, subscriberType, subscrib
 	t.Helper()
 	var matches []goldenEventDelivery
 	for _, delivery := range event.Deliveries {
-		actualSubscriberID := delivery.SubscriberID
-		if delivery.SubscriberType == "node" {
-			node, err := runtimeidentity.ParseExecutableNodeKey(actualSubscriberID)
-			if err != nil {
-				t.Fatalf("event %s returned invalid canonical node subscriber %q: %v", event.EventName, actualSubscriberID, err)
-			}
-			actualSubscriberID = node.NodeID()
-		}
-		if delivery.SubscriberType == subscriberType && actualSubscriberID == subscriberID {
+		if delivery.SubscriberType == subscriberType && delivery.SubscriberID == subscriberID {
 			matches = append(matches, delivery)
 		}
 	}
@@ -1083,6 +1093,51 @@ func goldenDeliveryFor(t *testing.T, event goldenEvent, subscriberType, subscrib
 		t.Fatalf("event %s %s/%s delivery matches = %#v, want exactly one", event.EventName, subscriberType, subscriberID, matches)
 	}
 	return matches[0]
+}
+
+func goldenNodeDeliveryForTarget(t *testing.T, event goldenEvent, subscriberID, kind, flowID string, entity goldenEntitySummary) goldenEventDelivery {
+	t.Helper()
+	var matches []goldenEventDelivery
+	for _, delivery := range event.Deliveries {
+		if delivery.SubscriberType != "node" {
+			continue
+		}
+		nodeID, err := goldenCanonicalNodeID(delivery.SubscriberID)
+		if err != nil {
+			t.Fatalf("event %s returned invalid canonical node subscriber %q: %v", event.EventName, delivery.SubscriberID, err)
+		}
+		target := delivery.Target
+		if nodeID == subscriberID && target.Kind == kind && target.FlowID == flowID &&
+			target.FlowInstance == entity.FlowInstance && target.EntityID == entity.EntityID {
+			matches = append(matches, delivery)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("event %s node %s target %s/%s/%s delivery matches = %#v, want exactly one", event.EventName, subscriberID, flowID, entity.FlowInstance, entity.EntityID, matches)
+	}
+	return matches[0]
+}
+
+func goldenCanonicalNodeID(key string) (string, error) {
+	parts := strings.Split(key, ".")
+	if len(parts) != 3 {
+		return "", fmt.Errorf("canonical node key has %d coordinates, want 3", len(parts))
+	}
+	decoded := make([]string, len(parts))
+	for index, coordinate := range parts {
+		value, err := base64.RawURLEncoding.DecodeString(coordinate)
+		if err != nil {
+			return "", fmt.Errorf("decode coordinate %d: %w", index, err)
+		}
+		if base64.RawURLEncoding.EncodeToString(value) != coordinate {
+			return "", fmt.Errorf("coordinate %d is not canonical base64url", index)
+		}
+		decoded[index] = string(value)
+	}
+	if decoded[0] == "" || decoded[2] == "" {
+		return "", fmt.Errorf("canonical node key requires package and node identity")
+	}
+	return decoded[2], nil
 }
 
 func TestGoldenProcessEnvironmentDoesNotResolveClaude(t *testing.T) {

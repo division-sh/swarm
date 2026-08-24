@@ -119,6 +119,7 @@ func (rt *Runtime) admitManagedExecution(ctx context.Context, authority runtimes
 				if reportErr == nil {
 					return
 				}
+				rt.failDeliveryContinuation(reportErr)
 				if rt.Logger != nil {
 					handleRuntimeLogPersistenceError("delivery-continuation", "continuation_failed", rt.Logger.Error(
 						reportCtx, "delivery-continuation", "continuation_failed", nil, reportErr,
@@ -166,6 +167,19 @@ func (rt *Runtime) admitManagedExecution(ctx context.Context, authority runtimes
 		}
 	}
 	return result, nil
+}
+
+func (rt *Runtime) failDeliveryContinuation(err error) {
+	if rt == nil || err == nil {
+		return
+	}
+	rt.CloseAdmission()
+	rt.lifecycleMu.Lock()
+	cancel := rt.cancelStart
+	rt.lifecycleMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 func (rt *Runtime) managedActorCensusFingerprint() (string, error) {

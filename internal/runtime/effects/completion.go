@@ -262,6 +262,22 @@ type CompletionSettlementResult struct {
 	Origin        CompletionOrigin
 	OriginSettled bool
 	Finalization  *ProviderDrainFinalization
+	continuation  *Attempt
+}
+
+// AdmitCommittedCompletionContinuation binds selected-store continuation
+// evidence to a successful current settlement result.
+func AdmitCommittedCompletionContinuation(result CompletionSettlementResult, attempt Attempt) (CompletionSettlementResult, error) {
+	continuation, ok := attempt.CompletionContinuation()
+	if !result.Committed || result.Disposition != CompletionSettlementCurrent || !ok ||
+		continuation.Phase != CompletionProjectionResponseSettled ||
+		strings.TrimSpace(result.AttemptID) != strings.TrimSpace(attempt.AttemptID) ||
+		result.Origin != attempt.Origin {
+		return result, fmt.Errorf("completion settlement result does not match an admitted current continuation")
+	}
+	admitted := attempt
+	result.continuation = &admitted
+	return result, nil
 }
 
 func (r CompletionSettlementResult) Drained() bool {

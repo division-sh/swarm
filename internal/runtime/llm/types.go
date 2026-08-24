@@ -160,6 +160,8 @@ type Response struct {
 	MCPVisibleTools      []string                     `json:"mcp_visible_tools,omitempty"`
 	CapabilitySurface    *managedcapabilities.Surface `json:"capability_surface,omitempty"`
 	ToolOutputAuthority  *ToolOutputAuthority         `json:"tool_output_authority,omitempty"`
+	completionHandle     *runtimeeffects.Handle
+	completionFrameID    string
 }
 
 type Session struct {

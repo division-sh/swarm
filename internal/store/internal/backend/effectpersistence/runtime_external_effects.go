@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -145,11 +146,6 @@ func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, auth
 	if existing, found, err := loadExistingExternalAttemptPostgres(ctx, tx, req.OperationID); err != nil {
 		return runtimeeffects.Attempt{}, err
 	} else if found {
-		if attempt, replayed, err := authorizeSettledDeliveryReplay(ctx, authority, req, existing); err != nil {
-			return runtimeeffects.Attempt{}, err
-		} else if replayed {
-			return attempt, nil
-		}
 		if attempt, resumed := resumeProviderRegistrationAuthorization(authority, req, existing); resumed {
 			return attempt, nil
 		}
@@ -211,12 +207,6 @@ func (s *EffectSQLiteOwner) AuthorizeExternalAttempt(ctx context.Context, author
 		if existing, found, err := loadExistingExternalAttemptSQLite(txctx, tx, req.OperationID); err != nil {
 			return err
 		} else if found {
-			if replayed, ok, replayErr := authorizeSettledDeliveryReplay(txctx, authority, req, existing); replayErr != nil {
-				return replayErr
-			} else if ok {
-				attempt = replayed
-				return nil
-			}
 			if resumed, ok := resumeProviderRegistrationAuthorization(authority, req, existing); ok {
 				attempt = resumed
 				return nil
@@ -734,32 +724,6 @@ func managedCapabilityPlanFingerprint(surface *managedcapabilities.Surface) (str
 		return surface.ContinuationFingerprint()
 	}
 	return surface.PlanFingerprint()
-}
-
-func authorizeSettledDeliveryReplay(ctx context.Context, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, existing existingExternalAttempt) (runtimeeffects.Attempt, bool, error) {
-	if authority.Kind != runtimeeffects.AuthorityNormalAgent || req.Kind != runtimeeffects.KindProviderTurn ||
-		req.Origin.Kind != runtimeeffects.CompletionOriginDelivery ||
-		existing.operationState != string(runtimeeffects.StateSettled) || existing.attemptState != string(runtimeeffects.StateSettled) {
-		return runtimeeffects.Attempt{}, false, nil
-	}
-	bundleHash, err := requiredExternalEffectBundleHash(ctx, authority)
-	if err != nil {
-		return runtimeeffects.Attempt{}, false, err
-	}
-	claim := req.Origin.Delivery
-	if !existing.matchesAuthorityIdentity(authority) || !existing.matchesOperationRequest(req) || existing.bundleHash != bundleHash ||
-		existing.originKind != string(runtimeeffects.CompletionOriginDelivery) ||
-		existing.originDeliveryID != claim.DeliveryID() || existing.originRunID != claim.RunID() ||
-		existing.originRouteIdentity != claim.RouteIdentity() || existing.originSubscriberType != string(claim.SubscriberClass()) ||
-		existing.originSubscriberID != claim.SubscriberID() {
-		return runtimeeffects.Attempt{}, false, nil
-	}
-	attempt := externalAuthorizedAttempt(authority, req, existing.attemptID, existing.attemptOrdinal)
-	replay, err := runtimeeffects.AdmitCompletionReplay(attempt, json.RawMessage(existing.evidenceJSON))
-	if err != nil {
-		return runtimeeffects.Attempt{}, false, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "completion_replay_evidence_invalid", "external-effects", "authorize_attempt", map[string]any{"operation_id": req.OperationID, "attempt_id": existing.attemptID}, err)
-	}
-	return replay, true, nil
 }
 
 func persistManagedCapabilitySurfacePostgres(ctx context.Context, tx *sql.Tx, surface *managedcapabilities.Surface) (string, string, error) {
@@ -1697,13 +1661,23 @@ func settleExternalAttemptPostgres(ctx context.Context, tx *sql.Tx, settlement r
 	if err != nil {
 		return false, err
 	}
+	var projectionPhase any
+	if settlement.CompletionProjectionPhase.Valid() {
+		projectionPhase = string(settlement.CompletionProjectionPhase)
+	}
+	if settlement.CompletionProjectionPhase == runtimeeffects.CompletionProjectionResponseSettled {
+		if err := replaceActiveCompletionContinuationPostgres(ctx, tx, settlement); err != nil {
+			return false, err
+		}
+	}
 	res, err := tx.ExecContext(ctx, `
 		UPDATE runtime_external_effect_attempts
 		SET state = $3, evidence = $4::jsonb, failure = $5::jsonb,
-		    completed_at = $6, updated_at = $6
+		    completed_at = $6, updated_at = $6, completion_projection_phase = $7,
+		    completion_continuation_active = COALESCE($7 = 'response_settled', FALSE)
 		WHERE attempt_id = $1::uuid AND operation_id = $2::uuid
 		  AND state IN ('authorized', 'launched', 'response_observed')
-	`, settlement.AttemptID, settlement.OperationID, string(settlement.State), string(evidence), nullableJSON(failure), settlement.Now.UTC())
+	`, settlement.AttemptID, settlement.OperationID, string(settlement.State), string(evidence), nullableJSON(failure), settlement.Now.UTC(), projectionPhase)
 	if err := requireExternalAttemptTransition(res, err); err != nil {
 		return false, acceptRepeatedPostgresSettlement(ctx, tx, settlement)
 	}
@@ -1716,17 +1690,72 @@ func settleExternalAttemptSQLiteTx(ctx context.Context, tx *sql.Tx, settlement r
 	if err != nil {
 		return false, err
 	}
+	var projectionPhase any
+	if settlement.CompletionProjectionPhase.Valid() {
+		projectionPhase = string(settlement.CompletionProjectionPhase)
+	}
+	if settlement.CompletionProjectionPhase == runtimeeffects.CompletionProjectionResponseSettled {
+		if err := replaceActiveCompletionContinuationSQLite(ctx, tx, settlement); err != nil {
+			return false, err
+		}
+	}
 	res, err := tx.ExecContext(ctx, `
 		UPDATE runtime_external_effect_attempts
-		SET state = ?, evidence = ?, failure = ?, completed_at = ?, updated_at = ?
+		SET state = ?, evidence = ?, failure = ?, completed_at = ?, updated_at = ?, completion_projection_phase = ?,
+		    completion_continuation_active = CASE WHEN ? = 'response_settled' THEN 1 ELSE 0 END
 		WHERE attempt_id = ? AND operation_id = ?
 		  AND state IN ('authorized', 'launched', 'response_observed')
-	`, string(settlement.State), string(evidence), sqliteNullableJSON(failure), settlement.Now.UTC(), settlement.Now.UTC(), settlement.AttemptID, settlement.OperationID)
+	`, string(settlement.State), string(evidence), sqliteNullableJSON(failure), settlement.Now.UTC(), settlement.Now.UTC(), projectionPhase, projectionPhase, settlement.AttemptID, settlement.OperationID)
 	if err := requireExternalAttemptTransition(res, err); err != nil {
 		return false, acceptRepeatedSQLiteSettlement(ctx, tx, settlement)
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE runtime_external_effect_operations SET state = ?, completed_at = ?, updated_at = ? WHERE operation_id = ?`, string(settlement.State), settlement.Now.UTC(), settlement.Now.UTC(), settlement.OperationID)
 	return err == nil, err
+}
+
+func replaceActiveCompletionContinuationPostgres(ctx context.Context, tx *sql.Tx, settlement runtimeeffects.Settlement) error {
+	var deliveryID string
+	err := tx.QueryRowContext(ctx, `
+		SELECT origin_delivery_id::text
+		FROM runtime_external_effect_attempts
+		WHERE attempt_id=$1::uuid AND operation_id=$2::uuid
+		  AND origin_kind='delivery' AND state IN ('authorized','launched','response_observed')
+		FOR UPDATE
+	`, settlement.AttemptID, settlement.OperationID).Scan(&deliveryID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("lock active completion continuation replacement: %w", err)
+	}
+	_, err = tx.ExecContext(ctx, `
+		UPDATE runtime_external_effect_attempts
+		SET completion_continuation_active=FALSE
+		WHERE origin_delivery_id=$1::uuid AND completion_continuation_active=TRUE AND attempt_id<>$2::uuid
+	`, deliveryID, settlement.AttemptID)
+	return err
+}
+
+func replaceActiveCompletionContinuationSQLite(ctx context.Context, tx *sql.Tx, settlement runtimeeffects.Settlement) error {
+	var deliveryID string
+	err := tx.QueryRowContext(ctx, `
+		SELECT origin_delivery_id
+		FROM runtime_external_effect_attempts
+		WHERE attempt_id=? AND operation_id=?
+		  AND origin_kind='delivery' AND state IN ('authorized','launched','response_observed')
+	`, settlement.AttemptID, settlement.OperationID).Scan(&deliveryID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("lock sqlite active completion continuation replacement: %w", err)
+	}
+	_, err = tx.ExecContext(ctx, `
+		UPDATE runtime_external_effect_attempts
+		SET completion_continuation_active=0
+		WHERE origin_delivery_id=? AND completion_continuation_active=1 AND attempt_id<>?
+	`, deliveryID, settlement.AttemptID)
+	return err
 }
 
 func externalEffectOperationRunID(ctx context.Context, tx *sql.Tx, operationID string, postgres bool) (string, error) {
