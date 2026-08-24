@@ -20,6 +20,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/google/uuid"
@@ -254,7 +255,8 @@ func TestCompletionAttemptHeartbeatLossCancelsExecutionAndForcesUncertainty(t *t
 	if !errors.Is(context.Cause(heartbeatCtx), injected) {
 		t.Fatalf("heartbeat cancellation cause=%v, want injected failure", context.Cause(heartbeatCtx))
 	}
-	dispatch := &completionDispatch{handle: handle, state: runtimeeffects.StateSettled}
+	dispatch := newCompletionDispatch(handle, runtimeeffects.StateSettled)
+	dispatch.markProviderInvocationStarted()
 	err = finishCompletionDispatchHeartbeat(dispatch, heartbeat, nil)
 	if err == nil || dispatch.state != runtimeeffects.StateOutcomeUncertain {
 		t.Fatalf("heartbeat finish err=%v state=%s, want outcome uncertainty", err, dispatch.state)
@@ -262,6 +264,46 @@ func TestCompletionAttemptHeartbeatLossCancelsExecutionAndForcesUncertainty(t *t
 	failure, ok := runtimefailures.As(err)
 	if !ok || failure.Failure.Detail.Code != "completion_attempt_heartbeat_lost" {
 		t.Fatalf("heartbeat failure=%v, want completion_attempt_heartbeat_lost", err)
+	}
+}
+
+func TestCompletionTurnSettlementRequiresStartedProviderInvocation(t *testing.T) {
+	tests := []struct {
+		name     string
+		dispatch func(*runtimeeffects.Handle) *completionDispatch
+	}{
+		{
+			name: "unclassified",
+			dispatch: func(handle *runtimeeffects.Handle) *completionDispatch {
+				return &completionDispatch{handle: handle}
+			},
+		},
+		{
+			name: "not_started_success",
+			dispatch: func(handle *runtimeeffects.Handle) *completionDispatch {
+				return newCompletionDispatch(handle, runtimeeffects.StateSettled)
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			harness := effecttest.New()
+			ctx := llmTestWorkContext(t, managedEffectHarnessContext(t, harness, "invocation-disposition-"+test.name))
+			handle, err := beginManagedTestCompletion(t, ctx, "anthropic_api", []byte("invocation-disposition"))
+			if err != nil {
+				t.Fatalf("authorize completion: %v", err)
+			}
+			dispatch := test.dispatch(handle)
+			if _, err := settleCompletionTurn(ctx, dispatch, handle.Attempt().Authority.Target.ID, AgentTurnRecord{}, nil, llmselection.Profile{}, runtimeeffects.CompletionUsage{}, runtimeeffects.StateSettled, nil, nil); err == nil {
+				t.Fatal("turn-bearing settlement accepted a provider invocation that never started")
+			}
+			if got := harness.CompletionCount(); got != 0 {
+				t.Fatalf("turn-bearing settlements = %d, want 0", got)
+			}
+			if err := harness.RequireState("anthropic_api", runtimeeffects.StateAuthorized); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

@@ -454,7 +454,7 @@ func (r *AnthropicAPIRuntime) sendRequest(ctx context.Context, payload []byte, m
 	if err != nil {
 		return nil, anthropicResponse{}, nil, err
 	}
-	dispatch := &completionDispatch{handle: attempt, state: runtimeeffects.StateOutcomeUncertain}
+	dispatch := newCompletionDispatch(attempt, runtimeeffects.StateOutcomeUncertain)
 	heartbeatCtx, heartbeat, err := startCompletionAttemptHeartbeat(ctx, attempt)
 	if err != nil {
 		dispatch.state = runtimeeffects.StateTerminalFailure
@@ -466,6 +466,7 @@ func (r *AnthropicAPIRuntime) sendRequest(ctx context.Context, payload []byte, m
 		return nil, anthropicResponse{}, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
 
+	dispatch.markProviderInvocationStarted()
 	httpResp, err := r.httpClient.Do(req)
 	if err != nil {
 		err = runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "provider_turn_outcome_unconfirmed", "anthropic-adapter", "send_request", map[string]any{"stage": "transport"}, err)

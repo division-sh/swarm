@@ -10675,9 +10675,15 @@ agent_execution_frame:
       Turn-bearing settlement is valid only from an attempt with durable `launched` or `response_observed` evidence; an
       `authorized` attempt has not executed and cannot create an agent turn or spend row. Startup recovery of an authorized
       attempt likewise settles only the attempt and releases any reservation without synthesizing provider execution.
-      A definitive CLI prelaunch or process-start rejection settles only the attempt and releases its budget reservation;
-      it cannot materialize a provider turn that never executed. A retry of that logical turn reuses the exact
-      operation-owned frame and materializes the single immutable turn only from terminal provider evidence.
+      Every managed adapter also retains one typed process-local provider-invocation disposition independently from the
+      durable launch marker. Initial attempt-heartbeat failure and a returned `MarkLaunched` error are definitive
+      zero-invocation outcomes for that dispatch, including when the launch transaction committed but its acknowledgement
+      was lost: Anthropic, OpenAI-compatible, OpenAI Responses, Claude CLI, and mock settle only the attempt, release its
+      budget reservation, and never attach turn or spend evidence. Only a dispatch that actually entered its HTTP,
+      process, or Python primitive is turn-eligible. An unclassified dispatch fails closed. Post-dispatch failures remain
+      outcome-uncertain and may consume the turn-bearing settlement path. A retry of an allowlisted logical turn reuses the
+      exact operation-owned frame and materializes the single immutable turn only from terminal provider evidence;
+      zero-invocation failure does not broaden the adapter retry allowlist.
     public_projection: >
       `conversation.get_turn` is the sole historical projection owner and derives only version, frame_id, content_hash,
       turn_kind, and the conditionally required parent_frame_id from the persisted private frame. Compact list, latest,
@@ -35222,7 +35228,11 @@ llm_completion_execution_authority:
     conversation_fork_chat: Active preallocated conversation_fork_turns group, actor, request occurrence/hash/idempotency identity, owner/fence, and ordered conversation_fork_turn_completions child target.
   protocol:
     authorize: Authorization validates the closed execution authority, authorizes the existing effect operation/attempt, and atomically reserves the full positive remaining capacity in every applicable monthly budget scope. No positive cap creates no reservation.
-    launch: MarkLaunched revalidates authority, owner, lease, and fence and commits before HTTP dispatch or process start.
+    launch: >
+      MarkLaunched revalidates authority, owner, lease, and fence and commits before HTTP dispatch, process start, or mock
+      Python execution. A returned marker error prevents that adapter invocation even if the marker transaction committed
+      and its acknowledgement was lost. The adapter must then use the shared attempt-only settlement path; durable
+      `launched` state alone does not permit that known zero-invocation caller to attach turn or spend evidence.
     heartbeat: Before launch and for the full lifetime of the HTTP request or provider process, the adapter renews the exact attempt lease through the selected-store authority. Renewal revalidates the authority, operation, attempt, execution owner, fence, and live attempt state; extends the lease monotonically without holding a transaction across provider work; and cancels the primitive plus forces outcome_uncertain settlement if renewal is lost. A completion controller without this capability fails before authorization.
     response_observed: Terminal provider bytes or a terminal process ResultMessage are durably marked response_observed before parsing or conversion.
     terminal: One selected-store transaction locks the attempt/fence, budget scopes, target, and optional Claude provider head; writes exactly one target usage fact and at most one spend row keyed by attempt_id; settles the effect; releases all reservations; and commits required transcript/audit mutation.

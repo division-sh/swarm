@@ -468,7 +468,7 @@ func (r *OpenAICompatibleRuntime) sendRequest(ctx context.Context, payload []byt
 	if err != nil {
 		return nil, openAICompatibleResponse{}, nil, err
 	}
-	dispatch := &completionDispatch{handle: attempt, state: runtimeeffects.StateOutcomeUncertain}
+	dispatch := newCompletionDispatch(attempt, runtimeeffects.StateOutcomeUncertain)
 	heartbeatCtx, heartbeat, err := startCompletionAttemptHeartbeat(ctx, attempt)
 	if err != nil {
 		dispatch.state = runtimeeffects.StateTerminalFailure
@@ -480,6 +480,7 @@ func (r *OpenAICompatibleRuntime) sendRequest(ctx context.Context, payload []byt
 		return nil, openAICompatibleResponse{}, dispatch, finishCompletionDispatchHeartbeat(dispatch, heartbeat, err)
 	}
 
+	dispatch.markProviderInvocationStarted()
 	httpResp, err := r.httpClient.Do(req)
 	if err != nil {
 		err = runtimefailures.Wrap(runtimefailures.ClassOutcomeUncertain, "provider_turn_outcome_unconfirmed", "openai-compatible-adapter", "send_request", map[string]any{"stage": "transport"}, err)

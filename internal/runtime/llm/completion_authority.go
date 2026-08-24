@@ -28,6 +28,29 @@ type completionDispatch struct {
 	state         runtimeeffects.State
 	evidence      map[string]any
 	providerModel llmselection.ResolvedModel
+	invocation    completionProviderInvocation
+}
+
+type completionProviderInvocation uint8
+
+const (
+	completionProviderInvocationUnclassified completionProviderInvocation = iota
+	completionProviderInvocationNotStarted
+	completionProviderInvocationStarted
+)
+
+func newCompletionDispatch(handle *runtimeeffects.Handle, state runtimeeffects.State) *completionDispatch {
+	return &completionDispatch{
+		handle:     handle,
+		state:      state,
+		invocation: completionProviderInvocationNotStarted,
+	}
+}
+
+func (d *completionDispatch) markProviderInvocationStarted() {
+	if d != nil {
+		d.invocation = completionProviderInvocationStarted
+	}
 }
 
 const (
@@ -194,7 +217,7 @@ func finishCompletionDispatchHeartbeat(dispatch *completionDispatch, heartbeat *
 	if heartbeatErr == nil {
 		return prior
 	}
-	if dispatch != nil {
+	if dispatch != nil && dispatch.invocation == completionProviderInvocationStarted {
 		dispatch.state = runtimeeffects.StateOutcomeUncertain
 	}
 	return errors.Join(prior, completionAttemptHeartbeatLoss(heartbeatErr))
@@ -293,11 +316,6 @@ func settleCompletionTurnWithProviderHead(ctx context.Context, dispatch *complet
 	if dispatch == nil || dispatch.handle == nil {
 		return runtimeeffects.CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_effect_handle_missing", "llm-completion-authority", "settle_completion", nil)
 	}
-	if dispatch.providerModel.ModelAlias == "" || dispatch.providerModel.ConcreteModel == "" ||
-		dispatch.providerModel.Backend != profile.ID || dispatch.providerModel.Provider != profile.Provider ||
-		dispatch.providerModel.Transport != profile.Transport || dispatch.providerModel.RuntimeMode != profile.RuntimeMode {
-		return runtimeeffects.CompletionSettlementResult{}, fmt.Errorf("completion dispatch provider selection is incomplete or does not match profile %q", profile.ID)
-	}
 	// The dispatch state can narrow a provider-call failure to a proven
 	// prelaunch failure. A successful transport does not make later response
 	// conversion, usage validation, or target persistence successful.
@@ -311,6 +329,26 @@ func settleCompletionTurnWithProviderHead(ctx context.Context, dispatch *complet
 		for key, value := range dispatch.evidence {
 			evidence[key] = value
 		}
+	}
+	switch dispatch.invocation {
+	case completionProviderInvocationNotStarted:
+		if state == runtimeeffects.StateSettled || response != nil || providerHead != nil {
+			return runtimeeffects.CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_provider_invocation_missing", "llm-completion-authority", "settle_completion", nil)
+		}
+		if failure == nil {
+			envelope := runtimefailures.FromError(fmt.Errorf("completion failed before provider invocation without failure detail"), "llm-completion-authority", "settle_completion")
+			failure = &envelope.Failure
+		}
+		return runtimeeffects.CompletionSettlementResult{}, dispatch.handle.Settle(ctx, runtimeeffects.StateTerminalFailure, failure, evidence)
+	case completionProviderInvocationStarted:
+		// Provider-visible outcomes may materialize the immutable turn below.
+	default:
+		return runtimeeffects.CompletionSettlementResult{}, runtimefailures.New(runtimefailures.ClassLifecycleConflict, "completion_provider_invocation_unclassified", "llm-completion-authority", "settle_completion", nil)
+	}
+	if dispatch.providerModel.ModelAlias == "" || dispatch.providerModel.ConcreteModel == "" ||
+		dispatch.providerModel.Backend != profile.ID || dispatch.providerModel.Provider != profile.Provider ||
+		dispatch.providerModel.Transport != profile.Transport || dispatch.providerModel.RuntimeMode != profile.RuntimeMode {
+		return runtimeeffects.CompletionSettlementResult{}, fmt.Errorf("completion dispatch provider selection is incomplete or does not match profile %q", profile.ID)
 	}
 	turn = enrichTurnRecord(ctx, nil, turn, response)
 	turn = CanonicalizeTurnForPersistence(turn)

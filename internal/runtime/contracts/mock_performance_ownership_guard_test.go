@@ -74,7 +74,7 @@ func allowedMockPerformanceCoordinateReaders() map[string]string {
 		"internal/runtime/contracts/mock_performance_loading.go::materializeAgentMockPerformance::Module":                   "sole authored module filesystem interpreter",
 		"internal/runtime/core/actors/agent_config.go::(*AgentConfig).NormalizeRuntimeDescriptor::Module":                   "immutable runtime carrier normalization",
 		"internal/runtime/core/actors/agent_config.go::(*AgentConfig).NormalizeRuntimeDescriptor::SourcePath":               "immutable runtime carrier normalization",
-		"internal/runtime/llm/mock_runtime.go::executeMockCompletion::SourcePath":                                           "diagnostic Python row identity; executes captured Source and Digest",
+		"internal/runtime/llm/mock_runtime.go::executeMockCompletionWithExecutor::SourcePath":                               "diagnostic Python row identity; executes captured Source and Digest",
 		"internal/runtime/mockperformance/model.go::(Performance).Configured::Module":                                       "authored artifact presence predicate",
 		"internal/store/internal/backend/agentpersistence/projection.go::decodePersistedAgentRuntimeDescriptor::Module":     "immutable persistence carrier normalization",
 		"internal/store/internal/backend/agentpersistence/projection.go::decodePersistedAgentRuntimeDescriptor::SourcePath": "immutable persistence carrier normalization",
