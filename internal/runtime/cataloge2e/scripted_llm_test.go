@@ -90,6 +90,10 @@ func (*scriptedLLMRuntime) PersistConversationSnapshot(context.Context, *llm.Ses
 	return nil
 }
 
+func (*scriptedLLMRuntime) PrepareManagedSession(context.Context, *llm.Session) error {
+	return nil
+}
+
 func (r *scriptedLLMRuntime) ContinueManagedSession(ctx context.Context, session *llm.Session, call llm.ManagedCall) (*llm.Response, error) {
 	message, err := call.ProviderMessage(ctx, session)
 	if err != nil {

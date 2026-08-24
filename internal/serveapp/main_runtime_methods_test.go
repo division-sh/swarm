@@ -33,6 +33,10 @@ func (r servedEventPublishBlockingLLMRuntime) StartSession(ctx context.Context, 
 	}, nil
 }
 
+func (servedEventPublishBlockingLLMRuntime) PrepareManagedSession(context.Context, *runtimellm.Session) error {
+	return nil
+}
+
 func (r servedEventPublishBlockingLLMRuntime) ContinueManagedSession(ctx context.Context, session *runtimellm.Session, call runtimellm.ManagedCall) (*runtimellm.Response, error) {
 	if _, err := call.ProviderMessage(ctx, session); err != nil {
 		return nil, err
@@ -74,6 +78,10 @@ func (r servedSessionCleanupProofLLMRuntime) StartSession(ctx context.Context, a
 		ID: lease.SessionID, AgentID: agentID, SystemPrompt: systemPrompt,
 		Tools: append([]runtimellm.ToolDefinition(nil), tools...), Memory: execution.Plan, MemoryIdentity: execution.Identity,
 	}, nil
+}
+
+func (servedSessionCleanupProofLLMRuntime) PrepareManagedSession(context.Context, *runtimellm.Session) error {
+	return nil
 }
 
 func (r servedSessionCleanupProofLLMRuntime) ContinueManagedSession(ctx context.Context, session *runtimellm.Session, call runtimellm.ManagedCall) (*runtimellm.Response, error) {
@@ -170,6 +178,10 @@ func (servedLiveAgentProofLLMRuntime) StartSession(ctx context.Context, agentID 
 		Memory:         memory,
 		MemoryIdentity: execution.Identity,
 	}, nil
+}
+
+func (servedLiveAgentProofLLMRuntime) PrepareManagedSession(context.Context, *runtimellm.Session) error {
+	return nil
 }
 
 func (r servedLiveAgentProofLLMRuntime) ContinueManagedSession(ctx context.Context, session *runtimellm.Session, call runtimellm.ManagedCall) (*runtimellm.Response, error) {

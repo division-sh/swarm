@@ -187,6 +187,10 @@ func (*closedReceiverManagedLLM) PersistConversationSnapshot(context.Context, *l
 	return nil
 }
 
+func (*closedReceiverManagedLLM) PrepareManagedSession(context.Context, *llm.Session) error {
+	return nil
+}
+
 func (r *closedReceiverManagedLLM) ContinueManagedSession(ctx context.Context, session *llm.Session, call llm.ManagedCall) (*llm.Response, error) {
 	message, err := call.ProviderMessage(ctx, session)
 	if err != nil {

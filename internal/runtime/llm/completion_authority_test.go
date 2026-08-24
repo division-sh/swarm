@@ -137,9 +137,10 @@ func TestAllManagedAdaptersDelegateRecoveryOnlyToConversationRoot(t *testing.T) 
 	}
 	conversationSource := string(conversationRaw)
 	recovery := strings.Index(conversationSource, "c.recoverManagedCompletionContinuation(ctx)")
+	preparation := strings.Index(conversationSource, "c.prepareManagedSession(ctx)")
 	frameConstruction := strings.Index(conversationSource, "c.continueManagedOnce(ctx, draft)")
-	if recovery < 0 || frameConstruction < 0 || recovery >= frameConstruction {
-		t.Fatalf("conversation root recovery ordering recovery=%d frame-construction=%d", recovery, frameConstruction)
+	if recovery < 0 || preparation < 0 || frameConstruction < 0 || recovery >= preparation || preparation >= frameConstruction {
+		t.Fatalf("conversation root ordering recovery=%d preparation=%d frame-construction=%d", recovery, preparation, frameConstruction)
 	}
 	for _, candidate := range []struct {
 		file    string
@@ -159,8 +160,10 @@ func TestAllManagedAdaptersDelegateRecoveryOnlyToConversationRoot(t *testing.T) 
 			source := string(raw)
 			if strings.Count(source, "recoverCompletionContinuation(ctx, ") != 1 ||
 				!strings.Contains(source, "recoverManagedCompletionContinuation(ctx context.Context, session *Session)") ||
+				!strings.Contains(source, "PrepareManagedSession(ctx context.Context, session *Session)") ||
+				strings.Contains(source, "MaybeRotateAfterTurn(ctx,") ||
 				!strings.Contains(source, candidate.adapter) {
-				t.Fatalf("adapter does not expose exactly one root recovery delegate")
+				t.Fatalf("adapter does not expose root recovery/preparation or still rotates after provider projection")
 			}
 			continueStart := strings.LastIndex(source, ") continueSession(")
 			if continueStart < 0 || strings.Contains(source[continueStart:], "recoverCompletionContinuation(ctx, ") {

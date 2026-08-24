@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -9,6 +10,37 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 )
+
+func prepareManagedSessionForTurn(ctx context.Context, s *Session, registry sessions.Registry, lockOwner string, rotateAfter int, sink any) error {
+	if s == nil {
+		return errors.New("managed session is required")
+	}
+	if !s.Memory.Enabled || rotateAfter <= 0 || s.TurnCount < rotateAfter {
+		return nil
+	}
+	if registry == nil {
+		return errors.New("managed session rotation requires a live session registry")
+	}
+	lease, resolved, err := acquireContinuedMemory(ctx, registry, s, lockOwner)
+	if err != nil {
+		return err
+	}
+	if !resolved.Enabled() || lease == nil {
+		return errors.New("managed session rotation requires an exact live lease")
+	}
+	if strings.TrimSpace(lease.SessionID) != strings.TrimSpace(s.ID) {
+		return errors.Join(
+			fmt.Errorf("managed session changed before rotation: have=%s want=%s", strings.TrimSpace(lease.SessionID), strings.TrimSpace(s.ID)),
+			registry.Release(context.WithoutCancel(ctx), lease),
+		)
+	}
+	releaseLease := lease
+	rotated, rotateErr := MaybeRotateAfterTurn(ctx, s, registry, lockOwner, rotateAfter, sink)
+	if rotated != nil {
+		releaseLease = rotated
+	}
+	return errors.Join(rotateErr, registry.Release(context.WithoutCancel(ctx), releaseLease))
+}
 
 func MaybeRotateAfterTurn(ctx context.Context, s *Session, registry sessions.Registry, lockOwner string, rotateAfter int, sink any) (*sessions.Lease, error) {
 	if s == nil || registry == nil || rotateAfter <= 0 {

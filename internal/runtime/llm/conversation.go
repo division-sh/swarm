@@ -188,6 +188,9 @@ func (c *Conversation) stepManaged(ctx context.Context, draft agentframe.TurnDra
 			return &terminal, nil
 		}
 	} else {
+		if err := c.prepareManagedSession(ctx); err != nil {
+			return nil, err
+		}
 		resp, err = c.continueManagedOnce(ctx, draft)
 	}
 	if err != nil {
@@ -213,6 +216,19 @@ func (c *Conversation) recoverManagedCompletionContinuation(ctx context.Context)
 		return nil, false, nil
 	}
 	return runtime.recoverManagedCompletionContinuation(ctx, c.Session)
+}
+
+func (c *Conversation) prepareManagedSession(ctx context.Context) error {
+	runtime, ok := c.runtime.(ManagedSessionRuntime)
+	if !ok {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "managed_runtime_boundary_missing", "llm-conversation", "prepare_session", nil)
+	}
+	if err := runtime.PrepareManagedSession(ctx, c.Session); err != nil {
+		return runtimefailures.Wrap(runtimefailures.ClassLifecycleConflict, "managed_session_preparation_failed", "llm-conversation", "prepare_session", nil, err)
+	}
+	c.Messages = append([]Message(nil), c.Session.Messages...)
+	c.TurnCount = c.Session.TurnCount
+	return nil
 }
 
 func (c *Conversation) adoptRecoveredCompletion(response *Response) {
