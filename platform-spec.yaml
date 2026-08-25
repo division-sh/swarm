@@ -9627,7 +9627,12 @@ tool_model:
         must confirm that exact claimant before local binding mutation. connect requires no current binding, reconnect
         requires the same account/conversation, rebind requires a different claimant and a current binding, and unbind
         writes an explicit fence. Every transition is exact-revision fenced; same-key replay and same-confirmation replay
-        return the original outcome while changed input conflicts. An expired awaiting-confirmation operation commits its
+        return the original outcome while changed input conflicts. After same-request replay handling, an unresolved
+        pending or failed proof responsibility blocks every new same-interface connect, reconnect, or rebind regardless
+        of whether the new operation would save a proof; replaying the original confirmation is the recovery path.
+        Unbind remains available and atomically marks every same-interface unresolved responsibility revoked before its
+        fence commits, so no later boot can recover it against the fence. An expired awaiting-confirmation operation
+        commits its
         expired terminal revision before returning CHANNEL_OPERATION_TERMINAL. Rejection returns the terminal operation
         without an invented empty binding. Optional operation timestamps and inapplicable binding fields are absent from
         API results rather than serialized as year-one timestamps or empty enum values.

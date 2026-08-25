@@ -65,6 +65,60 @@ func (s *failOnceOperatorChannelProofCompletionStore) CompleteProofResponsibilit
 	return s.Store.CompleteProofResponsibility(ctx, operationID, proofID, proofRevision, status, failure, now)
 }
 
+type unresolvedOperatorChannelProofMode string
+
+const (
+	unresolvedOperatorChannelProofWriteFailed      unresolvedOperatorChannelProofMode = "file_write_failed"
+	unresolvedOperatorChannelProofCompletionFailed unresolvedOperatorChannelProofMode = "store_completion_failed"
+)
+
+type unresolvedOperatorChannelProofFixture struct {
+	service         *operatorchannel.Service
+	proofs          *operatorchannel.FileProofStore
+	operation       operatorchannel.Operation
+	binding         operatorchannel.Binding
+	confirmRevision int64
+}
+
+func seedUnresolvedOperatorChannelProof(t *testing.T, fixture operatorChannelContractFixture, identity operatorchannel.InterfaceIdentity, mode unresolvedOperatorChannelProofMode, now time.Time) unresolvedOperatorChannelProofFixture {
+	t.Helper()
+	ctx := context.Background()
+	proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var serviceStore operatorchannel.Store = fixture.store
+	var serviceProofs operatorchannel.ProofStore = proofs
+	wantErr := errInjectedOperatorChannelProofWrite
+	if mode == unresolvedOperatorChannelProofCompletionFailed {
+		serviceStore = &failOnceOperatorChannelProofCompletionStore{Store: fixture.store}
+		wantErr = errInjectedOperatorChannelProofCompletion
+	} else {
+		serviceProofs = &failOnceOperatorChannelProofStore{delegate: proofs}
+	}
+	service, err := operatorchannel.NewService(serviceStore, serviceProofs, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.Bootstrap(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	op, err := service.Begin(ctx, identity.Selector, operatorchannel.OperationConnect, 0, "unresolved-"+string(mode)+"-key", "unresolved-"+string(mode)+"-request", true, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settlement, err := fixture.settle(ctx, operatorChannelContractClaim(op, operatorchannel.ConversationScopeDirect, "account-"+string(mode), "conversation-"+string(mode), uuid.NewString()), now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmed, binding, err := service.Confirm(ctx, op.OperationID, settlement.Operation.Revision, true, now.Add(2*time.Second))
+	if !errors.Is(err, wantErr) || confirmed.State != operatorchannel.StateBound || binding.Revision != 1 ||
+		(confirmed.ProofStatus != operatorchannel.ProofPending && confirmed.ProofStatus != operatorchannel.ProofFailed) {
+		t.Fatalf("seed unresolved proof = op:%#v binding:%#v err:%v", confirmed, binding, err)
+	}
+	return unresolvedOperatorChannelProofFixture{service: service, proofs: proofs, operation: confirmed, binding: binding, confirmRevision: settlement.Operation.Revision}
+}
+
 func TestServedParityHarnessOperatorChannelLifecycle(t *testing.T) {
 	scenarios := []servedparity.Scenario{
 		servedparity.MustScenario(servedparity.ScenarioOperatorChannelConnectLifecycle),
@@ -248,6 +302,185 @@ func TestOperatorChannelProofResponsibilityReconcilesCommittedFileSelectedStoreP
 				stored, found, err := proofs.Get(ctx, identity)
 				if err != nil || !found || !reflect.DeepEqual(stored, conflicting) {
 					t.Fatalf("mismatched proof changed = %#v found=%v err=%v", stored, found, err)
+				}
+			})
+		})
+	}
+}
+
+func TestOperatorChannelUnresolvedProofResponsibilityFencesBindingMutationSelectedStoreParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, mode := range []unresolvedOperatorChannelProofMode{unresolvedOperatorChannelProofWriteFailed, unresolvedOperatorChannelProofCompletionFailed} {
+			t.Run(backend+"/"+string(mode), func(t *testing.T) {
+				ctx := context.Background()
+				fixture := openOperatorChannelContractFixture(t, backend)
+				now := time.Date(2026, 8, 25, 13, 0, 0, 0, time.UTC)
+				identity := operatorChannelContractIdentity("unresolved-mutation-" + string(mode))
+				seed := seedUnresolvedOperatorChannelProof(t, fixture, identity, mode, now)
+
+				attempts := []struct {
+					name      string
+					kind      operatorchannel.OperationKind
+					saveProof bool
+				}{
+					{name: "reconnect", kind: operatorchannel.OperationReconnect, saveProof: true},
+					{name: "rebind", kind: operatorchannel.OperationRebind, saveProof: true},
+					{name: "no_save", kind: operatorchannel.OperationReconnect, saveProof: false},
+				}
+				for index, attempt := range attempts {
+					_, err := seed.service.Begin(ctx, identity.Selector, attempt.kind, seed.binding.Revision,
+						fmt.Sprintf("blocked-%s-%s", attempt.name, mode), fmt.Sprintf("blocked-request-%s-%s", attempt.name, mode),
+						attempt.saveProof, now.Add(time.Duration(index+3)*time.Second))
+					if !errors.Is(err, operatorchannel.ErrConflict) {
+						t.Fatalf("%s overtook unresolved %s responsibility: %v", attempt.name, mode, err)
+					}
+				}
+				operations, err := fixture.store.ListOperatorChannelOperations(ctx, seed.operation.PrincipalID)
+				if err != nil || len(operations) != 1 {
+					t.Fatalf("blocked operations = %#v, %v", operations, err)
+				}
+
+				replayed, replayedBinding, err := seed.service.Confirm(ctx, seed.operation.OperationID, seed.confirmRevision, true, now.Add(7*time.Second))
+				if err != nil || replayed.ProofStatus != operatorchannel.ProofActive || replayedBinding.Revision != seed.binding.Revision {
+					t.Fatalf("responsibility recovery replay = op:%#v binding:%#v err:%v", replayed, replayedBinding, err)
+				}
+				later, err := seed.service.Begin(ctx, identity.Selector, operatorchannel.OperationReconnect, seed.binding.Revision,
+					"later-"+string(mode)+"-key", "later-"+string(mode)+"-request", false, now.Add(8*time.Second))
+				if err != nil {
+					t.Fatalf("later operation remained fenced: %v", err)
+				}
+				settlement, err := fixture.settle(ctx, operatorChannelContractClaim(later, operatorchannel.ConversationScopeDirect,
+					seed.operation.ExternalAccountRef, seed.operation.ConversationRef, uuid.NewString()), now.Add(9*time.Second))
+				if err != nil {
+					t.Fatal(err)
+				}
+				advanced, advancedBinding, err := seed.service.Confirm(ctx, later.OperationID, settlement.Operation.Revision, true, now.Add(10*time.Second))
+				if err != nil || advanced.ProofStatus != operatorchannel.ProofSkipped || advancedBinding.Revision != seed.binding.Revision+1 {
+					t.Fatalf("later operation = op:%#v binding:%#v err:%v", advanced, advancedBinding, err)
+				}
+			})
+		}
+	}
+}
+
+func TestOperatorChannelUnbindDischargesUnresolvedProofResponsibilitySelectedStoreParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		for _, mode := range []unresolvedOperatorChannelProofMode{unresolvedOperatorChannelProofWriteFailed, unresolvedOperatorChannelProofCompletionFailed} {
+			t.Run(backend+"/"+string(mode), func(t *testing.T) {
+				ctx := context.Background()
+				fixture := openOperatorChannelContractFixture(t, backend)
+				now := time.Date(2026, 8, 25, 14, 0, 0, 0, time.UTC)
+				identity := operatorChannelContractIdentity("unresolved-unbind-" + string(mode))
+				seed := seedUnresolvedOperatorChannelProof(t, fixture, identity, mode, now)
+
+				unboundOp, unbound, err := seed.service.Unbind(ctx, identity.Selector, seed.binding.Revision,
+					"unresolved-unbind-"+string(mode)+"-key", "unresolved-unbind-"+string(mode)+"-request", now.Add(3*time.Second))
+				if err != nil || unboundOp.State != operatorchannel.StateUnbound || unbound.Status != operatorchannel.BindingUnbound || unbound.Revision != seed.binding.Revision+1 {
+					t.Fatalf("unbind unresolved responsibility = op:%#v binding:%#v err:%v", unboundOp, unbound, err)
+				}
+				responsibilities, err := fixture.store.ListPendingProofResponsibilities(ctx)
+				if err != nil || len(responsibilities) != 0 {
+					t.Fatalf("remaining responsibilities = %#v, %v", responsibilities, err)
+				}
+				operations, err := fixture.store.ListOperatorChannelOperations(ctx, seed.operation.PrincipalID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var predecessor operatorchannel.Operation
+				for _, operation := range operations {
+					if operation.OperationID == seed.operation.OperationID {
+						predecessor = operation
+					}
+				}
+				if predecessor.ProofStatus != operatorchannel.ProofRevoked {
+					t.Fatalf("discharged predecessor = %#v", predecessor)
+				}
+
+				recovered, err := operatorchannel.NewService(fixture.store, seed.proofs, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, _, err := recovered.Bootstrap(ctx, now.Add(4*time.Second)); err != nil {
+					t.Fatalf("bootstrap after unbind: %v", err)
+				}
+				readback, err := recovered.Readback(ctx)
+				if err != nil || len(readback) != 1 || readback[0].Status != operatorchannel.BindingUnbound {
+					t.Fatalf("durable unbind readback = %#v, %v", readback, err)
+				}
+			})
+		}
+	}
+}
+
+func TestOperatorChannelUnresolvedProofResponsibilityConcurrentMutationSelectedStoreParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			t.Run("completion_vs_begin", func(t *testing.T) {
+				ctx := context.Background()
+				fixture := openOperatorChannelContractFixture(t, backend)
+				now := time.Date(2026, 8, 25, 15, 0, 0, 0, time.UTC)
+				identity := operatorChannelContractIdentity("unresolved-concurrent-begin")
+				seed := seedUnresolvedOperatorChannelProof(t, fixture, identity, unresolvedOperatorChannelProofCompletionFailed, now)
+				start := make(chan struct{})
+				completeErr := make(chan error, 1)
+				beginErr := make(chan error, 1)
+				go func() {
+					<-start
+					completeErr <- fixture.store.CompleteProofResponsibility(ctx, seed.operation.OperationID, seed.operation.ProofID, seed.operation.ProofRevision, operatorchannel.ProofActive, "", now.Add(3*time.Second))
+				}()
+				go func() {
+					<-start
+					_, err := seed.service.Begin(ctx, identity.Selector, operatorchannel.OperationReconnect, seed.binding.Revision,
+						"concurrent-begin-key", "concurrent-begin-request", false, now.Add(3*time.Second))
+					beginErr <- err
+				}()
+				close(start)
+				if err := <-completeErr; err != nil {
+					t.Fatalf("concurrent completion: %v", err)
+				}
+				if err := <-beginErr; err != nil && !errors.Is(err, operatorchannel.ErrConflict) {
+					t.Fatalf("concurrent begin: %v", err)
+				}
+				responsibilities, err := fixture.store.ListPendingProofResponsibilities(ctx)
+				if err != nil || len(responsibilities) != 0 {
+					t.Fatalf("concurrent begin responsibilities = %#v, %v", responsibilities, err)
+				}
+			})
+
+			t.Run("completion_vs_unbind", func(t *testing.T) {
+				ctx := context.Background()
+				fixture := openOperatorChannelContractFixture(t, backend)
+				now := time.Date(2026, 8, 25, 16, 0, 0, 0, time.UTC)
+				identity := operatorChannelContractIdentity("unresolved-concurrent-unbind")
+				seed := seedUnresolvedOperatorChannelProof(t, fixture, identity, unresolvedOperatorChannelProofCompletionFailed, now)
+				start := make(chan struct{})
+				completeErr := make(chan error, 1)
+				unbindErr := make(chan error, 1)
+				go func() {
+					<-start
+					completeErr <- fixture.store.CompleteProofResponsibility(ctx, seed.operation.OperationID, seed.operation.ProofID, seed.operation.ProofRevision, operatorchannel.ProofActive, "", now.Add(3*time.Second))
+				}()
+				go func() {
+					<-start
+					_, _, err := seed.service.Unbind(ctx, identity.Selector, seed.binding.Revision,
+						"concurrent-unbind-key", "concurrent-unbind-request", now.Add(3*time.Second))
+					unbindErr <- err
+				}()
+				close(start)
+				completion := <-completeErr
+				if completion != nil && !errors.Is(completion, operatorchannel.ErrRevisionConflict) {
+					t.Fatalf("concurrent completion: %v", completion)
+				}
+				if err := <-unbindErr; err != nil {
+					t.Fatalf("concurrent unbind: %v", err)
+				}
+				responsibilities, err := fixture.store.ListPendingProofResponsibilities(ctx)
+				if err != nil || len(responsibilities) != 0 {
+					t.Fatalf("concurrent unbind responsibilities = %#v, %v", responsibilities, err)
+				}
+				bindings, err := fixture.store.ListOperatorChannelBindings(ctx, seed.operation.PrincipalID)
+				if err != nil || len(bindings) != 1 || bindings[0].Status != operatorchannel.BindingUnbound {
+					t.Fatalf("concurrent unbind binding = %#v, %v", bindings, err)
 				}
 			})
 		})
