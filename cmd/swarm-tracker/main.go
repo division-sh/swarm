@@ -306,6 +306,14 @@ func runCheck(args []string) error {
 		cycles = append(cycles, fmt.Sprintf("%v", cyc))
 	}
 
+	// Discipline: an open PR's branch (agent-x/...issue-NNNN...) must point at
+	// an issue labeled to that agent. PR branches are facts; so are labels.
+	discipline, err := disciplineViolations(open)
+	if err != nil {
+		return err
+	}
+
+	section("DISCIPLINE — open PR branch vs issue assignment mismatch", discipline)
 	section("UNBLOCKED — blockers all closed, ready to start", unblocked)
 	section("UNASSIGNED MUSTS — P0/P1/tier:must with no owner", unassignedMusts)
 	section("STALE MUSTS — tier:must/P0/P1 going forgotten", staleMusts)
@@ -318,6 +326,43 @@ func runCheck(args []string) error {
 
 	fmt.Printf("\n%d open issues checked.\n", len(issues))
 	return nil
+}
+
+func disciplineViolations(open map[int]issue) ([]string, error) {
+	raw, err := gh("pr", "list", "--repo", repo, "--state", "open", "--limit", "100",
+		"--json", "number,headRefName")
+	if err != nil {
+		return nil, err
+	}
+	var prs []struct {
+		Number      int    `json:"number"`
+		HeadRefName string `json:"headRefName"`
+	}
+	if err := json.Unmarshal(raw, &prs); err != nil {
+		return nil, err
+	}
+	branchRe := regexp.MustCompile(`^agent-([a-z0-9]+)/.*?([0-9]{3,})`)
+	var out []string
+	for _, pr := range prs {
+		m := branchRe.FindStringSubmatch(strings.ToLower(pr.HeadRefName))
+		if m == nil {
+			continue
+		}
+		lane := m[1]
+		n, _ := strconv.Atoi(m[2])
+		is, ok := open[n]
+		if !ok {
+			continue // issue closed or branch names something else; not provable
+		}
+		if a := agentOf(is); !strings.EqualFold(a, lane) {
+			got := a
+			if got == "" {
+				got = "unassigned"
+			}
+			out = append(out, fmt.Sprintf("PR #%d [%s] implements #%d, which is %s", pr.Number, pr.HeadRefName, n, got))
+		}
+	}
+	return out, nil
 }
 
 // --- assign ----------------------------------------------------------------
