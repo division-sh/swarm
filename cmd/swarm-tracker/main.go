@@ -209,8 +209,9 @@ func agentOf(is issue) string {
 	return ""
 }
 
-func isMust(set map[string]bool) bool {
-	return set["tier:must"] || set["priority:p0"] || set["priority:p1"]
+func isMust(is issue) bool {
+	set := labelSet(is)
+	return set["priority:p0"] || set["priority:p1"] || is.Score >= 50
 }
 
 // --- check -----------------------------------------------------------------
@@ -275,10 +276,10 @@ func runCheck(args []string) error {
 		if !hasPrefix(set, "priority:") {
 			missingPriority = append(missingPriority, ref)
 		}
-		if isMust(set) && agentOf(is) == "" {
+		if isMust(is) && agentOf(is) == "" {
 			unassignedMusts = append(unassignedMusts, ref)
 		}
-		if isMust(set) && now.Sub(is.UpdatedAt) > time.Duration(*staleDays)*24*time.Hour {
+		if isMust(is) && now.Sub(is.UpdatedAt) > time.Duration(*staleDays)*24*time.Hour {
 			staleMusts = append(staleMusts,
 				fmt.Sprintf("%s  (untouched %dd)", ref, int(now.Sub(is.UpdatedAt).Hours()/24)))
 		}
