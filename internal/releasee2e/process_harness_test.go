@@ -16,9 +16,19 @@ import (
 )
 
 func buildReleaseBinary(t *testing.T, outputRoot string) string {
+	return buildReleaseBinaryWithArgs(t, outputRoot)
+}
+
+func buildRaceReleaseBinary(t *testing.T, outputRoot string) string {
+	return buildReleaseBinaryWithArgs(t, outputRoot, "-race")
+}
+
+func buildReleaseBinaryWithArgs(t *testing.T, outputRoot string, buildArgs ...string) string {
 	t.Helper()
 	binaryPath := filepath.Join(outputRoot, "swarm")
-	cmd := exec.Command("go", "build", "-o", binaryPath, "./cmd/swarm")
+	args := append([]string{"build"}, buildArgs...)
+	args = append(args, "-o", binaryPath, "./cmd/swarm")
+	cmd := exec.Command("go", args...)
 	cmd.Dir = releaseE2ERepoRoot(t)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build release binary: %v\n%s", err, output)

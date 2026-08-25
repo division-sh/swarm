@@ -21,27 +21,48 @@ import (
 )
 
 const (
-	goldenAPIToken       = "golden-agent-release-e2e-token"
-	goldenPostgresEnv    = "SWARM_TEST_POSTGRES_DSN"
-	goldenPostgresPass   = "SWARM_GOLDEN_POSTGRES_PASSWORD"
-	goldenRunDeadline    = 90 * time.Second
-	goldenStartupTimeout = 60 * time.Second
+	goldenAPIToken        = "golden-agent-release-e2e-token"
+	goldenPostgresEnv     = "SWARM_TEST_POSTGRES_DSN"
+	goldenPostgresPass    = "SWARM_GOLDEN_POSTGRES_PASSWORD"
+	goldenProofProfileEnv = "SWARM_TEST_PROOF_PROFILE"
+	goldenRunDeadline     = 90 * time.Second
+	goldenBurstDeadline   = 150 * time.Second
+	goldenStartupTimeout  = 60 * time.Second
+	goldenBurstCandidateN = 10
+	goldenBurstIterations = 2
+	goldenBurstGOMAXPROCS = 2
 )
 
-var goldenCandidateIDs = []string{"alpha", "beta"}
+var goldenSmokeCandidateIDs = []string{"alpha", "beta"}
+
+type goldenWorkloadOptions struct {
+	candidateIDs      []string
+	processGOMAXPROCS int
+	runDeadline       time.Duration
+}
 
 func TestGoldenAgentWorkloadSQLiteSmoke(t *testing.T) {
+	if profile, continuous := goldenContinuousProofProfile(t); continuous {
+		t.Skipf("N=%d burst proof supersedes the N=2 smoke in %s", goldenBurstCandidateN, profile)
+	}
 	releaseRoot := goldenReleaseRoot(t)
 	binaryPath := buildReleaseBinary(t, releaseRoot)
-	runGoldenAgentWorkload(t, binaryPath, releaseRoot, goldenSQLiteStore(releaseRoot), false)
+	runGoldenAgentWorkload(t, binaryPath, releaseRoot, goldenSQLiteStore(releaseRoot), false, goldenWorkloadOptions{
+		candidateIDs: goldenSmokeCandidateIDs,
+	})
 }
 
 func TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends(t *testing.T) {
+	if profile, continuous := goldenContinuousProofProfile(t); profile != "" && !continuous {
+		t.Skipf("forced-restart proof runs in full/nightly, not %s", profile)
+	}
 	releaseRoot := goldenReleaseRoot(t)
 	binaryPath := buildReleaseBinary(t, releaseRoot)
 	t.Run("sqlite", func(t *testing.T) {
 		root := filepath.Join(releaseRoot, "sqlite-restart")
-		runGoldenAgentWorkload(t, binaryPath, root, goldenSQLiteStore(root), true)
+		runGoldenAgentWorkload(t, binaryPath, root, goldenSQLiteStore(root), true, goldenWorkloadOptions{
+			candidateIDs: goldenSmokeCandidateIDs,
+		})
 	})
 	t.Run("postgres", func(t *testing.T) {
 		dsn := strings.TrimSpace(os.Getenv(goldenPostgresEnv))
@@ -49,8 +70,66 @@ func TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends(t *testing.T) {
 			t.Skipf("%s is required for the supported host-PostgreSQL proof", goldenPostgresEnv)
 		}
 		root := filepath.Join(releaseRoot, "postgres-restart")
-		runGoldenAgentWorkload(t, binaryPath, root, goldenPostgresStore(t, dsn), true)
+		runGoldenAgentWorkload(t, binaryPath, root, goldenPostgresStore(t, dsn), true, goldenWorkloadOptions{
+			candidateIDs: goldenSmokeCandidateIDs,
+		})
 	})
+}
+
+func TestGoldenAgentWorkloadBurstConcurrencyOnBothBackends(t *testing.T) {
+	profile, continuous := goldenContinuousProofProfile(t)
+	if !continuous {
+		t.Skipf("burst proof requires full/nightly profile, got %q", profile)
+	}
+	dsn := strings.TrimSpace(os.Getenv(goldenPostgresEnv))
+	if dsn == "" {
+		t.Fatalf("%s is required for the supported host-PostgreSQL proof", goldenPostgresEnv)
+	}
+	releaseRoot := goldenReleaseRoot(t)
+	binaryPath := buildRaceReleaseBinary(t, releaseRoot)
+	options := goldenWorkloadOptions{
+		candidateIDs:      goldenBurstCandidateIDs(),
+		processGOMAXPROCS: goldenBurstGOMAXPROCS,
+		runDeadline:       goldenBurstDeadline,
+	}
+	for iteration := 1; iteration <= goldenBurstIterations; iteration++ {
+		t.Run(fmt.Sprintf("iteration-%d", iteration), func(t *testing.T) {
+			t.Run("sqlite", func(t *testing.T) {
+				t.Parallel()
+				root := filepath.Join(releaseRoot, fmt.Sprintf("burst-%d-sqlite", iteration))
+				runGoldenAgentWorkload(t, binaryPath, root, goldenSQLiteStore(root), false, options)
+			})
+			t.Run("postgres", func(t *testing.T) {
+				t.Parallel()
+				root := filepath.Join(releaseRoot, fmt.Sprintf("burst-%d-postgres", iteration))
+				runGoldenAgentWorkload(t, binaryPath, root, goldenPostgresStore(t, dsn), false, options)
+			})
+		})
+	}
+}
+
+func goldenBurstCandidateIDs() []string {
+	ids := make([]string, goldenBurstCandidateN)
+	for index := range ids {
+		ids[index] = fmt.Sprintf("candidate-%02d", index+1)
+	}
+	return ids
+}
+
+func goldenContinuousProofProfile(t *testing.T) (string, bool) {
+	t.Helper()
+	profile := strings.TrimSpace(os.Getenv(goldenProofProfileEnv))
+	switch profile {
+	case "":
+		return "", false
+	case "pr-common", "pr-escalated":
+		return profile, false
+	case "full", "nightly":
+		return profile, true
+	default:
+		t.Fatalf("%s has unsupported value %q", goldenProofProfileEnv, profile)
+		return profile, false
+	}
 }
 
 type goldenStoreSelection struct {
@@ -136,8 +215,18 @@ func goldenDatabaseName(t *testing.T) string {
 	return fmt.Sprintf("swarm_golden_%d_%s", os.Getpid(), hex.EncodeToString(random))
 }
 
-func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenStoreSelection, restart bool) {
+func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenStoreSelection, restart bool, options goldenWorkloadOptions) {
 	t.Helper()
+	if len(options.candidateIDs) < 2 {
+		t.Fatalf("golden workload requires at least two candidates, got %v", options.candidateIDs)
+	}
+	runDeadline := options.runDeadline
+	if runDeadline == 0 {
+		runDeadline = goldenRunDeadline
+	}
+	if runDeadline < 0 {
+		t.Fatalf("golden workload run deadline = %s, want a positive duration", runDeadline)
+	}
 	assertGoldenChildAgentUsesLogicalMapKeyOnly(t)
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("create release project: %v", err)
@@ -156,7 +245,7 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	writeReleaseFile(t, configPath, goldenRuntimeConfig(store, workspaceDir))
 	tokenFile := filepath.Join(root, "api-token")
 	writeReleaseFile(t, tokenFile, goldenAPIToken+"\n")
-	env := goldenProcessEnv(root, store.passwordEnv)
+	env := goldenProcessEnv(root, store.passwordEnv, options.processGOMAXPROCS)
 	assertGoldenProcessHasNoClaudeBinary(t, env)
 	verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binaryPath, "verify", "--config", configPath, "--contracts", contracts, "--json")
 	if verify.err != nil {
@@ -193,16 +282,16 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	}
 	process := start()
 	bundleHash := goldenServedBundleHash(t, process.rpc)
-	runID := goldenPublishIngress(t, process.rpc, bundleHash)
+	runID := goldenPublishIngress(t, process.rpc, bundleHash, options.candidateIDs)
 	if restart {
-		waitForGoldenCrashCheckpoint(t, process.rpc, runID)
+		waitForGoldenCrashCheckpoint(t, process.rpc, runID, options.candidateIDs, runDeadline)
 		if err := process.killAndWait(5 * time.Second); err != nil {
 			t.Fatalf("force-kill release serve: %v\n%s", err, process.output.String())
 		}
 		process = start()
 	}
-	waitForGoldenTerminalRun(t, process, runID)
-	assertGoldenPublicProof(t, process.rpc, runID, restart)
+	waitForGoldenTerminalRun(t, process, runID, runDeadline)
+	assertGoldenPublicProof(t, process.rpc, runID, restart, options.candidateIDs)
 }
 
 func assertGoldenChildAgentUsesLogicalMapKeyOnly(t *testing.T) {
@@ -237,9 +326,9 @@ func goldenRuntimeConfig(store goldenStoreSelection, workspaceDir string) string
 		store.configYAML
 }
 
-func goldenProcessEnv(root, postgresPassword string) []string {
+func goldenProcessEnv(root, postgresPassword string, processGOMAXPROCS int) []string {
 	blockedPrefixes := []string{"SWARM_", "ANTHROPIC_", "CLAUDE_", "OPENAI_", "PG"}
-	blockedExact := map[string]bool{"HOME": true, "PATH": true}
+	blockedExact := map[string]bool{"GOMAXPROCS": true, "HOME": true, "PATH": true}
 	env := make([]string, 0, len(os.Environ())+8)
 	for _, entry := range os.Environ() {
 		key, _, _ := strings.Cut(entry, "=")
@@ -265,6 +354,9 @@ func goldenProcessEnv(root, postgresPassword string) []string {
 	)
 	if postgresPassword != "" {
 		env = append(env, goldenPostgresPass+"="+postgresPassword)
+	}
+	if processGOMAXPROCS > 0 {
+		env = append(env, "GOMAXPROCS="+strconv.Itoa(processGOMAXPROCS))
 	}
 	return env
 }
@@ -312,7 +404,7 @@ func goldenServedBundleHash(t *testing.T, rpc *releaseRPCClient) string {
 	return health.Bundle.BundleHash
 }
 
-func goldenPublishIngress(t *testing.T, rpc *releaseRPCClient, bundleHash string) string {
+func goldenPublishIngress(t *testing.T, rpc *releaseRPCClient, bundleHash string, candidateIDs []string) string {
 	t.Helper()
 	var result struct {
 		EventID       string `json:"event_id"`
@@ -324,7 +416,7 @@ func goldenPublishIngress(t *testing.T, rpc *releaseRPCClient, bundleHash string
 	if err := rpc.call(ctx, "event.publish", map[string]any{
 		"bundle_hash":     bundleHash,
 		"event_name":      "search.requested",
-		"payload":         map[string]any{"query": "golden workload"},
+		"payload":         map[string]any{"query": "golden workload", "candidate_ids": candidateIDs},
 		"emitter":         "releasee2e",
 		"idempotency_key": "golden-search-ingress",
 	}, &result); err != nil {
@@ -358,9 +450,9 @@ type goldenDiagnosis struct {
 	TestQuiescence   goldenQuiescence  `json:"test_quiescence"`
 }
 
-func waitForGoldenCrashCheckpoint(t *testing.T, rpc *releaseRPCClient, runID string) {
+func waitForGoldenCrashCheckpoint(t *testing.T, rpc *releaseRPCClient, runID string, candidateIDs []string, deadline time.Duration) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), goldenRunDeadline)
+	ctx, cancel := context.WithTimeout(context.Background(), deadline)
 	defer cancel()
 	var last goldenDiagnosis
 	err := pollReleaseCondition(ctx, 5*time.Millisecond, func() (bool, error) {
@@ -368,7 +460,7 @@ func waitForGoldenCrashCheckpoint(t *testing.T, rpc *releaseRPCClient, runID str
 		if err != nil {
 			return false, err
 		}
-		if countGoldenEvents(events, "candidate.requested") != len(goldenCandidateIDs) {
+		if countGoldenEvents(events, "candidate.requested") != len(candidateIDs) {
 			return false, nil
 		}
 		if err := rpc.call(ctx, "run.diagnose", map[string]any{"run_id": runID}, &last); err != nil {
@@ -385,10 +477,10 @@ func goldenActiveWork(quiescence goldenQuiescence) int {
 	return quiescence.ActiveDeliveries + quiescence.UnsettledPipelineEvents + quiescence.DueTimers + quiescence.ActiveSessionLeases
 }
 
-func waitForGoldenTerminalRun(t *testing.T, process *releaseServeProcess, runID string) {
+func waitForGoldenTerminalRun(t *testing.T, process *releaseServeProcess, runID string, deadline time.Duration) {
 	t.Helper()
 	rpc := process.rpc
-	ctx, cancel := context.WithTimeout(context.Background(), goldenRunDeadline)
+	ctx, cancel := context.WithTimeout(context.Background(), deadline)
 	defer cancel()
 	var last goldenRunHeader
 	err := pollReleaseCondition(ctx, 10*time.Millisecond, func() (bool, error) {
@@ -537,7 +629,7 @@ type goldenConversation struct {
 	Status        string `json:"status"`
 }
 
-func assertGoldenPublicProof(t *testing.T, rpc *releaseRPCClient, runID string, restarted bool) {
+func assertGoldenPublicProof(t *testing.T, rpc *releaseRPCClient, runID string, restarted bool, candidateIDs []string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -550,7 +642,7 @@ func assertGoldenPublicProof(t *testing.T, rpc *releaseRPCClient, runID string, 
 	}
 
 	entities := listGoldenEntities(t, ctx, rpc, runID)
-	entitySet := assertGoldenEntities(t, ctx, rpc, runID, entities)
+	entitySet := assertGoldenEntities(t, ctx, rpc, runID, entities, candidateIDs)
 	agents := waitForGoldenAgentTeardown(t, ctx, rpc)
 	assertGoldenAgentTeardown(t, agents)
 
@@ -558,14 +650,14 @@ func assertGoldenPublicProof(t *testing.T, rpc *releaseRPCClient, runID string, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertGoldenTurns(t, ctx, rpc, runID, events)
+	assertGoldenTurns(t, ctx, rpc, runID, events, candidateIDs)
 	expectedCounts := map[string]int{
 		"search.requested":                   1,
 		"scout.requested":                    1,
 		"scout/scout.work.requested":         1,
 		"scout/scout.completed":              1,
-		"candidate.requested":                2,
-		"candidate/candidate.work.requested": 2,
+		"candidate.requested":                len(candidateIDs),
+		"candidate/candidate.work.requested": len(candidateIDs),
 	}
 	for _, entity := range entitySet.candidates {
 		expectedCounts[entity.FlowInstance+"/candidate.analyzed"] = 1
@@ -586,7 +678,7 @@ func assertGoldenPublicProof(t *testing.T, rpc *releaseRPCClient, runID string, 
 		}
 	}
 	assertGoldenAgentStartEvents(t, events, entitySet, restarted)
-	assertGoldenRoutePayloads(t, events, entitySet)
+	assertGoldenRoutePayloads(t, events, entitySet, candidateIDs)
 	for _, event := range events {
 		if len(event.DeadLetters) != 0 {
 			t.Errorf("event %s (%s) dead letters = %s", event.EventName, event.EventID, event.DeadLetters)
@@ -696,10 +788,10 @@ func listGoldenEntities(t *testing.T, ctx context.Context, rpc *releaseRPCClient
 	}
 }
 
-func assertGoldenEntities(t *testing.T, ctx context.Context, rpc *releaseRPCClient, runID string, entities []goldenEntitySummary) goldenEntitySet {
+func assertGoldenEntities(t *testing.T, ctx context.Context, rpc *releaseRPCClient, runID string, entities []goldenEntitySummary, candidateIDs []string) goldenEntitySet {
 	t.Helper()
-	if len(entities) != 4 {
-		t.Fatalf("entity.list = %#v, want root, scout, alpha, and beta", entities)
+	if len(entities) != len(candidateIDs)+2 {
+		t.Fatalf("entity.list count = %d, want root, scout, and %d candidates: %#v", len(entities), len(candidateIDs), entities)
 	}
 	result := goldenEntitySet{candidates: map[string]goldenEntitySummary{}}
 	seenEntityIDs := map[string]bool{}
@@ -746,7 +838,7 @@ func assertGoldenEntities(t *testing.T, ctx context.Context, rpc *releaseRPCClie
 	if result.root.EntityID == "" || result.scout.EntityID == "" {
 		t.Errorf("entity.list has incomplete root/scout set: %#v", entities)
 	}
-	for _, candidateID := range goldenCandidateIDs {
+	for _, candidateID := range candidateIDs {
 		entity, ok := result.candidates[candidateID]
 		if !ok || entity.FlowInstance == result.root.FlowInstance || entity.FlowInstance == result.scout.FlowInstance {
 			t.Errorf("candidate %s entity = %#v, want one distinct opaque child flow instance", candidateID, entity)
@@ -791,7 +883,7 @@ func assertGoldenAgentTeardown(t *testing.T, agents []goldenAgentSummary) {
 	}
 }
 
-func assertGoldenTurns(t *testing.T, ctx context.Context, rpc *releaseRPCClient, runID string, events []goldenEvent) {
+func assertGoldenTurns(t *testing.T, ctx context.Context, rpc *releaseRPCClient, runID string, events []goldenEvent, candidateIDs []string) {
 	t.Helper()
 	type turnExpectation struct {
 		agentID   string
@@ -806,13 +898,13 @@ func assertGoldenTurns(t *testing.T, ctx context.Context, rpc *releaseRPCClient,
 		wantByTrigger[event.EventID] = turnExpectation{agentID: agentID, eventName: event.EventName}
 	}
 	addTrigger(goldenSingleNamedEvent(t, events, "scout/scout.work.requested"), "scout-worker")
-	for _, event := range goldenNamedEvents(t, events, "candidate/candidate.work.requested", len(goldenCandidateIDs)) {
+	for _, event := range goldenNamedEvents(t, events, "candidate/candidate.work.requested", len(candidateIDs)) {
 		addTrigger(event, "candidate-worker")
 	}
 
 	conversations := listGoldenConversations(t, ctx, rpc, runID)
-	if len(conversations) != 3 {
-		t.Fatalf("conversation.list = %#v, want one scout and two candidate conversations", conversations)
+	if len(conversations) != len(candidateIDs)+1 {
+		t.Fatalf("conversation.list count = %d, want one scout and %d candidate conversations: %#v", len(conversations), len(candidateIDs), conversations)
 	}
 	seenSessions := map[string]bool{}
 	seenTriggers := map[string]int{}
@@ -946,24 +1038,25 @@ func assertGoldenAgentStartEvents(t *testing.T, events []goldenEvent, entities g
 	}
 }
 
-func assertGoldenRoutePayloads(t *testing.T, events []goldenEvent, entities goldenEntitySet) {
+func assertGoldenRoutePayloads(t *testing.T, events []goldenEvent, entities goldenEntitySet, candidateIDs []string) {
 	t.Helper()
+	payloadCandidateIDs := goldenPayloadCandidateIDs(candidateIDs)
 	search := goldenSingleNamedEvent(t, events, "search.requested")
-	assertGoldenExactPayload(t, search, map[string]any{"query": "golden workload"})
+	assertGoldenExactPayload(t, search, map[string]any{"query": "golden workload", "candidate_ids": payloadCandidateIDs})
 	assertGoldenSingleDelivery(t, search, "node", "search-intake", "materializing_entity", "golden-agent-workload", entities.root)
 
 	scoutRequested := goldenSingleNamedEvent(t, events, "scout.requested")
-	assertGoldenExactPayload(t, scoutRequested, map[string]any{"query": "golden workload"})
+	assertGoldenExactPayload(t, scoutRequested, map[string]any{"query": "golden workload", "candidate_ids": payloadCandidateIDs})
 	assertGoldenSingleDelivery(t, scoutRequested, "node", "scout-intake", "materializing_entity", "scout", entities.scout)
 
 	scoutWork := goldenSingleNamedEvent(t, events, "scout/scout.work.requested")
-	assertGoldenExactPayload(t, scoutWork, map[string]any{"query": "golden workload"})
+	assertGoldenExactPayload(t, scoutWork, map[string]any{"query": "golden workload", "candidate_ids": payloadCandidateIDs})
 	assertGoldenSingleTargetlessAgentDelivery(t, scoutWork, "scout-worker", entities.scout)
 
 	scoutCompleted := goldenSingleNamedEvent(t, events, "scout/scout.completed")
 	assertGoldenExactPayload(t, scoutCompleted, map[string]any{
 		"batch_id":      "golden-batch",
-		"candidate_ids": []any{"alpha", "beta"},
+		"candidate_ids": payloadCandidateIDs,
 	})
 	if len(scoutCompleted.Deliveries) != 2 || scoutCompleted.EntityID != "" {
 		t.Errorf("mixed scout completion = %#v, want two independently targeted deliveries and no singular entity projection", scoutCompleted)
@@ -971,9 +1064,9 @@ func assertGoldenRoutePayloads(t *testing.T, events []goldenEvent, entities gold
 	assertGoldenDeliveryToEntity(t, scoutCompleted, "node", "scout-completion", "existing_entity", "scout", entities.scout)
 	assertGoldenDeliveryToEntity(t, scoutCompleted, "node", "scout-collector", "existing_entity", "golden-agent-workload", entities.root)
 
-	candidateRequested := goldenNamedEvents(t, events, "candidate.requested", len(goldenCandidateIDs))
-	candidateWork := goldenNamedEvents(t, events, "candidate/candidate.work.requested", len(goldenCandidateIDs))
-	for _, candidateID := range goldenCandidateIDs {
+	candidateRequested := goldenNamedEvents(t, events, "candidate.requested", len(candidateIDs))
+	candidateWork := goldenNamedEvents(t, events, "candidate/candidate.work.requested", len(candidateIDs))
+	for _, candidateID := range candidateIDs {
 		entity := entities.candidates[candidateID]
 		requested := goldenCandidateEvent(t, candidateRequested, candidateID)
 		assertGoldenCandidatePayload(t, requested, candidateID, false)
@@ -991,6 +1084,14 @@ func assertGoldenRoutePayloads(t *testing.T, events []goldenEvent, entities gold
 		assertGoldenCandidatePayload(t, completed, candidateID, true)
 		assertGoldenSingleDelivery(t, completed, "node", "candidate-collector", "existing_entity", "golden-agent-workload", entities.root)
 	}
+}
+
+func goldenPayloadCandidateIDs(candidateIDs []string) []any {
+	values := make([]any, len(candidateIDs))
+	for index, candidateID := range candidateIDs {
+		values[index] = candidateID
+	}
+	return values
 }
 
 func goldenNamedEvents(t *testing.T, events []goldenEvent, name string, want int) []goldenEvent {
@@ -1141,11 +1242,36 @@ func goldenCanonicalNodeID(key string) (string, error) {
 }
 
 func TestGoldenProcessEnvironmentDoesNotResolveClaude(t *testing.T) {
-	env := goldenProcessEnv(t.TempDir(), "")
+	env := goldenProcessEnv(t.TempDir(), "", 0)
 	assertGoldenProcessHasNoClaudeBinary(t, env)
 	for _, entry := range env {
 		if strings.HasPrefix(entry, "CLAUDE_CODE_OAUTH_TOKEN=") || strings.HasPrefix(entry, "ANTHROPIC_API_KEY=") {
 			t.Fatalf("golden process environment carries an LLM credential: %s", entry)
 		}
+	}
+}
+
+func TestGoldenContinuousProofProfileSelection(t *testing.T) {
+	for _, test := range []struct {
+		profile    string
+		continuous bool
+	}{
+		{profile: ""},
+		{profile: "pr-common"},
+		{profile: "pr-escalated"},
+		{profile: "full", continuous: true},
+		{profile: "nightly", continuous: true},
+	} {
+		name := test.profile
+		if name == "" {
+			name = "local"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(goldenProofProfileEnv, test.profile)
+			profile, continuous := goldenContinuousProofProfile(t)
+			if profile != test.profile || continuous != test.continuous {
+				t.Fatalf("golden profile = %q/%t, want %q/%t", profile, continuous, test.profile, test.continuous)
+			}
+		})
 	}
 }

@@ -6,6 +6,7 @@ planning:
   unknown_package_seconds: 30
 escalation_paths:
   - ^internal/runtime/
+  - ^internal/releasee2e/
   - ^internal/testcatalog/
   - ^internal/cliapp/catalog_conformance_test\.go$
   - ^internal/cliapp/test_command_test\.go$
