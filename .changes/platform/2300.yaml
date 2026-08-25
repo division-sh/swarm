@@ -1,0 +1,6 @@
+issue: 2300
+impact: minor
+platform_train: 0.7.0
+summary: Publish the immutable compiled event-schema boundary over current admitted grammar.
+spec_sections:
+  - flow_model.compiled_event_schema_projection

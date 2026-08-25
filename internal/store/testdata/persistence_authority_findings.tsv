@@ -1763,6 +1763,7 @@ typed-process-local	interface-method	typed	internal/runtime/bus/store.go	Selecte
 typed-process-local	interface-method	typed	internal/runtime/context_manager.go	RunBundleAvailabilityReader	method:LoadRunBundleAvailability	func(context.Context, string) (github.com/division-sh/swarm/internal/runtime/runbundle.Availability, error)
 typed-process-local	interface-method	typed	internal/runtime/contracts/bundle_build.go	BundleBuildStep	method:Name	func() string
 typed-process-local	interface-method	typed	internal/runtime/contracts/bundle_build.go	BundleBuildStep	method:Run	func(context.Context, *github.com/division-sh/swarm/internal/runtime/contracts.BundleBuildContext) error
+typed-process-local	interface-method	typed	internal/runtime/contracts/compiled_event_schema.go	CompiledEventSchemaProvider	method:CompiledEventSchemas	func() ([]github.com/division-sh/swarm/internal/runtime/contracts.CompiledEventSchema, error)
 typed-process-local	interface-method	typed	internal/runtime/contracts/tool_input_schema_value.go	ToolInputSchemaOption	method:applyToolInputSchema	func(*github.com/division-sh/swarm/internal/runtime/contracts.toolInputSchemaDraft) error
 typed-process-local	interface-method	typed	internal/runtime/contracts/tool_schema_entry_value.go	ToolSchemaEntryOption	method:applyToolSchemaEntry	func(*github.com/division-sh/swarm/internal/runtime/contracts.toolSchemaEntryDraft) error
 typed-process-local	interface-method	typed	internal/runtime/contracts/workflow_contract_loading.go	PackAdmissionProjection	method:EffectivePackInventoryDigest	func() string
