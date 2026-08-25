@@ -179,7 +179,6 @@ func newDynamicFlowCreationAtomicityFixture(t *testing.T, backend string) dynami
 	}
 	lease, err := selected.RegisterAuthorActivityEventCatalog(scope, []runtimeauthoractivity.EventDescriptor{
 		{EventType: "test.dynamic_flow.triggered", Disposition: runtimeauthoractivity.StoryDifferent},
-		{EventType: string(event.Type()), Disposition: runtimeauthoractivity.StoryAuthored},
 	})
 	if err != nil {
 		t.Fatalf("register creation event descriptor: %v", err)
