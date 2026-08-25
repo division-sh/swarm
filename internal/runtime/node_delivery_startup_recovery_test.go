@@ -212,13 +212,6 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			storetest.CommitSemanticEventWithRoutes(t, ctx, selected, event, []events.DeliveryRoute{nodeRoute}, runtimepipelineobligation.ScopeSubscribed)
 
 			processOwner := worklifetime.NewProcess()
-			t.Cleanup(func() {
-				joinCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				if _, err := processOwner.Join(joinCtx); err != nil {
-					t.Errorf("join startup-order process owner: %v", err)
-				}
-			})
 			hydrated := atomic.Bool{}
 			runtime, err := swarmruntime.NewRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
 				Config: &config.Config{Runtime: config.RuntimeConfig{RecoveryOnStartup: true}, LLM: config.LLMConfig{Backend: "anthropic"}},
@@ -247,11 +240,8 @@ func TestRuntimeStartHydratesPersistedAgentsBeforeRecoveringNodeDeliveriesParity
 			}
 			capability, grant := installExternalRuntimeTestGeneration(t, ctx, selected, runtime)
 			t.Cleanup(func() {
-				if err := runtime.Shutdown(); err != nil {
-					t.Errorf("shutdown startup-order runtime: %v", err)
-				}
-				if err := capability.Release(context.Background()); err != nil {
-					t.Errorf("release startup-order process capability: %v", err)
+				if err := closeExternalRuntimeTestGeneration(runtime, processOwner, capability); err != nil {
+					t.Errorf("close startup-order generation: %v", err)
 				}
 			})
 			if err := runtime.Manager.ReconcileStaticTopologyForStartup(ctx, source); err != nil {
@@ -342,7 +332,7 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 
 					currentRunID := eventtest.UUID("recovery-disabled-current-" + backend + "-" + mode.name + "-" + test.name)
 					currentCtx := startupRecoverySourceContext(currentSource, currentRunID)
-					seedStartupRecoverySourceRun(t, currentCtx, db, backend, currentSource, currentRunID)
+					seedStartupRecoverySourceRun(t, currentCtx, db, backend, selected, currentSource, currentRunID)
 
 					var (
 						deliveryID  string
@@ -357,7 +347,7 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 							eventSource = foreignSource
 							eventRunID = eventtest.UUID("recovery-disabled-foreign-" + backend + "-" + mode.name)
 							eventCtx = startupRecoverySourceContext(eventSource, eventRunID)
-							seedStartupRecoverySourceRun(t, eventCtx, db, backend, eventSource, eventRunID)
+							seedStartupRecoverySourceRun(t, eventCtx, db, backend, selected, eventSource, eventRunID)
 						}
 						deliveryCtx = eventCtx
 						event := eventtest.ExistingRunRootIngress(
@@ -471,14 +461,8 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 							t.Fatalf("startup decision mutated delivery\nbefore: %#v\nafter:  %#v", before, after)
 						}
 					}
-					if shutdownErr := runtime.Shutdown(); shutdownErr != nil {
-						t.Fatalf("shutdown startup-decision runtime: %v", shutdownErr)
-					}
-					releaseExternalRuntimeTestCapability(t, capability)
-					joinCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-					defer cancel()
-					if _, joinErr := processOwner.Join(joinCtx); joinErr != nil {
-						t.Fatalf("join startup-decision process owner: %v", joinErr)
+					if closeErr := closeExternalRuntimeTestGeneration(runtime, processOwner, capability); closeErr != nil {
+						t.Fatalf("close startup-decision generation: %v", closeErr)
 					}
 				})
 			}
@@ -509,7 +493,7 @@ func TestCommittedPipelineHandoffCleanupFailureWakesExactDeliveryOnceParity(t *t
 			}
 			runID := eventtest.UUID("pipeline-handoff-cleanup-run-" + backend)
 			ctx := startupRecoverySourceContext(source, runID)
-			seedStartupRecoverySourceRun(t, ctx, db, backend, source, runID)
+			seedStartupRecoverySourceRun(t, ctx, db, backend, selected, source, runID)
 			route := startupRecoveryNodeRoute(t, "complete-task")
 			event := eventtest.ExistingRunRootIngress(
 				eventtest.UUID("pipeline-handoff-cleanup-event-"+backend),
@@ -643,6 +627,7 @@ func seedStartupRecoverySourceRun(
 	ctx context.Context,
 	db *sql.DB,
 	backend string,
+	selected startupRecoveryOrderStore,
 	source runtimecorrelation.BundleSourceFact,
 	runID string,
 ) {
@@ -653,11 +638,7 @@ func seedStartupRecoverySourceRun(
 		Origin: storetest.ScenarioSetupOrigin(), RunID: runID,
 		BundleHash: bundleHash, BundleSource: bundleSource,
 	}
-	if backend == "postgres" {
-		storetest.RequirePostgresRun(t, ctx, db, fixture)
-		return
-	}
-	storetest.RequireSQLiteRun(t, ctx, db, fixture)
+	storetest.RequireRun(t, ctx, selected, fixture)
 }
 
 func loadStartupRecoveryWorkflowModule(t *testing.T) runtimepipeline.WorkflowModule {

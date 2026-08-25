@@ -44,7 +44,7 @@ func TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *t
 		)
 		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
-		seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "slack-managed-credential-observer")
+		target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "slack-managed-credential-observer")
 		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, db, flowInstance, false)
 
 		runSlackManagedCredentialConnectorSurface(t, slackManagedConnectorBackend{
@@ -54,6 +54,7 @@ func TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *t
 			eventStore:    pg,
 			deliveryStore: pg,
 			inboundStore:  pg,
+			inboundTarget: target,
 			persistence:   runtimepipeline.NewWorkflowPersistence(pg),
 			runLifecycle:  pg,
 			obligations:   pg.PipelineObligations(),
@@ -72,7 +73,7 @@ func TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *t
 		)
 		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-		seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "slack-managed-credential-observer")
+		target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "slack-managed-credential-observer")
 		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, storetest.Database(sqliteStore), flowInstance, true)
 
 		runSlackManagedCredentialConnectorSurface(t, slackManagedConnectorBackend{
@@ -82,6 +83,7 @@ func TestSlackManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *t
 			eventStore:    sqliteStore,
 			deliveryStore: sqliteStore,
 			inboundStore:  sqliteStore,
+			inboundTarget: target,
 			persistence:   runtimepipeline.NewWorkflowPersistence(sqliteStore),
 			runLifecycle:  sqliteStore,
 			obligations:   sqliteStore.PipelineObligations(),
@@ -100,6 +102,7 @@ type slackManagedConnectorBackend struct {
 	eventStore       runtimebus.EventStore
 	deliveryStore    runtimedelivery.Store
 	inboundStore     runtimepkg.InboundPersistence
+	inboundTarget    runtimepkg.InboundTarget
 	activityAttempts runtimeTestActivityAttemptReader
 	persistence      runtimepipeline.WorkflowPersistence
 	runLifecycle     runtimerunlifecycle.OperationOwner
@@ -331,7 +334,7 @@ func publishTelegramMessageToSlack(t *testing.T, backend slackManagedConnectorBa
 	body := []byte(fmt.Sprintf(`{"update_id":%s,"message":{"message_id":7,"chat":{"id":42},"text":%q}}`, updateID, text))
 	req := newSignedTelegramRequest(webhookPath, "telegram-secret", body).WithContext(backend.ctx)
 	rec := httptest.NewRecorder()
-	handleBoundedProviderDelivery(t, gateway, bus, backend.inboundStore, rec, req, backend.runID, backend.entityID, "telegram", "telegram-secret")
+	handleBoundedProviderDelivery(t, gateway, bus, backend.inboundTarget, rec, req, "telegram", "telegram-secret")
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("%s gateway status for update %s = %d, want 202 body=%s", backend.name, updateID, rec.Code, rec.Body.String())
 	}

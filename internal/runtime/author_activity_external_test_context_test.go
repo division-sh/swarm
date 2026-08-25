@@ -42,6 +42,129 @@ var authorActivityTestBundleSourceFact = mustExternalTestBundleSourceFact("bundl
 
 var externalRuntimeTestEventBusOwners sync.Map
 
+type externalRuntimeTestEventBusOwner struct {
+	process       *worklifetime.Process
+	occurrence    worklifetime.Occurrence
+	retireAndWait func(context.Context) error
+	once          sync.Once
+	err           error
+}
+
+func (o *externalRuntimeTestEventBusOwner) close(ctx context.Context) error {
+	if o == nil || o.process == nil {
+		return nil
+	}
+	o.once.Do(func() {
+		if err := o.retireAndWait(ctx); err != nil {
+			o.err = fmt.Errorf("retire external runtime test occurrence: %w", err)
+			return
+		}
+		o.process.Retire()
+		if _, err := o.process.Join(ctx); err != nil {
+			o.err = fmt.Errorf("join external runtime test process: %w", err)
+		}
+	})
+	return o.err
+}
+
+type externalRuntimeTestCapability interface {
+	Release(context.Context) error
+}
+
+type externalRuntimeTestReleaseProbe struct {
+	released chan struct{}
+	once     sync.Once
+}
+
+func (p *externalRuntimeTestReleaseProbe) Release(context.Context) error {
+	p.once.Do(func() { close(p.released) })
+	return nil
+}
+
+func TestExternalRuntimeTestGenerationJoinsAcceptedWorkBeforeCapabilityRelease(t *testing.T) {
+	process := worklifetime.NewProcess()
+	lease, err := process.Begin(context.Background())
+	if err != nil {
+		t.Fatalf("begin accepted process work: %v", err)
+	}
+	capability := &externalRuntimeTestReleaseProbe{released: make(chan struct{})}
+	closed := make(chan error, 1)
+	go func() {
+		closed <- closeExternalRuntimeTestGeneration(nil, process, capability)
+	}()
+
+	<-lease.Context().Done()
+	select {
+	case <-capability.released:
+		t.Fatal("process capability released before accepted work settled")
+	default:
+	}
+	if err := lease.Done(); err != nil {
+		t.Fatalf("settle accepted process work: %v", err)
+	}
+	if err := <-closed; err != nil {
+		t.Fatalf("close external runtime test generation: %v", err)
+	}
+	select {
+	case <-capability.released:
+	default:
+		t.Fatal("process capability was not released after process join")
+	}
+}
+
+func closeExternalRuntimeTestGeneration(runtime *runtimepkg.Runtime, process *worklifetime.Process, capability externalRuntimeTestCapability) error {
+	if runtime != nil {
+		if err := runtime.Shutdown(); err != nil {
+			return fmt.Errorf("shutdown external runtime test generation: %w", err)
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if process != nil {
+		process.Retire()
+		if _, err := process.Join(ctx); err != nil {
+			return fmt.Errorf("join external runtime test process: %w", err)
+		}
+	}
+	if capability != nil {
+		if err := capability.Release(context.Background()); err != nil {
+			return fmt.Errorf("release external runtime test process capability: %w", err)
+		}
+	}
+	return nil
+}
+
+func closeExternalManagerTestGeneration(manager *runtimemanager.AgentManager, bus *runtimebus.EventBus, grant runtimestartupownership.GenerationGrant, capability externalRuntimeTestCapability) error {
+	if manager != nil {
+		if err := manager.Shutdown(); err != nil {
+			return fmt.Errorf("shutdown external runtime test manager: %w", err)
+		}
+	}
+	if bus != nil {
+		if err := bus.ResetInMemoryState(); err != nil {
+			return fmt.Errorf("reset external runtime test event bus: %w", err)
+		}
+		if owner, ok := externalRuntimeTestEventBusOwners.Load(bus); ok {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := owner.(*externalRuntimeTestEventBusOwner).close(ctx); err != nil {
+				return err
+			}
+		}
+	}
+	if grant != nil {
+		if err := grant.Retire(context.Background()); err != nil {
+			return fmt.Errorf("retire external manager test generation grant: %w", err)
+		}
+	}
+	if capability != nil {
+		if err := capability.Release(context.Background()); err != nil {
+			return fmt.Errorf("release external manager test process capability: %w", err)
+		}
+	}
+	return nil
+}
+
 type externalTestFlowInstanceActivationOwner struct {
 	mu       sync.Mutex
 	activate runtimepipeline.FlowInstanceActivator
@@ -307,16 +430,6 @@ func installExternalManagerTestGeneration(
 	}
 }
 
-func releaseExternalRuntimeTestCapability(t testing.TB, capability runtimestartupownership.ProcessCapability) {
-	t.Helper()
-	if capability == nil {
-		return
-	}
-	if err := capability.Release(context.Background()); err != nil {
-		t.Fatalf("release external runtime test process capability: %v", err)
-	}
-}
-
 type externalRuntimeTestDurableEventStore interface {
 	runtimebus.EventStore
 	runtimereplycontext.Store
@@ -423,6 +536,7 @@ func newRuntimeTestEventBus(t testing.TB, store runtimebus.EventStore) (*runtime
 
 func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore, opts runtimebus.EventBusOptions) (*runtimebus.EventBus, error) {
 	t.Helper()
+	var lifetimeOwner *externalRuntimeTestEventBusOwner
 	if !opts.ExecutionPosture.Valid() {
 		opts.ExecutionPosture = executionposture.Live
 	}
@@ -442,16 +556,13 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 			return nil, err
 		}
 		opts.WorkOwner = owner
-		t.Cleanup(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			if _, err := owner.RetireAndWait(ctx); err != nil {
-				t.Errorf("retire external runtime test occurrence: %v", err)
-			}
-			if _, err := process.Join(ctx); err != nil {
-				t.Errorf("join external runtime test process: %v", err)
-			}
-		})
+		lifetimeOwner = &externalRuntimeTestEventBusOwner{
+			process: process, occurrence: owner,
+			retireAndWait: func(ctx context.Context) error {
+				_, err := owner.RetireAndWait(ctx)
+				return err
+			},
+		}
 	}
 	if !opts.ReceiverExecution.Configured() {
 		opts.ReceiverExecution = eventreceiver.NormalExecution()
@@ -498,8 +609,25 @@ func newRuntimeTestEventBusWithOptions(t testing.TB, store runtimebus.EventStore
 	); err != nil {
 		return nil, err
 	}
-	externalRuntimeTestEventBusOwners.Store(bus, opts.WorkOwner)
-	t.Cleanup(func() { externalRuntimeTestEventBusOwners.Delete(bus) })
+	owner := &externalRuntimeTestEventBusOwner{occurrence: opts.WorkOwner}
+	if lifetimeOwner != nil {
+		owner = lifetimeOwner
+	}
+	externalRuntimeTestEventBusOwners.Store(bus, owner)
+	t.Cleanup(func() {
+		defer externalRuntimeTestEventBusOwners.Delete(bus)
+		if err := bus.ResetInMemoryState(); err != nil {
+			t.Errorf("reset external runtime test event bus: %v", err)
+			return
+		}
+		if lifetimeOwner != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := lifetimeOwner.close(ctx); err != nil {
+				t.Errorf("close external runtime test event bus owner: %v", err)
+			}
+		}
+	})
 	return bus, nil
 }
 
@@ -526,7 +654,7 @@ func runtimeTestEventBusWorkOwner(t testing.TB, bus *runtimebus.EventBus) workli
 	if !ok {
 		t.Fatal("external runtime test event bus has no registered work owner")
 	}
-	return owner.(worklifetime.Occurrence)
+	return owner.(*externalRuntimeTestEventBusOwner).occurrence
 }
 
 func ownRuntimeTestAgentManager(t testing.TB, manager *runtimemanager.AgentManager) *runtimemanager.AgentManager {

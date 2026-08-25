@@ -138,16 +138,8 @@ func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRunt
 			}
 			capability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, rt)
 			t.Cleanup(func() {
-				if err := rt.Shutdown(); err != nil {
-					t.Errorf("shutdown runtime: %v", err)
-				}
-				if err := capability.Release(context.Background()); err != nil {
-					t.Errorf("release runtime process capability: %v", err)
-				}
-				joinCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				if _, err := process.Join(joinCtx); err != nil {
-					t.Errorf("join process owner: %v", err)
+				if err := closeExternalRuntimeTestGeneration(rt, process, capability); err != nil {
+					t.Errorf("close workflow timer generation: %v", err)
 				}
 			})
 			if err := rt.Start(ctx); err != nil {
@@ -344,13 +336,8 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 			}
 			shutdown := func(label string, rt *swarmruntime.Runtime, process *worklifetime.Process) {
 				t.Helper()
-				if err := rt.Shutdown(); err != nil {
-					t.Fatalf("shutdown %s runtime: %v", label, err)
-				}
-				joinCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				if _, err := process.Join(joinCtx); err != nil {
-					t.Fatalf("join %s process owner: %v", label, err)
+				if err := closeExternalRuntimeTestGeneration(rt, process, nil); err != nil {
+					t.Fatalf("close %s runtime: %v", label, err)
 				}
 			}
 
@@ -386,12 +373,13 @@ func TestRuntimeStartFailsClosedWhenManagerHydrationWouldWithholdWorkflowTimersO
 			capability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, restarted)
 			err = restarted.Start(ctx)
 			if err == nil || !strings.Contains(err.Error(), "hydrate static declaration topology") {
-				shutdown("unexpected successful restart", restarted, restartedProcess)
+				if closeErr := closeExternalRuntimeTestGeneration(restarted, restartedProcess, capability); closeErr != nil {
+					t.Fatalf("close unexpected successful restart: %v", closeErr)
+				}
 				t.Fatalf("Start error = %v, want topology hydration failure before workflow-timer restoration", err)
 			}
-			shutdown("failed restart", restarted, restartedProcess)
-			if err := capability.Release(context.Background()); err != nil {
-				t.Fatalf("release failed-restart process capability: %v", err)
+			if err := closeExternalRuntimeTestGeneration(restarted, restartedProcess, capability); err != nil {
+				t.Fatalf("close failed-restart generation: %v", err)
 			}
 
 			instance, found, err := restarted.Pipeline.Load(ctx, runtimeflowidentity.RouteForInstancePath(runID))
@@ -486,13 +474,8 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 			}
 			shutdown := func(label string, rt *swarmruntime.Runtime, process *worklifetime.Process) {
 				t.Helper()
-				if err := rt.Shutdown(); err != nil {
-					t.Fatalf("shutdown %s runtime: %v", label, err)
-				}
-				joinCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				if _, err := process.Join(joinCtx); err != nil {
-					t.Fatalf("join %s process owner: %v", label, err)
+				if err := closeExternalRuntimeTestGeneration(rt, process, nil); err != nil {
+					t.Fatalf("close %s runtime: %v", label, err)
 				}
 			}
 
@@ -524,13 +507,14 @@ func TestRuntimeStartRestoresWorkflowTimersWithoutGenericScheduleStoreOnBothStor
 			restarted, restartedProcess := newRuntime()
 			capability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, restarted)
 			if err := restarted.Start(ctx); err != nil {
-				shutdown("failed restart", restarted, restartedProcess)
+				if closeErr := closeExternalRuntimeTestGeneration(restarted, restartedProcess, capability); closeErr != nil {
+					t.Fatalf("close failed restart: %v", closeErr)
+				}
 				t.Fatalf("Start restarted runtime: %v", err)
 			}
 			defer func() {
-				shutdown("restarted", restarted, restartedProcess)
-				if err := capability.Release(context.Background()); err != nil {
-					t.Errorf("release restarted process capability: %v", err)
+				if err := closeExternalRuntimeTestGeneration(restarted, restartedProcess, capability); err != nil {
+					t.Errorf("close restarted generation: %v", err)
 				}
 			}()
 			assertBootDetail := func(name, fragment string) {

@@ -891,7 +891,8 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 					stores := backend.open(t)
 					startupOwnership := &failOnceFinalizeStartupOwnershipStore{delegate: stores.StartupOwnership}
 					stores.StartupOwnership = startupOwnership
-					processWorkOwner := newSupervisorTestProcessOwner(t)
+					processWorkOwner := worklifetime.NewProcess()
+					var runtimes []*runtimepkg.Runtime
 					runtimeInstanceID := "11111111-1111-1111-1111-111111111111"
 					var active, maxActive atomic.Int32
 					bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier8-boot-verification/test-boot-success")
@@ -923,14 +924,28 @@ func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *tes
 						if err != nil {
 							t.Fatalf("NewRuntime(%s): %v", hash, err)
 						}
-						t.Cleanup(func() { _ = rt.Shutdown() })
+						runtimes = append(runtimes, rt)
 						return rt
 					}
 					oldFact := mustServeTestEphemeralBundleSourceFact(oldHash)
 					predecessor := newRuntime(oldHash)
 					predecessor.SystemNodes = []runtimepipeline.BackgroundNode{newReplacementOverlapProbeNode(&active, &maxActive)}
 					processCapability, _ := installSelectedStoreTestProcessTopology(t, stores, predecessor, source, oldFact, runtimeInstanceID)
-					t.Cleanup(func() { _ = processCapability.Release(context.Background()) })
+					t.Cleanup(func() {
+						shutdownFailed := false
+						for i := len(runtimes) - 1; i >= 0; i-- {
+							if err := runtimes[i].Shutdown(); err != nil {
+								t.Errorf("shutdown replacement runtime: %v", err)
+								shutdownFailed = true
+							}
+						}
+						if shutdownFailed {
+							return
+						}
+						if err := closeSelectedStoreTestProcess(processWorkOwner, processCapability); err != nil {
+							t.Errorf("close replacement selected-store generation: %v", err)
+						}
+					})
 					if err := predecessor.Start(context.Background()); err != nil {
 						t.Fatalf("start predecessor: %v", err)
 					}
@@ -1252,7 +1267,8 @@ func TestStandingReplacementAdoptionRestoresWorkflowTimersOnBothStores(t *testin
 					t.Fatalf("set credential %s: %v", key, err)
 				}
 			}
-			processWorkOwner := newSupervisorTestProcessOwner(t)
+			processWorkOwner := worklifetime.NewProcess()
+			var runtimes []*runtimepkg.Runtime
 			runtimeInstanceID := "11111111-1111-1111-1111-111111111111"
 			newRuntime := func() *runtimepkg.Runtime {
 				rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(t, stores, &config.Config{}, runtimepkg.RuntimeOptions{
@@ -1265,12 +1281,27 @@ func TestStandingReplacementAdoptionRestoresWorkflowTimersOnBothStores(t *testin
 				if err != nil {
 					t.Fatalf("NewRuntime: %v", err)
 				}
+				runtimes = append(runtimes, rt)
 				return rt
 			}
 
 			predecessor := newRuntime()
 			processCapability, plan := installSelectedStoreTestProcessTopology(t, stores, predecessor, semanticview.Wrap(bundle), fact, runtimeInstanceID)
-			t.Cleanup(func() { _ = processCapability.Release(context.Background()) })
+			t.Cleanup(func() {
+				shutdownFailed := false
+				for i := len(runtimes) - 1; i >= 0; i-- {
+					if err := runtimes[i].ShutdownWithOptions(runtimepkg.ShutdownOptions{Grace: 5 * time.Second}); err != nil {
+						t.Errorf("shutdown standing replacement runtime: %v", err)
+						shutdownFailed = true
+					}
+				}
+				if shutdownFailed {
+					return
+				}
+				if err := closeSelectedStoreTestProcess(processWorkOwner, processCapability); err != nil {
+					t.Errorf("close standing replacement generation: %v", err)
+				}
+			})
 			if err := predecessor.Start(context.Background()); err != nil {
 				t.Fatalf("start standing predecessor: %v", err)
 			}
@@ -1293,10 +1324,6 @@ func TestStandingReplacementAdoptionRestoresWorkflowTimersOnBothStores(t *testin
 			if err := candidate.Start(context.Background()); err != nil {
 				t.Fatalf("start standing replacement candidate: %v", err)
 			}
-			t.Cleanup(func() {
-				_ = candidate.ShutdownWithOptions(runtimepkg.ShutdownOptions{Grace: 5 * time.Second})
-			})
-
 			var timerEvent, timerStatus string
 			var fireAt any
 			if err := stores.SQLDB.QueryRowContext(context.Background(), `SELECT fire_event, status, fire_at FROM timers`).Scan(&timerEvent, &timerStatus, &fireAt); err != nil {
@@ -1424,19 +1451,31 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 					if err != nil {
 						t.Fatalf("installed capability subjects: %v", err)
 					}
-					processWorkOwner := newSupervisorTestProcessOwner(t)
+					processWorkOwner := worklifetime.NewProcess()
 					var manager *runtimepkg.RuntimeContextManager
 					var createdRuntimes []*runtimepkg.Runtime
+					var processCapability runtimestartupownership.ProcessCapability
 					t.Cleanup(func() {
+						shutdownFailed := false
 						if manager != nil {
 							for _, result := range manager.DeactivateAll(runtimepkg.RuntimeContextCauseUnloaded) {
 								if result.ShutdownErr != nil {
 									t.Errorf("deactivate replacement context %s: %v", result.BundleHash, result.ShutdownErr)
+									shutdownFailed = true
 								}
 							}
 						}
 						for i := len(createdRuntimes) - 1; i >= 0; i-- {
-							_ = createdRuntimes[i].ShutdownWithOptions(runtimepkg.ShutdownOptions{Grace: 5 * time.Second})
+							if err := createdRuntimes[i].ShutdownWithOptions(runtimepkg.ShutdownOptions{Grace: 5 * time.Second}); err != nil {
+								t.Errorf("shutdown standing runtime: %v", err)
+								shutdownFailed = true
+							}
+						}
+						if shutdownFailed {
+							return
+						}
+						if err := closeSelectedStoreTestProcess(processWorkOwner, processCapability); err != nil {
+							t.Errorf("close standing selected-store generation: %v", err)
 						}
 					})
 					newRuntime := func(hash string, workflowModule runtimepipeline.WorkflowModule) *runtimepkg.Runtime {
@@ -1456,8 +1495,7 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 
 					predecessor := newRuntime(oldHash, module)
 					oldFact := mustServeTestEphemeralBundleSourceFact(oldHash)
-					processCapability, _ := installSelectedStoreTestProcessTopology(t, stores, predecessor, oldSource, oldFact, "11111111-1111-1111-1111-111111111111")
-					t.Cleanup(func() { _ = processCapability.Release(context.Background()) })
+					processCapability, _ = installSelectedStoreTestProcessTopology(t, stores, predecessor, oldSource, oldFact, "11111111-1111-1111-1111-111111111111")
 					if err := predecessor.Start(context.Background()); err != nil {
 						t.Fatalf("start predecessor: %v", err)
 					}
@@ -1590,7 +1628,8 @@ func TestRuntimeProjectSupervisorQuiesceTimeoutRestoresFullStoreAuthority(t *tes
 		backend := backend
 		t.Run(backend.name, func(t *testing.T) {
 			stores := backend.open(t)
-			processWorkOwner := newSupervisorTestProcessOwner(t)
+			processWorkOwner := worklifetime.NewProcess()
+			var runtimes []*runtimepkg.Runtime
 			bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier8-boot-verification/test-boot-success")
 			if _, err := initializeStateStores(context.Background(), stores, bundle); err != nil {
 				t.Fatalf("initializeStateStores: %v", err)
@@ -1605,7 +1644,7 @@ func TestRuntimeProjectSupervisorQuiesceTimeoutRestoresFullStoreAuthority(t *tes
 				if err != nil {
 					t.Fatalf("NewRuntime: %v", err)
 				}
-				t.Cleanup(func() { _ = rt.Shutdown() })
+				runtimes = append(runtimes, rt)
 				return rt
 			}
 			var active, maxActive atomic.Int32
@@ -1614,7 +1653,21 @@ func TestRuntimeProjectSupervisorQuiesceTimeoutRestoresFullStoreAuthority(t *tes
 			predecessor.SystemNodes = []runtimepipeline.BackgroundNode{blocker}
 			t.Cleanup(blocker.Release)
 			processCapability, _ := installSelectedStoreTestProcessTopology(t, stores, predecessor, source, fact, runtimeInstanceID)
-			t.Cleanup(func() { _ = processCapability.Release(context.Background()) })
+			t.Cleanup(func() {
+				shutdownFailed := false
+				for i := len(runtimes) - 1; i >= 0; i-- {
+					if err := runtimes[i].Shutdown(); err != nil {
+						t.Errorf("shutdown quiescence runtime: %v", err)
+						shutdownFailed = true
+					}
+				}
+				if shutdownFailed {
+					return
+				}
+				if err := closeSelectedStoreTestProcess(processWorkOwner, processCapability); err != nil {
+					t.Errorf("close quiescence selected-store generation: %v", err)
+				}
+			})
 			if err := predecessor.Start(context.Background()); err != nil {
 				t.Fatalf("start predecessor: %v", err)
 			}
@@ -2051,7 +2104,7 @@ func TestStartServeRuntimeContextsRollsBackAllPreparedAuthorActivityCatalogs(t *
 		backend := backend
 		t.Run(backend.name, func(t *testing.T) {
 			stores := backend.open(t)
-			processWorkOwner := newSupervisorTestProcessOwner(t)
+			processWorkOwner := worklifetime.NewProcess()
 			bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier8-boot-verification/test-boot-success")
 			if _, err := initializeStateStores(context.Background(), stores, bundle); err != nil {
 				t.Fatalf("initializeStateStores: %v", err)
@@ -2078,7 +2131,11 @@ func TestStartServeRuntimeContextsRollsBackAllPreparedAuthorActivityCatalogs(t *
 			if err != nil {
 				t.Fatalf("acquire rollback process capability: %v", err)
 			}
-			t.Cleanup(func() { _ = capability.Release(context.Background()) })
+			t.Cleanup(func() {
+				if err := closeSelectedStoreTestProcess(processWorkOwner, capability); err != nil {
+					t.Errorf("close serve-context rollback generation: %v", err)
+				}
+			})
 			if _, err := capability.InstallCompleteSourceSet(context.Background(), runtimeagenttopology.SourceSetCommitRequest{
 				OperationID: uuid.NewString(), Plan: plan,
 			}); err != nil {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -80,6 +81,54 @@ type completeEventDispatchFixture struct {
 	source   semanticview.Source
 }
 
+type completeEventDispatchGeneration struct {
+	manager     *runtimemanager.AgentManager
+	coordinator *runtimedeliverycontinuation.Coordinator
+	process     *worklifetime.Process
+	owner       *worklifetime.RuntimeOccurrence
+	grant       runtimestartupownership.GenerationGrant
+	capability  runtimestartupownership.ProcessCapability
+	once        sync.Once
+}
+
+func (g *completeEventDispatchGeneration) close() error {
+	if g == nil {
+		return nil
+	}
+	var closeErr error
+	g.once.Do(func() {
+		if g.coordinator != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			closeErr = errors.Join(closeErr, g.coordinator.Retire(ctx))
+		}
+		if g.manager != nil {
+			closeErr = errors.Join(closeErr, g.manager.Shutdown())
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if g.owner != nil {
+			_, err := g.owner.RetireAndWait(ctx)
+			closeErr = errors.Join(closeErr, err)
+		}
+		if g.process != nil {
+			g.process.Retire()
+			_, err := g.process.Join(ctx)
+			closeErr = errors.Join(closeErr, err)
+		}
+		if closeErr != nil {
+			return
+		}
+		if g.grant != nil {
+			closeErr = errors.Join(closeErr, g.grant.Retire(context.Background()))
+		}
+		if closeErr == nil && g.capability != nil {
+			closeErr = errors.Join(closeErr, g.capability.Release(context.Background()))
+		}
+	})
+	return closeErr
+}
+
 func TestCompleteEventSnapshotDispatchesThroughRecoveryOwnersOnSQLiteAndPostgres(t *testing.T) {
 	for _, backend := range []string{"sqlite", "postgres"} {
 		for _, surface := range []string{"startup", "global_sweeper", "run_queue", "decision_obligation"} {
@@ -136,7 +185,8 @@ func TestCompleteEventSnapshotDispatchesThroughManagerBacklogOnSQLiteAndPostgres
 				t.Fatalf("%s schema admitted negative chain_depth", backend)
 			}
 			seen := make(chan events.Event, 1)
-			manager, workOwner := fixture.newRecordingManager(t, seen)
+			generation := fixture.newRecordingManager(t, seen)
+			manager := generation.manager
 			managerCtx := fixture.managedContext(t)
 			if _, err := manager.HydrateForStartup(managerCtx); err != nil {
 				t.Fatalf("hydrate manager: %v", err)
@@ -144,12 +194,7 @@ func TestCompleteEventSnapshotDispatchesThroughManagerBacklogOnSQLiteAndPostgres
 			if err := manager.Run(managerCtx); err != nil {
 				t.Fatalf("run manager: %v", err)
 			}
-			t.Cleanup(func() {
-				if err := manager.Shutdown(); err != nil {
-					t.Errorf("shutdown complete-event manager: %v", err)
-				}
-			})
-			fixture.startDeliveryContinuations(t, managerCtx, workOwner)
+			fixture.startDeliveryContinuations(t, managerCtx, generation)
 			assertCompleteEventDelivery(t, seen, fixture.event)
 		})
 	}
@@ -536,7 +581,7 @@ func (f completeEventDispatchFixture) managedContext(t *testing.T) context.Conte
 func (f completeEventDispatchFixture) newRecordingManager(
 	t *testing.T,
 	seen chan<- events.Event,
-) (*runtimemanager.AgentManager, *worklifetime.RuntimeOccurrence) {
+) *completeEventDispatchGeneration {
 	t.Helper()
 	process := worklifetime.NewProcess()
 	owner, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
@@ -546,15 +591,6 @@ func (f completeEventDispatchFixture) newRecordingManager(
 	if err != nil {
 		t.Fatalf("create complete-event work owner: %v", err)
 	}
-	t.Cleanup(func() {
-		if _, err := owner.RetireAndWait(context.Background()); err != nil {
-			t.Errorf("retire complete-event work owner: %v", err)
-		}
-		process.Retire()
-		if _, err := process.Join(context.Background()); err != nil {
-			t.Errorf("join complete-event process owner: %v", err)
-		}
-	})
 	manager := runtimemanager.NewAgentManagerWithOptions(f.bus, func(cfg runtimeactors.AgentConfig) (runtimemanager.Agent, error) {
 		return &completeEventRecordingAgent{id: cfg.ID, subscriptions: []events.EventType{f.event.Type()}, seen: seen}, nil
 	}, runtimemanager.AgentManagerOptions{
@@ -571,6 +607,12 @@ func (f completeEventDispatchFixture) newRecordingManager(
 		WorkOwner:         owner,
 		ReceiverExecution: eventreceiver.NormalExecution(),
 	}, f.store)
+	generation := &completeEventDispatchGeneration{manager: manager, process: process, owner: owner}
+	t.Cleanup(func() {
+		if err := generation.close(); err != nil {
+			t.Errorf("close complete-event dispatch generation: %v", err)
+		}
+	})
 	bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, BundleSource: bundleSource}
 	desired, err := manager.CompileStaticTopologyDesiredAgents(f.source, coordinate)
@@ -587,6 +629,7 @@ func (f completeEventDispatchFixture) newRecordingManager(
 	if err != nil {
 		t.Fatalf("acquire complete-event process capability: %v", err)
 	}
+	generation.capability = capability
 	if _, err := capability.InstallCompleteSourceSet(f.ctx, runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}); err != nil {
 		t.Fatalf("install complete-event source set: %v", err)
 	}
@@ -597,6 +640,7 @@ func (f completeEventDispatchFixture) newRecordingManager(
 	if err != nil {
 		t.Fatalf("issue complete-event generation grant: %v", err)
 	}
+	generation.grant = grant
 	admission, err := runtimeagenttopology.StaticAdmission(plan.Revision, bundleHash, bundleSource, runtimeagenttopology.LifetimeDurableManaged)
 	if err != nil {
 		t.Fatalf("construct complete-event static admission: %v", err)
@@ -607,15 +651,7 @@ func (f completeEventDispatchFixture) newRecordingManager(
 	if err := manager.ReconcileStaticTopologyForStartup(f.ctx, f.source); err != nil {
 		t.Fatalf("reconcile complete-event static topology: %v", err)
 	}
-	t.Cleanup(func() {
-		if err := grant.Retire(context.Background()); err != nil {
-			t.Errorf("retire complete-event generation grant: %v", err)
-		}
-		if err := capability.Release(context.Background()); err != nil {
-			t.Errorf("release complete-event process capability: %v", err)
-		}
-	})
-	return manager, owner
+	return generation
 }
 
 func completeEventAgentSource(agentID, subscription string, intent runtimeagentintent.Resolved) semanticview.Source {
@@ -651,7 +687,7 @@ func completeEventAgentOwnerURI(agentID string) string {
 func (f completeEventDispatchFixture) startDeliveryContinuations(
 	t *testing.T,
 	ctx context.Context,
-	workOwner *worklifetime.RuntimeOccurrence,
+	generation *completeEventDispatchGeneration,
 ) {
 	t.Helper()
 	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(f.agentID), AgentIdentity: f.identity}
@@ -672,7 +708,7 @@ func (f completeEventDispatchFixture) startDeliveryContinuations(
 	coordinator, err := runtimedeliverycontinuation.New(
 		f.store,
 		snapshot.Authority,
-		workOwner,
+		generation.owner,
 		f.bus,
 		func(_ context.Context, reportErr error) {
 			t.Errorf("complete-event delivery continuation failed: %v", reportErr)
@@ -687,13 +723,7 @@ func (f completeEventDispatchFixture) startDeliveryContinuations(
 	if err := coordinator.Start(ctx); err != nil {
 		t.Fatalf("start complete-event delivery coordinator: %v", err)
 	}
-	t.Cleanup(func() {
-		retireCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := coordinator.Retire(retireCtx); err != nil {
-			t.Errorf("retire complete-event delivery coordinator: %v", err)
-		}
-	})
+	generation.coordinator = coordinator
 }
 
 type completeEventRecordingAgent struct {

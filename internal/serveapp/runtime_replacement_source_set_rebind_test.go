@@ -308,6 +308,33 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			stores := backend.open(t)
 			cfg := &config.Config{}
 			processWorkOwner := newSupervisorTestProcessOwner(t)
+			var capability runtimestartupownership.ProcessCapability
+			var contexts *runtimepkg.RuntimeContextManager
+			var runtimes []*runtimepkg.Runtime
+			var err error
+			t.Cleanup(func() {
+				shutdownFailed := false
+				if contexts != nil {
+					for _, result := range contexts.DeactivateAll(runtimepkg.RuntimeContextCauseUnloaded) {
+						if result.ShutdownErr != nil {
+							t.Errorf("deactivate runtime context %s: %v", result.BundleHash, result.ShutdownErr)
+							shutdownFailed = true
+						}
+					}
+				}
+				for i := len(runtimes) - 1; i >= 0; i-- {
+					if shutdownErr := runtimes[i].ShutdownWithOptions(runtimepkg.ShutdownOptions{Grace: 5 * time.Second}); shutdownErr != nil {
+						t.Errorf("shutdown replacement runtime: %v", shutdownErr)
+						shutdownFailed = true
+					}
+				}
+				if shutdownFailed {
+					return
+				}
+				if closeErr := closeSelectedStoreTestProcess(processWorkOwner, capability); closeErr != nil {
+					t.Errorf("close replacement selected-store generation: %v", closeErr)
+				}
+			})
 			runtimeInstanceID := uuid.NewString()
 			providerCatalog := testProviderTriggerCatalog(t)
 
@@ -334,9 +361,7 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 				if err != nil {
 					t.Fatalf("NewRuntime(%s): %v", hash, err)
 				}
-				t.Cleanup(func() {
-					_ = rt.ShutdownWithOptions(runtimepkg.ShutdownOptions{Grace: 5 * time.Second})
-				})
+				runtimes = append(runtimes, rt)
 				return runtimeFixture{root: root, hash: hash, bundle: bundle, source: source, rt: rt}
 			}
 
@@ -374,7 +399,7 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			if err != nil {
 				t.Fatalf("construct initial complete source set: %v", err)
 			}
-			capability, err := stores.StartupOwnership.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+			capability, err = stores.StartupOwnership.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
 				OwnerID: "replacement-survivor-test", BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
 			})
 			if err != nil {
@@ -392,7 +417,7 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 				t.Fatalf("start survivor: %v", err)
 			}
 
-			contexts, err := runtimepkg.NewRuntimeContextManager(nil,
+			contexts, err = runtimepkg.NewRuntimeContextManager(nil,
 				completeServeTestPackContext(t, runtimepkg.BundleContext{
 					BundleSourceFact: predecessor.rt.Options.BundleSourceFact, Source: predecessor.source,
 					Runtime: predecessor.rt, WorkOwner: predecessor.rt.WorkOccurrence(),
@@ -405,17 +430,6 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			if err != nil {
 				t.Fatalf("NewRuntimeContextManager: %v", err)
 			}
-			t.Cleanup(func() {
-				for _, result := range contexts.DeactivateAll(runtimepkg.RuntimeContextCauseUnloaded) {
-					if result.ShutdownErr != nil {
-						t.Errorf("deactivate runtime context %s: %v", result.BundleHash, result.ShutdownErr)
-					}
-				}
-				if err := capability.Release(context.Background()); err != nil {
-					t.Errorf("release process capability: %v", err)
-				}
-			})
-
 			var ready atomic.Bool
 			ready.Store(true)
 			supervisor := &runtimeProjectSupervisor{

@@ -275,7 +275,9 @@ func (e *Executor) runChain(ctx context.Context, lease *worklifetime.Lease, cand
 		if err := e.waitUntilDue(ctx, candidate.DueAt); err != nil {
 			return
 		}
-		result, err := e.store.ExecuteCompletionCandidate(ctx, candidate, e.catalog)
+		// Retirement cancels waits and retries, but an admitted persistence
+		// operation must finish before its occurrence lease can settle.
+		result, err := e.store.ExecuteCompletionCandidate(context.WithoutCancel(ctx), candidate, e.catalog)
 		if err != nil {
 			result = CompletionResult{Outcome: OutcomeRetryCurrent, Retryable: err}
 		}

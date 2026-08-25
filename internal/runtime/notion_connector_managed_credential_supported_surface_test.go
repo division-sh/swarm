@@ -38,7 +38,7 @@ func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *
 		)
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
-		seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "notion-managed-credential-observer")
+		target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "notion-managed-credential-observer")
 		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, db, flowInstance, false)
 
 		runNotionManagedCredentialConnectorSurface(t, slackManagedConnectorBackend{
@@ -48,6 +48,7 @@ func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *
 			eventStore:    pg,
 			deliveryStore: pg,
 			inboundStore:  pg,
+			inboundTarget: target,
 			persistence:   runtimepipeline.NewWorkflowPersistence(pg),
 			runLifecycle:  pg,
 			obligations:   pg.PipelineObligations(),
@@ -66,7 +67,7 @@ func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *
 		)
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-		seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "notion-managed-credential-observer")
+		target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "notion-managed-credential-observer")
 		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, storetest.Database(sqliteStore), flowInstance, true)
 
 		runNotionManagedCredentialConnectorSurface(t, slackManagedConnectorBackend{
@@ -76,6 +77,7 @@ func TestNotionManagedCredentialConnectorPackRoundTripThroughActivityJournal(t *
 			eventStore:    sqliteStore,
 			deliveryStore: sqliteStore,
 			inboundStore:  sqliteStore,
+			inboundTarget: target,
 			persistence:   runtimepipeline.NewWorkflowPersistence(sqliteStore),
 			runLifecycle:  sqliteStore,
 			obligations:   sqliteStore.PipelineObligations(),

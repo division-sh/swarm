@@ -47,7 +47,7 @@ func TestGitHubAppIssueCommentConnectorPackRoundTripThroughActivityJournal(t *te
 		)
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
-		seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, "customer-a", "github", "github-webhook-secret", "github-app-issue-comment-observer")
+		target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, "customer-a", "github", "github-webhook-secret", "github-app-issue-comment-observer")
 		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, db, flowInstance, false)
 
 		runGitHubAppIssueCommentSurface(t, slackManagedConnectorBackend{
@@ -57,6 +57,7 @@ func TestGitHubAppIssueCommentConnectorPackRoundTripThroughActivityJournal(t *te
 			eventStore:    pg,
 			deliveryStore: pg,
 			inboundStore:  pg,
+			inboundTarget: target,
 			persistence:   runtimepipeline.NewWorkflowPersistence(pg),
 			runLifecycle:  pg,
 			obligations:   pg.PipelineObligations(),
@@ -75,7 +76,7 @@ func TestGitHubAppIssueCommentConnectorPackRoundTripThroughActivityJournal(t *te
 		)
 		ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-		seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "github", "github-webhook-secret", "github-app-issue-comment-observer")
+		target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "github", "github-webhook-secret", "github-app-issue-comment-observer")
 		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, storetest.Database(sqliteStore), flowInstance, true)
 
 		runGitHubAppIssueCommentSurface(t, slackManagedConnectorBackend{
@@ -85,6 +86,7 @@ func TestGitHubAppIssueCommentConnectorPackRoundTripThroughActivityJournal(t *te
 			eventStore:    sqliteStore,
 			deliveryStore: sqliteStore,
 			inboundStore:  sqliteStore,
+			inboundTarget: target,
 			persistence:   runtimepipeline.NewWorkflowPersistence(sqliteStore),
 			runLifecycle:  sqliteStore,
 			obligations:   sqliteStore.PipelineObligations(),
@@ -340,7 +342,7 @@ func publishGitHubIssueCommentFromSender(t *testing.T, backend slackManagedConne
 	req.Header.Set("X-GitHub-Delivery", deliveryID)
 	req.Header.Set("X-GitHub-Event", "issue_comment")
 	rec := httptest.NewRecorder()
-	handleBoundedProviderDelivery(t, gateway, bus, backend.inboundStore, rec, req, backend.runID, backend.entityID, "github", "github-webhook-secret")
+	handleBoundedProviderDelivery(t, gateway, bus, backend.inboundTarget, rec, req, "github", "github-webhook-secret")
 	if rec.Code != wantStatus {
 		t.Fatalf("%s gateway status for delivery %s = %d, want %d body=%s", backend.name, deliveryID, rec.Code, wantStatus, rec.Body.String())
 	}
