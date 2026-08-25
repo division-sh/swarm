@@ -12957,6 +12957,34 @@ flow_model:
       not by copy.
     enforcement: At boot, if the same event name appears in multiple flow event files, the platform logs a warning. The emitter
       flow's definition is authoritative.
+  compiled_event_schema_projection:
+    status: implemented_current_grammar_adapter
+    owner: internal/runtime/contracts.WorkflowContractBundle.CompiledEventSchemas
+    rule: >-
+      Downstream compilers consume one immutable admitted CompiledEventSchema projection and never inspect events.yaml,
+      EventCatalogEntry maps, required lists, package aliases, or generated-event registries directly. The projection
+      enumerates only exact importable authored declarations after package and event admission, in canonical
+      (package_key, qualified_event_name) order. Pattern declarations, generated events, provider imports, and
+      noncanonical package restatements do not become declaration identities.
+    fields: >-
+      Each declaration carries its canonical package key and qualified authored event name, authored classification,
+      a closed ordered field set with admitted semantic schema and IsOptional, an optional already-admitted scalar
+      business key, canonical acceptance-schema bytes and digest, and diagnostic source provenance. Diagnostic source
+      is never identity or hash input. Readbacks are mutation-isolated.
+    canonical_schema_owner: >-
+      internal/runtime/contracts eventSchemaFromCatalogEntry lowers admitted type meaning;
+      internal/runtime/eventschema.CanonicalAcceptanceSchema owns the accepted schema subset; and
+      internal/runtime/canonicaljson owns canonical bytes and their sha256 digest. Consumers must not reserialize or
+      independently hash raw event declarations.
+    current_grammar_adapter: >-
+      Until the presence-preserving T? grammar wave lands behind this same interface, IsOptional is derived once from
+      the admitted current required-list semantics. The interface does not preserve required-list syntax and no
+      downstream consumer may read that syntax.
+    migration_boundary: >-
+      This first slice publishes the stable compiled interface. The presence-preserving YAML substrate, T? grammar,
+      required-list retirement, business-key authoring, producer-only event schema ownership, provenance ledger, and
+      remaining decoder-family migrations land in the gated #2300 waves behind this interface without changing its
+      consumer semantics.
   stateless_flows:
     description: 'Some flows are stateless producers — they process events without tracking entity lifecycle. A signal-processing
       flow is an example: it receives inputs, filters them, and emits results without maintaining per-entity state.'

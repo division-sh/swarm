@@ -727,6 +727,8 @@ func cloneEventSchemaValue(value any) any {
 	switch typed := value.(type) {
 	case map[string]any:
 		return cloneEventSchemaMap(typed)
+	case []string:
+		return append([]string(nil), typed...)
 	case []any:
 		out := make([]any, len(typed))
 		for i := range typed {
