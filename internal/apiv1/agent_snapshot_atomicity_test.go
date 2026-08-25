@@ -34,6 +34,8 @@ type agentSnapshotTestStore interface {
 	AgentReadStore
 	storetest.AgentFixtureStore
 	storetest.ManagedAgentTurnFixtureStore
+	ListPendingAgentDeliveryFacts(context.Context, []agentidentity.Identity, time.Time) (map[agentidentity.Identity]operatorread.PendingAgentDeliveryFacts, error)
+	ListAgentDeliveryLifecycleFacts(context.Context, []agentidentity.Identity) (map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts, error)
 }
 
 type agentSnapshotBackend struct {
@@ -195,6 +197,60 @@ func TestAgentOperatorSummarySnapshotLatestTurnIsAtomicAcrossBackends(t *testing
 	}
 }
 
+func TestAgentPendingFactsSnapshotIsAtomicAcrossBackends(t *testing.T) {
+	for _, backend := range agentSnapshotBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := newAgentSnapshotBoundaryFixture(t, backend)
+			delivery := fixture.seedPendingDelivery(t)
+			var before map[agentidentity.Identity]operatorread.PendingAgentDeliveryFacts
+			fixture.readDeliveryWrapperAcrossBoundary(t, func() error {
+				var err error
+				before, err = fixture.store.ListPendingAgentDeliveryFacts(fixture.ctx, []agentidentity.Identity{fixture.identity}, time.Time{})
+				return err
+			}, func(exec agentSnapshotMutationExec, table string) {
+				fixture.settlePendingSnapshotDeliveryInTable(t, exec, table, delivery.deliveryID)
+			})
+			if got := before[fixture.identity].PendingCount; got != 1 {
+				t.Fatalf("snapshot pending facts count = %d, want complete before-state count 1", got)
+			}
+			after, err := fixture.store.ListPendingAgentDeliveryFacts(fixture.ctx, []agentidentity.Identity{fixture.identity}, time.Time{})
+			if err != nil {
+				t.Fatalf("load %s post-settlement pending facts: %v", backend.name, err)
+			}
+			if got := after[fixture.identity].PendingCount; got != 0 {
+				t.Fatalf("post-settlement pending facts count = %d, want 0", got)
+			}
+		})
+	}
+}
+
+func TestAgentLifecycleFactsSnapshotIsAtomicAcrossBackends(t *testing.T) {
+	for _, backend := range agentSnapshotBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := newAgentSnapshotBoundaryFixture(t, backend)
+			delivery := fixture.seedPendingDelivery(t)
+			var before map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts
+			fixture.readDeliveryWrapperAcrossBoundary(t, func() error {
+				var err error
+				before, err = fixture.store.ListAgentDeliveryLifecycleFacts(fixture.ctx, []agentidentity.Identity{fixture.identity})
+				return err
+			}, func(exec agentSnapshotMutationExec, table string) {
+				fixture.settlePendingSnapshotDeliveryInTable(t, exec, table, delivery.deliveryID)
+			})
+			if got := before[fixture.identity]; got.CurrentState != string(runtimedelivery.StateQueued) || got.BlockingLayer != "delivery_queue" {
+				t.Fatalf("snapshot lifecycle facts = %#v, want complete queued before-state", got)
+			}
+			after, err := fixture.store.ListAgentDeliveryLifecycleFacts(fixture.ctx, []agentidentity.Identity{fixture.identity})
+			if err != nil {
+				t.Fatalf("load %s post-settlement lifecycle facts: %v", backend.name, err)
+			}
+			if got := after[fixture.identity]; got != (operatorread.AgentDeliveryLifecycleFacts{}) {
+				t.Fatalf("post-settlement lifecycle facts = %#v, want empty", got)
+			}
+		})
+	}
+}
+
 func TestAgentOperatorDiagnosisSnapshotAggregateToPageIsAtomicAcrossBackends(t *testing.T) {
 	for _, backend := range agentSnapshotBackends() {
 		t.Run(backend.name, func(t *testing.T) {
@@ -277,6 +333,102 @@ func TestSelectedStoreAgentSnapshotHandlersExecuteAcrossBackends(t *testing.T) {
 				response := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":%q,"method":%q,"params":%s}`, tc.method, tc.method, tc.params))
 				if response.Error != nil {
 					t.Fatalf("%s %s error = %#v", backend.name, tc.method, response.Error)
+				}
+			}
+		})
+	}
+}
+
+func TestSelectedStoreAgentSnapshotHandlersPreserveOutputContractAcrossBackends(t *testing.T) {
+	for _, backend := range agentSnapshotBackends() {
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := newAgentSnapshotBoundaryFixture(t, backend)
+			fixture.setSessionLease(t, "snapshot-lease")
+			turnID := fixture.seedOutputContractTurn(t)
+			handler := testHandler(t, Options{
+				AuthTokens: []string{testToken},
+				Handlers: testOperatorHandlers(testOperatorCapabilities{
+					AgentConversations: fixture.store,
+				}),
+			})
+
+			list := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"list","method":"agent.list","params":{}}`)
+			if list.Error != nil {
+				t.Fatalf("%s agent.list error = %#v", backend.name, list.Error)
+			}
+			listed := requireAgentSnapshotRPCListItem(t, list.Result, fixture.identity.AgentID())
+			if listed["status"] != "idle" || listed["memory"] != true || listed["memory_source"] != "authored" {
+				t.Fatalf("%s agent.list canonical output = %#v", backend.name, listed)
+			}
+
+			get := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"get","method":"agent.get","params":{"agent_id":%q,"flow_instance":%q}}`, fixture.identity.AgentID(), fixture.identity.FlowInstance()))
+			if get.Error != nil {
+				t.Fatalf("%s agent.get error = %#v", backend.name, get.Error)
+			}
+			detail := asMap(t, get.Result)
+			agent := asMap(t, detail["agent"])
+			if agent["status"] != "idle" {
+				t.Fatalf("%s lease-backed agent status = %#v, want idle", backend.name, agent["status"])
+			}
+			sessionRef := asMap(t, detail["current_session_ref"])
+			if sessionRef["session_id"] != fixture.sessionID || sessionRef["started_at"] == "" {
+				t.Fatalf("%s current_session_ref = %#v", backend.name, sessionRef)
+			}
+			turnRef := asMap(t, detail["last_turn_ref"])
+			if turnRef["turn_id"] != turnID || turnRef["parse_ok"] != false || turnRef["completed_at"] == "" {
+				t.Fatalf("%s last_turn_ref = %#v", backend.name, turnRef)
+			}
+
+			diagnose := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"diagnose","method":"agent.diagnose","params":{"agent_id":%q,"flow_instance":%q}}`, fixture.identity.AgentID(), fixture.identity.FlowInstance()))
+			if diagnose.Error != nil {
+				t.Fatalf("%s agent.diagnose error = %#v", backend.name, diagnose.Error)
+			}
+			diagnosis := asMap(t, diagnose.Result)
+			if diagnosis["status"] != "idle" {
+				t.Fatalf("%s diagnosis status = %#v, want idle", backend.name, diagnosis["status"])
+			}
+			if _, ok := diagnosis["delivery_lifecycle"]; ok {
+				t.Fatalf("%s diagnosis exposed absent lifecycle: %#v", backend.name, diagnosis["delivery_lifecycle"])
+			}
+			active := asMap(t, diagnosis["active"])
+			if active["turn_id"] != turnID {
+				t.Fatalf("%s diagnosis active = %#v", backend.name, active)
+			}
+			if _, ok := active["task_id"]; ok {
+				t.Fatalf("%s diagnosis active exposed absent task_id: %#v", backend.name, active)
+			}
+			if _, ok := active["entity_id"]; ok {
+				t.Fatalf("%s diagnosis active exposed absent entity_id: %#v", backend.name, active)
+			}
+			lastTool := asMap(t, diagnosis["last_tool_outcome"])
+			if lastTool["turn_id"] != turnID || lastTool["tool_name"] != "selected_tool" || lastTool["tool_use_id"] != "toolu-selected" || lastTool["ok"] != false {
+				t.Fatalf("%s diagnosis last_tool_outcome = %#v", backend.name, lastTool)
+			}
+			for _, privateField := range []string{"output", "result"} {
+				if _, ok := lastTool[privateField]; ok {
+					t.Fatalf("%s diagnosis leaked private last-tool field %q: %#v", backend.name, privateField, lastTool)
+				}
+			}
+
+			emptyIdentity := sqliteAgentUsageIdentity(t, "snapshot-agent-b")
+			emptyGet := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"empty-get","method":"agent.get","params":{"agent_id":%q,"flow_instance":%q}}`, emptyIdentity.AgentID(), emptyIdentity.FlowInstance()))
+			if emptyGet.Error != nil {
+				t.Fatalf("%s empty agent.get error = %#v", backend.name, emptyGet.Error)
+			}
+			emptyDetail := asMap(t, emptyGet.Result)
+			for _, absent := range []string{"current_session_ref", "last_turn_ref"} {
+				if _, ok := emptyDetail[absent]; ok {
+					t.Fatalf("%s empty agent.get exposed %s: %#v", backend.name, absent, emptyDetail)
+				}
+			}
+			emptyDiagnose := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"empty-diagnose","method":"agent.diagnose","params":{"agent_id":%q,"flow_instance":%q}}`, emptyIdentity.AgentID(), emptyIdentity.FlowInstance()))
+			if emptyDiagnose.Error != nil {
+				t.Fatalf("%s empty agent.diagnose error = %#v", backend.name, emptyDiagnose.Error)
+			}
+			emptyDiagnosis := asMap(t, emptyDiagnose.Result)
+			for _, absent := range []string{"current_session_ref", "last_turn_ref", "delivery_lifecycle", "runtime_state", "active", "last_tool_outcome"} {
+				if _, ok := emptyDiagnosis[absent]; ok {
+					t.Fatalf("%s empty diagnosis exposed %s: %#v", backend.name, absent, emptyDiagnosis)
 				}
 			}
 		})
@@ -629,6 +781,16 @@ func (f agentSnapshotBoundaryFixture) insertSession(t *testing.T, exec agentSnap
 	}
 }
 
+func (f agentSnapshotBoundaryFixture) setSessionLease(t *testing.T, holder string) {
+	t.Helper()
+	expiresAt := time.Now().UTC().Add(time.Hour)
+	f.execDialect(t, f.db,
+		`UPDATE agent_sessions SET lease_holder=?, lease_expires_at=? WHERE session_id=?`,
+		`UPDATE agent_sessions SET lease_holder=$1, lease_expires_at=$2 WHERE session_id=$3::uuid`,
+		holder, expiresAt, f.sessionID,
+	)
+}
+
 func (f agentSnapshotBoundaryFixture) replaceSession(t *testing.T, exec agentSnapshotMutationExec, successorID string) {
 	t.Helper()
 	table := "agent_sessions"
@@ -680,6 +842,21 @@ func (f agentSnapshotBoundaryFixture) seedPendingDelivery(t *testing.T) agentSna
 
 func (f agentSnapshotBoundaryFixture) seedTurn(t *testing.T, output string) string {
 	t.Helper()
+	return f.seedTurnWithOutputContract(t, "snapshot-turn", "", true, []runtimellm.TurnBlock{{
+		Kind: "turn_summary", Data: json.RawMessage(fmt.Sprintf(`{"assistant_visible_output":%q,"outcome":"completed"}`, output)),
+	}})
+}
+
+func (f agentSnapshotBoundaryFixture) seedOutputContractTurn(t *testing.T) string {
+	t.Helper()
+	return f.seedTurnWithOutputContract(t, "", "", false, []runtimellm.TurnBlock{
+		{Kind: "tool_result", ToolName: "selected_tool", Output: json.RawMessage(`{"secret":"private-provider-output"}`), Data: json.RawMessage(`{"tool_use_id":"toolu-selected"}`)},
+		{Kind: "turn_summary", Data: json.RawMessage(`{"assistant_visible_output":"public summary","outcome":"failed"}`)},
+	})
+}
+
+func (f agentSnapshotBoundaryFixture) seedTurnWithOutputContract(t *testing.T, taskID, entityID string, parseOK bool, blocks []runtimellm.TurnBlock) string {
+	t.Helper()
 	eventID := uuid.NewString()
 	createdAt := time.Now().UTC().Add(-20 * time.Second)
 	event := storetest.InsertExistingRunRootEventRecord(
@@ -691,10 +868,8 @@ func (f agentSnapshotBoundaryFixture) seedTurn(t *testing.T, output string) stri
 	storetest.PersistManagedAgentTurnFixture(t, f.ctx, storetest.ManagedAgentTurnFixture{
 		Store: f.store, Selected: f.store, Identity: f.identity, RunID: f.runID,
 		SessionID: f.sessionID, TurnID: turnID, Memory: agentmemory.Authored(true), Event: event,
-		TaskID: "snapshot-turn", ParseOK: true, Latency: time.Millisecond, CreatedAt: createdAt,
-		TurnBlocks: []runtimellm.TurnBlock{{
-			Kind: "turn_summary", Data: json.RawMessage(fmt.Sprintf(`{"assistant_visible_output":%q,"outcome":"completed"}`, output)),
-		}},
+		TaskID: taskID, EntityID: entityID, ParseOK: parseOK, Latency: time.Millisecond, CreatedAt: createdAt,
+		TurnBlocks: blocks,
 	})
 	return turnID
 }
@@ -722,15 +897,20 @@ func (f agentSnapshotBoundaryFixture) replaceTurnSummary(t *testing.T, exec agen
 
 func (f agentSnapshotBoundaryFixture) settlePendingSnapshotDelivery(t *testing.T, exec agentSnapshotMutationExec, deliveryID string) {
 	t.Helper()
+	f.settlePendingSnapshotDeliveryInTable(t, exec, "event_deliveries", deliveryID)
+}
+
+func (f agentSnapshotBoundaryFixture) settlePendingSnapshotDeliveryInTable(t *testing.T, exec agentSnapshotMutationExec, table, deliveryID string) {
+	t.Helper()
 	now := time.Now().UTC()
-	query := `UPDATE event_deliveries
+	query := fmt.Sprintf(`UPDATE %s
 		SET status='delivered', next_eligible_at=NULL, settled_at=?, updated_at=?
-		WHERE delivery_id=? AND status='pending'`
+		WHERE delivery_id=? AND status='pending'`, table)
 	args := []any{now, now, deliveryID}
 	if !f.backend.sqlite {
-		query = `UPDATE event_deliveries
+		query = fmt.Sprintf(`UPDATE %s
 			SET status='delivered', next_eligible_at=NULL, settled_at=$1, updated_at=$1
-			WHERE delivery_id=$2::uuid AND status='pending'`
+			WHERE delivery_id=$2::uuid AND status='pending'`, table)
 		args = []any{now, deliveryID}
 	}
 	result, err := exec.ExecContext(f.ctx, query, args...)
@@ -739,6 +919,64 @@ func (f agentSnapshotBoundaryFixture) settlePendingSnapshotDelivery(t *testing.T
 	}
 	if changed, _ := result.RowsAffected(); changed != 1 {
 		t.Fatalf("settle %s pending snapshot delivery changed %d rows, want 1", f.backend.name, changed)
+	}
+}
+
+func (f agentSnapshotBoundaryFixture) readDeliveryWrapperAcrossBoundary(t *testing.T, read func() error, mutate func(agentSnapshotMutationExec, string)) {
+	t.Helper()
+	if f.backend.sqlite {
+		id := sqliteSnapshotBarrierID.Add(1)
+		barrier := &sqliteAgentSnapshotBarrier{entered: make(chan struct{}), release: make(chan struct{})}
+		sqliteSnapshotBarrierRegistry.Store(id, barrier)
+		t.Cleanup(func() { sqliteSnapshotBarrierRegistry.Delete(id) })
+		const source = "event_deliveries_snapshot_source"
+		if _, err := f.db.ExecContext(f.ctx, `ALTER TABLE event_deliveries RENAME TO event_deliveries_snapshot_source`); err != nil {
+			t.Fatalf("rename sqlite delivery snapshot table: %v", err)
+		}
+		if _, err := f.db.ExecContext(f.ctx, fmt.Sprintf(`CREATE VIEW event_deliveries AS SELECT * FROM %s WHERE agent_snapshot_barrier(%d)=1`, source, id)); err != nil {
+			t.Fatalf("create sqlite delivery snapshot barrier view: %v", err)
+		}
+		resultCh := make(chan error, 1)
+		go func() { resultCh <- read() }()
+		select {
+		case <-barrier.entered:
+		case <-time.After(10 * time.Second):
+			close(barrier.release)
+			t.Fatal("sqlite wrapper did not reach the delivery snapshot boundary")
+		}
+		mutate(f.db, source)
+		close(barrier.release)
+		receiveAgentSnapshotWrapper(t, resultCh)
+		return
+	}
+
+	blocker, err := f.db.BeginTx(f.ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Rollback()
+	if _, err := blocker.ExecContext(f.ctx, `LOCK TABLE event_deliveries IN ACCESS EXCLUSIVE MODE`); err != nil {
+		t.Fatalf("lock postgres delivery wrapper boundary: %v", err)
+	}
+	resultCh := make(chan error, 1)
+	go func() { resultCh <- read() }()
+	waitForPostgresAgentSnapshotReadBlock(t, f.ctx, f.db, "event_deliveries")
+	mutate(blocker, "event_deliveries")
+	if err := blocker.Commit(); err != nil {
+		t.Fatalf("commit postgres delivery wrapper boundary: %v", err)
+	}
+	receiveAgentSnapshotWrapper(t, resultCh)
+}
+
+func receiveAgentSnapshotWrapper(t *testing.T, resultCh <-chan error) {
+	t.Helper()
+	select {
+	case err := <-resultCh:
+		if err != nil {
+			t.Fatalf("read atomic agent wrapper snapshot: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("agent wrapper snapshot read did not complete")
 	}
 }
 
@@ -1009,4 +1247,20 @@ func requireSnapshotAgent(t *testing.T, result operatorread.OperatorAgentListRes
 	}
 	t.Fatalf("agent %s missing from snapshot: %#v", agentID, result.Agents)
 	return operatorread.OperatorAgentSummary{}
+}
+
+func requireAgentSnapshotRPCListItem(t *testing.T, result any, agentID string) map[string]any {
+	t.Helper()
+	items, ok := asMap(t, result)["agents"].([]any)
+	if !ok {
+		t.Fatalf("agent.list agents = %#v, want array", asMap(t, result)["agents"])
+	}
+	for _, item := range items {
+		agent := asMap(t, item)
+		if agent["agent_id"] == agentID {
+			return agent
+		}
+	}
+	t.Fatalf("agent.list missing %s: %#v", agentID, items)
+	return nil
 }

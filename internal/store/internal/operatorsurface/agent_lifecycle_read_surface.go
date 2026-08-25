@@ -3,6 +3,7 @@ package operatorsurface
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
@@ -29,11 +30,16 @@ func (s *AgentPostgres) ListAgentDeliveryLifecycleFacts(ctx context.Context, ide
 	if len(normalized) == 0 {
 		return map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts{}, nil
 	}
-	asOf, err := operatorPostgresDelivery.CaptureSnapshotTime(ctx, s.backend)
+	tx, err := s.backend.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		return nil, err
 	}
-	records, err := s.listAgentLifecycleRecordsSpec(ctx, normalized, asOf)
+	defer tx.Rollback()
+	asOf, err := operatorPostgresDelivery.CaptureSnapshotTime(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	records, err := s.listAgentLifecycleRecordsSpec(ctx, tx, normalized, asOf)
 	if err != nil {
 		return nil, err
 	}
@@ -48,11 +54,17 @@ func (s *AgentPostgres) ListAgentDeliveryLifecycleFacts(ctx context.Context, ide
 	for _, identity := range normalized {
 		out[identity] = canonicalAgentDeliveryLifecycleFactsFromRecords(grouped[identity])
 	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit postgres agent lifecycle facts snapshot: %w", err)
+	}
 	return out, nil
 }
 
-func (s *AgentPostgres) listAgentLifecycleRecordsSpec(ctx context.Context, identities []agentidentity.Identity, asOf time.Time) ([]agentLifecycleDeliveryRecord, error) {
-	snapshots, err := operatorPostgresDelivery.CurrentAgentSnapshots(ctx, s.backend, identities, asOf)
+func (s *AgentPostgres) listAgentLifecycleRecordsSpec(ctx context.Context, tx *sql.Tx, identities []agentidentity.Identity, asOf time.Time) ([]agentLifecycleDeliveryRecord, error) {
+	if tx == nil {
+		return nil, fmt.Errorf("postgres agent lifecycle facts transaction is required")
+	}
+	snapshots, err := operatorPostgresDelivery.CurrentAgentSnapshots(ctx, tx, identities, asOf)
 	if err != nil {
 		return nil, err
 	}
