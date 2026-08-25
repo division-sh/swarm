@@ -1,2 +1,2 @@
 task.requested:
-  value: string
+  value: string?

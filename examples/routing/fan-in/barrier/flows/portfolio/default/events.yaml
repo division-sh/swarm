@@ -1,8 +1,4 @@
 portfolio.setup:
-  portfolio_id: text
-  expected_operating_ids: [text]
-  period_id: text
-operating.reported:
-  operating_id: text
-  period_id: text
-  revenue: integer
+  portfolio_id: text?
+  expected_operating_ids: "[text]?"
+  period_id: text?

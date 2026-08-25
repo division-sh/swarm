@@ -425,7 +425,7 @@ func triggerEventDescriptors(manifest Manifest) []packs.TriggerEventDescriptor {
 		descriptor := packs.TriggerEventDescriptor{Event: name, Kind: string(output.Kind)}
 		if entry, ok := entries[name]; ok {
 			required := map[string]struct{}{}
-			for _, field := range entry.Required {
+			for _, field := range entry.Payload.Required {
 				required[field] = struct{}{}
 			}
 			for fieldName, field := range entry.Payload.Properties {

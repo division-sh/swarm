@@ -121,24 +121,22 @@ pins:
     events: [subject.observed]
 `)
 	entityIDField := ""
-	entityIDRequired := ""
 	switch entityID {
 	case RootStaticNoEntityID:
 	case RootStaticOptionalEntityID:
-		entityIDField = "  entity_id: string\n"
+		entityIDField = "  entity_id: string?\n"
 	case RootStaticRequiredEntityID:
 		entityIDField = "  entity_id: string\n"
-		entityIDRequired = "  required:\n    - entity_id\n"
 	default:
 		t.Fatalf("unsupported root static entity ID variant %d", entityID)
 	}
 	writeClosedVariantFile(t, root, "events.yaml", `subject.created:
   swarm:
     source: external
-`+entityIDField+`  display_name: string
-`+entityIDRequired+`subject.observed:
-`+entityIDField+`  display_name: string
-`+entityIDRequired)
+`+entityIDField+`  display_name: string?
+subject.observed:
+`+entityIDField+`  display_name: string?
+`)
 	writeClosedVariantFile(t, root, "entities.yaml", "subject:\n  display_name: text\n")
 	var nodes string
 	switch handler {
@@ -372,7 +370,7 @@ pins:
         carries:
           vertical_id: {from: payload.vertical_id, type: string}
 `,
-		"flows/consumer/policy.yaml": "{}\n", "flows/consumer/agents.yaml": "{}\n", "flows/consumer/events.yaml": "deploy.done:\n  vertical_id: string\n",
+		"flows/consumer/policy.yaml": "{}\n", "flows/consumer/agents.yaml": "{}\n", "flows/consumer/events.yaml": "{}\n",
 		"flows/consumer/entities.yaml": "deployment:\n  vertical_id:\n    type: string\n",
 		"flows/consumer/nodes.yaml":    "consumer-node:\n  id: consumer-node-{instance_id}\n  execution_type: system_node\n  event_handlers:\n    deploy.done: {}\n",
 	}
@@ -396,12 +394,12 @@ flows:
 		"events.yaml": `approval.completed:
   swarm:
     source: external
-  entity_id: string
-  instance_id: string
-  product_id: string
+  entity_id: string?
+  instance_id: string?
+  product_id: string?
 opco.spinup_requested:
-  instance_id: string
-  product_id: string
+  instance_id: string?
+  product_id: string?
 `,
 		"nodes.yaml": `approval-router:
   id: approval-router
@@ -436,9 +434,9 @@ auto_emit_on_create:
 `,
 		"flows/operating/entities.yaml": "operating_state: {}\n",
 		"flows/operating/events.yaml": `opco.product_initialization_requested:
-  product_id: string
+  product_id: string?
 component_scaffold.spawn_requested:
-  product_id: string
+  product_id: string?
 `,
 		"flows/operating/nodes.yaml": `lifecycle-orchestrator:
   id: lifecycle-orchestrator

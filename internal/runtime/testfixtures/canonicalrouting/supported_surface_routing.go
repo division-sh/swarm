@@ -225,7 +225,7 @@ pins:
       - name: deploy_completed
         event: deploy.done
 `)
-	writeClosedVariantFile(t, root, "events.yaml", "deploy.done: {}\n")
+	writeClosedVariantFile(t, root, "events.yaml", "{}\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "root_state: {}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-receiver:
   id: root-receiver

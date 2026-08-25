@@ -109,7 +109,8 @@ func TestResolveFlowEventProof_TemplateInstanceOutputUsesTemplateCatalog(t *test
 		},
 	}
 
-	proof := ResolveFlowEventProof(Wrap(bundle), "child", "child/inst-1/child.done")
+	source := Wrap(bundle)
+	proof := ResolveFlowEventProof(source, "child", "child/inst-1/child.done")
 	if !proof.HasSchema {
 		t.Fatal("expected concrete template instance event to resolve template schema proof")
 	}
@@ -124,6 +125,13 @@ func TestResolveFlowEventProof_TemplateInstanceOutputUsesTemplateCatalog(t *test
 	}
 	if proof.Entry.Payload.Properties["step"].Type != "string" {
 		t.Fatalf("Entry payload = %#v, want step string", proof.Entry.Payload)
+	}
+	if proof.IsAuthored(source) {
+		t.Fatal("concrete template-instance event identity must not become an authored declaration")
+	}
+	declaration := ResolveFlowEventProof(source, "child", "child/child.done")
+	if !declaration.IsAuthored(source) {
+		t.Fatalf("template declaration proof = %#v, want authored identity", declaration)
 	}
 }
 

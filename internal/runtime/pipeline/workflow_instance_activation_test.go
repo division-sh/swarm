@@ -1412,7 +1412,7 @@ auto_emit_on_create:
 		"flows/operating/events.yaml": `opco.product_initialization_requested:
   entity_id: string
 opco.ceo_ready:
-  entity_id: string
+  entity_id: string?
 `,
 		"flows/operating/nodes.yaml": `lifecycle-orchestrator:
   id: lifecycle-orchestrator

@@ -1,4 +1,4 @@
 task.requested:
   swarm:
     source: external
-orphan.unconsumed:
+orphan.unconsumed: {}

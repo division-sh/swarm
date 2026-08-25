@@ -1,7 +1,6 @@
 job.start:
-  mode: string
-  threshold: string
-job.complete:
-processor/process.run:
-processor/process.done:
-process.done:
+  mode: string?
+  threshold: string?
+job.complete: {}
+processor/process.run: {}
+processor/process.done: {}

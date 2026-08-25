@@ -1,5 +1,5 @@
 task.started:
   swarm:
     source: external
-timer.task_timeout:
-task.timed_out:
+timer.task_timeout: {}
+task.timed_out: {}

@@ -1,8 +1,8 @@
-start.all:
-work.begin:
-all.done:
-flow-a/work.begin:
-flow-a/internal.step2:
-flow-a/alpha.done:
-flow-b/work.begin:
-flow-b/beta.done:
+start.all: {}
+work.begin: {}
+all.done: {}
+flow-a/work.begin: {}
+flow-a/internal.step2: {}
+flow-a/alpha.done: {}
+flow-b/work.begin: {}
+flow-b/beta.done: {}

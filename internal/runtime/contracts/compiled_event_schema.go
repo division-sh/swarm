@@ -315,7 +315,7 @@ func (b *WorkflowContractBundle) compileCurrentEventDeclaration(
 		qualifiedName,
 		entry,
 		types,
-		"",
+		entry.BusinessKeyField,
 		CompiledEventSchemaSource{FlowID: strings.TrimSpace(flowID), Layer: layer, File: strings.TrimSpace(sourceFile)},
 	)
 	if err != nil {

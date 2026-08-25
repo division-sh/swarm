@@ -181,7 +181,7 @@ func ActivityApprovalEventCatalogEntry(site ActivitySite, revision bool) EventCa
 		Swarm: EventSwarmMetadata{Note: note, Source: "contract_derived_activity_approval", Producer: []string{site.Node.Key()}, Status: "generated"},
 		Note:  note, Emitter: EventEmitterRef{NodeID: site.Node.Key()}, EmitterType: "system_node",
 		Producer: []string{site.Node.Key()}, Source: "contract_derived_activity_approval", Status: "generated",
-		OwningNode: site.Node.Key(), Payload: EventPayloadSpec{Type: "object", Properties: properties, Required: required}, Required: required,
+		OwningNode: site.Node.Key(), Payload: EventPayloadSpec{Type: "object", Properties: properties, Required: required},
 		Consumer: []string{},
 	}
 }
@@ -270,7 +270,6 @@ func ActivityResultEventCatalogEntry(site ActivitySite, tool ToolSchemaEntry, st
 			Properties: properties,
 			Required:   required,
 		},
-		Required: required,
 		Consumer: []string{},
 	}
 }

@@ -111,7 +111,10 @@ func TestCompiledRoutingStringerGuardRejectsPromotedAndInterfaceConversions(t *t
 func TestCompiledConnectCompilerInputBoundaryRejectsBehavioralRawConnectAccess(t *testing.T) {
 	assertProductionSelectorCallsConfined(t, map[string]struct{}{
 		"CompositionConnects": {},
-	}, "internal/runtime/core/pinrouting/connect_route_plan.go")
+	}, map[string]struct{}{
+		"internal/runtime/core/pinrouting/connect_route_plan.go": {},
+		"internal/runtime/contracts/event_schema_ownership.go":   {},
+	})
 }
 
 func TestCompiledConnectCompilerInputBoundaryRejectsResolvedConnectHelper(t *testing.T) {
@@ -552,7 +555,7 @@ func assertProductionIdentifiersConfined(t testing.TB, names map[string]struct{}
 	}
 }
 
-func assertProductionSelectorCallsConfined(t testing.TB, names map[string]struct{}, allowedFile string) {
+func assertProductionSelectorCallsConfined(t testing.TB, names, allowedFiles map[string]struct{}) {
 	t.Helper()
 	scanProductionGoFiles(t, func(relative string, parsed *ast.File) {
 		ast.Inspect(parsed, func(node ast.Node) bool {
@@ -564,8 +567,9 @@ func assertProductionSelectorCallsConfined(t testing.TB, names map[string]struct
 			if !ok {
 				return true
 			}
-			if _, guarded := names[selector.Sel.Name]; guarded && relative != filepath.ToSlash(allowedFile) {
-				t.Errorf("%s calls confined compiled-connect input %s; only %s may own it", relative, selector.Sel.Name, allowedFile)
+			_, allowed := allowedFiles[relative]
+			if _, guarded := names[selector.Sel.Name]; guarded && !allowed {
+				t.Errorf("%s calls confined compiled-connect input %s; allowed owners are %#v", relative, selector.Sel.Name, allowedFiles)
 			}
 			return true
 		})

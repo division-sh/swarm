@@ -28,10 +28,10 @@ func CopyRuntimeAgentMemory(t testing.TB, variant RuntimeAgentMemoryVariant) str
 	for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml", "nodes.yaml"} {
 		writeClosedVariantFile(t, root, file, "{}\n")
 	}
-	writeClosedVariantFile(t, root, "events.yaml", "item.created:\n  swarm:\n    source: external (bootstrap fixture)\n  entity_id: string\n")
+	writeClosedVariantFile(t, root, "events.yaml", "item.created:\n  swarm:\n    source: external (bootstrap fixture)\n  entity_id: string?\n")
 	writeClosedVariantFile(t, root, "flows/support/schema.yaml", "name: support\ninitial_state: waiting\nstates:\n  - waiting\n")
 	writeClosedVariantFile(t, root, "flows/support/policy.yaml", "{}\n")
-	writeClosedVariantFile(t, root, "flows/support/events.yaml", "support/item.created:\n  entity_id: string\n")
+	writeClosedVariantFile(t, root, "flows/support/events.yaml", "support/item.created:\n  entity_id: string?\n")
 	agentBody := "backend:\n  type: generic\n  role: backend\n  intent: prompts/backend.md\n  model: regular\n  memory: true\n  subscriptions:\n    - support/item.created\n  emit_events:\n    - support/item.created\n"
 	if variant == RuntimeAgentMemoryPackageBacked {
 		writeClosedVariantFile(t, root, "flows/support/package.yaml", "name: support\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n")
@@ -98,6 +98,8 @@ func CopyEventMetadataAuthority(t testing.TB, variant EventMetadataAuthorityVari
 	events := "external.requested:\n  swarm:\n" + externalRequestedSwarm + "\ntask.start:\n  swarm:\n    source: external\ntask.done:\n"
 	if taskDoneSwarm != "" {
 		events += "  swarm:\n" + taskDoneSwarm
+	} else {
+		events += "  description: internally produced completion\n"
 	}
 	writeClosedVariantFile(t, root, "events.yaml", events)
 	writeClosedVariantFile(t, root, "nodes.yaml", "worker:\n  id: worker\n  execution_type: system_node\n"+timerBlock+"  event_handlers:\n    task.start:\n      emit:\n        event: task.done\nobserver:\n  id: observer\n  execution_type: system_node\n  event_handlers:\n    task.done: {}\n")

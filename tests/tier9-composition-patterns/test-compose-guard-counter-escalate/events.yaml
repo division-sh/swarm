@@ -1,2 +1,2 @@
-retry.requested:
-limit.reached:
+retry.requested: {}
+limit.reached: {}

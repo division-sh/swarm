@@ -45,6 +45,7 @@ type WorkflowContractBundle struct {
 	projectContracts      map[string]ProjectContractView
 	flowTypes             map[string]TypeCatalogDocument
 	flowEntities          map[string]EntityContractsDocument
+	effectiveProvenance   EffectiveProvenanceLedger
 	scopedNodes           map[string]SystemNodeContract
 	scopedEvents          map[string]EventCatalogEntry
 	scopedAgents          map[string]AgentRegistryEntry
@@ -1850,24 +1851,25 @@ type SystemNodeEventHandler struct {
 	Clear                *ClearSpec                `yaml:"clear"`
 }
 type EventCatalogEntry struct {
-	Swarm              EventSwarmMetadata `yaml:"swarm"`
-	Note               string             `yaml:"_note"`
-	Emitter            EventEmitterRef    `yaml:"emitter"`
-	EmitterType        string             `yaml:"emitter_type"`
-	Producer           []string           `yaml:"producer"`
-	AlternateEmitters  []string           `yaml:"alternate_emitters"`
-	Consumer           []string           `yaml:"consumer"`
-	ConsumerType       []string           `yaml:"consumer_type"`
-	Source             string             `yaml:"_source"`
-	Status             string             `yaml:"_status"`
-	Intercepted        bool               `yaml:"intercepted"`
-	Passthrough        bool               `yaml:"passthrough"`
-	RuntimeHandling    string             `yaml:"runtime_handling"`
-	OwningNode         string             `yaml:"owning_node"`
-	DeliveryChannel    string             `yaml:"delivery_channel"`
-	Payload            EventPayloadSpec   `yaml:"payload"`
-	Required           []string           `yaml:"required"`
-	AuthorSummaryField string             `yaml:"author_summary_field,omitempty"`
+	Swarm               EventSwarmMetadata `yaml:"swarm"`
+	BusinessKeyField    string             `yaml:"key"`
+	Note                string             `yaml:"_note"`
+	Emitter             EventEmitterRef    `yaml:"emitter"`
+	EmitterType         string             `yaml:"emitter_type"`
+	Producer            []string           `yaml:"producer"`
+	AlternateEmitters   []string           `yaml:"alternate_emitters"`
+	Consumer            []string           `yaml:"consumer"`
+	ConsumerType        []string           `yaml:"consumer_type"`
+	Source              string             `yaml:"_source"`
+	Status              string             `yaml:"_status"`
+	Intercepted         bool               `yaml:"intercepted"`
+	Passthrough         bool               `yaml:"passthrough"`
+	RuntimeHandling     string             `yaml:"runtime_handling"`
+	OwningNode          string             `yaml:"owning_node"`
+	DeliveryChannel     string             `yaml:"delivery_channel"`
+	Payload             EventPayloadSpec   `yaml:"payload"`
+	AuthorSummaryField  string             `yaml:"author_summary_field,omitempty"`
+	admissionProvenance map[string]EffectiveValueProvenance
 }
 type EventSwarmMetadata struct {
 	Note     string   `yaml:"note,omitempty"`

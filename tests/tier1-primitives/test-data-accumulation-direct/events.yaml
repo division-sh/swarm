@@ -1,4 +1,4 @@
 item.received:
-  name: string
-  score: integer
-item.stored:
+  name: string?
+  score: integer?
+item.stored: {}

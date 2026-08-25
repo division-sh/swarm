@@ -1,2 +1,2 @@
-process.run:
-process.done:
+process.run: {}
+process.done: {}

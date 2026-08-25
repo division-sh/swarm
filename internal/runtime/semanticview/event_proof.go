@@ -127,6 +127,54 @@ func (p FlowEventProof) EventKey() string {
 	return p.DisplayName()
 }
 
+// IsAuthored reports whether the proof's exact canonical event identity is an
+// authored declaration. Concrete template-instance identities are runtime
+// occurrences, not additional authored declarations.
+func (p FlowEventProof) IsAuthored(source Source) bool {
+	if source == nil || !p.HasSchema {
+		return false
+	}
+	canonical := runtimeeventidentity.Normalize(p.Canonical)
+	if canonical == "" {
+		return false
+	}
+	authored := source.AuthoredResolvedEventCatalog()
+	if _, ok := source.AuthoredEventEntries()[canonical]; ok {
+		return true
+	}
+	for _, scope := range source.FlowScopes() {
+		for eventType := range scope.Events {
+			if _, ok := authored[runtimeeventidentity.Normalize(eventType)]; !ok {
+				continue
+			}
+			declared := runtimeeventidentity.Normalize(source.ResolveFlowEventReference(scope.ID, eventType))
+			if declared == canonical {
+				return true
+			}
+		}
+	}
+	for _, scope := range source.ProjectScopes() {
+		for eventType := range scope.Events {
+			if _, ok := authored[runtimeeventidentity.Normalize(eventType)]; !ok {
+				continue
+			}
+			declared := runtimeeventidentity.Normalize(eventType)
+			if strings.TrimSpace(scope.OwningFlowID) != "" {
+				declared = runtimeeventidentity.Normalize(source.ResolveFlowEventReference(scope.OwningFlowID, eventType))
+			}
+			if declared == canonical {
+				return true
+			}
+		}
+	}
+	for eventType := range authored {
+		if runtimeeventidentity.Normalize(eventType) == canonical {
+			return true
+		}
+	}
+	return false
+}
+
 func (p FlowEventProof) CrossesDeclaredOutputBoundary(source Source) bool {
 	if source == nil {
 		return false

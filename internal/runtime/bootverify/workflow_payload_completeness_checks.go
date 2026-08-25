@@ -129,8 +129,7 @@ type payloadCompletenessEmitSite struct {
 }
 
 func payloadCompletenessRequiredFields(entry runtimecontracts.EventCatalogEntry) []string {
-	required := append([]string{}, entry.Required...)
-	required = append(required, entry.Payload.Required...)
+	required := append([]string{}, entry.Payload.Required...)
 	return uniquePayloadCompletenessStrings(required...)
 }
 
@@ -191,7 +190,7 @@ func payloadCompletenessDeclaredFields(entry runtimecontracts.EventCatalogEntry)
 			out[field] = struct{}{}
 		}
 	}
-	for _, field := range append(entry.Required, entry.Payload.Required...) {
+	for _, field := range entry.Payload.Required {
 		field = strings.TrimSpace(field)
 		if field != "" {
 			out[field] = struct{}{}
@@ -252,7 +251,7 @@ func payloadCompletenessTriggerSchemaState(entry runtimecontracts.EventCatalogEn
 		return "no"
 	}
 	required := map[string]struct{}{}
-	for _, item := range append(entry.Required, entry.Payload.Required...) {
+	for _, item := range entry.Payload.Required {
 		item = strings.TrimSpace(item)
 		if item != "" {
 			required[item] = struct{}{}

@@ -446,8 +446,7 @@ func generatedInputFixtureBundle() *runtimecontracts.WorkflowContractBundle {
 				runtimecontracts.ToolSchemaString,
 				runtimecontracts.ToolSchemaFormat("uuid"),
 			))},
-		}},
-		Required: []string{"alpha", "id"},
+		}, Required: []string{"alpha", "id"}},
 	}
 	betaEntry := runtimecontracts.EventCatalogEntry{
 		Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
@@ -455,8 +454,7 @@ func generatedInputFixtureBundle() *runtimecontracts.WorkflowContractBundle {
 				runtimecontracts.ToolSchemaInteger,
 				runtimecontracts.ToolSchemaMinimum(2),
 			))},
-		}},
-		Required: []string{"beta"},
+		}, Required: []string{"beta"}},
 	}
 	unsupportedEntry := runtimecontracts.EventCatalogEntry{
 		Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
@@ -465,8 +463,7 @@ func generatedInputFixtureBundle() *runtimecontracts.WorkflowContractBundle {
 				runtimecontracts.ToolSchemaMinLength(1),
 				runtimecontracts.ToolSchemaPattern("^[A-Z]+$"),
 			))},
-		}},
-		Required: []string{"code"},
+		}, Required: []string{"code"}},
 	}
 	alpha := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "alpha", Flow: "alpha", PackageKey: "flows/alpha"},

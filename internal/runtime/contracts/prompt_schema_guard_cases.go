@@ -7,6 +7,7 @@ import (
 type PromptSchemaGuardCase struct {
 	IntentSource     string
 	IntentContent    string
+	FlowID           string
 	EmitTool         string
 	RequiredTopLevel []string
 	ForbiddenTokens  []string
@@ -36,7 +37,7 @@ func DerivePromptSchemaGuards(bundle *WorkflowContractBundle) []PromptSchemaGuar
 			if emitEvent == "" {
 				continue
 			}
-			eventEntry, ok := bundle.EventEntry(emitEvent)
+			eventEntry, _, _, ok := effectiveEventDeclarationForFlowEvent(bundle, record.OwnerFlowID, emitEvent)
 			if !ok {
 				continue
 			}
@@ -52,6 +53,7 @@ func DerivePromptSchemaGuards(bundle *WorkflowContractBundle) []PromptSchemaGuar
 			cases = append(cases, PromptSchemaGuardCase{
 				IntentSource:     entry.ResolvedIntent.Coordinate,
 				IntentContent:    entry.ResolvedIntent.Content,
+				FlowID:           record.OwnerFlowID,
 				EmitTool:         "emit_" + strings.ReplaceAll(emitEvent, ".", "_"),
 				RequiredTopLevel: required,
 			})

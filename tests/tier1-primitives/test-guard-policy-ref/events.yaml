@@ -1,3 +1,3 @@
 check.requested:
-  region: string
-check.passed:
+  region: string?
+check.passed: {}

@@ -1,6 +1,6 @@
 spawn.requested:
-  instance_id: string
-  name: string
-  priority: integer
-  owner: string
-spawn.done:
+  instance_id: string?
+  name: string?
+  priority: integer?
+  owner: string?
+spawn.done: {}

@@ -1464,33 +1464,6 @@ func wave1FieldNodeAllowedKeys(opts wave1FieldNodeOptions) map[string]struct{} {
 	return allowed
 }
 
-func wave1FieldNodeSupportsKey(opts wave1FieldNodeOptions, key string) bool {
-	if strings.TrimSpace(key) == "of" {
-		return true
-	}
-	_, ok := wave1FieldNodeAllowedKeys(opts)[strings.TrimSpace(key)]
-	return ok
-}
-
-func eventPayloadNodeIsRetiredNestedBlock(node *yaml.Node) bool {
-	if node == nil || node.Kind != yaml.MappingNode {
-		return false
-	}
-	if hasAnyYAMLMappingKey(node, "properties", "fields", "shape", "required") {
-		return true
-	}
-	hasType := hasYAMLMappingKey(node, "type")
-	opts := wave1FieldNodeOptions{Context: "event payload field", AllowCitation: true}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		if key == "" || wave1FieldNodeSupportsKey(opts, key) {
-			continue
-		}
-		return !hasType
-	}
-	return false
-}
-
 func decodeSchemaRefinementPattern(node *yaml.Node) (string, error) {
 	pattern, err := decodeScalarStringNode(node)
 	if err != nil {
@@ -1697,27 +1670,6 @@ func parseWave1MapTypeRef(raw string) (string, string, bool) {
 func isBuiltinWave1Scalar(raw string) bool {
 	_, ok := builtinWave1ScalarTypes[strings.TrimSpace(raw)]
 	return ok
-}
-
-func buildFlatEventPayloadSpec(node *yaml.Node) (EventPayloadSpec, error) {
-	spec := EventPayloadSpec{Properties: map[string]EventFieldSpec{}}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		value := node.Content[i+1]
-		if key == "" || strings.HasPrefix(key, "_") {
-			continue
-		}
-		switch key {
-		case "description", "swarm", "emitter", "emitter_type", "producer", "_producer", "alternate_emitters", "consumer", "_consumer", "consumer_type", "_consumer_type", "_source", "_status", "_note", "intercepted", "passthrough", "runtime_handling", "owning_node", "delivery_channel", "required", "author_summary_field":
-			continue
-		}
-		var field EventFieldSpec
-		if err := value.Decode(&field); err != nil {
-			return EventPayloadSpec{}, err
-		}
-		spec.Properties[key] = field
-	}
-	return spec, nil
 }
 
 type wave1FieldNodeOptions struct {

@@ -1,4 +1,4 @@
 ticket.opened:
-  ticket_id: string
+  ticket_id: string?
 ticket.closed:
-  ticket_id: string
+  ticket_id: string?

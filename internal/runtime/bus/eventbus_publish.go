@@ -1597,7 +1597,7 @@ func (eb *EventBus) withAuthorActivityEventDescriptor(ctx context.Context, evt e
 		return ctx, nil
 	}
 	disposition := runtimeauthoractivity.StoryDifferent
-	if _, authored := eb.semanticSource.AuthoredResolvedEventCatalog()[strings.TrimSpace(proof.CatalogKey)]; authored {
+	if proof.IsAuthored(eb.semanticSource) {
 		disposition = runtimeauthoractivity.StoryAuthored
 	}
 	return runtimeauthoractivity.WithResolvedEventDescriptor(ctx, scope, runtimeauthoractivity.EventDescriptor{

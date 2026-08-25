@@ -121,7 +121,9 @@ func mergeEventCatalogEntry(existing EventCatalogEntry, incoming EventCatalogEnt
 	if merged.Payload, ok = mergeEventPayloadSpec(existing.Payload, incoming.Payload); !ok {
 		return EventCatalogEntry{}, false
 	}
-	merged.Required = mergeStringLists(existing.Required, incoming.Required)
+	if merged.BusinessKeyField, ok = mergeStringValue(existing.BusinessKeyField, incoming.BusinessKeyField); !ok {
+		return EventCatalogEntry{}, false
+	}
 	return merged, true
 }
 

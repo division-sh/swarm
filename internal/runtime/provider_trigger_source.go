@@ -357,7 +357,6 @@ func cloneProviderTriggerEventCatalogEntry(in runtimecontracts.EventCatalogEntry
 	out.AlternateEmitters = append([]string(nil), in.AlternateEmitters...)
 	out.Consumer = append([]string(nil), in.Consumer...)
 	out.ConsumerType = append([]string(nil), in.ConsumerType...)
-	out.Required = append([]string(nil), in.Required...)
 	out.Payload.Required = append([]string(nil), in.Payload.Required...)
 	out.Payload.Properties = make(map[string]runtimecontracts.EventFieldSpec, len(in.Payload.Properties))
 	for name, field := range in.Payload.Properties {

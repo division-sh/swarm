@@ -1059,8 +1059,7 @@ flows: []
 }
 
 func TestEventCatalogEntryDecode_AcceptsFlatWave1PayloadGrammar(t *testing.T) {
-	var entry EventCatalogEntry
-	if err := yaml.Unmarshal([]byte(`
+	entry, err := admitEventCatalogEntryForTest(t, `
 swarm:
   note: root handoff
   source: scoring
@@ -1068,8 +1067,9 @@ vertical_name: text
 composite_score:
   type: numeric
   description: final score
-`), &entry); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
+`)
+	if err != nil {
+		t.Fatalf("admit event catalog entry: %v", err)
 	}
 	if got := entry.Note; got != "root handoff" {
 		t.Fatalf("Note = %q", got)
@@ -1083,13 +1083,13 @@ composite_score:
 }
 
 func TestEventCatalogEntryDecode_AuthorSummaryFieldIsMetadataNotPayload(t *testing.T) {
-	var entry EventCatalogEntry
-	if err := yaml.Unmarshal([]byte(`
+	entry, err := admitEventCatalogEntryForTest(t, `
 chat_id: text
 text: text
 author_summary_field: text
-`), &entry); err != nil {
-		t.Fatalf("yaml.Unmarshal: %v", err)
+`)
+	if err != nil {
+		t.Fatalf("admit event catalog entry: %v", err)
 	}
 	if entry.AuthorSummaryField != "text" {
 		t.Fatalf("AuthorSummaryField = %q, want text", entry.AuthorSummaryField)
@@ -1103,12 +1103,11 @@ author_summary_field: text
 }
 
 func TestEventCatalogEntryDecode_RejectsMixedPayloadBlockAndFlatFields(t *testing.T) {
-	var entry EventCatalogEntry
-	err := yaml.Unmarshal([]byte(`
+	_, err := admitEventCatalogEntryForTest(t, `
 payload:
   entity_id: uuid
 vertical_name: text
-`), &entry)
+`)
 	if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "payload") {
 		t.Fatalf("yaml.Unmarshal error = %v, want RETIRED nested payload rejection", err)
 	}

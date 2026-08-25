@@ -116,7 +116,7 @@ func ResolveEventFieldType(bundle *WorkflowContractBundle, flowID, eventType, fi
 	if field == "" {
 		return CatalogTypeReference{}, false
 	}
-	entry, _, catalog, ok := eventSchemaDeclarationForFlowEvent(bundle, flowID, eventType)
+	entry, _, catalog, ok := effectiveEventDeclarationForFlowEvent(bundle, flowID, eventType)
 	if !ok {
 		return CatalogTypeReference{}, false
 	}

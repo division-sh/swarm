@@ -687,7 +687,6 @@ func TestCompileConnectPlansLoadedPackagePinsExactCanonicalEventIdentity(t *test
 		"flows/producer/events.yaml",
 		"flows/producer/nodes.yaml",
 		"flows/producer/schema.yaml",
-		"flows/consumer/events.yaml",
 		"flows/consumer/nodes.yaml",
 		"flows/consumer/schema.yaml",
 	} {

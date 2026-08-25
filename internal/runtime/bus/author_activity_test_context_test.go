@@ -269,7 +269,7 @@ func authorActivityTestEventDescriptors(source semanticview.Source) []runtimeaut
 		for _, endpoint := range endpoints {
 			if endpoint.Event.HasSchema {
 				disposition := runtimeauthoractivity.StoryDifferent
-				if _, ok := authored[strings.TrimSpace(endpoint.Event.CatalogKey)]; ok {
+				if endpoint.Event.IsAuthored(source) {
 					disposition = runtimeauthoractivity.StoryAuthored
 				}
 				add(endpoint.Event.EventKey(), endpoint.Event.Entry.AuthorSummaryField, disposition)

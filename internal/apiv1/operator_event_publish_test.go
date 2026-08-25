@@ -481,6 +481,29 @@ func TestOperatorEventPublishResolvesFlowScopedContractEventName(t *testing.T) {
 	}
 }
 
+func TestFlowScopedEventPublishDescriptorUsesCanonicalAuthoredIdentity(t *testing.T) {
+	source := semanticview.Wrap(flowScopedEventPublishTestBundle())
+	const eventName = "repo-scaffold/repo_scaffold.repo_commit_succeeded"
+	descriptors, err := runtimepkg.AuthorActivityEventDescriptors(source)
+	if err != nil {
+		t.Fatalf("AuthorActivityEventDescriptors: %v", err)
+	}
+	proof := semanticview.ResolveFlowEventProof(source, "", eventName)
+	if !proof.HasSchema || !proof.IsAuthored(source) {
+		t.Fatalf("publication proof = %#v, authored catalog = %#v", proof, source.AuthoredResolvedEventCatalog())
+	}
+	for _, descriptor := range descriptors {
+		if descriptor.EventType != eventName {
+			continue
+		}
+		if descriptor.Disposition != "authored" || descriptor.AuthorSummaryField != strings.TrimSpace(proof.Entry.AuthorSummaryField) {
+			t.Fatalf("registered descriptor = %#v, publication proof = %#v", descriptor, proof)
+		}
+		return
+	}
+	t.Fatalf("descriptor %q missing from %#v", eventName, descriptors)
+}
+
 func TestOperatorEventPublishSQLiteCarriesExactOrdinaryFlowEndpoint(t *testing.T) {
 	ctx := context.Background()
 	selected := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)

@@ -309,7 +309,7 @@ func (s bundleSource) ResolvedEventCatalog() map[string]runtimecontracts.EventCa
 	return s.bundle.ResolvedEventCatalog()
 }
 func (s bundleSource) ResolveFlowEventCatalogEntry(flowID, eventType string) (runtimecontracts.EventCatalogEntry, string, bool) {
-	return s.bundle.ResolveFlowEventCatalogEntry(flowID, eventType)
+	return s.bundle.EffectiveEventCatalogEntryForFlowEvent(flowID, eventType)
 }
 func (s bundleSource) DerivedHandlerTransitions() []runtimecontracts.HandlerTransitionSemantic {
 	return s.bundle.DerivedHandlerTransitions()

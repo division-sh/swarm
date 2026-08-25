@@ -117,8 +117,8 @@ payload:
 
 	entry := platformEventEntryFromYAMLNode(*node.Content[0])
 
-	if len(entry.Required) != 1 || entry.Required[0] != "required_value" {
-		t.Fatalf("Required = %#v, want only required_value", entry.Required)
+	if len(entry.Payload.Required) != 1 || entry.Payload.Required[0] != "required_value" {
+		t.Fatalf("Required = %#v, want only required_value", entry.Payload.Required)
 	}
 }
 

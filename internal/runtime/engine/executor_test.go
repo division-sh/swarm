@@ -3960,8 +3960,8 @@ func emitFromExecutorSource() semanticview.Source {
 						"interest_score": {Type: "number"},
 						"tier":           {Type: "string"},
 					},
+					Required: []string{"account_id", "bucket", "interest_score"},
 				},
-				Required: []string{"account_id", "bucket", "interest_score"},
 			},
 		},
 	})

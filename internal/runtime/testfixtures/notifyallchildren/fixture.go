@@ -134,13 +134,11 @@ func WriteVariant(t testing.TB, opts Options) string {
 `)
 	}
 	if opts.AutoEmitOnCreate {
-		replaceFile(t, accountEvents, `account.notify.requested:
-`, `account.created:
+		replaceFile(t, accountEvents, "account.notification.completed: {}\n", `account.notification.completed: {}
+account.created:
   account_id: text
-  template_instance_key: text
-  template_instance_source_event: text
-  required: [account_id]
-account.notify.requested:
+  template_instance_key: text?
+  template_instance_source_event: text?
 `)
 		replaceFile(t, accountSchema, `states: [active, completed]
 `, `states: [active, completed]

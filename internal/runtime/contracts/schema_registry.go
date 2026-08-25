@@ -78,7 +78,7 @@ func eventSchemaFromCatalogEntry(eventType string, entry EventCatalogEntry, type
 		"properties":           properties,
 		"additionalProperties": false,
 	}
-	if required := normalizeStrings(entry.Required); len(required) > 0 {
+	if required := normalizeStrings(entry.Payload.Required); len(required) > 0 {
 		schema["required"] = required
 	}
 	return EventSchema{
@@ -127,7 +127,7 @@ func EventSchemaForFlowEvent(bundle *WorkflowContractBundle, flowID, eventType s
 	if bundle == nil || eventType == "" {
 		return EventSchema{}, "", false
 	}
-	entry, key, types, ok := eventSchemaDeclarationForFlowEvent(bundle, flowID, eventType)
+	entry, key, types, ok := effectiveEventDeclarationForFlowEvent(bundle, flowID, eventType)
 	if !ok {
 		if schema, generatedOK := bundle.GeneratedActivityEventSchemas()[eventidentity.Normalize(eventType)]; generatedOK {
 			return schema, eventidentity.Normalize(eventType), true

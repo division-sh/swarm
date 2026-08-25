@@ -374,9 +374,7 @@ flow.started:
   entity_id:
     type: string
   topic:
-    type: string
-  required:
-    - entity_id
+    type: string?
 `)
 	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "discovery", "nodes.yaml"), `
 pipeline:

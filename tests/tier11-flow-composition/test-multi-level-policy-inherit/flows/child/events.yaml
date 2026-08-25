@@ -1,3 +1,3 @@
 child.check:
-  score: integer
-child.done:
+  score: integer?
+child.done: {}

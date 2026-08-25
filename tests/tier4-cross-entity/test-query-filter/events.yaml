@@ -1,4 +1,3 @@
-filter.requested:
+filter.requested: {}
 filter.completed:
-  results:
-  - FilterResult
+  results: "[FilterResult]?"

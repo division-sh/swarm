@@ -147,7 +147,7 @@ pins:
       - name: work_ready
         event: work.ready
 `)
-	writeClosedVariantFile(t, root, "events.yaml", "work.ready:\n  work_id: string\n")
+	writeClosedVariantFile(t, root, "events.yaml", "{}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-node:
   id: root-node
   execution_type: system_node
@@ -169,7 +169,7 @@ pins:
     events:
       - name: work_ready
         event: consumer.work.ready
-`, "consumer.work.ready:\n  work_id: string\n", "{}\n", `consumer-node:
+`, "{}\n", "{}\n", `consumer-node:
   id: consumer-node
   execution_type: system_node
   subscribes_to: [consumer.work.ready]
@@ -190,7 +190,7 @@ pins:
         carries:
           work_id:
             from: payload.work_id
-`, "dynamic.work.ready:\n  work_id: string\n", `dynamic_state:
+`, "{}\n", `dynamic_state:
   work_id: string
 `, `dynamic-node:
   id: dynamic-node-{instance_id}
@@ -296,9 +296,6 @@ pins:
 	if opts.producerRequiresOutput {
 		rootEvents = "deploy.completed:\n  vertical_id: string\n"
 	}
-	if opts.rootReceiver {
-		rootEvents = "deploy.completed:\n  vertical_id: string\n"
-	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), rootEvents)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	writeCompositionConnectProducerFlow(t, root, opts)
@@ -378,10 +375,7 @@ pins:
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "agents.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), `
-ticket.ready:
-  entity_id: string
-`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"), "{}\n")
 	return root
 }
@@ -445,10 +439,7 @@ pins:
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), `
-deploy.completed:
-  vertical_id: string
-`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), `
 deployment:
   vertical_id:
@@ -608,10 +599,7 @@ pins:
     events:`+inputEvents)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), `
-deploy.completed:
-  vertical_id: string
-`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), "{}\n")
 	if opts.consumerTemplateInstance {
 		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "entities.yaml"), `
 deployment:

@@ -1,7 +1,4 @@
 validation.triggered:
-  candidate: text
+  candidate: text?
 validation.requested:
-  candidate: text
-validation.started:
-  candidate: text
-  validation_case_id: uuid
+  candidate: text?

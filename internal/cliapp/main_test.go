@@ -5400,8 +5400,8 @@ func TestVerifyBundle_EmittedPayloadCompletenessReturnsWarningSurface(t *testing
 						"scan_id":   {Type: "string"},
 						"geography": {Type: "string"},
 					},
+					Required: []string{"scan_id", "geography"},
 				},
-				Required: []string{"scan_id", "geography"},
 			},
 			"market_research.scan_assigned": {
 				ConsumerType: []string{"dashboard"},
@@ -5412,8 +5412,8 @@ func TestVerifyBundle_EmittedPayloadCompletenessReturnsWarningSurface(t *testing
 						"trigger_event_type": {Type: "string"},
 						"scan_id":            {Type: "string"},
 					},
+					Required: []string{"entity_id", "scan_id"},
 				},
-				Required: []string{"entity_id", "scan_id"},
 			},
 		},
 	}

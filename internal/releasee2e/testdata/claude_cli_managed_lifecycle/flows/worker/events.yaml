@@ -1,6 +1,6 @@
 task.assigned:
-  request: "[text]"
+  request: "[text]?"
 agent.requested:
-  request: "[text]"
+  request: "[text]?"
 agent.completed:
-  flow_result: text
+  flow_result: text?

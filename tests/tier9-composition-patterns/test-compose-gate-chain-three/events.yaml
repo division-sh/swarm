@@ -1,4 +1,4 @@
-step.a_done:
-step.b_done:
-step.c_done:
-release.ready:
+step.a_done: {}
+step.b_done: {}
+step.c_done: {}
+release.ready: {}

@@ -1,4 +1,4 @@
-task.assigned:
+task.assigned: {}
 task.feedback:
-  comment: string
-task.result:
+  comment: string?
+task.result: {}

@@ -4,5 +4,5 @@ timer.scheduled:
 timer.cancel_requested:
   swarm:
     source: external
-timer.check:
-timer.cancelled:
+timer.check: {}
+timer.cancelled: {}

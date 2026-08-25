@@ -555,11 +555,10 @@ func (m Manifest) eventCatalogEntries() map[string]runtimecontracts.EventCatalog
 			name = strings.TrimSpace(name)
 			entry.Payload.Properties[name] = normalizedEventFieldSpec(projection.Schema)
 			if !projection.Optional {
-				entry.Required = append(entry.Required, strings.TrimSpace(name))
+				entry.Payload.Required = append(entry.Payload.Required, strings.TrimSpace(name))
 			}
 		}
-		sort.Strings(entry.Required)
-		entry.Payload.Required = append([]string{}, entry.Required...)
+		sort.Strings(entry.Payload.Required)
 		out[strings.TrimSpace(normalized.Event)] = entry
 	}
 	return out
@@ -617,7 +616,6 @@ func RawEventCatalogEntry() runtimecontracts.EventCatalogEntry {
 	sort.Strings(required)
 	return runtimecontracts.EventCatalogEntry{
 		Source: "provider_trigger_pack_raw", Swarm: runtimecontracts.EventSwarmMetadata{Source: "external"},
-		Payload:  runtimecontracts.EventPayloadSpec{Type: "object", Properties: properties, Required: append([]string{}, required...)},
-		Required: required,
+		Payload: runtimecontracts.EventPayloadSpec{Type: "object", Properties: properties, Required: append([]string{}, required...)},
 	}
 }

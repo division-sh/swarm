@@ -224,7 +224,7 @@ func eventPayloadDeclaredFields(entry EventCatalogEntry) map[string]struct{} {
 }
 
 func eventPayloadRequiredFields(entry EventCatalogEntry) []string {
-	return uniqueEmitFieldNames(entry.Required, entry.Payload.Required)
+	return uniqueEmitFieldNames(entry.Payload.Required)
 }
 
 func uniqueEmitFieldNames(groups ...[]string) []string {

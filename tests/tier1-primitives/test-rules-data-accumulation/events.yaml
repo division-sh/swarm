@@ -1,3 +1,3 @@
 item.received:
-  kind: string
-  value: integer
+  kind: string?
+  value: integer?

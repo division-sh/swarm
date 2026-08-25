@@ -210,6 +210,7 @@ func loadWorkflowContractBundleForPaths(paths ContractPaths, options WorkflowCon
 	bundle.ProjectPacks = projectPacks
 	bundle.PackInventory = effective
 	populateWorkflowSemantics(bundle)
+	populateEffectiveEventProvenance(bundle)
 	if err := validateWorkflowContractBundleLoadConstraints(bundle); err != nil {
 		return nil, err
 	}
@@ -338,6 +339,8 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 		}
 	}
 	errs = append(errs, validateWorkflowSchemaRefinements(bundle)...)
+	errs = append(errs, validateIntraPackageEventSchemaOwnership(bundle)...)
+	errs = append(errs, validateEventBusinessKeys(bundle)...)
 	errs = append(errs, validateWorkflowCriteriaContracts(bundle)...)
 	errs = append(errs, validateScopedAgentIntentCoordinates(bundle)...)
 	errs = append(errs, validateWorkflowPolicyValidationContracts(bundle)...)
@@ -349,6 +352,31 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 		return &LoadValidationError{Items: errs}
 	}
 	return nil
+}
+
+func validateEventBusinessKeys(bundle *WorkflowContractBundle) []error {
+	if bundle == nil {
+		return nil
+	}
+	var errs []error
+	for _, record := range bundle.currentEventDeclarationRecords() {
+		if strings.TrimSpace(record.entry.BusinessKeyField) == "" {
+			continue
+		}
+		if _, _, err := bundle.compileCurrentEventDeclaration(
+			record.packageKey,
+			record.flowID,
+			record.layer,
+			record.sourceFile,
+			record.localName,
+			record.qualifiedName,
+			record.entry,
+			record.types,
+		); err != nil {
+			errs = append(errs, fmt.Errorf("%w: %v", ErrInvalidField, err))
+		}
+	}
+	return errs
 }
 func workflowHandlerDeclaresConflictingCompletion(handler SystemNodeEventHandler) bool {
 	return len(handler.Rules) > 0 && workflowHandlerHasOnComplete(handler)

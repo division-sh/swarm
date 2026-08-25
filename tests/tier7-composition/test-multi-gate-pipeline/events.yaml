@@ -1,6 +1,6 @@
-gate.g1_set:
-gate.g2_set:
-gate.g3_set:
-approval.requested:
-approval.granted:
-gate.set:
+gate.g1_set: {}
+gate.g2_set: {}
+gate.g3_set: {}
+approval.requested: {}
+approval.granted: {}
+gate.set: {}

@@ -46,6 +46,20 @@ func TestSourceWithProviderTriggerEventsImportsEffectivePackSchemasWithoutAuthor
 	if _, err := ResolveStandingTargetDeclarations(wrapped, catalog); err != nil {
 		t.Fatalf("standing declarations rejected pack-composed source: %v", err)
 	}
+	descriptors, err := AuthorActivityEventDescriptors(wrapped)
+	if err != nil {
+		t.Fatalf("AuthorActivityEventDescriptors: %v", err)
+	}
+	for _, descriptor := range descriptors {
+		if descriptor.EventType != "inbound.telegram.text_message" {
+			continue
+		}
+		if descriptor.Disposition != "different" {
+			t.Fatalf("normalized provider event descriptor = %#v, want different", descriptor)
+		}
+		return
+	}
+	t.Fatalf("normalized provider event descriptor missing from %#v", descriptors)
 }
 
 func TestSourceWithProviderTriggerEventsImportsDeclaredNormalizedSchemaWithoutActivation(t *testing.T) {

@@ -1,5 +1,5 @@
 task.submitted:
-  score: integer
-  type: string
-task.completed:
-task.routed:
+  score: integer?
+  type: string?
+task.completed: {}
+task.routed: {}

@@ -1,5 +1,4 @@
-job.submit:
+job.submit: {}
 work.requested:
-  task_type: string
-child/work.completed:
-work.completed:
+  task_type: string?
+child/work.completed: {}

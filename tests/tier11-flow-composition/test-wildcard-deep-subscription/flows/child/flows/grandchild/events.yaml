@@ -1,2 +1,2 @@
-task.start:
-task.done:
+task.start: {}
+task.done: {}

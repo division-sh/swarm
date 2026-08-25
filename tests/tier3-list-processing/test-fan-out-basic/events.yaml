@@ -1,5 +1,5 @@
 batch.submitted:
-  items: array
+  items: array?
 item.assigned:
-  item: FanOutItem
-  item_id: text
+  item: FanOutItem?
+  item_id: text?

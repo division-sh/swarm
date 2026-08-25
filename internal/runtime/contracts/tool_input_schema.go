@@ -154,8 +154,11 @@ func cloneEventCatalogEntry(in EventCatalogEntry) EventCatalogEntry {
 	out.AlternateEmitters = append([]string(nil), in.AlternateEmitters...)
 	out.Consumer = append([]string(nil), in.Consumer...)
 	out.ConsumerType = append([]string(nil), in.ConsumerType...)
-	out.Required = append([]string(nil), in.Required...)
 	out.Payload.Required = append([]string(nil), in.Payload.Required...)
+	out.admissionProvenance = make(map[string]EffectiveValueProvenance, len(in.admissionProvenance))
+	for path, provenance := range in.admissionProvenance {
+		out.admissionProvenance[path] = cloneEffectiveValueProvenance(provenance)
+	}
 	out.Payload.Properties = make(map[string]EventFieldSpec, len(in.Payload.Properties))
 	for name, field := range in.Payload.Properties {
 		field.Citation.AllowedClasses = append([]string(nil), field.Citation.AllowedClasses...)

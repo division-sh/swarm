@@ -37,7 +37,6 @@ func PromptSchemaGuardFindingsForBundle(bundle *WorkflowContractBundle) ([]Promp
 	if bundle == nil {
 		return nil, fmt.Errorf("workflow contract bundle is required")
 	}
-	schemas := EventSchemaRegistryFromBundle(bundle)
 	cases := DerivePromptSchemaGuards(bundle)
 	findings := make([]PromptSchemaGuardFinding, 0)
 
@@ -46,7 +45,7 @@ func PromptSchemaGuardFindingsForBundle(bundle *WorkflowContractBundle) ([]Promp
 		text := tc.IntentContent
 
 		eventType := strings.ReplaceAll(strings.TrimPrefix(tc.EmitTool, "emit_"), "_", ".")
-		schema, ok := schemas[eventType]
+		schema, _, ok := EventSchemaForFlowEvent(bundle, tc.FlowID, eventType)
 		if !ok {
 			return nil, fmt.Errorf("unknown emit tool %s", tc.EmitTool)
 		}

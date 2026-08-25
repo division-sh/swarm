@@ -93,15 +93,17 @@ func CopyParentConnectEventMetadataInvalidity(t testing.TB, invalidity ParentCon
 	writeClosedVariantFile(t, root, "flows/producer/events.yaml",
 		closedMetadataEvent("flow.started", flowStartedRole, false)+
 			closedMetadataEvent("work.requested", "", true)+
-			closedMetadataEvent("work.ready", producerWorkReadyRole, true)+
+			closedMetadataEvent("work.ready", firstClosedRole(producerWorkReadyRole, consumerWorkReadyRole), true)+
 			closedMetadataEvent("deploy.done", "", true))
 	writeClosedVariantFile(t, root, "flows/consumer/events.yaml",
-		closedMetadataEvent("work.ready", consumerWorkReadyRole, true)+
-			closedMetadataEvent("deploy.completed", "", true))
+		closedMetadataEvent("deploy.completed", "", true))
 	return root
 }
 
 func closedMetadataEvent(name, role string, workID bool) string {
+	if role == "" && !workID {
+		return name + ": {}\n"
+	}
 	entry := name + ":\n"
 	if role != "" {
 		entry += "  swarm:\n    " + role + "\n"
@@ -110,4 +112,13 @@ func closedMetadataEvent(name, role string, workID bool) string {
 		entry += "  work_id: text\n"
 	}
 	return entry
+}
+
+func firstClosedRole(roles ...string) string {
+	for _, role := range roles {
+		if role != "" {
+			return role
+		}
+	}
+	return ""
 }

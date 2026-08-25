@@ -1,5 +1,5 @@
-job.created:
-work.assigned:
-job.done:
-intake/work.assigned:
-intake/item.processed:
+job.created: {}
+work.assigned: {}
+job.done: {}
+intake/work.assigned: {}
+intake/item.processed: {}

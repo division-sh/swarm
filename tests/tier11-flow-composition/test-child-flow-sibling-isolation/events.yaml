@@ -1,7 +1,7 @@
-run.start:
-run.complete:
-flow-a/alpha.start:
-flow-a/internal.done:
-flow-a/alpha.complete:
-flow-b/beta.start:
-flow-b/beta.complete:
+run.start: {}
+run.complete: {}
+flow-a/alpha.start: {}
+flow-a/internal.done: {}
+flow-a/alpha.complete: {}
+flow-b/beta.start: {}
+flow-b/beta.complete: {}

@@ -1,2 +1,2 @@
-trigger.beta:
-job.beta_done:
+trigger.beta: {}
+job.beta_done: {}

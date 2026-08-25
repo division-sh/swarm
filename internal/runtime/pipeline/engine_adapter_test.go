@@ -2702,8 +2702,8 @@ func testArtifactRepoResultEventSource(t *testing.T) semanticview.Source {
 artifact_repo.commit_completed:
   repo_id: string
   namespace: string
-  partition_key: string
-  display_slug: string
+  partition_key: string?
+  display_slug: string?
   request_id: string
   source_event_id: string
   repo_url: string
@@ -2711,18 +2711,16 @@ artifact_repo.commit_completed:
   file_manifest: ArtifactManifest
   provenance: ArtifactProvenance
   result_kind: string
-  required: [repo_id, namespace, request_id, source_event_id, repo_url, current_ref, file_manifest, provenance, result_kind]
 artifact_repo.commit_failed:
   repo_id: string
   namespace: string
-  partition_key: string
-  display_slug: string
+  partition_key: string?
+  display_slug: string?
   request_id: string
   source_event_id: string
   failure: platform.failure/v1 envelope
   provenance: ArtifactProvenance
-  request_copy: string
-  required: [repo_id, namespace, request_id, source_event_id, failure, provenance]
+  request_copy: string?
 `,
 	})
 }
@@ -3080,7 +3078,7 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsOnActionSurface
 		"events.yaml":              "parent.trigger:\n  entity_id: string\nparent.result:\n  entity_id: string\n",
 		"flows/child/package.yaml": "name: child\nversion: 1.0.0\ndescription: child flow\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n",
 		"flows/child/schema.yaml":  "name: child\ninitial_state: waiting\nterminal_states: [processed]\nstates: [waiting, processed]\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.internal]\n",
-		"flows/child/events.yaml":  "child.start:\n  entity_id: string\nchild.internal:\n  entity_id: string\n  step: string\n  required: [entity_id, step]\n",
+		"flows/child/events.yaml":  "child.start:\n  entity_id: string\nchild.internal:\n  entity_id: string\n  step: string\n",
 	})
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
@@ -3135,7 +3133,7 @@ func TestPipelineEnginePayloadShaper_RejectsMissingRequiredFieldsForConcreteTemp
 		"events.yaml":              "parent.trigger:\n  entity_id: string\n",
 		"flows/child/package.yaml": "name: child\nversion: 1.0.0\ndescription: child flow\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n",
 		"flows/child/schema.yaml":  "name: child\nmode: template\ninitial_state: waiting\nterminal_states: [processed]\nstates: [waiting, processed]\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.done]\n",
-		"flows/child/events.yaml":  "child.start:\n  entity_id: string\nchild.done:\n  step: string\n  required: [step]\n",
+		"flows/child/events.yaml":  "child.start:\n  entity_id: string\nchild.done:\n  step: string\n",
 	})
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
@@ -3191,7 +3189,7 @@ func TestPipelineEnginePayloadShaper_RejectsEnvelopeOnlyRequiredFieldOnActionSur
 		"events.yaml":              "parent.trigger:\n  entity_id: string\nparent.result:\n  entity_id: string\n",
 		"flows/child/package.yaml": "name: child\nversion: 1.0.0\ndescription: child flow\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n",
 		"flows/child/schema.yaml":  "name: child\ninitial_state: waiting\nterminal_states: [processed]\nstates: [waiting, processed]\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.internal]\n",
-		"flows/child/events.yaml":  "child.start:\n  entity_id: string\nchild.internal:\n  entity_id: string\n  required: [entity_id]\n",
+		"flows/child/events.yaml":  "child.start:\n  entity_id: string\nchild.internal:\n  entity_id: string\n",
 	})
 	bundle, ok := semanticview.Bundle(source)
 	if !ok {
@@ -3245,7 +3243,7 @@ func TestValidatePipelineEmitPayload_RejectsEnumViolationOnActionSurface(t *test
 		"types.yaml":               "enums:\n  Mode:\n    values: [fast, deep]\n    default: fast\n",
 		"flows/child/package.yaml": "name: child\nversion: 1.0.0\ndescription: child flow\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n",
 		"flows/child/schema.yaml":  "name: child\ninitial_state: waiting\nterminal_states: [processed]\nstates: [waiting, processed]\npins:\n  inputs:\n    events: [child.start]\n  outputs:\n    events: [child.internal]\n",
-		"flows/child/events.yaml":  "child.start:\n  entity_id: string\nchild.internal:\n  mode: Mode\n  required: [mode]\n",
+		"flows/child/events.yaml":  "child.start:\n  entity_id: string\nchild.internal:\n  mode: Mode\n",
 	})
 
 	err := validatePipelineEmitPayload(source, "child", "child.internal", map[string]any{
@@ -3267,7 +3265,7 @@ func TestPipelineEnginePayloadShaper_UsesRootNamedTypeSchemaForChildOutput(t *te
 		"package.yaml":             "name: child-output-named-type\nversion: 1.0.0\ndescription: child output named type proof\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n- id: child\n  flow: child\n  mode: static\n",
 		"schema.yaml":              "initial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  outputs:\n    events: [handoff.completed]\n",
 		"types.yaml":               "types:\n  Evidence:\n    root_field: text\n",
-		"events.yaml":              "handoff.completed:\n  evidence: Evidence\n  required: [evidence]\n",
+		"events.yaml":              "handoff.completed:\n  evidence: Evidence\n",
 		"flows/child/package.yaml": "name: child\nversion: 1.0.0\ndescription: child flow\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n",
 		"flows/child/schema.yaml":  "name: child\ninitial_state: waiting\nterminal_states: [processed]\nstates: [waiting, processed]\npins:\n  outputs:\n    events: [handoff.completed]\n",
 	})

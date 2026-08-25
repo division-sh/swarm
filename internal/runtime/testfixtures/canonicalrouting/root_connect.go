@@ -49,7 +49,7 @@ pins:
     events:
       - name: ready
         event: root.ready
-`, "root.ready:\n  entity_id: text\n", "{}\n", "{}\n")
+`, "{}\n", "{}\n", "{}\n")
 	return root
 }
 
@@ -77,7 +77,7 @@ pins:
     events:
       - name: ready
         event: root.ready
-`, "root.ready:\n  entity_id: text\n", "consumer_state:\n  entity_id: text\n", `consumer-node:
+`, "{}\n", "consumer_state:\n  entity_id: text\n", `consumer-node:
   id: consumer-node
   execution_type: system_node
   subscribes_to: [root.ready]
@@ -112,7 +112,7 @@ pins:
       - name: scout_completed
         event: scout.completed
 `)
-	writeClosedVariantFile(t, root, "events.yaml", "scout.completed:\n  proof: string\n")
+	writeClosedVariantFile(t, root, "events.yaml", "{}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-collector:
   id: root-collector
   execution_type: system_node
@@ -164,7 +164,7 @@ pins:
       - name: ping
         event: work.ping
 `)
-	writeClosedVariantFile(t, root, "events.yaml", "work.ping:\n  turn: integer\nwork.pong:\n  turn: integer\n")
+	writeClosedVariantFile(t, root, "events.yaml", "work.ping:\n  turn: integer\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-boomerang:
   id: root-boomerang
   execution_type: system_node
@@ -186,7 +186,7 @@ pins:
     events:
       - name: pong
         event: work.pong
-`, "work.ping:\n  turn: integer\nwork.pong:\n  turn: integer\n", "boomerang_state:\n  turn: integer\n", `boomerang-worker:
+`, "work.pong:\n  turn: integer\n", "boomerang_state:\n  turn: integer\n", `boomerang-worker:
   id: boomerang-worker
   execution_type: system_node
   subscribes_to: [work.ping]
@@ -235,6 +235,6 @@ pins:
     events:
       - name: ready
         event: root.ready
-`, "root.ready:\n  entity_id: string\n", "{}\n", "{}\n")
+`, "{}\n", "{}\n", "{}\n")
 	return root
 }

@@ -2612,8 +2612,8 @@ func declarativeEmitContractTestBundle(eventType string) *runtimecontracts.Workf
 			Properties: map[string]runtimecontracts.EventFieldSpec{
 				"label": {Type: "string"},
 			},
+			Required: []string{"label"},
 		},
-		Required: []string{"label"},
 	})
 	bundle.Events["batch.submitted"] = runtimecontracts.EventCatalogEntry{
 		Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
@@ -2655,8 +2655,8 @@ func rulesEmitTemplateContractBundle() *runtimecontracts.WorkflowContractBundle 
 						"account_id": {Type: "string"},
 						"score":      {Type: "number"},
 					},
+					Required: []string{"account_id", "score"},
 				},
-				Required: []string{"account_id", "score"},
 			},
 			"account.bucketed": {
 				Payload: runtimecontracts.EventPayloadSpec{
@@ -2665,8 +2665,8 @@ func rulesEmitTemplateContractBundle() *runtimecontracts.WorkflowContractBundle 
 						"score":      {Type: "number"},
 						"bucket":     {Type: "string"},
 					},
+					Required: []string{"account_id", "score", "bucket"},
 				},
-				Required: []string{"account_id", "score", "bucket"},
 			},
 		},
 	}
