@@ -1990,6 +1990,17 @@ func (a *Adapter) snapshotPageByIDQuery(ctx context.Context, q queryer, limit in
 }
 
 func (a *Adapter) snapshotsByIDQuery(ctx context.Context, q queryer, query string, args ...any) ([]Snapshot, error) {
+	now, err := a.databaseNow(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	return a.snapshotsByIDQueryAt(ctx, q, now, query, args...)
+}
+
+func (a *Adapter) snapshotsByIDQueryAt(ctx context.Context, q queryer, asOf time.Time, query string, args ...any) ([]Snapshot, error) {
+	if asOf.IsZero() {
+		return nil, fmt.Errorf("select delivery snapshots: as_of is required")
+	}
 	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("select delivery snapshots: %w", err)
@@ -2010,17 +2021,13 @@ func (a *Adapter) snapshotsByIDQuery(ctx context.Context, q queryer, query strin
 	if err := rows.Close(); err != nil {
 		return nil, fmt.Errorf("close delivery snapshot ids: %w", err)
 	}
-	now, err := a.databaseNow(ctx, q)
-	if err != nil {
-		return nil, err
-	}
 	out := make([]Snapshot, 0, len(ids))
 	for _, id := range ids {
 		record, err := a.loadByID(ctx, q, id, false)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, snapshotAt(record, now))
+		out = append(out, snapshotAt(record, asOf.UTC()))
 	}
 	return out, nil
 }
@@ -2686,6 +2693,12 @@ func (a *Adapter) databaseNow(ctx context.Context, q interface {
 		return time.Time{}, fmt.Errorf("read delivery database time: %w", err)
 	}
 	return now.UTC().Truncate(time.Microsecond), nil
+}
+
+// CaptureSnapshotTime returns the selected store's time coordinate for one
+// bounded delivery projection snapshot.
+func (a *Adapter) CaptureSnapshotTime(ctx context.Context, q queryer) (time.Time, error) {
+	return a.databaseNow(ctx, q)
 }
 
 func encodeRoute(route events.DeliveryRoute) ([]byte, []byte, []byte, []byte, error) {

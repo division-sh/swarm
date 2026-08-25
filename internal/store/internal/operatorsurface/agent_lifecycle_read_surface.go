@@ -29,7 +29,11 @@ func (s *AgentPostgres) ListAgentDeliveryLifecycleFacts(ctx context.Context, ide
 	if len(normalized) == 0 {
 		return map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts{}, nil
 	}
-	records, err := s.listAgentLifecycleRecordsSpec(ctx, normalized)
+	asOf, err := operatorPostgresDelivery.CaptureSnapshotTime(ctx, s.backend)
+	if err != nil {
+		return nil, err
+	}
+	records, err := s.listAgentLifecycleRecordsSpec(ctx, normalized, asOf)
 	if err != nil {
 		return nil, err
 	}
@@ -47,12 +51,24 @@ func (s *AgentPostgres) ListAgentDeliveryLifecycleFacts(ctx context.Context, ide
 	return out, nil
 }
 
-func (s *AgentPostgres) listAgentLifecycleRecordsSpec(ctx context.Context, identities []agentidentity.Identity) ([]agentLifecycleDeliveryRecord, error) {
-	snapshots, err := operatorPostgresDelivery.CurrentAgentSnapshots(ctx, s.backend, identities)
+func (s *AgentPostgres) listAgentLifecycleRecordsSpec(ctx context.Context, identities []agentidentity.Identity, asOf time.Time) ([]agentLifecycleDeliveryRecord, error) {
+	snapshots, err := operatorPostgresDelivery.CurrentAgentSnapshots(ctx, s.backend, identities, asOf)
 	if err != nil {
 		return nil, err
 	}
 	return agentLifecycleRecordsFromSnapshots(snapshots), nil
+}
+
+func agentDeliveryLifecycleFactsFromSnapshots(identities []agentidentity.Identity, snapshots []runtimedelivery.Snapshot) map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts {
+	out := make(map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts, len(identities))
+	grouped := make(map[agentidentity.Identity][]agentLifecycleDeliveryRecord, len(identities))
+	for _, record := range agentLifecycleRecordsFromSnapshots(snapshots) {
+		grouped[record.AgentIdentity] = append(grouped[record.AgentIdentity], record)
+	}
+	for _, identity := range identities {
+		out[identity] = canonicalAgentDeliveryLifecycleFactsFromRecords(grouped[identity])
+	}
+	return out
 }
 
 func agentLifecycleRecordsFromSnapshots(snapshots []runtimedelivery.Snapshot) []agentLifecycleDeliveryRecord {

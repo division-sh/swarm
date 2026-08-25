@@ -2,6 +2,7 @@ package agentpersistence
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -23,7 +24,27 @@ func (s *AgentPostgresOwner) LoadAgentsSpec(ctx context.Context) ([]runtimemanag
 }
 
 func (s *AgentPostgresOwner) loadAgentsSpec(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
-	const q = `
+	rows, err := s.backend.QueryContext(ctx, postgresAgentRegistryQuery)
+	if err != nil {
+		return nil, fmt.Errorf("query agents: %w", err)
+	}
+	return scanPostgresAgents(rows)
+}
+
+// LoadPostgresAgentsTx strictly decodes the runtime agent registry from the
+// transaction owned by a bounded selected-store read operation.
+func LoadPostgresAgentsTx(ctx context.Context, tx *sql.Tx) ([]runtimemanager.PersistedAgent, error) {
+	if tx == nil {
+		return nil, fmt.Errorf("load postgres agents: transaction is required")
+	}
+	rows, err := tx.QueryContext(ctx, postgresAgentRegistryQuery)
+	if err != nil {
+		return nil, fmt.Errorf("query agents: %w", err)
+	}
+	return scanPostgresAgents(rows)
+}
+
+const postgresAgentRegistryQuery = `
 		SELECT
 			agent_id,
 			agent_name_owner,
@@ -40,13 +61,13 @@ func (s *AgentPostgresOwner) loadAgentsSpec(ctx context.Context) ([]runtimemanag
 			COALESCE(parent_agent_id, ''),
 			COALESCE(entity_id::text, ''),
 			config,
-			COALESCE(runtime_descriptor, '{}'::jsonb),
-			COALESCE(subscriptions, '[]'::jsonb),
-			COALESCE(emit_events, '[]'::jsonb),
-			COALESCE(tools, '[]'::jsonb),
-			COALESCE(permissions, '[]'::jsonb),
-			COALESCE(status, 'active'),
-			COALESCE(created_at, now()),
+			runtime_descriptor,
+			subscriptions,
+			emit_events,
+			tools,
+			permissions,
+			status,
+			created_at,
 				lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, lifecycle_run_mode,
 				lifecycle_process_authority_id::text, lifecycle_process_owner_id,
 				lifecycle_process_boot_id::text, lifecycle_generation_grant_id::text,
@@ -57,10 +78,8 @@ func (s *AgentPostgresOwner) loadAgentsSpec(ctx context.Context) ([]runtimemanag
 		WHERE status NOT IN ('terminated', 'ephemeral')
 		ORDER BY created_at ASC, agent_id ASC
 	`
-	rows, err := s.backend.QueryContext(ctx, q)
-	if err != nil {
-		return nil, fmt.Errorf("query agents: %w", err)
-	}
+
+func scanPostgresAgents(rows *sql.Rows) ([]runtimemanager.PersistedAgent, error) {
 	defer rows.Close()
 
 	var out []runtimemanager.PersistedAgent
@@ -126,12 +145,28 @@ func (s *AgentPostgresOwner) loadAgentsSpec(ctx context.Context) ([]runtimemanag
 			return nil, err
 		}
 		rec.Config = cfg
+		if err := validateLoadedAgentRecord(rec); err != nil {
+			return nil, err
+		}
 		out = append(out, rec)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read agents rows: %w", err)
 	}
 	return out, nil
+}
+
+func validateLoadedAgentRecord(rec runtimemanager.PersistedAgent) error {
+	agentID := strings.TrimSpace(rec.Config.ID)
+	switch strings.TrimSpace(rec.Status) {
+	case "active", "paused", "failed":
+	default:
+		return fmt.Errorf("agent %s invalid persisted status %q", agentID, rec.Status)
+	}
+	if rec.StartedAt.IsZero() {
+		return fmt.Errorf("agent %s missing created_at", agentID)
+	}
+	return nil
 }
 
 func agentModel(cfg runtimeactors.AgentConfig) (string, error) {
@@ -170,17 +205,6 @@ func agentPersistedStatus(raw string) string {
 	default:
 		return "active"
 	}
-}
-
-func decodeJSONStringList(raw []byte) []string {
-	if len(raw) == 0 || !json.Valid(raw) {
-		return nil
-	}
-	var out []string
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil
-	}
-	return out
 }
 
 func coalesceStringList(primary, fallback []string) []string {

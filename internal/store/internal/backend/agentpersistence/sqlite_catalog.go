@@ -2,6 +2,7 @@ package agentpersistence
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -11,13 +12,33 @@ import (
 )
 
 func (s *AgentSQLiteOwner) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
-	rows, err := s.backend.QueryContext(ctx, `
+	rows, err := s.backend.QueryContext(ctx, sqliteAgentRegistryQuery)
+	if err != nil {
+		return nil, fmt.Errorf("query sqlite agents: %w", err)
+	}
+	return scanSQLiteAgents(rows)
+}
+
+// LoadSQLiteAgentsTx strictly decodes the runtime agent registry from the
+// transaction owned by a bounded selected-store read operation.
+func LoadSQLiteAgentsTx(ctx context.Context, tx *sql.Tx) ([]runtimemanager.PersistedAgent, error) {
+	if tx == nil {
+		return nil, fmt.Errorf("load sqlite agents: transaction is required")
+	}
+	rows, err := tx.QueryContext(ctx, sqliteAgentRegistryQuery)
+	if err != nil {
+		return nil, fmt.Errorf("query sqlite agents: %w", err)
+	}
+	return scanSQLiteAgents(rows)
+}
+
+const sqliteAgentRegistryQuery = `
 		SELECT agent_id, agent_name_owner, agent_name_source, agent_route_presence,
 		       flow_scope_key, flow_instance_id, flow_instance,
 		       role, model, llm_backend, memory_enabled, memory_source,
-		       COALESCE(parent_agent_id, ''), COALESCE(entity_id, ''), config, COALESCE(runtime_descriptor, '{}'),
-		       COALESCE(subscriptions, '[]'), COALESCE(emit_events, '[]'), COALESCE(tools, '[]'), COALESCE(permissions, '[]'),
-		       COALESCE(status, 'active'), COALESCE(created_at, CURRENT_TIMESTAMP),
+		       COALESCE(parent_agent_id, ''), COALESCE(entity_id, ''), config, runtime_descriptor,
+		       subscriptions, emit_events, tools, permissions,
+		       status, created_at,
 			       lifecycle_runtime_epoch, lifecycle_generation, lifecycle_phase, lifecycle_run_mode,
 			       lifecycle_process_authority_id, lifecycle_process_owner_id,
 			       lifecycle_process_boot_id, lifecycle_generation_grant_id,
@@ -27,10 +48,9 @@ func (s *AgentSQLiteOwner) LoadAgents(ctx context.Context) ([]runtimemanager.Per
 		FROM agents
 		WHERE status NOT IN ('terminated', 'ephemeral')
 		ORDER BY created_at ASC, agent_id ASC
-	`)
-	if err != nil {
-		return nil, fmt.Errorf("query sqlite agents: %w", err)
-	}
+	`
+
+func scanSQLiteAgents(rows *sql.Rows) ([]runtimemanager.PersistedAgent, error) {
 	defer rows.Close()
 	out := make([]runtimemanager.PersistedAgent, 0)
 	for rows.Next() {
@@ -74,6 +94,9 @@ func (s *AgentSQLiteOwner) LoadAgents(ctx context.Context) ([]runtimemanager.Per
 			return nil, err
 		}
 		rec.Config = cfg
+		if err := validateLoadedAgentRecord(rec); err != nil {
+			return nil, err
+		}
 		out = append(out, rec)
 	}
 	return out, rows.Err()

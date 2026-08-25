@@ -2,6 +2,7 @@ package operatorsurface
 
 import (
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -35,68 +36,128 @@ func (s *AgentPostgres) ListPendingAgentDeliveryFacts(ctx context.Context, ident
 	if err != nil {
 		return nil, err
 	}
-	aggregates, err := operatorPostgresDelivery.AgentPendingAggregates(ctx, s.backend, normalized, since)
+	asOf, err := operatorPostgresDelivery.CaptureSnapshotTime(ctx, s.backend)
 	if err != nil {
 		return nil, err
 	}
-	return pendingAgentDeliveryFactsFromAggregates(normalized, aggregates, time.Now()), nil
+	aggregates, err := operatorPostgresDelivery.AgentPendingAggregates(ctx, s.backend, normalized, since, asOf)
+	if err != nil {
+		return nil, err
+	}
+	return pendingAgentDeliveryFactsFromAggregates(normalized, aggregates, asOf), nil
 }
 
 func (s *AgentPostgres) ListPendingAgentDeliveryDetails(ctx context.Context, opts operatorread.PendingAgentDeliveryListOptions) (operatorread.PendingAgentDeliveryPage, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return operatorread.PendingAgentDeliveryPage{}, err
+	}
+	tx, err := s.backend.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return operatorread.PendingAgentDeliveryPage{}, err
+	}
+	defer tx.Rollback()
+	asOf, err := postgresAgentSnapshotTime(ctx, tx)
+	if err != nil {
+		return operatorread.PendingAgentDeliveryPage{}, err
+	}
+	result, err := s.listPendingAgentDeliveryDetailsTx(ctx, tx, opts, asOf)
+	if err != nil {
+		return operatorread.PendingAgentDeliveryPage{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return operatorread.PendingAgentDeliveryPage{}, fmt.Errorf("commit postgres pending agent delivery snapshot: %w", err)
+	}
+	return result, nil
+}
+
+func (s *AgentPostgres) listPendingAgentDeliveryDetailsTx(ctx context.Context, tx *sql.Tx, opts operatorread.PendingAgentDeliveryListOptions, asOf time.Time) (operatorread.PendingAgentDeliveryPage, error) {
+	if tx == nil {
+		return operatorread.PendingAgentDeliveryPage{}, fmt.Errorf("postgres pending agent delivery transaction is required")
+	}
 	opts, cursor, empty, err := normalizePendingAgentDeliveryOptions(opts)
 	if err != nil || empty {
 		return operatorread.PendingAgentDeliveryPage{PendingDeliveries: []operatorread.PendingAgentDeliveryDetail{}}, err
 	}
-	if err := s.requireCurrentSchema(); err != nil {
-		return operatorread.PendingAgentDeliveryPage{}, err
-	}
-	aggregates, err := operatorPostgresDelivery.AgentPendingAggregates(ctx, s.backend, []agentidentity.Identity{opts.AgentIdentity}, opts.Since)
+	aggregates, err := operatorPostgresDelivery.AgentPendingAggregates(ctx, tx, []agentidentity.Identity{opts.AgentIdentity}, opts.Since, asOf)
 	if err != nil {
 		return operatorread.PendingAgentDeliveryPage{}, err
 	}
-	page, err := operatorPostgresDelivery.AgentPendingReferencePage(ctx, s.backend, runtimedelivery.AgentPendingPageQuery{
+	page, err := operatorPostgresDelivery.AgentPendingReferencePage(ctx, tx, runtimedelivery.AgentPendingPageQuery{
 		AgentIdentity: opts.AgentIdentity,
 		Since:         opts.Since,
 		Limit:         opts.Limit,
 		After:         cursor,
-	})
+	}, asOf)
 	if err != nil {
 		return operatorread.PendingAgentDeliveryPage{}, err
 	}
-	return pendingAgentDeliveryPageFromProjection(ctx, opts.AgentIdentity, aggregates, page, time.Now(), func(ctx context.Context, eventID string) (eventrecord.Record, bool, error) {
-		return eventrecordpostgres.Load(ctx, s.backend, eventID)
+	return pendingAgentDeliveryPageFromProjection(ctx, opts.AgentIdentity, aggregates, page, asOf, func(ctx context.Context, eventID string) (eventrecord.Record, bool, error) {
+		return eventrecordpostgres.Load(ctx, tx, eventID)
 	})
 }
 
 func (s *AgentSQLite) ListPendingAgentDeliveryFacts(ctx context.Context, identities []agentidentity.Identity, since time.Time) (map[agentidentity.Identity]operatorread.PendingAgentDeliveryFacts, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return nil, err
+	}
 	normalized, err := normalizePendingAgentIdentities(identities)
 	if err != nil {
 		return nil, err
 	}
-	aggregates, err := operatorSQLiteDelivery.AgentPendingAggregates(ctx, s.backend, normalized, since)
+	asOf, err := operatorSQLiteDelivery.CaptureSnapshotTime(ctx, s.backend)
 	if err != nil {
 		return nil, err
 	}
-	return pendingAgentDeliveryFactsFromAggregates(normalized, aggregates, s.now()), nil
+	aggregates, err := operatorSQLiteDelivery.AgentPendingAggregates(ctx, s.backend, normalized, since, asOf)
+	if err != nil {
+		return nil, err
+	}
+	return pendingAgentDeliveryFactsFromAggregates(normalized, aggregates, asOf), nil
 }
 
 func (s *AgentSQLite) ListPendingAgentDeliveryDetails(ctx context.Context, opts operatorread.PendingAgentDeliveryListOptions) (operatorread.PendingAgentDeliveryPage, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return operatorread.PendingAgentDeliveryPage{}, err
+	}
+	tx, err := s.backend.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return operatorread.PendingAgentDeliveryPage{}, err
+	}
+	defer tx.Rollback()
+	asOf, err := operatorSQLiteDelivery.CaptureSnapshotTime(ctx, tx)
+	if err != nil {
+		return operatorread.PendingAgentDeliveryPage{}, err
+	}
+	result, err := s.listPendingAgentDeliveryDetailsTx(ctx, tx, opts, asOf)
+	if err != nil {
+		return operatorread.PendingAgentDeliveryPage{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return operatorread.PendingAgentDeliveryPage{}, fmt.Errorf("commit sqlite pending agent delivery snapshot: %w", err)
+	}
+	return result, nil
+}
+
+func (s *AgentSQLite) listPendingAgentDeliveryDetailsTx(ctx context.Context, tx *sql.Tx, opts operatorread.PendingAgentDeliveryListOptions, asOf time.Time) (operatorread.PendingAgentDeliveryPage, error) {
+	if tx == nil {
+		return operatorread.PendingAgentDeliveryPage{}, fmt.Errorf("sqlite pending agent delivery transaction is required")
+	}
 	opts, cursor, empty, err := normalizePendingAgentDeliveryOptions(opts)
 	if err != nil || empty {
 		return operatorread.PendingAgentDeliveryPage{PendingDeliveries: []operatorread.PendingAgentDeliveryDetail{}}, err
 	}
-	aggregates, err := operatorSQLiteDelivery.AgentPendingAggregates(ctx, s.backend, []agentidentity.Identity{opts.AgentIdentity}, opts.Since)
+	aggregates, err := operatorSQLiteDelivery.AgentPendingAggregates(ctx, tx, []agentidentity.Identity{opts.AgentIdentity}, opts.Since, asOf)
 	if err != nil {
 		return operatorread.PendingAgentDeliveryPage{}, err
 	}
-	page, err := operatorSQLiteDelivery.AgentPendingReferencePage(ctx, s.backend, runtimedelivery.AgentPendingPageQuery{
+	page, err := operatorSQLiteDelivery.AgentPendingReferencePage(ctx, tx, runtimedelivery.AgentPendingPageQuery{
 		AgentIdentity: opts.AgentIdentity, Since: opts.Since, Limit: opts.Limit, After: cursor,
-	})
+	}, asOf)
 	if err != nil {
 		return operatorread.PendingAgentDeliveryPage{}, err
 	}
-	return pendingAgentDeliveryPageFromProjection(ctx, opts.AgentIdentity, aggregates, page, s.now(), func(ctx context.Context, eventID string) (eventrecord.Record, bool, error) {
-		return eventrecordsqlite.Load(ctx, s.backend, eventID)
+	return pendingAgentDeliveryPageFromProjection(ctx, opts.AgentIdentity, aggregates, page, asOf, func(ctx context.Context, eventID string) (eventrecord.Record, bool, error) {
+		return eventrecordsqlite.Load(ctx, tx, eventID)
 	})
 }
 

@@ -447,7 +447,34 @@ func (s conversationProjection) loadLatestPublicConversationTurn(ctx context.Con
 	if sessionID == "" {
 		return nil, operatorread.ErrSessionNotFound
 	}
-	row := s.queryRow(ctx, `
+	row := s.queryRow(ctx, latestPublicConversationTurnQuery("?"), sessionID)
+	return decodeLatestPublicConversationTurn(row)
+}
+
+func loadLatestPostgresPublicConversationTurnTx(ctx context.Context, tx *sql.Tx, sessionID string) (*operatorread.OperatorPublicConversationTurn, error) {
+	if tx == nil {
+		return nil, fmt.Errorf("load latest postgres conversation turn: transaction is required")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, operatorread.ErrSessionNotFound
+	}
+	return decodeLatestPublicConversationTurn(tx.QueryRowContext(ctx, latestPublicConversationTurnQuery("$1"), sessionID))
+}
+
+func loadLatestSQLitePublicConversationTurnTx(ctx context.Context, tx *sql.Tx, sessionID string) (*operatorread.OperatorPublicConversationTurn, error) {
+	if tx == nil {
+		return nil, fmt.Errorf("load latest sqlite conversation turn: transaction is required")
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil, operatorread.ErrSessionNotFound
+	}
+	return decodeLatestPublicConversationTurn(tx.QueryRowContext(ctx, latestPublicConversationTurnQuery("?"), sessionID))
+}
+
+func latestPublicConversationTurnQuery(sessionPlaceholder string) string {
+	return fmt.Sprintf(`
 		WITH ordered AS (
 			SELECT
 				ROW_NUMBER() OVER (ORDER BY created_at ASC, turn_id ASC) AS ordinal,
@@ -466,7 +493,7 @@ func (s conversationProjection) loadLatestPublicConversationTurn(ctx context.Con
 				COALESCE(CAST(failure AS TEXT), 'null') AS failure,
 				created_at
 			FROM agent_turns
-			WHERE session_id = ?
+			WHERE session_id = %s
 		)
 		SELECT ordinal, turn_id, run_id, agent_id, session_id, entity_id,
 			trigger_event_id, trigger_event_type, task_id, turn_blocks, parse_ok,
@@ -475,7 +502,10 @@ func (s conversationProjection) loadLatestPublicConversationTurn(ctx context.Con
 		FROM ordered
 		ORDER BY created_at DESC, turn_id DESC
 		LIMIT 1
-	`, sessionID)
+	`, sessionPlaceholder)
+}
+
+func decodeLatestPublicConversationTurn(row operatorRowScanner) (*operatorread.OperatorPublicConversationTurn, error) {
 	record, err := scanConversationTurnRecord(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil

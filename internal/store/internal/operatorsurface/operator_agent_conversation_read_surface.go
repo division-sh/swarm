@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
-	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
+	storeagentpersistence "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
 	"github.com/google/uuid"
 )
 
@@ -71,8 +71,6 @@ type operatorAgentProjection struct {
 	Watchdog            *operatorread.OperatorConversationWatchdog
 }
 
-type OperatorAgentProjection = operatorAgentProjection
-
 type conversationPositionCursor struct {
 	Kind      string `json:"kind"`
 	UpdatedAt string `json:"updated_at"`
@@ -84,41 +82,30 @@ type operatorRowScanner interface {
 }
 
 func (r *AgentPostgres) ListOperatorAgents(ctx context.Context, opts operatorread.OperatorAgentListOptions) (operatorread.OperatorAgentListResult, error) {
+	return r.readOperatorAgentSummarySnapshot(ctx, opts)
+}
+
+func (r *AgentPostgres) readOperatorAgentSummarySnapshot(ctx context.Context, opts operatorread.OperatorAgentListOptions) (operatorread.OperatorAgentListResult, error) {
 	if err := r.requireAgentAccess(); err != nil {
 		return operatorread.OperatorAgentListResult{}, err
 	}
-	opts.Flow = strings.Trim(strings.TrimSpace(opts.Flow), "/")
-	opts.Role = strings.TrimSpace(opts.Role)
-	baseRows, err := r.runtime.LoadAgents(ctx)
+	tx, err := r.backend.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		return operatorread.OperatorAgentListResult{}, err
 	}
-	projections, err := r.loadAgentOperatorProjections(ctx)
+	defer tx.Rollback()
+	asOf, err := postgresAgentSnapshotTime(ctx, tx)
 	if err != nil {
 		return operatorread.OperatorAgentListResult{}, err
 	}
-	agents := make([]operatorread.OperatorAgentSummary, 0, len(baseRows))
-	for _, row := range baseRows {
-		if opts.Role != "" && strings.TrimSpace(row.Config.Role) != opts.Role {
-			continue
-		}
-		if opts.Flow != "" && !operatorAgentFlowMatches(row.Config.CanonicalFlowPath(), opts.Flow) {
-			continue
-		}
-		identity, err := row.Config.ConcreteIdentity()
-		if err != nil {
-			return operatorread.OperatorAgentListResult{}, err
-		}
-		projection, ok := projections[identity]
-		if !ok {
-			return operatorread.OperatorAgentListResult{}, fmt.Errorf("missing agent operator projection: %s", identity.Description())
-		}
-		agents = append(agents, operatorAgentSummaryFromPersisted(row, projection, opts.TurnLimit))
+	result, err := r.loadOperatorAgentSummariesTx(ctx, tx, opts, asOf)
+	if err != nil {
+		return operatorread.OperatorAgentListResult{}, err
 	}
-	if agents == nil {
-		agents = []operatorread.OperatorAgentSummary{}
+	if err := tx.Commit(); err != nil {
+		return operatorread.OperatorAgentListResult{}, fmt.Errorf("commit postgres agent summary snapshot: %w", err)
 	}
-	return operatorread.OperatorAgentListResult{Agents: agents}, nil
+	return result, nil
 }
 
 func (r *AgentPostgres) LoadOperatorAgent(ctx context.Context, identity agentidentity.Identity) (operatorread.OperatorAgentDetail, error) {
@@ -126,7 +113,7 @@ func (r *AgentPostgres) LoadOperatorAgent(ctx context.Context, identity agentide
 	if err := identity.Validate(); err != nil {
 		return operatorread.OperatorAgentDetail{}, operatorread.ErrAgentNotFound
 	}
-	result, err := r.ListOperatorAgents(ctx, operatorread.OperatorAgentListOptions{})
+	result, err := r.readOperatorAgentSummarySnapshot(ctx, operatorread.OperatorAgentListOptions{})
 	if err != nil {
 		return operatorread.OperatorAgentDetail{}, err
 	}
@@ -143,7 +130,27 @@ func (r *AgentPostgres) LoadOperatorAgent(ctx context.Context, identity agentide
 }
 
 func (r *AgentPostgres) LoadOperatorAgentDiagnosis(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentDiagnosisOptions) (operatorread.OperatorAgentDiagnosis, error) {
-	detail, err := r.LoadOperatorAgent(ctx, identity)
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
+		return operatorread.OperatorAgentDiagnosis{}, operatorread.ErrAgentNotFound
+	}
+	if err := r.requireAgentAccess(); err != nil {
+		return operatorread.OperatorAgentDiagnosis{}, err
+	}
+	tx, err := r.backend.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return operatorread.OperatorAgentDiagnosis{}, err
+	}
+	defer tx.Rollback()
+	asOf, err := postgresAgentSnapshotTime(ctx, tx)
+	if err != nil {
+		return operatorread.OperatorAgentDiagnosis{}, err
+	}
+	result, err := r.loadOperatorAgentSummariesTx(ctx, tx, operatorread.OperatorAgentListOptions{}, asOf)
+	if err != nil {
+		return operatorread.OperatorAgentDiagnosis{}, err
+	}
+	detail, err := operatorAgentDetailFromSnapshot(result, identity)
 	if err != nil {
 		return operatorread.OperatorAgentDiagnosis{}, err
 	}
@@ -151,17 +158,20 @@ func (r *AgentPostgres) LoadOperatorAgentDiagnosis(ctx context.Context, identity
 	if err != nil {
 		return operatorread.OperatorAgentDiagnosis{}, err
 	}
-	queue, err := r.delivery.ListPendingAgentDeliveryDetails(ctx, operatorread.PendingAgentDeliveryListOptions{
+	queue, err := r.listPendingAgentDeliveryDetailsTx(ctx, tx, operatorread.PendingAgentDeliveryListOptions{
 		AgentIdentity: identity,
 		Limit:         opts.QueueLimit,
 		Cursor:        opts.QueueCursor,
-	})
+	}, asOf)
 	if err != nil {
 		return operatorread.OperatorAgentDiagnosis{}, err
 	}
 	diagnosis.Queue = operatorAgentDiagnosisQueueFromPendingPage(queue)
 	if err := validateOperatorAgentDiagnosis(diagnosis); err != nil {
 		return operatorread.OperatorAgentDiagnosis{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return operatorread.OperatorAgentDiagnosis{}, fmt.Errorf("commit postgres agent diagnosis snapshot: %w", err)
 	}
 	return diagnosis, nil
 }
@@ -273,7 +283,7 @@ func (r *ConversationPostgres) ListOperatorConversations(ctx context.Context, op
 }
 
 func (r *AgentPostgres) requireAgentAccess() error {
-	if r == nil || r.backend == nil || r.runtime == nil || r.conversation == nil || r.delivery == nil || r.deadLetters == nil {
+	if r == nil || r.backend == nil || r.delivery == nil || r.deadLetters == nil {
 		return fmt.Errorf("operator agent read surface requires postgres store")
 	}
 	return r.requireCurrentSchema()
@@ -290,8 +300,31 @@ func (r *ConversationPostgres) loadLatestPublicConversationTurn(ctx context.Cont
 	return r.projection().loadLatestPublicConversationTurn(ctx, sessionID)
 }
 
-func (r *AgentPostgres) loadAgentOperatorProjections(ctx context.Context) (map[agentidentity.Identity]operatorAgentProjection, error) {
-	rows, err := r.backend.QueryContext(ctx, `
+func postgresAgentSnapshotTime(ctx context.Context, tx *sql.Tx) (time.Time, error) {
+	asOf, err := operatorPostgresDelivery.CaptureSnapshotTime(ctx, tx)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("capture postgres agent snapshot time: %w", err)
+	}
+	return asOf.UTC(), nil
+}
+
+func (r *AgentPostgres) loadOperatorAgentSummariesTx(ctx context.Context, tx *sql.Tx, opts operatorread.OperatorAgentListOptions, asOf time.Time) (operatorread.OperatorAgentListResult, error) {
+	baseRows, err := storeagentpersistence.LoadPostgresAgentsTx(ctx, tx)
+	if err != nil {
+		return operatorread.OperatorAgentListResult{}, err
+	}
+	projections, err := r.loadAgentOperatorProjectionsTx(ctx, tx, asOf)
+	if err != nil {
+		return operatorread.OperatorAgentListResult{}, err
+	}
+	return operatorAgentListResultFromSnapshot(baseRows, projections, opts, "postgres")
+}
+
+func (r *AgentPostgres) loadAgentOperatorProjectionsTx(ctx context.Context, tx *sql.Tx, asOf time.Time) (map[agentidentity.Identity]operatorAgentProjection, error) {
+	if tx == nil {
+		return nil, fmt.Errorf("load postgres agent projections: transaction is required")
+	}
+	rows, err := tx.QueryContext(ctx, `
 			SELECT
 			a.agent_id,
 			a.agent_name_owner,
@@ -300,13 +333,13 @@ func (r *AgentPostgres) loadAgentOperatorProjections(ctx context.Context) (map[a
 			a.flow_scope_key,
 			a.flow_instance_id,
 			a.flow_instance,
-			COALESCE(a.status, 'active'),
+			a.status,
 			COALESCE(sess.session_id::text, ''),
 			sess.created_at,
-			COALESCE(sess.turn_count, 0),
+			CASE WHEN sess.session_id IS NULL THEN 0 ELSE sess.turn_count END,
 			COALESCE(sess.lease_holder, ''),
 			sess.lease_expires_at,
-				COALESCE(sess.runtime_state, '{}'::jsonb),
+				CASE WHEN sess.session_id IS NULL THEN '{}'::jsonb ELSE sess.runtime_state END,
 				0,
 				0
 		FROM agents a
@@ -372,22 +405,29 @@ func (r *AgentPostgres) loadAgentOperatorProjections(ctx context.Context) (map[a
 		if sessionStartedAt.Valid {
 			projection.SessionStartedAt = sessionStartedAt.Time
 		}
+		if projection.SessionID != "" && !sessionStartedAt.Valid {
+			return nil, fmt.Errorf("postgres active agent session started_at is required")
+		}
+		if projection.SessionID != "" {
+			if _, err := uuid.Parse(projection.SessionID); err != nil {
+				return nil, fmt.Errorf("postgres active agent session_id is invalid: %w", err)
+			}
+		}
 		if lockExpiresAt.Valid {
 			projection.LockExpiresAt = lockExpiresAt.Time
 		}
 		if err := enrichOperatorAgentProjectionRuntimeState(&projection, runtimeStateRaw); err != nil {
 			return nil, err
 		}
-		if projection.SessionID != "" {
-			turn, err := loadOperatorLatestConversationTurn(ctx, r.conversation, projection.SessionID)
-			if err != nil {
-				return nil, fmt.Errorf("load latest agent turn: %w", err)
-			}
-			enrichOperatorProjectionWithPublicTurn(&projection, turn)
+		if projection.SessionID != "" && len(runtimeStateRaw) == 0 {
+			return nil, fmt.Errorf("postgres active agent session runtime_state is required")
 		}
 		identity, err := agentidentity.FromStorageFields(fields)
 		if err != nil {
 			return nil, fmt.Errorf("scan agent operator identity: %w", err)
+		}
+		if _, exists := out[identity]; exists {
+			return nil, fmt.Errorf("duplicate postgres agent operator projection: %s", identity.Description())
 		}
 		out[identity] = projection
 		identities = append(identities, identity)
@@ -395,14 +435,30 @@ func (r *AgentPostgres) loadAgentOperatorProjections(ctx context.Context) (map[a
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read agent operator projection rows: %w", err)
 	}
-	factsByAgent, err := r.delivery.ListPendingAgentDeliveryFacts(ctx, identities, time.Time{})
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close agent operator projection rows: %w", err)
+	}
+	for _, identity := range identities {
+		projection := out[identity]
+		if projection.SessionID != "" {
+			turn, err := loadLatestPostgresPublicConversationTurnTx(ctx, tx, projection.SessionID)
+			if err != nil {
+				return nil, fmt.Errorf("load latest agent turn: %w", err)
+			}
+			enrichOperatorProjectionWithPublicTurn(&projection, turn)
+			out[identity] = projection
+		}
+	}
+	aggregates, err := operatorPostgresDelivery.AgentPendingAggregates(ctx, tx, identities, time.Time{}, asOf)
 	if err != nil {
 		return nil, err
 	}
-	lifecycleByAgent, err := r.delivery.ListAgentDeliveryLifecycleFacts(ctx, identities)
+	factsByAgent := pendingAgentDeliveryFactsFromAggregates(identities, aggregates, asOf)
+	snapshots, err := operatorPostgresDelivery.CurrentAgentSnapshots(ctx, tx, identities, asOf)
 	if err != nil {
 		return nil, err
 	}
+	lifecycleByAgent := agentDeliveryLifecycleFactsFromSnapshots(identities, snapshots)
 	for identity, facts := range factsByAgent {
 		projection := out[identity]
 		projection.PendingEvents = facts.PendingCount
@@ -418,10 +474,57 @@ func (r *AgentPostgres) loadAgentOperatorProjections(ctx context.Context) (map[a
 	return out, nil
 }
 
-func operatorAgentSummaryFromPersisted(row runtimemanager.PersistedAgent, projection operatorAgentProjection, turnLimit int) operatorread.OperatorAgentSummary {
+func operatorAgentListResultFromSnapshot(baseRows []runtimemanager.PersistedAgent, projections map[agentidentity.Identity]operatorAgentProjection, opts operatorread.OperatorAgentListOptions, backend string) (operatorread.OperatorAgentListResult, error) {
+	opts.Flow = strings.Trim(strings.TrimSpace(opts.Flow), "/")
+	opts.Role = strings.TrimSpace(opts.Role)
+	if len(baseRows) != len(projections) {
+		return operatorread.OperatorAgentListResult{}, fmt.Errorf("%s agent snapshot cardinality mismatch: base=%d projections=%d", backend, len(baseRows), len(projections))
+	}
+	agents := make([]operatorread.OperatorAgentSummary, 0, len(baseRows))
+	seen := make(map[agentidentity.Identity]struct{}, len(baseRows))
+	for _, row := range baseRows {
+		identity, err := row.Config.ConcreteIdentity()
+		if err != nil {
+			return operatorread.OperatorAgentListResult{}, err
+		}
+		if _, exists := seen[identity]; exists {
+			return operatorread.OperatorAgentListResult{}, fmt.Errorf("duplicate %s persisted agent identity: %s", backend, identity.Description())
+		}
+		seen[identity] = struct{}{}
+		projection, ok := projections[identity]
+		if !ok {
+			return operatorread.OperatorAgentListResult{}, fmt.Errorf("missing %s agent operator projection: %s", backend, identity.Description())
+		}
+		if opts.Role != "" && strings.TrimSpace(row.Config.Role) != opts.Role {
+			continue
+		}
+		if opts.Flow != "" && !operatorAgentFlowMatches(row.Config.CanonicalFlowPath(), opts.Flow) {
+			continue
+		}
+		summary, err := operatorAgentSummaryFromPersisted(row, projection, opts.TurnLimit)
+		if err != nil {
+			return operatorread.OperatorAgentListResult{}, err
+		}
+		agents = append(agents, summary)
+	}
+	return operatorread.OperatorAgentListResult{Agents: agents}, nil
+}
+
+func operatorAgentDetailFromSnapshot(result operatorread.OperatorAgentListResult, identity agentidentity.Identity) (operatorread.OperatorAgentDetail, error) {
+	for _, agent := range result.Agents {
+		if agent.Identity == identity {
+			return operatorread.OperatorAgentDetail{
+				Agent: agent, CurrentSessionRef: agent.CurrentSessionRef, LastTurnRef: agent.LastTurnRef,
+			}, nil
+		}
+	}
+	return operatorread.OperatorAgentDetail{}, operatorread.ErrAgentNotFound
+}
+
+func operatorAgentSummaryFromPersisted(row runtimemanager.PersistedAgent, projection operatorAgentProjection, turnLimit int) (operatorread.OperatorAgentSummary, error) {
 	memory, err := row.Config.Memory.Normalize()
 	if err != nil {
-		memory = agentmemory.PlatformDefault()
+		return operatorread.OperatorAgentSummary{}, fmt.Errorf("decode persisted agent memory: %w", err)
 	}
 	out := operatorread.OperatorAgentSummary{
 		AgentID:               strings.TrimSpace(row.Config.ID),
@@ -467,11 +570,7 @@ func operatorAgentSummaryFromPersisted(row runtimemanager.PersistedAgent, projec
 	if out.TurnLimit > 0 {
 		out.NearBreaker = out.TurnCount*100 >= out.TurnLimit*85
 	}
-	return out
-}
-
-func OperatorAgentSummaryFromPersisted(row runtimemanager.PersistedAgent, projection OperatorAgentProjection, turnLimit int) operatorread.OperatorAgentSummary {
-	return operatorAgentSummaryFromPersisted(row, projection, turnLimit)
+	return out, nil
 }
 
 func operatorAgentDiagnosisFromDetail(detail operatorread.OperatorAgentDetail) (operatorread.OperatorAgentDiagnosis, error) {

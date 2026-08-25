@@ -9,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/manager"
@@ -112,6 +113,9 @@ func TestPostgresAgentConversationOwnerBacksSupportedAPISurface(t *testing.T) {
 		Memory: agentmemory.Authored(true), Event: storetest.LoadCanonicalEventRecord(t, ctx, selected, eventID),
 		TaskID: "task-operator-read", ParseOK: true, Latency: 10 * time.Millisecond, CreatedAt: base,
 	})
+	if _, err := selected.ListOperatorAgents(ctx, operatorread.OperatorAgentListOptions{}); err != nil {
+		t.Fatalf("direct postgres agent list: %v", err)
+	}
 
 	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: testOperatorHandlers(testOperatorCapabilities{
 		AgentConversations:     selected,

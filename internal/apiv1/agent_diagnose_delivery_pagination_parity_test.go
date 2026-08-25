@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
@@ -107,6 +108,9 @@ func TestAgentDiagnoseExactDeliveryPaginationParity(t *testing.T) {
 				wantDeliveryIDs = append(wantDeliveryIDs, deliveryID)
 			}
 			sort.Strings(wantDeliveryIDs)
+			if _, err := selected.LoadOperatorAgentDiagnosis(ctx, identity, operatorread.OperatorAgentDiagnosisOptions{QueueLimit: 1}); err != nil {
+				t.Fatalf("direct %s agent diagnosis: %v", backend.name, err)
+			}
 
 			handler := testHandler(t, Options{
 				AuthTokens: []string{testToken},

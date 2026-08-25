@@ -258,6 +258,22 @@ func HydratePersistedAgentConfig(row PersistedAgentProjection) (runtimeactors.Ag
 	if profile.ID != llmselection.BackendMock && desc.Mock.Configured() {
 		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s live runtime descriptor carries a mock performance artifact", strings.TrimSpace(row.AgentID))
 	}
+	subscriptions, err := decodePersistedAgentStringList(row.SubscriptionsJSON, "subscriptions")
+	if err != nil {
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s: %w", strings.TrimSpace(row.AgentID), err)
+	}
+	emitEvents, err := decodePersistedAgentStringList(row.EmitEventsJSON, "emit_events")
+	if err != nil {
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s: %w", strings.TrimSpace(row.AgentID), err)
+	}
+	tools, err := decodePersistedAgentStringList(row.ToolsJSON, "tools")
+	if err != nil {
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s: %w", strings.TrimSpace(row.AgentID), err)
+	}
+	permissions, err := decodePersistedAgentStringList(row.PermissionsJSON, "permissions")
+	if err != nil {
+		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s: %w", strings.TrimSpace(row.AgentID), err)
+	}
 	identity, err := runtimeagentidentity.FromStorageFields(row.Identity)
 	if err != nil {
 		return runtimeactors.AgentConfig{}, fmt.Errorf("agent %s invalid concrete identity: %w", strings.TrimSpace(row.AgentID), err)
@@ -281,10 +297,10 @@ func HydratePersistedAgentConfig(row PersistedAgentProjection) (runtimeactors.Ag
 		Intent:               desc.Intent,
 		Memory:               memory,
 		MaxTurnsPerTask:      desc.MaxTurnsPerTask,
-		Subscriptions:        decodeJSONStringList(row.SubscriptionsJSON),
-		EmitEvents:           decodeJSONStringList(row.EmitEventsJSON),
-		Tools:                decodeJSONStringList(row.ToolsJSON),
-		Permissions:          decodeJSONStringList(row.PermissionsJSON),
+		Subscriptions:        subscriptions,
+		EmitEvents:           emitEvents,
+		Tools:                tools,
+		Permissions:          permissions,
 		Criteria:             append([]string(nil), desc.Criteria...),
 		FlowDataAccess:       append([]string(nil), desc.FlowDataAccess...),
 		BudgetEnvelope:       desc.BudgetEnvelope,
@@ -346,7 +362,7 @@ func marshalPersistedAgentRuntimeDescriptor(cfg runtimeactors.AgentConfig, model
 func decodePersistedAgentRuntimeDescriptor(raw []byte) (PersistedAgentRuntimeDescriptor, error) {
 	obj := map[string]json.RawMessage{}
 	if len(raw) == 0 {
-		raw = []byte(`{}`)
+		return PersistedAgentRuntimeDescriptor{}, fmt.Errorf("runtime_descriptor is required")
 	}
 	if !json.Valid(raw) {
 		return PersistedAgentRuntimeDescriptor{}, fmt.Errorf("runtime_descriptor must be valid json")
@@ -377,6 +393,20 @@ func decodePersistedAgentRuntimeDescriptor(raw []byte) (PersistedAgentRuntimeDes
 	desc.Mock.SourcePath = strings.TrimSpace(desc.Mock.SourcePath)
 	desc.Mock.Source = append([]byte(nil), desc.Mock.Source...)
 	return desc, nil
+}
+
+func decodePersistedAgentStringList(raw []byte, field string) ([]string, error) {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return nil, fmt.Errorf("%s must be a valid json array", field)
+	}
+	var out []string
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("%s must be a json string array: %w", field, err)
+	}
+	if out == nil {
+		return nil, fmt.Errorf("%s must be a json string array", field)
+	}
+	return out, nil
 }
 
 func descExecutionModeMatchesBackend(backend string, mode runtimeeffects.ExecutionMode) bool {
@@ -451,7 +481,7 @@ func extractStringListField(raw []byte, key string) []string {
 
 func validateOpaqueAgentConfig(raw []byte) error {
 	if len(raw) == 0 {
-		return nil
+		return fmt.Errorf("config is required")
 	}
 	if !json.Valid(raw) {
 		return fmt.Errorf("config must be valid json")
@@ -459,6 +489,9 @@ func validateOpaqueAgentConfig(raw []byte) error {
 	var obj map[string]any
 	if err := json.Unmarshal(raw, &obj); err != nil {
 		return fmt.Errorf("decode config: %w", err)
+	}
+	if obj == nil {
+		return fmt.Errorf("config must be a json object")
 	}
 	conflicts := make([]string, 0)
 	for key := range runtimeConfigKeys {
@@ -500,7 +533,7 @@ func invalidPersistedAgentRuntimeDescriptorKeys(obj map[string]json.RawMessage) 
 
 func mustJSONBytes(v any, fallback string) []byte {
 	b, err := json.Marshal(v)
-	if err != nil || len(b) == 0 {
+	if err != nil || len(b) == 0 || string(b) == "null" {
 		return []byte(fallback)
 	}
 	return b
