@@ -2368,7 +2368,7 @@
     },
     {
       "name": "channel.confirm",
-      "description": "Confirm or reject the exact provider-authenticated claimant on one pending operation. Same revision and decision replay returns the terminal outcome without repeating claim or binding mutation.",
+      "description": "Confirm or reject the exact provider-authenticated claimant on one pending operation. Same revision and decision replay returns the terminal outcome and retries pending or failed proof projection without repeating claim or binding mutation; rejection omits binding.",
       "params": [
         {
           "name": "operation_id",
@@ -2956,7 +2956,7 @@
     },
     {
       "name": "channel.list",
-      "description": "Return generation-aware selected-store binding and machine-proof readback for every current or retained channel interface. Raw account references and display values are masked.",
+      "description": "Return generation-aware readback for the exact union of current interfaces, retained bindings, machine proofs, and nonterminal operations. Raw account references and display values are masked, with absent provider presentation falling back to the safely masked external account reference.",
       "params": [],
       "result": {
         "name": "result",
@@ -3008,7 +3008,7 @@
     },
     {
       "name": "channel.proof_revoke",
-      "description": "Revoke one exact machine-local verified-account proof revision. Derived local bindings immediately read back revoked and cannot grant authority.",
+      "description": "Revoke one exact current or retained machine-local verified-account proof revision. Derived local bindings immediately read back revoked and cannot grant authority; a listed interface without a proof fails as CHANNEL_PROOF_UNAVAILABLE.",
       "params": [
         {
           "name": "interface",
@@ -3847,7 +3847,7 @@
     },
     {
       "name": "channel.unbind",
-      "description": "Persist an explicit revision-fenced local unbind so an available machine proof cannot silently recreate the deployment binding.",
+      "description": "Persist an explicit revision-fenced local unbind for a current or retained listed interface so an available machine proof cannot silently recreate the deployment binding.",
       "params": [
         {
           "name": "interface",

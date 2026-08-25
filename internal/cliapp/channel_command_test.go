@@ -74,6 +74,8 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 					return operatorChannelCLIListResult("unbound", nil)
 				}
 				pending := operatorChannelCLIOperationResult("awaiting_confirmation", 2, 0)
+				pending["account_presentation"] = "41********90"
+				pending["external_account_reference"] = "41********90"
 				return operatorChannelCLIListResult("unbound", pending)
 			case "channel.connect":
 				if request.Params["interface"] != operatorChannelCLISelector || request.Params["expected_revision"] != float64(0) || request.Params["save_proof"] != true {
@@ -94,7 +96,7 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 		if code != 0 || strings.TrimSpace(stderr) != "" {
 			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 		}
-		for _, want := range []string{operatorChannelCLIChallenge, "Waiting for an authenticated claimant", "Claimed by @m***o in a shared conversation", "Connected provider.telegram.hitl_channel"} {
+		for _, want := range []string{operatorChannelCLIChallenge, "Waiting for an authenticated claimant", "Claimed by 41********90 in a shared conversation", "Connected provider.telegram.hitl_channel"} {
 			if !strings.Contains(stdout, want) {
 				t.Fatalf("connect output missing %q:\n%s", want, stdout)
 			}

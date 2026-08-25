@@ -91,7 +91,7 @@ func OperatorChannelHandlers(opts OperatorChannelHandlerOptions) map[string]Meth
 			if err != nil {
 				return nil, operatorChannelError(err)
 			}
-			return map[string]any{"operation": op, "binding": binding}, nil
+			return operatorChannelOperationResult(op, binding), nil
 		})
 	}
 	handlers["channel.unbind"] = func(ctx context.Context, req Request) (any, error) {
@@ -116,7 +116,7 @@ func OperatorChannelHandlers(opts OperatorChannelHandlerOptions) map[string]Meth
 			if err != nil {
 				return nil, operatorChannelError(err)
 			}
-			return map[string]any{"operation": op, "binding": binding}, nil
+			return operatorChannelOperationResult(op, binding), nil
 		})
 	}
 	handlers["channel.proof_revoke"] = func(ctx context.Context, req Request) (any, error) {
@@ -158,6 +158,14 @@ func OperatorChannelHandlers(opts OperatorChannelHandlerOptions) map[string]Meth
 		return map[string]any{"principal_id": principal.ID, "channels": channels}, nil
 	}
 	return handlers
+}
+
+func operatorChannelOperationResult(operation operatorchannel.Operation, binding operatorchannel.Binding) map[string]any {
+	result := map[string]any{"operation": operation}
+	if binding.PrincipalID != "" {
+		result["binding"] = binding
+	}
+	return result
 }
 
 func executeOperatorChannelIdempotent(ctx context.Context, req Request, opts OperatorChannelHandlerOptions, resourceID, idempotencyKey string, now time.Time, execute func(context.Context) (any, error)) (any, error) {

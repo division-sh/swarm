@@ -96,6 +96,10 @@ func TestOperatorChannelProofResponsibilityRecoversAfterCommittedBindingSelected
 			if err != nil || len(responsibilities) != 1 || responsibilities[0].Operation.OperationID != op.OperationID || responsibilities[0].Operation.ProofStatus != operatorchannel.ProofFailed {
 				t.Fatalf("pending proof responsibilities = %#v, %v", responsibilities, err)
 			}
+			replayed, replayedBinding, err := service.Confirm(ctx, op.OperationID, settlement.Operation.Revision, true, now.Add(3*time.Second))
+			if err != nil || replayed.State != operatorchannel.StateBound || replayed.ProofStatus != operatorchannel.ProofActive || replayedBinding.Revision != binding.Revision {
+				t.Fatalf("same-service confirmation replay = op:%#v binding:%#v err:%v", replayed, replayedBinding, err)
+			}
 
 			recovered, err := operatorchannel.NewService(fixture.store, proofs, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
 			if err != nil {
@@ -116,6 +120,92 @@ func TestOperatorChannelProofResponsibilityRecoversAfterCommittedBindingSelected
 			readback, err := recovered.Readback(ctx)
 			if err != nil || len(readback) != 1 || readback[0].Status != operatorchannel.BindingCurrent || readback[0].BindingRevision != 1 || readback[0].ProofRevision != 1 {
 				t.Fatalf("recovered readback = %#v, %v", readback, err)
+			}
+		})
+	}
+}
+
+func TestOperatorChannelRetainedLifecycleProjectionSelectedStoreParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := context.Background()
+			fixture := openOperatorChannelContractFixture(t, backend)
+			proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			now := time.Date(2026, 8, 24, 16, 0, 0, 0, time.UTC)
+			boundIdentity := operatorChannelContractIdentity("retained-bound-generation")
+			operationIdentity := operatorChannelContractIdentity("retained-operation-generation")
+			proofOnlyIdentity := operatorChannelContractIdentity("retained-proof-generation")
+			successorIdentity := operatorChannelContractIdentity("retained-successor-generation")
+
+			for index, identity := range []operatorchannel.InterfaceIdentity{boundIdentity, proofOnlyIdentity} {
+				binding := operatorchannel.Binding{
+					PrincipalID: uuid.NewString(), Interface: identity,
+					ExternalAccountRef: fmt.Sprintf("retained-account-%d", index), ConversationRef: fmt.Sprintf("retained-conversation-%d", index),
+					ConversationScope: operatorchannel.ConversationScopeDirect, AccountPresentation: "@retained",
+					Revision: 1, Status: operatorchannel.BindingCurrent, Source: operatorchannel.BindingSourceLiveVerification,
+					OperationID: uuid.NewString(), UpdatedAt: now,
+				}
+				proof := operatorChannelContractProof(identity, binding, now)
+				proof.Challenge = []string{"SWARM-BBBBBBBBBBBBBBBB", "SWARM-CCCCCCCCCCCCCCCC"}[index]
+				if err := proofs.Put(ctx, proof); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			service, err := operatorchannel.NewService(fixture.store, proofs, []operatorchannel.InterfaceIdentity{boundIdentity, operationIdentity}, uuid.NewString())
+			if err != nil {
+				t.Fatal(err)
+			}
+			principal, bindings, err := service.Bootstrap(ctx, now.Add(time.Minute))
+			if err != nil || principal.ID == "" || len(bindings) != 1 || bindings[0].Interface.Key() != boundIdentity.Key() {
+				t.Fatalf("retained bootstrap principal=%#v bindings=%#v err=%v", principal, bindings, err)
+			}
+			pending, err := service.Begin(ctx, operationIdentity.Selector, operatorchannel.OperationConnect, 0, "retained-operation-key", "retained-operation-request", false, now.Add(2*time.Minute))
+			if err != nil {
+				t.Fatal(err)
+			}
+			idempotency, ok := fixture.store.(apiv1.APIIdempotencyStore)
+			if !ok {
+				t.Fatalf("selected store %T lacks API idempotency", fixture.store)
+			}
+			server := newOperatorChannelSupportedSurfaceServer(t, service, idempotency, principal.ID, operatorChannelSupportedSurfaceToken)
+			if err := service.ReplaceInterfaces([]operatorchannel.InterfaceIdentity{successorIdentity}); err != nil {
+				t.Fatal(err)
+			}
+
+			listed := operatorChannelSupportedSurfaceList(t, server.URL, operatorChannelSupportedSurfaceToken)
+			if len(listed.Channels) != 4 {
+				t.Fatalf("retained readback = %#v", listed)
+			}
+			rows := map[string]operatorchannel.Readback{}
+			for _, row := range listed.Channels {
+				rows[row.Interface.Key()] = row
+			}
+			if rows[boundIdentity.Key()].Status != operatorchannel.BindingStale || rows[proofOnlyIdentity.Key()].ProofStatus != operatorchannel.ProofActive || rows[proofOnlyIdentity.Key()].ProofID == "" ||
+				rows[operationIdentity.Key()].PendingOperation == nil || rows[operationIdentity.Key()].PendingOperation.OperationID != pending.OperationID || rows[successorIdentity.Key()].Status != operatorchannel.BindingUnbound {
+				t.Fatalf("retained projection rows = %#v", rows)
+			}
+			var revoked struct {
+				Proof operatorchannel.VerifiedProof `json:"proof"`
+			}
+			operatorChannelSupportedSurfaceCall(t, server.URL, operatorChannelSupportedSurfaceToken, "channel.proof_revoke", map[string]any{
+				"interface": proofOnlyIdentity.Selector, "expected_revision": 1, "idempotency_key": "retained-proof-revoke-" + backend,
+			}, &revoked)
+			if revoked.Proof.Status != operatorchannel.ProofRevoked || revoked.Proof.Revision != 2 {
+				t.Fatalf("revoke retained proof-only identity = %#v", revoked.Proof)
+			}
+			var unbound struct {
+				Operation operatorchannel.Operation `json:"operation"`
+				Binding   operatorchannel.Binding   `json:"binding"`
+			}
+			operatorChannelSupportedSurfaceCall(t, server.URL, operatorChannelSupportedSurfaceToken, "channel.unbind", map[string]any{
+				"interface": boundIdentity.Selector, "expected_revision": 1, "idempotency_key": "retained-unbind-" + backend,
+			}, &unbound)
+			if unbound.Operation.State != operatorchannel.StateUnbound || unbound.Binding.Status != operatorchannel.BindingUnbound || unbound.Binding.Revision != 2 {
+				t.Fatalf("unbind retained binding = %#v", unbound)
 			}
 		})
 	}
@@ -214,6 +304,23 @@ func runOperatorChannelSupportedSurface(t *testing.T, backend servedparity.Backe
 
 	bindingRevision := int64(0)
 	proofRevision := int64(0)
+	var rejectedBegin struct {
+		Operation operatorchannel.Operation `json:"operation"`
+	}
+	operatorChannelSupportedSurfaceCall(t, server.URL, operatorChannelSupportedSurfaceToken, "channel.connect", map[string]any{
+		"interface": identity.Selector, "expected_revision": 0, "save_proof": false, "idempotency_key": "reject-" + string(backend),
+	}, &rejectedBegin)
+	rejectedSettlement, err := fixture.settle(context.Background(), operatorChannelContractClaim(rejectedBegin.Operation, operatorchannel.ConversationScopeDirect, "rejected-account", "rejected-conversation", uuid.NewString()), now.Add(30*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rejectedResult map[string]any
+	operatorChannelSupportedSurfaceCall(t, server.URL, operatorChannelSupportedSurfaceToken, "channel.confirm", map[string]any{
+		"operation_id": rejectedSettlement.Operation.OperationID, "expected_revision": rejectedSettlement.Operation.Revision, "approve": false, "idempotency_key": "reject-confirm-" + string(backend),
+	}, &rejectedResult)
+	if _, present := rejectedResult["binding"]; present {
+		t.Fatalf("%s rejected confirmation exposed an empty binding: %#v", backend, rejectedResult)
+	}
 	lifecycles := []struct {
 		method       string
 		account      string
@@ -339,13 +446,33 @@ func runOperatorChannelSupportedSurface(t *testing.T, backend servedparity.Backe
 		t.Fatalf("%s revoked channel.list = %#v", backend, list)
 	}
 
+	var unboundResult map[string]any
+	operatorChannelSupportedSurfaceCall(t, rotated.URL, "rotated-token", "channel.unbind", map[string]any{
+		"interface": identity.Selector, "expected_revision": bindingRevision, "idempotency_key": "unbind-" + string(backend),
+	}, &unboundResult)
+	operationResult := unboundResult["operation"].(map[string]any)
+	bindingResult := unboundResult["binding"].(map[string]any)
+	for _, absent := range []string{"expires_at", "claimed_at"} {
+		if _, present := operationResult[absent]; present {
+			t.Fatalf("%s unbind operation exposed zero %s: %#v", backend, absent, operationResult)
+		}
+	}
+	for _, absent := range []string{"external_account_reference", "conversation_reference", "conversation_scope", "account_presentation", "source", "proof_id", "proof_revision"} {
+		if _, present := bindingResult[absent]; present {
+			t.Fatalf("%s unbind binding exposed inapplicable %s: %#v", backend, absent, bindingResult)
+		}
+	}
+	rawUnbound, err := json.Marshal(unboundResult)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var unbound struct {
 		Operation operatorchannel.Operation `json:"operation"`
 		Binding   operatorchannel.Binding   `json:"binding"`
 	}
-	operatorChannelSupportedSurfaceCall(t, rotated.URL, "rotated-token", "channel.unbind", map[string]any{
-		"interface": identity.Selector, "expected_revision": bindingRevision, "idempotency_key": "unbind-" + string(backend),
-	}, &unbound)
+	if err := json.Unmarshal(rawUnbound, &unbound); err != nil {
+		t.Fatal(err)
+	}
 	if unbound.Operation.State != operatorchannel.StateUnbound || unbound.Binding.Status != operatorchannel.BindingUnbound || unbound.Binding.Revision != bindingRevision+1 {
 		t.Fatalf("%s unbind = %#v", backend, unbound)
 	}
