@@ -206,6 +206,13 @@ func beginBinding(ctx context.Context, runner transactionRunner, req domain.Begi
 		if err != nil {
 			return err
 		}
+		unresolved, err := unresolvedProofResponsibilityIDs(txctx, tx, runner.dialect(), req.Interface.Key(), true)
+		if err != nil {
+			return err
+		}
+		if len(unresolved) != 0 {
+			return fmt.Errorf("%w: operator channel interface has unresolved proof responsibility; replay its confirmation or unbind first", domain.ErrConflict)
+		}
 		currentRevision := int64(0)
 		if bindingFound {
 			currentRevision = binding.Revision
@@ -425,6 +432,9 @@ func unbind(ctx context.Context, runner transactionRunner, req domain.UnbindRequ
 			return domain.ErrRevisionConflict
 		}
 		now := canonicalTime(req.RequestedAt)
+		if err := dischargeProofResponsibilities(txctx, tx, runner.dialect(), req.Interface.Key(), now); err != nil {
+			return err
+		}
 		op = domain.Operation{OperationID: req.OperationID, Kind: domain.OperationUnbind, PrincipalID: req.PrincipalID, Interface: req.Interface.Normalized(), State: domain.StateUnbound, Revision: 1, BindingRevision: current.Revision + 1, SaveProof: false, ProofStatus: domain.ProofSkipped, RequestedAt: now, CompletedAt: now}
 		if err := insertOperation(txctx, tx, runner.dialect(), op, req.RequestKeyHash, req.RequestHash, req.ExpectedRevision, ""); err != nil {
 			return err
@@ -611,6 +621,32 @@ func completeProof(ctx context.Context, runner transactionRunner, operationID, p
 		}
 		return nil
 	})
+}
+
+func unresolvedProofResponsibilityIDs(ctx context.Context, db queryer, d dialect, interfaceKey string, forUpdate bool) ([]string, error) {
+	query := `SELECT operation_id FROM operator_channel_operations WHERE interface_key = ? AND state = 'bound' AND proof_status IN ('pending','failed') ORDER BY operation_id`
+	if forUpdate && d == dialectPostgres {
+		query += ` FOR UPDATE`
+	}
+	rows, err := db.QueryContext(ctx, d.bind(query), interfaceKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func dischargeProofResponsibilities(ctx context.Context, tx *sql.Tx, d dialect, interfaceKey string, now time.Time) error {
+	_, err := tx.ExecContext(ctx, d.bind(`UPDATE operator_channel_operations SET proof_status = 'revoked', proof_failure = 'operator channel unbound before proof responsibility completed', updated_at = ? WHERE interface_key = ? AND state = 'bound' AND proof_status IN ('pending','failed')`), now, interfaceKey)
+	return err
 }
 
 // SettleInboundClaimTx is called only inside the selected-store inbound
