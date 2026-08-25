@@ -67,7 +67,7 @@ func TestPostgresBundleDeleteCloseRecoversPendingSurvivorRefreshBeforeReplay(t *
 	t.Cleanup(func() { _ = db.Close() })
 	storetest.BootstrapPostgresRuntimeStore(t, selected)
 	cfg := &config.Config{}
-	stores := selectedPostgresStoreBundle(selected, db, cfg)
+	stores := openSelectedPostgresOwner(t, dsn, db, cfg)
 
 	firstRoot := writeServeRuntimeAgentSlugFixture(t, "delete-replay-a", "alpha-worker")
 	secondRoot := writeServeRuntimeAgentSlugFixture(t, "delete-replay-b", "beta-worker")
@@ -145,7 +145,7 @@ func TestPostgresBundleDeleteCloseRecoversPendingSurvivorRefreshBeforeReplay(t *
 	if err != nil {
 		t.Fatalf("NewSourceSetPlan: %v", err)
 	}
-	capability, err = stores.StartupOwnership.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+	capability, err = stores.StartupOwnership().AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
 		OwnerID: "bundle-delete-replay-test", BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
 	})
 	if err != nil {

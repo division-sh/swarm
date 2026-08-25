@@ -132,6 +132,77 @@ func goldenContinuousProofProfile(t *testing.T) (string, bool) {
 	}
 }
 
+func TestGoldenAgentWorkloadSQLiteDevRestartFailsClosed(t *testing.T) {
+	releaseRoot := goldenReleaseRoot(t)
+	binaryPath := buildReleaseBinary(t, releaseRoot)
+	root := filepath.Join(releaseRoot, "sqlite-dev-restart")
+	store := goldenSQLiteStore(root)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("create release project: %v", err)
+	}
+	contracts := filepath.Join(root, "contracts")
+	copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal", "releasee2e", "testdata", "golden_agent_workload"), contracts)
+	writeReleaseFile(t, filepath.Join(root, "go.mod"), "module golden-agent-release-e2e\n\ngo 1.23.0\n")
+	dataDir := filepath.Join(root, "data")
+	workspaceDir := filepath.Join(root, "workspace")
+	for _, dir := range []string{dataDir, workspaceDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("create release directory %s: %v", dir, err)
+		}
+	}
+	configPath := filepath.Join(root, "swarm.yaml")
+	writeReleaseFile(t, configPath, goldenRuntimeConfig(store, workspaceDir))
+	tokenFile := filepath.Join(root, "api-token")
+	writeReleaseFile(t, tokenFile, goldenAPIToken+"\n")
+	env := goldenProcessEnv(root, "")
+	assertGoldenProcessHasNoClaudeBinary(t, env)
+
+	apiPort := freeReleaseTCPPort(t)
+	mcpPort := freeReleaseTCPPort(t)
+	start := func(dev bool) *releaseServeProcess {
+		return startReleaseServe(t, releaseProcessSpec{
+			BinaryPath: binaryPath,
+			WorkingDir: root,
+			ConfigPath: configPath,
+			Contracts:  contracts,
+			Data:       dataDir,
+			Store:      store.name,
+			Dev:        dev,
+			APIPort:    apiPort,
+			MCPPort:    mcpPort,
+			TokenFile:  tokenFile,
+			Token:      goldenAPIToken,
+			Env:        env,
+		})
+	}
+
+	process := start(true)
+	readyCtx, readyCancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
+	if err := process.waitReady(readyCtx); err != nil {
+		readyCancel()
+		t.Fatal(err)
+	}
+	readyCancel()
+	bundleHash := goldenServedBundleHash(t, process.rpc)
+	runID := goldenPublishIngress(t, process.rpc, bundleHash)
+	waitForGoldenCrashCheckpoint(t, process.rpc, runID)
+	if err := process.killAndWait(5 * time.Second); err != nil {
+		t.Fatalf("force-kill dev release serve: %v\n%s", err, process.output.String())
+	}
+	restarted := start(false)
+	restartCtx, restartCancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
+	err := restarted.waitReady(restartCtx)
+	restartCancel()
+	if err == nil {
+		t.Fatal("non-dev restart unexpectedly resumed an active SQLite dev run")
+	}
+	for _, want := range []string{"bundle match admission", "BUNDLE_UNAVAILABLE", "bundle_source=ephemeral", runID} {
+		if !strings.Contains(restarted.output.String(), want) {
+			t.Fatalf("non-dev restart output missing %q:\n%s", want, restarted.output.String())
+		}
+	}
+}
+
 type goldenStoreSelection struct {
 	name        string
 	configYAML  string
@@ -148,12 +219,13 @@ func goldenReleaseRoot(t *testing.T) string {
 }
 
 func goldenSQLiteStore(root string) goldenStoreSelection {
+	path := filepath.Join(root, "runtime.db")
 	return goldenStoreSelection{
 		name: "sqlite",
 		configYAML: "store:\n" +
 			"  backend: sqlite\n" +
 			"  sqlite:\n" +
-			"    path: " + strconv.Quote(filepath.Join(root, "runtime.db")) + "\n",
+			"    path: " + strconv.Quote(path) + "\n",
 	}
 }
 

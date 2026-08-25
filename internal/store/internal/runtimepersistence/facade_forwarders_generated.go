@@ -2260,6 +2260,10 @@ func (s *SQLiteRuntimeStore) UpdateLiveSessionWatchdog(ctx context.Context, upda
 	return s.lLMSQLiteOwner.UpdateLiveSessionWatchdog(ctx, update)
 }
 
+func (s *SQLiteRuntimeStore) UpsertBundleCatalog(ctx context.Context, req bundlecatalog.Upsert) (bundlecatalog.UpsertResult, error) {
+	return s.sQLite.UpsertBundleCatalog(ctx, req)
+}
+
 func (s *SQLiteRuntimeStore) UpsertConversation(ctx context.Context, rec llm.ConversationRecord) error {
 	return s.lLMSQLiteOwner.UpsertConversation(ctx, rec)
 }

@@ -21,8 +21,10 @@ func TestRunServeRuntimeConsumesContractPathResolverBeforeBundleLoad(t *testing.
 		"contracts_path": configContracts,
 	}))
 	originalBuildStores := buildStoresForServe
-	buildStoresForServe = func(context.Context, storebackend.Selection, *config.Config) (storeBundle, error) {
-		return storeBundle{}, nil
+	owner := openSelectedSQLiteOwner(t, filepath.Join(t.TempDir(), "runtime.sqlite"), &config.Config{})
+	t.Cleanup(func() { closeUnactivatedSelectedStore(t, owner) })
+	buildStoresForServe = func(context.Context, storebackend.Selection, *config.Config) (*selectedStoreOwner, error) {
+		return owner, nil
 	}
 	t.Cleanup(func() {
 		buildStoresForServe = originalBuildStores

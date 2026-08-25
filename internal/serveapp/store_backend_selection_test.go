@@ -7,11 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"sort"
 	"strings"
 	"testing"
 
-	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packadmission"
@@ -22,9 +20,9 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
-	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	storeconstruction "github.com/division-sh/swarm/internal/store/construction"
+	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
 
@@ -77,9 +75,9 @@ func TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction(t
 			unsetStoreSelectorEnv(t)
 			oldBuildStores := buildStoresForServe
 			var captured storebackend.Selection
-			buildStoresForServe = func(_ context.Context, selection storebackend.Selection, _ *config.Config) (storeBundle, error) {
+			buildStoresForServe = func(_ context.Context, selection storebackend.Selection, _ *config.Config) (*selectedStoreOwner, error) {
 				captured = selection
-				return storeBundle{}, errors.New("stop after selector proof")
+				return nil, errors.New("stop after selector proof")
 			}
 			t.Cleanup(func() {
 				buildStoresForServe = oldBuildStores
@@ -117,9 +115,9 @@ func TestRunServeRuntimeStoreFlagCanOverrideConfigPostgresBeforePasswordRequirem
 
 	oldBuildStores := buildStoresForServe
 	var captured storebackend.Selection
-	buildStoresForServe = func(_ context.Context, selection storebackend.Selection, _ *config.Config) (storeBundle, error) {
+	buildStoresForServe = func(_ context.Context, selection storebackend.Selection, _ *config.Config) (*selectedStoreOwner, error) {
 		captured = selection
-		return storeBundle{}, errors.New("stop after selector proof")
+		return nil, errors.New("stop after selector proof")
 	}
 	t.Cleanup(func() {
 		buildStoresForServe = oldBuildStores
@@ -200,29 +198,20 @@ func TestPostgresDSNFromConfigSecretKeyUsesFileStoreNotEnvOverlay(t *testing.T) 
 
 func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "dev.db")
-	stores, err := buildStores(context.Background(), storebackend.Selection{
-		Backend:          storebackend.BackendSQLite,
-		BackendSource:    storebackend.SourceFlag,
-		SQLitePath:       path,
-		SQLitePathSource: storebackend.SourceRolloutDefault,
-	}, &config.Config{})
-	if err != nil {
-		t.Fatalf("buildStores(sqlite): %v", err)
+	stores := openSelectedSQLiteOwner(t, path, &config.Config{})
+	t.Cleanup(func() { closeUnactivatedSelectedStore(t, stores) })
+	runtimeDeps := stores.RuntimeDeps()
+	if stores.Schema() == nil || stores.Pinger() == nil || stores.StartupOwnership() == nil ||
+		stores.OperatorChannels() == nil || stores.MailboxAPI() == nil || stores.Observability() == nil ||
+		stores.AgentUsage() == nil || stores.AgentDeliveryLifecycle() == nil || stores.Idempotency() == nil ||
+		stores.Runs() == nil || stores.Entities() == nil || stores.Agents() == nil || stores.Conversations() == nil ||
+		runtimeDeps.EventStore == nil || !runtimeDeps.WorkflowPersistence.Valid() || runtimeDeps.SessionRegistry == nil ||
+		runtimeDeps.ConversationStore == nil || runtimeDeps.ManagerStore == nil || runtimeDeps.GenericScheduleStore == nil ||
+		runtimeDeps.MailboxMaterializer == nil || runtimeDeps.MailboxStore == nil || runtimeDeps.BudgetSpendStore == nil ||
+		runtimeDeps.InboundStore == nil || runtimeDeps.RuntimeIngressStore == nil {
+		t.Fatal("SQLite selected owner has an incomplete required projection")
 	}
-	t.Cleanup(func() { closeDB(stores.SQLDB) })
-	if stores.SQLDB == nil || stores.RuntimeLogStore == nil || stores.SchemaBootstrapper == nil || stores.EventStore == nil || !stores.WorkflowPersistence.Valid() || stores.SessionRegistry == nil || stores.ConversationStore == nil || stores.ManagerStore == nil || stores.GenericScheduleStore == nil || stores.MailboxMaterializer == nil || stores.MailboxStore == nil || stores.BudgetSpendStore == nil || stores.InboundStore == nil || stores.MailboxAPIStore == nil || stores.ObservabilityStore == nil || stores.AgentUsageStore == nil || stores.AgentDeliveryLifecycleStore == nil || stores.RuntimeIngressStore == nil || stores.IdempotencyStore == nil || stores.StartupOwnership == nil || stores.AgentReadStore == nil || stores.ConversationReadStore == nil {
-		t.Fatalf("sqlite store bundle missing selected core owners: %#v", stores)
-	}
-	if stores.Postgres != nil {
-		t.Fatalf("sqlite store bundle Postgres = %#v, want nil", stores.Postgres)
-	}
-	if _, ok := stores.ObservabilityStore.(apiv1.RunReadStore); !ok {
-		t.Fatalf("sqlite ObservabilityStore = %T, want selected run read store for run.get/list", stores.ObservabilityStore)
-	}
-	if _, ok := stores.ObservabilityStore.(apiv1.EntityReadStore); !ok {
-		t.Fatalf("sqlite ObservabilityStore = %T, want selected entity read store for entity.*", stores.ObservabilityStore)
-	}
-	apiCaps, err := stores.facade().apiCapabilities(selectedAPICapabilityRequest{})
+	apiCaps, err := buildSelectedAPICapabilities(stores, selectedAPICapabilityRequest{})
 	if err != nil {
 		t.Fatalf("sqlite apiCapabilities: %v", err)
 	}
@@ -252,7 +241,6 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 	if apiCaps.RuntimeContexts != nil {
 		t.Fatalf("sqlite optional capability RuntimeContexts = %T, want nil classified split/postgres-only capability", apiCaps.RuntimeContexts)
 	}
-	runtimeDeps := stores.runtimeDeps()
 	if _, ok := reflect.TypeOf(runtimeDeps).FieldByName("SQLDB"); ok {
 		t.Fatal("sqlite RuntimeDeps exposes raw SQLDB field")
 	}
@@ -283,72 +271,49 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 }
 
 func TestBuildStoresSQLiteBindsOwnershipToConstructedBackendIdentity(t *testing.T) {
-	for _, operation := range []string{"acquire", "repair"} {
-		t.Run(operation, func(t *testing.T) {
-			ctx := context.Background()
-			path := filepath.Join(t.TempDir(), "runtime.db")
-			stores, err := buildStores(ctx, storebackend.Selection{
-				Backend: storebackend.BackendSQLite, SQLitePath: path,
-			}, &config.Config{})
-			if err != nil {
-				t.Fatalf("buildStores(sqlite): %v", err)
-			}
-			t.Cleanup(func() { _ = stores.facade().closeWithError() })
-			if _, err := initializeServePlatformStateStores(ctx, stores, filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath)); err != nil {
-				t.Fatalf("bootstrap SQLite selected store: %v", err)
-			}
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "runtime.db")
+	stores := openSelectedSQLiteOwner(t, path, &config.Config{})
+	t.Cleanup(func() { closeUnactivatedSelectedStore(t, stores) })
+	if _, err := initializeServePlatformStateStores(ctx, stores.Schema(), filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath)); err != nil {
+		t.Fatalf("bootstrap SQLite selected store: %v", err)
+	}
 
-			retiredPath := path + ".retired"
-			if err := os.Rename(path, retiredPath); err != nil {
-				t.Fatalf("replace constructed SQLite identity: %v", err)
-			}
-			if err := os.WriteFile(path, nil, 0o600); err != nil {
-				t.Fatalf("create replacement SQLite identity: %v", err)
-			}
-			contender, _, contenderErr := storeconstruction.OpenSQLiteRuntimeWithOwnershipBinding(retiredPath)
-			if contender != nil {
-				_ = contender.Close()
-				t.Fatal("renamed constructed SQLite backend admitted a concurrent process constructor")
-			}
-			var contenderAcquisitionErr *runtimestartupownership.AcquisitionError
-			if !errors.As(contenderErr, &contenderAcquisitionErr) || contenderAcquisitionErr.Failure != runtimestartupownership.AcquisitionTakeoverRequired {
-				t.Fatalf("renamed backend contender error=%v, want takeover_required", contenderErr)
-			}
+	retiredPath := path + ".retired"
+	if err := os.Rename(path, retiredPath); err != nil {
+		t.Fatalf("replace constructed SQLite identity: %v", err)
+	}
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatalf("create replacement SQLite identity: %v", err)
+	}
+	contender, _, contenderErr := storeconstruction.OpenSQLiteRuntimeWithOwnershipBinding(retiredPath)
+	if contender != nil {
+		_ = contender.Close()
+		t.Fatal("renamed constructed SQLite backend admitted a concurrent process constructor")
+	}
+	var contenderAcquisitionErr *runtimestartupownership.AcquisitionError
+	if !errors.As(contenderErr, &contenderAcquisitionErr) || contenderAcquisitionErr.Failure != runtimestartupownership.AcquisitionTakeoverRequired {
+		t.Fatalf("renamed backend contender error=%v, want takeover_required", contenderErr)
+	}
 
-			switch operation {
-			case "acquire":
-				capability, err := stores.StartupOwnership.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
-					OwnerID: "backend-identity-proof", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
-				})
-				if capability != nil {
-					_ = capability.Release(ctx)
-					t.Fatal("SQLite acquisition returned a capability for a different backend inode")
-				}
-				requireSQLiteBackendIdentityRefusal(t, err)
-			case "repair":
-				maintenance, ok := stores.StartupOwnership.(interface {
-					RepairAuthority(context.Context, runtimestartupownership.AuthorityRepairRequest) (runtimestartupownership.AuthorityRepairResult, error)
-				})
-				if !ok {
-					t.Fatalf("SQLite startup owner %T does not expose repair", stores.StartupOwnership)
-				}
-				_, err := maintenance.RepairAuthority(ctx, runtimestartupownership.AuthorityRepairRequest{
-					OperationID: uuid.NewString(), FindingsDigest: "sha256:" + strings.Repeat("0", 64), Confirmed: true,
-				})
-				requireSQLiteBackendIdentityRefusal(t, err)
-			}
+	capability, err := stores.StartupOwnership().AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+		OwnerID: "backend-identity-proof", BootID: uuid.NewString(), RuntimeInstanceID: uuid.NewString(),
+	})
+	if capability != nil {
+		_ = capability.Release(ctx)
+		t.Fatal("SQLite acquisition returned a capability for a different backend inode")
+	}
+	requireSQLiteBackendIdentityRefusal(t, err)
 
-			var authorityRows int
-			if err := stores.SQLDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_startup_authority_facts`).Scan(&authorityRows); err != nil {
-				t.Fatalf("read constructed SQLite authority rows: %v", err)
-			}
-			if authorityRows != 0 {
-				t.Fatalf("constructed SQLite backend gained %d authority rows after identity replacement", authorityRows)
-			}
-			if info, err := os.Stat(path); err != nil || info.Size() != 0 {
-				t.Fatalf("replacement SQLite identity was mutated: info=%#v err=%v", info, err)
-			}
-		})
+	var authorityRows int
+	if err := selectedStoreDatabaseForTest(t, stores).QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_startup_authority_facts`).Scan(&authorityRows); err != nil {
+		t.Fatalf("read constructed SQLite authority rows: %v", err)
+	}
+	if authorityRows != 0 {
+		t.Fatalf("constructed SQLite backend gained %d authority rows after identity replacement", authorityRows)
+	}
+	if info, err := os.Stat(path); err != nil || info.Size() != 0 {
+		t.Fatalf("replacement SQLite identity was mutated: info=%#v err=%v", info, err)
 	}
 }
 
@@ -371,144 +336,76 @@ func TestBuildStoresSQLiteSelectsRunBundleContextForServedEventPublish(t *testin
 	if err != nil {
 		t.Fatalf("buildStores(sqlite): %v", err)
 	}
-	t.Cleanup(func() { closeDB(stores.SQLDB) })
-	runBundleContext, ok := stores.ObservabilityStore.(apiv1.RunBundleContextStore)
-	if !ok {
-		t.Fatalf("sqlite ObservabilityStore = %T, want selected run bundle context store for event.publish --run-id", stores.ObservabilityStore)
+	t.Cleanup(func() { closeUnactivatedSelectedStore(t, stores) })
+	runBundleContext := stores.RunBundleContext()
+	apiCaps, err := buildSelectedAPICapabilities(stores, selectedAPICapabilityRequest{})
+	if err != nil {
+		t.Fatalf("build API capabilities: %v", err)
 	}
-	if got := stores.facade().apiRunBundleContextStore(); got == nil || got != runBundleContext {
-		t.Fatalf("selected API run bundle context = %T, want sqlite selected owner %T", got, runBundleContext)
+	if runBundleContext == nil || apiCaps.RunBundleContext != runBundleContext {
+		t.Fatalf("selected API run bundle context = %T, want selected owner %T", apiCaps.RunBundleContext, runBundleContext)
 	}
 }
 
-func TestSelectedOperatorReadConstructionParityClassifiesSQLitePostgresDelta(t *testing.T) {
+func TestSelectedOwnerAPICapabilityMatrixIsExplicitAcrossBackends(t *testing.T) {
 	ctx := context.Background()
-	sqliteStores, err := buildStores(ctx, storebackend.Selection{
-		Backend:          storebackend.BackendSQLite,
-		BackendSource:    storebackend.SourceFlag,
-		SQLitePath:       filepath.Join(t.TempDir(), "dev.db"),
-		SQLitePathSource: storebackend.SourceRolloutDefault,
-	}, &config.Config{})
+	sqlite := openSelectedSQLiteOwner(t, filepath.Join(t.TempDir(), "dev.db"), &config.Config{})
+	t.Cleanup(func() { closeUnactivatedSelectedStore(t, sqlite) })
+	dsn, db, cleanup := testutil.StartPostgres(t)
+	t.Cleanup(cleanup)
+	postgres := openSelectedPostgresOwner(t, dsn, db, &config.Config{})
+	t.Cleanup(func() { closeUnactivatedSelectedStore(t, postgres) })
+
+	sqliteCaps, err := buildSelectedAPICapabilities(sqlite, selectedAPICapabilityRequest{})
 	if err != nil {
-		t.Fatalf("buildStores(sqlite): %v", err)
+		t.Fatalf("build SQLite API capabilities: %v", err)
 	}
-	t.Cleanup(func() { closeDB(sqliteStores.SQLDB) })
-
-	postgresStores := selectedPostgresStoreBundle(&store.PostgresStore{}, nil, &config.Config{})
-	postgresCaps, err := postgresStores.facade().apiCapabilities(selectedAPICapabilityRequest{})
+	postgresCaps, err := buildSelectedAPICapabilities(postgres, selectedAPICapabilityRequest{})
 	if err != nil {
-		t.Fatalf("postgres apiCapabilities: %v", err)
+		t.Fatalf("build PostgreSQL API capabilities: %v", err)
 	}
-	sqliteCaps, err := sqliteStores.facade().apiCapabilities(selectedAPICapabilityRequest{})
-	if err != nil {
-		t.Fatalf("sqlite apiCapabilities: %v", err)
-	}
-
-	ledger := selectedOperatorReadConstructionCapabilityLedger()
-	seen := map[string]struct{}{}
-	for _, entry := range ledger {
-		if entry.Reason == "" {
-			t.Fatalf("selected operator-read construction capability %s missing classification reason", entry.Name)
-		}
-		if _, exists := seen[entry.Name]; exists {
-			t.Fatalf("selected operator-read construction capability %s appears more than once in classification ledger", entry.Name)
-		}
-		seen[entry.Name] = struct{}{}
-		postgresValue, ok := selectedAPICapabilityField(postgresCaps, entry.Name)
-		if !ok {
-			t.Fatalf("selected operator-read construction capability ledger names unknown field %s", entry.Name)
-		}
-		sqliteValue, _ := selectedAPICapabilityField(sqliteCaps, entry.Name)
-		postgresConfigured := selectedAPICapabilityConfigured(postgresValue)
-		sqliteConfigured := selectedAPICapabilityConfigured(sqliteValue)
-		switch entry.Classification {
-		case "wired_both":
-			if !postgresConfigured {
-				t.Fatalf("postgres selected operator-read capability %s unexpectedly nil; parity guard lost its baseline", entry.Name)
-			}
-			if !sqliteConfigured {
-				t.Fatalf("sqlite selected operator-read capability %s nil while postgres wires it; wire SQLite or classify explicitly: %s", entry.Name, entry.Reason)
-			}
-		case "split_with_issue_ref", "different_semantic_concept_with_proof", "postgres_only_with_spec_ref":
-			if entry.Issue == 0 && strings.TrimSpace(entry.SpecRef) == "" {
-				t.Fatalf("selected operator-read construction capability %s classification %s missing issue or governing spec ref", entry.Name, entry.Classification)
-			}
-			if entry.RequiresPostgresBaseline && !postgresConfigured {
-				t.Fatalf("classified optional capability %s no longer has a postgres baseline; update construction-parity classification: %s", entry.Name, entry.Reason)
-			}
-			if sqliteConfigured {
-				t.Fatalf("sqlite optional capability %s is configured; keep it classified until separately gated: %s", entry.Name, entry.Reason)
-			}
-		default:
-			t.Fatalf("selected operator-read construction capability %s has unsupported classification %q", entry.Name, entry.Classification)
+	for name, available := range map[string]bool{
+		"sqlite required serve ingest":       sqlite.ServeBundleIngestWriter() != nil,
+		"sqlite required run availability":   sqlite.RunBundleAvailability() != nil,
+		"sqlite database":                    sqliteCaps.Database != nil,
+		"sqlite runs":                        sqliteCaps.Runs != nil,
+		"sqlite entities":                    sqliteCaps.Entities != nil,
+		"sqlite agents":                      sqliteCaps.Agents != nil,
+		"sqlite conversations":               sqliteCaps.Conversations != nil,
+		"sqlite observability":               sqliteCaps.Observability != nil,
+		"sqlite run bundle context":          sqliteCaps.RunBundleContext != nil,
+		"sqlite test setup":                  sqliteCaps.TestSetup != nil,
+		"sqlite bundle catalog":              sqliteCaps.BundleCatalog != nil,
+		"sqlite conversation reads":          sqliteCaps.ConversationForks != nil,
+		"sqlite conversation lifecycle":      sqliteCaps.ConversationForkLifecycle != nil,
+		"postgres bundle register":           postgresCaps.BundleRegister != nil,
+		"postgres required serve ingest":     postgres.ServeBundleIngestWriter() != nil,
+		"postgres required run availability": postgres.RunBundleAvailability() != nil,
+		"postgres bundle delete":             postgresCaps.BundleDelete != nil,
+		"postgres run fork":                  postgresCaps.RunFork != nil,
+		"postgres run fork selector":         postgresCaps.RunForkSelector != nil,
+		"postgres reset":                     postgresCaps.ResetCoordinator != nil,
+	} {
+		if !available {
+			t.Fatalf("%s capability is unavailable", name)
 		}
 	}
-	for _, field := range selectedAPICapabilityFieldNames() {
-		if _, ok := seen[field]; !ok {
-			t.Fatalf("selected operator-read construction capability ledger missing field %s", field)
+	for name, available := range map[string]bool{
+		"sqlite bundle register":   sqliteCaps.BundleRegister != nil,
+		"sqlite bundle delete":     sqliteCaps.BundleDelete != nil,
+		"sqlite run fork":          sqliteCaps.RunFork != nil,
+		"sqlite run fork selector": sqliteCaps.RunForkSelector != nil,
+		"sqlite reset":             sqliteCaps.ResetCoordinator != nil,
+	} {
+		if available {
+			t.Fatalf("%s capability unexpectedly available", name)
 		}
 	}
-}
-
-type selectedOperatorReadConstructionCapabilityEntry struct {
-	Name                     string
-	Classification           string
-	Issue                    int
-	SpecRef                  string
-	RequiresPostgresBaseline bool
-	Reason                   string
-}
-
-func selectedOperatorReadConstructionCapabilityLedger() []selectedOperatorReadConstructionCapabilityEntry {
-	return []selectedOperatorReadConstructionCapabilityEntry{
-		{Name: "Database", Classification: "wired_both", Reason: "health.check/readiness pinger is selected on SQLite and Postgres"},
-		{Name: "Runs", Classification: "wired_both", Reason: "run.get/list/diagnose read owner is backend-neutral selected-store surface"},
-		{Name: "Entities", Classification: "wired_both", Reason: "entity.get/list/aggregate read owner is backend-neutral selected-store surface"},
-		{Name: "Agents", Classification: "wired_both", Reason: "agent read owner was promoted by #1782/#1805"},
-		{Name: "Conversations", Classification: "wired_both", Reason: "conversation read owner was promoted by #1782/#1805"},
-		{Name: "Observability", Classification: "wired_both", Reason: "event/runtime log/run trace read owner is backend-neutral selected-store surface"},
-		{Name: "RunBundleContext", Classification: "wired_both", Reason: "served event.publish follow-up read context is required on both selected stores"},
-		{Name: "TestSetup", Classification: "wired_both", Reason: "test.setup_entities capability is selected through entity owner and remains mutating-ledger classified separately"},
-		{Name: "BundleCatalog", Classification: "wired_both", Reason: "bundle.list/get/agents read owner was promoted by #1782/#1805"},
-		{Name: "BundleRegister", Classification: "postgres_only_with_spec_ref", SpecRef: "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.bundle_register", RequiresPostgresBaseline: true, Reason: "bundle.register is a spec-classified Postgres-only bundle catalog mutation capability"},
-		{Name: "BundleDelete", Classification: "postgres_only_with_spec_ref", SpecRef: "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.bundle_delete", RequiresPostgresBaseline: true, Reason: "bundle.delete is a spec-classified Postgres-only mutating/destructive bundle lifecycle capability, not operator-read parity"},
-		{Name: "ConversationForks", Classification: "wired_both", Reason: "conversation.fork_list/view consume the shared fork semantic owner on SQLite and Postgres"},
-		{Name: "ConversationForkLifecycle", Classification: "wired_both", Reason: "conversation.fork/fork_chat/fork_delete consume the shared fork semantic owner with backend-local mutation adapters"},
-		{Name: "RunForkAvailability", Classification: "postgres_only_with_spec_ref", SpecRef: "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork", RequiresPostgresBaseline: true, Reason: "run.fork availability is a spec-classified Postgres-only product/mutating lifecycle seam"},
-		{Name: "RunFork", Classification: "postgres_only_with_spec_ref", SpecRef: "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork", RequiresPostgresBaseline: true, Reason: "run.fork execution is a spec-classified Postgres-only product/mutating lifecycle seam"},
-		{Name: "RunForkSelector", Classification: "postgres_only_with_spec_ref", SpecRef: "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork", RequiresPostgresBaseline: true, Reason: "run.fork selector is part of the same explicit Postgres-only selected-contract lifecycle capability"},
-		{Name: "RuntimeContexts", Classification: "different_semantic_concept_with_proof", SpecRef: "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.selected_runtime_store_facade", Reason: "multi-bundle DB-loaded runtime context routing is conditional product/runtime support, not core operator-read parity"},
-		{Name: "ResetCoordinator", Classification: "postgres_only_with_spec_ref", SpecRef: "platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.runtime_nuke", RequiresPostgresBaseline: true, Reason: "destructive reset coordinator is a spec-classified Postgres-only product capability"},
+	if err := sqlite.Pinger().Ping(ctx); err != nil {
+		t.Fatalf("SQLite selected owner ping: %v", err)
 	}
-}
-
-func selectedAPICapabilityFieldNames() []string {
-	typ := reflect.TypeOf(selectedAPICapabilities{})
-	out := make([]string, 0, typ.NumField())
-	for i := 0; i < typ.NumField(); i++ {
-		out = append(out, typ.Field(i).Name)
-	}
-	sort.Strings(out)
-	return out
-}
-
-func selectedAPICapabilityField(caps selectedAPICapabilities, name string) (reflect.Value, bool) {
-	value := reflect.ValueOf(caps).FieldByName(name)
-	if !value.IsValid() {
-		return reflect.Value{}, false
-	}
-	return value, true
-}
-
-func selectedAPICapabilityConfigured(value reflect.Value) bool {
-	if !value.IsValid() {
-		return false
-	}
-	switch value.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return !value.IsNil()
-	default:
-		return !value.IsZero()
+	if err := postgres.Pinger().Ping(ctx); err != nil {
+		t.Fatalf("PostgreSQL selected owner ping: %v", err)
 	}
 }
 
@@ -525,8 +422,8 @@ func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwne
 	if err != nil {
 		t.Fatalf("buildStores(sqlite): %v", err)
 	}
-	t.Cleanup(func() { closeDB(stores.SQLDB) })
-	runtimeDeps := stores.runtimeDeps()
+	t.Cleanup(func() { closeUnactivatedSelectedStore(t, stores) })
+	runtimeDeps := stores.RuntimeDeps()
 	if _, ok := reflect.TypeOf(runtimeDeps).FieldByName("SQLDB"); ok {
 		t.Fatal("sqlite RuntimeDeps exposes raw SQLDB field")
 	}
@@ -537,7 +434,7 @@ func TestBuildStoresSQLiteRuntimeNoLongerFailsClosedOnMailboxMaterializationOwne
 		t.Fatal("sqlite runtimeDeps MailboxMaterializer missing backend-neutral mailbox_write owner")
 	}
 	bundle := loadStoreBackendSelectionWorkflowBundle(t)
-	if _, err := initializeStateStores(ctx, stores, bundle); err != nil {
+	if _, err := initializeStateStores(ctx, stores.Schema(), bundle); err != nil {
 		t.Fatalf("initializeStateStores(sqlite): %v", err)
 	}
 	bundleHash, err := runtimecontracts.BundleHash(bundle)

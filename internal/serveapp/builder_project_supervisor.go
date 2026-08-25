@@ -32,6 +32,7 @@ import (
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/store"
 	"github.com/google/uuid"
 )
 
@@ -39,7 +40,7 @@ type runtimeProjectSupervisor struct {
 	RepoRoot             string
 	platformSpecPath     string
 	cfg                  *config.Config
-	stores               storeBundle
+	stores               serveRuntimePersistence
 	ready                serveReadiness
 	dev                  bool
 	mountSources         cliapp.WorkspaceMountSources
@@ -64,8 +65,8 @@ type runtimeProjectSupervisor struct {
 	shutdownRuntime      func(context.Context, *runtime.Runtime, runtime.ShutdownOptions) error
 	loadWorkflow         func(RepoRoot, contractsRoot, platformSpecPath string, base *packartifact.PlatformPackInventory) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error)
 	validateSource       func(context.Context, semanticview.Source, *providertriggers.CatalogSnapshot) error
-	initStateStores      func(context.Context, storeBundle, *runtimecontracts.WorkflowContractBundle) (string, error)
-	newWorkspaces        func(storeBundle, string, semanticview.Source, cliapp.WorkspaceMountSources) (workspace.Lifecycle, cliapp.WorkspaceBackendSelection, error)
+	initStateStores      func(context.Context, store.SchemaBootstrapper, *runtimecontracts.WorkflowContractBundle) (string, error)
+	newWorkspaces        func(workspace.Lookup, string, semanticview.Source, cliapp.WorkspaceMountSources) (workspace.Lifecycle, cliapp.WorkspaceBackendSelection, error)
 	createRuntime        func(context.Context, runtime.RuntimeDeps) (*runtime.Runtime, error)
 	cloneRuntime         func(context.Context, *runtime.Runtime) (*runtime.Runtime, *worklifetime.RuntimeOccurrence, error)
 	replacementShutdown  runtime.ShutdownOptions
@@ -186,7 +187,7 @@ func newRuntimeProjectSupervisor(
 	RepoRoot string,
 	platformSpecPath string,
 	cfg *config.Config,
-	stores storeBundle,
+	stores serveRuntimePersistence,
 	ready serveReadiness,
 	mountSources cliapp.WorkspaceMountSources,
 	workspaceBackend cliapp.WorkspaceBackendSelection,
@@ -243,8 +244,8 @@ func newRuntimeProjectSupervisor(
 		loadWorkflow: func(RepoRoot, contractsRoot, platformSpecPath string, base *packartifact.PlatformPackInventory) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
 			return cliapp.NewSwarmWorkflowModuleWithPackBase(RepoRoot, contractsRoot, platformSpecPath, base)
 		},
-		initStateStores: func(ctx context.Context, stores storeBundle, bundle *runtimecontracts.WorkflowContractBundle) (string, error) {
-			return initializeStateStores(ctx, stores, bundle)
+		initStateStores: func(ctx context.Context, schema store.SchemaBootstrapper, bundle *runtimecontracts.WorkflowContractBundle) (string, error) {
+			return initializeStateStores(ctx, schema, bundle)
 		},
 		createRuntime: func(ctx context.Context, deps runtime.RuntimeDeps) (*runtime.Runtime, error) {
 			return runtime.NewRuntime(ctx, deps)
@@ -481,7 +482,7 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	}
 	candidateChannelPlans := append([]packs.SatisfactionPlan(nil), candidatePacks.Channels.Plans...)
 	candidateChannelBindings := append([]packs.OutboundBindingPlan(nil), candidatePacks.Channels.Bindings...)
-	bundleSourcePlan, err := planServeBundleSource(s.stores, bundle, s.dev)
+	bundleSourcePlan, err := planServeBundleSource(s.stores.bundleWriter, bundle, s.dev)
 	if err != nil {
 		return builderpkg.ProjectStatus{}, fmt.Errorf("plan project bundle source: %w", err)
 	}
@@ -521,14 +522,14 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 		channelPlans: candidateChannelPlans, channelBindings: candidateChannelBindings,
 		base: candidateBase, baseSelection: baseSelection, config: candidateConfig.Config,
 	}
-	if _, err := s.initStateStores(ctx, s.stores, bundle); err != nil {
+	if _, err := s.initStateStores(ctx, s.stores.schema, bundle); err != nil {
 		return builderpkg.ProjectStatus{}, err
 	}
 	bundleIdentity, err := runtimecontracts.BootBundleIdentity(bundle)
 	if err != nil {
 		return builderpkg.ProjectStatus{}, fmt.Errorf("derive project bundle identity: %w", err)
 	}
-	bundleSourceFact, err := persistServeBundleSourcePlan(ctx, s.stores, bundleSourcePlan)
+	bundleSourceFact, err := persistServeBundleSourcePlan(ctx, s.stores.bundleWriter, bundleSourcePlan)
 	if err != nil {
 		return builderpkg.ProjectStatus{}, fmt.Errorf("persist project bundle source: %w", err)
 	}
@@ -546,11 +547,11 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	var workspaces workspace.Lifecycle
 	var workspaceBackend cliapp.WorkspaceBackendSelection
 	if s.newWorkspaces != nil {
-		workspaces, workspaceBackend, err = s.newWorkspaces(s.stores, resolvedRoot, source, s.mountSources)
+		workspaces, workspaceBackend, err = s.newWorkspaces(s.stores.workspace, resolvedRoot, source, s.mountSources)
 	} else {
 		workspaceBackend, err = cliapp.DecideWorkspaceBackend(s.workspaceBackend, currentConfig, source)
 		if err == nil {
-			workspaces, err = cliapp.ConfiguredWorkspaceLifecycleForBackend(s.stores.facade().workspaceLookup(), currentConfig, resolvedRoot, source, s.mountSources, workspaceBackend)
+			workspaces, err = cliapp.ConfiguredWorkspaceLifecycleForBackend(s.stores.workspace, currentConfig, resolvedRoot, source, s.mountSources, workspaceBackend)
 		}
 	}
 	if err != nil {

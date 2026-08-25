@@ -23,8 +23,6 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/store"
-	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
-	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -72,13 +70,7 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			primaryFact := mustServeTestPersistedBundleSourceFact(primaryHash)
 			selectedFact := mustServeTestPersistedBundleSourceFact(selectedHash)
 			expectedBundleSource := "persisted"
-			if backend == "sqlite" {
-				primaryFact = mustServeTestEphemeralBundleSourceFact(primaryHash)
-				selectedFact = mustServeTestEphemeralBundleSourceFact(selectedHash)
-				expectedBundleSource = "ephemeral"
-			} else {
-				seedStandingRuntimeContextBundle(t, selectedStores.Postgres, selectedBundle)
-			}
+			seedStandingRuntimeContextBundle(t, selectedStores.ServeBundleIngestWriter(), selectedBundle)
 			runtimeInstanceID := uuid.NewString()
 			primaryModule := stubWorkflowModule{source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 				Platform: selectedBundle.Platform,
@@ -127,7 +119,7 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 			controller := &serveStandingServiceController{manager: manager}
 			handlers := apiv1.OperatorStandingServiceHandlers(apiv1.StandingServiceHandlerOptions{
 				Controller:  controller,
-				Idempotency: selectedStores.IdempotencyStore,
+				Idempotency: selectedStores.Idempotency(),
 			})
 			invoke := func(action string) standingRuntimeContextOperationResult {
 				t.Helper()
@@ -197,13 +189,13 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 	}
 }
 
-func seedStandingRuntimeContextBundle(t *testing.T, pg *store.PostgresStore, bundle *runtimecontracts.WorkflowContractBundle) {
+func seedStandingRuntimeContextBundle(t *testing.T, writer bundlecatalog.ServeIngestWriter, bundle *runtimecontracts.WorkflowContractBundle) {
 	t.Helper()
 	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
 	if err != nil {
 		t.Fatalf("project standing runtime-context bundle: %v", err)
 	}
-	if _, err := pg.UpsertBundleCatalog(context.Background(), bundlecatalog.Upsert{
+	if _, err := writer.UpsertBundleCatalog(context.Background(), bundlecatalog.Upsert{
 		BundleHash: projection.BundleHash, ContentYAML: projection.ContentYAML,
 		ParsedJSON: projection.ParsedJSON, DataBlob: projection.DataBlob, Metadata: projection.Metadata,
 	}); err != nil {
@@ -211,17 +203,13 @@ func seedStandingRuntimeContextBundle(t *testing.T, pg *store.PostgresStore, bun
 	}
 }
 
-func openStandingRuntimeContextStore(t *testing.T, backend, suffix string) storeBundle {
+func openStandingRuntimeContextStore(t *testing.T, backend, suffix string) *selectedStoreOwner {
 	t.Helper()
 	switch backend {
 	case "sqlite":
-		stores, err := buildStores(context.Background(), storebackend.Selection{
-			Backend: storebackend.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), suffix+".sqlite"),
-		}, &config.Config{})
-		if err != nil {
-			t.Fatalf("build %s SQLite selected store: %v", suffix, err)
-		}
-		t.Cleanup(func() { closeDB(stores.SQLDB) })
+		path := filepath.Join(t.TempDir(), suffix+".sqlite")
+		stores := openSelectedSQLiteOwner(t, path, &config.Config{})
+		t.Cleanup(func() { closeUnactivatedSelectedStore(t, stores) })
 		spec, err := loadServePlatformSpecDocument(filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath))
 		if err != nil {
 			t.Fatalf("load platform spec for %s SQLite store: %v", suffix, err)
@@ -234,25 +222,26 @@ func openStandingRuntimeContextStore(t *testing.T, backend, suffix string) store
 		if err != nil {
 			t.Fatalf("build schema request for %s SQLite store: %v", suffix, err)
 		}
-		if err := ensureServeSchemaTables(context.Background(), stores, request); err != nil {
+		if err := ensureServeSchemaTables(context.Background(), stores.Schema(), request); err != nil {
 			t.Fatalf("bootstrap %s SQLite store: %v", suffix, err)
 		}
 		return stores
 	case "postgres":
-		_, db, cleanup := testutil.StartPostgres(t)
+		dsn, db, cleanup := testutil.StartPostgres(t)
 		t.Cleanup(cleanup)
-		pg := storetest.AdmitPostgresRuntimeStore(t, db)
-		return selectedPostgresStoreBundle(pg, storetest.DatabaseForTest(pg), &config.Config{})
+		stores := openSelectedPostgresOwner(t, dsn, db, &config.Config{})
+		t.Cleanup(func() { closeUnactivatedSelectedStore(t, stores) })
+		return stores
 	default:
 		t.Fatalf("unsupported standing runtime-context backend %q", backend)
-		return storeBundle{}
+		return nil
 	}
 }
 
 func newStandingRuntimeContextRuntime(
 	t *testing.T,
 	process *worklifetime.Process,
-	stores storeBundle,
+	stores *selectedStoreOwner,
 	module runtimepipeline.WorkflowModule,
 	fact runtimecorrelation.BundleSourceFact,
 	runtimeInstanceID string,

@@ -13,7 +13,7 @@ import (
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
-	storeconstruction "github.com/division-sh/swarm/internal/store/construction"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/versionmetadata"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -232,11 +232,11 @@ func openAuthorityInspectionStore(ctx context.Context, repo string, cmd *cobra.C
 }
 
 func constructAuthorityInspectionStore(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (authorityInspectionStore, error) {
-	if selection.Backend == storebackend.BackendSQLite {
-		selected, err := storeconstruction.OpenSQLiteRuntimeReadOnly(selection.SQLitePath)
-		return selected, err
+	request, err := selectedAuthorityRequest(ctx, selection, cfg)
+	if err != nil {
+		return nil, err
 	}
-	return constructAuthorityMaintenanceStore(ctx, selection, cfg)
+	return storeselected.OpenAuthorityInspection(ctx, request)
 }
 
 func resolveAuthorityStoreSelection(repo, configPath string, cmd *cobra.Command, cfg *config.Config, paths CLIContractPlatformSpecPaths, storeMode string, storeModeSet bool) (storebackend.Selection, error) {
@@ -255,26 +255,33 @@ func resolveAuthorityStoreSelection(repo, configPath string, cmd *cobra.Command,
 }
 
 func constructAuthorityMaintenanceStore(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (authorityMaintenanceStore, error) {
-	switch selection.Backend {
-	case storebackend.BackendSQLite:
-		selected, _, err := storeconstruction.OpenSQLiteRuntimeWithOwnershipBinding(selection.SQLitePath)
-		return selected, err
-	case storebackend.BackendPostgres:
-		var credentials runtimecredentials.Store
-		if strings.TrimSpace(cfg.Database.PasswordSecretKey) != "" {
-			fileStore, err := CredentialFileStore()
-			if err != nil {
-				return nil, err
-			}
-			credentials = fileStore
-		}
-		password, err := store.ResolveDatabasePassword(ctx, cfg.Database, credentials)
-		if err != nil {
-			return nil, err
-		}
-		selected, _, err := storeconstruction.OpenPostgres(store.DSNFromConfig(cfg.Database, password))
-		return selected, err
-	default:
-		return nil, fmt.Errorf("selected store backend is required")
+	request, err := selectedAuthorityRequest(ctx, selection, cfg)
+	if err != nil {
+		return nil, err
 	}
+	return storeselected.OpenAuthorityMaintenance(ctx, request)
+}
+
+func selectedAuthorityRequest(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeselected.AuthorityRequest, error) {
+	request := storeselected.AuthorityRequest{Selection: selection}
+	if selection.Backend != storebackend.BackendPostgres {
+		return request, nil
+	}
+	if cfg == nil {
+		return storeselected.AuthorityRequest{}, errors.New("runtime config is required")
+	}
+	var credentials runtimecredentials.Store
+	if strings.TrimSpace(cfg.Database.PasswordSecretKey) != "" {
+		fileStore, err := CredentialFileStore()
+		if err != nil {
+			return storeselected.AuthorityRequest{}, err
+		}
+		credentials = fileStore
+	}
+	password, err := store.ResolveDatabasePassword(ctx, cfg.Database, credentials)
+	if err != nil {
+		return storeselected.AuthorityRequest{}, err
+	}
+	request.PostgresDSN = store.DSNFromConfig(cfg.Database, password)
+	return request, nil
 }

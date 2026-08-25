@@ -21,19 +21,19 @@ import (
 func TestBundleDeleteRuntimeQuiescenceRestoresExactRunningContextOnBothStores(t *testing.T) {
 	backends := []struct {
 		name string
-		open func(*testing.T) storeBundle
+		open func(*testing.T) *selectedStoreOwner
 	}{
-		{name: "sqlite", open: func(t *testing.T) storeBundle {
+		{name: "sqlite", open: func(t *testing.T) *selectedStoreOwner {
 			stores, err := buildStores(context.Background(), storebackend.Selection{
 				Backend: storebackend.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "runtime.sqlite"),
 			}, &config.Config{})
 			if err != nil {
 				t.Fatalf("build SQLite stores: %v", err)
 			}
-			t.Cleanup(func() { _ = stores.SQLDB.Close() })
+			t.Cleanup(func() { _ = stores.CloseUnactivated() })
 			return stores
 		}},
-		{name: "postgres", open: func(t *testing.T) storeBundle {
+		{name: "postgres", open: func(t *testing.T) *selectedStoreOwner {
 			dsn, _, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			selected, err := store.NewPostgresStore(dsn)
@@ -42,7 +42,7 @@ func TestBundleDeleteRuntimeQuiescenceRestoresExactRunningContextOnBothStores(t 
 			}
 			db := storetest.DatabaseForTest(selected)
 			t.Cleanup(func() { _ = db.Close() })
-			return selectedPostgresStoreBundle(selected, db, &config.Config{})
+			return openSelectedPostgresOwner(t, dsn, db, &config.Config{})
 		}},
 	}
 	for _, backend := range backends {
@@ -50,7 +50,7 @@ func TestBundleDeleteRuntimeQuiescenceRestoresExactRunningContextOnBothStores(t 
 		t.Run(backend.name, func(t *testing.T) {
 			stores := backend.open(t)
 			bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier8-boot-verification/test-boot-success")
-			if _, err := initializeStateStores(context.Background(), stores, bundle); err != nil {
+			if _, err := initializeStateStores(context.Background(), stores.Schema(), bundle); err != nil {
 				t.Fatalf("initialize state stores: %v", err)
 			}
 			source := semanticview.Wrap(bundle)

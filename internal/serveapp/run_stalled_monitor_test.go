@@ -117,12 +117,11 @@ func TestServeRunStalledReaderLoadsSnapshotProgressFromStore(t *testing.T) {
 	}
 }
 
-func TestSelectedStoreFacadeRunStalledReaderUsesSelectedOwner(t *testing.T) {
+func TestServeRunStalledReaderUsesSelectedProjection(t *testing.T) {
 	postgresStore := &store.PostgresStore{}
-	stores := storeBundle{RunStalledReader: postgresStore}
-
-	if got := stores.facade().runStalledReader(); got != postgresStore {
-		t.Fatalf("run stalled reader = %T, want selected run-stalled owner", got)
+	reader, ok := newServeRunStalledReader(postgresStore)
+	if !ok || reader.store != postgresStore {
+		t.Fatalf("run stalled reader = %#v, want selected run-stalled projection", reader)
 	}
 }
 

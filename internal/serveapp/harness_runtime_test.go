@@ -15,7 +15,7 @@ import (
 func TestServeRejectsHarnessInjectionBeforeRuntime(t *testing.T) {
 	repo := cliapp.RepoRoot()
 	root := canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection)
-	loaded, err := loadServeRuntimeBundle(context.Background(), repo, storeBundle{}, cliapp.CLIContractPlatformSpecPaths{
+	loaded, err := loadServeRuntimeBundle(context.Background(), repo, nil, cliapp.CLIContractPlatformSpecPaths{
 		ContractsPath: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
 	}, cliapp.ServeOptions{}, testPlatformPackBaseGenerations(t))
 	if err != nil {

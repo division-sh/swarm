@@ -60,6 +60,7 @@ type releaseProcessSpec struct {
 	Contracts  string
 	Data       string
 	Store      string
+	Dev        bool
 	APIPort    int
 	MCPPort    int
 	TokenFile  string
@@ -81,8 +82,7 @@ type releaseServeProcess struct {
 func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServeProcess {
 	t.Helper()
 	output := &releaseProcessOutput{}
-	cmd := exec.Command(
-		options.BinaryPath,
+	args := []string{
 		"serve",
 		"--config", options.ConfigPath,
 		"--contracts", options.Contracts,
@@ -95,7 +95,11 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 		"--api-token-file", options.TokenFile,
 		"--shutdown-grace", "2s",
 		"--no-color",
-	)
+	}
+	if options.Dev {
+		args = append(args, "--dev")
+	}
+	cmd := exec.Command(options.BinaryPath, args...)
 	cmd.Dir = options.WorkingDir
 	cmd.Env = options.Env
 	cmd.Stdout = output

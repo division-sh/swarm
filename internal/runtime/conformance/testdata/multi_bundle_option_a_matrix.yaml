@@ -71,7 +71,7 @@ rows:
       - {kind: spec_ref, path: platform-spec.yaml, ref: serve_ingest_projection}
     proof_refs:
       - {kind: go_test, name: TestPrepareServeBundleSourceDevStampsEphemeralWithoutCatalogRow}
-      - {kind: go_test, name: TestPrepareServeBundleSourceSQLiteStampsEphemeralWithoutPostgresCatalog}
+      - {kind: go_test, name: TestPrepareServeBundleSourceSQLiteDevStampsEphemeralWithoutCatalogRow}
 
   - id: db_loaded_serve_boot
     category: serve_boot
