@@ -33,6 +33,7 @@ const (
 
 	postgresDatabaseNowExpression = `clock_timestamp()`
 	sqliteDatabaseNowExpression   = `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`
+	sqliteSnapshotTimeQuery       = `SELECT ` + sqliteDatabaseNowExpression + ` FROM runtime_store_metadata WHERE id = 1`
 )
 
 // Adapter contains the private SQL mechanics for the executable-delivery
@@ -2684,6 +2685,21 @@ func (a *Adapter) databaseNow(ctx context.Context, q interface {
 	} else if a != nil && a.dialect == DialectPostgres {
 		query = `SELECT ` + postgresDatabaseNowExpression
 	}
+	return queryDatabaseTime(ctx, q, query)
+}
+
+// CaptureSnapshotTime returns the selected store's time coordinate for one
+// bounded delivery projection snapshot.
+func (a *Adapter) CaptureSnapshotTime(ctx context.Context, q queryer) (time.Time, error) {
+	if a != nil && a.dialect == DialectSQLite {
+		return queryDatabaseTime(ctx, q, sqliteSnapshotTimeQuery)
+	}
+	return a.databaseNow(ctx, q)
+}
+
+func queryDatabaseTime(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, query string) (time.Time, error) {
 	var raw any
 	if err := q.QueryRowContext(ctx, query).Scan(&raw); err != nil {
 		return time.Time{}, fmt.Errorf("read delivery database time: %w", err)
@@ -2693,12 +2709,6 @@ func (a *Adapter) databaseNow(ctx context.Context, q interface {
 		return time.Time{}, fmt.Errorf("read delivery database time: %w", err)
 	}
 	return now.UTC().Truncate(time.Microsecond), nil
-}
-
-// CaptureSnapshotTime returns the selected store's time coordinate for one
-// bounded delivery projection snapshot.
-func (a *Adapter) CaptureSnapshotTime(ctx context.Context, q queryer) (time.Time, error) {
-	return a.databaseNow(ctx, q)
 }
 
 func encodeRoute(route events.DeliveryRoute) ([]byte, []byte, []byte, []byte, error) {
