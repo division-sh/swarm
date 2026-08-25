@@ -436,7 +436,7 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 					processOwner := worklifetime.NewProcess()
 					activationProbe := &startupRecoveryActivationProbe{Store: selected}
 					handlerStarts := atomic.Int64{}
-					runtime, runtimeErr := swarmruntime.NewRuntime(runtimeCtx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
+					runtime, runtimeErr := swarmruntime.NewRuntime(currentCtx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
 						Config: &config.Config{
 							Runtime: config.RuntimeConfig{RecoveryOnStartup: mode.recoveryOnStartup},
 							LLM:     config.LLMConfig{Backend: "anthropic"},

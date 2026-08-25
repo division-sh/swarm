@@ -9,11 +9,15 @@ flows:
     flow: candidate
     mode: template
 connect:
-  - from: .scout_requested
-    to: scout.scout_requested
-  - from: scout.scout_completed
-    to: .scout_completed
-  - from: .candidate_requested
-    to: candidate.candidate_requested
-  - from: candidate.candidate_completed
-    to: .candidate_completed
+  - event: scout.requested
+    from: .
+    to: scout
+  - event: scout.completed
+    from: scout
+    to: .
+  - event: candidate.requested
+    from: .
+    to: candidate
+  - event: candidate.completed
+    from: candidate
+    to: .

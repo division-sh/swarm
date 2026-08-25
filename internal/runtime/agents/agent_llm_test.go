@@ -118,32 +118,36 @@ func (r *agentTestRuntimeAdapter) ContinueManagedSession(ctx context.Context, se
 		observer.observeAgentTestFrame(call.Frame())
 	}
 	response, err := behavior.continueAgentTest(ctx, session, message)
-	if err != nil || response == nil || response.CapabilitySurface != nil {
+	if err != nil || response == nil {
 		return response, err
 	}
-	if surface, ok := managedcapabilities.FromContext(ctx); ok {
-		evidence := make([]managedcapabilities.DeliveryEvidence, 0, len(surface.Tools))
-		for _, tool := range surface.Tools {
-			if !tool.Capability.Visible || !tool.Capability.Callable {
-				continue
+	if response.CapabilitySurface == nil {
+		if surface, ok := managedcapabilities.FromContext(ctx); ok {
+			evidence := make([]managedcapabilities.DeliveryEvidence, 0, len(surface.Tools))
+			for _, tool := range surface.Tools {
+				if !tool.Capability.Visible || !tool.Capability.Callable {
+					continue
+				}
+				for _, binding := range tool.Bindings {
+					evidence = append(evidence, managedcapabilities.DeliveryEvidence{
+						BindingKind: binding.Kind, ExactName: binding.ExactName,
+						Kind: binding.RequiredEvidenceKind, Status: managedcapabilities.EvidenceConfirmed,
+					})
+				}
 			}
-			for _, binding := range tool.Bindings {
-				evidence = append(evidence, managedcapabilities.DeliveryEvidence{
-					BindingKind: binding.Kind, ExactName: binding.ExactName,
-					Kind: binding.RequiredEvidenceKind, Status: managedcapabilities.EvidenceConfirmed,
-				})
+			observed, observeErr := surface.Observe(evidence...)
+			if observeErr != nil {
+				return nil, observeErr
 			}
-		}
-		observed, observeErr := surface.Observe(evidence...)
-		if observeErr != nil {
-			return nil, observeErr
-		}
-		response.CapabilitySurface = &observed
-		response.ToolOutputAuthority = &llm.ToolOutputAuthority{
-			ProviderOperationID: eventtest.UUID("agent-test-provider-operation:" + observed.ID),
-			SettledAt:           time.Date(2026, 8, 23, 0, 0, 0, 0, time.UTC),
+			response.CapabilitySurface = &observed
+			response.ToolOutputAuthority = &llm.ToolOutputAuthority{
+				ProviderOperationID: eventtest.UUID("agent-test-provider-operation:" + observed.ID),
+				SettledAt:           time.Date(2026, 8, 23, 0, 0, 0, 0, time.UTC),
+			}
 		}
 	}
+	session.Messages = append(session.Messages, message, response.Message)
+	session.TurnCount++
 	return response, nil
 }
 
