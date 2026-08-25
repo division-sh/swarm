@@ -23,7 +23,7 @@ import (
 func TestServeBootLegacySchemaRendersTeachingError(t *testing.T) {
 	repo := cliapp.RepoRoot()
 	root := canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection)
-	loaded, err := loadServeRuntimeBundle(context.Background(), repo, storeBundle{}, cliapp.CLIContractPlatformSpecPaths{
+	loaded, err := loadServeRuntimeBundle(context.Background(), repo, nil, cliapp.CLIContractPlatformSpecPaths{
 		ContractsPath: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
 	}, cliapp.ServeOptions{}, testPlatformPackBaseGenerations(t))
 	if err != nil {
@@ -49,7 +49,7 @@ func TestServeBootLegacySchemaRendersTeachingError(t *testing.T) {
 			t.Fatalf("create legacy timers table: %v", err)
 		}
 		pgStore := storetest.NewPostgresStoreForTest(pg)
-		request.Stores = storeBundle{Postgres: pgStore, SQLDB: pg, Database: pgStore, SchemaBootstrapper: pgStore}
+		request.Stores = serveRuntimePersistence{schema: pgStore}
 
 		_, err := buildServeRuntimeBundleContext(request)
 		assertLegacySchemaTeachingBootError(t, "postgres", err, "create and select a fresh PostgreSQL database")
@@ -65,7 +65,7 @@ func TestServeBootLegacySchemaRendersTeachingError(t *testing.T) {
 		if _, err := sqliteDB.Exec(`CREATE TABLE timers (timer_id TEXT PRIMARY KEY, due_at TIMESTAMP NOT NULL)`); err != nil {
 			t.Fatalf("create legacy timers table: %v", err)
 		}
-		request.Stores = storeBundle{SQLDB: sqliteDB, Database: sqliteStore, SchemaBootstrapper: sqliteStore}
+		request.Stores = serveRuntimePersistence{schema: sqliteStore}
 
 		_, err = buildServeRuntimeBundleContext(request)
 		assertLegacySchemaTeachingBootError(t, "sqlite", err, "rm -f --")

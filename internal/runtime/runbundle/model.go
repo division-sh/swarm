@@ -1,10 +1,25 @@
 package runbundle
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 )
+
+// RuntimeCatalogReader loads the persisted source required to boot a selected
+// bundle without exposing the selected backend.
+type RuntimeCatalogReader interface {
+	LoadBundleCatalogRuntimeRecord(context.Context, string) (BundleCatalogRuntimeRecord, error)
+}
+
+// AvailabilityStore is the complete availability projection consumed by
+// runtime selection, startup recovery, and fixed-bundle admission.
+type AvailabilityStore interface {
+	LoadRunBundleAvailability(context.Context, string) (Availability, error)
+	ActiveRunBundleAvailabilities(context.Context) ([]Availability, error)
+	ActiveRunBundleAvailabilityConflicts(context.Context) ([]Availability, error)
+}
 
 const (
 	CodeBundleUnavailable        = "BUNDLE_UNAVAILABLE"

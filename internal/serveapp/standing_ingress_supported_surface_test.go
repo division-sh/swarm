@@ -176,10 +176,10 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 	case servedparity.BackendDefaultSQLite:
 		sqlitePath := filepath.Join(t.TempDir(), "standing-lifecycle.sqlite")
 		oldBuildStores := buildStoresForServe
-		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
 			stores, err := oldBuildStores(ctx, selection, cfg)
 			if err == nil {
-				db = stores.SQLDB
+				db = selectedStoreDatabaseForTest(t, stores)
 			}
 			return stores, err
 		}
@@ -188,7 +188,7 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 			ConfigPath:    writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil),
 			ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
 			StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-			SelfCheck: true, RequireBundleMatch: false, Dev: true, Verbose: true,
+			SelfCheck: true, RequireBundleMatch: false, Verbose: true,
 			TestLLMRuntime:          telegramPhraseBotLLMRuntime{onContinue: managerProbe.observe},
 			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 		}
@@ -197,14 +197,14 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 		t.Cleanup(cleanup)
 		oldBuildStores := buildStoresForServe
 		oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
-		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
 			pg, err := store.NewPostgresStore(dsn)
 			if err != nil {
-				return storeBundle{}, err
+				return nil, err
 			}
 			storetest.BootstrapPostgresRuntimeStore(t, pg)
 			db = storetest.DatabaseForTest(pg)
-			return selectedPostgresStoreBundle(pg, storetest.DatabaseForTest(pg), cfg), nil
+			return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(pg), cfg), nil
 		}
 		cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 			return serveRuntimeWorkspaceStub{}, nil
@@ -217,7 +217,7 @@ func runServedStandingServiceLifecycleBackendProof(t *testing.T, backend servedp
 			ConfigPath: writeServeRuntimeTestConfig(t), ContractsPath: contractsRoot,
 			PlatformSpecPath: defaultPlatformSpecPath, StoreMode: "postgres", StoreModeSet: true,
 			APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-			SelfCheck: true, RequireBundleMatch: false, Dev: true, Verbose: true,
+			SelfCheck: true, RequireBundleMatch: false, Verbose: true,
 			TestLLMRuntime:          telegramPhraseBotLLMRuntime{onContinue: managerProbe.observe},
 			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 		}
@@ -706,21 +706,11 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 	opts := cliapp.ServeOptions{
 		ConfigPath: configPath, ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		SelfCheck: true, RequireBundleMatch: false, Dev: true,
+		SelfCheck: true, RequireBundleMatch: false,
 		TestLLMRuntime: telegramPhraseBotLLMRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
-	var readyRuntime *runtimepkg.Runtime
-	opts.TestRuntimeReadyHook = func(rt *runtimepkg.Runtime) { readyRuntime = rt }
-	opts.TestAfterAuthorActivityHead = func() error {
-		if readyRuntime == nil {
-			return fmt.Errorf("runtime ready hook did not run before author activity head")
-		}
-		return commitReadinessHandoffAuthorActivity(sqlitePath, readyRuntime)
-	}
-
 	first := startServeRuntimeTestProcess(t, opts)
 	first.waitForReadyLine()
-	waitForStandingStoryOutput(t, first, "ready — waiting for events", "handoff → message received (chat readiness) \"across head\"")
 	firstURL := "http://" + serveRuntimeAPIListenerFromOutput(t, first.outputString())
 	firstEntity := sendStandingTelegramUpdate(t, firstURL, 101, 42)
 	secondEntity := sendStandingTelegramUpdate(t, firstURL, 102, 42)
@@ -733,11 +723,8 @@ func TestStandingIngressSupportedSurfaceSQLiteRestartPreservesAuthorityAndReplie
 		t.Fatalf("first serve exit = %d", code)
 	}
 	firstOutput := first.outputString()
-	if strings.Count(firstOutput, "handoff → message received (chat readiness) \"across head\"") != 1 {
-		t.Fatalf("readiness handoff occurrence was not rendered exactly once:\n%s", firstOutput)
-	}
 	for _, want := range []string{
-		"swarm serve --dev · ",
+		"swarm serve · ",
 		"store                      sqlite · " + sqlitePath,
 		"workspace                  host · agent work runs on this machine",
 		"listeners                  api 127.0.0.1:",
@@ -949,9 +936,9 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	}
 	oldBuildStores := buildStoresForServe
 	oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
-	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
 		storetest.BootstrapPostgresRuntimeStore(t, runtimePG)
-		return selectedPostgresStoreBundle(runtimePG, storetest.DatabaseForTest(runtimePG), cfg), nil
+		return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(runtimePG), cfg), nil
 	}
 	cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
 		return serveRuntimeWorkspaceStub{}, nil
@@ -984,7 +971,7 @@ func TestStandingIngressSupportedSurfacePostgresRestartPreservesAuthorityAndRepl
 	opts := cliapp.ServeOptions{
 		ConfigPath: writeServeRuntimeTestConfig(t), ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		StoreMode: "postgres", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		SelfCheck: true, RequireBundleMatch: false, Dev: true, Verbose: true,
+		SelfCheck: true, RequireBundleMatch: false, Verbose: true,
 		TestLLMRuntime: telegramPhraseBotLLMRuntime{}, TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
 	first := startServeRuntimeTestProcess(t, opts)

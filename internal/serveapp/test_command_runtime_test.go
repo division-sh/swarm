@@ -228,10 +228,10 @@ func startPublicInputRollbackRuntime(t *testing.T, backend servedparity.Backend)
 	case servedparity.BackendDefaultSQLite:
 		stubServeRuntimeWorkspaceLifecycle(t)
 		oldBuildStores := buildStoresForServe
-		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
 			stores, err := oldBuildStores(ctx, selection, cfg)
 			if err == nil {
-				db = stores.SQLDB
+				db = selectedStoreDatabaseForTest(t, stores)
 			}
 			return stores, err
 		}
@@ -329,10 +329,10 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 		stubServeRuntimeWorkspaceLifecycle(t)
 		sqlitePath := filepath.Join(t.TempDir(), "public-mock-approval.sqlite")
 		oldBuildStores := buildStoresForServe
-		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
 			stores, err := oldBuildStores(ctx, selection, cfg)
 			if err == nil {
-				db = stores.SQLDB
+				db = selectedStoreDatabaseForTest(t, stores)
 			}
 			return stores, err
 		}
@@ -434,10 +434,10 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 	case servedparity.BackendDefaultSQLite:
 		stubServeRuntimeWorkspaceLifecycle(t)
 		oldBuildStores := buildStoresForServe
-		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
 			stores, err := oldBuildStores(ctx, selection, cfg)
 			if err == nil {
-				db = stores.SQLDB
+				db = selectedStoreDatabaseForTest(t, stores)
 			}
 			return stores, err
 		}
@@ -542,9 +542,9 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 		}
 		t.Cleanup(func() { _ = storetest.DatabaseForTest(reopened).Close() })
 		priorBuildStores := buildStoresForServe
-		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+		buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
 			storetest.BootstrapPostgresRuntimeStore(t, reopened)
-			return selectedPostgresStoreBundle(reopened, storetest.DatabaseForTest(reopened), cfg), nil
+			return openSelectedPostgresOwner(t, postgresDSN, storetest.DatabaseForTest(reopened), cfg), nil
 		}
 		t.Cleanup(func() { buildStoresForServe = priorBuildStores })
 		db = storetest.DatabaseForTest(reopened)
@@ -595,10 +595,10 @@ func runScaffoldArchetypeSQLiteProof(t *testing.T, archetype string) {
 	}
 	oldBuildStores := buildStoresForServe
 	var db *sql.DB
-	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+	buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
 		stores, err := oldBuildStores(ctx, selection, cfg)
 		if err == nil {
-			db = stores.SQLDB
+			db = selectedStoreDatabaseForTest(t, stores)
 		}
 		return stores, err
 	}
@@ -793,10 +793,10 @@ func runServedGeneratedInputFixtureBackendProof(t *testing.T, backend servedpari
 		stubServeRuntimeWorkspaceLifecycle(t)
 		sqlitePath := filepath.Join(t.TempDir(), "generated-input.sqlite")
 		oldBuildStores := buildStoresForServe
-		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
 			stores, err := oldBuildStores(ctx, selection, cfg)
 			if err == nil {
-				db = stores.SQLDB
+				db = selectedStoreDatabaseForTest(t, stores)
 			}
 			return stores, err
 		}
@@ -1086,10 +1086,10 @@ func TestSwarmTestCanonicalRoutingExamplesRunFullAuthoredPathsOnServedSQLite(t *
 			t.Cleanup(func() { buildStoresForServe = oldBuildStores })
 			var servedDB *sql.DB
 			replyContextObserved := make(chan string, 1)
-			buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+			buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
 				stores, err := oldBuildStores(ctx, selection, cfg)
 				if err == nil {
-					servedDB = stores.SQLDB
+					servedDB = selectedStoreDatabaseForTest(t, stores)
 				}
 				return stores, err
 			}

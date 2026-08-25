@@ -161,10 +161,6 @@ func runServeAuthorActivityFollower(
 	}
 }
 
-func serveAuthorActivityReaderFromStores(stores storeBundle) serveAuthorActivityReader {
-	return stores.AuthorActivityReader
-}
-
 func serveAuthorActivityRenderOptions(out io.Writer, noColor bool) runtimeauthoractivity.RenderOptions {
 	mode := runtimeauthoractivity.RenderPlain
 	noColorEnvironment := strings.TrimSpace(os.Getenv("NO_COLOR")) != ""

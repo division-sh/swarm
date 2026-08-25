@@ -27,48 +27,36 @@ import (
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebundledelete "github.com/division-sh/swarm/internal/runtime/bundledelete"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
-	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
-	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanagedcredentials "github.com/division-sh/swarm/internal/runtime/managedcredentials"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
 	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
-	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
-	runtimerunforkadmission "github.com/division-sh/swarm/internal/runtime/runforkadmission"
-	runtimerunforkexecution "github.com/division-sh/swarm/internal/runtime/runforkexecution"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/runtime/scenarioderivation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimestartuprecovery "github.com/division-sh/swarm/internal/runtime/startuprecovery"
-	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
-	storeconstruction "github.com/division-sh/swarm/internal/store/construction"
+	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/versionmetadata"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
@@ -82,7 +70,8 @@ const (
 )
 
 var (
-	buildStoresForServe = buildStores
+	buildStoresForServe               = buildStores
+	projectRuntimePersistenceForServe = projectServeRuntimePersistence
 )
 
 type serveReadiness interface {
@@ -128,156 +117,6 @@ func (noWorkspaceStartupRecoveryContainers) ManagedContainers(context.Context) (
 
 func (noWorkspaceStartupRecoveryContainers) StopManagedContainer(context.Context, string) error {
 	return fmt.Errorf("workspace lifecycle is not configured")
-}
-
-type storeBundle struct {
-	Postgres                       *store.PostgresStore
-	SQLDB                          *sql.DB
-	WorkspaceLookup                workspace.Lookup
-	Database                       apiv1.Pinger
-	RuntimeLogStore                runtime.RuntimeLogPersistence
-	SchemaBootstrapper             store.SchemaBootstrapper
-	EventStore                     runtimebus.EventStore
-	EventBusDurable                runtimebus.DurableDependencies
-	EventPayloadValidationBinder   runtime.EventPayloadValidationBinder
-	InboundPayloadValidationBinder runtime.EventPayloadValidationBinder
-	AuthorActivityRegistrars       []runtime.AuthorActivityCatalogRegistrar
-	AuthorActivityReader           serveAuthorActivityReader
-	RunControlStore                runtimeruncontrol.Store
-	RunLifecycleCandidates         runtimerunlifecycle.CandidateOwner
-	WorkflowPersistence            runtimepipeline.WorkflowPersistence
-	SessionRegistry                sessions.Registry
-	LiveSessionAcquirer            runtimellm.LiveSessionAcquirer
-	SessionResetter                sessions.Resetter
-	ConversationStore              runtimellm.ConversationPersistence
-	ManagerStore                   runtimemanager.ManagerPersistence
-	ManagerLifecycleDiagnostics    runtimemanager.AgentLifecycleDiagnosticPersistence
-	ManagerPersistenceRoles        runtimemanager.PersistenceRoles
-	EffectsStore                   runtimeeffects.Store
-	CompletionStore                runtimeeffects.CompletionStore
-	CompletionHeartbeatStore       runtimeeffects.CompletionHeartbeatStore
-	EffectsRecoveryStore           runtimeeffects.RecoveryStore
-	ManagedCapabilitiesStore       managedcapabilities.Persistence
-	DeliveryStore                  runtimedelivery.Store
-	PipelineObligations            runtimepipelineobligation.Store
-	GenericScheduleStore           runtimegenericschedule.Store
-	TimerObligationReader          runtimetimerobligation.Reader
-	MailboxMaterializer            runtimepipeline.MailboxWriteMaterializationStore
-	MailboxStore                   runtimetools.MailboxPersistence
-	ToolEntityStore                runtimetools.EntityPersistence
-	HumanTaskStore                 runtimetools.HumanTaskCardStore
-	BudgetSpendStore               budgetspend.Store
-	InboundStore                   runtime.InboundPersistence
-	OperatorChannels               operatorchannel.Store
-	MailboxAPIStore                apiv1.MailboxAPIStore
-	MailboxNoticeAcknowledgment    apiv1.MailboxNoticeAcknowledgmentStore
-	DecisionCards                  decisioncard.Store
-	ProposedEffects                decisioncard.ProposedEffectStore
-	DecisionCardHumanTasks         decisioncard.HumanTaskStore
-	DecisionCardDraftExpiry        runtimepipeline.DecisionCardDraftExpiry
-	HumanTaskExpiry                runtimepipeline.HumanTaskExpiry
-	ObservabilityStore             apiv1.ObservabilityReadStore
-	AgentUsageStore                apiv1.AgentUsageReadStore
-	AgentDeliveryLifecycleStore    apiv1.AgentDeliveryLifecycleReadStore
-	RuntimeIngressStore            runtimeingress.Store
-	IdempotencyStore               apiv1.APIIdempotencyStore
-	StartupOwnership               runtimestartupownership.Store
-	RunQuiescenceStore             runtimerunquiescence.ServeAbandonStore
-	RunReadStore                   apiv1.RunReadStore
-	EntityReadStore                apiv1.EntityReadStore
-	AgentReadStore                 apiv1.AgentReadStore
-	ConversationReadStore          apiv1.ConversationReadStore
-	RunBundleContextStore          apiv1.RunBundleContextStore
-	BundleRuntimeCatalogStore      selectedBundleRuntimeCatalogStore
-	BundleSourceCatalogStore       selectedBundleSourceCatalogStore
-	RunBundleAvailabilityStore     selectedRunBundleAvailabilityStore
-	ScenarioExecutionProfiles      runtimepipeline.ScenarioExecutionProfileReader
-	StartupRecoveryStore           selectedStartupRecoveryStore
-	RunStalledReader               runStalledReadStore
-	APIOptionalCapabilityBuilder   selectedAPIOptionalCapabilityBuilder
-	RunForkRuntimeOwner            selectedRunForkRuntimeOwner
-}
-
-type sqlDBPinger struct {
-	db *sql.DB
-}
-
-func (p sqlDBPinger) Ping(ctx context.Context) error {
-	if p.db == nil {
-		return errors.New("sql database is not configured")
-	}
-	return p.db.PingContext(ctx)
-}
-
-func selectedPostgresAPIOptionalCapabilityBuilder(pg *store.PostgresStore, stores storeBundle) selectedAPIOptionalCapabilityBuilder {
-	if pg == nil {
-		return nil
-	}
-	return func(req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
-		resetPlanner := runtimedestructivereset.InventoryPlanner{
-			Reader: runtimedestructivereset.CompositeInventoryReader{
-				Reader:     pg,
-				Containers: req.Workspaces,
-			},
-		}
-		runForkSourceLoader := runtimerunforkexecution.SelectedContractSourceLoader(runtimerunforkexecution.ContractBundleSourceLoader{
-			RepoRoot:          req.RepoRoot,
-			PlatformSpecPath:  req.PlatformSpecPath,
-			PlatformPackBases: req.PlatformPackBases,
-		})
-		if req.LoadedBundle.dbLoaded {
-			runForkSourceLoader = runtimerunforkexecution.BundleCatalogSelectedContractSourceLoader{
-				RepoRoot:          req.RepoRoot,
-				PlatformSpecPath:  req.RunningPlatformSpecPath,
-				PlatformPackBases: req.PlatformPackBases,
-				Store:             pg,
-			}
-		}
-		runFork := apiv1.SelectedContractRunForkExecutor{
-			ExecuteSelectedContractRunFork: selectedPostgresRunForkExecutionFunc(pg, stores.WorkflowPersistence),
-			SourceLoader:                   runForkSourceLoader,
-			ContractSelection:              runtimerunforkadmission.SelectedContractSelection(req.Source, req.ContractsRoot),
-			AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
-				Config: req.Config, ExecutionPosture: req.ExecutionPosture, EntityStore: stores.ToolEntityStore, HumanTaskStore: stores.HumanTaskStore,
-				SessionRegistry: stores.SessionRegistry, ConversationStore: stores.ConversationStore,
-				MailboxStore: stores.MailboxStore, Workspace: req.Workspaces,
-				NoticePresentation: req.NoticePresentation,
-				Credentials:        req.Credentials, ManagedCredentials: req.ManagedCredentials, ProviderCredentials: req.ProviderCredentials,
-				ProcessCapability: req.ProcessCapability,
-			},
-		}
-		return selectedAPICapabilities{
-			BundleCatalog:  pg,
-			BundleRegister: pg,
-			BundleDelete: &runtimebundledelete.Coordinator{
-				Planner: pg,
-				Cleaner: pg,
-				Finalizer: processOwnedBundleDeleteFinalizer{
-					capability: req.ProcessCapability, runtimeContexts: req.RuntimeContextManager,
-				},
-				Locks:              pg,
-				ContainerInventory: req.Workspaces,
-				Containers:         runtimedestructivereset.ManagedContainerStopper{Runtime: req.Workspaces},
-				RuntimeQuiescer: bundleDeleteRuntimeQuiescer{
-					contexts: req.RuntimeContextManager, supervisor: req.RuntimeSupervisor,
-				},
-			},
-			ConversationForks:         pg,
-			ConversationForkLifecycle: pg,
-			RunForkAvailability:       pg,
-			RunFork:                   runFork,
-			RunForkSelector:           runFork,
-			RuntimeContexts:           req.RuntimeContextManager,
-			ResetCoordinator: &runtimedestructivereset.Coordinator{
-				Planner:         resetPlanner,
-				Locks:           pg,
-				Quiescer:        runtimedestructivereset.Quiescer{Store: pg},
-				Cleaner:         runtimedestructivereset.Cleaner{Store: processOwnedDestructiveResetStore{capability: req.ProcessCapability}},
-				Containers:      runtimedestructivereset.ManagedContainerStopper{Runtime: req.Workspaces},
-				RuntimeContexts: req.RuntimeContextManager,
-			},
-		}, nil
-	}
 }
 
 type processOwnedBundleDeleteFinalizer struct {
@@ -428,173 +267,6 @@ func (f processOwnedBundleDeleteFinalizer) ReplayBundleDeleteFinalMutation(ctx c
 	return result, nil
 }
 
-func selectedSQLiteAPIOptionalCapabilityBuilder(sqliteStore *store.SQLiteRuntimeStore) selectedAPIOptionalCapabilityBuilder {
-	if sqliteStore == nil {
-		return nil
-	}
-	return func(req selectedAPICapabilityRequest) (selectedAPICapabilities, error) {
-		return selectedAPICapabilities{
-			BundleCatalog:             sqliteStore,
-			ConversationForks:         sqliteStore,
-			ConversationForkLifecycle: sqliteStore,
-			RuntimeContexts:           req.RuntimeContextManager,
-		}, nil
-	}
-}
-
-func selectedPostgresRunForkExecutionFunc(pg *store.PostgresStore, persistence runtimepipeline.WorkflowPersistence) apiv1.SelectedContractRunForkExecutionFunc {
-	if pg == nil {
-		return nil
-	}
-	owner, ownerErr := selectedPostgresContractExecutionOwner(pg, persistence)
-	return func(ctx context.Context, req runtimerunforkexecution.SelectedContractExecutionRequest) (runtimerunforkexecution.SelectedContractExecutionResult, error) {
-		if ownerErr != nil {
-			return runtimerunforkexecution.SelectedContractExecutionResult{}, ownerErr
-		}
-		req.Owner = owner
-		return runtimerunforkexecution.ExecuteSelectedContractRunFork(ctx, req)
-	}
-}
-
-func selectedPostgresRunForkRuntimeOwner(pg *store.PostgresStore, persistence runtimepipeline.WorkflowPersistence) selectedRunForkRuntimeOwner {
-	if pg == nil {
-		return selectedRunForkRuntimeOwner{}
-	}
-	executionOwner, executionOwnerErr := selectedPostgresContractExecutionOwner(pg, persistence)
-	return selectedRunForkRuntimeOwner{
-		activateFunc: func(ctx context.Context, req runtimerunforkexecution.SelectedContractActivationGateRequest) (runtimerunforkexecution.SelectedContractActivationGateResult, error) {
-			if executionOwnerErr != nil {
-				return runtimerunforkexecution.SelectedContractActivationGateResult{}, executionOwnerErr
-			}
-			req.Store = pg
-			req.ExecutionOwner = executionOwner
-			return runtimerunforkexecution.ActivateSelectedContractRunFork(ctx, req)
-		},
-		materializeFunc: pg.MaterializeRunFork,
-		executeFunc: func(ctx context.Context, req runtimerunforkexecution.SelectedContractExecutionRequest) (runtimerunforkexecution.SelectedContractExecutionResult, error) {
-			if executionOwnerErr != nil {
-				return runtimerunforkexecution.SelectedContractExecutionResult{}, executionOwnerErr
-			}
-			req.Owner = executionOwner
-			return runtimerunforkexecution.ExecuteSelectedContractRunFork(ctx, req)
-		},
-		planFunc: pg.PlanRunFork,
-	}
-}
-
-func selectedPostgresContractExecutionOwner(pg *store.PostgresStore, persistence runtimepipeline.WorkflowPersistence) (runtimerunforkexecution.SelectedContractExecutionOwner, error) {
-	if pg == nil {
-		return runtimerunforkexecution.SelectedContractExecutionOwner{}, errors.New("selected-contract postgres store is required")
-	}
-	durable := runtimebus.DurableDependencies{
-		ReplyContext: pg, RunLifecycle: pg, DeliveryLifecycle: pg,
-		FlowRoutes: pg, FlowRouteRecords: pg, FlowRouteSets: pg, FlowRouteTopology: pg, FlowRouteRollback: pg,
-		ActiveAgents: pg, ActiveFlows: pg, TargetOwners: pg, WorkflowInstances: pg, PreparedEvents: pg,
-		TargetFailureRecorder: pg, RunOrigins: pg,
-	}
-	managerRoles := runtimemanager.PersistenceRoles{
-		LifecycleCensus: pg, LifecycleState: pg, LifecycleEffects: pg, LifecycleDiagnostics: pg, EffectsRecovery: pg,
-		DeliveryQuiescence: pg, EventExistence: pg, DirectiveOperations: pg, DirectiveTargets: pg,
-		FlowRoutes: pg,
-	}
-	return runtimerunforkexecution.NewSelectedContractExecutionOwner(
-		persistence, pg, pg, pg, pg, durable, pg.PipelineObligations(), pg, managerRoles,
-		pg, pg, pg, pg, pg, pg, pg, pg, pg, pg, pg, pg, pg,
-	)
-}
-
-func selectedPostgresStoreBundle(pg *store.PostgresStore, constructionDB *sql.DB, cfg *config.Config) storeBundle {
-	if pg == nil {
-		return storeBundle{}
-	}
-	if cfg == nil {
-		cfg = &config.Config{}
-	}
-	pg.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
-	workflowPersistence := runtimepipeline.NewWorkflowPersistence(pg)
-	bundle := storeBundle{
-		Postgres:           pg,
-		SQLDB:              constructionDB,
-		WorkspaceLookup:    pg,
-		Database:           pg,
-		RuntimeLogStore:    pg,
-		SchemaBootstrapper: pg,
-		EventStore:         pg,
-		EventBusDurable: runtimebus.DurableDependencies{
-			ReplyContext: pg, RunLifecycle: pg, DeliveryLifecycle: pg,
-			FlowRoutes: pg, FlowRouteRecords: pg, FlowRouteSets: pg, FlowRouteTopology: pg, FlowRouteRollback: pg,
-			ActiveAgents: pg, ActiveFlows: pg, TargetOwners: pg, WorkflowInstances: pg, PreparedEvents: pg,
-			TargetFailureRecorder: pg, RunOrigins: pg,
-		},
-		EventPayloadValidationBinder:   pg,
-		InboundPayloadValidationBinder: pg,
-		AuthorActivityRegistrars:       []runtime.AuthorActivityCatalogRegistrar{pg},
-		AuthorActivityReader:           pg,
-		RunControlStore:                pg,
-		RunLifecycleCandidates:         pg,
-		WorkflowPersistence:            workflowPersistence,
-		SessionRegistry:                pg,
-		LiveSessionAcquirer:            pg,
-		SessionResetter:                pg,
-		ConversationStore:              pg,
-		ManagerStore:                   pg,
-		ManagerLifecycleDiagnostics:    pg,
-		ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
-			LifecycleCensus: pg, LifecycleState: pg, LifecycleEffects: pg,
-			LifecycleDiagnostics: pg, EffectsRecovery: pg, DeliveryQuiescence: pg,
-			EventExistence: pg, DirectiveOperations: pg, DirectiveTargets: pg, FlowRoutes: pg,
-		},
-		EffectsStore:                pg,
-		CompletionStore:             pg,
-		CompletionHeartbeatStore:    pg,
-		EffectsRecoveryStore:        pg,
-		ManagedCapabilitiesStore:    pg,
-		DeliveryStore:               pg,
-		PipelineObligations:         pg.PipelineObligations(),
-		GenericScheduleStore:        pg,
-		TimerObligationReader:       pg,
-		MailboxMaterializer:         pg,
-		MailboxStore:                pg,
-		ToolEntityStore:             pg,
-		HumanTaskStore:              pg,
-		BudgetSpendStore:            pg,
-		InboundStore:                pg,
-		OperatorChannels:            pg,
-		MailboxAPIStore:             pg,
-		MailboxNoticeAcknowledgment: pg,
-		DecisionCards:               pg,
-		ProposedEffects:             pg,
-		DecisionCardHumanTasks:      pg,
-		DecisionCardDraftExpiry:     pg,
-		HumanTaskExpiry:             pg,
-		ObservabilityStore:          pg,
-		AgentUsageStore:             pg,
-		AgentDeliveryLifecycleStore: pg,
-		RuntimeIngressStore:         pg,
-		IdempotencyStore:            pg,
-		StartupOwnership:            pg,
-		RunQuiescenceStore:          pg,
-		RunReadStore:                pg,
-		EntityReadStore:             pg,
-		AgentReadStore:              pg,
-		ConversationReadStore:       pg,
-		RunBundleContextStore:       pg,
-		BundleRuntimeCatalogStore:   pg,
-		BundleSourceCatalogStore:    pg,
-		RunBundleAvailabilityStore:  pg,
-		ScenarioExecutionProfiles:   pg,
-		StartupRecoveryStore:        pg,
-		RunStalledReader:            pg,
-		RunForkRuntimeOwner:         selectedPostgresRunForkRuntimeOwner(pg, workflowPersistence),
-	}
-	bundle.APIOptionalCapabilityBuilder = selectedPostgresAPIOptionalCapabilityBuilder(pg, bundle)
-	return bundle
-}
-
-func (s storeBundle) runtimeDeps() runtime.RuntimeDeps {
-	return s.facade().runtimeDeps()
-}
-
 type serveRuntimeBundle struct {
 	module           runtimepipeline.WorkflowModule
 	bundle           *runtimecontracts.WorkflowContractBundle
@@ -626,7 +298,7 @@ type serveRuntimeBundleContext struct {
 
 type serveRuntimeBundleContextRequest struct {
 	Ctx                    context.Context
-	Stores                 storeBundle
+	Stores                 serveRuntimePersistence
 	Config                 *config.Config
 	Loaded                 serveRuntimeBundle
 	StateStoreSummary      string
@@ -768,7 +440,7 @@ func servePreCatalogPlatformSpecPath(resolvedPaths cliapp.CLIContractPlatformSpe
 	return resolvedPaths.PlatformSpecPath, nil
 }
 
-func loadServeRuntimeBundles(ctx context.Context, repo string, stores storeBundle, resolvedPaths cliapp.CLIContractPlatformSpecPaths, opts cliapp.ServeOptions, packBases *packartifact.PlatformPackBaseGenerationOwner) ([]serveRuntimeBundle, error) {
+func loadServeRuntimeBundles(ctx context.Context, repo string, catalog runbundle.RuntimeCatalogReader, resolvedPaths cliapp.CLIContractPlatformSpecPaths, opts cliapp.ServeOptions, packBases *packartifact.PlatformPackBaseGenerationOwner) ([]serveRuntimeBundle, error) {
 	hashes, err := cliapp.ServeBundleHashes(opts)
 	if err != nil {
 		return nil, err
@@ -780,7 +452,7 @@ func loadServeRuntimeBundles(ctx context.Context, repo string, stores storeBundl
 			return nil, fmt.Errorf("resolve embedded platform spec for bundle catalog admission: %w", err)
 		}
 		for _, hash := range hashes {
-			loaded, err := loadServeRuntimeBundleFromCatalog(ctx, repo, stores, hash, runningPlatformSpecPath, packBases)
+			loaded, err := loadServeRuntimeBundleFromCatalog(ctx, repo, catalog, hash, runningPlatformSpecPath, packBases)
 			if err != nil {
 				for _, prior := range out {
 					if prior.cleanup != nil {
@@ -793,14 +465,14 @@ func loadServeRuntimeBundles(ctx context.Context, repo string, stores storeBundl
 		}
 		return out, nil
 	}
-	loaded, err := loadServeRuntimeBundle(ctx, repo, stores, resolvedPaths, opts, packBases)
+	loaded, err := loadServeRuntimeBundle(ctx, repo, catalog, resolvedPaths, opts, packBases)
 	if err != nil {
 		return nil, err
 	}
 	return []serveRuntimeBundle{loaded}, nil
 }
 
-func loadServeRuntimeBundle(ctx context.Context, repo string, stores storeBundle, resolvedPaths cliapp.CLIContractPlatformSpecPaths, opts cliapp.ServeOptions, packBases *packartifact.PlatformPackBaseGenerationOwner) (serveRuntimeBundle, error) {
+func loadServeRuntimeBundle(ctx context.Context, repo string, catalog runbundle.RuntimeCatalogReader, resolvedPaths cliapp.CLIContractPlatformSpecPaths, opts cliapp.ServeOptions, packBases *packartifact.PlatformPackBaseGenerationOwner) (serveRuntimeBundle, error) {
 	hashes, err := cliapp.ServeBundleHashes(opts)
 	if err != nil {
 		return serveRuntimeBundle{}, err
@@ -813,7 +485,7 @@ func loadServeRuntimeBundle(ctx context.Context, repo string, stores storeBundle
 		if err != nil {
 			return serveRuntimeBundle{}, fmt.Errorf("resolve embedded platform spec for bundle catalog admission: %w", err)
 		}
-		return loadServeRuntimeBundleFromCatalog(ctx, repo, stores, hashes[0], runningPlatformSpecPath, packBases)
+		return loadServeRuntimeBundleFromCatalog(ctx, repo, catalog, hashes[0], runningPlatformSpecPath, packBases)
 	}
 	contractsRoot, err := cliapp.NormalizeContractsRoot(resolvedPaths.ContractsPath)
 	if err != nil {
@@ -842,8 +514,7 @@ func loadServeRuntimeBundle(ctx context.Context, repo string, stores storeBundle
 	}, nil
 }
 
-func loadServeRuntimeBundleFromCatalog(ctx context.Context, repo string, stores storeBundle, bundleHash, runningPlatformSpecPath string, packBases *packartifact.PlatformPackBaseGenerationOwner) (serveRuntimeBundle, error) {
-	catalog := stores.facade().bundleRuntimeCatalogStore()
+func loadServeRuntimeBundleFromCatalog(ctx context.Context, repo string, catalog runbundle.RuntimeCatalogReader, bundleHash, runningPlatformSpecPath string, packBases *packartifact.PlatformPackBaseGenerationOwner) (serveRuntimeBundle, error) {
 	if catalog == nil {
 		return serveRuntimeBundle{}, fmt.Errorf("BUNDLE_UNAVAILABLE: swarm serve --bundle-hash requires selected bundle catalog store")
 	}
@@ -901,7 +572,7 @@ func loadServeRuntimeBundleFromCatalog(ctx context.Context, repo string, stores 
 	}, nil
 }
 
-func prepareLoadedServeBundleSource(ctx context.Context, stores storeBundle, loaded serveRuntimeBundle, dev bool) (runtimecorrelation.BundleSourceFact, error) {
+func prepareLoadedServeBundleSource(ctx context.Context, persistence serveRuntimePersistence, loaded serveRuntimeBundle, dev bool) (runtimecorrelation.BundleSourceFact, error) {
 	if loaded.dbLoaded {
 		if dev {
 			return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("--bundle-hash is mutually exclusive with --dev")
@@ -918,21 +589,7 @@ func prepareLoadedServeBundleSource(ctx context.Context, stores storeBundle, loa
 		}
 		return prepared, nil
 	}
-	return prepareServeBundleSource(ctx, stores, loaded.bundle, dev && !bundleHasStandingActivation(loaded.bundle))
-}
-
-func bundleHasStandingActivation(bundle *runtimecontracts.WorkflowContractBundle) bool {
-	if bundle == nil {
-		return false
-	}
-	for _, pkg := range bundle.PackageTree {
-		for _, ref := range pkg.Manifest.Flows {
-			if ref.HasStandingActivation() {
-				return true
-			}
-		}
-	}
-	return false
+	return prepareServeBundleSource(ctx, persistence.bundleWriter, loaded.bundle, dev)
 }
 
 func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serveRuntimeBundleContext, error) {
@@ -940,7 +597,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	stateStoreSummary := strings.TrimSpace(req.StateStoreSummary)
 	if stateStoreSummary == "" {
 		var err error
-		stateStoreSummary, err = initializeStateStores(req.Ctx, req.Stores, loaded.bundle)
+		stateStoreSummary, err = initializeStateStores(req.Ctx, req.Stores.schema, loaded.bundle)
 		if err != nil {
 			return serveRuntimeBundleContext{}, err
 		}
@@ -960,7 +617,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	loaded.source = projection.Source()
 	bootIdentity := loaded.bootIdentity
 	bootIdentity.BundleHash = bundleSourceFact.BundleHash()
-	workspaces, err := cliapp.ConfiguredWorkspaceLifecycleForServe(req.Stores.WorkspaceLookup, req.Config, loaded.contractsRoot, loaded.source, req.MountSources, req.WorkspaceBackend)
+	workspaces, err := cliapp.ConfiguredWorkspaceLifecycleForServe(req.Stores.workspace, req.Config, loaded.contractsRoot, loaded.source, req.MountSources, req.WorkspaceBackend)
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("configure workspaces: %w", err)
 	}
@@ -1258,25 +915,23 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		return 1
 	}
 	presenter.recordStore(storeSelection)
-	storeFacade := stores.facade()
-	storeOwner := newSelectedStoreOwner(storeFacade)
+	runtimePersistence := projectRuntimePersistenceForServe(stores)
 	defer func() {
-		if err := storeOwner.CloseUnactivated(); err != nil {
+		if err := stores.CloseUnactivated(); err != nil {
 			presenter.cleanupFailure("store shutdown", err)
 		}
 	}()
-	if stores.SchemaBootstrapper != nil {
-		preCatalogPlatformSpecPath, err := servePreCatalogPlatformSpecPath(resolvedPaths, opts)
-		if err != nil {
-			presenter.fail(4, "bundle_load", err)
-			return 1
-		}
-		if _, err := initializeServePlatformStateStores(ctx, stores, preCatalogPlatformSpecPath); err != nil {
-			presenter.fail(4, "bundle_load", err)
-			return 1
-		}
+	preCatalogPlatformSpecPath, err := servePreCatalogPlatformSpecPath(resolvedPaths, opts)
+	if err != nil {
+		presenter.fail(4, "bundle_load", err)
+		return 1
 	}
-	loadedBundles, err := loadServeRuntimeBundles(ctx, repo, stores, resolvedPaths, opts, platformPackBases)
+	if _, err := initializeServePlatformStateStores(ctx, runtimePersistence.schema, preCatalogPlatformSpecPath); err != nil {
+		presenter.fail(4, "bundle_load", err)
+		return 1
+	}
+	bundleRuntimeCatalog, _ := stores.BundleRuntimeCatalog()
+	loadedBundles, err := loadServeRuntimeBundles(ctx, repo, bundleRuntimeCatalog, resolvedPaths, opts, platformPackBases)
 	if err != nil {
 		detail := err.Error()
 		if _, ok := runtimecontracts.AsLoaderDiagnostic(err); ok {
@@ -1359,16 +1014,14 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		return 3
 	}
 	stateStoreSummaries := make([]string, len(loadedBundles))
-	if stores.SchemaBootstrapper != nil {
-		summaries, err := initializeLoadedServeRuntimeStateStores(ctx, stores, loadedBundles)
-		if err != nil {
-			presenter.fail(4, "state_store_schema", err)
-			return 1
-		}
-		stateStoreSummaries = summaries
+	summaries, err := initializeLoadedServeRuntimeStateStores(ctx, runtimePersistence.schema, loadedBundles)
+	if err != nil {
+		presenter.fail(4, "state_store_schema", err)
+		return 1
 	}
+	stateStoreSummaries = summaries
 	for i := range loadedBundles {
-		fact, err := prepareLoadedServeBundleSource(ctx, stores, loadedBundles[i], opts.Dev)
+		fact, err := prepareLoadedServeBundleSource(ctx, runtimePersistence, loadedBundles[i], opts.Dev)
 		if err != nil {
 			presenter.fail(4, "bundle_source", err)
 			return 1
@@ -1427,7 +1080,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		packLoad := bundlePackLoads[i]
 		contextDef, err := buildServeRuntimeBundleContext(serveRuntimeBundleContextRequest{
 			Ctx:                    ctx,
-			Stores:                 stores,
+			Stores:                 runtimePersistence,
 			Config:                 cfg,
 			Loaded:                 loaded,
 			StateStoreSummary:      serveStateStoreSummaryAt(stateStoreSummaries, i),
@@ -1464,11 +1117,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		presenter.fail(5, "startup_topology", err)
 		return 3
 	}
-	if stores.StartupOwnership == nil {
-		presenter.fail(5, "startup_ownership_lease", errors.New("selected store process startup/topology owner is required"))
-		return 3
-	}
-	processCapability, err := stores.StartupOwnership.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+	processCapability, err := stores.StartupOwnership().AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
 		OwnerID: "serve:" + runtimeInstanceID, BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
 	})
 	if err != nil {
@@ -1521,10 +1170,6 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	workspaces := primaryContext.workspaces
 	primaryWorkspaceBackend = primaryContext.workspaceBackend
 	rt := primaryContext.runtime
-	if stores.OperatorChannels == nil {
-		presenter.fail(5, "operator_channel", errors.New("selected store operator-channel owner is required"))
-		return 3
-	}
 	channelInterfaces, err := serveOperatorChannelInterfaces(runtimeContexts)
 	if err != nil {
 		presenter.fail(5, "operator_channel", err)
@@ -1535,7 +1180,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		presenter.fail(5, "operator_channel", err)
 		return 1
 	}
-	operatorChannels, err := operatorchannel.NewService(stores.OperatorChannels, proofStore, channelInterfaces, runtimeInstanceID)
+	operatorChannels, err := operatorchannel.NewService(stores.OperatorChannels(), proofStore, channelInterfaces, runtimeInstanceID)
 	if err != nil {
 		presenter.fail(5, "operator_channel", err)
 		return 1
@@ -1559,6 +1204,23 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		presenter.fail(5, "runtime_context", err)
 		return 1
 	}
+	if opts.AbandonActiveRuns {
+		result, err := stores.RunQuiescence().ApplyServeAbandonActiveRunQuiescence(ctx, time.Now().UTC())
+		if err != nil {
+			presenter.fail(5, "run_quiescence", err)
+			return 3
+		}
+		presenter.recordAbandonedWork(len(result.Runs), len(result.Deliveries), result.PipelineReceiptCount)
+	}
+	if recovery, available := stores.StartupRecovery(); available {
+		if exitCode := runServeUnavailableBundleStartupRecovery(ctx, recovery, stores.WorkspaceLookup(), cfg, loadedBundle, source, mountSources, primaryWorkspaceBackend, presenter); exitCode != 0 {
+			return exitCode
+		}
+	}
+	if err := enforceServeBundleMatchAdmissionForHashes(ctx, stores.RunBundleAvailability(), serveRuntimeBundleIdentitiesDetail(loadedBundles), opts.RequireBundleMatch, pinnedBundleHashes); err != nil {
+		presenter.fail(5, "bundle_match_admission", err)
+		return 3
+	}
 	standingReconciliations, err := reconcileServeStandingServices(ctx, rt.Pipeline, runtimeContexts)
 	if err != nil {
 		presenter.fail(5, "runtime_context", err)
@@ -1573,43 +1235,20 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		runtimeContexts[i].startupStandingTargets = targets
 		runtimeContexts[i].startupStandingActivations = activations
 	}
-	if opts.AbandonActiveRuns {
-		if stores.RunQuiescenceStore == nil {
-			presenter.fail(5, "run_quiescence", errors.New("selected store active-run quiescence owner is required"))
-			return 3
-		}
-		result, err := stores.RunQuiescenceStore.ApplyServeAbandonActiveRunQuiescence(ctx, time.Now().UTC())
-		if err != nil {
-			presenter.fail(5, "run_quiescence", err)
-			return 3
-		}
-		presenter.recordAbandonedWork(len(result.Runs), len(result.Deliveries), result.PipelineReceiptCount)
-	}
-	if exitCode := runServeUnavailableBundleStartupRecovery(ctx, storeFacade, cfg, loadedBundle, source, mountSources, primaryWorkspaceBackend, presenter); exitCode != 0 {
-		return exitCode
-	}
-	if err := enforceServeBundleMatchAdmissionForHashes(ctx, storeFacade.runBundleAvailabilityStore(), serveRuntimeBundleIdentitiesDetail(loadedBundles), opts.RequireBundleMatch, pinnedBundleHashes); err != nil {
-		presenter.fail(5, "bundle_match_admission", err)
-		return 3
-	}
-	runtimeContextManager, err := runtime.NewRuntimeContextManager(runtimeContextAvailabilityReader(stores))
+	runtimeContextManager, err := runtime.NewRuntimeContextManager(stores.RunBundleAvailability())
 	if err != nil {
 		presenter.fail(5, "runtime_context", err)
 		return 1
 	}
 
-	if stores.EffectsStore == nil || stores.CompletionStore == nil || stores.CompletionHeartbeatStore == nil {
-		presenter.fail(5, "forkchat_sandbox", fmt.Errorf("selected runtime store does not implement completion execution authority"))
-		return 1
-	}
-	forkChatLLM, err := buildForkChatSandboxLLMRuntimes(cfg, workspaces, toolGatewayBinding, providerCredentialStore, stores.EffectsStore, stores.CompletionStore, stores.CompletionHeartbeatStore, rt.Budget)
+	forkChatLLM, err := buildForkChatSandboxLLMRuntimes(cfg, workspaces, toolGatewayBinding, providerCredentialStore, stores.Effects(), stores.Completion(), stores.CompletionHeartbeat(), rt.Budget)
 	if err != nil {
 		presenter.fail(5, "forkchat_sandbox", err)
 		return 1
 	}
 
 	ready := runtimepublicingress.NewReadinessOwner(publicIngressEnabled)
-	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, stores, ready, mountSources, workspaceBackendPreference, credentialStore, providerCredentialStore, primaryPackLoad.ProviderTriggers.Catalog, platformPackBase, contractsRoot, bundle, source, rt, opts.Dev)
+	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, runtimePersistence, ready, mountSources, workspaceBackendPreference, credentialStore, providerCredentialStore, primaryPackLoad.ProviderTriggers.Catalog, platformPackBase, contractsRoot, bundle, source, rt, opts.Dev)
 	supervisor.noticePresentation = noticePresentation
 	supervisor.SetPlatformPackBaseGenerationOwner(platformPackBases)
 	supervisor.SetProcessCapability(processCapability)
@@ -1627,7 +1266,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	if len(pinnedBundleHashes) > 0 {
 		supervisor.DisableSourceReplacement("swarm serve --bundle-hash pins persisted bundle contexts for the process; dynamic project reload is not supported in this mode")
 	}
-	if err := storeOwner.Activate(processWorkOwner); err != nil {
+	if err := stores.Activate(processWorkOwner); err != nil {
 		presenter.fail(5, "runtime_context", err)
 		return 1
 	}
@@ -1661,17 +1300,16 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		if joinErr == nil {
 			shutdownErr = errors.Join(shutdownErr, processCapability.Release(context.Background()))
 			if shutdownErr == nil {
-				shutdownErr = errors.Join(shutdownErr, storeOwner.CloseActivated(receipt))
+				shutdownErr = errors.Join(shutdownErr, stores.CloseActivated(receipt))
 			}
 		}
 		presenter.shutdown(shutdownErr)
 	}()
-	apiStoreCaps, err := storeFacade.apiCapabilities(selectedAPICapabilityRequest{
+	apiStoreCaps, err := buildSelectedAPICapabilities(stores, selectedAPICapabilityRequest{
 		RepoRoot:                repo,
 		PlatformSpecPath:        resolvedPlatformSpecPath,
 		RunningPlatformSpecPath: strings.TrimSpace(loadedBundle.runningSpecPath),
 		LoadedBundle:            loadedBundle,
-		RuntimeContexts:         runtimeContexts,
 		Source:                  source,
 		ContractsRoot:           contractsRoot,
 		Config:                  cfg,
@@ -1690,13 +1328,15 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		presenter.fail(5, "runtime_context", err)
 		return 1
 	}
+	storeDeps := stores.RuntimeDeps()
+	idempotency := stores.Idempotency()
 	readyFn := func() bool { return ready.Load() }
 	publication := apiv1.EventPublicationOptions{
 		ExecutionPosture: rt.ExecutionPosture,
-		Idempotency:      stores.IdempotencyStore, Events: rt.Bus, Acknowledged: rt.Bus, RecipientPlans: rt.Bus, BundleSource: rt.Bus,
+		Idempotency:      idempotency, Events: rt.Bus, Acknowledged: rt.Bus, RecipientPlans: rt.Bus, BundleSource: rt.Bus,
 		Runs: apiStoreCaps.Runs, Entities: apiStoreCaps.Entities, Observability: apiStoreCaps.Observability,
 		RunBundleContext: apiStoreCaps.RunBundleContext, RuntimeContexts: apiStoreCaps.RuntimeContexts,
-		Source: source, Bundle: bootBundleIdentity, ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles,
+		Source: source, Bundle: bootBundleIdentity, ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles(),
 	}
 	runtimeIdentity := apiv1.RuntimeIdentityResult{
 		RuntimeInstanceID:   runtimeInstanceID,
@@ -1710,29 +1350,29 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		apiv1.OperatorRunReadHandlers(apiv1.RunReadHandlerOptions{Runs: apiStoreCaps.Runs}),
 		apiv1.OperatorObservabilityHandlers(apiv1.ObservabilityHandlerOptions{Observability: apiStoreCaps.Observability}),
 		apiv1.OperatorEntityHandlers(apiv1.EntityHandlerOptions{Entities: apiStoreCaps.Entities}),
-		apiv1.OperatorAgentConversationHandlers(apiv1.AgentConversationHandlerOptions{Agents: apiStoreCaps.Agents, Conversations: apiStoreCaps.Conversations, DeliveryLifecycle: stores.AgentDeliveryLifecycleStore, Usage: stores.AgentUsageStore}),
+		apiv1.OperatorAgentConversationHandlers(apiv1.AgentConversationHandlerOptions{Agents: apiStoreCaps.Agents, Conversations: apiStoreCaps.Conversations, DeliveryLifecycle: stores.AgentDeliveryLifecycle(), Usage: stores.AgentUsage()}),
 		apiv1.OperatorBundleCatalogHandlers(apiv1.BundleCatalogHandlerOptions{Catalog: apiStoreCaps.BundleCatalog}),
 		apiv1.OperatorAgentFrameHandlers(apiv1.AgentFrameHandlerOptions{Catalog: apiStoreCaps.BundleCatalog, Effective: rt.Manager}),
 		apiv1.OperatorBundleRegisterHandlers(apiv1.BundleRegisterHandlerOptions{
 			RepoRoot: repo, PlatformSpecPath: resolvedPlatformSpecPath,
 			PlatformPackBases: platformPackBases, AdmitPackInventory: packadmission.AdmitInventory,
-			Register: apiStoreCaps.BundleRegister, Idempotency: stores.IdempotencyStore,
+			Register: apiStoreCaps.BundleRegister, Idempotency: idempotency,
 		}),
-		apiv1.OperatorBundleDeleteHandlers(apiv1.BundleDeleteHandlerOptions{Executor: apiStoreCaps.BundleDelete, Idempotency: stores.IdempotencyStore}),
-		apiv1.OperatorConversationForkHandlers(apiv1.ConversationForkHandlerOptions{Reads: apiStoreCaps.ConversationForks, Lifecycle: apiStoreCaps.ConversationForkLifecycle, Chat: cliapp.NewWorkspaceAdmittedForkChatExecutor(apiv1.NewLLMForkChatExecutor(forkChatLLM), forkChatLLM, primaryWorkspaceBackend), Idempotency: stores.IdempotencyStore, ExecutionPosture: rt.ExecutionPosture}),
-		apiv1.OperatorMailboxHandlers(apiv1.MailboxHandlerOptions{Mailbox: stores.MailboxAPIStore}),
-		apiv1.OperatorDecisionCardHandlers(apiv1.DecisionCardHandlerOptions{Cards: stores.DecisionCards, ProposedEffects: stores.ProposedEffects, Mailbox: stores.MailboxAPIStore, NoticeAcknowledgment: stores.MailboxNoticeAcknowledgment, Authority: rt.Pipeline, BundleSource: rt.Bus, Idempotency: stores.IdempotencyStore, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
+		apiv1.OperatorBundleDeleteHandlers(apiv1.BundleDeleteHandlerOptions{Executor: apiStoreCaps.BundleDelete, Idempotency: idempotency}),
+		apiv1.OperatorConversationForkHandlers(apiv1.ConversationForkHandlerOptions{Reads: apiStoreCaps.ConversationForks, Lifecycle: apiStoreCaps.ConversationForkLifecycle, Chat: cliapp.NewWorkspaceAdmittedForkChatExecutor(apiv1.NewLLMForkChatExecutor(forkChatLLM), forkChatLLM, primaryWorkspaceBackend), Idempotency: idempotency, ExecutionPosture: rt.ExecutionPosture}),
+		apiv1.OperatorMailboxHandlers(apiv1.MailboxHandlerOptions{Mailbox: stores.MailboxAPI()}),
+		apiv1.OperatorDecisionCardHandlers(apiv1.DecisionCardHandlerOptions{Cards: storeDeps.DecisionCards, ProposedEffects: storeDeps.ProposedEffects, Mailbox: stores.MailboxAPI(), NoticeAcknowledgment: stores.MailboxNoticeAcknowledgment(), Authority: rt.Pipeline, BundleSource: rt.Bus, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
 		apiv1.OperatorRunStartHandlers(apiv1.RunStartHandlerOptions{Publication: publication}),
 		apiv1.OperatorEventPublishHandlers(apiv1.EventPublishHandlerOptions{Publication: publication}),
-		apiv1.OperatorEventReplayHandlers(apiv1.EventReplayHandlerOptions{ExecutionPosture: rt.ExecutionPosture, Idempotency: stores.IdempotencyStore, Events: rt.Bus, Observability: apiStoreCaps.Observability, AgentIdentities: apiStoreCaps.Agents, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
-		apiv1.OperatorTestSetupHandlers(apiv1.TestSetupHandlerOptions{Setup: apiStoreCaps.TestSetup, Idempotency: stores.IdempotencyStore, RunBundleContext: apiStoreCaps.RunBundleContext, RuntimeContexts: apiStoreCaps.RuntimeContexts, BundleSource: rt.Bus, Source: source, ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles}),
-		apiv1.OperatorRunForkHandlers(apiv1.RunForkHandlerOptions{Availability: apiStoreCaps.RunForkAvailability, Executor: apiStoreCaps.RunFork, Selector: apiStoreCaps.RunForkSelector, Idempotency: stores.IdempotencyStore, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
-		apiv1.OperatorRunControlHandlers(apiv1.RunControlHandlerOptions{Controller: rt.RunControl, Idempotency: stores.IdempotencyStore, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
-		apiv1.OperatorStandingServiceHandlers(apiv1.StandingServiceHandlerOptions{Controller: &serveStandingServiceController{manager: runtimeContextManager}, Idempotency: stores.IdempotencyStore}),
-		apiv1.OperatorRuntimeControlHandlers(apiv1.RuntimeControlHandlerOptions{Ingress: rt.RuntimeIngress, Idempotency: stores.IdempotencyStore, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
-		apiv1.OperatorRuntimeNukeHandlers(apiv1.RuntimeNukeHandlerOptions{Coordinator: apiStoreCaps.ResetCoordinator, Idempotency: stores.IdempotencyStore}),
-		apiv1.OperatorAgentControlHandlers(apiv1.AgentControlHandlerOptions{Controller: dashboardDynamicAgentControl{supervisor: supervisor}, Idempotency: stores.IdempotencyStore, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
-		apiv1.OperatorChannelHandlers(apiv1.OperatorChannelHandlerOptions{Channels: operatorChannels, Idempotency: stores.IdempotencyStore}),
+		apiv1.OperatorEventReplayHandlers(apiv1.EventReplayHandlerOptions{ExecutionPosture: rt.ExecutionPosture, Idempotency: idempotency, Events: rt.Bus, Observability: apiStoreCaps.Observability, AgentIdentities: apiStoreCaps.Agents, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
+		apiv1.OperatorTestSetupHandlers(apiv1.TestSetupHandlerOptions{Setup: apiStoreCaps.TestSetup, Idempotency: idempotency, RunBundleContext: apiStoreCaps.RunBundleContext, RuntimeContexts: apiStoreCaps.RuntimeContexts, BundleSource: rt.Bus, Source: source, ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles()}),
+		apiv1.OperatorRunForkHandlers(apiv1.RunForkHandlerOptions{Availability: apiStoreCaps.RunForkAvailability, Executor: apiStoreCaps.RunFork, Selector: apiStoreCaps.RunForkSelector, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
+		apiv1.OperatorRunControlHandlers(apiv1.RunControlHandlerOptions{Controller: rt.RunControl, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
+		apiv1.OperatorStandingServiceHandlers(apiv1.StandingServiceHandlerOptions{Controller: &serveStandingServiceController{manager: runtimeContextManager}, Idempotency: idempotency}),
+		apiv1.OperatorRuntimeControlHandlers(apiv1.RuntimeControlHandlerOptions{Ingress: rt.RuntimeIngress, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
+		apiv1.OperatorRuntimeNukeHandlers(apiv1.RuntimeNukeHandlerOptions{Coordinator: apiStoreCaps.ResetCoordinator, Idempotency: idempotency}),
+		apiv1.OperatorAgentControlHandlers(apiv1.AgentControlHandlerOptions{Controller: dashboardDynamicAgentControl{supervisor: supervisor}, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
+		apiv1.OperatorChannelHandlers(apiv1.OperatorChannelHandlerOptions{Channels: operatorChannels, Idempotency: idempotency}),
 	)
 	apiV1Handler, err := apiv1.NewHandler(apiv1.Options{
 		PlatformSpecPath:    resolvedPlatformSpecPath,
@@ -1743,7 +1383,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		Subscriptions: apiv1.OperatorSubscriptions(apiv1.SubscriptionOptions{
 			ExecutionPosture: rt.ExecutionPosture,
 			Ready:            readyFn, Database: apiStoreCaps.Database, Observability: apiStoreCaps.Observability,
-			DecisionCards: stores.DecisionCards, ProposedEffects: stores.ProposedEffects, Bundle: bootBundleIdentity,
+			DecisionCards: storeDeps.DecisionCards, ProposedEffects: storeDeps.ProposedEffects, Bundle: bootBundleIdentity,
 		}),
 	})
 	if err != nil {
@@ -1770,7 +1410,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	var reconcilePublicIngress func(context.Context, runtimepublicingress.Generation) error
 	if publicIngressEnabled {
 		registrationController, controllerErr := runtimepublicingress.NewProviderRegistrationController(runtimepublicingress.RegistrationControllerOptions{
-			CredentialOwner: providerCredentialOwner, EffectsStore: stores.EffectsStore,
+			CredentialOwner: providerCredentialOwner, EffectsStore: stores.Effects(),
 			HTTP: runtimeregistration.HTTPExecutor{}, Posture: rt.ExecutionPosture, RuntimeInstanceID: runtimeInstanceID,
 			StartupAuthority: func() (runtimestartupownership.GrantEvidence, error) {
 				current, _, _ := supervisor.PublicIngressState()
@@ -1897,7 +1537,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	if opts.TestRuntimeContextsReadyHook != nil {
 		opts.TestRuntimeContextsReadyHook(runtimeContextManager)
 	}
-	if err := startServeRunStalledEscalation(ctx, processWorkOwner, stores, runtimeContexts, rt.Bus, rt.ExecutionPosture); err != nil {
+	if err := startServeRunStalledEscalation(ctx, processWorkOwner, stores.RunStalled(), runtimeContexts, rt.Bus, rt.ExecutionPosture); err != nil {
 		presenter.fail(22, "ready", err)
 		return 1
 	}
@@ -1926,7 +1566,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	presenter.boot(22, "ready", "ok", fmt.Sprintf("total=%s state_stores=%s", readyAfter.Round(time.Millisecond), strings.TrimSpace(stateStoreSummary)))
 	flowCount, agentCount, toolCount := serveLifecycleSourceCounts(runtimeContexts)
 	feedEnabled := opts.Dev && !opts.NoFeed
-	storyReader := serveAuthorActivityReaderFromStores(stores)
+	storyReader := stores.AuthorActivity()
 	storyHead := int64(0)
 	if feedEnabled {
 		if storyReader == nil {
@@ -1943,7 +1583,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 			feedEnabled = false
 		}
 	}
-	unreadInformationalNotices, err := stores.MailboxStore.CountUnreadInformationalNotices(ctx)
+	unreadInformationalNotices, err := stores.Mailbox().CountUnreadInformationalNotices(ctx)
 	if err != nil {
 		presenter.fail(22, "ready", fmt.Errorf("count unread informational notices: %w", err))
 		return 1
@@ -2427,16 +2067,6 @@ func reportServeStandingReadiness(ctx context.Context, owner standingServiceStat
 	return nil
 }
 
-func runtimeContextAvailabilityReader(stores storeBundle) runtime.RunBundleAvailabilityReader {
-	if stores.RunBundleAvailabilityStore != nil {
-		return stores.RunBundleAvailabilityStore
-	}
-	if reader, ok := stores.RunBundleContextStore.(runtime.RunBundleAvailabilityReader); ok {
-		return reader
-	}
-	return nil
-}
-
 func plannedServeRuntimeContexts(contexts []serveRuntimeBundleContext) ([]runtime.BundleContext, error) {
 	planned := make([]runtime.BundleContext, 0, len(contexts))
 	for _, contextDef := range contexts {
@@ -2569,7 +2199,8 @@ func closeServeRuntime(ctx context.Context, supervisor *runtimeProjectSupervisor
 
 func runServeUnavailableBundleStartupRecovery(
 	ctx context.Context,
-	storeFacade selectedRuntimeStoreFacade,
+	recoveryStore storeselected.StartupRecovery,
+	workspaceLookup workspace.Lookup,
 	cfg *config.Config,
 	loaded serveRuntimeBundle,
 	source semanticview.Source,
@@ -2577,11 +2208,7 @@ func runServeUnavailableBundleStartupRecovery(
 	workspaceBackend cliapp.WorkspaceBackendSelection,
 	presenter *serveLifecyclePresenter,
 ) int {
-	recoveryStore := storeFacade.startupRecoveryStore()
-	if recoveryStore == nil {
-		return 0
-	}
-	recoveryWorkspaces, err := cliapp.ConfiguredWorkspaceLifecycleForServe(storeFacade.workspaceLookup(), cfg, loaded.contractsRoot, source, mountSources, workspaceBackend)
+	recoveryWorkspaces, err := cliapp.ConfiguredWorkspaceLifecycleForServe(workspaceLookup, cfg, loaded.contractsRoot, source, mountSources, workspaceBackend)
 	if err != nil {
 		presenter.fail(5, "recovery_workspace", err)
 		return 1
@@ -2591,8 +2218,8 @@ func runServeUnavailableBundleStartupRecovery(
 		recoveryContainers = noWorkspaceStartupRecoveryContainers{}
 	}
 	recovery, err := runtimestartuprecovery.Recover(ctx, runtimestartuprecovery.Request{
-		AvailabilityReader: recoveryStore,
-		CleanupStore:       recoveryStore,
+		AvailabilityReader: recoveryStore.Availability(),
+		CleanupStore:       recoveryStore.Cleanup(),
 		Containers:         recoveryContainers,
 		RequestedAt:        time.Now().UTC(),
 	})
@@ -2807,118 +2434,22 @@ func closeAdditionalServeRuntimeContexts(ctx context.Context, contexts []serveRu
 	return shutdownErr
 }
 
-func buildStores(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+func buildStores(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*storeselected.Owner, error) {
 	if cfg == nil {
-		return storeBundle{}, errors.New("runtime config is required")
+		return nil, errors.New("runtime config is required")
 	}
-	switch selection.Backend {
-	case storebackend.BackendPostgres:
+	request := storeselected.RuntimeRequest{
+		Selection:      selection,
+		SessionLockTTL: cfg.LLM.Session.LockTTL,
+	}
+	if selection.Backend == storebackend.BackendPostgres {
 		dsn, err := postgresDSNFromConfig(ctx, cfg.Database)
 		if err != nil {
-			return storeBundle{}, err
+			return nil, err
 		}
-		pg, constructionDB, err := storeconstruction.OpenPostgres(dsn)
-		if err != nil {
-			return storeBundle{}, err
-		}
-		if err := pg.Ping(ctx); err != nil {
-			return storeBundle{}, err
-		}
-		bundle := selectedPostgresStoreBundle(pg, constructionDB, cfg)
-		if err := validateSelectedStoreBundleRoles(selection.Backend, bundle); err != nil {
-			closeDB(constructionDB)
-			return storeBundle{}, err
-		}
-		return bundle, nil
-	case storebackend.BackendSQLite:
-		sqliteStore, constructionDB, err := storeconstruction.OpenSQLiteRuntimeWithOwnershipBinding(selection.SQLitePath)
-		if err != nil {
-			return storeBundle{}, err
-		}
-		if err := sqliteStore.Ping(ctx); err != nil {
-			_ = sqliteStore.Close()
-			return storeBundle{}, err
-		}
-		sqliteStore.SetSessionLockTTL(cfg.LLM.Session.LockTTL)
-		workflowPersistence := runtimepipeline.NewWorkflowPersistence(sqliteStore)
-		bundle := storeBundle{
-			SQLDB:              constructionDB,
-			WorkspaceLookup:    sqliteStore,
-			Database:           sqlDBPinger{db: constructionDB},
-			RuntimeLogStore:    sqliteStore,
-			SchemaBootstrapper: sqliteStore,
-			EventStore:         sqliteStore,
-			EventBusDurable: runtimebus.DurableDependencies{
-				ReplyContext: sqliteStore, RunLifecycle: sqliteStore, DeliveryLifecycle: sqliteStore,
-				FlowRoutes: sqliteStore, FlowRouteRecords: sqliteStore, FlowRouteSets: sqliteStore, FlowRouteTopology: sqliteStore, FlowRouteRollback: sqliteStore,
-				ActiveAgents: sqliteStore, ActiveFlows: sqliteStore, TargetOwners: sqliteStore, WorkflowInstances: sqliteStore, PreparedEvents: sqliteStore,
-				TargetFailureRecorder: sqliteStore, RunOrigins: sqliteStore,
-			},
-			EventPayloadValidationBinder:   sqliteStore,
-			InboundPayloadValidationBinder: sqliteStore,
-			AuthorActivityRegistrars:       []runtime.AuthorActivityCatalogRegistrar{sqliteStore},
-			AuthorActivityReader:           sqliteStore,
-			RunControlStore:                sqliteStore,
-			RunLifecycleCandidates:         sqliteStore,
-			WorkflowPersistence:            workflowPersistence,
-			SessionRegistry:                sqliteStore,
-			LiveSessionAcquirer:            sqliteStore,
-			SessionResetter:                sqliteStore,
-			ConversationStore:              sqliteStore,
-			ManagerStore:                   sqliteStore,
-			ManagerLifecycleDiagnostics:    sqliteStore,
-			ManagerPersistenceRoles: runtimemanager.PersistenceRoles{
-				LifecycleCensus: sqliteStore, LifecycleState: sqliteStore, LifecycleEffects: sqliteStore,
-				LifecycleDiagnostics: sqliteStore, EffectsRecovery: sqliteStore, DeliveryQuiescence: sqliteStore,
-				EventExistence: sqliteStore, DirectiveOperations: sqliteStore, DirectiveTargets: sqliteStore, FlowRoutes: sqliteStore,
-			},
-			EffectsStore:                sqliteStore,
-			CompletionStore:             sqliteStore,
-			CompletionHeartbeatStore:    sqliteStore,
-			EffectsRecoveryStore:        sqliteStore,
-			ManagedCapabilitiesStore:    sqliteStore,
-			DeliveryStore:               sqliteStore,
-			PipelineObligations:         sqliteStore.PipelineObligations(),
-			GenericScheduleStore:        sqliteStore,
-			TimerObligationReader:       sqliteStore,
-			MailboxMaterializer:         sqliteStore,
-			MailboxStore:                sqliteStore,
-			ToolEntityStore:             sqliteStore,
-			HumanTaskStore:              sqliteStore,
-			BudgetSpendStore:            sqliteStore,
-			InboundStore:                sqliteStore,
-			OperatorChannels:            sqliteStore,
-			MailboxAPIStore:             sqliteStore,
-			MailboxNoticeAcknowledgment: sqliteStore,
-			DecisionCards:               sqliteStore,
-			ProposedEffects:             sqliteStore,
-			DecisionCardHumanTasks:      sqliteStore,
-			DecisionCardDraftExpiry:     sqliteStore,
-			HumanTaskExpiry:             sqliteStore,
-			ObservabilityStore:          sqliteStore,
-			AgentUsageStore:             sqliteStore,
-			AgentDeliveryLifecycleStore: sqliteStore,
-			RuntimeIngressStore:         sqliteStore,
-			IdempotencyStore:            sqliteStore,
-			StartupOwnership:            sqliteStore,
-			RunQuiescenceStore:          sqliteStore,
-			RunReadStore:                sqliteStore,
-			EntityReadStore:             sqliteStore,
-			AgentReadStore:              sqliteStore,
-			ConversationReadStore:       sqliteStore,
-			RunBundleContextStore:       sqliteStore,
-			ScenarioExecutionProfiles:   sqliteStore,
-			RunStalledReader:            sqliteStore,
-		}
-		bundle.APIOptionalCapabilityBuilder = selectedSQLiteAPIOptionalCapabilityBuilder(sqliteStore)
-		if err := validateSelectedStoreBundleRoles(selection.Backend, bundle); err != nil {
-			_ = sqliteStore.Close()
-			return storeBundle{}, err
-		}
-		return bundle, nil
-	default:
-		return storeBundle{}, fmt.Errorf("store backend selection is required; supported backends: %s, %s", storebackend.BackendPostgres, storebackend.BackendSQLite)
+		request.PostgresDSN = dsn
 	}
+	return storeselected.OpenRuntime(ctx, request)
 }
 
 func postgresDSNFromConfig(ctx context.Context, cfg config.DatabaseConfig) (string, error) {
@@ -2937,7 +2468,7 @@ func postgresDSNFromConfig(ctx context.Context, cfg config.DatabaseConfig) (stri
 	return store.DSNFromConfig(cfg, password), nil
 }
 
-func enforceServeBundleMatchAdmission(ctx context.Context, availability selectedRunBundleAvailabilityStore, bootIdentity string, requireMatch bool, pinnedBundleHash string) error {
+func enforceServeBundleMatchAdmission(ctx context.Context, availability runbundle.AvailabilityStore, bootIdentity string, requireMatch bool, pinnedBundleHash string) error {
 	var pinned []string
 	if hash := strings.TrimSpace(pinnedBundleHash); hash != "" {
 		pinned = []string{hash}
@@ -2945,7 +2476,7 @@ func enforceServeBundleMatchAdmission(ctx context.Context, availability selected
 	return enforceServeBundleMatchAdmissionForHashes(ctx, availability, bootIdentity, requireMatch, pinned)
 }
 
-func enforceServeBundleMatchAdmissionForHashes(ctx context.Context, availability selectedRunBundleAvailabilityStore, bootIdentity string, requireMatch bool, pinnedBundleHashes []string) error {
+func enforceServeBundleMatchAdmissionForHashes(ctx context.Context, availability runbundle.AvailabilityStore, bootIdentity string, requireMatch bool, pinnedBundleHashes []string) error {
 	bootIdentity = strings.TrimSpace(bootIdentity)
 	pinnedBundleHashes = uniqueTrimmedServeBundleHashes(pinnedBundleHashes)
 	enforceActiveAvailability := requireMatch || len(pinnedBundleHashes) > 0
@@ -2985,7 +2516,7 @@ func enforceServeBundleMatchAdmissionForHashes(ctx context.Context, availability
 	return fmt.Errorf("active run pinned bundle_hash conflict: DB-loaded serve bundle_hash set %s cannot resume %d active run(s) with different bundle_hash: %s", strings.Join(pinnedBundleHashes, ","), len(mismatches), strings.Join(details, "; "))
 }
 
-func activeRunPinnedBundleHashConflicts(ctx context.Context, availability selectedRunBundleAvailabilityStore, pinnedBundleHash string) ([]runbundle.Availability, error) {
+func activeRunPinnedBundleHashConflicts(ctx context.Context, availability runbundle.AvailabilityStore, pinnedBundleHash string) ([]runbundle.Availability, error) {
 	pinnedBundleHash = strings.TrimSpace(pinnedBundleHash)
 	if pinnedBundleHash == "" {
 		return nil, nil
@@ -3006,7 +2537,7 @@ func activeRunPinnedBundleHashConflicts(ctx context.Context, availability select
 	return conflicts, nil
 }
 
-func activeRunPinnedBundleHashesConflicts(ctx context.Context, availability selectedRunBundleAvailabilityStore, pinnedBundleHashes []string) ([]runbundle.Availability, error) {
+func activeRunPinnedBundleHashesConflicts(ctx context.Context, availability runbundle.AvailabilityStore, pinnedBundleHashes []string) ([]runbundle.Availability, error) {
 	allowed := map[string]struct{}{}
 	for _, hash := range uniqueTrimmedServeBundleHashes(pinnedBundleHashes) {
 		allowed[hash] = struct{}{}
@@ -3048,8 +2579,8 @@ func uniqueTrimmedServeBundleHashes(values []string) []string {
 	return out
 }
 
-func initializeStateStores(ctx context.Context, stores storeBundle, bundle *runtimecontracts.WorkflowContractBundle) (string, error) {
-	if stores.SchemaBootstrapper == nil || bundle == nil {
+func initializeStateStores(ctx context.Context, schema store.SchemaBootstrapper, bundle *runtimecontracts.WorkflowContractBundle) (string, error) {
+	if bundle == nil {
 		return "store wiring ready", nil
 	}
 	plans, err := cliapp.StateStoreSchemaPlans(bundle)
@@ -3060,16 +2591,13 @@ func initializeStateStores(ctx context.Context, stores storeBundle, bundle *runt
 	if err != nil {
 		return "", err
 	}
-	if err := ensureServeSchemaTables(ctx, stores, request); err != nil {
+	if err := ensureServeSchemaTables(ctx, schema, request); err != nil {
 		return "", err
 	}
 	return cliapp.SummarizeServeSchemaPlans(plans.All()), nil
 }
 
-func initializeServePlatformStateStores(ctx context.Context, stores storeBundle, platformSpecPath string) (string, error) {
-	if stores.SchemaBootstrapper == nil {
-		return "store wiring ready", nil
-	}
+func initializeServePlatformStateStores(ctx context.Context, schema store.SchemaBootstrapper, platformSpecPath string) (string, error) {
 	spec, err := loadServePlatformSpecDocument(platformSpecPath)
 	if err != nil {
 		return "", err
@@ -3082,16 +2610,16 @@ func initializeServePlatformStateStores(ctx context.Context, stores storeBundle,
 	if err != nil {
 		return "", err
 	}
-	if err := ensureServeSchemaTables(ctx, stores, request); err != nil {
+	if err := ensureServeSchemaTables(ctx, schema, request); err != nil {
 		return "", err
 	}
 	return cliapp.SummarizeServeSchemaPlans(plans), nil
 }
 
-func initializeLoadedServeRuntimeStateStores(ctx context.Context, stores storeBundle, loaded []serveRuntimeBundle) ([]string, error) {
+func initializeLoadedServeRuntimeStateStores(ctx context.Context, schema store.SchemaBootstrapper, loaded []serveRuntimeBundle) ([]string, error) {
 	summaries := make([]string, len(loaded))
 	for i, bundle := range loaded {
-		summary, err := initializeStateStores(ctx, stores, bundle.bundle)
+		summary, err := initializeStateStores(ctx, schema, bundle.bundle)
 		if err != nil {
 			return nil, fmt.Errorf("bundle %s state stores: %w", bundle.serveIdentityDetail(), err)
 		}
@@ -3116,14 +2644,8 @@ func schemaBootstrapRequest(spec runtimecontracts.PlatformSpecDocument, platform
 	}, nil
 }
 
-func ensureServeSchemaTables(ctx context.Context, stores storeBundle, request store.SchemaBootstrapRequest) error {
-	if stores.SchemaBootstrapper == nil {
-		return nil
-	}
-	if err := stores.SchemaBootstrapper.BootstrapSchema(ctx, request); err != nil {
-		return err
-	}
-	return nil
+func ensureServeSchemaTables(ctx context.Context, schema store.SchemaBootstrapper, request store.SchemaBootstrapRequest) error {
+	return schema.BootstrapSchema(ctx, request)
 }
 
 func loadServePlatformSpecDocument(platformSpecPath string) (runtimecontracts.PlatformSpecDocument, error) {

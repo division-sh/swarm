@@ -1,9 +1,17 @@
 package bundlecatalog
 
 import (
+	"context"
 	"errors"
 	"time"
 )
+
+// ServeIngestWriter persists the canonical source projection required by
+// non-dev contracts-based serve startup. Public bundle registration is a
+// separate optional product capability.
+type ServeIngestWriter interface {
+	UpsertBundleCatalog(context.Context, Upsert) (UpsertResult, error)
+}
 
 var (
 	ErrNotFound                = errors.New("bundle not found")

@@ -5379,14 +5379,16 @@ engine:
     - Explicit postgres selection must remain available through flag, runtime config, and deprecated environment fallback
       and must reach the existing Postgres runtime store path.
     - >
-      Local/dev SQLite `swarm run start --contracts` may stamp an ephemeral bundle source fact when no Postgres bundle catalog
-      is present. DB-loaded `--bundle-hash` boot remains Postgres-only until a separate bundle-catalog portability owner
-      promotes SQLite support.
+      Selected non-dev `swarm serve --contracts` and inherited `swarm run start --contracts` persist the canonical bundle
+      projection and stamp bundle_source=persisted on PostgreSQL and SQLite. Explicit --dev writes no bundle row and stamps
+      bundle_source=ephemeral. DB-loaded `--bundle-hash` boot remains Postgres-only until a separately gated catalog runtime
+      loader promotes SQLite support.
     required_consumers:
     - internal/cliapp DefaultServeOptions
     - swarm serve --store command surface
     - internal/serveapp runServeRuntime and buildStoresForServe
-    - internal/serveapp buildStores
+    - internal/store/selected OpenRuntime
+    - internal/store/selected OpenAuthorityInspection and OpenAuthorityMaintenance
     - internal/cliapp startLocalRunServe through inherited serve options
     - internal/serveapp runForkRuntimeOwnerHarness test owner
     - runtime config loading for store.backend and store.sqlite.path
@@ -5480,38 +5482,47 @@ engine:
           Must support the #1088 zero-service SQLite `swarm run start` local/dev default and explicit Postgres opt-in proof.
           SQLite construction remains local/dev support only; it does not promote production multi-writer SQLite semantics.
     selected_contracts:
-    - name: runtime_store_bundle_construction
-      owner: internal/serveapp buildStores plus selectedRuntimeStoreFacade.runtimeDeps projecting exact consumer-owned ports
+    - name: selected_runtime_store_construction
+      owner: internal/store/selected.OpenRuntime and opaque internal/store/selected.Owner
       consumers:
       - swarm serve explicit --store sqlite
-      - local foreground run startup through buildStores
+      - local foreground run startup through the serve composition root
       - runtime.NewRuntime store dependency graph
-    - name: selected_runtime_store_facade
-      owner: internal/serveapp storeBundle selectedRuntimeStoreFacade
+      rule: >
+        The selected package acquires the exact PostgreSQL or SQLite resource, composes every required port and optional
+        product family, validates Ping, and retains sole close authority before activation. Any open, composition, Ping,
+        or projection failure closes that exact resource. Activation transfers close authority once to the process root;
+        activated close requires that root's exact ProcessJoinReceipt.
+    - name: selected_runtime_store_projection
+      owner: opaque internal/store/selected.Owner projecting exact consumer-owned ports
       promoted_by: '#1395'
       model_defined_by: '#1404'
       producer_facing_model_name: selected_runtime_store_capability_model
       scope: >
-        After backendselection resolves the selected runtime backend and buildStores constructs concrete stores, the
-        composition root projects exact consumer-owned dependency groups. The selected runtime store facade is construction
-        plumbing only; it is not a semantic owner and does not escape into Runtime or subsystem values. Concrete
-        PostgresStore / SQLiteRuntimeStore identity, raw SQL handles, and backend dialect flags are not producer-side
-        authority for selected runtime behavior.
+        After backendselection resolves the selected runtime backend, internal/store/selected privately constructs the
+        concrete store and projects exact consumer-owned dependency groups. Owner is the construction-completeness,
+        product-availability, and resource-lifetime owner only; it does not own domain operations and does not escape into
+        Runtime, API handlers, supervisors, or subsystem values. Concrete PostgresStore / SQLiteRuntimeStore identity, raw
+        SQL handles, and backend dialect flags do not escape the selected package.
       model: >
         The selected runtime store capability model is a construction-time projection graph, not a backend tag or a running
         service locator. Required core roles are compile-visible constructor inputs declared by their consumer package.
-        Optional public products may be absent only at the separately owned composition boundary. Producers must not infer
-        required capability availability from PostgresStore, SQLiteRuntimeStore, raw *sql.DB, broad dependency bags,
-        interface assertions, dialect strings, or backend ids once construction has completed.
+        Operator-channel persistence and every other required role are populated directly by both backend composition
+        functions. Each optional public product family resolves once to its family-specific typed owner plus an explicit
+        availability value. Producers must not infer capability availability from nil, PostgresStore, SQLiteRuntimeStore,
+        raw *sql.DB, broad dependency bags, interface assertions, reflection, dialect strings, or backend ids.
       capability_groups:
       - name: construction_only_backend_owner
-        owner: internal/store/backendselection plus internal/serveapp buildStores and backend-specific store constructors
+        owner: internal/store/backendselection plus internal/store/selected and private backend-specific store constructors
         allowed_consumers:
         - backend selector/config parsing
-        - schema/bootstrap construction
-        - storeBundle population before exact RuntimeDeps and public-product projection
+        - internal/store/selected runtime, authority-inspection, and authority-maintenance construction
+        - schema/bootstrap construction through its exact projected port
         - backend-specific store implementations
-        rule: Concrete backend identity and raw database handles are authoritative only inside this construction boundary.
+        rule: >
+          Concrete backend identity and raw database handles are authoritative only inside this construction boundary.
+          Runtime construction, read-only authority inspection, and mutable authority maintenance are distinct purpose-typed
+          results; inspection cannot reach schema or repair mutation.
       - name: core_runtime_stores
         owner: runtime.RuntimeDeps and exact subsystem constructor groups whose interfaces are declared by runtime consumers
         capabilities:
@@ -5547,9 +5558,10 @@ engine:
           required owners are present; direct read consumers fail closed with typed unavailability when an owner is absent.
           Root internal/store does not own or alias public read models or semantic errors.
       - name: optional_product_capabilities
-        owner: selectedRuntimeStoreFacade selected optional capability accessors
+        owner: internal/store/selected family-specific typed owner and availability accessors
         capabilities:
-        - bundle catalog read/write
+        - bundle catalog read
+        - public bundle.register writer
         - conversation fork read surface
         - conversation fork lifecycle/chat/delete
         - run bundle availability
@@ -5559,14 +5571,24 @@ engine:
         - startup recovery
         - run-stalled read
         - runtime contexts
-        rule: Optional or not-yet-promoted feature families are represented as absent typed capabilities or explicit fail-closed diagnostics, not as producer-side backend checks. Mixed read/lifecycle roles must be segregated; conversation.fork_list and conversation.fork_view consume the read-only fork capability, while conversation.fork, conversation.fork_chat, and conversation.fork_delete consume the lifecycle capability. Both capabilities are selected for Postgres and local/dev SQLite through one shared fork semantic owner with backend-local transaction adapters.
+        rule: Optional or not-yet-promoted feature families are resolved once during selected construction as a family-specific typed owner plus explicit availability, then represented as absent typed capabilities or explicit fail-closed diagnostics, not nil discovery or producer-side backend checks. Mixed read/lifecycle roles must be segregated; conversation.fork_list and conversation.fork_view consume the read-only fork capability, while conversation.fork, conversation.fork_chat, and conversation.fork_delete consume the lifecycle capability. Both capabilities are selected for Postgres and local/dev SQLite through one shared fork semantic owner with backend-local transaction adapters.
+      - name: required_serve_bundle_ingest
+        owner: internal/bundlecatalog.ServeIngestWriter projected by internal/store/selected.Owner
+        capabilities:
+        - canonical bundle catalog upsert for selected non-dev contracts-source startup
+        consumers:
+        - internal/serveapp.prepareServeBundleSource
+        rule: >
+          PostgreSQL and SQLite selected runtime construction must provide this required private ingest projection. It is
+          consumed only by non-dev contracts-source preparation and does not grant or imply public bundle.register,
+          DB-loaded bundle reconstruction, bundle deletion, or run.fork support. Explicit --dev bypasses the write by
+          selecting an ephemeral source plan, not by treating the required projection as unavailable.
       - name: workspace_and_process_db_capabilities
-        owner: internal/cliapp workspace lifecycle and internal/serveapp process health construction
+        owner: internal/cliapp workspace lifecycle plus typed selected-store health projection
         capabilities:
         - workspace lifecycle SQL handle
-        - process DB close
         - selected DB ping
-        rule: These raw database consumers are adjacent process/workspace capabilities, not selected runtime persistence authority. They must stay named and must not be reused as runtime store fallbacks.
+        rule: The workspace SQL handle is the sole named raw construction exception. Selected health is a typed Ping projection, while exact resource close remains private selected.Owner authority. Neither may be reused as runtime persistence or close fallback.
       - name: selected_runtime_mutation_unit_of_work
         owner: backend_neutral_runtime_mutation_write_boundary plus typed selected-runtime row-family unit-of-work entrypoints under '#1403'
         promoted_by: '#1403'
@@ -5600,7 +5622,7 @@ engine:
         forbidden:
         - Producer-side runtime behavior must not use raw *sql.DB, *sql.Tx, concrete store type, backend id, or dialect string as capability authority.
         - SQLite selected runtime construction must not pass a raw runtime SQL handle to Postgres-only runtime consumers.
-        - Runtime construction must not reconstruct selected pipeline persistence from raw SQL when buildStores failed to provide the opaque WorkflowPersistence value.
+        - Runtime construction must not reconstruct selected pipeline persistence from raw SQL when the selected owner failed to provide the opaque WorkflowPersistence value.
         - The public internal/store package is a typed facade. It MUST NOT import database/sql, retain a raw backend member, export a raw handle/accessor, or expose a generic query, execution, or transaction callback.
         - Test-only construction and readback authority MUST remain in internal/store/storetest and MUST NOT be available from the production facade.
         - API, dashboard, builder, monitoring, digest, bundle-delete, and destructive-reset consumers MUST NOT accept raw SQL, concrete selected stores, generic query executors, or transaction callbacks.
@@ -5695,9 +5717,9 @@ engine:
         fixture_authority: internal/store/storetest
         rules:
         - The selected-runtime composition package is private and composes only closed operation families through named private fields; production operation files there MUST NOT execute SQL, accept *sql.Tx, accept transaction/query callbacks, or anonymously embed a backend owner. SQL and transaction implementation belongs to the bounded backend semantic owners listed above.
-        - The process-construction owner opens raw PostgreSQL and SQLite handles, configures their pools, constructs private backend roots, and passes only those roots into selected-runtime composition. Selected-runtime composition MUST NOT open or return raw database handles.
+        - internal/store/selected is the production process-construction owner. It opens raw PostgreSQL and SQLite handles through internal/store/construction, constructs private backend roots, retains their exact resource lifetime, and never returns a raw handle.
         - The exact fixture-2151 construction/readback seam remains separately classified for hostile test setup and persistence readback; it is not a production runtime operation or consumer capability.
-        - Backend roots retain their raw handle privately. Selected store facades retain only private named backend-owner fields and explicit generated typed forwarders; no raw handle, transaction method, query interface, dialect, or callback is promoted or recoverable.
+        - Backend roots retain their raw handle privately. The opaque selected Owner retains only private construction/lifetime state and exact typed projections; no raw handle, transaction method, query interface, dialect, or callback is promoted or recoverable.
         - A cross-domain atomic flow has one named operation owner. Shared transaction-scoped implementation is permitted only as an exact row-family helper below internal/store/internal/backend; generic repositories, transaction bundles, callback runners, and dialect service locators are forbidden.
         - Moving an implementation file does not grant authority. Every raw or callback-bearing declaration is governed by its exact resolved finding identity.
       structural_enforcement:
@@ -5711,12 +5733,12 @@ engine:
       dependency_classifications:
       - dependency: internal/store/backendselection and selector parsing
         classification: legitimate backend-selection/construction boundary
-      - dependency: internal/serveapp buildStores concrete backend switch
-        classification: legitimate backend-selection/construction boundary
-      - dependency: internal/serveapp storeBundle concrete/raw fields
-        classification: construction payload only; producer-facing use is invalid and must migrate under #1401/#1402
-      - dependency: selectedRuntimeStoreFacade.runtimeDeps
-        classification: construction-time projection into exact consumer-owned dependencies; not a semantic owner or runtime service locator
+      - dependency: internal/store/selected backend switch, concrete composition, and exact resource lifetime
+        classification: sole production selected-store construction boundary
+      - dependency: former internal/serveapp storeBundle, selectedRuntimeStoreFacade, and reflection role ledger
+        classification: removed by '#2150'; no compatibility or producer-facing replacement aggregate exists
+      - dependency: internal/store/selected exact accessors and immutable family projections
+        classification: construction-time projection into exact consumer-owned dependencies; Owner is not a domain semantic owner or runtime service locator
       - dependency: runtime.RuntimeDeps exact typed fields and subsystem groups
         classification: selected core runtime constructor inputs declared by semantic consumers
       - dependency: former runtime.RuntimeDeps.SQLDB and RuntimeSQLDB
@@ -5734,10 +5756,10 @@ engine:
       - dependency: route planning, event admission/defaulting, delivery authority, startup readiness
         classification: different semantic concepts; explicitly split unless a later gate widens
       rules:
-      - Concrete backend selection remains confined to backendselection/config parsing, buildStores construction, and backend-specific store implementations.
+      - Concrete backend selection remains confined to backendselection/config parsing, internal/store/selected construction, and backend-specific store implementations.
       - Serve/API/CLI/runtime producers must consume exact consumer-owned ports such as EventBus durable roles, opaque workflow persistence, API read stores, bundle catalog capabilities, run-fork capabilities, destructive reset capabilities, startup recovery capabilities, and run-stalled read capabilities.
       - Unsupported or not-yet-promoted feature families are represented as absent typed optional capabilities rather than inferred by checking concrete backend identity at the producer.
-      - Runtime construction must not reconstruct selected pipeline persistence from a raw SQL handle when buildStores failed to provide the opaque WorkflowPersistence value.
+      - Runtime construction must not reconstruct selected pipeline persistence from a raw SQL handle when the selected owner failed to provide the opaque WorkflowPersistence value.
       - Selected-contract run-fork construction must not accept or propagate a broad selected-store interface. The composition root constructs one opaque execution owner from validated exact port groups; only package-private projections may pass those groups to EventBus, PipelineCoordinator, Manager, replay, and fork-lifecycle consumers.
       - Child issues must consume this model without redefining ownership: #1401 removes producer-side backend branching, #1403 promotes typed runtime mutation unit-of-work, #1405 hides SQLite busy/serialization policy, and #1402 adds guard/proof durability.
       excludes:
@@ -6117,7 +6139,7 @@ engine:
         SQLite exposes persisted local-runtime event, delivery, session, turn, and log rows through the same API read owner.
         Cursor-rich production read semantics remain Postgres-owned unless separately promoted for SQLite.
     optional_public_mutating_backend_support:
-      owner: selectedRuntimeStoreFacade optional_product_capabilities plus internal/apiv1 exact handler option families
+      owner: internal/store/selected family-specific typed availability plus internal/apiv1 exact handler option families
       rule: >
         Public mutating methods whose required selected optional product capability is absent for SQLite MUST remain
         fail-closed on SQLite through normal /v1/rpc method registration. Publishing a method in the public catalog does
@@ -6126,9 +6148,9 @@ engine:
         catalog presence.
       bundle_register:
         method: bundle.register
-        selected_capability: BundleCatalog register writer capability
+        selected_capability: optional public BundleRegisterWriter capability, distinct from required serve ingest
         postgres_support: supported through the Postgres persisted bundle source catalog writer
-        sqlite_support: unsupported; SQLite wires the bundle catalog read capability only and must not expose bundle.register until a separately gated SQLite write owner exists
+        sqlite_support: unsupported; SQLite wires bundle catalog read and private required serve ingest but must not expose bundle.register until #2276 promotes the public capability
       bundle_delete:
         method: bundle.delete
         selected_capability: apiv1.BundleDeleteExecutor
@@ -17487,9 +17509,12 @@ multi_bundle_persistence:
         - credentials
         - generated runtime state
     serve_ingest_projection:
-      status: implemented_for_local_postgres_serve_contracts
+      status: implemented_for_selected_postgres_and_sqlite_serve_contracts
       projection_owner: internal/runtime/contracts.BuildBundleCatalogProjection
-      store_owner: internal/store.PostgresStore.UpsertBundleCatalog
+      selected_projection_owner: internal/bundlecatalog.ServeIngestWriter projected by internal/store/selected.Owner
+      store_owners:
+        postgres: private PostgreSQL bundle-catalog UpsertBundleCatalog owner
+        sqlite: private SQLite bundle-catalog UpsertBundleCatalog owner
       source_fact_owner: internal/serveapp.prepareServeBundleSource
       runtime_context_owner: internal/runtime/correlation.BundleSourceFact
       applies_to:
@@ -17522,9 +17547,9 @@ multi_bundle_persistence:
       split_boundaries:
         - DB-loaded same-bundle source/fork loaders consume the persisted bundle catalog runtime source owner.
         - New-work routing and bundle_hash admission remain #1022.
-        - Bundle register/delete APIs remain #1017/#1018/#1019.
-        - SQLite local/dev runtime support is promoted for `swarm run start --contracts`, but DB-loaded `--bundle-hash`
-          bundle-catalog boot remains Postgres-only unless separately gated.
+        - SQLite public bundle.register and selected-contract run.fork remain #2276; backend-neutral capture remains #2272.
+        - Bundle delete remains outside this projection.
+        - SQLite DB-loaded `--bundle-hash` bundle-catalog boot remains unsupported unless separately gated.
     serve_db_loaded_runtime_source:
       status: implemented_for_boot_pinned_postgres_serve_bundle_hash_contexts
       cli_flag: 'swarm serve --bundle-hash <bundle-v1:sha256:<64 lowercase hex>> [--bundle-hash <bundle-v1:sha256:<64 lowercase hex>> ...]'

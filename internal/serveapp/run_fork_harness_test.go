@@ -112,8 +112,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		}
 		return 1
 	}
-	storeFacade := stores.facade()
-	defer storeFacade.close()
+	defer stores.CloseUnactivated()
 	resolvedPlatformSpecPath := cliapp.ResolvePath(repo, *platformSpecPath)
 	if strings.TrimSpace(*platformSpecPath) == defaultPlatformSpecPath {
 		if _, statErr := os.Stat(resolvedPlatformSpecPath); statErr != nil {
@@ -141,14 +140,14 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		}
 		return 1
 	}
-	if err := ensureServeSchemaTables(ctx, stores, bootstrapRequest); err != nil {
+	if err := ensureServeSchemaTables(ctx, stores.Schema(), bootstrapRequest); err != nil {
 		if out != nil {
 			fmt.Fprintf(out, "fork failed: bootstrap platform schema: %v\n", err)
 		}
 		return 1
 	}
 	ctx = runForkRuntimeOwnerContext(ctx)
-	runForkOwner, ok := storeFacade.runForkRuntimeOwner()
+	runForkOwner, ok := stores.RunFork()
 	if !ok {
 		if out != nil {
 			fmt.Fprintln(out, "fork failed: postgres store required")
@@ -156,7 +155,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		return 1
 	}
 	if *activate {
-		result, err := runForkOwner.activate(ctx, runtimerunforkexecution.SelectedContractActivationGateRequest{
+		result, err := runForkOwner.Activate(ctx, runtimerunforkexecution.SelectedContractActivationGateRequest{
 			ForkRunID:           strings.TrimSpace(*runID),
 			ConfirmSourceFreeze: *confirmSourceFreeze,
 			AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
@@ -211,7 +210,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 				writeForkContractLoadError(out, "fork failed: classify selected contracts", err)
 				return cliapp.CLIExitValidation
 			}
-			result, err := runForkOwner.materialize(ctx, runfork.RunForkMaterializeRequest{
+			result, err := runForkOwner.Materialize(ctx, runfork.RunForkMaterializeRequest{
 				SourceRunID:       strings.TrimSpace(*runID),
 				At:                strings.TrimSpace(*at),
 				ContractSelection: contractSelection,
@@ -235,7 +234,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			printRunForkMaterialization(out, result)
 			return 0
 		}
-		result, err := runForkOwner.materialize(ctx, runfork.RunForkMaterializeRequest{
+		result, err := runForkOwner.Materialize(ctx, runfork.RunForkMaterializeRequest{
 			SourceRunID:       strings.TrimSpace(*runID),
 			At:                strings.TrimSpace(*at),
 			ContractSelection: contractSelection,
@@ -326,7 +325,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			}
 			return 1
 		}
-		workspaces, err := cliapp.ConfiguredWorkspaceLifecycleForBackend(storeFacade.workspaceLookup(), cfg, contractsRoot, source, mountSources, workspaceBackend)
+		workspaces, err := cliapp.ConfiguredWorkspaceLifecycleForBackend(stores.WorkspaceLookup(), cfg, contractsRoot, source, mountSources, workspaceBackend)
 		if err != nil {
 			if out != nil {
 				fmt.Fprintf(out, "fork failed: configure workspaces: %v\n", err)
@@ -345,7 +344,8 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			}
 			return 1
 		}
-		result, executionErr := runForkOwner.execute(executionCtx, runtimerunforkexecution.SelectedContractExecutionRequest{
+		deps := stores.RuntimeDeps()
+		result, executionErr := runForkOwner.Execute(executionCtx, runtimerunforkexecution.SelectedContractExecutionRequest{
 			SourceRunID: strings.TrimSpace(*runID),
 			At:          strings.TrimSpace(*at),
 			SourceLoader: runtimerunforkexecution.ContractBundleSourceLoader{
@@ -356,11 +356,11 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			AgentRuntime: runtimerunforkexecution.SelectedContractAgentRuntimeOptions{
 				Config:              cfg,
 				ExecutionPosture:    posture,
-				EntityStore:         stores.ToolEntityStore,
-				HumanTaskStore:      stores.HumanTaskStore,
-				SessionRegistry:     stores.SessionRegistry,
-				ConversationStore:   stores.ConversationStore,
-				MailboxStore:        stores.MailboxStore,
+				EntityStore:         deps.ToolEntityStore,
+				HumanTaskStore:      deps.HumanTaskStore,
+				SessionRegistry:     deps.SessionRegistry,
+				ConversationStore:   deps.ConversationStore,
+				MailboxStore:        deps.MailboxStore,
 				Workspace:           workspaces,
 				Credentials:         credentialStore,
 				ManagedCredentials:  managedCredentialStore,
@@ -386,7 +386,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		printSelectedContractExecution(out, result)
 		return 0
 	}
-	plan, err := runForkOwner.plan(ctx, runfork.RunForkPlanRequest{
+	plan, err := runForkOwner.Plan(ctx, runfork.RunForkPlanRequest{
 		SourceRunID: strings.TrimSpace(*runID),
 		At:          strings.TrimSpace(*at),
 	})

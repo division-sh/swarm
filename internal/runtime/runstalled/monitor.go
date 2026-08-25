@@ -8,8 +8,19 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	operatorread "github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 )
+
+// ProjectionReader is the persisted operator-read surface from which the
+// monitor adapter derives its purpose-specific snapshots.
+type ProjectionReader interface {
+	ListRunHeaders(context.Context, operatorread.RunHeaderListOptions) ([]operatorread.RunHeader, string, error)
+	LoadRunDebugReport(context.Context, string, operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error)
+	ListOperatorEvents(context.Context, operatorread.OperatorEventListOptions) (operatorread.OperatorEventListResult, error)
+	LoadLatestRunFlowInstance(context.Context, string) (string, error)
+	LoadLatestRunNonEscalationProgressAt(context.Context, string, string) (time.Time, error)
+}
 
 const (
 	EventType                = "platform.run_stalled"

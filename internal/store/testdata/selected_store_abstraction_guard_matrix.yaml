@@ -42,14 +42,14 @@ rows:
     concepts:
       - producer-side backend branching after construction
     owners:
-      - internal/serveapp/store_facade_guard_test.go
-      - selectedRuntimeStoreFacade
+      - internal/store/selected/boundary_test.go
+      - internal/store/selected.Owner
     proof_refs:
       - kind: go_test
-        name: TestSelectedStoreFacadeOwnsProducerBackendBranching
+        name: TestProductionSelectedStoreBoundaryIsClosed
     guard_proof_refs:
       - kind: go_test
-        name: TestSelectedStoreFacadeBackendBranchingGuardRejectsProducerFixture
+        name: TestProductionSelectedStoreBoundaryGuardRejectsOldInterpreters
     notes: >
       Producer/public-surface assembly must not infer capability availability
       from concrete Postgres/SQLite fields after store construction.

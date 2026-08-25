@@ -242,21 +242,27 @@ func TestSelectedContractSourceLoaderIsExact(t *testing.T) {
 func TestServeCompositionProvidesExactRuntimePorts(t *testing.T) {
 	root := persistenceOwnershipRepoRoot(t)
 	mainSource := readOwnershipSource(t, root, "internal/serveapp/main.go")
-	facadeSource := readOwnershipSource(t, root, "internal/serveapp/store_facade.go")
+	selectedSource := readOwnershipSource(t, root, "internal/store/selected/selected.go")
+	projectionSource := readOwnershipSource(t, root, "internal/serveapp/store_runtime.go")
 	assertOwnershipSourceContains(t, mainSource,
-		"runtimepipeline.NewWorkflowPersistence(pg)",
-		"runtimepipeline.NewWorkflowPersistence(sqliteStore)",
-		"LiveSessionAcquirer:            pg",
-		"LiveSessionAcquirer:            sqliteStore",
-		"SessionResetter:                pg",
-		"SessionResetter:                sqliteStore",
+		"return storeselected.OpenRuntime(ctx, request)",
+		"runtimePersistence := projectRuntimePersistenceForServe(stores)",
 	)
-	assertOwnershipSourceContains(t, facadeSource,
-		"WorkflowPersistence:            s.WorkflowPersistence",
-		"LiveSessionAcquirer:            s.LiveSessionAcquirer",
-		"SessionResetter:                s.SessionResetter",
+	assertOwnershipSourceContains(t, selectedSource,
+		"func composePostgres(selected *private.PostgresStore)",
+		"func composeSQLite(selected *private.SQLiteRuntimeStore)",
+		"workflow := runtimepipeline.NewWorkflowPersistence(selected)",
+		"LiveSessionAcquirer: selected",
+		"SessionResetter: selected",
 	)
-	assertOwnershipSourceExcludes(t, mainSource+facadeSource, "runtime.Stores", ".runtimeStores(", "predecessor.Stores")
+	assertOwnershipSourceContains(t, projectionSource,
+		"deps: owner.RuntimeDeps()",
+		"schema: owner.Schema()",
+		"workspace: owner.WorkspaceLookup()",
+	)
+	assertOwnershipSourceExcludes(t, mainSource+selectedSource+projectionSource,
+		"runtime.Stores", ".runtimeStores(", "predecessor.Stores", "selectedRuntimeStoreFacade",
+	)
 }
 
 func TestRuntimeSemanticModelsHaveSingleConsumerOwner(t *testing.T) {

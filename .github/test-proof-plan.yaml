@@ -192,9 +192,10 @@ units:
   selected-store-fast:
     packages:
       - github.com/division-sh/swarm/internal/store
+      - github.com/division-sh/swarm/internal/store/selected
       - github.com/division-sh/swarm/internal/serveapp
       - github.com/division-sh/swarm/internal/apiv1
-    run: TestSelectedStoreAbstractionGuardMatrix|TestSelectedStoreFacadeOwnsProducerBackendBranching|TestSelectedStoreFacadeBackendBranchingGuardRejectsProducerFixture|TestSelectedSQLiteRuntimeWriterBoundaryAudit|TestRuntimeWriterBoundaryGuardRejects|TestSelectedSQLiteRuntimeConstructionConsumesMutationBoundary|TestPublicSurfaceBackendMatrixCoversSelectedBackendRows|TestPublicSurfaceBackendMatrixRejectsStaleReferences
+    run: TestSelectedStoreAbstractionGuardMatrix|TestProductionSelectedStoreBoundaryIsClosed|TestProductionSelectedStoreBoundaryGuardRejectsOldInterpreters|TestSelectedSQLiteRuntimeWriterBoundaryAudit|TestRuntimeWriterBoundaryGuardRejects|TestSelectedSQLiteRuntimeConstructionConsumesMutationBoundary|TestPublicSurfaceBackendMatrixCoversSelectedBackendRows|TestPublicSurfaceBackendMatrixRejectsStaleReferences
     count_mode: count-1
     environment_id: local-postgres-explicit-v1
     budget_class: broad

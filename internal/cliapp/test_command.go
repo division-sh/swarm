@@ -377,9 +377,7 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 
 func scenarioTestBundleSourceFact(bundleHash string, backend storebackend.Backend) (runtimecorrelation.BundleSourceFact, error) {
 	switch backend {
-	case storebackend.BackendSQLite:
-		return runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
-	case storebackend.BackendPostgres:
+	case storebackend.BackendSQLite, storebackend.BackendPostgres:
 		return runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
 	default:
 		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("unsupported runtime store backend %q", backend)

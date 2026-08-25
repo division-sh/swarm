@@ -196,15 +196,15 @@ func installSupervisorTestProcessCapability(
 
 func installSelectedStoreTestProcessTopology(
 	t testing.TB,
-	stores storeBundle,
+	stores *selectedStoreOwner,
 	rt *runtimepkg.Runtime,
 	source semanticview.Source,
 	fact runtimecorrelation.BundleSourceFact,
 	runtimeInstanceID string,
 ) (runtimestartupownership.ProcessCapability, runtimeagenttopology.SourceSetPlan) {
 	t.Helper()
-	if stores.StartupOwnership == nil || rt == nil || rt.Manager == nil {
-		t.Fatal("selected-store topology test requires startup ownership and a runtime manager")
+	if stores == nil || rt == nil || rt.Manager == nil {
+		t.Fatal("selected-store topology test requires an owner and runtime manager")
 	}
 	bundleHash, bundleSource := fact.StorageValues()
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, BundleSource: bundleSource}
@@ -216,7 +216,7 @@ func installSelectedStoreTestProcessTopology(
 	if err != nil {
 		t.Fatalf("construct selected-store test source set: %v", err)
 	}
-	capability, err := stores.StartupOwnership.AcquireProcessCapability(context.Background(), runtimestartupownership.AcquireRequest{
+	capability, err := stores.StartupOwnership().AcquireProcessCapability(context.Background(), runtimestartupownership.AcquireRequest{
 		OwnerID: "serve-topology-test:" + runtimeInstanceID, BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
 	})
 	if err != nil {

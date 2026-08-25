@@ -275,20 +275,20 @@ func TestRuntimeProjectSupervisorRollbackPendingReplacementUsesExactPublicationP
 func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothStores(t *testing.T) {
 	type backend struct {
 		name string
-		open func(*testing.T) storeBundle
+		open func(*testing.T) *selectedStoreOwner
 	}
 	backends := []backend{
-		{name: "sqlite", open: func(t *testing.T) storeBundle {
+		{name: "sqlite", open: func(t *testing.T) *selectedStoreOwner {
 			stores, err := buildStores(context.Background(), storebackend.Selection{
 				Backend: storebackend.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "runtime.sqlite"),
 			}, &config.Config{})
 			if err != nil {
 				t.Fatalf("build SQLite stores: %v", err)
 			}
-			t.Cleanup(func() { _ = stores.SQLDB.Close() })
+			t.Cleanup(func() { _ = stores.CloseUnactivated() })
 			return stores
 		}},
-		{name: "postgres", open: func(t *testing.T) storeBundle {
+		{name: "postgres", open: func(t *testing.T) *selectedStoreOwner {
 			dsn, _, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
 			selected, err := store.NewPostgresStore(dsn)
@@ -297,7 +297,7 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			}
 			db := storetest.DatabaseForTest(selected)
 			t.Cleanup(func() { _ = db.Close() })
-			return selectedPostgresStoreBundle(selected, db, &config.Config{})
+			return openSelectedPostgresOwner(t, dsn, db, &config.Config{})
 		}},
 	}
 
@@ -347,7 +347,7 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			}
 			newRuntime := func(root, hash string) runtimeFixture {
 				bundle := loadWorkflowValidationBundleAt(t, root)
-				if _, err := initializeStateStores(ctx, stores, bundle); err != nil {
+				if _, err := initializeStateStores(ctx, stores.Schema(), bundle); err != nil {
 					t.Fatalf("initialize state stores for %s: %v", hash, err)
 				}
 				source := semanticview.Wrap(bundle)
@@ -399,7 +399,7 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			if err != nil {
 				t.Fatalf("construct initial complete source set: %v", err)
 			}
-			capability, err = stores.StartupOwnership.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+			capability, err = stores.StartupOwnership().AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
 				OwnerID: "replacement-survivor-test", BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
 			})
 			if err != nil {
@@ -439,7 +439,7 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 				runtimeContexts:         contexts, executionPosture: executionposture.Live,
 				runtimeInstanceID: runtimeInstanceID, runtimeGeneration: 1,
 				replacementShutdown: runtimepkg.ShutdownOptions{Grace: 5 * time.Second},
-				stores:              stores,
+				stores:              projectServeRuntimePersistence(stores),
 			}
 			supervisor.SetProcessCapability(capability)
 			status, err := supervisor.replaceCurrentRuntimeWithSourceAndPacks(
@@ -469,7 +469,7 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 				t.Fatalf("survivor context after replacement = %#v, want loaded", lookup)
 			}
 
-			agents, err := stores.ManagerStore.LoadAgents(ctx)
+			agents, err := stores.RuntimeDeps().ManagerStore.LoadAgents(ctx)
 			if err != nil {
 				t.Fatalf("read persisted replacement topology: %v", err)
 			}
@@ -569,7 +569,7 @@ func TestRuntimeProjectSupervisorReplacementRefreshesSurvivingGenerationsOnBothS
 			if err != nil || !exists || restoredPlan.Revision != currentPlan.Revision {
 				t.Fatalf("restored source set = exists:%v revision:%s want:%s err:%v", exists, restoredPlan.Revision, currentPlan.Revision, err)
 			}
-			agents, err = stores.ManagerStore.LoadAgents(ctx)
+			agents, err = stores.RuntimeDeps().ManagerStore.LoadAgents(ctx)
 			if err != nil {
 				t.Fatalf("read topology after post-publication rollback: %v", err)
 			}

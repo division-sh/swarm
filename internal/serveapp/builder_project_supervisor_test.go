@@ -37,7 +37,6 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
@@ -51,13 +50,12 @@ import (
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
-	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
 )
 
-func runtimeDepsForServeTest(t testing.TB, stores storeBundle, cfg *config.Config, options runtimepkg.RuntimeOptions) runtimepkg.RuntimeDeps {
+func runtimeDepsForServeTest(t testing.TB, stores *selectedStoreOwner, cfg *config.Config, options runtimepkg.RuntimeOptions) runtimepkg.RuntimeDeps {
 	t.Helper()
 	if options.WorkflowModule != nil {
 		if bundle, ok := semanticview.Bundle(options.WorkflowModule.SemanticSource()); ok && bundle != nil && bundle.PackInventory != nil && bundle.PackAdmission == nil {
@@ -74,7 +72,7 @@ func runtimeDepsForServeTest(t testing.TB, stores storeBundle, cfg *config.Confi
 	if options.ProviderCredentials == nil {
 		options.ProviderCredentials = processIngressCredentialStore{}
 	}
-	deps := stores.runtimeDeps()
+	deps := stores.RuntimeDeps()
 	deps.Config = cfg
 	deps.Options = options
 	return deps
@@ -121,10 +119,10 @@ func TestRuntimeProjectSupervisorRejectsHarnessInputReplacementBeforeQuiesce(t *
 	var ready atomic.Bool
 	ready.Store(true)
 	supervisor := newRuntimeProjectSupervisor(
-		repo, spec, nil, storeBundle{}, &ready, cliapp.WorkspaceMountSources{},
+		repo, spec, nil, serveRuntimePersistence{}, &ready, cliapp.WorkspaceMountSources{},
 		cliapp.WorkspaceBackendSelection{NoWorkspace: true, Source: "test"},
 		nil, nil, catalog, packfixture.EmbeddedBase(t), "/old", &runtimecontracts.WorkflowContractBundle{},
-		semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), oldRuntime,
+		semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), oldRuntime, true,
 	)
 	supervisor.loadWorkflow = func(_, contractsRoot, _ string, _ *packartifact.PlatformPackInventory) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
 		if contractsRoot != root {
@@ -846,383 +844,28 @@ func assertReplacementHTTPStatus(t *testing.T, handler http.Handler, path string
 	}
 }
 
-func TestRuntimeProjectSupervisorReplacementTransfersRealStartupOwnership(t *testing.T) {
-	t.Skip("superseded startup-handoff fixture; process-capability replacement parity is covered separately")
-	type backend struct {
-		name string
-		open func(*testing.T) storeBundle
-	}
-	backends := []backend{
-		{
-			name: "sqlite",
-			open: func(t *testing.T) storeBundle {
-				stores, err := buildStores(context.Background(), storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "runtime.sqlite")}, &config.Config{})
-				if err != nil {
-					t.Fatalf("build SQLite stores: %v", err)
-				}
-				t.Cleanup(func() { _ = stores.SQLDB.Close() })
-				return stores
-			},
-		},
-		{
-			name: "postgres",
-			open: func(t *testing.T) storeBundle {
-				dsn, _, cleanup := testutil.StartPostgres(t)
-				t.Cleanup(cleanup)
-				selected, err := store.NewPostgresStore(dsn)
-				if err != nil {
-					t.Fatalf("NewPostgresStore: %v", err)
-				}
-				t.Cleanup(func() { _ = storetest.DatabaseForTest(selected).Close() })
-				return selectedPostgresStoreBundle(selected, storetest.DatabaseForTest(selected), &config.Config{})
-			},
-		},
-	}
-	for _, backend := range backends {
-		backend := backend
-		t.Run(backend.name, func(t *testing.T) {
-			for _, changedHash := range []bool{false, true} {
-				changedHash := changedHash
-				name := "same_hash"
-				if changedHash {
-					name = "changed_nonstanding_hash"
-				}
-				t.Run(name, func(t *testing.T) {
-					stores := backend.open(t)
-					startupOwnership := &failOnceFinalizeStartupOwnershipStore{delegate: stores.StartupOwnership}
-					stores.StartupOwnership = startupOwnership
-					processWorkOwner := worklifetime.NewProcess()
-					var runtimes []*runtimepkg.Runtime
-					runtimeInstanceID := "11111111-1111-1111-1111-111111111111"
-					var active, maxActive atomic.Int32
-					bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier8-boot-verification/test-boot-success")
-					if _, err := initializeStateStores(context.Background(), stores, bundle); err != nil {
-						t.Fatalf("initializeStateStores: %v", err)
-					}
-					providerRegistry := testProviderTriggerCatalog(t)
-					baseSource := semanticview.Wrap(bundle)
-					source := replacementProviderEventSource{
-						Source: baseSource, generation: providerRegistry.Generation(), eventName: "inbound.telegram.text_message",
-					}
-					module := stubWorkflowModule{source: source}
-					oldHash := runtimeContextTestHash("a")
-					newHash := oldHash
-					if changedHash {
-						newHash = runtimeContextTestHash("b")
-					}
-					newRuntime := func(hash string) *runtimepkg.Runtime {
-						rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(t, stores, &config.Config{}, runtimepkg.RuntimeOptions{
-							SelfCheck:                        false,
-							WorkflowModule:                   module,
-							LLMRuntime:                       servedNoopLLMRuntime{},
-							DisablePersistentStartupRecovery: true,
-							ProviderTriggerCatalog:           providerRegistry,
-							ProcessWorkOwner:                 processWorkOwner,
-							RuntimeInstanceID:                runtimeInstanceID,
-							BundleSourceFact:                 mustServeTestEphemeralBundleSourceFact(hash),
-						}))
-						if err != nil {
-							t.Fatalf("NewRuntime(%s): %v", hash, err)
-						}
-						runtimes = append(runtimes, rt)
-						return rt
-					}
-					oldFact := mustServeTestEphemeralBundleSourceFact(oldHash)
-					predecessor := newRuntime(oldHash)
-					predecessor.SystemNodes = []runtimepipeline.BackgroundNode{newReplacementOverlapProbeNode(&active, &maxActive)}
-					processCapability, _ := installSelectedStoreTestProcessTopology(t, stores, predecessor, source, oldFact, runtimeInstanceID)
-					t.Cleanup(func() {
-						shutdownFailed := false
-						for i := len(runtimes) - 1; i >= 0; i-- {
-							if err := runtimes[i].Shutdown(); err != nil {
-								t.Errorf("shutdown replacement runtime: %v", err)
-								shutdownFailed = true
-							}
-						}
-						if shutdownFailed {
-							return
-						}
-						if err := closeSelectedStoreTestProcess(processWorkOwner, processCapability); err != nil {
-							t.Errorf("close replacement selected-store generation: %v", err)
-						}
-					})
-					if err := predecessor.Start(context.Background()); err != nil {
-						t.Fatalf("start predecessor: %v", err)
-					}
-					if predecessor.Manager == nil || !predecessor.Manager.IsRunning() || !predecessor.Bus.OutboxSweeperActive() {
-						t.Fatal("full-store predecessor manager/outbox consumers did not start")
-					}
-					predecessorWakeup, err := runtimegenericschedule.NewWakeup("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", time.Now().Add(time.Hour))
-					if err != nil {
-						t.Fatalf("build pending predecessor wakeup: %v", err)
-					}
-					if err := predecessor.Scheduler.RegisterGenericScheduleWakeup(context.Background(), predecessorWakeup); err != nil {
-						t.Fatalf("register pending predecessor wakeup: %v", err)
-					}
-					probe := newRuntime(newHash)
-					if err := probe.Start(context.Background()); err == nil || !strings.Contains(err.Error(), "generation grant is required") {
-						t.Fatalf("ordinary competing start error = %v, want missing generation grant denial", err)
-					}
-
-					newFact := mustServeTestEphemeralBundleSourceFact(newHash)
-					manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
-						BundleSourceFact: oldFact, Source: source, Runtime: predecessor, WorkOwner: predecessor.WorkOccurrence(),
-					})
-					if err != nil {
-						t.Fatalf("NewRuntimeContextManager: %v", err)
-					}
-					candidate := newRuntime(newHash)
-					candidate.SystemNodes = []runtimepipeline.BackgroundNode{newReplacementOverlapProbeNode(&active, &maxActive)}
-					supervisor := &runtimeProjectSupervisor{
-						ready:                   new(atomic.Bool),
-						currentRoot:             "/old",
-						currentSource:           source,
-						currentBundle:           bundle,
-						currentRT:               predecessor,
-						currentBundleSourceFact: oldFact,
-						runtimeContexts:         manager,
-						executionPosture:        executionposture.Live,
-					}
-					supervisor.runtimeInstanceID = runtimeInstanceID
-					supervisor.SetProcessCapability(processCapability)
-					supervisor.ready.Store(true)
-					supervisor.SetStartupOwnershipHandoffBarrier(func(context.Context) (func(), error) {
-						return nil, errors.New("injected unresolved registration attempt")
-					})
-					if _, err := supervisor.replaceCurrentRuntimeWithSource(
-						context.Background(), "/rejected", source, bundle, newFact,
-						runtimecontracts.BundleIdentity{BundleHash: newHash}, candidate, candidate.WorkOccurrence(),
-					); err == nil || !strings.Contains(err.Error(), "injected unresolved registration attempt") {
-						t.Fatalf("registration barrier rejection error = %v", err)
-					}
-					rejectedLookup := manager.LookupBundleHashStatus(oldHash)
-					if !supervisor.ready.Load() || supervisor.CurrentRuntime() != predecessor || !predecessor.Manager.IsRunning() || !predecessor.Bus.OutboxSweeperActive() || !rejectedLookup.Loaded() {
-						t.Fatalf("registration barrier rejection mutated predecessor = ready:%v runtime:%p manager:%v outbox:%v lookup:%#v", supervisor.ready.Load(), supervisor.CurrentRuntime(), predecessor.Manager.IsRunning(), predecessor.Bus.OutboxSweeperActive(), rejectedLookup)
-					}
-					var registrationBarrierCalls atomic.Int32
-					barrierPredecessor := predecessor
-					var registrationFreezeActive atomic.Int32
-					supervisor.SetStartupOwnershipHandoffBarrier(func(ctx context.Context) (func(), error) {
-						current := supervisor.CurrentRuntime()
-						if current == nil || current != barrierPredecessor {
-							return nil, errors.New("registration handoff barrier does not own the expected predecessor runtime")
-						}
-						if !current.Manager.IsRunning() || !current.Bus.OutboxSweeperActive() {
-							return nil, errors.New("registration handoff barrier ran after predecessor quiescence")
-						}
-						if _, err := current.CurrentStartupGrantEvidence(); err != nil {
-							return nil, err
-						}
-						registrationBarrierCalls.Add(1)
-						registrationFreezeActive.Add(1)
-						var once sync.Once
-						return func() { once.Do(func() { registrationFreezeActive.Add(-1) }) }, nil
-					})
-					supervisor.startRuntime = func(ctx context.Context, rt *runtimepkg.Runtime) error {
-						if rt == candidate {
-							if active.Load() != 0 || predecessor.Manager.IsRunning() || predecessor.Bus.OutboxSweeperActive() {
-								t.Fatalf("candidate activation began before predecessor consumers quiesced: node=%d manager=%v outbox=%v", active.Load(), predecessor.Manager.IsRunning(), predecessor.Bus.OutboxSweeperActive())
-							}
-						}
-						return rt.Start(ctx)
-					}
-					status, err := supervisor.replaceCurrentRuntimeWithSource(
-						context.Background(), "/new", source, bundle, newFact,
-						runtimecontracts.BundleIdentity{BundleHash: newHash}, candidate, candidate.WorkOccurrence(),
-					)
-					if err == nil || !strings.Contains(err.Error(), "injected startup ownership finalize failure") {
-						t.Fatalf("first replacement finalization error = %v", err)
-					}
-					if supervisor.ready.Load() || supervisor.pendingReplacement == nil || supervisor.CurrentRuntime() != predecessor {
-						t.Fatalf("failed finalization visibility = status:%#v ready:%v runtime:%p pending:%#v", status, supervisor.ready.Load(), supervisor.CurrentRuntime(), supervisor.pendingReplacement)
-					}
-					if got := registrationFreezeActive.Load(); got != 1 {
-						t.Fatalf("registration freeze after retained finalization failure=%d, want 1", got)
-					}
-					lookup := manager.LookupBundleHashStatus(oldHash)
-					if lookup.Loaded() || lookup.Cause != runtimepkg.RuntimeContextCauseReplacing {
-						t.Fatalf("failed finalization selector = %#v, want unavailable replacing", lookup)
-					}
-					if prepareCount, finalizeAttempts := startupOwnership.counts(); prepareCount != 1 || finalizeAttempts != 1 {
-						t.Fatalf("failed finalization counts = prepare:%d finalize:%d, want 1/1", prepareCount, finalizeAttempts)
-					}
-					if err := supervisor.completePendingReplacement(); err != nil {
-						t.Fatalf("retry retained replacement finalization: %v", err)
-					}
-					status = supervisor.CurrentProject()
-					if prepareCount, finalizeAttempts := startupOwnership.counts(); prepareCount != 1 || finalizeAttempts != 2 {
-						t.Fatalf("retried finalization counts = prepare:%d finalize:%d, want exact retained handoff 1/2", prepareCount, finalizeAttempts)
-					}
-					if !status.Loaded || supervisor.CurrentRuntime() != candidate {
-						t.Fatalf("replacement status/runtime = %#v/%p, want loaded candidate %p", status, supervisor.CurrentRuntime(), candidate)
-					}
-					if got := registrationBarrierCalls.Load(); got != 1 {
-						t.Fatalf("registration barrier calls after first handoff=%d, want 1", got)
-					}
-					if got := registrationFreezeActive.Load(); got != 0 {
-						t.Fatalf("registration freeze after published replacement=%d, want 0", got)
-					}
-					replacementContext, ok := manager.LookupBundleHash(newHash)
-					if !ok {
-						t.Fatalf("manager does not expose replacement hash %s", newHash)
-					}
-					if _, declared := bundle.EventEntry("inbound.telegram.text_message"); declared {
-						t.Fatal("authored replacement bundle unexpectedly owns imported event")
-					}
-					runtimeGeneration := requireProviderTriggerEventSource(t, candidate.Options.WorkflowModule.SemanticSource(), "inbound.telegram.text_message")
-					managerGeneration := requireProviderTriggerEventSource(t, replacementContext.Source, "inbound.telegram.text_message")
-					supervisorGeneration := requireProviderTriggerEventSource(t, supervisor.CurrentSource(), "inbound.telegram.text_message")
-					if !runtimeGeneration.Equal(providerRegistry.Generation()) || !managerGeneration.Equal(runtimeGeneration) || !supervisorGeneration.Equal(runtimeGeneration) {
-						t.Fatalf("replacement provider-trigger generations differ: catalog=%s runtime=%s manager=%s supervisor=%s", providerRegistry.Generation().Diagnostic(), runtimeGeneration.Diagnostic(), managerGeneration.Diagnostic(), supervisorGeneration.Diagnostic())
-					}
-					if got := maxActive.Load(); got != 1 {
-						t.Fatalf("simultaneous predecessor/candidate system consumers = %d, want one", got)
-					}
-					successor := newRuntime(newHash)
-					successor.SystemNodes = []runtimepipeline.BackgroundNode{newReplacementOverlapProbeNode(&active, &maxActive)}
-					barrierPredecessor = candidate
-					status, err = supervisor.replaceCurrentRuntimeWithSource(
-						context.Background(), "/successor", source, bundle, newFact,
-						runtimecontracts.BundleIdentity{BundleHash: newHash}, successor, successor.WorkOccurrence(),
-					)
-					if err != nil || !status.Loaded || supervisor.CurrentRuntime() != successor {
-						t.Fatalf("later replacement = status:%#v runtime:%p err:%v, want successor %p", status, supervisor.CurrentRuntime(), err, successor)
-					}
-					if prepareCount, finalizeAttempts := startupOwnership.counts(); prepareCount != 2 || finalizeAttempts != 3 {
-						t.Fatalf("later replacement counts = prepare:%d finalize:%d, want 2/3", prepareCount, finalizeAttempts)
-					}
-					if got := registrationBarrierCalls.Load(); got != 2 {
-						t.Fatalf("registration barrier calls after second handoff=%d, want 2", got)
-					}
-					if got := registrationFreezeActive.Load(); got != 0 {
-						t.Fatalf("registration freeze after second published replacement=%d, want 0", got)
-					}
-					if err := successor.Shutdown(); err != nil {
-						t.Fatalf("shutdown later replacement: %v", err)
-					}
-
-					rollbackPredecessor := newRuntime(newHash)
-					rollbackPredecessor.SystemNodes = []runtimepipeline.BackgroundNode{newReplacementOverlapProbeNode(&active, &maxActive)}
-					rollbackPlan, exists, err := processCapability.CurrentSourceSet(context.Background())
-					if err != nil || !exists {
-						t.Fatalf("load rollback source set: exists=%v err=%v", exists, err)
-					}
-					installSelectedStoreTestGeneration(t, processCapability, rollbackPredecessor, rollbackPlan, 4)
-					if err := rollbackPredecessor.Start(context.Background()); err != nil {
-						t.Fatalf("start rollback predecessor: %v", err)
-					}
-					rollbackWakeup, err := runtimegenericschedule.NewWakeup("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", time.Now().Add(time.Hour))
-					if err != nil {
-						t.Fatalf("build pending rollback wakeup: %v", err)
-					}
-					if err := rollbackPredecessor.Scheduler.RegisterGenericScheduleWakeup(context.Background(), rollbackWakeup); err != nil {
-						t.Fatalf("register pending rollback wakeup: %v", err)
-					}
-					rollbackFact := mustServeTestEphemeralBundleSourceFact(newHash)
-					rollbackManager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
-						BundleSourceFact: rollbackFact, Source: source, Runtime: rollbackPredecessor, WorkOwner: rollbackPredecessor.WorkOccurrence(),
-					})
-					if err != nil {
-						t.Fatalf("NewRuntimeContextManager rollback: %v", err)
-					}
-					failingCandidate := newRuntime(newHash)
-					failingCandidate.SystemNodes = []runtimepipeline.BackgroundNode{newReplacementOverlapProbeNode(&active, &maxActive)}
-					restored := newRuntime(newHash)
-					restored.SystemNodes = []runtimepipeline.BackgroundNode{newReplacementOverlapProbeNode(&active, &maxActive)}
-					rollbackSupervisor := &runtimeProjectSupervisor{
-						ready:                   new(atomic.Bool),
-						currentRoot:             "/rollback-old",
-						currentSource:           source,
-						currentBundle:           bundle,
-						currentRT:               rollbackPredecessor,
-						currentBundleSourceFact: rollbackFact,
-						runtimeContexts:         rollbackManager,
-						executionPosture:        executionposture.Live,
-					}
-					rollbackSupervisor.runtimeInstanceID = runtimeInstanceID
-					rollbackSupervisor.SetProcessCapability(processCapability)
-					rollbackSupervisor.runtimeGeneration = 4
-					rollbackSupervisor.ready.Store(true)
-					rollbackSupervisor.cloneRuntime = func(context.Context, *runtimepkg.Runtime) (*runtimepkg.Runtime, *worklifetime.RuntimeOccurrence, error) {
-						return restored, restored.WorkOccurrence(), nil
-					}
-					rollbackSupervisor.startRuntime = func(ctx context.Context, rt *runtimepkg.Runtime) error {
-						if rt == failingCandidate && (active.Load() != 0 || rollbackPredecessor.Manager.IsRunning() || rollbackPredecessor.Bus.OutboxSweeperActive()) {
-							t.Fatalf("failing candidate activation overlapped predecessor consumers")
-						}
-						if err := rt.Start(ctx); err != nil {
-							return err
-						}
-						if rt == failingCandidate {
-							return errors.New("injected post-start precommit failure")
-						}
-						return nil
-					}
-					_, err = rollbackSupervisor.replaceCurrentRuntimeWithSource(
-						context.Background(), "/rollback-candidate", source, bundle, rollbackFact,
-						runtimecontracts.BundleIdentity{BundleHash: newHash}, failingCandidate, failingCandidate.WorkOccurrence(),
-					)
-					if err == nil || !strings.Contains(err.Error(), "injected post-start precommit failure") {
-						t.Fatalf("precommit replacement error = %v", err)
-					}
-					lookup = rollbackManager.LookupBundleHashStatus(newHash)
-					if !lookup.Loaded() || lookup.Context.Runtime != nil || rollbackSupervisor.CurrentRuntime() != restored {
-						t.Fatalf("precommit rollback authority = %#v/%p, want restored runtime %p", lookup, rollbackSupervisor.CurrentRuntime(), restored)
-					}
-					restoredManagerGeneration := requireProviderTriggerEventSource(t, lookup.Context.Source, "inbound.telegram.text_message")
-					restoredSupervisorGeneration := requireProviderTriggerEventSource(t, rollbackSupervisor.CurrentSource(), "inbound.telegram.text_message")
-					if !restoredManagerGeneration.Equal(providerRegistry.Generation()) || !restoredSupervisorGeneration.Equal(restoredManagerGeneration) {
-						t.Fatalf("restored provider-trigger generations differ: catalog=%s manager=%s supervisor=%s", providerRegistry.Generation().Diagnostic(), restoredManagerGeneration.Diagnostic(), restoredSupervisorGeneration.Diagnostic())
-					}
-					use, _, acquireErr := rollbackManager.AcquireBundleHash(context.Background(), newHash)
-					if acquireErr != nil || use == nil || use.Runtime() != restored {
-						t.Fatalf("precommit rollback execution authority = use:%#v err:%v", use, acquireErr)
-					}
-					if err := use.Done(); err != nil {
-						t.Fatalf("settle precommit rollback authority: %v", err)
-					}
-					if got := maxActive.Load(); got != 1 {
-						t.Fatalf("rollback overlapped shared-store consumers: max=%d", got)
-					}
-					if err := restored.Shutdown(); err != nil {
-						t.Fatalf("shutdown restored predecessor: %v", err)
-					}
-				})
-			}
-		})
-	}
-}
-
 func TestStandingReplacementAdoptionRestoresWorkflowTimersOnBothStores(t *testing.T) {
 	type backend struct {
 		name string
-		open func(*testing.T) storeBundle
+		open func(*testing.T) *selectedStoreOwner
 	}
 	backends := []backend{
 		{
 			name: "sqlite",
-			open: func(t *testing.T) storeBundle {
-				stores, err := buildStores(context.Background(), storebackend.Selection{
-					Backend: storebackend.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "runtime.sqlite"),
-				}, &config.Config{})
-				if err != nil {
-					t.Fatalf("build SQLite stores: %v", err)
-				}
-				t.Cleanup(func() { _ = stores.SQLDB.Close() })
-				return stores
+			open: func(t *testing.T) *selectedStoreOwner {
+				owner := openSelectedSQLiteOwner(t, filepath.Join(t.TempDir(), "runtime.sqlite"), &config.Config{})
+				t.Cleanup(func() { closeUnactivatedSelectedStore(t, owner) })
+				return owner
 			},
 		},
 		{
 			name: "postgres",
-			open: func(t *testing.T) storeBundle {
-				dsn, _, cleanup := testutil.StartPostgres(t)
+			open: func(t *testing.T) *selectedStoreOwner {
+				dsn, db, cleanup := testutil.StartPostgres(t)
 				t.Cleanup(cleanup)
-				selected, err := store.NewPostgresStore(dsn)
-				if err != nil {
-					t.Fatalf("NewPostgresStore: %v", err)
-				}
-				t.Cleanup(func() { _ = storetest.DatabaseForTest(selected).Close() })
-				return selectedPostgresStoreBundle(selected, storetest.DatabaseForTest(selected), &config.Config{})
+				owner := openSelectedPostgresOwner(t, dsn, db, &config.Config{})
+				t.Cleanup(func() { closeUnactivatedSelectedStore(t, owner) })
+				return owner
 			},
 		},
 	}
@@ -1248,7 +891,7 @@ func TestStandingReplacementAdoptionRestoresWorkflowTimersOnBothStores(t *testin
 				t.Fatalf("load standing workflow module: %v", err)
 			}
 			stores := backend.open(t)
-			if _, err := initializeStateStores(context.Background(), stores, bundle); err != nil {
+			if _, err := initializeStateStores(context.Background(), stores.Schema(), bundle); err != nil {
 				t.Fatalf("initialize state stores: %v", err)
 			}
 			bundleHash, err := runtimecontracts.BundleHash(bundle)
@@ -1326,7 +969,7 @@ func TestStandingReplacementAdoptionRestoresWorkflowTimersOnBothStores(t *testin
 			}
 			var timerEvent, timerStatus string
 			var fireAt any
-			if err := stores.SQLDB.QueryRowContext(context.Background(), `SELECT fire_event, status, fire_at FROM timers`).Scan(&timerEvent, &timerStatus, &fireAt); err != nil {
+			if err := selectedStoreDatabaseForTest(t, stores).QueryRowContext(context.Background(), `SELECT fire_event, status, fire_at FROM timers`).Scan(&timerEvent, &timerStatus, &fireAt); err != nil {
 				t.Fatalf("load standing workflow timer: %v", err)
 			}
 			if timerStatus != "active" {
@@ -1342,7 +985,7 @@ func TestStandingReplacementAdoptionRestoresWorkflowTimersOnBothStores(t *testin
 			}
 			deadline := time.Now().Add(8 * time.Second)
 			for time.Now().Before(deadline) {
-				if err := stores.SQLDB.QueryRowContext(context.Background(), `SELECT status FROM timers`).Scan(&timerStatus); err != nil {
+				if err := selectedStoreDatabaseForTest(t, stores).QueryRowContext(context.Background(), `SELECT status FROM timers`).Scan(&timerStatus); err != nil {
 					t.Fatalf("reload standing workflow timer: %v", err)
 				}
 				if timerStatus == "fired" {
@@ -1358,7 +1001,7 @@ func TestStandingReplacementAdoptionRestoresWorkflowTimersOnBothStores(t *testin
 				query = `SELECT COUNT(*) FROM events WHERE event_name = $1`
 			}
 			var events int
-			if err := stores.SQLDB.QueryRowContext(context.Background(), query, timerEvent).Scan(&events); err != nil {
+			if err := selectedStoreDatabaseForTest(t, stores).QueryRowContext(context.Background(), query, timerEvent).Scan(&events); err != nil {
 				t.Fatalf("count adopted standing timer events: %v", err)
 			}
 			if events != 1 {
@@ -1371,28 +1014,20 @@ func TestStandingReplacementAdoptionRestoresWorkflowTimersOnBothStores(t *testin
 func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomicallyOnBothStores(t *testing.T) {
 	type backend struct {
 		name string
-		open func(*testing.T) storeBundle
+		open func(*testing.T) *selectedStoreOwner
 	}
 	backends := []backend{
-		{name: "sqlite", open: func(t *testing.T) storeBundle {
-			stores, err := buildStores(context.Background(), storebackend.Selection{
-				Backend: storebackend.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "runtime.sqlite"),
-			}, &config.Config{})
-			if err != nil {
-				t.Fatalf("build SQLite stores: %v", err)
-			}
-			t.Cleanup(func() { _ = stores.SQLDB.Close() })
-			return stores
+		{name: "sqlite", open: func(t *testing.T) *selectedStoreOwner {
+			owner := openSelectedSQLiteOwner(t, filepath.Join(t.TempDir(), "runtime.sqlite"), &config.Config{})
+			t.Cleanup(func() { closeUnactivatedSelectedStore(t, owner) })
+			return owner
 		}},
-		{name: "postgres", open: func(t *testing.T) storeBundle {
-			dsn, _, cleanup := testutil.StartPostgres(t)
+		{name: "postgres", open: func(t *testing.T) *selectedStoreOwner {
+			dsn, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
-			selected, err := store.NewPostgresStore(dsn)
-			if err != nil {
-				t.Fatalf("NewPostgresStore: %v", err)
-			}
-			t.Cleanup(func() { _ = storetest.DatabaseForTest(selected).Close() })
-			return selectedPostgresStoreBundle(selected, storetest.DatabaseForTest(selected), &config.Config{})
+			owner := openSelectedPostgresOwner(t, dsn, db, &config.Config{})
+			t.Cleanup(func() { closeUnactivatedSelectedStore(t, owner) })
+			return owner
 		}},
 	}
 	for _, backend := range backends {
@@ -1423,7 +1058,7 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 						t.Fatalf("load standing workflow module: %v", err)
 					}
 					stores := backend.open(t)
-					if _, err := initializeStateStores(context.Background(), stores, bundle); err != nil {
+					if _, err := initializeStateStores(context.Background(), stores.Schema(), bundle); err != nil {
 						t.Fatalf("initialize state stores: %v", err)
 					}
 					oldHash, err := runtimecontracts.BundleHash(bundle)
@@ -1555,7 +1190,7 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 					}
 
 					var timerEvent, timerStatus string
-					if err := stores.SQLDB.QueryRowContext(context.Background(), `SELECT fire_event, status FROM timers`).Scan(&timerEvent, &timerStatus); err != nil {
+					if err := selectedStoreDatabaseForTest(t, stores).QueryRowContext(context.Background(), `SELECT fire_event, status FROM timers`).Scan(&timerEvent, &timerStatus); err != nil {
 						t.Fatalf("load adopted timer: %v", err)
 					}
 					if timerStatus != "active" {
@@ -1566,7 +1201,7 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 						query = `SELECT COUNT(*) FROM events WHERE event_name = $1`
 					}
 					var count int
-					if err := stores.SQLDB.QueryRowContext(context.Background(), query, timerEvent).Scan(&count); err != nil {
+					if err := selectedStoreDatabaseForTest(t, stores).QueryRowContext(context.Background(), query, timerEvent).Scan(&count); err != nil {
 						t.Fatalf("count adopted timer events: %v", err)
 					}
 					if count != 0 {
@@ -1575,7 +1210,7 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 					if changedHash {
 						deadline := time.Now().Add(10 * time.Second)
 						for time.Now().Before(deadline) {
-							if err := stores.SQLDB.QueryRowContext(context.Background(), `SELECT status FROM timers`).Scan(&timerStatus); err != nil {
+							if err := selectedStoreDatabaseForTest(t, stores).QueryRowContext(context.Background(), `SELECT status FROM timers`).Scan(&timerStatus); err != nil {
 								t.Fatalf("reload changed-hash adopted timer: %v", err)
 							}
 							if timerStatus == "fired" {
@@ -1586,7 +1221,7 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 						if timerStatus != "fired" {
 							t.Fatalf("changed-hash adopted timer status = %q, want candidate lifecycle fire", timerStatus)
 						}
-						if err := stores.SQLDB.QueryRowContext(context.Background(), query, timerEvent).Scan(&count); err != nil {
+						if err := selectedStoreDatabaseForTest(t, stores).QueryRowContext(context.Background(), query, timerEvent).Scan(&count); err != nil {
 							t.Fatalf("count changed-hash adopted timer events: %v", err)
 						}
 						if count != 1 {
@@ -1602,26 +1237,20 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 func TestRuntimeProjectSupervisorQuiesceTimeoutRestoresFullStoreAuthority(t *testing.T) {
 	type backend struct {
 		name string
-		open func(*testing.T) storeBundle
+		open func(*testing.T) *selectedStoreOwner
 	}
 	backends := []backend{
-		{name: "sqlite", open: func(t *testing.T) storeBundle {
-			stores, err := buildStores(context.Background(), storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "runtime.sqlite")}, &config.Config{})
-			if err != nil {
-				t.Fatalf("build SQLite stores: %v", err)
-			}
-			t.Cleanup(func() { _ = stores.SQLDB.Close() })
-			return stores
+		{name: "sqlite", open: func(t *testing.T) *selectedStoreOwner {
+			owner := openSelectedSQLiteOwner(t, filepath.Join(t.TempDir(), "runtime.sqlite"), &config.Config{})
+			t.Cleanup(func() { closeUnactivatedSelectedStore(t, owner) })
+			return owner
 		}},
-		{name: "postgres", open: func(t *testing.T) storeBundle {
-			dsn, _, cleanup := testutil.StartPostgres(t)
+		{name: "postgres", open: func(t *testing.T) *selectedStoreOwner {
+			dsn, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
-			pg, err := store.NewPostgresStore(dsn)
-			if err != nil {
-				t.Fatalf("NewPostgresStore: %v", err)
-			}
-			t.Cleanup(func() { _ = storetest.DatabaseForTest(pg).Close() })
-			return selectedPostgresStoreBundle(pg, storetest.DatabaseForTest(pg), &config.Config{})
+			owner := openSelectedPostgresOwner(t, dsn, db, &config.Config{})
+			t.Cleanup(func() { closeUnactivatedSelectedStore(t, owner) })
+			return owner
 		}},
 	}
 	for _, backend := range backends {
@@ -1631,7 +1260,7 @@ func TestRuntimeProjectSupervisorQuiesceTimeoutRestoresFullStoreAuthority(t *tes
 			processWorkOwner := worklifetime.NewProcess()
 			var runtimes []*runtimepkg.Runtime
 			bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier8-boot-verification/test-boot-success")
-			if _, err := initializeStateStores(context.Background(), stores, bundle); err != nil {
+			if _, err := initializeStateStores(context.Background(), stores.Schema(), bundle); err != nil {
 				t.Fatalf("initializeStateStores: %v", err)
 			}
 			source := semanticview.Wrap(bundle)
@@ -2078,26 +1707,20 @@ func TestRuntimeProjectSupervisorCloseProjectWithShutdownOptionsUsesConfiguredGr
 func TestStartServeRuntimeContextsRollsBackAllPreparedAuthorActivityCatalogs(t *testing.T) {
 	type backend struct {
 		name string
-		open func(*testing.T) storeBundle
+		open func(*testing.T) *selectedStoreOwner
 	}
 	backends := []backend{
-		{name: "sqlite", open: func(t *testing.T) storeBundle {
-			stores, err := buildStores(context.Background(), storebackend.Selection{Backend: storebackend.BackendSQLite, SQLitePath: filepath.Join(t.TempDir(), "runtime.sqlite")}, &config.Config{})
-			if err != nil {
-				t.Fatalf("build SQLite stores: %v", err)
-			}
-			t.Cleanup(func() { _ = stores.SQLDB.Close() })
-			return stores
+		{name: "sqlite", open: func(t *testing.T) *selectedStoreOwner {
+			owner := openSelectedSQLiteOwner(t, filepath.Join(t.TempDir(), "runtime.sqlite"), &config.Config{})
+			t.Cleanup(func() { closeUnactivatedSelectedStore(t, owner) })
+			return owner
 		}},
-		{name: "postgres", open: func(t *testing.T) storeBundle {
-			dsn, _, cleanup := testutil.StartPostgres(t)
+		{name: "postgres", open: func(t *testing.T) *selectedStoreOwner {
+			dsn, db, cleanup := testutil.StartPostgres(t)
 			t.Cleanup(cleanup)
-			pg, err := store.NewPostgresStore(dsn)
-			if err != nil {
-				t.Fatalf("NewPostgresStore: %v", err)
-			}
-			t.Cleanup(func() { _ = storetest.DatabaseForTest(pg).Close() })
-			return selectedPostgresStoreBundle(pg, storetest.DatabaseForTest(pg), &config.Config{})
+			owner := openSelectedPostgresOwner(t, dsn, db, &config.Config{})
+			t.Cleanup(func() { closeUnactivatedSelectedStore(t, owner) })
+			return owner
 		}},
 	}
 	for _, backend := range backends {
@@ -2107,7 +1730,7 @@ func TestStartServeRuntimeContextsRollsBackAllPreparedAuthorActivityCatalogs(t *
 			processWorkOwner := worklifetime.NewProcess()
 			runtimes := make([]*runtimepkg.Runtime, 0, 2)
 			bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier8-boot-verification/test-boot-success")
-			if _, err := initializeStateStores(context.Background(), stores, bundle); err != nil {
+			if _, err := initializeStateStores(context.Background(), stores.Schema(), bundle); err != nil {
 				t.Fatalf("initializeStateStores: %v", err)
 			}
 			source := semanticview.Wrap(bundle)
@@ -2126,7 +1749,7 @@ func TestStartServeRuntimeContextsRollsBackAllPreparedAuthorActivityCatalogs(t *
 			if err != nil {
 				t.Fatalf("construct rollback source set: %v", err)
 			}
-			capability, err := stores.StartupOwnership.AcquireProcessCapability(context.Background(), runtimestartupownership.AcquireRequest{
+			capability, err := stores.StartupOwnership().AcquireProcessCapability(context.Background(), runtimestartupownership.AcquireRequest{
 				OwnerID: "serve-context-rollback-test", BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
 			})
 			if err != nil {
@@ -2185,7 +1808,7 @@ func TestStartServeRuntimeContextsRollsBackAllPreparedAuthorActivityCatalogs(t *
 				t.Fatalf("startServeRuntimeContexts error = %v, want shutdown admission failure", err)
 			}
 
-			registrar, ok := stores.runtimeDeps().EventStore.(interface {
+			registrar, ok := stores.RuntimeDeps().EventStore.(interface {
 				RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
 			})
 			if !ok {
@@ -2310,7 +1933,7 @@ func newSupervisorForLoadProjectFailureTest(
 	module := stubWorkflowModule{source: source}
 	base := packfixture.EmbeddedBase(t)
 	catalog := testProviderTriggerCatalog(t)
-	supervisor := newRuntimeProjectSupervisor("", "", nil, storeBundle{}, new(atomic.Bool), cliapp.WorkspaceMountSources{}, cliapp.WorkspaceBackendSelection{Backend: workspace.BackendDocker, Source: "test"}, nil, nil, catalog, base, "", nil, nil, nil)
+	supervisor := newRuntimeProjectSupervisor("", "", nil, serveRuntimePersistence{}, new(atomic.Bool), cliapp.WorkspaceMountSources{}, cliapp.WorkspaceBackendSelection{Backend: workspace.BackendDocker, Source: "test"}, nil, nil, catalog, base, "", nil, nil, nil)
 	supervisor.executionPosture = executionposture.Live
 	supervisor.processWorkOwner = worklifetime.NewProcess()
 	supervisor.providerTriggers = catalog
@@ -2325,10 +1948,10 @@ func newSupervisorForLoadProjectFailureTest(
 		return module, bundle, nil
 	}
 	supervisor.validateSource = func(context.Context, semanticview.Source, *providertriggers.CatalogSnapshot) error { return nil }
-	supervisor.initStateStores = func(context.Context, storeBundle, *runtimecontracts.WorkflowContractBundle) (string, error) {
+	supervisor.initStateStores = func(context.Context, store.SchemaBootstrapper, *runtimecontracts.WorkflowContractBundle) (string, error) {
 		return "store wiring ready", nil
 	}
-	supervisor.newWorkspaces = func(storeBundle, string, semanticview.Source, cliapp.WorkspaceMountSources) (workspace.Lifecycle, cliapp.WorkspaceBackendSelection, error) {
+	supervisor.newWorkspaces = func(workspace.Lookup, string, semanticview.Source, cliapp.WorkspaceMountSources) (workspace.Lifecycle, cliapp.WorkspaceBackendSelection, error) {
 		return lifecycle, cliapp.WorkspaceBackendSelection{Backend: workspace.BackendDocker, Source: "test"}, nil
 	}
 	if createRuntime != nil {
@@ -2466,7 +2089,7 @@ func TestRuntimeProjectSupervisorDerivesProcessOwnerFromInitialRuntime(t *testin
 	processOwner := worklifetime.NewProcess()
 	initial := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Options: runtimepkg.RuntimeOptions{ProcessWorkOwner: processOwner}}
 	supervisor := newRuntimeProjectSupervisor(
-		"", "", nil, storeBundle{}, new(atomic.Bool), cliapp.WorkspaceMountSources{},
+		"", "", nil, serveRuntimePersistence{}, new(atomic.Bool), cliapp.WorkspaceMountSources{},
 		cliapp.WorkspaceBackendSelection{}, nil, nil, nil, nil, "", nil, nil, initial,
 	)
 	if supervisor.processWorkOwner != processOwner {
@@ -2487,7 +2110,7 @@ func TestRuntimeProjectSupervisorLoadProjectUsesResolvedWorkspaceMountSources(t 
 		return &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Options: deps.Options}, nil
 	})
 	supervisor.mountSources = wantMountSources
-	supervisor.newWorkspaces = func(_ storeBundle, _ string, _ semanticview.Source, mountSources cliapp.WorkspaceMountSources) (workspace.Lifecycle, cliapp.WorkspaceBackendSelection, error) {
+	supervisor.newWorkspaces = func(_ workspace.Lookup, _ string, _ semanticview.Source, mountSources cliapp.WorkspaceMountSources) (workspace.Lifecycle, cliapp.WorkspaceBackendSelection, error) {
 		gotMountSources = mountSources
 		return stubWorkspaceLifecycle{}, cliapp.WorkspaceBackendSelection{Backend: workspace.BackendDocker, Source: "test"}, nil
 	}
@@ -2579,7 +2202,7 @@ flows:
 	if err != nil {
 		t.Fatalf("build SQLite stores: %v", err)
 	}
-	t.Cleanup(func() { _ = stores.facade().closeWithError() })
+	t.Cleanup(func() { closeUnactivatedSelectedStore(t, stores) })
 	cfg := &config.Config{}
 	cfg.Runtime.ExecutionPosture = executionposture.Live
 	candidateCatalog := testProviderTriggerCatalog(t)
@@ -2594,7 +2217,7 @@ flows:
 	}
 	var ready atomic.Bool
 	supervisor := newRuntimeProjectSupervisor(
-		cliapp.RepoRoot(), runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot()), cfg, stores, &ready,
+		cliapp.RepoRoot(), runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot()), cfg, projectServeRuntimePersistence(stores), &ready,
 		cliapp.WorkspaceMountSources{}, cliapp.WorkspaceBackendSelection{Backend: workspace.BackendDocker, Source: "test"},
 		nil, processIngressCredentialStore{}, candidateCatalog, packfixture.EmbeddedBase(t), "", nil, nil, nil,
 	)
@@ -2607,7 +2230,7 @@ flows:
 		return runtimepkg.NewRuntime(ctx, deps)
 	}
 	var workspaceSource semanticview.Source
-	supervisor.newWorkspaces = func(_ storeBundle, _ string, semanticSource semanticview.Source, _ cliapp.WorkspaceMountSources) (workspace.Lifecycle, cliapp.WorkspaceBackendSelection, error) {
+	supervisor.newWorkspaces = func(_ workspace.Lookup, _ string, semanticSource semanticview.Source, _ cliapp.WorkspaceMountSources) (workspace.Lifecycle, cliapp.WorkspaceBackendSelection, error) {
 		workspaceSource = semanticSource
 		return stubWorkspaceLifecycle{}, cliapp.WorkspaceBackendSelection{Backend: workspace.BackendDocker, Source: "test"}, nil
 	}
@@ -2686,7 +2309,7 @@ flows:
 	if replacementRuntime.ScenarioProfileCatalog == nil || !replacementRuntime.ScenarioProfileCatalog.EffectiveSourceIdentity().Equal(replacementRuntime.EffectiveSourceIdentity) {
 		t.Fatal("replacement runtime did not retain the exact effective-source scenario profile catalog")
 	}
-	manager, err := runtimepkg.NewRuntimeContextManager(stores.RunBundleAvailabilityStore, completeServeTestPackContext(t, runtimepkg.BundleContext{
+	manager, err := runtimepkg.NewRuntimeContextManager(stores.RunBundleAvailability(), completeServeTestPackContext(t, runtimepkg.BundleContext{
 		BundleSourceFact: replacementFact,
 		BundleIdentity:   replacementIdentity,
 		Source:           source,
@@ -2707,15 +2330,15 @@ flows:
 
 	publication := apiv1.EventPublicationOptions{
 		ExecutionPosture: replacementRuntime.ExecutionPosture,
-		Idempotency:      stores.IdempotencyStore,
+		Idempotency:      stores.Idempotency(),
 		Events:           replacementRuntime.Bus,
 		Acknowledged:     replacementRuntime.Bus,
 		RecipientPlans:   replacementRuntime.Bus,
 		BundleSource:     replacementRuntime.Bus,
-		Runs:             stores.RunReadStore,
-		Entities:         stores.EntityReadStore,
-		Observability:    stores.ObservabilityStore,
-		RunBundleContext: stores.RunBundleContextStore,
+		Runs:             stores.Runs(),
+		Entities:         stores.Entities(),
+		Observability:    stores.Observability(),
+		RunBundleContext: stores.RunBundleContext(),
 		RuntimeContexts:  manager,
 		Source:           source,
 		Bundle:           replacementIdentity,
@@ -2746,7 +2369,7 @@ flows:
 	var persisted operatorread.OperatorEventFull
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		persisted, err = stores.ObservabilityStore.LoadOperatorEvent(context.Background(), published.EventID)
+		persisted, err = stores.Observability().LoadOperatorEvent(context.Background(), published.EventID)
 		if err == nil && len(persisted.Deliveries) == 1 && persisted.Deliveries[0].Status == "delivered" {
 			break
 		}
@@ -2852,7 +2475,7 @@ func TestRuntimeProjectSupervisorOpenProjectExecutesExplicitHostRefusal(t *testi
 	module := stubWorkflowModule{source: source}
 	cfg := testWorkspaceBackendConfig(llmselection.BackendClaudeCLI)
 	supervisor := newRuntimeProjectSupervisor(
-		"", "", cfg, storeBundle{}, new(atomic.Bool), cliapp.WorkspaceMountSources{},
+		"", "", cfg, serveRuntimePersistence{}, new(atomic.Bool), cliapp.WorkspaceMountSources{},
 		cliapp.WorkspaceBackendSelection{Backend: workspace.BackendHost, Source: "workspace.backend", PreferenceExplicit: true},
 		nil, nil, nil, packfixture.EmbeddedBase(t), "", nil, nil, nil,
 	)
@@ -2869,7 +2492,7 @@ func TestRuntimeProjectSupervisorOpenProjectExecutesExplicitHostRefusal(t *testi
 		return module, bundle, nil
 	}
 	supervisor.validateSource = func(context.Context, semanticview.Source, *providertriggers.CatalogSnapshot) error { return nil }
-	supervisor.initStateStores = func(context.Context, storeBundle, *runtimecontracts.WorkflowContractBundle) (string, error) {
+	supervisor.initStateStores = func(context.Context, store.SchemaBootstrapper, *runtimecontracts.WorkflowContractBundle) (string, error) {
 		return "store wiring ready", nil
 	}
 	supervisor.createRuntime = func(context.Context, runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
@@ -2900,13 +2523,13 @@ func TestRuntimeProjectSupervisorOpenProjectNoAgentSkipsWorkspaceLifecycle(t *te
 	supervisor.ready = &ready
 	supervisor.cfg = &config.Config{LLM: config.LLMConfig{Backend: "anthropic"}}
 	supervisor.workspaceBackend = cliapp.WorkspaceBackendSelection{Source: "capability-derived"}
-	supervisor.newWorkspaces = func(stores storeBundle, contractsRoot string, source semanticview.Source, mountSources cliapp.WorkspaceMountSources) (workspace.Lifecycle, cliapp.WorkspaceBackendSelection, error) {
+	supervisor.newWorkspaces = func(lookup workspace.Lookup, contractsRoot string, source semanticview.Source, mountSources cliapp.WorkspaceMountSources) (workspace.Lifecycle, cliapp.WorkspaceBackendSelection, error) {
 		createdWorkspace = true
 		decision, err := cliapp.DecideWorkspaceBackend(supervisor.workspaceBackend, supervisor.cfg, source)
 		if err != nil {
 			return nil, cliapp.WorkspaceBackendSelection{}, err
 		}
-		lifecycle, err := cliapp.ConfiguredWorkspaceLifecycleForBackend(stores.facade().workspaceLookup(), supervisor.cfg, contractsRoot, source, mountSources, decision)
+		lifecycle, err := cliapp.ConfiguredWorkspaceLifecycleForBackend(lookup, supervisor.cfg, contractsRoot, source, mountSources, decision)
 		if err != nil {
 			return nil, decision, err
 		}
@@ -2939,7 +2562,7 @@ func TestRuntimeProjectSupervisorOpenProjectRejectsNilLifecycleWithoutNoWorkspac
 		t.Fatal("createRuntime should not be called when lifecycle is nil without no-workspace decision")
 		return nil, nil
 	})
-	supervisor.newWorkspaces = func(storeBundle, string, semanticview.Source, cliapp.WorkspaceMountSources) (workspace.Lifecycle, cliapp.WorkspaceBackendSelection, error) {
+	supervisor.newWorkspaces = func(workspace.Lookup, string, semanticview.Source, cliapp.WorkspaceMountSources) (workspace.Lifecycle, cliapp.WorkspaceBackendSelection, error) {
 		return nil, cliapp.WorkspaceBackendSelection{Backend: workspace.BackendHost, Source: "test"}, nil
 	}
 

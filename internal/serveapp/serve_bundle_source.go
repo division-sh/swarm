@@ -14,23 +14,25 @@ type serveBundleSourcePlan struct {
 	projection *runtimecontracts.BundleCatalogProjection
 }
 
-func prepareServeBundleSource(ctx context.Context, stores storeBundle, bundle *runtimecontracts.WorkflowContractBundle, dev bool) (runtimecorrelation.BundleSourceFact, error) {
-	plan, err := planServeBundleSource(stores, bundle, dev)
+func prepareServeBundleSource(ctx context.Context, writer bundlecatalog.ServeIngestWriter, bundle *runtimecontracts.WorkflowContractBundle, dev bool) (runtimecorrelation.BundleSourceFact, error) {
+	plan, err := planServeBundleSource(writer, bundle, dev)
 	if err != nil {
 		return runtimecorrelation.BundleSourceFact{}, err
 	}
-	return persistServeBundleSourcePlan(ctx, stores, plan)
+	return persistServeBundleSourcePlan(ctx, writer, plan)
 }
 
-func planServeBundleSource(stores storeBundle, bundle *runtimecontracts.WorkflowContractBundle, dev bool) (serveBundleSourcePlan, error) {
+func planServeBundleSource(writer bundlecatalog.ServeIngestWriter, bundle *runtimecontracts.WorkflowContractBundle, dev bool) (serveBundleSourcePlan, error) {
 	bundleHash, err := runtimecontracts.BundleHash(bundle)
 	if err != nil {
 		return serveBundleSourcePlan{}, fmt.Errorf("derive canonical bundle hash: %w", err)
 	}
-	catalog := stores.facade().bundleSourceCatalogStore()
-	if dev || catalog == nil {
+	if dev {
 		fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
 		return serveBundleSourcePlan{fact: fact}, err
+	}
+	if writer == nil {
+		return serveBundleSourcePlan{}, fmt.Errorf("non-dev serve requires the selected bundle ingest writer")
 	}
 	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
 	if err != nil {
@@ -46,7 +48,7 @@ func planServeBundleSource(stores storeBundle, bundle *runtimecontracts.Workflow
 	return serveBundleSourcePlan{fact: fact, projection: &projection}, nil
 }
 
-func persistServeBundleSourcePlan(ctx context.Context, stores storeBundle, plan serveBundleSourcePlan) (runtimecorrelation.BundleSourceFact, error) {
+func persistServeBundleSourcePlan(ctx context.Context, writer bundlecatalog.ServeIngestWriter, plan serveBundleSourcePlan) (runtimecorrelation.BundleSourceFact, error) {
 	if err := plan.fact.Validate(); err != nil {
 		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("planned bundle source fact: %w", err)
 	}
@@ -62,11 +64,10 @@ func persistServeBundleSourcePlan(ctx context.Context, stores storeBundle, plan 
 	if plan.projection.BundleHash != plan.fact.BundleHash() {
 		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("planned bundle catalog projection hash %q does not match source fact %q", plan.projection.BundleHash, plan.fact.BundleHash())
 	}
-	catalog := stores.facade().bundleSourceCatalogStore()
-	if catalog == nil {
+	if writer == nil {
 		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("persisted bundle source plan requires a bundle catalog store")
 	}
-	if _, err := catalog.UpsertBundleCatalog(ctx, bundlecatalog.Upsert{
+	if _, err := writer.UpsertBundleCatalog(ctx, bundlecatalog.Upsert{
 		BundleHash:  plan.projection.BundleHash,
 		ContentYAML: plan.projection.ContentYAML,
 		ParsedJSON:  plan.projection.ParsedJSON,

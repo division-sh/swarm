@@ -17,20 +17,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
-type runStalledReadStore interface {
-	ListRunHeaders(context.Context, operatorread.RunHeaderListOptions) ([]operatorread.RunHeader, string, error)
-	LoadRunDebugReport(context.Context, string, operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error)
-	ListOperatorEvents(context.Context, operatorread.OperatorEventListOptions) (operatorread.OperatorEventListResult, error)
-	LoadLatestRunFlowInstance(context.Context, string) (string, error)
-	LoadLatestRunNonEscalationProgressAt(context.Context, string, string) (time.Time, error)
-}
-
 type serveRunStalledReader struct {
-	store runStalledReadStore
+	store runstalled.ProjectionReader
 }
 
-func startServeRunStalledEscalation(ctx context.Context, owner *worklifetime.Process, stores storeBundle, contexts []serveRuntimeBundleContext, eventBus *bus.EventBus, posture executionposture.Posture) error {
-	reader, ok := newServeRunStalledReader(stores)
+func startServeRunStalledEscalation(ctx context.Context, owner *worklifetime.Process, projection runstalled.ProjectionReader, contexts []serveRuntimeBundleContext, eventBus *bus.EventBus, posture executionposture.Posture) error {
+	reader, ok := newServeRunStalledReader(projection)
 	if !ok || eventBus == nil {
 		return nil
 	}
@@ -57,12 +49,11 @@ func startServeRunStalledEscalation(ctx context.Context, owner *worklifetime.Pro
 	return nil
 }
 
-func newServeRunStalledReader(stores storeBundle) (*serveRunStalledReader, bool) {
-	readStore := stores.facade().runStalledReader()
-	if readStore == nil {
+func newServeRunStalledReader(projection runstalled.ProjectionReader) (*serveRunStalledReader, bool) {
+	if projection == nil {
 		return nil, false
 	}
-	return &serveRunStalledReader{store: readStore}, true
+	return &serveRunStalledReader{store: projection}, true
 }
 
 func (r *serveRunStalledReader) ListRunningRuns(ctx context.Context, limit int, cursor string) ([]runstalled.RunRef, string, error) {

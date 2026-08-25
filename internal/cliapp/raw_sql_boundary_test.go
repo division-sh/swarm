@@ -95,11 +95,6 @@ func selectedRawSQLBoundaryLedger() map[string]rawSQLBoundaryEntry {
 			Issue:          1783,
 			Reason:         "backend selection, selected-store construction, workspace lifecycle construction, and DB close plumbing are allowed construction/process boundaries",
 		},
-		"internal/serveapp/store_roles.go": {
-			Classification: rawSQLConstructionBoundary,
-			Issue:          1783,
-			Reason:         "compile-time selected store role assertions are construction/model proof, not producer-side concrete store capability authority",
-		},
 		"internal/testutil/runtimepipelinefixture/context.go": {
 			Classification: rawSQLTestSupportBoundary,
 			Issue:          2148,
