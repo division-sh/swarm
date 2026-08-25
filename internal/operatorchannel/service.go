@@ -251,13 +251,88 @@ func (s *Service) RecoverProofResponsibilities(ctx context.Context, now time.Tim
 }
 
 func (s *Service) materializeProof(ctx context.Context, responsibility ProofResponsibility, now time.Time) error {
-	proof := responsibility.Proof
-	proof.MintingDeploymentID = s.deploymentID
-	if err := s.proofs.Put(ctx, proof); err != nil {
+	proof, err := validatedResponsibilityProof(responsibility)
+	if err != nil {
+		_ = s.store.CompleteProofResponsibility(context.WithoutCancel(ctx), responsibility.Operation.OperationID, responsibility.Operation.ProofID, responsibility.Operation.ProofRevision, ProofFailed, err.Error(), now)
+		return fmt.Errorf("materialize verified account proof: %w", err)
+	}
+	existing, found, err := s.proofs.Get(ctx, proof.Interface)
+	if err == nil && found && existing.ProofID == proof.ProofID && existing.Revision == proof.Revision {
+		if !proofMatchesResponsibility(existing, proof) {
+			err = fmt.Errorf("%w: existing proof %q revision %d contradicts its durable responsibility", ErrRevisionConflict, proof.ProofID, proof.Revision)
+		} else {
+			// The file write is already durable. Its deployment occurrence is
+			// immutable even when a later serve completes the database handoff.
+			proof = existing
+		}
+	} else if err == nil {
+		proof.MintingDeploymentID = s.deploymentID
+		err = s.proofs.Put(ctx, proof)
+	}
+	if err != nil {
 		_ = s.store.CompleteProofResponsibility(context.WithoutCancel(ctx), responsibility.Operation.OperationID, proof.ProofID, proof.Revision, ProofFailed, err.Error(), now)
 		return fmt.Errorf("materialize verified account proof: %w", err)
 	}
 	return s.store.CompleteProofResponsibility(ctx, responsibility.Operation.OperationID, proof.ProofID, proof.Revision, ProofActive, "", now)
+}
+
+func validatedResponsibilityProof(responsibility ProofResponsibility) (VerifiedProof, error) {
+	operation := responsibility.Operation
+	binding := responsibility.Binding
+	if operation.State != StateBound || !operation.SaveProof ||
+		(operation.ProofStatus != ProofPending && operation.ProofStatus != ProofFailed) ||
+		binding.Status != BindingCurrent || binding.Source != BindingSourceLiveVerification ||
+		binding.PrincipalID != operation.PrincipalID || binding.Interface.Normalized() != operation.Interface.Normalized() ||
+		binding.ExternalAccountRef != operation.ExternalAccountRef || binding.ConversationRef != operation.ConversationRef ||
+		binding.ConversationScope != operation.ConversationScope || binding.AccountPresentation != operation.AccountPresentation ||
+		binding.Revision != operation.BindingRevision || binding.OperationID != operation.OperationID ||
+		binding.ProofID != operation.ProofID || binding.ProofRevision != operation.ProofRevision ||
+		!binding.UpdatedAt.Equal(operation.CompletedAt) {
+		return VerifiedProof{}, fmt.Errorf("%w: proof responsibility contradicts its committed operation or binding", ErrRevisionConflict)
+	}
+	proof := proofFromOperation(operation, binding)
+	if !immutableProofFactsMatch(responsibility.Proof, proof) {
+		return VerifiedProof{}, fmt.Errorf("%w: durable proof projection contradicts its committed operation or binding", ErrRevisionConflict)
+	}
+	return proof, nil
+}
+
+func proofMatchesResponsibility(existing, responsibility VerifiedProof) bool {
+	if err := existing.Validate(); err != nil || strings.TrimSpace(existing.MintingDeploymentID) == "" {
+		return false
+	}
+	return immutableProofFactsMatch(existing, responsibility)
+}
+
+func immutableProofFactsMatch(existing, responsibility VerifiedProof) bool {
+	return existing.Format == responsibility.Format &&
+		existing.ProofID == responsibility.ProofID &&
+		existing.Revision == responsibility.Revision &&
+		existing.Status == responsibility.Status &&
+		existing.Interface.Normalized() == responsibility.Interface.Normalized() &&
+		existing.ExternalAccountRef == responsibility.ExternalAccountRef &&
+		existing.ConversationRef == responsibility.ConversationRef &&
+		existing.ConversationScope == responsibility.ConversationScope &&
+		existing.AccountPresentation == responsibility.AccountPresentation &&
+		existing.Method == responsibility.Method &&
+		existing.Challenge == responsibility.Challenge &&
+		existing.OriginalOperationID == responsibility.OriginalOperationID &&
+		existing.MintingStoreID == responsibility.MintingStoreID &&
+		existing.VerifiedAt.Equal(responsibility.VerifiedAt) &&
+		existing.OperatorConfirmed == responsibility.OperatorConfirmed &&
+		equalConsentScopes(existing.ConsentScopes, responsibility.ConsentScopes)
+}
+
+func equalConsentScopes(left, right []ConsentScope) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func proofFromOperation(op Operation, binding Binding) VerifiedProof {

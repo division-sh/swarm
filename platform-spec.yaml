@@ -9645,7 +9645,10 @@ tool_model:
         projection. Boot may create a missing local binding from an exact active proof and must announce that source.
         Explicit local unbind blocks boot reuse; machine proof revocation immediately makes every exact derived binding
         non-authoritative, and re-verification creates the next proof revision. Exact confirmation replay retries either
-        pending or failed proof materialization responsibility without repeating claim or binding mutation. A retained
+        pending or failed proof materialization responsibility without repeating claim or binding mutation. When the
+        exact planned proof ID and revision already exist after a file-success/store-completion failure, recovery must
+        validate every immutable responsibility fact, preserve the original non-empty minting deployment occurrence,
+        and complete the selected-store responsibility without rewriting the proof; any mismatch fails closed. A retained
         interface with no machine proof returns CHANNEL_PROOF_UNAVAILABLE from proof revocation.
       readback_rule: >
         Generation-aware readback is the only operator-channel authority consumed downstream. It reports current, stale,
