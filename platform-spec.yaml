@@ -924,66 +924,81 @@ contract_formats:
         by their typed replay-lineage rule.
       invariant_ids:
         runtime.event.producer_origin_valid_at_construction:
-          owner: internal/events class-specific constructors and ProducerIdentity
+          owner_ref: platform-spec.yaml#contract_formats.event_schema.runtime_event_construction
           rule: Every successful durable event construction carries one validated non-empty typed producer identity; no later layer classifies, defaults, or repairs it.
-          negative_proof: TestEventConstructionClassInvariantMatrix
+          executable_proofs:
+            - {path: internal/events/admission_test.go, test: TestEventConstructionClassInvariantMatrix}
         runtime.event.class_lineage_valid_at_construction:
-          owner: internal/events class-specific constructors and typed lineage/provenance values
+          owner_ref: platform-spec.yaml#contract_formats.event_schema.runtime_event_construction
           rule: Constructor class and every class-conditioned causal, operator, or selected-fork lineage fact are complete before admission.
-          negative_proof: TestEventConstructionClassInvariantMatrix
+          executable_proofs:
+            - {path: internal/events/admission_test.go, test: TestEventConstructionClassInvariantMatrix}
         runtime.event.runtime_lineage_intent_explicit_at_construction:
-          owner: internal/events causal, run-scoped, run-creating, and standalone runtime/control/diagnostic constructors
+          owner_ref: platform-spec.yaml#contract_formats.event_schema.runtime_event_construction
           rule: Every runtime/control/diagnostic producer explicitly chooses causal, run-scoped unparented, standalone unparented, or the one closed run-creating platform.agent_directive intent. Causal construction requires one typed EventLineage carrying run, parent, task where applicable, and execution mode; EventBus validates and never infers or mutates those facts.
-          negative_proof: TestProductionEventConstructionUsesPublicAPI
+          executable_proofs:
+            - {path: internal/events/construction_test.go, test: TestProductionEventConstructionUsesPublicAPI}
         runtime.event.root_run_intent_explicit_at_construction:
-          owner: internal/events run-creating-root and existing-run-root constructors
+          owner_ref: platform-spec.yaml#contract_formats.event_schema.runtime_event_construction
           rule: Every root producer explicitly chooses whether the event may create its exact run or requires an already-active run. Builder and API new-run roots are run-creating; standing-provider roots are existing-run. Canonical readback always reconstructs existing-run intent, and manager identity binding preserves the private fresh intent without inference.
-          negative_proof: TestProductionEventConstructionUsesPublicAPI
+          executable_proofs:
+            - {path: internal/events/construction_test.go, test: TestProductionEventConstructionUsesPublicAPI}
         runtime.event.routing_source_typed_at_construction:
-          owner: internal/events RoutingSource
+          owner_ref: platform-spec.yaml#contract_formats.event_schema.runtime_event_construction
           rule: Routing source is an opaque typed construction fact; target, receiver, payload, top-level projections, and empty strings never become source evidence. Static-flow and concrete-template source variants always carry exact flow and instance identity and carry entity identity exactly when the producing execution has one; an entityless receiver therefore remains an exact flow source without inventing an entity. A contract-backed agent source is admitted only from agent_identity_model.declaration_execution_scope and keeps the declaration owning flow distinct from the concrete runtime instance path. Runtime-control publication preserves a root schedule's root source, converts declared-flow execution sources to entity-bound flow-owned control, and uses platform control only for closed global system work.
-          negative_proof: TestRunScopedRuntimeControlPreservesExactRootRoutingSource;
-            TestResolveAgentExecutionSemanticScopeRejectsHostileIdentityContradictions
+          executable_proofs:
+            - {path: internal/events/admission_test.go, test: TestRunScopedRuntimeControlPreservesExactRootRoutingSource}
+            - {path: internal/runtime/semanticview/agent_execution_scope_test.go, test: TestResolveAgentExecutionSemanticScopeRejectsHostileIdentityContradictions}
         runtime.event.admitted_persistence_boundary:
-          owner: internal/events AdmittedEvent and the closed named store operations
+          owner_ref: platform-spec.yaml#contract_formats.event_schema.runtime_event_construction
           rule: Durable event writers accept only opaque admitted values; raw Event, SQL, row, transaction, and generic mutation capabilities are unavailable to runtime and API consumers.
-          negative_proof: TestEventAdmittedPersistenceBoundaryGuard
+          executable_proofs:
+            - {path: internal/store/internal/runtimepersistence/event_boundary_guard_test.go, test: TestEventAdmittedPersistenceBoundaryGuard}
         runtime.event.admitted_run_disposition:
-          owner: internal/events AdmittedEvent admission/revalidation and both selected-store private appenders
+          owner_ref: platform-spec.yaml#contract_formats.event_schema.runtime_event_construction
           rule: Fresh admission carries exact create-authorized, require-active, require-present, or runless authority through persistence; readback never restores create authority and writers never infer it from labels, payload, context, or run presence.
-          negative_proof: TestAdmissionCarriesExactRunDispositionAndReadbackNeverRegainsCreation
+          executable_proofs:
+            - {path: internal/events/admission_test.go, test: TestAdmissionCarriesExactRunDispositionAndReadbackNeverRegainsCreation}
         runtime.event.delivery_projection_nonpersistable:
-          owner: internal/events DeliveryEvent
+          owner_ref: platform-spec.yaml#contract_formats.event_schema.runtime_event_construction
           rule: Receiver-local target, context, and payload projections are distinct nonpersistable values and never rewrite the journal event.
-          negative_proof: TestEventDeliveryProjectionCannotPersist
+          executable_proofs:
+            - {path: internal/events/types_test.go, test: TestEventDeliveryProjectionCannotPersist}
         store.event_record.exact_persistence:
-          owner: internal/store/internal/backend/eventrecord Record and backend-private adapters
+          owner_ref: platform-spec.yaml#contract_formats.event_schema.runtime_event_construction
           rule: The immutable durable record contains and writes every admitted event-owned fact exactly, with no adapter defaults, inference, classification, or repair. payload_bytes is the sole authoritative payload fact and preserves the caller-owned admitted bytes; payload is an atomically written derived JSON query projection and never becomes identity, hydration, retry, recovery, replay, or fork evidence.
-          negative_proof: TestEventRecordPayloadByteIdentityParity
+          executable_proofs:
+            - {path: internal/store/internal/runtimepersistence/event_record_contract_test.go, test: TestEventRecordPayloadByteIdentityParity}
         store.event_record.exact_duplicate_identity:
-          owner: internal/store event record comparator
+          owner_ref: platform-spec.yaml#contract_formats.event_schema.runtime_event_construction
           rule: Every durable field participates in duplicate identity; payload_bytes is compared byte-for-byte, only an exact record is idempotent, and semantically equal JSON with different whitespace, key order, or numeric lexemes is an identity conflict.
-          negative_proof: TestEventRecordPayloadByteIdentityParity
+          executable_proofs:
+            - {path: internal/store/internal/runtimepersistence/event_record_contract_test.go, test: TestEventRecordPayloadByteIdentityParity}
         store.event_record.canonical_readback:
-          owner: internal/store/internal/backend/eventrecord decoder and backend-private bounded hydrators
+          owner_ref: platform-spec.yaml#contract_formats.event_schema.runtime_event_construction
           rule: Every complete executable, recoverable, or replayable readback hydrates stable event IDs through one decoder from payload_bytes, never from the derived payload projection, and fails on missing, duplicate, ambiguous-lineage, corrupt, or cancelled input.
-          negative_proof: TestEventRecordBatchHydrationContractParity
+          executable_proofs:
+            - {path: internal/store/internal/runtimepersistence/event_record_contract_test.go, test: TestEventRecordBatchHydrationContractParity}
         store.event_record.named_operation_atomicity:
-          owner: internal/store closed event commit operations
+          owner_ref: platform-spec.yaml#contract_formats.event_schema.runtime_event_construction
           rule: Event rows and their declared initial delivery, replay, receipt, dead-letter, inbound, diagnostic, or selected-fork lineage facts commit atomically; exact duplicate stops the whole operation before side effects.
-          negative_proof: TestEventNamedOperationAtomicityParity
+          executable_proofs:
+            - {path: internal/store/internal/runtimepersistence/event_named_operation_atomicity_test.go, test: TestEventNamedOperationAtomicityParity}
         store.event_record.same_run_references:
-          owner: internal/store private selected-store append adapters
+          owner_ref: platform-spec.yaml#contract_formats.event_schema.runtime_event_construction
           rule: Causal source events and operator-reference events MUST already exist in the admitted event's exact run and are verified inside the same transaction before insertion; selected-fork cross-run lineage remains sidecar-owned.
-          negative_proof: TestEventOwnedReferencesRequireExistingSameRunEventParity
+          executable_proofs:
+            - {path: internal/store/internal/runtimepersistence/event_reference_integrity_parity_test.go, test: TestEventOwnedReferencesRequireExistingSameRunEventParity}
         store.event_record.standalone_run_convergence:
-          owner: internal/store event append plus final-receipt convergence
+          owner_ref: platform-spec.yaml#contract_formats.event_schema.runtime_event_construction
           rule: A standalone runtime run may converge only when its durable creation trigger matches the event identity and type and the immutable runtime class, platform/runtime producer, and no-parent facts; event labels never grant standalone authority.
-          negative_proof: TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity
+          executable_proofs:
+            - {path: internal/store/internal/runtimepersistence/standalone_runtime_convergence_parity_test.go, test: TestStandaloneRuntimeManifestationsConvergeThroughEventBusParity}
         store.event_record.selected_backend_parity:
-          owner: PostgreSQL and SQLite selected-store event adapters and operations
+          owner_ref: platform-spec.yaml#contract_formats.event_schema.runtime_event_construction
           rule: Both selected stores enforce the same construction, DDL, exact-write, byte-exact payload duplicate identity, rollback, bounded-hydration, and canonical-readback contract through PostgreSQL BYTEA and translated SQLite BLOB storage.
-          negative_proof: TestEventRecordPayloadByteIdentityParity
+          executable_proofs:
+            - {path: internal/store/internal/runtimepersistence/event_record_contract_test.go, test: TestEventRecordPayloadByteIdentityParity}
       terminal_run_admission:
         owner: internal/runtime/runlifecycle plus private selected-store lifecycle adapters and the selected-store event mutation boundary
         rule: >
@@ -6526,14 +6541,18 @@ engine:
               artifacts, backend profiles, and responder presence never select process posture.
             turn_mode_admission:
               owner: internal/runtime/agents.LLMAgent.OnEvent
-              rule: >
-                The actor's resolved execution selection controls the concrete turn adapter and may only narrow causal
-                authority. A live event delivered to an exact mock actor executes as mock and every child/effect remains
-                mock. A mock-causal event delivered to a live-selected actor is rejected before conversation mutation,
-                provider invocation, or tool execution; no receiver may promote mock causality to live execution.
-                The process posture is admitted before actor execution and recovery; a restored live delivery under
-                mock_only is rejected rather than narrowed by choosing a mock actor.
-              proof: TestLLMAgentOnEventPreventsMockCausalityFromEscalatingToLive
+              invariant_ids:
+                runtime.agent.mock_causality_no_live_escalation:
+                  owner_ref: platform-spec.yaml#engine.agent_session_management.llm_provider_selection_config_authority.mock_agent_runtime.selection.runtime_binding.turn_mode_admission
+                  rule: >
+                    The actor's resolved execution selection controls the concrete turn adapter and may only narrow causal
+                    authority. A live event delivered to an exact mock actor executes as mock and every child/effect remains
+                    mock. A mock-causal event delivered to a live-selected actor is rejected before conversation mutation,
+                    provider invocation, or tool execution; no receiver may promote mock causality to live execution.
+                    The process posture is admitted before actor execution and recovery; a restored live delivery under
+                    mock_only is rejected rather than narrowed by choosing a mock actor.
+                  executable_proofs:
+                    - {path: internal/runtime/agents/agent_llm_test.go, test: TestLLMAgentOnEventPreventsMockCausalityFromEscalatingToLive}
             construction_consumers:
               - internal/runtime/runtime.go ordinary managed runtime
               - internal/runtime/runforkexecution/agent_runtime_materialization.go selected-contract served and standalone runtime
@@ -17138,15 +17157,22 @@ agent_identity_model:
         Strict contract loading emits one immutable semantic record for each physical agents.yaml declaration. The
         private physical key is the exact source file plus local declaration key; consumers receive the exact package,
         declaration owner URI, owning flow or explicit root absence, local declaration key, and effective declaration.
-      rule: >
-        Every identity-bearing declaration consumer uses that one record. Boot diagnostics and entity coverage, static
-        materialization, EventBus agent routes, flow-data validation, provider/tool/workspace/CLI/serve projections,
-        and contract-backed event producers MUST NOT independently pair project and flow maps, rank duplicate views,
-        or reconstruct declaration ownership from URI, package path, local ID, public name, runtime route, suffix, or
-        leaf equality. Physical source layer identifies declaration provenance only; it never decides whether execution
-        is root-owned or flow-owned. A project package nested under a declared flow retains its exact package identity
-        and the loader-established owning flow, and activation plus source admission consume that owning-flow fact; a
-        flow projection of the same physical declaration is not a second declaration.
+      invariant_ids:
+        runtime.agent.declaration_execution_scope:
+          owner_ref: platform-spec.yaml#agent_identity_model.concepts.declaration_execution_scope
+          rule: >
+            Every identity-bearing declaration consumer uses that one record. Boot diagnostics and entity coverage, static
+            materialization, EventBus agent routes, flow-data validation, provider/tool/workspace/CLI/serve projections,
+            and contract-backed event producers MUST NOT independently pair project and flow maps, rank duplicate views,
+            or reconstruct declaration ownership from URI, package path, local ID, public name, runtime route, suffix, or
+            leaf equality. Physical source layer identifies declaration provenance only; it never decides whether execution
+            is root-owned or flow-owned. A project package nested under a declared flow retains its exact package identity
+            and the loader-established owning flow, and activation plus source admission consume that owning-flow fact; a
+            flow projection of the same physical declaration is not a second declaration.
+          executable_proofs:
+            - {path: internal/runtime/contracts/agent_declaration_records_test.go, test: TestAgentDeclarationRecordsCanonicalizeDeepPackageBackedFlowProjection}
+            - {path: internal/runtime/semanticview/agent_execution_scope_test.go, test: TestLoadAgentExecutionSemanticScopeMatrix}
+            - {path: internal/runtime/semanticview/agent_name_ownership_guard_test.go, test: TestDeclaredAgentNameOwnershipBoundary}
       ownership_derivation: >
         Package ownership is established only by exact structural containment beneath a declared flow directory or by
         an already-established parent package owning-flow fact. The number of flows declared by a parent package is not
@@ -17173,8 +17199,6 @@ agent_identity_model:
         Existing stores and declaration/path-derived source encodings are unsupported. Missing, duplicate, ambiguous,
         or contradictory declaration/execution facts fail before mutation. There is no compatibility reader, migration,
         alias, fallback, partial-source authority, or dual semantic owner.
-      proof: TestAgentDeclarationRecordsCanonicalizeDeepPackageBackedFlowProjection;
-        TestLoadAgentExecutionSemanticScopeMatrix; TestDeclaredAgentNameOwnershipBoundary
     bundle_scoped_lookup:
       status: not_supported_for_duplicate_agent_slugs
       rule: >
@@ -35430,23 +35454,92 @@ durable_pipeline_processing_obligation_authority:
     - compute-module evidence
     - dead-letter diagnostics
     - destructive-reset and preservation physical cleanup
-  invariants:
-    PPO-OWN-001: One mandatory selected-store owner; no optional, nil, no-op, alias, legacy, reader, writer, settler, or fake-store assembler survives on durable runtime, EventBus, coordinator, or recovery paths.
-    PPO-DIS-001: One closed typed disposition vocabulary owns every foreground, recovery, directive, decision-route, and initial outcome.
-    PPO-SEL-001: Eligibility and canonical hydration are exact, age-independent, and exhaustive through one opaque selected-store cursor whose batch limit bounds examined candidates; diagnostic and non-running/non-paused exclusions are explicit.
-    PPO-CLM-001: Exclusion precedes final eligibility recheck and only one current claim exists per event across every process sharing a selected PostgreSQL store or within the selected SQLite runtime; PostgreSQL retains one exact private session authority for lock acquisition, mutation, and checked unlock until the claim is consumed, and poisoning that physical session snapshots every attached sibling under session state, releases the triggering lease and separately acquired operation boundary, then terminalizes sibling capabilities without holding lease, operation, or transaction boundaries before any can be accepted again; exact active-mutation release may retire only the triggering capability before transaction unwind.
-    PPO-PUB-001: Foreground publication, executable event commit, and every recovery surface share the exact current event-identity exclusion; only closed diagnostic-direct named commits are claim-free.
-    PPO-SET-001: Acknowledgement and decision-route disposition require the current claim and commit atomically.
-    PPO-REL-001: Cancellation, cursor abandonment, non-durable retry release, failed settlement, explicit release, and restart preserve reclaimability without stranded ownership or blocking later sweep candidates; one bounded recovery sweep retains retry-release claims through its current examination window and terminally releases them before returning, preventing concurrent duplicate recovery without a runtime retry registry; SQLite mutation and retirement serialize through one per-claim operation lock; PostgreSQL serializes all sibling claim transactions and detached releases on one retained physical session through transaction unwind, while an exact active mutation may release inside its already-owned session boundary; every PostgreSQL release is terminal, false/error unlock poisons and force-discards the exact session, verified unlock closes it, and session-owned group terminalization retires every attached registry claim, cursor membership, wrapper, and capacity reservation exactly once while cleanup evidence is propagated; the group transition snapshots under session state, releases the triggering lease and separately acquired operation boundary, and drains sibling callbacks outside every lease, operation, and transaction boundary, while exact active-mutation release may retire only the trigger before unwind and ambiguous acquisition during a borrowed transaction queues the sibling drain until unwind releases that boundary; EventBus reset preserves pending operations until prior retirement succeeds and then attempts every terminal release; startup, ingress resume, and run continue stop normally only on explicit exhaustion or blockage.
-    PPO-SCP-001: Committed scope is exact persisted truth; missing or invalid scope returns typed claim-bound quarantine work to the consumer, and no store-side settlement, delivery marker, current-route inference, fallback, or repair exists.
-    PPO-CUR-001: Cursor continuation is monotonic across fixed global/run phases, records mutable decision-route progress only as a private monotonic set of immutable insertion sequences so each route is examined at most once per pass while attempt/retry priority remains intact, captures one selected-store-generated immutable insertion-sequence high-water boundary per phase plus an exact PostgreSQL visibility snapshot, tests mutable rows through immutable insertion transaction identity rather than current tuple versions, advances before release, remembers local blockage until bounded-pass exhaustion, reaches every consumer as one typed SweepResult, survives periodic tick boundaries, excludes transactions committed after phase entry regardless of sequence allocation order, and cannot be reset, extended, or positioned by a caller.
-    PPO-DSP-001: Every prepared-dispatch entry owns its publication claim before validation or process-work admission; validation and fenced/retired admission failure synchronously consume it with cleanup evidence, successful asynchronous admission transfers that sole owner to the admitted goroutine, and accepted dispatch cannot outlive runtime retirement or selected-store release.
-    PPO-DCR-001: Decision-route defer, quarantine, processed acknowledgement, convergence retry, completion, and inactive-parent supersession are age-independent and ordered.
-    PPO-GLO-001: Global durable-work presence is one typed age-independent projection.
-    PPO-SUM-001: Per-run summary preserves absent, successful, terminal non-success, deferred, diagnostic, inactive, and forked distinctions.
-    PPO-FAM-001: Exact platform acknowledgement remains structurally separate from every other receipt, delivery, evidence, and cleanup family.
-    PPO-PRV-001: SQL and backend synchronization mechanics are private to selected-store adapters; public connection and transaction context values cannot establish or redirect PostgreSQL session-lock authority. Bundle delete and destructive reset acquire operation-specific opaque leases on their own exact PostgreSQL sessions, retain those leases across external work, and use separate short operation-owned transactions for persistence. Layered API idempotency and administrative leases reserve independent capacity and cannot borrow a surrounding transaction or wait on their own session.
-    PPO-PAR-001: Named parent terminalization is typed, transactional, and linearized with claim registration before either durable mutation.
+  invariant_ids:
+    PPO-OWN-001:
+      owner_ref: platform-spec.yaml#durable_pipeline_processing_obligation_authority
+      rule: One mandatory selected-store owner; no optional, nil, no-op, alias, legacy, reader, writer, settler, or fake-store assembler survives on durable runtime, EventBus, coordinator, or recovery paths.
+      executable_proofs:
+        - {path: internal/store/internal/runtimepersistence/pipeline_obligation_parity_test.go, test: TestPipelineObligationHasNoLegacyCapabilityAssemblers}
+    PPO-DIS-001:
+      owner_ref: platform-spec.yaml#durable_pipeline_processing_obligation_authority.disposition_contract
+      rule: One closed typed disposition vocabulary owns every foreground, recovery, directive, decision-route, and initial outcome.
+      executable_proofs:
+        - {path: internal/runtime/pipelineobligation/model_test.go, test: TestPipelineDispositionContractIsClosed}
+        - {path: internal/runtime/pipelineobligation/model_test.go, test: TestPipelineRetryReleaseIsNotDurableDisposition}
+    PPO-SEL-001:
+      owner_ref: platform-spec.yaml#durable_pipeline_processing_obligation_authority.claim_contract
+      rule: Eligibility and canonical hydration are exact, age-independent, and exhaustive through one opaque selected-store cursor whose batch limit bounds examined candidates; diagnostic and non-running/non-paused exclusions are explicit.
+      executable_proofs:
+        - {path: internal/store/internal/runtimepersistence/pipeline_obligation_review_closure_test.go, test: TestPipelineScanBoundsExaminationAndContinuesPastBusyCandidatesOnSQLiteAndPostgres}
+    PPO-CLM-001:
+      owner_ref: platform-spec.yaml#durable_pipeline_processing_obligation_authority.claim_contract
+      rule: Exclusion precedes final eligibility recheck and only one current claim exists per event across every process sharing a selected PostgreSQL store or within the selected SQLite runtime; PostgreSQL retains one exact private session authority for lock acquisition, mutation, and checked unlock until the claim is consumed, and poisoning that physical session snapshots every attached sibling under session state, releases the triggering lease and separately acquired operation boundary, then terminalizes sibling capabilities without holding lease, operation, or transaction boundaries before any can be accepted again; exact active-mutation release may retire only the triggering capability before transaction unwind.
+      executable_proofs:
+        - {path: internal/store/internal/runtimepersistence/pipeline_obligation_parity_test.go, test: TestPipelineObligationSQLitePostgresParityMatrix}
+        - {path: internal/store/internal/runtimepersistence/postgres_session_authority_test.go, test: TestPostgresPipelineClaimUsesExactSessionAcrossCommitAndRollback}
+    PPO-PUB-001:
+      owner_ref: platform-spec.yaml#durable_pipeline_processing_obligation_authority.claim_contract
+      rule: Foreground publication, executable event commit, and every recovery surface share the exact current event-identity exclusion; only closed diagnostic-direct named commits are claim-free.
+      executable_proofs:
+        - {path: internal/store/internal/runtimepersistence/pipeline_obligation_review_closure_test.go, test: TestExecutableEventCommitRequiresCurrentPublicationClaimOnSQLiteAndPostgres}
+    PPO-SET-001:
+      owner_ref: platform-spec.yaml#durable_pipeline_processing_obligation_authority.decision_route_contract
+      rule: Acknowledgement and decision-route disposition require the current claim and commit atomically.
+      executable_proofs:
+        - {path: internal/runtime/pipeline/workflow_gate_lifecycle_test.go, test: TestWorkflowGateDecisionRoutePublishesAtomicallyAndRecoversIdempotentlyOnBothStores}
+    PPO-REL-001:
+      owner_ref: platform-spec.yaml#durable_pipeline_processing_obligation_authority.claim_contract
+      rule: Cancellation, cursor abandonment, non-durable retry release, failed settlement, explicit release, and restart preserve reclaimability without stranded ownership or blocking later sweep candidates; one bounded recovery sweep retains retry-release claims through its current examination window and terminally releases them before returning, preventing concurrent duplicate recovery without a runtime retry registry; SQLite mutation and retirement serialize through one per-claim operation lock; PostgreSQL serializes all sibling claim transactions and detached releases on one retained physical session through transaction unwind, while an exact active mutation may release inside its already-owned session boundary; every PostgreSQL release is terminal, false/error unlock poisons and force-discards the exact session, verified unlock closes it, and session-owned group terminalization retires every attached registry claim, cursor membership, wrapper, and capacity reservation exactly once while cleanup evidence is propagated; the group transition snapshots under session state, releases the triggering lease and separately acquired operation boundary, and drains sibling callbacks outside every lease, operation, and transaction boundary, while exact active-mutation release may retire only the trigger before unwind and ambiguous acquisition during a borrowed transaction queues the sibling drain until unwind releases that boundary; EventBus reset preserves pending operations until prior retirement succeeds and then attempts every terminal release; startup, ingress resume, and run continue stop normally only on explicit exhaustion or blockage.
+      executable_proofs:
+        - {path: internal/store/internal/runtimepersistence/pipeline_obligation_review_closure_test.go, test: TestPipelineScanCancellationAndAbandonmentReleaseClaimsOnSQLiteAndPostgres}
+    PPO-SCP-001:
+      owner_ref: platform-spec.yaml#durable_pipeline_processing_obligation_authority.claim_contract
+      rule: Committed scope is exact persisted truth; missing or invalid scope returns typed claim-bound quarantine work to the consumer, and no store-side settlement, delivery marker, current-route inference, fallback, or repair exists.
+      executable_proofs:
+        - {path: internal/store/internal/runtimepersistence/pipeline_obligation_review_closure_test.go, test: TestClaimEventReturnsTypedCorruptDecisionWorkForAcknowledgedAndUnacknowledgedOnSQLiteAndPostgres}
+    PPO-CUR-001:
+      owner_ref: platform-spec.yaml#durable_pipeline_processing_obligation_authority.claim_contract
+      rule: Cursor continuation is monotonic across fixed global/run phases, records mutable decision-route progress only as a private monotonic set of immutable insertion sequences so each route is examined at most once per pass while attempt/retry priority remains intact, captures one selected-store-generated immutable insertion-sequence high-water boundary per phase plus an exact PostgreSQL visibility snapshot, tests mutable rows through immutable insertion transaction identity rather than current tuple versions, advances before release, remembers local blockage until bounded-pass exhaustion, reaches every consumer as one typed SweepResult, survives periodic tick boundaries, excludes transactions committed after phase entry regardless of sequence allocation order, and cannot be reset, extended, or positioned by a caller.
+      executable_proofs:
+        - {path: internal/store/internal/runtimepersistence/pipeline_obligation_review_closure_test.go, test: TestPipelineScanDecisionPhaseHighWaterPreventsRecoveryStarvationOnSQLiteAndPostgres}
+    PPO-DSP-001:
+      owner_ref: platform-spec.yaml#durable_pipeline_processing_obligation_authority.process_local_handoff
+      rule: Every prepared-dispatch entry owns its publication claim before validation or process-work admission; validation and fenced/retired admission failure synchronously consume it with cleanup evidence, successful asynchronous admission transfers that sole owner to the admitted goroutine, and accepted dispatch cannot outlive runtime retirement or selected-store release.
+      executable_proofs:
+        - {path: internal/runtime/bus/pipeline_terminal_release_test.go, test: TestPreparedDispatchAdmissionFailureTerminallyConsumesPublicationClaim}
+        - {path: internal/runtime/bus/pipeline_terminal_release_test.go, test: TestInvalidPreparedDispatchTerminallyConsumesAttachedPublicationClaim}
+    PPO-DCR-001:
+      owner_ref: platform-spec.yaml#durable_pipeline_processing_obligation_authority.decision_route_contract
+      rule: Decision-route defer, quarantine, processed acknowledgement, convergence retry, completion, and inactive-parent supersession are age-independent and ordered.
+      executable_proofs:
+        - {path: internal/runtime/pipeline/workflow_gate_recovery_external_test.go, test: TestDecisionRouteObligationFairnessAdmitsNewWorkBehindFullDeferredPageOnBothStores}
+        - {path: internal/runtime/bus/pipeline_corrupt_scope_scan_test.go, test: TestAcknowledgedDecisionRouteWinsBeforeCorruptScopeQuarantineOnSQLiteAndPostgres}
+    PPO-GLO-001:
+      owner_ref: platform-spec.yaml#durable_pipeline_processing_obligation_authority.projection_contracts
+      rule: Global durable-work presence is one typed age-independent projection.
+      executable_proofs:
+        - {path: internal/store/internal/runtimepersistence/pipeline_obligation_parity_test.go, test: TestPipelineObligationSQLitePostgresParityMatrix}
+    PPO-SUM-001:
+      owner_ref: platform-spec.yaml#durable_pipeline_processing_obligation_authority.projection_contracts
+      rule: Per-run summary preserves absent, successful, terminal non-success, deferred, diagnostic, inactive, and forked distinctions.
+      executable_proofs:
+        - {path: internal/store/internal/runtimepersistence/pipeline_obligation_parity_test.go, test: TestPipelineObligationSQLitePostgresParityMatrix}
+    PPO-FAM-001:
+      owner_ref: platform-spec.yaml#durable_pipeline_processing_obligation_authority.receipt_family_boundary
+      rule: Exact platform acknowledgement remains structurally separate from every other receipt, delivery, evidence, and cleanup family.
+      executable_proofs:
+        - {path: internal/store/internal/runtimepersistence/pipeline_obligation_parity_test.go, test: TestPipelineObligationSQLitePostgresParityMatrix}
+    PPO-PRV-001:
+      owner_ref: platform-spec.yaml#durable_pipeline_processing_obligation_authority
+      rule: SQL and backend synchronization mechanics are private to selected-store adapters; public connection and transaction context values cannot establish or redirect PostgreSQL session-lock authority. Bundle delete and destructive reset acquire operation-specific opaque leases on their own exact PostgreSQL sessions, retain those leases across external work, and use separate short operation-owned transactions for persistence. Layered API idempotency and administrative leases reserve independent capacity and cannot borrow a surrounding transaction or wait on their own session.
+      executable_proofs:
+        - {path: internal/store/internal/runtimepersistence/postgres_session_authority_test.go, test: TestPostgresPipelineClaimUsesExactSessionAcrossCommitAndRollback}
+        - {path: internal/apiv1/operator_administrative_layering_test.go, test: TestAdministrativeOperationsLayerIdempotencyLeaseAndExternalWorkWithOneConnection}
+    PPO-PAR-001:
+      owner_ref: platform-spec.yaml#durable_pipeline_processing_obligation_authority.parent_terminalization
+      rule: Named parent terminalization is typed, transactional, and linearized with claim registration before either durable mutation.
+      executable_proofs:
+        - {path: internal/store/internal/runtimepersistence/pipeline_obligation_review_closure_test.go, test: TestPostgresParentTerminalizationLinearizesClaimRegistration}
 
 agent_topology_authority:
   owner: process composition retained selected-store capability plus the typed AgentManager lifecycle coordinator
@@ -35842,41 +35935,78 @@ managed_external_effect_authority:
     terminal: Existing settled, terminal_failure, and outcome_uncertain attempts are unchanged.
   invariant_ids:
     runtime.provider_attempt.origin_exact:
-      owner: BeginCompletion plus selected-store external-effect authorization
+      owner_ref: platform-spec.yaml#managed_external_effect_authority
       rule: Every normal-agent provider attempt stores exactly one validated live delivery or directive-operation origin; no event, route, run, latest-row, or context inference can replace it, and no delivery row is fabricated for a directive.
-      negative_proof: TestProviderAttemptDrainRejectsMissingOrForeignOriginClaimParity, TestProviderDirectiveOriginRejectsMissingAmbiguousAndForeignParity, TestProviderDirectiveOriginCurrentSuccessParity, and TestProviderDirectiveOriginSupersessionParity
+      executable_proofs:
+        - {path: internal/store/internal/runtimepersistence/provider_attempt_drain_test.go, test: TestProviderAttemptDrainRejectsMissingOrForeignOriginClaimParity}
+        - {path: internal/store/internal/runtimepersistence/provider_directive_origin_test.go, test: TestProviderDirectiveOriginRejectsMissingAmbiguousAndForeignParity}
+        - {path: internal/store/internal/runtimepersistence/provider_directive_origin_test.go, test: TestProviderDirectiveOriginCurrentSuccessParity}
+        - {path: internal/store/internal/runtimepersistence/provider_directive_origin_test.go, test: TestProviderDirectiveOriginSupersessionParity}
     runtime.provider_attempt.supersession_linearized:
-      owner: selected-store lifecycle transition and launch operations
+      owner_ref: platform-spec.yaml#managed_external_effect_authority
       rule: Transition-wins terminally settles prelaunch work and launch-wins captures one exact predecessor drain under the same lifecycle cell lock.
-      negative_proof: TestProviderAttemptLaunchVersusLifecycleSupersessionParity
+      executable_proofs:
+        - {path: internal/store/internal/runtimepersistence/provider_attempt_drain_test.go, test: TestProviderAttemptLaunchVersusLifecycleSupersessionParity}
     runtime.provider_attempt.drained_settlement_restricted:
-      owner: DrainedCompletionSettlement and the named selected-store drained completion operation
+      owner_ref: platform-spec.yaml#managed_external_effect_authority
       rule: Locked selected-store truth may project a formerly-current completion candidate into drained immutable evidence and its exact origin/finalization only. The typed drained result stops every provider and Manager consumer before mutable or cross-attempt projection, without retry.
-      negative_proof: TestDrainedCompletionInputHasNoMutableProjectionSurface, TestProviderAttemptDrainLifecycleSupersessionParity, TestProviderDirectiveOriginSupersessionParity, TestClaudeMemoryDrainedCompletionStopsBeforeProviderHeadProjection, TestAnthropicDrainedCompletionStopsBeforeMutableProjection, TestProcessEventConsumesDrainedCompletionObservationWithoutSecondReceiptOrOutput, and TestBoardStep_DrainedDirectiveStopsBeforeRemediation
+      executable_proofs:
+        - {path: internal/runtime/effects/effects_test.go, test: TestDrainedCompletionInputHasNoMutableProjectionSurface}
+        - {path: internal/store/internal/runtimepersistence/provider_attempt_drain_test.go, test: TestProviderAttemptDrainLifecycleSupersessionParity}
+        - {path: internal/store/internal/runtimepersistence/provider_directive_origin_test.go, test: TestProviderDirectiveOriginSupersessionParity}
+        - {path: internal/runtime/llm/completion_authority_test.go, test: TestClaudeMemoryDrainedCompletionStopsBeforeProviderHeadProjection}
+        - {path: internal/runtime/llm/completion_authority_test.go, test: TestAnthropicDrainedCompletionStopsBeforeMutableProjection}
+        - {path: internal/runtime/manager/receipts_test.go, test: TestProcessEventConsumesDrainedCompletionObservationWithoutSecondReceiptOrOutput}
+        - {path: internal/runtime/agents/agent_llm_test.go, test: TestBoardStep_DrainedDirectiveStopsBeforeRemediation}
     runtime.provider_attempt.recovery_no_redispatch:
-      owner: selected-store external-effect recovery before delivery recovery
+      owner_ref: platform-spec.yaml#managed_external_effect_authority
       rule: Every captured or crash-stranded provider attempt converges to exact terminal evidence and origin outcome without provider dispatch, and repeated recovery is idempotent.
-      negative_proof: TestProviderAttemptDrainStartupRecoveryParity, TestProviderAttemptDrainTerminalRunRecoveryParity, TestProviderDirectiveOriginRecoveryParity, and TestClaudeProviderHeadCommitFailureSettlesUncertain
+      executable_proofs:
+        - {path: internal/store/internal/runtimepersistence/provider_attempt_drain_test.go, test: TestProviderAttemptDrainStartupRecoveryParity}
+        - {path: internal/store/internal/runtimepersistence/provider_attempt_drain_test.go, test: TestProviderAttemptDrainTerminalRunRecoveryParity}
+        - {path: internal/store/internal/runtimepersistence/provider_directive_origin_test.go, test: TestProviderDirectiveOriginRecoveryParity}
+        - {path: internal/serveapp/claude_attempt_identity_test.go, test: TestClaudeProviderHeadCommitFailureSettlesUncertain}
     runtime.provider_attempt.settled_delivery_response_continuation:
-      owner: immutable settled attempt evidence plus exact selected-store delivery authorization
+      owner_ref: platform-spec.yaml#managed_external_effect_authority
       rule: A reclaimed normal-agent delivery whose provider attempt already settled may consume only its selected-store active continuation pointer and canonical parsed response under a current claim after exact operation, request, callable-plan, bundle, actor, run, route, subscriber, delivery, lifecycle, memory, and projection-phase verification. Recovery occurs once at managed-conversation root reentry, never from recursive provider-frame calls. Successful successor settlement atomically replaces the prior active continuation; a consumed predecessor with further tool work atomically carries the exact agentframe parent and canonical TurnToolContinuation result until that settlement. Recovery never orders historical attempts to infer a latest turn. Conversation projection is monotonic and idempotent across a crash after persistence; stateless session rebinding changes only continuation-fingerprint-excluded process coordinates. The recovered predecessor handle cannot launch, observe, resettle, reserve budget, record spend, or cross a delivery or directive boundary.
-      negative_proof: TestSettledProviderResponseContinuesExactReclaimedDeliverySQLite, TestSettledProviderResponseContinuesExactReclaimedDeliveryPostgres, TestSettledProviderResponseRebindsStatelessSessionSQLite, TestSettledProviderResponseRebindsStatelessSessionPostgres, TestSettledCompletionRecoveryUsesImmutableProjectedTurn, TestAllManagedAdaptersDelegateRecoveryOnlyToConversationRoot, TestManagedConversationRootResumesExactConsumedToolContinuation, TestManagedConversationRootDoesNotRepeatConsumedTerminalTool, TestPrepareManagedSessionRotatesExactCompletedRootBeforeNextFrame, TestPrepareManagedSessionRejectsStaleSessionWithoutRotation, TestCompletionResponseSuccessorCheckpointMatrixSQLite, TestCompletionResponseSuccessorCheckpointMatrixPostgres, TestCompletionContinuationCannotDispatchOrResettle, and TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends
+      executable_proofs:
+        - {path: internal/store/internal/runtimepersistence/completion_settlement_test.go, test: TestSettledProviderResponseContinuesExactReclaimedDeliverySQLite}
+        - {path: internal/store/internal/runtimepersistence/completion_settlement_test.go, test: TestSettledProviderResponseContinuesExactReclaimedDeliveryPostgres}
+        - {path: internal/store/internal/runtimepersistence/completion_settlement_test.go, test: TestSettledProviderResponseRebindsStatelessSessionSQLite}
+        - {path: internal/store/internal/runtimepersistence/completion_settlement_test.go, test: TestSettledProviderResponseRebindsStatelessSessionPostgres}
+        - {path: internal/runtime/llm/completion_authority_test.go, test: TestSettledCompletionRecoveryUsesImmutableProjectedTurn}
+        - {path: internal/runtime/llm/completion_authority_test.go, test: TestAllManagedAdaptersDelegateRecoveryOnlyToConversationRoot}
+        - {path: internal/runtime/llm/conversation_test.go, test: TestManagedConversationRootResumesExactConsumedToolContinuation}
+        - {path: internal/runtime/llm/conversation_test.go, test: TestManagedConversationRootDoesNotRepeatConsumedTerminalTool}
+        - {path: internal/runtime/llm/session_rotation_test.go, test: TestPrepareManagedSessionRotatesExactCompletedRootBeforeNextFrame}
+        - {path: internal/runtime/llm/session_rotation_test.go, test: TestPrepareManagedSessionRejectsStaleSessionWithoutRotation}
+        - {path: internal/store/internal/runtimepersistence/completion_settlement_test.go, test: TestCompletionResponseSuccessorCheckpointMatrixSQLite}
+        - {path: internal/store/internal/runtimepersistence/completion_settlement_test.go, test: TestCompletionResponseSuccessorCheckpointMatrixPostgres}
+        - {path: internal/runtime/effects/effects_test.go, test: TestCompletionContinuationCannotDispatchOrResettle}
+        - {path: internal/releasee2e/golden_agent_workload_test.go, test: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends}
     runtime.workflow_engine.state_revision_retry:
-      owner: workflow engine state compare-and-set plus executable delivery lifecycle
+      owner_ref: platform-spec.yaml#engine.runtime_core_persistence_store_contracts
       rule: A workflow state revision compare-and-set loss rolls back the complete paired mutation and returns a typed retryable lifecycle conflict so the exact delivery reloads current state; it is never terminalized as handler failure.
-      negative_proof: TestWorkflowEngineStateRevisionConflictIsRetryable and TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends
+      executable_proofs:
+        - {path: internal/store/internal/backend/pipelinepersistence/workflow_engine_mutation_commit_test.go, test: TestWorkflowEngineStateRevisionConflictIsRetryable}
+        - {path: internal/releasee2e/golden_agent_workload_test.go, test: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends}
     runtime.provider_attempt.tail_lease_coupled:
-      owner: selected-store completion heartbeat plus the exact generation-to-process renewal handoff
+      owner_ref: platform-spec.yaml#managed_external_effect_authority
       rule: A live normal-provider tail retains its effect attempt, exact delivery claim or directive execution lease, and pending drain through one atomic heartbeat; no generation-owned origin heartbeat concurrently interprets liveness during that tail.
-      negative_proof: TestProviderAttemptHeartbeatAuthorityParity, TestProviderAttemptCompletionAfterOriginalOriginExpiryParity, and TestCompletionHeartbeatYieldsExactOriginRenewal
+      executable_proofs:
+        - {path: internal/store/internal/runtimepersistence/provider_attempt_drain_test.go, test: TestProviderAttemptHeartbeatAuthorityParity}
+        - {path: internal/store/internal/runtimepersistence/provider_attempt_drain_test.go, test: TestProviderAttemptCompletionAfterOriginalOriginExpiryParity}
+        - {path: internal/runtime/llm/completion_authority_test.go, test: TestCompletionHeartbeatYieldsExactOriginRenewal}
     runtime.provider_attempt.destructive_reset_terminal_only:
-      owner: destructive-reset provider-authority guard plus immutable provider origin snapshots
+      owner_ref: platform-spec.yaml#managed_external_effect_authority
       rule: runtime.nuke rejects nonterminal normal-provider attempts and pending drains, while terminal attempt/drain no-redispatch evidence survives deletion of mutable delivery history without a foreign-key dependency.
-      negative_proof: TestPostgresStore_ApplyDestructiveResetCleanup_ProviderAuthorityMatrix
+      executable_proofs:
+        - {path: internal/store/internal/runtimepersistence/destructive_reset_cleanup_test.go, test: TestPostgresStore_ApplyDestructiveResetCleanup_ProviderAuthorityMatrix}
     runtime.provider_attempt.mock_tail_timing:
-      owner: generation-owned mockperformance Performance and mock runtime
+      owner_ref: platform-spec.yaml#managed_external_effect_authority
       rule: Authored deterministic post-tool tail latency delays response observation on tool-result rounds and remains cancellation-aware.
-      negative_proof: TestMockProviderTailLatencyShapesSelfTerminalization
+      executable_proofs:
+        - {path: internal/runtime/llm/mock_runtime_test.go, test: TestMockProviderTailLatencyShapesSelfTerminalization}
   automatic_redispatch_allowlist:
     - adapter: claude_cli
       condition: preceding operation and attempt are terminal_failure, retain the same persisted authority epoch/generation as the current typed authority, and have no launched_at or carry exact launch_rejected=true evidence after cmd.Start rejection
