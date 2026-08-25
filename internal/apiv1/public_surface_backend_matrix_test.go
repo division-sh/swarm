@@ -380,7 +380,7 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 				row := publicSurfaceMatrixRowByID(t, matrix, "event_publish_dynamic_auto_emit_served_lifecycle")
 				row.ProofRefs = []publicSurfaceProofRef{
 					{Kind: "go_test", Name: "TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite"},
-					{Kind: "go_test", Name: "TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres"},
+					{Kind: "go_test", Name: "TestRunForkEndToEndPostgresCapturesCompleteRevisionHistory"},
 				}
 			},
 			want: "event_publish_dynamic_auto_emit_served_lifecycle missing required go_test proof_ref TestRunServeRuntimeEventPublishDynamicAutoEmitServedPathDefaultSQLite",
@@ -1553,7 +1553,7 @@ func expectedPublicSurfaceRowShapes() map[string]publicSurfaceExpectedRowShape {
 			ProofDimensions:      []string{"canonical_store_owner", "cli_v1_path", "openrpc_publication", "real_runtime_startup", "real_v1_handler", "selected_store", "served_mutating_lifecycle"},
 			GoTestProofRefs: []string{
 				"TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite",
-				"TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres",
+				"TestRunForkEndToEndPostgresCapturesCompleteRevisionHistory",
 				"TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite",
 				"TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathPostgres",
 			},

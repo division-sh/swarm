@@ -20,6 +20,7 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
+	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
 type diagnosticRuntimeLogFixtureStore interface {
@@ -286,7 +287,12 @@ func commitDeliveryReplayEventFixture(
 		if !inserted {
 			return fmt.Errorf("delivery-replay fixture delivery %s was not inserted", forkDeliveryID)
 		}
-		return nil
+		_, err = finalizePostgresRunForkTestRevision(txctx, tx, forkRunID,
+			runforkrevision.FamilyEvents,
+			runforkrevision.FamilyEventDeliveries,
+			runforkrevision.FamilyCommittedReplayScopes,
+		)
+		return err
 	})
 }
 
@@ -377,11 +383,31 @@ func commitAdmittedSemanticEventFixtureOutcomeWithDisposition(
 	switch selected := store.(type) {
 	case *PostgresStore:
 		err = selected.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-			return commit(txctx, tx, story, selected)
+			if err := commit(txctx, tx, story, selected); err != nil {
+				return err
+			}
+			_, err := finalizePostgresRunForkTestRevision(txctx, tx, admitted.Event().RunID(),
+				runforkrevision.FamilyEvents,
+				runforkrevision.FamilyEventDeliveries,
+				runforkrevision.FamilyCommittedReplayScopes,
+				runforkrevision.FamilyEventReceipts,
+				runforkrevision.FamilyReplyContexts,
+			)
+			return err
 		})
 	case *SQLiteRuntimeStore:
 		err = selected.runPrivateAuthorActivityMutation(ctx, "sqlite semantic event fixture", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-			return commit(txctx, tx, story, selected)
+			if err := commit(txctx, tx, story, selected); err != nil {
+				return err
+			}
+			_, err := finalizeSQLiteRunForkTestRevision(txctx, tx, admitted.Event().RunID(),
+				runforkrevision.FamilyEvents,
+				runforkrevision.FamilyEventDeliveries,
+				runforkrevision.FamilyCommittedReplayScopes,
+				runforkrevision.FamilyEventReceipts,
+				runforkrevision.FamilyReplyContexts,
+			)
+			return err
 		})
 	default:
 		return runtimebus.EventAppendOutcomeUnknown, fmt.Errorf("semantic event fixture store %T is unsupported", store)

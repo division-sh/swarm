@@ -16,8 +16,9 @@ var executableDeliverySQL = regexp.MustCompile(`(?is)\b(?:from|join|into|update|
 
 var executableDeliverySQLOwners = map[string]string{
 	"internal/store/internal/backend/delivery/adapter.go":                                                 "private canonical executable-delivery lifecycle adapter",
+	"internal/store/internal/backend/delivery/lifecycle.go":                                               "named delivery lifecycle owner resolving affected runs before mutation",
 	"internal/store/internal/backend/delivery/read_projections.go":                                        "private canonical bounded executable-delivery read projections",
-	"internal/store/internal/backend/runforkrevision/revision.go":                                         "private immutable fork-revision fact capture",
+	"internal/store/internal/backend/runforkrevision/projection.go":                                       "private immutable fork-revision canonical projection",
 	"internal/store/internal/adminpersistence/destructive_reset_cleanup.go":                               "named destructive-reset physical cleanup",
 	"internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_execution_mutation.go": "selected-fork physical cleanup after typed terminalization",
 	"internal/store/internal/backend/pipelinepersistence/standing_service.go":                             "standing-service pre-mutation execution-posture inspection",

@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
+	"github.com/google/uuid"
 )
 
 type runForkRevisionMatrixFixture struct {
@@ -76,6 +78,75 @@ func TestRunForkRevisionTwelveFamilySelectedStoreParity(t *testing.T) {
 	})
 	if !reflect.DeepEqual(results["sqlite"], results["postgres"]) {
 		t.Fatalf("selected-store canonical revision facts differ:\nsqlite=%#v\npostgres=%#v", results["sqlite"], results["postgres"])
+	}
+}
+
+func TestGoldenRuntimeRunsRemainForkPlannablePostgres(t *testing.T) {
+	for _, workload := range []struct {
+		name             string
+		extraEvents      int
+		extraDeadLetters int
+	}{
+		{name: "golden_workload"},
+		{name: "jobflow_damaged_run", extraEvents: 100, extraDeadLetters: 15},
+	} {
+		t.Run(workload.name, func(t *testing.T) {
+			_, db, _ := testutil.StartPostgres(t)
+			ctx := testAuthorActivityContext()
+			fixture := newRunForkRevisionMatrixFixture()
+			selected := newPostgresStoreWithBackend(mustPostgresBackend(db))
+			requireRunFixtureForTest(t, ctx, selected, semanticRunFixture{
+				Origin: semanticScenarioSetupRunOriginForTest(), RunID: fixture.runID, StartedAt: fixture.at,
+			})
+			seedTestAgentRow(t, ctx, db, true, testAgentIdentity(t, "revision-matrix-agent", ""), "active")
+
+			tx, err := db.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatalf("begin representative workload revision: %v", err)
+			}
+			defer func() { _ = tx.Rollback() }()
+			seedRunForkRevisionMatrixFacts(t, ctx, tx, fixture, true)
+			selectedEventID := fixture.eventID
+			for i := 0; i < workload.extraEvents; i++ {
+				selectedEventID = uuid.NewString()
+				seedRunForkRevisionMatrixEvent(t, ctx, tx, fixture.runID, selectedEventID, fixture.at.Add(time.Duration(i+1)*time.Microsecond))
+			}
+			for i := 0; i < workload.extraDeadLetters; i++ {
+				mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO dead_letters (dead_letter_id,original_event_id,original_event,original_payload,flow_instance,failure,created_at) VALUES ($1,$2,'matrix.event',$3,'matrix-flow',$4,$5)`, uuid.NewString(), fixture.eventID, `{}`, `{"class":"matrix"}`, fixture.at.Add(time.Duration(i+1)*time.Microsecond))
+			}
+			effects, err := runforkrevision.ForRun(fixture.runID, runforkrevision.AllFamilies()...)
+			if err != nil {
+				t.Fatalf("declare representative workload effects: %v", err)
+			}
+			results, err := runforkrevision.FinalizePostgres(ctx, tx, effects)
+			if err != nil {
+				t.Fatalf("finalize representative workload revision: %v", err)
+			}
+			if got := results[fixture.runID]; !got.Changed || got.Revision != 1 {
+				t.Fatalf("representative workload revision = %#v, want changed revision 1", got)
+			}
+			if err := tx.Commit(); err != nil {
+				t.Fatalf("commit representative workload revision: %v", err)
+			}
+
+			plan, err := selected.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: fixture.runID, At: selectedEventID})
+			if err != nil {
+				t.Fatalf("representative workload is not fork-plannable: %v", err)
+			}
+			if plan.ForkPoint.EventID != selectedEventID || plan.ForkPoint.Revision != 1 {
+				t.Fatalf("representative workload fork point = %#v, want event %s at revision 1", plan.ForkPoint, selectedEventID)
+			}
+		})
+	}
+}
+
+func newRunForkRevisionMatrixFixture() runForkRevisionMatrixFixture {
+	return runForkRevisionMatrixFixture{
+		runID: uuid.NewString(), eventID: uuid.NewString(), entityID: uuid.NewString(), mutationID: uuid.NewString(),
+		deliveryID: uuid.NewString(), receiptID: uuid.NewString(), deadLetterID: uuid.NewString(), timerID: uuid.NewString(),
+		sessionID: uuid.NewString(), turnID: uuid.NewString(), auditID: uuid.NewString(), replyID: "revision-matrix-" + uuid.NewString(),
+		surfaceID: uuid.NewString(), operationID: uuid.NewString(), attemptID: uuid.NewString(), authorityID: uuid.NewString(),
+		at: time.Date(2026, 8, 25, 19, 0, 0, 123000000, time.UTC),
 	}
 }
 

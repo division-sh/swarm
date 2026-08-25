@@ -119,7 +119,7 @@ rows:
       - {kind: spec_ref, path: platform-spec.yaml, ref: workflow_node_route_authority}
     proof_refs:
       - {kind: go_test, name: TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite}
-      - {kind: go_test, name: TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres}
+      - {kind: go_test, name: TestRunForkEndToEndPostgresCapturesCompleteRevisionHistory}
       - {kind: issue, issue: 1337}
     notes: >
       The served proof asserts that the initial root-input publication persists
@@ -215,7 +215,7 @@ rows:
       - {kind: go_test, name: TestPipelineCoordinatorInterceptSettlesAuthorizedNodeDelivery}
       - {kind: go_test, name: TestExecutableDeliveryLifecycleParity}
       - {kind: go_test, name: TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite}
-      - {kind: go_test, name: TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres}
+      - {kind: go_test, name: TestRunForkEndToEndPostgresCapturesCompleteRevisionHistory}
     notes: >
       #1293 owns execution admission. Workflow nodes now consume committed
       typed node event_deliveries authority before handler execution across the

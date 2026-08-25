@@ -63,12 +63,13 @@ var eventPayloadBytesSQLFiles = map[string]struct{}{
 	"internal/store/internal/backend/delivery/dead_letters.go":        {},
 	"internal/store/internal/backend/eventrecord/postgres/adapter.go": {},
 	"internal/store/internal/backend/eventrecord/sqlite/adapter.go":   {},
-	"internal/store/internal/backend/runforkrevision/revision.go":     {},
+	"internal/store/internal/backend/runforkrevision/projection.go":   {},
 }
 
 var directEventSQLTestFixtures = map[string]int{
-	"internal/cliapp/raw_sql_boundary_test.go":                                 1,
-	"internal/store/internal/runtimepersistence/event_schema_contract_test.go": 2,
+	"internal/cliapp/raw_sql_boundary_test.go":                                                   1,
+	"internal/store/internal/runtimepersistence/event_schema_contract_test.go":                   2,
+	"internal/store/internal/runtimepersistence/run_fork_revision_selected_store_parity_test.go": 1,
 }
 
 var eventInsertSQL = regexp.MustCompile(`(?is)\bINSERT\s+INTO\s+events\b`)

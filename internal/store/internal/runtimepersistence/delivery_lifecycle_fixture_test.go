@@ -15,6 +15,7 @@ import (
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
+	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
 func postgresDeliveryFixtureStore(db *sql.DB) *PostgresStore {
@@ -65,7 +66,10 @@ func commitPostgresDeliveryFixture(t testing.TB, ctx context.Context, db *sql.DB
 		if err != nil {
 			return err
 		}
-		_, err = postgresDeliveryAdapter.CommitInitial(txctx, tx, event.ID(), event.RunID(), []events.DeliveryRoute{route}, authority)
+		if _, err = postgresDeliveryAdapter.CommitInitial(txctx, tx, event.ID(), event.RunID(), []events.DeliveryRoute{route}, authority); err != nil {
+			return err
+		}
+		_, err = finalizePostgresRunForkTestRevision(txctx, tx, event.RunID(), runforkrevision.FamilyEventDeliveries)
 		return err
 	}); err != nil {
 		t.Fatalf("commit delivery fixture %s/%s: %v", eventID, route.Recipient.ID(), err)
@@ -195,7 +199,10 @@ func commitDeliveryObligationFixture(ctx context.Context, store deliveryFixtureS
 			if err != nil {
 				return err
 			}
-			_, err = postgresDeliveryAdapter.CommitInitial(txctx, tx, event.ID(), event.RunID(), []events.DeliveryRoute{route}, authority)
+			if _, err = postgresDeliveryAdapter.CommitInitial(txctx, tx, event.ID(), event.RunID(), []events.DeliveryRoute{route}, authority); err != nil {
+				return err
+			}
+			_, err = finalizePostgresRunForkTestRevision(txctx, tx, event.RunID(), runforkrevision.FamilyEventDeliveries)
 			return err
 		})
 	case *SQLiteRuntimeStore:
@@ -204,7 +211,10 @@ func commitDeliveryObligationFixture(ctx context.Context, store deliveryFixtureS
 			if err != nil {
 				return err
 			}
-			_, err = sqliteDeliveryAdapter.CommitInitial(txctx, tx, event.ID(), event.RunID(), []events.DeliveryRoute{route}, authority)
+			if _, err = sqliteDeliveryAdapter.CommitInitial(txctx, tx, event.ID(), event.RunID(), []events.DeliveryRoute{route}, authority); err != nil {
+				return err
+			}
+			_, err = finalizeSQLiteRunForkTestRevision(txctx, tx, event.RunID(), runforkrevision.FamilyEventDeliveries)
 			return err
 		})
 	default:

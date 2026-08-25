@@ -204,6 +204,9 @@ func (o *PostgresOwner) AdmitGenericSchedule(ctx context.Context, command runtim
 		if err != nil {
 			return err
 		}
+		if result.Outcome != runtimegenericschedule.AdmissionCreated {
+			return nil
+		}
 		return finalizeTimerEffectPostgres(txctx, tx, command.RunID)
 	})
 	return result, err
@@ -219,6 +222,9 @@ func (o *SQLiteOwner) AdmitGenericSchedule(ctx context.Context, command runtimeg
 		result, err = AdmitTx(txctx, tx, false, command, o.now)
 		if err != nil {
 			return err
+		}
+		if result.Outcome != runtimegenericschedule.AdmissionCreated {
+			return nil
 		}
 		return finalizeTimerEffectSQLite(txctx, tx, command.RunID)
 	})
@@ -547,6 +553,9 @@ func (o *PostgresOwner) CancelGenericSchedule(ctx context.Context, command runti
 		if err != nil {
 			return err
 		}
+		if result.Outcome != runtimegenericschedule.CancelChanged {
+			return nil
+		}
 		return finalizeTimerEffectPostgres(txctx, tx, result.Activation.Command.RunID)
 	})
 	return result, err
@@ -562,6 +571,9 @@ func (o *SQLiteOwner) CancelGenericSchedule(ctx context.Context, command runtime
 		result, err = CancelTx(txctx, tx, false, command)
 		if err != nil {
 			return err
+		}
+		if result.Outcome != runtimegenericschedule.CancelChanged {
+			return nil
 		}
 		return finalizeTimerEffectSQLite(txctx, tx, result.Activation.Command.RunID)
 	})

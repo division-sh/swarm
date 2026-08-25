@@ -892,14 +892,12 @@ func (s *postgresPipelineObligationStore) MarkDecisionProcessed(ctx context.Cont
 		if _, err := s.candidateRequests.RequestCompletionCandidateTx(ctx, tx, runID, nil, handoff); err != nil {
 			return errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
 		}
-		if err := postgresDeliveryAdapter.CommitPipelineHandoff(ctx, tx, claim.EventID()); err != nil {
-			return errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
-		}
 		if _, err := privaterunforkrevision.FinalizePostgres(ctx, tx, effects); err != nil {
 			return errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
 		}
-	} else {
-		return errors.Join(errors.New("processed pipeline event has no owning run"), postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
+	}
+	if err := postgresDeliveryAdapter.CommitPipelineHandoff(ctx, tx, claim.EventID()); err != nil {
+		return errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
 	}
 	if err := tx.Commit(); err != nil {
 		return errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
@@ -945,8 +943,6 @@ func (s *sqlitePipelineObligationStore) MarkDecisionProcessed(ctx context.Contex
 			if _, err = s.candidateRequests.RequestCompletionCandidateTx(txctx, tx, runID, nil, handoff); err != nil {
 				return err
 			}
-		} else {
-			return errors.New("processed pipeline event has no owning run")
 		}
 		return sqliteDeliveryAdapter.CommitPipelineHandoff(txctx, tx, claim.EventID())
 	})
@@ -1856,16 +1852,14 @@ func (s *postgresPipelineObligationStore) Settle(ctx context.Context, claim runt
 		if _, err := s.candidateRequests.RequestCompletionCandidateTx(ctx, tx, runID, nil, handoff); err != nil {
 			return runtimepipelineobligation.SettlementOutcome{}, errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
 		}
-		if disposition.Successful() {
-			if err := postgresDeliveryAdapter.CommitPipelineHandoff(ctx, tx, claim.EventID()); err != nil {
-				return runtimepipelineobligation.SettlementOutcome{}, errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
-			}
-		}
 		if _, err := privaterunforkrevision.FinalizePostgres(ctx, tx, effects); err != nil {
 			return runtimepipelineobligation.SettlementOutcome{}, errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
 		}
-	} else {
-		return runtimepipelineobligation.SettlementOutcome{}, errors.Join(errors.New("settled pipeline event has no owning run"), postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
+	}
+	if disposition.Successful() {
+		if err := postgresDeliveryAdapter.CommitPipelineHandoff(ctx, tx, claim.EventID()); err != nil {
+			return runtimepipelineobligation.SettlementOutcome{}, errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return runtimepipelineobligation.SettlementOutcome{}, errors.Join(err, postgresbackend.RollbackAuthorityTransaction(tx, lease.Session()))
@@ -1913,8 +1907,6 @@ func (s *sqlitePipelineObligationStore) Settle(ctx context.Context, claim runtim
 			if _, err = s.candidateRequests.RequestCompletionCandidateTx(txctx, tx, runID, nil, handoff); err != nil {
 				return err
 			}
-		} else {
-			return errors.New("settled pipeline event has no owning run")
 		}
 		if disposition.Successful() {
 			return sqliteDeliveryAdapter.CommitPipelineHandoff(txctx, tx, claim.EventID())

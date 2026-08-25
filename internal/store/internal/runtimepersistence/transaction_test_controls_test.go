@@ -75,9 +75,6 @@ func (s *PostgresStore) runPrivateAuthorActivityMutation(ctx context.Context, op
 		if err := operation(txctx, tx, story); err != nil {
 			return err
 		}
-		if _, err := finalizeAllPostgresRunForkTestRevisions(txctx, tx); err != nil {
-			return err
-		}
 		return story.Finalize(txctx)
 	})
 }
