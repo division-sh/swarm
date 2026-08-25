@@ -257,7 +257,7 @@ func runCheck(args []string) error {
 	}
 
 	var missingMilestone, missingAgent, missingComplexity, missingPriority []string
-	var unblocked, staleMusts, phantoms, cycles []string
+	var unblocked, staleMusts, phantoms, cycles, unassignedMusts []string
 
 	now := time.Now()
 	for _, is := range issues {
@@ -274,6 +274,9 @@ func runCheck(args []string) error {
 		}
 		if !hasPrefix(set, "priority:") {
 			missingPriority = append(missingPriority, ref)
+		}
+		if isMust(set) && agentOf(is) == "" {
+			unassignedMusts = append(unassignedMusts, ref)
 		}
 		if isMust(set) && now.Sub(is.UpdatedAt) > time.Duration(*staleDays)*24*time.Hour {
 			staleMusts = append(staleMusts,
@@ -303,6 +306,7 @@ func runCheck(args []string) error {
 	}
 
 	section("UNBLOCKED — blockers all closed, ready to start", unblocked)
+	section("UNASSIGNED MUSTS — P0/P1/tier:must with no owner", unassignedMusts)
 	section("STALE MUSTS — tier:must/P0/P1 going forgotten", staleMusts)
 	section("PHANTOM ASSIGNMENTS — assigned but silent", phantoms)
 	section("BLOCKER CYCLES", cycles)
