@@ -284,6 +284,11 @@ func (e *Executor) runChain(ctx context.Context, lease *worklifetime.Lease, cand
 		if validationErr := result.Validate(); validationErr != nil {
 			result = CompletionResult{Outcome: OutcomeRetryCurrent, Retryable: validationErr}
 		}
+		// The admitted attempt may settle during retirement, but its result does
+		// not retain authority to start a successor attempt.
+		if ctx.Err() != nil {
+			return
+		}
 		switch result.Outcome {
 		case OutcomeRetryCurrent:
 			delay := e.retry.Delay(attempt)
