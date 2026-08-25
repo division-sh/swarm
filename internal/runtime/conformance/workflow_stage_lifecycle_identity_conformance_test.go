@@ -103,11 +103,8 @@ func TestSingletonStageLifecyclePreservesRouteAndEntityAcrossRestartOnBothBacken
 			assertStageLifecycleGateIdentity(t, card, activation)
 			assertStageLifecycleTimerIdentity(t, runCtx, lifecycleStore, activation, true)
 
-			if err := runtime.Shutdown(); err != nil {
-				t.Fatalf("shutdown before lifecycle restart: %v", err)
-			}
-			if err := processCapability.Release(context.Background()); err != nil {
-				t.Fatalf("release process capability before lifecycle restart: %v", err)
+			if err := closeConformanceRuntimeGeneration(runtime, processCapability); err != nil {
+				t.Fatalf("close generation before lifecycle restart: %v", err)
 			}
 			runtime, _ = newStageLifecycleIdentityRuntime(t, selected, module)
 			startStageLifecycleIdentityRuntime(t, runtime)

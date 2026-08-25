@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
@@ -60,7 +61,7 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+	target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
@@ -90,7 +91,7 @@ func TestInboundGateway_GitHubPausedRuntimePersistsAndReleasesSubscribedDispatch
 	req.Header.Set("X-GitHub-Delivery", providerEventID)
 	req.Header.Set("X-GitHub-Event", "push")
 	rec := httptest.NewRecorder()
-	handleBoundedProviderDelivery(t, g, bus, pg, rec, req, runID, entityID, provider, webhookSecret)
+	handleBoundedProviderDelivery(t, g, bus, target, rec, req, provider, webhookSecret)
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
@@ -163,7 +164,7 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+	target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
@@ -193,7 +194,7 @@ func TestInboundGateway_SlackPausedRuntimePersistsAndReleasesSubscribedDispatch(
 	req.Header.Set("X-Slack-Request-Timestamp", timestamp)
 	req.Header.Set("X-Slack-Signature", slackWebhookSignature(webhookSecret, timestamp, body))
 	rec := httptest.NewRecorder()
-	handleBoundedProviderDelivery(t, g, bus, pg, rec, req, runID, entityID, provider, webhookSecret)
+	handleBoundedProviderDelivery(t, g, bus, target, rec, req, provider, webhookSecret)
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
@@ -266,7 +267,7 @@ func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+	target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
@@ -295,7 +296,7 @@ func TestInboundGateway_StripePausedRuntimePersistsAndReleasesSubscribedDispatch
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/stripe", strings.NewReader(string(body)))
 	req.Header.Set("Stripe-Signature", stripeWebhookSignature(webhookSecret, timestamp, body))
 	rec := httptest.NewRecorder()
-	handleBoundedProviderDelivery(t, g, bus, pg, rec, req, runID, entityID, provider, webhookSecret)
+	handleBoundedProviderDelivery(t, g, bus, target, rec, req, provider, webhookSecret)
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
@@ -368,7 +369,7 @@ func TestInboundGateway_StripeSQLitePersistsConfiguredManifestDelivery(t *testin
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-	seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+	target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
 	bus, err := newScopedTestEventBus(t, sqliteStore, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
@@ -383,7 +384,7 @@ func TestInboundGateway_StripeSQLitePersistsConfiguredManifestDelivery(t *testin
 	req := httptest.NewRequest(http.MethodPost, "/webhooks/customer-a/stripe", strings.NewReader(string(body)))
 	req.Header.Set("Stripe-Signature", stripeWebhookSignature(webhookSecret, timestamp, body))
 	rec := httptest.NewRecorder()
-	handleBoundedProviderDelivery(t, g, bus, sqliteStore, rec, req, runID, entityID, provider, webhookSecret)
+	handleBoundedProviderDelivery(t, g, bus, target, rec, req, provider, webhookSecret)
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
@@ -430,7 +431,7 @@ func TestInboundGateway_TwilioPostgresPersistsConfiguredManifestDelivery(t *test
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+	target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
@@ -449,7 +450,7 @@ func TestInboundGateway_TwilioPostgresPersistsConfiguredManifestDelivery(t *test
 	}
 	req := newSignedTwilioRequest(requestURL, webhookSecret, form)
 	rec := httptest.NewRecorder()
-	handleBoundedProviderDelivery(t, g, bus, pg, rec, req, runID, entityID, provider, webhookSecret)
+	handleBoundedProviderDelivery(t, g, bus, target, rec, req, provider, webhookSecret)
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
@@ -493,7 +494,7 @@ func TestInboundGateway_TwilioSQLitePersistsConfiguredManifestDelivery(t *testin
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-	seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+	target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
 	bus, err := newScopedTestEventBus(t, sqliteStore, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
@@ -512,7 +513,7 @@ func TestInboundGateway_TwilioSQLitePersistsConfiguredManifestDelivery(t *testin
 	}
 	req := newSignedTwilioRequest(requestURL, webhookSecret, form)
 	rec := httptest.NewRecorder()
-	handleBoundedProviderDelivery(t, g, bus, sqliteStore, rec, req, runID, entityID, provider, webhookSecret)
+	handleBoundedProviderDelivery(t, g, bus, target, rec, req, provider, webhookSecret)
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
@@ -559,7 +560,7 @@ func TestInboundGateway_ShopifyPostgresPersistsConfiguredManifestDelivery(t *tes
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+	target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
@@ -574,7 +575,7 @@ func TestInboundGateway_ShopifyPostgresPersistsConfiguredManifestDelivery(t *tes
 	req.Header.Set("X-Shopify-Webhook-Id", providerEventID)
 	req.Header.Set("X-Shopify-Topic", "orders/create")
 	rec := httptest.NewRecorder()
-	handleBoundedProviderDelivery(t, g, bus, pg, rec, req, runID, entityID, provider, webhookSecret)
+	handleBoundedProviderDelivery(t, g, bus, target, rec, req, provider, webhookSecret)
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
@@ -618,7 +619,7 @@ func TestInboundGateway_ShopifySQLitePersistsConfiguredManifestDelivery(t *testi
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-	seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+	target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
 	bus, err := newScopedTestEventBus(t, sqliteStore, runtimebus.EventBusOptions{}, providerEventName)
 	if err != nil {
@@ -633,7 +634,7 @@ func TestInboundGateway_ShopifySQLitePersistsConfiguredManifestDelivery(t *testi
 	req.Header.Set("X-Shopify-Webhook-Id", providerEventID)
 	req.Header.Set("X-Shopify-Topic", "orders/updated")
 	rec := httptest.NewRecorder()
-	handleBoundedProviderDelivery(t, g, bus, sqliteStore, rec, req, runID, entityID, provider, webhookSecret)
+	handleBoundedProviderDelivery(t, g, bus, target, rec, req, provider, webhookSecret)
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
@@ -680,7 +681,7 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+	target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
 	bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{}, providerEventName, "inbound.telegram.text_message")
 	if err != nil {
@@ -693,7 +694,7 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 	body := []byte(`{"update_id":123456789,"undeclared_root":"root-must-not-enter-author-story","message":{"message_id":7,"from":{"id":41},"chat":{"id":42,"type":"private"},"text":"hello","undeclared_private":"private-must-not-enter-author-story"}}`)
 	req := newSignedTelegramRequest("/webhooks/customer-a/telegram", webhookSecret, body)
 	rec := httptest.NewRecorder()
-	handleBoundedProviderDelivery(t, g, bus, pg, rec, req, runID, entityID, provider, webhookSecret)
+	handleBoundedProviderDelivery(t, g, bus, target, rec, req, provider, webhookSecret)
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
@@ -727,7 +728,7 @@ func TestInboundGateway_TelegramPostgresPersistsConfiguredManifestDelivery(t *te
 		Reason:    "prove inbound duplicate comparison rejects a schema-valid durable payload conflict",
 	}, "", `UPDATE events SET payload = '{"corrupt":true}'::jsonb, payload_bytes = '{"corrupt":true}'::bytea WHERE event_id = $1::uuid`, eventID)
 	duplicate := httptest.NewRecorder()
-	handleBoundedProviderDelivery(t, g, bus, pg, duplicate, newSignedTelegramRequest("/webhooks/customer-a/telegram", webhookSecret, body), runID, entityID, provider, webhookSecret)
+	handleBoundedProviderDelivery(t, g, bus, target, duplicate, newSignedTelegramRequest("/webhooks/customer-a/telegram", webhookSecret, body), provider, webhookSecret)
 	if duplicate.Code != http.StatusServiceUnavailable {
 		t.Fatalf("corrupt duplicate status = %d, want 503 body=%s", duplicate.Code, duplicate.Body.String())
 	}
@@ -749,7 +750,7 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 	)
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-	seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
+	target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, entitySlug, provider, webhookSecret, agentID)
 
 	bus, err := newScopedTestEventBus(t, sqliteStore, runtimebus.EventBusOptions{}, providerEventName, "inbound.telegram.text_message")
 	if err != nil {
@@ -762,7 +763,7 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 	body := []byte(`{"update_id":987654321,"undeclared_root":"root-must-not-enter-author-story","message":{"message_id":8,"from":{"id":41},"chat":{"id":42,"type":"private"},"text":"hello sqlite","undeclared_private":"private-must-not-enter-author-story"}}`)
 	req := newSignedTelegramRequest("/webhooks/customer-a/telegram", webhookSecret, body)
 	rec := httptest.NewRecorder()
-	handleBoundedProviderDelivery(t, g, bus, sqliteStore, rec, req, runID, entityID, provider, webhookSecret)
+	handleBoundedProviderDelivery(t, g, bus, target, rec, req, provider, webhookSecret)
 
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
@@ -796,7 +797,7 @@ func TestInboundGateway_TelegramSQLitePersistsConfiguredManifestDelivery(t *test
 		Reason:    "prove inbound duplicate comparison rejects a schema-valid durable payload conflict",
 	}, `UPDATE events SET payload = '{"corrupt":true}', payload_bytes = CAST('{"corrupt":true}' AS BLOB) WHERE event_id = ?`, "", eventID)
 	duplicate := httptest.NewRecorder()
-	handleBoundedProviderDelivery(t, g, bus, sqliteStore, duplicate, newSignedTelegramRequest("/webhooks/customer-a/telegram", webhookSecret, body), runID, entityID, provider, webhookSecret)
+	handleBoundedProviderDelivery(t, g, bus, target, duplicate, newSignedTelegramRequest("/webhooks/customer-a/telegram", webhookSecret, body), provider, webhookSecret)
 	if duplicate.Code != http.StatusServiceUnavailable {
 		t.Fatalf("corrupt duplicate status = %d, want 503 body=%s", duplicate.Code, duplicate.Body.String())
 	}
@@ -940,7 +941,7 @@ func TestInboundGateway_TypeformAndIntercomPostgresPersistsConfiguredManifestDel
 
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), tc.runID)
 			pg := storetest.AdmitPostgresRuntimeStore(t, db)
-			seedPostgresInboundGatewayRuntime(t, ctx, db, pg, tc.runID, tc.entityID, tc.flowInstance, "customer-a", tc.provider, tc.webhookSecret, tc.agentID)
+			target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, tc.runID, tc.entityID, tc.flowInstance, "customer-a", tc.provider, tc.webhookSecret, tc.agentID)
 
 			bus, err := newScopedTestEventBus(t, pg, runtimebus.EventBusOptions{}, tc.providerEventName)
 			if err != nil {
@@ -953,7 +954,7 @@ func TestInboundGateway_TypeformAndIntercomPostgresPersistsConfiguredManifestDel
 
 			req := tc.newRequest("/webhooks/customer-a/"+tc.provider, tc.webhookSecret, tc.body)
 			rec := httptest.NewRecorder()
-			handleBoundedProviderDelivery(t, g, bus, pg, rec, req, tc.runID, tc.entityID, tc.provider, tc.webhookSecret)
+			handleBoundedProviderDelivery(t, g, bus, target, rec, req, tc.provider, tc.webhookSecret)
 
 			if rec.Code != http.StatusAccepted {
 				t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
@@ -1032,7 +1033,7 @@ func TestInboundGateway_TypeformAndIntercomSQLitePersistsConfiguredManifestDeliv
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), tc.runID)
 			sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-			seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, tc.runID, tc.entityID, tc.flowInstance, "customer-a", tc.provider, tc.webhookSecret, tc.agentID)
+			target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, tc.runID, tc.entityID, tc.flowInstance, "customer-a", tc.provider, tc.webhookSecret, tc.agentID)
 
 			bus, err := newScopedTestEventBus(t, sqliteStore, runtimebus.EventBusOptions{}, tc.providerEventName)
 			if err != nil {
@@ -1045,7 +1046,7 @@ func TestInboundGateway_TypeformAndIntercomSQLitePersistsConfiguredManifestDeliv
 
 			req := tc.newRequest("/webhooks/customer-a/"+tc.provider, tc.webhookSecret, tc.body)
 			rec := httptest.NewRecorder()
-			handleBoundedProviderDelivery(t, g, bus, sqliteStore, rec, req, tc.runID, tc.entityID, tc.provider, tc.webhookSecret)
+			handleBoundedProviderDelivery(t, g, bus, target, rec, req, tc.provider, tc.webhookSecret)
 
 			if rec.Code != http.StatusAccepted {
 				t.Fatalf("status = %d, want 202 body=%s", rec.Code, rec.Body.String())
@@ -1089,7 +1090,7 @@ func seedPostgresInboundGatewayRuntime(
 	provider string,
 	webhookSecret string,
 	agentID string,
-) {
+) runtimepkg.InboundTarget {
 	t.Helper()
 	storetest.RequirePostgresRun(t, ctx, db, storetest.RunFixture{
 		Origin: boundedInboundStandingOrigin(t, provider),
@@ -1148,7 +1149,7 @@ func seedPostgresInboundGatewayRuntime(
 	}); err != nil {
 		t.Fatalf("UpsertAgent(%s): %v", agentID, err)
 	}
-	ensureBoundedStandingTarget(t, ctx, pg, runID, entityID, provider)
+	return seedBoundedStandingTarget(t, ctx, pg, runID, entityID, flowInstance, provider)
 }
 
 func inboundGatewayAgentIdentity(t testing.TB, agentID, flowInstance string) runtimeagentidentity.Identity {
@@ -1198,7 +1199,7 @@ func seedSQLiteInboundGatewayRuntime(
 	provider string,
 	webhookSecret string,
 	agentID string,
-) {
+) runtimepkg.InboundTarget {
 	t.Helper()
 	now := time.Now().UTC()
 	storetest.RequireSQLiteRun(t, ctx, storetest.DatabaseForTest(sqliteStore), storetest.RunFixture{
@@ -1255,7 +1256,7 @@ func seedSQLiteInboundGatewayRuntime(
 	}); err != nil {
 		t.Fatalf("UpsertAgent(%s): %v", agentID, err)
 	}
-	ensureBoundedStandingTarget(t, ctx, sqliteStore, runID, entityID, provider)
+	return seedBoundedStandingTarget(t, ctx, sqliteStore, runID, entityID, flowInstance, provider)
 }
 
 func boundedInboundStandingOrigin(t *testing.T, provider string) runtimerunlifecycle.RunOrigin {

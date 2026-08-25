@@ -367,16 +367,12 @@ func installCatalogRuntimeStartupGrant(
 	if err != nil {
 		t.Fatalf("acquire catalog runtime process capability: %v", err)
 	}
-	t.Cleanup(func() {
-		select {
-		case <-capability.Done():
-			return
-		default:
+	release := true
+	defer func() {
+		if release {
+			_ = capability.Release(context.Background())
 		}
-		if err := capability.Release(context.Background()); err != nil {
-			t.Errorf("release catalog runtime process capability: %v", err)
-		}
-	})
+	}()
 	current, exists, err := capability.CurrentSourceSet(ctx)
 	if err != nil {
 		t.Fatalf("load catalog runtime source set: %v", err)
@@ -403,6 +399,7 @@ func installCatalogRuntimeStartupGrant(
 	if err := rt.InstallStartupGrant(grant); err != nil {
 		t.Fatalf("install catalog runtime generation grant: %v", err)
 	}
+	release = false
 	return capability
 }
 
@@ -563,6 +560,15 @@ func (h *runtimeHarness) shutdown() {
 		if h.cancel != nil {
 			h.cancel()
 		}
+		if h.processOwner != nil {
+			joinCtx, cancelJoin := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancelJoin()
+			h.processOwner.Retire()
+			if _, err := h.processOwner.Join(joinCtx); err != nil {
+				h.t.Errorf("join catalog runtime process owner: %v", err)
+				return
+			}
+		}
 		if h.processTopology != nil {
 			select {
 			case <-h.processTopology.Done():
@@ -570,13 +576,6 @@ func (h *runtimeHarness) shutdown() {
 				if err := h.processTopology.Release(context.Background()); err != nil {
 					h.t.Errorf("release catalog process topology capability: %v", err)
 				}
-			}
-		}
-		if h.processOwner != nil {
-			joinCtx, cancelJoin := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancelJoin()
-			if _, err := h.processOwner.Join(joinCtx); err != nil {
-				h.t.Errorf("join catalog runtime process owner: %v", err)
 			}
 		}
 	})

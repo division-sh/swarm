@@ -64,12 +64,13 @@ func (runtimeTestRejectedMutationOwner) RunRuntimeMutationContext(context.Contex
 type runtimeTestUnavailableDecisionCards struct{ decisioncard.Store }
 
 type runtimeTestRetainedSession struct {
-	mu        sync.Mutex
-	authority runtimestartupownership.Authority
-	plan      runtimeagenttopology.SourceSetPlan
-	agents    map[string]runtimemanager.PersistedAgent
-	callback  func(runtimestartupownership.TerminalResult)
-	released  bool
+	mu              sync.Mutex
+	authority       runtimestartupownership.Authority
+	plan            runtimeagenttopology.SourceSetPlan
+	agents          map[string]runtimemanager.PersistedAgent
+	callback        func(runtimestartupownership.TerminalResult)
+	grantTransition func(*runtimestartupownership.GrantEvidence, runtimestartupownership.GrantEvidence)
+	released        bool
 }
 
 type runtimeTestRetainedSessionProvider interface {
@@ -108,7 +109,13 @@ func (s *runtimeTestRetainedSession) InstallTerminalOwner(owner runtimestartupow
 	return nil
 }
 
-func (*runtimeTestRetainedSession) RecordGenerationGrantTransition(context.Context, *runtimestartupownership.GrantEvidence, runtimestartupownership.GrantEvidence) error {
+func (s *runtimeTestRetainedSession) RecordGenerationGrantTransition(_ context.Context, previous *runtimestartupownership.GrantEvidence, next runtimestartupownership.GrantEvidence) error {
+	s.mu.Lock()
+	observe := s.grantTransition
+	s.mu.Unlock()
+	if observe != nil {
+		observe(previous, next)
+	}
 	return nil
 }
 

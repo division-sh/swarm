@@ -4,12 +4,14 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/division-sh/swarm/internal/config"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -55,6 +57,23 @@ func TestBundleDeleteRuntimeQuiescenceRestoresExactRunningContextOnBothStores(t 
 			fact := mustServeTestEphemeralBundleSourceFact(runtimeContextTestHash("d"))
 			runtimeInstanceID := "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 			processWorkOwner := newSupervisorTestProcessOwner(t)
+			var capability runtimestartupownership.ProcessCapability
+			var runtimes []*runtimepkg.Runtime
+			t.Cleanup(func() {
+				shutdownFailed := false
+				for i := len(runtimes) - 1; i >= 0; i-- {
+					if err := runtimes[i].ShutdownWithOptions(runtimepkg.ShutdownOptions{Grace: 5 * time.Second}); err != nil {
+						t.Errorf("shutdown bundle-delete runtime: %v", err)
+						shutdownFailed = true
+					}
+				}
+				if shutdownFailed {
+					return
+				}
+				if err := closeSelectedStoreTestProcess(processWorkOwner, capability); err != nil {
+					t.Errorf("close bundle-delete selected-store generation: %v", err)
+				}
+			})
 			providerCatalog := testProviderTriggerCatalog(t)
 			newRuntime := func() *runtimepkg.Runtime {
 				rt, err := runtimepkg.NewRuntime(context.Background(), runtimeDepsForServeTest(t, stores, &config.Config{}, runtimepkg.RuntimeOptions{
@@ -66,12 +85,11 @@ func TestBundleDeleteRuntimeQuiescenceRestoresExactRunningContextOnBothStores(t 
 				if err != nil {
 					t.Fatalf("NewRuntime: %v", err)
 				}
-				t.Cleanup(func() { _ = rt.Shutdown() })
+				runtimes = append(runtimes, rt)
 				return rt
 			}
 			predecessor := newRuntime()
-			capability, _ := installSelectedStoreTestProcessTopology(t, stores, predecessor, source, fact, runtimeInstanceID)
-			t.Cleanup(func() { _ = capability.Release(context.Background()) })
+			capability, _ = installSelectedStoreTestProcessTopology(t, stores, predecessor, source, fact, runtimeInstanceID)
 			if err := predecessor.Start(context.Background()); err != nil {
 				t.Fatalf("start predecessor: %v", err)
 			}

@@ -137,9 +137,36 @@ func testAuthorActivityRuntimeOptions(t testing.TB, opts runtimepkg.RuntimeOptio
 		opts.BundleSourceFact = authorActivityTestBundleSourceFact
 	}
 	if opts.ProcessWorkOwner == nil {
-		opts.ProcessWorkOwner = conformanceTestProcessOwner(t)
+		opts.ProcessWorkOwner = worklifetime.NewProcess()
 	}
 	return opts
+}
+
+func closeConformanceRuntimeGeneration(rt *runtimepkg.Runtime, capability runtimestartupownership.ProcessCapability) error {
+	if rt != nil {
+		if err := rt.Shutdown(); err != nil {
+			return fmt.Errorf("shutdown conformance runtime: %w", err)
+		}
+		if rt.Options.ProcessWorkOwner != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			rt.Options.ProcessWorkOwner.Retire()
+			if _, err := rt.Options.ProcessWorkOwner.Join(ctx); err != nil {
+				return fmt.Errorf("join conformance runtime process owner: %w", err)
+			}
+		}
+	}
+	if capability != nil {
+		select {
+		case <-capability.Done():
+			return nil
+		default:
+		}
+		if err := capability.Release(context.Background()); err != nil {
+			return fmt.Errorf("release conformance process capability: %w", err)
+		}
+	}
+	return nil
 }
 
 func installConformanceRuntimeStartupGrant(t testing.TB, ctx context.Context, selected any, rt *runtimepkg.Runtime) runtimestartupownership.ProcessCapability {
@@ -223,14 +250,8 @@ func installConformanceRuntimeStartupGeneration(
 		t.Fatalf("install conformance runtime generation grant: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = rt.Shutdown()
-		select {
-		case <-capability.Done():
-			return
-		default:
-		}
-		if err := capability.Release(context.Background()); err != nil {
-			t.Errorf("release conformance process capability: %v", err)
+		if err := closeConformanceRuntimeGeneration(rt, capability); err != nil {
+			t.Errorf("close conformance runtime generation: %v", err)
 		}
 	})
 	release = false

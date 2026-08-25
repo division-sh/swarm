@@ -3,6 +3,7 @@ package serveapp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -253,6 +254,28 @@ func installSelectedStoreTestGeneration(
 		_ = grant.Retire(context.Background())
 		t.Fatalf("install selected-store test generation grant: %v", err)
 	}
+}
+
+func closeSelectedStoreTestProcess(process *worklifetime.Process, capability runtimestartupownership.ProcessCapability) error {
+	if process != nil {
+		process.Retire()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := process.Join(ctx); err != nil {
+			return fmt.Errorf("join selected-store test process: %w", err)
+		}
+	}
+	if capability != nil {
+		select {
+		case <-capability.Done():
+			return nil
+		default:
+		}
+		if err := capability.Release(context.Background()); err != nil {
+			return fmt.Errorf("release selected-store test process capability: %w", err)
+		}
+	}
+	return nil
 }
 
 func registerServeTestEphemeralAgent(t testing.TB, manager *runtimemanager.AgentManager, cfg runtimeactors.AgentConfig) {

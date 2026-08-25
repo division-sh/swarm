@@ -3,7 +3,11 @@ package runtime_test
 import (
 	"context"
 	"database/sql"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
+	stdruntime "runtime"
 	"strings"
 	"testing"
 	"time"
@@ -49,41 +53,92 @@ func newTestInboundGateway(t *testing.T, bus *runtimebus.EventBus, logger *runti
 
 // handleBoundedProviderDelivery exercises provider parsing through the real
 // standing-service inbound publication operation.
-func handleBoundedProviderDelivery(t *testing.T, gateway *runtimepkg.InboundGateway, bus *runtimebus.EventBus, store runtimepkg.InboundPersistence, w http.ResponseWriter, r *http.Request, runID, entityID, provider, signingSecret string) {
+func handleBoundedProviderDelivery(t *testing.T, gateway *runtimepkg.InboundGateway, bus *runtimebus.EventBus, target runtimepkg.InboundTarget, w http.ResponseWriter, r *http.Request, provider, signingSecret string) {
 	t.Helper()
 	_ = bus
 	plan, err := testProviderTriggerCatalog(t).CompileAdmission(providertriggers.CompileAdmissionRequest{
-		Alias: entityID, Provider: provider, SigningSecret: signingSecret,
+		Alias: target.Alias, Provider: provider, SigningSecret: signingSecret,
 	})
 	if err != nil {
 		t.Fatalf("compile provider admission: %v", err)
 	}
-	target := ensureBoundedStandingTarget(t, r.Context(), store, runID, entityID, provider)
 	target.Provider = provider
 	target.SigningSecret = signingSecret
 	target.AdmissionPlan = plan
 	gateway.HandleResolvedWebhook(w, r, target, nil)
 }
 
-func ensureBoundedStandingTarget(t *testing.T, ctx context.Context, persistence runtimepkg.InboundPersistence, runID, entityID, provider string) runtimepkg.InboundTarget {
+func TestBoundedProviderDeliveryRequiresPreResolvedStandingTarget(t *testing.T) {
+	_, path, _, ok := stdruntime.Caller(0)
+	if !ok {
+		t.Fatal("resolve bounded provider helper source")
+	}
+	file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	if err != nil {
+		t.Fatalf("parse bounded provider helper source: %v", err)
+	}
+	var handler *ast.FuncDecl
+	for _, declaration := range file.Decls {
+		candidate, ok := declaration.(*ast.FuncDecl)
+		if ok && candidate.Name.Name == "handleBoundedProviderDelivery" {
+			handler = candidate
+			break
+		}
+	}
+	if handler == nil {
+		t.Fatal("bounded provider delivery helper is missing")
+	}
+	forbidden := map[string]struct{}{
+		"seedBoundedStandingTarget":     {},
+		"insertPostgresStandingFixture": {},
+		"insertSQLiteStandingFixture":   {},
+		"BeginTx":                       {},
+		"Exec":                          {},
+		"ExecContext":                   {},
+	}
+	ast.Inspect(handler.Body, func(node ast.Node) bool {
+		switch expression := node.(type) {
+		case *ast.Ident:
+			if _, found := forbidden[expression.Name]; found {
+				t.Errorf("admitted bounded provider handler contains forbidden live setup operation %s", expression.Name)
+			}
+		case *ast.SelectorExpr:
+			if _, found := forbidden[expression.Sel.Name]; found {
+				t.Errorf("admitted bounded provider handler contains forbidden live mutation %s", expression.Sel.Name)
+			}
+		}
+		return true
+	})
+
+	hasResolvedTarget := false
+	for _, field := range handler.Type.Params.List {
+		for _, name := range field.Names {
+			switch name.Name {
+			case "runID", "entityID", "flowInstance", "persistence", "store":
+				t.Errorf("admitted bounded provider handler retains mutable setup coordinate %q", name.Name)
+			case "target":
+				selector, ok := field.Type.(*ast.SelectorExpr)
+				hasResolvedTarget = ok && selector.Sel.Name == "InboundTarget"
+			}
+		}
+	}
+	if !hasResolvedTarget {
+		t.Error("admitted bounded provider handler does not require a pre-resolved inbound target")
+	}
+}
+
+func seedBoundedStandingTarget(t *testing.T, ctx context.Context, persistence runtimepkg.InboundPersistence, runID, entityID, flowInstance, provider string) runtimepkg.InboundTarget {
 	t.Helper()
 	packageKey := "test.provider." + strings.ToLower(strings.TrimSpace(provider))
 	flowID := "bounded-inbound"
 	serviceID := runtimeflowidentity.StandingServiceID(packageKey, flowID)
 	const bundleHash = "bundle-v1:sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	const bundleSource = "ephemeral"
-	var flowInstance string
 
 	switch selected := persistence.(type) {
 	case *storepkg.PostgresStore:
-		if err := storetest.DatabaseForTest(selected).QueryRowContext(ctx, `SELECT flow_instance FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`, runID, entityID).Scan(&flowInstance); err != nil {
-			t.Fatalf("load postgres bounded provider flow instance: %v", err)
-		}
 		insertPostgresStandingFixture(t, ctx, storetest.DatabaseForTest(selected), serviceID, packageKey, flowID, flowInstance, entityID, runID, bundleHash, bundleSource)
 	case *storepkg.SQLiteRuntimeStore:
-		if err := storetest.DatabaseForTest(selected).QueryRowContext(ctx, `SELECT flow_instance FROM entity_state WHERE run_id = ? AND entity_id = ?`, runID, entityID).Scan(&flowInstance); err != nil {
-			t.Fatalf("load sqlite bounded provider flow instance: %v", err)
-		}
 		insertSQLiteStandingFixture(t, ctx, selected, serviceID, packageKey, flowID, flowInstance, entityID, runID, bundleHash, bundleSource)
 	default:
 		t.Fatalf("unsupported bounded provider persistence %T", persistence)

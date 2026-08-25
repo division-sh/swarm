@@ -136,19 +136,26 @@ func TestExecutorRetriesCurrentRevisionAndRearmsBeforeSettling(t *testing.T) {
 	retireExecutorTestSubject(t, executor, occurrence)
 }
 
-func TestExecutorRetirementCancelsAcceptedWorkAndRejectsNewAdmission(t *testing.T) {
+func TestExecutorRetirementJoinsAcceptedPersistenceAndRejectsNewAdmission(t *testing.T) {
 	candidate := executorTestCandidate(1)
 	executing := make(chan struct{})
-	cancelled := make(chan error, 1)
+	release := make(chan struct{})
+	completed := make(chan struct{})
+	canceled := make(chan error, 1)
 	store := &executorTestStore{
 		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
 			return CandidatePage{Exhausted: true}, nil
 		},
 		execute: func(ctx context.Context, _ Candidate, _ TerminalCatalog) (CompletionResult, error) {
 			close(executing)
-			<-ctx.Done()
-			cancelled <- context.Cause(ctx)
-			return CompletionResult{}, context.Cause(ctx)
+			select {
+			case <-ctx.Done():
+				canceled <- context.Cause(ctx)
+				return CompletionResult{}, context.Cause(ctx)
+			case <-release:
+			}
+			close(completed)
+			return CompletionResult{Outcome: OutcomeAwaitMutation}, nil
 		},
 	}
 	executor, occurrence := newExecutorTestSubject(t, store, ExecutorOptions{})
@@ -163,13 +170,30 @@ func TestExecutorRetirementCancelsAcceptedWorkAndRejectsNewAdmission(t *testing.
 	if err := executor.Retire(context.Background()); err != nil {
 		t.Fatalf("retire executor: %v", err)
 	}
-	if cause := receiveValue(t, cancelled, "candidate cancellation"); !errors.Is(cause, worklifetime.ErrRetired) {
-		t.Fatalf("candidate cancellation cause = %v, want %v", cause, worklifetime.ErrRetired)
-	}
 	if _, err := executor.ReserveCompletionCandidate(context.Background()); !errors.Is(err, worklifetime.ErrRetired) {
 		t.Fatalf("post-retirement admission error = %v, want %v", err, worklifetime.ErrRetired)
 	}
-	retireRuntimeOccurrence(t, occurrence)
+	retired := make(chan error, 1)
+	go func() {
+		_, err := occurrence.RetireAndWait(context.Background())
+		retired <- err
+	}()
+	select {
+	case err := <-retired:
+		t.Fatalf("runtime occurrence retired before persistence completed: %v", err)
+	default:
+	}
+	close(release)
+	select {
+	case <-completed:
+	case err := <-canceled:
+		t.Fatalf("accepted persistence was canceled during retirement: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for candidate persistence completion")
+	}
+	if err := receiveValue(t, retired, "runtime occurrence retirement"); err != nil {
+		t.Fatalf("retire runtime occurrence: %v", err)
+	}
 }
 
 func TestExecutorRetirementIsContextBoundAndRejectsDelayedReservedSubmission(t *testing.T) {

@@ -49,7 +49,7 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 		)
 		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 		pg := storetest.AdmitPostgresRuntimeStore(t, db)
-		seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "telegram-supported-surface-observer")
+		target := seedPostgresInboundGatewayRuntime(t, ctx, db, pg, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "telegram-supported-surface-observer")
 		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, db, flowInstance, false)
 
 		runTelegramConnectorSupportedSurfaceRoundTrip(t, telegramConnectorSupportedSurfaceBackend{
@@ -59,6 +59,7 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 			eventStore:    pg,
 			deliveryStore: pg,
 			inboundStore:  pg,
+			inboundTarget: target,
 			persistence:   runtimepipeline.NewWorkflowPersistence(pg),
 			runLifecycle:  pg,
 			obligations:   pg.PipelineObligations(),
@@ -77,7 +78,7 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 		)
 		ctx := testAuthorActivityContext(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID))
 		sqliteStore := storetest.StartSQLiteRuntimeStoreWithContext(t, ctx)
-		seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "telegram-supported-surface-observer")
+		target := seedSQLiteInboundGatewayRuntime(t, ctx, sqliteStore, runID, entityID, flowInstance, "customer-a", "telegram", "telegram-secret", "telegram-supported-surface-observer")
 		seedTelegramConnectorSupportedSurfaceWorkflowVersion(t, ctx, storetest.Database(sqliteStore), flowInstance, true)
 
 		runTelegramConnectorSupportedSurfaceRoundTrip(t, telegramConnectorSupportedSurfaceBackend{
@@ -87,6 +88,7 @@ func TestTelegramConnectorBoundedIntegrationRoundTripThroughInboundGateway(t *te
 			eventStore:    sqliteStore,
 			deliveryStore: sqliteStore,
 			inboundStore:  sqliteStore,
+			inboundTarget: target,
 			persistence:   runtimepipeline.NewWorkflowPersistence(sqliteStore),
 			runLifecycle:  sqliteStore,
 			obligations:   sqliteStore.PipelineObligations(),
@@ -105,6 +107,7 @@ type telegramConnectorSupportedSurfaceBackend struct {
 	eventStore       runtimebus.EventStore
 	deliveryStore    runtimedelivery.Store
 	inboundStore     runtimepkg.InboundPersistence
+	inboundTarget    runtimepkg.InboundTarget
 	activityAttempts runtimeTestActivityAttemptReader
 	persistence      runtimepipeline.WorkflowPersistence
 	runLifecycle     runtimerunlifecycle.OperationOwner
@@ -174,7 +177,7 @@ func runTelegramConnectorSupportedSurfaceRoundTrip(t *testing.T, backend telegra
 	validBody := []byte(`{"update_id":123456789,"message":{"message_id":7,"chat":{"id":42},"text":"hello from telegram"}}`)
 	validReq := newSignedTelegramRequest(webhookPath, "telegram-secret", validBody).WithContext(backend.ctx)
 	validRec := httptest.NewRecorder()
-	handleBoundedProviderDelivery(t, gateway, bus, backend.inboundStore, validRec, validReq, backend.runID, backend.entityID, "telegram", "telegram-secret")
+	handleBoundedProviderDelivery(t, gateway, bus, backend.inboundTarget, validRec, validReq, "telegram", "telegram-secret")
 	if validRec.Code != http.StatusAccepted {
 		t.Fatalf("%s gateway status = %d, want 202 body=%s", backend.name, validRec.Code, validRec.Body.String())
 	}
@@ -214,7 +217,7 @@ func runTelegramConnectorSupportedSurfaceRoundTrip(t *testing.T, backend telegra
 
 	duplicateReq := newSignedTelegramRequest(webhookPath, "telegram-secret", validBody).WithContext(backend.ctx)
 	duplicateRec := httptest.NewRecorder()
-	handleBoundedProviderDelivery(t, gateway, bus, backend.inboundStore, duplicateRec, duplicateReq, backend.runID, backend.entityID, "telegram", "telegram-secret")
+	handleBoundedProviderDelivery(t, gateway, bus, backend.inboundTarget, duplicateRec, duplicateReq, "telegram", "telegram-secret")
 	if duplicateRec.Code != http.StatusOK {
 		t.Fatalf("%s duplicate gateway status = %d, want 200 body=%s", backend.name, duplicateRec.Code, duplicateRec.Body.String())
 	}
@@ -263,7 +266,7 @@ func assertTelegramConnectorSupportedSurfaceMissingToken(t *testing.T, backend t
 	missingTokenBody := []byte(`{"update_id":123456790,"message":{"message_id":8,"chat":{"id":42},"text":"missing token"}}`)
 	req := newSignedTelegramRequest(webhookPath, "telegram-secret", missingTokenBody).WithContext(backend.ctx)
 	rec := httptest.NewRecorder()
-	handleBoundedProviderDelivery(t, gateway, bus, backend.inboundStore, rec, req, backend.runID, backend.entityID, "telegram", "telegram-secret")
+	handleBoundedProviderDelivery(t, gateway, bus, backend.inboundTarget, rec, req, "telegram", "telegram-secret")
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("%s missing-token gateway status = %d, want 202 body=%s", backend.name, rec.Code, rec.Body.String())
 	}

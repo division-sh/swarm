@@ -150,7 +150,11 @@ func TestCompletionBudgetRecoveryProjectionParity(t *testing.T) {
 			if err := manager.ReconcileStaticTopologyForStartup(ctx, source); err != nil {
 				t.Fatalf("reconcile budget recovery manager topology: %v", err)
 			}
-			t.Cleanup(func() { _ = capability.Release(context.Background()) })
+			t.Cleanup(func() {
+				if err := closeExternalManagerTestGeneration(manager, bus, grant, capability); err != nil {
+					t.Errorf("close budget recovery generation: %v", err)
+				}
+			})
 
 			admission, err := managedexecution.New(managedexecution.KindNormalRuntime, "budget-recovery-test", 1, "", "budget-recovery-actors", "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", nil)
 			if err != nil {

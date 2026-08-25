@@ -76,12 +76,30 @@ func TestPostgresBundleDeleteCloseRecoversPendingSurvivorRefreshBeforeReplay(t *
 	secondHash := seedServeRuntimeBundleCatalogRoot(t, ctx, selected, secondRoot)
 	thirdHash := seedServeRuntimeBundleCatalogRoot(t, ctx, selected, thirdRoot)
 	processWorkOwner := worklifetime.NewProcess()
+	var capability runtimestartupownership.ProcessCapability
+	var contexts *runtimepkg.RuntimeContextManager
+	var runtimes []*runtimepkg.Runtime
 	t.Cleanup(func() {
-		processWorkOwner.Retire()
-		joinCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if _, err := processWorkOwner.Join(joinCtx); err != nil {
-			t.Errorf("join process work owner: %v", err)
+		shutdownFailed := false
+		if contexts != nil {
+			for _, result := range contexts.DeactivateAll(runtimepkg.RuntimeContextCauseUnloaded) {
+				if result.ShutdownErr != nil {
+					t.Errorf("shutdown runtime context %s: %v", result.BundleHash, result.ShutdownErr)
+					shutdownFailed = true
+				}
+			}
+		}
+		for i := len(runtimes) - 1; i >= 0; i-- {
+			if err := runtimes[i].ShutdownWithOptions(runtimepkg.ShutdownOptions{Grace: 5 * time.Second}); err != nil {
+				t.Errorf("shutdown bundle-delete replay runtime: %v", err)
+				shutdownFailed = true
+			}
+		}
+		if shutdownFailed {
+			return
+		}
+		if err := closeSelectedStoreTestProcess(processWorkOwner, capability); err != nil {
+			t.Errorf("close bundle-delete replay generation: %v", err)
 		}
 	})
 	runtimeInstanceID := uuid.NewString()
@@ -104,6 +122,7 @@ func TestPostgresBundleDeleteCloseRecoversPendingSurvivorRefreshBeforeReplay(t *
 		if err != nil {
 			t.Fatalf("NewRuntime(%s): %v", bundleHash, err)
 		}
+		runtimes = append(runtimes, rt)
 		return runtimeFixture{runtime: rt, source: source}
 	}
 	first := newRuntime(firstRoot, firstHash)
@@ -126,7 +145,7 @@ func TestPostgresBundleDeleteCloseRecoversPendingSurvivorRefreshBeforeReplay(t *
 	if err != nil {
 		t.Fatalf("NewSourceSetPlan: %v", err)
 	}
-	capability, err := stores.StartupOwnership.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+	capability, err = stores.StartupOwnership.AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
 		OwnerID: "bundle-delete-replay-test", BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
 	})
 	if err != nil {
@@ -147,7 +166,7 @@ func TestPostgresBundleDeleteCloseRecoversPendingSurvivorRefreshBeforeReplay(t *
 	if err := third.runtime.Start(ctx); err != nil {
 		t.Fatalf("start third runtime: %v", err)
 	}
-	contexts, err := runtimepkg.NewRuntimeContextManager(nil,
+	contexts, err = runtimepkg.NewRuntimeContextManager(nil,
 		completeServeTestPackContext(t, runtimepkg.BundleContext{BundleSourceFact: first.runtime.Options.BundleSourceFact, Source: first.source, Runtime: first.runtime, WorkOwner: first.runtime.WorkOccurrence()}),
 		completeServeTestPackContext(t, runtimepkg.BundleContext{BundleSourceFact: second.runtime.Options.BundleSourceFact, Source: second.source, Runtime: second.runtime, WorkOwner: second.runtime.WorkOccurrence()}),
 		completeServeTestPackContext(t, runtimepkg.BundleContext{BundleSourceFact: third.runtime.Options.BundleSourceFact, Source: third.source, Runtime: third.runtime, WorkOwner: third.runtime.WorkOccurrence()}),
@@ -155,17 +174,6 @@ func TestPostgresBundleDeleteCloseRecoversPendingSurvivorRefreshBeforeReplay(t *
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
 	}
-	t.Cleanup(func() {
-		for _, result := range contexts.DeactivateAll(runtimepkg.RuntimeContextCauseUnloaded) {
-			if result.ShutdownErr != nil {
-				t.Errorf("shutdown runtime context %s: %v", result.BundleHash, result.ShutdownErr)
-			}
-		}
-		if err := capability.Release(context.Background()); err != nil {
-			t.Errorf("release process capability: %v", err)
-		}
-	})
-
 	failingCapability := &failOncePostCommitBundleDeleteCapability{ProcessCapability: capability}
 	supervisor := &runtimeProjectSupervisor{
 		currentRT: first.runtime, runtimeContexts: contexts, processCapability: failingCapability,

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -24,6 +25,7 @@ import (
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	deliveryfixture "github.com/division-sh/swarm/internal/store/testutil/deliveryfixture"
@@ -47,6 +49,38 @@ func (a runtimeShutdownTestAgent) OnEvent(ctx context.Context, evt events.Event)
 }
 
 type runtimeShutdownManagerStore struct{}
+
+type runtimeShutdownCompletionStore struct {
+	started   chan struct{}
+	release   chan struct{}
+	completed chan struct{}
+	canceled  chan error
+}
+
+func (s *runtimeShutdownCompletionStore) ListCompletionCandidates(
+	context.Context,
+	runtimerunlifecycle.CandidateScope,
+	runtimerunlifecycle.CandidateCursor,
+	int,
+) (runtimerunlifecycle.CandidatePage, error) {
+	return runtimerunlifecycle.CandidatePage{Exhausted: true}, nil
+}
+
+func (s *runtimeShutdownCompletionStore) ExecuteCompletionCandidate(
+	ctx context.Context,
+	_ runtimerunlifecycle.Candidate,
+	_ runtimerunlifecycle.TerminalCatalog,
+) (runtimerunlifecycle.CompletionResult, error) {
+	close(s.started)
+	select {
+	case <-ctx.Done():
+		s.canceled <- context.Cause(ctx)
+		return runtimerunlifecycle.CompletionResult{}, context.Cause(ctx)
+	case <-s.release:
+	}
+	close(s.completed)
+	return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeAwaitMutation}, nil
+}
 
 type runtimeShutdownDeliveryStore struct {
 	runtimedelivery.Store
@@ -618,6 +652,115 @@ func TestRuntimeShutdownBoundsLifecycleExecutorRetirementByGrace(t *testing.T) {
 	err = <-shutdownErr
 	if err == nil || !strings.Contains(err.Error(), "run lifecycle executor retirement timed out after 20ms") {
 		t.Fatalf("shutdown error = %v, want bounded lifecycle executor timeout", err)
+	}
+}
+
+func TestRuntimeShutdownRetiresGrantAfterCompletionPersistenceSettles(t *testing.T) {
+	store := &runtimeShutdownCompletionStore{
+		started:   make(chan struct{}),
+		release:   make(chan struct{}),
+		completed: make(chan struct{}),
+		canceled:  make(chan error, 1),
+	}
+	occurrence := runtimeTestOccurrence(t, runtimeTestBundleHash)
+	executor, err := runtimerunlifecycle.NewExecutor(
+		store,
+		runtimerunlifecycle.CandidateScope{BundleHash: runtimeTestBundleHash},
+		runtimerunlifecycle.TerminalCatalog{},
+		occurrence,
+		runtimerunlifecycle.ExecutorOptions{},
+	)
+	if err != nil {
+		t.Fatalf("create run lifecycle executor: %v", err)
+	}
+	if err := executor.Start(context.Background()); err != nil {
+		t.Fatalf("start run lifecycle executor: %v", err)
+	}
+
+	authority, err := runtimestartupownership.NewColdAuthority(runtimestartupownership.AcquireRequest{
+		OwnerID:           "runtime-shutdown-completion-test",
+		BootID:            uuid.NewString(),
+		RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+	}, "runtime_test")
+	if err != nil {
+		t.Fatalf("construct runtime shutdown authority: %v", err)
+	}
+	grantRetired := make(chan struct{})
+	var grantRetiredOnce sync.Once
+	session := &runtimeTestRetainedSession{
+		authority: authority,
+		agents:    map[string]runtimemanager.PersistedAgent{},
+		grantTransition: func(_ *runtimestartupownership.GrantEvidence, next runtimestartupownership.GrantEvidence) {
+			if next.State == runtimestartupownership.GrantRetired {
+				grantRetiredOnce.Do(func() { close(grantRetired) })
+			}
+		},
+	}
+	_, grant, err := newRuntimeTestProcessCapabilityWithSession(
+		t,
+		nil,
+		nil,
+		testBundleSourceFact(t, runtimeTestBundleHash),
+		authorActivityTestRuntimeInstanceID,
+		session,
+	)
+	if err != nil {
+		t.Fatalf("construct runtime shutdown generation: %v", err)
+	}
+	candidate := runtimerunlifecycle.Candidate{
+		RunID:      "11111111-1111-4111-8111-111111111111",
+		BundleHash: runtimeTestBundleHash,
+		Revision:   1,
+		DueAt:      runtimerunlifecycle.CanonicalTimestamp(time.Now().UTC().Add(-time.Second)),
+	}
+	if err := executor.SubmitCompletionCandidate(context.Background(), candidate); err != nil {
+		t.Fatalf("submit completion candidate: %v", err)
+	}
+	select {
+	case <-store.started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for completion persistence")
+	}
+
+	rt := &Runtime{
+		workOccurrence:       occurrence,
+		runLifecycleExecutor: executor,
+		startupGrant:         grant,
+	}
+	shutdown := make(chan error, 1)
+	go func() { shutdown <- rt.Shutdown() }()
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	for executor.Ready() {
+		select {
+		case <-deadline.C:
+			t.Fatal("timed out waiting for runtime retirement fence")
+		default:
+			goruntime.Gosched()
+		}
+	}
+	select {
+	case <-grantRetired:
+		t.Fatal("generation grant retired while completion persistence was active")
+	case err := <-shutdown:
+		t.Fatalf("runtime shutdown completed while persistence was active: %v", err)
+	default:
+	}
+	close(store.release)
+	select {
+	case <-store.completed:
+	case err := <-store.canceled:
+		t.Fatalf("completion persistence was canceled during retirement: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for completion persistence to settle")
+	}
+	if err := <-shutdown; err != nil {
+		t.Fatalf("shutdown runtime: %v", err)
+	}
+	select {
+	case <-grantRetired:
+	default:
+		t.Fatal("generation grant was not retired after completion persistence settled")
 	}
 }
 

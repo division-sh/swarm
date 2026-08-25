@@ -79,14 +79,6 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 				workflowPersistence = runtimepipeline.NewWorkflowPersistence(selected)
 			}
 			processOwner := worklifetime.NewProcess()
-			t.Cleanup(func() {
-				joinCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				processOwner.Retire()
-				if _, err := processOwner.Join(joinCtx); err != nil {
-					t.Errorf("join receiver authority runtime: %v", err)
-				}
-			})
 			modelRuntime := &closedReceiverManagedLLM{
 				controller: runtimeeffects.NewCompletionController(selected, selected, selected, nil).WithExecutionPosture(executionposture.Live),
 			}
@@ -125,11 +117,8 @@ func TestManagedEffectAuthorityFollowsActingAgentAcrossNodeChain(t *testing.T) {
 			}
 			capability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, rt)
 			t.Cleanup(func() {
-				if err := rt.Shutdown(); err != nil {
-					t.Errorf("shutdown receiver authority runtime: %v", err)
-				}
-				if err := capability.Release(context.Background()); err != nil {
-					t.Errorf("release receiver authority process capability: %v", err)
+				if err := closeExternalRuntimeTestGeneration(rt, processOwner, capability); err != nil {
+					t.Errorf("close receiver authority generation: %v", err)
 				}
 			})
 			if err := rt.PrepareAuthorActivityCatalog(); err != nil {
