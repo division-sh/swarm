@@ -28,11 +28,16 @@ func (s *AgentSQLite) ListAgentDeliveryLifecycleFacts(ctx context.Context, ident
 	if len(normalized) == 0 {
 		return out, nil
 	}
-	asOf, err := operatorSQLiteDelivery.CaptureSnapshotTime(ctx, s.backend)
+	tx, err := s.backend.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, err
 	}
-	records, err := s.listSQLiteAgentLifecycleRecords(ctx, normalized, asOf)
+	defer tx.Rollback()
+	asOf, err := operatorSQLiteDelivery.CaptureSnapshotTime(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	records, err := s.listSQLiteAgentLifecycleRecords(ctx, tx, normalized, asOf)
 	if err != nil {
 		return nil, err
 	}
@@ -43,11 +48,17 @@ func (s *AgentSQLite) ListAgentDeliveryLifecycleFacts(ctx context.Context, ident
 	for _, identity := range normalized {
 		out[identity] = canonicalAgentDeliveryLifecycleFactsFromRecords(grouped[identity])
 	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit sqlite agent lifecycle facts snapshot: %w", err)
+	}
 	return out, nil
 }
 
-func (s *AgentSQLite) listSQLiteAgentLifecycleRecords(ctx context.Context, identities []agentidentity.Identity, asOf time.Time) ([]agentLifecycleDeliveryRecord, error) {
-	snapshots, err := operatorSQLiteDelivery.CurrentAgentSnapshots(ctx, s.backend, identities, asOf)
+func (s *AgentSQLite) listSQLiteAgentLifecycleRecords(ctx context.Context, tx *sql.Tx, identities []agentidentity.Identity, asOf time.Time) ([]agentLifecycleDeliveryRecord, error) {
+	if tx == nil {
+		return nil, fmt.Errorf("sqlite agent lifecycle facts transaction is required")
+	}
+	snapshots, err := operatorSQLiteDelivery.CurrentAgentSnapshots(ctx, tx, identities, asOf)
 	if err != nil {
 		return nil, err
 	}

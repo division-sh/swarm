@@ -36,15 +36,24 @@ func (s *AgentPostgres) ListPendingAgentDeliveryFacts(ctx context.Context, ident
 	if err != nil {
 		return nil, err
 	}
-	asOf, err := operatorPostgresDelivery.CaptureSnapshotTime(ctx, s.backend)
+	tx, err := s.backend.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		return nil, err
 	}
-	aggregates, err := operatorPostgresDelivery.AgentPendingAggregates(ctx, s.backend, normalized, since, asOf)
+	defer tx.Rollback()
+	asOf, err := operatorPostgresDelivery.CaptureSnapshotTime(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
-	return pendingAgentDeliveryFactsFromAggregates(normalized, aggregates, asOf), nil
+	aggregates, err := operatorPostgresDelivery.AgentPendingAggregates(ctx, tx, normalized, since, asOf)
+	if err != nil {
+		return nil, err
+	}
+	result := pendingAgentDeliveryFactsFromAggregates(normalized, aggregates, asOf)
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit postgres pending agent facts snapshot: %w", err)
+	}
+	return result, nil
 }
 
 func (s *AgentPostgres) ListPendingAgentDeliveryDetails(ctx context.Context, opts operatorread.PendingAgentDeliveryListOptions) (operatorread.PendingAgentDeliveryPage, error) {
@@ -104,15 +113,24 @@ func (s *AgentSQLite) ListPendingAgentDeliveryFacts(ctx context.Context, identit
 	if err != nil {
 		return nil, err
 	}
-	asOf, err := operatorSQLiteDelivery.CaptureSnapshotTime(ctx, s.backend)
+	tx, err := s.backend.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return nil, err
 	}
-	aggregates, err := operatorSQLiteDelivery.AgentPendingAggregates(ctx, s.backend, normalized, since, asOf)
+	defer tx.Rollback()
+	asOf, err := operatorSQLiteDelivery.CaptureSnapshotTime(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
-	return pendingAgentDeliveryFactsFromAggregates(normalized, aggregates, asOf), nil
+	aggregates, err := operatorSQLiteDelivery.AgentPendingAggregates(ctx, tx, normalized, since, asOf)
+	if err != nil {
+		return nil, err
+	}
+	result := pendingAgentDeliveryFactsFromAggregates(normalized, aggregates, asOf)
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit sqlite pending agent facts snapshot: %w", err)
+	}
+	return result, nil
 }
 
 func (s *AgentSQLite) ListPendingAgentDeliveryDetails(ctx context.Context, opts operatorread.PendingAgentDeliveryListOptions) (operatorread.PendingAgentDeliveryPage, error) {
