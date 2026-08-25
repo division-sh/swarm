@@ -40,6 +40,17 @@ type immediateRetryPolicy struct{}
 
 func (immediateRetryPolicy) Delay(int) time.Duration { return 0 }
 
+type blockingRetryPolicy struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (p *blockingRetryPolicy) Delay(int) time.Duration {
+	close(p.started)
+	<-p.release
+	return 0
+}
+
 func TestExecutorRepresentsCandidateAcrossStartupEnumerationOverlap(t *testing.T) {
 	candidate := executorTestCandidate(1)
 	enumerating := make(chan struct{})
@@ -288,6 +299,94 @@ func TestExecutorRetirementRejectsElapsedRearmAfterActiveAttemptSettles(t *testi
 	}
 }
 
+func TestExecutorRetirementDuringRetryDelayRejectsSuccessorAttempt(t *testing.T) {
+	candidate := executorTestCandidate(1)
+	executions := make(chan int, 2)
+	policy := &blockingRetryPolicy{started: make(chan struct{}), release: make(chan struct{})}
+	var calls atomic.Int64
+	store := &executorTestStore{
+		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
+			return CandidatePage{Exhausted: true}, nil
+		},
+		execute: func(context.Context, Candidate, TerminalCatalog) (CompletionResult, error) {
+			call := int(calls.Add(1))
+			executions <- call
+			if call == 1 {
+				return CompletionResult{}, errors.New("retry after admitted attempt")
+			}
+			return CompletionResult{Outcome: OutcomeAwaitMutation}, nil
+		},
+	}
+	executor, occurrence := newExecutorTestSubject(t, store, ExecutorOptions{RetryPolicy: policy})
+	if err := executor.Start(context.Background()); err != nil {
+		t.Fatalf("start executor: %v", err)
+	}
+	if err := executor.SubmitCompletionCandidate(context.Background(), candidate); err != nil {
+		t.Fatalf("submit candidate: %v", err)
+	}
+	receiveSignal(t, policy.started, "retry policy evaluation")
+	if got := receiveValue(t, executions, "first candidate execution"); got != 1 {
+		t.Fatalf("first candidate execution = %d, want 1", got)
+	}
+
+	if err := executor.Retire(context.Background()); err != nil {
+		t.Fatalf("retire executor: %v", err)
+	}
+	close(policy.release)
+	retireRuntimeOccurrence(t, occurrence)
+	select {
+	case call := <-executions:
+		t.Fatalf("candidate execution %d started after retirement during retry evaluation", call)
+	default:
+	}
+}
+
+func TestExecutorRetirementDuringRearmDueEvaluationRejectsSuccessorAttempt(t *testing.T) {
+	candidate := executorTestCandidate(1)
+	executions := make(chan int, 2)
+	clock := &blockingSecondNowClock{
+		now:           candidate.DueAt.Add(time.Second),
+		secondStarted: make(chan struct{}),
+		releaseSecond: make(chan struct{}),
+	}
+	var calls atomic.Int64
+	store := &executorTestStore{
+		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
+			return CandidatePage{Exhausted: true}, nil
+		},
+		execute: func(_ context.Context, got Candidate, _ TerminalCatalog) (CompletionResult, error) {
+			call := int(calls.Add(1))
+			executions <- call
+			if call == 1 {
+				return CompletionResult{Outcome: OutcomeRearmAt, Candidate: got}, nil
+			}
+			return CompletionResult{Outcome: OutcomeAwaitMutation}, nil
+		},
+	}
+	executor, occurrence := newExecutorTestSubject(t, store, ExecutorOptions{Clock: clock})
+	if err := executor.Start(context.Background()); err != nil {
+		t.Fatalf("start executor: %v", err)
+	}
+	if err := executor.SubmitCompletionCandidate(context.Background(), candidate); err != nil {
+		t.Fatalf("submit candidate: %v", err)
+	}
+	receiveSignal(t, clock.secondStarted, "rearm due-time evaluation")
+	if got := receiveValue(t, executions, "first candidate execution"); got != 1 {
+		t.Fatalf("first candidate execution = %d, want 1", got)
+	}
+
+	if err := executor.Retire(context.Background()); err != nil {
+		t.Fatalf("retire executor: %v", err)
+	}
+	close(clock.releaseSecond)
+	retireRuntimeOccurrence(t, occurrence)
+	select {
+	case call := <-executions:
+		t.Fatalf("candidate execution %d started after retirement during rearm evaluation", call)
+	default:
+	}
+}
+
 func TestExecutorRetirementIsContextBoundAndRejectsDelayedReservedSubmission(t *testing.T) {
 	store := &executorTestStore{
 		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
@@ -342,6 +441,27 @@ func (c *executorTestClock) Now() time.Time {
 }
 
 func (c *executorTestClock) After(time.Duration) <-chan time.Time {
+	ch := make(chan time.Time, 1)
+	ch <- c.now
+	return ch
+}
+
+type blockingSecondNowClock struct {
+	now           time.Time
+	secondStarted chan struct{}
+	releaseSecond chan struct{}
+	calls         atomic.Int64
+}
+
+func (c *blockingSecondNowClock) Now() time.Time {
+	if c.calls.Add(1) == 2 {
+		close(c.secondStarted)
+		<-c.releaseSecond
+	}
+	return c.now
+}
+
+func (c *blockingSecondNowClock) After(time.Duration) <-chan time.Time {
 	ch := make(chan time.Time, 1)
 	ch <- c.now
 	return ch

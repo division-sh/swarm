@@ -275,6 +275,9 @@ func (e *Executor) runChain(ctx context.Context, lease *worklifetime.Lease, cand
 		if err := e.waitUntilDue(ctx, candidate.DueAt); err != nil {
 			return
 		}
+		if !e.admitAttempt(ctx) {
+			return
+		}
 		// Retirement cancels waits and retries, but an admitted persistence
 		// operation must finish before its occurrence lease can settle.
 		result, err := e.store.ExecuteCompletionCandidate(context.WithoutCancel(ctx), candidate, e.catalog)
@@ -316,6 +319,12 @@ func (e *Executor) runChain(ctx context.Context, lease *worklifetime.Lease, cand
 			return
 		}
 	}
+}
+
+func (e *Executor) admitAttempt(ctx context.Context) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return !e.retiring && ctx.Err() == nil
 }
 
 func (e *Executor) waitUntilDue(ctx context.Context, dueAt time.Time) error {
