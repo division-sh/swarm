@@ -61,29 +61,36 @@ func (a *sqliteAdapter) latestRevision(ctx context.Context, runID string) (int64
 	return revision, true, nil
 }
 
-func (a *sqliteAdapter) latestFacts(ctx context.Context, runID string, family Family) (map[string]ledgerFact, error) {
+func (a *sqliteAdapter) latestFacts(ctx context.Context, runID string) (ledgerFactsByFamily, error) {
 	rows, err := a.tx.QueryContext(ctx, `
-		SELECT r.fact_key, r.fact, r.present
+		SELECT r.family, r.fact_key, r.fact, r.present
 		FROM run_fork_fact_revisions r
-		WHERE r.run_id=$1 AND r.family=$2
+		WHERE r.run_id=$1
 		  AND NOT EXISTS (
 			SELECT 1 FROM run_fork_fact_revisions newer
 			WHERE newer.run_id=r.run_id AND newer.family=r.family AND newer.fact_key=r.fact_key AND newer.revision>r.revision
 		  )
-	`, runID, family)
+	`, runID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	facts := map[string]ledgerFact{}
+	facts := ledgerFactsByFamily{}
 	for rows.Next() {
+		var family Family
 		var key string
 		var fact []byte
 		var present bool
-		if err := rows.Scan(&key, &fact, &present); err != nil {
+		if err := rows.Scan(&family, &key, &fact, &present); err != nil {
 			return nil, err
 		}
-		facts[key] = ledgerFact{fact: append([]byte(nil), fact...), present: present}
+		if !ValidFamily(family) {
+			return nil, fmt.Errorf("decode unsupported run fork revision fact family %q", family)
+		}
+		if facts[family] == nil {
+			facts[family] = map[string]ledgerFact{}
+		}
+		facts[family][key] = ledgerFact{fact: append([]byte(nil), fact...), present: present}
 	}
 	return facts, rows.Err()
 }
