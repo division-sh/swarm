@@ -45,34 +45,16 @@ func finalizePostgresRunForkTestRevision(ctx context.Context, tx *sql.Tx, runID 
 	return results[runID].Revision, nil
 }
 
-func finalizeAllPostgresRunForkTestRevisions(ctx context.Context, tx *sql.Tx) (map[string]int64, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT CAST(run_id AS TEXT) FROM runs ORDER BY run_id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+func finalizeSQLiteRunForkTestRevision(ctx context.Context, tx *sql.Tx, runID string, families ...runforkrevision.Family) (int64, error) {
 	effects := runforkrevision.NewEffects()
-	for rows.Next() {
-		var runID string
-		if err := rows.Scan(&runID); err != nil {
-			return nil, err
-		}
-		if err := effects.Add(runID, runforkrevision.AllFamilies()...); err != nil {
-			return nil, err
-		}
+	if err := effects.Add(runID, families...); err != nil {
+		return 0, err
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	results, err := runforkrevision.FinalizePostgres(ctx, tx, effects)
+	results, err := runforkrevision.FinalizeSQLite(ctx, tx, effects)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
-	revisions := make(map[string]int64, len(results))
-	for runID, result := range results {
-		revisions[runID] = result.Revision
-	}
-	return revisions, nil
+	return results[runID].Revision, nil
 }
 
 func seedRunForkSessionProjection(t *testing.T, db *sql.DB, runID, agentID, sessionID, status string, at time.Time) {

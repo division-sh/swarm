@@ -873,7 +873,7 @@ rows:
       - kind: go_test
         name: TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite
       - kind: go_test
-        name: TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres
+        name: TestRunForkEndToEndPostgresCapturesCompleteRevisionHistory
       - kind: go_test
         name: TestRunServeRuntimeEventPublishExistingRunActiveLoadServedPathDefaultSQLite
       - kind: go_test
