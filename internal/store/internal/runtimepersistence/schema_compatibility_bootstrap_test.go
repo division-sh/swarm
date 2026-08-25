@@ -1024,16 +1024,38 @@ func generatedProbeStatePlans() []SchemaTableDDL {
 
 func canonicalSchemaBootstrapTestRequest(t testing.TB) SchemaBootstrapRequest {
 	t.Helper()
-	var spec runtimecontracts.PlatformSpecDocument
-	if err := yaml.Unmarshal(platform.PlatformSpecYAML(), &spec); err != nil {
-		t.Fatal(err)
-	}
-	plans, err := GeneratePlatformTableDDLs(spec)
-	if err != nil {
-		t.Fatal(err)
-	}
+	plans, platformVersion := canonicalPlatformSchemaTestPlans(t)
 	return SchemaBootstrapRequest{
 		PlatformPlans: plans,
-		Origin:        RuntimeStoreOrigin{SwarmVersion: "schema-test", PlatformVersion: spec.Platform.Version, CreatedAt: time.Now().UTC()},
+		Origin:        RuntimeStoreOrigin{SwarmVersion: "schema-test", PlatformVersion: platformVersion, CreatedAt: time.Now().UTC()},
 	}
+}
+
+var canonicalPlatformSchemaTestPlanCache struct {
+	sync.Once
+	plans           []SchemaTableDDL
+	platformVersion string
+	err             error
+}
+
+func canonicalPlatformSchemaTestPlans(t testing.TB) ([]SchemaTableDDL, string) {
+	t.Helper()
+	canonicalPlatformSchemaTestPlanCache.Do(func() {
+		var spec runtimecontracts.PlatformSpecDocument
+		if err := yaml.Unmarshal(platform.PlatformSpecYAML(), &spec); err != nil {
+			canonicalPlatformSchemaTestPlanCache.err = err
+			return
+		}
+		canonicalPlatformSchemaTestPlanCache.plans, canonicalPlatformSchemaTestPlanCache.err = GeneratePlatformTableDDLs(spec)
+		canonicalPlatformSchemaTestPlanCache.platformVersion = spec.Platform.Version
+	})
+	if canonicalPlatformSchemaTestPlanCache.err != nil {
+		t.Fatal(canonicalPlatformSchemaTestPlanCache.err)
+	}
+	plans := make([]SchemaTableDDL, len(canonicalPlatformSchemaTestPlanCache.plans))
+	for i, plan := range canonicalPlatformSchemaTestPlanCache.plans {
+		plans[i] = plan
+		plans[i].Statements = append([]string(nil), plan.Statements...)
+	}
+	return plans, canonicalPlatformSchemaTestPlanCache.platformVersion
 }

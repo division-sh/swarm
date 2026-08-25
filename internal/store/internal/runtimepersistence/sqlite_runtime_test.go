@@ -1830,11 +1830,7 @@ func newBootstrappedSQLiteRuntimeStoreForTest(t *testing.T) *SQLiteRuntimeStore 
 
 func newBootstrappedSQLiteRuntimeStoreForPath(t *testing.T, dbPath string) *SQLiteRuntimeStore {
 	t.Helper()
-	spec := loadPlatformSpecForSQLiteSchemaTest(t)
-	plans, err := GeneratePlatformTableDDLs(spec)
-	if err != nil {
-		t.Fatalf("GeneratePlatformTableDDLs: %v", err)
-	}
+	plans, platformVersion := canonicalPlatformSchemaTestPlans(t)
 	store, err := NewSQLiteRuntimeStore(dbPath)
 	if err != nil {
 		t.Fatalf("NewSQLiteRuntimeStore: %v", err)
@@ -1848,7 +1844,7 @@ func newBootstrappedSQLiteRuntimeStoreForPath(t *testing.T, dbPath string) *SQLi
 		PlatformPlans: plans,
 		Origin: RuntimeStoreOrigin{
 			SwarmVersion:    "sqlite-runtime-test",
-			PlatformVersion: spec.Platform.Version,
+			PlatformVersion: platformVersion,
 			CreatedAt:       time.Now().UTC(),
 		},
 	}); err != nil {
