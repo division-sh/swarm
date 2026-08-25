@@ -43,7 +43,7 @@ pins:
       - name: branch_start
         event: branch.start
 `,
-		"events.yaml": "branch.start:\n  branch_id: string\nbranch.done:\n  branch_id: string\n",
+		"events.yaml": "branch.start:\n  branch_id: string\n",
 		"nodes.yaml": `root-collector:
   id: root-collector
   execution_type: system_node
@@ -75,7 +75,7 @@ pins:
         event: branch.done
 `,
 		"flows/branch/entities.yaml": "branch_state:\n  branch_id:\n    type: string\n    _unused_reason: concrete diamond branch identity\n",
-		"flows/branch/events.yaml":   "branch.start:\n  branch_id: string\nwork.ready:\n  branch_id: string\nbranch.done:\n  branch_id: string\n",
+		"flows/branch/events.yaml":   "work.ready:\n  branch_id: string\nbranch.done:\n  branch_id: string\n",
 		"flows/branch/nodes.yaml": `branch-worker:
   id: branch-worker
   execution_type: system_node
@@ -111,7 +111,7 @@ pins:
       - name: work_ready
         event: work.ready
 `,
-		"flows/branch/flows/worker/result-static/events.yaml": "work.ready:\n  branch_id: string\n",
+		"flows/branch/flows/worker/result-static/events.yaml": "{}\n",
 		"flows/branch/flows/worker/result-static/nodes.yaml": `static-result-node:
   id: static-result-node
   execution_type: system_node
@@ -129,7 +129,7 @@ pins:
       - name: work_ready
         event: work.ready
 `,
-		"flows/branch/flows/worker/result/events.yaml": "work.ready:\n  branch_id: string\n",
+		"flows/branch/flows/worker/result/events.yaml": "{}\n",
 		"flows/branch/flows/worker/result/nodes.yaml": `singleton-result-node:
   id: singleton-result-node
   execution_type: system_node
@@ -154,7 +154,7 @@ pins:
       - name: work_ready
         event: work.ready
 `,
-		"flows/unrelated/worker/result/events.yaml": "work.ready:\n  branch_id: string\n",
+		"flows/unrelated/worker/result/events.yaml": "{}\n",
 		"flows/unrelated/worker/result/nodes.yaml": `hostile-node:
   id: hostile-node
   execution_type: system_node

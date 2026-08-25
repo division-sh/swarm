@@ -16,10 +16,9 @@ func TestCompiledEventSchemasCurrentGrammarOwnsOptionalityAndCanonicalSchema(t *
 	eventsFile := filepath.Join(root, "events.yaml")
 	writeFixtureFile(t, eventsFile, `
 item.created:
-  entity_id: string
+  entity_id: string?
   item_id: uuid
-  note: text
-  required: [item_id]
+  note: text?
 evidence.recorded:
   entity_id: string
   note: string
@@ -236,8 +235,7 @@ func TestCompiledEventBusinessKeyAdmissionIsClosed(t *testing.T) {
 			"object_key":   {Type: "object"},
 			"array_key":    {Type: "list<text>"},
 			"optional_key": {Type: "string"},
-		}},
-		Required: []string{"bool_key", "string_key", "number_key", "integer_key", "object_key", "array_key"},
+		}, Required: []string{"bool_key", "string_key", "number_key", "integer_key", "object_key", "array_key"}},
 	}
 	for _, test := range []struct {
 		field        string

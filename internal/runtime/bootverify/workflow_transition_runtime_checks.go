@@ -33,7 +33,7 @@ func (c *checkerContext) transitionReferences() []Finding {
 		} else if transitionTriggerIsTimerReference(c.source, transition) {
 			// Timer-triggered transitions are derived from stage timer rows and are
 			// not event catalog entries. The timer owner is validated separately.
-		} else if !eventExists(c.source, strings.TrimSpace(transition.Trigger)) {
+		} else if !flowEventExists(c.source, transitionOwningFlowID(transition), strings.TrimSpace(transition.Trigger)) {
 			c.transitionRefFindings = append(c.transitionRefFindings, Finding{
 				CheckID:  "transition_reference_validation",
 				Severity: "error",
@@ -56,7 +56,7 @@ func (c *checkerContext) transitionReferences() []Finding {
 				})
 				continue
 			}
-			if emits := strings.TrimSpace(action.Emits); emits != "" && !eventExists(c.source, emits) {
+			if emits := strings.TrimSpace(action.Emits); emits != "" && !flowEventExists(c.source, transitionOwningFlowID(transition), emits) {
 				c.transitionRefFindings = append(c.transitionRefFindings, Finding{
 					CheckID:  "transition_reference_validation",
 					Severity: "error",
@@ -83,7 +83,7 @@ func (c *checkerContext) transitionReferences() []Finding {
 	for flowID := range c.source.FlowSchemaEntries() {
 		for _, eventType := range c.source.FlowInputEvents(flowID) {
 			eventType = strings.TrimSpace(eventType)
-			if eventType != "" && !eventExists(c.source, eventType) {
+			if eventType != "" && !flowEventExists(c.source, flowID, eventType) {
 				c.transitionRefFindings = append(c.transitionRefFindings, Finding{
 					CheckID:  "transition_reference_validation",
 					Severity: "error",
@@ -94,7 +94,7 @@ func (c *checkerContext) transitionReferences() []Finding {
 		}
 		for _, eventType := range c.source.FlowOutputEvents(flowID) {
 			eventType = strings.TrimSpace(eventType)
-			if eventType != "" && !eventExists(c.source, eventType) {
+			if eventType != "" && !flowEventExists(c.source, flowID, eventType) {
 				c.transitionRefFindings = append(c.transitionRefFindings, Finding{
 					CheckID:  "transition_reference_validation",
 					Severity: "error",
@@ -107,6 +107,23 @@ func (c *checkerContext) transitionReferences() []Finding {
 	return c.transitionRefFindings
 }
 
+func flowEventExists(source semanticview.Source, flowID, eventType string) bool {
+	if proof := semanticview.ResolveFlowEventProof(source, strings.TrimSpace(flowID), strings.TrimSpace(eventType)); proof.HasSchema {
+		return true
+	}
+	return eventExists(source, eventType)
+}
+
+func transitionOwningFlowID(transition runtimecontracts.WorkflowTransitionContract) string {
+	if flowID := strings.TrimSpace(transition.FlowID); flowID != "" {
+		return flowID
+	}
+	if transition.ExecutableNode.Valid() {
+		return transition.ExecutableNode.FlowID()
+	}
+	return ""
+}
+
 func transitionTriggerIsTimerReference(source semanticview.Source, transition runtimecontracts.WorkflowTransitionContract) bool {
 	trigger := strings.TrimSpace(transition.Trigger)
 	if !strings.HasPrefix(trigger, "timer:") {
@@ -116,7 +133,7 @@ func transitionTriggerIsTimerReference(source semanticview.Source, transition ru
 	if timerID == "" || source == nil {
 		return false
 	}
-	timer, ok := source.WorkflowStageTimerByID(transition.FlowID, timerID)
+	timer, ok := source.WorkflowStageTimerByID(transitionOwningFlowID(transition), timerID)
 	return ok && timer.StageOwned
 }
 

@@ -4,4 +4,4 @@ monitor.started:
 monitor.stopped:
   swarm:
     source: external
-timer.tick:
+timer.tick: {}

@@ -1,4 +1,4 @@
 task.completed:
-  status: string
-task.logged:
-tracker/task.record:
+  status: string?
+task.logged: {}
+tracker/task.record: {}

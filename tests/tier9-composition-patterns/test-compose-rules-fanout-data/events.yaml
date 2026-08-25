@@ -1,4 +1,4 @@
 batch.requested:
-  mode: string
-  items: array
-batch.dispatched:
+  mode: string?
+  items: array?
+batch.dispatched: {}

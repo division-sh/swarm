@@ -3,8 +3,6 @@ package contracts
 import (
 	"strings"
 	"testing"
-
-	"gopkg.in/yaml.v3"
 )
 
 func TestEventCatalogPayloadFieldSupportsEveryWave1Shape(t *testing.T) {
@@ -34,9 +32,9 @@ func TestEventCatalogPayloadFieldSupportsEveryWave1Shape(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			var entry EventCatalogEntry
-			if err := yaml.Unmarshal([]byte(tc.yaml), &entry); err != nil {
-				t.Fatalf("yaml.Unmarshal: %v", err)
+			entry, err := admitEventCatalogEntryForTest(t, tc.yaml)
+			if err != nil {
+				t.Fatalf("admit event catalog entry: %v", err)
 			}
 			field, ok := entry.Payload.Properties["payload"]
 			if !ok {
@@ -63,8 +61,7 @@ func TestEventCatalogPayloadFieldDistinguishesRetiredBlocksFromMalformedFields(t
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			var entry EventCatalogEntry
-			err := yaml.Unmarshal([]byte(tc.yaml), &entry)
+			_, err := admitEventCatalogEntryForTest(t, tc.yaml)
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("error = %v, want %q", err, tc.wantErr)
 			}

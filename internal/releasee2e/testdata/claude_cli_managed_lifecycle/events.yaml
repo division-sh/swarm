@@ -2,4 +2,4 @@ agent.completed:
   swarm:
     source: external
     consumer: external
-  result: text
+  result: text?

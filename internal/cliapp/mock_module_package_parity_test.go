@@ -20,7 +20,7 @@ packages:
     path: bot
 flows: []
 `)
-	writeVerifyMockPackageFile(t, filepath.Join(root, "events.yaml"), "assistant.requested:\n  message: text\n")
+	writeVerifyMockPackageFile(t, filepath.Join(root, "events.yaml"), "assistant.requested:\n  message: text?\n")
 	writeVerifyMockPackageFile(t, filepath.Join(child, "package.yaml"), `name: bot
 version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
@@ -38,7 +38,7 @@ flows: []
     module: mocks/assistant.py
 `)
 	writeVerifyMockPackageFile(t, filepath.Join(child, "events.yaml"), `assistant.requested:
-  message: text
+  message: text?
 `)
 	writeVerifyMockPackageFile(t, filepath.Join(child, "mocks", "assistant.py"), "def handle(input):\n    return {'text': 'verified'}\n")
 	config := writeTestVerifyRuntimeConfig(t)

@@ -47,7 +47,6 @@ schema-ref-agent:
 	if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte(strings.TrimLeft(`
 schema.prompt.created:
   item_id: string
-  required: [item_id]
 `, "\n")), 0o644); err != nil {
 		t.Fatalf("write events.yaml: %v", err)
 	}
@@ -93,17 +92,19 @@ func TestDerivePromptSchemaGuardsPreservesScopedDuplicateLogicalAgents(t *testin
 		ResolvedIntent: resolve("flows/review/agents.yaml#agents.reviewer.intent", "Flow reviewer intent."),
 		EmitEvents:     []string{"review.completed"},
 	}
+	events := map[string]EventCatalogEntry{
+		"review.completed": {Payload: EventPayloadSpec{Required: []string{"review_id"}}},
+	}
 	flow := FlowContractView{
 		Paths:  FlowContractPaths{ID: "review", Flow: "review"},
 		Path:   "review",
 		Agents: map[string]AgentRegistryEntry{"reviewer": flowAgent},
+		Events: events,
 	}
 	bundle := &WorkflowContractBundle{
-		Events: map[string]EventCatalogEntry{
-			"review.completed": {Payload: EventPayloadSpec{Required: []string{"review_id"}}},
-		},
+		Events: events,
 		projectContracts: map[string]ProjectContractView{
-			".": {Paths: ProjectPackagePaths{Key: "."}, Agents: map[string]AgentRegistryEntry{"reviewer": rootAgent}},
+			".": {Paths: ProjectPackagePaths{Key: "."}, Agents: map[string]AgentRegistryEntry{"reviewer": rootAgent}, Events: events},
 		},
 		FlowTree: flowmodel.Tree[FlowContractView]{Root: &flow, ByID: map[string]*FlowContractView{"review": &flow}},
 	}

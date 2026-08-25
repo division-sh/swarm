@@ -1,4 +1,4 @@
-task.completed:
+task.completed: {}
 task.updated:
-  data: string
-task.finished:
+  data: string?
+task.finished: {}

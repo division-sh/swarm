@@ -1,9 +1,7 @@
 scout.setup:
   member_ids: "[text]"
   batch_id: text
-  required: [member_ids, batch_id]
 scout.member.done:
   member_id: text
   batch_id: text
   value: integer
-  required: [member_id, batch_id, value]

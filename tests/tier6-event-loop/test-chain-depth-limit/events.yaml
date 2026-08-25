@@ -1,7 +1,7 @@
-chain.start:
-chain.e1:
-chain.e2:
-chain.e3:
-chain.e4:
-chain.e5:
-chain.e6:
+chain.start: {}
+chain.e1: {}
+chain.e2: {}
+chain.e3: {}
+chain.e4: {}
+chain.e5: {}
+chain.e6: {}

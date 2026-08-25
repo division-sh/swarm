@@ -1,4 +1,4 @@
 check.requested:
-  score: integer
-  level: integer
-check.passed:
+  score: integer?
+  level: integer?
+check.passed: {}

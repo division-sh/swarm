@@ -1,5 +1,5 @@
-audit.logged:
-flow-alpha/trigger.alpha:
+audit.logged: {}
+flow-alpha/trigger.alpha: {}
 flow-alpha/job.alpha_done:
   description: Cross-flow event from flow-alpha indicating alpha job completion
 flow-beta/job.beta_done:

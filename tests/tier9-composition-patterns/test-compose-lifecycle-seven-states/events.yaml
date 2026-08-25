@@ -1,7 +1,7 @@
-phase.init:
-phase.activate:
-phase.start:
-phase.stabilize:
-phase.wind_down:
-phase.close:
-lifecycle.complete:
+phase.init: {}
+phase.activate: {}
+phase.start: {}
+phase.stabilize: {}
+phase.wind_down: {}
+phase.close: {}
+lifecycle.complete: {}

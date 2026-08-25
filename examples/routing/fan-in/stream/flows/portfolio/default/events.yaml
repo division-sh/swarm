@@ -1,4 +1,1 @@
-operating.reported:
-  operating_id: text
-  period_id: text
-  revenue: integer
+{}

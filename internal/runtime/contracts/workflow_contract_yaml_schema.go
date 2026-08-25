@@ -122,29 +122,6 @@ func (s *NodeGateStateSchema) UnmarshalYAML(node *yaml.Node) error {
 	}
 }
 
-func (s *EventFieldSpec) UnmarshalYAML(node *yaml.Node) error {
-	if s == nil {
-		return nil
-	}
-	parsed, err := decodeWave1FieldNode(node, wave1FieldNodeOptions{
-		Context:           "event payload field",
-		AllowInitial:      false,
-		AllowImmutable:    false,
-		AllowUnusedReason: false,
-		AllowCitation:     true,
-	})
-	if err != nil {
-		return err
-	}
-	*s = EventFieldSpec{
-		Type:        parsed.Type,
-		Description: parsed.Description,
-		Refinements: parsed.Refinements,
-		Citation:    parsed.Citation,
-	}
-	return nil
-}
-
 func (p *EventPayloadSpec) UnmarshalYAML(node *yaml.Node) error {
 	if p == nil {
 		return nil

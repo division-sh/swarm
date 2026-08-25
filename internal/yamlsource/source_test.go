@@ -2,6 +2,8 @@ package yamlsource
 
 import (
 	"bytes"
+	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -263,4 +265,130 @@ func TestSnapshotDecodeDoesNotExposeRetainedNodeToUnmarshalers(t *testing.T) {
 func loadError(store *Store, raw []byte) error {
 	_, err := store.Load(raw)
 	return err
+}
+
+func TestDocumentPreservesClosedPresenceVocabulary(t *testing.T) {
+	snapshot, err := Load([]byte(`
+null_value: null
+empty_scalar: ""
+scalar: value
+empty_sequence: []
+sequence: [value]
+empty_mapping: {}
+mapping: {field: value}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := snapshot.Document("contract.yaml").Root()
+	want := map[string]Presence{
+		"missing":        PresenceMissing,
+		"null_value":     PresenceNull,
+		"empty_scalar":   PresenceEmptyScalar,
+		"scalar":         PresenceScalar,
+		"empty_sequence": PresenceEmptySequence,
+		"sequence":       PresenceSequence,
+		"empty_mapping":  PresenceEmptyMapping,
+		"mapping":        PresenceMapping,
+	}
+	for field, presence := range want {
+		lookup, err := root.Lookup(field)
+		if err != nil {
+			t.Fatalf("lookup %s: %v", field, err)
+		}
+		if lookup.Presence != presence {
+			t.Errorf("%s presence = %s, want %s", field, lookup.Presence, presence)
+		}
+		if lookup.SemanticPath != `$["`+field+`"]` {
+			t.Errorf("%s semantic path = %q", field, lookup.SemanticPath)
+		}
+	}
+	if got := MissingDocument("optional.yaml").Presence(); got != PresenceMissing {
+		t.Fatalf("missing document presence = %s", got)
+	}
+}
+
+func TestDocumentMappingReportsAllDirectAndMergedOccurrences(t *testing.T) {
+	snapshot, err := Load([]byte(`
+defaults: &defaults
+  retired: inherited
+  stable: inherited
+entry:
+  <<: *defaults
+  stable: direct
+  retired: direct
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := snapshot.Document("events.yaml").Root().Lookup("entry")
+	if err != nil {
+		t.Fatal(err)
+	}
+	retired, err := entry.Value.Lookup("retired")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(retired.Occurrences) != 2 {
+		t.Fatalf("retired occurrences = %#v", retired.Occurrences)
+	}
+	if !retired.Occurrences[0].FromMerge || retired.Occurrences[1].FromMerge {
+		t.Fatalf("retired merge ownership = %#v", retired.Occurrences)
+	}
+	if retired.Occurrences[0].KeyLocation.Line != 3 || retired.Occurrences[1].KeyLocation.Line != 8 || retired.Occurrences[0].MergeLocation.Line != 6 {
+		t.Fatalf("retired locations = %#v", retired.Occurrences)
+	}
+	stable, err := entry.Value.Lookup("stable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := []int{stable.Occurrences[0].KeyLocation.Line, stable.Occurrences[1].KeyLocation.Line}; !reflect.DeepEqual(got, []int{4, 7}) {
+		t.Fatalf("stable occurrence lines = %v", got)
+	}
+}
+
+func TestDocumentValidateUniqueMappingsRejectsDirectAndMergedDuplicates(t *testing.T) {
+	for _, tc := range []struct {
+		source string
+		lines  []string
+	}{
+		{source: "entry:\n  value: one\n  value: two\n", lines: []string{"contract.yaml:2", "contract.yaml:3"}},
+		{source: "entry:\n  <<: &base\n    value: one\n  value: two\n", lines: []string{"contract.yaml:3", "contract.yaml:4"}},
+	} {
+		snapshot, err := Load([]byte(tc.source))
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = snapshot.Document("contract.yaml").Root().ValidateUniqueMappings()
+		if err == nil || !strings.Contains(err.Error(), "duplicate effective YAML key \"value\"") || !strings.Contains(err.Error(), tc.lines[0]) || !strings.Contains(err.Error(), tc.lines[1]) {
+			t.Fatalf("duplicate error = %v", err)
+		}
+	}
+}
+
+func TestDocumentProjectReturnsCallerOwnedTypedValue(t *testing.T) {
+	snapshot, err := Load([]byte("entry: {values: [one, two]}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := snapshot.Document("contract.yaml").Root().Lookup("entry")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first struct {
+		Values []string `yaml:"values"`
+	}
+	if err := entry.Value.Project(&first); err != nil {
+		t.Fatal(err)
+	}
+	first.Values[0] = "changed"
+	var second struct {
+		Values []string `yaml:"values"`
+	}
+	if err := entry.Value.Project(&second); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(second.Values, []string{"one", "two"}) {
+		t.Fatalf("second projection = %v", second.Values)
+	}
 }

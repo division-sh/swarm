@@ -68,9 +68,9 @@ func CopyRootIngressServedExternalEvent(t testing.TB) string {
 	t.Helper()
 	root := CopyRootIngressServedFollowUp(t)
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), `item.processed:
-  item_id: text
+  item_id: text?
 `, `item.processed:
-  item_id: text
+  item_id: text?
 external.observed:
   swarm:
     source: external
@@ -355,9 +355,9 @@ pins:
   owner: text
 `)
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"), `item.processed:
-  item_id: text
+  item_id: text?
 `, `item.processed:
-  item_id: text
+  item_id: text?
 opco.bootstrap_requested:
   owner: text
 opco.spinup_requested:

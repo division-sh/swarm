@@ -328,13 +328,13 @@ func TestValidateWorkflowContractBundleLoadConstraintsRequiresValidateRowsToMapD
 }
 
 func TestEventFieldSpecDecodeRejectsMalformedSchemaRefinement(t *testing.T) {
-	var field EventFieldSpec
-	err := yaml.Unmarshal([]byte(`
-type: text
-pattern: "["
-`), &field)
+	_, err := admitEventCatalogEntryForTest(t, `
+value:
+  type: text
+  pattern: "["
+`)
 	if err == nil || !strings.Contains(err.Error(), "pattern") {
-		t.Fatalf("EventFieldSpec decode error = %v, want pattern failure", err)
+		t.Fatalf("event catalog admission error = %v, want pattern failure", err)
 	}
 }
 
@@ -728,16 +728,16 @@ criteria: [feasibility_exclusions]
 		t.Fatalf("agent criteria = %q, want feasibility_exclusions", got)
 	}
 
-	var event EventCatalogEntry
-	if err := yaml.Unmarshal([]byte(`
+	event, err := admitEventCatalogEntryForTest(t, `
 reason: text
 cites:
   type: "[text]"
   citation:
     criteria: feasibility_exclusions
     allowed_classes: [hard, soft]
-`), &event); err != nil {
-		t.Fatalf("yaml.Unmarshal EventCatalogEntry: %v", err)
+`)
+	if err != nil {
+		t.Fatalf("admit EventCatalogEntry: %v", err)
 	}
 	field := event.Payload.Properties["cites"]
 	if field.Citation.Criteria != "feasibility_exclusions" {

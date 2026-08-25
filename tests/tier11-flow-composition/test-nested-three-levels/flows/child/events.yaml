@@ -1,5 +1,3 @@
-step.begin:
-grandchild/micro.done:
-micro.start:
-micro.done:
-micro.relayed:
+grandchild/micro.done: {}
+micro.start: {}
+micro.relayed: {}

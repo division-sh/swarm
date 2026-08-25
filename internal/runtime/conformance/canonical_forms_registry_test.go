@@ -49,6 +49,7 @@ type canonicalFormsRegistry struct {
 	DecoderCoverage   map[string]map[string][]string `yaml:"decoder_coverage"`
 	DecoderExclusions map[string]map[string][]string `yaml:"decoder_exclusions"`
 	Wave1             canonicalFormsWave1            `yaml:"wave_1"`
+	Wave3             canonicalFormsWave3            `yaml:"wave_3"`
 }
 
 type canonicalFormsInventory struct {
@@ -74,6 +75,14 @@ type canonicalFormsWave1 struct {
 	Rows                   []string                      `yaml:"rows"`
 	CheckedInPackageCorpus canonicalFormsPackageCorpus   `yaml:"checked_in_package_corpus"`
 	GoConnectCorpus        canonicalFormsGoConnectCorpus `yaml:"go_connect_corpus"`
+}
+
+type canonicalFormsWave3 struct {
+	Issue              int      `yaml:"issue"`
+	Status             string   `yaml:"status"`
+	Rows               []string `yaml:"rows"`
+	MigratedDecoders   []string `yaml:"migrated_decoders"`
+	RemainingReachable int      `yaml:"remaining_reachable_decoders"`
 }
 
 type canonicalFormsPackageCorpus struct {
@@ -159,11 +168,64 @@ func TestCanonicalFormsRegistryOwnsCompleteDecoderInventory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("collect custom YAML decoders: %v", err)
 	}
-	if record.Inventory.CustomUnmarshalTotal != 104 || record.Inventory.CustomUnmarshalReachable != 103 || record.Inventory.CustomUnmarshalExcluded != 1 || len(expectedReachable) != 103 || len(expectedExcluded) != 1 || len(actual) != 104 {
-		t.Fatalf("decoder inventory total/reachable/excluded/coverage/exclusion/source = %d/%d/%d/%d/%d/%d, want 104/103/1/103/1/104", record.Inventory.CustomUnmarshalTotal, record.Inventory.CustomUnmarshalReachable, record.Inventory.CustomUnmarshalExcluded, len(expectedReachable), len(expectedExcluded), len(actual))
+	if record.Inventory.CustomUnmarshalTotal != 102 || record.Inventory.CustomUnmarshalReachable != 101 || record.Inventory.CustomUnmarshalExcluded != 1 || len(expectedReachable) != 101 || len(expectedExcluded) != 1 || len(actual) != 102 {
+		t.Fatalf("decoder inventory total/reachable/excluded/coverage/exclusion/source = %d/%d/%d/%d/%d/%d, want 102/101/1/101/1/102", record.Inventory.CustomUnmarshalTotal, record.Inventory.CustomUnmarshalReachable, record.Inventory.CustomUnmarshalExcluded, len(expectedReachable), len(expectedExcluded), len(actual))
 	}
 	if err := validateCustomYAMLDecoderInventory(expectedReachable, expectedExcluded, actual); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCanonicalFormsRegistryPinsWave3EventAdmission(t *testing.T) {
+	root := conformanceRepoRoot(t)
+	record := loadCanonicalFormsRegistry(t, root)
+	wantDecoders := []string{
+		"workflow_contract_yaml_handlers.go:EventCatalogEntry",
+		"workflow_contract_yaml_schema.go:EventFieldSpec",
+	}
+	if record.Wave3.Issue != 2300 || record.Wave3.Status != "closed" || !reflect.DeepEqual(record.Wave3.Rows, []string{"event.schema_ownership"}) || !reflect.DeepEqual(record.Wave3.MigratedDecoders, wantDecoders) || record.Wave3.RemainingReachable != 101 {
+		t.Fatalf("wave 3 registry = %#v", record.Wave3)
+	}
+
+	migratedFiles := []string{
+		"internal/runtime/contracts/event_catalog_admission.go",
+		"internal/runtime/contracts/event_schema_ownership.go",
+		"internal/runtime/contracts/effective_provenance.go",
+	}
+	for _, relative := range migratedFiles {
+		path := filepath.Join(root, filepath.FromSlash(relative))
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			selector, ok := node.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			if selector.Sel.Name == "Decode" || selector.Sel.Name == "Kind" || selector.Sel.Name == "Tag" || selector.Sel.Name == "Unmarshal" {
+				t.Errorf("migrated W3 file %s contains raw YAML bypass selector %s", relative, selector.Sel.Name)
+			}
+			return true
+		})
+	}
+
+	actual, err := collectCustomYAMLDecoders(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, retired := range wantDecoders {
+		if _, exists := actual[retired]; exists {
+			t.Errorf("retired W3 decoder %s reappeared", retired)
+		}
+	}
+
+	treeSource, err := os.ReadFile(filepath.Join(root, "internal/runtime/contracts/workflow_contract_tree.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := bytes.Count(treeSource, []byte("loadOptionalEventCatalog(")); got != 2 {
+		t.Fatalf("event catalog loader call count = %d, want project + flow admission calls", got)
 	}
 }
 

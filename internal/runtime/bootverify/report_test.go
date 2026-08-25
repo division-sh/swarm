@@ -1755,8 +1755,7 @@ func TestRun_ReportsArtifactRepoCommitResultEventSchemaMismatch(t *testing.T) {
 					"file_manifest":   {Type: "object"},
 					"provenance":      {Type: "object"},
 					"result_kind":     {Type: "string"},
-				}},
-				Required: []string{"repo_id", "namespace", "request_id", "source_event_id", "repo_url", "current_ref", "file_manifest", "provenance", "result_kind"},
+				}, Required: []string{"repo_id", "namespace", "request_id", "source_event_id", "repo_url", "current_ref", "file_manifest", "provenance", "result_kind"}},
 			},
 			"artifact_repo.commit_failed": {
 				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
@@ -1767,8 +1766,7 @@ func TestRun_ReportsArtifactRepoCommitResultEventSchemaMismatch(t *testing.T) {
 					"failure":         {Type: runtimefailures.EnvelopeSchemaVersion + " envelope"},
 					"provenance":      {Type: "object"},
 					"request_copy":    {Type: "string"},
-				}},
-				Required: []string{"repo_id", "namespace", "request_id", "source_event_id", "failure", "provenance", "request_copy"},
+				}, Required: []string{"repo_id", "namespace", "request_id", "source_event_id", "failure", "provenance", "request_copy"}},
 			},
 		},
 	})
@@ -1838,8 +1836,7 @@ func TestRun_ReportsArtifactRepoCommitResultEventRuntimeOwnedTypeMismatch(t *tes
 					"file_manifest":   {Type: "string"},
 					"provenance":      {Type: "object"},
 					"result_kind":     {Type: "string"},
-				}},
-				Required: []string{"repo_id", "namespace", "request_id", "source_event_id", "repo_url", "current_ref", "file_manifest", "provenance", "result_kind"},
+				}, Required: []string{"repo_id", "namespace", "request_id", "source_event_id", "repo_url", "current_ref", "file_manifest", "provenance", "result_kind"}},
 			},
 			"artifact_repo.commit_failed": {
 				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
@@ -1850,8 +1847,7 @@ func TestRun_ReportsArtifactRepoCommitResultEventRuntimeOwnedTypeMismatch(t *tes
 					"failure":         {Type: "string"},
 					"provenance":      {Type: "string"},
 					"request_copy":    {Type: "string"},
-				}},
-				Required: []string{"repo_id", "namespace", "request_id", "source_event_id", "failure", "provenance", "request_copy"},
+				}, Required: []string{"repo_id", "namespace", "request_id", "source_event_id", "failure", "provenance", "request_copy"}},
 			},
 		},
 	})
@@ -3743,7 +3739,7 @@ func TestRun_ErrorsWhenEmitFieldsOmitRequiredEmittedField(t *testing.T) {
 func TestRun_ErrorsWithoutEmitFieldsEvenWhenContextSuggestsPassthrough(t *testing.T) {
 	bundle := bootverifyPayloadCompletenessBundle()
 	entry := bundle.Events["market_research.scan_assigned"]
-	entry.Required = []string{"entity_id", "scan_id"}
+	entry.Payload.Required = []string{"entity_id", "scan_id"}
 	bundle.Events["market_research.scan_assigned"] = entry
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -3788,7 +3784,7 @@ func TestRun_RejectsEmitFieldsForEmptyPayloadSchema(t *testing.T) {
 	bundle := bootverifyPayloadCompletenessBundle()
 	entry := bundle.Events["market_research.scan_assigned"]
 	entry.Payload = runtimecontracts.EventPayloadSpec{}
-	entry.Required = nil
+	entry.Payload.Required = nil
 	bundle.Events["market_research.scan_assigned"] = entry
 
 	node := bundle.Nodes["dispatcher"]
@@ -3813,7 +3809,7 @@ func TestRun_RejectsEmitFieldsForEmptyPayloadSchema(t *testing.T) {
 func TestRun_LowersEmitFromBeforePayloadCompletenessAndExpressionValidation(t *testing.T) {
 	bundle := bootverifyPayloadCompletenessBundle()
 	entry := bundle.Events["market_research.scan_assigned"]
-	entry.Required = []string{"scan_id", "geography"}
+	entry.Payload.Required = []string{"scan_id", "geography"}
 	bundle.Events["market_research.scan_assigned"] = entry
 	node := bundle.Nodes["dispatcher"]
 	handler := node.EventHandlers["scan.corpus_dispatch"]
@@ -3841,7 +3837,7 @@ func TestRun_LowersEmitFromBeforePayloadCompletenessAndExpressionValidation(t *t
 func TestRun_LowersEmitFromThroughRulesEmitTemplateSpecialization(t *testing.T) {
 	bundle := bootverifyPayloadCompletenessBundle()
 	entry := bundle.Events["market_research.scan_assigned"]
-	entry.Required = []string{"scan_id", "geography"}
+	entry.Payload.Required = []string{"scan_id", "geography"}
 	bundle.Events["market_research.scan_assigned"] = entry
 	node := bundle.Nodes["dispatcher"]
 	handler := node.EventHandlers["scan.corpus_dispatch"]
@@ -3875,7 +3871,7 @@ func TestRun_LowersEmitFromThroughRulesEmitTemplateSpecialization(t *testing.T) 
 func TestRun_ReportsEmitFromLoweringErrorsAsPayloadCompletenessFailures(t *testing.T) {
 	bundle := bootverifyPayloadCompletenessBundle()
 	entry := bundle.Events["market_research.scan_assigned"]
-	entry.Required = []string{"scan_id", "missing_required"}
+	entry.Payload.Required = []string{"scan_id", "missing_required"}
 	entry.Payload.Properties["missing_required"] = runtimecontracts.EventFieldSpec{Type: "string"}
 	bundle.Events["market_research.scan_assigned"] = entry
 	node := bundle.Nodes["dispatcher"]
@@ -3947,7 +3943,7 @@ func TestRun_DoesNotWarnWhenEmitFieldsCoverRequiredPayloadAcrossExpressionKinds(
 func TestRun_ErrorsWhenRequiredPayloadContainsEnvelopeOwnedFields(t *testing.T) {
 	bundle := bootverifyPayloadCompletenessBundle()
 	entry := bundle.Events["market_research.scan_assigned"]
-	entry.Required = []string{"entity_id", "current_state"}
+	entry.Payload.Required = []string{"entity_id", "current_state"}
 	bundle.Events["market_research.scan_assigned"] = entry
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -3963,7 +3959,7 @@ func TestRun_ErrorsWhenRequiredPayloadContainsEnvelopeOwnedFields(t *testing.T) 
 func TestRun_ErrorsWhenEmitFieldsAuthorEnvelopeOwnedFieldWithoutRequiredPayload(t *testing.T) {
 	bundle := bootverifyPayloadCompletenessBundle()
 	entry := bundle.Events["market_research.scan_assigned"]
-	entry.Required = nil
+	entry.Payload.Required = nil
 	bundle.Events["market_research.scan_assigned"] = entry
 	node := bundle.Nodes["dispatcher"]
 	handler := node.EventHandlers["scan.corpus_dispatch"]
@@ -4031,7 +4027,7 @@ func TestRun_ErrorsPerEmitSiteWhenSameEventIsUnderspecifiedOnOneRuleOnly(t *test
 func TestRun_RulesEmitTemplateSpecializationUsesMergedBranchPayloads(t *testing.T) {
 	bundle := bootverifyPayloadCompletenessBundle()
 	entry := bundle.Events["market_research.scan_assigned"]
-	entry.Required = []string{"scan_id", "geography"}
+	entry.Payload.Required = []string{"scan_id", "geography"}
 	bundle.Events["market_research.scan_assigned"] = entry
 	node := bundle.Nodes["dispatcher"]
 	handler := node.EventHandlers["scan.corpus_dispatch"]
@@ -4076,7 +4072,7 @@ func TestRun_RulesEmitTemplateSpecializationUsesMergedBranchPayloads(t *testing.
 func TestRun_RulesEmitTemplateSpecializationErrorsPerMergedBranch(t *testing.T) {
 	bundle := bootverifyPayloadCompletenessBundle()
 	entry := bundle.Events["market_research.scan_assigned"]
-	entry.Required = []string{"scan_id", "geography"}
+	entry.Payload.Required = []string{"scan_id", "geography"}
 	bundle.Events["market_research.scan_assigned"] = entry
 	node := bundle.Nodes["dispatcher"]
 	handler := node.EventHandlers["scan.corpus_dispatch"]
@@ -4130,8 +4126,8 @@ func TestRun_ErrorsForOnSuccessEmitSitePayloadDrift(t *testing.T) {
 			Properties: map[string]runtimecontracts.EventFieldSpec{
 				"audit_id": {Type: "string"},
 			},
+			Required: []string{"audit_id"},
 		},
-		Required: []string{"audit_id"},
 	}
 	node := bundle.Nodes["dispatcher"]
 	handler := node.EventHandlers["scan.corpus_dispatch"]
@@ -4242,7 +4238,7 @@ func TestRun_ErrorsForGuardEscalatePayloadDrift(t *testing.T) {
 		entry.Payload.Properties = map[string]runtimecontracts.EventFieldSpec{}
 	}
 	entry.Payload.Properties["reason"] = runtimecontracts.EventFieldSpec{Type: "string"}
-	entry.Required = []string{"reason"}
+	entry.Payload.Required = []string{"reason"}
 	bundle.Events["check.escalated"] = entry
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -4263,7 +4259,7 @@ func TestRun_DoesNotWarnWhenGuardEscalateObjectFieldsCoverRequiredPayload(t *tes
 	}
 	entry.Payload.Properties["score"] = runtimecontracts.EventFieldSpec{Type: "integer"}
 	entry.Payload.Properties["reason"] = runtimecontracts.EventFieldSpec{Type: "string"}
-	entry.Required = []string{"score", "reason"}
+	entry.Payload.Required = []string{"score", "reason"}
 	bundle.Events["check.escalated"] = entry
 	setGuardEscalationForBootverifyTest(bundle, runtimecontracts.EmitSpec{
 		Event: "check.escalated",
@@ -4288,7 +4284,7 @@ func TestRun_ErrorsWhenGuardEscalateObjectFieldsMissRequiredPayload(t *testing.T
 	}
 	entry.Payload.Properties["score"] = runtimecontracts.EventFieldSpec{Type: "integer"}
 	entry.Payload.Properties["reason"] = runtimecontracts.EventFieldSpec{Type: "string"}
-	entry.Required = []string{"score", "reason"}
+	entry.Payload.Required = []string{"score", "reason"}
 	bundle.Events["check.escalated"] = entry
 	setGuardEscalationForBootverifyTest(bundle, runtimecontracts.EmitSpec{
 		Event: "check.escalated",
@@ -4310,7 +4306,7 @@ func TestRun_ErrorsWhenGuardEscalateObjectFieldsMissRequiredPayload(t *testing.T
 func TestRun_ErrorsWhenGuardEscalateObjectFieldsAuthorEnvelopeOwnedField(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier1-primitives", "test-guard-escalate"))
 	entry := bundle.Events["check.escalated"]
-	entry.Required = nil
+	entry.Payload.Required = nil
 	bundle.Events["check.escalated"] = entry
 	setGuardEscalationForBootverifyTest(bundle, runtimecontracts.EmitSpec{
 		Event: "check.escalated",
@@ -4332,7 +4328,7 @@ func TestRun_ErrorsWhenGuardEscalateObjectFieldsAuthorEnvelopeOwnedField(t *test
 func TestRun_ErrorsForGuardEscalateWhenRequiredPayloadContainsEnvelopeOwnedFields(t *testing.T) {
 	bundle := loadFixtureBundle(t, filepath.Join("tests", "tier1-primitives", "test-guard-escalate"))
 	entry := bundle.Events["check.escalated"]
-	entry.Required = []string{"entity_id"}
+	entry.Payload.Required = []string{"entity_id"}
 	bundle.Events["check.escalated"] = entry
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -7471,8 +7467,7 @@ func artifactRepoTimerResultEventEntry(success bool) runtimecontracts.EventCatal
 		required = append(required, "failure")
 	}
 	return runtimecontracts.EventCatalogEntry{
-		Payload:  runtimecontracts.EventPayloadSpec{Properties: properties},
-		Required: required,
+		Payload: runtimecontracts.EventPayloadSpec{Properties: properties, Required: required},
 	}
 }
 
@@ -7760,7 +7755,7 @@ task.assigned:
   score: numeric
 task.feedback:
   comment: string
-task.result:
+task.result: {}
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
 worker:
@@ -8070,8 +8065,8 @@ func bootverifyPayloadCompletenessBundle() *runtimecontracts.WorkflowContractBun
 						"geography": {Type: "string"},
 						"mode":      {Type: "string"},
 					},
+					Required: []string{"scan_id", "geography"},
 				},
-				Required: []string{"scan_id", "geography"},
 			},
 			"market_research.scan_assigned": {
 				Swarm: runtimecontracts.EventSwarmMetadata{Consumer: []string{"dashboard"}},
@@ -8080,8 +8075,8 @@ func bootverifyPayloadCompletenessBundle() *runtimecontracts.WorkflowContractBun
 						"scan_id":   {Type: "string"},
 						"geography": {Type: "string"},
 					},
+					Required: []string{"scan_id"},
 				},
-				Required: []string{"scan_id"},
 			},
 		},
 	}

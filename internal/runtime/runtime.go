@@ -858,7 +858,7 @@ func AuthorActivityEventDescriptors(source semanticview.Source) ([]runtimeauthor
 			continue
 		}
 		disposition := runtimeauthoractivity.StoryDifferent
-		if _, ok := authored[strings.TrimSpace(proof.CatalogKey)]; ok {
+		if proof.IsAuthored(source) {
 			disposition = runtimeauthoractivity.StoryAuthored
 		}
 		if err := add(proof.EventKey(), proof.Entry, disposition); err != nil {

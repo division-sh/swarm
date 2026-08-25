@@ -793,9 +793,9 @@ auto_emit_on_create:
 `,
 		"flows/operating/entities.yaml": "operating_state: {}\n",
 		"flows/operating/events.yaml": `opco.product_initialization_requested:
-  entity_id: string
+  entity_id: string?
 opco.ceo_ready:
-  entity_id: string
+  entity_id: string?
 `,
 		"flows/operating/nodes.yaml": `lifecycle-orchestrator:
   id: lifecycle-orchestrator
@@ -819,9 +819,9 @@ flows:
     mode: template
 `,
 		"events.yaml": `opco.spinup_requested:
-  entity_id: string
-  instance_id: string
-  product_id: string
+  entity_id: string?
+  instance_id: string?
+  product_id: string?
 `,
 		"nodes.yaml": `portfolio-node:
   id: portfolio-node
@@ -844,9 +844,9 @@ auto_emit_on_create:
 `,
 		"flows/operating/entities.yaml": "operating_state: {}\n",
 		"flows/operating/events.yaml": `opco.product_initialization_requested:
-  product_id: string
+  product_id: string?
 component_scaffold.spawn_requested:
-  product_id: string
+  product_id: string?
 `,
 		"flows/operating/nodes.yaml": `lifecycle-orchestrator:
   id: lifecycle-orchestrator
@@ -874,9 +874,9 @@ flows:
     mode: template
 `,
 		"events.yaml": `opco.spinup_requested:
-  entity_id: string
-  instance_id: string
-  product_id: string
+  entity_id: string?
+  instance_id: string?
+  product_id: string?
 `,
 		"nodes.yaml": `portfolio-node:
   id: portfolio-node
@@ -899,11 +899,11 @@ auto_emit_on_create:
 `,
 		"flows/operating/entities.yaml": "operating_state: {}\n",
 		"flows/operating/events.yaml": `opco.product_initialization_requested:
-  instance_id: string
-  template_id: string
-  flow_path: string
-  parent_entity_id: string
-  product_id: string
+  instance_id: string?
+  template_id: string?
+  flow_path: string?
+  parent_entity_id: string?
+  product_id: string?
 `,
 		"flows/operating/agents.yaml": `ceo:
   type: generic

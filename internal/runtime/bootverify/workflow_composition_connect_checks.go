@@ -348,7 +348,7 @@ func inputPinPayloadFieldExists(source semanticview.Source, flowID string, pin r
 	if _, ok := entry.Payload.Properties[field]; ok {
 		return true
 	}
-	for _, required := range append(entry.Required, entry.Payload.Required...) {
+	for _, required := range entry.Payload.Required {
 		if strings.TrimSpace(required) == field {
 			return true
 		}

@@ -328,8 +328,8 @@ func TestExecutorTelemetry_EmitToolLogsStructuredPublishedOutcome(t *testing.T) 
 					Properties: map[string]runtimecontracts.EventFieldSpec{
 						"category": {Type: "string"},
 					},
+					Required: []string{"category"},
 				},
-				Required: []string{"category"},
 			},
 		},
 	}
@@ -412,8 +412,8 @@ func TestExecutorTelemetry_PreservesTypedLineageForEmitToolOutcome(t *testing.T)
 					Properties: map[string]runtimecontracts.EventFieldSpec{
 						"category": {Type: "string"},
 					},
+					Required: []string{"category"},
 				},
-				Required: []string{"category"},
 			},
 		},
 	}
@@ -446,8 +446,8 @@ func TestExecutorTelemetry_EmitToolLogsSchemaValidationFailureSeparatelyFromPubl
 					Properties: map[string]runtimecontracts.EventFieldSpec{
 						"category": {Type: "string"},
 					},
+					Required: []string{"category"},
 				},
-				Required: []string{"category"},
 			},
 		},
 	}
@@ -490,8 +490,8 @@ func TestExecutorTelemetry_EmitToolLogsUndeclaredFieldSchemaValidationFailure(t 
 					Properties: map[string]runtimecontracts.EventFieldSpec{
 						"category": {Type: "string"},
 					},
+					Required: []string{"category"},
 				},
-				Required: []string{"category"},
 			},
 		},
 	})
@@ -565,8 +565,8 @@ func TestExecutorTelemetry_EmitToolLogsPublishFailureWithCanonicalEventIdentity(
 					Properties: map[string]runtimecontracts.EventFieldSpec{
 						"category": {Type: "string"},
 					},
+					Required: []string{"category"},
 				},
-				Required: []string{"category"},
 			},
 		},
 	}
@@ -623,8 +623,8 @@ func TestExecutorTelemetry_EmitToolLogsPayloadShapeFailureBeforeSchemaValidation
 					Properties: map[string]runtimecontracts.EventFieldSpec{
 						"category": {Type: "string"},
 					},
+					Required: []string{"category"},
 				},
-				Required: []string{"category"},
 			},
 		},
 	})
@@ -701,8 +701,8 @@ func TestExecutorTelemetry_EmitToolCapsOversizedPayloadSnapshotsOnSchemaValidati
 						"category": {Type: "string"},
 						"notes":    {Type: "string"},
 					},
+					Required: []string{"category"},
 				},
-				Required: []string{"category"},
 			},
 		},
 	})

@@ -66,7 +66,6 @@ func CopyTemplateInstanceRoute(t testing.TB, opts TemplateInstanceRouteOptions) 
 
 	secondConnect := ""
 	secondPin := ""
-	secondEventSchema := ""
 	secondHandler := ""
 	if opts.SecondPin == TemplateInstanceSecondPinDuplicateEdge {
 		secondConnect = "  - event: deploy.done\n    from: producer\n    to: consumer\n"
@@ -76,7 +75,6 @@ func CopyTemplateInstanceRoute(t testing.TB, opts TemplateInstanceRouteOptions) 
 		if opts.SecondPin == TemplateInstanceSecondPinDistinctEvent {
 			secondConnect += "    rename: deploy.audited\n    adapter: deploy_done_to_deploy_audited\n"
 			secondEvent = "deploy.audited"
-			secondEventSchema = "deploy.audited:\n  " + producerField + ": string\n"
 			secondHandler = "    " + secondEvent + ": {}\n"
 		} else if opts.SecondPin != TemplateInstanceSecondPinSameEvent {
 			t.Fatalf("unsupported template instance second pin %d", opts.SecondPin)
@@ -141,7 +139,7 @@ pins:
             from: `+carrySource+`
             type: string
 `+secondPin,
-		"deploy.done:\n  "+producerField+": string\n"+secondEventSchema,
+		"{}\n",
 		"deployment:\n  vertical_id:\n    type: string\n",
 		consumerNodes)
 	writeClosedVariantFile(t, root, "flows/consumer/agents.yaml", consumerAgents)

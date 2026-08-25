@@ -461,7 +461,7 @@ func validateArtifactRepoResultEventSpec(source semanticview.Source, flowID, nod
 				findings = append(findings, artifactRepoFinding(nodeID, eventType, fmt.Sprintf("artifact_repo.%s_payload.%s is not declared by %s payload schema", label, target, resultEvent)))
 			}
 		}
-		for _, field := range entry.Required {
+		for _, field := range entry.Payload.Required {
 			field = strings.TrimSpace(field)
 			if field == "" {
 				continue

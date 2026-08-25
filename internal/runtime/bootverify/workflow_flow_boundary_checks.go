@@ -756,11 +756,6 @@ func eventEntryDeclaresPayloadField(entry runtimecontracts.EventCatalogEntry, fi
 	if _, ok := entry.Payload.Properties[field]; ok {
 		return true
 	}
-	for _, required := range entry.Required {
-		if strings.TrimSpace(required) == field {
-			return true
-		}
-	}
 	for _, required := range entry.Payload.Required {
 		if strings.TrimSpace(required) == field {
 			return true

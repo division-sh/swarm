@@ -42,11 +42,11 @@ classification_tests:
   f2_bug: "An accepted spelling changes, disappears, or is independently reinterpreted after decode."
 
 inventory:
-  custom_unmarshal_total: 104
-  custom_unmarshal_reachable: 103
+  custom_unmarshal_total: 102
+  custom_unmarshal_reachable: 101
   custom_unmarshal_excluded: 1
   custom_unmarshal_breakdown:
-    contracts: 89
+    contracts: 87
     flowmodel_policy: 11
     agentintent: 1
     contract_element_identity: 1
@@ -309,8 +309,8 @@ rows:
 
   - id: typed_field
     ruled: mechanical-ratified
-    paths: "types.types.<type>.<field>, entities.<entity>.<field>, events.<event>.<field>"
-    owners: [TypeFieldSpec.UnmarshalYAML, EntityFieldDecl.UnmarshalYAML, EventFieldSpec.UnmarshalYAML, decodeWave1FieldNode]
+    paths: "types.types.<type>.<field>, entities.<entity>.<field>"
+    owners: [TypeFieldSpec.UnmarshalYAML, EntityFieldDecl.UnmarshalYAML, decodeWave1FieldNode]
     information:
       fact: [type, initial, refinements, materialize_from, project]
       choice: [indexed, immutable]
@@ -320,7 +320,7 @@ rows:
       retired_duplicates: [mapping_with_type_only, one_item_sequence_type, "mapping {type: list, of: T} versus [T]"]
       distinct_overrides: [mapping_with_non_type_fields]
     f2_bug: "type:list plus of remains accepted although it is the same semantic type as [T]"
-    corpus: {event_scalar: 83, event_one_item_sequence: 1, event_mapping: 0, entity_scalar: 4, entity_type_only_mapping: 5, entity_mapping_with_metadata: 7}
+    corpus: {entity_scalar: 4, entity_type_only_mapping: 5, entity_mapping_with_metadata: 7}
 
   - id: entity_document
     ruled: mechanical-ratified
@@ -335,8 +335,8 @@ rows:
 
   - id: event.schema_ownership
     ruled: mechanical-ratified
-    paths: "events.<event>, events.<event>.<payload_field>, events.<event>.required"
-    owners: [EventCatalogEntry.UnmarshalYAML, buildFlatEventPayloadSpec]
+    paths: "events.<event>, events.<event>.key, events.<event>.<payload_field>, events.<event>.<payload_field>.type?"
+    owners: [yamlsource.Document, admitEventCatalogDocument, admitEventCatalogEntry, admitEventPayloadField, effectiveEventDeclarationForFlowEvent]
     information:
       fact: [producer-owned event ID and payload schema]
       derived_projection: [intra-package consumer schema]
@@ -346,7 +346,7 @@ rows:
       retired_duplicates: [intra_package_consumer_restatement, nested_payload_block]
       distinct_overrides: []
     f2_bug: "3 intra-package duplicate event declarations disagree instead of consuming one producer projection"
-    corpus: {event_declarations: 54, intra_package_duplicate_declarations: 16, exact_duplicate_restatements: 13, divergent_restatements: 3}
+    corpus: {event_declarations: 38, migrated_consumer_restatements: 16, intra_package_duplicate_declarations: 0, exact_projection_proofs: 13, named_delivery_projection_deltas: 3}
     divergent_manifestations:
       - fan-in/barrier:operating.report.requested
       - fan-in/stream:operating.report.requested
@@ -355,7 +355,7 @@ rows:
   - id: event.metadata_roles
     ruled: mechanical-ratified
     paths: "events.<event>.swarm.note, events.<event>.swarm.source, events.<event>.swarm.producer, events.<event>.swarm.consumer, events.<event>.swarm.status, events.<event>._note, events.<event>.consumer_type, events.<event>._consumer_type, events.<event>.emitter, events.<event>.alternate_emitters, events.<event>.emitter_type, events.<event>.intercepted, events.<event>.passthrough, events.<event>.runtime_handling, events.<event>.owning_node, events.<event>.delivery_channel, events.<event>.author_summary_field"
-    owner: EventCatalogEntry.UnmarshalYAML
+    owner: admitEventMetadata
     information:
       derived_projection: [internal producer, internal consumer, owning_node]
       fact: [external producer/consumer/source/status, emitter identity, delivery channel]
@@ -740,7 +740,6 @@ decoder_coverage:
   workflow_contract_yaml_schema.go:
     unreachable_retired_decoders: [EntitySchema, EventPayloadSpec]
     node.state_schema: [NodeStateSchema, NodeGateStateSchema]
-    typed_field: [EventFieldSpec]
     tool.schema_value: [ToolInputSchema]
     platform.pack_interface: [PackInterfaceDefinition, PackInterfaceOperation, PackInterfaceEvent, PackInterfaceField]
     tool.schema_entry: [ToolSchemaEntry]
@@ -758,7 +757,6 @@ decoder_coverage:
     handler.emit_action_activity: [EmitSpec, HandlerOnSuccessSpec, ActivitySpec, ActionSpec]
     handler.mailbox_artifact_repo: [MailboxWriteSpec, ArtifactRepoSpec, ArtifactRepoFileSpec, ArtifactRepoSchemaSpec, ArtifactRepoOutputSpec, ArtifactRepoLimitsSpec]
     handler.container: [SystemNodeEventHandler]
-    event.schema_ownership: [EventCatalogEntry]
   workflow_contract_yaml_rules.go:
     handler.guard_gate_clear: [GuardSpec, GateSpec]
     handler.collection_compute: [AccumulateSpec, FanOutSpec, GroupBySpec, FilterSpec, ReduceSpec, CountSpec, QuerySpec]
@@ -797,9 +795,18 @@ decoder_exclusions:
     deployment.swarm_yaml: [WorkspaceConfig]
 
 registry_result:
-  completeness: "all 104 production custom unmarshallers classified as 103 bundle-reachable row owners and 1 deployment swarm.yaml exclusion, plus strict reachable structs mapped"
+  completeness: "all 102 remaining production custom unmarshallers classified as 101 bundle-reachable row owners and 1 deployment swarm.yaml exclusion; the two W3 event decoders are retired behind yamlsource admission"
   wave_1_status: closed
   later_wave_gate: "presence-sensitive retirements remain blocked on the effective-model/presence-substrate design gate"
+
+wave_3:
+  issue: 2300
+  status: closed
+  rows: [event.schema_ownership]
+  migrated_decoders:
+    - workflow_contract_yaml_handlers.go:EventCatalogEntry
+    - workflow_contract_yaml_schema.go:EventFieldSpec
+  remaining_reachable_decoders: 101
 
 wave_1:
   issue: 2309

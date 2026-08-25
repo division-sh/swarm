@@ -1,2 +1,2 @@
-state.reset_requested:
-state.reset_completed:
+state.reset_requested: {}
+state.reset_completed: {}

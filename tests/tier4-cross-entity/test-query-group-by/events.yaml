@@ -1,4 +1,3 @@
-digest.requested:
+digest.requested: {}
 digest.compiled:
-  groups:
-  - GroupedDigest
+  groups: "[GroupedDigest]?"

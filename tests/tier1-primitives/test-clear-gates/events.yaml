@@ -1,2 +1,2 @@
-gates.clear_requested:
-gates.cleared:
+gates.clear_requested: {}
+gates.cleared: {}

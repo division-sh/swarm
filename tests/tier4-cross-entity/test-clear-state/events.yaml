@@ -1,2 +1,2 @@
-state.clear_requested:
-state.cleared:
+state.clear_requested: {}
+state.cleared: {}

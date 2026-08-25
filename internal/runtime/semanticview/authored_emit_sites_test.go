@@ -336,13 +336,11 @@ pins:
 scan.corpus_dispatch:
   geography:
     type: string
-  required: [geography]
 market_research.scan_assigned:
   scan_id:
     type: string
   geography:
     type: string
-  required: [scan_id, geography]
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 scan:

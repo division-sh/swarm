@@ -3197,8 +3197,8 @@ func TestActivateFlowInstanceAutoEmitPublishesConfigPayloadWithoutActivationCont
 				"component_id":   {Type: "string"},
 				"component_type": {Type: "string"},
 			},
+			Required: []string{"component_id", "component_type"},
 		},
-		Required: []string{"component_id", "component_type"},
 	})
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.Config = map[string]any{
@@ -3238,8 +3238,8 @@ func TestActivateFlowInstanceAutoEmitKeepsPayloadSourceEventIDNonAuthoritative(t
 			Properties: map[string]runtimecontracts.EventFieldSpec{
 				"source_event_id": {Type: "string"},
 			},
+			Required: []string{"source_event_id"},
 		},
-		Required: []string{"source_event_id"},
 	})
 	const triggerEventID = "44444444-4444-4444-4444-444444444444"
 	const payloadSourceEventID = "business-payload-source"
@@ -3271,8 +3271,8 @@ func TestActivateFlowInstanceCommittedAutoEmitUsesProjectedConfigPayload(t *test
 			Properties: map[string]runtimecontracts.EventFieldSpec{
 				"component_id": {Type: "string"},
 			},
+			Required: []string{"component_id"},
 		},
-		Required: []string{"component_id"},
 	})
 	ctx := testAuthorActivityContext(context.Background())
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
@@ -3301,8 +3301,8 @@ func TestActivateFlowInstanceAutoEmitAllowsDeclaredTemplateIDBusinessField(t *te
 			Properties: map[string]runtimecontracts.EventFieldSpec{
 				"template_id": {Type: "string"},
 			},
+			Required: []string{"template_id"},
 		},
-		Required: []string{"template_id"},
 	})
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	req.Config = map[string]any{"template_id": "application-basic-v1"}
@@ -3388,8 +3388,8 @@ func TestActivateFlowInstanceFailsClosedOnAutoEmitMissingRequiredField(t *testin
 			Properties: map[string]runtimecontracts.EventFieldSpec{
 				"reason": {Type: "string"},
 			},
+			Required: []string{"reason"},
 		},
-		Required: []string{"reason"},
 	})
 
 	err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"))
@@ -3481,8 +3481,8 @@ func TestValidateAutoEmitPayload_RejectsListTypeViolation(t *testing.T) {
 				"parent_entity_id": {Type: "string"},
 				"sources":          {Type: "[SourceID]"},
 			},
+			Required: []string{"instance_id", "template_id", "flow_path", "parent_entity_id", "sources"},
 		},
-		Required: []string{"instance_id", "template_id", "flow_path", "parent_entity_id", "sources"},
 	})
 	bundle.RootTypes = runtimecontracts.TypeCatalogDocument{
 		Scalars: map[string]runtimecontracts.ScalarTypeDecl{
@@ -3515,8 +3515,8 @@ func TestValidateAutoEmitPayload_AllowsNamedTypeThroughCanonicalSchema(t *testin
 				"parent_entity_id": {Type: "string"},
 				"details":          {Type: "ReviewDetails"},
 			},
+			Required: []string{"instance_id", "template_id", "flow_path", "parent_entity_id", "details"},
 		},
-		Required: []string{"instance_id", "template_id", "flow_path", "parent_entity_id", "details"},
 	})
 	bundle.RootTypes = runtimecontracts.TypeCatalogDocument{
 		Types: map[string]runtimecontracts.NamedTypeDecl{

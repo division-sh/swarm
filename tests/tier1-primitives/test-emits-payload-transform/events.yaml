@@ -1,4 +1,4 @@
 item.received:
-  raw_score: integer
+  raw_score: integer?
 item.scored:
-  score: integer
+  score: integer?

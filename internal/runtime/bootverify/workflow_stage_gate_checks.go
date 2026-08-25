@@ -181,7 +181,7 @@ func validateStageGateEmit(c *checkerContext, plan runtimecontracts.WorkflowGate
 		}
 		findings = append(findings, stageGateFinding(location, fmt.Sprintf("outcome %s emit field %s uses expression %q; stage gate emits support only literals or exact decision.<field> references", verdict, field, text)))
 	}
-	for _, required := range entry.Required {
+	for _, required := range entry.Payload.Required {
 		required = strings.TrimSpace(required)
 		if required == "" {
 			continue

@@ -296,7 +296,7 @@ func writeReleaseObserverOverflowFixture(t *testing.T, repo, root string, eventC
 	writeReleaseFile(t, filepath.Join(root, "payload.json"), string(payload))
 	flowRoot := filepath.Join(root, "contracts", "flows", "worker")
 	writeReleaseFile(t, filepath.Join(flowRoot, "entities.yaml"), "worker_state:\n  requests: \"[text]\"\n")
-	writeReleaseFile(t, filepath.Join(flowRoot, "events.yaml"), "task.assigned:\n  request: \"[text]\"\nagent.requested:\n  request: \"[text]\"\nagent.completed:\n  flow_result: text\ncompletion.item:\n  request: text\n")
+	writeReleaseFile(t, filepath.Join(flowRoot, "events.yaml"), "task.assigned:\n  request: \"[text]?\"\nagent.requested:\n  request: \"[text]?\"\nagent.completed:\n  flow_result: text?\ncompletion.item:\n  request: text?\n")
 	writeReleaseFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: claude-cli-release-worker\nmode: singleton\nstages:\n  pending:\n    initial: true\n  active:\n    timers:\n      - id: complete_after_overflow\n        after: 10s\n        advances_to: done\n  done:\n    terminal: true\npins:\n  inputs:\n    events:\n      - name: task_assigned\n        event: task.assigned\n        source: external\n  outputs:\n    events: []\n")
 	writeReleaseFile(t, filepath.Join(flowRoot, "nodes.yaml"), fmt.Sprintf(`intake:
   id: intake

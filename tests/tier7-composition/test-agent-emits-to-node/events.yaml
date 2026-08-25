@@ -1,4 +1,4 @@
-task.assigned:
+task.assigned: {}
 task.acknowledged: {}
 task.completed: {}
 task.finalized: {}

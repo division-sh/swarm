@@ -543,7 +543,7 @@ func TestNormalizedEventCatalogDerivesSchemaAndCapabilities(t *testing.T) {
 	if entry.Source != "provider_trigger_pack_normalized" || entry.Payload.Properties["chat_id"].Type != "text" {
 		t.Fatalf("catalog entry = %#v", entry)
 	}
-	if got := strings.Join(entry.Required, ","); got != "chat_id,message_id,text" {
+	if got := strings.Join(entry.Payload.Required, ","); got != "chat_id,message_id,text" {
 		t.Fatalf("required = %q", got)
 	}
 	capabilities := DerivedCapabilities(manifest)

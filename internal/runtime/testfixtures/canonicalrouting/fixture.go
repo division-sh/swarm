@@ -85,6 +85,11 @@ func (snippet ParserSnippet) Decode(target any) error {
 	return snippet.document.Content[0].Decode(target)
 }
 
+// SourceBytes returns an owned serialization for presence-aware admission tests.
+func (snippet ParserSnippet) SourceBytes() ([]byte, error) {
+	return yaml.Marshal(&snippet.document)
+}
+
 // ExampleRoot returns the checked-in positive authoring owner for a routing pattern.
 func ExampleRoot(t testing.TB, id ArtifactID) string {
 	t.Helper()

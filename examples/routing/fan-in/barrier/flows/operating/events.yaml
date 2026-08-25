@@ -1,8 +1,4 @@
-operating.report.requested:
-  period_id: text
-  revenue: integer
-  operating_id: text
 operating.reported:
-  operating_id: text
-  period_id: text
-  revenue: integer
+  operating_id: text?
+  period_id: text?
+  revenue: integer?

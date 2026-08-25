@@ -52,22 +52,17 @@ func applyTemplateReplyExplicitCorrelation(t testing.TB, root string) {
 	applyClosedReplacement(t, providerSchema,
 		"      - name: provider_replied\n        event: provider.replied\n",
 		"      - name: provider_replied\n        event: provider.replied\n        key: provider_request_id\n        carries: [provider_request_id]\n")
-	for _, flowID := range []string{"requester", "provider"} {
-		eventsFile := filepath.Join(root, "flows", flowID, "events.yaml")
-		applyClosedReplacement(t, eventsFile, "provider.requested:\n", "provider.requested:\n  provider_request_id: text\n")
-		applyClosedReplacement(t, eventsFile, "provider.replied:\n", "provider.replied:\n  provider_request_id: text\n")
-	}
+	applyClosedReplacement(t, filepath.Join(root, "flows", "requester", "events.yaml"),
+		"provider.requested:\n", "provider.requested:\n  provider_request_id: text\n")
+	applyClosedReplacement(t, filepath.Join(root, "flows", "provider", "events.yaml"),
+		"provider.replied:\n", "provider.replied:\n  provider_request_id: text\n")
 	initiatorEvents := filepath.Join(root, "flows", "initiator", "events.yaml")
 	applyClosedReplacement(t, initiatorEvents,
-		"request.submitted:\n  account_id: text\n",
-		"request.submitted:\n  account_id: text\n  provider_request_id: text\n")
+		"request.submitted:\n  account_id: text?\n",
+		"request.submitted:\n  account_id: text?\n  provider_request_id: text\n")
 	applyClosedReplacement(t, initiatorEvents,
-		"requester.requested:\n  account_id: text\n",
-		"requester.requested:\n  account_id: text\n  provider_request_id: text\n")
-	requesterEvents := filepath.Join(root, "flows", "requester", "events.yaml")
-	applyClosedReplacement(t, requesterEvents,
-		"requester.requested:\n  account_id: text\n",
-		"requester.requested:\n  account_id: text\n  provider_request_id: text\n")
+		"requester.requested:\n  account_id: text?\n",
+		"requester.requested:\n  account_id: text?\n  provider_request_id: text\n")
 	initiatorNodes := filepath.Join(root, "flows", "initiator", "nodes.yaml")
 	applyClosedReplacement(t, initiatorNodes,
 		"    request.submitted:\n      emit:\n        event: requester.requested\n        fields:\n          account_id: payload.account_id\n",

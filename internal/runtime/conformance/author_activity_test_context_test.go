@@ -446,7 +446,7 @@ func testAuthorActivityEventDescriptors(t *testing.T, opts runtimebus.EventBusOp
 			continue
 		}
 		disposition := runtimeauthoractivity.StoryDifferent
-		if _, ok := authored[strings.TrimSpace(proof.CatalogKey)]; ok {
+		if proof.IsAuthored(opts.ContractBundle) {
 			disposition = runtimeauthoractivity.StoryAuthored
 		}
 		add(proof.EventKey(), runtimeauthoractivity.EventDescriptor{Disposition: disposition, AuthorSummaryField: strings.TrimSpace(proof.Entry.AuthorSummaryField)})

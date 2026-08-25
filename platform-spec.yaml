@@ -295,6 +295,20 @@ contract_formats:
       bundle hashes, bundle identities, resolved agent intents, and source-line views
       remain in their existing semantic owners and MUST NOT become shared
       mutable cache values.
+    immutable_document_projection: |
+      `internal/yamlsource.Document` is the sole syntax substrate for migrated
+      contract families. It exposes semantic-path lookups, file/line/column
+      locations, and every direct, alias-expanded, or merge-expanded lexical
+      occurrence without exposing retained yaml.Node pointers. Its closed
+      presence vocabulary is missing, null, empty_scalar, scalar,
+      empty_sequence, sequence, empty_mapping, and mapping. Typed admission,
+      not the substrate, assigns domain meaning to those states.
+    aliases_merges_and_duplicates: |
+      YAML aliases and `<<` merge keys remain supported syntax. Admission sees
+      every lexical occurrence, including fields introduced through merges;
+      shadowing does not hide retired syntax. Two effective occurrences of one
+      mapping key fail closed with both source locations. YAML last-wins
+      behavior is never contract authority.
     diagnostics: Read failures and parse/decode failures preserve the current source path and fail closed.
   loader_defaults:
     description: Fields and identifiers that the loader derives from context. Entries marked non-authorable are not accepted
@@ -693,6 +707,12 @@ contract_formats:
       connect routes, runtime owners, and effective system-node helpers.
       Authored metadata that deterministically restates those internal
       roles is a hard invalidity, not an alternate semantic owner.
+      Payload fields are required by default. Exactly one trailing `?` on the
+      authored type marks a field optional and is removed from the admitted
+      semantic type. The retired event-level `required:` list fails closed on
+      presence, including through a YAML merge. Optional `key:` names one
+      required declared payload field whose admitted semantics are boolean,
+      number, or string; it is the sole event business-key authoring surface.
       Validation ownership is layered, not competing: supported emit
       surfaces validate producer-authored payloads before publish, while
       canonical event-store admission validates every event payload that
@@ -703,13 +723,15 @@ contract_formats:
       interpret routing, delivery, source, target, or recipient semantics.
     format:
       event_name: |
+        key: entity_id (optional; must name a required scalar payload field)
         swarm:
           source: external (optional; non-derivable external/platform producer proof)
           producer: mailbox_human (optional; exceptional non-derivable producer proof)
           consumer: external (optional; registered non-derivable external sink proof)
           status: planned (optional; lifecycle suppression)
           note: Human-readable metadata (optional)
-        field_name: type
+        required_field: type
+        optional_field: type?
         nested_field:
           type: NamedType
           description: Human-readable annotation
@@ -723,14 +745,14 @@ contract_formats:
           equal_to: sibling_field
     strict_payload_contract:
       rule: |
-        Event payloads are producer-complete only. Every declared
+        Event payloads are producer-complete only. Every required declared
         payload field must be populated by the active emit site's
         canonical explicit `emit.fields` map. `emit.from` and same-named
         bare namespace `emit.fields` values are only authoring sugar for
         system-node emitted payload maps; they lower to the same explicit map
         before validation, generated/semantic views, and runtime execution. No
         payload defaults. No implicit passthrough. No nested `payload:` block.
-        Missing declared fields and undeclared emitted fields are contract
+        Missing required fields and undeclared emitted fields are contract
         violations.
       envelope_split: |
         Envelope fields are runtime-owned and are not author-declared
@@ -2038,8 +2060,9 @@ rule:
       when no writer has populated the field yet.
     required_by_default_uniform_with_events: |
       Declared entity fields and event payload fields are required and
-      type-checked by default unless an explicit supported contract form
-      states otherwise. Readers and writers must not infer optionality from
+      type-checked by default. Event payload fields use exactly one trailing
+      `?` on the authored type as their explicit optional form. Readers and
+      writers must not infer optionality from
       sparse runtime rows, absent historical writes, or prompt prose.
     lifecycle_vs_field_presence: |
       The state machine is the authority for entity lifecycle. It is not
@@ -13017,14 +13040,20 @@ flow_model:
     rule: An event schema is defined ONCE, in the flow that emits it. Consuming flows reference it by absolute path — they
       do NOT redefine the schema. If both flows need the schema for validation, the consuming flow imports it by reference,
       not by copy.
-    enforcement: At boot, if the same event name appears in multiple flow event files, the platform logs a warning. The emitter
-      flow's definition is authoritative.
+    enforcement: >-
+      Intra-package connect consumers compile their effective payload view from
+      the producer declaration. A consumer-authored restatement is a hard load
+      error naming both declarations, even when byte-equivalent. Receiver input
+      carries may add delivery-owned fields to the effective consumer projection;
+      generated.uuid and event.id lower with intrinsic UUID semantics and explicit
+      derived provenance. Cross-package boundary snapshots are a distinct frozen
+      contract concept and are not classified as intra-package restatements.
   compiled_event_schema_projection:
-    status: implemented_current_grammar_adapter
+    status: implemented_presence_preserving_w3
     owner: internal/runtime/contracts.WorkflowContractBundle.CompiledEventSchemas
     rule: >-
       Downstream compilers consume one immutable admitted CompiledEventSchema projection and never inspect events.yaml,
-      EventCatalogEntry maps, required lists, package aliases, or generated-event registries directly. The projection
+      EventCatalogEntry maps, retired required lists, package aliases, or generated-event registries directly. The projection
       enumerates only exact importable authored declarations after package and event admission, in canonical
       (package_key, qualified_event_name) order. Pattern declarations, generated events, provider imports, and
       noncanonical package restatements do not become declaration identities.
@@ -13039,14 +13068,16 @@ flow_model:
       internal/runtime/canonicaljson owns canonical bytes and their sha256 digest. Consumers must not reserialize or
       independently hash raw event declarations.
     current_grammar_adapter: >-
-      Until the presence-preserving T? grammar wave lands behind this same interface, IsOptional is derived once from
-      the admitted current required-list semantics. The interface does not preserve required-list syntax and no
-      downstream consumer may read that syntax.
+      The presence-preserving W3 adapter derives IsOptional exactly once from
+      the admitted trailing-`?` spelling. Requiredness defaults to true; the
+      marker never survives in the semantic type and the retired required-list
+      syntax is not represented. `key:` is admitted only after its referenced
+      field is proved required with boolean, number, or string semantics.
     migration_boundary: >-
-      This first slice publishes the stable compiled interface. The presence-preserving YAML substrate, T? grammar,
-      required-list retirement, business-key authoring, producer-only event schema ownership, provenance ledger, and
-      remaining decoder-family migrations land in the gated #2300 waves behind this interface without changing its
-      consumer semantics.
+      The stable compiled interface and W3 event-family migration are complete.
+      Producer-only intra-package ownership and receiver delivery projections
+      consume the immutable provenance ledger. The remaining decoder families
+      continue under #2300 without reopening event grammar or compatibility paths.
   stateless_flows:
     description: 'Some flows are stateless producers — they process events without tracking entity lifecycle. A signal-processing
       flow is an example: it receives inputs, filters them, and emits results without maintaining per-entity state.'

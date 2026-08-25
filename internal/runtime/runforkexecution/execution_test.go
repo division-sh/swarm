@@ -924,7 +924,7 @@ func TestSelectedContractForkRejectsSyntheticCarryDynamicCreationBeforeMutation(
 		t.Fatalf("source event %s has no semantic descriptor proof", sourceEvent.Type())
 	}
 	disposition := runtimeauthoractivity.StoryDifferent
-	if _, ok := loaded.Source.AuthoredResolvedEventCatalog()[strings.TrimSpace(proof.CatalogKey)]; ok {
+	if proof.IsAuthored(loaded.Source) {
 		disposition = runtimeauthoractivity.StoryAuthored
 	}
 	sourceCtx, err = runtimeauthoractivity.WithResolvedEventDescriptor(sourceCtx, sourceScope, runtimeauthoractivity.EventDescriptor{

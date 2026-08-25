@@ -1,6 +1,6 @@
 item.discovered:
-  name: string
-score.requested:
-item.dispatched:
-scoring/score.requested:
-scoring/score.done:
+  name: string?
+score.requested: {}
+item.dispatched: {}
+scoring/score.requested: {}
+scoring/score.done: {}

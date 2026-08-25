@@ -1,4 +1,4 @@
-task.completed:
-task.finalized:
+task.completed: {}
+task.finalized: {}
 task.audited:
   description: Event emitted by audit-agent after auditing a completed task

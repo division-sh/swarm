@@ -90,7 +90,7 @@ func TestEventMetadataAuthorityRejectsFlowSurfaceRestatements(t *testing.T) {
 			name:       "consumer names flow input pin",
 			invalidity: canonicalrouting.ParentConnectMetadataConsumerFlowInput,
 			want:       "swarm.consumer",
-			wantMsg:    "flow consumer input pin consumer",
+			wantMsg:    "flow consumer",
 		},
 		{
 			name:       "producer names parent connect output",

@@ -1,4 +1,1 @@
-account.setup:
-  account_id: text
-account.ready:
-  account_id: text
+{}

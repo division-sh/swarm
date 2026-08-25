@@ -1243,6 +1243,11 @@ func (b *WorkflowContractBundle) flowLocalEvents(flowID string) []string {
 			out = append(out, eventType)
 		}
 	}
+	for _, row := range compileEventSchemaOwnershipRows(b) {
+		if row.receiverFlowID == flowID {
+			out = append(out, packageEndpointLocalEvent(b, flowID, row.receiverEvent, true))
+		}
+	}
 	if autoEmit := strings.TrimSpace(view.Schema.AutoEmitOnCreate.Event); autoEmit != "" {
 		out = append(out, autoEmit)
 	}

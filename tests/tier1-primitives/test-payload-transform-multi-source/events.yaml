@@ -1,5 +1,5 @@
-export.requested:
+export.requested: {}
 item.exported:
-  id: string
-  name: string
-  status: string
+  id: string?
+  name: string?
+  status: string?

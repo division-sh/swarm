@@ -1,3 +1,2 @@
 task.submitted:
   work_id: text
-  required: [work_id]

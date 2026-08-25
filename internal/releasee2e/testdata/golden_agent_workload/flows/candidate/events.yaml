@@ -1,14 +1,11 @@
-candidate.requested:
-  batch_id: text
-  candidate_id: text
 candidate.work.requested:
-  batch_id: text
-  candidate_id: text
+  batch_id: text?
+  candidate_id: text?
 candidate.analyzed:
-  batch_id: text
-  candidate_id: text
-  summary: text
+  batch_id: text?
+  candidate_id: text?
+  summary: text?
 candidate.completed:
-  batch_id: text
-  candidate_id: text
-  summary: text
+  batch_id: text?
+  candidate_id: text?
+  summary: text?

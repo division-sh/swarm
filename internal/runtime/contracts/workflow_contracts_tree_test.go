@@ -1010,9 +1010,9 @@ gate_state:
 }
 
 func TestEventCatalogEntry_SwarmMetadataOwnsTopologyAndLifecycle(t *testing.T) {
-	var entry EventCatalogEntry
 	snippet := canonicalrouting.EventCatalogMetadataParserSnippet(t, canonicalrouting.CanonicalExternalEventMetadata)
-	if err := snippet.Decode(&entry); err != nil {
+	entry, err := admitEventCatalogParserSnippet(t, snippet)
+	if err != nil {
 		t.Fatalf("load event catalog entry: %v", err)
 	}
 	if got := entry.SwarmSource(); got != "external (human board interface)" {
@@ -1039,10 +1039,9 @@ func TestEventCatalogEntry_SwarmMetadataOwnsTopologyAndLifecycle(t *testing.T) {
 }
 
 func TestEventCatalogEntry_LegacyMetadataFieldsFailClosed(t *testing.T) {
-	var entry EventCatalogEntry
 	snippet := canonicalrouting.EventCatalogMetadataParserSnippet(t, canonicalrouting.RetiredExternalEventMetadata)
-	if err := snippet.Decode(&entry); err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "_source") || !strings.Contains(err.Error(), "swarm.source") {
-		t.Fatalf("load event catalog entry error = %v, want retired _source failure", err)
+	if _, err := admitEventCatalogParserSnippet(t, snippet); err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), "metadata field") || !strings.Contains(err.Error(), "swarm.") {
+		t.Fatalf("load event catalog entry error = %v, want retired metadata failure", err)
 	}
 }
 
@@ -1070,8 +1069,7 @@ entity_id: string
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var entry EventCatalogEntry
-			err := loadYAMLBytes([]byte(tc.yaml), &entry)
+			_, err := admitEventCatalogEntryForTest(t, tc.yaml)
 			if err == nil || !strings.Contains(err.Error(), "RETIRED") || !strings.Contains(err.Error(), tc.wantField) || !strings.Contains(err.Error(), "swarm.") {
 				t.Fatalf("load event catalog entry error = %v, want retired %s failure", err, tc.wantField)
 			}
@@ -1080,12 +1078,20 @@ entity_id: string
 }
 
 func TestEventCatalogEntry_ConflictingSwarmAndLegacyMetadataFailsClosed(t *testing.T) {
-	var entry EventCatalogEntry
 	snippet := canonicalrouting.EventCatalogMetadataParserSnippet(t, canonicalrouting.ConflictingEventMetadata)
-	err := snippet.Decode(&entry)
+	_, err := admitEventCatalogParserSnippet(t, snippet)
 	if err == nil || !strings.Contains(err.Error(), "swarm.source") || !strings.Contains(err.Error(), "_source") {
 		t.Fatalf("load event catalog entry error = %v, want swarm/_source conflict", err)
 	}
+}
+
+func admitEventCatalogParserSnippet(t testing.TB, snippet canonicalrouting.ParserSnippet) (EventCatalogEntry, error) {
+	t.Helper()
+	raw, err := snippet.SourceBytes()
+	if err != nil {
+		return EventCatalogEntry{}, err
+	}
+	return admitEventCatalogEntryForTest(t, string(raw))
 }
 
 func loadYAMLBytes(raw []byte, target any) error {

@@ -72,9 +72,9 @@ func platformEventEntryFromYAMLNode(node yaml.Node) EventCatalogEntry {
 		entry.Payload.Properties = platformEventPayloadProperties(*payload)
 	}
 	if required := platformEventStringList(node, "required"); len(required) > 0 {
-		entry.Required = required
+		entry.Payload.Required = required
 	} else {
-		entry.Required = requiredPlatformEventFieldNames(entry.Payload.Properties)
+		entry.Payload.Required = requiredPlatformEventFieldNames(entry.Payload.Properties)
 	}
 	if consumer := platformEventStringList(node, "consumer"); len(consumer) > 0 {
 		entry.Consumer = consumer

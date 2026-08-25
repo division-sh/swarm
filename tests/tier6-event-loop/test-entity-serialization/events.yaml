@@ -1,4 +1,4 @@
-step.first:
-step.second:
-step.first_done:
-step.second_done:
+step.first: {}
+step.second: {}
+step.first_done: {}
+step.second_done: {}

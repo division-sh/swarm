@@ -1,3 +1,3 @@
 scores.ready:
-  scores: array
-scores.computed:
+  scores: array?
+scores.computed: {}

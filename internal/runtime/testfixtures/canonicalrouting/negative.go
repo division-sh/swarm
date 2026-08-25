@@ -77,9 +77,6 @@ func ApplyCompositionConnectReceiverPinCollisionMutation(t testing.TB, root stri
 	applyClosedReplacement(t, filepath.Join(root, "flows", "consumer", "schema.yaml"),
 		"        event: deploy.completed\n",
 		"        event: deploy.completed\n      - name: deploy_audited\n        event: deploy.audited\n")
-	applyClosedReplacement(t, filepath.Join(root, "flows", "consumer", "events.yaml"),
-		"deploy.completed:\n  vertical_id: string\n",
-		"deploy.completed:\n  vertical_id: string\ndeploy.audited:\n  vertical_id: string\n")
 	applyClosedReplacement(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"),
 		"  subscribes_to: [deploy.completed]\n",
 		"  subscribes_to: [deploy.completed, deploy.audited]\n")

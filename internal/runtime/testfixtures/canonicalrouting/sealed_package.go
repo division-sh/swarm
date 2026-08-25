@@ -64,8 +64,8 @@ func addSealedProducerDependencies(t testing.TB, root string) {
 	writeClosedVariantFile(t, root, "flows/producer/package.yaml", "name: producer\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nrequires:\n  inputs: [work.requested]\n  outputs: [work.ready]\n  policy: [runtime.profile]\n  credentials: [shared_token]\n")
 	SetOverlayFile(t, root, "flows/producer/policy.yaml", "runtime:\n  profile: producer-local\n")
 	applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"),
-		"work.ready:\n  work_id: text\n",
-		"work.ready:\n  work_id: text\naudit.seen:\n  work_id: text\n")
+		"work.ready:\n  work_id: text?\n",
+		"work.ready:\n  work_id: text?\naudit.seen:\n  work_id: text\n")
 	applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), "  produces: [work.ready]\n", "  produces: [work.ready, audit.seen]\n")
 }
 
@@ -77,8 +77,8 @@ func addSealedConsumerDependencies(t testing.TB, root string, opts SealedParentC
 		"      - name: work_ready\n        event: work.ready\n",
 		"      - name: work_ready\n        event: work.ready\n      - name: control_start\n        event: control.start\n")
 	applyClosedReplacement(t, filepath.Join(root, "flows", "consumer", "events.yaml"),
-		"work.ready:\n  work_id: text\n",
-		"work.ready:\n  work_id: text\ncontrol.start:\n  work_id: text\naudit.seen:\n  work_id: text\n")
+		"{}\n",
+		"work.ready:\n  work_id: text?\ncontrol.start:\n  work_id: text\naudit.seen:\n  work_id: text\n")
 	wildcard := "**/audit.seen"
 	if opts.ForbiddenSiblingWildcard {
 		wildcard = "producer/**/audit.seen"

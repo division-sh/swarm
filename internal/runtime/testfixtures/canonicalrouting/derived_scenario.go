@@ -55,7 +55,6 @@ pins:
 		"flows/fulfillment/events.yaml": `
 fulfillment.requested:
   order_id: text
-  required: [order_id]
 `,
 		"flows/fulfillment/nodes.yaml": `
 complete-request:

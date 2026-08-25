@@ -528,8 +528,8 @@ states: [ready, done]
 repo_scaffold.repo_commit_succeeded:
   repo_id: string
   namespace: string
-  partition_key: string
-  display_slug: string
+  partition_key: string?
+  display_slug: string?
   request_id: string
   source_event_id: string
   repo_url: string
@@ -537,19 +537,17 @@ repo_scaffold.repo_commit_succeeded:
   file_manifest: ArtifactManifest
   provenance: ArtifactProvenance
   result_kind: string
-  required: [repo_id, namespace, request_id, source_event_id, repo_url, current_ref, file_manifest, provenance, result_kind]
 repo_scaffold.repo_commit_failed:
   repo_id: string
   namespace: string
-  partition_key: string
-  display_slug: string
+  partition_key: string?
+  display_slug: string?
   request_id: string
   source_event_id: string
   failure: platform.failure/v1 envelope
   provenance: ArtifactProvenance
   result_kind: string
-  request_copy: string
-  required: [repo_id, namespace, request_id, source_event_id, failure, provenance, result_kind]
+  request_copy: string?
 `,
 		"flows/repo-scaffold/nodes.yaml": `repo-scaffold-node:
   id: repo-scaffold-node

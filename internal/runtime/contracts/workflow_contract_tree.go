@@ -31,7 +31,8 @@ func loadProjectContractView(contractsRoot string, paths ProjectPackagePaths, ma
 	if err := loadOptionalYAMLMap(paths.ProjectNodesFile, &view.Nodes); err != nil {
 		return view, err
 	}
-	if err := loadOptionalYAMLMap(paths.ProjectEventsFile, &view.Events); err != nil {
+	var err error
+	if view.Events, err = loadOptionalEventCatalog(paths.ProjectEventsFile); err != nil {
 		return view, err
 	}
 	if err := loadOptionalYAMLMap(paths.ProjectAgentsFile, &view.Agents); err != nil {
@@ -79,7 +80,8 @@ func loadFlowContractView(contractsRoot string, paths FlowContractPaths, schema 
 	if err := loadOptionalYAMLMap(paths.NodesFile, &view.Nodes); err != nil {
 		return view, err
 	}
-	if err := loadOptionalYAMLMap(paths.EventsFile, &view.Events); err != nil {
+	var err error
+	if view.Events, err = loadOptionalEventCatalog(paths.EventsFile); err != nil {
 		return view, err
 	}
 	if err := loadOptionalYAMLMap(paths.AgentsFile, &view.Agents); err != nil {

@@ -196,8 +196,7 @@ func stageGateLiteralEmitReport(field runtimecontracts.EventFieldSpec, rootTypes
 		RootTypes: rootTypes,
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"review.completed": {
-				Payload:  runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"value": field}},
-				Required: []string{"value"},
+				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"value": field}, Required: []string{"value"}},
 			},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
@@ -221,7 +220,7 @@ func stageGateLiteralEmitReport(field runtimecontracts.EventFieldSpec, rootTypes
 func stageGateValidationBundle(plan runtimecontracts.WorkflowGatePlan, fields map[string]runtimecontracts.EventFieldSpec, required []string) *runtimecontracts.WorkflowContractBundle {
 	return &runtimecontracts.WorkflowContractBundle{
 		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"review.completed": {Payload: runtimecontracts.EventPayloadSpec{Properties: fields}, Required: required},
+			"review.completed": {Payload: runtimecontracts.EventPayloadSpec{Properties: fields, Required: required}},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name: "launch", InitialStage: "awaiting_review", Stages: []runtimecontracts.WorkflowStageContract{{ID: "awaiting_review"}, {ID: "complete"}},
