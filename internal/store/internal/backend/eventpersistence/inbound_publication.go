@@ -128,7 +128,7 @@ func (s *EventPostgresOwner) CommitInboundPublication(ctx context.Context, comma
 	defer handoff.Rollback()
 	request := command.Request.Normalized()
 	var result runtimeinbound.CommitResult
-	err = s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	err = s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
 		identityKey := inboundEventIdempotencyKey(request.ProviderEventID, request.EntityID, request.Provider)
 		if _, err := tx.ExecContext(txctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, identityKey); err != nil {
 			return fmt.Errorf("lock inbound publication identity: %w", err)
@@ -154,7 +154,15 @@ func (s *EventPostgresOwner) CommitInboundPublication(ctx context.Context, comma
 			return err
 		}
 		result, err = commitInboundPublicationTx(txctx, tx, story, s, s, true, command, handoff)
-		return err
+		if err != nil {
+			return err
+		}
+		for _, publication := range command.Finalization.Events {
+			if err := declareEventCommitEffects(effects, publication.Event.RunID()); err != nil {
+				return err
+			}
+		}
+		return declareEventCommitEffects(effects, command.Finalization.EvidenceEvent.RunID())
 	})
 	if err != nil {
 		return runtimeinbound.CommitResult{}, err

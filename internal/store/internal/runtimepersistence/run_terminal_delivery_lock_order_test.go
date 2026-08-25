@@ -102,7 +102,7 @@ func TestPostgresMarkRunTerminalLocksRunBeforeDeliverySettlement(t *testing.T) {
 			RunID: fixture.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: time.Now().UTC(),
 		})
 		if err == nil {
-			_, err = privaterunforkrevision.CaptureCurrentTransaction(storyCtx, terminalTx)
+			_, err = finalizePostgresRunForkTestRevision(storyCtx, terminalTx, fixture.RunID, privaterunforkrevision.FamilyEventDeliveries)
 		}
 		if err == nil {
 			err = authoractivityfixture.Finalize(storyCtx)

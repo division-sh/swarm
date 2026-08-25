@@ -154,12 +154,19 @@ func advanceWorkflowEngineTimerOccurrence(
 }
 
 func (s *PipelinePostgresOwner) CommitWorkflowTimerOccurrence(ctx context.Context, command runtimepipeline.WorkflowTimerOccurrenceCommand) (runtimepipeline.CommittedWorkflowTimerOccurrence, error) {
+	effects := newRevisionEffects()
+	if err := addTimerRevisionEffects(effects, command.Activation.RunID); err != nil {
+		return runtimepipeline.CommittedWorkflowTimerOccurrence{}, err
+	}
+	if err := addPublicationRevisionEffects(effects, command.Publication); err != nil {
+		return runtimepipeline.CommittedWorkflowTimerOccurrence{}, err
+	}
 	return commitWorkflowTimerOccurrence(
 		ctx,
 		s,
 		true,
 		func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-			return s.runPrivateAuthorActivityMutation(ctx, fn)
+			return s.runPrivateAuthorActivityMutation(ctx, effects, fn)
 		},
 		reserveRunLifecycleCandidateHandoff,
 		func(reservation *runLifecycleCandidateHandoffReservation, result runtimerunlifecycle.CandidateRequestResult) error {
@@ -173,12 +180,19 @@ func (s *PipelinePostgresOwner) CommitWorkflowTimerOccurrence(ctx context.Contex
 }
 
 func (s *PipelineSQLiteOwner) CommitWorkflowTimerOccurrence(ctx context.Context, command runtimepipeline.WorkflowTimerOccurrenceCommand) (runtimepipeline.CommittedWorkflowTimerOccurrence, error) {
+	effects := newRevisionEffects()
+	if err := addTimerRevisionEffects(effects, command.Activation.RunID); err != nil {
+		return runtimepipeline.CommittedWorkflowTimerOccurrence{}, err
+	}
+	if err := addPublicationRevisionEffects(effects, command.Publication); err != nil {
+		return runtimepipeline.CommittedWorkflowTimerOccurrence{}, err
+	}
 	return commitWorkflowTimerOccurrence(
 		ctx,
 		s,
 		false,
 		func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-			return s.runPrivateAuthorActivityMutation(ctx, "sqlite workflow timer occurrence", fn)
+			return s.runPrivateAuthorActivityMutation(ctx, "sqlite workflow timer occurrence", effects, fn)
 		},
 		reserveRunLifecycleCandidateHandoff,
 		func(reservation *runLifecycleCandidateHandoffReservation, result runtimerunlifecycle.CandidateRequestResult) error {

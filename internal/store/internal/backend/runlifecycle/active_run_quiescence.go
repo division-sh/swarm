@@ -187,15 +187,12 @@ func (s *RunLifecyclePostgresOwner) ApplyActiveRunQuiescence(ctx context.Context
 			return runtimerunquiescence.Result{}, err
 		}
 	}
-	changes := make([]runforkrevision.Change, 0, len(runIDs))
-	for _, runID := range runIDs {
-		changes = append(changes, runforkrevision.Change{RunID: runID, Families: []runforkrevision.Family{
-			runforkrevision.FamilyEventDeliveries,
-			runforkrevision.FamilyEventReceipts,
-		}})
+	effects, err := runTerminationRevisionEffects(runIDs...)
+	if err != nil {
+		return runtimerunquiescence.Result{}, err
 	}
 	if len(active) > 0 {
-		if _, err := runforkrevision.CaptureChanges(ctx, tx, changes...); err != nil {
+		if _, err := runforkrevision.FinalizePostgres(ctx, tx, effects); err != nil {
 			return runtimerunquiescence.Result{}, err
 		}
 	}
@@ -247,7 +244,8 @@ func (s *RunLifecycleSQLiteOwner) ApplyActiveRunQuiescence(ctx context.Context, 
 	}
 
 	baseOut := out
-	if err := s.runPrivateAuthorActivityMutation(ctx, "sqlite active run quiescence", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	effects := runforkrevision.NewEffects()
+	if err := s.runPrivateAuthorActivityMutation(ctx, "sqlite active run quiescence", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		attemptOut := baseOut
 		var runs []runtimerunquiescence.QuiescedRun
 		var err error
@@ -306,6 +304,16 @@ func (s *RunLifecycleSQLiteOwner) ApplyActiveRunQuiescence(ctx context.Context, 
 		if req.DryRun {
 			out = attemptOut
 			return nil
+		}
+		for _, runID := range attemptRunIDs {
+			if err := effects.Add(runID,
+				runforkrevision.FamilyEventDeliveries,
+				runforkrevision.FamilyEventReceipts,
+				runforkrevision.FamilyAgentSessions,
+				runforkrevision.FamilyTimers,
+			); err != nil {
+				return err
+			}
 		}
 
 		for _, runID := range attemptRunIDs {

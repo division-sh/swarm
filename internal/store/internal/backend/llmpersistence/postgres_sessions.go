@@ -151,7 +151,11 @@ func (s *LLMPostgresOwner) acquirePostgresLiveSession(ctx context.Context, ident
 		RetryReason: strings.TrimSpace(current.retryReason.String), RetriesFromSessionID: strings.TrimSpace(current.retriesFrom.String),
 		LockOwner: lockOwner, ExpiresAt: current.leaseExpires.Time,
 	}
-	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
+	effects, err := agentSessionEffects(identity.RunID)
+	if err != nil {
+		return nil, runtimellm.ConversationRecord{}, err
+	}
+	if err := finalizePostgresRunForkRevisionTx(ctx, tx, effects); err != nil {
 		return nil, runtimellm.ConversationRecord{}, fmt.Errorf("commit live session acquire: %w", err)
 	}
 	if err := handoff.Commit(); err != nil {
@@ -209,7 +213,11 @@ func (s *LLMPostgresOwner) Release(ctx context.Context, lease *runtimesessions.L
 	if err := handoff.Prepare(s.runLifecycleCandidates, request); err != nil {
 		return err
 	}
-	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
+	effects, err := agentSessionEffects(identity.RunID)
+	if err != nil {
+		return err
+	}
+	if err := finalizePostgresRunForkRevisionTx(ctx, tx, effects); err != nil {
 		return fmt.Errorf("commit live session release: %w", err)
 	}
 	return handoff.Commit()
@@ -326,7 +334,11 @@ func (s *LLMPostgresOwner) Rotate(ctx context.Context, identity agentmemory.Iden
 	if err := handoff.Prepare(s.runLifecycleCandidates, request); err != nil {
 		return nil, err
 	}
-	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
+	effects, err := agentSessionEffects(identity.RunID)
+	if err != nil {
+		return nil, err
+	}
+	if err := finalizePostgresRunForkRevisionTx(ctx, tx, effects); err != nil {
 		return nil, err
 	}
 	if err := handoff.Commit(); err != nil {
@@ -368,7 +380,11 @@ func (s *LLMPostgresOwner) IncrementTurn(ctx context.Context, identity agentmemo
 	if rows, _ := res.RowsAffected(); rows == 0 {
 		return fmt.Errorf("session not found for turn increment: run=%s agent=%s flow=%s session=%s", identity.RunID, identity.AgentID(), identity.FlowInstance(), sessionID)
 	}
-	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
+	effects, err := agentSessionEffects(identity.RunID)
+	if err != nil {
+		return err
+	}
+	if err := finalizePostgresRunForkRevisionTx(ctx, tx, effects); err != nil {
 		return fmt.Errorf("commit live session turn increment: %w", err)
 	}
 	return nil
@@ -443,7 +459,11 @@ func (s *LLMPostgresOwner) AdoptSessionID(ctx context.Context, identity agentmem
 	if err := handoff.Prepare(s.runLifecycleCandidates, request); err != nil {
 		return err
 	}
-	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
+	effects, err := agentSessionEffects(identity.RunID)
+	if err != nil {
+		return err
+	}
+	if err := finalizePostgresRunForkRevisionTx(ctx, tx, effects); err != nil {
 		return fmt.Errorf("commit live session provider adoption: %w", err)
 	}
 	return handoff.Commit()
@@ -498,11 +518,15 @@ func (s *LLMPostgresOwner) ResetAll(metadata runtimesessions.ResetMetadata) (run
 		return runtimesessions.ResetSummary{}, fmt.Errorf("close postgres live session reset: %w", err)
 	}
 	seenRuns := make(map[string]struct{}, len(summary.OrphanedSessions))
+	effects := emptyRunForkRevisionEffects()
 	for _, disposition := range summary.OrphanedSessions {
 		if _, exists := seenRuns[disposition.RunID]; exists {
 			continue
 		}
 		seenRuns[disposition.RunID] = struct{}{}
+		if err := addAgentSessionEffect(effects, disposition.RunID); err != nil {
+			return runtimesessions.ResetSummary{}, err
+		}
 		request, err := storerunlifecycle.RequestPostgresCompletionCandidateTx(ctx, tx, disposition.RunID, nil)
 		if err != nil {
 			return runtimesessions.ResetSummary{}, err
@@ -511,7 +535,7 @@ func (s *LLMPostgresOwner) ResetAll(metadata runtimesessions.ResetMetadata) (run
 			return runtimesessions.ResetSummary{}, err
 		}
 	}
-	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
+	if err := finalizePostgresRunForkRevisionTx(ctx, tx, effects); err != nil {
 		return runtimesessions.ResetSummary{}, fmt.Errorf("commit postgres live session reset: %w", err)
 	}
 	if err := handoff.Commit(); err != nil {

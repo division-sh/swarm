@@ -13,7 +13,7 @@ import (
 	storefailurecodec "github.com/division-sh/swarm/internal/store/internal/failurecodec"
 )
 
-func (s *AgentPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+func (s *AgentPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Context, effects *privaterunforkrevision.Effects, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
@@ -25,7 +25,7 @@ func (s *AgentPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Contex
 		if err := fn(txctx, tx, story); err != nil {
 			return err
 		}
-		if _, err := privaterunforkrevision.CaptureCurrentTransaction(txctx, tx); err != nil {
+		if _, err := privaterunforkrevision.FinalizePostgres(txctx, tx, effects); err != nil {
 			return err
 		}
 		return story.Finalize(txctx)
@@ -39,13 +39,16 @@ func (s *AgentSQLiteOwner) runRuntimeMutation(ctx context.Context, label string,
 	return s.backend.RunTransaction(ctx, label, fn)
 }
 
-func (s *AgentSQLiteOwner) runPrivateAuthorActivityMutation(ctx context.Context, label string, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+func (s *AgentSQLiteOwner) runPrivateAuthorActivityMutation(ctx context.Context, label string, effects *privaterunforkrevision.Effects, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 	return s.runRuntimeMutation(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
 		if err != nil {
 			return err
 		}
 		if err := fn(txctx, tx, story); err != nil {
+			return err
+		}
+		if _, err := privaterunforkrevision.FinalizeSQLite(txctx, tx, effects); err != nil {
 			return err
 		}
 		return story.Finalize(txctx)

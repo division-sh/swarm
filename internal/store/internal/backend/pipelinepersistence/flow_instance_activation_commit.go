@@ -90,14 +90,30 @@ func commitOneFlowInstanceActivation(
 }
 
 func (s *PipelinePostgresOwner) CommitFlowInstanceActivation(ctx context.Context, command runtimebus.FlowInstanceActivationCommand) (runtimepipeline.CommittedFlowInstanceActivation, error) {
+	record, err := command.Plan.PersistenceRecord()
+	if err != nil {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, err
+	}
+	effects, err := workflowLifecycleRevisionEffects(record.RunID)
+	if err != nil {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, err
+	}
 	return commitOneFlowInstanceActivation(ctx, command, s, true, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, fn)
+		return s.runPrivateAuthorActivityMutation(ctx, effects, fn)
 	})
 }
 
 func (s *PipelineSQLiteOwner) CommitFlowInstanceActivation(ctx context.Context, command runtimebus.FlowInstanceActivationCommand) (runtimepipeline.CommittedFlowInstanceActivation, error) {
+	record, err := command.Plan.PersistenceRecord()
+	if err != nil {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, err
+	}
+	effects, err := workflowLifecycleRevisionEffects(record.RunID)
+	if err != nil {
+		return runtimepipeline.CommittedFlowInstanceActivation{}, err
+	}
 	return commitOneFlowInstanceActivation(ctx, command, s, false, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, "sqlite commit flow instance activation", fn)
+		return s.runPrivateAuthorActivityMutation(ctx, "sqlite commit flow instance activation", effects, fn)
 	})
 }
 

@@ -28,7 +28,11 @@ func (s *PipelinePostgresOwner) SetupScenarioEntities(ctx context.Context, req r
 		return runtimepipeline.ScenarioSetupResult{}, err
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, req.RunID)
-	if err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	effects := newRevisionEffects()
+	if err := addEntityMetadataRevisionEffects(effects, req.RunID); err != nil {
+		return runtimepipeline.ScenarioSetupResult{}, err
+	}
+	if err := s.runPrivateAuthorActivityMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		fact, ok := runtimecorrelation.BundleSourceFactFromContext(txctx)
 		if !ok {
 			return fmt.Errorf("postgres scenario setup requires executable bundle source fact")
@@ -101,7 +105,11 @@ func (s *PipelineSQLiteOwner) SetupScenarioEntities(ctx context.Context, req run
 		return runtimepipeline.ScenarioSetupResult{}, err
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, req.RunID)
-	if err := s.runPrivateAuthorActivityMutation(ctx, "sqlite scenario setup", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	effects := newRevisionEffects()
+	if err := addEntityMetadataRevisionEffects(effects, req.RunID); err != nil {
+		return runtimepipeline.ScenarioSetupResult{}, err
+	}
+	if err := s.runPrivateAuthorActivityMutation(ctx, "sqlite scenario setup", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		fact, ok := runtimecorrelation.BundleSourceFactFromContext(txctx)
 		if !ok {
 			return fmt.Errorf("sqlite scenario setup requires executable bundle source fact")

@@ -124,10 +124,13 @@ func (s *EventPostgresOwner) appendAdmittedEventTxOutcome(ctx context.Context, t
 	}
 	if tx == nil {
 		outcome := runtimebus.EventAppendOutcomeUnknown
-		err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
 			var err error
 			outcome, err = s.appendAdmittedEventTxOutcome(txctx, tx, runtimeAuthorActivityMutation(story), admitted, settlement)
-			return err
+			if err != nil {
+				return err
+			}
+			return declareEventCommitEffects(effects, admitted.Event().RunID())
 		})
 		return outcome, err
 	}

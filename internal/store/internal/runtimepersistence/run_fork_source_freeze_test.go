@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -501,7 +502,7 @@ func commitRunForkSourceFreezeForTest(ctx context.Context, store *PostgresStore,
 	if err := store.runForkPostgresOwner.ApplyRunForkSourceFreezeTx(ctx, tx, story, lineage, now, confirmed, handoff); err != nil {
 		return err
 	}
-	if err := commitRunForkAuthorActivityTransaction(ctx, tx, story); err != nil {
+	if err := commitRunForkAuthorActivityTransaction(ctx, tx, story, privaterunforkrevision.NewEffects()); err != nil {
 		return err
 	}
 	return handoff.Commit()

@@ -206,7 +206,13 @@ func commitWorkflowTimerReconciliation(
 }
 
 func (s *PipelinePostgresOwner) CommitWorkflowTimerReconciliation(ctx context.Context, command runtimepipeline.WorkflowTimerReconciliationCommand) (runtimepipeline.CommittedWorkflowLifecycleMutation, error) {
-	return commitWorkflowTimerReconciliation(ctx, s.DecisionPostgresOwner, s.genericScheduleTxOwner(), true, s.runPrivateAuthorActivityMutation, reserveRunLifecycleCandidateHandoff,
+	effects := newRevisionEffects()
+	if err := addTimerRevisionEffects(effects, command.RunID); err != nil {
+		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
+	}
+	return commitWorkflowTimerReconciliation(ctx, s.DecisionPostgresOwner, s.genericScheduleTxOwner(), true, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+		return s.runPrivateAuthorActivityMutation(ctx, effects, fn)
+	}, reserveRunLifecycleCandidateHandoff,
 		func(reservation *runLifecycleCandidateHandoffReservation, result runtimerunlifecycle.CandidateRequestResult) error {
 			return reservation.Prepare(s.runLifecycleCandidates, result)
 		},
@@ -216,9 +222,13 @@ func (s *PipelinePostgresOwner) CommitWorkflowTimerReconciliation(ctx context.Co
 }
 
 func (s *PipelineSQLiteOwner) CommitWorkflowTimerReconciliation(ctx context.Context, command runtimepipeline.WorkflowTimerReconciliationCommand) (runtimepipeline.CommittedWorkflowLifecycleMutation, error) {
+	effects := newRevisionEffects()
+	if err := addTimerRevisionEffects(effects, command.RunID); err != nil {
+		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
+	}
 	return commitWorkflowTimerReconciliation(ctx, s.DecisionSQLiteOwner, s.genericScheduleTxOwner(), false,
 		func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-			return s.runPrivateAuthorActivityMutation(ctx, "sqlite workflow timer reconciliation", fn)
+			return s.runPrivateAuthorActivityMutation(ctx, "sqlite workflow timer reconciliation", effects, fn)
 		}, reserveRunLifecycleCandidateHandoff,
 		func(reservation *runLifecycleCandidateHandoffReservation, result runtimerunlifecycle.CandidateRequestResult) error {
 			return reservation.Prepare(s.runLifecycleCandidates, result)

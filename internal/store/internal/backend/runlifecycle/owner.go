@@ -172,6 +172,7 @@ func (s *RunLifecycleSQLiteOwner) runRuntimeMutation(ctx context.Context, label 
 
 func (s *RunLifecyclePostgresOwner) runPrivateAuthorActivityMutation(
 	ctx context.Context,
+	effects *privaterunforkrevision.Effects,
 	operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error,
 ) error {
 	return s.runPostgresRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
@@ -182,7 +183,7 @@ func (s *RunLifecyclePostgresOwner) runPrivateAuthorActivityMutation(
 		if err := operation(txctx, tx, story); err != nil {
 			return err
 		}
-		if _, err := privaterunforkrevision.CaptureCurrentTransaction(txctx, tx); err != nil {
+		if _, err := privaterunforkrevision.FinalizePostgres(txctx, tx, effects); err != nil {
 			return err
 		}
 		return story.Finalize(txctx)
@@ -192,6 +193,7 @@ func (s *RunLifecyclePostgresOwner) runPrivateAuthorActivityMutation(
 func (s *RunLifecycleSQLiteOwner) runPrivateAuthorActivityMutation(
 	ctx context.Context,
 	label string,
+	effects *privaterunforkrevision.Effects,
 	operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error,
 ) error {
 	return s.runRuntimeMutation(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
@@ -202,8 +204,26 @@ func (s *RunLifecycleSQLiteOwner) runPrivateAuthorActivityMutation(
 		if err := operation(txctx, tx, story); err != nil {
 			return err
 		}
+		if _, err := privaterunforkrevision.FinalizeSQLite(txctx, tx, effects); err != nil {
+			return err
+		}
 		return story.Finalize(txctx)
 	})
+}
+
+func runTerminationRevisionEffects(runIDs ...string) (*privaterunforkrevision.Effects, error) {
+	effects := privaterunforkrevision.NewEffects()
+	for _, runID := range runIDs {
+		if err := effects.Add(runID,
+			privaterunforkrevision.FamilyEventDeliveries,
+			privaterunforkrevision.FamilyEventReceipts,
+			privaterunforkrevision.FamilyAgentSessions,
+			privaterunforkrevision.FamilyTimers,
+		); err != nil {
+			return nil, err
+		}
+	}
+	return effects, nil
 }
 
 func runtimeAuthorActivityMutation(story *privateauthoractivity.Mutation) runtimeauthoractivity.Mutation {

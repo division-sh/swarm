@@ -84,7 +84,11 @@ func (s *LLMSQLiteOwner) UpsertConversation(ctx context.Context, rec runtimellm.
 	if err != nil {
 		return err
 	}
-	return s.runRuntimeMutation(ctx, "sqlite upsert exact conversation", func(txctx context.Context, tx *sql.Tx) error {
+	effects, err := agentSessionEffects(identity.RunID)
+	if err != nil {
+		return err
+	}
+	return s.runRuntimeMutation(ctx, "sqlite upsert exact conversation", effects, func(txctx context.Context, tx *sql.Tx) error {
 		if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, identity.RunID); err != nil {
 			return err
 		}
@@ -202,7 +206,11 @@ func (s *LLMSQLiteOwner) UpdateLiveSessionWatchdog(ctx context.Context, update r
 	if err != nil {
 		return err
 	}
-	return s.runRuntimeMutation(ctx, "sqlite update exact memory watchdog", func(txctx context.Context, tx *sql.Tx) error {
+	effects, err := agentSessionEffects(identity.RunID)
+	if err != nil {
+		return err
+	}
+	return s.runRuntimeMutation(ctx, "sqlite update exact memory watchdog", effects, func(txctx context.Context, tx *sql.Tx) error {
 		if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, identity.RunID); err != nil {
 			return err
 		}

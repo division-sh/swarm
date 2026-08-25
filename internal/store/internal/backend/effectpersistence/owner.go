@@ -12,6 +12,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
@@ -26,6 +27,70 @@ import (
 
 type completionCandidateOwner interface {
 	RequestCompletionCandidateTx(context.Context, *sql.Tx, string, *time.Time, *storerunhandoff.CandidateHandoff) (runtimerunlifecycle.CandidateRequestResult, error)
+}
+
+type revisionEffects = privaterunforkrevision.Effects
+
+func declareRevisionEffects(effects *revisionEffects, runID string, families ...privaterunforkrevision.Family) error {
+	if strings.TrimSpace(runID) == "" {
+		return nil
+	}
+	return effects.Add(runID, families...)
+}
+
+func declareCompletionTargetEffects(effects *revisionEffects, settlement runtimeeffects.CompletionSettlement) error {
+	if settlement.AgentTurn == nil {
+		return nil
+	}
+	families := []privaterunforkrevision.Family{privaterunforkrevision.FamilyAgentTurns}
+	if settlement.AgentTurn.Memory.Enabled {
+		families = append(families, privaterunforkrevision.FamilyAgentSessions)
+	} else {
+		families = append(families, privaterunforkrevision.FamilyAgentConversationAudits)
+	}
+	return declareRevisionEffects(effects, settlement.AgentTurn.RunID, families...)
+}
+
+func declareAgentSessionProjectionEffects(effects *revisionEffects, runID string) error {
+	return declareRevisionEffects(effects, runID, privaterunforkrevision.FamilyAgentSessions)
+}
+
+func declareProviderOriginEffects(effects *revisionEffects, origin runtimeeffects.CompletionOrigin, runID string) error {
+	switch origin.Kind {
+	case runtimeeffects.CompletionOriginDelivery:
+		return declareRevisionEffects(effects, origin.Delivery.RunID(),
+			privaterunforkrevision.FamilyEventDeliveries,
+			privaterunforkrevision.FamilyDeadLetters,
+		)
+	case runtimeeffects.CompletionOriginDirective:
+		return declareRevisionEffects(effects, runID,
+			privaterunforkrevision.FamilyCommittedReplayScopes,
+			privaterunforkrevision.FamilyEventReceipts,
+		)
+	default:
+		return nil
+	}
+}
+
+func declareRecoveryCandidateEffects(effects *revisionEffects, candidates []externalEffectRecoveryCandidate) error {
+	for _, candidate := range candidates {
+		runID, err := candidate.runID()
+		if err != nil {
+			return err
+		}
+		if err := declareRevisionEffects(effects, runID,
+			privaterunforkrevision.FamilyAgentTurns,
+			privaterunforkrevision.FamilyAgentSessions,
+			privaterunforkrevision.FamilyAgentConversationAudits,
+			privaterunforkrevision.FamilyEventDeliveries,
+			privaterunforkrevision.FamilyDeadLetters,
+			privaterunforkrevision.FamilyCommittedReplayScopes,
+			privaterunforkrevision.FamilyEventReceipts,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 type schemaQueryer interface {
@@ -117,43 +182,54 @@ func NewSQLite(backend *sqlitebackend.Backend, requireCurrent func() error, life
 	return &EffectSQLiteOwner{backend: backend, requireCurrent: requireCurrent, lifecycle: lifecycle, llm: llm}, nil
 }
 
-func (s *EffectPostgresOwner) runRuntimeMutation(ctx context.Context, operation func(context.Context, *sql.Tx) error) error {
+func (s *EffectPostgresOwner) runRuntimeMutation(ctx context.Context, operation func(context.Context, *sql.Tx, *privaterunforkrevision.Effects) error) error {
 	if err := s.requireCurrent(); err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, operation)
+	effects := privaterunforkrevision.NewEffects()
+	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		if err := operation(txctx, tx, effects); err != nil {
+			return err
+		}
+		_, err := privaterunforkrevision.FinalizePostgres(txctx, tx, effects)
+		return err
+	})
 }
 
-func (s *EffectSQLiteOwner) runRuntimeMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx) error) error {
+func (s *EffectSQLiteOwner) runRuntimeMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *privaterunforkrevision.Effects) error) error {
 	if err := s.requireCurrent(); err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, label, operation)
+	effects := privaterunforkrevision.NewEffects()
+	return s.backend.RunTransaction(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
+		if err := operation(txctx, tx, effects); err != nil {
+			return err
+		}
+		_, err := privaterunforkrevision.FinalizeSQLite(txctx, tx, effects)
+		return err
+	})
 }
 
-func (s *EffectPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-	return s.runRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
+func (s *EffectPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *privaterunforkrevision.Effects) error) error {
+	return s.runRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects) error {
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
 		if err != nil {
 			return err
 		}
-		if err := operation(txctx, tx, story); err != nil {
-			return err
-		}
-		if _, err := privaterunforkrevision.CaptureCurrentTransaction(txctx, tx); err != nil {
+		if err := operation(txctx, tx, story, effects); err != nil {
 			return err
 		}
 		return story.Finalize(txctx)
 	})
 }
 
-func (s *EffectSQLiteOwner) runPrivateAuthorActivityMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-	return s.runRuntimeMutation(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
+func (s *EffectSQLiteOwner) runPrivateAuthorActivityMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *privaterunforkrevision.Effects) error) error {
+	return s.runRuntimeMutation(ctx, label, func(txctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects) error {
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
 		if err != nil {
 			return err
 		}
-		if err := operation(txctx, tx, story); err != nil {
+		if err := operation(txctx, tx, story, effects); err != nil {
 			return err
 		}
 		return story.Finalize(txctx)

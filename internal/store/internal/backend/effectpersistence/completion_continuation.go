@@ -56,7 +56,7 @@ type completionContinuationRow struct {
 func (s *EffectPostgresOwner) RecoverCompletionContinuation(ctx context.Context, req runtimeeffects.CompletionContinuationRequest) (runtimeeffects.Attempt, bool, error) {
 	var attempt runtimeeffects.Attempt
 	var found bool
-	err := s.runRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx, _ *revisionEffects) error {
 		if err := requireCompletionContinuationRequest(req); err != nil {
 			return err
 		}
@@ -92,7 +92,7 @@ func (s *EffectPostgresOwner) RecoverCompletionContinuation(ctx context.Context,
 func (s *EffectSQLiteOwner) RecoverCompletionContinuation(ctx context.Context, req runtimeeffects.CompletionContinuationRequest) (runtimeeffects.Attempt, bool, error) {
 	var attempt runtimeeffects.Attempt
 	var found bool
-	err := s.runRuntimeMutation(ctx, "sqlite recover exact completion continuation", func(txctx context.Context, tx *sql.Tx) error {
+	err := s.runRuntimeMutation(ctx, "sqlite recover exact completion continuation", func(txctx context.Context, tx *sql.Tx, _ *revisionEffects) error {
 		if err := requireCompletionContinuationRequest(req); err != nil {
 			return err
 		}
@@ -337,7 +337,7 @@ func loadSettledCompletionContinuationSQLite(ctx context.Context, tx *sql.Tx, at
 }
 
 func (s *EffectPostgresOwner) ProjectCompletionConversation(ctx context.Context, attempt runtimeeffects.Attempt, projection runtimeeffects.CompletionConversationProjection) error {
-	return s.runRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	return s.runRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx, effects *revisionEffects) error {
 		locked, err := s.lockCompletionContinuationPostgres(txctx, tx, attempt)
 		if err != nil {
 			return err
@@ -352,6 +352,9 @@ func (s *EffectPostgresOwner) ProjectCompletionConversation(ctx context.Context,
 			return fmt.Errorf("completion continuation has invalid projection phase %q", locked.phase)
 		}
 		if projection.Memory.Enabled {
+			if err := declareAgentSessionProjectionEffects(effects, projection.Identity.RunID); err != nil {
+				return err
+			}
 			record, err := completionConversationRecord(projection)
 			if err != nil {
 				return err
@@ -366,7 +369,7 @@ func (s *EffectPostgresOwner) ProjectCompletionConversation(ctx context.Context,
 }
 
 func (s *EffectSQLiteOwner) ProjectCompletionConversation(ctx context.Context, attempt runtimeeffects.Attempt, projection runtimeeffects.CompletionConversationProjection) error {
-	return s.runRuntimeMutation(ctx, "sqlite project exact completion conversation", func(txctx context.Context, tx *sql.Tx) error {
+	return s.runRuntimeMutation(ctx, "sqlite project exact completion conversation", func(txctx context.Context, tx *sql.Tx, effects *revisionEffects) error {
 		locked, err := s.lockCompletionContinuationSQLite(txctx, tx, attempt)
 		if err != nil {
 			return err
@@ -382,6 +385,9 @@ func (s *EffectSQLiteOwner) ProjectCompletionConversation(ctx context.Context, a
 		}
 		now := time.Now().UTC()
 		if projection.Memory.Enabled {
+			if err := declareAgentSessionProjectionEffects(effects, projection.Identity.RunID); err != nil {
+				return err
+			}
 			record, err := completionConversationRecord(projection)
 			if err != nil {
 				return err
@@ -434,7 +440,7 @@ func completionConversationRecord(projection runtimeeffects.CompletionConversati
 }
 
 func (s *EffectPostgresOwner) ConsumeCompletionResponse(ctx context.Context, attempt runtimeeffects.Attempt, successor *agentframe.ToolContinuation) error {
-	return s.runRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	return s.runRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx, _ *revisionEffects) error {
 		locked, err := s.lockCompletionContinuationPostgres(txctx, tx, attempt)
 		if err != nil {
 			return err
@@ -455,7 +461,7 @@ func (s *EffectPostgresOwner) ConsumeCompletionResponse(ctx context.Context, att
 }
 
 func (s *EffectSQLiteOwner) ConsumeCompletionResponse(ctx context.Context, attempt runtimeeffects.Attempt, successor *agentframe.ToolContinuation) error {
-	return s.runRuntimeMutation(ctx, "sqlite consume exact completion response", func(txctx context.Context, tx *sql.Tx) error {
+	return s.runRuntimeMutation(ctx, "sqlite consume exact completion response", func(txctx context.Context, tx *sql.Tx, _ *revisionEffects) error {
 		locked, err := s.lockCompletionContinuationSQLite(txctx, tx, attempt)
 		if err != nil {
 			return err

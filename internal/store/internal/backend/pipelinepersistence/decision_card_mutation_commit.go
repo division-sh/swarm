@@ -175,14 +175,38 @@ func commitDecisionCardGateState(
 }
 
 func (s *PipelinePostgresOwner) CommitDecisionCardOperation(ctx context.Context, command runtimepipeline.DecisionCardMutationCommand) (runtimepipeline.CommittedDecisionCardMutation, error) {
+	effects := newRevisionEffects()
+	if command.GateState != nil {
+		if err := addEntityMetadataRevisionEffects(effects, command.GateState.RunID); err != nil {
+			return runtimepipeline.CommittedDecisionCardMutation{}, err
+		}
+	}
+	if err := addPublicationRevisionEffects(effects, command.Publication); err != nil {
+		return runtimepipeline.CommittedDecisionCardMutation{}, err
+	}
+	if err := addPublicationRevisionEffects(effects, command.ForcedDeferralPublication); err != nil {
+		return runtimepipeline.CommittedDecisionCardMutation{}, err
+	}
 	return commitDecisionCardOperation(ctx, s, s.DecisionPostgresOwner, true, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, fn)
+		return s.runPrivateAuthorActivityMutation(ctx, effects, fn)
 	}, command)
 }
 
 func (s *PipelineSQLiteOwner) CommitDecisionCardOperation(ctx context.Context, command runtimepipeline.DecisionCardMutationCommand) (runtimepipeline.CommittedDecisionCardMutation, error) {
+	effects := newRevisionEffects()
+	if command.GateState != nil {
+		if err := addEntityMetadataRevisionEffects(effects, command.GateState.RunID); err != nil {
+			return runtimepipeline.CommittedDecisionCardMutation{}, err
+		}
+	}
+	if err := addPublicationRevisionEffects(effects, command.Publication); err != nil {
+		return runtimepipeline.CommittedDecisionCardMutation{}, err
+	}
+	if err := addPublicationRevisionEffects(effects, command.ForcedDeferralPublication); err != nil {
+		return runtimepipeline.CommittedDecisionCardMutation{}, err
+	}
 	return commitDecisionCardOperation(ctx, s, s.DecisionSQLiteOwner, false, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, "sqlite decision-card operation", fn)
+		return s.runPrivateAuthorActivityMutation(ctx, "sqlite decision-card operation", effects, fn)
 	}, command)
 }
 

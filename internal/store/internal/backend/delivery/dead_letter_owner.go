@@ -60,6 +60,7 @@ func (s *DeadLetterSQLiteOwner) requireCurrentSchema() error {
 
 func (s *DeadLetterPostgresOwner) runPrivateAuthorActivityMutation(
 	ctx context.Context,
+	effects *privaterunforkrevision.Effects,
 	operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error,
 ) error {
 	if err := s.requireCurrentSchema(); err != nil {
@@ -73,7 +74,7 @@ func (s *DeadLetterPostgresOwner) runPrivateAuthorActivityMutation(
 		if err := operation(txctx, tx, story); err != nil {
 			return err
 		}
-		if _, err := privaterunforkrevision.CaptureCurrentTransaction(txctx, tx); err != nil {
+		if _, err := privaterunforkrevision.FinalizePostgres(txctx, tx, effects); err != nil {
 			return err
 		}
 		return story.Finalize(txctx)
@@ -83,6 +84,7 @@ func (s *DeadLetterPostgresOwner) runPrivateAuthorActivityMutation(
 func (s *DeadLetterSQLiteOwner) runPrivateAuthorActivityMutation(
 	ctx context.Context,
 	label string,
+	effects *privaterunforkrevision.Effects,
 	operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error,
 ) error {
 	if err := s.requireCurrentSchema(); err != nil {
@@ -94,6 +96,9 @@ func (s *DeadLetterSQLiteOwner) runPrivateAuthorActivityMutation(
 			return err
 		}
 		if err := operation(txctx, tx, story); err != nil {
+			return err
+		}
+		if _, err := privaterunforkrevision.FinalizeSQLite(txctx, tx, effects); err != nil {
 			return err
 		}
 		return story.Finalize(txctx)

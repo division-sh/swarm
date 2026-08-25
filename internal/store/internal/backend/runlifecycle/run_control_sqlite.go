@@ -71,7 +71,11 @@ func (s *RunLifecycleSQLiteOwner) runControlTransition(ctx context.Context, req 
 	}
 	defer handoff.Rollback()
 	var state runtimeruncontrol.State
-	if err := s.runPrivateAuthorActivityMutation(ctx, "sqlite run control transition", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	effects, err := runTerminationRevisionEffects(runID)
+	if err != nil {
+		return runtimeruncontrol.State{}, err
+	}
+	if err := s.runPrivateAuthorActivityMutation(ctx, "sqlite run control transition", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		var err error
 		state, err = loadSQLiteRunControlState(txctx, tx, runID)
 		if err != nil {

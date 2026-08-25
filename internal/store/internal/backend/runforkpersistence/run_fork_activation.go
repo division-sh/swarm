@@ -154,7 +154,17 @@ func (s *RunForkPostgresOwner) ActivateRunFork(ctx context.Context, req runfork.
 	if err := s.applyRunForkSourceFreeze(ctx, tx, story, lineage, now, req.ConfirmSourceFreeze, handoff); err != nil {
 		return result, err
 	}
-	if err := commitRunForkAuthorActivityTransaction(ctx, tx, story); err != nil {
+	effects := privaterunforkrevision.NewEffects()
+	if err := effects.Add(lineage.ForkRunID,
+		privaterunforkrevision.FamilyEvents,
+		privaterunforkrevision.FamilyEventDeliveries,
+		privaterunforkrevision.FamilyCommittedReplayScopes,
+		privaterunforkrevision.FamilyEventReceipts,
+		privaterunforkrevision.FamilyReplyContexts,
+	); err != nil {
+		return result, err
+	}
+	if err := commitRunForkAuthorActivityTransaction(ctx, tx, story, effects); err != nil {
 		return result, fmt.Errorf("commit fork activation: %w", err)
 	}
 	committed = true
@@ -190,18 +200,18 @@ func recordRunForkActivationAuthorActivity(ctx context.Context, story runtimeaut
 	})
 }
 
-func commitRunForkAuthorActivityTransaction(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-	if _, err := privaterunforkrevision.CaptureCurrentTransaction(ctx, tx); err != nil {
+func commitRunForkAuthorActivityTransaction(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *privaterunforkrevision.Effects) error {
+	if err := story.Finalize(ctx); err != nil {
 		return err
 	}
-	if err := story.Finalize(ctx); err != nil {
+	if _, err := privaterunforkrevision.FinalizePostgres(ctx, tx, effects); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func CommitRunForkAuthorActivityTransaction(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-	return commitRunForkAuthorActivityTransaction(ctx, tx, story)
+func CommitRunForkAuthorActivityTransaction(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *privaterunforkrevision.Effects) error {
+	return commitRunForkAuthorActivityTransaction(ctx, tx, story, effects)
 }
 
 func requireRunForkHistoricalReplayExecution(

@@ -12,6 +12,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 )
 
@@ -164,7 +165,7 @@ func runPostgresLifecycleOperation[T any](
 ) (T, error) {
 	return WithCandidateHandoffResult(ctx, func(handoff *CandidateHandoff) (T, error) {
 		var result T
-		err := store.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		err := store.runPrivateAuthorActivityMutation(ctx, privaterunforkrevision.NewEffects(), func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 			var err error
 			result, err = fn(txctx, postgresRunLifecycleMutation{
 				store: store, tx: tx, story: runtimeAuthorActivityMutation(story), handoff: handoff,
@@ -182,7 +183,7 @@ func runSQLiteLifecycleOperation[T any](
 ) (T, error) {
 	return WithCandidateHandoffResult(ctx, func(handoff *CandidateHandoff) (T, error) {
 		var result T
-		err := store.runPrivateAuthorActivityMutation(ctx, "sqlite run lifecycle operation", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		err := store.runPrivateAuthorActivityMutation(ctx, "sqlite run lifecycle operation", privaterunforkrevision.NewEffects(), func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 			var err error
 			result, err = fn(txctx, sqliteRunLifecycleMutation{
 				store: store, tx: tx, story: runtimeAuthorActivityMutation(story), handoff: handoff,
@@ -238,13 +239,13 @@ func (s *RunLifecycleSQLiteOwner) RequireActiveRun(ctx context.Context, runID st
 // operation only guarantees that terminal-run refusal cannot be shadowed by a
 // later route-planning error.
 func (s *RunLifecyclePostgresOwner) RequirePublicationRunActive(ctx context.Context, runID string) error {
-	return s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
+	return s.runPrivateAuthorActivityMutation(ctx, privaterunforkrevision.NewEffects(), func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
 		return (postgresRunLifecycleMutation{store: s, tx: tx}).RequireActive(txctx, runID)
 	})
 }
 
 func (s *RunLifecycleSQLiteOwner) RequirePublicationRunActive(ctx context.Context, runID string) error {
-	return s.runPrivateAuthorActivityMutation(ctx, "sqlite publication run preflight", func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
+	return s.runPrivateAuthorActivityMutation(ctx, "sqlite publication run preflight", privaterunforkrevision.NewEffects(), func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
 		return (sqliteRunLifecycleMutation{store: s, tx: tx}).RequireActive(txctx, runID)
 	})
 }

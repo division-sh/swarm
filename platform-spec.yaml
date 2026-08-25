@@ -13673,8 +13673,8 @@ platform_tables:
     run_fork_revision_heads:
       description: >-
         Canonical per-run counter for the bounded supported-fork historical projection. The existing
-        store transaction owner increments this row while holding its row lock; all approved fork-reader
-        facts written by the same PostgreSQL transaction share the resulting revision. Every runtime
+        named selected-store transaction owner increments this row through the private revision finalizer;
+        all declared fork-reader families changed for the same run share the resulting revision. Every runtime
         transaction MUST collect all affected run IDs and lock their parent runs rows in stable run-ID
         order before owning a corresponding revision head or revision ledger row. The shared allocator
         uses the minimum foreign-key-compatible parent lock; destructive owners MAY retain a stronger lock.
@@ -13686,24 +13686,23 @@ platform_tables:
         );
     run_fork_revisions:
       description: >-
-        Commit-serialized revision ledger for the bounded supported-fork projection. transaction_id is
-        used only to reuse one revision inside one SQL transaction; it is not a public historical cursor.
-        Runtime allocation, activation-frontier access, and destructive cleanup MUST consume the parent-run-
-        before-revision-state lock order owned by run_fork_revision_heads; local retries or inverse lock
-        interpretations are forbidden.
+        Commit-serialized revision ledger for the bounded supported-fork projection. One private finalizer
+        invocation allocates at most one revision for each declared affected run; database transaction
+        identity is not semantic authority. Runtime allocation, activation-frontier access, and destructive
+        cleanup MUST consume the parent-run-before-revision-state lock order owned by
+        run_fork_revision_heads; local retries or inverse lock interpretations are forbidden.
       ddl: |
         CREATE TABLE run_fork_revisions (
             run_id        UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
             revision      BIGINT NOT NULL CHECK (revision > 0),
-            transaction_id BIGINT NOT NULL,
             recorded_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            PRIMARY KEY (run_id, revision),
-            UNIQUE (run_id, transaction_id)
+            PRIMARY KEY (run_id, revision)
         );
     run_fork_fact_revisions:
       description: >-
         Append-only, closed-registry projection of the twelve source fact families consumed by supported
-        PostgreSQL fork planning. This table is not a general temporal database and has no trigger,
+        fork planning. PostgreSQL and SQLite private adapters consume one backend-neutral declared-effect
+        and canonical-projection contract. This table is not a general temporal database and has no trigger,
         migration, compatibility, or arbitrary-history API. The events family stores payload_base64 derived
         from events.payload_bytes so historical revision hydration reconstructs the exact admitted payload
         bytes; the derived events.payload JSON projection is not revision or replay evidence.
@@ -13715,7 +13714,6 @@ platform_tables:
             fact_key  TEXT NOT NULL CHECK (fact_key <> ''),
             fact      JSONB NOT NULL,
             present   BOOLEAN NOT NULL DEFAULT TRUE,
-            source_transaction_id BIGINT NOT NULL CHECK (source_transaction_id >= 0),
             PRIMARY KEY (run_id, family, fact_key, revision),
             FOREIGN KEY (run_id, revision) REFERENCES run_fork_revisions(run_id, revision) ON DELETE CASCADE,
             INDEX idx_run_fork_fact_revision_snapshot (run_id, revision, family, fact_key)
@@ -16324,6 +16322,7 @@ run_model:
       - entity_mutations
       - entity_metadata
       - event_deliveries
+      - committed_replay_scopes
       - event_receipts
       - dead_letters
       - timers
@@ -16332,23 +16331,24 @@ run_model:
       - agent_conversation_audits
       - reply_contexts
       write_contract: >-
-        Existing PostgreSQL store transactions allocate one commit-serialized revision per affected run after
-        provider, tool, agent, and network work. A family is changed only when its canonical projected fact JSON or
-        fact presence differs from the latest published revision; writes to excluded physical columns do not advance
-        the family. Publication and completeness validation MUST compare that same canonical projection and presence,
-        never row transaction identity. Every changed family in one transaction shares that revision;
-        repeated capture in the transaction reuses it; rollback publishes neither facts nor revision. Transactions
-        affecting multiple runs lock revision heads in deterministic run-ID order. No revision lock may span external
-        work. Deletion emits present=false for the removed fact in the same transaction.
+        Every named selected-store mutation declares a closed typed set of affected run IDs and families before its
+        private PostgreSQL or SQLite transaction finalizes. Private family writers contribute to that aggregate; they
+        never allocate revisions or infer effects from transaction metadata. One private finalizer compares only the
+        declared canonical projected fact JSON and presence against the latest published revision, after all domain
+        writes and before commit. Writes to excluded physical columns do not advance a family. Every changed family for
+        one run shares one revision; exact no-change emits no revision; rollback publishes neither domain facts nor
+        revision facts. Multi-run finalization locks parent runs in deterministic run-ID order. No revision lock spans
+        external work. Retained-run deletion emits present=false for every removed fact in the same transaction.
       read_contract: >-
-        PlanRunFork resolves the event UUID to its first revision and reads all eleven families through one read-only
-        repeatable-read PostgreSQL snapshot. Every generic and selected planning, readiness, materialization, and
-        historical activation replan consumes that projection. RunForkPoint carries the exact selected event's
+        PostgreSQL and SQLite private adapters validate and decode the same twelve-family historical projection.
+        PlanRunFork currently exposes the PostgreSQL public consumer: it resolves the event UUID to its first revision
+        and reads all twelve families through one read-only repeatable-read snapshot. Every generic and selected
+        planning, readiness, materialization, and historical activation replan consumes that projection. RunForkPoint carries the exact selected event's
         normalized revisioned source_route for both explicit event and implicit latest selection. Selected route-history
         lookup and dynamic flow-instance accounting consume that typed fork-point fact even when no delivery row exists;
         they MUST NOT recover it from an event name, current route state, receiver flow_instance, or a synthetic delivery.
         Missing, ambiguous, lineage-invalid, partially deleted, or unrevisioned facts fail closed; old stores are unsupported
-        and must be recreated. SQLite returns typed unsupported for fork mutation and does not emulate this owner.
+        and must be recreated. SQLite does not expose the public fork mutation/planning surface in this contract.
       route_projection: >-
         Global routing_rules are current unversioned state and are never queried as historical authority. The fixed
         projection emits not_applicable when no route-relevant source fact exists and unknown_unversioned otherwise.
@@ -16363,10 +16363,12 @@ run_model:
         source-advancement validation is likewise an activation safety owner and is not answered from the historical
         snapshot.
       retention: >-
-        The eleven authoritative source families remain available while a live dependent fork requires them. Partial
-        fact deletion is unsupported. Existing whole-run cleanup may remove the complete source only when no live
-        dependent fork remains; no tombstone subsystem, migration, backfill, export, purge, or compatibility reader is
-        provided for old selected stores.
+        The twelve authoritative source families remain available while a live dependent fork requires them. A named
+        operation that retains the run while deleting current governed facts MUST retain prior revision authority and
+        append present=false facts for the exact removed projection in the same transaction. Whole-parent deletion may
+        remove the run and cascade-owned ledger together only when dependency guards allow it. Historical event
+        selection remains ledger-backed after a retained-run deletion. This bounded absence encoding is not a generic
+        tombstone subsystem; no migration, backfill, export, purge, or compatibility reader is provided for old stores.
     replay_resume_admission_taxonomy: 'Fork planning, materialization, and activation surfaces expose the
       canonical store-backed replay_resume_admission taxonomy. This taxonomy classifies
       historical source-run facts as reconstruct, lineage-only, fail-closed blockers, split siblings, or
@@ -16819,7 +16821,7 @@ run_model:
       source event UUID to that event''s first persisted commit-ordered run revision. Occurrence and lifecycle
       timestamps remain diagnostics and are never a fallback selector or historical membership predicate.'
     semantics:
-      1_reconstruct_state: 'Resolve the source event UUID to revision R, load the eleven-family projection at
+      1_reconstruct_state: 'Resolve the source event UUID to revision R, load the twelve-family projection at
         revision <= R in one repeatable-read snapshot, and forward-apply revisioned entity_mutations in deterministic
         revision/fact order. A reconstructed entity is materializable only after
         runtime.run_fork.materialized_entity_snapshot_metadata authorizes flow_instance/entity_type metadata present

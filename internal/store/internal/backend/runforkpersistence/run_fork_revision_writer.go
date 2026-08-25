@@ -7,13 +7,11 @@ import (
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
-func commitPostgresRunForkRevisionTx(ctx context.Context, tx *sql.Tx) error {
-	if _, err := privaterunforkrevision.CaptureCurrentTransaction(ctx, tx); err != nil {
-		return err
-	}
-	return tx.Commit()
+func finalizePostgresRunForkRevisionTx(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects) error {
+	_, err := privaterunforkrevision.FinalizePostgres(ctx, tx, effects)
+	return err
 }
 
-func (s *RunForkPostgresOwner) CommitRunForkRevisionTx(ctx context.Context, tx *sql.Tx) error {
-	return commitPostgresRunForkRevisionTx(ctx, tx)
+func (s *RunForkPostgresOwner) FinalizeRunForkRevisionTx(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects) error {
+	return finalizePostgresRunForkRevisionTx(ctx, tx, effects)
 }

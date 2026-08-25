@@ -73,7 +73,7 @@ func TestRunForkRevisionCapturePreservesExactEventPayloadBytes(t *testing.T) {
 	if err := insertPostgresCanonicalEventRecordFixtureTx(ctx, tx, event); err != nil {
 		t.Fatalf("insert event: %v", err)
 	}
-	revision, err := runforkrevision.Capture(ctx, tx, runID, runforkrevision.FamilyEvents)
+	revision, err := finalizePostgresRunForkTestRevision(ctx, tx, runID, runforkrevision.FamilyEvents)
 	if err != nil {
 		t.Fatalf("capture revision: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestRunForkRevisionEqualityIncludesExactEventPayloadBytes(t *testing.T) {
 	if err := insertPostgresCanonicalEventRecordFixtureTx(ctx, firstTx, event); err != nil {
 		t.Fatalf("insert first event fact: %v", err)
 	}
-	firstRevision, err := runforkrevision.Capture(ctx, firstTx, runID, runforkrevision.FamilyEvents)
+	firstRevision, err := finalizePostgresRunForkTestRevision(ctx, firstTx, runID, runforkrevision.FamilyEvents)
 	if err != nil {
 		t.Fatalf("capture first event revision: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestRunForkRevisionEqualityIncludesExactEventPayloadBytes(t *testing.T) {
 	if _, err := secondTx.ExecContext(ctx, `UPDATE events SET payload_bytes=$2::bytea WHERE event_id=$1::uuid`, eventID, secondPayload); err != nil {
 		t.Fatalf("mutate only authoritative payload bytes: %v", err)
 	}
-	secondRevision, err := runforkrevision.Capture(ctx, secondTx, runID, runforkrevision.FamilyEvents)
+	secondRevision, err := finalizePostgresRunForkTestRevision(ctx, secondTx, runID, runforkrevision.FamilyEvents)
 	if err != nil {
 		t.Fatalf("capture byte-distinct event revision: %v", err)
 	}
@@ -197,8 +197,8 @@ func TestRunForkRevisionStateAccessorInventoryIsClosed(t *testing.T) {
 		"internal/runtime/destructivereset/cleanup_catalog.go",
 		"internal/store/internal/adminpersistence/destructive_reset_cleanup.go",
 		"internal/store/internal/backend/runforkpersistence/run_fork_activation.go",
-		"internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_execution_mutation.go",
-		"internal/store/internal/backend/runforkrevision/revision.go",
+		"internal/store/internal/backend/runforkrevision/postgres.go",
+		"internal/store/internal/backend/runforkrevision/sqlite.go",
 		"internal/store/platformschema/platformschema.go",
 	}
 	var got []string
@@ -253,19 +253,23 @@ func TestRunForkRevisionCaptureReusesTransactionRevisionAndRollbackPublishesNoth
 	`, runID, uuid.NewString(), eventID); err != nil {
 		t.Fatalf("seed mutation: %v", err)
 	}
-	revisions, err := runforkrevision.CaptureCurrentTransaction(ctx, tx)
+	effects := runforkrevision.NewEffects()
+	if err := effects.Add(runID, runforkrevision.FamilyEvents, runforkrevision.FamilyEntityMutations); err != nil {
+		t.Fatalf("declare transaction revision effects: %v", err)
+	}
+	results, err := runforkrevision.FinalizePostgres(ctx, tx, effects)
 	if err != nil {
-		t.Fatalf("capture transaction: %v", err)
+		t.Fatalf("finalize transaction revision: %v", err)
 	}
-	if revisions[runID] != 1 {
-		t.Fatalf("captured revision = %d, want 1", revisions[runID])
+	if results[runID].Revision != 1 {
+		t.Fatalf("finalized revision = %d, want 1", results[runID].Revision)
 	}
-	reused, err := runforkrevision.Capture(ctx, tx, runID, runforkrevision.FamilyEvents)
+	reused, err := finalizePostgresRunForkTestRevision(ctx, tx, runID, runforkrevision.FamilyEvents)
 	if err != nil {
 		t.Fatalf("repeat capture: %v", err)
 	}
-	if reused != revisions[runID] {
-		t.Fatalf("repeated capture revision = %d, want transaction revision %d", reused, revisions[runID])
+	if reused != results[runID].Revision {
+		t.Fatalf("repeated finalization revision = %d, want unchanged revision %d", reused, results[runID].Revision)
 	}
 	var ledgerRows, factRows int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1::uuid`, runID).Scan(&ledgerRows); err != nil {
@@ -311,7 +315,7 @@ func TestRunForkRevisionCaptureSerializesSameRunCommitVisibility(t *testing.T) {
 	}
 	defer func() { _ = first.Rollback() }()
 	seedPostgresSemanticEventRecordFixtureTx(t, ctx, first, firstEventID, runID, "revision.first", events.EventProducerPlatform, "revision-test", "", "", time.Now().UTC())
-	firstRevision, err := runforkrevision.Capture(ctx, first, runID, runforkrevision.FamilyEvents)
+	firstRevision, err := finalizePostgresRunForkTestRevision(ctx, first, runID, runforkrevision.FamilyEvents)
 	if err != nil {
 		t.Fatalf("capture first transaction: %v", err)
 	}
@@ -328,7 +332,7 @@ func TestRunForkRevisionCaptureSerializesSameRunCommitVisibility(t *testing.T) {
 	}
 	done := make(chan captureResult, 1)
 	go func() {
-		revision, err := runforkrevision.Capture(ctx, second, runID, runforkrevision.FamilyEvents)
+		revision, err := finalizePostgresRunForkTestRevision(ctx, second, runID, runforkrevision.FamilyEvents)
 		done <- captureResult{revision: revision, err: err}
 	}()
 	select {
@@ -418,12 +422,17 @@ func TestRunForkRevisionCaptureLocksParentBeforeRevisionState(t *testing.T) {
 	}
 	deliveryCapture := make(chan captureResult, 1)
 	go func() {
-		revision, err := runforkrevision.CaptureForEvent(deliveryTxCtx, deliveryTx, seedEventID, runforkrevision.FamilyEventDeliveries)
+		runID, err := runforkrevision.RunIDForEvent(deliveryTxCtx, deliveryTx, seedEventID)
+		if err != nil {
+			deliveryCapture <- captureResult{err: err}
+			return
+		}
+		revision, err := finalizePostgresRunForkTestRevision(deliveryTxCtx, deliveryTx, runID, runforkrevision.FamilyEventDeliveries)
 		deliveryCapture <- captureResult{revision: revision, err: err}
 	}()
 	waitForPostgresBackendLock(t, ctx, db, deliveryBackendPID)
 
-	publishRevision, err := runforkrevision.Capture(ctx, publishTx, runID, runforkrevision.FamilyEvents, runforkrevision.FamilyEventDeliveries)
+	publishRevision, err := finalizePostgresRunForkTestRevision(ctx, publishTx, runID, runforkrevision.FamilyEvents, runforkrevision.FamilyEventDeliveries)
 	if err != nil {
 		t.Fatalf("capture event publication revision: %v", err)
 	}
@@ -556,11 +565,18 @@ func TestRunForkRevisionCaptureOrdersMultiRunLocksDeterministically(t *testing.T
 			}
 		}
 		<-start
-		changes := []runforkrevision.Change{
-			{RunID: order[0], Families: []runforkrevision.Family{runforkrevision.FamilyEvents}},
-			{RunID: order[1], Families: []runforkrevision.Family{runforkrevision.FamilyEvents}},
+		effects := runforkrevision.NewEffects()
+		for _, runID := range order {
+			if err := effects.Add(runID, runforkrevision.FamilyEvents); err != nil {
+				results <- workerResult{err: err}
+				return
+			}
 		}
-		revisions, err := runforkrevision.CaptureChanges(ctx, tx, changes...)
+		finalized, err := runforkrevision.FinalizePostgres(ctx, tx, effects)
+		revisions := make(map[string]int64, len(finalized))
+		for runID, result := range finalized {
+			revisions[runID] = result.Revision
+		}
 		if err == nil {
 			err = tx.Commit()
 		}
@@ -644,8 +660,8 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 		fields.RoutePresence, fields.FlowScopeKey, fields.FlowInstanceID, fields.FlowInstancePath, now); err != nil {
 		t.Fatalf("seed lifecycle source session: %v", err)
 	}
-	if _, err := runforkrevision.CaptureCurrentTransaction(ctx, tx); err != nil {
-		t.Fatalf("capture lifecycle source revision: %v", err)
+	if _, err := finalizePostgresRunForkTestRevision(ctx, tx, runID, runforkrevision.FamilyEvents, runforkrevision.FamilyAgentSessions); err != nil {
+		t.Fatalf("finalize lifecycle source revision: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit lifecycle source revision: %v", err)
@@ -715,7 +731,7 @@ func TestRunForkRevisionSessionProjectionIgnoresExcludedWriterChurnAndTracksStat
 	if err != nil {
 		t.Fatalf("begin excluded-writer validation: %v", err)
 	}
-	if err := runforkrevision.ValidateComplete(ctx, validationTx, runID); err != nil {
+	if err := runforkrevision.ValidateCompletePostgres(ctx, validationTx, runID); err != nil {
 		_ = validationTx.Rollback()
 		t.Fatalf("validate excluded-writer projection: %v", err)
 	}
@@ -729,11 +745,10 @@ func TestRunForkRevisionSessionProjectionIgnoresExcludedWriterChurnAndTracksStat
 	if _, err := statusTx.ExecContext(ctx, `UPDATE agent_sessions SET status='terminated', termination_reason='normal', terminated_at=$2, updated_at=$2 WHERE session_id=$1::uuid`, sessionID, at.Add(time.Minute)); err != nil {
 		t.Fatalf("update projected session status: %v", err)
 	}
-	statusRevisions, err := runforkrevision.CaptureCurrentTransaction(ctx, statusTx)
+	statusRevision, err := finalizePostgresRunForkTestRevision(ctx, statusTx, runID, runforkrevision.FamilyAgentSessions)
 	if err != nil {
 		t.Fatalf("capture projected session status: %v", err)
 	}
-	statusRevision := statusRevisions[runID]
 	if statusRevision <= firstRevision {
 		t.Fatalf("projected status revision = %d, want after %d", statusRevision, firstRevision)
 	}
@@ -749,7 +764,7 @@ func TestRunForkRevisionSessionProjectionIgnoresExcludedWriterChurnAndTracksStat
 	if _, err := deleteTx.ExecContext(ctx, `DELETE FROM agent_sessions WHERE session_id=$1::uuid`, sessionID); err != nil {
 		t.Fatalf("delete projected session: %v", err)
 	}
-	deleteRevision, err := runforkrevision.Capture(ctx, deleteTx, runID, runforkrevision.FamilyAgentSessions)
+	deleteRevision, err := finalizePostgresRunForkTestRevision(ctx, deleteTx, runID, runforkrevision.FamilyAgentSessions)
 	if err != nil {
 		t.Fatalf("capture projected session deletion: %v", err)
 	}
