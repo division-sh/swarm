@@ -305,6 +305,7 @@ func TestCLIIdentifierResolverCallsitesUseRegisteredReadRows(t *testing.T) {
 
 func TestCLIIdentifierDisplayColumnsUseFamilyAwareOwner(t *testing.T) {
 	expected := map[string]cliIdentifierFamily{
+		"channel_command.go\x00SELECTOR":   cliIdentifierFamilyOperatorChannel,
 		"agents.go\x00AGENT_ID":            cliIdentifierFamilyAgent,
 		"agents.go\x00FLOW_INSTANCE":       cliIdentifierFamilyFlowInstance,
 		"agents.go\x00EVENT ID":            cliIdentifierFamilyEvent,
@@ -1166,6 +1167,9 @@ func cliIdentifierTableColumnLiteral(literal *ast.CompositeLit) (string, cliIden
 				family = cliIdentifierFamily(strings.ToLower(string(family)))
 				if family == "flowinstance" {
 					family = cliIdentifierFamilyFlowInstance
+				}
+				if family == "operatorchannel" {
+					family = cliIdentifierFamilyOperatorChannel
 				}
 			}
 		case "KeyColumn":

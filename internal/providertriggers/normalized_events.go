@@ -39,11 +39,13 @@ type NormalizedEventFieldProjection struct {
 	Schema   runtimecontracts.ToolInputSchema `yaml:"schema" json:"schema"`
 	Optional bool                             `yaml:"optional,omitempty" json:"optional,omitempty"`
 	Convert  string                           `yaml:"convert,omitempty" json:"convert,omitempty"`
+	Values   map[string]string                `yaml:"values,omitempty" json:"values,omitempty"`
 }
 
 func (p NormalizedEventFieldProjection) normalized() NormalizedEventFieldProjection {
 	p.From = strings.TrimSpace(p.From)
 	p.Convert = strings.ToLower(strings.TrimSpace(p.Convert))
+	p.Values = cloneTextMap(p.Values)
 	return p
 }
 
@@ -53,10 +55,13 @@ type AuthorSubjectManifest struct {
 }
 
 type NormalizedEventWhen struct {
-	Exists []string          `yaml:"exists,omitempty"`
-	Absent []string          `yaml:"absent,omitempty"`
-	Equals map[string]string `yaml:"equals,omitempty"`
+	Exists []string            `yaml:"exists,omitempty"`
+	Absent []string            `yaml:"absent,omitempty"`
+	Equals map[string]string   `yaml:"equals,omitempty"`
+	OneOf  map[string][]string `yaml:"one_of,omitempty"`
 }
+
+const normalizedFieldConvertTextEnumMap = "text_enum_map"
 
 type OutputManifest struct {
 	Kind               OutputKind
@@ -169,12 +174,37 @@ func (m Manifest) validateNormalizedEvents() error {
 			}
 			switch field.Convert {
 			case "":
+				if len(field.Values) != 0 {
+					return fmt.Errorf("%s normalized event %q field %q values require convert: text_enum_map", provider, eventName, name)
+				}
 			case runtimecontracts.FieldProjectionConvertNumberToText:
+				if len(field.Values) != 0 {
+					return fmt.Errorf("%s normalized event %q field %q conversion number_to_text forbids values", provider, eventName, name)
+				}
 				if field.Schema.Kind() != runtimecontracts.ToolSchemaString {
 					return fmt.Errorf("%s normalized event %q field %q conversion number_to_text requires a string output schema", provider, eventName, name)
 				}
+			case normalizedFieldConvertTextEnumMap:
+				if field.Schema.Kind() != runtimecontracts.ToolSchemaString {
+					return fmt.Errorf("%s normalized event %q field %q conversion text_enum_map requires a string output schema", provider, eventName, name)
+				}
+				if len(field.Values) == 0 {
+					return fmt.Errorf("%s normalized event %q field %q conversion text_enum_map requires values", provider, eventName, name)
+				}
+				projected, err := field.Schema.Project()
+				if err != nil {
+					return fmt.Errorf("%s normalized event %q field %q conversion text_enum_map output schema: %w", provider, eventName, name, err)
+				}
+				for input, output := range field.Values {
+					if input == "" || strings.TrimSpace(input) != input || output == "" || strings.TrimSpace(output) != output {
+						return fmt.Errorf("%s normalized event %q field %q conversion text_enum_map values require exact non-empty text", provider, eventName, name)
+					}
+					if err := eventschema.ValidateValueAgainstSchema(projected, output); err != nil {
+						return fmt.Errorf("%s normalized event %q field %q conversion text_enum_map value %q violates its declared output schema: %w", provider, eventName, name, output, err)
+					}
+				}
 			default:
-				return fmt.Errorf("%s normalized event %q field %q has unsupported conversion %q; use number_to_text or remove convert", provider, eventName, name, field.Convert)
+				return fmt.Errorf("%s normalized event %q field %q has unsupported conversion %q; use number_to_text, text_enum_map, or remove convert", provider, eventName, name, field.Convert)
 			}
 			fields[name] = field
 		}
@@ -196,6 +226,27 @@ func (m Manifest) validateNormalizedEvents() error {
 }
 
 func validateNormalizedWhen(provider, eventName string, declared NormalizedEventWhen, fields map[string]NormalizedEventFieldProjection) (NormalizedEventWhen, error) {
+	for path, values := range declared.OneOf {
+		if path == "" || strings.TrimSpace(path) != path {
+			return NormalizedEventWhen{}, fmt.Errorf("%s normalized event %q when.one_of path %q must be canonical non-empty text", provider, eventName, path)
+		}
+		if _, err := runtimepaths.ParseStrictRelative(path); err != nil {
+			return NormalizedEventWhen{}, fmt.Errorf("%s normalized event %q when.one_of path: %w", provider, eventName, err)
+		}
+		if len(values) == 0 {
+			return NormalizedEventWhen{}, fmt.Errorf("%s normalized event %q when.one_of[%q] requires at least one value", provider, eventName, path)
+		}
+		seen := make(map[string]struct{}, len(values))
+		for _, value := range values {
+			if value == "" || strings.TrimSpace(value) != value {
+				return NormalizedEventWhen{}, fmt.Errorf("%s normalized event %q when.one_of[%q] values require exact non-empty text", provider, eventName, path)
+			}
+			if _, duplicate := seen[value]; duplicate {
+				return NormalizedEventWhen{}, fmt.Errorf("%s normalized event %q when.one_of[%q] duplicates value %q", provider, eventName, path, value)
+			}
+			seen[value] = struct{}{}
+		}
+	}
 	when := declared.normalized(fields)
 	for _, path := range append(append([]string{}, when.Exists...), when.Absent...) {
 		if _, err := runtimepaths.ParseStrictRelative(path); err != nil {
@@ -238,7 +289,16 @@ func (w NormalizedEventWhen) normalized(fields map[string]NormalizedEventFieldPr
 	if len(equals) == 0 {
 		equals = nil
 	}
-	return NormalizedEventWhen{Exists: normalizedPaths(exists), Absent: normalizedPaths(w.Absent), Equals: equals}
+	oneOf := make(map[string][]string, len(w.OneOf))
+	for path, values := range w.OneOf {
+		path = strings.TrimSpace(path)
+		oneOf[path] = append([]string(nil), values...)
+		exists = append(exists, path)
+	}
+	if len(oneOf) == 0 {
+		oneOf = nil
+	}
+	return NormalizedEventWhen{Exists: normalizedPaths(exists), Absent: normalizedPaths(w.Absent), Equals: equals, OneOf: oneOf}
 }
 
 func normalizedPaths(in []string) []string {
@@ -372,6 +432,16 @@ func normalizedWhenMatches(payload any, when NormalizedEventWhen) bool {
 			return false
 		}
 	}
+	for path, allowed := range when.OneOf {
+		got, ok := valueFromRelativePath(payload, path)
+		if !ok {
+			return false
+		}
+		text, ok := got.(string)
+		if !ok || !containsExactText(allowed, text) {
+			return false
+		}
+	}
 	return true
 }
 
@@ -399,6 +469,16 @@ func normalizeProjectedValue(value any, field NormalizedEventFieldProjection) (a
 	var err error
 	if field.Convert == runtimecontracts.FieldProjectionConvertNumberToText {
 		normalized, err = exactNumberText(value)
+	} else if field.Convert == normalizedFieldConvertTextEnumMap {
+		text, ok := value.(string)
+		if !ok {
+			return nil, fmt.Errorf("text_enum_map requires a text value, got %T", value)
+		}
+		var found bool
+		normalized, found = field.Values[text]
+		if !found {
+			return nil, fmt.Errorf("text_enum_map has no mapping for %q", text)
+		}
 	} else {
 		normalized = value
 	}
@@ -413,6 +493,26 @@ func normalizeProjectedValue(value any, field NormalizedEventFieldProjection) (a
 		return nil, fmt.Errorf("projected value violates its declared output schema: %w", err)
 	}
 	return normalized, nil
+}
+
+func cloneTextMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func containsExactText(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func exactNumberText(value any) (string, error) {

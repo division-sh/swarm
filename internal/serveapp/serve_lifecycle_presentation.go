@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
@@ -280,6 +281,20 @@ func (p *serveLifecyclePresenter) recordNoConnectedChannels() {
 	}
 	p.mu.Lock()
 	p.operatorWarnings = append(p.operatorWarnings, "No channels connected yet. Run: swarm channel connect telegram")
+	p.mu.Unlock()
+}
+
+func (p *serveLifecyclePresenter) recordOperatorChannelProofReuse(binding operatorchannel.Binding) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.operatorWarnings = append(p.operatorWarnings, fmt.Sprintf(
+		"operator channel %s restored from machine-local verified proof for %s (%s)",
+		binding.Interface.ChannelPackID,
+		operatorchannel.MaskPresentation(binding.AccountPresentation),
+		binding.ConversationScope,
+	))
 	p.mu.Unlock()
 }
 

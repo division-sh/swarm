@@ -92,6 +92,8 @@ type rootCommandOptions struct {
 	runReadyPoll           time.Duration
 	runStatusPoll          time.Duration
 	runTraceAttachTimeout  time.Duration
+	channelConnectWait     time.Duration
+	channelConnectPoll     time.Duration
 	now                    func() time.Time
 }
 
@@ -104,6 +106,8 @@ func defaultRootCommandOptions() rootCommandOptions {
 		runReadyPoll:          250 * time.Millisecond,
 		runStatusPoll:         time.Second,
 		runTraceAttachTimeout: 5 * time.Second,
+		channelConnectWait:    2 * time.Minute,
+		channelConnectPoll:    500 * time.Millisecond,
 		now:                   time.Now,
 	}
 }

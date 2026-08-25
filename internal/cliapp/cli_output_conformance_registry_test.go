@@ -67,6 +67,9 @@ var cliOutputSharedOwnerProofs = map[string]cliOutputSharedOwnerProof{
 	"swarm describe routes":              {Constructor: "newDescribeRoutesCommand", Runner: "runDescribeRoutesCommandWithOutput"},
 	"swarm entity list":                  {Constructor: "newEntitiesListCommand", Runner: "runEntitiesListCommand"},
 	"swarm entity view":                  {Constructor: "newEntityViewCommand", Runner: "runEntityViewCommand"},
+	"swarm channel connect":              {Constructor: "newChannelConnectCommand", Runner: "runChannelConnect"},
+	"swarm channel list":                 {Constructor: "newChannelListCommand", Runner: "runChannelList"},
+	"swarm channel unbind":               {Constructor: "newChannelUnbindCommand", Runner: "runChannelUnbind"},
 }
 
 var cliOutputGrandfatheredNonSharedRows = map[string]string{
@@ -89,6 +92,7 @@ var cliOutputGrandfatheredNonSharedRows = map[string]string{
 	"swarm connections callback":   "split",
 	"swarm connections status":     "split",
 	"swarm connections disconnect": "split",
+	"swarm channel":                "exception",
 	"swarm serve":                  "exception",
 	"swarm run":                    "exception",
 	"swarm run start":              "split",
@@ -146,6 +150,9 @@ var cliOutputExpectedFactOwners = map[string]string{
 	"swarm agent deliveries": "/v1/rpc agent.delivery_lifecycle",
 	"swarm entity list":      "/v1/rpc entity.list",
 	"swarm entity view":      "/v1/rpc entity.get",
+	"swarm channel connect":  "/v1/rpc channel.connect|reconnect|rebind then channel.confirm",
+	"swarm channel list":     "/v1/rpc channel.list",
+	"swarm channel unbind":   "/v1/rpc channel.unbind",
 }
 
 var cliOutputSharedDisplayProofs = map[string][]string{
@@ -181,6 +188,7 @@ var cliOutputSharedDisplayProofs = map[string][]string{
 	"writeRuntimeLogListResult":              {"writeCLITable"},
 	"writeRuntimeIncidentListResult":         {"writeCLITable"},
 	"writeSecretsTable":                      {"writeCLITable"},
+	"writeChannelList":                       {"writeCLITable"},
 }
 
 func cliOutputConformanceRegistryRows(t *testing.T) map[string]cliOutputConformanceRegistryRow {

@@ -22,6 +22,7 @@ func TestCLIRuntimeStateAPIConsumersAreExplicitlyAccounted(t *testing.T) {
 		"agent_restart.go":   {},
 		"agents.go":          {},
 		"bundle.go":          {},
+		"channel_command.go": {},
 		"control_mailbox.go": {},
 		"control_nuke.go":    {},
 		"control_run.go":     {},

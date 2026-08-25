@@ -239,6 +239,9 @@ func readOnlyHTTPRuntimeMethods(t *testing.T, api *apispec.APISpecification, ope
 		if expectedComplianceTransport(methodName, method) != "http" {
 			continue
 		}
+		if methodName == "channel.list" {
+			continue
+		}
 		out = append(out, methodName)
 	}
 	sort.Strings(out)

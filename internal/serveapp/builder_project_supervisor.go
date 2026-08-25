@@ -147,6 +147,23 @@ func (s *runtimeProjectSupervisor) SetRuntimePublishedHook(hook func(context.Con
 	s.mu.Unlock()
 }
 
+func (s *runtimeProjectSupervisor) AddRuntimePublishedHook(hook func(context.Context) error) {
+	if s == nil || hook == nil {
+		return
+	}
+	s.mu.Lock()
+	previous := s.onRuntimePublished
+	s.onRuntimePublished = func(ctx context.Context) error {
+		if previous != nil {
+			if err := previous(ctx); err != nil {
+				return err
+			}
+		}
+		return hook(ctx)
+	}
+	s.mu.Unlock()
+}
+
 func (s *runtimeProjectSupervisor) SetStartupOwnershipHandoffBarrier(barrier func(context.Context) (func(), error)) {
 	if s == nil {
 		return

@@ -296,7 +296,7 @@ func (s *EventSQLiteOwner) finalizeInboundPublicationTx(ctx context.Context, tx 
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(MIN(ordinal), -1), COALESCE(MAX(ordinal), -1) FROM inbound_publication_events WHERE publication_id = ?`, request.PublicationID).Scan(&count, &minOrdinal, &maxOrdinal); err != nil {
 		return runtimeinbound.Record{}, fmt.Errorf("validate sqlite inbound publication child cardinality: %w", err)
 	}
-	if count != outputCount || minOrdinal != 0 || maxOrdinal != outputCount-1 {
+	if count != outputCount || !validInboundOrdinalRange(outputCount, minOrdinal, maxOrdinal) {
 		return runtimeinbound.Record{}, fmt.Errorf("sqlite inbound publication child ordinals are not contiguous: count=%d min=%d max=%d expected=%d", count, minOrdinal, maxOrdinal, outputCount)
 	}
 	now := time.Now().UTC()
@@ -336,7 +336,7 @@ func validateSQLiteInboundPublicationIntegrityTx(ctx context.Context, db inbound
 	`, record.PublicationID, record.PublicationID, record.PublicationID, record.MarkerEventID).Scan(&childCount, &minOrdinal, &maxOrdinal, &markerCount); err != nil {
 		return fmt.Errorf("validate sqlite inbound publication cardinality: %w", err)
 	}
-	if childCount != record.OutputCount || minOrdinal != 0 || maxOrdinal != record.OutputCount-1 || markerCount != 1 {
+	if childCount != record.OutputCount || !validInboundOrdinalRange(record.OutputCount, minOrdinal, maxOrdinal) || markerCount != 1 {
 		return fmt.Errorf("sqlite inbound publication %s is missing contiguous children or evidence", record.PublicationID)
 	}
 	marker, err := loadSQLiteInboundPublicationEvent(ctx, db, record.MarkerEventID)

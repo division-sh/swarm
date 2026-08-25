@@ -477,6 +477,14 @@ var cliHumanCodeRawOutputAllowances = map[string]cliHumanCodeRawOutputAllowance{
 		Names:  []string{"status"},
 		Reason: "bundle.delete mutation outcome is not a registered run/agent/delivery status family",
 	},
+	"channel_command.go\x00runChannelConnect": {
+		Names:  []string{"state"},
+		Reason: "operator-channel operation state is an exact taxonomy owned by the operator-channel lifecycle",
+	},
+	"channel_command.go\x00writeChannelList": {
+		Names:  []string{"state", "status"},
+		Reason: "operator-channel binding and proof status are exact taxonomies owned by the operator-channel lifecycle",
+	},
 	"connections.go\x00newConnectionsCallbackCommand": {
 		Names:  []string{"status"},
 		Reason: "managed-credential connection status is a separate command taxonomy",

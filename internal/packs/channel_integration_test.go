@@ -16,10 +16,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
@@ -371,6 +373,18 @@ func TestProductionCompilerAcceptsStructurallyDifferentTighterSatisfier(t *testi
 	plan, err := packs.CompileChannel(registry, channel, []packs.TriggerPackDescriptor{trigger}, []packs.ConnectorPackDescriptor{connector})
 	if err != nil {
 		t.Fatalf("CompileChannel(mock): %v", err)
+	}
+	authorization := runtimeprovideroutput.MustAuthorization(
+		"mock", "mock.text", trigger.Identity.ID(), trigger.Identity.Version(), trigger.Identity.ManifestHash(), trigger.Generation,
+	)
+	fact, matched, err := plan.ProjectTextFact("mock.text", authorization, map[string]any{
+		"text": "SWARM-AAAAAAAAAAAAAAAA", "principal": "operator-a", "room": "ops-room", "scope": "shared", "message_ref": "mock-delivery:12345678",
+	})
+	if err != nil || !matched {
+		t.Fatalf("ProjectTextFact(mock) = %#v matched=%v err=%v", fact, matched, err)
+	}
+	if fact.ExternalAccountRef != `{"principal":"operator-a"}` || fact.ConversationRef != `{"room":"ops-room"}` || fact.ConversationScope != operatorchannel.ConversationScopeShared {
+		t.Fatalf("mock operator-channel fact = %#v", fact)
 	}
 	wantMax := map[string]int{
 		"presentation.text": 128,
@@ -1393,17 +1407,17 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 		Events: map[string]packs.ChannelEventBinding{
 			"action": {Event: "mock.action", Fields: map[string]string{
 				"token": "event.token", "interaction_reference.cursor": "event.cursor", "external_account_reference.principal": "event.principal",
-				"conversation_reference.room": "event.room", "provider_message_reference": "event.message_ref",
+				"conversation_reference.room": "event.room", "conversation_scope": "event.scope", "provider_message_reference": "event.message_ref",
 			}},
 			"text": {Event: "mock.text", Fields: map[string]string{
-				"text": "event.text", "external_account_reference.principal": "event.principal", "conversation_reference.room": "event.room", "provider_message_reference": "event.message_ref",
+				"text": "event.text", "external_account_reference.principal": "event.principal", "conversation_reference.room": "event.room", "conversation_scope": "event.scope", "provider_message_reference": "event.message_ref",
 			}},
 		},
 	}
 	channel := packs.LoadedChannelPack{
 		Envelope: packs.Envelope{
 			ID: "provider.mock.hitl_channel", Type: packs.TypeChannel, Version: "0.1.0", ManifestHash: "sha256:" + strings.Repeat("a", 64),
-			Implements: []string{"swarm.hitl-channel/v1"}, Provenance: packs.Provenance{Source: "external"},
+			Implements: []string{"swarm.hitl-channel/v2"}, Provenance: packs.Provenance{Source: "external"},
 			Requires: packs.Requires{Packs: map[string]string{packs.TypeTrigger: "provider.mock", packs.TypeConnector: "provider.mock.connector"}},
 		},
 		Manifest: manifest, Source: packs.MustPackSource("external", "mock-channel"),
@@ -1419,6 +1433,8 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 				schema = mockStringSchema(1, 16, "")
 			case "principal", "room":
 				schema = mockStringSchema(1, 20, "")
+			case "scope":
+				schema = runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string"), runtimecontracts.ToolSchemaEnum("direct", "shared"))
 			case "message_ref":
 				schema = deliveryReference
 			case "text":
@@ -1434,8 +1450,8 @@ func mockChannelSatisfier() (packs.LoadedChannelPack, packs.TriggerPackDescripto
 		Identity: packs.MustPackIdentity("provider.mock", "0.1.0", "sha256:"+strings.Repeat("b", 64), packs.TypeTrigger, packs.MustPackSource("test", "mock-trigger")), Provider: "mock",
 		Generation: triggergeneration.FromCanonicalBytes([]byte("mock-trigger-generation")),
 		Events: map[string]packs.TriggerEvent{
-			"mock.action": {Name: "mock.action", Fields: triggerFields("token", "cursor", "principal", "room", "message_ref")},
-			"mock.text":   {Name: "mock.text", Fields: triggerFields("text", "principal", "room", "message_ref")},
+			"mock.action": {Name: "mock.action", Fields: triggerFields("token", "cursor", "principal", "room", "scope", "message_ref")},
+			"mock.text":   {Name: "mock.text", Fields: triggerFields("text", "principal", "room", "scope", "message_ref")},
 		},
 	}
 	connector := packs.ConnectorPackDescriptor{

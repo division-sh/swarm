@@ -163,6 +163,7 @@ with 'swarm run trace', 'swarm event list', and 'swarm mailbox'.`,
 		newEventCommand(opts),
 		newMailboxCommand(opts),
 		newAgentCommand(opts),
+		newChannelCommand(opts),
 		newForkChatCommand(opts),
 	)
 	addToGroup(commandGroupObserve,

@@ -66,7 +66,7 @@ func TestTelegramSelectedTextMessageContractUsesShippedPack(t *testing.T) {
 	}
 	wantPayload := map[string]any{
 		"external_account_reference": "12345", "conversation_reference": "-1001234567890",
-		"provider_message_reference": json.Number("7"), "text": "hello",
+		"conversation_scope": "direct", "provider_message_reference": json.Number("7"), "text": "hello",
 	}
 	if !reflect.DeepEqual(normalized.Payload, wantPayload) {
 		t.Fatalf("normalized payload = %#v, want %#v", normalized.Payload, wantPayload)
@@ -96,13 +96,136 @@ func TestTelegramSelectedCallbackActionContractUsesShippedPack(t *testing.T) {
 	}
 	want := map[string]any{
 		"token": "approve_1", "interaction_reference": "callback-1", "external_account_reference": "12345",
-		"conversation_reference": "67890", "provider_message_reference": json.Number("8"),
+		"conversation_reference": "67890", "conversation_scope": "direct", "provider_message_reference": json.Number("8"),
 	}
 	if !reflect.DeepEqual(delivery.Events[1].Payload, want) {
 		t.Fatalf("callback payload = %#v, want %#v", delivery.Events[1].Payload, want)
 	}
 	if delivery.Events[1].AuthorSummary != "" || delivery.Events[1].AuthorSubjectType != "chat" || delivery.Events[1].AuthorSubjectID != "67890" {
 		t.Fatalf("callback author projection = summary:%q subject:%q/%q", delivery.Events[1].AuthorSummary, delivery.Events[1].AuthorSubjectType, delivery.Events[1].AuthorSubjectID)
+	}
+}
+
+func TestTelegramSupportedConversationScopesUseExactV2Facts(t *testing.T) {
+	_, _, plan := telegramPlatformContract(t)
+	for _, tc := range []struct {
+		name  string
+		kind  string
+		scope string
+	}{
+		{name: "private", kind: "private", scope: "direct"},
+		{name: "group", kind: "group", scope: "shared"},
+		{name: "supergroup", kind: "supergroup", scope: "shared"},
+	} {
+		t.Run("text "+tc.name, func(t *testing.T) {
+			delivery, err := plan.Accept(telegramContractRequest(t, map[string]any{
+				"update_id": 300,
+				"message": map[string]any{
+					"message_id": 7, "from": map[string]any{"id": 12345},
+					"chat": map[string]any{"id": -1001234567890, "type": tc.kind}, "text": "hello",
+				},
+			}))
+			if err != nil {
+				t.Fatalf("Accept: %v", err)
+			}
+			assertTelegramNormalizedScope(t, delivery, "inbound.telegram.text_message", tc.scope)
+		})
+		t.Run("callback "+tc.name, func(t *testing.T) {
+			delivery, err := plan.Accept(telegramContractRequest(t, map[string]any{
+				"update_id": 301,
+				"callback_query": map[string]any{
+					"id": "callback-1", "data": "approve", "from": map[string]any{"id": 12345},
+					"message": map[string]any{"message_id": 8, "chat": map[string]any{"id": -1001234567890, "type": tc.kind}},
+				},
+			}))
+			if err != nil {
+				t.Fatalf("Accept: %v", err)
+			}
+			assertTelegramNormalizedScope(t, delivery, "inbound.telegram.callback_action", tc.scope)
+		})
+	}
+}
+
+func TestTelegramSharedSenderAuthenticityRemainsRawOnly(t *testing.T) {
+	_, _, plan := telegramPlatformContract(t)
+	for _, tc := range []struct {
+		name   string
+		kind   string
+		from   any
+		sender any
+	}{
+		{name: "group missing from", kind: "group"},
+		{name: "supergroup missing from", kind: "supergroup"},
+		{name: "group anonymous administrator", kind: "group", from: map[string]any{"id": 1087968824}, sender: map[string]any{"id": -100100, "type": "supergroup"}},
+		{name: "supergroup anonymous administrator", kind: "supergroup", from: map[string]any{"id": 1087968824}, sender: map[string]any{"id": -100101, "type": "supergroup"}},
+		{name: "group linked channel", kind: "group", from: map[string]any{"id": 777000}, sender: map[string]any{"id": -100200, "type": "channel", "title": "Ops", "username": "ops"}},
+		{name: "supergroup send as chat", kind: "supergroup", from: map[string]any{"id": 777000}, sender: map[string]any{"id": -100201, "type": "channel", "title": "Ops"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			message := map[string]any{
+				"message_id": 9, "chat": map[string]any{"id": -1001234567890, "type": tc.kind}, "text": "/start claim-code",
+			}
+			if tc.from != nil {
+				message["from"] = tc.from
+			}
+			if tc.sender != nil {
+				message["sender_chat"] = tc.sender
+			}
+			delivery, err := plan.Accept(telegramContractRequest(t, map[string]any{"update_id": 302, "message": message}))
+			if err != nil {
+				t.Fatalf("Accept: %v", err)
+			}
+			assertTelegramRawOnly(t, delivery)
+		})
+	}
+}
+
+func TestTelegramUnsupportedConversationKindsRemainRawOnly(t *testing.T) {
+	_, _, plan := telegramPlatformContract(t)
+	for _, kind := range []string{"channel", "forum", "private "} {
+		t.Run("text "+kind, func(t *testing.T) {
+			delivery, err := plan.Accept(telegramContractRequest(t, map[string]any{
+				"update_id": 303,
+				"message": map[string]any{
+					"message_id": 10, "from": map[string]any{"id": 12345},
+					"chat": map[string]any{"id": -1001234567890, "type": kind}, "text": "hello",
+				},
+			}))
+			if err != nil {
+				t.Fatalf("Accept: %v", err)
+			}
+			assertTelegramRawOnly(t, delivery)
+		})
+		t.Run("callback "+kind, func(t *testing.T) {
+			delivery, err := plan.Accept(telegramContractRequest(t, map[string]any{
+				"update_id": 304,
+				"callback_query": map[string]any{
+					"id": "callback-2", "data": "approve", "from": map[string]any{"id": 12345},
+					"message": map[string]any{"message_id": 11, "chat": map[string]any{"id": -1001234567890, "type": kind}},
+				},
+			}))
+			if err != nil {
+				t.Fatalf("Accept: %v", err)
+			}
+			assertTelegramRawOnly(t, delivery)
+		})
+	}
+}
+
+func assertTelegramNormalizedScope(t *testing.T, delivery Delivery, event, scope string) {
+	t.Helper()
+	if len(delivery.Events) != 2 || delivery.Events[0].Kind != OutputKindRaw || delivery.Events[1].Kind != OutputKindNormalized || string(delivery.Events[1].Name) != event {
+		t.Fatalf("events = %#v, want raw plus %s", delivery.Events, event)
+	}
+	if got := delivery.Events[1].Payload["conversation_scope"]; got != scope {
+		t.Fatalf("conversation_scope = %#v, want %q", got, scope)
+	}
+}
+
+func assertTelegramRawOnly(t *testing.T, delivery Delivery) {
+	t.Helper()
+	if len(delivery.Events) != 1 || delivery.Events[0].Kind != OutputKindRaw || delivery.Events[0].Name != "inbound.telegram" {
+		t.Fatalf("events = %#v, want raw only", delivery.Events)
 	}
 }
 
@@ -365,6 +488,7 @@ func telegramSelectedTriggerDescriptors() []packs.TriggerEventDescriptor {
 			Event: "inbound.telegram.callback_action", Kind: "normalized",
 			Fields: []packs.TriggerEventFieldDescriptor{
 				{Name: "conversation_reference", Type: "text", Required: true, CarryEligible: true},
+				{Name: "conversation_scope", Type: "text", Required: true, CarryEligible: true},
 				{Name: "external_account_reference", Type: "text", Required: true, CarryEligible: true},
 				{Name: "interaction_reference", Type: "text", Required: true, CarryEligible: true},
 				{Name: "provider_message_reference", Type: "integer", Required: true, CarryEligible: true},
@@ -375,6 +499,7 @@ func telegramSelectedTriggerDescriptors() []packs.TriggerEventDescriptor {
 			Event: "inbound.telegram.text_message", Kind: "normalized",
 			Fields: []packs.TriggerEventFieldDescriptor{
 				{Name: "conversation_reference", Type: "text", Required: true, CarryEligible: true},
+				{Name: "conversation_scope", Type: "text", Required: true, CarryEligible: true},
 				{Name: "external_account_reference", Type: "text", Required: true, CarryEligible: true},
 				{Name: "provider_message_reference", Type: "integer", Required: true, CarryEligible: true},
 				{Name: "text", Type: "text", Required: true, CarryEligible: true},

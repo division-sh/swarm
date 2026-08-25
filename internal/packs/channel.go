@@ -9,10 +9,12 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/manifesthash"
 	"github.com/division-sh/swarm/internal/runtime/core/packidentity"
+	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
@@ -675,6 +677,106 @@ type OutboundBindingPlan struct {
 
 func (p SatisfactionPlan) ChannelIdentity() PackIdentity {
 	return p.channel
+}
+
+func (p SatisfactionPlan) InterfaceIdentity() (operatorchannel.InterfaceIdentity, error) {
+	generation, err := p.Generation()
+	if err != nil {
+		return operatorchannel.InterfaceIdentity{}, err
+	}
+	identity := operatorchannel.InterfaceIdentity{
+		InterfaceRef: p.interfaceRef.String(), ChannelPackID: p.channel.ID(),
+		ChannelPackVersion: p.channel.Version(), ChannelManifestHash: p.channel.ManifestHash(),
+		SemanticGeneration: generation.Diagnostic(),
+	}.Normalized()
+	return identity, identity.Validate()
+}
+
+// ProjectTextFact is the sole provider-neutral projection from one current,
+// satisfier-authenticated normalized event into operator-channel identity.
+func (p SatisfactionPlan) ProjectTextFact(eventName string, authorization runtimeprovideroutput.Authorization, payload any) (operatorchannel.TextFact, bool, error) {
+	if p.interfaceRef.String() != operatorchannel.InterfaceHITLChannelV2 {
+		return operatorchannel.TextFact{}, false, nil
+	}
+	event, ok := p.events["text"]
+	if !ok || event.event.String() != strings.TrimSpace(eventName) {
+		return operatorchannel.TextFact{}, false, nil
+	}
+	if !authorization.Valid() || authorization.Provider() != p.provider.String() || authorization.Event() != event.event.String() ||
+		authorization.PackID() != p.trigger.ID() || authorization.PackVersion() != p.trigger.Version() ||
+		authorization.ManifestHash() != p.trigger.ManifestHash() || !authorization.Generation().Equal(p.triggerGeneration) {
+		return operatorchannel.TextFact{}, false, nil
+	}
+	object, ok := payload.(map[string]any)
+	if !ok {
+		return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q payload must be an object", eventName)
+	}
+	projected := make(map[string]any, len(event.fields))
+	for target, source := range event.fields {
+		fieldName := strings.TrimPrefix(source.String(), "event.")
+		if fieldName == source.String() || strings.Contains(fieldName, ".") {
+			return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event source %q is not a normalized field", source.String())
+		}
+		value, exists := object[fieldName]
+		if !exists {
+			return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q is missing required field %q", eventName, fieldName)
+		}
+		if schema, exists := event.fieldSchema[fieldName]; exists {
+			if err := schema.Validate(value); err != nil {
+				return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event field %q: %w", fieldName, err)
+			}
+		}
+		targetPath, err := compileChannelPath(target)
+		if err != nil {
+			return operatorchannel.TextFact{}, false, err
+		}
+		if err := targetPath.set(projected, value); err != nil {
+			return operatorchannel.TextFact{}, false, err
+		}
+	}
+	text, textOK := projected["text"].(string)
+	account, accountOK, err := operatorChannelOpaqueReference(projected["external_account_reference"])
+	if err != nil {
+		return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q external_account_reference: %w", eventName, err)
+	}
+	conversation, conversationOK, err := operatorChannelOpaqueReference(projected["conversation_reference"])
+	if err != nil {
+		return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q conversation_reference: %w", eventName, err)
+	}
+	scope, scopeOK := projected["conversation_scope"].(string)
+	if !textOK || !accountOK || !conversationOK || !scopeOK {
+		return operatorchannel.TextFact{}, false, fmt.Errorf("channel text event %q does not project admitted identity fields", eventName)
+	}
+	identity, err := p.InterfaceIdentity()
+	if err != nil {
+		return operatorchannel.TextFact{}, false, err
+	}
+	fact := operatorchannel.TextFact{
+		Interface: identity, ExternalAccountRef: account, ConversationRef: conversation,
+		ConversationScope: operatorchannel.ConversationScope(scope), Text: text,
+	}
+	if err := fact.Validate(); err != nil {
+		return operatorchannel.TextFact{}, false, err
+	}
+	return fact, true, nil
+}
+
+func operatorChannelOpaqueReference(value any) (string, bool, error) {
+	switch value := value.(type) {
+	case string:
+		if strings.TrimSpace(value) == "" {
+			return "", false, nil
+		}
+		return value, true, nil
+	case map[string]any:
+		encoded, err := canonicaljson.Bytes(value)
+		if err != nil {
+			return "", false, err
+		}
+		return string(encoded), true, nil
+	default:
+		return "", false, nil
+	}
 }
 
 func (p SatisfactionPlan) OperationNames() []string {

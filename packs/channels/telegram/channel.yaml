@@ -86,6 +86,7 @@ events:
       interaction_reference: event.interaction_reference
       external_account_reference: event.external_account_reference
       conversation_reference: event.conversation_reference
+      conversation_scope: event.conversation_scope
       provider_message_reference.id: event.provider_message_reference
   text:
     event: inbound.telegram.text_message
@@ -93,4 +94,5 @@ events:
       text: event.text
       external_account_reference: event.external_account_reference
       conversation_reference: event.conversation_reference
+      conversation_scope: event.conversation_scope
       provider_message_reference.id: event.provider_message_reference

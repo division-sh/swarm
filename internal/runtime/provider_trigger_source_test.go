@@ -26,7 +26,7 @@ func TestSourceWithProviderTriggerEventsImportsEffectivePackSchemasWithoutAuthor
 		t.Fatal("pack event was misclassified as authored")
 	}
 	resolved, name, ok := wrapped.ResolveFlowEventCatalogEntry("coordinator", "inbound.telegram.text_message")
-	wantFields := []string{"conversation_reference", "external_account_reference", "provider_message_reference", "text"}
+	wantFields := []string{"conversation_reference", "conversation_scope", "external_account_reference", "provider_message_reference", "text"}
 	if !ok || name != "inbound.telegram.text_message" || len(resolved.Payload.Properties) != len(wantFields) {
 		t.Fatalf("flow catalog resolution = (%#v, %q, %v)", resolved, name, ok)
 	}

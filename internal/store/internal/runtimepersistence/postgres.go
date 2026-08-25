@@ -20,6 +20,7 @@ import (
 	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	storellm "github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
 	storemanagedcapability "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
+	storeoperatorchannel "github.com/division-sh/swarm/internal/store/internal/backend/operatorchannel"
 	storepipeline "github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	storereplycontext "github.com/division-sh/swarm/internal/store/internal/backend/replycontext"
@@ -74,6 +75,7 @@ type PostgresStore struct {
 	startupPostgresOwner           *storestartupownership.StartupPostgresOwner
 	timerObligationPostgresReader  *storetimerobligation.PostgresReader
 	genericSchedulePostgresOwner   *storegenericschedule.PostgresOwner
+	operatorChannelPostgresOwner   *storeoperatorchannel.PostgresOwner
 
 	backend               *postgresbackend.Backend
 	runBundles            *storerunbundle.Postgres

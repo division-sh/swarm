@@ -25,6 +25,7 @@ import (
 	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	storellm "github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
 	storemanagedcapability "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
+	storeoperatorchannel "github.com/division-sh/swarm/internal/store/internal/backend/operatorchannel"
 	storepipeline "github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	storereplycontext "github.com/division-sh/swarm/internal/store/internal/backend/replycontext"
 	storerunfork "github.com/division-sh/swarm/internal/store/internal/backend/runforkpersistence"
@@ -76,6 +77,7 @@ type SQLiteRuntimeStore struct {
 	runLifecycleSQLiteOwner      *storerunlifecycle.RunLifecycleSQLiteOwner
 	timerObligationSQLiteReader  *storetimerobligation.SQLiteReader
 	genericScheduleSQLiteOwner   *storegenericschedule.SQLiteOwner
+	operatorChannelSQLiteOwner   *storeoperatorchannel.SQLiteOwner
 
 	schema                *SQLiteSchemaStore
 	backend               *sqlitebackend.Backend

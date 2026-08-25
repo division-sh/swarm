@@ -55,6 +55,13 @@ const (
 	RuntimeNotPausedCode                   = "RUNTIME_NOT_PAUSED"
 	RuntimeNukeInProgressCode              = "RUNTIME_NUKE_IN_PROGRESS"
 	StandingServiceNotFoundCode            = "STANDING_SERVICE_NOT_FOUND"
+	ChannelInterfaceNotFoundCode           = "CHANNEL_INTERFACE_NOT_FOUND"
+	ChannelInterfaceAmbiguousCode          = "CHANNEL_INTERFACE_AMBIGUOUS"
+	ChannelBindingConflictCode             = "CHANNEL_BINDING_CONFLICT"
+	ChannelRevisionConflictCode            = "CHANNEL_REVISION_CONFLICT"
+	ChannelOperationNotFoundCode           = "CHANNEL_OPERATION_NOT_FOUND"
+	ChannelOperationTerminalCode           = "CHANNEL_OPERATION_TERMINAL"
+	ChannelProofUnavailableCode            = "CHANNEL_PROOF_UNAVAILABLE"
 )
 
 type Registry struct {

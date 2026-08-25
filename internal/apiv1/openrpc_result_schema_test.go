@@ -169,6 +169,15 @@ func approvedResultSchemaRuntimeMethods() []string {
 	out := append([]string{}, approvedReadOnlyHTTPRuntimeMethods()...)
 	out = append(out, approvedMutatingHTTPRuntimeMethods()...)
 	out = append(out, approvedWebSocketRuntimeMethods()...)
+	out = append(out,
+		"channel.connect",
+		"channel.reconnect",
+		"channel.rebind",
+		"channel.confirm",
+		"channel.unbind",
+		"channel.proof_revoke",
+		"channel.list",
+	)
 	sort.Strings(out)
 	return out
 }
@@ -294,6 +303,8 @@ func assertNotificationSchemaMatrixProofRefs(t *testing.T, matrix openRPCComplia
 func successfulRuntimeResult(t *testing.T, methodName string) any {
 	t.Helper()
 	switch {
+	case strings.HasPrefix(methodName, "channel."):
+		return successfulOperatorChannelRuntimeResult(methodName)
 	case containsString(approvedReadOnlyHTTPRuntimeMethods(), methodName):
 		fixture := readOnlyHTTPRuntimeFixtures()[methodName]
 		handler, calls := newReadOnlyRuntimeProbeHandler(t, readOnlyRuntimeProbeOptions(t))
@@ -320,6 +331,47 @@ func successfulRuntimeResult(t *testing.T, methodName string) any {
 		t.Fatalf("%s has no successful runtime result producer", methodName)
 		return nil
 	}
+}
+
+func successfulOperatorChannelRuntimeResult(methodName string) any {
+	identity := map[string]any{
+		"interface_ref": "swarm.hitl-channel/v2", "channel_pack_id": "provider.telegram.hitl_channel",
+		"channel_pack_version": "1.0.0", "channel_manifest_hash": "sha256:operator-channel-schema-probe",
+		"semantic_generation": "operator-channel-schema-probe", "selector": "provider.telegram.hitl_channel@schema-probe",
+	}
+	if methodName == "channel.list" {
+		return map[string]any{"principal_id": "00000000-0000-0000-0000-000000000801", "channels": []any{}}
+	}
+	if methodName == "channel.proof_revoke" {
+		return map[string]any{"proof": map[string]any{
+			"format": "swarm-verified-account-proof-v1", "proof_id": "00000000-0000-0000-0000-000000000802",
+			"revision": 2, "status": "revoked", "interface": identity,
+			"external_account_reference": "account", "conversation_reference": "conversation", "conversation_scope": "direct",
+			"method": "connect", "challenge": "SWARM-AAAAAAAAAAAAAAAA",
+			"original_operation_id": "00000000-0000-0000-0000-000000000803",
+			"minting_store_id":      "00000000-0000-0000-0000-000000000804",
+			"minting_deployment_id": "00000000-0000-0000-0000-000000000805",
+			"verified_at":           "2026-08-24T12:00:00Z", "operator_confirmed": true,
+			"consent_scopes": []any{"notify", "decide"},
+		}}
+	}
+	kind, state := strings.TrimPrefix(methodName, "channel."), "awaiting_claim"
+	if kind == "confirm" {
+		kind, state = "connect", "bound"
+	}
+	if kind == "unbind" {
+		state = "unbound"
+	}
+	operation := map[string]any{
+		"operation_id": "00000000-0000-0000-0000-000000000806", "kind": kind,
+		"principal_id": "00000000-0000-0000-0000-000000000801", "interface": identity,
+		"state": state, "revision": 1, "save_proof": false, "proof_status": "skipped",
+		"requested_at": "2026-08-24T12:00:00Z",
+	}
+	if state == "awaiting_claim" {
+		operation["challenge"] = "SWARM-AAAAAAAAAAAAAAAA"
+	}
+	return map[string]any{"operation": operation}
 }
 
 func successfulWebSocketRuntimeResult(t *testing.T, methodName string) any {
@@ -754,6 +806,40 @@ func (v openRPCResultSchemaValidator) validateArray(path string, schema map[stri
 	if !ok {
 		return fmt.Errorf("%s must be array, got %T", path, value)
 	}
+	if raw, present := schema["minItems"]; present {
+		minimum, ok := schemaNumber(raw)
+		if !ok || minimum < 0 || minimum != float64(int(minimum)) {
+			return fmt.Errorf("%s.minItems must be a non-negative integer", path)
+		}
+		if len(items) < int(minimum) {
+			return fmt.Errorf("%s must contain at least %d items", path, int(minimum))
+		}
+	}
+	if raw, present := schema["maxItems"]; present {
+		maximum, ok := schemaNumber(raw)
+		if !ok || maximum < 0 || maximum != float64(int(maximum)) {
+			return fmt.Errorf("%s.maxItems must be a non-negative integer", path)
+		}
+		if len(items) > int(maximum) {
+			return fmt.Errorf("%s must contain at most %d items", path, int(maximum))
+		}
+	}
+	if unique, present := schema["uniqueItems"]; present {
+		required, ok := unique.(bool)
+		if !ok {
+			return fmt.Errorf("%s.uniqueItems must be boolean", path)
+		}
+		if required {
+			seen := map[string]struct{}{}
+			for _, item := range items {
+				key := compactJSON(item)
+				if _, duplicate := seen[key]; duplicate {
+					return fmt.Errorf("%s items must be unique", path)
+				}
+				seen[key] = struct{}{}
+			}
+		}
+	}
 	itemSchema, hasItems := schema["items"]
 	if !hasItems {
 		return nil
@@ -827,6 +913,9 @@ func validateOpenRPCSchemaKeys(path string, schema map[string]any) error {
 		"properties",
 		"required",
 		"type",
+		"minItems",
+		"maxItems",
+		"uniqueItems",
 	})
 	for key := range schema {
 		if _, ok := allowed[key]; !ok {
@@ -871,6 +960,13 @@ func schemaTypeForValidation(path string, schema map[string]any) (string, error)
 func validateOpenRPCSchemaKeywordPlacement(path string, schema map[string]any, schemaType string) error {
 	if schema["items"] != nil && schemaType != "array" {
 		return fmt.Errorf("%s.items is only supported on array schemas", path)
+	}
+	if schemaType != "array" {
+		for _, key := range []string{"minItems", "maxItems", "uniqueItems"} {
+			if schema[key] != nil {
+				return fmt.Errorf("%s.%s is only supported on array schemas", path, key)
+			}
+		}
 	}
 	if schemaType != "object" {
 		for _, key := range []string{"properties", "required", "additionalProperties"} {
