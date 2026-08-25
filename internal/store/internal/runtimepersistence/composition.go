@@ -17,6 +17,7 @@ import (
 	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	storellm "github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
 	storemanagedcapability "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
+	storeoperatorchannel "github.com/division-sh/swarm/internal/store/internal/backend/operatorchannel"
 	storepipeline "github.com/division-sh/swarm/internal/store/internal/backend/pipelinepersistence"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
 	storereplycontext "github.com/division-sh/swarm/internal/store/internal/backend/replycontext"
@@ -86,6 +87,11 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.postgresOwner = apiIdempotency
+	operatorChannels, err := storeoperatorchannel.NewPostgres(backend, store.requireCurrentSchema)
+	if err != nil {
+		return nil, err
+	}
+	store.operatorChannelPostgresOwner = operatorChannels
 	bundleCatalog, err := storebundlecatalog.NewPostgres(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
@@ -212,6 +218,9 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err := eventOwner.BindPipeline(pipelineOwner); err != nil {
 		return nil, err
 	}
+	if err := eventOwner.BindOperatorChannelClaims(operatorChannels); err != nil {
+		return nil, err
+	}
 	if err := runLifecycle.BindDelivery(deliveryOwner); err != nil {
 		return nil, err
 	}
@@ -329,6 +338,11 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.sQLiteOwner = apiIdempotency
+	operatorChannels, err := storeoperatorchannel.NewSQLite(backend, store.requireCurrentSchema)
+	if err != nil {
+		return nil, err
+	}
+	store.operatorChannelSQLiteOwner = operatorChannels
 	bundleCatalog, err := storebundlecatalog.NewSQLite(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
@@ -443,6 +457,9 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	if err := eventOwner.BindPipeline(pipelineOwner); err != nil {
+		return nil, err
+	}
+	if err := eventOwner.BindOperatorChannelClaims(operatorChannels); err != nil {
 		return nil, err
 	}
 	if err := runLifecycle.BindDelivery(deliveryOwner); err != nil {

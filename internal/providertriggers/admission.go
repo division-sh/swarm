@@ -358,6 +358,15 @@ func (p InboundAdmissionPlan) Outputs() []OutputManifest {
 		output.Fields = fields
 		output.When.Exists = append([]string{}, output.When.Exists...)
 		output.When.Absent = append([]string{}, output.When.Absent...)
+		output.When.Equals = cloneTextMap(output.When.Equals)
+		oneOf := output.When.OneOf
+		output.When.OneOf = nil
+		if len(oneOf) != 0 {
+			output.When.OneOf = make(map[string][]string, len(oneOf))
+			for path, values := range oneOf {
+				output.When.OneOf[path] = append([]string(nil), values...)
+			}
+		}
 		out = append(out, output)
 	}
 	return out

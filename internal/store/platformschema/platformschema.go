@@ -191,6 +191,14 @@ func platformTableOrder(name string) int {
 		return 12
 	case "run_fork_fact_revisions":
 		return 13
+	case "operator_principals":
+		return 1
+	case "operator_channel_operations":
+		return 2
+	case "operator_channel_bindings":
+		return 3
+	case "operator_channel_claim_receipts":
+		return 4
 	case "agent_topology_source_set_head":
 		return 13
 	case "agent_topology_source_set_operations":

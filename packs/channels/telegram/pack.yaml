@@ -2,8 +2,8 @@ id: provider.telegram.hitl_channel
 version: 0.1.0
 platform_version: '>=0.7.0 <0.8.0'
 type: channel
-implements: [swarm.hitl-channel/v1]
-manifest_hash: sha256:5128843e8da8f1cf036cc3270360ad5e1591ffa74bba48d9d61c1f53c4c6206f
+implements: [swarm.hitl-channel/v2]
+manifest_hash: sha256:42266a0d2e1cc4b46fbf513360429939db3e3752b773a4ea1db690537ec398dc
 provenance:
   source: platform
 capabilities:

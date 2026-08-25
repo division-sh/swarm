@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
@@ -33,6 +34,14 @@ type selectedForkLineageOwner interface {
 	InsertSelectedForkExecutionLineageTx(context.Context, *sql.Tx, runtimerunfork.RunForkSelectedContractExecutionLineage) error
 }
 
+type operatorChannelClaimPostgresOwner interface {
+	SettleInboundClaimTx(context.Context, *sql.Tx, operatorchannel.InboundClaim, time.Time) (operatorchannel.ClaimSettlement, error)
+}
+
+type operatorChannelClaimSQLiteOwner interface {
+	SettleInboundClaimTx(context.Context, *sql.Tx, operatorchannel.InboundClaim, time.Time) (operatorchannel.ClaimSettlement, error)
+}
+
 type EventPostgresOwner struct {
 	*storeactivityjournal.ActivityPostgresOwner
 	*storerunlifecycle.RunLifecyclePostgresOwner
@@ -40,12 +49,13 @@ type EventPostgresOwner struct {
 	*storepipeline.PipelinePostgresOwner
 	*storereplycontext.ReplyPostgresOwner
 
-	backend        *postgresbackend.Backend
-	requireCurrent func() error
-	validatorMu    sync.RWMutex
-	validator      func(context.Context, string, []byte) error
-	runFork        selectedForkLineageOwner
-	apiIdempotency *storeapiidempotency.PostgresOwner
+	backend               *postgresbackend.Backend
+	requireCurrent        func() error
+	validatorMu           sync.RWMutex
+	validator             func(context.Context, string, []byte) error
+	runFork               selectedForkLineageOwner
+	apiIdempotency        *storeapiidempotency.PostgresOwner
+	operatorChannelClaims operatorChannelClaimPostgresOwner
 }
 
 type EventSQLiteOwner struct {
@@ -55,13 +65,14 @@ type EventSQLiteOwner struct {
 	*storepipeline.PipelineSQLiteOwner
 	*storereplycontext.ReplySQLiteOwner
 
-	backend        *sqlitebackend.Backend
-	requireCurrent func() error
-	nowFn          func() time.Time
-	validatorMu    sync.RWMutex
-	validator      func(context.Context, string, []byte) error
-	runFork        selectedForkLineageOwner
-	apiIdempotency *storeapiidempotency.SQLiteOwner
+	backend               *sqlitebackend.Backend
+	requireCurrent        func() error
+	nowFn                 func() time.Time
+	validatorMu           sync.RWMutex
+	validator             func(context.Context, string, []byte) error
+	runFork               selectedForkLineageOwner
+	apiIdempotency        *storeapiidempotency.SQLiteOwner
+	operatorChannelClaims operatorChannelClaimSQLiteOwner
 }
 
 func NewPostgres(backend *postgresbackend.Backend, requireCurrent func() error, activity *storeactivityjournal.ActivityPostgresOwner, lifecycle *storerunlifecycle.RunLifecyclePostgresOwner, delivery *storedelivery.DeliveryPostgresOwner, reply *storereplycontext.ReplyPostgresOwner, apiIdempotency *storeapiidempotency.PostgresOwner) (*EventPostgresOwner, error) {
@@ -100,6 +111,22 @@ func (s *EventSQLiteOwner) BindPipeline(owner *storepipeline.PipelineSQLiteOwner
 		return errors.New("event SQLite pipeline owner is already bound")
 	}
 	s.PipelineSQLiteOwner = owner
+	return nil
+}
+
+func (s *EventPostgresOwner) BindOperatorChannelClaims(owner operatorChannelClaimPostgresOwner) error {
+	if s == nil || owner == nil || s.operatorChannelClaims != nil {
+		return errors.New("event PostgreSQL operator channel claim owner must be bound exactly once")
+	}
+	s.operatorChannelClaims = owner
+	return nil
+}
+
+func (s *EventSQLiteOwner) BindOperatorChannelClaims(owner operatorChannelClaimSQLiteOwner) error {
+	if s == nil || owner == nil || s.operatorChannelClaims != nil {
+		return errors.New("event SQLite operator channel claim owner must be bound exactly once")
+	}
+	s.operatorChannelClaims = owner
 	return nil
 }
 

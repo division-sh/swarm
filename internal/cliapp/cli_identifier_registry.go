@@ -8,21 +8,22 @@ import (
 type cliIdentifierFamily string
 
 const (
-	cliIdentifierFamilyNone         cliIdentifierFamily = "none"
-	cliIdentifierFamilyAgent        cliIdentifierFamily = "agent"
-	cliIdentifierFamilyBundle       cliIdentifierFamily = "bundle"
-	cliIdentifierFamilyRun          cliIdentifierFamily = "run"
-	cliIdentifierFamilyEntity       cliIdentifierFamily = "entity"
-	cliIdentifierFamilyEvent        cliIdentifierFamily = "event"
-	cliIdentifierFamilySession      cliIdentifierFamily = "session"
-	cliIdentifierFamilyTurn         cliIdentifierFamily = "turn"
-	cliIdentifierFamilyFork         cliIdentifierFamily = "fork"
-	cliIdentifierFamilyMailbox      cliIdentifierFamily = "mailbox"
-	cliIdentifierFamilyFlowInstance cliIdentifierFamily = "flow_instance"
-	cliIdentifierFamilyContext      cliIdentifierFamily = "context"
-	cliIdentifierFamilySubscriber   cliIdentifierFamily = "subscriber"
-	cliIdentifierFamilyStanding     cliIdentifierFamily = "standing_service"
-	cliIdentifierFamilyPack         cliIdentifierFamily = "pack"
+	cliIdentifierFamilyNone            cliIdentifierFamily = "none"
+	cliIdentifierFamilyAgent           cliIdentifierFamily = "agent"
+	cliIdentifierFamilyBundle          cliIdentifierFamily = "bundle"
+	cliIdentifierFamilyRun             cliIdentifierFamily = "run"
+	cliIdentifierFamilyEntity          cliIdentifierFamily = "entity"
+	cliIdentifierFamilyEvent           cliIdentifierFamily = "event"
+	cliIdentifierFamilySession         cliIdentifierFamily = "session"
+	cliIdentifierFamilyTurn            cliIdentifierFamily = "turn"
+	cliIdentifierFamilyFork            cliIdentifierFamily = "fork"
+	cliIdentifierFamilyMailbox         cliIdentifierFamily = "mailbox"
+	cliIdentifierFamilyFlowInstance    cliIdentifierFamily = "flow_instance"
+	cliIdentifierFamilyContext         cliIdentifierFamily = "context"
+	cliIdentifierFamilySubscriber      cliIdentifierFamily = "subscriber"
+	cliIdentifierFamilyStanding        cliIdentifierFamily = "standing_service"
+	cliIdentifierFamilyPack            cliIdentifierFamily = "pack"
+	cliIdentifierFamilyOperatorChannel cliIdentifierFamily = "operator_channel"
 )
 
 type cliIdentifierInputMode string
@@ -60,6 +61,7 @@ const (
 	cliIdentifierSourceLocalContext cliIdentifierCandidateSource = "local_context_registry"
 	cliIdentifierSourcePolymorphic  cliIdentifierCandidateSource = "polymorphic_subscriber_identity"
 	cliIdentifierSourceLocalPacks   cliIdentifierCandidateSource = "local_effective_pack_inventory"
+	cliIdentifierSourceChannelList  cliIdentifierCandidateSource = "/v1/rpc channel.list"
 )
 
 type cliIdentifierScopeMode string
@@ -233,6 +235,15 @@ var cliIdentifierFamilyRegistry = map[cliIdentifierFamily]cliIdentifierFamilyPol
 		NormalizationRule: "trim only; case-sensitive",
 		DisplayProjection: cliIdentifierDisplayFull,
 	},
+	cliIdentifierFamilyOperatorChannel: {
+		Family:            cliIdentifierFamilyOperatorChannel,
+		CandidateSource:   cliIdentifierSourceChannelList,
+		ScopeMode:         cliIdentifierScopeBoundedCatalog,
+		ScopeRule:         "active exact pack-qualified operator channel interfaces",
+		NormalizationMode: cliIdentifierNormalizeCaseSensitive,
+		NormalizationRule: "trim only; exact selector required",
+		DisplayProjection: cliIdentifierDisplayFull,
+	},
 }
 
 // This is the living public-input ledger. A row describes input semantics, not
@@ -333,6 +344,8 @@ var cliIdentifierInputRegistry = []cliIdentifierInputRegistration{
 	{Command: "swarm standing reset", Selector: "arg:service-id", Family: cliIdentifierFamilyStanding, Mode: cliIdentifierModeFullOnly, Safety: cliIdentifierSafetyMutating},
 	{Command: "swarm import", Selector: "arg:pack-id", Family: cliIdentifierFamilyPack, Mode: cliIdentifierModeFullOnly, Safety: cliIdentifierSafetyMutating},
 	{Command: "swarm packs show", Selector: "arg:pack-id", Family: cliIdentifierFamilyPack, Mode: cliIdentifierModeFullOnly},
+	{Command: "swarm channel connect", Selector: "arg:interface", Family: cliIdentifierFamilyOperatorChannel, Mode: cliIdentifierModeFullOnly, Safety: cliIdentifierSafetyMutating},
+	{Command: "swarm channel unbind", Selector: "arg:interface", Family: cliIdentifierFamilyOperatorChannel, Mode: cliIdentifierModeFullOnly, Safety: cliIdentifierSafetyMutating},
 
 	{Command: "swarm <mutating>", Selector: "flag:idempotency-key", Family: cliIdentifierFamilyNone, Mode: cliIdentifierModeDifferent, ScopeRule: "caller-authored retry key"},
 	{Command: "swarm connections <key>", Selector: "arg:key", Family: cliIdentifierFamilyNone, Mode: cliIdentifierModeDifferent, ScopeRule: "authored stable connection key"},
@@ -391,6 +404,8 @@ func expectedCLIIdentifierFamilyPolicyModes(family cliIdentifierFamily) (cliIden
 		return cliIdentifierSourceUnpromoted, cliIdentifierScopeUnpromoted, cliIdentifierNormalizeCaseSensitive, true
 	case cliIdentifierFamilyPack:
 		return cliIdentifierSourceLocalPacks, cliIdentifierScopeLocalBounded, cliIdentifierNormalizeCaseSensitive, true
+	case cliIdentifierFamilyOperatorChannel:
+		return cliIdentifierSourceChannelList, cliIdentifierScopeBoundedCatalog, cliIdentifierNormalizeCaseSensitive, true
 	default:
 		return "", "", "", false
 	}

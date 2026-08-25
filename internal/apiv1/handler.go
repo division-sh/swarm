@@ -62,34 +62,37 @@ func (r AuthTokenResolution) UsesDefaultLoopbackToken() bool {
 }
 
 type Handler struct {
-	registry  *Registry
-	tokens    map[string]struct{}
-	handlers  map[string]MethodHandler
-	upgrader  websocket.Upgrader
-	subs      *SubscriptionRuntime
-	workOwner *worklifetime.Process
+	registry            *Registry
+	tokens              map[string]struct{}
+	operatorPrincipalID string
+	handlers            map[string]MethodHandler
+	upgrader            websocket.Upgrader
+	subs                *SubscriptionRuntime
+	workOwner           *worklifetime.Process
 }
 
 type MethodHandler func(context.Context, Request) (any, error)
 
 type Options struct {
-	PlatformSpecPath string
-	Registry         *Registry
-	AuthTokens       []string
-	Handlers         map[string]MethodHandler
-	Subscriptions    *SubscriptionRuntime
-	ProcessWorkOwner *worklifetime.Process
+	PlatformSpecPath    string
+	Registry            *Registry
+	AuthTokens          []string
+	Handlers            map[string]MethodHandler
+	Subscriptions       *SubscriptionRuntime
+	ProcessWorkOwner    *worklifetime.Process
+	OperatorPrincipalID string
 }
 
 type Request struct {
-	ID             any
-	Method         string
-	Params         map[string]any
-	SemanticParams semanticvalue.Value
-	CorrelationID  string
-	Transport      string
-	ActorTokenID   string
-	RequestHash    string
+	ID                  any
+	Method              string
+	Params              map[string]any
+	SemanticParams      semanticvalue.Value
+	CorrelationID       string
+	Transport           string
+	ActorTokenID        string
+	OperatorPrincipalID string
+	RequestHash         string
 }
 
 type rpcRequest struct {
@@ -130,6 +133,12 @@ type applicationErrorData struct {
 }
 
 func NewHandler(opts Options) (*Handler, error) {
+	operatorPrincipalID := strings.TrimSpace(opts.OperatorPrincipalID)
+	if operatorPrincipalID != "" {
+		if _, err := uuid.Parse(operatorPrincipalID); err != nil {
+			return nil, fmt.Errorf("operator principal id must be a UUID: %w", err)
+		}
+	}
 	registry := opts.Registry
 	if registry == nil {
 		var err error
@@ -157,12 +166,13 @@ func NewHandler(opts Options) (*Handler, error) {
 		handlers[clean] = handler
 	}
 	handler := &Handler{
-		registry:  registry,
-		tokens:    tokenSet(opts.AuthTokens),
-		handlers:  handlers,
-		upgrader:  websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }},
-		subs:      opts.Subscriptions.withDefaults(),
-		workOwner: opts.ProcessWorkOwner,
+		registry:            registry,
+		tokens:              tokenSet(opts.AuthTokens),
+		operatorPrincipalID: operatorPrincipalID,
+		handlers:            handlers,
+		upgrader:            websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }},
+		subs:                opts.Subscriptions.withDefaults(),
+		workOwner:           opts.ProcessWorkOwner,
 	}
 	if handler.subs != nil {
 		handler.subs.workOwner = opts.ProcessWorkOwner
@@ -241,6 +251,7 @@ func (h *Handler) prepareRequest(raw []byte, transport, fallbackCorrelationID, a
 	}
 	req.Transport = transport
 	req.ActorTokenID = strings.TrimSpace(actorTokenID)
+	req.OperatorPrincipalID = h.operatorPrincipalID
 	req.RequestHash = requestBodyHash(req.Method, req.SemanticParams)
 	if method, ok := h.registry.Method(req.Method); ok {
 		if rpcErr := h.admitMethodTransport(req.Method, method, transport, correlationID); rpcErr != nil {

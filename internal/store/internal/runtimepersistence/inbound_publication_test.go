@@ -14,6 +14,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -252,6 +253,191 @@ func runInboundPublicationOperationProof(t *testing.T, db *sql.DB, sqlite bool, 
 	runInboundPublicationRawOnlyProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
 	runInboundPublicationOrdinalRollbackProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
 	runInboundPublicationCorruptionProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
+	runInboundPublicationOperatorChannelClaimProof(t, ctx, db, sqlite, store, candidate, standing.RunID, standing.Generation, sequence)
+}
+
+func runInboundPublicationOperatorChannelClaimProof(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, store inboundPublicationProofStore, candidate runtimepipeline.StandingServiceCandidate, runID string, generation, sequence int64) {
+	t.Helper()
+	channelStore, ok := any(store).(operatorchannel.Store)
+	if !ok {
+		t.Fatalf("inbound publication store %T lacks operator-channel owner", store)
+	}
+	now := time.Date(2026, 8, 24, 16, 0, 0, 0, time.UTC)
+	principal, err := channelStore.EnsureOperatorPrincipal(ctx, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := operatorChannelContractIdentity("inbound-atomic-generation")
+	begin := func(key string) operatorchannel.Operation {
+		op, err := channelStore.BeginChannelBinding(ctx, operatorchannel.BeginRequest{
+			OperationID: uuid.NewString(), Kind: operatorchannel.OperationConnect, PrincipalID: principal.ID,
+			Interface: identity, ExpectedRevision: 0, RequestKeyHash: key, RequestHash: key + "-body",
+			RequestedAt: now, ExpiresAt: now.Add(operatorchannel.DefaultChallengeTTL),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return op
+	}
+	command := func(op operatorchannel.Operation, providerEventID string) runtimeinbound.CommitCommand {
+		request := inboundPublicationProofRequest(t, candidate, runID, generation, sequence, providerEventID)
+		request.OriginalReceivedAt = now.Add(time.Minute)
+		claim := operatorChannelContractClaim(op, operatorchannel.ConversationScopeShared, "account-atomic", "conversation-atomic", request.PublicationID)
+		claim.Provider = request.Provider
+		claim.ProviderEventID = request.ProviderEventID
+		claim.PublicationID = request.PublicationID
+		projection, _ := runtimeauthoractivity.InboundProjectionFromContext(ctx)
+		return runtimeinbound.CommitCommand{
+			Request: request, Finalization: runtimeinbound.Finalization{EvidenceEvent: inboundPublicationZeroOutputEvidence(t, request)},
+			AuthorProjection: projection, OperatorChannelClaim: &claim,
+		}
+	}
+	for _, fault := range []struct {
+		name      string
+		table     string
+		operation string
+	}{
+		{name: "operation update", table: "operator_channel_operations", operation: "UPDATE"},
+		{name: "claim receipt insert", table: "operator_channel_claim_receipts", operation: "INSERT"},
+	} {
+		t.Run("rollback after "+fault.name, func(t *testing.T) {
+			faultOp := begin("atomic-claim-fault-" + strings.ReplaceAll(fault.name, " ", "-"))
+			faultCommand := command(faultOp, "operator-channel-fault-"+strings.ReplaceAll(fault.name, " ", "-"))
+			drop := installOperatorChannelClaimFailureTrigger(t, db, sqlite, fault.table, fault.operation)
+			if _, err := store.CommitInboundPublication(ctx, faultCommand); err == nil {
+				drop()
+				t.Fatalf("%s fault unexpectedly committed", fault.name)
+			}
+			drop()
+			assertOperatorChannelOperationAwaitingClaim(t, ctx, channelStore, principal.ID, faultOp.OperationID)
+			result, err := store.CommitInboundPublication(ctx, faultCommand)
+			if err != nil || !result.Record.Created || result.OperatorChannelClaim == nil || result.OperatorChannelClaim.Disposition != operatorchannel.DispositionConsumedBinding {
+				t.Fatalf("%s recovery result = %#v, %v", fault.name, result, err)
+			}
+		})
+	}
+
+	op := begin("atomic-claim-success")
+	accepted := command(op, "operator-channel-claim-success")
+	result, err := store.CommitInboundPublication(ctx, accepted)
+	if err != nil {
+		t.Fatalf("commit zero-event operator claim: %v", err)
+	}
+	if !result.Record.Created || result.Record.OutputCount != 0 || len(result.Record.Events) != 0 || len(result.Publications) != 0 || result.OperatorChannelClaim == nil || result.OperatorChannelClaim.Disposition != operatorchannel.DispositionConsumedBinding {
+		t.Fatalf("zero-event operator claim result = %#v", result)
+	}
+	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM inbound_publication_events WHERE publication_id = `, accepted.Request.PublicationID, 0)
+	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM events WHERE event_id = `, accepted.Request.MarkerEventID, 1)
+
+	replayed, err := store.CommitInboundPublication(ctx, accepted)
+	if err != nil || replayed.Record.Created || replayed.Record.OutputCount != 0 || replayed.OperatorChannelClaim != nil {
+		t.Fatalf("zero-event operator claim replay = %#v, %v", replayed, err)
+	}
+	changed := accepted
+	changed.Request.RequestFingerprint = strings.Repeat("e", 64)
+	if _, err := store.CommitInboundPublication(ctx, changed); !errors.Is(err, runtimeinbound.ErrRequestIdentityConflict) {
+		t.Fatalf("changed zero-event operator claim retry error = %v", err)
+	}
+
+	concurrentOp := begin("atomic-claim-concurrent")
+	concurrent := command(concurrentOp, "operator-channel-claim-concurrent")
+	results := make(chan runtimeinbound.CommitResult, 2)
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got, err := store.CommitInboundPublication(ctx, concurrent)
+			results <- got
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(results)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent zero-event operator claim: %v", err)
+		}
+	}
+	created := 0
+	for got := range results {
+		if got.Record.Created {
+			created++
+		}
+	}
+	if created != 1 {
+		t.Fatalf("concurrent zero-event operator claim created results = %d, want 1", created)
+	}
+
+	failedOp := begin("atomic-claim-rollback")
+	failed := command(failedOp, "operator-channel-claim-rollback")
+	failed.Request.MarkerEventID = accepted.Request.MarkerEventID
+	failed.Finalization.EvidenceEvent = inboundPublicationZeroOutputEvidence(t, failed.Request)
+	if _, err := store.CommitInboundPublication(ctx, failed); err == nil {
+		t.Fatal("late duplicate evidence write unexpectedly committed operator claim")
+	}
+	assertOperatorChannelOperationAwaitingClaim(t, ctx, channelStore, principal.ID, failedOp.OperationID)
+}
+
+func assertOperatorChannelOperationAwaitingClaim(t *testing.T, ctx context.Context, channelStore operatorchannel.Store, principalID, operationID string) {
+	t.Helper()
+	operations, err := channelStore.ListOperatorChannelOperations(ctx, principalID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range operations {
+		if candidate.OperationID == operationID {
+			if candidate.State != operatorchannel.StateAwaitingClaim || candidate.Revision != 1 {
+				t.Fatalf("failed atomic claim operation = %#v", candidate)
+			}
+			return
+		}
+	}
+	t.Fatalf("failed atomic claim operation %s not found", operationID)
+}
+
+func installOperatorChannelClaimFailureTrigger(t *testing.T, db *sql.DB, sqlite bool, table, operation string) func() {
+	t.Helper()
+	const trigger = "operator_channel_claim_injected_failure"
+	const function = "operator_channel_claim_injected_failure_fn"
+	if sqlite {
+		if _, err := db.Exec(fmt.Sprintf(`CREATE TRIGGER %s BEFORE %s ON %s BEGIN SELECT RAISE(ABORT, 'injected operator channel claim failure'); END`, trigger, operation, table)); err != nil {
+			t.Fatalf("install SQLite operator-channel fault trigger: %v", err)
+		}
+		return func() {
+			if _, err := db.Exec(`DROP TRIGGER ` + trigger); err != nil {
+				t.Fatalf("drop SQLite operator-channel fault trigger: %v", err)
+			}
+		}
+	}
+	if _, err := db.Exec(fmt.Sprintf(`
+CREATE FUNCTION %s() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION 'injected operator channel claim failure';
+END
+$$;
+CREATE TRIGGER %s BEFORE %s ON %s FOR EACH ROW EXECUTE FUNCTION %s()`, function, trigger, operation, table, function)); err != nil {
+		t.Fatalf("install Postgres operator-channel fault trigger: %v", err)
+	}
+	return func() {
+		if _, err := db.Exec(fmt.Sprintf(`DROP TRIGGER %s ON %s; DROP FUNCTION %s()`, trigger, table, function)); err != nil {
+			t.Fatalf("drop Postgres operator-channel fault trigger: %v", err)
+		}
+	}
+}
+
+func inboundPublicationZeroOutputEvidence(t *testing.T, request runtimeinbound.Request) events.Event {
+	t.Helper()
+	payload, err := runtimeinbound.BuildEvidencePayload(request, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return eventtest.DiagnosticDirect(
+		request.MarkerEventID, events.EventTypePlatformInboundRecord, "runtime", "", payload, 0,
+		request.ResolvedRunID, "", events.EnvelopeForEntityID(events.EventEnvelope{}, request.EntityID), request.OriginalReceivedAt,
+	)
 }
 
 func assertInboundEvidenceRouteSettlement(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, eventID string) {

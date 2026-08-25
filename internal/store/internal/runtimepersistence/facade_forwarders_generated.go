@@ -8,6 +8,7 @@ import (
 	bundlecatalog "github.com/division-sh/swarm/internal/bundlecatalog"
 	events "github.com/division-sh/swarm/internal/events"
 	mailbox "github.com/division-sh/swarm/internal/mailbox"
+	operatorchannel "github.com/division-sh/swarm/internal/operatorchannel"
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
 	runtime "github.com/division-sh/swarm/internal/runtime"
 	activityresult "github.com/division-sh/swarm/internal/runtime/activityresult"
@@ -142,12 +143,20 @@ func (s *PostgresStore) AuthorizeExternalAttempt(ctx context.Context, authority 
 	return s.effectPostgresOwner.AuthorizeExternalAttempt(ctx, authority, req)
 }
 
+func (s *PostgresStore) BeginChannelBinding(ctx context.Context, req operatorchannel.BeginRequest) (operatorchannel.Operation, error) {
+	return s.operatorChannelPostgresOwner.BeginChannelBinding(ctx, req)
+}
+
 func (s *PostgresStore) BeginDecisionCardInput(ctx context.Context, req decisioncard.BeginInputRequest) (decisioncard.InputDraft, error) {
 	return s.decisionPostgresOwner.BeginDecisionCardInput(ctx, req)
 }
 
 func (s *PostgresStore) BindAgentSession(ctx context.Context, claim deliverylifecycle.Claim, sessionID string) (deliverylifecycle.Snapshot, error) {
 	return s.deliveryPostgresOwner.BindAgentSession(ctx, claim, sessionID)
+}
+
+func (s *PostgresStore) BindOperatorChannelFromProof(ctx context.Context, req operatorchannel.BootBindRequest) (operatorchannel.Binding, error) {
+	return s.operatorChannelPostgresOwner.BindOperatorChannelFromProof(ctx, req)
 }
 
 func (s *PostgresStore) CancelDecisionCardInput(ctx context.Context, req decisioncard.CancelInputRequest) (decisioncard.InputDraft, error) {
@@ -242,8 +251,16 @@ func (s *PostgresStore) CompleteHumanTaskOutcome(ctx context.Context, cardID str
 	return s.decisionPostgresOwner.CompleteHumanTaskOutcome(ctx, cardID, eventID, at)
 }
 
+func (s *PostgresStore) CompleteProofResponsibility(ctx context.Context, operationID string, proofID string, proofRevision int64, status operatorchannel.ProofStatus, failure string, now time.Time) error {
+	return s.operatorChannelPostgresOwner.CompleteProofResponsibility(ctx, operationID, proofID, proofRevision, status, failure, now)
+}
+
 func (s *PostgresStore) CompleteProposedEffectRoute(ctx context.Context, cardID string, routeEventID string, at time.Time) (decisioncard.ProposedEffectContinuation, error) {
 	return s.decisionPostgresOwner.CompleteProposedEffectRoute(ctx, cardID, routeEventID, at)
+}
+
+func (s *PostgresStore) ConfirmChannelBinding(ctx context.Context, req operatorchannel.ConfirmRequest) (operatorchannel.Operation, operatorchannel.Binding, error) {
+	return s.operatorChannelPostgresOwner.ConfirmChannelBinding(ctx, req)
 }
 
 func (s *PostgresStore) ContinueRunControl(ctx context.Context, req runcontrol.TransitionRequest) (runcontrol.State, error) {
@@ -328,6 +345,10 @@ func (s *PostgresStore) DeliverySnapshotsForEvent(ctx context.Context, eventID s
 
 func (s *PostgresStore) DiscardMaterializedSelectedContractExecutionFork(ctx context.Context, forkRunID string) error {
 	return s.runForkPostgresOwner.DiscardMaterializedSelectedContractExecutionFork(ctx, forkRunID)
+}
+
+func (s *PostgresStore) EnsureOperatorPrincipal(ctx context.Context, now time.Time) (operatorchannel.Principal, error) {
+	return s.operatorChannelPostgresOwner.EnsureOperatorPrincipal(ctx, now)
 }
 
 func (s *PostgresStore) EnsureRunForkNoPostForkCommittedReplayScopeMarkers(ctx context.Context, sourceRunID string, forkEventID string) error {
@@ -506,6 +527,14 @@ func (s *PostgresStore) ListOperatorAgents(ctx context.Context, opts operatorrea
 	return s.operatorAgentPostgres.ListOperatorAgents(ctx, opts)
 }
 
+func (s *PostgresStore) ListOperatorChannelBindings(ctx context.Context, principalID string) ([]operatorchannel.Binding, error) {
+	return s.operatorChannelPostgresOwner.ListOperatorChannelBindings(ctx, principalID)
+}
+
+func (s *PostgresStore) ListOperatorChannelOperations(ctx context.Context, principalID string) ([]operatorchannel.Operation, error) {
+	return s.operatorChannelPostgresOwner.ListOperatorChannelOperations(ctx, principalID)
+}
+
 func (s *PostgresStore) ListOperatorConversationForks(ctx context.Context, opts runfork.ConversationForkListOptions) (runfork.ConversationForkListResult, error) {
 	return s.runForkPostgresOwner.ListOperatorConversationForks(ctx, opts)
 }
@@ -540,6 +569,10 @@ func (s *PostgresStore) ListPendingAgentDeliveryFacts(ctx context.Context, ident
 
 func (s *PostgresStore) ListPendingAgentLifecycleDiagnostics(ctx context.Context, limit int) ([]manager.AgentLifecycleDiagnostic, error) {
 	return s.agentPostgresOwner.ListPendingAgentLifecycleDiagnostics(ctx, limit)
+}
+
+func (s *PostgresStore) ListPendingProofResponsibilities(ctx context.Context) ([]operatorchannel.ProofResponsibility, error) {
+	return s.operatorChannelPostgresOwner.ListPendingProofResponsibilities(ctx)
 }
 
 func (s *PostgresStore) ListRunDebugRuns(ctx context.Context, limit int) ([]operatorread.RunDebugRunSummary, error) {
@@ -640,6 +673,10 @@ func (s *PostgresStore) LoadHumanTaskContinuation(ctx context.Context, cardID st
 
 func (s *PostgresStore) LoadInboundPublicationByIdentity(ctx context.Context, provider string, entityID string, providerEventID string) (inboundpublication.Record, bool, error) {
 	return s.eventPostgresOwner.LoadInboundPublicationByIdentity(ctx, provider, entityID, providerEventID)
+}
+
+func (s *PostgresStore) LoadLatestPublicConversationTurn(ctx context.Context, sessionID string) (*operatorread.OperatorPublicConversationTurn, error) {
+	return s.operatorConversationPostgres.LoadLatestPublicConversationTurn(ctx, sessionID)
 }
 
 func (s *PostgresStore) LoadLatestRunFlowInstance(ctx context.Context, runID string) (string, error) {
@@ -1150,6 +1187,10 @@ func (s *PostgresStore) TransitionRuntimeIngressState(ctx context.Context, targe
 	return s.runtimeIngressPostgresOwner.TransitionRuntimeIngressState(ctx, target, reason, controlledBy, now)
 }
 
+func (s *PostgresStore) UnbindOperatorChannel(ctx context.Context, req operatorchannel.UnbindRequest) (operatorchannel.Operation, operatorchannel.Binding, error) {
+	return s.operatorChannelPostgresOwner.UnbindOperatorChannel(ctx, req)
+}
+
 func (s *PostgresStore) UpdateLiveSessionWatchdog(ctx context.Context, update llm.ConversationWatchdogUpdate) error {
 	return s.lLMPostgresOwner.UpdateLiveSessionWatchdog(ctx, update)
 }
@@ -1234,12 +1275,20 @@ func (s *SQLiteRuntimeStore) AuthorizeExternalAttempt(ctx context.Context, autho
 	return s.effectSQLiteOwner.AuthorizeExternalAttempt(ctx, authority, req)
 }
 
+func (s *SQLiteRuntimeStore) BeginChannelBinding(ctx context.Context, req operatorchannel.BeginRequest) (operatorchannel.Operation, error) {
+	return s.operatorChannelSQLiteOwner.BeginChannelBinding(ctx, req)
+}
+
 func (s *SQLiteRuntimeStore) BeginDecisionCardInput(ctx context.Context, req decisioncard.BeginInputRequest) (decisioncard.InputDraft, error) {
 	return s.decisionSQLiteOwner.BeginDecisionCardInput(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) BindAgentSession(ctx context.Context, claim deliverylifecycle.Claim, sessionID string) (deliverylifecycle.Snapshot, error) {
 	return s.deliverySQLiteOwner.BindAgentSession(ctx, claim, sessionID)
+}
+
+func (s *SQLiteRuntimeStore) BindOperatorChannelFromProof(ctx context.Context, req operatorchannel.BootBindRequest) (operatorchannel.Binding, error) {
+	return s.operatorChannelSQLiteOwner.BindOperatorChannelFromProof(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) CancelDecisionCardInput(ctx context.Context, req decisioncard.CancelInputRequest) (decisioncard.InputDraft, error) {
@@ -1334,8 +1383,16 @@ func (s *SQLiteRuntimeStore) CompleteHumanTaskOutcome(ctx context.Context, cardI
 	return s.decisionSQLiteOwner.CompleteHumanTaskOutcome(ctx, cardID, eventID, at)
 }
 
+func (s *SQLiteRuntimeStore) CompleteProofResponsibility(ctx context.Context, operationID string, proofID string, proofRevision int64, status operatorchannel.ProofStatus, failure string, now time.Time) error {
+	return s.operatorChannelSQLiteOwner.CompleteProofResponsibility(ctx, operationID, proofID, proofRevision, status, failure, now)
+}
+
 func (s *SQLiteRuntimeStore) CompleteProposedEffectRoute(ctx context.Context, cardID string, routeEventID string, at time.Time) (decisioncard.ProposedEffectContinuation, error) {
 	return s.decisionSQLiteOwner.CompleteProposedEffectRoute(ctx, cardID, routeEventID, at)
+}
+
+func (s *SQLiteRuntimeStore) ConfirmChannelBinding(ctx context.Context, req operatorchannel.ConfirmRequest) (operatorchannel.Operation, operatorchannel.Binding, error) {
+	return s.operatorChannelSQLiteOwner.ConfirmChannelBinding(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) ContinueRunControl(ctx context.Context, req runcontrol.TransitionRequest) (runcontrol.State, error) {
@@ -1416,6 +1473,10 @@ func (s *SQLiteRuntimeStore) DeliverySnapshotsForEvent(ctx context.Context, even
 
 func (s *SQLiteRuntimeStore) DestructiveResetDeliveryQuiesced(ctx context.Context, eventID string, subscriberType string, subscriberID string) (bool, error) {
 	return s.runLifecycleSQLiteOwner.DestructiveResetDeliveryQuiesced(ctx, eventID, subscriberType, subscriberID)
+}
+
+func (s *SQLiteRuntimeStore) EnsureOperatorPrincipal(ctx context.Context, now time.Time) (operatorchannel.Principal, error) {
+	return s.operatorChannelSQLiteOwner.EnsureOperatorPrincipal(ctx, now)
 }
 
 func (s *SQLiteRuntimeStore) EnsureRuntimeIngressState(ctx context.Context, now time.Time) (ingress.State, error) {
@@ -1582,6 +1643,14 @@ func (s *SQLiteRuntimeStore) ListOperatorAgents(ctx context.Context, opts operat
 	return s.operatorAgentSQLite.ListOperatorAgents(ctx, opts)
 }
 
+func (s *SQLiteRuntimeStore) ListOperatorChannelBindings(ctx context.Context, principalID string) ([]operatorchannel.Binding, error) {
+	return s.operatorChannelSQLiteOwner.ListOperatorChannelBindings(ctx, principalID)
+}
+
+func (s *SQLiteRuntimeStore) ListOperatorChannelOperations(ctx context.Context, principalID string) ([]operatorchannel.Operation, error) {
+	return s.operatorChannelSQLiteOwner.ListOperatorChannelOperations(ctx, principalID)
+}
+
 func (s *SQLiteRuntimeStore) ListOperatorConversationForks(ctx context.Context, opts runfork.ConversationForkListOptions) (runfork.ConversationForkListResult, error) {
 	return s.runForkSQLiteOwner.ListOperatorConversationForks(ctx, opts)
 }
@@ -1608,6 +1677,10 @@ func (s *SQLiteRuntimeStore) ListOperatorRuntimeLogs(ctx context.Context, opts o
 
 func (s *SQLiteRuntimeStore) ListPendingAgentLifecycleDiagnostics(ctx context.Context, limit int) ([]manager.AgentLifecycleDiagnostic, error) {
 	return s.agentSQLiteOwner.ListPendingAgentLifecycleDiagnostics(ctx, limit)
+}
+
+func (s *SQLiteRuntimeStore) ListPendingProofResponsibilities(ctx context.Context) ([]operatorchannel.ProofResponsibility, error) {
+	return s.operatorChannelSQLiteOwner.ListPendingProofResponsibilities(ctx)
 }
 
 func (s *SQLiteRuntimeStore) ListRunHeaders(ctx context.Context, opts operatorread.RunHeaderListOptions) ([]operatorread.RunHeader, string, error) {
@@ -1688,6 +1761,10 @@ func (s *SQLiteRuntimeStore) LoadHumanTaskContinuation(ctx context.Context, card
 
 func (s *SQLiteRuntimeStore) LoadInboundPublicationByIdentity(ctx context.Context, provider string, entityID string, providerEventID string) (inboundpublication.Record, bool, error) {
 	return s.eventSQLiteOwner.LoadInboundPublicationByIdentity(ctx, provider, entityID, providerEventID)
+}
+
+func (s *SQLiteRuntimeStore) LoadLatestPublicConversationTurn(ctx context.Context, sessionID string) (*operatorread.OperatorPublicConversationTurn, error) {
+	return s.operatorConversationSQLite.LoadLatestPublicConversationTurn(ctx, sessionID)
 }
 
 func (s *SQLiteRuntimeStore) LoadLatestRunFlowInstance(ctx context.Context, runID string) (string, error) {
@@ -2148,6 +2225,10 @@ func (s *SQLiteRuntimeStore) TransitionActiveRun(ctx context.Context, request ru
 
 func (s *SQLiteRuntimeStore) TransitionRuntimeIngressState(ctx context.Context, target ingress.Status, reason string, controlledBy string, now time.Time) (ingress.State, bool, error) {
 	return s.runtimeIngressSQLiteOwner.TransitionRuntimeIngressState(ctx, target, reason, controlledBy, now)
+}
+
+func (s *SQLiteRuntimeStore) UnbindOperatorChannel(ctx context.Context, req operatorchannel.UnbindRequest) (operatorchannel.Operation, operatorchannel.Binding, error) {
+	return s.operatorChannelSQLiteOwner.UnbindOperatorChannel(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) UpdateLiveSessionWatchdog(ctx context.Context, update llm.ConversationWatchdogUpdate) error {

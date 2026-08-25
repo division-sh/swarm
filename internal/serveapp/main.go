@@ -19,6 +19,7 @@ import (
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
 	"github.com/division-sh/swarm/internal/packs"
@@ -167,6 +168,7 @@ type storeBundle struct {
 	HumanTaskStore                 runtimetools.HumanTaskCardStore
 	BudgetSpendStore               budgetspend.Store
 	InboundStore                   runtime.InboundPersistence
+	OperatorChannels               operatorchannel.Store
 	MailboxAPIStore                apiv1.MailboxAPIStore
 	MailboxNoticeAcknowledgment    apiv1.MailboxNoticeAcknowledgmentStore
 	DecisionCards                  decisioncard.Store
@@ -557,6 +559,7 @@ func selectedPostgresStoreBundle(pg *store.PostgresStore, constructionDB *sql.DB
 		HumanTaskStore:              pg,
 		BudgetSpendStore:            pg,
 		InboundStore:                pg,
+		OperatorChannels:            pg,
 		MailboxAPIStore:             pg,
 		MailboxNoticeAcknowledgment: pg,
 		DecisionCards:               pg,
@@ -1102,6 +1105,28 @@ func buildForkChatSandboxLLMRuntimes(cfg *config.Config, workspaces workspace.Re
 	}, nil)
 }
 
+func serveOperatorChannelInterfaces(contexts []serveRuntimeBundleContext) ([]operatorchannel.InterfaceIdentity, error) {
+	identities := []operatorchannel.InterfaceIdentity{}
+	seen := map[string]struct{}{}
+	for _, runtimeContext := range contexts {
+		if runtimeContext.runtime == nil {
+			return nil, fmt.Errorf("operator channel interface projection requires every loaded runtime context")
+		}
+		for _, plan := range runtimeContext.runtime.Options.ChannelPlans {
+			identity, err := plan.InterfaceIdentity()
+			if err != nil {
+				return nil, err
+			}
+			if _, exists := seen[identity.Key()]; exists {
+				continue
+			}
+			seen[identity.Key()] = struct{}{}
+			identities = append(identities, identity)
+		}
+	}
+	return identities, nil
+}
+
 func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	ctx, cancelServe := context.WithCancel(ctx)
 	defer cancelServe()
@@ -1496,6 +1521,33 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	workspaces := primaryContext.workspaces
 	primaryWorkspaceBackend = primaryContext.workspaceBackend
 	rt := primaryContext.runtime
+	if stores.OperatorChannels == nil {
+		presenter.fail(5, "operator_channel", errors.New("selected store operator-channel owner is required"))
+		return 3
+	}
+	channelInterfaces, err := serveOperatorChannelInterfaces(runtimeContexts)
+	if err != nil {
+		presenter.fail(5, "operator_channel", err)
+		return 1
+	}
+	proofStore, err := operatorchannel.NewFileProofStore(swarmDir.Path)
+	if err != nil {
+		presenter.fail(5, "operator_channel", err)
+		return 1
+	}
+	operatorChannels, err := operatorchannel.NewService(stores.OperatorChannels, proofStore, channelInterfaces, runtimeInstanceID)
+	if err != nil {
+		presenter.fail(5, "operator_channel", err)
+		return 1
+	}
+	operatorPrincipal, recoveredBindings, err := operatorChannels.Bootstrap(ctx, bootStartedAt)
+	if err != nil {
+		presenter.fail(5, "operator_channel", err)
+		return 1
+	}
+	for _, binding := range recoveredBindings {
+		presenter.recordOperatorChannelProofReuse(binding)
+	}
 	bootReport := primaryContext.validation.BootReport
 	stateStoreSummary := serveRuntimeStateStoreSummary(runtimeContexts)
 	preflightContexts, err := plannedServeRuntimeContexts(runtimeContexts)
@@ -1680,12 +1732,14 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		apiv1.OperatorRuntimeControlHandlers(apiv1.RuntimeControlHandlerOptions{Ingress: rt.RuntimeIngress, Idempotency: stores.IdempotencyStore, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
 		apiv1.OperatorRuntimeNukeHandlers(apiv1.RuntimeNukeHandlerOptions{Coordinator: apiStoreCaps.ResetCoordinator, Idempotency: stores.IdempotencyStore}),
 		apiv1.OperatorAgentControlHandlers(apiv1.AgentControlHandlerOptions{Controller: dashboardDynamicAgentControl{supervisor: supervisor}, Idempotency: stores.IdempotencyStore, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
+		apiv1.OperatorChannelHandlers(apiv1.OperatorChannelHandlerOptions{Channels: operatorChannels, Idempotency: stores.IdempotencyStore}),
 	)
 	apiV1Handler, err := apiv1.NewHandler(apiv1.Options{
-		PlatformSpecPath: resolvedPlatformSpecPath,
-		AuthTokens:       apiAuth.Tokens,
-		ProcessWorkOwner: processWorkOwner,
-		Handlers:         handlers,
+		PlatformSpecPath:    resolvedPlatformSpecPath,
+		AuthTokens:          apiAuth.Tokens,
+		ProcessWorkOwner:    processWorkOwner,
+		OperatorPrincipalID: operatorPrincipal.ID,
+		Handlers:            handlers,
 		Subscriptions: apiv1.OperatorSubscriptions(apiv1.SubscriptionOptions{
 			ExecutionPosture: rt.ExecutionPosture,
 			Ready:            readyFn, Database: apiStoreCaps.Database, Observability: apiStoreCaps.Observability,
@@ -1776,6 +1830,19 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		})
 		supervisor.SetStartupOwnershipHandoffBarrier(registrationController.PrepareStartupHandoff)
 	}
+	supervisor.AddRuntimePublishedHook(func(context.Context) error {
+		current, _, _ := supervisor.PublicIngressState()
+		if current == nil {
+			return errors.New("published runtime is unavailable for operator-channel interface projection")
+		}
+		publishedContexts := append([]serveRuntimeBundleContext(nil), runtimeContexts...)
+		publishedContexts[0].runtime = current
+		identities, err := serveOperatorChannelInterfaces(publishedContexts)
+		if err != nil {
+			return err
+		}
+		return operatorChannels.ReplaceInterfaces(identities)
+	})
 	apiServerLease, err := processWorkOwner.Begin(ctx)
 	if err != nil {
 		presenter.fail(20, "http_listener_bind", fmt.Errorf("admit api server: %w", err))
@@ -2820,6 +2887,7 @@ func buildStores(ctx context.Context, selection storebackend.Selection, cfg *con
 			HumanTaskStore:              sqliteStore,
 			BudgetSpendStore:            sqliteStore,
 			InboundStore:                sqliteStore,
+			OperatorChannels:            sqliteStore,
 			MailboxAPIStore:             sqliteStore,
 			MailboxNoticeAcknowledgment: sqliteStore,
 			DecisionCards:               sqliteStore,

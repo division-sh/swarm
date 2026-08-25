@@ -225,6 +225,7 @@ func TestGeneratedInputFixtureLoadsComposedTelegramSchemaAndPublishesNormalizedE
 	}
 	wantPayload := map[string]any{
 		"conversation_reference":     "0",
+		"conversation_scope":         "direct",
 		"external_account_reference": "0",
 		"provider_message_reference": float64(1),
 		"text":                       "0",
@@ -274,6 +275,7 @@ func TestAuthoredTelegramInputFixturesUseEffectivePublishSchemaAndPublicRPC(t *t
 	}
 	wantPayload := map[string]any{
 		"conversation_reference":     "123",
+		"conversation_scope":         "direct",
 		"external_account_reference": "456",
 		"provider_message_reference": float64(789),
 		"text":                       "authored fixture",
@@ -281,6 +283,7 @@ func TestAuthoredTelegramInputFixturesUseEffectivePublishSchemaAndPublicRPC(t *t
 	fixturePath := filepath.Join(contractsPath, "flows", "telegram-chat", "tests", "fixtures", "telegram.yaml")
 	writeWorkflowValidationFixtureFile(t, fixturePath, `
 conversation_reference: "123"
+conversation_scope: direct
 external_account_reference: "456"
 provider_message_reference: 789
 text: authored fixture
@@ -293,6 +296,7 @@ text: authored fixture
 	}{
 		{name: "inline", payload: map[string]any{
 			"conversation_reference":     "123",
+			"conversation_scope":         "direct",
 			"external_account_reference": "456",
 			"provider_message_reference": float64(789),
 			"text":                       "authored fixture",
@@ -356,6 +360,7 @@ steps:
 	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 	wantPayload := map[string]any{
 		"conversation_reference":     "0",
+		"conversation_scope":         "direct",
 		"external_account_reference": "0",
 		"provider_message_reference": float64(1),
 		"text":                       "0",

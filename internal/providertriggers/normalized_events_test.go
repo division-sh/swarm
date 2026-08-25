@@ -393,6 +393,150 @@ func TestNormalizedEventManifestRejectsImplicitAndUnknownConversions(t *testing.
 	}
 }
 
+func TestNormalizedEventFinitePredicateAndTextEnumMap(t *testing.T) {
+	manifest := normalizedEventTestManifest()
+	manifest.NormalizedEvents[0].Fields["conversation_scope"] = NormalizedEventFieldProjection{
+		From: "message.chat.type",
+		Schema: runtimecontracts.MustToolInputSchema(
+			runtimecontracts.ToolSchemaKind("string"),
+			runtimecontracts.ToolSchemaEnum("direct", "shared"),
+		),
+		Convert: normalizedFieldConvertTextEnumMap,
+		Values:  map[string]string{"private": "direct", "group": "shared", "supergroup": "shared"},
+	}
+	manifest.NormalizedEvents[0].When.OneOf = map[string][]string{
+		"message.chat.type": {"private", "group", "supergroup"},
+	}
+	if err := manifest.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name      string
+		kind      any
+		wantScope string
+		wantRaw   bool
+	}{
+		{name: "private", kind: "private", wantScope: "direct"},
+		{name: "group", kind: "group", wantScope: "shared"},
+		{name: "supergroup", kind: "supergroup", wantScope: "shared"},
+		{name: "unsupported exact text", kind: "channel", wantRaw: true},
+		{name: "non-text", kind: json.Number("1"), wantRaw: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			delivery, err := manifest.Accept(Request{
+				Target: Target{EntityID: "entity-1"},
+				Payload: map[string]any{
+					"update_id": json.Number("123"),
+					"message": map[string]any{
+						"message_id": json.Number("7"),
+						"chat":       map[string]any{"id": json.Number("42"), "type": tc.kind},
+						"text":       "hello",
+					},
+				},
+			})
+			if err != nil {
+				t.Fatalf("Accept: %v", err)
+			}
+			if tc.wantRaw {
+				if len(delivery.Events) != 1 || delivery.Events[0].Kind != OutputKindRaw {
+					t.Fatalf("events = %#v, want raw only", delivery.Events)
+				}
+				return
+			}
+			if len(delivery.Events) != 2 || delivery.Events[1].Payload["conversation_scope"] != tc.wantScope {
+				t.Fatalf("events = %#v, want normalized scope %q", delivery.Events, tc.wantScope)
+			}
+		})
+	}
+}
+
+func TestNormalizedEventFiniteSemanticsFailClosedAtAdmission(t *testing.T) {
+	stringSchema := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string"))
+	integerSchema := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("integer"))
+	for _, tc := range []struct {
+		name  string
+		field NormalizedEventFieldProjection
+		oneOf map[string][]string
+		want  string
+	}{
+		{name: "values without conversion", field: NormalizedEventFieldProjection{From: "message.chat.type", Schema: stringSchema, Values: map[string]string{"private": "direct"}}, want: "values require convert"},
+		{name: "number conversion values", field: NormalizedEventFieldProjection{From: "message.chat.id", Schema: stringSchema, Convert: runtimecontracts.FieldProjectionConvertNumberToText, Values: map[string]string{"1": "one"}}, want: "number_to_text forbids values"},
+		{name: "map missing values", field: NormalizedEventFieldProjection{From: "message.chat.type", Schema: stringSchema, Convert: normalizedFieldConvertTextEnumMap}, want: "requires values"},
+		{name: "map non-string output", field: NormalizedEventFieldProjection{From: "message.chat.type", Schema: integerSchema, Convert: normalizedFieldConvertTextEnumMap, Values: map[string]string{"private": "direct"}}, want: "requires a string output schema"},
+		{name: "map noncanonical input", field: NormalizedEventFieldProjection{From: "message.chat.type", Schema: stringSchema, Convert: normalizedFieldConvertTextEnumMap, Values: map[string]string{" private": "direct"}}, want: "exact non-empty text"},
+		{name: "map noncanonical output", field: NormalizedEventFieldProjection{From: "message.chat.type", Schema: stringSchema, Convert: normalizedFieldConvertTextEnumMap, Values: map[string]string{"private": " direct"}}, want: "exact non-empty text"},
+		{name: "map output outside enum", field: NormalizedEventFieldProjection{From: "message.chat.type", Schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string"), runtimecontracts.ToolSchemaEnum("direct", "shared")), Convert: normalizedFieldConvertTextEnumMap, Values: map[string]string{"private": "private"}}, want: "invalid enum"},
+		{name: "one-of hostile path", field: NormalizedEventFieldProjection{From: "message.chat.type", Schema: stringSchema}, oneOf: map[string][]string{"$.message.chat.type": {"private"}}, want: "when.one_of path"},
+		{name: "one-of empty", field: NormalizedEventFieldProjection{From: "message.chat.type", Schema: stringSchema}, oneOf: map[string][]string{"message.chat.type": nil}, want: "requires at least one value"},
+		{name: "one-of noncanonical", field: NormalizedEventFieldProjection{From: "message.chat.type", Schema: stringSchema}, oneOf: map[string][]string{"message.chat.type": {" private"}}, want: "exact non-empty text"},
+		{name: "one-of duplicate", field: NormalizedEventFieldProjection{From: "message.chat.type", Schema: stringSchema}, oneOf: map[string][]string{"message.chat.type": {"private", "private"}}, want: "duplicates value"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			manifest := normalizedEventTestManifest()
+			manifest.NormalizedEvents[0].Fields["scope"] = tc.field
+			manifest.NormalizedEvents[0].When.OneOf = tc.oneOf
+			if err := manifest.Validate(); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Validate error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestNormalizedEventFiniteSemanticsAreDeeplyImmutable(t *testing.T) {
+	manifest := normalizedEventTestManifest()
+	manifest.NormalizedEvents[0].Fields["scope"] = NormalizedEventFieldProjection{
+		From: "message.chat.type", Schema: runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaKind("string")),
+		Convert: normalizedFieldConvertTextEnumMap, Values: map[string]string{"private": "direct"},
+	}
+	manifest.NormalizedEvents[0].When.OneOf = map[string][]string{"message.chat.type": {"private"}}
+	catalog, err := NewCatalogSnapshot(CatalogEntry{
+		Manifest: manifest,
+		Identity: PackIdentity{ID: "provider.telegram", Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat("c", 64), Provenance: "platform"},
+		Source:   "test",
+	})
+	if err != nil {
+		t.Fatalf("NewCatalogSnapshot: %v", err)
+	}
+	plan, err := catalog.CompileAdmission(CompileAdmissionRequest{
+		Alias: "chat", Provider: "telegram", Declaration: AdmissionDeclaration{Acknowledge: UnsignedWebhookAcknowledgement},
+	})
+	if err != nil {
+		t.Fatalf("CompileAdmission: %v", err)
+	}
+
+	outputs := plan.Outputs()
+	for index := range outputs {
+		if outputs[index].Event != "inbound.telegram.text_message" {
+			continue
+		}
+		field := outputs[index].Fields["scope"]
+		field.Values["private"] = "mutated"
+		outputs[index].Fields["scope"] = field
+		outputs[index].When.OneOf["message.chat.type"][0] = "mutated"
+	}
+	for _, output := range plan.Outputs() {
+		if output.Event != "inbound.telegram.text_message" {
+			continue
+		}
+		if output.Fields["scope"].Values["private"] != "direct" || output.When.OneOf["message.chat.type"][0] != "private" {
+			t.Fatalf("plan output shared finite semantic state: %#v", output)
+		}
+	}
+}
+
+func TestNormalizedEventOneOfDoesNotProveBranchExclusivity(t *testing.T) {
+	manifest := normalizedEventTestManifest()
+	manifest.NormalizedEvents[0].When.OneOf = map[string][]string{"message.chat.type": {"private"}}
+	copy := manifest.NormalizedEvents[0]
+	copy.Event = "inbound.telegram.message_copy"
+	copy.When.OneOf = map[string][]string{"message.chat.type": {"group"}}
+	manifest.NormalizedEvents = append(manifest.NormalizedEvents, copy)
+	if err := manifest.Validate(); err == nil || !strings.Contains(err.Error(), "can match the same payload") {
+		t.Fatalf("Validate error = %v, want exists/absent exclusivity requirement", err)
+	}
+}
+
 func TestNormalizedEventCatalogDerivesSchemaAndCapabilities(t *testing.T) {
 	manifest := normalizedEventTestManifest()
 	entry := manifest.EventCatalogEntries()["inbound.telegram.text_message"]

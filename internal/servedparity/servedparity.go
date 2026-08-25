@@ -49,6 +49,12 @@ const (
 	ScenarioConversationForkLifecycle            = "conversation_fork_lifecycle"
 	ScenarioConversationForkChatLifecycle        = "conversation_fork_chat_lifecycle"
 	ScenarioConversationForkDeleteLifecycle      = "conversation_fork_delete_lifecycle"
+	ScenarioOperatorChannelConnectLifecycle      = "operator_channel_connect_lifecycle"
+	ScenarioOperatorChannelReconnectLifecycle    = "operator_channel_reconnect_lifecycle"
+	ScenarioOperatorChannelRebindLifecycle       = "operator_channel_rebind_lifecycle"
+	ScenarioOperatorChannelConfirmLifecycle      = "operator_channel_confirm_lifecycle"
+	ScenarioOperatorChannelUnbindLifecycle       = "operator_channel_unbind_lifecycle"
+	ScenarioOperatorChannelProofRevokeLifecycle  = "operator_channel_proof_revoke_lifecycle"
 )
 
 type Scenario struct {
@@ -102,6 +108,12 @@ func Scenarios() []Scenario {
 		servedControlScenario(ScenarioConversationForkLifecycle, "conversation.fork", "TestServedParityHarnessConversationForkLifecycle"),
 		servedControlScenario(ScenarioConversationForkChatLifecycle, "conversation.fork_chat", "TestServedParityHarnessConversationForkLifecycle"),
 		servedControlScenario(ScenarioConversationForkDeleteLifecycle, "conversation.fork_delete", "TestServedParityHarnessConversationForkLifecycle"),
+		servedControlScenario(ScenarioOperatorChannelConnectLifecycle, "channel.connect", "TestServedParityHarnessOperatorChannelLifecycle"),
+		servedControlScenario(ScenarioOperatorChannelReconnectLifecycle, "channel.reconnect", "TestServedParityHarnessOperatorChannelLifecycle"),
+		servedControlScenario(ScenarioOperatorChannelRebindLifecycle, "channel.rebind", "TestServedParityHarnessOperatorChannelLifecycle"),
+		servedControlScenario(ScenarioOperatorChannelConfirmLifecycle, "channel.confirm", "TestServedParityHarnessOperatorChannelLifecycle"),
+		servedControlScenario(ScenarioOperatorChannelUnbindLifecycle, "channel.unbind", "TestServedParityHarnessOperatorChannelLifecycle"),
+		servedControlScenario(ScenarioOperatorChannelProofRevokeLifecycle, "channel.proof_revoke", "TestServedParityHarnessOperatorChannelLifecycle"),
 	}
 }
 

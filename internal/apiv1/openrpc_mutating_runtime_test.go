@@ -270,6 +270,9 @@ func mutatingHTTPRuntimeMethods(t *testing.T, api *apispec.APISpecification, ope
 		if expectedComplianceTransport(methodName, method) != "http" {
 			t.Fatalf("%s mutating runtime probe expected HTTP transport, got %q", methodName, expectedComplianceTransport(methodName, method))
 		}
+		if strings.HasPrefix(methodName, "channel.") {
+			continue
+		}
 		out = append(out, methodName)
 	}
 	sort.Strings(out)

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
@@ -41,6 +42,32 @@ func commitInboundPublicationTx(
 		return runtimeinbound.CommitResult{}, err
 	}
 	request := command.Request.Normalized()
+	var settledClaim *operatorchannel.ClaimSettlement
+	if command.OperatorChannelClaim != nil {
+		var settlement operatorchannel.ClaimSettlement
+		var err error
+		switch owner := any(eventStore).(type) {
+		case *EventPostgresOwner:
+			if owner.operatorChannelClaims == nil {
+				return runtimeinbound.CommitResult{}, fmt.Errorf("operator channel claim owner is unavailable")
+			}
+			settlement, err = owner.operatorChannelClaims.SettleInboundClaimTx(ctx, tx, *command.OperatorChannelClaim, request.OriginalReceivedAt)
+		case *EventSQLiteOwner:
+			if owner.operatorChannelClaims == nil {
+				return runtimeinbound.CommitResult{}, fmt.Errorf("operator channel claim owner is unavailable")
+			}
+			settlement, err = owner.operatorChannelClaims.SettleInboundClaimTx(ctx, tx, *command.OperatorChannelClaim, request.OriginalReceivedAt)
+		default:
+			err = fmt.Errorf("operator channel claim event owner is unsupported")
+		}
+		if err != nil {
+			return runtimeinbound.CommitResult{}, err
+		}
+		if !settlement.Consumed {
+			return runtimeinbound.CommitResult{}, fmt.Errorf("operator channel claim settlement did not consume claim")
+		}
+		settledClaim = &settlement
+	}
 	committed := make([]runtimebus.CommittedPublication, len(command.Publications))
 	children := make([]runtimeinbound.EventRecord, len(command.Finalization.Events))
 	for index, publication := range command.Publications {
@@ -87,7 +114,7 @@ func commitInboundPublicationTx(
 		return runtimeinbound.CommitResult{}, err
 	}
 	record.Created = true
-	return runtimeinbound.CommitResult{Record: record, Publications: committed}, nil
+	return runtimeinbound.CommitResult{Record: record, Publications: committed, OperatorChannelClaim: settledClaim}, nil
 }
 
 func (s *EventPostgresOwner) CommitInboundPublication(ctx context.Context, command runtimeinbound.CommitCommand) (runtimeinbound.CommitResult, error) {
@@ -365,7 +392,7 @@ func (s *EventPostgresOwner) finalizeInboundPublicationTx(ctx context.Context, t
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(MIN(ordinal), -1), COALESCE(MAX(ordinal), -1) FROM inbound_publication_events WHERE publication_id = $1::uuid`, request.PublicationID).Scan(&count, &minOrdinal, &maxOrdinal); err != nil {
 		return runtimeinbound.Record{}, fmt.Errorf("validate inbound publication child cardinality: %w", err)
 	}
-	if count != outputCount || minOrdinal != 0 || maxOrdinal != outputCount-1 {
+	if count != outputCount || !validInboundOrdinalRange(outputCount, minOrdinal, maxOrdinal) {
 		return runtimeinbound.Record{}, fmt.Errorf("inbound publication child ordinals are not contiguous: count=%d min=%d max=%d expected=%d", count, minOrdinal, maxOrdinal, outputCount)
 	}
 	res, err := tx.ExecContext(ctx, `
@@ -415,7 +442,7 @@ func validateInboundPublicationRecordShape(record *runtimeinbound.Record) error 
 	if record.PublicationID != expectedPublicationID || record.MarkerEventID != expectedMarkerEventID {
 		return fmt.Errorf("inbound publication %s has invalid deterministic operation identity", record.PublicationID)
 	}
-	if record.State != "committed" || record.MarkerEventID == "" || record.CommittedAt.IsZero() || record.OutputCount < 1 || record.OutputCount > 2 {
+	if record.State != "committed" || record.MarkerEventID == "" || record.CommittedAt.IsZero() || record.OutputCount < 0 || record.OutputCount > 2 {
 		return fmt.Errorf("inbound publication %s has incomplete committed coupling", record.PublicationID)
 	}
 	if len(record.Events) != record.OutputCount {
@@ -461,7 +488,7 @@ func validatePostgresInboundPublicationIntegrityTx(ctx context.Context, db inbou
 	`, record.PublicationID, record.MarkerEventID).Scan(&childCount, &minOrdinal, &maxOrdinal, &markerCount); err != nil {
 		return fmt.Errorf("validate inbound publication cardinality: %w", err)
 	}
-	if childCount != record.OutputCount || minOrdinal != 0 || maxOrdinal != record.OutputCount-1 || markerCount != 1 {
+	if childCount != record.OutputCount || !validInboundOrdinalRange(record.OutputCount, minOrdinal, maxOrdinal) || markerCount != 1 {
 		return fmt.Errorf("inbound publication %s is missing contiguous children or evidence", record.PublicationID)
 	}
 	marker, err := loadPostgresInboundPublicationEvent(ctx, db, record.MarkerEventID)
@@ -486,6 +513,13 @@ func validatePostgresInboundPublicationIntegrityTx(ctx context.Context, db inbou
 		}
 	}
 	return nil
+}
+
+func validInboundOrdinalRange(count, minOrdinal, maxOrdinal int) bool {
+	if count == 0 {
+		return minOrdinal == -1 && maxOrdinal == -1
+	}
+	return minOrdinal == 0 && maxOrdinal == count-1
 }
 
 func loadPostgresInboundPublicationRoutes(ctx context.Context, db inboundPublicationQueryer, eventID string) ([]events.DeliveryRoute, error) {

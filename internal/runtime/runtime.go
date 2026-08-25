@@ -1363,6 +1363,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 
 	if runtimeDeps.InboundStore != nil {
 		rt.InboundGateway = NewInboundGateway(rt.Bus, rt.Logger, rt.shutdownAdmissionClosed, boot.ExecutionPosture, runtimeDeps.InboundStore)
+		rt.InboundGateway.SetChannelPlans(opts.ChannelPlans)
 		rt.InboundGateway.SetAdmissionGuard(rt.shutdownGate.BeginContext)
 		rt.InboundGateway.SetRuntimeIngress(rt.RuntimeIngress)
 		if err := rt.InboundGateway.SetCredentialStore(opts.ProviderCredentials); err != nil {

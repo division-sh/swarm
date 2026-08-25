@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
@@ -164,10 +165,11 @@ type Finalization struct {
 // every event before entering storage; the selected store owns the one atomic
 // transaction and cannot call back into runtime or borrow transaction context.
 type CommitCommand struct {
-	Request          Request
-	Finalization     Finalization
-	Publications     []runtimebus.PublicationCommand
-	AuthorProjection runtimeauthoractivity.InboundProjection
+	Request              Request
+	Finalization         Finalization
+	Publications         []runtimebus.PublicationCommand
+	AuthorProjection     runtimeauthoractivity.InboundProjection
+	OperatorChannelClaim *operatorchannel.InboundClaim
 }
 
 func (c CommitCommand) Validate() error {
@@ -175,8 +177,21 @@ func (c CommitCommand) Validate() error {
 	if err := request.Validate(); err != nil {
 		return err
 	}
-	if len(c.Finalization.Events) < 1 || len(c.Finalization.Events) > 2 {
+	if len(c.Finalization.Events) > 2 {
 		return fmt.Errorf("inbound publication requires raw plus zero or one normalized event")
+	}
+	if len(c.Finalization.Events) == 0 {
+		if c.OperatorChannelClaim == nil {
+			return fmt.Errorf("zero-event inbound publication requires an operator channel claim")
+		}
+		if err := c.OperatorChannelClaim.Validate(); err != nil {
+			return err
+		}
+		if c.OperatorChannelClaim.PublicationID != request.PublicationID || c.OperatorChannelClaim.Provider != request.Provider || c.OperatorChannelClaim.ProviderEventID != request.ProviderEventID {
+			return fmt.Errorf("operator channel claim provenance does not match inbound request")
+		}
+	} else if c.OperatorChannelClaim != nil {
+		return fmt.Errorf("operator channel claim publication must contain zero business events")
 	}
 	if len(c.Publications) != len(c.Finalization.Events) {
 		return fmt.Errorf("inbound publication event and publication command counts differ")
@@ -266,8 +281,9 @@ type Record struct {
 // an exact request duplicate and otherwise corresponds one-for-one with the
 // command's ordered publication plans.
 type CommitResult struct {
-	Record       Record
-	Publications []runtimebus.CommittedPublication
+	Record               Record
+	Publications         []runtimebus.CommittedPublication
+	OperatorChannelClaim *operatorchannel.ClaimSettlement
 }
 
 type EvidencePayload struct {
@@ -298,8 +314,8 @@ func (r Record) EventNames() []string {
 
 func BuildEvidencePayload(request Request, eventIDs, eventNames []string) (json.RawMessage, error) {
 	request = request.Normalized()
-	if len(eventIDs) < 1 || len(eventIDs) > 2 || len(eventNames) != len(eventIDs) {
-		return nil, fmt.Errorf("inbound evidence requires one or two ordered event ids and names")
+	if len(eventIDs) > 2 || len(eventNames) != len(eventIDs) {
+		return nil, fmt.Errorf("inbound evidence requires zero to two ordered event ids and names")
 	}
 	ids := make([]string, len(eventIDs))
 	names := make([]string, len(eventNames))

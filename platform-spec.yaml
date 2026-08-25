@@ -3,7 +3,7 @@ platform:
   version: 0.7.0
 interfaces:
   swarm.hitl-channel:
-    v1:
+    v2:
       kind: pack_channel
       schemas:
         presentation:
@@ -24,6 +24,7 @@ interfaces:
               token: {type: string, minLength: 1}
         nonempty_text: {type: string, minLength: 1}
         inbound_text: {type: string, minLength: 1}
+        conversation_scope: {type: string, enum: [direct, shared]}
       operations:
         deliver:
           effect_class: non_idempotent_write
@@ -55,12 +56,14 @@ interfaces:
             interaction_reference: {opaque: interaction_reference}
             external_account_reference: {opaque: external_account_reference}
             conversation_reference: {opaque: conversation_reference}
+            conversation_scope: {schema: conversation_scope}
             provider_message_reference: {opaque: delivery_reference}
         text:
           required_fields:
             text: {schema: inbound_text}
             external_account_reference: {opaque: external_account_reference}
             conversation_reference: {opaque: conversation_reference}
+            conversation_scope: {schema: conversation_scope}
             provider_message_reference: {opaque: delivery_reference}
 spec_authority:
   merge_bearing_owner: platform-spec.yaml
@@ -9507,9 +9510,9 @@ tool_model:
   hitl_channel_pack_interface:
     issue: '#1981'
     semantic_ownership_refactor: '#2112'
-    interface_identity: swarm.hitl-channel/v1
+    interface_identity: swarm.hitl-channel/v2
     owners:
-      immutable_interface: platform-spec.yaml interfaces.swarm.hitl-channel.v1
+      immutable_interface: platform-spec.yaml interfaces.swarm.hitl-channel.v2
       universal_envelope: internal/packs
       accepted_trigger_inventory: internal/providertriggers.CatalogSnapshot
       normalized_trigger_field_schema: internal/providertriggers.NormalizedEventFieldProjection.Schema
@@ -9596,6 +9599,59 @@ tool_model:
       SatisfactionPlan, OutboundBindingPlan, ExecutionTool, ChannelActivityTarget, and plan generation expose only immutable
       snapshots or finite operations. Registries and semantic sources return those immutable values directly; callers do
       not clone, reconstruct, normalize, or reparse admitted authority.
+    operator_account_binding:
+      issue: '#2240'
+      owners:
+        authenticated_principal: selected-store operator_principals singleton resolved only after canonical bearer authentication
+        operation_and_binding: selected-store operator_channel_operations and operator_channel_bindings
+        claim_settlement: selected-store inbound publication transaction plus operator_channel_claim_receipts
+        machine_proof: resolved Swarm state directory operator-channel-proofs.json
+        provider_fact: current packs.SatisfactionPlan text projection from satisfier-authenticated normalized v2 output
+        api: /v1/rpc channel.connect|reconnect|rebind|confirm|unbind|proof_revoke|list
+        cli: swarm channel connect|list|unbind
+      principal_rule: >
+        One selected store owns one deployment operator principal. A successfully authenticated bearer token resolves to
+        that principal but its hash remains transport-credential occurrence identity only; token rotation or revocation
+        never rewrites principal identity. A new/reset selected store mints a new principal. There is no adoption,
+        migration, alias, export, purge, or fallback path.
+      claim_rule: >
+        Setup accepts only exact canonical SWARM- plus sixteen base32-character text from one current pack-authorized v2
+        text fact. The fact carries opaque authenticated external-account and conversation references plus exactly direct
+        or shared scope. Provider display names, configured destinations, OS names, CLI strings, callback actions,
+        provider-native conversation kinds, proof filenames, and bearer-token hashes carry no authority. Accepted setup
+        claims commit in the same selected-store transaction as the inbound publication and publish zero raw or normalized
+        business events. Duplicate, expired, wrong-target, and rejected challenge-shaped facts receive one named durable
+        disposition; silent absence and consumed-but-unbound terminal states are forbidden.
+      confirmation_rule: >
+        A provider-authenticated claimant first moves the operation to awaiting_confirmation. The authenticated operator
+        must confirm that exact claimant before local binding mutation. connect requires no current binding, reconnect
+        requires the same account/conversation, rebind requires a different claimant and a current binding, and unbind
+        writes an explicit fence. Every transition is exact-revision fenced; same-key replay and same-confirmation replay
+        return the original outcome while changed input conflicts.
+      challenge_storage_rationale: >
+        The challenge is stored as plaintext operation evidence because it is not a credential and cannot independently
+        grant authority. It becomes meaningful only when presented through a current satisfier-authenticated text fact and
+        joined to authenticated operator confirmation. Challenges use cryptographic entropy, expire after ten minutes,
+        are single-settlement values, and remain in retained operation/receipt audit evidence after completion.
+      proof_rule: >
+        Operator-confirmed success may project one structured machine-local verified-account proof for the exact interface
+        identity. The proof contains opaque provider references, provider-neutral scope, original challenge/operation,
+        minting store/deployment, confirmation, consent scope, stable proof identity, and monotonic revision; it contains
+        no provider secret or independently validatable credential. Database claim/binding settlement commits first and
+        one durable proof responsibility makes file materialization idempotently recoverable. --no-save suppresses the
+        projection. Boot may create a missing local binding from an exact active proof and must announce that source.
+        Explicit local unbind blocks boot reuse; machine proof revocation immediately makes every exact derived binding
+        non-authoritative, and re-verification creates the next proof revision.
+      readback_rule: >
+        Generation-aware readback is the only operator-channel authority consumed downstream. It reports current, stale,
+        unbound, or revoked from the exact active interface generation, local binding revision/fence, and exact active proof
+        revision. Project replacement changes the active interface projection atomically; predecessor bindings remain loud
+        stale evidence and cannot authorize delivery. User-facing readback masks opaque account/conversation references and
+        presentation values. Stale or absent channels never drop notices; downstream delivery falls back to the mailbox.
+      no_legacy_rule: >
+        Active authority is swarm.hitl-channel/v2 only. v1 readers, aliases, dual plans, compatibility decoders, provider
+        branches in generic identity, pre-serve polling, copied-proof portability, synthesized claims, destination-as-
+        identity, and split claim/write settlement are unsupported.
     opaque_reference_slots:
       exact:
       - destination
@@ -9608,8 +9664,11 @@ tool_model:
         Each satisfier binds every slot exactly once to either a non-empty string schema or a closed object schema whose
         leaves are all required. Generic channel code validates and carries these semantic values but must not inspect their
         provider-owned fields or assume scalar, decimal, message-id, account-id, conversation-id, or callback-token shapes.
-        Provider-native conversation-kind vocabulary does not cross the v1 interface; direct-message admission remains a
-        provider trigger predicate.
+        When an opaque account or conversation reference enters the selected-store operator-channel text projection, an
+        admitted string remains exact and an admitted closed object is encoded as canonical JSON; no consumer parses its
+        provider-owned members or reconstructs identity from presentation text.
+        Provider-native conversation-kind vocabulary does not cross the v2 interface. The required provider-neutral
+        conversation_scope is exactly direct or shared and is projected once by the accepted provider trigger.
     operation_model:
       exact_operations:
       - deliver
@@ -9660,7 +9719,8 @@ tool_model:
       inbound:
         action: inbound.telegram.callback_action
         text: inbound.telegram.text_message
-        direct_private_predicate: 'when.equals: {message.chat.type: private} or {callback_query.message.chat.type: private}'
+        supported_scope_predicate: 'when.one_of admits private, group, or supergroup and text_enum_map projects private to direct and group or supergroup to shared'
+        authenticated_text_sender_predicate: message.from.id is required and message.sender_chat is absent
         branch_exclusivity: callback uses callback_query exists/message absent; text uses message exists/callback_query absent
         numeric_projection: external account and conversation integers use number_to_text and are admitted against their exact post-conversion string schemas; bounded provider message ids remain integers end to end
       rule: >
@@ -10109,11 +10169,12 @@ tool_model:
           payload field to recover a preview. Optional `author_subject` must declare its registered subject type and name one
           declared string field; both members are required together.
         paths: >
-          `from` and `when.exists/absent` use strict dotted paths relative to the decoded raw provider object. Empty
+          `from`, `when.exists/absent`, and `when.one_of` keys use strict dotted paths relative to the decoded raw provider object. Empty
           segments, rooted JSONPath, CEL, runtime namespaces, expression syntax, and unsupported segments fail pack load.
         predicates: >
-          Omitted `when` means every required field path exists. Authored `when` may add closed `exists` and `absent`
-          constraints. Verification proves every branch pair mutually exclusive; an overlap fails pack load with the two
+          Omitted `when` means every required field path exists. Authored `when` may add closed `exists`, `absent`, `equals`,
+          and finite exact-text `one_of` constraints. `one_of` requires at least one unique canonical value and narrows
+          runtime matching only; it does not prove branch exclusivity from disjoint value sets. Verification proves every branch pair mutually exclusive; an overlap fails pack load with the two
           events and a remediation naming `when.absent`. Runtime multi-match rejection remains a fail-closed unreachable
           backstop. No match publishes the raw event only.
         extraction: >
@@ -10122,8 +10183,11 @@ tool_model:
           or conversion failure rejects the provider delivery with pack id/version/manifest_hash, normalized event, field,
           and path provenance; no marker or output survives.
         conversion: >
-          The v1 closed enum contains exactly `number_to_text`. It converts a lossless JSON integer to canonical decimal
-          text. There is no implicit coercion and unknown conversions fail pack load.
+          The closed enum contains exactly `number_to_text` and `text_enum_map`. `number_to_text` converts a lossless JSON
+          integer to canonical decimal text. `text_enum_map` requires a finite exact input/output map, accepts text only,
+          and validates every mapped output against the declared post-conversion schema at pack admission. Source artifact
+          presence is not conversion or backend selection. There is no implicit coercion, missing-key fallback, or unknown
+          conversion behavior.
         output_route: >
           Raw and normalized outputs are explicit compiled kinds. Raw is exact-standing-target. Normalized is target-free
           but inherits the standing run. The provider-delivery batch carries the normalized kind plus the exact verified
@@ -13165,6 +13229,10 @@ platform_tables:
         - runtime_external_effect_operations
         - runtime_external_effect_attempts
         - runtime_provider_attempt_drains
+        - operator_principals
+        - operator_channel_operations
+        - operator_channel_bindings
+        - operator_channel_claim_receipts
         - run_fork_selected_contract_runtime_executions
         - budget_admission_scopes
         - runtime_effect_budget_reservations
@@ -13510,6 +13578,101 @@ platform_tables:
             FOREIGN KEY (run_id, revision) REFERENCES run_fork_revisions(run_id, revision) ON DELETE CASCADE,
             INDEX idx_run_fork_fact_revision_snapshot (run_id, revision, family, fact_key)
         );
+    operator_principals:
+      description: >-
+        Selected-store singleton authenticated operator principal. A successfully authenticated API bearer
+        credential resolves to this principal; credential hashes are transport occurrence identity only.
+        Fresh/reset stores mint a new principal and no migration, adoption, alias, or fallback exists.
+      ddl: |
+        CREATE TABLE operator_principals (
+            singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+            principal_id UUID NOT NULL UNIQUE,
+            created_at   TIMESTAMPTZ NOT NULL
+        );
+    operator_channel_operations:
+      description: >-
+        Durable owner of one connect, reconnect, rebind, or unbind operation. It owns exact request replay,
+        challenge lifecycle, provider-authenticated claimant, operator confirmation, binding revision, and
+        the bounded proof-file projection responsibility. A challenge cannot be terminally consumed without
+        either a bound result or the explicit rejected/expired terminal disposition.
+      ddl: |
+        CREATE TABLE operator_channel_operations (
+            operation_id UUID PRIMARY KEY,
+            operation_kind TEXT NOT NULL CHECK (operation_kind IN ('connect','reconnect','rebind','unbind')),
+            principal_id UUID NOT NULL REFERENCES operator_principals(principal_id),
+            interface_key TEXT NOT NULL,
+            interface_ref TEXT NOT NULL CHECK (interface_ref = 'swarm.hitl-channel/v2'),
+            channel_pack_id TEXT NOT NULL,
+            channel_pack_version TEXT NOT NULL,
+            channel_manifest_hash TEXT NOT NULL,
+            semantic_generation TEXT NOT NULL,
+            request_key_hash TEXT NOT NULL UNIQUE,
+            request_hash TEXT NOT NULL,
+            expected_binding_revision BIGINT NOT NULL CHECK (expected_binding_revision >= 0),
+            challenge TEXT UNIQUE,
+            state TEXT NOT NULL CHECK (state IN ('awaiting_claim','awaiting_confirmation','bound','rejected','expired','unbound')),
+            operation_revision BIGINT NOT NULL CHECK (operation_revision > 0),
+            binding_revision BIGINT CHECK (binding_revision > 0),
+            external_account_reference TEXT,
+            conversation_reference TEXT,
+            conversation_scope TEXT CHECK (conversation_scope IS NULL OR conversation_scope IN ('direct','shared')),
+            account_presentation TEXT,
+            claim_provider TEXT,
+            claim_provider_event_id TEXT,
+            claim_publication_id UUID,
+            claim_authorization TEXT,
+            claim_disposition TEXT CHECK (claim_disposition IS NULL OR claim_disposition IN ('consumed_by_binding','rejected_binding_claim')),
+            save_proof BOOLEAN NOT NULL,
+            planned_proof_id UUID,
+            planned_proof_revision BIGINT CHECK (planned_proof_revision IS NULL OR planned_proof_revision > 0),
+            proof_id UUID,
+            proof_revision BIGINT CHECK (proof_revision IS NULL OR proof_revision > 0),
+            proof_status TEXT NOT NULL CHECK (proof_status IN ('pending','active','revoked','failed','skipped')),
+            proof_failure TEXT,
+            requested_at TIMESTAMPTZ NOT NULL,
+            expires_at TIMESTAMPTZ,
+            claimed_at TIMESTAMPTZ,
+            completed_at TIMESTAMPTZ,
+            updated_at TIMESTAMPTZ NOT NULL,
+            CHECK ((operation_kind = 'unbind' AND challenge IS NULL AND state = 'unbound') OR (operation_kind <> 'unbind' AND challenge IS NOT NULL)),
+            CHECK (state NOT IN ('awaiting_confirmation','bound','rejected') OR (external_account_reference IS NOT NULL AND conversation_reference IS NOT NULL AND conversation_scope IS NOT NULL)),
+            CHECK ((state IN ('bound','unbound')) = (binding_revision IS NOT NULL)),
+            CHECK ((save_proof AND planned_proof_id IS NOT NULL AND planned_proof_revision IS NOT NULL) OR (NOT save_proof AND planned_proof_id IS NULL AND planned_proof_revision IS NULL)),
+            CHECK ((proof_status IN ('pending','active','failed','revoked') AND proof_id IS NOT NULL AND proof_revision IS NOT NULL) OR (proof_status = 'skipped' AND proof_id IS NULL AND proof_revision IS NULL)),
+            INDEX idx_operator_channel_operations_interface (interface_key, requested_at),
+            INDEX idx_operator_channel_operations_state (state, expires_at),
+            INDEX idx_operator_channel_operations_proof (proof_status, updated_at)
+        );
+    operator_channel_bindings:
+      description: >-
+        Current selected-store local binding or explicit unbind fence for one exact pack-qualified interface.
+        A bound row is authoritative only when its semantic generation is current and any referenced machine-local
+        proof identity/revision remains active. Unbind is persisted state, never inferred from row absence.
+      ddl: |
+        CREATE TABLE operator_channel_bindings (
+            interface_key TEXT PRIMARY KEY,
+            principal_id UUID NOT NULL REFERENCES operator_principals(principal_id),
+            interface_ref TEXT NOT NULL CHECK (interface_ref = 'swarm.hitl-channel/v2'),
+            channel_pack_id TEXT NOT NULL,
+            channel_pack_version TEXT NOT NULL,
+            channel_manifest_hash TEXT NOT NULL,
+            semantic_generation TEXT NOT NULL,
+            external_account_reference TEXT,
+            conversation_reference TEXT,
+            conversation_scope TEXT CHECK (conversation_scope IS NULL OR conversation_scope IN ('direct','shared')),
+            account_presentation TEXT,
+            binding_revision BIGINT NOT NULL CHECK (binding_revision > 0),
+            status TEXT NOT NULL CHECK (status IN ('current','unbound')),
+            source TEXT CHECK (source IS NULL OR source IN ('live_verification','local_proof')),
+            proof_id UUID,
+            proof_revision BIGINT CHECK (proof_revision IS NULL OR proof_revision > 0),
+            operation_id UUID NOT NULL REFERENCES operator_channel_operations(operation_id),
+            updated_at TIMESTAMPTZ NOT NULL,
+            CHECK ((status = 'current' AND external_account_reference IS NOT NULL AND conversation_reference IS NOT NULL AND conversation_scope IS NOT NULL AND source IS NOT NULL) OR (status = 'unbound' AND external_account_reference IS NULL AND conversation_reference IS NULL AND conversation_scope IS NULL AND source IS NULL)),
+            CHECK (source <> 'local_proof' OR (proof_id IS NOT NULL AND proof_revision IS NOT NULL)),
+            INDEX idx_operator_channel_bindings_principal (principal_id, interface_key),
+            INDEX idx_operator_channel_bindings_proof (proof_id, proof_revision)
+        );
     inbound_publications:
       description: >-
         Permanent inbound provider request/idempotency owner. The parent reserves one
@@ -13543,7 +13706,7 @@ platform_tables:
             state                        TEXT NOT NULL CHECK (state IN ('prepared', 'committed')),
             created_at                   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             committed_at                 TIMESTAMPTZ,
-            CHECK ((state = 'prepared' AND marker_event_id IS NULL AND output_count = 0 AND committed_at IS NULL) OR (state = 'committed' AND marker_event_id IS NOT NULL AND output_count >= 1 AND output_count <= 2 AND committed_at IS NOT NULL)),
+            CHECK ((state = 'prepared' AND marker_event_id IS NULL AND output_count = 0 AND committed_at IS NULL) OR (state = 'committed' AND marker_event_id IS NOT NULL AND output_count >= 0 AND output_count <= 2 AND committed_at IS NOT NULL)),
             UNIQUE (provider, entity_id, provider_event_id),
             INDEX idx_inbound_publications_run (resolved_run_id, created_at),
             INDEX idx_inbound_publications_service (stable_service_id, created_at),
@@ -13572,6 +13735,24 @@ platform_tables:
             PRIMARY KEY (publication_id, ordinal),
             CHECK ((output_kind = 'raw' AND pack_id IS NULL AND pack_version IS NULL AND manifest_hash IS NULL AND observed_generation_id IS NULL) OR (output_kind = 'normalized' AND pack_id IS NOT NULL AND pack_version IS NOT NULL AND manifest_hash IS NOT NULL AND observed_generation_id IS NOT NULL)),
             INDEX idx_inbound_publication_events_event (event_id)
+        );
+    operator_channel_claim_receipts:
+      description: >-
+        Immutable selected-store disposition for every challenge-shaped provider fact admitted by the operator-channel
+        owner. Accepted setup claims and rejected/expired/wrong-target claims are named and retained. The receipt commits
+        in the inbound publication transaction; accepted setup facts publish zero raw or normalized business events.
+      ddl: |
+        CREATE TABLE operator_channel_claim_receipts (
+            publication_id UUID PRIMARY KEY,
+            provider TEXT NOT NULL,
+            provider_event_id TEXT NOT NULL,
+            interface_key TEXT NOT NULL,
+            challenge TEXT NOT NULL,
+            operation_id UUID REFERENCES operator_channel_operations(operation_id),
+            disposition TEXT NOT NULL CHECK (disposition IN ('consumed_by_binding','rejected_binding_claim')),
+            reason TEXT NOT NULL,
+            recorded_at TIMESTAMPTZ NOT NULL,
+            UNIQUE (provider, provider_event_id, interface_key)
         );
     agent_topology_source_set_head:
       description: >-
@@ -22229,6 +22410,14 @@ cli_specification:
             normalization: trim only; case-sensitive
             display_projection: full
             display_shortening_eligible: false
+          operator_channel:
+            candidate_source: /v1/rpc channel.list
+            scope_mode: bounded_catalog
+            scope_rule: active exact pack-qualified operator channel interfaces
+            normalization_mode: trim_case_sensitive
+            normalization: trim only; exact selector required
+            display_projection: full
+            display_shortening_eligible: false
         input_rows:
           agent_frame_agent: {command: swarm agent frame, selector: 'arg:agent-id', family: agent, mode: full_only}
           agent_frame_bundle_hash: {command: swarm agent frame, selector: 'flag:bundle-hash', family: bundle, mode: full_only}
@@ -22314,6 +22503,8 @@ cli_specification:
           standing_reset_service: {command: swarm standing reset, selector: 'arg:service-id', family: standing_service, mode: full_only, safety: mutating}
           import_pack: {command: swarm import, selector: 'arg:pack-id', family: pack, mode: full_only, safety: mutating}
           packs_show_pack: {command: swarm packs show, selector: 'arg:pack-id', family: pack, mode: full_only}
+          channel_connect_interface: {command: swarm channel connect, selector: 'arg:interface', family: operator_channel, mode: full_only, safety: mutating}
+          channel_unbind_interface: {command: swarm channel unbind, selector: 'arg:interface', family: operator_channel, mode: full_only, safety: mutating}
           mutating_idempotency: {command: 'swarm <mutating>', selector: 'flag:idempotency-key', family: none, mode: different_concept, scope_rule: caller-authored retry key}
           connections_key: {command: 'swarm connections <key>', selector: 'arg:key', family: none, mode: different_concept, scope_rule: authored stable connection key}
           secrets_key: {command: 'swarm secrets <key>', selector: 'arg:key', family: none, mode: different_concept, scope_rule: authored stable secret key}
@@ -22733,6 +22924,31 @@ cli_specification:
               classification: split
               owner_issue: '#1712'
               reason: managed-credential command output has not been migrated to the shared output-mode owner.
+            channel:
+              command: swarm channel
+              classification: exception
+              exception_rule: group_help
+            channel_connect:
+              command: swarm channel connect
+              classification: shared_output
+              fact_owner: /v1/rpc channel.connect|reconnect|rebind then channel.confirm
+              json_shape: channel operation result with exact interface, state, revisions, claimant presentation, scope, and expiry
+              quiet_values:
+              - operation_id
+            channel_list:
+              command: swarm channel list
+              classification: shared_output
+              fact_owner: /v1/rpc channel.list
+              json_shape: principal_id and ordered generation-aware channel readback rows
+              quiet_values:
+              - exact interface selector per row
+            channel_unbind:
+              command: swarm channel unbind
+              classification: shared_output
+              fact_owner: /v1/rpc channel.unbind
+              json_shape: channel unbind operation result with exact successor binding revision
+              quiet_values:
+              - operation_id
             serve:
               command: swarm serve
               classification: exception
@@ -24392,6 +24608,29 @@ cli_specification:
         - multi-tenant per-user token vaults
         - DB/AWS SigV4/non-HTTP/native connector auth
         - external vault/team managed credential UI/API
+    channel:
+      command: swarm channel connect|list|unbind
+      group: run_operate
+      tier: must_have
+      implementation_status: implemented
+      owner: tool_model.hitl_channel_pack_interface.operator_account_binding
+      behavior: >
+        API-only operator-channel handshake and local binding lifecycle. `connect <interface>` resolves one current
+        exact pack-qualified interface, starts connect/reconnect/rebind under expected revision, waits for one
+        satisfier-authenticated claimant, displays its masked presentation and scope, and requires explicit operator
+        confirmation. `list` renders generation-aware current/stale/unbound/revoked and pending state with an exact
+        selector. `unbind` writes a local fence and does not revoke the machine proof. Non-exact selectors fail closed;
+        the CLI never reads the selected store, provider payload, or provider HTTP directly.
+      subcommands:
+        connect:
+          command: swarm channel connect <interface> [--no-save] [--replace] [--yes] [--json|--quiet]
+          api_owner: /v1/rpc channel.connect|reconnect|rebind then channel.confirm
+        list:
+          command: swarm channel list [--json|--quiet]
+          api_owner: /v1/rpc channel.list
+        unbind:
+          command: swarm channel unbind <interface> [--json|--quiet]
+          api_owner: /v1/rpc channel.unbind
     serve:
       command: swarm serve [flags]
       group: getting_started
@@ -27038,7 +27277,7 @@ api_specification:
       \ ships) and any future external SDK or third-party tooling. Retired `swarm investigate *` commands are legacy consumers\
       \ only and are not a source for new CLI topology.\n"
   namespaces:
-    description: "Ten canonical owner namespaces. Every concept the API exposes lives in\nexactly one namespace. No overlap.\
+    description: "Eleven canonical owner namespaces. Every concept the API exposes lives in\nexactly one namespace. No overlap.\
       \ Two ownership rules locked because\nthey were the source of the prior dual-API spec drift:\n  - conversation.* owns\
       \ sessions, turns, transcripts. agent.* owns\n    agent identity, current status, and control actions only. Reading\n\
       \    a session goes through conversation.*, not agent.*.\n  - event.subscribe is the only canonical event stream. run.subscribe_trace\n\
@@ -27068,6 +27307,9 @@ api_specification:
         streams: none
       runtime:
         owns: runtime control (ingress pause/resume), runtime observability (structured logs, incidents)
+        streams: none
+      channel:
+        owns: authenticated operator principal channel-account binding, confirmation, local proof lifecycle, and readback
         streams: none
       test:
         owns: public deterministic test-runner setup/pre-state mutation helpers only; not product runtime mutation
@@ -27274,6 +27516,12 @@ api_specification:
       - conversation.fork
       - conversation.fork_chat
       - conversation.fork_delete
+      - channel.connect
+      - channel.reconnect
+      - channel.rebind
+      - channel.unbind
+      - channel.confirm
+      - channel.proof_revoke
       - test.setup_entities
     mailbox:
       tagged_projection: 'mailbox.list/get are a read-only tagged union of notice and decision_card. Generic mailbox rows own
@@ -27382,6 +27630,8 @@ api_specification:
       - read:runtime
       - control:runtime
       - admin:runtime
+      - read:channels
+      - control:channels
       assignment_rule: Each method in the method catalog declares its required scope(s) in its `scope.required` field. Methods
         that join across resources declare the union of relevant read scopes.
       v1_enforcement: Scope check is NOT enforced in v1. Every valid bearer token grants every scope. Spec declarations exist
@@ -30995,6 +31245,135 @@ api_specification:
           ok:
             type: boolean
             const: true
+      OperatorChannelInterface:
+        type: object
+        additionalProperties: false
+        required: [interface_ref, channel_pack_id, channel_pack_version, channel_manifest_hash, semantic_generation, selector]
+        properties:
+          interface_ref: {type: string, const: swarm.hitl-channel/v2}
+          channel_pack_id: {type: string, minLength: 1}
+          channel_pack_version: {type: string, minLength: 1}
+          channel_manifest_hash: {type: string, minLength: 1}
+          semantic_generation: {type: string, minLength: 1}
+          selector:
+            type: string
+            minLength: 1
+            description: Exact opaque selector derived from the complete pack-qualified semantic identity; short interface or pack names are never accepted.
+      OperatorChannelOperation:
+        type: object
+        additionalProperties: false
+        required: [operation_id, kind, principal_id, interface, state, revision, save_proof, proof_status, requested_at]
+        properties:
+          operation_id: {$ref: '#/components/schemas/OpaqueId'}
+          kind: {type: string, enum: [connect, reconnect, rebind, unbind]}
+          principal_id: {$ref: '#/components/schemas/OpaqueId'}
+          interface: {$ref: '#/components/schemas/OperatorChannelInterface'}
+          challenge: {type: string, pattern: '^SWARM-[A-Z2-7]{16}$'}
+          state: {type: string, enum: [awaiting_claim, awaiting_confirmation, bound, rejected, expired, unbound]}
+          revision: {type: integer, minimum: 1}
+          binding_revision: {type: integer, minimum: 1}
+          external_account_reference: {type: string}
+          conversation_reference: {type: string}
+          conversation_scope: {type: string, enum: [direct, shared]}
+          account_presentation: {type: string}
+          save_proof: {type: boolean}
+          proof_id: {$ref: '#/components/schemas/OpaqueId'}
+          proof_revision: {type: integer, minimum: 1}
+          proof_status: {type: string, enum: [pending, active, revoked, failed, skipped]}
+          claim_disposition: {type: string, enum: [consumed_by_binding, rejected_binding_claim]}
+          requested_at: {$ref: '#/components/schemas/Timestamp'}
+          expires_at: {$ref: '#/components/schemas/Timestamp'}
+          claimed_at: {$ref: '#/components/schemas/Timestamp'}
+          completed_at: {$ref: '#/components/schemas/Timestamp'}
+      OperatorChannelBinding:
+        type: object
+        additionalProperties: false
+        required: [principal_id, interface, revision, status, operation_id, updated_at]
+        properties:
+          principal_id: {$ref: '#/components/schemas/OpaqueId'}
+          interface: {$ref: '#/components/schemas/OperatorChannelInterface'}
+          external_account_reference: {type: string}
+          conversation_reference: {type: string}
+          conversation_scope: {type: string, enum: [direct, shared]}
+          account_presentation: {type: string}
+          revision: {type: integer, minimum: 1}
+          status: {type: string, enum: [current, stale, unbound, revoked]}
+          source: {type: string, enum: [live_verification, local_proof]}
+          proof_id: {$ref: '#/components/schemas/OpaqueId'}
+          proof_revision: {type: integer, minimum: 1}
+          operation_id: {$ref: '#/components/schemas/OpaqueId'}
+          updated_at: {$ref: '#/components/schemas/Timestamp'}
+      OperatorChannelProof:
+        type: object
+        additionalProperties: false
+        required: [format, proof_id, revision, status, interface, external_account_reference, conversation_reference, conversation_scope, method, challenge, original_operation_id, minting_store_id, minting_deployment_id, verified_at, operator_confirmed, consent_scopes]
+        properties:
+          format: {type: string, const: swarm-verified-account-proof-v1}
+          proof_id: {$ref: '#/components/schemas/OpaqueId'}
+          revision: {type: integer, minimum: 1}
+          status: {type: string, enum: [active, revoked]}
+          interface: {$ref: '#/components/schemas/OperatorChannelInterface'}
+          external_account_reference: {type: string, minLength: 1}
+          conversation_reference: {type: string, minLength: 1}
+          conversation_scope: {type: string, enum: [direct, shared]}
+          account_presentation: {type: string}
+          method: {type: string, enum: [connect, reconnect, rebind]}
+          challenge: {type: string, pattern: '^SWARM-[A-Z2-7]{16}$'}
+          original_operation_id: {$ref: '#/components/schemas/OpaqueId'}
+          minting_store_id: {$ref: '#/components/schemas/OpaqueId'}
+          minting_deployment_id: {$ref: '#/components/schemas/OpaqueId'}
+          verified_at: {$ref: '#/components/schemas/Timestamp'}
+          operator_confirmed: {type: boolean, const: true}
+          consent_scopes:
+            type: array
+            minItems: 1
+            uniqueItems: true
+            items: {type: string, enum: [notify, decide]}
+      OperatorChannelReadback:
+        type: object
+        additionalProperties: false
+        required: [principal_id, interface, status]
+        properties:
+          principal_id: {$ref: '#/components/schemas/OpaqueId'}
+          interface: {$ref: '#/components/schemas/OperatorChannelInterface'}
+          status: {type: string, enum: [current, stale, unbound, revoked]}
+          reason: {type: string}
+          binding_revision: {type: integer, minimum: 1}
+          external_account_reference: {type: string}
+          conversation_reference: {type: string}
+          conversation_scope: {type: string, enum: [direct, shared]}
+          account_presentation: {type: string}
+          source: {type: string, enum: [live_verification, local_proof]}
+          proof_id: {$ref: '#/components/schemas/OpaqueId'}
+          proof_revision: {type: integer, minimum: 1}
+          proof_status: {type: string, enum: [pending, active, revoked, failed, skipped]}
+          consent_scopes:
+            type: array
+            uniqueItems: true
+            items: {type: string, enum: [notify, decide]}
+          pending_operation: {$ref: '#/components/schemas/OperatorChannelOperation'}
+      OperatorChannelOperationResult:
+        type: object
+        additionalProperties: false
+        required: [operation]
+        properties:
+          operation: {$ref: '#/components/schemas/OperatorChannelOperation'}
+          binding: {$ref: '#/components/schemas/OperatorChannelBinding'}
+      OperatorChannelListResult:
+        type: object
+        additionalProperties: false
+        required: [principal_id, channels]
+        properties:
+          principal_id: {$ref: '#/components/schemas/OpaqueId'}
+          channels:
+            type: array
+            items: {$ref: '#/components/schemas/OperatorChannelReadback'}
+      OperatorChannelProofResult:
+        type: object
+        additionalProperties: false
+        required: [proof]
+        properties:
+          proof: {$ref: '#/components/schemas/OperatorChannelProof'}
       RunStopRecoveryResult:
         type: object
         additionalProperties: false
@@ -31148,6 +31527,41 @@ api_specification:
           root-input EVENT_NOT_DECLARED facts. Event-publish and replay invalid-event mapping remains a separate
           event-catalog concept.
     errors:
+      CHANNEL_INTERFACE_NOT_FOUND:
+        type: object
+        additionalProperties: false
+        required: [reason]
+        properties: {reason: {type: string}}
+      CHANNEL_INTERFACE_AMBIGUOUS:
+        type: object
+        additionalProperties: false
+        required: [reason]
+        properties: {reason: {type: string}}
+      CHANNEL_BINDING_CONFLICT:
+        type: object
+        additionalProperties: false
+        required: [reason]
+        properties: {reason: {type: string}}
+      CHANNEL_REVISION_CONFLICT:
+        type: object
+        additionalProperties: false
+        required: [reason]
+        properties: {reason: {type: string}}
+      CHANNEL_OPERATION_NOT_FOUND:
+        type: object
+        additionalProperties: false
+        required: [reason]
+        properties: {reason: {type: string}}
+      CHANNEL_OPERATION_TERMINAL:
+        type: object
+        additionalProperties: false
+        required: [reason]
+        properties: {reason: {type: string}}
+      CHANNEL_PROOF_UNAVAILABLE:
+        type: object
+        additionalProperties: false
+        required: [reason]
+        properties: {reason: {type: string}}
       IDEMPOTENCY_CONFLICT:
         type: object
         additionalProperties: false
@@ -34228,6 +34642,83 @@ api_specification:
             next_cursor:
               $ref: '#/components/schemas/Cursor'
       errors: []
+    channel.connect:
+      tier: must_have
+      description: Begin an exact revision-fenced binding for an unbound v2 channel interface. The returned short-lived challenge is not a credential; only a current satisfier-authenticated text fact followed by operator confirmation can bind it.
+      scope: {required: [control:channels]}
+      idempotency: bearer-token-scoped API request occurrence plus stable-principal durable operation replay.
+      params:
+      - {name: interface, required: true, schema: {type: string, minLength: 1}}
+      - {name: expected_revision, required: true, schema: {type: integer, minimum: 0}}
+      - {name: save_proof, required: false, schema: {type: boolean, default: true}}
+      - {name: idempotency_key, required: false, schema: {type: string}}
+      result: {name: result, required: true, schema: {$ref: '#/components/schemas/OperatorChannelOperationResult'}}
+      errors: [CHANNEL_INTERFACE_NOT_FOUND, CHANNEL_INTERFACE_AMBIGUOUS, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, IDEMPOTENCY_CONFLICT]
+    channel.reconnect:
+      tier: must_have
+      description: Re-verify the same authenticated account and conversation against the current exact binding revision and active interface generation.
+      scope: {required: [control:channels]}
+      idempotency: bearer-token-scoped API request occurrence plus stable-principal durable operation replay.
+      params:
+      - {name: interface, required: true, schema: {type: string, minLength: 1}}
+      - {name: expected_revision, required: true, schema: {type: integer, minimum: 1}}
+      - {name: save_proof, required: false, schema: {type: boolean, default: true}}
+      - {name: idempotency_key, required: false, schema: {type: string}}
+      result: {name: result, required: true, schema: {$ref: '#/components/schemas/OperatorChannelOperationResult'}}
+      errors: [CHANNEL_INTERFACE_NOT_FOUND, CHANNEL_INTERFACE_AMBIGUOUS, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, IDEMPOTENCY_CONFLICT]
+    channel.rebind:
+      tier: must_have
+      description: Replace a current binding with a different satisfier-authenticated claimant after explicit operator confirmation; it never silently selects or overwrites an account.
+      scope: {required: [control:channels]}
+      idempotency: bearer-token-scoped API request occurrence plus stable-principal durable operation replay.
+      params:
+      - {name: interface, required: true, schema: {type: string, minLength: 1}}
+      - {name: expected_revision, required: true, schema: {type: integer, minimum: 1}}
+      - {name: save_proof, required: false, schema: {type: boolean, default: true}}
+      - {name: idempotency_key, required: false, schema: {type: string}}
+      result: {name: result, required: true, schema: {$ref: '#/components/schemas/OperatorChannelOperationResult'}}
+      errors: [CHANNEL_INTERFACE_NOT_FOUND, CHANNEL_INTERFACE_AMBIGUOUS, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, IDEMPOTENCY_CONFLICT]
+    channel.confirm:
+      tier: must_have
+      description: Confirm or reject the exact provider-authenticated claimant on one pending operation. Same revision and decision replay returns the terminal outcome without repeating claim or binding mutation.
+      scope: {required: [control:channels]}
+      idempotency: per the selected-store API idempotency owner, scoped to the bearer-token request occurrence and exact pending operation; operator authority remains the stable principal.
+      params:
+      - {name: operation_id, required: true, schema: {$ref: '#/components/schemas/OpaqueId'}}
+      - {name: expected_revision, required: true, schema: {type: integer, minimum: 1}}
+      - {name: approve, required: true, schema: {type: boolean}}
+      - {name: idempotency_key, required: false, schema: {type: string}}
+      result: {name: result, required: true, schema: {$ref: '#/components/schemas/OperatorChannelOperationResult'}}
+      errors: [CHANNEL_OPERATION_NOT_FOUND, CHANNEL_OPERATION_TERMINAL, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, IDEMPOTENCY_CONFLICT]
+    channel.unbind:
+      tier: must_have
+      description: Persist an explicit revision-fenced local unbind so an available machine proof cannot silently recreate the deployment binding.
+      scope: {required: [control:channels]}
+      idempotency: bearer-token-scoped API request occurrence plus stable-principal durable operation replay.
+      params:
+      - {name: interface, required: true, schema: {type: string, minLength: 1}}
+      - {name: expected_revision, required: true, schema: {type: integer, minimum: 1}}
+      - {name: idempotency_key, required: false, schema: {type: string}}
+      result: {name: result, required: true, schema: {$ref: '#/components/schemas/OperatorChannelOperationResult'}}
+      errors: [CHANNEL_INTERFACE_NOT_FOUND, CHANNEL_INTERFACE_AMBIGUOUS, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, IDEMPOTENCY_CONFLICT]
+    channel.proof_revoke:
+      tier: must_have
+      description: Revoke one exact machine-local verified-account proof revision. Derived local bindings immediately read back revoked and cannot grant authority.
+      scope: {required: [control:channels]}
+      idempotency: per the selected-store API idempotency owner, scoped to the bearer-token request occurrence and exact interface proof revision; operator authority remains the stable principal.
+      params:
+      - {name: interface, required: true, schema: {type: string, minLength: 1}}
+      - {name: expected_revision, required: true, schema: {type: integer, minimum: 1}}
+      - {name: idempotency_key, required: false, schema: {type: string}}
+      result: {name: result, required: true, schema: {$ref: '#/components/schemas/OperatorChannelProofResult'}}
+      errors: [CHANNEL_INTERFACE_NOT_FOUND, CHANNEL_INTERFACE_AMBIGUOUS, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, IDEMPOTENCY_CONFLICT]
+    channel.list:
+      tier: must_have
+      description: Return generation-aware selected-store binding and machine-proof readback for every current or retained channel interface. Raw account references and display values are masked.
+      scope: {required: [read:channels]}
+      params: []
+      result: {name: result, required: true, schema: {$ref: '#/components/schemas/OperatorChannelListResult'}}
+      errors: [CHANNEL_PROOF_UNAVAILABLE]
     runtime.pause:
       tier: should_have
       description: Pause runtime ingress. Queueable event-producing ingress is persisted but not dispatched until runtime.resume;

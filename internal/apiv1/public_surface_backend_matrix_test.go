@@ -1120,6 +1120,10 @@ func publicSurfaceOperatorReadProofRefCoversMethodBackend(ref publicSurfaceProof
 
 func publicSurfaceSelectedOperatorReadAPIProofs() map[string]publicSurfaceSelectedOperatorReadAPIProof {
 	return map[string]publicSurfaceSelectedOperatorReadAPIProof{
+		"TestServedParityHarnessOperatorChannelLifecycle": {
+			Backends: []string{"default_sqlite", "explicit_postgres"},
+			Methods:  []string{"channel.list"},
+		},
 		"TestServedParityHarnessConversationForkLifecycle": {
 			Backends: []string{"default_sqlite", "explicit_postgres"},
 			Methods:  []string{"conversation.fork_list", "conversation.fork_view"},

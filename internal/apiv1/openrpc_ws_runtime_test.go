@@ -365,6 +365,15 @@ func approvedWebSocketRuntimeMethods() []string {
 func approvedHTTPRuntimeTransportMethods() []string {
 	out := append([]string{}, approvedReadOnlyHTTPRuntimeMethods()...)
 	out = append(out, approvedMutatingHTTPRuntimeMethods()...)
+	out = append(out,
+		"channel.confirm",
+		"channel.connect",
+		"channel.list",
+		"channel.proof_revoke",
+		"channel.rebind",
+		"channel.reconnect",
+		"channel.unbind",
+	)
 	sort.Strings(out)
 	return out
 }

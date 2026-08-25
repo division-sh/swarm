@@ -37,13 +37,18 @@ normalized_events:
         from: callback_query.message.chat.id
         schema: {type: string, pattern: '^-?[0-9]+$', minLength: 1, maxLength: 17}
         convert: number_to_text
+      conversation_scope:
+        from: callback_query.message.chat.type
+        schema: {type: string, enum: [direct, shared]}
+        convert: text_enum_map
+        values: {private: direct, group: shared, supergroup: shared}
       provider_message_reference:
         from: callback_query.message.message_id
         schema: {type: integer, minimum: 1, maximum: 2147483647}
     when:
       absent: [message]
-      equals:
-        callback_query.message.chat.type: private
+      one_of:
+        callback_query.message.chat.type: [private, group, supergroup]
   - event: inbound.telegram.text_message
     author_summary_field: text
     author_subject:
@@ -61,13 +66,18 @@ normalized_events:
         from: message.chat.id
         schema: {type: string, pattern: '^-?[0-9]+$', minLength: 1, maxLength: 17}
         convert: number_to_text
+      conversation_scope:
+        from: message.chat.type
+        schema: {type: string, enum: [direct, shared]}
+        convert: text_enum_map
+        values: {private: direct, group: shared, supergroup: shared}
       provider_message_reference:
         from: message.message_id
         schema: {type: integer, minimum: 1, maximum: 2147483647}
     when:
-      absent: [callback_query]
-      equals:
-        message.chat.type: private
+      absent: [callback_query, message.sender_chat]
+      one_of:
+        message.chat.type: [private, group, supergroup]
 ack:
   mode: durable_before_dispatch
 metadata:

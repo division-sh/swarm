@@ -318,7 +318,57 @@ mutating_api_parity_ledger:
       SQLite and explicit Postgres, including selected bundle-scope validation,
       idempotency replay, persisted entity state/mutation rows on an event-created
       run, and generic settlement postconditions.
+  - method: channel.connect
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: operator_channel_connect_lifecycle
+    proof_refs:
+      - {kind: go_test, name: TestServedParityHarnessOperatorChannelLifecycle}
+    notes: Exact interface selection and the awaiting-claim operation are served through the selected-store owner.
+  - method: channel.reconnect
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: operator_channel_reconnect_lifecycle
+    proof_refs:
+      - {kind: go_test, name: TestServedParityHarnessOperatorChannelLifecycle}
+    notes: Same-account re-verification remains revision-fenced on both selected stores.
+  - method: channel.rebind
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: operator_channel_rebind_lifecycle
+    proof_refs:
+      - {kind: go_test, name: TestServedParityHarnessOperatorChannelLifecycle}
+    notes: Different-account replacement is claimant-confirmed and revision-fenced on both selected stores.
+  - method: channel.confirm
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: operator_channel_confirm_lifecycle
+    proof_refs:
+      - {kind: go_test, name: TestServedParityHarnessOperatorChannelLifecycle}
+    notes: Operator confirmation advances the local binding and materializes its machine proof responsibility.
+  - method: channel.unbind
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: operator_channel_unbind_lifecycle
+    proof_refs:
+      - {kind: go_test, name: TestServedParityHarnessOperatorChannelLifecycle}
+    notes: Explicit unbind establishes the local proof-reuse fence on both selected stores.
+  - method: channel.proof_revoke
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: operator_channel_proof_revoke_lifecycle
+    proof_refs:
+      - {kind: go_test, name: TestServedParityHarnessOperatorChannelLifecycle}
+    notes: Machine-proof revocation is exact-interface and expected-revision fenced with revoked readback.
 operator_read_api_parity_ledger:
+  - method: channel.list
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - kind: go_test
+        name: TestServedParityHarnessOperatorChannelLifecycle
+        backends: [default_sqlite, explicit_postgres]
+    notes: The served selected-store lifecycle proves stable-principal and exact binding/proof readback on both backends.
   - method: agent.frame
     classification: different_semantic_concept_with_proof
     backends: [default_sqlite, explicit_postgres]
