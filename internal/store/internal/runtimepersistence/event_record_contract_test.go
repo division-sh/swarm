@@ -431,6 +431,7 @@ func TestEventRecordBatchHydrationContractParity(t *testing.T) {
 			}
 
 			runID := uuid.NewString()
+			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			createdAt := time.Date(2026, 7, 18, 18, 0, 0, 0, time.UTC)
 			ids := make([]string, batchSize*2+3)
 			payloads := make(map[string][]byte, len(ids))
@@ -451,7 +452,7 @@ func TestEventRecordBatchHydrationContractParity(t *testing.T) {
 						payload, 0, runID, events.EventEnvelope{}, eventAt,
 					)
 				}
-				if err := commitSemanticEventFixture(ctx, store, event); err != nil {
+				if err := insertCanonicalEventRecordFixture(ctx, store, event); err != nil {
 					t.Fatalf("commit event %d: %v", index, err)
 				}
 			}
