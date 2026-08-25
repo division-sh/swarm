@@ -79,16 +79,16 @@ item.*: {}
 	}
 
 	// Every readback is detached from the immutable compiled value.
-	event.AcceptanceSchema()["type"] = "array"
-	event.CanonicalAcceptanceSchema()[0] = 'x'
+	acceptance := event.AcceptanceSchema()
+	acceptance["type"] = "array"
+	acceptance["properties"].(map[string]any)["item_id"] = map[string]any{"type": "number"}
+	canonical := event.CanonicalAcceptanceSchema()
+	canonical[0] = 'x'
 	fields[1].SemanticSchema()["format"] = "changed"
-	second, err := bundle.CompiledEventSchemas()
-	if err != nil {
-		t.Fatalf("second CompiledEventSchemas: %v", err)
-	}
-	again := requireCompiledEventSchema(t, second, ".", "item.created")
-	if again.AcceptanceSchema()["type"] != "object" || again.Fields()[1].SemanticSchema()["format"] != "uuid" || !bytes.Equal(again.CanonicalAcceptanceSchema(), wantBytes) {
-		t.Fatalf("compiled schema readback mutation escaped into owner: schema=%#v field=%#v bytes=%s", again.AcceptanceSchema(), again.Fields()[1].SemanticSchema(), again.CanonicalAcceptanceSchema())
+	fields[0], fields[1] = fields[1], CompiledEventField{}
+	againFields := event.Fields()
+	if event.AcceptanceSchema()["type"] != "object" || againFields[0].Name() != "entity_id" || againFields[1].Name() != "item_id" || againFields[1].SemanticSchema()["format"] != "uuid" || !bytes.Equal(event.CanonicalAcceptanceSchema(), wantBytes) {
+		t.Fatalf("compiled schema same-value readback mutation escaped into owner: schema=%#v fields=%#v field=%#v bytes=%s", event.AcceptanceSchema(), compiledEventFieldNames(againFields), againFields[1].SemanticSchema(), event.CanonicalAcceptanceSchema())
 	}
 }
 
@@ -104,12 +104,36 @@ func TestCompiledEventSchemasPreservesPackageOwnerAndRejectsRawRestatements(t *t
 		t.Fatalf("CompiledEventSchemas: %v", err)
 	}
 
+	wantCoordinates := []string{
+		".:orders/root.start",
+		".:root.start",
+		"child:child.ready",
+		"flows/orders/child:orders/child.ready",
+	}
+	if got := compiledEventCoordinates(compiled); !stringSlicesEqual(got, wantCoordinates) {
+		t.Fatalf("compiled coordinates = %#v, want exact physical declaration list %#v", got, wantCoordinates)
+	}
 	requireCompiledEventSchema(t, compiled, ".", "root.start")
 	flowEvent := requireCompiledEventSchema(t, compiled, ".", "orders/root.start")
 	if got := flowEvent.Source(); got.Layer != "flow" || got.FlowID != "orders" || !strings.HasSuffix(got.File, "/flows/orders/events.yaml") {
 		t.Fatalf("flow source = %#v", got)
 	}
 	requireCompiledEventSchema(t, compiled, "child", "child.ready")
+	childEvent := requireCompiledEventSchema(t, compiled, "flows/orders/child", "orders/child.ready")
+	if got := childEvent.Source(); got.Layer != "project" || got.FlowID != "orders" || !strings.HasSuffix(got.File, "/flows/orders/child/events.yaml") {
+		t.Fatalf("flow-owned child source = %#v", got)
+	}
+	childFields := childEvent.Fields()
+	if len(childFields) != 1 || childFields[0].Name() != "order_code" || childFields[0].SemanticSchema()["type"] != "string" {
+		t.Fatalf("flow-owned child fields = %#v/%#v, want OrderCode lowered through owning flow catalog", compiledEventFieldNames(childFields), childFields[0].SemanticSchema())
+	}
+	childCanonical, err := canonicaljson.Bytes(childEvent.AcceptanceSchema())
+	if err != nil {
+		t.Fatalf("flow-owned child canonical schema: %v", err)
+	}
+	if !bytes.Equal(childEvent.CanonicalAcceptanceSchema(), childCanonical) || childEvent.AcceptanceSchemaDigest() != canonicaljson.HashBytes(childCanonical) {
+		t.Fatalf("flow-owned child canonical bytes/digest disagree with admitted schema")
+	}
 	for _, event := range compiled {
 		if strings.Contains(event.EventName(), "addon-a") {
 			t.Fatalf("noncanonical package restatement became declaration identity: %s:%s", event.PackageKey(), event.EventName())
@@ -120,22 +144,120 @@ func TestCompiledEventSchemasPreservesPackageOwnerAndRejectsRawRestatements(t *t
 	}
 }
 
+func TestCompiledEventSchemasExcludeGeneratedAndProviderImportedEvents(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := t.TempDir()
+	writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: compiled-event-exclusions
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+provider_trigger_events:
+  imports:
+    - provider: telegram
+      event: inbound.telegram.text_message
+flows: []
+`)
+	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: compiled-event-exclusions\n")
+	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "source.requested:\n  url: string\n")
+	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
+scanner:
+  id: scanner
+  execution_type: system_node
+  subscribes_to: [source.requested]
+  event_handlers:
+    source.requested:
+      activity:
+        id: source_scrape
+        tool: source_scrape
+        input:
+          url: {cel: payload.url}
+`)
+	writeFixtureFile(t, filepath.Join(root, "tools.yaml"), `
+source_scrape:
+  description: Read a source.
+  handler_type: http
+  effect_class: read_only
+  http:
+    method: GET
+    url: https://example.test
+  input_schema:
+    type: object
+    required: [url]
+    properties:
+      url: {type: string}
+  output_schema:
+    type: object
+    properties:
+      title: {type: string}
+`)
+	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
+	writeFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatalf("load generated/provider fixture: %v", err)
+	}
+	generated := bundle.GeneratedActivityEventEntries()
+	if len(generated) == 0 {
+		t.Fatal("fixture did not materialize generated activity events")
+	}
+	if len(bundle.Package.ProviderTriggerEvents.Imports) != 1 {
+		t.Fatalf("fixture provider imports = %#v", bundle.Package.ProviderTriggerEvents.Imports)
+	}
+	compiled, err := bundle.CompiledEventSchemas()
+	if err != nil {
+		t.Fatalf("CompiledEventSchemas: %v", err)
+	}
+	if got := compiledEventCoordinates(compiled); !stringSlicesEqual(got, []string{".:source.requested"}) {
+		t.Fatalf("compiled coordinates = %#v, want authored event only", got)
+	}
+	for generatedName := range generated {
+		for _, candidate := range compiled {
+			if candidate.EventName() == generatedName {
+				t.Fatalf("generated event %q entered authored compiled declarations", generatedName)
+			}
+		}
+	}
+	for _, imported := range bundle.Package.ProviderTriggerEvents.Imports {
+		for _, candidate := range compiled {
+			if candidate.EventName() == imported.Event {
+				t.Fatalf("provider-imported event %q entered authored compiled declarations", imported.Event)
+			}
+		}
+	}
+}
+
 func TestCompiledEventBusinessKeyAdmissionIsClosed(t *testing.T) {
 	entry := EventCatalogEntry{
 		Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{
-			"id":    {Type: "integer"},
-			"label": {Type: "string"},
-			"items": {Type: "list<text>"},
+			"bool_key":     {Type: "boolean"},
+			"string_key":   {Type: "string"},
+			"number_key":   {Type: "numeric"},
+			"integer_key":  {Type: "integer"},
+			"object_key":   {Type: "object"},
+			"array_key":    {Type: "list<text>"},
+			"optional_key": {Type: "string"},
 		}},
-		Required: []string{"id", "items"},
+		Required: []string{"bool_key", "string_key", "number_key", "integer_key", "object_key", "array_key"},
 	}
-	compiled, err := newCompiledEventSchema(".", "item.recorded", entry, TypeCatalogDocument{}, "id", CompiledEventSchemaSource{})
-	if err != nil {
-		t.Fatalf("compile required numeric key: %v", err)
-	}
-	key, ok := compiled.BusinessKey()
-	if !ok || key.Field != "id" || key.SemanticType != "number" {
-		t.Fatalf("business key = %#v, %t", key, ok)
+	for _, test := range []struct {
+		field        string
+		semanticType string
+	}{
+		{field: "bool_key", semanticType: "boolean"},
+		{field: "string_key", semanticType: "string"},
+		{field: "number_key", semanticType: "number"},
+		{field: "integer_key", semanticType: "number"},
+	} {
+		t.Run("accept_"+test.field, func(t *testing.T) {
+			compiled, err := newCompiledEventSchema(".", "item.recorded", entry, TypeCatalogDocument{}, test.field, CompiledEventSchemaSource{})
+			if err != nil {
+				t.Fatalf("compile business key: %v", err)
+			}
+			key, ok := compiled.BusinessKey()
+			if !ok || key.Field != test.field || key.SemanticType != test.semanticType {
+				t.Fatalf("business key = %#v, %t, want %q/%q", key, ok, test.field, test.semanticType)
+			}
+		})
 	}
 
 	for _, test := range []struct {
@@ -143,8 +265,9 @@ func TestCompiledEventBusinessKeyAdmissionIsClosed(t *testing.T) {
 		field string
 		want  string
 	}{
-		{name: "optional", field: "label", want: "must be required"},
-		{name: "container", field: "items", want: "boolean, number, or string"},
+		{name: "object", field: "object_key", want: "boolean, number, or string"},
+		{name: "array", field: "array_key", want: "boolean, number, or string"},
+		{name: "optional", field: "optional_key", want: "must be required"},
 		{name: "missing", field: "unknown", want: "is not declared"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -183,6 +306,18 @@ func compiledEventFieldNames(fields []CompiledEventField) []string {
 	return out
 }
 
+func stringSlicesEqual(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
 func writeCompiledEventPackageFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -210,7 +345,7 @@ flows:
 	}
 
 	flowRoot := filepath.Join(root, "flows", "orders")
-	writeFixtureFile(t, filepath.Join(flowRoot, "package.yaml"), "name: orders\nversion: \"1.0.0\"\nflows: []\n")
+	writeFixtureFile(t, filepath.Join(flowRoot, "package.yaml"), "name: orders\nversion: \"1.0.0\"\npackages:\n  - path: child\nflows: []\n")
 	writeFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), `
 name: orders
 mode: static
@@ -221,8 +356,14 @@ pins:
     events: [root.start]
 `)
 	writeFixtureFile(t, filepath.Join(flowRoot, "events.yaml"), "root.start: {}\naddon-a.start: {}\n")
+	writeFixtureFile(t, filepath.Join(flowRoot, "types.yaml"), "scalars:\n  OrderCode: text\n")
 	for _, name := range []string{"nodes.yaml", "agents.yaml", "tools.yaml", "policy.yaml"} {
 		writeFixtureFile(t, filepath.Join(flowRoot, name), "{}\n")
+	}
+	writeFixtureFile(t, filepath.Join(flowRoot, "child", "package.yaml"), "name: orders-child\nversion: \"1.0.0\"\nflows: []\n")
+	writeFixtureFile(t, filepath.Join(flowRoot, "child", "events.yaml"), "child.ready:\n  order_code: OrderCode\n")
+	for _, name := range []string{"nodes.yaml", "agents.yaml", "tools.yaml", "policy.yaml"} {
+		writeFixtureFile(t, filepath.Join(flowRoot, "child", name), "{}\n")
 	}
 	return root
 }

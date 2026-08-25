@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -160,6 +161,17 @@ func (s CompiledEventSchema) Source() CompiledEventSchemaSource {
 
 var _ CompiledEventSchemaProvider = (*WorkflowContractBundle)(nil)
 
+type currentEventDeclarationRecord struct {
+	packageKey    string
+	flowID        string
+	layer         string
+	sourceFile    string
+	localName     string
+	qualifiedName string
+	entry         EventCatalogEntry
+	types         TypeCatalogDocument
+}
+
 // CompiledEventSchemas enumerates exact importable authored declarations in
 // canonical coordinate order. Pattern declarations, generated events, and
 // noncanonical package restatements do not become resource identities.
@@ -168,45 +180,22 @@ func (b *WorkflowContractBundle) CompiledEventSchemas() ([]CompiledEventSchema, 
 		return nil, nil
 	}
 	var out []CompiledEventSchema
-	for _, view := range b.ProjectViews() {
-		for _, localName := range sortedContractKeys(view.Events) {
-			compiled, ok, err := b.compileCurrentEventDeclaration(
-				view.Paths.Key,
-				"",
-				"project",
-				view.Paths.ProjectEventsFile,
-				localName,
-				localName,
-				view.Events[localName],
-				b.RootTypeCatalog(),
-			)
-			if err != nil {
-				return nil, err
-			}
-			if ok {
-				out = append(out, compiled)
-			}
+	for _, record := range b.currentEventDeclarationRecords() {
+		compiled, ok, err := b.compileCurrentEventDeclaration(
+			record.packageKey,
+			record.flowID,
+			record.layer,
+			record.sourceFile,
+			record.localName,
+			record.qualifiedName,
+			record.entry,
+			record.types,
+		)
+		if err != nil {
+			return nil, err
 		}
-	}
-	for _, view := range b.FlowViews() {
-		flowID := strings.TrimSpace(view.Paths.ID)
-		for _, localName := range sortedContractKeys(view.Events) {
-			compiled, ok, err := b.compileCurrentEventDeclaration(
-				view.Paths.PackageKey,
-				flowID,
-				"flow",
-				view.Paths.EventsFile,
-				localName,
-				resolvedEventSchemaKey(b, flowID, localName),
-				view.Events[localName],
-				b.ResolvedTypeCatalogForFlow(flowID),
-			)
-			if err != nil {
-				return nil, err
-			}
-			if ok {
-				out = append(out, compiled)
-			}
+		if ok {
+			out = append(out, compiled)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -227,6 +216,79 @@ func (b *WorkflowContractBundle) CompiledEventSchemas() ([]CompiledEventSchema, 
 		}
 	}
 	return out, nil
+}
+
+func (b *WorkflowContractBundle) currentEventDeclarationRecords() []currentEventDeclarationRecord {
+	flowDeclarations := map[string]struct{}{}
+	flowRecords := make([]currentEventDeclarationRecord, 0, len(b.FlowTree.ByID))
+	for _, view := range b.FlowViews() {
+		flowID := strings.TrimSpace(view.Paths.ID)
+		for _, localName := range sortedContractKeys(view.Events) {
+			if key := currentEventDeclarationRecordKey(view.Paths.EventsFile, localName); key != "" {
+				flowDeclarations[key] = struct{}{}
+			}
+			flowRecords = append(flowRecords, currentEventDeclarationRecord{
+				packageKey:    view.Paths.PackageKey,
+				flowID:        flowID,
+				layer:         "flow",
+				sourceFile:    view.Paths.EventsFile,
+				localName:     localName,
+				qualifiedName: resolvedEventSchemaKey(b, flowID, localName),
+				entry:         view.Events[localName],
+				types:         b.ResolvedTypeCatalogForFlow(flowID),
+			})
+		}
+	}
+
+	records := make([]currentEventDeclarationRecord, 0, len(b.ProjectViews())+len(flowRecords))
+	for _, view := range b.ProjectViews() {
+		flowID := strings.TrimSpace(view.Paths.OwningFlowID)
+		types := b.RootTypeCatalog()
+		if flowID != "" {
+			types = b.ResolvedTypeCatalogForFlow(flowID)
+		}
+		for _, localName := range sortedContractKeys(view.Events) {
+			if key := currentEventDeclarationRecordKey(view.Paths.ProjectEventsFile, localName); key != "" {
+				if _, representedByFlow := flowDeclarations[key]; representedByFlow {
+					continue
+				}
+			}
+			qualifiedName := localName
+			if flowID != "" {
+				qualifiedName = resolvedOwnedEventSchemaKey(b, flowID, localName)
+			}
+			records = append(records, currentEventDeclarationRecord{
+				packageKey:    view.Paths.Key,
+				flowID:        flowID,
+				layer:         "project",
+				sourceFile:    view.Paths.ProjectEventsFile,
+				localName:     localName,
+				qualifiedName: qualifiedName,
+				entry:         view.Events[localName],
+				types:         types,
+			})
+		}
+	}
+	records = append(records, flowRecords...)
+	return records
+}
+
+func resolvedOwnedEventSchemaKey(bundle *WorkflowContractBundle, flowID, eventName string) string {
+	resolved := resolvedEventSchemaKey(bundle, flowID, eventName)
+	if bundle == nil || strings.TrimSpace(flowID) == "" || resolved != eventidentity.Normalize(eventName) {
+		return resolved
+	}
+	// Ownership discovery proves this project declaration is local to the flow,
+	// even though it is not repeated in the flow view's local event map.
+	return eventidentity.ExternalizeForFlow(bundle.FlowPath(flowID), []string{resolved}, resolved)
+}
+
+func currentEventDeclarationRecordKey(sourceFile, localName string) string {
+	sourceFile = strings.TrimSpace(sourceFile)
+	if sourceFile == "" {
+		return ""
+	}
+	return filepath.Clean(sourceFile) + "\x00" + strings.TrimSpace(localName)
 }
 
 func (b *WorkflowContractBundle) compileCurrentEventDeclaration(
