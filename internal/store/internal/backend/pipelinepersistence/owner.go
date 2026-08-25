@@ -15,6 +15,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
@@ -36,6 +37,82 @@ import (
 
 type CompletionCandidateRequester interface {
 	RequestCompletionCandidateTx(context.Context, *sql.Tx, string, *time.Time, *runhandoff.CandidateHandoff) (runtimerunlifecycle.CandidateRequestResult, error)
+}
+
+type revisionEffects = privaterunforkrevision.Effects
+
+func newRevisionEffects() *revisionEffects { return privaterunforkrevision.NewEffects() }
+
+func addRevisionEffects(effects *revisionEffects, runID string, families ...privaterunforkrevision.Family) error {
+	return effects.Add(runID, families...)
+}
+
+func addEventCommitRevisionEffects(effects *revisionEffects, runID string) error {
+	return addRevisionEffects(effects, runID,
+		privaterunforkrevision.FamilyEvents,
+		privaterunforkrevision.FamilyEventDeliveries,
+		privaterunforkrevision.FamilyCommittedReplayScopes,
+		privaterunforkrevision.FamilyEventReceipts,
+		privaterunforkrevision.FamilyReplyContexts,
+	)
+}
+
+func revisionEffectsForRun(runID string, families ...privaterunforkrevision.Family) (*revisionEffects, error) {
+	effects := newRevisionEffects()
+	if err := addRevisionEffects(effects, runID, families...); err != nil {
+		return nil, err
+	}
+	return effects, nil
+}
+
+func workflowLifecycleRevisionEffects(runID string) (*revisionEffects, error) {
+	return revisionEffectsForRun(runID,
+		privaterunforkrevision.FamilyEntityMetadata,
+		privaterunforkrevision.FamilyEntityMutations,
+		privaterunforkrevision.FamilyTimers,
+	)
+}
+
+func addWorkflowMutationRevisionEffects(effects *revisionEffects, runID string) error {
+	return addRevisionEffects(effects, runID,
+		privaterunforkrevision.FamilyEntityMetadata,
+		privaterunforkrevision.FamilyEntityMutations,
+		privaterunforkrevision.FamilyTimers,
+		privaterunforkrevision.FamilyEventDeliveries,
+	)
+}
+
+func addEntityMetadataRevisionEffects(effects *revisionEffects, runID string) error {
+	return addRevisionEffects(effects, runID,
+		privaterunforkrevision.FamilyEntityMetadata,
+		privaterunforkrevision.FamilyEntityMutations,
+	)
+}
+
+func addTimerRevisionEffects(effects *revisionEffects, runID string) error {
+	return addRevisionEffects(effects, runID, privaterunforkrevision.FamilyTimers)
+}
+
+func addDeliveryRevisionEffects(effects *revisionEffects, runID string) error {
+	return addRevisionEffects(effects, runID, privaterunforkrevision.FamilyEventDeliveries)
+}
+
+func addPipelineDispositionRevisionEffects(effects *revisionEffects, runID string) error {
+	return addRevisionEffects(effects, runID,
+		privaterunforkrevision.FamilyEventDeliveries,
+		privaterunforkrevision.FamilyEventReceipts,
+	)
+}
+
+func addPublicationRevisionEffects(effects *revisionEffects, plan runtimeengine.DurablePublicationPlan) error {
+	if plan == nil {
+		return nil
+	}
+	publication, ok := plan.(runtimebus.EnginePublicationPlan)
+	if !ok {
+		return errors.New("durable publication plan has no selected-store command")
+	}
+	return addEventCommitRevisionEffects(effects, publication.PublicationCommand().Commit.Event.Event().RunID())
 }
 
 type EventCommitOwner interface {
@@ -288,14 +365,20 @@ func (s *PipelineSQLiteOwner) now() time.Time {
 	return s.nowFn().UTC()
 }
 
-func (s *PipelineSQLiteOwner) runRuntimeMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx) error) error {
+func (s *PipelineSQLiteOwner) runRuntimeMutation(ctx context.Context, label string, effects *revisionEffects, operation func(context.Context, *sql.Tx) error) error {
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, label, operation)
+	return s.backend.RunTransaction(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
+		if err := operation(txctx, tx); err != nil {
+			return err
+		}
+		_, err := privaterunforkrevision.FinalizeSQLite(txctx, tx, effects)
+		return err
+	})
 }
 
-func (s *PipelinePostgresOwner) runPrivateAuthorActivityMutation(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+func (s *PipelinePostgresOwner) runPrivateAuthorActivityMutation(ctx context.Context, effects *revisionEffects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
@@ -307,15 +390,16 @@ func (s *PipelinePostgresOwner) runPrivateAuthorActivityMutation(ctx context.Con
 		if err := operation(txctx, tx, story); err != nil {
 			return err
 		}
-		if _, err := privaterunforkrevision.CaptureCurrentTransaction(txctx, tx); err != nil {
+		if err := story.Finalize(txctx); err != nil {
 			return err
 		}
-		return story.Finalize(txctx)
+		_, err = privaterunforkrevision.FinalizePostgres(txctx, tx, effects)
+		return err
 	})
 }
 
-func (s *PipelineSQLiteOwner) runPrivateAuthorActivityMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-	return s.runRuntimeMutation(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
+func (s *PipelineSQLiteOwner) runPrivateAuthorActivityMutation(ctx context.Context, label string, effects *revisionEffects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+	return s.runRuntimeMutation(ctx, label, effects, func(txctx context.Context, tx *sql.Tx) error {
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
 		if err != nil {
 			return err

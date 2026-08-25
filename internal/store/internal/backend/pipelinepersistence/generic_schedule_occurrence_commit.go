@@ -139,10 +139,17 @@ func commitGenericScheduleOccurrence(
 }
 
 func (s *PipelinePostgresOwner) CommitGenericScheduleOccurrence(ctx context.Context, command runtimegenericschedule.CommitCommand) (runtimegenericschedule.CommitResult, error) {
+	effects := newRevisionEffects()
+	if err := addTimerRevisionEffects(effects, command.Activation.Command.RunID); err != nil {
+		return runtimegenericschedule.CommitResult{}, err
+	}
+	if err := addPublicationRevisionEffects(effects, command.Publication); err != nil {
+		return runtimegenericschedule.CommitResult{}, err
+	}
 	return commitGenericScheduleOccurrence(
 		ctx, s, true,
 		func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-			return s.runPrivateAuthorActivityMutation(ctx, fn)
+			return s.runPrivateAuthorActivityMutation(ctx, effects, fn)
 		},
 		reserveRunLifecycleCandidateHandoff,
 		func(reservation *runLifecycleCandidateHandoffReservation, result runtimerunlifecycle.CandidateRequestResult) error {
@@ -157,10 +164,17 @@ func (s *PipelinePostgresOwner) CommitGenericScheduleOccurrence(ctx context.Cont
 }
 
 func (s *PipelineSQLiteOwner) CommitGenericScheduleOccurrence(ctx context.Context, command runtimegenericschedule.CommitCommand) (runtimegenericschedule.CommitResult, error) {
+	effects := newRevisionEffects()
+	if err := addTimerRevisionEffects(effects, command.Activation.Command.RunID); err != nil {
+		return runtimegenericschedule.CommitResult{}, err
+	}
+	if err := addPublicationRevisionEffects(effects, command.Publication); err != nil {
+		return runtimegenericschedule.CommitResult{}, err
+	}
 	return commitGenericScheduleOccurrence(
 		ctx, s, false,
 		func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-			return s.runPrivateAuthorActivityMutation(ctx, "sqlite generic schedule occurrence", fn)
+			return s.runPrivateAuthorActivityMutation(ctx, "sqlite generic schedule occurrence", effects, fn)
 		},
 		reserveRunLifecycleCandidateHandoff,
 		func(reservation *runLifecycleCandidateHandoffReservation, result runtimerunlifecycle.CandidateRequestResult) error {

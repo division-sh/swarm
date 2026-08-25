@@ -10,6 +10,7 @@ import (
 
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
 func (s *RunLifecyclePostgresOwner) RegisterCompletionCandidateSink(
@@ -462,7 +463,7 @@ func (s *RunLifecyclePostgresOwner) ExecuteCompletionCandidate(
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	var outcome runtimerunlifecycle.CompletionResult
-	err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	err := s.runPrivateAuthorActivityMutation(ctx, privaterunforkrevision.NewEffects(), func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		var err error
 		outcome, err = s.executeCompletionCandidateTx(txctx, tx, story, candidate, catalog)
 		return err
@@ -479,7 +480,7 @@ func (s *RunLifecycleSQLiteOwner) ExecuteCompletionCandidate(
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	var outcome runtimerunlifecycle.CompletionResult
-	err := s.runPrivateAuthorActivityMutation(ctx, "sqlite execute run completion candidate", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	err := s.runPrivateAuthorActivityMutation(ctx, "sqlite execute run completion candidate", privaterunforkrevision.NewEffects(), func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		var err error
 		outcome, err = s.executeCompletionCandidateTx(txctx, tx, story, candidate, catalog)
 		return err

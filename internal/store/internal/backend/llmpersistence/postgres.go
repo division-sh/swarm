@@ -120,7 +120,11 @@ func (s *LLMPostgresOwner) UpsertConversation(ctx context.Context, rec runtimell
 	if err != nil {
 		return err
 	}
-	return s.runPostgresRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
+	effects, err := agentSessionEffects(identity.RunID)
+	if err != nil {
+		return err
+	}
+	return s.runPostgresRuntimeMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx) error {
 		ctx = txctx
 		if err := storerunstate.RequirePostgresActiveTx(ctx, tx, identity.RunID); err != nil {
 			return err
@@ -304,7 +308,11 @@ func (s *LLMPostgresOwner) UpdateLiveSessionWatchdog(ctx context.Context, update
 	if rows, _ := res.RowsAffected(); rows != 1 {
 		return fmt.Errorf("no exact active memory row found for watchdog update")
 	}
-	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
+	effects, err := agentSessionEffects(identity.RunID)
+	if err != nil {
+		return err
+	}
+	if err := finalizePostgresRunForkRevisionTx(ctx, tx, effects); err != nil {
 		return fmt.Errorf("update live session watchdog commit: %w", err)
 	}
 	return nil

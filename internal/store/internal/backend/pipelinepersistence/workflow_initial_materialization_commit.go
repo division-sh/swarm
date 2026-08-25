@@ -158,14 +158,22 @@ func workflowInitialMaterializationSnapshotExists(
 }
 
 func (s *PipelinePostgresOwner) CommitWorkflowInitialMaterialization(ctx context.Context, command runtimepipeline.WorkflowInitialMaterializationCommand) (runtimepipeline.CommittedWorkflowInitialMaterialization, error) {
+	effects, err := workflowLifecycleRevisionEffects(command.Record.State.RunID)
+	if err != nil {
+		return runtimepipeline.CommittedWorkflowInitialMaterialization{}, err
+	}
 	return commitWorkflowInitialMaterialization(ctx, s, true, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, fn)
+		return s.runPrivateAuthorActivityMutation(ctx, effects, fn)
 	}, command)
 }
 
 func (s *PipelineSQLiteOwner) CommitWorkflowInitialMaterialization(ctx context.Context, command runtimepipeline.WorkflowInitialMaterializationCommand) (runtimepipeline.CommittedWorkflowInitialMaterialization, error) {
+	effects, err := workflowLifecycleRevisionEffects(command.Record.State.RunID)
+	if err != nil {
+		return runtimepipeline.CommittedWorkflowInitialMaterialization{}, err
+	}
 	return commitWorkflowInitialMaterialization(ctx, s, false, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, "sqlite workflow initial materialization", fn)
+		return s.runPrivateAuthorActivityMutation(ctx, "sqlite workflow initial materialization", effects, fn)
 	}, command)
 }
 

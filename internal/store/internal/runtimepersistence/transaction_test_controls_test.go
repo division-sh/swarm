@@ -9,7 +9,6 @@ import (
 
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storeschema "github.com/division-sh/swarm/internal/store/internal/schemastore"
 	_ "github.com/lib/pq"
 )
@@ -76,7 +75,7 @@ func (s *PostgresStore) runPrivateAuthorActivityMutation(ctx context.Context, op
 		if err := operation(txctx, tx, story); err != nil {
 			return err
 		}
-		if _, err := privaterunforkrevision.CaptureCurrentTransaction(txctx, tx); err != nil {
+		if _, err := finalizeAllPostgresRunForkTestRevisions(txctx, tx); err != nil {
 			return err
 		}
 		return story.Finalize(txctx)

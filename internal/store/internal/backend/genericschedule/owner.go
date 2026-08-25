@@ -204,8 +204,7 @@ func (o *PostgresOwner) AdmitGenericSchedule(ctx context.Context, command runtim
 		if err != nil {
 			return err
 		}
-		_, err = privaterunforkrevision.CaptureCurrentTransaction(txctx, tx)
-		return err
+		return finalizeTimerEffectPostgres(txctx, tx, command.RunID)
 	})
 	return result, err
 }
@@ -218,7 +217,10 @@ func (o *SQLiteOwner) AdmitGenericSchedule(ctx context.Context, command runtimeg
 	err := o.backend.RunTransaction(ctx, "sqlite generic schedule admission", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		result, err = AdmitTx(txctx, tx, false, command, o.now)
-		return err
+		if err != nil {
+			return err
+		}
+		return finalizeTimerEffectSQLite(txctx, tx, command.RunID)
 	})
 	return result, err
 }
@@ -390,17 +392,27 @@ func (o *SQLiteOwner) listActive(ctx context.Context) ([]runtimegenericschedule.
 
 func (o *PostgresOwner) failMalformed(ctx context.Context, activationID string, malformed error) error {
 	return o.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		runID, err := timerRunIDTx(txctx, tx, activationID)
+		if err != nil {
+			return err
+		}
 		if err := failMalformedByIDTx(txctx, tx, true, activationID, malformed, o.now()); err != nil {
 			return err
 		}
-		_, err := privaterunforkrevision.CaptureCurrentTransaction(txctx, tx)
-		return err
+		return finalizeTimerEffectPostgres(txctx, tx, runID)
 	})
 }
 
 func (o *SQLiteOwner) failMalformed(ctx context.Context, activationID string, malformed error) error {
 	return o.backend.RunTransaction(ctx, "sqlite malformed generic schedule terminalization", func(txctx context.Context, tx *sql.Tx) error {
-		return failMalformedByIDTx(txctx, tx, false, activationID, malformed, o.now())
+		runID, err := timerRunIDTx(txctx, tx, activationID)
+		if err != nil {
+			return err
+		}
+		if err := failMalformedByIDTx(txctx, tx, false, activationID, malformed, o.now()); err != nil {
+			return err
+		}
+		return finalizeTimerEffectSQLite(txctx, tx, runID)
 	})
 }
 
@@ -418,8 +430,14 @@ func (o *PostgresOwner) PrepareGenericScheduleOccurrence(ctx context.Context, wa
 		if err != nil {
 			return err
 		}
-		_, err = privaterunforkrevision.CaptureCurrentTransaction(txctx, tx)
-		return err
+		runID := result.Activation.Command.RunID
+		if strings.TrimSpace(runID) == "" {
+			runID, err = timerRunIDTx(txctx, tx, wakeup.ActivationID())
+			if err != nil {
+				return err
+			}
+		}
+		return finalizeTimerEffectPostgres(txctx, tx, runID)
 	})
 	return result, err
 }
@@ -435,7 +453,17 @@ func (o *SQLiteOwner) PrepareGenericScheduleOccurrence(ctx context.Context, wake
 			return err
 		}
 		result, err = PrepareOccurrenceTx(txctx, tx, false, wakeup, admittedAt)
-		return err
+		if err != nil {
+			return err
+		}
+		runID := result.Activation.Command.RunID
+		if strings.TrimSpace(runID) == "" {
+			runID, err = timerRunIDTx(txctx, tx, wakeup.ActivationID())
+			if err != nil {
+				return err
+			}
+		}
+		return finalizeTimerEffectSQLite(txctx, tx, runID)
 	})
 	return result, err
 }
@@ -519,8 +547,7 @@ func (o *PostgresOwner) CancelGenericSchedule(ctx context.Context, command runti
 		if err != nil {
 			return err
 		}
-		_, err = privaterunforkrevision.CaptureCurrentTransaction(txctx, tx)
-		return err
+		return finalizeTimerEffectPostgres(txctx, tx, result.Activation.Command.RunID)
 	})
 	return result, err
 }
@@ -533,9 +560,46 @@ func (o *SQLiteOwner) CancelGenericSchedule(ctx context.Context, command runtime
 	err := o.backend.RunTransaction(ctx, "sqlite generic schedule cancellation", func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		result, err = CancelTx(txctx, tx, false, command)
-		return err
+		if err != nil {
+			return err
+		}
+		return finalizeTimerEffectSQLite(txctx, tx, result.Activation.Command.RunID)
 	})
 	return result, err
+}
+
+func timerRunIDTx(ctx context.Context, tx *sql.Tx, activationID string) (string, error) {
+	var runID sql.NullString
+	err := tx.QueryRowContext(ctx, `SELECT CAST(run_id AS TEXT) FROM timers WHERE timer_id=$1`, strings.TrimSpace(activationID)).Scan(&runID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("resolve generic schedule affected run: %w", err)
+	}
+	return strings.TrimSpace(runID.String), nil
+}
+
+func finalizeTimerEffectPostgres(ctx context.Context, tx *sql.Tx, runID string) error {
+	effects := privaterunforkrevision.NewEffects()
+	if strings.TrimSpace(runID) != "" {
+		if err := effects.Add(runID, privaterunforkrevision.FamilyTimers); err != nil {
+			return err
+		}
+	}
+	_, err := privaterunforkrevision.FinalizePostgres(ctx, tx, effects)
+	return err
+}
+
+func finalizeTimerEffectSQLite(ctx context.Context, tx *sql.Tx, runID string) error {
+	effects := privaterunforkrevision.NewEffects()
+	if strings.TrimSpace(runID) != "" {
+		if err := effects.Add(runID, privaterunforkrevision.FamilyTimers); err != nil {
+			return err
+		}
+	}
+	_, err := privaterunforkrevision.FinalizeSQLite(ctx, tx, effects)
+	return err
 }
 
 func CancelTx(ctx context.Context, tx *sql.Tx, postgres bool, command runtimegenericschedule.CancelCommand) (runtimegenericschedule.CancelResult, error) {

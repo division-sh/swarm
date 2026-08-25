@@ -10,9 +10,8 @@ import (
 	"time"
 
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
-	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
+	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	runhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
 )
@@ -60,46 +59,41 @@ func (s *LLMPostgresOwner) requireCurrentSchema() error { return s.requireCurren
 func (s *LLMSQLiteOwner) requireCurrentSchema() error   { return s.requireCurrent() }
 func (s *LLMSQLiteOwner) now() time.Time                { return s.nowFn().UTC() }
 
-func (s *LLMPostgresOwner) runPostgresRuntimeMutation(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
+func agentSessionEffects(runID string) (*runforkrevision.Effects, error) {
+	return runforkrevision.ForRun(runID, runforkrevision.FamilyAgentSessions)
+}
+
+func emptyRunForkRevisionEffects() *runforkrevision.Effects {
+	return runforkrevision.NewEffects()
+}
+
+func addAgentSessionEffect(effects *runforkrevision.Effects, runID string) error {
+	return effects.Add(runID, runforkrevision.FamilyAgentSessions)
+}
+
+func (s *LLMPostgresOwner) runPostgresRuntimeMutation(ctx context.Context, effects *runforkrevision.Effects, fn func(context.Context, *sql.Tx) error) error {
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, fn)
-}
-
-func (s *LLMPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-	return s.runPostgresRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
-		if err != nil {
+	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		if err := fn(txctx, tx); err != nil {
 			return err
 		}
-		if err := fn(txctx, tx, story); err != nil {
-			return err
-		}
-		if _, err := privaterunforkrevision.CaptureCurrentTransaction(txctx, tx); err != nil {
-			return err
-		}
-		return story.Finalize(txctx)
+		_, err := runforkrevision.FinalizePostgres(txctx, tx, effects)
+		return err
 	})
 }
 
-func (s *LLMSQLiteOwner) runRuntimeMutation(ctx context.Context, label string, fn func(context.Context, *sql.Tx) error) error {
+func (s *LLMSQLiteOwner) runRuntimeMutation(ctx context.Context, label string, effects *runforkrevision.Effects, fn func(context.Context, *sql.Tx) error) error {
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, label, fn)
-}
-
-func (s *LLMSQLiteOwner) runPrivateAuthorActivityMutation(ctx context.Context, label string, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-	return s.runRuntimeMutation(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
-		if err != nil {
+	return s.backend.RunTransaction(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
+		if err := fn(txctx, tx); err != nil {
 			return err
 		}
-		if err := fn(txctx, tx, story); err != nil {
-			return err
-		}
-		return story.Finalize(txctx)
+		_, err := runforkrevision.FinalizeSQLite(txctx, tx, effects)
+		return err
 	})
 }
 
@@ -199,8 +193,8 @@ func (s *LLMSQLiteOwner) SetSessionLockTTL(ttl time.Duration) {
 	s.sessionLockTTL = ttl
 }
 
-func commitPostgresRunForkRevisionTx(ctx context.Context, tx *sql.Tx) error {
-	if _, err := privaterunforkrevision.CaptureCurrentTransaction(ctx, tx); err != nil {
+func finalizePostgresRunForkRevisionTx(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects) error {
+	if _, err := runforkrevision.FinalizePostgres(ctx, tx, effects); err != nil {
 		return err
 	}
 	return tx.Commit()

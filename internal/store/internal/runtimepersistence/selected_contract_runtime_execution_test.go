@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -370,7 +371,7 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 	}
 }
 
-func TestSelectedForkCompletionAuthorityCleanupPreservesEvidencePostgres(t *testing.T) {
+func TestSelectedForkRetainedDiscardPublishesHistoricalTombstoneRevisionPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := admitTestPostgresStore(t, db)
 	fixture := newSelectedCompletionFixture(t, store, db, false)
@@ -408,6 +409,63 @@ func TestSelectedForkCompletionAuthorityCleanupPreservesEvidencePostgres(t *test
 	if err := store.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); err != nil {
 		t.Fatalf("close selected completion authority: %v", err)
 	}
+	matrix := runForkRevisionMatrixFixture{
+		runID:        fixture.forkRun,
+		eventID:      "00000000-0000-0000-0000-000000002291",
+		entityID:     "00000000-0000-0000-0000-000000002292",
+		mutationID:   "00000000-0000-0000-0000-000000002293",
+		deliveryID:   "00000000-0000-0000-0000-000000002294",
+		receiptID:    "00000000-0000-0000-0000-000000002295",
+		deadLetterID: "00000000-0000-0000-0000-000000002296",
+		timerID:      "00000000-0000-0000-0000-000000002297",
+		sessionID:    "00000000-0000-0000-0000-000000002298",
+		turnID:       "00000000-0000-0000-0000-000000002299",
+		auditID:      "00000000-0000-0000-0000-000000002300",
+		replyID:      "retained-discard-reply",
+		surfaceID:    "00000000-0000-0000-0000-000000002301",
+		operationID:  "00000000-0000-0000-0000-000000002302",
+		attemptID:    "00000000-0000-0000-0000-000000002303",
+		authorityID:  "00000000-0000-0000-0000-000000002304",
+		at:           time.Date(2026, 8, 25, 20, 0, 0, 0, time.UTC),
+	}
+	seedTestAgentRow(t, ctx, db, true, testAgentIdentity(t, "revision-matrix-agent", ""), "active")
+	matrixRoute := events.DeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient(mustPersistenceRootNode("matrix-node")),
+		Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "matrix-flow", FlowInstance: "matrix-flow/one"}),
+	}
+	matrixEvent := eventtest.PersistedProjection(
+		matrix.eventID, "selected.retained_history", "selected-test", "", json.RawMessage(`{"matrix":true}`),
+		0, fixture.forkRun, "", events.EventEnvelope{}, matrix.at,
+	)
+	if err := commitSemanticEventFixtureWithRoutes(ctx, store, matrixEvent, []events.DeliveryRoute{matrixRoute}); err != nil {
+		t.Fatalf("commit retained-discard event and delivery: %v", err)
+	}
+	seedTx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin retained-discard history seed: %v", err)
+	}
+	seedRunForkRevisionMatrixFacts(t, ctx, seedTx, matrix, false)
+	effects, err := runforkrevision.ForRun(fixture.forkRun, runforkrevision.AllFamilies()...)
+	if err != nil {
+		t.Fatalf("declare retained-discard history effects: %v", err)
+	}
+	seeded, err := runforkrevision.FinalizePostgres(ctx, seedTx, effects)
+	if err != nil {
+		_ = seedTx.Rollback()
+		t.Fatalf("finalize retained-discard history: %v", err)
+	}
+	preDiscardRevision := seeded[fixture.forkRun].Revision
+	if !seeded[fixture.forkRun].Changed {
+		_ = seedTx.Rollback()
+		t.Fatal("retained-discard history seed did not publish a revision")
+	}
+	if err := seedTx.Commit(); err != nil {
+		t.Fatalf("commit retained-discard history: %v", err)
+	}
+	beforePlan, err := store.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: fixture.forkRun, At: matrix.eventID})
+	if err != nil {
+		t.Fatalf("plan retained event before discard: %v", err)
+	}
 	if _, err := transitionRunForTest(ctx, store, runtimerunlifecycle.ActiveTransitionRequest{
 		RunID: fixture.forkRun, State: runtimerunlifecycle.StatePaused,
 	}); err != nil {
@@ -429,9 +487,65 @@ func TestSelectedForkCompletionAuthorityCleanupPreservesEvidencePostgres(t *test
 	assertSelectedCompletionEvidenceCount(t, db, "operation and attempt", `SELECT COUNT(*) FROM runtime_external_effect_operations o JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id WHERE o.selected_execution_id=$1::uuid AND a.attempt_id=$2::uuid`, authority.ID, handle.Attempt().AttemptID)
 	assertSelectedCompletionEvidenceCount(t, db, "turn and attempt", `SELECT COUNT(*) FROM agent_turns t JOIN runtime_external_effect_attempts a ON a.attempt_id=t.completion_attempt_id WHERE t.turn_id=$1::uuid AND t.run_id=$2::uuid`, authority.Target.ID, fixture.forkRun)
 	assertSelectedCompletionEvidenceCount(t, db, "spend and attempt", `SELECT COUNT(*) FROM spend_ledger s JOIN runtime_external_effect_attempts a ON a.attempt_id=s.external_effect_attempt_id WHERE s.external_effect_attempt_id=$1::uuid`, handle.Attempt().AttemptID)
-	assertSelectedCompletionEvidenceAbsent(t, db, "fork fact revisions", `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1::uuid`, fixture.forkRun)
-	assertSelectedCompletionEvidenceAbsent(t, db, "fork revision ledger", `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1::uuid`, fixture.forkRun)
-	assertSelectedCompletionEvidenceAbsent(t, db, "fork revision head", `SELECT COUNT(*) FROM run_fork_revision_heads WHERE run_id=$1::uuid`, fixture.forkRun)
+	var terminalRevision, ledgerRows int64
+	if err := db.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1::uuid`, fixture.forkRun).Scan(&terminalRevision); err != nil {
+		t.Fatalf("load retained-discard revision head: %v", err)
+	}
+	if terminalRevision != preDiscardRevision+1 {
+		t.Fatalf("retained-discard revision = %d, want one revision after %d", terminalRevision, preDiscardRevision)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1::uuid`, fixture.forkRun).Scan(&ledgerRows); err != nil {
+		t.Fatalf("count retained-discard revision ledger: %v", err)
+	}
+	if ledgerRows != terminalRevision {
+		t.Fatalf("retained-discard ledger rows = %d, want retained contiguous ledger through %d", ledgerRows, terminalRevision)
+	}
+	rows, err := db.QueryContext(ctx, `SELECT family FROM run_fork_fact_revisions WHERE run_id=$1::uuid AND revision=$2 AND NOT present ORDER BY family`, fixture.forkRun, terminalRevision)
+	if err != nil {
+		t.Fatalf("load retained-discard tombstone families: %v", err)
+	}
+	var tombstoneFamilies []runforkrevision.Family
+	for rows.Next() {
+		var family runforkrevision.Family
+		if err := rows.Scan(&family); err != nil {
+			_ = rows.Close()
+			t.Fatalf("scan retained-discard tombstone family: %v", err)
+		}
+		tombstoneFamilies = append(tombstoneFamilies, family)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatalf("close retained-discard tombstone rows: %v", err)
+	}
+	wantTombstones := []runforkrevision.Family{
+		runforkrevision.FamilyAgentSessions,
+		runforkrevision.FamilyCommittedReplayScopes,
+		runforkrevision.FamilyDeadLetters,
+		runforkrevision.FamilyEntityMetadata,
+		runforkrevision.FamilyEntityMutations,
+		runforkrevision.FamilyEventDeliveries,
+		runforkrevision.FamilyEventReceipts,
+		runforkrevision.FamilyEvents,
+		runforkrevision.FamilyTimers,
+	}
+	if !reflect.DeepEqual(tombstoneFamilies, wantTombstones) {
+		t.Fatalf("retained-discard tombstone families = %q, want exact removed registry %q", tombstoneFamilies, wantTombstones)
+	}
+	validationTx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatalf("begin retained-discard completeness validation: %v", err)
+	}
+	if err := runforkrevision.ValidateCompletePostgres(ctx, validationTx, fixture.forkRun); err != nil {
+		_ = validationTx.Rollback()
+		t.Fatalf("validate retained-discard terminal projection: %v", err)
+	}
+	_ = validationTx.Rollback()
+	afterPlan, err := store.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: fixture.forkRun, At: matrix.eventID})
+	if err != nil {
+		t.Fatalf("plan retained historical event after discard: %v", err)
+	}
+	if afterPlan.ForkPoint != beforePlan.ForkPoint || afterPlan.EventCountAtFork != beforePlan.EventCountAtFork || afterPlan.ForkPoint.EventID != matrix.eventID {
+		t.Fatalf("retained historical plan changed after discard: before=%#v after=%#v", beforePlan, afterPlan)
+	}
 }
 
 func TestSelectedForkDiscardDeletesClaimedAndSettledDeliveryHistoryPostgres(t *testing.T) {
@@ -514,7 +628,7 @@ func TestSelectedForkDiscardLocksParentBeforeRevisionDeletionPostgres(t *testing
 	defer func() { _ = allocationTx.Rollback() }()
 	concurrentEventID := uuid.NewString()
 	seedPostgresSemanticEventRecordFixtureTx(t, ctx, allocationTx, concurrentEventID, fixture.forkRun, "selected.discard.concurrent", events.EventProducerPlatform, "selected-discard", "", "", time.Now().UTC())
-	allocatedRevision, err := runforkrevision.Capture(ctx, allocationTx, fixture.forkRun, runforkrevision.FamilyEvents)
+	allocatedRevision, err := finalizePostgresRunForkTestRevision(ctx, allocationTx, fixture.forkRun, runforkrevision.FamilyEvents)
 	if err != nil {
 		t.Fatalf("capture competing selected revision: %v", err)
 	}
@@ -582,18 +696,18 @@ func TestSelectedForkDiscardLocksParentBeforeRevisionDeletionPostgres(t *testing
 	if status != "cancelled" {
 		t.Fatalf("retained selected run status = %q, want cancelled", status)
 	}
-	for label, query := range map[string]string{
-		"revision head":   `SELECT COUNT(*) FROM run_fork_revision_heads WHERE run_id=$1::uuid`,
-		"revision ledger": `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1::uuid`,
-		"revision facts":  `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1::uuid`,
-	} {
-		var count int
-		if err := db.QueryRowContext(ctx, query, fixture.forkRun).Scan(&count); err != nil {
-			t.Fatalf("count %s after discard: %v", label, err)
-		}
-		if count != 0 {
-			t.Fatalf("%s rows after discard = %d, want 0", label, count)
-		}
+	var terminalRevision, terminalLedgerRows, tombstoneRows int
+	if err := db.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1::uuid`, fixture.forkRun).Scan(&terminalRevision); err != nil {
+		t.Fatalf("load terminal revision head: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1::uuid`, fixture.forkRun).Scan(&terminalLedgerRows); err != nil {
+		t.Fatalf("count terminal revision ledger: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1::uuid AND revision=$2 AND family='events' AND NOT present`, fixture.forkRun, terminalRevision).Scan(&tombstoneRows); err != nil {
+		t.Fatalf("count terminal event tombstones: %v", err)
+	}
+	if terminalRevision != int(allocatedRevision)+1 || terminalLedgerRows != terminalRevision || tombstoneRows != 2 {
+		t.Fatalf("terminal discard revision state = head:%d ledger:%d event_tombstones:%d, want %d/%d/2", terminalRevision, terminalLedgerRows, tombstoneRows, allocatedRevision+1, allocatedRevision+1)
 	}
 	var authorityRows int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE execution_id=$1::uuid`, issued.ExecutionID).Scan(&authorityRows); err != nil {
@@ -602,6 +716,106 @@ func TestSelectedForkDiscardLocksParentBeforeRevisionDeletionPostgres(t *testing
 	if authorityRows != 1 {
 		t.Fatalf("retained selected authority rows = %d, want 1", authorityRows)
 	}
+}
+
+func TestSelectedForkRetainedDiscardRollbackIncludesRevisionPublicationPostgres(t *testing.T) {
+	for _, failure := range []struct {
+		name      string
+		statement string
+	}{
+		{
+			name: "after_prior_domain_deletions",
+			statement: `CREATE TRIGGER fail_selected_discard_domain
+				BEFORE DELETE ON entity_state FOR EACH STATEMENT
+				EXECUTE FUNCTION fail_selected_discard()`,
+		},
+		{
+			name: "during_revision_finalization",
+			statement: `CREATE TRIGGER fail_selected_discard_finalization
+				BEFORE INSERT ON run_fork_fact_revisions FOR EACH STATEMENT
+				EXECUTE FUNCTION fail_selected_discard()`,
+		},
+		{
+			name: "during_deferred_commit",
+			statement: `CREATE CONSTRAINT TRIGGER fail_selected_discard_commit
+				AFTER INSERT ON run_fork_revisions DEFERRABLE INITIALLY DEFERRED FOR EACH ROW
+				EXECUTE FUNCTION fail_selected_discard()`,
+		},
+	} {
+		t.Run(failure.name, func(t *testing.T) {
+			_, db, _ := testutil.StartPostgres(t)
+			store := admitTestPostgresStore(t, db)
+			fixture := newSelectedCompletionFixture(t, store, db, false)
+			ctx := testAuthorActivityContext()
+			issued, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
+			if err != nil {
+				t.Fatalf("issue retained selected execution: %v", err)
+			}
+			eventID := uuid.NewString()
+			route := events.DeliveryRoute{
+				Recipient: events.MustNodeDeliveryRecipient(mustPersistenceRootNode("rollback-node")),
+				Target:    events.MustEntitylessReceiverTarget(events.RouteIdentity{FlowID: "rollback", FlowInstance: "rollback/one"}),
+			}
+			event := eventtest.PersistedProjection(eventID, "selected.rollback", "selected-test", "", json.RawMessage(`{}`), 0, fixture.forkRun, "", events.EventEnvelope{}, time.Now().UTC())
+			if err := commitSemanticEventFixtureWithRoutes(ctx, store, event, []events.DeliveryRoute{route}); err != nil {
+				t.Fatalf("commit rollback event: %v", err)
+			}
+			if _, err := db.ExecContext(ctx, `CREATE OR REPLACE FUNCTION fail_selected_discard() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected selected discard failure'; END $$`); err != nil {
+				t.Fatalf("create retained-discard failure function: %v", err)
+			}
+			if _, err := db.ExecContext(ctx, failure.statement); err != nil {
+				t.Fatalf("create retained-discard failure trigger: %v", err)
+			}
+
+			before := loadSelectedForkDiscardRollbackState(t, ctx, db, fixture.forkRun, eventID, issued.ExecutionID)
+			err = store.DiscardMaterializedSelectedContractExecutionFork(ctx, fixture.forkRun)
+			if err == nil || !strings.Contains(err.Error(), "injected selected discard failure") {
+				t.Fatalf("retained-discard failure = %v, want injected rollback error", err)
+			}
+			after := loadSelectedForkDiscardRollbackState(t, ctx, db, fixture.forkRun, eventID, issued.ExecutionID)
+			if !reflect.DeepEqual(after, before) {
+				t.Fatalf("retained-discard rollback state changed:\nbefore=%#v\nafter=%#v", before, after)
+			}
+		})
+	}
+}
+
+type selectedForkDiscardRollbackState struct {
+	Status        string
+	Events        int
+	Deliveries    int
+	ExecutionRows int
+	HeadRevision  int64
+	RevisionRows  int
+	RevisionFacts int
+}
+
+func loadSelectedForkDiscardRollbackState(t *testing.T, ctx context.Context, db *sql.DB, runID, eventID, executionID string) selectedForkDiscardRollbackState {
+	t.Helper()
+	var state selectedForkDiscardRollbackState
+	if err := db.QueryRowContext(ctx, `SELECT status FROM runs WHERE run_id=$1::uuid`, runID).Scan(&state.Status); err != nil {
+		t.Fatalf("load retained-discard rollback run: %v", err)
+	}
+	queries := []struct {
+		query string
+		args  []any
+		dest  *int
+	}{
+		{`SELECT COUNT(*) FROM events WHERE run_id=$1::uuid AND event_id=$2::uuid`, []any{runID, eventID}, &state.Events},
+		{`SELECT COUNT(*) FROM event_deliveries WHERE run_id=$1::uuid AND event_id=$2::uuid`, []any{runID, eventID}, &state.Deliveries},
+		{`SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1::uuid AND execution_id=$2::uuid`, []any{runID, executionID}, &state.ExecutionRows},
+		{`SELECT COUNT(*) FROM run_fork_revisions WHERE run_id=$1::uuid`, []any{runID}, &state.RevisionRows},
+		{`SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1::uuid`, []any{runID}, &state.RevisionFacts},
+	}
+	for _, query := range queries {
+		if err := db.QueryRowContext(ctx, query.query, query.args...).Scan(query.dest); err != nil {
+			t.Fatalf("load retained-discard rollback state with %q: %v", query.query, err)
+		}
+	}
+	if err := db.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1::uuid`, runID).Scan(&state.HeadRevision); err != nil {
+		t.Fatalf("load retained-discard rollback revision head: %v", err)
+	}
+	return state
 }
 
 func TestSelectedForkDiscardRejectsLiveDependentForkPostgres(t *testing.T) {

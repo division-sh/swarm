@@ -415,16 +415,18 @@ func commitSemanticEventWithInitialFacts(
 		if _, ok := selectedStore.(*store.PostgresStore); !ok {
 			t.Fatalf("semantic fork frontier fixture requires PostgreSQL, got %T", selectedStore)
 		}
-		if _, err := runforkrevision.Capture(
-			ctx,
-			tx,
+		effects := runforkrevision.NewEffects()
+		if err := effects.Add(
 			record.RunID,
 			runforkrevision.FamilyEvents,
 			runforkrevision.FamilyEventDeliveries,
 			runforkrevision.FamilyCommittedReplayScopes,
 			runforkrevision.FamilyEventReceipts,
 		); err != nil {
-			t.Fatalf("capture semantic fork frontier fixture: %v", err)
+			t.Fatalf("declare semantic fork frontier fixture: %v", err)
+		}
+		if _, err := runforkrevision.FinalizePostgres(ctx, tx, effects); err != nil {
+			t.Fatalf("finalize semantic fork frontier fixture: %v", err)
 		}
 	}
 	if err := tx.Commit(); err != nil {

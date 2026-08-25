@@ -51,7 +51,11 @@ func (s *ReplyPostgresOwner) CreateReplyContext(ctx context.Context, record runt
 		if err := createPostgresReplyContext(txctx, tx, record); err != nil {
 			return err
 		}
-		_, err := runforkrevision.CaptureCurrentTransaction(txctx, tx)
+		effects := runforkrevision.NewEffects()
+		if err := effects.Add(record.RunID, runforkrevision.FamilyReplyContexts); err != nil {
+			return err
+		}
+		_, err := runforkrevision.FinalizePostgres(txctx, tx, effects)
 		return err
 	})
 }
@@ -108,7 +112,15 @@ func (s *ReplyPostgresOwner) CreateWithinTransaction(ctx context.Context, tx *sq
 
 func (s *ReplySQLiteOwner) CreateReplyContext(ctx context.Context, record runtimereplycontext.Record) error {
 	return s.backend.RunTransaction(ctx, "sqlite reply context create", func(txctx context.Context, tx *sql.Tx) error {
-		return createSQLiteReplyContextTx(txctx, tx, record)
+		if err := createSQLiteReplyContextTx(txctx, tx, record); err != nil {
+			return err
+		}
+		effects := runforkrevision.NewEffects()
+		if err := effects.Add(record.RunID, runforkrevision.FamilyReplyContexts); err != nil {
+			return err
+		}
+		_, err := runforkrevision.FinalizeSQLite(txctx, tx, effects)
+		return err
 	})
 }
 
@@ -201,7 +213,11 @@ func (s *ReplyPostgresOwner) ClaimReplyContext(ctx context.Context, id, replyEve
 		if err != nil {
 			return err
 		}
-		_, err = runforkrevision.CaptureCurrentTransaction(txctx, tx)
+		effects := runforkrevision.NewEffects()
+		if err := effects.Add(record.RunID, runforkrevision.FamilyReplyContexts); err != nil {
+			return err
+		}
+		_, err = runforkrevision.FinalizePostgres(txctx, tx, effects)
 		return err
 	})
 	return record, outcome, err
@@ -224,6 +240,14 @@ func (s *ReplySQLiteOwner) ClaimReplyContext(ctx context.Context, id, replyEvent
 			return err
 		}
 		record, outcome, err = claimLoadedReplyContextTx(txctx, tx, loaded, replyEventID, false)
+		if err != nil {
+			return err
+		}
+		effects := runforkrevision.NewEffects()
+		if err := effects.Add(record.RunID, runforkrevision.FamilyReplyContexts); err != nil {
+			return err
+		}
+		_, err = runforkrevision.FinalizeSQLite(txctx, tx, effects)
 		return err
 	})
 	return record, outcome, err

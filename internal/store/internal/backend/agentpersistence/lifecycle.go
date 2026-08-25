@@ -407,7 +407,11 @@ func (s *AgentPostgresOwner) CommitAgentLifecycleTransitionTx(ctx context.Contex
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
-	if _, err := privaterunforkrevision.CaptureCurrentTransaction(ctx, tx); err != nil {
+	effects, err := lifecycleRevisionEffects(result)
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	if _, err := privaterunforkrevision.FinalizePostgres(ctx, tx, effects); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	if err := story.Finalize(ctx); err != nil {
@@ -433,6 +437,13 @@ func (s *AgentSQLiteOwner) CommitAgentLifecycleTransitionTx(ctx context.Context,
 	}
 	result, err := commitSQLiteAgentLifecycleTransitionTx(ctx, tx, story, req, s.providerDrains)
 	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	effects, err := lifecycleRevisionEffects(result)
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	if _, err := privaterunforkrevision.FinalizeSQLite(ctx, tx, effects); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	if err := story.Finalize(ctx); err != nil {
@@ -560,11 +571,18 @@ func (s *AgentPostgresOwner) runPostgresLifecycleMutation(ctx context.Context, o
 		if err := operation(txctx, tx, story); err != nil {
 			return err
 		}
-		if _, err := privaterunforkrevision.CaptureCurrentTransaction(txctx, tx); err != nil {
-			return err
-		}
 		return story.Finalize(txctx)
 	})
+}
+
+func lifecycleRevisionEffects(result runtimemanager.AgentLifecycleTransitionResult) (*privaterunforkrevision.Effects, error) {
+	effects := privaterunforkrevision.NewEffects()
+	for _, session := range result.Subordinate.Sessions {
+		if err := effects.Add(session.RunID, privaterunforkrevision.FamilyAgentSessions); err != nil {
+			return nil, err
+		}
+	}
+	return effects, nil
 }
 
 func (s *AgentSQLiteOwner) runSQLiteLifecycleMutation(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {

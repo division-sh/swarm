@@ -82,7 +82,11 @@ func (s *RunLifecyclePostgresOwner) runControlTransition(ctx context.Context, re
 	}
 	defer handoff.Rollback()
 	var state runtimeruncontrol.State
-	err = s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	effects, err := runTerminationRevisionEffects(runID)
+	if err != nil {
+		return runtimeruncontrol.State{}, err
+	}
+	err = s.runPrivateAuthorActivityMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		var err error
 		state, err = lockRunControlState(txctx, tx, runID)
 		if err != nil {

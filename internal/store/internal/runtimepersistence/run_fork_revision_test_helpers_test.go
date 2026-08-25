@@ -1,6 +1,7 @@
 package runtimepersistence
 
 import (
+	"context"
 	"database/sql"
 	"testing"
 	"time"
@@ -22,7 +23,7 @@ func captureRunForkTestRevision(t *testing.T, db *sql.DB, runID string, families
 		t.Fatalf("begin run fork test revision: %v", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	revision, err := runforkrevision.Capture(testAuthorActivityContext(), tx, runID, families...)
+	revision, err := finalizePostgresRunForkTestRevision(testAuthorActivityContext(), tx, runID, families...)
 	if err != nil {
 		t.Fatalf("capture run fork test revision: %v", err)
 	}
@@ -30,6 +31,48 @@ func captureRunForkTestRevision(t *testing.T, db *sql.DB, runID string, families
 		t.Fatalf("commit run fork test revision: %v", err)
 	}
 	return revision
+}
+
+func finalizePostgresRunForkTestRevision(ctx context.Context, tx *sql.Tx, runID string, families ...runforkrevision.Family) (int64, error) {
+	effects := runforkrevision.NewEffects()
+	if err := effects.Add(runID, families...); err != nil {
+		return 0, err
+	}
+	results, err := runforkrevision.FinalizePostgres(ctx, tx, effects)
+	if err != nil {
+		return 0, err
+	}
+	return results[runID].Revision, nil
+}
+
+func finalizeAllPostgresRunForkTestRevisions(ctx context.Context, tx *sql.Tx) (map[string]int64, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT CAST(run_id AS TEXT) FROM runs ORDER BY run_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	effects := runforkrevision.NewEffects()
+	for rows.Next() {
+		var runID string
+		if err := rows.Scan(&runID); err != nil {
+			return nil, err
+		}
+		if err := effects.Add(runID, runforkrevision.AllFamilies()...); err != nil {
+			return nil, err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	results, err := runforkrevision.FinalizePostgres(ctx, tx, effects)
+	if err != nil {
+		return nil, err
+	}
+	revisions := make(map[string]int64, len(results))
+	for runID, result := range results {
+		revisions[runID] = result.Revision
+	}
+	return revisions, nil
 }
 
 func seedRunForkSessionProjection(t *testing.T, db *sql.DB, runID, agentID, sessionID, status string, at time.Time) {
@@ -81,8 +124,8 @@ func mutateRunForkSessionExcludedColumns(t *testing.T, db *sql.DB, runID, sessio
 	`, runID, sessionID, at); err != nil {
 		t.Fatalf("update excluded session columns: %v", err)
 	}
-	if _, err := runforkrevision.CaptureCurrentTransaction(ctx, tx); err != nil {
-		t.Fatalf("capture excluded session mutation: %v", err)
+	if _, err := finalizePostgresRunForkTestRevision(ctx, tx, runID, runforkrevision.FamilyAgentSessions); err != nil {
+		t.Fatalf("finalize excluded session mutation revision: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit excluded session mutation: %v", err)

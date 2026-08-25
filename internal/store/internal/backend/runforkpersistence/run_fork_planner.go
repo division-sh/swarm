@@ -69,7 +69,7 @@ func (s *RunForkPostgresOwner) PlanRunFork(ctx context.Context, req runfork.RunF
 	if err := loadRunForkSourceSummary(ctx, tx, &plan); err != nil {
 		return runfork.RunForkPlan{}, err
 	}
-	if err := runforkrevision.ValidateComplete(ctx, tx, runID); err != nil {
+	if err := runforkrevision.ValidateCompletePostgres(ctx, tx, runID); err != nil {
 		return runfork.RunForkPlan{}, err
 	}
 	if at != "" {

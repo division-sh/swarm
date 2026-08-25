@@ -10,7 +10,6 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
-	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	runhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
 )
@@ -69,9 +68,6 @@ func (s *DecisionPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Con
 			return err
 		}
 		if err := operation(txctx, tx, story); err != nil {
-			return err
-		}
-		if _, err := privaterunforkrevision.CaptureCurrentTransaction(txctx, tx); err != nil {
 			return err
 		}
 		return story.Finalize(txctx)

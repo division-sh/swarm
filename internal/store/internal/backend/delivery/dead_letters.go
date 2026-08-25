@@ -15,6 +15,7 @@ import (
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
 
@@ -24,8 +25,19 @@ func (s *DeadLetterPostgresOwner) RecordDeadLetter(ctx context.Context, rec runt
 	if err != nil {
 		return err
 	}
-	return s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		return s.RecordDeadLetterTx(txctx, tx, story, rec, true)
+	effects := privaterunforkrevision.NewEffects()
+	return s.runPrivateAuthorActivityMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		if err := s.RecordDeadLetterTx(txctx, tx, story, rec, true); err != nil {
+			return err
+		}
+		runID, err := privaterunforkrevision.RunIDForEvent(txctx, tx, rec.OriginalEventID)
+		if err != nil {
+			return err
+		}
+		if runID == "" {
+			return nil
+		}
+		return effects.Add(runID, privaterunforkrevision.FamilyDeadLetters)
 	})
 }
 
@@ -134,8 +146,19 @@ func (s *DeadLetterSQLiteOwner) RecordDeadLetter(ctx context.Context, rec runtim
 	if err != nil {
 		return err
 	}
-	return s.runPrivateAuthorActivityMutation(ctx, "sqlite record dead letter", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		return s.RecordDeadLetterTx(txctx, tx, story, rec, true)
+	effects := privaterunforkrevision.NewEffects()
+	return s.runPrivateAuthorActivityMutation(ctx, "sqlite record dead letter", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		if err := s.RecordDeadLetterTx(txctx, tx, story, rec, true); err != nil {
+			return err
+		}
+		runID, err := privaterunforkrevision.RunIDForEvent(txctx, tx, rec.OriginalEventID)
+		if err != nil {
+			return err
+		}
+		if runID == "" {
+			return nil
+		}
+		return effects.Add(runID, privaterunforkrevision.FamilyDeadLetters)
 	})
 }
 

@@ -25,6 +25,7 @@ import (
 	storeentity "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime"
 	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	timerobligationstore "github.com/division-sh/swarm/internal/store/internal/backend/timerobligation"
 	storeworkflowtimer "github.com/division-sh/swarm/internal/store/internal/backend/workflowtimer"
 	"github.com/google/uuid"
@@ -40,6 +41,7 @@ type standingServiceAdapter struct {
 	sqliteStore                  *PipelineSQLiteOwner
 	story                        runtimeauthoractivity.Mutation
 	handoff                      *runLifecycleCandidateHandoffReservation
+	revisionEffects              *revisionEffects
 	deliveryContinuationRequired bool
 }
 
@@ -54,12 +56,15 @@ func newPostgresStandingServiceAdapter(store *PipelinePostgresOwner) *standingSe
 	}
 	adapter.run = func(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
 		return withRunLifecycleCandidateHandoff(ctx, func(handoff *runLifecycleCandidateHandoffReservation) error {
-			return store.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+			effects := newRevisionEffects()
+			return store.runPrivateAuthorActivityMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 				adapter.story = story
 				adapter.handoff = handoff
+				adapter.revisionEffects = effects
 				defer func() {
 					adapter.story = nil
 					adapter.handoff = nil
+					adapter.revisionEffects = nil
 				}()
 				return fn(txctx, tx)
 			})
@@ -78,12 +83,15 @@ func newSQLiteStandingServiceAdapter(store *PipelineSQLiteOwner) *standingServic
 	}
 	adapter.run = func(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
 		return withRunLifecycleCandidateHandoff(ctx, func(handoff *runLifecycleCandidateHandoffReservation) error {
-			return store.runPrivateAuthorActivityMutation(ctx, "sqlite standing service mutation", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+			effects := newRevisionEffects()
+			return store.runPrivateAuthorActivityMutation(ctx, "sqlite standing service mutation", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 				adapter.story = story
 				adapter.handoff = handoff
+				adapter.revisionEffects = effects
 				defer func() {
 					adapter.story = nil
 					adapter.handoff = nil
+					adapter.revisionEffects = nil
 				}()
 				return fn(txctx, tx)
 			})
@@ -1368,6 +1376,16 @@ func (s *standingServiceAdapter) quiesceStandingRunTx(ctx context.Context, tx *s
 	if !s.validRunLifecycleMutation(tx) {
 		return nil, fmt.Errorf("quiesce standing run: standing transaction owner is required")
 	}
+	if err := addRevisionEffects(s.revisionEffects, runID,
+		privaterunforkrevision.FamilyEventDeliveries,
+		privaterunforkrevision.FamilyCommittedReplayScopes,
+		privaterunforkrevision.FamilyEventReceipts,
+		privaterunforkrevision.FamilyDeadLetters,
+		privaterunforkrevision.FamilyTimers,
+		privaterunforkrevision.FamilyAgentSessions,
+	); err != nil {
+		return nil, err
+	}
 	scope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, bundleHash)
 	if err != nil {
 		return nil, fmt.Errorf("quiesce standing run scope: %w", err)
@@ -1476,6 +1494,9 @@ func (s *standingServiceAdapter) setStandingRunCancelledTx(ctx context.Context, 
 }
 
 func (s *standingServiceAdapter) copyStandingEntityStateTx(ctx context.Context, tx *sql.Tx, oldRunID, newRunID, entityID string, copiedAt time.Time) error {
+	if err := addEntityMetadataRevisionEffects(s.revisionEffects, newRunID); err != nil {
+		return err
+	}
 	var result sql.Result
 	var err error
 	if s.isSQLite() {

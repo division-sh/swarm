@@ -17,6 +17,7 @@ import (
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storegenericschedule "github.com/division-sh/swarm/internal/store/internal/backend/genericschedule"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storeworkflowtimer "github.com/division-sh/swarm/internal/store/internal/backend/workflowtimer"
 	"github.com/lib/pq"
 )
@@ -36,7 +37,7 @@ type lifecycleOwner interface {
 }
 
 type revisionOwner interface {
-	CommitRunForkRevisionTx(context.Context, *sql.Tx) error
+	FinalizeRunForkRevisionTx(context.Context, *sql.Tx, *privaterunforkrevision.Effects) error
 }
 
 type PreservationPostgresOwner struct {
@@ -252,7 +253,23 @@ func (s *PreservationPostgresOwner) applyPreservationCleanup(ctx context.Context
 	if err := story.Finalize(ctx); err != nil {
 		return preservationcleanup.Result{}, err
 	}
-	if err := s.runFork.CommitRunForkRevisionTx(ctx, tx); err != nil {
+	effects := privaterunforkrevision.NewEffects()
+	for _, runID := range activeRunIDs {
+		if err := effects.Add(runID,
+			privaterunforkrevision.FamilyEventDeliveries,
+			privaterunforkrevision.FamilyCommittedReplayScopes,
+			privaterunforkrevision.FamilyEventReceipts,
+			privaterunforkrevision.FamilyDeadLetters,
+			privaterunforkrevision.FamilyTimers,
+			privaterunforkrevision.FamilyAgentSessions,
+		); err != nil {
+			return preservationcleanup.Result{}, err
+		}
+	}
+	if err := s.runFork.FinalizeRunForkRevisionTx(ctx, tx, effects); err != nil {
+		return preservationcleanup.Result{}, fmt.Errorf("finalize preservation cleanup revisions: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
 		return preservationcleanup.Result{}, fmt.Errorf("commit preservation cleanup tx: %w", err)
 	}
 	committed = true

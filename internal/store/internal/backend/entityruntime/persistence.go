@@ -42,7 +42,7 @@ func sqliteEntityRunSourceOwner(tx *sql.Tx) entityRunSourceOwner {
 	}
 }
 
-func (s *EntityPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+func (s *EntityPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Context, effects *privaterunforkrevision.Effects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 	if s == nil || s.schemaGuard == nil {
 		return fmt.Errorf("entity postgres owner is required")
 	}
@@ -57,14 +57,14 @@ func (s *EntityPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Conte
 		if err := operation(txctx, tx, story); err != nil {
 			return err
 		}
-		if _, err := privaterunforkrevision.CaptureCurrentTransaction(txctx, tx); err != nil {
+		if _, err := privaterunforkrevision.FinalizePostgres(txctx, tx, effects); err != nil {
 			return err
 		}
 		return story.Finalize(txctx)
 	})
 }
 
-func (s *EntitySQLiteOwner) runPrivateAuthorActivityMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+func (s *EntitySQLiteOwner) runPrivateAuthorActivityMutation(ctx context.Context, label string, effects *privaterunforkrevision.Effects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 	if s == nil || s.schemaGuard == nil {
 		return fmt.Errorf("entity sqlite owner is required")
 	}
@@ -77,6 +77,9 @@ func (s *EntitySQLiteOwner) runPrivateAuthorActivityMutation(ctx context.Context
 			return err
 		}
 		if err := operation(txctx, tx, story); err != nil {
+			return err
+		}
+		if _, err := privaterunforkrevision.FinalizeSQLite(txctx, tx, effects); err != nil {
 			return err
 		}
 		return story.Finalize(txctx)
@@ -178,7 +181,11 @@ func (s *EntityPostgresOwner) SaveEntityField(ctx context.Context, update runtim
 		return 0, err
 	}
 	var revision int
-	err = s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	effects := privaterunforkrevision.NewEffects()
+	if err := effects.Add(runID, privaterunforkrevision.FamilyEntityMutations); err != nil {
+		return 0, err
+	}
+	err = s.runPrivateAuthorActivityMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		if err := storerunstate.RequirePostgresActiveTx(txctx, tx, runID); err != nil {
 			return err
 		}
@@ -232,7 +239,11 @@ func (s *EntitySQLiteOwner) SaveEntityField(ctx context.Context, update runtimet
 		return 0, err
 	}
 	var revision int
-	if err := s.runPrivateAuthorActivityMutation(ctx, "sqlite entity field update", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	effects := privaterunforkrevision.NewEffects()
+	if err := effects.Add(runID, privaterunforkrevision.FamilyEntityMutations); err != nil {
+		return 0, err
+	}
+	if err := s.runPrivateAuthorActivityMutation(ctx, "sqlite entity field update", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, runID); err != nil {
 			return err
 		}
@@ -298,7 +309,11 @@ func (s *EntityPostgresOwner) CreateEntity(ctx context.Context, rec runtimetools
 	if err != nil {
 		return err
 	}
-	return s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	effects := privaterunforkrevision.NewEffects()
+	if err := effects.Add(rec.RunID, privaterunforkrevision.FamilyEntityMetadata, privaterunforkrevision.FamilyEntityMutations); err != nil {
+		return err
+	}
+	return s.runPrivateAuthorActivityMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		if err := storerunstate.RequirePostgresActiveTx(txctx, tx, rec.RunID); err != nil {
 			return err
 		}
@@ -334,7 +349,11 @@ func (s *EntitySQLiteOwner) CreateEntity(ctx context.Context, rec runtimetools.E
 	if err != nil {
 		return err
 	}
-	return s.runPrivateAuthorActivityMutation(ctx, "sqlite entity create", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	effects := privaterunforkrevision.NewEffects()
+	if err := effects.Add(rec.RunID, privaterunforkrevision.FamilyEntityMetadata, privaterunforkrevision.FamilyEntityMutations); err != nil {
+		return err
+	}
+	return s.runPrivateAuthorActivityMutation(ctx, "sqlite entity create", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, rec.RunID); err != nil {
 			return err
 		}

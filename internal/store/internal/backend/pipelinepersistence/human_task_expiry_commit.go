@@ -73,12 +73,26 @@ func commitHumanTaskExpirations(
 }
 
 func (s *PipelinePostgresOwner) CommitHumanTaskExpirations(ctx context.Context, command runtimepipeline.HumanTaskExpiryCommand) (runtimepipeline.CommittedHumanTaskExpiry, error) {
-	return commitHumanTaskExpirations(ctx, s, s.DecisionPostgresOwner, true, s.runPrivateAuthorActivityMutation, command)
+	effects := newRevisionEffects()
+	for _, publication := range command.Publications {
+		if err := addPublicationRevisionEffects(effects, publication); err != nil {
+			return runtimepipeline.CommittedHumanTaskExpiry{}, err
+		}
+	}
+	return commitHumanTaskExpirations(ctx, s, s.DecisionPostgresOwner, true, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+		return s.runPrivateAuthorActivityMutation(ctx, effects, fn)
+	}, command)
 }
 
 func (s *PipelineSQLiteOwner) CommitHumanTaskExpirations(ctx context.Context, command runtimepipeline.HumanTaskExpiryCommand) (runtimepipeline.CommittedHumanTaskExpiry, error) {
+	effects := newRevisionEffects()
+	for _, publication := range command.Publications {
+		if err := addPublicationRevisionEffects(effects, publication); err != nil {
+			return runtimepipeline.CommittedHumanTaskExpiry{}, err
+		}
+	}
 	return commitHumanTaskExpirations(ctx, s, s.DecisionSQLiteOwner, false, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, "sqlite human-task expiry", fn)
+		return s.runPrivateAuthorActivityMutation(ctx, "sqlite human-task expiry", effects, fn)
 	}, command)
 }
 

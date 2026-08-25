@@ -1445,14 +1445,14 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathDefaultSQLite(t *test
 	runServedEventPublishFollowUpProof(t, endpoint, servedDB, "sqlite", bundleHash, probe)
 }
 
-func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres(t *testing.T) {
-	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
+func TestRunForkEndToEndPostgresCapturesCompleteRevisionHistory(t *testing.T) {
+	dsn, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
 	contractsPath := writeServedEventPublishFollowUpFixture(t)
 	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 	probe := lifecycletest.New(t, lifecycletest.WithTimeout(servedEventPublishLifecycleProbeWaitTimeout))
-	endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
+	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
 		ConfigPath:              writeServeRuntimeTestConfig(t),
 		ContractsPath:           contractsPath,
 		PlatformSpecPath:        defaultPlatformSpecPath,
@@ -1466,8 +1466,129 @@ func TestRunServeRuntimeEventPublishRunIDFollowUpServedPathPostgres(t *testing.T
 		TestLifecycleProbe:      probe,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	})
+	serve.waitForReadyLine()
+	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, serve.outputString()) + "/v1/rpc"
 
-	runServedEventPublishFollowUpProof(t, endpoint, db, "postgres", bundleHash, probe)
+	proof := runServedEventPublishFollowUpProof(t, endpoint, db, "postgres", bundleHash, probe)
+
+	amendedContractsPath := writeServedEventPublishFollowUpFixture(t)
+	packagePath := filepath.Join(amendedContractsPath, "package.yaml")
+	packageYAML, err := os.ReadFile(packagePath)
+	if err != nil {
+		t.Fatalf("read amended bundle package: %v", err)
+	}
+	amendedPackageYAML := strings.Replace(string(packageYAML), `version: "1.0.0"`, `version: "1.0.1"`, 1)
+	if amendedPackageYAML == string(packageYAML) {
+		t.Fatal("amended bundle package version replacement did not apply")
+	}
+	if err := os.WriteFile(packagePath, []byte(amendedPackageYAML), 0o644); err != nil {
+		t.Fatalf("write amended bundle package: %v", err)
+	}
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	upload, err := runtimecontracts.BuildBundleRegistrationDirectoryUpload(
+		repoRoot, amendedContractsPath, runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("BuildBundleRegistrationDirectoryUpload: %v", err)
+	}
+	registrationParams := map[string]any{
+		"content_yaml":    upload.ContentYAML,
+		"idempotency_key": "issue-2272-postgres-amended-bundle",
+	}
+	if upload.DataBlob != nil {
+		registrationParams["data_blob"] = upload.DataBlob
+	}
+	var registration struct {
+		BundleHash string `json:"bundle_hash"`
+		Registered bool   `json:"registered"`
+	}
+	requireServedJSONRPCResult(t, endpoint, "bundle.register", registrationParams, &registration)
+	if !registration.Registered || runtimecontracts.ValidateBundleHash(registration.BundleHash) != nil || registration.BundleHash == bundleHash {
+		t.Fatalf("amended bundle registration = %#v, want distinct registered bundle", registration)
+	}
+	if code := serve.stop(); code != 0 {
+		t.Fatalf("first served runtime exit code = %d\noutput:\n%s", code, serve.outputString())
+	}
+	reopened, err := store.NewPostgresStore(dsn)
+	if err != nil {
+		t.Fatalf("reopen PostgreSQL runtime store: %v", err)
+	}
+	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+		storetest.BootstrapPostgresRuntimeStore(t, reopened)
+		return selectedPostgresStoreBundle(reopened, storetest.DatabaseForTest(reopened), cfg), nil
+	}
+
+	restarted := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
+		ConfigPath:         writeServeRuntimeTestConfig(t),
+		BundleHash:         bundleHash,
+		BundleHashes:       []string{registration.BundleHash},
+		PlatformSpecPath:   defaultPlatformSpecPath,
+		StoreMode:          "postgres",
+		StoreModeSet:       true,
+		APIListenAddr:      "127.0.0.1:0",
+		MCPListenAddr:      "127.0.0.1:0",
+		SelfCheck:          true,
+		RequireBundleMatch: true,
+		Verbose:            true,
+	})
+	restarted.waitForReadyLine()
+	endpoint = "http://" + serveRuntimeAPIListenerFromOutput(t, restarted.outputString()) + "/v1/rpc"
+
+	response := requestServedJSONRPCWithTimeout(t, endpoint, "run.fork", map[string]any{
+		"source_run_id":         proof.RunID,
+		"fork_event_id":         proof.FollowUpEventID,
+		"bundle_hash":           registration.BundleHash,
+		"confirm_source_freeze": true,
+		"idempotency_key":       "issue-2272-postgres-real-run-fork",
+	}, 30*time.Second)
+	if response.Error != nil {
+		_, planErr := reopened.PlanRunFork(context.Background(), runfork.RunForkPlanRequest{
+			SourceRunID: proof.RunID,
+			At:          proof.FollowUpEventID,
+		})
+		t.Fatalf("run.fork real served path error = %#v\nplanner error: %v\nserve output:\n%s", response.Error, planErr, restarted.outputString())
+	}
+	var fork apiv1.RunForkExecutionResult
+	if err := json.Unmarshal(response.Result, &fork); err != nil {
+		t.Fatalf("decode run.fork real served path result: %v\n%s", err, response.Result)
+	}
+	if fork.SourceRunID != proof.RunID || fork.ForkEventID != proof.FollowUpEventID || fork.ForkRunID == "" || fork.BundleHash != registration.BundleHash || fork.ExecutedEventCount != 1 {
+		t.Fatalf("run.fork real served path result = %#v", fork)
+	}
+	requireServedRunForkCounterfactualCompleted(t, db, fork.ForkRunID)
+	if code := restarted.stop(); code != 0 {
+		t.Fatalf("restarted served runtime exit code = %d\noutput:\n%s", code, restarted.outputString())
+	}
+}
+
+func requireServedRunForkCounterfactualCompleted(t *testing.T, db *sql.DB, forkRunID string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var terminalEntities, deliveredEvents int
+		var executionState string
+		err := db.QueryRowContext(context.Background(), `
+			SELECT
+				(SELECT COUNT(*) FROM entity_state WHERE run_id=$1::uuid AND current_state='done'),
+				(SELECT COUNT(*)
+				 FROM events e
+				 JOIN event_deliveries d ON d.event_id=e.event_id AND d.run_id=e.run_id
+				 WHERE e.run_id=$1::uuid
+				   AND e.event_name='item.processed'
+				   AND d.subscriber_id=$2
+				   AND d.status='delivered'),
+				(SELECT state
+				 FROM run_fork_selected_contract_runtime_executions
+				 WHERE fork_run_id=$1::uuid)
+		`, forkRunID, identitytest.RootNode(t, "item-observer").Key()).Scan(&terminalEntities, &deliveredEvents, &executionState)
+		if err == nil && terminalEntities == 1 && deliveredEvents == 1 && executionState == "closed" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("counterfactual completion for %s = entities:%d deliveries:%d execution:%q err:%v", forkRunID, terminalEntities, deliveredEvents, executionState, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func TestRunServeRuntimeEventPublishTargetRouteServedPathDefaultSQLite(t *testing.T) {
@@ -5345,7 +5466,13 @@ const (
 	servedProofPollDeadline = 60 * time.Second
 )
 
-func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, probe *lifecycletest.Probe) {
+type servedEventPublishFollowUpProof struct {
+	RunID           string
+	InitialEventID  string
+	FollowUpEventID string
+}
+
+func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.DB, backend, bundleHash string, probe *lifecycletest.Probe) servedEventPublishFollowUpProof {
 	t.Helper()
 	initialStdout, initialStderr, code := runServedCLICommand(t, endpoint, []string{
 		"event", "publish", "item.received",
@@ -5457,6 +5584,11 @@ func runServedEventPublishFollowUpProof(t *testing.T, endpoint string, db *sql.D
 	}
 	if got := servedEventPublishAPIIdempotencyCount(t, db, backend, "event.publish", unhandledIdempotencyKey); got != 0 {
 		t.Fatalf("%s idempotency rows for rejected follow-up = %d, want 0", backend, got)
+	}
+	return servedEventPublishFollowUpProof{
+		RunID:           runID,
+		InitialEventID:  initialEventID,
+		FollowUpEventID: followUpEventID,
 	}
 }
 

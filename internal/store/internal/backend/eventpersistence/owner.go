@@ -30,6 +30,21 @@ import (
 	"github.com/google/uuid"
 )
 
+type revisionEffects = privaterunforkrevision.Effects
+
+func declareEventCommitEffects(effects *revisionEffects, runID string) error {
+	if strings.TrimSpace(runID) == "" {
+		return nil
+	}
+	return effects.Add(runID,
+		privaterunforkrevision.FamilyEvents,
+		privaterunforkrevision.FamilyEventDeliveries,
+		privaterunforkrevision.FamilyCommittedReplayScopes,
+		privaterunforkrevision.FamilyEventReceipts,
+		privaterunforkrevision.FamilyReplyContexts,
+	)
+}
+
 type selectedForkLineageOwner interface {
 	InsertSelectedForkExecutionLineageTx(context.Context, *sql.Tx, runtimerunfork.RunForkSelectedContractExecutionLineage) error
 }
@@ -134,39 +149,48 @@ func (s *EventPostgresOwner) requireCurrentSchema() error { return s.requireCurr
 func (s *EventSQLiteOwner) requireCurrentSchema() error   { return s.requireCurrent() }
 func (s *EventSQLiteOwner) now() time.Time                { return s.nowFn().UTC() }
 
-func (s *EventPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+func (s *EventPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects) error) error {
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
 	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		effects := privaterunforkrevision.NewEffects()
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
 		if err != nil {
 			return err
 		}
-		if err := operation(txctx, tx, story); err != nil {
+		if err := operation(txctx, tx, story, effects); err != nil {
 			return err
 		}
-		if _, err := privaterunforkrevision.CaptureCurrentTransaction(txctx, tx); err != nil {
+		if err := story.Finalize(txctx); err != nil {
 			return err
 		}
-		return story.Finalize(txctx)
+		_, err = privaterunforkrevision.FinalizePostgres(txctx, tx, effects)
+		return err
 	})
 }
 
-func (s *EventSQLiteOwner) runRuntimeMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx) error) error {
+func (s *EventSQLiteOwner) runRuntimeMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *revisionEffects) error) error {
 	if err := s.requireCurrentSchema(); err != nil {
 		return err
 	}
-	return s.backend.RunTransaction(ctx, label, operation)
+	return s.backend.RunTransaction(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
+		effects := privaterunforkrevision.NewEffects()
+		if err := operation(txctx, tx, effects); err != nil {
+			return err
+		}
+		_, err := privaterunforkrevision.FinalizeSQLite(txctx, tx, effects)
+		return err
+	})
 }
 
-func (s *EventSQLiteOwner) runPrivateAuthorActivityMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-	return s.runRuntimeMutation(ctx, label, func(txctx context.Context, tx *sql.Tx) error {
+func (s *EventSQLiteOwner) runPrivateAuthorActivityMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects) error) error {
+	return s.runRuntimeMutation(ctx, label, func(txctx context.Context, tx *sql.Tx, effects *revisionEffects) error {
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
 		if err != nil {
 			return err
 		}
-		if err := operation(txctx, tx, story); err != nil {
+		if err := operation(txctx, tx, story, effects); err != nil {
 			return err
 		}
 		return story.Finalize(txctx)

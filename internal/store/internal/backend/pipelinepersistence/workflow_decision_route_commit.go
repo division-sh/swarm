@@ -127,7 +127,13 @@ func (s *PipelinePostgresOwner) CommitHumanTaskDeferredRoute(ctx context.Context
 	if !ok {
 		return runtimepipeline.CommittedHumanTaskRoute{}, fmt.Errorf("human-task deferred route publication has unexpected type %T", command.Publication)
 	}
-	return commitHumanTaskRoute(ctx, s, s.DecisionPostgresOwner, true, s.runPrivateAuthorActivityMutation, plan, command.CardID, command.RouteEventID, command.OccurredAt, false)
+	effects := newRevisionEffects()
+	if err := addPublicationRevisionEffects(effects, command.Publication); err != nil {
+		return runtimepipeline.CommittedHumanTaskRoute{}, err
+	}
+	return commitHumanTaskRoute(ctx, s, s.DecisionPostgresOwner, true, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+		return s.runPrivateAuthorActivityMutation(ctx, effects, fn)
+	}, plan, command.CardID, command.RouteEventID, command.OccurredAt, false)
 }
 
 func (s *PipelineSQLiteOwner) CommitHumanTaskDeferredRoute(ctx context.Context, command runtimepipeline.HumanTaskDeferredRouteCommand) (runtimepipeline.CommittedHumanTaskRoute, error) {
@@ -138,8 +144,12 @@ func (s *PipelineSQLiteOwner) CommitHumanTaskDeferredRoute(ctx context.Context, 
 	if !ok {
 		return runtimepipeline.CommittedHumanTaskRoute{}, fmt.Errorf("human-task deferred route publication has unexpected type %T", command.Publication)
 	}
+	effects := newRevisionEffects()
+	if err := addPublicationRevisionEffects(effects, command.Publication); err != nil {
+		return runtimepipeline.CommittedHumanTaskRoute{}, err
+	}
 	return commitHumanTaskRoute(ctx, s, s.DecisionSQLiteOwner, false, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, "sqlite human-task deferred route", fn)
+		return s.runPrivateAuthorActivityMutation(ctx, "sqlite human-task deferred route", effects, fn)
 	}, plan, command.CardID, command.RouteEventID, command.OccurredAt, false)
 }
 
@@ -151,7 +161,13 @@ func (s *PipelinePostgresOwner) CommitHumanTaskOutcomeRoute(ctx context.Context,
 	if !ok {
 		return runtimepipeline.CommittedHumanTaskRoute{}, fmt.Errorf("human-task outcome route publication has unexpected type %T", command.Publication)
 	}
-	return commitHumanTaskRoute(ctx, s, s.DecisionPostgresOwner, true, s.runPrivateAuthorActivityMutation, plan, command.CardID, command.RouteEventID, command.OccurredAt, true)
+	effects := newRevisionEffects()
+	if err := addPublicationRevisionEffects(effects, command.Publication); err != nil {
+		return runtimepipeline.CommittedHumanTaskRoute{}, err
+	}
+	return commitHumanTaskRoute(ctx, s, s.DecisionPostgresOwner, true, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+		return s.runPrivateAuthorActivityMutation(ctx, effects, fn)
+	}, plan, command.CardID, command.RouteEventID, command.OccurredAt, true)
 }
 
 func (s *PipelineSQLiteOwner) CommitHumanTaskOutcomeRoute(ctx context.Context, command runtimepipeline.HumanTaskOutcomeRouteCommand) (runtimepipeline.CommittedHumanTaskRoute, error) {
@@ -162,13 +178,23 @@ func (s *PipelineSQLiteOwner) CommitHumanTaskOutcomeRoute(ctx context.Context, c
 	if !ok {
 		return runtimepipeline.CommittedHumanTaskRoute{}, fmt.Errorf("human-task outcome route publication has unexpected type %T", command.Publication)
 	}
+	effects := newRevisionEffects()
+	if err := addPublicationRevisionEffects(effects, command.Publication); err != nil {
+		return runtimepipeline.CommittedHumanTaskRoute{}, err
+	}
 	return commitHumanTaskRoute(ctx, s, s.DecisionSQLiteOwner, false, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, "sqlite human-task outcome route", fn)
+		return s.runPrivateAuthorActivityMutation(ctx, "sqlite human-task outcome route", effects, fn)
 	}, plan, command.CardID, command.RouteEventID, command.OccurredAt, true)
 }
 
 func (s *PipelinePostgresOwner) CommitProposedEffectRoute(ctx context.Context, command runtimepipeline.ProposedEffectRouteCommand) (runtimepipeline.CommittedProposedEffectRoute, error) {
-	return commitProposedEffectRoute(ctx, s, s.DecisionPostgresOwner, true, s.runPrivateAuthorActivityMutation, reserveRunLifecycleCandidateHandoff,
+	effects := newRevisionEffects()
+	if err := addPublicationRevisionEffects(effects, command.Publication); err != nil {
+		return runtimepipeline.CommittedProposedEffectRoute{}, err
+	}
+	return commitProposedEffectRoute(ctx, s, s.DecisionPostgresOwner, true, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+		return s.runPrivateAuthorActivityMutation(ctx, effects, fn)
+	}, reserveRunLifecycleCandidateHandoff,
 		func(reservation *runLifecycleCandidateHandoffReservation, result runtimerunlifecycle.CandidateRequestResult) error {
 			return reservation.Prepare(s.runLifecycleCandidates, result)
 		}, func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.CandidateRequestResult, error) {
@@ -177,9 +203,13 @@ func (s *PipelinePostgresOwner) CommitProposedEffectRoute(ctx context.Context, c
 }
 
 func (s *PipelineSQLiteOwner) CommitProposedEffectRoute(ctx context.Context, command runtimepipeline.ProposedEffectRouteCommand) (runtimepipeline.CommittedProposedEffectRoute, error) {
+	effects := newRevisionEffects()
+	if err := addPublicationRevisionEffects(effects, command.Publication); err != nil {
+		return runtimepipeline.CommittedProposedEffectRoute{}, err
+	}
 	return commitProposedEffectRoute(ctx, s, s.DecisionSQLiteOwner, false,
 		func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-			return s.runPrivateAuthorActivityMutation(ctx, "sqlite proposed-effect route", fn)
+			return s.runPrivateAuthorActivityMutation(ctx, "sqlite proposed-effect route", effects, fn)
 		}, reserveRunLifecycleCandidateHandoff,
 		func(reservation *runLifecycleCandidateHandoffReservation, result runtimerunlifecycle.CandidateRequestResult) error {
 			return reservation.Prepare(s.runLifecycleCandidates, result)

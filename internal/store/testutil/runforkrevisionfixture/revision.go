@@ -10,7 +10,6 @@ import (
 )
 
 type Family = private.Family
-type Change = private.Change
 
 const (
 	FamilyEvents                  = private.FamilyEvents
@@ -30,9 +29,13 @@ const (
 func AllFamilies() []Family { return private.AllFamilies() }
 
 func Capture(ctx context.Context, tx *sql.Tx, runID string, families ...Family) (int64, error) {
-	return private.Capture(ctx, tx, runID, families...)
-}
-
-func CaptureCurrentTransaction(ctx context.Context, tx *sql.Tx) (map[string]int64, error) {
-	return private.CaptureCurrentTransaction(ctx, tx)
+	effects := private.NewEffects()
+	if err := effects.Add(runID, families...); err != nil {
+		return 0, err
+	}
+	results, err := private.FinalizePostgres(ctx, tx, effects)
+	if err != nil {
+		return 0, err
+	}
+	return results[runID].Revision, nil
 }

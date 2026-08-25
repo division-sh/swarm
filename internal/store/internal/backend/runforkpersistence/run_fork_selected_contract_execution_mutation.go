@@ -281,7 +281,11 @@ func (s *RunForkPostgresOwner) MaterializeRunForkForSelectedContractExecution(ct
 			return runfork.RunForkMaterialization{}, err
 		}
 	}
-	if err := commitRunForkAuthorActivityTransaction(ctx, tx, story); err != nil {
+	effects := runforkrevision.NewEffects()
+	if err := effects.Add(forkRunID, runforkrevision.FamilyEntityMutations, runforkrevision.FamilyEntityMetadata); err != nil {
+		return runfork.RunForkMaterialization{}, err
+	}
+	if err := commitRunForkAuthorActivityTransaction(ctx, tx, story, effects); err != nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("commit selected-contract fork materialization: %w", err)
 	}
 	committed = true
@@ -593,7 +597,7 @@ func (s *RunForkPostgresOwner) ActivateRunForkForSelectedContractExecution(ctx c
 		if err := recordRunForkActivationAuthorActivity(ctx, story, lineage, now); err != nil {
 			return result, err
 		}
-		if err := commitRunForkAuthorActivityTransaction(ctx, tx, story); err != nil {
+		if err := commitRunForkAuthorActivityTransaction(ctx, tx, story, runforkrevision.NewEffects()); err != nil {
 			return result, fmt.Errorf("commit selected-contract branch activation: %w", err)
 		}
 		committed = true
@@ -611,7 +615,7 @@ func (s *RunForkPostgresOwner) ActivateRunForkForSelectedContractExecution(ctx c
 	if err := s.applyRunForkSourceFreeze(ctx, tx, story, lineage, now, req.ConfirmSourceFreeze, handoff); err != nil {
 		return result, err
 	}
-	if err := commitRunForkAuthorActivityTransaction(ctx, tx, story); err != nil {
+	if err := commitRunForkAuthorActivityTransaction(ctx, tx, story, runforkrevision.NewEffects()); err != nil {
 		return result, fmt.Errorf("commit selected-contract fork activation: %w", err)
 	}
 	committed = true
@@ -794,17 +798,7 @@ func (s *RunForkPostgresOwner) DiscardMaterializedSelectedContractExecutionFork(
 	if _, err := tx.ExecContext(ctx, `DELETE FROM entity_state WHERE run_id = $1::uuid`, forkRunID); err != nil {
 		return fmt.Errorf("delete selected-contract fork entity state: %w", err)
 	}
-	if preserveCompletionEvidence {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM run_fork_fact_revisions WHERE run_id=$1::uuid`, forkRunID); err != nil {
-			return fmt.Errorf("delete selected-contract fork fact revisions: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM run_fork_revisions WHERE run_id=$1::uuid`, forkRunID); err != nil {
-			return fmt.Errorf("delete selected-contract fork revision ledger: %w", err)
-		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM run_fork_revision_heads WHERE run_id=$1::uuid`, forkRunID); err != nil {
-			return fmt.Errorf("delete selected-contract fork revision head: %w", err)
-		}
-	} else {
+	if !preserveCompletionEvidence {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM run_fork_selected_contract_bindings WHERE fork_run_id = $1::uuid`, forkRunID); err != nil {
 			return fmt.Errorf("delete selected-contract fork binding: %w", err)
 		}
@@ -812,7 +806,26 @@ func (s *RunForkPostgresOwner) DiscardMaterializedSelectedContractExecutionFork(
 			return err
 		}
 	}
-	if err := commitPostgresRunForkRevisionTx(ctx, tx); err != nil {
+	if preserveCompletionEvidence {
+		effects := runforkrevision.NewEffects()
+		if err := effects.Add(forkRunID,
+			runforkrevision.FamilyEvents,
+			runforkrevision.FamilyEntityMutations,
+			runforkrevision.FamilyEntityMetadata,
+			runforkrevision.FamilyEventDeliveries,
+			runforkrevision.FamilyCommittedReplayScopes,
+			runforkrevision.FamilyEventReceipts,
+			runforkrevision.FamilyDeadLetters,
+			runforkrevision.FamilyTimers,
+			runforkrevision.FamilyAgentSessions,
+		); err != nil {
+			return err
+		}
+		if _, err := runforkrevision.FinalizePostgres(ctx, tx, effects); err != nil {
+			return fmt.Errorf("finalize selected-contract fork discard revisions: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit selected-contract fork discard: %w", err)
 	}
 	committed = true
@@ -905,11 +918,11 @@ func (s *RunForkPostgresOwner) LoadRunForkSelectedContractSourceEvents(ctx conte
 		}
 		out[idx] = prepared
 	}
-	if _, err := runforkrevision.CaptureCurrentTransaction(ctx, tx); err != nil {
-		return nil, fmt.Errorf("capture selected-contract source event preparation revisions: %w", err)
-	}
 	if err := story.Finalize(ctx); err != nil {
 		return nil, fmt.Errorf("finalize selected-contract source event author activity: %w", err)
+	}
+	if _, err := runforkrevision.FinalizePostgres(ctx, tx, runforkrevision.NewEffects()); err != nil {
+		return nil, fmt.Errorf("finalize selected-contract source event preparation revisions: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit selected-contract source event preparation: %w", err)
@@ -1242,7 +1255,7 @@ func (s *RunForkPostgresOwner) EnsureRunForkNoPostForkCommittedReplayScopeMarker
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := runforkrevision.ValidateComplete(ctx, tx, sourceRunID); err != nil {
+	if err := runforkrevision.ValidateCompletePostgres(ctx, tx, sourceRunID); err != nil {
 		return err
 	}
 	var revision int64

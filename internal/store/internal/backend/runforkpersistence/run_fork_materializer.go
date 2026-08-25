@@ -16,6 +16,7 @@ import (
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storedecision "github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
 	"github.com/google/uuid"
@@ -155,7 +156,11 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 		}
 		selectedContractBinding = &binding
 	}
-	if err := commitRunForkAuthorActivityTransaction(ctx, tx, story); err != nil {
+	effects := privaterunforkrevision.NewEffects()
+	if err := effects.Add(forkRunID, privaterunforkrevision.FamilyEntityMutations, privaterunforkrevision.FamilyEntityMetadata); err != nil {
+		return runfork.RunForkMaterialization{}, err
+	}
+	if err := commitRunForkAuthorActivityTransaction(ctx, tx, story, effects); err != nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("commit fork materialization: %w", err)
 	}
 	committed = true

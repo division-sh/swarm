@@ -643,8 +643,24 @@ func commitWorkflowEngineMutation(
 }
 
 func (s *PipelinePostgresOwner) CommitWorkflowEngineMutation(ctx context.Context, command runtimepipeline.WorkflowEngineMutationCommand) (runtimepipeline.CommittedWorkflowEngineMutation, error) {
+	effects := newRevisionEffects()
+	if command.EntitylessTarget.Empty() {
+		if err := addWorkflowMutationRevisionEffects(effects, command.State.RunID); err != nil {
+			return runtimepipeline.CommittedWorkflowEngineMutation{}, err
+		}
+	}
+	for _, publication := range command.Publications {
+		if err := addPublicationRevisionEffects(effects, publication); err != nil {
+			return runtimepipeline.CommittedWorkflowEngineMutation{}, err
+		}
+	}
+	if command.DeliverySuccess != nil {
+		if err := addDeliveryRevisionEffects(effects, command.DeliverySuccess.Claim.RunID()); err != nil {
+			return runtimepipeline.CommittedWorkflowEngineMutation{}, err
+		}
+	}
 	return commitWorkflowEngineMutation(ctx, s, true, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, fn)
+		return s.runPrivateAuthorActivityMutation(ctx, effects, fn)
 	}, reserveRunLifecycleCandidateHandoff, func(reservation *runLifecycleCandidateHandoffReservation, result runtimerunlifecycle.CandidateRequestResult) error {
 		return reservation.Prepare(s.runLifecycleCandidates, result)
 	}, func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.CandidateRequestResult, error) {
@@ -653,8 +669,24 @@ func (s *PipelinePostgresOwner) CommitWorkflowEngineMutation(ctx context.Context
 }
 
 func (s *PipelineSQLiteOwner) CommitWorkflowEngineMutation(ctx context.Context, command runtimepipeline.WorkflowEngineMutationCommand) (runtimepipeline.CommittedWorkflowEngineMutation, error) {
+	effects := newRevisionEffects()
+	if command.EntitylessTarget.Empty() {
+		if err := addWorkflowMutationRevisionEffects(effects, command.State.RunID); err != nil {
+			return runtimepipeline.CommittedWorkflowEngineMutation{}, err
+		}
+	}
+	for _, publication := range command.Publications {
+		if err := addPublicationRevisionEffects(effects, publication); err != nil {
+			return runtimepipeline.CommittedWorkflowEngineMutation{}, err
+		}
+	}
+	if command.DeliverySuccess != nil {
+		if err := addDeliveryRevisionEffects(effects, command.DeliverySuccess.Claim.RunID()); err != nil {
+			return runtimepipeline.CommittedWorkflowEngineMutation{}, err
+		}
+	}
 	return commitWorkflowEngineMutation(ctx, s, false, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-		return s.runPrivateAuthorActivityMutation(ctx, "sqlite workflow engine mutation", fn)
+		return s.runPrivateAuthorActivityMutation(ctx, "sqlite workflow engine mutation", effects, fn)
 	}, reserveRunLifecycleCandidateHandoff, func(reservation *runLifecycleCandidateHandoffReservation, result runtimerunlifecycle.CandidateRequestResult) error {
 		return reservation.Prepare(s.runLifecycleCandidates, result)
 	}, func(ctx context.Context, tx *sql.Tx, runID string) (runtimerunlifecycle.CandidateRequestResult, error) {

@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"slices"
 	"testing"
 	"time"
 
@@ -13,14 +14,16 @@ import (
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 	"github.com/google/uuid"
 )
 
-func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansRunScopedState(t *testing.T) {
+func TestPreservationCleanupPublishesOneCompleteRunForkRevisionPostgres(t *testing.T) {
 	dsn, _, cleanup := testutil.StartPostgres(t)
 	t.Cleanup(cleanup)
 	pg, err := NewPostgresStore(dsn)
@@ -48,6 +51,7 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 		sessionID   string
 		generic     runtimegenericschedule.Activation
 		workflow    workflowTimerDDLProofRow
+		beforeHead  int64
 	}
 	seeded := map[string]seededRun{}
 	for _, source := range []runbundle.AvailabilitySource{
@@ -109,6 +113,12 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 			generic: admitted.Activation, workflow: workflow,
 		}
 	}
+	for source, item := range seeded {
+		if err := pg.backend.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1::uuid`, item.runID).Scan(&item.beforeHead); err != nil {
+			t.Fatalf("load pre-cleanup revision head %s: %v", source, err)
+		}
+		seeded[source] = item
+	}
 
 	result, err := pg.ApplyUnavailableBundleStartupPreservationCleanup(ctx, preservationcleanup.Request{
 		OperationName: preservationcleanup.UnavailableBundleStartupOperationName,
@@ -141,6 +151,7 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 			t, ctx, pg, result.Timers, runtimetimercancellation.FamilyWorkflowTimer,
 			item.workflow.timerID, item.runID, target.ReasonCode,
 		)
+		assertPreservationCleanupRunForkRevision(t, ctx, pg, item)
 	}
 	var eventCount int
 	if err := pg.backend.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&eventCount); err != nil {
@@ -148,6 +159,70 @@ func TestPostgresStore_ApplyUnavailableBundleStartupPreservationCleanup_OrphansR
 	}
 	if eventCount != 4 {
 		t.Fatalf("events count = %d, want 4 preserved rows", eventCount)
+	}
+}
+
+func assertPreservationCleanupRunForkRevision(t *testing.T, ctx context.Context, pg *PostgresStore, item struct {
+	runID       string
+	eventID     string
+	untouchedID string
+	sessionID   string
+	generic     runtimegenericschedule.Activation
+	workflow    workflowTimerDDLProofRow
+	beforeHead  int64
+}) {
+	t.Helper()
+	var terminalRevision int64
+	if err := pg.backend.QueryRowContext(ctx, `SELECT last_revision FROM run_fork_revision_heads WHERE run_id=$1::uuid`, item.runID).Scan(&terminalRevision); err != nil {
+		t.Fatalf("load preservation cleanup revision head %s: %v", item.runID, err)
+	}
+	if terminalRevision != item.beforeHead+1 {
+		t.Fatalf("preservation cleanup revision head %s = %d, want %d", item.runID, terminalRevision, item.beforeHead+1)
+	}
+	rows, err := pg.backend.QueryContext(ctx, `
+		SELECT DISTINCT family
+		FROM run_fork_fact_revisions
+		WHERE run_id=$1::uuid AND revision=$2
+		ORDER BY family
+	`, item.runID, terminalRevision)
+	if err != nil {
+		t.Fatalf("load preservation cleanup revision families %s: %v", item.runID, err)
+	}
+	defer rows.Close()
+	var families []string
+	for rows.Next() {
+		var family string
+		if err := rows.Scan(&family); err != nil {
+			t.Fatalf("scan preservation cleanup revision family %s: %v", item.runID, err)
+		}
+		families = append(families, family)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read preservation cleanup revision families %s: %v", item.runID, err)
+	}
+	wantFamilies := []string{
+		string(privaterunforkrevision.FamilyAgentSessions),
+		string(privaterunforkrevision.FamilyDeadLetters),
+		string(privaterunforkrevision.FamilyEventDeliveries),
+		string(privaterunforkrevision.FamilyEventReceipts),
+		string(privaterunforkrevision.FamilyTimers),
+	}
+	if !slices.Equal(families, wantFamilies) {
+		t.Fatalf("preservation cleanup revision families %s = %v, want %v", item.runID, families, wantFamilies)
+	}
+	validationTx, err := pg.backend.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatalf("begin preservation cleanup validation %s: %v", item.runID, err)
+	}
+	defer validationTx.Rollback()
+	if err := privaterunforkrevision.ValidateCompletePostgres(ctx, validationTx, item.runID); err != nil {
+		t.Fatalf("validate preservation cleanup revision %s: %v", item.runID, err)
+	}
+	if err := validationTx.Commit(); err != nil {
+		t.Fatalf("commit preservation cleanup validation %s: %v", item.runID, err)
+	}
+	if _, err := pg.PlanRunFork(ctx, runfork.RunForkPlanRequest{SourceRunID: item.runID, At: item.eventID}); err != nil {
+		t.Fatalf("plan preservation cleanup historical event %s/%s: %v", item.runID, item.eventID, err)
 	}
 }
 

@@ -45,6 +45,10 @@ func (s *LLMSQLiteOwner) acquireSQLiteLiveSession(ctx context.Context, identity 
 	}
 	s.sessionMu.Lock()
 	defer s.sessionMu.Unlock()
+	effects, err := agentSessionEffects(identity.RunID)
+	if err != nil {
+		return nil, runtimellm.ConversationRecord{}, err
+	}
 
 	var lease *runtimesessions.Lease
 	var conversation runtimellm.ConversationRecord
@@ -53,7 +57,7 @@ func (s *LLMSQLiteOwner) acquireSQLiteLiveSession(ctx context.Context, identity 
 		return nil, runtimellm.ConversationRecord{}, err
 	}
 	defer handoff.Rollback()
-	if err := s.runRuntimeMutation(ctx, "sqlite session acquire", func(txctx context.Context, tx *sql.Tx) error {
+	if err := s.runRuntimeMutation(ctx, "sqlite session acquire", effects, func(txctx context.Context, tx *sql.Tx) error {
 		if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, identity.RunID); err != nil {
 			return err
 		}
@@ -154,9 +158,13 @@ func (s *LLMSQLiteOwner) Release(ctx context.Context, lease *runtimesessions.Lea
 	}
 	s.sessionMu.Lock()
 	defer s.sessionMu.Unlock()
+	effects, err := agentSessionEffects(identity.RunID)
+	if err != nil {
+		return err
+	}
 	var rows int64
 	if err := runhandoff.WithCandidateHandoff(ctx, func(handoff *runhandoff.CandidateHandoff) error {
-		return s.runRuntimeMutation(ctx, "sqlite session release", func(txctx context.Context, tx *sql.Tx) error {
+		return s.runRuntimeMutation(ctx, "sqlite session release", effects, func(txctx context.Context, tx *sql.Tx) error {
 			if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, identity.RunID); err != nil {
 				return err
 			}
@@ -203,9 +211,13 @@ func (s *LLMSQLiteOwner) Rotate(ctx context.Context, identity agentmemory.Identi
 	}
 	s.sessionMu.Lock()
 	defer s.sessionMu.Unlock()
+	effects, err := agentSessionEffects(identity.RunID)
+	if err != nil {
+		return nil, err
+	}
 	var lease *runtimesessions.Lease
 	if err := runhandoff.WithCandidateHandoff(ctx, func(handoff *runhandoff.CandidateHandoff) error {
-		return s.runRuntimeMutation(ctx, "sqlite session rotate", func(txctx context.Context, tx *sql.Tx) error {
+		return s.runRuntimeMutation(ctx, "sqlite session rotate", effects, func(txctx context.Context, tx *sql.Tx) error {
 			if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, identity.RunID); err != nil {
 				return err
 			}
@@ -271,8 +283,12 @@ func (s *LLMSQLiteOwner) IncrementTurn(ctx context.Context, identity agentmemory
 	if err != nil {
 		return err
 	}
+	effects, err := agentSessionEffects(identity.RunID)
+	if err != nil {
+		return err
+	}
 	var rows int64
-	if err := s.runRuntimeMutation(ctx, "sqlite session turn increment", func(txctx context.Context, tx *sql.Tx) error {
+	if err := s.runRuntimeMutation(ctx, "sqlite session turn increment", effects, func(txctx context.Context, tx *sql.Tx) error {
 		if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, identity.RunID); err != nil {
 			return err
 		}
@@ -309,10 +325,14 @@ func (s *LLMSQLiteOwner) AdoptSessionID(ctx context.Context, identity agentmemor
 	if lockOwner == "" || newSessionID == "" {
 		return errors.New("lockOwner and newSessionID are required")
 	}
+	effects, err := agentSessionEffects(identity.RunID)
+	if err != nil {
+		return err
+	}
 	s.sessionMu.Lock()
 	defer s.sessionMu.Unlock()
 	return runhandoff.WithCandidateHandoff(ctx, func(handoff *runhandoff.CandidateHandoff) error {
-		return s.runRuntimeMutation(ctx, "sqlite adopt session id", func(txctx context.Context, tx *sql.Tx) error {
+		return s.runRuntimeMutation(ctx, "sqlite adopt session id", effects, func(txctx context.Context, tx *sql.Tx) error {
 			if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, identity.RunID); err != nil {
 				return err
 			}
@@ -348,8 +368,9 @@ func (s *LLMSQLiteOwner) ResetAll(metadata runtimesessions.ResetMetadata) (runti
 	now := s.now()
 	summary := runtimesessions.ResetSummary{}
 	ctx := context.Background()
+	effects := emptyRunForkRevisionEffects()
 	if err := runhandoff.WithCandidateHandoff(ctx, func(handoff *runhandoff.CandidateHandoff) error {
-		return s.runRuntimeMutation(ctx, "sqlite session reset", func(ctx context.Context, tx *sql.Tx) error {
+		return s.runRuntimeMutation(ctx, "sqlite session reset", effects, func(ctx context.Context, tx *sql.Tx) error {
 			rows, err := tx.QueryContext(ctx, `SELECT session_id, run_id, agent_id, flow_instance, status FROM agent_sessions WHERE status IN ('active','suspended') ORDER BY run_id, agent_id, flow_instance, session_id`)
 			if err != nil {
 				return err
@@ -376,6 +397,9 @@ func (s *LLMSQLiteOwner) ResetAll(metadata runtimesessions.ResetMetadata) (runti
 					continue
 				}
 				seenRuns[disposition.RunID] = struct{}{}
+				if err := addAgentSessionEffect(effects, disposition.RunID); err != nil {
+					return err
+				}
 				if _, err := s.lifecycle.RequestCompletionCandidateTx(ctx, tx, disposition.RunID, nil, handoff); err != nil {
 					return err
 				}
