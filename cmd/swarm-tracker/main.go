@@ -324,9 +324,11 @@ func runAssign(args []string) error {
 	blockersFlag := fs.String("blockers", "", "comma-separated blocker issue numbers")
 	score := fs.Int("score", 0, "delivery score")
 	fs.Parse(args)
-	if *num == 0 || *agent == "" {
-		return fmt.Errorf("assign requires --issue and --agent")
+	if *num == 0 {
+		return fmt.Errorf("assign requires --issue")
 	}
+	provided := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { provided[f.Name] = true })
 
 	var blockers []int
 	if *blockersFlag != "" {
@@ -347,22 +349,29 @@ func runAssign(args []string) error {
 	if err := json.Unmarshal(raw, &cur); err != nil {
 		return err
 	}
+	curBlockers, curScore := parseTrackerBlock(cur.Body)
+	if !provided["blockers"] {
+		blockers = curBlockers
+	}
+	if !provided["score"] {
+		*score = curScore
+	}
 
-	// One agent label at a time: drop any existing agent labels first.
-	agentLabel := "agent:" + strings.ToUpper(*agent)
-	if len(*agent) > 1 { // ds, ds2 style lanes keep their case
-		agentLabel = "agent:" + *agent
-	}
-	var removals []string
-	for _, l := range cur.Labels {
-		low := strings.ToLower(l.Name)
-		if (strings.HasPrefix(low, "agent:") || strings.HasPrefix(low, "agent-")) && !strings.EqualFold(l.Name, agentLabel) {
-			removals = append(removals, l.Name)
+	editArgs := []string{"issue", "edit", strconv.Itoa(*num), "--repo", repo}
+	agentLabel := "(unchanged)"
+	if provided["agent"] {
+		// One agent label at a time: drop any existing agent labels first.
+		agentLabel = "agent:" + strings.ToUpper(*agent)
+		if len(*agent) > 1 { // ds, ds2 style lanes keep their case
+			agentLabel = "agent:" + *agent
 		}
-	}
-	editArgs := []string{"issue", "edit", strconv.Itoa(*num), "--repo", repo, "--add-label", agentLabel}
-	for _, r := range removals {
-		editArgs = append(editArgs, "--remove-label", r)
+		editArgs = append(editArgs, "--add-label", agentLabel)
+		for _, l := range cur.Labels {
+			low := strings.ToLower(l.Name)
+			if (strings.HasPrefix(low, "agent:") || strings.HasPrefix(low, "agent-")) && !strings.EqualFold(l.Name, agentLabel) {
+				editArgs = append(editArgs, "--remove-label", l.Name)
+			}
+		}
 	}
 
 	body := upsertTrackerBlock(cur.Body, blockers, *score)
