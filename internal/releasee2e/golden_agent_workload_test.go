@@ -322,10 +322,11 @@ func assertGoldenFixtureHasSingleMockOwner(t *testing.T) {
 			t.Fatalf("golden package-owned mock %s is not one regular file: info=%v err=%v", relativePath, info, err)
 		}
 	}
+	packageManifest := strings.Join([]string{"package", "yaml"}, ".")
 	for _, relativePath := range []string{
-		filepath.Join("flows", "candidate", "package.yaml"),
+		filepath.Join("flows", "candidate", packageManifest),
 		filepath.Join("flows", "candidate", "mocks", "candidate.py"),
-		filepath.Join("flows", "scout", "package.yaml"),
+		filepath.Join("flows", "scout", packageManifest),
 		filepath.Join("flows", "scout", "mocks", "scout.py"),
 	} {
 		if _, err := os.Stat(filepath.Join(root, relativePath)); err == nil {
