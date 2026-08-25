@@ -315,8 +315,8 @@ func runCheck(args []string) error {
 
 	section("DISCIPLINE — open PR branch vs issue assignment mismatch", discipline)
 	section("UNBLOCKED — blockers all closed, ready to start", unblocked)
-	section("UNASSIGNED MUSTS — P0/P1/tier:must with no owner", unassignedMusts)
-	section("STALE MUSTS — tier:must/P0/P1 going forgotten", staleMusts)
+	section("UNASSIGNED MUSTS — P0/P1 or score≥50, no owner", unassignedMusts)
+	section("STALE MUSTS — P0/P1 or score≥50 going forgotten", staleMusts)
 	section("PHANTOM ASSIGNMENTS — assigned but silent", phantoms)
 	section("BLOCKER CYCLES", cycles)
 	section("missing milestone", missingMilestone)
