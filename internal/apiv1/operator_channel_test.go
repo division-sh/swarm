@@ -95,12 +95,23 @@ func TestOperatorChannelAPIContractEvidence(t *testing.T) {
 	if operation["state"] != string(operatorchannel.StateAwaitingClaim) || operation["challenge"] == "" {
 		t.Fatalf("channel.connect operation = %#v", operation)
 	}
+	for _, absent := range []string{"claimed_at", "completed_at"} {
+		if _, present := operation[absent]; present {
+			t.Fatalf("channel.connect operation exposed zero %s: %#v", absent, operation)
+		}
+	}
+	if _, present := operation["expires_at"]; !present {
+		t.Fatalf("channel.connect operation omitted challenge expiry: %#v", operation)
+	}
 	replayed := rpcCall(t, handler, connectBody)
 	if replayed.Error != nil || asMap(t, asMap(t, replayed.Result)["operation"])["operation_id"] != operation["operation_id"] {
 		t.Fatalf("channel.connect replay = %#v", replayed)
 	}
 	changed := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"changed","method":"channel.connect","params":{"interface":%q,"expected_revision":0,"save_proof":false,"idempotency_key":"connect-key"}}`, identity.Selector))
 	requireOperatorChannelAPIErrorCode(t, changed, IdempotencyConflictCode)
+
+	missingProof := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"missing-proof","method":"channel.proof_revoke","params":{"interface":%q,"expected_revision":1,"idempotency_key":"missing-proof"}}`, identity.Selector))
+	requireOperatorChannelAPIErrorCode(t, missingProof, ChannelProofUnavailableCode)
 
 	idempotency.actors = nil
 	missingOperationID := uuid.NewString()

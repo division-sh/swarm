@@ -9627,7 +9627,10 @@ tool_model:
         must confirm that exact claimant before local binding mutation. connect requires no current binding, reconnect
         requires the same account/conversation, rebind requires a different claimant and a current binding, and unbind
         writes an explicit fence. Every transition is exact-revision fenced; same-key replay and same-confirmation replay
-        return the original outcome while changed input conflicts.
+        return the original outcome while changed input conflicts. An expired awaiting-confirmation operation commits its
+        expired terminal revision before returning CHANNEL_OPERATION_TERMINAL. Rejection returns the terminal operation
+        without an invented empty binding. Optional operation timestamps and inapplicable binding fields are absent from
+        API results rather than serialized as year-one timestamps or empty enum values.
       challenge_storage_rationale: >
         The challenge is stored as plaintext operation evidence because it is not a credential and cannot independently
         grant authority. It becomes meaningful only when presented through a current satisfier-authenticated text fact and
@@ -9641,13 +9644,20 @@ tool_model:
         one durable proof responsibility makes file materialization idempotently recoverable. --no-save suppresses the
         projection. Boot may create a missing local binding from an exact active proof and must announce that source.
         Explicit local unbind blocks boot reuse; machine proof revocation immediately makes every exact derived binding
-        non-authoritative, and re-verification creates the next proof revision.
+        non-authoritative, and re-verification creates the next proof revision. Exact confirmation replay retries either
+        pending or failed proof materialization responsibility without repeating claim or binding mutation. A retained
+        interface with no machine proof returns CHANNEL_PROOF_UNAVAILABLE from proof revocation.
       readback_rule: >
         Generation-aware readback is the only operator-channel authority consumed downstream. It reports current, stale,
-        unbound, or revoked from the exact active interface generation, local binding revision/fence, and exact active proof
-        revision. Project replacement changes the active interface projection atomically; predecessor bindings remain loud
-        stale evidence and cannot authorize delivery. User-facing readback masks opaque account/conversation references and
-        presentation values. Stale or absent channels never drop notices; downstream delivery falls back to the mailbox.
+        unbound, or revoked from one exact retained lifecycle projection: the union of current admitted interfaces, local
+        bindings/fences, machine proofs, and nonterminal operations. New connect, reconnect, and rebind admission resolves
+        only the current admitted interface set. Readback, unbind, and proof revocation resolve the retained projection so
+        project replacement cannot make listed predecessor state impossible to inspect or remove. Project replacement
+        changes the active interface projection atomically; predecessor state remains loud stale evidence and cannot
+        authorize delivery. User-facing readback masks opaque account/conversation references and presentation values; when
+        provider presentation is absent, claimant display falls back to the safely masked external-account reference and
+        never exposes the raw reference. Stale or absent channels never drop notices; downstream delivery falls back to the
+        mailbox.
       no_legacy_rule: >
         Active authority is swarm.hitl-channel/v2 only. v1 readers, aliases, dual plans, compatibility decoders, provider
         branches in generic identity, pre-serve polling, copied-proof portability, synthesized claims, destination-as-
@@ -22413,7 +22423,7 @@ cli_specification:
           operator_channel:
             candidate_source: /v1/rpc channel.list
             scope_mode: bounded_catalog
-            scope_rule: active exact pack-qualified operator channel interfaces
+            scope_rule: exact pack-qualified selectors returned by channel.list; creation requires current admission while destructive cleanup may select retained lifecycle state
             normalization_mode: trim_case_sensitive
             normalization: trim only; exact selector required
             display_projection: full
@@ -34680,7 +34690,7 @@ api_specification:
       errors: [CHANNEL_INTERFACE_NOT_FOUND, CHANNEL_INTERFACE_AMBIGUOUS, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, IDEMPOTENCY_CONFLICT]
     channel.confirm:
       tier: must_have
-      description: Confirm or reject the exact provider-authenticated claimant on one pending operation. Same revision and decision replay returns the terminal outcome without repeating claim or binding mutation.
+      description: Confirm or reject the exact provider-authenticated claimant on one pending operation. Same revision and decision replay returns the terminal outcome and retries pending or failed proof projection without repeating claim or binding mutation; rejection omits binding.
       scope: {required: [control:channels]}
       idempotency: per the selected-store API idempotency owner, scoped to the bearer-token request occurrence and exact pending operation; operator authority remains the stable principal.
       params:
@@ -34692,7 +34702,7 @@ api_specification:
       errors: [CHANNEL_OPERATION_NOT_FOUND, CHANNEL_OPERATION_TERMINAL, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, IDEMPOTENCY_CONFLICT]
     channel.unbind:
       tier: must_have
-      description: Persist an explicit revision-fenced local unbind so an available machine proof cannot silently recreate the deployment binding.
+      description: Persist an explicit revision-fenced local unbind for a current or retained listed interface so an available machine proof cannot silently recreate the deployment binding.
       scope: {required: [control:channels]}
       idempotency: bearer-token-scoped API request occurrence plus stable-principal durable operation replay.
       params:
@@ -34703,7 +34713,7 @@ api_specification:
       errors: [CHANNEL_INTERFACE_NOT_FOUND, CHANNEL_INTERFACE_AMBIGUOUS, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, IDEMPOTENCY_CONFLICT]
     channel.proof_revoke:
       tier: must_have
-      description: Revoke one exact machine-local verified-account proof revision. Derived local bindings immediately read back revoked and cannot grant authority.
+      description: Revoke one exact current or retained machine-local verified-account proof revision. Derived local bindings immediately read back revoked and cannot grant authority; a listed interface without a proof fails as CHANNEL_PROOF_UNAVAILABLE.
       scope: {required: [control:channels]}
       idempotency: per the selected-store API idempotency owner, scoped to the bearer-token request occurrence and exact interface proof revision; operator authority remains the stable principal.
       params:
@@ -34714,7 +34724,7 @@ api_specification:
       errors: [CHANNEL_INTERFACE_NOT_FOUND, CHANNEL_INTERFACE_AMBIGUOUS, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, IDEMPOTENCY_CONFLICT]
     channel.list:
       tier: must_have
-      description: Return generation-aware selected-store binding and machine-proof readback for every current or retained channel interface. Raw account references and display values are masked.
+      description: Return generation-aware readback for the exact union of current interfaces, retained bindings, machine proofs, and nonterminal operations. Raw account references and display values are masked, with absent provider presentation falling back to the safely masked external account reference.
       scope: {required: [read:channels]}
       params: []
       result: {name: result, required: true, schema: {$ref: '#/components/schemas/OperatorChannelListResult'}}

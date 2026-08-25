@@ -291,9 +291,9 @@ type Operation struct {
 	ProofStatus             ProofStatus       `json:"proof_status"`
 	ClaimDisposition        string            `json:"claim_disposition,omitempty"`
 	RequestedAt             time.Time         `json:"requested_at"`
-	ExpiresAt               time.Time         `json:"expires_at,omitempty"`
-	ClaimedAt               time.Time         `json:"claimed_at,omitempty"`
-	CompletedAt             time.Time         `json:"completed_at,omitempty"`
+	ExpiresAt               time.Time         `json:"expires_at,omitzero"`
+	ClaimedAt               time.Time         `json:"claimed_at,omitzero"`
+	CompletedAt             time.Time         `json:"completed_at,omitzero"`
 	RequestHash             string            `json:"-"`
 	ExpectedBindingRevision int64             `json:"-"`
 	PlannedProofID          string            `json:"-"`
@@ -303,13 +303,13 @@ type Operation struct {
 type Binding struct {
 	PrincipalID         string            `json:"principal_id"`
 	Interface           InterfaceIdentity `json:"interface"`
-	ExternalAccountRef  string            `json:"external_account_reference"`
-	ConversationRef     string            `json:"conversation_reference"`
-	ConversationScope   ConversationScope `json:"conversation_scope"`
+	ExternalAccountRef  string            `json:"external_account_reference,omitempty"`
+	ConversationRef     string            `json:"conversation_reference,omitempty"`
+	ConversationScope   ConversationScope `json:"conversation_scope,omitempty"`
 	AccountPresentation string            `json:"account_presentation,omitempty"`
 	Revision            int64             `json:"revision"`
 	Status              BindingStatus     `json:"status"`
-	Source              BindingSource     `json:"source"`
+	Source              BindingSource     `json:"source,omitempty"`
 	ProofID             string            `json:"proof_id,omitempty"`
 	ProofRevision       int64             `json:"proof_revision,omitempty"`
 	OperationID         string            `json:"operation_id"`
@@ -464,4 +464,11 @@ func MaskPresentation(value string) string {
 		return strings.Repeat("*", len(value))
 	}
 	return value[:2] + strings.Repeat("*", len(value)-4) + value[len(value)-2:]
+}
+
+func MaskClaimantPresentation(presentation, externalAccountRef string) string {
+	if masked := MaskPresentation(presentation); masked != "" {
+		return masked
+	}
+	return MaskPresentation(externalAccountRef)
 }

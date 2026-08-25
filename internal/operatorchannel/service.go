@@ -190,7 +190,7 @@ func (s *Service) Confirm(ctx context.Context, operationID string, expectedRevis
 	if err != nil {
 		return op, binding, err
 	}
-	if op.State == StateBound && op.ProofStatus == ProofPending {
+	if op.State == StateBound && (op.ProofStatus == ProofPending || op.ProofStatus == ProofFailed) {
 		if err := s.materializeProof(ctx, ProofResponsibility{Operation: op, Binding: binding, Proof: proofFromOperation(op, binding)}, now); err != nil {
 			return op, binding, err
 		}
@@ -204,7 +204,7 @@ func (s *Service) Unbind(ctx context.Context, selector string, expectedRevision 
 	if err != nil {
 		return Operation{}, Binding{}, err
 	}
-	identity, err := s.ResolveInterface(selector)
+	identity, err := s.ResolveRetainedInterface(ctx, selector)
 	if err != nil {
 		return Operation{}, Binding{}, err
 	}
@@ -212,12 +212,15 @@ func (s *Service) Unbind(ctx context.Context, selector string, expectedRevision 
 }
 
 func (s *Service) RevokeProof(ctx context.Context, selector string, expectedRevision int64, now time.Time) (VerifiedProof, error) {
-	identity, err := s.ResolveInterface(selector)
+	identity, err := s.ResolveRetainedInterface(ctx, selector)
 	if err != nil {
 		return VerifiedProof{}, err
 	}
 	revoked, err := s.proofs.Revoke(ctx, identity, expectedRevision, now)
 	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return VerifiedProof{}, fmt.Errorf("%w: no machine-local proof exists for operator channel interface %q", ErrProofUnavailable, identity.Selector)
+		}
 		return VerifiedProof{}, err
 	}
 	operations, listErr := s.store.ListOperatorChannelOperations(ctx, s.mustPrincipalID())
@@ -268,95 +271,187 @@ func proofFromOperation(op Operation, binding Binding) VerifiedProof {
 	}
 }
 
+type retainedLifecycleProjection struct {
+	active     map[string]InterfaceIdentity
+	identities map[string]InterfaceIdentity
+	bindings   map[string]Binding
+	proofs     map[string]VerifiedProof
+	pending    map[string]Operation
+}
+
+func (s *Service) retainedProjection(ctx context.Context) (retainedLifecycleProjection, error) {
+	principal, err := s.Principal()
+	if err != nil {
+		return retainedLifecycleProjection{}, err
+	}
+	bindings, err := s.store.ListOperatorChannelBindings(ctx, principal.ID)
+	if err != nil {
+		return retainedLifecycleProjection{}, err
+	}
+	operations, err := s.store.ListOperatorChannelOperations(ctx, principal.ID)
+	if err != nil {
+		return retainedLifecycleProjection{}, err
+	}
+	proofs, err := s.proofs.List(ctx)
+	if err != nil {
+		return retainedLifecycleProjection{}, err
+	}
+	s.mu.RLock()
+	interfaces := append([]InterfaceIdentity(nil), s.interfaces...)
+	s.mu.RUnlock()
+
+	projection := retainedLifecycleProjection{
+		active: map[string]InterfaceIdentity{}, identities: map[string]InterfaceIdentity{}, bindings: map[string]Binding{},
+		proofs: map[string]VerifiedProof{}, pending: map[string]Operation{},
+	}
+	addIdentity := func(identity InterfaceIdentity) error {
+		identity = identity.Normalized()
+		if err := identity.Validate(); err != nil {
+			return err
+		}
+		if identity.InterfaceRef != InterfaceHITLChannelV2 {
+			return fmt.Errorf("%w: retained operator channel identity uses unsupported interface %q", ErrInvalidRequest, identity.InterfaceRef)
+		}
+		key := identity.Key()
+		if existing, found := projection.identities[key]; found && existing != identity {
+			return fmt.Errorf("%w: retained operator channel identity %q is contradictory", ErrConflict, identity.Selector)
+		}
+		projection.identities[key] = identity
+		return nil
+	}
+	for _, identity := range interfaces {
+		identity = identity.Normalized()
+		if err := addIdentity(identity); err != nil {
+			return retainedLifecycleProjection{}, err
+		}
+		projection.active[identity.Key()] = identity
+	}
+	for _, binding := range bindings {
+		binding.Interface = binding.Interface.Normalized()
+		if binding.PrincipalID != principal.ID {
+			return retainedLifecycleProjection{}, fmt.Errorf("%w: retained operator channel binding belongs to another principal", ErrConflict)
+		}
+		if err := addIdentity(binding.Interface); err != nil {
+			return retainedLifecycleProjection{}, err
+		}
+		key := binding.Interface.Key()
+		if _, found := projection.bindings[key]; found {
+			return retainedLifecycleProjection{}, fmt.Errorf("%w: duplicate retained operator channel binding %q", ErrConflict, binding.Interface.Selector)
+		}
+		projection.bindings[key] = binding
+	}
+	for _, proof := range proofs {
+		proof.Interface = proof.Interface.Normalized()
+		if err := addIdentity(proof.Interface); err != nil {
+			return retainedLifecycleProjection{}, err
+		}
+		key := proof.Interface.Key()
+		if _, found := projection.proofs[key]; found {
+			return retainedLifecycleProjection{}, fmt.Errorf("%w: duplicate retained operator channel proof %q", ErrConflict, proof.Interface.Selector)
+		}
+		projection.proofs[key] = proof
+	}
+	for _, operation := range operations {
+		if operation.State.Terminal() {
+			continue
+		}
+		operation.Interface = operation.Interface.Normalized()
+		if operation.PrincipalID != principal.ID {
+			return retainedLifecycleProjection{}, fmt.Errorf("%w: retained operator channel operation belongs to another principal", ErrConflict)
+		}
+		if err := addIdentity(operation.Interface); err != nil {
+			return retainedLifecycleProjection{}, err
+		}
+		key := operation.Interface.Key()
+		if existing, found := projection.pending[key]; !found || existing.RequestedAt.Before(operation.RequestedAt) ||
+			(existing.RequestedAt.Equal(operation.RequestedAt) && existing.OperationID < operation.OperationID) {
+			operation.AccountPresentation = MaskClaimantPresentation(operation.AccountPresentation, operation.ExternalAccountRef)
+			operation.ExternalAccountRef = MaskPresentation(operation.ExternalAccountRef)
+			operation.ConversationRef = MaskPresentation(operation.ConversationRef)
+			projection.pending[key] = operation
+		}
+	}
+	return projection, nil
+}
+
+func (s *Service) ResolveRetainedInterface(ctx context.Context, selector string) (InterfaceIdentity, error) {
+	selector = strings.TrimSpace(selector)
+	if selector == "" {
+		return InterfaceIdentity{}, fmt.Errorf("%w: interface selector is required", ErrInvalidRequest)
+	}
+	projection, err := s.retainedProjection(ctx)
+	if err != nil {
+		return InterfaceIdentity{}, err
+	}
+	matches := []InterfaceIdentity{}
+	for _, identity := range projection.identities {
+		if identity.Selector == selector {
+			matches = append(matches, identity)
+		}
+	}
+	if len(matches) == 0 {
+		return InterfaceIdentity{}, fmt.Errorf("%w: retained operator channel interface %q was not found", ErrNotFound, selector)
+	}
+	if len(matches) != 1 {
+		return InterfaceIdentity{}, fmt.Errorf("%w: retained operator channel interface %q is ambiguous", ErrConflict, selector)
+	}
+	return matches[0], nil
+}
+
 func (s *Service) Readback(ctx context.Context) ([]Readback, error) {
 	principal, err := s.Principal()
 	if err != nil {
 		return nil, err
 	}
-	bindings, err := s.store.ListOperatorChannelBindings(ctx, principal.ID)
+	projection, err := s.retainedProjection(ctx)
 	if err != nil {
 		return nil, err
 	}
-	operations, err := s.store.ListOperatorChannelOperations(ctx, principal.ID)
-	if err != nil {
-		return nil, err
-	}
-	proofs, err := s.proofs.List(ctx)
-	if err != nil {
-		return nil, err
-	}
-	s.mu.RLock()
-	interfaces := append([]InterfaceIdentity(nil), s.interfaces...)
-	s.mu.RUnlock()
-	current := map[string]InterfaceIdentity{}
-	activeInterfaces := map[string]InterfaceIdentity{}
-	for _, identity := range interfaces {
-		identity = identity.Normalized()
-		current[identity.Key()] = identity
-		activeInterfaces[identity.Key()] = identity
-	}
-	bindingByKey := map[string]Binding{}
-	for _, binding := range bindings {
-		binding.Interface = binding.Interface.Normalized()
-		bindingByKey[binding.Interface.Key()] = binding
-		if _, exists := current[binding.Interface.Key()]; !exists {
-			current[binding.Interface.Key()] = binding.Interface
-		}
-	}
-	proofByKey := map[string]VerifiedProof{}
-	for _, proof := range proofs {
-		proof.Interface = proof.Interface.Normalized()
-		proofByKey[proof.Interface.Key()] = proof
-	}
-	pendingByKey := map[string]Operation{}
-	for _, op := range operations {
-		op.Interface = op.Interface.Normalized()
-		if op.State.Terminal() {
-			continue
-		}
-		key := op.Interface.Key()
-		if existing, ok := pendingByKey[key]; !ok || existing.RequestedAt.Before(op.RequestedAt) {
-			copy := op
-			copy.AccountPresentation = MaskPresentation(copy.AccountPresentation)
-			copy.ExternalAccountRef = MaskPresentation(copy.ExternalAccountRef)
-			copy.ConversationRef = MaskPresentation(copy.ConversationRef)
-			pendingByKey[key] = copy
-		}
-	}
-	keys := make([]string, 0, len(current))
-	for key := range current {
+	keys := make([]string, 0, len(projection.identities))
+	for key := range projection.identities {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
 	out := make([]Readback, 0, len(keys))
 	for _, key := range keys {
-		identity := current[key]
+		identity := projection.identities[key]
 		read := Readback{PrincipalID: principal.ID, Interface: identity, Status: BindingUnbound, Reason: "no local binding"}
-		if op, ok := pendingByKey[key]; ok {
+		if op, ok := projection.pending[key]; ok {
 			read.PendingOperation = &op
 		}
-		binding, found := bindingByKey[key]
+		proof, proofFound := projection.proofs[key]
+		if proofFound {
+			read.ProofID, read.ProofRevision, read.ProofStatus = proof.ProofID, proof.Revision, proof.Status
+			read.ConsentScopes = append([]ConsentScope(nil), proof.ConsentScopes...)
+		}
+		binding, found := projection.bindings[key]
 		if !found {
+			if proofFound && proof.Status == ProofRevoked {
+				read.Status, read.Reason = BindingRevoked, "machine-local verified account proof is revoked; no local binding"
+			} else if _, active := projection.active[key]; !active {
+				read.Status, read.Reason = BindingStale, "retained channel interface is no longer active"
+			} else if proofFound {
+				read.Reason = "active machine-local verified account proof; no local binding"
+			}
 			out = append(out, read)
 			continue
 		}
 		read.BindingRevision, read.ExternalAccountRef, read.ConversationRef = binding.Revision, MaskPresentation(binding.ExternalAccountRef), MaskPresentation(binding.ConversationRef)
-		read.ConversationScope, read.AccountPresentation, read.Source = binding.ConversationScope, MaskPresentation(binding.AccountPresentation), binding.Source
+		read.ConversationScope, read.AccountPresentation, read.Source = binding.ConversationScope, MaskClaimantPresentation(binding.AccountPresentation, binding.ExternalAccountRef), binding.Source
 		read.ProofID, read.ProofRevision = binding.ProofID, binding.ProofRevision
 		if binding.Status == BindingUnbound {
 			read.Reason = "explicit local unbind fence"
 			out = append(out, read)
 			continue
 		}
-		active, activeFound := activeInterfaces[key]
+		active, activeFound := projection.active[key]
 		if !activeFound || active.SemanticGeneration != binding.Interface.SemanticGeneration {
 			read.Status, read.Reason = BindingStale, "channel semantic generation changed; reconnect required"
 			out = append(out, read)
 			continue
 		}
 		if binding.ProofID != "" {
-			proof, found := proofByKey[key]
-			if !found || proof.Status != ProofActive || proof.ProofID != binding.ProofID || proof.Revision != binding.ProofRevision {
+			if !proofFound || proof.Status != ProofActive || proof.ProofID != binding.ProofID || proof.Revision != binding.ProofRevision {
 				read.Status, read.Reason, read.ProofStatus = BindingRevoked, "machine-local verified account proof is missing, revoked, or superseded", ProofRevoked
 				out = append(out, read)
 				continue

@@ -69,6 +69,17 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 	if err != nil {
 		t.Fatal(err)
 	}
+	proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	channelService, err := operatorchannel.NewService(selected, proofs, []operatorchannel.InterfaceIdentity{identity}, operatorchannel.NewOperationID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := channelService.Bootstrap(ctx, now); err != nil {
+		t.Fatal(err)
+	}
 	operation, err := selected.BeginChannelBinding(ctx, operatorchannel.BeginRequest{
 		OperationID: operatorchannel.NewOperationID(), Kind: operatorchannel.OperationConnect,
 		PrincipalID: principal.ID, Interface: identity, ExpectedRevision: 0,
@@ -176,6 +187,13 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 		claimed := requireOperatorChannelOperationState(t, selected, principal.ID, operation.OperationID, operatorchannel.StateAwaitingConfirmation, 2)
 		if claimed.ExternalAccountRef != "41" || claimed.ConversationRef != fmt.Sprint(claim.conversation) || claimed.ConversationScope != claim.scope {
 			t.Fatalf("%s claimed Telegram identity = %#v", claim.chatKind, claimed)
+		}
+		readback, err := channelService.Readback(ctx)
+		if err != nil || len(readback) != 1 || readback[0].PendingOperation == nil {
+			t.Fatalf("%s Telegram claimant readback = %#v, %v", claim.chatKind, readback, err)
+		}
+		if got, want := readback[0].PendingOperation.AccountPresentation, operatorchannel.MaskPresentation(claimed.ExternalAccountRef); got != want || got == "" {
+			t.Fatalf("%s Telegram claimant presentation = %q, want safe fallback %q", claim.chatKind, got, want)
 		}
 		confirmed, binding, err := selected.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
 			OperationID: operation.OperationID, PrincipalID: principal.ID, ExpectedRevision: claimed.Revision,

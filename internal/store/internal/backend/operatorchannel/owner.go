@@ -273,6 +273,7 @@ func confirmBinding(ctx context.Context, runner transactionRunner, req domain.Co
 	}
 	var out domain.Operation
 	var binding domain.Binding
+	var terminalErr error
 	err := runner.mutate(ctx, "confirm operator channel binding", func(txctx context.Context, tx *sql.Tx) error {
 		op, found, err := loadOperationByID(txctx, tx, runner.dialect(), req.OperationID, true)
 		if err != nil || !found {
@@ -285,6 +286,14 @@ func confirmBinding(ctx context.Context, runner transactionRunner, req domain.Co
 			return domain.ErrRevisionConflict
 		}
 		if op.State.Terminal() {
+			if op.State == domain.StateExpired {
+				if op.Revision != req.ExpectedRevision+1 {
+					return domain.ErrRevisionConflict
+				}
+				out = op
+				terminalErr = domain.ErrOperationTerminal
+				return nil
+			}
 			if op.Revision != req.ExpectedRevision+1 || (op.State == domain.StateBound) != req.Approve || (op.State == domain.StateRejected) == req.Approve {
 				return domain.ErrRevisionConflict
 			}
@@ -307,7 +316,8 @@ func confirmBinding(ctx context.Context, runner transactionRunner, req domain.Co
 				return err
 			}
 			out = op
-			return domain.ErrOperationTerminal
+			terminalErr = domain.ErrOperationTerminal
+			return nil
 		}
 		if !req.Approve {
 			op.State, op.Revision, op.CompletedAt = domain.StateRejected, op.Revision+1, now
@@ -369,7 +379,10 @@ func confirmBinding(ctx context.Context, runner transactionRunner, req domain.Co
 		out = op
 		return nil
 	})
-	return out, binding, err
+	if err != nil {
+		return out, binding, err
+	}
+	return out, binding, terminalErr
 }
 
 func (s *PostgresOwner) UnbindOperatorChannel(ctx context.Context, req domain.UnbindRequest) (domain.Operation, domain.Binding, error) {

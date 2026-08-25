@@ -321,6 +321,47 @@ func runOperatorChannelContract(t *testing.T, fixture operatorChannelContractFix
 		t.Fatalf("expired settlement = %#v, %v", expiredSettlement, err)
 	}
 
+	confirmExpiryBegin := operatorchannel.BeginRequest{
+		OperationID: uuid.NewString(), Kind: operatorchannel.OperationConnect, PrincipalID: principal.ID,
+		Interface: operatorChannelContractIdentity("generation-confirm-expired"), ExpectedRevision: 0,
+		RequestKeyHash: "confirm-expired-key", RequestHash: "confirm-expired-body", RequestedAt: now, ExpiresAt: now.Add(time.Second),
+	}
+	confirmExpiryOp, err := fixture.store.BeginChannelBinding(ctx, confirmExpiryBegin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmExpirySettlement, err := fixture.settle(ctx, operatorChannelContractClaim(confirmExpiryOp, operatorchannel.ConversationScopeDirect, "account-d", "conversation-d", uuid.NewString()), now.Add(500*time.Millisecond))
+	if err != nil || confirmExpirySettlement.Operation.State != operatorchannel.StateAwaitingConfirmation {
+		t.Fatalf("confirmation-expiry claim = %#v, %v", confirmExpirySettlement, err)
+	}
+	expiredConfirmation, expiredBinding, err := fixture.store.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
+		OperationID: confirmExpiryOp.OperationID, PrincipalID: principal.ID, ExpectedRevision: confirmExpirySettlement.Operation.Revision,
+		Approve: true, ConfirmedAt: now.Add(2 * time.Second),
+	})
+	if !errors.Is(err, operatorchannel.ErrOperationTerminal) || expiredConfirmation.State != operatorchannel.StateExpired || expiredConfirmation.Revision != 3 || expiredBinding != (operatorchannel.Binding{}) {
+		t.Fatalf("expired confirmation = op:%#v binding:%#v err:%v", expiredConfirmation, expiredBinding, err)
+	}
+	operations, err := fixture.store.ListOperatorChannelOperations(ctx, principal.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundExpiredConfirmation := false
+	for _, candidate := range operations {
+		if candidate.OperationID == confirmExpiryOp.OperationID {
+			foundExpiredConfirmation = candidate.State == operatorchannel.StateExpired && candidate.Revision == 3
+		}
+	}
+	if !foundExpiredConfirmation {
+		t.Fatalf("expired confirmation was not committed: %#v", operations)
+	}
+	replayedExpired, _, err := fixture.store.ConfirmChannelBinding(ctx, operatorchannel.ConfirmRequest{
+		OperationID: confirmExpiryOp.OperationID, PrincipalID: principal.ID, ExpectedRevision: confirmExpirySettlement.Operation.Revision,
+		Approve: true, ConfirmedAt: now.Add(3 * time.Second),
+	})
+	if !errors.Is(err, operatorchannel.ErrOperationTerminal) || replayedExpired.State != operatorchannel.StateExpired || replayedExpired.Revision != 3 {
+		t.Fatalf("expired confirmation replay = op:%#v err:%v", replayedExpired, err)
+	}
+
 	unknownClaim := operatorChannelContractClaim(expiredOp, operatorchannel.ConversationScopeDirect, "account-c", "conversation-c", uuid.NewString())
 	unknownClaim.Challenge = "SWARM-BBBBBBBBBBBBBBBB"
 	unknownClaim.Text = unknownClaim.Challenge

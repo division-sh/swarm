@@ -239,7 +239,7 @@ var cliIdentifierFamilyRegistry = map[cliIdentifierFamily]cliIdentifierFamilyPol
 		Family:            cliIdentifierFamilyOperatorChannel,
 		CandidateSource:   cliIdentifierSourceChannelList,
 		ScopeMode:         cliIdentifierScopeBoundedCatalog,
-		ScopeRule:         "active exact pack-qualified operator channel interfaces",
+		ScopeRule:         "exact pack-qualified selectors returned by channel.list; creation requires current admission while destructive cleanup may select retained lifecycle state",
 		NormalizationMode: cliIdentifierNormalizeCaseSensitive,
 		NormalizationRule: "trim only; exact selector required",
 		DisplayProjection: cliIdentifierDisplayFull,
