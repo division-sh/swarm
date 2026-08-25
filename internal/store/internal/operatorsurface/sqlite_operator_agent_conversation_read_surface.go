@@ -2,12 +2,15 @@ package operatorsurface
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	storeagentpersistence "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
+	"github.com/google/uuid"
 )
 
 func (s *AgentSQLite) ListAgentDeliveryLifecycleFacts(ctx context.Context, identities []agentidentity.Identity) (map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts, error) {
@@ -25,7 +28,11 @@ func (s *AgentSQLite) ListAgentDeliveryLifecycleFacts(ctx context.Context, ident
 	if len(normalized) == 0 {
 		return out, nil
 	}
-	records, err := s.listSQLiteAgentLifecycleRecords(ctx, normalized)
+	asOf, err := operatorSQLiteDelivery.CaptureSnapshotTime(ctx, s.backend)
+	if err != nil {
+		return nil, err
+	}
+	records, err := s.listSQLiteAgentLifecycleRecords(ctx, normalized, asOf)
 	if err != nil {
 		return nil, err
 	}
@@ -39,8 +46,8 @@ func (s *AgentSQLite) ListAgentDeliveryLifecycleFacts(ctx context.Context, ident
 	return out, nil
 }
 
-func (s *AgentSQLite) listSQLiteAgentLifecycleRecords(ctx context.Context, identities []agentidentity.Identity) ([]agentLifecycleDeliveryRecord, error) {
-	snapshots, err := operatorSQLiteDelivery.CurrentAgentSnapshots(ctx, s.backend, identities)
+func (s *AgentSQLite) listSQLiteAgentLifecycleRecords(ctx context.Context, identities []agentidentity.Identity, asOf time.Time) ([]agentLifecycleDeliveryRecord, error) {
+	snapshots, err := operatorSQLiteDelivery.CurrentAgentSnapshots(ctx, s.backend, identities, asOf)
 	if err != nil {
 		return nil, err
 	}
@@ -48,41 +55,30 @@ func (s *AgentSQLite) listSQLiteAgentLifecycleRecords(ctx context.Context, ident
 }
 
 func (r *AgentSQLite) ListOperatorAgents(ctx context.Context, opts operatorread.OperatorAgentListOptions) (operatorread.OperatorAgentListResult, error) {
+	return r.readOperatorAgentSummarySnapshot(ctx, opts)
+}
+
+func (r *AgentSQLite) readOperatorAgentSummarySnapshot(ctx context.Context, opts operatorread.OperatorAgentListOptions) (operatorread.OperatorAgentListResult, error) {
 	if err := r.requireAgentAccess(); err != nil {
 		return operatorread.OperatorAgentListResult{}, err
 	}
-	opts.Flow = strings.Trim(strings.TrimSpace(opts.Flow), "/")
-	opts.Role = strings.TrimSpace(opts.Role)
-	baseRows, err := r.runtime.LoadAgents(ctx)
+	tx, err := r.backend.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return operatorread.OperatorAgentListResult{}, err
 	}
-	projections, err := r.loadAgentOperatorProjections(ctx)
+	defer tx.Rollback()
+	asOf, err := operatorSQLiteDelivery.CaptureSnapshotTime(ctx, tx)
 	if err != nil {
 		return operatorread.OperatorAgentListResult{}, err
 	}
-	agents := make([]operatorread.OperatorAgentSummary, 0, len(baseRows))
-	for _, row := range baseRows {
-		if opts.Role != "" && strings.TrimSpace(row.Config.Role) != opts.Role {
-			continue
-		}
-		if opts.Flow != "" && !operatorAgentFlowMatches(row.Config.CanonicalFlowPath(), opts.Flow) {
-			continue
-		}
-		identity, err := row.Config.ConcreteIdentity()
-		if err != nil {
-			return operatorread.OperatorAgentListResult{}, err
-		}
-		projection, ok := projections[identity]
-		if !ok {
-			return operatorread.OperatorAgentListResult{}, fmt.Errorf("missing sqlite agent operator projection: %s", identity.Description())
-		}
-		agents = append(agents, operatorAgentSummaryFromPersisted(row, projection, opts.TurnLimit))
+	result, err := r.loadOperatorAgentSummariesTx(ctx, tx, opts, asOf)
+	if err != nil {
+		return operatorread.OperatorAgentListResult{}, err
 	}
-	if agents == nil {
-		agents = []operatorread.OperatorAgentSummary{}
+	if err := tx.Commit(); err != nil {
+		return operatorread.OperatorAgentListResult{}, fmt.Errorf("commit sqlite agent summary snapshot: %w", err)
 	}
-	return operatorread.OperatorAgentListResult{Agents: agents}, nil
+	return result, nil
 }
 
 func (r *AgentSQLite) LoadOperatorAgent(ctx context.Context, identity agentidentity.Identity) (operatorread.OperatorAgentDetail, error) {
@@ -90,7 +86,7 @@ func (r *AgentSQLite) LoadOperatorAgent(ctx context.Context, identity agentident
 	if err := identity.Validate(); err != nil {
 		return operatorread.OperatorAgentDetail{}, operatorread.ErrAgentNotFound
 	}
-	result, err := r.ListOperatorAgents(ctx, operatorread.OperatorAgentListOptions{})
+	result, err := r.readOperatorAgentSummarySnapshot(ctx, operatorread.OperatorAgentListOptions{})
 	if err != nil {
 		return operatorread.OperatorAgentDetail{}, err
 	}
@@ -107,7 +103,27 @@ func (r *AgentSQLite) LoadOperatorAgent(ctx context.Context, identity agentident
 }
 
 func (r *AgentSQLite) LoadOperatorAgentDiagnosis(ctx context.Context, identity agentidentity.Identity, opts operatorread.OperatorAgentDiagnosisOptions) (operatorread.OperatorAgentDiagnosis, error) {
-	detail, err := r.LoadOperatorAgent(ctx, identity)
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
+		return operatorread.OperatorAgentDiagnosis{}, operatorread.ErrAgentNotFound
+	}
+	if err := r.requireAgentAccess(); err != nil {
+		return operatorread.OperatorAgentDiagnosis{}, err
+	}
+	tx, err := r.backend.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return operatorread.OperatorAgentDiagnosis{}, err
+	}
+	defer tx.Rollback()
+	asOf, err := operatorSQLiteDelivery.CaptureSnapshotTime(ctx, tx)
+	if err != nil {
+		return operatorread.OperatorAgentDiagnosis{}, err
+	}
+	result, err := r.loadOperatorAgentSummariesTx(ctx, tx, operatorread.OperatorAgentListOptions{}, asOf)
+	if err != nil {
+		return operatorread.OperatorAgentDiagnosis{}, err
+	}
+	detail, err := operatorAgentDetailFromSnapshot(result, identity)
 	if err != nil {
 		return operatorread.OperatorAgentDiagnosis{}, err
 	}
@@ -115,17 +131,20 @@ func (r *AgentSQLite) LoadOperatorAgentDiagnosis(ctx context.Context, identity a
 	if err != nil {
 		return operatorread.OperatorAgentDiagnosis{}, err
 	}
-	queue, err := r.delivery.ListPendingAgentDeliveryDetails(ctx, operatorread.PendingAgentDeliveryListOptions{
+	queue, err := r.listPendingAgentDeliveryDetailsTx(ctx, tx, operatorread.PendingAgentDeliveryListOptions{
 		AgentIdentity: identity,
 		Limit:         opts.QueueLimit,
 		Cursor:        opts.QueueCursor,
-	})
+	}, asOf)
 	if err != nil {
 		return operatorread.OperatorAgentDiagnosis{}, err
 	}
 	diagnosis.Queue = operatorAgentDiagnosisQueueFromPendingPage(queue)
 	if err := validateOperatorAgentDiagnosis(diagnosis); err != nil {
 		return operatorread.OperatorAgentDiagnosis{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return operatorread.OperatorAgentDiagnosis{}, fmt.Errorf("commit sqlite agent diagnosis snapshot: %w", err)
 	}
 	return diagnosis, nil
 }
@@ -230,7 +249,7 @@ func (r *ConversationSQLite) ListOperatorConversations(ctx context.Context, opts
 }
 
 func (r *AgentSQLite) requireAgentAccess() error {
-	if r == nil || r.backend == nil || r.runtime == nil || r.conversation == nil || r.delivery == nil || r.deadLetters == nil {
+	if r == nil || r.backend == nil || r.delivery == nil || r.deadLetters == nil {
 		return fmt.Errorf("operator agent read surface requires sqlite store")
 	}
 	return r.requireCurrentSchema()
@@ -243,8 +262,23 @@ func (r *ConversationSQLite) requireConversationAccess() error {
 	return r.requireCurrentSchema()
 }
 
-func (r *AgentSQLite) loadAgentOperatorProjections(ctx context.Context) (map[agentidentity.Identity]operatorAgentProjection, error) {
-	rows, err := r.backend.QueryContext(ctx, `
+func (r *AgentSQLite) loadOperatorAgentSummariesTx(ctx context.Context, tx *sql.Tx, opts operatorread.OperatorAgentListOptions, asOf time.Time) (operatorread.OperatorAgentListResult, error) {
+	baseRows, err := storeagentpersistence.LoadSQLiteAgentsTx(ctx, tx)
+	if err != nil {
+		return operatorread.OperatorAgentListResult{}, err
+	}
+	projections, err := r.loadAgentOperatorProjectionsTx(ctx, tx, asOf)
+	if err != nil {
+		return operatorread.OperatorAgentListResult{}, err
+	}
+	return operatorAgentListResultFromSnapshot(baseRows, projections, opts, "sqlite")
+}
+
+func (r *AgentSQLite) loadAgentOperatorProjectionsTx(ctx context.Context, tx *sql.Tx, asOf time.Time) (map[agentidentity.Identity]operatorAgentProjection, error) {
+	if tx == nil {
+		return nil, fmt.Errorf("load sqlite agent projections: transaction is required")
+	}
+	rows, err := tx.QueryContext(ctx, `
 		SELECT
 			a.agent_id,
 			a.agent_name_owner,
@@ -253,13 +287,13 @@ func (r *AgentSQLite) loadAgentOperatorProjections(ctx context.Context) (map[age
 			a.flow_scope_key,
 			a.flow_instance_id,
 			a.flow_instance,
-			COALESCE(a.status, 'active'),
+			a.status,
 			COALESCE(sess.session_id, ''),
 			sess.created_at,
-			COALESCE(sess.turn_count, 0),
+			CASE WHEN sess.session_id IS NULL THEN 0 ELSE sess.turn_count END,
 			COALESCE(sess.lease_holder, ''),
 			sess.lease_expires_at,
-				COALESCE(sess.runtime_state, '{}'),
+				CASE WHEN sess.session_id IS NULL THEN '{}' ELSE sess.runtime_state END,
 				0,
 				0
 		FROM agents a
@@ -321,6 +355,14 @@ func (r *AgentSQLite) loadAgentOperatorProjections(ctx context.Context) (map[age
 		} else if ok {
 			projection.SessionStartedAt = at
 		}
+		if projection.SessionID != "" && projection.SessionStartedAt.IsZero() {
+			return nil, fmt.Errorf("sqlite active agent session started_at is required")
+		}
+		if projection.SessionID != "" {
+			if _, err := uuid.Parse(projection.SessionID); err != nil {
+				return nil, fmt.Errorf("sqlite active agent session_id is invalid: %w", err)
+			}
+		}
 		if at, ok, err := sqliteTimeValue(lockExpiresAtRaw); err != nil {
 			return nil, fmt.Errorf("scan sqlite agent session lease_expires_at: %w", err)
 		} else if ok {
@@ -329,16 +371,15 @@ func (r *AgentSQLite) loadAgentOperatorProjections(ctx context.Context) (map[age
 		if err := enrichOperatorAgentProjectionRuntimeState(&projection, runtimeStateRaw); err != nil {
 			return nil, err
 		}
-		if projection.SessionID != "" {
-			turn, err := loadOperatorLatestConversationTurn(ctx, r.conversation, projection.SessionID)
-			if err != nil {
-				return nil, fmt.Errorf("load sqlite latest agent turn: %w", err)
-			}
-			enrichOperatorProjectionWithPublicTurn(&projection, turn)
+		if projection.SessionID != "" && len(runtimeStateRaw) == 0 {
+			return nil, fmt.Errorf("sqlite active agent session runtime_state is required")
 		}
 		identity, err := agentidentity.FromStorageFields(fields)
 		if err != nil {
 			return nil, fmt.Errorf("scan sqlite agent operator identity: %w", err)
+		}
+		if _, exists := out[identity]; exists {
+			return nil, fmt.Errorf("duplicate sqlite agent operator projection: %s", identity.Description())
 		}
 		out[identity] = projection
 		identities = append(identities, identity)
@@ -346,14 +387,30 @@ func (r *AgentSQLite) loadAgentOperatorProjections(ctx context.Context) (map[age
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read sqlite agent operator projection rows: %w", err)
 	}
-	factsByAgent, err := r.delivery.ListPendingAgentDeliveryFacts(ctx, identities, time.Time{})
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close sqlite agent operator projection rows: %w", err)
+	}
+	for _, identity := range identities {
+		projection := out[identity]
+		if projection.SessionID != "" {
+			turn, err := loadLatestSQLitePublicConversationTurnTx(ctx, tx, projection.SessionID)
+			if err != nil {
+				return nil, fmt.Errorf("load sqlite latest agent turn: %w", err)
+			}
+			enrichOperatorProjectionWithPublicTurn(&projection, turn)
+			out[identity] = projection
+		}
+	}
+	aggregates, err := operatorSQLiteDelivery.AgentPendingAggregates(ctx, tx, identities, time.Time{}, asOf)
 	if err != nil {
 		return nil, err
 	}
-	lifecycleByAgent, err := r.delivery.ListAgentDeliveryLifecycleFacts(ctx, identities)
+	factsByAgent := pendingAgentDeliveryFactsFromAggregates(identities, aggregates, asOf)
+	snapshots, err := operatorSQLiteDelivery.CurrentAgentSnapshots(ctx, tx, identities, asOf)
 	if err != nil {
 		return nil, err
 	}
+	lifecycleByAgent := agentDeliveryLifecycleFactsFromSnapshots(identities, snapshots)
 	for identity, facts := range factsByAgent {
 		projection := out[identity]
 		projection.PendingEvents = facts.PendingCount

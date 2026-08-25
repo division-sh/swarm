@@ -165,7 +165,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err != nil {
 		return nil, err
 	}
-	operatorAgent, err := storeoperatorsurface.NewAgentPostgres(backend, store.requireCurrentSchema, agentOwner, operatorConversation, nil, operatorObservability)
+	operatorAgent, err := storeoperatorsurface.NewAgentPostgres(backend, store.requireCurrentSchema, operatorObservability)
 	if err != nil {
 		return nil, err
 	}
@@ -393,7 +393,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	if err != nil {
 		return nil, err
 	}
-	operatorAgent, err := storeoperatorsurface.NewAgentSQLite(backend, store.requireCurrentSchema, store.now, agentOwner, operatorConversation, nil, operatorObservability)
+	operatorAgent, err := storeoperatorsurface.NewAgentSQLite(backend, store.requireCurrentSchema, operatorObservability)
 	if err != nil {
 		return nil, err
 	}

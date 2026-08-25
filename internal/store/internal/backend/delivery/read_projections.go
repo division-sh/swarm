@@ -25,6 +25,22 @@ const (
 	)`
 )
 
+func postgresAgentPendingEligibilityAt(asOf string) string {
+	return `(
+		d.status = 'pending'
+		OR (d.status = 'failed' AND d.retry_count <= d.max_retries AND d.next_eligible_at <= ` + asOf + `)
+		OR d.status = 'in_progress'
+	)`
+}
+
+func sqliteAgentPendingEligibilityAt(asOf string) string {
+	return `(
+		d.status = 'pending'
+		OR (d.status = 'failed' AND d.retry_count <= d.max_retries AND julianday(substr(d.next_eligible_at, 1, 23)) <= julianday(` + asOf + `))
+		OR d.status = 'in_progress'
+	)`
+}
+
 // PendingRunEventIDs applies the active-run, pending-delivery, replay
 // exclusion, ordering, de-duplication, and limit shape before event hydration.
 func (a *Adapter) PendingRunEventIDs(ctx context.Context, q queryer, page PendingRunEventQuery) ([]string, error) {
@@ -122,7 +138,7 @@ func (a *Adapter) PendingRunEventIDs(ctx context.Context, q queryer, page Pendin
 
 // AgentPendingAggregates computes pending-obligation count and oldest event
 // time for all requested agents without hydrating lifecycle or event records.
-func (a *Adapter) AgentPendingAggregates(ctx context.Context, q queryer, identities []agentidentity.Identity, since time.Time) ([]AgentPendingAggregate, error) {
+func (a *Adapter) AgentPendingAggregates(ctx context.Context, q queryer, identities []agentidentity.Identity, since, asOf time.Time) ([]AgentPendingAggregate, error) {
 	identities, err := normalizeAgentIdentities(identities)
 	if err != nil {
 		return nil, err
@@ -132,6 +148,9 @@ func (a *Adapter) AgentPendingAggregates(ctx context.Context, q queryer, identit
 	}
 	if since.IsZero() {
 		since = time.Unix(0, 0).UTC()
+	}
+	if asOf.IsZero() {
+		return nil, fmt.Errorf("agent pending aggregates as_of is required")
 	}
 	predicate, args, err := agentIdentityPredicate(a.dialect, "d", identities, 1)
 	if err != nil {
@@ -143,6 +162,8 @@ func (a *Adapter) AgentPendingAggregates(ctx context.Context, q queryer, identit
 		args = append(args, since.UTC())
 		sinceIndex := len(args)
 		args = append(args, string(activeStates[0]), string(activeStates[1]))
+		args = append(args, asOf.UTC())
+		asOfIndex := len(args)
 		query = fmt.Sprintf(`
 			SELECT d.subscriber_id, d.agent_name_owner, d.agent_name_source,
 			       d.agent_route_presence, d.agent_flow_scope_key,
@@ -160,10 +181,11 @@ func (a *Adapter) AgentPendingAggregates(ctx context.Context, q queryer, identit
 			         d.agent_route_presence, d.agent_flow_scope_key,
 			         d.agent_flow_instance_id, d.agent_flow_instance_path
 			ORDER BY d.subscriber_id, d.agent_flow_instance_path`,
-			predicate, sinceIndex, sinceIndex+1, sinceIndex+2, postgresAgentPendingEligibility)
+			predicate, sinceIndex, sinceIndex+1, sinceIndex+2, postgresAgentPendingEligibilityAt(fmt.Sprintf("$%d::timestamptz", asOfIndex)))
 	} else {
 		args = append(args, since.UTC())
 		args = append(args, string(activeStates[0]), string(activeStates[1]))
+		args = append(args, sqliteTraceSQLTime(asOf.UTC()))
 		query = fmt.Sprintf(`
 			SELECT d.subscriber_id, d.agent_name_owner, d.agent_name_source,
 			       d.agent_route_presence, d.agent_flow_scope_key,
@@ -181,7 +203,7 @@ func (a *Adapter) AgentPendingAggregates(ctx context.Context, q queryer, identit
 			         d.agent_route_presence, d.agent_flow_scope_key,
 			         d.agent_flow_instance_id, d.agent_flow_instance_path
 			ORDER BY d.subscriber_id, d.agent_flow_instance_path`,
-			predicate, sqliteAgentPendingEligibility)
+			predicate, sqliteAgentPendingEligibilityAt("?"))
 	}
 	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -229,7 +251,7 @@ func (a *Adapter) AgentPendingAggregates(ctx context.Context, q queryer, identit
 
 // AgentPendingReferencePage selects limit+1 exact obligation identities, trims
 // the lookahead row, and only then hydrates canonical lifecycle snapshots.
-func (a *Adapter) AgentPendingReferencePage(ctx context.Context, q queryer, page AgentPendingPageQuery) (AgentPendingReferencePage, error) {
+func (a *Adapter) AgentPendingReferencePage(ctx context.Context, q queryer, page AgentPendingPageQuery, asOf time.Time) (AgentPendingReferencePage, error) {
 	page.AgentIdentity = page.AgentIdentity.Normalize()
 	if err := page.AgentIdentity.Validate(); err != nil {
 		return AgentPendingReferencePage{}, fmt.Errorf("agent pending page identity: %w", err)
@@ -239,6 +261,9 @@ func (a *Adapter) AgentPendingReferencePage(ctx context.Context, q queryer, page
 	}
 	if page.Since.IsZero() {
 		page.Since = time.Unix(0, 0).UTC()
+	}
+	if asOf.IsZero() {
+		return AgentPendingReferencePage{}, fmt.Errorf("agent pending page as_of is required")
 	}
 	if page.After != nil {
 		page.After.EventID = strings.TrimSpace(page.After.EventID)
@@ -263,12 +288,14 @@ func (a *Adapter) AgentPendingReferencePage(ctx context.Context, q queryer, page
 		args = append(args, page.Since.UTC())
 		sinceIndex := len(args)
 		args = append(args, string(activeStates[0]), string(activeStates[1]))
+		args = append(args, asOf.UTC())
+		asOfIndex := len(args)
 		where := []string{
 			"d.subscriber_type = 'agent'",
 			"(" + predicate + ")",
 			fmt.Sprintf("e.created_at >= $%d::timestamptz", sinceIndex),
 			fmt.Sprintf("(e.run_id IS NULL OR r.status IN ($%d, $%d))", sinceIndex+1, sinceIndex+2),
-			postgresAgentPendingEligibility,
+			postgresAgentPendingEligibilityAt(fmt.Sprintf("$%d::timestamptz", asOfIndex)),
 		}
 		if page.After != nil {
 			args = append(args, page.After.EventCreatedAt.UTC(), page.After.EventID, page.After.DeliveryID)
@@ -289,12 +316,13 @@ func (a *Adapter) AgentPendingReferencePage(ctx context.Context, q queryer, page
 	} else {
 		args = append(args, page.Since.UTC())
 		args = append(args, string(activeStates[0]), string(activeStates[1]))
+		args = append(args, sqliteTraceSQLTime(asOf.UTC()))
 		where := []string{
 			"d.subscriber_type = 'agent'",
 			"(" + predicate + ")",
 			"e.created_at >= ?",
 			"(e.run_id IS NULL OR r.status IN (?, ?))",
-			sqliteAgentPendingEligibility,
+			sqliteAgentPendingEligibilityAt("?"),
 		}
 		if page.After != nil {
 			eventAt := sqliteTraceSQLTime(page.After.EventCreatedAt)
@@ -359,20 +387,16 @@ func (a *Adapter) AgentPendingReferencePage(ctx context.Context, q queryer, page
 	if result.HasMore {
 		raw = raw[:page.Limit]
 	}
-	now, err := a.databaseNow(ctx, q)
-	if err != nil {
-		return AgentPendingReferencePage{}, err
-	}
 	result.References = make([]AgentPendingReference, 0, len(raw))
 	for _, reference := range raw {
 		record, err := a.loadByID(ctx, q, reference.deliveryID, false)
 		if err != nil {
 			return AgentPendingReferencePage{}, err
 		}
-		snapshot := snapshotAt(record, now)
+		snapshot := snapshotAt(record, asOf.UTC())
 		if snapshot.DeliveryID != reference.deliveryID || snapshot.EventID != reference.eventID ||
 			snapshot.SubscriberClass != SubscriberAgent || snapshot.Route.AgentIdentity != page.AgentIdentity ||
-			!agentPendingSnapshotEligible(snapshot, now) {
+			!agentPendingSnapshotEligible(snapshot, asOf.UTC()) {
 			return AgentPendingReferencePage{}, fmt.Errorf("%w: agent pending page reference changed during hydration", ErrConflict)
 		}
 		result.References = append(result.References, AgentPendingReference{
@@ -385,13 +409,16 @@ func (a *Adapter) AgentPendingReferencePage(ctx context.Context, q queryer, page
 
 // CurrentAgentSnapshots selects at most one row-ranked current lifecycle
 // candidate for each requested agent before canonical hydration.
-func (a *Adapter) CurrentAgentSnapshots(ctx context.Context, q queryer, identities []agentidentity.Identity) ([]Snapshot, error) {
+func (a *Adapter) CurrentAgentSnapshots(ctx context.Context, q queryer, identities []agentidentity.Identity, asOf time.Time) ([]Snapshot, error) {
 	identities, err := normalizeAgentIdentities(identities)
 	if err != nil {
 		return nil, err
 	}
 	if len(identities) == 0 {
 		return []Snapshot{}, nil
+	}
+	if asOf.IsZero() {
+		return nil, fmt.Errorf("current agent snapshots as_of is required")
 	}
 	predicate, args, err := agentIdentityPredicate(a.dialect, "d", identities, 1)
 	if err != nil {
@@ -465,7 +492,7 @@ func (a *Adapter) CurrentAgentSnapshots(ctx context.Context, q queryer, identiti
 			WHERE row_number = 1
 			ORDER BY delivery_id`, predicate)
 	}
-	snapshots, err := a.snapshotsByIDQuery(ctx, q, query, args...)
+	snapshots, err := a.snapshotsByIDQueryAt(ctx, q, asOf.UTC(), query, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -8,7 +8,6 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
@@ -24,24 +23,11 @@ type TimerObligationSource interface {
 	ReadTimerObligations(context.Context, runtimetimerobligation.Scope, time.Time) (runtimetimerobligation.Snapshot, error)
 }
 
-type AgentRuntimeSource interface {
-	LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error)
-}
-
-type conversationTurnReader interface {
-	ListOperatorConversationTurns(context.Context, operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error)
-	LoadOperatorPublicConversationTurn(context.Context, string, string) (operatorread.OperatorPublicConversationTurnDetail, error)
-	LoadLatestPublicConversationTurn(context.Context, string) (*operatorread.OperatorPublicConversationTurn, error)
-}
-
 type DeadLetterProjection interface {
 	LoadOperatorDeliveryDeadLetters(context.Context, string, int64) ([]operatorread.OperatorDeadLetterRecord, error)
 }
 
 type agentDeliveryProjection interface {
-	ListPendingAgentDeliveryFacts(context.Context, []agentidentity.Identity, time.Time) (map[agentidentity.Identity]operatorread.PendingAgentDeliveryFacts, error)
-	ListPendingAgentDeliveryDetails(context.Context, operatorread.PendingAgentDeliveryListOptions) (operatorread.PendingAgentDeliveryPage, error)
-	ListAgentDeliveryLifecycleFacts(context.Context, []agentidentity.Identity) (map[agentidentity.Identity]operatorread.AgentDeliveryLifecycleFacts, error)
 	DeliveryLifecycleSnapshotPageForAgent(context.Context, runtimedelivery.AgentLifecyclePageQuery) (runtimedelivery.SnapshotPage, error)
 	DeliveryDiagnosticSnapshotPageForAgent(context.Context, runtimedelivery.AgentDiagnosticPageQuery) (runtimedelivery.SnapshotPage, error)
 	DeliveryDiagnosticCountsForAgentSince(context.Context, agentidentity.Identity, time.Time) (runtimedelivery.AgentDiagnosticCounts, error)
@@ -61,12 +47,10 @@ type EntityPostgres struct {
 }
 
 type AgentPostgres struct {
-	backend      *postgresbackend.Backend
-	schemaGuard  func() error
-	runtime      AgentRuntimeSource
-	conversation conversationTurnReader
-	delivery     agentDeliveryProjection
-	deadLetters  DeadLetterProjection
+	backend     *postgresbackend.Backend
+	schemaGuard func() error
+	delivery    agentDeliveryProjection
+	deadLetters DeadLetterProjection
 }
 
 type ConversationPostgres struct {
@@ -103,17 +87,15 @@ func NewEntityPostgres(backend *postgresbackend.Backend, schemaGuard func() erro
 	return &EntityPostgres{backend: backend, schemaGuard: schemaGuard}, nil
 }
 
-func NewAgentPostgres(backend *postgresbackend.Backend, schemaGuard func() error, runtime AgentRuntimeSource, conversation conversationTurnReader, delivery agentDeliveryProjection, deadLetters DeadLetterProjection) (*AgentPostgres, error) {
+func NewAgentPostgres(backend *postgresbackend.Backend, schemaGuard func() error, deadLetters DeadLetterProjection) (*AgentPostgres, error) {
 	if err := requirePostgresBackend(backend); err != nil {
 		return nil, err
 	}
-	if runtime == nil || conversation == nil || deadLetters == nil {
+	if deadLetters == nil {
 		return nil, fmt.Errorf("agent read sources are required")
 	}
-	owner := &AgentPostgres{backend: backend, schemaGuard: schemaGuard, runtime: runtime, conversation: conversation, delivery: delivery, deadLetters: deadLetters}
-	if owner.delivery == nil {
-		owner.delivery = owner
-	}
+	owner := &AgentPostgres{backend: backend, schemaGuard: schemaGuard, deadLetters: deadLetters}
+	owner.delivery = owner
 	return owner, nil
 }
 
@@ -166,10 +148,6 @@ func (s *RunPostgres) RequireCurrentSchema() error          { return s.requireCu
 func (s *AgentPostgres) RequireCurrentSchema() error        { return s.requireCurrentSchema() }
 func (s *ConversationPostgres) RequireCurrentSchema() error { return s.requireCurrentSchema() }
 
-func (s *AgentPostgres) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
-	return s.runtime.LoadAgents(ctx)
-}
-
 func (s *AgentPostgres) LoadOperatorDeliveryDeadLetters(ctx context.Context, deliveryID string, claimVersion int64) ([]operatorread.OperatorDeadLetterRecord, error) {
 	return s.deadLetters.LoadOperatorDeliveryDeadLetters(ctx, deliveryID, claimVersion)
 }
@@ -189,13 +167,10 @@ type EntitySQLite struct {
 }
 
 type AgentSQLite struct {
-	backend      *sqlitebackend.Backend
-	schemaGuard  func() error
-	nowFn        func() time.Time
-	runtime      AgentRuntimeSource
-	conversation conversationTurnReader
-	delivery     agentDeliveryProjection
-	deadLetters  DeadLetterProjection
+	backend     *sqlitebackend.Backend
+	schemaGuard func() error
+	delivery    agentDeliveryProjection
+	deadLetters DeadLetterProjection
 }
 
 type ConversationSQLite struct {
@@ -232,17 +207,15 @@ func NewEntitySQLite(backend *sqlitebackend.Backend, schemaGuard func() error) (
 	return &EntitySQLite{backend: backend, schemaGuard: schemaGuard}, nil
 }
 
-func NewAgentSQLite(backend *sqlitebackend.Backend, schemaGuard func() error, nowFn func() time.Time, runtime AgentRuntimeSource, conversation conversationTurnReader, delivery agentDeliveryProjection, deadLetters DeadLetterProjection) (*AgentSQLite, error) {
+func NewAgentSQLite(backend *sqlitebackend.Backend, schemaGuard func() error, deadLetters DeadLetterProjection) (*AgentSQLite, error) {
 	if err := requireSQLiteBackend(backend); err != nil {
 		return nil, err
 	}
-	if runtime == nil || conversation == nil || deadLetters == nil {
+	if deadLetters == nil {
 		return nil, fmt.Errorf("agent read sources are required")
 	}
-	owner := &AgentSQLite{backend: backend, schemaGuard: schemaGuard, nowFn: nowFn, runtime: runtime, conversation: conversation, delivery: delivery, deadLetters: deadLetters}
-	if owner.delivery == nil {
-		owner.delivery = owner
-	}
+	owner := &AgentSQLite{backend: backend, schemaGuard: schemaGuard, deadLetters: deadLetters}
+	owner.delivery = owner
 	return owner, nil
 }
 
@@ -295,12 +268,7 @@ func (s *RunSQLite) RequireCurrentSchema() error          { return s.requireCurr
 func (s *AgentSQLite) RequireCurrentSchema() error        { return s.requireCurrentSchema() }
 func (s *ConversationSQLite) RequireCurrentSchema() error { return s.requireCurrentSchema() }
 
-func (s *RunSQLite) now() time.Time   { return ownerNow(s.nowFn) }
-func (s *AgentSQLite) now() time.Time { return ownerNow(s.nowFn) }
-
-func (s *AgentSQLite) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
-	return s.runtime.LoadAgents(ctx)
-}
+func (s *RunSQLite) now() time.Time { return ownerNow(s.nowFn) }
 
 func (s *AgentSQLite) LoadOperatorDeliveryDeadLetters(ctx context.Context, deliveryID string, claimVersion int64) ([]operatorread.OperatorDeadLetterRecord, error) {
 	return s.deadLetters.LoadOperatorDeliveryDeadLetters(ctx, deliveryID, claimVersion)
