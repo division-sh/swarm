@@ -11,6 +11,7 @@ scout-intake:
         event: scout.work.requested
         fields:
           query: payload.query
+          candidate_ids: payload.candidate_ids
 
 scout-completion:
   id: scout-completion

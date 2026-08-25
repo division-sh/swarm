@@ -11,6 +11,7 @@ search-intake:
         event: scout.requested
         fields:
           query: payload.query
+          candidate_ids: payload.candidate_ids
 scout-collector:
   id: scout-collector
   execution_type: system_node
@@ -28,7 +29,7 @@ scout-collector:
       fan_out:
         items_from: payload.candidate_ids
         as: candidate_id
-        max_items: 8
+        max_items: 10
         emit:
           event: candidate.requested
           fields:

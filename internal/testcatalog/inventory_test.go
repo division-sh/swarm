@@ -37,11 +37,11 @@ func TestCatalogRequiredInventory(t *testing.T) {
 	if got := len(inventory.PublicCompanions()); got != 87 {
 		t.Fatalf("public companion count = %d, want 87", got)
 	}
-	if got := len(inventory.Claims); got != 20 {
-		t.Fatalf("canonical claim count = %d, want 20", got)
+	if got := len(inventory.Claims); got != 24 {
+		t.Fatalf("canonical claim count = %d, want 24", got)
 	}
-	if got := len(inventory.ExternalProofs); got != 3 {
-		t.Fatalf("external proof count = %d, want 3", got)
+	if got := len(inventory.ExternalProofs); got != 4 {
+		t.Fatalf("external proof count = %d, want 4", got)
 	}
 	wantProofs := map[string]struct {
 		executor string
@@ -50,6 +50,15 @@ func TestCatalogRequiredInventory(t *testing.T) {
 		"examples/integrations/telegram-agent": {executor: "github.com/division-sh/swarm/internal/serveapp", claims: telegramAgentClaims()},
 		"internal/runtime/llm":                 {executor: "github.com/division-sh/swarm/internal/runtime/llm", claims: []string{"catalog.runtime.managed_hitl_api_transport", "catalog.runtime.managed_hitl_inprocess_transport"}},
 		"internal/releasee2e":                  {executor: "github.com/division-sh/swarm/internal/releasee2e", claims: []string{"catalog.runtime.managed_hitl_cli_mcp_transport"}},
+		"internal/releasee2e/testdata/golden_agent_workload": {
+			executor: "github.com/division-sh/swarm/internal/releasee2e",
+			claims: []string{
+				"catalog.runtime.agent_instance_materialization",
+				"catalog.runtime.agent_turn_completion",
+				"catalog.runtime.agent_emission_delivery",
+				"catalog.runtime.agent_terminal_teardown",
+			},
+		},
 	}
 	for _, proof := range inventory.ExternalProofs {
 		want, ok := wantProofs[proof.Source]
@@ -254,6 +263,7 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 		t.Fatalf("load proof policy: %v", err)
 	}
 	const cliappPackage = "github.com/division-sh/swarm/internal/cliapp"
+	const releasePackage = "github.com/division-sh/swarm/internal/releasee2e"
 	cliappUnit, ok := policy.Units["catalog-required-verify"]
 	if !ok {
 		t.Fatal("proof policy omits catalog-required-verify")
@@ -265,6 +275,10 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 		t.Fatalf("catalog-required-verify run filter = %q, want unfiltered full package", cliappUnit.Run)
 	}
 	requiredUnits := []string{"catalog-required-inventory", "catalog-required-verify"}
+	releaseUnit, ok := policy.Units["hitl-releasee2e-full"]
+	if !ok || len(releaseUnit.Packages) != 1 || releaseUnit.Packages[0] != releasePackage || strings.TrimSpace(releaseUnit.Run) != "" || releaseUnit.BudgetClass != "full" {
+		t.Fatalf("hitl-releasee2e-full = %#v, want one unfiltered releasee2e owner with the full timing budget", releaseUnit)
+	}
 	planPackages := append([]string{"github.com/division-sh/swarm/internal/events"}, policy.SpecialPackages...)
 	model := testplanning.WeightModel{Version: 1, SourceRunID: "issue-2143-ci-owner-guard", Packages: map[string]float64{}}
 	for _, profileName := range []string{
@@ -279,6 +293,9 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 				t.Errorf("profile %s omits %s", profileName, unit)
 			}
 		}
+		if !containsString(profile.Units, "hitl-releasee2e-full") {
+			t.Errorf("profile %s omits hitl-releasee2e-full", profileName)
+		}
 		catalogUnit := "catalog-full"
 		if profileName == testplanning.ProfilePRCommon {
 			catalogUnit = "catalog-required-smoke"
@@ -290,24 +307,35 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 		if err != nil {
 			t.Fatalf("build %s plan: %v", profileName, err)
 		}
-		owners := 0
+		cliappOwners := 0
+		releaseOwners := 0
 		for _, unit := range plan.Units {
 			for _, pkg := range unit.Packages {
-				if pkg != cliappPackage {
-					continue
-				}
-				owners++
-				if unit.ID != "catalog-required-verify" || strings.TrimSpace(unit.Run) != "" {
-					t.Errorf("profile %s cliapp owner = %s run=%q, want catalog-required-verify unfiltered", profileName, unit.ID, unit.Run)
+				switch pkg {
+				case cliappPackage:
+					cliappOwners++
+					if unit.ID != "catalog-required-verify" || strings.TrimSpace(unit.Run) != "" {
+						t.Errorf("profile %s cliapp owner = %s run=%q, want catalog-required-verify unfiltered", profileName, unit.ID, unit.Run)
+					}
+				case releasePackage:
+					releaseOwners++
+					if unit.ID != "hitl-releasee2e-full" || strings.TrimSpace(unit.Run) != "" {
+						t.Errorf("profile %s releasee2e owner = %s run=%q, want hitl-releasee2e-full unfiltered", profileName, unit.ID, unit.Run)
+					}
 				}
 			}
 		}
-		if owners != 1 {
-			t.Errorf("profile %s cliapp owner count = %d, want 1", profileName, owners)
+		if cliappOwners != 1 {
+			t.Errorf("profile %s cliapp owner count = %d, want 1", profileName, cliappOwners)
+		}
+		if releaseOwners != 1 {
+			t.Errorf("profile %s releasee2e owner count = %d, want 1", profileName, releaseOwners)
 		}
 	}
 	for _, changedPath := range []string{
 		"internal/runtime/engine.go",
+		"internal/releasee2e/golden_agent_workload_test.go",
+		"internal/releasee2e/testdata/golden_agent_workload/package.yaml",
 		"internal/testcatalog/inventory.go",
 		"tests/tier1-primitives/test-advances-to/expected.yaml",
 		"platform-spec.yaml",
@@ -319,6 +347,13 @@ func TestCatalogRequiredCIProofSelection(t *testing.T) {
 		if profile != testplanning.ProfilePREscalated {
 			t.Errorf("changed path %s resolved profile %s, want %s", changedPath, profile, testplanning.ProfilePREscalated)
 		}
+	}
+	workflow, err := os.ReadFile(filepath.Join(catalogRepoRoot(t), ".github", "workflows", "ci.yml"))
+	if err != nil {
+		t.Fatalf("read CI workflow: %v", err)
+	}
+	if !strings.Contains(string(workflow), "SWARM_TEST_PROOF_PROFILE: ${{ needs.ci-plan.outputs.profile }}") {
+		t.Fatal("CI proof units do not receive the canonical planned profile")
 	}
 }
 
