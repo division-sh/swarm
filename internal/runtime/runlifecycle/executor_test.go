@@ -5,6 +5,7 @@ import (
 	"errors"
 	goruntime "runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -193,6 +194,97 @@ func TestExecutorRetirementJoinsAcceptedPersistenceAndRejectsNewAdmission(t *tes
 	}
 	if err := receiveValue(t, retired, "runtime occurrence retirement"); err != nil {
 		t.Fatalf("retire runtime occurrence: %v", err)
+	}
+}
+
+func TestExecutorRetirementRejectsZeroDelayRetryAfterActiveAttemptSettles(t *testing.T) {
+	candidate := executorTestCandidate(1)
+	executing := make(chan struct{})
+	release := make(chan struct{})
+	executions := make(chan int, 2)
+	var calls atomic.Int64
+	store := &executorTestStore{
+		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
+			return CandidatePage{Exhausted: true}, nil
+		},
+		execute: func(context.Context, Candidate, TerminalCatalog) (CompletionResult, error) {
+			call := int(calls.Add(1))
+			executions <- call
+			if call == 1 {
+				close(executing)
+				<-release
+				return CompletionResult{}, errors.New("retry after admitted attempt")
+			}
+			return CompletionResult{Outcome: OutcomeAwaitMutation}, nil
+		},
+	}
+	executor, occurrence := newExecutorTestSubject(t, store, ExecutorOptions{RetryPolicy: immediateRetryPolicy{}})
+	if err := executor.Start(context.Background()); err != nil {
+		t.Fatalf("start executor: %v", err)
+	}
+	if err := executor.SubmitCompletionCandidate(context.Background(), candidate); err != nil {
+		t.Fatalf("submit candidate: %v", err)
+	}
+	receiveSignal(t, executing, "candidate execution")
+	if got := receiveValue(t, executions, "first candidate execution"); got != 1 {
+		t.Fatalf("first candidate execution = %d, want 1", got)
+	}
+
+	if err := executor.Retire(context.Background()); err != nil {
+		t.Fatalf("retire executor: %v", err)
+	}
+	close(release)
+	retireRuntimeOccurrence(t, occurrence)
+	select {
+	case call := <-executions:
+		t.Fatalf("candidate execution %d started after retirement", call)
+	default:
+	}
+}
+
+func TestExecutorRetirementRejectsElapsedRearmAfterActiveAttemptSettles(t *testing.T) {
+	candidate := executorTestCandidate(1)
+	executing := make(chan struct{})
+	release := make(chan struct{})
+	executions := make(chan int, 2)
+	var calls atomic.Int64
+	store := &executorTestStore{
+		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
+			return CandidatePage{Exhausted: true}, nil
+		},
+		execute: func(_ context.Context, got Candidate, _ TerminalCatalog) (CompletionResult, error) {
+			call := int(calls.Add(1))
+			executions <- call
+			if call == 1 {
+				close(executing)
+				<-release
+				return CompletionResult{Outcome: OutcomeRearmAt, Candidate: got}, nil
+			}
+			return CompletionResult{Outcome: OutcomeAwaitMutation}, nil
+		},
+	}
+	clock := &executorTestClock{now: candidate.DueAt.Add(time.Second)}
+	executor, occurrence := newExecutorTestSubject(t, store, ExecutorOptions{Clock: clock})
+	if err := executor.Start(context.Background()); err != nil {
+		t.Fatalf("start executor: %v", err)
+	}
+	if err := executor.SubmitCompletionCandidate(context.Background(), candidate); err != nil {
+		t.Fatalf("submit candidate: %v", err)
+	}
+	receiveSignal(t, executing, "candidate execution")
+	if got := receiveValue(t, executions, "first candidate execution"); got != 1 {
+		t.Fatalf("first candidate execution = %d, want 1", got)
+	}
+
+	if err := executor.Retire(context.Background()); err != nil {
+		t.Fatalf("retire executor: %v", err)
+	}
+	close(release)
+	retireRuntimeOccurrence(t, occurrence)
+	select {
+	case call := <-executions:
+		t.Fatalf("candidate execution %d started after retirement", call)
+	default:
 	}
 }
 

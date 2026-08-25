@@ -1033,7 +1033,6 @@ func TestStartupRecoveryDecisionSurface_RoundTripsThroughObservabilityReader(t *
 		t.Fatalf("NewRuntime: %v", err)
 	}
 	installConformanceRuntimeStartupGrant(t, ctx, pg, rt)
-	t.Cleanup(func() { _ = rt.Shutdown() })
 
 	startErr := rt.Start(ctx)
 	if startErr == nil || !strings.Contains(startErr.Error(), "runtime.recovery_on_startup=false") {
@@ -1127,11 +1126,6 @@ func TestStartupRecoveryFailurePlatformEventSurface_PreservesRecoveryFailedWitho
 	if err := rt.Start(ctx); err == nil || !strings.Contains(err.Error(), "recover pipeline obligations before delivery enumeration") {
 		t.Fatalf("Start error = %v, want boot-fatal recovery exhaustion failure", err)
 	}
-	defer func() {
-		if err := rt.Shutdown(); err != nil {
-			t.Fatalf("Shutdown: %v", err)
-		}
-	}()
 
 	var resetCount int
 	if err := db.QueryRowContext(ctx, `
@@ -1419,11 +1413,6 @@ func TestStartupManagerReplayAftermathSurface_RoundTripsThroughObservabilityRead
 	if err := rt.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	defer func() {
-		if err := rt.Shutdown(); err != nil {
-			t.Fatalf("Shutdown: %v", err)
-		}
-	}()
 
 	reader := dashboardserver.NewObservabilityProjection(pg)
 	if reader == nil {

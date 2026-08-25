@@ -2105,6 +2105,7 @@ func TestStartServeRuntimeContextsRollsBackAllPreparedAuthorActivityCatalogs(t *
 		t.Run(backend.name, func(t *testing.T) {
 			stores := backend.open(t)
 			processWorkOwner := worklifetime.NewProcess()
+			runtimes := make([]*runtimepkg.Runtime, 0, 2)
 			bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier8-boot-verification/test-boot-success")
 			if _, err := initializeStateStores(context.Background(), stores, bundle); err != nil {
 				t.Fatalf("initializeStateStores: %v", err)
@@ -2132,8 +2133,17 @@ func TestStartServeRuntimeContextsRollsBackAllPreparedAuthorActivityCatalogs(t *
 				t.Fatalf("acquire rollback process capability: %v", err)
 			}
 			t.Cleanup(func() {
+				var closeErr error
+				for _, rt := range runtimes {
+					if err := rt.Shutdown(); err != nil {
+						closeErr = errors.Join(closeErr, fmt.Errorf("shutdown serve-context rollback runtime: %w", err))
+					}
+				}
 				if err := closeSelectedStoreTestProcess(processWorkOwner, capability); err != nil {
-					t.Errorf("close serve-context rollback generation: %v", err)
+					closeErr = errors.Join(closeErr, err)
+				}
+				if closeErr != nil {
+					t.Errorf("close serve-context rollback generation: %v", closeErr)
 				}
 			})
 			if _, err := capability.InstallCompleteSourceSet(context.Background(), runtimeagenttopology.SourceSetCommitRequest{
@@ -2156,6 +2166,7 @@ func TestStartServeRuntimeContextsRollsBackAllPreparedAuthorActivityCatalogs(t *
 				if err != nil {
 					t.Fatalf("NewRuntime(%s): %v", fact.BundleHash(), err)
 				}
+				runtimes = append(runtimes, rt)
 				_, bundleSource := fact.StorageValues()
 				grant, err := capability.IssueGenerationGrant(context.Background(), runtimestartupownership.GrantRequest{
 					BundleHash: fact.BundleHash(), BundleSource: bundleSource, RuntimeInstanceID: runtimeInstanceID,
@@ -2167,7 +2178,6 @@ func TestStartServeRuntimeContextsRollsBackAllPreparedAuthorActivityCatalogs(t *
 				if err := rt.InstallStartupGrant(grant); err != nil {
 					t.Fatalf("install rollback generation grant: %v", err)
 				}
-				t.Cleanup(func() { _ = rt.Shutdown() })
 				contexts = append(contexts, serveRuntimeBundleContext{runtime: rt, bundleSourceFact: fact})
 			}
 			contexts[0].runtime.CloseAdmission()

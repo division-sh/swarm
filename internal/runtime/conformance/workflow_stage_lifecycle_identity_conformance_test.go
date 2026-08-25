@@ -212,7 +212,6 @@ func newStageLifecycleIdentityRuntime(t *testing.T, selected any, module conform
 		t.Fatalf("prepare stage lifecycle author activity catalog: %v", err)
 	}
 	processCapability := installConformanceRuntimeStartupGrant(t, testAuthorActivityContext(context.Background()), selected, runtime)
-	t.Cleanup(func() { _ = runtime.Shutdown() })
 	return runtime, processCapability
 }
 

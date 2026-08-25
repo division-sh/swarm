@@ -433,6 +433,11 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 						t.Fatalf("NewRuntime: %v", runtimeErr)
 					}
 					capability, _ := installExternalRuntimeTestGeneration(t, currentCtx, selected, runtime)
+					t.Cleanup(func() {
+						if closeErr := closeExternalRuntimeTestGeneration(runtime, processOwner, capability); closeErr != nil {
+							t.Errorf("close startup-decision generation: %v", closeErr)
+						}
+					})
 					startErr := runtime.Start(currentCtx)
 					if test.wantDenied {
 						if startErr == nil {
@@ -460,9 +465,6 @@ func TestRuntimeStartRecoveryDisabledRejectsExecutableDeliveryInventoryParity(t 
 						if !reflect.DeepEqual(after, before) {
 							t.Fatalf("startup decision mutated delivery\nbefore: %#v\nafter:  %#v", before, after)
 						}
-					}
-					if closeErr := closeExternalRuntimeTestGeneration(runtime, processOwner, capability); closeErr != nil {
-						t.Fatalf("close startup-decision generation: %v", closeErr)
 					}
 				})
 			}
