@@ -227,7 +227,7 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	if runDeadline < 0 {
 		t.Fatalf("golden workload run deadline = %s, want a positive duration", runDeadline)
 	}
-	assertGoldenChildAgentUsesLogicalMapKeyOnly(t)
+	assertGoldenFixtureHasSingleMockOwner(t)
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("create release project: %v", err)
 	}
@@ -245,8 +245,8 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	writeReleaseFile(t, configPath, goldenRuntimeConfig(store, workspaceDir))
 	tokenFile := filepath.Join(root, "api-token")
 	writeReleaseFile(t, tokenFile, goldenAPIToken+"\n")
-	env := goldenProcessEnv(root, store.passwordEnv, options.processGOMAXPROCS)
-	assertGoldenProcessHasNoClaudeBinary(t, env)
+	env := goldenProcessEnv(t, root, store.passwordEnv, options.processGOMAXPROCS)
+	assertGoldenProcessHasNoExternalExecutables(t, env)
 	verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binaryPath, "verify", "--config", configPath, "--contracts", contracts, "--json")
 	if verify.err != nil {
 		t.Fatalf("golden release verify failed: %v\n%s", verify.err, verify.output)
@@ -294,9 +294,10 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	assertGoldenPublicProof(t, process.rpc, runID, restart, options.candidateIDs)
 }
 
-func assertGoldenChildAgentUsesLogicalMapKeyOnly(t *testing.T) {
+func assertGoldenFixtureHasSingleMockOwner(t *testing.T) {
 	t.Helper()
-	path := filepath.Join(releaseE2ERepoRoot(t), "internal", "releasee2e", "testdata", "golden_agent_workload", "flows", "candidate", "agents.yaml")
+	root := filepath.Join(releaseE2ERepoRoot(t), "internal", "releasee2e", "testdata", "golden_agent_workload")
+	path := filepath.Join(root, "flows", "candidate", "agents.yaml")
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read golden child agent declaration: %v", err)
@@ -312,6 +313,27 @@ func assertGoldenChildAgentUsesLogicalMapKeyOnly(t *testing.T) {
 	if _, redundant := child["id"]; redundant {
 		t.Fatal("golden child agent must not carry a redundant id; #2169 owns logical-key materialization")
 	}
+	for _, relativePath := range []string{
+		filepath.Join("mocks", "candidate.py"),
+		filepath.Join("mocks", "scout.py"),
+	} {
+		info, err := os.Stat(filepath.Join(root, relativePath))
+		if err != nil || !info.Mode().IsRegular() {
+			t.Fatalf("golden package-owned mock %s is not one regular file: info=%v err=%v", relativePath, info, err)
+		}
+	}
+	for _, relativePath := range []string{
+		filepath.Join("flows", "candidate", "package.yaml"),
+		filepath.Join("flows", "candidate", "mocks", "candidate.py"),
+		filepath.Join("flows", "scout", "package.yaml"),
+		filepath.Join("flows", "scout", "mocks", "scout.py"),
+	} {
+		if _, err := os.Stat(filepath.Join(root, relativePath)); err == nil {
+			t.Fatalf("obsolete nested golden mock owner returned at %s", relativePath)
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("inspect obsolete nested golden mock owner %s: %v", relativePath, err)
+		}
+	}
 }
 
 func goldenRuntimeConfig(store goldenStoreSelection, workspaceDir string) string {
@@ -326,7 +348,8 @@ func goldenRuntimeConfig(store goldenStoreSelection, workspaceDir string) string
 		store.configYAML
 }
 
-func goldenProcessEnv(root, postgresPassword string, processGOMAXPROCS int) []string {
+func goldenProcessEnv(t *testing.T, root, postgresPassword string, processGOMAXPROCS int) []string {
+	t.Helper()
 	blockedPrefixes := []string{"SWARM_", "ANTHROPIC_", "CLAUDE_", "OPENAI_", "PG"}
 	blockedExact := map[string]bool{"GOMAXPROCS": true, "HOME": true, "PATH": true}
 	env := make([]string, 0, len(os.Environ())+8)
@@ -344,12 +367,16 @@ func goldenProcessEnv(root, postgresPassword string, processGOMAXPROCS int) []st
 		}
 	}
 	home := filepath.Join(root, "home")
+	emptyBin := filepath.Join(root, "empty-bin")
+	if err := os.MkdirAll(emptyBin, 0o755); err != nil {
+		t.Fatalf("create golden empty executable path: %v", err)
+	}
 	env = append(env,
 		"HOME="+home,
 		"XDG_CONFIG_HOME="+filepath.Join(home, ".config"),
 		"XDG_CACHE_HOME="+filepath.Join(home, ".cache"),
 		"XDG_DATA_HOME="+filepath.Join(home, ".local", "share"),
-		"PATH=/usr/bin:/bin:/usr/sbin:/sbin",
+		"PATH="+emptyBin,
 		"NO_COLOR=1",
 	)
 	if postgresPassword != "" {
@@ -361,7 +388,7 @@ func goldenProcessEnv(root, postgresPassword string, processGOMAXPROCS int) []st
 	return env
 }
 
-func assertGoldenProcessHasNoClaudeBinary(t *testing.T, env []string) {
+func assertGoldenProcessHasNoExternalExecutables(t *testing.T, env []string) {
 	t.Helper()
 	path := ""
 	for _, entry := range env {
@@ -369,8 +396,18 @@ func assertGoldenProcessHasNoClaudeBinary(t *testing.T, env []string) {
 			path = value
 		}
 	}
+	if path == "" {
+		t.Fatal("golden process environment has no executable search path")
+	}
 	for _, dir := range filepath.SplitList(path) {
-		for _, name := range []string{"claude", "claude-code"} {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("read golden executable search path %s: %v", dir, err)
+		}
+		if len(entries) != 0 {
+			t.Fatalf("golden executable search path %s is not empty: %v", dir, entries)
+		}
+		for _, name := range []string{"claude", "claude-code", "docker", "podman"} {
 			if info, err := os.Stat(filepath.Join(dir, name)); err == nil && !info.IsDir() {
 				t.Fatalf("release PATH unexpectedly exposes %s at %s", name, dir)
 			}
@@ -1241,9 +1278,13 @@ func goldenCanonicalNodeID(key string) (string, error) {
 	return decoded[2], nil
 }
 
-func TestGoldenProcessEnvironmentDoesNotResolveClaude(t *testing.T) {
-	env := goldenProcessEnv(t.TempDir(), "", 0)
-	assertGoldenProcessHasNoClaudeBinary(t, env)
+func TestGoldenAgentWorkloadFixtureHasSingleMockOwner(t *testing.T) {
+	assertGoldenFixtureHasSingleMockOwner(t)
+}
+
+func TestGoldenProcessEnvironmentDoesNotResolveExternalExecutables(t *testing.T) {
+	env := goldenProcessEnv(t, t.TempDir(), "", 0)
+	assertGoldenProcessHasNoExternalExecutables(t, env)
 	for _, entry := range env {
 		if strings.HasPrefix(entry, "CLAUDE_CODE_OAUTH_TOKEN=") || strings.HasPrefix(entry, "ANTHROPIC_API_KEY=") {
 			t.Fatalf("golden process environment carries an LLM credential: %s", entry)
