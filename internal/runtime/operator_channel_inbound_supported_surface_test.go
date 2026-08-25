@@ -53,10 +53,11 @@ func TestInboundGatewaySignedTelegramOperatorChannelClaimSelectedStoreParity(t *
 func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorChannelInboundSelectedStore, db *sql.DB, sqlite bool, runID, entityID, flowInstance string) {
 	t.Helper()
 	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+	var inboundTarget runtimepkg.InboundTarget
 	if sqlite {
-		seedSQLiteInboundGatewayRuntime(t, ctx, selected.(*store.SQLiteRuntimeStore), runID, entityID, flowInstance, "operator-channel", "telegram", "telegram-secret", "operator-channel-observer")
+		inboundTarget = seedSQLiteInboundGatewayRuntime(t, ctx, selected.(*store.SQLiteRuntimeStore), runID, entityID, flowInstance, "operator-channel", "telegram", "telegram-secret", "operator-channel-observer")
 	} else {
-		seedPostgresInboundGatewayRuntime(t, ctx, db, selected.(*store.PostgresStore), runID, entityID, flowInstance, "operator-channel", "telegram", "telegram-secret", "operator-channel-observer")
+		inboundTarget = seedPostgresInboundGatewayRuntime(t, ctx, db, selected.(*store.PostgresStore), runID, entityID, flowInstance, "operator-channel", "telegram", "telegram-secret", "operator-channel-observer")
 	}
 
 	plan := compileEmbeddedTelegramOperatorChannelPlan(t)
@@ -145,7 +146,7 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 	}
 	for _, tc := range negativeBodies {
 		t.Run(tc.name, func(t *testing.T) {
-			response := publishOperatorChannelTelegramUpdate(t, gateway, bus, selected, ctx, runID, entityID, []byte(tc.body))
+			response := publishOperatorChannelTelegramUpdate(t, gateway, bus, inboundTarget, ctx, []byte(tc.body))
 			wantEvents := []string{"inbound.telegram"}
 			if tc.normalizedEvent != "" {
 				wantEvents = append(wantEvents, tc.normalizedEvent)
@@ -180,7 +181,7 @@ func runOperatorChannelInboundSupportedSurface(t *testing.T, selected operatorCh
 			}
 		}
 		validBody := []byte(fmt.Sprintf(`{"update_id":%d,"message":{"message_id":%d,"from":{"id":41,"first_name":"Operator"},"chat":{"id":%d,"type":%q},"text":%q}}`, 7310+index, 16+index, claim.conversation, claim.chatKind, operation.Challenge))
-		response := publishOperatorChannelTelegramUpdate(t, gateway, bus, selected, ctx, runID, entityID, validBody)
+		response := publishOperatorChannelTelegramUpdate(t, gateway, bus, inboundTarget, ctx, validBody)
 		if response.ClaimDisposition != operatorchannel.DispositionConsumedBinding || response.OperationID != operation.OperationID || len(response.EventIDs) != 0 || len(response.EventNames) != 0 {
 			t.Fatalf("%s claim response = %#v, want consumed operation with zero business events", claim.chatKind, response)
 		}
@@ -212,11 +213,11 @@ type operatorChannelInboundResponse struct {
 	OperationID      string   `json:"operator_channel_operation_id"`
 }
 
-func publishOperatorChannelTelegramUpdate(t *testing.T, gateway *runtimepkg.InboundGateway, bus *runtimebus.EventBus, selected runtimepkg.InboundPersistence, ctx context.Context, runID, entityID string, body []byte) operatorChannelInboundResponse {
+func publishOperatorChannelTelegramUpdate(t *testing.T, gateway *runtimepkg.InboundGateway, bus *runtimebus.EventBus, target runtimepkg.InboundTarget, ctx context.Context, body []byte) operatorChannelInboundResponse {
 	t.Helper()
 	recorder := httptest.NewRecorder()
 	request := newSignedTelegramRequest("/webhooks/operator-channel/telegram", "telegram-secret", body).WithContext(ctx)
-	handleBoundedProviderDelivery(t, gateway, bus, selected, recorder, request, runID, entityID, "telegram", "telegram-secret")
+	handleBoundedProviderDelivery(t, gateway, bus, target, recorder, request, "telegram", "telegram-secret")
 	if recorder.Code != http.StatusAccepted {
 		t.Fatalf("signed Telegram status = %d, want 202 body=%s", recorder.Code, recorder.Body.String())
 	}
