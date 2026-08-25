@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -21,7 +22,10 @@ import (
 
 const operatorChannelSupportedSurfaceToken = "operator-channel-supported-surface-token"
 
-var errInjectedOperatorChannelProofWrite = errors.New("injected operator channel proof write failure")
+var (
+	errInjectedOperatorChannelProofWrite      = errors.New("injected operator channel proof write failure")
+	errInjectedOperatorChannelProofCompletion = errors.New("injected operator channel proof completion failure")
+)
 
 type failOnceOperatorChannelProofStore struct {
 	delegate operatorchannel.ProofStore
@@ -46,6 +50,19 @@ func (s *failOnceOperatorChannelProofStore) Put(ctx context.Context, proof opera
 
 func (s *failOnceOperatorChannelProofStore) Revoke(ctx context.Context, identity operatorchannel.InterfaceIdentity, revision int64, now time.Time) (operatorchannel.VerifiedProof, error) {
 	return s.delegate.Revoke(ctx, identity, revision, now)
+}
+
+type failOnceOperatorChannelProofCompletionStore struct {
+	operatorchannel.Store
+	failed bool
+}
+
+func (s *failOnceOperatorChannelProofCompletionStore) CompleteProofResponsibility(ctx context.Context, operationID, proofID string, proofRevision int64, status operatorchannel.ProofStatus, failure string, now time.Time) error {
+	if !s.failed {
+		s.failed = true
+		return errInjectedOperatorChannelProofCompletion
+	}
+	return s.Store.CompleteProofResponsibility(ctx, operationID, proofID, proofRevision, status, failure, now)
 }
 
 func TestServedParityHarnessOperatorChannelLifecycle(t *testing.T) {
@@ -121,6 +138,118 @@ func TestOperatorChannelProofResponsibilityRecoversAfterCommittedBindingSelected
 			if err != nil || len(readback) != 1 || readback[0].Status != operatorchannel.BindingCurrent || readback[0].BindingRevision != 1 || readback[0].ProofRevision != 1 {
 				t.Fatalf("recovered readback = %#v, %v", readback, err)
 			}
+		})
+	}
+}
+
+func TestOperatorChannelProofResponsibilityReconcilesCommittedFileSelectedStoreParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := context.Background()
+			now := time.Date(2026, 8, 25, 11, 0, 0, 0, time.UTC)
+
+			t.Run("exact_file_converges_after_restart", func(t *testing.T) {
+				fixture := openOperatorChannelContractFixture(t, backend)
+				identity := operatorChannelContractIdentity("proof-file-first-recovery-generation")
+				proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
+				if err != nil {
+					t.Fatal(err)
+				}
+				completionStore := &failOnceOperatorChannelProofCompletionStore{Store: fixture.store}
+				mintingDeploymentID := uuid.NewString()
+				service, err := operatorchannel.NewService(completionStore, proofs, []operatorchannel.InterfaceIdentity{identity}, mintingDeploymentID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, _, err := service.Bootstrap(ctx, now); err != nil {
+					t.Fatal(err)
+				}
+				op, err := service.Begin(ctx, identity.Selector, operatorchannel.OperationConnect, 0, "proof-file-first-key", "proof-file-first-request", true, now)
+				if err != nil {
+					t.Fatal(err)
+				}
+				settlement, err := fixture.settle(ctx, operatorChannelContractClaim(op, operatorchannel.ConversationScopeShared, "account-file-first", "conversation-file-first", uuid.NewString()), now.Add(time.Second))
+				if err != nil {
+					t.Fatal(err)
+				}
+				confirmed, binding, err := service.Confirm(ctx, op.OperationID, settlement.Operation.Revision, true, now.Add(2*time.Second))
+				if !errors.Is(err, errInjectedOperatorChannelProofCompletion) || confirmed.ProofStatus != operatorchannel.ProofPending || binding.Revision != 1 {
+					t.Fatalf("file-first confirmation = op:%#v binding:%#v err:%v", confirmed, binding, err)
+				}
+				written, found, err := proofs.Get(ctx, identity)
+				if err != nil || !found || written.Revision != 1 || written.MintingDeploymentID != mintingDeploymentID {
+					t.Fatalf("written proof = %#v found=%v err=%v", written, found, err)
+				}
+
+				recovered, err := operatorchannel.NewService(completionStore, proofs, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, _, err := recovered.Bootstrap(ctx, now.Add(3*time.Second)); err != nil {
+					t.Fatalf("recover file-first responsibility: %v", err)
+				}
+				responsibilities, err := fixture.store.ListPendingProofResponsibilities(ctx)
+				if err != nil || len(responsibilities) != 0 {
+					t.Fatalf("remaining proof responsibilities = %#v, %v", responsibilities, err)
+				}
+				proofList, err := proofs.List(ctx)
+				if err != nil || len(proofList) != 1 || !reflect.DeepEqual(proofList[0], written) {
+					t.Fatalf("reconciled proofs = %#v, %v; want unchanged %#v", proofList, err, written)
+				}
+				readback, err := recovered.Readback(ctx)
+				if err != nil || len(readback) != 1 || readback[0].Status != operatorchannel.BindingCurrent || readback[0].ProofStatus != operatorchannel.ProofActive || readback[0].ProofRevision != written.Revision {
+					t.Fatalf("recovered readback = %#v, %v", readback, err)
+				}
+			})
+
+			t.Run("same_revision_mismatch_fails_closed", func(t *testing.T) {
+				fixture := openOperatorChannelContractFixture(t, backend)
+				identity := operatorChannelContractIdentity("proof-file-first-mismatch-generation")
+				proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
+				if err != nil {
+					t.Fatal(err)
+				}
+				failingProofs := &failOnceOperatorChannelProofStore{delegate: proofs}
+				service, err := operatorchannel.NewService(fixture.store, failingProofs, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, _, err := service.Bootstrap(ctx, now.Add(10*time.Minute)); err != nil {
+					t.Fatal(err)
+				}
+				op, err := service.Begin(ctx, identity.Selector, operatorchannel.OperationConnect, 0, "proof-mismatch-key", "proof-mismatch-request", true, now.Add(10*time.Minute))
+				if err != nil {
+					t.Fatal(err)
+				}
+				settlement, err := fixture.settle(ctx, operatorChannelContractClaim(op, operatorchannel.ConversationScopeDirect, "account-mismatch", "conversation-mismatch", uuid.NewString()), now.Add(11*time.Minute))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, _, err := service.Confirm(ctx, op.OperationID, settlement.Operation.Revision, true, now.Add(12*time.Minute)); !errors.Is(err, errInjectedOperatorChannelProofWrite) {
+					t.Fatalf("seed failed responsibility: %v", err)
+				}
+				responsibilities, err := fixture.store.ListPendingProofResponsibilities(ctx)
+				if err != nil || len(responsibilities) != 1 || responsibilities[0].Operation.OperationID != op.OperationID {
+					t.Fatalf("pending mismatch responsibility = %#v, %v", responsibilities, err)
+				}
+				conflicting := responsibilities[0].Proof
+				conflicting.MintingDeploymentID = uuid.NewString()
+				conflicting.ConversationRef = "different-conversation"
+				if err := proofs.Put(ctx, conflicting); err != nil {
+					t.Fatal(err)
+				}
+				recovered, err := operatorchannel.NewService(fixture.store, proofs, []operatorchannel.InterfaceIdentity{identity}, uuid.NewString())
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, _, err := recovered.Bootstrap(ctx, now.Add(13*time.Minute)); !errors.Is(err, operatorchannel.ErrRevisionConflict) {
+					t.Fatalf("mismatched proof recovery error = %v", err)
+				}
+				stored, found, err := proofs.Get(ctx, identity)
+				if err != nil || !found || !reflect.DeepEqual(stored, conflicting) {
+					t.Fatalf("mismatched proof changed = %#v found=%v err=%v", stored, found, err)
+				}
+			})
 		})
 	}
 }
