@@ -466,6 +466,62 @@ func TestBundleCatalogSelectedContractSourceLoaderLoadsPersistedSourceForRequest
 	}
 }
 
+func TestSelectedContractSourceLoadersRejectPresentZeroBeforePublication(t *testing.T) {
+	ctx := context.Background()
+	repoRoot := runForkExecutionRepoRoot(t)
+	fixtureRoot := filepath.Join(repoRoot, "tests", "tier12-runtime-fork", "test-selected-contract-fork-execution")
+	project := t.TempDir()
+	if err := os.CopyFS(project, os.DirFS(fixtureRoot)); err != nil {
+		t.Fatalf("copy selected-contract fixture: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "agents.yaml"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write present-zero selected-contract file: %v", err)
+	}
+	diskSelection := runfork.RunForkContractSelection{
+		Mode:          runfork.RunForkContractSelectionModeSelectedContracts,
+		ContractsRoot: project,
+	}
+	if _, err := (ContractBundleSourceLoader{RepoRoot: repoRoot}).LoadRunForkSelectedContractSource(ctx, diskSelection); err == nil ||
+		!strings.Contains(err.Error(), "agents.yaml declares nothing - delete the file (absent means empty)") {
+		t.Fatalf("disk selected-contract error = %v, want present-zero rejection", err)
+	}
+
+	bundle := loadRunForkExecutionFixtureBundle(t, filepath.Join("tests", "tier12-runtime-fork", "test-selected-contract-fork-execution"))
+	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
+	if err != nil {
+		t.Fatalf("BuildBundleCatalogProjection: %v", err)
+	}
+	catalogStore := &fakeBundleCatalogSelectedContractSourceStore{
+		record: runbundle.BundleCatalogRuntimeRecord{
+			BundleHash:  projection.BundleHash,
+			ContentYAML: bundleCatalogContentWithPresentZeroTypes(t, projection.ContentYAML),
+			DataBlob:    projection.DataBlob,
+		},
+	}
+	catalogSelection := runfork.RunForkContractSelection{
+		Mode:       runfork.RunForkContractSelectionModeBundleHash,
+		BundleHash: projection.BundleHash,
+	}
+	if _, err := (BundleCatalogSelectedContractSourceLoader{RepoRoot: repoRoot, Store: catalogStore}).LoadRunForkSelectedContractSource(ctx, catalogSelection); err == nil ||
+		!strings.Contains(err.Error(), "types.yaml declares nothing - delete the file (absent means empty)") {
+		t.Fatalf("catalog selected-contract error = %v, want present-zero rejection", err)
+	}
+	if catalogStore.requestedBundleHash != projection.BundleHash {
+		t.Fatalf("catalog selected-contract request hash = %q, want %q", catalogStore.requestedBundleHash, projection.BundleHash)
+	}
+}
+
+func bundleCatalogContentWithPresentZeroTypes(t *testing.T, contentYAML string) string {
+	t.Helper()
+	const marker = "canonical_inputs:\n"
+	const file = "  - label: \"bundle/types.yaml\"\n    content_base64: \"e30K\"\n    size_bytes: 3\n"
+	if !strings.Contains(contentYAML, marker) {
+		t.Fatal("bundle catalog content is missing canonical_inputs")
+	}
+	return strings.Replace(contentYAML, marker, file+marker, 1) +
+		"  - label: \"bundle/types.yaml\"\n    policy: yaml\n    size_bytes: 3\n"
+}
+
 func TestBundleCatalogSelectedContractSourceLoaderPreservesImportedPackGenerationForFork(t *testing.T) {
 	ctx := context.Background()
 	repoRoot := runForkExecutionRepoRoot(t)

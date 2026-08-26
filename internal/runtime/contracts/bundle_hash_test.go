@@ -614,6 +614,40 @@ func TestBundleCatalogRuntimeLoaderReconstructsConfigAndData(t *testing.T) {
 	}
 }
 
+func TestBundleCatalogRuntimeLoaderRejectsPresentZeroBeforePublishingSource(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	contractsRoot := filepath.Join(repo, "tests", "tier12-runtime-tools", "test-flow-data-access")
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, contractsRoot, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	}
+	projection, err := BuildBundleCatalogProjection(bundle)
+	if err != nil {
+		t.Fatalf("BuildBundleCatalogProjection: %v", err)
+	}
+	contentYAML := bundleCatalogContentWithPresentZeroAgents(t, projection.ContentYAML)
+
+	_, err = LoadBundleCatalogRuntimeSource(repo, BundleCatalogRuntimeLoadRequest{
+		BundleHash:  projection.BundleHash,
+		ContentYAML: contentYAML,
+		DataBlob:    projection.DataBlob,
+	})
+	if err == nil || !strings.Contains(err.Error(), "agents.yaml declares nothing - delete the file (absent means empty)") {
+		t.Fatalf("LoadBundleCatalogRuntimeSource error = %v, want present-zero rejection", err)
+	}
+}
+
+func bundleCatalogContentWithPresentZeroAgents(t *testing.T, contentYAML string) string {
+	t.Helper()
+	const marker = "canonical_inputs:\n"
+	const file = "  - label: \"bundle/agents.yaml\"\n    content_base64: \"e30K\"\n    size_bytes: 3\n"
+	if !strings.Contains(contentYAML, marker) {
+		t.Fatal("bundle catalog content is missing canonical_inputs")
+	}
+	return strings.Replace(contentYAML, marker, file+marker, 1) +
+		"  - label: \"bundle/agents.yaml\"\n    policy: yaml\n    size_bytes: 3\n"
+}
+
 func TestBundleCatalogRuntimeLoaderFailsClosedForMissingDataOrHashMismatch(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	contractsRoot := filepath.Join(repo, "tests", "tier12-runtime-tools", "test-flow-data-access")

@@ -69,6 +69,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
+	"github.com/division-sh/swarm/internal/runtime/runbundle"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
@@ -733,6 +734,56 @@ func TestLoadServeRuntimeBundleFromCatalogLoadsPersistedRuntimeSource(t *testing
 	if _, err := prepareLoadedServeBundleSource(ctx, persistence, loaded, true); err == nil || !strings.Contains(err.Error(), "--bundle-hash is mutually exclusive with --dev") {
 		t.Fatalf("prepareLoadedServeBundleSource dev error = %v", err)
 	}
+}
+
+type presentZeroServeRuntimeCatalog struct {
+	record runbundle.BundleCatalogRuntimeRecord
+	loads  int
+}
+
+func (c *presentZeroServeRuntimeCatalog) LoadBundleCatalogRuntimeRecord(context.Context, string) (runbundle.BundleCatalogRuntimeRecord, error) {
+	c.loads++
+	return c.record, nil
+}
+
+func TestLoadServeRuntimeBundleFromCatalogRejectsPresentZeroBeforePublication(t *testing.T) {
+	ctx := context.Background()
+	bundle := loadWorkflowValidationFixtureBundle(t, filepath.Join("tests", "tier12-runtime-tools", "test-flow-data-access"))
+	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
+	if err != nil {
+		t.Fatalf("BuildBundleCatalogProjection: %v", err)
+	}
+	catalog := &presentZeroServeRuntimeCatalog{record: runbundle.BundleCatalogRuntimeRecord{
+		BundleHash:  projection.BundleHash,
+		ContentYAML: bundleCatalogContentWithPresentZeroAgents(t, projection.ContentYAML),
+		DataBlob:    projection.DataBlob,
+	}}
+
+	_, err = loadServeRuntimeBundleFromCatalog(
+		ctx,
+		cliapp.RepoRoot(),
+		catalog,
+		projection.BundleHash,
+		runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot()),
+		testPlatformPackBaseGenerations(t),
+	)
+	if err == nil || !strings.Contains(err.Error(), "agents.yaml declares nothing - delete the file (absent means empty)") {
+		t.Fatalf("loadServeRuntimeBundleFromCatalog error = %v, want present-zero rejection", err)
+	}
+	if catalog.loads != 1 {
+		t.Fatalf("catalog loads = %d, want one read and no runtime publication", catalog.loads)
+	}
+}
+
+func bundleCatalogContentWithPresentZeroAgents(t *testing.T, contentYAML string) string {
+	t.Helper()
+	const marker = "canonical_inputs:\n"
+	const file = "  - label: \"bundle/agents.yaml\"\n    content_base64: \"e30K\"\n    size_bytes: 3\n"
+	if !strings.Contains(contentYAML, marker) {
+		t.Fatal("bundle catalog content is missing canonical_inputs")
+	}
+	return strings.Replace(contentYAML, marker, file+marker, 1) +
+		"  - label: \"bundle/agents.yaml\"\n    policy: yaml\n    size_bytes: 3\n"
 }
 
 func TestRunServeRuntimeDBLoadedUsesEmbeddedSpecBeforeCatalogRead(t *testing.T) {
