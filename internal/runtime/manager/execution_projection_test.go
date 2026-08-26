@@ -798,8 +798,8 @@ func TestExecutionProjectionRecoveryStartsPersistedRunningCell(t *testing.T) {
 	if !live {
 		t.Fatal("Run treated persisted phase as a live process and skipped activation")
 	}
-	if route.token.Generation != 5 {
-		t.Fatalf("recovered route generation = %d, want 5", route.token.Generation)
+	if route.token.Generation != 6 {
+		t.Fatalf("recovered route generation = %d, want 6 after pre-run recovery preparation", route.token.Generation)
 	}
 	bus.send(agentID, projectionRuntimeEvent("recovery-result", "test.old"))
 	select {

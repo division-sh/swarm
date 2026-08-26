@@ -1504,7 +1504,7 @@ func (am *AgentManager) replaceExecutionTargetConfigWithTopology(
 	currentPhase := cell.phase
 	currentRevision := cell.configRevision
 	currentTopology := cell.topology
-	currentLoopLive := execution.loopDone != nil && execution.routeToken.Valid()
+	currentLoopLive := am.lifecycle.executionRunnableCurrentOccurrenceLocked(cell)
 	am.lifecycle.mu.Unlock()
 	if expected != nil {
 		expectedRevision, revisionErr := lifecycleConfigRevision(PersistedAgent{Config: *expected})

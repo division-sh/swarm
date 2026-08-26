@@ -84,6 +84,11 @@ func beginCoordinatorRun(t *testing.T, coordinator *agentLifecycleCoordinator, c
 	return runCtx
 }
 
+func registerCoordinatorLifecycleCell(t *testing.T, coordinator *agentLifecycleCoordinator, ctx context.Context, rec PersistedAgent, persist bool) error {
+	t.Helper()
+	return coordinator.registerExecution(ctx, rec, persist, nil, testManagerSubscriptionAdmission(t, rec.Config))
+}
+
 type lifecyclePersistenceProbe struct {
 	mu         sync.Mutex
 	cell       lifecycleProbeCell
@@ -259,7 +264,7 @@ func TestLifecycleCoordinatorReplayDoesNotReplaceSuccessfulGeneration(t *testing
 	probe := newLifecyclePersistenceProbe()
 	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
 	rec := lifecycleTestPersistedAgent(t)
-	if err := coordinator.register(testAuthorActivityContext(context.Background()), rec, true); err != nil {
+	if err := registerCoordinatorLifecycleCell(t, coordinator, testAuthorActivityContext(context.Background()), rec, true); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	beginCoordinatorRun(t, coordinator, testAuthorActivityContext(context.Background()), AgentRunModeStandard)
@@ -290,7 +295,7 @@ func TestLifecycleCoordinatorReconfigureOperationIdentityTracksTransitionOccurre
 	probe := newLifecyclePersistenceProbe()
 	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
 	base := lifecycleTestPersistedAgent(t)
-	if err := coordinator.register(testAuthorActivityContext(context.Background()), base, true); err != nil {
+	if err := registerCoordinatorLifecycleCell(t, coordinator, testAuthorActivityContext(context.Background()), base, true); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	plan := runtimesessions.LifecycleMutationPlan{
@@ -338,7 +343,7 @@ func TestLifecycleCoordinatorReconfigureOperationIdentityIsStableBeforeCommit(t 
 	probe := newLifecyclePersistenceProbe()
 	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
 	base := lifecycleTestPersistedAgent(t)
-	if err := coordinator.register(testAuthorActivityContext(context.Background()), base, true); err != nil {
+	if err := registerCoordinatorLifecycleCell(t, coordinator, testAuthorActivityContext(context.Background()), base, true); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	target := base
@@ -365,7 +370,7 @@ func TestLifecycleCoordinatorReconfigureRetryAdoptsCommittedOccurrence(t *testin
 	probe := newLifecyclePersistenceProbe()
 	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
 	base := lifecycleTestPersistedAgent(t)
-	if err := coordinator.register(testAuthorActivityContext(context.Background()), base, true); err != nil {
+	if err := registerCoordinatorLifecycleCell(t, coordinator, testAuthorActivityContext(context.Background()), base, true); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	target := base
@@ -407,7 +412,7 @@ func TestLifecycleCoordinatorPersistenceFailureLeavesPriorGenerationOwned(t *tes
 	probe := newLifecyclePersistenceProbe()
 	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
 	rec := lifecycleTestPersistedAgent(t)
-	if err := coordinator.register(testAuthorActivityContext(context.Background()), rec, true); err != nil {
+	if err := registerCoordinatorLifecycleCell(t, coordinator, testAuthorActivityContext(context.Background()), rec, true); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	beginCoordinatorRun(t, coordinator, testAuthorActivityContext(context.Background()), AgentRunModeStandard)
@@ -441,7 +446,7 @@ func TestLifecycleCoordinatorSpawnPersistenceFailurePublishesNoCell(t *testing.T
 	probe.failNext = fmt.Errorf("injected spawn persistence failure")
 	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
 	rec := lifecycleTestPersistedAgent(t)
-	if err := coordinator.register(testAuthorActivityContext(context.Background()), rec, true); err == nil {
+	if err := registerCoordinatorLifecycleCell(t, coordinator, testAuthorActivityContext(context.Background()), rec, true); err == nil {
 		t.Fatal("register succeeded despite persistence failure")
 	}
 	_, exists := testLifecycleCell(t, coordinator, rec.Config.ID, "")
@@ -515,7 +520,7 @@ func TestLifecycleCoordinatorTeardownPersistenceFailureLeavesLoopOwned(t *testin
 	probe := newLifecyclePersistenceProbe()
 	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
 	rec := lifecycleTestPersistedAgent(t)
-	if err := coordinator.register(testAuthorActivityContext(context.Background()), rec, true); err != nil {
+	if err := registerCoordinatorLifecycleCell(t, coordinator, testAuthorActivityContext(context.Background()), rec, true); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	beginCoordinatorRun(t, coordinator, testAuthorActivityContext(context.Background()), AgentRunModeStandard)
@@ -555,7 +560,7 @@ func TestLifecycleCoordinatorSelfRetirementCommitsAfterAcceptedLoopSettles(t *te
 	probe := newLifecyclePersistenceProbe()
 	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
 	rec := lifecycleTestPersistedAgent(t)
-	if err := coordinator.register(testAuthorActivityContext(context.Background()), rec, true); err != nil {
+	if err := registerCoordinatorLifecycleCell(t, coordinator, testAuthorActivityContext(context.Background()), rec, true); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	beginCoordinatorRun(t, coordinator, managedExecutionTestContext(t, testAuthorActivityContext(context.Background())), AgentRunModeStandard)
@@ -763,7 +768,7 @@ func TestLifecycleCoordinatorRestartVersusTeardownNeverResurrectsLoop(t *testing
 	probe := newLifecyclePersistenceProbe()
 	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
 	rec := lifecycleTestPersistedAgent(t)
-	if err := coordinator.register(testAuthorActivityContext(context.Background()), rec, true); err != nil {
+	if err := registerCoordinatorLifecycleCell(t, coordinator, testAuthorActivityContext(context.Background()), rec, true); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	beginCoordinatorRun(t, coordinator, testAuthorActivityContext(context.Background()), AgentRunModeStandard)
@@ -822,7 +827,7 @@ func TestLifecycleCoordinatorSelfReleasePersistenceFailureFailsClosed(t *testing
 	probe := newLifecyclePersistenceProbe()
 	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
 	rec := lifecycleTestPersistedAgent(t)
-	if err := coordinator.register(testAuthorActivityContext(context.Background()), rec, true); err != nil {
+	if err := registerCoordinatorLifecycleCell(t, coordinator, testAuthorActivityContext(context.Background()), rec, true); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	beginCoordinatorRun(t, coordinator, testAuthorActivityContext(context.Background()), AgentRunModeStandard)
@@ -848,7 +853,7 @@ func TestLifecycleCoordinatorConcurrentReplacementsCommitAdjacentGenerations(t *
 	probe := newLifecyclePersistenceProbe()
 	coordinator := newAgentLifecycleCoordinator(probe, nil, nil, nil, nil)
 	rec := lifecycleTestPersistedAgent(t)
-	if err := coordinator.register(testAuthorActivityContext(context.Background()), rec, true); err != nil {
+	if err := registerCoordinatorLifecycleCell(t, coordinator, testAuthorActivityContext(context.Background()), rec, true); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	beginCoordinatorRun(t, coordinator, testAuthorActivityContext(context.Background()), AgentRunModeStandard)

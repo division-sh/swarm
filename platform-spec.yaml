@@ -4912,7 +4912,16 @@ engine:
         Generic hire cannot add an agent to that instance, and generic fire/reconfigure cannot mutate a declared agent;
         those operations fail at the selected-store mutation boundary unless they carry the exact current readiness-plan
         authority. Recovery adopts the exact persisted generation before any retire or replace transition; it cannot infer a
-        local generation, keep a removed process agent, or patch an old config.
+        local generation, keep a removed process agent, or patch an old config. Every expected executable declaration consumes
+        one phase-aware AgentManager handoff backed by `agent_lifecycle_authority.process_execution_projection` and
+        `prepared_execution_publication`. Before a Manager run occurrence, that handoff may produce only an exact
+        `registered`/`stopped` `prepared_before_run` projection; this is preparation, not process-liveness evidence, and both
+        Manager run modes must upgrade every such projection before startup can become public-ready. During a live Manager
+        occurrence, reconciliation completes only on `runnable_current_occurrence`; the durable cell is `running` in the
+        current run mode, the current projection is unfenced, and its exact lifecycle route and loop are installed. Config
+        presence, lifecycle registration, revision or topology equality, and a prior `topology_ready_at` are insufficient.
+        Lifecycle-only adoption for a removed or replaced declaration remains a closed non-executable variant used solely to
+        authorize exact retirement or replacement; it never builds provider execution, installs a route, or starts a loop.
       - 10. After a fresh active/paused eligibility check, the reconciler transactionally reconciles the exact initial timer
         declaration set for its admitted source revision, projects the committed active set, reloads eligibility, and only
         then records topology readiness. While the instance remains at its initial-entry stage, the selected-store operation
@@ -4993,8 +5002,11 @@ engine:
           terminal/inactive projections install, mark, arm, and emit nothing.
         process_visibility: Persisting `routing_rules` is not process publication. The process route table and EventBus
           recipient manifest MUST remain unaware of a dynamic route until the keyed readiness reconciler has verified every
-          declared agent. The selected mutation that creates or terminates the route may use its private exact topology
-          overlay to complete that mutation's own delivery planning; the overlay never escapes rollback and is not a second
+          declared agent. Verification consumes the phase-aware AgentManager handoff; preparation may satisfy pre-Run topology
+          assembly only while public startup remains fenced on Manager start, whereas reconciliation in a live Manager occurrence
+          requires exact current-occurrence running route/loop evidence. A stored topology completion or matching process config
+          cannot substitute for that ephemeral proof. The selected mutation that creates or terminates the route may use its
+          private exact topology overlay to complete that mutation's own delivery planning; the overlay never escapes rollback and is not a second
           global route owner. Any later route verification, timer-arm, creation-publication, or completion failure retires
           the process route while leaving the durable readiness row pending for the same owner.
         automatic_recovery: The existing generation-owned manager retry loop enumerates incomplete eligible readiness rows

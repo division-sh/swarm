@@ -1104,10 +1104,10 @@ func (am *AgentManager) reconcileDynamicFlowAgent(
 	if err != nil {
 		return err
 	}
-	existing, live := am.getAgentConfigIdentity(identity)
+	existing, present := am.getAgentConfigIdentity(identity)
 	actualRevision := ""
 	actualTopology := runtimeagenttopology.Admission{}
-	if live {
+	if present {
 		actualRevision, err = lifecycleConfigRevision(PersistedAgent{Config: existing})
 		if err != nil {
 			return err
@@ -1136,13 +1136,13 @@ func (am *AgentManager) reconcileDynamicFlowAgent(
 			return fmt.Errorf("agent %s persisted identity changed", identity.Description())
 		}
 	}
-	if live && persistedIdentity.IsZero() {
+	if present && persistedIdentity.IsZero() {
 		return fmt.Errorf("agent %s is process-ready without durable registration", identity.Description())
 	}
-	if live && (actualRevision != persistedRevision || !actualTopology.Equal(persisted.Topology)) {
+	if present && (actualRevision != persistedRevision || !actualTopology.Equal(persisted.Topology)) {
 		return fmt.Errorf("agent %s process and durable lifecycle facts disagree", identity.Description())
 	}
-	if !live && !persistedIdentity.IsZero() {
+	if !present && !persistedIdentity.IsZero() {
 		adopt := am.adoptPersistedAgentForLifecycle
 		if persistedRevision != expectedRevision || !persisted.Topology.Equal(rec.Topology) {
 			adopt = func(ctx context.Context, _ semanticview.Source, rec PersistedAgent) error {
@@ -1152,15 +1152,20 @@ func (am *AgentManager) reconcileDynamicFlowAgent(
 		if err := adopt(ctx, source, persisted); err != nil {
 			return fmt.Errorf("adopt persisted agent %s: %w", identity.Description(), err)
 		}
-		live = true
+		present = true
 		actualRevision = persistedRevision
 		actualTopology = persisted.Topology
 	}
-	if live {
+	if present {
 		if actualRevision == expectedRevision && actualTopology.Equal(rec.Topology) {
-			return nil
+			_, err := am.ensureExecutableAgentLifecycle(ctx, identity)
+			return err
 		}
-		return am.reconfigureAgentIdentityExactWithTopology(ctx, source, identity, rec.Config, topology)
+		if err := am.reconfigureAgentIdentityExactWithTopology(ctx, source, identity, rec.Config, topology); err != nil {
+			return err
+		}
+		_, err := am.ensureExecutableAgentLifecycle(ctx, identity)
+		return err
 	}
 	return am.spawnAgentInternalForSourceWithTopology(ctx, rec, true, source, topology)
 }
@@ -1215,22 +1220,22 @@ func (am *AgentManager) verifyDynamicFlowAgents(
 			}
 		}
 	}
-	liveByIdentity := make(map[runtimeagentidentity.Identity]models.AgentConfig, len(expected))
+	processByIdentity := make(map[runtimeagentidentity.Identity]models.AgentConfig, len(expected))
 	for _, cfg := range am.ListAgentConfigs() {
 		identity, err := cfg.ConcreteIdentity()
 		if err != nil {
 			return err
 		}
 		if identity.FlowInstance() == instancePath {
-			liveByIdentity[identity] = cfg
+			processByIdentity[identity] = cfg
 		}
 	}
-	if len(persistedByIdentity) != len(expectedByIdentity) || len(liveByIdentity) != len(expectedByIdentity) {
+	if len(persistedByIdentity) != len(expectedByIdentity) || len(processByIdentity) != len(expectedByIdentity) {
 		return fmt.Errorf(
 			"declared agent set mismatch: expected=%d persisted=%d process=%d",
 			len(expectedByIdentity),
 			len(persistedByIdentity),
-			len(liveByIdentity),
+			len(processByIdentity),
 		)
 	}
 	for _, rec := range expected {
@@ -1242,11 +1247,11 @@ func (am *AgentManager) verifyDynamicFlowAgents(
 		if err != nil {
 			return err
 		}
-		live, ok := liveByIdentity[identity]
+		process, ok := processByIdentity[identity]
 		if !ok {
 			return fmt.Errorf("declared agent %s is not process-ready", identity.Description())
 		}
-		liveRevision, err := lifecycleConfigRevision(PersistedAgent{Config: live})
+		processRevision, err := lifecycleConfigRevision(PersistedAgent{Config: process})
 		if err != nil {
 			return err
 		}
@@ -1258,16 +1263,16 @@ func (am *AgentManager) verifyDynamicFlowAgents(
 		if err != nil {
 			return err
 		}
-		state, ok := am.lifecycle.stateByIdentity(identity)
-		if !ok {
-			return fmt.Errorf("declared agent %s has no process lifecycle state", identity.Description())
+		readiness, err := am.lifecycle.executableReadinessByIdentity(identity)
+		if err != nil {
+			return fmt.Errorf("declared agent %s executable readiness: %w", identity.Description(), err)
 		}
-		if liveRevision != expectedRevision || storedRevision != expectedRevision ||
-			!state.Topology.Equal(topology) || !stored.Topology.Equal(topology) {
+		if processRevision != expectedRevision || storedRevision != expectedRevision ||
+			!readiness.State.Topology.Equal(topology) || !stored.Topology.Equal(topology) {
 			return fmt.Errorf(
-				"declared agent %s readiness facts mismatch: expected_revision=%s live_revision=%s stored_revision=%s live_topology_equal=%t stored_topology_equal=%t",
-				identity.Description(), expectedRevision, liveRevision, storedRevision,
-				state.Topology.Equal(topology), stored.Topology.Equal(topology),
+				"declared agent %s readiness facts mismatch: expected_revision=%s process_revision=%s stored_revision=%s process_topology_equal=%t stored_topology_equal=%t",
+				identity.Description(), expectedRevision, processRevision, storedRevision,
+				readiness.State.Topology.Equal(topology), stored.Topology.Equal(topology),
 			)
 		}
 	}

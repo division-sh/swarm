@@ -429,20 +429,59 @@ func (am *AgentManager) spawnAgentInternalForSourceWithTopology(
 	if _, exists := am.lifecycle.executionSnapshotByIdentity(identity); exists {
 		return fmt.Errorf("%w: %s", ErrAgentAlreadyExists, a.ID())
 	}
-	if err := am.lifecycle.registerExecutionWithTopology(ctx, rec, persist, a, subscriptionAdmission, *topology); err != nil {
-		return err
-	}
+	_, err = am.registerExecutableAgentLifecycle(ctx, rec, persist, a, subscriptionAdmission, *topology)
+	return err
+}
 
+func (am *AgentManager) registerExecutableAgentLifecycle(
+	ctx context.Context,
+	rec PersistedAgent,
+	persist bool,
+	agent Agent,
+	admission semanticview.FlowOwnedAgentSubscriptionAdmission,
+	topology runtimeagenttopology.Admission,
+) (executableAgentReadiness, error) {
+	identity, err := rec.Config.ConcreteIdentity()
+	if err != nil {
+		return executableAgentReadiness{}, err
+	}
+	if err := am.lifecycle.registerExecutionWithTopology(ctx, rec, persist, agent, admission, topology); err != nil {
+		return executableAgentReadiness{}, err
+	}
 	_ = am.projectLifecycleDiagnostics(context.WithoutCancel(ctx))
+	return am.ensureExecutableAgentLifecycle(ctx, identity)
+}
 
-	runCtx, _, isRunning := am.lifecycle.runSnapshot()
-	_ = persist
-	if isRunning {
-		if _, err := am.replaceExecutionIdentityConfigWithTopology(runCtx, identity, "start", "", nil, am.semanticSource, false, nil, nil); err != nil {
-			return err
-		}
+func (am *AgentManager) ensureExecutableAgentLifecycle(ctx context.Context, identity runtimeagentidentity.Identity) (executableAgentReadiness, error) {
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
+		return executableAgentReadiness{}, err
 	}
-	return nil
+	for attempt := 0; attempt < 2; attempt++ {
+		readiness, readinessErr := am.lifecycle.executableReadinessByIdentity(identity)
+		if readinessErr == nil {
+			return readiness, nil
+		}
+		runCtx, _, running := am.lifecycle.runSnapshot()
+		transitionCtx := ctx
+		if running {
+			transitionCtx = runCtx
+		}
+		if _, err := am.replaceExecutionIdentityConfigWithTopology(transitionCtx, identity, "start", "", nil, am.semanticSource, false, nil, nil); err != nil {
+			return executableAgentReadiness{}, err
+		}
+		readiness, err := am.lifecycle.executableReadinessByIdentity(identity)
+		if err == nil {
+			return readiness, nil
+		}
+		_, _, nowRunning := am.lifecycle.runSnapshot()
+		if running == nowRunning {
+			return executableAgentReadiness{}, err
+		}
+		// Manager.Run can cross either readiness observation. Retry once so
+		// preparation and start still consume the same replacement owner.
+	}
+	return executableAgentReadiness{}, errors.New("agent executable readiness did not converge with manager phase")
 }
 
 func bindRuntimeCreatedIdentity(cfg models.AgentConfig, owner string) (models.AgentConfig, error) {
@@ -471,28 +510,6 @@ func bindRuntimeCreatedIdentity(cfg models.AgentConfig, owner string) (models.Ag
 	return cfg, nil
 }
 
-func (am *AgentManager) publishCommittedAgent(ctx context.Context, rec PersistedAgent, a Agent, subscriptionAdmission semanticview.FlowOwnedAgentSubscriptionAdmission, result AgentLifecycleTransitionResult) error {
-	rec.LifecycleEpoch = result.RuntimeEpoch
-	rec.LifecycleGeneration = result.Generation
-	rec.LifecyclePhase = result.Phase
-	rec.LifecycleRunMode = result.RunMode
-	if err := am.lifecycle.registerExecution(ctx, rec, false, a, subscriptionAdmission); err != nil {
-		return err
-	}
-	_ = am.projectLifecycleDiagnostics(ctx)
-	runCtx, _, isRunning := am.lifecycle.runSnapshot()
-	if isRunning {
-		identity, err := rec.Config.ConcreteIdentity()
-		if err != nil {
-			return err
-		}
-		if _, err := am.replaceExecutionIdentityConfigWithTopology(runCtx, identity, "start", "", nil, am.semanticSource, false, nil, nil); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (am *AgentManager) adoptPersistedAgentForLifecycle(
 	ctx context.Context,
 	source semanticview.Source,
@@ -515,7 +532,8 @@ func (am *AgentManager) adoptPersistedAgentForLifecycle(
 	if err != nil {
 		return err
 	}
-	return am.lifecycle.registerExecution(ctx, rec, false, agent, subscriptionAdmission)
+	_, err = am.registerExecutableAgentLifecycle(ctx, rec, false, agent, subscriptionAdmission, rec.Topology)
+	return err
 }
 
 func (am *AgentManager) adoptPersistedAgentLifecycleOnly(ctx context.Context, rec PersistedAgent) error {
