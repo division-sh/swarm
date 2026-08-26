@@ -65,7 +65,7 @@ func DatabaseForTest(selected any) *sql.DB {
 
 // CommitPersistedEventDeliveryFixtureForTest is the named test-only operation
 // for adding executable routes to an event that is already persisted.
-func CommitPersistedEventDeliveryFixtureForTest(ctx context.Context, selected any, event events.Event, routes []events.DeliveryRoute) error {
+func CommitPersistedEventDeliveryFixtureForTest(ctx context.Context, selected any, eventID, runID string, routes []events.DeliveryRoute) error {
 	routes = events.NormalizeDeliveryRoutes(routes)
 	switch store := selected.(type) {
 	case *PostgresStore:
@@ -77,11 +77,11 @@ func CommitPersistedEventDeliveryFixtureForTest(ctx context.Context, selected an
 			return fmt.Errorf("construct postgres delivery fixture adapter: %w", err)
 		}
 		return store.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-			authority, err := persistedEventDeliveryFixtureAuthority(txctx, tx, event.RunID(), false)
+			authority, err := persistedEventDeliveryFixtureAuthority(txctx, tx, runID, false)
 			if err != nil {
 				return err
 			}
-			_, err = adapter.CommitInitial(txctx, tx, event.ID(), event.RunID(), routes, authority)
+			_, err = adapter.CommitInitial(txctx, tx, eventID, runID, routes, authority)
 			return err
 		})
 	case *SQLiteRuntimeStore:
@@ -93,11 +93,11 @@ func CommitPersistedEventDeliveryFixtureForTest(ctx context.Context, selected an
 			return fmt.Errorf("construct sqlite delivery fixture adapter: %w", err)
 		}
 		return store.backend.RunTransaction(ctx, "persisted event delivery fixture", func(txctx context.Context, tx *sql.Tx) error {
-			authority, err := persistedEventDeliveryFixtureAuthority(txctx, tx, event.RunID(), true)
+			authority, err := persistedEventDeliveryFixtureAuthority(txctx, tx, runID, true)
 			if err != nil {
 				return err
 			}
-			_, err = adapter.CommitInitial(txctx, tx, event.ID(), event.RunID(), routes, authority)
+			_, err = adapter.CommitInitial(txctx, tx, eventID, runID, routes, authority)
 			return err
 		})
 	default:

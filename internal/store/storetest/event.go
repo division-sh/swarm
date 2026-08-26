@@ -98,7 +98,7 @@ func CommitDeliveryObligationsForPersistedEvent(
 	routes []events.DeliveryRoute,
 ) {
 	t.Helper()
-	if err := commitPersistedEventDeliveryFixture(ctx, selectedStore, event, routes); err != nil {
+	if err := commitPersistedEventDeliveryFixture(ctx, selectedStore, event.ID(), event.RunID(), routes); err != nil {
 		t.Fatalf("commit persisted event delivery fixture: %v", err)
 	}
 }

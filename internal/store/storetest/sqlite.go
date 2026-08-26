@@ -130,8 +130,8 @@ func DatabaseForTest(selected any) *sql.DB {
 	return Database(selected)
 }
 
-func commitPersistedEventDeliveryFixture(ctx context.Context, selected any, event events.Event, routes []events.DeliveryRoute) error {
-	return private.CommitPersistedEventDeliveryFixtureForTest(ctx, selected, event, routes)
+func commitPersistedEventDeliveryFixture(ctx context.Context, selected any, eventID, runID string, routes []events.DeliveryRoute) error {
+	return private.CommitPersistedEventDeliveryFixtureForTest(ctx, selected, eventID, runID, routes)
 }
 
 func NewPostgresStoreForTest(db *sql.DB) *store.PostgresStore {
