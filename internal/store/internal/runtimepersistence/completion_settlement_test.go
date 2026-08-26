@@ -904,6 +904,36 @@ func TestCompletionAttemptHeartbeatFencesRecoveryPostgres(t *testing.T) {
 	proveCompletionAttemptHeartbeatFencesRecovery(t, newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false))
 }
 
+func TestDeliveryClaimRenewalPublishesCompleteRunForkRevisionSQLite(t *testing.T) {
+	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+	proveDeliveryClaimRenewalPublishesCompleteRunForkRevision(t, newCompletionSettlementFixture(t, store, store.backend.ConstructionHandle(), true))
+}
+
+func TestDeliveryClaimRenewalPublishesCompleteRunForkRevisionPostgres(t *testing.T) {
+	_, db, _ := testutil.StartPostgres(t)
+	proveDeliveryClaimRenewalPublishesCompleteRunForkRevision(t, newCompletionSettlementFixture(t, admitTestPostgresStore(t, db), db, false))
+}
+
+func proveDeliveryClaimRenewalPublishesCompleteRunForkRevision(t *testing.T, fixture completionSettlementFixture) {
+	t.Helper()
+	ctx := testAuthorActivityContext()
+	setProviderOriginLease(t, fixture, fixture.origin, time.Now().UTC().Add(30*time.Second))
+	before := providerOriginLease(t, fixture, fixture.origin)
+	publishCompleteRunForkRevisionBaseline(t, ctx, fixture.db, !fixture.sqlite, fixture.authority.Target.RunID)
+	if _, err := fixture.store.RenewClaim(ctx, fixture.origin); err != nil {
+		t.Fatalf("renew delivery claim: %v", err)
+	}
+	after := providerOriginLease(t, fixture, fixture.origin)
+	if !after.After(before) {
+		t.Fatalf("renewed delivery lease=%s, want after prior lease %s", after, before)
+	}
+	revisionStore, ok := fixture.store.(authorActivityReceiptStore)
+	if !ok {
+		t.Fatalf("delivery store %T cannot validate run-fork revision", fixture.store)
+	}
+	requireCompleteRunForkRevision(t, ctx, authorActivityReceiptFixture{store: revisionStore, db: fixture.db}, fixture.authority.Target.RunID)
+}
+
 func proveCompletionAttemptHeartbeatFencesRecovery(t *testing.T, fixture completionSettlementFixture) {
 	t.Helper()
 	ctx := runtimeeffects.WithLogicalOperationIdentity(fixture.context, "completion-heartbeat")
@@ -914,13 +944,26 @@ func proveCompletionAttemptHeartbeatFencesRecovery(t *testing.T, fixture complet
 	}
 	before := time.Now().UTC().Add(-time.Minute)
 	setCompletionAttemptLease(t, fixture, handle.Attempt().AttemptID, before)
-	if err := handle.Heartbeat(ctx, 2*time.Minute); err != nil {
+	setProviderOriginLease(t, fixture, fixture.origin, time.Now().UTC().Add(30*time.Second))
+	originLeaseBefore := providerOriginLease(t, fixture, fixture.origin)
+	publishCompleteRunForkRevisionBaseline(t, ctx, fixture.db, !fixture.sqlite, fixture.authority.Target.RunID)
+	heartbeatAt := time.Now().UTC()
+	if err := fixture.store.HeartbeatCompletionAttempt(ctx, handle.Attempt(), heartbeatAt, 2*time.Minute); err != nil {
 		t.Fatalf("heartbeat authorized completion: %v", err)
 	}
 	after := completionAttemptLease(t, fixture, handle.Attempt().AttemptID)
-	if !after.After(time.Now().UTC().Add(time.Minute)) {
+	if !after.After(heartbeatAt.Add(time.Minute)) {
 		t.Fatalf("heartbeat lease=%s, want more than one minute of live authority", after)
 	}
+	originLeaseAfter := providerOriginLease(t, fixture, fixture.origin)
+	if !originLeaseAfter.After(originLeaseBefore) {
+		t.Fatalf("provider origin lease=%s, want after prior lease %s", originLeaseAfter, originLeaseBefore)
+	}
+	revisionStore, ok := fixture.store.(authorActivityReceiptStore)
+	if !ok {
+		t.Fatalf("completion store %T cannot validate run-fork revision", fixture.store)
+	}
+	requireCompleteRunForkRevision(t, ctx, authorActivityReceiptFixture{store: revisionStore, db: fixture.db}, fixture.authority.Target.RunID)
 	if err := handle.MarkLaunched(ctx); err != nil {
 		t.Fatalf("launch heartbeat completion: %v", err)
 	}

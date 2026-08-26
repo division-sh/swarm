@@ -181,6 +181,18 @@ func assertRunForkRevisionContributionPaths(t *testing.T, root string) {
 			ProofTokens: []string{"fixture.store.TerminalizeRun", "requireCompleteRunForkRevision"},
 		},
 		{
+			Path: "internal/store/internal/backend/delivery/lifecycle.go", Writer: "renewClaimTx",
+			WriterTokens: []string{"effects *privaterunforkrevision.Effects", "RenewClaim", "effects.Add", "FamilyEventDeliveries"},
+			ProofPath:    "internal/store/internal/runtimepersistence/completion_settlement_test.go", Proof: "proveDeliveryClaimRenewalPublishesCompleteRunForkRevision",
+			ProofTokens: []string{"fixture.store.RenewClaim", "providerOriginLease", "requireCompleteRunForkRevision"},
+		},
+		{
+			Path: "internal/store/internal/backend/effectpersistence/runtime_external_effects.go", Writer: "HeartbeatCompletionAttempt",
+			WriterTokens: []string{"runRuntimeMutation", "effects *revisionEffects", "renewProviderOriginTx"},
+			ProofPath:    "internal/store/internal/runtimepersistence/completion_settlement_test.go", Proof: "proveCompletionAttemptHeartbeatFencesRecovery",
+			ProofTokens: []string{"HeartbeatCompletionAttempt", "providerOriginLease", "requireCompleteRunForkRevision"},
+		},
+		{
 			Path: "internal/store/internal/backend/pipelinepersistence/owner_operations.go", Writer: "TerminalizePipelineObligationTx",
 			WriterTokens: []string{"effects *revisionEffects", "terminalizeUnclaimedPipelineObligationTx", "declareEventRevisionFamily", "FamilyEventReceipts"},
 			ProofPath:    "internal/store/internal/runtimepersistence/active_run_quiescence_delivery_readback_test.go", Proof: "TestActiveRunDeliveryQuiescenceReadbackParity",

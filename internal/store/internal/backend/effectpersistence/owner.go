@@ -44,7 +44,7 @@ type schemaQueryer interface {
 
 type providerDrainDeliveryOwner interface {
 	ValidateProviderOriginTx(context.Context, *sql.Tx, runtimedelivery.Claim) error
-	RenewProviderOriginTx(context.Context, *sql.Tx, runtimedelivery.Claim, time.Duration) error
+	RenewProviderOriginTx(context.Context, *sql.Tx, *revisionEffects, runtimedelivery.Claim, time.Duration) error
 	SettleProviderOriginSuccessTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *revisionEffects, runtimedelivery.Claim, []string, time.Duration) error
 	SettleProviderOriginFailureTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *revisionEffects, runtimedelivery.Claim, runtimedelivery.Settlement) error
 	SettleProviderOriginRecoveryFailureTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *revisionEffects, runtimedelivery.Claim, runtimedelivery.Settlement) error
