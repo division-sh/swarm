@@ -22,6 +22,7 @@ type CredentialWriteResult struct {
 
 type CredentialWriter struct {
 	store     runtimecredentials.ReceiptWriter
+	deleter   runtimecredentials.ReceiptDeleter
 	snapshots *runtimecredentials.SnapshotOwner
 }
 
@@ -30,11 +31,28 @@ func NewCredentialWriter(store runtimecredentials.Store) (*CredentialWriter, err
 	if !ok || receiptWriter == nil {
 		return nil, fmt.Errorf("channel onboarding requires a receipt-capable credential store")
 	}
+	receiptDeleter, ok := store.(runtimecredentials.ReceiptDeleter)
+	if !ok || receiptDeleter == nil {
+		return nil, fmt.Errorf("channel onboarding requires receipt-fenced credential deletion")
+	}
 	snapshots, err := runtimecredentials.NewSnapshotOwner(store)
 	if err != nil {
 		return nil, err
 	}
-	return &CredentialWriter{store: receiptWriter, snapshots: snapshots}, nil
+	return &CredentialWriter{store: receiptWriter, deleter: receiptDeleter, snapshots: snapshots}, nil
+}
+
+func (w *CredentialWriter) Release(ctx context.Context, admission CredentialAdmission) (bool, error) {
+	if w == nil || w.deleter == nil {
+		return false, fmt.Errorf("channel onboarding credential writer is required")
+	}
+	if err := admission.Validate(); err != nil {
+		return false, err
+	}
+	if admission.Kind != CredentialAdmissionWritten {
+		return false, nil
+	}
+	return w.deleter.DeleteWithReceipt(ctx, admission.StoreKey, admission.Receipt, admission.Epoch)
 }
 
 func (w *CredentialWriter) Admit(ctx context.Context, req CredentialWriteRequest) (CredentialWriteResult, error) {

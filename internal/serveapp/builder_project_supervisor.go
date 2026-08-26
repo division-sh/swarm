@@ -414,13 +414,14 @@ func (s *runtimeProjectSupervisor) CloseProjectWithShutdownOptions(ctx context.C
 	s.mu.RUnlock()
 	if manager != nil && bundleHash != "" {
 		retiredContext, _ := manager.LookupBundleHash(bundleHash)
+		if retiredContext != nil && retiredHook != nil {
+			if retirementErr := retiredHook(context.WithoutCancel(ctx), *retiredContext); retirementErr != nil {
+				return s.CurrentProject(), errors.Join(finalizationErr, retirementErr)
+			}
+		}
 		result := manager.DeactivateBundleHashWithOptions(bundleHash, runtime.RuntimeContextCauseUnloaded, opts)
 		_ = s.detachCurrentRuntime()
-		var retirementErr error
-		if retiredContext != nil && retiredHook != nil {
-			retirementErr = retiredHook(context.WithoutCancel(ctx), *retiredContext)
-		}
-		return builderpkg.ProjectStatus{}, errors.Join(finalizationErr, result.ShutdownErr, retirementErr)
+		return builderpkg.ProjectStatus{}, errors.Join(finalizationErr, result.ShutdownErr)
 	}
 	oldRT := s.detachCurrentRuntime()
 

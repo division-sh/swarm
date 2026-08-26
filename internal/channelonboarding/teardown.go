@@ -151,6 +151,15 @@ type TeardownStore interface {
 	CompleteChannelTeardown(context.Context, CompleteTeardownRequest) (TeardownOperation, error)
 }
 
+type DestructiveStore interface {
+	TeardownStore
+	ListChannelOnboardingOperations(context.Context) ([]Operation, error)
+}
+
+type CredentialReleaser interface {
+	Release(context.Context, CredentialAdmission) (bool, error)
+}
+
 type DestructiveIdentityLifecycle interface {
 	Principal() (operatorchannel.Principal, error)
 	ResolveRetainedInterface(context.Context, string) (operatorchannel.InterfaceIdentity, error)
@@ -161,20 +170,21 @@ type DestructiveIdentityLifecycle interface {
 }
 
 type DestructiveService struct {
-	store       TeardownStore
+	store       DestructiveStore
 	identities  DestructiveIdentityLifecycle
+	credentials CredentialReleaser
 	activations ActivationRefresher
 	now         func() time.Time
 }
 
-func NewDestructiveService(store TeardownStore, identities DestructiveIdentityLifecycle, activations ActivationRefresher, now func() time.Time) (*DestructiveService, error) {
-	if store == nil || identities == nil || activations == nil {
-		return nil, fmt.Errorf("channel destructive lifecycle requires teardown store, identity, and activation owners")
+func NewDestructiveService(store DestructiveStore, identities DestructiveIdentityLifecycle, credentials CredentialReleaser, activations ActivationRefresher, now func() time.Time) (*DestructiveService, error) {
+	if store == nil || identities == nil || credentials == nil || activations == nil {
+		return nil, fmt.Errorf("channel destructive lifecycle requires teardown, identity, credential, and activation owners")
 	}
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
-	return &DestructiveService{store: store, identities: identities, activations: activations, now: now}, nil
+	return &DestructiveService{store: store, identities: identities, credentials: credentials, activations: activations, now: now}, nil
 }
 
 func (s *DestructiveService) Unbind(ctx context.Context, selector string, expectedRevision int64, requestKey, requestHash string) (operatorchannel.Operation, operatorchannel.Binding, error) {
@@ -377,7 +387,38 @@ func (s *DestructiveService) retireAuthority(ctx context.Context, op TeardownOpe
 	if err := s.activations.RefreshChannelActivations(context.WithoutCancel(ctx)); err != nil {
 		return op, err
 	}
+	if err := s.releaseScopedCredentials(context.WithoutCancel(ctx), op.Scope); err != nil {
+		return op, err
+	}
 	return op, nil
+}
+
+func (s *DestructiveService) releaseScopedCredentials(ctx context.Context, scope TeardownScope) error {
+	operations, err := s.store.ListChannelOnboardingOperations(ctx)
+	if err != nil {
+		return err
+	}
+	for _, operation := range operations {
+		if !teardownScopeMatchesOperation(scope, operation) {
+			continue
+		}
+		for _, admission := range operation.CredentialAdmissions {
+			if _, err := s.credentials.Release(ctx, admission); err != nil {
+				return fmt.Errorf("release channel credential %q: %w", admission.StoreKey, err)
+			}
+		}
+	}
+	return nil
+}
+
+func teardownScopeMatchesOperation(scope TeardownScope, operation Operation) bool {
+	scope = scope.normalized()
+	if scope.Interface.Validate() == nil {
+		return scope.Interface.Normalized() == operation.Interface.Normalized()
+	}
+	return scope.BundleHash == operation.Coordinate.BundleHash &&
+		scope.BundleSource == operation.Coordinate.BundleSource &&
+		scope.ContextPublicationGeneration == operation.Coordinate.ContextPublicationGeneration
 }
 
 func (s *DestructiveService) complete(ctx context.Context, teardownID string, succeeded bool, code, message string) (TeardownOperation, error) {

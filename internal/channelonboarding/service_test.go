@@ -2,6 +2,7 @@ package channelonboarding
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,6 +11,103 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/google/uuid"
 )
+
+func TestExpiredIdentityTerminalizesOnboardingAndReleasesWrittenCredentials(t *testing.T) {
+	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
+	catalog, err := NewCandidateCatalog([]Candidate{candidate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := NewCredentialWriter(credentialStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	written, err := credentials.Admit(context.Background(), CredentialWriteRequest{StoreKey: "channel.telegram.provider", Value: "token", Receipt: "operation/provider"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identityOperationID := uuid.NewString()
+	op := Operation{
+		OperationID: uuid.NewString(), RequestKeyHash: "expired-key", RequestHash: "expired-request", PrincipalID: "principal-a",
+		Verb: VerbConnect, Provider: candidate.Provider, Interface: candidate.Interface, Coordinate: candidate.Coordinate,
+		TargetSelector: candidate.Target.Selector, Posture: candidate.Posture, Ceremony: candidate.Ceremony,
+		Phase: PhaseAwaitingExternalIdentity, Revision: 3, SaveProof: true, CredentialReservations: credentialReservations(candidate),
+		CredentialAdmissions: []CredentialAdmission{{Role: candidate.ProviderCredentialRole, StoreKey: written.StoreKey, Kind: CredentialAdmissionWritten, Receipt: written.Receipt, Epoch: written.Epoch}},
+		IdentityOperationID:  identityOperationID, RequestedAt: now, UpdatedAt: now,
+	}
+	op.SlotKey = StartRequest{Provider: op.Provider, Interface: op.Interface, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector}.SlotKey()
+	store := &cancellationTestStore{op: op}
+	identities := &cancellationTestIdentities{operation: operatorchannel.Operation{OperationID: identityOperationID, State: operatorchannel.StateExpired}}
+	activations := &cancellationTestActivations{}
+	service, err := NewService(ServiceOptions{
+		Store: store, Identities: identities, Credentials: credentials,
+		Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: activations,
+		Confirmation: cancellationTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Retry(context.Background(), RetryInput{OperationID: op.OperationID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Operation.Phase != PhaseFailed || result.Operation.FailureCode != "identity_expired" {
+		t.Fatalf("expired result = %#v", result.Operation)
+	}
+	if _, found, err := credentialStore.Get(context.Background(), written.StoreKey); err != nil || found {
+		t.Fatalf("expired credential found=%v err=%v", found, err)
+	}
+	if activations.refreshes != 1 {
+		t.Fatalf("activation refreshes = %d, want 1", activations.refreshes)
+	}
+}
+
+func TestPermanentActivationFailureTerminalizesAndReleasesWrittenCredentials(t *testing.T) {
+	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
+	catalog, err := NewCandidateCatalog([]Candidate{candidate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := NewCredentialWriter(credentialStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &cancellationTestStore{}
+	activations := &cancellationTestActivations{err: NewTerminalActivationError("public_ingress_unavailable", errors.New("public ingress is disabled"))}
+	service, err := NewService(ServiceOptions{
+		Store: store, Identities: &cancellationTestIdentities{}, Credentials: credentials,
+		Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: activations,
+		Confirmation: cancellationTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Start(context.Background(), StartInput{Verb: VerbConnect, Selection: CandidateSelection{Provider: candidate.Provider}, ProviderCredential: "token", SaveProof: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Operation.Phase != PhaseFailed || result.Operation.FailureCode != "public_ingress_unavailable" {
+		t.Fatalf("activation result = %#v", result.Operation)
+	}
+	for _, admission := range result.Operation.CredentialAdmissions {
+		if admission.Kind != CredentialAdmissionWritten {
+			continue
+		}
+		if _, found, err := credentialStore.Get(context.Background(), admission.StoreKey); err != nil || found {
+			t.Fatalf("failed credential %q found=%v err=%v", admission.StoreKey, found, err)
+		}
+	}
+}
 
 func TestChannelOnboardingClientCancellationStopsNarrationNotOperation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -236,6 +334,10 @@ func (s *cancellationTestStore) AdvanceChannelOnboarding(ctx context.Context, re
 	if req.ConfirmationOperationID != "" {
 		s.op.ConfirmationOperationID = req.ConfirmationOperationID
 	}
+	if req.FailureCode != "" {
+		s.op.FailureCode = req.FailureCode
+		s.op.FailureMessage = req.FailureMessage
+	}
 	return s.op, nil
 }
 
@@ -351,13 +453,22 @@ func (i *cancellationTestIdentities) Readback(ctx context.Context) ([]operatorch
 	return nil, nil
 }
 
-type cancellationTestActivations struct{ sawCanceledContext bool }
+type cancellationTestActivations struct {
+	sawCanceledContext bool
+	refreshes          int
+	err                error
+}
 
 func (a *cancellationTestActivations) RefreshChannelActivations(ctx context.Context) error {
 	if ctx.Err() != nil {
 		a.sawCanceledContext = true
 	}
-	return nil
+	a.refreshes++
+	err := a.err
+	if _, terminal := AsTerminalActivationError(err); terminal {
+		a.err = nil
+	}
+	return err
 }
 
 type cancellationTestConfirmation struct{}

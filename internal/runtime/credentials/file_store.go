@@ -150,6 +150,35 @@ func (s *FileStore) Delete(_ context.Context, key string) error {
 	})
 }
 
+func (s *FileStore) DeleteWithReceipt(_ context.Context, key, receipt, epoch string) (bool, error) {
+	key = strings.TrimSpace(key)
+	receipt = strings.TrimSpace(receipt)
+	epoch = strings.TrimSpace(epoch)
+	if key == "" || receipt == "" || epoch == "" {
+		return false, fmt.Errorf("credential key, write receipt, and occurrence epoch are required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	deleted := false
+	err := s.withWriteLockLocked(func() error {
+		doc, err := s.loadLocked()
+		if err != nil {
+			return err
+		}
+		item, found := doc.Entries[key]
+		if !found || strings.TrimSpace(item.Receipt) != receipt || strings.TrimSpace(item.Epoch) != epoch {
+			return nil
+		}
+		delete(doc.Entries, key)
+		if err := s.saveLocked(doc); err != nil {
+			return err
+		}
+		deleted = true
+		return nil
+	})
+	return deleted, err
+}
+
 func (s *FileStore) Inspect(_ context.Context, key string) (Metadata, error) {
 	snapshot, err := s.Snapshot(context.Background(), key)
 	if err != nil {

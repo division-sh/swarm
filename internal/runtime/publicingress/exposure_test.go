@@ -210,6 +210,7 @@ func TestManagedGenerationFailureStopsChildBeforeRetry(t *testing.T) {
 	defer listener.Close()
 	controller.listener = listener
 	controller.nonce = "probe"
+	controller.waitRetry = func(context.Context, time.Duration) error { return nil }
 
 	if err := controller.establish(context.Background()); err == nil {
 		t.Fatal("establish succeeded despite failed public-route proof")
@@ -222,6 +223,42 @@ func TestManagedGenerationFailureStopsChildBeforeRetry(t *testing.T) {
 	case <-process.Done():
 	case <-time.After(time.Second):
 		t.Fatal("failed generation left its managed child running")
+	}
+}
+
+func TestManagedQuickTunnelRetriesPublicRouteWhileHostnamePropagates(t *testing.T) {
+	launcher := &fakeManagedLauncher{}
+	var routeAttempts atomic.Int64
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		switch request.URL.Path {
+		case "/ready":
+			return testHTTPResponse(http.StatusOK, ""), nil
+		case "/quicktunnel":
+			return testHTTPResponse(http.StatusOK, `{"hostname":"unit.trycloudflare.com"}`), nil
+		default:
+			if routeAttempts.Add(1) < 3 {
+				return nil, &net.DNSError{Err: "no such host", Name: "unit.trycloudflare.com", IsNotFound: true}
+			}
+			return testHTTPResponse(http.StatusNoContent, ""), nil
+		}
+	})}
+	controller, err := NewController(Options{Mode: ModeManagedQuickTunnel, Handler: http.NotFoundHandler(), HTTPClient: client, Launcher: launcher})
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller.waitRetry = func(context.Context, time.Duration) error { return nil }
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	controller.listener = listener
+	controller.nonce = "probe"
+	if err := controller.establish(context.Background()); err != nil {
+		t.Fatalf("establish after propagation retries: %v", err)
+	}
+	if routeAttempts.Load() != 3 || controller.Generation().ID == "" {
+		t.Fatalf("route attempts=%d generation=%#v", routeAttempts.Load(), controller.Generation())
 	}
 }
 

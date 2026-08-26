@@ -370,6 +370,7 @@ var cliIdentifierInputRegistry = []cliIdentifierInputRegistration{
 	{Command: "swarm channel rebind", Selector: "flag:bundle", Family: cliIdentifierFamilyBundle, Mode: cliIdentifierModeFullOnly, Safety: cliIdentifierSafetyMutating},
 	{Command: "swarm channel rebind", Selector: "flag:interface", Family: cliIdentifierFamilyOperatorChannel, Mode: cliIdentifierModeFullOnly, Safety: cliIdentifierSafetyMutating},
 	{Command: "swarm channel rebind", Selector: "flag:target", Family: cliIdentifierFamilyNone, Mode: cliIdentifierModeDifferent, ScopeRule: "exact package-qualified provider activation target", Safety: cliIdentifierSafetyMutating},
+	{Command: "swarm channel resume", Selector: "arg:operation-id", Family: cliIdentifierFamilyNone, Mode: cliIdentifierModeDifferent, ScopeRule: "exact durable channel onboarding operation identifier", Safety: cliIdentifierSafetyMutating},
 	{Command: "swarm channel unbind", Selector: "arg:interface", Family: cliIdentifierFamilyOperatorChannel, Mode: cliIdentifierModeFullOnly, Safety: cliIdentifierSafetyMutating},
 
 	{Command: "swarm <mutating>", Selector: "flag:idempotency-key", Family: cliIdentifierFamilyNone, Mode: cliIdentifierModeDifferent, ScopeRule: "caller-authored retry key"},

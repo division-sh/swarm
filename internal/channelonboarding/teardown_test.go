@@ -21,7 +21,7 @@ func TestConnectedChannelProofOptionalLifecycle(t *testing.T) {
 		binding:   operatorchannel.Binding{Interface: identity, Revision: 4, Status: operatorchannel.BindingCurrent},
 		proofErr:  operatorchannel.ErrProofUnavailable,
 	}
-	service, err := NewDestructiveService(store, identities, recordingActivationRefresher{calls: &calls}, testTeardownNow)
+	service, err := NewDestructiveService(store, identities, recordingCredentialReleaser{}, recordingActivationRefresher{calls: &calls}, testTeardownNow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestChannelProofRevokeRetiresProofLinkedActivationAuthority(t *testing.T) {
 			ProofID: "proof-a", Interface: identity, Revision: 3, Status: operatorchannel.ProofRevoked,
 		},
 	}
-	service, err := NewDestructiveService(store, identities, recordingActivationRefresher{calls: &calls}, testTeardownNow)
+	service, err := NewDestructiveService(store, identities, recordingCredentialReleaser{}, recordingActivationRefresher{calls: &calls}, testTeardownNow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestChannelUnbindRetiresConnectedActivationAuthorityBeforeIdentity(t *testi
 		principal: operatorchannel.Principal{ID: "principal-a"},
 		binding:   operatorchannel.Binding{Interface: identity, Revision: 4, Status: operatorchannel.BindingCurrent},
 	}
-	service, err := NewDestructiveService(store, identities, recordingActivationRefresher{calls: &calls}, testTeardownNow)
+	service, err := NewDestructiveService(store, identities, recordingCredentialReleaser{}, recordingActivationRefresher{calls: &calls}, testTeardownNow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,13 +90,40 @@ func TestChannelUnbindRetiresConnectedActivationAuthorityBeforeIdentity(t *testi
 	}
 }
 
+func TestChannelUnbindReleasesOnlyOperationOwnedCredentialsAfterAuthorityRetirement(t *testing.T) {
+	identity := testTeardownInterface()
+	calls := []string{}
+	store := &recordingTeardownStore{calls: &calls, onboarding: []Operation{{
+		OperationID: "operation-a", Interface: identity,
+		CredentialAdmissions: []CredentialAdmission{
+			{Role: "provider", StoreKey: "channel.telegram.provider", Kind: CredentialAdmissionWritten, Receipt: "receipt-a", Epoch: "epoch-a"},
+			{Role: "signing", StoreKey: "channel.telegram.signing", Kind: CredentialAdmissionObserved, Receipt: "observation-a", Epoch: "epoch-b"},
+		},
+	}}}
+	identities := &recordingDestructiveIdentities{
+		calls: &calls, identity: identity, principal: operatorchannel.Principal{ID: "principal-a"},
+		binding: operatorchannel.Binding{Interface: identity, Revision: 4, Status: operatorchannel.BindingCurrent},
+	}
+	service, err := NewDestructiveService(store, identities, recordingCredentialReleaser{calls: &calls}, recordingActivationRefresher{calls: &calls}, testTeardownNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.Unbind(context.Background(), identity.Selector, 4, "unbind-key", "unbind-hash"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"principal", "resolve", "current_binding", "reserve", "retire", "refresh", "release:channel.telegram.provider", "unbind", "get", "complete"}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("credential teardown order = %#v, want %#v", calls, want)
+	}
+}
+
 func TestChannelActivationRetiresAuthorityBeforeRuntimeContextUnload(t *testing.T) {
 	calls := []string{}
 	store := &recordingTeardownStore{calls: &calls}
 	identities := &recordingDestructiveIdentities{
 		calls: &calls, principal: operatorchannel.Principal{ID: "principal-a"},
 	}
-	service, err := NewDestructiveService(store, identities, recordingActivationRefresher{calls: &calls}, testTeardownNow)
+	service, err := NewDestructiveService(store, identities, recordingCredentialReleaser{}, recordingActivationRefresher{calls: &calls}, testTeardownNow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +147,7 @@ func TestChannelActivationRetiresAuthorityBeforeInterfaceRemoval(t *testing.T) {
 	identities := &recordingDestructiveIdentities{
 		calls: &calls, principal: operatorchannel.Principal{ID: "principal-a"},
 	}
-	service, err := NewDestructiveService(store, identities, recordingActivationRefresher{calls: &calls}, testTeardownNow)
+	service, err := NewDestructiveService(store, identities, recordingCredentialReleaser{}, recordingActivationRefresher{calls: &calls}, testTeardownNow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +175,7 @@ func TestChannelTeardownClientCancellationStopsNarrationNotResponsibility(t *tes
 		binding:   operatorchannel.Binding{Interface: identity, Revision: 4, Status: operatorchannel.BindingCurrent},
 	}
 	sawCanceledActivation := false
-	service, err := NewDestructiveService(store, identities, recordingActivationRefresher{calls: &calls, sawCanceledContext: &sawCanceledActivation}, testTeardownNow)
+	service, err := NewDestructiveService(store, identities, recordingCredentialReleaser{}, recordingActivationRefresher{calls: &calls, sawCanceledContext: &sawCanceledActivation}, testTeardownNow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +207,7 @@ func TestChannelProofRevokeRecoveryResumesAfterAuthorityRetirement(t *testing.T)
 		principal: operatorchannel.Principal{ID: "principal-a"}, proofErr: operatorchannel.ErrProofUnavailable,
 		revoked: operatorchannel.VerifiedProof{Interface: identity, Revision: 3, Status: operatorchannel.ProofRevoked},
 	}
-	service, err := NewDestructiveService(store, identities, recordingActivationRefresher{calls: &calls}, testTeardownNow)
+	service, err := NewDestructiveService(store, identities, recordingCredentialReleaser{}, recordingActivationRefresher{calls: &calls}, testTeardownNow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,6 +238,12 @@ type recordingTeardownStore struct {
 	operations         []TeardownOperation
 	cancelAfterReserve context.CancelFunc
 	sawCanceledContext bool
+	onboarding         []Operation
+}
+
+func (s *recordingTeardownStore) ListChannelOnboardingOperations(ctx context.Context) ([]Operation, error) {
+	s.observe(ctx)
+	return append([]Operation(nil), s.onboarding...), nil
 }
 
 func (s *recordingTeardownStore) record(call string) { *s.calls = append(*s.calls, call) }
@@ -345,6 +378,17 @@ func (i *recordingDestructiveIdentities) RevokeProof(ctx context.Context, _ stri
 type recordingActivationRefresher struct {
 	calls              *[]string
 	sawCanceledContext *bool
+}
+
+type recordingCredentialReleaser struct {
+	calls *[]string
+}
+
+func (r recordingCredentialReleaser) Release(_ context.Context, admission CredentialAdmission) (bool, error) {
+	if r.calls != nil && admission.Kind == CredentialAdmissionWritten {
+		*r.calls = append(*r.calls, "release:"+admission.StoreKey)
+	}
+	return admission.Kind == CredentialAdmissionWritten, nil
 }
 
 func (r recordingActivationRefresher) RefreshChannelActivations(ctx context.Context) error {

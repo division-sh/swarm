@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/cliapp"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
@@ -22,6 +23,22 @@ import (
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"gopkg.in/yaml.v3"
 )
+
+func TestServeLifecyclePresenterMasksProofReuseFallbackPresentation(t *testing.T) {
+	presenter := newServeLifecyclePresenter(cliapp.ServeOptions{})
+	presenter.recordOperatorChannelProofReuse(operatorchannel.Binding{
+		Interface:          operatorchannel.InterfaceIdentity{ChannelPackID: "provider.telegram.hitl_channel"},
+		ExternalAccountRef: "123456789",
+		ConversationScope:  operatorchannel.ConversationScopeDirect,
+	})
+	if len(presenter.operatorWarnings) != 1 {
+		t.Fatalf("operator warnings = %#v", presenter.operatorWarnings)
+	}
+	warning := presenter.operatorWarnings[0]
+	if strings.Contains(warning, "123456789") || !strings.Contains(warning, operatorchannel.MaskPresentation("123456789")) {
+		t.Fatalf("proof reuse warning did not use masked claimant fallback: %q", warning)
+	}
+}
 
 func TestServeLifecyclePresenterConciseReadinessUsesTypedFacts(t *testing.T) {
 	var out bytes.Buffer

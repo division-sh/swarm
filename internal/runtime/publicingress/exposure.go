@@ -73,6 +73,7 @@ type Controller struct {
 	done        chan struct{}
 	supervising bool
 	nonce       string
+	waitRetry   func(context.Context, time.Duration) error
 }
 
 func PreflightCloudflared(ctx context.Context, binary string) error {
@@ -116,7 +117,7 @@ func NewController(opts Options) (*Controller, error) {
 	if err := ValidateConfiguration(opts.Mode, opts.PublicOrigin, opts.ListenAddress); err != nil {
 		return nil, err
 	}
-	return &Controller{opts: opts, done: make(chan struct{})}, nil
+	return &Controller{opts: opts, done: make(chan struct{}), waitRetry: waitPublicRouteRetry}, nil
 }
 
 func ValidateConfiguration(mode, publicOrigin, listenAddress string) error {
@@ -217,7 +218,11 @@ func (c *Controller) establish(ctx context.Context) error {
 		}
 		publicOrigin = "https://" + hostname
 	}
-	if err := c.probePublicRoute(ctx, publicOrigin); err != nil {
+	probe := c.probePublicRoute
+	if c.opts.Mode == ModeManagedQuickTunnel {
+		probe = c.probeManagedPublicRoute
+	}
+	if err := probe(ctx, publicOrigin); err != nil {
 		return err
 	}
 	generation := Generation{ID: uuid.NewString(), Mode: c.opts.Mode, PublicOrigin: publicOrigin, ListenAddress: c.listener.Addr().String(), CreatedAt: c.opts.Now().UTC()}
@@ -382,6 +387,40 @@ func (c *Controller) probePublicRoute(ctx context.Context, origin string) error 
 		return fmt.Errorf("prove public webhook route: got HTTP %d, want 204", response.StatusCode)
 	}
 	return nil
+}
+
+func (c *Controller) probeManagedPublicRoute(ctx context.Context, origin string) error {
+	var last error
+	for attempt, backoff := range append([]time.Duration{0}, time.Second, 2*time.Second, 4*time.Second) {
+		if backoff > 0 {
+			wait := c.waitRetry
+			if wait == nil {
+				wait = waitPublicRouteRetry
+			}
+			if err := wait(ctx, backoff); err != nil {
+				return err
+			}
+		}
+		last = c.probePublicRoute(ctx, origin)
+		if last == nil {
+			return nil
+		}
+		if attempt == 3 {
+			break
+		}
+	}
+	return fmt.Errorf("prove managed public webhook route after bounded propagation retries: %w", last)
+}
+
+func waitPublicRouteRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (c *Controller) httpClient() *http.Client {

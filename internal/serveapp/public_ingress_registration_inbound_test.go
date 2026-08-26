@@ -109,6 +109,14 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	}
 	t.Cleanup(func() { _ = bus.ResetInMemoryState() })
 	gateway := runtimepkg.NewInboundGateway(bus, nil, nil, executionposture.Live, persistence)
+	emptyActivationPublication, err := channelonboarding.NewChannelActivationPublication(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activationOwner, err := runtimechannelactivation.NewOwner(emptyActivationPublication)
+	if err != nil {
+		t.Fatal(err)
+	}
 	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
 	if err != nil {
 		t.Fatalf("NewFileStore: %v", err)
@@ -137,7 +145,7 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	}
 	manager, err := runtimepkg.NewRuntimeContextManager(nil, completeServeTestPackContext(t, runtimepkg.BundleContext{
 		BundleSourceFact: mustServeTestEphemeralBundleSourceFact(bundleHash), Source: source,
-		Runtime: &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, InboundGateway: gateway}, WorkOwner: workOwner,
+		Runtime: &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, InboundGateway: gateway, ChannelActivations: activationOwner}, WorkOwner: workOwner,
 		StandingTargets: []runtimepkg.StandingTarget{target}, ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: installed,
 	}))
 	if err != nil {
@@ -145,11 +153,67 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	}
 	t.Cleanup(func() { _ = manager.QuiesceAllRuntimeContexts(context.Background()) })
 
+	channelPlan := loadSupportedTelegramChannelPlan(t)
+	learnedBinding, err := packs.NewOutboundBindingPlanWithRegistration(
+		"learned-telegram", channelPlan, "42", nil,
+		map[string]string{"telegram_bot_token": "bot", "webhook_signing_secret": "channel.generated.signing"},
+		"ingress:telegram-package:telegram-chat:telegram",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loadedContext := manager.LoadedContexts()[0]
+	activationPlanGeneration, err := learnedBinding.PlanGeneration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundleHash, bundleSource := loadedContext.BundleSourceFact.StorageValues()
+	learnedPublication, err := channelonboarding.NewChannelActivationPublication([]channelonboarding.CompiledActivation{{
+		Source: channelonboarding.ActivationSourceLearned,
+		Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
+			BundleHash: bundleHash, BundleSource: bundleSource, BundleIdentity: "telegram@1.0.0#activation-readiness",
+			PackInventoryGeneration: loadedContext.PackInventoryDigest, ContextPublicationGeneration: loadedContext.PublicationGeneration,
+			PlanGeneration: activationPlanGeneration, TargetGeneration: 1,
+		},
+		ActivationRevision: 1, Plan: learnedBinding,
+		CredentialAdmissions: []channelonboarding.CredentialAdmission{
+			{Role: "telegram_bot_token", StoreKey: "bot", Kind: channelonboarding.CredentialAdmissionObserved, Receipt: "bot-observation", Epoch: "bot-epoch"},
+			{Role: "webhook_signing_secret", StoreKey: "channel.generated.signing", Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "signing-write", Epoch: "signing-epoch"},
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.ReplaceChannelActivationsContext(context.Background(), bundleHash, loadedContext.PublicationGeneration, learnedPublication); err != nil {
+		t.Fatal(err)
+	}
+
 	registration := loadSupportedTelegramRegistration(t)
 	credentialSnapshots, err := runtimecredentials.NewSnapshotOwner(credentialStore)
 	if err != nil {
 		t.Fatalf("NewSnapshotOwner: %v", err)
 	}
+	assertIngressStatus := func(want packs.SubjectStatus) {
+		t.Helper()
+		subjects, projectionErr := manager.EvaluatedCapabilitySubjects(context.Background(), credentialSnapshots)
+		if projectionErr != nil {
+			t.Fatal(projectionErr)
+		}
+		for _, subject := range subjects {
+			if subject.Kind == packs.SubjectProviderTrigger && subject.Applicability == "effective" {
+				if subject.Status != want {
+					t.Fatalf("activation-backed ingress status = %s, want %s", subject.Status, want)
+				}
+				return
+			}
+		}
+		t.Fatal("effective ingress subject is missing")
+	}
+	assertIngressStatus(packs.StatusNotReady)
+	if err := credentialStore.Set(context.Background(), "channel.generated.signing", "generated-secret"); err != nil {
+		t.Fatal(err)
+	}
+	assertIngressStatus(packs.StatusReady)
 	effectsStore := &supportedRegistrationEffectStore{Harness: effecttest.New()}
 	transport := &supportedTelegramRegistrationTransport{}
 	readiness := runtimepublicingress.NewReadinessOwner(true)

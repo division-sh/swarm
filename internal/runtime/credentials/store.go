@@ -33,6 +33,13 @@ type ReceiptWriter interface {
 	AdmitWithReceipt(context.Context, string, string, string) (WriteReceipt, error)
 }
 
+// ReceiptDeleter removes only the exact writable occurrence created by a
+// receipt-bearing admission. A stale receipt can never delete its successor.
+type ReceiptDeleter interface {
+	Store
+	DeleteWithReceipt(context.Context, string, string, string) (bool, error)
+}
+
 type Inspector interface {
 	Store
 	Inspect(ctx context.Context, key string) (Metadata, error)

@@ -309,6 +309,34 @@ func credentialsRepoRootForTest(t *testing.T) string {
 	return filepath.Clean(filepath.Join(wd, "..", "..", ".."))
 }
 
+func TestFileStoreDeleteWithReceiptCannotDeleteSuccessorOccurrence(t *testing.T) {
+	store, err := NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	first, err := store.AdmitWithReceipt(ctx, "channel.telegram.provider", "first", "operation-a/provider")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.AdmitWithReceipt(ctx, "channel.telegram.provider", "second", "operation-b/provider")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted, err := store.DeleteWithReceipt(ctx, first.Key, first.Receipt, first.Epoch); err != nil || deleted {
+		t.Fatalf("stale delete = %v, %v; want false, nil", deleted, err)
+	}
+	if value, found, err := store.Get(ctx, second.Key); err != nil || !found || value != "second" {
+		t.Fatalf("successor after stale delete = %q, %v, %v", value, found, err)
+	}
+	if deleted, err := store.DeleteWithReceipt(ctx, second.Key, second.Receipt, second.Epoch); err != nil || !deleted {
+		t.Fatalf("current delete = %v, %v; want true, nil", deleted, err)
+	}
+	if _, found, err := store.Get(ctx, second.Key); err != nil || found {
+		t.Fatalf("credential after current delete found=%v err=%v", found, err)
+	}
+}
+
 func writeCredentialsFixtureFile(t *testing.T, path, contents string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

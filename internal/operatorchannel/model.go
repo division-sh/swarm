@@ -472,3 +472,10 @@ func MaskClaimantPresentation(presentation, externalAccountRef string) string {
 	}
 	return MaskPresentation(externalAccountRef)
 }
+
+func ProjectOperationReadback(operation Operation) Operation {
+	operation.AccountPresentation = MaskClaimantPresentation(operation.AccountPresentation, operation.ExternalAccountRef)
+	operation.ExternalAccountRef = MaskPresentation(operation.ExternalAccountRef)
+	operation.ConversationRef = MaskPresentation(operation.ConversationRef)
+	return operation
+}

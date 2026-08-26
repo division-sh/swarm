@@ -956,9 +956,18 @@ func (m *RuntimeContextManager) EvaluatedCapabilitySubjects(ctx context.Context,
 		if !runtimeContextEntryLoaded(entry) {
 			continue
 		}
+		activationSigning, err := currentChannelActivationSigningKeys(entry)
+		if err != nil {
+			m.mu.RUnlock()
+			return nil, err
+		}
 		for _, target := range entry.context.StandingTargets {
 			if m.standingServiceSuppressedLocked(target.ServiceID) {
 				continue
+			}
+			selector := fmt.Sprintf("ingress:%s:%s:%s", target.PackageKey, target.FlowID, target.Provider)
+			if signingKey, found := activationSigning[selector]; found {
+				target.SigningSecret = signingKey
 			}
 			subject, err := target.CapabilitySubject()
 			if err != nil {
@@ -981,7 +990,14 @@ func (m *RuntimeContextManager) EvaluatedCapabilitySubjects(ctx context.Context,
 		if !ok {
 			return nil, fmt.Errorf("effective provider trigger subject %q has no current standing target", subject.ID)
 		}
-		current, err := evaluateStandingIngressCapabilitySubject(ctx, target, subject, projection)
+		activationBackedSubject, err := target.CapabilitySubject()
+		if err != nil {
+			return nil, err
+		}
+		if activationBackedSubject.ID != subject.ID {
+			return nil, fmt.Errorf("activation-backed provider trigger subject changed identity from %q to %q", subject.ID, activationBackedSubject.ID)
+		}
+		current, err := evaluateStandingIngressCapabilitySubject(ctx, target, activationBackedSubject, projection)
 		if err != nil {
 			return nil, err
 		}
@@ -1001,6 +1017,58 @@ func (m *RuntimeContextManager) EvaluatedCapabilitySubjects(ctx context.Context,
 		return nil, fmt.Errorf("provider ingress capability projection became stale while credentials were observed")
 	}
 	return normalized, nil
+}
+
+func currentChannelActivationSigningKeys(entry *runtimeContextEntry) (map[string]string, error) {
+	out := map[string]string{}
+	if !runtimeContextEntryLoaded(entry) || entry.context == nil || entry.runtime == nil || entry.runtime.ChannelActivations == nil {
+		return out, nil
+	}
+	lease, available := entry.runtime.ChannelActivations.AcquirePresentation()
+	if !available {
+		return nil, fmt.Errorf("runtime context %s channel activation publication is unavailable", entry.context.BundleSourceFact.BundleHash())
+	}
+	defer lease.Release()
+	for _, activation := range lease.Activations() {
+		selector := strings.TrimSpace(activation.Plan.RegistrationTarget())
+		if selector == "" {
+			continue
+		}
+		if activation.Coordinate.BundleHash != entry.context.BundleSourceFact.BundleHash() ||
+			activation.Coordinate.ContextPublicationGeneration != entry.context.PublicationGeneration {
+			return nil, fmt.Errorf("channel activation registration target %q contradicts its runtime context", selector)
+		}
+		target, err := packs.ParseChannelRegistrationTarget(selector)
+		if err != nil {
+			return nil, err
+		}
+		matched := false
+		for _, standing := range entry.context.StandingTargets {
+			if standing.PackageKey == target.PackageKey && standing.FlowID == target.FlowID && standing.Provider == target.Provider {
+				if uint64(standing.Generation) != activation.Coordinate.TargetGeneration {
+					return nil, fmt.Errorf("channel activation registration target %q has a contradictory target generation", selector)
+				}
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return nil, fmt.Errorf("channel activation registration target %q has no exact standing target", selector)
+		}
+		registration, ok := activation.Plan.Registration()
+		if !ok {
+			return nil, fmt.Errorf("channel activation registration target %q has no compiled registration", selector)
+		}
+		signingKey := strings.TrimSpace(activation.Plan.CredentialStoreKeys()[registration.SigningCredential()])
+		if signingKey == "" {
+			return nil, fmt.Errorf("channel activation registration target %q has no signing credential key", selector)
+		}
+		if existing, duplicate := out[selector]; duplicate && existing != signingKey {
+			return nil, fmt.Errorf("channel activation registration target %q has contradictory signing credential keys", selector)
+		}
+		out[selector] = signingKey
+	}
+	return out, nil
 }
 
 func (m *RuntimeContextManager) duplicateLoadedIngressAliasLocked(incoming BundleContext) (BundleContext, BundleContext, string, bool) {

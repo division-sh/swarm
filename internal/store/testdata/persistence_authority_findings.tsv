@@ -413,6 +413,7 @@ typed-process-local	callback-type	typed	internal/runtime/pipeline/workflow_timer
 typed-process-local	callback-type	typed	internal/runtime/pipeline/workflow_timer_owner.go	WorkflowTimerLifecycle	field:cancel	context.CancelFunc
 typed-process-local	callback-type	typed	internal/runtime/pipeline/workflow_timer_owner.go	WorkflowTimerLifecycle	field:testAfterWakeupLoad	func()
 typed-process-local	callback-type	typed	internal/runtime/publicingress/exposure.go	Controller	field:cancel	context.CancelFunc
+typed-process-local	callback-type	typed	internal/runtime/publicingress/exposure.go	Controller	field:waitRetry	func(context.Context, time.Duration) error
 typed-process-local	callback-type	typed	internal/runtime/publicingress/exposure.go	Options	field:Now	func() time.Time
 typed-process-local	callback-type	typed	internal/runtime/publicingress/exposure.go	Options	field:OnFatal	func(error)
 typed-process-local	callback-type	typed	internal/runtime/publicingress/exposure.go	Options	field:OnGeneration	func(context.Context, github.com/division-sh/swarm/internal/runtime/publicingress.Generation) error
@@ -1977,6 +1978,7 @@ typed-process-local	interface-method	typed	internal/runtime/core/worklifetime/ev
 typed-process-local	interface-method	typed	internal/runtime/core/worklifetime/event_delivery.go	Occurrence	method:standingProjection	func() *github.com/division-sh/swarm/internal/runtime/core/worklifetime.StandingOccurrence
 typed-process-local	interface-method	typed	internal/runtime/core/worklifetime/event_delivery.go	Occurrence	method:workOccurrence	func()
 typed-process-local	interface-method	typed	internal/runtime/credentials/store.go	Inspector	method:Inspect	func(ctx context.Context, key string) (github.com/division-sh/swarm/internal/runtime/credentials.Metadata, error)
+typed-process-local	interface-method	typed	internal/runtime/credentials/store.go	ReceiptDeleter	method:DeleteWithReceipt	func(context.Context, string, string, string) (bool, error)
 typed-process-local	interface-method	typed	internal/runtime/credentials/store.go	ReceiptWriter	method:AdmitWithReceipt	func(context.Context, string, string, string) (github.com/division-sh/swarm/internal/runtime/credentials.WriteReceipt, error)
 typed-process-local	interface-method	typed	internal/runtime/credentials/store.go	Snapshotter	method:Snapshot	func(context.Context, string) (github.com/division-sh/swarm/internal/runtime/credentials.AtomicSnapshot, error)
 typed-process-local	interface-method	typed	internal/runtime/credentials/store.go	Store	method:Delete	func(ctx context.Context, key string) error
