@@ -175,6 +175,19 @@ func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) ListDynamicFlowRunti
 	return p.store.legacyListDynamicFlowRuntimeReadinessKeys(ctx)
 }
 
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) InspectDynamicFlowRuntimeStartupProjection(ctx context.Context, _ runtimecorrelation.BundleSourceFact) (DynamicFlowRuntimeStartupProjection, error) {
+	items, err := p.store.legacyListDynamicFlowRuntimeReadiness(ctx)
+	projection := DynamicFlowRuntimeStartupProjection{}
+	for _, item := range items {
+		if item.Pending() {
+			projection.Pending = append(projection.Pending, item)
+		} else {
+			projection.Completed = append(projection.Completed, item)
+		}
+	}
+	return projection, err
+}
+
 func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error {
 	return p.store.legacyMarkDynamicFlowRuntimeTopologyReady(ctx, plan, readyAt)
 }

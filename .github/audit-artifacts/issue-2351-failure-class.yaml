@@ -2,13 +2,14 @@ version: 1
 kind: pre_implementation_failure_class_artifact
 issue: 2351
 audit_base: 7dd0174cd8bf0c2d36765613105b28e24325087e
-phase: pre_implementation_gate_repair_cycle_3
-implementation_frozen: true
+phase: implementation_approved_gate_cycle_4
+implementation_frozen: false
 supersedes:
   adoption_only_audit: https://github.com/division-sh/swarm/issues/2351#issuecomment-5426766949
   cycle_1_gate: https://github.com/division-sh/swarm/issues/2351#issuecomment-5427779828
   cycle_2_audit: https://github.com/division-sh/swarm/issues/2351#issuecomment-5429037567
   cycle_3_gate: https://github.com/division-sh/swarm/issues/2351#issuecomment-5429122839
+  cycle_4_gate: https://github.com/division-sh/swarm/issues/2351#issuecomment-5429632239
 binding_context:
   issue: https://github.com/division-sh/swarm/issues/2351
   implementation_discovery: https://github.com/division-sh/swarm/issues/2351#issuecomment-5428191484
@@ -49,7 +50,7 @@ class_model:
   parent_failure_class: multi_phase_runtime_startup_readiness_and_lifecycle_ownership
   architecture_parent_issue: 2250
   broader_failure_class: process_required_topology_and_durable_work_replay_share_one_startup_switch
-  framing: broad_enough_after_gate_cycle_3_source_scope_repair
+  framing: broad_enough_after_gate_cycle_4_approval
   prior_framing: too_narrow_and_superseded
   entry_point_not_boundary: >-
     The skip at Runtime.Start and registered/stopped adoption are entry points. The
@@ -476,7 +477,8 @@ tracker:
 gate:
   independent_gate_required: true
   requested_outcome: approved
-  current_outcome: pending
+  current_outcome: approved
+  approval: https://github.com/division-sh/swarm/issues/2351#issuecomment-5429632239
   blocking_ambiguity: none_after_route_producer_census
   stop_conditions:
     - another_current_format_active_topology_producer_without_readiness

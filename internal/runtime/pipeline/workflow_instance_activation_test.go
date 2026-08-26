@@ -678,15 +678,6 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			if err != nil || len(items) != 0 {
 				t.Fatalf("terminal generation readiness: items=%#v err=%v", items, err)
 			}
-			keys, err := store.ListDynamicFlowRuntimeReadinessKeys(nextContext)
-			keyCounts := map[string]int{}
-			for _, key := range keys {
-				keyCounts[key.InstancePath]++
-			}
-			if err != nil || len(keys) != 3 || keyCounts[instance.StorageRef] != 2 || keyCounts[noAutoInstance.StorageRef] != 1 {
-				t.Fatalf("readiness route owners: keys=%#v err=%v", keys, err)
-			}
-
 			changed := plan
 			changed.Agents = append([]DynamicFlowRuntimeAgentExpectation(nil), plan.Agents...)
 			changed.Agents[0].ConfigRevision = strings.Repeat("c", 64)

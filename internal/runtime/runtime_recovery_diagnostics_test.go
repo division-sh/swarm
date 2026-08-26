@@ -64,6 +64,10 @@ func (startupRecoveryWorkflowOwner) ListDynamicFlowRuntimeReadinessKeys(context.
 	return nil, nil
 }
 
+func (startupRecoveryWorkflowOwner) InspectDynamicFlowRuntimeStartupProjection(context.Context, runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeStartupProjection, error) {
+	return runtimepipeline.DynamicFlowRuntimeStartupProjection{}, nil
+}
+
 func (startupRecoveryWorkflowOwner) ListWorkflowTimerActivations(context.Context, string, string, bool) ([]runtimepipeline.WorkflowTimerActivation, error) {
 	return nil, nil
 }
@@ -435,6 +439,19 @@ func (s *startupReadinessFinalizationStore) ListDynamicFlowRuntimeReadinessKeys(
 		})
 	}
 	return keys, nil
+}
+
+func (s *startupReadinessFinalizationStore) InspectDynamicFlowRuntimeStartupProjection(ctx context.Context, _ runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeStartupProjection, error) {
+	items, err := s.ListDynamicFlowRuntimeReadiness(ctx)
+	projection := runtimepipeline.DynamicFlowRuntimeStartupProjection{}
+	for _, item := range items {
+		if item.Pending() {
+			projection.Pending = append(projection.Pending, item)
+		} else {
+			projection.Completed = append(projection.Completed, item)
+		}
+	}
+	return projection, err
 }
 
 func (*startupReadinessFinalizationStore) MarkDynamicFlowRuntimeTopologyReady(

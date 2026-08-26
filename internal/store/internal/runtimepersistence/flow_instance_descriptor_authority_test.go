@@ -29,6 +29,84 @@ type flowInstanceDescriptorAuthorityStore interface {
 	runtimebus.ActiveFlowInstanceDescriptorLister
 }
 
+type dynamicFlowStartupProjectionStore interface {
+	InspectDynamicFlowRuntimeStartupProjection(context.Context, runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeStartupProjection, error)
+}
+
+func TestDynamicFlowRuntimeStartupProjectionScopesInSQLBothStores(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		open func(*testing.T) (dynamicFlowStartupProjectionStore, *sql.DB, bool)
+	}{
+		{"postgres", func(t *testing.T) (dynamicFlowStartupProjectionStore, *sql.DB, bool) {
+			_, db, cleanup := testutil.StartPostgres(t)
+			t.Cleanup(cleanup)
+			return storetest.AdmitPostgresRuntimeStore(t, db), db, false
+		}},
+		{"sqlite", func(t *testing.T) (dynamicFlowStartupProjectionStore, *sql.DB, bool) {
+			store := storetest.StartSQLiteRuntimeStore(t)
+			return store, storetest.Database(store), true
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store, db, sqlite := tc.open(t)
+			sourceA := mustExternalStoreTestBundleSourceFact()
+			hashA, kindA := sourceA.StorageValues()
+			hashB := "bundle-v1:sha256:" + strings.Repeat("b", 64)
+			sourceB, err := runtimecorrelation.NewEphemeralBundleSourceFact(hashB)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, kindB := sourceB.StorageValues()
+			runA, runB := uuid.NewString(), uuid.NewString()
+			ctx := testAuthorActivityContext()
+			fixtureA := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runA, BundleHash: hashA, BundleSource: kindA}
+			fixtureB := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runB, BundleHash: hashB, BundleSource: kindB}
+			if sqlite {
+				runlifecyclefixture.RequireSQLite(t, ctx, db, fixtureA)
+				runlifecyclefixture.RequireSQLite(t, ctx, db, fixtureB)
+			} else {
+				runlifecyclefixture.RequirePostgres(t, ctx, db, fixtureA)
+				runlifecyclefixture.RequirePostgres(t, ctx, db, fixtureB)
+			}
+			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runA, uuid.NewString(), "account/a", hashA, kindA)
+			seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runB, uuid.NewString(), "account/b", hashB, kindB)
+			query := `UPDATE flow_instance_runtime_readiness SET topology_ready_at = ? WHERE run_id = ? AND instance_id = ?`
+			args := []any{time.Now().UTC(), runA, "account/a"}
+			if !sqlite {
+				query = `UPDATE flow_instance_runtime_readiness SET topology_ready_at = $1 WHERE run_id = $2::uuid AND instance_id = $3`
+			}
+			if _, err := db.ExecContext(ctx, query, args...); err != nil {
+				t.Fatal(err)
+			}
+			projection, err := store.InspectDynamicFlowRuntimeStartupProjection(ctx, sourceA)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(projection.Completed) != 1 || projection.Completed[0].InstancePath != "account/a" || len(projection.Pending) != 0 {
+				t.Fatalf("source A projection = %#v", projection)
+			}
+			deleteQuery := `DELETE FROM flow_instance_runtime_readiness WHERE run_id = ? AND instance_id = ?`
+			routeQuery := `INSERT INTO routing_rules (event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow, is_materialized, status, created_at) VALUES (?, 'node', 'receiver', ?, 'account', TRUE, 'active', ?)`
+			deleteArgs := []any{runB, "account/b"}
+			routeArgs := []any{"account/b/event", "account/b", time.Now().UTC()}
+			if !sqlite {
+				deleteQuery = `DELETE FROM flow_instance_runtime_readiness WHERE run_id = $1::uuid AND instance_id = $2`
+				routeQuery = `INSERT INTO routing_rules (event_pattern, subscriber_type, subscriber_id, flow_instance, source_flow, is_materialized, status, created_at) VALUES ($1, 'node', 'receiver', $2, 'account', TRUE, 'active', $3)`
+			}
+			if _, err := db.ExecContext(ctx, deleteQuery, deleteArgs...); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.ExecContext(ctx, routeQuery, routeArgs...); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.InspectDynamicFlowRuntimeStartupProjection(ctx, sourceB); err == nil || !strings.Contains(err.Error(), "no dynamic runtime readiness owner") {
+				t.Fatalf("invalid source-owned route error = %v", err)
+			}
+		})
+	}
+}
+
 func TestActiveFlowInstanceDescriptorAuthorityScopesCensusToExactRunBothStores(t *testing.T) {
 	type backendCase struct {
 		name  string

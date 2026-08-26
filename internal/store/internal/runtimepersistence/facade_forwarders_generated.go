@@ -444,6 +444,10 @@ func (s *PostgresStore) InspectDeliveryRecovery(ctx context.Context, source corr
 	return s.deliveryPostgresOwner.InspectDeliveryRecovery(ctx, source)
 }
 
+func (s *PostgresStore) InspectDynamicFlowRuntimeStartupProjection(ctx context.Context, source correlation.BundleSourceFact) (pipeline.DynamicFlowRuntimeStartupProjection, error) {
+	return s.pipelinePostgresOwner.InspectDynamicFlowRuntimeStartupProjection(ctx, source)
+}
+
 func (s *PostgresStore) IsExternalEffectAuthorityCurrent(ctx context.Context, authority effects.Authority) (bool, error) {
 	return s.effectPostgresOwner.IsExternalEffectAuthorityCurrent(ctx, authority)
 }
@@ -502,10 +506,6 @@ func (s *PostgresStore) ListDurableAgentLifecycleStates(ctx context.Context) ([]
 
 func (s *PostgresStore) ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]pipeline.DynamicFlowRuntimeReadiness, error) {
 	return s.pipelinePostgresOwner.ListDynamicFlowRuntimeReadiness(ctx)
-}
-
-func (s *PostgresStore) ListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]pipeline.DynamicFlowRuntimeReadinessKey, error) {
-	return s.pipelinePostgresOwner.ListDynamicFlowRuntimeReadinessKeys(ctx)
 }
 
 func (s *PostgresStore) ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error) {
@@ -1580,6 +1580,10 @@ func (s *SQLiteRuntimeStore) InspectDeliveryRecovery(ctx context.Context, source
 	return s.deliverySQLiteOwner.InspectDeliveryRecovery(ctx, source)
 }
 
+func (s *SQLiteRuntimeStore) InspectDynamicFlowRuntimeStartupProjection(ctx context.Context, source correlation.BundleSourceFact) (pipeline.DynamicFlowRuntimeStartupProjection, error) {
+	return s.pipelineSQLiteOwner.InspectDynamicFlowRuntimeStartupProjection(ctx, source)
+}
+
 func (s *SQLiteRuntimeStore) IsExternalEffectAuthorityCurrent(ctx context.Context, authority effects.Authority) (bool, error) {
 	return s.effectSQLiteOwner.IsExternalEffectAuthorityCurrent(ctx, authority)
 }
@@ -1638,10 +1642,6 @@ func (s *SQLiteRuntimeStore) ListDurableAgentLifecycleStates(ctx context.Context
 
 func (s *SQLiteRuntimeStore) ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]pipeline.DynamicFlowRuntimeReadiness, error) {
 	return s.pipelineSQLiteOwner.ListDynamicFlowRuntimeReadiness(ctx)
-}
-
-func (s *SQLiteRuntimeStore) ListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]pipeline.DynamicFlowRuntimeReadinessKey, error) {
-	return s.pipelineSQLiteOwner.ListDynamicFlowRuntimeReadinessKeys(ctx)
 }
 
 func (s *SQLiteRuntimeStore) ListFlowInstanceRouteRecords(ctx context.Context, identity flowidentity.Route) ([]bus.FlowInstanceRouteRecord, error) {

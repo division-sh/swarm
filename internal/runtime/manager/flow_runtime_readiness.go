@@ -69,6 +69,7 @@ type dynamicFlowRuntimeReadinessAdmission struct {
 	planCoordinate  string
 	source          dynamicFlowRuntimeReadinessSource
 	topologyDurable bool
+	processOnly     bool
 }
 
 var errDynamicFlowRuntimeReadinessPlanStale = errors.New(
@@ -92,36 +93,6 @@ func newDynamicFlowRuntimeReadinessKey(runID, instancePath string) (dynamicFlowR
 	return key, nil
 }
 
-func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessForStartup(ctx context.Context) error {
-	if am == nil || am.workflowInstances == nil {
-		return nil
-	}
-	active, err := am.workflowInstances.ListDynamicFlowRuntimeReadiness(ctx)
-	if err != nil {
-		return err
-	}
-	activePaths := make(map[string]struct{}, len(active))
-	for _, item := range active {
-		activePaths[item.InstancePath] = struct{}{}
-		if err := am.reconcileDynamicFlowRuntimeReadiness(ctx, item.Plan.RunID, item.InstancePath); err != nil {
-			return fmt.Errorf("finalize dynamic flow runtime readiness %s: %w", item.InstancePath, err)
-		}
-	}
-	keys, err := am.workflowInstances.ListDynamicFlowRuntimeReadinessKeys(ctx)
-	if err != nil {
-		return err
-	}
-	for _, key := range keys {
-		if _, hasActiveSuccessor := activePaths[key.InstancePath]; hasActiveSuccessor {
-			continue
-		}
-		if err := am.reconcileDynamicFlowRuntimeReadiness(ctx, key.RunID, key.InstancePath); err != nil {
-			return fmt.Errorf("finalize dynamic flow runtime readiness %s: %w", key.InstancePath, err)
-		}
-	}
-	return nil
-}
-
 func (am *AgentManager) reconcilePendingDynamicFlowRuntimeReadiness(ctx context.Context) error {
 	if am == nil || am.workflowInstances == nil {
 		return nil
@@ -140,6 +111,67 @@ func (am *AgentManager) reconcilePendingDynamicFlowRuntimeReadiness(ctx context.
 		}
 	}
 	return errors.Join(reconcileErrs...)
+}
+
+func (am *AgentManager) InspectDynamicFlowRuntimeStartupProjection(ctx context.Context, source runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeStartupProjection, error) {
+	if am == nil || am.workflowInstances == nil {
+		return runtimepipeline.DynamicFlowRuntimeStartupProjection{}, nil
+	}
+	return am.workflowInstances.InspectDynamicFlowRuntimeStartupProjection(ctx, source)
+}
+
+func (am *AgentManager) ReconcileDynamicFlowRuntimeStartupProjection(ctx context.Context, source runtimecorrelation.BundleSourceFact) error {
+	projection, err := am.InspectDynamicFlowRuntimeStartupProjection(ctx, source)
+	if err != nil {
+		return err
+	}
+	for _, item := range projection.Pending {
+		if err := am.reconcileDynamicFlowRuntimeReadiness(ctx, item.Plan.RunID, item.InstancePath); err != nil {
+			return &dynamicFlowRuntimeReadinessFinalizationError{cause: fmt.Errorf("finalize source-scoped dynamic flow runtime readiness %s: %w", item.InstancePath, err)}
+		}
+	}
+	return nil
+}
+
+func (am *AgentManager) ReconstructDynamicFlowRuntimeStartupTopology(ctx context.Context, sourceFact runtimecorrelation.BundleSourceFact) error {
+	projection, err := am.InspectDynamicFlowRuntimeStartupProjection(ctx, sourceFact)
+	if err != nil {
+		return err
+	}
+	if len(projection.Pending) != 0 {
+		return fmt.Errorf("dynamic flow startup topology remains incomplete for %d source-owned instance(s)", len(projection.Pending))
+	}
+	if len(projection.Completed) == 0 {
+		return nil
+	}
+	source, err := am.dynamicFlowRuntimeReadinessSource(ctx)
+	if err != nil {
+		return err
+	}
+	for _, item := range projection.Completed {
+		plan, err := item.Plan.Normalized()
+		if err != nil {
+			return err
+		}
+		if err := validateDynamicFlowRuntimeReadinessCallbackSource(plan, source); err != nil {
+			return err
+		}
+		key, err := newDynamicFlowRuntimeReadinessKey(plan.RunID, item.InstancePath)
+		if err != nil {
+			return err
+		}
+		coordinate, err := dynamicFlowRuntimeReadinessPlanCoordinate(plan)
+		if err != nil {
+			return err
+		}
+		if err := am.reconcileDeclaredDynamicFlowRuntimeReadiness(dynamicFlowRuntimeReadinessAdmission{
+			ctx: ctx, key: key, plan: plan, planCoordinate: coordinate, source: source,
+			topologyDurable: true, processOnly: true,
+		}); err != nil {
+			return fmt.Errorf("reconstruct dynamic flow process topology %s: %w", item.InstancePath, err)
+		}
+	}
+	return nil
 }
 
 func (am *AgentManager) reconcileEnsuredDynamicFlowRuntimeReadinessPlan(
@@ -817,6 +849,10 @@ func (am *AgentManager) reconcileDynamicFlowRuntimeReadinessOnce(
 	}()
 	if err := am.verifyDynamicFlowRoute(ctx, plan.Identity.Route()); err != nil {
 		return err
+	}
+	if admission.processOnly {
+		published = false
+		return nil
 	}
 	if eligible, err := am.dynamicFlowRuntimeReadinessStillEligible(ctx, key, plan); err != nil {
 		return err

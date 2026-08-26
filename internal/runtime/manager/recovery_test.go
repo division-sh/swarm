@@ -447,14 +447,8 @@ func TestRecoverRestoresPersistedFlowInstanceRoutes(t *testing.T) {
 	if err := am.Recover(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
-	if len(bus.restored) != 1 || bus.restored[0] != "review/inst-1" {
-		t.Fatalf("restored routes = %#v, want [review/inst-1]", bus.restored)
-	}
-	if got := bus.restoredRequests[0].ActivationVariables["vertical_id"]; got != "11111111-1111-4111-8111-111111111111" {
-		t.Fatalf("restored activation variable vertical_id = %q, want persisted config value", got)
-	}
-	if len(workflowInstances.routeLoads) != 1 || workflowInstances.routeLoads[0] != runtimeflowidentity.DeriveRoute("review", "inst-1") {
-		t.Fatalf("route recovery projection loads = %#v, want exact review/inst-1 route", workflowInstances.routeLoads)
+	if len(bus.restored) != 0 || len(workflowInstances.routeLoads) != 0 {
+		t.Fatalf("generic no-readiness route was restored: routes=%#v loads=%#v", bus.restored, workflowInstances.routeLoads)
 	}
 }
 
