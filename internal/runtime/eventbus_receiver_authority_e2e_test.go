@@ -573,6 +573,5 @@ downstream-agent:
       advances_to: done
       emit: task.finalized
 `,
-		"policy.yaml": "{}\n",
 	}
 }

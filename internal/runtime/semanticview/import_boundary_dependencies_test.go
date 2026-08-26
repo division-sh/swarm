@@ -255,10 +255,6 @@ provider:
   threshold: 0.91
   parent_only: leaked
 `)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "worker", "package.yaml"), `
 name: worker-package
@@ -272,9 +268,6 @@ provider:
   mode: child-local
   package_only: visible
 `)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "worker", "tools.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "worker", "agents.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "worker", "events.yaml"), "{}\n")
 
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
@@ -305,10 +298,6 @@ flows:
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: nested-import-policy\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "policy.yaml"), "root_threshold: 70\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "child", "package.yaml"), `
 name: child-package
@@ -324,10 +313,6 @@ flows:
         threshold: parent.policy.threshold
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), "name: child\nmode: static\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "child", "policy.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "child", "tools.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), "{}\n")
 
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "child", "flows", "grandchild", "package.yaml"), `
 name: grandchild-package
@@ -336,10 +321,6 @@ requires:
   policy: [threshold]
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "child", "flows", "grandchild", "schema.yaml"), "name: grandchild\nmode: static\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "child", "flows", "grandchild", "policy.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "child", "flows", "grandchild", "tools.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "child", "flows", "grandchild", "agents.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "child", "flows", "grandchild", "events.yaml"), "{}\n")
 
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
@@ -373,10 +354,6 @@ packages:
 provider:
   threshold: 0.91
 `)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "packages", "vendor", "package.yaml"), `
 name: vendor-package
@@ -396,10 +373,6 @@ flows:
     mode: static
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "packages", "vendor", "subpkg", "flows", "worker", "schema.yaml"), "name: worker\nmode: static\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "packages", "vendor", "subpkg", "flows", "worker", "policy.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "packages", "vendor", "subpkg", "flows", "worker", "tools.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "packages", "vendor", "subpkg", "flows", "worker", "agents.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "packages", "vendor", "subpkg", "flows", "worker", "events.yaml"), "{}\n")
 
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

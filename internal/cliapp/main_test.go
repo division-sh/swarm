@@ -1509,11 +1509,6 @@ version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: embedded-platform-spec\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 
 	var buf bytes.Buffer
 	code := runVerifyCommandWithContractsForTest(t, context.Background(), "", root, &buf)
@@ -1535,11 +1530,6 @@ version: "1.0.0"
 platform_version: ">=0.8.0"
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: incompatible-platform-spec\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 
 	var buf bytes.Buffer
 	code := runVerifyCommandWithContractsForTest(t, context.Background(), "", root, &buf)
@@ -1572,11 +1562,6 @@ extra:
   colony.division.sh/display_name: Package Self Facts Verify
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: package-self-facts-verify\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 
 	var buf bytes.Buffer
 	code := runVerifyCommandWithContractsForTest(t, context.Background(), "", root, &buf)
@@ -1599,11 +1584,6 @@ platform_version: ">=0.7.0 <0.8.0"
 homepage: https://division.sh
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: package-unknown-field-verify\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 
 	var buf bytes.Buffer
 	code := runVerifyCommandWithContractsForTest(t, context.Background(), "", root, &buf)
@@ -3870,8 +3850,6 @@ pins:
     events: [item.processed]
 `)
 				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "item.received:\nitem.processed: {}\n")
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
 				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 test-node:
   id: test-node
@@ -3913,8 +3891,6 @@ pins:
     events: [item.processed]
 `)
 				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "item.received:\nitem.processed: {}\n")
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
 				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 test-node:
   id: test-node
@@ -3960,8 +3936,6 @@ pins:
     events: [item.processed]
 `)
 				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "item.received:\nitem.processed: {}\n")
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
 				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 test-node:
   id: test-node
@@ -4680,11 +4654,26 @@ func loadWorkflowValidationBundleAt(t *testing.T, fixtureRoot string) *runtimeco
 
 func writeWorkflowValidationFixtureFile(t *testing.T, path, contents string) {
 	t.Helper()
+	if isOptionalWorkflowDeclarationFixture(path) && strings.TrimSpace(contents) == "{}" {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			t.Fatalf("remove omitted optional declaration fixture %s: %v", path, err)
+		}
+		return
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
 	}
 	if err := os.WriteFile(path, []byte(strings.TrimLeft(contents, "\n")), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func isOptionalWorkflowDeclarationFixture(path string) bool {
+	switch filepath.Base(path) {
+	case "agents.yaml", "entities.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml", "types.yaml":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -4724,10 +4713,6 @@ version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: dead-event-schema\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `
 root.unused: {}
 `)

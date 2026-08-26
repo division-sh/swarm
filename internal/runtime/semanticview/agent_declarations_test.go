@@ -27,15 +27,9 @@ flows:
     mode: static
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: agent-declaration-census\n")
-	for _, file := range []string{"agents.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
-		writeSemanticviewFixtureFile(t, filepath.Join(root, file), "{}\n")
-	}
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), "name: support\nversion: \"1.0.0\"\nflows: []\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), "name: support\nmode: static\ninitial_state: active\nstates: [active]\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), "flow-agent:\n  id: flow-agent\n  model: regular\n  memory: false\n  intent:\n    inline: Exercise package-backed declaration ownership.\n")
-	for _, file := range []string{"events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
-		writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", file), "{}\n")
-	}
 
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
@@ -95,9 +89,6 @@ func TestAgentDeclarationsResolvesUniqueRootOnlyProjectOwner(t *testing.T) {
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "package.yaml"), "name: root-only-agent\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: root-only-agent\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "agents.yaml"), "root-agent:\n  id: root-agent\n  model: regular\n  memory: false\n  intent:\n    inline: Exercise root declaration ownership.\n")
-	for _, file := range []string{"events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
-		writeSemanticviewFixtureFile(t, filepath.Join(root, file), "{}\n")
-	}
 
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

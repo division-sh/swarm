@@ -5416,17 +5416,9 @@ flows:
     mode: static
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: duplicate-agent-writer-coverage\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 
 	for _, flowID := range []string{"alpha", "beta"} {
 		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), "name: "+flowID+"\n")
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "policy.yaml"), "{}\n")
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), "{}\n")
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "nodes.yaml"), "{}\n")
 		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "entities.yaml"), `
 case:
   business_brief:
@@ -7213,9 +7205,6 @@ flows:
     mode: static
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: select-entity-fixture\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), `
 opco.spend_requested:
   vertical_id: string
@@ -7237,7 +7226,6 @@ opco.spend_requested:
   vertical_id: string
   amount_usd: number
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "treasury", "agents.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "treasury", "entities.yaml"), `
 opco_budget:
   vertical_id:
@@ -7252,11 +7240,27 @@ opco_budget:
 
 func writeBootverifyFixtureFile(t *testing.T, path, contents string) {
 	t.Helper()
+	contents = strings.TrimLeft(contents, "\n")
+	if isOptionalBootverifyDeclarationFile(path) && strings.TrimSpace(contents) == "{}" {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			t.Fatalf("omit empty optional declaration file %s: %v", path, err)
+		}
+		return
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
 	}
-	if err := os.WriteFile(path, []byte(strings.TrimLeft(contents, "\n")), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func isOptionalBootverifyDeclarationFile(path string) bool {
+	switch filepath.Base(path) {
+	case "agents.yaml", "entities.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml", "types.yaml":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -7285,8 +7289,6 @@ item:
   item_id: string
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: agent-memory-validation\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), `
 item.created:
   entity_id: string
@@ -7303,7 +7305,6 @@ item.created:
 			flowAgents = "{}\n"
 		}
 		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), flowSchema)
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
 		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
 support/item.created:
   entity_id: string
@@ -7331,9 +7332,6 @@ item:
   item_id: string
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: agent-memory-validation\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), `
 item.created:
   entity_id: string
@@ -7345,7 +7343,6 @@ platform_version: ">=0.7.0 <0.8.0"
 flows: []
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), flowSchema)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
 support/item.created:
   entity_id: string
@@ -7495,10 +7492,6 @@ item:
   item_id: string
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: pin-ambiguity\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 
 	for _, flowID := range []string{"producer_a", "producer_b"} {
 		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), `
@@ -7513,7 +7506,6 @@ pins:
     events:
       - ticket.ready
 `)
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "policy.yaml"), "{}\n")
 		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), `
 ticket.ready:
   entity_id: string
@@ -7537,7 +7529,6 @@ pins:
     events:
       - consumer.started
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "policy.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), `
 ticket.ready:
   entity_id: string
@@ -7588,10 +7579,6 @@ flows:
     mode: static
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: state-reachability\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
 name: support
@@ -7602,7 +7589,6 @@ states: [waiting, active, review, done]
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "entities.yaml"), `
 ticket: {}
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
 ticket.opened:
   entity_id: string
@@ -7654,16 +7640,11 @@ flows:
     mode: static
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: staged-lifecycle\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), schema)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "entities.yaml"), `
 ticket: {}
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
 ticket.opened:
   entity_id: string
@@ -7701,11 +7682,6 @@ flows:
     flow: child
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: wave1-expression-fixture\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
 name: child
@@ -7748,8 +7724,6 @@ task:
     type: integer
     initial: 1
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
 task.assigned:
   score: numeric
@@ -7796,17 +7770,12 @@ flows:
     mode: static
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: wave1-root-reader-coverage\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 case:
   priority:
     type: integer
     _unused_reason: child read-pin coverage proof field
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
 name: child
@@ -7820,8 +7789,6 @@ pins:
   outputs:
     events: []
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
 task.assigned:
   entity_id: string
@@ -7861,11 +7828,6 @@ flows:
     mode: static
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: prompt-writer-coverage\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
 name: child
 initial_state: idle
@@ -7873,10 +7835,7 @@ terminal_states: [done]
 states: [idle, done]
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "entities.yaml"), entitiesYAML)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "policy.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), agentsYAML)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), "{}\n")
 	if strings.TrimSpace(promptText) == "" {
 		promptText = "Write the fields authorized by the contract.\n"
 	}
@@ -8140,7 +8099,6 @@ func writeDeadEventSchemaFixture(t *testing.T, opts deadEventSchemaFixtureOption
 	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), rootSchema+"\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), defaultFixtureYAML(opts.rootPolicy))
-	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), defaultFixtureYAML(opts.rootAgents))
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), defaultFixtureYAML(opts.rootEvents))
 	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), defaultFixtureYAML(opts.rootNodes))

@@ -244,10 +244,6 @@ root.escalated: {}
 root.routed: {}
 root.audit: {}
 `)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "entities.yaml"), "{}\n")
 	rootNodeYAML := authoredEmitSiteNodeYAML(opts.rootNodeID, "root.start", opts.rootEmit, opts.rootGuardEmit)
 	if strings.TrimSpace(opts.rootRuleEmit) != "" || strings.TrimSpace(opts.rootOnSuccess) != "" {
 		rootNodeYAML = authoredEmitSiteRulesSuccessNodeYAML(opts.rootNodeID, "root.start", opts.rootRuleEmit, opts.rootOnSuccess)
@@ -281,8 +277,6 @@ pins:
 support.start: {}
 support.ready: {}
 `)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), "{}\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "nodes.yaml"), authoredEmitSiteNodeYAML(opts.flowNodeID, "support.start", opts.flowEmit, ""))
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "package.yaml"), `
 name: extras
@@ -347,9 +341,6 @@ scan:
   scan_id:
     type: text
 `)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 dispatcher:
   id: dispatcher

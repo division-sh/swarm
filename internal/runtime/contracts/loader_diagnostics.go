@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
 type LoaderDiagnosticLocation struct {
@@ -225,6 +227,45 @@ func NewOutputEventPinNameRequiredDiagnostic(cause error) *LoaderDiagnostic {
 		"Use `events: [item.processed]` or `events: [{name: item_processed, event: item.processed}]`.",
 		cause,
 	)
+}
+
+func NewOptionalDeclarationFileEmptyDiagnostic(fileName string) *LoaderDiagnostic {
+	fileName = strings.TrimSpace(fileName)
+	return NewExpectedShapeDiagnostic(
+		"contract_loader.optional_declaration_file_empty",
+		fileName,
+		fmt.Sprintf("%s declares nothing - delete the file (absent means empty).", fileName),
+		"Delete the file. Optional workflow declaration files exist only when they contain at least one declaration.",
+		nil,
+	)
+}
+
+func NewDeclarationNameInvalidDiagnostic(context, name string, location yamlsource.Location) *LoaderDiagnostic {
+	return &LoaderDiagnostic{
+		Code:        "contract_loader.declaration_name_invalid",
+		Problem:     fmt.Sprintf("%s name %q at %s must be non-empty and have no surrounding whitespace.", strings.TrimSpace(context), name, location),
+		Remediation: "Use one exact non-empty declaration name.",
+		Location: LoaderDiagnosticLocation{
+			File:     location.File,
+			YAMLPath: strings.TrimSpace(context),
+			Line:     location.Line,
+			Column:   location.Column,
+		},
+	}
+}
+
+func NewDeclarationNameCollisionDiagnostic(context, name string, first, second yamlsource.Location) *LoaderDiagnostic {
+	return &LoaderDiagnostic{
+		Code:        "contract_loader.declaration_name_collision",
+		Problem:     fmt.Sprintf("%s names at %s and %s collide as %q.", strings.TrimSpace(context), first, second, name),
+		Remediation: "Use distinct exact declaration names.",
+		Location: LoaderDiagnosticLocation{
+			File:     second.File,
+			YAMLPath: strings.TrimSpace(context),
+			Line:     second.Line,
+			Column:   second.Column,
+		},
+	}
 }
 
 func wrapLoaderDiagnosticFile(err error, file string) error {

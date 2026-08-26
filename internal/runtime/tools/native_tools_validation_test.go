@@ -384,9 +384,6 @@ flows:
     mode: static
 `)
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: same-flow-scoped-native-tool-census\n")
-	for _, file := range []string{"agents.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
-		writeToolFlowDataFixtureFile(t, filepath.Join(root, file), "{}\n")
-	}
 	flowDir := filepath.Join(root, "flows", "operating")
 	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "package.yaml"), `
 name: operating
@@ -397,14 +394,10 @@ packages:
 flows: []
 `)
 	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "schema.yaml"), "name: operating\nmode: static\ninitial_state: active\nstates: [active]\n")
-	for _, file := range []string{"agents.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
-		writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, file), "{}\n")
-	}
 	for _, project := range []string{"project-a", "project-b"} {
 		dir := filepath.Join(flowDir, "packages", project)
 		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "package.yaml"), "name: "+project+"\nversion: \"1.0.0\"\nflows: []\n")
 		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "agents.yaml"), scopedNativeToolAgentYAML())
-		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "nodes.yaml"), "{}\n")
 	}
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
@@ -432,9 +425,6 @@ workspace_classes:
   shared_flow:
     workspace_scope: per-flow-instance
 `)
-	for _, file := range []string{"agents.yaml", "events.yaml", "nodes.yaml", "tools.yaml"} {
-		writeToolFlowDataFixtureFile(t, filepath.Join(root, file), "{}\n")
-	}
 	flowDir := filepath.Join(root, "flows", "review")
 	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "schema.yaml"), "name: review\nmode: static\ninitial_state: active\nstates: [active]\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, "agents.yaml"), `
@@ -448,9 +438,6 @@ scoped-worker:
   native_tools:
     file_io: true
 `)
-	for _, file := range []string{"events.yaml", "nodes.yaml", "policy.yaml"} {
-		writeToolFlowDataFixtureFile(t, filepath.Join(flowDir, file), "{}\n")
-	}
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
@@ -478,22 +465,15 @@ flows:
     mode: static
 `)
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: scoped-native-tool-census\n")
-	for _, file := range []string{"agents.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
-		writeToolFlowDataFixtureFile(t, filepath.Join(root, file), "{}\n")
-	}
 	for _, project := range []string{"project-a", "project-b"} {
 		dir := filepath.Join(root, "packages", project)
 		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "package.yaml"), "name: "+project+"\nversion: \"1.0.0\"\nflows: []\n")
 		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "agents.yaml"), scopedNativeToolAgentYAML())
-		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "nodes.yaml"), "{}\n")
 	}
 	for _, flowID := range []string{"flow-a", "flow-b"} {
 		dir := filepath.Join(root, "flows", flowID)
 		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "schema.yaml"), "name: "+flowID+"\nmode: static\ninitial_state: active\nstates: [active]\n")
 		writeToolFlowDataFixtureFile(t, filepath.Join(dir, "agents.yaml"), scopedNativeToolAgentYAML())
-		for _, file := range []string{"events.yaml", "nodes.yaml", "policy.yaml"} {
-			writeToolFlowDataFixtureFile(t, filepath.Join(dir, file), "{}\n")
-		}
 	}
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))

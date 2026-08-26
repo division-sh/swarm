@@ -133,11 +133,6 @@ platform_version: "`+declaredRange+`"
 flows: []
 `)
 	writeBundleHashText(t, filepath.Join(root, "schema.yaml"), "name: platform-version-admission\n")
-	writeBundleHashText(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBundleHashText(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeBundleHashText(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeBundleHashText(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeBundleHashText(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	return root
 }
 

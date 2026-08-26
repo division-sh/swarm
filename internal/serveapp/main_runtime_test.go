@@ -8272,6 +8272,34 @@ func TestRunServeRuntimeDuplicateAgentSlugFailsBeforeReadiness(t *testing.T) {
 	}
 }
 
+func TestRunServeRuntimeRejectsPresentZeroBeforeContextPublication(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	project := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
+	writeWorkflowValidationFixtureFile(t, filepath.Join(project, "agents.yaml"), "{}\n")
+	var published atomic.Bool
+	var out lockedBuffer
+	code := Run(context.Background(), cliapp.RepoRoot(), cliapp.ServeOptions{
+		ConfigPath:       writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "runtime.db")),
+		ContractsPath:    project,
+		PlatformSpecPath: defaultPlatformSpecPath,
+		APIListenAddr:    "127.0.0.1:0",
+		MCPListenAddr:    "127.0.0.1:0",
+		SelfCheck:        true,
+		ShutdownGrace:    runtimepkg.DefaultShutdownGrace,
+		Output:           &out,
+		TestLLMRuntime:   servedNoopLLMRuntime{},
+		TestRuntimeContextsReadyHook: func(*runtimepkg.RuntimeContextManager) {
+			published.Store(true)
+		},
+	})
+	if code == 0 || !strings.Contains(out.String(), "agents.yaml declares nothing - delete the file (absent means empty)") {
+		t.Fatalf("serve code=%d output=%s, want present-zero rejection", code, out.String())
+	}
+	if published.Load() || strings.Contains(out.String(), "ready in ") {
+		t.Fatalf("serve published a runtime context after present-zero rejection: %s", out.String())
+	}
+}
+
 func TestRunServeRuntimeDistinctAgentSlugsBootPinnedContextsReachReadiness(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	_, _, pg := installServeRuntimePostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {

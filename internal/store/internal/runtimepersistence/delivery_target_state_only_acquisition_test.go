@@ -845,9 +845,6 @@ func admitStateOnlyAcquisitionEntityContracts(t *testing.T, base *runtimecontrac
 	}
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "package.yaml"), fmt.Sprintf("name: state-only-acquisition\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n%s", packageFlows.String()))
 	writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: state-only-acquisition\n")
-	for _, file := range []string{"agents.yaml", "entities.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml", "types.yaml"} {
-		writeStateOnlyAcquisitionFixtureFile(t, filepath.Join(root, file), "{}\n")
-	}
 	admitted, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(runtimepipeline.WorkflowRepoRoot(), root, runtimecontracts.DefaultPlatformSpecFile(runtimepipeline.WorkflowRepoRoot()))
 	if err != nil {
 		t.Fatalf("load state-only acquisition entity contracts: %v", err)

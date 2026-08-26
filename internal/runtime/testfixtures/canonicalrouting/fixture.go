@@ -262,11 +262,32 @@ func applyClosedReplacement(t testing.TB, path, old, replacement string) {
 	}
 }
 
-func writeFixtureFile(path, source string) error {
+func writeFixtureFile(t testing.TB, path, source string) error {
+	t.Helper()
+	if isOptionalDeclarationFile(path) && strings.TrimSpace(source) == "{}" {
+		omitOptionalDeclarationFile(t, path)
+		return nil
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 	return os.WriteFile(path, []byte(source), 0o644)
+}
+
+func omitOptionalDeclarationFile(t testing.TB, path string) {
+	t.Helper()
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("omit empty optional declaration file %s: %v", path, err)
+	}
+}
+
+func isOptionalDeclarationFile(path string) bool {
+	switch filepath.Base(path) {
+	case "agents.yaml", "entities.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml", "types.yaml":
+		return true
+	default:
+		return false
+	}
 }
 
 // duplicateFlowForNegativeMutation creates a second receiver solely for a
@@ -379,10 +400,7 @@ pins:
 func writeClosedNegativeFile(t testing.TB, root, relativePath, source string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(relativePath))
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
-	}
-	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+	if err := writeFixtureFile(t, path, source); err != nil {
 		t.Fatalf("write closed negative fixture %s: %v", path, err)
 	}
 }

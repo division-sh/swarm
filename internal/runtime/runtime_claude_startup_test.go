@@ -594,9 +594,6 @@ packages:
 `)
 	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: scoped-claude-startup\n")
 	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "entities.yaml"), "item:\n  item_id: string\n")
-	for _, file := range []string{"events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
-		writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, file), "{}\n")
-	}
 	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "agents.yaml"), `
 root-mock:
   id: root-mock
@@ -619,7 +616,6 @@ root-mock:
 		dir := filepath.Join(root, "packages", project.name)
 		writeAgentFreeRuntimeFixtureFile(t, filepath.Join(dir, "package.yaml"), "name: "+project.name+"\nversion: \"1.0.0\"\nflows: []\n")
 		writeAgentFreeRuntimeFixtureFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  id: shared-worker\n  model: "+project.model+"\n  memory: false\n  intent:\n    inline: Exercise the scoped Claude startup census.\n")
-		writeAgentFreeRuntimeFixtureFile(t, filepath.Join(dir, "nodes.yaml"), "{}\n")
 	}
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))

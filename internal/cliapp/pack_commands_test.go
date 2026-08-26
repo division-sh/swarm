@@ -373,6 +373,43 @@ func TestMalformedPackBodiesFailBeforeEveryCLIPublishingSurface(t *testing.T) {
 	}
 }
 
+func TestPresentZeroOptionalFileFailsBeforeEveryCLIPublishingSurface(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	project := canonicalrouting.CopyExample(t, canonicalrouting.RootIngress)
+	if err := os.WriteFile(filepath.Join(project, "agents.yaml"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write present-zero agents file: %v", err)
+	}
+	configPath := writeTestVerifyRuntimeConfig(t)
+	const want = "agents.yaml declares nothing - delete the file (absent means empty)"
+
+	assertRejected := func(surface string, args ...string) {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		code := executeRootCommandWithOptions(context.Background(), RepoRoot(), args, &stdout, &stderr, defaultRootCommandOptions())
+		if combined := stdout.String() + stderr.String(); code == 0 || !strings.Contains(combined, want) {
+			t.Fatalf("%s code=%d stdout=%s stderr=%s, want %q", surface, code, stdout.String(), stderr.String(), want)
+		}
+	}
+
+	if _, _, err := NewSwarmWorkflowModule(RepoRoot(), project, runtimecontracts.DefaultPlatformSpecFile(RepoRoot())); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("module/hash admission error = %v, want %q", err, want)
+	}
+	if _, err := runtimecontracts.BuildBundleRegistrationDirectoryUpload(RepoRoot(), project, runtimecontracts.DefaultPlatformSpecFile(RepoRoot())); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("registration upload admission error = %v, want %q", err, want)
+	}
+
+	buildOutput := filepath.Join(t.TempDir(), "bundle")
+	assertRejected("bundle build", "bundle", "build", "--contracts", project, "--output", buildOutput, "--config", configPath)
+	if _, err := os.Stat(buildOutput); !os.IsNotExist(err) {
+		t.Fatalf("bundle build published output after rejection: %v", err)
+	}
+	assertRejected("bundle register", "bundle", "register", "--contracts", project, "--config", configPath)
+	assertRejected("verify", "verify", "--contracts", project, "--config", configPath, "--json")
+	assertRejected("doctor", "doctor", "--contracts", project, "--config", configPath, "--json")
+	assertRejected("describe", "describe", "--contracts", project, "--config", configPath, "--json")
+	assertRejected("test", "test", "--contracts", project, "--config", configPath)
+}
+
 func runPacksCommand(t testing.TB, repo string, args ...string) (int, string, string) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer

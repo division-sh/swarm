@@ -121,7 +121,7 @@ func closedScalarLiteral(t testing.TB, label, value, fallback string) string {
 func writeClosedVariantFile(t testing.TB, root, relativePath, source string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(relativePath))
-	if err := writeFixtureFile(path, source); err != nil {
+	if err := writeFixtureFile(t, path, source); err != nil {
 		t.Fatalf("write closed template reply variant %s: %v", path, err)
 	}
 }

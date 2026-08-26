@@ -35,9 +35,6 @@ packages:
   - {id: support, flow: support, mode: `+mode+`}
 `)
 	write(t, filepath.Join(root, "schema.yaml"), "name: flow-owned-project-agent\n")
-	for _, name := range []string{"agents.yaml", "entities.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
-		write(t, filepath.Join(root, name), "{}\n")
-	}
 
 	flowRoot := filepath.Join(root, "flows", "support")
 	write(t, filepath.Join(flowRoot, "package.yaml"), "name: support\nversion: \"1.0.0\"\nflows: []\n")
@@ -56,9 +53,6 @@ pins:
     events: [work.requested]
 `)
 	write(t, filepath.Join(flowRoot, "events.yaml"), "work.requested: {}\nwork.completed: {}\n")
-	for _, name := range []string{"agents.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
-		write(t, filepath.Join(flowRoot, name), "{}\n")
-	}
 	writeAgentPackage(t, filepath.Join(flowRoot, "left"), "public-worker-left")
 	if duplicateRole {
 		writeAgentPackage(t, filepath.Join(flowRoot, "right"), "public-worker-right")

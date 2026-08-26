@@ -41,9 +41,6 @@ worker:
   memory: false
   subscriptions: [work.requested]
 `)
-	for _, file := range []string{"events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
-		writeFixtureFile(t, filepath.Join(flowRoot, file), "{}\n")
-	}
 
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
@@ -123,7 +120,4 @@ packages:
 func writeAgentDeclarationBaseFiles(t *testing.T, root, name string) {
 	t.Helper()
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: "+name+"\n")
-	for _, file := range []string{"agents.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
-		writeFixtureFile(t, filepath.Join(root, file), "{}\n")
-	}
 }

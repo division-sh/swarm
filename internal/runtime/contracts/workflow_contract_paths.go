@@ -467,9 +467,3 @@ func loadYAMLFile(path string, target any) error {
 	}
 	return nil
 }
-func loadOptionalYAMLMap(path string, target any) error {
-	if strings.TrimSpace(path) == "" {
-		return nil
-	}
-	return loadYAMLFile(path, target)
-}

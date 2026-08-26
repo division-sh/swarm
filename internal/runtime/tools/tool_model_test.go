@@ -984,10 +984,6 @@ web_search_provider:
   provider: brave
   credentials_key: provider_key
 `)
-	writeToolFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeToolFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeToolFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeToolFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	writeToolFixtureFile(t, filepath.Join(root, "flows", "worker", "package.yaml"), `
 name: worker-package
 version: "1.0.0"
@@ -995,7 +991,6 @@ requires:
 `+policyRequires+credentialRequires+`
 `)
 	writeToolFixtureFile(t, filepath.Join(root, "flows", "worker", "schema.yaml"), "name: worker\nmode: static\n")
-	writeToolFixtureFile(t, filepath.Join(root, "flows", "worker", "policy.yaml"), "{}\n")
 	writeToolFixtureFile(t, filepath.Join(root, "flows", "worker", "agents.yaml"), `
 worker-agent:
   id: worker-agent
@@ -1018,7 +1013,6 @@ send_provider:
   response_mapping:
     ok: '{{response.body.ok}}'
 `)
-	writeToolFixtureFile(t, filepath.Join(root, "flows", "worker", "events.yaml"), "{}\n")
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)

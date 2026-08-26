@@ -221,9 +221,6 @@ flows:
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: same-flow-sibling-agents\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "agents.yaml"), "root-worker:\n  role: root-role\n  intent: {inline: Exercise root ownership.}\n  model: regular\n  memory: false\n")
-	for _, file := range []string{"events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
-		writeSemanticviewFixtureFile(t, filepath.Join(root, file), "{}\n")
-	}
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), `
 name: support
 version: "1.0.0"
@@ -233,9 +230,6 @@ packages:
 flows: []
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), "name: support\nmode: static\ninitial_state: active\nstates: [active]\n")
-	for _, file := range []string{"agents.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
-		writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", file), "{}\n")
-	}
 	for _, prefix := range []string{"first", "second"} {
 		packageRoot := filepath.Join(root, "flows", "support", prefix)
 		writeSemanticviewFixtureFile(t, filepath.Join(packageRoot, "package.yaml"), "name: "+prefix+"\nversion: \"1.0.0\"\nflows: []\n")

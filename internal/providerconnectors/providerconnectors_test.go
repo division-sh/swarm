@@ -223,9 +223,6 @@ packages:
   - {path: parent}
 `)
 	write(filepath.Join(root, "schema.yaml"), "name: nested-provider-agent\n")
-	for _, name := range []string{"agents.yaml", "entities.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
-		write(filepath.Join(root, name), "{}\n")
-	}
 	write(filepath.Join(root, "parent", "package.yaml"), `
 name: parent
 version: "1.0.0"
@@ -251,9 +248,6 @@ sender:
   subscriptions: [work.requested]
 `)
 	write(filepath.Join(flowRoot, "events.yaml"), "work.requested: {}\n")
-	for _, name := range []string{"nodes.yaml", "policy.yaml", "tools.yaml"} {
-		write(filepath.Join(flowRoot, name), "{}\n")
-	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)

@@ -100,21 +100,10 @@ func writePlatformVersionCompatibilityFixture(t *testing.T, rootRange, childRang
 	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), rootPackage.String())
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: platform-version-compatibility\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 
 	if strings.TrimSpace(childRange) != "" {
 		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), "name: support\nversion: \"1.0.0\"\nplatform_version: "+childRange+"\nflows: []\n")
 		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), "name: support\nmode: static\n")
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "tools.yaml"), "{}\n")
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), "{}\n")
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), "{}\n")
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "nodes.yaml"), "{}\n")
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "entities.yaml"), "{}\n")
 	}
 	return root
 }

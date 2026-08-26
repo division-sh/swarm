@@ -129,17 +129,9 @@ flows:
     mode: static
 `)
 	writePromptWriterFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: prompt-entity-writes-duplicate\n")
-	writePromptWriterFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writePromptWriterFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writePromptWriterFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writePromptWriterFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writePromptWriterFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 
 	for _, flowID := range []string{"alpha", "beta"} {
 		writePromptWriterFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), "name: "+flowID+"\n")
-		writePromptWriterFixtureFile(t, filepath.Join(root, "flows", flowID, "policy.yaml"), "{}\n")
-		writePromptWriterFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), "{}\n")
-		writePromptWriterFixtureFile(t, filepath.Join(root, "flows", flowID, "nodes.yaml"), "{}\n")
 		writePromptWriterFixtureFile(t, filepath.Join(root, "flows", flowID, "entities.yaml"), `
 case:
   business_brief:

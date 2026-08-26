@@ -112,16 +112,7 @@ flows:
     flow: scoring
 `)
 	writePrimaryEntityConformanceFile(t, filepath.Join(root, "schema.yaml"), "name: primary-entity-conformance\n")
-	writePrimaryEntityConformanceFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writePrimaryEntityConformanceFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writePrimaryEntityConformanceFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writePrimaryEntityConformanceFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writePrimaryEntityConformanceFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	writePrimaryEntityConformanceFile(t, filepath.Join(root, "flows", "scoring", "schema.yaml"), strings.TrimSpace(flowSchema)+"\n")
-	writePrimaryEntityConformanceFile(t, filepath.Join(root, "flows", "scoring", "policy.yaml"), "{}\n")
-	writePrimaryEntityConformanceFile(t, filepath.Join(root, "flows", "scoring", "events.yaml"), "{}\n")
-	writePrimaryEntityConformanceFile(t, filepath.Join(root, "flows", "scoring", "nodes.yaml"), "{}\n")
-	writePrimaryEntityConformanceFile(t, filepath.Join(root, "flows", "scoring", "agents.yaml"), "{}\n")
 	if strings.TrimSpace(flowEntities) != "" {
 		writePrimaryEntityConformanceFile(t, filepath.Join(root, "flows", "scoring", "entities.yaml"), strings.TrimSpace(flowEntities)+"\n")
 	}

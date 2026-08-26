@@ -31,10 +31,6 @@ item:
   item_id: string
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), `
 name: support
 version: "1.0.0"
@@ -47,8 +43,6 @@ states:
   - waiting
   - done
 `)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), "{}\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), `
 flow-agent:
   id: flow-agent
@@ -156,10 +150,6 @@ item:
   item_id: string
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
 name: support
 initial_state: waiting
@@ -167,9 +157,6 @@ states:
   - waiting
   - done
 `)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), "{}\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "package.yaml"), `
 name: extras
 version: "1.0.0"
@@ -234,10 +221,6 @@ item:
   item_id: string
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), `
 name: support
 version: "1.0.0"
@@ -250,8 +233,6 @@ states:
   - waiting
   - done
 `)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), "{}\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), `
 backend:
   intent: {inline: "Exercise package-backed memory proof."}
@@ -304,10 +285,6 @@ item:
   item_id: string
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
 name: support
 initial_state: waiting
@@ -315,8 +292,6 @@ states:
   - waiting
   - done
 `)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), "{}\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), `
 backend:
   intent: {inline: "Exercise flow-scoped memory proof."}
@@ -346,6 +321,9 @@ backend:
 
 func writeSemanticviewFixtureFile(t *testing.T, path, contents string) {
 	t.Helper()
+	if filepath.Base(path) == "nodes.yaml" && strings.TrimSpace(contents) == "{}" {
+		return
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
 	}

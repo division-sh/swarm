@@ -815,7 +815,7 @@ func convertSelectedTelegramFixtureToPackImport(t *testing.T, contractsRoot stri
 	if err := os.WriteFile(packagePath, body, 0o644); err != nil {
 		t.Fatalf("write selected package fixture: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(contractsRoot, "flows", "worker", "tools.yaml"), []byte("{}\n"), 0o644); err != nil {
+	if err := os.Remove(filepath.Join(contractsRoot, "flows", "worker", "tools.yaml")); err != nil {
 		t.Fatalf("remove selected flow-local connector fixture: %v", err)
 	}
 }
@@ -1113,11 +1113,6 @@ platform_version: "`+declaredRange+`"
 flows: []
 `)
 	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: selected-platform-version\n")
-	writeSelectedContractFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeSelectedContractFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeSelectedContractFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeSelectedContractFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeSelectedContractFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	return root
 }
 

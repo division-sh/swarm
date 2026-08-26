@@ -125,6 +125,37 @@ func TestCatalogRequiredVerifyGateMutationDiscoversAndNamesBrokenBundles(t *test
 	}
 }
 
+func TestCatalogRequiredVerifyGateRejectsDiscoveredPresentZeroOptionalFile(t *testing.T) {
+	setRequiredConformanceCredentials(t)
+	repoRoot := RepoRoot()
+	corpusRoot := t.TempDir()
+	bundleRoot := filepath.Join(corpusRoot, "examples", "nested", "present-zero")
+	if err := os.MkdirAll(bundleRoot, 0o755); err != nil {
+		t.Fatalf("create mutated bundle: %v", err)
+	}
+	files := map[string]string{
+		"package.yaml": "name: present-zero\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n",
+		"schema.yaml":  "name: present-zero\n",
+		"agents.yaml":  "{}\n",
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(bundleRoot, name), []byte(body), 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	bundles, err := discoverRequiredExampleBundles(corpusRoot, writeTestVerifyRuntimeConfig(t))
+	if err != nil {
+		t.Fatalf("discover mutated bundles: %v", err)
+	}
+	failures := verifyRequiredPassingBundles(context.Background(), repoRoot, bundles)
+	if len(failures) != 1 ||
+		!strings.Contains(failures[0], "examples/nested/present-zero") ||
+		!strings.Contains(failures[0], "agents.yaml declares nothing") ||
+		!strings.Contains(failures[0], "delete the file") {
+		t.Fatalf("present-zero failures = %#v, want bundle, file, and omission remediation", failures)
+	}
+}
+
 func TestCatalogRequiredVerifyGateRejectsInvalidGeneratedArchetypeConfig(t *testing.T) {
 	setRequiredConformanceCredentials(t)
 	repoRoot := RepoRoot()

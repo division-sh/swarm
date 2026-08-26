@@ -270,9 +270,6 @@ func loadAgentExecutionSemanticScopeFixture(t *testing.T, mode string, packagePa
 		}
 	}
 	write(filepath.Join(root, "schema.yaml"), "name: agent-execution-root\n")
-	for _, name := range []string{"agents.yaml", "entities.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
-		write(filepath.Join(root, name), "{}\n")
-	}
 	flowRoot := filepath.Join(packageRoot, "flows", "support")
 	write(filepath.Join(flowRoot, "package.yaml"), "name: support\nversion: \"1.0.0\"\nflows: []\n")
 	write(filepath.Join(flowRoot, "schema.yaml"), "name: support\nmode: "+mode+"\ninitial_state: active\nstates: [active]\n")
@@ -285,9 +282,6 @@ worker:
   memory: false
   subscriptions: [work.requested]
 `)
-	for _, name := range []string{"nodes.yaml", "policy.yaml", "tools.yaml"} {
-		write(filepath.Join(flowRoot, name), "{}\n")
-	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)

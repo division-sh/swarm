@@ -747,11 +747,6 @@ flows:
     mode: template
 `)
 	writeDescribeTestFile(t, filepath.Join(root, "schema.yaml"), "name: defaulted-template-policy\n")
-	writeDescribeTestFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeDescribeTestFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeDescribeTestFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeDescribeTestFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeDescribeTestFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	writeDescribeTestFile(t, filepath.Join(root, "flows", "scoring", "schema.yaml"), `
 name: scoring
 mode: template
@@ -762,11 +757,6 @@ pins:
   outputs:
     events: []
 `)
-	writeDescribeTestFile(t, filepath.Join(root, "flows", "scoring", "policy.yaml"), "{}\n")
-	writeDescribeTestFile(t, filepath.Join(root, "flows", "scoring", "tools.yaml"), "{}\n")
-	writeDescribeTestFile(t, filepath.Join(root, "flows", "scoring", "agents.yaml"), "{}\n")
-	writeDescribeTestFile(t, filepath.Join(root, "flows", "scoring", "events.yaml"), "{}\n")
-	writeDescribeTestFile(t, filepath.Join(root, "flows", "scoring", "nodes.yaml"), "{}\n")
 	writeDescribeTestFile(t, filepath.Join(root, "flows", "scoring", "entities.yaml"), `
 account:
   account_id: uuid
@@ -789,11 +779,6 @@ platform_version: ">=0.7.0 <0.8.0"
 flows: []
 `)
 	writeDescribeTestFile(t, filepath.Join(root, "schema.yaml"), "name: root-primary-entity\n")
-	writeDescribeTestFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeDescribeTestFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeDescribeTestFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeDescribeTestFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeDescribeTestFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	writeDescribeTestFile(t, filepath.Join(root, "entities.yaml"), `
 workspace:
   org_id: text

@@ -254,10 +254,6 @@ flows:
     mode: static
 `)
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: flow-data-test\n")
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), "name: support\nversion: \"1.0.0\"\nflows: []\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), "name: support\nmode: static\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "entities.yaml"), "support_state:\n  support_id: string\n")
@@ -267,7 +263,6 @@ factory-cto:
   role: factory_cto
   intent: {inline: "Read only the flow data declared by this contract."}
 `+toolFlowDataAccessYAML(access))
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), "{}\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "data", "exclusions.yaml"), "blocked: true\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "other", "package.yaml"), "name: other\nversion: \"1.0.0\"\nflows: []\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "other", "schema.yaml"), "name: other\nmode: static\n")
@@ -278,7 +273,6 @@ factory-cto:
   role: other_factory_cto
   intent: {inline: "Read only the other flow data declared by this contract."}
 `+toolFlowDataAccessYAML(access))
-	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "other", "events.yaml"), "{}\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "other", "data", "exclusions.yaml"), "blocked: other-flow\n")
 
 	repoRoot := runtimepipeline.WorkflowRepoRoot()

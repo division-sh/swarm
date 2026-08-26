@@ -1008,9 +1008,6 @@ root-agent:
   subscriptions: [root.requested]
   emit_events: [root.done]
 `)
-	for _, file := range []string{"events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
-		writeAuthoringViewTestFile(t, filepath.Join(root, file), "{}\n")
-	}
 	flowSchema := "name: analysis\nmode: static\n"
 	if explicitFlowRequiredAgents {
 		flowSchema += "required_agents: []\n"
@@ -1024,9 +1021,6 @@ analyzer:
   model: regular
   subscriptions: [analysis.requested]
 `)
-	for _, file := range []string{"events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
-		writeAuthoringViewTestFile(t, filepath.Join(flowRoot, file), "{}\n")
-	}
 
 	repo := authoringViewRepoRoot(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repo, root, runtimecontracts.DefaultPlatformSpecFile(repo))
@@ -1049,11 +1043,6 @@ flows:
     mode: template
 `)
 	writeAuthoringViewTestFile(t, filepath.Join(root, "schema.yaml"), "name: defaulted-template-policy\n")
-	writeAuthoringViewTestFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeAuthoringViewTestFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeAuthoringViewTestFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeAuthoringViewTestFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeAuthoringViewTestFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	writeAuthoringViewTestFile(t, filepath.Join(root, "flows", "scoring", "schema.yaml"), `
 name: scoring
 mode: template
@@ -1064,11 +1053,6 @@ pins:
   outputs:
     events: []
 `)
-	writeAuthoringViewTestFile(t, filepath.Join(root, "flows", "scoring", "policy.yaml"), "{}\n")
-	writeAuthoringViewTestFile(t, filepath.Join(root, "flows", "scoring", "tools.yaml"), "{}\n")
-	writeAuthoringViewTestFile(t, filepath.Join(root, "flows", "scoring", "agents.yaml"), "{}\n")
-	writeAuthoringViewTestFile(t, filepath.Join(root, "flows", "scoring", "events.yaml"), "{}\n")
-	writeAuthoringViewTestFile(t, filepath.Join(root, "flows", "scoring", "nodes.yaml"), "{}\n")
 	writeAuthoringViewTestFile(t, filepath.Join(root, "flows", "scoring", "entities.yaml"), `
 account:
   account_id: uuid
@@ -1091,11 +1075,6 @@ platform_version: ">=0.7.0 <0.8.0"
 flows: []
 `)
 	writeAuthoringViewTestFile(t, filepath.Join(root, "schema.yaml"), "name: root-primary-entity\n")
-	writeAuthoringViewTestFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeAuthoringViewTestFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeAuthoringViewTestFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeAuthoringViewTestFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeAuthoringViewTestFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	writeAuthoringViewTestFile(t, filepath.Join(root, "entities.yaml"), `
 workspace:
   org_id: text
@@ -1120,11 +1099,6 @@ flows:
     mode: singleton
 `)
 	writeAuthoringViewTestFile(t, filepath.Join(root, "schema.yaml"), "name: duplicate-node-contained-ops\n")
-	writeAuthoringViewTestFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeAuthoringViewTestFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeAuthoringViewTestFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeAuthoringViewTestFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeAuthoringViewTestFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	writeDuplicateNodeIDFlow(t, root, "alpha")
 	writeDuplicateNodeIDFlow(t, root, "beta")
 
@@ -1152,9 +1126,6 @@ pins:
   outputs:
     events: []
 `)
-	writeAuthoringViewTestFile(t, filepath.Join(dir, "policy.yaml"), "{}\n")
-	writeAuthoringViewTestFile(t, filepath.Join(dir, "tools.yaml"), "{}\n")
-	writeAuthoringViewTestFile(t, filepath.Join(dir, "agents.yaml"), "{}\n")
 	writeAuthoringViewTestFile(t, filepath.Join(dir, "types.yaml"), `
 types:
   Item:

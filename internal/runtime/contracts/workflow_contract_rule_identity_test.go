@@ -272,8 +272,6 @@ pins:
   inputs:
     events: [root.started]
 `)
-	writeFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "root.started: {entity_id: string}\n")
 	rootRules := ""
 	if duplicateRoot {
@@ -307,8 +305,6 @@ pins:
   inputs:
     events: [child.started]
 `)
-	writeFixtureFile(t, filepath.Join(childRoot, "policy.yaml"), "{}\n")
-	writeFixtureFile(t, filepath.Join(childRoot, "agents.yaml"), "{}\n")
 	writeFixtureFile(t, filepath.Join(childRoot, "events.yaml"), "child.started: {entity_id: string}\n")
 	writeFixtureFile(t, filepath.Join(childRoot, "nodes.yaml"), `
 child-handler:

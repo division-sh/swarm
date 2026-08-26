@@ -1336,9 +1336,7 @@ func TestEntityTools_GetEntityReturnsForkLocalMaterializedRevision(t *testing.T)
 		Role:          "operator",
 		Tools:         []string{"get_entity"},
 	}
-	bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", `
-types: {}
-`, `
+	bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", "", `
 accounts:
   status: text
 `)
@@ -1434,9 +1432,7 @@ func TestEntityTools_SaveEntityFieldAfterForkActivationUsesForkRunID(t *testing.
 		Role:          "operator",
 		Tools:         []string{"get_entity", "save_entity_field"},
 	}
-	bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", `
-types: {}
-`, `
+	bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", "", `
 accounts:
   status: text
 `)

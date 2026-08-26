@@ -236,7 +236,6 @@ states: [queued]
 child_entity:
   request_id: text
 `,
-		"flows/child/nodes.yaml": "{}\n",
 	})
 	pc := newPostgresPipelineCoordinatorForTest(noopPipelineBus{}, db, PipelineCoordinatorOptions{
 		Module: &pipelineFixtureWorkflowModule{

@@ -76,8 +76,7 @@ func addSealedConsumerDependencies(t testing.TB, root string, opts SealedParentC
 	applyClosedReplacement(t, filepath.Join(root, "flows", "consumer", "schema.yaml"),
 		"      - name: work_ready\n        event: work.ready\n",
 		"      - name: work_ready\n        event: work.ready\n      - name: control_start\n        event: control.start\n")
-	applyClosedReplacement(t, filepath.Join(root, "flows", "consumer", "events.yaml"),
-		"{}\n",
+	SetOverlayFile(t, root, "flows/consumer/events.yaml",
 		"work.ready:\n  work_id: text?\ncontrol.start:\n  work_id: text\naudit.seen:\n  work_id: text\n")
 	wildcard := "**/audit.seen"
 	if opts.ForbiddenSiblingWildcard {

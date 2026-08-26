@@ -126,14 +126,10 @@ packages:
   - path: packages/project-b
 `)
 	writeWorkspaceValidationFile(t, filepath.Join(root, "schema.yaml"), "name: scoped-workspace-validation\n")
-	for _, file := range []string{"agents.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
-		writeWorkspaceValidationFile(t, filepath.Join(root, file), "{}\n")
-	}
 	for _, project := range []string{"project-a", "project-b"} {
 		dir := filepath.Join(root, "packages", project)
 		writeWorkspaceValidationFile(t, filepath.Join(dir, "package.yaml"), "name: "+project+"\nversion: \"1.0.0\"\nflows: []\n")
 		writeWorkspaceValidationFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker:\n  id: shared-worker\n  model: regular\n  memory: false\n  intent:\n    inline: Exercise scoped workspace-class validation.\n  workspace_class: missing\n")
-		writeWorkspaceValidationFile(t, filepath.Join(dir, "nodes.yaml"), "{}\n")
 	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

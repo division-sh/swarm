@@ -6605,11 +6605,6 @@ flows:
     mode: static
 `)
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: projection-flow\n")
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "entities.yaml"), "{}\n")
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "flows", "scoring", "schema.yaml"), `
 name: scoring
 initial_state: pending
@@ -6684,11 +6679,6 @@ flows:
     mode: singleton
 `)
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: singleton-coordinator-runtime\n")
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeEngineProjectionFixtureFile(t, filepath.Join(root, "entities.yaml"), "{}\n")
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "flows", "coordinator", "schema.yaml"), `
 name: coordinator
 mode: singleton

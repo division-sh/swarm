@@ -517,10 +517,6 @@ flows:
 `)
 	writeEmitFixtureFile(t, filepath.Join(root, "entities.yaml"), "item:\n  item_id: uuid\n")
 	writeEmitFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: provider-schema-validation\n")
-	writeEmitFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeEmitFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeEmitFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeEmitFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 	writeEmitFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), `
 name: support
 version: "1.0.0"
@@ -532,8 +528,6 @@ initial_state: waiting
 states:
   - waiting
 `)
-	writeEmitFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
-	writeEmitFixtureFile(t, filepath.Join(root, "flows", "support", "tools.yaml"), "{}\n")
 	writeEmitFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
 local.done:
   unsupported: NotDeclared
@@ -557,13 +551,10 @@ initial_state: waiting
 states:
   - waiting
 `)
-	writeEmitFixtureFile(t, filepath.Join(root, "flows", "other", "policy.yaml"), "{}\n")
-	writeEmitFixtureFile(t, filepath.Join(root, "flows", "other", "tools.yaml"), "{}\n")
 	writeEmitFixtureFile(t, filepath.Join(root, "flows", "other", "events.yaml"), `
 local.done:
   ok: string
 `)
-	writeEmitFixtureFile(t, filepath.Join(root, "flows", "other", "agents.yaml"), "{}\n")
 
 	repoRoot, err := filepath.Abs("../../..")
 	if err != nil {

@@ -263,13 +263,7 @@ func loadProjectAgentOwnedByFlowSource(t *testing.T, mode string) semanticview.S
 	}
 	write(filepath.Join(root, "package.yaml"), "name: project-flow-agent\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\npackages:\n  - path: flows/support/extras\nflows:\n  - id: support\n    flow: support\n    mode: "+mode+"\n")
 	write(filepath.Join(root, "schema.yaml"), "name: project-flow-agent\n")
-	write(filepath.Join(root, "policy.yaml"), "{}\n")
-	write(filepath.Join(root, "tools.yaml"), "{}\n")
-	write(filepath.Join(root, "agents.yaml"), "{}\n")
-	write(filepath.Join(root, "events.yaml"), "{}\n")
 	write(filepath.Join(root, "flows", "support", "schema.yaml"), "name: support\ninitial_state: waiting\nstates: [waiting, done]\n")
-	write(filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
-	write(filepath.Join(root, "flows", "support", "events.yaml"), "{}\n")
 	write(filepath.Join(root, "flows", "support", "extras", "package.yaml"), "name: extras\nversion: \"1.0.0\"\nflows: []\n")
 	write(filepath.Join(root, "flows", "support", "extras", "agents.yaml"), "backend:\n  type: generic\n  role: backend\n  intent: {inline: \"Handle backend work.\"}\n  model: regular\n")
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))

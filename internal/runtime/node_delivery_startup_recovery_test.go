@@ -684,7 +684,7 @@ func loadEntitylessStartupRecoveryBundle(t *testing.T) *runtimecontracts.Workflo
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "tests", "tier8-boot-verification", "test-boot-success")
 	files := make(map[string]string)
-	for _, name := range []string{"package.yaml", "schema.yaml", "events.yaml", "nodes.yaml", "agents.yaml", "policy.yaml"} {
+	for _, name := range []string{"package.yaml", "schema.yaml", "events.yaml", "nodes.yaml"} {
 		body, err := os.ReadFile(filepath.Join(fixtureRoot, name))
 		if err != nil {
 			t.Fatalf("read startup recovery fixture %s: %v", name, err)

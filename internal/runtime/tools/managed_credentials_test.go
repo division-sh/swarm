@@ -437,10 +437,6 @@ flows:
     bind:
 `+bindCredentials)
 	writeToolFixtureFile(t, root+"/schema.yaml", "name: managed-credential-import\n")
-	writeToolFixtureFile(t, root+"/tools.yaml", "{}\n")
-	writeToolFixtureFile(t, root+"/agents.yaml", "{}\n")
-	writeToolFixtureFile(t, root+"/events.yaml", "{}\n")
-	writeToolFixtureFile(t, root+"/nodes.yaml", "{}\n")
 	requires := "  credentials: [provider_oauth]\n"
 	if omitRequires {
 		requires = ""
@@ -451,7 +447,6 @@ version: "1.0.0"
 requires:
 `+requires)
 	writeToolFixtureFile(t, root+"/flows/worker/schema.yaml", "name: worker\nmode: static\n")
-	writeToolFixtureFile(t, root+"/flows/worker/policy.yaml", "{}\n")
 	writeToolFixtureFile(t, root+"/flows/worker/agents.yaml", `
 worker-agent:
   id: worker-agent
@@ -474,7 +469,6 @@ send_provider:
   response_mapping:
     ok: '{{response.body.ok}}'
 `)
-	writeToolFixtureFile(t, root+"/flows/worker/events.yaml", "{}\n")
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)

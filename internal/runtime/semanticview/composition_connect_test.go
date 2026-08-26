@@ -118,9 +118,6 @@ func writeCompositionConnectFlow(t *testing.T, root, flowID, schemaTail, events,
 name: `+flowID+`
 mode: static
 `+schemaTail)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", flowID, "policy.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", flowID, "agents.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", flowID, "nodes.yaml"), "{}\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), events)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", flowID, "entities.yaml"), entities)
 }
