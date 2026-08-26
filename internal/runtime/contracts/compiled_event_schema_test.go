@@ -91,6 +91,19 @@ item.*: {}
 	}
 }
 
+func TestCompileCurrentEventDeclarationRejectsNoncanonicalIdentityInsteadOfOmittingIt(t *testing.T) {
+	bundle := &WorkflowContractBundle{}
+	for _, name := range []string{"", " item.created ", "/item.created", "Item Ready", "item.pre*"} {
+		_, ok, err := bundle.compileCurrentEventDeclaration(".", "", "project", "events.yaml", name, name, EventCatalogEntry{}, TypeCatalogDocument{})
+		if err == nil || ok || !strings.Contains(err.Error(), "canonical") {
+			t.Fatalf("compile declaration %q = ok:%t err:%v, want fail-closed canonical identity error", name, ok, err)
+		}
+	}
+	if _, ok, err := bundle.compileCurrentEventDeclaration(".", "", "project", "events.yaml", "item.*", "item.*", EventCatalogEntry{}, TypeCatalogDocument{}); err != nil || ok {
+		t.Fatalf("pattern declaration = ok:%t err:%v, want supported non-importable pattern", ok, err)
+	}
+}
+
 func TestCompiledEventSchemasPreservesPackageOwnerAndRejectsRawRestatements(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := writeCompiledEventPackageFixture(t)
@@ -134,9 +147,6 @@ func TestCompiledEventSchemasPreservesPackageOwnerAndRejectsRawRestatements(t *t
 		t.Fatalf("flow-owned child canonical bytes/digest disagree with admitted schema")
 	}
 	for _, event := range compiled {
-		if strings.Contains(event.EventName(), "addon-a") {
-			t.Fatalf("noncanonical package restatement became declaration identity: %s:%s", event.PackageKey(), event.EventName())
-		}
 		if event.Classification() != CompiledEventSchemaAuthored {
 			t.Fatalf("non-authored event escaped exact enumeration: %#v", event.Classification())
 		}
@@ -359,7 +369,7 @@ pins:
   inputs:
     events: [root.start]
 `)
-	writeFixtureFile(t, filepath.Join(flowRoot, "events.yaml"), "root.start: {}\naddon-a.start: {}\n")
+	writeFixtureFile(t, filepath.Join(flowRoot, "events.yaml"), "root.start: {}\n")
 	writeFixtureFile(t, filepath.Join(flowRoot, "types.yaml"), "scalars:\n  OrderCode: text\n")
 	for _, name := range []string{"nodes.yaml", "agents.yaml", "tools.yaml", "policy.yaml"} {
 		writeFixtureFile(t, filepath.Join(flowRoot, name), "{}\n")

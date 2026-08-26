@@ -347,6 +347,77 @@ entry:
 	}
 }
 
+func TestDocumentPreservesAliasUseAndResolvedTargetLocations(t *testing.T) {
+	snapshot, err := Load([]byte(`
+scalar_anchor: &scalar value
+sequence_anchor: &sequence [one, two]
+mapping_anchor: &mapping {field: value}
+scalar_alias: *scalar
+sequence_alias: *sequence
+mapping_alias: *mapping
+merge_target: &merge_target
+  merged: *scalar
+merge_alias:
+  <<: *merge_target
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := snapshot.Document("contract.yaml").Root()
+	for _, tc := range []struct {
+		name         string
+		aliasLine    int
+		resolvedLine int
+		presence     Presence
+	}{
+		{name: "scalar_alias", aliasLine: 5, resolvedLine: 2, presence: PresenceScalar},
+		{name: "sequence_alias", aliasLine: 6, resolvedLine: 3, presence: PresenceSequence},
+		{name: "mapping_alias", aliasLine: 7, resolvedLine: 4, presence: PresenceMapping},
+	} {
+		lookup, lookupErr := root.Lookup(tc.name)
+		if lookupErr != nil {
+			t.Fatal(lookupErr)
+		}
+		if lookup.Presence != tc.presence || lookup.Value.Location().Line != tc.aliasLine || lookup.Value.ResolvedLocation().Line != tc.resolvedLine {
+			t.Fatalf("%s = presence:%s location:%s resolved:%s", tc.name, lookup.Presence, lookup.Value.Location(), lookup.Value.ResolvedLocation())
+		}
+		if len(lookup.Occurrences) != 1 || lookup.Occurrences[0].ValueLocation.Line != tc.aliasLine || lookup.Occurrences[0].ResolvedValueLocation.Line != tc.resolvedLine {
+			t.Fatalf("%s occurrences = %#v", tc.name, lookup.Occurrences)
+		}
+	}
+
+	scalarAlias, err := root.Lookup("scalar_alias")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scalar, err := scalarAlias.Value.Scalar()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scalar.Location.Line != 5 || scalar.ResolvedLocation.Line != 2 {
+		t.Fatalf("scalar alias locations = %s / %s", scalar.Location, scalar.ResolvedLocation)
+	}
+
+	mergeAlias, err := root.Lookup("merge_alias")
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged, err := mergeAlias.Value.Lookup("merged")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(merged.Occurrences) != 1 {
+		t.Fatalf("merged occurrences = %#v", merged.Occurrences)
+	}
+	occurrence := merged.Occurrences[0]
+	if !occurrence.FromMerge || occurrence.MergeLocation.Line != 11 || occurrence.MergeValueLocation.Line != 11 || occurrence.MergeResolvedValueLocation.Line != 8 {
+		t.Fatalf("merge alias locations = %#v", occurrence)
+	}
+	if occurrence.ValueLocation.Line != 9 || occurrence.ResolvedValueLocation.Line != 2 {
+		t.Fatalf("nested alias locations = %#v", occurrence)
+	}
+}
+
 func TestDocumentValidateUniqueMappingsRejectsDirectAndMergedDuplicates(t *testing.T) {
 	for _, tc := range []struct {
 		source string

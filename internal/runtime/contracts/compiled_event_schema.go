@@ -296,15 +296,14 @@ func (b *WorkflowContractBundle) compileCurrentEventDeclaration(
 	entry EventCatalogEntry,
 	types TypeCatalogDocument,
 ) (CompiledEventSchema, bool, error) {
-	if strings.Contains(localName, "*") {
+	if eventidentity.IsCanonicalPattern(localName) {
 		return CompiledEventSchema{}, false, nil
 	}
-	if eventidentity.Normalize(localName) != localName {
-		return CompiledEventSchema{}, false, nil
+	if !eventidentity.IsCanonicalName(localName) {
+		return CompiledEventSchema{}, false, fmt.Errorf("compiled event declaration %q is not an exact canonical event identity", localName)
 	}
-	qualifiedName = eventidentity.Normalize(qualifiedName)
-	if !eventidentity.IsValidName(qualifiedName) {
-		return CompiledEventSchema{}, false, nil
+	if !eventidentity.IsCanonicalName(qualifiedName) {
+		return CompiledEventSchema{}, false, fmt.Errorf("compiled event declaration %q resolves to noncanonical identity %q", localName, qualifiedName)
 	}
 	admittedPackage, err := runtimeidentity.ParsePackageKey(packageKey)
 	if err != nil {

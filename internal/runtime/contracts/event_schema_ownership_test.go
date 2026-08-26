@@ -232,6 +232,110 @@ func TestEffectiveEventResolutionPreservesConnectedRenameOwnership(t *testing.T)
 	}
 }
 
+func TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConnectOrder(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	source := filepath.Join(repo, "examples", "routing", "parent-connect")
+	for _, reverse := range []bool{false, true} {
+		name := "authored order"
+		if reverse {
+			name = "reversed order"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "parent-connect")
+			copyTree(t, source, root)
+			copyTree(t, filepath.Join(root, "flows", "producer"), filepath.Join(root, "flows", "producer-b"))
+			if err := os.WriteFile(filepath.Join(root, "flows", "producer-b", "events.yaml"), []byte("work.requested:\n  work_id: uuid?\nwork.ready:\n  work_id: uuid?\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "flows", "producer-b", "schema.yaml"), []byte(`name: producer-b
+mode: static
+pins:
+  inputs:
+    events:
+      - name: work_requested
+        event: work.requested
+        source: external
+  outputs:
+    events:
+      - name: work_ready
+        event: work.ready
+`), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			connects := []string{
+				"  - event: work.ready\n    from: producer\n    to: consumer",
+				"  - event: work.ready\n    from: producer-b\n    to: consumer",
+			}
+			if reverse {
+				connects[0], connects[1] = connects[1], connects[0]
+			}
+			manifest := `name: routing-parent-connect
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: producer
+    flow: producer
+    mode: static
+  - id: producer-b
+    flow: producer-b
+    mode: static
+  - id: consumer
+    flow: consumer
+    mode: static
+connect:
+` + strings.Join(connects, "\n") + "\n"
+			if err := os.WriteFile(filepath.Join(root, "package.yaml"), []byte(manifest), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+			if err == nil || !contractErrorContains(err, "multiple connected producer schema owners") || !contractErrorContains(err, "producer-b") || !contractErrorContains(err, "work.ready") {
+				t.Fatalf("load error = %v, want deterministic distinct-producer ownership rejection", err)
+			}
+		})
+	}
+}
+
+func TestEffectiveEventResolutionDoesNotFallbackAfterConnectedOwnerAmbiguity(t *testing.T) {
+	wrong := EventCatalogEntry{Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"wrong": {Type: "text"}}}}
+	bundle := &WorkflowContractBundle{
+		Events: map[string]EventCatalogEntry{"work.ready": wrong},
+		Semantics: WorkflowSemanticView{FlowInputs: map[string][]string{
+			"consumer": {"work.ready"},
+		}},
+		eventOwnersByFlow: map[string][]eventSchemaOwnershipRow{
+			"consumer": {
+				{packageKey: ".", producerEndpoint: "producer-a", producerFlowID: "producer-a", producerName: "work.ready", receiverEndpoint: "consumer", receiverFlowID: "consumer", receiverEvent: "work.ready"},
+				{packageKey: ".", producerEndpoint: "producer-b", producerFlowID: "producer-b", producerName: "work.ready", receiverEndpoint: "consumer", receiverFlowID: "consumer", receiverEvent: "work.ready"},
+			},
+		},
+	}
+	entry, key, _, connected, ok := resolveEffectiveEventDeclarationForFlowEvent(bundle, "consumer", "work.ready")
+	if ok || !connected || key != "" || len(entry.Payload.Properties) != 0 {
+		t.Fatalf("ambiguous resolution = entry:%#v key:%q connected:%t ok:%t, want fail closed before generic fallback", entry, key, connected, ok)
+	}
+}
+
+func TestConnectedEventSchemaOwnershipPreservesSingleProducerFanIn(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	for _, fixture := range []string{"barrier", "stream"} {
+		t.Run(fixture, func(t *testing.T) {
+			root := filepath.Join(repo, "examples", "routing", "fan-in", fixture)
+			bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+			if err != nil {
+				t.Fatal(err)
+			}
+			row, ok, ambiguous := connectedEventSchemaOwnershipRow(bundle, "operating", "operating.report.requested")
+			if !ok || ambiguous || row.producerFlowID != "ingress" || row.receiverFlowID != "operating" {
+				t.Fatalf("fan-in owner = %#v, found=%t ambiguous=%t", row, ok, ambiguous)
+			}
+			entry, _, ok := bundle.ResolveFlowEventCatalogEntry("operating", "operating.report.requested")
+			if !ok || entry.Payload.Properties["operating_id"].Type != "uuid" {
+				t.Fatalf("fan-in effective schema = %#v, found=%t", entry.Payload.Properties, ok)
+			}
+		})
+	}
+}
+
 func TestIntraPackageEventConsumerRestatementFailsClosed(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	source := filepath.Join(repo, "examples", "routing", "parent-connect")

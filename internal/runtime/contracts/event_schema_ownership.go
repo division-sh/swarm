@@ -115,7 +115,17 @@ func compileEventSchemaOwnershipRow(bundle *WorkflowContractBundle, connect Flow
 
 func validateIntraPackageEventSchemaOwnership(bundle *WorkflowContractBundle) []error {
 	var errs []error
-	for _, row := range effectiveEventSchemaOwnershipRows(bundle) {
+	rows := effectiveEventSchemaOwnershipRows(bundle)
+	ownersByReceiver := make(map[string]map[string]eventSchemaOwnershipRow)
+	for _, row := range rows {
+		receiverKey := eventSchemaReceiverOwnerKey(bundle, row)
+		producerKey := eventSchemaProducerOwnerKey(row)
+		if receiverKey != "" && producerKey != "" {
+			if ownersByReceiver[receiverKey] == nil {
+				ownersByReceiver[receiverKey] = map[string]eventSchemaOwnershipRow{}
+			}
+			ownersByReceiver[receiverKey][producerKey] = row
+		}
 		if !row.receiverRestatement {
 			continue
 		}
@@ -133,7 +143,58 @@ func validateIntraPackageEventSchemaOwnership(bundle *WorkflowContractBundle) []
 			receiverLocation,
 		))
 	}
+	receiverKeys := make([]string, 0, len(ownersByReceiver))
+	for receiverKey := range ownersByReceiver {
+		receiverKeys = append(receiverKeys, receiverKey)
+	}
+	sort.Strings(receiverKeys)
+	for _, receiverKey := range receiverKeys {
+		owners := ownersByReceiver[receiverKey]
+		if len(owners) <= 1 {
+			continue
+		}
+		labels := make([]string, 0, len(owners))
+		var receiver eventSchemaOwnershipRow
+		for _, owner := range owners {
+			receiver = owner
+			labels = append(labels, fmt.Sprintf("%s event %s at %s", packageEndpointLabel(owner.producerEndpoint), owner.producerName, eventDeclarationLocation(owner.producer)))
+		}
+		sort.Strings(labels)
+		errs = append(errs, fmt.Errorf(
+			"%w: receiver %s event %s in package %s has multiple connected producer schema owners: %s; one effective receiver event must have exactly one producer-owned schema",
+			ErrMultipleAuthoritativeOwners,
+			packageEndpointLabel(receiver.receiverEndpoint),
+			receiver.receiverEvent,
+			receiver.packageKey,
+			strings.Join(labels, ", "),
+		))
+	}
 	return errs
+}
+
+func eventSchemaReceiverOwnerKey(bundle *WorkflowContractBundle, row eventSchemaOwnershipRow) string {
+	receiverEvent := eventidentity.Normalize(row.receiverEvent)
+	if bundle != nil && row.receiverFlowID != "" {
+		local := packageEndpointLocalEvent(bundle, row.receiverFlowID, receiverEvent, true)
+		receiverEvent = eventidentity.ExternalizeForFlow(bundle.FlowPath(row.receiverFlowID), bundle.FlowInputEvents(row.receiverFlowID), local)
+	}
+	if receiverEvent == "" {
+		return ""
+	}
+	return strings.Join([]string{strings.TrimSpace(row.packageKey), strings.TrimSpace(row.receiverFlowID), receiverEvent}, "\x00")
+}
+
+func eventSchemaProducerOwnerKey(row eventSchemaOwnershipRow) string {
+	producerName := eventidentity.Normalize(row.producerName)
+	if producerName == "" {
+		return ""
+	}
+	return strings.Join([]string{strings.TrimSpace(row.packageKey), strings.TrimSpace(row.producerFlowID), strings.TrimSpace(row.producerEndpoint), producerName}, "\x00")
+}
+
+func sameEventSchemaProducerOwner(left, right eventSchemaOwnershipRow) bool {
+	leftKey := eventSchemaProducerOwnerKey(left)
+	return leftKey != "" && leftKey == eventSchemaProducerOwnerKey(right)
 }
 
 func packageEndpointOwningFlowID(bundle *WorkflowContractBundle, packageKey, endpoint string) string {
@@ -231,7 +292,9 @@ func resolveEffectiveEventDeclarationForFlowEvent(bundle *WorkflowContractBundle
 	var types TypeCatalogDocument
 	connected := false
 	var ok bool
-	if row, found := connectedEventSchemaOwnershipRow(bundle, flowID, eventType); found {
+	if row, found, ambiguous := connectedEventSchemaOwnershipRow(bundle, flowID, eventType); ambiguous {
+		return EventCatalogEntry{}, "", TypeCatalogDocument{}, true, false
+	} else if found {
 		entry = row.producer
 		key = row.producerName
 		types = bundle.RootTypeCatalog()
@@ -267,17 +330,27 @@ func (b *WorkflowContractBundle) flowInputEventMatches(flowID, subscription, eve
 	return scope.Matches(subscription, eventType, nil)
 }
 
-func connectedEventSchemaOwnershipRow(bundle *WorkflowContractBundle, flowID, eventType string) (eventSchemaOwnershipRow, bool) {
+func connectedEventSchemaOwnershipRow(bundle *WorkflowContractBundle, flowID, eventType string) (eventSchemaOwnershipRow, bool, bool) {
 	if bundle == nil {
-		return eventSchemaOwnershipRow{}, false
+		return eventSchemaOwnershipRow{}, false, false
 	}
 	flowID = strings.TrimSpace(flowID)
+	var selected eventSchemaOwnershipRow
+	found := false
 	for _, row := range eventSchemaOwnershipRowsForReceiver(bundle, flowID) {
-		if bundle.flowInputEventMatches(flowID, row.receiverEvent, eventType) {
-			return row, true
+		if !bundle.flowInputEventMatches(flowID, row.receiverEvent, eventType) {
+			continue
+		}
+		if !found {
+			selected = row
+			found = true
+			continue
+		}
+		if !sameEventSchemaProducerOwner(selected, row) {
+			return eventSchemaOwnershipRow{}, false, true
 		}
 	}
-	return eventSchemaOwnershipRow{}, false
+	return selected, found, false
 }
 
 // ResolveFlowEventCatalogEntry returns the producer-owned event declaration

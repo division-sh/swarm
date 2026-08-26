@@ -15,6 +15,36 @@ func TestIsValidNameUsesCanonicalEventGrammar(t *testing.T) {
 	}
 }
 
+func TestCanonicalEventDeclarationGrammar(t *testing.T) {
+	for _, name := range []string{
+		"item.created",
+		"flow/step.completed",
+		"item.*",
+		"*.completed",
+		"*/order.completed",
+		"**/item.processed",
+	} {
+		if !IsCanonicalDeclaration(name) {
+			t.Fatalf("IsCanonicalDeclaration(%q) = false, want true", name)
+		}
+	}
+	for _, name := range []string{
+		"",
+		" item.created ",
+		"/item.created",
+		"item.created/",
+		"Item Ready",
+		"item.pre*",
+		"item.**",
+		"item.?",
+		"item.[ab]",
+	} {
+		if IsCanonicalDeclaration(name) {
+			t.Fatalf("IsCanonicalDeclaration(%q) = true, want false", name)
+		}
+	}
+}
+
 func TestLeafName_LocalizesScopedEvent(t *testing.T) {
 	if got := LeafName("scoring/vertical.shortlisted"); got != "vertical.shortlisted" {
 		t.Fatalf("LeafName = %q, want %q", got, "vertical.shortlisted")
