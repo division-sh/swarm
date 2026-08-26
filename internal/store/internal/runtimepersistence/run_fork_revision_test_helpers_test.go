@@ -15,10 +15,22 @@ const runForkRevisionFlowInstance = "revision-flow"
 
 func captureRunForkTestRevision(t *testing.T, db *sql.DB, runID string, families ...runforkrevision.Family) int64 {
 	t.Helper()
+	ctx := testAuthorActivityContext()
+	var bundleHash string
+	if err := db.QueryRowContext(ctx, `SELECT bundle_hash FROM runs WHERE run_id = $1::uuid`, runID).Scan(&bundleHash); err != nil {
+		t.Fatalf("load run-fork fixture bundle identity: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json, metadata)
+		VALUES ($1, 'api_version: swarm.test.bundle.v1', '{}'::jsonb, '{"source":"run-fork-test"}'::jsonb)
+		ON CONFLICT (bundle_hash) DO NOTHING
+	`, bundleHash); err != nil {
+		t.Fatalf("admit run-fork fixture bundle catalog: %v", err)
+	}
 	if len(families) == 0 {
 		families = runforkrevision.AllFamilies()
 	}
-	tx, err := db.BeginTx(testAuthorActivityContext(), nil)
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin run fork test revision: %v", err)
 	}

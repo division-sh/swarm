@@ -601,7 +601,7 @@
       },
       "errors": [
         {
-          "code": -32025,
+          "code": -32037,
           "message": "Application error: EVENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -639,7 +639,7 @@
           }
         },
         {
-          "code": -32029,
+          "code": -32041,
           "message": "Application error: EVENT_REPLAY_NO_DELIVERY_HISTORY",
           "data": {
             "additionalProperties": false,
@@ -677,7 +677,7 @@
           }
         },
         {
-          "code": -32030,
+          "code": -32042,
           "message": "Application error: EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL",
           "data": {
             "additionalProperties": false,
@@ -732,7 +732,7 @@
           }
         },
         {
-          "code": -32031,
+          "code": -32043,
           "message": "Application error: EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE",
           "data": {
             "additionalProperties": false,
@@ -792,7 +792,7 @@
           }
         },
         {
-          "code": -32028,
+          "code": -32040,
           "message": "Application error: EVENT_REPLAY_NOT_ELIGIBLE",
           "data": {
             "additionalProperties": false,
@@ -846,7 +846,7 @@
           }
         },
         {
-          "code": -32042,
+          "code": -32055,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -904,7 +904,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -1038,7 +1038,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -1270,7 +1270,7 @@
           }
         },
         {
-          "code": -32048,
+          "code": -32064,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -1308,7 +1308,7 @@
           }
         },
         {
-          "code": -32047,
+          "code": -32060,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -1411,7 +1411,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -2082,7 +2082,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -2306,7 +2306,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -2599,7 +2599,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -2894,7 +2894,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -3195,7 +3195,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -3490,7 +3490,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -3785,7 +3785,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4034,7 +4034,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4129,7 +4129,7 @@
       },
       "errors": [
         {
-          "code": -32050,
+          "code": -32066,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4167,7 +4167,7 @@
           }
         },
         {
-          "code": -32052,
+          "code": -32068,
           "message": "Application error: TURN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4209,7 +4209,7 @@
           }
         },
         {
-          "code": -32025,
+          "code": -32037,
           "message": "Application error: EVENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4247,7 +4247,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4343,7 +4343,7 @@
       },
       "errors": [
         {
-          "code": -32032,
+          "code": -32044,
           "message": "Application error: FORK_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4381,7 +4381,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4469,7 +4469,7 @@
       },
       "errors": [
         {
-          "code": -32032,
+          "code": -32044,
           "message": "Application error: FORK_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4507,7 +4507,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -4640,7 +4640,7 @@
       },
       "errors": [
         {
-          "code": -32032,
+          "code": -32044,
           "message": "Application error: FORK_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4707,7 +4707,7 @@
       },
       "errors": [
         {
-          "code": -32050,
+          "code": -32066,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4745,7 +4745,7 @@
           }
         },
         {
-          "code": -32052,
+          "code": -32068,
           "message": "Application error: TURN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4893,7 +4893,7 @@
       },
       "errors": [
         {
-          "code": -32050,
+          "code": -32066,
           "message": "Application error: SESSION_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -4915,6 +4915,925 @@
                 "required": [
                   "session_id"
                 ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "data.check",
+      "description": "Validate one complete JSONL candidate against the declaration and schema owned by the exact selected bundle. The permanent source invocation receipt owns replay, but no version, row, provenance, head, pin, or tombstone is written.\n",
+      "params": [
+        {
+          "name": "source_invocation_id",
+          "required": true,
+          "schema": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        {
+          "name": "bundle_hash",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/BundleHash"
+          }
+        },
+        {
+          "name": "declaration",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/DataDeclarationRef"
+          }
+        },
+        {
+          "name": "expected_head",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/ExpectedHead"
+          }
+        },
+        {
+          "name": "input",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/DataInput"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/SourceOperationResult"
+        }
+      },
+      "errors": [
+        {
+          "code": -32053,
+          "message": "Application error: MESSAGE_BUDGET_EXCEEDED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MESSAGE_BUDGET_EXCEEDED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "boundary": {
+                    "enum": [
+                      "rpc_message",
+                      "decoded_import",
+                      "aggregate_import",
+                      "public_page",
+                      "tool_page"
+                    ],
+                    "type": "string"
+                  },
+                  "limit_bytes": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "method": {
+                    "type": "string"
+                  },
+                  "observed_bytes": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "receipt_created": {
+                    "const": false,
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "boundary",
+                  "method",
+                  "limit_bytes",
+                  "observed_bytes",
+                  "receipt_created"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32029,
+          "message": "Application error: DATA_INVOCATION_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_INVOCATION_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "description": "A permanent source, prune, or run-creation identity was reused with a different semantic request.",
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32024,
+          "message": "Application error: DATA_CONTRACT_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_CONTRACT_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "bundle_hash": {
+                    "$ref": "#/components/schemas/BundleHash"
+                  },
+                  "declaration": {
+                    "$ref": "#/components/schemas/DataDeclarationRef"
+                  },
+                  "receipt_created": {
+                    "const": false,
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "bundle_hash",
+                  "declaration",
+                  "receipt_created"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32028,
+          "message": "Application error: DATA_INTEGRITY_ERROR",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_INTEGRITY_ERROR",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "description": "Persisted data declaration, version, row, pin, receipt, or tombstone facts contradict one another.",
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "data.import",
+      "description": "Validate and compare-and-set one immutable JSONL resource version against the declaration/schema in the exact selected bundle. Permanent receipt, version, rows, provenance, head, alias, and history commit atomically.\n",
+      "params": [
+        {
+          "name": "source_invocation_id",
+          "required": true,
+          "schema": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        {
+          "name": "bundle_hash",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/BundleHash"
+          }
+        },
+        {
+          "name": "declaration",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/DataDeclarationRef"
+          }
+        },
+        {
+          "name": "expected_head",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/ExpectedHead"
+          }
+        },
+        {
+          "name": "input",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/DataInput"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/SourceOperationResult"
+        }
+      },
+      "errors": [
+        {
+          "code": -32053,
+          "message": "Application error: MESSAGE_BUDGET_EXCEEDED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MESSAGE_BUDGET_EXCEEDED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "boundary": {
+                    "enum": [
+                      "rpc_message",
+                      "decoded_import",
+                      "aggregate_import",
+                      "public_page",
+                      "tool_page"
+                    ],
+                    "type": "string"
+                  },
+                  "limit_bytes": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "method": {
+                    "type": "string"
+                  },
+                  "observed_bytes": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "receipt_created": {
+                    "const": false,
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "boundary",
+                  "method",
+                  "limit_bytes",
+                  "observed_bytes",
+                  "receipt_created"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32029,
+          "message": "Application error: DATA_INVOCATION_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_INVOCATION_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "description": "A permanent source, prune, or run-creation identity was reused with a different semantic request.",
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32024,
+          "message": "Application error: DATA_CONTRACT_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_CONTRACT_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "bundle_hash": {
+                    "$ref": "#/components/schemas/BundleHash"
+                  },
+                  "declaration": {
+                    "$ref": "#/components/schemas/DataDeclarationRef"
+                  },
+                  "receipt_created": {
+                    "const": false,
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "bundle_hash",
+                  "declaration",
+                  "receipt_created"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32028,
+          "message": "Application error: DATA_INTEGRITY_ERROR",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_INTEGRITY_ERROR",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "description": "Persisted data declaration, version, row, pin, receipt, or tombstone facts contradict one another.",
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "data.prune",
+      "description": "Permanently evaluate and, when legal, remove only immutable version payload rows. Manifest, schema, alias, provenance, head history, tombstone, and operation receipts remain. Replay precedes state checks; aggregate integrity precedes normal refusal outcomes.\n",
+      "params": [
+        {
+          "name": "prune_invocation_id",
+          "required": true,
+          "schema": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        {
+          "name": "declaration",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/DataDeclarationRef"
+          }
+        },
+        {
+          "name": "version_id",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/ResourceVersionID"
+          }
+        },
+        {
+          "name": "expected_head",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/ExpectedHead"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/PruneOperationResult"
+        }
+      },
+      "errors": [
+        {
+          "code": -32029,
+          "message": "Application error: DATA_INVOCATION_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_INVOCATION_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "description": "A permanent source, prune, or run-creation identity was reused with a different semantic request.",
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32028,
+          "message": "Application error: DATA_INTEGRITY_ERROR",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_INTEGRITY_ERROR",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "description": "Persisted data declaration, version, row, pin, receipt, or tombstone facts contradict one another.",
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        }
+      ]
+    },
+    {
+      "name": "data.show",
+      "description": "Bounded typed readback for declarations, immutable versions, rows, canonical export chunks, provenance, pins, head history, and permanent source/prune/run-creation operation evidence. Every non-singleton view requires an explicit bounded page and every cursor is query-bound.\n",
+      "params": [
+        {
+          "name": "view",
+          "required": true,
+          "schema": {
+            "enum": [
+              "declarations",
+              "versions",
+              "version",
+              "rows",
+              "row",
+              "export_chunk",
+              "provenance",
+              "head_history",
+              "pins",
+              "operation"
+            ],
+            "type": "string"
+          }
+        },
+        {
+          "name": "bundle_hash",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/BundleHash"
+          }
+        },
+        {
+          "name": "declaration",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/DataDeclarationRef"
+          }
+        },
+        {
+          "name": "selector",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/DataVersionSelector"
+          }
+        },
+        {
+          "name": "row_selector",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/DataRowSelector"
+          }
+        },
+        {
+          "name": "operation_ref",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/DataOperationRef"
+          }
+        },
+        {
+          "name": "detail",
+          "required": false,
+          "schema": {
+            "enum": [
+              "summary",
+              "defects",
+              "delta_added",
+              "delta_removed",
+              "delta_changed",
+              "pins",
+              "run_binding",
+              "child_evaluations",
+              "child_defects"
+            ],
+            "type": "string"
+          }
+        },
+        {
+          "name": "page",
+          "required": false,
+          "schema": {
+            "$ref": "#/components/schemas/DataPageRequest"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "required": true,
+        "schema": {
+          "$ref": "#/components/schemas/DataShowResult"
+        }
+      },
+      "errors": [
+        {
+          "code": -32053,
+          "message": "Application error: MESSAGE_BUDGET_EXCEEDED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MESSAGE_BUDGET_EXCEEDED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "boundary": {
+                    "enum": [
+                      "rpc_message",
+                      "decoded_import",
+                      "aggregate_import",
+                      "public_page",
+                      "tool_page"
+                    ],
+                    "type": "string"
+                  },
+                  "limit_bytes": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "method": {
+                    "type": "string"
+                  },
+                  "observed_bytes": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "receipt_created": {
+                    "const": false,
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "boundary",
+                  "method",
+                  "limit_bytes",
+                  "observed_bytes",
+                  "receipt_created"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32026,
+          "message": "Application error: DATA_DECLARATION_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_DECLARATION_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "declaration": {
+                    "$ref": "#/components/schemas/DataDeclarationRef"
+                  }
+                },
+                "required": [
+                  "declaration"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32034,
+          "message": "Application error: DATA_VERSION_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_VERSION_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "description": "An exact resource version or alias selector did not resolve.",
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32031,
+          "message": "Application error: DATA_PAYLOAD_PRUNED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_PAYLOAD_PRUNED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "version_id": {
+                    "$ref": "#/components/schemas/ResourceVersionID"
+                  }
+                },
+                "required": [
+                  "version_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32030,
+          "message": "Application error: DATA_OPERATION_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_OPERATION_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "description": "The exact permanent operation identity does not exist.",
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32025,
+          "message": "Application error: DATA_CURSOR_INVALID",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_CURSOR_INVALID",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32028,
+          "message": "Application error: DATA_INTEGRITY_ERROR",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_INTEGRITY_ERROR",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "description": "Persisted data declaration, version, row, pin, receipt, or tombstone facts contradict one another.",
                 "type": "object"
               },
               "retryable": {
@@ -4997,7 +5916,7 @@
       },
       "errors": [
         {
-          "code": -32023,
+          "code": -32035,
           "message": "Application error: ENTITY_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -5130,7 +6049,7 @@
       },
       "errors": [
         {
-          "code": -32025,
+          "code": -32037,
           "message": "Application error: EVENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -5236,7 +6155,7 @@
       },
       "errors": [
         {
-          "code": -32026,
+          "code": -32038,
           "message": "Application error: EVENT_OBSERVATION_RUN_SCOPE_REQUIRED",
           "data": {
             "additionalProperties": false,
@@ -5349,6 +6268,14 @@
           "description": "Exact immutable scenario profile selection for a new or already-exactly-bound mock-only run.",
           "schema": {
             "$ref": "#/components/schemas/ScenarioExecutionSelector"
+          }
+        },
+        {
+          "name": "data",
+          "required": false,
+          "description": "Exact fused imports and explicit version pins for create-new-work only. Existing-run publication rejects this field.",
+          "schema": {
+            "$ref": "#/components/schemas/RunCreationDataEnvelope"
           }
         },
         {
@@ -5554,7 +6481,7 @@
           }
         },
         {
-          "code": -32053,
+          "code": -32069,
           "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
           "data": {
             "additionalProperties": false,
@@ -5589,7 +6516,7 @@
           }
         },
         {
-          "code": -32024,
+          "code": -32036,
           "message": "Application error: EVENT_NOT_DECLARED",
           "data": {
             "additionalProperties": false,
@@ -5646,7 +6573,7 @@
           }
         },
         {
-          "code": -32027,
+          "code": -32039,
           "message": "Application error: EVENT_PUBLISH_FAILED",
           "data": {
             "additionalProperties": false,
@@ -5703,7 +6630,7 @@
           }
         },
         {
-          "code": -32042,
+          "code": -32055,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -5761,7 +6688,7 @@
           }
         },
         {
-          "code": -32048,
+          "code": -32064,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -5799,7 +6726,7 @@
           }
         },
         {
-          "code": -32025,
+          "code": -32037,
           "message": "Application error: EVENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -5837,7 +6764,7 @@
           }
         },
         {
-          "code": -32047,
+          "code": -32060,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -5879,7 +6806,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -5936,6 +6863,399 @@
             ],
             "type": "object"
           }
+        },
+        {
+          "code": -32053,
+          "message": "Application error: MESSAGE_BUDGET_EXCEEDED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MESSAGE_BUDGET_EXCEEDED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "boundary": {
+                    "enum": [
+                      "rpc_message",
+                      "decoded_import",
+                      "aggregate_import",
+                      "public_page",
+                      "tool_page"
+                    ],
+                    "type": "string"
+                  },
+                  "limit_bytes": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "method": {
+                    "type": "string"
+                  },
+                  "observed_bytes": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "receipt_created": {
+                    "const": false,
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "boundary",
+                  "method",
+                  "limit_bytes",
+                  "observed_bytes",
+                  "receipt_created"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32029,
+          "message": "Application error: DATA_INVOCATION_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_INVOCATION_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "description": "A permanent source, prune, or run-creation identity was reused with a different semantic request.",
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32024,
+          "message": "Application error: DATA_CONTRACT_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_CONTRACT_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "bundle_hash": {
+                    "$ref": "#/components/schemas/BundleHash"
+                  },
+                  "declaration": {
+                    "$ref": "#/components/schemas/DataDeclarationRef"
+                  },
+                  "receipt_created": {
+                    "const": false,
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "bundle_hash",
+                  "declaration",
+                  "receipt_created"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32027,
+          "message": "Application error: DATA_DEPENDENCY_INCOMPLETE",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_DEPENDENCY_INCOMPLETE",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "description": "A new or fork run does not have one exact version for every mandatory selected-bundle declaration.",
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32032,
+          "message": "Application error: DATA_PIN_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_PIN_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "description": "Duplicate, undeclared, removed, or conflicting resource pin selection.",
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32033,
+          "message": "Application error: DATA_SCHEMA_MISMATCH",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_SCHEMA_MISMATCH",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "description": "The selected version schema differs from the selected bundle declaration schema.",
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32062,
+          "message": "Application error: RUN_DATA_IMMUTABLE",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "RUN_DATA_IMMUTABLE",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "run_id": {
+                    "format": "uuid",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "run_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32063,
+          "message": "Application error: RUN_DATA_REJECTED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "RUN_DATA_REJECTED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "description": "Permanent run-creation data validation rejection with typed operation evidence.",
+                "properties": {
+                  "operation": {
+                    "$ref": "#/components/schemas/DataRunCreationOperationSummary"
+                  },
+                  "run_id": {
+                    "format": "uuid",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "run_id",
+                  "operation"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32061,
+          "message": "Application error: RUN_DATA_HEAD_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "RUN_DATA_HEAD_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "description": "Permanent run-creation expected-head conflict with typed operation evidence.",
+                "properties": {
+                  "operation": {
+                    "$ref": "#/components/schemas/DataRunCreationOperationSummary"
+                  },
+                  "run_id": {
+                    "format": "uuid",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "run_id",
+                  "operation"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32028,
+          "message": "Application error: DATA_INTEGRITY_ERROR",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_INTEGRITY_ERROR",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "description": "Persisted data declaration, version, row, pin, receipt, or tombstone facts contradict one another.",
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
         }
       ]
     },
@@ -5978,7 +7298,7 @@
       },
       "errors": [
         {
-          "code": -32025,
+          "code": -32037,
           "message": "Application error: EVENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -6016,7 +7336,7 @@
           }
         },
         {
-          "code": -32029,
+          "code": -32041,
           "message": "Application error: EVENT_REPLAY_NO_DELIVERY_HISTORY",
           "data": {
             "additionalProperties": false,
@@ -6054,7 +7374,7 @@
           }
         },
         {
-          "code": -32030,
+          "code": -32042,
           "message": "Application error: EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL",
           "data": {
             "additionalProperties": false,
@@ -6109,7 +7429,7 @@
           }
         },
         {
-          "code": -32031,
+          "code": -32043,
           "message": "Application error: EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE",
           "data": {
             "additionalProperties": false,
@@ -6169,7 +7489,7 @@
           }
         },
         {
-          "code": -32028,
+          "code": -32040,
           "message": "Application error: EVENT_REPLAY_NOT_ELIGIBLE",
           "data": {
             "additionalProperties": false,
@@ -6223,7 +7543,7 @@
           }
         },
         {
-          "code": -32042,
+          "code": -32055,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -6281,7 +7601,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -6373,7 +7693,7 @@
       },
       "errors": [
         {
-          "code": -32026,
+          "code": -32038,
           "message": "Application error: EVENT_OBSERVATION_RUN_SCOPE_REQUIRED",
           "data": {
             "additionalProperties": false,
@@ -6502,7 +7822,7 @@
       },
       "errors": [
         {
-          "code": -32039,
+          "code": -32051,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -6540,7 +7860,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -6652,7 +7972,7 @@
       },
       "errors": [
         {
-          "code": -32039,
+          "code": -32051,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -6690,7 +8010,7 @@
           }
         },
         {
-          "code": -32040,
+          "code": -32052,
           "message": "Application error: MAILBOX_STALE_CARD",
           "data": {
             "additionalProperties": false,
@@ -6732,7 +8052,7 @@
           }
         },
         {
-          "code": -32038,
+          "code": -32050,
           "message": "Application error: MAILBOX_INVALID_VERDICT",
           "data": {
             "additionalProperties": false,
@@ -6774,7 +8094,7 @@
           }
         },
         {
-          "code": -32035,
+          "code": -32047,
           "message": "Application error: MAILBOX_ALREADY_DECIDED",
           "data": {
             "additionalProperties": false,
@@ -6812,7 +8132,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -6908,7 +8228,7 @@
       },
       "errors": [
         {
-          "code": -32039,
+          "code": -32051,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -6946,7 +8266,7 @@
           }
         },
         {
-          "code": -32037,
+          "code": -32049,
           "message": "Application error: MAILBOX_INPUT_DRAFT_NOT_AUTHORITY",
           "data": {
             "additionalProperties": false,
@@ -6984,7 +8304,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -7118,7 +8438,7 @@
       },
       "errors": [
         {
-          "code": -32039,
+          "code": -32051,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -7156,7 +8476,7 @@
           }
         },
         {
-          "code": -32035,
+          "code": -32047,
           "message": "Application error: MAILBOX_ALREADY_DECIDED",
           "data": {
             "additionalProperties": false,
@@ -7194,7 +8514,7 @@
           }
         },
         {
-          "code": -32040,
+          "code": -32052,
           "message": "Application error: MAILBOX_STALE_CARD",
           "data": {
             "additionalProperties": false,
@@ -7236,7 +8556,7 @@
           }
         },
         {
-          "code": -32038,
+          "code": -32050,
           "message": "Application error: MAILBOX_INVALID_VERDICT",
           "data": {
             "additionalProperties": false,
@@ -7278,7 +8598,7 @@
           }
         },
         {
-          "code": -32037,
+          "code": -32049,
           "message": "Application error: MAILBOX_INPUT_DRAFT_NOT_AUTHORITY",
           "data": {
             "additionalProperties": false,
@@ -7316,7 +8636,7 @@
           }
         },
         {
-          "code": -32036,
+          "code": -32048,
           "message": "Application error: MAILBOX_CARD_SUPERSEDED",
           "data": {
             "additionalProperties": false,
@@ -7354,7 +8674,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -7450,7 +8770,7 @@
       },
       "errors": [
         {
-          "code": -32039,
+          "code": -32051,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -7488,7 +8808,7 @@
           }
         },
         {
-          "code": -32035,
+          "code": -32047,
           "message": "Application error: MAILBOX_ALREADY_DECIDED",
           "data": {
             "additionalProperties": false,
@@ -7526,7 +8846,7 @@
           }
         },
         {
-          "code": -32034,
+          "code": -32046,
           "message": "Application error: INVALID_DEFER_UNTIL",
           "data": {
             "additionalProperties": false,
@@ -7572,7 +8892,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -7653,7 +8973,7 @@
       },
       "errors": [
         {
-          "code": -32039,
+          "code": -32051,
           "message": "Application error: MAILBOX_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -7857,7 +9177,7 @@
       },
       "errors": [
         {
-          "code": -32048,
+          "code": -32064,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -7895,7 +9215,7 @@
           }
         },
         {
-          "code": -32049,
+          "code": -32065,
           "message": "Application error: RUN_NOT_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -7937,7 +9257,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -8018,7 +9338,7 @@
       },
       "errors": [
         {
-          "code": -32048,
+          "code": -32064,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -8092,6 +9412,18 @@
           "schema": {
             "default": false,
             "type": "boolean"
+          }
+        },
+        {
+          "name": "data_pin_overrides",
+          "required": false,
+          "description": "Exact structured declaration/version replacements. Head and alias selectors are forbidden; omission inherits the complete source pin set.",
+          "schema": {
+            "items": {
+              "$ref": "#/components/schemas/DataPinOverride"
+            },
+            "maxItems": 256,
+            "type": "array"
           }
         },
         {
@@ -8208,7 +9540,7 @@
           }
         },
         {
-          "code": -32048,
+          "code": -32064,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -8246,7 +9578,7 @@
           }
         },
         {
-          "code": -32025,
+          "code": -32037,
           "message": "Application error: EVENT_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -8284,7 +9616,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -8341,6 +9673,199 @@
             ],
             "type": "object"
           }
+        },
+        {
+          "code": -32027,
+          "message": "Application error: DATA_DEPENDENCY_INCOMPLETE",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_DEPENDENCY_INCOMPLETE",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "description": "A new or fork run does not have one exact version for every mandatory selected-bundle declaration.",
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32032,
+          "message": "Application error: DATA_PIN_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_PIN_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "description": "Duplicate, undeclared, removed, or conflicting resource pin selection.",
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32033,
+          "message": "Application error: DATA_SCHEMA_MISMATCH",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_SCHEMA_MISMATCH",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "description": "The selected version schema differs from the selected bundle declaration schema.",
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32031,
+          "message": "Application error: DATA_PAYLOAD_PRUNED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_PAYLOAD_PRUNED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "version_id": {
+                    "$ref": "#/components/schemas/ResourceVersionID"
+                  }
+                },
+                "required": [
+                  "version_id"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32034,
+          "message": "Application error: DATA_VERSION_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_VERSION_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "description": "An exact resource version or alias selector did not resolve.",
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32028,
+          "message": "Application error: DATA_INTEGRITY_ERROR",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_INTEGRITY_ERROR",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "description": "Persisted data declaration, version, row, pin, receipt, or tombstone facts contradict one another.",
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
         }
       ]
     },
@@ -8374,7 +9899,7 @@
       },
       "errors": [
         {
-          "code": -32048,
+          "code": -32064,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -8515,7 +10040,7 @@
       },
       "errors": [
         {
-          "code": -32048,
+          "code": -32064,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -8553,7 +10078,7 @@
           }
         },
         {
-          "code": -32047,
+          "code": -32060,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -8595,7 +10120,7 @@
           }
         },
         {
-          "code": -32046,
+          "code": -32059,
           "message": "Application error: RUN_ALREADY_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -8633,7 +10158,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -8730,6 +10255,14 @@
           }
         },
         {
+          "name": "data",
+          "required": false,
+          "description": "Exact fused imports and explicit version pins consumed by the method-neutral run-creation operation.",
+          "schema": {
+            "$ref": "#/components/schemas/RunCreationDataEnvelope"
+          }
+        },
+        {
           "name": "idempotency_key",
           "required": false,
           "schema": {
@@ -8743,6 +10276,9 @@
         "schema": {
           "additionalProperties": false,
           "properties": {
+            "data_binding": {
+              "$ref": "#/components/schemas/DataBinding"
+            },
             "run_id": {
               "$ref": "#/components/schemas/OpaqueId"
             },
@@ -8752,7 +10288,8 @@
           },
           "required": [
             "run_id",
-            "status"
+            "status",
+            "data_binding"
           ],
           "type": "object"
         }
@@ -8945,7 +10482,7 @@
           }
         },
         {
-          "code": -32053,
+          "code": -32069,
           "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
           "data": {
             "additionalProperties": false,
@@ -8980,7 +10517,7 @@
           }
         },
         {
-          "code": -32024,
+          "code": -32036,
           "message": "Application error: EVENT_NOT_DECLARED",
           "data": {
             "additionalProperties": false,
@@ -9037,7 +10574,7 @@
           }
         },
         {
-          "code": -32027,
+          "code": -32039,
           "message": "Application error: EVENT_PUBLISH_FAILED",
           "data": {
             "additionalProperties": false,
@@ -9094,7 +10631,7 @@
           }
         },
         {
-          "code": -32042,
+          "code": -32055,
           "message": "Application error: PAYLOAD_VALIDATION_FAILED",
           "data": {
             "additionalProperties": false,
@@ -9152,7 +10689,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -9209,6 +10746,360 @@
             ],
             "type": "object"
           }
+        },
+        {
+          "code": -32053,
+          "message": "Application error: MESSAGE_BUDGET_EXCEEDED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "MESSAGE_BUDGET_EXCEEDED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "boundary": {
+                    "enum": [
+                      "rpc_message",
+                      "decoded_import",
+                      "aggregate_import",
+                      "public_page",
+                      "tool_page"
+                    ],
+                    "type": "string"
+                  },
+                  "limit_bytes": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "method": {
+                    "type": "string"
+                  },
+                  "observed_bytes": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "receipt_created": {
+                    "const": false,
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "boundary",
+                  "method",
+                  "limit_bytes",
+                  "observed_bytes",
+                  "receipt_created"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32029,
+          "message": "Application error: DATA_INVOCATION_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_INVOCATION_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "description": "A permanent source, prune, or run-creation identity was reused with a different semantic request.",
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32024,
+          "message": "Application error: DATA_CONTRACT_NOT_FOUND",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_CONTRACT_NOT_FOUND",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "properties": {
+                  "bundle_hash": {
+                    "$ref": "#/components/schemas/BundleHash"
+                  },
+                  "declaration": {
+                    "$ref": "#/components/schemas/DataDeclarationRef"
+                  },
+                  "receipt_created": {
+                    "const": false,
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "bundle_hash",
+                  "declaration",
+                  "receipt_created"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32027,
+          "message": "Application error: DATA_DEPENDENCY_INCOMPLETE",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_DEPENDENCY_INCOMPLETE",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "description": "A new or fork run does not have one exact version for every mandatory selected-bundle declaration.",
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32032,
+          "message": "Application error: DATA_PIN_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_PIN_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "description": "Duplicate, undeclared, removed, or conflicting resource pin selection.",
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32033,
+          "message": "Application error: DATA_SCHEMA_MISMATCH",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_SCHEMA_MISMATCH",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "description": "The selected version schema differs from the selected bundle declaration schema.",
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32063,
+          "message": "Application error: RUN_DATA_REJECTED",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "RUN_DATA_REJECTED",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "description": "Permanent run-creation data validation rejection with typed operation evidence.",
+                "properties": {
+                  "operation": {
+                    "$ref": "#/components/schemas/DataRunCreationOperationSummary"
+                  },
+                  "run_id": {
+                    "format": "uuid",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "run_id",
+                  "operation"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32061,
+          "message": "Application error: RUN_DATA_HEAD_CONFLICT",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "RUN_DATA_HEAD_CONFLICT",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": false,
+                "description": "Permanent run-creation expected-head conflict with typed operation evidence.",
+                "properties": {
+                  "operation": {
+                    "$ref": "#/components/schemas/DataRunCreationOperationSummary"
+                  },
+                  "run_id": {
+                    "format": "uuid",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "run_id",
+                  "operation"
+                ],
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
+        },
+        {
+          "code": -32028,
+          "message": "Application error: DATA_INTEGRITY_ERROR",
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "DATA_INTEGRITY_ERROR",
+                "type": "string"
+              },
+              "correlation_id": {
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": true,
+                "description": "Persisted data declaration, version, row, pin, receipt, or tombstone facts contradict one another.",
+                "type": "object"
+              },
+              "retryable": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "code",
+              "details",
+              "retryable",
+              "correlation_id"
+            ],
+            "type": "object"
+          }
         }
       ]
     },
@@ -9240,7 +11131,7 @@
       },
       "errors": [
         {
-          "code": -32048,
+          "code": -32064,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -9278,7 +11169,7 @@
           }
         },
         {
-          "code": -32047,
+          "code": -32060,
           "message": "Application error: RUN_ALREADY_TERMINAL",
           "data": {
             "additionalProperties": false,
@@ -9320,7 +11211,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -9429,7 +11320,7 @@
       },
       "errors": [
         {
-          "code": -32048,
+          "code": -32064,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -9539,7 +11430,7 @@
       },
       "errors": [
         {
-          "code": -32048,
+          "code": -32064,
           "message": "Application error: RUN_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -9839,7 +11730,7 @@
       },
       "errors": [
         {
-          "code": -32045,
+          "code": -32058,
           "message": "Application error: RUNTIME_NUKE_IN_PROGRESS",
           "data": {
             "additionalProperties": false,
@@ -9877,7 +11768,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -9958,7 +11849,7 @@
       },
       "errors": [
         {
-          "code": -32043,
+          "code": -32056,
           "message": "Application error: RUNTIME_ALREADY_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -9989,7 +11880,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -10070,7 +11961,7 @@
       },
       "errors": [
         {
-          "code": -32044,
+          "code": -32057,
           "message": "Application error: RUNTIME_NOT_PAUSED",
           "data": {
             "additionalProperties": false,
@@ -10101,7 +11992,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -10277,7 +12168,7 @@
       },
       "errors": [
         {
-          "code": -32051,
+          "code": -32067,
           "message": "Application error: STANDING_SERVICE_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -10315,7 +12206,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -10410,7 +12301,7 @@
       },
       "errors": [
         {
-          "code": -32051,
+          "code": -32067,
           "message": "Application error: STANDING_SERVICE_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -10448,7 +12339,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -10543,7 +12434,7 @@
       },
       "errors": [
         {
-          "code": -32051,
+          "code": -32067,
           "message": "Application error: STANDING_SERVICE_NOT_FOUND",
           "data": {
             "additionalProperties": false,
@@ -10581,7 +12472,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -10877,7 +12768,7 @@
           }
         },
         {
-          "code": -32053,
+          "code": -32069,
           "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
           "data": {
             "additionalProperties": false,
@@ -10912,7 +12803,7 @@
           }
         },
         {
-          "code": -32033,
+          "code": -32045,
           "message": "Application error: IDEMPOTENCY_CONFLICT",
           "data": {
             "additionalProperties": false,
@@ -13081,6 +14972,70 @@
         ],
         "type": "object"
       },
+      "CandidateVersion": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "state": {
+                "const": "none",
+                "type": "string"
+              }
+            },
+            "required": [
+              "state"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "manifest": {
+                "$ref": "#/components/schemas/ResourceManifest"
+              },
+              "state": {
+                "const": "candidate",
+                "type": "string"
+              },
+              "version_id": {
+                "$ref": "#/components/schemas/ResourceVersionID"
+              }
+            },
+            "required": [
+              "state",
+              "version_id",
+              "manifest"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "alias": {
+                "pattern": "^v[1-9][0-9]*$",
+                "type": "string"
+              },
+              "manifest": {
+                "$ref": "#/components/schemas/ResourceManifest"
+              },
+              "state": {
+                "const": "version",
+                "type": "string"
+              },
+              "version_id": {
+                "$ref": "#/components/schemas/ResourceVersionID"
+              }
+            },
+            "required": [
+              "state",
+              "version_id",
+              "alias",
+              "manifest"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "ConversationActivity": {
         "additionalProperties": false,
         "properties": {
@@ -13705,6 +15660,1610 @@
       "Cursor": {
         "description": "Opaque pagination cursor. Encoded by the runtime; clients MUST treat as opaque and pass back unchanged.",
         "type": "string"
+      },
+      "DataBinding": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "state": {
+                "const": "none",
+                "type": "string"
+              }
+            },
+            "required": [
+              "state"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "evidence": {
+                "$ref": "#/components/schemas/DataRunCreationItemPage"
+              },
+              "import_count": {
+                "maximum": 256,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "pin_count": {
+                "maximum": 256,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "run_id": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "state": {
+                "const": "bound",
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "run_id",
+              "pin_count",
+              "import_count",
+              "evidence"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "DataBusinessKey": {
+        "description": "Canonical typed business key admitted from a declared required scalar event field.",
+        "oneOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "maxLength": 4096,
+            "type": "string"
+          }
+        ]
+      },
+      "DataDeclarationPage": {
+        "additionalProperties": false,
+        "properties": {
+          "continuation": {
+            "$ref": "#/components/schemas/DataPageContinuation"
+          },
+          "encoded_items_bytes": {
+            "maximum": 524288,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "item_count": {
+            "maximum": 1000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DataDeclarationSummary"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "item_count",
+          "encoded_items_bytes",
+          "continuation"
+        ],
+        "type": "object"
+      },
+      "DataDeclarationRef": {
+        "additionalProperties": false,
+        "properties": {
+          "event": {
+            "description": "Exact canonical qualified authored event name.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "package_key": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "package_key",
+          "event"
+        ],
+        "type": "object"
+      },
+      "DataDeclarationSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "declaration": {
+            "$ref": "#/components/schemas/DataDeclarationRef"
+          },
+          "head": {
+            "$ref": "#/components/schemas/ExpectedHead"
+          },
+          "local_name": {
+            "type": "string"
+          },
+          "materialized_bytes": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "materialized_version_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema_digest": {
+            "$ref": "#/components/schemas/ResourceSchemaDigest"
+          },
+          "version_count": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "declaration",
+          "local_name",
+          "schema_digest",
+          "head",
+          "version_count",
+          "materialized_version_count",
+          "materialized_bytes"
+        ],
+        "type": "object"
+      },
+      "DataDeltaKey": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "$ref": "#/components/schemas/DataBusinessKey"
+          }
+        },
+        "required": [
+          "key"
+        ],
+        "type": "object"
+      },
+      "DataDeltaKeyPage": {
+        "additionalProperties": false,
+        "properties": {
+          "continuation": {
+            "$ref": "#/components/schemas/DataPageContinuation"
+          },
+          "encoded_items_bytes": {
+            "maximum": 524288,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "item_count": {
+            "maximum": 1000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DataDeltaKey"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "item_count",
+          "encoded_items_bytes",
+          "continuation"
+        ],
+        "type": "object"
+      },
+      "DataDeltaResult": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "against": {
+                "$ref": "#/components/schemas/ExpectedHead"
+              },
+              "row_identity": {
+                "enum": [
+                  "position",
+                  "business_key"
+                ],
+                "type": "string"
+              },
+              "state": {
+                "const": "computed",
+                "type": "string"
+              },
+              "summary": {
+                "$ref": "#/components/schemas/DataDeltaSummary"
+              }
+            },
+            "required": [
+              "state",
+              "row_identity",
+              "against",
+              "summary"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "reason": {
+                "enum": [
+                  "validation_rejected",
+                  "head_conflict"
+                ],
+                "type": "string"
+              },
+              "state": {
+                "const": "not_computed",
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "reason"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "against": {
+                "$ref": "#/components/schemas/ExpectedHead"
+              },
+              "reason": {
+                "const": "schema_changed",
+                "type": "string"
+              },
+              "state": {
+                "const": "not_comparable",
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "against",
+              "reason"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "DataDeltaSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "added": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "changed": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "order_changed": {
+            "type": "boolean"
+          },
+          "removed": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "added",
+          "removed",
+          "changed"
+        ],
+        "type": "object"
+      },
+      "DataExplicitPin": {
+        "additionalProperties": false,
+        "properties": {
+          "declaration": {
+            "$ref": "#/components/schemas/DataDeclarationRef"
+          },
+          "version_id": {
+            "$ref": "#/components/schemas/ResourceVersionID"
+          }
+        },
+        "required": [
+          "declaration",
+          "version_id"
+        ],
+        "type": "object"
+      },
+      "DataExportChunk": {
+        "additionalProperties": false,
+        "properties": {
+          "chunk_base64": {
+            "type": "string"
+          },
+          "chunk_bytes": {
+            "maximum": 524288,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "chunk_sha256": {
+            "$ref": "#/components/schemas/Sha256Fingerprint"
+          },
+          "content_digest": {
+            "$ref": "#/components/schemas/ResourceContentDigest"
+          },
+          "continuation": {
+            "$ref": "#/components/schemas/DataPageContinuation"
+          },
+          "declaration": {
+            "$ref": "#/components/schemas/DataDeclarationRef"
+          },
+          "first_ordinal": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "row_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "total_rows": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "version_id": {
+            "$ref": "#/components/schemas/ResourceVersionID"
+          }
+        },
+        "required": [
+          "declaration",
+          "version_id",
+          "content_digest",
+          "total_rows",
+          "first_ordinal",
+          "row_count",
+          "chunk_base64",
+          "chunk_bytes",
+          "chunk_sha256",
+          "continuation"
+        ],
+        "type": "object"
+      },
+      "DataFusedChildDefect": {
+        "additionalProperties": false,
+        "properties": {
+          "defect": {
+            "$ref": "#/components/schemas/DataValidationDefect"
+          },
+          "source_invocation_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_invocation_id",
+          "defect"
+        ],
+        "type": "object"
+      },
+      "DataFusedChildDefectPage": {
+        "additionalProperties": false,
+        "properties": {
+          "continuation": {
+            "$ref": "#/components/schemas/DataPageContinuation"
+          },
+          "encoded_items_bytes": {
+            "maximum": 524288,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "item_count": {
+            "maximum": 1000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DataFusedChildDefect"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "item_count",
+          "encoded_items_bytes",
+          "continuation"
+        ],
+        "type": "object"
+      },
+      "DataFusedChildEvaluation": {
+        "additionalProperties": false,
+        "properties": {
+          "bundle_hash": {
+            "$ref": "#/components/schemas/BundleHash"
+          },
+          "candidate": {
+            "$ref": "#/components/schemas/CandidateVersion"
+          },
+          "declaration": {
+            "$ref": "#/components/schemas/DataDeclarationRef"
+          },
+          "defect_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "delta": {
+            "$ref": "#/components/schemas/DataDeltaResult"
+          },
+          "expected_head": {
+            "$ref": "#/components/schemas/ExpectedHead"
+          },
+          "observed_head": {
+            "$ref": "#/components/schemas/ExpectedHead"
+          },
+          "outcome": {
+            "enum": [
+              "ready",
+              "validation_rejected",
+              "head_conflict"
+            ],
+            "type": "string"
+          },
+          "schema_digest": {
+            "$ref": "#/components/schemas/ResourceSchemaDigest"
+          },
+          "source_invocation_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_invocation_id",
+          "bundle_hash",
+          "schema_digest",
+          "declaration",
+          "expected_head",
+          "observed_head",
+          "candidate",
+          "delta",
+          "defect_count",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      "DataFusedChildEvaluationPage": {
+        "additionalProperties": false,
+        "properties": {
+          "continuation": {
+            "$ref": "#/components/schemas/DataPageContinuation"
+          },
+          "encoded_items_bytes": {
+            "maximum": 524288,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "item_count": {
+            "maximum": 1000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DataFusedChildEvaluation"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "item_count",
+          "encoded_items_bytes",
+          "continuation"
+        ],
+        "type": "object"
+      },
+      "DataFusedImport": {
+        "additionalProperties": false,
+        "properties": {
+          "declaration": {
+            "$ref": "#/components/schemas/DataDeclarationRef"
+          },
+          "expected_head": {
+            "$ref": "#/components/schemas/ExpectedHead"
+          },
+          "input": {
+            "$ref": "#/components/schemas/DataInput"
+          },
+          "source_invocation_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_invocation_id",
+          "declaration",
+          "expected_head",
+          "input"
+        ],
+        "type": "object"
+      },
+      "DataHeadHistory": {
+        "additionalProperties": false,
+        "properties": {
+          "after": {
+            "$ref": "#/components/schemas/ExpectedHead"
+          },
+          "before": {
+            "$ref": "#/components/schemas/ExpectedHead"
+          },
+          "committed_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "operation_ref": {
+            "$ref": "#/components/schemas/DataSourceOperationRef"
+          },
+          "revision": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "revision",
+          "before",
+          "after",
+          "operation_ref",
+          "committed_at"
+        ],
+        "type": "object"
+      },
+      "DataHeadHistoryPage": {
+        "additionalProperties": false,
+        "properties": {
+          "continuation": {
+            "$ref": "#/components/schemas/DataPageContinuation"
+          },
+          "encoded_items_bytes": {
+            "maximum": 524288,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "item_count": {
+            "maximum": 1000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DataHeadHistory"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "item_count",
+          "encoded_items_bytes",
+          "continuation"
+        ],
+        "type": "object"
+      },
+      "DataHeadResult": {
+        "additionalProperties": false,
+        "properties": {
+          "after": {
+            "$ref": "#/components/schemas/ExpectedHead"
+          },
+          "before": {
+            "$ref": "#/components/schemas/ExpectedHead"
+          },
+          "changed": {
+            "type": "boolean"
+          },
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "before",
+          "after",
+          "changed",
+          "revision"
+        ],
+        "type": "object"
+      },
+      "DataInput": {
+        "additionalProperties": false,
+        "properties": {
+          "content_base64": {
+            "contentEncoding": "base64",
+            "maxLength": 983040,
+            "type": "string"
+          },
+          "format": {
+            "const": "jsonl",
+            "type": "string"
+          }
+        },
+        "required": [
+          "format",
+          "content_base64"
+        ],
+        "type": "object"
+      },
+      "DataOperationRef": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/DataSourceOperationRef"
+          },
+          {
+            "$ref": "#/components/schemas/DataPruneOperationRef"
+          },
+          {
+            "$ref": "#/components/schemas/DataRunCreationOperationRef"
+          }
+        ]
+      },
+      "DataOperationSummary": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "source",
+                "type": "string"
+              },
+              "source": {
+                "$ref": "#/components/schemas/SourceOperationSummary"
+              }
+            },
+            "required": [
+              "kind",
+              "source"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "prune",
+                "type": "string"
+              },
+              "prune": {
+                "$ref": "#/components/schemas/PruneOperationResult"
+              }
+            },
+            "required": [
+              "kind",
+              "prune"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "run_creation",
+                "type": "string"
+              },
+              "run_creation": {
+                "$ref": "#/components/schemas/DataRunCreationOperationSummary"
+              }
+            },
+            "required": [
+              "kind",
+              "run_creation"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "DataPageContinuation": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "state": {
+                "const": "end",
+                "type": "string"
+              }
+            },
+            "required": [
+              "state"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "cursor": {
+                "$ref": "#/components/schemas/Cursor"
+              },
+              "state": {
+                "const": "more",
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "cursor"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "DataPageRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "byte_limit": {
+            "default": 65536,
+            "maximum": 524288,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "cursor": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Cursor"
+              },
+              {
+                "maxLength": 4096
+              }
+            ]
+          },
+          "limit": {
+            "default": 100,
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "DataPinOverride": {
+        "$ref": "#/components/schemas/DataExplicitPin"
+      },
+      "DataPinPage": {
+        "additionalProperties": false,
+        "properties": {
+          "continuation": {
+            "$ref": "#/components/schemas/DataPageContinuation"
+          },
+          "encoded_items_bytes": {
+            "maximum": 524288,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "item_count": {
+            "maximum": 1000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ResourcePin"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "item_count",
+          "encoded_items_bytes",
+          "continuation"
+        ],
+        "type": "object"
+      },
+      "DataProvenance": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "committed_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "producer_ref": {
+            "$ref": "#/components/schemas/DataProvenanceRef"
+          },
+          "version_id": {
+            "$ref": "#/components/schemas/ResourceVersionID"
+          }
+        },
+        "required": [
+          "version_id",
+          "producer_ref",
+          "actor",
+          "committed_at"
+        ],
+        "type": "object"
+      },
+      "DataProvenancePage": {
+        "additionalProperties": false,
+        "properties": {
+          "continuation": {
+            "$ref": "#/components/schemas/DataPageContinuation"
+          },
+          "encoded_items_bytes": {
+            "maximum": 524288,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "item_count": {
+            "maximum": 1000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DataProvenance"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "item_count",
+          "encoded_items_bytes",
+          "continuation"
+        ],
+        "type": "object"
+      },
+      "DataProvenanceRef": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "import",
+                "type": "string"
+              },
+              "source_invocation_id": {
+                "format": "uuid",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "source_invocation_id"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "normal_run",
+                "type": "string"
+              },
+              "run_id": {
+                "format": "uuid",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "run_id"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "fork_candidate_promotion",
+                "type": "string"
+              },
+              "promotion_invocation_id": {
+                "format": "uuid",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "promotion_invocation_id"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "DataPruneDefect": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "enum": [
+              "declaration_not_found",
+              "version_not_found"
+            ],
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "type": "object"
+      },
+      "DataPruneDefectPage": {
+        "additionalProperties": false,
+        "properties": {
+          "continuation": {
+            "$ref": "#/components/schemas/DataPageContinuation"
+          },
+          "encoded_items_bytes": {
+            "maximum": 524288,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "item_count": {
+            "maximum": 1000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DataPruneDefect"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "item_count",
+          "encoded_items_bytes",
+          "continuation"
+        ],
+        "type": "object"
+      },
+      "DataPruneOperationRef": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "prune",
+            "type": "string"
+          },
+          "prune_invocation_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "prune_invocation_id"
+        ],
+        "type": "object"
+      },
+      "DataRow": {
+        "additionalProperties": false,
+        "properties": {
+          "declaration": {
+            "$ref": "#/components/schemas/DataDeclarationRef"
+          },
+          "key": {
+            "$ref": "#/components/schemas/DataBusinessKey"
+          },
+          "ordinal": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "value": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "version_id": {
+            "$ref": "#/components/schemas/ResourceVersionID"
+          }
+        },
+        "required": [
+          "declaration",
+          "version_id",
+          "ordinal",
+          "value"
+        ],
+        "type": "object"
+      },
+      "DataRowPage": {
+        "additionalProperties": false,
+        "properties": {
+          "continuation": {
+            "$ref": "#/components/schemas/DataPageContinuation"
+          },
+          "encoded_items_bytes": {
+            "maximum": 524288,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "item_count": {
+            "maximum": 1000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DataRow"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "item_count",
+          "encoded_items_bytes",
+          "continuation"
+        ],
+        "type": "object"
+      },
+      "DataRowSelector": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "position": {
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "position"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "key": {
+                "$ref": "#/components/schemas/DataBusinessKey"
+              }
+            },
+            "required": [
+              "key"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "DataRunCreationItem": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "pin",
+                "type": "string"
+              },
+              "pin": {
+                "$ref": "#/components/schemas/ResourcePin"
+              }
+            },
+            "required": [
+              "kind",
+              "pin"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "import": {
+                "$ref": "#/components/schemas/SourceOperationSummary"
+              },
+              "kind": {
+                "const": "import",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "import"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "DataRunCreationItemPage": {
+        "additionalProperties": false,
+        "properties": {
+          "continuation": {
+            "$ref": "#/components/schemas/DataPageContinuation"
+          },
+          "encoded_items_bytes": {
+            "maximum": 524288,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "item_count": {
+            "maximum": 1000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DataRunCreationItem"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "item_count",
+          "encoded_items_bytes",
+          "continuation"
+        ],
+        "type": "object"
+      },
+      "DataRunCreationOperationRef": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "run_creation",
+            "type": "string"
+          },
+          "run_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "run_id"
+        ],
+        "type": "object"
+      },
+      "DataRunCreationOperationSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "bundle_hash": {
+            "$ref": "#/components/schemas/BundleHash"
+          },
+          "completed_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "event_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "import_count": {
+            "maximum": 256,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "kind": {
+            "const": "run_creation",
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "created",
+              "data_rejected",
+              "head_conflict"
+            ],
+            "type": "string"
+          },
+          "pin_count": {
+            "maximum": 256,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "rejection": {
+            "$ref": "#/components/schemas/DataRunCreationRejection"
+          },
+          "run_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          }
+        },
+        "required": [
+          "kind",
+          "outcome",
+          "run_id",
+          "bundle_hash",
+          "pin_count",
+          "import_count",
+          "rejection",
+          "completed_at"
+        ],
+        "type": "object"
+      },
+      "DataRunCreationRejection": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "state": {
+                "const": "none",
+                "type": "string"
+              }
+            },
+            "required": [
+              "state"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "fused_validation_rejected",
+                "type": "string"
+              },
+              "state": {
+                "const": "rejected",
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "code"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "fused_head_conflict",
+                "type": "string"
+              },
+              "state": {
+                "const": "rejected",
+                "type": "string"
+              }
+            },
+            "required": [
+              "state",
+              "code"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "explicit_pin_version_missing",
+                "type": "string"
+              },
+              "declaration": {
+                "$ref": "#/components/schemas/DataDeclarationRef"
+              },
+              "state": {
+                "const": "rejected",
+                "type": "string"
+              },
+              "version_id": {
+                "$ref": "#/components/schemas/ResourceVersionID"
+              }
+            },
+            "required": [
+              "state",
+              "code",
+              "declaration",
+              "version_id"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "explicit_pin_version_pruned",
+                "type": "string"
+              },
+              "declaration": {
+                "$ref": "#/components/schemas/DataDeclarationRef"
+              },
+              "state": {
+                "const": "rejected",
+                "type": "string"
+              },
+              "version_id": {
+                "$ref": "#/components/schemas/ResourceVersionID"
+              }
+            },
+            "required": [
+              "state",
+              "code",
+              "declaration",
+              "version_id"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "const": "explicit_pin_schema_mismatch",
+                "type": "string"
+              },
+              "declaration": {
+                "$ref": "#/components/schemas/DataDeclarationRef"
+              },
+              "expected_schema_digest": {
+                "$ref": "#/components/schemas/ResourceSchemaDigest"
+              },
+              "selected_schema_digest": {
+                "$ref": "#/components/schemas/ResourceSchemaDigest"
+              },
+              "state": {
+                "const": "rejected",
+                "type": "string"
+              },
+              "version_id": {
+                "$ref": "#/components/schemas/ResourceVersionID"
+              }
+            },
+            "required": [
+              "state",
+              "code",
+              "declaration",
+              "version_id",
+              "expected_schema_digest",
+              "selected_schema_digest"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "DataShowResult": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/DataDeclarationPage"
+          },
+          {
+            "$ref": "#/components/schemas/DataVersionPage"
+          },
+          {
+            "$ref": "#/components/schemas/DataVersionSummary"
+          },
+          {
+            "$ref": "#/components/schemas/DataRowPage"
+          },
+          {
+            "$ref": "#/components/schemas/DataRow"
+          },
+          {
+            "$ref": "#/components/schemas/DataExportChunk"
+          },
+          {
+            "$ref": "#/components/schemas/DataProvenancePage"
+          },
+          {
+            "$ref": "#/components/schemas/DataHeadHistoryPage"
+          },
+          {
+            "$ref": "#/components/schemas/DataPinPage"
+          },
+          {
+            "$ref": "#/components/schemas/DataOperationSummary"
+          },
+          {
+            "$ref": "#/components/schemas/DataValidationDefectPage"
+          },
+          {
+            "$ref": "#/components/schemas/DataDeltaKeyPage"
+          },
+          {
+            "$ref": "#/components/schemas/DataPruneDefectPage"
+          },
+          {
+            "$ref": "#/components/schemas/DataRunCreationItemPage"
+          },
+          {
+            "$ref": "#/components/schemas/DataFusedChildEvaluationPage"
+          },
+          {
+            "$ref": "#/components/schemas/DataFusedChildDefectPage"
+          }
+        ]
+      },
+      "DataSourceOperationRef": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "source",
+            "type": "string"
+          },
+          "source_invocation_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "source_invocation_id"
+        ],
+        "type": "object"
+      },
+      "DataValidationDefect": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "row": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "row",
+          "path",
+          "code",
+          "message"
+        ],
+        "type": "object"
+      },
+      "DataValidationDefectPage": {
+        "additionalProperties": false,
+        "properties": {
+          "continuation": {
+            "$ref": "#/components/schemas/DataPageContinuation"
+          },
+          "encoded_items_bytes": {
+            "maximum": 524288,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "item_count": {
+            "maximum": 1000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DataValidationDefect"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "item_count",
+          "encoded_items_bytes",
+          "continuation"
+        ],
+        "type": "object"
+      },
+      "DataVersionPage": {
+        "additionalProperties": false,
+        "properties": {
+          "continuation": {
+            "$ref": "#/components/schemas/DataPageContinuation"
+          },
+          "encoded_items_bytes": {
+            "maximum": 524288,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "item_count": {
+            "maximum": 1000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DataVersionSummary"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "item_count",
+          "encoded_items_bytes",
+          "continuation"
+        ],
+        "type": "object"
+      },
+      "DataVersionSelector": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "head",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "version",
+                "type": "string"
+              },
+              "version_id": {
+                "$ref": "#/components/schemas/ResourceVersionID"
+              }
+            },
+            "required": [
+              "kind",
+              "version_id"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "alias": {
+                "pattern": "^v[1-9][0-9]*$",
+                "type": "string"
+              },
+              "kind": {
+                "const": "alias",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "alias"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "DataVersionSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "alias": {
+            "pattern": "^v[1-9][0-9]*$",
+            "type": "string"
+          },
+          "business_key": {
+            "description": "Declared event payload field owning keyed-version identity; omitted for keyless versions.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "declaration": {
+            "$ref": "#/components/schemas/DataDeclarationRef"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/ResourceManifest"
+          },
+          "materialized_bytes": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "payload_state": {
+            "enum": [
+              "materialized",
+              "pruned"
+            ],
+            "type": "string"
+          },
+          "version_id": {
+            "$ref": "#/components/schemas/ResourceVersionID"
+          }
+        },
+        "required": [
+          "declaration",
+          "version_id",
+          "alias",
+          "manifest",
+          "payload_state",
+          "materialized_bytes"
+        ],
+        "type": "object"
       },
       "DeadLetterRecord": {
         "additionalProperties": false,
@@ -14698,6 +18257,9 @@
       "EventPublishResult": {
         "additionalProperties": false,
         "properties": {
+          "data_binding": {
+            "$ref": "#/components/schemas/DataBinding"
+          },
           "deliveries": {
             "description": "Canonical persisted delivery rows for the published event; empty when the declared event has no subscribers.",
             "items": {
@@ -14723,7 +18285,8 @@
           "event_id",
           "run_id",
           "new_run_created",
-          "deliveries"
+          "deliveries",
+          "data_binding"
         ],
         "type": "object"
       },
@@ -14864,6 +18427,40 @@
           "mock"
         ],
         "type": "string"
+      },
+      "ExpectedHead": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "state": {
+                "const": "absent",
+                "type": "string"
+              }
+            },
+            "required": [
+              "state"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "state": {
+                "const": "version",
+                "type": "string"
+              },
+              "version_id": {
+                "$ref": "#/components/schemas/ResourceVersionID"
+              }
+            },
+            "required": [
+              "state",
+              "version_id"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "FailureClass": {
         "enum": [
@@ -15990,6 +19587,166 @@
         ],
         "type": "object"
       },
+      "PruneOperationResult": {
+        "additionalProperties": false,
+        "properties": {
+          "completed_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "current_version_id": {
+            "$ref": "#/components/schemas/ResourceVersionID"
+          },
+          "declaration": {
+            "$ref": "#/components/schemas/DataDeclarationRef"
+          },
+          "defects": {
+            "$ref": "#/components/schemas/DataPruneDefectPage"
+          },
+          "expected_head": {
+            "$ref": "#/components/schemas/ExpectedHead"
+          },
+          "observed_head": {
+            "$ref": "#/components/schemas/ExpectedHead"
+          },
+          "outcome": {
+            "enum": [
+              "rejected",
+              "head_conflict",
+              "refused_current",
+              "refused_pinned",
+              "already_pruned",
+              "pruned"
+            ],
+            "type": "string"
+          },
+          "payload_after": {
+            "enum": [
+              "materialized",
+              "pruned"
+            ],
+            "type": "string"
+          },
+          "payload_before": {
+            "enum": [
+              "materialized",
+              "pruned"
+            ],
+            "type": "string"
+          },
+          "pin_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "pins": {
+            "$ref": "#/components/schemas/DataPinPage"
+          },
+          "prune_invocation_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "version_id": {
+            "$ref": "#/components/schemas/ResourceVersionID"
+          }
+        },
+        "required": [
+          "outcome",
+          "prune_invocation_id",
+          "declaration",
+          "version_id",
+          "expected_head",
+          "observed_head",
+          "completed_at"
+        ],
+        "type": "object"
+      },
+      "ResourceContentDigest": {
+        "pattern": "^resource-content-v1:sha256:[a-f0-9]{64}$",
+        "type": "string"
+      },
+      "ResourceManifest": {
+        "additionalProperties": false,
+        "properties": {
+          "content_digest": {
+            "$ref": "#/components/schemas/ResourceContentDigest"
+          },
+          "declaration": {
+            "$ref": "#/components/schemas/DataDeclarationRef"
+          },
+          "manifest_format": {
+            "const": "swarm.resource.version.manifest.v1",
+            "type": "string"
+          },
+          "row_codec": {
+            "const": "swarm.resource.rows.v1",
+            "type": "string"
+          },
+          "row_count": {
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "schema_digest": {
+            "$ref": "#/components/schemas/ResourceSchemaDigest"
+          }
+        },
+        "required": [
+          "manifest_format",
+          "declaration",
+          "schema_digest",
+          "row_codec",
+          "content_digest",
+          "row_count"
+        ],
+        "type": "object"
+      },
+      "ResourcePin": {
+        "additionalProperties": false,
+        "properties": {
+          "declaration": {
+            "$ref": "#/components/schemas/DataDeclarationRef"
+          },
+          "run_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "run_state": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "schema_digest": {
+            "$ref": "#/components/schemas/ResourceSchemaDigest"
+          },
+          "selection": {
+            "enum": [
+              "explicit",
+              "fused_import",
+              "fork_inherited",
+              "fork_override"
+            ],
+            "type": "string"
+          },
+          "version_id": {
+            "$ref": "#/components/schemas/ResourceVersionID"
+          }
+        },
+        "required": [
+          "run_id",
+          "run_state",
+          "declaration",
+          "schema_digest",
+          "version_id",
+          "selection"
+        ],
+        "type": "object"
+      },
+      "ResourceSchemaDigest": {
+        "pattern": "^resource-schema-v1:sha256:[a-f0-9]{64}$",
+        "type": "string"
+      },
+      "ResourceVersionID": {
+        "pattern": "^resource-version-v1:sha256:[a-f0-9]{64}$",
+        "type": "string"
+      },
       "RpcSubscriptionNotification": {
         "additionalProperties": false,
         "properties": {
@@ -16022,6 +19779,30 @@
           "jsonrpc",
           "method",
           "params"
+        ],
+        "type": "object"
+      },
+      "RunCreationDataEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "imports": {
+            "items": {
+              "$ref": "#/components/schemas/DataFusedImport"
+            },
+            "maxItems": 256,
+            "type": "array"
+          },
+          "pins": {
+            "items": {
+              "$ref": "#/components/schemas/DataExplicitPin"
+            },
+            "maxItems": 256,
+            "type": "array"
+          }
+        },
+        "required": [
+          "imports",
+          "pins"
         ],
         "type": "object"
       },
@@ -16154,6 +19935,12 @@
           "bundle_hash": {
             "$ref": "#/components/schemas/BundleHash"
           },
+          "data_pins": {
+            "items": {
+              "$ref": "#/components/schemas/ResourcePin"
+            },
+            "type": "array"
+          },
           "executed_event_count": {
             "minimum": 0,
             "type": "integer"
@@ -16191,7 +19978,8 @@
           "fork_event_id",
           "fork_run_status",
           "bundle_hash",
-          "executed_event_count"
+          "executed_event_count",
+          "data_pins"
         ],
         "type": "object"
       },
@@ -16805,7 +20593,9 @@
           "write:conversations",
           "read:runtime",
           "control:runtime",
-          "admin:runtime"
+          "admin:runtime",
+          "read:data",
+          "write:data"
         ],
         "type": "string"
       },
@@ -16829,6 +20619,147 @@
         "description": "Generic SHA-256 digest used by non-bundle integrity and idempotency contracts.",
         "pattern": "^sha256:[a-f0-9]{64}$",
         "type": "string"
+      },
+      "SourceOperationResult": {
+        "additionalProperties": false,
+        "properties": {
+          "bundle_hash": {
+            "$ref": "#/components/schemas/BundleHash"
+          },
+          "candidate": {
+            "$ref": "#/components/schemas/CandidateVersion"
+          },
+          "completed_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "declaration": {
+            "$ref": "#/components/schemas/DataDeclarationRef"
+          },
+          "defects": {
+            "$ref": "#/components/schemas/DataValidationDefectPage"
+          },
+          "delta": {
+            "$ref": "#/components/schemas/DataDeltaResult"
+          },
+          "expected_head": {
+            "$ref": "#/components/schemas/ExpectedHead"
+          },
+          "head": {
+            "$ref": "#/components/schemas/DataHeadResult"
+          },
+          "observed_head": {
+            "$ref": "#/components/schemas/ExpectedHead"
+          },
+          "operation": {
+            "enum": [
+              "check",
+              "import"
+            ],
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "accepted",
+              "validation_rejected",
+              "head_conflict"
+            ],
+            "type": "string"
+          },
+          "schema_digest": {
+            "$ref": "#/components/schemas/ResourceSchemaDigest"
+          },
+          "source_invocation_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_invocation_id",
+          "operation",
+          "outcome",
+          "bundle_hash",
+          "schema_digest",
+          "declaration",
+          "expected_head",
+          "observed_head",
+          "candidate",
+          "head",
+          "delta",
+          "defects",
+          "completed_at"
+        ],
+        "type": "object"
+      },
+      "SourceOperationSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "bundle_hash": {
+            "$ref": "#/components/schemas/BundleHash"
+          },
+          "candidate": {
+            "$ref": "#/components/schemas/CandidateVersion"
+          },
+          "completed_at": {
+            "$ref": "#/components/schemas/Timestamp"
+          },
+          "declaration": {
+            "$ref": "#/components/schemas/DataDeclarationRef"
+          },
+          "defect_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "delta": {
+            "$ref": "#/components/schemas/DataDeltaResult"
+          },
+          "expected_head": {
+            "$ref": "#/components/schemas/ExpectedHead"
+          },
+          "head": {
+            "$ref": "#/components/schemas/DataHeadResult"
+          },
+          "observed_head": {
+            "$ref": "#/components/schemas/ExpectedHead"
+          },
+          "operation": {
+            "enum": [
+              "check",
+              "import"
+            ],
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "accepted",
+              "validation_rejected",
+              "head_conflict"
+            ],
+            "type": "string"
+          },
+          "schema_digest": {
+            "$ref": "#/components/schemas/ResourceSchemaDigest"
+          },
+          "source_invocation_id": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_invocation_id",
+          "operation",
+          "outcome",
+          "bundle_hash",
+          "schema_digest",
+          "declaration",
+          "expected_head",
+          "observed_head",
+          "candidate",
+          "head",
+          "delta",
+          "defect_count",
+          "completed_at"
+        ],
+        "type": "object"
       },
       "StageGateDecisionCardAnchor": {
         "additionalProperties": false,
@@ -18188,8 +22119,417 @@
           "type": "object"
         }
       },
-      "ENTITY_NOT_FOUND": {
+      "DATA_ACCESS_DENIED": {
         "code": -32023,
+        "message": "Application error: DATA_ACCESS_DENIED",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "DATA_ACCESS_DENIED",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": true,
+              "description": "The requested static or resource item is absent from the actor's immutable access list.",
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "DATA_CONTRACT_NOT_FOUND": {
+        "code": -32024,
+        "message": "Application error: DATA_CONTRACT_NOT_FOUND",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "DATA_CONTRACT_NOT_FOUND",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "bundle_hash": {
+                  "$ref": "#/components/schemas/BundleHash"
+                },
+                "declaration": {
+                  "$ref": "#/components/schemas/DataDeclarationRef"
+                },
+                "receipt_created": {
+                  "const": false,
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "bundle_hash",
+                "declaration",
+                "receipt_created"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "DATA_CURSOR_INVALID": {
+        "code": -32025,
+        "message": "Application error: DATA_CURSOR_INVALID",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "DATA_CURSOR_INVALID",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "reason"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "DATA_DECLARATION_NOT_FOUND": {
+        "code": -32026,
+        "message": "Application error: DATA_DECLARATION_NOT_FOUND",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "DATA_DECLARATION_NOT_FOUND",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "declaration": {
+                  "$ref": "#/components/schemas/DataDeclarationRef"
+                }
+              },
+              "required": [
+                "declaration"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "DATA_DEPENDENCY_INCOMPLETE": {
+        "code": -32027,
+        "message": "Application error: DATA_DEPENDENCY_INCOMPLETE",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "DATA_DEPENDENCY_INCOMPLETE",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": true,
+              "description": "A new or fork run does not have one exact version for every mandatory selected-bundle declaration.",
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "DATA_INTEGRITY_ERROR": {
+        "code": -32028,
+        "message": "Application error: DATA_INTEGRITY_ERROR",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "DATA_INTEGRITY_ERROR",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": true,
+              "description": "Persisted data declaration, version, row, pin, receipt, or tombstone facts contradict one another.",
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "DATA_INVOCATION_CONFLICT": {
+        "code": -32029,
+        "message": "Application error: DATA_INVOCATION_CONFLICT",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "DATA_INVOCATION_CONFLICT",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": true,
+              "description": "A permanent source, prune, or run-creation identity was reused with a different semantic request.",
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "DATA_OPERATION_NOT_FOUND": {
+        "code": -32030,
+        "message": "Application error: DATA_OPERATION_NOT_FOUND",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "DATA_OPERATION_NOT_FOUND",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": true,
+              "description": "The exact permanent operation identity does not exist.",
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "DATA_PAYLOAD_PRUNED": {
+        "code": -32031,
+        "message": "Application error: DATA_PAYLOAD_PRUNED",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "DATA_PAYLOAD_PRUNED",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "version_id": {
+                  "$ref": "#/components/schemas/ResourceVersionID"
+                }
+              },
+              "required": [
+                "version_id"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "DATA_PIN_CONFLICT": {
+        "code": -32032,
+        "message": "Application error: DATA_PIN_CONFLICT",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "DATA_PIN_CONFLICT",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": true,
+              "description": "Duplicate, undeclared, removed, or conflicting resource pin selection.",
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "DATA_SCHEMA_MISMATCH": {
+        "code": -32033,
+        "message": "Application error: DATA_SCHEMA_MISMATCH",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "DATA_SCHEMA_MISMATCH",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": true,
+              "description": "The selected version schema differs from the selected bundle declaration schema.",
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "DATA_VERSION_NOT_FOUND": {
+        "code": -32034,
+        "message": "Application error: DATA_VERSION_NOT_FOUND",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "DATA_VERSION_NOT_FOUND",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": true,
+              "description": "An exact resource version or alias selector did not resolve.",
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "ENTITY_NOT_FOUND": {
+        "code": -32035,
         "message": "Application error: ENTITY_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -18227,7 +22567,7 @@
         }
       },
       "EVENT_NOT_DECLARED": {
-        "code": -32024,
+        "code": -32036,
         "message": "Application error: EVENT_NOT_DECLARED",
         "data": {
           "additionalProperties": false,
@@ -18284,7 +22624,7 @@
         }
       },
       "EVENT_NOT_FOUND": {
-        "code": -32025,
+        "code": -32037,
         "message": "Application error: EVENT_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -18322,7 +22662,7 @@
         }
       },
       "EVENT_OBSERVATION_RUN_SCOPE_REQUIRED": {
-        "code": -32026,
+        "code": -32038,
         "message": "Application error: EVENT_OBSERVATION_RUN_SCOPE_REQUIRED",
         "data": {
           "additionalProperties": false,
@@ -18367,7 +22707,7 @@
         }
       },
       "EVENT_PUBLISH_FAILED": {
-        "code": -32027,
+        "code": -32039,
         "message": "Application error: EVENT_PUBLISH_FAILED",
         "data": {
           "additionalProperties": false,
@@ -18424,7 +22764,7 @@
         }
       },
       "EVENT_REPLAY_NOT_ELIGIBLE": {
-        "code": -32028,
+        "code": -32040,
         "message": "Application error: EVENT_REPLAY_NOT_ELIGIBLE",
         "data": {
           "additionalProperties": false,
@@ -18478,7 +22818,7 @@
         }
       },
       "EVENT_REPLAY_NO_DELIVERY_HISTORY": {
-        "code": -32029,
+        "code": -32041,
         "message": "Application error: EVENT_REPLAY_NO_DELIVERY_HISTORY",
         "data": {
           "additionalProperties": false,
@@ -18516,7 +22856,7 @@
         }
       },
       "EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL": {
-        "code": -32030,
+        "code": -32042,
         "message": "Application error: EVENT_REPLAY_SUBSCRIBER_NOT_ORIGINAL",
         "data": {
           "additionalProperties": false,
@@ -18571,7 +22911,7 @@
         }
       },
       "EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE": {
-        "code": -32031,
+        "code": -32043,
         "message": "Application error: EVENT_REPLAY_SUBSCRIBER_UNAVAILABLE",
         "data": {
           "additionalProperties": false,
@@ -18631,7 +22971,7 @@
         }
       },
       "FORK_NOT_FOUND": {
-        "code": -32032,
+        "code": -32044,
         "message": "Application error: FORK_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -18669,7 +23009,7 @@
         }
       },
       "IDEMPOTENCY_CONFLICT": {
-        "code": -32033,
+        "code": -32045,
         "message": "Application error: IDEMPOTENCY_CONFLICT",
         "data": {
           "additionalProperties": false,
@@ -18728,7 +23068,7 @@
         }
       },
       "INVALID_DEFER_UNTIL": {
-        "code": -32034,
+        "code": -32046,
         "message": "Application error: INVALID_DEFER_UNTIL",
         "data": {
           "additionalProperties": false,
@@ -18774,7 +23114,7 @@
         }
       },
       "MAILBOX_ALREADY_DECIDED": {
-        "code": -32035,
+        "code": -32047,
         "message": "Application error: MAILBOX_ALREADY_DECIDED",
         "data": {
           "additionalProperties": false,
@@ -18812,7 +23152,7 @@
         }
       },
       "MAILBOX_CARD_SUPERSEDED": {
-        "code": -32036,
+        "code": -32048,
         "message": "Application error: MAILBOX_CARD_SUPERSEDED",
         "data": {
           "additionalProperties": false,
@@ -18850,7 +23190,7 @@
         }
       },
       "MAILBOX_INPUT_DRAFT_NOT_AUTHORITY": {
-        "code": -32037,
+        "code": -32049,
         "message": "Application error: MAILBOX_INPUT_DRAFT_NOT_AUTHORITY",
         "data": {
           "additionalProperties": false,
@@ -18888,7 +23228,7 @@
         }
       },
       "MAILBOX_INVALID_VERDICT": {
-        "code": -32038,
+        "code": -32050,
         "message": "Application error: MAILBOX_INVALID_VERDICT",
         "data": {
           "additionalProperties": false,
@@ -18930,7 +23270,7 @@
         }
       },
       "MAILBOX_NOT_FOUND": {
-        "code": -32039,
+        "code": -32051,
         "message": "Application error: MAILBOX_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -18968,7 +23308,7 @@
         }
       },
       "MAILBOX_STALE_CARD": {
-        "code": -32040,
+        "code": -32052,
         "message": "Application error: MAILBOX_STALE_CARD",
         "data": {
           "additionalProperties": false,
@@ -19009,8 +23349,72 @@
           "type": "object"
         }
       },
+      "MESSAGE_BUDGET_EXCEEDED": {
+        "code": -32053,
+        "message": "Application error: MESSAGE_BUDGET_EXCEEDED",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "MESSAGE_BUDGET_EXCEEDED",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "boundary": {
+                  "enum": [
+                    "rpc_message",
+                    "decoded_import",
+                    "aggregate_import",
+                    "public_page",
+                    "tool_page"
+                  ],
+                  "type": "string"
+                },
+                "limit_bytes": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "method": {
+                  "type": "string"
+                },
+                "observed_bytes": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "receipt_created": {
+                  "const": false,
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "boundary",
+                "method",
+                "limit_bytes",
+                "observed_bytes",
+                "receipt_created"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
       "METHOD_UNAVAILABLE": {
-        "code": -32041,
+        "code": -32054,
         "message": "Application error: METHOD_UNAVAILABLE",
         "data": {
           "additionalProperties": false,
@@ -19048,7 +23452,7 @@
         }
       },
       "PAYLOAD_VALIDATION_FAILED": {
-        "code": -32042,
+        "code": -32055,
         "message": "Application error: PAYLOAD_VALIDATION_FAILED",
         "data": {
           "additionalProperties": false,
@@ -19106,7 +23510,7 @@
         }
       },
       "RUNTIME_ALREADY_PAUSED": {
-        "code": -32043,
+        "code": -32056,
         "message": "Application error: RUNTIME_ALREADY_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -19137,7 +23541,7 @@
         }
       },
       "RUNTIME_NOT_PAUSED": {
-        "code": -32044,
+        "code": -32057,
         "message": "Application error: RUNTIME_NOT_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -19168,7 +23572,7 @@
         }
       },
       "RUNTIME_NUKE_IN_PROGRESS": {
-        "code": -32045,
+        "code": -32058,
         "message": "Application error: RUNTIME_NUKE_IN_PROGRESS",
         "data": {
           "additionalProperties": false,
@@ -19206,7 +23610,7 @@
         }
       },
       "RUN_ALREADY_PAUSED": {
-        "code": -32046,
+        "code": -32059,
         "message": "Application error: RUN_ALREADY_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -19244,7 +23648,7 @@
         }
       },
       "RUN_ALREADY_TERMINAL": {
-        "code": -32047,
+        "code": -32060,
         "message": "Application error: RUN_ALREADY_TERMINAL",
         "data": {
           "additionalProperties": false,
@@ -19285,8 +23689,135 @@
           "type": "object"
         }
       },
+      "RUN_DATA_HEAD_CONFLICT": {
+        "code": -32061,
+        "message": "Application error: RUN_DATA_HEAD_CONFLICT",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "RUN_DATA_HEAD_CONFLICT",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "description": "Permanent run-creation expected-head conflict with typed operation evidence.",
+              "properties": {
+                "operation": {
+                  "$ref": "#/components/schemas/DataRunCreationOperationSummary"
+                },
+                "run_id": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "run_id",
+                "operation"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "RUN_DATA_IMMUTABLE": {
+        "code": -32062,
+        "message": "Application error: RUN_DATA_IMMUTABLE",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "RUN_DATA_IMMUTABLE",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "properties": {
+                "run_id": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "run_id"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "RUN_DATA_REJECTED": {
+        "code": -32063,
+        "message": "Application error: RUN_DATA_REJECTED",
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "const": "RUN_DATA_REJECTED",
+              "type": "string"
+            },
+            "correlation_id": {
+              "type": "string"
+            },
+            "details": {
+              "additionalProperties": false,
+              "description": "Permanent run-creation data validation rejection with typed operation evidence.",
+              "properties": {
+                "operation": {
+                  "$ref": "#/components/schemas/DataRunCreationOperationSummary"
+                },
+                "run_id": {
+                  "format": "uuid",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "run_id",
+                "operation"
+              ],
+              "type": "object"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "details",
+            "retryable",
+            "correlation_id"
+          ],
+          "type": "object"
+        }
+      },
       "RUN_NOT_FOUND": {
-        "code": -32048,
+        "code": -32064,
         "message": "Application error: RUN_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -19324,7 +23855,7 @@
         }
       },
       "RUN_NOT_PAUSED": {
-        "code": -32049,
+        "code": -32065,
         "message": "Application error: RUN_NOT_PAUSED",
         "data": {
           "additionalProperties": false,
@@ -19366,7 +23897,7 @@
         }
       },
       "SESSION_NOT_FOUND": {
-        "code": -32050,
+        "code": -32066,
         "message": "Application error: SESSION_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -19404,7 +23935,7 @@
         }
       },
       "STANDING_SERVICE_NOT_FOUND": {
-        "code": -32051,
+        "code": -32067,
         "message": "Application error: STANDING_SERVICE_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -19442,7 +23973,7 @@
         }
       },
       "TURN_NOT_FOUND": {
-        "code": -32052,
+        "code": -32068,
         "message": "Application error: TURN_NOT_FOUND",
         "data": {
           "additionalProperties": false,
@@ -19484,7 +24015,7 @@
         }
       },
       "UNSUPPORTED_BUNDLE_HASH": {
-        "code": -32053,
+        "code": -32069,
         "message": "Application error: UNSUPPORTED_BUNDLE_HASH",
         "data": {
           "additionalProperties": false,
@@ -19519,7 +24050,7 @@
         }
       },
       "UNSUPPORTED_BUNDLE_HASH_FORK": {
-        "code": -32054,
+        "code": -32070,
         "message": "Application error: UNSUPPORTED_BUNDLE_HASH_FORK",
         "data": {
           "additionalProperties": false,

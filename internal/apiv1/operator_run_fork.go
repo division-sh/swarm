@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
+	"github.com/division-sh/swarm/internal/durabledata"
 	swruntime "github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
@@ -44,19 +45,21 @@ type RunForkExecutionRequest struct {
 	ForkEventID         string
 	BundleHash          string
 	ConfirmSourceFreeze bool
+	DataPinOverrides    []durabledata.ExplicitPin
 	ContractSelection   runfork.RunForkContractSelection
 }
 
 type RunForkExecutionResult struct {
-	Owner              string `json:"owner"`
-	SourceRunID        string `json:"source_run_id"`
-	SourceRunStatus    string `json:"source_run_status"`
-	SourceFrozen       bool   `json:"source_frozen"`
-	ForkRunID          string `json:"fork_run_id"`
-	ForkEventID        string `json:"fork_event_id"`
-	ForkRunStatus      string `json:"fork_run_status"`
-	BundleHash         string `json:"bundle_hash"`
-	ExecutedEventCount int    `json:"executed_event_count"`
+	Owner              string            `json:"owner"`
+	SourceRunID        string            `json:"source_run_id"`
+	SourceRunStatus    string            `json:"source_run_status"`
+	SourceFrozen       bool              `json:"source_frozen"`
+	ForkRunID          string            `json:"fork_run_id"`
+	ForkEventID        string            `json:"fork_event_id"`
+	ForkRunStatus      string            `json:"fork_run_status"`
+	BundleHash         string            `json:"bundle_hash"`
+	ExecutedEventCount int               `json:"executed_event_count"`
+	DataPins           []durabledata.Pin `json:"data_pins"`
 }
 
 type SelectedContractRunForkExecutionFunc func(context.Context, runtimerunforkexecution.SelectedContractExecutionRequest) (runtimerunforkexecution.SelectedContractExecutionResult, error)
@@ -104,6 +107,7 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 		At:                      strings.TrimSpace(req.ForkEventID),
 		ExpectedBundleHash:      strings.TrimSpace(req.BundleHash),
 		ConfirmSourceFreeze:     req.ConfirmSourceFreeze,
+		DataPinOverrides:        req.DataPinOverrides,
 		SourceLoader:            e.SourceLoader,
 		ContractSelection:       selection,
 		AgentRuntime:            e.AgentRuntime,
@@ -116,6 +120,11 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 	if status == "" {
 		status = strings.TrimSpace(result.Materialization.ForkRunStatus)
 	}
+	pins := make([]durabledata.Pin, len(result.Materialization.DataPins))
+	copy(pins, result.Materialization.DataPins)
+	for index := range pins {
+		pins[index].RunState = status
+	}
 	return RunForkExecutionResult{
 		Owner:              strings.TrimSpace(result.Owner),
 		SourceRunID:        strings.TrimSpace(result.Materialization.SourceRunID),
@@ -126,6 +135,7 @@ func (e SelectedContractRunForkExecutor) ExecuteRunFork(ctx context.Context, req
 		ForkRunStatus:      status,
 		BundleHash:         strings.TrimSpace(req.BundleHash),
 		ExecutedEventCount: result.ExecutedEventCount,
+		DataPins:           pins,
 	}, nil
 }
 
@@ -227,6 +237,7 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 			ForkEventID:         params.ForkEventID,
 			BundleHash:          params.BundleHash,
 			ConfirmSourceFreeze: params.ConfirmSourceFreeze,
+			DataPinOverrides:    params.DataPinOverrides,
 			ContractSelection:   contractSelection,
 		})
 		if err != nil {
@@ -234,6 +245,9 @@ func executeRunFork(ctx context.Context, req Request, opts RunForkHandlerOptions
 		}
 		if result.BundleHash == "" {
 			result.BundleHash = params.BundleHash
+		}
+		if result.DataPins == nil {
+			result.DataPins = []durabledata.Pin{}
 		}
 		if err := validateRunForkExecutionResult(result); err != nil {
 			return apiidempotency.Completion{}, err
@@ -276,6 +290,7 @@ type runForkParams struct {
 	ForkEventID         string
 	BundleHash          string
 	ConfirmSourceFreeze bool
+	DataPinOverrides    []durabledata.ExplicitPin
 	IdempotencyKey      string
 }
 
@@ -305,13 +320,56 @@ func runForkParamsFromRequest(params map[string]any) (runForkParams, error) {
 	if err != nil {
 		return runForkParams{}, err
 	}
+	dataPinOverrides, err := runForkDataPinOverrides(params)
+	if err != nil {
+		return runForkParams{}, err
+	}
 	return runForkParams{
 		SourceRunID:         sourceRunID,
 		ForkEventID:         forkEventID,
 		BundleHash:          bundleHash,
 		ConfirmSourceFreeze: confirmSourceFreeze,
+		DataPinOverrides:    dataPinOverrides,
 		IdempotencyKey:      idempotencyKey,
 	}, nil
+}
+
+func runForkDataPinOverrides(params map[string]any) ([]durabledata.ExplicitPin, error) {
+	raw, present := params["data_pin_overrides"]
+	if !present {
+		return []durabledata.ExplicitPin{}, nil
+	}
+	items, ok := raw.([]any)
+	if !ok {
+		return nil, NewInvalidParamsError(map[string]any{"field": "data_pin_overrides", "reason": "must be an array"})
+	}
+	if len(items) > durabledata.MaxDataDeclarationsPerBundle {
+		return nil, NewInvalidParamsError(map[string]any{"field": "data_pin_overrides", "reason": fmt.Sprintf("must contain at most %d items", durabledata.MaxDataDeclarationsPerBundle)})
+	}
+	overrides := make([]durabledata.ExplicitPin, 0, len(items))
+	for index, rawItem := range items {
+		item, ok := rawItem.(map[string]any)
+		if !ok {
+			return nil, NewInvalidParamsError(map[string]any{"field": fmt.Sprintf("data_pin_overrides[%d]", index), "reason": "must be an object"})
+		}
+		if err := exactDataParams(item, "declaration", "version_id"); err != nil {
+			return nil, err
+		}
+		declaration, err := dataDeclarationRef(item["declaration"])
+		if err != nil {
+			return nil, err
+		}
+		versionID, err := dataVersionID(item["version_id"], fmt.Sprintf("data_pin_overrides[%d].version_id", index))
+		if err != nil {
+			return nil, err
+		}
+		overrides = append(overrides, durabledata.ExplicitPin{Declaration: declaration, VersionID: versionID})
+	}
+	canonical, err := durabledata.CanonicalExplicitPins(overrides)
+	if err != nil {
+		return nil, NewInvalidParamsError(map[string]any{"field": "data_pin_overrides", "reason": err.Error()})
+	}
+	return canonical, nil
 }
 
 func requiredUUIDParam(params map[string]any, name string) (string, error) {
@@ -363,6 +421,10 @@ func runForkError(sourceRunID, forkEventID string, err error) error {
 	var applicationErr *ApplicationError
 	if errors.As(err, &applicationErr) {
 		return applicationErr
+	}
+	var dataErr *durabledata.DomainError
+	if errors.As(err, &dataErr) {
+		return dataApplicationError(dataErr)
 	}
 	var conflict *apiidempotency.ConflictError
 	if errors.As(err, &conflict) {

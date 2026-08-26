@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providerconnectors"
@@ -141,6 +142,7 @@ type RuntimeDeps struct {
 	StartupGrant                   runtimestartupownership.GenerationGrant
 	MailboxStore                   runtimetools.MailboxPersistence
 	ToolEntityStore                runtimetools.EntityPersistence
+	DataAccessStore                durabledata.ResourceAccessStore
 	HumanTaskStore                 runtimetools.HumanTaskCardStore
 	BudgetSpendStore               budgetspend.Store
 	InboundStore                   InboundPersistence
@@ -1226,6 +1228,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		HumanTaskStore:     runtimeDeps.HumanTaskStore,
 		WorkflowInstances:  rt.Pipeline,
 		WorkflowSource:     source,
+		DataAccessStore:    runtimeDeps.DataAccessStore,
 		ChannelBindings:    opts.ChannelOutboundBindings,
 		ActivityExecutor:   rt.Pipeline,
 		WorkspaceResolver:  rt.Workspace,

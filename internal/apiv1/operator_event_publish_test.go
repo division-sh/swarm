@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
+	"github.com/division-sh/swarm/internal/durabledata"
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 
@@ -363,10 +364,11 @@ func TestOperatorEventPublishSQLiteRejectsExistingRunSameHashDifferentSourceBefo
 	handler := eventPublishTestHandlerWithStores(t, sqliteStore, sqliteStore, sqliteStore, bus, source)
 	runID := uuid.NewString()
 	if _, err := storetest.DatabaseForTest(sqliteStore).ExecContext(ctx, `
-		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
-		VALUES (?, 'name: source-mismatch', '{}')
+		UPDATE bundles
+		SET content_yaml = 'name: source-mismatch', parsed_json = '{}'
+		WHERE bundle_hash = ?
 	`, runStartTestBundleHash); err != nil {
-		t.Fatalf("seed SQLite bundle row: %v", err)
+		t.Fatalf("replace SQLite bundle row: %v", err)
 	}
 	runlifecyclefixture.RequireSQLite(t, ctx, storetest.DatabaseForTest(sqliteStore), runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: time.Now().UTC(), BundleHash: runStartTestBundleHash, BundleSource: "persisted"})
 
@@ -2204,6 +2206,14 @@ func (p *publicInputPublishProbe) PublishAPIEventAcknowledged(ctx context.Contex
 		p.endpoint = endpoint.Readback()
 	}
 	return p.EventBus.PublishAPIEventAcknowledged(ctx, evt, nil, request, completion)
+}
+
+func (p *publicInputPublishProbe) PublishAPIEventWithRunCreationAcknowledged(ctx context.Context, evt events.Event, endpoint *runtimebus.APIEventPublicationEndpoint, request apiidempotency.Request, completion apiidempotency.Completion, runCreation *durabledata.RunCreationCommand) (apiidempotency.Completion, bool, error) {
+	p.publicInputCalls++
+	if endpoint != nil {
+		p.endpoint = endpoint.Readback()
+	}
+	return p.EventBus.PublishAPIEventWithRunCreationAcknowledged(ctx, evt, nil, request, completion, runCreation)
 }
 
 type failStandalonePipelineReceiptOnceStore struct {

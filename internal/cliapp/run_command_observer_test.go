@@ -157,7 +157,7 @@ func TestRunCommandObserverDetachPreservesTerminalFailureExit(t *testing.T) {
 			case "health.check":
 				return runCommandHealthResult()
 			case "run.start":
-				return map[string]any{"run_id": "run-detached-failure", "status": "running"}
+				return runStartCommandResult("run-detached-failure", "running")
 			case "run.get":
 				run := validDiagnosticRunHeader("run-detached-failure")
 				select {
@@ -200,7 +200,7 @@ func TestRunCommandTerminalStatusCancelsPendingTraceObserver(t *testing.T) {
 			case "health.check":
 				return runCommandHealthResult()
 			case "run.start":
-				return map[string]any{"run_id": "run-terminal-pending", "status": "running"}
+				return runStartCommandResult("run-terminal-pending", "running")
 			case "run.get":
 				awaitRunCommandTraceRequest(t, requestRead)
 				run := validDiagnosticRunHeader("run-terminal-pending")
@@ -243,7 +243,7 @@ func TestRunCommandTerminalFailureCancelsPendingTraceObserver(t *testing.T) {
 			case "health.check":
 				return runCommandHealthResult()
 			case "run.start":
-				return map[string]any{"run_id": "run-terminal-failure-pending", "status": "running"}
+				return runStartCommandResult("run-terminal-failure-pending", "running")
 			case "run.get":
 				awaitRunCommandTraceRequest(t, requestRead)
 				run := validDiagnosticRunHeader("run-terminal-failure-pending")
@@ -351,7 +351,7 @@ func TestRunCommandInterruptCancelsPendingTraceObserverByMode(t *testing.T) {
 					case "health.check":
 						return runCommandHealthResult()
 					case "run.start":
-						return map[string]any{"run_id": "run-pending-interrupt", "status": "running"}
+						return runStartCommandResult("run-pending-interrupt", "running")
 					case "run.get":
 						return map[string]any{"run": validDiagnosticRunHeader("run-pending-interrupt")}
 					case "run.stop":
@@ -426,7 +426,7 @@ func TestRunCommandInterruptAfterObserverDetachPreservesModeControl(t *testing.T
 					case "health.check":
 						return runCommandHealthResult()
 					case "run.start":
-						return map[string]any{"run_id": "run-detached-interrupt", "status": "running"}
+						return runStartCommandResult("run-detached-interrupt", "running")
 					case "run.get":
 						return map[string]any{"run": validDiagnosticRunHeader("run-detached-interrupt")}
 					case "run.stop":
@@ -497,7 +497,7 @@ func TestRunCommandBlockedTraceRenderingDoesNotDelayInterruptControl(t *testing.
 					case "health.check":
 						return runCommandHealthResult()
 					case "run.start":
-						return map[string]any{"run_id": "run-blocked-trace", "status": "running"}
+						return runStartCommandResult("run-blocked-trace", "running")
 					case "run.get":
 						return map[string]any{"run": validDiagnosticRunHeader("run-blocked-trace")}
 					case "run.stop":
@@ -563,7 +563,7 @@ func TestRunCommandBlockedDetachRenderingDoesNotDelayTerminalSelection(t *testin
 			case "health.check":
 				return runCommandHealthResult()
 			case "run.start":
-				return map[string]any{"run_id": "run-blocked-detach", "status": "running"}
+				return runStartCommandResult("run-blocked-detach", "running")
 			case "run.get":
 				run := validDiagnosticRunHeader("run-blocked-detach")
 				select {
@@ -672,7 +672,7 @@ func TestRunCommandHealthyTraceBurstWithinTransportBoundDoesNotDetach(t *testing
 			case "health.check":
 				return runCommandHealthResult()
 			case "run.start":
-				return map[string]any{"run_id": "run-healthy-burst", "status": "running"}
+				return runStartCommandResult("run-healthy-burst", "running")
 			case "run.get":
 				run := validDiagnosticRunHeader("run-healthy-burst")
 				select {
@@ -775,7 +775,7 @@ func TestRunCommandTerminalJoinPublishesEstablishedObserverOverflow(t *testing.T
 			case "health.check":
 				return runCommandHealthResult()
 			case "run.start":
-				return map[string]any{"run_id": "run-terminal-overflow", "status": "running"}
+				return runStartCommandResult("run-terminal-overflow", "running")
 			case "run.get":
 				run := validDiagnosticRunHeader("run-terminal-overflow")
 				select {
@@ -853,7 +853,7 @@ func observerTerminalAfterWarningResponder(t *testing.T, runID string, warning <
 		case "health.check":
 			return runCommandHealthResult()
 		case "run.start":
-			return map[string]any{"run_id": runID, "status": "running"}
+			return runStartCommandResult(runID, "running")
 		case "run.get":
 			run := validDiagnosticRunHeader(runID)
 			select {

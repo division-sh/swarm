@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
+	"github.com/division-sh/swarm/internal/durabledata"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -17,8 +18,9 @@ import (
 const runStartIDempotencyTTL = 24 * time.Hour
 
 type runStartResult struct {
-	RunID  string `json:"run_id"`
-	Status string `json:"status"`
+	RunID       string                  `json:"run_id"`
+	Status      string                  `json:"status"`
+	DataBinding durabledata.DataBinding `json:"data_binding"`
 }
 
 type bundleIdentityParam struct {
@@ -58,9 +60,11 @@ func executeRunStart(ctx context.Context, req Request, opts EventPublicationOpti
 		sourceAgent:                    func(Request) string { return "api.v1" },
 		rootInputOnly:                  true,
 		injectRunIDEntityIDWhenMissing: true,
+		durablePublishAck:              true,
+		atomicAPICompletion:            true,
 		publishError:                   runStartEventPublishError,
 		buildCompletion: func(_ context.Context, _ EventPublicationOptions, params eventPublicationParams) (any, string, error) {
-			return runStartResult{RunID: params.RunID, Status: "running"}, params.RunID, nil
+			return runStartResult{RunID: params.RunID, Status: "running", DataBinding: durabledata.DataBinding{State: "none"}}, params.RunID, nil
 		},
 	}
 	completion, replay, err := executeOperatorEventPublication(ctx, req, opts, now, cfg)
@@ -112,6 +116,10 @@ func runStartIdempotencyError(err error) error {
 }
 
 func publicationApplicationError(eventName string, err error) error {
+	var dataDomain *durabledata.DomainError
+	if errors.As(err, &dataDomain) {
+		return dataApplicationError(err)
+	}
 	var bundleUnavailable *runtimerunlifecycle.PersistedBundleUnavailableError
 	if errors.As(err, &bundleUnavailable) || errors.Is(err, runtimerunlifecycle.ErrPersistedBundleUnavailable) {
 		details := map[string]any{"event_name": eventName}

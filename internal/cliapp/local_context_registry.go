@@ -53,7 +53,6 @@ type localContextDescriptor struct {
 	ProjectRoot       string                     `json:"project_root,omitempty"`
 	ContractsPath     string                     `json:"contracts_path,omitempty"`
 	StorePath         string                     `json:"store_path,omitempty"`
-	DataDir           string                     `json:"data_dir,omitempty"`
 	PID               int                        `json:"pid,omitempty"`
 	CreatedAt         string                     `json:"created_at"`
 	UpdatedAt         string                     `json:"updated_at"`

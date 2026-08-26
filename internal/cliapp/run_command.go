@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/durabledata"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -62,7 +64,8 @@ type runCommandOptions struct {
 	configPath       string
 	backend          string
 	contractsPath    string
-	dataSource       string
+	dataImports      []string
+	dataPins         []string
 	platformSpecPath string
 	idempotencyKey   string
 	runID            string
@@ -73,8 +76,9 @@ type runCommandOptions struct {
 }
 
 type runStartResult struct {
-	RunID  string `json:"run_id"`
-	Status string `json:"status"`
+	RunID       string                  `json:"run_id"`
+	Status      string                  `json:"status"`
+	DataBinding durabledata.DataBinding `json:"data_binding"`
 }
 
 type runCommandOKResult struct {
@@ -183,7 +187,8 @@ func newRunCommand(repo string, rootOpts rootCommandOptions) *cobra.Command {
 	cmd.Flags().StringVar(&opts.configPath, "config", "", "Path to swarm.yaml config for local foreground startup")
 	cmd.Flags().StringVar(&opts.backend, "backend", "", "LLM backend profile for local foreground startup: anthropic, claude_cli, openai_compatible, or openai_responses")
 	cmd.Flags().StringVar(&opts.contractsPath, "contracts", "", "Path to Swarm contract bundle root for local foreground startup")
-	cmd.Flags().StringVar(&opts.dataSource, "data", "", "Path to agent-visible read-only /data reference directory")
+	cmd.Flags().StringArrayVar(&opts.dataImports, "data", nil, "Fused immutable data import and pin: name=file.jsonl (repeatable)")
+	cmd.Flags().StringArrayVar(&opts.dataPins, "pin", nil, "Exact data version pin: name@head, name@vN, or name@ResourceVersionID (repeatable)")
 	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", "", retiredPlatformSpecFlagHelp)
 	cmd.Flags().StringVar(&opts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for run.start")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
@@ -292,8 +297,15 @@ func (o runCommandOptions) validate() error {
 	if o.changedFlags["platform-spec"] {
 		return fmt.Errorf("--platform-spec is retired; the swarm binary embeds its own platform spec. Use config paths.platform_spec_path only for platform spec development")
 	}
-	if o.changedFlags["data"] && strings.TrimSpace(o.dataSource) == "" {
-		return fmt.Errorf("--data must be non-empty")
+	for _, value := range o.dataImports {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("--data must be name=file.jsonl")
+		}
+	}
+	for _, value := range o.dataPins {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("--pin must be name@head, name@vN, or name@ResourceVersionID")
+		}
 	}
 	if o.changedFlags["api-port"] {
 		effectiveMCPAddr := defaultMCPListenAddr
@@ -318,7 +330,7 @@ func (o runCommandOptions) validate() error {
 		if strings.TrimSpace(o.eventName) != "" || strings.TrimSpace(o.payloadPath) != "" || strings.TrimSpace(o.idempotencyKey) != "" || strings.TrimSpace(o.runID) != "" {
 			return fmt.Errorf("--reattach is mutually exclusive with --event, --payload, --idempotency-key, and --run-id")
 		}
-		for _, flag := range []string{"bundle-hash", "config", "backend", "contracts", "data", "api-port", "mcp-port"} {
+		for _, flag := range []string{"bundle-hash", "config", "backend", "contracts", "data", "pin", "api-port", "mcp-port"} {
 			if o.changedFlags[flag] {
 				return fmt.Errorf("--reattach is mutually exclusive with --%s", flag)
 			}
@@ -326,7 +338,7 @@ func (o runCommandOptions) validate() error {
 		return nil
 	}
 	if strings.TrimSpace(o.connectURL) != "" {
-		for _, flag := range []string{"config", "backend", "contracts", "data", "api-port", "mcp-port"} {
+		for _, flag := range []string{"config", "backend", "contracts", "api-port", "mcp-port"} {
 			if o.changedFlags[flag] {
 				return fmt.Errorf("--%s requires local foreground mode and cannot be used with --connect", flag)
 			}
@@ -483,7 +495,6 @@ func startLocalRunServe(ctx context.Context, repo string, opts runCommandOptions
 	serveOpts.ConfigPath = opts.configPath
 	serveOpts.Backend = opts.backend
 	serveOpts.ContractsPath = resolvedPaths.ContractsPath
-	serveOpts.DataSource = opts.dataSource
 	serveOpts.PlatformSpecPath = resolvedPaths.PlatformSpecPath
 	serveOpts.LocalRun = true
 	var startupOutput runStartupOutput
@@ -612,7 +623,19 @@ func runCommandStart(ctx context.Context, client *cliAPIClient, health diagnosti
 	} else if bundleHash := strings.TrimSpace(health.Bundle.BundleHash); bundleHash != "" {
 		params["bundle_hash"] = bundleHash
 	}
-	if runID := strings.TrimSpace(opts.runID); runID != "" {
+	runID := strings.TrimSpace(opts.runID)
+	if len(opts.dataImports) > 0 || len(opts.dataPins) > 0 {
+		if runID == "" {
+			runID = uuid.NewString()
+		}
+		bundleHash, _ := params["bundle_hash"].(string)
+		data, err := buildRunDataEnvelope(ctx, client, bundleHash, runID, opts.dataImports, opts.dataPins)
+		if err != nil {
+			return runStartResult{}, err
+		}
+		params["data"] = data
+	}
+	if runID != "" {
 		params["run_id"] = runID
 	}
 	if key := strings.TrimSpace(opts.idempotencyKey); key != "" {
@@ -638,6 +661,18 @@ func validateRunStartResult(result runStartResult) error {
 	}
 	if _, ok := diagnosticValidRunStatuses[status]; !ok {
 		return fmt.Errorf("malformed run.start result: status=%q is not a valid RunStatus", status)
+	}
+	switch result.DataBinding.State {
+	case "none":
+		if result.DataBinding.RunID != "" || result.DataBinding.Evidence != nil {
+			return fmt.Errorf("malformed run.start result: unbound data_binding contains evidence")
+		}
+	case "bound":
+		if result.DataBinding.RunID != result.RunID || result.DataBinding.Evidence == nil || result.DataBinding.PinCount < 1 || result.DataBinding.ImportCount < 0 {
+			return fmt.Errorf("malformed run.start result: bound data_binding is contradictory")
+		}
+	default:
+		return fmt.Errorf("malformed run.start result: data_binding.state is required")
 	}
 	return nil
 }

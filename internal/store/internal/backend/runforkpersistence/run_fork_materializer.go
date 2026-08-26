@@ -19,6 +19,7 @@ import (
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
+	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 	"github.com/google/uuid"
 )
 
@@ -113,6 +114,11 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 		if err := requireExactRunForkScenarioProfile(ctx, tx, forkRunID, scenarioProfile, sourceProfiled); err != nil {
 			return runfork.RunForkMaterialization{}, err
 		}
+		pins, err := storedurabledata.MaterializeForkPinsTx(s.durableData, ctx, tx, plan.SourceRunID, forkRunID, identity.BundleSourceFact.BundleHash(), req.DataPinOverrides, true, time.Time{})
+		if err != nil {
+			return runfork.RunForkMaterialization{}, err
+		}
+		existing.DataPins = pins
 		return existing, nil
 	}
 	metadata, err := loadRunForkEntityMetadata(plan)
@@ -129,6 +135,10 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 	ctx = runtimeauthoractivity.WithScope(ctx, forkScope)
 	if err := s.InsertRunForkRunTx(ctx, tx, story, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now, identity.BundleSourceFact); err != nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("insert fork run: %w", err)
+	}
+	pins, err := storedurabledata.MaterializeForkPinsTx(s.durableData, ctx, tx, plan.SourceRunID, forkRunID, identity.BundleSourceFact.BundleHash(), req.DataPinOverrides, false, now)
+	if err != nil {
+		return runfork.RunForkMaterialization{}, err
 	}
 	if sourceProfiled {
 		if err := scenarioexecutionpersistence.EnsurePostgres(ctx, tx, forkRunID, scenarioProfile, now); err != nil {
@@ -172,6 +182,7 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 		SelectedContractBinding:  selectedContractBinding,
 		DeliveryResumeBlocked:    true,
 		SourceRunStatusUnchanged: true,
+		DataPins:                 pins,
 	}, nil
 }
 

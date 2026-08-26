@@ -427,7 +427,7 @@ func writeInboundAdmissionPolicyMatrixFixture(t testing.TB) string {
 
 func writeInboundAdmissionRuntimeConfig(t testing.TB, backend, sqlitePath string) string {
 	t.Helper()
-	lines := []string{"runtime:", "  execution_posture: live", "  recovery_on_startup: true", "workspace:", "  data_source: " + t.TempDir()}
+	lines := []string{"runtime:", "  execution_posture: live", "  recovery_on_startup: true"}
 	if backend == "sqlite" {
 		lines = append(lines, "store:", "  backend: sqlite", "  sqlite:", "    path: "+sqlitePath)
 	}

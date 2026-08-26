@@ -2097,13 +2097,9 @@ func TestRuntimeProjectSupervisorDerivesProcessOwnerFromInitialRuntime(t *testin
 	}
 }
 
-func TestRuntimeProjectSupervisorLoadProjectUsesResolvedWorkspaceMountSources(t *testing.T) {
+func TestRuntimeProjectSupervisorLoadProjectUsesNoAmbientWorkspaceMountSources(t *testing.T) {
 	projectRoot := writeProjectRoot(t)
-	dataDir := t.TempDir()
-	wantMountSources := cliapp.WorkspaceMountSources{
-		DataSource:       dataDir,
-		DataSourceSource: "--data",
-	}
+	wantMountSources := cliapp.WorkspaceMountSources{}
 
 	var gotMountSources cliapp.WorkspaceMountSources
 	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(_ context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {

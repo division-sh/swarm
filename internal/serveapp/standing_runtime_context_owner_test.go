@@ -195,10 +195,10 @@ func seedStandingRuntimeContextBundle(t *testing.T, writer bundlecatalog.ServeIn
 	if err != nil {
 		t.Fatalf("project standing runtime-context bundle: %v", err)
 	}
-	if _, err := writer.UpsertBundleCatalog(context.Background(), bundlecatalog.Upsert{
+	if _, err := writer.UpsertBundleCatalogWithData(context.Background(), bundlecatalog.Upsert{
 		BundleHash: projection.BundleHash, ContentYAML: projection.ContentYAML,
 		ParsedJSON: projection.ParsedJSON, DataBlob: projection.DataBlob, Metadata: projection.Metadata,
-	}); err != nil {
+	}, projection.DataCatalog); err != nil {
 		t.Fatalf("persist standing runtime-context bundle: %v", err)
 	}
 }

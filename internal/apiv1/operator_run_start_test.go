@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiidempotency"
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -620,6 +622,22 @@ func (p failingRunStartPublisher) Publish(context.Context, events.Event) error {
 	return p.err
 }
 
+func (p failingRunStartPublisher) PublishAcknowledged(context.Context, events.Event) error {
+	return p.err
+}
+
+func (p failingRunStartPublisher) LookupAPIEventPublication(context.Context, apiidempotency.Request) (apiidempotency.Completion, bool, error) {
+	return apiidempotency.Completion{}, false, nil
+}
+
+func (p failingRunStartPublisher) PublishAPIEventAcknowledged(context.Context, events.Event, *runtimebus.APIEventPublicationEndpoint, apiidempotency.Request, apiidempotency.Completion) (apiidempotency.Completion, bool, error) {
+	return apiidempotency.Completion{}, false, p.err
+}
+
+func (p failingRunStartPublisher) PublishAPIEventWithRunCreationAcknowledged(context.Context, events.Event, *runtimebus.APIEventPublicationEndpoint, apiidempotency.Request, apiidempotency.Completion, *durabledata.RunCreationCommand) (apiidempotency.Completion, bool, error) {
+	return apiidempotency.Completion{}, false, p.err
+}
+
 func (p failingRunStartPublisher) AdmitBundleSourceFact(ctx context.Context) (context.Context, error) {
 	return runtimecorrelation.WithBundleSourceFact(ctx, runStartTestBundleSourceFact()), nil
 }
@@ -628,6 +646,22 @@ type missingRunStartBundleScopePublisher struct{}
 
 func (missingRunStartBundleScopePublisher) Publish(context.Context, events.Event) error {
 	return errors.New("unexpected publish without active runtime bundle scope")
+}
+
+func (missingRunStartBundleScopePublisher) PublishAcknowledged(context.Context, events.Event) error {
+	return errors.New("unexpected publish without active runtime bundle scope")
+}
+
+func (missingRunStartBundleScopePublisher) LookupAPIEventPublication(context.Context, apiidempotency.Request) (apiidempotency.Completion, bool, error) {
+	return apiidempotency.Completion{}, false, nil
+}
+
+func (missingRunStartBundleScopePublisher) PublishAPIEventAcknowledged(context.Context, events.Event, *runtimebus.APIEventPublicationEndpoint, apiidempotency.Request, apiidempotency.Completion) (apiidempotency.Completion, bool, error) {
+	return apiidempotency.Completion{}, false, errors.New("unexpected publish without active runtime bundle scope")
+}
+
+func (missingRunStartBundleScopePublisher) PublishAPIEventWithRunCreationAcknowledged(context.Context, events.Event, *runtimebus.APIEventPublicationEndpoint, apiidempotency.Request, apiidempotency.Completion, *durabledata.RunCreationCommand) (apiidempotency.Completion, bool, error) {
+	return apiidempotency.Completion{}, false, errors.New("unexpected publish without active runtime bundle scope")
 }
 
 func runStartBody(runID, bundleHash, eventName, payload, idempotencyKey string) string {

@@ -108,7 +108,7 @@ func populateEffectiveEventProvenance(bundle *WorkflowContractBundle) {
 	}
 	builder := newEffectiveProvenanceBuilder()
 	owners := map[string]string{}
-	for _, record := range bundle.currentEventDeclarationRecords() {
+	for _, record := range bundle.canonicalCurrentEventDeclarationRecords() {
 		prefix := effectiveEventProvenancePrefix(record.packageKey, record.qualifiedName)
 		if prefix == "" {
 			continue

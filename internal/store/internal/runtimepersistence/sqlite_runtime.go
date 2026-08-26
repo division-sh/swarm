@@ -34,6 +34,7 @@ import (
 	storetimerobligation "github.com/division-sh/swarm/internal/store/internal/backend/timerobligation"
 	storebudgetspend "github.com/division-sh/swarm/internal/store/internal/budgetspend"
 	storebundlecatalog "github.com/division-sh/swarm/internal/store/internal/bundlecatalog"
+	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 	storeingress "github.com/division-sh/swarm/internal/store/internal/ingresspersistence"
 	storemailbox "github.com/division-sh/swarm/internal/store/internal/mailboxpersistence"
 	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
@@ -78,6 +79,7 @@ type SQLiteRuntimeStore struct {
 	timerObligationSQLiteReader  *storetimerobligation.SQLiteReader
 	genericScheduleSQLiteOwner   *storegenericschedule.SQLiteOwner
 	operatorChannelSQLiteOwner   *storeoperatorchannel.SQLiteOwner
+	durableDataOwner             *storedurabledata.Owner
 
 	schema                *SQLiteSchemaStore
 	backend               *sqlitebackend.Backend

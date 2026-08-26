@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/packartifact"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
@@ -48,6 +49,10 @@ type WorkflowContractBundle struct {
 	eventOwnership        []eventSchemaOwnershipRow
 	eventOwnersByFlow     map[string][]eventSchemaOwnershipRow
 	effectiveProvenance   EffectiveProvenanceLedger
+	dataDeclarations      map[string]DurableDataDeclaration
+	staticData            []durabledata.StaticData
+	staticDataAccess      map[string][]durabledata.StaticDataID
+	resourceDataAccess    map[string][]durabledata.DeclarationRef
 	scopedNodes           map[string]SystemNodeContract
 	scopedEvents          map[string]EventCatalogEntry
 	scopedAgents          map[string]AgentRegistryEntry
@@ -1154,6 +1159,7 @@ type ProjectPackagePaths struct {
 	ProjectAgentsFile string
 	ProjectToolsFile  string
 	ProjectPolicyFile string
+	DataFile          string
 	Flows             []FlowContractPaths
 }
 type FlowContractPaths struct {
@@ -1947,6 +1953,7 @@ type AgentRegistryEntry struct {
 	ToolsTier2             []string                        `yaml:"tools_tier2"`
 	NativeTools            map[string]any                  `yaml:"native_tools"`
 	FlowDataAccess         []string                        `yaml:"flow_data_access" json:"flow_data_access,omitempty"`
+	DataAccess             []DurableDataAccessRef          `yaml:"data_access" json:"data_access,omitempty"`
 	Criteria               []string                        `yaml:"criteria" json:"criteria,omitempty"`
 	EmitEvents             []string                        `yaml:"emit_events"`
 	Implementation         string                          `yaml:"implementation"`
@@ -2039,6 +2046,7 @@ var agentRegistryEntryFieldOptions = map[string]struct{}{
 	"tools":              {},
 	"native_tools":       {},
 	"flow_data_access":   {},
+	"data_access":        {},
 	"criteria":           {},
 	"emit_events":        {},
 	"implementation":     {},

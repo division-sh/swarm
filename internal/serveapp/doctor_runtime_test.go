@@ -45,7 +45,6 @@ func TestRunServeRuntimeConsumesLocalClaudePreflightAfterBundleDecision(t *testi
 	code := Run(context.Background(), cliapp.RepoRoot(), cliapp.ServeOptions{
 		ConfigPath:         writeDoctorClaudeConfig(t, dockerBin),
 		ContractsPath:      doctorAgentContractsPath,
-		DataSource:         t.TempDir(),
 		PlatformSpecPath:   defaultPlatformSpecPath,
 		StoreMode:          "not-a-store",
 		APIListenAddr:      "127.0.0.1:0",
@@ -76,8 +75,6 @@ func TestRunServeRuntimeRejectsDeclaredDevelopmentPackInventoryBeforeStoreSelect
 		"runtime:",
 		"  execution_posture: live",
 		"  recovery_on_startup: false",
-		"workspace:",
-		"  data_source: " + t.TempDir(),
 		"llm:",
 		"  backend: anthropic",
 		"  session:",
@@ -94,7 +91,6 @@ func TestRunServeRuntimeRejectsDeclaredDevelopmentPackInventoryBeforeStoreSelect
 	code := Run(context.Background(), cliapp.RepoRoot(), cliapp.ServeOptions{
 		ConfigPath:         configPath,
 		ContractsPath:      doctorAgentContractsPath,
-		DataSource:         t.TempDir(),
 		PlatformSpecPath:   defaultPlatformSpecPath,
 		StoreMode:          "not-a-store",
 		APIListenAddr:      "127.0.0.1:0",
@@ -124,7 +120,6 @@ func writeDoctorClaudeConfig(t *testing.T, dockerBin string) string {
 	storePath := filepath.Join(t.TempDir(), "runtime.db")
 	workspace := []string{
 		"workspace:",
-		"  data_source: " + t.TempDir(),
 		"  image: doctor-test-image:latest",
 	}
 	if strings.TrimSpace(dockerBin) != "" {

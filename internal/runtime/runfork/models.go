@@ -20,6 +20,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/durabledata"
+
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 )
@@ -267,6 +269,7 @@ type RunForkMaterializeRequest struct {
 	ContractSelection       *RunForkContractSelection
 	BundleSourceFact        runtimecorrelation.BundleSourceFact
 	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
+	DataPinOverrides        []durabledata.ExplicitPin
 }
 
 type RunForkMaterialization struct {
@@ -281,6 +284,7 @@ type RunForkMaterialization struct {
 	UnsupportedBlockers      []RunForkUnsupportedBlocker     `json:"unsupported_blockers,omitempty"`
 	DeliveryResumeBlocked    bool                            `json:"delivery_resume_blocked"`
 	SourceRunStatusUnchanged bool                            `json:"source_run_status_unchanged"`
+	DataPins                 []durabledata.Pin               `json:"data_pins"`
 }
 
 const (
@@ -977,6 +981,7 @@ type RunForkSelectedContractExecutionMaterializeRequest struct {
 	RouteTopology           RunForkSelectedContractRouteTopology
 	RecipientPlanning       RunForkSelectedContractRecipientPlanning
 	WorkflowStates          []RunForkSelectedContractWorkflowState
+	DataPinOverrides        []durabledata.ExplicitPin
 }
 
 type RunForkSelectedContractWorkflowStateAddressKind string

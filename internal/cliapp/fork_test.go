@@ -344,6 +344,7 @@ func validRunForkResult(sourceRunID, bundleHash string) map[string]any {
 		"fork_run_status":      "running",
 		"bundle_hash":          bundleHash,
 		"executed_event_count": 1,
+		"data_pins":            []any{},
 	}
 }
 

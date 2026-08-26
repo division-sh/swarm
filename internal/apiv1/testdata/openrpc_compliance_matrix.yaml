@@ -288,6 +288,21 @@ methods:
     examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
     service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}
     gap_classification: []
+  - method: data.check
+    transport: http
+    required_params: [source_invocation_id, bundle_hash, declaration, expected_head, input]
+    declared_errors: [MESSAGE_BUDGET_EXCEEDED, DATA_INVOCATION_CONFLICT, DATA_CONTRACT_NOT_FOUND, DATA_INTEGRITY_ERROR]
+    happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCPermanentOperationHTTPRuntimeProbes}, {kind: go_test, name: TestDurableDataHTTPPublicSurfaceAcrossSelectedStores}]}
+    required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCPermanentOperationHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
+    unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCPermanentOperationHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
+    auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCPermanentOperationHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
+    declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOperatorDataHandlersMapTypedErrors}, {kind: go_test, name: TestRPCMessageBudgetBoundaries}]}
+    idempotency: {status: not_applicable}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCPermanentOperationHTTPRuntimeProbes}]}
+    notification_schema: {status: not_applicable}
+    examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
+    service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}
+    gap_classification: []
   - method: channel.proof_revoke
     transport: http
     required_params: [interface, expected_revision]
@@ -303,6 +318,21 @@ methods:
     examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
     service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}
     gap_classification: []
+  - method: data.import
+    transport: http
+    required_params: [source_invocation_id, bundle_hash, declaration, expected_head, input]
+    declared_errors: [MESSAGE_BUDGET_EXCEEDED, DATA_INVOCATION_CONFLICT, DATA_CONTRACT_NOT_FOUND, DATA_INTEGRITY_ERROR]
+    happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCPermanentOperationHTTPRuntimeProbes}, {kind: go_test, name: TestDurableDataHTTPPublicSurfaceAcrossSelectedStores}]}
+    required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCPermanentOperationHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
+    unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCPermanentOperationHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
+    auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCPermanentOperationHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
+    declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOperatorDataHandlersMapTypedErrors}, {kind: go_test, name: TestRPCMessageBudgetBoundaries}]}
+    idempotency: {status: not_applicable}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCPermanentOperationHTTPRuntimeProbes}]}
+    notification_schema: {status: not_applicable}
+    examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
+    service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}
+    gap_classification: []
   - method: channel.rebind
     transport: http
     required_params: [interface, expected_revision]
@@ -314,6 +344,21 @@ methods:
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOperatorChannelAPIContractEvidence}]}
     idempotency: {status: covered, proof_refs: [{kind: go_test, name: TestOperatorChannelAPIContractEvidence}]}
     result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOperatorChannelAPIContractEvidence}]}
+    notification_schema: {status: not_applicable}
+    examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
+    service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}
+    gap_classification: []
+  - method: data.prune
+    transport: http
+    required_params: [prune_invocation_id, declaration, version_id, expected_head]
+    declared_errors: [DATA_INVOCATION_CONFLICT, DATA_INTEGRITY_ERROR]
+    happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCPermanentOperationHTTPRuntimeProbes}, {kind: go_test, name: TestDurableDataHTTPPublicSurfaceAcrossSelectedStores}]}
+    required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCPermanentOperationHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
+    unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCPermanentOperationHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
+    auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCPermanentOperationHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
+    declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOperatorDataHandlersMapTypedErrors}]}
+    idempotency: {status: not_applicable}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCPermanentOperationHTTPRuntimeProbes}]}
     notification_schema: {status: not_applicable}
     examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
     service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}
@@ -344,6 +389,21 @@ methods:
     declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOperatorChannelAPIContractEvidence}]}
     idempotency: {status: covered, proof_refs: [{kind: go_test, name: TestOperatorChannelAPIContractEvidence}]}
     result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOperatorChannelAPIContractEvidence}]}
+    notification_schema: {status: not_applicable}
+    examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
+    service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}
+    gap_classification: []
+  - method: data.show
+    transport: http
+    required_params: [view]
+    declared_errors: [MESSAGE_BUDGET_EXCEEDED, DATA_DECLARATION_NOT_FOUND, DATA_VERSION_NOT_FOUND, DATA_PAYLOAD_PRUNED, DATA_OPERATION_NOT_FOUND, DATA_CURSOR_INVALID, DATA_INTEGRITY_ERROR]
+    happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCPermanentOperationHTTPRuntimeProbes}, {kind: go_test, name: TestDurableDataHTTPPublicSurfaceAcrossSelectedStores}]}
+    required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCPermanentOperationHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
+    unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCPermanentOperationHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
+    auth: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCPermanentOperationHTTPRuntimeProbes}, {kind: go_test, name: TestHandlerHTTPAuthBoundary}]}
+    declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestOperatorDataHandlersMapTypedErrors}, {kind: go_test, name: TestRPCMessageBudgetBoundaries}]}
+    idempotency: {status: not_applicable}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestOpenRPCPermanentOperationHTTPRuntimeProbes}]}
     notification_schema: {status: not_applicable}
     examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
     service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}
@@ -546,7 +606,7 @@ methods:
   - method: event.publish
     transport: http
     required_params: [event_name, payload]
-    declared_errors: [BUNDLE_MISMATCH, BUNDLE_SCOPE_REQUIRED, BUNDLE_UNAVAILABLE, BUNDLE_DATA_INTEGRITY_ERROR, UNSUPPORTED_BUNDLE_HASH, EVENT_NOT_DECLARED, EVENT_PUBLISH_FAILED, PAYLOAD_VALIDATION_FAILED, RUN_NOT_FOUND, EVENT_NOT_FOUND, RUN_ALREADY_TERMINAL, IDEMPOTENCY_CONFLICT]
+    declared_errors: [BUNDLE_MISMATCH, BUNDLE_SCOPE_REQUIRED, BUNDLE_UNAVAILABLE, BUNDLE_DATA_INTEGRITY_ERROR, UNSUPPORTED_BUNDLE_HASH, EVENT_NOT_DECLARED, EVENT_PUBLISH_FAILED, PAYLOAD_VALIDATION_FAILED, RUN_NOT_FOUND, EVENT_NOT_FOUND, RUN_ALREADY_TERMINAL, IDEMPOTENCY_CONFLICT, MESSAGE_BUDGET_EXCEEDED, DATA_INVOCATION_CONFLICT, DATA_CONTRACT_NOT_FOUND, DATA_DEPENDENCY_INCOMPLETE, DATA_PIN_CONFLICT, DATA_SCHEMA_MISMATCH, RUN_DATA_IMMUTABLE, RUN_DATA_REJECTED, RUN_DATA_HEAD_CONFLICT, DATA_INTEGRITY_ERROR]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorEventPublishHandlersPersistEventReportDeliveriesAndReplayIdempotency}, {kind: go_test, name: TestOperatorEventPublishExistingRunTargetRouteValidatesAndPersistsCanonicalTarget}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
@@ -846,7 +906,7 @@ methods:
   - method: run.fork
     transport: http
     required_params: [source_run_id]
-    declared_errors: [BUNDLE_UNAVAILABLE, BUNDLE_DATA_INTEGRITY_ERROR, RUN_NOT_FOUND, EVENT_NOT_FOUND, IDEMPOTENCY_CONFLICT]
+    declared_errors: [BUNDLE_UNAVAILABLE, BUNDLE_DATA_INTEGRITY_ERROR, RUN_NOT_FOUND, EVENT_NOT_FOUND, IDEMPOTENCY_CONFLICT, DATA_DEPENDENCY_INCOMPLETE, DATA_PIN_CONFLICT, DATA_SCHEMA_MISMATCH, DATA_PAYLOAD_PRUNED, DATA_VERSION_NOT_FOUND, DATA_INTEGRITY_ERROR]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRunForkHandlersUseAvailabilityAndSelectedExecutor}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}
@@ -876,7 +936,7 @@ methods:
   - method: run.start
     transport: http
     required_params: [event_name, payload]
-    declared_errors: [BUNDLE_MISMATCH, BUNDLE_SCOPE_REQUIRED, BUNDLE_UNAVAILABLE, BUNDLE_DATA_INTEGRITY_ERROR, UNSUPPORTED_BUNDLE_HASH, EVENT_NOT_DECLARED, EVENT_PUBLISH_FAILED, PAYLOAD_VALIDATION_FAILED, IDEMPOTENCY_CONFLICT]
+    declared_errors: [BUNDLE_MISMATCH, BUNDLE_SCOPE_REQUIRED, BUNDLE_UNAVAILABLE, BUNDLE_DATA_INTEGRITY_ERROR, UNSUPPORTED_BUNDLE_HASH, EVENT_NOT_DECLARED, EVENT_PUBLISH_FAILED, PAYLOAD_VALIDATION_FAILED, IDEMPOTENCY_CONFLICT, MESSAGE_BUDGET_EXCEEDED, DATA_INVOCATION_CONFLICT, DATA_CONTRACT_NOT_FOUND, DATA_DEPENDENCY_INCOMPLETE, DATA_PIN_CONFLICT, DATA_SCHEMA_MISMATCH, RUN_DATA_REJECTED, RUN_DATA_HEAD_CONFLICT, DATA_INTEGRITY_ERROR]
     happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_test, name: TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency}]}
     required_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
     unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_test, name: TestOpenRPCMutatingHTTPRuntimeProbes}, {kind: go_helper, name: validateParams}]}

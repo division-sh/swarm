@@ -773,12 +773,8 @@ func TestBundleHashV1RejectsIntentBytesChangedAfterResolution(t *testing.T) {
 func TestBundleHashV1RejectsIntentPathThatIsAnotherCanonicalInput(t *testing.T) {
 	root, platform := writeEquivalentBundleHashFixture(t, "\n", "name: overlapping-intent-input\nversion: \"1.0.0\"\nflows: []\n")
 	writeBundleHashText(t, filepath.Join(root, "agents.yaml"), "guide:\n  id: guide\n  role: guide\n  intent: agents.yaml\n  model: regular\n")
-	bundle, err := LoadWorkflowContractBundleWithOverrides(filepath.Dir(root), root, platform)
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
-	}
-	if _, err := BundleHash(bundle); err == nil || !strings.Contains(err.Error(), "overlaps canonical input") {
-		t.Fatalf("BundleHash error = %v, want intent/non-intent policy overlap rejection", err)
+	if _, err := LoadWorkflowContractBundleWithOverrides(filepath.Dir(root), root, platform); err == nil || !strings.Contains(err.Error(), "overlaps canonical input") {
+		t.Fatalf("contract load error = %v, want catalog-level intent/non-intent policy overlap rejection", err)
 	}
 }
 

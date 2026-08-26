@@ -302,6 +302,7 @@ func validateReleaseDockerEvidence(records []fakeDockerRecord) error {
 		"image_inspect":    0,
 		"cli_preflight":    0,
 		"container_create": 0,
+		"container_remove": 0,
 		"container_start":  0,
 		"network_connect":  0,
 		"claude_startup":   0,

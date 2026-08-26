@@ -475,6 +475,24 @@ func sqliteRenderPredicate(raw string) (string, error) {
 		"route_identity ~ '^delivery-route-v2:sha256:[0-9a-f]{64}$'",
 		sqliteDeliveryRouteIdentityPredicate("route_identity"),
 	)
+	for _, digest := range []struct {
+		column string
+		prefix string
+	}{
+		{"schema_digest", "resource-schema-v1:sha256:"},
+		{"content_digest", "resource-content-v1:sha256:"},
+		{"version_id", "resource-version-v1:sha256:"},
+		{"request_hash", "resource-source-request-v1:sha256:"},
+		{"request_hash", "resource-prune-request-v1:sha256:"},
+		{"request_hash", "resource-run-creation-request-v1:sha256:"},
+		{"static_id", "static-data-v1:sha256:"},
+		{"content_digest", "static-content-v1:sha256:"},
+	} {
+		predicate = strings.ReplaceAll(predicate,
+			digest.column+" ~ '^"+digest.prefix+"[0-9a-f]{64}$'",
+			sqlitePrefixedSHA256Predicate(digest.column, digest.prefix),
+		)
+	}
 	for _, column := range []string{"profile_digest", "effective_source_digest", "request_hash", "findings_digest"} {
 		predicate = strings.ReplaceAll(predicate,
 			column+" ~ '^sha256:[0-9a-f]{64}$'",
@@ -503,6 +521,11 @@ func sqliteDeliveryRouteIdentityPredicate(column string) string {
 func sqliteSHA256Predicate(column string) string {
 	return fmt.Sprintf("(length(%s) = 71 AND substr(%s, 1, 7) = 'sha256:' AND substr(%s, 8) GLOB '%s')",
 		column, column, column, strings.Repeat("[0-9a-f]", 64))
+}
+
+func sqlitePrefixedSHA256Predicate(column, prefix string) string {
+	return fmt.Sprintf("(length(%s) = %d AND substr(%s, 1, %d) = '%s' AND substr(%s, %d) GLOB '%s')",
+		column, len(prefix)+64, column, len(prefix), prefix, column, len(prefix)+1, strings.Repeat("[0-9a-f]", 64))
 }
 
 func rejectSQLiteUnsupportedConstructs(statement string) error {

@@ -49,7 +49,7 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 		"  sslmode: disable",
 		"  pool_size: 5",
 		"workspace:",
-		"  data_source: ./reference-data",
+		"  backend: host",
 		"llm:",
 		"  backend: claude_cli",
 		"  session:",
@@ -87,14 +87,8 @@ func TestLoadAndValidate_CLI_TestMode(t *testing.T) {
 	if cfg.LLM.Session.LockTTL <= 0*time.Second {
 		t.Fatalf("expected lock ttl > 0")
 	}
-	if cfg.Workspace.DataSource != "./reference-data" {
-		t.Fatalf("workspace.data_source = %q, want ./reference-data", cfg.Workspace.DataSource)
-	}
-	if !cfg.Workspace.DataSourceConfigured() {
-		t.Fatal("workspace.data_source presence was not preserved")
-	}
-	if cfg.Workspace.Backend != "" {
-		t.Fatalf("workspace.backend = %q, want empty", cfg.Workspace.Backend)
+	if cfg.Workspace.Backend != "host" {
+		t.Fatalf("workspace.backend = %q, want host", cfg.Workspace.Backend)
 	}
 
 	var ext ExtensionsConfig
@@ -122,7 +116,7 @@ func TestValidatePlatformPackDirs(t *testing.T) {
 		"  execution_posture: live",
 		"  recovery_on_startup: false",
 		"workspace:",
-		"  data_source: ./reference-data",
+		"  backend: host",
 		"llm:",
 		"  backend: anthropic",
 		"  session:",
@@ -251,7 +245,7 @@ func validDatabasePasswordConfig() *Config {
 	}
 }
 
-func TestLoad_PreservesEmptyWorkspaceDataSourcePresence(t *testing.T) {
+func TestLoad_RejectsRetiredWorkspaceDataSourceEvenWhenBlank(t *testing.T) {
 	cfgText := strings.Join([]string{
 		"runtime:",
 		"  execution_posture: live",
@@ -269,15 +263,9 @@ func TestLoad_PreservesEmptyWorkspaceDataSourcePresence(t *testing.T) {
 	if err := os.WriteFile(p, []byte(cfgText), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	cfg, err := Load(p)
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if !cfg.Workspace.DataSourceConfigured() {
-		t.Fatal("empty workspace.data_source presence was not preserved")
-	}
-	if cfg.Workspace.DataSource != "   " {
-		t.Fatalf("workspace.data_source = %q, want preserved whitespace", cfg.Workspace.DataSource)
+	_, err := Load(p)
+	if err == nil || !strings.Contains(err.Error(), "workspace.data_source is retired") {
+		t.Fatalf("Load error = %v, want retired workspace.data_source rejection", err)
 	}
 }
 

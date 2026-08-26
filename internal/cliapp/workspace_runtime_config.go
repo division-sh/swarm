@@ -40,13 +40,6 @@ func runtimeConfigWorkspaceHostRoot(cfg *config.Config) (string, bool, error) {
 	return workspaceConfigValue(cfg.Workspace.HostRoot, cfg.Workspace.HostRootConfigured(), "workspace.host_root")
 }
 
-func runtimeConfigWorkspaceVolumesFrom(cfg *config.Config) (string, bool, error) {
-	if cfg == nil {
-		return "", false, nil
-	}
-	return workspaceConfigValue(cfg.Workspace.VolumesFrom, cfg.Workspace.VolumesFromConfigured(), "workspace.volumes_from")
-}
-
 func runtimeConfigWorkspaceNetwork(cfg *config.Config) (string, bool, error) {
 	if cfg == nil {
 		return "", false, nil
@@ -78,6 +71,9 @@ func workspaceDockerBinFromRuntimeConfigOrDefault(cfg *config.Config) (string, e
 
 func dockerWorkspaceConfigFromRuntimeConfig(cfg *config.Config) (workspace.DockerConfig, error) {
 	out := workspace.DefaultDockerConfig()
+	if cfg != nil && (cfg.Workspace.DataSourceConfigured() || cfg.Workspace.VolumesFromConfigured()) {
+		return out, fmt.Errorf("workspace.data_source and workspace.volumes_from are retired; declare flow_data_access or data_access")
+	}
 	if image, ok, err := runtimeConfigWorkspaceImage(cfg); err != nil {
 		return out, err
 	} else if ok {
@@ -93,16 +89,14 @@ func dockerWorkspaceConfigFromRuntimeConfig(cfg *config.Config) (workspace.Docke
 	} else if ok {
 		out.WorkspaceNetwork = network
 	}
-	if volumesFrom, ok, err := runtimeConfigWorkspaceVolumesFrom(cfg); err != nil {
-		return out, err
-	} else if ok {
-		out.WorkspaceVolumesFrom = volumesFrom
-	}
 	return out, nil
 }
 
 func hostWorkspaceConfigFromRuntimeConfig(cfg *config.Config) (workspace.HostConfig, error) {
 	out := workspace.DefaultHostConfig()
+	if cfg != nil && (cfg.Workspace.DataSourceConfigured() || cfg.Workspace.VolumesFromConfigured()) {
+		return out, fmt.Errorf("workspace.data_source and workspace.volumes_from are retired; declare flow_data_access or data_access")
+	}
 	if hostRoot, ok, err := runtimeConfigWorkspaceHostRoot(cfg); err != nil {
 		return out, err
 	} else if ok {

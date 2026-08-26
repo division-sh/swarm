@@ -112,7 +112,7 @@ func (w *WorkspaceConfig) UnmarshalYAML(value *yaml.Node) error {
 		for i := 0; i+1 < len(value.Content); i += 2 {
 			switch value.Content[i].Value {
 			case "data_source":
-				w.dataSourceSet = true
+				return fmt.Errorf("workspace.data_source is retired; declare flow_data_access or data_access")
 			case "backend":
 				w.backendSet = true
 			case "allow_exec_on_host":
@@ -124,7 +124,7 @@ func (w *WorkspaceConfig) UnmarshalYAML(value *yaml.Node) error {
 			case "host_root":
 				w.hostRootSet = true
 			case "volumes_from":
-				w.volumesFromSet = true
+				return fmt.Errorf("workspace.volumes_from is retired; declare flow_data_access or data_access")
 			case "network":
 				w.networkSet = true
 			}

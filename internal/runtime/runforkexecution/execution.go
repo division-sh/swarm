@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -27,6 +28,7 @@ type SelectedContractExecutionRequest struct {
 	BundleSourceFact        runtimecorrelation.BundleSourceFact
 	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
 	ConfirmSourceFreeze     bool
+	DataPinOverrides        []durabledata.ExplicitPin
 
 	Owner             SelectedContractExecutionOwner
 	SourceLoader      SelectedContractSourceLoader
@@ -208,6 +210,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		RouteTopology:           routeTopology,
 		RecipientPlanning:       *model.RecipientPlanning,
 		WorkflowStates:          workflowStates,
+		DataPinOverrides:        req.DataPinOverrides,
 	})
 	if err != nil {
 		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner, Materialization: materialization}, err

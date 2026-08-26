@@ -469,6 +469,14 @@ type cliHumanCodeRawOutputAllowance struct {
 }
 
 var cliHumanCodeRawOutputAllowances = map[string]cliHumanCodeRawOutputAllowance{
+	"data.go\x00runDataImportCommand": {
+		Names:  []string{"outcome"},
+		Reason: "resource source-operation outcome is a separate immutable-data operation taxonomy",
+	},
+	"data.go\x00runDataPruneCommand": {
+		Names:  []string{"outcome"},
+		Reason: "resource prune outcome is a separate immutable-data operation taxonomy",
+	},
 	"agent_frame.go\x00writeAgentFrameResult": {
 		Names:  []string{"status"},
 		Reason: "execution-frame presence is a resolved/unresolved projection marker, not a registered runtime lifecycle status family",

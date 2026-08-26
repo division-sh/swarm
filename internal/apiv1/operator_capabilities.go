@@ -67,6 +67,10 @@ type BundleCatalogHandlerOptions struct {
 	Catalog BundleCatalogReadStore
 }
 
+type DataHandlerOptions struct {
+	Store DurableDataStore
+}
+
 type AgentConversationHandlerOptions struct {
 	Agents            AgentReadStore
 	Conversations     ConversationReadStore

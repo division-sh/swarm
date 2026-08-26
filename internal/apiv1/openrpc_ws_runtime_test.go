@@ -374,6 +374,7 @@ func approvedHTTPRuntimeTransportMethods() []string {
 		"channel.reconnect",
 		"channel.unbind",
 	)
+	out = append(out, approvedPermanentOperationHTTPRuntimeMethods()...)
 	sort.Strings(out)
 	return out
 }

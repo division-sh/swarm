@@ -15,8 +15,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/division-sh/swarm/internal/apispec"
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	"github.com/division-sh/swarm/internal/runtime/diaglog"
@@ -118,6 +120,7 @@ type rpcError struct {
 type outboundMessage struct {
 	value      semanticvalue.Value
 	closeAfter bool
+	closeCode  int
 }
 
 type standardErrorData struct {
@@ -212,13 +215,18 @@ func (h *Handler) handleRPC(w http.ResponseWriter, r *http.Request) {
 		writeAuthFailure(w, failure)
 		return
 	}
-	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	raw, err := io.ReadAll(io.LimitReader(r.Body, durabledata.MaxRPCMessageBytes+1))
 	if err != nil {
-		writeRPC(w, rpcResponse{JSONRPC: jsonRPCVersion, ID: nil, Error: h.standardError(codeInvalidRequest, "invalid request", correlationID, map[string]any{"reason": "read body failed"})})
+		writeRPC(w, rpcResponse{JSONRPC: jsonRPCVersion, ID: nil, Error: h.standardError(codeInvalidRequest, "invalid request", correlationID, map[string]any{"reason": "read body failed"})}, h)
+		return
+	}
+	if len(raw) > durabledata.MaxRPCMessageBytes {
+		id, method := rpcBudgetIdentity(raw)
+		writeRPC(w, h.rpcMessageBudgetResponse(id, correlationID, method, len(raw)), h)
 		return
 	}
 	resp := h.dispatch(r.Context(), raw, transportHTTP, correlationID, actorTokenID(token))
-	writeRPC(w, resp)
+	writeRPC(w, resp, h)
 }
 
 func (h *Handler) handleWS(w http.ResponseWriter, r *http.Request) {
@@ -454,9 +462,15 @@ func (s *webSocketSession) run() {
 		_ = s.conn.Close()
 		wg.Wait()
 	}()
+	s.conn.SetReadLimit(durabledata.MaxRPCMessageBytes + 1)
 	for {
 		_, raw, err := s.conn.ReadMessage()
 		if err != nil {
+			return
+		}
+		if len(raw) > durabledata.MaxRPCMessageBytes {
+			id, method := rpcBudgetIdentity(raw)
+			_ = s.enqueueWithClose(s.handler.rpcMessageBudgetResponse(id, s.fallbackCorrelationID, method, len(raw)), websocket.CloseMessageTooBig)
 			return
 		}
 		if !s.handleRaw(raw) {
@@ -481,6 +495,9 @@ func (s *webSocketSession) writeLoop() {
 				return
 			}
 			if msg.closeAfter {
+				if msg.closeCode != 0 {
+					_ = s.conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(msg.closeCode, "message budget exceeded"), time.Now().Add(time.Second))
+				}
 				s.close()
 				return
 			}
@@ -522,6 +539,7 @@ func (s *webSocketSession) handleRaw(raw []byte) bool {
 func (s *webSocketSession) enqueue(msg any) bool {
 	admitted, err := admitRPCMessage(msg)
 	closeAfter := false
+	closeCode := 0
 	if err != nil {
 		requestID := any(nil)
 		if response, ok := msg.(rpcResponse); ok {
@@ -533,10 +551,35 @@ func (s *webSocketSession) enqueue(msg any) bool {
 			"correlation_id", s.fallbackCorrelationID, "error", err.Error(), "connection_closing", closeAfter)
 		admitted = safeOutputFailureValue(requestID)
 	}
+	if raw, encodeErr := canonicaljson.Encode(admitted); encodeErr == nil && len(raw) > durabledata.MaxRPCMessageBytes {
+		requestID := any(nil)
+		if response, ok := msg.(rpcResponse); ok {
+			requestID = response.ID
+		}
+		admitted, _ = admitRPCMessage(s.handler.rpcMessageBudgetResponse(requestID, s.fallbackCorrelationID, "unknown", len(raw)))
+		closeAfter = true
+		closeCode = websocket.CloseMessageTooBig
+	}
 	select {
 	case <-s.ctx.Done():
 		return false
-	case s.out <- outboundMessage{value: admitted, closeAfter: closeAfter}:
+	case s.out <- outboundMessage{value: admitted, closeAfter: closeAfter, closeCode: closeCode}:
+		return true
+	default:
+		s.close()
+		return false
+	}
+}
+
+func (s *webSocketSession) enqueueWithClose(msg any, closeCode int) bool {
+	admitted, err := admitRPCMessage(msg)
+	if err != nil {
+		admitted = safeOutputFailureValue(nil)
+	}
+	select {
+	case <-s.ctx.Done():
+		return false
+	case s.out <- outboundMessage{value: admitted, closeAfter: true, closeCode: closeCode}:
 		return true
 	default:
 		s.close()
@@ -869,7 +912,7 @@ func writeAuthFailure(w http.ResponseWriter, failure *authFailure) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": failure.message})
 }
 
-func writeRPC(w http.ResponseWriter, resp rpcResponse) {
+func writeRPC(w http.ResponseWriter, resp rpcResponse, handlers ...*Handler) {
 	value, err := admitRPCMessage(resp)
 	if err != nil {
 		diaglog.ProcessLog(diaglog.LevelError, "api", "json-rpc http output admission failed", "error", err.Error())
@@ -879,9 +922,53 @@ func writeRPC(w http.ResponseWriter, resp rpcResponse) {
 	if err != nil {
 		raw = []byte(`{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"internal error"}}`)
 	}
+	if len(raw) > durabledata.MaxRPCMessageBytes {
+		if len(handlers) > 0 && handlers[0] != nil {
+			value, _ = admitRPCMessage(handlers[0].rpcMessageBudgetResponse(resp.ID, "", "unknown", len(raw)))
+			raw, _ = canonicaljson.Encode(value)
+		} else {
+			raw, _ = canonicaljson.Encode(safeOutputFailureValue(resp.ID))
+		}
+	}
 	w.Header().Set("content-type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write(append(raw, '\n'))
+	_, _ = w.Write(raw)
+}
+
+func (h *Handler) rpcMessageBudgetResponse(id any, correlationID, method string, observed int) rpcResponse {
+	method = strings.TrimSpace(method)
+	if method == "" {
+		method = "unknown"
+	}
+	return rpcResponse{JSONRPC: jsonRPCVersion, ID: id, Error: h.applicationError("MESSAGE_BUDGET_EXCEEDED", correlationID, false, map[string]any{
+		"boundary": "rpc_message", "method": method, "limit_bytes": durabledata.MaxRPCMessageBytes,
+		"observed_bytes": observed, "receipt_created": false,
+	})}
+}
+
+func rpcBudgetIdentity(raw []byte) (any, string) {
+	admitted, err := canonicaljson.Decode(raw)
+	if err != nil {
+		return nil, "unknown"
+	}
+	object, ok := admitted.ObjectMap()
+	if !ok {
+		return nil, "unknown"
+	}
+	id := any(nil)
+	if value, exists := object["id"]; exists {
+		candidate := value.Interface()
+		if validJSONRPCID(candidate) {
+			id = candidate
+		}
+	}
+	method := "unknown"
+	if value, exists := object["method"]; exists {
+		if candidate, ok := value.String(); ok && strings.TrimSpace(candidate) != "" {
+			method = strings.TrimSpace(candidate)
+		}
+	}
+	return id, method
 }
 
 func admitRPCMessage(message any) (semanticvalue.Value, error) {

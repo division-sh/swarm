@@ -124,6 +124,7 @@ func ContractFilesExist(repoRoot string) []string {
 		for _, pkg := range paths.ProjectPackages {
 			files = append(files,
 				pkg.PackageFile,
+				pkg.DataFile,
 				pkg.ProjectNodesFile,
 				pkg.ProjectEventsFile,
 				pkg.ProjectAgentsFile,
@@ -207,6 +208,7 @@ func discoverProjectPackagePaths(packageFile, workflowDir string) []ProjectPacka
 			ProjectAgentsFile: existingFile(filepath.Join(packageDir, "agents.yaml")),
 			ProjectToolsFile:  existingFile(filepath.Join(packageDir, "tools.yaml")),
 			ProjectPolicyFile: existingFile(filepath.Join(packageDir, "policy.yaml")),
+			DataFile:          existingFile(filepath.Join(packageDir, "data.yaml")),
 		}
 		if manifestErr != nil {
 			out = append(out, pkg)

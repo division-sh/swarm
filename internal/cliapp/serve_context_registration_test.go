@@ -32,7 +32,7 @@ func TestServeProjectContextRegistrationWritesFinalDescriptor(t *testing.T) {
 	if err := reg.WriteFinal("runtime-1", listener.Addr(), defaultLoopbackAuthResolution(), CLIContractPlatformSpecPaths{ContractsPath: project.contracts}, storebackend.Selection{
 		Backend:    storebackend.BackendSQLite,
 		SQLitePath: storePath,
-	}, WorkspaceMountSources{DataSource: filepath.Join(project.root, ".swarm", "data")}); err != nil {
+	}, WorkspaceMountSources{}); err != nil {
 		t.Fatalf("write final: %v", err)
 	}
 
@@ -48,8 +48,8 @@ func TestServeProjectContextRegistrationWritesFinalDescriptor(t *testing.T) {
 	if desc.RuntimeInstanceID != "runtime-1" || desc.ProjectRoot != project.canonicalRoot || desc.ContractsPath != project.contracts {
 		t.Fatalf("descriptor = %#v, want runtime/project/contracts metadata", desc)
 	}
-	if desc.StorePath != storePath || desc.DataDir == "" || desc.Auth.Mode != localContextAuthBuiltinLoopback {
-		t.Fatalf("descriptor = %#v, want store/data/builtin auth metadata", desc)
+	if desc.StorePath != storePath || desc.Auth.Mode != localContextAuthBuiltinLoopback {
+		t.Fatalf("descriptor = %#v, want store/builtin auth metadata", desc)
 	}
 	if current, err := registry.CurrentName(); err != nil || current != desc.Name {
 		t.Fatalf("current = %q err=%v, want %q", current, err, desc.Name)

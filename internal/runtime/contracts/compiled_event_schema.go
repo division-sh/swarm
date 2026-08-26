@@ -180,7 +180,7 @@ func (b *WorkflowContractBundle) CompiledEventSchemas() ([]CompiledEventSchema, 
 		return nil, nil
 	}
 	var out []CompiledEventSchema
-	for _, record := range b.currentEventDeclarationRecords() {
+	for _, record := range b.canonicalCurrentEventDeclarationRecords() {
 		compiled, ok, err := b.compileCurrentEventDeclaration(
 			record.packageKey,
 			record.flowID,
@@ -271,6 +271,46 @@ func (b *WorkflowContractBundle) currentEventDeclarationRecords() []currentEvent
 	}
 	records = append(records, flowRecords...)
 	return records
+}
+
+// canonicalCurrentEventDeclarationRecords is the sole declaration-list owner
+// for non-behavioral compiled projections. Connected producer ownership is
+// admitted separately; this projection only collapses a package-qualified
+// project view when the same coordinate has one exact flow declaration.
+func (b *WorkflowContractBundle) canonicalCurrentEventDeclarationRecords() []currentEventDeclarationRecord {
+	records := b.currentEventDeclarationRecords()
+	byCoordinate := make(map[string][]currentEventDeclarationRecord, len(records))
+	coordinates := make([]string, 0, len(records))
+	for _, record := range records {
+		coordinate := strings.TrimSpace(record.packageKey) + "\x00" + eventidentity.Normalize(record.qualifiedName)
+		if _, exists := byCoordinate[coordinate]; !exists {
+			coordinates = append(coordinates, coordinate)
+		}
+		byCoordinate[coordinate] = append(byCoordinate[coordinate], record)
+	}
+
+	out := make([]currentEventDeclarationRecord, 0, len(records))
+	for _, coordinate := range coordinates {
+		candidates := byCoordinate[coordinate]
+		if len(candidates) == 1 {
+			out = append(out, candidates[0])
+			continue
+		}
+		flowOwners := make([]currentEventDeclarationRecord, 0, len(candidates))
+		for _, candidate := range candidates {
+			if candidate.layer == "flow" {
+				flowOwners = append(flowOwners, candidate)
+			}
+		}
+		if len(flowOwners) == 1 {
+			out = append(out, flowOwners[0])
+			continue
+		}
+		// Preserve ambiguity so compiled admission fails closed rather than
+		// selecting an owner by source or map order.
+		out = append(out, candidates...)
+	}
+	return out
 }
 
 func resolvedOwnedEventSchemaKey(bundle *WorkflowContractBundle, flowID, eventName string) string {

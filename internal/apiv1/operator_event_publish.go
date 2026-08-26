@@ -10,10 +10,12 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
+	"github.com/division-sh/swarm/internal/durabledata"
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeeventidentity "github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -27,11 +29,12 @@ import (
 )
 
 type eventPublishResult struct {
-	EventID                  string                 `json:"event_id"`
-	RunID                    string                 `json:"run_id"`
-	OperatorReferenceEventID string                 `json:"operator_reference_event_id,omitempty"`
-	NewRunCreated            bool                   `json:"new_run_created"`
-	Deliveries               []eventPublishDelivery `json:"deliveries"`
+	EventID                  string                  `json:"event_id"`
+	RunID                    string                  `json:"run_id"`
+	OperatorReferenceEventID string                  `json:"operator_reference_event_id,omitempty"`
+	NewRunCreated            bool                    `json:"new_run_created"`
+	Deliveries               []eventPublishDelivery  `json:"deliveries"`
+	DataBinding              durabledata.DataBinding `json:"data_binding"`
 }
 
 type eventPublishDelivery struct {
@@ -71,6 +74,8 @@ type eventPublicationParams struct {
 	NewRunCreated          bool
 	RunIDProvided          bool
 	ScenarioExecution      *scenarioexecution.Selector
+	Data                   durabledata.RunCreationDataEnvelope
+	DataPresent            bool
 }
 
 type eventPublicationConfig struct {
@@ -98,6 +103,7 @@ type publicInputAcknowledgedPublisher interface {
 type apiEventAcknowledgedPublisher interface {
 	LookupAPIEventPublication(context.Context, apiidempotency.Request) (apiidempotency.Completion, bool, error)
 	PublishAPIEventAcknowledged(context.Context, events.Event, *runtimebus.APIEventPublicationEndpoint, apiidempotency.Request, apiidempotency.Completion) (apiidempotency.Completion, bool, error)
+	PublishAPIEventWithRunCreationAcknowledged(context.Context, events.Event, *runtimebus.APIEventPublicationEndpoint, apiidempotency.Request, apiidempotency.Completion, *durabledata.RunCreationCommand) (apiidempotency.Completion, bool, error)
 }
 
 func OperatorEventPublishHandlers(opts EventPublishHandlerOptions) map[string]MethodHandler {
@@ -139,6 +145,7 @@ func executeEventPublish(ctx context.Context, req Request, opts EventPublication
 				OperatorReferenceEventID: params.SourceEventID,
 				NewRunCreated:            params.NewRunCreated,
 				Deliveries:               []eventPublishDelivery{},
+				DataBinding:              durabledata.DataBinding{State: "none"},
 			}, params.EventID, nil
 		},
 	}
@@ -269,7 +276,19 @@ func executeOperatorEventPublication(
 			if !ok || publisher == nil {
 				return apiidempotency.Completion{}, errors.New("event.publish requires atomic selected-store publication and API completion")
 			}
-			committed, replay, err := publisher.PublishAPIEventAcknowledged(ctx, publication, params.APIEventEndpoint, idempotency, completion)
+			var runCreation *durabledata.RunCreationCommand
+			if params.NewRunCreated {
+				semanticRequest, semanticErr := runCreationInitialEvent(params)
+				if semanticErr != nil {
+					return apiidempotency.Completion{}, semanticErr
+				}
+				command := durabledata.RunCreationCommand{
+					RunID: params.RunID, Actor: req.ActorTokenID, BundleHash: params.BundleSourceFact.BundleHash(),
+					EventID: params.EventID, InitialEvent: semanticRequest, Data: params.Data,
+				}
+				runCreation = &command
+			}
+			committed, replay, err := publisher.PublishAPIEventWithRunCreationAcknowledged(ctx, publication, params.APIEventEndpoint, idempotency, completion, runCreation)
 			if err != nil {
 				if errors.Is(err, apiidempotency.ErrConflict) {
 					return apiidempotency.Completion{}, err
@@ -348,6 +367,10 @@ func eventPublicationParamsFromRequest(req Request, cfg eventPublicationConfig) 
 	if err != nil {
 		return eventPublicationParams{}, bundleIdentityParam{}, err
 	}
+	data, dataPresent, err := runCreationDataEnvelopeParam(req.Method, req.Params)
+	if err != nil {
+		return eventPublicationParams{}, bundleIdentityParam{}, err
+	}
 	if targetRouteSet && !cfg.allowExplicitTargetRoute {
 		return eventPublicationParams{}, bundleIdentityParam{}, NewInvalidParamsError(map[string]any{"field": "target", "reason": "is not supported for this method"})
 	}
@@ -376,6 +399,15 @@ func eventPublicationParamsFromRequest(req Request, cfg eventPublicationConfig) 
 	} else {
 		runID = parsed.String()
 	}
+	if runIDProvided && (cfg.rootInputOnly || dataPresent) {
+		newRun = true
+	}
+	if dataPresent && !runIDProvided {
+		return eventPublicationParams{}, bundleIdentityParam{}, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "is required for data-bearing create-new publication"})
+	}
+	if dataPresent && !newRun {
+		return eventPublicationParams{}, bundleIdentityParam{}, NewApplicationError(string(durabledata.CodeRunDataImmutable), false, map[string]any{"run_id": runID})
+	}
 	payload, payloadEntityIDPresent, err := eventPublicationPayload(req.Params)
 	if err != nil {
 		return eventPublicationParams{}, bundleIdentityParam{}, err
@@ -398,8 +430,12 @@ func eventPublicationParamsFromRequest(req Request, cfg eventPublicationConfig) 
 	if emitter == "" && cfg.sourceAgent != nil {
 		emitter = cfg.sourceAgent(req)
 	}
+	eventID := uuid.NewString()
+	if newRun {
+		eventID = uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.run.initial-event.v1\x00"+runID)).String()
+	}
 	return eventPublicationParams{
-		EventID:                uuid.NewString(),
+		EventID:                eventID,
 		EventName:              eventName,
 		Payload:                payload,
 		EntityID:               entityID,
@@ -413,7 +449,103 @@ func eventPublicationParamsFromRequest(req Request, cfg eventPublicationConfig) 
 		NewRunCreated:          newRun,
 		RunIDProvided:          runIDProvided,
 		ScenarioExecution:      scenarioSelector,
+		Data:                   data,
+		DataPresent:            dataPresent,
 	}, bundleIdentity, nil
+}
+
+func runCreationDataEnvelopeParam(method string, params map[string]any) (durabledata.RunCreationDataEnvelope, bool, error) {
+	raw, present := params["data"]
+	if !present {
+		return durabledata.RunCreationDataEnvelope{}, false, nil
+	}
+	object, ok := raw.(map[string]any)
+	if !ok {
+		return durabledata.RunCreationDataEnvelope{}, true, NewInvalidParamsError(map[string]any{"field": "data", "reason": "must be an object"})
+	}
+	if err := exactDataParams(object, "imports", "pins"); err != nil {
+		return durabledata.RunCreationDataEnvelope{}, true, err
+	}
+	importsRaw, ok := object["imports"].([]any)
+	if !ok {
+		return durabledata.RunCreationDataEnvelope{}, true, NewInvalidParamsError(map[string]any{"field": "data.imports", "reason": "must be an array"})
+	}
+	pinsRaw, ok := object["pins"].([]any)
+	if !ok {
+		return durabledata.RunCreationDataEnvelope{}, true, NewInvalidParamsError(map[string]any{"field": "data.pins", "reason": "must be an array"})
+	}
+	if len(importsRaw) > durabledata.MaxDataDeclarationsPerBundle || len(pinsRaw) > durabledata.MaxDataDeclarationsPerBundle {
+		return durabledata.RunCreationDataEnvelope{}, true, NewInvalidParamsError(map[string]any{"field": "data", "reason": fmt.Sprintf("imports and pins are capped at %d items each", durabledata.MaxDataDeclarationsPerBundle)})
+	}
+	envelope := durabledata.RunCreationDataEnvelope{Imports: make([]durabledata.FusedImport, 0, len(importsRaw)), Pins: make([]durabledata.ExplicitPin, 0, len(pinsRaw))}
+	totalBytes := 0
+	for index, rawItem := range importsRaw {
+		item, ok := rawItem.(map[string]any)
+		if !ok {
+			return durabledata.RunCreationDataEnvelope{}, true, NewInvalidParamsError(map[string]any{"field": fmt.Sprintf("data.imports[%d]", index), "reason": "must be an object"})
+		}
+		if err := exactDataParams(item, "source_invocation_id", "declaration", "expected_head", "input"); err != nil {
+			return durabledata.RunCreationDataEnvelope{}, true, err
+		}
+		id, err := canonicalDataUUID(item["source_invocation_id"], fmt.Sprintf("data.imports[%d].source_invocation_id", index))
+		if err != nil {
+			return durabledata.RunCreationDataEnvelope{}, true, err
+		}
+		declaration, err := dataDeclarationRef(item["declaration"])
+		if err != nil {
+			return durabledata.RunCreationDataEnvelope{}, true, err
+		}
+		expected, err := dataExpectedHead(item["expected_head"])
+		if err != nil {
+			return durabledata.RunCreationDataEnvelope{}, true, err
+		}
+		input, err := dataInput(item["input"])
+		if err != nil {
+			return durabledata.RunCreationDataEnvelope{}, true, err
+		}
+		totalBytes += len(input)
+		envelope.Imports = append(envelope.Imports, durabledata.FusedImport{SourceInvocationID: id, Declaration: declaration, ExpectedHead: expected, InputFormat: "jsonl", Input: input})
+	}
+	if totalBytes > durabledata.MaxDecodedImportBytes {
+		return durabledata.RunCreationDataEnvelope{}, true, NewApplicationError("MESSAGE_BUDGET_EXCEEDED", false, map[string]any{"boundary": "aggregate_import", "method": method, "limit_bytes": durabledata.MaxDecodedImportBytes, "observed_bytes": totalBytes, "receipt_created": false})
+	}
+	for index, rawItem := range pinsRaw {
+		item, ok := rawItem.(map[string]any)
+		if !ok {
+			return durabledata.RunCreationDataEnvelope{}, true, NewInvalidParamsError(map[string]any{"field": fmt.Sprintf("data.pins[%d]", index), "reason": "must be an object"})
+		}
+		if err := exactDataParams(item, "declaration", "version_id"); err != nil {
+			return durabledata.RunCreationDataEnvelope{}, true, err
+		}
+		declaration, err := dataDeclarationRef(item["declaration"])
+		if err != nil {
+			return durabledata.RunCreationDataEnvelope{}, true, err
+		}
+		versionID, err := dataVersionID(item["version_id"], fmt.Sprintf("data.pins[%d].version_id", index))
+		if err != nil {
+			return durabledata.RunCreationDataEnvelope{}, true, err
+		}
+		envelope.Pins = append(envelope.Pins, durabledata.ExplicitPin{Declaration: declaration, VersionID: versionID})
+	}
+	canonical, err := envelope.Canonical()
+	if err != nil {
+		return durabledata.RunCreationDataEnvelope{}, true, NewInvalidParamsError(map[string]any{"field": "data", "reason": err.Error()})
+	}
+	return canonical, true, nil
+}
+
+func runCreationInitialEvent(params eventPublicationParams) (json.RawMessage, error) {
+	request := map[string]any{
+		"event_name": params.EventName, "payload": json.RawMessage(params.Payload), "emitter": params.Emitter,
+		"entity_id": params.EntityID, "flow_instance": params.FlowInstance, "source_event_id": params.SourceEventID,
+	}
+	if params.TargetRouteSet {
+		request["target"] = params.TargetRoute
+	}
+	if params.ScenarioExecution != nil {
+		request["scenario_execution"] = *params.ScenarioExecution
+	}
+	return canonicaljson.Bytes(request)
 }
 
 func eventPublicationTargetRouteParam(params map[string]any) (events.RouteIdentity, bool, error) {

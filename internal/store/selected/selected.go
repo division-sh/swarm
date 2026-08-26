@@ -12,6 +12,7 @@ import (
 
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/bundlecatalog"
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -91,6 +92,8 @@ type requiredPorts struct {
 	conversations          apiv1.ConversationReadStore
 	testSetup              apiv1.TestSetupStore
 	runBundleContext       apiv1.RunBundleContextStore
+	data                   apiv1.DurableDataStore
+	dataAccess             durabledata.ResourceAccessStore
 	runBundleAvailability  runbundle.AvailabilityStore
 	runStalled             runtimerunstalled.ProjectionReader
 	serveBundleIngest      bundlecatalog.ServeIngestWriter
@@ -288,6 +291,7 @@ func composePostgres(selected *private.PostgresStore) (*Owner, error) {
 			DecisionCardDraftExpiry: selected, HumanTaskExpiry: selected,
 			MailboxStore: selected, ToolEntityStore: selected, HumanTaskStore: selected,
 			BudgetSpendStore: selected, InboundStore: selected, RuntimeIngressStore: selected,
+			DataAccessStore:           selected,
 			ScenarioExecutionProfiles: selected,
 		},
 		required: requiredPorts{
@@ -296,7 +300,7 @@ func composePostgres(selected *private.PostgresStore) (*Owner, error) {
 			mailboxAPI: selected, mailboxNoticeAck: selected, observability: selected,
 			agentUsage: selected, agentDeliveryLifecycle: selected, idempotency: selected,
 			runs: selected, entities: selected, agents: selected, conversations: selected,
-			testSetup: selected, runBundleContext: selected, runBundleAvailability: selected,
+			testSetup: selected, runBundleContext: selected, data: selected, dataAccess: selected, runBundleAvailability: selected,
 			runStalled: selected, serveBundleIngest: selected,
 		},
 		products: productPorts{
@@ -341,6 +345,7 @@ func composeSQLite(selected *private.SQLiteRuntimeStore) (*Owner, error) {
 			DecisionCardDraftExpiry: selected, HumanTaskExpiry: selected,
 			MailboxStore: selected, ToolEntityStore: selected, HumanTaskStore: selected,
 			BudgetSpendStore: selected, InboundStore: selected, RuntimeIngressStore: selected,
+			DataAccessStore:           selected,
 			ScenarioExecutionProfiles: selected,
 		},
 		required: requiredPorts{
@@ -349,7 +354,7 @@ func composeSQLite(selected *private.SQLiteRuntimeStore) (*Owner, error) {
 			mailboxAPI: selected, mailboxNoticeAck: selected, observability: selected,
 			agentUsage: selected, agentDeliveryLifecycle: selected, idempotency: selected,
 			runs: selected, entities: selected, agents: selected, conversations: selected,
-			testSetup: selected, runBundleContext: selected, runBundleAvailability: selected,
+			testSetup: selected, runBundleContext: selected, data: selected, dataAccess: selected, runBundleAvailability: selected,
 			runStalled: selected, serveBundleIngest: selected,
 		},
 		products: productPorts{

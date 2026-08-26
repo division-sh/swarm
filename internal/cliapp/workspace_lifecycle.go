@@ -25,15 +25,8 @@ func configuredWorkspaceLifecycle(lookup workspace.Lookup, cfg *config.Config, c
 	if err != nil {
 		return nil, err
 	}
-	if dataSource := strings.TrimSpace(mountSources.DataSource); dataSource != "" {
-		if volumesFrom := strings.TrimSpace(workspaceCfg.WorkspaceVolumesFrom); volumesFrom != "" {
-			sourceLabel := strings.TrimSpace(mountSources.DataSourceSource)
-			if sourceLabel == "" {
-				sourceLabel = "explicit data source"
-			}
-			return nil, fmt.Errorf("workspace data source from %s cannot be combined with workspace.volumes_from=%s", sourceLabel, volumesFrom)
-		}
-		workspaceCfg.SharedDataSource = dataSource
+	if strings.TrimSpace(mountSources.DataSource) != "" {
+		return nil, fmt.Errorf("ambient workspace data sources are retired; declare flow_data_access or data_access")
 	}
 	if contractsDir := strings.TrimSpace(contractsRoot); contractsDir != "" {
 		workspaceCfg.ContractsSource = contractsDir
@@ -65,20 +58,13 @@ func ConfiguredWorkspaceLifecycleForBackend(lookup workspace.Lookup, cfg *config
 }
 
 func configuredHostWorkspaceLifecycle(cfg *config.Config, contractsRoot string, source semanticview.Source, mountSources WorkspaceMountSources) (*workspace.HostManager, error) {
-	if cfg != nil && cfg.Workspace.VolumesFromConfigured() {
-		volumesFrom := strings.TrimSpace(cfg.Workspace.VolumesFrom)
-		if volumesFrom == "" {
-			return nil, fmt.Errorf("workspace.volumes_from must be non-empty when configured")
-		}
-		return nil, fmt.Errorf("host workspace backend cannot consume workspace.volumes_from=%s", volumesFrom)
-	}
 	manager := workspace.NewHostManager()
 	workspaceCfg, err := hostWorkspaceConfigFromRuntimeConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
-	if dataSource := strings.TrimSpace(mountSources.DataSource); dataSource != "" {
-		workspaceCfg.SharedDataSource = dataSource
+	if strings.TrimSpace(mountSources.DataSource) != "" {
+		return nil, fmt.Errorf("ambient workspace data sources are retired; declare flow_data_access or data_access")
 	}
 	if contractsDir := strings.TrimSpace(contractsRoot); contractsDir != "" {
 		workspaceCfg.ContractsSource = contractsDir

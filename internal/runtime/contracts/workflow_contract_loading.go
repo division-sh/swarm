@@ -47,6 +47,7 @@ func loadWorkflowContractBundleForPaths(paths ContractPaths, options WorkflowCon
 		projectContracts:      map[string]ProjectContractView{},
 		flowTypes:             map[string]TypeCatalogDocument{},
 		flowEntities:          map[string]EntityContractsDocument{},
+		dataDeclarations:      map[string]DurableDataDeclaration{},
 		scopedNodes:           map[string]SystemNodeContract{},
 		scopedEvents:          map[string]EventCatalogEntry{},
 		scopedAgents:          map[string]AgentRegistryEntry{},
@@ -211,9 +212,15 @@ func loadWorkflowContractBundleForPaths(paths ContractPaths, options WorkflowCon
 	bundle.ProjectPacks = projectPacks
 	bundle.PackInventory = effective
 	populateWorkflowSemantics(bundle)
-	populateEffectiveEventProvenance(bundle)
 	if err := validateWorkflowContractBundleLoadConstraints(bundle); err != nil {
 		return nil, err
+	}
+	populateEffectiveEventProvenance(bundle)
+	if err := loadDurableDataDeclarations(bundle); err != nil {
+		return nil, err
+	}
+	if _, err := BuildDurableDataCatalog(bundle); err != nil {
+		return nil, fmt.Errorf("compile durable data catalog: %w", err)
 	}
 	return bundle, nil
 }
@@ -360,7 +367,7 @@ func validateEventBusinessKeys(bundle *WorkflowContractBundle) []error {
 		return nil
 	}
 	var errs []error
-	for _, record := range bundle.currentEventDeclarationRecords() {
+	for _, record := range bundle.canonicalCurrentEventDeclarationRecords() {
 		if strings.TrimSpace(record.entry.BusinessKeyField) == "" {
 			continue
 		}

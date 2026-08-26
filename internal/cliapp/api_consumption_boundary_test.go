@@ -27,6 +27,7 @@ func TestCLIRuntimeStateAPIConsumersAreExplicitlyAccounted(t *testing.T) {
 		"control_nuke.go":    {},
 		"control_run.go":     {},
 		"conversations.go":   {},
+		"data.go":            {},
 		"diagnostics.go":     {},
 		"entities.go":        {},
 		"event_publish.go":   {},

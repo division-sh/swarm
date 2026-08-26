@@ -177,10 +177,10 @@ func TestNativeFileToolsUseHostExecutionTargetWithoutShell(t *testing.T) {
 func TestExecutorHostFileToolsUseHostManagerSupportedSurfaceWithoutDocker(t *testing.T) {
 	ctx := unmanagedToolTestContext()
 	workspaceRoot := filepath.Join(t.TempDir(), "host-workspaces")
-	dataDir := t.TempDir()
+	escapeDir := t.TempDir()
 	contractsDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dataDir, "ref.txt"), []byte("data content"), 0o644); err != nil {
-		t.Fatalf("write data ref: %v", err)
+	if err := os.WriteFile(filepath.Join(escapeDir, "ref.txt"), []byte("outside content"), 0o644); err != nil {
+		t.Fatalf("write escape ref: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("contracts content"), 0o644); err != nil {
 		t.Fatalf("write contracts package: %v", err)
@@ -189,8 +189,6 @@ func TestExecutorHostFileToolsUseHostManagerSupportedSurfaceWithoutDocker(t *tes
 	manager := workspace.NewHostManager()
 	manager.SetConfig(workspace.HostConfig{
 		WorkspaceRoot:       workspaceRoot,
-		SharedDataSource:    dataDir,
-		DataMountPoint:      workspace.LogicalDataMount,
 		ContractsSource:     contractsDir,
 		ContractsMountPoint: workspace.LogicalContractsMount,
 	})
@@ -236,13 +234,6 @@ func TestExecutorHostFileToolsUseHostManagerSupportedSurfaceWithoutDocker(t *tes
 	if got := readWorkspace.(map[string]any)["content"]; got != "workspace content" {
 		t.Fatalf("workspace content = %#v", got)
 	}
-	readData, err := exec.Execute(actorCtx, "read_file", map[string]any{"path": "/data/ref.txt"})
-	if err != nil {
-		t.Fatalf("Execute read_file data: %v", err)
-	}
-	if got := readData.(map[string]any)["content"]; got != "data content" {
-		t.Fatalf("data content = %#v", got)
-	}
 	readContracts, err := exec.Execute(actorCtx, "read_file", map[string]any{"path": "/opt/swarm/contracts/package.yaml"})
 	if err != nil {
 		t.Fatalf("Execute read_file contracts: %v", err)
@@ -272,12 +263,12 @@ func TestExecutorHostFileToolsUseHostManagerSupportedSurfaceWithoutDocker(t *tes
 		if err == nil {
 			t.Fatalf("Execute write_file(%q) succeeded, want fail closed", forbidden)
 		}
-		if strings.Contains(err.Error(), target.Workdir) || strings.Contains(err.Error(), dataDir) || strings.Contains(err.Error(), contractsDir) {
+		if strings.Contains(err.Error(), target.Workdir) || strings.Contains(err.Error(), escapeDir) || strings.Contains(err.Error(), contractsDir) {
 			t.Fatalf("Execute write_file(%q) leaked host path in error: %v", forbidden, err)
 		}
 	}
 
-	if err := os.Symlink(dataDir, filepath.Join(target.Workdir, "link")); err != nil {
+	if err := os.Symlink(escapeDir, filepath.Join(target.Workdir, "link")); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
 	_, err = exec.Execute(actorCtx, "read_file", map[string]any{"path": "/workspace/link/ref.txt"})
@@ -289,7 +280,6 @@ func TestExecutorHostFileToolsUseHostManagerSupportedSurfaceWithoutDocker(t *tes
 func TestExecutorHostNativeBashUsesExplicitHostManagerTarget(t *testing.T) {
 	ctx := unmanagedToolTestContext()
 	workspaceRoot := filepath.Join(t.TempDir(), "host-workspaces")
-	dataDir := t.TempDir()
 	contractsDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("contracts content"), 0o644); err != nil {
 		t.Fatalf("write contracts package: %v", err)
@@ -298,8 +288,6 @@ func TestExecutorHostNativeBashUsesExplicitHostManagerTarget(t *testing.T) {
 	manager := workspace.NewHostManager()
 	manager.SetConfig(workspace.HostConfig{
 		WorkspaceRoot:       workspaceRoot,
-		SharedDataSource:    dataDir,
-		DataMountPoint:      workspace.LogicalDataMount,
 		ContractsSource:     contractsDir,
 		ContractsMountPoint: workspace.LogicalContractsMount,
 	})
@@ -343,8 +331,8 @@ func TestExecutorHostNativeBashUsesExplicitHostManagerTarget(t *testing.T) {
 	if data, err := os.ReadFile(filepath.Join(target.Workdir, "cmd", "out.txt")); err != nil || string(data) != "host-bash" {
 		t.Fatalf("host bash workspace file = %q err=%v", data, err)
 	}
-	if _, err := os.Stat(filepath.Join(dataDir, "cmd", "out.txt")); !os.IsNotExist(err) {
-		t.Fatalf("host bash wrote outside workspace dataDir err=%v", err)
+	if _, err := os.Stat(filepath.Join(contractsDir, "cmd", "out.txt")); !os.IsNotExist(err) {
+		t.Fatalf("host bash wrote into read-only contracts source err=%v", err)
 	}
 }
 

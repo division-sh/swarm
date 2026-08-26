@@ -169,8 +169,16 @@ func platformTableOrder(name string) int {
 		return 0
 	case "bundles":
 		return 3
+	case "resource_declarations":
+		return 3
+	case "resource_bundle_declarations", "bundle_static_data", "resource_versions", "resource_source_invocations", "resource_prune_invocations", "resource_run_creation_operations":
+		return 4
+	case "resource_heads", "resource_version_provenance", "resource_prune_pin_evidence", "resource_run_creation_child_reservations":
+		return 5
 	case "runs":
 		return 5
+	case "resource_version_pins", "resource_head_history", "resource_run_creation_child_evaluations":
+		return 6
 	case "run_scenario_execution_profiles":
 		return 6
 	case "standing_services":

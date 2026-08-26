@@ -6227,7 +6227,7 @@ engine:
         method: bundle.register
         selected_capability: optional public BundleRegisterWriter capability, distinct from required serve ingest
         postgres_support: supported through the Postgres persisted bundle source catalog writer
-        sqlite_support: supported through the SQLite persisted bundle source catalog writer
+        sqlite_support: supported through the SQLite persisted bundle source catalog writer; bundle bytes and every durable data/static declaration projection commit atomically through the same selected-store transaction
         semantic_owner: internal/apiv1 bundle.register canonical projection plus the selected store UpsertBundleCatalog transaction
         boundary: >
           Both selected backends expose the optional public writer explicitly. The writer reuses the backend's exact
@@ -13385,6 +13385,57 @@ agent_directive_operation_model:
     response projection, TTL, receipt behavior, and recovery. SQLite uses the canonical
     selected-store mutation executor; Postgres uses short explicit transactions. Backend
     selection is not visible to API/runtime consumers.
+durable_data_resources:
+  status: canonical
+  owner: internal/durabledata semantic records and internal/store/internal/durabledata selected-store owner
+  declaration_projection:
+    owner: workflow_model.compiled_event_schema_projection
+    identity: Structured exact (package_key, qualified event name). Bundle generation and source path are not identity. Rename or package move creates a new declaration without aliases, inference, migration, or backfill.
+    schema: The immutable compiled acceptance schema is the sole row schema. Generated, pattern, provider-imported, and noncanonical restated events are non-importable.
+    business_key: The optional business-key fact is consumed only after compiled admission proves that it names one required top-level boolean, number, or string field. Keyed and keyless interpretations have distinct resource schema digests.
+    grammar_boundary: Durable-data consumers never inspect authored event maps, retired required lists, source paths, aliases, or YAML grammar. The implemented presence-preserving event admission owns trailing-? optionality and key authoring; durable data consumes only the resulting immutable CompiledEventSchema fields, business-key fact, canonical schema bytes, and digest.
+    access: Agents declare data_access by exact qualified event name. Runtime access consumes the loader's package-qualified declaration record.
+  version_identity:
+    manifest_format: swarm.resource.version.manifest.v1
+    row_codec: swarm.resource.rows.v1
+    manifest_fields: [manifest_format, declaration, schema_digest, row_codec, content_digest, row_count]
+    rule: ResourceVersionID hashes only the canonical semantic manifest. Provenance and import attempt identity are attached evidence and are never identity inputs.
+    keyless_rows: Every row has a 1-based ordinal. Source order and duplicate payload multiplicity are preserved; row identity and lookup are (version_id, ordinal). Delta compares canonical payload multiplicity and reports order_changed when equal multisets differ in order.
+    keyed_rows: Every row has a 1-based ordinal and a canonical typed boolean, number, or string business key. Duplicate business keys reject the whole input. Rows are byte-sorted by canonical business-key bytes for digesting, storage, activation, and replay; delta and named lookup use the business key.
+    import_normalization: External null in an optional field normalizes to omission recursively. Null in required fields and null list elements reject. Internal rows never contain null as an optionality representation.
+    atomicity: One invalid row rejects the entire candidate and reports all bounded row defects. No partial version or head mutation exists.
+    empty_input: Canonical empty JSONL is a valid zero-row candidate. Standalone and fused inputs admit its canonical empty Base64 encoding and persist row_count zero without a sentinel row.
+  source_operations:
+    standalone: data.check and data.import require an exact registered bundle_hash, declaration, expected_head, and source_invocation_id.
+    replay: The permanent source receipt is consulted before current catalog or head state. Same invocation and identical request returns the exact result; conflicting reuse fails closed.
+    evaluation_owner: Every receipt retains one versioned immutable evaluation context containing the exact admitted declaration/schema/business-key facts, locked historical head, and historical base payload. Insert, fused projection, exact replay, and public readback deterministically recompute candidate, defects, delta, row identity, and evidence from that context plus the exact request; current catalog state and surviving version payload are never replay fallbacks.
+    compare_and_set: data.import atomically admits an immutable version, provenance, monotonic human sequence alias, and declaration head only when expected_head equals the locked head.
+    fused: event.publish and run.start may carry the same typed source request. Validation and reservation evidence is parent-owned until the parent transaction commits; an accepted child receipt is created only with that commit.
+    delta: Accepted or ready candidates return a computed delta with one explicit row_identity fact. Positional deltas forbid key evidence; business_key deltas require complete key evidence whose class counts exactly match the summary. Validation rejection and head conflict return an explicit not_computed reason.
+    candidate_projection: A validated but uncommitted semantic candidate carries state candidate, version_id, and manifest without a human alias. State version and its mandatory monotonic alias exist only after selected-store commit.
+  run_pins:
+    start: A run stores exactly the versions selected by its explicit imports and pins before execution. Authored event declarations and existing heads never create implicit dependencies or inject rows.
+    fork: A fork inherits the source run's exact stored pin set and applies explicit exact-version overrides atomically with fork creation. Unselected target declarations remain unpinned; a pinned source declaration absent from or schema-incompatible with the target bundle fails before fork mutation.
+    retention: Active and terminal forkable runs pin versions. There is no automatic garbage collection in v1. Live pin pagination binds the selected version and its declaration in the fixed query fingerprint, then resumes strictly after the run_id carried by the bounded opaque cursor. Concurrent pin insertion never shifts an offset because offsets are forbidden.
+    rejection_evidence: Failed run creation permanently records one closed typed rejection fact. Explicit-pin failures name the exact declaration and version, schema mismatch also records both schema digests, and fused aggregate failures carry their exact class without invented target facts.
+  prune:
+    rule: data.prune uses a permanent prune_invocation_id and fail-closed expected-head check. Current or pinned versions cannot be pruned.
+    replay: Replay/conflicting receipt reuse has precedence over catalog integrity, expected-head, current, pin, and already-pruned checks.
+    evidence: Prune clears payload bytes only; immutable manifest, provenance, head history, and source/prune receipts remain durable.
+  provenance:
+    integrity: Every lineage row owns typed version, monotonic version-local sequence, producer kind/id, actor, and canonical UTC microsecond timestamp facts. The JSON public projection must agree exactly with those typed facts and each producer arm requires one canonical non-zero UUID.
+    traversal: Provenance sequence is allocated under the selected version's store lock and is the sole strict traversal order. Public continuation is a fixed-size query-bound keyset over that sequence; offset cursors and compatibility readers are forbidden, so later equal-content producer attempts cannot shift an issued page.
+  static_data:
+    identity: StaticDataRef is exact (bundle_hash, canonical_input_label); StaticDataID is its deterministic hash and content digest is a separate fact.
+    validation: Bundle admission requires regular strict UTF-8 bytes. Runtime and tools consume typed access-list bytes by static_id; host paths and reverse mount parsing are forbidden.
+  workspace_projection:
+    owner: internal/runtime/dataaccess.Materializer and typed workspace projection-provider consumption
+    inputs: The admitted semantic source, selected store, actor identity, exact run resource-version pins, and compiled static-data access records.
+    rule: Materialize one private read-only `/data` projection per execution actor. The generated host root is an ephemeral projection and is never parsed back, persisted as semantic authority, or exposed as an authored source. Paged resource-row tool reads bind the exact declaration and selected version through one fixed-size opaque target fingerprint; continuation state never embeds authored declaration bytes or accepts an older cursor form.
+    verification: Reuse verifies the manifest, every canonical file byte, exact file set, regular-file kind, and immutable modes. Missing, modified, symlinked, mutable, or unexpected entries fail closed.
+    container_binding: A managed Docker workspace container is bound to the complete typed container identity including exact run_id and bundle identity. A different managed identity is removed and recreated before use so a prior run's `/data` mount cannot survive; an unowned or malformed name collision fails closed.
+    parity: Docker and host workspaces consume the same provider and logical paths. A backend may not add directory, config, environment, cwd, repository, or inherited-volume fallbacks.
+  legacy_policy: Fresh schemas only. workspace.data_source, workspace.volumes_from, --data directory authority, SWARM_WORKSPACE_DATA_SOURCE, SWARM_WORKSPACE_DATA_MOUNT, ambient/default roots, runtime path reads, reverse parsing, dual readers, migration, and compatibility aliases are retired.
 platform_tables:
   description: Platform-owned infrastructure tables. These exist regardless of which product contracts are loaded. They are
     the normal runtime boot schema, including canonical entity_state. They do not include product-specific typed entity
@@ -13425,6 +13476,7 @@ platform_tables:
         - run_fork_selected_contract_route_recoveries
         - run_fork_selected_contract_bindings
       delete_by_run_id:
+        - resource_version_pins
         - author_activity_occurrences
         - run_scenario_execution_profiles
         - run_fork_fact_revisions
@@ -13468,6 +13520,19 @@ platform_tables:
         - runs
       preserve:
         - runtime_store_metadata
+        - resource_declarations
+        - resource_bundle_declarations
+        - bundle_static_data
+        - resource_versions
+        - resource_version_provenance
+        - resource_heads
+        - resource_head_history
+        - resource_source_invocations
+        - resource_prune_invocations
+        - resource_prune_pin_evidence
+        - resource_run_creation_operations
+        - resource_run_creation_child_reservations
+        - resource_run_creation_child_evaluations
         - author_activity_order
         - api_idempotency
         - runtime_ingress_state
@@ -13607,6 +13672,48 @@ platform_tables:
         are dim. An ordinary line uses no more than two colored semantic tokens.
     legacy_policy: Fresh authoritative schema only. Old selected stores are unsupported; no migration, adoption, backfill, dual reader, log fallback, or compatibility cursor is allowed.
   tables:
+    resource_declarations:
+      description: Canonical package-qualified stable identity only. Bundle-specific name and schema facts never overwrite this row.
+      ddl: "CREATE TABLE resource_declarations (\n    package_key          TEXT NOT NULL,\n    event_name           TEXT NOT NULL,\n    admitted_at          TIMESTAMPTZ NOT NULL,\n    PRIMARY KEY (package_key, event_name)\n);"
+    resource_bundle_declarations:
+      description: Exact immutable bundle membership plus the schema/name snapshot derived from that bundle. Amendments may retain declaration identity while changing schema.
+      ddl: "CREATE TABLE resource_bundle_declarations (\n    bundle_hash          TEXT NOT NULL CHECK (bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),\n    package_key          TEXT NOT NULL,\n    event_name           TEXT NOT NULL,\n    display_name         TEXT NOT NULL,\n    owner_flow_id        TEXT NOT NULL DEFAULT '',\n    business_key_field   TEXT,\n    schema_digest        TEXT NOT NULL CHECK (schema_digest ~ '^resource-schema-v1:sha256:[0-9a-f]{64}$'),\n    canonical_schema_bytes BYTEA NOT NULL,\n    admitted_at          TIMESTAMPTZ NOT NULL,\n    PRIMARY KEY (bundle_hash, package_key, event_name),\n    UNIQUE (bundle_hash, package_key, display_name),\n    FOREIGN KEY (package_key, event_name) REFERENCES resource_declarations(package_key, event_name)\n);"
+    bundle_static_data:
+      description: Exact strict-UTF-8 static input bytes and identity projected at bundle admission; host paths are not persisted authority.
+      ddl: "CREATE TABLE bundle_static_data (\n    static_id            TEXT PRIMARY KEY CHECK (static_id ~ '^static-data-v1:sha256:[0-9a-f]{64}$'),\n    bundle_hash          TEXT NOT NULL CHECK (bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),\n    canonical_input_label TEXT NOT NULL,\n    package_key          TEXT NOT NULL,\n    owner_flow_id        TEXT NOT NULL DEFAULT '',\n    relative_path        TEXT NOT NULL,\n    content_digest       TEXT NOT NULL CHECK (content_digest ~ '^static-content-v1:sha256:[0-9a-f]{64}$'),\n    content_type         TEXT NOT NULL,\n    content_bytes        BYTEA NOT NULL,\n    admitted_at          TIMESTAMPTZ NOT NULL,\n    UNIQUE (bundle_hash, canonical_input_label)\n);"
+    resource_versions:
+      description: Immutable semantic version evidence, exact schema snapshot, and optional retained canonical payload. Provenance attempts are separate rows.
+      ddl: "CREATE TABLE resource_versions (\n    version_id           TEXT PRIMARY KEY CHECK (version_id ~ '^resource-version-v1:sha256:[0-9a-f]{64}$'),\n    package_key          TEXT NOT NULL,\n    event_name           TEXT NOT NULL,\n    sequence_alias       BIGINT NOT NULL CHECK (sequence_alias > 0),\n    schema_digest        TEXT NOT NULL CHECK (schema_digest ~ '^resource-schema-v1:sha256:[0-9a-f]{64}$'),\n    canonical_schema_bytes BYTEA NOT NULL,\n    business_key_field   TEXT,\n    content_digest       TEXT NOT NULL CHECK (content_digest ~ '^resource-content-v1:sha256:[0-9a-f]{64}$'),\n    row_codec            TEXT NOT NULL CHECK (row_codec = 'swarm.resource.rows.v1'),\n    row_count            BIGINT NOT NULL CHECK (row_count >= 0 AND row_count <= 100000),\n    manifest_json        JSONB NOT NULL,\n    canonical_jsonl      BYTEA,\n    created_at           TIMESTAMPTZ NOT NULL,\n    pruned_at            TIMESTAMPTZ,\n    FOREIGN KEY (package_key, event_name) REFERENCES resource_declarations(package_key, event_name),\n    UNIQUE (package_key, event_name, sequence_alias),\n    CHECK ((canonical_jsonl IS NULL) = (pruned_at IS NOT NULL))\n);"
+    resource_version_provenance:
+      description: Immutable producer attempts attached to a semantic version; provenance never participates in ResourceVersionID.
+      ddl: "CREATE TABLE resource_version_provenance (\n    version_id           TEXT NOT NULL REFERENCES resource_versions(version_id),\n    provenance_sequence  BIGINT NOT NULL CHECK (provenance_sequence > 0),\n    producer_kind        TEXT NOT NULL CHECK (producer_kind IN ('import', 'normal_run', 'fork_candidate_promotion')),\n    producer_id          UUID NOT NULL,\n    actor                TEXT NOT NULL,\n    provenance_json      JSONB NOT NULL,\n    committed_at         TIMESTAMPTZ NOT NULL,\n    PRIMARY KEY (version_id, producer_kind, producer_id),\n    UNIQUE (version_id, provenance_sequence)\n);\nCREATE INDEX idx_resource_version_provenance_sequence ON resource_version_provenance (version_id, provenance_sequence);"
+    resource_heads:
+      description: Single compare-and-set head and monotonic revision for each resource declaration.
+      ddl: "CREATE TABLE resource_heads (\n    package_key          TEXT NOT NULL,\n    event_name           TEXT NOT NULL,\n    version_id           TEXT,\n    revision             BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),\n    updated_at           TIMESTAMPTZ NOT NULL,\n    PRIMARY KEY (package_key, event_name),\n    FOREIGN KEY (package_key, event_name) REFERENCES resource_declarations(package_key, event_name),\n    FOREIGN KEY (version_id) REFERENCES resource_versions(version_id)\n);"
+    resource_head_history:
+      description: Immutable compare-and-set head transitions in monotonic declaration-local revision order.
+      ddl: "CREATE TABLE resource_head_history (\n    package_key          TEXT NOT NULL,\n    event_name           TEXT NOT NULL,\n    revision             BIGINT NOT NULL CHECK (revision > 0),\n    before_version_id    TEXT,\n    after_version_id     TEXT NOT NULL REFERENCES resource_versions(version_id),\n    operation_kind       TEXT NOT NULL CHECK (operation_kind IN ('source_import', 'fused_import', 'sink_publish', 'promotion')),\n    operation_id         UUID NOT NULL,\n    committed_at         TIMESTAMPTZ NOT NULL,\n    PRIMARY KEY (package_key, event_name, revision),\n    FOREIGN KEY (package_key, event_name) REFERENCES resource_declarations(package_key, event_name),\n    FOREIGN KEY (before_version_id) REFERENCES resource_versions(version_id)\n);"
+    resource_source_invocations:
+      description: Permanent exact request/result replay evidence for standalone and committed fused check/import operations.
+      ddl: "CREATE TABLE resource_source_invocations (\n    source_invocation_id UUID PRIMARY KEY,\n    request_hash         TEXT NOT NULL CHECK (request_hash ~ '^resource-source-request-v1:sha256:[0-9a-f]{64}$'),\n    operation            TEXT NOT NULL CHECK (operation IN ('check', 'import')),\n    parent_run_id        UUID,\n    actor                TEXT NOT NULL,\n    bundle_hash          TEXT NOT NULL,\n    package_key          TEXT NOT NULL,\n    event_name           TEXT NOT NULL,\n    request_json         JSONB NOT NULL,\n    evaluation_json      JSONB NOT NULL,\n    result_json          JSONB NOT NULL,\n    evidence_json        JSONB NOT NULL,\n    completed_at         TIMESTAMPTZ NOT NULL,\n    CHECK (parent_run_id IS NULL OR operation = 'import')\n);"
+    resource_prune_invocations:
+      description: Permanent exact request/result replay evidence for prune operations.
+      ddl: "CREATE TABLE resource_prune_invocations (\n    prune_invocation_id  UUID PRIMARY KEY,\n    request_hash         TEXT NOT NULL CHECK (request_hash ~ '^resource-prune-request-v1:sha256:[0-9a-f]{64}$'),\n    actor                TEXT NOT NULL,\n    package_key          TEXT NOT NULL,\n    event_name           TEXT NOT NULL,\n    version_id           TEXT NOT NULL,\n    request_json         JSONB NOT NULL,\n    result_json          JSONB NOT NULL,\n    completed_at         TIMESTAMPTZ NOT NULL\n);"
+    resource_prune_pin_evidence:
+      description: Complete immutable pin evidence for refused prune operations; bounded summaries are projections of this owner.
+      ddl: "CREATE TABLE resource_prune_pin_evidence (\n    prune_invocation_id  UUID NOT NULL REFERENCES resource_prune_invocations(prune_invocation_id),\n    ordinal              BIGINT NOT NULL CHECK (ordinal > 0),\n    run_id               UUID NOT NULL,\n    run_state            TEXT NOT NULL,\n    package_key          TEXT NOT NULL,\n    event_name           TEXT NOT NULL,\n    schema_digest        TEXT NOT NULL CHECK (schema_digest ~ '^resource-schema-v1:sha256:[0-9a-f]{64}$'),\n    version_id           TEXT NOT NULL REFERENCES resource_versions(version_id),\n    selection            TEXT NOT NULL CHECK (selection IN ('explicit', 'fused_import', 'fork_inherited', 'fork_override')),\n    PRIMARY KEY (prune_invocation_id, ordinal),\n    UNIQUE (prune_invocation_id, run_id, package_key, event_name),\n    FOREIGN KEY (package_key, event_name) REFERENCES resource_declarations(package_key, event_name)\n);"
+    resource_run_creation_operations:
+      description: Permanent method-neutral run-ID receipt owning fused data admission, replay, and bounded public evidence.
+      ddl: "CREATE TABLE resource_run_creation_operations (\n    run_id               UUID PRIMARY KEY,\n    request_hash         TEXT NOT NULL CHECK (request_hash ~ '^resource-run-creation-request-v1:sha256:[0-9a-f]{64}$'),\n    actor                TEXT NOT NULL,\n    bundle_hash          TEXT NOT NULL CHECK (bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),\n    request_json         JSONB NOT NULL,\n    summary_json         JSONB NOT NULL,\n    binding_json         JSONB NOT NULL,\n    evidence_json        JSONB NOT NULL,\n    completed_at         TIMESTAMPTZ NOT NULL\n);"
+    resource_run_creation_child_reservations:
+      description: Permanent failed-parent ownership of fused SourceInvocationIDs; successful children are instead owned by source receipts.
+      ddl: "CREATE TABLE resource_run_creation_child_reservations (\n    source_invocation_id UUID PRIMARY KEY,\n    parent_run_id        UUID NOT NULL REFERENCES resource_run_creation_operations(run_id),\n    request_hash         TEXT NOT NULL CHECK (request_hash ~ '^resource-source-request-v1:sha256:[0-9a-f]{64}$'),\n    reserved_at          TIMESTAMPTZ NOT NULL\n);\nCREATE INDEX idx_resource_run_creation_child_reservations_parent ON resource_run_creation_child_reservations (parent_run_id, source_invocation_id);"
+    resource_run_creation_child_evaluations:
+      description: Complete immutable child evaluation and defect evidence retained by failed parent run creation.
+      ddl: "CREATE TABLE resource_run_creation_child_evaluations (\n    parent_run_id        UUID NOT NULL REFERENCES resource_run_creation_operations(run_id),\n    source_invocation_id UUID NOT NULL REFERENCES resource_run_creation_child_reservations(source_invocation_id),\n    context_json         JSONB NOT NULL,\n    evaluation_json      JSONB NOT NULL,\n    defects_json         JSONB NOT NULL,\n    PRIMARY KEY (parent_run_id, source_invocation_id)\n);"
+    resource_version_pins:
+      description: Exact immutable run dependency pins; terminal forkable runs retain their versions until the run is deleted.
+      ddl: "CREATE TABLE resource_version_pins (\n    run_id               UUID NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,\n    package_key          TEXT NOT NULL,\n    event_name           TEXT NOT NULL,\n    schema_digest        TEXT NOT NULL CHECK (schema_digest ~ '^resource-schema-v1:sha256:[0-9a-f]{64}$'),\n    version_id           TEXT NOT NULL REFERENCES resource_versions(version_id),\n    selection            TEXT NOT NULL CHECK (selection IN ('explicit', 'fused_import', 'fork_inherited', 'fork_override')),\n    pinned_at            TIMESTAMPTZ NOT NULL,\n    PRIMARY KEY (run_id, package_key, event_name),\n    FOREIGN KEY (package_key, event_name) REFERENCES resource_declarations(package_key, event_name)\n);\nCREATE INDEX idx_resource_version_pins_version ON resource_version_pins (version_id, run_id);"
     bundles:
       description: 'Content-addressed bundle catalog. The primary key is the canonical bundle_hash
         (`bundle-v1:sha256:<64 lowercase hex>`) from multi_bundle_persistence.bundle_identity.
@@ -16284,7 +16391,7 @@ run_model:
       fork_materialization {source_run_id,source_event_id}. Later events and lifecycle transitions preserve the
       origin unchanged. Readers decode only these persisted facts and never infer origin from event history.
       Public run forking is governed by multi_bundle_persistence.api_surface.run_fork and the intended CLI command
-      `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]`.
+      `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--idempotency-key <key>]`.
     propagation: 'run_id propagates through the causal chain. When a handler, agent, or contextual platform
       producer emits an event, it supplies typed EventLineage from the exact parent at construction. EventBus
       validates but never infers or mutates run_id, source_event_id, task_id, or execution_mode. Producers that
@@ -16338,7 +16445,7 @@ run_model:
       unfinished work; in-progress delivery, session, turn, audit, non-agent, route, retry/idempotency, and other
       unsupported historical facts remain permanently fail-closed unless a later issue names a concrete consumer and
       proves a new owner.'
-    command: 'public CLI: `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--confirm-source-freeze] [--idempotency-key <key>]`, consuming /v1/rpc run.fork'
+    command: 'public CLI: `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--confirm-source-freeze] [--idempotency-key <key>]`, consuming /v1/rpc run.fork'
     dry_run_command: 'retired in v1 CLI; historical `swarm fork --dry-run` is not a supported operator command'
     materialize_only_command: 'retired in v1 CLI; historical `swarm fork --materialize-only` is not a supported operator command'
     activation_command: 'retired in v1 CLI; historical `swarm fork --activate` is not a supported operator command'
@@ -18079,7 +18186,7 @@ multi_bundle_persistence:
       - swarm event publish <event-name> --bundle-hash <bundle_hash>
       - swarm run start --bundle-hash <bundle_hash>
     run_fork:
-      command: swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--confirm-source-freeze] [--idempotency-key <key>]
+      command: swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--confirm-source-freeze] [--idempotency-key <key>]
       public_status: implemented_public_command
       api_owner: /v1/rpc run.fork
       rules:
@@ -19420,17 +19527,18 @@ environment_source_authority:
       semantic ownership.
     classifications:
       existing_config_owned_workspace_sources:
-        disposition: retired_by_1843_to_flags_or_typed_workspace_config
-        owner: workspace_model.data_source_authority and workspace_model.workspace_backend_selection
+        disposition: retired
+        owner: durable_data_resources.workspace_projection and workspace_model.workspace_backend_selection
         env_vars:
         - SWARM_WORKSPACE_DATA_SOURCE
         - SWARM_WORKSPACE_BACKEND
         rule: >
           These envs historically overlapped existing workspace owners. #1843 removes them from source order and accepted-set
-          seeded status: use `--data` / `workspace.data_source` and `--workspace-backend` / `workspace.backend` instead.
+          seeded status. SWARM_WORKSPACE_DATA_SOURCE has no path/config replacement: data is selected by explicit resource
+          imports/pins and declared access. Workspace backend selection uses `--workspace-backend` / `workspace.backend`.
       production_bootstrap_or_deployment_plumbing:
         disposition: retired_by_1843_to_workspace_config_or_internal_defaults
-        owner: workspace_model.runtime_image_packaging, workspace_model.local_workspace_image_build_authority, workspace_model.data_source_authority, workspace_model.workspace_backend_selection, and workspace lifecycle config construction
+        owner: workspace_model.runtime_image_packaging, workspace_model.local_workspace_image_build_authority, durable_data_resources.workspace_projection, workspace_model.workspace_backend_selection, and workspace lifecycle config construction
         env_vars:
         - SWARM_DOCKER_BIN
         - SWARM_WORKSPACE_IMAGE
@@ -19444,8 +19552,9 @@ environment_source_authority:
           #1843 removes these envs as live parent-process workspace/bootstrap inputs. `SWARM_DOCKER_BIN` moves to
           `workspace.docker_bin` or explicit `--docker-bin` for `swarm workspace build`; `SWARM_WORKSPACE_IMAGE` moves to
           `workspace.image` or explicit `--image`; host root, volumes-from, and network move to typed workspace config.
-          Data/contract mount destinations are internal generated defaults with no env replacement, and contracts source is
-          selected through the contracts path owner / `--contracts`.
+          Volumes-from and data mount sources have no replacement; `/data` is a selected-run projection. Data/contract mount
+          destinations are internal generated defaults with no env replacement, and contracts source is selected through
+          the contracts path owner / `--contracts`.
       internal_workspace_lifecycle_names:
         disposition: retired_by_1843_internal_generated_defaults
         owner: internal/runtime/workspace Docker lifecycle configuration
@@ -19814,12 +19923,12 @@ configuration_source_authority:
         SWARM_DB_USER: database.user
         SWARM_DB_SSLMODE: database.sslmode
         SWARM_DB_POOL_SIZE: database.pool_size
-        SWARM_WORKSPACE_DATA_SOURCE: workspace.data_source
+        SWARM_WORKSPACE_DATA_SOURCE: retired; use explicit dataset imports/pins and declared flow_data_access or data_access
         SWARM_WORKSPACE_BACKEND: workspace.backend
         SWARM_DOCKER_BIN: workspace.docker_bin or --docker-bin for workspace build
         SWARM_WORKSPACE_IMAGE: workspace.image or --image for workspace build
         SWARM_WORKSPACE_HOST_ROOT: workspace.host_root
-        SWARM_WORKSPACE_VOLUMES_FROM: workspace.volumes_from
+        SWARM_WORKSPACE_VOLUMES_FROM: retired with no replacement
         SWARM_WORKSPACE_NETWORK: workspace.network
         SWARM_ARTIFACT_ROOT: paths.artifact_root
         SWARM_MONITOR_DIR: paths.monitor_dir
@@ -19885,11 +19994,9 @@ workspace_model:
         `swarm workspace build --backend claude_cli`. It MUST NOT advertise pulling a release image until the release-image
         authority publishes one.
     mount_source_rule: >
-      Host sources for `/data` and `/opt/swarm/contracts` MUST come from `workspace_model.data_source_authority`,
-      explicit deployment configuration, config/CLI path resolution, or an already selected workflow/project
-      root passed by the command owner. Default workspace runtime configuration MUST NOT derive those mount sources from
-      the Swarm source checkout except for the promoted `.swarm/data` managed local default owned by
-      `workspace_model.data_source_authority`.
+      The host source for `/opt/swarm/contracts` comes from the admitted contract source. `/data` is never selected from
+      an authored or ambient host directory: each execution consumes the read-only projection materialized by
+      `durable_data_resources.workspace_projection` from the exact run pins and compiled static-data access facts.
     split_scope: >
       Docker Compose setup and workspace image contents/default agent CLI availability remain tracked separately by #996 and
       #997 unless a future gate explicitly widens them.
@@ -19938,66 +20045,40 @@ workspace_model:
       - '`swarm doctor --backend claude_cli` may report or recommend the build command, but MUST NOT build images.'
       - '`swarm serve --dev --backend claude_cli` and local foreground `swarm run start --backend claude_cli` MUST NOT auto-build images.'
       - 'Host workspace backend execution, local API connection discovery, stale MCP gateway env policy, Compose setup, and docs rollout remain split.'
-  data_source_authority:
-    promoted_by: '#1139/#1223'
+  data_projection_authority:
+    promoted_by: '#2295'
     implementation_status: implemented
-    canonical_owner: platform-spec.yaml#workspace_model.data_source_authority
+    canonical_owner: platform-spec.yaml#durable_data_resources.workspace_projection
     scope: >
-      Defines the host/source authority for the agent-visible `/data` mount for `swarm serve`, local foreground `swarm run start`,
-      and current workspace lifecycle consumers. Compose/Postgres onboarding (#1137), host workspace backend execution
-      parity (#1138/#1213), SQLite store concurrency, agent-free workspace-init skipping, and mount destination override
-      cleanup remain split.
-    cli_flag: --data
-    config_key: workspace.data_source
-    retired_env_var: SWARM_WORKSPACE_DATA_SOURCE
-    source_order:
-    - --data
+      Defines the private host projection mounted read-only at `/data` for one exact execution actor. It is derived only
+      from the admitted bundle's compiled static-data access records and the selected run's immutable resource-version
+      pins. It is not an authored path, configuration source, deployment volume, bundle-identity input, or durable owner.
+    materialization_rule: >
+      The workspace lifecycle asks the typed projection provider to materialize the actor's exact accessible static files
+      and pinned resource rows into a private generated directory immediately before execution. Docker and host backends
+      consume that same provider and mount/map only its returned root. The projection may be rebuilt because its canonical
+      bytes remain owned by the admitted bundle and selected store.
+    absence_rule: >
+      A run with no accessible static data and no resource pins receives an empty projection; startup never invents a
+      project, cwd, repository, or user-global data directory.
+    retired_inputs:
     - workspace.data_source
-    - project_default
-    default_behavior: >
-      If no explicit path source is selected and no deployment alternate such as `workspace.volumes_from` is active,
-      the local runtime state resolver MUST select and create `<project-root>/.swarm/data` with mode 0755 only when the canonical
-      contracts project root is the active repo root or is under it. If there is no project, or the command points at a borrowed
-      contracts root outside the active repo root, startup MUST fail closed with guidance to pass `--data` or configure
-      `workspace.data_source`; it MUST NOT create cwd-relative `.swarm/data` or pollute the
-      borrowed contracts tree. The runtime MUST NOT synthesize `/data` from the Swarm source checkout or from a repo-local
-      `data/` directory unless that path was explicitly selected through the authoritative source order.
-    path_resolution_rule: >
-      Non-empty relative path sources are resolved through the command path resolver with the active repo root when present;
-      absolute path sources are used as-is after cleaning. Empty explicit values are invalid.
+    - workspace.volumes_from
+    - --data directory authority
+    - SWARM_WORKSPACE_DATA_SOURCE
+    - SWARM_WORKSPACE_DATA_MOUNT
+    - project .swarm/data defaults
+    - inherited container volumes
     failure_behavior: >
-      Missing or unreadable explicit path sources fail closed during workspace boot validation. Empty explicit values are
-      invalid and MUST NOT fall through to environment or default sources. Default directory creation failures fail closed
-      before workspace lifecycle construction.
-    volumes_from_conflict_rule: >
-      `workspace.volumes_from` is an explicit Docker deployment alternate, not a fallback path source. If no explicit
-      `/data` path source is selected and `workspace.volumes_from` is active, the command resolver MUST NOT
-      materialize or override with `.swarm/data`; Docker workspace validation consumes the alternate shared mounts instead.
-      `workspace.volumes_from` MUST NOT be combined with an explicit `/data` path source from `--data` or
-      `workspace.data_source`; startup must fail closed on that conflict. Host backend startup continues to reject
-      `workspace.volumes_from`.
-    read_policy: >
-      `/data` remains read-only, global, and opaque to the platform. Source authority does not permit indexing, mutating,
-      validating contents beyond mount readability, or folding runtime `/data` into workflow bundle identity.
+      Any retired authored/config/environment input fails closed with guidance to declare flow_data_access or data_access,
+      or to import and pin an authored event dataset. Missing pins, inaccessible static-data declarations, corrupt selected
+      store rows, or projection materialization failure abort execution; no path fallback exists.
     consumers:
-    - swarm serve boot workspace lifecycle
-    - local foreground `swarm run start` startup through the serve startup owner
-    - builder project supervisor reload workspace lifecycle
-    - selected-contract run-fork workspace lifecycle
-    - Docker workspace manager SharedDataSource mount consumer
-    - Host workspace manager SharedDataSource mount consumer
-    retired_non_authoritative_sources:
-    - repoRoot/data derivation in internal/cliapp configuredWorkspaceLifecycle
-    - lower-level Docker default ownership of SWARM_WORKSPACE_DATA_SOURCE
-    - parent-process SWARM_WORKSPACE_DATA_SOURCE
-    - parent-process SWARM_WORKSPACE_VOLUMES_FROM
-    split_scope:
-    - '#1137 Compose/Postgres onboarding and Compose ./data:/data:ro deployment shape'
-    - '#1138/#1213 host workspace backend execution parity'
-    - '#1214 SQLite first run/event locking'
-    - agent-free workspace-init skipping
-    - broader local runtime onboarding/docs polish
-    - mount destination override semantics such as SWARM_WORKSPACE_DATA_MOUNT
+    - Docker workspace execution target production
+    - Host workspace execution target production
+    - agent native tools and flow-data tools through logical /data
+    - local and connected run execution
+    - selected-contract run-fork execution
   workspace_backend_selection:
     promoted_by: '#1138'
     implementation_status: implemented_capability_driven_first_slice
@@ -20061,8 +20142,9 @@ workspace_model:
           managed container lifecycle.
       host:
         behavior: >
-          Default backend for non-exec agent bundles and explicit local-dev/trusted opt-in where accepted. Startup consumes the selected `/data` source from
-          `workspace_model.data_source_authority`, the loaded contracts source, and a platform-managed host workspace root.
+          Default backend for non-exec agent bundles and explicit local-dev/trusted opt-in where accepted. Execution consumes
+          the actor-specific `/data` projection from `durable_data_resources.workspace_projection`, the loaded contracts
+          source, and a platform-managed host workspace root.
           It MUST NOT require Docker, build Docker images, or create containers. It supports trusted/unsafe native command
           execution only through `workspace_execution_target_capability` after explicit unsafe host opt-out and actor
           `native_tools.bash` authorization. Host native command execution is full host-user shell execution and must not be
@@ -20081,8 +20163,7 @@ workspace_model:
     failure_behavior:
     - Unsupported backend names fail closed before runtime construction.
     - Empty explicit backend sources from the flag or config fail closed instead of falling through.
-    - Host backend MUST reject `workspace.volumes_from`; the host backend consumes explicit path authorities, not Docker
-      volume inheritance.
+    - Every backend MUST reject `workspace.volumes_from`; inherited deployment volumes are not selected-run data authority.
     - Host backend MUST fail closed for Claude CLI/provider execution unless a future gate promotes that support. Host native
       command execution is supported only as trusted/unsafe explicit host-mode execution through
       `workspace_execution_target_capability`; unsupported native tool execution MUST still fail closed.
@@ -20160,8 +20241,8 @@ workspace_model:
         agent-visible authority.
       - Host file operations MUST resolve private host backing paths through this owner from the selected logical mount and
         MUST reject symlink escapes or raw host absolute paths as product input.
-      - Host execution target production MUST consume `workspace_model.data_source_authority` for `/data` and the loaded
-        contracts source for `/opt/swarm/contracts`.
+      - Host and Docker execution target production MUST consume `durable_data_resources.workspace_projection` for `/data`
+        and the loaded contracts source for `/opt/swarm/contracts`.
     consumers:
     - Docker workspace target production
     - Host workspace target production
@@ -21454,6 +21535,8 @@ test_specification:
           runs may omit the selector or repeat the exact profile, but cannot install or switch it. An omitted existing-run
           selector loads the durable profile during API admission and rejects posture or effective-source drift before event
           publication. There is no jsonb authority, decode/re-encode fallback, legacy reader, migration, or dual format.
+          The identity-only selector is part of the permanent new-run semantic request hash; reuse of a run_id with a different
+          selector is an invocation conflict and never replays the earlier run-creation result.
         dispatch: >-
           Activity dispatch resolves SourceRunID to the durable profile, requires exact runtime effective-source identity before
           attempt/credential/transport, overlays the admitted responses through the existing response plan, and never reads
@@ -22770,6 +22853,9 @@ cli_specification:
           bundle_show_hash: {command: swarm bundle show, selector: 'arg:bundle-hash', family: bundle, mode: resolver_bounded}
           bundle_agents_hash: {command: swarm bundle agents, selector: 'arg:bundle-hash', family: bundle, mode: resolver_bounded}
           bundle_delete_hash: {command: swarm bundle delete, selector: 'arg:bundle-hash', family: bundle, mode: full_only, safety: mutating}
+          data_import_bundle_hash: {command: swarm data import, selector: 'flag:bundle-hash', family: bundle, mode: full_only, safety: mutating}
+          data_show_bundle_hash: {command: swarm data show, selector: 'flag:bundle-hash', family: bundle, mode: full_only}
+          data_prune_bundle_hash: {command: swarm data prune, selector: 'flag:bundle-hash', family: bundle, mode: full_only, safety: mutating}
           serve_bundle_hash: {command: swarm serve, selector: 'flag:bundle-hash', family: bundle, mode: full_only, safety: boot}
           run_start_bundle_hash: {command: swarm run start, selector: 'flag:bundle-hash', family: bundle, mode: full_only, safety: creation}
           run_fork_bundle_hash: {command: swarm run fork, selector: 'flag:bundle-hash', family: bundle, mode: full_only, safety: mutating}
@@ -22793,6 +22879,17 @@ cli_specification:
           mailbox_list_run: {command: swarm mailbox list, selector: 'flag:run-id', family: run, mode: full_only}
           logs_run: {command: swarm logs, selector: 'flag:run-id', family: run, mode: full_only}
           run_start_caller_run: {command: swarm run start, selector: 'flag:run-id', family: none, mode: different_concept, scope_rule: caller-minted new-run ID}
+          data_import_declaration: {command: swarm data import, selector: 'arg:qualified-or-unambiguous-name', family: none, mode: different_concept, scope_rule: 'exact selected-bundle declaration; bare local name resolves only when unambiguous'}
+          data_import_invocation: {command: swarm data import, selector: 'flag:source-invocation-id', family: none, mode: different_concept, scope_rule: caller-minted permanent source operation UUID}
+          data_import_expected_head: {command: swarm data import, selector: 'flag:expected-head', family: none, mode: different_concept, scope_rule: absent or exact ResourceVersionID compare-and-set evidence}
+          data_show_selector: {command: swarm data show, selector: 'arg:data-selector', family: none, mode: different_concept, scope_rule: exact selected-bundle declaration plus explicit bounded version selector}
+          data_show_position: {command: swarm data show, selector: 'flag:position', family: none, mode: different_concept, scope_rule: exact 1-based ordinal in a keyless immutable version}
+          data_show_key: {command: swarm data show, selector: 'flag:key', family: none, mode: different_concept, scope_rule: exact canonical typed business key in a keyed immutable version}
+          data_prune_selector: {command: swarm data prune, selector: 'arg:data-selector', family: none, mode: different_concept, scope_rule: exact selected-bundle declaration and exact resolved ResourceVersionID}
+          data_prune_invocation: {command: swarm data prune, selector: 'flag:prune-invocation-id', family: none, mode: different_concept, scope_rule: caller-minted permanent prune operation UUID}
+          data_prune_expected_head: {command: swarm data prune, selector: 'flag:expected-head', family: none, mode: different_concept, scope_rule: absent or exact ResourceVersionID compare-and-set evidence}
+          run_start_data_pin: {command: swarm run start, selector: 'flag:pin', family: none, mode: different_concept, scope_rule: 'selected-bundle declaration plus exact head, alias, or ResourceVersionID resolved before mutation'}
+          run_fork_data_pin: {command: swarm run fork, selector: 'flag:pin', family: none, mode: different_concept, scope_rule: 'target-bundle declaration plus exact alias or ResourceVersionID; head is forbidden'}
           entity_view_entity: {command: swarm entity view, selector: 'arg:entity-id', family: entity, mode: resolver_scoped, scope_rule: full --run-id required}
           event_list_entity: {command: swarm event list, selector: 'flag:entity-id', family: entity, mode: full_only}
           event_follow_entity: {command: swarm event follow, selector: 'flag:entity-id', family: entity, mode: full_only}
@@ -23282,6 +23379,31 @@ cli_specification:
               command: swarm serve
               classification: exception
               exception_rule: serve_daemon_process
+            data_group:
+              command: swarm data
+              classification: exception
+              exception_rule: group_help
+            data_import:
+              command: swarm data import
+              classification: shared_output
+              fact_owner: /v1/rpc data.check or /v1/rpc data.import
+              json_shape: SourceOperationResult
+              quiet_values:
+              - candidate ResourceVersionID
+            data_show:
+              command: swarm data show
+              classification: shared_output
+              fact_owner: /v1/rpc data.show
+              json_shape: exact selected DataShowResult projection; canonical JSONL export is an explicit raw format
+              quiet_values:
+              - declaration label, row key, or ResourceVersionID according to the selected view
+            data_prune:
+              command: swarm data prune
+              classification: shared_output
+              fact_owner: /v1/rpc data.prune
+              json_shape: PruneOperationResult
+              quiet_values:
+              - prune outcome
             run_group:
               command: swarm run # live run command group help
               classification: exception
@@ -24050,15 +24172,12 @@ cli_specification:
           Explicit Postgres backend selection remains governed by runtime_store_backend_selection and bypasses SQLite
           path defaults.
       data_resolution:
-        source_order:
-        - --data
-        - workspace.data_source
-        - workspace.volumes_from deployment alternate
-        - project_default
-        project_default: <project-root>/.swarm/data
+        owner: durable_data_resources.workspace_projection
+        source_order: []
         rule: >
-          The project default is created with mode 0755 only for a project-local root. No-project and borrowed-project
-          local startup fail closed unless an explicit data source or deployment alternate is selected.
+          Local runtime startup resolves no host data directory. Each execution receives a generated read-only projection
+          from its exact durable-data pins and compiled static-data access; no-project and borrowed-project modes use the
+          same owner without cwd, repository, config, or inherited-volume fallback.
       run_startup_rule: >
         Default foreground `swarm run start` starts a descriptorless local runtime only after the same project live-runtime
         guard used by `serve --dev`. A live project context blocks local foreground startup with guidance to use
@@ -24983,20 +25102,13 @@ cli_specification:
           `--backend` flag overrides config `llm.backend` only after the configured backend itself has been validated.
           SWARM_LLM_BACKEND, SWARM_LLM_RUNTIME_MODE, llm.runtime_mode, and SWARM_OPENAI_COMPATIBLE_BASE_URL are retired
           selector/connection-owner seams and must fail closed.
-      workspace_data_source_authority:
-        promoted_by: '#1139/#1223'
-        owner: workspace_model.data_source_authority
-        flag: --data <path>
-        config_key: workspace.data_source
-        retired_env_var: SWARM_WORKSPACE_DATA_SOURCE
+      workspace_data_projection_authority:
+        promoted_by: '#2295'
+        owner: durable_data_resources.workspace_projection
         rule: >
-          `swarm serve` MUST resolve the agent-visible `/data` source through
-          `workspace_model.data_source_authority` before constructing any workspace lifecycle. The command MUST NOT
-          derive `/data` from the Swarm source checkout or from a repo-local `data/` directory unless that path was
-          explicitly selected by the operator through the promoted source order. When no explicit path source and no
-          deployment alternate are selected, the shared local runtime state resolver MUST create and use
-          `<project-root>/.swarm/data` only for a canonical project root that matches the active repo root; no-project and
-          borrowed-contract startup fail closed instead of creating cwd-relative or borrowed-tree state.
+          `swarm serve` installs one typed projection provider on each workspace lifecycle after admitting the exact bundle
+          and selected store. Execution materializes `/data` from the actor run's immutable resource pins plus compiled
+          static-data access. Serve never resolves, creates, records, or accepts an ambient host data directory.
         consumers:
         - serve boot workspace lifecycle
         - local foreground `swarm run start` startup through the serve startup owner
@@ -25577,6 +25689,42 @@ cli_specification:
           child promotes them.
       remaining_tail: '#750 has no remaining promoted serve/dev lifecycle tail after #830. `platform.shutdown` event persistence
         and persisted delivery/receipt interruption reasons remain unpromoted unless a later child makes them authoritative.'
+    data_group:
+      command: swarm data
+      group: run_operate
+      tier: must_have
+      implementation_status: implemented
+      owner: cobra noun-group help
+      behavior: Bare `swarm data` prints data command help and performs no API call.
+    data_import:
+      command: swarm data import <qualified-or-unambiguous-name> <file.jsonl>
+      group: run_operate
+      tier: must_have
+      implementation_status: implemented
+      owner: /v1/rpc data.check and /v1/rpc data.import
+      behavior: >
+        Reads one bounded file once, resolves the declaration against the exact selected bundle, and submits a caller-authored
+        permanent source invocation plus explicit expected head. `--check` records validation evidence without committing a
+        version. Bare local names resolve only when exactly one declaration matches; ambiguity fails closed with candidates.
+    data_show:
+      command: swarm data show [data-selector]
+      group: run_operate
+      tier: must_have
+      implementation_status: implemented
+      owner: /v1/rpc data.show
+      behavior: >
+        Lists exact selected-bundle declarations or reads one bounded immutable version, row, or canonical JSONL stream through
+        typed paginated API projections. The CLI validates cursor, chunk, ordinal, digest, and version continuity and never opens
+        selected-store files directly.
+    data_prune:
+      command: swarm data prune <data-selector>
+      group: run_operate
+      tier: must_have
+      implementation_status: implemented
+      owner: /v1/rpc data.prune
+      behavior: >
+        Resolves one exact immutable version before mutation and submits a caller-authored permanent prune invocation plus explicit
+        expected head. Refusal and replay evidence come only from the selected-store prune owner.
     run_group:
       command: swarm run # live noun-group form: bare run prints group help
       tier: must_have
@@ -25613,7 +25761,8 @@ cli_specification:
       - --config <path>
       - --backend <anthropic|claude_cli|openai_compatible|openai_responses>
       - --contracts <path>
-      - --data <path>
+      - --data <name=file.jsonl> (repeatable fused import)
+      - --pin <name@head|vN|ResourceVersionID> (repeatable exact pin)
       - --idempotency-key <key>
       - --run-id <id>
       - --api-port <int>
@@ -25623,16 +25772,16 @@ cli_specification:
         --platform-spec: 'Retired (#1574); fail with exit 2 and a teaching error naming the embedded platform spec and the paths.platform_spec_path config escape.'
       modes:
         foreground_local_start:
-          invocation: swarm run start --event <name> --payload <file> [--config <path>] [--backend <profile>] --contracts <path> [--data <path>]
+          invocation: swarm run start --event <name> --payload <file> [--config <path>] [--backend <profile>] --contracts <path> [--data <name=file.jsonl>] [--pin <name@selector>]
           behavior: >
             Start runtime/API/MCP through the existing serve startup owner, call health.check, call run.start, begin
             authoritative run.get status/interrupt handling, and attempt optional bounded run.subscribe_trace observation.
             Render available trace rows and the final status-owned summary until terminal. Local runtime config and
-            backend selection consume the same shared resolver as `swarm serve`; local `/data` source selection consumes
-            `workspace_model.data_source_authority` through the serve startup owner. When the caller does not pass
+            backend selection consume the same shared resolver as `swarm serve`. Fused imports and pins consume the same
+            exact selected-bundle data declarations and method-neutral run-creation owner as connected starts. When the caller does not pass
             `--bundle-hash`, run.start uses the active canonical bundle_hash
-            returned by health.check for create-new-work scope. `--data` is local foreground startup configuration only and
-            MUST fail closed with `--connect` or `--reattach`.
+            returned by health.check for create-new-work scope. `--data` and `--pin` are create-new-work inputs, are valid for
+            local and connected starts, and fail closed with `--reattach`.
           ctrl_c: 'First Ctrl-C calls run.stop after a run_id exists, shuts down the locally started runtime, and exits 130. A second interrupt may hard-exit.'
         foreground_connected_start:
           invocation: swarm run start --connect <url> --event <name> --payload <file>
@@ -26765,7 +26914,7 @@ cli_specification:
       - unpromoted bundle.get alias, bundle new, bundle build --watch, archive register packaging, auto-build in test/register,
         release-pipeline/per-module Python snapshot production, and generated bindings remain absent/unknown until later CLI gates
     run_fork:
-      command: swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--confirm-source-freeze] [--idempotency-key <key>]
+      command: swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--confirm-source-freeze] [--idempotency-key <key>]
       group: run_operate
       tier: should_have
       implementation_status: implemented_public_cli_consumer
@@ -27168,7 +27317,7 @@ cli_specification:
       command: swarm fork --dry-run|--materialize-only|--activate|--contracts
       status: retired_legacy_harness_forms
       exit_code: 2
-      message: "ERROR: legacy fork harness flags are not supported operator commands. The public command is `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--idempotency-key <key>]` over /v1/rpc run.fork."
+      message: "ERROR: legacy fork harness flags are not supported operator commands. The public command is `swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--idempotency-key <key>]` over /v1/rpc run.fork."
     topology_v2_2_retired_spellings:
       status: retired_topology_v2_2
       implemented_by: '#1677'
@@ -27373,7 +27522,7 @@ cli_specification:
         group: run_operate
         inherits_contract: cli_specification.command_catalog.trace
       run_fork:
-        command: swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--confirm-source-freeze] [--idempotency-key <key>]
+        command: swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--confirm-source-freeze] [--idempotency-key <key>]
         group: run_operate
         inherits_contract: cli_specification.command_catalog.run_fork
         supersession_scope: >
@@ -27642,6 +27791,9 @@ api_specification:
         streams: none
       test:
         owns: public deterministic test-runner setup/pre-state mutation helpers only; not product runtime mutation
+        streams: none
+      data:
+        owns: immutable named data declarations, version admission, bounded readback, durable operation evidence, and prune
         streams: none
   conventions:
     error_format:
@@ -27941,6 +28093,8 @@ api_specification:
       vocabulary: action-resource (read:<resource>, write:<resource>, control:<resource>, admin:<resource>, decide:<resource>, acknowledge:<resource>,
         verify:<resource>)
       catalog:
+      - read:data
+      - write:data
       - read:health
       - read:runs
       - write:runs
@@ -28114,6 +28268,8 @@ api_specification:
         - read:runtime
         - control:runtime
         - admin:runtime
+        - read:data
+        - write:data
       BundleIdentity:
         description: "Server bundle identity returned by health.check. bundle_hash is the active canonical v1 bundle identity\
           \ and the value clients use for create-new-work bundle scope; workflow_name and workflow_version are human-friendly\
@@ -29203,6 +29359,7 @@ api_specification:
         - run_id
         - new_run_created
         - deliveries
+        - data_binding
         properties:
           event_id:
             $ref: '#/components/schemas/OpaqueId'
@@ -29218,6 +29375,8 @@ api_specification:
             description: Canonical persisted delivery rows for the published event; empty when the declared event has no subscribers.
             items:
               $ref: '#/components/schemas/EventPublishDelivery'
+          data_binding:
+            $ref: '#/components/schemas/DataBinding'
       TestSetupEntityResult:
         type: object
         additionalProperties: false
@@ -29349,6 +29508,7 @@ api_specification:
         - fork_run_status
         - bundle_hash
         - executed_event_count
+        - data_pins
         properties:
           owner:
             type: string
@@ -29371,6 +29531,10 @@ api_specification:
           executed_event_count:
             type: integer
             minimum: 0
+          data_pins:
+            type: array
+            items:
+              $ref: '#/components/schemas/ResourcePin'
       AgentReplayResult:
         type: object
         additionalProperties: false
@@ -31815,6 +31979,747 @@ api_specification:
                   type: string
                 message:
                   type: string
+      ResourceSchemaDigest:
+        type: string
+        pattern: ^resource-schema-v1:sha256:[a-f0-9]{64}$
+      ResourceContentDigest:
+        type: string
+        pattern: ^resource-content-v1:sha256:[a-f0-9]{64}$
+      ResourceVersionID:
+        type: string
+        pattern: ^resource-version-v1:sha256:[a-f0-9]{64}$
+      DataDeclarationRef:
+        type: object
+        additionalProperties: false
+        required: [package_key, event]
+        properties:
+          package_key:
+            type: string
+            minLength: 1
+          event:
+            type: string
+            minLength: 1
+            description: Exact canonical qualified authored event name.
+      ExpectedHead:
+        oneOf:
+        - type: object
+          additionalProperties: false
+          required: [state]
+          properties:
+            state:
+              type: string
+              const: absent
+        - type: object
+          additionalProperties: false
+          required: [state, version_id]
+          properties:
+            state:
+              type: string
+              const: version
+            version_id:
+              $ref: '#/components/schemas/ResourceVersionID'
+      DataVersionSelector:
+        oneOf:
+        - type: object
+          additionalProperties: false
+          required: [kind]
+          properties:
+            kind:
+              type: string
+              const: head
+        - type: object
+          additionalProperties: false
+          required: [kind, version_id]
+          properties:
+            kind:
+              type: string
+              const: version
+            version_id:
+              $ref: '#/components/schemas/ResourceVersionID'
+        - type: object
+          additionalProperties: false
+          required: [kind, alias]
+          properties:
+            kind:
+              type: string
+              const: alias
+            alias:
+              type: string
+              pattern: ^v[1-9][0-9]*$
+      DataInput:
+        type: object
+        additionalProperties: false
+        required: [format, content_base64]
+        properties:
+          format:
+            type: string
+            const: jsonl
+          content_base64:
+            type: string
+            contentEncoding: base64
+            maxLength: 983040
+      ResourceManifest:
+        type: object
+        additionalProperties: false
+        required: [manifest_format, declaration, schema_digest, row_codec, content_digest, row_count]
+        properties:
+          manifest_format:
+            type: string
+            const: swarm.resource.version.manifest.v1
+          declaration:
+            $ref: '#/components/schemas/DataDeclarationRef'
+          schema_digest:
+            $ref: '#/components/schemas/ResourceSchemaDigest'
+          row_codec:
+            type: string
+            const: swarm.resource.rows.v1
+          content_digest:
+            $ref: '#/components/schemas/ResourceContentDigest'
+          row_count:
+            type: integer
+            minimum: 0
+            maximum: 100000
+      CandidateVersion:
+        oneOf:
+        - type: object
+          additionalProperties: false
+          required: [state]
+          properties:
+            state:
+              type: string
+              const: none
+        - type: object
+          additionalProperties: false
+          required: [state, version_id, manifest]
+          properties:
+            state:
+              type: string
+              const: candidate
+            version_id:
+              $ref: '#/components/schemas/ResourceVersionID'
+            manifest:
+              $ref: '#/components/schemas/ResourceManifest'
+        - type: object
+          additionalProperties: false
+          required: [state, version_id, alias, manifest]
+          properties:
+            state:
+              type: string
+              const: version
+            version_id:
+              $ref: '#/components/schemas/ResourceVersionID'
+            alias:
+              type: string
+              pattern: ^v[1-9][0-9]*$
+            manifest:
+              $ref: '#/components/schemas/ResourceManifest'
+      DataHeadResult:
+        type: object
+        additionalProperties: false
+        required: [before, after, changed, revision]
+        properties:
+          before:
+            $ref: '#/components/schemas/ExpectedHead'
+          after:
+            $ref: '#/components/schemas/ExpectedHead'
+          changed:
+            type: boolean
+          revision:
+            type: integer
+            minimum: 0
+      DataDeltaSummary:
+        type: object
+        additionalProperties: false
+        required: [added, removed, changed]
+        properties:
+          added: {type: integer, minimum: 0}
+          removed: {type: integer, minimum: 0}
+          changed: {type: integer, minimum: 0}
+          order_changed: {type: boolean}
+      DataDeltaResult:
+        oneOf:
+        - type: object
+          additionalProperties: false
+          required: [state, row_identity, against, summary]
+          properties:
+            state: {type: string, const: computed}
+            row_identity: {type: string, enum: [position, business_key]}
+            against:
+              $ref: '#/components/schemas/ExpectedHead'
+            summary:
+              $ref: '#/components/schemas/DataDeltaSummary'
+        - type: object
+          additionalProperties: false
+          required: [state, reason]
+          properties:
+            state: {type: string, const: not_computed}
+            reason:
+              type: string
+              enum: [validation_rejected, head_conflict]
+        - type: object
+          additionalProperties: false
+          required: [state, against, reason]
+          properties:
+            state: {type: string, const: not_comparable}
+            against:
+              $ref: '#/components/schemas/ExpectedHead'
+            reason:
+              type: string
+              const: schema_changed
+      DataPageRequest:
+        type: object
+        additionalProperties: false
+        properties:
+          limit:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+          byte_limit:
+            type: integer
+            minimum: 1
+            maximum: 524288
+            default: 65536
+          cursor:
+            allOf:
+            - $ref: '#/components/schemas/Cursor'
+            - maxLength: 4096
+      DataPageContinuation:
+        oneOf:
+        - type: object
+          additionalProperties: false
+          required: [state]
+          properties:
+            state: {type: string, const: end}
+        - type: object
+          additionalProperties: false
+          required: [state, cursor]
+          properties:
+            state: {type: string, const: more}
+            cursor:
+              $ref: '#/components/schemas/Cursor'
+      DataValidationDefect:
+        type: object
+        additionalProperties: false
+        required: [row, path, code, message]
+        properties:
+          row: {type: integer, minimum: 0}
+          path: {type: string}
+          code: {type: string}
+          message: {type: string}
+      DataBusinessKey:
+        description: Canonical typed business key admitted from a declared required scalar event field.
+        oneOf:
+        - type: boolean
+        - type: number
+        - type: string
+          maxLength: 4096
+      DataDeltaKey:
+        type: object
+        additionalProperties: false
+        required: [key]
+        properties:
+          key:
+            $ref: '#/components/schemas/DataBusinessKey'
+      DataProvenanceRef:
+        oneOf:
+        - type: object
+          additionalProperties: false
+          required: [kind, source_invocation_id]
+          properties:
+            kind: {type: string, const: import}
+            source_invocation_id: {type: string, format: uuid}
+        - type: object
+          additionalProperties: false
+          required: [kind, run_id]
+          properties:
+            kind: {type: string, const: normal_run}
+            run_id: {type: string, format: uuid}
+        - type: object
+          additionalProperties: false
+          required: [kind, promotion_invocation_id]
+          properties:
+            kind: {type: string, const: fork_candidate_promotion}
+            promotion_invocation_id: {type: string, format: uuid}
+      DataProvenance:
+        type: object
+        additionalProperties: false
+        required: [version_id, producer_ref, actor, committed_at]
+        properties:
+          version_id:
+            $ref: '#/components/schemas/ResourceVersionID'
+          producer_ref:
+            $ref: '#/components/schemas/DataProvenanceRef'
+          actor: {type: string, minLength: 1}
+          committed_at:
+            $ref: '#/components/schemas/Timestamp'
+      ResourcePin:
+        type: object
+        additionalProperties: false
+        required: [run_id, run_state, declaration, schema_digest, version_id, selection]
+        properties:
+          run_id: {type: string, format: uuid}
+          run_state: {type: string, minLength: 1}
+          declaration:
+            $ref: '#/components/schemas/DataDeclarationRef'
+          schema_digest:
+            $ref: '#/components/schemas/ResourceSchemaDigest'
+          version_id:
+            $ref: '#/components/schemas/ResourceVersionID'
+          selection:
+            type: string
+            enum: [explicit, fused_import, fork_inherited, fork_override]
+      DataValidationDefectPage:
+        type: object
+        additionalProperties: false
+        required: [items, item_count, encoded_items_bytes, continuation]
+        properties:
+          items: {type: array, items: {$ref: '#/components/schemas/DataValidationDefect'}}
+          item_count: {type: integer, minimum: 0, maximum: 1000}
+          encoded_items_bytes: {type: integer, minimum: 0, maximum: 524288}
+          continuation: {$ref: '#/components/schemas/DataPageContinuation'}
+      DataDeltaKeyPage:
+        type: object
+        additionalProperties: false
+        required: [items, item_count, encoded_items_bytes, continuation]
+        properties:
+          items: {type: array, items: {$ref: '#/components/schemas/DataDeltaKey'}}
+          item_count: {type: integer, minimum: 0, maximum: 1000}
+          encoded_items_bytes: {type: integer, minimum: 0, maximum: 524288}
+          continuation: {$ref: '#/components/schemas/DataPageContinuation'}
+      DataPinPage:
+        type: object
+        additionalProperties: false
+        required: [items, item_count, encoded_items_bytes, continuation]
+        properties:
+          items: {type: array, items: {$ref: '#/components/schemas/ResourcePin'}}
+          item_count: {type: integer, minimum: 0, maximum: 1000}
+          encoded_items_bytes: {type: integer, minimum: 0, maximum: 524288}
+          continuation: {$ref: '#/components/schemas/DataPageContinuation'}
+      SourceOperationResult:
+        type: object
+        additionalProperties: false
+        required: [source_invocation_id, operation, outcome, bundle_hash, schema_digest, declaration, expected_head, observed_head, candidate, head, delta, defects, completed_at]
+        properties:
+          source_invocation_id: {type: string, format: uuid}
+          operation: {type: string, enum: [check, import]}
+          outcome: {type: string, enum: [accepted, validation_rejected, head_conflict]}
+          bundle_hash: {$ref: '#/components/schemas/BundleHash'}
+          schema_digest: {$ref: '#/components/schemas/ResourceSchemaDigest'}
+          declaration: {$ref: '#/components/schemas/DataDeclarationRef'}
+          expected_head: {$ref: '#/components/schemas/ExpectedHead'}
+          observed_head: {$ref: '#/components/schemas/ExpectedHead'}
+          candidate: {$ref: '#/components/schemas/CandidateVersion'}
+          head: {$ref: '#/components/schemas/DataHeadResult'}
+          delta: {$ref: '#/components/schemas/DataDeltaResult'}
+          defects: {$ref: '#/components/schemas/DataValidationDefectPage'}
+          completed_at: {$ref: '#/components/schemas/Timestamp'}
+      SourceOperationSummary:
+        type: object
+        additionalProperties: false
+        required: [source_invocation_id, operation, outcome, bundle_hash, schema_digest, declaration, expected_head, observed_head, candidate, head, delta, defect_count, completed_at]
+        properties:
+          source_invocation_id: {type: string, format: uuid}
+          operation: {type: string, enum: [check, import]}
+          outcome: {type: string, enum: [accepted, validation_rejected, head_conflict]}
+          bundle_hash: {$ref: '#/components/schemas/BundleHash'}
+          schema_digest: {$ref: '#/components/schemas/ResourceSchemaDigest'}
+          declaration: {$ref: '#/components/schemas/DataDeclarationRef'}
+          expected_head: {$ref: '#/components/schemas/ExpectedHead'}
+          observed_head: {$ref: '#/components/schemas/ExpectedHead'}
+          candidate: {$ref: '#/components/schemas/CandidateVersion'}
+          head: {$ref: '#/components/schemas/DataHeadResult'}
+          delta: {$ref: '#/components/schemas/DataDeltaResult'}
+          defect_count: {type: integer, minimum: 0}
+          completed_at: {$ref: '#/components/schemas/Timestamp'}
+      DataPruneDefect:
+        type: object
+        additionalProperties: false
+        required: [code, message]
+        properties:
+          code: {type: string, enum: [declaration_not_found, version_not_found]}
+          message: {type: string}
+      DataPruneDefectPage:
+        type: object
+        additionalProperties: false
+        required: [items, item_count, encoded_items_bytes, continuation]
+        properties:
+          items: {type: array, items: {$ref: '#/components/schemas/DataPruneDefect'}}
+          item_count: {type: integer, minimum: 0, maximum: 1000}
+          encoded_items_bytes: {type: integer, minimum: 0, maximum: 524288}
+          continuation: {$ref: '#/components/schemas/DataPageContinuation'}
+      PruneOperationResult:
+        type: object
+        additionalProperties: false
+        required: [outcome, prune_invocation_id, declaration, version_id, expected_head, observed_head, completed_at]
+        properties:
+          outcome:
+            type: string
+            enum: [rejected, head_conflict, refused_current, refused_pinned, already_pruned, pruned]
+          prune_invocation_id: {type: string, format: uuid}
+          declaration: {$ref: '#/components/schemas/DataDeclarationRef'}
+          version_id: {$ref: '#/components/schemas/ResourceVersionID'}
+          expected_head: {$ref: '#/components/schemas/ExpectedHead'}
+          observed_head: {$ref: '#/components/schemas/ExpectedHead'}
+          current_version_id: {$ref: '#/components/schemas/ResourceVersionID'}
+          payload_before: {type: string, enum: [materialized, pruned]}
+          payload_after: {type: string, enum: [materialized, pruned]}
+          pin_count: {type: integer, minimum: 0}
+          pins: {$ref: '#/components/schemas/DataPinPage'}
+          defects: {$ref: '#/components/schemas/DataPruneDefectPage'}
+          completed_at: {$ref: '#/components/schemas/Timestamp'}
+      DataDeclarationSummary:
+        type: object
+        additionalProperties: false
+        required: [declaration, local_name, schema_digest, head, version_count, materialized_version_count, materialized_bytes]
+        properties:
+          declaration: {$ref: '#/components/schemas/DataDeclarationRef'}
+          local_name: {type: string}
+          schema_digest: {$ref: '#/components/schemas/ResourceSchemaDigest'}
+          head: {$ref: '#/components/schemas/ExpectedHead'}
+          version_count: {type: integer, minimum: 0}
+          materialized_version_count: {type: integer, minimum: 0}
+          materialized_bytes: {type: integer, minimum: 0}
+      DataVersionSummary:
+        type: object
+        additionalProperties: false
+        required: [declaration, version_id, alias, manifest, payload_state, materialized_bytes]
+        properties:
+          declaration: {$ref: '#/components/schemas/DataDeclarationRef'}
+          version_id: {$ref: '#/components/schemas/ResourceVersionID'}
+          alias: {type: string, pattern: '^v[1-9][0-9]*$'}
+          manifest: {$ref: '#/components/schemas/ResourceManifest'}
+          business_key: {type: string, minLength: 1, description: Declared event payload field owning keyed-version identity; omitted for keyless versions.}
+          payload_state: {type: string, enum: [materialized, pruned]}
+          materialized_bytes: {type: integer, minimum: 0}
+      DataRow:
+        type: object
+        additionalProperties: false
+        required: [declaration, version_id, ordinal, value]
+        properties:
+          declaration: {$ref: '#/components/schemas/DataDeclarationRef'}
+          version_id: {$ref: '#/components/schemas/ResourceVersionID'}
+          ordinal: {type: integer, minimum: 1}
+          key: {$ref: '#/components/schemas/DataBusinessKey'}
+          value:
+            type: object
+            additionalProperties: true
+      DataRowSelector:
+        oneOf:
+        - type: object
+          additionalProperties: false
+          required: [position]
+          properties:
+            position: {type: integer, minimum: 1}
+        - type: object
+          additionalProperties: false
+          required: [key]
+          properties:
+            key: {$ref: '#/components/schemas/DataBusinessKey'}
+      DataHeadHistory:
+        type: object
+        additionalProperties: false
+        required: [revision, before, after, operation_ref, committed_at]
+        properties:
+          revision: {type: integer, minimum: 1}
+          before: {$ref: '#/components/schemas/ExpectedHead'}
+          after: {$ref: '#/components/schemas/ExpectedHead'}
+          operation_ref: {$ref: '#/components/schemas/DataSourceOperationRef'}
+          committed_at: {$ref: '#/components/schemas/Timestamp'}
+      DataSourceOperationRef:
+        type: object
+        additionalProperties: false
+        required: [kind, source_invocation_id]
+        properties:
+          kind: {type: string, const: source}
+          source_invocation_id: {type: string, format: uuid}
+      DataPruneOperationRef:
+        type: object
+        additionalProperties: false
+        required: [kind, prune_invocation_id]
+        properties:
+          kind: {type: string, const: prune}
+          prune_invocation_id: {type: string, format: uuid}
+      DataRunCreationOperationRef:
+        type: object
+        additionalProperties: false
+        required: [kind, run_id]
+        properties:
+          kind: {type: string, const: run_creation}
+          run_id: {type: string, format: uuid}
+      DataOperationRef:
+        oneOf:
+        - $ref: '#/components/schemas/DataSourceOperationRef'
+        - $ref: '#/components/schemas/DataPruneOperationRef'
+        - $ref: '#/components/schemas/DataRunCreationOperationRef'
+      DataExportChunk:
+        type: object
+        additionalProperties: false
+        required: [declaration, version_id, content_digest, total_rows, first_ordinal, row_count, chunk_base64, chunk_bytes, chunk_sha256, continuation]
+        properties:
+          declaration: {$ref: '#/components/schemas/DataDeclarationRef'}
+          version_id: {$ref: '#/components/schemas/ResourceVersionID'}
+          content_digest: {$ref: '#/components/schemas/ResourceContentDigest'}
+          total_rows: {type: integer, minimum: 0}
+          first_ordinal: {type: integer, minimum: 0}
+          row_count: {type: integer, minimum: 0}
+          chunk_base64: {type: string}
+          chunk_bytes: {type: integer, minimum: 0, maximum: 524288}
+          chunk_sha256: {$ref: '#/components/schemas/Sha256Fingerprint'}
+          continuation: {$ref: '#/components/schemas/DataPageContinuation'}
+      DataFusedChildEvaluation:
+        type: object
+        additionalProperties: false
+        required: [source_invocation_id, bundle_hash, schema_digest, declaration, expected_head, observed_head, candidate, delta, defect_count, outcome]
+        properties:
+          source_invocation_id: {type: string, format: uuid}
+          bundle_hash: {$ref: '#/components/schemas/BundleHash'}
+          schema_digest: {$ref: '#/components/schemas/ResourceSchemaDigest'}
+          declaration: {$ref: '#/components/schemas/DataDeclarationRef'}
+          expected_head: {$ref: '#/components/schemas/ExpectedHead'}
+          observed_head: {$ref: '#/components/schemas/ExpectedHead'}
+          candidate: {$ref: '#/components/schemas/CandidateVersion'}
+          delta: {$ref: '#/components/schemas/DataDeltaResult'}
+          defect_count: {type: integer, minimum: 0}
+          outcome: {type: string, enum: [ready, validation_rejected, head_conflict]}
+      DataFusedChildDefect:
+        type: object
+        additionalProperties: false
+        required: [source_invocation_id, defect]
+        properties:
+          source_invocation_id: {type: string, format: uuid}
+          defect: {$ref: '#/components/schemas/DataValidationDefect'}
+      DataRunCreationItem:
+        oneOf:
+        - type: object
+          additionalProperties: false
+          required: [kind, pin]
+          properties:
+            kind: {type: string, const: pin}
+            pin: {$ref: '#/components/schemas/ResourcePin'}
+        - type: object
+          additionalProperties: false
+          required: [kind, import]
+          properties:
+            kind: {type: string, const: import}
+            import: {$ref: '#/components/schemas/SourceOperationSummary'}
+      DataRunCreationItemPage:
+        type: object
+        additionalProperties: false
+        required: [items, item_count, encoded_items_bytes, continuation]
+        properties:
+          items: {type: array, items: {$ref: '#/components/schemas/DataRunCreationItem'}}
+          item_count: {type: integer, minimum: 0, maximum: 1000}
+          encoded_items_bytes: {type: integer, minimum: 0, maximum: 524288}
+          continuation: {$ref: '#/components/schemas/DataPageContinuation'}
+      DataBinding:
+        oneOf:
+        - type: object
+          additionalProperties: false
+          required: [state]
+          properties:
+            state: {type: string, const: none}
+        - type: object
+          additionalProperties: false
+          required: [state, run_id, pin_count, import_count, evidence]
+          properties:
+            state: {type: string, const: bound}
+            run_id: {type: string, format: uuid}
+            pin_count: {type: integer, minimum: 1, maximum: 256}
+            import_count: {type: integer, minimum: 0, maximum: 256}
+            evidence: {$ref: '#/components/schemas/DataRunCreationItemPage'}
+      DataRunCreationOperationSummary:
+        type: object
+        additionalProperties: false
+        required: [kind, outcome, run_id, bundle_hash, pin_count, import_count, rejection, completed_at]
+        properties:
+          kind: {type: string, const: run_creation}
+          outcome: {type: string, enum: [created, data_rejected, head_conflict]}
+          run_id: {type: string, format: uuid}
+          bundle_hash: {$ref: '#/components/schemas/BundleHash'}
+          event_id: {type: string, format: uuid}
+          status: {$ref: '#/components/schemas/RunStatus'}
+          pin_count: {type: integer, minimum: 0, maximum: 256}
+          import_count: {type: integer, minimum: 0, maximum: 256}
+          rejection: {$ref: '#/components/schemas/DataRunCreationRejection'}
+          completed_at: {$ref: '#/components/schemas/Timestamp'}
+      DataRunCreationRejection:
+        oneOf:
+        - type: object
+          additionalProperties: false
+          required: [state]
+          properties:
+            state: {type: string, const: none}
+        - type: object
+          additionalProperties: false
+          required: [state, code]
+          properties:
+            state: {type: string, const: rejected}
+            code: {type: string, const: fused_validation_rejected}
+        - type: object
+          additionalProperties: false
+          required: [state, code]
+          properties:
+            state: {type: string, const: rejected}
+            code: {type: string, const: fused_head_conflict}
+        - type: object
+          additionalProperties: false
+          required: [state, code, declaration, version_id]
+          properties:
+            state: {type: string, const: rejected}
+            code: {type: string, const: explicit_pin_version_missing}
+            declaration: {$ref: '#/components/schemas/DataDeclarationRef'}
+            version_id: {$ref: '#/components/schemas/ResourceVersionID'}
+        - type: object
+          additionalProperties: false
+          required: [state, code, declaration, version_id]
+          properties:
+            state: {type: string, const: rejected}
+            code: {type: string, const: explicit_pin_version_pruned}
+            declaration: {$ref: '#/components/schemas/DataDeclarationRef'}
+            version_id: {$ref: '#/components/schemas/ResourceVersionID'}
+        - type: object
+          additionalProperties: false
+          required: [state, code, declaration, version_id, expected_schema_digest, selected_schema_digest]
+          properties:
+            state: {type: string, const: rejected}
+            code: {type: string, const: explicit_pin_schema_mismatch}
+            declaration: {$ref: '#/components/schemas/DataDeclarationRef'}
+            version_id: {$ref: '#/components/schemas/ResourceVersionID'}
+            expected_schema_digest: {$ref: '#/components/schemas/ResourceSchemaDigest'}
+            selected_schema_digest: {$ref: '#/components/schemas/ResourceSchemaDigest'}
+      DataOperationSummary:
+        oneOf:
+        - type: object
+          additionalProperties: false
+          required: [kind, source]
+          properties:
+            kind: {type: string, const: source}
+            source: {$ref: '#/components/schemas/SourceOperationSummary'}
+        - type: object
+          additionalProperties: false
+          required: [kind, prune]
+          properties:
+            kind: {type: string, const: prune}
+            prune: {$ref: '#/components/schemas/PruneOperationResult'}
+        - type: object
+          additionalProperties: false
+          required: [kind, run_creation]
+          properties:
+            kind: {type: string, const: run_creation}
+            run_creation: {$ref: '#/components/schemas/DataRunCreationOperationSummary'}
+      DataDeclarationPage:
+        type: object
+        additionalProperties: false
+        required: [items, item_count, encoded_items_bytes, continuation]
+        properties:
+          items: {type: array, items: {$ref: '#/components/schemas/DataDeclarationSummary'}}
+          item_count: {type: integer, minimum: 0, maximum: 1000}
+          encoded_items_bytes: {type: integer, minimum: 0, maximum: 524288}
+          continuation: {$ref: '#/components/schemas/DataPageContinuation'}
+      DataVersionPage:
+        type: object
+        additionalProperties: false
+        required: [items, item_count, encoded_items_bytes, continuation]
+        properties:
+          items: {type: array, items: {$ref: '#/components/schemas/DataVersionSummary'}}
+          item_count: {type: integer, minimum: 0, maximum: 1000}
+          encoded_items_bytes: {type: integer, minimum: 0, maximum: 524288}
+          continuation: {$ref: '#/components/schemas/DataPageContinuation'}
+      DataRowPage:
+        type: object
+        additionalProperties: false
+        required: [items, item_count, encoded_items_bytes, continuation]
+        properties:
+          items: {type: array, items: {$ref: '#/components/schemas/DataRow'}}
+          item_count: {type: integer, minimum: 0, maximum: 1000}
+          encoded_items_bytes: {type: integer, minimum: 0, maximum: 524288}
+          continuation: {$ref: '#/components/schemas/DataPageContinuation'}
+      DataProvenancePage:
+        type: object
+        additionalProperties: false
+        required: [items, item_count, encoded_items_bytes, continuation]
+        properties:
+          items: {type: array, items: {$ref: '#/components/schemas/DataProvenance'}}
+          item_count: {type: integer, minimum: 0, maximum: 1000}
+          encoded_items_bytes: {type: integer, minimum: 0, maximum: 524288}
+          continuation: {$ref: '#/components/schemas/DataPageContinuation'}
+      DataHeadHistoryPage:
+        type: object
+        additionalProperties: false
+        required: [items, item_count, encoded_items_bytes, continuation]
+        properties:
+          items: {type: array, items: {$ref: '#/components/schemas/DataHeadHistory'}}
+          item_count: {type: integer, minimum: 0, maximum: 1000}
+          encoded_items_bytes: {type: integer, minimum: 0, maximum: 524288}
+          continuation: {$ref: '#/components/schemas/DataPageContinuation'}
+      DataFusedChildEvaluationPage:
+        type: object
+        additionalProperties: false
+        required: [items, item_count, encoded_items_bytes, continuation]
+        properties:
+          items: {type: array, items: {$ref: '#/components/schemas/DataFusedChildEvaluation'}}
+          item_count: {type: integer, minimum: 0, maximum: 1000}
+          encoded_items_bytes: {type: integer, minimum: 0, maximum: 524288}
+          continuation: {$ref: '#/components/schemas/DataPageContinuation'}
+      DataFusedChildDefectPage:
+        type: object
+        additionalProperties: false
+        required: [items, item_count, encoded_items_bytes, continuation]
+        properties:
+          items: {type: array, items: {$ref: '#/components/schemas/DataFusedChildDefect'}}
+          item_count: {type: integer, minimum: 0, maximum: 1000}
+          encoded_items_bytes: {type: integer, minimum: 0, maximum: 524288}
+          continuation: {$ref: '#/components/schemas/DataPageContinuation'}
+      DataShowResult:
+        oneOf:
+        - $ref: '#/components/schemas/DataDeclarationPage'
+        - $ref: '#/components/schemas/DataVersionPage'
+        - $ref: '#/components/schemas/DataVersionSummary'
+        - $ref: '#/components/schemas/DataRowPage'
+        - $ref: '#/components/schemas/DataRow'
+        - $ref: '#/components/schemas/DataExportChunk'
+        - $ref: '#/components/schemas/DataProvenancePage'
+        - $ref: '#/components/schemas/DataHeadHistoryPage'
+        - $ref: '#/components/schemas/DataPinPage'
+        - $ref: '#/components/schemas/DataOperationSummary'
+        - $ref: '#/components/schemas/DataValidationDefectPage'
+        - $ref: '#/components/schemas/DataDeltaKeyPage'
+        - $ref: '#/components/schemas/DataPruneDefectPage'
+        - $ref: '#/components/schemas/DataRunCreationItemPage'
+        - $ref: '#/components/schemas/DataFusedChildEvaluationPage'
+        - $ref: '#/components/schemas/DataFusedChildDefectPage'
+      DataFusedImport:
+        type: object
+        additionalProperties: false
+        required: [source_invocation_id, declaration, expected_head, input]
+        properties:
+          source_invocation_id: {type: string, format: uuid}
+          declaration: {$ref: '#/components/schemas/DataDeclarationRef'}
+          expected_head: {$ref: '#/components/schemas/ExpectedHead'}
+          input: {$ref: '#/components/schemas/DataInput'}
+      DataExplicitPin:
+        type: object
+        additionalProperties: false
+        required: [declaration, version_id]
+        properties:
+          declaration: {$ref: '#/components/schemas/DataDeclarationRef'}
+          version_id: {$ref: '#/components/schemas/ResourceVersionID'}
+      RunCreationDataEnvelope:
+        type: object
+        additionalProperties: false
+        required: [imports, pins]
+        properties:
+          imports:
+            type: array
+            maxItems: 256
+            items: {$ref: '#/components/schemas/DataFusedImport'}
+          pins:
+            type: array
+            maxItems: 256
+            items: {$ref: '#/components/schemas/DataExplicitPin'}
+      DataPinOverride:
+        $ref: '#/components/schemas/DataExplicitPin'
       SubscriptionId:
         type: object
         additionalProperties: false
@@ -31910,6 +32815,96 @@ api_specification:
         additionalProperties: false
         required: [reason]
         properties: {reason: {type: string}}
+      MESSAGE_BUDGET_EXCEEDED:
+        type: object
+        additionalProperties: false
+        required: [boundary, method, limit_bytes, observed_bytes, receipt_created]
+        properties:
+          boundary: {type: string, enum: [rpc_message, decoded_import, aggregate_import, public_page, tool_page]}
+          method: {type: string}
+          limit_bytes: {type: integer, minimum: 1}
+          observed_bytes: {type: integer, minimum: 0}
+          receipt_created: {type: boolean, const: false}
+      DATA_INVOCATION_CONFLICT:
+        type: object
+        additionalProperties: true
+        description: A permanent source, prune, or run-creation identity was reused with a different semantic request.
+      DATA_CONTRACT_NOT_FOUND:
+        type: object
+        additionalProperties: false
+        required: [bundle_hash, declaration, receipt_created]
+        properties:
+          bundle_hash: {$ref: '#/components/schemas/BundleHash'}
+          declaration: {$ref: '#/components/schemas/DataDeclarationRef'}
+          receipt_created: {type: boolean, const: false}
+      DATA_DECLARATION_NOT_FOUND:
+        type: object
+        additionalProperties: false
+        required: [declaration]
+        properties:
+          declaration: {$ref: '#/components/schemas/DataDeclarationRef'}
+      DATA_VERSION_NOT_FOUND:
+        type: object
+        additionalProperties: true
+        description: An exact resource version or alias selector did not resolve.
+      DATA_PAYLOAD_PRUNED:
+        type: object
+        additionalProperties: false
+        required: [version_id]
+        properties:
+          version_id: {$ref: '#/components/schemas/ResourceVersionID'}
+      DATA_OPERATION_NOT_FOUND:
+        type: object
+        additionalProperties: true
+        description: The exact permanent operation identity does not exist.
+      DATA_CURSOR_INVALID:
+        type: object
+        additionalProperties: false
+        required: [reason]
+        properties:
+          reason: {type: string}
+      DATA_DEPENDENCY_INCOMPLETE:
+        type: object
+        additionalProperties: true
+        description: A new or fork run does not have one exact version for every mandatory selected-bundle declaration.
+      DATA_PIN_CONFLICT:
+        type: object
+        additionalProperties: true
+        description: Duplicate, undeclared, removed, or conflicting resource pin selection.
+      DATA_SCHEMA_MISMATCH:
+        type: object
+        additionalProperties: true
+        description: The selected version schema differs from the selected bundle declaration schema.
+      RUN_DATA_IMMUTABLE:
+        type: object
+        additionalProperties: false
+        required: [run_id]
+        properties:
+          run_id: {type: string, format: uuid}
+      RUN_DATA_REJECTED:
+        type: object
+        additionalProperties: false
+        required: [run_id, operation]
+        properties:
+          run_id: {type: string, format: uuid}
+          operation: {$ref: '#/components/schemas/DataRunCreationOperationSummary'}
+        description: Permanent run-creation data validation rejection with typed operation evidence.
+      RUN_DATA_HEAD_CONFLICT:
+        type: object
+        additionalProperties: false
+        required: [run_id, operation]
+        properties:
+          run_id: {type: string, format: uuid}
+          operation: {$ref: '#/components/schemas/DataRunCreationOperationSummary'}
+        description: Permanent run-creation expected-head conflict with typed operation evidence.
+      DATA_ACCESS_DENIED:
+        type: object
+        additionalProperties: true
+        description: The requested static or resource item is absent from the actor's immutable access list.
+      DATA_INTEGRITY_ERROR:
+        type: object
+        additionalProperties: true
+        description: Persisted data declaration, version, row, pin, receipt, or tombstone facts contradict one another.
       IDEMPOTENCY_CONFLICT:
         type: object
         additionalProperties: false
@@ -32819,6 +33814,135 @@ api_specification:
         schema:
           $ref: '#/components/schemas/OkResult'
       errors: []
+    data.check:
+      tier: should_have
+      description: >
+        Validate one complete JSONL candidate against the declaration and schema
+        owned by the exact selected bundle. The permanent source invocation
+        receipt owns replay, but no version, row, provenance, head, pin, or
+        tombstone is written.
+      scope:
+        required: [write:data]
+      params:
+      - name: source_invocation_id
+        required: true
+        schema: {type: string, format: uuid}
+      - name: bundle_hash
+        required: true
+        schema: {$ref: '#/components/schemas/BundleHash'}
+      - name: declaration
+        required: true
+        schema: {$ref: '#/components/schemas/DataDeclarationRef'}
+      - name: expected_head
+        required: true
+        schema: {$ref: '#/components/schemas/ExpectedHead'}
+      - name: input
+        required: true
+        schema: {$ref: '#/components/schemas/DataInput'}
+      result:
+        name: result
+        required: true
+        schema: {$ref: '#/components/schemas/SourceOperationResult'}
+      errors: [MESSAGE_BUDGET_EXCEEDED, DATA_INVOCATION_CONFLICT, DATA_CONTRACT_NOT_FOUND, DATA_INTEGRITY_ERROR]
+    data.import:
+      tier: should_have
+      description: >
+        Validate and compare-and-set one immutable JSONL resource version against
+        the declaration/schema in the exact selected bundle. Permanent receipt,
+        version, rows, provenance, head, alias, and history commit atomically.
+      scope:
+        required: [write:data]
+      params:
+      - name: source_invocation_id
+        required: true
+        schema: {type: string, format: uuid}
+      - name: bundle_hash
+        required: true
+        schema: {$ref: '#/components/schemas/BundleHash'}
+      - name: declaration
+        required: true
+        schema: {$ref: '#/components/schemas/DataDeclarationRef'}
+      - name: expected_head
+        required: true
+        schema: {$ref: '#/components/schemas/ExpectedHead'}
+      - name: input
+        required: true
+        schema: {$ref: '#/components/schemas/DataInput'}
+      result:
+        name: result
+        required: true
+        schema: {$ref: '#/components/schemas/SourceOperationResult'}
+      errors: [MESSAGE_BUDGET_EXCEEDED, DATA_INVOCATION_CONFLICT, DATA_CONTRACT_NOT_FOUND, DATA_INTEGRITY_ERROR]
+    data.show:
+      tier: should_have
+      description: >
+        Bounded typed readback for declarations, immutable versions, rows,
+        canonical export chunks, provenance, pins, head history, and permanent
+        source/prune/run-creation operation evidence. Every non-singleton view
+        requires an explicit bounded page and every cursor is query-bound.
+      scope:
+        required: [read:data]
+      params:
+      - name: view
+        required: true
+        schema:
+          type: string
+          enum: [declarations, versions, version, rows, row, export_chunk, provenance, head_history, pins, operation]
+      - name: bundle_hash
+        required: false
+        schema: {$ref: '#/components/schemas/BundleHash'}
+      - name: declaration
+        required: false
+        schema: {$ref: '#/components/schemas/DataDeclarationRef'}
+      - name: selector
+        required: false
+        schema: {$ref: '#/components/schemas/DataVersionSelector'}
+      - name: row_selector
+        required: false
+        schema: {$ref: '#/components/schemas/DataRowSelector'}
+      - name: operation_ref
+        required: false
+        schema: {$ref: '#/components/schemas/DataOperationRef'}
+      - name: detail
+        required: false
+        schema:
+          type: string
+          enum: [summary, defects, delta_added, delta_removed, delta_changed, pins, run_binding, child_evaluations, child_defects]
+      - name: page
+        required: false
+        schema: {$ref: '#/components/schemas/DataPageRequest'}
+      result:
+        name: result
+        required: true
+        schema: {$ref: '#/components/schemas/DataShowResult'}
+      errors: [MESSAGE_BUDGET_EXCEEDED, DATA_DECLARATION_NOT_FOUND, DATA_VERSION_NOT_FOUND, DATA_PAYLOAD_PRUNED, DATA_OPERATION_NOT_FOUND, DATA_CURSOR_INVALID, DATA_INTEGRITY_ERROR]
+    data.prune:
+      tier: should_have
+      description: >
+        Permanently evaluate and, when legal, remove only immutable version
+        payload rows. Manifest, schema, alias, provenance, head history,
+        tombstone, and operation receipts remain. Replay precedes state checks;
+        aggregate integrity precedes normal refusal outcomes.
+      scope:
+        required: [write:data]
+      params:
+      - name: prune_invocation_id
+        required: true
+        schema: {type: string, format: uuid}
+      - name: declaration
+        required: true
+        schema: {$ref: '#/components/schemas/DataDeclarationRef'}
+      - name: version_id
+        required: true
+        schema: {$ref: '#/components/schemas/ResourceVersionID'}
+      - name: expected_head
+        required: true
+        schema: {$ref: '#/components/schemas/ExpectedHead'}
+      result:
+        name: result
+        required: true
+        schema: {$ref: '#/components/schemas/PruneOperationResult'}
+      errors: [DATA_INVOCATION_CONFLICT, DATA_INTEGRITY_ERROR]
     event.publish:
       tier: should_have
       description: "Canonical low-level event publication and workflow-creation primitive.\nPublishes one declared event into\
@@ -32932,6 +34056,11 @@ api_specification:
         description: Exact immutable scenario profile selection for a new or already-exactly-bound mock-only run.
         schema:
           $ref: '#/components/schemas/ScenarioExecutionSelector'
+      - name: data
+        required: false
+        description: Exact fused imports and explicit version pins for create-new-work only. Existing-run publication rejects this field.
+        schema:
+          $ref: '#/components/schemas/RunCreationDataEnvelope'
       - name: idempotency_key
         required: false
         schema:
@@ -32954,6 +34083,16 @@ api_specification:
       - EVENT_NOT_FOUND
       - RUN_ALREADY_TERMINAL
       - IDEMPOTENCY_CONFLICT
+      - MESSAGE_BUDGET_EXCEEDED
+      - DATA_INVOCATION_CONFLICT
+      - DATA_CONTRACT_NOT_FOUND
+      - DATA_DEPENDENCY_INCOMPLETE
+      - DATA_PIN_CONFLICT
+      - DATA_SCHEMA_MISMATCH
+      - RUN_DATA_IMMUTABLE
+      - RUN_DATA_REJECTED
+      - RUN_DATA_HEAD_CONFLICT
+      - DATA_INTEGRITY_ERROR
     test.setup_entities:
       tier: should_have
       description: >
@@ -33136,6 +34275,11 @@ api_specification:
         description: Caller-provided ID; if omitted, runtime assigns.
         schema:
           $ref: '#/components/schemas/OpaqueId'
+      - name: data
+        required: false
+        description: Exact fused imports and explicit version pins consumed by the method-neutral run-creation operation.
+        schema:
+          $ref: '#/components/schemas/RunCreationDataEnvelope'
       - name: idempotency_key
         required: false
         schema:
@@ -33149,11 +34293,14 @@ api_specification:
           required:
           - run_id
           - status
+          - data_binding
           properties:
             run_id:
               $ref: '#/components/schemas/OpaqueId'
             status:
               $ref: '#/components/schemas/RunStatus'
+            data_binding:
+              $ref: '#/components/schemas/DataBinding'
       errors:
       - BUNDLE_MISMATCH
       - BUNDLE_SCOPE_REQUIRED
@@ -33164,6 +34311,15 @@ api_specification:
       - EVENT_PUBLISH_FAILED
       - PAYLOAD_VALIDATION_FAILED
       - IDEMPOTENCY_CONFLICT
+      - MESSAGE_BUDGET_EXCEEDED
+      - DATA_INVOCATION_CONFLICT
+      - DATA_CONTRACT_NOT_FOUND
+      - DATA_DEPENDENCY_INCOMPLETE
+      - DATA_PIN_CONFLICT
+      - DATA_SCHEMA_MISMATCH
+      - RUN_DATA_REJECTED
+      - RUN_DATA_HEAD_CONFLICT
+      - DATA_INTEGRITY_ERROR
     run.fork:
       tier: should_have
       description: "Public selected-contract run fork mutation.\n\nCreates and executes a selected-contract fork from a source run. The method consumes source bundle availability from runs.bundle_source / runs.bundle_hash and bundle-row presence before any fork mutation. Source runs whose canonical bundle bytes are unavailable fail closed with BUNDLE_UNAVAILABLE; persisted source rows with missing bundle data fail with BUNDLE_DATA_INTEGRITY_ERROR. The selected-contract execution path consumes the existing store/runtime run_fork selected_contracts owners and must not infer source identity from nullable identity, compatibility aliases, or local filesystem heuristics.\n\nIf bundle_hash is omitted, the source run's canonical bundle_hash is used. If bundle_hash is supplied and equals the source run bundle_hash, the same-bundle selected_contracts fork may proceed. Disk-loaded source execution uses the existing runtime selected-contract source loader. DB-loaded same-bundle source execution must load source bytes from the persisted bundle catalog runtime source owner, verify the reconstructed bundle_hash, and stamp fork-created runs with bundle_source=persisted plus that canonical bundle_hash.\n\nIf bundle_hash differs from the source run bundle_hash, the target hash selects an already loaded/boot-pinned RuntimeContextManager BundleContext under current Option A. The method must persist selected-contract ownership as mode=bundle_hash with that target bundle_hash, recover routes against the same target identity, execute against the target BundleContext runtime/source, and stamp fork-created runs with bundle_source=persisted plus the target canonical bundle_hash. Valid target hashes that are not loaded by this process, have been unloaded or deactivated, are missing/deleted from the catalog, or otherwise lack supported persisted bytes fail closed with BUNDLE_UNAVAILABLE. Corrupt or hash-mismatched persisted target bytes fail with BUNDLE_DATA_INTEGRITY_ERROR. run.fork MUST NOT perform Dynamic Load, bundle.register runtime start, catalog-only runtime load, ambient CLI bundle selection, or Option B artifact capture. The `swarm run fork` CLI consumes this method and must not call runtime/store helpers directly.\n"
@@ -33193,6 +34349,14 @@ api_specification:
         schema:
           type: boolean
           default: false
+      - name: data_pin_overrides
+        required: false
+        description: Exact structured declaration/version replacements. Head and alias selectors are forbidden; omission inherits the complete source pin set.
+        schema:
+          type: array
+          maxItems: 256
+          items:
+            $ref: '#/components/schemas/DataPinOverride'
       - name: idempotency_key
         required: false
         schema:
@@ -33208,6 +34372,12 @@ api_specification:
       - RUN_NOT_FOUND
       - EVENT_NOT_FOUND
       - IDEMPOTENCY_CONFLICT
+      - DATA_DEPENDENCY_INCOMPLETE
+      - DATA_PIN_CONFLICT
+      - DATA_SCHEMA_MISMATCH
+      - DATA_PAYLOAD_PRUNED
+      - DATA_VERSION_NOT_FOUND
+      - DATA_INTEGRITY_ERROR
     standing.suspend:
       tier: must_have
       description: Persistently suspend a declaration-owned standing service, quiesce active deliveries, sessions, and timers, pause its current run, and withdraw inbound publication. The override survives restart.

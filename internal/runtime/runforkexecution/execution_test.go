@@ -4741,6 +4741,7 @@ func seedSelectedExecutionStateOnlySourceRun(
 		ctx,
 		runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, sourceFact.BundleHash()),
 	)
+	admitSelectedExecutionBundleCatalog(t, ctx, db, sourceFact.BundleHash())
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
 		RunID: sourceRunID, StartedAt: at.Add(-time.Minute), Source: sourceFact,
 	})
@@ -4890,6 +4891,7 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 		ctx,
 		runtimeauthoractivity.BundleScope(runForkTestRuntimeInstanceID, sourceFact.BundleHash()),
 	)
+	admitSelectedExecutionBundleCatalog(t, ctx, db, sourceFact.BundleHash())
 	payload, _ := json.Marshal(map[string]any{"entity_id": entityID})
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(),
 		RunID: sourceRunID, StartedAt: at.Add(-time.Minute), Source: sourceFact,
@@ -4923,6 +4925,17 @@ func seedSelectedExecutionSourceRunWithPrimaryRouteModeAndSource(
 		t.Fatalf("seed source entity_state: %v", err)
 	}
 	return event
+}
+
+func admitSelectedExecutionBundleCatalog(t testing.TB, ctx context.Context, db *sql.DB, bundleHash string) {
+	t.Helper()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json, metadata)
+		VALUES ($1, 'api_version: swarm.test.bundle.v1', '{}'::jsonb, '{"source":"selected-fork-test"}'::jsonb)
+		ON CONFLICT (bundle_hash) DO NOTHING
+	`, bundleHash); err != nil {
+		t.Fatalf("admit selected-execution bundle catalog: %v", err)
+	}
 }
 
 func seedSourceOutcomeThatMustNotSuppressFork(t *testing.T, db *sql.DB, sourceEventID, entityID string, at time.Time) {

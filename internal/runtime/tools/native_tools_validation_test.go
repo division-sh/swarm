@@ -311,7 +311,6 @@ func TestValidateNativeToolBootConfigResolvesDistinctProjectAndFlowOwners(t *tes
 func TestValidateNativeToolBootConfigUsesScopedFlowRouteForWorkspaceAdmission(t *testing.T) {
 	source := scopedFlowWorkspaceNativeToolFixture(t)
 	root := filepath.Join(t.TempDir(), "workspaces")
-	dataDir := t.TempDir()
 	contractsDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: scoped-flow-native-tool-workspace\n"), 0o644); err != nil {
 		t.Fatalf("write contracts package: %v", err)
@@ -319,8 +318,6 @@ func TestValidateNativeToolBootConfigUsesScopedFlowRouteForWorkspaceAdmission(t 
 	workspaces := workspace.NewHostManager()
 	workspaces.SetConfigForTest(workspace.HostConfig{
 		WorkspaceRoot:       root,
-		SharedDataSource:    dataDir,
-		DataMountPoint:      "/data",
 		ContractsSource:     contractsDir,
 		ContractsMountPoint: "/opt/swarm/contracts",
 	})

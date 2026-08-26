@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -10,11 +11,13 @@ import (
 	"strings"
 	"testing"
 
+	runtimecontaineridentity "github.com/division-sh/swarm/internal/runtime/containeridentity"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
+	runtimedataaccess "github.com/division-sh/swarm/internal/runtime/dataaccess"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/google/uuid"
@@ -79,14 +82,12 @@ func TestWorkspaceClassesForSource(t *testing.T) {
 }
 
 func TestValidateSource_RejectsUndefinedWorkspaceClass(t *testing.T) {
-	dataDir := t.TempDir()
 	contractsDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
 		t.Fatalf("write package.yaml: %v", err)
 	}
 	manager := NewDockerManager(nil)
 	cfg := DefaultDockerConfig()
-	cfg.SharedDataSource = dataDir
 	cfg.ContractsSource = contractsDir
 	cfg.WorkspaceNetwork = ""
 	cfg.WorkspaceImage = "test-image"
@@ -160,11 +161,11 @@ func TestResolveWorkspace_PerAgentMountsStandardPaths(t *testing.T) {
 	}
 	manager := NewDockerManager(nil)
 	cfg := DefaultDockerConfig()
-	cfg.SharedDataSource = dataDir
 	cfg.ContractsSource = contractsDir
 	cfg.WorkspaceNetwork = ""
 	cfg.WorkspaceImage = "test-image"
 	manager.SetConfig(cfg)
+	manager.SetDataProjectionProvider(workspaceDataProjectionStub{root: dataDir})
 	manager.SetSemanticSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
 		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
 			"workspace_classes": {
@@ -226,17 +227,132 @@ func TestResolveWorkspace_PerAgentMountsStandardPaths(t *testing.T) {
 	}
 }
 
+func TestEnsureWorkspaceContainerReplacesDifferentRunProjectionIdentity(t *testing.T) {
+	manager := NewDockerManager(nil)
+	cfg := DefaultDockerConfig()
+	cfg.WorkspaceNetwork = ""
+	manager.SetConfig(cfg)
+	name := "swarm-flow-shared-work"
+	existing := runtimecontaineridentity.Identity{
+		Owner: runtimecontaineridentity.OwnerRuntime, Kind: runtimecontaineridentity.KindFlow,
+		ResetEligible: true, CreationSource: "workspace.ResolveWorkspace", ContainerName: name,
+		WorkspaceScope: "per-flow-instance", RunID: "11111111-1111-1111-1111-111111111111", FlowInstance: "shared/work",
+	}
+	requested := existing
+	requested.RunID = "22222222-2222-2222-2222-222222222222"
+	labels, err := json.Marshal(existing.Labels())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls [][]string
+	manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
+		calls = append(calls, append([]string(nil), args...))
+		switch {
+		case len(args) >= 3 && args[0] == "inspect" && args[2] == "{{.State.Running}}":
+			return "true", nil
+		case len(args) >= 3 && args[0] == "inspect" && args[2] == "{{json .Config.Labels}}":
+			return string(labels), nil
+		default:
+			return "", nil
+		}
+	})
+	if err := manager.EnsureContainerRunningWithIdentity(context.Background(), name, requested, []string{
+		"-v", "/projection/run-b:/data:ro", "image", "sleep", "infinity",
+	}); err != nil {
+		t.Fatalf("EnsureContainerRunningWithIdentity: %v", err)
+	}
+	joined := flattenDockerCalls(calls)
+	for _, required := range []string{
+		"rm --force " + name,
+		"create --name " + name,
+		"--label dev.swarm.run_id=22222222-2222-2222-2222-222222222222",
+		"/projection/run-b:/data:ro",
+	} {
+		if !strings.Contains(joined, required) {
+			t.Fatalf("replacement calls missing %q:\n%s", required, joined)
+		}
+	}
+	if strings.Index(joined, "rm --force "+name) > strings.Index(joined, "create --name "+name) {
+		t.Fatalf("stale container was not removed before replacement:\n%s", joined)
+	}
+}
+
+func TestEnsureWorkspaceContainerReusesExactRunProjectionIdentity(t *testing.T) {
+	manager := NewDockerManager(nil)
+	cfg := DefaultDockerConfig()
+	cfg.WorkspaceNetwork = ""
+	manager.SetConfig(cfg)
+	identity := runtimecontaineridentity.Identity{
+		Owner: runtimecontaineridentity.OwnerRuntime, Kind: runtimecontaineridentity.KindFlow,
+		ResetEligible: true, CreationSource: "workspace.ResolveWorkspace", ContainerName: "swarm-flow-shared-work",
+		WorkspaceScope: "per-flow-instance", RunID: "22222222-2222-2222-2222-222222222222", FlowInstance: "shared/work",
+	}
+	labels, err := json.Marshal(identity.Labels())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mutatingCall bool
+	manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
+		switch {
+		case len(args) >= 3 && args[0] == "inspect" && args[2] == "{{.State.Running}}":
+			return "true", nil
+		case len(args) >= 3 && args[0] == "inspect" && args[2] == "{{json .Config.Labels}}":
+			return string(labels), nil
+		case args[0] == "rm" || args[0] == "create" || args[0] == "start":
+			mutatingCall = true
+		}
+		return "", nil
+	})
+	if err := manager.EnsureContainerRunningWithIdentity(context.Background(), identity.ContainerName, identity, []string{
+		"-v", "/projection/run-b:/data:ro",
+	}); err != nil {
+		t.Fatalf("EnsureContainerRunningWithIdentity: %v", err)
+	}
+	if mutatingCall {
+		t.Fatal("exact container identity was needlessly replaced")
+	}
+}
+
+func TestEnsureWorkspaceContainerRejectsUnownedNameCollision(t *testing.T) {
+	manager := NewDockerManager(nil)
+	cfg := DefaultDockerConfig()
+	cfg.WorkspaceNetwork = ""
+	manager.SetConfig(cfg)
+	requested := runtimecontaineridentity.Identity{
+		Owner: runtimecontaineridentity.OwnerRuntime, Kind: runtimecontaineridentity.KindFlow,
+		ResetEligible: true, CreationSource: "workspace.ResolveWorkspace", ContainerName: "swarm-flow-shared-work",
+		WorkspaceScope: "per-flow-instance", RunID: "22222222-2222-2222-2222-222222222222", FlowInstance: "shared/work",
+	}
+	var mutatingCall bool
+	manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
+		switch {
+		case len(args) >= 3 && args[0] == "inspect" && args[2] == "{{.State.Running}}":
+			return "true", nil
+		case len(args) >= 3 && args[0] == "inspect" && args[2] == "{{json .Config.Labels}}":
+			return `{}`, nil
+		case args[0] == "rm" || args[0] == "create" || args[0] == "start":
+			mutatingCall = true
+		}
+		return "", nil
+	})
+	err := manager.EnsureContainerRunningWithIdentity(context.Background(), requested.ContainerName, requested, nil)
+	if err == nil || !strings.Contains(err.Error(), "without the required runtime identity") {
+		t.Fatalf("identity collision error = %v", err)
+	}
+	if mutatingCall {
+		t.Fatal("unowned container name collision triggered mutation")
+	}
+}
+
 func TestResolveWorkspace_BundleScopeDisambiguatesContainersVolumesAndLabels(t *testing.T) {
 	const bundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	const entityID = "22222222-2222-2222-2222-222222222222"
-	dataDir := t.TempDir()
 	contractsDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
 		t.Fatalf("write package.yaml: %v", err)
 	}
 	manager := NewDockerManager(workspaceLookupStub{entity: WorkspaceEntityLookup{Slug: "acme"}})
 	cfg := DefaultDockerConfig()
-	cfg.SharedDataSource = dataDir
 	cfg.ContractsSource = contractsDir
 	cfg.WorkspaceNetwork = ""
 	cfg.WorkspaceImage = "test-image"
@@ -313,14 +429,12 @@ func TestResolveWorkspace_BundleScopeDisambiguatesContainersVolumesAndLabels(t *
 }
 
 func TestResolveWorkspace_PerFlowInstanceSharesByFlowPath(t *testing.T) {
-	dataDir := t.TempDir()
 	contractsDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
 		t.Fatalf("write package.yaml: %v", err)
 	}
 	manager := NewDockerManager(nil)
 	cfg := DefaultDockerConfig()
-	cfg.SharedDataSource = dataDir
 	cfg.ContractsSource = contractsDir
 	cfg.WorkspaceNetwork = ""
 	cfg.WorkspaceImage = "test-image"
@@ -423,6 +537,14 @@ type workspaceLookupStub struct {
 	set    RuntimeWorkspaceContainerSet
 }
 
+type workspaceDataProjectionStub struct {
+	root string
+}
+
+func (s workspaceDataProjectionStub) Materialize(context.Context, models.AgentConfig) (runtimedataaccess.Projection, error) {
+	return runtimedataaccess.Projection{Root: s.root}, nil
+}
+
 func (s workspaceLookupStub) LookupWorkspaceEntity(context.Context, runtimecurrentstate.Identity) (WorkspaceEntityLookup, error) {
 	return s.entity, nil
 }
@@ -433,14 +555,12 @@ func (s workspaceLookupStub) ListRuntimeWorkspaceContainers(context.Context, str
 
 func TestResolveWorkspace_UsesInjectedSemanticSourceForRoleLookup(t *testing.T) {
 	const owner = "test://workspace/ops/worker"
-	dataDir := t.TempDir()
 	contractsDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
 		t.Fatalf("write package.yaml: %v", err)
 	}
 	manager := NewDockerManager(nil)
 	cfg := DefaultDockerConfig()
-	cfg.SharedDataSource = dataDir
 	cfg.ContractsSource = contractsDir
 	cfg.WorkspaceNetwork = ""
 	cfg.WorkspaceImage = "test-image"
@@ -529,10 +649,10 @@ func TestDefaultDockerConfigDoesNotDeriveSourceRootMounts(t *testing.T) {
 	}
 }
 
-func TestDefaultDockerConfigLeavesDataSourceToCommandResolver(t *testing.T) {
+func TestDefaultDockerConfigHasNoAmbientDataSource(t *testing.T) {
 	cfg := DefaultDockerConfig()
 	if cfg.SharedDataSource != "" {
-		t.Fatalf("SharedDataSource = %q, want command-level resolver to own workspace.data_source", cfg.SharedDataSource)
+		t.Fatalf("SharedDataSource = %q, want retired ambient authority to remain absent", cfg.SharedDataSource)
 	}
 	if cfg.ContractsSource != "" {
 		t.Fatalf("ContractsSource = %q, want command-level resolver to own contracts source", cfg.ContractsSource)

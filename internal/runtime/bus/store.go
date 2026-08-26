@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -50,17 +51,22 @@ type APIEventPublicationCommand struct {
 	Publication PublicationCommand
 	Idempotency apiidempotency.Request
 	Completion  apiidempotency.Completion
+	RunCreation *durabledata.RunCreationCommand
 }
 
 func (c APIEventPublicationCommand) Validate() error {
 	if err := c.Publication.Validate(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(c.Idempotency.Method) != "event.publish" {
-		return fmt.Errorf("API event publication requires event.publish idempotency authority")
+	if method := strings.TrimSpace(c.Idempotency.Method); method != "event.publish" && method != "run.start" {
+		return fmt.Errorf("API event publication requires event.publish or run.start method authority")
 	}
-	if strings.TrimSpace(c.Completion.ResourceID) != strings.TrimSpace(c.Publication.Commit.Event.ID()) {
-		return fmt.Errorf("API event publication completion resource does not match the publication event")
+	expectedResourceID := strings.TrimSpace(c.Publication.Commit.Event.ID())
+	if strings.TrimSpace(c.Idempotency.Method) == "run.start" && c.RunCreation != nil {
+		expectedResourceID = strings.TrimSpace(c.RunCreation.RunID)
+	}
+	if strings.TrimSpace(c.Completion.ResourceID) != expectedResourceID {
+		return fmt.Errorf("API event publication completion resource does not match the method result")
 	}
 	if len(c.Completion.Response) == 0 {
 		return fmt.Errorf("API event publication completion response is required")
@@ -69,16 +75,35 @@ func (c APIEventPublicationCommand) Validate() error {
 		(strings.TrimSpace(c.Idempotency.ActorTokenID) == "" || strings.TrimSpace(c.Idempotency.RequestHash) == "") {
 		return fmt.Errorf("API event publication actor token and request hash are required for idempotency")
 	}
+	creating := c.Publication.Commit.Event.RunDisposition() == events.AdmittedRunCreateAuthorized
+	if creating != (c.RunCreation != nil) {
+		return fmt.Errorf("API create-new-run publication and durable run-creation command must be present together")
+	}
 	return nil
 }
 
 type CommittedAPIEventPublication struct {
 	Publication CommittedPublication
 	Completion  apiidempotency.Completion
+	RunCreation *durabledata.RunCreationOperationRecord
 	Replay      bool
 }
 
 func (r CommittedAPIEventPublication) Validate() error {
+	if r.RunCreation != nil {
+		if err := r.RunCreation.Validate(); err != nil {
+			return fmt.Errorf("committed run creation is contradictory: %w", err)
+		}
+	}
+	if r.RunCreation != nil && r.RunCreation.Summary.Outcome != "created" {
+		if r.RunCreation.Summary.Outcome != "data_rejected" && r.RunCreation.Summary.Outcome != "head_conflict" {
+			return fmt.Errorf("committed run creation has invalid outcome %q", r.RunCreation.Summary.Outcome)
+		}
+		if strings.TrimSpace(r.Completion.ResourceID) != "" || len(r.Completion.Response) != 0 {
+			return fmt.Errorf("failed run creation cannot expose an API success completion")
+		}
+		return nil
+	}
 	if strings.TrimSpace(r.Completion.ResourceID) == "" || len(r.Completion.Response) == 0 {
 		return fmt.Errorf("committed API event publication completion is incomplete")
 	}

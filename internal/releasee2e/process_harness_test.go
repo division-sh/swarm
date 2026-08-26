@@ -58,7 +58,6 @@ type releaseProcessSpec struct {
 	WorkingDir string
 	ConfigPath string
 	Contracts  string
-	Data       string
 	Store      string
 	Dev        bool
 	APIPort    int
@@ -86,7 +85,6 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 		"serve",
 		"--config", options.ConfigPath,
 		"--contracts", options.Contracts,
-		"--data", options.Data,
 		"--store", options.Store,
 		"--backend", "claude_cli",
 		"--workspace-backend", "host",

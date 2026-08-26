@@ -235,6 +235,8 @@ func runFakeDocker(args []string) int {
 		return fakeDockerSetRunning(root, args, true)
 	case "stop":
 		return fakeDockerSetRunning(root, args, false)
+	case "rm":
+		return fakeDockerRemove(root, args)
 	case "container":
 		return fakeDockerContainerCommand(root, args)
 	case "exec":
@@ -278,7 +280,7 @@ func validateReleaseDockerCommand(root string, args []string) error {
 			return fmt.Errorf("unsupported Docker inspect shape")
 		}
 		switch args[2] {
-		case "{{.State.Running}}", "{{json .}}", "{{json .Mounts}}":
+		case "{{.State.Running}}", "{{json .}}", "{{json .Mounts}}", "{{json .Config.Labels}}":
 		default:
 			return fmt.Errorf("unsupported Docker inspect format")
 		}
@@ -289,6 +291,10 @@ func validateReleaseDockerCommand(root string, args []string) error {
 	case "start", "stop":
 		if len(args) != 2 || !releaseE2EContainerName(args[1]) {
 			return fmt.Errorf("unsupported Docker container lifecycle shape")
+		}
+	case "rm":
+		if len(args) != 3 || args[1] != "--force" || !releaseE2EContainerName(args[2]) {
+			return fmt.Errorf("unsupported Docker container removal shape")
 		}
 	case "container":
 		want := []string{
@@ -444,7 +450,6 @@ func parseReleaseDockerCreate(args []string) (releaseDockerCreate, error) {
 func validateReleaseDockerMounts(root string, raw []string, required map[string]string) error {
 	releaseRoot := filepath.Dir(filepath.Clean(root))
 	requiredProjectMounts := map[string]string{
-		"/data":                filepath.Join(releaseRoot, ".swarm", "data"),
 		"/opt/swarm/contracts": filepath.Join(releaseRoot, "contracts"),
 	}
 	seen := map[string]string{}
@@ -462,7 +467,7 @@ func validateReleaseDockerMounts(root string, raw []string, required map[string]
 			return fmt.Errorf("malformed mount %q", mount)
 		}
 		switch target {
-		case "/data", "/opt/swarm/contracts":
+		case "/opt/swarm/contracts":
 			wantSource := requiredProjectMounts[target]
 			if mode != "ro" || !filepath.IsAbs(source) || !releasePathsEqual(source, wantSource) {
 				return fmt.Errorf("project mount %q does not match %s:%s:ro", mount, wantSource, target)
@@ -601,6 +606,8 @@ func fakeDockerInspect(root string, args []string) int {
 	switch format {
 	case "{{.State.Running}}":
 		fmt.Fprintln(os.Stdout, container.Running)
+	case "{{json .Config.Labels}}":
+		_ = json.NewEncoder(os.Stdout).Encode(container.Labels)
 	case "{{json .}}":
 		_ = json.NewEncoder(os.Stdout).Encode(map[string]any{
 			"State":  map[string]any{"Running": container.Running},
@@ -661,6 +668,24 @@ func fakeDockerSetRunning(root string, args []string, running bool) int {
 		class = "container_start"
 	}
 	recordFakeDocker(root, fakeDockerRecord{Class: class, Args: redactDockerArgs(args)})
+	return 0
+}
+
+func fakeDockerRemove(root string, args []string) int {
+	if len(args) != 3 || args[1] != "--force" {
+		return fakeDockerUnexpected(root, args, "container removal requires --force and one name")
+	}
+	name := args[2]
+	var exists bool
+	withFakeDockerState(root, func(state *fakeDockerState) {
+		_, exists = state.Containers[name]
+		delete(state.Containers, name)
+	})
+	if !exists {
+		fmt.Fprintf(os.Stderr, "Error: No such object: %s\n", name)
+		return 1
+	}
+	recordFakeDocker(root, fakeDockerRecord{Class: "container_remove", Args: redactDockerArgs(args)})
 	return 0
 }
 

@@ -57,8 +57,6 @@
 #   platform_spec_path: platform-spec.yaml # Project-contained platform spec path override.
 #   tooling_lock_file: ./tooling.lock # Project-contained tooling lock file.
 #   verification_gates_file: ./verification-gates.yaml # Project-contained verification gates file.
-# workspace:
-#   data_source: ./.swarm/data # Project-contained workspace data source.
 
 # Connection and auth settings: use user-global config, --config, or flags
 # These keys can redirect clients or name auth material, so keep them in user-global config, an explicit --config file, or invocation flags.
@@ -106,7 +104,6 @@
 #   host_root: ~/.swarm/workspaces # Host workspace root for local/operator use.
 #   image: swarm-workspace:latest # Workspace image for Docker-backed execution.
 #   network: swarm # Docker network for workspaces.
-#   volumes_from: swarm-orchestrator # Container volume source for orchestrated deployments.
 
 # Secret references: never store plaintext secrets in config
 # These keys point at secret material; the secret value itself belongs in the secrets store, a token file, a mounted secret file, or an explicitly delegated env var.

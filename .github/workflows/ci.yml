@@ -145,7 +145,6 @@ jobs:
           ./swarm run start \
             --config .github/fixtures/sqlite-local-smoke.swarm.yaml \
             --contracts examples/routing/root-ingress \
-            --data "${{ github.workspace }}/data" \
             --event item.received \
             --payload "$payload" \
             --api-port 18091

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/durabledata"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
 )
 
@@ -19,6 +20,7 @@ type BundleCatalogProjection struct {
 	ParsedJSON  map[string]any
 	DataBlob    []byte
 	Metadata    map[string]any
+	DataCatalog durabledata.Catalog
 }
 
 type BundleCatalogProjectionOptions struct {
@@ -99,6 +101,10 @@ func BuildBundleCatalogProjectionWithOptions(bundle *WorkflowContractBundle, opt
 	if err != nil {
 		return BundleCatalogProjection{}, err
 	}
+	dataCatalog, err := BuildDurableDataCatalog(bundle)
+	if err != nil {
+		return BundleCatalogProjection{}, err
+	}
 	parsed := map[string]any{
 		"projection_version": bundleCatalogProjectionVersion,
 		"package":            bundleCatalogPackageJSON(bundle.Package),
@@ -106,8 +112,9 @@ func BuildBundleCatalogProjectionWithOptions(bundle *WorkflowContractBundle, opt
 			"name":    strings.TrimSpace(bundle.Semantics.Name),
 			"version": strings.TrimSpace(bundle.Semantics.Version),
 		},
-		"files":  bundleCatalogFilesJSON(files),
-		"agents": agents,
+		"files":          bundleCatalogFilesJSON(files),
+		"agents":         agents,
+		"data_resources": bundleCatalogDataResourcesJSON(dataCatalog),
 	}
 	metadata := map[string]any{
 		"projection_version": bundleCatalogProjectionVersion,
@@ -127,7 +134,20 @@ func BuildBundleCatalogProjectionWithOptions(bundle *WorkflowContractBundle, opt
 		ParsedJSON:  parsed,
 		DataBlob:    dataBlob,
 		Metadata:    metadata,
+		DataCatalog: dataCatalog,
 	}, nil
+}
+
+func bundleCatalogDataResourcesJSON(catalog durabledata.Catalog) []map[string]any {
+	out := make([]map[string]any, 0, len(catalog.Declarations))
+	for _, declaration := range catalog.Declarations {
+		out = append(out, map[string]any{
+			"name": declaration.Name, "package_key": declaration.Ref.PackageKey, "event": declaration.Ref.EventName,
+			"owner_flow_id": declaration.OwnerFlowID, "business_key": declaration.BusinessKey,
+			"schema_digest": declaration.SchemaDigest,
+		})
+	}
+	return out
 }
 
 func bundleCatalogPolicyName(policy bundleHashContentPolicy) string {

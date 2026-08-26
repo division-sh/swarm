@@ -28,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
+	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
@@ -46,6 +47,7 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	loadYAML(t, filepath.Join(fixtureRoot, "expected.yaml"), &expected)
 
 	h := newRuntimeHarness(t, fixtureRoot, true)
+	storetest.RequireDurableDataCatalog(t, h.ctx, h.pg, authorActivityTestBundleSourceFact.BundleHash())
 	// Source execution is paused at T; register recipient evidence through runtime APIs before publishing.
 	declarationOwner, ok := semanticview.AgentDeclarationOwner(semanticview.Wrap(h.bundle), "", "test-agent")
 	if !ok {
@@ -72,6 +74,11 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	sourceRowsBefore := selectedContractSourceRowSnapshot(t, h.db, sourceRunID, sourceEventID)
 
 	loader, selection, selectedSource := selectedContractForkFixtureSelection(t, h.ctx, repoRoot, fixtureRoot)
+	selectedBundle, ok := semanticview.Bundle(selectedSource.Source)
+	if !ok {
+		t.Fatal("selected-contract source has no loader-owned bundle")
+	}
+	storetest.RequireBundleDataCatalog(t, h.ctx, h.pg, selectedBundle)
 	installCatalogSelectedSourceTopology(t, h.ctx, h, selectedSource)
 	materialized, err := materializeSelectedContractForkCleanupProbe(t, h.ctx, h.pg, loader, selection, sourceRunID, forkAt)
 	if err != nil {

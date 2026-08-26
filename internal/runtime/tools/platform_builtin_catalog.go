@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/durabledata"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
@@ -163,30 +164,49 @@ func notifyHumanContractSchema() builtinToolDraft {
 }
 
 func flowDataToolSchemaEntriesForActor(source semanticview.Source, actor models.AgentConfig) map[string]builtinToolDraft {
-	filenames := flowdata.AllowedFilenames(source, actor)
-	if len(filenames) == 0 {
+	staticData := flowdata.AllowedStaticData(source, actor)
+	resources := flowdata.AllowedResourceData(source, actor)
+	if len(staticData) == 0 && len(resources) == 0 {
 		return map[string]builtinToolDraft{}
 	}
-	enum := make([]any, 0, len(filenames))
-	for _, filename := range filenames {
-		enum = append(enum, filename)
+	staticIDs := make([]any, 0, len(staticData))
+	for _, item := range staticData {
+		staticIDs = append(staticIDs, item.StaticID)
 	}
+	kinds := make([]any, 0, 3)
+	properties := map[string]any{}
+	if len(staticIDs) > 0 {
+		kinds = append(kinds, "static_file")
+		properties["static_id"] = map[string]any{"type": "string", "enum": staticIDs}
+		properties["cursor"] = map[string]any{"type": "string", "minLength": 1, "maxLength": durabledata.MaxBusinessKeyBytes}
+	}
+	if len(resources) > 0 {
+		kinds = append(kinds, "resource_row", "resource_rows")
+		packageKeys := make([]any, 0, len(resources))
+		events := make([]any, 0, len(resources))
+		for _, ref := range resources {
+			packageKeys = append(packageKeys, ref.PackageKey)
+			events = append(events, ref.EventName)
+		}
+		properties["declaration"] = ObjectSchema(map[string]any{
+			"package_key": map[string]any{"type": "string", "enum": packageKeys},
+			"event":       map[string]any{"type": "string", "enum": events},
+		}, "package_key", "event")
+		properties["position"] = map[string]any{"type": "integer", "minimum": 1, "maximum": durabledata.MaxResourceRows}
+		properties["key"] = map[string]any{}
+		properties["page"] = ObjectSchema(map[string]any{
+			"limit":      map[string]any{"type": "integer", "minimum": 1, "maximum": durabledata.MaxPublicPageItems},
+			"byte_limit": map[string]any{"type": "integer", "minimum": 1, "maximum": durabledata.MaxToolPageBytes},
+			"cursor":     map[string]any{"type": "string", "minLength": 1, "maxLength": durabledata.MaxBusinessKeyBytes},
+		})
+	}
+	properties["kind"] = map[string]any{"type": "string", "enum": kinds}
 	return map[string]builtinToolDraft{
 		flowdata.ToolName: {
 			Category:        "flow_data",
-			Description:     "Read a declared static reference-data file from the agent's owning flow data root.",
+			Description:     "Read only exact static bytes or pinned resource rows admitted for this actor and run.",
 			GeneratedSchema: true,
-			InputSchema: ObjectSchema(map[string]any{
-				"filename": map[string]any{
-					"type": "string",
-					"enum": enum,
-				},
-			}, "filename"),
-			OutputSchema: ObjectSchema(map[string]any{
-				"content":      map[string]any{"type": "string"},
-				"content_type": map[string]any{"type": "string", "enum": []any{"yaml", "json", "markdown", "text"}},
-				"size_bytes":   map[string]any{"type": "integer", "minimum": 0},
-			}, "content", "content_type", "size_bytes"),
+			InputSchema:     ObjectSchema(properties, "kind"),
 		},
 	}
 }
