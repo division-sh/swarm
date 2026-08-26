@@ -49,7 +49,7 @@ func TestDynamicFlowRuntimeReadinessProductionConsumersStatic(t *testing.T) {
 		})
 	}
 	requireStaticReadinessCalls(t, calls, "reconcileDynamicFlowRuntimeReadiness", map[string]int{
-		"flow_runtime_readiness.go": 3,
+		"flow_runtime_readiness.go": 2,
 	})
 	requireStaticReadinessCalls(t, calls, "reconcileDynamicFlowRuntimeReadinessPlan", map[string]int{
 		"flow_activation.go":        1,
@@ -57,14 +57,14 @@ func TestDynamicFlowRuntimeReadinessProductionConsumersStatic(t *testing.T) {
 	})
 	requireStaticReadinessCalls(t, calls, "dynamicFlowRuntimeReadinessSource", map[string]int{
 		"flow_activation.go":        2,
-		"flow_runtime_readiness.go": 4,
+		"flow_runtime_readiness.go": 5,
 	})
 	requireStaticReadinessCalls(t, calls, "dynamicFlowRuntimeReadinessSourceCoordinate", map[string]int{
 		"flow_activation.go":        1,
 		"flow_runtime_readiness.go": 1,
 	})
 	requireStaticReadinessCalls(t, calls, "validateDynamicFlowRuntimeReadinessCallbackSource", map[string]int{
-		"flow_runtime_readiness.go": 4,
+		"flow_runtime_readiness.go": 5,
 	})
 	requireStaticReadinessCalls(t, calls, "registerExecutableAgentLifecycle", map[string]int{
 		"agent_manager.go": 2,

@@ -2292,6 +2292,14 @@ func runServeUnavailableBundleStartupRecovery(
 }
 
 func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundleContext, manager *runtime.RuntimeContextManager) error {
+	for _, contextDef := range contexts {
+		if contextDef.runtime == nil {
+			continue
+		}
+		if err := contextDef.runtime.PreflightDynamicTopologyStartup(ctx); err != nil {
+			return fmt.Errorf("preflight runtime dynamic topology: %w", err)
+		}
+	}
 	prepared := make([]*runtime.Runtime, 0, len(contexts))
 	for _, contextDef := range contexts {
 		if contextDef.runtime == nil {

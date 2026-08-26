@@ -671,6 +671,19 @@ func (s *flowActivationTestInstanceStore) ListDynamicFlowRuntimeReadinessKeys(co
 	return keys, nil
 }
 
+func (s *flowActivationTestInstanceStore) InspectDynamicFlowRuntimeStartupProjection(ctx context.Context, _ runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeStartupProjection, error) {
+	items, err := s.ListDynamicFlowRuntimeReadiness(ctx)
+	projection := runtimepipeline.DynamicFlowRuntimeStartupProjection{}
+	for _, item := range items {
+		if item.Pending() {
+			projection.Pending = append(projection.Pending, item)
+		} else {
+			projection.Completed = append(projection.Completed, item)
+		}
+	}
+	return projection, err
+}
+
 func (s *flowActivationTestInstanceStore) MarkDynamicFlowRuntimeTopologyReady(
 	_ context.Context,
 	expected runtimepipeline.DynamicFlowRuntimeReadinessPlan,
@@ -2598,8 +2611,7 @@ func TestDynamicFlowRuntimeReadinessCoalescesConcurrentAttemptsByRunAndInstance(
 		followerErrs <- am.reconcilePendingDynamicFlowRuntimeReadiness(pendingCtx)
 	}()
 	go func() {
-		_, err := am.HydrateForStartup(startupCtx)
-		followerErrs <- err
+		followerErrs <- am.ReconcileDynamicFlowRuntimeStartupProjection(startupCtx, authorActivityTestBundleSourceFact)
 	}()
 	cancelEnsure()
 	cancelPending()
@@ -2744,7 +2756,7 @@ func TestRecoverableStateSnapshotIncludesReadinessOnlyPendingWork(t *testing.T) 
 	}
 }
 
-func TestHydrateForStartupFinalizesIncompleteDynamicFlowRuntimeReadiness(t *testing.T) {
+func TestSourceScopedStartupFinalizesIncompleteDynamicFlowRuntimeReadiness(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{failAgentID: "writer"}
 	firstBus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
@@ -2769,8 +2781,8 @@ func TestHydrateForStartupFinalizesIncompleteDynamicFlowRuntimeReadiness(t *test
 	restartBus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
 	restarted := newFlowActivationManager(t, restartBus, instances, agents)
 	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
-	if _, err := restarted.HydrateForStartup(ctx); err != nil {
-		t.Fatalf("HydrateForStartup: %v", err)
+	if err := restarted.ReconcileDynamicFlowRuntimeStartupProjection(ctx, authorActivityTestBundleSourceFact); err != nil {
+		t.Fatalf("ReconcileDynamicFlowRuntimeStartupProjection: %v", err)
 	}
 	if _, ok := testAgentConfig(t, restarted, "reviewer", "review/inst-1"); !ok {
 		t.Fatal("restarted manager did not restore first declared agent")
@@ -2784,8 +2796,8 @@ func TestHydrateForStartupFinalizesIncompleteDynamicFlowRuntimeReadiness(t *test
 	if len(restartBus.published) != 1 {
 		t.Fatalf("startup creation event count = %d, want one", len(restartBus.published))
 	}
-	if _, err := restarted.HydrateForStartup(ctx); err != nil {
-		t.Fatalf("second HydrateForStartup: %v", err)
+	if err := restarted.ReconcileDynamicFlowRuntimeStartupProjection(ctx, authorActivityTestBundleSourceFact); err != nil {
+		t.Fatalf("second ReconcileDynamicFlowRuntimeStartupProjection: %v", err)
 	}
 	if len(restartBus.published) != 1 {
 		t.Fatalf("creation events after repeated startup recovery = %d, want one", len(restartBus.published))
@@ -2822,7 +2834,7 @@ func TestMockOnlyPostureRejectsLiveDynamicReadinessBeforeTopologyMutation(t *tes
 	}
 }
 
-func TestHydrateForStartupRetiresTerminalDynamicFlowProcessTopology(t *testing.T) {
+func TestSourceScopedStartupExcludesTerminalDynamicFlowTopology(t *testing.T) {
 	bundle := testFlowBundle(t, "")
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 	bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
@@ -2877,15 +2889,10 @@ func TestHydrateForStartupRetiresTerminalDynamicFlowProcessTopology(t *testing.T
 		req.Instance.InstancePath: "active",
 	}}
 	bus := &flowActivationTestBus{routeStore: routeStore}
-	if err := bus.PublishPersistedFlowInstanceRoute(runtimebus.FlowInstanceRouteMaterializationRequest{
-		Identity: req.Instance.Route(),
-	}); err != nil {
-		t.Fatalf("seed process route: %v", err)
-	}
 	am := newFlowActivationManager(t, bus, instances, agents)
 	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
-	if _, err := am.HydrateForStartup(testAuthorActivityContext(context.Background())); err != nil {
-		t.Fatalf("HydrateForStartup: %v", err)
+	if err := am.ReconstructDynamicFlowRuntimeStartupTopology(testAuthorActivityContext(context.Background()), authorActivityTestBundleSourceFact); err != nil {
+		t.Fatalf("ReconstructDynamicFlowRuntimeStartupTopology: %v", err)
 	}
 	if _, ok := testAgentConfig(t, am, "reviewer", "review/inst-1"); ok {
 		t.Fatal("terminal readiness retained a process agent")

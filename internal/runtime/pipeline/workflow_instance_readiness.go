@@ -104,6 +104,11 @@ type DynamicFlowRuntimeReadinessKey struct {
 	InstancePath string
 }
 
+type DynamicFlowRuntimeStartupProjection struct {
+	Completed []DynamicFlowRuntimeReadiness
+	Pending   []DynamicFlowRuntimeReadiness
+}
+
 // DynamicFlowRuntimeReadinessPersistence owns the complete selected-store
 // readiness projection. Runtime consumers receive only typed records and
 // named mutations; transaction and query authority remain private.
@@ -111,7 +116,7 @@ type DynamicFlowRuntimeReadinessPersistence interface {
 	ReconcileDynamicFlowRuntimeReadinessPlan(context.Context, DynamicFlowRuntimeReadinessPlan, time.Time) (bool, error)
 	LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (DynamicFlowRuntimeReadiness, bool, error)
 	ListDynamicFlowRuntimeReadiness(context.Context) ([]DynamicFlowRuntimeReadiness, error)
-	ListDynamicFlowRuntimeReadinessKeys(context.Context) ([]DynamicFlowRuntimeReadinessKey, error)
+	InspectDynamicFlowRuntimeStartupProjection(context.Context, runtimecorrelation.BundleSourceFact) (DynamicFlowRuntimeStartupProjection, error)
 	MarkDynamicFlowRuntimeTopologyReady(context.Context, DynamicFlowRuntimeReadinessPlan, time.Time) error
 }
 

@@ -419,6 +419,23 @@ func (rt *Runtime) PrepareStartupLifecycle(ctx context.Context) error {
 	return nil
 }
 
+// PreflightDynamicTopologyStartup observes only the current bundle source. It
+// is safe to run across every serve context before any startup mutation.
+func (rt *Runtime) PreflightDynamicTopologyStartup(ctx context.Context) error {
+	if rt == nil || rt.Manager == nil {
+		return nil
+	}
+	projection, err := rt.Manager.InspectDynamicFlowRuntimeStartupProjection(ctx, rt.Options.BundleSourceFact)
+	if err != nil {
+		return fmt.Errorf("inspect source-scoped dynamic topology startup: %w", err)
+	}
+	replayAllowed := rt.Config != nil && rt.Config.Runtime.RecoveryOnStartup && !rt.Options.DisablePersistentStartupRecovery
+	if len(projection.Pending) > 0 && !replayAllowed {
+		return fmt.Errorf("dynamic topology startup requires recovery for %d incomplete source-owned instance(s)", len(projection.Pending))
+	}
+	return nil
+}
+
 // PreparedStaticSourceSetGenerationRefresh reserves one runtime generation and
 // all of its static lifecycle cells before process composition mutates the
 // complete source set. Commit and Abort both settle every held lock exactly
@@ -1395,6 +1412,10 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	if rt == nil {
 		return fmt.Errorf("runtime is nil")
 	}
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, rt.Options.BundleSourceFact)
+	if err := rt.PreflightDynamicTopologyStartup(ctx); err != nil {
+		return err
+	}
 	if err := rt.PrepareAuthorActivityCatalog(); err != nil {
 		return err
 	}
@@ -1698,6 +1719,21 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	}
 	rt.emitBootProgress(15, "mcp_tool_validation", "ok", fmt.Sprintf("%d capability surfaces settled", len(surfaceIDs)))
 	if rt.Manager != nil {
+		if rt.Config.Runtime.RecoveryOnStartup && !skipPersistentStartupRecovery {
+			if err := rt.Manager.ReconcileDynamicFlowRuntimeStartupProjection(ctx, rt.Options.BundleSourceFact); err != nil {
+				if runtimemanager.IsDynamicFlowRuntimeReadinessFinalizationError(err) {
+					return fmt.Errorf("finalize dynamic flow runtime readiness during startup: %w", err)
+				}
+				return fmt.Errorf("reconcile source-scoped dynamic topology before startup: %w", err)
+			}
+		}
+		projection, err := rt.Manager.InspectDynamicFlowRuntimeStartupProjection(ctx, rt.Options.BundleSourceFact)
+		if err != nil {
+			return fmt.Errorf("revalidate source-scoped dynamic topology before startup: %w", err)
+		}
+		if len(projection.Pending) != 0 {
+			return fmt.Errorf("dynamic topology startup remains incomplete for %d source-owned instance(s)", len(projection.Pending))
+		}
 		activation, activateErr := rt.admitManagedExecution(startCtx, settledAuthority, rt.Config.Runtime.RecoveryOnStartup && !skipPersistentStartupRecovery)
 		if activateErr != nil {
 			if activation.ReplayErr != nil {
@@ -1726,6 +1762,10 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		if err := rt.Manager.Run(startCtx); err != nil {
 			rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", err.Error())
 			return fmt.Errorf("start managed execution loops: %w", err)
+		}
+		if err := rt.Manager.ReconstructDynamicFlowRuntimeStartupTopology(startCtx, rt.Options.BundleSourceFact); err != nil {
+			rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", err.Error())
+			return fmt.Errorf("reconstruct source-scoped dynamic topology: %w", err)
 		}
 		if rt.deliveryContinuations != nil {
 			if err := rt.deliveryContinuations.Synchronize(startCtx); err != nil {

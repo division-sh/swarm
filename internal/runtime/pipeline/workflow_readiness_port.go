@@ -6,6 +6,7 @@ import (
 	"time"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 )
 
 func (s *workflowInstanceStore) ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error) {
@@ -29,11 +30,11 @@ func (s *workflowInstanceStore) ListDynamicFlowRuntimeReadiness(ctx context.Cont
 	return s.readiness.ListDynamicFlowRuntimeReadiness(ctx)
 }
 
-func (s *workflowInstanceStore) ListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]DynamicFlowRuntimeReadinessKey, error) {
+func (s *workflowInstanceStore) InspectDynamicFlowRuntimeStartupProjection(ctx context.Context, source runtimecorrelation.BundleSourceFact) (DynamicFlowRuntimeStartupProjection, error) {
 	if s == nil || s.readiness == nil {
-		return nil, fmt.Errorf("dynamic flow runtime readiness owner is required")
+		return DynamicFlowRuntimeStartupProjection{}, fmt.Errorf("dynamic flow runtime readiness persistence is required")
 	}
-	return s.readiness.ListDynamicFlowRuntimeReadinessKeys(ctx)
+	return s.readiness.InspectDynamicFlowRuntimeStartupProjection(ctx, source)
 }
 
 func (s *workflowInstanceStore) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error {

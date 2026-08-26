@@ -19,7 +19,6 @@ import (
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
-	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -1028,12 +1027,6 @@ func (am *AgentManager) HydrateForStartup(ctx context.Context) (StartupReplaySum
 	if !hydrated {
 		return summary, errors.New("static declaration reconciliation must hydrate agents before startup recovery")
 	}
-	if err := am.reconcileDynamicFlowRuntimeReadinessForStartup(ctx); err != nil {
-		return summary, &dynamicFlowRuntimeReadinessFinalizationError{cause: err}
-	}
-	if err := am.restoreFlowInstanceRoutes(ctx); err != nil {
-		return summary, err
-	}
 	if err := am.restoreSelectedContractRouteRecoveries(ctx); err != nil {
 		return summary, err
 	}
@@ -1170,69 +1163,6 @@ func (am *AgentManager) RecoverableStateSnapshot(ctx context.Context) (Recoverab
 	}
 	snapshot.ReplayEligibleEventPresent = presence.Any()
 	return snapshot, nil
-}
-
-func (am *AgentManager) restoreFlowInstanceRoutes(ctx context.Context) error {
-	if am == nil || am.bus == nil {
-		return nil
-	}
-	restorer := am.roles.RouteRestorer
-	if restorer == nil {
-		return nil
-	}
-	routeStore := am.roles.FlowRoutes
-	if routeStore == nil {
-		return nil
-	}
-	routes, err := routeStore.ListFlowInstanceRoutes(ctx)
-	if err != nil {
-		return fmt.Errorf("list persisted flow instance routes: %w", err)
-	}
-	readinessPaths := map[string]struct{}{}
-	if am.workflowInstances != nil {
-		keys, err := am.workflowInstances.ListDynamicFlowRuntimeReadinessKeys(ctx)
-		if err != nil {
-			return fmt.Errorf("list dynamic flow runtime readiness route owners: %w", err)
-		}
-		for _, key := range keys {
-			readinessPaths[strings.Trim(strings.TrimSpace(key.InstancePath), "/")] = struct{}{}
-		}
-	}
-	for _, route := range routes {
-		if _, owned := readinessPaths[strings.Trim(strings.TrimSpace(route.InstancePath), "/")]; owned {
-			continue
-		}
-		req, err := am.restoredFlowInstanceRouteMaterializationRequest(ctx, route)
-		if err != nil {
-			return err
-		}
-		if err := restorer.PublishPersistedFlowInstanceRoute(req); err != nil {
-			return fmt.Errorf("restore flow instance route %s/%s: %w", route.ScopeKey, route.InstanceID, err)
-		}
-	}
-	return nil
-}
-
-func (am *AgentManager) restoredFlowInstanceRouteMaterializationRequest(ctx context.Context, route runtimeflowidentity.Route) (runtimebus.FlowInstanceRouteMaterializationRequest, error) {
-	route = runtimeflowidentity.StoredRoute(route.ScopeKey, route.InstanceID, route.InstancePath)
-	if !route.Valid() {
-		return runtimebus.FlowInstanceRouteMaterializationRequest{}, fmt.Errorf("flow-instance route identity is required")
-	}
-	if am.workflowInstances == nil {
-		return runtimebus.FlowInstanceRouteMaterializationRequest{}, fmt.Errorf("workflow instance store is required to restore flow instance route %s", route.InstancePath)
-	}
-	projection, err := am.workflowInstances.LoadRouteRecoveryProjection(ctx, route)
-	if err != nil {
-		return runtimebus.FlowInstanceRouteMaterializationRequest{}, fmt.Errorf("load flow instance route recovery projection %s: %w", route.InstancePath, err)
-	}
-	vars := flowActivationVars(runtimepipeline.FlowInstanceActivationRequest{
-		Instance: projection.Identity,
-		Config:   projection.Config,
-	})
-	return runtimebus.FlowInstanceRouteMaterializationRequest{
-		Identity:            route,
-		ActivationVariables: vars,
-	}, nil
 }
 
 func (am *AgentManager) readinessReconciliationLoop(ctx context.Context) {

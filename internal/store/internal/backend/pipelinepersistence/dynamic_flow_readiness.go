@@ -9,6 +9,7 @@ import (
 
 	runtimecanonicaljson "github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/google/uuid"
@@ -18,6 +19,120 @@ func (s *PipelinePostgresOwner) ReconcileDynamicFlowRuntimeReadinessPlan(ctx con
 	return reconcileDynamicFlowRuntimeReadinessPlan(ctx, true, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 		return s.runPrivateAuthorActivityMutation(ctx, newRevisionEffects(), fn)
 	}, expected, observedAt)
+}
+
+func (s *PipelinePostgresOwner) InspectDynamicFlowRuntimeStartupProjection(ctx context.Context, source runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeStartupProjection, error) {
+	if s == nil || s.backend == nil {
+		return runtimepipeline.DynamicFlowRuntimeStartupProjection{}, fmt.Errorf("postgres dynamic flow startup projection reader is required")
+	}
+	return inspectDynamicFlowRuntimeStartupProjection(ctx, s.backend, true, source)
+}
+
+func (s *PipelineSQLiteOwner) InspectDynamicFlowRuntimeStartupProjection(ctx context.Context, source runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeStartupProjection, error) {
+	if s == nil || s.backend == nil {
+		return runtimepipeline.DynamicFlowRuntimeStartupProjection{}, fmt.Errorf("sqlite dynamic flow startup projection reader is required")
+	}
+	return inspectDynamicFlowRuntimeStartupProjection(ctx, s.backend, false, source)
+}
+
+func inspectDynamicFlowRuntimeStartupProjection(ctx context.Context, db dynamicFlowReadinessQueryer, postgres bool, source runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeStartupProjection, error) {
+	if err := source.Validate(); err != nil {
+		return runtimepipeline.DynamicFlowRuntimeStartupProjection{}, fmt.Errorf("dynamic flow startup projection source: %w", err)
+	}
+	bundleHash, bundleSource := source.StorageValues()
+	query := `
+		SELECT readiness.run_id::text, readiness.instance_id, readiness.plan,
+		       readiness.topology_ready_at, readiness.creation_event_emitted_at,
+		       run.status, instance.status, instance.terminated_at
+		FROM flow_instance_runtime_readiness AS readiness
+		JOIN flow_instances AS instance ON instance.instance_id = readiness.instance_id
+		JOIN runs AS run ON run.run_id = readiness.run_id
+		WHERE LOWER(BTRIM(instance.status)) = 'active' AND instance.terminated_at IS NULL
+		  AND LOWER(BTRIM(run.status)) IN ('running', 'paused')
+		  AND run.bundle_hash = $1 AND run.bundle_source = $2
+		ORDER BY readiness.run_id, readiness.instance_id`
+	if !postgres {
+		query = `
+			SELECT readiness.run_id, readiness.instance_id, readiness.plan,
+			       readiness.topology_ready_at, readiness.creation_event_emitted_at,
+			       run.status, instance.status, instance.terminated_at
+			FROM flow_instance_runtime_readiness AS readiness
+			JOIN flow_instances AS instance ON instance.instance_id = readiness.instance_id
+			JOIN runs AS run ON run.run_id = readiness.run_id
+			WHERE LOWER(TRIM(instance.status)) = 'active' AND instance.terminated_at IS NULL
+			  AND LOWER(TRIM(run.status)) IN ('running', 'paused')
+			  AND run.bundle_hash = ? AND run.bundle_source = ?
+			ORDER BY readiness.run_id, readiness.instance_id`
+	}
+	rows, err := db.QueryContext(ctx, query, bundleHash, bundleSource)
+	if err != nil {
+		return runtimepipeline.DynamicFlowRuntimeStartupProjection{}, fmt.Errorf("inspect source-scoped dynamic flow readiness: %w", err)
+	}
+	projection := runtimepipeline.DynamicFlowRuntimeStartupProjection{}
+	if err := func() error {
+		defer rows.Close()
+		for rows.Next() {
+			var record runtimepipeline.DynamicFlowRuntimeReadinessPersistenceRecord
+			var topologyReadyAt, creationEventEmittedAt, instanceTerminatedAt any
+			if err := rows.Scan(&record.RunID, &record.InstancePath, &record.Plan, &topologyReadyAt, &creationEventEmittedAt, &record.RunStatus, &record.InstanceStatus, &instanceTerminatedAt); err != nil {
+				return err
+			}
+			if record.TopologyReadyAt, record.HasTopologyReadyAt, err = sqliteTimeValue(topologyReadyAt); err != nil {
+				return err
+			}
+			if record.CreationEventEmittedAt, record.HasCreationEventEmittedAt, err = sqliteTimeValue(creationEventEmittedAt); err != nil {
+				return err
+			}
+			if record.InstanceTerminatedAt, record.HasInstanceTerminatedAt, err = sqliteTimeValue(instanceTerminatedAt); err != nil {
+				return err
+			}
+			item, err := runtimepipeline.DecodeDynamicFlowRuntimeReadinessPersistenceRecord(record)
+			if err != nil {
+				return err
+			}
+			plan, err := item.Plan.Normalized()
+			if err != nil {
+				return err
+			}
+			if plan.BundleHash != bundleHash || plan.BundleSource != bundleSource {
+				return fmt.Errorf("dynamic flow readiness %s plan source does not match owning run", item.InstancePath)
+			}
+			if item.Pending() {
+				projection.Pending = append(projection.Pending, item)
+			} else {
+				projection.Completed = append(projection.Completed, item)
+			}
+		}
+		return rows.Err()
+	}(); err != nil {
+		return projection, err
+	}
+
+	invalidQuery := `
+		SELECT route.flow_instance
+		FROM routing_rules AS route
+		JOIN flow_instances AS instance ON instance.instance_id = route.flow_instance
+		JOIN entity_state AS entity ON entity.flow_instance = instance.instance_id
+		JOIN runs AS run ON run.run_id = entity.run_id
+		LEFT JOIN flow_instance_runtime_readiness AS readiness ON readiness.run_id = run.run_id AND readiness.instance_id = instance.instance_id
+		WHERE LOWER(BTRIM(route.status)) = 'active' AND route.is_materialized = TRUE
+		  AND LOWER(BTRIM(instance.status)) = 'active' AND instance.terminated_at IS NULL
+		  AND LOWER(BTRIM(run.status)) IN ('running', 'paused')
+		  AND run.bundle_hash = $1 AND run.bundle_source = $2 AND readiness.run_id IS NULL
+		LIMIT 1`
+	if !postgres {
+		invalidQuery = strings.ReplaceAll(strings.ReplaceAll(invalidQuery, "$1", "?"), "$2", "?")
+		invalidQuery = strings.ReplaceAll(invalidQuery, "BTRIM", "TRIM")
+	}
+	var invalidPath string
+	err = db.QueryRowContext(ctx, invalidQuery, bundleHash, bundleSource).Scan(&invalidPath)
+	if err == nil {
+		return projection, fmt.Errorf("source-owned active flow route %s has no dynamic runtime readiness owner", strings.TrimSpace(invalidPath))
+	}
+	if err != sql.ErrNoRows {
+		return projection, fmt.Errorf("inspect source-scoped route ownership: %w", err)
+	}
+	return projection, nil
 }
 
 func (s *PipelineSQLiteOwner) ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, expected runtimepipeline.DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error) {
@@ -242,43 +357,6 @@ func listDynamicFlowRuntimeReadiness(ctx context.Context, db dynamicFlowReadines
 			return nil, err
 		}
 		result = append(result, item)
-	}
-	return result, rows.Err()
-}
-
-func (s *PipelinePostgresOwner) ListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadinessKey, error) {
-	if s == nil || s.backend == nil {
-		return nil, fmt.Errorf("postgres dynamic flow readiness reader is required")
-	}
-	return listDynamicFlowRuntimeReadinessKeys(ctx, s.backend, true)
-}
-
-func (s *PipelineSQLiteOwner) ListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadinessKey, error) {
-	if s == nil || s.backend == nil {
-		return nil, fmt.Errorf("sqlite dynamic flow readiness reader is required")
-	}
-	return listDynamicFlowRuntimeReadinessKeys(ctx, s.backend, false)
-}
-
-func listDynamicFlowRuntimeReadinessKeys(ctx context.Context, db dynamicFlowReadinessQueryer, postgres bool) ([]runtimepipeline.DynamicFlowRuntimeReadinessKey, error) {
-	query := `SELECT run_id::text, instance_id FROM flow_instance_runtime_readiness ORDER BY run_id, instance_id`
-	if !postgres {
-		query = `SELECT run_id, instance_id FROM flow_instance_runtime_readiness ORDER BY run_id, instance_id`
-	}
-	rows, err := db.QueryContext(ctx, query)
-	if err != nil {
-		return nil, fmt.Errorf("list dynamic flow runtime readiness keys: %w", err)
-	}
-	defer rows.Close()
-	result := make([]runtimepipeline.DynamicFlowRuntimeReadinessKey, 0)
-	for rows.Next() {
-		var key runtimepipeline.DynamicFlowRuntimeReadinessKey
-		if err := rows.Scan(&key.RunID, &key.InstancePath); err != nil {
-			return nil, err
-		}
-		key.RunID = strings.TrimSpace(key.RunID)
-		key.InstancePath = strings.Trim(strings.TrimSpace(key.InstancePath), "/")
-		result = append(result, key)
 	}
 	return result, rows.Err()
 }

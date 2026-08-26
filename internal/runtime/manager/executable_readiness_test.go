@@ -381,7 +381,7 @@ func TestDynamicReadinessRejectsRegisteredStoppedAsProcessReady(t *testing.T) {
 	}
 }
 
-func TestDynamicReadinessRestoresPersistedAgentsIntoLiveManagerOccurrence(t *testing.T) {
+func TestSourceScopedCompletedTopologyReconstructsIntoLiveManagerOccurrence(t *testing.T) {
 	instances := &flowActivationTestInstanceStore{}
 	agents := &flowActivationTestStore{}
 	firstBus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
@@ -404,10 +404,15 @@ func TestDynamicReadinessRestoresPersistedAgentsIntoLiveManagerOccurrence(t *tes
 		cancelRun()
 		_ = restarted.ShutdownWithOptions(ShutdownOptions{Grace: time.Second})
 	})
-	if created, err := restarted.EnsureFlowInstance(ctx, req); err != nil {
-		t.Fatalf("EnsureFlowInstance: %v", err)
-	} else if created {
-		t.Fatal("EnsureFlowInstance reported a new instance")
+	armedBefore := len(instances.armedEntries)
+	if err := restarted.ReconstructDynamicFlowRuntimeStartupTopology(ctx, authorActivityTestBundleSourceFact); err != nil {
+		t.Fatalf("ReconstructDynamicFlowRuntimeStartupTopology: %v", err)
+	}
+	if !restartBus.HasFlowInstanceRoute(req.Instance.Route()) {
+		t.Fatal("completed topology did not publish its persisted process route")
+	}
+	if len(instances.armedEntries) != armedBefore || len(restartBus.published) != 0 {
+		t.Fatalf("topology-only reconstruction replayed durable work: timers=%d/%d events=%d", len(instances.armedEntries), armedBefore, len(restartBus.published))
 	}
 	for _, agentID := range []string{"reviewer", "writer"} {
 		cfg, ok := testAgentConfig(t, restarted, agentID, req.Instance.InstancePath)

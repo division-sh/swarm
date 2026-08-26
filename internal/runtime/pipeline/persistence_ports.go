@@ -227,8 +227,8 @@ func (pc *PipelineCoordinator) ListDynamicFlowRuntimeReadiness(ctx context.Conte
 	return pc.workflowStore.ListDynamicFlowRuntimeReadiness(ctx)
 }
 
-func (pc *PipelineCoordinator) ListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]DynamicFlowRuntimeReadinessKey, error) {
-	return pc.workflowStore.ListDynamicFlowRuntimeReadinessKeys(ctx)
+func (pc *PipelineCoordinator) InspectDynamicFlowRuntimeStartupProjection(ctx context.Context, source runtimecorrelation.BundleSourceFact) (DynamicFlowRuntimeStartupProjection, error) {
+	return pc.workflowStore.InspectDynamicFlowRuntimeStartupProjection(ctx, source)
 }
 
 func (pc *PipelineCoordinator) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error {
