@@ -5,8 +5,29 @@ import "testing"
 // WriteNovelDerivedScenarioBundle creates the closed, scenario-free bundle
 // used to prove that derivation does not depend on a checked-in archetype.
 func WriteNovelDerivedScenarioBundle(t testing.TB) string {
+	return writeNovelDerivedScenarioBundle(t, false)
+}
+
+// WriteNovelDerivedScenarioBundleWithRootInput adds the same canonical event
+// as a supported root input for connected run-start proofs.
+func WriteNovelDerivedScenarioBundleWithRootInput(t testing.TB) string {
+	return writeNovelDerivedScenarioBundle(t, true)
+}
+
+func writeNovelDerivedScenarioBundle(t testing.TB, rootInput bool) string {
 	t.Helper()
 	root := t.TempDir()
+	rootSchema := "\nname: derived-novel-flow\n"
+	if rootInput {
+		rootSchema = `
+name: derived-novel-flow
+pins:
+  inputs:
+    events:
+      - {name: request, event: fulfillment.requested, source: external}
+  outputs: {events: []}
+`
+	}
 	files := map[string]string{
 		"package.yaml": `
 name: derived-novel-flow
@@ -15,9 +36,7 @@ platform_version: ">=0.7.0 <0.8.0"
 flows:
   - {id: fulfillment, flow: fulfillment, mode: static}
 `,
-		"schema.yaml": `
-name: derived-novel-flow
-`,
+		"schema.yaml":   rootSchema,
 		"events.yaml":   "{}\n",
 		"nodes.yaml":    "{}\n",
 		"entities.yaml": "{}\n",

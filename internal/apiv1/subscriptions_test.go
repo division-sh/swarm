@@ -13,8 +13,10 @@ import (
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/gorilla/websocket"
 )
@@ -82,6 +84,94 @@ func TestHandlerWebSocketHealthSubscribeAndUnsubscribe(t *testing.T) {
 	unsubscribe := readWSResponse(t, conn)
 	if unsubscribe.Error != nil || asMap(t, unsubscribe.Result)["ok"] != true {
 		t.Fatalf("rpc.unsubscribe response = %#v", unsubscribe)
+	}
+}
+
+func TestRuntimeIdentityAndHealthReadCurrentPublicationPerObservation(t *testing.T) {
+	const (
+		predecessorHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+		successorHash   = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	)
+	publicationSnapshot := func(bundleHash string) runtime.RuntimeContextPublicationSnapshot {
+		t.Helper()
+		fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
+		if err != nil {
+			t.Fatalf("construct source fact: %v", err)
+		}
+		return runtime.RuntimeContextPublicationSnapshot{
+			PrimaryBundle: runtimecontracts.BundleIdentity{
+				WorkflowName: "review", WorkflowVersion: "1.2.3", BundleHash: bundleHash,
+			},
+			BundleSourceFacts: []runtimecorrelation.BundleSourceFact{fact},
+		}
+	}
+	publication := &mutableTestRuntimePublicationReader{}
+	publication.set(publicationSnapshot(predecessorHash), nil)
+	capabilities := testOperatorCapabilities{
+		ExecutionPosture:   executionposture.MockOnly,
+		Ready:              func() bool { return true },
+		Database:           fakePinger{},
+		RuntimePublication: publication,
+		RuntimeIdentity: RuntimeIdentityResult{
+			RuntimeInstanceID: "runtime-instance", StartedAt: time.Now().UTC().Format(time.RFC3339Nano),
+			APIVersion: "v1", SupportedTransports: []string{"tcp"},
+		},
+	}
+	handler := testHandler(t, Options{
+		AuthTokens:    []string{testToken},
+		Handlers:      testOperatorHandlers(capabilities),
+		Subscriptions: testOperatorSubscriptions(capabilities, SubscriptionRuntimeOptions{HealthInterval: 10 * time.Millisecond}),
+	})
+
+	assertReadbacks := func(wantHash string) {
+		t.Helper()
+		health := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"health","method":"health.check","params":{}}`)
+		if health.Error != nil {
+			t.Fatalf("health.check error = %#v", health.Error)
+		}
+		if got := asMap(t, asMap(t, health.Result)["bundle"])["bundle_hash"]; got != wantHash {
+			t.Fatalf("health bundle_hash = %#v, want %s", got, wantHash)
+		}
+		identity := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"identity","method":"runtime.identity","params":{}}`)
+		if identity.Error != nil {
+			t.Fatalf("runtime.identity error = %#v", identity.Error)
+		}
+		sources := asMap(t, identity.Result)["bundle_sources"].([]any)
+		if len(sources) != 1 || asMap(t, sources[0])["bundle_hash"] != wantHash {
+			t.Fatalf("runtime.identity sources = %#v, want %s", sources, wantHash)
+		}
+	}
+	assertReadbacks(predecessorHash)
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	conn := dialTestWS(t, server.URL)
+	defer conn.Close()
+	writeWSRequest(t, conn, map[string]any{"jsonrpc": "2.0", "id": "sub", "method": "health.subscribe", "params": map[string]any{}})
+	subscribe := readWSResponse(t, conn)
+	if subscribe.Error != nil {
+		t.Fatalf("health.subscribe error = %#v", subscribe.Error)
+	}
+	first := readWSNotification(t, conn)
+	if got := asMap(t, asMap(t, first.Params.Result)["bundle"])["bundle_hash"]; got != predecessorHash {
+		t.Fatalf("initial subscription bundle_hash = %#v, want %s", got, predecessorHash)
+	}
+
+	publication.set(publicationSnapshot(successorHash), nil)
+	second := readWSNotification(t, conn)
+	if got := asMap(t, asMap(t, second.Params.Result)["bundle"])["bundle_hash"]; got != successorHash {
+		t.Fatalf("replacement subscription bundle_hash = %#v, want %s", got, successorHash)
+	}
+	assertReadbacks(successorHash)
+
+	publication.set(runtime.RuntimeContextPublicationSnapshot{}, errors.New("replacement unavailable"))
+	health := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"unavailable-health","method":"health.check","params":{}}`)
+	if health.Error != nil || asMap(t, health.Result)["runtime_ok"] != false {
+		t.Fatalf("unavailable health = %#v", health)
+	}
+	identity := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"unavailable-identity","method":"runtime.identity","params":{}}`)
+	if identity.Error == nil {
+		t.Fatalf("unavailable runtime.identity result = %#v, want fail-closed error", identity.Result)
 	}
 }
 

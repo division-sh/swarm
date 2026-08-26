@@ -6265,7 +6265,11 @@ engine:
     replacement_and_readback: >
       Project replacement fully validates the candidate against the predecessor's exact process posture before quiescence,
       startup, standing activation, or context publication. A candidate cannot change posture. health.check and health
-      subscription readback always expose execution_posture from the same immutable runtime fact.
+      subscription readback always expose execution_posture from the same immutable runtime fact. RuntimeContextManager also
+      publishes one atomic current-publication snapshot containing every selectable BundleSourceFact and the semantic primary
+      bundle identity. runtime.identity, health.check, and every health subscription observation consume that snapshot at
+      observation time. Changed-hash publication moves the primary slot to the successor; rollback restores it to the
+      predecessor; replacement downtime and primary unload/delete expose no stale or lexical-hash fallback identity.
     no_legacy_rule: >
       Old configs without runtime.execution_posture and old selected stores containing live work selected under mock_only are
       unsupported. No default, migration, fallback reader, store-wide posture marker, live-to-mock rewrite, warning-only

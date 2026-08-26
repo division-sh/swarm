@@ -39,6 +39,10 @@ type StandingServiceController interface {
 	ResetStandingService(context.Context, runtimepipeline.StandingServiceOperation) (runtimepipeline.StandingServiceReconciliation, error)
 }
 
+type RuntimePublicationReader interface {
+	CurrentPublication() (runtime.RuntimeContextPublicationSnapshot, error)
+}
+
 // Each handler family receives only the capabilities needed to execute its
 // declared methods. Runtime selection remains explicit on the families that
 // can target a loaded bundle context.
@@ -47,11 +51,12 @@ type HealthHandlerOptions struct {
 	Now              func() time.Time
 	Ready            func() bool
 	Database         Pinger
-	Bundle           runtimecontracts.BundleIdentity
+	Publication      RuntimePublicationReader
 }
 
 type RuntimeIdentityHandlerOptions struct {
-	Identity RuntimeIdentityResult
+	Identity    RuntimeIdentityResult
+	Publication RuntimePublicationReader
 }
 
 type RunReadHandlerOptions struct {
@@ -221,7 +226,7 @@ type SubscriptionOptions struct {
 	Observability    ObservabilityReadStore
 	DecisionCards    decisioncard.Store
 	ProposedEffects  decisioncard.ProposedEffectStore
-	Bundle           runtimecontracts.BundleIdentity
+	Publication      RuntimePublicationReader
 }
 
 func MergeOperatorHandlers(groups ...map[string]MethodHandler) map[string]MethodHandler {

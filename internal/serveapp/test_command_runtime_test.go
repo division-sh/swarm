@@ -33,6 +33,7 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/store/testsql"
+	"github.com/gorilla/websocket"
 
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 )
@@ -151,6 +152,169 @@ expect:
 				}
 			})
 		}
+	}
+}
+
+func TestChangedHashDevReplacementPublishesCurrentIdentityToSupportedClients(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	unsetStoreSelectorEnv(t)
+	stubServeRuntimeWorkspaceLifecycle(t)
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("TELEGRAM_BOT_TOKEN", "")
+	t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
+	contractsPath := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
+	testsDir := filepath.Join(contractsPath, "tests")
+	if err := os.MkdirAll(testsDir, 0o755); err != nil {
+		t.Fatalf("create authored scenario directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(testsDir, "authored.yaml"), []byte(`
+name: replacement source posture
+steps:
+  - publish: fulfillment.requested
+    payload: {order_id: authored-replacement}
+expect:
+  events:
+    include: [fulfillment.requested]
+  no_dead_letters: true
+`), 0o644); err != nil {
+		t.Fatalf("write authored scenario: %v", err)
+	}
+	configPath := writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "replacement-readback.sqlite"))
+	reloaderReady := make(chan func(context.Context) error, 1)
+	managerReady := make(chan *runtimepkg.RuntimeContextManager, 1)
+	process := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
+		ConfigPath: configPath, ContractsPath: contractsPath,
+		PlatformSpecPath: filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath),
+		APIListenAddr:    "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
+		Dev: true, NoFeed: true, SelfCheck: true, RequireBundleMatch: false, NoRequireBundleMatch: true,
+		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+		TestRuntimeProjectReloadHook: func(reload func(context.Context) error) {
+			reloaderReady <- reload
+		},
+		TestRuntimeContextsReadyHook: func(manager *runtimepkg.RuntimeContextManager) {
+			managerReady <- manager
+		},
+	})
+	process.waitForReadyLine()
+	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString())
+	rpcEndpoint := endpoint + "/v1/rpc"
+
+	var predecessorIdentity apiv1.RuntimeIdentityResult
+	requireServedJSONRPCResult(t, rpcEndpoint, "runtime.identity", map[string]any{}, &predecessorIdentity)
+	if len(predecessorIdentity.BundleSources) != 1 {
+		t.Fatalf("predecessor runtime identity = %#v, want one source", predecessorIdentity)
+	}
+	predecessorHash := predecessorIdentity.BundleSources[0].BundleHash
+
+	packagePath := filepath.Join(contractsPath, "package.yaml")
+	packageBody, err := os.ReadFile(packagePath)
+	if err != nil {
+		t.Fatalf("read package manifest: %v", err)
+	}
+	replaced := strings.Replace(string(packageBody), `version: "1.0.0"`, `version: "1.0.1"`, 1)
+	if replaced == string(packageBody) {
+		t.Fatalf("package manifest did not contain replacement version:\n%s", packageBody)
+	}
+	if err := os.WriteFile(packagePath, []byte(replaced), 0o644); err != nil {
+		t.Fatalf("write changed-hash package manifest: %v", err)
+	}
+	reload := <-reloaderReady
+	reloadCtx, cancelReload := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelReload()
+	if err := reload(reloadCtx); err != nil {
+		t.Fatalf("reload changed-hash development runtime: %v\nserve output:\n%s", err, process.outputString())
+	}
+	manager := <-managerReady
+	publication, err := manager.CurrentPublication()
+	if err != nil {
+		t.Fatalf("current replacement publication: %v", err)
+	}
+	successorHash := publication.PrimaryBundle.BundleHash
+	if successorHash == "" || successorHash == predecessorHash {
+		t.Fatalf("replacement primary hash = %q, want changed from %q", successorHash, predecessorHash)
+	}
+
+	var successorIdentity apiv1.RuntimeIdentityResult
+	requireServedJSONRPCResult(t, rpcEndpoint, "runtime.identity", map[string]any{}, &successorIdentity)
+	if len(successorIdentity.BundleSources) != 1 || successorIdentity.BundleSources[0].BundleHash != successorHash || successorIdentity.BundleSources[0].BundleSource != "ephemeral" {
+		t.Fatalf("successor runtime identity = %#v, want current ephemeral %s", successorIdentity, successorHash)
+	}
+	var health struct {
+		Bundle runtimecontracts.BundleIdentity `json:"bundle"`
+	}
+	requireServedJSONRPCResult(t, rpcEndpoint, "health.check", map[string]any{}, &health)
+	if health.Bundle.BundleHash != successorHash {
+		t.Fatalf("health bundle = %#v, want successor %s", health.Bundle, successorHash)
+	}
+	requireServedHealthSubscriptionBundle(t, endpoint, successorHash)
+
+	for _, args := range [][]string{
+		{"test", "--contracts", contractsPath, "--timeout", "5s", "--poll-interval", "10ms"},
+		{"test", "--contracts", contractsPath, "--derive", "fulfillment", "--input", "request", "--timeout", "5s", "--poll-interval", "10ms"},
+	} {
+		var stdout, stderr bytes.Buffer
+		commandArgs := append(append([]string(nil), args...), "--api-server", endpoint, "--config", configPath)
+		if code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), commandArgs, &stdout, &stderr, nil); code != 0 {
+			t.Fatalf("replacement command %v code=%d stdout=%s stderr=%s", args, code, stdout.String(), stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "swarm test ok: scenarios=1") {
+			t.Fatalf("replacement command %v output missing success: %s", args, stdout.String())
+		}
+	}
+
+	payloadPath := filepath.Join(t.TempDir(), "run-payload.json")
+	if err := os.WriteFile(payloadPath, []byte(`{"order_id":"connected-replacement"}`), 0o600); err != nil {
+		t.Fatalf("write connected run payload: %v", err)
+	}
+	t.Setenv("SWARM_CONFIG", configPath)
+	var runStdout, runStderr bytes.Buffer
+	if code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
+		"run", "start", "--connect", endpoint, "--event", "fulfillment.requested", "--payload", payloadPath, "--no-follow",
+	}, &runStdout, &runStderr, nil); code != 0 {
+		t.Fatalf("connected replacement run code=%d stdout=%s stderr=%s", code, runStdout.String(), runStderr.String())
+	}
+	if !strings.Contains(runStdout.String(), "run started:") || strings.Contains(runStderr.String(), "BUNDLE_UNAVAILABLE") {
+		t.Fatalf("connected replacement run did not use successor health identity: stdout=%s stderr=%s", runStdout.String(), runStderr.String())
+	}
+}
+
+func requireServedHealthSubscriptionBundle(t *testing.T, endpoint, wantHash string) {
+	t.Helper()
+	wsURL := "ws" + strings.TrimPrefix(endpoint, "http") + "/v1/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, http.Header{"Authorization": []string{"Bearer " + apiv1.DefaultLoopbackAPIToken}})
+	if err != nil {
+		t.Fatalf("dial health subscription: %v", err)
+	}
+	defer conn.Close()
+	if err := conn.WriteJSON(map[string]any{"jsonrpc": "2.0", "id": "health-replacement", "method": "health.subscribe", "params": map[string]any{}}); err != nil {
+		t.Fatalf("write health subscription: %v", err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	var response struct {
+		Result struct {
+			SubscriptionID string `json:"subscription_id"`
+		} `json:"result"`
+		Error *servedJSONRPCError `json:"error"`
+	}
+	if err := conn.ReadJSON(&response); err != nil {
+		t.Fatalf("read health subscription response: %v", err)
+	}
+	if response.Error != nil || response.Result.SubscriptionID == "" {
+		t.Fatalf("health subscription response = %#v", response)
+	}
+	var notification struct {
+		Params struct {
+			Result struct {
+				Bundle runtimecontracts.BundleIdentity `json:"bundle"`
+			} `json:"result"`
+		} `json:"params"`
+	}
+	if err := conn.ReadJSON(&notification); err != nil {
+		t.Fatalf("read health subscription notification: %v", err)
+	}
+	if notification.Params.Result.Bundle.BundleHash != wantHash {
+		t.Fatalf("health subscription bundle = %#v, want %s", notification.Params.Result.Bundle, wantHash)
 	}
 }
 
