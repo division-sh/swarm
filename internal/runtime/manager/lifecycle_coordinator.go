@@ -114,6 +114,113 @@ type agentExecutionSnapshot struct {
 	StandingOwner *worklifetime.StandingOccurrence
 }
 
+type executableAgentReadinessKind string
+
+const (
+	executableAgentPreparedBeforeRun         executableAgentReadinessKind = "prepared_before_run"
+	executableAgentRunnableCurrentOccurrence executableAgentReadinessKind = "runnable_current_occurrence"
+)
+
+type executableAgentReadiness struct {
+	Kind  executableAgentReadinessKind
+	State AgentLifecycleState
+}
+
+func (c *agentLifecycleCoordinator) executableReadinessByIdentity(identity runtimeagentidentity.Identity) (executableAgentReadiness, error) {
+	if c == nil {
+		return executableAgentReadiness{}, errors.New("agent lifecycle coordinator is required")
+	}
+	identity = identity.Normalize()
+	if err := identity.Validate(); err != nil {
+		return executableAgentReadiness{}, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cell := c.cells[identity]
+	if cell == nil || cell.execution == nil || cell.execution.agent == nil {
+		return executableAgentReadiness{}, fmt.Errorf("agent %s has no executable lifecycle projection", identity.Description())
+	}
+	state := lifecycleStateFromCell(cell)
+	switch c.phase {
+	case runtimeLifecycleStopped:
+		if !executionPreparedBeforeRunLocked(cell) {
+			return executableAgentReadiness{}, executableReadinessError(identity, c.phase, state, "projection is not exactly registered/stopped preparation")
+		}
+		return executableAgentReadiness{Kind: executableAgentPreparedBeforeRun, State: state}, nil
+	case runtimeLifecycleRunning:
+		if !c.executionRunnableCurrentOccurrenceLocked(cell) {
+			return executableAgentReadiness{}, executableReadinessError(identity, c.phase, state, "projection is not reachable in the current manager occurrence")
+		}
+		return executableAgentReadiness{Kind: executableAgentRunnableCurrentOccurrence, State: state}, nil
+	default:
+		return executableAgentReadiness{}, executableReadinessError(identity, c.phase, state, "manager lifecycle does not admit executable readiness")
+	}
+}
+
+func lifecycleStateFromCell(cell *agentLifecycleCell) AgentLifecycleState {
+	if cell == nil {
+		return AgentLifecycleState{}
+	}
+	return AgentLifecycleState{
+		Identity: cell.identity, AgentID: cell.identity.AgentID(), RuntimeEpoch: cell.epoch,
+		Generation: cell.generation, Phase: cell.phase, ConfigRevision: cell.configRevision,
+		RunMode: cell.runMode, Topology: cell.topology, ProcessBinding: cell.processBinding,
+	}
+}
+
+func executionPreparedBeforeRunLocked(cell *agentLifecycleCell) bool {
+	if cell == nil || cell.execution == nil {
+		return false
+	}
+	execution := cell.execution
+	token := lifecycleToken(cell.identity, cell.epoch, cell.generation)
+	return cell.phase == AgentLifecycleRegistered && cell.runMode == AgentRunModeStopped &&
+		execution.agent != nil && execution.token == token && !execution.fenced &&
+		execution.generationCtx != nil && execution.generationCtx.Err() == nil &&
+		execution.loopCancel == nil && execution.loopDone == nil && execution.loopSettled == nil &&
+		execution.stopAfterAccepted == nil && execution.route == nil && !execution.routeToken.Valid()
+}
+
+func (c *agentLifecycleCoordinator) executionRunnableCurrentOccurrenceLocked(cell *agentLifecycleCell) bool {
+	if c == nil || cell == nil || cell.execution == nil || c.phase != runtimeLifecycleRunning ||
+		c.runCtx == nil || c.runCtx.Err() != nil {
+		return false
+	}
+	execution := cell.execution
+	token := lifecycleToken(cell.identity, cell.epoch, cell.generation)
+	return cell.phase == AgentLifecycleRunning && cell.runMode == c.runMode &&
+		execution.agent != nil && execution.token == token && execution.routeToken == token &&
+		!execution.fenced && execution.generationCtx != nil && execution.generationCtx.Err() == nil &&
+		execution.loopDone != nil && signalPending(execution.loopDone) &&
+		execution.loopSettled != nil && signalPending(execution.loopSettled) &&
+		execution.stopAfterAccepted != nil && execution.route != nil
+}
+
+func signalPending(signal <-chan struct{}) bool {
+	if signal == nil {
+		return false
+	}
+	select {
+	case <-signal:
+		return false
+	default:
+		return true
+	}
+}
+
+func executableReadinessError(identity runtimeagentidentity.Identity, managerPhase runtimeLifecyclePhase, state AgentLifecycleState, reason string) error {
+	return runtimefailures.New(
+		runtimefailures.ClassLifecycleConflict,
+		"agent_execution_not_ready",
+		"agent-lifecycle",
+		"verify_executable_readiness",
+		map[string]any{
+			"agent": identity.Description(), "manager_phase": string(managerPhase),
+			"lifecycle_phase": string(state.Phase), "run_mode": string(state.RunMode), "reason": reason,
+		},
+	)
+}
+
 func (c *agentLifecycleCoordinator) stateByIdentity(identity runtimeagentidentity.Identity) (AgentLifecycleState, bool) {
 	if c == nil {
 		return AgentLifecycleState{}, false
@@ -125,11 +232,7 @@ func (c *agentLifecycleCoordinator) stateByIdentity(identity runtimeagentidentit
 	if cell == nil {
 		return AgentLifecycleState{}, false
 	}
-	return AgentLifecycleState{
-		Identity: identity, AgentID: identity.AgentID(), RuntimeEpoch: cell.epoch,
-		Generation: cell.generation, Phase: cell.phase, ConfigRevision: cell.configRevision,
-		RunMode: cell.runMode, Topology: cell.topology, ProcessBinding: cell.processBinding,
-	}, true
+	return lifecycleStateFromCell(cell), true
 }
 
 type agentExecutionLease struct {
@@ -494,16 +597,6 @@ func lifecycleMutationExecutionAuthority(store AgentLifecyclePersistence, previo
 	return "process_takeover", target, nil
 }
 
-func (c *agentLifecycleCoordinator) register(ctx context.Context, rec PersistedAgent, persist bool) error {
-	admission, err := semanticview.AdmitFlowOwnedAgentSubscriptions(nil, semanticview.FlowOwnedAgentSubscriptionRequest{
-		AgentID: rec.Config.ID, FlowID: rec.Config.FlowID, FlowPath: rec.Config.CanonicalFlowPath(), Subscriptions: rec.Config.Subscriptions,
-	})
-	if err != nil {
-		return err
-	}
-	return c.registerExecution(ctx, rec, persist, nil, admission)
-}
-
 func (c *agentLifecycleCoordinator) registerExecution(ctx context.Context, rec PersistedAgent, persist bool, agent Agent, admission semanticview.FlowOwnedAgentSubscriptionAdmission) error {
 	return c.registerExecutionWithTopology(ctx, rec, persist, agent, admission, rec.Topology)
 }
@@ -537,6 +630,9 @@ func (c *agentLifecycleCoordinator) registerExecutionWithTopology(
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.phase == runtimeLifecycleShuttingDown || c.phase == runtimeLifecycleResetting {
+		return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "lifecycle_transition_conflict", "agent-lifecycle", "register_execution", map[string]any{"agent_id": agentID})
+	}
 	existingCell := c.cells[identity]
 	if existingCell != nil && existingCell.phase != AgentLifecycleTerminated {
 		return fmt.Errorf("%w: %s", ErrAgentAlreadyExists, agentID)

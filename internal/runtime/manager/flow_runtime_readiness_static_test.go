@@ -66,6 +66,20 @@ func TestDynamicFlowRuntimeReadinessProductionConsumersStatic(t *testing.T) {
 	requireStaticReadinessCalls(t, calls, "validateDynamicFlowRuntimeReadinessCallbackSource", map[string]int{
 		"flow_runtime_readiness.go": 4,
 	})
+	requireStaticReadinessCalls(t, calls, "registerExecutableAgentLifecycle", map[string]int{
+		"agent_manager.go": 2,
+	})
+	requireStaticReadinessCalls(t, calls, "ensureExecutableAgentLifecycle", map[string]int{
+		"agent_manager.go":          1,
+		"flow_runtime_readiness.go": 2,
+	})
+	requireStaticReadinessCalls(t, calls, "registerExecutionWithTopology", map[string]int{
+		"agent_manager.go":         1,
+		"lifecycle_coordinator.go": 1,
+	})
+	requireStaticReadinessCalls(t, calls, "registerExecution", map[string]int{
+		"agent_manager.go": 1,
+	})
 	for _, ownerCall := range []string{
 		"LoadDynamicFlowRuntimeReadiness",
 		"MarkDynamicFlowRuntimeTopologyReady",
