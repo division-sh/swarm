@@ -22,7 +22,7 @@ type DurableDataStore interface {
 	ExecuteDataSourceOperation(context.Context, durabledata.SourceCommand) (durabledata.SourceOperationResult, error)
 	PruneDataResource(context.Context, durabledata.PruneCommand) (durabledata.PruneOperationResult, error)
 	ShowDataResource(context.Context, string, durabledata.DeclarationRef) (durabledata.ResourceSnapshot, error)
-	ListDataDeclarations(context.Context, string) ([]durabledata.Declaration, error)
+	ListDataDeclarationSummaries(context.Context, string) ([]durabledata.DeclarationSummary, error)
 	LoadDataSourceOperation(context.Context, string) (durabledata.SourceOperationRecord, error)
 	LoadDataPruneOperation(context.Context, string) (durabledata.PruneOperationResult, error)
 	LoadDataPruneOperationPins(context.Context, string) ([]durabledata.Pin, error)
@@ -146,29 +146,9 @@ func executeDataShow(ctx context.Context, req Request, store DurableDataStore) (
 		if err != nil {
 			return nil, err
 		}
-		declarations, err := store.ListDataDeclarations(ctx, bundleHash)
+		items, err := store.ListDataDeclarationSummaries(ctx, bundleHash)
 		if err != nil {
 			return nil, dataApplicationError(err)
-		}
-		items := make([]durabledata.DeclarationSummary, 0, len(declarations))
-		for _, declaration := range declarations {
-			snapshot, err := store.ShowDataResource(ctx, bundleHash, declaration.Ref)
-			if err != nil {
-				return nil, dataApplicationError(err)
-			}
-			var materialized int
-			var materializedBytes int
-			for _, version := range snapshot.Versions {
-				if version.PrunedAt == nil {
-					materialized++
-					materializedBytes += len(version.CanonicalJSONL)
-				}
-			}
-			items = append(items, durabledata.DeclarationSummary{
-				Declaration: declaration.Ref, LocalName: declaration.Name, SchemaDigest: declaration.SchemaDigest,
-				Head: snapshot.Head.Before, VersionCount: len(snapshot.Versions),
-				MaterializedVersionCount: materialized, MaterializedBytes: materializedBytes,
-			})
 		}
 		return pageDataItems(items, page, dataCursorFingerprint(view, bundleHash))
 	case "versions", "version", "rows", "row", "export_chunk", "provenance", "pins", "head_history":

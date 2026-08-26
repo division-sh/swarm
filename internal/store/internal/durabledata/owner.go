@@ -688,37 +688,75 @@ func (o *Owner) Show(ctx context.Context, bundleHash string, ref runtimedata.Dec
 	return snapshot, err
 }
 
-func (o *Owner) ListDeclarations(ctx context.Context, bundleHash string) ([]runtimedata.Declaration, error) {
+func (o *Owner) ListDeclarationSummaries(ctx context.Context, bundleHash string) ([]runtimedata.DeclarationSummary, error) {
 	if err := o.requireCurrent(); err != nil {
 		return nil, err
 	}
 	if err := runtimebundleidentity.ValidateCanonicalHash(bundleHash); err != nil {
 		return nil, err
 	}
-	var declarations []runtimedata.Declaration
+	var summaries []runtimedata.DeclarationSummary
 	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		rows, err := tx.QueryContext(txctx, o.query(`
-			SELECT package_key, event_name, display_name, owner_flow_id, COALESCE(business_key_field, ''), schema_digest, canonical_schema_bytes
-			FROM resource_bundle_declarations WHERE bundle_hash = %s ORDER BY package_key, event_name
+			SELECT d.package_key, d.event_name, d.display_name, d.schema_digest, d.canonical_schema_bytes,
+			       h.version_id, h.revision,
+			       (SELECT COUNT(*) FROM resource_versions v
+			        WHERE v.package_key = d.package_key AND v.event_name = d.event_name),
+			       (SELECT COUNT(*) FROM resource_versions v
+			        WHERE v.package_key = d.package_key AND v.event_name = d.event_name AND v.pruned_at IS NULL),
+			       (SELECT COALESCE(SUM(LENGTH(v.canonical_jsonl)), 0) FROM resource_versions v
+			        WHERE v.package_key = d.package_key AND v.event_name = d.event_name AND v.pruned_at IS NULL),
+			       (SELECT COUNT(*) FROM resource_versions v
+			        WHERE v.package_key = d.package_key AND v.event_name = d.event_name AND v.version_id = h.version_id)
+			FROM resource_bundle_declarations d
+			LEFT JOIN resource_heads h ON h.package_key = d.package_key AND h.event_name = d.event_name
+			WHERE d.bundle_hash = %s ORDER BY d.package_key, d.event_name
 		`, 1), bundleHash)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var declaration runtimedata.Declaration
-			if err := rows.Scan(&declaration.Ref.PackageKey, &declaration.Ref.EventName, &declaration.Name, &declaration.OwnerFlowID,
-				&declaration.BusinessKey, &declaration.SchemaDigest, &declaration.CanonicalSchema); err != nil {
+			var summary runtimedata.DeclarationSummary
+			var canonicalSchema []byte
+			var headVersion sql.NullString
+			var revision sql.NullInt64
+			var versionCount, materializedCount, materializedBytes, headMatchCount int64
+			if err := rows.Scan(&summary.Declaration.PackageKey, &summary.Declaration.EventName, &summary.LocalName,
+				&summary.SchemaDigest, &canonicalSchema, &headVersion, &revision, &versionCount,
+				&materializedCount, &materializedBytes, &headMatchCount); err != nil {
 				return err
 			}
-			if err := declaration.Ref.Validate(); err != nil || runtimedata.SchemaDigestFor(declaration.CanonicalSchema) != declaration.SchemaDigest {
+			if runtimedata.SchemaDigestFor(canonicalSchema) != summary.SchemaDigest || !revision.Valid || revision.Int64 < 0 {
 				return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "bundle %s data declaration aggregate is contradictory", bundleHash)
 			}
-			declarations = append(declarations, declaration)
+			if versionCount < 0 || materializedCount < 0 || materializedBytes < 0 || headMatchCount < 0 ||
+				versionCount > int64(^uint(0)>>1) || materializedCount > int64(^uint(0)>>1) || materializedBytes > int64(^uint(0)>>1) {
+				return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "bundle %s data declaration summary exceeds supported bounds", bundleHash)
+			}
+			summary.Head = runtimedata.AbsentHead()
+			if headVersion.Valid {
+				if revision.Int64 == 0 {
+					return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "bundle %s version data declaration head has zero revision", bundleHash)
+				}
+				summary.Head = runtimedata.VersionHead(runtimedata.VersionID(headVersion.String))
+				if headMatchCount != 1 {
+					return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "bundle %s data declaration head is outside its version inventory", bundleHash)
+				}
+			} else if headMatchCount != 0 || revision.Int64 != 0 {
+				return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "bundle %s absent data declaration head has mutation evidence", bundleHash)
+			}
+			summary.VersionCount = int(versionCount)
+			summary.MaterializedVersionCount = int(materializedCount)
+			summary.MaterializedBytes = int(materializedBytes)
+			if err := summary.Validate(); err != nil {
+				return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "bundle %s data declaration summary is contradictory: %v", bundleHash, err)
+			}
+			summaries = append(summaries, summary)
 		}
 		return rows.Err()
 	})
-	return declarations, err
+	return summaries, err
 }
 
 func (o *Owner) LoadSourceOperation(ctx context.Context, id string) (runtimedata.SourceOperationRecord, error) {

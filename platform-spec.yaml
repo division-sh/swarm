@@ -13415,6 +13415,7 @@ durable_data_resources:
     candidate_projection: A validated but uncommitted semantic candidate carries state candidate, version_id, and manifest without a human alias. State version and its mandatory monotonic alias exist only after selected-store commit.
   run_pins:
     start: A run stores exactly the versions selected by its explicit imports and pins before execution. Authored event declarations and existing heads never create implicit dependencies or inject rows.
+    immutability: A data-bearing event.publish or run.start request is admitted only when authoritative selected-run resolution proves that the request creates the run. An existing run fails with RUN_DATA_IMMUTABLE before event publication, source evaluation, receipt creation, pinning, or version mutation; request-local create intent is never authority.
     fork: A fork inherits the source run's exact stored pin set and applies explicit exact-version overrides atomically with fork creation. Unselected target declarations remain unpinned; a pinned source declaration absent from or schema-incompatible with the target bundle fails before fork mutation.
     retention: Active and terminal forkable runs pin versions. There is no automatic garbage collection in v1. Live pin pagination binds the selected version and its declaration in the fixed query fingerprint, then resumes strictly after the run_id carried by the bounded opaque cursor. Concurrent pin insertion never shifts an offset because offsets are forbidden.
     rejection_evidence: Failed run creation permanently records one closed typed rejection fact. Explicit-pin failures name the exact declaration and version, schema mismatch also records both schema digests, and fused aggregate failures carry their exact class without invented target facts.
@@ -13425,6 +13426,8 @@ durable_data_resources:
   provenance:
     integrity: Every lineage row owns typed version, monotonic version-local sequence, producer kind/id, actor, and canonical UTC microsecond timestamp facts. The JSON public projection must agree exactly with those typed facts and each producer arm requires one canonical non-zero UUID.
     traversal: Provenance sequence is allocated under the selected version's store lock and is the sole strict traversal order. Public continuation is a fixed-size query-bound keyset over that sequence; offset cursors and compatibility readers are forbidden, so later equal-content producer attempts cannot shift an issued page.
+  public_readback:
+    declaration_inventory: data.show declaration listing consumes one selected-store aggregate projection of exact bundle declarations, current heads, version counts, retained-version counts, and retained payload byte totals. It never loads, recompiles, or validates every version payload or provenance row; version and row detail remain separately bounded explicit reads.
   static_data:
     identity: StaticDataRef is exact (bundle_hash, canonical_input_label); StaticDataID is its deterministic hash and content digest is a separate fact.
     validation: Bundle admission requires regular strict UTF-8 bytes. Runtime and tools consume typed access-list bytes by static_id; host paths and reverse mount parsing are forbidden.

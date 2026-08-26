@@ -30,6 +30,8 @@ type dataRuntimeProbeStore struct {
 	pruneResult durabledata.PruneOperationResult
 	prunePins   []durabledata.Pin
 	pins        []durabledata.Pin
+	summaries   []durabledata.DeclarationSummary
+	showCalls   int
 	now         time.Time
 }
 
@@ -133,6 +135,7 @@ func (s *dataRuntimeProbeStore) PruneDataResource(_ context.Context, command dur
 }
 
 func (s *dataRuntimeProbeStore) ShowDataResource(_ context.Context, _ string, ref durabledata.DeclarationRef) (durabledata.ResourceSnapshot, error) {
+	s.showCalls++
 	return durabledata.ResourceSnapshot{
 		Declaration: s.declaration,
 		Head: durabledata.HeadResult{
@@ -142,8 +145,15 @@ func (s *dataRuntimeProbeStore) ShowDataResource(_ context.Context, _ string, re
 	}, nil
 }
 
-func (s *dataRuntimeProbeStore) ListDataDeclarations(context.Context, string) ([]durabledata.Declaration, error) {
-	return []durabledata.Declaration{s.declaration}, nil
+func (s *dataRuntimeProbeStore) ListDataDeclarationSummaries(context.Context, string) ([]durabledata.DeclarationSummary, error) {
+	if s.summaries != nil {
+		return append([]durabledata.DeclarationSummary(nil), s.summaries...), nil
+	}
+	return []durabledata.DeclarationSummary{{
+		Declaration: s.declaration.Ref, LocalName: s.declaration.Name, SchemaDigest: s.declaration.SchemaDigest,
+		Head: durabledata.VersionHead(s.version.VersionID), VersionCount: 1, MaterializedVersionCount: 1,
+		MaterializedBytes: len(s.version.CanonicalJSONL),
+	}}, nil
 }
 
 func (s *dataRuntimeProbeStore) LoadDataSourceOperation(_ context.Context, id string) (durabledata.SourceOperationRecord, error) {
@@ -308,6 +318,29 @@ func TestOperatorDataHandlersRejectContradictoryStoreResults(t *testing.T) {
 				t.Fatalf("contradictory %s result error = %#v, want %s", test.method, err, durabledata.CodeIntegrity)
 			}
 		})
+	}
+}
+
+func TestDataShowDeclarationsConsumesBoundedStoreSummary(t *testing.T) {
+	store := newDataRuntimeProbeStore(t)
+	store.summaries = []durabledata.DeclarationSummary{{
+		Declaration: store.declaration.Ref, LocalName: store.declaration.Name, SchemaDigest: store.declaration.SchemaDigest,
+		Head: durabledata.VersionHead(store.version.VersionID), VersionCount: 100_000, MaterializedVersionCount: 75_000,
+		MaterializedBytes: 16 * 1024 * 1024,
+	}}
+	handler := OperatorDataHandlers(DataHandlerOptions{Store: store})["data.show"]
+	result, err := handler(context.Background(), Request{Method: "data.show", Params: map[string]any{
+		"view": "declarations", "bundle_hash": dataProbeBundleHash, "page": map[string]any{},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, ok := result.(durabledata.PageResult[durabledata.DeclarationSummary])
+	if !ok || len(page.Items) != 1 || page.Items[0] != store.summaries[0] {
+		t.Fatalf("declaration summary page = %#v", result)
+	}
+	if store.showCalls != 0 {
+		t.Fatalf("declaration listing loaded %d full resource snapshots", store.showCalls)
 	}
 }
 

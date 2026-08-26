@@ -79,12 +79,12 @@ func (s *SQLiteRuntimeStore) PruneDataResource(ctx context.Context, command runt
 	return s.durableDataOwner.Prune(ctx, command)
 }
 
-func (s *PostgresStore) ListDataDeclarations(ctx context.Context, bundleHash string) ([]runtimedata.Declaration, error) {
-	return s.durableDataOwner.ListDeclarations(ctx, bundleHash)
+func (s *PostgresStore) ListDataDeclarationSummaries(ctx context.Context, bundleHash string) ([]runtimedata.DeclarationSummary, error) {
+	return s.durableDataOwner.ListDeclarationSummaries(ctx, bundleHash)
 }
 
-func (s *SQLiteRuntimeStore) ListDataDeclarations(ctx context.Context, bundleHash string) ([]runtimedata.Declaration, error) {
-	return s.durableDataOwner.ListDeclarations(ctx, bundleHash)
+func (s *SQLiteRuntimeStore) ListDataDeclarationSummaries(ctx context.Context, bundleHash string) ([]runtimedata.DeclarationSummary, error) {
+	return s.durableDataOwner.ListDeclarationSummaries(ctx, bundleHash)
 }
 
 func (s *PostgresStore) LoadDataSourceOperation(ctx context.Context, id string) (runtimedata.SourceOperationRecord, error) {

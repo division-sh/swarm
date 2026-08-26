@@ -38,7 +38,7 @@ type dataRunLifecycleStore interface {
 	ExecuteDataSourceOperation(context.Context, durabledata.SourceCommand) (durabledata.SourceOperationResult, error)
 	PruneDataResource(context.Context, durabledata.PruneCommand) (durabledata.PruneOperationResult, error)
 	ShowDataResource(context.Context, string, durabledata.DeclarationRef) (durabledata.ResourceSnapshot, error)
-	ListDataDeclarations(context.Context, string) ([]durabledata.Declaration, error)
+	ListDataDeclarationSummaries(context.Context, string) ([]durabledata.DeclarationSummary, error)
 	LoadDataSourceOperation(context.Context, string) (durabledata.SourceOperationRecord, error)
 	LoadDataPruneOperation(context.Context, string) (durabledata.PruneOperationResult, error)
 	LoadDataPruneOperationPins(context.Context, string) ([]durabledata.Pin, error)
@@ -136,6 +136,46 @@ func TestDurableDataRunLifecycleAcrossSelectedStores(t *testing.T) {
 			receipt, err := fixture.reconstructed.LoadDataRunCreationOperation(ctx, runID)
 			if err != nil || receipt.Summary.PinCount != 0 || receipt.Summary.ImportCount != 0 || receipt.Binding.State != "none" {
 				t.Fatalf("ordinary reconstructed receipt = %#v, %v", receipt, err)
+			}
+		})
+
+		t.Run("existing run rejects data before any mutation", func(t *testing.T) {
+			for _, method := range []string{"run.start", "event.publish"} {
+				t.Run(method, func(t *testing.T) {
+					sourceID := uuid.NewString()
+					data := map[string]any{
+						"imports": []any{dataRunFusedImport(sourceID, scanRef, durabledata.AbsentHead(), []byte("{\"topic\":\"must-not-commit\"}\n"))},
+						"pins":    []any{},
+					}
+					beforeEvents := dataRunCount(t, fixture, "events", "run_id", ordinaryRunID)
+					beforeRuns := dataRunCount(t, fixture, "runs", "run_id", ordinaryRunID)
+					beforeRunReceipts := dataRunCount(t, fixture, "resource_run_creation_operations", "run_id", ordinaryRunID)
+					idempotencyKey := uuid.NewString()
+					body := dataRunStartBody(ordinaryRunID, idempotencyKey, data)
+					if method == "event.publish" {
+						body = dataRunEventPublishBody(ordinaryRunID, idempotencyKey, data)
+					}
+					response := rpcCall(t, handler, body)
+					if response.Error == nil || asMap(t, response.Error.Data)["code"] != string(durabledata.CodeRunDataImmutable) {
+						t.Fatalf("existing-run data response = %#v, want %s", response, durabledata.CodeRunDataImmutable)
+					}
+					if got := dataRunCount(t, fixture, "events", "run_id", ordinaryRunID); got != beforeEvents {
+						t.Fatalf("existing-run rejection event count = %d, want unchanged %d", got, beforeEvents)
+					}
+					if got := dataRunCount(t, fixture, "runs", "run_id", ordinaryRunID); got != beforeRuns {
+						t.Fatalf("existing-run rejection run count = %d, want unchanged %d", got, beforeRuns)
+					}
+					if got := dataRunCount(t, fixture, "resource_run_creation_operations", "run_id", ordinaryRunID); got != beforeRunReceipts {
+						t.Fatalf("existing-run rejection receipt count = %d, want unchanged %d", got, beforeRunReceipts)
+					}
+					if got := dataRunCount(t, fixture, "resource_source_invocations", "source_invocation_id", sourceID); got != 0 {
+						t.Fatalf("existing-run rejection source receipts = %d, want 0", got)
+					}
+				})
+			}
+			snapshot, err := fixture.reconstructed.ShowDataResource(ctx, runStartTestBundleHash, scanRef)
+			if err != nil || len(snapshot.Versions) != 0 || snapshot.Head.Before.State != "absent" {
+				t.Fatalf("existing-run rejection resource snapshot = %#v, %v", snapshot, err)
 			}
 		})
 
@@ -1016,6 +1056,18 @@ func dataRunEventPublishBodyForBundle(runID, idempotencyKey, bundleHash string, 
 		params["data"] = data
 	}
 	raw, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": idempotencyKey, "method": "event.publish", "params": params})
+	if err != nil {
+		panic(err)
+	}
+	return string(raw)
+}
+
+func dataRunStartBody(runID, idempotencyKey string, data map[string]any) string {
+	params := map[string]any{
+		"bundle_hash": runStartTestBundleHash, "event_name": "scan.requested", "payload": map[string]any{"topic": "trigger"},
+		"run_id": runID, "idempotency_key": idempotencyKey, "data": data,
+	}
+	raw, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": idempotencyKey, "method": "run.start", "params": params})
 	if err != nil {
 		panic(err)
 	}

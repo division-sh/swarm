@@ -2,6 +2,8 @@ package durabledata
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 )
 
@@ -15,6 +17,28 @@ type DeclarationSummary struct {
 	VersionCount             int            `json:"version_count"`
 	MaterializedVersionCount int            `json:"materialized_version_count"`
 	MaterializedBytes        int            `json:"materialized_bytes"`
+}
+
+func (s DeclarationSummary) Validate() error {
+	if err := s.Declaration.Validate(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(s.LocalName) == "" {
+		return fmt.Errorf("declaration summary requires local_name")
+	}
+	if err := s.SchemaDigest.Validate(); err != nil {
+		return err
+	}
+	if err := s.Head.Validate(); err != nil {
+		return err
+	}
+	if s.VersionCount < 0 || s.MaterializedVersionCount < 0 || s.MaterializedBytes < 0 || s.MaterializedVersionCount > s.VersionCount {
+		return fmt.Errorf("declaration summary counts are contradictory")
+	}
+	if (s.VersionCount == 0) != (s.Head.State == "absent") {
+		return fmt.Errorf("declaration summary head contradicts version inventory")
+	}
+	return nil
 }
 
 type VersionSummary struct {

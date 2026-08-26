@@ -34,6 +34,7 @@ type durableDataSelectedStore interface {
 	ExecuteDataSourceOperation(context.Context, durabledata.SourceCommand) (durabledata.SourceOperationResult, error)
 	PruneDataResource(context.Context, durabledata.PruneCommand) (durabledata.PruneOperationResult, error)
 	ShowDataResource(context.Context, string, durabledata.DeclarationRef) (durabledata.ResourceSnapshot, error)
+	ListDataDeclarationSummaries(context.Context, string) ([]durabledata.DeclarationSummary, error)
 	LoadDataSourceOperation(context.Context, string) (durabledata.SourceOperationRecord, error)
 	LoadDataPruneOperation(context.Context, string) (durabledata.PruneOperationResult, error)
 	LoadDataPruneOperationPins(context.Context, string) ([]durabledata.Pin, error)
@@ -70,6 +71,12 @@ func TestDurableDataSelectedStoreLifecycleReplayAndPrune(t *testing.T) {
 		catalog, ref := durableDataTestCatalog(t)
 		if err := registerDurableDataTestCatalog(ctx, primary, catalog); err != nil {
 			t.Fatalf("register durable data test catalog: %v", err)
+		}
+		initialSummaries, err := primary.ListDataDeclarationSummaries(ctx, testDataBundle)
+		if err != nil || len(initialSummaries) != 1 || initialSummaries[0].Declaration != ref ||
+			initialSummaries[0].Head != durabledata.AbsentHead() || initialSummaries[0].VersionCount != 0 ||
+			initialSummaries[0].MaterializedVersionCount != 0 || initialSummaries[0].MaterializedBytes != 0 {
+			t.Fatalf("initial declaration summaries = %#v, %v", initialSummaries, err)
 		}
 
 		firstID := uuid.NewString()
@@ -144,6 +151,16 @@ func TestDurableDataSelectedStoreLifecycleReplayAndPrune(t *testing.T) {
 		snapshot, err := primary.ShowDataResource(ctx, testDataBundle, ref)
 		if err != nil || len(snapshot.Versions) != 2 || snapshot.Versions[0].PrunedAt == nil || snapshot.Versions[1].PrunedAt != nil {
 			t.Fatalf("snapshot = %#v, %v", snapshot, err)
+		}
+		summaries, err := primary.ListDataDeclarationSummaries(ctx, testDataBundle)
+		if err != nil || len(summaries) != 1 {
+			t.Fatalf("declaration summaries = %#v, %v", summaries, err)
+		}
+		summary := summaries[0]
+		if summary.Declaration != ref || summary.LocalName != catalog.Declarations[0].Name || summary.SchemaDigest != catalog.Declarations[0].SchemaDigest ||
+			!summary.Head.Equal(second.Head.After) || summary.VersionCount != 2 || summary.MaterializedVersionCount != 1 ||
+			summary.MaterializedBytes != len(snapshot.Versions[1].CanonicalJSONL) {
+			t.Fatalf("bounded declaration summary = %#v", summary)
 		}
 	})
 }

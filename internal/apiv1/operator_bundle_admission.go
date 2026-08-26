@@ -31,7 +31,7 @@ func resolveEventPublicationBundleScope(
 	if err != nil {
 		return ctx, opts, params, err
 	}
-	if cfg.rootInputOnly {
+	if cfg.rootInputOnly || params.DataPresent {
 		params.NewRunCreated = !hasRunContext
 	}
 
