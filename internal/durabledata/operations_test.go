@@ -49,6 +49,68 @@ func TestDeclarationSummaryClosesHeadAndInventoryStates(t *testing.T) {
 	}
 }
 
+func TestVersionReadTypesCloseSummaryAndSelectorStates(t *testing.T) {
+	ref, err := ParseDeclarationRef(".", "records.loaded")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := map[string]any{"type": "object", "additionalProperties": true}
+	compiled, defects := CompileJSONL(ref, schema, "", []byte("{\"value\":1}\n"))
+	if len(defects) != 0 {
+		t.Fatalf("compile summary fixture: %#v", defects)
+	}
+	valid := VersionSummary{
+		Declaration: ref, VersionID: compiled.VersionID, Alias: "v1", Manifest: compiled.Manifest,
+		PayloadState: "materialized", MaterializedBytes: len(compiled.CanonicalJSONL),
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid version summary: %v", err)
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*VersionSummary)
+	}{
+		{name: "noncanonical alias", mutate: func(summary *VersionSummary) { summary.Alias = "v01" }},
+		{name: "wrong version", mutate: func(summary *VersionSummary) {
+			summary.VersionID = VersionID("resource-version-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+		}},
+		{name: "wrong declaration", mutate: func(summary *VersionSummary) { summary.Declaration.EventName = "other.loaded" }},
+		{name: "unknown payload state", mutate: func(summary *VersionSummary) { summary.PayloadState = "missing" }},
+		{name: "pruned bytes", mutate: func(summary *VersionSummary) { summary.PayloadState = "pruned" }},
+		{name: "negative bytes", mutate: func(summary *VersionSummary) { summary.MaterializedBytes = -1 }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			summary := valid
+			test.mutate(&summary)
+			if err := summary.Validate(); err == nil {
+				t.Fatal("Validate error = nil, want closed summary rejection")
+			}
+		})
+	}
+
+	for _, selector := range []VersionSelector{
+		{Kind: "head"},
+		{Kind: "version", VersionID: compiled.VersionID},
+		{Kind: "alias", SequenceAlias: 1},
+	} {
+		if err := selector.Validate(); err != nil {
+			t.Fatalf("valid selector %#v: %v", selector, err)
+		}
+	}
+	for _, selector := range []VersionSelector{
+		{},
+		{Kind: "head", VersionID: compiled.VersionID},
+		{Kind: "version"},
+		{Kind: "version", VersionID: compiled.VersionID, SequenceAlias: 1},
+		{Kind: "alias"},
+		{Kind: "alias", SequenceAlias: 1, VersionID: compiled.VersionID},
+	} {
+		if err := selector.Validate(); err == nil {
+			t.Fatalf("selector %#v unexpectedly validated", selector)
+		}
+	}
+}
+
 func TestCandidateVersionClosedStates(t *testing.T) {
 	ref, err := ParseDeclarationRef(".", "records.loaded")
 	if err != nil {
