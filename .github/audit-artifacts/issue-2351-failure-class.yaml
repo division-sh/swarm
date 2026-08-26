@@ -2,7 +2,7 @@ version: 1
 kind: pre_implementation_failure_class_artifact
 issue: 2351
 audit_base: 27e2e89322604e1c1361ca7edbb2aafb4500cf6e
-phase: pre_implementation_gate_cycle_8_repair
+phase: pre_implementation_gate_cycle_9_repair
 implementation_frozen: true
 supersedes:
   adoption_only_audit: https://github.com/division-sh/swarm/issues/2351#issuecomment-5426766949
@@ -15,6 +15,8 @@ supersedes:
   cycle_6_audit: https://github.com/division-sh/swarm/issues/2351#issuecomment-5430853655
   cycle_6_gate: https://github.com/division-sh/swarm/issues/2351#issuecomment-5430956275
   cycle_7_gate: https://github.com/division-sh/swarm/issues/2351#issuecomment-5431216042
+  cycle_8_audit: https://github.com/division-sh/swarm/issues/2351#issuecomment-5432040977
+  cycle_8_gate: https://github.com/division-sh/swarm/issues/2351#issuecomment-5432176053
 binding_context:
   issue: https://github.com/division-sh/swarm/issues/2351
   implementation_discovery: https://github.com/division-sh/swarm/issues/2351#issuecomment-5428191484
@@ -23,6 +25,7 @@ binding_context:
   source_transition_insufficient_gate: https://github.com/division-sh/swarm/issues/2351#issuecomment-5430579890
   exact_observation_insufficient_gate: https://github.com/division-sh/swarm/issues/2351#issuecomment-5430956275
   cycle_7_approval: https://github.com/division-sh/swarm/issues/2351#issuecomment-5431216042
+  cycle_8_insufficient_gate: https://github.com/division-sh/swarm/issues/2351#issuecomment-5432176053
   architecture_parent: 2250
   blocked_supported_surface: 2008
   separate_delivery_class: 2339
@@ -34,6 +37,8 @@ binding_context:
     - platform-spec.yaml#runtime.agent_lifecycle_authority.process_execution_projection
     - platform-spec.yaml#runtime.agent_lifecycle_authority.prepared_execution_publication
     - platform-spec.yaml#runtime.startup_progress.steps.manager_recovery_if_enabled
+    - platform-spec.yaml#runtime.startup_progress.steps.schedule_restoration
+    - platform-spec.yaml#runtime.startup_progress.steps.pipeline_maintenance
     - platform-spec.yaml#runtime.startup_progress.steps.manager_event_loop_start
     - platform-spec.yaml#multi_bundle_persistence.persistence_model.serve_db_loaded_runtime_source
   guidelines:
@@ -53,35 +58,38 @@ class_model:
     - predecessor_readiness_completion_posture_preservation
     - exact_source_scoped_readiness_observation_for_startup_retry_and_recovery_diagnostics
     - exact_run_and_source_scoped_readiness_observation_for_live_source_revision
-    - observed_state_guarded_readiness_plan_replacement
+    - selected_store_atomic_batch_observed_state_guarded_readiness_plan_replacement
     - generation_owned_signal_and_periodic_retry_reachability
-    - all_source_transition_plans_canonicalized_before_aggregate_topology_finalization
-    - completed_process_topology_before_pipeline_and_delivery_recovery_execution
+    - all_source_transition_plans_committed_or_rolled_back_as_one_set
+    - all_authorized_pending_process_topology_prepared_before_any_finalizer_publication
+    - completed_process_topology_latch_before_every_autonomous_startup_work_producer
     - managed_execution_authority_admission_separated_from_recovery_execution
     - optional_interrupted_execution_and_effect_replay
     - startup_refusal_for_incomplete_dynamic_readiness_without_replay_authority
     - current_manager_occurrence_agent_and_route_runnability
     - multi_context_startup_isolation_and_all_or_nothing_admission
-  working_failure_class: source_and_run_scoped_dynamic_readiness_observation_canonicalization_process_reconstruction_and_recovery_execution_ordering
+  working_failure_class: source_and_run_scoped_dynamic_readiness_batch_canonicalization_topology_latching_and_autonomous_startup_producer_ordering
   immediate_parent_failure_class: startup_topology_reconstruction_and_execution_replay_policy_coupling
   parent_failure_class: multi_phase_runtime_startup_readiness_and_lifecycle_ownership
   architecture_parent_issue: 2250
-  broader_failure_class: context_bound_readiness_consumers_share_global_observation_and_unguarded_desired_state_replacement_while_managed_execution_admission_executes_recovery_before_topology
-  framing: broad_enough_after_gate_cycle_8_recovery_order_and_multi_item_transition_absorption
+  broader_failure_class: context_bound_readiness_consumers_share_global_observation_and_non_atomic_desired_state_replacement_while_startup_releases_autonomous_work_before_executable_topology
+  framing: broad_enough_after_gate_cycle_9_complete_producer_census_and_atomic_transition_set_absorption
   prior_framing: too_narrow_and_superseded
   entry_point_not_boundary: >-
     The skip at Runtime.Start and registered/stopped adoption are entry points. The
     audit boundary includes every startup consumer in HydrateForStartup, every
     current-format route/readiness producer, automatic retry, live source revision,
-    recovery diagnostics, observed-state replacement, execution admission, both Manager run
-    modes, process route publication, continuation synchronization, public readiness,
+    recovery diagnostics, observed-state batch replacement, execution admission, both Manager run
+    modes, process route publication, pending finalization, run-lifecycle execution,
+    maintenance, schedule and timer restoration, pipeline recovery, continuation synchronization,
+    outbox, listeners, ingress, public readiness,
     refusal, compensation, restart postures, single- and multi-context serving,
     exact source isolation, and both stores.
   intended_closure_level: chosen_working_failure_class_eliminated
   chosen_class_closure_commitment: true
   closure_feasible_in_one_pr: true
   local_adoption_only_fix_would_leave_same_concept_interpreter_live: true
-  corrected_class_complete_fix_leaves_same_concept_interpreter_live: false_after_global_list_port_deletion_observed_state_guarded_replacement_all_plan_canonicalization_and_topology_before_replay
+  corrected_class_complete_fix_leaves_same_concept_interpreter_live: false_after_global_list_port_deletion_atomic_batch_guarded_replacement_complete_process_topology_latch_and_post_latch_producer_release
 
 governing_policy:
   current_source_completed_active_readiness: >-
@@ -91,8 +99,9 @@ governing_policy:
     Refuse startup before public readiness without mutating readiness, agents, routes,
     timers, creation events, effects, drains, receipts, or deliveries.
   current_source_ordinary_pending_recovery_enabled: >-
-    The existing keyed readiness reconciler may complete it under existing recovery
-    authority before mandatory process reconstruction proves the completed result.
+    Existing recovery authority admits it into the keyed readiness owner. Its process
+    topology is prepared with the complete authorized set; only after every receiver
+    is verified may keyed finalization arm timers, publish creation, and complete it.
   source_transition_required: >-
     A SQL-selected owning run matches the requested current BundleSourceFact while an
     otherwise valid exact run/instance readiness plan carries a predecessor source.
@@ -100,9 +109,10 @@ governing_policy:
   predecessor_completed_source_transition: >-
     Mandatory desired-source canonicalization runs before Manager.Run regardless of
     recovery policy. The current semantic source derives the exact current plan and
-    the existing ReconcileDynamicFlowRuntimeReadinessPlan writer owns the guarded
+    the selected-store batch readiness writer owns the guarded all-or-none
     replacement; the predecessor plan supplies no agent, route, version, or creation
-    authority.
+    authority. The completed predecessor posture authorizes only this startup attempt's
+    exact post-batch pending item to proceed to process preparation and finalization.
   predecessor_pending_source_transition: >-
     Preserve its incomplete posture. Recovery-disabled startup refuses before any
     readiness mutation. Recovery-enabled startup may canonicalize and resume it
@@ -136,10 +146,10 @@ governing_policy:
       - rows_owned_by_another_bundle_source
     freshness: >-
       Observation-only all-context preflight is repeated for the current source
-      before Manager.Run. Source-transition rows are canonicalized only by guarded
-      exact-item writes, then the projection is reloaded and must contain no source
-      transition before Manager.Run. It is reloaded again after Manager.Run; an
-      earlier snapshot never becomes process-topology authority.
+      before Manager.Run. Source-transition rows are canonicalized only by one guarded
+      exact-source batch write, then the projection is reloaded and must contain no
+      source transition before Manager.Run. It is reloaded again after Manager.Run;
+      an earlier snapshot never becomes process-topology authority.
   exact_run_readiness_projection:
     operation: InspectDynamicFlowRuntimeReadinessForRun
     input:
@@ -155,10 +165,10 @@ governing_policy:
       - live_EnsureStandingTargets_source_revision
       - exact_item_current_source_plan_derivation
   observed_state_guarded_plan_replacement:
-    operation: ReconcileDynamicFlowRuntimeReadinessPlan
+    operation: ReconcileDynamicFlowRuntimeReadinessPlans
     request:
-      - exact_observed_readiness_record
-      - desired_current_source_plan
+      - exact_nonempty_set_of_observed_readiness_records_for_one_source
+      - exact_desired_current_source_plan_for_each_observation
       - exact_observed_at
     observed_coordinate:
       - normalized_plan_json
@@ -168,48 +178,90 @@ governing_policy:
       - run_status_and_eligibility
       - instance_status_terminated_at_and_eligibility
     transaction_rule: >-
-      The existing selected-store writer locks the exact run/instance row and joins
-      its owning run and instance. Before writing, it compares every observed
-      coordinate above against current state. Any mismatch returns a typed stale
-      observation conflict with zero mutation. Unchanged and replaced are distinct
-      successful results. A reload after replacement is a fence, not a substitute
-      for the locked comparison.
+      The selected-store owner rejects duplicate identities and mixed requested
+      sources, derives and validates the complete desired set before opening the
+      transaction, and locks every exact run/instance row in deterministic identity
+      order. It reloads and compares every observed coordinate above for every item
+      before issuing the first update. Any stale item or validation error returns a
+      typed conflict with zero mutation. Every changed row is then updated in that one
+      selected-store transaction; any write failure rolls the complete set back.
+      Unchanged and replaced are distinct per-item successful results. A reload after
+      commit is a fence, not a substitute for the locked comparisons.
     consumers:
-      - live_source_revision
-      - predecessor_completed_source_transition
-      - recovery_authorized_predecessor_pending_source_transition
-  exact_item_source_transition_owner: >-
+      - live_source_revision_as_batch_of_one_or_more_for_the_exact_run
+      - predecessor_completed_source_transition_set
+      - recovery_authorized_predecessor_pending_source_transition_set
+  exact_source_transition_batch_owner: >-
     Extract current-source plan derivation from
-    ReconcileDynamicFlowRuntimeReadinessPlansForRun and feed only source-transition
-    observations returned by the scoped projection to the existing selected-store
-    ReconcileDynamicFlowRuntimeReadinessPlan writer. Live source revision receives
-    its observations from the exact run-and-source SQL projection. Never call or
-    post-filter an unscoped readiness list. Existing emitted-creation immutability and exact
-    identity/execution-mode checks remain fail closed.
+    ReconcileDynamicFlowRuntimeReadinessPlansForRun and feed the complete authorized
+    source-transition set returned by the scoped projection to the selected-store
+    ReconcileDynamicFlowRuntimeReadinessPlans operation once. Live source revision
+    receives observations from the exact run-and-source SQL projection and delegates
+    to the same plural owner; a one-item request is a batch of one, not a retained
+    singular writer. Never call or post-filter an unscoped readiness list. Existing
+    emitted-creation immutability and exact identity/execution-mode checks remain fail
+    closed.
   source_transition_desired_topology_work: >-
-    Canonicalizing an authorized source transition includes the existing keyed
-    reconciler's exact current desired topology work for that item, including agent,
-    route, timer, and still-unemitted creation obligations. This is not permission to
-    replay unrelated interrupted work. Predecessor-completed authorizes that bounded
-    desired-source convergence; predecessor-pending requires recovery authority.
+    Batch canonicalization changes only durable readiness plans and clears completion
+    for changed plans. It does not install process topology, arm timers, emit creation
+    events, or replay unrelated interrupted work. Predecessor-completed authorizes
+    bounded desired-source process preparation and finalization in the same startup
+    attempt; predecessor-pending requires recovery authority. After a committed batch
+    followed by process failure, the rows are ordinary current-source pending and no
+    later startup may infer predecessor-completed authorization.
   source_transition_set_ordering: >-
-    Startup MUST derive and guarded-replace every authorized source-transition plan
-    for the exact source before invoking keyed finalization for any item. A per-item
-    replace-then-finalize loop is forbidden because aggregate route/descriptor
-    consumers would observe sibling predecessor plans and either reject a legitimate
-    revision or publish a mixed-source topology. After all replacements, one fresh
-    exact-source projection MUST contain no source-transition row before current
-    pending finalization begins.
+    Startup MUST derive and validate every authorized source-transition plan for the
+    exact source before one selected-store batch compare-and-replace. A per-item
+    transaction or replace-then-finalize loop is forbidden because failure can leave
+    durable mixed predecessor/current plans and aggregate route/descriptor consumers
+    can observe sibling predecessor plans. After commit, one fresh exact-source
+    projection MUST contain no source-transition row before any process preparation.
+    A crash or failure after batch commit but before finalization leaves every changed
+    row current-source pending; recovery-disabled restart refuses and recovery-enabled
+    restart resumes through the ordinary pending owner.
+  pending_process_preparation_and_finalization: >-
+    The existing keyed readiness owner is separated into two bounded operations, not
+    two semantic owners. Its process-only preparation phase reconciles exact agents,
+    current generation routes, and flow routes for every authorized current pending
+    row without arming timers, marking readiness complete, or publishing creation
+    events. Every current-completed row is reconstructed through the same lifecycle
+    and route owners. Only after all completed and authorized pending process topology
+    is prepared and verified may keyed finalization arm exact timers, mark readiness,
+    and publish any still-unemitted deterministic creation event. This prevents one
+    pending finalizer from publishing against a sibling receiver that has not yet
+    been reconstructed.
+  completed_process_topology_latch: >-
+    Runtime.Start proves, from a fresh exact-source projection, that no transition or
+    authorized pending row remains and that every eligible completed row has its exact
+    current-occurrence agent loop, generation route, and flow route. This is an
+    in-memory phase boundary over existing owners, not a new durable owner, table, or
+    framework. No autonomous startup producer may run before it closes.
   managed_execution_recovery_ordering: >-
     Managed-execution admission first establishes the exact execution and delivery
     authorities without replaying pipeline work or starting the delivery-continuation
     coordinator. Startup then starts the Manager occurrence and reconstructs and
-    verifies every current-completed dynamic agent loop, generation route, and flow
-    route. Only after that proof may recovery-enabled startup drive event-level
-    pipeline obligations to exhaustion, start the already-bound continuation owner,
-    and synchronize its exact delivery scope. Recovery-disabled startup retains its
-    pre-admission refusal. Authority admission, recovery execution, and continuation
-    execution are ordered phases, not three semantic owners or a new framework.
+    prepares every authorized pending receiver, finalizes it only after all process
+    receivers are live, and verifies every current-completed dynamic agent loop,
+    generation route, and flow route. Only after the completed topology latch may
+    recovery-enabled hydration and event-level pipeline recovery run. The already-
+    bound continuation owner then starts and synchronizes its exact delivery scope.
+    Recovery-disabled startup retains its pre-admission refusal. Authority admission,
+    process preparation, finalization, recovery execution, and continuation execution
+    are ordered phases, not new semantic owners or a generic framework.
+  autonomous_startup_producer_release: >-
+    Run-lifecycle candidate execution, pipeline maintenance, generic schedule
+    restore/boot admission, and workflow timer restore are delayed until completed
+    topology plus pipeline recovery plus delivery-continuation synchronization. Their
+    registration or construction may occur earlier only when it cannot claim, publish,
+    execute, or arm work. Outbox dispatch and platform.boot follow those releases;
+    public ingress remains fail-closed until Runtime.Start succeeds.
+  schedule_pipeline_fence_decision: >-
+    No second pre-continuation pipeline-exhaustion sweep is required. Persisted
+    pipeline recovery reaches exhaustion after topology and before the continuation
+    owner starts. Schedule and timer restoration is deliberately later than
+    continuation start/synchronization, so due callbacks publish only when both exact
+    receivers and the live continuation consumer exist. A sweep racing asynchronous
+    callbacks would not be an execution fence and is forbidden as false proof.
   replay_only_work: >-
     Effects, provider drains, budget and diagnostic recovery projection, pipeline
     receipts, delivery replay, ordinary pending timer/creation recovery, and selected-
@@ -234,26 +286,34 @@ governing_policy:
     - second_source_transition_writer
     - desired_plan_replacement_without_exact_observed_coordinate
     - global_list_for_automatic_retry_live_revision_or_recovery_diagnostics
+    - per_item_transition_transaction_for_multi_item_startup
+    - pending_finalizer_publication_before_all_sibling_process_topology
+    - autonomous_schedule_timer_maintenance_or_run_lifecycle_work_before_topology
+    - second_pipeline_sweep_as_a_substitute_for_producer_ordering
 
 startup_order:
   sequence:
     - all_context_source_scoped_observation_preflight_classifies_three_disjoint_sets_before_any_runtime_mutation
     - predecessor_pending_transition_without_recovery_refuses_all_contexts
-    - recovery_snapshot_and_admission_classify_replay_work
-    - static_declaration_topology_hydrates
-    - system_nodes_start
-    - recovery_enabled_non_routing_finalizers_may_reconcile_interrupted_effect_drain_budget_and_diagnostic_work
-    - current_source_transition_set_is_revalidated_and_every_exact_plan_is_guarded_replaced_by_predecessor_posture
+    - prerequisite_consumers_and_authority_only_components_construct_without_claiming_publishing_or_executing_work
+    - static_declaration_topology_hydrates_and_system_node_subscriptions_become_ready
+    - current_source_transition_set_is_revalidated_and_complete_desired_set_is_derived_before_any_write
+    - selected_store_batch_compares_every_observation_then_commits_every_replacement_or_none
     - exact_source_projection_is_reloaded_and_any_source_transition_refuses
-    - ordinary_pending_rows_follow_existing_recovery_policy_and_unresolved_rows_refuse
+    - ordinary_pending_rows_are_authorized_or_refuse_under_existing_recovery_policy
     - managed_execution_and_delivery_authorities_are_admitted_without_replay_or_continuation_execution
     - manager_run_starts_the_current_occurrence
     - current_source_projection_is_reloaded_after_manager_run
-    - mandatory_topology_only_reconstruction_consumes_only_its_completed_rows
-    - exact_agent_lifecycle_routes_loops_and_flow_routes_are_verified
+    - mandatory_topology_only_reconstruction_consumes_completed_rows
+    - process_only_preparation_consumes_every_authorized_pending_row_without_timer_or_event_publication
+    - exact_agent_lifecycle_routes_loops_and_flow_routes_for_all_rows_are_verified
+    - keyed_pending_finalizers_arm_timers_mark_completion_and_publish_creation_events
+    - fresh_projection_and_exact_process_verification_close_the_completed_topology_latch
+    - recovery_enabled_effect_drain_budget_diagnostic_and_selected_contract_hydration_runs
     - recovery_enabled_pipeline_obligations_replay_to_exhaustion
     - delivery_continuation_owner_starts_and_synchronizes
-    - outbox_and_public_boot_readiness_may_open
+    - generic_schedule_and_workflow_timer_restore_run_lifecycle_execution_and_pipeline_maintenance_are_released
+    - outbox_platform_boot_and_public_ingress_readiness_may_open
   failure_compensation: >-
     Any topology-only reconstruction or verification failure fails Runtime.Start and
     consumes existing start-failure cleanup plus lifecycle/route compensation. It
@@ -265,7 +325,10 @@ startup_order:
     without replay in any context refuses the all-or-nothing serve before another
     context can acquire process topology. A predecessor-completed transition is valid
     required work, not completed topology. Each Runtime.Start revalidates and performs
-    only exact-source guarded item writes before Manager.Run.
+    only one exact-source guarded batch write before Manager.Run. No transaction spans
+    contexts; all-context observation prevents expected refusal from partially starting
+    another context, while a later temporal store conflict aborts that context and the
+    existing serve cleanup closes any earlier context before public ingress opens.
 
 user_visible_flow:
   must_succeed_before_observed_failure:
@@ -293,15 +356,27 @@ user_visible_flow:
     - step: managed_execution_authority_admission
       gate: same_chosen_class_ordering
       proof: authority_is_bound_without_pipeline_replay_or_continuation_execution
+    - step: exact_source_transition_batch
+      gate: same_chosen_class_atomicity
+      proof: every_observed_plan_is_compared_and_all_replacements_commit_or_none_do
     - step: Manager_Run
       gate: same_chosen_class_ordering
       proof: current_occurrence_starts_before_any_recovery_delivery_can_execute
-    - step: mandatory_completed_topology_reconstruction
+    - step: complete_process_topology_preparation
       gate: same_chosen_class_missing_entrance
-      proof: must_adopt_start_and_verify_exact_agent_and_flow_routes_without_replay
-    - step: recovery_pipeline_replay_then_delivery_continuation_sync_and_public_readiness
+      proof: all_completed_and_authorized_pending_rows_have_exact_agents_and_routes_before_any_pending_finalizer_publishes
+    - step: pending_finalization_and_completed_topology_latch
+      gate: same_chosen_class_downstream_fence
+      proof: exact_timers_completion_and_creation_publish_only_after_all_receivers_then_fresh_projection_proves_complete
+    - step: recovery_pipeline_replay_then_delivery_continuation_sync
       gate: same_chosen_class_downstream_fence
       proof: replay_and_continuations_cannot_execute_before_process_topology_is_executable
+    - step: schedule_timer_maintenance_run_lifecycle_and_outbox_release
+      gate: same_chosen_class_autonomous_producer_fence
+      proof: due_work_cannot_claim_publish_or_execute_until_topology_and_continuation_are_live
+    - step: public_readiness_and_ingress
+      gate: same_chosen_class_publication_fence
+      proof: executable_endpoints_remain_fail_closed_until_Runtime_Start_completes
     - step: second_normalized_event_routing
       gate: same_chosen_class_manifestation
       proof: exact_entity_recipient_delivery_turn_and_effect_required
@@ -336,18 +411,36 @@ startup_posture_matrix:
     proof: two_pinned_PostgreSQL_contexts_isolation_refusal_and_no_unscoped_reads
 
 startup_consumer_matrix:
+  all_context_readiness_preflight:
+    classification: state_or_authority_only_safe_before_topology
+    proof: exact_source_SQL_projection_is_observation_only_and_precedes_every_runtime_mutation
   static_declaration_topology:
-    classification: always_run_process_reconstruction
-    proof: HydrateStaticTopologyForStartup_is_already_unconditional_and_separate
+    classification: prerequisite_consumer_safe_before_topology
+    proof: static_agents_and_routes_are_receivers_and_do_not_claim_publish_or_execute_retained_work
+  system_node_start:
+    classification: prerequisite_consumer_safe_before_topology
+    proof: starts_subscription_consumers_only_and_production_BackgroundNodes_is_currently_empty
+  run_lifecycle_candidate_sink_registration:
+    classification: state_or_authority_only_safe_before_topology
+    proof: registration_binds_the_sink_without_enumerating_or_executing_candidates
+  run_lifecycle_executor_start:
+    classification: autonomous_publication_or_execution_moved_after_topology
+    proof: Start_enumerates_candidates_and_Submit_launches_due_chain_execution
+  runtime_ingress_state_sync:
+    classification: state_or_authority_only_safe_before_topology
+    proof: SyncState_updates_ingress_state_without_releasing_public_ingress_or_event_work
+  directive_operation_reconciliation:
+    classification: state_or_authority_only_safe_before_topology
+    proof: settles_persisted_operation_state_and_author_activity_without_constructing_or_dispatching_dynamic_work
   current_source_completed_active_dynamic_readiness:
-    classification: always_run_process_reconstruction
+    classification: prerequisite_consumer_safe_before_topology
     proof: source_scoped_completed_eligible_plan_is_durable_desired_topology_not_interrupted_work
   current_source_ordinary_pending_dynamic_readiness:
     classification: startup_blocking_when_replay_disabled
-    proof: full_reconciler_can_write_topology_timers_completion_and_creation_event
+    proof: authorized_items_prepare_process_topology_for_the_complete_set_before_any_keyed_finalizer_can_arm_or_publish
   predecessor_completed_source_transition:
-    classification: mandatory_desired_source_canonicalization_before_manager_run
-    proof: current_run_source_is_canonical_and_predecessor_completion_proves_no_interrupted_readiness_tail
+    classification: state_or_authority_only_safe_before_topology
+    proof: current_run_source_authorizes_one_atomic_batch_plan_replacement_before_Manager_Run_but_no_process_or_event_work
   predecessor_pending_source_transition:
     classification: source_canonicalization_and_resume_are_recovery_gated
     proof: predecessor_incomplete_posture_cannot_be_erased_by_source_rebind
@@ -372,44 +465,74 @@ startup_consumer_matrix:
     replacement: InspectDynamicFlowRuntimeReadinessForRun
     proof: >-
       The selected store constrains exact run_id and current BundleSourceFact in SQL
-      before decode; current semantic authority derives desired plans only from those
-      exact observed rows and passes each observation to the guarded writer.
+      before decode; current semantic authority derives the complete desired set and
+      passes it once to the guarded batch writer. One row remains a batch of one.
   persisted_dynamic_route_without_readiness:
     classification: invalid_obsolete_and_deleted
     proof: source_scoped_current_activation_commits_readiness_and_exact_route_topology_together
+  pending_process_only_preparation:
+    classification: prerequisite_consumer_safe_before_topology
+    proof: reconciles_agents_generation_routes_and_flow_routes_for_all_authorized_rows_without_timer_arm_completion_or_event_publication
+  pending_keyed_finalization:
+    classification: autonomous_publication_or_execution_moved_after_topology
+    proof: timer_arming_and_creation_publication_wait_until_every_completed_and_pending_sibling_process_receiver_is_verified
   selected_contract_route_recovery_evidence:
-    classification: recovery_only_replay_or_mutation
-    proof: selected_fork_evidence_has_its_own_recovery_owner_and_no_serving_topology_authority
+    classification: autonomous_publication_or_execution_moved_after_topology
+    proof: retained_with_optional_HydrateForStartup_after_the_completed_topology_latch
   external_effect_attempts:
-    classification: recovery_only_replay_or_mutation
-    proof: ReconcileExternalEffectAttempts_settles_interrupted_effect_attempts
+    classification: autonomous_publication_or_execution_moved_after_topology
+    proof: optional_HydrateForStartup_settles_interrupted_effect_attempts_only_after_the_latch
   provider_drain_finalization:
-    classification: recovery_only_replay_or_mutation
-    proof: refreshRecoveredProviderDrainFinalizations_mutates_recovered_tail_state
+    classification: autonomous_publication_or_execution_moved_after_topology
+    proof: optional_HydrateForStartup_mutates_recovered_tail_state_only_after_the_latch
   budget_projection:
-    classification: recovery_only_replay_or_mutation
-    proof: ProjectRecoveryBudgetState_projects_retained_recovery_state_and_may_emit
+    classification: autonomous_publication_or_execution_moved_after_topology
+    proof: ProjectRecoveryBudgetState_can_publish_threshold_events_and_whole_optional_hydration_moves_after_the_latch
   lifecycle_diagnostic_projection:
-    classification: recovery_only_replay_or_mutation
-    proof: projection_marks_diagnostic_rows_projected
+    classification: autonomous_publication_or_execution_moved_after_topology
+    proof: projection_mutates_diagnostic_state_and_moves_with_optional_hydration_after_the_latch
   pipeline_receipt_recovery:
-    classification: recovery_only_replay_or_mutation
-    proof: RecoverAfterStartupAdmission_runs_only_after_Manager_and_completed_dynamic_topology_are_live
+    classification: autonomous_publication_or_execution_moved_after_topology
+    proof: RecoverToExhaustion_runs_after_completed_topology_and_before_continuation_start
   executable_delivery_replay:
-    classification: recovery_only_replay_or_mutation
+    classification: autonomous_publication_or_execution_moved_after_topology
     proof: delivery_authority_admission_is_conditioned_separately_from_post_topology_replay_execution
   delivery_continuation_synchronization:
-    classification: different_concept_with_ordering_dependency
+    classification: autonomous_publication_or_execution_moved_after_topology
     proof: coordinator_Start_and_Synchronize_consume_already_admitted_live_routes_and_must_follow_topology_reconstruction_and_event_level_replay
-  workflow_and_generic_timers:
-    classification: recovery_only_except_exact_authorized_source_transition_desired_topology
-    proof: restoration_can_make_persisted_wakeups_runnable_but_current_source_transition_must_reconcile_its_exact_declared_set
+  generic_schedule_restore_and_boot_ensure:
+    classification: autonomous_publication_or_execution_moved_after_topology
+    proof: Restore_and_admission_reconcile_wakeups_immediately_so_they_follow_continuation_synchronization
+  workflow_timer_restore:
+    classification: autonomous_publication_or_execution_moved_after_topology
+    proof: Restore_reconciles_due_wakeups_immediately_so_it_follows_continuation_synchronization
+  pipeline_maintenance:
+    classification: autonomous_publication_or_execution_moved_after_topology
+    proof: RunMaintenance_can_expire_HITL_or_draft_work_and_publish_events
   dynamic_creation_event:
-    classification: recovery_only_except_exact_authorized_source_transition_unemitted_plan
-    proof: emitted_occurrence_is_immutable_and_current_source_may_only_rederive_persisted_unemitted_lineage
-  directive_operation_reconciliation:
-    classification: different_concept_with_proof
-    proof: existing_required_operation_settlement_precedes_recovery_and_does_not_construct_topology
+    classification: autonomous_publication_or_execution_moved_after_topology
+    proof: current_source_may_rederive_only_persisted_unemitted_lineage_and_publish_after_all_sibling_process_topology
+  outbox_sweeper:
+    classification: autonomous_publication_or_execution_moved_after_topology
+    proof: starts_after_topology_recovery_continuation_and_schedule_timer_release
+  platform_boot_event:
+    classification: autonomous_publication_or_execution_moved_after_topology
+    proof: commits_only_after_every_startup_gate_and_producer_release_succeeds
+  api_webhook_and_websocket_listener:
+    classification: prerequisite_consumer_safe_before_topology
+    proof: sockets_may_bind_early_but_non_health_execution_is_fail_closed_by_exact_runtime_readiness
+  mcp_listener:
+    classification: prerequisite_consumer_safe_before_topology
+    proof: no_tool_execution_without_exact_turn_context_and_managed_admission_which_do_not_exist_before_runtime_start
+  public_provider_ingress:
+    classification: autonomous_publication_or_execution_moved_after_topology
+    proof: handlers_register_and_public_readiness_opens_only_after_every_runtime_start_succeeds
+  standing_target_and_timer_recovery:
+    classification: separate_source_scoped_owner_already_fenced_later
+    proof: EnsureStandingTargets_runs_after_Runtime_Start_and_installs_exact_standing_routes_before_its_timer_restore
+  run_stalled_escalation:
+    classification: separate_source_scoped_owner_already_fenced_later
+    proof: process_owned_escalation_loop_starts_only_after_all_runtime_contexts_are_ready
 
 route_producer_census:
   canonical_current_format_writer: >-
@@ -448,15 +571,16 @@ canonical_owners:
     consumers:
       - live_EnsureStandingTargets_source_revision
       - exact_item_current_source_derivation
-  exact_item_source_transition_canonicalization:
-    owner: current_semantic_source_derivation_plus_observed_state_guarded_ReconcileDynamicFlowRuntimeReadinessPlan_writer
+  exact_source_transition_batch_canonicalization:
+    owner: current_semantic_source_derivation_plus_selected_store_ReconcileDynamicFlowRuntimeReadinessPlans_batch_writer
     real_semantic_owner: true
     consumers:
-      - predecessor_completed_transition_before_manager_run
-      - predecessor_pending_transition_only_under_recovery_authority
+      - complete_predecessor_completed_transition_set_before_manager_run
+      - complete_predecessor_pending_transition_set_only_under_recovery_authority
+      - live_source_revision_as_batch_of_one_or_more
       - guarded_projection_reload_and_transition_empty_fence
   observed_state_replacement:
-    owner: existing_selected_store_ReconcileDynamicFlowRuntimeReadinessPlan_with_observed_coordinate
+    owner: selected_store_ReconcileDynamicFlowRuntimeReadinessPlans_with_complete_observed_set
     real_semantic_owner: true
     consumers:
       - live_source_revision
@@ -473,6 +597,8 @@ canonical_owners:
       - automatic_retry
       - recovery_enabled_startup_finalization
       - mandatory_completed_topology_startup_reconstruction
+      - process_only_preparation_for_all_authorized_pending_rows
+      - post_process_topology_keyed_finalization
   durable_agent_lifecycle:
     owner: selected_store_agents_cell_and_typed_lifecycle_transition
     real_semantic_owner: true
@@ -503,6 +629,18 @@ canonical_owners:
       - selected_mutation_private_overlay
       - mandatory_completed_topology_reconstruction
       - recipient_planning_after_publication
+  startup_process_topology_latch:
+    owner: Runtime_Start_ordered_fresh_projection_plus_existing_lifecycle_and_route_verifiers
+    real_semantic_owner: true
+    consumers:
+      - pending_keyed_finalization
+      - optional_recovery_hydration
+      - pipeline_recovery
+      - delivery_continuation_start_and_sync
+      - generic_schedule_and_workflow_timer_restore
+      - pipeline_maintenance
+      - run_lifecycle_executor_start
+      - outbox_boot_and_public_ingress
 
 systematic_consumption_audit:
   multi_context_all_source_preflight: moved_to_exact_source_scoped_projection_before_any_runtime_start
@@ -510,31 +648,50 @@ systematic_consumption_audit:
   multi_context_pending_readiness: startup_refusal_before_cross_context_mutation
   hostile_cross_source_similar_paths: excluded_by_selected_store_source_predicate
   sqlite_source_scoped_projection: moved_to_same_typed_store_contract
-  cold_revision_predecessor_completed_plan: moved_to_mandatory_exact_item_current_source_canonicalization
+  cold_revision_predecessor_completed_plan: moved_to_mandatory_exact_source_atomic_batch_current_source_canonicalization
   cold_revision_predecessor_pending_plan: remains_recovery_gated_and_refuses_without_recovery
-  standing_EnsureStandingTargets_post_start_source_revision: moved_to_exact_run_and_source_SQL_projection_plus_guarded_writer
+  standing_EnsureStandingTargets_post_start_source_revision: moved_to_exact_run_and_source_SQL_projection_plus_guarded_batch_writer
   reconcilePendingDynamicFlowRuntimeReadiness_automatic_retry: moved_to_exact_source_projection_current_pending_only
   readinessReconciliationLoop_periodic_reachability: existing_generation_owned_loop_gains_bounded_wakeup_without_second_owner
   RecoverableStateSnapshot_readiness_inspection: moved_to_exact_source_projection_observation_only
   ReconcileDynamicFlowRuntimeReadinessPlansForRun_live_revision: moved_to_exact_run_and_source_SQL_projection
   ListDynamicFlowRuntimeReadiness_interface_and_adapters: removed_end_to_end_with_zero_production_symbol_census
   unscoped_readiness_and_route_lists: invalid_for_every_context_bound_readiness_consumer
-  desired_only_ReconcileDynamicFlowRuntimeReadinessPlan: evolved_to_compare_exact_observation_under_existing_lock
+  singular_ReconcileDynamicFlowRuntimeReadinessPlan: removed_and_replaced_by_plural_selected_store_transaction_single_item_is_batch_of_one
   fresh_spawn_before_manager_run: moved_to_phase_aware_owner_prepared_before_run
   fresh_spawn_during_manager_run: moved_to_phase_aware_owner_runnable_current_occurrence
   persisted_completed_readiness_default_restart: moved_to_mandatory_topology_only_reconstruction
-  persisted_completed_readiness_explicit_recovery: moved_to_mandatory_topology_only_reconstruction_after_recovery
+  persisted_completed_readiness_explicit_recovery: moved_to_mandatory_topology_only_reconstruction_before_recovery
   persisted_pending_readiness_default_restart: startup_refusal_no_mutation
-  persisted_pending_readiness_explicit_recovery: existing_keyed_reconciler_then_mandatory_reconstruction
+  persisted_pending_readiness_explicit_recovery: process_only_preparation_with_complete_authorized_set_then_keyed_finalization
   manager_standard_run: already_consumes_lifecycle_replacement_owner
   manager_authoritative_delivery_only_run: already_consumes_lifecycle_replacement_owner
   lifecycle_only_removed_declaration_adoption: different_non_executable_concept_preserved
   reconfigure_restart_teardown_shutdown_reset: already_consume_lifecycle_coordinator
-  direct_post_commit_ensure_source_revision_retry_readiness: consume_keyed_reconciler_after_exact_scoped_observation_and_guarded_write
-  flow_route_process_publication: moved_behind_completed_topology_only_verification_on_startup
+  direct_post_commit_ensure_source_revision_retry_readiness: consume_keyed_reconciler_after_exact_scoped_observation_and_guarded_batch_write
+  flow_route_process_publication: moved_into_complete_process_only_preparation_and_verified_before_any_autonomous_producer
   generic_no_readiness_route_restore: invalid_removed
-  selected_contract_route_recovery: different_recovery_evidence_concept_preserved
-  delivery_continuation_synchronization: already_canonical_but_reordered_after_mandatory_topology
+  selected_contract_route_recovery: different_recovery_evidence_concept_preserved_and_reordered_after_topology
+  run_lifecycle_candidate_sink_registration: retained_before_topology_as_authority_only
+  run_lifecycle_executor_start: moved_after_topology_pipeline_recovery_and_continuation_sync
+  RuntimeIngress_SyncState: retained_before_topology_as_non_releasing_state_sync
+  directive_operation_reconciliation: retained_before_topology_as_operation_state_settlement_only
+  system_node_start: retained_before_topology_as_prerequisite_subscription_consumer
+  optional_HydrateForStartup_effect_drain_budget_diagnostic_selected_contract: moved_whole_after_completed_topology_latch
+  pending_readiness_process_preparation: split_inside_existing_keyed_owner_and_runs_for_complete_authorized_set_before_any_finalizer
+  pending_readiness_timer_completion_creation_finalizer: moved_after_complete_process_topology_preparation
+  pipeline_RecoverToExhaustion: moved_after_completed_topology_latch
+  delivery_continuation_synchronization: moved_after_topology_and_pipeline_exhaustion
+  generic_schedule_Restore_and_boot_ensure: moved_after_delivery_continuation_synchronization
+  workflow_timer_Restore: moved_after_delivery_continuation_synchronization
+  pipeline_RunMaintenance: moved_after_delivery_continuation_synchronization
+  outbox_sweeper: moved_after_schedule_timer_maintenance_and_run_lifecycle_release
+  platform_boot_event: moved_after_every_startup_gate
+  api_webhook_websocket_listener: already_fail_closed_before_runtime_readiness_except_health
+  mcp_listener: already_requires_exact_turn_context_and_managed_admission
+  public_provider_ingress: already_registered_and_exposed_only_after_all_Runtime_Start_calls
+  standing_EnsureStandingTargets_timer_restore: separate_exact_source_owner_already_runs_after_Runtime_Start_and_route_installation
+  run_stalled_escalation: separate_process_owner_already_starts_after_context_readiness
 
 invalid_or_non_authoritative_paths:
   - config_presence_as_liveness
@@ -557,8 +714,14 @@ invalid_or_non_authoritative_paths:
   - post_write_reload_as_substitute_for_locked_observation_comparison
   - post_Manager_Run_EnsureStandingTargets_as_first_source_transition_owner
   - per_item_source_transition_replace_then_aggregate_finalization_while_siblings_remain_predecessor_owned
+  - sequential_per_item_transition_transactions_that_can_commit_a_prefix
+  - current_pending_finalizer_timer_or_creation_publication_before_all_sibling_process_topology
   - managed_execution_authority_admission_as_permission_to_execute_pipeline_replay_before_receivers_are_live
   - delivery_continuation_start_before_completed_dynamic_topology_reconstruction
+  - generic_schedule_or_workflow_timer_restore_before_completed_dynamic_topology
+  - pipeline_maintenance_or_run_lifecycle_candidate_execution_before_completed_dynamic_topology
+  - optional_HydrateForStartup_publication_before_completed_dynamic_topology
+  - second_pipeline_recovery_sweep_racing_due_schedule_or_timer_callbacks
 
 manifestations:
   fresh_first_materialization:
@@ -578,13 +741,52 @@ manifestations:
     planned_proof: recovery_disabled_refuses_zero_mutation_and_recovery_enabled_canonicalizes_then_resumes
   multi_instance_source_revision_with_sibling_predecessor_plans:
     disposition: in_scope_reproduced_broad_test_blocking
-    planned_proof: dual_store_standing_ingress_source_revision_matrix_replaces_all_plans_before_any_aggregate_route_finalization
+    planned_proof: dual_store_standing_ingress_source_revision_matrix_commits_every_plan_in_one_batch_before_process_preparation
+  multi_row_transition_batch_success:
+    disposition: in_scope_reproduced_and_fixed
+    planned_proof: dual_store_complete_set_compare_then_all_rows_replace_in_one_selected_store_transaction
+  last_row_transition_derivation_failure:
+    disposition: in_scope_reproduced_and_fixed
+    planned_proof: dual_store_last_desired_plan_derivation_failure_occurs_before_transaction_and_writes_zero_rows
+  last_row_transition_stale_conflict:
+    disposition: in_scope_reproduced_and_fixed
+    planned_proof: dual_store_last_locked_observation_conflict_returns_typed_stale_and_writes_zero_rows
+  transition_batch_mid_write_failure:
+    disposition: in_scope_reproduced_and_fixed
+    planned_proof: dual_store_injected_later_update_failure_rolls_back_every_earlier_update
+  post_batch_pre_finalization_failure:
+    disposition: in_scope_reproduced_and_fixed
+    planned_proof: dual_store_failure_leaves_all_changed_rows_current_pending_no_mixed_source_then_disabled_restart_refuses_and_enabled_restart_resumes
+  pending_finalizer_before_sibling_process_topology:
+    disposition: in_scope_reproduced_and_fixed
+    planned_proof: dual_store_creation_and_timer_finalization_counters_remain_zero_until_every_authorized_sibling_agent_generation_route_and_flow_route_is_verified
   explicit_recovery_restart:
     disposition: in_scope_reproduced_and_fixed
     planned_proof: recovery_then_topology_without_double_start_or_duplicate_replay
   explicit_recovery_replay_before_completed_receivers:
     disposition: in_scope_reproduced_broad_test_blocking
     planned_proof: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends_proves_no_authoritative_delivery_incomplete_on_SQLite_or_PostgreSQL
+  due_generic_schedule_before_completed_receivers:
+    disposition: in_scope_reproduced_and_fixed
+    planned_proof: dual_store_due_schedule_cannot_claim_publish_or_execute_before_exact_topology_then_fires_after_continuation_is_live
+  due_workflow_timer_before_completed_receivers:
+    disposition: in_scope_reproduced_and_fixed
+    planned_proof: dual_store_due_timer_cannot_claim_publish_or_execute_before_exact_topology_then_fires_after_continuation_is_live
+  optional_recovery_hydration_before_completed_receivers:
+    disposition: in_scope_execution_proven_through_corrected_order
+    planned_proof: effect_drain_budget_diagnostic_and_selected_contract_mutation_or_publication_counters_remain_zero_before_topology
+  pipeline_recovery_before_completed_receivers:
+    disposition: in_scope_reproduced_and_fixed
+    planned_proof: dual_store_retained_pipeline_obligation_executes_only_after_exact_topology_and_reaches_exhaustion_before_continuation
+  delivery_continuation_before_completed_receivers:
+    disposition: in_scope_reproduced_and_fixed
+    planned_proof: dual_store_coordinator_start_and_sync_counters_remain_zero_until_topology_and_pipeline_exhaustion
+  run_lifecycle_execution_before_completed_receivers:
+    disposition: in_scope_execution_proven_through_corrected_order
+    planned_proof: due_candidate_sink_registration_is_inert_and_executor_does_not_enumerate_or_run_until_post_continuation_release
+  pipeline_maintenance_before_completed_receivers:
+    disposition: in_scope_execution_proven_through_corrected_order
+    planned_proof: expiry_and_maintenance_publication_counters_remain_zero_until_post_continuation_release
   recovery_disabled_pending_readiness:
     disposition: in_scope_reproduced_and_fixed
     planned_proof: startup_refuses_and_all_replay_side_effect_counters_remain_zero
@@ -665,14 +867,16 @@ supported_surface_proof:
     - malformed_identity_and_template_route_without_readiness_fail_closed_on_both
     - static_route_without_dynamic_readiness_is_inert_on_both
     - foreign_malformed_and_pending_rows_are_invisible_to_local_retry_snapshot_and_live_revision
-    - observed_state_guard_rejects_every_plan_posture_source_and_eligibility_race_with_zero_mutation
+    - observed_state_batch_guard_rejects_every_plan_posture_source_and_eligibility_race_with_zero_mutation
+    - complete_multi_row_batch_commits_all_or_none_on_both_stores
+    - later_write_failure_rolls_back_earlier_update_on_both_stores
   multi_context_proof:
     - completed_topology_isolated_per_source
     - pending_in_either_source_refuses_all_contexts_before_mutation
     - hostile_same_path_cross_source_rows_are_inert_to_the_wrong_context
     - no_unscoped_read_or_process_side_filter
-    - source_transition_exact_item_writes_never_cross_context
-    - every_same_source_transition_plan_is_replaced_before_any_aggregate_topology_finalizer_runs
+    - source_transition_exact_source_batch_never_crosses_context
+    - every_same_source_transition_plan_is_replaced_atomically_before_process_preparation
   scoped_consumer_proof:
     - automatic_retry_consumes_exact_source_current_pending_only
     - missed_or_absent_signal_converges_on_the_same_bounded_generation_owned_periodic_loop
@@ -685,6 +889,13 @@ supported_surface_proof:
     - creation_event_emitted_at_posture_changed
     - owning_run_bundle_source_or_status_changed
     - instance_status_or_terminated_at_eligibility_changed
+  batch_transaction_failure_matrix:
+    - last_row_derivation_failure_before_transaction_zero_writes
+    - last_row_stale_conflict_after_all_locks_zero_writes
+    - later_update_injected_failure_rolls_back_earlier_update
+    - post_batch_pre_finalization_failure_leaves_whole_set_current_pending
+    - recovery_disabled_restart_refuses_post_batch_pending_without_inferred_authority
+    - recovery_enabled_restart_resumes_post_batch_pending
   negative_no_replay_proof:
     - no_timer_arm_or_restore
     - no_creation_event_commit_or_dispatch
@@ -694,9 +905,20 @@ supported_surface_proof:
     - no_selected_contract_recovery
   recovery_execution_order_proof:
     - managed_execution_and_delivery_authority_admission_executes_no_pipeline_or_continuation_work
-    - manager_occurrence_and_completed_dynamic_receivers_are_live_before_pipeline_replay
+    - manager_occurrence_and_all_completed_or_authorized_pending_dynamic_receivers_are_live_before_any_pending_finalizer
+    - keyed_pending_finalizers_complete_before_the_fresh_completed_topology_latch
+    - optional_recovery_hydration_executes_only_after_completed_topology
     - pipeline_recovery_reaches_exhaustion_before_delivery_continuation_start_and_sync
+    - schedule_and_timer_restore_follow_delivery_continuation_sync_so_no_second_pipeline_sweep_is_needed
+    - maintenance_and_run_lifecycle_execution_follow_delivery_continuation_sync
     - sqlite_and_postgresql_golden_restart_have_no_authoritative_delivery_incomplete
+  autonomous_producer_fence_proof:
+    - due_generic_schedule_cannot_claim_publish_or_execute_before_topology
+    - due_workflow_timer_cannot_claim_publish_or_execute_before_topology
+    - pending_creation_or_timer_finalizer_cannot_publish_before_all_sibling_process_topology
+    - run_lifecycle_executor_cannot_enumerate_or_execute_before_topology
+    - pipeline_maintenance_cannot_expire_or_publish_before_topology
+    - outbox_and_public_ingress_remain_closed_until_all_startup_releases_complete
   complete_matrix:
     - focused_lifecycle_and_race_tests
     - unchanged_issue_2008_M5
@@ -714,6 +936,8 @@ tracker:
     static_topology: different_concept_already_unconditional
     selected_contract_recovery: different_recovery_evidence_concept
     delivery_continuations: different_owner_with_ordering_dependency
+    schedule_and_timer_restore: different_durable_owner_with_same_topology_ordering_dependency_absorbed
+    maintenance_and_run_lifecycle_execution: different_owners_with_same_topology_ordering_dependency_absorbed
     terminal_singleton_materialization: split_to_2339
     broad_startup_phase_decomposition: remains_2250
   post_pre_audit_parent_action: close_corrected_child_now_keep_architecture_parent_open
@@ -722,21 +946,26 @@ tracker:
     readiness orchestration. Multi-bundle serving, cold source transition, automatic
     retry, live source revision, and recovery diagnostics are live consumers of the
     same readiness observation concept and are absorbed here through one source-
-    scoped three-class projection, one exact-run derivative, and the existing writer
-    evolved with an observed-state guard. The existing retry loop also receives its
-    already-specified bounded periodic wakeup so durable pending work does not depend
-    on an in-memory signal; no broader recovery family must be absorbed.
+    scoped three-class projection, one exact-run derivative, and the selected-store
+    writer evolved into one observed-state batch transaction. The cycle-8 probe also
+    found schedule/timer, maintenance, run-lifecycle, pending-finalizer, pipeline,
+    continuation, and outbox producers sharing the topology-ordering dependency; all
+    are now classified behind one completed process-topology latch. The existing retry
+    loop retains its bounded periodic wakeup. No broader recovery family must be
+    absorbed.
   remaining_parent_tail:
     grouping: wholesale_Runtime_Start_typed_phase_decomposition_and_general_recovery_scoping
     owner: 2250
     estimate: multi_pr_architecture_work
     confidence: high
   architecture_smell: >-
-    HydrateForStartup combines mandatory process reconstruction with optional durable
-    work replay, while standing source persistence advances the canonical run source
-    before the runtime-owned derived readiness plan is canonicalized after startup.
-    The persistence port also exposed a global collection reader to context-bound
-    managers and accepted desired replacement without an observed-state coordinate.
+    Runtime.Start hides prerequisite consumers, topology reconstruction, optional
+    replay, autonomous schedules/timers, maintenance, lifecycle execution, and public
+    release inside one oversized sequence. Standing source persistence also advances
+    canonical run source before runtime-owned derived readiness, and the prior store
+    API made a multi-plan semantic transition through independent row transactions.
+    The bounded repair establishes exact batch and order semantics; typed general
+    startup phases remain architecture work in #2250.
   long_run_direction: explicit_typed_startup_phases_under_issue_2250
   architecture_tracking_decision: update_existing_issue_2250_and_watchlist_only
   architecture_effort: medium_to_large
@@ -746,11 +975,12 @@ tracker:
 gate:
   independent_gate_required: true
   requested_outcome: approved
-  current_outcome: pending_gate_cycle_8_after_broad_supported_surface_disproved_cycle_7_ordering
+  current_outcome: pending_gate_cycle_9_after_cycle_8_found_autonomous_producers_and_non_atomic_transition_set
   prior_approval_superseded: https://github.com/division-sh/swarm/issues/2351#issuecomment-5431216042
   insufficient_cycle_5: https://github.com/division-sh/swarm/issues/2351#issuecomment-5430579890
   insufficient_cycle_6: https://github.com/division-sh/swarm/issues/2351#issuecomment-5430956275
-  blocking_ambiguity: topology_before_pipeline_replay_and_all_transition_plans_before_aggregate_finalization_repaired_gate_review_pending
+  insufficient_cycle_8: https://github.com/division-sh/swarm/issues/2351#issuecomment-5432176053
+  blocking_ambiguity: none_in_repaired_artifact_independent_cycle_9_gate_review_pending
   stop_conditions:
     - another_current_format_active_topology_producer_without_readiness
     - topology_only_reconstruction_requires_durable_replay_mutation
@@ -761,8 +991,10 @@ gate:
     - source_transition_requires_unscoped_read_or_second_readiness_writer
     - any_production_ListDynamicFlowRuntimeReadiness_interpreter_survives
     - exact_source_or_exact_run_SQL_scoping_cannot_serve_every_named_consumer
-    - existing_writer_cannot_compare_the_complete_observed_coordinate_under_its_current_lock
+    - selected_store_cannot_compare_and_replace_the_complete_exact_source_set_in_one_existing_owner_transaction
     - generation_owned_retry_cannot_provide_signal_and_bounded_periodic_reachability_through_one_loop
     - managed_execution_authority_cannot_be_admitted_without_executing_pipeline_or_delivery_recovery
-    - completed_dynamic_topology_cannot_be_proved_before_recovery_execution_without_a_generic_startup_framework
-    - source_transition_plan_replacement_cannot_complete_for_the_exact_set_before_aggregate_finalization
+    - completed_dynamic_topology_cannot_be_proved_before_every_autonomous_startup_producer_without_a_generic_startup_framework
+    - any_autonomous_startup_producer_cannot_be_delayed_until_topology_or_classified_as_a_prerequisite_consumer
+    - pending_finalization_cannot_be_split_into_process_preparation_then_publication_inside_the_existing_keyed_owner
+    - selected_store_batch_requires_a_new_table_ledger_outbox_or_cross_owner_transaction_framework

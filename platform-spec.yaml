@@ -5053,37 +5053,48 @@ engine:
           current semantic source derives the current workflow version, agent set and revisions, exact route projection, and
           any still-unemitted creation plan. Every projection item carries the exact observed normalized plan, owning-run source,
           topology completion posture, creation-emission posture, run status, and instance status/termination posture. The
-          existing selected-store `ReconcileDynamicFlowRuntimeReadinessPlan` writer and
-          keyed lifecycle reconciler remain the sole canonicalization owners. Startup MUST derive and guarded-replace every
-          authorized source-transition plan in the exact-source projection before invoking keyed lifecycle finalization for
-          any item. A per-item replace-then-finalize loop is forbidden because aggregate route/descriptor consumers would
-          observe sibling predecessor plans and create mixed-source topology or reject a valid revision. Previously completed
-          transitions replace and then complete the desired current-source topology regardless of recovery policy; previously
-          pending transitions do so only when replay is authorized. This bounded desired-source convergence may reconcile the transitioned item's exact
-          agents, routes, timers, and still-unemitted creation obligation; it does not authorize unrelated effect, drain,
-          receipt, delivery, diagnostic, budget, or selected-contract replay. The existing writer MUST accept the exact observed
-          readiness item together with the desired plan. Under its existing transaction lock it MUST compare normalized plan
-          JSON, owning-run source and eligibility, topology completion posture, creation-emission posture, and instance
-          eligibility before replacement. Any changed coordinate returns a typed stale-observation conflict with zero mutation;
-          a post-write reload cannot substitute for this comparison. No unscoped readiness list, desired-only replacement,
-          second writer,
-          predecessor agent/version trust, or
-          post-start `EnsureStandingTargets` fallback is permitted. Startup then reloads the exact-source projection, requires
-          the source-transition set to be empty, and applies ordinary pending recovery/refusal policy. Unresolved rows refuse
-          before Manager run. Managed-execution admission binds the exact execution and delivery authorities but MUST NOT yet
-          replay pipeline work, start delivery-continuation execution, or enumerate executable deliveries. After Manager run
-          starts, the operation reloads again rather than trusting an earlier snapshot.
-          One bounded topology-only consumer reconciles only freshly returned current-completed rows through the canonical
-          lifecycle owner, proves each exact agent
-          `runnable_current_occurrence`, and publishes/verifies the already-persisted exact flow route process-locally before
-          delivery-continuation synchronization, outbox dispatch, boot publication, listener readiness, or public ingress.
-          This operation performs no readiness write, route derivation or durable route mutation, timer operation, creation-
-          event publication, external-effect or provider-drain settlement, budget or diagnostic projection, receipt recovery,
-          delivery replay, or selected-contract recovery. Only after this process-topology proof may recovery-enabled startup
-          drive event-level pipeline obligations to exhaustion, start the already-bound delivery-continuation owner, and
-          synchronize its exact scope. Authority admission and recovery execution are ordered phases, not separate semantic
-          owners or a generic startup framework. Failure fails startup and consumes existing lifecycle/route/start-
-          failure compensation; it cannot degrade into public readiness or affect another source.
+          selected-store `ReconcileDynamicFlowRuntimeReadinessPlans` batch writer and keyed lifecycle reconciler remain the
+          sole canonicalization owners. Startup MUST derive and validate the complete authorized source-transition desired set
+          before opening the selected-store transaction. The batch writer rejects duplicate identities or mixed requested
+          sources, locks every exact run/instance row in deterministic identity order, reloads and compares every observed
+          normalized plan, owning-run source and eligibility, topology completion posture, creation-emission posture, and
+          instance eligibility before issuing its first update, then commits every changed plan or none. Any stale item,
+          validation failure, or write failure returns a typed error and leaves the whole set unchanged. A one-item live source
+          revision delegates as a batch of one; no singular writer survives. A post-write reload cannot substitute for the
+          locked complete-set comparison. A per-item transaction or replace-then-finalize loop is forbidden because failure
+          can durably mix predecessor/current plans and aggregate route/descriptor consumers can observe sibling predecessor
+          plans. Previously completed transitions authorize the exact current startup attempt to prepare and finalize the
+          desired topology regardless of recovery policy; previously pending transitions do so only when replay is authorized.
+          Batch canonicalization itself writes readiness plans only. It does not install agents or routes, arm timers, emit a
+          creation event, or authorize unrelated effect, drain, receipt, delivery, diagnostic, budget, or selected-contract
+          replay. If startup fails after batch commit, every changed row remains ordinary current-source pending; a later
+          recovery-disabled startup refuses and a recovery-enabled startup may resume. No later process may infer the lost
+          predecessor-completed authorization from current pending state.
+          No unscoped readiness list, desired-only or singular replacement, second writer, predecessor agent/version trust, or
+          post-start `EnsureStandingTargets` fallback is permitted. Startup reloads the exact-source projection, requires the
+          source-transition set to be empty, and applies ordinary pending authorization/refusal before Manager run.
+          Managed-execution admission binds exact execution and delivery authorities but MUST NOT replay pipeline work, start
+          delivery-continuation execution, enumerate executable deliveries, restore schedules or timers, run maintenance, or
+          start run-lifecycle candidate execution. After Manager run starts, startup reloads rather than trusting an earlier
+          snapshot. The existing keyed readiness owner first performs process-only preparation for every authorized pending
+          row while completed rows consume mandatory reconstruction. Process-only preparation reconciles exact agents,
+          current-generation routes, and flow routes but MUST NOT arm timers, mark readiness complete, or publish creation
+          events. Only after every completed and authorized pending row has verified exact current-occurrence agent loops,
+          generation routes, and flow routes may the same keyed owner finalize pending rows, arm their exact timers, record
+          completion, and publish any still-unemitted deterministic creation event. A fresh exact-source reload MUST then show
+          no transition or authorized pending row and MUST reverify every eligible completed process topology. This closes one
+          in-memory completed-process-topology latch over existing owners; it is not a new durable owner or framework.
+          Only after that latch may optional effect/drain/budget/diagnostic/selected-contract hydration and event-level pipeline
+          recovery execute. Pipeline recovery reaches explicit exhaustion before the already-bound delivery-continuation owner
+          starts and synchronizes its exact scope. Generic schedule restore/boot admission, workflow-timer restore, pipeline
+          maintenance, and run-lifecycle candidate execution run only after continuation synchronization because each can
+          claim, publish, or execute autonomous work. Therefore no second pre-continuation pipeline sweep is required: schedule
+          and timer callbacks are not released until exact receivers and the continuation consumer are live, and a sweep racing
+          asynchronous callbacks would not be a valid fence. Outbox dispatch, platform.boot publication, and public ingress
+          follow those releases. Early-bound API/webhook/WebSocket listeners remain fail-closed for executable endpoints until
+          runtime readiness; MCP execution additionally requires an exact admitted turn context. Failure at any phase fails
+          startup and consumes existing lifecycle/route/start-failure compensation; it cannot degrade into public readiness or
+          affect another source.
       auto_emit: Flow schemas may declare auto_emit_on_create. When the platform creates an instance, it automatically emits
         the declared event after the exact route and complete declared-agent topology are verified and initial timers are
         armed. Event ID, lineage, payload, execution mode, delivery context, and occurrence time belong to the durable
@@ -7782,7 +7793,8 @@ engine:
     crash_recovery: >
       Restart restores active workflow rows through WorkflowTimerLifecycle and active generic rows through
       GenericScheduleLifecycle, registering each exact persisted occurrence coordinate once. Runtime-scoped restoration
-      occurs only after manager route/agent hydration succeeds.
+      occurs only after the exact completed-process-topology latch, pipeline recovery to exhaustion, and delivery-
+      continuation start/synchronization succeed. A due restore is an autonomous producer, not inert hydration.
       Global restoration excludes standing-service runs; a runtime that adopts an already-active standing run performs the
       same run-scoped exact-row registration only after the standing reconciliation mutation commits and its runtime route
       is installed. It does not wait for another process restart.
@@ -17909,7 +17921,7 @@ multi_bundle_persistence:
         - RuntimeContextManager lifecycle state is fail-closed and monotonic in this slice: once a loaded persisted BundleContext is marked unavailable/unloaded by an authoritative bundle-unavailability operation, supported admission paths must reject that context with BUNDLE_UNAVAILABLE unless a later separately-approved Load/repair owner exists.
         - The bundle-delete coordinator quiesces a loaded matching BundleContext before any real non-force final mutation and before force-controlled cleanup. RuntimeContextManager performs that typed quiescence while the retiring agents still hold the predecessor source-set revision; the API handler never infers deactivation from a returned result. Successful or partial runtime.nuke with include_bundles=true consumes its own coordinator-owned RuntimeContextManager deactivation. runtime.nuke include_bundles=false must not deactivate bundle contexts.
         - Existing-run controls that can be resolved by run_id dispatch through the selected BundleContext. Ambiguous singleton controls such as runtime.pause/resume, mailbox decision event publication, and broad agent restart/backlog replay fail closed in multi-context mode pending dynamic lifecycle work.
-        - When more than one bundle is pinned in the same process, unscoped startup ownership, active schedule restoration, and manager pending-event recovery remain disabled for every context. This does not disable mandatory dynamic process-topology reconstruction or predecessor-completed desired-source transition. Before any context starts, serve composition invokes the selected-store dynamic readiness startup projection separately with each context's exact immutable BundleSourceFact and observes its three disjoint sets. Malformed or invalid-route state, current ordinary pending without replay authority, or predecessor-pending source transition without replay authority refuses the all-or-nothing serve before cross-context mutation. A predecessor-completed transition is mandatory exact-context work, not completed topology: Runtime.Start revalidates it, derives the current plan from that context's semantic source, consumes the existing exact-item writer/keyed reconciler before Manager run, reloads to require no transition or unresolved pending, and never reconstructs the predecessor plan. After Manager run it reloads again and reconstructs only that source's current-completed topology. Both stores implement the same typed projection contract, while public multi-bundle boot remains PostgreSQL-only. The database query itself constrains exact runs.bundle_hash and runs.bundle_source; an unscoped list or process-side post-filter is forbidden. One context MUST NOT canonicalize, adopt, publish, reject, or otherwise interpret another context's readiness or route rows. Single-bundle DB-loaded serve consumes the same three-class policy.
+        - When more than one bundle is pinned in the same process, unscoped startup ownership, active schedule restoration, and manager pending-event recovery remain disabled for every context. This does not disable mandatory dynamic process-topology reconstruction or predecessor-completed desired-source transition. Before any context starts, serve composition invokes the selected-store dynamic readiness startup projection separately with each context's exact immutable BundleSourceFact and observes its three disjoint sets. Malformed or invalid-route state, current ordinary pending without replay authority, or predecessor-pending source transition without replay authority refuses the all-or-nothing serve before cross-context mutation. A predecessor-completed transition is mandatory exact-context work, not completed topology: Runtime.Start revalidates the complete source transition set, derives every desired plan from that context's semantic source before mutation, and consumes one selected-store observed-state batch transaction that compares every row and commits every replacement or none before Manager run. A one-row set is still a batch; no singular writer or process-side source filter survives. Runtime.Start reloads to require no transition or unauthorized pending, never reconstructs a predecessor plan, then starts Manager and prepares every completed or authorized pending agent/generation/flow route before any pending finalizer may arm or publish. A fresh exact-source reload and route/loop verification closes completed topology before optional recovery, continuation execution, or autonomous schedule/timer/maintenance/run-lifecycle work. Both stores implement the same typed projection contract, while public multi-bundle boot remains PostgreSQL-only. The database query itself constrains exact runs.bundle_hash and runs.bundle_source; an unscoped list or process-side post-filter is forbidden. One context MUST NOT canonicalize, adopt, publish, reject, or otherwise interpret another context's readiness or route rows. Single-bundle DB-loaded serve consumes the same three-class, batch, and producer-fence policy.
         - Every run writer reachable under the selected runtime context consumes BundleSourceFact with bundle_source=persisted and bundle_hash equal to that context's canonical hash.
         - Runtime project OpenProject/ReloadProject source replacement is disabled while the process is pinned to a DB-loaded bundle source.
         - Workspace/container names, volumes, and managed identity labels for executable context paths include bundle-disambiguated identity when more than one context can be loaded.
@@ -25583,6 +25595,13 @@ cli_specification:
             canonical step identity, and renders observed rows once in numeric order. A failed step suppresses later observed
             rows. Failed verbose startup renders the sequence to stderr; a successful sequence renders to stdout. Runtime
             producers MUST use the canonical step name for failures as well as successful updates.
+          execution_phase_rule: >
+            Step numbers and canonical names are presentation identities, not authorization to execute autonomous work in
+            numeric order. Runtime.Start MUST retain the dynamic completed-process-topology latch described by
+            runtime.dynamic_instance_lifecycle.creation.route_materialization.serving_generation_reconstruction. A step that
+            can claim, publish, execute, arm, or recover work reports its existing canonical progress identity only when the
+            required topology/recovery/continuation phase actually releases it; preserving numeric rendering MUST NOT move the
+            producer ahead of that phase.
           steps:
           - step: 1
             name: process_start
@@ -25608,6 +25627,10 @@ cli_specification:
           - step: 8
             name: pipeline_maintenance
             owner: internal/runtime
+            ordering: >
+              Construction may occur earlier, but RunMaintenance can expire human or draft work and publish events and therefore
+              MUST NOT execute until completed dynamic topology, pipeline recovery, and delivery-continuation synchronization
+              have succeeded.
           - step: 9
             name: system_nodes_start
             owner: internal/runtime
@@ -25615,30 +25638,24 @@ cli_specification:
             name: manager_recovery_if_enabled
             owner: internal/runtime
             ordering: >
-              This step owns optional interrupted-work replay, not mandatory serving-process topology. When persistent startup
-              recovery is enabled, the runtime MUST hydrate persisted agent state and register every admitted live agent
-              receiver, reconcile every active dynamic-flow readiness key, retire terminal crash-left dynamic topology, and
-              refuse invalid routes without readiness ownership before it recovers any executable
-              workflow-node delivery. Dynamic readiness reconciliation is boot-fatal and must finish before the successful
-              agent-hydration boundary authorizes the initial node-delivery recovery pass, which in turn opens standing node
-              recovery and runnable workflow-timer restoration. A recovered node handler or due workflow timer therefore
-              observes the same receiver registry as post-readiness dispatch rather than treating an unhydrated or partially
-              reconciled persisted agent as an absent recipient.
+              This step owns optional interrupted-work hydration, not mandatory serving-process topology. Exact-source
+              transition batch canonicalization, Manager.Run, complete process preparation for all completed/authorized pending
+              dynamic rows, keyed finalization, and fresh completed-topology verification occur first under
+              manager_event_loop_start. Only after that latch may enabled recovery settle external effects/provider drains,
+              project budget or lifecycle diagnostics, restore selected-contract evidence, and drive pipeline obligations to
+              exhaustion. Recovery-disabled startup still performs mandatory topology and refuses unauthorized pending work.
             failure_rule: >
-              If persisted agent hydration fails, startup records the canonical degraded manager-recovery decision and
-              MUST keep executable node-delivery recovery and workflow-timer activation closed. It MUST NOT claim, retry,
-              settle, dead-letter, or publish recovered work against a partially hydrated receiver registry. No timer,
-              polling loop, or later maintenance pass may bypass that gate. Startup MUST fail closed instead of entering
-              the degraded running state when timer-obligation inspection is incomplete or when that inspection reports
-              any recoverable runtime-owned workflow timer, because no later manager recovery path owns restoration of a
-              timer withheld at this boundary. Degraded running remains permitted only when complete inspection proves
-              that no runtime-owned workflow timer restoration is being withheld.
+              Failure keeps delivery continuation, schedule/timer restore, maintenance, run-lifecycle execution, outbox, and
+              public readiness closed. Startup MUST NOT claim, retry, settle, dead-letter, or publish recovered work against a
+              partial receiver registry. No timer, polling loop, or later maintenance pass may bypass that gate.
           - step: 11
             name: schedule_restoration
             owner: internal/runtime
             ordering: >
-              The schedule-restoration step follows manager recovery. Runtime-owned workflow timers become runnable only
-              after manager route/agent hydration succeeds. Global workflow-timer restoration excludes standing-service
+              Generic schedule restore/boot admission and workflow-timer restore can reconcile due wakeups immediately. They
+              therefore run only after completed topology, pipeline recovery to exhaustion, and delivery-continuation start and
+              synchronization. No second pre-continuation pipeline sweep is required because these producers remain closed until
+              both exact receivers and the continuation consumer are live. Global workflow-timer restoration excludes standing-service
               run IDs because standing reconciliation owns their route, agent, generation, and publication boundary. EnsureStandingTargets,
               EnsureStandingServiceTargets, or EnsureStandingReplacementTargets restores each admitted standing run's
               exact active workflow timers only after that standing mutation commits and its runtime route is installed.
@@ -25659,20 +25676,25 @@ cli_specification:
             owner: internal/runtime
             ordering: >
               Managed execution admission binds exact execution and delivery authority without replaying pipeline work,
-              starting delivery-continuation execution, or enumerating executable deliveries. Independently of recovery policy, the
-              runtime's exact BundleSourceFact-scoped startup projection has already refused pending or invalid topology before
-              Manager run. Every authorized source-transition plan is guarded-replaced before any keyed finalizer may consume
-              aggregate route/descriptor state. After the Manager run occurrence starts, the same selected-store operation is reloaded and mandatory
-              completed dynamic topology reconstruction consumes only that source's rows, proving exact current-occurrence
-              agent routes/loops plus the persisted flow route. Recovery-enabled startup then drives the exact pipeline-
-              obligation scope to explicit exhaustion, starts and exhausts the exact delivery-continuation scope, and
-              synchronizes it before any later readiness step. Multi-context serve completes the observation-only projection preflight for every context before
-              starting any runtime. No unscoped readiness/route scan, process-side source filter, periodic pipeline/outbox
-              sweeper, or foreign context may race this sequence or publish readiness while a handoff-hidden delivery or
-              missing executable receiver remains.
+              starting delivery-continuation execution, enumerating executable deliveries, or releasing autonomous producers.
+              Independently of recovery policy, the runtime's exact BundleSourceFact-scoped startup projection has already
+              refused unauthorized pending or invalid topology before Manager run. Every authorized source-transition desired
+              plan is derived first; one selected-store transaction compares the complete exact observed set and replaces all
+              plans or none. After the Manager occurrence starts, a fresh projection drives mandatory reconstruction of
+              completed rows and process-only preparation of every authorized pending row. No pending timer, completion, or
+              creation-event finalizer runs until all exact current-occurrence agent loops, generation routes, and persisted flow
+              routes are verified. The keyed owner then finalizes pending rows, and a fresh projection plus exact route/loop
+              verification closes completed topology. Optional hydration and pipeline recovery follow that latch; pipeline
+              recovery reaches exhaustion before delivery-continuation start/synchronization. Schedules, timers, maintenance,
+              and run-lifecycle execution follow continuation synchronization. Multi-context serve completes observation-only
+              preflight for every context before starting any runtime. No unscoped readiness/route scan, process-side source
+              filter, per-row partial transition, periodic pipeline/outbox sweeper, or foreign context may race this sequence.
           - step: 17
             name: outbox_sweeper
             owner: internal/runtime
+            ordering: >
+              Outbox dispatch starts only after completed topology, recovery, continuation synchronization, and autonomous
+              schedule/timer/maintenance/run-lifecycle producer release succeed.
           - step: 18
             name: boot_self_check_optional
             owner: internal/runtime
