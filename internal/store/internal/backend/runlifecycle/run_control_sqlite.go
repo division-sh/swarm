@@ -13,6 +13,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
 
@@ -71,10 +72,7 @@ func (s *RunLifecycleSQLiteOwner) runControlTransition(ctx context.Context, req 
 	}
 	defer handoff.Rollback()
 	var state runtimeruncontrol.State
-	effects, err := runTerminationRevisionEffects(runID)
-	if err != nil {
-		return runtimeruncontrol.State{}, err
-	}
+	effects := runforkrevision.NewEffects()
 	if err := s.runPrivateAuthorActivityMutation(ctx, "sqlite run control transition", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		var err error
 		state, err = loadSQLiteRunControlState(txctx, tx, runID)
@@ -94,7 +92,7 @@ func (s *RunLifecycleSQLiteOwner) runControlTransition(ctx context.Context, req 
 			if err := rejectSQLiteStandingRunStopTx(txctx, tx, runID); err != nil {
 				return err
 			}
-			state, err = s.stopRunControlTx(txctx, tx, story, state, req)
+			state, err = s.stopRunControlTx(txctx, tx, story, effects, state, req)
 		default:
 			err = fmt.Errorf("unsupported run control action %q", action)
 		}
@@ -215,7 +213,7 @@ func (s *RunLifecycleSQLiteOwner) continueRunControlTx(ctx context.Context, tx *
 	return state, nil
 }
 
-func (s *RunLifecycleSQLiteOwner) stopRunControlTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
+func (s *RunLifecycleSQLiteOwner) stopRunControlTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *runforkrevision.Effects, state runtimeruncontrol.State, req runtimeruncontrol.TransitionRequest) (runtimeruncontrol.State, error) {
 	lifecycleState, err := runtimerunlifecycle.ParseState(state.Status)
 	if err != nil {
 		return runtimeruncontrol.State{}, err
@@ -223,11 +221,11 @@ func (s *RunLifecycleSQLiteOwner) stopRunControlTx(ctx context.Context, tx *sql.
 	if !lifecycleState.Active() {
 		return runtimeruncontrol.State{}, &runtimeruncontrol.StateError{Err: runtimeruncontrol.ErrAlreadyTerminal, RunID: state.RunID, CurrentStatus: state.Status}
 	}
-	abandoned, cancellations, err := s.quiesceStoppedRunWorkTx(ctx, tx, story, state.RunID, req.Reason, req.Now.UTC())
+	abandoned, cancellations, err := s.quiesceStoppedRunWorkTx(ctx, tx, story, effects, state.RunID, req.Reason, req.Now.UTC())
 	if err != nil {
 		return runtimeruncontrol.State{}, err
 	}
-	if _, _, err := s.MarkTerminalTx(ctx, tx, story, runtimerunlifecycle.TerminalRequest{RunID: state.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: req.Now.UTC()}); err != nil {
+	if _, _, err := s.MarkTerminalTx(ctx, tx, story, effects, runtimerunlifecycle.TerminalRequest{RunID: state.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: req.Now.UTC()}); err != nil {
 		return runtimeruncontrol.State{}, err
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -249,21 +247,21 @@ func (s *RunLifecycleSQLiteOwner) stopRunControlTx(ctx context.Context, tx *sql.
 	return state, nil
 }
 
-func (s *RunLifecycleSQLiteOwner) quiesceStoppedRunWorkTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, runID, reason string, now time.Time) (int, []runtimetimercancellation.Ref, error) {
+func (s *RunLifecycleSQLiteOwner) quiesceStoppedRunWorkTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *runforkrevision.Effects, runID, reason string, now time.Time) (int, []runtimetimercancellation.Ref, error) {
 	if s.delivery == nil || s.pipeline == nil {
 		return 0, nil, fmt.Errorf("run lifecycle SQLite quiescence owners are required")
 	}
-	deliveries, err := s.delivery.TerminalizeRunDeliveriesTx(ctx, tx, story, runID, "run_stopped")
+	deliveries, err := s.delivery.TerminalizeRunDeliveriesTx(ctx, tx, story, effects, runID, "run_stopped")
 	if err != nil {
 		return 0, nil, err
 	}
-	if _, err := s.pipeline.TerminalizeRunTx(ctx, tx, runID, runtimepipelineobligation.DeadLetter("run_stopped", nil), now); err != nil {
+	if _, err := s.pipeline.TerminalizeRunTx(ctx, tx, effects, runID, runtimepipelineobligation.DeadLetter("run_stopped", nil), now); err != nil {
 		return 0, nil, err
 	}
-	if _, err := s.TerminateActiveSessionsTx(ctx, tx, []string{runID}, "run_stopped", now); err != nil {
+	if _, err := s.TerminateActiveSessionsTx(ctx, tx, effects, []string{runID}, "run_stopped", now); err != nil {
 		return 0, nil, err
 	}
-	cancellations, err := cancelActiveRunTimerFamiliesTx(ctx, tx, false, []string{runID}, "run_stopped", now)
+	cancellations, err := cancelActiveRunTimerFamiliesTx(ctx, tx, false, effects, []string{runID}, "run_stopped", now)
 	if err != nil {
 		return 0, nil, err
 	}

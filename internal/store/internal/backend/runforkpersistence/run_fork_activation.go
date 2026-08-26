@@ -140,21 +140,21 @@ func (s *RunForkPostgresOwner) ActivateRunFork(ctx context.Context, req runfork.
 	}
 
 	now := time.Now().UTC()
+	effects := privaterunforkrevision.NewEffects()
 	replayResult := runfork.RunForkDeliveryEventReplayResult{
 		Owner:       runfork.RunForkDeliveryEventReplayOwner,
 		SourceRunID: lineage.SourceRunID,
 		ForkRunID:   lineage.ForkRunID,
 	}
 	if historicalReplayExecution.DeliveryEventReplayReady {
-		replayResult, err = applyRunForkDeliveryEventReplay(ctx, tx, story, s, lineage, historicalReplayExecution, now)
+		replayResult, err = applyRunForkDeliveryEventReplay(ctx, tx, story, effects, s, lineage, historicalReplayExecution, now)
 		if err != nil {
 			return result, err
 		}
 	}
-	if err := s.applyRunForkSourceFreeze(ctx, tx, story, lineage, now, req.ConfirmSourceFreeze, handoff); err != nil {
+	if err := s.applyRunForkSourceFreeze(ctx, tx, story, effects, lineage, now, req.ConfirmSourceFreeze, handoff); err != nil {
 		return result, err
 	}
-	effects := privaterunforkrevision.NewEffects()
 	if err := effects.Add(lineage.ForkRunID,
 		privaterunforkrevision.FamilyEvents,
 		privaterunforkrevision.FamilyEventDeliveries,

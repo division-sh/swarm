@@ -433,11 +433,12 @@ func (s *EffectPostgresOwner) settleProviderDrainTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	story runtimeauthoractivity.Mutation,
+	effects *revisionEffects,
 	attempt runtimeeffects.Attempt,
 	settlement runtimeeffects.CompletionSettlement,
 	permit providerDrainPermit,
 ) (*runtimeeffects.ProviderDrainFinalization, error) {
-	if err := settleProviderDrainOrigin(ctx, tx, story, settlement, permit.Origin, s.delivery, s.directives); err != nil {
+	if err := settleProviderDrainOrigin(ctx, tx, story, effects, settlement, permit.Origin, s.delivery, s.directives); err != nil {
 		return nil, err
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE runtime_provider_attempt_drains SET state='settled', settled_at=$2 WHERE drain_id=$1::uuid AND state='pending'`, permit.DrainID, settlement.Now.UTC())
@@ -451,11 +452,12 @@ func (s *EffectSQLiteOwner) settleProviderDrainTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	story runtimeauthoractivity.Mutation,
+	effects *revisionEffects,
 	attempt runtimeeffects.Attempt,
 	settlement runtimeeffects.CompletionSettlement,
 	permit providerDrainPermit,
 ) (*runtimeeffects.ProviderDrainFinalization, error) {
-	if err := settleProviderDrainOrigin(ctx, tx, story, settlement, permit.Origin, s.delivery, s.directives); err != nil {
+	if err := settleProviderDrainOrigin(ctx, tx, story, effects, settlement, permit.Origin, s.delivery, s.directives); err != nil {
 		return nil, err
 	}
 	res, err := tx.ExecContext(ctx, `UPDATE runtime_provider_attempt_drains SET state='settled', settled_at=? WHERE drain_id=? AND state='pending'`, settlement.Now.UTC(), permit.DrainID)
@@ -469,6 +471,7 @@ func settleProviderDrainRecovery(
 	ctx context.Context,
 	tx *sql.Tx,
 	story runtimeauthoractivity.Mutation,
+	effects *revisionEffects,
 	attempt runtimeeffects.Attempt,
 	settlement runtimeeffects.CompletionSettlement,
 	permit providerDrainPermit,
@@ -477,7 +480,7 @@ func settleProviderDrainRecovery(
 	delivery providerDrainDeliveryOwner,
 	directives providerDrainDirectiveOwner,
 ) (*runtimeeffects.ProviderDrainFinalization, error) {
-	if err := settleProviderDrainOriginRecovery(ctx, tx, story, settlement, permit.Origin, delivery, directives); err != nil {
+	if err := settleProviderDrainOriginRecovery(ctx, tx, story, effects, settlement, permit.Origin, delivery, directives); err != nil {
 		return nil, err
 	}
 	state := "settled"
@@ -510,6 +513,7 @@ func settleProviderDrainOrigin(
 	ctx context.Context,
 	tx *sql.Tx,
 	story runtimeauthoractivity.Mutation,
+	effects *revisionEffects,
 	settlement runtimeeffects.CompletionSettlement,
 	origin runtimeeffects.CompletionOrigin,
 	delivery providerDrainDeliveryOwner,
@@ -520,7 +524,7 @@ func settleProviderDrainOrigin(
 			return fmt.Errorf("provider-drain directive owner is not bound")
 		}
 		failure := directiveDrainFailure(settlement)
-		return directives.SettleProviderDirectiveOriginTx(ctx, tx, story, origin.Directive, runtimeagentcontrol.DirectiveOperationIndeterminate, failure, settlement.Now.UTC())
+		return directives.SettleProviderDirectiveOriginTx(ctx, tx, story, effects, origin.Directive, runtimeagentcontrol.DirectiveOperationIndeterminate, failure, settlement.Now.UTC())
 	}
 	if origin.Kind != runtimeeffects.CompletionOriginDelivery || delivery == nil {
 		return fmt.Errorf("provider-drain delivery origin owner is not bound")
@@ -530,13 +534,13 @@ func settleProviderDrainOrigin(
 		duration = time.Duration(settlement.AgentTurn.LatencyMS) * time.Millisecond
 	}
 	if settlement.Settlement.State == runtimeeffects.StateSettled {
-		return delivery.SettleProviderOriginSuccessTx(ctx, tx, story, origin.Delivery, nil, duration)
+		return delivery.SettleProviderOriginSuccessTx(ctx, tx, story, effects, origin.Delivery, nil, duration)
 	}
 	reason := "provider_attempt_drained_without_confirmed_success"
 	if settlement.Settlement.Failure != nil && strings.TrimSpace(settlement.Settlement.Failure.Detail.Code) != "" {
 		reason = settlement.Settlement.Failure.Detail.Code
 	}
-	return delivery.SettleProviderOriginFailureTx(ctx, tx, story, origin.Delivery, runtimedelivery.Settlement{
+	return delivery.SettleProviderOriginFailureTx(ctx, tx, story, effects, origin.Delivery, runtimedelivery.Settlement{
 		Disposition:   runtimedelivery.FailureDeadLetter,
 		ReasonCode:    reason,
 		Failure:       settlement.Settlement.Failure,
@@ -549,6 +553,7 @@ func settleProviderDrainOriginRecovery(
 	ctx context.Context,
 	tx *sql.Tx,
 	story runtimeauthoractivity.Mutation,
+	effects *revisionEffects,
 	settlement runtimeeffects.CompletionSettlement,
 	origin runtimeeffects.CompletionOrigin,
 	delivery providerDrainDeliveryOwner,
@@ -561,7 +566,7 @@ func settleProviderDrainOriginRecovery(
 		if directives == nil {
 			return fmt.Errorf("provider-drain directive owner is not bound")
 		}
-		return directives.SettleProviderDirectiveOriginTx(ctx, tx, story, origin.Directive, runtimeagentcontrol.DirectiveOperationIndeterminate, *settlement.Settlement.Failure, settlement.Now.UTC())
+		return directives.SettleProviderDirectiveOriginTx(ctx, tx, story, effects, origin.Directive, runtimeagentcontrol.DirectiveOperationIndeterminate, *settlement.Settlement.Failure, settlement.Now.UTC())
 	}
 	if origin.Kind != runtimeeffects.CompletionOriginDelivery || delivery == nil {
 		return fmt.Errorf("provider-drain delivery origin owner is not bound")
@@ -574,7 +579,7 @@ func settleProviderDrainOriginRecovery(
 	if code := strings.TrimSpace(settlement.Settlement.Failure.Detail.Code); code != "" {
 		reason = code
 	}
-	return delivery.SettleProviderOriginRecoveryFailureTx(ctx, tx, story, origin.Delivery, runtimedelivery.Settlement{
+	return delivery.SettleProviderOriginRecoveryFailureTx(ctx, tx, story, effects, origin.Delivery, runtimedelivery.Settlement{
 		Disposition:   runtimedelivery.FailureDeadLetter,
 		ReasonCode:    reason,
 		Failure:       settlement.Settlement.Failure,
@@ -685,6 +690,7 @@ func (s *EffectPostgresOwner) CaptureProviderAttemptDrainsPostgresTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	story runtimeauthoractivity.Mutation,
+	effects *revisionEffects,
 	capture runtimeeffects.ProviderAttemptDrainCapture,
 ) (runtimeeffects.ProviderAttemptDrainCaptureResult, error) {
 	if err := capture.Validate(); err != nil {
@@ -720,13 +726,14 @@ func (s *EffectPostgresOwner) CaptureProviderAttemptDrainsPostgresTx(
 	if err != nil {
 		return runtimeeffects.ProviderAttemptDrainCaptureResult{}, err
 	}
-	return s.captureProviderAttemptDrains(ctx, tx, story, capture, candidates, true)
+	return s.captureProviderAttemptDrains(ctx, tx, story, effects, capture, candidates, true)
 }
 
 func (s *EffectSQLiteOwner) CaptureProviderAttemptDrainsSQLiteTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	story runtimeauthoractivity.Mutation,
+	effects *revisionEffects,
 	capture runtimeeffects.ProviderAttemptDrainCapture,
 ) (runtimeeffects.ProviderAttemptDrainCaptureResult, error) {
 	if err := capture.Validate(); err != nil {
@@ -761,7 +768,7 @@ func (s *EffectSQLiteOwner) CaptureProviderAttemptDrainsSQLiteTx(
 	if err != nil {
 		return runtimeeffects.ProviderAttemptDrainCaptureResult{}, err
 	}
-	return s.captureProviderAttemptDrains(ctx, tx, story, capture, candidates, false)
+	return s.captureProviderAttemptDrains(ctx, tx, story, effects, capture, candidates, false)
 }
 
 func scanProviderAttemptDrainCandidates(rows *sql.Rows) ([]providerAttemptDrainCandidate, error) {
@@ -794,28 +801,31 @@ func (s *EffectPostgresOwner) captureProviderAttemptDrains(
 	ctx context.Context,
 	tx *sql.Tx,
 	story runtimeauthoractivity.Mutation,
+	effects *revisionEffects,
 	capture runtimeeffects.ProviderAttemptDrainCapture,
 	candidates []providerAttemptDrainCandidate,
 	postgres bool,
 ) (runtimeeffects.ProviderAttemptDrainCaptureResult, error) {
-	return captureProviderAttemptDrains(ctx, tx, story, capture, candidates, postgres, s.delivery, s.directives)
+	return captureProviderAttemptDrains(ctx, tx, story, effects, capture, candidates, postgres, s.delivery, s.directives)
 }
 
 func (s *EffectSQLiteOwner) captureProviderAttemptDrains(
 	ctx context.Context,
 	tx *sql.Tx,
 	story runtimeauthoractivity.Mutation,
+	effects *revisionEffects,
 	capture runtimeeffects.ProviderAttemptDrainCapture,
 	candidates []providerAttemptDrainCandidate,
 	postgres bool,
 ) (runtimeeffects.ProviderAttemptDrainCaptureResult, error) {
-	return captureProviderAttemptDrains(ctx, tx, story, capture, candidates, postgres, s.delivery, s.directives)
+	return captureProviderAttemptDrains(ctx, tx, story, effects, capture, candidates, postgres, s.delivery, s.directives)
 }
 
 func captureProviderAttemptDrains(
 	ctx context.Context,
 	tx *sql.Tx,
 	story runtimeauthoractivity.Mutation,
+	effects *revisionEffects,
 	capture runtimeeffects.ProviderAttemptDrainCapture,
 	candidates []providerAttemptDrainCandidate,
 	postgres bool,
@@ -833,7 +843,7 @@ func captureProviderAttemptDrains(
 		}
 		switch candidate.State {
 		case runtimeeffects.StateAuthorized:
-			if err := abandonPrelaunchProviderAttempt(ctx, tx, story, candidate, origin, capture.CapturedAt, postgres, delivery, directives); err != nil {
+			if err := abandonPrelaunchProviderAttempt(ctx, tx, story, effects, candidate, origin, capture.CapturedAt, postgres, delivery, directives); err != nil {
 				return runtimeeffects.ProviderAttemptDrainCaptureResult{}, err
 			}
 		case runtimeeffects.StateLaunched, runtimeeffects.StateResponseObserved:
@@ -852,6 +862,7 @@ func abandonPrelaunchProviderAttempt(
 	ctx context.Context,
 	tx *sql.Tx,
 	story runtimeauthoractivity.Mutation,
+	effects *revisionEffects,
 	candidate providerAttemptDrainCandidate,
 	origin runtimeeffects.CompletionOrigin,
 	now time.Time,
@@ -868,10 +879,10 @@ func abandonPrelaunchProviderAttempt(
 	)
 	failure, _ := runtimefailures.EnvelopeFromError(failureErr)
 	if origin.Kind == runtimeeffects.CompletionOriginDirective {
-		if err := directives.SettleProviderDirectiveOriginTx(ctx, tx, story, origin.Directive, runtimeagentcontrol.DirectiveOperationFailed, failure, now.UTC()); err != nil {
+		if err := directives.SettleProviderDirectiveOriginTx(ctx, tx, story, effects, origin.Directive, runtimeagentcontrol.DirectiveOperationFailed, failure, now.UTC()); err != nil {
 			return fmt.Errorf("settle superseded prelaunch directive origin: %w", err)
 		}
-	} else if err := delivery.SettleProviderOriginFailureTx(ctx, tx, story, origin.Delivery, runtimedelivery.Settlement{
+	} else if err := delivery.SettleProviderOriginFailureTx(ctx, tx, story, effects, origin.Delivery, runtimedelivery.Settlement{
 		Disposition: runtimedelivery.FailureDeadLetter, ReasonCode: "provider_attempt_superseded_before_launch", Failure: &failure,
 		RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
 	}); err != nil {

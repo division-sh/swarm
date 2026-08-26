@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
 
@@ -22,7 +23,7 @@ const (
 	runForkDeliveryEventReplayTable = "run_fork_delivery_event_replays"
 )
 
-func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, store *RunForkPostgresOwner, lineage runForkActivationLineage, execution runfork.RunForkHistoricalReplayExecution, now time.Time) (runfork.RunForkDeliveryEventReplayResult, error) {
+func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *runforkrevision.Effects, store *RunForkPostgresOwner, lineage runForkActivationLineage, execution runfork.RunForkHistoricalReplayExecution, now time.Time) (runfork.RunForkDeliveryEventReplayResult, error) {
 	result := runfork.RunForkDeliveryEventReplayResult{
 		Owner:       runfork.RunForkDeliveryEventReplayOwner,
 		SourceRunID: lineage.SourceRunID,
@@ -129,11 +130,11 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, story *pri
 		if err := (runtimebus.PreparedPublishEvent{Event: admitted, Settlement: settlement, DeliveryRoutes: routes}).Validate(); err != nil {
 			return result, fmt.Errorf("validate fork replay event %s aggregate: %w", forkEventID, err)
 		}
-		outcome, err := store.events.AppendAdmittedEventTxOutcome(ctx, tx, story, preparedEvents[forkEventID], settlement)
+		outcome, err := store.events.AppendAdmittedEventTxOutcome(ctx, tx, story, effects, preparedEvents[forkEventID], settlement)
 		if err != nil {
 			return result, err
 		}
-		if err := store.PipelinePostgresOwner.CommitScopeAtTx(ctx, tx, forkEventID, runtimepipelineobligation.ScopeDirect, now); err != nil {
+		if err := store.PipelinePostgresOwner.CommitScopeAtTx(ctx, tx, effects, forkEventID, runtimepipelineobligation.ScopeDirect, now); err != nil {
 			return result, err
 		}
 		if outcome == runtimebus.EventAppendInserted {

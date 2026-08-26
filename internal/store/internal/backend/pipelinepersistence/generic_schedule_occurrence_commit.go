@@ -17,6 +17,7 @@ func commitGenericScheduleOccurrence(
 	ctx context.Context,
 	store eventCommitTxStore,
 	postgres bool,
+	effects *revisionEffects,
 	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error,
 	reserve func(context.Context) (*runLifecycleCandidateHandoffReservation, error),
 	prepare func(*runLifecycleCandidateHandoffReservation, runtimerunlifecycle.CandidateRequestResult) error,
@@ -75,7 +76,7 @@ func commitGenericScheduleOccurrence(
 			return nil
 		}
 
-		committed, err := store.commitPublicationTx(txctx, tx, story, plan.PublicationCommand(), handoff)
+		committed, err := store.commitPublicationTx(txctx, tx, story, effects, plan.PublicationCommand(), handoff)
 		if err != nil {
 			return fmt.Errorf("commit generic schedule publication: %w", err)
 		}
@@ -101,6 +102,9 @@ func commitGenericScheduleOccurrence(
 			if failErr != nil {
 				return failErr
 			}
+			if err := addTimerRevisionEffects(effects, persisted.Command.RunID); err != nil {
+				return err
+			}
 			result = runtimegenericschedule.CommitResult{Outcome: runtimegenericschedule.CommitTerminal, Next: failed}
 			return nil
 		}
@@ -113,6 +117,9 @@ func commitGenericScheduleOccurrence(
 		}
 		if outcome != runtimegenericschedule.CommitCommitted {
 			return fmt.Errorf("generic schedule changed state after event admission")
+		}
+		if err := addTimerRevisionEffects(effects, next.Command.RunID); err != nil {
+			return err
 		}
 		if next.Status == runtimegenericschedule.StatusFired && next.Command.RunID != "" {
 			candidate, err := requestCandidate(txctx, tx, next.Command.RunID)
@@ -140,14 +147,8 @@ func commitGenericScheduleOccurrence(
 
 func (s *PipelinePostgresOwner) CommitGenericScheduleOccurrence(ctx context.Context, command runtimegenericschedule.CommitCommand) (runtimegenericschedule.CommitResult, error) {
 	effects := newRevisionEffects()
-	if err := addTimerRevisionEffects(effects, command.Activation.Command.RunID); err != nil {
-		return runtimegenericschedule.CommitResult{}, err
-	}
-	if err := addPublicationRevisionEffects(effects, command.Publication); err != nil {
-		return runtimegenericschedule.CommitResult{}, err
-	}
 	return commitGenericScheduleOccurrence(
-		ctx, s, true,
+		ctx, s, true, effects,
 		func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 			return s.runPrivateAuthorActivityMutation(ctx, effects, fn)
 		},
@@ -165,14 +166,8 @@ func (s *PipelinePostgresOwner) CommitGenericScheduleOccurrence(ctx context.Cont
 
 func (s *PipelineSQLiteOwner) CommitGenericScheduleOccurrence(ctx context.Context, command runtimegenericschedule.CommitCommand) (runtimegenericschedule.CommitResult, error) {
 	effects := newRevisionEffects()
-	if err := addTimerRevisionEffects(effects, command.Activation.Command.RunID); err != nil {
-		return runtimegenericschedule.CommitResult{}, err
-	}
-	if err := addPublicationRevisionEffects(effects, command.Publication); err != nil {
-		return runtimegenericschedule.CommitResult{}, err
-	}
 	return commitGenericScheduleOccurrence(
-		ctx, s, false,
+		ctx, s, false, effects,
 		func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 			return s.runPrivateAuthorActivityMutation(ctx, "sqlite generic schedule occurrence", effects, fn)
 		},

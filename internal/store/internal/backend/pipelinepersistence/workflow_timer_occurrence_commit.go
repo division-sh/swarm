@@ -17,6 +17,7 @@ func commitWorkflowTimerOccurrence(
 	ctx context.Context,
 	store eventCommitTxStore,
 	postgres bool,
+	effects *revisionEffects,
 	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error,
 	reserve func(context.Context) (*runLifecycleCandidateHandoffReservation, error),
 	prepare func(*runLifecycleCandidateHandoffReservation, runtimerunlifecycle.CandidateRequestResult) error,
@@ -62,7 +63,7 @@ func commitWorkflowTimerOccurrence(
 			return err
 		}
 
-		committed, err := store.commitPublicationTx(txctx, tx, story, plan.PublicationCommand(), handoff)
+		committed, err := store.commitPublicationTx(txctx, tx, story, effects, plan.PublicationCommand(), handoff)
 		if err != nil {
 			return fmt.Errorf("commit workflow timer publication: %w", err)
 		}
@@ -73,7 +74,7 @@ func commitWorkflowTimerOccurrence(
 			return fmt.Errorf("workflow timer publication returned invalid append outcome")
 		}
 
-		next, err := advanceWorkflowEngineTimerOccurrence(txctx, tx, postgres, activation, command.FiredAt)
+		next, err := advanceWorkflowEngineTimerOccurrence(txctx, tx, postgres, effects, activation, command.FiredAt)
 		if err != nil {
 			return err
 		}
@@ -113,6 +114,7 @@ func advanceWorkflowEngineTimerOccurrence(
 	ctx context.Context,
 	tx *sql.Tx,
 	postgres bool,
+	effects *revisionEffects,
 	activation runtimepipeline.WorkflowTimerActivation,
 	firedAt time.Time,
 ) (runtimepipeline.WorkflowTimerActivation, error) {
@@ -145,6 +147,9 @@ func advanceWorkflowEngineTimerOccurrence(
 	if rows != 1 {
 		return runtimepipeline.WorkflowTimerActivation{}, fmt.Errorf("workflow timer occurrence advanced %d rows", rows)
 	}
+	if err := addTimerRevisionEffects(effects, activation.RunID); err != nil {
+		return runtimepipeline.WorkflowTimerActivation{}, err
+	}
 	next.Status = nextStatus
 	next = next.Canonical()
 	if err := next.Validate(); err != nil {
@@ -155,16 +160,11 @@ func advanceWorkflowEngineTimerOccurrence(
 
 func (s *PipelinePostgresOwner) CommitWorkflowTimerOccurrence(ctx context.Context, command runtimepipeline.WorkflowTimerOccurrenceCommand) (runtimepipeline.CommittedWorkflowTimerOccurrence, error) {
 	effects := newRevisionEffects()
-	if err := addTimerRevisionEffects(effects, command.Activation.RunID); err != nil {
-		return runtimepipeline.CommittedWorkflowTimerOccurrence{}, err
-	}
-	if err := addPublicationRevisionEffects(effects, command.Publication); err != nil {
-		return runtimepipeline.CommittedWorkflowTimerOccurrence{}, err
-	}
 	return commitWorkflowTimerOccurrence(
 		ctx,
 		s,
 		true,
+		effects,
 		func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 			return s.runPrivateAuthorActivityMutation(ctx, effects, fn)
 		},
@@ -181,16 +181,11 @@ func (s *PipelinePostgresOwner) CommitWorkflowTimerOccurrence(ctx context.Contex
 
 func (s *PipelineSQLiteOwner) CommitWorkflowTimerOccurrence(ctx context.Context, command runtimepipeline.WorkflowTimerOccurrenceCommand) (runtimepipeline.CommittedWorkflowTimerOccurrence, error) {
 	effects := newRevisionEffects()
-	if err := addTimerRevisionEffects(effects, command.Activation.RunID); err != nil {
-		return runtimepipeline.CommittedWorkflowTimerOccurrence{}, err
-	}
-	if err := addPublicationRevisionEffects(effects, command.Publication); err != nil {
-		return runtimepipeline.CommittedWorkflowTimerOccurrence{}, err
-	}
 	return commitWorkflowTimerOccurrence(
 		ctx,
 		s,
 		false,
+		effects,
 		func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 			return s.runPrivateAuthorActivityMutation(ctx, "sqlite workflow timer occurrence", effects, fn)
 		},

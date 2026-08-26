@@ -24,15 +24,15 @@ import (
 
 type deliveryOwner interface {
 	ActiveRunDeliverySnapshotsTx(context.Context, *sql.Tx, string) ([]runtimedelivery.Snapshot, error)
-	TerminalizeRunDeliveriesTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, string, string) ([]runtimedelivery.Terminalization, error)
+	TerminalizeRunDeliveriesTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *privaterunforkrevision.Effects, string, string) ([]runtimedelivery.Terminalization, error)
 }
 
 type pipelineOwner interface {
-	TerminalizeRunTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Disposition, time.Time) (int, error)
+	TerminalizeRunTx(context.Context, *sql.Tx, *privaterunforkrevision.Effects, string, runtimepipelineobligation.Disposition, time.Time) (int, error)
 }
 
 type lifecycleOwner interface {
-	MarkTerminalTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error)
+	MarkTerminalTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *privaterunforkrevision.Effects, runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error)
 	UpsertQuiescedRunControlTx(context.Context, *sql.Tx, string, string, string, time.Time) error
 }
 
@@ -132,6 +132,7 @@ func (s *PreservationPostgresOwner) applyPreservationCleanup(ctx context.Context
 	if err != nil {
 		return preservationcleanup.Result{}, err
 	}
+	effects := privaterunforkrevision.NewEffects()
 
 	runs, err := lockUnavailableBundlePreservationRunsTx(ctx, tx, runIDs)
 	if err != nil {
@@ -206,10 +207,10 @@ func (s *PreservationPostgresOwner) applyPreservationCleanup(ctx context.Context
 	}
 	for _, runID := range activeRunIDs {
 		target := targetByRun[runID]
-		if _, err := s.delivery.TerminalizeRunDeliveriesTx(ctx, tx, story, runID, target.ReasonCode); err != nil {
+		if _, err := s.delivery.TerminalizeRunDeliveriesTx(ctx, tx, story, effects, runID, target.ReasonCode); err != nil {
 			return preservationcleanup.Result{}, err
 		}
-		terminalized, err := s.pipeline.TerminalizeRunTx(ctx, tx, runID, runtimepipelineobligation.DeadLetter(target.ReasonCode, nil), now)
+		terminalized, err := s.pipeline.TerminalizeRunTx(ctx, tx, effects, runID, runtimepipelineobligation.DeadLetter(target.ReasonCode, nil), now)
 		if err != nil {
 			return preservationcleanup.Result{}, err
 		}
@@ -217,17 +218,17 @@ func (s *PreservationPostgresOwner) applyPreservationCleanup(ctx context.Context
 	}
 	for _, session := range sessions {
 		target := targetByRun[session.RunID]
-		if err := terminateUnavailableBundlePreservationSessionTx(ctx, tx, session.SessionID, target.ReasonCode, now); err != nil {
+		if err := terminateUnavailableBundlePreservationSessionTx(ctx, tx, effects, session.RunID, session.SessionID, target.ReasonCode, now); err != nil {
 			return preservationcleanup.Result{}, err
 		}
 	}
 	for _, runID := range activeRunIDs {
 		target := targetByRun[runID]
-		generic, err := storegenericschedule.CancelRunsTx(ctx, tx, true, []string{runID}, target.ReasonCode, now)
+		generic, err := storegenericschedule.CancelRunsTx(ctx, tx, true, effects, []string{runID}, target.ReasonCode, now)
 		if err != nil {
 			return preservationcleanup.Result{}, fmt.Errorf("cancel preservation generic schedules: %w", err)
 		}
-		workflow, err := storeworkflowtimer.CancelRunsTx(ctx, tx, true, []string{runID})
+		workflow, err := storeworkflowtimer.CancelRunsTx(ctx, tx, true, effects, []string{runID})
 		if err != nil {
 			return preservationcleanup.Result{}, fmt.Errorf("cancel preservation workflow timers: %w", err)
 		}
@@ -241,7 +242,7 @@ func (s *PreservationPostgresOwner) applyPreservationCleanup(ctx context.Context
 	}
 	for _, run := range runs {
 		target := targetByRun[run.RunID]
-		if _, _, err := s.lifecycle.MarkTerminalTx(ctx, tx, story, runtimerunlifecycle.TerminalRequest{
+		if _, _, err := s.lifecycle.MarkTerminalTx(ctx, tx, story, effects, runtimerunlifecycle.TerminalRequest{
 			RunID: run.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: now,
 		}); err != nil {
 			return preservationcleanup.Result{}, err
@@ -252,19 +253,6 @@ func (s *PreservationPostgresOwner) applyPreservationCleanup(ctx context.Context
 	}
 	if err := story.Finalize(ctx); err != nil {
 		return preservationcleanup.Result{}, err
-	}
-	effects := privaterunforkrevision.NewEffects()
-	for _, runID := range activeRunIDs {
-		if err := effects.Add(runID,
-			privaterunforkrevision.FamilyEventDeliveries,
-			privaterunforkrevision.FamilyCommittedReplayScopes,
-			privaterunforkrevision.FamilyEventReceipts,
-			privaterunforkrevision.FamilyDeadLetters,
-			privaterunforkrevision.FamilyTimers,
-			privaterunforkrevision.FamilyAgentSessions,
-		); err != nil {
-			return preservationcleanup.Result{}, err
-		}
 	}
 	if err := s.runFork.FinalizeRunForkRevisionTx(ctx, tx, effects); err != nil {
 		return preservationcleanup.Result{}, fmt.Errorf("finalize preservation cleanup revisions: %w", err)
@@ -341,8 +329,8 @@ func lockUnavailableBundlePreservationSessionsTx(ctx context.Context, tx *sql.Tx
 	return out, nil
 }
 
-func terminateUnavailableBundlePreservationSessionTx(ctx context.Context, tx *sql.Tx, sessionID, reasonCode string, at time.Time) error {
-	if _, err := tx.ExecContext(ctx, `
+func terminateUnavailableBundlePreservationSessionTx(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, runID, sessionID, reasonCode string, at time.Time) error {
+	result, err := tx.ExecContext(ctx, `
 		UPDATE agent_sessions
 		SET
 			status = 'terminated',
@@ -355,8 +343,16 @@ func terminateUnavailableBundlePreservationSessionTx(ctx context.Context, tx *sq
 			updated_at = $4
 		WHERE session_id = $1::uuid
 		  AND status IN ('active', 'suspended')
-	`, sessionID, preservationcleanup.SessionTerminationReasonOrphaned, reasonCode, at.UTC()); err != nil {
+	`, sessionID, preservationcleanup.SessionTerminationReasonOrphaned, reasonCode, at.UTC())
+	if err != nil {
 		return fmt.Errorf("terminate unavailable bundle preservation session %s: %w", sessionID, err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed > 0 {
+		return effects.Add(runID, privaterunforkrevision.FamilyAgentSessions)
 	}
 	return nil
 }

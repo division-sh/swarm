@@ -13,6 +13,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -842,13 +843,13 @@ func completeRunLifecycleCandidateParity(
 	switch store := fixture.store.(type) {
 	case *PostgresStore:
 		err := store.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-			snapshot, disposition, inner = store.runLifecyclePostgresOwner.CompleteRunTx(txctx, tx, story, runID, endedAt)
+			snapshot, disposition, inner = store.runLifecyclePostgresOwner.CompleteRunTx(txctx, tx, story, privaterunforkrevision.NewEffects(), runID, endedAt)
 			return inner
 		})
 		return snapshot, disposition, err
 	case *SQLiteRuntimeStore:
 		err := store.runPrivateAuthorActivityMutation(ctx, "test successful completion", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-			snapshot, disposition, inner = store.runLifecycleSQLiteOwner.CompleteRunTx(txctx, tx, story, runID, endedAt)
+			snapshot, disposition, inner = store.runLifecycleSQLiteOwner.CompleteRunTx(txctx, tx, story, privaterunforkrevision.NewEffects(), runID, endedAt)
 			return inner
 		})
 		return snapshot, disposition, err
@@ -868,14 +869,14 @@ func runLifecycleCandidateRollback(
 	switch store := fixture.store.(type) {
 	case *PostgresStore:
 		return store.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-			if _, _, err := store.runLifecyclePostgresOwner.MarkRunTerminalStateTx(txctx, tx, story, terminalRunMutation{RunID: runID, State: state, EndedAt: endedAt}); err != nil {
+			if _, _, err := store.runLifecyclePostgresOwner.MarkRunTerminalStateTx(txctx, tx, story, privaterunforkrevision.NewEffects(), terminalRunMutation{RunID: runID, State: state, EndedAt: endedAt}); err != nil {
 				return err
 			}
 			return injected
 		})
 	case *SQLiteRuntimeStore:
 		return store.runPrivateAuthorActivityMutation(ctx, "test terminal lifecycle rollback", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-			if _, _, err := store.runLifecycleSQLiteOwner.MarkRunTerminalStateTx(txctx, tx, story, terminalRunMutation{RunID: runID, State: state, EndedAt: endedAt}); err != nil {
+			if _, _, err := store.runLifecycleSQLiteOwner.MarkRunTerminalStateTx(txctx, tx, story, privaterunforkrevision.NewEffects(), terminalRunMutation{RunID: runID, State: state, EndedAt: endedAt}); err != nil {
 				return err
 			}
 			return injected

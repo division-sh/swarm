@@ -13,6 +13,7 @@ import (
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
 
@@ -176,10 +177,10 @@ func insertTimerObligationProofRowTx(
 	switch store := selected.(type) {
 	case *PostgresStore:
 		store.genericSchedulePostgresOwner.SetNowFnForTest(func() time.Time { return fireAt.Add(-time.Hour) })
-		admitted, err = store.genericSchedulePostgresOwner.AdmitTx(ctx, tx, command)
+		admitted, err = store.genericSchedulePostgresOwner.AdmitTx(ctx, tx, privaterunforkrevision.NewEffects(), command)
 	case *SQLiteRuntimeStore:
 		store.genericScheduleSQLiteOwner.SetNowFnForTest(func() time.Time { return fireAt.Add(-time.Hour) })
-		admitted, err = store.genericScheduleSQLiteOwner.AdmitTx(ctx, tx, command)
+		admitted, err = store.genericScheduleSQLiteOwner.AdmitTx(ctx, tx, privaterunforkrevision.NewEffects(), command)
 	default:
 		t.Fatalf("unsupported selected store %T", selected)
 	}

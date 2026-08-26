@@ -12,12 +12,14 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
 func commitWorkflowEngineTimerMutation(
 	ctx context.Context,
 	tx *sql.Tx,
 	postgres bool,
+	effects *revisionEffects,
 	mutation runtimepipeline.WorkflowTimerMutation,
 ) (timeridentity.WorkflowTimerActivationRef, bool, error) {
 	activation := mutation.Activation.Canonical()
@@ -27,9 +29,15 @@ func commitWorkflowEngineTimerMutation(
 	switch mutation.Kind {
 	case runtimepipeline.WorkflowTimerMutationInsert:
 		changed, err := insertWorkflowEngineTimerActivation(ctx, tx, postgres, activation)
+		if err == nil && changed {
+			err = effects.Add(activation.RunID, privaterunforkrevision.FamilyTimers)
+		}
 		return activation.Ref, changed, err
 	case runtimepipeline.WorkflowTimerMutationCancel:
 		changed, err := cancelWorkflowEngineTimerActivation(ctx, tx, postgres, activation)
+		if err == nil && changed {
+			err = effects.Add(activation.RunID, privaterunforkrevision.FamilyTimers)
+		}
 		return activation.Ref, changed, err
 	default:
 		return timeridentity.WorkflowTimerActivationRef{}, false, fmt.Errorf("workflow timer mutation kind %q is unsupported", mutation.Kind)

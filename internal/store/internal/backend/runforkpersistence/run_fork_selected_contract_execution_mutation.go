@@ -239,6 +239,7 @@ func (s *RunForkPostgresOwner) MaterializeRunForkForSelectedContractExecution(ct
 		return runfork.RunForkMaterialization{}, err
 	}
 	now := time.Now().UTC()
+	effects := runforkrevision.NewEffects()
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, identity.BundleSourceFact)
 	forkScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, identity.BundleSourceFact.BundleHash())
 	if err != nil {
@@ -258,7 +259,7 @@ func (s *RunForkPostgresOwner) MaterializeRunForkForSelectedContractExecution(ct
 	for _, entity := range plan.Entities {
 		if err := materializeRunForkEntityState(forkCtx, s.DecisionPostgresOwner, tx, story, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
 			return s.RunLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID)
-		}), forkRunID, plan, entity, metadata[entity.EntityID], now); err != nil {
+		}), effects, forkRunID, plan, entity, metadata[entity.EntityID], now); err != nil {
 			return runfork.RunForkMaterialization{}, err
 		}
 	}
@@ -280,10 +281,6 @@ func (s *RunForkPostgresOwner) MaterializeRunForkForSelectedContractExecution(ct
 		if err := insertRunForkSelectedContractRouteRecovery(ctx, tx, routeRecovery); err != nil {
 			return runfork.RunForkMaterialization{}, err
 		}
-	}
-	effects := runforkrevision.NewEffects()
-	if err := effects.Add(forkRunID, runforkrevision.FamilyEntityMutations, runforkrevision.FamilyEntityMetadata); err != nil {
-		return runfork.RunForkMaterialization{}, err
 	}
 	if err := commitRunForkAuthorActivityTransaction(ctx, tx, story, effects); err != nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("commit selected-contract fork materialization: %w", err)
@@ -477,6 +474,7 @@ func (s *RunForkPostgresOwner) ActivateRunForkForSelectedContractExecution(ctx c
 	if err != nil {
 		return runfork.RunForkActivation{}, err
 	}
+	effects := runforkrevision.NewEffects()
 	lineage, err := loadRunForkActivationLineage(ctx, s.RunLifecyclePostgresOwner, tx, forkRunID)
 	if err != nil {
 		return runfork.RunForkActivation{}, err
@@ -597,7 +595,7 @@ func (s *RunForkPostgresOwner) ActivateRunForkForSelectedContractExecution(ctx c
 		if err := recordRunForkActivationAuthorActivity(ctx, story, lineage, now); err != nil {
 			return result, err
 		}
-		if err := commitRunForkAuthorActivityTransaction(ctx, tx, story, runforkrevision.NewEffects()); err != nil {
+		if err := commitRunForkAuthorActivityTransaction(ctx, tx, story, effects); err != nil {
 			return result, fmt.Errorf("commit selected-contract branch activation: %w", err)
 		}
 		committed = true
@@ -612,10 +610,10 @@ func (s *RunForkPostgresOwner) ActivateRunForkForSelectedContractExecution(ctx c
 		return result, nil
 	}
 
-	if err := s.applyRunForkSourceFreeze(ctx, tx, story, lineage, now, req.ConfirmSourceFreeze, handoff); err != nil {
+	if err := s.applyRunForkSourceFreeze(ctx, tx, story, effects, lineage, now, req.ConfirmSourceFreeze, handoff); err != nil {
 		return result, err
 	}
-	if err := commitRunForkAuthorActivityTransaction(ctx, tx, story, runforkrevision.NewEffects()); err != nil {
+	if err := commitRunForkAuthorActivityTransaction(ctx, tx, story, effects); err != nil {
 		return result, fmt.Errorf("commit selected-contract fork activation: %w", err)
 	}
 	committed = true
@@ -657,6 +655,7 @@ func (s *RunForkPostgresOwner) DiscardMaterializedSelectedContractExecutionFork(
 	if err != nil {
 		return err
 	}
+	effects := runforkrevision.NewEffects()
 
 	snapshot, err := s.RunLifecyclePostgresOwner.LoadSnapshotTx(ctx, tx, forkRunID, true)
 	if err != nil {
@@ -675,11 +674,11 @@ func (s *RunForkPostgresOwner) DiscardMaterializedSelectedContractExecutionFork(
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id=$1::uuid)`, forkRunID).Scan(&preserveCompletionEvidence); err != nil {
 		return fmt.Errorf("check selected-contract completion evidence preservation: %w", err)
 	}
-	if _, err := s.TerminalizeRunDeliveriesTx(ctx, tx, story, forkRunID, "fork_discarded"); err != nil {
+	if _, err := s.TerminalizeRunDeliveriesTx(ctx, tx, story, effects, forkRunID, "fork_discarded"); err != nil {
 		return fmt.Errorf("terminalize selected-contract fork deliveries before discard: %w", err)
 	}
 	if preserveCompletionEvidence {
-		if _, _, err := s.RunLifecyclePostgresOwner.MarkTerminalTx(ctx, tx, story, runtimerunlifecycle.TerminalRequest{
+		if _, _, err := s.RunLifecyclePostgresOwner.MarkTerminalTx(ctx, tx, story, effects, runtimerunlifecycle.TerminalRequest{
 			RunID: forkRunID, State: runtimerunlifecycle.StateCancelled, EndedAt: time.Now().UTC(),
 		}); err != nil {
 			return fmt.Errorf("retain selected-contract completion run tombstone: %w", err)
@@ -807,7 +806,6 @@ func (s *RunForkPostgresOwner) DiscardMaterializedSelectedContractExecutionFork(
 		}
 	}
 	if preserveCompletionEvidence {
-		effects := runforkrevision.NewEffects()
 		if err := effects.Add(forkRunID,
 			runforkrevision.FamilyEvents,
 			runforkrevision.FamilyEntityMutations,

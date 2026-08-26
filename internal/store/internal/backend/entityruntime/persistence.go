@@ -182,9 +182,6 @@ func (s *EntityPostgresOwner) SaveEntityField(ctx context.Context, update runtim
 	}
 	var revision int
 	effects := privaterunforkrevision.NewEffects()
-	if err := effects.Add(runID, privaterunforkrevision.FamilyEntityMutations); err != nil {
-		return 0, err
-	}
 	err = s.runPrivateAuthorActivityMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		if err := storerunstate.RequirePostgresActiveTx(txctx, tx, runID); err != nil {
 			return err
@@ -215,7 +212,7 @@ func (s *EntityPostgresOwner) SaveEntityField(ctx context.Context, update runtim
 	`, entityID, pathArray, string(valueJSON), runID).Scan(&revision); err != nil {
 			return fmt.Errorf("update postgres entity field: %w", err)
 		}
-		if err := privatemutationlog.InsertEntityStateDiffWithStory(txctx, tx, postgresEntityRunSourceOwner(tx), story, entityID, runtimemutationlog.EntityStateProjection{
+		if err := privatemutationlog.InsertEntityStateDiffWithStory(txctx, tx, postgresEntityRunSourceOwner(tx), story, effects, entityID, runtimemutationlog.EntityStateProjection{
 			Fields: map[string]any{update.FieldPath: toolNullableJSONBytes(oldValue)},
 		}, runtimemutationlog.EntityStateProjection{
 			Fields: map[string]any{update.FieldPath: json.RawMessage(valueJSON)},
@@ -240,9 +237,6 @@ func (s *EntitySQLiteOwner) SaveEntityField(ctx context.Context, update runtimet
 	}
 	var revision int
 	effects := privaterunforkrevision.NewEffects()
-	if err := effects.Add(runID, privaterunforkrevision.FamilyEntityMutations); err != nil {
-		return 0, err
-	}
 	if err := s.runPrivateAuthorActivityMutation(ctx, "sqlite entity field update", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, runID); err != nil {
 			return err
@@ -287,7 +281,7 @@ func (s *EntitySQLiteOwner) SaveEntityField(ctx context.Context, update runtimet
 		`, runID, entityID).Scan(&revision); err != nil {
 			return fmt.Errorf("load sqlite entity revision: %w", err)
 		}
-		if err := InsertSQLiteEntityStateDiff(txctx, story, tx, runID, entityID, runtimemutationlog.EntityStateProjection{
+		if err := InsertSQLiteEntityStateDiff(txctx, story, tx, effects, runID, entityID, runtimemutationlog.EntityStateProjection{
 			Fields: map[string]any{update.FieldPath: oldValue},
 		}, runtimemutationlog.EntityStateProjection{
 			Fields: map[string]any{update.FieldPath: newValue},
@@ -310,9 +304,6 @@ func (s *EntityPostgresOwner) CreateEntity(ctx context.Context, rec runtimetools
 		return err
 	}
 	effects := privaterunforkrevision.NewEffects()
-	if err := effects.Add(rec.RunID, privaterunforkrevision.FamilyEntityMetadata, privaterunforkrevision.FamilyEntityMutations); err != nil {
-		return err
-	}
 	return s.runPrivateAuthorActivityMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		if err := storerunstate.RequirePostgresActiveTx(txctx, tx, rec.RunID); err != nil {
 			return err
@@ -331,7 +322,10 @@ func (s *EntityPostgresOwner) CreateEntity(ctx context.Context, rec runtimetools
 	`, rec.RunID, rec.EntityID, rec.FlowInstance, rec.EntityType, rec.Name, rec.CurrentState, string(rec.FieldsJSON), rec.CreatedAt); err != nil {
 			return fmt.Errorf("insert postgres entity: %w", err)
 		}
-		if err := privatemutationlog.InsertEntityStateDiffWithStory(txctx, tx, postgresEntityRunSourceOwner(tx), story, rec.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
+		if err := effects.Add(rec.RunID, privaterunforkrevision.FamilyEntityMetadata); err != nil {
+			return err
+		}
+		if err := privatemutationlog.InsertEntityStateDiffWithStory(txctx, tx, postgresEntityRunSourceOwner(tx), story, effects, rec.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
 			CurrentState: rec.CurrentState,
 			Fields:       fields,
 		}, MutationWriter(rec.Writer)); err != nil {
@@ -350,9 +344,6 @@ func (s *EntitySQLiteOwner) CreateEntity(ctx context.Context, rec runtimetools.E
 		return err
 	}
 	effects := privaterunforkrevision.NewEffects()
-	if err := effects.Add(rec.RunID, privaterunforkrevision.FamilyEntityMetadata, privaterunforkrevision.FamilyEntityMutations); err != nil {
-		return err
-	}
 	return s.runPrivateAuthorActivityMutation(ctx, "sqlite entity create", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		if err := storerunstate.RequireSQLiteActiveTx(txctx, tx, rec.RunID); err != nil {
 			return err
@@ -368,7 +359,10 @@ func (s *EntitySQLiteOwner) CreateEntity(ctx context.Context, rec runtimetools.E
 			rec.CurrentState, string(rec.FieldsJSON), rec.CreatedAt, rec.CreatedAt, rec.CreatedAt); err != nil {
 			return fmt.Errorf("insert sqlite entity: %w", err)
 		}
-		if err := InsertSQLiteEntityStateDiff(txctx, story, tx, rec.RunID, rec.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
+		if err := effects.Add(rec.RunID, privaterunforkrevision.FamilyEntityMetadata); err != nil {
+			return err
+		}
+		if err := InsertSQLiteEntityStateDiff(txctx, story, tx, effects, rec.RunID, rec.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
 			CurrentState: rec.CurrentState,
 			Fields:       fields,
 		}, MutationWriter(rec.Writer), rec.CreatedAt); err != nil {
@@ -792,7 +786,7 @@ func toolSetPath(fields map[string]any, segments []string, value any) {
 	current[segments[len(segments)-1]] = value
 }
 
-func InsertSQLiteEntityStateDiff(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, runID string, entityID string, before, after runtimemutationlog.EntityStateProjection, writer runtimemutationlog.Writer, createdAt time.Time) error {
+func InsertSQLiteEntityStateDiff(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, effects *privaterunforkrevision.Effects, runID string, entityID string, before, after runtimemutationlog.EntityStateProjection, writer runtimemutationlog.Writer, createdAt time.Time) error {
 	if story == nil {
 		return fmt.Errorf("entity mutation story owner is required")
 	}
@@ -836,6 +830,9 @@ func InsertSQLiteEntityStateDiff(ctx context.Context, story runtimeauthoractivit
 				return err
 			}
 		}
+	}
+	if len(records) > 0 {
+		return effects.Add(runID, privaterunforkrevision.FamilyEntityMutations)
 	}
 	return nil
 }

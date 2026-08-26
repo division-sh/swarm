@@ -13,24 +13,25 @@ import (
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 )
 
 type DirectiveEventCommitter interface {
-	CommitDirectiveEventTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, events.AdmittedEvent) (runtimebus.EventAppendOutcome, error)
+	CommitDirectiveEventTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *privaterunforkrevision.Effects, events.AdmittedEvent) (runtimebus.EventAppendOutcome, error)
 	LoadDirectiveEventTx(context.Context, *sql.Tx, string) (events.AdmittedEvent, bool, error)
 }
 
 type DirectivePipelineOwner interface {
-	TerminalizePipelineObligationTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Disposition, time.Time) error
+	TerminalizePipelineObligationTx(context.Context, *sql.Tx, *privaterunforkrevision.Effects, string, runtimepipelineobligation.Disposition, time.Time) error
 }
 
 type ProviderAttemptDrainPostgresCapturer interface {
-	CaptureProviderAttemptDrainsPostgresTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, runtimeeffects.ProviderAttemptDrainCapture) (runtimeeffects.ProviderAttemptDrainCaptureResult, error)
+	CaptureProviderAttemptDrainsPostgresTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *privaterunforkrevision.Effects, runtimeeffects.ProviderAttemptDrainCapture) (runtimeeffects.ProviderAttemptDrainCaptureResult, error)
 }
 
 type ProviderAttemptDrainSQLiteCapturer interface {
-	CaptureProviderAttemptDrainsSQLiteTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, runtimeeffects.ProviderAttemptDrainCapture) (runtimeeffects.ProviderAttemptDrainCaptureResult, error)
+	CaptureProviderAttemptDrainsSQLiteTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *privaterunforkrevision.Effects, runtimeeffects.ProviderAttemptDrainCapture) (runtimeeffects.ProviderAttemptDrainCaptureResult, error)
 }
 
 type AgentSource interface {

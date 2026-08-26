@@ -12,7 +12,6 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
@@ -38,61 +37,6 @@ func declareRevisionEffects(effects *revisionEffects, runID string, families ...
 	return effects.Add(runID, families...)
 }
 
-func declareCompletionTargetEffects(effects *revisionEffects, settlement runtimeeffects.CompletionSettlement) error {
-	if settlement.AgentTurn == nil {
-		return nil
-	}
-	families := []privaterunforkrevision.Family{privaterunforkrevision.FamilyAgentTurns}
-	if settlement.AgentTurn.Memory.Enabled {
-		families = append(families, privaterunforkrevision.FamilyAgentSessions)
-	} else {
-		families = append(families, privaterunforkrevision.FamilyAgentConversationAudits)
-	}
-	return declareRevisionEffects(effects, settlement.AgentTurn.RunID, families...)
-}
-
-func declareAgentSessionProjectionEffects(effects *revisionEffects, runID string) error {
-	return declareRevisionEffects(effects, runID, privaterunforkrevision.FamilyAgentSessions)
-}
-
-func declareProviderOriginEffects(effects *revisionEffects, origin runtimeeffects.CompletionOrigin, runID string) error {
-	switch origin.Kind {
-	case runtimeeffects.CompletionOriginDelivery:
-		return declareRevisionEffects(effects, origin.Delivery.RunID(),
-			privaterunforkrevision.FamilyEventDeliveries,
-			privaterunforkrevision.FamilyDeadLetters,
-		)
-	case runtimeeffects.CompletionOriginDirective:
-		return declareRevisionEffects(effects, runID,
-			privaterunforkrevision.FamilyCommittedReplayScopes,
-			privaterunforkrevision.FamilyEventReceipts,
-		)
-	default:
-		return nil
-	}
-}
-
-func declareRecoveryCandidateEffects(effects *revisionEffects, candidates []externalEffectRecoveryCandidate) error {
-	for _, candidate := range candidates {
-		runID, err := candidate.runID()
-		if err != nil {
-			return err
-		}
-		if err := declareRevisionEffects(effects, runID,
-			privaterunforkrevision.FamilyAgentTurns,
-			privaterunforkrevision.FamilyAgentSessions,
-			privaterunforkrevision.FamilyAgentConversationAudits,
-			privaterunforkrevision.FamilyEventDeliveries,
-			privaterunforkrevision.FamilyDeadLetters,
-			privaterunforkrevision.FamilyCommittedReplayScopes,
-			privaterunforkrevision.FamilyEventReceipts,
-		); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 type schemaQueryer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row
@@ -101,15 +45,15 @@ type schemaQueryer interface {
 type providerDrainDeliveryOwner interface {
 	ValidateProviderOriginTx(context.Context, *sql.Tx, runtimedelivery.Claim) error
 	RenewProviderOriginTx(context.Context, *sql.Tx, runtimedelivery.Claim, time.Duration) error
-	SettleProviderOriginSuccessTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, runtimedelivery.Claim, []string, time.Duration) error
-	SettleProviderOriginFailureTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, runtimedelivery.Claim, runtimedelivery.Settlement) error
-	SettleProviderOriginRecoveryFailureTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, runtimedelivery.Claim, runtimedelivery.Settlement) error
+	SettleProviderOriginSuccessTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *revisionEffects, runtimedelivery.Claim, []string, time.Duration) error
+	SettleProviderOriginFailureTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *revisionEffects, runtimedelivery.Claim, runtimedelivery.Settlement) error
+	SettleProviderOriginRecoveryFailureTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *revisionEffects, runtimedelivery.Claim, runtimedelivery.Settlement) error
 }
 
 type providerDrainDirectiveOwner interface {
 	ValidateProviderDirectiveOriginTx(context.Context, *sql.Tx, runtimeagentcontrol.DirectiveExecutionOrigin, string, runtimeagentidentity.Identity) error
 	RenewProviderDirectiveOriginTx(context.Context, *sql.Tx, runtimeagentcontrol.DirectiveExecutionOrigin, time.Time, time.Duration) error
-	SettleProviderDirectiveOriginTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, runtimeagentcontrol.DirectiveExecutionOrigin, runtimeagentcontrol.DirectiveOperationState, runtimefailures.Envelope, time.Time) error
+	SettleProviderDirectiveOriginTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *revisionEffects, runtimeagentcontrol.DirectiveExecutionOrigin, runtimeagentcontrol.DirectiveOperationState, runtimefailures.Envelope, time.Time) error
 }
 
 type EffectPostgresOwner struct {

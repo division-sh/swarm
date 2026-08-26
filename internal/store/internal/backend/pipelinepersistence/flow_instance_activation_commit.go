@@ -23,6 +23,7 @@ func commitFlowInstanceActivations(
 	story *privateauthoractivity.Mutation,
 	store eventCommitTxStore,
 	postgres bool,
+	effects *revisionEffects,
 	plans []runtimepipeline.FlowInstanceActivationPlan,
 ) ([]runtimepipeline.CommittedFlowInstanceActivation, error) {
 	if len(plans) == 0 {
@@ -43,7 +44,7 @@ func commitFlowInstanceActivations(
 			return nil, fmt.Errorf("flow activation %d repeats route %q", index, record.Route.InstancePath)
 		}
 		seen[key] = struct{}{}
-		created, lifecycle, err := commitFlowInstanceActivation(ctx, tx, story, store, postgres, plan, record)
+		created, lifecycle, err := commitFlowInstanceActivation(ctx, tx, story, store, postgres, effects, plan, record)
 		if err != nil {
 			return nil, fmt.Errorf("commit flow activation %s: %w", record.Route.InstancePath, err)
 		}
@@ -52,12 +53,12 @@ func commitFlowInstanceActivations(
 	return committed, nil
 }
 
-func (s *PipelinePostgresOwner) CommitFlowInstanceActivationsTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, plans []runtimepipeline.FlowInstanceActivationPlan) ([]runtimepipeline.CommittedFlowInstanceActivation, error) {
-	return commitFlowInstanceActivations(ctx, tx, story, s, true, plans)
+func (s *PipelinePostgresOwner) CommitFlowInstanceActivationsTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects, plans []runtimepipeline.FlowInstanceActivationPlan) ([]runtimepipeline.CommittedFlowInstanceActivation, error) {
+	return commitFlowInstanceActivations(ctx, tx, story, s, true, effects, plans)
 }
 
-func (s *PipelineSQLiteOwner) CommitFlowInstanceActivationsTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, plans []runtimepipeline.FlowInstanceActivationPlan) ([]runtimepipeline.CommittedFlowInstanceActivation, error) {
-	return commitFlowInstanceActivations(ctx, tx, story, s, false, plans)
+func (s *PipelineSQLiteOwner) CommitFlowInstanceActivationsTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects, plans []runtimepipeline.FlowInstanceActivationPlan) ([]runtimepipeline.CommittedFlowInstanceActivation, error) {
+	return commitFlowInstanceActivations(ctx, tx, story, s, false, effects, plans)
 }
 
 func commitOneFlowInstanceActivation(
@@ -65,6 +66,7 @@ func commitOneFlowInstanceActivation(
 	command runtimebus.FlowInstanceActivationCommand,
 	store eventCommitTxStore,
 	postgres bool,
+	effects *revisionEffects,
 	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error,
 ) (runtimepipeline.CommittedFlowInstanceActivation, error) {
 	if err := command.Validate(); err != nil {
@@ -72,7 +74,7 @@ func commitOneFlowInstanceActivation(
 	}
 	var result runtimepipeline.CommittedFlowInstanceActivation
 	err := run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		committed, err := commitFlowInstanceActivations(txctx, tx, story, store, postgres, []runtimepipeline.FlowInstanceActivationPlan{command.Plan})
+		committed, err := commitFlowInstanceActivations(txctx, tx, story, store, postgres, effects, []runtimepipeline.FlowInstanceActivationPlan{command.Plan})
 		if err != nil {
 			return err
 		}
@@ -90,29 +92,15 @@ func commitOneFlowInstanceActivation(
 }
 
 func (s *PipelinePostgresOwner) CommitFlowInstanceActivation(ctx context.Context, command runtimebus.FlowInstanceActivationCommand) (runtimepipeline.CommittedFlowInstanceActivation, error) {
-	record, err := command.Plan.PersistenceRecord()
-	if err != nil {
-		return runtimepipeline.CommittedFlowInstanceActivation{}, err
-	}
-	effects, err := workflowLifecycleRevisionEffects(record.RunID)
-	if err != nil {
-		return runtimepipeline.CommittedFlowInstanceActivation{}, err
-	}
-	return commitOneFlowInstanceActivation(ctx, command, s, true, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+	effects := newRevisionEffects()
+	return commitOneFlowInstanceActivation(ctx, command, s, true, effects, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 		return s.runPrivateAuthorActivityMutation(ctx, effects, fn)
 	})
 }
 
 func (s *PipelineSQLiteOwner) CommitFlowInstanceActivation(ctx context.Context, command runtimebus.FlowInstanceActivationCommand) (runtimepipeline.CommittedFlowInstanceActivation, error) {
-	record, err := command.Plan.PersistenceRecord()
-	if err != nil {
-		return runtimepipeline.CommittedFlowInstanceActivation{}, err
-	}
-	effects, err := workflowLifecycleRevisionEffects(record.RunID)
-	if err != nil {
-		return runtimepipeline.CommittedFlowInstanceActivation{}, err
-	}
-	return commitOneFlowInstanceActivation(ctx, command, s, false, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+	effects := newRevisionEffects()
+	return commitOneFlowInstanceActivation(ctx, command, s, false, effects, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 		return s.runPrivateAuthorActivityMutation(ctx, "sqlite commit flow instance activation", effects, fn)
 	})
 }
@@ -126,6 +114,7 @@ func commitFlowInstanceActivation(
 	story *privateauthoractivity.Mutation,
 	store eventCommitTxStore,
 	postgres bool,
+	effects *revisionEffects,
 	plan runtimepipeline.FlowInstanceActivationPlan,
 	record runtimepipeline.FlowInstanceActivationRecord,
 ) (bool, runtimepipeline.CommittedWorkflowLifecycleMutation, error) {
@@ -162,7 +151,7 @@ func commitFlowInstanceActivation(
 		}
 		return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, nil
 	}
-	lifecycle, err := insertFlowInstanceActivation(ctx, tx, story, store, postgres, plan, record, allowStandingGenerationRebind)
+	lifecycle, err := insertFlowInstanceActivation(ctx, tx, story, store, postgres, effects, plan, record, allowStandingGenerationRebind)
 	if err != nil {
 		return false, runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
@@ -356,11 +345,12 @@ func insertFlowInstanceActivation(
 	story *privateauthoractivity.Mutation,
 	store eventCommitTxStore,
 	postgres bool,
+	effects *revisionEffects,
 	plan runtimepipeline.FlowInstanceActivationPlan,
 	record runtimepipeline.FlowInstanceActivationRecord,
 	allowStandingGenerationRebind bool,
 ) (runtimepipeline.CommittedWorkflowLifecycleMutation, error) {
-	if err := commitWorkflowEngineState(ctx, tx, postgres, record.State, allowStandingGenerationRebind); err != nil {
+	if err := commitWorkflowEngineState(ctx, tx, postgres, effects, record.State, allowStandingGenerationRebind); err != nil {
 		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
 	if postgres {
@@ -400,17 +390,18 @@ func insertFlowInstanceActivation(
 		story,
 		store,
 		postgres,
+		effects,
 		record.State,
 		runtimemutationlog.EntityStateProjection{},
 	)
 	if err != nil {
 		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
-	lifecycle, err := commitWorkflowEngineLifecycle(ctx, tx, runtimeAuthorActivityMutation(story), store.workflowDecisionLifecycleOwner(), store.genericScheduleTxOwner(), postgres, plan.Lifecycle)
+	lifecycle, err := commitWorkflowEngineLifecycle(ctx, tx, runtimeAuthorActivityMutation(story), store.workflowDecisionLifecycleOwner(), store.genericScheduleTxOwner(), postgres, effects, plan.Lifecycle)
 	if err != nil {
 		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
-	if err := commitWorkflowEngineMutationLog(ctx, tx, story, store, postgres, record.State, before); err != nil {
+	if err := commitWorkflowEngineMutationLog(ctx, tx, story, store, postgres, effects, record.State, before); err != nil {
 		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
 	}
 	return lifecycle, nil

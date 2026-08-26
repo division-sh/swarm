@@ -176,9 +176,9 @@ func (s *standingServiceAdapter) markTerminalRun(ctx context.Context, tx *sql.Tx
 		return runtimerunlifecycle.Snapshot{}, "", errors.New("standing run lifecycle mutation owner is required")
 	}
 	if s.postgresStore != nil {
-		return s.postgresStore.RunLifecyclePostgresOwner.MarkTerminalTx(ctx, tx, s.story, request)
+		return s.postgresStore.RunLifecyclePostgresOwner.MarkTerminalTx(ctx, tx, s.story, s.revisionEffects, request)
 	}
-	return s.sqliteStore.RunLifecycleSQLiteOwner.MarkTerminalTx(ctx, tx, s.story, request)
+	return s.sqliteStore.RunLifecycleSQLiteOwner.MarkTerminalTx(ctx, tx, s.story, s.revisionEffects, request)
 }
 
 func standingServiceResultEvidence(result runtimepipeline.StandingServiceReconciliation, adapter *standingServiceAdapter, err error) (runtimepipeline.StandingServiceReconciliation, error) {
@@ -1376,16 +1376,6 @@ func (s *standingServiceAdapter) quiesceStandingRunTx(ctx context.Context, tx *s
 	if !s.validRunLifecycleMutation(tx) {
 		return nil, fmt.Errorf("quiesce standing run: standing transaction owner is required")
 	}
-	if err := addRevisionEffects(s.revisionEffects, runID,
-		privaterunforkrevision.FamilyEventDeliveries,
-		privaterunforkrevision.FamilyCommittedReplayScopes,
-		privaterunforkrevision.FamilyEventReceipts,
-		privaterunforkrevision.FamilyDeadLetters,
-		privaterunforkrevision.FamilyTimers,
-		privaterunforkrevision.FamilyAgentSessions,
-	); err != nil {
-		return nil, err
-	}
 	scope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, bundleHash)
 	if err != nil {
 		return nil, fmt.Errorf("quiesce standing run scope: %w", err)
@@ -1393,9 +1383,9 @@ func (s *standingServiceAdapter) quiesceStandingRunTx(ctx context.Context, tx *s
 	ctx = runtimeauthoractivity.WithScope(ctx, scope)
 	var deliveryErr error
 	if s.isSQLite() {
-		_, deliveryErr = s.sqliteStore.TerminalizeRunDeliveriesTx(ctx, tx, s.story, runID, reason)
+		_, deliveryErr = s.sqliteStore.TerminalizeRunDeliveriesTx(ctx, tx, s.story, s.revisionEffects, runID, reason)
 	} else {
-		_, deliveryErr = s.postgresStore.TerminalizeRunDeliveriesTx(ctx, tx, s.story, runID, reason)
+		_, deliveryErr = s.postgresStore.TerminalizeRunDeliveriesTx(ctx, tx, s.story, s.revisionEffects, runID, reason)
 	}
 	if deliveryErr != nil {
 		return nil, fmt.Errorf("terminalize standing deliveries: %w", deliveryErr)
@@ -1403,35 +1393,51 @@ func (s *standingServiceAdapter) quiesceStandingRunTx(ctx context.Context, tx *s
 	disposition := runtimepipelineobligation.DeadLetter(reason, nil)
 	var pipelineErr error
 	if s.isSQLite() {
-		_, pipelineErr = s.sqliteStore.TerminalizeRunTx(ctx, tx, runID, disposition, now)
+		_, pipelineErr = s.sqliteStore.TerminalizeRunTx(ctx, tx, s.revisionEffects, runID, disposition, now)
 	} else {
-		_, pipelineErr = s.postgresStore.TerminalizeRunTx(ctx, tx, runID, disposition, now)
+		_, pipelineErr = s.postgresStore.TerminalizeRunTx(ctx, tx, s.revisionEffects, runID, disposition, now)
 	}
 	if pipelineErr != nil {
 		return nil, fmt.Errorf("terminalize standing pipeline obligations: %w", pipelineErr)
 	}
 	if s.isSQLite() {
-		if _, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET status = 'terminated', termination_reason = ?, termination_detail = ?, terminated_at = COALESCE(terminated_at, ?), lease_holder = NULL, lease_expires_at = NULL, updated_at = ? WHERE run_id = ? AND status IN ('active', 'suspended')`, sessionReason, reason, now, now, runID); err != nil {
+		result, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET status = 'terminated', termination_reason = ?, termination_detail = ?, terminated_at = COALESCE(terminated_at, ?), lease_holder = NULL, lease_expires_at = NULL, updated_at = ? WHERE run_id = ? AND status IN ('active', 'suspended')`, sessionReason, reason, now, now, runID)
+		if err != nil {
 			return nil, fmt.Errorf("terminate sqlite standing sessions: %w", err)
 		}
-		generic, err := storegenericschedule.CancelRunsTx(ctx, tx, false, []string{runID}, reason, now)
+		if changed, err := result.RowsAffected(); err != nil {
+			return nil, err
+		} else if changed > 0 {
+			if err := s.revisionEffects.Add(runID, privaterunforkrevision.FamilyAgentSessions); err != nil {
+				return nil, err
+			}
+		}
+		generic, err := storegenericschedule.CancelRunsTx(ctx, tx, false, s.revisionEffects, []string{runID}, reason, now)
 		if err != nil {
 			return nil, fmt.Errorf("cancel sqlite standing generic schedules: %w", err)
 		}
-		workflow, err := storeworkflowtimer.CancelRunsTx(ctx, tx, false, []string{runID})
+		workflow, err := storeworkflowtimer.CancelRunsTx(ctx, tx, false, s.revisionEffects, []string{runID})
 		if err != nil {
 			return nil, fmt.Errorf("cancel sqlite standing workflow timers: %w", err)
 		}
 		return append(generic, workflow...), nil
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET status = 'terminated', termination_reason = $2, termination_detail = $3, terminated_at = COALESCE(terminated_at, $4), lease_holder = NULL, lease_expires_at = NULL, updated_at = $4 WHERE run_id = $1::uuid AND status IN ('active', 'suspended')`, runID, sessionReason, reason, now); err != nil {
+	result, err := tx.ExecContext(ctx, `UPDATE agent_sessions SET status = 'terminated', termination_reason = $2, termination_detail = $3, terminated_at = COALESCE(terminated_at, $4), lease_holder = NULL, lease_expires_at = NULL, updated_at = $4 WHERE run_id = $1::uuid AND status IN ('active', 'suspended')`, runID, sessionReason, reason, now)
+	if err != nil {
 		return nil, fmt.Errorf("terminate standing sessions: %w", err)
 	}
-	generic, err := storegenericschedule.CancelRunsTx(ctx, tx, true, []string{runID}, reason, now)
+	if changed, err := result.RowsAffected(); err != nil {
+		return nil, err
+	} else if changed > 0 {
+		if err := s.revisionEffects.Add(runID, privaterunforkrevision.FamilyAgentSessions); err != nil {
+			return nil, err
+		}
+	}
+	generic, err := storegenericschedule.CancelRunsTx(ctx, tx, true, s.revisionEffects, []string{runID}, reason, now)
 	if err != nil {
 		return nil, fmt.Errorf("cancel standing generic schedules: %w", err)
 	}
-	workflow, err := storeworkflowtimer.CancelRunsTx(ctx, tx, true, []string{runID})
+	workflow, err := storeworkflowtimer.CancelRunsTx(ctx, tx, true, s.revisionEffects, []string{runID})
 	if err != nil {
 		return nil, fmt.Errorf("cancel standing workflow timers: %w", err)
 	}
@@ -1494,9 +1500,6 @@ func (s *standingServiceAdapter) setStandingRunCancelledTx(ctx context.Context, 
 }
 
 func (s *standingServiceAdapter) copyStandingEntityStateTx(ctx context.Context, tx *sql.Tx, oldRunID, newRunID, entityID string, copiedAt time.Time) error {
-	if err := addEntityMetadataRevisionEffects(s.revisionEffects, newRunID); err != nil {
-		return err
-	}
 	var result sql.Result
 	var err error
 	if s.isSQLite() {
@@ -1525,6 +1528,9 @@ func (s *standingServiceAdapter) copyStandingEntityStateTx(ctx context.Context, 
 	if count == 0 {
 		return nil
 	}
+	if err := s.revisionEffects.Add(newRunID, privaterunforkrevision.FamilyEntityMetadata); err != nil {
+		return err
+	}
 	projection, err := s.loadStandingEntityStateProjectionTx(ctx, tx, newRunID, entityID)
 	if err != nil {
 		return err
@@ -1548,6 +1554,7 @@ func (s *standingServiceAdapter) copyStandingEntityStateTx(ctx context.Context, 
 				return s.postgresStore.RunLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID)
 			}),
 			s.story,
+			s.revisionEffects,
 			entityID,
 			runtimemutationlog.EntityStateProjection{},
 			projection,
@@ -1558,6 +1565,7 @@ func (s *standingServiceAdapter) copyStandingEntityStateTx(ctx context.Context, 
 		mutationCtx,
 		s.story,
 		tx,
+		s.revisionEffects,
 		newRunID,
 		entityID,
 		runtimemutationlog.EntityStateProjection{},

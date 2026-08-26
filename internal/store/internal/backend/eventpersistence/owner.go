@@ -32,19 +32,6 @@ import (
 
 type revisionEffects = privaterunforkrevision.Effects
 
-func declareEventCommitEffects(effects *revisionEffects, runID string) error {
-	if strings.TrimSpace(runID) == "" {
-		return nil
-	}
-	return effects.Add(runID,
-		privaterunforkrevision.FamilyEvents,
-		privaterunforkrevision.FamilyEventDeliveries,
-		privaterunforkrevision.FamilyCommittedReplayScopes,
-		privaterunforkrevision.FamilyEventReceipts,
-		privaterunforkrevision.FamilyReplyContexts,
-	)
-}
-
 type selectedForkLineageOwner interface {
 	InsertSelectedForkExecutionLineageTx(context.Context, *sql.Tx, runtimerunfork.RunForkSelectedContractExecutionLineage) error
 }
@@ -321,18 +308,18 @@ func (s *EventSQLiteOwner) BindRunFork(owner selectedForkLineageOwner) error {
 	return nil
 }
 
-func (s *EventPostgresOwner) createReplyContextTx(ctx context.Context, tx *sql.Tx, record runtimereplycontext.Record) error {
-	return s.ReplyPostgresOwner.CreateWithinTransaction(ctx, tx, record)
+func (s *EventPostgresOwner) createReplyContextTx(ctx context.Context, tx *sql.Tx, effects *revisionEffects, record runtimereplycontext.Record) error {
+	return s.ReplyPostgresOwner.CreateWithinTransaction(ctx, tx, effects, record)
 }
 
-func (s *EventSQLiteOwner) createReplyContextTx(ctx context.Context, tx *sql.Tx, record runtimereplycontext.Record) error {
-	return s.ReplySQLiteOwner.CreateWithinTransaction(ctx, tx, record)
+func (s *EventSQLiteOwner) createReplyContextTx(ctx context.Context, tx *sql.Tx, effects *revisionEffects, record runtimereplycontext.Record) error {
+	return s.ReplySQLiteOwner.CreateWithinTransaction(ctx, tx, effects, record)
 }
 
-func (s *EventPostgresOwner) claimReplyContextTx(ctx context.Context, tx *sql.Tx, command runtimereplycontext.ClaimCommand) error {
-	return s.ReplyPostgresOwner.ClaimWithinTransaction(ctx, tx, command)
+func (s *EventPostgresOwner) claimReplyContextTx(ctx context.Context, tx *sql.Tx, effects *revisionEffects, command runtimereplycontext.ClaimCommand) error {
+	return s.ReplyPostgresOwner.ClaimWithinTransaction(ctx, tx, effects, command)
 }
 
-func (s *EventSQLiteOwner) claimReplyContextTx(ctx context.Context, tx *sql.Tx, command runtimereplycontext.ClaimCommand) error {
-	return s.ReplySQLiteOwner.ClaimWithinTransaction(ctx, tx, command)
+func (s *EventSQLiteOwner) claimReplyContextTx(ctx context.Context, tx *sql.Tx, effects *revisionEffects, command runtimereplycontext.ClaimCommand) error {
+	return s.ReplySQLiteOwner.ClaimWithinTransaction(ctx, tx, effects, command)
 }

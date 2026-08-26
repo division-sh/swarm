@@ -217,6 +217,7 @@ func TestOperatorRunTerminalizationPreservesExactDeadLetterEvidenceParity(t *tes
 				t.Fatalf("terminalized run failed deliveries = %#v", report.FailedDeliveries)
 			}
 			assertExactOperatorDeadLetterEvidence(t, report.FailedDeliveries[0].DeadLetters, snapshot)
+			requireCompleteRunForkRevision(t, ctx, fixture, runID)
 		})
 	}
 }

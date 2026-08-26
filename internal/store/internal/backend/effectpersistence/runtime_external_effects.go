@@ -68,10 +68,7 @@ func (s *EffectPostgresOwner) ReconcileExternalEffectAttempts(ctx context.Contex
 			if err := admitExternalEffectRecoveryCandidates(request, candidates); err != nil {
 				return err
 			}
-			if err := declareRecoveryCandidateEffects(effects, candidates); err != nil {
-				return err
-			}
-			summary, err = reconcileExternalEffectAttemptsPostgres(txctx, tx, s.llm, s.delivery, s.directives, story, request.Now())
+			summary, err = reconcileExternalEffectAttemptsPostgres(txctx, tx, s.llm, s.delivery, s.directives, story, effects, request.Now())
 			if err != nil {
 				return err
 			}
@@ -101,10 +98,7 @@ func (s *EffectSQLiteOwner) ReconcileExternalEffectAttempts(ctx context.Context,
 			if err := admitExternalEffectRecoveryCandidates(request, candidates); err != nil {
 				return err
 			}
-			if err := declareRecoveryCandidateEffects(effects, candidates); err != nil {
-				return err
-			}
-			summary, err = reconcileExternalEffectAttemptsSQLiteTx(txctx, tx, s.llm, s.delivery, s.directives, story, request.Now())
+			summary, err = reconcileExternalEffectAttemptsSQLiteTx(txctx, tx, s.llm, s.delivery, s.directives, story, effects, request.Now())
 			if err != nil {
 				return err
 			}
@@ -1828,8 +1822,8 @@ func externalEffectRecoveryFailure(class runtimefailures.Class, code string, now
 	return json.Marshal(envelope)
 }
 
-func reconcileExternalEffectAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *storellm.LLMPostgresOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, story *privateauthoractivity.Mutation, now time.Time) (runtimeeffects.RecoverySummary, error) {
-	completionSummary, err := reconcileCompletionAttemptsPostgres(ctx, tx, llm, delivery, directives, story, now)
+func reconcileExternalEffectAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *storellm.LLMPostgresOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, story *privateauthoractivity.Mutation, effects *revisionEffects, now time.Time) (runtimeeffects.RecoverySummary, error) {
+	completionSummary, err := reconcileCompletionAttemptsPostgres(ctx, tx, llm, delivery, directives, story, effects, now)
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, err
 	}
@@ -1867,8 +1861,8 @@ func reconcileExternalEffectAttemptsPostgres(ctx context.Context, tx *sql.Tx, ll
 	return completionSummary, nil
 }
 
-func reconcileExternalEffectAttemptsSQLiteTx(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, story *privateauthoractivity.Mutation, now time.Time) (runtimeeffects.RecoverySummary, error) {
-	completionSummary, err := reconcileCompletionAttemptsSQLite(ctx, tx, llm, delivery, directives, story, now)
+func reconcileExternalEffectAttemptsSQLiteTx(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, story *privateauthoractivity.Mutation, effects *revisionEffects, now time.Time) (runtimeeffects.RecoverySummary, error) {
+	completionSummary, err := reconcileCompletionAttemptsSQLite(ctx, tx, llm, delivery, directives, story, effects, now)
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, err
 	}

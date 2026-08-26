@@ -463,9 +463,10 @@ func (s *RunLifecyclePostgresOwner) ExecuteCompletionCandidate(
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	var outcome runtimerunlifecycle.CompletionResult
-	err := s.runPrivateAuthorActivityMutation(ctx, privaterunforkrevision.NewEffects(), func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	effects := privaterunforkrevision.NewEffects()
+	err := s.runPrivateAuthorActivityMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		var err error
-		outcome, err = s.executeCompletionCandidateTx(txctx, tx, story, candidate, catalog)
+		outcome, err = s.executeCompletionCandidateTx(txctx, tx, story, effects, candidate, catalog)
 		return err
 	})
 	return outcome, err
@@ -480,9 +481,10 @@ func (s *RunLifecycleSQLiteOwner) ExecuteCompletionCandidate(
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	var outcome runtimerunlifecycle.CompletionResult
-	err := s.runPrivateAuthorActivityMutation(ctx, "sqlite execute run completion candidate", privaterunforkrevision.NewEffects(), func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+	effects := privaterunforkrevision.NewEffects()
+	err := s.runPrivateAuthorActivityMutation(ctx, "sqlite execute run completion candidate", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		var err error
-		outcome, err = s.executeCompletionCandidateTx(txctx, tx, story, candidate, catalog)
+		outcome, err = s.executeCompletionCandidateTx(txctx, tx, story, effects, candidate, catalog)
 		return err
 	})
 	return outcome, err
@@ -492,6 +494,7 @@ func (s *RunLifecyclePostgresOwner) executeCompletionCandidateTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	story *privateauthoractivity.Mutation,
+	effects *privaterunforkrevision.Effects,
 	candidate runtimerunlifecycle.Candidate,
 	catalog runtimerunlifecycle.TerminalCatalog,
 ) (runtimerunlifecycle.CompletionResult, error) {
@@ -586,7 +589,7 @@ func (s *RunLifecyclePostgresOwner) executeCompletionCandidateTx(
 			return s.finishBlockedPostgresCandidate(ctx, tx, candidate, optionalWake(summaries.Sessions.NextExpiry))
 		}
 	}
-	if _, _, err := s.completeRunTx(ctx, tx, story, candidate.RunID, selectedNow); err != nil {
+	if _, _, err := s.completeRunTx(ctx, tx, story, effects, candidate.RunID, selectedNow); err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeTerminallyEligible}, nil
@@ -618,6 +621,7 @@ func (s *RunLifecycleSQLiteOwner) executeCompletionCandidateTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	story *privateauthoractivity.Mutation,
+	effects *privaterunforkrevision.Effects,
 	candidate runtimerunlifecycle.Candidate,
 	catalog runtimerunlifecycle.TerminalCatalog,
 ) (runtimerunlifecycle.CompletionResult, error) {
@@ -713,7 +717,7 @@ func (s *RunLifecycleSQLiteOwner) executeCompletionCandidateTx(
 			return s.finishBlockedSQLiteCandidate(ctx, tx, candidate, optionalWake(summaries.Sessions.NextExpiry), selectedNow)
 		}
 	}
-	if _, _, err := s.completeRunTx(ctx, tx, story, candidate.RunID, selectedNow); err != nil {
+	if _, _, err := s.completeRunTx(ctx, tx, story, effects, candidate.RunID, selectedNow); err != nil {
 		return runtimerunlifecycle.CompletionResult{}, err
 	}
 	return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeTerminallyEligible}, nil

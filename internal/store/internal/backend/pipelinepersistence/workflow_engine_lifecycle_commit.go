@@ -18,11 +18,12 @@ func commitWorkflowEngineLifecycle(
 	decisions workflowDecisionLifecycleTxOwner,
 	genericSchedules GenericScheduleTxOwner,
 	postgres bool,
+	effects *revisionEffects,
 	plan runtimepipeline.WorkflowLifecycleMutationPlan,
 ) (runtimepipeline.CommittedWorkflowLifecycleMutation, error) {
 	result := runtimepipeline.CommittedWorkflowLifecycleMutation{}
 	for index, mutation := range plan.Timers {
-		ref, changed, err := commitWorkflowEngineTimerMutation(ctx, tx, postgres, mutation)
+		ref, changed, err := commitWorkflowEngineTimerMutation(ctx, tx, postgres, effects, mutation)
 		if err != nil {
 			return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("commit workflow engine timer mutation %d: %w", index, err)
 		}
@@ -41,13 +42,13 @@ func commitWorkflowEngineLifecycle(
 	for index, mutation := range plan.Schedules {
 		switch mutation.Kind {
 		case runtimepipeline.WorkflowScheduleMutationUpsert:
-			admitted, err := genericSchedules.AdmitTx(ctx, tx, mutation.Command)
+			admitted, err := genericSchedules.AdmitTx(ctx, tx, effects, mutation.Command)
 			if err != nil {
 				return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("commit workflow engine schedule admission %d: %w", index, err)
 			}
 			result.GenericScheduleActivations = append(result.GenericScheduleActivations, admitted.Activation)
 		case runtimepipeline.WorkflowScheduleMutationCancel:
-			cancelled, err := genericSchedules.CancelAdmissionTx(ctx, tx, mutation.Command, mutation.CancelCause, mutation.CancelledAt)
+			cancelled, err := genericSchedules.CancelAdmissionTx(ctx, tx, effects, mutation.Command, mutation.CancelCause, mutation.CancelledAt)
 			if err != nil {
 				return runtimepipeline.CommittedWorkflowLifecycleMutation{}, fmt.Errorf("commit workflow engine schedule cancellation %d: %w", index, err)
 			}

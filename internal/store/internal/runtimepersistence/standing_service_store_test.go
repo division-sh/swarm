@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -14,10 +15,13 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedeliverycontinuation "github.com/division-sh/swarm/internal/runtime/deliverycontinuation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -314,6 +318,7 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	genericActivation, workflowActivation := seedGenericScheduleTimerFamilies(
 		t, store, store.backend.ConstructionHandle(), fixtureCtx,
 	)
+	seedStandingServiceGateRevisionFixture(t, fixtureCtx, store, store.backend.ConstructionHandle(), false, created.RunID, created.EntityID, created.InstanceID, candidate.Source.BundleHash(), time.Now().UTC())
 	continuationAuthority, err := runtimedelivery.NewNormalExecutionAuthority(candidate.Source, "standing-lifecycle", 1)
 	if err != nil {
 		t.Fatal(err)
@@ -399,6 +404,7 @@ func TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState(t
 	if runStatus != "cancelled" {
 		t.Fatalf("reset predecessor status = %s, want cancelled", runStatus)
 	}
+	requireCompleteRunForkRevision(t, fixtureCtx, authorActivityReceiptFixture{store: store, db: store.backend.ConstructionHandle()}, created.RunID)
 }
 
 func TestSQLiteStandingServiceSetOrphansRemovedDeclaration(t *testing.T) {
@@ -589,6 +595,7 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 		t.Fatal(err)
 	}
 	genericActivation, workflowActivation := seedGenericScheduleTimerFamilies(t, selected, db, fixtureCtx)
+	seedStandingServiceGateRevisionFixture(t, fixtureCtx, selected, db, true, created[0].RunID, created[0].EntityID, created[0].InstanceID, candidate.Source.BundleHash(), time.Now().UTC())
 	continuationAuthority, err := runtimedelivery.NewNormalExecutionAuthority(candidate.Source, "standing-lifecycle", 1)
 	if err != nil {
 		t.Fatal(err)
@@ -649,6 +656,64 @@ func TestPostgresStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState
 	if got := continuationSignals.Load(); got != 2 {
 		t.Fatalf("reset continuation signals = %d, want 2", got)
 	}
+	requireCompleteRunForkRevision(t, fixtureCtx, authorActivityReceiptFixture{store: selected, db: db}, created[0].RunID)
+}
+
+func seedStandingServiceGateRevisionFixture(t *testing.T, ctx context.Context, cards decisioncard.Store, db *sql.DB, postgres bool, runID, entityID, instanceID, bundleHash string, now time.Time) {
+	t.Helper()
+	query := `SELECT flow_instance FROM entity_state WHERE run_id = ? AND entity_id = ?`
+	if postgres {
+		query = `SELECT flow_instance FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`
+	}
+	var flowInstance string
+	existing := true
+	if err := db.QueryRowContext(ctx, query, runID, entityID).Scan(&flowInstance); errors.Is(err, sql.ErrNoRows) {
+		existing = false
+		flowInstance = instanceID
+	} else if err != nil {
+		t.Fatalf("load standing gate entity: %v", err)
+	}
+	activation, err := gateruntime.New(runID, flowInstance, entityID, "standing", "active", "standing_reset", bundleHash, testGateRoutes(t), "state:active", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	card := newDecisionCardTestCard(t, runID, now)
+	card.CardID = activation.CardID
+	card.Anchor = newDecisionCardTestStageAnchor(flowInstance, "standing", entityID, activation.Stage, activation.ActivationID)
+	card.Snapshot.Decision, card.BundleHash = activation.DecisionID, activation.BundleHash
+	card, err = decisioncard.New(card)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cards.CreateDecisionCard(ctx, card); err != nil {
+		t.Fatal(err)
+	}
+	buckets := map[string]map[string]any{}
+	if err := gateruntime.Store(buckets, activation); err != nil {
+		t.Fatal(err)
+	}
+	accumulator, err := json.Marshal(runtimeengine.NewStateCarrier(nil, nil, buckets).PersistedStateBuckets())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var args []any
+	if existing {
+		query = `UPDATE entity_state SET accumulator = ?, updated_at = ? WHERE run_id = ? AND entity_id = ?`
+		args = []any{string(accumulator), now, runID, entityID}
+		if postgres {
+			query = `UPDATE entity_state SET accumulator = $1::jsonb, updated_at = $2 WHERE run_id = $3::uuid AND entity_id = $4::uuid`
+		}
+	} else {
+		query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES (?, ?, ?, 'standing', 'active', '{}', '{}', ?, 1, ?, ?, ?)`
+		args = []any{runID, entityID, flowInstance, string(accumulator), now, now, now}
+		if postgres {
+			query = `INSERT INTO entity_state (run_id, entity_id, flow_instance, entity_type, current_state, gates, fields, accumulator, revision, entered_state_at, created_at, updated_at) VALUES ($1::uuid, $2::uuid, $3, 'standing', 'active', '{}'::jsonb, '{}'::jsonb, $4::jsonb, 1, $5, $6, $7)`
+		}
+	}
+	if _, err := db.ExecContext(ctx, query, args...); err != nil {
+		t.Fatal(err)
+	}
+	publishCompleteRunForkRevisionBaseline(t, ctx, db, postgres, runID)
 }
 
 func assertStandingMockOnlyLifecycleRejectsLiveWorkBeforeMutation(

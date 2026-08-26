@@ -67,7 +67,7 @@ func (s *AgentPostgresOwner) ReserveDirectiveOperation(ctx context.Context, req 
 				return nil
 			}
 		}
-		outcome, err := s.events.CommitDirectiveEventTx(txctx, tx, story, req.Event)
+		outcome, err := s.events.CommitDirectiveEventTx(txctx, tx, story, effects, req.Event)
 		if err != nil {
 			return err
 		}
@@ -83,7 +83,7 @@ func (s *AgentPostgresOwner) ReserveDirectiveOperation(ctx context.Context, req 
 		if err := recordDirectiveAuthorActivity(txctx, story, op, req.Now, nil); err != nil {
 			return err
 		}
-		return addDirectiveRevisionEffects(txctx, tx, effects, op.DirectiveEventID)
+		return nil
 	})
 	return reservation, err
 }
@@ -116,7 +116,7 @@ func (s *AgentSQLiteOwner) ReserveDirectiveOperation(ctx context.Context, req ru
 				return nil
 			}
 		}
-		outcome, err := s.events.CommitDirectiveEventTx(txctx, tx, story, req.Event)
+		outcome, err := s.events.CommitDirectiveEventTx(txctx, tx, story, effects, req.Event)
 		if err != nil {
 			return err
 		}
@@ -132,7 +132,7 @@ func (s *AgentSQLiteOwner) ReserveDirectiveOperation(ctx context.Context, req ru
 		if err := recordDirectiveAuthorActivity(txctx, story, op, req.Now, nil); err != nil {
 			return err
 		}
-		return addDirectiveRevisionEffects(txctx, tx, effects, op.DirectiveEventID)
+		return nil
 	})
 	return reservation, err
 }
@@ -400,7 +400,7 @@ func (s *AgentPostgresOwner) FinalizeDirectiveSuccess(ctx context.Context, opera
 		if op.State != runtimeagentcontrol.DirectiveOperationExecuted && op.State != runtimeagentcontrol.DirectiveOperationSucceeded {
 			return runtimeagentcontrol.ErrorForDirectiveOperation(op)
 		}
-		if err := s.pipeline.TerminalizePipelineObligationTx(txctx, tx, op.DirectiveEventID, runtimepipelineobligation.Acknowledged("processed"), now); err != nil {
+		if err := s.pipeline.TerminalizePipelineObligationTx(txctx, tx, effects, op.DirectiveEventID, runtimepipelineobligation.Acknowledged("processed"), now); err != nil {
 			return err
 		}
 		if err := storePostgresDirectiveProjection(txctx, tx, op, now, ttl); err != nil {
@@ -419,7 +419,7 @@ func (s *AgentPostgresOwner) FinalizeDirectiveSuccess(ctx context.Context, opera
 		if err := recordDirectiveAuthorActivity(txctx, story, op, op.UpdatedAt, nil); err != nil {
 			return err
 		}
-		return addDirectiveRevisionEffects(txctx, tx, effects, op.DirectiveEventID)
+		return nil
 	})
 	return out, err
 }
@@ -435,7 +435,7 @@ func (s *AgentSQLiteOwner) FinalizeDirectiveSuccess(ctx context.Context, operati
 		if op.State != runtimeagentcontrol.DirectiveOperationExecuted && op.State != runtimeagentcontrol.DirectiveOperationSucceeded {
 			return runtimeagentcontrol.ErrorForDirectiveOperation(op)
 		}
-		if err := s.pipeline.TerminalizePipelineObligationTx(txctx, tx, op.DirectiveEventID, runtimepipelineobligation.Acknowledged("processed"), now); err != nil {
+		if err := s.pipeline.TerminalizePipelineObligationTx(txctx, tx, effects, op.DirectiveEventID, runtimepipelineobligation.Acknowledged("processed"), now); err != nil {
 			return err
 		}
 		if err := storeSQLiteDirectiveProjectionTx(txctx, tx, op, now, ttl); err != nil {
@@ -454,7 +454,7 @@ func (s *AgentSQLiteOwner) FinalizeDirectiveSuccess(ctx context.Context, operati
 		if err := recordDirectiveAuthorActivity(txctx, story, op, op.UpdatedAt, nil); err != nil {
 			return err
 		}
-		return addDirectiveRevisionEffects(txctx, tx, effects, op.DirectiveEventID)
+		return nil
 	})
 	return out, err
 }
@@ -541,7 +541,7 @@ func (s *AgentPostgresOwner) finalizePostgresDirectiveFailure(ctx context.Contex
 		if op.State != from || (ownerID != "" && op.ExecutionOwnerID != ownerID) {
 			return runtimeagentcontrol.ErrorForDirectiveOperation(op)
 		}
-		if err := s.pipeline.TerminalizePipelineObligationTx(txctx, tx, op.DirectiveEventID, runtimepipelineobligation.Terminal("", &failure), now); err != nil {
+		if err := s.pipeline.TerminalizePipelineObligationTx(txctx, tx, effects, op.DirectiveEventID, runtimepipelineobligation.Terminal("", &failure), now); err != nil {
 			return err
 		}
 		res, err := tx.ExecContext(txctx, `UPDATE agent_directive_operations SET state = $3, failure = $4::jsonb, execution_lease_expires_at = NULL, completed_at = $5, updated_at = $5, expires_at = $6 WHERE operation_id = $1::uuid AND state = $2`, operationID, string(from), string(to), string(failureRaw), now.UTC(), terminalDirectiveExpiry(to, now, ttl))
@@ -558,7 +558,7 @@ func (s *AgentPostgresOwner) finalizePostgresDirectiveFailure(ctx context.Contex
 		if err := recordDirectiveAuthorActivity(txctx, story, op, now, &failure); err != nil {
 			return err
 		}
-		return addDirectiveRevisionEffects(txctx, tx, effects, op.DirectiveEventID)
+		return nil
 	})
 	return out, err
 }
@@ -585,7 +585,7 @@ func (s *AgentSQLiteOwner) finalizeSQLiteDirectiveFailure(ctx context.Context, o
 		if op.State != from || (ownerID != "" && op.ExecutionOwnerID != ownerID) {
 			return runtimeagentcontrol.ErrorForDirectiveOperation(op)
 		}
-		if err := s.pipeline.TerminalizePipelineObligationTx(txctx, tx, op.DirectiveEventID, runtimepipelineobligation.Terminal("", &failure), now); err != nil {
+		if err := s.pipeline.TerminalizePipelineObligationTx(txctx, tx, effects, op.DirectiveEventID, runtimepipelineobligation.Terminal("", &failure), now); err != nil {
 			return err
 		}
 		res, err := tx.ExecContext(txctx, `UPDATE agent_directive_operations SET state = ?, failure = ?, execution_lease_expires_at = NULL, completed_at = ?, updated_at = ?, expires_at = ? WHERE operation_id = ? AND state = ?`, string(to), string(failureRaw), now.UTC(), now.UTC(), terminalDirectiveExpiry(to, now, ttl), operationID, string(from))
@@ -602,7 +602,7 @@ func (s *AgentSQLiteOwner) finalizeSQLiteDirectiveFailure(ctx context.Context, o
 		if err := recordDirectiveAuthorActivity(txctx, story, op, now, &failure); err != nil {
 			return err
 		}
-		return addDirectiveRevisionEffects(txctx, tx, effects, op.DirectiveEventID)
+		return nil
 	})
 	return out, err
 }
@@ -700,22 +700,6 @@ func (s *AgentSQLiteOwner) transitionSQLiteDirectiveOperation(ctx context.Contex
 		return recordDirectiveAuthorActivity(txctx, story, out, out.UpdatedAt, out.Failure)
 	})
 	return out, err
-}
-
-func addDirectiveRevisionEffects(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, eventID string) error {
-	runID, err := privaterunforkrevision.RunIDForEvent(ctx, tx, eventID)
-	if err != nil {
-		return err
-	}
-	if runID == "" {
-		return nil
-	}
-	return effects.Add(runID,
-		privaterunforkrevision.FamilyEvents,
-		privaterunforkrevision.FamilyEventDeliveries,
-		privaterunforkrevision.FamilyCommittedReplayScopes,
-		privaterunforkrevision.FamilyEventReceipts,
-	)
 }
 
 func recordDirectiveAuthorActivity(ctx context.Context, story runtimeauthoractivity.Mutation, op runtimeagentcontrol.DirectiveOperation, occurredAt time.Time, failure *runtimefailures.Envelope) error {

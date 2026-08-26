@@ -11,6 +11,7 @@ import (
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
 func (s *AgentPostgresOwner) ValidateProviderDirectiveOriginTx(ctx context.Context, tx *sql.Tx, origin runtimeagentcontrol.DirectiveExecutionOrigin, runID string, identity runtimeagentidentity.Identity) error {
@@ -61,7 +62,7 @@ func (s *AgentSQLiteOwner) RenewProviderDirectiveOriginTx(ctx context.Context, t
 	return requireDirectiveTransition(res, err)
 }
 
-func (s *AgentPostgresOwner) SettleProviderDirectiveOriginTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, origin runtimeagentcontrol.DirectiveExecutionOrigin, state runtimeagentcontrol.DirectiveOperationState, failure runtimefailures.Envelope, now time.Time) error {
+func (s *AgentPostgresOwner) SettleProviderDirectiveOriginTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, origin runtimeagentcontrol.DirectiveExecutionOrigin, state runtimeagentcontrol.DirectiveOperationState, failure runtimefailures.Envelope, now time.Time) error {
 	op, ok, err := loadPostgresDirectiveOperationByID(ctx, tx, origin.OperationID, true)
 	if err != nil {
 		return err
@@ -75,7 +76,7 @@ func (s *AgentPostgresOwner) SettleProviderDirectiveOriginTx(ctx context.Context
 	if op.State == state {
 		return nil
 	}
-	if err := s.pipeline.TerminalizePipelineObligationTx(ctx, tx, op.DirectiveEventID, runtimepipelineobligation.Terminal("", &failure), now); err != nil {
+	if err := s.pipeline.TerminalizePipelineObligationTx(ctx, tx, effects, op.DirectiveEventID, runtimepipelineobligation.Terminal("", &failure), now); err != nil {
 		return err
 	}
 	raw, err := runtimefailures.MarshalEnvelope(failure)
@@ -92,10 +93,13 @@ func (s *AgentPostgresOwner) SettleProviderDirectiveOriginTx(ctx context.Context
 	if state == runtimeagentcontrol.DirectiveOperationFailed {
 		op.ExpiresAt = now.Add(directiveOperationDefaultTTL).UTC()
 	}
-	return recordDirectiveAuthorActivity(ctx, story, op, now, &failure)
+	if err := recordDirectiveAuthorActivity(ctx, story, op, now, &failure); err != nil {
+		return err
+	}
+	return nil
 }
 
-func (s *AgentSQLiteOwner) SettleProviderDirectiveOriginTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, origin runtimeagentcontrol.DirectiveExecutionOrigin, state runtimeagentcontrol.DirectiveOperationState, failure runtimefailures.Envelope, now time.Time) error {
+func (s *AgentSQLiteOwner) SettleProviderDirectiveOriginTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, origin runtimeagentcontrol.DirectiveExecutionOrigin, state runtimeagentcontrol.DirectiveOperationState, failure runtimefailures.Envelope, now time.Time) error {
 	op, ok, err := loadSQLiteDirectiveOperationByID(ctx, tx, origin.OperationID)
 	if err != nil {
 		return err
@@ -109,7 +113,7 @@ func (s *AgentSQLiteOwner) SettleProviderDirectiveOriginTx(ctx context.Context, 
 	if op.State == state {
 		return nil
 	}
-	if err := s.pipeline.TerminalizePipelineObligationTx(ctx, tx, op.DirectiveEventID, runtimepipelineobligation.Terminal("", &failure), now); err != nil {
+	if err := s.pipeline.TerminalizePipelineObligationTx(ctx, tx, effects, op.DirectiveEventID, runtimepipelineobligation.Terminal("", &failure), now); err != nil {
 		return err
 	}
 	raw, err := runtimefailures.MarshalEnvelope(failure)
@@ -126,7 +130,10 @@ func (s *AgentSQLiteOwner) SettleProviderDirectiveOriginTx(ctx context.Context, 
 	if state == runtimeagentcontrol.DirectiveOperationFailed {
 		op.ExpiresAt = now.Add(directiveOperationDefaultTTL).UTC()
 	}
-	return recordDirectiveAuthorActivity(ctx, story, op, now, &failure)
+	if err := recordDirectiveAuthorActivity(ctx, story, op, now, &failure); err != nil {
+		return err
+	}
+	return nil
 }
 
 func requireProviderDirectiveOriginOrExactTerminal(op runtimeagentcontrol.DirectiveOperation, origin runtimeagentcontrol.DirectiveExecutionOrigin, state runtimeagentcontrol.DirectiveOperationState, failure runtimefailures.Envelope) error {

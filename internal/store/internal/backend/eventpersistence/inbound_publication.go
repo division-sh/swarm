@@ -29,6 +29,7 @@ func commitInboundPublicationTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	story *privateauthoractivity.Mutation,
+	effects *revisionEffects,
 	eventStore eventCommitTxStore,
 	publicationStore inboundPublicationTransactionStore,
 	postgres bool,
@@ -72,7 +73,7 @@ func commitInboundPublicationTx(
 	children := make([]runtimeinbound.EventRecord, len(command.Finalization.Events))
 	for index, publication := range command.Publications {
 		var err error
-		committed[index], err = commitPublicationTx(ctx, tx, story, eventStore, postgres, publication, handoff)
+		committed[index], err = commitPublicationTx(ctx, tx, story, effects, eventStore, postgres, publication, handoff)
 		if err != nil {
 			return runtimeinbound.CommitResult{}, fmt.Errorf("commit inbound publication event %d: %w", index, err)
 		}
@@ -98,7 +99,7 @@ func commitInboundPublicationTx(
 	if err != nil {
 		return runtimeinbound.CommitResult{}, fmt.Errorf("admit inbound evidence: %w", err)
 	}
-	committer := sqlPublishCommitter{tx: tx, store: eventStore, story: runtimeAuthorActivityMutation(story)}
+	committer := sqlPublishCommitter{tx: tx, store: eventStore, story: runtimeAuthorActivityMutation(story), effects: effects}
 	settlement, err := events.NewNoDeliverySettlement(events.EventWriteInboundEvidenceDirect, events.NoDeliveryNoSubscriberByDesign, events.ConnectEvaluationLedger{})
 	if err != nil {
 		return runtimeinbound.CommitResult{}, err
@@ -153,16 +154,11 @@ func (s *EventPostgresOwner) CommitInboundPublication(ctx context.Context, comma
 		if err := insertPostgresInboundPublicationPreparedTx(txctx, tx, request); err != nil {
 			return err
 		}
-		result, err = commitInboundPublicationTx(txctx, tx, story, s, s, true, command, handoff)
+		result, err = commitInboundPublicationTx(txctx, tx, story, effects, s, s, true, command, handoff)
 		if err != nil {
 			return err
 		}
-		for _, publication := range command.Finalization.Events {
-			if err := declareEventCommitEffects(effects, publication.Event.RunID()); err != nil {
-				return err
-			}
-		}
-		return declareEventCommitEffects(effects, command.Finalization.EvidenceEvent.RunID())
+		return nil
 	})
 	if err != nil {
 		return runtimeinbound.CommitResult{}, err

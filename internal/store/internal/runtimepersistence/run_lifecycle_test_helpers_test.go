@@ -15,6 +15,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storerunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 )
@@ -319,7 +320,7 @@ func requirePostgresRunFixtureTxForTest(
 	requireRunFixtureInCurrentMutationForTest(
 		t,
 		ctx,
-		postgresRunLifecycleFixtureMutation{storerunlifecycle.NewPostgresTransactionMutation(nil, tx, story)},
+		postgresRunLifecycleFixtureMutation{storerunlifecycle.NewPostgresTransactionMutation(nil, tx, story, privaterunforkrevision.NewEffects())},
 		fixture,
 	)
 }
@@ -359,7 +360,7 @@ func requireSQLiteRunFixtureTxForTest(
 	requireRunFixtureInCurrentMutationForTest(
 		t,
 		ctx,
-		sqliteRunLifecycleFixtureMutation{storerunlifecycle.NewSQLiteTransactionMutation(nil, tx, story)},
+		sqliteRunLifecycleFixtureMutation{storerunlifecycle.NewSQLiteTransactionMutation(nil, tx, story, privaterunforkrevision.NewEffects())},
 		fixture,
 	)
 }

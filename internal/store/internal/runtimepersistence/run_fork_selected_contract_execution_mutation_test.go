@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -1197,6 +1198,19 @@ func TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation(t *testin
 	}
 	if branchRows != 0 || sourceRouteRows != 1 || routeRecoveryRows != 0 {
 		t.Fatalf("branch rows=%d fork delivery rows=%d source route rows=%d route recovery rows=%d, want no divergence, one untouched global route, and no invented recovery", branchRows, forkDeliveryRows, sourceRouteRows, routeRecoveryRows)
+	}
+	validationTx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatalf("begin selected-contract source-freeze completeness validation: %v", err)
+	}
+	defer validationTx.Rollback()
+	for _, runID := range []string{sourceRunID, materialized.ForkRunID} {
+		if err := runforkrevision.ValidateCompletePostgres(ctx, validationTx, runID); err != nil {
+			t.Fatalf("validate selected-contract source-freeze revision %s: %v", runID, err)
+		}
+	}
+	if err := validationTx.Commit(); err != nil {
+		t.Fatalf("commit selected-contract source-freeze completeness validation: %v", err)
 	}
 }
 

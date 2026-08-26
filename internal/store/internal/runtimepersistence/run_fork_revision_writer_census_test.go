@@ -159,20 +159,119 @@ func TestRunForkRevisionProductionWriterCensusIsClosed(t *testing.T) {
 		}
 	}
 
-	pipelineOwner, err := os.ReadFile(filepath.Join(root, "internal/store/internal/backend/pipelinepersistence/owner.go"))
-	if err != nil {
-		t.Fatalf("read pipeline revision effect owners: %v", err)
+	assertRunForkRevisionContributionPaths(t, root)
+}
+
+type runForkRevisionContributionPath struct {
+	Path         string
+	Writer       string
+	WriterTokens []string
+	ProofPath    string
+	Proof        string
+	ProofTokens  []string
+}
+
+func assertRunForkRevisionContributionPaths(t *testing.T, root string) {
+	t.Helper()
+	paths := []runForkRevisionContributionPath{
+		{
+			Path: "internal/store/internal/backend/delivery/lifecycle.go", Writer: "TerminalizeRunDeliveriesTx",
+			WriterTokens: []string{"effects *privaterunforkrevision.Effects", "effects.Add", "FamilyEventDeliveries", "RecordDeadLetterTx"},
+			ProofPath:    "internal/store/internal/runtimepersistence/run_fork_revision_operation_proof_test.go", Proof: "TestRunForkRevisionDirectDeliveryTerminalizationIsCompleteOnBothStores",
+			ProofTokens: []string{"fixture.store.TerminalizeRun", "requireCompleteRunForkRevision"},
+		},
+		{
+			Path: "internal/store/internal/backend/pipelinepersistence/owner_operations.go", Writer: "TerminalizePipelineObligationTx",
+			WriterTokens: []string{"effects *revisionEffects", "terminalizeUnclaimedPipelineObligationTx", "declareEventRevisionFamily", "FamilyEventReceipts"},
+			ProofPath:    "internal/store/internal/runtimepersistence/active_run_quiescence_delivery_readback_test.go", Proof: "TestActiveRunDeliveryQuiescenceReadbackParity",
+			ProofTokens: []string{"ApplyActiveRunQuiescence", "requireCompleteRunForkRevision"},
+		},
+		{
+			Path: "internal/store/internal/backend/pipelinepersistence/owner_operations.go", Writer: "MarkDecisionProcessed",
+			WriterTokens: []string{"effects := newRevisionEffects()", "FamilyEventReceipts", "CommitPipelineHandoff", "FamilyEventDeliveries", "FinalizePostgres"},
+			ProofPath:    "internal/store/internal/runtimepersistence/pipeline_obligation_parity_test.go", Proof: "provePipelineDecisionRouteDispositions",
+			ProofTokens: []string{"MarkDecisionProcessed", "Settle", "requireCompleteRunForkRevision"},
+		},
+		{
+			Path: "internal/store/internal/backend/pipelinepersistence/owner_operations.go", Writer: "Settle",
+			WriterTokens: []string{"effects := newRevisionEffects()", "FamilyEventReceipts", "CommitPipelineHandoff", "FamilyEventDeliveries", "FinalizePostgres"},
+			ProofPath:    "internal/store/internal/runtimepersistence/pipeline_obligation_parity_test.go", Proof: "provePipelineExactPayloadRecovery",
+			ProofTokens: []string{"PipelineObligations().Settle", "requireCompleteRunForkRevision"},
+		},
+		{
+			Path: "internal/store/internal/backend/eventpersistence/event_commit.go", Writer: "commitInitialSideEffectEvidence",
+			WriterTokens: []string{"effects", "CommitInitialPipelineDispositionTx", "RecordDeadLetterTx"},
+			ProofPath:    "internal/store/internal/runtimepersistence/run_fork_revision_operation_proof_test.go", Proof: "TestRunForkRevisionTargetFailurePublicationIsCompleteOnBothStores",
+			ProofTokens: []string{"store.CommitPublication", "requireCompleteRunForkRevision"},
+		},
+		{
+			Path: "internal/store/internal/backend/runlifecycle/run_lifecycle_state_adapter.go", Writer: "markRunTerminalStateTx",
+			WriterTokens: []string{"effects *privaterunforkrevision.Effects", "TerminalizeRunDeliveriesTx", "SupersedeRunTx"},
+			ProofPath:    "internal/store/internal/runtimepersistence/decision_cards_test.go", Proof: "TestTerminalDecisionCardSupersessionStateChangeOnlyProducerParity",
+			ProofTokens: []string{"markDecisionCardRunTerminalStatus", "stopDecisionCardRun", "quiesceDecisionCardRun", "assertTerminalDecisionCardStateChangeOnly"},
+		},
+		{
+			Path: "internal/store/internal/backend/runlifecycle/run_control.go", Writer: "quiesceStoppedRunWorkTx",
+			WriterTokens: []string{"effects *runforkrevision.Effects", "TerminalizeRunTx", "terminateActiveRunSessionsTx", "cancelActiveRunTimerFamiliesTx"},
+			ProofPath:    "internal/store/internal/runtimepersistence/decision_cards_test.go", Proof: "TestTerminalDecisionCardSupersessionStateChangeOnlyProducerParity",
+			ProofTokens: []string{"run_stop", "stopDecisionCardRun", "assertTerminalDecisionCardStateChangeOnly"},
+		},
+		{
+			Path: "internal/store/internal/backend/runlifecycle/active_run_quiescence.go", Writer: "ApplyActiveRunQuiescence",
+			WriterTokens: []string{"effects := runforkrevision.NewEffects()", "TerminalizeRunDeliveriesTx", "TerminalizeRunTx", "FinalizePostgres"},
+			ProofPath:    "internal/store/internal/runtimepersistence/active_run_quiescence_delivery_readback_test.go", Proof: "TestActiveRunDeliveryQuiescenceReadbackParity",
+			ProofTokens: []string{"ApplyActiveRunQuiescence", "requireCompleteRunForkRevision"},
+		},
+		{
+			Path: "internal/store/internal/backend/runlifecycle/run_lifecycle_candidates.go", Writer: "executeCompletionCandidateTx",
+			WriterTokens: []string{"effects *privaterunforkrevision.Effects", "completeRunTx"},
+			ProofPath:    "internal/store/internal/runtimepersistence/decision_cards_test.go", Proof: "TestStandaloneCompletionCandidatePublishesChangedGateRevisionParity",
+			ProofTokens: []string{"executeStandaloneCompletionCandidateWithCatalog", "requireCompleteRunForkRevision"},
+		},
+		{
+			Path: "internal/store/internal/preservationpersistence/preservation_cleanup.go", Writer: "applyPreservationCleanup",
+			WriterTokens: []string{"effects := privaterunforkrevision.NewEffects()", "TerminalizeRunTx", "MarkTerminalTx", "FinalizeRunForkRevisionTx"},
+			ProofPath:    "internal/store/internal/runtimepersistence/preservation_cleanup_test.go", Proof: "TestPreservationCleanupPublishesOneCompleteRunForkRevisionPostgres",
+			ProofTokens: []string{"ApplyUnavailableBundleStartupPreservationCleanup", "assertPreservationCleanupRunForkRevision"},
+		},
+		{
+			Path: "internal/store/internal/backend/pipelinepersistence/standing_service.go", Writer: "quiesceStandingRunTx",
+			WriterTokens: []string{"s.revisionEffects", "TerminalizeRunDeliveriesTx", "TerminalizeRunTx", "FamilyAgentSessions"},
+			ProofPath:    "internal/store/internal/runtimepersistence/standing_service_store_test.go", Proof: "TestSQLiteStandingServiceOperatorLifecycleQuiescesAndPersistsDesiredState",
+			ProofTokens: []string{"ResetStandingService", "requireCompleteRunForkRevision"},
+		},
+		{
+			Path: "internal/store/internal/backend/runforkpersistence/run_fork_source_freeze.go", Writer: "applyRunForkSourceFreeze",
+			WriterTokens: []string{"effects *runforkrevision.Effects", "ForkSourceTx"},
+			ProofPath:    "internal/store/internal/runtimepersistence/run_fork_source_freeze_test.go", Proof: "TestRunForkSourceFreezeCommitsCoupledLifecycleDecisionAndActivityOutcome",
+			ProofTokens: []string{"commitRunForkSourceFreezeForTest", "ValidateCompletePostgres"},
+		},
+		{
+			Path: "internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_execution_mutation.go", Writer: "ActivateRunForkForSelectedContractExecution",
+			WriterTokens: []string{"effects := runforkrevision.NewEffects()", "applyRunForkSourceFreeze", "commitRunForkAuthorActivityTransaction"},
+			ProofPath:    "internal/store/internal/runtimepersistence/run_fork_selected_contract_execution_mutation_test.go", Proof: "TestPostTGlobalRoutingRuleDoesNotChangeSelectedContractActivation",
+			ProofTokens: []string{"ActivateRunForkForSelectedContractExecution", "ValidateCompletePostgres"},
+		},
 	}
-	ownerText := string(pipelineOwner)
-	for _, functionName := range []string{
-		"workflowLifecycleRevisionEffects",
-		"addWorkflowMutationRevisionEffects",
-		"addEntityMetadataRevisionEffects",
-	} {
-		body := productionFunctionBody(t, ownerText, functionName)
-		for _, required := range []string{"FamilyEntityMetadata", "FamilyEntityMutations"} {
-			if !strings.Contains(body, required) {
-				t.Fatalf("pipeline revision effect owner %s does not declare %s", functionName, required)
+	for _, path := range paths {
+		productionSource, err := os.ReadFile(filepath.Join(root, path.Path))
+		if err != nil {
+			t.Fatalf("read contribution writer %s: %v", path.Path, err)
+		}
+		writerBody := productionFunctionBody(t, string(productionSource), path.Writer)
+		for _, token := range path.WriterTokens {
+			if !strings.Contains(writerBody, token) {
+				t.Fatalf("revision contribution path %s/%s cannot prove writer token %q", path.Path, path.Writer, token)
+			}
+		}
+		proofSource, err := os.ReadFile(filepath.Join(root, path.ProofPath))
+		if err != nil {
+			t.Fatalf("read contribution proof %s: %v", path.ProofPath, err)
+		}
+		proofBody := productionFunctionBody(t, string(proofSource), path.Proof)
+		for _, token := range path.ProofTokens {
+			if !strings.Contains(proofBody, token) {
+				t.Fatalf("revision contribution proof %s/%s does not execute %q", path.ProofPath, path.Proof, token)
 			}
 		}
 	}
@@ -182,7 +281,13 @@ func productionFunctionBody(t *testing.T, source, functionName string) string {
 	t.Helper()
 	start := strings.Index(source, "func "+functionName+"(")
 	if start < 0 {
-		t.Fatalf("production function %s is missing", functionName)
+		method := strings.Index(source, ") "+functionName+"(")
+		if method >= 0 {
+			start = strings.LastIndex(source[:method], "func (")
+		}
+	}
+	if start < 0 {
+		t.Fatalf("production function or method %s is missing", functionName)
 	}
 	bodyStart := strings.Index(source[start:], "{")
 	if bodyStart < 0 {
@@ -197,7 +302,7 @@ func productionFunctionBody(t *testing.T, source, functionName string) string {
 		case '}':
 			depth--
 			if depth == 0 {
-				return source[bodyStart : index+1]
+				return source[start : index+1]
 			}
 		}
 	}

@@ -12,6 +12,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -94,7 +95,7 @@ func TestMutationLogPrivateAdapterRequiresExactActiveRunSource(t *testing.T) {
 
 func insertMutationLogPrivateAdapter(ctx context.Context, selected *PostgresStore, record runtimemutationlog.Record) error {
 	return selected.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-		return privatemutationlog.InsertWithStory(txctx, tx, postgresActiveRunSourceOwner(selected, tx), story, record)
+		return privatemutationlog.InsertWithStory(txctx, tx, postgresActiveRunSourceOwner(selected, tx), story, privaterunforkrevision.NewEffects(), record)
 	})
 }
 
