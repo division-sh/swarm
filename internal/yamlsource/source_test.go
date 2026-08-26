@@ -416,6 +416,54 @@ merge_alias:
 	if occurrence.ValueLocation.Line != 9 || occurrence.ResolvedValueLocation.Line != 2 {
 		t.Fatalf("nested alias locations = %#v", occurrence)
 	}
+	if merged.Value.IntroductionLocation().Line != 11 {
+		t.Fatalf("merged introduction location = %s, want merge alias use on line 11", merged.Value.IntroductionLocation())
+	}
+	mappingAlias, err := root.Lookup("mapping_alias")
+	if err != nil {
+		t.Fatal(err)
+	}
+	field, err := mappingAlias.Value.Lookup("field")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if field.Value.Location().Line != 4 || field.Value.IntroductionLocation().Line != 7 {
+		t.Fatalf("mapping alias child locations = %s / %s", field.Value.Location(), field.Value.IntroductionLocation())
+	}
+}
+
+func TestDocumentPreservesEachMergeSequenceIntroductionLocation(t *testing.T) {
+	snapshot, err := Load([]byte(`
+first: &first {one: value}
+second: &second {two: value}
+merged:
+  <<:
+    - *first
+    - *second
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := snapshot.Document("contract.yaml").Root()
+	merged, err := root.Lookup("merged")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name     string
+		wantLine int
+	}{
+		{name: "one", wantLine: 6},
+		{name: "two", wantLine: 7},
+	} {
+		field, lookupErr := merged.Value.Lookup(tc.name)
+		if lookupErr != nil {
+			t.Fatal(lookupErr)
+		}
+		if field.Value.IntroductionLocation().Line != tc.wantLine {
+			t.Fatalf("%s introduction = %s, want merge item alias on line %d", tc.name, field.Value.IntroductionLocation(), tc.wantLine)
+		}
+	}
 }
 
 func TestDocumentValidateUniqueMappingsRejectsDirectAndMergedDuplicates(t *testing.T) {

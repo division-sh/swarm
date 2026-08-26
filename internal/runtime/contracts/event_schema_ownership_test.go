@@ -299,6 +299,39 @@ func TestConnectedEventSchemaOwnershipPreservesSingleProducerFanIn(t *testing.T)
 	}
 }
 
+func TestConnectedEventSchemaOwnershipTreatsPackageRootAndOwningFlowAsOneProducer(t *testing.T) {
+	entry := EventCatalogEntry{Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{"value": {Type: "text"}}}}
+	bundle := &WorkflowContractBundle{
+		projectContracts: map[string]ProjectContractView{
+			"flows/child": {
+				Paths:  ProjectPackagePaths{Key: "flows/child", OwningFlowID: "child"},
+				Events: map[string]EventCatalogEntry{"work.ready": entry},
+			},
+		},
+		FlowTree: FlowTree{ByID: map[string]*FlowContractView{
+			"child":    {Paths: FlowContractPaths{ID: "child", PackageKey: "flows/child"}, Events: map[string]EventCatalogEntry{"work.ready": entry}},
+			"consumer": {Paths: FlowContractPaths{ID: "consumer", PackageKey: "flows/child"}},
+		}},
+		Semantics: WorkflowSemanticView{
+			CompositionConnects: []FlowPackageConnect{
+				{PackageKey: "flows/child", Event: "work.ready", From: ".", To: "consumer"},
+				{PackageKey: "flows/child", Event: "work.ready", From: "child", To: "consumer"},
+			},
+			FlowInputs: map[string][]string{"consumer": {"work.ready"}},
+		},
+	}
+	rows := compileEventSchemaOwnershipRows(bundle)
+	if len(rows) != 2 {
+		t.Fatalf("ownership rows = %#v, want two routes", rows)
+	}
+	if !sameEventSchemaProducerOwner(rows[0], rows[1]) {
+		t.Fatalf("package root and owning flow resolved as distinct owners: %#v / %#v", rows[0], rows[1])
+	}
+	if errs := validateIntraPackageEventSchemaOwnership(bundle); len(errs) != 0 {
+		t.Fatalf("same canonical producer was rejected as ambiguous: %v", errs)
+	}
+}
+
 func TestIntraPackageEventConsumerRestatementFailsClosed(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	source := filepath.Join(repo, "examples", "routing", "parent-connect")

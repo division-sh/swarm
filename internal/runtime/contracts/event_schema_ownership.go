@@ -189,7 +189,7 @@ func eventSchemaProducerOwnerKey(row eventSchemaOwnershipRow) string {
 	if producerName == "" {
 		return ""
 	}
-	return strings.Join([]string{strings.TrimSpace(row.packageKey), strings.TrimSpace(row.producerFlowID), strings.TrimSpace(row.producerEndpoint), producerName}, "\x00")
+	return strings.Join([]string{strings.TrimSpace(row.packageKey), strings.TrimSpace(row.producerFlowID), producerName}, "\x00")
 }
 
 func sameEventSchemaProducerOwner(left, right eventSchemaOwnershipRow) bool {
