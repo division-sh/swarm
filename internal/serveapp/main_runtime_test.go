@@ -2388,6 +2388,15 @@ func runServedBundleRegisterBackendProof(t *testing.T, backend servedparity.Back
 	if catalogReplay.Registered || catalogReplay.BundleHash != insert.BundleHash {
 		t.Fatalf("%s catalog bundle.register replay = %#v, want existing %s", rt.Backend, catalogReplay, insert.BundleHash)
 	}
+	unavailable := requireServedJSONRPCError(t, rt.Endpoint, "event.publish", map[string]any{
+		"event_name":      "item.received",
+		"bundle_hash":     insert.BundleHash,
+		"payload":         map[string]any{"item_id": "registered-but-unloaded"},
+		"idempotency_key": "issue-2359-" + rt.Backend + "-catalog-only",
+	})
+	if unavailable.Data["code"] != apiv1.BundleUnavailableCode {
+		t.Fatalf("%s publication against registered-only bundle data = %#v, want %s", rt.Backend, unavailable.Data, apiv1.BundleUnavailableCode)
+	}
 
 	beforeMalformed := servedBundleRegisterTableCount(t, rt.DB, "bundles")
 	malformed := requireServedJSONRPCError(t, rt.Endpoint, "bundle.register", map[string]any{
