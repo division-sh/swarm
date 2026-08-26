@@ -174,16 +174,20 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 		}
 	})
 
-	t.Run("reconnect admits an explicit replacement credential", func(t *testing.T) {
-		server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
-			if request.Method != "channel.onboarding_start" || request.Params["verb"] != "reconnect" || request.Params["provider_credential"] != "replacement-token" {
-				t.Fatalf("replacement start = %s %#v", request.Method, request.Params)
-			}
-			return channelOnboardingCLIResult("succeeded", "bound", true)
-		})
-		stdout, stderr, code := runOperatorChannelCLIWithInput(t, server, "replacement-token\n", "channel", "reconnect", "telegram", "--credential-stdin")
-		if code != 0 || stderr != "" || !strings.Contains(stdout, "Connected telegram channel READY") {
-			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+	t.Run("replacement verbs admit an explicit credential", func(t *testing.T) {
+		for _, verb := range []string{"reconnect", "rebind"} {
+			t.Run(verb, func(t *testing.T) {
+				server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
+					if request.Method != "channel.onboarding_start" || request.Params["verb"] != verb || request.Params["provider_credential"] != "replacement-token" {
+						t.Fatalf("replacement start = %s %#v", request.Method, request.Params)
+					}
+					return channelOnboardingCLIResult("succeeded", "bound", true)
+				})
+				stdout, stderr, code := runOperatorChannelCLIWithInput(t, server, "replacement-token\n", "channel", verb, "telegram", "--credential-stdin")
+				if code != 0 || stderr != "" || !strings.Contains(stdout, "Connected telegram channel READY") {
+					t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+				}
+			})
 		}
 	})
 
@@ -233,6 +237,29 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 		stdout, stderr, code := runOperatorChannelCLIWithInput(t, server, "replacement-token\n", "channel", "resume", operatorChannelCLIOperation, "--yes", "--credential-stdin")
 		if code != 0 || stderr != "" || !strings.Contains(stdout, "Connected telegram channel READY") {
 			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+		}
+	})
+
+	t.Run("claim timeout names the exact durable resume command", func(t *testing.T) {
+		server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
+			switch request.Method {
+			case "channel.onboarding_start", "channel.onboarding_get":
+				return channelOnboardingCLIResult("awaiting_external_identity", "awaiting_claim", false)
+			default:
+				t.Fatalf("unexpected method %q", request.Method)
+				return nil
+			}
+		})
+		setCLIAPITestToken(t, operatorChannelCLIToken)
+		opts := testRootCommandOptions(server)
+		opts.channelConnectWait = 5 * time.Millisecond
+		opts.channelConnectPoll = time.Millisecond
+		opts.input = strings.NewReader("bot-token\n")
+		var stdout, stderr bytes.Buffer
+		code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"channel", "connect", "telegram", "--yes"}, &stdout, &stderr, opts)
+		want := "swarm channel resume " + operatorChannelCLIOperation
+		if code != CLIExitRuntime || !strings.Contains(stderr.String(), want) {
+			t.Fatalf("code=%d stdout=%q stderr=%q, want %q", code, stdout.String(), stderr.String(), want)
 		}
 	})
 
