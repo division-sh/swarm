@@ -82,9 +82,10 @@ type AgentManager struct {
 	deliveryLaneMu sync.Mutex
 	deliveryLanes  map[runtimeagentidentity.Identity]*claimedAttemptLane
 
-	dynamicFlowReadinessMu       sync.Mutex
-	dynamicFlowReadinessAttempts map[dynamicFlowRuntimeReadinessKey]*dynamicFlowRuntimeReadinessAttempt
-	dynamicFlowReadinessSignal   chan struct{}
+	dynamicFlowReadinessMu            sync.Mutex
+	dynamicFlowReadinessAttempts      map[dynamicFlowRuntimeReadinessKey]*dynamicFlowRuntimeReadinessAttempt
+	dynamicFlowReadinessSignal        chan struct{}
+	dynamicFlowReadinessRetryInterval time.Duration
 
 	testAfterDynamicFlowReadinessAdmission func()
 }
@@ -231,33 +232,34 @@ func NewAgentManagerWithOptions(bus Bus, factory AgentFactory, opts AgentManager
 		semanticReadinessSource: dynamicFlowRuntimeReadinessSource{
 			fact: opts.BundleSourceFact, source: opts.SemanticSource,
 		},
-		workflowInstances:               opts.WorkflowInstances,
-		workOwner:                       opts.WorkOwner,
-		receiverExecution:               opts.ReceiverExecution,
-		selectedContractRouteRecoveries: map[string]SelectedContractRouteRecoveryTruth{},
-		directiveHeartbeat:              defaultDirectiveHeartbeatConfig(),
-		runtimeMode:                     strings.TrimSpace(opts.RuntimeMode),
-		budget:                          opts.Budget,
-		resetRuntimeOwnedState:          opts.ResetRuntimeOwnedState,
-		runtimeShutdownAdmissionClosed:  opts.RuntimeShutdownAdmissionClosed,
-		runtimeIngressSafetyPause:       opts.RuntimeIngressSafetyPause,
-		nativeToolAdmissionValidator:    opts.NativeToolAdmissionValidator,
-		throttleSuppressPrefixes:        throttleSuppressPrefixes,
-		llmBackend:                      normalizeManagerLLMBackend(opts.LLMBackend),
-		modelAliases:                    llmselection.EffectiveModelAliases(opts.ModelAliases),
-		requireModelResolution:          opts.RequireModelResolution,
-		lifecycle:                       lifecycle,
-		roles:                           opts.PersistenceRoles,
-		baseContext:                     opts.BaseContext,
-		executionPosture:                opts.ExecutionPosture,
-		poisonPanicCounts:               make(map[poisonPanicKey]int),
-		poisonEventEntities:             make(map[string]map[string]struct{}),
-		poisonEventEmitted:              make(map[string]bool),
-		deadLetterWindows:               make(map[string][]deadLetterEscalationSample),
-		deadLetterLastRaised:            make(map[string]time.Time),
-		deliveryLanes:                   make(map[runtimeagentidentity.Identity]*claimedAttemptLane),
-		dynamicFlowReadinessAttempts:    make(map[dynamicFlowRuntimeReadinessKey]*dynamicFlowRuntimeReadinessAttempt),
-		dynamicFlowReadinessSignal:      make(chan struct{}, 1),
+		workflowInstances:                 opts.WorkflowInstances,
+		workOwner:                         opts.WorkOwner,
+		receiverExecution:                 opts.ReceiverExecution,
+		selectedContractRouteRecoveries:   map[string]SelectedContractRouteRecoveryTruth{},
+		directiveHeartbeat:                defaultDirectiveHeartbeatConfig(),
+		runtimeMode:                       strings.TrimSpace(opts.RuntimeMode),
+		budget:                            opts.Budget,
+		resetRuntimeOwnedState:            opts.ResetRuntimeOwnedState,
+		runtimeShutdownAdmissionClosed:    opts.RuntimeShutdownAdmissionClosed,
+		runtimeIngressSafetyPause:         opts.RuntimeIngressSafetyPause,
+		nativeToolAdmissionValidator:      opts.NativeToolAdmissionValidator,
+		throttleSuppressPrefixes:          throttleSuppressPrefixes,
+		llmBackend:                        normalizeManagerLLMBackend(opts.LLMBackend),
+		modelAliases:                      llmselection.EffectiveModelAliases(opts.ModelAliases),
+		requireModelResolution:            opts.RequireModelResolution,
+		lifecycle:                         lifecycle,
+		roles:                             opts.PersistenceRoles,
+		baseContext:                       opts.BaseContext,
+		executionPosture:                  opts.ExecutionPosture,
+		poisonPanicCounts:                 make(map[poisonPanicKey]int),
+		poisonEventEntities:               make(map[string]map[string]struct{}),
+		poisonEventEmitted:                make(map[string]bool),
+		deadLetterWindows:                 make(map[string][]deadLetterEscalationSample),
+		deadLetterLastRaised:              make(map[string]time.Time),
+		deliveryLanes:                     make(map[runtimeagentidentity.Identity]*claimedAttemptLane),
+		dynamicFlowReadinessAttempts:      make(map[dynamicFlowRuntimeReadinessKey]*dynamicFlowRuntimeReadinessAttempt),
+		dynamicFlowReadinessSignal:        make(chan struct{}, 1),
+		dynamicFlowReadinessRetryInterval: defaultDynamicFlowReadinessRetryInterval,
 	}
 }
 

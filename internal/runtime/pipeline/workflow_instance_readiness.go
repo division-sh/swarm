@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -92,6 +93,7 @@ type DynamicFlowRuntimeReadinessPlan struct {
 type DynamicFlowRuntimeReadiness struct {
 	InstancePath           string
 	Plan                   DynamicFlowRuntimeReadinessPlan
+	OwningRunSource        runtimecorrelation.BundleSourceFact
 	RunStatus              string
 	InstanceStatus         string
 	InstanceTerminatedAt   time.Time
@@ -104,19 +106,49 @@ type DynamicFlowRuntimeReadinessKey struct {
 	InstancePath string
 }
 
-type DynamicFlowRuntimeStartupProjection struct {
-	Completed []DynamicFlowRuntimeReadiness
-	Pending   []DynamicFlowRuntimeReadiness
+type DynamicFlowRuntimeReadinessProjection struct {
+	CurrentCompleted         []DynamicFlowRuntimeReadiness
+	CurrentPending           []DynamicFlowRuntimeReadiness
+	SourceTransitionRequired []DynamicFlowRuntimeReadiness
+}
+
+var ErrDynamicFlowRuntimeReadinessObservationStale = errors.New("dynamic flow runtime readiness observation is stale")
+
+type DynamicFlowRuntimeReadinessObservationConflict struct {
+	RunID        string
+	InstancePath string
+	Coordinate   string
+}
+
+func (e *DynamicFlowRuntimeReadinessObservationConflict) Error() string {
+	if e == nil {
+		return ErrDynamicFlowRuntimeReadinessObservationStale.Error()
+	}
+	return fmt.Sprintf(
+		"%s for %s/%s: %s changed",
+		ErrDynamicFlowRuntimeReadinessObservationStale,
+		strings.TrimSpace(e.RunID),
+		strings.Trim(strings.TrimSpace(e.InstancePath), "/"),
+		strings.TrimSpace(e.Coordinate),
+	)
+}
+
+func (e *DynamicFlowRuntimeReadinessObservationConflict) Unwrap() error {
+	return ErrDynamicFlowRuntimeReadinessObservationStale
+}
+
+func IsDynamicFlowRuntimeReadinessObservationConflict(err error) bool {
+	return errors.Is(err, ErrDynamicFlowRuntimeReadinessObservationStale)
 }
 
 // DynamicFlowRuntimeReadinessPersistence owns the complete selected-store
 // readiness projection. Runtime consumers receive only typed records and
 // named mutations; transaction and query authority remain private.
 type DynamicFlowRuntimeReadinessPersistence interface {
-	ReconcileDynamicFlowRuntimeReadinessPlan(context.Context, DynamicFlowRuntimeReadinessPlan, time.Time) (bool, error)
+	ReconcileDynamicFlowRuntimeReadinessPlan(context.Context, DynamicFlowRuntimeReadiness, DynamicFlowRuntimeReadinessPlan, time.Time) (bool, error)
 	LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (DynamicFlowRuntimeReadiness, bool, error)
-	ListDynamicFlowRuntimeReadiness(context.Context) ([]DynamicFlowRuntimeReadiness, error)
-	InspectDynamicFlowRuntimeStartupProjection(context.Context, runtimecorrelation.BundleSourceFact) (DynamicFlowRuntimeStartupProjection, error)
+	InspectDynamicFlowRuntimeReadinessForSource(context.Context, runtimecorrelation.BundleSourceFact) (DynamicFlowRuntimeReadinessProjection, error)
+	InspectDynamicFlowRuntimeReadinessForRun(context.Context, string, runtimecorrelation.BundleSourceFact) ([]DynamicFlowRuntimeReadiness, error)
 	MarkDynamicFlowRuntimeTopologyReady(context.Context, DynamicFlowRuntimeReadinessPlan, time.Time) error
 }
 
@@ -124,6 +156,8 @@ type DynamicFlowRuntimeReadinessPersistenceRecord struct {
 	RunID                     string
 	InstancePath              string
 	Plan                      []byte
+	OwningRunBundleHash       string
+	OwningRunBundleSource     string
 	RunStatus                 string
 	InstanceStatus            string
 	InstanceTerminatedAt      time.Time
@@ -135,7 +169,7 @@ type DynamicFlowRuntimeReadinessPersistenceRecord struct {
 }
 
 func DecodeDynamicFlowRuntimeReadinessPersistenceRecord(record DynamicFlowRuntimeReadinessPersistenceRecord) (DynamicFlowRuntimeReadiness, error) {
-	return decodeDynamicFlowRuntimeReadiness(
+	item, err := decodeDynamicFlowRuntimeReadiness(
 		record.RunID,
 		record.InstancePath,
 		record.Plan,
@@ -145,6 +179,17 @@ func DecodeDynamicFlowRuntimeReadinessPersistenceRecord(record DynamicFlowRuntim
 		dynamicFlowRuntimeReadinessTime{Time: record.TopologyReadyAt, Valid: record.HasTopologyReadyAt},
 		dynamicFlowRuntimeReadinessTime{Time: record.CreationEventEmittedAt, Valid: record.HasCreationEventEmittedAt},
 	)
+	if err != nil {
+		return DynamicFlowRuntimeReadiness{}, err
+	}
+	item.OwningRunSource, err = runtimecorrelation.DecodeBundleSourceFact(
+		record.OwningRunBundleHash,
+		record.OwningRunBundleSource,
+	)
+	if err != nil {
+		return DynamicFlowRuntimeReadiness{}, fmt.Errorf("dynamic flow runtime readiness %s owning run source: %w", record.InstancePath, err)
+	}
+	return item, nil
 }
 
 func (r DynamicFlowRuntimeReadiness) Eligible() bool {

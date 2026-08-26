@@ -215,20 +215,20 @@ func (pc *PipelineCoordinator) RetireInitialEntryTimerWakeups(ctx context.Contex
 	return pc.workflowStore.RetireInitialEntryTimerWakeups(ctx, route)
 }
 
-func (pc *PipelineCoordinator) ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error) {
-	return pc.workflowStore.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, plan, observedAt)
+func (pc *PipelineCoordinator) ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, observed DynamicFlowRuntimeReadiness, plan DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error) {
+	return pc.workflowStore.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, observed, plan, observedAt)
 }
 
 func (pc *PipelineCoordinator) LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID string, route runtimeflowidentity.Route) (DynamicFlowRuntimeReadiness, bool, error) {
 	return pc.workflowStore.LoadDynamicFlowRuntimeReadiness(ctx, runID, route)
 }
 
-func (pc *PipelineCoordinator) ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]DynamicFlowRuntimeReadiness, error) {
-	return pc.workflowStore.ListDynamicFlowRuntimeReadiness(ctx)
+func (pc *PipelineCoordinator) InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source runtimecorrelation.BundleSourceFact) (DynamicFlowRuntimeReadinessProjection, error) {
+	return pc.workflowStore.InspectDynamicFlowRuntimeReadinessForSource(ctx, source)
 }
 
-func (pc *PipelineCoordinator) InspectDynamicFlowRuntimeStartupProjection(ctx context.Context, source runtimecorrelation.BundleSourceFact) (DynamicFlowRuntimeStartupProjection, error) {
-	return pc.workflowStore.InspectDynamicFlowRuntimeStartupProjection(ctx, source)
+func (pc *PipelineCoordinator) InspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, runID string, source runtimecorrelation.BundleSourceFact) ([]DynamicFlowRuntimeReadiness, error) {
+	return pc.workflowStore.InspectDynamicFlowRuntimeReadinessForRun(ctx, runID, source)
 }
 
 func (pc *PipelineCoordinator) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, expected DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error {

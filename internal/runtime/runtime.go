@@ -425,13 +425,22 @@ func (rt *Runtime) PreflightDynamicTopologyStartup(ctx context.Context) error {
 	if rt == nil || rt.Manager == nil {
 		return nil
 	}
-	projection, err := rt.Manager.InspectDynamicFlowRuntimeStartupProjection(ctx, rt.Options.BundleSourceFact)
+	projection, err := rt.Manager.InspectDynamicFlowRuntimeReadinessForSource(ctx, rt.Options.BundleSourceFact)
 	if err != nil {
 		return fmt.Errorf("inspect source-scoped dynamic topology startup: %w", err)
 	}
 	replayAllowed := rt.Config != nil && rt.Config.Runtime.RecoveryOnStartup && !rt.Options.DisablePersistentStartupRecovery
-	if len(projection.Pending) > 0 && !replayAllowed {
-		return fmt.Errorf("dynamic topology startup requires recovery for %d incomplete source-owned instance(s)", len(projection.Pending))
+	pendingTransitions := 0
+	for _, item := range projection.SourceTransitionRequired {
+		if item.Pending() {
+			pendingTransitions++
+		}
+	}
+	if !replayAllowed && (len(projection.CurrentPending) > 0 || pendingTransitions > 0) {
+		return fmt.Errorf(
+			"dynamic topology startup requires recovery: current_pending=%d predecessor_pending_transitions=%d",
+			len(projection.CurrentPending), pendingTransitions,
+		)
 	}
 	return nil
 }
@@ -1719,22 +1728,24 @@ func (rt *Runtime) Start(ctx context.Context) error {
 	}
 	rt.emitBootProgress(15, "mcp_tool_validation", "ok", fmt.Sprintf("%d capability surfaces settled", len(surfaceIDs)))
 	if rt.Manager != nil {
-		if rt.Config.Runtime.RecoveryOnStartup && !skipPersistentStartupRecovery {
-			if err := rt.Manager.ReconcileDynamicFlowRuntimeStartupProjection(ctx, rt.Options.BundleSourceFact); err != nil {
-				if runtimemanager.IsDynamicFlowRuntimeReadinessFinalizationError(err) {
-					return fmt.Errorf("finalize dynamic flow runtime readiness during startup: %w", err)
-				}
-				return fmt.Errorf("reconcile source-scoped dynamic topology before startup: %w", err)
-			}
-		}
-		projection, err := rt.Manager.InspectDynamicFlowRuntimeStartupProjection(ctx, rt.Options.BundleSourceFact)
+		replayAllowed := rt.Config.Runtime.RecoveryOnStartup && !skipPersistentStartupRecovery
+		projection, err := rt.Manager.InspectDynamicFlowRuntimeReadinessForSource(ctx, rt.Options.BundleSourceFact)
 		if err != nil {
 			return fmt.Errorf("revalidate source-scoped dynamic topology before startup: %w", err)
 		}
-		if len(projection.Pending) != 0 {
-			return fmt.Errorf("dynamic topology startup remains incomplete for %d source-owned instance(s)", len(projection.Pending))
+		pendingTransitions := 0
+		for _, item := range projection.SourceTransitionRequired {
+			if item.Pending() {
+				pendingTransitions++
+			}
 		}
-		activation, activateErr := rt.admitManagedExecution(startCtx, settledAuthority, rt.Config.Runtime.RecoveryOnStartup && !skipPersistentStartupRecovery)
+		if !replayAllowed && (len(projection.CurrentPending) != 0 || pendingTransitions != 0) {
+			return fmt.Errorf(
+				"dynamic topology startup requires recovery: current_pending=%d predecessor_pending_transitions=%d",
+				len(projection.CurrentPending), pendingTransitions,
+			)
+		}
+		activation, activateErr := rt.admitManagedExecution(startCtx, settledAuthority, replayAllowed)
 		if activateErr != nil {
 			if activation.ReplayErr != nil {
 				rt.recordStartupManagerRecoveryFailure(ctx, &startupRecoveryDecision, activation.ReplayErr)
@@ -1744,7 +1755,7 @@ func (rt *Runtime) Start(ctx context.Context) error {
 			return fmt.Errorf("activate managed execution: %w", activateErr)
 		}
 		startCtx = managedexecution.WithAdmission(startCtx, activation.Admission)
-		if rt.Config.Runtime.RecoveryOnStartup && !skipPersistentStartupRecovery {
+		if replayAllowed {
 			startupRecoveryDecision.ManagerReplayCount = activation.ReplaySummary.ReplayedCount
 			startupRecoveryDecision.ManagerSkipCount = activation.ReplaySummary.SkippedCount
 			startupRecoveryDecision.ManagerDropCount = activation.ReplaySummary.DroppedCount
@@ -1758,6 +1769,12 @@ func (rt *Runtime) Start(ctx context.Context) error {
 					startupRecoveryDecision.Failure = newStartupRecoveryFailure(runtimefailures.ClassInternalFailure, "startup_manager_replay_dropped_without_failure", "recover_manager", map[string]any{"dropped_count": startupRecoveryDecision.ManagerDropCount}, nil)
 				}
 			}
+		}
+		if err := rt.Manager.ReconcileDynamicFlowRuntimeStartupReadiness(startCtx, rt.Options.BundleSourceFact, replayAllowed); err != nil {
+			if runtimemanager.IsDynamicFlowRuntimeReadinessFinalizationError(err) {
+				return fmt.Errorf("finalize dynamic flow runtime readiness during startup: %w", err)
+			}
+			return fmt.Errorf("reconcile source-scoped dynamic topology before manager run: %w", err)
 		}
 		if err := rt.Manager.Run(startCtx); err != nil {
 			rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", err.Error())

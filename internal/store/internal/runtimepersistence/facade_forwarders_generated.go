@@ -444,8 +444,12 @@ func (s *PostgresStore) InspectDeliveryRecovery(ctx context.Context, source corr
 	return s.deliveryPostgresOwner.InspectDeliveryRecovery(ctx, source)
 }
 
-func (s *PostgresStore) InspectDynamicFlowRuntimeStartupProjection(ctx context.Context, source correlation.BundleSourceFact) (pipeline.DynamicFlowRuntimeStartupProjection, error) {
-	return s.pipelinePostgresOwner.InspectDynamicFlowRuntimeStartupProjection(ctx, source)
+func (s *PostgresStore) InspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, runID string, source correlation.BundleSourceFact) ([]pipeline.DynamicFlowRuntimeReadiness, error) {
+	return s.pipelinePostgresOwner.InspectDynamicFlowRuntimeReadinessForRun(ctx, runID, source)
+}
+
+func (s *PostgresStore) InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source correlation.BundleSourceFact) (pipeline.DynamicFlowRuntimeReadinessProjection, error) {
+	return s.pipelinePostgresOwner.InspectDynamicFlowRuntimeReadinessForSource(ctx, source)
 }
 
 func (s *PostgresStore) IsExternalEffectAuthorityCurrent(ctx context.Context, authority effects.Authority) (bool, error) {
@@ -502,10 +506,6 @@ func (s *PostgresStore) ListDueHumanTaskExpiryEvents(ctx context.Context, now ti
 
 func (s *PostgresStore) ListDurableAgentLifecycleStates(ctx context.Context) ([]manager.AgentLifecycleState, error) {
 	return s.agentPostgresOwner.ListDurableAgentLifecycleStates(ctx)
-}
-
-func (s *PostgresStore) ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]pipeline.DynamicFlowRuntimeReadiness, error) {
-	return s.pipelinePostgresOwner.ListDynamicFlowRuntimeReadiness(ctx)
 }
 
 func (s *PostgresStore) ListEventDeliveryRecipients(ctx context.Context, eventID string) ([]string, error) {
@@ -932,8 +932,8 @@ func (s *PostgresStore) ReconcileDirectiveOperations(ctx context.Context, now ti
 	return s.agentPostgresOwner.ReconcileDirectiveOperations(ctx, now, ttl)
 }
 
-func (s *PostgresStore) ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, expected pipeline.DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error) {
-	return s.pipelinePostgresOwner.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, expected, observedAt)
+func (s *PostgresStore) ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, observed pipeline.DynamicFlowRuntimeReadiness, expected pipeline.DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error) {
+	return s.pipelinePostgresOwner.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, observed, expected, observedAt)
 }
 
 func (s *PostgresStore) ReconcileExternalEffectAttempts(ctx context.Context, request effects.RecoveryRequest) (effects.RecoverySummary, error) {
@@ -1580,8 +1580,12 @@ func (s *SQLiteRuntimeStore) InspectDeliveryRecovery(ctx context.Context, source
 	return s.deliverySQLiteOwner.InspectDeliveryRecovery(ctx, source)
 }
 
-func (s *SQLiteRuntimeStore) InspectDynamicFlowRuntimeStartupProjection(ctx context.Context, source correlation.BundleSourceFact) (pipeline.DynamicFlowRuntimeStartupProjection, error) {
-	return s.pipelineSQLiteOwner.InspectDynamicFlowRuntimeStartupProjection(ctx, source)
+func (s *SQLiteRuntimeStore) InspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, runID string, source correlation.BundleSourceFact) ([]pipeline.DynamicFlowRuntimeReadiness, error) {
+	return s.pipelineSQLiteOwner.InspectDynamicFlowRuntimeReadinessForRun(ctx, runID, source)
+}
+
+func (s *SQLiteRuntimeStore) InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source correlation.BundleSourceFact) (pipeline.DynamicFlowRuntimeReadinessProjection, error) {
+	return s.pipelineSQLiteOwner.InspectDynamicFlowRuntimeReadinessForSource(ctx, source)
 }
 
 func (s *SQLiteRuntimeStore) IsExternalEffectAuthorityCurrent(ctx context.Context, authority effects.Authority) (bool, error) {
@@ -1638,10 +1642,6 @@ func (s *SQLiteRuntimeStore) ListDueHumanTaskExpiryEvents(ctx context.Context, n
 
 func (s *SQLiteRuntimeStore) ListDurableAgentLifecycleStates(ctx context.Context) ([]manager.AgentLifecycleState, error) {
 	return s.agentSQLiteOwner.ListDurableAgentLifecycleStates(ctx)
-}
-
-func (s *SQLiteRuntimeStore) ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]pipeline.DynamicFlowRuntimeReadiness, error) {
-	return s.pipelineSQLiteOwner.ListDynamicFlowRuntimeReadiness(ctx)
 }
 
 func (s *SQLiteRuntimeStore) ListFlowInstanceRouteRecords(ctx context.Context, identity flowidentity.Route) ([]bus.FlowInstanceRouteRecord, error) {
@@ -1988,8 +1988,8 @@ func (s *SQLiteRuntimeStore) ReconcileDirectiveOperations(ctx context.Context, n
 	return s.agentSQLiteOwner.ReconcileDirectiveOperations(ctx, now, ttl)
 }
 
-func (s *SQLiteRuntimeStore) ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, expected pipeline.DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error) {
-	return s.pipelineSQLiteOwner.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, expected, observedAt)
+func (s *SQLiteRuntimeStore) ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, observed pipeline.DynamicFlowRuntimeReadiness, expected pipeline.DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error) {
+	return s.pipelineSQLiteOwner.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, observed, expected, observedAt)
 }
 
 func (s *SQLiteRuntimeStore) ReconcileExternalEffectAttempts(ctx context.Context, request effects.RecoveryRequest) (effects.RecoverySummary, error) {

@@ -80,7 +80,10 @@ var errDynamicFlowRuntimeReadinessSourceStale = errors.New(
 	"dynamic flow runtime readiness callback source is stale",
 )
 
-const dynamicFlowRuntimeReadinessCleanupTimeout = 10 * time.Second
+const (
+	dynamicFlowRuntimeReadinessCleanupTimeout = 10 * time.Second
+	defaultDynamicFlowReadinessRetryInterval  = 5 * time.Second
+)
 
 func newDynamicFlowRuntimeReadinessKey(runID, instancePath string) (dynamicFlowRuntimeReadinessKey, error) {
 	key := dynamicFlowRuntimeReadinessKey{
@@ -97,15 +100,16 @@ func (am *AgentManager) reconcilePendingDynamicFlowRuntimeReadiness(ctx context.
 	if am == nil || am.workflowInstances == nil {
 		return nil
 	}
-	items, err := am.workflowInstances.ListDynamicFlowRuntimeReadiness(ctx)
+	source, err := am.dynamicFlowRuntimeReadinessSource(ctx)
+	if err != nil {
+		return err
+	}
+	projection, err := am.workflowInstances.InspectDynamicFlowRuntimeReadinessForSource(ctx, source.fact)
 	if err != nil {
 		return err
 	}
 	var reconcileErrs []error
-	for _, item := range items {
-		if !item.Pending() {
-			continue
-		}
+	for _, item := range projection.CurrentPending {
 		if err := am.reconcileDynamicFlowRuntimeReadiness(ctx, item.Plan.RunID, item.InstancePath); err != nil {
 			reconcileErrs = append(reconcileErrs, fmt.Errorf("%s: %w", item.InstancePath, err))
 		}
@@ -113,42 +117,93 @@ func (am *AgentManager) reconcilePendingDynamicFlowRuntimeReadiness(ctx context.
 	return errors.Join(reconcileErrs...)
 }
 
-func (am *AgentManager) InspectDynamicFlowRuntimeStartupProjection(ctx context.Context, source runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeStartupProjection, error) {
+func (am *AgentManager) InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error) {
 	if am == nil || am.workflowInstances == nil {
-		return runtimepipeline.DynamicFlowRuntimeStartupProjection{}, nil
+		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, nil
 	}
-	return am.workflowInstances.InspectDynamicFlowRuntimeStartupProjection(ctx, source)
+	return am.workflowInstances.InspectDynamicFlowRuntimeReadinessForSource(ctx, source)
 }
 
-func (am *AgentManager) ReconcileDynamicFlowRuntimeStartupProjection(ctx context.Context, source runtimecorrelation.BundleSourceFact) error {
-	projection, err := am.InspectDynamicFlowRuntimeStartupProjection(ctx, source)
+func (am *AgentManager) ReconcileDynamicFlowRuntimeStartupReadiness(ctx context.Context, sourceFact runtimecorrelation.BundleSourceFact, replayAllowed bool) error {
+	projection, err := am.InspectDynamicFlowRuntimeReadinessForSource(ctx, sourceFact)
 	if err != nil {
 		return err
 	}
-	for _, item := range projection.Pending {
+	if len(projection.SourceTransitionRequired) == 0 && len(projection.CurrentPending) == 0 {
+		return nil
+	}
+	ownedSource, err := am.dynamicFlowRuntimeReadinessSource(ctx)
+	if err != nil {
+		return err
+	}
+	if !ownedSource.fact.Matches(sourceFact) {
+		return fmt.Errorf("dynamic flow startup readiness source is not manager-owned")
+	}
+	for _, item := range projection.SourceTransitionRequired {
+		if item.Pending() && !replayAllowed {
+			return &dynamicFlowRuntimeReadinessFinalizationError{cause: fmt.Errorf(
+				"source transition for %s retains incomplete predecessor readiness and requires recovery",
+				item.InstancePath,
+			)}
+		}
+		expected, err := am.deriveCurrentDynamicFlowRuntimeReadinessPlan(ctx, item, ownedSource)
+		if err != nil {
+			return &dynamicFlowRuntimeReadinessFinalizationError{cause: fmt.Errorf("derive current-source dynamic flow readiness %s: %w", item.InstancePath, err)}
+		}
+		if _, err := am.workflowInstances.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, item, expected, time.Now().UTC()); err != nil {
+			return &dynamicFlowRuntimeReadinessFinalizationError{cause: fmt.Errorf("canonicalize current-source dynamic flow readiness %s: %w", item.InstancePath, err)}
+		}
+		if err := am.reconcileDynamicFlowRuntimeReadinessPlan(ctx, expected, ownedSource.source); err != nil {
+			return &dynamicFlowRuntimeReadinessFinalizationError{cause: fmt.Errorf("finalize current-source dynamic flow readiness %s: %w", item.InstancePath, err)}
+		}
+	}
+	projection, err = am.InspectDynamicFlowRuntimeReadinessForSource(ctx, sourceFact)
+	if err != nil {
+		return err
+	}
+	if len(projection.SourceTransitionRequired) != 0 {
+		return fmt.Errorf("dynamic topology startup retains %d unresolved source transition(s)", len(projection.SourceTransitionRequired))
+	}
+	if len(projection.CurrentPending) != 0 && !replayAllowed {
+		return fmt.Errorf("dynamic topology startup requires recovery for %d incomplete source-owned instance(s)", len(projection.CurrentPending))
+	}
+	for _, item := range projection.CurrentPending {
 		if err := am.reconcileDynamicFlowRuntimeReadiness(ctx, item.Plan.RunID, item.InstancePath); err != nil {
 			return &dynamicFlowRuntimeReadinessFinalizationError{cause: fmt.Errorf("finalize source-scoped dynamic flow runtime readiness %s: %w", item.InstancePath, err)}
 		}
+	}
+	projection, err = am.InspectDynamicFlowRuntimeReadinessForSource(ctx, sourceFact)
+	if err != nil {
+		return err
+	}
+	if len(projection.SourceTransitionRequired) != 0 || len(projection.CurrentPending) != 0 {
+		return fmt.Errorf(
+			"dynamic topology startup remains incomplete: current_pending=%d source_transition_required=%d",
+			len(projection.CurrentPending), len(projection.SourceTransitionRequired),
+		)
 	}
 	return nil
 }
 
 func (am *AgentManager) ReconstructDynamicFlowRuntimeStartupTopology(ctx context.Context, sourceFact runtimecorrelation.BundleSourceFact) error {
-	projection, err := am.InspectDynamicFlowRuntimeStartupProjection(ctx, sourceFact)
+	projection, err := am.InspectDynamicFlowRuntimeReadinessForSource(ctx, sourceFact)
 	if err != nil {
 		return err
 	}
-	if len(projection.Pending) != 0 {
-		return fmt.Errorf("dynamic flow startup topology remains incomplete for %d source-owned instance(s)", len(projection.Pending))
+	if len(projection.CurrentPending) != 0 || len(projection.SourceTransitionRequired) != 0 {
+		return fmt.Errorf(
+			"dynamic flow startup topology remains incomplete: current_pending=%d source_transition_required=%d",
+			len(projection.CurrentPending), len(projection.SourceTransitionRequired),
+		)
 	}
-	if len(projection.Completed) == 0 {
+	if len(projection.CurrentCompleted) == 0 {
 		return nil
 	}
 	source, err := am.dynamicFlowRuntimeReadinessSource(ctx)
 	if err != nil {
 		return err
 	}
-	for _, item := range projection.Completed {
+	for _, item := range projection.CurrentCompleted {
 		plan, err := item.Plan.Normalized()
 		if err != nil {
 			return err
@@ -245,7 +300,7 @@ func (am *AgentManager) reconcileEnsuredDynamicFlowRuntimeReadinessPlan(
 	if err := am.executionPosture.Admit(expected.ExecutionMode, "dynamic flow runtime readiness plan reconciliation"); err != nil {
 		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, err
 	}
-	if _, err := am.workflowInstances.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, expected, occurredAt); err != nil {
+	if _, err := am.workflowInstances.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, current, expected, occurredAt); err != nil {
 		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("reconcile dynamic flow runtime readiness plan %s: %w", req.Instance.InstancePath, err)
 	}
 	return expected, nil
@@ -273,74 +328,17 @@ func (am *AgentManager) ReconcileDynamicFlowRuntimeReadinessPlansForRun(
 	if observedAt.IsZero() {
 		return fmt.Errorf("dynamic flow runtime readiness reconciliation requires exact occurrence time")
 	}
-	bundleHash, bundleSource := admittedSource.fact.StorageValues()
-	items, err := am.workflowInstances.ListDynamicFlowRuntimeReadiness(ctx)
+	items, err := am.workflowInstances.InspectDynamicFlowRuntimeReadinessForRun(ctx, runID, admittedSource.fact)
 	if err != nil {
 		return err
 	}
 	changedPlans := make([]runtimepipeline.DynamicFlowRuntimeReadinessPlan, 0, len(items))
 	for _, item := range items {
-		if item.Plan.RunID != runID {
-			continue
-		}
-		projection, err := am.workflowInstances.LoadRouteRecoveryProjection(ctx, item.Plan.Identity.Route())
+		expected, err := am.deriveCurrentDynamicFlowRuntimeReadinessPlan(ctx, item, admittedSource)
 		if err != nil {
-			return fmt.Errorf("load dynamic flow readiness projection %s: %w", item.InstancePath, err)
-		}
-		scope, ok := semanticview.FlowScopeByID(source, projection.Identity.TemplateID)
-		if !ok {
-			return fmt.Errorf("flow contract view not found: %s", projection.Identity.TemplateID)
-		}
-		schema, ok := source.FlowSchemaByID(projection.Identity.TemplateID)
-		if !ok {
-			return fmt.Errorf("flow schema not found: %s", projection.Identity.TemplateID)
-		}
-		records, err := am.flowInstanceAgentRecords(runtimepipeline.FlowInstanceActivationRequest{
-			ContractBundle: source,
-			Instance:       projection.Identity,
-			Config:         projection.Config,
-		}, schema, scope)
-		if err != nil {
-			return fmt.Errorf("derive dynamic flow readiness agents %s: %w", item.InstancePath, err)
-		}
-		expected := item.Plan
-		expected.Identity = projection.Identity
-		expected.BundleHash = bundleHash
-		expected.BundleSource = bundleSource
-		expected.WorkflowVersion = strings.TrimSpace(source.WorkflowVersion())
-		expected.Agents = make([]runtimepipeline.DynamicFlowRuntimeAgentExpectation, 0, len(records))
-		for _, record := range records {
-			identity, err := record.Config.ConcreteIdentity()
-			if err != nil {
-				return fmt.Errorf(
-					"derive dynamic flow agent identity %s: %w",
-					record.Config.ID,
-					err,
-				)
-			}
-			revision, err := lifecycleConfigRevision(record)
-			if err != nil {
-				return fmt.Errorf("derive dynamic flow agent revision %s: %w", record.Config.ID, err)
-			}
-			expected.Agents = append(expected.Agents, runtimepipeline.DynamicFlowRuntimeAgentExpectation{
-				Identity: identity, ConfigRevision: revision,
-			})
-		}
-		expected.CreationEvent, err = rebuildPendingDynamicFlowRuntimeCreationEventPlan(
-			item.Plan.CreationEvent,
-			!item.CreationEventEmittedAt.IsZero(),
-			source,
-			schema,
-			projection.Identity,
-			projection.Config,
-		)
-		if err != nil {
-			return fmt.Errorf("rebuild dynamic flow creation plan %s: %w", item.InstancePath, err)
-		}
-		if err := am.executionPosture.Admit(expected.ExecutionMode, "dynamic flow runtime readiness plan reconciliation"); err != nil {
 			return err
 		}
-		changed, err := am.workflowInstances.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, expected, observedAt)
+		changed, err := am.workflowInstances.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, item, expected, observedAt)
 		if err != nil {
 			return fmt.Errorf("reconcile dynamic flow runtime readiness plan %s: %w", item.InstancePath, err)
 		}
@@ -356,6 +354,80 @@ func (am *AgentManager) ReconcileDynamicFlowRuntimeReadinessPlansForRun(
 		}
 	}
 	return nil
+}
+
+func (am *AgentManager) deriveCurrentDynamicFlowRuntimeReadinessPlan(
+	ctx context.Context,
+	item runtimepipeline.DynamicFlowRuntimeReadiness,
+	admittedSource dynamicFlowRuntimeReadinessSource,
+) (runtimepipeline.DynamicFlowRuntimeReadinessPlan, error) {
+	if !item.OwningRunSource.Matches(admittedSource.fact) {
+		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("dynamic flow readiness %s is not owned by the admitted source", item.InstancePath)
+	}
+	plan, err := item.Plan.Normalized()
+	if err != nil {
+		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, err
+	}
+	ctx = runtimecorrelation.WithRunID(ctx, plan.RunID)
+	projection, err := am.workflowInstances.LoadRouteRecoveryProjection(ctx, plan.Identity.Route())
+	if err != nil {
+		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("load dynamic flow readiness projection %s: %w", item.InstancePath, err)
+	}
+	if projection.Identity.Route() != plan.Identity.Route() || projection.Identity.TemplateID != plan.Identity.TemplateID || projection.Identity.EntityID != plan.Identity.EntityID {
+		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("dynamic flow readiness %s persisted identity changed", item.InstancePath)
+	}
+	source := admittedSource.source
+	scope, ok := semanticview.FlowScopeByID(source, projection.Identity.TemplateID)
+	if !ok {
+		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("flow contract view not found: %s", projection.Identity.TemplateID)
+	}
+	schema, ok := source.FlowSchemaByID(projection.Identity.TemplateID)
+	if !ok {
+		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("flow schema not found: %s", projection.Identity.TemplateID)
+	}
+	records, err := am.flowInstanceAgentRecords(runtimepipeline.FlowInstanceActivationRequest{
+		ContractBundle: source,
+		Instance:       projection.Identity,
+		Config:         projection.Config,
+	}, schema, scope)
+	if err != nil {
+		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("derive dynamic flow readiness agents %s: %w", item.InstancePath, err)
+	}
+	bundleHash, bundleSource := admittedSource.fact.StorageValues()
+	expected := plan
+	expected.Identity = projection.Identity
+	expected.BundleHash = bundleHash
+	expected.BundleSource = bundleSource
+	expected.WorkflowVersion = strings.TrimSpace(source.WorkflowVersion())
+	expected.Agents = make([]runtimepipeline.DynamicFlowRuntimeAgentExpectation, 0, len(records))
+	for _, record := range records {
+		identity, err := record.Config.ConcreteIdentity()
+		if err != nil {
+			return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("derive dynamic flow agent identity %s: %w", record.Config.ID, err)
+		}
+		revision, err := lifecycleConfigRevision(record)
+		if err != nil {
+			return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("derive dynamic flow agent revision %s: %w", record.Config.ID, err)
+		}
+		expected.Agents = append(expected.Agents, runtimepipeline.DynamicFlowRuntimeAgentExpectation{
+			Identity: identity, ConfigRevision: revision,
+		})
+	}
+	expected.CreationEvent, err = rebuildPendingDynamicFlowRuntimeCreationEventPlan(
+		plan.CreationEvent,
+		!item.CreationEventEmittedAt.IsZero(),
+		source,
+		schema,
+		projection.Identity,
+		projection.Config,
+	)
+	if err != nil {
+		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, fmt.Errorf("rebuild dynamic flow creation plan %s: %w", item.InstancePath, err)
+	}
+	if err := am.executionPosture.Admit(expected.ExecutionMode, "dynamic flow runtime readiness plan reconciliation"); err != nil {
+		return runtimepipeline.DynamicFlowRuntimeReadinessPlan{}, err
+	}
+	return expected.Normalized()
 }
 
 func rebuildPendingDynamicFlowRuntimeCreationEventPlan(

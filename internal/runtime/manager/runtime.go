@@ -1119,11 +1119,16 @@ func (am *AgentManager) RecoverableStateSnapshot(ctx context.Context) (Recoverab
 		return snapshot, nil
 	}
 	if am.workflowInstances != nil {
-		items, err := am.workflowInstances.ListDynamicFlowRuntimeReadiness(ctx)
+		source, err := am.dynamicFlowRuntimeReadinessSource(ctx)
 		if err != nil {
-			return RecoverableStateSnapshot{}, fmt.Errorf("list dynamic flow runtime readiness: %w", err)
+			return RecoverableStateSnapshot{}, err
 		}
-		for _, item := range items {
+		projection, err := am.workflowInstances.InspectDynamicFlowRuntimeReadinessForSource(ctx, source.fact)
+		if err != nil {
+			return RecoverableStateSnapshot{}, fmt.Errorf("inspect source-scoped dynamic flow runtime readiness: %w", err)
+		}
+		snapshot.PendingDynamicFlowRuntimeReadinessCount = len(projection.CurrentPending)
+		for _, item := range projection.SourceTransitionRequired {
 			if item.Pending() {
 				snapshot.PendingDynamicFlowRuntimeReadinessCount++
 			}
@@ -1169,20 +1174,32 @@ func (am *AgentManager) readinessReconciliationLoop(ctx context.Context) {
 	if am.store == nil && am.workflowInstances == nil {
 		return
 	}
+	interval := am.dynamicFlowReadinessRetryInterval
+	if interval <= 0 {
+		interval = defaultDynamicFlowReadinessRetryInterval
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-am.dynamicFlowReadinessSignal:
-			if err := am.reconcilePendingDynamicFlowRuntimeReadiness(ctx); err != nil && am.bus != nil {
-				_ = am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
-					Level:     "error",
-					Component: "agent-manager",
-					Action:    "dynamic_flow_runtime_readiness_retry_failed",
-					Failure:   failureEnvelope(err, "agent-manager", "dynamic_flow_runtime_readiness_retry"),
-				})
-			}
+			am.retryPendingDynamicFlowRuntimeReadiness(ctx)
+		case <-ticker.C:
+			am.retryPendingDynamicFlowRuntimeReadiness(ctx)
 		}
+	}
+}
+
+func (am *AgentManager) retryPendingDynamicFlowRuntimeReadiness(ctx context.Context) {
+	if err := am.reconcilePendingDynamicFlowRuntimeReadiness(ctx); err != nil && am.bus != nil {
+		_ = am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
+			Level:     "error",
+			Component: "agent-manager",
+			Action:    "dynamic_flow_runtime_readiness_retry_failed",
+			Failure:   failureEnvelope(err, "agent-manager", "dynamic_flow_runtime_readiness_retry"),
+		})
 	}
 }
 

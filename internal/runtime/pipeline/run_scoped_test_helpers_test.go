@@ -159,33 +159,50 @@ type pipelineTestDynamicFlowRuntimeReadinessPersistence struct {
 	store *workflowInstanceStore
 }
 
-func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error) {
-	return p.store.legacyReconcileDynamicFlowRuntimeReadinessPlan(ctx, plan, observedAt)
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, observed DynamicFlowRuntimeReadiness, plan DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error) {
+	return p.store.legacyReconcileDynamicFlowRuntimeReadinessPlan(ctx, observed, plan, observedAt)
 }
 
 func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID string, route runtimeflowidentity.Route) (DynamicFlowRuntimeReadiness, bool, error) {
 	return p.store.legacyLoadDynamicFlowRuntimeReadiness(ctx, runID, route)
 }
 
-func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]DynamicFlowRuntimeReadiness, error) {
-	return p.store.legacyListDynamicFlowRuntimeReadiness(ctx)
-}
-
-func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) ListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]DynamicFlowRuntimeReadinessKey, error) {
-	return p.store.legacyListDynamicFlowRuntimeReadinessKeys(ctx)
-}
-
-func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) InspectDynamicFlowRuntimeStartupProjection(ctx context.Context, _ runtimecorrelation.BundleSourceFact) (DynamicFlowRuntimeStartupProjection, error) {
-	items, err := p.store.legacyListDynamicFlowRuntimeReadiness(ctx)
-	projection := DynamicFlowRuntimeStartupProjection{}
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source runtimecorrelation.BundleSourceFact) (DynamicFlowRuntimeReadinessProjection, error) {
+	items, err := p.store.legacyQueryAllDynamicFlowRuntimeReadiness(ctx)
+	projection := DynamicFlowRuntimeReadinessProjection{}
 	for _, item := range items {
+		if !item.OwningRunSource.Matches(source) {
+			continue
+		}
+		planSource, sourceErr := runtimecorrelation.DecodeBundleSourceFact(item.Plan.BundleHash, item.Plan.BundleSource)
+		if sourceErr != nil {
+			return projection, sourceErr
+		}
+		if !planSource.Matches(source) {
+			projection.SourceTransitionRequired = append(projection.SourceTransitionRequired, item)
+			continue
+		}
 		if item.Pending() {
-			projection.Pending = append(projection.Pending, item)
+			projection.CurrentPending = append(projection.CurrentPending, item)
 		} else {
-			projection.Completed = append(projection.Completed, item)
+			projection.CurrentCompleted = append(projection.CurrentCompleted, item)
 		}
 	}
 	return projection, err
+}
+
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) InspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, runID string, source runtimecorrelation.BundleSourceFact) ([]DynamicFlowRuntimeReadiness, error) {
+	items, err := p.store.legacyQueryAllDynamicFlowRuntimeReadiness(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]DynamicFlowRuntimeReadiness, 0, len(items))
+	for _, item := range items {
+		if item.Plan.RunID == strings.TrimSpace(runID) && item.OwningRunSource.Matches(source) {
+			result = append(result, item)
+		}
+	}
+	return result, nil
 }
 
 func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error {

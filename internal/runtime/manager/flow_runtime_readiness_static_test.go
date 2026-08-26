@@ -53,11 +53,12 @@ func TestDynamicFlowRuntimeReadinessProductionConsumersStatic(t *testing.T) {
 	})
 	requireStaticReadinessCalls(t, calls, "reconcileDynamicFlowRuntimeReadinessPlan", map[string]int{
 		"flow_activation.go":        1,
-		"flow_runtime_readiness.go": 1,
+		"flow_runtime_readiness.go": 2,
 	})
 	requireStaticReadinessCalls(t, calls, "dynamicFlowRuntimeReadinessSource", map[string]int{
 		"flow_activation.go":        2,
-		"flow_runtime_readiness.go": 5,
+		"flow_runtime_readiness.go": 7,
+		"runtime.go":                1,
 	})
 	requireStaticReadinessCalls(t, calls, "dynamicFlowRuntimeReadinessSourceCoordinate", map[string]int{
 		"flow_activation.go":        1,

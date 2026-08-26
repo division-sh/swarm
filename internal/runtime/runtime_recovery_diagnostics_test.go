@@ -56,16 +56,12 @@ func (o startupRecoveryWorkflowOwner) ReadTimerObligations(ctx context.Context, 
 	return runtimetimerobligation.Snapshot{ObservedAt: observedAt.UTC()}, nil
 }
 
-func (startupRecoveryWorkflowOwner) ListDynamicFlowRuntimeReadiness(context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
-	return nil, nil
+func (startupRecoveryWorkflowOwner) InspectDynamicFlowRuntimeReadinessForSource(context.Context, runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error) {
+	return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, nil
 }
 
-func (startupRecoveryWorkflowOwner) ListDynamicFlowRuntimeReadinessKeys(context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadinessKey, error) {
+func (startupRecoveryWorkflowOwner) InspectDynamicFlowRuntimeReadinessForRun(context.Context, string, runtimecorrelation.BundleSourceFact) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
 	return nil, nil
-}
-
-func (startupRecoveryWorkflowOwner) InspectDynamicFlowRuntimeStartupProjection(context.Context, runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeStartupProjection, error) {
-	return runtimepipeline.DynamicFlowRuntimeStartupProjection{}, nil
 }
 
 func (startupRecoveryWorkflowOwner) ListWorkflowTimerActivations(context.Context, string, string, bool) ([]runtimepipeline.WorkflowTimerActivation, error) {
@@ -407,6 +403,7 @@ func (*startupReadinessFinalizationStore) RetireInitialEntryTimerWakeups(context
 
 func (*startupReadinessFinalizationStore) ReconcileDynamicFlowRuntimeReadinessPlan(
 	context.Context,
+	runtimepipeline.DynamicFlowRuntimeReadiness,
 	runtimepipeline.DynamicFlowRuntimeReadinessPlan,
 	time.Time,
 ) (bool, error) {
@@ -426,32 +423,37 @@ func (s *startupReadinessFinalizationStore) LoadDynamicFlowRuntimeReadiness(
 	return runtimepipeline.DynamicFlowRuntimeReadiness{}, false, nil
 }
 
-func (s *startupReadinessFinalizationStore) ListDynamicFlowRuntimeReadiness(context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
-	return append([]runtimepipeline.DynamicFlowRuntimeReadiness(nil), s.items...), nil
-}
-
-func (s *startupReadinessFinalizationStore) ListDynamicFlowRuntimeReadinessKeys(context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadinessKey, error) {
-	keys := make([]runtimepipeline.DynamicFlowRuntimeReadinessKey, 0, len(s.items))
+func (s *startupReadinessFinalizationStore) InspectDynamicFlowRuntimeReadinessForSource(_ context.Context, source runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error) {
+	projection := runtimepipeline.DynamicFlowRuntimeReadinessProjection{}
 	for _, item := range s.items {
-		keys = append(keys, runtimepipeline.DynamicFlowRuntimeReadinessKey{
-			RunID:        item.Plan.RunID,
-			InstancePath: item.InstancePath,
-		})
-	}
-	return keys, nil
-}
-
-func (s *startupReadinessFinalizationStore) InspectDynamicFlowRuntimeStartupProjection(ctx context.Context, _ runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeStartupProjection, error) {
-	items, err := s.ListDynamicFlowRuntimeReadiness(ctx)
-	projection := runtimepipeline.DynamicFlowRuntimeStartupProjection{}
-	for _, item := range items {
+		if !item.OwningRunSource.Matches(source) {
+			continue
+		}
+		planSource, err := runtimecorrelation.DecodeBundleSourceFact(item.Plan.BundleHash, item.Plan.BundleSource)
+		if err != nil {
+			return projection, err
+		}
+		if !planSource.Matches(source) {
+			projection.SourceTransitionRequired = append(projection.SourceTransitionRequired, item)
+			continue
+		}
 		if item.Pending() {
-			projection.Pending = append(projection.Pending, item)
+			projection.CurrentPending = append(projection.CurrentPending, item)
 		} else {
-			projection.Completed = append(projection.Completed, item)
+			projection.CurrentCompleted = append(projection.CurrentCompleted, item)
 		}
 	}
-	return projection, err
+	return projection, nil
+}
+
+func (s *startupReadinessFinalizationStore) InspectDynamicFlowRuntimeReadinessForRun(_ context.Context, runID string, source runtimecorrelation.BundleSourceFact) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
+	result := make([]runtimepipeline.DynamicFlowRuntimeReadiness, 0, len(s.items))
+	for _, item := range s.items {
+		if item.Plan.RunID == strings.TrimSpace(runID) && item.OwningRunSource.Matches(source) {
+			result = append(result, item)
+		}
+	}
+	return result, nil
 }
 
 func (*startupReadinessFinalizationStore) MarkDynamicFlowRuntimeTopologyReady(
@@ -1259,9 +1261,10 @@ func TestRuntimeStart_DynamicFlowReadinessFinalizationFailureIsBootFatal(t *test
 	}
 	bundleHash, bundleSource := sourceFact.StorageValues()
 	readinessStore := &startupReadinessFinalizationStore{items: []runtimepipeline.DynamicFlowRuntimeReadiness{{
-		InstancePath:   "review/inst-1",
-		RunStatus:      "running",
-		InstanceStatus: "active",
+		InstancePath:    "review/inst-1",
+		OwningRunSource: sourceFact,
+		RunStatus:       "running",
+		InstanceStatus:  "active",
 		Plan: runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 			Identity: runtimeflowidentity.Instance{
 				TemplateID: "review", ScopeKey: "review", InstanceID: "inst-1",
