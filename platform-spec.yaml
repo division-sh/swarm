@@ -5023,14 +5023,26 @@ engine:
           durable work under the existing recovery authority.
         serving_generation_reconstruction: >-
           Every allowed serving generation MUST reconstruct completed, eligible, current-format dynamic topology regardless
-          of `runtime.recovery_on_startup`. After managed execution admission and Manager run start, but before delivery-
-          continuation synchronization, outbox dispatch, boot publication, listener readiness, or public ingress, one bounded
-          topology-only operation reloads each completed readiness plan, reconciles its exact expected agents through the
-          canonical lifecycle owner, proves each agent `runnable_current_occurrence`, and publishes/verifies the already-
-          persisted exact flow route process-locally. This operation performs no readiness write, route derivation or durable
-          route mutation, timer operation, creation-event publication, external-effect or provider-drain settlement, budget or
-          diagnostic projection, receipt recovery, delivery replay, or selected-contract recovery. Failure fails startup and
-          consumes existing lifecycle/route/start-failure compensation; it cannot degrade into public readiness.
+          of `runtime.recovery_on_startup` or `DisablePersistentStartupRecovery`. The selected-store readiness owner exposes
+          one typed `InspectDynamicFlowRuntimeStartupProjection` operation that requires the runtime's exact immutable
+          `BundleSourceFact`. PostgreSQL and SQLite MUST join readiness to its flow instance and run and constrain canonical
+          `runs.bundle_hash` plus `runs.bundle_source` in the database query. An unscoped readiness or route list followed by
+          process-side filtering is forbidden. The projection returns only that source's eligible completed and pending rows;
+          rejects malformed plans, plan/source disagreement, and source-owned active materialized routes without exact
+          readiness; and cannot install topology for terminal runs, inactive or terminated instances, or another source.
+          Serve composition performs observation-only projection inspection for every constructed context before any runtime
+          starts, so a pending or invalid context refuses multi-context serve without cross-context mutation. Runtime startup
+          repeats its own inspection before Manager run to fence races. When replay is disabled, pending readiness refuses
+          before mutation. When replay is enabled, the existing keyed reconciler may complete pending work under its existing
+          authority, but unresolved pending work still refuses before Manager run. After Manager run starts, the operation is
+          reloaded rather than trusting an earlier snapshot. One bounded topology-only consumer reconciles only those freshly
+          returned completed rows through the canonical lifecycle owner, proves each exact agent
+          `runnable_current_occurrence`, and publishes/verifies the already-persisted exact flow route process-locally before
+          delivery-continuation synchronization, outbox dispatch, boot publication, listener readiness, or public ingress.
+          This operation performs no readiness write, route derivation or durable route mutation, timer operation, creation-
+          event publication, external-effect or provider-drain settlement, budget or diagnostic projection, receipt recovery,
+          delivery replay, or selected-contract recovery. Failure fails startup and consumes existing lifecycle/route/start-
+          failure compensation; it cannot degrade into public readiness or affect another source.
       auto_emit: Flow schemas may declare auto_emit_on_create. When the platform creates an instance, it automatically emits
         the declared event after the exact route and complete declared-agent topology are verified and initial timers are
         armed. Event ID, lineage, payload, execution mode, delivery context, and occurrence time belong to the durable
@@ -17855,7 +17867,7 @@ multi_bundle_persistence:
         - RuntimeContextManager lifecycle state is fail-closed and monotonic in this slice: once a loaded persisted BundleContext is marked unavailable/unloaded by an authoritative bundle-unavailability operation, supported admission paths must reject that context with BUNDLE_UNAVAILABLE unless a later separately-approved Load/repair owner exists.
         - The bundle-delete coordinator quiesces a loaded matching BundleContext before any real non-force final mutation and before force-controlled cleanup. RuntimeContextManager performs that typed quiescence while the retiring agents still hold the predecessor source-set revision; the API handler never infers deactivation from a returned result. Successful or partial runtime.nuke with include_bundles=true consumes its own coordinator-owned RuntimeContextManager deactivation. runtime.nuke include_bundles=false must not deactivate bundle contexts.
         - Existing-run controls that can be resolved by run_id dispatch through the selected BundleContext. Ambiguous singleton controls such as runtime.pause/resume, mailbox decision event publication, and broad agent restart/backlog replay fail closed in multi-context mode pending dynamic lifecycle work.
-        - When more than one bundle is pinned in the same process, unscoped startup ownership, active schedule restoration, and manager pending-event recovery are disabled for every context until bundle-scoped recovery filters are promoted. Single-bundle DB-loaded serve may keep the existing startup recovery owner.
+        - When more than one bundle is pinned in the same process, unscoped startup ownership, active schedule restoration, and manager pending-event recovery remain disabled for every context. This does not disable mandatory dynamic process-topology reconstruction. Before any context starts, serve composition invokes the selected-store dynamic readiness startup projection separately with each context's exact immutable BundleSourceFact; a pending, malformed, source-disagreeing, or source-owned route-without-readiness result refuses the all-or-nothing serve before cross-context mutation. Each Runtime.Start revalidates its source before Manager run and, after Manager run, reloads and reconstructs only that source's completed topology. Both stores implement the same typed projection contract, while public multi-bundle boot remains PostgreSQL-only. The database query itself constrains exact runs.bundle_hash and runs.bundle_source; an unscoped list or process-side post-filter is forbidden. One context MUST NOT adopt, publish, reject, or otherwise interpret another context's readiness or route rows. Single-bundle DB-loaded serve may keep the existing startup recovery owner.
         - Every run writer reachable under the selected runtime context consumes BundleSourceFact with bundle_source=persisted and bundle_hash equal to that context's canonical hash.
         - Runtime project OpenProject/ReloadProject source replacement is disabled while the process is pinned to a DB-loaded bundle source.
         - Workspace/container names, volumes, and managed identity labels for executable context paths include bundle-disambiguated identity when more than one context can be loaded.
@@ -25606,11 +25618,15 @@ cli_specification:
             ordering: >
               Managed execution admission synchronously recovers the exact pipeline-obligation scope to explicit
               exhaustion, activates and enumerates the exact executable-delivery scope to explicit exhaustion,
-              and only then starts manager event loops when recovery is authorized. After the Manager run occurrence starts,
-              mandatory completed dynamic topology reconstruction runs independently of recovery policy and proves exact
-              current-occurrence agent routes/loops plus the persisted flow route before delivery-continuation synchronization
-              or any later readiness step. No periodic pipeline/outbox sweeper may race this admission and reconstruction
-              sequence or publish readiness while a handoff-hidden delivery or missing executable receiver remains.
+              and only then starts manager event loops when recovery is authorized. Independently of recovery policy, the
+              runtime's exact BundleSourceFact-scoped startup projection has already refused pending or invalid topology before
+              Manager run. After the Manager run occurrence starts, the same selected-store operation is reloaded and mandatory
+              completed dynamic topology reconstruction consumes only that source's rows, proving exact current-occurrence
+              agent routes/loops plus the persisted flow route before delivery-continuation synchronization or any later
+              readiness step. Multi-context serve completes the observation-only projection preflight for every context before
+              starting any runtime. No unscoped readiness/route scan, process-side source filter, periodic pipeline/outbox
+              sweeper, or foreign context may race this sequence or publish readiness while a handoff-hidden delivery or
+              missing executable receiver remains.
           - step: 17
             name: outbox_sweeper
             owner: internal/runtime
