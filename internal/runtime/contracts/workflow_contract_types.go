@@ -45,6 +45,8 @@ type WorkflowContractBundle struct {
 	projectContracts      map[string]ProjectContractView
 	flowTypes             map[string]TypeCatalogDocument
 	flowEntities          map[string]EntityContractsDocument
+	eventOwnership        []eventSchemaOwnershipRow
+	eventOwnersByFlow     map[string][]eventSchemaOwnershipRow
 	effectiveProvenance   EffectiveProvenanceLedger
 	scopedNodes           map[string]SystemNodeContract
 	scopedEvents          map[string]EventCatalogEntry

@@ -89,6 +89,36 @@ func TestIntraPackageEventConsumerProjectionCensus(t *testing.T) {
 	}
 }
 
+func TestDeclaredLocalEventReferenceFastPathMatchesCanonicalScopeResolution(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := filepath.Join(repo, "examples", "routing", "template-create-minted-key")
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, item := range []struct {
+		name      string
+		flowID    string
+		eventType string
+	}{
+		{name: "authored output", flowID: "producer", eventType: "validation.requested"},
+		{name: "connected receiver", flowID: "producer", eventType: "validation.started"},
+	} {
+		t.Run(item.name, func(t *testing.T) {
+			got, ok := bundle.resolveDeclaredLocalFlowEventReference(item.flowID, item.eventType)
+			if !ok {
+				t.Fatalf("fast path did not recognize %s.%s", item.flowID, item.eventType)
+			}
+			scope := bundle.flowEventScope(item.flowID)
+			want := scope.ResolveEvent(item.eventType, bundle.flowEventDescendants(item.flowID))
+			if got != want {
+				t.Fatalf("fast path = %q, canonical scope = %q", got, want)
+			}
+		})
+	}
+}
+
 func TestEffectiveEventResolutionPrefersConnectedProducerOverUnrelatedSameNameRoot(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	source := filepath.Join(repo, "examples", "routing", "template-create-minted-key")

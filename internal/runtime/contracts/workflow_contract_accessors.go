@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -1100,8 +1101,45 @@ func (b *WorkflowContractBundle) FlowInputProducerPatterns(targetFlowID, eventTy
 	return append([]string{}, b.ResolveFlowInputAutoWire(targetFlowID, eventType).Patterns...)
 }
 func (b *WorkflowContractBundle) ResolveFlowEventReference(flowID, eventType string) string {
+	if resolved, ok := b.resolveDeclaredLocalFlowEventReference(flowID, eventType); ok {
+		return resolved
+	}
 	scope := b.flowEventScope(flowID)
 	return scope.ResolveEvent(eventType, b.flowEventDescendants(flowID))
+}
+
+func (b *WorkflowContractBundle) resolveDeclaredLocalFlowEventReference(flowID, eventType string) (string, bool) {
+	flowID = strings.TrimSpace(flowID)
+	eventType = eventidentity.Normalize(eventType)
+	if b == nil || strings.Contains(eventType, "/") {
+		return "", false
+	}
+	if flowID == "" {
+		return eventType, eventType != ""
+	}
+	view, ok := b.FlowViewByID(flowID)
+	if !ok || view == nil {
+		return "", false
+	}
+	local := false
+	if _, local = view.Events[eventType]; !local {
+		local = slices.Contains(eventidentity.NormalizeList(view.Schema.Pins.Outputs.Events), eventType)
+	}
+	if !local {
+		for _, row := range eventSchemaOwnershipRowsForReceiver(b, flowID) {
+			if packageEndpointLocalEvent(b, flowID, row.receiverEvent, true) == eventType {
+				local = true
+				break
+			}
+		}
+	}
+	if !local {
+		local = eventidentity.Normalize(view.Schema.AutoEmitOnCreate.Event) == eventType
+	}
+	if !local {
+		return "", false
+	}
+	return eventidentity.ExternalizeForFlow(b.FlowPath(flowID), []string{eventType}, eventType), true
 }
 func (b *WorkflowContractBundle) ResolveFlowEventPattern(flowID, pattern string) string {
 	scope := b.flowEventScope(flowID)
@@ -1243,7 +1281,7 @@ func (b *WorkflowContractBundle) flowLocalEvents(flowID string) []string {
 			out = append(out, eventType)
 		}
 	}
-	for _, row := range compileEventSchemaOwnershipRows(b) {
+	for _, row := range effectiveEventSchemaOwnershipRows(b) {
 		if row.receiverFlowID == flowID {
 			out = append(out, packageEndpointLocalEvent(b, flowID, row.receiverEvent, true))
 		}
