@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/platform"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/store"
@@ -127,6 +128,10 @@ func Database(selected any) *sql.DB {
 
 func DatabaseForTest(selected any) *sql.DB {
 	return Database(selected)
+}
+
+func commitPersistedEventDeliveryFixture(ctx context.Context, selected any, event events.Event, routes []events.DeliveryRoute) error {
+	return private.CommitPersistedEventDeliveryFixtureForTest(ctx, selected, event, routes)
 }
 
 func NewPostgresStoreForTest(db *sql.DB) *store.PostgresStore {

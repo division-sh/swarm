@@ -98,38 +98,8 @@ func CommitDeliveryObligationsForPersistedEvent(
 	routes []events.DeliveryRoute,
 ) {
 	t.Helper()
-	var (
-		db      *sql.DB
-		adapter *deliveryadapter.Adapter
-		err     error
-	)
-	switch selected := selectedStore.(type) {
-	case *store.PostgresStore:
-		db = DatabaseForTest(selected)
-		adapter, err = deliveryadapter.NewAdapter(deliveryadapter.DialectPostgres)
-	case *store.SQLiteRuntimeStore:
-		db = DatabaseForTest(selected)
-		adapter, err = deliveryadapter.NewAdapter(deliveryadapter.DialectSQLite)
-	default:
-		t.Fatalf("persisted event delivery fixture store %T is unsupported", selectedStore)
-	}
-	if err != nil {
-		t.Fatalf("construct persisted event delivery fixture adapter: %v", err)
-	}
-	if db == nil || adapter == nil {
-		t.Fatalf("persisted event delivery fixture store %T is not initialized", selectedStore)
-	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin persisted event delivery fixture: %v", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	authority := deliveryFixtureAuthority(t, ctx, tx, event.RunID(), adapter)
-	if _, err := adapter.CommitInitial(ctx, tx, event.ID(), event.RunID(), events.NormalizeDeliveryRoutes(routes), authority); err != nil {
+	if err := commitPersistedEventDeliveryFixture(ctx, selectedStore, event, routes); err != nil {
 		t.Fatalf("commit persisted event delivery fixture: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit persisted event delivery fixture transaction: %v", err)
 	}
 }
 
