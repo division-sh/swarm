@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	"github.com/division-sh/swarm/internal/providertriggers"
@@ -37,7 +38,7 @@ type WorkflowContractValidationOptions struct {
 	AllowHarnessOutputs            bool
 	ProviderTriggerCatalog         *providertriggers.CatalogSnapshot
 	ChannelPlans                   []packs.SatisfactionPlan
-	ChannelOutboundBindings        []packs.OutboundBindingPlan
+	ChannelActivationPublication   channelonboarding.ChannelActivationPublication
 }
 
 type WorkflowContractValidationResult struct {
@@ -189,7 +190,17 @@ func ValidateWorkflowContractSurface(ctx context.Context, source semanticview.So
 		}
 		result.CapabilitySubjects = append(result.CapabilitySubjects, subject)
 	}
-	for _, binding := range opts.ChannelOutboundBindings {
+	activationPublication := opts.ChannelActivationPublication
+	if !activationPublication.Generation().Valid() {
+		activationPublication, err = channelonboarding.NewDeclaredOnlyChannelActivationPublication(nil)
+		if err != nil {
+			return result, fmt.Errorf("channel activation publication failed: %w", err)
+		}
+	}
+	if err := activationPublication.Validate(); err != nil {
+		return result, fmt.Errorf("channel activation publication failed: %w", err)
+	}
+	for _, binding := range activationPublication.Bindings() {
 		subject, subjectErr := binding.CapabilitySubject()
 		if subjectErr != nil {
 			return result, fmt.Errorf("channel outbound capability projection failed: %w", subjectErr)

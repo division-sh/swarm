@@ -1120,6 +1120,10 @@ func publicSurfaceOperatorReadProofRefCoversMethodBackend(ref publicSurfaceProof
 
 func publicSurfaceSelectedOperatorReadAPIProofs() map[string]publicSurfaceSelectedOperatorReadAPIProof {
 	return map[string]publicSurfaceSelectedOperatorReadAPIProof{
+		"TestChannelConnectTelegramFirstUserJourney": {
+			Backends: []string{"default_sqlite", "explicit_postgres"},
+			Methods:  []string{"channel.onboarding_get"},
+		},
 		"TestServedParityHarnessBundleRegisterLifecycle": {
 			Backends: []string{"default_sqlite", "explicit_postgres"},
 			Methods:  []string{"bundle.get"},

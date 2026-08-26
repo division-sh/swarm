@@ -9940,6 +9940,111 @@ tool_model:
         Active authority is swarm.hitl-channel/v2 only. v1 readers, aliases, dual plans, compatibility decoders, provider
         branches in generic identity, pre-serve polling, copied-proof portability, synthesized claims, destination-as-
         identity, and split claim/write settlement are unsupported.
+    connected_channel_onboarding:
+      issue: '#2079'
+      implementation_status: implemented
+      canonical_owners:
+        provider_profile: admitted ChannelOnboardingProfile compiled with the exact swarm.hitl-channel/v2 satisfaction plan
+        context_coordinate: ChannelRuntimeContextCoordinate
+        responsibility: selected-store ChannelOnboardingOperation and ChannelTeardownOperation
+        learned_activation: selected-store ConnectedChannelActivation
+        executable_projection: >-
+          process-local channelactivation.Owner publication of complete canonical compiled activation records, identified by
+          one typed ChannelActivationGeneration
+        identity: operator_account_binding
+        registration: public_ingress.provider_registration
+        readiness: ConnectedChannelReadiness exact-current projection
+        api: /v1/rpc channel.onboarding_start|channel.onboarding_get|channel.onboarding_retry and channel.list
+        cli: swarm channel connect|reconnect|rebind|list|unbind
+      context_coordinate_rule: >
+        Every candidate, operation, pre-binding intent, learned activation, provider effect, compiled executable plan,
+        confirmation, readiness result, and API/CLI readback retains one exact bundle source fact, bundle identity,
+        effective-pack inventory generation, runtime-context publication generation, channel-plan generation, and target
+        generation. Provider, pack id, target shape, primary context, or load order never substitutes for that coordinate.
+        Stable --bundle, --interface, and --target selectors are required when provider shorthand is ambiguous. A successor
+        publication may consume retained selected-store facts only after exact source, inventory, plan, target, identity,
+        and revision reconciliation; stale publication identity grants no execution or READY authority.
+      provider_axes:
+        activation:
+        - webhook_registration
+        - session_connection
+        identity_ceremony:
+        - authenticated_text_challenge
+        - provider_pairing
+        rule: >
+          Generic onboarding branches only on these admitted axes. Telegram is webhook_registration plus
+          authenticated_text_challenge. Discord paper conformance is the second webhook/text shape. WhatsApp paper
+          conformance is session_connection plus provider_pairing and grants no executable session authority before
+          #2338/#2341 provide the service and health owners.
+      operation_rule: >
+        connect, reconnect, and rebind are distinct whole-journey verbs. One selected-store operation reserves exact
+        semantic input and target-slot responsibility before credential writes or provider effects. Same-key/same-input
+        replay returns that operation, changed input conflicts, and a second same-slot operation conflicts. Client
+        cancellation stops response narration only; admitted work continues or is recovered from its persisted phase.
+        connect requires absent identity and activation, reconnect preserves current account/conversation identity while
+        repairing deployment activation, and rebind requires a new authenticated identity ceremony. connect --replace,
+        implicit verb switching, --force, aliases, and lower identity RPCs as a second whole-journey API are unsupported.
+      credential_rule: >
+        Provider secret material enters only through the authenticated onboarding API from hidden TTY or stdin. Secret
+        values and reusable digests are forbidden in semantic request hashes, API idempotency rows, selected-store rows,
+        logs, traces, progress, errors, and readback. The operation first reserves exact credential roles and keys, then
+        stores only non-secret receipt and epoch evidence. Fresh webhook connect generates a missing signing value;
+        replay, reconnect, and rebind do not rotate credentials without an explicit newly admitted epoch.
+      activation_rule: >
+        Operator-declared config and selected-store learned activations are closed source variants lowered through one
+        compiler into immutable OutboundBindingPlan values. Source artifact presence is not backend or activation
+        selection. The variants never use precedence, adoption, fallback, or compatibility. Binding or target-slot
+        collision and any generation, credential-role, destination, or identity contradiction fail before publication.
+        One process-local owner publishes the complete current canonical activation records. Its deterministic typed
+        generation includes source variant, exact runtime-context coordinate, activation revision, complete executable
+        plan canonical value, and non-secret credential admission/epoch facts; secret values and reusable secret digests
+        are excluded. Before a runtime-context occurrence exists, verify, preflight, test, and serve admission use the same
+        publication carrier in an explicit declared-only mode containing only configured binding plans. Declared-only
+        publications cannot grant execution and cannot synthesize learned state; executable owners reject them. Replacement
+        fences new leases, waits for predecessor model-presentation, validation, execution,
+        private-activity, registration, and readback leases, and removes every predecessor tool and route before admitting
+        the successor. A model turn pins the publication that supplied its tools. Durable private activities persist both
+        activation-publication and plan generation and never substitute a same-name current target. Tool discovery,
+        validation, authorization, agent-origin dispatch, private activity dispatch/recovery, registration selection,
+        readiness, and runtime-context readback consume that owner; no config-only map or independent current-state copy
+        survives. The selected-store ConnectedChannelActivation remains the durable learned source; the process
+        publication is its exact-current compiled projection, not a second durable owner.
+      registration_handoff_rule: >
+        A pre-binding webhook intent carries only exact registration plan, target, credential epoch, and generation facts.
+        It grants no conversation destination or outbound authority. After operator_account_binding settles the external
+        identity, selected-store activation publication revision-fences handoff to the current registration selection.
+        Temporary authority cannot survive successful handoff, and an uncertain provider acknowledgment prevents blind
+        resend, cleanup, or successor publication.
+      confirmation_rule: >
+        Onboarding confirmation is one operator-origin, generation-pinned channel activity using the compiled activation
+        and the existing one-attempt provider effect journal. It fabricates no workflow run, event, entity, agent, or
+        inbound context. Durable dispatch acceptance is insufficient: terminal provider success for the exact activation
+        and binding revisions is required, while failure or acknowledgment uncertainty remains non-successful and NOT_READY.
+      destructive_rule: >
+        unbind, linked proof revocation, active-interface retirement, runtime-context unload, and activation supersession
+        reserve selected-store teardown responsibility and retire every matching pending operation and learned activation
+        before identity mutation, proof-file revocation, source removal, or successor authority. Runtime refresh then fences
+        registration, public runtime tools, and private activity routes. Recovery resumes every reserved or
+        authority-retired teardown idempotently. Proofless revocation fails before mutation because no proof authority exists.
+      readiness_rule: >
+        ConnectedChannelReadiness is derived, never persisted as a boolean, and reports the exact activation-publication
+        generation used by API/CLI readback. READY requires one exact current coordinate,
+        available channel plan, current activation and binding revisions, current proof when the binding is proof-backed,
+        current credential epochs, terminal-success confirmation for the same activation/binding, and posture-specific
+        target evidence. Webhook posture additionally joins exact ingress/signing, exposure, callback, and provider
+        registration generations from that same activation publication. Session posture instead joins exact service
+        fulfillment and live send health. Any loss,
+        rotation, replacement, reset, revocation, expiry, or supersession removes READY immediately. Proofless current
+        bindings are valid without invented proof evidence, but cannot remint identity after selected-store reset.
+      reset_and_recovery_rule: >
+        Startup resumes every nonterminal operation and teardown without replaying settled writes or effects. Selected-store
+        reset removes learned activation and operation facts. A surviving machine proof may restore identity only; it cannot
+        infer target, credential, registration, executable activation, confirmation, or READY. Readback must teach exactly
+        that activation was lost and require swarm channel reconnect <provider>.
+      no_legacy_rule: >
+        No config writer, migration, adoption, export, purge, selected-store fallback, provider-specific generic-runtime
+        branch, placeholder destination, manual callback/conversation/signing value, compatibility flag, dual executable
+        owner, universal activation registry, or generic saga framework is supported.
     opaque_reference_slots:
       exact:
       - destination
@@ -13653,6 +13758,8 @@ platform_tables:
         - conversation_forks
         - timers
       delete_all:
+        - channel_onboarding_operations
+        - connected_channel_activations
         - standing_service_journal
         - standing_service_generations
         - standing_services
@@ -13692,6 +13799,7 @@ platform_tables:
         - operator_channel_operations
         - operator_channel_bindings
         - operator_channel_claim_receipts
+        - channel_onboarding_teardowns
         - run_fork_selected_contract_runtime_executions
         - budget_admission_scopes
         - runtime_effect_budget_reservations
@@ -14172,6 +14280,143 @@ platform_tables:
             INDEX idx_operator_channel_bindings_principal (principal_id, interface_key),
             INDEX idx_operator_channel_bindings_proof (proof_id, proof_revision)
         );
+    channel_onboarding_operations:
+      description: >-
+        Durable whole-journey responsibility for one exact runtime-context-scoped channel connect,
+        reconnect, or rebind operation. Secret values and reusable secret digests are forbidden;
+        only admitted credential key, receipt, and epoch metadata may be stored. Request-key replay,
+        target-slot exclusion, phase transitions, and activation publication are revision fenced.
+      ddl: |
+        CREATE TABLE channel_onboarding_operations (
+            operation_id UUID PRIMARY KEY,
+            request_key_hash TEXT NOT NULL UNIQUE,
+            request_hash TEXT NOT NULL,
+            slot_key TEXT NOT NULL,
+            principal_id UUID NOT NULL REFERENCES operator_principals(principal_id),
+            verb TEXT NOT NULL CHECK (verb IN ('connect','reconnect','rebind')),
+            provider TEXT NOT NULL,
+            interface_key TEXT NOT NULL,
+            interface_ref TEXT NOT NULL CHECK (interface_ref = 'swarm.hitl-channel/v2'),
+            channel_pack_id TEXT NOT NULL,
+            channel_pack_version TEXT NOT NULL,
+            channel_manifest_hash TEXT NOT NULL,
+            semantic_generation TEXT NOT NULL,
+            bundle_hash TEXT NOT NULL CHECK (bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),
+            bundle_source TEXT NOT NULL CHECK (bundle_source IN ('persisted','ephemeral')),
+            bundle_identity TEXT NOT NULL,
+            pack_inventory_generation TEXT NOT NULL,
+            context_publication_generation BIGINT NOT NULL CHECK (context_publication_generation > 0),
+            plan_generation TEXT NOT NULL,
+            target_selector TEXT NOT NULL,
+            target_generation BIGINT NOT NULL CHECK (target_generation > 0),
+            activation_posture TEXT NOT NULL CHECK (activation_posture IN ('webhook_registration','session_connection')),
+            identity_ceremony TEXT NOT NULL CHECK (identity_ceremony IN ('authenticated_text_challenge','provider_pairing')),
+            phase TEXT NOT NULL CHECK (phase IN ('preparing','activating_provider','awaiting_external_identity','awaiting_operator_confirmation','publishing_activation','delivering_confirmation','succeeded','failed','retired')),
+            operation_revision BIGINT NOT NULL CHECK (operation_revision > 0),
+            save_proof BOOLEAN NOT NULL,
+            credential_reservations TEXT NOT NULL,
+            credential_admissions TEXT NOT NULL DEFAULT '[]',
+            identity_operation_id UUID,
+            binding_revision BIGINT CHECK (binding_revision IS NULL OR binding_revision > 0),
+            activation_revision BIGINT CHECK (activation_revision IS NULL OR activation_revision > 0),
+            confirmation_operation_id UUID,
+            failure_code TEXT,
+            failure_message TEXT,
+            requested_at TIMESTAMPTZ NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL,
+            completed_at TIMESTAMPTZ,
+            CHECK ((phase IN ('succeeded','failed','retired')) = (completed_at IS NOT NULL)),
+            UNIQUE INDEX idx_channel_onboarding_active_slot (slot_key) WHERE phase NOT IN ('succeeded','failed','retired'),
+            INDEX idx_channel_onboarding_principal (principal_id, requested_at),
+            INDEX idx_channel_onboarding_phase (phase, updated_at)
+        );
+    channel_onboarding_teardowns:
+      description: >-
+        Durable destructive channel-lifecycle responsibility. The selected-store owner fences
+        every matching pending onboarding operation and learned activation before an operator
+        identity/proof mutation or runtime-context retirement can complete. It stores no secret
+        value or reusable secret digest and is the replay owner after API completion loss.
+      ddl: |
+        CREATE TABLE channel_onboarding_teardowns (
+            teardown_id UUID PRIMARY KEY,
+            request_key_hash TEXT NOT NULL UNIQUE,
+            request_hash TEXT NOT NULL,
+            kind TEXT NOT NULL CHECK (kind IN ('unbind','proof_revoke','interface_retirement','context_retirement')),
+            principal_id UUID NOT NULL REFERENCES operator_principals(principal_id),
+            interface_key TEXT,
+            interface_ref TEXT CHECK (interface_ref IS NULL OR interface_ref = 'swarm.hitl-channel/v2'),
+            channel_pack_id TEXT,
+            channel_pack_version TEXT,
+            channel_manifest_hash TEXT,
+            semantic_generation TEXT,
+            bundle_hash TEXT CHECK (bundle_hash IS NULL OR bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),
+            bundle_source TEXT CHECK (bundle_source IS NULL OR bundle_source IN ('persisted','ephemeral')),
+            context_publication_generation BIGINT CHECK (context_publication_generation IS NULL OR context_publication_generation > 0),
+            expected_binding_revision BIGINT CHECK (expected_binding_revision IS NULL OR expected_binding_revision > 0),
+            expected_proof_revision BIGINT CHECK (expected_proof_revision IS NULL OR expected_proof_revision > 0),
+            phase TEXT NOT NULL CHECK (phase IN ('reserved','authority_retired','succeeded','failed')),
+            teardown_revision BIGINT NOT NULL CHECK (teardown_revision > 0),
+            retired_operations BIGINT NOT NULL DEFAULT 0 CHECK (retired_operations >= 0),
+            retired_activations BIGINT NOT NULL DEFAULT 0 CHECK (retired_activations >= 0),
+            failure_code TEXT,
+            failure_message TEXT,
+            requested_at TIMESTAMPTZ NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL,
+            completed_at TIMESTAMPTZ,
+            CHECK ((kind = 'context_retirement' AND bundle_hash IS NOT NULL AND bundle_source IS NOT NULL AND context_publication_generation IS NOT NULL AND interface_key IS NULL) OR (kind <> 'context_retirement' AND interface_key IS NOT NULL AND bundle_hash IS NULL AND bundle_source IS NULL AND context_publication_generation IS NULL)),
+            CHECK ((kind = 'unbind' AND expected_binding_revision IS NOT NULL AND expected_proof_revision IS NULL) OR (kind = 'proof_revoke' AND expected_binding_revision IS NULL AND expected_proof_revision IS NOT NULL) OR (kind IN ('interface_retirement','context_retirement') AND expected_binding_revision IS NULL AND expected_proof_revision IS NULL)),
+            CHECK ((phase IN ('succeeded','failed')) = (completed_at IS NOT NULL)),
+            INDEX idx_channel_teardown_principal (principal_id, requested_at),
+            INDEX idx_channel_teardown_phase (phase, updated_at),
+            INDEX idx_channel_teardown_interface (interface_key, phase),
+            INDEX idx_channel_teardown_bundle (bundle_hash, bundle_source, context_publication_generation, phase)
+        );
+    connected_channel_activations:
+      description: >-
+        Current or historical learned channel activation for one exact bundle/runtime-context,
+        interface, and target slot. It links rather than duplicates operator account identity and
+        stores no secret values. A current row is executable only through the canonical compiled
+        activation and exact-current readiness owners.
+      ddl: |
+        CREATE TABLE connected_channel_activations (
+            activation_id UUID PRIMARY KEY,
+            slot_key TEXT NOT NULL,
+            operation_id UUID NOT NULL REFERENCES channel_onboarding_operations(operation_id),
+            operation_revision BIGINT NOT NULL CHECK (operation_revision > 0),
+            principal_id UUID NOT NULL REFERENCES operator_principals(principal_id),
+            provider TEXT NOT NULL,
+            interface_key TEXT NOT NULL,
+            interface_ref TEXT NOT NULL CHECK (interface_ref = 'swarm.hitl-channel/v2'),
+            channel_pack_id TEXT NOT NULL,
+            channel_pack_version TEXT NOT NULL,
+            channel_manifest_hash TEXT NOT NULL,
+            semantic_generation TEXT NOT NULL,
+            bundle_hash TEXT NOT NULL CHECK (bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),
+            bundle_source TEXT NOT NULL CHECK (bundle_source IN ('persisted','ephemeral')),
+            bundle_identity TEXT NOT NULL,
+            pack_inventory_generation TEXT NOT NULL,
+            context_publication_generation BIGINT NOT NULL CHECK (context_publication_generation > 0),
+            plan_generation TEXT NOT NULL,
+            target_selector TEXT NOT NULL,
+            target_generation BIGINT NOT NULL CHECK (target_generation > 0),
+            activation_posture TEXT NOT NULL CHECK (activation_posture IN ('webhook_registration','session_connection')),
+            binding_revision BIGINT NOT NULL CHECK (binding_revision > 0),
+            proof_id UUID,
+            proof_revision BIGINT CHECK (proof_revision IS NULL OR proof_revision > 0),
+            credential_admissions TEXT NOT NULL,
+            activation_revision BIGINT NOT NULL CHECK (activation_revision > 0),
+            status TEXT NOT NULL CHECK (status IN ('current','retired')),
+            retirement_reason TEXT,
+            created_at TIMESTAMPTZ NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL,
+            retired_at TIMESTAMPTZ,
+            CHECK ((proof_id IS NULL AND proof_revision IS NULL) OR (proof_id IS NOT NULL AND proof_revision IS NOT NULL)),
+            CHECK ((status = 'current' AND retired_at IS NULL AND retirement_reason IS NULL) OR (status = 'retired' AND retired_at IS NOT NULL AND retirement_reason IS NOT NULL)),
+            UNIQUE INDEX idx_connected_channel_current_slot (slot_key) WHERE status = 'current',
+            INDEX idx_connected_channel_operation (operation_id, operation_revision),
+            INDEX idx_connected_channel_bundle (bundle_hash, bundle_source, status),
+            INDEX idx_connected_channel_interface (interface_key, status)
+        );
     inbound_publications:
       description: >-
         Permanent inbound provider request/idempotency owner. The parent reserves one
@@ -14537,7 +14782,7 @@ platform_tables:
             effect_class       TEXT NOT NULL CHECK (effect_class IN ('read_only', 'write_or_unknown')),
             execution_mode     TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
             bundle_hash        TEXT NOT NULL,
-            authority_kind     TEXT NOT NULL CHECK (authority_kind IN ('normal_agent', 'selected_contract_fork', 'conversation_fork_chat', 'startup_probe', 'serve_registration')),
+            authority_kind     TEXT NOT NULL CHECK (authority_kind IN ('normal_agent', 'selected_contract_fork', 'conversation_fork_chat', 'startup_probe', 'serve_registration', 'channel_confirmation')),
             authority_id       TEXT NOT NULL,
             agent_id           TEXT,
             agent_name_owner   TEXT,
@@ -14560,10 +14805,10 @@ platform_tables:
             created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             completed_at       TIMESTAMPTZ,
-            CHECK (authority_kind IN ('conversation_fork_chat', 'serve_registration') OR NULLIF(TRIM(COALESCE(capability_plan_fingerprint, '')), '') IS NOT NULL),
+            CHECK (authority_kind IN ('conversation_fork_chat', 'serve_registration', 'channel_confirmation') OR NULLIF(TRIM(COALESCE(capability_plan_fingerprint, '')), '') IS NOT NULL),
             CHECK (authority_kind <> 'conversation_fork_chat' OR capability_plan_fingerprint IS NULL),
             CHECK ((effect_kind <> 'provider_turn' OR authority_kind NOT IN ('normal_agent', 'selected_contract_fork') OR agent_frame_bytes IS NOT NULL) AND (agent_frame_bytes IS NULL OR (effect_kind = 'provider_turn' AND authority_kind IN ('normal_agent', 'selected_contract_fork')))),
-            CHECK ((authority_kind = 'normal_agent' AND agent_id IS NOT NULL AND agent_name_owner IS NOT NULL AND agent_name_source IS NOT NULL AND agent_route_presence IS NOT NULL AND flow_scope_key IS NOT NULL AND flow_instance_id IS NOT NULL AND flow_instance IS NOT NULL AND runtime_epoch > 0 AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL) OR (authority_kind = 'selected_contract_fork' AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NOT NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL) OR (authority_kind = 'conversation_fork_chat' AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NOT NULL AND startup_authority_id IS NULL) OR (authority_kind = 'startup_probe' AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NOT NULL) OR (authority_kind = 'serve_registration' AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NOT NULL)),
+            CHECK ((authority_kind = 'normal_agent' AND agent_id IS NOT NULL AND agent_name_owner IS NOT NULL AND agent_name_source IS NOT NULL AND agent_route_presence IS NOT NULL AND flow_scope_key IS NOT NULL AND flow_instance_id IS NOT NULL AND flow_instance IS NOT NULL AND runtime_epoch > 0 AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL) OR (authority_kind = 'selected_contract_fork' AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NOT NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL) OR (authority_kind = 'conversation_fork_chat' AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NOT NULL AND startup_authority_id IS NULL) OR (authority_kind = 'startup_probe' AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NOT NULL) OR (authority_kind = 'serve_registration' AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NOT NULL) OR (authority_kind = 'channel_confirmation' AND agent_id IS NULL AND agent_name_owner IS NULL AND agent_name_source IS NULL AND agent_route_presence IS NULL AND flow_scope_key IS NULL AND flow_instance_id IS NULL AND flow_instance IS NULL AND runtime_epoch IS NULL AND generation > 0 AND selected_execution_id IS NULL AND fork_turn_id IS NULL AND startup_authority_id IS NULL)),
             FOREIGN KEY (agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance) REFERENCES agents (agent_id, agent_name_owner, agent_name_source, agent_route_presence, flow_scope_key, flow_instance_id, flow_instance),
             UNIQUE (authority_kind, authority_id, operation_id),
             INDEX idx_runtime_external_effect_operations_agent (agent_id, created_at) WHERE agent_id IS NOT NULL,
@@ -21673,11 +21918,13 @@ test_specification:
           One typed projection returns the composed semantic source, executable workflow module when supplied, and a versioned
           canonical digest. Consumers do not compose or hash source subsets independently. The identity includes the exact base
           bundle hash and persisted/ephemeral provenance; every exact public input with resolved event provenance and accepted
-          schema; every effective authored/imported provider connector and channel runtime tool with complete canonical schema;
-          connector import/generation/provenance; provider-trigger catalog generation and imported-event provenance; and every
-          configured channel plan/binding generation and each binding's exact admitted destination. Missing required schemas
-          or external provenance fails closed.
-        excluded: credentials, readiness, scenario assertions, response values, mutable runtime state, and unrelated source internals
+          schema; every effective authored/imported provider connector with complete canonical schema and provenance;
+          provider-trigger catalog generation and imported-event provenance; and every structural channel SatisfactionPlan
+          generation. Missing required schemas or external provenance fails closed. Mutable declared/learned deployment
+          activations are a separate ChannelActivationGeneration and do not alter historical workflow/source identity.
+        excluded: >-
+          channel deployment destinations, activation runtime tools and private targets, activation credential references/epochs,
+          readiness, scenario assertions, response values, mutable runtime state, and unrelated source internals
       execution_profile:
         owner: internal/runtime/scenarioexecution
         selector: identity-only ScenarioExecutionSelector; raw response bytes are never accepted by the API
@@ -23087,7 +23334,18 @@ cli_specification:
           standing_reset_service: {command: swarm standing reset, selector: 'arg:service-id', family: standing_service, mode: full_only, safety: mutating}
           import_pack: {command: swarm import, selector: 'arg:pack-id', family: pack, mode: full_only, safety: mutating}
           packs_show_pack: {command: swarm packs show, selector: 'arg:pack-id', family: pack, mode: full_only}
-          channel_connect_interface: {command: swarm channel connect, selector: 'arg:interface', family: operator_channel, mode: full_only, safety: mutating}
+          channel_connect_provider: {command: swarm channel connect, selector: 'arg:provider', family: none, mode: different_concept, scope_rule: admitted provider shorthand resolved through the exact onboarding candidate catalog, safety: mutating}
+          channel_connect_bundle: {command: swarm channel connect, selector: 'flag:bundle', family: bundle, mode: full_only, safety: mutating}
+          channel_connect_interface: {command: swarm channel connect, selector: 'flag:interface', family: operator_channel, mode: full_only, safety: mutating}
+          channel_connect_target: {command: swarm channel connect, selector: 'flag:target', family: none, mode: different_concept, scope_rule: exact package-qualified provider activation target, safety: mutating}
+          channel_reconnect_provider: {command: swarm channel reconnect, selector: 'arg:provider', family: none, mode: different_concept, scope_rule: admitted provider shorthand resolved through the exact onboarding candidate catalog, safety: mutating}
+          channel_reconnect_bundle: {command: swarm channel reconnect, selector: 'flag:bundle', family: bundle, mode: full_only, safety: mutating}
+          channel_reconnect_interface: {command: swarm channel reconnect, selector: 'flag:interface', family: operator_channel, mode: full_only, safety: mutating}
+          channel_reconnect_target: {command: swarm channel reconnect, selector: 'flag:target', family: none, mode: different_concept, scope_rule: exact package-qualified provider activation target, safety: mutating}
+          channel_rebind_provider: {command: swarm channel rebind, selector: 'arg:provider', family: none, mode: different_concept, scope_rule: admitted provider shorthand resolved through the exact onboarding candidate catalog, safety: mutating}
+          channel_rebind_bundle: {command: swarm channel rebind, selector: 'flag:bundle', family: bundle, mode: full_only, safety: mutating}
+          channel_rebind_interface: {command: swarm channel rebind, selector: 'flag:interface', family: operator_channel, mode: full_only, safety: mutating}
+          channel_rebind_target: {command: swarm channel rebind, selector: 'flag:target', family: none, mode: different_concept, scope_rule: exact package-qualified provider activation target, safety: mutating}
           channel_unbind_interface: {command: swarm channel unbind, selector: 'arg:interface', family: operator_channel, mode: full_only, safety: mutating}
           mutating_idempotency: {command: 'swarm <mutating>', selector: 'flag:idempotency-key', family: none, mode: different_concept, scope_rule: caller-authored retry key}
           connections_key: {command: 'swarm connections <key>', selector: 'arg:key', family: none, mode: different_concept, scope_rule: authored stable connection key}
@@ -23515,8 +23773,22 @@ cli_specification:
             channel_connect:
               command: swarm channel connect
               classification: shared_output
-              fact_owner: /v1/rpc channel.connect|reconnect|rebind then channel.confirm
+              fact_owner: /v1/rpc channel.onboarding_start|get|retry plus channel.confirm
               json_shape: channel operation result with exact interface, state, revisions, claimant presentation, scope, and expiry
+              quiet_values:
+              - operation_id
+            channel_reconnect:
+              command: swarm channel reconnect
+              classification: shared_output
+              fact_owner: /v1/rpc channel.onboarding_start|get|retry plus channel.confirm
+              json_shape: channel onboarding operation and exact connected-channel readback
+              quiet_values:
+              - operation_id
+            channel_rebind:
+              command: swarm channel rebind
+              classification: shared_output
+              fact_owner: /v1/rpc channel.onboarding_start|get|retry plus channel.confirm
+              json_shape: channel onboarding operation and exact connected-channel readback
               quiet_values:
               - operation_id
             channel_list:
@@ -25238,22 +25510,30 @@ cli_specification:
         - DB/AWS SigV4/non-HTTP/native connector auth
         - external vault/team managed credential UI/API
     channel:
-      command: swarm channel connect|list|unbind
+      command: swarm channel connect|reconnect|rebind|list|unbind
       group: run_operate
       tier: must_have
       implementation_status: implemented
-      owner: tool_model.hitl_channel_pack_interface.operator_account_binding
+      owner: tool_model.hitl_channel_pack_interface.connected_channel_onboarding
       behavior: >
-        API-only operator-channel handshake and local binding lifecycle. `connect <interface>` resolves one current
-        exact pack-qualified interface, starts connect/reconnect/rebind under expected revision, waits for one
-        satisfier-authenticated claimant, displays its masked presentation and scope, and requires explicit operator
-        confirmation. `list` renders generation-aware current/stale/unbound/revoked and pending state with an exact
-        selector. `unbind` writes a local fence and does not revoke the machine proof. Non-exact selectors fail closed;
-        the CLI never reads the selected store, provider payload, or provider HTTP directly.
+        API-only complete connected-channel lifecycle. `connect <provider>`, `reconnect <provider>`, and
+        `rebind <provider>` select one exact bundle/interface/target candidate and consume the durable onboarding
+        operation through start/get/retry. The nested satisfier-authenticated identity ceremony remains owned by
+        channel.connect|reconnect|rebind plus channel.confirm, but those lower RPCs are not a second whole-journey CLI.
+        Provider credentials enter only through hidden TTY input or stdin and are never accepted in argv. `list`
+        consumes the composed identity/activation/readiness projection. `unbind` durably retires selected-store
+        execution authority before committing the identity fence. Non-exact selectors fail closed; the CLI never reads
+        the selected store, provider payload, credential file, or provider HTTP directly.
       subcommands:
         connect:
-          command: swarm channel connect <interface> [--no-save] [--replace] [--yes] [--json|--quiet]
-          api_owner: /v1/rpc channel.connect|reconnect|rebind then channel.confirm
+          command: swarm channel connect <provider> [--bundle <bundle-hash>] [--interface <exact-selector>] [--target <exact-target>] [--no-save] [--yes] [--json|--quiet]
+          api_owner: /v1/rpc channel.onboarding_start|get|retry plus nested channel.confirm
+        reconnect:
+          command: swarm channel reconnect <provider> [--bundle <bundle-hash>] [--interface <exact-selector>] [--target <exact-target>] [--json|--quiet]
+          api_owner: /v1/rpc channel.onboarding_start|get|retry
+        rebind:
+          command: swarm channel rebind <provider> [--bundle <bundle-hash>] [--interface <exact-selector>] [--target <exact-target>] [--no-save] [--yes] [--json|--quiet]
+          api_owner: /v1/rpc channel.onboarding_start|get|retry plus nested channel.confirm
         list:
           command: swarm channel list [--json|--quiet]
           api_owner: /v1/rpc channel.list
@@ -28197,6 +28477,8 @@ api_specification:
       - conversation.fork
       - conversation.fork_chat
       - conversation.fork_delete
+      - channel.onboarding_start
+      - channel.onboarding_retry
       - channel.connect
       - channel.reconnect
       - channel.rebind
@@ -32064,6 +32346,169 @@ api_specification:
             uniqueItems: true
             items: {type: string, enum: [notify, decide]}
           pending_operation: {$ref: '#/components/schemas/OperatorChannelOperation'}
+      ChannelRuntimeContextCoordinate:
+        type: object
+        additionalProperties: false
+        required: [bundle_hash, bundle_source, bundle_identity, pack_inventory_generation, context_publication_generation, plan_generation, target_generation]
+        properties:
+          bundle_hash: {type: string, pattern: '^bundle-v1:sha256:[0-9a-f]{64}$'}
+          bundle_source: {type: string, enum: [persisted, ephemeral]}
+          bundle_identity: {type: string, minLength: 1}
+          pack_inventory_generation: {type: string, minLength: 1}
+          context_publication_generation: {type: integer, minimum: 1}
+          plan_generation: {type: string, minLength: 1}
+          target_generation: {type: integer, minimum: 1}
+      ChannelCredentialReservation:
+        type: object
+        additionalProperties: false
+        required: [role, store_key]
+        properties:
+          role: {type: string, minLength: 1}
+          store_key: {type: string, minLength: 1}
+      ChannelCredentialAdmission:
+        type: object
+        additionalProperties: false
+        required: [role, store_key, kind, receipt, epoch]
+        properties:
+          role: {type: string, minLength: 1}
+          store_key: {type: string, minLength: 1}
+          kind: {type: string, enum: [written, observed]}
+          receipt: {type: string, minLength: 1}
+          epoch: {type: string, minLength: 1}
+      ChannelOnboardingOperation:
+        type: object
+        additionalProperties: false
+        required: [operation_id, principal_id, verb, provider, interface, coordinate, target_selector, activation_posture, identity_ceremony, phase, revision, save_proof, credential_reservations, requested_at, updated_at]
+        properties:
+          operation_id: {$ref: '#/components/schemas/OpaqueId'}
+          principal_id: {$ref: '#/components/schemas/OpaqueId'}
+          verb: {type: string, enum: [connect, reconnect, rebind]}
+          provider: {type: string, minLength: 1}
+          interface: {$ref: '#/components/schemas/OperatorChannelInterface'}
+          coordinate: {$ref: '#/components/schemas/ChannelRuntimeContextCoordinate'}
+          target_selector: {type: string, minLength: 1}
+          activation_posture: {type: string, enum: [webhook_registration, session_connection]}
+          identity_ceremony: {type: string, enum: [authenticated_text_challenge, provider_pairing]}
+          phase: {type: string, enum: [preparing, activating_provider, awaiting_external_identity, awaiting_operator_confirmation, publishing_activation, delivering_confirmation, succeeded, failed, retired]}
+          revision: {type: integer, minimum: 1}
+          save_proof: {type: boolean}
+          credential_reservations:
+            type: array
+            minItems: 1
+            items: {$ref: '#/components/schemas/ChannelCredentialReservation'}
+          credential_admissions:
+            type: array
+            items: {$ref: '#/components/schemas/ChannelCredentialAdmission'}
+          identity_operation_id: {$ref: '#/components/schemas/OpaqueId'}
+          binding_revision: {type: integer, minimum: 1}
+          activation_revision: {type: integer, minimum: 1}
+          confirmation_operation_id: {$ref: '#/components/schemas/OpaqueId'}
+          failure_code: {type: string}
+          failure_message: {type: string}
+          requested_at: {$ref: '#/components/schemas/Timestamp'}
+          updated_at: {$ref: '#/components/schemas/Timestamp'}
+          completed_at: {$ref: '#/components/schemas/Timestamp'}
+      ChannelOnboardingCandidateTarget:
+        type: object
+        additionalProperties: false
+        required: [selector, service_id, package_key, flow_id, alias, provider, generation, publication_sequence, admission_generation]
+        properties:
+          selector: {type: string, minLength: 1}
+          service_id: {$ref: '#/components/schemas/OpaqueId'}
+          package_key: {type: string, minLength: 1}
+          flow_id: {type: string, minLength: 1}
+          alias: {type: string, minLength: 1}
+          provider: {type: string, minLength: 1}
+          generation: {type: integer, minimum: 1}
+          publication_sequence: {type: integer, minimum: 1}
+          admission_generation: {type: string, pattern: '^[0-9a-f]{64}$'}
+          signing_credential_key: {type: string}
+      ChannelOnboardingCandidate:
+        type: object
+        additionalProperties: false
+        required: [provider, interface, coordinate, target, activation_posture, identity_ceremony, provider_credential_role, confirmation_operation]
+        properties:
+          provider: {type: string, minLength: 1}
+          interface: {$ref: '#/components/schemas/OperatorChannelInterface'}
+          coordinate: {$ref: '#/components/schemas/ChannelRuntimeContextCoordinate'}
+          target: {$ref: '#/components/schemas/ChannelOnboardingCandidateTarget'}
+          activation_posture: {type: string, enum: [webhook_registration, session_connection]}
+          identity_ceremony: {type: string, enum: [authenticated_text_challenge, provider_pairing]}
+          provider_credential_role: {type: string, minLength: 1}
+          signing_credential_role: {type: string}
+          confirmation_operation: {type: string, minLength: 1}
+          connection_health: {type: string}
+      ConnectedChannelReadiness:
+        type: object
+        additionalProperties: false
+        required: [ready, reason, coordinate, activation_revision, binding_revision, observed_at]
+        properties:
+          ready: {type: boolean}
+          reason: {type: string, enum: [ready, runtime_context_coordinate_invalid, channel_plan_unavailable, activation_not_current, binding_not_current, proof_not_current, credentials_not_current, confirmation_not_terminal_success, target_not_current, exposure_not_current, registration_not_current, session_not_current]}
+          coordinate: {$ref: '#/components/schemas/ChannelRuntimeContextCoordinate'}
+          activation_generation: {type: string, minLength: 1}
+          activation_revision: {type: integer, minimum: 0}
+          binding_revision: {type: integer, minimum: 0}
+          observed_at: {$ref: '#/components/schemas/Timestamp'}
+      ConnectedChannelActivation:
+        type: object
+        additionalProperties: false
+        required: [activation_id, operation_id, operation_revision, principal_id, provider, interface, coordinate, target_selector, activation_posture, binding_revision, credential_admissions, revision, status, created_at, updated_at]
+        properties:
+          activation_id: {$ref: '#/components/schemas/OpaqueId'}
+          operation_id: {$ref: '#/components/schemas/OpaqueId'}
+          operation_revision: {type: integer, minimum: 1}
+          principal_id: {$ref: '#/components/schemas/OpaqueId'}
+          provider: {type: string, minLength: 1}
+          interface: {$ref: '#/components/schemas/OperatorChannelInterface'}
+          coordinate: {$ref: '#/components/schemas/ChannelRuntimeContextCoordinate'}
+          target_selector: {type: string, minLength: 1}
+          activation_posture: {type: string, enum: [webhook_registration, session_connection]}
+          binding_revision: {type: integer, minimum: 1}
+          proof_id: {$ref: '#/components/schemas/OpaqueId'}
+          proof_revision: {type: integer, minimum: 1}
+          credential_admissions:
+            type: array
+            minItems: 1
+            items: {$ref: '#/components/schemas/ChannelCredentialAdmission'}
+          revision: {type: integer, minimum: 1}
+          status: {type: string, enum: [current, retired]}
+          retirement_reason: {type: string}
+          created_at: {$ref: '#/components/schemas/Timestamp'}
+          updated_at: {$ref: '#/components/schemas/Timestamp'}
+          retired_at: {$ref: '#/components/schemas/Timestamp'}
+      ConnectedChannelReadback:
+        type: object
+        additionalProperties: false
+        required: [identity]
+        properties:
+          identity: {$ref: '#/components/schemas/OperatorChannelReadback'}
+          operation: {$ref: '#/components/schemas/ChannelOnboardingOperation'}
+          activation: {$ref: '#/components/schemas/ConnectedChannelActivation'}
+          readiness: {$ref: '#/components/schemas/ConnectedChannelReadiness'}
+          recovery: {$ref: '#/components/schemas/ConnectedChannelRecovery'}
+      ConnectedChannelRecovery:
+        type: object
+        additionalProperties: false
+        required: [reason, provider, commands]
+        properties:
+          reason: {type: string, const: activation_not_current}
+          provider: {type: string, minLength: 1}
+          commands:
+            type: array
+            minItems: 1
+            uniqueItems: true
+            items: {type: string, minLength: 1}
+      ChannelOnboardingResult:
+        type: object
+        additionalProperties: false
+        required: [operation, candidate]
+        properties:
+          operation: {$ref: '#/components/schemas/ChannelOnboardingOperation'}
+          candidate: {$ref: '#/components/schemas/ChannelOnboardingCandidate'}
+          identity_operation: {$ref: '#/components/schemas/OperatorChannelOperation'}
+          binding: {$ref: '#/components/schemas/OperatorChannelBinding'}
+          readiness: {$ref: '#/components/schemas/ConnectedChannelReadiness'}
       OperatorChannelOperationResult:
         type: object
         additionalProperties: false
@@ -32079,7 +32524,7 @@ api_specification:
           principal_id: {$ref: '#/components/schemas/OpaqueId'}
           channels:
             type: array
-            items: {$ref: '#/components/schemas/OperatorChannelReadback'}
+            items: {$ref: '#/components/schemas/ConnectedChannelReadback'}
       OperatorChannelProofResult:
         type: object
         additionalProperties: false
@@ -33105,6 +33550,15 @@ api_specification:
         type: object
         additionalProperties: true
         description: Persisted data declaration, version, row, pin, receipt, or tombstone facts contradict one another.
+      CHANNEL_CREDENTIAL_REQUIRED:
+        type: object
+        additionalProperties: false
+        required: [reason, role, store_key, remediation]
+        properties:
+          reason: {type: string}
+          role: {type: string, minLength: 1}
+          store_key: {type: string, minLength: 1}
+          remediation: {type: string, minLength: 1}
       IDEMPOTENCY_CONFLICT:
         type: object
         additionalProperties: false
@@ -36361,6 +36815,41 @@ api_specification:
             next_cursor:
               $ref: '#/components/schemas/Cursor'
       errors: []
+    channel.onboarding_start:
+      tier: must_have
+      description: Reserve and advance one durable exact-context connected-channel connect, reconnect, or rebind journey. Provider secret material is transient write-only input and is absent from request identity, durable rows, logs, errors, and readback.
+      scope: {required: [control:channels]}
+      idempotency: stable-principal domain-operation replay; generic completed-response idempotency does not own this long external flow.
+      params:
+      - {name: verb, required: true, schema: {type: string, enum: [connect, reconnect, rebind]}}
+      - {name: provider, required: true, schema: {type: string, minLength: 1}}
+      - {name: bundle, required: false, schema: {type: string, pattern: '^bundle-v1:sha256:[0-9a-f]{64}$'}}
+      - {name: interface, required: false, schema: {type: string, minLength: 1}}
+      - {name: target, required: false, schema: {type: string, minLength: 1}}
+      - {name: provider_credential, required: false, schema: {type: string, minLength: 1, writeOnly: true}}
+      - {name: save_proof, required: false, schema: {type: boolean, default: true}}
+      - {name: idempotency_key, required: false, schema: {type: string}}
+      result: {name: result, required: true, schema: {$ref: '#/components/schemas/ChannelOnboardingResult'}}
+      errors: [CHANNEL_INTERFACE_NOT_FOUND, CHANNEL_INTERFACE_AMBIGUOUS, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, CHANNEL_CREDENTIAL_REQUIRED, IDEMPOTENCY_CONFLICT]
+    channel.onboarding_get:
+      tier: must_have
+      description: Read one durable onboarding operation, its nested identity state, and its exact-current connected readiness without advancing or replaying effects.
+      scope: {required: [read:channels]}
+      params:
+      - {name: operation_id, required: true, schema: {$ref: '#/components/schemas/OpaqueId'}}
+      result: {name: result, required: true, schema: {$ref: '#/components/schemas/ChannelOnboardingResult'}}
+      errors: [CHANNEL_OPERATION_NOT_FOUND]
+    channel.onboarding_retry:
+      tier: must_have
+      description: Resume the same durable onboarding responsibility from settled component evidence. It never blindly resends uncertain provider work or rotates credentials merely because the client retried.
+      scope: {required: [control:channels]}
+      idempotency: exact durable operation phase/revision and external-effect journal state.
+      params:
+      - {name: operation_id, required: true, schema: {$ref: '#/components/schemas/OpaqueId'}}
+      - {name: provider_credential, required: false, schema: {type: string, minLength: 1, writeOnly: true}}
+      - {name: idempotency_key, required: false, schema: {type: string}}
+      result: {name: result, required: true, schema: {$ref: '#/components/schemas/ChannelOnboardingResult'}}
+      errors: [CHANNEL_OPERATION_NOT_FOUND, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, CHANNEL_CREDENTIAL_REQUIRED]
     channel.connect:
       tier: must_have
       description: Begin an exact revision-fenced binding for an unbound v2 channel interface. The returned short-lived challenge is not a credential; only a current satisfier-authenticated text fact followed by operator confirmation can bind it.
@@ -37579,6 +38068,7 @@ managed_external_effect_authority:
   adapters:
     provider: [anthropic_api, openai_compatible, openai_responses, claude_cli]
     provider_registration: [provider_registration]
+    channel_confirmation: [channel_confirmation]
     tool: [authored_http_tool, managed_credential, native_web_search]
     mcp: [mcp_tools_call_http, mcp_tools_call_stdio]
     native: [native_bash, native_read_file, native_write_file]

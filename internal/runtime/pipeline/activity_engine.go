@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimeactivityresult "github.com/division-sh/swarm/internal/runtime/activityresult"
@@ -238,7 +239,14 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	if source == nil {
 		return runtimefailures.New(runtimefailures.ClassInternalFailure, "activity_semantic_source_missing", "activity-runtime", "execute_activity", nil)
 	}
-	target, privateTarget := d.coordinator.channelActivityTools[intent.Tool]
+	target, privateTarget, activationLease, targetErr := d.coordinator.channelActivityTarget(intent.Tool, intent.ChannelActivationGeneration)
+	if targetErr != nil {
+		return d.publishActivityFailure(ctx, intent, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "channel_activity_plan_invalid", "activity-runtime", "resolve_private_target", map[string]any{"tool": intent.Tool}, targetErr))
+	}
+	if activationLease != nil {
+		defer activationLease.Release()
+	}
+	ctx = withActivityChannelTarget(ctx, target, privateTarget)
 	tool, ok := target.Tool()
 	if privateTarget {
 		if !intent.PlanGeneration.Valid() || !intent.PlanGeneration.Equal(target.Generation()) {
@@ -674,32 +682,33 @@ func (pc *PipelineCoordinator) handleActivityRequestEventWithEmissionPlan(ctx co
 }
 
 type activityRequestPayload struct {
-	ActivityID       string                       `json:"activity_id"`
-	Tool             string                       `json:"tool"`
-	PlanGeneration   *plangeneration.Generation   `json:"plan_generation,omitempty"`
-	BundleHash       string                       `json:"bundle_hash,omitempty"`
-	WorkflowVersion  string                       `json:"workflow_version,omitempty"`
-	EffectClass      string                       `json:"effect_class"`
-	SuccessEvent     string                       `json:"success_event"`
-	FailureEvent     string                       `json:"failure_event"`
-	RevisionEvent    string                       `json:"revision_event,omitempty"`
-	RejectedEvent    string                       `json:"rejected_event,omitempty"`
-	RetryMaxAttempts int                          `json:"retry_max_attempts"`
-	RetryBackoff     string                       `json:"retry_backoff"`
-	ForkPolicy       string                       `json:"fork_policy"`
-	EntityID         string                       `json:"entity_id"`
-	NodeID           string                       `json:"node_id"`
-	FlowID           string                       `json:"flow_id"`
-	FlowInstance     string                       `json:"flow_instance,omitempty"`
-	HandlerEventKey  string                       `json:"handler_event_key"`
-	SourceEventID    string                       `json:"source_event_id"`
-	SourceRunID      string                       `json:"source_run_id"`
-	SourceTaskID     string                       `json:"source_task_id"`
-	ParentEventID    string                       `json:"parent_event_id"`
-	ChainDepth       int                          `json:"chain_depth"`
-	Attempt          int                          `json:"attempt"`
-	Generation       attemptgeneration.Generation `json:"loop_generation,omitempty"`
-	LoopStage        string                       `json:"loop_stage,omitempty"`
+	ActivityID                  string                                         `json:"activity_id"`
+	Tool                        string                                         `json:"tool"`
+	PlanGeneration              *plangeneration.Generation                     `json:"plan_generation,omitempty"`
+	ChannelActivationGeneration *channelonboarding.ChannelActivationGeneration `json:"channel_activation_generation,omitempty"`
+	BundleHash                  string                                         `json:"bundle_hash,omitempty"`
+	WorkflowVersion             string                                         `json:"workflow_version,omitempty"`
+	EffectClass                 string                                         `json:"effect_class"`
+	SuccessEvent                string                                         `json:"success_event"`
+	FailureEvent                string                                         `json:"failure_event"`
+	RevisionEvent               string                                         `json:"revision_event,omitempty"`
+	RejectedEvent               string                                         `json:"rejected_event,omitempty"`
+	RetryMaxAttempts            int                                            `json:"retry_max_attempts"`
+	RetryBackoff                string                                         `json:"retry_backoff"`
+	ForkPolicy                  string                                         `json:"fork_policy"`
+	EntityID                    string                                         `json:"entity_id"`
+	NodeID                      string                                         `json:"node_id"`
+	FlowID                      string                                         `json:"flow_id"`
+	FlowInstance                string                                         `json:"flow_instance,omitempty"`
+	HandlerEventKey             string                                         `json:"handler_event_key"`
+	SourceEventID               string                                         `json:"source_event_id"`
+	SourceRunID                 string                                         `json:"source_run_id"`
+	SourceTaskID                string                                         `json:"source_task_id"`
+	ParentEventID               string                                         `json:"parent_event_id"`
+	ChainDepth                  int                                            `json:"chain_depth"`
+	Attempt                     int                                            `json:"attempt"`
+	Generation                  attemptgeneration.Generation                   `json:"loop_generation,omitempty"`
+	LoopStage                   string                                         `json:"loop_stage,omitempty"`
 }
 
 func activityRequestEmitIntents(intents []runtimeengine.ActivityIntent) ([]runtimeengine.EmitIntent, error) {
@@ -906,33 +915,39 @@ func activityRequestPayloadFromIntent(intent runtimeengine.ActivityIntent) activ
 		value := intent.PlanGeneration
 		planGeneration = &value
 	}
+	var activationGeneration *channelonboarding.ChannelActivationGeneration
+	if intent.ChannelActivationGeneration.Valid() {
+		value := intent.ChannelActivationGeneration
+		activationGeneration = &value
+	}
 	return activityRequestPayload{
-		ActivityID:       intent.ActivityID,
-		Tool:             intent.Tool,
-		PlanGeneration:   planGeneration,
-		BundleHash:       intent.BundleHash,
-		WorkflowVersion:  intent.WorkflowVersion,
-		EffectClass:      string(intent.EffectClass),
-		SuccessEvent:     intent.SuccessEvent,
-		FailureEvent:     intent.FailureEvent,
-		RevisionEvent:    intent.RevisionEvent,
-		RejectedEvent:    intent.RejectedEvent,
-		RetryMaxAttempts: intent.RetryMaxAttempts,
-		RetryBackoff:     intent.RetryBackoff,
-		ForkPolicy:       string(intent.ForkPolicy),
-		EntityID:         intent.EntityID.String(),
-		NodeID:           intent.Owner.Key(),
-		FlowID:           intent.ExecutionFlowID.String(),
-		FlowInstance:     intent.FlowInstance,
-		HandlerEventKey:  intent.HandlerEventKey,
-		SourceEventID:    intent.SourceEventID,
-		SourceRunID:      intent.SourceRunID,
-		SourceTaskID:     intent.SourceTaskID,
-		ParentEventID:    intent.ParentEventID,
-		ChainDepth:       intent.ChainDepth,
-		Attempt:          intent.Attempt,
-		Generation:       intent.Generation,
-		LoopStage:        intent.LoopStage,
+		ActivityID:                  intent.ActivityID,
+		Tool:                        intent.Tool,
+		PlanGeneration:              planGeneration,
+		ChannelActivationGeneration: activationGeneration,
+		BundleHash:                  intent.BundleHash,
+		WorkflowVersion:             intent.WorkflowVersion,
+		EffectClass:                 string(intent.EffectClass),
+		SuccessEvent:                intent.SuccessEvent,
+		FailureEvent:                intent.FailureEvent,
+		RevisionEvent:               intent.RevisionEvent,
+		RejectedEvent:               intent.RejectedEvent,
+		RetryMaxAttempts:            intent.RetryMaxAttempts,
+		RetryBackoff:                intent.RetryBackoff,
+		ForkPolicy:                  string(intent.ForkPolicy),
+		EntityID:                    intent.EntityID.String(),
+		NodeID:                      intent.Owner.Key(),
+		FlowID:                      intent.ExecutionFlowID.String(),
+		FlowInstance:                intent.FlowInstance,
+		HandlerEventKey:             intent.HandlerEventKey,
+		SourceEventID:               intent.SourceEventID,
+		SourceRunID:                 intent.SourceRunID,
+		SourceTaskID:                intent.SourceTaskID,
+		ParentEventID:               intent.ParentEventID,
+		ChainDepth:                  intent.ChainDepth,
+		Attempt:                     intent.Attempt,
+		Generation:                  intent.Generation,
+		LoopStage:                   intent.LoopStage,
 	}
 }
 
@@ -948,8 +963,8 @@ func activityIntentFromRequestEvent(evt events.Event) (runtimeengine.ActivityInt
 	if err := canonicaljson.ValueInto(semanticPayload, &payload); err != nil {
 		return runtimeengine.ActivityIntent{}, fmt.Errorf("decode activity request %s: %w", evt.ID(), err)
 	}
-	if strings.HasPrefix(strings.TrimSpace(payload.Tool), runtimecontracts.PrivateChannelActivityPrefix) && payload.PlanGeneration == nil {
-		return runtimeengine.ActivityIntent{}, fmt.Errorf("activity request %s for private channel target requires plan_generation", evt.ID())
+	if strings.HasPrefix(strings.TrimSpace(payload.Tool), runtimecontracts.PrivateChannelActivityPrefix) && (payload.PlanGeneration == nil || payload.ChannelActivationGeneration == nil) {
+		return runtimeengine.ActivityIntent{}, fmt.Errorf("activity request %s for private channel target requires plan_generation and channel_activation_generation", evt.ID())
 	}
 	input, ok := semanticPayload.Lookup("input")
 	if !ok || input.Kind() != semanticvalue.KindObject {
@@ -995,6 +1010,9 @@ func activityIntentFromRequestEvent(evt events.Event) (runtimeengine.ActivityInt
 		LoopStage:        payload.LoopStage,
 		ExecutionMode:    evt.ExecutionMode(),
 	}.Normalized()
+	if payload.ChannelActivationGeneration != nil {
+		intent.ChannelActivationGeneration = *payload.ChannelActivationGeneration
+	}
 	if intent.ActivityID == "" || intent.Tool == "" || intent.SuccessEvent == "" || intent.FailureEvent == "" {
 		return runtimeengine.ActivityIntent{}, fmt.Errorf("activity request %s is missing required activity identity", evt.ID())
 	}
@@ -1402,13 +1420,12 @@ func (d pipelineActivityDispatcher) resolveActivityToolCredentials(ctx context.C
 		source = d.coordinator.SemanticSource()
 	}
 	flowID := intent.ExecutionFlowID.String()
+	channelTarget, channelPrivate := activityChannelTargetFromContext(ctx)
 	for _, key := range keys {
 		storeKey := ""
 		mapped := false
-		if d.coordinator != nil {
-			if target, private := d.coordinator.channelActivityTools[intent.Tool]; private {
-				storeKey, mapped = target.CredentialStoreKey(key)
-			}
+		if channelPrivate {
+			storeKey, mapped = channelTarget.CredentialStoreKey(key)
 		}
 		if !mapped {
 			storeKey, mapped = semanticview.CredentialStoreKeyForFlow(source, flowID, key)
@@ -1430,6 +1447,25 @@ func (d pipelineActivityDispatcher) resolveActivityToolCredentials(ctx context.C
 		secrets = append(secrets, value)
 	}
 	return out, secrets, nil
+}
+
+type activityChannelTargetContextKey struct{}
+
+type activityChannelTargetContextValue struct {
+	target  ChannelActivityTarget
+	private bool
+}
+
+func withActivityChannelTarget(ctx context.Context, target ChannelActivityTarget, private bool) context.Context {
+	return context.WithValue(ctx, activityChannelTargetContextKey{}, activityChannelTargetContextValue{target: target, private: private})
+}
+
+func activityChannelTargetFromContext(ctx context.Context) (ChannelActivityTarget, bool) {
+	value, ok := ctx.Value(activityChannelTargetContextKey{}).(activityChannelTargetContextValue)
+	if !ok {
+		return ChannelActivityTarget{}, false
+	}
+	return value.target, value.private
 }
 
 func redactActivityError(err error, secrets []string) error {

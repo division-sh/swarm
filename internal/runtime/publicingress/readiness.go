@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 )
 
@@ -29,20 +30,21 @@ type ExposureEvidence struct {
 }
 
 type RegistrationEvidence struct {
-	BindingID          string    `json:"binding_id"`
-	Target             string    `json:"target"`
-	Provider           string    `json:"provider"`
-	Alias              string    `json:"alias"`
-	IntentID           string    `json:"intent_id"`
-	SlotID             string    `json:"slot_id"`
-	CallbackURL        string    `json:"callback_url"`
-	StartupAuthorityID string    `json:"startup_authority_id"`
-	Phase              string    `json:"phase"`
-	Applied            bool      `json:"applied"`
-	CallbackMatched    bool      `json:"callback_matched"`
-	ObservedAt         time.Time `json:"observed_at"`
-	ExpiresAt          time.Time `json:"expires_at"`
-	Failure            string    `json:"failure,omitempty"`
+	BindingID                   string    `json:"binding_id"`
+	Target                      string    `json:"target"`
+	Provider                    string    `json:"provider"`
+	Alias                       string    `json:"alias"`
+	IntentID                    string    `json:"intent_id"`
+	SlotID                      string    `json:"slot_id"`
+	CallbackURL                 string    `json:"callback_url"`
+	StartupAuthorityID          string    `json:"startup_authority_id"`
+	Phase                       string    `json:"phase"`
+	Applied                     bool      `json:"applied"`
+	CallbackMatched             bool      `json:"callback_matched"`
+	ObservedAt                  time.Time `json:"observed_at"`
+	ExpiresAt                   time.Time `json:"expires_at"`
+	Failure                     string    `json:"failure,omitempty"`
+	ChannelActivationGeneration string    `json:"channel_activation_generation,omitempty"`
 }
 
 type Snapshot struct {
@@ -53,6 +55,13 @@ type Snapshot struct {
 	Exposure             *ExposureEvidence      `json:"exposure,omitempty"`
 	Registrations        []RegistrationEvidence `json:"registrations,omitempty"`
 	Failure              string                 `json:"failure,omitempty"`
+}
+
+type ChannelRegistrationCurrentness struct {
+	Exposure             *ExposureEvidence                             `json:"exposure,omitempty"`
+	Registration         RegistrationEvidence                          `json:"registration"`
+	ActivationGeneration channelonboarding.ChannelActivationGeneration `json:"-"`
+	Current              bool                                          `json:"current"`
 }
 
 // registrationProcessSnapshot is replaced as one value. Its maps and states
@@ -149,6 +158,8 @@ func (o *RegistrationSnapshotOwner) replaceSelected(pairs []RegistrationPair) {
 func sameRegistrationSelection(left, right RegistrationPair) bool {
 	return left.BindingID == right.BindingID &&
 		left.PlanGeneration.Diagnostic() == right.PlanGeneration.Diagnostic() &&
+		left.ChannelActivationGeneration.Diagnostic() == right.ChannelActivationGeneration.Diagnostic() &&
+		strings.TrimSpace(left.PrebindingOperationID) == strings.TrimSpace(right.PrebindingOperationID) &&
 		maps.Equal(left.CredentialKeys, right.CredentialKeys) &&
 		left.Target.Selector == right.Target.Selector &&
 		left.Target.BundleHash == right.Target.BundleHash &&
@@ -397,21 +408,71 @@ func (o *ReadinessOwner) Snapshot(now time.Time) Snapshot {
 	return o.evaluate(ctx, now).output
 }
 
-func (o *ReadinessOwner) CallbackCurrent(ctx context.Context, now time.Time, alias, provider, token string) bool {
+// ChannelRegistrationCurrent resolves one exact connected-channel
+// registration from the same evaluated snapshot used by ingress readiness.
+func (o *ReadinessOwner) ChannelRegistrationCurrent(ctx context.Context, now time.Time, bindingID, target, provider string) (ChannelRegistrationCurrentness, bool) {
 	if o == nil {
-		return false
+		return ChannelRegistrationCurrentness{}, false
+	}
+	bindingID = strings.TrimSpace(bindingID)
+	target = strings.TrimSpace(target)
+	provider = strings.TrimSpace(provider)
+	evaluated := o.evaluate(ctx, now)
+	var result ChannelRegistrationCurrentness
+	found := false
+	for key, state := range evaluated.snapshot.registrations {
+		if state.Pair.BindingID != bindingID || state.Pair.Target.Selector != target || state.Pair.Target.Provider != provider {
+			continue
+		}
+		if found {
+			return ChannelRegistrationCurrentness{}, false
+		}
+		found = true
+		result.Registration = state.evidence(evaluated.current[key])
+		result.ActivationGeneration = state.Pair.ChannelActivationGeneration
+		result.Current = evaluated.current[key]
+	}
+	if !found {
+		return ChannelRegistrationCurrentness{}, false
+	}
+	if evaluated.output.Exposure != nil {
+		copy := *evaluated.output.Exposure
+		result.Exposure = &copy
+	}
+	return result, o.registration.currentRevision(evaluated.snapshot.revision)
+}
+
+func (o *ReadinessOwner) CallbackCurrent(ctx context.Context, now time.Time, alias, provider, token string) bool {
+	_, current := o.CallbackTargetCurrent(ctx, now, alias, provider, token)
+	return current
+}
+
+// CallbackTargetCurrent returns the exact selected registration target only
+// when the callback token and every registration currentness fence still hold.
+func (o *ReadinessOwner) CallbackTargetCurrent(ctx context.Context, now time.Time, alias, provider, token string) (RegistrationTarget, bool) {
+	if o == nil {
+		return RegistrationTarget{}, false
 	}
 	evaluated := o.evaluate(ctx, now)
 	alias = strings.TrimSpace(alias)
 	provider = strings.TrimSpace(provider)
 	token = strings.TrimSpace(token)
+	var selected RegistrationTarget
+	found := false
 	for key, state := range evaluated.snapshot.registrations {
 		if !evaluated.current[key] || state.Pair.Target.Alias != alias || state.Pair.Target.Provider != provider || state.LastVerified == nil {
 			continue
 		}
 		if subtle.ConstantTimeCompare([]byte(state.LastVerified.CallbackToken), []byte(token)) == 1 {
-			return o.registration.currentRevision(evaluated.snapshot.revision)
+			if found {
+				return RegistrationTarget{}, false
+			}
+			selected = state.Pair.Target
+			found = true
 		}
 	}
-	return false
+	if !found || !o.registration.currentRevision(evaluated.snapshot.revision) {
+		return RegistrationTarget{}, false
+	}
+	return selected, true
 }

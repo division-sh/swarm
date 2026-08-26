@@ -58,6 +58,5 @@ func serveTestBundlePackCandidate(t testing.TB, bundle *runtimecontracts.Workflo
 		installedSubjects: subjects,
 		inventoryDigest:   bundle.PackInventory.Digest(),
 		channelPlans:      loaded.Channels.Plans,
-		channelBindings:   loaded.Channels.Bindings,
 	}
 }

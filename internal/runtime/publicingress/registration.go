@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -44,11 +45,13 @@ type RegistrationTarget struct {
 }
 
 type RegistrationPair struct {
-	BindingID      string
-	PlanGeneration plangeneration.Generation
-	Registration   packs.CompiledChannelRegistration
-	CredentialKeys map[string]string
-	Target         RegistrationTarget
+	BindingID                   string
+	PlanGeneration              plangeneration.Generation
+	ChannelActivationGeneration channelonboarding.ChannelActivationGeneration
+	PrebindingOperationID       string
+	Registration                packs.CompiledChannelRegistration
+	CredentialKeys              map[string]string
+	Target                      RegistrationTarget
 }
 
 type RegistrationControllerOptions struct {
@@ -66,6 +69,18 @@ type ProviderRegistrationController struct {
 	opts        RegistrationControllerOptions
 	reconcileMu sync.Mutex
 	snapshot    *RegistrationSnapshotOwner
+}
+
+type currentRegistrationTargetContextKey struct{}
+
+// CurrentRegistrationTarget returns the exact registration target selected by
+// Handler after callback-token and registration-currentness admission.
+func CurrentRegistrationTarget(ctx context.Context) (RegistrationTarget, bool) {
+	if ctx == nil {
+		return RegistrationTarget{}, false
+	}
+	target, ok := ctx.Value(currentRegistrationTargetContextKey{}).(RegistrationTarget)
+	return target, ok
 }
 
 type registrationPhase string
@@ -264,7 +279,9 @@ func (c *ProviderRegistrationController) prepareStartupHandoffLocked(ctx context
 
 func (c *ProviderRegistrationController) admitAndIdentify(ctx context.Context, exposure Generation, pair RegistrationPair) (admittedPair, error) {
 	key := pairKey(pair)
-	if key == "" || !pair.PlanGeneration.Valid() || !pair.Target.AdmissionPlanGeneration.Valid() || strings.TrimSpace(pair.Target.BundleHash) == "" {
+	activationAuthority := pair.ChannelActivationGeneration.Valid()
+	prebindingAuthority := strings.TrimSpace(pair.PrebindingOperationID) != ""
+	if key == "" || !pair.PlanGeneration.Valid() || activationAuthority == prebindingAuthority || !pair.Target.AdmissionPlanGeneration.Valid() || strings.TrimSpace(pair.Target.BundleHash) == "" {
 		return admittedPair{}, fmt.Errorf("provider registration pair identity is incomplete")
 	}
 	if pair.Registration.Provider() != strings.TrimSpace(pair.Target.Provider) {
@@ -594,6 +611,13 @@ func (c *ProviderRegistrationController) CallbackCurrent(ctx context.Context, al
 	return c != nil && c.opts.Readiness.CallbackCurrent(ctx, c.opts.Now().UTC(), alias, provider, token)
 }
 
+func (c *ProviderRegistrationController) callbackTargetCurrent(ctx context.Context, alias, provider, token string) (RegistrationTarget, bool) {
+	if c == nil {
+		return RegistrationTarget{}, false
+	}
+	return c.opts.Readiness.CallbackTargetCurrent(ctx, c.opts.Now().UTC(), alias, provider, token)
+}
+
 func (c *ProviderRegistrationController) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		parts := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
@@ -602,10 +626,12 @@ func (c *ProviderRegistrationController) Handler(next http.Handler) http.Handler
 			return
 		}
 		managed := c.snapshot.routeSelected(parts[1], parts[2])
-		if !managed || !c.CallbackCurrent(request.Context(), parts[1], parts[2], request.URL.Query().Get("swarm_callback_generation")) {
+		target, current := c.callbackTargetCurrent(request.Context(), parts[1], parts[2], request.URL.Query().Get("swarm_callback_generation"))
+		if !managed || !current {
 			http.NotFound(response, request)
 			return
 		}
+		request = request.WithContext(context.WithValue(request.Context(), currentRegistrationTargetContextKey{}, target))
 		next.ServeHTTP(response, request)
 	})
 }
@@ -656,6 +682,9 @@ func (s registrationState) evidence(current bool) RegistrationEvidence {
 	evidence := RegistrationEvidence{
 		BindingID: s.Pair.BindingID, Target: s.Pair.Target.Selector, Provider: s.Pair.Target.Provider, Alias: s.Pair.Target.Alias,
 		Phase: string(s.Phase), Failure: s.Failure, CallbackMatched: current,
+	}
+	if s.Pair.ChannelActivationGeneration.Valid() {
+		evidence.ChannelActivationGeneration = s.Pair.ChannelActivationGeneration.Diagnostic()
 	}
 	intent := s.activeIntent()
 	if intent == nil {
@@ -747,10 +776,12 @@ func registrationBaseFingerprint(exposure Generation, pair RegistrationPair, pro
 			"generation": pair.Target.Generation, "publication_sequence": pair.Target.PublicationSequence,
 			"admission_plan_generation": pair.Target.AdmissionPlanGeneration.Diagnostic(),
 		},
-		"plan_generation":      pair.PlanGeneration.Diagnostic(),
-		"slot_id":              slotID,
-		"provider_credentials": providerEvidence,
-		"signing_credential":   map[string]any{"key": signing.Key, "source": signing.Source, "epoch": signing.Epoch()},
+		"plan_generation":               pair.PlanGeneration.Diagnostic(),
+		"channel_activation_generation": pair.ChannelActivationGeneration.Diagnostic(),
+		"prebinding_operation_id":       strings.TrimSpace(pair.PrebindingOperationID),
+		"slot_id":                       slotID,
+		"provider_credentials":          providerEvidence,
+		"signing_credential":            map[string]any{"key": signing.Key, "source": signing.Source, "epoch": signing.Epoch()},
 	})
 	if err != nil {
 		return "", err

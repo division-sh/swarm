@@ -12,6 +12,7 @@ import (
 	storeactivityjournal "github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	storeactivityresult "github.com/division-sh/swarm/internal/store/internal/backend/activityresult"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
+	storechannelonboarding "github.com/division-sh/swarm/internal/store/internal/backend/channelonboarding"
 	storedecision "github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	storeeffect "github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
@@ -78,6 +79,7 @@ type PostgresStore struct {
 	genericSchedulePostgresOwner   *storegenericschedule.PostgresOwner
 	operatorChannelPostgresOwner   *storeoperatorchannel.PostgresOwner
 	durableDataOwner               *storedurabledata.Owner
+	channelOnboardingPostgresOwner *storechannelonboarding.PostgresOwner
 
 	backend               *postgresbackend.Backend
 	runBundles            *storerunbundle.Postgres

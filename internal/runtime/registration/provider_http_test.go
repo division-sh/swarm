@@ -13,6 +13,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/effects/effecttest"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/testutil/packfixture"
 	"github.com/google/uuid"
 )
@@ -21,6 +22,96 @@ type registrationRoundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f registrationRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
 	return f(request)
+}
+
+type channelConfirmationHarness struct {
+	*effecttest.Harness
+}
+
+func (h *channelConfirmationHarness) IsExternalEffectAuthorityCurrent(_ context.Context, authority runtimeeffects.Authority) (bool, error) {
+	return authority.Kind == runtimeeffects.AuthorityChannelConfirmation && authority.Valid(), nil
+}
+
+func channelConfirmationTestContext(harness *channelConfirmationHarness, operationID string) context.Context {
+	planGeneration, err := plangeneration.FromCanonicalValue(map[string]string{"test": "channel-confirmation"})
+	if err != nil {
+		panic(err)
+	}
+	authority := runtimeeffects.Authority{
+		Kind: runtimeeffects.AuthorityChannelConfirmation, ID: operationID,
+		ExecutionOwner: "channel-onboarding:test", LeaseExpiresAt: time.Now().UTC().Add(time.Minute), FenceGeneration: 7,
+		ExecutionMode: runtimeeffects.ExecutionModeLive,
+		ChannelConfirmation: runtimeeffects.ChannelConfirmationAuthority{
+			EffectOperationID: operationID, OnboardingOperationID: uuid.NewString(), OnboardingRevision: 4,
+			ActivationID: uuid.NewString(), ActivationRevision: 2, BindingRevision: 3, PrincipalID: uuid.NewString(),
+			BundleHash: "bundle-v1:sha256:" + strings.Repeat("a", 64), ContextPublicationGeneration: 7, PlanGeneration: planGeneration,
+		},
+	}
+	ctx := runtimeeffects.WithExecutionMode(context.Background(), runtimeeffects.ExecutionModeLive)
+	ctx = runtimeeffects.WithController(ctx, runtimeeffects.NewController(harness).WithExecutionPosture(executionposture.Live))
+	return runtimeeffects.WithAuthority(ctx, authority)
+}
+
+func TestChannelConfirmationEffectOutcomes(t *testing.T) {
+	tool := packfixture.ConnectorTool(t, "telegram", "telegram.send_interactive").Tool
+	input := map[string]any{
+		"chat_id": "42", "text": "Swarm channel connected.",
+		"reply_markup": map[string]any{"inline_keyboard": []any{}},
+	}
+	credentials := map[string]any{"telegram_bot_token": "bot-secret"}
+
+	t.Run("terminal provider success", func(t *testing.T) {
+		harness := &channelConfirmationHarness{Harness: effecttest.New()}
+		operationID := uuid.NewString()
+		executor := HTTPExecutor{Client: &http.Client{Transport: registrationRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+			if err := harness.RequireState("channel_confirmation", runtimeeffects.StateLaunched); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(request.URL.String(), "bot-secret") {
+				t.Fatalf("provider request omitted admitted credential: %s", request.URL)
+			}
+			return registrationResponse(http.StatusOK, `{"ok":true,"result":{"message_id":1}}`), nil
+		})}}
+		result, err := executor.DeliverChannelConfirmation(channelConfirmationTestContext(harness, operationID), "telegram.send_interactive", tool, input, credentials, map[string]string{"activation_id": uuid.NewString()})
+		if err != nil || result.OperationID != operationID {
+			t.Fatalf("DeliverChannelConfirmation = %#v, %v", result, err)
+		}
+		if err := harness.RequireState("channel_confirmation", runtimeeffects.StateSettled); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("acknowledgment loss is uncertain", func(t *testing.T) {
+		harness := &channelConfirmationHarness{Harness: effecttest.New()}
+		operationID := uuid.NewString()
+		executor := HTTPExecutor{Client: &http.Client{Transport: registrationRoundTripFunc(func(*http.Request) (*http.Response, error) {
+			return nil, errors.New("transport lost bot-secret")
+		})}}
+		result, err := executor.DeliverChannelConfirmation(channelConfirmationTestContext(harness, operationID), "telegram.send_interactive", tool, input, credentials, nil)
+		if err == nil || result.OperationID != operationID || strings.Contains(err.Error(), "bot-secret") {
+			t.Fatalf("acknowledgment loss = %#v, %v", result, err)
+		}
+		if err := harness.RequireState("channel_confirmation", runtimeeffects.StateOutcomeUncertain); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("launch persistence failure is terminal prelaunch", func(t *testing.T) {
+		harness := &channelConfirmationHarness{Harness: effecttest.New()}
+		harness.MarkErr = errors.New("injected launch persistence failure")
+		operationID := uuid.NewString()
+		executor := HTTPExecutor{Client: &http.Client{Transport: registrationRoundTripFunc(func(*http.Request) (*http.Response, error) {
+			t.Fatal("prelaunch failure reached provider transport")
+			return nil, nil
+		})}}
+		result, err := executor.DeliverChannelConfirmation(channelConfirmationTestContext(harness, operationID), "telegram.send_interactive", tool, input, credentials, nil)
+		if err == nil || result.OperationID != operationID {
+			t.Fatalf("prelaunch failure = %#v, %v", result, err)
+		}
+		if err := harness.RequireState("channel_confirmation", runtimeeffects.StateTerminalFailure); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 func serveRegistrationTestContext(harness *effecttest.Harness, identity string) context.Context {

@@ -231,8 +231,8 @@ func TestRuntimeProjectSupervisorReloadRecompilesAndInstallsChannelPlans(t *test
 	if len(captured.Options.ChannelPlans) != 1 {
 		t.Fatalf("replacement runtime channel plans = %#v", captured.Options.ChannelPlans)
 	}
-	if len(captured.Options.ChannelOutboundBindings) != 1 {
-		t.Fatalf("replacement runtime channel bindings = %#v", captured.Options.ChannelOutboundBindings)
+	if len(captured.Options.DeclaredChannelPublication.Bindings()) != 1 {
+		t.Fatalf("replacement runtime channel bindings = %#v", captured.Options.DeclaredChannelPublication.Bindings())
 	}
 }
 
@@ -1922,7 +1922,6 @@ func newSupervisorForLoadProjectFailureTest(
 			projection, err := runtimepkg.AdmitEffectiveSourceProjection(runtimepkg.EffectiveSourceProjectionRequest{
 				WorkflowModule: deps.Options.WorkflowModule, BundleSourceFact: deps.Options.BundleSourceFact,
 				ProviderTriggerCatalog: deps.Options.ProviderTriggerCatalog, ChannelPlans: deps.Options.ChannelPlans,
-				ChannelOutboundBindings: deps.Options.ChannelOutboundBindings,
 			})
 			if err != nil {
 				return nil, err
@@ -2237,10 +2236,11 @@ flows:
 			t.Fatalf("%s source was not observed", label)
 		}
 		requireProviderTriggerEventSource(t, projectedSource, "inbound.telegram.text_message")
-		for _, toolID := range []string{"telegram.send_message", "channel.ops.deliver"} {
-			if _, declared := projectedSource.ToolEntries()[toolID]; !declared {
-				t.Fatalf("%s source omitted projected tool %q", label, toolID)
-			}
+		if _, declared := projectedSource.ToolEntries()["telegram.send_message"]; !declared {
+			t.Fatalf("%s source omitted projected connector tool", label)
+		}
+		if _, contaminated := projectedSource.ToolEntries()["channel.ops.deliver"]; contaminated {
+			t.Fatalf("%s immutable source retained mutable channel activation tool", label)
 		}
 	}
 	source := supervisor.CurrentSource()
@@ -2265,13 +2265,15 @@ flows:
 		t.Fatal("replacement runtime did not retain the exact effective-source scenario profile catalog")
 	}
 	manager, err := runtimepkg.NewRuntimeContextManager(stores.RunBundleAvailability(), completeServeTestPackContext(t, runtimepkg.BundleContext{
-		BundleSourceFact: replacementFact,
-		BundleIdentity:   replacementIdentity,
-		Source:           source,
-		ContractsRoot:    projectRoot,
-		PlatformSpecPath: cliapp.ResolvePath(cliapp.RepoRoot(), defaultPlatformSpecPath),
-		Runtime:          replacementRuntime,
-		WorkOwner:        replacementRuntime.WorkOccurrence(),
+		BundleSourceFact:           replacementFact,
+		BundleIdentity:             replacementIdentity,
+		Source:                     source,
+		ContractsRoot:              projectRoot,
+		PlatformSpecPath:           cliapp.ResolvePath(cliapp.RepoRoot(), defaultPlatformSpecPath),
+		Runtime:                    replacementRuntime,
+		WorkOwner:                  replacementRuntime.WorkOccurrence(),
+		ChannelPlans:               replacementRuntime.Options.ChannelPlans,
+		DeclaredChannelPublication: replacementRuntime.Options.DeclaredChannelPublication,
 	}))
 	if err != nil {
 		t.Fatalf("NewRuntimeContextManager: %v", err)
@@ -2355,8 +2357,8 @@ flows:
 		loaded.Channels = conflicting
 		return loaded, nil
 	})
-	if _, reloadErr := supervisor.ReloadProject(context.Background(), projectRoot); reloadErr == nil || !strings.Contains(reloadErr.Error(), `duplicate channel runtime tool "channel.ops.`) {
-		t.Fatalf("ReloadProject error = %v, want duplicate projected channel tool rejection", reloadErr)
+	if _, reloadErr := supervisor.ReloadProject(context.Background(), projectRoot); reloadErr == nil || !strings.Contains(reloadErr.Error(), `duplicate declared-only channel activation binding "ops"`) {
+		t.Fatalf("ReloadProject error = %v, want duplicate declared-only activation rejection", reloadErr)
 	}
 	lookup = manager.LookupBundleHashStatus(replacementFact.BundleHash())
 	contextRuntime := (*runtimepkg.Runtime)(nil)

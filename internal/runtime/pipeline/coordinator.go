@@ -9,8 +9,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/providerconnectors"
+	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -78,7 +80,7 @@ type PipelineCoordinator struct {
 	mockConnectorResponses *providerconnectors.MockResponsePlan
 	scenarioProfiles       ScenarioExecutionProfileReader
 	effectiveSource        scenarioexecution.EffectiveSourceIdentity
-	channelActivityTools   map[string]ChannelActivityTarget
+	channelActivations     *runtimechannelactivation.Owner
 	artifactRoot           string
 	bundleSourceFact       runtimecorrelation.BundleSourceFact
 	runBundleAvailability  RunBundleAvailabilityReader
@@ -124,7 +126,7 @@ type PipelineCoordinatorOptions struct {
 	MockConnectorResponses           *providerconnectors.MockResponsePlan
 	ScenarioExecutionProfiles        ScenarioExecutionProfileReader
 	EffectiveSourceIdentity          scenarioexecution.EffectiveSourceIdentity
-	ChannelActivityTools             map[string]ChannelActivityTarget
+	ChannelActivations               *runtimechannelactivation.Owner
 	ArtifactRoot                     string
 	BundleSourceFact                 runtimecorrelation.BundleSourceFact
 	RunBundleAvailability            RunBundleAvailabilityReader
@@ -179,6 +181,36 @@ func (t ChannelActivityTarget) Generation() plangeneration.Generation {
 	return t.value.generation
 }
 
+func (pc *PipelineCoordinator) channelActivityTarget(toolID string, generation channelonboarding.ChannelActivationGeneration) (ChannelActivityTarget, bool, *runtimechannelactivation.Lease, error) {
+	if pc == nil {
+		return ChannelActivityTarget{}, false, nil, nil
+	}
+	if pc.channelActivations == nil {
+		return ChannelActivityTarget{}, false, nil, nil
+	}
+	lease, ok := pc.channelActivations.AcquireActivityOperation(toolID, generation)
+	if !ok {
+		return ChannelActivityTarget{}, false, nil, nil
+	}
+	operation := lease.Operation()
+	identity, err := operation.Binding.RuntimeActivityTarget(operation.Name)
+	if err != nil {
+		lease.Release()
+		return ChannelActivityTarget{}, false, nil, err
+	}
+	tool, err := operation.Binding.OperationTool(operation.Name)
+	if err != nil {
+		lease.Release()
+		return ChannelActivityTarget{}, false, nil, err
+	}
+	target, err := NewChannelActivityTargetWithCredentials(tool, identity.Generation(), identity.CredentialStoreKeys())
+	if err != nil {
+		lease.Release()
+		return ChannelActivityTarget{}, false, nil, err
+	}
+	return target, true, lease, nil
+}
+
 func (t ChannelActivityTarget) CredentialStoreKey(logical string) (string, bool) {
 	if t.value == nil {
 		return "", false
@@ -196,14 +228,6 @@ type WorkflowDeliveryRuntime interface {
 	AcquireDeliveryContinuation(string) (worklifetime.DeliveryContinuation, error)
 	ReleaseDeliveryContinuation(string) error
 	RetainDeliveryContinuation(runtimedelivery.Snapshot) error
-}
-
-func copyActivityToolEntries(in map[string]ChannelActivityTarget) map[string]ChannelActivityTarget {
-	out := make(map[string]ChannelActivityTarget, len(in))
-	for name, target := range in {
-		out[name] = target
-	}
-	return out
 }
 
 func NewPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions) *PipelineCoordinator {
@@ -269,7 +293,7 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 		mockConnectorResponses:           opts.MockConnectorResponses,
 		scenarioProfiles:                 opts.ScenarioExecutionProfiles,
 		effectiveSource:                  opts.EffectiveSourceIdentity,
-		channelActivityTools:             copyActivityToolEntries(opts.ChannelActivityTools),
+		channelActivations:               opts.ChannelActivations,
 		artifactRoot:                     strings.TrimSpace(opts.ArtifactRoot),
 		bundleSourceFact:                 opts.BundleSourceFact,
 		runBundleAvailability:            opts.RunBundleAvailability,

@@ -264,6 +264,7 @@ func approvedReadOnlyHTTPRuntimeMethods() []string {
 		"bundle.agents",
 		"bundle.get",
 		"bundle.list",
+		"channel.onboarding_get",
 		"conversation.fork_list",
 		"conversation.fork_view",
 		"conversation.get_turn",
@@ -300,6 +301,7 @@ func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 		"bundle.agents":              {Params: map[string]any{"bundle_hash": readOnlyProbeBundleHash}, ResultKeys: []string{"agents"}},
 		"bundle.get":                 {Params: map[string]any{"bundle_hash": readOnlyProbeBundleHash}, ResultKeys: []string{"bundle_hash", "content_yaml", "parsed_json", "metadata", "agent_count", "has_data", "data_size_bytes", "ingested_at"}},
 		"bundle.list":                {Params: map[string]any{}, ResultKeys: []string{"bundles"}},
+		"channel.onboarding_get":     {Params: map[string]any{"operation_id": "00000000-0000-4000-8000-000000000207"}, ResultKeys: []string{"operation", "candidate"}},
 		"conversation.fork_list":     {Params: map[string]any{}, ResultKeys: []string{"forks"}},
 		"conversation.fork_view":     {Params: map[string]any{"fork_id": "00000000-0000-0000-0000-000000000301"}, ResultKeys: []string{"fork_id", "source_session_id", "source_agent_id", "fork_point", "created_by", "created_at", "expires_at", "state", "turns"}},
 		"conversation.get_turn":      {Params: map[string]any{"session_id": "sess-1", "turn_id": readOnlyProbeTurnID}, ResultKeys: []string{"session", "turn", "frame"}},
@@ -1002,6 +1004,12 @@ func newReadOnlyRuntimeProbeHandler(t *testing.T, opts testOperatorCapabilities)
 	handlers := map[string]MethodHandler{}
 	for _, methodName := range approvedReadOnlyHTTPRuntimeMethods() {
 		handler, ok := allHandlers[methodName]
+		if methodName == "channel.onboarding_get" {
+			handler = func(context.Context, Request) (any, error) {
+				return readOnlyOnboardingProbeResult(), nil
+			}
+			ok = true
+		}
 		if !ok {
 			t.Fatalf("OperatorReadHandlers missing read-only method %s", methodName)
 		}
@@ -1012,6 +1020,39 @@ func newReadOnlyRuntimeProbeHandler(t *testing.T, opts testOperatorCapabilities)
 		}
 	}
 	return testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: handlers}), calls
+}
+
+func readOnlyOnboardingProbeResult() map[string]any {
+	identity := map[string]any{
+		"interface_ref": "swarm.hitl-channel/v2", "channel_pack_id": "provider.telegram.hitl_channel",
+		"channel_pack_version": "1.0.0", "channel_manifest_hash": "sha256:manifest",
+		"semantic_generation": "sha256:semantic", "selector": "channel-interface-v2:probe",
+	}
+	coordinate := map[string]any{
+		"bundle_hash": readOnlyProbeBundleHash, "bundle_source": "persisted", "bundle_identity": "probe@1.0.0#bundle",
+		"pack_inventory_generation": "sha256:inventory", "context_publication_generation": 1,
+		"plan_generation": "sha256:plan", "target_generation": 1,
+	}
+	return map[string]any{
+		"operation": map[string]any{
+			"operation_id": "00000000-0000-4000-8000-000000000207", "principal_id": "00000000-0000-4000-8000-000000000208",
+			"verb": "connect", "provider": "telegram", "interface": identity, "coordinate": coordinate,
+			"target_selector": "ingress:probe:telegram:telegram", "activation_posture": "webhook_registration",
+			"identity_ceremony": "authenticated_text_challenge", "phase": "preparing", "revision": 1,
+			"save_proof": false, "credential_reservations": []any{map[string]any{"role": "bot_token", "store_key": "telegram_bot_token"}},
+			"credential_admissions": []any{}, "requested_at": "2026-08-25T12:00:00Z", "updated_at": "2026-08-25T12:00:00Z",
+		},
+		"candidate": map[string]any{
+			"provider": "telegram", "interface": identity, "coordinate": coordinate,
+			"target": map[string]any{
+				"selector": "ingress:probe:telegram:telegram", "service_id": "00000000-0000-4000-8000-000000000209",
+				"package_key": "probe", "flow_id": "telegram", "alias": "telegram", "provider": "telegram",
+				"generation": 1, "publication_sequence": 1, "admission_generation": strings.Repeat("a", 64),
+			},
+			"activation_posture": "webhook_registration", "identity_ceremony": "authenticated_text_challenge",
+			"provider_credential_role": "bot_token", "confirmation_operation": "telegram.send_message",
+		},
+	}
 }
 
 func callReadOnlyProbeRPC(t *testing.T, handler *Handler, methodName string, params map[string]any, authHeader string) (int, rpcResponse, string) {

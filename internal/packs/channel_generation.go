@@ -25,6 +25,44 @@ func (p OutboundBindingPlan) Generation() (plangeneration.Generation, error) {
 	return p.structural.Generation()
 }
 
+// ActivationCanonicalValue is the complete behavior-bearing value of one
+// executable channel binding. It is intentionally separate from the
+// structural SatisfactionPlan generation because destinations, credential
+// references, and private execution targets are deployment activation facts.
+func (p OutboundBindingPlan) ActivationCanonicalValue() (map[string]any, error) {
+	structuralGeneration, err := p.structural.Generation()
+	if err != nil {
+		return nil, err
+	}
+	runtimeTools := make(map[string]any, len(p.runtimeTools))
+	for _, toolID := range sortedKeys(p.runtimeTools) {
+		value, err := p.runtimeTools[toolID].CanonicalValue()
+		if err != nil {
+			return nil, fmt.Errorf("channel activation runtime tool %q: %w", toolID, err)
+		}
+		runtimeTools[toolID] = value
+	}
+	privateTargets := make(map[string]any, len(p.activityTargets))
+	for _, operation := range sortedKeys(p.activityTargets) {
+		target := p.activityTargets[operation]
+		privateTargets[operation] = map[string]any{
+			"tool_id":         target.toolID.String(),
+			"plan_generation": target.generation.Diagnostic(),
+			"credential_keys": cloneChannelStringMap(target.credentialKeys),
+		}
+	}
+	return map[string]any{
+		"binding_id":            p.id.String(),
+		"structural_generation": structuralGeneration.Diagnostic(),
+		"destination":           p.destination.Interface(),
+		"requirements":          cloneRequirements(p.requirements),
+		"credential_keys":       cloneChannelStringMap(p.credentialKeys),
+		"registration_target":   strings.TrimSpace(p.registrationTarget),
+		"runtime_tools":         runtimeTools,
+		"private_targets":       privateTargets,
+	}, nil
+}
+
 func compileSatisfactionPlanGeneration(p SatisfactionPlan) (plangeneration.Generation, error) {
 	if err := validateSatisfactionPlanGenerationInputs(p); err != nil {
 		return plangeneration.Generation{}, err
@@ -69,6 +107,18 @@ func compileSatisfactionPlanGeneration(p SatisfactionPlan) (plangeneration.Gener
 	if p.registration != nil {
 		registration = p.registration.generationValue()
 	}
+	var onboarding any
+	if p.onboarding != nil {
+		onboarding = map[string]any{
+			"provider":            p.onboarding.Provider(),
+			"activation":          p.onboarding.ActivationPosture(),
+			"ceremony":            p.onboarding.IdentityCeremony(),
+			"provider_credential": p.onboarding.ProviderCredential(),
+			"signing_credential":  p.onboarding.SigningCredential(),
+			"confirmation":        p.onboarding.ConfirmationOperation(),
+			"connection_health":   p.onboarding.ConnectionHealth(),
+		}
+	}
 	return plangeneration.FromCanonicalValue(map[string]any{
 		"interface_ref":      p.interfaceRef.String(),
 		"channel":            p.channel,
@@ -82,6 +132,7 @@ func compileSatisfactionPlanGeneration(p SatisfactionPlan) (plangeneration.Gener
 		"operations":         operations,
 		"events":             events,
 		"registration":       registration,
+		"onboarding":         onboarding,
 	})
 }
 

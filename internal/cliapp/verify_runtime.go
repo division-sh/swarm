@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
@@ -129,7 +130,7 @@ func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCom
 		projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
 			Source: source, BundleSourceFact: sourceFact,
 			ProviderTriggerCatalog: validationOpts.ProviderTriggerCatalog,
-			ChannelPlans:           validationOpts.ChannelPlans, ChannelOutboundBindings: validationOpts.ChannelOutboundBindings,
+			ChannelPlans:           validationOpts.ChannelPlans,
 		})
 		if err != nil {
 			if errOut != nil {
@@ -331,7 +332,10 @@ func verifyWorkflowContractValidationOptions(repo, configPath string, source sem
 	}
 	opts.ProviderTriggerCatalog = packRuntime.ProviderTriggers.Catalog
 	opts.ChannelPlans = packRuntime.Channels.Plans
-	opts.ChannelOutboundBindings = packRuntime.Channels.Bindings
+	opts.ChannelActivationPublication, err = channelonboarding.NewDeclaredOnlyChannelActivationPublication(packRuntime.Channels.Bindings)
+	if err != nil {
+		return runtime.WorkflowContractValidationOptions{}, fmt.Errorf("compile declared-only channel activation publication: %w", err)
+	}
 	return opts, nil
 }
 

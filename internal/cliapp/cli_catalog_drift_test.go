@@ -493,6 +493,8 @@ func TestPreDispatchValidatorsNormalizeRootPersistentFlags(t *testing.T) {
 		{"retired trace log-level", []string{"trace"}, []string{"--log-level", "debug"}, true},
 		// api-connection flags, same matrix
 		{"run list api-server", []string{"run", "list"}, []string{"--api-server", "http://127.0.0.1:9"}, true},
+		{"channel connect api-server", []string{"channel", "connect", "telegram"}, []string{"--api-server", "http://127.0.0.1:9"}, true},
+		{"channel list api-server", []string{"channel", "list"}, []string{"--api-server", "http://127.0.0.1:9"}, true},
 		{"retired fork api-server", []string{"fork"}, []string{"--api-server", "http://127.0.0.1:9"}, true},
 		{"bare run api-server", []string{"run"}, []string{"--api-server", "http://127.0.0.1:9"}, true},
 		// misplacement must still fail closed regardless of root flags

@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	"github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/google/uuid"
 )
 
@@ -24,6 +25,7 @@ const (
 	AuthorityConversationForkChat AuthorityKind = "conversation_fork_chat"
 	AuthorityStartupProbe         AuthorityKind = "startup_probe"
 	AuthorityServeRegistration    AuthorityKind = "serve_registration"
+	AuthorityChannelConfirmation  AuthorityKind = "channel_confirmation"
 )
 
 type UsageTargetKind string
@@ -173,20 +175,34 @@ type ServeRegistrationAuthority struct {
 	StartupStateVersion uint64
 }
 
+type ChannelConfirmationAuthority struct {
+	EffectOperationID            string
+	OnboardingOperationID        string
+	OnboardingRevision           int64
+	ActivationID                 string
+	ActivationRevision           int64
+	BindingRevision              int64
+	PrincipalID                  string
+	BundleHash                   string
+	ContextPublicationGeneration uint64
+	PlanGeneration               plangeneration.Generation
+}
+
 type Authority struct {
-	Kind              AuthorityKind
-	ID                string
-	Normal            LifecycleToken
-	SelectedFork      SelectedContractForkAuthority
-	ForkChat          ConversationForkChatAuthority
-	StartupProbe      StartupProbeAuthority
-	ServeRegistration ServeRegistrationAuthority
-	ExecutionOwner    string
-	LeaseExpiresAt    time.Time
-	FenceGeneration   uint64
-	Target            UsageTarget
-	BudgetScopes      []BudgetAdmissionScope
-	ExecutionMode     ExecutionMode
+	Kind                AuthorityKind
+	ID                  string
+	Normal              LifecycleToken
+	SelectedFork        SelectedContractForkAuthority
+	ForkChat            ConversationForkChatAuthority
+	StartupProbe        StartupProbeAuthority
+	ServeRegistration   ServeRegistrationAuthority
+	ChannelConfirmation ChannelConfirmationAuthority
+	ExecutionOwner      string
+	LeaseExpiresAt      time.Time
+	FenceGeneration     uint64
+	Target              UsageTarget
+	BudgetScopes        []BudgetAdmissionScope
+	ExecutionMode       ExecutionMode
 }
 
 type ExecutionMode = executionmode.Mode
@@ -229,6 +245,13 @@ func (a Authority) Valid() bool {
 	case AuthorityServeRegistration:
 		return validUUIDs(a.ServeRegistration.IntentID, a.ServeRegistration.StartupAuthorityID) &&
 			a.ID == strings.TrimSpace(a.ServeRegistration.IntentID) && a.ServeRegistration.StartupStateVersion > 0
+	case AuthorityChannelConfirmation:
+		confirmation := a.ChannelConfirmation
+		return validUUIDs(confirmation.EffectOperationID, confirmation.OnboardingOperationID, confirmation.ActivationID, confirmation.PrincipalID) &&
+			a.ID == strings.TrimSpace(confirmation.EffectOperationID) && confirmation.OnboardingRevision > 0 &&
+			confirmation.ActivationRevision > 0 && confirmation.BindingRevision > 0 &&
+			confirmation.ContextPublicationGeneration == a.FenceGeneration &&
+			nonEmpty(confirmation.BundleHash) && confirmation.PlanGeneration.Valid()
 	default:
 		return false
 	}
@@ -240,7 +263,7 @@ func (a Authority) Generation() uint64 {
 		return a.Normal.Generation
 	case AuthoritySelectedContractFork:
 		return a.SelectedFork.Generation
-	case AuthorityConversationForkChat, AuthorityServeRegistration:
+	case AuthorityConversationForkChat, AuthorityServeRegistration, AuthorityChannelConfirmation:
 		return a.FenceGeneration
 	case AuthorityStartupProbe:
 		return a.FenceGeneration
@@ -304,6 +327,18 @@ func (a Authority) Evidence() map[string]any {
 		evidence["intent_id"] = a.ServeRegistration.IntentID
 		evidence["startup_authority_id"] = a.ServeRegistration.StartupAuthorityID
 		evidence["startup_state_version"] = a.ServeRegistration.StartupStateVersion
+	case AuthorityChannelConfirmation:
+		confirmation := a.ChannelConfirmation
+		evidence["effect_operation_id"] = confirmation.EffectOperationID
+		evidence["onboarding_operation_id"] = confirmation.OnboardingOperationID
+		evidence["onboarding_revision"] = confirmation.OnboardingRevision
+		evidence["activation_id"] = confirmation.ActivationID
+		evidence["activation_revision"] = confirmation.ActivationRevision
+		evidence["binding_revision"] = confirmation.BindingRevision
+		evidence["principal_id"] = confirmation.PrincipalID
+		evidence["bundle_hash"] = confirmation.BundleHash
+		evidence["context_publication_generation"] = confirmation.ContextPublicationGeneration
+		evidence["plan_generation"] = confirmation.PlanGeneration.Diagnostic()
 	}
 	return evidence
 }

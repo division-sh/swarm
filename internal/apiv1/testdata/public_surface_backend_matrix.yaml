@@ -322,6 +322,20 @@ mutating_api_parity_ledger:
       SQLite and explicit Postgres, including selected bundle-scope validation,
       idempotency replay, persisted entity state/mutation rows on an event-created
       run, and generic settlement postconditions.
+  - method: channel.onboarding_start
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: connected_channel_onboarding_lifecycle
+    proof_refs:
+      - {kind: go_test, name: TestChannelConnectTelegramFirstUserJourney}
+    notes: Exact-context durable onboarding reserves before credentials, registration, identity, activation, or confirmation effects.
+  - method: channel.onboarding_retry
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: connected_channel_onboarding_retry_lifecycle
+    proof_refs:
+      - {kind: go_test, name: TestChannelConnectTelegramFirstUserJourney}
+    notes: Retry resumes the selected-store operation from settled evidence without rotating credentials or blindly resending uncertain effects.
   - method: channel.connect
     classification: dual_backend_served_proof
     backends: [default_sqlite, explicit_postgres]
@@ -365,6 +379,13 @@ mutating_api_parity_ledger:
       - {kind: go_test, name: TestServedParityHarnessOperatorChannelLifecycle}
     notes: Machine-proof revocation is exact-interface and expected-revision fenced with revoked readback.
 operator_read_api_parity_ledger:
+  - method: channel.onboarding_get
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - kind: go_test
+        name: TestChannelConnectTelegramFirstUserJourney
+        backends: [default_sqlite, explicit_postgres]
   - method: channel.list
     classification: dual_backend_api_proof
     backends: [default_sqlite, explicit_postgres]

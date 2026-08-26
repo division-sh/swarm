@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
@@ -226,7 +227,12 @@ func appendChannelCapabilitySubjects(report *LocalPreflightReport, load ChannelP
 		}
 		subjects = append(subjects, subject)
 	}
-	for _, binding := range load.Bindings {
+	publication, err := channelonboarding.NewDeclaredOnlyChannelActivationPublication(load.Bindings)
+	if err != nil {
+		report.add(localPreflightProviderPackPrerequisite, "channel_outbound_surface_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the outbound channel binding or connector credentials")
+		return
+	}
+	for _, binding := range publication.Bindings() {
 		subject, err := binding.CapabilitySubject()
 		if err != nil {
 			report.add(localPreflightProviderPackPrerequisite, "channel_outbound_surface_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix the outbound channel binding or connector credentials")

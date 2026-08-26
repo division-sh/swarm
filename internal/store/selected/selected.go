@@ -12,6 +12,7 @@ import (
 
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/bundlecatalog"
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime"
@@ -78,6 +79,7 @@ type requiredPorts struct {
 	pinger                 apiv1.Pinger
 	authorActivity         runtimeauthoractivity.Reader
 	operatorChannels       operatorchannel.Store
+	channelOnboarding      channelonboarding.Store
 	startupOwnership       runtimestartupownership.Store
 	runQuiescence          runtimerunquiescence.ServeAbandonStore
 	mailboxAPI             apiv1.MailboxAPIStore
@@ -296,7 +298,7 @@ func composePostgres(selected *private.PostgresStore) (*Owner, error) {
 		},
 		required: requiredPorts{
 			schema: selected, workspace: selected, pinger: selected, authorActivity: selected,
-			operatorChannels: selected, startupOwnership: selected, runQuiescence: selected,
+			operatorChannels: selected, channelOnboarding: selected, startupOwnership: selected, runQuiescence: selected,
 			mailboxAPI: selected, mailboxNoticeAck: selected, observability: selected,
 			agentUsage: selected, agentDeliveryLifecycle: selected, idempotency: selected,
 			runs: selected, entities: selected, agents: selected, conversations: selected,
@@ -354,7 +356,7 @@ func composeSQLite(selected *private.SQLiteRuntimeStore) (*Owner, error) {
 		},
 		required: requiredPorts{
 			schema: selected, workspace: selected, pinger: selected, authorActivity: selected,
-			operatorChannels: selected, startupOwnership: selected, runQuiescence: selected,
+			operatorChannels: selected, channelOnboarding: selected, startupOwnership: selected, runQuiescence: selected,
 			mailboxAPI: selected, mailboxNoticeAck: selected, observability: selected,
 			agentUsage: selected, agentDeliveryLifecycle: selected, idempotency: selected,
 			runs: selected, entities: selected, agents: selected, conversations: selected,

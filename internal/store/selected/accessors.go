@@ -5,6 +5,7 @@ import (
 
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/bundlecatalog"
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime"
@@ -36,6 +37,7 @@ func (o *Owner) WorkspaceLookup() workspace.Lookup               { return o.requ
 func (o *Owner) Pinger() apiv1.Pinger                            { return o.required.pinger }
 func (o *Owner) AuthorActivity() runtimeauthoractivity.Reader    { return o.required.authorActivity }
 func (o *Owner) OperatorChannels() operatorchannel.Store         { return o.required.operatorChannels }
+func (o *Owner) ChannelOnboarding() channelonboarding.Store      { return o.required.channelOnboarding }
 func (o *Owner) StartupOwnership() runtimestartupownership.Store { return o.required.startupOwnership }
 func (o *Owner) RunQuiescence() runtimerunquiescence.ServeAbandonStore {
 	return o.required.runQuiescence

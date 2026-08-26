@@ -1,4 +1,10 @@
 provider: telegram
+onboarding:
+  activation: webhook_registration
+  ceremony: authenticated_text_challenge
+  provider_credential: telegram_bot_token
+  signing_credential: webhook_signing_secret
+  confirmation: deliver
 registration:
   slot:
     namespace: bot_webhook

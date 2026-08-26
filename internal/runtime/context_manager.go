@@ -9,9 +9,11 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
+	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -32,20 +34,24 @@ type RunBundleAvailabilityReader interface {
 }
 
 type BundleContext struct {
-	BundleSourceFact          runtimecorrelation.BundleSourceFact
-	BundleIdentity            runtimecontracts.BundleIdentity
-	Source                    semanticview.Source
-	ContractsRoot             string
-	PlatformSpecPath          string
-	Runtime                   *Runtime
-	WorkOwner                 *worklifetime.RuntimeOccurrence
-	WorkspaceScopeKey         string
-	StandingTargets           []StandingTarget
-	ProviderTriggerGeneration triggergeneration.Generation
-	InstalledTriggerSubjects  []packs.Subject
-	PackInventoryDigest       string
-	EffectiveSourceIdentity   scenarioexecution.EffectiveSourceIdentity
-	ScenarioProfileCatalog    *scenarioexecution.Catalog
+	BundleSourceFact            runtimecorrelation.BundleSourceFact
+	BundleIdentity              runtimecontracts.BundleIdentity
+	PublicationGeneration       uint64
+	Source                      semanticview.Source
+	ContractsRoot               string
+	PlatformSpecPath            string
+	Runtime                     *Runtime
+	WorkOwner                   *worklifetime.RuntimeOccurrence
+	WorkspaceScopeKey           string
+	StandingTargets             []StandingTarget
+	ProviderTriggerGeneration   triggergeneration.Generation
+	InstalledTriggerSubjects    []packs.Subject
+	PackInventoryDigest         string
+	ChannelPlans                []packs.SatisfactionPlan
+	DeclaredChannelPublication  channelonboarding.ChannelActivationPublication
+	ChannelActivationGeneration channelonboarding.ChannelActivationGeneration
+	EffectiveSourceIdentity     scenarioexecution.EffectiveSourceIdentity
+	ScenarioProfileCatalog      *scenarioexecution.Catalog
 }
 
 type RuntimeContextState string
@@ -68,6 +74,7 @@ func (c BundleContext) normalized() BundleContext {
 	c.WorkspaceScopeKey = strings.TrimSpace(c.WorkspaceScopeKey)
 	c.PackInventoryDigest = strings.TrimSpace(c.PackInventoryDigest)
 	c.InstalledTriggerSubjects = packs.CloneSubjects(c.InstalledTriggerSubjects)
+	c.ChannelPlans = append([]packs.SatisfactionPlan(nil), c.ChannelPlans...)
 	if len(c.StandingTargets) > 0 {
 		targets := make([]StandingTarget, 0, len(c.StandingTargets))
 		for _, target := range c.StandingTargets {
@@ -430,6 +437,7 @@ type RuntimeContextManager struct {
 	primaryBundleHash          string
 	capabilitySubjects         []packs.Subject
 	capabilityRevision         uint64
+	nextPublicationGeneration  uint64
 	suppressedStandingServices map[string]struct{}
 }
 
@@ -533,6 +541,8 @@ func (m *RuntimeContextManager) register(contextDef BundleContext, activateOccur
 	if existing, incoming, alias, ok := m.duplicateLoadedIngressAliasLocked(contextDef); ok {
 		return fmt.Errorf("duplicate standing ingress alias %q across loaded BundleContexts: existing %s; incoming %s; rename one package flow ingress alias", alias, runtimeContextBundleLabel(existing), runtimeContextBundleLabel(incoming))
 	}
+	m.nextPublicationGeneration++
+	contextDef.PublicationGeneration = m.nextPublicationGeneration
 	copied := contextDef
 	runtimeOwner := copied.Runtime
 	workOwner := copied.WorkOwner
@@ -690,6 +700,29 @@ func validateRuntimeContextDefinition(contextDef BundleContext) (BundleContext, 
 	if contextDef.Runtime.Bus == nil {
 		return BundleContext{}, fmt.Errorf("runtime context %s event bus is required", bundleHash)
 	}
+	if !equalRuntimeContextSlice(contextDef.ChannelPlans, contextDef.Runtime.Options.ChannelPlans) {
+		return BundleContext{}, fmt.Errorf("runtime context %s channel plans do not belong to runtime", bundleHash)
+	}
+	runtimeDeclaredPublication := contextDef.Runtime.Options.DeclaredChannelPublication
+	if !runtimeDeclaredPublication.Generation().Valid() {
+		emptyPublication, emptyErr := channelonboarding.NewDeclaredOnlyChannelActivationPublication(nil)
+		if emptyErr != nil {
+			return BundleContext{}, fmt.Errorf("runtime context %s empty declared-only channel publication: %w", bundleHash, emptyErr)
+		}
+		runtimeDeclaredPublication = emptyPublication
+	}
+	if !contextDef.DeclaredChannelPublication.Generation().Valid() {
+		contextDef.DeclaredChannelPublication = runtimeDeclaredPublication
+	}
+	if err := contextDef.DeclaredChannelPublication.Validate(); err != nil {
+		return BundleContext{}, fmt.Errorf("runtime context %s declared-only channel publication is invalid: %w", bundleHash, err)
+	}
+	if contextDef.DeclaredChannelPublication.Mode() != channelonboarding.ChannelActivationPublicationDeclaredOnly {
+		return BundleContext{}, fmt.Errorf("runtime context %s channel declaration publication must use declared-only mode", bundleHash)
+	}
+	if !contextDef.DeclaredChannelPublication.Generation().Equal(runtimeDeclaredPublication.Generation()) {
+		return BundleContext{}, fmt.Errorf("runtime context %s declared-only channel publication does not belong to runtime", bundleHash)
+	}
 	if contextDef.WorkOwner == nil {
 		return BundleContext{}, fmt.Errorf("runtime context %s work owner is required", bundleHash)
 	}
@@ -736,6 +769,13 @@ func validateRuntimeContextDefinition(contextDef BundleContext) (BundleContext, 
 		return BundleContext{}, err
 	}
 	return contextDef, nil
+}
+
+func equalRuntimeContextSlice[T any](left, right []T) bool {
+	if len(left) == 0 && len(right) == 0 {
+		return true
+	}
+	return reflect.DeepEqual(left, right)
 }
 
 func validateRuntimeContextStandingTargets(contextDef BundleContext) error {
@@ -1108,6 +1148,66 @@ func (m *RuntimeContextManager) LoadedContexts() []BundleContext {
 		out = append(out, *entry.context)
 	}
 	return out
+}
+
+func (m *RuntimeContextManager) ChannelActivationPublication(bundleHash string, publicationGeneration uint64) (channelonboarding.ChannelActivationPublication, bool, error) {
+	lease, current, err := m.AcquireChannelActivationPublication(bundleHash, publicationGeneration)
+	if err != nil || !current {
+		return channelonboarding.ChannelActivationPublication{}, current, err
+	}
+	defer lease.Release()
+	publication, err := channelonboarding.NewChannelActivationPublication(lease.Activations())
+	return publication, err == nil, err
+}
+
+func (m *RuntimeContextManager) AcquireChannelActivationPublication(bundleHash string, publicationGeneration uint64) (*runtimechannelactivation.Lease, bool, error) {
+	if m == nil || strings.TrimSpace(bundleHash) == "" || publicationGeneration == 0 {
+		return nil, false, fmt.Errorf("runtime context channel activation coordinate is required")
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	entry := m.contexts[strings.TrimSpace(bundleHash)]
+	if !runtimeContextEntryLoaded(entry) || entry.context == nil || entry.runtime == nil || entry.runtime.ChannelActivations == nil {
+		return nil, false, nil
+	}
+	if entry.context.PublicationGeneration != publicationGeneration {
+		return nil, false, nil
+	}
+	lease, available := entry.runtime.ChannelActivations.AcquirePresentation()
+	if !available {
+		return nil, false, nil
+	}
+	if !entry.context.ChannelActivationGeneration.Equal(lease.Generation()) {
+		lease.Release()
+		return nil, false, fmt.Errorf("runtime context %s channel activation generation contradicts its owner", bundleHash)
+	}
+	return lease, true, nil
+}
+
+// ReplaceChannelActivations publishes an exact executable activation snapshot
+// only to the still-current runtime-context publication that owns it.
+func (m *RuntimeContextManager) ReplaceChannelActivations(bundleHash string, publicationGeneration uint64, publication channelonboarding.ChannelActivationPublication) error {
+	return m.ReplaceChannelActivationsContext(context.Background(), bundleHash, publicationGeneration, publication)
+}
+
+func (m *RuntimeContextManager) ReplaceChannelActivationsContext(ctx context.Context, bundleHash string, publicationGeneration uint64, publication channelonboarding.ChannelActivationPublication) error {
+	if m == nil || strings.TrimSpace(bundleHash) == "" || publicationGeneration == 0 {
+		return fmt.Errorf("runtime context channel activation coordinate is required")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	entry := m.contexts[strings.TrimSpace(bundleHash)]
+	if entry == nil || entry.context == nil || entry.runtime == nil || entry.state != RuntimeContextStateLoaded {
+		return fmt.Errorf("runtime context %s is not loaded for channel activation replacement", bundleHash)
+	}
+	if entry.context.PublicationGeneration != publicationGeneration {
+		return fmt.Errorf("runtime context %s publication changed before channel activation replacement", bundleHash)
+	}
+	if err := entry.runtime.ReplaceChannelActivationsContext(ctx, publication); err != nil {
+		return err
+	}
+	entry.context.ChannelActivationGeneration = publication.Generation()
+	return nil
 }
 
 func (m *RuntimeContextManager) acquireEntryLocked(ctx context.Context, entry *runtimeContextEntry) (*RuntimeContextUse, error) {
@@ -1947,6 +2047,8 @@ func (m *RuntimeContextManager) PrepareBundleHashReplacementPublication(existing
 	if entry == nil || entry.state != RuntimeContextStateUnloaded || entry.cause != RuntimeContextCauseReplacing {
 		return nil, fmt.Errorf("runtime context %s is not unavailable for replacement", existingHash)
 	}
+	m.nextPublicationGeneration++
+	contextDef.PublicationGeneration = m.nextPublicationGeneration
 	publication, err := m.prepareReplacementPublicationLocked(existingHash, contextDef, entry)
 	if err != nil {
 		return nil, err
@@ -1981,6 +2083,10 @@ func (m *RuntimeContextManager) PrepareRestoredBundleHashReplacementPublication(
 	if err := validateRestoredAdmissionAuthority(*entry.context, contextDef); err != nil {
 		return nil, err
 	}
+	if contextDef.PublicationGeneration != 0 && contextDef.PublicationGeneration != entry.context.PublicationGeneration {
+		return nil, fmt.Errorf("runtime context %s restored publication generation %d does not match predecessor generation %d", existingHash, contextDef.PublicationGeneration, entry.context.PublicationGeneration)
+	}
+	contextDef.PublicationGeneration = entry.context.PublicationGeneration
 	if _, err := m.replacementCapabilitySubjectsLocked(existingHash, contextDef); err != nil {
 		return nil, err
 	}

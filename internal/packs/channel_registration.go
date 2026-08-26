@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 const (
@@ -26,7 +27,12 @@ func ParseChannelRegistrationTarget(raw string) (ChannelRegistrationTarget, erro
 		return ChannelRegistrationTarget{}, fmt.Errorf("registration target must use ingress:<package>:<flow>:<provider>")
 	}
 	target := ChannelRegistrationTarget{PackageKey: parts[1], FlowID: parts[2], Provider: parts[3]}
-	for _, value := range []string{target.PackageKey, target.FlowID, target.Provider} {
+	packageKey, err := runtimeidentity.ParsePackageKey(target.PackageKey)
+	if err != nil {
+		return ChannelRegistrationTarget{}, fmt.Errorf("registration target has invalid canonical package key %q: %w", target.PackageKey, err)
+	}
+	target.PackageKey = packageKey.String()
+	for _, value := range []string{target.FlowID, target.Provider} {
 		if value == "" || value == "." || value == ".." || strings.ContainsAny(value, "/%?# \t\r\n") {
 			return ChannelRegistrationTarget{}, fmt.Errorf("registration target must use ingress:<package>:<flow>:<provider> with valid identity segments")
 		}
@@ -63,6 +69,13 @@ func (p SatisfactionPlan) Registration() (CompiledChannelRegistration, bool) {
 		return CompiledChannelRegistration{}, false
 	}
 	return p.registration.clone(), true
+}
+
+func (p SatisfactionPlan) OnboardingProfile() (CompiledChannelOnboardingProfile, bool) {
+	if p.onboarding == nil {
+		return CompiledChannelOnboardingProfile{}, false
+	}
+	return *p.onboarding, true
 }
 
 func (r CompiledChannelRegistration) Provider() string      { return r.provider.String() }

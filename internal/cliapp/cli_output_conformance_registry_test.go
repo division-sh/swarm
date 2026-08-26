@@ -70,7 +70,9 @@ var cliOutputSharedOwnerProofs = map[string]cliOutputSharedOwnerProof{
 	"swarm describe routes":              {Constructor: "newDescribeRoutesCommand", Runner: "runDescribeRoutesCommandWithOutput"},
 	"swarm entity list":                  {Constructor: "newEntitiesListCommand", Runner: "runEntitiesListCommand"},
 	"swarm entity view":                  {Constructor: "newEntityViewCommand", Runner: "runEntityViewCommand"},
-	"swarm channel connect":              {Constructor: "newChannelConnectCommand", Runner: "runChannelConnect"},
+	"swarm channel connect":              {Constructor: "newChannelLifecycleCommand", Runner: "runChannelConnect"},
+	"swarm channel reconnect":            {Constructor: "newChannelLifecycleCommand", Runner: "runChannelConnect"},
+	"swarm channel rebind":               {Constructor: "newChannelLifecycleCommand", Runner: "runChannelConnect"},
 	"swarm channel list":                 {Constructor: "newChannelListCommand", Runner: "runChannelList"},
 	"swarm channel unbind":               {Constructor: "newChannelUnbindCommand", Runner: "runChannelUnbind"},
 }
@@ -143,20 +145,22 @@ var cliOutputGrandfatheredNonSharedRows = map[string]string{
 }
 
 var cliOutputExpectedFactOwners = map[string]string{
-	"swarm agent frame":      "/v1/rpc agent.frame",
-	"swarm bundle list":      "/v1/rpc bundle.list",
-	"swarm bundle show":      "/v1/rpc bundle.get",
-	"swarm bundle agents":    "/v1/rpc bundle.agents",
-	"swarm bundle register":  "/v1/rpc bundle.register",
-	"swarm bundle delete":    "/v1/rpc bundle.delete",
-	"swarm agent view":       "/v1/rpc agent.get",
-	"swarm agent diagnose":   "/v1/rpc agent.diagnose",
-	"swarm agent deliveries": "/v1/rpc agent.delivery_lifecycle",
-	"swarm entity list":      "/v1/rpc entity.list",
-	"swarm entity view":      "/v1/rpc entity.get",
-	"swarm channel connect":  "/v1/rpc channel.connect|reconnect|rebind then channel.confirm",
-	"swarm channel list":     "/v1/rpc channel.list",
-	"swarm channel unbind":   "/v1/rpc channel.unbind",
+	"swarm agent frame":       "/v1/rpc agent.frame",
+	"swarm bundle list":       "/v1/rpc bundle.list",
+	"swarm bundle show":       "/v1/rpc bundle.get",
+	"swarm bundle agents":     "/v1/rpc bundle.agents",
+	"swarm bundle register":   "/v1/rpc bundle.register",
+	"swarm bundle delete":     "/v1/rpc bundle.delete",
+	"swarm agent view":        "/v1/rpc agent.get",
+	"swarm agent diagnose":    "/v1/rpc agent.diagnose",
+	"swarm agent deliveries":  "/v1/rpc agent.delivery_lifecycle",
+	"swarm entity list":       "/v1/rpc entity.list",
+	"swarm entity view":       "/v1/rpc entity.get",
+	"swarm channel connect":   "/v1/rpc channel.onboarding_start|get|retry plus channel.confirm",
+	"swarm channel reconnect": "/v1/rpc channel.onboarding_start|get|retry plus channel.confirm",
+	"swarm channel rebind":    "/v1/rpc channel.onboarding_start|get|retry plus channel.confirm",
+	"swarm channel list":      "/v1/rpc channel.list",
+	"swarm channel unbind":    "/v1/rpc channel.unbind",
 }
 
 var cliOutputSharedDisplayProofs = map[string][]string{

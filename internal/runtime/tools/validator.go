@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"errors"
 	"strings"
 
@@ -10,7 +11,7 @@ import (
 )
 
 type ToolInputValidator struct {
-	definitions func(actor *models.AgentConfig) ([]llm.ToolDefinition, error)
+	definitions func(context.Context, *models.AgentConfig) ([]llm.ToolDefinition, error)
 }
 
 var errToolDefinitionsProviderRequired = errors.New("tool definitions provider is required")
@@ -21,10 +22,25 @@ func NewToolInputValidator(definitions func(actor *models.AgentConfig) ([]llm.To
 			return nil, errToolDefinitionsProviderRequired
 		}
 	}
+	return &ToolInputValidator{definitions: func(_ context.Context, actor *models.AgentConfig) ([]llm.ToolDefinition, error) {
+		return definitions(actor)
+	}}
+}
+
+func NewContextToolInputValidator(definitions func(context.Context, *models.AgentConfig) ([]llm.ToolDefinition, error)) *ToolInputValidator {
+	if definitions == nil {
+		definitions = func(context.Context, *models.AgentConfig) ([]llm.ToolDefinition, error) {
+			return nil, errToolDefinitionsProviderRequired
+		}
+	}
 	return &ToolInputValidator{definitions: definitions}
 }
 
 func (v *ToolInputValidator) Validate(actor *models.AgentConfig, name string, input any) error {
+	return v.ValidateContext(context.Background(), actor, name, input)
+}
+
+func (v *ToolInputValidator) ValidateContext(ctx context.Context, actor *models.AgentConfig, name string, input any) error {
 	name = normalizeNativeToolName(name)
 	if name == "" || toolKindPolicy(name) == toolcapabilities.KindEmit {
 		return nil
@@ -41,7 +57,7 @@ func (v *ToolInputValidator) Validate(actor *models.AgentConfig, name string, in
 		payload = map[string]any{}
 	}
 
-	defs, defsErr := v.definitions(actor)
+	defs, defsErr := v.definitions(ctx, actor)
 	if defsErr != nil {
 		return defsErr
 	}

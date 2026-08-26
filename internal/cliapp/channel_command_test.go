@@ -44,7 +44,7 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 				if err := json.Unmarshal([]byte(output), &result); err != nil {
 					t.Fatal(err)
 				}
-				if result.PrincipalID != "principal-1" || len(result.Channels) != 1 || result.Channels[0].Interface.Selector != operatorChannelCLISelector {
+				if result.PrincipalID != "principal-1" || len(result.Channels) != 1 || result.Channels[0].Identity.Interface.Selector != operatorChannelCLISelector {
 					t.Fatalf("JSON output = %#v", result)
 				}
 			}},
@@ -64,85 +64,75 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 		}
 	})
 
-	t.Run("connect waits and confirms", func(t *testing.T) {
+	t.Run("connect uses durable onboarding and confirms nested identity", func(t *testing.T) {
 		var methods []string
 		server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, call int) map[string]any {
 			methods = append(methods, request.Method)
 			switch request.Method {
-			case "channel.list":
-				if call == 0 {
-					return operatorChannelCLIListResult("unbound", nil)
+			case "channel.onboarding_start":
+				if request.Params["provider"] != "telegram" || request.Params["verb"] != "connect" || request.Params["save_proof"] != true || request.Params["provider_credential"] != "bot-token" {
+					t.Fatalf("channel.onboarding_start params = %#v", request.Params)
 				}
-				pending := operatorChannelCLIOperationResult("awaiting_confirmation", 2, 0)
-				pending["account_presentation"] = "41********90"
-				pending["external_account_reference"] = "41********90"
-				return operatorChannelCLIListResult("unbound", pending)
-			case "channel.connect":
-				if request.Params["interface"] != operatorChannelCLISelector || request.Params["expected_revision"] != float64(0) || request.Params["save_proof"] != true {
-					t.Fatalf("channel.connect params = %#v", request.Params)
-				}
-				return map[string]any{"operation": operatorChannelCLIOperationResult("awaiting_claim", 1, 0)}
+				return channelOnboardingCLIResult("awaiting_external_identity", "awaiting_claim", false)
+			case "channel.onboarding_get":
+				return channelOnboardingCLIResult("awaiting_operator_confirmation", "awaiting_confirmation", false)
 			case "channel.confirm":
 				if request.Params["operation_id"] != operatorChannelCLIOperation || request.Params["expected_revision"] != float64(2) || request.Params["approve"] != true {
 					t.Fatalf("channel.confirm params = %#v", request.Params)
 				}
 				return map[string]any{"operation": operatorChannelCLIOperationResult("bound", 3, 1), "binding": map[string]any{"revision": 1}}
+			case "channel.onboarding_retry":
+				return channelOnboardingCLIResult("succeeded", "bound", true)
 			default:
 				t.Fatalf("unexpected method %q", request.Method)
 			}
 			return nil
 		})
-		stdout, stderr, code := runOperatorChannelCLI(t, server, "channel", "connect", operatorChannelCLISelector, "--yes")
+		stdout, stderr, code := runOperatorChannelCLIWithInput(t, server, "bot-token\n", "channel", "connect", "telegram", "--yes")
 		if code != 0 || strings.TrimSpace(stderr) != "" {
 			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 		}
-		for _, want := range []string{operatorChannelCLIChallenge, "Waiting for an authenticated claimant", "Claimed by 41********90 in a shared conversation", "Connected provider.telegram.hitl_channel"} {
+		for _, want := range []string{operatorChannelCLIChallenge, "Waiting for an authenticated claimant", "Claimed by @m***o in a shared conversation", "Connected telegram channel READY"} {
 			if !strings.Contains(stdout, want) {
 				t.Fatalf("connect output missing %q:\n%s", want, stdout)
 			}
 		}
-		wantMethods := []string{"channel.list", "channel.connect", "channel.list", "channel.confirm"}
+		wantMethods := []string{"channel.onboarding_start", "channel.onboarding_get", "channel.confirm", "channel.onboarding_retry"}
 		if strings.Join(methods, ",") != strings.Join(wantMethods, ",") {
 			t.Fatalf("methods = %v, want %v", methods, wantMethods)
 		}
 	})
 
-	t.Run("no-save remains explicit through confirmation", func(t *testing.T) {
+	t.Run("no-save remains explicit on connect", func(t *testing.T) {
 		server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, call int) map[string]any {
 			switch request.Method {
-			case "channel.list":
-				if call == 0 {
-					return operatorChannelCLIListResult("unbound", nil)
-				}
-				return operatorChannelCLIListResult("unbound", operatorChannelCLIOperationResult("awaiting_confirmation", 2, 0))
-			case "channel.connect":
+			case "channel.onboarding_start":
 				if request.Params["save_proof"] != false {
-					t.Fatalf("channel.connect save_proof = %#v, want false", request.Params["save_proof"])
+					t.Fatalf("channel.onboarding_start save_proof = %#v, want false", request.Params["save_proof"])
 				}
-				return map[string]any{"operation": operatorChannelCLIOperationResult("awaiting_claim", 1, 0)}
+				return channelOnboardingCLIResult("awaiting_external_identity", "awaiting_claim", false)
+			case "channel.onboarding_get":
+				return channelOnboardingCLIResult("awaiting_operator_confirmation", "awaiting_confirmation", false)
 			case "channel.confirm":
 				return map[string]any{"operation": operatorChannelCLIOperationResult("bound", 3, 1), "binding": map[string]any{"revision": 1}}
+			case "channel.onboarding_retry":
+				return channelOnboardingCLIResult("succeeded", "bound", true)
 			default:
 				t.Fatalf("unexpected method %q", request.Method)
 			}
 			return nil
 		})
-		stdout, stderr, code := runOperatorChannelCLI(t, server, "channel", "connect", operatorChannelCLISelector, "--no-save", "--yes")
-		if code != 0 || strings.TrimSpace(stderr) != "" || !strings.Contains(stdout, "Connected provider.telegram.hitl_channel") {
+		stdout, stderr, code := runOperatorChannelCLIWithInput(t, server, "bot-token\n", "channel", "connect", "telegram", "--no-save", "--yes")
+		if code != 0 || strings.TrimSpace(stderr) != "" || !strings.Contains(stdout, "Connected telegram channel READY") {
 			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
 		}
 	})
 
-	t.Run("interactive rejection remains terminal and unapproved", func(t *testing.T) {
+	t.Run("explicit rebind rejection remains unapproved", func(t *testing.T) {
 		server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, call int) map[string]any {
 			switch request.Method {
-			case "channel.list":
-				if call == 0 {
-					return operatorChannelCLIListResult("unbound", nil)
-				}
-				return operatorChannelCLIListResult("unbound", operatorChannelCLIOperationResult("awaiting_confirmation", 2, 0))
-			case "channel.connect":
-				return map[string]any{"operation": operatorChannelCLIOperationResult("awaiting_claim", 1, 0)}
+			case "channel.onboarding_start":
+				return channelOnboardingCLIResult("awaiting_operator_confirmation", "awaiting_confirmation", false)
 			case "channel.confirm":
 				if request.Params["approve"] != false {
 					t.Fatalf("channel.confirm approve = %#v, want false", request.Params["approve"])
@@ -160,24 +150,38 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 		opts.input = strings.NewReader("n\n")
 		opts.stdinIsTerminal = func() bool { return true }
 		var stdout, stderr bytes.Buffer
-		code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"channel", "connect", operatorChannelCLISelector}, &stdout, &stderr, opts)
-		if code != 0 || !strings.Contains(stdout.String(), "rejected") {
+		code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"channel", "rebind", "telegram"}, &stdout, &stderr, opts)
+		if code != CLIExitValidation || !strings.Contains(stderr.String(), "rejected") {
 			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 		}
 	})
 
-	t.Run("short selector fails before mutation", func(t *testing.T) {
+	t.Run("exact selectors are forwarded without lower identity lookup", func(t *testing.T) {
 		var methods []string
 		server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
 			methods = append(methods, request.Method)
-			return operatorChannelCLIListResult("unbound", nil)
+			if request.Params["bundle"] != "bundle-v1:sha256:"+strings.Repeat("b", 64) || request.Params["interface"] != operatorChannelCLISelector || request.Params["target"] != "ingress:support:telegram:telegram" {
+				t.Fatalf("exact selectors = %#v", request.Params)
+			}
+			return channelOnboardingCLIResult("succeeded", "bound", true)
 		})
-		_, stderr, code := runOperatorChannelCLI(t, server, "channel", "connect", "provider.telegram.hitl_channel", "--yes")
-		if code != CLIExitValidation || !strings.Contains(stderr, "is not active") {
+		_, stderr, code := runOperatorChannelCLI(t, server, "channel", "reconnect", "telegram", "--bundle", "bundle-v1:sha256:"+strings.Repeat("b", 64), "--interface", operatorChannelCLISelector, "--target", "ingress:support:telegram:telegram")
+		if code != 0 || stderr != "" {
 			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
-		if strings.Join(methods, ",") != "channel.list" {
-			t.Fatalf("methods = %v, want readback only", methods)
+		if strings.Join(methods, ",") != "channel.onboarding_start" {
+			t.Fatalf("methods = %v", methods)
+		}
+	})
+
+	t.Run("legacy replace flag is rejected", func(t *testing.T) {
+		server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
+			t.Fatalf("legacy flag reached API method %q", request.Method)
+			return nil
+		})
+		_, stderr, code := runOperatorChannelCLIWithInput(t, server, "bot-token\n", "channel", "connect", "telegram", "--replace", "--yes")
+		if code == 0 || !strings.Contains(stderr, "unknown flag: --replace") {
+			t.Fatalf("code=%d stderr=%q", code, stderr)
 		}
 	})
 
@@ -233,18 +237,45 @@ func newOperatorChannelCLIServer(t *testing.T, respond func(*testing.T, jsonRPCR
 }
 
 func runOperatorChannelCLI(t *testing.T, server *httptest.Server, args ...string) (string, string, int) {
+	return runOperatorChannelCLIWithInput(t, server, "", args...)
+}
+
+func runOperatorChannelCLIWithInput(t *testing.T, server *httptest.Server, input string, args ...string) (string, string, int) {
 	t.Helper()
 	setCLIAPITestToken(t, operatorChannelCLIToken)
 	opts := testRootCommandOptions(server)
 	opts.channelConnectWait = time.Second
 	opts.channelConnectPoll = time.Millisecond
+	opts.input = strings.NewReader(input)
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, opts)
 	return stdout.String(), stderr.String(), code
 }
 
+func channelOnboardingCLIResult(phase, identityState string, ready bool) map[string]any {
+	operation := map[string]any{
+		"operation_id": operatorChannelCLIOperation,
+		"verb":         "connect", "provider": "telegram", "phase": phase,
+		"revision": 6, "binding_revision": 1, "activation_revision": 1,
+	}
+	result := map[string]any{
+		"operation": operation,
+		"candidate": map[string]any{
+			"provider":  "telegram",
+			"interface": map[string]any{"selector": operatorChannelCLISelector},
+			"target":    map[string]any{"selector": "ingress:support:telegram:telegram"},
+		},
+		"readiness": operatorChannelCLIReadiness(ready),
+	}
+	if identityState != "" {
+		identity := operatorChannelCLIOperationResult(identityState, 2, 1)
+		result["identity_operation"] = identity
+	}
+	return result
+}
+
 func operatorChannelCLIListResult(status string, pending map[string]any) map[string]any {
-	row := map[string]any{
+	identity := map[string]any{
 		"interface": map[string]any{
 			"interface_ref": "swarm.hitl-channel/v2", "channel_pack_id": "provider.telegram.hitl_channel",
 			"channel_pack_version": "1.0.0", "channel_manifest_hash": "sha256:" + strings.Repeat("a", 64),
@@ -253,14 +284,33 @@ func operatorChannelCLIListResult(status string, pending map[string]any) map[str
 		"status": status, "binding_revision": 1, "account_presentation": "@m***o", "conversation_scope": "shared",
 	}
 	if status == "unbound" {
-		row["binding_revision"] = 0
-		row["account_presentation"] = ""
-		row["conversation_scope"] = ""
+		identity["binding_revision"] = 0
+		identity["account_presentation"] = ""
+		identity["conversation_scope"] = ""
 	}
 	if pending != nil {
-		row["pending_operation"] = pending
+		identity["pending_operation"] = pending
 	}
+	row := map[string]any{"identity": identity, "readiness": operatorChannelCLIReadiness(status == "current")}
 	return map[string]any{"principal_id": "principal-1", "channels": []any{row}}
+}
+
+func operatorChannelCLIReadiness(ready bool) map[string]any {
+	activationRevision := 0
+	bindingRevision := 0
+	if ready {
+		activationRevision = 1
+		bindingRevision = 1
+	}
+	return map[string]any{
+		"ready": ready, "reason": map[bool]string{true: "ready", false: "activation_not_current"}[ready],
+		"coordinate": map[string]any{
+			"bundle_hash": "bundle-v1:sha256:" + strings.Repeat("b", 64), "bundle_source": "persisted",
+			"bundle_identity": "operator-channel-cli@1.0.0#fixture", "pack_inventory_generation": "pack-generation",
+			"context_publication_generation": 1, "plan_generation": "sha256:" + strings.Repeat("c", 64), "target_generation": 1,
+		},
+		"activation_revision": activationRevision, "binding_revision": bindingRevision, "observed_at": "2026-08-24T23:59:59Z",
+	}
 }
 
 func operatorChannelCLIOperationResult(state string, revision, bindingRevision int64) map[string]any {

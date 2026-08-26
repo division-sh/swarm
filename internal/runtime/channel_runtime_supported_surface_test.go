@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packartifact"
@@ -25,6 +26,7 @@ import (
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
@@ -33,6 +35,8 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -156,33 +160,26 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				t.Fatalf("NewEventBusWithOptions: %v", err)
 			}
 			credentialStore := channelRuntimeCredentialStore(t, "provider-secret")
-			privateTool, err := binding.OperationTool("deliver")
-			if err != nil {
-				t.Fatalf("OperationTool: %v", err)
-			}
 			privateIdentity, err := binding.RuntimeActivityTarget("deliver")
 			if err != nil {
 				t.Fatalf("RuntimeActivityTarget: %v", err)
 			}
-			privateTarget, err := runtimepipeline.NewChannelActivityTarget(privateTool, privateIdentity.Generation())
-			if err != nil {
-				t.Fatalf("NewChannelActivityTarget: %v", err)
-			}
 			privateToolID := privateIdentity.ToolID()
+			activationOwner := testChannelActivationOwner(t, binding)
 			coordinator = newExternalRuntimeTestPipelineCoordinator(t, bus, db, eventStore, runtimepipeline.PipelineCoordinatorOptions{
-				WorkOwner:            runtimeTestEventBusWorkOwner(t, bus),
-				Module:               telegramConnectorSupportedSurfaceModule{source: source},
-				Persistence:          workflowPersistence,
-				RunLifecycle:         runLifecycle,
-				DeliveryStore:        deliveryStore,
-				PipelineObligations:  pipelineObligations,
-				Credentials:          credentialStore,
-				ChannelActivityTools: map[string]runtimepipeline.ChannelActivityTarget{privateToolID: privateTarget},
-				FlowRoutes:           bus,
+				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
+				Module:              telegramConnectorSupportedSurfaceModule{source: source},
+				Persistence:         workflowPersistence,
+				RunLifecycle:        runLifecycle,
+				DeliveryStore:       deliveryStore,
+				PipelineObligations: pipelineObligations,
+				Credentials:         credentialStore,
+				ChannelActivations:  activationOwner,
+				FlowRoutes:          bus,
 			})
 
 			stopActivityNode := startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db)
-			executor := configuredChannelExecutor(source, binding, credentialStore, coordinator)
+			executor := configuredChannelExecutor(source, activationOwner, credentialStore, coordinator)
 			actor := models.AgentConfig{
 				ExecutionMode: "live", ID: "channel-sender", Identity: agentidentitytest.Declared(t, "channel-sender", agentOwner, flowPath, flowInstanceID, flowInstance), Role: "worker", FlowID: "global",
 				FlowPath: flowInstance, EntityID: entityID, Tools: []string{"channel.ops.deliver"},
@@ -241,7 +238,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 
 			ackExecutor := &channelAckLossExecutor{delegate: coordinator}
 			ackExecutor.failNext.Store(true)
-			ackPath := configuredChannelExecutor(source, binding, credentialStore, ackExecutor)
+			ackPath := configuredChannelExecutor(source, activationOwner, credentialStore, ackExecutor)
 			ackCtx := configuredChannelCallContext(t, ctx, eventStore, actor, runID, entityID, flowInstance, "call-ack-loss")
 			if _, err := ackPath.Execute(ackCtx, "channel.ops.deliver", input); err == nil {
 				t.Fatal("simulated post-commit acknowledgment loss was not surfaced")
@@ -270,22 +267,15 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				t.Fatalf("restore Telegram credential: %v", err)
 			}
 			replacementBinding := configuredTelegramChannelBindingWithTextLimit(t, server.URL, true)
-			replacementTool, err := replacementBinding.OperationTool("deliver")
-			if err != nil {
-				t.Fatalf("replacement OperationTool: %v", err)
-			}
 			replacementIdentity, err := replacementBinding.RuntimeActivityTarget("deliver")
 			if err != nil {
 				t.Fatalf("replacement RuntimeActivityTarget: %v", err)
-			}
-			replacementTarget, err := runtimepipeline.NewChannelActivityTarget(replacementTool, replacementIdentity.Generation())
-			if err != nil {
-				t.Fatalf("replacement NewChannelActivityTarget: %v", err)
 			}
 			replacementToolID := replacementIdentity.ToolID()
 			if replacementToolID == privateToolID || replacementIdentity.Generation().Equal(privateIdentity.Generation()) {
 				t.Fatal("replacement plan reused the prior private target generation")
 			}
+			replacementOwner := testChannelActivationOwner(t, replacementBinding)
 			mismatchedCoordinator := newExternalRuntimeTestPipelineCoordinator(t, bus, db, eventStore, runtimepipeline.PipelineCoordinatorOptions{
 				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
 				Module:              telegramConnectorSupportedSurfaceModule{source: source},
@@ -295,15 +285,13 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				PipelineObligations: pipelineObligations,
 				Credentials:         credentialStore,
 				FlowRoutes:          bus,
-				ChannelActivityTools: map[string]runtimepipeline.ChannelActivityTarget{
-					privateToolID: replacementTarget,
-				},
+				ChannelActivations:  replacementOwner,
 			})
 
 			stopActivityNode()
 			coordinator = mismatchedCoordinator
 			stopActivityNode = startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db)
-			mismatchedExecutor := configuredChannelExecutor(source, binding, credentialStore, mismatchedCoordinator)
+			mismatchedExecutor := configuredChannelExecutor(source, activationOwner, credentialStore, mismatchedCoordinator)
 			mismatchedCtx := configuredChannelCallContext(t, ctx, eventStore, actor, runID, entityID, flowInstance, "mismatched-plan-generation")
 			if _, err := mismatchedExecutor.Execute(mismatchedCtx, "channel.ops.deliver", input); err == nil {
 				t.Fatal("request executed through a private target carrying a different generation")
@@ -320,15 +308,13 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				PipelineObligations: pipelineObligations,
 				Credentials:         credentialStore,
 				FlowRoutes:          bus,
-				ChannelActivityTools: map[string]runtimepipeline.ChannelActivityTarget{
-					replacementToolID: replacementTarget,
-				},
+				ChannelActivations:  replacementOwner,
 			})
 
 			stopActivityNode()
 			coordinator = reloadedCoordinator
 			stopActivityNode = startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db)
-			staleExecutor := configuredChannelExecutor(source, binding, credentialStore, reloadedCoordinator)
+			staleExecutor := configuredChannelExecutor(source, activationOwner, credentialStore, reloadedCoordinator)
 			staleCtx := configuredChannelCallContext(t, ctx, eventStore, actor, runID, entityID, flowInstance, "stale-plan-generation")
 			if _, err := staleExecutor.Execute(staleCtx, "channel.ops.deliver", input); err == nil {
 				t.Fatal("persisted old-generation request executed through replacement plan")
@@ -338,6 +324,188 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 			}
 		})
 	}
+}
+
+func TestChannelActivationReplacementUpdatesExecutorToolProjection(t *testing.T) {
+	predecessor := configuredTelegramChannelBindingWithTextLimit(t, "http://127.0.0.1", false)
+	successor := configuredTelegramChannelBindingWithTextLimit(t, "http://127.0.0.1", true)
+	agentOwner := "test://channel-runtime/global/channel-sender"
+	agentRef := runtimecontracts.ContractURIRef{Kind: "agent", FlowID: "global", LocalID: "channel-sender", Full: agentOwner}
+	global := runtimecontracts.FlowContractView{
+		Paths: runtimecontracts.FlowContractPaths{
+			ID: "global", Flow: "global", Mode: runtimecontracts.FlowModeTemplate,
+			PackageKey: "channel-runtime", AgentsFile: "/contracts/channel-runtime/flows/global/agents.yaml",
+		},
+		Path:   "gateway/global",
+		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate},
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"channel-sender": runtimecontracts.EffectiveAgentRegistryEntry("channel-sender", runtimecontracts.AgentRegistryEntry{ID: "channel-sender", Role: "worker"}),
+		},
+		AgentURIs: map[string]string{"channel-sender": agentOwner},
+	}
+	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{global}}
+	base := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{Name: "channel_runtime", Version: "1.0.0"},
+		FlowTree: runtimecontracts.FlowTree{
+			Root: &root,
+			ByID: map[string]*runtimecontracts.FlowContractView{"global": &root.Children[0]},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"global": global.Schema},
+		URIRegistry: runtimecontracts.ContractURIRegistry{
+			Agents: map[string]runtimecontracts.ContractURIRef{"global/channel-sender": agentRef},
+			ByURI:  map[string]runtimecontracts.ContractURIRef{agentOwner: agentRef},
+		},
+	})
+	source := base
+	owner := testChannelActivationOwner(t, predecessor)
+	executor := configuredChannelExecutor(source, owner, nil, nil)
+	actor := models.AgentConfig{ID: "channel-sender", Role: "worker", FlowID: "global", Tools: []string{"channel.ops.deliver"}}
+	if containsChannelToolDefinition(executor.ToolDefinitionsForActor(actor), "channel.ops.deliver") || containsChannelToolDefinition(executor.ToolDefinitionsForActorInContext(context.Background(), actor), "channel.ops.deliver") {
+		t.Fatal("unleased tool discovery exposed a channel activation")
+	}
+	predecessorMax := channelToolTextMaximum(t, acquireChannelToolDefinitions(t, executor, actor), "channel.ops.deliver")
+
+	if err := owner.Replace(testChannelActivationPublication(t, successor)); err != nil {
+		t.Fatal(err)
+	}
+	successorMax := channelToolTextMaximum(t, acquireChannelToolDefinitions(t, executor, actor), "channel.ops.deliver")
+	if successorMax != predecessorMax-1 {
+		t.Fatalf("successor channel tool text maximum = %d, want predecessor %d minus one", successorMax, predecessorMax)
+	}
+	if err := owner.Replace(testChannelActivationPublication(t)); err != nil {
+		t.Fatal(err)
+	}
+	for _, definition := range acquireChannelToolDefinitions(t, executor, actor) {
+		if definition.Name == "channel.ops.deliver" {
+			t.Fatal("retired channel activation remained visible to the executor")
+		}
+	}
+}
+
+func TestChannelModelToolPresentationPinsOneActivationGeneration(t *testing.T) {
+	predecessor := configuredTelegramChannelBindingWithTextLimit(t, "http://127.0.0.1", false)
+	successor := configuredTelegramChannelBindingWithTextLimit(t, "http://127.0.0.1", true)
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+	owner := testChannelActivationOwner(t, predecessor)
+	executor := configuredChannelExecutor(source, owner, nil, unusedChannelRuntimeActivityExecutor{})
+	actor := models.AgentConfig{ID: "channel-sender", Role: "worker", FlowID: "global", Tools: []string{"channel.ops.deliver"}, ExecutionMode: runtimeeffects.ExecutionModeLive}
+	pinnedCtx, definitions, release, err := executor.AcquireToolDefinitionsForActorInContext(context.Background(), actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	predecessorMax := channelToolTextMaximum(t, definitions, "channel.ops.deliver")
+	if pinnedCtx == nil || predecessorMax == 0 {
+		t.Fatal("model turn did not receive the predecessor publication")
+	}
+	pinnedInput := map[string]any{
+		"presentation": map[string]any{"text": "Approve deployment?"},
+		"actions":      []any{map[string]any{"label": "Approve", "token": "approve_1"}},
+	}
+	if _, _, err := predecessor.PrepareOperation("deliver", pinnedInput); err != nil {
+		t.Fatalf("predecessor pinned input: %v", err)
+	}
+
+	successorPublication := testChannelActivationPublication(t, successor)
+	done := make(chan error, 1)
+	go func() { done <- owner.Replace(successorPublication) }()
+	deadline := time.Now().Add(time.Second)
+	for {
+		probe, open := owner.AcquireRuntimeOperation(predecessor.RuntimeToolID("deliver"))
+		if open {
+			probe.Release()
+		} else {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("replacement did not fence model-visible predecessor execution")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("replacement completed while the model still held predecessor tools: %v", err)
+	default:
+	}
+	callCtx := runtimetools.WithActor(pinnedCtx, actor)
+	_, callErr := executor.Execute(callCtx, "channel.ops.deliver", pinnedInput)
+	failure, classified := runtimefailures.As(callErr)
+	if callErr == nil || !classified || failure.Failure.Detail.Code != "channel_source_event_required" {
+		t.Fatalf("pinned predecessor call = %v (cause=%v), want predecessor schema/dispatch followed by source-event rejection", callErr, errors.Unwrap(callErr))
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("replacement completed while pinned predecessor dispatch was still owned: %v", err)
+	default:
+	}
+	release()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	successorMax := channelToolTextMaximum(t, acquireChannelToolDefinitions(t, executor, actor), "channel.ops.deliver")
+	if successorMax != predecessorMax-1 {
+		t.Fatalf("successor maximum = %d, want %d", successorMax, predecessorMax-1)
+	}
+}
+
+type unusedChannelRuntimeActivityExecutor struct{}
+
+func (unusedChannelRuntimeActivityExecutor) ExecuteDurableActivity(context.Context, runtimeengine.ActivityIntent) (runtimepipeline.ActivityAttemptRecord, error) {
+	return runtimepipeline.ActivityAttemptRecord{}, nil
+}
+
+func acquireChannelToolDefinitions(t *testing.T, executor *runtimetools.Executor, actor models.AgentConfig) []llm.ToolDefinition {
+	t.Helper()
+	_, definitions, release, err := executor.AcquireToolDefinitionsForActorInContext(context.Background(), actor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release()
+	return definitions
+}
+
+func containsChannelToolDefinition(definitions []llm.ToolDefinition, name string) bool {
+	for _, definition := range definitions {
+		if definition.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func channelToolTextMaximum(t *testing.T, definitions []llm.ToolDefinition, name string) int {
+	t.Helper()
+	for _, definition := range definitions {
+		if definition.Name != name {
+			continue
+		}
+		schema, ok := definition.Schema.(map[string]any)
+		if !ok {
+			t.Fatalf("channel tool schema = %T", definition.Schema)
+		}
+		properties, ok := schema["properties"].(map[string]any)
+		if !ok {
+			t.Fatalf("channel tool has no properties schema: %#v", schema)
+		}
+		presentation, ok := properties["presentation"].(map[string]any)
+		if !ok {
+			t.Fatal("channel tool has no presentation schema")
+		}
+		presentationProperties, ok := presentation["properties"].(map[string]any)
+		if !ok {
+			t.Fatal("channel tool presentation has no properties schema")
+		}
+		textSchema, ok := presentationProperties["text"].(map[string]any)
+		if !ok {
+			t.Fatal("channel tool has no presentation.text schema")
+		}
+		maximum, ok := textSchema["maxLength"].(int)
+		if !ok {
+			t.Fatalf("channel tool presentation.text maximum = %#v", textSchema["maxLength"])
+		}
+		return maximum
+	}
+	t.Fatalf("channel tool %q is absent", name)
+	return 0
 }
 
 func startConfiguredChannelActivityNode(t *testing.T, ctx context.Context, coordinator *runtimepipeline.PipelineCoordinator, bus *runtimebus.EventBus, db *sql.DB) func() {
@@ -364,10 +532,56 @@ func (e *channelAckLossExecutor) ExecuteDurableActivity(ctx context.Context, int
 	return record, err
 }
 
-func configuredChannelExecutor(source semanticview.Source, binding packs.OutboundBindingPlan, credentials runtimecredentials.Store, activity runtimetools.DurableActivityExecutor) *runtimetools.Executor {
+func configuredChannelExecutor(source semanticview.Source, activations *runtimechannelactivation.Owner, credentials runtimecredentials.Store, activity runtimetools.DurableActivityExecutor) *runtimetools.Executor {
 	return runtimetools.NewExecutorWithOptions(nil, runtimetools.ExecutorOptions{
-		WorkflowSource: source, ChannelBindings: []packs.OutboundBindingPlan{binding}, Credentials: credentials, ActivityExecutor: activity,
+		WorkflowSource: source, ChannelActivations: activations, Credentials: credentials, ActivityExecutor: activity,
 	})
+}
+
+func testChannelActivationOwner(t *testing.T, bindings ...packs.OutboundBindingPlan) *runtimechannelactivation.Owner {
+	t.Helper()
+	owner, err := runtimechannelactivation.NewOwner(testChannelActivationPublication(t, bindings...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return owner
+}
+
+func testChannelActivationPublication(t *testing.T, bindings ...packs.OutboundBindingPlan) channelonboarding.ChannelActivationPublication {
+	t.Helper()
+	fact := testBundleSourceFact(t, "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	bundleHash, bundleSource := fact.StorageValues()
+	activations := make([]channelonboarding.CompiledActivation, 0, len(bindings))
+	for _, binding := range bindings {
+		generation, err := binding.PlanGeneration()
+		if err != nil {
+			t.Fatal(err)
+		}
+		coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
+			BundleHash: bundleHash, BundleSource: bundleSource, BundleIdentity: "channel-runtime@1.0.0#test",
+			PackInventoryGeneration: "sha256:test-inventory", ContextPublicationGeneration: 1,
+			PlanGeneration: generation,
+		}
+		if binding.RegistrationTarget() != "" {
+			coordinate.TargetGeneration = 1
+		}
+		admissions := make([]channelonboarding.CredentialAdmission, 0, len(binding.CredentialStoreKeys()))
+		for role, key := range binding.CredentialStoreKeys() {
+			admissions = append(admissions, channelonboarding.CredentialAdmission{
+				Role: role, StoreKey: key, Kind: channelonboarding.CredentialAdmissionObserved,
+				Receipt: "test-receipt-" + role, Epoch: "test-epoch-" + role,
+			})
+		}
+		activations = append(activations, channelonboarding.CompiledActivation{
+			Source: channelonboarding.ActivationSourceDeclared, Coordinate: coordinate,
+			Plan: binding, CredentialAdmissions: admissions,
+		})
+	}
+	publication, err := channelonboarding.NewChannelActivationPublication(activations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return publication
 }
 
 func configuredChannelCallContext(t *testing.T, ctx context.Context, selectedStore any, actor models.AgentConfig, runID, entityID, flowInstance, operationID string) context.Context {

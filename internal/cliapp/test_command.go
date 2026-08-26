@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -329,12 +330,18 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
 		Source: semanticview.Wrap(bundle), BundleSourceFact: sourceFact,
 		ProviderTriggerCatalog: providerPacks.Catalog, ChannelPlans: channelPacks.Plans,
-		ChannelOutboundBindings: channelPacks.Bindings,
 	})
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("admit effective source: %w", err))
 	}
 	source := projection.Source()
+	declaredChannelPublication, err := channelonboarding.NewDeclaredOnlyChannelActivationPublication(channelPacks.Bindings)
+	if err != nil {
+		return returnScenarioTestValidationError(errOut, fmt.Errorf("compile declared-only channel activation publication: %w", err))
+	}
+	if err := declaredChannelPublication.Validate(); err != nil {
+		return returnScenarioTestValidationError(errOut, fmt.Errorf("validate declared-only channel activation publication: %w", err))
+	}
 	runner := scenarioRunner{
 		client:                  client,
 		bundle:                  bundle,

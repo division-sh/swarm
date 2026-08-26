@@ -237,6 +237,21 @@ func (s *Service) RevokeProof(ctx context.Context, selector string, expectedRevi
 	return revoked, nil
 }
 
+func (s *Service) CurrentProof(ctx context.Context, selector string) (VerifiedProof, error) {
+	identity, err := s.ResolveRetainedInterface(ctx, selector)
+	if err != nil {
+		return VerifiedProof{}, err
+	}
+	proof, found, err := s.proofs.Get(ctx, identity)
+	if err != nil {
+		return VerifiedProof{}, err
+	}
+	if !found || proof.Status != ProofActive {
+		return VerifiedProof{}, fmt.Errorf("%w: no active machine-local proof exists for operator channel interface %q", ErrProofUnavailable, identity.Selector)
+	}
+	return proof, nil
+}
+
 func (s *Service) RecoverProofResponsibilities(ctx context.Context, now time.Time) error {
 	responsibilities, err := s.store.ListPendingProofResponsibilities(ctx)
 	if err != nil {
@@ -471,6 +486,72 @@ func (s *Service) ResolveRetainedInterface(ctx context.Context, selector string)
 		return InterfaceIdentity{}, fmt.Errorf("%w: retained operator channel interface %q is ambiguous", ErrConflict, selector)
 	}
 	return matches[0], nil
+}
+
+// GetOperation returns one exact durable identity operation for trusted
+// lifecycle composition. Public API readback continues to use masked rows.
+func (s *Service) GetOperation(ctx context.Context, operationID string) (Operation, error) {
+	principal, err := s.Principal()
+	if err != nil {
+		return Operation{}, err
+	}
+	operationID = strings.TrimSpace(operationID)
+	if operationID == "" {
+		return Operation{}, fmt.Errorf("%w: operation_id is required", ErrInvalidRequest)
+	}
+	operations, err := s.store.ListOperatorChannelOperations(ctx, principal.ID)
+	if err != nil {
+		return Operation{}, err
+	}
+	for _, operation := range operations {
+		if operation.OperationID == operationID {
+			return operation, nil
+		}
+	}
+	return Operation{}, fmt.Errorf("%w: operator channel operation %q was not found", ErrNotFound, operationID)
+}
+
+// CurrentBinding returns the unmasked selected-store identity fact to trusted
+// runtime composition. It never creates or recovers a binding.
+func (s *Service) CurrentBinding(ctx context.Context, identity InterfaceIdentity) (Binding, error) {
+	principal, err := s.Principal()
+	if err != nil {
+		return Binding{}, err
+	}
+	identity = identity.Normalized()
+	if err := identity.Validate(); err != nil {
+		return Binding{}, err
+	}
+	bindings, err := s.store.ListOperatorChannelBindings(ctx, principal.ID)
+	if err != nil {
+		return Binding{}, err
+	}
+	for _, binding := range bindings {
+		if binding.Interface.Normalized().Key() != identity.Key() || binding.Status != BindingCurrent {
+			continue
+		}
+		return binding, nil
+	}
+	return Binding{}, fmt.Errorf("%w: current operator channel binding %q was not found", ErrNotFound, identity.Selector)
+}
+
+// CurrentBindingReadiness returns the exact current binding and whether its
+// optional machine-proof link is current. Proofless bindings are valid without
+// manufacturing proof evidence.
+func (s *Service) CurrentBindingReadiness(ctx context.Context, identity InterfaceIdentity) (Binding, bool, error) {
+	binding, err := s.CurrentBinding(ctx, identity)
+	if err != nil {
+		return Binding{}, false, err
+	}
+	if strings.TrimSpace(binding.ProofID) == "" {
+		return binding, true, nil
+	}
+	proof, found, err := s.proofs.Get(ctx, binding.Interface)
+	if err != nil {
+		return Binding{}, false, err
+	}
+	current := found && proof.Status == ProofActive && proof.ProofID == binding.ProofID && proof.Revision == binding.ProofRevision
+	return binding, current, nil
 }
 
 func (s *Service) Readback(ctx context.Context) ([]Readback, error) {

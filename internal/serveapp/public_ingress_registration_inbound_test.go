@@ -12,11 +12,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -175,7 +177,7 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 		t.Fatalf("PlanGeneration: %v", err)
 	}
 	pair := runtimepublicingress.RegistrationPair{
-		BindingID: "telegram", PlanGeneration: planGeneration, Registration: registration,
+		BindingID: "telegram", PlanGeneration: planGeneration, PrebindingOperationID: "test-prebinding-telegram", Registration: registration,
 		CredentialKeys: map[string]string{"telegram_bot_token": "bot"},
 		Target: runtimepublicingress.RegistrationTarget{
 			Selector: "ingress:telegram-package:telegram-chat:telegram", BundleHash: bundleHash, ServiceID: target.ServiceID,
@@ -270,10 +272,18 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 		InstanceID: "chat", EntityID: "41000000-0000-0000-0000-000000000002",
 		Generation: 1, PublicationSequence: 1, AdmissionPlan: admission,
 	}
+	emptyPublication, err := channelonboarding.NewChannelActivationPublication(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activationOwner, err := runtimechannelactivation.NewOwner(emptyPublication)
+	if err != nil {
+		t.Fatal(err)
+	}
 	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
 		BundleSourceFact:          mustServeTestEphemeralBundleSourceFact(bundleHash),
 		Source:                    semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
-		Runtime:                   &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus},
+		Runtime:                   &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, ChannelActivations: activationOwner},
 		WorkOwner:                 workOwner,
 		StandingTargets:           []runtimepkg.StandingTarget{target},
 		ProviderTriggerGeneration: catalog.Generation(),
@@ -292,7 +302,39 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 	if err != nil {
 		t.Fatalf("NewOutboundBindingPlanWithRegistration: %v", err)
 	}
-	pairs, err := resolveServeRegistrationPairs([]packs.OutboundBindingPlan{binding}, manager)
+	contextDef := manager.LoadedContexts()[0]
+	generation, err := binding.PlanGeneration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundleHash, bundleSource := contextDef.BundleSourceFact.StorageValues()
+	compiled := channelonboarding.CompiledActivation{
+		Source: channelonboarding.ActivationSourceDeclared,
+		Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
+			BundleHash: bundleHash, BundleSource: bundleSource, BundleIdentity: "test-bundle",
+			PackInventoryGeneration: "sha256:test", ContextPublicationGeneration: contextDef.PublicationGeneration,
+			PlanGeneration: generation, TargetGeneration: 1,
+		},
+		Plan: binding,
+		CredentialAdmissions: []channelonboarding.CredentialAdmission{{
+			Role: "telegram_bot_token", StoreKey: "bot", Kind: channelonboarding.CredentialAdmissionObserved,
+			Receipt: "test-receipt", Epoch: "test-epoch",
+		}},
+	}
+	publication, err := channelonboarding.NewChannelActivationPublication([]channelonboarding.CompiledActivation{compiled})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.ReplaceChannelActivationsContext(context.Background(), bundleHash, contextDef.PublicationGeneration, publication); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := serveChannelActivationSnapshot{}
+	selection, err := resolveServeRegistrationPairs(snapshot, manager)
+	var pairs []runtimepublicingress.RegistrationPair
+	if selection != nil {
+		defer selection.Release()
+		pairs = selection.Pairs
+	}
 	if err == nil || !strings.Contains(err.Error(), "requires a signing credential role") || !strings.Contains(err.Error(), "UNAUTHENTICATED") {
 		t.Fatalf("resolveServeRegistrationPairs pairs=%#v err=%v, want unsigned signing-role contradiction", pairs, err)
 	}

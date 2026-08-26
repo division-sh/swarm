@@ -6,8 +6,8 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/packs"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
+	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -63,7 +63,7 @@ type ExecutorOptions struct {
 	MCPClient          *runtimemcp.Client
 	WorkflowSource     semanticview.Source
 	DataAccessStore    durabledata.ResourceAccessStore
-	ChannelBindings    []packs.OutboundBindingPlan
+	ChannelActivations *runtimechannelactivation.Owner
 	ActivityExecutor   DurableActivityExecutor
 	WorkspaceResolver  workspace.Resolver
 	ModelRuntimes      llm.AgentRuntimeResolver

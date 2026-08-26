@@ -42,6 +42,34 @@ func (s *OverlayStore) Set(ctx context.Context, key, value string) error {
 	return s.writable.Set(ctx, key, value)
 }
 
+func (s *OverlayStore) AdmitWithReceipt(ctx context.Context, key, value, receipt string) (WriteReceipt, error) {
+	if s == nil || s.writable == nil {
+		return WriteReceipt{}, ErrNotWritable
+	}
+	key = strings.TrimSpace(key)
+	if key == "" || strings.TrimSpace(receipt) == "" {
+		return WriteReceipt{}, fmt.Errorf("credential key and write receipt are required")
+	}
+	if s.primary != nil {
+		snapshotter, ok := s.primary.(Snapshotter)
+		if !ok || snapshotter == nil {
+			return WriteReceipt{}, fmt.Errorf("primary credential store does not provide atomic snapshots")
+		}
+		primary, err := snapshotter.Snapshot(ctx, key)
+		if err != nil {
+			return WriteReceipt{}, err
+		}
+		if primary.Present {
+			return WriteReceipt{}, fmt.Errorf("credential %q is owned by the read-only primary tier and cannot be admitted to the shadowed file tier", key)
+		}
+	}
+	writer, ok := s.writable.(ReceiptWriter)
+	if !ok || writer == nil {
+		return WriteReceipt{}, fmt.Errorf("writable credential store does not support receipt admission")
+	}
+	return writer.AdmitWithReceipt(ctx, key, value, receipt)
+}
+
 func (s *OverlayStore) List(ctx context.Context) ([]string, error) {
 	if s == nil {
 		return nil, nil

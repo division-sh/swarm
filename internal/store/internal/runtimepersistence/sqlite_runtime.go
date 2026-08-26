@@ -17,6 +17,7 @@ import (
 	storeactivityjournal "github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	storeactivityresult "github.com/division-sh/swarm/internal/store/internal/backend/activityresult"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
+	storechannelonboarding "github.com/division-sh/swarm/internal/store/internal/backend/channelonboarding"
 	storedecision "github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	storeeffect "github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
@@ -80,6 +81,7 @@ type SQLiteRuntimeStore struct {
 	genericScheduleSQLiteOwner   *storegenericschedule.SQLiteOwner
 	operatorChannelSQLiteOwner   *storeoperatorchannel.SQLiteOwner
 	durableDataOwner             *storedurabledata.Owner
+	channelOnboardingSQLiteOwner *storechannelonboarding.SQLiteOwner
 
 	schema                *SQLiteSchemaStore
 	backend               *sqlitebackend.Backend

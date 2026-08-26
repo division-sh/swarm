@@ -27,6 +27,11 @@ func FromCanonicalValue(value any) (Generation, error) {
 	return decode(encoded)
 }
 
+// Parse decodes the canonical durable representation of a plan generation.
+func Parse(encoded string) (Generation, error) {
+	return decode(encoded)
+}
+
 func (g Generation) Valid() bool {
 	return g.valid
 }

@@ -64,6 +64,8 @@ func externalEffectAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer
 		return startupProbeAuthorityCurrentPostgres(ctx, q, authority)
 	case runtimeeffects.AuthorityServeRegistration:
 		return serveRegistrationAuthorityCurrentPostgres(ctx, q, authority)
+	case runtimeeffects.AuthorityChannelConfirmation:
+		return channelConfirmationAuthorityCurrentPostgres(ctx, q, authority)
 	default:
 		return false, nil
 	}
@@ -126,6 +128,8 @@ func externalEffectAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, 
 		return startupProbeAuthorityCurrentSQLite(ctx, q, authority)
 	case runtimeeffects.AuthorityServeRegistration:
 		return serveRegistrationAuthorityCurrentSQLite(ctx, q, authority)
+	case runtimeeffects.AuthorityChannelConfirmation:
+		return channelConfirmationAuthorityCurrentSQLite(ctx, q, authority)
 	default:
 		return false, nil
 	}
@@ -173,7 +177,7 @@ func (s *EffectSQLiteOwner) RequireExternalEffectAuthorityTx(ctx context.Context
 }
 
 func externalEffectRunID(ctx context.Context, authority runtimeeffects.Authority) (string, bool, error) {
-	if authority.Kind == runtimeeffects.AuthorityConversationForkChat || authority.Kind == runtimeeffects.AuthorityStartupProbe || authority.Kind == runtimeeffects.AuthorityServeRegistration {
+	if authority.Kind == runtimeeffects.AuthorityConversationForkChat || authority.Kind == runtimeeffects.AuthorityStartupProbe || authority.Kind == runtimeeffects.AuthorityServeRegistration || authority.Kind == runtimeeffects.AuthorityChannelConfirmation {
 		return "", false, nil
 	}
 	runID := strings.TrimSpace(authority.SelectedFork.ForkRunID)
@@ -302,7 +306,26 @@ func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.
 			    WHERE newer.grant_id=runtime_generation_grants.grant_id
 			      AND newer.state_version>runtime_generation_grants.state_version
 			  )
-		`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration)
+			`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration)
+	case runtimeeffects.AuthorityChannelConfirmation:
+		confirmation := authority.ChannelConfirmation
+		res, err = tx.ExecContext(ctx, `
+			UPDATE connected_channel_activations activation SET updated_at=activation.updated_at
+			FROM channel_onboarding_operations operation
+			WHERE activation.activation_id=$1::uuid AND activation.operation_id=operation.operation_id
+			  AND activation.status='current' AND activation.activation_revision=$2
+			  AND activation.binding_revision=$3 AND activation.principal_id=$4::uuid
+			  AND activation.bundle_hash=$5 AND activation.context_publication_generation=$6
+			  AND activation.plan_generation=$7
+			  AND operation.operation_id=$8::uuid AND operation.operation_revision=$9
+			  AND operation.phase='delivering_confirmation'
+			  AND operation.confirmation_operation_id=$10::uuid
+			  AND operation.activation_revision=activation.activation_revision
+			  AND operation.binding_revision=activation.binding_revision
+		`, confirmation.ActivationID, confirmation.ActivationRevision, confirmation.BindingRevision,
+			confirmation.PrincipalID, confirmation.BundleHash, confirmation.ContextPublicationGeneration,
+			confirmation.PlanGeneration.Diagnostic(), confirmation.OnboardingOperationID, confirmation.OnboardingRevision,
+			confirmation.EffectOperationID)
 	default:
 		return invalidExternalAuthority(authority, "unsupported_kind")
 	}
@@ -375,7 +398,26 @@ func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx
 			    WHERE newer.grant_id=runtime_generation_grants.grant_id
 			      AND newer.state_version>runtime_generation_grants.state_version
 			  )
-		`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration)
+			`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration)
+	case runtimeeffects.AuthorityChannelConfirmation:
+		confirmation := authority.ChannelConfirmation
+		res, err = tx.ExecContext(ctx, `
+			UPDATE connected_channel_activations SET updated_at=updated_at
+			WHERE activation_id=? AND status='current' AND activation_revision=?
+			  AND binding_revision=? AND principal_id=? AND bundle_hash=?
+			  AND context_publication_generation=? AND plan_generation=?
+			  AND operation_id=? AND EXISTS (
+			    SELECT 1 FROM channel_onboarding_operations operation
+			    WHERE operation.operation_id=connected_channel_activations.operation_id
+			      AND operation.operation_revision=? AND operation.phase='delivering_confirmation'
+			      AND operation.confirmation_operation_id=?
+			      AND operation.activation_revision=connected_channel_activations.activation_revision
+			      AND operation.binding_revision=connected_channel_activations.binding_revision
+			  )
+		`, confirmation.ActivationID, confirmation.ActivationRevision, confirmation.BindingRevision,
+			confirmation.PrincipalID, confirmation.BundleHash, confirmation.ContextPublicationGeneration,
+			confirmation.PlanGeneration.Diagnostic(), confirmation.OnboardingOperationID, confirmation.OnboardingRevision,
+			confirmation.EffectOperationID)
 	default:
 		return invalidExternalAuthority(authority, "unsupported_kind")
 	}
@@ -456,6 +498,8 @@ func externalEffectAttemptLeasePostgres(ctx context.Context, q schemaQueryer, au
 		return authority.LeaseExpiresAt.UTC(), nil
 	case runtimeeffects.AuthorityServeRegistration:
 		return authority.LeaseExpiresAt.UTC(), nil
+	case runtimeeffects.AuthorityChannelConfirmation:
+		return authority.LeaseExpiresAt.UTC(), nil
 	case runtimeeffects.AuthorityConversationForkChat:
 		var lease time.Time
 		err := q.QueryRowContext(ctx, `
@@ -490,6 +534,8 @@ func externalEffectAttemptLeaseSQLite(ctx context.Context, q schemaQueryer, auth
 	case runtimeeffects.AuthorityStartupProbe:
 		return authority.LeaseExpiresAt.UTC(), nil
 	case runtimeeffects.AuthorityServeRegistration:
+		return authority.LeaseExpiresAt.UTC(), nil
+	case runtimeeffects.AuthorityChannelConfirmation:
 		return authority.LeaseExpiresAt.UTC(), nil
 	case runtimeeffects.AuthorityConversationForkChat:
 		var lease conversationForkTimeValue
@@ -550,6 +596,52 @@ func serveRegistrationAuthorityCurrentSQLite(ctx context.Context, q schemaQuerye
 		  AND f.process_owner_id=? AND f.runtime_generation=?
 		  AND NOT EXISTS (SELECT 1 FROM runtime_generation_grants newer WHERE newer.grant_id=f.grant_id AND newer.state_version>f.state_version)
 	`, startup.StartupAuthorityID, startup.StartupStateVersion, authority.ExecutionOwner, authority.FenceGeneration).Scan(&count)
+	return count == 1, err
+}
+
+func channelConfirmationAuthorityCurrentPostgres(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
+	confirmation := authority.ChannelConfirmation
+	var count int
+	err := q.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM connected_channel_activations activation
+		JOIN channel_onboarding_operations operation ON operation.operation_id=activation.operation_id
+		WHERE activation.activation_id=$1::uuid AND activation.status='current'
+		  AND activation.activation_revision=$2 AND activation.binding_revision=$3
+		  AND activation.principal_id=$4::uuid AND activation.bundle_hash=$5
+		  AND activation.context_publication_generation=$6 AND activation.plan_generation=$7
+		  AND operation.operation_id=$8::uuid AND operation.operation_revision=$9
+		  AND operation.phase='delivering_confirmation'
+		  AND operation.confirmation_operation_id=$10::uuid
+		  AND operation.activation_revision=activation.activation_revision
+		  AND operation.binding_revision=activation.binding_revision
+	`, confirmation.ActivationID, confirmation.ActivationRevision, confirmation.BindingRevision,
+		confirmation.PrincipalID, confirmation.BundleHash, confirmation.ContextPublicationGeneration,
+		confirmation.PlanGeneration.Diagnostic(), confirmation.OnboardingOperationID, confirmation.OnboardingRevision,
+		confirmation.EffectOperationID).Scan(&count)
+	return count == 1, err
+}
+
+func channelConfirmationAuthorityCurrentSQLite(ctx context.Context, q schemaQueryer, authority runtimeeffects.Authority) (bool, error) {
+	confirmation := authority.ChannelConfirmation
+	var count int
+	err := q.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM connected_channel_activations activation
+		JOIN channel_onboarding_operations operation ON operation.operation_id=activation.operation_id
+		WHERE activation.activation_id=? AND activation.status='current'
+		  AND activation.activation_revision=? AND activation.binding_revision=?
+		  AND activation.principal_id=? AND activation.bundle_hash=?
+		  AND activation.context_publication_generation=? AND activation.plan_generation=?
+		  AND operation.operation_id=? AND operation.operation_revision=?
+		  AND operation.phase='delivering_confirmation'
+		  AND operation.confirmation_operation_id=?
+		  AND operation.activation_revision=activation.activation_revision
+		  AND operation.binding_revision=activation.binding_revision
+	`, confirmation.ActivationID, confirmation.ActivationRevision, confirmation.BindingRevision,
+		confirmation.PrincipalID, confirmation.BundleHash, confirmation.ContextPublicationGeneration,
+		confirmation.PlanGeneration.Diagnostic(), confirmation.OnboardingOperationID, confirmation.OnboardingRevision,
+		confirmation.EffectOperationID).Scan(&count)
 	return count == 1, err
 }
 

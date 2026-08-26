@@ -21,12 +21,11 @@ import (
 const admittedEffectiveSourceProjectionVersion = "admitted-effective-source-projection/v1"
 
 type EffectiveSourceProjectionRequest struct {
-	Source                  semanticview.Source
-	WorkflowModule          runtimepipeline.WorkflowModule
-	BundleSourceFact        runtimecorrelation.BundleSourceFact
-	ProviderTriggerCatalog  *providertriggers.CatalogSnapshot
-	ChannelPlans            []packs.SatisfactionPlan
-	ChannelOutboundBindings []packs.OutboundBindingPlan
+	Source                 semanticview.Source
+	WorkflowModule         runtimepipeline.WorkflowModule
+	BundleSourceFact       runtimecorrelation.BundleSourceFact
+	ProviderTriggerCatalog *providertriggers.CatalogSnapshot
+	ChannelPlans           []packs.SatisfactionPlan
 }
 
 // AdmittedEffectiveSourceProjection is the single owner of the composed
@@ -72,25 +71,7 @@ func AdmitEffectiveSourceProjection(request EffectiveSourceProjectionRequest) (A
 	if err != nil {
 		return AdmittedEffectiveSourceProjection{}, fmt.Errorf("provider trigger event import failed: %w", err)
 	}
-	channelTools := map[string]runtimecontracts.ToolSchemaEntry{}
-	for _, binding := range request.ChannelOutboundBindings {
-		tools, toolErr := binding.RuntimeTools()
-		if toolErr != nil {
-			return AdmittedEffectiveSourceProjection{}, fmt.Errorf("compile channel binding %q runtime tools: %w", binding.BindingID(), toolErr)
-		}
-		for id, tool := range tools {
-			if _, duplicate := channelTools[id]; duplicate {
-				return AdmittedEffectiveSourceProjection{}, fmt.Errorf("duplicate channel runtime tool %q", id)
-			}
-			channelTools[id] = tool
-		}
-	}
-	source, err = semanticview.WithRuntimeTools(source, channelTools)
-	if err != nil {
-		return AdmittedEffectiveSourceProjection{}, err
-	}
-
-	identityValue, err := effectiveSourceIdentityValue(source, request.BundleSourceFact, request.ChannelPlans, request.ChannelOutboundBindings)
+	identityValue, err := effectiveSourceIdentityValue(source, request.BundleSourceFact, request.ChannelPlans)
 	if err != nil {
 		return AdmittedEffectiveSourceProjection{}, err
 	}
@@ -127,7 +108,7 @@ func packProjectionsForEffectiveSource(source semanticview.Source, suppliedTrigg
 	return connectors, triggers, nil
 }
 
-func effectiveSourceIdentityValue(source semanticview.Source, sourceFact runtimecorrelation.BundleSourceFact, channelPlans []packs.SatisfactionPlan, bindings []packs.OutboundBindingPlan) (map[string]any, error) {
+func effectiveSourceIdentityValue(source semanticview.Source, sourceFact runtimecorrelation.BundleSourceFact, channelPlans []packs.SatisfactionPlan) (map[string]any, error) {
 	bundleHash, bundleSource := sourceFact.StorageValues()
 	inputs := semanticview.BuildAuthoredEventEndpointCensus(source).InputPins()
 	inputValues := make([]map[string]any, 0, len(inputs))
@@ -229,7 +210,7 @@ func effectiveSourceIdentityValue(source semanticview.Source, sourceFact runtime
 		triggerValue = map[string]any{"catalog_generation": generation.Diagnostic(), "events": provenanceValues}
 	}
 
-	channelValues := make([]map[string]any, 0, len(channelPlans)+len(bindings))
+	channelValues := make([]map[string]any, 0, len(channelPlans))
 	for _, plan := range channelPlans {
 		generation, err := plan.Generation()
 		if err != nil {
@@ -237,28 +218,6 @@ func effectiveSourceIdentityValue(source semanticview.Source, sourceFact runtime
 		}
 		channelValues = append(channelValues, map[string]any{
 			"kind": "satisfaction", "id": plan.ChannelIdentity().ID(), "generation": generation.Diagnostic(),
-		})
-	}
-	for _, binding := range bindings {
-		generation, err := binding.Generation()
-		if err != nil {
-			return nil, fmt.Errorf("effective channel binding %q: %w", binding.BindingID(), err)
-		}
-		tools, err := binding.RuntimeTools()
-		if err != nil {
-			return nil, err
-		}
-		toolValues := make([]map[string]any, 0, len(tools))
-		for _, id := range sortedToolIDs(tools) {
-			value, valueErr := tools[id].CanonicalValue()
-			if valueErr != nil {
-				return nil, fmt.Errorf("effective channel binding %q tool %q: %w", binding.BindingID(), id, valueErr)
-			}
-			toolValues = append(toolValues, map[string]any{"id": id, "tool": value})
-		}
-		channelValues = append(channelValues, map[string]any{
-			"kind": "outbound_binding", "id": binding.BindingID(), "generation": generation.Diagnostic(),
-			"destination": binding.Destination().Interface(), "runtime_tools": toolValues,
 		})
 	}
 	sort.Slice(channelValues, func(left, right int) bool {

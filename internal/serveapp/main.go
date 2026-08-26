@@ -16,6 +16,7 @@ import (
 	"time"
 
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/operatorchannel"
@@ -610,7 +611,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
 		WorkflowModule: loaded.module, BundleSourceFact: bundleSourceFact,
 		ProviderTriggerCatalog: req.ProviderTriggerCatalog,
-		ChannelPlans:           req.ChannelPlans, ChannelOutboundBindings: req.ChannelBindings,
+		ChannelPlans:           req.ChannelPlans,
 	})
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("admit effective source projection: %w", err)
@@ -653,7 +654,11 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	validationOpts.ProviderCredentials = req.ProviderCredentials
 	validationOpts.ProviderTriggerCatalog = req.ProviderTriggerCatalog
 	validationOpts.ChannelPlans = req.ChannelPlans
-	validationOpts.ChannelOutboundBindings = req.ChannelBindings
+	declaredChannelPublication, err := channelonboarding.NewDeclaredOnlyChannelActivationPublication(req.ChannelBindings)
+	if err != nil {
+		return serveRuntimeBundleContext{}, fmt.Errorf("compile declared-only channel activation publication: %w", err)
+	}
+	validationOpts.ChannelActivationPublication = declaredChannelPublication
 	profile, err := req.Config.LLMBackendProfile()
 	if err != nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("resolve llm backend profile for workflow validation: %w", err)
@@ -693,7 +698,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 		ProviderTriggerCatalog:           req.ProviderTriggerCatalog,
 		NoticePresentation:               req.NoticePresentation,
 		ChannelPlans:                     req.ChannelPlans,
-		ChannelOutboundBindings:          req.ChannelBindings,
+		DeclaredChannelPublication:       declaredChannelPublication,
 		ScenarioDeclarations:             scenarioDeclarations,
 		BootStartedAt:                    req.BootStartedAt,
 		BootProgress:                     req.BootProgress,
@@ -1006,6 +1011,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		presenter.fail(4, "bundle_load", err)
 		return 1
 	}
+	channelOnboardingStore := stores.ChannelOnboarding()
 	bundleRuntimeCatalog, _ := stores.BundleRuntimeCatalog()
 	loadedBundles, err := loadServeRuntimeBundles(ctx, repo, bundleRuntimeCatalog, resolvedPaths, opts, platformPackBases)
 	if err != nil {
@@ -1427,6 +1433,56 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		APIVersion:          "v1",
 		SupportedTransports: []string{"tcp"},
 	}
+	credentialWriter, err := channelonboarding.NewCredentialWriter(providerCredentialStore)
+	if err != nil {
+		presenter.fail(20, "channel_onboarding", err)
+		return 1
+	}
+	confirmationEffects, ok := stores.Effects().(channelConfirmationEffectStore)
+	if !ok {
+		presenter.fail(20, "channel_onboarding", fmt.Errorf("selected store does not provide channel confirmation outcome ownership"))
+		return 1
+	}
+	confirmationDispatcher, err := newServeChannelConfirmationDispatcher(confirmationEffects, providerCredentialOwner, rt.ExecutionPosture, runtimeInstanceID, nil)
+	if err != nil {
+		presenter.fail(20, "channel_onboarding", err)
+		return 1
+	}
+	channelActivationRefresher := &serveChannelActivationRefresher{
+		manager: runtimeContextManager, store: channelOnboardingStore, identities: operatorChannels,
+		credentials: providerCredentialOwner,
+	}
+	connectedChannelReadiness := &serveConnectedChannelReadiness{
+		manager: runtimeContextManager, store: channelOnboardingStore, identities: operatorChannels,
+		credentials: providerCredentialOwner, effects: confirmationEffects, ingress: ready,
+	}
+	channelOnboarding, err := channelonboarding.NewService(channelonboarding.ServiceOptions{
+		Store: channelOnboardingStore, Identities: operatorChannels, Credentials: credentialWriter,
+		Catalog: func() (*channelonboarding.CandidateCatalog, error) {
+			if !publicIngressEnabled {
+				return nil, fmt.Errorf("webhook channel onboarding requires public ingress activation")
+			}
+			return serveChannelOnboardingCatalog(runtimeContextManager)
+		},
+		Activations: channelActivationRefresher, Confirmation: confirmationDispatcher, Readiness: connectedChannelReadiness,
+	})
+	if err != nil {
+		presenter.fail(20, "channel_onboarding", err)
+		return 1
+	}
+	channelDestructive, err := channelonboarding.NewDestructiveService(channelOnboardingStore, operatorChannels, channelActivationRefresher, nil)
+	if err != nil {
+		presenter.fail(20, "channel_onboarding", err)
+		return 1
+	}
+	supervisor.SetRuntimeRetiredHook(func(retireCtx context.Context, retired runtime.BundleContext) error {
+		bundleHash, bundleSource := retired.BundleSourceFact.StorageValues()
+		publication := retired.PublicationGeneration
+		requestKey := operatorchannel.Hash("channel-context-retirement-key-v1", bundleHash, bundleSource, fmt.Sprint(publication))
+		requestHash := operatorchannel.Hash("channel-context-retirement-request-v1", bundleHash, bundleSource, fmt.Sprint(publication))
+		_, retireErr := channelDestructive.RetireContext(retireCtx, bundleHash, bundleSource, publication, requestKey, requestHash, "runtime_context_retired")
+		return retireErr
+	})
 	handlers := apiv1.MergeOperatorHandlers(
 		apiv1.OperatorHealthHandlers(apiv1.HealthHandlerOptions{ExecutionPosture: rt.ExecutionPosture, Ready: readyFn, Database: apiStoreCaps.Database, Publication: runtimeContextManager}),
 		apiv1.OperatorRuntimeIdentityHandlers(apiv1.RuntimeIdentityHandlerOptions{Identity: runtimeIdentity, Publication: runtimeContextManager}),
@@ -1456,7 +1512,8 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		apiv1.OperatorRuntimeControlHandlers(apiv1.RuntimeControlHandlerOptions{Ingress: rt.RuntimeIngress, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
 		apiv1.OperatorRuntimeNukeHandlers(apiv1.RuntimeNukeHandlerOptions{Coordinator: apiStoreCaps.ResetCoordinator, Idempotency: idempotency}),
 		apiv1.OperatorAgentControlHandlers(apiv1.AgentControlHandlerOptions{Controller: dashboardDynamicAgentControl{supervisor: supervisor}, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
-		apiv1.OperatorChannelHandlers(apiv1.OperatorChannelHandlerOptions{Channels: operatorChannels, Idempotency: idempotency}),
+		apiv1.OperatorChannelHandlers(apiv1.OperatorChannelHandlerOptions{Channels: operatorChannels, Destructive: channelDestructive, Readback: channelOnboarding, Idempotency: idempotency}),
+		apiv1.ChannelOnboardingHandlers(apiv1.ChannelOnboardingHandlerOptions{Onboarding: channelOnboarding, Channels: operatorChannels}),
 	)
 	apiV1Handler, err := apiv1.NewHandler(apiv1.Options{
 		PlatformSpecPath:    resolvedPlatformSpecPath,
@@ -1497,7 +1554,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 			CredentialOwner: providerCredentialOwner, EffectsStore: stores.Effects(),
 			HTTP: runtimeregistration.HTTPExecutor{}, Posture: rt.ExecutionPosture, RuntimeInstanceID: runtimeInstanceID,
 			StartupAuthority: func() (runtimestartupownership.GrantEvidence, error) {
-				current, _, _ := supervisor.PublicIngressState()
+				current, _ := supervisor.PublicIngressState()
 				if current == nil {
 					return runtimestartupownership.GrantEvidence{}, fmt.Errorf("public ingress runtime owner is unavailable")
 				}
@@ -1510,12 +1567,17 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 			return 1
 		}
 		reconcilePublicIngress = func(reconcileCtx context.Context, generation runtimepublicingress.Generation) error {
-			_, bindings, manager := supervisor.PublicIngressState()
-			pairs, pairErr := resolveServeRegistrationPairs(bindings, manager)
+			_, manager := supervisor.PublicIngressState()
+			snapshot, pairErr := compileServeChannelActivationSnapshot(reconcileCtx, manager, channelOnboardingStore, operatorChannels, providerCredentialOwner)
 			if pairErr != nil {
 				return pairErr
 			}
-			return registrationController.Reconcile(reconcileCtx, generation, pairs)
+			selection, pairErr := resolveServeRegistrationPairs(snapshot, manager)
+			if pairErr != nil {
+				return pairErr
+			}
+			defer selection.Release()
+			return registrationController.Reconcile(reconcileCtx, generation, selection.Pairs)
 		}
 		publicHandler := http.NotFoundHandler()
 		if inboundHandler != nil {
@@ -1525,7 +1587,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 			Mode: publicIngressMode, PublicOrigin: opts.PublicWebhookBaseURL, ListenAddress: opts.PublicWebhookListen,
 			Handler: publicHandler, Readiness: ready,
 			StartupAuthority: func() string {
-				current, _, _ := supervisor.PublicIngressState()
+				current, _ := supervisor.PublicIngressState()
 				if current == nil {
 					return ""
 				}
@@ -1542,6 +1604,13 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 			presenter.fail(20, "public_ingress", controllerErr)
 			return 1
 		}
+		channelActivationRefresher.reconcile = func(refreshCtx context.Context) error {
+			generation := publicExposure.Generation()
+			if generation.ID == "" {
+				return fmt.Errorf("public exposure generation is unavailable for channel activation refresh")
+			}
+			return reconcilePublicIngress(refreshCtx, generation)
+		}
 		supervisor.SetRuntimePublishedHook(func(hookCtx context.Context) error {
 			generation := publicExposure.Generation()
 			if generation.ID == "" {
@@ -1554,8 +1623,8 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		})
 		supervisor.SetStartupOwnershipHandoffBarrier(registrationController.PrepareStartupHandoff)
 	}
-	supervisor.AddRuntimePublishedHook(func(context.Context) error {
-		current, _, _ := supervisor.PublicIngressState()
+	supervisor.AddRuntimePublishedHook(func(hookCtx context.Context) error {
+		current, _ := supervisor.PublicIngressState()
 		if current == nil {
 			return errors.New("published runtime is unavailable for operator-channel interface projection")
 		}
@@ -1565,7 +1634,10 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		if err != nil {
 			return err
 		}
-		return operatorChannels.ReplaceInterfaces(identities)
+		if err := operatorChannels.ReplaceInterfaces(identities); err != nil {
+			return err
+		}
+		return channelActivationRefresher.RefreshChannelActivations(hookCtx)
 	})
 	apiServerLease, err := processWorkOwner.Begin(ctx)
 	if err != nil {
@@ -1595,16 +1667,42 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		presenter.fail(22, "ready", err)
 		return 1
 	}
+	if err := channelActivationRefresher.publishChannelActivations(ctx); err != nil {
+		presenter.fail(22, "channel_onboarding", err)
+		return 1
+	}
 	initialRegistrationPairs := []runtimepublicingress.RegistrationPair{}
 	if publicIngressEnabled {
-		_, bindings, manager := supervisor.PublicIngressState()
-		initialRegistrationPairs, err = resolveServeRegistrationPairs(bindings, manager)
+		_, manager := supervisor.PublicIngressState()
+		snapshot, snapshotErr := compileServeChannelActivationSnapshot(ctx, manager, channelOnboardingStore, operatorChannels, providerCredentialOwner)
+		if snapshotErr != nil {
+			presenter.fail(22, "public_ingress", snapshotErr)
+			return 1
+		}
+		selection, selectionErr := resolveServeRegistrationPairs(snapshot, manager)
+		if selectionErr == nil {
+			initialRegistrationPairs = append(initialRegistrationPairs, selection.Pairs...)
+			selection.Release()
+		}
+		err = selectionErr
 		if err != nil {
 			presenter.fail(22, "public_ingress", err)
 			return 1
 		}
 		if err := publicExposure.Start(ctx); err != nil {
 			presenter.fail(22, "public_ingress", err)
+			return 1
+		}
+		if err := channelActivationRefresher.RefreshChannelActivations(ctx); err != nil {
+			presenter.fail(22, "channel_onboarding", err)
+			return 1
+		}
+		if err := channelDestructive.Recover(ctx); err != nil {
+			presenter.fail(22, "channel_onboarding", err)
+			return 1
+		}
+		if err := channelOnboarding.Recover(ctx); err != nil {
+			presenter.fail(22, "channel_onboarding", err)
 			return 1
 		}
 		if err := startServePublicIngressRenewal(ctx, processWorkOwner, publicExposure, reconcilePublicIngress); err != nil {
@@ -2162,17 +2260,19 @@ func plannedServeRuntimeContexts(contexts []serveRuntimeBundleContext) ([]runtim
 			return nil, err
 		}
 		planned = append(planned, runtime.BundleContext{
-			BundleSourceFact:          contextDef.bundleSourceFact,
-			BundleIdentity:            contextDef.bootIdentity,
-			Source:                    contextDef.loaded.source,
-			ContractsRoot:             contextDef.loaded.contractsRoot,
-			PlatformSpecPath:          contextDef.loaded.platformSpecPath,
-			Runtime:                   contextDef.runtime,
-			WorkOwner:                 contextDef.runtime.WorkOccurrence(),
-			StandingTargets:           targets,
-			ProviderTriggerGeneration: contextDef.providerTriggerGeneration,
-			InstalledTriggerSubjects:  contextDef.installedTriggerSubjects,
-			PackInventoryDigest:       contextDef.packInventoryDigest,
+			BundleSourceFact:           contextDef.bundleSourceFact,
+			BundleIdentity:             contextDef.bootIdentity,
+			Source:                     contextDef.loaded.source,
+			ContractsRoot:              contextDef.loaded.contractsRoot,
+			PlatformSpecPath:           contextDef.loaded.platformSpecPath,
+			Runtime:                    contextDef.runtime,
+			WorkOwner:                  contextDef.runtime.WorkOccurrence(),
+			StandingTargets:            targets,
+			ProviderTriggerGeneration:  contextDef.providerTriggerGeneration,
+			InstalledTriggerSubjects:   contextDef.installedTriggerSubjects,
+			PackInventoryDigest:        contextDef.packInventoryDigest,
+			ChannelPlans:               contextDef.runtime.Options.ChannelPlans,
+			DeclaredChannelPublication: contextDef.runtime.Options.DeclaredChannelPublication,
 		})
 	}
 	return planned, nil
@@ -2420,17 +2520,19 @@ func startServeRuntimeContexts(ctx context.Context, contexts []serveRuntimeBundl
 				}
 			}
 			if err := manager.Register(runtime.BundleContext{
-				BundleSourceFact:          contextDef.bundleSourceFact,
-				BundleIdentity:            contextDef.bootIdentity,
-				Source:                    contextDef.loaded.source,
-				ContractsRoot:             contextDef.loaded.contractsRoot,
-				PlatformSpecPath:          contextDef.loaded.platformSpecPath,
-				Runtime:                   contextDef.runtime,
-				WorkOwner:                 contextDef.runtime.WorkOccurrence(),
-				StandingTargets:           targets,
-				ProviderTriggerGeneration: contextDef.providerTriggerGeneration,
-				InstalledTriggerSubjects:  contextDef.installedTriggerSubjects,
-				PackInventoryDigest:       contextDef.packInventoryDigest,
+				BundleSourceFact:           contextDef.bundleSourceFact,
+				BundleIdentity:             contextDef.bootIdentity,
+				Source:                     contextDef.loaded.source,
+				ContractsRoot:              contextDef.loaded.contractsRoot,
+				PlatformSpecPath:           contextDef.loaded.platformSpecPath,
+				Runtime:                    contextDef.runtime,
+				WorkOwner:                  contextDef.runtime.WorkOccurrence(),
+				StandingTargets:            targets,
+				ProviderTriggerGeneration:  contextDef.providerTriggerGeneration,
+				InstalledTriggerSubjects:   contextDef.installedTriggerSubjects,
+				PackInventoryDigest:        contextDef.packInventoryDigest,
+				ChannelPlans:               contextDef.runtime.Options.ChannelPlans,
+				DeclaredChannelPublication: contextDef.runtime.Options.DeclaredChannelPublication,
 			}); err != nil {
 				rollback()
 				return err

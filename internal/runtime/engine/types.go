@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -363,37 +364,38 @@ type EmitIntent struct {
 }
 
 type ActivityIntent struct {
-	Context          events.DeliveryContext
-	RoutingSource    events.RoutingSource
-	ActivityID       string
-	Tool             string
-	PlanGeneration   plangeneration.Generation
-	BundleHash       string
-	WorkflowVersion  string
-	Input            semanticvalue.Value
-	ApprovalDecision string
-	EffectClass      runtimecontracts.ActivityEffectClass
-	SuccessEvent     string
-	FailureEvent     string
-	RevisionEvent    string
-	RejectedEvent    string
-	RetryMaxAttempts int
-	RetryBackoff     string
-	ForkPolicy       runtimecontracts.ActivityForkPolicy
-	EntityID         identity.EntityID
-	Owner            activityidentity.Owner
-	ExecutionFlowID  identity.FlowID
-	FlowInstance     string
-	HandlerEventKey  string
-	SourceEventID    string
-	SourceRunID      string
-	SourceTaskID     string
-	ParentEventID    string
-	ChainDepth       int
-	Attempt          int
-	Generation       attemptgeneration.Generation
-	LoopStage        string
-	ExecutionMode    executionmode.Mode
+	Context                     events.DeliveryContext
+	RoutingSource               events.RoutingSource
+	ActivityID                  string
+	Tool                        string
+	PlanGeneration              plangeneration.Generation
+	ChannelActivationGeneration channelonboarding.ChannelActivationGeneration
+	BundleHash                  string
+	WorkflowVersion             string
+	Input                       semanticvalue.Value
+	ApprovalDecision            string
+	EffectClass                 runtimecontracts.ActivityEffectClass
+	SuccessEvent                string
+	FailureEvent                string
+	RevisionEvent               string
+	RejectedEvent               string
+	RetryMaxAttempts            int
+	RetryBackoff                string
+	ForkPolicy                  runtimecontracts.ActivityForkPolicy
+	EntityID                    identity.EntityID
+	Owner                       activityidentity.Owner
+	ExecutionFlowID             identity.FlowID
+	FlowInstance                string
+	HandlerEventKey             string
+	SourceEventID               string
+	SourceRunID                 string
+	SourceTaskID                string
+	ParentEventID               string
+	ChainDepth                  int
+	Attempt                     int
+	Generation                  attemptgeneration.Generation
+	LoopStage                   string
+	ExecutionMode               executionmode.Mode
 }
 
 func (i ActivityIntent) Normalized() ActivityIntent {

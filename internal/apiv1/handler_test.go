@@ -50,8 +50,8 @@ func TestRegistryMethodNamesMatchGeneratedOpenRPC(t *testing.T) {
 	if got := registry.MethodNames(); !reflect.DeepEqual(got, openRPCNames) {
 		t.Fatalf("registry method names drifted from generated OpenRPC:\nregistry=%v\nopenrpc=%v", got, openRPCNames)
 	}
-	if len(openRPCNames) != 75 {
-		t.Fatalf("method count = %d, want 75", len(openRPCNames))
+	if len(openRPCNames) != 78 {
+		t.Fatalf("method count = %d, want 78", len(openRPCNames))
 	}
 	if _, ok := registry.Method("test.setup_entities"); !ok {
 		t.Fatal("test.setup_entities missing from generated registry")
@@ -328,6 +328,24 @@ func TestRequestBodyHashUsesCanonicalSemanticNumbers(t *testing.T) {
 	decimal := requestBodyHash("mailbox.decide", mustTestSemanticObject(map[string]any{"fields": map[string]any{"score": 1.0}}))
 	if integer != decimal {
 		t.Fatalf("equivalent semantic numbers have different hashes: %q != %q", integer, decimal)
+	}
+}
+
+func TestChannelOnboardingRequestHashDoesNotDigestProviderCredential(t *testing.T) {
+	credentialA := mustTestSemanticObject(map[string]any{"provider": "telegram", "provider_credential": "secret-a"})
+	credentialB := mustTestSemanticObject(map[string]any{"provider": "telegram", "provider_credential": "secret-b"})
+	withoutCredential := mustTestSemanticObject(map[string]any{"provider": "telegram"})
+
+	startA := requestBodyHash("channel.onboarding_start", requestHashParams("channel.onboarding_start", credentialA))
+	startB := requestBodyHash("channel.onboarding_start", requestHashParams("channel.onboarding_start", credentialB))
+	if startA != startB {
+		t.Fatalf("credential values produced distinct reusable request digests: %q != %q", startA, startB)
+	}
+	if startA == requestBodyHash("channel.onboarding_start", requestHashParams("channel.onboarding_start", withoutCredential)) {
+		t.Fatal("credential presence was erased from onboarding request identity")
+	}
+	if requestBodyHash("unrelated", requestHashParams("unrelated", credentialA)) == requestBodyHash("unrelated", requestHashParams("unrelated", credentialB)) {
+		t.Fatal("credential redaction leaked into unrelated API methods")
 	}
 }
 

@@ -14,6 +14,8 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/durabledata"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
+	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -46,7 +48,7 @@ type Executor struct {
 	mcpClient                      *runtimemcp.Client
 	workflowSource                 semanticview.Source
 	dataAccessStore                durabledata.ResourceAccessStore
-	channelOperations              map[string]channelOperation
+	channelActivations             *runtimechannelactivation.Owner
 	activityExecutor               DurableActivityExecutor
 	workspaces                     workspace.Resolver
 	modelRuntimes                  llm.AgentRuntimeResolver
@@ -87,7 +89,7 @@ func NewExecutorWithOptions(bus EventPublisher, opts ExecutorOptions) *Executor 
 		mcpClient:                      opts.MCPClient,
 		workflowSource:                 opts.WorkflowSource,
 		dataAccessStore:                opts.DataAccessStore,
-		channelOperations:              compileChannelOperations(opts.ChannelBindings),
+		channelActivations:             opts.ChannelActivations,
 		activityExecutor:               opts.ActivityExecutor,
 		workspaces:                     opts.WorkspaceResolver,
 		modelRuntimes:                  opts.ModelRuntimes,
@@ -113,13 +115,13 @@ func NewExecutorWithOptions(bus EventPublisher, opts ExecutorOptions) *Executor 
 		}
 	}
 	exec.authorizer = NewToolAuthorizer(bus, exec.toolAuthorizationDecision)
-	exec.validator = NewToolInputValidator(exec.contractDefinitionsForActor)
+	exec.validator = NewContextToolInputValidator(exec.contractDefinitionsForActorInContext)
 	exec.dispatcher = NewToolDispatcher(
 		func(ctx context.Context, actor models.AgentConfig, name string, input any) (any, error) {
 			return exec.handleEmitTool(ctx, actor, name, input)
 		},
-		func(actor models.AgentConfig, name string) (ExecutionTool, bool, error) {
-			return exec.resolveExecutionTool(actor, name)
+		func(ctx context.Context, actor models.AgentConfig, name string) (ExecutionTool, bool, error) {
+			return exec.resolveExecutionToolInContext(ctx, actor, name)
 		},
 		func(ctx context.Context, actor models.AgentConfig, tool ExecutionTool, input any) (any, error) {
 			return exec.execHTTPTool(ctx, actor, tool, input)
@@ -150,8 +152,30 @@ func (e *Executor) SetModelRuntimes(runtimes llm.AgentRuntimeResolver) {
 func (e *Executor) contractDefinitions() ([]llm.ToolDefinition, error) {
 	e.mu.RLock()
 	source := e.workflowSource
+	activations := e.channelActivations
 	client := e.mcpClient
 	e.mu.RUnlock()
+	var release func()
+	if activations != nil {
+		if lease, available := activations.AcquirePresentation(); available {
+			release = lease.Release
+			var err error
+			source, err = semanticview.WithChannelRuntimeToolProjection(source, lease.ToolEntries())
+			if err != nil {
+				release()
+				return nil, err
+			}
+		} else {
+			var err error
+			source, err = semanticview.WithChannelRuntimeToolProjection(source, map[string]runtimecontracts.ToolSchemaEntry{})
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	if release != nil {
+		defer release()
+	}
 	var discovered map[string]runtimemcp.DiscoveredTool
 	if client != nil {
 		discovered = client.DiscoveredTools()
@@ -163,10 +187,24 @@ func (e *Executor) contractDefinitionsForActor(actor *models.AgentConfig) ([]llm
 	if actor == nil {
 		return e.contractDefinitions()
 	}
+	return e.contractDefinitionsForActorInContext(context.Background(), actor)
+}
+
+func (e *Executor) contractDefinitionsForActorInContext(ctx context.Context, actor *models.AgentConfig) ([]llm.ToolDefinition, error) {
+	if actor == nil {
+		return e.contractDefinitions()
+	}
 	e.mu.RLock()
 	source := e.workflowSource
 	client := e.mcpClient
 	e.mu.RUnlock()
+	if lease, pinned := channelRuntimeExecutionPublicationFromContext(ctx); pinned {
+		var err error
+		source, err = semanticview.WithChannelRuntimeToolProjection(source, lease.ToolEntries())
+		if err != nil {
+			return nil, err
+		}
+	}
 	var discovered map[string]runtimemcp.DiscoveredTool
 	if client != nil {
 		discovered = client.DiscoveredTools()
@@ -175,12 +213,23 @@ func (e *Executor) contractDefinitionsForActor(actor *models.AgentConfig) ([]llm
 }
 
 func (e *Executor) resolveExecutionTool(actor models.AgentConfig, name string) (ExecutionTool, bool, error) {
+	return e.resolveExecutionToolInContext(context.Background(), actor, name)
+}
+
+func (e *Executor) resolveExecutionToolInContext(ctx context.Context, actor models.AgentConfig, name string) (ExecutionTool, bool, error) {
 	name = normalizeNativeToolName(name)
 	e.mu.RLock()
 	source := e.workflowSource
 	client := e.mcpClient
 	allowInternalLegacy := e.allowInternalLegacyEntityTools
 	e.mu.RUnlock()
+	if lease, pinned := channelRuntimeExecutionLeaseFromContext(ctx, name); pinned {
+		var err error
+		source, err = semanticview.WithChannelRuntimeToolProjection(source, lease.ToolEntries())
+		if err != nil {
+			return ExecutionTool{}, false, err
+		}
+	}
 	var discovered map[string]runtimemcp.DiscoveredTool
 	if client != nil {
 		discovered = client.DiscoveredTools()
@@ -208,6 +257,18 @@ func (e *Executor) ToolDefinitionsForActor(actor models.AgentConfig) []llm.ToolD
 	source := e.workflowSource
 	client := e.mcpClient
 	e.mu.RUnlock()
+	return e.toolDefinitionsForActor(actor, source, client, nil)
+}
+
+func (e *Executor) toolDefinitionsForActor(actor models.AgentConfig, source semanticview.Source, client *runtimemcp.Client, channelTools map[string]runtimecontracts.ToolSchemaEntry) []llm.ToolDefinition {
+	if channelTools != nil {
+		var err error
+		source, err = semanticview.WithChannelRuntimeToolProjection(source, channelTools)
+		if err != nil {
+			processWarn("tool-executor", "failed to project current channel tool definitions: %v", err)
+			return nil
+		}
+	}
 	var discovered map[string]runtimemcp.DiscoveredTool
 	if client != nil {
 		discovered = client.DiscoveredTools()
@@ -247,7 +308,40 @@ func (e *Executor) ToolDefinitionsForActor(actor models.AgentConfig) []llm.ToolD
 }
 
 func (e *Executor) ToolDefinitionsForActorInContext(ctx context.Context, actor models.AgentConfig) []llm.ToolDefinition {
-	defs := e.ToolDefinitionsForActor(actor)
+	if e == nil {
+		return nil
+	}
+	e.mu.RLock()
+	source := e.workflowSource
+	client := e.mcpClient
+	e.mu.RUnlock()
+	definitions := e.toolDefinitionsForActor(actor, source, client, nil)
+	return e.filterToolDefinitionsForActorInContext(ctx, actor, definitions)
+}
+
+func (e *Executor) AcquireToolDefinitionsForActorInContext(ctx context.Context, actor models.AgentConfig) (context.Context, []llm.ToolDefinition, func(), error) {
+	if e == nil {
+		return ctx, nil, func() {}, fmt.Errorf("tool executor is unavailable")
+	}
+	e.mu.RLock()
+	source := e.workflowSource
+	activations := e.channelActivations
+	client := e.mcpClient
+	e.mu.RUnlock()
+	if activations == nil {
+		definitions := e.toolDefinitionsForActor(actor, source, client, nil)
+		return ctx, e.filterToolDefinitionsForActorInContext(ctx, actor, definitions), func() {}, nil
+	}
+	lease, err := activations.AcquirePresentationContext(ctx)
+	if err != nil {
+		return ctx, nil, func() {}, fmt.Errorf("acquire channel activation publication: %w", err)
+	}
+	pinnedCtx := withChannelActivationGeneration(ctx, lease)
+	definitions := e.toolDefinitionsForActor(actor, source, client, lease.ToolEntries())
+	return pinnedCtx, e.filterToolDefinitionsForActorInContext(pinnedCtx, actor, definitions), lease.Release, nil
+}
+
+func (e *Executor) filterToolDefinitionsForActorInContext(ctx context.Context, actor models.AgentConfig, defs []llm.ToolDefinition) []llm.ToolDefinition {
 	roleScopedNames := e.RoleScopedEntityToolNamesForActor(actor)
 	if len(roleScopedNames) == 0 || e.roleScopedEntityToolsEligibleForCurrentTurn(ctx, actor) {
 		return e.filterNativeDefinitionsForWorkspaceExecution(ctx, actor, defs)
@@ -409,11 +503,20 @@ func (e *Executor) execute(ctx context.Context, name string, input any, outputId
 		e.emitToolExecutionEvent(ctx, actor, name, input, nil, err, 0, "admission")
 		return nil, err
 	}
+	admittedCtx, channelLease, err := e.admitChannelRuntimeExecution(ctx, name)
+	if err != nil {
+		e.emitToolExecutionEvent(ctx, actor, name, input, nil, err, 0, "admission")
+		return nil, err
+	}
+	ctx = admittedCtx
+	if channelLease != nil {
+		defer channelLease.Release()
+	}
 	if err := e.authorizeToolUsage(ctx, actor, name); err != nil {
 		e.emitToolExecutionEvent(ctx, actor, name, input, nil, err, 0, "authorize")
 		return nil, err
 	}
-	if err := e.validateRuntimeToolInput(actor, name, input); err != nil {
+	if err := e.validateRuntimeToolInput(ctx, actor, name, input); err != nil {
 		wrapped := failures.WrapDetail(
 			"invalid_tool_input",
 			"tool-executor",
@@ -428,7 +531,6 @@ func (e *Executor) execute(ctx context.Context, name string, input any, outputId
 	start := time.Now()
 	dispatchCtx := withExternalDispatchAdmissionCollector(ctx)
 	var out any
-	var err error
 	if outputIdentity != nil {
 		out, err = e.handleEmitTool(dispatchCtx, actor, name, input, *outputIdentity)
 	} else {
@@ -441,11 +543,11 @@ func (e *Executor) execute(ctx context.Context, name string, input any, outputId
 	return out, err
 }
 
-func (e *Executor) validateRuntimeToolInput(actor models.AgentConfig, name string, input any) error {
+func (e *Executor) validateRuntimeToolInput(ctx context.Context, actor models.AgentConfig, name string, input any) error {
 	if e.validator == nil {
 		return nil
 	}
-	return e.validator.Validate(&actor, name, input)
+	return e.validator.ValidateContext(ctx, &actor, name, input)
 }
 
 func normalizeRuntimeToolInput(name string, input any) any {
@@ -679,7 +781,7 @@ func (e *Executor) humanTaskStoreDependency() (HumanTaskCardStore, error) {
 }
 
 func (e *Executor) ValidateRuntimeToolInputForTest(name string, input any) error {
-	return e.validateRuntimeToolInput(models.AgentConfig{}, name, input)
+	return e.validateRuntimeToolInput(context.Background(), models.AgentConfig{}, name, input)
 }
 
 func (e *Executor) ExecScheduleDirect(actor models.AgentConfig, input any) (any, error) {

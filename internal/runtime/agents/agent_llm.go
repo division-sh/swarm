@@ -44,6 +44,10 @@ type contextAwareActorScopedToolExecutor interface {
 	ToolDefinitionsForActorInContext(context.Context, models.AgentConfig) []llm.ToolDefinition
 }
 
+type leasedActorScopedToolExecutor interface {
+	AcquireToolDefinitionsForActorInContext(context.Context, models.AgentConfig) (context.Context, []llm.ToolDefinition, func(), error)
+}
+
 func newLLMAgent(cfg models.AgentConfig, modelRuntime llm.Runtime, toolExecutor actorScopedToolExecutor, tools []llm.ToolDefinition, _ LLMAgentOptions) (*LLMAgent, error) {
 	subs := make([]events.EventType, 0, len(cfg.Subscriptions))
 	for _, s := range cfg.Subscriptions {
@@ -148,7 +152,11 @@ func (a *LLMAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Even
 	ctx = agentmemory.WithExecution(ctx, a.cfg.Memory, agentmemory.Identity{RunID: evt.RunID(), Agent: a.cfg.Identity})
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx = runtimebus.WithEmittedEventsRecorder(ctx, recorder)
-	a.applyTurnToolDefinitions(ctx)
+	ctx, releaseToolPublication, err := a.applyTurnToolDefinitions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseToolPublication()
 
 	// Human-task outcomes are delivered directly to the requester and correlate
 	// through the canonical decision-card identity.
@@ -195,19 +203,34 @@ func admitAgentTurnExecutionMode(cfg models.AgentConfig, evt events.Event) (runt
 	return cfg.ExecutionMode, nil
 }
 
-func (a *LLMAgent) applyTurnToolDefinitions(ctx context.Context) {
+func (a *LLMAgent) applyTurnToolDefinitions(ctx context.Context) (context.Context, func(), error) {
 	if a == nil || a.conversation == nil || a.toolExecutor == nil {
-		return
+		return ctx, func() {}, nil
+	}
+	if leased, ok := a.toolExecutor.(leasedActorScopedToolExecutor); ok {
+		pinnedCtx, tools, release, err := leased.AcquireToolDefinitionsForActorInContext(ctx, a.cfg)
+		if err != nil {
+			return ctx, func() {}, err
+		}
+		a.conversation.Tools = tools
+		if a.conversation.Session != nil {
+			a.conversation.Session.Tools = tools
+		}
+		if release == nil {
+			release = func() {}
+		}
+		return pinnedCtx, release, nil
 	}
 	contextAware, ok := a.toolExecutor.(contextAwareActorScopedToolExecutor)
 	if !ok {
-		return
+		return ctx, func() {}, nil
 	}
 	tools := contextAware.ToolDefinitionsForActorInContext(ctx, a.cfg)
 	a.conversation.Tools = tools
 	if a.conversation.Session != nil {
 		a.conversation.Session.Tools = tools
 	}
+	return ctx, func() {}, nil
 }
 
 func (a *LLMAgent) prepareConversationForInvocation(evt events.Event) {
@@ -325,7 +348,11 @@ func (a *LLMAgent) BoardStep(ctx context.Context, directive runtimeagentcontrol.
 	ctx = agentmemory.WithExecution(ctx, a.cfg.Memory, agentmemory.Identity{RunID: evt.RunID(), Agent: a.cfg.Identity})
 	recorder := runtimebus.NewEmittedEventsRecorder()
 	ctx = runtimebus.WithEmittedEventsRecorder(ctx, recorder)
-	a.applyTurnToolDefinitions(ctx)
+	ctx, releaseToolPublication, err := a.applyTurnToolDefinitions(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer releaseToolPublication()
 	frameDirective := &agentframe.Directive{
 		Identity: strings.TrimSpace(evt.ID()),
 		Text:     directiveText,

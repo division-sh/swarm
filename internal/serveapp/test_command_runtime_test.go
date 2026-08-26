@@ -348,8 +348,16 @@ channels:
 	if rt == nil || rt.Options.WorkflowModule == nil {
 		t.Fatal("configured channel runtime is incomplete")
 	}
-	if _, ok := rt.Options.WorkflowModule.SemanticSource().ToolEntries()["channel.ops.deliver"]; !ok {
-		t.Fatal("configured channel runtime omitted projected channel.ops.deliver tool")
+	if _, contaminated := rt.Options.WorkflowModule.SemanticSource().ToolEntries()["channel.ops.deliver"]; contaminated {
+		t.Fatal("configured channel runtime contaminated immutable source with deployment tool")
+	}
+	presentation, available := rt.ChannelActivations.AcquirePresentation()
+	if !available {
+		t.Fatal("configured channel activation publication is unavailable")
+	}
+	defer presentation.Release()
+	if _, ok := presentation.ToolEntries()["channel.ops.deliver"]; !ok {
+		t.Fatal("configured channel activation publication omitted channel.ops.deliver tool")
 	}
 }
 

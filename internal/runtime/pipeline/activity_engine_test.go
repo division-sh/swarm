@@ -19,6 +19,7 @@ import (
 
 	runlifecyclefixture "github.com/division-sh/swarm/internal/testutil/runlifecyclefixture"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/providerconnectors"
@@ -109,6 +110,11 @@ func TestPrivateChannelGenerationIsTypedAcrossIntentJournalAndRecovery(t *testin
 	intent := testNonIdempotentActivityIntent("run-1", "evt-1", "entity-1")
 	intent.Tool = runtimecontracts.PrivateChannelActivityPrefix + "ops.deliver.gtest"
 	intent.PlanGeneration = generation
+	publication, err := channelonboarding.NewChannelActivationPublication(nil)
+	if err != nil {
+		t.Fatalf("activation publication: %v", err)
+	}
+	intent.ChannelActivationGeneration = publication.Generation()
 	request, err := activityRequestEmitIntent(intent)
 	if err != nil {
 		t.Fatalf("activityRequestEmitIntent: %v", err)
@@ -120,6 +126,9 @@ func TestPrivateChannelGenerationIsTypedAcrossIntentJournalAndRecovery(t *testin
 	if !recovered.PlanGeneration.Equal(generation) {
 		t.Fatalf("recovered generation = %q, want %q", recovered.PlanGeneration.Diagnostic(), generation.Diagnostic())
 	}
+	if !recovered.ChannelActivationGeneration.Equal(intent.ChannelActivationGeneration) {
+		t.Fatalf("recovered activation generation = %q, want %q", recovered.ChannelActivationGeneration.Diagnostic(), intent.ChannelActivationGeneration.Diagnostic())
+	}
 
 	var payload map[string]any
 	if err := json.Unmarshal(request.Event.Payload(), &payload); err != nil {
@@ -130,8 +139,15 @@ func TestPrivateChannelGenerationIsTypedAcrossIntentJournalAndRecovery(t *testin
 	if _, err := activityIntentFromRequestEvent(missing); err == nil || !strings.Contains(err.Error(), "requires plan_generation") {
 		t.Fatalf("missing private generation error = %v", err)
 	}
+	payload["plan_generation"] = generation.Diagnostic()
+	delete(payload, "channel_activation_generation")
+	missingActivation := activityRequestEventWithPayload(t, request.Event, payload)
+	if _, err := activityIntentFromRequestEvent(missingActivation); err == nil || !strings.Contains(err.Error(), "channel_activation_generation") {
+		t.Fatalf("missing private activation generation error = %v", err)
+	}
 
 	payload["plan_generation"] = "sha256:not-a-digest"
+	payload["channel_activation_generation"] = intent.ChannelActivationGeneration.Diagnostic()
 	malformed := activityRequestEventWithPayload(t, request.Event, payload)
 	if _, err := activityIntentFromRequestEvent(malformed); err == nil || !strings.Contains(err.Error(), "invalid length") {
 		t.Fatalf("malformed private generation error = %v", err)
