@@ -258,17 +258,31 @@ func (v *PolicyValue) UnmarshalYAML(node *yaml.Node) error {
 		*v = PolicyValue{}
 		return nil
 	}
-	if node.Kind == yaml.MappingNode && (hasYAMLMappingKey(node, "value") || hasYAMLMappingKey(node, "description") || hasYAMLMappingKey(node, "override")) {
+	root := yamlsource.ValueFromNode(node)
+	structured := false
+	if root.Presence() == yamlsource.PresenceMapping || root.Presence() == yamlsource.PresenceEmptyMapping {
+		fields, err := root.Mapping()
+		if err != nil {
+			return err
+		}
+		for _, field := range fields {
+			switch strings.TrimSpace(field.Name) {
+			case "value", "description", "override":
+				structured = true
+			}
+		}
+	}
+	if structured {
 		type alias PolicyValue
 		var aux alias
-		if err := node.Decode(&aux); err != nil {
+		if err := root.Project(&aux); err != nil {
 			return err
 		}
 		*v = PolicyValue(aux)
 		return nil
 	}
 	var raw any
-	if err := node.Decode(&raw); err != nil {
+	if err := root.Project(&raw); err != nil {
 		return err
 	}
 	*v = PolicyValue{Value: raw}
@@ -399,16 +413,4 @@ func validateYAMLMappingKeys(node *yaml.Node, context string, allowed map[string
 		}
 	}
 	return nil
-}
-
-func hasYAMLMappingKey(node *yaml.Node, key string) bool {
-	if node == nil || node.Kind != yaml.MappingNode {
-		return false
-	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		if strings.TrimSpace(node.Content[i].Value) == key {
-			return true
-		}
-	}
-	return false
 }

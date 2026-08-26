@@ -128,6 +128,16 @@ func TestPolicyDocumentDecodesMergeExpandedMapping(t *testing.T) {
 	}
 }
 
+func TestPolicyDocumentDecodesSiblingAnchorInsideDeclaration(t *testing.T) {
+	var doc PolicyDocument
+	if err := yaml.Unmarshal([]byte("base: &base\n  value: 7\nlimit:\n  <<: *base\n"), &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal PolicyDocument: %v", err)
+	}
+	if got := doc.Values["limit"].Value; got != 7 {
+		t.Fatalf("sibling-anchored policy limit = %#v, want 7", got)
+	}
+}
+
 func TestPolicyDocumentValidationIsTypedSectionNotGenericValue(t *testing.T) {
 	var doc PolicyDocument
 	if err := yaml.Unmarshal([]byte(`
