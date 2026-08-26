@@ -37,15 +37,14 @@ const (
 func CopyStaticMultiEntityRetirement(t testing.TB, handler StaticRetirementHandler) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
+	removeClosedVariantFiles(t, root, "entities.yaml", "events.yaml", "nodes.yaml")
 	writeClosedVariantFile(t, root, "package.yaml", `name: static-multi-entity-retirement
 version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 flows:
   - {id: treasury, flow: treasury, mode: static}
 `)
-	for _, name := range []string{"schema.yaml", "policy.yaml", "tools.yaml", "agents.yaml", "events.yaml", "nodes.yaml", "entities.yaml"} {
-		writeClosedVariantFile(t, root, name, "{}\n")
-	}
+	writeClosedVariantFile(t, root, "schema.yaml", "{}\n")
 	writeClosedVariantFile(t, root, "flows/treasury/schema.yaml", `name: treasury
 mode: static
 initial_state: active
@@ -72,9 +71,6 @@ opco.spend_recorded:
     type: number
     initial: 0
 `)
-	for _, name := range []string{"policy.yaml", "agents.yaml"} {
-		writeClosedVariantFile(t, root, "flows/treasury/"+name, "{}\n")
-	}
 	var body string
 	switch handler {
 	case StaticRetirementCreate:
@@ -169,15 +165,13 @@ subject.observed:
 		t.Fatalf("unsupported root static handler variant %d", handler)
 	}
 	writeClosedVariantFile(t, root, "nodes.yaml", nodes)
-	for _, name := range []string{"policy.yaml", "tools.yaml", "agents.yaml"} {
-		writeClosedVariantFile(t, root, name, "{}\n")
-	}
 	return root
 }
 
 func CopyServedJoinProof(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
+	removeClosedVariantFiles(t, root, "entities.yaml")
 	files := map[string]string{
 		"package.yaml": `name: served-join-proof
 version: "1.0.0"
@@ -270,7 +264,6 @@ fork-probe:
         writes:
           - {source_field: marker, target_field: probe}
 `,
-		"policy.yaml": "{}\n", "tools.yaml": "{}\n", "agents.yaml": "{}\n",
 	}
 	for name, source := range files {
 		writeClosedVariantFile(t, root, name, source)
@@ -294,10 +287,8 @@ initial_state: new
 terminal_states: [done]
 states: [new, done]
 `,
-		"entities.yaml": "{}\n",
-		"events.yaml":   "scan.requested:\n  swarm: {source: external}\n  topic: text\n",
-		"nodes.yaml":    "scan-orchestrator:\n  id: scan-orchestrator\n  execution_type: system_node\n  subscribes_to: [scan.requested]\n",
-		"policy.yaml":   "{}\n", "tools.yaml": "{}\n", "agents.yaml": "{}\n",
+		"events.yaml": "scan.requested:\n  swarm: {source: external}\n  topic: text\n",
+		"nodes.yaml":  "scan-orchestrator:\n  id: scan-orchestrator\n  execution_type: system_node\n  subscribes_to: [scan.requested]\n",
 		"flows/operating/schema.yaml": `name: operating
 mode: static
 initial_state: initializing
@@ -325,10 +316,8 @@ states: [initializing, waiting, ready]
       sets_gate: review_ready
       advances_to: ready
 `,
-		"flows/operating/policy.yaml": "{}\n", "flows/operating/tools.yaml": "{}\n", "flows/operating/agents.yaml": "{}\n",
 		"flows/secondary/schema.yaml":   "name: secondary\nmode: static\ninitial_state: open\nterminal_states: [closed]\nstates: [open, closed]\n",
 		"flows/secondary/entities.yaml": "ticket:\n  ticket_id: text\n",
-		"flows/secondary/events.yaml":   "{}\n", "flows/secondary/nodes.yaml": "{}\n", "flows/secondary/policy.yaml": "{}\n", "flows/secondary/tools.yaml": "{}\n", "flows/secondary/agents.yaml": "{}\n",
 	}
 	for name, source := range files {
 		writeClosedVariantFile(t, root, name, source)
@@ -349,7 +338,7 @@ flows:
 connect:
   - {event: deploy.done, from: producer, to: consumer}
 `,
-		"schema.yaml": "name: test\n", "policy.yaml": "{}\n", "tools.yaml": "{}\n", "agents.yaml": "{}\n", "events.yaml": "{}\n", "nodes.yaml": "{}\n",
+		"schema.yaml": "name: test\n",
 		"flows/producer/schema.yaml": `name: producer
 mode: static
 pins:
@@ -357,7 +346,7 @@ pins:
     events:
       - {name: deploy_done, event: deploy.done, key: vertical_id, carries: [vertical_id]}
 `,
-		"flows/producer/policy.yaml": "{}\n", "flows/producer/agents.yaml": "{}\n", "flows/producer/events.yaml": "deploy.done:\n  vertical_id: string\n", "flows/producer/entities.yaml": "{}\n", "flows/producer/nodes.yaml": "{}\n",
+		"flows/producer/events.yaml": "deploy.done:\n  vertical_id: string\n",
 		"flows/consumer/schema.yaml": `name: consumer
 mode: template
 instance: vertical_id
@@ -370,7 +359,6 @@ pins:
         carries:
           vertical_id: {from: payload.vertical_id, type: string}
 `,
-		"flows/consumer/policy.yaml": "{}\n", "flows/consumer/agents.yaml": "{}\n", "flows/consumer/events.yaml": "{}\n",
 		"flows/consumer/entities.yaml": "deployment:\n  vertical_id:\n    type: string\n",
 		"flows/consumer/nodes.yaml":    "consumer-node:\n  id: consumer-node-{instance_id}\n  execution_type: system_node\n  event_handlers:\n    deploy.done: {}\n",
 	}
@@ -461,7 +449,7 @@ component_scaffold.spawn_requested:
 func CopyProviderRollback(t testing.TB, withCarrier bool) string {
 	t.Helper()
 	root := CopyExample(t, TemplateSelectOrCreate)
-	nodes := "{}\n"
+	nodes := ""
 	if withCarrier {
 		nodes = "consumer-node:\n  id: consumer-node-{instance_id}\n  execution_type: system_node\n  event_handlers:\n    inbound.telegram.text_message: {}\n"
 	}
@@ -472,7 +460,7 @@ platform_version: ">=0.7.0 <0.8.0"
 flows:
   - {id: consumer, flow: consumer, mode: template}
 `,
-		"schema.yaml": "name: provider-rollback-proof\n", "policy.yaml": "{}\n", "tools.yaml": "{}\n", "agents.yaml": "{}\n", "nodes.yaml": "{}\n",
+		"schema.yaml": "name: provider-rollback-proof\n",
 		"events.yaml": "inbound.telegram:\n  raw: boolean\ninbound.telegram.text_message:\n  chat_id: text\n",
 		"flows/consumer/schema.yaml": `name: consumer
 mode: template
@@ -487,9 +475,11 @@ pins:
         carries:
           chat_id: {from: payload.chat_id, type: text}
 `,
-		"flows/consumer/policy.yaml": "{}\n", "flows/consumer/agents.yaml": "{}\n", "flows/consumer/events.yaml": "{}\n",
 		"flows/consumer/entities.yaml": "chat:\n  chat_id:\n    type: text\n    indexed: true\n",
 		"flows/consumer/nodes.yaml":    nodes,
+	}
+	if nodes == "" {
+		delete(files, "flows/consumer/nodes.yaml")
 	}
 	for name, source := range files {
 		writeClosedVariantFile(t, root, name, source)

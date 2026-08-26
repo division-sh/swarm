@@ -83,9 +83,6 @@ flows:
         work.completed: parent.lead_enriched
 `+connect)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), rootSchema)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), `
 parent.lead_captured: {}
 parent.lead_enriched: {}
@@ -118,8 +115,6 @@ pins:
       - name: work_completed
         event: work.completed
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "worker", "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "worker", "agents.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "worker", "events.yaml"), "work.completed: {}\n")
 	workerNodes := `
 worker-node:
@@ -187,11 +182,6 @@ flows:
     mode: static
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: import-boundary-wildcard\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	writeImportBoundaryWildcardFlow(t, root, "worker", true)
 	writeImportBoundaryWildcardFlow(t, root, "producer", false)
 	return root
@@ -210,11 +200,9 @@ pins:
   outputs:
     events: [task.done]
 `)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "agents.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "entities.yaml"), "test_entity: {}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), "task.done: {}\n")
-	nodes := "{}\n"
+	nodes := ""
 	if listener {
 		nodes = `
 worker-listener:
@@ -226,5 +214,7 @@ worker-listener:
       clear_gates: [sibling_gate]
 `
 	}
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "nodes.yaml"), nodes)
+	if nodes != "" {
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "nodes.yaml"), nodes)
+	}
 }

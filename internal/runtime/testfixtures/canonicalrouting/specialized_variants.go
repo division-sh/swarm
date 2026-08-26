@@ -22,9 +22,7 @@ flows:
     flow: child
 `)
 	writeClosedVariantFile(t, root, "schema.yaml", "name: output-mode-verify\n")
-	for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml", "nodes.yaml", "events.yaml", "entities.yaml"} {
-		writeClosedVariantFile(t, root, file, "{}\n")
-	}
+	removeClosedVariantFiles(t, root, "nodes.yaml", "events.yaml", "entities.yaml")
 	writeLegacyInstanceFlow(t, root, "child", `name: child
 initial_state: idle
 terminal_states: [done]
@@ -66,6 +64,7 @@ func CopyManagedNativeLifecycle(t testing.TB, agentID string) string {
 		t.Fatal("managed-native lifecycle fixture requires an agent ID")
 	}
 	root := CopyExample(t, RootIngress)
+	removeClosedVariantFiles(t, root, "nodes.yaml")
 	writeClosedVariantFile(t, root, "package.yaml", `name: managed-native-lifecycle
 version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
@@ -93,10 +92,7 @@ pins:
 `, agentID, agentID, agentID))
 	writeClosedVariantFile(t, root, filepath.Join("prompts", agentID+".md"), "Operate as the managed native lifecycle test agent.\n")
 	for file, contents := range map[string]string{
-		"nodes.yaml":  "{}\n",
 		"events.yaml": "task.requested:\n  swarm:\n    source: external\n",
-		"policy.yaml": "{}\n",
-		"tools.yaml":  "{}\n",
 	} {
 		writeClosedVariantFile(t, root, file, contents)
 	}
@@ -116,9 +112,7 @@ flows:
     flow: support
 `)
 	writeClosedVariantFile(t, root, "schema.yaml", "name: stage-graph\n")
-	for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml", "events.yaml", "nodes.yaml", "entities.yaml"} {
-		writeClosedVariantFile(t, root, file, "{}\n")
-	}
+	removeClosedVariantFiles(t, root, "nodes.yaml", "events.yaml", "entities.yaml")
 	writeLegacyInstanceFlow(t, root, "support", `name: support
 stages:
   waiting:
@@ -197,6 +191,7 @@ line_item.requested:
 func CopyInboundAdmissionPolicyMatrix(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
+	removeClosedVariantFiles(t, root, "nodes.yaml", "events.yaml", "entities.yaml")
 	files := map[string]string{
 		"package.yaml": `name: inbound-admission-policy-matrix
 version: "1.0.0"
@@ -250,7 +245,6 @@ flows:
             payload: raw
 `,
 		"schema.yaml": "name: inbound-admission-policy-matrix\n",
-		"policy.yaml": "{}\n", "tools.yaml": "{}\n", "agents.yaml": "{}\n", "events.yaml": "{}\n", "nodes.yaml": "{}\n",
 		"flows/matrix/schema.yaml": `name: matrix
 mode: singleton
 initial_state: active
@@ -267,9 +261,8 @@ pins:
   outputs: {events: []}
 `,
 		"flows/matrix/entities.yaml": "matrix_service:\n  service_id:\n    type: text\n    initial: standing\n",
-		"flows/matrix/types.yaml":    "{}\n", "flows/matrix/policy.yaml": "{}\n", "flows/matrix/tools.yaml": "{}\n", "flows/matrix/agents.yaml": "{}\n",
-		"flows/matrix/events.yaml": inboundAdmissionEvents(),
-		"flows/matrix/nodes.yaml":  inboundAdmissionNodes(),
+		"flows/matrix/events.yaml":   inboundAdmissionEvents(),
+		"flows/matrix/nodes.yaml":    inboundAdmissionNodes(),
 	}
 	for name, body := range files {
 		writeClosedVariantFile(t, root, name, body)
@@ -341,9 +334,6 @@ widget.started:
             expression: entity.score + payload.delta
       advances_to: done
 `)
-	for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml"} {
-		writeClosedVariantFile(t, root, file, "{}\n")
-	}
 	return root
 }
 
@@ -440,9 +430,6 @@ assignee:
         check: "entity.category != ''"
       advances_to: resolved
 `)
-	for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml"} {
-		writeClosedVariantFile(t, root, file, "{}\n")
-	}
 	return root
 }
 
@@ -452,15 +439,12 @@ func CopyAgentSlugAdmission(t testing.TB, workflowName, agentKey, agentID string
 	agentKey = closedScalarLiteral(t, "agent key", agentKey, "worker")
 	agentID = closedScalarLiteral(t, "agent ID", agentID, "worker")
 	root := CopyExample(t, RootIngress)
+	removeClosedVariantFiles(t, root, "nodes.yaml", "entities.yaml")
 	writeClosedVariantFile(t, root, "package.yaml", "name: "+workflowName+"\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n")
 	writeClosedVariantFile(t, root, "schema.yaml", "initial_state: pending\nterminal_states: [done]\nstates: [pending, done]\npins:\n  inputs:\n    events: [agent.requested]\n")
 	writeClosedVariantFile(t, root, "events.yaml", "agent.requested:\n  swarm:\n    source: external\n")
-	writeClosedVariantFile(t, root, "nodes.yaml", "{}\n")
 	writeClosedVariantFile(t, root, "agents.yaml", agentKey+":\n  id: "+agentID+"\n  role: "+agentID+"\n  intent: prompts/"+agentID+".md\n  model: regular\n  memory: false\n  subscriptions: [agent.requested]\n")
 	writeClosedVariantFile(t, root, "prompts/"+agentID+".md", "Handle assigned work.\n")
-	for _, file := range []string{"policy.yaml", "tools.yaml", "entities.yaml"} {
-		writeClosedVariantFile(t, root, file, "{}\n")
-	}
 	return root
 }
 
@@ -506,9 +490,6 @@ func CopyArtifactRepoCommitAdmission(t testing.TB) string {
             last_request_id: last_request_id
             last_source_event_id: last_source_event_id
 `)
-	for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml"} {
-		writeClosedVariantFile(t, root, file, "{}\n")
-	}
 	return root
 }
 
@@ -537,9 +518,6 @@ flows:
       emit:
         event: task.completed
 `)
-	for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml", "entities.yaml"} {
-		writeClosedVariantFile(t, root, file, "{}\n")
-	}
 	writeLegacyInstanceFlow(t, root, "child", "name: child\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, working, done]\npins:\n  inputs:\n    events: [task.assigned, task.feedback]\n", "task.assigned: {}\ntask.feedback:\n  comment: string\ntask.result: {}\n", "work_item: {}\n", `worker:
   id: worker
   execution_type: system_node
@@ -559,13 +537,11 @@ flows:
 func CopyRunForkTarget(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
+	removeClosedVariantFiles(t, root, "entities.yaml")
 	writeClosedVariantFile(t, root, "package.yaml", "name: cross-bundle-target\nversion: 1.0.0\ndescription: Cross-bundle target fixture for run.fork.\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n")
 	writeClosedVariantFile(t, root, "schema.yaml", "initial_state: pending\nterminal_states: [done]\nstates: [pending, done]\npins:\n  inputs:\n    events: [task.requested]\n  outputs:\n    events: []\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", "test-node:\n  id: test-node\n  execution_type: system_node\n  subscribes_to: [task.requested]\n  produces: []\n  event_handlers:\n    task.requested:\n      advances_to: done\n")
 	writeClosedVariantFile(t, root, "events.yaml", "task.requested:\n  swarm:\n    source: external\n")
-	for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml", "entities.yaml"} {
-		writeClosedVariantFile(t, root, file, "{}\n")
-	}
 	return root
 }
 
@@ -573,11 +549,9 @@ func CopyScenarioSetup(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
 	removeInheritedScenarios(t, root)
+	removeClosedVariantFiles(t, root, "entities.yaml", "events.yaml", "nodes.yaml")
 	writeClosedVariantFile(t, root, "package.yaml", "name: scenario-setup-fixture\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n  - id: operating\n    flow: operating\n    mode: static\n")
 	writeClosedVariantFile(t, root, "schema.yaml", "name: scenario-setup-fixture\ninitial_state: new\nterminal_states: [done]\nstates: [new, done]\n")
-	for _, file := range []string{"entities.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml", "agents.yaml"} {
-		writeClosedVariantFile(t, root, file, "{}\n")
-	}
 	writeLegacyInstanceFlow(t, root, "operating", "name: operating\nmode: static\ninitial_state: initializing\nterminal_states: [ready]\nstates: [initializing, waiting, ready]\npins:\n  inputs:\n    events: [opco.product_review_requested]\n", "opco.product_review_requested:\n  swarm:\n    source: external\n  note: text\n", "product:\n  product_id: text\n  note: text\n", `reviewer:
   id: reviewer
   execution_type: system_node
@@ -652,12 +626,10 @@ func removeInheritedScenarios(t testing.TB, root string) {
 func CopyInputPinExternalScope(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
+	removeClosedVariantFiles(t, root, "events.yaml", "nodes.yaml", "entities.yaml")
 	writeClosedVariantFile(t, root, "package.yaml", "name: input-pin-external-scope\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n  - id: external_consumer\n    flow: external_consumer\n    mode: static\n  - id: plain_consumer\n    flow: plain_consumer\n    mode: static\n")
 	writeClosedVariantFile(t, root, "schema.yaml", "name: input-pin-external-scope\n")
-	for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml", "events.yaml", "nodes.yaml", "entities.yaml"} {
-		writeClosedVariantFile(t, root, file, "{}\n")
-	}
-	writeLegacyInstanceFlow(t, root, "external_consumer", "name: external_consumer\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events:\n      - name: ticket.ready\n        source: external\n  outputs:\n    events: []\n", "ticket.ready:\n  entity_id: string\n", "{}\n", "{}\n")
-	writeLegacyInstanceFlow(t, root, "plain_consumer", "name: plain_consumer\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events:\n      - ticket.ready\n  outputs:\n    events: []\n", "ticket.ready:\n  entity_id: string\n", "{}\n", "{}\n")
+	writeLegacyInstanceFlow(t, root, "external_consumer", "name: external_consumer\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events:\n      - name: ticket.ready\n        source: external\n  outputs:\n    events: []\n", "ticket.ready:\n  entity_id: string\n", "", "")
+	writeLegacyInstanceFlow(t, root, "plain_consumer", "name: plain_consumer\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events:\n      - ticket.ready\n  outputs:\n    events: []\n", "ticket.ready:\n  entity_id: string\n", "", "")
 	return root
 }

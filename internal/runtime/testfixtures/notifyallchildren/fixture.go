@@ -122,7 +122,7 @@ func WriteVariant(t testing.TB, opts Options) string {
 		replaceFile(t, ownerEntities, `  account_ids: "[text]"
 `, `  account_ids: "[AccountRef]"
 `)
-		replaceFile(t, ownerTypes, "{}\n", `types:
+		writeNewFile(t, ownerTypes, `types:
   AccountRef:
     account_id: text
 `)
@@ -276,10 +276,6 @@ func copyTree(t testing.TB, source, target string) {
 func replaceFile(t testing.TB, path, old, replacement string) {
 	t.Helper()
 	contents, err := os.ReadFile(path)
-	if os.IsNotExist(err) && strings.TrimSpace(old) == "{}" {
-		contents = []byte(old)
-		err = nil
-	}
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
@@ -288,6 +284,13 @@ func replaceFile(t testing.TB, path, old, replacement string) {
 	}
 	updated := strings.Replace(string(contents), old, replacement, 1)
 	if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func writeNewFile(t testing.TB, path, contents string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
 }

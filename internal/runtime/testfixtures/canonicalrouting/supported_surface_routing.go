@@ -7,6 +7,7 @@ import "testing"
 func CopyHandlerRuleSelectionProof(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
+	removeClosedVariantFiles(t, root, "entities.yaml")
 	writeClosedVariantFile(t, root, "package.yaml", `name: handler-rule-selection-proof
 version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
@@ -64,9 +65,6 @@ direct: {swarm: {source: external}}
           condition: "false"
     direct: {}
 `)
-	for _, file := range []string{"entities.yaml", "policy.yaml", "tools.yaml", "agents.yaml", "types.yaml"} {
-		writeClosedVariantFile(t, root, file, "{}\n")
-	}
 	return root
 }
 
@@ -135,9 +133,6 @@ platform_version: ">=0.7.0 <0.8.0"
 		writeClosedVariantFile(t, root, "events.yaml", joinEvents)
 		writeClosedVariantFile(t, root, "types.yaml", joinTypes)
 		writeClosedVariantFile(t, root, "nodes.yaml", joinNodes)
-		for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml"} {
-			writeClosedVariantFile(t, root, file, "{}\n")
-		}
 	case "orders":
 		writeClosedVariantFile(t, root, "package.yaml", `name: join-eventbus-proof
 version: "1.0.0"
@@ -148,9 +143,7 @@ flows:
     mode: template
 `)
 		writeClosedVariantFile(t, root, "schema.yaml", "name: join-eventbus-proof\n")
-		for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml", "entities.yaml", "events.yaml", "nodes.yaml", "types.yaml"} {
-			writeClosedVariantFile(t, root, file, "{}\n")
-		}
+		removeClosedVariantFiles(t, root, "entities.yaml", "events.yaml", "nodes.yaml")
 		writeLegacyInstanceFlow(t, root, "orders", "mode: template\ninstance: order_id\n"+joinSchema,
 			joinEvents, joinEntities, joinNodes)
 		writeClosedVariantFile(t, root, "flows/orders/types.yaml", joinTypes)
@@ -195,9 +188,6 @@ pins:
     timer.cancel:
       advances_to: done
 `)
-	for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml"} {
-		writeClosedVariantFile(t, root, file, "{}\n")
-	}
 	return root
 }
 
@@ -225,7 +215,6 @@ pins:
       - name: deploy_completed
         event: deploy.done
 `)
-	writeClosedVariantFile(t, root, "events.yaml", "{}\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "root_state: {}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-receiver:
   id: root-receiver
@@ -237,9 +226,6 @@ pins:
         id: selected_owner
         check: '_entity.id != ""'
 `)
-	for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml"} {
-		writeClosedVariantFile(t, root, file, "{}\n")
-	}
 	writeLegacyInstanceFlow(t, root, "producer", `name: producer
 mode: template
 instance: producer_id
@@ -248,6 +234,6 @@ pins:
     events:
       - name: deploy_done
         event: deploy.done
-`, "deploy.done: {}\n", "producer_state:\n  producer_id: string\n", "{}\n")
+`, "deploy.done: {}\n", "producer_state:\n  producer_id: string\n", "")
 	return root
 }

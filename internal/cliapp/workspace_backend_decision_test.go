@@ -334,11 +334,13 @@ flows:
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: scoped-workspace-backend\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), "item:\n  item_id: string\n")
-	rootAgents := "{}\n"
+	rootAgents := ""
 	if includeRootAgent {
 		rootAgents = "root-mock:\n  id: root-mock\n  model: regular\n  memory: false\n  intent:\n    inline: Exercise root workspace backend selection.\n  mock:\n    kind: python\n    module: mocks/root-mock.py\n"
 	}
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), rootAgents)
+	if rootAgents != "" {
+		writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), rootAgents)
+	}
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "mocks", "root-mock.py"), "def handle(input):\n    return {'text': 'mock'}\n")
 
 	for _, project := range []string{"project-a", "project-b"} {

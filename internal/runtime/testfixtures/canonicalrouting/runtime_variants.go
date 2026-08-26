@@ -5,21 +5,17 @@ import "testing"
 func CopyGeneratedActivity(t testing.TB, nested, subscribeResults bool) string {
 	t.Helper()
 	root := CopyExample(t, RootIngress)
+	removeClosedVariantFiles(t, root, "entities.yaml")
 	flowRoot := ""
 	if nested {
+		removeClosedVariantFiles(t, root, "events.yaml", "nodes.yaml")
 		writeClosedVariantFile(t, root, "package.yaml", "name: nested-generated-activity-topology\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n  - id: child\n    flow: child\n    mode: static\n")
 		writeClosedVariantFile(t, root, "schema.yaml", "name: nested-generated-activity-topology\nstages: []\n")
 		flowRoot = "flows/child/"
-		for _, file := range []string{"entities.yaml", "policy.yaml", "tools.yaml", "agents.yaml", "events.yaml", "nodes.yaml"} {
-			writeClosedVariantFile(t, root, file, "{}\n")
-		}
 		writeClosedVariantFile(t, root, flowRoot+"schema.yaml", "name: child\nmode: static\nstages: []\n")
 	} else {
 		writeClosedVariantFile(t, root, "package.yaml", "name: generated-activity-topology\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n")
 		writeClosedVariantFile(t, root, "schema.yaml", "name: generated-activity-topology\nstages: []\n")
-	}
-	for _, file := range []string{"entities.yaml", "policy.yaml", "agents.yaml"} {
-		writeClosedVariantFile(t, root, flowRoot+file, "{}\n")
 	}
 	writeClosedVariantFile(t, root, flowRoot+"events.yaml", "request:\n  message: text\n  swarm:\n    source: external\n")
 	writeClosedVariantFile(t, root, flowRoot+"tools.yaml", `send:
@@ -65,9 +61,6 @@ func CopyPayloadNamedField(t testing.TB) string {
 	writeClosedVariantFile(t, root, "entities.yaml", "chat:\n  chat_id: text\n")
 	writeClosedVariantFile(t, root, "events.yaml", "inbound.telegram:\n  entity_id: text\n  payload: json\n  swarm:\n    source: external\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", "normalizer:\n  id: normalizer\n  execution_type: system_node\n  subscribes_to: [inbound.telegram]\n  event_handlers:\n    inbound.telegram:\n      data_accumulation:\n        writes:\n          - target_field: chat_id\n            value:\n              ref: payload.payload.message.chat.id\n      advances_to: done\n")
-	for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml"} {
-		writeClosedVariantFile(t, root, file, "{}\n")
-	}
 	return root
 }
 
@@ -76,9 +69,6 @@ func CopyLegacyStaticCreate(t testing.TB, withTimer bool) string {
 	root := CopyExample(t, TemplateCreateMintedKey)
 	writeClosedVariantFile(t, root, "package.yaml", "name: exact-once-test\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n  - id: validation\n    flow: validation\n    mode: static\n")
 	writeClosedVariantFile(t, root, "schema.yaml", "name: exact-once-test\n")
-	for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml", "events.yaml", "nodes.yaml", "entities.yaml"} {
-		writeClosedVariantFile(t, root, file, "{}\n")
-	}
 	inputs := "thing.created"
 	produces := "thing.emitted"
 	timer := ""

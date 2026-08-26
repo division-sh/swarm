@@ -115,6 +115,19 @@ criteria:
 	}
 }
 
+func TestPolicyDocumentDecodesMergeExpandedMapping(t *testing.T) {
+	var doc PolicyDocument
+	if err := yaml.Unmarshal([]byte("<<: &policy\n  limit:\n    value: 7\n"), &doc); err != nil {
+		t.Fatalf("yaml.Unmarshal PolicyDocument: %v", err)
+	}
+	if got := doc.Values["limit"].Value; got != 7 {
+		t.Fatalf("merged policy limit = %#v, want 7", got)
+	}
+	if _, ok := doc.Values["<<"]; ok {
+		t.Fatalf("merged policy published pseudo-key: %#v", doc.Values)
+	}
+}
+
 func TestPolicyDocumentValidationIsTypedSectionNotGenericValue(t *testing.T) {
 	var doc PolicyDocument
 	if err := yaml.Unmarshal([]byte(`

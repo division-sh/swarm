@@ -1141,3 +1141,27 @@ types:
 		t.Fatalf("yaml.Unmarshal error = %v, want RETIRED inline object rejection", err)
 	}
 }
+
+func TestCustomContractDocumentsDecodeMergeExpandedMappings(t *testing.T) {
+	var entities EntityContractsDocument
+	if err := yaml.Unmarshal([]byte("<<: &entities\n  item: {}\n"), &entities); err != nil {
+		t.Fatalf("yaml.Unmarshal entities: %v", err)
+	}
+	if _, ok := entities["item"]; !ok {
+		t.Fatalf("merged entities = %#v, want item", entities)
+	}
+	if _, ok := entities["<<"]; ok {
+		t.Fatalf("merged entities published pseudo-key: %#v", entities)
+	}
+
+	var types TypeCatalogDocument
+	if err := yaml.Unmarshal([]byte("<<: &catalog\n  types:\n    Item: {}\n"), &types); err != nil {
+		t.Fatalf("yaml.Unmarshal types: %v", err)
+	}
+	if _, ok := types.Types["Item"]; !ok {
+		t.Fatalf("merged types = %#v, want Item", types)
+	}
+	if _, ok := types.Types["<<"]; ok {
+		t.Fatalf("merged types published pseudo-key: %#v", types)
+	}
+}

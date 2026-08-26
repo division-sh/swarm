@@ -20,7 +20,7 @@ pins:
     events: [job.received]
   outputs:
     events: []
-`, singletonCoordinatorEntitiesYAML(), "", "{}\n")
+`, singletonCoordinatorEntitiesYAML(), "", "")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -48,7 +48,7 @@ memory-agent:
   model: regular
   memory: true
   subscriptions: [job.received]
-`, "{}\n")
+`, "")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -68,7 +68,7 @@ pins:
     events: [job.received]
   outputs:
     events: []
-`, singletonCoordinatorEntitiesYAML(), "", "{}\n")
+`, singletonCoordinatorEntitiesYAML(), "", "")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -89,7 +89,7 @@ pins:
 `, `
 coordinator_state:
   verticals: map[text]MissingType
-`, "", "{}\n")
+`, "", "")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -110,7 +110,7 @@ pins:
 `, `
 coordinator_state:
   status: text
-`, "", "{}\n")
+`, "", "")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -700,11 +700,12 @@ job.received:
   vertical_id: text
   job: Job
 `)
-	if strings.TrimSpace(flowAgents) == "" {
-		flowAgents = "{}\n"
+	if strings.TrimSpace(flowAgents) != "" {
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "coordinator", "agents.yaml"), strings.TrimSpace(flowAgents)+"\n")
 	}
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "coordinator", "agents.yaml"), strings.TrimSpace(flowAgents)+"\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "coordinator", "nodes.yaml"), strings.TrimSpace(flowNodes)+"\n")
+	if strings.TrimSpace(flowNodes) != "" {
+		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "coordinator", "nodes.yaml"), strings.TrimSpace(flowNodes)+"\n")
+	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)

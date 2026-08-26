@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -62,6 +63,9 @@ func admitOptionalDeclarationFile(path string, role optionalDeclarationRole) (op
 	if err := validateOptionalDeclarationDocument(document, role); err != nil {
 		return optionalDeclarationAdmission{}, false, wrapLoaderDiagnosticFile(err, path)
 	}
+	if document.Presence() == yamlsource.PresenceNull {
+		return optionalDeclarationAdmission{}, false, wrapLoaderDiagnosticFile(NewOptionalDeclarationFileEmptyDiagnostic(role.fileName()), path)
+	}
 	return optionalDeclarationAdmission{path: path, role: role, source: source, document: document}, true, nil
 }
 
@@ -89,8 +93,8 @@ func loadOptionalEntityDeclarations(path string) (EntityContractsDocument, error
 	if err != nil || !present {
 		return EntityContractsDocument{}, err
 	}
-	entries := EntityContractsDocument{}
-	if err := admission.source.Decode(&entries); err != nil {
+	entries, err := projectEntityContractsDocument(admission.document.Root())
+	if err != nil {
 		return nil, wrapLoaderDiagnosticFile(err, path)
 	}
 	return entries, admission.RequireLive(len(entries))
@@ -113,8 +117,8 @@ func loadOptionalPolicyDeclarations(path string) (PolicyDocument, error) {
 	if err != nil || !present {
 		return PolicyDocument{Values: map[string]PolicyValue{}}, err
 	}
-	document := PolicyDocument{}
-	if err := admission.source.Decode(&document); err != nil {
+	document, err := flowmodel.ProjectPolicyDocument(admission.document.Root())
+	if err != nil {
 		return PolicyDocument{}, wrapLoaderDiagnosticFile(err, path)
 	}
 	count := len(document.Values) + len(document.Criteria) + len(document.Validation) + len(document.Modules)
@@ -138,8 +142,8 @@ func loadOptionalTypeDeclarations(path string) (TypeCatalogDocument, error) {
 	if err != nil || !present {
 		return TypeCatalogDocument{}, err
 	}
-	document := TypeCatalogDocument{}
-	if err := admission.source.Decode(&document); err != nil {
+	document, err := projectTypeCatalogDocument(admission.document.Root())
+	if err != nil {
 		return TypeCatalogDocument{}, wrapLoaderDiagnosticFile(err, path)
 	}
 	count := len(document.Scalars) + len(document.Enums) + len(document.Types)
@@ -148,8 +152,12 @@ func loadOptionalTypeDeclarations(path string) (TypeCatalogDocument, error) {
 
 func validateOptionalDeclarationDocument(document yamlsource.Document, role optionalDeclarationRole) error {
 	root := document.Root()
-	if root.Presence() != yamlsource.PresenceMapping {
+	switch root.Presence() {
+	case yamlsource.PresenceNull, yamlsource.PresenceEmptyMapping:
 		return nil
+	case yamlsource.PresenceMapping:
+	default:
+		return NewOptionalDeclarationFileShapeDiagnostic(role.fileName(), root.Presence())
 	}
 	switch role {
 	case optionalDeclarationEvents:

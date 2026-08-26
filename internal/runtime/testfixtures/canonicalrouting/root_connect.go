@@ -27,7 +27,7 @@ connect:
     to: consumer
 `)
 	rootInput := ""
-	rootNodes := "{}\n"
+	rootNodes := ""
 	if emit != RootConnectNoEmitter {
 		rootInput = "  inputs:\n    events: [root.start]\n"
 		emitBody := "      emit:\n        event: root.ready\n        fields:\n          entity_id: payload.entity_id\n"
@@ -38,9 +38,8 @@ connect:
 	}
 	writeClosedVariantFile(t, root, "schema.yaml", "name: root-output-connect\npins:\n"+rootInput+"  outputs:\n    events:\n      - name: root_ready\n        event: root.ready\n")
 	writeClosedVariantFile(t, root, "events.yaml", "root.start:\n  entity_id: text\nroot.ready:\n  entity_id: text\n")
-	writeClosedVariantFile(t, root, "nodes.yaml", rootNodes)
-	for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml", "entities.yaml"} {
-		writeClosedVariantFile(t, root, file, "{}\n")
+	if rootNodes != "" {
+		writeClosedVariantFile(t, root, "nodes.yaml", rootNodes)
 	}
 	writeLegacyInstanceFlow(t, root, "consumer", `name: consumer
 mode: static
@@ -49,7 +48,7 @@ pins:
     events:
       - name: ready
         event: root.ready
-`, "{}\n", "{}\n", "{}\n")
+`, "", "", "")
 	return root
 }
 
@@ -77,7 +76,7 @@ pins:
     events:
       - name: ready
         event: root.ready
-`, "{}\n", "consumer_state:\n  entity_id: text\n", `consumer-node:
+`, "", "consumer_state:\n  entity_id: text\n", `consumer-node:
   id: consumer-node
   execution_type: system_node
   subscribes_to: [root.ready]
@@ -112,7 +111,6 @@ pins:
       - name: scout_completed
         event: scout.completed
 `)
-	writeClosedVariantFile(t, root, "events.yaml", "{}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-collector:
   id: root-collector
   execution_type: system_node
@@ -130,7 +128,7 @@ pins:
     events:
       - name: completed
         event: scout.completed
-`, "scout.completed:\n  proof: string\n", "{}\n", "{}\n")
+`, "scout.completed:\n  proof: string\n", "", "")
 	return root
 }
 
@@ -235,6 +233,6 @@ pins:
     events:
       - name: ready
         event: root.ready
-`, "{}\n", "{}\n", "{}\n")
+`, "", "", "")
 	return root
 }

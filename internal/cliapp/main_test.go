@@ -4291,9 +4291,6 @@ initial_state: waiting
 terminal_states: [done]
 states: [waiting, done]
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "entities.yaml"), `
 ticket:
   ticket_id:
@@ -4401,11 +4398,6 @@ flows:
     flow: child
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-prompt-writer-coverage`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `{}`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "schema.yaml"), `
 name: child
 initial_state: idle
@@ -4421,7 +4413,6 @@ case:
     type: text
     _unused_reason: verify prompt writer proof field
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "policy.yaml"), `{}`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "agents.yaml"), `
 writer:
   id: writer
@@ -4435,7 +4426,6 @@ writer:
       save:
       - research_context
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `{}`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "child", "nodes.yaml"), `
 closer:
   id: closer
@@ -4477,10 +4467,6 @@ version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `name: verify-state-schema-pseudo-types`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), `{}`)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 accumulator:
   id: accumulator
@@ -4596,9 +4582,6 @@ pins:
   inputs:
     events: [item.arrived]
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `{}`)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `{}`)
 	sourceBlock := ""
 	if strings.TrimSpace(opts.eventSource) != "" {
 		sourceBlock = "\n  swarm:\n    source: " + opts.eventSource
@@ -4655,10 +4638,7 @@ func loadWorkflowValidationBundleAt(t *testing.T, fixtureRoot string) *runtimeco
 func writeWorkflowValidationFixtureFile(t *testing.T, path, contents string) {
 	t.Helper()
 	if isOptionalWorkflowDeclarationFixture(path) && strings.TrimSpace(contents) == "{}" {
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			t.Fatalf("remove omitted optional declaration fixture %s: %v", path, err)
-		}
-		return
+		t.Fatalf("optional declaration fixture %s must be omitted instead of written as {}", path)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)

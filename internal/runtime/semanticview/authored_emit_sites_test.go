@@ -254,7 +254,9 @@ root.audit: {}
 	if opts.rootGuardObject {
 		rootNodeYAML = authoredEmitSiteNodeYAMLWithGuardObject(opts.rootNodeID, "root.start", opts.rootEmit, opts.rootGuardEmit)
 	}
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "nodes.yaml"), rootNodeYAML)
+	if strings.TrimSpace(rootNodeYAML) != "" {
+		writeSemanticviewFixtureFile(t, filepath.Join(root, "nodes.yaml"), rootNodeYAML)
+	}
 	if !opts.omitFlowPackage {
 		writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), `
 name: support
@@ -277,14 +279,18 @@ pins:
 support.start: {}
 support.ready: {}
 `)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "nodes.yaml"), authoredEmitSiteNodeYAML(opts.flowNodeID, "support.start", opts.flowEmit, ""))
+	if flowNodes := authoredEmitSiteNodeYAML(opts.flowNodeID, "support.start", opts.flowEmit, ""); strings.TrimSpace(flowNodes) != "" {
+		writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "nodes.yaml"), flowNodes)
+	}
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "package.yaml"), `
 name: extras
 version: "1.0.0"
 flows: []
 `)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "events.yaml"), "extras.start: {}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "nodes.yaml"), authoredEmitSiteNodeYAML(opts.extrasNodeID, "extras.start", opts.extrasEmit, ""))
+	if extraNodes := authoredEmitSiteNodeYAML(opts.extrasNodeID, "extras.start", opts.extrasEmit, ""); strings.TrimSpace(extraNodes) != "" {
+		writeSemanticviewFixtureFile(t, filepath.Join(root, "extras", "nodes.yaml"), extraNodes)
+	}
 	if strings.TrimSpace(opts.nestedPackageNodeID) != "" {
 		writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", "support", "addon", "package.yaml"), `
 name: support-addon
@@ -362,7 +368,7 @@ dispatcher:
 
 func authoredEmitSiteNodeYAML(nodeID, trigger, eventType, guardEventType string) string {
 	if strings.TrimSpace(nodeID) == "" || strings.TrimSpace(eventType) == "" {
-		return "{}\n"
+		return ""
 	}
 	guardYAML := ""
 	if strings.TrimSpace(guardEventType) != "" {
@@ -385,7 +391,7 @@ func authoredEmitSiteNodeYAML(nodeID, trigger, eventType, guardEventType string)
 
 func authoredEmitSiteNodeYAMLWithGuardObject(nodeID, trigger, eventType, guardEventType string) string {
 	if strings.TrimSpace(nodeID) == "" || strings.TrimSpace(eventType) == "" {
-		return "{}\n"
+		return ""
 	}
 	return nodeID + `:
   id: ` + nodeID + `
@@ -410,7 +416,7 @@ func authoredEmitSiteNodeYAMLWithGuardObject(nodeID, trigger, eventType, guardEv
 
 func authoredEmitSiteRulesSuccessNodeYAML(nodeID, trigger, ruleEventType, successEventType string) string {
 	if strings.TrimSpace(nodeID) == "" {
-		return "{}\n"
+		return ""
 	}
 	return nodeID + `:
   id: ` + nodeID + `
@@ -429,7 +435,7 @@ func authoredEmitSiteRulesSuccessNodeYAML(nodeID, trigger, ruleEventType, succes
 
 func authoredEmitSiteTemplateNodeYAML(nodeID, trigger, eventType string) string {
 	if strings.TrimSpace(nodeID) == "" || strings.TrimSpace(eventType) == "" {
-		return "{}\n"
+		return ""
 	}
 	return nodeID + `:
   id: ` + nodeID + `

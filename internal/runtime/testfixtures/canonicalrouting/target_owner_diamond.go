@@ -111,7 +111,6 @@ pins:
       - name: work_ready
         event: work.ready
 `,
-		"flows/branch/flows/worker/result-static/events.yaml": "{}\n",
 		"flows/branch/flows/worker/result-static/nodes.yaml": `static-result-node:
   id: static-result-node
   execution_type: system_node
@@ -129,7 +128,6 @@ pins:
       - name: work_ready
         event: work.ready
 `,
-		"flows/branch/flows/worker/result/events.yaml": "{}\n",
 		"flows/branch/flows/worker/result/nodes.yaml": `singleton-result-node:
   id: singleton-result-node
   execution_type: system_node
@@ -154,7 +152,6 @@ pins:
       - name: work_ready
         event: work.ready
 `,
-		"flows/unrelated/worker/result/events.yaml": "{}\n",
 		"flows/unrelated/worker/result/nodes.yaml": `hostile-node:
   id: hostile-node
   execution_type: system_node

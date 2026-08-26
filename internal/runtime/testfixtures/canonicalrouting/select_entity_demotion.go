@@ -46,13 +46,7 @@ func CopySelectEntityDemotion(t testing.TB, opts SelectEntityDemotionOptions) st
 		connect = "\nconnect:\n  - event: deploy.done\n    from: producer\n    to: " + targetFlow + rename
 	}
 	writeClosedVariantFile(t, root, "package.yaml", "name: select-entity-demotion\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:"+flows+connect+"\n")
-	for _, name := range []string{"schema.yaml", "policy.yaml", "tools.yaml", "agents.yaml", "events.yaml", "entities.yaml"} {
-		body := "{}\n"
-		if name == "schema.yaml" {
-			body = "name: select-entity-demotion\n"
-		}
-		writeClosedVariantFile(t, root, name, body)
-	}
+	writeClosedVariantFile(t, root, "schema.yaml", "name: select-entity-demotion\n")
 	if opts.WithProducer {
 		writeSelectEntityDemotionProducer(t, root)
 		if opts.ConnectProducerToOther {
@@ -88,9 +82,6 @@ pins:
         fields: {vertical_id: payload.vertical_id}
       advances_to: done
 `)
-	for _, name := range []string{"policy.yaml", "agents.yaml"} {
-		writeClosedVariantFile(t, root, "flows/producer/"+name, "{}\n")
-	}
 }
 
 func writeSelectEntityDemotionOther(t testing.TB, root string) {
@@ -109,9 +100,6 @@ pins:
 	writeClosedVariantFile(t, root, "flows/other_consumer/events.yaml", "deploy.done:\n  vertical_id: string\n")
 	writeClosedVariantFile(t, root, "flows/other_consumer/entities.yaml", "deployment:\n  vertical_id:\n    type: string\n    indexed: true\n    _unused_reason: select_entity demotion other receiver route-key proof field\n")
 	writeClosedVariantFile(t, root, "flows/other_consumer/nodes.yaml", "other-consumer-node:\n  id: other-consumer-node\n  execution_type: system_node\n  subscribes_to: [deploy.done]\n  event_handlers:\n    deploy.done: {advances_to: done}\n")
-	for _, name := range []string{"policy.yaml", "agents.yaml"} {
-		writeClosedVariantFile(t, root, "flows/other_consumer/"+name, "{}\n")
-	}
 }
 
 func writeSelectEntityDemotionConsumer(t testing.TB, root string, opts SelectEntityDemotionOptions) {
@@ -148,7 +136,4 @@ func writeSelectEntityDemotionConsumer(t testing.TB, root string, opts SelectEnt
 		t.Fatalf("unsupported select-entity acquisition %d", opts.Acquisition)
 	}
 	writeClosedVariantFile(t, root, "flows/consumer/nodes.yaml", "consumer-node:\n  id: consumer-node\n  execution_type: system_node\n  subscribes_to: ["+eventName+"]\n  event_handlers:\n    "+eventName+":\n"+acquisition+"      advances_to: done\n")
-	for _, name := range []string{"policy.yaml", "agents.yaml"} {
-		writeClosedVariantFile(t, root, "flows/consumer/"+name, "{}\n")
-	}
 }
