@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	runtimedataaccess "github.com/division-sh/swarm/internal/runtime/dataaccess"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 
@@ -27,6 +28,7 @@ type HostConfig struct {
 type HostManager struct {
 	cfg    HostConfig
 	source semanticview.Source
+	data   runtimedataaccess.Provider
 }
 
 func DefaultHostConfig() HostConfig {
@@ -64,6 +66,12 @@ func (m *HostManager) SetSemanticSource(source semanticview.Source) {
 		return
 	}
 	m.source = source
+}
+
+func (m *HostManager) SetDataProjectionProvider(provider runtimedataaccess.Provider) {
+	if m != nil {
+		m.data = provider
+	}
 }
 
 func (m *HostManager) SetBundleScope(bundleHash string) {
@@ -138,7 +146,7 @@ func (m *HostManager) StopEntityWorkspace(context.Context, string) error {
 	return nil
 }
 
-func (m *HostManager) ResolveWorkspace(_ context.Context, actor models.AgentConfig) (*Target, error) {
+func (m *HostManager) ResolveWorkspace(ctx context.Context, actor models.AgentConfig) (*Target, error) {
 	if m == nil {
 		return nil, fmt.Errorf("host workspace manager is required")
 	}
@@ -148,9 +156,17 @@ func (m *HostManager) ResolveWorkspace(_ context.Context, actor models.AgentConf
 	}
 	switch workspaceRouteClass(class) {
 	case "scaffold":
-		return m.hostTarget("scaffold")
+		return m.hostTarget("scaffold", "")
 	case "system":
-		return m.hostTarget("system")
+		return m.hostTarget("system", "")
+	}
+	dataRoot := ""
+	if m.data != nil {
+		projection, err := m.data.Materialize(ctx, actor)
+		if err != nil {
+			return nil, fmt.Errorf("materialize workspace data projection: %w", err)
+		}
+		dataRoot = projection.Root
 	}
 	scope, scopeKey, err := workspaceScopeForActor(m.source, actor)
 	if err != nil {
@@ -158,9 +174,9 @@ func (m *HostManager) ResolveWorkspace(_ context.Context, actor models.AgentConf
 	}
 	switch scope {
 	case "per-flow-instance":
-		return m.hostTarget(filepath.Join("flows", SanitizeSlug(scopeKey)))
+		return m.hostTarget(filepath.Join("flows", SanitizeSlug(scopeKey)), dataRoot)
 	default:
-		return m.hostTarget(filepath.Join("agents", SanitizeSlug(scopeKey)))
+		return m.hostTarget(filepath.Join("agents", SanitizeSlug(scopeKey)), dataRoot)
 	}
 }
 
@@ -195,7 +211,7 @@ func (m *HostManager) KillOrphanProcesses(context.Context) error {
 	return nil
 }
 
-func (m *HostManager) hostTarget(rel string) (*Target, error) {
+func (m *HostManager) hostTarget(rel, dataRoot string) (*Target, error) {
 	workdir, err := m.ensureHostWorkspaceDir(rel)
 	if err != nil {
 		return nil, err
@@ -203,11 +219,11 @@ func (m *HostManager) hostTarget(rel string) (*Target, error) {
 	return &Target{
 		Workdir: workdir,
 		Backend: BackendHost,
-		Mounts:  m.hostExecutionMounts(workdir),
+		Mounts:  m.hostExecutionMounts(workdir, dataRoot),
 	}, nil
 }
 
-func (m *HostManager) hostExecutionMounts(workdir string) []ExecutionMount {
+func (m *HostManager) hostExecutionMounts(workdir, dataRoot string) []ExecutionMount {
 	dataMount := strings.TrimSpace(m.cfg.DataMountPoint)
 	if dataMount == "" {
 		dataMount = LogicalDataMount
@@ -216,11 +232,14 @@ func (m *HostManager) hostExecutionMounts(workdir string) []ExecutionMount {
 	if contractsMount == "" {
 		contractsMount = LogicalContractsMount
 	}
-	return []ExecutionMount{
+	out := []ExecutionMount{
 		{LogicalPath: LogicalWorkspaceMount, HostPath: strings.TrimSpace(workdir), Access: MountAccessReadWrite},
-		{LogicalPath: dataMount, HostPath: strings.TrimSpace(m.cfg.SharedDataSource), Access: MountAccessReadOnly},
 		{LogicalPath: contractsMount, HostPath: strings.TrimSpace(m.cfg.ContractsSource), Access: MountAccessReadOnly},
 	}
+	if strings.TrimSpace(dataRoot) != "" {
+		out = append(out, ExecutionMount{LogicalPath: dataMount, HostPath: strings.TrimSpace(dataRoot), Access: MountAccessReadOnly})
+	}
+	return out
 }
 
 func (m *HostManager) ensureHostWorkspaceDir(rel string) (string, error) {
@@ -264,9 +283,8 @@ func (m *HostManager) hostRoot() (string, error) {
 }
 
 func (m *HostManager) validateSharedMounts() error {
-	dataSource, err := canonicalReadableDir(strings.TrimSpace(m.cfg.SharedDataSource), "workspace validation failed: /data source")
-	if err != nil {
-		return err
+	if strings.TrimSpace(m.cfg.SharedDataSource) != "" {
+		return fmt.Errorf("workspace.data_source is retired; declare flow_data_access or data_access")
 	}
 	contractsSource, err := canonicalReadableDir(strings.TrimSpace(m.cfg.ContractsSource), "workspace validation failed: /opt/swarm/contracts source")
 	if err != nil {
@@ -282,10 +300,7 @@ func (m *HostManager) validateSharedMounts() error {
 	for _, source := range []struct {
 		name string
 		path string
-	}{
-		{name: "/data source", path: dataSource},
-		{name: "/opt/swarm/contracts source", path: contractsSource},
-	} {
+	}{{name: "/opt/swarm/contracts source", path: contractsSource}} {
 		if pathsOverlap(root, source.path) {
 			return fmt.Errorf("workspace validation failed: host workspace root %s must not overlap %s %s", root, source.name, source.path)
 		}

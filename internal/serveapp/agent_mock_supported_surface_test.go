@@ -214,8 +214,6 @@ func writeMockAgentRuntimeConfig(t *testing.T, backend, sqlitePath string) strin
 		"runtime:",
 		"  execution_posture: mock_only",
 		"  recovery_on_startup: true",
-		"workspace:",
-		"  data_source: " + t.TempDir(),
 		"store:",
 		"  backend: " + backend,
 	}

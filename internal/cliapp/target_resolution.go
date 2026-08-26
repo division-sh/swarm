@@ -581,7 +581,11 @@ func resolveDoctorTargetData(repo string, opts doctorOptions, project localRunti
 		return doctorTargetPath{Status: "missing", Detail: err.Error()}
 	}
 	if strings.TrimSpace(mountSources.DataSource) == "" {
-		return doctorTargetPath{Source: "workspace.volumes_from", Status: "no_host_data_dir", Detail: "workspace volumes_from supplies container mounts"}
+		return doctorTargetPath{
+			Source: "platform-spec.yaml#durable_data_resources.workspace_projection",
+			Status: "runtime_projected",
+			Detail: "no ambient host data directory; /data is materialized from the run's exact durable-data pins and compiled static-data access",
+		}
 	}
 	return doctorTargetPath{
 		Path:   mountSources.DataSource,

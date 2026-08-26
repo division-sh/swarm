@@ -33,6 +33,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimedataaccess "github.com/division-sh/swarm/internal/runtime/dataaccess"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -630,6 +631,9 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 		}
 	}
 	if workspaces != nil {
+		if err := configureWorkspaceDataProjection(workspaces, loaded.source, req.Stores); err != nil {
+			return serveRuntimeBundleContext{}, err
+		}
 		if err := workspaces.ValidateSource(req.Ctx, loaded.source); err != nil {
 			return serveRuntimeBundleContext{}, fmt.Errorf("validate workspaces: %w", err)
 		}
@@ -742,6 +746,27 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 		installedTriggerSubjects:  installedTriggerSubjects,
 		packInventoryDigest:       loaded.bundle.PackInventory.Digest(),
 	}, nil
+}
+
+func configureWorkspaceDataProjection(workspaces workspace.Lifecycle, source semanticview.Source, stores serveRuntimePersistence) error {
+	if workspaces == nil || source == nil || !source.DataProjectionRequired() {
+		return nil
+	}
+	if stores.data == nil {
+		return fmt.Errorf("selected store does not expose durable data access projection")
+	}
+	materializer, err := runtimedataaccess.NewMaterializer(runtimedataaccess.DefaultProjectionRoot(), source, stores.data)
+	if err != nil {
+		return err
+	}
+	setter, ok := workspaces.(interface {
+		SetDataProjectionProvider(runtimedataaccess.Provider)
+	})
+	if !ok {
+		return fmt.Errorf("workspace lifecycle does not consume typed data projections")
+	}
+	setter.SetDataProjectionProvider(materializer)
+	return nil
 }
 
 func buildForkChatSandboxLLMRuntimes(cfg *config.Config, workspaces workspace.Resolver, binding toolgateway.Binding, providerCredentials runtimecredentials.Store, effectStore runtimeeffects.Store, completionStore runtimeeffects.CompletionStore, heartbeatStore runtimeeffects.CompletionHeartbeatStore, projector runtimeeffects.CompletionSpendProjector) (*runtimellm.AgentRuntimeSet, error) {
@@ -1373,6 +1398,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		apiv1.OperatorEntityHandlers(apiv1.EntityHandlerOptions{Entities: apiStoreCaps.Entities}),
 		apiv1.OperatorAgentConversationHandlers(apiv1.AgentConversationHandlerOptions{Agents: apiStoreCaps.Agents, Conversations: apiStoreCaps.Conversations, DeliveryLifecycle: stores.AgentDeliveryLifecycle(), Usage: stores.AgentUsage()}),
 		apiv1.OperatorBundleCatalogHandlers(apiv1.BundleCatalogHandlerOptions{Catalog: apiStoreCaps.BundleCatalog}),
+		apiv1.OperatorDataHandlers(apiv1.DataHandlerOptions{Store: apiStoreCaps.Data}),
 		apiv1.OperatorAgentFrameHandlers(apiv1.AgentFrameHandlerOptions{Catalog: apiStoreCaps.BundleCatalog, Effective: rt.Manager}),
 		apiv1.OperatorBundleRegisterHandlers(apiv1.BundleRegisterHandlerOptions{
 			RepoRoot: repo, PlatformSpecPath: resolvedPlatformSpecPath,

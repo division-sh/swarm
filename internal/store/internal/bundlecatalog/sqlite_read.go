@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	bundlecatalogcontract "github.com/division-sh/swarm/internal/bundlecatalog"
+	runtimerunbundle "github.com/division-sh/swarm/internal/runtime/runbundle"
 )
 
 func (s *SQLite) requireBundleCatalogAccess() error {
@@ -111,6 +112,34 @@ func (s *SQLite) LoadBundleCatalog(ctx context.Context, bundleHash string) (bund
 		return bundlecatalogcontract.Detail{}, err
 	}
 	return scanned.toDetail()
+}
+
+func (s *SQLite) LoadBundleCatalogRuntimeRecord(ctx context.Context, bundleHash string) (runtimerunbundle.BundleCatalogRuntimeRecord, error) {
+	if err := s.requireBundleCatalogAccess(); err != nil {
+		return runtimerunbundle.BundleCatalogRuntimeRecord{}, err
+	}
+	bundleHash = strings.TrimSpace(bundleHash)
+	if bundleHash == "" {
+		return runtimerunbundle.BundleCatalogRuntimeRecord{}, runtimerunbundle.ErrBundleNotFound
+	}
+	var out runtimerunbundle.BundleCatalogRuntimeRecord
+	var dataBlob []byte
+	var hasData bool
+	err := s.backend.QueryRowContext(ctx, `
+		SELECT bundle_hash, content_yaml, COALESCE(data_blob, X''), data_blob IS NOT NULL
+		FROM bundles WHERE bundle_hash = ?
+	`, bundleHash).Scan(&out.BundleHash, &out.ContentYAML, &dataBlob, &hasData)
+	if errors.Is(err, sql.ErrNoRows) {
+		return runtimerunbundle.BundleCatalogRuntimeRecord{}, runtimerunbundle.ErrBundleNotFound
+	}
+	if err != nil {
+		return runtimerunbundle.BundleCatalogRuntimeRecord{}, fmt.Errorf("load sqlite bundle catalog runtime record: %w", err)
+	}
+	out.BundleHash = strings.TrimSpace(out.BundleHash)
+	if hasData {
+		out.DataBlob = append([]byte(nil), dataBlob...)
+	}
+	return out, nil
 }
 
 func (s *SQLite) ListBundleCatalogAgents(ctx context.Context, bundleHash string, opts bundlecatalogcontract.AgentListOptions) (bundlecatalogcontract.AgentsResult, error) {

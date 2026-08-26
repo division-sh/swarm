@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/bundlecatalog"
+	"github.com/division-sh/swarm/internal/durabledata"
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -49,8 +50,8 @@ func TestRegistryMethodNamesMatchGeneratedOpenRPC(t *testing.T) {
 	if got := registry.MethodNames(); !reflect.DeepEqual(got, openRPCNames) {
 		t.Fatalf("registry method names drifted from generated OpenRPC:\nregistry=%v\nopenrpc=%v", got, openRPCNames)
 	}
-	if len(openRPCNames) != 71 {
-		t.Fatalf("method count = %d, want 71", len(openRPCNames))
+	if len(openRPCNames) != 75 {
+		t.Fatalf("method count = %d, want 75", len(openRPCNames))
 	}
 	if _, ok := registry.Method("test.setup_entities"); !ok {
 		t.Fatal("test.setup_entities missing from generated registry")
@@ -66,6 +67,75 @@ func TestRegistryMethodNamesMatchGeneratedOpenRPC(t *testing.T) {
 	}
 	if _, ok := registry.Method("runtime.nuke"); !ok {
 		t.Fatal("runtime.nuke missing from generated registry")
+	}
+}
+
+func TestRPCMessageBudgetBoundaries(t *testing.T) {
+	calls := 0
+	handler := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: map[string]MethodHandler{
+		"health.ping": func(context.Context, Request) (any, error) {
+			calls++
+			return map[string]any{"ok": true}, nil
+		},
+	}})
+	base := []byte(`{"jsonrpc":"2.0","id":"budget","method":"health.ping","params":{}}`)
+	callSized := func(t *testing.T, size int) rpcResponse {
+		t.Helper()
+		if size < len(base) {
+			t.Fatalf("request size %d is below base envelope %d", size, len(base))
+		}
+		raw := append(append([]byte(nil), base...), bytes.Repeat([]byte(" "), size-len(base))...)
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/v1/rpc", bytes.NewReader(raw))
+		request.Header.Set("Authorization", "Bearer "+testToken)
+		handler.ServeHTTP(recorder, testAuthorActivityRequest(request))
+		if recorder.Body.Len() > durabledata.MaxRPCMessageBytes {
+			t.Fatalf("response bytes = %d, exceeds %d", recorder.Body.Len(), durabledata.MaxRPCMessageBytes)
+		}
+		var response rpcResponse
+		if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode response: %v body=%s", err, recorder.Body.String())
+		}
+		return response
+	}
+	for _, size := range []int{durabledata.MaxRPCMessageBytes - 1, durabledata.MaxRPCMessageBytes} {
+		response := callSized(t, size)
+		if response.Error != nil {
+			t.Fatalf("size %d rejected: %#v", size, response.Error)
+		}
+	}
+	before := calls
+	response := callSized(t, durabledata.MaxRPCMessageBytes+1)
+	if calls != before {
+		t.Fatalf("oversized request dispatched: calls %d -> %d", before, calls)
+	}
+	data := asMap(t, response.Error.Data)
+	if data["code"] != "MESSAGE_BUDGET_EXCEEDED" {
+		t.Fatalf("oversized response error = %#v", response.Error)
+	}
+	details := asMap(t, data["details"])
+	if details["boundary"] != "rpc_message" || details["method"] != "health.ping" || details["receipt_created"] != false {
+		t.Fatalf("oversized details = %#v", details)
+	}
+
+	large := testHandler(t, Options{AuthTokens: []string{testToken}, Handlers: map[string]MethodHandler{
+		"health.ping": func(context.Context, Request) (any, error) {
+			return map[string]any{"value": strings.Repeat("x", durabledata.MaxRPCMessageBytes)}, nil
+		},
+	}})
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/rpc", bytes.NewReader(base))
+	request.Header.Set("Authorization", "Bearer "+testToken)
+	large.ServeHTTP(recorder, testAuthorActivityRequest(request))
+	if recorder.Body.Len() > durabledata.MaxRPCMessageBytes {
+		t.Fatalf("bounded replacement bytes = %d", recorder.Body.Len())
+	}
+	var bounded rpcResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &bounded); err != nil {
+		t.Fatal(err)
+	}
+	if asMap(t, bounded.Error.Data)["code"] != "MESSAGE_BUDGET_EXCEEDED" {
+		t.Fatalf("oversized output response = %#v", bounded)
 	}
 }
 
@@ -1412,7 +1482,7 @@ func (s *fakeBundleCatalogReadStore) ListBundleCatalogAgents(_ context.Context, 
 	return result, nil
 }
 
-func (s *fakeBundleCatalogReadStore) UpsertBundleCatalog(_ context.Context, req bundlecatalog.Upsert) (bundlecatalog.UpsertResult, error) {
+func (s *fakeBundleCatalogReadStore) UpsertBundleCatalogWithData(_ context.Context, req bundlecatalog.Upsert, _ durabledata.Catalog) (bundlecatalog.UpsertResult, error) {
 	if s.conflict {
 		return bundlecatalog.UpsertResult{}, &bundlecatalog.ConflictError{BundleHash: req.BundleHash}
 	}

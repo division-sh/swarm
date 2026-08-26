@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/bundlecatalog"
+	"github.com/division-sh/swarm/internal/durabledata"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -54,6 +56,10 @@ scan.followup scan.requested thing.created trace.visible triage.requested
 
 type authorActivityTestCatalogRegistrar interface {
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
+}
+
+type apiTestBundleDataCatalogRegistrar interface {
+	UpsertBundleCatalogWithData(context.Context, bundlecatalog.Upsert, durabledata.Catalog) (bundlecatalog.UpsertResult, error)
 }
 
 type apiTestRuntimeMutationOwner interface {
@@ -122,6 +128,25 @@ func newScopedAPITestEventBus(t *testing.T, eventStore runtimebus.EventStore, op
 	}
 	if opts.BundleSourceFact.BundleHash() == "" {
 		opts.BundleSourceFact = authorActivityTestBundleSourceFact
+	}
+	if registrar, ok := eventStore.(apiTestBundleDataCatalogRegistrar); ok && opts.BundleSourceFact.IsEphemeral() {
+		catalog := durabledata.Catalog{BundleHash: opts.BundleSourceFact.BundleHash()}
+		if opts.ContractBundle != nil {
+			for _, declaration := range opts.ContractBundle.DurableDataDeclarations() {
+				catalog.Declarations = append(catalog.Declarations, durabledata.Declaration{
+					Name: declaration.Name, Ref: declaration.Ref, OwnerFlowID: declaration.OwnerFlowID,
+					BusinessKey:  declaration.BusinessKey,
+					SchemaDigest: declaration.SchemaDigest, CanonicalSchema: append([]byte(nil), declaration.CanonicalSchema...),
+				})
+			}
+		}
+		if _, err := registrar.UpsertBundleCatalogWithData(context.Background(), bundlecatalog.Upsert{
+			BundleHash: opts.BundleSourceFact.BundleHash(), ContentYAML: "api_version: swarm.bundle.catalog.test.v1\n",
+			ParsedJSON: map[string]any{"projection_version": "swarm.bundle.catalog.v2", "agents": []any{}},
+			Metadata:   map[string]any{"source": "api-test"},
+		}, catalog); err != nil {
+			return nil, fmt.Errorf("register API test bundle/data catalog: %w", err)
+		}
 	}
 	if opts.WorkOwner == nil {
 		opts.WorkOwner = newAPITestRuntimeWorkOccurrence(t, opts.RuntimeInstanceID, opts.BundleSourceFact.BundleHash())

@@ -181,26 +181,16 @@ func legacyProjectSQLiteStoreError(project localRuntimeStateProject, selection s
 
 func resolveWorkspaceMountSourcesForLocalState(RepoRoot string, flagDataSource string, cfg *config.Config, project localRuntimeStateProject, createDefault bool) (WorkspaceMountSources, error) {
 	configDataSource, configDataSourceSet := runtimeConfigWorkspaceDataSource(cfg)
-	volumesFrom, volumesFromSet, err := runtimeConfigWorkspaceVolumesFrom(cfg)
-	if err != nil {
-		return WorkspaceMountSources{}, err
-	}
-	defaultDataSource := ""
-	defaultSource := ""
-	if project.ProjectLocal && strings.TrimSpace(project.CanonicalProjectRoot) != "" {
-		defaultDataSource = filepath.Join(project.CanonicalProjectRoot, defaultWorkspaceDataSourceRelativePath)
-		defaultSource = defaultWorkspaceDataSourceSource
+	volumesFrom := ""
+	volumesFromSet := false
+	if cfg != nil {
+		volumesFrom = cfg.Workspace.VolumesFrom
+		volumesFromSet = cfg.Workspace.VolumesFromConfigured()
 	}
 	return resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
-		RepoRoot:                RepoRoot,
-		FlagDataSource:          flagDataSource,
-		ConfigDataSource:        configDataSource,
-		ConfigDataSourceSet:     configDataSourceSet,
-		VolumesFrom:             volumesFrom,
-		VolumesFromSet:          volumesFromSet,
-		DefaultDataSource:       defaultDataSource,
-		DefaultDataSourceSource: defaultSource,
-		CreateDefaultDataSource: createDefault,
+		RepoRoot: RepoRoot, FlagDataSource: flagDataSource,
+		ConfigDataSource: configDataSource, ConfigDataSourceSet: configDataSourceSet,
+		VolumesFrom: volumesFrom, VolumesFromSet: volumesFromSet,
 	})
 }
 

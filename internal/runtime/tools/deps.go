@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/packs"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
@@ -61,6 +62,7 @@ type ExecutorOptions struct {
 	WorkflowInstances  WorkflowInstanceLoader
 	MCPClient          *runtimemcp.Client
 	WorkflowSource     semanticview.Source
+	DataAccessStore    durabledata.ResourceAccessStore
 	ChannelBindings    []packs.OutboundBindingPlan
 	ActivityExecutor   DurableActivityExecutor
 	WorkspaceResolver  workspace.Resolver

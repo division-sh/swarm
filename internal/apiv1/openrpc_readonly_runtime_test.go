@@ -220,6 +220,7 @@ func readOnlyHTTPRuntimeMethods(t *testing.T, api *apispec.APISpecification, ope
 		matrixRows[row.Method] = row
 	}
 	mutating := complianceStringSet(api.Conventions.Idempotency.MutatingMethods)
+	permanentOperations := complianceStringSet(approvedPermanentOperationHTTPRuntimeMethods())
 
 	var out []string
 	for methodName, method := range api.MethodCatalog {
@@ -234,6 +235,9 @@ func readOnlyHTTPRuntimeMethods(t *testing.T, api *apispec.APISpecification, ope
 			t.Fatalf("%s matrix transport = %q, want %q", methodName, row.Transport, expectedComplianceTransport(methodName, method))
 		}
 		if _, ok := mutating[methodName]; ok {
+			continue
+		}
+		if _, ok := permanentOperations[methodName]; ok {
 			continue
 		}
 		if expectedComplianceTransport(methodName, method) != "http" {

@@ -16,14 +16,21 @@ func TestValidateSourceEvaluatesNestedPhysicalAgentDeclarationExactlyOnce(t *tes
 		declaredFile string
 		writeFile    bool
 		wantFindings int
+		wantLoadErr  string
 	}{
 		{name: "valid", declaredFile: "resume.md", writeFile: true},
-		{name: "missing", declaredFile: "missing.md", wantFindings: 1},
+		{name: "missing", declaredFile: "missing.md", wantLoadErr: "missing from the exact bundle catalog"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := writeNestedFlowDataFixture(t, tc.declaredFile, tc.writeFile)
 			repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 			bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+			if tc.wantLoadErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantLoadErr) {
+					t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want %q", err, tc.wantLoadErr)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
 			}
@@ -49,9 +56,6 @@ func TestValidateSourceEvaluatesNestedPhysicalAgentDeclarationExactlyOnce(t *tes
 			findings := ValidateSource(source)
 			if len(findings) != tc.wantFindings {
 				t.Fatalf("flow-data findings = %#v, want %d", findings, tc.wantFindings)
-			}
-			if tc.wantFindings == 1 && (findings[0].Filename != tc.declaredFile || !strings.Contains(findings[0].Message, "not readable")) {
-				t.Fatalf("flow-data finding = %#v, want one exact missing-file result", findings[0])
 			}
 		})
 	}

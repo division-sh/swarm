@@ -334,7 +334,7 @@ func TestCLI_ServeOwnsRuntimeStartupFlags(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("serve help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"Start the Swarm runtime", "--config", "--backend", "openai_responses", "--contracts", "--data", "--workspace-backend", "--bundle-hash", "--api-listen-addr", "API, WebSocket, health, and readiness routes", "--mcp-listen-addr", "MCP and tools routes", "--platform-spec", "--store", "--self-check", "--dev", "--require-bundle-match", "--no-require-bundle-match", "--abandon-active-runs", "--shutdown-grace", "--verbose"} {
+	for _, want := range []string{"Start the Swarm runtime", "--config", "--backend", "openai_responses", "--contracts", "--workspace-backend", "--bundle-hash", "--api-listen-addr", "API, WebSocket, health, and readiness routes", "--mcp-listen-addr", "MCP and tools routes", "--platform-spec", "--store", "--self-check", "--dev", "--require-bundle-match", "--no-require-bundle-match", "--abandon-active-runs", "--shutdown-grace", "--verbose"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("serve help missing %q:\n%s", want, stdout.String())
 		}
@@ -742,33 +742,14 @@ func TestCLI_ServeUnifiedConfigFeedsListenerConfig(t *testing.T) {
 	}
 }
 
-func TestCLI_ServeDataFlagFeedsServeOptions(t *testing.T) {
-	dataDir := t.TempDir()
-	var captured ServeOptions
-	opts := defaultRootCommandOptions()
-	opts.runServe = func(_ context.Context, _ string, serveOpts ServeOptions) int {
-		captured = serveOpts
-		return 0
-	}
-
+func TestCLI_ServeRejectsRetiredDataFlag(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--data", dataDir}, &stdout, &stderr, opts)
-	if code != 0 {
-		t.Fatalf("serve code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
-	}
-	if captured.DataSource != dataDir {
-		t.Fatalf("data source = %q, want %q", captured.DataSource, dataDir)
-	}
-}
-
-func TestCLI_ServeDataFlagRejectsEmptySource(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--data", ""}, &stdout, &stderr, defaultRootCommandOptions())
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"serve", "--data", t.TempDir()}, &stdout, &stderr, defaultRootCommandOptions())
 	if code == 0 {
 		t.Fatalf("serve code = 0, want failure stdout=%s stderr=%s", stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "--data must be non-empty") {
-		t.Fatalf("serve stderr = %q, want --data validation error", stderr.String())
+	if !strings.Contains(stderr.String(), "unknown flag: --data") {
+		t.Fatalf("serve stderr = %q, want hard retirement", stderr.String())
 	}
 }
 
@@ -1597,7 +1578,7 @@ homepage: https://division.sh
 	}
 }
 
-func TestConfiguredWorkspaceLifecycleDoesNotInventSourceRootDataSource(t *testing.T) {
+func TestConfiguredWorkspaceLifecycleNeedsNoAmbientDataSource(t *testing.T) {
 	contractsDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
 		t.Fatalf("write package.yaml: %v", err)
@@ -1607,48 +1588,39 @@ func TestConfiguredWorkspaceLifecycleDoesNotInventSourceRootDataSource(t *testin
 	if err != nil {
 		t.Fatalf("configuredWorkspaceLifecycle: %v", err)
 	}
-	err = manager.ValidateSource(context.Background(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
-	if err == nil || !strings.Contains(err.Error(), "/data source is not configured") {
-		t.Fatalf("ValidateSource error = %v, want explicit /data source requirement", err)
+	if err := manager.ValidateSource(context.Background(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})); err != nil {
+		t.Fatalf("ValidateSource without ambient data: %v", err)
 	}
 }
 
-func TestConfiguredWorkspaceLifecycleUsesExplicitDataAndContractsSources(t *testing.T) {
-	dataDir := t.TempDir()
+func TestConfiguredWorkspaceLifecycleRejectsExplicitAmbientData(t *testing.T) {
 	contractsDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
 		t.Fatalf("write package.yaml: %v", err)
 	}
 
-	manager, err := configuredWorkspaceLifecycle(nil, nil, contractsDir, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{
-		DataSource:       dataDir,
+	_, err := configuredWorkspaceLifecycle(nil, nil, contractsDir, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{
+		DataSource:       t.TempDir(),
 		DataSourceSource: "--data",
 	})
-	if err != nil {
-		t.Fatalf("configuredWorkspaceLifecycle: %v", err)
-	}
-	if err := manager.ValidateSource(context.Background(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})); err != nil {
-		t.Fatalf("ValidateSource: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "ambient workspace data sources are retired") {
+		t.Fatalf("configuredWorkspaceLifecycle error = %v, want hard retirement", err)
 	}
 }
 
-func TestConfiguredWorkspaceLifecycleFailsClosedForUnreadableDataSource(t *testing.T) {
+func TestConfiguredWorkspaceLifecycleRejectsUnreadableAmbientDataWithoutFallback(t *testing.T) {
 	missingDataDir := filepath.Join(t.TempDir(), "missing-data")
 	contractsDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
 		t.Fatalf("write package.yaml: %v", err)
 	}
 
-	manager, err := configuredWorkspaceLifecycle(nil, nil, contractsDir, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{
+	_, err := configuredWorkspaceLifecycle(nil, nil, contractsDir, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{
 		DataSource:       missingDataDir,
 		DataSourceSource: "--data",
 	})
-	if err != nil {
-		t.Fatalf("configuredWorkspaceLifecycle: %v", err)
-	}
-	err = manager.ValidateSource(context.Background(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
-	if err == nil || !strings.Contains(err.Error(), "/data source") || !strings.Contains(err.Error(), missingDataDir) {
-		t.Fatalf("ValidateSource error = %v, want missing explicit /data source", err)
+	if err == nil || !strings.Contains(err.Error(), "ambient workspace data sources are retired") {
+		t.Fatalf("configuredWorkspaceLifecycle error = %v, want hard retirement before filesystem fallback", err)
 	}
 }
 
@@ -1658,22 +1630,18 @@ func TestConfiguredWorkspaceLifecycleRejectsExplicitDataSourceWithVolumesFrom(t 
 		DataSource:       t.TempDir(),
 		DataSourceSource: "workspace.data_source",
 	})
-	if err == nil || !strings.Contains(err.Error(), "cannot be combined with workspace.volumes_from") {
-		t.Fatalf("configuredWorkspaceLifecycle error = %v, want volumes-from conflict", err)
+	if err == nil || !strings.Contains(err.Error(), "workspace.data_source and workspace.volumes_from are retired") {
+		t.Fatalf("configuredWorkspaceLifecycle error = %v, want retired config rejection", err)
 	}
 }
 
 func TestConfiguredWorkspaceLifecycleForBackendSelectsHostWithoutDocker(t *testing.T) {
 	cfg := &config.Config{Workspace: config.WorkspaceConfig{HostRoot: filepath.Join(t.TempDir(), "host-workspaces")}}
-	dataDir := t.TempDir()
 	contractsDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
 		t.Fatalf("write package.yaml: %v", err)
 	}
-	lifecycle, err := ConfiguredWorkspaceLifecycleForBackend(nil, cfg, contractsDir, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{
-		DataSource:       dataDir,
-		DataSourceSource: "--data",
-	}, WorkspaceBackendSelection{Backend: workspace.BackendHost, Source: "--workspace-backend"})
+	lifecycle, err := ConfiguredWorkspaceLifecycleForBackend(nil, cfg, contractsDir, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{}, WorkspaceBackendSelection{Backend: workspace.BackendHost, Source: "--workspace-backend"})
 	if err != nil {
 		t.Fatalf("ConfiguredWorkspaceLifecycleForBackend: %v", err)
 	}
@@ -1691,16 +1659,13 @@ func TestConfiguredWorkspaceLifecycleForBackendSelectsHostWithoutDocker(t *testi
 
 func TestConfiguredWorkspaceLifecycleForBackendRejectsHostVolumesFrom(t *testing.T) {
 	cfg := &config.Config{Workspace: config.WorkspaceConfig{VolumesFrom: "swarm-orchestrator"}}
-	_, err := ConfiguredWorkspaceLifecycleForBackend(nil, cfg, t.TempDir(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{
-		DataSource:       t.TempDir(),
-		DataSourceSource: "--data",
-	}, WorkspaceBackendSelection{Backend: workspace.BackendHost, Source: "--workspace-backend"})
-	if err == nil || !strings.Contains(err.Error(), "host workspace backend cannot consume workspace.volumes_from") {
-		t.Fatalf("ConfiguredWorkspaceLifecycleForBackend error = %v, want host volumes-from rejection", err)
+	_, err := ConfiguredWorkspaceLifecycleForBackend(nil, cfg, t.TempDir(), semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), WorkspaceMountSources{}, WorkspaceBackendSelection{Backend: workspace.BackendHost, Source: "--workspace-backend"})
+	if err == nil || !strings.Contains(err.Error(), "workspace.data_source and workspace.volumes_from are retired") {
+		t.Fatalf("ConfiguredWorkspaceLifecycleForBackend error = %v, want retired config rejection", err)
 	}
 }
 
-func TestResolveWorkspaceMountSourcesPrecedence(t *testing.T) {
+func TestResolveWorkspaceMountSourcesRejectsRetiredAuthorities(t *testing.T) {
 	RepoRoot := t.TempDir()
 	flagDir := filepath.Join(RepoRoot, "flag-data")
 	configDir := filepath.Join(RepoRoot, "config-data")
@@ -1710,31 +1675,25 @@ func TestResolveWorkspaceMountSourcesPrecedence(t *testing.T) {
 		}
 	}
 
-	result, err := resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
+	_, err := resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
 		RepoRoot:         RepoRoot,
 		FlagDataSource:   "flag-data",
 		ConfigDataSource: "config-data",
 	})
-	if err != nil {
-		t.Fatalf("resolve workspace mount sources: %v", err)
-	}
-	if result.DataSource != flagDir || result.DataSourceSource != "--data" {
-		t.Fatalf("flag precedence result = %#v, want source %q from --data", result, flagDir)
+	if err == nil || !strings.Contains(err.Error(), "ambient workspace data sources are retired") {
+		t.Fatalf("flag/config resolution error = %v, want hard retirement", err)
 	}
 
-	result, err = resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
+	_, err = resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
 		RepoRoot:            RepoRoot,
 		ConfigDataSource:    "config-data",
 		ConfigDataSourceSet: true,
 	})
-	if err != nil {
-		t.Fatalf("resolve config workspace mount source: %v", err)
-	}
-	if result.DataSource != configDir || result.DataSourceSource != "workspace.data_source" {
-		t.Fatalf("config precedence result = %#v, want source %q from workspace.data_source", result, configDir)
+	if err == nil || !strings.Contains(err.Error(), "ambient workspace data sources are retired") {
+		t.Fatalf("config resolution error = %v, want hard retirement", err)
 	}
 
-	result, err = resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
+	result, err := resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
 		RepoRoot:                RepoRoot,
 		DefaultDataSource:       filepath.Join(RepoRoot, defaultWorkspaceDataSourceRelativePath),
 		DefaultDataSourceSource: defaultWorkspaceDataSourceSource,
@@ -1743,12 +1702,11 @@ func TestResolveWorkspaceMountSourcesPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve default workspace mount source: %v", err)
 	}
-	defaultDir := filepath.Join(RepoRoot, defaultWorkspaceDataSourceRelativePath)
-	if result.DataSource != defaultDir || result.DataSourceSource != defaultWorkspaceDataSourceSource {
-		t.Fatalf("default result = %#v, want source %q from %s", result, defaultDir, defaultWorkspaceDataSourceSource)
+	if result.DataSource != "" || result.DataSourceSource != "" {
+		t.Fatalf("default result = %#v, want no ambient data source", result)
 	}
-	if info, err := os.Stat(defaultDir); err != nil || !info.IsDir() {
-		t.Fatalf("default data source stat = (%v, %v), want created directory", info, err)
+	if _, err := os.Stat(filepath.Join(RepoRoot, defaultWorkspaceDataSourceRelativePath)); !os.IsNotExist(err) {
+		t.Fatalf("retired default data directory exists: %v", err)
 	}
 }
 
@@ -1764,18 +1722,18 @@ func TestResolveWorkspaceMountSourcesRejectsEmptyConfigBeforeAlternateOrDefault(
 		DefaultDataSourceSource: defaultWorkspaceDataSourceSource,
 		CreateDefaultDataSource: true,
 	})
-	if err == nil || !strings.Contains(err.Error(), "workspace.data_source") || !strings.Contains(err.Error(), "must be non-empty") {
-		t.Fatalf("resolve workspace mount sources error = %v, want empty workspace.data_source rejection", err)
+	if err == nil || !strings.Contains(err.Error(), "ambient workspace data sources are retired") {
+		t.Fatalf("resolve workspace mount sources error = %v, want hard retirement", err)
 	}
-	if result.DataSource != "" || result.DataSourceSource != "workspace.data_source" {
-		t.Fatalf("workspace mount sources = %#v, want no alternate/default fallback and workspace.data_source source label", result)
+	if result.DataSource != "" || result.DataSourceSource != "" {
+		t.Fatalf("workspace mount sources = %#v, want no fallback", result)
 	}
 	if _, err := os.Stat(filepath.Join(RepoRoot, defaultWorkspaceDataSourceRelativePath)); !os.IsNotExist(err) {
 		t.Fatalf("default data source stat error = %v, want not created", err)
 	}
 }
 
-func TestResolveWorkspaceMountSourcesDefaultsToSwarmDataNotRepoData(t *testing.T) {
+func TestResolveWorkspaceMountSourcesNeverInventsAmbientDefault(t *testing.T) {
 	RepoRoot := t.TempDir()
 	repoDataDir := filepath.Join(RepoRoot, "data")
 	if err := os.MkdirAll(repoDataDir, 0o755); err != nil {
@@ -1790,19 +1748,16 @@ func TestResolveWorkspaceMountSourcesDefaultsToSwarmDataNotRepoData(t *testing.T
 	if err != nil {
 		t.Fatalf("resolve workspace mount sources: %v", err)
 	}
-	defaultDir := filepath.Join(RepoRoot, defaultWorkspaceDataSourceRelativePath)
-	if result.DataSource != defaultDir || result.DataSourceSource != defaultWorkspaceDataSourceSource {
-		t.Fatalf("workspace mount sources = %#v, want default %q", result, defaultDir)
+	if result.DataSource != "" || result.DataSourceSource != "" {
+		t.Fatalf("workspace mount sources = %#v, want no ambient default", result)
 	}
-	if result.DataSource == repoDataDir {
-		t.Fatalf("workspace mount source = repo data dir %q, want managed .swarm/data default", repoDataDir)
+	if _, err := os.Stat(filepath.Join(RepoRoot, defaultWorkspaceDataSourceRelativePath)); !os.IsNotExist(err) {
+		t.Fatalf("retired default data directory exists: %v", err)
 	}
-	if info, err := os.Stat(defaultDir); err != nil || !info.IsDir() {
-		t.Fatalf("default data source stat = (%v, %v), want created directory", info, err)
-	}
+	_ = repoDataDir
 }
 
-func TestResolveWorkspaceMountSourcesRejectsDefaultWithoutProjectSource(t *testing.T) {
+func TestResolveWorkspaceMountSourcesAllowsNoAmbientSource(t *testing.T) {
 	oldWD, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("get cwd: %v", err)
@@ -1818,8 +1773,8 @@ func TestResolveWorkspaceMountSourcesRejectsDefaultWithoutProjectSource(t *testi
 	})
 
 	result, err := resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{})
-	if err == nil || !strings.Contains(err.Error(), "workspace data source is required") {
-		t.Fatalf("resolve workspace mount sources error = %v, want missing data source failure", err)
+	if err != nil {
+		t.Fatalf("resolve workspace mount sources: %v", err)
 	}
 	if result.DataSource != "" || result.DataSourceSource != "" {
 		t.Fatalf("workspace mount sources = %#v, want no default source", result)
@@ -1829,15 +1784,15 @@ func TestResolveWorkspaceMountSourcesRejectsDefaultWithoutProjectSource(t *testi
 	}
 }
 
-func TestResolveWorkspaceMountSourcesUsesVolumesFromAlternateWithoutDefault(t *testing.T) {
+func TestResolveWorkspaceMountSourcesRejectsVolumesFromWithoutFallback(t *testing.T) {
 	RepoRoot := t.TempDir()
 	result, err := resolveWorkspaceMountSourcesFromInput(workspaceDataSourceInput{
 		RepoRoot:       RepoRoot,
 		VolumesFrom:    "swarm-orchestrator",
 		VolumesFromSet: true,
 	})
-	if err != nil {
-		t.Fatalf("resolve workspace mount sources: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "ambient workspace data sources are retired") {
+		t.Fatalf("resolve workspace mount sources error = %v, want hard retirement", err)
 	}
 	if result.DataSource != "" || result.DataSourceSource != "" {
 		t.Fatalf("workspace mount sources = %#v, want volumes-from alternate without path source", result)
@@ -1854,11 +1809,11 @@ func TestResolveWorkspaceMountSourcesReadsRuntimeConfigAndRejectsEmptyConfig(t *
 	result, err := resolveWorkspaceMountSources(RepoRoot, "", &config.Config{
 		Workspace: config.WorkspaceConfig{DataSource: configDir},
 	})
-	if err != nil {
-		t.Fatalf("resolve config workspace mount sources: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "ambient workspace data sources are retired") {
+		t.Fatalf("config-backed workspace mount error = %v, want hard retirement", err)
 	}
-	if result.DataSource != configDir || result.DataSourceSource != "workspace.data_source" {
-		t.Fatalf("config-backed workspace mount sources = %#v, want %q from workspace.data_source", result, configDir)
+	if result.DataSource != "" || result.DataSourceSource != "" {
+		t.Fatalf("config-backed workspace mount sources = %#v, want no fallback", result)
 	}
 
 	configPath := filepath.Join(t.TempDir(), "swarm.yaml")
@@ -1875,16 +1830,8 @@ func TestResolveWorkspaceMountSourcesReadsRuntimeConfigAndRejectsEmptyConfig(t *
 		"    rotate_after_turns: 40",
 		"    rotate_on_parse_failures: 3",
 	}, "\n")+"\n")
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		t.Fatalf("load config with empty workspace.data_source: %v", err)
-	}
-	result, err = resolveWorkspaceMountSources(RepoRoot, "", cfg)
-	if err == nil || !strings.Contains(err.Error(), "workspace.data_source") || !strings.Contains(err.Error(), "must be non-empty") {
-		t.Fatalf("resolve empty configured workspace source error = %v, want fail-closed config rejection", err)
-	}
-	if result.DataSource != "" || result.DataSourceSource != "workspace.data_source" {
-		t.Fatalf("empty configured workspace source result = %#v, want no env fallback", result)
+	if _, err := config.Load(configPath); err == nil || !strings.Contains(err.Error(), "workspace.data_source is retired") {
+		t.Fatalf("load config error = %v, want parser-level hard retirement", err)
 	}
 }
 
@@ -2256,7 +2203,7 @@ func TestPlatformSpecWorkspaceExecutionTargetCapabilityPromoted(t *testing.T) {
 			t.Fatalf("logical read-only mounts missing %q: %#v", want, authority.LogicalMountAuthority.ReadOnly)
 		}
 	}
-	for _, want := range []string{"Relative execution paths", "Writes outside logical `/workspace`", "MUST NOT leak raw host backing paths", "symlink escapes", "data_source_authority"} {
+	for _, want := range []string{"Relative execution paths", "Writes outside logical `/workspace`", "MUST NOT leak raw host backing paths", "symlink escapes", "durable_data_resources.workspace_projection"} {
 		if !joinedContains(authority.LogicalMountAuthority.Rules, want) {
 			t.Fatalf("logical mount authority rules missing %q: %#v", want, authority.LogicalMountAuthority.Rules)
 		}
@@ -2373,7 +2320,7 @@ func TestPlatformSpecInstalledBinaryPortabilityPromoted(t *testing.T) {
 			t.Fatalf("runtime image packaging rule missing %q:\n%s", want, packaging.Rule)
 		}
 	}
-	for _, want := range []string{"/data", "/opt/swarm/contracts", "MUST NOT derive"} {
+	for _, want := range []string{"/data", "/opt/swarm/contracts", "never selected", "durable_data_resources.workspace_projection"} {
 		if !strings.Contains(packaging.MountSourceRule, want) {
 			t.Fatalf("runtime image packaging mount source rule missing %q:\n%s", want, packaging.MountSourceRule)
 		}
@@ -5227,7 +5174,6 @@ func writeStoreBackendRuntimeConfigWithWorkspaceFields(t *testing.T, backend str
 		"runtime:",
 		"  recovery_on_startup: false",
 		"workspace:",
-		"  data_source: " + t.TempDir(),
 	}
 	lines = append(lines, workspaceFields...)
 	if strings.TrimSpace(backend) != "" || strings.TrimSpace(sqlitePath) != "" {

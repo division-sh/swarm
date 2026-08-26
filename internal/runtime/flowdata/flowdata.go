@@ -2,12 +2,12 @@ package flowdata
 
 import (
 	"fmt"
-	"os"
 	"path"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/durabledata"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -15,11 +15,16 @@ import (
 
 const ToolName = "read_flow_data"
 
-type ResolvedFile struct {
-	Filename    string
-	Path        string
-	ContentType string
-	SizeBytes   int64
+type ResolvedStaticData struct {
+	StaticID      durabledata.StaticDataID
+	StaticRef     durabledata.StaticDataRef
+	PackageKey    string
+	OwnerFlowID   string
+	RelativePath  string
+	ContentDigest string
+	ContentType   string
+	MountPath     string
+	Content       []byte
 }
 
 type Finding struct {
@@ -29,10 +34,9 @@ type Finding struct {
 }
 
 type agentFlowDataDeclaration struct {
-	LogicalID string
-	Entry     runtimecontracts.AgentRegistryEntry
-	FlowID    string
-	Scope     semanticview.FlowScope
+	LogicalID  string
+	FlowID     string
+	PackageKey string
 }
 
 func NormalizeAccessList(values []string) []string {
@@ -96,11 +100,40 @@ func ContentType(filename string) string {
 	}
 }
 
-func AllowedFilenames(source semanticview.Source, actor models.AgentConfig) []string {
-	if decl, ok := resolveAgentFlowDataDeclaration(source, actor); ok {
-		return FlowDataAccessFromEntry(decl.Entry)
+func AllowedStaticData(source semanticview.Source, actor models.AgentConfig) []ResolvedStaticData {
+	decl, ok := resolveAgentFlowDataDeclaration(source, actor)
+	if !ok {
+		return nil
 	}
-	return nil
+	values := source.StaticDataForAgent(decl.PackageKey, decl.FlowID, decl.LogicalID)
+	out := make([]ResolvedStaticData, 0, len(values))
+	for _, value := range values {
+		mountPath, err := durabledata.StaticMountPath(value.StaticID)
+		if err != nil {
+			return nil
+		}
+		out = append(out, ResolvedStaticData{
+			StaticID:      value.StaticID,
+			StaticRef:     value.Ref,
+			PackageKey:    value.PackageKey,
+			OwnerFlowID:   value.OwnerFlowID,
+			RelativePath:  value.RelativePath,
+			ContentDigest: value.ContentDigest,
+			ContentType:   value.ContentType,
+			MountPath:     mountPath,
+			Content:       append([]byte(nil), value.Content...),
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].StaticID < out[j].StaticID })
+	return out
+}
+
+func AllowedResourceData(source semanticview.Source, actor models.AgentConfig) []durabledata.DeclarationRef {
+	declaration, ok := semanticview.ResolveAgentDeclaration(source, actor)
+	if !ok {
+		return nil
+	}
+	return source.DurableDataForAgent(declaration.Source.PackageKey, declaration.OwnerFlowID, declaration.LocalID)
 }
 
 func ValidateSource(source semanticview.Source) []Finding {
@@ -121,62 +154,35 @@ func ValidateSource(source semanticview.Source) []Finding {
 			}
 			continue
 		}
-		scope, ok := source.FlowScopeByID(declaration.OwnerFlowID)
-		if !ok {
+		if _, ok := source.FlowScopeByID(declaration.OwnerFlowID); !ok {
 			findings = append(findings, Finding{AgentLabel: scopeLabel, Message: fmt.Sprintf("agent %s references missing owning flow %s", agentID, declaration.OwnerFlowID)})
 			continue
 		}
-		for _, raw := range declaration.Entry.FlowDataAccess {
-			filename, err := NormalizeFilename(raw)
-			if err != nil {
-				findings = append(findings, Finding{
-					AgentLabel: scopeLabel,
-					Filename:   strings.TrimSpace(raw),
-					Message:    fmt.Sprintf("invalid flow_data_access path: %v", err),
-				})
-				continue
-			}
-			if _, err := resolveUnderDataRoot(scope.DataDir, filename); err != nil {
-				findings = append(findings, Finding{
-					AgentLabel: scopeLabel,
-					Filename:   filename,
-					Message:    err.Error(),
-				})
-			}
+		compiled := source.StaticDataForAgent(declaration.Source.PackageKey, declaration.OwnerFlowID, declaration.LocalID)
+		if len(compiled) != len(NormalizeAccessList(declaration.Entry.FlowDataAccess)) {
+			findings = append(findings, Finding{
+				AgentLabel: scopeLabel,
+				Message:    "flow_data_access does not have a complete compiled static-data projection",
+			})
 		}
 	}
 	return findings
 }
 
-func Resolve(source semanticview.Source, actor models.AgentConfig, rawFilename string) (ResolvedFile, error) {
+func Resolve(source semanticview.Source, actor models.AgentConfig, staticID durabledata.StaticDataID) (ResolvedStaticData, error) {
 	if source == nil {
-		return ResolvedFile{}, fmt.Errorf("semantic source is required for %s", ToolName)
+		return ResolvedStaticData{}, fmt.Errorf("semantic source is required for %s", ToolName)
 	}
-	filename, err := NormalizeFilename(rawFilename)
-	if err != nil {
-		return ResolvedFile{}, err
+	if err := staticID.Validate(); err != nil {
+		return ResolvedStaticData{}, fmt.Errorf("static_id: %w", err)
 	}
-	decl, ok := resolveAgentFlowDataDeclaration(source, actor)
-	if !ok {
-		return ResolvedFile{}, fmt.Errorf("agent %s has no flow-scoped contract declaration for flow data", strings.TrimSpace(actor.ID))
+	for _, item := range AllowedStaticData(source, actor) {
+		if item.StaticID == staticID {
+			item.Content = append([]byte(nil), item.Content...)
+			return item, nil
+		}
 	}
-	if !filenameAllowed(filename, FlowDataAccessFromEntry(decl.Entry)) {
-		return ResolvedFile{}, fmt.Errorf("flow data file %q is not declared for agent %s", filename, strings.TrimSpace(actor.ID))
-	}
-	resolvedPath, err := resolveUnderDataRoot(decl.Scope.DataDir, filename)
-	if err != nil {
-		return ResolvedFile{}, err
-	}
-	info, err := os.Stat(resolvedPath)
-	if err != nil {
-		return ResolvedFile{}, err
-	}
-	return ResolvedFile{
-		Filename:    filename,
-		Path:        resolvedPath,
-		ContentType: ContentType(filename),
-		SizeBytes:   info.Size(),
-	}, nil
+	return ResolvedStaticData{}, fmt.Errorf("static data %q is not declared for agent %s", staticID, strings.TrimSpace(actor.ID))
 }
 
 func resolveAgentFlowDataDeclaration(source semanticview.Source, actor models.AgentConfig) (agentFlowDataDeclaration, bool) {
@@ -188,59 +194,14 @@ func resolveAgentFlowDataDeclaration(source semanticview.Source, actor models.Ag
 		return agentFlowDataDeclaration{}, false
 	}
 	flowID := strings.TrimSpace(declaration.OwnerFlowID)
-	scope, ok := source.FlowScopeByID(flowID)
-	if !ok {
+	if _, ok := source.FlowScopeByID(flowID); !ok {
 		return agentFlowDataDeclaration{}, false
 	}
 	return agentFlowDataDeclaration{
-		LogicalID: strings.TrimSpace(declaration.LocalID),
-		Entry:     declaration.Entry,
-		FlowID:    flowID,
-		Scope:     scope,
+		LogicalID:  strings.TrimSpace(declaration.LocalID),
+		FlowID:     flowID,
+		PackageKey: strings.TrimSpace(declaration.Source.PackageKey),
 	}, true
-}
-
-func resolveUnderDataRoot(dataDir, filename string) (string, error) {
-	filename, err := NormalizeFilename(filename)
-	if err != nil {
-		return "", err
-	}
-	dataDir = strings.TrimSpace(dataDir)
-	if dataDir == "" {
-		return "", fmt.Errorf("flow data root is missing")
-	}
-	root, err := filepath.EvalSymlinks(dataDir)
-	if err != nil {
-		return "", fmt.Errorf("flow data root is not readable: %w", err)
-	}
-	root = filepath.Clean(root)
-	target := filepath.Join(root, filepath.FromSlash(filename))
-	realTarget, err := filepath.EvalSymlinks(target)
-	if err != nil {
-		return "", fmt.Errorf("flow data file %q is not readable: %w", filename, err)
-	}
-	realTarget = filepath.Clean(realTarget)
-	rel, err := filepath.Rel(root, realTarget)
-	if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || rel == ".." || filepath.IsAbs(rel) {
-		return "", fmt.Errorf("flow data file %q escapes the flow data root", filename)
-	}
-	info, err := os.Stat(realTarget)
-	if err != nil {
-		return "", fmt.Errorf("flow data file %q is not readable: %w", filename, err)
-	}
-	if !info.Mode().IsRegular() {
-		return "", fmt.Errorf("flow data file %q is not a regular file", filename)
-	}
-	return realTarget, nil
-}
-
-func filenameAllowed(filename string, allowed []string) bool {
-	for _, item := range allowed {
-		if item == filename {
-			return true
-		}
-	}
-	return false
 }
 
 func projectScopeLabel(key, name string) string {

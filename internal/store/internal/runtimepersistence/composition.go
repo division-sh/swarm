@@ -27,6 +27,7 @@ import (
 	storetimerobligation "github.com/division-sh/swarm/internal/store/internal/backend/timerobligation"
 	storebudgetspend "github.com/division-sh/swarm/internal/store/internal/budgetspend"
 	storebundlecatalog "github.com/division-sh/swarm/internal/store/internal/bundlecatalog"
+	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 	storeingress "github.com/division-sh/swarm/internal/store/internal/ingresspersistence"
 	storemailbox "github.com/division-sh/swarm/internal/store/internal/mailboxpersistence"
 	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
@@ -97,6 +98,11 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.postgres = bundleCatalog
+	durableData, err := storedurabledata.NewPostgres(backend, store.requireCurrentSchema)
+	if err != nil {
+		return nil, err
+	}
+	store.durableDataOwner = durableData
 	operatorObservability, err := storeoperatorsurface.NewObservabilityPostgres(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
@@ -204,7 +210,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err != nil {
 		return nil, err
 	}
-	eventOwner, err := storeevent.NewPostgres(backend, store.requireCurrentSchema, activityJournal, runLifecycle, deliveryOwner, replyContexts, apiIdempotency)
+	eventOwner, err := storeevent.NewPostgres(backend, store.requireCurrentSchema, activityJournal, runLifecycle, deliveryOwner, replyContexts, apiIdempotency, durableData)
 	if err != nil {
 		return nil, err
 	}
@@ -249,7 +255,7 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 	if err := pipelineOwner.BindSelectedForkWriter(eventOwner); err != nil {
 		return nil, err
 	}
-	runForkOwner, err := storerunfork.NewPostgres(backend, store.requireCurrentSchema, runLifecycle, decisionOwner, deliveryOwner, effectOwner, pipelineOwner, eventOwner, operatorConversation)
+	runForkOwner, err := storerunfork.NewPostgres(backend, store.requireCurrentSchema, runLifecycle, decisionOwner, deliveryOwner, effectOwner, pipelineOwner, eventOwner, operatorConversation, durableData)
 	if err != nil {
 		return nil, err
 	}
@@ -348,6 +354,11 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.sQLite = bundleCatalog
+	durableData, err := storedurabledata.NewSQLite(backend, store.requireCurrentSchema, store.now)
+	if err != nil {
+		return nil, err
+	}
+	store.durableDataOwner = durableData
 	operatorObservability, err := storeoperatorsurface.NewObservabilitySQLite(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
@@ -445,7 +456,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	if err != nil {
 		return nil, err
 	}
-	eventOwner, err := storeevent.NewSQLite(backend, store.requireCurrentSchema, activityJournal, runLifecycle, deliveryOwner, replyContexts, apiIdempotency, store.now)
+	eventOwner, err := storeevent.NewSQLite(backend, store.requireCurrentSchema, activityJournal, runLifecycle, deliveryOwner, replyContexts, apiIdempotency, durableData, store.now)
 	if err != nil {
 		return nil, err
 	}
@@ -490,7 +501,7 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 	if err := pipelineOwner.BindSelectedForkWriter(eventOwner); err != nil {
 		return nil, err
 	}
-	runForkOwner, err := storerunfork.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, decisionOwner, deliveryOwner, effectOwner, pipelineOwner, eventOwner, operatorConversation, store.now)
+	runForkOwner, err := storerunfork.NewSQLite(backend, store.requireCurrentSchema, runLifecycle, decisionOwner, deliveryOwner, effectOwner, pipelineOwner, eventOwner, operatorConversation, durableData, store.now)
 	if err != nil {
 		return nil, err
 	}

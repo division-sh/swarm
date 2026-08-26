@@ -16,6 +16,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
+	runtimedataaccess "github.com/division-sh/swarm/internal/runtime/dataaccess"
 	runtimedestructivereset "github.com/division-sh/swarm/internal/runtime/destructivereset"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -131,6 +132,7 @@ type DockerManager struct {
 	lookup      Lookup
 	cfg         DockerConfig
 	source      semanticview.Source
+	data        runtimedataaccess.Provider
 	RunDockerFn func(ctx context.Context, args ...string) (string, error) // test seam
 }
 
@@ -223,6 +225,12 @@ func (m *DockerManager) SetSemanticSource(source semanticview.Source) {
 		return
 	}
 	m.source = source
+}
+
+func (m *DockerManager) SetDataProjectionProvider(provider runtimedataaccess.Provider) {
+	if m != nil {
+		m.data = provider
+	}
 }
 
 func (m *DockerManager) SetRunDockerFnForTest(runDockerFn func(ctx context.Context, args ...string) (string, error)) {
@@ -558,7 +566,7 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 			Container: m.cfg.ScaffoldContainer,
 			Workdir:   m.cfg.ScaffoldWorkdir,
 			Backend:   BackendDocker,
-			Mounts:    dockerExecutionMounts(m.cfg),
+			Mounts:    dockerExecutionMounts(m.cfg, false),
 		}, nil
 	case "system":
 		if err := m.EnsureContainerRunningWithIdentity(ctx, m.cfg.SystemContainer, m.systemContainerIdentity("workspace.ResolveWorkspace", runtimecontaineridentity.KindSystem), []string{
@@ -576,7 +584,7 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 			Container: m.cfg.SystemContainer,
 			Workdir:   m.cfg.SystemWorkdir,
 			Backend:   BackendDocker,
-			Mounts:    dockerExecutionMounts(m.cfg),
+			Mounts:    dockerExecutionMounts(m.cfg, false),
 		}, nil
 	}
 	scope, scopeKey, err := m.workspaceScopeForActor(actor)
@@ -588,7 +596,16 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 	if err != nil {
 		return nil, err
 	}
-	if err := m.EnsureContainerRunningWithIdentity(ctx, container, identity, append(m.standardMountArgs(),
+	mounts := m.standardMountArgs()
+	var projection runtimedataaccess.Projection
+	if m.data != nil {
+		projection, err = m.data.Materialize(ctx, actor)
+		if err != nil {
+			return nil, fmt.Errorf("materialize workspace data projection: %w", err)
+		}
+		mounts = append(mounts, "-v", fmt.Sprintf("%s:%s:ro", projection.Root, strings.TrimSpace(m.cfg.DataMountPoint)))
+	}
+	if err := m.EnsureContainerRunningWithIdentity(ctx, container, identity, append(mounts,
 		[]string{
 			"-v", fmt.Sprintf("%s:%s", volume, m.cfg.EntityWorkdir),
 			"-w", m.cfg.EntityWorkdir,
@@ -601,11 +618,11 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 		Container: container,
 		Workdir:   m.cfg.EntityWorkdir,
 		Backend:   BackendDocker,
-		Mounts:    dockerExecutionMounts(m.cfg),
+		Mounts:    dockerExecutionMounts(m.cfg, projection.Root != ""),
 	}, nil
 }
 
-func dockerExecutionMounts(cfg DockerConfig) []ExecutionMount {
+func dockerExecutionMounts(cfg DockerConfig, hasData bool) []ExecutionMount {
 	dataMount := strings.TrimSpace(cfg.DataMountPoint)
 	if dataMount == "" {
 		dataMount = LogicalDataMount
@@ -614,11 +631,14 @@ func dockerExecutionMounts(cfg DockerConfig) []ExecutionMount {
 	if contractsMount == "" {
 		contractsMount = LogicalContractsMount
 	}
-	return []ExecutionMount{
+	out := []ExecutionMount{
 		{LogicalPath: LogicalWorkspaceMount, Access: MountAccessReadWrite},
-		{LogicalPath: dataMount, Access: MountAccessReadOnly},
 		{LogicalPath: contractsMount, Access: MountAccessReadOnly},
 	}
+	if hasData {
+		out = append(out, ExecutionMount{LogicalPath: dataMount, Access: MountAccessReadOnly})
+	}
+	return out
 }
 
 func (m *DockerManager) workspaceClass(actor models.AgentConfig) (string, error) {
@@ -783,13 +803,7 @@ func (m *DockerManager) standardMountArgs() []string {
 	if m == nil {
 		return nil
 	}
-	if volumesFrom := strings.TrimSpace(m.cfg.WorkspaceVolumesFrom); volumesFrom != "" {
-		return []string{"--volumes-from", volumesFrom + ":ro"}
-	}
 	args := []string{}
-	if source := strings.TrimSpace(m.cfg.SharedDataSource); source != "" {
-		args = append(args, "-v", fmt.Sprintf("%s:%s:ro", source, strings.TrimSpace(m.cfg.DataMountPoint)))
-	}
 	if source := strings.TrimSpace(m.cfg.ContractsSource); source != "" {
 		args = append(args, "-v", fmt.Sprintf("%s:%s:ro", source, strings.TrimSpace(m.cfg.ContractsMountPoint)))
 	}
@@ -840,23 +854,8 @@ func (m *DockerManager) ensureWorkspaceImage(ctx context.Context) error {
 }
 
 func (m *DockerManager) validateSharedMounts(ctx context.Context) error {
-	if volumesFrom := strings.TrimSpace(m.cfg.WorkspaceVolumesFrom); volumesFrom != "" {
-		mounts, err := m.inspectContainerMountDestinations(ctx, volumesFrom)
-		if err != nil {
-			return fmt.Errorf("workspace validation failed: inspect shared mounts from %s: %w", volumesFrom, err)
-		}
-		for _, required := range []string{strings.TrimSpace(m.cfg.DataMountPoint), strings.TrimSpace(m.cfg.ContractsMountPoint)} {
-			if required == "" {
-				continue
-			}
-			if _, ok := mounts[required]; !ok {
-				return fmt.Errorf("workspace validation failed: shared mount source %s does not provide %s", volumesFrom, required)
-			}
-		}
-		return nil
-	}
-	if err := validateReadableDir(strings.TrimSpace(m.cfg.SharedDataSource), "workspace validation failed: /data source"); err != nil {
-		return err
+	if strings.TrimSpace(m.cfg.WorkspaceVolumesFrom) != "" || strings.TrimSpace(m.cfg.SharedDataSource) != "" {
+		return fmt.Errorf("workspace.data_source and workspace.volumes_from are retired; declare flow_data_access or data_access")
 	}
 	if err := validateReadableDir(strings.TrimSpace(m.cfg.ContractsSource), "workspace validation failed: /opt/swarm/contracts source"); err != nil {
 		return err
@@ -1012,14 +1011,34 @@ func (m *DockerManager) EnsureContainerRunningWithIdentity(ctx context.Context, 
 	if err != nil {
 		return err
 	}
+	labels, err := identityLabelsForContainer(name, identity)
+	if err != nil {
+		return err
+	}
+	if exists && len(labels) > 0 {
+		existing, found, inspectErr := m.inspectRuntimeContainerIdentity(ctx, name)
+		if inspectErr != nil {
+			return inspectErr
+		}
+		identity.ContainerName = strings.TrimSpace(name)
+		if !found {
+			return fmt.Errorf("container %s exists without the required runtime identity", name)
+		}
+		if !existing.Equal(identity) {
+			if !existing.ResetEligibleManaged() || existing.ContainerName != strings.TrimSpace(name) {
+				return fmt.Errorf("container %s has a conflicting non-replaceable runtime identity", name)
+			}
+			if _, err := m.RunDocker(ctx, "rm", "--force", name); err != nil {
+				return fmt.Errorf("replace stale workspace container %s: %w", name, err)
+			}
+			exists = false
+			running = false
+		}
+	}
 	if !exists {
 		args := []string{"create", "--name", name}
 		if network := strings.TrimSpace(m.cfg.WorkspaceNetwork); network != "" {
 			args = append(args, "--network", network)
-		}
-		labels, err := identityLabelsForContainer(name, identity)
-		if err != nil {
-			return err
 		}
 		if len(labels) > 0 {
 			args = append(args, runtimecontaineridentity.DockerCreateLabelArgs(labels)...)
@@ -1046,6 +1065,22 @@ func (m *DockerManager) EnsureContainerRunningWithIdentity(ctx context.Context, 
 		return err
 	}
 	return nil
+}
+
+func (m *DockerManager) inspectRuntimeContainerIdentity(ctx context.Context, name string) (runtimecontaineridentity.Identity, bool, error) {
+	out, err := m.RunDocker(ctx, "inspect", "--format", "{{json .Config.Labels}}", strings.TrimSpace(name))
+	if err != nil {
+		return runtimecontaineridentity.Identity{}, false, err
+	}
+	var labels map[string]string
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &labels); err != nil {
+		return runtimecontaineridentity.Identity{}, false, fmt.Errorf("inspect container %s runtime identity: %w", name, err)
+	}
+	identity, found, err := runtimecontaineridentity.FromLabels(labels)
+	if err != nil {
+		return runtimecontaineridentity.Identity{}, false, fmt.Errorf("inspect container %s runtime identity: %w", name, err)
+	}
+	return identity, found, nil
 }
 
 func identityLabelsForContainer(name string, identity runtimecontaineridentity.Identity) (map[string]string, error) {

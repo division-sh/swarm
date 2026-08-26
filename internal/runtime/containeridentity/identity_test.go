@@ -37,6 +37,18 @@ func TestIdentityLabelsRoundTripResetEligibleAgent(t *testing.T) {
 	}
 }
 
+func TestIdentityEqualityUsesNormalizedCompleteIdentity(t *testing.T) {
+	left := Identity{Owner: OwnerRuntime, Kind: KindFlow, ResetEligible: true, ContainerName: " flow ", RunID: " run-a ", FlowInstance: "/child/one/"}
+	right := Identity{Owner: OwnerRuntime, Kind: KindFlow, ResetEligible: true, ContainerName: "flow", RunID: "run-a", FlowInstance: "child/one"}
+	if !left.Equal(right) {
+		t.Fatal("normalized equal identities compare unequal")
+	}
+	right.RunID = "run-b"
+	if left.Equal(right) {
+		t.Fatal("different run identities compare equal")
+	}
+}
+
 func TestIdentityRejectsPartialAgentLabels(t *testing.T) {
 	_, _, err := FromLabels(map[string]string{
 		LabelOwner:         OwnerRuntime,

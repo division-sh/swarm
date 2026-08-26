@@ -153,6 +153,56 @@ func TestCompiledEventSchemasPreservesPackageOwnerAndRejectsRawRestatements(t *t
 	}
 }
 
+func TestCompiledEventSchemasPrefersFlowOwnerOverQualifiedProjectRestatement(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatalf("load sibling owner fixture: %v", err)
+	}
+	compiled, err := bundle.CompiledEventSchemas()
+	if err != nil {
+		t.Fatalf("CompiledEventSchemas: %v", err)
+	}
+
+	var matches []CompiledEventSchema
+	for _, event := range compiled {
+		if event.PackageKey() == "." && event.EventName() == "flow-a/alpha.done" {
+			matches = append(matches, event)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("compiled flow-a/alpha.done owners = %d, coordinates=%#v", len(matches), compiledEventCoordinates(compiled))
+	}
+	if got := matches[0].Source(); got.Layer != "flow" || got.FlowID != "flow-a" || !strings.HasSuffix(got.File, "/flows/flow-a/events.yaml") {
+		t.Fatalf("canonical flow owner source = %#v", got)
+	}
+}
+
+func TestCompiledEventSchemasConsumesAdmittedProducerAndRejectsConsumerRestatement(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := t.TempDir()
+	copyTree(t, filepath.Join(repo, "examples", "routing", "parent-connect"), root)
+
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatalf("load producer-owned fixture: %v", err)
+	}
+	compiled, err := bundle.CompiledEventSchemas()
+	if err != nil {
+		t.Fatalf("CompiledEventSchemas: %v", err)
+	}
+	event := requireCompiledEventSchema(t, compiled, ".", "producer/work.ready")
+	if got := event.Source(); got.FlowID != "producer" || !strings.HasSuffix(got.File, "/flows/producer/events.yaml") {
+		t.Fatalf("canonical producer source = %#v, want producer event declaration", got)
+	}
+
+	writeFixtureFile(t, filepath.Join(root, "flows", "consumer", "events.yaml"), "work.ready:\n  work_id: text?\n")
+	if _, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo)); err == nil || !strings.Contains(err.Error(), "restates producer-owned schema") {
+		t.Fatalf("consumer restatement load error = %v, want #2300 owner rejection", err)
+	}
+}
+
 func TestCompiledEventSchemasExcludeGeneratedAndProviderImportedEvents(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := t.TempDir()

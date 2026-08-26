@@ -357,6 +357,7 @@ func TestRepositoryEventBusSourceOperationLedgerIsExhaustive(t *testing.T) {
 		"Publish":                                    operationMutation,
 		"PublishAcknowledged":                        operationMutation,
 		"PublishAPIEventAcknowledged":                operationMutation,
+		"PublishAPIEventWithRunCreationAcknowledged": operationMutation,
 		"PublishAndWait":                             operationMutation,
 		"PublishDirect":                              operationMutation,
 		"PublishDirectRoutes":                        operationMutation,

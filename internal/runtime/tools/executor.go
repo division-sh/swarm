@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/durabledata"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/toolcapabilities"
@@ -44,6 +45,7 @@ type Executor struct {
 	httpClient                     *http.Client
 	mcpClient                      *runtimemcp.Client
 	workflowSource                 semanticview.Source
+	dataAccessStore                durabledata.ResourceAccessStore
 	channelOperations              map[string]channelOperation
 	activityExecutor               DurableActivityExecutor
 	workspaces                     workspace.Resolver
@@ -85,6 +87,7 @@ func NewExecutorWithOptions(bus EventPublisher, opts ExecutorOptions) *Executor 
 		httpClient:                     &http.Client{Timeout: 30 * time.Second},
 		mcpClient:                      opts.MCPClient,
 		workflowSource:                 opts.WorkflowSource,
+		dataAccessStore:                opts.DataAccessStore,
 		channelOperations:              compileChannelOperations(opts.ChannelBindings),
 		activityExecutor:               opts.ActivityExecutor,
 		workspaces:                     opts.WorkspaceResolver,
@@ -345,7 +348,7 @@ func (e *Executor) toolAuthorizationDecision(actor models.AgentConfig, toolName 
 		return toolAuthorizationDecision{
 			ownership: toolOwnershipPlatformBuiltin,
 			class:     toolAuthorizationFlowData,
-			allowed:   len(flowdata.AllowedFilenames(source, actor)) > 0,
+			allowed:   len(flowdata.AllowedStaticData(source, actor)) > 0 || len(flowdata.AllowedResourceData(source, actor)) > 0,
 		}
 	}
 	if roleScopedEntityToolsEnabledForActor(source, actor) {

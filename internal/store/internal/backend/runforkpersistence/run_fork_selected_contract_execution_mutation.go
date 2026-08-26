@@ -23,6 +23,7 @@ import (
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
+	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
@@ -205,6 +206,11 @@ func (s *RunForkPostgresOwner) MaterializeRunForkForSelectedContractExecution(ct
 		if err := requireExactRunForkScenarioProfile(ctx, tx, forkRunID, scenarioProfile, sourceProfiled); err != nil {
 			return runfork.RunForkMaterialization{}, err
 		}
+		pins, err := storedurabledata.MaterializeForkPinsTx(s.durableData, ctx, tx, plan.SourceRunID, forkRunID, identity.BundleSourceFact.BundleHash(), req.DataPinOverrides, true, time.Time{})
+		if err != nil {
+			return runfork.RunForkMaterialization{}, err
+		}
+		existing.DataPins = pins
 		if routeResolved {
 			if err := validateRunForkSelectedContractRouteRecoveryAtActivation(ctx, tx, routeRecovery); err != nil {
 				return runfork.RunForkMaterialization{}, err
@@ -248,6 +254,10 @@ func (s *RunForkPostgresOwner) MaterializeRunForkForSelectedContractExecution(ct
 	ctx = runtimeauthoractivity.WithScope(ctx, forkScope)
 	if err := s.InsertRunForkRunTx(ctx, tx, story, forkRunID, plan.SourceRunID, plan.ForkPoint.EventID, len(plan.Entities), now, identity.BundleSourceFact); err != nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("insert selected-contract fork run: %w", err)
+	}
+	pins, err := storedurabledata.MaterializeForkPinsTx(s.durableData, ctx, tx, plan.SourceRunID, forkRunID, identity.BundleSourceFact.BundleHash(), req.DataPinOverrides, false, now)
+	if err != nil {
+		return runfork.RunForkMaterialization{}, err
 	}
 	if sourceProfiled {
 		if err := scenarioexecutionpersistence.EnsurePostgres(ctx, tx, forkRunID, scenarioProfile, now); err != nil {
@@ -299,6 +309,7 @@ func (s *RunForkPostgresOwner) MaterializeRunForkForSelectedContractExecution(ct
 		UnsupportedBlockers:      unsupportedBlockers,
 		DeliveryResumeBlocked:    true,
 		SourceRunStatusUnchanged: true,
+		DataPins:                 pins,
 	}, nil
 }
 

@@ -135,7 +135,6 @@ func (r *ServeProjectContextRegistration) WriteFinal(runtimeInstanceID string, a
 		ProjectRoot:       r.project.canonicalProjectRoot,
 		ContractsPath:     strings.TrimSpace(resolvedPaths.ContractsPath),
 		StorePath:         serveDescriptorStorePath(storeSelection),
-		DataDir:           strings.TrimSpace(mountSources.DataSource),
 		PID:               currentProcessID(),
 		CreatedAt:         now,
 		UpdatedAt:         now,

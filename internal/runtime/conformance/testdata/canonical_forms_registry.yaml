@@ -42,11 +42,11 @@ classification_tests:
   f2_bug: "An accepted spelling changes, disappears, or is independently reinterpreted after decode."
 
 inventory:
-  custom_unmarshal_total: 102
-  custom_unmarshal_reachable: 101
+  custom_unmarshal_total: 103
+  custom_unmarshal_reachable: 102
   custom_unmarshal_excluded: 1
   custom_unmarshal_breakdown:
-    contracts: 87
+    contracts: 88
     flowmodel_policy: 11
     agentintent: 1
     contract_element_identity: 1
@@ -773,6 +773,8 @@ decoder_coverage:
     handler.emit_action_activity: [EmitSpec, HandlerOnSuccessSpec, ActivitySpec, ActionSpec]
     handler.mailbox_artifact_repo: [MailboxWriteSpec, ArtifactRepoSpec, ArtifactRepoFileSpec, ArtifactRepoSchemaSpec, ArtifactRepoOutputSpec, ArtifactRepoLimitsSpec]
     handler.container: [SystemNodeEventHandler]
+  durable_data.go:
+    agent.behavior: [DurableDataAccessRef]
   workflow_contract_yaml_rules.go:
     handler.guard_gate_clear: [GuardSpec, GateSpec]
     handler.collection_compute: [AccumulateSpec, FanOutSpec, GroupBySpec, FilterSpec, ReduceSpec, CountSpec, QuerySpec]
@@ -811,7 +813,7 @@ decoder_exclusions:
     deployment.swarm_yaml: [WorkspaceConfig]
 
 registry_result:
-  completeness: "all 102 remaining production custom unmarshallers classified as 101 bundle-reachable row owners and 1 deployment swarm.yaml exclusion; the two W3 event decoders are retired behind yamlsource admission"
+  completeness: "all 103 remaining production custom unmarshallers classified as 102 bundle-reachable row owners and 1 deployment swarm.yaml exclusion; the two W3 event decoders are retired behind yamlsource admission and durable_data.go adds one reachable data-access decoder"
   wave_1_status: closed
   later_wave_gate: "presence-sensitive retirements remain blocked on the effective-model/presence-substrate design gate"
 

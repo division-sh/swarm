@@ -3,6 +3,7 @@ package semanticview
 import (
 	"strings"
 
+	"github.com/division-sh/swarm/internal/durabledata"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
@@ -36,6 +37,18 @@ func (s bundleSource) semanticSourceCore() sourceCore     { return sourceCore{bu
 
 func (s bundleSource) WorkflowVersion() string { return s.bundle.WorkflowVersion() }
 func (s bundleSource) WorkflowName() string    { return s.bundle.WorkflowName() }
+func (s bundleSource) DurableDataDeclarations() []runtimecontracts.DurableDataDeclaration {
+	return s.bundle.DurableDataDeclarations()
+}
+func (s bundleSource) StaticData() []durabledata.StaticData { return s.bundle.StaticData() }
+func (s bundleSource) StaticDataForAgent(packageKey, flowID, logicalID string) []durabledata.StaticData {
+	return s.bundle.StaticDataForAgent(packageKey, flowID, logicalID)
+}
+
+func (s bundleSource) DurableDataForAgent(packageKey, flowID, logicalID string) []durabledata.DeclarationRef {
+	return s.bundle.DurableDataForAgent(packageKey, flowID, logicalID)
+}
+func (s bundleSource) DataProjectionRequired() bool { return s.bundle.DataProjectionRequired() }
 func (s bundleSource) PlatformSpec() runtimecontracts.PlatformSpecDocument {
 	return s.bundle.Platform
 }

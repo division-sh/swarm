@@ -200,7 +200,6 @@ func newHostRelayExecutor(t *testing.T) (*Executor, models.AgentConfig, *workspa
 	t.Helper()
 	ctx := unmanagedToolTestContext()
 	workspaceRoot := filepath.Join(t.TempDir(), "host-workspaces")
-	dataDir := t.TempDir()
 	contractsDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
 		t.Fatalf("write package.yaml: %v", err)
@@ -208,8 +207,6 @@ func newHostRelayExecutor(t *testing.T) (*Executor, models.AgentConfig, *workspa
 	manager := workspace.NewHostManager()
 	manager.SetConfig(workspace.HostConfig{
 		WorkspaceRoot:       workspaceRoot,
-		SharedDataSource:    dataDir,
-		DataMountPoint:      workspace.LogicalDataMount,
 		ContractsSource:     contractsDir,
 		ContractsMountPoint: workspace.LogicalContractsMount,
 	})

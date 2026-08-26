@@ -5,6 +5,7 @@ import (
 
 	apiv1 "github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/bundlecatalog"
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -55,6 +56,8 @@ func (o *Owner) Agents() apiv1.AgentReadStore                  { return o.requir
 func (o *Owner) Conversations() apiv1.ConversationReadStore    { return o.required.conversations }
 func (o *Owner) TestSetup() apiv1.TestSetupStore               { return o.required.testSetup }
 func (o *Owner) RunBundleContext() apiv1.RunBundleContextStore { return o.required.runBundleContext }
+func (o *Owner) Data() apiv1.DurableDataStore                  { return o.required.data }
+func (o *Owner) DataAccess() durabledata.ResourceAccessStore   { return o.required.dataAccess }
 func (o *Owner) RunBundleAvailability() runbundle.AvailabilityStore {
 	return o.required.runBundleAvailability
 }

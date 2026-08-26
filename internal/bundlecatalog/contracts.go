@@ -4,13 +4,15 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/division-sh/swarm/internal/durabledata"
 )
 
 // ServeIngestWriter persists the canonical source projection required by
 // non-dev contracts-based serve startup. Public bundle registration is a
 // separate optional product capability.
 type ServeIngestWriter interface {
-	UpsertBundleCatalog(context.Context, Upsert) (UpsertResult, error)
+	UpsertBundleCatalogWithData(context.Context, Upsert, durabledata.Catalog) (UpsertResult, error)
 }
 
 var (

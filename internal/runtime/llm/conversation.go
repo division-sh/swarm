@@ -30,7 +30,7 @@ type conversationForkSandboxToolsContextValue struct {
 const defaultMaxToolRounds = 8
 
 const (
-	maxToolResultBytes              = 16 * 1024
+	maxToolResultBytes              = toolresultpolicy.MaxInlineToolResultBytes
 	maxToolMessageBytes             = 64 * 1024
 	maxReadFileResultBytes          = 256 * 1024
 	maxReadFileEnvelopeReserveBytes = 8 * 1024

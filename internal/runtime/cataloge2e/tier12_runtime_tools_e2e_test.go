@@ -6,8 +6,11 @@ import (
 	"testing"
 
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/flowdata"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
@@ -43,8 +46,13 @@ func TestTier12RuntimeTools_FlowDataAccessFixture(t *testing.T) {
 		t.Fatalf("flow_data_access exposed native file tools: %#v", names)
 	}
 
-	out, err := h.rt.ToolExecutor.Execute(models.WithActor(testAuthorActivityContext(context.Background()), cfg), "read_flow_data", map[string]any{
-		"filename": "exclusions.yaml",
+	static := flowdata.AllowedStaticData(semanticview.Wrap(h.bundle), cfg)
+	if len(static) != 1 || static[0].RelativePath != "exclusions.yaml" {
+		t.Fatalf("compiled static data = %#v, want exact exclusions.yaml grant", static)
+	}
+	toolCtx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), catalogRuntimeRunID)
+	out, err := h.rt.ToolExecutor.Execute(models.WithActor(toolCtx, cfg), "read_flow_data", map[string]any{
+		"kind": "static_file", "static_id": static[0].StaticID,
 	})
 	if err != nil {
 		t.Fatalf("read_flow_data(exclusions.yaml): %v", err)
@@ -61,14 +69,14 @@ func TestTier12RuntimeTools_FlowDataAccessFixture(t *testing.T) {
 		t.Fatalf("content_type = %q, want yaml", got)
 	}
 
-	if _, err := h.rt.ToolExecutor.Execute(models.WithActor(testAuthorActivityContext(context.Background()), cfg), "read_flow_data", map[string]any{
+	if _, err := h.rt.ToolExecutor.Execute(models.WithActor(toolCtx, cfg), "read_flow_data", map[string]any{
 		"filename": "undeclared.yaml",
 	}); err == nil {
 		t.Fatal("undeclared read unexpectedly succeeded")
 	} else if failure, ok := runtimefailures.As(err); !ok || failure.Failure.Class != runtimefailures.ClassSchemaInvalid || failure.Failure.Detail.Code != "invalid_tool_input" {
 		t.Fatalf("undeclared read failure = %#v, want fail-closed schema rejection", failure)
 	}
-	if _, err := h.rt.ToolExecutor.Execute(models.WithActor(testAuthorActivityContext(context.Background()), cfg), "read_flow_data", map[string]any{
+	if _, err := h.rt.ToolExecutor.Execute(models.WithActor(toolCtx, cfg), "read_flow_data", map[string]any{
 		"filename": "../support/data/exclusions.yaml",
 	}); err == nil {
 		t.Fatal("traversal read succeeded, want fail-closed error")
@@ -81,8 +89,8 @@ func TestTier12RuntimeTools_FlowDataAccessFixture(t *testing.T) {
 	if defs := h.rt.ToolExecutor.ToolDefinitionsForActor(other); containsTier12String(toolNamesForTier12RuntimeTools(defs), "read_flow_data") {
 		t.Fatalf("undeclared actor saw read_flow_data definitions: %#v", toolNamesForTier12RuntimeTools(defs))
 	}
-	if _, err := h.rt.ToolExecutor.Execute(models.WithActor(testAuthorActivityContext(context.Background()), other), "read_flow_data", map[string]any{
-		"filename": "exclusions.yaml",
+	if _, err := h.rt.ToolExecutor.Execute(models.WithActor(toolCtx, other), "read_flow_data", map[string]any{
+		"kind": "static_file", "static_id": static[0].StaticID,
 	}); err == nil {
 		t.Fatal("undeclared actor read flow data, want fail-closed error")
 	}

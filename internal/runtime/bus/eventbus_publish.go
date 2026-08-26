@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
@@ -224,6 +225,19 @@ func (eb *EventBus) PublishAPIEventAcknowledged(
 	idempotency apiidempotency.Request,
 	completion apiidempotency.Completion,
 ) (apiidempotency.Completion, bool, error) {
+	return eb.PublishAPIEventWithRunCreationAcknowledged(ctx, evt, endpoint, idempotency, completion, nil)
+}
+
+// PublishAPIEventWithRunCreationAcknowledged adds the method-neutral durable
+// parent operation required by create-new-run event.publish and run.start.
+func (eb *EventBus) PublishAPIEventWithRunCreationAcknowledged(
+	ctx context.Context,
+	evt events.Event,
+	endpoint *APIEventPublicationEndpoint,
+	idempotency apiidempotency.Request,
+	completion apiidempotency.Completion,
+	runCreation *durabledata.RunCreationCommand,
+) (apiidempotency.Completion, bool, error) {
 	ctx, lease, err := eb.beginRuntimeWork(ctx)
 	if err != nil {
 		return apiidempotency.Completion{}, false, err
@@ -262,9 +276,21 @@ func (eb *EventBus) PublishAPIEventAcknowledged(
 		Publication: command,
 		Idempotency: idempotency,
 		Completion:  completion,
+		RunCreation: runCreation,
 	})
 	if err != nil {
 		return apiidempotency.Completion{}, false, errors.Join(err, prepared.publicationClaim.Release(preparedCtx))
+	}
+	if committed.RunCreation != nil && committed.RunCreation.Summary.Outcome != "created" {
+		code := durabledata.CodeRunDataRejected
+		if committed.RunCreation.Summary.Outcome == "head_conflict" {
+			code = durabledata.CodeRunHeadConflict
+		}
+		details := map[string]any{"run_id": committed.RunCreation.Summary.RunID, "operation": committed.RunCreation.Summary}
+		return apiidempotency.Completion{}, committed.Replay, errors.Join(
+			durabledata.NewDomainErrorWithDetails(code, details, "run creation %s", committed.RunCreation.Summary.Outcome),
+			prepared.publicationClaim.Release(preparedCtx),
+		)
 	}
 	if committed.Replay {
 		return committed.Completion, true, prepared.publicationClaim.Release(preparedCtx)

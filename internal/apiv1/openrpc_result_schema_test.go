@@ -168,6 +168,7 @@ func resultSchemaRuntimeMethods(t *testing.T, api *apispec.APISpecification, ope
 func approvedResultSchemaRuntimeMethods() []string {
 	out := append([]string{}, approvedReadOnlyHTTPRuntimeMethods()...)
 	out = append(out, approvedMutatingHTTPRuntimeMethods()...)
+	out = append(out, approvedPermanentOperationHTTPRuntimeMethods()...)
 	out = append(out, approvedWebSocketRuntimeMethods()...)
 	out = append(out,
 		"channel.connect",
@@ -325,6 +326,8 @@ func successfulRuntimeResult(t *testing.T, methodName string) any {
 			t.Fatalf("%s handler calls = %d, want 1", methodName, calls[methodName])
 		}
 		return resp.Result
+	case containsString(approvedPermanentOperationHTTPRuntimeMethods(), methodName):
+		return successfulDataRuntimeResult(t, methodName)
 	case containsString(approvedWebSocketRuntimeMethods(), methodName):
 		return successfulWebSocketRuntimeResult(t, methodName)
 	default:

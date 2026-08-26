@@ -168,8 +168,8 @@ func TestCanonicalFormsRegistryOwnsCompleteDecoderInventory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("collect custom YAML decoders: %v", err)
 	}
-	if record.Inventory.CustomUnmarshalTotal != 102 || record.Inventory.CustomUnmarshalReachable != 101 || record.Inventory.CustomUnmarshalExcluded != 1 || len(expectedReachable) != 101 || len(expectedExcluded) != 1 || len(actual) != 102 {
-		t.Fatalf("decoder inventory total/reachable/excluded/coverage/exclusion/source = %d/%d/%d/%d/%d/%d, want 102/101/1/101/1/102", record.Inventory.CustomUnmarshalTotal, record.Inventory.CustomUnmarshalReachable, record.Inventory.CustomUnmarshalExcluded, len(expectedReachable), len(expectedExcluded), len(actual))
+	if record.Inventory.CustomUnmarshalTotal != 103 || record.Inventory.CustomUnmarshalReachable != 102 || record.Inventory.CustomUnmarshalExcluded != 1 || len(expectedReachable) != 102 || len(expectedExcluded) != 1 || len(actual) != 103 {
+		t.Fatalf("decoder inventory total/reachable/excluded/coverage/exclusion/source = %d/%d/%d/%d/%d/%d, want 103/102/1/102/1/103", record.Inventory.CustomUnmarshalTotal, record.Inventory.CustomUnmarshalReachable, record.Inventory.CustomUnmarshalExcluded, len(expectedReachable), len(expectedExcluded), len(actual))
 	}
 	if err := validateCustomYAMLDecoderInventory(expectedReachable, expectedExcluded, actual); err != nil {
 		t.Fatal(err)

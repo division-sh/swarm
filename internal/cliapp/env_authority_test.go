@@ -67,7 +67,6 @@ func TestDoctorCommandIgnoresMalformedRepoDotEnv(t *testing.T) {
 		"--backend", "claude_cli",
 		"--config", writeDoctorClaudeConfig(t, ""),
 		"--contracts", contractsRoot,
-		"--data", t.TempDir(),
 		"--api-listen-addr", "127.0.0.1:0",
 		"--mcp-listen-addr", "127.0.0.1:0",
 	}, &stdout, &stderr, defaultRootCommandOptions())
@@ -222,7 +221,7 @@ func TestPlatformSpecIssue1640EnvClassificationCoversRetainedSlice(t *testing.T)
 	}
 
 	for name, wantDisposition := range map[string]string{
-		"existing_config_owned_workspace_sources":     "retired_by_1843_to_flags_or_typed_workspace_config",
+		"existing_config_owned_workspace_sources":     "retired",
 		"production_bootstrap_or_deployment_plumbing": "retired_by_1843_to_workspace_config_or_internal_defaults",
 		"internal_workspace_lifecycle_names":          "retired_by_1843_internal_generated_defaults",
 		"runtime_private_storage_and_observability":   "keep_env_first_slice_runtime_private_storage_or_observability",

@@ -519,8 +519,6 @@ func writeStoreBackendRuntimeConfig(t *testing.T, backend string, sqlitePath str
 		"runtime:",
 		"  execution_posture: live",
 		"  recovery_on_startup: false",
-		"workspace:",
-		"  data_source: " + t.TempDir(),
 	}
 	if strings.TrimSpace(backend) != "" || strings.TrimSpace(sqlitePath) != "" {
 		lines = append(lines,
@@ -559,8 +557,6 @@ func writeStoreBackendRuntimeConfigWithoutPasswordSource(t *testing.T, backend s
 		"runtime:",
 		"  execution_posture: live",
 		"  recovery_on_startup: false",
-		"workspace:",
-		"  data_source: " + t.TempDir(),
 		"store:",
 		"  backend: " + backend,
 		"llm:",

@@ -3,11 +3,13 @@ package eventpersistence
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
+	runtimedata "github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
@@ -19,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storeapiidempotency "github.com/division-sh/swarm/internal/store/internal/apiidempotency"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
 )
 
 type eventCommitTxStore interface {
@@ -276,8 +279,8 @@ func (s *EventPostgresOwner) LookupAPIEventPublication(ctx context.Context, requ
 	if strings.TrimSpace(request.IdempotencyKey) == "" {
 		return apiidempotency.Completion{}, false, nil
 	}
-	if strings.TrimSpace(request.Method) != "event.publish" {
-		return apiidempotency.Completion{}, false, fmt.Errorf("API event publication lookup requires event.publish idempotency authority")
+	if method := strings.TrimSpace(request.Method); method != "event.publish" && method != "run.start" {
+		return apiidempotency.Completion{}, false, fmt.Errorf("API event publication lookup requires event.publish or run.start method authority")
 	}
 	lease, err := storeapiidempotency.AcquirePostgresRequest(ctx, s.apiIdempotency, request)
 	if err != nil {
@@ -298,8 +301,8 @@ func (s *EventSQLiteOwner) LookupAPIEventPublication(ctx context.Context, reques
 	if strings.TrimSpace(request.IdempotencyKey) == "" {
 		return apiidempotency.Completion{}, false, nil
 	}
-	if strings.TrimSpace(request.Method) != "event.publish" {
-		return apiidempotency.Completion{}, false, fmt.Errorf("API event publication lookup requires event.publish idempotency authority")
+	if method := strings.TrimSpace(request.Method); method != "event.publish" && method != "run.start" {
+		return apiidempotency.Completion{}, false, fmt.Errorf("API event publication lookup requires event.publish or run.start method authority")
 	}
 	lease, err := storeapiidempotency.AcquireSQLiteRequest(ctx, s.apiIdempotency, request)
 	if err != nil {
@@ -314,43 +317,90 @@ func (s *EventPostgresOwner) CommitAPIEventPublication(ctx context.Context, comm
 	if err := command.Validate(); err != nil {
 		return result, err
 	}
-	if strings.TrimSpace(command.Idempotency.IdempotencyKey) == "" {
-		result.Publication, err = s.CommitPublication(ctx, command.Publication)
-		result.Completion = command.Completion
-		return result, err
-	}
-	lease, err := storeapiidempotency.AcquirePostgresRequest(ctx, s.apiIdempotency, command.Idempotency)
-	if err != nil {
-		return result, err
-	}
-	defer func() {
-		if releaseErr := lease.Release(ctx); releaseErr != nil {
-			result = runtimebus.CommittedAPIEventPublication{}
-			err = errors.Join(err, fmt.Errorf("release API event publication idempotency authority: %w", releaseErr))
+	var lease *storeapiidempotency.PostgresRequestLease
+	if strings.TrimSpace(command.Idempotency.IdempotencyKey) != "" {
+		lease, err = storeapiidempotency.AcquirePostgresRequest(ctx, s.apiIdempotency, command.Idempotency)
+		if err != nil {
+			return result, err
 		}
-	}()
-	if completion, replay := lease.Replay(); replay {
-		return runtimebus.CommittedAPIEventPublication{Completion: completion, Replay: true}, nil
+		defer func() {
+			if releaseErr := lease.Release(ctx); releaseErr != nil {
+				result = runtimebus.CommittedAPIEventPublication{}
+				err = errors.Join(err, fmt.Errorf("release API event publication idempotency authority: %w", releaseErr))
+			}
+		}()
+		if completion, replay := lease.Replay(); replay {
+			return runtimebus.CommittedAPIEventPublication{Completion: completion, Replay: true}, nil
+		}
 	}
 	ctx, err = publicationCommitContext(ctx, command.Publication)
 	if err != nil {
 		return result, err
 	}
-	result.Completion = command.Completion
-	result.Publication, err = withRunLifecycleCandidateHandoffResult(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (runtimebus.CommittedPublication, error) {
-		committed := runtimebus.CommittedPublication{}
+	_, err = withRunLifecycleCandidateHandoffResult(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (struct{}, error) {
 		err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
-			var commitErr error
-			committed, commitErr = commitPublicationTx(txctx, tx, story, effects, s, true, command.Publication, handoff)
+			var plan *storedurabledata.RunCreationPlan
+			if command.RunCreation != nil {
+				prepared, prepareErr := storedurabledata.PrepareRunCreationTx(s.durableData, txctx, tx, *command.RunCreation)
+				if prepareErr != nil {
+					return prepareErr
+				}
+				plan = &prepared
+				record := prepared.Record()
+				if prepared.Replay() {
+					if prepared.Failed() {
+						result = runtimebus.CommittedAPIEventPublication{RunCreation: &record, Replay: true}
+						return nil
+					}
+					completion, bindErr := bindRunCreationCompletion(command.Completion, record)
+					if bindErr != nil {
+						return bindErr
+					}
+					result = runtimebus.CommittedAPIEventPublication{Completion: completion, RunCreation: &record, Replay: true}
+					if lease != nil {
+						return storeapiidempotency.StorePostgresCompletionTx(txctx, lease, tx, completion)
+					}
+					return nil
+				}
+				if prepared.Failed() {
+					result = runtimebus.CommittedAPIEventPublication{RunCreation: &record}
+					return nil
+				}
+				if commitErr := storedurabledata.CommitRunCreationImportsTx(s.durableData, txctx, tx, plan); commitErr != nil {
+					return commitErr
+				}
+			}
+			committed, commitErr := commitPublicationTx(txctx, tx, story, effects, s, true, command.Publication, handoff)
 			if commitErr != nil {
 				return commitErr
 			}
-			if err := storeapiidempotency.StorePostgresCompletionTx(txctx, lease, tx, command.Completion); err != nil {
-				return err
+			completion := command.Completion
+			result = runtimebus.CommittedAPIEventPublication{Publication: committed, Completion: completion}
+			if plan != nil {
+				if committed.AppendOutcome != runtimebus.EventAppendInserted {
+					return fmt.Errorf("run creation event was already committed without its permanent parent receipt")
+				}
+				var status string
+				if err := tx.QueryRowContext(txctx, `SELECT status FROM runs WHERE run_id = $1::uuid`, command.RunCreation.RunID).Scan(&status); err != nil {
+					return fmt.Errorf("load created run for data pins: %w", err)
+				}
+				record, completeErr := storedurabledata.CompleteRunCreationTx(s.durableData, txctx, tx, plan, command.RunCreation.EventID, status)
+				if completeErr != nil {
+					return completeErr
+				}
+				completion, completeErr = bindRunCreationCompletion(completion, record)
+				if completeErr != nil {
+					return completeErr
+				}
+				result.Completion = completion
+				result.RunCreation = &record
+			}
+			if lease != nil {
+				return storeapiidempotency.StorePostgresCompletionTx(txctx, lease, tx, result.Completion)
 			}
 			return nil
 		})
-		return committed, err
+		return struct{}{}, err
 	})
 	if err != nil {
 		return runtimebus.CommittedAPIEventPublication{}, err
@@ -362,43 +412,110 @@ func (s *EventSQLiteOwner) CommitAPIEventPublication(ctx context.Context, comman
 	if err := command.Validate(); err != nil {
 		return result, err
 	}
-	if strings.TrimSpace(command.Idempotency.IdempotencyKey) == "" {
-		result.Publication, err = s.CommitPublication(ctx, command.Publication)
-		result.Completion = command.Completion
-		return result, err
-	}
-	lease, err := storeapiidempotency.AcquireSQLiteRequest(ctx, s.apiIdempotency, command.Idempotency)
-	if err != nil {
-		return result, err
-	}
-	defer lease.Release()
-	if completion, replay := lease.Replay(); replay {
-		return runtimebus.CommittedAPIEventPublication{Completion: completion, Replay: true}, nil
+	var lease *storeapiidempotency.SQLiteRequestLease
+	if strings.TrimSpace(command.Idempotency.IdempotencyKey) != "" {
+		lease, err = storeapiidempotency.AcquireSQLiteRequest(ctx, s.apiIdempotency, command.Idempotency)
+		if err != nil {
+			return result, err
+		}
+		defer lease.Release()
+		if completion, replay := lease.Replay(); replay {
+			return runtimebus.CommittedAPIEventPublication{Completion: completion, Replay: true}, nil
+		}
 	}
 	ctx, err = publicationCommitContext(ctx, command.Publication)
 	if err != nil {
 		return result, err
 	}
-	result.Completion = command.Completion
-	result.Publication, err = withRunLifecycleCandidateHandoffResult(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (runtimebus.CommittedPublication, error) {
-		committed := runtimebus.CommittedPublication{}
+	_, err = withRunLifecycleCandidateHandoffResult(ctx, func(handoff *runLifecycleCandidateHandoffReservation) (struct{}, error) {
 		err := s.runPrivateAuthorActivityMutation(ctx, "sqlite API event publication commit", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
-			var commitErr error
-			committed, commitErr = commitPublicationTx(txctx, tx, story, effects, s, false, command.Publication, handoff)
+			var plan *storedurabledata.RunCreationPlan
+			if command.RunCreation != nil {
+				prepared, prepareErr := storedurabledata.PrepareRunCreationTx(s.durableData, txctx, tx, *command.RunCreation)
+				if prepareErr != nil {
+					return prepareErr
+				}
+				plan = &prepared
+				record := prepared.Record()
+				if prepared.Replay() {
+					if prepared.Failed() {
+						result = runtimebus.CommittedAPIEventPublication{RunCreation: &record, Replay: true}
+						return nil
+					}
+					completion, bindErr := bindRunCreationCompletion(command.Completion, record)
+					if bindErr != nil {
+						return bindErr
+					}
+					result = runtimebus.CommittedAPIEventPublication{Completion: completion, RunCreation: &record, Replay: true}
+					if lease != nil {
+						return storeapiidempotency.StoreSQLiteCompletionTx(txctx, lease, tx, completion)
+					}
+					return nil
+				}
+				if prepared.Failed() {
+					result = runtimebus.CommittedAPIEventPublication{RunCreation: &record}
+					return nil
+				}
+				if commitErr := storedurabledata.CommitRunCreationImportsTx(s.durableData, txctx, tx, plan); commitErr != nil {
+					return commitErr
+				}
+			}
+			committed, commitErr := commitPublicationTx(txctx, tx, story, effects, s, false, command.Publication, handoff)
 			if commitErr != nil {
 				return commitErr
 			}
-			if err := storeapiidempotency.StoreSQLiteCompletionTx(txctx, lease, tx, command.Completion); err != nil {
-				return err
+			completion := command.Completion
+			result = runtimebus.CommittedAPIEventPublication{Publication: committed, Completion: completion}
+			if plan != nil {
+				if committed.AppendOutcome != runtimebus.EventAppendInserted {
+					return fmt.Errorf("run creation event was already committed without its permanent parent receipt")
+				}
+				var status string
+				if err := tx.QueryRowContext(txctx, `SELECT status FROM runs WHERE run_id = ?`, command.RunCreation.RunID).Scan(&status); err != nil {
+					return fmt.Errorf("load created run for data pins: %w", err)
+				}
+				record, completeErr := storedurabledata.CompleteRunCreationTx(s.durableData, txctx, tx, plan, command.RunCreation.EventID, status)
+				if completeErr != nil {
+					return completeErr
+				}
+				completion, completeErr = bindRunCreationCompletion(completion, record)
+				if completeErr != nil {
+					return completeErr
+				}
+				result.Completion = completion
+				result.RunCreation = &record
+			}
+			if lease != nil {
+				return storeapiidempotency.StoreSQLiteCompletionTx(txctx, lease, tx, result.Completion)
 			}
 			return nil
 		})
-		return committed, err
+		return struct{}{}, err
 	})
 	if err != nil {
 		return runtimebus.CommittedAPIEventPublication{}, err
 	}
 	return result, result.Validate()
+}
+
+func bindRunCreationCompletion(completion apiidempotency.Completion, record runtimedata.RunCreationOperationRecord) (apiidempotency.Completion, error) {
+	if err := record.Validate(); err != nil {
+		return apiidempotency.Completion{}, fmt.Errorf("cannot bind contradictory run creation: %w", err)
+	}
+	if record.Summary.Outcome != "created" {
+		return apiidempotency.Completion{}, fmt.Errorf("cannot bind failed run creation to success completion")
+	}
+	var response map[string]any
+	if err := json.Unmarshal(completion.Response, &response); err != nil || response == nil {
+		return apiidempotency.Completion{}, fmt.Errorf("decode run creation API completion")
+	}
+	response["data_binding"] = record.Binding
+	raw, err := json.Marshal(response)
+	if err != nil {
+		return apiidempotency.Completion{}, err
+	}
+	completion.Response = raw
+	return completion, nil
 }
 
 func commitPublicationTx(

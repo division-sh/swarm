@@ -962,7 +962,7 @@ func TestDoctorTargetHumanExplainsResolutionWithoutPreflight(t *testing.T) {
 		"descriptor_registry: empty (" + localContextRegistryOwner,
 		"runtime_identity: unavailable (platform-spec.yaml#api_specification.method_catalog.runtime.identity)",
 		"store_path: " + filepath.Join(canonicalRepo, ".swarm", "stores", "dev.db"),
-		"data_dir: " + filepath.Join(canonicalRepo, ".swarm", "data"),
+		"data_dir: runtime_projected",
 		"command_classes:",
 		"read_only_inspection: implemented",
 		"store/data migration and swarm run start semantics are implemented",
@@ -1111,19 +1111,16 @@ func TestDoctorTargetUsesResolvedSwarmDirForExplicitContext(t *testing.T) {
 	}
 }
 
-func TestDoctorTargetConsumesRuntimeConfigStoreAndData(t *testing.T) {
+func TestDoctorTargetConsumesRuntimeConfigStoreWithoutAmbientData(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	unsetStoreSelectorEnv(t)
 	repo := writeDoctorTargetRepo(t)
 	sqlitePath := filepath.Join(t.TempDir(), "configured-dev.db")
-	dataDir := filepath.Join(t.TempDir(), "configured-data")
 	configPath := writeDoctorTargetRuntimeConfig(t, `
 store:
   backend: sqlite
   sqlite:
     path: `+sqlitePath+`
-workspace:
-  data_source: `+dataDir+`
 `)
 
 	var stdout, stderr bytes.Buffer
@@ -1145,11 +1142,8 @@ workspace:
 	if report.Store.Path != sqlitePath || report.Store.Source != string(storebackend.SourceRuntimeConfig) || report.Store.Status != "resolved" {
 		t.Fatalf("store resolution = %#v, want configured sqlite path from runtime config", report.Store)
 	}
-	if report.Data.Path != dataDir || report.Data.Source != "workspace.data_source" || report.Data.Status != "resolved" {
-		t.Fatalf("data resolution = %#v, want configured workspace data source", report.Data)
-	}
-	if _, err := os.Stat(dataDir); !os.IsNotExist(err) {
-		t.Fatalf("configured target data stat error = %v, want dry-run without directory creation", err)
+	if report.Data.Path != "" || report.Data.Source != "platform-spec.yaml#durable_data_resources.workspace_projection" || report.Data.Status != "runtime_projected" {
+		t.Fatalf("data resolution = %#v, want selected-run data projection", report.Data)
 	}
 }
 
@@ -1421,7 +1415,6 @@ func doctorClaudeArgs(t *testing.T, configPath string, asJSON bool) []string {
 		"--backend", "claude_cli",
 		"--config", configPath,
 		"--contracts", doctorAgentContractsPath,
-		"--data", t.TempDir(),
 		"--api-listen-addr", "127.0.0.1:0",
 		"--mcp-listen-addr", "127.0.0.1:0",
 	}
@@ -1439,7 +1432,6 @@ func writeDoctorClaudeConfig(t *testing.T, dockerBin string) string {
 	storePath := filepath.Join(t.TempDir(), "runtime.db")
 	workspace := []string{
 		"workspace:",
-		"  data_source: " + t.TempDir(),
 		"  image: doctor-test-image:latest",
 	}
 	if strings.TrimSpace(dockerBin) != "" {

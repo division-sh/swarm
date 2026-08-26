@@ -301,36 +301,38 @@ func TestValidateServeAPIAuthBindingDefaultTokenLoopbackBoundary(t *testing.T) {
 	}
 }
 
-func TestPlatformSpecWorkspaceDataSourceAuthorityPromoted(t *testing.T) {
+func TestPlatformSpecWorkspaceDataProjectionAuthorityPromoted(t *testing.T) {
 	var spec struct {
 		WorkspaceModel struct {
-			DataSourceAuthority struct {
-				PromotedBy                     string   `yaml:"promoted_by"`
-				ImplementationStatus           string   `yaml:"implementation_status"`
-				CanonicalOwner                 string   `yaml:"canonical_owner"`
-				CLIFlag                        string   `yaml:"cli_flag"`
-				ConfigKey                      string   `yaml:"config_key"`
-				RetiredEnvVar                  string   `yaml:"retired_env_var"`
-				SourceOrder                    []string `yaml:"source_order"`
-				DefaultBehavior                string   `yaml:"default_behavior"`
-				FailureBehavior                string   `yaml:"failure_behavior"`
-				VolumesFromConflictRule        string   `yaml:"volumes_from_conflict_rule"`
-				ReadPolicy                     string   `yaml:"read_policy"`
-				RetiredNonAuthoritativeSources []string `yaml:"retired_non_authoritative_sources"`
-				SplitScope                     []string `yaml:"split_scope"`
-			} `yaml:"data_source_authority"`
+			DataProjectionAuthority struct {
+				PromotedBy           string   `yaml:"promoted_by"`
+				ImplementationStatus string   `yaml:"implementation_status"`
+				CanonicalOwner       string   `yaml:"canonical_owner"`
+				Scope                string   `yaml:"scope"`
+				MaterializationRule  string   `yaml:"materialization_rule"`
+				AbsenceRule          string   `yaml:"absence_rule"`
+				RetiredInputs        []string `yaml:"retired_inputs"`
+				FailureBehavior      string   `yaml:"failure_behavior"`
+				Consumers            []string `yaml:"consumers"`
+			} `yaml:"data_projection_authority"`
 		} `yaml:"workspace_model"`
+		DurableDataResources struct {
+			WorkspaceProjection struct {
+				Owner  string `yaml:"owner"`
+				Inputs string `yaml:"inputs"`
+				Rule   string `yaml:"rule"`
+				Parity string `yaml:"parity"`
+			} `yaml:"workspace_projection"`
+		} `yaml:"durable_data_resources"`
 		CLISpecification struct {
 			CommandCatalog struct {
 				Serve struct {
-					WorkspaceDataSourceAuthority struct {
+					WorkspaceDataProjectionAuthority struct {
 						PromotedBy string   `yaml:"promoted_by"`
 						Owner      string   `yaml:"owner"`
-						Flag       string   `yaml:"flag"`
-						ConfigKey  string   `yaml:"config_key"`
-						RetiredEnv string   `yaml:"retired_env_var"`
+						Rule       string   `yaml:"rule"`
 						Consumers  []string `yaml:"consumers"`
-					} `yaml:"workspace_data_source_authority"`
+					} `yaml:"workspace_data_projection_authority"`
 				} `yaml:"serve"`
 				Run struct {
 					Flags []string `yaml:"flags"`
@@ -345,46 +347,54 @@ func TestPlatformSpecWorkspaceDataSourceAuthorityPromoted(t *testing.T) {
 		} `yaml:"cli_specification"`
 	}
 	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath), &spec)
-	authority := spec.WorkspaceModel.DataSourceAuthority
-	if !strings.Contains(authority.PromotedBy, "#1139") || !strings.Contains(authority.PromotedBy, "#1223") || strings.TrimSpace(authority.ImplementationStatus) != "implemented" {
-		t.Fatalf("workspace data source authority status = promoted_by:%q implementation_status:%q", authority.PromotedBy, authority.ImplementationStatus)
+	authority := spec.WorkspaceModel.DataProjectionAuthority
+	if authority.PromotedBy != "#2295" || strings.TrimSpace(authority.ImplementationStatus) != "implemented" {
+		t.Fatalf("workspace data projection authority status = promoted_by:%q implementation_status:%q", authority.PromotedBy, authority.ImplementationStatus)
 	}
-	if !strings.Contains(authority.CanonicalOwner, "workspace_model.data_source_authority") {
-		t.Fatalf("workspace data source canonical owner = %q", authority.CanonicalOwner)
+	if authority.CanonicalOwner != "platform-spec.yaml#durable_data_resources.workspace_projection" {
+		t.Fatalf("workspace data projection canonical owner = %q", authority.CanonicalOwner)
 	}
-	if authority.CLIFlag != "--data" || authority.ConfigKey != "workspace.data_source" || authority.RetiredEnvVar != "SWARM_WORKSPACE_DATA_SOURCE" {
-		t.Fatalf("workspace data source selectors = %#v", authority)
-	}
-	for _, want := range []string{"--data", "workspace.data_source", defaultWorkspaceDataSourceSource} {
-		if !stringSliceContains(authority.SourceOrder, want) {
-			t.Fatalf("workspace data source order missing %q: %#v", want, authority.SourceOrder)
+	for _, want := range []string{"immutable resource-version pins", "compiled static-data access", "not an authored path", "private generated directory", "empty projection", "never invents"} {
+		if !strings.Contains(authority.Scope+authority.MaterializationRule+authority.AbsenceRule, want) {
+			t.Fatalf("workspace data projection authority missing %q: %#v", want, authority)
 		}
 	}
-	for _, want := range []string{defaultWorkspaceDataSourceRelativePath, "0755", "repo-local `data/`", "fail closed", "SWARM_WORKSPACE_VOLUMES_FROM", "read-only", "opaque"} {
-		if !strings.Contains(authority.DefaultBehavior+authority.FailureBehavior+authority.VolumesFromConflictRule+authority.ReadPolicy+strings.Join(authority.RetiredNonAuthoritativeSources, "\n"), want) {
-			t.Fatalf("workspace data source spec missing %q:\n%#v", want, authority)
+	for _, want := range []string{"workspace.data_source", "workspace.volumes_from", "--data directory authority", "SWARM_WORKSPACE_DATA_SOURCE", "project .swarm/data defaults"} {
+		if !stringSliceContains(authority.RetiredInputs, want) {
+			t.Fatalf("retired workspace data inputs missing %q: %#v", want, authority.RetiredInputs)
 		}
 	}
-	for _, want := range []string{"#1137", "#1138", "#1214", "workspace-init", "SWARM_WORKSPACE_DATA_MOUNT"} {
-		if !joinedContains(authority.SplitScope, want) {
-			t.Fatalf("workspace data source split scope missing %q: %#v", want, authority.SplitScope)
+	for _, want := range []string{"fails closed", "flow_data_access", "data_access", "Missing pins", "no path fallback"} {
+		if !strings.Contains(authority.FailureBehavior, want) {
+			t.Fatalf("workspace projection failure behavior missing %q: %#v", want, authority)
 		}
 	}
-	command := spec.CLISpecification.CommandCatalog.Serve.WorkspaceDataSourceAuthority
-	if !strings.Contains(command.PromotedBy, "#1139") || !strings.Contains(command.PromotedBy, "#1223") || command.Owner != "workspace_model.data_source_authority" || command.Flag != "--data <path>" {
-		t.Fatalf("serve command data authority = %#v", command)
+	for _, want := range []string{"Docker workspace", "Host workspace", "native tools", "local and connected", "run-fork"} {
+		if !joinedContains(authority.Consumers, want) {
+			t.Fatalf("workspace projection consumers missing %q: %#v", want, authority.Consumers)
+		}
+	}
+	projection := spec.DurableDataResources.WorkspaceProjection
+	for _, want := range []string{"internal/runtime/dataaccess.Materializer", "selected store", "exact run resource-version pins", "private read-only `/data`", "never parsed back", "Docker and host"} {
+		if !strings.Contains(projection.Owner+projection.Inputs+projection.Rule+projection.Parity, want) {
+			t.Fatalf("durable data workspace projection missing %q: %#v", want, projection)
+		}
+	}
+	command := spec.CLISpecification.CommandCatalog.Serve.WorkspaceDataProjectionAuthority
+	if command.PromotedBy != "#2295" || command.Owner != "durable_data_resources.workspace_projection" || !strings.Contains(command.Rule, "immutable resource pins") {
+		t.Fatalf("serve command data projection authority = %#v", command)
 	}
 	for _, want := range []string{"serve boot", "local foreground `swarm run start`", "Builder project reload", "selected-contract run-fork"} {
 		if !joinedContains(command.Consumers, want) {
-			t.Fatalf("serve command data authority consumers missing %q: %#v", want, command.Consumers)
+			t.Fatalf("serve command data projection consumers missing %q: %#v", want, command.Consumers)
 		}
 	}
 	run := spec.CLISpecification.CommandCatalog.Run
-	if !stringSliceContains(run.Flags, "--data <path>") {
-		t.Fatalf("run command flags missing --data <path>: %#v", run.Flags)
+	if !stringSliceContains(run.Flags, "--data <name=file.jsonl> (repeatable fused import)") || stringSliceContains(run.Flags, "--data <path>") {
+		t.Fatalf("run command data flags retain retired path authority: %#v", run.Flags)
 	}
-	if !strings.Contains(run.Modes.ForegroundLocalStart.Invocation, "--data <path>") || !strings.Contains(run.Modes.ForegroundLocalStart.Behavior, "workspace_model.data_source_authority") || !strings.Contains(run.Modes.ForegroundLocalStart.Behavior, "--connect") || !strings.Contains(run.Modes.ForegroundLocalStart.Behavior, "--reattach") {
-		t.Fatalf("run local foreground data authority missing from spec: %#v", run.Modes.ForegroundLocalStart)
+	if !strings.Contains(run.Modes.ForegroundLocalStart.Invocation, "--data <name=file.jsonl>") || !strings.Contains(run.Modes.ForegroundLocalStart.Behavior, "exact selected-bundle data declarations") || !strings.Contains(run.Modes.ForegroundLocalStart.Behavior, "--reattach") {
+		t.Fatalf("run local foreground import/pin authority missing from spec: %#v", run.Modes.ForegroundLocalStart)
 	}
 }
 
@@ -2204,6 +2214,52 @@ func TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed(t *testing.T) {
 	}
 }
 
+func TestRunServeRuntimeBundleRegisterSupportedOnBothSelectedStores(t *testing.T) {
+	servedparity.Run(t, servedparity.MustScenario(servedparity.ScenarioBundleRegisterLifecycle), func(t *testing.T, backend servedparity.Backend) {
+		rt := startServedControlProofRuntime(t, backend)
+		params := map[string]any{
+			"content_yaml": `api_version: swarm.bundle.register.v1
+files:
+  - path: package.yaml
+    text: |
+      name: served-bundle-register-proof
+      version: "1.0.0"
+      platform_version: ">=0.7.0 <0.8.0"
+      flows: []
+`,
+			"idempotency_key": "issue-2295-bundle-register-" + string(backend),
+		}
+		var first struct {
+			BundleHash string `json:"bundle_hash"`
+			Registered bool   `json:"registered"`
+		}
+		requireServedJSONRPCResult(t, rt.Endpoint, "bundle.register", params, &first)
+		if first.BundleHash == "" || !first.Registered {
+			t.Fatalf("%s bundle.register result = %#v", backend, first)
+		}
+		var replay struct {
+			BundleHash string `json:"bundle_hash"`
+			Registered bool   `json:"registered"`
+		}
+		requireServedJSONRPCResult(t, rt.Endpoint, "bundle.register", params, &replay)
+		if replay != first {
+			t.Fatalf("%s bundle.register replay = %#v, want %#v", backend, replay, first)
+		}
+		var list bundlecatalog.ListResult
+		requireServedJSONRPCResult(t, rt.Endpoint, "bundle.list", map[string]any{"limit": 100}, &list)
+		found := false
+		for _, summary := range list.Bundles {
+			if summary.BundleHash == first.BundleHash {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("%s bundle.list omitted registered hash %q: %#v", backend, first.BundleHash, list.Bundles)
+		}
+	})
+}
+
 type servedControlProofRuntime struct {
 	Endpoint   string
 	DB         *sql.DB
@@ -2894,8 +2950,6 @@ func writeServedConversationForkConfig(t *testing.T, backend, sqlitePath, provid
 		"runtime:",
 		"  execution_posture: live",
 		"  recovery_on_startup: false",
-		"workspace:",
-		"  data_source: " + t.TempDir(),
 		"store:",
 		"  backend: " + backend,
 	}
@@ -3387,7 +3441,7 @@ func startServedTestSetupEntitiesProofRuntime(t *testing.T, backend servedparity
 		captureSelectedRuntimePersistence(t, func(persistence serveRuntimePersistence) {
 			servedDB, _, _ = selectedRuntimeStoreForTest(t, persistence)
 		})
-		endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
+		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 			ConfigPath:              writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 			ContractsPath:           contractsPath,
 			PlatformSpecPath:        defaultPlatformSpecPath,
@@ -3402,14 +3456,14 @@ func startServedTestSetupEntitiesProofRuntime(t *testing.T, backend servedparity
 		if servedDB == nil {
 			t.Fatal("served sqlite SQLDB is required for test.setup_entities served parity proof")
 		}
-		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash}
+		return servedControlProofRuntime{Endpoint: endpoint, DB: servedDB, Backend: "sqlite", BundleHash: bundleHash, Runtime: rt}
 	case servedparity.BackendExplicitPostgres:
 		_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 			return serveRuntimeWorkspaceStub{}
 		})
 		contractsPath := writeServedTestSetupFixture(t)
 		bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
-		endpoint, _ := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
+		endpoint, rt := startServedEventPublishFollowUpRuntime(t, cliapp.ServeOptions{
 			ConfigPath:              writeServeRuntimeTestConfig(t),
 			ContractsPath:           contractsPath,
 			PlatformSpecPath:        defaultPlatformSpecPath,
@@ -3422,7 +3476,7 @@ func startServedTestSetupEntitiesProofRuntime(t *testing.T, backend servedparity
 			Verbose:                 true,
 			TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 		})
-		return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash}
+		return servedControlProofRuntime{Endpoint: endpoint, DB: db, Backend: "postgres", BundleHash: bundleHash, Runtime: rt}
 	default:
 		t.Fatalf("unknown served test.setup_entities backend %q", backend)
 		return servedControlProofRuntime{}
@@ -3780,7 +3834,7 @@ func runServedTestSetupEntitiesLifecycleProof(t *testing.T, rt servedControlProo
 	if entity.Alias != "subject" || entity.EntityID != entityID || entity.FlowInstance != runID || entity.EntityType != "widget" || entity.CurrentState != "waiting" {
 		t.Fatalf("%s test.setup_entities entity result = %#v", rt.Backend, entity)
 	}
-	requireServedTestSetupPersistence(t, rt.DB, rt.Backend, runID, entityID, rt.BundleHash)
+	requireServedTestSetupPersistence(t, rt, runID, entityID)
 	requireServedScenarioRunOriginSurfaces(t, rt.Endpoint, runID)
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "test.setup_entities", key, 1)
 
@@ -3795,7 +3849,7 @@ func runServedTestSetupEntitiesLifecycleProof(t *testing.T, rt servedControlProo
 		t.Fatalf("%s test.setup_entities replay = %#v, want original run/entity", rt.Backend, replay)
 	}
 	requireServedControlAPIIdempotencyRows(t, rt.DB, rt.Backend, "test.setup_entities", key, 1)
-	requireServedTestSetupPersistence(t, rt.DB, rt.Backend, runID, entityID, rt.BundleHash)
+	requireServedTestSetupPersistence(t, rt, runID, entityID)
 
 	published := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
 		"event_name":      "widget.scored",
@@ -3851,8 +3905,14 @@ func requireServedScenarioRunOriginSurfaces(t *testing.T, endpoint, runID string
 	requireOrigin("run.diagnose", diagnosis.Run)
 }
 
-func requireServedTestSetupPersistence(t *testing.T, db *sql.DB, backend, runID, entityID, bundleHash string) {
+func requireServedTestSetupPersistence(t *testing.T, rt servedControlProofRuntime, runID, entityID string) {
 	t.Helper()
+	db := rt.DB
+	backend := rt.Backend
+	bundleHash, wantSource := rt.Runtime.Options.BundleSourceFact.StorageValues()
+	if bundleHash == "" || wantSource == "" || bundleHash != rt.BundleHash {
+		t.Fatalf("%s served runtime bundle source = %q/%q, want exact hash %q", backend, bundleHash, wantSource, rt.BundleHash)
+	}
 	var status, originKind, trigger, gotHash, source string
 	var runQuery string
 	var runArgs []any
@@ -3869,7 +3929,6 @@ func requireServedTestSetupPersistence(t *testing.T, db *sql.DB, backend, runID,
 	if err := db.QueryRowContext(context.Background(), runQuery, runArgs...).Scan(&status, &originKind, &trigger, &gotHash, &source); err != nil {
 		t.Fatalf("%s load test.setup_entities run %s: %v", backend, runID, err)
 	}
-	wantSource := storerunlifecycle.BundleSourcePersisted
 	if status != "running" || originKind != string(storerunlifecycle.OriginScenarioSetup) ||
 		trigger != "" || gotHash != bundleHash || source != wantSource {
 		t.Fatalf(
@@ -5170,19 +5229,20 @@ func seedServedRunControlPendingRunWithAgentDelivery(t *testing.T, rt servedCont
 	runID := uuid.NewString()
 	eventID := uuid.NewString()
 	now := time.Now().UTC()
+	bundleHash, bundleSource := rt.Runtime.Options.BundleSourceFact.StorageValues()
+	if bundleHash == "" || bundleSource == "" || bundleHash != rt.BundleHash {
+		t.Fatalf("%s served runtime bundle source = %q/%q, want exact hash %q", backend, bundleHash, bundleSource, rt.BundleHash)
+	}
 	var selectedStore any
 	switch backend {
 	case "postgres":
-		runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: rt.BundleHash, BundleSource: "persisted"})
+		runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: bundleHash, BundleSource: bundleSource})
 		if rt.Postgres == nil {
 			t.Fatal("served postgres store owner is required for run-control seed")
 		}
 		selectedStore = rt.Postgres
 	case "sqlite":
-		storetest.RequireSQLiteRun(t, ctx, db, storetest.RunFixture{
-			Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now,
-			BundleHash: rt.BundleHash, BundleSource: storerunlifecycle.BundleSourcePersisted,
-		})
+		storetest.RequireSQLiteRun(t, ctx, db, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: bundleHash, BundleSource: bundleSource})
 		if rt.SQLite == nil {
 			t.Fatal("served sqlite store owner is required for run-control seed")
 		}
@@ -7294,8 +7354,7 @@ func servedEventPublishEntityState(t *testing.T, db *sql.DB, backend, runID, ent
 	return gotEntityID, state
 }
 
-func TestRunServeRuntimePassesDataFlagToWorkspaceLifecycle(t *testing.T) {
-	dataDir := t.TempDir()
+func TestRunServeRuntimePassesNoAmbientDataSourceToWorkspaceLifecycle(t *testing.T) {
 	var capturedMountSources cliapp.WorkspaceMountSources
 	_, _, _ = installServeRuntimePostgresTestStoresWithWorkspaceFactory(t, func(mountSources cliapp.WorkspaceMountSources) cliapp.ServeWorkspaceLifecycle {
 		capturedMountSources = mountSources
@@ -7305,7 +7364,6 @@ func TestRunServeRuntimePassesDataFlagToWorkspaceLifecycle(t *testing.T) {
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
 		ConfigPath:         writeServeRuntimeTestConfig(t),
 		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		DataSource:         dataDir,
 		PlatformSpecPath:   defaultPlatformSpecPath,
 		StoreMode:          "postgres",
 		APIListenAddr:      "127.0.0.1:0",
@@ -7318,15 +7376,14 @@ func TestRunServeRuntimePassesDataFlagToWorkspaceLifecycle(t *testing.T) {
 	if code := serve.stop(); code != 0 {
 		t.Fatalf("Run code = %d\noutput:\n%s", code, serve.outputString())
 	}
-	if capturedMountSources.DataSource != dataDir || capturedMountSources.DataSourceSource != "--data" {
-		t.Fatalf("workspace mount sources = %#v, want %q from --data", capturedMountSources, dataDir)
+	if capturedMountSources != (cliapp.WorkspaceMountSources{}) {
+		t.Fatalf("workspace mount sources = %#v, want no ambient data authority", capturedMountSources)
 	}
 }
 
 func TestRunServeRuntimeHostWorkspaceBackendBootsWithoutDockerForSystemOnlyFlow(t *testing.T) {
 	missingDocker := filepath.Join(t.TempDir(), "missing-docker")
 	hostRoot := filepath.Join(t.TempDir(), "host-workspaces")
-	dataDir := t.TempDir()
 	configPath := writeStoreBackendRuntimeConfigWithWorkspaceFields(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "runtime.db"), []string{
 		fmt.Sprintf("  docker_bin: %q", missingDocker),
 		fmt.Sprintf("  host_root: %q", hostRoot),
@@ -7335,7 +7392,6 @@ func TestRunServeRuntimeHostWorkspaceBackendBootsWithoutDockerForSystemOnlyFlow(
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
 		ConfigPath:           configPath,
 		ContractsPath:        filepath.Join("examples", "routing", "root-ingress"),
-		DataSource:           dataDir,
 		WorkspaceBackend:     workspace.BackendHost,
 		WorkspaceBackendSet:  true,
 		PlatformSpecPath:     defaultPlatformSpecPath,
@@ -7365,7 +7421,6 @@ func TestRunServeRuntimeNoAgentDefaultBootsWithoutDocker(t *testing.T) {
 			fmt.Sprintf("  docker_bin: %q", missingDocker),
 		}),
 		ContractsPath:        filepath.Join("examples", "routing", "root-ingress"),
-		DataSource:           t.TempDir(),
 		PlatformSpecPath:     defaultPlatformSpecPath,
 		StoreMode:            storebackend.ActiveDefaultBackend().String(),
 		APIListenAddr:        "127.0.0.1:0",
@@ -7398,7 +7453,6 @@ func TestRunServeRuntimeAPIAgentDefaultHostBootsWithoutDocker(t *testing.T) {
 			fmt.Sprintf("  host_root: %q", hostRoot),
 		}),
 		ContractsPath:        writeServeRuntimeAgentSlugFixture(t, "api-agent-host-default", "api-worker"),
-		DataSource:           t.TempDir(),
 		PlatformSpecPath:     defaultPlatformSpecPath,
 		StoreMode:            storebackend.ActiveDefaultBackend().String(),
 		APIListenAddr:        "127.0.0.1:0",
@@ -7432,7 +7486,6 @@ func TestRunServeRuntimeNativeBashDefaultDockerFailsWithoutDocker(t *testing.T) 
 			fmt.Sprintf("  docker_bin: %q", missingDocker),
 		}),
 		ContractsPath:        writeServeRuntimeNativeBashFixture(t),
-		DataSource:           t.TempDir(),
 		PlatformSpecPath:     defaultPlatformSpecPath,
 		StoreMode:            storebackend.ActiveDefaultBackend().String(),
 		APIListenAddr:        "127.0.0.1:0",
@@ -9825,7 +9878,6 @@ func TestRunServeRuntimeDevClaudeCLIStaleGatewayEnvUsesTypedBinding(t *testing.T
 		ConfigPath:         writeDoctorClaudeConfig(t, ""),
 		Backend:            "claude_cli",
 		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		DataSource:         t.TempDir(),
 		PlatformSpecPath:   defaultPlatformSpecPath,
 		StoreMode:          "sqlite",
 		APIListenAddr:      "127.0.0.1:0",
@@ -10010,7 +10062,6 @@ func TestRunServeRuntimeNonDevClaudeCLIRetiredGatewayURLEnvFailsClosed(t *testin
 				ConfigPath:         writeDoctorClaudeConfig(t, ""),
 				Backend:            "claude_cli",
 				ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-				DataSource:         t.TempDir(),
 				PlatformSpecPath:   defaultPlatformSpecPath,
 				StoreMode:          "not-a-store",
 				APIListenAddr:      "127.0.0.1:0",
@@ -10032,7 +10083,6 @@ func TestRunServeRuntimeBundleHashRetiredGatewayURLEnvFailsBeforeStartupSideEffe
 		ConfigPath:         writeDoctorClaudeConfig(t, ""),
 		Backend:            "claude_cli",
 		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		DataSource:         t.TempDir(),
 		PlatformSpecPath:   defaultPlatformSpecPath,
 		StoreMode:          "not-a-store",
 		APIListenAddr:      "127.0.0.1:0",
@@ -10053,7 +10103,6 @@ func TestRunServeRuntimeNonClaudeRetiredGatewayURLEnvFailsBeforeStartupSideEffec
 		ConfigPath:         writeServeRuntimeTestConfig(t),
 		Backend:            "anthropic",
 		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
-		DataSource:         t.TempDir(),
 		PlatformSpecPath:   defaultPlatformSpecPath,
 		StoreMode:          "not-a-store",
 		APIListenAddr:      "127.0.0.1:0",
@@ -10130,7 +10179,7 @@ func assertServePreflightStaleGatewayWarning(t *testing.T, opts cliapp.ServeOpti
 	if err != nil {
 		t.Fatalf("load bundle pack runtime for preflight proof: %v", err)
 	}
-	report := cliapp.RunServeLocalClaudeCLIPreflight(context.Background(), cliapp.RepoRoot(), opts, cfgResult.Config, resolvedPaths, workspaceBackend, cliapp.WorkspaceMountSources{DataSource: t.TempDir(), DataSourceSource: "test"}, platformPackBase, packRuntime.ProviderTriggers.Loaded, packRuntime.ProviderTriggers.Catalog, providerCredentials, packRuntime.Channels)
+	report := cliapp.RunServeLocalClaudeCLIPreflight(context.Background(), cliapp.RepoRoot(), opts, cfgResult.Config, resolvedPaths, workspaceBackend, cliapp.WorkspaceMountSources{}, platformPackBase, packRuntime.ProviderTriggers.Loaded, packRuntime.ProviderTriggers.Catalog, providerCredentials, packRuntime.Channels)
 	if report.Mode != wantMode {
 		t.Fatalf("preflight mode = %q, want %q", report.Mode, wantMode)
 	}
@@ -10631,7 +10680,6 @@ func writeServeRuntimeTestConfigWithWorkspaceFields(t *testing.T, workspaceField
 		"  execution_posture: live",
 		"  recovery_on_startup: false",
 		"workspace:",
-		"  data_source: " + t.TempDir(),
 	}, "\n") + "\n"
 	if len(workspaceFields) > 0 {
 		configText += strings.Join(workspaceFields, "\n") + "\n"
@@ -10841,7 +10889,6 @@ func writeStoreBackendRuntimeConfigWithWorkspaceFields(t *testing.T, backend str
 		"  execution_posture: live",
 		"  recovery_on_startup: false",
 		"workspace:",
-		"  data_source: " + t.TempDir(),
 	}
 	lines = append(lines, workspaceFields...)
 	if strings.TrimSpace(backend) != "" || strings.TrimSpace(sqlitePath) != "" {

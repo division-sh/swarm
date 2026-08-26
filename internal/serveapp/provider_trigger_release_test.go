@@ -33,9 +33,6 @@ func TestReleaseBinaryUsesEmbeddedPackInventoryWithoutAdjacentPackTree(t *testin
 	if err := os.WriteFile(filepath.Join(releaseRoot, "platform-spec.yaml"), platformSpecBody, 0o644); err != nil {
 		t.Fatalf("write release platform spec: %v", err)
 	}
-	if err := os.MkdirAll(filepath.Join(releaseRoot, "data"), 0o755); err != nil {
-		t.Fatalf("mkdir release data: %v", err)
-	}
 	sqlitePath := filepath.Join(releaseRoot, "runtime.db")
 	seedReleaseProviderTriggerStore(t, platformSpecBody, sqlitePath)
 	configPath := filepath.Join(releaseRoot, "platform-config.yaml")
@@ -46,7 +43,6 @@ func TestReleaseBinaryUsesEmbeddedPackInventoryWithoutAdjacentPackTree(t *testin
 			"doctor",
 			"--config", configPath,
 			"--contracts", filepath.Join(releaseRoot, "contracts"),
-			"--data", filepath.Join(releaseRoot, "data"),
 			"--workspace-backend", "host",
 			"--api-listen-addr", "127.0.0.1:0",
 			"--mcp-listen-addr", "127.0.0.1:0",

@@ -11,7 +11,7 @@ import (
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 )
 
-func TestResolveLocalRuntimeStateUsesProjectLocalStoreAndData(t *testing.T) {
+func TestResolveLocalRuntimeStateUsesProjectLocalStoreWithoutAmbientData(t *testing.T) {
 	projectRoot, contractsPath := writeLocalRuntimeStateProject(t)
 	swarmDir := CLISwarmDirResolution{Path: t.TempDir(), Source: "test"}
 
@@ -30,28 +30,30 @@ func TestResolveLocalRuntimeStateUsesProjectLocalStoreAndData(t *testing.T) {
 	if state.StoreSelection.SQLitePath != wantStore || state.StoreSelection.SQLitePathSource != storebackend.SourceProjectDefault {
 		t.Fatalf("sqlite path = %q source %q, want %q from project_default", state.StoreSelection.SQLitePath, state.StoreSelection.SQLitePathSource, wantStore)
 	}
-	wantData := filepath.Join(state.Project.CanonicalProjectRoot, ".swarm", "data")
-	if state.MountSources.DataSource != wantData || state.MountSources.DataSourceSource != defaultWorkspaceDataSourceSource {
-		t.Fatalf("data source = %#v, want %q from %s", state.MountSources, wantData, defaultWorkspaceDataSourceSource)
+	if state.MountSources.DataSource != "" || state.MountSources.DataSourceSource != "" {
+		t.Fatalf("data source = %#v, want no ambient data source", state.MountSources)
 	}
-	if info, err := os.Stat(wantData); err != nil || !info.IsDir() {
-		t.Fatalf("project data default stat = (%v, %v), want created directory", info, err)
+	if _, err := os.Stat(filepath.Join(state.Project.CanonicalProjectRoot, ".swarm", "data")); !os.IsNotExist(err) {
+		t.Fatalf("retired project data default exists: %v", err)
 	}
 }
 
-func TestResolveLocalRuntimeStateBorrowedContractsRequireExplicitData(t *testing.T) {
+func TestResolveLocalRuntimeStateBorrowedContractsNeedsNoAmbientData(t *testing.T) {
 	RepoRoot := t.TempDir()
 	_, contractsPath := writeLocalRuntimeStateProject(t)
 
-	_, err := ResolveLocalRuntimeState(LocalRuntimeStateOptions{
+	state, err := ResolveLocalRuntimeState(LocalRuntimeStateOptions{
 		RepoRoot:                RepoRoot,
 		ResolvedPaths:           CLIContractPlatformSpecPaths{ContractsPath: contractsPath},
 		SwarmDir:                CLISwarmDirResolution{Path: t.TempDir(), Source: "test"},
 		Config:                  &config.Config{},
 		CreateDefaultDataSource: true,
 	})
-	if err == nil || !strings.Contains(err.Error(), "workspace data source is required") {
-		t.Fatalf("ResolveLocalRuntimeState error = %v, want explicit data requirement", err)
+	if err != nil {
+		t.Fatalf("ResolveLocalRuntimeState: %v", err)
+	}
+	if state.MountSources != (WorkspaceMountSources{}) {
+		t.Fatalf("mount sources = %#v, want no ambient data", state.MountSources)
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(contractsPath), ".swarm", "data")); !os.IsNotExist(err) {
 		t.Fatalf("borrowed contracts data stat error = %v, want no .swarm/data created", err)

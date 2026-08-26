@@ -225,7 +225,7 @@ func eventPublicationRunBundleContext(
 	}
 	availability, err := reader.LoadRunBundleAvailability(ctx, params.RunID)
 	if errors.Is(err, runbundle.ErrRunNotFound) {
-		if cfg.requireExistingExplicitRun {
+		if cfg.requireExistingExplicitRun && !params.NewRunCreated {
 			return runbundle.Availability{}, false, NewApplicationError(RunNotFoundCode, false, map[string]any{"run_id": params.RunID})
 		}
 		return runbundle.Availability{}, false, nil

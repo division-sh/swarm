@@ -13,6 +13,9 @@ func TestReleaseDockerCommandAdmissionRejectsMalformedShapes(t *testing.T) {
 	if err := validateReleaseDockerCommand(root, validCreate); err != nil {
 		t.Fatalf("valid fixture create rejected: %v", err)
 	}
+	if err := validateReleaseDockerCommand(root, []string{"inspect", "--format", "{{json .Config.Labels}}", "swarm-scaffold"}); err != nil {
+		t.Fatalf("runtime identity label inspection rejected: %v", err)
+	}
 	cases := map[string][]string{
 		"version shape":    {"version"},
 		"network name":     {"network", "inspect", "wrong-network"},
@@ -20,6 +23,7 @@ func TestReleaseDockerCommandAdmissionRejectsMalformedShapes(t *testing.T) {
 		"preflight shape":  {"run", "definitely-not-a-valid-preflight"},
 		"inspect target":   {"inspect", "--format", "{{.State.Running}}", "wrong-container"},
 		"lifecycle target": {"start", "wrong-container"},
+		"removal target":   {"rm", "--force", "wrong-container"},
 		"inventory shape":  {"container", "ls"},
 	}
 	for name, args := range cases {
@@ -54,7 +58,6 @@ func TestReleaseDockerCommandAdmissionRejectsMalformedShapes(t *testing.T) {
 
 	releaseRoot := filepath.Dir(root)
 	projectMounts := map[string]string{
-		"/data":                filepath.Join(releaseRoot, ".swarm", "data"),
 		"/opt/swarm/contracts": filepath.Join(releaseRoot, "contracts"),
 	}
 	for target, source := range projectMounts {
@@ -299,7 +302,6 @@ func validReleaseScaffoldCreateArgs(root string) []string {
 		"--label", "dev.swarm.owner=runtime",
 		"--label", "dev.swarm.reset.eligible=false",
 		"--label", "dev.swarm.workspace.scope=scaffold",
-		"-v", filepath.Join(releaseRoot, ".swarm", "data") + ":/data:ro",
 		"-v", filepath.Join(releaseRoot, "contracts") + ":/opt/swarm/contracts:ro",
 		"-v", "scaffold:/opt/swarm/scaffold",
 		"-w", "/opt/swarm/scaffold",
@@ -323,6 +325,7 @@ func validReleaseEvidence() []fakeDockerRecord {
 			RawMCPURL: releaseE2ERawMCPURL,
 			MCPURL:    releaseE2EHostMCPURL,
 		},
+		{Class: "container_remove"},
 		{
 			Class:     "claude_live",
 			Args:      []string{"claude", "--tools", strings.Join(releaseE2EBuiltinTools(), ","), "--allowedTools", strings.Join(releaseE2ELiveAllowedTools(), ","), "--model", releaseE2EManagedModel},

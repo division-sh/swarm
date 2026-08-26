@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/toolresultpolicy"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 )
 
@@ -18,7 +19,7 @@ const (
 	ClaudeCodeToolUseIDMetaKey = "claudecode/toolUseId"
 	claudeCodeToolUseIDMetaKey = ClaudeCodeToolUseIDMetaKey
 
-	maxToolResultBytes        = 16 * 1024
+	maxToolResultBytes        = toolresultpolicy.MaxInlineToolResultBytes
 	maxReadFileResultBytes    = 256 * 1024
 	maxToolResultPreviewRunes = 1200
 	MaxWireResponseBytes      = maxReadFileResultBytes

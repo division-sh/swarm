@@ -1,6 +1,7 @@
 package semanticview
 
 import (
+	"github.com/division-sh/swarm/internal/durabledata"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
@@ -11,6 +12,11 @@ type Source interface {
 	semanticSourceCore() sourceCore
 	WorkflowVersion() string
 	WorkflowName() string
+	DurableDataDeclarations() []runtimecontracts.DurableDataDeclaration
+	StaticData() []durabledata.StaticData
+	StaticDataForAgent(packageKey, flowID, logicalID string) []durabledata.StaticData
+	DurableDataForAgent(packageKey, flowID, logicalID string) []durabledata.DeclarationRef
+	DataProjectionRequired() bool
 	PlatformSpec() runtimecontracts.PlatformSpecDocument
 	WorkflowEntitySchema() runtimecontracts.EntitySchema
 	WorkflowStages() []runtimecontracts.WorkflowStageContract

@@ -68,7 +68,6 @@ func unifiedConfigExampleEntries() []unifiedConfigExampleEntry {
 		e("budget.human_tasks.auto_expire_hours", "168", "Human task auto-expiration window in hours.", unifiedConfigExampleTierProjectSafe),
 		e("budget.human_tasks.categories_enabled", `["ops"]`, "Human task categories covered by the budget.", unifiedConfigExampleTierProjectSafe),
 
-		e("workspace.data_source", "./.swarm/data", "Project-contained workspace data source.", unifiedConfigExampleTierProjectContainedPath),
 		e("paths.contracts_path", "./contracts", "Project-contained contract bundle root.", unifiedConfigExampleTierProjectContainedPath),
 		e("paths.platform_spec_path", "platform-spec.yaml", "Project-contained platform spec path override.", unifiedConfigExampleTierProjectContainedPath),
 		e("paths.agent_config_map_file", "./agent-config-map.yaml", "Project-contained agent config map file.", unifiedConfigExampleTierProjectContainedPath),
@@ -91,7 +90,6 @@ func unifiedConfigExampleEntries() []unifiedConfigExampleEntry {
 		e("workspace.image", "swarm-workspace:latest", "Workspace image for Docker-backed execution.", unifiedConfigExampleTierElevated),
 		e("workspace.docker_bin", "docker", "Docker executable path/name.", unifiedConfigExampleTierElevated),
 		e("workspace.host_root", "~/.swarm/workspaces", "Host workspace root for local/operator use.", unifiedConfigExampleTierElevated),
-		e("workspace.volumes_from", "swarm-orchestrator", "Container volume source for orchestrated deployments.", unifiedConfigExampleTierElevated),
 		e("workspace.network", "swarm", "Docker network for workspaces.", unifiedConfigExampleTierElevated),
 		e("llm.claude_cli.command", "claude", "Claude CLI executable path/name.", unifiedConfigExampleTierElevated),
 		e("llm.openai_compatible.base_url", "https://api.example.com/v1", "OpenAI-compatible endpoint base URL.", unifiedConfigExampleTierElevated),

@@ -27,7 +27,6 @@ func TestBootFloorConformanceNativeBashHostOptOutIsLoudUnsafe(t *testing.T) {
 			fmt.Sprintf("  host_root: %q", hostRoot),
 		}),
 		ContractsPath:        writeServeRuntimeNativeBashFixture(t),
-		DataSource:           t.TempDir(),
 		WorkspaceBackend:     workspace.BackendHost,
 		WorkspaceBackendSet:  true,
 		PlatformSpecPath:     defaultPlatformSpecPath,
@@ -141,7 +140,6 @@ func TestBootFloorExplicitHostRefusalAcrossServeVerifyDescribe(t *testing.T) {
 		code := Run(context.Background(), cliapp.RepoRoot(), cliapp.ServeOptions{
 			ConfigPath:           configPath,
 			ContractsPath:        contractsPath,
-			DataSource:           t.TempDir(),
 			PlatformSpecPath:     defaultPlatformSpecPath,
 			StoreMode:            storebackend.ActiveDefaultBackend().String(),
 			SwarmDir:             swarmDir,

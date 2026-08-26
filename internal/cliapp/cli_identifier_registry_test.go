@@ -992,6 +992,7 @@ var cliIdentifierGlobalNonResourceStringFlags = map[string]bool{
 }
 
 var cliIdentifierNonResourceStringFlags = map[string]bool{
+	cliIdentifierRegistryKey("swarm data show", "flag:format"):                      true,
 	cliIdentifierRegistryKey("swarm store status", "flag:store"):                    true,
 	cliIdentifierRegistryKey("swarm store repair-authority", "flag:confirm"):        true,
 	cliIdentifierRegistryKey("swarm store repair-authority", "flag:store"):          true,

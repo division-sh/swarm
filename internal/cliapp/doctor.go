@@ -3,7 +3,6 @@ package cliapp
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/packartifact"
@@ -48,13 +47,6 @@ func newDoctorCommand(ctx context.Context, repo string, rootOpts rootCommandOpti
 			if opts.target && opts.schemaInventory {
 				return fmt.Errorf("--schema-inventory cannot be combined with --target")
 			}
-			if cmd.Flags().Changed("data") {
-				opts.dataSource = strings.TrimSpace(opts.dataSource)
-				if opts.dataSource == "" {
-					return fmt.Errorf("--data must be non-empty")
-				}
-			}
-			opts.dataSourceSet = cmd.Flags().Changed("data")
 			if path, set, err := effectiveCommandConfigPath(cmd, opts.configPath, cmd.Flags().Changed("config")); err != nil {
 				return err
 			} else if set {
@@ -80,7 +72,6 @@ func newDoctorCommand(ctx context.Context, repo string, rootOpts rootCommandOpti
 	cmd.Flags().StringVar(&opts.configPath, "config", opts.configPath, "Path to swarm.yaml config")
 	cmd.Flags().StringVar(&opts.backend, "backend", opts.backend, "LLM backend profile to diagnose: anthropic, claude_cli, openai_compatible, or openai_responses")
 	cmd.Flags().StringVar(&opts.contractsPath, "contracts", opts.contractsPath, "Path to Swarm contract bundle root")
-	cmd.Flags().StringVar(&opts.dataSource, "data", opts.dataSource, "Path to agent-visible read-only /data reference directory")
 	cmd.Flags().StringVar(&opts.workspaceBackend, "workspace-backend", opts.workspaceBackend, "Workspace backend for local diagnostics: docker or host")
 	cmd.Flags().StringVar(&opts.platformSpecPath, "platform-spec", opts.platformSpecPath, "Path to platform spec yaml")
 	cmd.Flags().StringVar(&opts.apiListenAddr, "api-listen-addr", opts.apiListenAddr, "HTTP bind address to preflight for API, WebSocket, health, and readiness routes")
@@ -237,7 +228,7 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 	})
 	if err != nil {
 		report := configReport
-		report.add(localPreflightWorkspacePrerequisite, "workspace_data_source_invalid", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix --data or workspace.data_source")
+		report.add(localPreflightWorkspacePrerequisite, "workspace_data_source_invalid", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "remove retired workspace data paths; declare flow_data_access or data_access, or import a dataset with swarm run start --data name=file.jsonl")
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
 	report := runLocalClaudeCLIPreflight(ctx, localPreflightRequest{

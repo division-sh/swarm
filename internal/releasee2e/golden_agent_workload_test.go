@@ -143,15 +143,8 @@ func TestGoldenAgentWorkloadSQLiteDevRestartFailsClosed(t *testing.T) {
 	contracts := filepath.Join(root, "contracts")
 	copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal", "releasee2e", "testdata", "golden_agent_workload"), contracts)
 	writeReleaseFile(t, filepath.Join(root, "go.mod"), "module golden-agent-release-e2e\n\ngo 1.23.0\n")
-	dataDir := filepath.Join(root, "data")
-	workspaceDir := filepath.Join(root, "workspace")
-	for _, dir := range []string{dataDir, workspaceDir} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("create release directory %s: %v", dir, err)
-		}
-	}
 	configPath := filepath.Join(root, "swarm.yaml")
-	writeReleaseFile(t, configPath, goldenRuntimeConfig(store, workspaceDir))
+	writeReleaseFile(t, configPath, goldenRuntimeConfig(store))
 	tokenFile := filepath.Join(root, "api-token")
 	writeReleaseFile(t, tokenFile, goldenAPIToken+"\n")
 	env := goldenProcessEnv(t, root, "", 0)
@@ -165,7 +158,6 @@ func TestGoldenAgentWorkloadSQLiteDevRestartFailsClosed(t *testing.T) {
 			WorkingDir: root,
 			ConfigPath: configPath,
 			Contracts:  contracts,
-			Data:       dataDir,
 			Store:      store.name,
 			Dev:        dev,
 			APIPort:    apiPort,
@@ -306,15 +298,8 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	contracts := filepath.Join(root, "contracts")
 	copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal", "releasee2e", "testdata", "golden_agent_workload"), contracts)
 	writeReleaseFile(t, filepath.Join(root, "go.mod"), "module golden-agent-release-e2e\n\ngo 1.23.0\n")
-	dataDir := filepath.Join(root, "data")
-	workspaceDir := filepath.Join(root, "workspace")
-	for _, dir := range []string{dataDir, workspaceDir} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("create release directory %s: %v", dir, err)
-		}
-	}
 	configPath := filepath.Join(root, "swarm.yaml")
-	writeReleaseFile(t, configPath, goldenRuntimeConfig(store, workspaceDir))
+	writeReleaseFile(t, configPath, goldenRuntimeConfig(store))
 	tokenFile := filepath.Join(root, "api-token")
 	writeReleaseFile(t, tokenFile, goldenAPIToken+"\n")
 	env := goldenProcessEnv(t, root, store.passwordEnv, options.processGOMAXPROCS)
@@ -337,7 +322,6 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 			WorkingDir: root,
 			ConfigPath: configPath,
 			Contracts:  contracts,
-			Data:       dataDir,
 			Store:      store.name,
 			APIPort:    apiPort,
 			MCPPort:    mcpPort,
@@ -409,7 +393,7 @@ func assertGoldenFixtureHasSingleMockOwner(t *testing.T) {
 	}
 }
 
-func goldenRuntimeConfig(store goldenStoreSelection, workspaceDir string) string {
+func goldenRuntimeConfig(store goldenStoreSelection) string {
 	return "runtime:\n" +
 		"  execution_posture: mock_only\n" +
 		"  recovery_on_startup: true\n" +
@@ -417,7 +401,6 @@ func goldenRuntimeConfig(store goldenStoreSelection, workspaceDir string) string
 		"  backend: claude_cli\n" +
 		"workspace:\n" +
 		"  backend: host\n" +
-		"  data_source: " + strconv.Quote(workspaceDir) + "\n" +
 		store.configYAML
 }
 

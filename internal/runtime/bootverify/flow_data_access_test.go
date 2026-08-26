@@ -30,12 +30,12 @@ func TestRun_ValidatesFlowDataAccessDeclarations(t *testing.T) {
 			name:       "missing file",
 			access:     []string{"missing.yaml"},
 			files:      map[string]string{"other.yaml": "ok\n"},
-			wantSubstr: "not readable",
+			wantSubstr: "missing from the exact bundle catalog",
 		},
 		{
 			name:       "absolute path",
 			access:     []string{"/etc/passwd"},
-			wantSubstr: "absolute paths",
+			wantSubstr: "portable relative path",
 		},
 		{
 			name:       "traversal",
@@ -45,7 +45,7 @@ func TestRun_ValidatesFlowDataAccessDeclarations(t *testing.T) {
 		{
 			name:       "backslash",
 			access:     []string{`dir\\file.yaml`},
-			wantSubstr: "platform-specific",
+			wantSubstr: "portable relative path",
 		},
 		{
 			name:       "project agent",
@@ -57,45 +57,21 @@ func TestRun_ValidatesFlowDataAccessDeclarations(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			root := writeFlowDataAccessFixture(t, tc.access, tc.files, tc.rootAgent)
-			report := Run(context.Background(), semanticview.Wrap(loadFlowDataAccessBundle(t, root)), Options{})
-			if !reportContains(report.Errors(), "flow_data_access_validation", tc.wantSubstr) {
-				t.Fatalf("expected flow_data_access_validation containing %q, got %#v", tc.wantSubstr, report.Errors())
+			repoRoot := repoRootForBootverifyTest(t)
+			_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+			if err == nil || !strings.Contains(err.Error(), tc.wantSubstr) {
+				t.Fatalf("contract load error = %v, want %q", err, tc.wantSubstr)
 			}
 		})
 	}
 }
 
-func TestRun_ReportsNestedPhysicalFlowDataDeclarationExactlyOnce(t *testing.T) {
+func TestCatalogRejectsNestedPhysicalFlowDataDeclarationExactlyOnce(t *testing.T) {
 	root := writeNestedBootFlowDataAccessFixture(t)
-	source := semanticview.Wrap(loadFlowDataAccessBundle(t, root))
-	if records := wave1ScopedAgentRecords(source); len(records) != 1 || records[0].LogicalID != "worker" {
-		t.Fatalf("entity-coverage agent records = %#v, want one nested physical declaration", records)
-	}
-	report := Run(context.Background(), source, Options{})
-	findings := []Finding{}
-	invalidFields := []Finding{}
-	for _, finding := range report.Errors() {
-		if finding.CheckID == "flow_data_access_validation" {
-			findings = append(findings, finding)
-		}
-		if finding.CheckID == "invalid_field_detection" && strings.Contains(finding.Message, "missing required field subscriptions") {
-			invalidFields = append(invalidFields, finding)
-		}
-	}
-	if len(findings) != 1 || !strings.Contains(findings[0].Message, "not readable") {
-		t.Fatalf("flow_data_access_validation findings = %#v, want one nested physical-declaration error", findings)
-	}
-	if len(invalidFields) != 1 {
-		t.Fatalf("invalid-field findings = %#v, want one nested physical-declaration error", invalidFields)
-	}
-	intentFindings := []Finding{}
-	for _, finding := range report.Warnings() {
-		if finding.CheckID == "intent_resolution" && strings.Contains(finding.Message, "TODO") {
-			intentFindings = append(intentFindings, finding)
-		}
-	}
-	if len(intentFindings) != 1 {
-		t.Fatalf("intent findings = %#v, want one nested physical-declaration warning", intentFindings)
+	repoRoot := repoRootForBootverifyTest(t)
+	_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err == nil || strings.Count(err.Error(), "missing.md") != 1 || !strings.Contains(err.Error(), "package parent/child") {
+		t.Fatalf("contract load error = %v, want one exact nested declaration rejection", err)
 	}
 }
 

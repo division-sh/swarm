@@ -136,6 +136,7 @@ func bundleHashEntries(bundle *WorkflowContractBundle) ([]bundleHashEntry, error
 				return nil, err
 			}
 			for _, path := range []string{
+				pkg.DataFile,
 				pkg.ProjectNodesFile,
 				pkg.ProjectEventsFile,
 				pkg.ProjectAgentsFile,
@@ -145,6 +146,11 @@ func bundleHashEntries(bundle *WorkflowContractBundle) ([]bundleHashEntry, error
 				if err := builder.addOptionalBundleFile(path, bundleHashYAML); err != nil {
 					return nil, err
 				}
+			}
+		}
+		if isRootPackage {
+			if err := builder.addOptionalBundleFile(pkg.DataFile, bundleHashYAML); err != nil {
+				return nil, err
 			}
 		}
 		for _, flow := range pkg.Flows {

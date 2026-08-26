@@ -64,6 +64,10 @@ func (i Identity) Normalized() Identity {
 	return i
 }
 
+func (i Identity) Equal(other Identity) bool {
+	return i.Normalized() == other.Normalized()
+}
+
 func (i Identity) Labels() map[string]string {
 	i = i.Normalized()
 	labels := map[string]string{

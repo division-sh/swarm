@@ -38,7 +38,7 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 				if got := req.Params["bundle_hash"]; got != "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 					t.Fatalf("bundle_hash = %#v, want health.check bundle hash", got)
 				}
-				return map[string]any{"run_id": "run-local", "status": "running"}
+				return runStartCommandResult("run-local", "running")
 			case "run.get":
 				run := validDiagnosticRunHeader("run-local")
 				select {
@@ -67,7 +67,7 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 	}
 	opts.runServe = func(ctx context.Context, repo string, serveOpts ServeOptions) int {
 		serveCalled.Add(1)
-		if serveOpts.ConfigPath != configPath || serveOpts.Backend != "claude_cli" || serveOpts.ContractsPath != filepath.Join(repo, "contracts") || serveOpts.DataSource != "reference-data" {
+		if serveOpts.ConfigPath != configPath || serveOpts.Backend != "claude_cli" || serveOpts.ContractsPath != filepath.Join(repo, "contracts") || serveOpts.DataSource != "" {
 			t.Errorf("serve opts = %#v", serveOpts)
 		}
 		if serveOpts.Verbose {
@@ -83,7 +83,7 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 
 	stdout := &notifyingBuffer{needle: "id=evt-local", notify: tracePrinted}
 	var stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), repo, []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--config", configPath, "--backend", "claude_cli", "--contracts", "contracts", "--data", "reference-data"}, stdout, &stderr, opts)
+	code := executeRootCommandWithOptions(context.Background(), repo, []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--config", configPath, "--backend", "claude_cli", "--contracts", "contracts"}, stdout, &stderr, opts)
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -131,7 +131,7 @@ func TestRunCommandLocalForegroundUsesServeAPITokenFileForEmbeddedClient(t *test
 			case "health.check":
 				return runCommandHealthResult()
 			case "run.start":
-				return map[string]any{"run_id": "run-token-file", "status": "running"}
+				return runStartCommandResult("run-token-file", "running")
 			case "run.get":
 				awaitRunCommandTraceRequest(t, requestRead)
 				run := validDiagnosticRunHeader("run-token-file")
@@ -285,7 +285,7 @@ func TestRunCommandHelpShowsDataFlag(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("run --help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	for _, want := range []string{"--data", "Path to agent-visible read-only /data reference directory", "--backend", "openai_responses"} {
+	for _, want := range []string{"--data", "Fused immutable data import", "--pin", "Exact data version pin", "--backend", "openai_responses"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("run help missing %q:\n%s", want, stdout.String())
 		}
@@ -304,7 +304,7 @@ func TestRunCommandConnectedNoFollowUsesHealthAndRunStartOnly(t *testing.T) {
 				if got := req.Params["bundle_hash"]; got != "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" {
 					t.Fatalf("bundle_hash = %#v, want health.check bundle hash", got)
 				}
-				return map[string]any{"run_id": "run-no-follow", "status": "running"}
+				return runStartCommandResult("run-no-follow", "running")
 			default:
 				t.Fatalf("unexpected method = %q", req.Method)
 			}
@@ -338,7 +338,7 @@ func TestRunStartRemoteModesDoNotAcquireLocalOwnership(t *testing.T) {
 			case "health.check":
 				return runCommandHealthResult()
 			case "run.start":
-				return map[string]any{"run_id": "run-remote", "status": "running"}
+				return runStartCommandResult("run-remote", "running")
 			case "run.get":
 				run := validDiagnosticRunHeader("run-remote")
 				run["status"] = "completed"
@@ -392,7 +392,7 @@ func TestRunCommandStartIncludesOptionalRunIDAndIdempotencyKey(t *testing.T) {
 				if got := req.Params["idempotency_key"]; got != "idem-start" {
 					t.Fatalf("idempotency_key = %#v, want idem-start", got)
 				}
-				return map[string]any{"run_id": "run-explicit", "status": "running"}
+				return runStartCommandResult("run-explicit", "running")
 			default:
 				t.Fatalf("unexpected method = %q", req.Method)
 			}
@@ -584,7 +584,7 @@ func TestRunCommandConnectedForegroundFollowsTraceAndExitsOnTerminalRunGet(t *te
 			case "health.check":
 				return runCommandHealthResult()
 			case "run.start":
-				return map[string]any{"run_id": "run-foreground", "status": "running"}
+				return runStartCommandResult("run-foreground", "running")
 			case "run.get":
 				run := validDiagnosticRunHeader("run-foreground")
 				select {
@@ -734,7 +734,7 @@ func TestRunCommandStartCtrlCCallsRunStopAfterRunID(t *testing.T) {
 			case "health.check":
 				return runCommandHealthResult()
 			case "run.start":
-				return map[string]any{"run_id": "run-interrupt", "status": "running"}
+				return runStartCommandResult("run-interrupt", "running")
 			case "run.stop":
 				if got := req.Params["run_id"]; got != "run-interrupt" {
 					t.Fatalf("run.stop run_id = %#v", got)
@@ -810,7 +810,7 @@ func TestRunCommandClosedTraceChannelStillWaitsForRunGet(t *testing.T) {
 			case "health.check":
 				return runCommandHealthResult()
 			case "run.start":
-				return map[string]any{"run_id": "run-closed-ws", "status": "running"}
+				return runStartCommandResult("run-closed-ws", "running")
 			case "run.get":
 				run := validDiagnosticRunHeader("run-closed-ws")
 				select {
@@ -929,7 +929,7 @@ func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
 		{name: "reattach rejects data flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--data", "reference-data"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --data"},
 		{name: "platform spec retired on reattach", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--platform-spec", "platform.yaml"}, wantCode: 2, wantStderr: "--platform-spec is retired"},
 		{name: "reattach rejects api port flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--reattach", "run-1", "--api-port", "8081"}, wantCode: 2, wantStderr: "--reattach is mutually exclusive with --api-port"},
-		{name: "blank data rejected", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--data", " "}, wantCode: 2, wantStderr: "--data must be non-empty"},
+		{name: "blank data rejected", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--data", " "}, wantCode: 2, wantStderr: "--data must be name=file.jsonl"},
 		{name: "api port zero rejected when explicit", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "0"}, wantCode: 2, wantStderr: "--api-port must be between 1 and 65535"},
 		{name: "api port rejects default mcp listener conflict", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "8082"}, wantCode: 2, wantStderr: "--api-port 8082 conflicts with MCP listener 127.0.0.1:8082"},
 		{name: "mcp port zero rejected when explicit", token: "test-token", args: []string{"run", "start", "--event", "scan.requested", "--payload", payloadPath, "--mcp-port", "0"}, wantCode: 2, wantStderr: "--mcp-port must be between 1 and 65535"},
@@ -937,7 +937,6 @@ func TestRunCommandValidationAndAuthNoCallPaths(t *testing.T) {
 		{name: "connect rejects config local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--config", "swarm.yaml"}, wantCode: 2, wantStderr: "--config requires local foreground mode"},
 		{name: "connect rejects backend local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--backend", "claude_cli"}, wantCode: 2, wantStderr: "--backend requires local foreground mode"},
 		{name: "connect rejects contracts local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--contracts", "contracts"}, wantCode: 2, wantStderr: "--contracts requires local foreground mode"},
-		{name: "connect rejects data local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--data", "reference-data"}, wantCode: 2, wantStderr: "--data requires local foreground mode"},
 		{name: "platform spec retired on connect", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--platform-spec", "platform.yaml"}, wantCode: 2, wantStderr: "--platform-spec is retired"},
 		{name: "connect rejects api port local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--api-port", "8081"}, wantCode: 2, wantStderr: "--api-port requires local foreground mode"},
 		{name: "connect rejects mcp port local flag", token: "test-token", args: []string{"run", "start", "--connect", "http://127.0.0.1:1", "--event", "scan.requested", "--payload", payloadPath, "--mcp-port", "9000"}, wantCode: 2, wantStderr: "--mcp-port requires local foreground mode"},
@@ -1210,6 +1209,10 @@ func runCommandHealthResult() map[string]any {
 			"bundle_hash":      "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
 	}
+}
+
+func runStartCommandResult(runID, status string) map[string]any {
+	return map[string]any{"run_id": runID, "status": status, "data_binding": map[string]any{"state": "none"}}
 }
 
 func validRunCommandTraceRow(eventID string) map[string]any {

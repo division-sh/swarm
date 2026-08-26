@@ -17,6 +17,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/bundlecatalog"
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/packartifact"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 
@@ -27,7 +28,7 @@ import (
 const bundleRegisterIdempotencyTTL = 24 * time.Hour
 
 type BundleCatalogRegisterStore interface {
-	UpsertBundleCatalog(context.Context, bundlecatalog.Upsert) (bundlecatalog.UpsertResult, error)
+	UpsertBundleCatalogWithData(context.Context, bundlecatalog.Upsert, durabledata.Catalog) (bundlecatalog.UpsertResult, error)
 }
 
 type bundleRegisterResult struct {
@@ -100,13 +101,13 @@ func executeBundleRegister(ctx context.Context, req Request, opts BundleRegister
 		if err != nil {
 			return apiidempotency.Completion{}, err
 		}
-		upsert, err := writer.UpsertBundleCatalog(ctx, bundlecatalog.Upsert{
+		upsert, err := writer.UpsertBundleCatalogWithData(ctx, bundlecatalog.Upsert{
 			BundleHash:  projection.BundleHash,
 			ContentYAML: projection.ContentYAML,
 			ParsedJSON:  projection.ParsedJSON,
 			DataBlob:    projection.DataBlob,
 			Metadata:    projection.Metadata,
-		})
+		}, projection.DataCatalog)
 		if errors.Is(err, bundlecatalog.ErrConflict) {
 			return apiidempotency.Completion{}, NewApplicationError(BundleRegisterConflictCode, false, map[string]any{"bundle_hash": projection.BundleHash})
 		}

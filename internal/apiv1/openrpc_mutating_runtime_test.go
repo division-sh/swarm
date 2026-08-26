@@ -15,6 +15,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
 	"github.com/division-sh/swarm/internal/bundlecatalog"
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/mailbox"
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
 
@@ -561,7 +562,7 @@ func mutatingHTTPRuntimeErrorProbes(t testing.TB) []mutatingHTTPRuntimeErrorProb
 	sourceTurnID := "00000000-0000-0000-0000-000000000401"
 	forkID := "00000000-0000-0000-0000-000000000301"
 	standingServiceID := "00000000-0000-0000-0000-000000000701"
-	return []mutatingHTTPRuntimeErrorProbe{
+	probes := []mutatingHTTPRuntimeErrorProbe{
 		{Method: "standing.suspend", Params: map[string]any{"service_id": standingServiceID, "idempotency_key": "idem-error"}, Code: StandingServiceNotFoundCode, Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
 			s.standing.errs["suspend"] = runtimepipeline.ErrStandingServiceNotFound
 		}}},
@@ -756,13 +757,70 @@ func mutatingHTTPRuntimeErrorProbes(t testing.TB) []mutatingHTTPRuntimeErrorProb
 			s.runForkAvailability.rows[setupRunID] = runForkDataIntegrity(setupRunID, runStartTestBundleHash)
 		}}},
 	}
+	dataErrors := []durabledata.ErrorCode{
+		durabledata.CodeInvocationConflict,
+		durabledata.CodeContractNotFound,
+		durabledata.CodeDependencyMissing,
+		durabledata.CodePinConflict,
+		durabledata.CodeSchemaMismatch,
+		durabledata.CodeRunDataRejected,
+		durabledata.CodeRunHeadConflict,
+		durabledata.CodeIntegrity,
+	}
+	for _, method := range []string{"event.publish", "run.start"} {
+		for _, code := range dataErrors {
+			code := code
+			probes = append(probes, mutatingHTTPRuntimeErrorProbe{
+				Method: method,
+				Params: validEvent,
+				Code:   string(code),
+				Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+					s.events.runCreationErr = durabledata.NewDomainError(code, "simulated durable data failure")
+				}},
+			})
+		}
+	}
+	probes = append(probes, mutatingHTTPRuntimeErrorProbe{
+		Method: "event.publish",
+		Params: validEvent,
+		Code:   string(durabledata.CodeRunDataImmutable),
+		Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+			s.events.runCreationErr = durabledata.NewDomainError(durabledata.CodeRunDataImmutable, "simulated durable data failure")
+		}},
+	})
+	for _, code := range []durabledata.ErrorCode{
+		durabledata.CodeDependencyMissing,
+		durabledata.CodePinConflict,
+		durabledata.CodeSchemaMismatch,
+		durabledata.CodePayloadPruned,
+		durabledata.CodeVersionMissing,
+		durabledata.CodeIntegrity,
+	} {
+		code := code
+		probes = append(probes, mutatingHTTPRuntimeErrorProbe{
+			Method: "run.fork",
+			Params: map[string]any{
+				"source_run_id":         runForkTestSourceRunID,
+				"fork_event_id":         runForkTestEventID,
+				"confirm_source_freeze": true,
+			},
+			Code: string(code),
+			Modifiers: []func(*mutatingRuntimeProbeState){func(s *mutatingRuntimeProbeState) {
+				s.runFork.err = durabledata.NewDomainError(code, "simulated durable data fork failure")
+			}},
+		})
+	}
+	return probes
 }
 
 func assertMutatingRuntimeDeclaredErrorCoverage(t *testing.T, api *apispec.APISpecification, methods []string) {
 	t.Helper()
 	covered := map[string]map[string]struct{}{}
 	for _, methodName := range methods {
-		covered[methodName] = map[string]struct{}{IdempotencyConflictCode: {}}
+		covered[methodName] = map[string]struct{}{
+			IdempotencyConflictCode:   {},
+			"MESSAGE_BUDGET_EXCEEDED": {}, // Central transport admission proves this before method dispatch.
+		}
 	}
 	for _, probe := range mutatingHTTPRuntimeErrorProbes(t) {
 		if _, ok := covered[probe.Method]; !ok {
@@ -1237,7 +1295,7 @@ func (s *mutatingProbeBundleCatalog) ListBundleCatalogAgents(context.Context, st
 	return bundlecatalog.AgentsResult{Agents: []bundlecatalog.AgentDefinition{}}, nil
 }
 
-func (s *mutatingProbeBundleCatalog) UpsertBundleCatalog(_ context.Context, req bundlecatalog.Upsert) (bundlecatalog.UpsertResult, error) {
+func (s *mutatingProbeBundleCatalog) UpsertBundleCatalogWithData(_ context.Context, req bundlecatalog.Upsert, _ durabledata.Catalog) (bundlecatalog.UpsertResult, error) {
 	if s.conflict {
 		return bundlecatalog.UpsertResult{}, &bundlecatalog.ConflictError{BundleHash: req.BundleHash}
 	}
@@ -1267,6 +1325,7 @@ var _ BundleCatalogRegisterStore = (*mutatingProbeBundleCatalog)(nil)
 type mutatingProbeEventPublisher struct {
 	state                   *mutatingRuntimeProbeState
 	bundleSourceFact        runtimecorrelation.BundleSourceFact
+	runCreationErr          error
 	publishErr              error
 	directErr               error
 	checkErr                error
@@ -1304,6 +1363,23 @@ func (p *mutatingProbeEventPublisher) PublishAPIEventAcknowledged(
 		}
 		return completion, nil
 	})
+}
+
+func (p *mutatingProbeEventPublisher) PublishAPIEventWithRunCreationAcknowledged(
+	ctx context.Context,
+	evt events.Event,
+	endpoint *runtimebus.APIEventPublicationEndpoint,
+	request apiidempotency.Request,
+	completion apiidempotency.Completion,
+	command *durabledata.RunCreationCommand,
+) (apiidempotency.Completion, bool, error) {
+	if p.runCreationErr != nil {
+		if command == nil {
+			return apiidempotency.Completion{}, false, errors.New("run creation error probe requires a run creation command")
+		}
+		return apiidempotency.Completion{}, false, p.runCreationErr
+	}
+	return p.PublishAPIEventAcknowledged(ctx, evt, endpoint, request, completion)
 }
 
 func (p *mutatingProbeEventPublisher) CheckPublishRecipientPlan(context.Context, events.Event) (runtimebus.PublishRecipientPlan, error) {

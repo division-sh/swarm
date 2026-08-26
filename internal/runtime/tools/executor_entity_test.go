@@ -1349,6 +1349,7 @@ accounts:
 	at := time.Unix(1700000710, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
 	ctx := unmanagedToolTestContext()
+	storetest.RequireDurableDataCatalog(t, ctx, pg, authorActivityTestBundleHash)
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash, BundleSource: authorActivityTestBundleSource})
 	for _, fixture := range []struct {
 		id        string
@@ -1445,6 +1446,7 @@ accounts:
 	at := time.Unix(1700000720, 0).UTC()
 	forkAt := at.Add(30 * time.Second)
 	ctx := unmanagedToolTestContext()
+	storetest.RequireDurableDataCatalog(t, ctx, pg, authorActivityTestBundleHash)
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: sourceRunID, StartedAt: at.Add(-time.Minute), BundleHash: authorActivityTestBundleHash, BundleSource: authorActivityTestBundleSource})
 	for _, fixture := range []struct {
 		id        string

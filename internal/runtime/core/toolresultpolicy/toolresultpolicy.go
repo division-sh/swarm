@@ -9,6 +9,10 @@ import (
 )
 
 const (
+	// MaxInlineToolResultBytes is the complete serialized-result budget shared
+	// by tool producers and every transport projection that delivers inline.
+	MaxInlineToolResultBytes = 16 * 1024
+
 	// Keep this above the #571 40KB proof target while still bounding a single
 	// inline typed read result with enough room for the LLM tool-call envelope.
 	MaxCompleteTypedReadResultBytes = 56 * 1024

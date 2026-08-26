@@ -9,13 +9,14 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/cli/argcount"
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
 const (
 	runForkMethod       = "run.fork"
-	runForkCommandShape = "swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--confirm-source-freeze] [--idempotency-key <key>]"
+	runForkCommandShape = "swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--confirm-source-freeze] [--idempotency-key <key>]"
 )
 
 type forkCommandOptions struct {
@@ -26,6 +27,7 @@ type forkCommandOptions struct {
 	atEvent             string
 	confirmSourceFreeze bool
 	idempotencyKey      string
+	pins                []string
 
 	bundleHashSet     bool
 	atEventSet        bool
@@ -33,15 +35,16 @@ type forkCommandOptions struct {
 }
 
 type runForkResult struct {
-	Owner              string `json:"owner"`
-	SourceRunID        string `json:"source_run_id"`
-	SourceRunStatus    string `json:"source_run_status"`
-	SourceFrozen       *bool  `json:"source_frozen"`
-	ForkRunID          string `json:"fork_run_id"`
-	ForkEventID        string `json:"fork_event_id"`
-	ForkRunStatus      string `json:"fork_run_status"`
-	BundleHash         string `json:"bundle_hash"`
-	ExecutedEventCount int    `json:"executed_event_count"`
+	Owner              string            `json:"owner"`
+	SourceRunID        string            `json:"source_run_id"`
+	SourceRunStatus    string            `json:"source_run_status"`
+	SourceFrozen       *bool             `json:"source_frozen"`
+	ForkRunID          string            `json:"fork_run_id"`
+	ForkEventID        string            `json:"fork_event_id"`
+	ForkRunStatus      string            `json:"fork_run_status"`
+	BundleHash         string            `json:"bundle_hash"`
+	ExecutedEventCount int               `json:"executed_event_count"`
+	DataPins           []durabledata.Pin `json:"data_pins"`
 }
 
 func newForkCommand(opts rootCommandOptions) *cobra.Command {
@@ -65,6 +68,7 @@ func newForkCommand(opts rootCommandOptions) *cobra.Command {
 	argcount.SetDiscoveryHint(cmd, "List run ids with `swarm run list`.")
 	cmd.Flags().StringVar(&forkOpts.bundleHash, "bundle-hash", "", "Target bundle hash for run.fork selection")
 	cmd.Flags().StringVar(&forkOpts.atEvent, "at-event", "", "Fork at this source event id")
+	cmd.Flags().StringArrayVar(&forkOpts.pins, "pin", nil, "Exact data version override: name@vN or name@ResourceVersionID (repeatable)")
 	cmd.Flags().BoolVar(&forkOpts.confirmSourceFreeze, "confirm-source-freeze", false, "Authorize permanently freezing an active source unless source advancement preserves it")
 	cmd.Flags().StringVar(&forkOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for retry-safe fork creation")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
@@ -81,6 +85,39 @@ func runForkCommand(ctx context.Context, out, errOut io.Writer, opts forkCommand
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
 		return returnCLIAPIError(errOut, err, runForkAPIErrorClassifier())
+	}
+	if len(opts.pins) > 0 {
+		bundleHash, err := selectedDataBundleIdentity(ctx, client, opts.bundleHash)
+		if err != nil {
+			return returnCLIAPIError(errOut, err, dataAPIErrorClassifier())
+		}
+		declarations, err := listDataDeclarations(ctx, client, bundleHash)
+		if err != nil {
+			return returnCLIAPIError(errOut, err, dataAPIErrorClassifier())
+		}
+		overrides := make([]any, 0, len(opts.pins))
+		seen := make(map[string]struct{}, len(opts.pins))
+		for _, raw := range opts.pins {
+			name, versionSelector, err := splitDataVersionSelector(raw, false)
+			if err != nil {
+				return returnCLIValidationError(errOut, fmt.Errorf("--pin: %w", err))
+			}
+			declaration, err := resolveDataDeclarationFromList(bundleHash, name, declarations)
+			if err != nil {
+				return returnCLIValidationError(errOut, err)
+			}
+			if _, duplicate := seen[declaration.Declaration.Key()]; duplicate {
+				return returnCLIValidationError(errOut, fmt.Errorf("--pin repeats data declaration %s", dataDeclarationLabel(declaration)))
+			}
+			version, err := resolveDataVersion(ctx, client, declaration.Declaration, versionSelector, false)
+			if err != nil {
+				return returnCLIAPIError(errOut, err, dataAPIErrorClassifier())
+			}
+			seen[declaration.Declaration.Key()] = struct{}{}
+			overrides = append(overrides, map[string]any{"declaration": declaration.Declaration, "version_id": version.VersionID})
+		}
+		params["bundle_hash"] = bundleHash
+		params["data_pin_overrides"] = overrides
 	}
 	if !opts.confirmSourceFreeze {
 		sourceRunID, _ := params["source_run_id"].(string)
@@ -226,6 +263,14 @@ func validateRunForkResult(result runForkResult) error {
 	if result.ExecutedEventCount < 0 {
 		return fmt.Errorf("malformed run.fork result: executed_event_count must be non-negative")
 	}
+	if result.DataPins == nil {
+		return fmt.Errorf("malformed run.fork result: data_pins is required")
+	}
+	for index, pin := range result.DataPins {
+		if pin.RunID != result.ForkRunID || pin.Declaration.Validate() != nil || pin.SchemaDigest.Validate() != nil || pin.VersionID.Validate() != nil {
+			return fmt.Errorf("malformed run.fork result: data_pins[%d] is contradictory", index)
+		}
+	}
 	if result.SourceFrozen == nil {
 		return fmt.Errorf("malformed run.fork result: source_frozen is required")
 	}
@@ -261,5 +306,6 @@ func writeRunForkHuman(w io.Writer, result runForkResult) {
 	fmt.Fprintf(w, "source_run_id=%s fork_run_id=%s fork_event_id=%s\n", result.SourceRunID, result.ForkRunID, result.ForkEventID)
 	fmt.Fprintf(w, "source_status=%s source_frozen=%t\n", formatCLIHumanCode(cliHumanCodeRunStatus, result.SourceRunStatus), *result.SourceFrozen)
 	fmt.Fprintf(w, "status=%s bundle_hash=%s executed_event_count=%d\n", formatCLIHumanCode(cliHumanCodeRunStatus, result.ForkRunStatus), result.BundleHash, result.ExecutedEventCount)
+	fmt.Fprintf(w, "data_pins=%d\n", len(result.DataPins))
 	fmt.Fprintf(w, "owner=%s\n", result.Owner)
 }

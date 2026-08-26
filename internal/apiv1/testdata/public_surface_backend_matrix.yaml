@@ -43,11 +43,13 @@ mutating_api_parity_ledger:
     scenario: bundle_register_lifecycle
     proof_refs:
       - {kind: go_test, name: TestServedParityHarnessBundleRegisterLifecycle}
+      - {kind: go_test, name: TestRunServeRuntimeBundleRegisterSupportedOnBothSelectedStores}
     notes: >
       The real served harness proves canonical insertion, keyed and catalog
       replay, malformed rejection, exact conflict detection, transaction
-      rollback and retry, catalog-only behavior, and terminal bundle.get
-      readback through the selected SQLite and PostgreSQL owners.
+      rollback and retry, catalog-only behavior, atomic durable-data/static
+      declaration projection, and terminal bundle.get readback through the
+      selected SQLite and PostgreSQL owners.
   - method: event.publish
     classification: dual_backend_served_proof
     backends: [default_sqlite, explicit_postgres]
@@ -470,6 +472,33 @@ operator_read_api_parity_ledger:
     proof_refs:
       - {kind: go_test, name: TestSQLiteAgentConversationOwnerBacksSupportedAPISurface, backends: [default_sqlite]}
       - {kind: go_test, name: TestPostgresAgentConversationOwnerBacksSupportedAPISurface, backends: [explicit_postgres]}
+  - method: data.check
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestDurableDataHTTPPublicSurfaceAcrossSelectedStores, backends: [default_sqlite, explicit_postgres]}
+      - {kind: go_test, name: TestOpenRPCPermanentOperationHTTPRuntimeProbes}
+    notes: Permanent source-operation replay is domain-owned rather than generic TTL idempotency; both selected stores expose it through the same typed HTTP method.
+  - method: data.import
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestDurableDataHTTPPublicSurfaceAcrossSelectedStores, backends: [default_sqlite, explicit_postgres]}
+      - {kind: go_test, name: TestOpenRPCPermanentOperationHTTPRuntimeProbes}
+    notes: Permanent source-operation replay is domain-owned rather than generic TTL idempotency; both selected stores expose it through the same typed HTTP method.
+  - method: data.prune
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestDurableDataHTTPPublicSurfaceAcrossSelectedStores, backends: [default_sqlite, explicit_postgres]}
+      - {kind: go_test, name: TestOpenRPCPermanentOperationHTTPRuntimeProbes}
+    notes: Permanent prune replay is domain-owned rather than generic TTL idempotency; both selected stores expose it through the same typed HTTP method.
+  - method: data.show
+    classification: dual_backend_api_proof
+    backends: [default_sqlite, explicit_postgres]
+    proof_refs:
+      - {kind: go_test, name: TestDurableDataHTTPPublicSurfaceAcrossSelectedStores, backends: [default_sqlite, explicit_postgres]}
+      - {kind: go_test, name: TestOpenRPCPermanentOperationHTTPRuntimeProbes}
   - method: entity.aggregate
     classification: dual_backend_api_proof
     backends: [default_sqlite, explicit_postgres]

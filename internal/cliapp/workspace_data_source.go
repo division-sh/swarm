@@ -2,8 +2,6 @@ package cliapp
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/config"
@@ -36,29 +34,10 @@ type workspaceDataSourceInput struct {
 }
 
 func resolveWorkspaceMountSourcesFromInput(in workspaceDataSourceInput) (WorkspaceMountSources, error) {
-	switch {
-	case strings.TrimSpace(in.FlagDataSource) != "":
-		path, err := normalizeWorkspaceDataSourcePath(in.RepoRoot, in.FlagDataSource, "--data")
-		return WorkspaceMountSources{DataSource: path, DataSourceSource: "--data"}, err
-	case in.ConfigDataSourceSet:
-		path, err := normalizeWorkspaceDataSourcePath(in.RepoRoot, in.ConfigDataSource, "workspace.data_source")
-		return WorkspaceMountSources{DataSource: path, DataSourceSource: "workspace.data_source"}, err
-	case in.VolumesFromSet && strings.TrimSpace(in.VolumesFrom) != "":
-		return WorkspaceMountSources{}, nil
-	case strings.TrimSpace(in.DefaultDataSource) != "":
-		path, err := normalizeWorkspaceDataSourcePath(in.RepoRoot, in.DefaultDataSource, defaultWorkspaceDataSourceSourceLabel(in.DefaultDataSourceSource))
-		if err != nil {
-			return WorkspaceMountSources{DataSource: path, DataSourceSource: defaultWorkspaceDataSourceSourceLabel(in.DefaultDataSourceSource)}, err
-		}
-		if in.CreateDefaultDataSource {
-			if err := os.MkdirAll(path, 0o755); err != nil {
-				return WorkspaceMountSources{DataSource: path, DataSourceSource: defaultWorkspaceDataSourceSourceLabel(in.DefaultDataSourceSource)}, fmt.Errorf("create default workspace data source %s: %w", path, err)
-			}
-		}
-		return WorkspaceMountSources{DataSource: path, DataSourceSource: defaultWorkspaceDataSourceSourceLabel(in.DefaultDataSourceSource)}, nil
-	default:
-		return WorkspaceMountSources{}, fmt.Errorf("workspace data source is required: pass --data, set workspace.data_source, or run from a project with a managed %s default", defaultWorkspaceDataSourceRelativePath)
+	if strings.TrimSpace(in.FlagDataSource) != "" || in.ConfigDataSourceSet || in.VolumesFromSet {
+		return WorkspaceMountSources{}, fmt.Errorf("ambient workspace data sources are retired; use flow_data_access, data_access, or swarm run start --data name=file.jsonl")
 	}
+	return WorkspaceMountSources{}, nil
 }
 
 func defaultWorkspaceDataSourceSourceLabel(source string) string {
@@ -74,12 +53,4 @@ func runtimeConfigWorkspaceDataSource(cfg *config.Config) (string, bool) {
 		return "", false
 	}
 	return cfg.Workspace.DataSource, cfg.Workspace.DataSourceConfigured()
-}
-
-func normalizeWorkspaceDataSourcePath(RepoRoot string, raw string, source string) (string, error) {
-	path := strings.TrimSpace(raw)
-	if path == "" {
-		return "", fmt.Errorf("workspace data source from %s must be non-empty", source)
-	}
-	return filepath.Clean(ResolvePath(RepoRoot, path)), nil
 }

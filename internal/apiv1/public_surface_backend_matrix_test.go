@@ -1128,6 +1128,10 @@ func publicSurfaceSelectedOperatorReadAPIProofs() map[string]publicSurfaceSelect
 			Backends: []string{"default_sqlite", "explicit_postgres"},
 			Methods:  []string{"channel.list"},
 		},
+		"TestDurableDataHTTPPublicSurfaceAcrossSelectedStores": {
+			Backends: []string{"default_sqlite", "explicit_postgres"},
+			Methods:  []string{"data.check", "data.import", "data.prune", "data.show"},
+		},
 		"TestServedParityHarnessConversationForkLifecycle": {
 			Backends: []string{"default_sqlite", "explicit_postgres"},
 			Methods:  []string{"conversation.fork_list", "conversation.fork_view"},

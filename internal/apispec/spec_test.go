@@ -18,14 +18,14 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
-	if report.MethodCount != 71 {
-		t.Fatalf("method count = %d, want 71", report.MethodCount)
+	if report.MethodCount != 75 {
+		t.Fatalf("method count = %d, want 75", report.MethodCount)
 	}
-	if report.SchemaCount != 175 {
-		t.Fatalf("schema count = %d, want 175", report.SchemaCount)
+	if report.SchemaCount != 233 {
+		t.Fatalf("schema count = %d, want 233", report.SchemaCount)
 	}
-	if report.ErrorCodeCount != 55 {
-		t.Fatalf("error code count = %d, want 55", report.ErrorCodeCount)
+	if report.ErrorCodeCount != 71 {
+		t.Fatalf("error code count = %d, want 71", report.ErrorCodeCount)
 	}
 	if report.MutatingMethodCount != 33 {
 		t.Fatalf("mutating method count = %d, want 33", report.MutatingMethodCount)
@@ -97,14 +97,14 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if err := json.Unmarshal(artifact, &doc); err != nil {
 		t.Fatalf("unmarshal openrpc artifact: %v", err)
 	}
-	if len(doc.Methods) != 71 {
-		t.Fatalf("generated OpenRPC methods = %d, want 71", len(doc.Methods))
+	if len(doc.Methods) != 75 {
+		t.Fatalf("generated OpenRPC methods = %d, want 75", len(doc.Methods))
 	}
-	if len(doc.Components.Schemas) != 175 {
-		t.Fatalf("generated OpenRPC schemas = %d, want 175", len(doc.Components.Schemas))
+	if len(doc.Components.Schemas) != 233 {
+		t.Fatalf("generated OpenRPC schemas = %d, want 233", len(doc.Components.Schemas))
 	}
-	if len(doc.Components.Errors) != 55 {
-		t.Fatalf("generated OpenRPC errors = %d, want 55", len(doc.Components.Errors))
+	if len(doc.Components.Errors) != 71 {
+		t.Fatalf("generated OpenRPC errors = %d, want 71", len(doc.Components.Errors))
 	}
 	assertGeneratedMethodsOmitExamplesUnderPolicy(t, api, artifact)
 	assertGeneratedMethodsOmitRPCDiscoverUnderPolicy(t, api, doc)
@@ -387,7 +387,7 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 
 	cliSurface := mustMappingValue(t, multi, "cli_surface")
 	runFork := mustMappingValue(t, cliSurface, "run_fork")
-	const runForkCommand = "swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--confirm-source-freeze] [--idempotency-key <key>]"
+	const runForkCommand = "swarm run fork <source-run-id> [--bundle-hash <bundle_hash>] [--at-event <event-id>] [--pin <name@vN|ResourceVersionID>] [--confirm-source-freeze] [--idempotency-key <key>]"
 	assertScalarValue(t, mustMappingValue(t, runFork, "command"), runForkCommand)
 	if strings.Contains(runForkCommand, "--bundle ") {
 		t.Fatal("run fork command promoted legacy --bundle spelling")

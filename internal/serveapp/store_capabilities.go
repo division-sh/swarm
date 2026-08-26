@@ -31,6 +31,7 @@ type selectedAPICapabilities struct {
 	RunBundleContext          apiv1.RunBundleContextStore
 	TestSetup                 apiv1.TestSetupStore
 	BundleCatalog             apiv1.BundleCatalogReadStore
+	Data                      apiv1.DurableDataStore
 	BundleRegister            apiv1.BundleCatalogRegisterStore
 	BundleDelete              apiv1.BundleDeleteExecutor
 	ConversationForks         apiv1.ConversationForkReadStore
@@ -66,7 +67,7 @@ func buildSelectedAPICapabilities(owner *storeselected.Owner, req selectedAPICap
 	caps := selectedAPICapabilities{
 		Database: owner.Pinger(), Runs: owner.Runs(), Entities: owner.Entities(), Agents: owner.Agents(),
 		Conversations: owner.Conversations(), Observability: owner.Observability(),
-		RunBundleContext: owner.RunBundleContext(), TestSetup: owner.TestSetup(),
+		RunBundleContext: owner.RunBundleContext(), TestSetup: owner.TestSetup(), Data: owner.Data(),
 		RuntimeContexts: req.RuntimeContextManager,
 	}
 	if catalog, available := owner.BundleCatalog(); available {

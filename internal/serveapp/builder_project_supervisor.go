@@ -562,6 +562,9 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 			return builderpkg.ProjectStatus{}, fmt.Errorf("workspace lifecycle is not configured for backend %q; no lifecycle is only valid for canonical no-workspace decision", strings.TrimSpace(workspaceBackend.Backend))
 		}
 	} else {
+		if err := configureWorkspaceDataProjection(workspaces, source, s.stores); err != nil {
+			return builderpkg.ProjectStatus{}, err
+		}
 		if err := workspaces.ValidateSource(ctx, source); err != nil {
 			return builderpkg.ProjectStatus{}, err
 		}

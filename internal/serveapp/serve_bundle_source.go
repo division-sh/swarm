@@ -53,9 +53,6 @@ func persistServeBundleSourcePlan(ctx context.Context, writer bundlecatalog.Serv
 		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("planned bundle source fact: %w", err)
 	}
 	if plan.fact.IsEphemeral() {
-		if plan.projection != nil {
-			return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("ephemeral bundle source plan must not carry a catalog projection")
-		}
 		return plan.fact, nil
 	}
 	if plan.projection == nil {
@@ -67,13 +64,13 @@ func persistServeBundleSourcePlan(ctx context.Context, writer bundlecatalog.Serv
 	if writer == nil {
 		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("persisted bundle source plan requires a bundle catalog store")
 	}
-	if _, err := writer.UpsertBundleCatalog(ctx, bundlecatalog.Upsert{
+	if _, err := writer.UpsertBundleCatalogWithData(ctx, bundlecatalog.Upsert{
 		BundleHash:  plan.projection.BundleHash,
 		ContentYAML: plan.projection.ContentYAML,
 		ParsedJSON:  plan.projection.ParsedJSON,
 		DataBlob:    plan.projection.DataBlob,
 		Metadata:    plan.projection.Metadata,
-	}); err != nil {
+	}, plan.projection.DataCatalog); err != nil {
 		return runtimecorrelation.BundleSourceFact{}, err
 	}
 	return plan.fact, nil
