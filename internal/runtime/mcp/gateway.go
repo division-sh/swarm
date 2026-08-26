@@ -56,6 +56,10 @@ type runtimeGatewayContextAwareExecutor interface {
 	ToolCapabilitiesForActorInContext(context.Context, models.AgentConfig, []string, map[string]struct{}) toolcapabilities.Set
 }
 
+type runtimeGatewayLeasedContextAwareExecutor interface {
+	AcquireToolDefinitionsForActorInContext(context.Context, models.AgentConfig) (context.Context, []llm.ToolDefinition, func(), error)
+}
+
 func NewGateway(executor runtimeGatewayExecutor, authToken string, hooks GatewayHooks) *Gateway {
 	return &Gateway{
 		executor:  executor,
@@ -640,10 +644,11 @@ func (g *Gateway) mcpToolsForCapabilitySurface(ctx context.Context, turn TurnCon
 	if err := turn.CapabilitySurface.Validate(); err != nil || identityErr != nil || !turn.CapabilitySurface.MatchesActor(actorIdentity) {
 		return nil, nil, nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.capability_surface", err, map[string]any{"reason": "surface_invalid_or_mismatched"})
 	}
-	definitions, err := g.toolDefinitionsInContext(ctx, turn.Actor, true)
+	_, definitions, release, err := g.acquireToolDefinitionsInContext(ctx, turn.Actor, true)
 	if err != nil {
 		return nil, nil, nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.catalog", err, map[string]any{"reason": "executor_catalog_invalid"})
 	}
+	defer release()
 	type plannedMCPTool struct {
 		tool    managedcapabilities.Tool
 		binding managedcapabilities.DeliveryBinding
@@ -721,11 +726,12 @@ func (g *Gateway) MCPToolsForActor(actor models.AgentConfig) []ToolDef {
 }
 
 func (g *Gateway) mcpToolsForActorInContext(ctx context.Context, actor models.AgentConfig, allowed map[string]struct{}, actorOK bool) ([]ToolDef, error) {
-	definitions, err := g.toolDefinitionsInContext(ctx, actor, actorOK)
+	pinnedCtx, definitions, release, err := g.acquireToolDefinitionsInContext(ctx, actor, actorOK)
 	if err != nil {
 		return nil, g.newGatewayError(ErrCodeContextNotFound, "mcp.tools.list.catalog", err, map[string]any{"reason": "executor_catalog_invalid"})
 	}
-	set, hasSet := g.requestToolCapabilitiesInContext(ctx, actor, actorOK, definitions, allowed)
+	defer release()
+	set, hasSet := g.requestToolCapabilitiesInContext(pinnedCtx, actor, actorOK, definitions, allowed)
 
 	out := make([]ToolDef, 0, len(definitions))
 	for _, def := range definitions {
@@ -757,12 +763,24 @@ func (g *Gateway) mcpToolsForActorInContext(ctx context.Context, actor models.Ag
 	return out, nil
 }
 
-func (g *Gateway) toolDefinitionsInContext(ctx context.Context, actor models.AgentConfig, actorOK bool) ([]llm.ToolDefinition, error) {
+func (g *Gateway) acquireToolDefinitionsInContext(ctx context.Context, actor models.AgentConfig, actorOK bool) (context.Context, []llm.ToolDefinition, func(), error) {
+	noopRelease := func() {}
 	if !actorOK || g.executor == nil {
-		return nil, nil
+		return ctx, nil, noopRelease, nil
 	}
+	pinnedCtx := ctx
+	release := noopRelease
 	definitions := g.executor.ToolDefinitionsForActor(actor)
-	if contextAware, ok := g.executor.(runtimeGatewayContextAwareExecutor); ok {
+	if leased, ok := g.executor.(runtimeGatewayLeasedContextAwareExecutor); ok {
+		var err error
+		pinnedCtx, definitions, release, err = leased.AcquireToolDefinitionsForActorInContext(ctx, actor)
+		if err != nil {
+			return ctx, nil, noopRelease, err
+		}
+		if release == nil {
+			release = noopRelease
+		}
+	} else if contextAware, ok := g.executor.(runtimeGatewayContextAwareExecutor); ok {
 		definitions = contextAware.ToolDefinitionsForActorInContext(ctx, actor)
 	}
 	seen := make(map[string]struct{}, len(definitions))
@@ -770,17 +788,20 @@ func (g *Gateway) toolDefinitionsInContext(ctx context.Context, actor models.Age
 		name := strings.TrimSpace(definition.Name)
 		canonical := normalizeGatewayToolName(name)
 		if canonical == "" {
-			return nil, fmt.Errorf("executor catalog contains an empty tool name")
+			release()
+			return ctx, nil, noopRelease, fmt.Errorf("executor catalog contains an empty tool name")
 		}
 		if _, duplicate := seen[canonical]; duplicate {
-			return nil, fmt.Errorf("executor catalog contains duplicate canonical tool name %q", canonical)
+			release()
+			return ctx, nil, noopRelease, fmt.Errorf("executor catalog contains duplicate canonical tool name %q", canonical)
 		}
 		if canonical != name {
-			return nil, fmt.Errorf("executor catalog contains non-canonical tool name %q", definition.Name)
+			release()
+			return ctx, nil, noopRelease, fmt.Errorf("executor catalog contains non-canonical tool name %q", definition.Name)
 		}
 		seen[canonical] = struct{}{}
 	}
-	return definitions, nil
+	return pinnedCtx, definitions, release, nil
 }
 
 func (g *Gateway) requestToolCapabilitiesInContext(ctx context.Context, actor models.AgentConfig, actorOK bool, definitions []llm.ToolDefinition, requestAllowed map[string]struct{}) (toolcapabilities.Set, bool) {

@@ -103,6 +103,7 @@ func TestEffectiveSourceHasNoChannelDeploymentInterpreter(t *testing.T) {
 func TestChannelActivationExecutionConsumersUseCanonicalOwner(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", ".."))
 	checks := map[string][]string{
+		"internal/runtime/mcp/gateway.go":              {"AcquireToolDefinitionsForActorInContext"},
 		"internal/runtime/tools/channel_runtime.go":    {"channelActivationPresentationFromContext", "RuntimeOperation"},
 		"internal/runtime/pipeline/coordinator.go":     {"AcquireActivityOperation"},
 		"internal/runtime/pipeline/activity_engine.go": {"ChannelActivationGeneration"},

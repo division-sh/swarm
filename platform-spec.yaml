@@ -10017,7 +10017,9 @@ tool_model:
         publications cannot grant execution and cannot synthesize learned state; executable owners reject them. Replacement
         fences new leases, waits for predecessor model-presentation, validation, execution,
         private-activity, registration, and readback leases, and removes every predecessor tool and route before admitting
-        the successor. A model turn pins the publication that supplied its tools. Durable private activities persist both
+        the successor. A model turn pins the publication that supplied its tools. Managed MCP tools/list acquires that same
+        exact activation-publication lease for catalog projection and capability filtering; an unleased actor catalog cannot
+        publish activation tools, and replacement cannot substitute a successor while the request holds the lease. Durable private activities persist both
         activation-publication and plan generation and never substitute a same-name current target. Tool discovery,
         validation, authorization, agent-origin dispatch, private activity dispatch/recovery, registration selection,
         readiness, and runtime-context readback consume that owner; no config-only map or independent current-state copy
@@ -10074,7 +10076,10 @@ tool_model:
         infer target, credential, registration, executable activation, confirmation, or READY. Readback must teach exactly
         that activation was lost and require swarm channel reconnect <provider>. Readback preserves independently retained
         active proof identity after unbind so the public proof-revocation route remains reachable, and every operation,
-        transition, and boot presentation uses the same masked claimant fallback as canonical channel readback.
+        transition, and boot presentation uses the same masked claimant fallback as canonical channel readback. When startup
+        finds a nonterminal onboarding operation whose exact runtime-context coordinate is no longer present, it records a
+        runtime_context_retired terminal failure, compare-deletes only that operation's receipt/epoch-owned credentials,
+        refreshes activation authority, and continues; catalog construction or contradiction errors still fail startup closed.
       no_legacy_rule: >
         No config writer, migration, adoption, export, purge, selected-store fallback, provider-specific generic-runtime
         branch, placeholder destination, manual callback/conversation/signing value, compatibility flag, dual executable
