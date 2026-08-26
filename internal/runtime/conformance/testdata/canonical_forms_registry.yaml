@@ -72,7 +72,7 @@ corpus:
 rows:
   - id: workflow.optional_declaration_file_liveness
     ruled: issue-2318
-    paths: "agents.yaml, entities.yaml, events.yaml, nodes.yaml, policy.yaml, tools.yaml, types.yaml at every project, imported-package, and flow scope"
+    paths: "root package and declared flow: agents.yaml, entities.yaml, events.yaml, nodes.yaml, policy.yaml, tools.yaml, types.yaml; non-root project package: agents.yaml, events.yaml, nodes.yaml, policy.yaml, tools.yaml; non-root package-scoped entities.yaml and types.yaml outside a declared flow are retired"
     owners: [admitOptionalDeclarationFile, optionalDeclarationAdmission.RequireLive, admitEventCatalogDocument]
     information:
       fact: [file presence and admitted typed declarations]
