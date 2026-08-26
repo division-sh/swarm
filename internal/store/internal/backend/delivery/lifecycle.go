@@ -261,20 +261,20 @@ func (s *DeliverySQLiteOwner) ObserveDeliveryContinuation(
 }
 
 func (s *DeliveryPostgresOwner) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.Snapshot, error) {
-	return postgresDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation, _ *privaterunforkrevision.Effects) (runtimedelivery.Snapshot, error) {
+	return postgresDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation, effects *privaterunforkrevision.Effects) (runtimedelivery.Snapshot, error) {
 		if err := runstate.RequirePostgresActiveTx(txctx, tx, claim.RunID()); err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
-		return postgresDeliveryAdapter.RenewClaim(txctx, tx, claim, runtimedelivery.DefaultLeaseTTL)
+		return s.renewClaimTx(txctx, tx, effects, claim, runtimedelivery.DefaultLeaseTTL)
 	})
 }
 
 func (s *DeliverySQLiteOwner) RenewClaim(ctx context.Context, claim runtimedelivery.Claim) (runtimedelivery.Snapshot, error) {
-	return sqliteDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation, _ *privaterunforkrevision.Effects) (runtimedelivery.Snapshot, error) {
+	return sqliteDeliveryMutation(s, ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation, effects *privaterunforkrevision.Effects) (runtimedelivery.Snapshot, error) {
 		if err := runstate.RequireSQLiteActiveTx(txctx, tx, claim.RunID()); err != nil {
 			return runtimedelivery.Snapshot{}, err
 		}
-		return sqliteDeliveryAdapter.RenewClaim(txctx, tx, claim, runtimedelivery.DefaultLeaseTTL)
+		return s.renewClaimTx(txctx, tx, effects, claim, runtimedelivery.DefaultLeaseTTL)
 	})
 }
 
@@ -295,14 +295,36 @@ func (s *DeliverySQLiteOwner) ValidateProviderOriginTx(ctx context.Context, tx *
 	return sqliteDeliveryAdapter.ValidateCurrentClaim(ctx, tx, claim)
 }
 
-func (s *DeliveryPostgresOwner) RenewProviderOriginTx(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim, lease time.Duration) error {
-	_, err := postgresDeliveryAdapter.RenewClaim(ctx, tx, claim, lease)
+func (s *DeliveryPostgresOwner) RenewProviderOriginTx(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, claim runtimedelivery.Claim, lease time.Duration) error {
+	_, err := s.renewClaimTx(ctx, tx, effects, claim, lease)
 	return err
 }
 
-func (s *DeliverySQLiteOwner) RenewProviderOriginTx(ctx context.Context, tx *sql.Tx, claim runtimedelivery.Claim, lease time.Duration) error {
-	_, err := sqliteDeliveryAdapter.RenewClaim(ctx, tx, claim, lease)
+func (s *DeliverySQLiteOwner) RenewProviderOriginTx(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, claim runtimedelivery.Claim, lease time.Duration) error {
+	_, err := s.renewClaimTx(ctx, tx, effects, claim, lease)
 	return err
+}
+
+func (s *DeliveryPostgresOwner) renewClaimTx(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, claim runtimedelivery.Claim, lease time.Duration) (runtimedelivery.Snapshot, error) {
+	snapshot, err := postgresDeliveryAdapter.RenewClaim(ctx, tx, claim, lease)
+	if err != nil {
+		return runtimedelivery.Snapshot{}, err
+	}
+	if err := effects.Add(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries); err != nil {
+		return runtimedelivery.Snapshot{}, err
+	}
+	return snapshot, nil
+}
+
+func (s *DeliverySQLiteOwner) renewClaimTx(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, claim runtimedelivery.Claim, lease time.Duration) (runtimedelivery.Snapshot, error) {
+	snapshot, err := sqliteDeliveryAdapter.RenewClaim(ctx, tx, claim, lease)
+	if err != nil {
+		return runtimedelivery.Snapshot{}, err
+	}
+	if err := effects.Add(claim.RunID(), privaterunforkrevision.FamilyEventDeliveries); err != nil {
+		return runtimedelivery.Snapshot{}, err
+	}
+	return snapshot, nil
 }
 
 func (s *DeliveryPostgresOwner) SettleProviderOriginSuccessTx(
