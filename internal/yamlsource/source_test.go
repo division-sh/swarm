@@ -511,3 +511,23 @@ func TestDocumentProjectReturnsCallerOwnedTypedValue(t *testing.T) {
 		t.Fatalf("second projection = %v", second.Values)
 	}
 }
+
+func TestDocumentProjectRetainsAliasTargetsOutsideProjectedSubtree(t *testing.T) {
+	snapshot, err := Load([]byte("base: &base {value: 7}\nentry: {<<: *base}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, err := snapshot.Document("contract.yaml").Root().Lookup("entry")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var projected struct {
+		Value int `yaml:"value"`
+	}
+	if err := entry.Value.Project(&projected); err != nil {
+		t.Fatal(err)
+	}
+	if projected.Value != 7 {
+		t.Fatalf("projected value = %d, want 7", projected.Value)
+	}
+}

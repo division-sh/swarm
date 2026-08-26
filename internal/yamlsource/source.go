@@ -268,18 +268,21 @@ func cloneNode(source *yaml.Node) *yaml.Node {
 }
 
 func nodeTreeSize(source *yaml.Node) (nodes, edges int) {
-	if source == nil {
-		return 0, 0
+	seen := make(map[*yaml.Node]bool)
+	var visit func(*yaml.Node)
+	visit = func(node *yaml.Node) {
+		if node == nil || seen[node] {
+			return
+		}
+		seen[node] = true
+		nodes++
+		edges += len(node.Content)
+		for _, child := range node.Content {
+			visit(child)
+		}
+		visit(node.Alias)
 	}
-	nodes = 1
-	edges = len(source.Content)
-	for _, child := range source.Content {
-		childNodes, childEdges := nodeTreeSize(child)
-		nodes += childNodes
-		edges += childEdges
-	}
-	// yaml.v3 parser aliases point at anchored nodes already present in the
-	// document Content tree, so they do not require additional arena slots.
+	visit(source)
 	return nodes, edges
 }
 
