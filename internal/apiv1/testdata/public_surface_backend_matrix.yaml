@@ -43,13 +43,12 @@ mutating_api_parity_ledger:
     scenario: bundle_register_lifecycle
     proof_refs:
       - {kind: go_test, name: TestServedParityHarnessBundleRegisterLifecycle}
-      - {kind: go_test, name: TestRunServeRuntimeBundleRegisterSupportedOnBothSelectedStores}
     notes: >
       The real served harness proves canonical insertion, keyed and catalog
       replay, malformed rejection, exact conflict detection, transaction
-      rollback and retry, catalog-only behavior, atomic durable-data/static
-      declaration projection, and terminal bundle.get readback through the
-      selected SQLite and PostgreSQL owners.
+      rollback and retry, catalog-only behavior, and bounded bundle.list
+      readback through the selected SQLite and PostgreSQL owners. Full
+      bundle.get read cardinality remains tracked by #2334.
   - method: event.publish
     classification: dual_backend_served_proof
     backends: [default_sqlite, explicit_postgres]
