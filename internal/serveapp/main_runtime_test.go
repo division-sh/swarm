@@ -1513,9 +1513,10 @@ func TestRunForkEndToEndPostgresCapturesCompleteRevisionHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen PostgreSQL runtime store: %v", err)
 	}
-	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (storeBundle, error) {
+	t.Cleanup(func() { _ = storetest.DatabaseForTest(reopened).Close() })
+	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
 		storetest.BootstrapPostgresRuntimeStore(t, reopened)
-		return selectedPostgresStoreBundle(reopened, storetest.DatabaseForTest(reopened), cfg), nil
+		return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(reopened), cfg), nil
 	}
 
 	restarted := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
