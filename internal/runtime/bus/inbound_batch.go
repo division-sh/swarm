@@ -7,7 +7,9 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 )
@@ -24,6 +26,32 @@ type InboundDeliveryEvent struct {
 	Event         events.Event
 	Kind          runtimeprovideroutput.Kind
 	Authorization runtimeprovideroutput.Authorization
+}
+
+// providerRawSettlementAdmission is minted only by the typed inbound batch
+// owner. Generic publication paths cannot construct deliberate raw emptiness.
+type providerRawSettlementAdmission struct {
+	eventID string
+	source  events.RouteIdentity
+	target  events.RouteIdentity
+}
+
+func (a providerRawSettlementAdmission) authorizes(projected, inbound events.Event, plan RoutePlan) bool {
+	if strings.TrimSpace(a.eventID) == "" || a.eventID != projected.ID() || a.eventID != inbound.ID() ||
+		!events.SameRouteIdentity(a.source, projected.RoutingSource().Route()) ||
+		!events.SameRouteIdentity(a.source, inbound.RoutingSource().Route()) ||
+		!events.SameRouteIdentity(a.target, inbound.TargetRoute()) || len(inbound.TargetRoutes()) != 0 {
+		return false
+	}
+	// A route-less plan canonically clears journal target facts. Any different
+	// projected target remains a contradiction rather than settlement authority.
+	if target := projected.TargetRoute(); !target.Empty() && !events.SameRouteIdentity(a.target, target) {
+		return false
+	}
+	if len(projected.TargetRoutes()) != 0 {
+		return false
+	}
+	return len(plan.DeliveryRoutes()) == 0 && plan.TargetFailure == runtimepinrouting.FailureTargetNotSubscribed
 }
 
 // InboundDeliveryPlan is the immutable runtime half of a closed inbound
@@ -87,8 +115,9 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 		if err := eb.requireExistingRunActive(preparedCtx, admitted.Event()); err != nil {
 			return release(err)
 		}
+		rawSettlement := eb.admitProviderRawSettlement(item.Kind, admitted.Event())
 		prepared, command, err := eb.prepareClosedPublication(preparedCtx, eventBusCommitPublishPlan{
-			bus: eb, event: admitted.Event(), admitted: admitted,
+			bus: eb, event: admitted.Event(), admitted: admitted, providerRawSettlement: rawSettlement,
 		})
 		if err != nil {
 			return release(err)
@@ -113,6 +142,31 @@ func (eb *EventBus) PrepareInboundDeliveryBatch(ctx context.Context, batch Inbou
 		plan.commands = append(plan.commands, command)
 	}
 	return plan, nil
+}
+
+func (eb *EventBus) admitProviderRawSettlement(kind runtimeprovideroutput.Kind, evt events.Event) providerRawSettlementAdmission {
+	if eb == nil || eb.semanticSource == nil || kind != runtimeprovideroutput.KindRaw {
+		return providerRawSettlementAdmission{}
+	}
+	source := evt.RoutingSource()
+	if source.Kind() != events.RoutingSourceExternalIngress || source.Authority() != events.RoutingSourceAuthorityProviderAdmissionPlan {
+		return providerRawSettlementAdmission{}
+	}
+	sourceRoute := source.Route().Normalized()
+	target := evt.TargetRoute().Normalized()
+	if sourceRoute.FlowID == "" || sourceRoute.EntityID == "" || target.FlowInstance == "" || target.EntityID == "" ||
+		len(evt.TargetRoutes()) != 0 || target.EntityID != sourceRoute.EntityID ||
+		(target.FlowID != "" && target.FlowID != sourceRoute.FlowID) {
+		return providerRawSettlementAdmission{}
+	}
+	if runtimeflowidentity.SemanticScope(target.FlowInstance) != runtimeflowidentity.ScopeKey(eb.semanticSource, sourceRoute.FlowID) {
+		return providerRawSettlementAdmission{}
+	}
+	producer := runtimepinrouting.ResolveFlowInputProducer(eb.semanticSource, sourceRoute.FlowID, string(evt.Type()))
+	if !producer.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress) {
+		return providerRawSettlementAdmission{}
+	}
+	return providerRawSettlementAdmission{eventID: evt.ID(), source: sourceRoute, target: target}
 }
 
 func (eb *EventBus) AbandonInboundDeliveryPlan(ctx context.Context, plan InboundDeliveryPlan) error {

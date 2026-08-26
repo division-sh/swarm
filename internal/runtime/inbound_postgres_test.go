@@ -1128,26 +1128,28 @@ func seedPostgresInboundGatewayRuntime(
 	`, runID, entityID, flowInstance, entitySlug); err != nil {
 		t.Fatalf("seed entity state: %v", err)
 	}
-	if err := storetest.UpsertAgentFixture(t, ctx, pg, runtimemanager.PersistedAgent{
-		Config: runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
-			ExecutionMode:      "live",
-			ResolvedLLMBackend: "anthropic",
-			ID:                 agentID,
-			Identity:           inboundGatewayAgentIdentity(t, agentID, flowInstance),
-			Role:               "observer",
-			FlowID:             boundedProviderFlowID,
-			Type:               "stub",
-			Model:              "regular",
-			FlowPath:           flowInstance,
-			EntityID:           entityID,
-			Subscriptions:      []string{"inbound." + provider},
-			Config:             []byte(`{}`),
-		}),
-		Status:    "active",
-		HiredBy:   "test",
-		StartedAt: time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("UpsertAgent(%s): %v", agentID, err)
+	if strings.TrimSpace(agentID) != "" {
+		if err := storetest.UpsertAgentFixture(t, ctx, pg, runtimemanager.PersistedAgent{
+			Config: runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
+				ExecutionMode:      "live",
+				ResolvedLLMBackend: "anthropic",
+				ID:                 agentID,
+				Identity:           inboundGatewayAgentIdentity(t, agentID, flowInstance),
+				Role:               "observer",
+				FlowID:             boundedProviderFlowID,
+				Type:               "stub",
+				Model:              "regular",
+				FlowPath:           flowInstance,
+				EntityID:           entityID,
+				Subscriptions:      []string{"inbound." + provider},
+				Config:             []byte(`{}`),
+			}),
+			Status:    "active",
+			HiredBy:   "test",
+			StartedAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("UpsertAgent(%s): %v", agentID, err)
+		}
 	}
 	return seedBoundedStandingTarget(t, ctx, pg, runID, entityID, flowInstance, provider)
 }
@@ -1235,26 +1237,28 @@ func seedSQLiteInboundGatewayRuntime(
 	`, runID, entityID, flowInstance, entitySlug, now, now, now); err != nil {
 		t.Fatalf("seed sqlite entity state: %v", err)
 	}
-	if err := storetest.UpsertAgentFixture(t, ctx, sqliteStore, runtimemanager.PersistedAgent{
-		Config: runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
-			ExecutionMode:      "live",
-			ResolvedLLMBackend: "anthropic",
-			ID:                 agentID,
-			Identity:           inboundGatewayAgentIdentity(t, agentID, flowInstance),
-			Role:               "observer",
-			FlowID:             boundedProviderFlowID,
-			Type:               "stub",
-			Model:              "regular",
-			FlowPath:           flowInstance,
-			EntityID:           entityID,
-			Config:             []byte(`{}`),
-			Subscriptions:      []string{"inbound." + provider},
-		}),
-		Status:    "active",
-		HiredBy:   "test",
-		StartedAt: now,
-	}); err != nil {
-		t.Fatalf("UpsertAgent(%s): %v", agentID, err)
+	if strings.TrimSpace(agentID) != "" {
+		if err := storetest.UpsertAgentFixture(t, ctx, sqliteStore, runtimemanager.PersistedAgent{
+			Config: runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
+				ExecutionMode:      "live",
+				ResolvedLLMBackend: "anthropic",
+				ID:                 agentID,
+				Identity:           inboundGatewayAgentIdentity(t, agentID, flowInstance),
+				Role:               "observer",
+				FlowID:             boundedProviderFlowID,
+				Type:               "stub",
+				Model:              "regular",
+				FlowPath:           flowInstance,
+				EntityID:           entityID,
+				Config:             []byte(`{}`),
+				Subscriptions:      []string{"inbound." + provider},
+			}),
+			Status:    "active",
+			HiredBy:   "test",
+			StartedAt: now,
+		}); err != nil {
+			t.Fatalf("UpsertAgent(%s): %v", agentID, err)
+		}
 	}
 	return seedBoundedStandingTarget(t, ctx, sqliteStore, runID, entityID, flowInstance, provider)
 }

@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -462,22 +464,27 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 	}
 	requireStandingTelegramSignatureRejection(t, firstURL)
 	requireStandingTelegramEvidenceCounts(t, backend, storeLocation, standingTelegramEvidenceCounts{}, "rejected signatures")
-	sendStandingTelegramUnmatchedUpdate(t, firstURL, 100)
+	unmatched := sendStandingTelegramUnmatchedUpdate(t, firstURL, 100)
 	waitForStandingTelegramRawCount(t, backend, storeLocation, 1)
 	requireStandingTelegramEvidenceCounts(t, backend, storeLocation, standingTelegramEvidenceCounts{Raw: 1}, "unmatched raw-only update")
-	entity := sendStandingTelegramUpdate(t, firstURL, 101, 42, firstDiagnostics)
+	requireStandingTelegramPublicationSettlement(t, firstURL, unmatched, false)
+	firstMatched := sendStandingTelegramUpdatePublication(t, firstURL, 101, 42, firstDiagnostics)
+	entity := firstMatched.EntityID
 	waitForStandingMemoryCompletion(t, backend, storeLocation, "mock", 1)
-	if got := sendStandingTelegramDuplicate(t, firstURL, 101, 42); got != entity {
-		t.Fatalf("exact duplicate entity = %q, want %q", got, entity)
-	}
+	requireStandingTelegramPublicationSettlement(t, firstURL, firstMatched, true)
+	requireStandingTelegramDuplicateIdentity(t, sendStandingTelegramDuplicate(t, firstURL, 101, 42), firstMatched)
 	requireStandingMemoryAttemptCount(t, backend, storeLocation, "mock", 1, "same-process exact duplicate")
-	if got := sendStandingTelegramUpdate(t, firstURL, 102, 42, firstDiagnostics); got != entity {
-		t.Fatalf("A2 entity = %q, want A1 entity %q", got, entity)
+	secondMatched := sendStandingTelegramUpdatePublication(t, firstURL, 102, 42, firstDiagnostics)
+	if secondMatched.EntityID != entity {
+		t.Fatalf("A2 entity = %q, want A1 entity %q", secondMatched.EntityID, entity)
 	}
-	if got := sendStandingTelegramUpdate(t, firstURL, 103, 84, firstDiagnostics); got != entity {
-		t.Fatalf("B1 entity = %q, want standing entity %q", got, entity)
+	thirdMatched := sendStandingTelegramUpdatePublication(t, firstURL, 103, 84, firstDiagnostics)
+	if thirdMatched.EntityID != entity {
+		t.Fatalf("B1 entity = %q, want standing entity %q", thirdMatched.EntityID, entity)
 	}
 	waitForStandingMemoryCompletion(t, backend, storeLocation, "mock", 3)
+	requireStandingTelegramPublicationSettlement(t, firstURL, secondMatched, true)
+	requireStandingTelegramPublicationSettlement(t, firstURL, thirdMatched, true)
 	requireStandingPayloadOnlyTargetReadback(t, firstURL, bundleHash, "mock", 2, []string{
 		"Mock turn 1: hello 101",
 		"Mock turn 2: hello 102",
@@ -495,14 +502,16 @@ func runStandingTelegramMemorySupportedSurface(t *testing.T, backend string) {
 	second := startServeRuntimeTestProcess(t, opts)
 	second.waitForReadyLine()
 	secondURL := "http://" + serveRuntimeAPIListenerFromOutput(t, second.outputString())
-	if got := sendStandingTelegramDuplicate(t, secondURL, 101, 42); got != entity {
-		t.Fatalf("post-restart exact duplicate entity = %q, want %q", got, entity)
-	}
+	requireStandingTelegramDuplicateIdentity(t, sendStandingTelegramDuplicate(t, secondURL, 101, 42), firstMatched)
+	requireStandingTelegramPublicationSettlement(t, secondURL, unmatched, false)
+	requireStandingTelegramPublicationSettlement(t, secondURL, firstMatched, true)
 	requireStandingMemoryAttemptCount(t, backend, storeLocation, "mock", 3, "post-restart exact duplicate")
-	if got := sendStandingTelegramUpdate(t, secondURL, 104, 42); got != entity {
-		t.Fatalf("A3 entity = %q, want standing entity %q", got, entity)
+	fourthMatched := sendStandingTelegramUpdatePublication(t, secondURL, 104, 42)
+	if fourthMatched.EntityID != entity {
+		t.Fatalf("A3 entity = %q, want standing entity %q", fourthMatched.EntityID, entity)
 	}
 	waitForStandingMemoryCompletion(t, backend, storeLocation, "mock", 4)
+	requireStandingTelegramPublicationSettlement(t, secondURL, fourthMatched, true)
 	requireStandingPayloadOnlyTargetReadback(t, secondURL, bundleHash, "mock", 2, []string{
 		"Mock turn 1: hello 101",
 		"Mock turn 2: hello 102",
@@ -521,6 +530,13 @@ type standingTelegramEvidenceCounts struct {
 	Normalized int
 	Replies    int
 	Activities int
+}
+
+type standingTelegramPublication struct {
+	Status     string   `json:"status"`
+	EntityID   string   `json:"entity_id"`
+	EventIDs   []string `json:"event_ids"`
+	EventNames []string `json:"event_names"`
 }
 
 func requireStandingTelegramSignatureRejection(t testing.TB, baseURL string) {
@@ -553,27 +569,46 @@ func requireStandingTelegramSignatureRejection(t testing.TB, baseURL string) {
 	}
 }
 
-func sendStandingTelegramUnmatchedUpdate(t testing.TB, baseURL string, updateID int) {
+func sendStandingTelegramUnmatchedUpdate(t testing.TB, baseURL string, updateID int) standingTelegramPublication {
 	t.Helper()
 	body := []byte(fmt.Sprintf(`{"update_id":%d,"channel_post":{"message_id":%d,"chat":{"id":-100,"type":"channel"},"text":"raw only"}}`, updateID, updateID))
+	return sendStandingTelegramPublication(t, baseURL, body, http.StatusAccepted, "accepted")
+}
+
+func sendStandingTelegramUpdatePublication(t testing.TB, baseURL string, updateID, chatID int, diagnostics ...func() string) standingTelegramPublication {
+	t.Helper()
+	body := []byte(fmt.Sprintf(`{"update_id":%d,"message":{"message_id":%d,"from":{"id":%d},"chat":{"id":%d,"type":"private"},"text":"hello %d"}}`, updateID, updateID, chatID, chatID, updateID))
+	return sendStandingTelegramPublication(t, baseURL, body, http.StatusAccepted, "accepted", diagnostics...)
+}
+
+func sendStandingTelegramPublication(t testing.TB, baseURL string, body []byte, wantCode int, wantStatus string, diagnostics ...func() string) standingTelegramPublication {
+	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/webhooks/chat/telegram", bytes.NewReader(body))
 	if err != nil {
-		t.Fatalf("new unmatched Telegram request: %v", err)
+		t.Fatalf("new Telegram publication request: %v", err)
 	}
 	req.Header.Set("content-type", "application/json")
 	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		t.Fatalf("send unmatched Telegram request: %v", err)
+		t.Fatalf("send Telegram publication: %v", err)
 	}
 	defer resp.Body.Close()
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		t.Fatalf("read unmatched Telegram response: %v", err)
+		t.Fatalf("read Telegram publication response: %v", err)
 	}
-	if resp.StatusCode != http.StatusAccepted {
-		t.Fatalf("unmatched Telegram status = %d body=%q, want %d", resp.StatusCode, strings.TrimSpace(string(responseBody)), http.StatusAccepted)
+	var publication standingTelegramPublication
+	if err := json.Unmarshal(responseBody, &publication); err != nil {
+		t.Fatalf("decode Telegram publication status=%d body=%q: %v%s", resp.StatusCode, strings.TrimSpace(string(responseBody)), err, standingWebhookDiagnostics(diagnostics))
 	}
+	if resp.StatusCode != wantCode || publication.Status != wantStatus {
+		t.Fatalf("Telegram publication status=%d payload=%#v, want %d/%s%s", resp.StatusCode, publication, wantCode, wantStatus, standingWebhookDiagnostics(diagnostics))
+	}
+	if publication.EntityID == "" || len(publication.EventIDs) == 0 || len(publication.EventIDs) != len(publication.EventNames) {
+		t.Fatalf("Telegram publication identity = %#v", publication)
+	}
+	return publication
 }
 
 func waitForStandingTelegramRawCount(t testing.TB, backend, location string, want int) {
@@ -626,32 +661,78 @@ func loadStandingTelegramEvidenceCounts(t testing.TB, backend, location string) 
 	return counts
 }
 
-func sendStandingTelegramDuplicate(t testing.TB, baseURL string, updateID, chatID int) string {
+func sendStandingTelegramDuplicate(t testing.TB, baseURL string, updateID, chatID int) standingTelegramPublication {
 	t.Helper()
 	body := []byte(fmt.Sprintf(`{"update_id":%d,"message":{"message_id":%d,"from":{"id":%d},"chat":{"id":%d,"type":"private"},"text":"hello %d"}}`, updateID, updateID, chatID, chatID, updateID))
-	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(baseURL, "/")+"/webhooks/chat/telegram", bytes.NewReader(body))
-	if err != nil {
-		t.Fatalf("new duplicate webhook request: %v", err)
+	return sendStandingTelegramPublication(t, baseURL, body, http.StatusOK, "duplicate")
+}
+
+func requireStandingTelegramDuplicateIdentity(t testing.TB, got, want standingTelegramPublication) {
+	t.Helper()
+	if got.EntityID != want.EntityID || !slices.Equal(got.EventIDs, want.EventIDs) || !slices.Equal(got.EventNames, want.EventNames) {
+		t.Fatalf("duplicate publication = %#v, want exact identity %#v", got, want)
 	}
-	req.Header.Set("content-type", "application/json")
-	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "telegram-secret")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("send duplicate webhook: %v", err)
+}
+
+func requireStandingTelegramPublicationSettlement(t *testing.T, baseURL string, publication standingTelegramPublication, matched bool) {
+	t.Helper()
+	endpoint := strings.TrimRight(baseURL, "/") + "/v1/rpc"
+	rawID := ""
+	normalizedID := ""
+	for index, name := range publication.EventNames {
+		switch name {
+		case "inbound.telegram":
+			if rawID != "" {
+				t.Fatalf("Telegram publication has duplicate raw outputs: %#v", publication)
+			}
+			rawID = publication.EventIDs[index]
+		case "inbound.telegram.text_message":
+			if normalizedID != "" {
+				t.Fatalf("Telegram publication has duplicate normalized outputs: %#v", publication)
+			}
+			normalizedID = publication.EventIDs[index]
+		default:
+			t.Fatalf("Telegram publication has unexpected output %q: %#v", name, publication)
+		}
 	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read duplicate webhook response: %v", err)
+	if rawID == "" || matched != (normalizedID != "") || (!matched && len(publication.EventIDs) != 1) || (matched && len(publication.EventIDs) != 2) {
+		t.Fatalf("Telegram output shape = %#v, matched=%t", publication, matched)
 	}
-	var payload map[string]any
-	if err := json.Unmarshal(raw, &payload); err != nil {
-		t.Fatalf("decode duplicate webhook response status=%d body=%q: %v", resp.StatusCode, strings.TrimSpace(string(raw)), err)
+
+	var raw operatorread.OperatorEventFull
+	requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": rawID}, &raw)
+	requireStandingConsumerlessRawSettlement(t, raw, rawID)
+	var listed operatorread.OperatorEventListResult
+	requireServedJSONRPCResult(t, endpoint, "event.list", map[string]any{
+		"filter": map[string]any{"run_id": raw.RunID, "event_name": "inbound.telegram"},
+		"limit":  500,
+	}, &listed)
+	matches := 0
+	for _, event := range listed.Events {
+		if event.EventID == rawID {
+			matches++
+			requireStandingConsumerlessRawSettlement(t, event, rawID)
+		}
 	}
-	if resp.StatusCode != http.StatusOK || strings.TrimSpace(fmt.Sprint(payload["status"])) != "duplicate" {
-		t.Fatalf("duplicate webhook status=%d payload=%#v, want 200 duplicate", resp.StatusCode, payload)
+	if matches != 1 {
+		t.Fatalf("event.list occurrences for raw event %s = %d, want one", rawID, matches)
 	}
-	return strings.TrimSpace(fmt.Sprint(payload["entity_id"]))
+	if normalizedID == "" {
+		return
+	}
+	var normalized operatorread.OperatorEventFull
+	requireServedJSONRPCResult(t, endpoint, "event.get", map[string]any{"event_id": normalizedID}, &normalized)
+	if normalized.EventName != "inbound.telegram.text_message" || normalized.NoDelivery != nil || len(normalized.DeadLetters) != 0 || len(normalized.Deliveries) == 0 {
+		t.Fatalf("normalized Telegram settlement = %#v, want executable delivery without failure", normalized)
+	}
+}
+
+func requireStandingConsumerlessRawSettlement(t testing.TB, observed operatorread.OperatorEventFull, eventID string) {
+	t.Helper()
+	if observed.EventID != eventID || observed.EventName != "inbound.telegram" || len(observed.Deliveries) != 0 || len(observed.DeadLetters) != 0 ||
+		observed.NoDelivery == nil || observed.NoDelivery.Reason != events.NoDeliveryNoSubscriberByDesign.Code() {
+		t.Fatalf("raw Telegram settlement = %#v, want no_subscriber_by_design without delivery/dead letter", observed)
+	}
 }
 
 func requireStandingPayloadOnlyTargetReadback(t *testing.T, baseURL, bundleHash, executionMode string, wantOwners int, wantTexts []string) {
