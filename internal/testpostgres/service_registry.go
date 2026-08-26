@@ -284,12 +284,9 @@ func (s *Service) Close(ctx context.Context) error {
 			return err
 		}
 		s.lease = nil
-		lease, acquired, err := acquireFileLock(s.registry.leasePath(s.record.LeaseID), true)
+		lease, err := waitForFileLock(ctx, s.registry.leasePath(s.record.LeaseID))
 		if err != nil {
-			return err
-		}
-		if !acquired {
-			return fmt.Errorf("Postgres test work still owns service lease %s after the supervisor child exited; reconciliation deferred", s.record.LeaseID)
+			return fmt.Errorf("wait for Postgres test work to release service lease %s: %w; service evidence retained for reconciliation", s.record.LeaseID, err)
 		}
 		s.lease = lease
 		s.leaseInherited = false

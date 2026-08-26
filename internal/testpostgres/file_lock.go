@@ -1,6 +1,13 @@
 package testpostgres
 
-import "os"
+import (
+	"context"
+	"fmt"
+	"os"
+	"time"
+)
+
+const fileLockWaitInterval = 10 * time.Millisecond
 
 type fileLock struct {
 	file *os.File
@@ -17,4 +24,31 @@ func (l *fileLock) Drop() error {
 	file := l.file
 	l.file = nil
 	return file.Close()
+}
+
+func waitForFileLock(ctx context.Context, path string) (*fileLock, error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("lock wait context is nil")
+	}
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("wait for lock %s: %w", path, err)
+		}
+		lock, acquired, err := acquireFileLock(path, true)
+		if err != nil {
+			return nil, err
+		}
+		if acquired {
+			return lock, nil
+		}
+		timer := time.NewTimer(fileLockWaitInterval)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return nil, fmt.Errorf("wait for lock %s: %w", path, ctx.Err())
+		case <-timer.C:
+		}
+	}
 }

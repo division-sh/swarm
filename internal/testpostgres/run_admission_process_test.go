@@ -43,7 +43,7 @@ func TestRunSlotSurvivesSupervisorDeathUntilChildExit(t *testing.T) {
 	ctx, cancelAcquire := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancelAcquire()
 	lease := acquireTestRun(t, admission, ctx, "after-child", 1)
-	if err := lease.Complete(false); err != nil {
+	if err := lease.Complete(context.Background(), false); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -63,7 +63,9 @@ func TestRunCompletionDoesNotUnlockSurvivingDescendant(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitForRunLeaseFile(t, started, 2*time.Second)
-	if err := lease.Complete(false); err == nil {
+	completionCtx, cancelCompletion := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancelCompletion()
+	if err := lease.Complete(completionCtx, false); err == nil {
 		t.Fatal("completion unlocked a slot still held by a descendant")
 	}
 	blockedCtx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
@@ -77,7 +79,7 @@ func TestRunCompletionDoesNotUnlockSurvivingDescendant(t *testing.T) {
 	ctx, cancelAcquire := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancelAcquire()
 	after := acquireTestRun(t, admission, ctx, "after-descendant", 1)
-	if err := after.Complete(false); err != nil {
+	if err := after.Complete(context.Background(), false); err != nil {
 		t.Fatal(err)
 	}
 }

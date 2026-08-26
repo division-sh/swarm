@@ -77,7 +77,7 @@ func TestSwarmTestQueuedSignalResultAndTicketCleanup(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer active.Complete(false)
+			defer active.Complete(context.Background(), false)
 
 			logPath := filepath.Join(t.TempDir(), "queued.log")
 			logFile, err := os.Create(logPath)
@@ -99,7 +99,7 @@ func TestSwarmTestQueuedSignalResultAndTicketCleanup(t *testing.T) {
 			if err := logFile.Close(); err != nil {
 				t.Fatal(err)
 			}
-			if err := active.Complete(false); err != nil {
+			if err := active.Complete(context.Background(), false); err != nil {
 				t.Fatal(err)
 			}
 			assertSignalContenderHandoff(t, runner, repoRoot, stateHome)

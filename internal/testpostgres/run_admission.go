@@ -254,11 +254,11 @@ func (a *RunAdmission) Acquire(ctx context.Context, command RunCommand, capacity
 		}
 		if lease != nil {
 			if err := ticketLock.Close(); err != nil {
-				_ = lease.Complete(false)
+				_ = lease.Complete(context.Background(), false)
 				return nil, fmt.Errorf("release admitted run ticket authority: %w", err)
 			}
 			if err := removeRunTicketAuthority(a.ticketPath(id)); err != nil {
-				_ = lease.Complete(false)
+				_ = lease.Complete(context.Background(), false)
 				return nil, err
 			}
 			cleanupTicket = false
@@ -290,10 +290,49 @@ func (l *RunLease) InheritTo(cmd *exec.Cmd) error {
 	return nil
 }
 
-// Complete publishes successful admitted duration evidence and releases the slot.
-func (l *RunLease) Complete(success bool) error {
+// Join waits until inherited test work releases the slot, then retains it for
+// the supervisor so settlement cannot race a contender.
+func (l *RunLease) Join(ctx context.Context) error {
+	if ctx == nil {
+		return fmt.Errorf("run join context is nil")
+	}
 	if l == nil || l.closed {
 		return nil
+	}
+	if !l.inherited {
+		return nil
+	}
+	return l.admission.withRegistry(func(doc *runRegistryDocument) error {
+		index := activeIndex(doc.Active, l.id)
+		if index < 0 || doc.Active[index].Slot != l.slot {
+			return fmt.Errorf("active run %s is missing or changed", l.id)
+		}
+		if l.lock != nil {
+			if err := l.lock.Drop(); err != nil {
+				return err
+			}
+			l.lock = nil
+		}
+		probe, err := waitForFileLock(ctx, l.admission.slotPath(l.slot))
+		if err != nil {
+			return fmt.Errorf("wait for test work to release slot %d: %w; active evidence retained for reconciliation", l.slot, err)
+		}
+		l.lock = probe
+		l.inherited = false
+		return nil
+	})
+}
+
+// Complete joins inherited work, publishes successful duration evidence, and releases the slot.
+func (l *RunLease) Complete(ctx context.Context, success bool) error {
+	if ctx == nil {
+		return fmt.Errorf("run completion context is nil")
+	}
+	if l == nil || l.closed {
+		return nil
+	}
+	if err := l.Join(ctx); err != nil {
+		return err
 	}
 	l.closed = true
 	now := l.admission.nowUTC()
@@ -301,20 +340,6 @@ func (l *RunLease) Complete(success bool) error {
 		index := activeIndex(doc.Active, l.id)
 		if index < 0 || doc.Active[index].Slot != l.slot {
 			return fmt.Errorf("active run %s is missing or changed", l.id)
-		}
-		if l.inherited {
-			if err := l.lock.Drop(); err != nil {
-				return err
-			}
-			l.lock = nil
-			probe, acquired, err := acquireFileLock(l.admission.slotPath(l.slot), true)
-			if err != nil {
-				return err
-			}
-			if !acquired {
-				return fmt.Errorf("test work still owns slot %d after the supervisor child exited; reconciliation deferred", l.slot)
-			}
-			l.lock = probe
 		}
 		doc.Active = append(doc.Active[:index], doc.Active[index+1:]...)
 		if success {
