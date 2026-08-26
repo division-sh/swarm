@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -281,14 +282,7 @@ func TestSwarmTestJoinsDescendantAuthorityBeforeSettlement(t *testing.T) {
 	fixture := `#!/bin/sh
 set -eu
 test "$1" = test
-(
-  trap '' INT TERM HUP
-  touch "$SWARM_TEST_DESCENDANT_STARTED"
-  while [ ! -f "$SWARM_TEST_DESCENDANT_RELEASE" ]; do
-    sleep .02 || true
-  done
-  touch "$SWARM_TEST_DESCENDANT_FINISHED"
-) &
+"$SWARM_TEST_DESCENDANT_HELPER" -test.run='^TestSwarmTestDescendantProcessFixture$' >/dev/null 2>&1 &
 case "$SWARM_TEST_DESCENDANT_MODE" in
   normal_success|normal_failure)
     while [ ! -f "$SWARM_TEST_TOP_RELEASE" ]; do sleep .02; done
@@ -297,6 +291,9 @@ case "$SWARM_TEST_DESCENDANT_MODE" in
     ;;
   signal)
     while :; do sleep 1; done
+    ;;
+  post_exit_signal)
+    exit 0
     ;;
   *)
     echo "invalid descendant fixture mode" >&2
@@ -323,6 +320,7 @@ esac
 				name     string
 				mode     string
 				signal   syscall.Signal
+				postExit bool
 				exitCode int
 				history  int
 			}{
@@ -330,6 +328,8 @@ esac
 				{name: "normal_failure", mode: "normal_failure", exitCode: 23},
 				{name: "interrupt", mode: "signal", signal: syscall.SIGINT, exitCode: 130},
 				{name: "terminate", mode: "signal", signal: syscall.SIGTERM, exitCode: 143},
+				{name: "post_exit_interrupt", mode: "post_exit_signal", signal: syscall.SIGINT, postExit: true, exitCode: 130},
+				{name: "post_exit_terminate", mode: "post_exit_signal", signal: syscall.SIGTERM, postExit: true, exitCode: 143},
 			} {
 				t.Run(completion.name, func(t *testing.T) {
 					stateHome := filepath.Join(t.TempDir(), "state-home")
@@ -338,6 +338,7 @@ esac
 					release := filepath.Join(t.TempDir(), "descendant-release")
 					finished := filepath.Join(t.TempDir(), "descendant-finished")
 					topRelease := filepath.Join(t.TempDir(), "top-release")
+					signalled := filepath.Join(t.TempDir(), "descendant-signalled")
 					logPath := filepath.Join(t.TempDir(), "runner.log")
 					logFile, err := os.Create(logPath)
 					if err != nil {
@@ -350,7 +351,9 @@ esac
 						"SWARM_TEST_DESCENDANT_STARTED="+started,
 						"SWARM_TEST_DESCENDANT_RELEASE="+release,
 						"SWARM_TEST_DESCENDANT_FINISHED="+finished,
+						"SWARM_TEST_DESCENDANT_SIGNALLED="+signalled,
 						"SWARM_TEST_DESCENDANT_MODE="+completion.mode,
+						"SWARM_TEST_DESCENDANT_HELPER="+os.Args[0],
 						"SWARM_TEST_TOP_RELEASE="+topRelease,
 					)
 					command.Stdout, command.Stderr = logFile, logFile
@@ -380,7 +383,10 @@ esac
 					}()
 
 					waitForRunnerPath(t, started, result, []string{logPath}, 2*time.Minute)
-					if completion.signal != 0 {
+					admission := NewRunAdmission(stateRoot, nil)
+					if completion.postExit {
+						waitForRunSettlementFence(t, admission, 0, 5*time.Second)
+					} else if completion.signal != 0 {
 						if err := command.Process.Signal(completion.signal); err != nil {
 							t.Fatal(err)
 						}
@@ -388,7 +394,6 @@ esac
 						t.Fatal(err)
 					}
 
-					admission := NewRunAdmission(stateRoot, nil)
 					type contenderResult struct {
 						lease *RunLease
 						err   error
@@ -440,8 +445,15 @@ esac
 					default:
 					}
 
-					if err := os.WriteFile(release, []byte("release\n"), 0o600); err != nil {
-						t.Fatal(err)
+					if completion.postExit {
+						if err := command.Process.Signal(completion.signal); err != nil {
+							t.Fatal(err)
+						}
+						waitForPath(t, signalled, 5*time.Second)
+					} else {
+						if err := os.WriteFile(release, []byte("release\n"), 0o600); err != nil {
+							t.Fatal(err)
+						}
 					}
 					waitForPath(t, finished, 5*time.Second)
 					err = waitForProcess(t, result, 45*time.Second)
@@ -516,6 +528,41 @@ esac
 				})
 			}
 		})
+	}
+}
+
+func TestSwarmTestDescendantProcessFixture(t *testing.T) {
+	mode := os.Getenv("SWARM_TEST_DESCENDANT_MODE")
+	if mode == "" {
+		return
+	}
+	started := os.Getenv("SWARM_TEST_DESCENDANT_STARTED")
+	release := os.Getenv("SWARM_TEST_DESCENDANT_RELEASE")
+	finished := os.Getenv("SWARM_TEST_DESCENDANT_FINISHED")
+	if err := os.WriteFile(started, []byte("started\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if mode == "post_exit_signal" {
+		signals := make(chan os.Signal, 1)
+		signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(signals)
+		<-signals
+		if err := os.WriteFile(os.Getenv("SWARM_TEST_DESCENDANT_SIGNALLED"), []byte("signalled\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		signal.Ignore(os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+		for {
+			if _, err := os.Stat(release); err == nil {
+				break
+			} else if !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if err := os.WriteFile(finished, []byte("finished\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 

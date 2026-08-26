@@ -4,6 +4,7 @@ package testpostgres
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -84,6 +85,78 @@ func TestRunCompletionDoesNotUnlockSurvivingDescendant(t *testing.T) {
 	}
 }
 
+func TestRunJoinDoesNotBlockOtherCapacitySlotOrQueuedCancellation(t *testing.T) {
+	root := t.TempDir()
+	started := filepath.Join(root, "descendant-started")
+	release := filepath.Join(root, "descendant-release")
+	admission := testRunAdmission(filepath.Join(root, "state"), nil)
+	settling := acquireTestRun(t, admission, context.Background(), "settling", 2)
+	child := exec.Command("sh", "-c", `sh -c 'touch "$1"; while [ ! -f "$2" ]; do sleep .01; done' descendant "$1" "$2" >/dev/null 2>&1 &`, "supervisor-child", started, release)
+	if err := settling.InheritTo(child); err != nil {
+		t.Fatal(err)
+	}
+	if err := child.Run(); err != nil {
+		t.Fatal(err)
+	}
+	waitForRunLeaseFile(t, started, 2*time.Second)
+	t.Cleanup(func() { _ = os.WriteFile(release, []byte("release\n"), 0o600) })
+
+	joinCtx, cancelJoin := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelJoin()
+	joinResult := make(chan error, 1)
+	go func() { joinResult <- settling.Join(joinCtx) }()
+	waitForRunSettlementFence(t, admission, settling.slot, 2*time.Second)
+
+	other := acquireTestRun(t, admission, context.Background(), "other-slot", 2)
+	cancelledCtx, cancelCancelled := context.WithCancel(context.Background())
+	cancelled := make(chan error, 1)
+	go func() {
+		_, err := testRunAdmission(admission.StateRoot, nil).Acquire(cancelledCtx, testRunCommand("cancelled"), 2)
+		cancelled <- err
+	}()
+	waitForWaitingRuns(t, admission, 1)
+	cancelCancelled()
+	select {
+	case err := <-cancelled:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("queued cancellation error = %v, want context canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("queued cancellation blocked behind another slot settlement")
+	}
+
+	otherCompleted := make(chan error, 1)
+	go func() { otherCompleted <- other.Complete(context.Background(), false) }()
+	select {
+	case err := <-otherCompleted:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("unrelated slot completion blocked behind another slot settlement")
+	}
+	select {
+	case err := <-joinResult:
+		t.Fatalf("settling slot joined before descendant release: %v", err)
+	default:
+	}
+
+	if err := os.WriteFile(release, []byte("release\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-joinResult:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("settling slot did not join after descendant release")
+	}
+	if err := settling.Complete(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func runLeaseOwnerFixture() {
 	state := os.Getenv("SWARM_RUN_LEASE_STATE")
 	started := os.Getenv("SWARM_RUN_LEASE_STARTED")
@@ -126,4 +199,23 @@ func waitForRunLeaseFile(t *testing.T, path string, timeout time.Duration) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %s", path)
+}
+
+func waitForRunSettlementFence(t *testing.T, admission *RunAdmission, slot int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		probe, acquired, err := acquireFileLock(admission.settlementPath(slot), true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !acquired {
+			return
+		}
+		if err := probe.Close(); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for slot %d settlement fence", slot)
 }

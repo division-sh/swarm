@@ -97,7 +97,7 @@ func run(args []string) int {
 			serviceErr = service.Close(settlementCtx)
 		}
 		if leaseErr == nil {
-			leaseErr = lease.Complete(settlementCtx, success && serviceErr == nil)
+			leaseErr = lease.Complete(settlementCtx, success && serviceErr == nil && receivedSignal.Load() == 0)
 		}
 		return serviceErr, leaseErr
 	}
@@ -212,9 +212,9 @@ func run(args []string) int {
 		}
 	}()
 	waitErr := cmd.Wait()
+	serviceErr, leaseErr := settle(waitErr == nil)
 	close(done)
 	<-forwardingDone
-	serviceErr, leaseErr := settle(waitErr == nil)
 	if serviceErr != nil {
 		fmt.Fprintf(os.Stderr, "remove runner-owned Postgres: %v (child result: %v)\n", serviceErr, waitErr)
 		return 1

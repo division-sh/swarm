@@ -302,25 +302,45 @@ func (l *RunLease) Join(ctx context.Context) error {
 	if !l.inherited {
 		return nil
 	}
-	return l.admission.withRegistry(func(doc *runRegistryDocument) error {
+	var settlement *fileLock
+	err := l.admission.withRegistry(func(doc *runRegistryDocument) error {
 		index := activeIndex(doc.Active, l.id)
 		if index < 0 || doc.Active[index].Slot != l.slot {
 			return fmt.Errorf("active run %s is missing or changed", l.id)
 		}
-		if l.lock != nil {
-			if err := l.lock.Drop(); err != nil {
-				return err
-			}
-			l.lock = nil
-		}
-		probe, err := waitForFileLock(ctx, l.admission.slotPath(l.slot))
+		var acquired bool
+		var err error
+		settlement, acquired, err = acquireFileLock(l.admission.settlementPath(l.slot), true)
 		if err != nil {
-			return fmt.Errorf("wait for test work to release slot %d: %w; active evidence retained for reconciliation", l.slot, err)
+			return err
 		}
-		l.lock = probe
-		l.inherited = false
+		if !acquired {
+			return fmt.Errorf("run slot %d already has an active settlement handoff", l.slot)
+		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	if l.lock != nil {
+		if err := l.lock.Drop(); err != nil {
+			return errors.Join(err, settlement.Close())
+		}
+		l.lock = nil
+	}
+	probe, err := waitForFileLock(ctx, l.admission.slotPath(l.slot))
+	if err != nil {
+		return errors.Join(
+			fmt.Errorf("wait for test work to release slot %d: %w; active evidence retained for reconciliation", l.slot, err),
+			settlement.Close(),
+		)
+	}
+	l.lock = probe
+	l.inherited = false
+	if err := settlement.Close(); err != nil {
+		return fmt.Errorf("release run slot %d settlement handoff: %w", l.slot, err)
+	}
+	return nil
 }
 
 // Complete joins inherited work, publishes successful duration evidence, and releases the slot.
@@ -502,6 +522,17 @@ func (a *RunAdmission) reconcile(doc *runRegistryDocument, callerID string, requ
 		activeBySlot[record.Slot] = index
 	}
 	for slot := 0; slot < probeCapacity; slot++ {
+		settlement, acquired, err := acquireFileLock(a.settlementPath(slot), true)
+		if err != nil {
+			return nil, err
+		}
+		if !acquired {
+			occupied[slot] = true
+			continue
+		}
+		if err := settlement.Close(); err != nil {
+			return nil, err
+		}
 		probe, acquired, err := acquireFileLock(a.slotPath(slot), true)
 		if err != nil {
 			return nil, err
@@ -823,6 +854,10 @@ func (a *RunAdmission) ticketPath(id string) string {
 
 func (a *RunAdmission) slotPath(slot int) string {
 	return filepath.Join(a.StateRoot, "run-slots", strconv.Itoa(slot)+".lock")
+}
+
+func (a *RunAdmission) settlementPath(slot int) string {
+	return filepath.Join(a.StateRoot, "run-slots", strconv.Itoa(slot)+".settlement.lock")
 }
 
 func (a *RunAdmission) nowUTC() time.Time {
