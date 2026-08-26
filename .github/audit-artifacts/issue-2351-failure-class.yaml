@@ -1,0 +1,397 @@
+version: 1
+kind: pre_implementation_failure_class_artifact
+issue: 2351
+audit_base: 7dd0174cd8bf0c2d36765613105b28e24325087e
+phase: pre_implementation_gate_repair
+implementation_frozen: true
+supersedes:
+  audit: https://github.com/division-sh/swarm/issues/2351#issuecomment-5426766949
+  gate: https://github.com/division-sh/swarm/issues/2351#issuecomment-5427779828
+binding_context:
+  issue: https://github.com/division-sh/swarm/issues/2351
+  implementation_discovery: https://github.com/division-sh/swarm/issues/2351#issuecomment-5428191484
+  insufficient_gate: https://github.com/division-sh/swarm/issues/2351#issuecomment-5428808311
+  architecture_parent: 2250
+  blocked_supported_surface: 2008
+  separate_delivery_class: 2339
+  exact_spec_refs:
+    - platform-spec.yaml#runtime.dynamic_instance_lifecycle.creation.process
+    - platform-spec.yaml#runtime.dynamic_instance_lifecycle.creation.route_materialization.recovery
+    - platform-spec.yaml#runtime.dynamic_instance_lifecycle.creation.route_materialization.process_visibility
+    - platform-spec.yaml#runtime.dynamic_instance_lifecycle.creation.route_materialization.automatic_recovery
+    - platform-spec.yaml#runtime.agent_lifecycle_authority.process_execution_projection
+    - platform-spec.yaml#runtime.agent_lifecycle_authority.prepared_execution_publication
+    - platform-spec.yaml#runtime.startup_progress.steps.manager_recovery_if_enabled
+    - platform-spec.yaml#runtime.startup_progress.steps.manager_event_loop_start
+  guidelines:
+    - /Users/youmew/dev/swarm-docs/docs/IMPLEMENTER_GUIDELINES.md
+    - /Users/youmew/dev/swarm-docs/docs/SEMANTIC_DRIFT.md
+
+class_model:
+  issue_category: p1_runtime_lifecycle_semantic_drift_and_supported_store_parity
+  observed_symptom: >-
+    On default recovery-disabled graceful restart, a completed active dynamic-flow
+    readiness row and its route remain durable, but no executable dynamic process
+    topology is reconstructed. The next normalized M5 event commits with no entity,
+    recipient, delivery, or dead letter while the run is publicly running.
+  exact_concepts:
+    - mandatory_active_dynamic_executable_topology_reconstruction
+    - optional_interrupted_execution_and_effect_replay
+    - startup_refusal_for_incomplete_dynamic_readiness_without_replay_authority
+    - current_manager_occurrence_agent_and_route_runnability
+  working_failure_class: active_dynamic_executable_topology_reconstruction_gated_by_optional_execution_recovery
+  immediate_parent_failure_class: startup_topology_reconstruction_and_execution_replay_policy_coupling
+  parent_failure_class: multi_phase_runtime_startup_readiness_and_lifecycle_ownership
+  architecture_parent_issue: 2250
+  broader_failure_class: process_required_topology_and_durable_work_replay_share_one_startup_switch
+  framing: broad_enough_after_gate_cycle_2_repair
+  prior_framing: too_narrow_and_superseded
+  entry_point_not_boundary: >-
+    The skip at Runtime.Start and registered/stopped adoption are entry points. The
+    audit boundary includes every startup consumer in HydrateForStartup, every
+    current-format route/readiness producer, execution admission, both Manager run
+    modes, process route publication, continuation synchronization, public readiness,
+    refusal, compensation, restart postures, and both stores.
+  intended_closure_level: chosen_working_failure_class_eliminated
+  chosen_class_closure_commitment: true
+  closure_feasible_in_one_pr: true
+  local_adoption_only_fix_would_leave_same_concept_interpreter_live: true
+  corrected_class_complete_fix_leaves_same_concept_interpreter_live: false
+
+governing_policy:
+  completed_active_current_format_readiness: >-
+    Always reconstruct and prove the exact executable agent and flow-route process
+    topology in every allowed serving generation, independently of replay policy.
+  incomplete_active_readiness_recovery_disabled: >-
+    Refuse startup before public readiness without mutating readiness, agents, routes,
+    timers, creation events, effects, drains, receipts, or deliveries.
+  incomplete_active_readiness_recovery_enabled: >-
+    The existing keyed readiness reconciler may complete it under existing recovery
+    authority before mandatory process reconstruction proves the completed result.
+  replay_only_work: >-
+    Effects, provider drains, budget and diagnostic recovery projection, pipeline
+    receipts, delivery replay, timers, creation events, and selected-contract route
+    recovery remain conditional on existing recovery authority.
+  invalid_route_without_readiness: >-
+    No current production writer legitimately creates an active dynamic route without
+    an exact readiness owner. The generic no-readiness restorer is obsolete and must
+    be deleted; missing readiness fails closed rather than invoking compatibility.
+  forbidden:
+    - unconditional_HydrateForStartup
+    - legacy_row_reader_or_migration
+    - tolerant_route_fallback
+    - telegram_specific_branch
+    - polling_repair
+    - second_readiness_or_liveness_owner
+    - generic_startup_framework
+
+startup_order:
+  sequence:
+    - recovery_snapshot_and_admission_classify_replay_work
+    - static_declaration_topology_hydrates
+    - system_nodes_start
+    - recovery_enabled_only_finalizers_may_reconcile_interrupted_work
+    - managed_execution_admission_completes
+    - manager_run_starts_the_current_occurrence
+    - mandatory_topology_only_reconstruction_enumerates_completed_active_readiness
+    - exact_agent_lifecycle_routes_loops_and_flow_routes_are_verified
+    - delivery_continuation_synchronization_runs
+    - outbox_and_public_boot_readiness_may_open
+  failure_compensation: >-
+    Any topology-only reconstruction or verification failure fails Runtime.Start and
+    consumes existing start-failure cleanup plus lifecycle/route compensation. It
+    cannot leave public readiness open or authorize replay mutation.
+
+user_visible_flow:
+  must_succeed_before_observed_failure:
+    - authored_bundle_compile_and_verify
+    - cold_serve_selected_store_construction_and_public_readiness
+    - standing_run_and_dynamic_instance_activation
+    - first_signed_provider_ingress_and_typed_raw_settlement
+    - first_normalization_agent_delivery_and_effect_settlement
+    - quiescence_and_graceful_shutdown
+    - selected_store_reopen_and_startup_admission
+    - second_signed_provider_ingress_and_normalized_event_commit
+  ordered_path:
+    - step: cold_static_topology_and_system_nodes
+      gate: different_concept_with_proof
+      proof: first_boot_and_first_M5_ingress_reach_dynamic_materialization
+    - step: standing_dynamic_readiness_activation
+      gate: same_chosen_class_fresh_entrance
+      proof: first_expected_agent_route_turn_and_effect
+    - step: graceful_shutdown
+      gate: different_concept_with_proof
+      proof: joined_quiescent_process_exit_before_restart
+    - step: default_recovery_disabled_reopen
+      gate: same_chosen_class_startup_policy
+      proof: completed_readiness_exists_but_HydrateForStartup_is_skipped
+    - step: managed_execution_admission_and_Manager_Run
+      gate: same_chosen_class_ordering
+      proof: current_occurrence_starts_without_dynamic_projection_on_master
+    - step: mandatory_completed_topology_reconstruction
+      gate: same_chosen_class_missing_entrance
+      proof: must_adopt_start_and_verify_exact_agent_and_flow_routes_without_replay
+    - step: delivery_continuation_sync_and_public_readiness
+      gate: same_chosen_class_downstream_fence
+      proof: cannot_open_before_process_topology_is_executable
+    - step: second_normalized_event_routing
+      gate: same_chosen_class_manifestation
+      proof: exact_entity_recipient_delivery_turn_and_effect_required
+    - step: terminal_singleton_delivery_materialization
+      gate: explicitly_split_to_issue_2339
+      proof: this_defect_never_selects_a_recipient_or_creates_a_delivery
+
+startup_posture_matrix:
+  graceful_default_recovery_disabled:
+    policy: completed_topology_reconstructs_pending_readiness_refuses
+    proof: unchanged_issue_2008_M5
+  forced_death_default_recovery_disabled:
+    policy: existing_blocking_delivery_or_timer_work_refuses_before_serving
+    proof: issue_2008_ratified_default_refusal_scenario
+  explicit_recovery_enabled:
+    policy: interrupted_work_recovers_then_completed_topology_reconstructs
+    proof: issue_2008_recovery_scenario_without_duplicate_effect
+  dev_abandon:
+    policy: predecessor_is_terminalized_before_runtime_start_then_only_successor_eligible_topology_executes
+    proof: issue_2008_dev_new_generation_scenario
+  multi_context_persistent_recovery_disabled:
+    policy: >-
+      This flag does not authorize unscoped replay or missing executable topology.
+      Any #2351 operation must consume an exact current-context source coordinate;
+      discovery that this requires general multi-context recovery scoping stops and
+      escalates to #2250 rather than weakening readiness.
+    proof: platform_spec_multi_bundle_persistence_serve_db_loaded_runtime_source
+
+startup_consumer_matrix:
+  static_declaration_topology:
+    classification: always_run_process_reconstruction
+    proof: HydrateStaticTopologyForStartup_is_already_unconditional_and_separate
+  completed_active_dynamic_readiness:
+    classification: always_run_process_reconstruction
+    proof: completed_eligible_plan_is_durable_desired_topology_not_interrupted_work
+  incomplete_or_pending_active_dynamic_readiness:
+    classification: startup_blocking_when_replay_disabled
+    proof: full_reconciler_can_write_topology_timers_completion_and_creation_event
+  persisted_dynamic_route_without_readiness:
+    classification: invalid_obsolete_and_deleted
+    proof: current_activation_commits_readiness_and_exact_route_topology_together
+  selected_contract_route_recovery_evidence:
+    classification: recovery_only_replay_or_mutation
+    proof: selected_fork_evidence_has_its_own_recovery_owner_and_no_serving_topology_authority
+  external_effect_attempts:
+    classification: recovery_only_replay_or_mutation
+    proof: ReconcileExternalEffectAttempts_settles_interrupted_effect_attempts
+  provider_drain_finalization:
+    classification: recovery_only_replay_or_mutation
+    proof: refreshRecoveredProviderDrainFinalizations_mutates_recovered_tail_state
+  budget_projection:
+    classification: recovery_only_replay_or_mutation
+    proof: ProjectRecoveryBudgetState_projects_retained_recovery_state_and_may_emit
+  lifecycle_diagnostic_projection:
+    classification: recovery_only_replay_or_mutation
+    proof: projection_marks_diagnostic_rows_projected
+  pipeline_receipt_recovery:
+    classification: recovery_only_replay_or_mutation
+    proof: RecoverAfterStartupAdmission_recovers_pipeline_receipts
+  executable_delivery_replay:
+    classification: recovery_only_replay_or_mutation
+    proof: managed_execution_admission_replay_is_conditioned_on_recovery_policy
+  delivery_continuation_synchronization:
+    classification: different_concept_with_ordering_dependency
+    proof: Synchronize_consumes_already_admitted_routes_and_must_follow_topology_reconstruction
+  workflow_and_generic_timers:
+    classification: recovery_only_replay_or_mutation
+    proof: restoration_can_make_persisted_wakeups_runnable
+  dynamic_creation_event:
+    classification: recovery_only_replay_or_mutation
+    proof: full_readiness_reconcile_can_commit_and_dispatch_creation_occurrence
+  directive_operation_reconciliation:
+    classification: different_concept_with_proof
+    proof: existing_required_operation_settlement_precedes_recovery_and_does_not_construct_topology
+
+route_producer_census:
+  canonical_current_format_writer: >-
+    EventBus flow-instance activation derives RouteTopology from the same
+    FlowInstanceActivationPlan that contains DynamicFlowRuntimeReadinessPlan, and the
+    selected-store activation mutation commits them atomically.
+  standalone_upsert_production_callers: zero
+  exact_set_replace_production_callers:
+    - selected_flow_instance_activation_mutation
+    - readiness_owned_source_revision_and_retirement_mutations
+  generic_no_readiness_restorer: restoreFlowInstanceRoutes
+  disposition: delete_as_obsolete_fallback
+  selected_contract_restorer: restoreSelectedContractRouteRecoveries
+  selected_contract_disposition: retain_recovery_gated_as_different_concept
+
+canonical_owners:
+  desired_dynamic_topology:
+    owner: dynamic_flow_runtime_readiness_plan_keyed_by_run_and_instance
+    real_semantic_owner: true
+    consumers:
+      - direct_activation
+      - selected_mutation_post_commit_activation
+      - ensure_and_exact_replay
+      - source_revision_reconciliation
+      - automatic_retry
+      - recovery_enabled_startup_finalization
+      - mandatory_completed_topology_startup_reconstruction
+  durable_agent_lifecycle:
+    owner: selected_store_agents_cell_and_typed_lifecycle_transition
+    real_semantic_owner: true
+    consumers:
+      - fresh_spawn
+      - persisted_executable_adoption
+      - both_manager_run_modes
+      - replace_reconfigure_restart
+      - teardown_shutdown_reset
+  process_execution_projection:
+    owner: agent_manager_lifecycle_coordinator_and_phase_aware_ensure_runnable_handoff
+    real_semantic_owner: true
+    consumers:
+      - fresh_spawn_before_and_during_run
+      - completed_readiness_topology_reconstruction
+      - dynamic_readiness_verification
+  exact_agent_route:
+    owner: eventbus_generation_token_route_owner
+    real_semantic_owner: true
+    consumers:
+      - lifecycle_replacement
+      - executable_readiness_verification
+      - normal_and_authoritative_delivery
+  exact_flow_route:
+    owner: persisted_exact_route_topology_plus_process_route_table_publication
+    real_semantic_owner: true
+    consumers:
+      - selected_mutation_private_overlay
+      - mandatory_completed_topology_reconstruction
+      - recipient_planning_after_publication
+
+systematic_consumption_audit:
+  fresh_spawn_before_manager_run: moved_to_phase_aware_owner_prepared_before_run
+  fresh_spawn_during_manager_run: moved_to_phase_aware_owner_runnable_current_occurrence
+  persisted_completed_readiness_default_restart: moved_to_mandatory_topology_only_reconstruction
+  persisted_completed_readiness_explicit_recovery: moved_to_mandatory_topology_only_reconstruction_after_recovery
+  persisted_pending_readiness_default_restart: startup_refusal_no_mutation
+  persisted_pending_readiness_explicit_recovery: existing_keyed_reconciler_then_mandatory_reconstruction
+  manager_standard_run: already_consumes_lifecycle_replacement_owner
+  manager_authoritative_delivery_only_run: already_consumes_lifecycle_replacement_owner
+  lifecycle_only_removed_declaration_adoption: different_non_executable_concept_preserved
+  reconfigure_restart_teardown_shutdown_reset: already_consume_lifecycle_coordinator
+  direct_post_commit_ensure_source_revision_retry_readiness: already_consume_keyed_readiness_owner
+  flow_route_process_publication: moved_behind_completed_topology_only_verification_on_startup
+  generic_no_readiness_route_restore: invalid_removed
+  selected_contract_route_recovery: different_recovery_evidence_concept_preserved
+  delivery_continuation_synchronization: already_canonical_but_reordered_after_mandatory_topology
+
+invalid_or_non_authoritative_paths:
+  - config_presence_as_liveness
+  - registered_stopped_as_live_manager_readiness
+  - topology_ready_at_as_current_process_liveness
+  - optional_recovery_flag_as_process_topology_authority
+  - full_HydrateForStartup_as_mandatory_topology_operation
+  - generic_persisted_route_without_readiness_fallback
+  - route_publication_before_exact_agent_runnability
+
+manifestations:
+  fresh_first_materialization:
+    disposition: in_scope_execution_proven_through_canonical_owner
+    planned_proof: exact_generation_route_turn_and_single_effect
+  same_process_repeat:
+    disposition: in_scope_execution_proven_through_canonical_owner
+    planned_proof: no_duplicate_generation_route_or_effect
+  graceful_default_restart_completed_readiness:
+    disposition: in_scope_reproduced_and_fixed
+    planned_proof: unchanged_real_M5_SQLite_and_PostgreSQL
+  explicit_recovery_restart:
+    disposition: in_scope_reproduced_and_fixed
+    planned_proof: recovery_then_topology_without_double_start_or_duplicate_replay
+  recovery_disabled_pending_readiness:
+    disposition: in_scope_reproduced_and_fixed
+    planned_proof: startup_refuses_and_all_replay_side_effect_counters_remain_zero
+  forced_default_refusal:
+    disposition: in_scope_execution_proven_through_same_startup_policy
+    planned_proof: existing_delivery_timer_refusal_plus_pending_readiness_refusal
+  dev_abandon_new_generation:
+    disposition: in_scope_execution_proven_through_canonical_owner
+    planned_proof: predecessor_terminalized_successor_only_receives_work
+  lifecycle_only_removed_declaration:
+    disposition: in_scope_execution_proven_through_non_executable_variant
+    planned_proof: teardown_without_agent_build_route_or_loop
+  topology_failure_before_public_readiness:
+    disposition: in_scope_reproduced_and_fixed
+    planned_proof: startup_failure_compensates_projection_route_loop_and_public_gate
+  invalid_route_without_readiness:
+    disposition: in_scope_removed_interpreter
+    planned_proof: deletion_census_and_fail_closed_current_format_fixture
+  terminal_singleton_materialization_reuse:
+    disposition: split_to_issue_2339_as_different_storage_delivery_class
+    planned_proof: no_change_to_2339_contract_or_tests
+
+supported_surface_proof:
+  required: true
+  stores:
+    - sqlite
+    - host_postgresql
+  manager_modes:
+    - standard
+    - authoritative_delivery_only
+  startup_postures:
+    - graceful_default_recovery_disabled
+    - explicit_recovery_enabled
+    - forced_default_refusal
+    - dev_abandon_new_generation
+  negative_no_replay_proof:
+    - no_timer_arm_or_restore
+    - no_creation_event_commit_or_dispatch
+    - no_external_effect_settlement
+    - no_provider_drain_finalization
+    - no_pipeline_receipt_or_delivery_replay
+    - no_selected_contract_recovery
+  complete_matrix:
+    - focused_lifecycle_and_race_tests
+    - unchanged_issue_2008_M5
+    - complete_issue_2008_M1_through_M17_SQLite_and_PostgreSQL
+    - go_test_all_with_host_postgresql
+
+tracker:
+  tracker_state_decision: current_issue_updated_before_coding
+  watchlist_repository: swarm-docs
+  watchlist_node: shutdown_and_runtime_lifecycle
+  watchlist_decision: refine_existing_node_before_gate
+  parent_action: keep_bounded_child_and_attach_architecture_to_2250
+  parent_sibling_probe:
+    static_topology: different_concept_already_unconditional
+    selected_contract_recovery: different_recovery_evidence_concept
+    delivery_continuations: different_owner_with_ordering_dependency
+    terminal_singleton_materialization: split_to_2339
+    broad_startup_phase_decomposition: remains_2250
+  post_pre_audit_parent_action: close_corrected_child_now_keep_architecture_parent_open
+  watchlist_promotion_check: >-
+    The node already tracks split lifecycle/startup ownership and #2250 tracks broader
+    readiness orchestration. It exposes this startup-policy entrance but no additional
+    live same-concept consumer family requiring absorption into #2351.
+  remaining_parent_tail:
+    grouping: wholesale_Runtime_Start_phase_decomposition_and_multi_context_scoping
+    owner: 2250
+    estimate: multi_pr_architecture_work
+    confidence: high
+  architecture_smell: >-
+    HydrateForStartup combines mandatory process reconstruction with optional durable
+    work replay, while startup admission treats manager topology as skippable work.
+  long_run_direction: explicit_typed_startup_phases_under_issue_2250
+  architecture_tracking_decision: update_existing_issue_2250_and_watchlist_only
+  architecture_effort: medium_to_large
+  architecture_roi: high_but_not_required_for_this_bounded_fix
+  new_issue_required: false
+
+gate:
+  independent_gate_required: true
+  requested_outcome: approved
+  current_outcome: pending
+  blocking_ambiguity: none_after_route_producer_census
+  stop_conditions:
+    - another_current_format_active_topology_producer_without_readiness
+    - topology_only_reconstruction_requires_durable_replay_mutation
+    - existing_lifecycle_compensation_cannot_own_failure
+    - general_startup_or_multi_context_rewrite_required
+    - second_process_liveness_authority_required
