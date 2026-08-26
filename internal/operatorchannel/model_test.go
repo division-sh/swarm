@@ -66,6 +66,18 @@ func TestChallengeGrammarIsClosed(t *testing.T) {
 	}
 }
 
+func TestProjectOperationReadbackMasksAndFallsBackToExternalAccountReference(t *testing.T) {
+	projected := ProjectOperationReadback(Operation{
+		ExternalAccountRef: "123456789", ConversationRef: "987654321", AccountPresentation: "",
+	})
+	if projected.AccountPresentation == "" || projected.AccountPresentation == "123456789" {
+		t.Fatalf("account presentation = %q", projected.AccountPresentation)
+	}
+	if projected.ExternalAccountRef == "123456789" || projected.ConversationRef == "987654321" {
+		t.Fatalf("opaque references were not masked: %#v", projected)
+	}
+}
+
 func testInterfaceIdentity() InterfaceIdentity {
 	return InterfaceIdentity{
 		InterfaceRef: InterfaceHITLChannelV2, ChannelPackID: "provider.telegram.hitl_channel",

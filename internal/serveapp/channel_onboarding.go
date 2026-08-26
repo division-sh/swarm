@@ -17,6 +17,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	runtimepublicingress "github.com/division-sh/swarm/internal/runtime/publicingress"
 	runtimeregistration "github.com/division-sh/swarm/internal/runtime/registration"
@@ -89,6 +90,18 @@ func serveChannelOnboardingCatalog(manager *runtime.RuntimeContextManager) (*cha
 		}
 	}
 	return channelonboarding.NewCandidateCatalog(candidates)
+}
+
+func rejectWebhookPrebindingWithoutPublicIngress(snapshot serveChannelActivationSnapshot) error {
+	for _, prebinding := range snapshot.Prebinding {
+		if prebinding.Candidate.Posture == channelonboarding.ActivationWebhookRegistration {
+			return channelonboarding.NewTerminalActivationError(
+				"public_ingress_unavailable",
+				fmt.Errorf("webhook channel onboarding requires --dev --expose or an explicit public webhook origin and listener"),
+			)
+		}
+	}
+	return nil
 }
 
 func channelOnboardingDeclaredPlans(contextDef runtime.BundleContext) []packs.OutboundBindingPlan {
@@ -509,7 +522,12 @@ func (r *serveChannelActivationRefresher) RefreshChannelActivations(ctx context.
 		return err
 	}
 	if r.reconcile != nil {
-		return r.reconcile(ctx)
+		err := r.reconcile(ctx)
+		var failure *runtimefailures.Error
+		if errors.As(err, &failure) && failure.Failure.Detail.Code == "mock_external_effect_forbidden" {
+			return channelonboarding.NewTerminalActivationError(failure.Failure.Detail.Code, err)
+		}
+		return err
 	}
 	return nil
 }

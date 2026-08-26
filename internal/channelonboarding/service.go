@@ -26,6 +26,41 @@ type ActivationRefresher interface {
 	RefreshChannelActivations(context.Context) error
 }
 
+type TerminalActivationError struct {
+	Code string
+	Err  error
+}
+
+func (e *TerminalActivationError) Error() string {
+	if e == nil || e.Err == nil {
+		return ""
+	}
+	return e.Err.Error()
+}
+
+func (e *TerminalActivationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func NewTerminalActivationError(code string, err error) error {
+	code = strings.TrimSpace(code)
+	if code == "" || err == nil {
+		return fmt.Errorf("terminal channel activation failure requires a code and cause")
+	}
+	return &TerminalActivationError{Code: code, Err: err}
+}
+
+func AsTerminalActivationError(err error) (*TerminalActivationError, bool) {
+	var terminal *TerminalActivationError
+	if !errors.As(err, &terminal) {
+		return nil, false
+	}
+	return terminal, true
+}
+
 type ConfirmationRequest struct {
 	Operation  Operation
 	Activation ConnectedChannelActivation
@@ -350,6 +385,13 @@ func (s *Service) drive(ctx context.Context, op Operation, candidate Candidate, 
 			}
 		case PhaseActivatingProvider:
 			if err := s.activations.RefreshChannelActivations(ctx); err != nil {
+				if terminal, ok := AsTerminalActivationError(err); ok {
+					failed, failErr := s.failOperation(ctx, op, terminal.Code, terminal.Error())
+					if failErr != nil {
+						return Result{}, errors.Join(err, failErr)
+					}
+					return s.result(ctx, failed, candidate)
+				}
 				return s.blockedResult(ctx, op, candidate, err)
 			}
 			var err error
@@ -529,8 +571,28 @@ func (s *Service) advanceIdentity(ctx context.Context, op Operation, candidate C
 		})
 		return next, identityOp.State != operatorchannel.StateBound, err
 	default:
-		return op, false, fmt.Errorf("%w: identity operation %s ended in %s", ErrConflict, identityOp.OperationID, identityOp.State)
+		failed, err := s.failOperation(ctx, op, "identity_"+string(identityOp.State), fmt.Sprintf("identity operation %s ended in %s", identityOp.OperationID, identityOp.State))
+		return failed, false, err
 	}
+}
+
+func (s *Service) failOperation(ctx context.Context, op Operation, code, message string) (Operation, error) {
+	for _, admission := range op.CredentialAdmissions {
+		if _, err := s.credentials.Release(context.WithoutCancel(ctx), admission); err != nil {
+			return op, fmt.Errorf("release failed onboarding credential %q: %w", admission.StoreKey, err)
+		}
+	}
+	failed, err := s.store.AdvanceChannelOnboarding(context.WithoutCancel(ctx), AdvanceRequest{
+		OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: PhaseFailed,
+		FailureCode: strings.TrimSpace(code), FailureMessage: strings.TrimSpace(message), Now: s.now().UTC(),
+	})
+	if err != nil {
+		return op, err
+	}
+	if err := s.activations.RefreshChannelActivations(context.WithoutCancel(ctx)); err != nil {
+		return failed, fmt.Errorf("refresh channel activations after terminal onboarding failure: %w", err)
+	}
+	return failed, nil
 }
 
 func (s *Service) confirmedBinding(ctx context.Context, op Operation) (operatorchannel.Binding, bool, error) {
@@ -615,6 +677,7 @@ func (s *Service) result(ctx context.Context, op Operation, candidate Candidate)
 		if err != nil {
 			return result, err
 		}
+		identityOp = operatorchannel.ProjectOperationReadback(identityOp)
 		result.IdentityOperation = &identityOp
 	}
 	if binding, err := s.identities.CurrentBinding(ctx, op.Interface); err == nil {

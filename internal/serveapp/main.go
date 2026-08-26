@@ -1452,6 +1452,15 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		manager: runtimeContextManager, store: channelOnboardingStore, identities: operatorChannels,
 		credentials: providerCredentialOwner,
 	}
+	if !publicIngressEnabled {
+		channelActivationRefresher.reconcile = func(refreshCtx context.Context) error {
+			snapshot, snapshotErr := compileServeChannelActivationSnapshot(refreshCtx, runtimeContextManager, channelOnboardingStore, operatorChannels, providerCredentialOwner)
+			if snapshotErr != nil {
+				return snapshotErr
+			}
+			return rejectWebhookPrebindingWithoutPublicIngress(snapshot)
+		}
+	}
 	connectedChannelReadiness := &serveConnectedChannelReadiness{
 		manager: runtimeContextManager, store: channelOnboardingStore, identities: operatorChannels,
 		credentials: providerCredentialOwner, effects: confirmationEffects, ingress: ready,
@@ -1459,9 +1468,6 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	channelOnboarding, err := channelonboarding.NewService(channelonboarding.ServiceOptions{
 		Store: channelOnboardingStore, Identities: operatorChannels, Credentials: credentialWriter,
 		Catalog: func() (*channelonboarding.CandidateCatalog, error) {
-			if !publicIngressEnabled {
-				return nil, fmt.Errorf("webhook channel onboarding requires public ingress activation")
-			}
 			return serveChannelOnboardingCatalog(runtimeContextManager)
 		},
 		Activations: channelActivationRefresher, Confirmation: confirmationDispatcher, Readiness: connectedChannelReadiness,
@@ -1470,7 +1476,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		presenter.fail(20, "channel_onboarding", err)
 		return 1
 	}
-	channelDestructive, err := channelonboarding.NewDestructiveService(channelOnboardingStore, operatorChannels, channelActivationRefresher, nil)
+	channelDestructive, err := channelonboarding.NewDestructiveService(channelOnboardingStore, operatorChannels, credentialWriter, channelActivationRefresher, nil)
 	if err != nil {
 		presenter.fail(20, "channel_onboarding", err)
 		return 1

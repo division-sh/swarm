@@ -292,7 +292,7 @@ func (p *serveLifecyclePresenter) recordOperatorChannelProofReuse(binding operat
 	p.operatorWarnings = append(p.operatorWarnings, fmt.Sprintf(
 		"operator channel %s restored from machine-local verified proof for %s (%s)",
 		binding.Interface.ChannelPackID,
-		operatorchannel.MaskPresentation(binding.AccountPresentation),
+		operatorchannel.MaskClaimantPresentation(binding.AccountPresentation, binding.ExternalAccountRef),
 		binding.ConversationScope,
 	))
 	p.mu.Unlock()

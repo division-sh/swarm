@@ -9955,7 +9955,7 @@ tool_model:
         registration: public_ingress.provider_registration
         readiness: ConnectedChannelReadiness exact-current projection
         api: /v1/rpc channel.onboarding_start|channel.onboarding_get|channel.onboarding_retry and channel.list
-        cli: swarm channel connect|reconnect|rebind|list|unbind
+        cli: swarm channel connect|reconnect|rebind|resume|list|unbind
       context_coordinate_rule: >
         Every candidate, operation, pre-binding intent, learned activation, provider effect, compiled executable plan,
         confirmation, readiness result, and API/CLI readback retains one exact bundle source fact, bundle identity,
@@ -9983,13 +9983,21 @@ tool_model:
         cancellation stops response narration only; admitted work continues or is recovered from its persisted phase.
         connect requires absent identity and activation, reconnect preserves current account/conversation identity while
         repairing deployment activation, and rebind requires a new authenticated identity ceremony. connect --replace,
+        A public resume command consumes one exact durable operation ID and continues that responsibility; a client wait
+        timeout must name that command and cannot imply that a new connect replaces the pending operation. Expired or
+        rejected identity ceremony and permanently unavailable activation prerequisites commit a named failed operation,
+        release operation-owned credentials, and refresh activation authority before returning. connect --replace,
         implicit verb switching, --force, aliases, and lower identity RPCs as a second whole-journey API are unsupported.
       credential_rule: >
         Provider secret material enters only through the authenticated onboarding API from hidden TTY or stdin. Secret
         values and reusable digests are forbidden in semantic request hashes, API idempotency rows, selected-store rows,
         logs, traces, progress, errors, and readback. The operation first reserves exact credential roles and keys, then
         stores only non-secret receipt and epoch evidence. Fresh webhook connect generates a missing signing value;
-        replay, reconnect, and rebind do not rotate credentials without an explicit newly admitted epoch.
+        replay, reconnect, and rebind do not rotate credentials without an explicit newly admitted epoch. Reconnect,
+        rebind, and resume accept explicit hidden replacement credential input when the exact reserved occurrence is no
+        longer current. Every operation-written credential occurrence is owned by its receipt and epoch: terminal
+        onboarding failure and destructive teardown compare-delete only that exact occurrence after executable authority
+        retires. A successor occurrence and an observed pre-existing credential are never deleted by stale cleanup.
       activation_rule: >
         Operator-declared config and selected-store learned activations are closed source variants lowered through one
         compiler into immutable OutboundBindingPlan values. Source artifact presence is not backend or activation
@@ -10014,7 +10022,9 @@ tool_model:
         It grants no conversation destination or outbound authority. After operator_account_binding settles the external
         identity, selected-store activation publication revision-fences handoff to the current registration selection.
         Temporary authority cannot survive successful handoff, and an uncertain provider acknowledgment prevents blind
-        resend, cleanup, or successor publication.
+        resend, cleanup, or successor publication. Candidate catalog declaration remains available without public ingress;
+        webhook pre-binding is rejected at activation when no exposure owner exists, while non-webhook catalog candidates
+        acquire no invented ingress requirement.
       confirmation_rule: >
         Onboarding confirmation is one operator-origin, generation-pinned channel activity using the compiled activation
         and the existing one-attempt provider effect journal. It fabricates no workflow run, event, entity, agent, or
@@ -10024,15 +10034,20 @@ tool_model:
         unbind, linked proof revocation, active-interface retirement, runtime-context unload, and activation supersession
         reserve selected-store teardown responsibility and retire every matching pending operation and learned activation
         before identity mutation, proof-file revocation, source removal, or successor authority. Runtime refresh then fences
-        registration, public runtime tools, and private activity routes. Recovery resumes every reserved or
-        authority-retired teardown idempotently. Proofless revocation fails before mutation because no proof authority exists.
+        registration, public runtime tools, and private activity routes. Only after that retirement, teardown removes each
+        exact operation-written credential occurrence through its receipt/epoch fence. Recovery resumes every reserved or
+        authority-retired teardown idempotently, including credential cleanup. Runtime-context shutdown performs this
+        retirement while the exact context and public-ingress owner remain current, and aborts withdrawal if retirement
+        fails. Proofless revocation fails before mutation because no proof authority exists.
       readiness_rule: >
         ConnectedChannelReadiness is derived, never persisted as a boolean, and reports the exact activation-publication
         generation used by API/CLI readback. READY requires one exact current coordinate,
         available channel plan, current activation and binding revisions, current proof when the binding is proof-backed,
         current credential epochs, terminal-success confirmation for the same activation/binding, and posture-specific
         target evidence. Webhook posture additionally joins exact ingress/signing, exposure, callback, and provider
-        registration generations from that same activation publication. Session posture instead joins exact service
+        registration generations from that same activation publication. The current activation publication, not authored
+        standing-target configuration, supplies the webhook signing credential identity used by the registration/readiness
+        join; missing or contradictory activation provenance fails closed. Session posture instead joins exact service
         fulfillment and live send health. Any loss,
         rotation, replacement, reset, revocation, expiry, or supersession removes READY immediately. Proofless current
         bindings are valid without invented proof evidence, but cannot remint identity after selected-store reset.
@@ -10040,7 +10055,9 @@ tool_model:
         Startup resumes every nonterminal operation and teardown without replaying settled writes or effects. Selected-store
         reset removes learned activation and operation facts. A surviving machine proof may restore identity only; it cannot
         infer target, credential, registration, executable activation, confirmation, or READY. Readback must teach exactly
-        that activation was lost and require swarm channel reconnect <provider>.
+        that activation was lost and require swarm channel reconnect <provider>. Readback preserves independently retained
+        active proof identity after unbind so the public proof-revocation route remains reachable, and every operation,
+        transition, and boot presentation uses the same masked claimant fallback as canonical channel readback.
       no_legacy_rule: >
         No config writer, migration, adoption, export, purge, selected-store fallback, provider-specific generic-runtime
         branch, placeholder destination, manual callback/conversation/signing value, compatibility flag, dual executable
@@ -10187,7 +10204,9 @@ tool_model:
         readiness routes are absent. `/webhooks/_swarm_probe/*` is reserved for one unguessable reachability nonce and
         cannot be selected by an ingress alias.
       lifecycle: >
-        Exposure is explicit and process-local. Successful public nonce proof mints one random exposure generation.
+        Exposure is explicit and process-local. Initial managed quick-tunnel reachability tolerates hostname propagation by
+        probing immediately and after bounded 1s, 2s, and 4s delays; failure after that exact sequence is terminal. External
+        origins remain single-probe and do not inherit managed-tunnel retry semantics. Successful public nonce proof mints one random exposure generation.
         Tunnel loss revokes readiness immediately, then performs at most three re-establishment attempts after 1s, 2s,
         and 4s; each success mints a fresh generation and callback intent. Sustained failure terminates serve with cause.
         Shutdown revokes and joins listener/tunnel work but does not unregister the provider callback. Quick-tunnel URLs
@@ -23346,6 +23365,7 @@ cli_specification:
           channel_rebind_bundle: {command: swarm channel rebind, selector: 'flag:bundle', family: bundle, mode: full_only, safety: mutating}
           channel_rebind_interface: {command: swarm channel rebind, selector: 'flag:interface', family: operator_channel, mode: full_only, safety: mutating}
           channel_rebind_target: {command: swarm channel rebind, selector: 'flag:target', family: none, mode: different_concept, scope_rule: exact package-qualified provider activation target, safety: mutating}
+          channel_resume_operation: {command: swarm channel resume, selector: 'arg:operation-id', family: none, mode: different_concept, scope_rule: exact durable channel onboarding operation identifier, safety: mutating}
           channel_unbind_interface: {command: swarm channel unbind, selector: 'arg:interface', family: operator_channel, mode: full_only, safety: mutating}
           mutating_idempotency: {command: 'swarm <mutating>', selector: 'flag:idempotency-key', family: none, mode: different_concept, scope_rule: caller-authored retry key}
           connections_key: {command: 'swarm connections <key>', selector: 'arg:key', family: none, mode: different_concept, scope_rule: authored stable connection key}
@@ -23788,6 +23808,13 @@ cli_specification:
               command: swarm channel rebind
               classification: shared_output
               fact_owner: /v1/rpc channel.onboarding_start|get|retry plus channel.confirm
+              json_shape: channel onboarding operation and exact connected-channel readback
+              quiet_values:
+              - operation_id
+            channel_resume:
+              command: swarm channel resume
+              classification: shared_output
+              fact_owner: /v1/rpc channel.onboarding_get|retry plus channel.confirm
               json_shape: channel onboarding operation and exact connected-channel readback
               quiet_values:
               - operation_id

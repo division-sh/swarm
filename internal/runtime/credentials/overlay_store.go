@@ -107,6 +107,17 @@ func (s *OverlayStore) Delete(ctx context.Context, key string) error {
 	return s.writable.Delete(ctx, key)
 }
 
+func (s *OverlayStore) DeleteWithReceipt(ctx context.Context, key, receipt, epoch string) (bool, error) {
+	if s == nil || s.writable == nil {
+		return false, ErrNotWritable
+	}
+	deleter, ok := s.writable.(ReceiptDeleter)
+	if !ok || deleter == nil {
+		return false, fmt.Errorf("writable credential store does not support receipt-fenced deletion")
+	}
+	return deleter.DeleteWithReceipt(ctx, key, receipt, epoch)
+}
+
 func (s *OverlayStore) Inspect(ctx context.Context, key string) (Metadata, error) {
 	snapshot, err := s.Snapshot(ctx, key)
 	if err != nil {

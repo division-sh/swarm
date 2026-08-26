@@ -83,3 +83,34 @@ func TestOnboardingCredentialOccurrenceSurvivesSnapshotOwnerRestart(t *testing.T
 		t.Fatalf("restarted epoch = %q, want %q", observed.Epoch, written.Epoch)
 	}
 }
+
+func TestOnboardingCredentialReleaseOwnsOnlyWrittenCurrentOccurrence(t *testing.T) {
+	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := NewCredentialWriter(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	written, err := writer.Admit(context.Background(), CredentialWriteRequest{StoreKey: "channel.telegram.provider", Value: "token-a", Receipt: "operation-a/provider"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admission := CredentialAdmission{Role: "provider", StoreKey: written.StoreKey, Kind: CredentialAdmissionWritten, Receipt: written.Receipt, Epoch: written.Epoch}
+	if released, err := writer.Release(context.Background(), admission); err != nil || !released {
+		t.Fatalf("release = %v, %v; want true, nil", released, err)
+	}
+
+	written, err = writer.Admit(context.Background(), CredentialWriteRequest{StoreKey: "channel.telegram.provider", Value: "token-b", Receipt: "operation-b/provider"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed := CredentialAdmission{Role: "provider", StoreKey: written.StoreKey, Kind: CredentialAdmissionObserved, Receipt: "observation", Epoch: written.Epoch}
+	if released, err := writer.Release(context.Background(), observed); err != nil || released {
+		t.Fatalf("observed release = %v, %v; want false, nil", released, err)
+	}
+	if value, found, err := store.Get(context.Background(), written.StoreKey); err != nil || !found || value != "token-b" {
+		t.Fatalf("observed credential = %q, %v, %v", value, found, err)
+	}
+}

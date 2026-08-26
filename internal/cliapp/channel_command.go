@@ -30,15 +30,17 @@ type channelOperationEnvelope struct {
 }
 
 type channelConnectOptions struct {
-	apiOptions     rootCommandOptions
-	output         cliOutputOptions
-	verb           string
-	noSave         bool
-	yes            bool
-	bundle         string
-	interfaceRef   string
-	target         string
-	idempotencyKey string
+	apiOptions       rootCommandOptions
+	output           cliOutputOptions
+	verb             string
+	noSave           bool
+	yes              bool
+	bundle           string
+	interfaceRef     string
+	target           string
+	idempotencyKey   string
+	credentialStdin  bool
+	resumeCredential string
 }
 
 type channelOnboardingResult = channelonboarding.Result
@@ -56,6 +58,7 @@ func newChannelCommand(opts rootCommandOptions) *cobra.Command {
 		newChannelLifecycleCommand(opts, "connect"),
 		newChannelLifecycleCommand(opts, "reconnect"),
 		newChannelLifecycleCommand(opts, "rebind"),
+		newChannelResumeCommand(opts),
 		newChannelListCommand(opts),
 		newChannelUnbindCommand(opts),
 		newChannelProofRevokeCommand(opts),
@@ -82,7 +85,27 @@ func newChannelLifecycleCommand(opts rootCommandOptions, verb string) *cobra.Com
 	cmd.Flags().StringVar(&commandOpts.target, "target", "", "Select the exact provider activation target")
 	cmd.Flags().StringVar(&commandOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
+	if verb == "reconnect" || verb == "rebind" {
+		cmd.Flags().BoolVar(&commandOpts.credentialStdin, "credential-stdin", false, "Read an explicit replacement provider credential from hidden input or stdin")
+	}
 	bindCLIAPIConnectionFlagsWithClass(cmd, &commandOpts.apiOptions, cliAPICommandClassControl, "swarm channel "+verb)
+	bindCLIOutputFlags(cmd, &commandOpts.output)
+	return cmd
+}
+
+func newChannelResumeCommand(opts rootCommandOptions) *cobra.Command {
+	commandOpts := channelConnectOptions{apiOptions: opts, verb: "resume"}
+	cmd := &cobra.Command{
+		Use:   "resume <operation-id>",
+		Short: "Resume one exact durable channel onboarding operation.",
+		Args:  argcount.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runChannelResume(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], commandOpts)
+		},
+	}
+	cmd.Flags().BoolVarP(&commandOpts.yes, "yes", "y", false, "Approve the authenticated claimant without an interactive prompt")
+	cmd.Flags().BoolVar(&commandOpts.credentialStdin, "credential-stdin", false, "Read an explicit replacement provider credential from hidden input or stdin")
+	bindCLIAPIConnectionFlagsWithClass(cmd, &commandOpts.apiOptions, cliAPICommandClassControl, "swarm channel resume")
 	bindCLIOutputFlags(cmd, &commandOpts.output)
 	return cmd
 }
@@ -198,7 +221,7 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 	if strings.TrimSpace(opts.idempotencyKey) != "" {
 		params["idempotency_key"] = strings.TrimSpace(opts.idempotencyKey)
 	}
-	if opts.verb == "connect" {
+	if opts.verb == "connect" || opts.credentialStdin {
 		credential, readErr := readSecretValue(opts.apiOptions.input, errOut, false)
 		if readErr != nil {
 			return returnCLIValidationError(errOut, fmt.Errorf("read %s provider credential: %w", provider, readErr))
@@ -215,6 +238,48 @@ func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider stri
 		progressOut = io.Discard
 	}
 	result, err := completeChannelOnboarding(ctx, client, begun, opts, progressOut, errOut)
+	if err != nil {
+		return err
+	}
+	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
+		fmt.Fprintf(w, "Connected %s channel READY at activation revision %d.\n", result.Operation.Provider, result.Operation.ActivationRevision)
+	}, func() ([]string, error) {
+		return []string{result.Operation.OperationID}, nil
+	})
+}
+
+func runChannelResume(ctx context.Context, out, errOut io.Writer, operationID string, opts channelConnectOptions) error {
+	if err := opts.output.validate(); err != nil {
+		return returnCLIValidationError(errOut, err)
+	}
+	operationID = strings.TrimSpace(operationID)
+	if operationID == "" {
+		return returnCLIValidationError(errOut, errors.New("channel onboarding operation ID is required"))
+	}
+	if !opts.yes && !controlStdinIsTerminal(opts.apiOptions) {
+		return returnCLIValidationError(errOut, errors.New("channel claimant confirmation requires a terminal or --yes"))
+	}
+	if opts.credentialStdin {
+		credential, readErr := readSecretValue(opts.apiOptions.input, errOut, false)
+		if readErr != nil {
+			return returnCLIValidationError(errOut, fmt.Errorf("read replacement provider credential: %w", readErr))
+		}
+		opts.resumeCredential = credential
+		defer func() { opts.resumeCredential = "" }()
+	}
+	client, err := newCLIAPIClient(opts.apiOptions)
+	if err != nil {
+		return returnCLIAPIError(errOut, err, channelErrorClassifier())
+	}
+	var current channelOnboardingResult
+	if err := client.call(ctx, "channel.onboarding_get", map[string]any{"operation_id": operationID}, &current); err != nil {
+		return returnCLIAPIError(errOut, err, channelErrorClassifier())
+	}
+	progressOut := out
+	if opts.output.asJSON || opts.output.quiet {
+		progressOut = io.Discard
+	}
+	result, err := completeChannelOnboarding(ctx, client, current, opts, progressOut, errOut)
 	if err != nil {
 		return err
 	}
@@ -273,10 +338,16 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 				}
 			}
 		}
+		params := map[string]any{"operation_id": result.Operation.OperationID}
+		if opts.resumeCredential != "" {
+			params["provider_credential"] = opts.resumeCredential
+		}
 		var next channelOnboardingResult
-		if err := client.call(ctx, "channel.onboarding_retry", map[string]any{"operation_id": result.Operation.OperationID}, &next); err != nil {
+		if err := client.call(ctx, "channel.onboarding_retry", params, &next); err != nil {
 			return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
 		}
+		delete(params, "provider_credential")
+		opts.resumeCredential = ""
 		if next.Operation.Revision == result.Operation.Revision && next.Operation.Phase == result.Operation.Phase {
 			return channelOnboardingResult{}, returnCLIValidationError(errOut, fmt.Errorf("channel onboarding is blocked in %s; retry after resolving the reported prerequisite", next.Operation.Phase))
 		}
@@ -309,7 +380,7 @@ func waitForChannelOnboardingClaim(ctx context.Context, client *cliAPIClient, be
 		case <-ctx.Done():
 			return channelOnboardingResult{}, ctx.Err()
 		case <-deadline.C:
-			return channelOnboardingResult{}, fmt.Errorf("timed out waiting for channel claim; operation %s remains durable and can be retried", begun.Operation.OperationID)
+			return channelOnboardingResult{}, fmt.Errorf("timed out waiting for channel claim; resume operation %s with `swarm channel resume %s`", begun.Operation.OperationID, begun.Operation.OperationID)
 		case <-ticker.C:
 		}
 	}

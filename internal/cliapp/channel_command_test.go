@@ -174,6 +174,68 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 		}
 	})
 
+	t.Run("reconnect admits an explicit replacement credential", func(t *testing.T) {
+		server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
+			if request.Method != "channel.onboarding_start" || request.Params["verb"] != "reconnect" || request.Params["provider_credential"] != "replacement-token" {
+				t.Fatalf("replacement start = %s %#v", request.Method, request.Params)
+			}
+			return channelOnboardingCLIResult("succeeded", "bound", true)
+		})
+		stdout, stderr, code := runOperatorChannelCLIWithInput(t, server, "replacement-token\n", "channel", "reconnect", "telegram", "--credential-stdin")
+		if code != 0 || stderr != "" || !strings.Contains(stdout, "Connected telegram channel READY") {
+			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+		}
+	})
+
+	t.Run("resume continues one exact durable operation", func(t *testing.T) {
+		var methods []string
+		server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
+			methods = append(methods, request.Method)
+			switch request.Method {
+			case "channel.onboarding_get":
+				if request.Params["operation_id"] != operatorChannelCLIOperation {
+					t.Fatalf("resume operation = %#v", request.Params)
+				}
+				return channelOnboardingCLIResult("awaiting_operator_confirmation", "awaiting_confirmation", false)
+			case "channel.confirm":
+				return map[string]any{"operation": operatorChannelCLIOperationResult("bound", 3, 1), "binding": map[string]any{"revision": 1}}
+			case "channel.onboarding_retry":
+				return channelOnboardingCLIResult("succeeded", "bound", true)
+			default:
+				t.Fatalf("unexpected method %q", request.Method)
+			}
+			return nil
+		})
+		stdout, stderr, code := runOperatorChannelCLI(t, server, "channel", "resume", operatorChannelCLIOperation, "--yes")
+		if code != 0 || stderr != "" || !strings.Contains(stdout, "Connected telegram channel READY") {
+			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+		}
+		if got := strings.Join(methods, ","); got != "channel.onboarding_get,channel.confirm,channel.onboarding_retry" {
+			t.Fatalf("resume methods = %s", got)
+		}
+	})
+
+	t.Run("resume can supply a missing operation credential", func(t *testing.T) {
+		server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
+			switch request.Method {
+			case "channel.onboarding_get":
+				return channelOnboardingCLIResult("preparing", "", false)
+			case "channel.onboarding_retry":
+				if request.Params["provider_credential"] != "replacement-token" {
+					t.Fatalf("resume credential params = %#v", request.Params)
+				}
+				return channelOnboardingCLIResult("succeeded", "bound", true)
+			default:
+				t.Fatalf("unexpected method %q", request.Method)
+			}
+			return nil
+		})
+		stdout, stderr, code := runOperatorChannelCLIWithInput(t, server, "replacement-token\n", "channel", "resume", operatorChannelCLIOperation, "--yes", "--credential-stdin")
+		if code != 0 || stderr != "" || !strings.Contains(stdout, "Connected telegram channel READY") {
+			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+		}
+	})
+
 	t.Run("legacy replace flag is rejected", func(t *testing.T) {
 		server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
 			t.Fatalf("legacy flag reached API method %q", request.Method)

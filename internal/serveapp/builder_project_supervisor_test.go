@@ -1556,9 +1556,23 @@ func TestRuntimeProjectSupervisorManagerBackedClosePropagatesShutdownOptions(t *
 		currentRoot: "/tmp/current", currentSource: source, currentBundle: &runtimecontracts.WorkflowContractBundle{}, currentRT: rt, executionPosture: executionposture.Live,
 		currentBundleSourceFact: fact, runtimeContexts: manager,
 	}
+	hookCalled := false
+	supervisor.SetRuntimeRetiredHook(func(context.Context, runtimepkg.BundleContext) error {
+		hookCalled = true
+		if supervisor.CurrentRuntime() == nil {
+			t.Fatal("retirement hook ran after the current runtime was detached")
+		}
+		if current, found := manager.LookupBundleHash(hash); current == nil || !found {
+			t.Fatalf("retirement hook ran after runtime-context withdrawal: %#v found=%v", current, found)
+		}
+		return nil
+	})
 	_, err = supervisor.CloseProjectWithShutdownOptions(context.Background(), runtimepkg.ShutdownOptions{Grace: -1})
 	if err == nil || !strings.Contains(err.Error(), "shutdown grace") {
 		t.Fatalf("manager-backed configured shutdown error = %v", err)
+	}
+	if !hookCalled {
+		t.Fatal("runtime retirement hook was not called")
 	}
 }
 

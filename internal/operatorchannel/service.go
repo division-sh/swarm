@@ -455,10 +455,7 @@ func (s *Service) retainedProjection(ctx context.Context) (retainedLifecycleProj
 		key := operation.Interface.Key()
 		if existing, found := projection.pending[key]; !found || existing.RequestedAt.Before(operation.RequestedAt) ||
 			(existing.RequestedAt.Equal(operation.RequestedAt) && existing.OperationID < operation.OperationID) {
-			operation.AccountPresentation = MaskClaimantPresentation(operation.AccountPresentation, operation.ExternalAccountRef)
-			operation.ExternalAccountRef = MaskPresentation(operation.ExternalAccountRef)
-			operation.ConversationRef = MaskPresentation(operation.ConversationRef)
-			projection.pending[key] = operation
+			projection.pending[key] = ProjectOperationReadback(operation)
 		}
 	}
 	return projection, nil
@@ -592,9 +589,7 @@ func (s *Service) Readback(ctx context.Context) ([]Readback, error) {
 			out = append(out, read)
 			continue
 		}
-		read.BindingRevision, read.ExternalAccountRef, read.ConversationRef = binding.Revision, MaskPresentation(binding.ExternalAccountRef), MaskPresentation(binding.ConversationRef)
-		read.ConversationScope, read.AccountPresentation, read.Source = binding.ConversationScope, MaskClaimantPresentation(binding.AccountPresentation, binding.ExternalAccountRef), binding.Source
-		read.ProofID, read.ProofRevision = binding.ProofID, binding.ProofRevision
+		projectBindingReadback(&read, binding)
 		if binding.Status == BindingUnbound {
 			read.Reason = "explicit local unbind fence"
 			out = append(out, read)
@@ -619,6 +614,14 @@ func (s *Service) Readback(ctx context.Context) ([]Readback, error) {
 		out = append(out, read)
 	}
 	return out, nil
+}
+
+func projectBindingReadback(read *Readback, binding Binding) {
+	read.BindingRevision, read.ExternalAccountRef, read.ConversationRef = binding.Revision, MaskPresentation(binding.ExternalAccountRef), MaskPresentation(binding.ConversationRef)
+	read.ConversationScope, read.AccountPresentation, read.Source = binding.ConversationScope, MaskClaimantPresentation(binding.AccountPresentation, binding.ExternalAccountRef), binding.Source
+	if strings.TrimSpace(binding.ProofID) != "" {
+		read.ProofID, read.ProofRevision = binding.ProofID, binding.ProofRevision
+	}
 }
 
 func (s *Service) mustPrincipalID() string {
