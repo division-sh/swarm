@@ -199,6 +199,19 @@ func (s *Service) Confirm(ctx context.Context, operationID string, expectedRevis
 	return op, binding, nil
 }
 
+// ExpireOperation settles one exact overdue identity ceremony. The selected
+// store owns the terminal transition; callers cannot infer expiry locally.
+func (s *Service) ExpireOperation(ctx context.Context, operationID string, expectedRevision int64, now time.Time) (Operation, error) {
+	principal, err := s.Principal()
+	if err != nil {
+		return Operation{}, err
+	}
+	return s.store.ExpireChannelBinding(ctx, ExpireRequest{
+		OperationID: strings.TrimSpace(operationID), PrincipalID: principal.ID,
+		ExpectedRevision: expectedRevision, ExpiredAt: now,
+	})
+}
+
 func (s *Service) Unbind(ctx context.Context, selector string, expectedRevision int64, requestKey, requestHash string, now time.Time) (Operation, Binding, error) {
 	principal, err := s.Principal()
 	if err != nil {

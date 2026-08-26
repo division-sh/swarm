@@ -257,6 +257,23 @@ type serveChannelActivationRefresher struct {
 	reconcile   func(context.Context) error
 }
 
+type serveConnectedChannelRecovery interface {
+	Recover(context.Context) error
+}
+
+func recoverServeConnectedChannelLifecycle(ctx context.Context, teardown, onboarding serveConnectedChannelRecovery) error {
+	if teardown == nil || onboarding == nil {
+		return fmt.Errorf("connected channel recovery requires teardown and onboarding owners")
+	}
+	if err := teardown.Recover(ctx); err != nil {
+		return fmt.Errorf("recover connected channel teardown: %w", err)
+	}
+	if err := onboarding.Recover(ctx); err != nil {
+		return fmt.Errorf("recover connected channel onboarding: %w", err)
+	}
+	return nil
+}
+
 type serveConnectedChannelReadiness struct {
 	manager     *runtime.RuntimeContextManager
 	store       channelonboarding.Store

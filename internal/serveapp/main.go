@@ -1703,14 +1703,12 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 			presenter.fail(22, "channel_onboarding", err)
 			return 1
 		}
-		if err := channelDestructive.Recover(ctx); err != nil {
-			presenter.fail(22, "channel_onboarding", err)
-			return 1
-		}
-		if err := channelOnboarding.Recover(ctx); err != nil {
-			presenter.fail(22, "channel_onboarding", err)
-			return 1
-		}
+	}
+	if err := recoverServeConnectedChannelLifecycle(ctx, channelDestructive, channelOnboarding); err != nil {
+		presenter.fail(22, "channel_onboarding", err)
+		return 1
+	}
+	if publicIngressEnabled {
 		if err := startServePublicIngressRenewal(ctx, processWorkOwner, publicExposure, reconcilePublicIngress); err != nil {
 			presenter.fail(22, "public_ingress", err)
 			return 1

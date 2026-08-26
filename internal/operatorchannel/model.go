@@ -255,6 +255,13 @@ type ConfirmRequest struct {
 	ConfirmedAt      time.Time `json:"confirmed_at"`
 }
 
+type ExpireRequest struct {
+	OperationID      string    `json:"operation_id"`
+	PrincipalID      string    `json:"principal_id"`
+	ExpectedRevision int64     `json:"expected_revision"`
+	ExpiredAt        time.Time `json:"expired_at"`
+}
+
 type UnbindRequest struct {
 	OperationID      string            `json:"operation_id"`
 	PrincipalID      string            `json:"principal_id"`
@@ -397,6 +404,7 @@ type Store interface {
 	EnsureOperatorPrincipal(context.Context, time.Time) (Principal, error)
 	BeginChannelBinding(context.Context, BeginRequest) (Operation, error)
 	ConfirmChannelBinding(context.Context, ConfirmRequest) (Operation, Binding, error)
+	ExpireChannelBinding(context.Context, ExpireRequest) (Operation, error)
 	UnbindOperatorChannel(context.Context, UnbindRequest) (Operation, Binding, error)
 	BindOperatorChannelFromProof(context.Context, BootBindRequest) (Binding, error)
 	ListOperatorChannelOperations(context.Context, string) ([]Operation, error)

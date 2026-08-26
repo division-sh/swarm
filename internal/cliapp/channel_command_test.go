@@ -129,7 +129,9 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 	})
 
 	t.Run("explicit rebind rejection remains unapproved", func(t *testing.T) {
+		var methods []string
 		server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, call int) map[string]any {
+			methods = append(methods, request.Method)
 			switch request.Method {
 			case "channel.onboarding_start":
 				return channelOnboardingCLIResult("awaiting_operator_confirmation", "awaiting_confirmation", false)
@@ -138,6 +140,11 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 					t.Fatalf("channel.confirm approve = %#v, want false", request.Params["approve"])
 				}
 				return map[string]any{"operation": operatorChannelCLIOperationResult("rejected", 3, 0), "binding": map[string]any{}}
+			case "channel.onboarding_retry":
+				if request.Params["operation_id"] != operatorChannelCLIOperation {
+					t.Fatalf("rejected parent operation = %#v", request.Params)
+				}
+				return channelOnboardingCLIResult("failed", "rejected", false)
 			default:
 				t.Fatalf("unexpected method %q", request.Method)
 			}
@@ -147,12 +154,16 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 		opts := testRootCommandOptions(server)
 		opts.channelConnectWait = time.Second
 		opts.channelConnectPoll = time.Millisecond
+		opts.now = func() time.Time { return time.Date(2026, 8, 24, 23, 0, 0, 0, time.UTC) }
 		opts.input = strings.NewReader("n\n")
 		opts.stdinIsTerminal = func() bool { return true }
 		var stdout, stderr bytes.Buffer
 		code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"channel", "rebind", "telegram"}, &stdout, &stderr, opts)
 		if code != CLIExitValidation || !strings.Contains(stderr.String(), "rejected") {
 			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+		}
+		if got := strings.Join(methods, ","); got != "channel.onboarding_start,channel.confirm,channel.onboarding_retry" {
+			t.Fatalf("methods = %s, want rejected parent settlement", got)
 		}
 	})
 
@@ -254,6 +265,7 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 		opts := testRootCommandOptions(server)
 		opts.channelConnectWait = 5 * time.Millisecond
 		opts.channelConnectPoll = time.Millisecond
+		opts.now = func() time.Time { return time.Date(2026, 8, 24, 23, 0, 0, 0, time.UTC) }
 		opts.input = strings.NewReader("bot-token\n")
 		var stdout, stderr bytes.Buffer
 		code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"channel", "connect", "telegram", "--yes"}, &stdout, &stderr, opts)
@@ -335,6 +347,7 @@ func runOperatorChannelCLIWithInput(t *testing.T, server *httptest.Server, input
 	opts := testRootCommandOptions(server)
 	opts.channelConnectWait = time.Second
 	opts.channelConnectPoll = time.Millisecond
+	opts.now = func() time.Time { return time.Date(2026, 8, 24, 23, 0, 0, 0, time.UTC) }
 	opts.input = strings.NewReader(input)
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, opts)

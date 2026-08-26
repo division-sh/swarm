@@ -661,3 +661,25 @@ func TestWebhookOnboardingAdmissionIsRejectedAtActivationWithoutPublicIngress(t 
 		t.Fatalf("webhook activation error = %#v, %v", terminal, err)
 	}
 }
+
+func TestConnectedChannelRecoveryRunsWithoutPublicIngressOwner(t *testing.T) {
+	order := []string{}
+	teardown := &serveChannelRecoveryProbe{name: "teardown", order: &order}
+	onboarding := &serveChannelRecoveryProbe{name: "onboarding", order: &order}
+	if err := recoverServeConnectedChannelLifecycle(context.Background(), teardown, onboarding); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(order, ","); got != "teardown,onboarding" {
+		t.Fatalf("recovery order = %s, want teardown,onboarding", got)
+	}
+}
+
+type serveChannelRecoveryProbe struct {
+	name  string
+	order *[]string
+}
+
+func (p *serveChannelRecoveryProbe) Recover(context.Context) error {
+	*p.order = append(*p.order, p.name)
+	return nil
+}

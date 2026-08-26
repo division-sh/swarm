@@ -18,6 +18,7 @@ type IdentityLifecycle interface {
 	Principal() (operatorchannel.Principal, error)
 	Begin(context.Context, string, operatorchannel.OperationKind, int64, string, string, bool, time.Time) (operatorchannel.Operation, error)
 	GetOperation(context.Context, string) (operatorchannel.Operation, error)
+	ExpireOperation(context.Context, string, int64, time.Time) (operatorchannel.Operation, error)
 	CurrentBinding(context.Context, operatorchannel.InterfaceIdentity) (operatorchannel.Binding, error)
 	Readback(context.Context) ([]operatorchannel.Readback, error)
 }
@@ -227,9 +228,9 @@ func (s *Service) Get(ctx context.Context, operationID string) (Result, error) {
 	return s.result(ctx, op, candidate)
 }
 
-// ReadbackConnectedChannels composes retained identity state with the latest
-// durable onboarding operation for each exact activation slot. It is the only
-// list/status projection; consumers must not recompute readiness.
+// ReadbackConnectedChannels composes retained identity state with the operation
+// that owns each current activation, falling back to the latest operation only
+// when no current activation exists. It is the only list/status projection.
 func (s *Service) ReadbackConnectedChannels(ctx context.Context) ([]ConnectedChannelReadback, error) {
 	if s == nil {
 		return nil, fmt.Errorf("channel onboarding service is required")
@@ -247,7 +248,9 @@ func (s *Service) ReadbackConnectedChannels(ctx context.Context) ([]ConnectedCha
 		return nil, err
 	}
 	latestBySlot := make(map[string]Operation, len(operations))
+	operationByID := make(map[string]Operation, len(operations))
 	for _, operation := range operations {
+		operationByID[operation.OperationID] = operation
 		current, found := latestBySlot[operation.SlotKey]
 		if !found || operation.UpdatedAt.After(current.UpdatedAt) || (operation.UpdatedAt.Equal(current.UpdatedAt) && operation.Revision > current.Revision) {
 			latestBySlot[operation.SlotKey] = operation
@@ -262,6 +265,16 @@ func (s *Service) ReadbackConnectedChannels(ctx context.Context) ([]ConnectedCha
 	representedIdentity := map[string]struct{}{}
 	for _, slot := range slots {
 		operation := latestBySlot[slot]
+		activation, activationErr := s.store.GetConnectedChannelActivation(ctx, slot)
+		if activationErr == nil {
+			owner, found := operationByID[activation.OperationID]
+			if !found || owner.SlotKey != slot {
+				return nil, fmt.Errorf("%w: current activation %s has no exact owning onboarding operation", ErrConflict, activation.ActivationID)
+			}
+			operation = owner
+		} else if !errors.Is(activationErr, ErrNotFound) {
+			return nil, activationErr
+		}
 		identityKey := operation.Interface.Normalized().Key()
 		identity, found := identityByKey[identityKey]
 		if !found {
@@ -272,10 +285,8 @@ func (s *Service) ReadbackConnectedChannels(ctx context.Context) ([]ConnectedCha
 			return nil, err
 		}
 		row := ConnectedChannelReadback{Identity: identity, Operation: &result.Operation, Readiness: result.Readiness}
-		if activation, activationErr := s.store.GetConnectedChannelActivation(ctx, operation.SlotKey); activationErr == nil {
+		if activationErr == nil {
 			row.Activation = &activation
-		} else if !errors.Is(activationErr, ErrNotFound) {
-			return nil, activationErr
 		}
 		rows = append(rows, row)
 		representedIdentity[identityKey] = struct{}{}
@@ -409,6 +420,19 @@ func (s *Service) drive(ctx context.Context, op Operation, candidate Candidate, 
 				return s.result(ctx, op, candidate)
 			}
 		case PhaseAwaitingOperatorConfirmation:
+			if op.IdentityOperationID != "" {
+				identityOp, identityErr := s.currentIdentityOperation(ctx, op.IdentityOperationID)
+				if identityErr != nil {
+					return Result{}, identityErr
+				}
+				if identityOp.State.Terminal() && identityOp.State != operatorchannel.StateBound {
+					failed, failErr := s.failOperation(ctx, op, "identity_"+string(identityOp.State), fmt.Sprintf("identity operation %s ended in %s", identityOp.OperationID, identityOp.State))
+					if failErr != nil {
+						return Result{}, failErr
+					}
+					return s.result(ctx, failed, candidate)
+				}
+			}
 			binding, blocked, err := s.confirmedBinding(ctx, op)
 			if err != nil {
 				return Result{}, err
@@ -557,7 +581,7 @@ func (s *Service) advanceIdentity(ctx context.Context, op Operation, candidate C
 		})
 		return next, true, err
 	}
-	identityOp, err := s.identities.GetOperation(ctx, op.IdentityOperationID)
+	identityOp, err := s.currentIdentityOperation(ctx, op.IdentityOperationID)
 	if err != nil {
 		return op, false, err
 	}
@@ -574,6 +598,18 @@ func (s *Service) advanceIdentity(ctx context.Context, op Operation, candidate C
 		failed, err := s.failOperation(ctx, op, "identity_"+string(identityOp.State), fmt.Sprintf("identity operation %s ended in %s", identityOp.OperationID, identityOp.State))
 		return failed, false, err
 	}
+}
+
+func (s *Service) currentIdentityOperation(ctx context.Context, operationID string) (operatorchannel.Operation, error) {
+	identityOp, err := s.identities.GetOperation(ctx, operationID)
+	if err != nil {
+		return operatorchannel.Operation{}, err
+	}
+	now := s.now().UTC()
+	if !identityOp.State.Terminal() && !identityOp.ExpiresAt.IsZero() && !identityOp.ExpiresAt.After(now) {
+		return s.identities.ExpireOperation(context.WithoutCancel(ctx), identityOp.OperationID, identityOp.Revision, now)
+	}
+	return identityOp, nil
 }
 
 func (s *Service) failOperation(ctx context.Context, op Operation, code, message string) (Operation, error) {
@@ -597,7 +633,7 @@ func (s *Service) failOperation(ctx context.Context, op Operation, code, message
 
 func (s *Service) confirmedBinding(ctx context.Context, op Operation) (operatorchannel.Binding, bool, error) {
 	if op.IdentityOperationID != "" {
-		identityOp, err := s.identities.GetOperation(ctx, op.IdentityOperationID)
+		identityOp, err := s.currentIdentityOperation(ctx, op.IdentityOperationID)
 		if err != nil {
 			return operatorchannel.Binding{}, false, err
 		}

@@ -386,6 +386,10 @@ func (s *PostgresStore) ExecuteSourceOperation(ctx context.Context, command dura
 	return s.durableDataOwner.ExecuteSourceOperation(ctx, command)
 }
 
+func (s *PostgresStore) ExpireChannelBinding(ctx context.Context, req operatorchannel.ExpireRequest) (operatorchannel.Operation, error) {
+	return s.operatorChannelPostgresOwner.ExpireChannelBinding(ctx, req)
+}
+
 func (s *PostgresStore) ExpireDecisionCardInputDrafts(ctx context.Context, now time.Time) (int, error) {
 	return s.decisionPostgresOwner.ExpireDecisionCardInputDrafts(ctx, now)
 }
@@ -1656,6 +1660,10 @@ func (s *SQLiteRuntimeStore) ExecuteCompletionCandidate(ctx context.Context, can
 
 func (s *SQLiteRuntimeStore) ExecuteSourceOperation(ctx context.Context, command durabledata.SourceCommand) (durabledata.SourceOperationResult, error) {
 	return s.durableDataOwner.ExecuteSourceOperation(ctx, command)
+}
+
+func (s *SQLiteRuntimeStore) ExpireChannelBinding(ctx context.Context, req operatorchannel.ExpireRequest) (operatorchannel.Operation, error) {
+	return s.operatorChannelSQLiteOwner.ExpireChannelBinding(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) ExpireDecisionCardInputDrafts(ctx context.Context, now time.Time) (int, error) {
