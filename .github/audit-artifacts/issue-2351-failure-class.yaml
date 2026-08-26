@@ -2,7 +2,7 @@ version: 1
 kind: pre_implementation_failure_class_artifact
 issue: 2351
 audit_base: 7dd0174cd8bf0c2d36765613105b28e24325087e
-phase: pre_implementation_gate_cycle_5_repair
+phase: pre_implementation_gate_cycle_6_repair
 implementation_frozen: true
 supersedes:
   adoption_only_audit: https://github.com/division-sh/swarm/issues/2351#issuecomment-5426766949
@@ -12,12 +12,15 @@ supersedes:
   cycle_4_gate: https://github.com/division-sh/swarm/issues/2351#issuecomment-5429632239
   cycle_5_contradiction: https://github.com/division-sh/swarm/issues/2351#issuecomment-5430274000
   cycle_5_gate: https://github.com/division-sh/swarm/issues/2351#issuecomment-5430579890
+  cycle_6_audit: https://github.com/division-sh/swarm/issues/2351#issuecomment-5430853655
+  cycle_6_gate: https://github.com/division-sh/swarm/issues/2351#issuecomment-5430956275
 binding_context:
   issue: https://github.com/division-sh/swarm/issues/2351
   implementation_discovery: https://github.com/division-sh/swarm/issues/2351#issuecomment-5428191484
   insufficient_gate: https://github.com/division-sh/swarm/issues/2351#issuecomment-5428808311
   source_scope_insufficient_gate: https://github.com/division-sh/swarm/issues/2351#issuecomment-5429122839
   source_transition_insufficient_gate: https://github.com/division-sh/swarm/issues/2351#issuecomment-5430579890
+  exact_observation_insufficient_gate: https://github.com/division-sh/swarm/issues/2351#issuecomment-5430956275
   architecture_parent: 2250
   blocked_supported_surface: 2008
   separate_delivery_class: 2339
@@ -46,21 +49,25 @@ class_model:
     - exact_bundle_source_scoped_active_dynamic_executable_topology_reconstruction
     - exact_source_transition_readiness_plan_canonicalization
     - predecessor_readiness_completion_posture_preservation
+    - exact_source_scoped_readiness_observation_for_startup_retry_and_recovery_diagnostics
+    - exact_run_and_source_scoped_readiness_observation_for_live_source_revision
+    - observed_state_guarded_readiness_plan_replacement
     - optional_interrupted_execution_and_effect_replay
     - startup_refusal_for_incomplete_dynamic_readiness_without_replay_authority
     - current_manager_occurrence_agent_and_route_runnability
     - multi_context_startup_isolation_and_all_or_nothing_admission
-  working_failure_class: source_scoped_active_dynamic_topology_reconstruction_and_required_source_transition_canonicalization
+  working_failure_class: source_and_run_scoped_dynamic_readiness_observation_canonicalization_and_process_reconstruction
   immediate_parent_failure_class: startup_topology_reconstruction_and_execution_replay_policy_coupling
   parent_failure_class: multi_phase_runtime_startup_readiness_and_lifecycle_ownership
   architecture_parent_issue: 2250
-  broader_failure_class: process_required_topology_and_desired_source_transition_share_optional_replay_and_post_start_ownership
-  framing: broad_enough_after_gate_cycle_5_source_transition_absorption
+  broader_failure_class: context_bound_readiness_consumers_share_global_observation_and_unguarded_desired_state_replacement
+  framing: broad_enough_after_gate_cycle_6_global_reader_and_temporal_guard_absorption
   prior_framing: too_narrow_and_superseded
   entry_point_not_boundary: >-
     The skip at Runtime.Start and registered/stopped adoption are entry points. The
     audit boundary includes every startup consumer in HydrateForStartup, every
-    current-format route/readiness producer, execution admission, both Manager run
+    current-format route/readiness producer, automatic retry, live source revision,
+    recovery diagnostics, observed-state replacement, execution admission, both Manager run
     modes, process route publication, continuation synchronization, public readiness,
     refusal, compensation, restart postures, single- and multi-context serving,
     exact source isolation, and both stores.
@@ -68,7 +75,7 @@ class_model:
   chosen_class_closure_commitment: true
   closure_feasible_in_one_pr: true
   local_adoption_only_fix_would_leave_same_concept_interpreter_live: true
-  corrected_class_complete_fix_leaves_same_concept_interpreter_live: false_after_exact_item_source_transition_owner_is_consumed
+  corrected_class_complete_fix_leaves_same_concept_interpreter_live: false_after_global_list_port_deletion_and_observed_state_guarded_replacement
 
 governing_policy:
   current_source_completed_active_readiness: >-
@@ -94,14 +101,19 @@ governing_policy:
     Preserve its incomplete posture. Recovery-disabled startup refuses before any
     readiness mutation. Recovery-enabled startup may canonicalize and resume it
     through the same current-source owner and existing keyed reconciler.
-  source_scoped_startup_projection:
-    operation: InspectDynamicFlowRuntimeStartupProjection
+  source_scoped_readiness_projection:
+    operation: InspectDynamicFlowRuntimeReadinessForSource
     input: exact_immutable_BundleSourceFact
     selected_store_owner: dynamic_flow_runtime_readiness_persistence
     query_boundary: >-
       PostgreSQL and SQLite join readiness to flow_instances and runs and constrain
       canonical runs.bundle_hash plus runs.bundle_source in SQL. An unscoped list,
       followed by process-side filtering, is forbidden.
+    consumers:
+      - all_context_startup_preflight_and_runtime_revalidation
+      - generation_owned_automatic_pending_retry
+      - manager_recovery_diagnostic_and_admission_snapshot
+      - post_manager_completed_topology_reconstruction
     output:
       - current_source_completed_rows
       - current_source_ordinary_pending_rows
@@ -122,12 +134,51 @@ governing_policy:
       exact-item writes, then the projection is reloaded and must contain no source
       transition before Manager.Run. It is reloaded again after Manager.Run; an
       earlier snapshot never becomes process-topology authority.
+  exact_run_readiness_projection:
+    operation: InspectDynamicFlowRuntimeReadinessForRun
+    input:
+      - exact_run_id
+      - exact_immutable_BundleSourceFact
+    selected_store_owner: dynamic_flow_runtime_readiness_persistence
+    query_boundary: >-
+      PostgreSQL and SQLite constrain readiness by exact readiness.run_id and the
+      joined owning run's bundle_hash plus bundle_source before decoding any plan.
+      ReconcileDynamicFlowRuntimeReadinessPlansForRun receives only those rows; it
+      never enumerates all source rows or all eligible rows and then filters in Go.
+    consumers:
+      - live_EnsureStandingTargets_source_revision
+      - exact_item_current_source_plan_derivation
+  observed_state_guarded_plan_replacement:
+    operation: ReconcileDynamicFlowRuntimeReadinessPlan
+    request:
+      - exact_observed_readiness_record
+      - desired_current_source_plan
+      - exact_observed_at
+    observed_coordinate:
+      - normalized_plan_json
+      - owning_run_bundle_hash_and_bundle_source
+      - topology_ready_at_completion_posture
+      - creation_event_emitted_at_posture
+      - run_status_and_eligibility
+      - instance_status_terminated_at_and_eligibility
+    transaction_rule: >-
+      The existing selected-store writer locks the exact run/instance row and joins
+      its owning run and instance. Before writing, it compares every observed
+      coordinate above against current state. Any mismatch returns a typed stale
+      observation conflict with zero mutation. Unchanged and replaced are distinct
+      successful results. A reload after replacement is a fence, not a substitute
+      for the locked comparison.
+    consumers:
+      - live_source_revision
+      - predecessor_completed_source_transition
+      - recovery_authorized_predecessor_pending_source_transition
   exact_item_source_transition_owner: >-
     Extract current-source plan derivation from
     ReconcileDynamicFlowRuntimeReadinessPlansForRun and feed only source-transition
-    items returned by the scoped projection to the existing selected-store
-    ReconcileDynamicFlowRuntimeReadinessPlan writer. Never call or post-filter the
-    unscoped readiness list. Existing emitted-creation immutability and exact
+    observations returned by the scoped projection to the existing selected-store
+    ReconcileDynamicFlowRuntimeReadinessPlan writer. Live source revision receives
+    its observations from the exact run-and-source SQL projection. Never call or
+    post-filter an unscoped readiness list. Existing emitted-creation immutability and exact
     identity/execution-mode checks remain fail closed.
   source_transition_desired_topology_work: >-
     Canonicalizing an authorized source transition includes the existing keyed
@@ -157,6 +208,8 @@ governing_policy:
     - predecessor_plan_reconstruction
     - generic_pending_classification_for_source_transition
     - second_source_transition_writer
+    - desired_plan_replacement_without_exact_observed_coordinate
+    - global_list_for_automatic_retry_live_revision_or_recovery_diagnostics
 
 startup_order:
   sequence:
@@ -270,6 +323,26 @@ startup_consumer_matrix:
   predecessor_pending_source_transition:
     classification: source_canonicalization_and_resume_are_recovery_gated
     proof: predecessor_incomplete_posture_cannot_be_erased_by_source_rebind
+  generation_owned_automatic_readiness_retry:
+    classification: exact_source_scoped_current_pending_consumer
+    replacement: InspectDynamicFlowRuntimeReadinessForSource
+    proof: >-
+      The manager-owned immutable BundleSourceFact selects rows in SQL before decode;
+      the loop retries only current ordinary pending rows for its own source. Source
+      transitions retain their separate authorization and foreign rows are invisible.
+  manager_recovery_diagnostic_and_admission_snapshot:
+    classification: exact_source_scoped_observation_only_consumer
+    replacement: InspectDynamicFlowRuntimeReadinessForSource
+    proof: >-
+      The snapshot counts current ordinary pending plus predecessor-pending transition
+      work for only the manager-owned source and performs no readiness mutation.
+  live_standing_source_revision:
+    classification: exact_run_and_current_source_scoped_derivation_consumer
+    replacement: InspectDynamicFlowRuntimeReadinessForRun
+    proof: >-
+      The selected store constrains exact run_id and current BundleSourceFact in SQL
+      before decode; current semantic authority derives desired plans only from those
+      exact observed rows and passes each observation to the guarded writer.
   persisted_dynamic_route_without_readiness:
     classification: invalid_obsolete_and_deleted
     proof: source_scoped_current_activation_commits_readiness_and_exact_route_topology_together
@@ -328,21 +401,36 @@ route_producer_census:
     context publish or reject another context's route.
 
 canonical_owners:
-  source_scoped_startup_projection:
-    owner: selected_store_InspectDynamicFlowRuntimeStartupProjection_by_BundleSourceFact
+  source_scoped_readiness_projection:
+    owner: selected_store_InspectDynamicFlowRuntimeReadinessForSource_by_BundleSourceFact
     real_semantic_owner: true
     consumers:
       - serve_all_context_observation_preflight
       - runtime_start_pre_manager_revalidation
+      - generation_owned_automatic_pending_retry
+      - manager_recovery_diagnostic_and_admission_snapshot
       - post_manager_completed_topology_reconstruction
       - source_scoped_invalid_route_validation
+  exact_run_readiness_projection:
+    owner: selected_store_InspectDynamicFlowRuntimeReadinessForRun_by_run_id_and_BundleSourceFact
+    real_semantic_owner: true
+    consumers:
+      - live_EnsureStandingTargets_source_revision
+      - exact_item_current_source_derivation
   exact_item_source_transition_canonicalization:
-    owner: current_semantic_source_derivation_plus_existing_ReconcileDynamicFlowRuntimeReadinessPlan_writer
+    owner: current_semantic_source_derivation_plus_observed_state_guarded_ReconcileDynamicFlowRuntimeReadinessPlan_writer
     real_semantic_owner: true
     consumers:
       - predecessor_completed_transition_before_manager_run
       - predecessor_pending_transition_only_under_recovery_authority
       - guarded_projection_reload_and_transition_empty_fence
+  observed_state_replacement:
+    owner: existing_selected_store_ReconcileDynamicFlowRuntimeReadinessPlan_with_observed_coordinate
+    real_semantic_owner: true
+    consumers:
+      - live_source_revision
+      - predecessor_completed_transition_before_manager_run
+      - predecessor_pending_transition_under_recovery
   desired_dynamic_topology:
     owner: dynamic_flow_runtime_readiness_plan_keyed_by_run_and_instance
     real_semantic_owner: true
@@ -393,8 +481,13 @@ systematic_consumption_audit:
   sqlite_source_scoped_projection: moved_to_same_typed_store_contract
   cold_revision_predecessor_completed_plan: moved_to_mandatory_exact_item_current_source_canonicalization
   cold_revision_predecessor_pending_plan: remains_recovery_gated_and_refuses_without_recovery
-  standing_EnsureStandingTargets_post_start_source_revision: no_longer_first_startup_canonicalization_owner
-  unscoped_readiness_and_route_lists: invalid_for_mandatory_topology_startup
+  standing_EnsureStandingTargets_post_start_source_revision: moved_to_exact_run_and_source_SQL_projection_plus_guarded_writer
+  reconcilePendingDynamicFlowRuntimeReadiness_automatic_retry: moved_to_exact_source_projection_current_pending_only
+  RecoverableStateSnapshot_readiness_inspection: moved_to_exact_source_projection_observation_only
+  ReconcileDynamicFlowRuntimeReadinessPlansForRun_live_revision: moved_to_exact_run_and_source_SQL_projection
+  ListDynamicFlowRuntimeReadiness_interface_and_adapters: removed_end_to_end_with_zero_production_symbol_census
+  unscoped_readiness_and_route_lists: invalid_for_every_context_bound_readiness_consumer
+  desired_only_ReconcileDynamicFlowRuntimeReadinessPlan: evolved_to_compare_exact_observation_under_existing_lock
   fresh_spawn_before_manager_run: moved_to_phase_aware_owner_prepared_before_run
   fresh_spawn_during_manager_run: moved_to_phase_aware_owner_runnable_current_occurrence
   persisted_completed_readiness_default_restart: moved_to_mandatory_topology_only_reconstruction
@@ -405,7 +498,7 @@ systematic_consumption_audit:
   manager_authoritative_delivery_only_run: already_consumes_lifecycle_replacement_owner
   lifecycle_only_removed_declaration_adoption: different_non_executable_concept_preserved
   reconfigure_restart_teardown_shutdown_reset: already_consume_lifecycle_coordinator
-  direct_post_commit_ensure_source_revision_retry_readiness: already_consume_keyed_readiness_owner
+  direct_post_commit_ensure_source_revision_retry_readiness: consume_keyed_reconciler_after_exact_scoped_observation_and_guarded_write
   flow_route_process_publication: moved_behind_completed_topology_only_verification_on_startup
   generic_no_readiness_route_restore: invalid_removed
   selected_contract_route_recovery: different_recovery_evidence_concept_preserved
@@ -425,6 +518,11 @@ invalid_or_non_authoritative_paths:
   - predecessor_source_plan_as_completed_reconstruction_authority
   - predecessor_source_plan_as_ordinary_pending_without_preserved_posture
   - unscoped_ListDynamicFlowRuntimeReadiness_for_source_transition
+  - unscoped_ListDynamicFlowRuntimeReadiness_for_automatic_retry
+  - unscoped_ListDynamicFlowRuntimeReadiness_for_live_source_revision
+  - unscoped_ListDynamicFlowRuntimeReadiness_for_recovery_diagnostics
+  - desired_plan_only_readiness_replacement_without_observation_CAS
+  - post_write_reload_as_substitute_for_locked_observation_comparison
   - post_Manager_Run_EnsureStandingTargets_as_first_source_transition_owner
 
 manifestations:
@@ -473,6 +571,24 @@ manifestations:
   hostile_cross_source_path_alias:
     disposition: in_scope_reproduced_and_fixed
     planned_proof: similar_paths_from_another_source_cannot_adopt_publish_or_deny_current_context
+  foreign_malformed_or_pending_row_vs_automatic_retry:
+    disposition: in_scope_reproduced_and_fixed
+    planned_proof: dual_store_local_retry_decodes_and_retries_only_exact_source_rows_without_foreign_error_or_mutation
+  foreign_malformed_or_pending_row_vs_recovery_snapshot:
+    disposition: in_scope_reproduced_and_fixed
+    planned_proof: dual_store_local_snapshot_counts_only_exact_source_recoverable_rows_without_foreign_error_or_interpretation
+  foreign_malformed_or_pending_row_vs_live_source_revision:
+    disposition: in_scope_reproduced_and_fixed
+    planned_proof: dual_store_exact_run_revision_derives_and_replaces_only_selected_run_rows_without_foreign_decode_or_mutation
+  observed_plan_or_source_changed_before_replacement:
+    disposition: in_scope_reproduced_and_fixed
+    planned_proof: dual_store_locked_compare_rejects_changed_normalized_plan_or_owning_run_source_with_typed_stale_conflict_and_zero_overwrite
+  observed_completion_or_creation_posture_changed_before_replacement:
+    disposition: in_scope_reproduced_and_fixed
+    planned_proof: dual_store_locked_compare_rejects_changed_topology_ready_at_or_creation_event_emitted_at_with_typed_stale_conflict_and_zero_overwrite
+  observed_run_or_instance_eligibility_changed_before_replacement:
+    disposition: in_scope_reproduced_and_fixed
+    planned_proof: dual_store_locked_compare_rejects_changed_run_status_instance_status_or_terminated_at_with_typed_stale_conflict_and_zero_overwrite
   persistent_recovery_disabled_unscoped_read_boundary:
     disposition: in_scope_execution_proven_through_canonical_owner
     planned_proof: existing_unscoped_read_guard_remains_green
@@ -500,15 +616,29 @@ supported_surface_proof:
   store_contract_parity:
     - sqlite_three_class_exact_source_projection_classification
     - postgresql_three_class_exact_source_projection_classification
+    - sqlite_and_postgresql_exact_run_plus_source_projection_classification
     - predecessor_completion_posture_preserved_on_both
     - malformed_identity_and_template_route_without_readiness_fail_closed_on_both
     - static_route_without_dynamic_readiness_is_inert_on_both
+    - foreign_malformed_and_pending_rows_are_invisible_to_local_retry_snapshot_and_live_revision
+    - observed_state_guard_rejects_every_plan_posture_source_and_eligibility_race_with_zero_mutation
   multi_context_proof:
     - completed_topology_isolated_per_source
     - pending_in_either_source_refuses_all_contexts_before_mutation
     - hostile_same_path_cross_source_rows_are_inert_to_the_wrong_context
     - no_unscoped_read_or_process_side_filter
     - source_transition_exact_item_writes_never_cross_context
+  scoped_consumer_proof:
+    - automatic_retry_consumes_exact_source_current_pending_only
+    - recovery_snapshot_consumes_exact_source_pending_postures_observation_only
+    - live_source_revision_consumes_exact_run_and_source_rows_only
+    - old_ListDynamicFlowRuntimeReadiness_symbol_port_adapters_forwarders_and_production_callers_are_zero
+  observed_state_race_matrix:
+    - normalized_plan_or_plan_source_changed
+    - topology_ready_at_completion_posture_changed
+    - creation_event_emitted_at_posture_changed
+    - owning_run_bundle_source_or_status_changed
+    - instance_status_or_terminated_at_eligibility_changed
   negative_no_replay_proof:
     - no_timer_arm_or_restore
     - no_creation_event_commit_or_dispatch
@@ -521,7 +651,7 @@ supported_surface_proof:
     - unchanged_issue_2008_M5
     - supported_cold_source_revision_SQLite_and_PostgreSQL
     - complete_issue_2008_M1_through_M17_SQLite_and_PostgreSQL
-    - go_test_all_with_host_postgresql
+    - go_run_cmd_swarm_test_full_with_host_postgresql
 
 tracker:
   tracker_state_decision: current_issue_updated_before_coding
@@ -538,10 +668,11 @@ tracker:
   post_pre_audit_parent_action: close_corrected_child_now_keep_architecture_parent_open
   watchlist_promotion_check: >-
     The node already tracks split lifecycle/startup ownership and #2250 tracks broader
-    readiness orchestration. Multi-bundle serving and cold source transition are live
-    consumers of the same mandatory topology concept and are absorbed here through
-    one bounded source-scoped three-class projection plus the existing exact-item
-    writer; no broader recovery family must be absorbed.
+    readiness orchestration. Multi-bundle serving, cold source transition, automatic
+    retry, live source revision, and recovery diagnostics are live consumers of the
+    same readiness observation concept and are absorbed here through one source-
+    scoped three-class projection, one exact-run derivative, and the existing writer
+    evolved with an observed-state guard; no broader recovery family must be absorbed.
   remaining_parent_tail:
     grouping: wholesale_Runtime_Start_typed_phase_decomposition_and_general_recovery_scoping
     owner: 2250
@@ -551,6 +682,8 @@ tracker:
     HydrateForStartup combines mandatory process reconstruction with optional durable
     work replay, while standing source persistence advances the canonical run source
     before the runtime-owned derived readiness plan is canonicalized after startup.
+    The persistence port also exposed a global collection reader to context-bound
+    managers and accepted desired replacement without an observed-state coordinate.
   long_run_direction: explicit_typed_startup_phases_under_issue_2250
   architecture_tracking_decision: update_existing_issue_2250_and_watchlist_only
   architecture_effort: medium_to_large
@@ -560,10 +693,11 @@ tracker:
 gate:
   independent_gate_required: true
   requested_outcome: approved
-  current_outcome: pending_gate_cycle_6_after_cycle_5_widening
+  current_outcome: pending_gate_cycle_7_after_cycle_6_widening
   prior_approval_superseded: https://github.com/division-sh/swarm/issues/2351#issuecomment-5429632239
   insufficient_cycle_5: https://github.com/division-sh/swarm/issues/2351#issuecomment-5430579890
-  blocking_ambiguity: source_transition_model_repaired_gate_review_pending
+  insufficient_cycle_6: https://github.com/division-sh/swarm/issues/2351#issuecomment-5430956275
+  blocking_ambiguity: exact_scoped_consumer_and_observed_state_writer_model_repaired_gate_review_pending
   stop_conditions:
     - another_current_format_active_topology_producer_without_readiness
     - topology_only_reconstruction_requires_durable_replay_mutation
@@ -572,3 +706,6 @@ gate:
     - second_process_liveness_authority_required
     - exact_item_current_source_derivation_cannot_preserve_predecessor_completion_posture
     - source_transition_requires_unscoped_read_or_second_readiness_writer
+    - any_production_ListDynamicFlowRuntimeReadiness_interpreter_survives
+    - exact_source_or_exact_run_SQL_scoping_cannot_serve_every_named_consumer
+    - existing_writer_cannot_compare_the_complete_observed_coordinate_under_its_current_lock

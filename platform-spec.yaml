@@ -5012,8 +5012,10 @@ engine:
           private exact topology overlay to complete that mutation's own delivery planning; the overlay never escapes rollback and is not a second
           global route owner. Any later route verification, timer-arm, creation-publication, or completion failure retires
           the process route while leaving the durable readiness row pending for the same owner.
-        automatic_recovery: The existing generation-owned manager retry loop enumerates incomplete eligible readiness rows
-          on both explicit post-commit signal and bounded periodic wakeup. It retries from a freshly loaded row, coalesces
+        automatic_recovery: The existing generation-owned manager retry loop reads incomplete eligible readiness rows only
+          through the selected store's exact-`BundleSourceFact` projection on both explicit post-commit signal and bounded
+          periodic wakeup. The store MUST constrain the owning run source before decoding any row; a manager MUST NOT enumerate
+          a global readiness list or interpret another source's malformed or pending row. It retries from a freshly loaded row, coalesces
           concurrent activation/Ensure/startup attempts by exact key, and never creates a second callback, scheduler, or
           readiness ledger. A pending readiness row is startup-recoverable work even when no persisted agent, generic route,
           selected-route recovery, or event receipt is otherwise present. Interrupted-work replay and mandatory process
@@ -5024,10 +5026,16 @@ engine:
         serving_generation_reconstruction: >-
           Every allowed serving generation MUST reconstruct completed, eligible, current-format dynamic topology regardless
           of `runtime.recovery_on_startup` or `DisablePersistentStartupRecovery`. The selected-store readiness owner exposes
-          one typed `InspectDynamicFlowRuntimeStartupProjection` operation that requires the runtime's exact immutable
-          `BundleSourceFact`. PostgreSQL and SQLite MUST join readiness to its flow instance and run and constrain canonical
+          one typed `InspectDynamicFlowRuntimeReadinessForSource` operation that requires the runtime's exact immutable
+          `BundleSourceFact`. Startup preflight/revalidation/reconstruction, generation-owned automatic retry, and manager
+          recovery diagnostics MUST consume this operation or a named typed derivative of its result. PostgreSQL and SQLite
+          MUST join readiness to its flow instance and run and constrain canonical
           `runs.bundle_hash` plus `runs.bundle_source` in the database query. An unscoped readiness or route list followed by
-          process-side filtering is forbidden. The projection classifies exact-source eligible rows into three disjoint sets.
+          process-side filtering is forbidden for any readiness consumer. The former global
+          `ListDynamicFlowRuntimeReadiness` persistence port has no authoritative use and MUST NOT exist. Live source revision
+          uses a separate typed `InspectDynamicFlowRuntimeReadinessForRun` operation constrained in SQL by both exact `run_id`
+          and the owning run's current `BundleSourceFact`; it MUST NOT list a source or the store and filter in process. The
+          source projection classifies exact-source eligible rows into three disjoint sets.
           `current_completed` means the owning run and normalized plan both match the requested source and durable readiness is
           complete. `current_pending` means both source coordinates match but readiness is incomplete. `source_transition_required`
           means the SQL-selected owning run matches the requested current source while an otherwise valid exact run/instance
@@ -5042,12 +5050,19 @@ engine:
           required work rather than completed topology. Runtime startup repeats its own source inspection to fence races.
           Before Manager run, source transitions MUST consume only the exact items returned by that scoped projection. The
           current semantic source derives the current workflow version, agent set and revisions, exact route projection, and
-          any still-unemitted creation plan. The existing selected-store `ReconcileDynamicFlowRuntimeReadinessPlan` writer and
+          any still-unemitted creation plan. Every projection item carries the exact observed normalized plan, owning-run source,
+          topology completion posture, creation-emission posture, run status, and instance status/termination posture. The
+          existing selected-store `ReconcileDynamicFlowRuntimeReadinessPlan` writer and
           keyed lifecycle reconciler remain the sole canonicalization owners. Previously completed transitions canonicalize
           and complete the desired current-source topology regardless of recovery policy; previously pending transitions do so
           only when replay is authorized. This bounded desired-source convergence may reconcile the transitioned item's exact
           agents, routes, timers, and still-unemitted creation obligation; it does not authorize unrelated effect, drain,
-          receipt, delivery, diagnostic, budget, or selected-contract replay. No unscoped readiness list, second writer,
+          receipt, delivery, diagnostic, budget, or selected-contract replay. The existing writer MUST accept the exact observed
+          readiness item together with the desired plan. Under its existing transaction lock it MUST compare normalized plan
+          JSON, owning-run source and eligibility, topology completion posture, creation-emission posture, and instance
+          eligibility before replacement. Any changed coordinate returns a typed stale-observation conflict with zero mutation;
+          a post-write reload cannot substitute for this comparison. No unscoped readiness list, desired-only replacement,
+          second writer,
           predecessor agent/version trust, or
           post-start `EnsureStandingTargets` fallback is permitted. Startup then reloads the exact-source projection, requires
           the source-transition set to be empty, and applies ordinary pending recovery/refusal policy. Unresolved rows refuse
