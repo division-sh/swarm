@@ -258,6 +258,51 @@ methods:
     examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
     service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}
     gap_classification: []
+  - method: channel.onboarding_get
+    transport: http
+    required_params: [operation_id]
+    declared_errors: [CHANNEL_OPERATION_NOT_FOUND]
+    happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestChannelOnboardingAPIContractEvidence}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}]}
+    required_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}]}
+    unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}]}
+    auth: {status: covered, proof_refs: [{kind: go_test, name: TestHandlerHTTPAuthBoundary}, {kind: go_test, name: TestChannelOnboardingAPIContractEvidence}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}]}
+    declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestChannelOnboardingAPIContractEvidence}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}]}
+    idempotency: {status: not_applicable}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestChannelOnboardingAPIContractEvidence}, {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}]}
+    notification_schema: {status: not_applicable}
+    examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
+    service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}
+    gap_classification: []
+  - method: channel.onboarding_retry
+    transport: http
+    required_params: [operation_id]
+    declared_errors: [CHANNEL_OPERATION_NOT_FOUND, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, CHANNEL_CREDENTIAL_REQUIRED]
+    happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestChannelOnboardingAPIContractEvidence}]}
+    required_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
+    unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}]}
+    auth: {status: covered, proof_refs: [{kind: go_test, name: TestHandlerHTTPAuthBoundary}, {kind: go_test, name: TestChannelOnboardingAPIContractEvidence}]}
+    declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestChannelOnboardingAPIContractEvidence}]}
+    idempotency: {status: covered, proof_refs: [{kind: go_test, name: TestChannelOnboardingAPIContractEvidence}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestChannelOnboardingAPIContractEvidence}]}
+    notification_schema: {status: not_applicable}
+    examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
+    service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}
+    gap_classification: []
+  - method: channel.onboarding_start
+    transport: http
+    required_params: [verb, provider]
+    declared_errors: [CHANNEL_INTERFACE_NOT_FOUND, CHANNEL_INTERFACE_AMBIGUOUS, CHANNEL_BINDING_CONFLICT, CHANNEL_REVISION_CONFLICT, CHANNEL_PROOF_UNAVAILABLE, CHANNEL_CREDENTIAL_REQUIRED, IDEMPOTENCY_CONFLICT]
+    happy_path: {status: covered, proof_refs: [{kind: go_test, name: TestChannelOnboardingAPIContractEvidence}]}
+    required_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}, {kind: go_test, name: TestHandlerHTTPJSONRPCEnvelopeAndErrorSemantics}]}
+    unknown_top_level_param_validation: {status: shared, proof_refs: [{kind: go_helper, name: validateParams}]}
+    auth: {status: covered, proof_refs: [{kind: go_test, name: TestHandlerHTTPAuthBoundary}, {kind: go_test, name: TestChannelOnboardingAPIContractEvidence}]}
+    declared_error_tests: {status: covered, proof_refs: [{kind: go_test, name: TestChannelOnboardingAPIContractEvidence}]}
+    idempotency: {status: covered, proof_refs: [{kind: go_test, name: TestChannelOnboardingAPIContractEvidence}]}
+    result_schema: {status: covered, proof_refs: [{kind: go_test, name: TestOpenRPCSuccessfulResultSchemas}, {kind: go_test, name: TestChannelOnboardingAPIContractEvidence}]}
+    notification_schema: {status: not_applicable}
+    examples: {status: policy_deferred, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}]}
+    service_discovery_publication: {status: policy_not_published, proof_refs: [{kind: artifact, path: platform-spec.yaml}, {kind: artifact, path: openrpc.json}, {kind: go_test, name: TestOpenRPCComplianceMatrixCoversEveryGeneratedMethod}, {kind: go_test, name: TestServiceDiscoveryPolicyDoesNotServeRPCDiscover}]}
+    gap_classification: []
   - method: channel.connect
     transport: http
     required_params: [interface, expected_revision]

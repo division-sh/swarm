@@ -131,7 +131,8 @@ func nonCompletionRegistrationsForParity(t *testing.T) []runtimeeffects.Registra
 	for _, registration := range runtimeeffects.Registrations() {
 		if registration.Kind == runtimeeffects.KindProviderTurn ||
 			registration.Kind == runtimeeffects.KindProviderStartupProbe ||
-			registration.Kind == runtimeeffects.KindServeRegistration {
+			registration.Kind == runtimeeffects.KindServeRegistration ||
+			registration.Kind == runtimeeffects.KindChannelConfirmation {
 			continue
 		}
 		if _, duplicate := actual[registration.Adapter]; duplicate {

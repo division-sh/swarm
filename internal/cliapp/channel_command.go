@@ -9,42 +9,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cli/argcount"
+	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/spf13/cobra"
 )
 
-type channelInterfaceResult struct {
-	InterfaceRef        string `json:"interface_ref"`
-	ChannelPackID       string `json:"channel_pack_id"`
-	ChannelPackVersion  string `json:"channel_pack_version"`
-	ChannelManifestHash string `json:"channel_manifest_hash"`
-	SemanticGeneration  string `json:"semantic_generation"`
-	Selector            string `json:"selector"`
-}
-
-type channelOperationResult struct {
-	OperationID         string                 `json:"operation_id"`
-	Kind                string                 `json:"kind"`
-	Interface           channelInterfaceResult `json:"interface"`
-	Challenge           string                 `json:"challenge"`
-	State               string                 `json:"state"`
-	Revision            int64                  `json:"revision"`
-	BindingRevision     int64                  `json:"binding_revision"`
-	AccountPresentation string                 `json:"account_presentation"`
-	ConversationScope   string                 `json:"conversation_scope"`
-	ExpiresAt           time.Time              `json:"expires_at"`
-}
-
-type channelReadbackResult struct {
-	Interface           channelInterfaceResult  `json:"interface"`
-	Status              string                  `json:"status"`
-	Reason              string                  `json:"reason"`
-	BindingRevision     int64                   `json:"binding_revision"`
-	AccountPresentation string                  `json:"account_presentation"`
-	ConversationScope   string                  `json:"conversation_scope"`
-	ProofRevision       int64                   `json:"proof_revision"`
-	PendingOperation    *channelOperationResult `json:"pending_operation"`
-}
+type channelInterfaceResult = operatorchannel.InterfaceIdentity
+type channelOperationResult = operatorchannel.Operation
+type channelReadbackResult = channelonboarding.ConnectedChannelReadback
 
 type channelListResult struct {
 	PrincipalID string                  `json:"principal_id"`
@@ -52,17 +25,23 @@ type channelListResult struct {
 }
 
 type channelOperationEnvelope struct {
-	Operation channelOperationResult `json:"operation"`
+	Operation channelOperationResult   `json:"operation"`
+	Binding   *operatorchannel.Binding `json:"binding,omitempty"`
 }
 
 type channelConnectOptions struct {
 	apiOptions     rootCommandOptions
 	output         cliOutputOptions
+	verb           string
 	noSave         bool
-	replace        bool
 	yes            bool
+	bundle         string
+	interfaceRef   string
+	target         string
 	idempotencyKey string
 }
+
+type channelOnboardingResult = channelonboarding.Result
 
 func newChannelCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
@@ -73,28 +52,50 @@ func newChannelCommand(opts rootCommandOptions) *cobra.Command {
 			return cmd.Help()
 		},
 	}
-	cmd.AddCommand(newChannelConnectCommand(opts), newChannelListCommand(opts), newChannelUnbindCommand(opts), newChannelProofRevokeCommand(opts))
+	cmd.AddCommand(
+		newChannelLifecycleCommand(opts, "connect"),
+		newChannelLifecycleCommand(opts, "reconnect"),
+		newChannelLifecycleCommand(opts, "rebind"),
+		newChannelListCommand(opts),
+		newChannelUnbindCommand(opts),
+		newChannelProofRevokeCommand(opts),
+	)
 	return cmd
 }
 
-func newChannelConnectCommand(opts rootCommandOptions) *cobra.Command {
-	commandOpts := channelConnectOptions{apiOptions: opts}
+func newChannelLifecycleCommand(opts rootCommandOptions, verb string) *cobra.Command {
+	commandOpts := channelConnectOptions{apiOptions: opts, verb: verb}
 	cmd := &cobra.Command{
-		Use:   "connect <interface>",
-		Short: "Verify and connect an operator channel account.",
+		Use:   verb + " <provider>",
+		Short: channelLifecycleShort(verb),
 		Args:  argcount.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runChannelConnect(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], commandOpts)
 		},
 	}
-	cmd.Flags().BoolVar(&commandOpts.noSave, "no-save", false, "Do not save the verified account proof on this machine")
-	cmd.Flags().BoolVar(&commandOpts.replace, "replace", false, "Replace the currently bound account after confirmation")
+	if verb != "reconnect" {
+		cmd.Flags().BoolVar(&commandOpts.noSave, "no-save", false, "Do not save the verified account proof on this machine")
+	}
 	cmd.Flags().BoolVarP(&commandOpts.yes, "yes", "y", false, "Approve the authenticated claimant without an interactive prompt")
+	cmd.Flags().StringVar(&commandOpts.bundle, "bundle", "", "Select the exact bundle hash")
+	cmd.Flags().StringVar(&commandOpts.interfaceRef, "interface", "", "Select the exact pack-qualified channel interface")
+	cmd.Flags().StringVar(&commandOpts.target, "target", "", "Select the exact provider activation target")
 	cmd.Flags().StringVar(&commandOpts.idempotencyKey, "idempotency-key", "", "Optional idempotency key for safe retries (advanced)")
 	_ = cmd.Flags().MarkHidden("idempotency-key")
-	bindCLIAPIConnectionFlagsWithClass(cmd, &commandOpts.apiOptions, cliAPICommandClassControl, "swarm channel connect")
+	bindCLIAPIConnectionFlagsWithClass(cmd, &commandOpts.apiOptions, cliAPICommandClassControl, "swarm channel "+verb)
 	bindCLIOutputFlags(cmd, &commandOpts.output)
 	return cmd
+}
+
+func channelLifecycleShort(verb string) string {
+	switch verb {
+	case "reconnect":
+		return "Repair a provider channel while preserving its verified identity."
+	case "rebind":
+		return "Replace a provider channel's verified identity and activation."
+	default:
+		return "Connect a provider channel end to end."
+	}
 }
 
 func newChannelListCommand(opts rootCommandOptions) *cobra.Command {
@@ -152,7 +153,7 @@ func newChannelProofRevokeCommand(opts rootCommandOptions) *cobra.Command {
 			if err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
-			if row.ProofRevision < 1 {
+			if row.Identity.ProofRevision < 1 {
 				return returnCLIValidationError(cmd.ErrOrStderr(), fmt.Errorf("channel %s has no machine proof to revoke", args[0]))
 			}
 			var result struct {
@@ -160,10 +161,10 @@ func newChannelProofRevokeCommand(opts rootCommandOptions) *cobra.Command {
 					Revision int64 `json:"revision"`
 				} `json:"proof"`
 			}
-			if err := client.call(cmd.Context(), "channel.proof_revoke", map[string]any{"interface": args[0], "expected_revision": row.ProofRevision}, &result); err != nil {
+			if err := client.call(cmd.Context(), "channel.proof_revoke", map[string]any{"interface": args[0], "expected_revision": row.Identity.ProofRevision}, &result); err != nil {
 				return returnCLIAPIError(cmd.ErrOrStderr(), err, channelErrorClassifier())
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Revoked %s machine proof at revision %d.\n", row.Interface.ChannelPackID, result.Proof.Revision)
+			fmt.Fprintf(cmd.OutOrStdout(), "Revoked %s machine proof at revision %d.\n", row.Identity.Interface.ChannelPackID, result.Proof.Revision)
 			return nil
 		},
 	}
@@ -171,80 +172,147 @@ func newChannelProofRevokeCommand(opts rootCommandOptions) *cobra.Command {
 	return cmd
 }
 
-func runChannelConnect(ctx context.Context, out, errOut io.Writer, selector string, opts channelConnectOptions) error {
+func runChannelConnect(ctx context.Context, out, errOut io.Writer, provider string, opts channelConnectOptions) error {
 	if err := opts.output.validate(); err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
-	selector = strings.TrimSpace(selector)
-	if selector == "" {
-		return returnCLIValidationError(errOut, errors.New("channel interface is required"))
+	provider = strings.TrimSpace(provider)
+	if provider == "" {
+		return returnCLIValidationError(errOut, errors.New("channel provider is required"))
 	}
-	if !opts.yes && !controlStdinIsTerminal(opts.apiOptions) {
+	if (opts.verb == "connect" || opts.verb == "rebind") && !opts.yes && !controlStdinIsTerminal(opts.apiOptions) {
 		return returnCLIValidationError(errOut, errors.New("channel claimant confirmation requires a terminal or --yes"))
 	}
 	client, err := newCLIAPIClient(opts.apiOptions)
 	if err != nil {
 		return returnCLIAPIError(errOut, err, channelErrorClassifier())
 	}
-	list, err := fetchChannelList(ctx, client)
-	if err != nil {
-		return returnCLIAPIError(errOut, err, channelErrorClassifier())
-	}
-	row, err := selectChannelReadback(list.Channels, selector)
-	if err != nil {
-		return returnCLIValidationError(errOut, err)
-	}
-	method := "channel.connect"
-	if row.Status == "current" || row.Status == "revoked" {
-		method = "channel.reconnect"
-		if opts.replace {
-			method = "channel.rebind"
-		}
-	} else if opts.replace {
-		return returnCLIValidationError(errOut, errors.New("--replace requires a current channel binding"))
-	}
 	params := map[string]any{
-		"interface": row.Interface.Selector, "expected_revision": row.BindingRevision, "save_proof": !opts.noSave,
+		"provider": provider, "verb": opts.verb, "save_proof": !opts.noSave,
+	}
+	for key, value := range map[string]string{"bundle": opts.bundle, "interface": opts.interfaceRef, "target": opts.target} {
+		if value = strings.TrimSpace(value); value != "" {
+			params[key] = value
+		}
 	}
 	if strings.TrimSpace(opts.idempotencyKey) != "" {
 		params["idempotency_key"] = strings.TrimSpace(opts.idempotencyKey)
 	}
-	var begun channelOperationEnvelope
-	if err := client.call(ctx, method, params, &begun); err != nil {
+	if opts.verb == "connect" {
+		credential, readErr := readSecretValue(opts.apiOptions.input, errOut, false)
+		if readErr != nil {
+			return returnCLIValidationError(errOut, fmt.Errorf("read %s provider credential: %w", provider, readErr))
+		}
+		params["provider_credential"] = credential
+		defer delete(params, "provider_credential")
+	}
+	var begun channelOnboardingResult
+	if err := client.call(ctx, "channel.onboarding_start", params, &begun); err != nil {
 		return returnCLIAPIError(errOut, err, channelErrorClassifier())
 	}
-	op := begun.Operation
 	progressOut := out
 	if opts.output.asJSON || opts.output.quiet {
 		progressOut = io.Discard
 	}
-	fmt.Fprintf(progressOut, "Send this exact code through the live %s channel before %s:\n\n  %s\n\nWaiting for an authenticated claimant...\n", row.Interface.ChannelPackID, op.ExpiresAt.Local().Format(time.RFC3339), op.Challenge)
-	claimed, err := waitForChannelClaim(ctx, client, op, opts.apiOptions)
+	result, err := completeChannelOnboarding(ctx, client, begun, opts, progressOut, errOut)
 	if err != nil {
-		return returnCLIAPIError(errOut, err, channelErrorClassifier())
+		return err
 	}
-	if claimed.State == "bound" {
-		result := channelOperationEnvelope{Operation: claimed}
-		human, quiet := channelOperationRenderers(result, row.Interface.ChannelPackID)
-		return renderCLIOutput(out, errOut, opts.output, result, human, quiet)
+	return renderCLIOutput(out, errOut, opts.output, result, func(w io.Writer) {
+		fmt.Fprintf(w, "Connected %s channel READY at activation revision %d.\n", result.Operation.Provider, result.Operation.ActivationRevision)
+	}, func() ([]string, error) {
+		return []string{result.Operation.OperationID}, nil
+	})
+}
+
+func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result channelOnboardingResult, opts channelConnectOptions, progressOut, errOut io.Writer) (channelOnboardingResult, error) {
+	identityAnnounced := false
+	for {
+		switch result.Operation.Phase {
+		case "succeeded":
+			if result.Readiness == nil || !result.Readiness.Ready {
+				reason := "connected readiness evidence is unavailable"
+				if result.Readiness != nil && strings.TrimSpace(string(result.Readiness.Reason)) != "" {
+					reason = string(result.Readiness.Reason)
+				}
+				return channelOnboardingResult{}, returnCLIValidationError(errOut, fmt.Errorf("channel onboarding succeeded historically but the channel is not READY: %s", reason))
+			}
+			return result, nil
+		case "failed", "retired":
+			return channelOnboardingResult{}, returnCLIValidationError(errOut, fmt.Errorf("channel onboarding ended in %s: %s", result.Operation.Phase, result.Operation.FailureMessage))
+		}
+		if identity := result.IdentityOperation; identity != nil {
+			if identity.State == "awaiting_claim" {
+				if !identityAnnounced {
+					fmt.Fprintf(progressOut, "Send this exact code through the live %s channel before %s:\n\n  %s\n\nWaiting for an authenticated claimant...\n", result.Operation.Provider, identity.ExpiresAt.Local().Format(time.RFC3339), identity.Challenge)
+					identityAnnounced = true
+				}
+				var err error
+				result, err = waitForChannelOnboardingClaim(ctx, client, result, opts.apiOptions)
+				if err != nil {
+					return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
+				}
+				continue
+			}
+			if identity.State == "awaiting_confirmation" {
+				fmt.Fprintf(progressOut, "Claimed by %s in a %s conversation.\n", identity.AccountPresentation, identity.ConversationScope)
+				approve := opts.yes
+				var err error
+				if !approve {
+					approve, err = confirmChannelClaimant(opts.apiOptions.input, errOut)
+					if err != nil {
+						return channelOnboardingResult{}, returnCLIValidationError(errOut, err)
+					}
+				}
+				var confirmed channelOperationEnvelope
+				if err := client.call(ctx, "channel.confirm", map[string]any{"operation_id": identity.OperationID, "expected_revision": identity.Revision, "approve": approve}, &confirmed); err != nil {
+					return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
+				}
+				if !approve {
+					return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("channel claimant was rejected; onboarding remains incomplete"))
+				}
+			}
+		}
+		var next channelOnboardingResult
+		if err := client.call(ctx, "channel.onboarding_retry", map[string]any{"operation_id": result.Operation.OperationID}, &next); err != nil {
+			return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
+		}
+		if next.Operation.Revision == result.Operation.Revision && next.Operation.Phase == result.Operation.Phase {
+			return channelOnboardingResult{}, returnCLIValidationError(errOut, fmt.Errorf("channel onboarding is blocked in %s; retry after resolving the reported prerequisite", next.Operation.Phase))
+		}
+		result = next
 	}
-	if claimed.State != "awaiting_confirmation" {
-		return returnCLIValidationError(errOut, fmt.Errorf("channel operation ended in %s", claimed.State))
+}
+
+func waitForChannelOnboardingClaim(ctx context.Context, client *cliAPIClient, begun channelOnboardingResult, opts rootCommandOptions) (channelOnboardingResult, error) {
+	wait := opts.channelConnectWait
+	if wait <= 0 {
+		wait = 2 * time.Minute
 	}
-	fmt.Fprintf(progressOut, "Claimed by %s in a %s conversation.\n", claimed.AccountPresentation, claimed.ConversationScope)
-	approve := opts.yes
-	if !approve {
-		approve, err = confirmChannelClaimant(opts.apiOptions.input, errOut)
-		if err != nil {
-			return returnCLIValidationError(errOut, err)
+	poll := opts.channelConnectPoll
+	if poll <= 0 {
+		poll = 500 * time.Millisecond
+	}
+	deadline := time.NewTimer(wait)
+	defer deadline.Stop()
+	ticker := time.NewTicker(poll)
+	defer ticker.Stop()
+	for {
+		var current channelOnboardingResult
+		if err := client.call(ctx, "channel.onboarding_get", map[string]any{"operation_id": begun.Operation.OperationID}, &current); err != nil {
+			return channelOnboardingResult{}, err
+		}
+		if current.IdentityOperation == nil || current.IdentityOperation.State != "awaiting_claim" {
+			return current, nil
+		}
+		select {
+		case <-ctx.Done():
+			return channelOnboardingResult{}, ctx.Err()
+		case <-deadline.C:
+			return channelOnboardingResult{}, fmt.Errorf("timed out waiting for channel claim; operation %s remains durable and can be retried", begun.Operation.OperationID)
+		case <-ticker.C:
 		}
 	}
-	var confirmed channelOperationEnvelope
-	if err := client.call(ctx, "channel.confirm", map[string]any{"operation_id": claimed.OperationID, "expected_revision": claimed.Revision, "approve": approve}, &confirmed); err != nil {
-		return returnCLIAPIError(errOut, err, channelErrorClassifier())
-	}
-	human, quiet := channelOperationRenderers(confirmed, row.Interface.ChannelPackID)
-	return renderCLIOutput(out, errOut, opts.output, confirmed, human, quiet)
 }
 
 func runChannelList(ctx context.Context, out, errOut io.Writer, opts rootCommandOptions, output cliOutputOptions) error {
@@ -264,7 +332,7 @@ func runChannelList(ctx context.Context, out, errOut io.Writer, opts rootCommand
 	}, func() ([]string, error) {
 		selectors := make([]string, 0, len(result.Channels))
 		for _, row := range result.Channels {
-			selectors = append(selectors, row.Interface.Selector)
+			selectors = append(selectors, row.Identity.Interface.Selector)
 		}
 		return selectors, nil
 	})
@@ -286,10 +354,10 @@ func runChannelUnbind(ctx context.Context, out, errOut io.Writer, selector, idem
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
-	if row.BindingRevision < 1 {
+	if row.Identity.BindingRevision < 1 {
 		return returnCLIValidationError(errOut, fmt.Errorf("channel %s has no local binding to unbind", selector))
 	}
-	params := map[string]any{"interface": row.Interface.Selector, "expected_revision": row.BindingRevision}
+	params := map[string]any{"interface": row.Identity.Interface.Selector, "expected_revision": row.Identity.BindingRevision}
 	if strings.TrimSpace(idempotencyKey) != "" {
 		params["idempotency_key"] = strings.TrimSpace(idempotencyKey)
 	}
@@ -297,7 +365,7 @@ func runChannelUnbind(ctx context.Context, out, errOut io.Writer, selector, idem
 	if err := client.call(ctx, "channel.unbind", params, &result); err != nil {
 		return returnCLIAPIError(errOut, err, channelErrorClassifier())
 	}
-	human, quiet := channelOperationRenderers(result, row.Interface.ChannelPackID)
+	human, quiet := channelOperationRenderers(result, row.Identity.Interface.ChannelPackID)
 	return renderCLIOutput(out, errOut, output, result, human, quiet)
 }
 
@@ -337,9 +405,9 @@ func waitForChannelClaim(ctx context.Context, client *cliAPIClient, begun channe
 			return channelOperationResult{}, err
 		}
 		for _, row := range list.Channels {
-			if row.PendingOperation != nil && row.PendingOperation.OperationID == begun.OperationID {
-				if row.PendingOperation.State != "awaiting_claim" {
-					return *row.PendingOperation, nil
+			if row.Identity.PendingOperation != nil && row.Identity.PendingOperation.OperationID == begun.OperationID {
+				if row.Identity.PendingOperation.State != "awaiting_claim" {
+					return *row.Identity.PendingOperation, nil
 				}
 			}
 		}
@@ -376,7 +444,7 @@ func selectChannelReadback(rows []channelReadbackResult, selector string) (chann
 	selector = strings.TrimSpace(selector)
 	matches := []channelReadbackResult{}
 	for _, row := range rows {
-		if selector == row.Interface.Selector {
+		if selector == row.Identity.Interface.Selector {
 			matches = append(matches, row)
 		}
 	}
@@ -385,7 +453,7 @@ func selectChannelReadback(rows []channelReadbackResult, selector string) (chann
 	}
 	active := matches[:0]
 	for _, row := range matches {
-		if row.Status != "stale" {
+		if row.Identity.Status != "stale" {
 			active = append(active, row)
 		}
 	}
@@ -402,17 +470,30 @@ func writeChannelList(out io.Writer, result channelListResult) {
 	rows := make([][]string, 0, len(result.Channels))
 	footers := []string{}
 	for _, row := range result.Channels {
-		account := row.AccountPresentation
+		account := row.Identity.AccountPresentation
 		if account == "" {
 			account = "-"
 		}
-		rows = append(rows, []string{row.Interface.ChannelPackID, row.Status, account, fmt.Sprintf("%d", row.BindingRevision), row.ConversationScope, row.Reason, row.Interface.Selector})
-		if row.PendingOperation != nil {
-			footers = append(footers, fmt.Sprintf("%s pending %s: %s (expires %s)", row.Interface.ChannelPackID, row.PendingOperation.Kind, row.PendingOperation.State, row.PendingOperation.ExpiresAt.Local().Format(time.RFC3339)))
+		ready, reason := "-", row.Identity.Reason
+		if row.Readiness != nil {
+			ready = fmt.Sprint(row.Readiness.Ready)
+			if row.Readiness.Reason != "" {
+				reason = string(row.Readiness.Reason)
+			}
+		}
+		if row.Recovery != nil {
+			reason = string(row.Recovery.Reason)
+			for _, command := range row.Recovery.Commands {
+				footers = append(footers, fmt.Sprintf("channel %s: identity verified, activation lost with store - run %s", row.Recovery.Provider, command))
+			}
+		}
+		rows = append(rows, []string{row.Identity.Interface.ChannelPackID, string(row.Identity.Status), ready, account, fmt.Sprintf("%d", row.Identity.BindingRevision), string(row.Identity.ConversationScope), reason, row.Identity.Interface.Selector})
+		if row.Identity.PendingOperation != nil {
+			footers = append(footers, fmt.Sprintf("%s pending %s: %s (expires %s)", row.Identity.Interface.ChannelPackID, row.Identity.PendingOperation.Kind, row.Identity.PendingOperation.State, row.Identity.PendingOperation.ExpiresAt.Local().Format(time.RFC3339)))
 		}
 	}
 	writeCLITable(out, cliTable{
-		Columns: []cliTableColumn{{Header: "PACK"}, {Header: "STATUS"}, {Header: "ACCOUNT"}, {Header: "REVISION"}, {Header: "SCOPE"}, {Header: "REASON"}, {Header: "SELECTOR", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyOperatorChannel}},
+		Columns: []cliTableColumn{{Header: "PACK"}, {Header: "STATUS"}, {Header: "READY"}, {Header: "ACCOUNT"}, {Header: "REVISION"}, {Header: "SCOPE"}, {Header: "REASON"}, {Header: "SELECTOR", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyOperatorChannel}},
 		Rows:    rows, EmptyMessage: "No operator channels are active.", FooterLines: footers,
 	})
 }

@@ -6,6 +6,7 @@ import (
 	json "encoding/json"
 	apiidempotency "github.com/division-sh/swarm/internal/apiidempotency"
 	bundlecatalog "github.com/division-sh/swarm/internal/bundlecatalog"
+	channelonboarding "github.com/division-sh/swarm/internal/channelonboarding"
 	durabledata "github.com/division-sh/swarm/internal/durabledata"
 	events "github.com/division-sh/swarm/internal/events"
 	mailbox "github.com/division-sh/swarm/internal/mailbox"
@@ -107,6 +108,10 @@ func (s *PostgresStore) AdmitStandingServiceRun(ctx context.Context, runID strin
 
 func (s *PostgresStore) AdoptSessionID(ctx context.Context, identity agentmemory.Identity, lockOwner string, newSessionID string) error {
 	return s.lLMPostgresOwner.AdoptSessionID(ctx, identity, lockOwner, newSessionID)
+}
+
+func (s *PostgresStore) AdvanceChannelOnboarding(ctx context.Context, req channelonboarding.AdvanceRequest) (channelonboarding.Operation, error) {
+	return s.channelOnboardingPostgresOwner.AdvanceChannelOnboarding(ctx, req)
 }
 
 func (s *PostgresStore) AggregateOperatorEntities(ctx context.Context, opts operatorread.OperatorEntityAggregateOptions) (operatorread.OperatorEntityAggregateResult, error) {
@@ -247,6 +252,10 @@ func (s *PostgresStore) CommitWorkflowTimerReconciliation(ctx context.Context, c
 
 func (s *PostgresStore) CompleteActivityAttempt(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, error) {
 	return s.activityPostgresOwner.CompleteActivityAttempt(ctx, record)
+}
+
+func (s *PostgresStore) CompleteChannelTeardown(ctx context.Context, req channelonboarding.CompleteTeardownRequest) (channelonboarding.TeardownOperation, error) {
+	return s.channelOnboardingPostgresOwner.CompleteChannelTeardown(ctx, req)
 }
 
 func (s *PostgresStore) CompleteHumanTaskOutcome(ctx context.Context, cardID string, eventID string, at time.Time) (decisioncard.HumanTaskContinuation, error) {
@@ -405,8 +414,24 @@ func (s *PostgresStore) ForkRunSource(ctx context.Context, request runlifecycle.
 	return s.runLifecyclePostgresOwner.ForkRunSource(ctx, request)
 }
 
+func (s *PostgresStore) GetChannelOnboarding(ctx context.Context, operationID string) (channelonboarding.Operation, error) {
+	return s.channelOnboardingPostgresOwner.GetChannelOnboarding(ctx, operationID)
+}
+
+func (s *PostgresStore) GetChannelTeardown(ctx context.Context, teardownID string) (channelonboarding.TeardownOperation, error) {
+	return s.channelOnboardingPostgresOwner.GetChannelTeardown(ctx, teardownID)
+}
+
+func (s *PostgresStore) GetConnectedChannelActivation(ctx context.Context, slotKey string) (channelonboarding.ConnectedChannelActivation, error) {
+	return s.channelOnboardingPostgresOwner.GetConnectedChannelActivation(ctx, slotKey)
+}
+
 func (s *PostgresStore) GetDecisionCard(ctx context.Context, id string) (decisioncard.Card, error) {
 	return s.decisionPostgresOwner.GetDecisionCard(ctx, id)
+}
+
+func (s *PostgresStore) GetExternalEffectOutcome(ctx context.Context, operationID string) (effects.OperationOutcome, bool, error) {
+	return s.effectPostgresOwner.GetExternalEffectOutcome(ctx, operationID)
 }
 
 func (s *PostgresStore) GetMailboxItem(ctx context.Context, id string) (tools.MailboxItem, error) {
@@ -493,8 +518,20 @@ func (s *PostgresStore) ListBundleCatalogAgents(ctx context.Context, bundleHash 
 	return s.postgres.ListBundleCatalogAgents(ctx, bundleHash, opts)
 }
 
+func (s *PostgresStore) ListChannelOnboardingOperations(ctx context.Context) ([]channelonboarding.Operation, error) {
+	return s.channelOnboardingPostgresOwner.ListChannelOnboardingOperations(ctx)
+}
+
+func (s *PostgresStore) ListChannelTeardowns(ctx context.Context) ([]channelonboarding.TeardownOperation, error) {
+	return s.channelOnboardingPostgresOwner.ListChannelTeardowns(ctx)
+}
+
 func (s *PostgresStore) ListCompletionCandidates(ctx context.Context, scope runlifecycle.CandidateScope, cursor runlifecycle.CandidateCursor, limit int) (runlifecycle.CandidatePage, error) {
 	return s.runLifecyclePostgresOwner.ListCompletionCandidates(ctx, scope, cursor, limit)
+}
+
+func (s *PostgresStore) ListCurrentConnectedChannelActivations(ctx context.Context) ([]channelonboarding.ConnectedChannelActivation, error) {
+	return s.channelOnboardingPostgresOwner.ListCurrentConnectedChannelActivations(ctx)
 }
 
 func (s *PostgresStore) ListDecisionCardChanges(ctx context.Context, opts decisioncard.SubscriptionOptions) ([]decisioncard.Change, error) {
@@ -953,6 +990,10 @@ func (s *PostgresStore) Prune(ctx context.Context, command durabledata.PruneComm
 	return s.durableDataOwner.Prune(ctx, command)
 }
 
+func (s *PostgresStore) PublishConnectedChannelActivation(ctx context.Context, req channelonboarding.PublishActivationRequest) (channelonboarding.Operation, channelonboarding.ConnectedChannelActivation, error) {
+	return s.channelOnboardingPostgresOwner.PublishConnectedChannelActivation(ctx, req)
+}
+
 func (s *PostgresStore) PublishStandingService(ctx context.Context, serviceID string, runID string, generation int64) (int64, error) {
 	return s.pipelinePostgresOwner.PublishStandingService(ctx, serviceID, runID, generation)
 }
@@ -1093,6 +1134,14 @@ func (s *PostgresStore) RequireRunForkSelectedContractBinding(ctx context.Contex
 	return s.runForkPostgresOwner.RequireRunForkSelectedContractBinding(ctx, forkRunID)
 }
 
+func (s *PostgresStore) ReserveChannelOnboarding(ctx context.Context, req channelonboarding.StartRequest) (channelonboarding.Operation, error) {
+	return s.channelOnboardingPostgresOwner.ReserveChannelOnboarding(ctx, req)
+}
+
+func (s *PostgresStore) ReserveChannelTeardown(ctx context.Context, req channelonboarding.ReserveTeardownRequest) (channelonboarding.TeardownOperation, error) {
+	return s.channelOnboardingPostgresOwner.ReserveChannelTeardown(ctx, req)
+}
+
 func (s *PostgresStore) ReserveDirectiveOperation(ctx context.Context, req agentcontrol.ReserveDirectiveOperationRequest) (agentcontrol.DirectiveOperationReservation, error) {
 	return s.agentPostgresOwner.ReserveDirectiveOperation(ctx, req)
 }
@@ -1139,6 +1188,14 @@ func (s *PostgresStore) ResolveVersionSummary(ctx context.Context, ref durableda
 
 func (s *PostgresStore) ResumeStandingService(ctx context.Context, operation pipeline.StandingServiceOperation) (pipeline.StandingServiceReconciliation, error) {
 	return s.pipelinePostgresOwner.ResumeStandingService(ctx, operation)
+}
+
+func (s *PostgresStore) RetireChannelTeardownAuthority(ctx context.Context, req channelonboarding.RetireTeardownAuthorityRequest) (channelonboarding.TeardownOperation, error) {
+	return s.channelOnboardingPostgresOwner.RetireChannelTeardownAuthority(ctx, req)
+}
+
+func (s *PostgresStore) RetireConnectedChannelActivation(ctx context.Context, req channelonboarding.RetireActivationRequest) (channelonboarding.ConnectedChannelActivation, error) {
+	return s.channelOnboardingPostgresOwner.RetireConnectedChannelActivation(ctx, req)
 }
 
 func (s *PostgresStore) ReviseRunSource(ctx context.Context, request runlifecycle.SourceRevisionRequest) (runlifecycle.MutationDisposition, error) {
@@ -1341,6 +1398,10 @@ func (s *SQLiteRuntimeStore) AdoptSessionID(ctx context.Context, identity agentm
 	return s.lLMSQLiteOwner.AdoptSessionID(ctx, identity, lockOwner, newSessionID)
 }
 
+func (s *SQLiteRuntimeStore) AdvanceChannelOnboarding(ctx context.Context, req channelonboarding.AdvanceRequest) (channelonboarding.Operation, error) {
+	return s.channelOnboardingSQLiteOwner.AdvanceChannelOnboarding(ctx, req)
+}
+
 func (s *SQLiteRuntimeStore) AggregateOperatorEntities(ctx context.Context, opts operatorread.OperatorEntityAggregateOptions) (operatorread.OperatorEntityAggregateResult, error) {
 	return s.operatorEntitySQLite.AggregateOperatorEntities(ctx, opts)
 }
@@ -1463,6 +1524,10 @@ func (s *SQLiteRuntimeStore) CommitWorkflowTimerReconciliation(ctx context.Conte
 
 func (s *SQLiteRuntimeStore) CompleteActivityAttempt(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, error) {
 	return s.activitySQLiteOwner.CompleteActivityAttempt(ctx, record)
+}
+
+func (s *SQLiteRuntimeStore) CompleteChannelTeardown(ctx context.Context, req channelonboarding.CompleteTeardownRequest) (channelonboarding.TeardownOperation, error) {
+	return s.channelOnboardingSQLiteOwner.CompleteChannelTeardown(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) CompleteHumanTaskOutcome(ctx context.Context, cardID string, eventID string, at time.Time) (decisioncard.HumanTaskContinuation, error) {
@@ -1621,8 +1686,24 @@ func (s *SQLiteRuntimeStore) ForkRunSource(ctx context.Context, request runlifec
 	return s.runLifecycleSQLiteOwner.ForkRunSource(ctx, request)
 }
 
+func (s *SQLiteRuntimeStore) GetChannelOnboarding(ctx context.Context, operationID string) (channelonboarding.Operation, error) {
+	return s.channelOnboardingSQLiteOwner.GetChannelOnboarding(ctx, operationID)
+}
+
+func (s *SQLiteRuntimeStore) GetChannelTeardown(ctx context.Context, teardownID string) (channelonboarding.TeardownOperation, error) {
+	return s.channelOnboardingSQLiteOwner.GetChannelTeardown(ctx, teardownID)
+}
+
+func (s *SQLiteRuntimeStore) GetConnectedChannelActivation(ctx context.Context, slotKey string) (channelonboarding.ConnectedChannelActivation, error) {
+	return s.channelOnboardingSQLiteOwner.GetConnectedChannelActivation(ctx, slotKey)
+}
+
 func (s *SQLiteRuntimeStore) GetDecisionCard(ctx context.Context, id string) (decisioncard.Card, error) {
 	return s.decisionSQLiteOwner.GetDecisionCard(ctx, id)
+}
+
+func (s *SQLiteRuntimeStore) GetExternalEffectOutcome(ctx context.Context, operationID string) (effects.OperationOutcome, bool, error) {
+	return s.effectSQLiteOwner.GetExternalEffectOutcome(ctx, operationID)
 }
 
 func (s *SQLiteRuntimeStore) GetMailboxItem(ctx context.Context, id string) (tools.MailboxItem, error) {
@@ -1709,8 +1790,20 @@ func (s *SQLiteRuntimeStore) ListBundleCatalogAgents(ctx context.Context, bundle
 	return s.sQLite.ListBundleCatalogAgents(ctx, bundleHash, opts)
 }
 
+func (s *SQLiteRuntimeStore) ListChannelOnboardingOperations(ctx context.Context) ([]channelonboarding.Operation, error) {
+	return s.channelOnboardingSQLiteOwner.ListChannelOnboardingOperations(ctx)
+}
+
+func (s *SQLiteRuntimeStore) ListChannelTeardowns(ctx context.Context) ([]channelonboarding.TeardownOperation, error) {
+	return s.channelOnboardingSQLiteOwner.ListChannelTeardowns(ctx)
+}
+
 func (s *SQLiteRuntimeStore) ListCompletionCandidates(ctx context.Context, scope runlifecycle.CandidateScope, cursor runlifecycle.CandidateCursor, limit int) (runlifecycle.CandidatePage, error) {
 	return s.runLifecycleSQLiteOwner.ListCompletionCandidates(ctx, scope, cursor, limit)
+}
+
+func (s *SQLiteRuntimeStore) ListCurrentConnectedChannelActivations(ctx context.Context) ([]channelonboarding.ConnectedChannelActivation, error) {
+	return s.channelOnboardingSQLiteOwner.ListCurrentConnectedChannelActivations(ctx)
 }
 
 func (s *SQLiteRuntimeStore) ListDecisionCardChanges(ctx context.Context, opts decisioncard.SubscriptionOptions) ([]decisioncard.Change, error) {
@@ -2129,6 +2222,10 @@ func (s *SQLiteRuntimeStore) Prune(ctx context.Context, command durabledata.Prun
 	return s.durableDataOwner.Prune(ctx, command)
 }
 
+func (s *SQLiteRuntimeStore) PublishConnectedChannelActivation(ctx context.Context, req channelonboarding.PublishActivationRequest) (channelonboarding.Operation, channelonboarding.ConnectedChannelActivation, error) {
+	return s.channelOnboardingSQLiteOwner.PublishConnectedChannelActivation(ctx, req)
+}
+
 func (s *SQLiteRuntimeStore) PublishStandingService(ctx context.Context, serviceID string, runID string, generation int64) (int64, error) {
 	return s.pipelineSQLiteOwner.PublishStandingService(ctx, serviceID, runID, generation)
 }
@@ -2269,6 +2366,14 @@ func (s *SQLiteRuntimeStore) RequireRunForkSelectedContractBinding(ctx context.C
 	return s.runForkSQLiteOwner.RequireRunForkSelectedContractBinding(ctx, forkRunID)
 }
 
+func (s *SQLiteRuntimeStore) ReserveChannelOnboarding(ctx context.Context, req channelonboarding.StartRequest) (channelonboarding.Operation, error) {
+	return s.channelOnboardingSQLiteOwner.ReserveChannelOnboarding(ctx, req)
+}
+
+func (s *SQLiteRuntimeStore) ReserveChannelTeardown(ctx context.Context, req channelonboarding.ReserveTeardownRequest) (channelonboarding.TeardownOperation, error) {
+	return s.channelOnboardingSQLiteOwner.ReserveChannelTeardown(ctx, req)
+}
+
 func (s *SQLiteRuntimeStore) ReserveDirectiveOperation(ctx context.Context, req agentcontrol.ReserveDirectiveOperationRequest) (agentcontrol.DirectiveOperationReservation, error) {
 	return s.agentSQLiteOwner.ReserveDirectiveOperation(ctx, req)
 }
@@ -2311,6 +2416,14 @@ func (s *SQLiteRuntimeStore) ResolveVersionSummary(ctx context.Context, ref dura
 
 func (s *SQLiteRuntimeStore) ResumeStandingService(ctx context.Context, operation pipeline.StandingServiceOperation) (pipeline.StandingServiceReconciliation, error) {
 	return s.pipelineSQLiteOwner.ResumeStandingService(ctx, operation)
+}
+
+func (s *SQLiteRuntimeStore) RetireChannelTeardownAuthority(ctx context.Context, req channelonboarding.RetireTeardownAuthorityRequest) (channelonboarding.TeardownOperation, error) {
+	return s.channelOnboardingSQLiteOwner.RetireChannelTeardownAuthority(ctx, req)
+}
+
+func (s *SQLiteRuntimeStore) RetireConnectedChannelActivation(ctx context.Context, req channelonboarding.RetireActivationRequest) (channelonboarding.ConnectedChannelActivation, error) {
+	return s.channelOnboardingSQLiteOwner.RetireConnectedChannelActivation(ctx, req)
 }
 
 func (s *SQLiteRuntimeStore) ReviseRunSource(ctx context.Context, request runlifecycle.SourceRevisionRequest) (runlifecycle.MutationDisposition, error) {

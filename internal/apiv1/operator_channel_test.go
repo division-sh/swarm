@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiidempotency"
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/google/uuid"
@@ -19,6 +20,35 @@ import (
 type recordingOperatorChannelIdempotency struct {
 	delegate APIIdempotencyStore
 	actors   []string
+}
+
+type directOperatorChannelDestructiveTestAdapter struct {
+	service *operatorchannel.Service
+	now     time.Time
+}
+
+type operatorChannelIdentityReadbackAdapter struct {
+	service *operatorchannel.Service
+}
+
+func (a operatorChannelIdentityReadbackAdapter) ReadbackConnectedChannels(ctx context.Context) ([]channelonboarding.ConnectedChannelReadback, error) {
+	identities, err := a.service.Readback(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]channelonboarding.ConnectedChannelReadback, 0, len(identities))
+	for _, identity := range identities {
+		rows = append(rows, channelonboarding.ConnectedChannelReadback{Identity: identity})
+	}
+	return rows, nil
+}
+
+func (a directOperatorChannelDestructiveTestAdapter) Unbind(ctx context.Context, selector string, revision int64, requestKey, requestHash string) (operatorchannel.Operation, operatorchannel.Binding, error) {
+	return a.service.Unbind(ctx, selector, revision, requestKey, requestHash, a.now)
+}
+
+func (a directOperatorChannelDestructiveTestAdapter) RevokeProof(ctx context.Context, selector string, revision int64, _, _ string) (operatorchannel.VerifiedProof, error) {
+	return a.service.RevokeProof(ctx, selector, revision, a.now)
 }
 
 func (s *recordingOperatorChannelIdempotency) WithAPIIdempotency(ctx context.Context, req apiidempotency.Request, execute func(context.Context) (apiidempotency.Completion, error)) (apiidempotency.Completion, bool, error) {
@@ -47,7 +77,10 @@ func TestOperatorChannelAPIContractEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	idempotency := &recordingOperatorChannelIdempotency{delegate: selected}
-	handlers := OperatorChannelHandlers(OperatorChannelHandlerOptions{Channels: service, Idempotency: idempotency, Now: func() time.Time { return now }})
+	handlers := OperatorChannelHandlers(OperatorChannelHandlerOptions{
+		Channels: service, Destructive: directOperatorChannelDestructiveTestAdapter{service: service, now: now},
+		Readback: operatorChannelIdentityReadbackAdapter{service: service}, Idempotency: idempotency, Now: func() time.Time { return now },
+	})
 	for _, method := range []string{"channel.connect", "channel.reconnect", "channel.rebind", "channel.confirm", "channel.unbind", "channel.proof_revoke", "channel.list"} {
 		if handlers[method] == nil {
 			t.Fatalf("operator channel handler %s is missing", method)

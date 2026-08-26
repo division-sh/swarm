@@ -369,6 +369,8 @@ func approvedHTTPRuntimeTransportMethods() []string {
 		"channel.confirm",
 		"channel.connect",
 		"channel.list",
+		"channel.onboarding_retry",
+		"channel.onboarding_start",
 		"channel.proof_revoke",
 		"channel.rebind",
 		"channel.reconnect",

@@ -183,7 +183,8 @@ func proveSelectedForkCompletionAuthorityIssuance(t *testing.T, fixture selected
 	for _, registration := range runtimeeffects.Registrations() {
 		if registration.Kind == runtimeeffects.KindProviderTurn ||
 			registration.Kind == runtimeeffects.KindProviderStartupProbe ||
-			registration.Kind == runtimeeffects.KindServeRegistration {
+			registration.Kind == runtimeeffects.KindServeRegistration ||
+			registration.Kind == runtimeeffects.KindChannelConfirmation {
 			continue
 		}
 		handle, err := runtimeeffects.Begin(providerCtx, registration.Adapter, []byte(registration.Adapter), nil)

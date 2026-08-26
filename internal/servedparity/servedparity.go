@@ -24,39 +24,41 @@ const (
 )
 
 const (
-	ScenarioEventPublishDynamicAutoEmitLifecycle = "event_publish_dynamic_auto_emit_lifecycle"
-	ScenarioBundleRegisterLifecycle              = "bundle_register_lifecycle"
-	ScenarioEventReplayLiveAgentLifecycle        = "event_replay_live_agent_lifecycle"
-	ScenarioAgentReplayLiveAgentLifecycle        = "agent_replay_live_agent_lifecycle"
-	ScenarioRunStopControlLifecycle              = "run_stop_control_lifecycle"
-	ScenarioRunPauseControlLifecycle             = "run_pause_control_lifecycle"
-	ScenarioRunContinueControlLifecycle          = "run_continue_control_lifecycle"
-	ScenarioRunForkLifecycle                     = "run_fork_lifecycle"
-	ScenarioAgentRestartLifecycle                = "agent_restart_lifecycle"
-	ScenarioAgentDirectiveOutcomeLifecycle       = "agent_directive_outcome_lifecycle"
-	ScenarioRuntimePauseIngressLifecycle         = "runtime_pause_ingress_lifecycle"
-	ScenarioRuntimeResumeIngressLifecycle        = "runtime_resume_ingress_lifecycle"
-	ScenarioStandingServiceSuspendLifecycle      = "standing_service_suspend_lifecycle"
-	ScenarioStandingServiceResumeLifecycle       = "standing_service_resume_lifecycle"
-	ScenarioStandingServiceResetLifecycle        = "standing_service_reset_lifecycle"
-	ScenarioMailboxNoticeAcknowledgmentLifecycle = "mailbox_notice_acknowledgment_lifecycle"
-	ScenarioMailboxBeginInputLifecycle           = "mailbox_begin_input_lifecycle"
-	ScenarioMailboxCancelInputLifecycle          = "mailbox_cancel_input_lifecycle"
-	ScenarioMailboxDecisionCardLifecycle         = "mailbox_decision_card_lifecycle"
-	ScenarioMailboxDeferDecisionLifecycle        = "mailbox_defer_decision_lifecycle"
-	ScenarioTestSetupEntitiesLifecycle           = "test_setup_entities_lifecycle"
-	ScenarioGeneratedInputFixtureLifecycle       = "generated_input_fixture_lifecycle"
-	ScenarioDerivedScenarioLifecycle             = "derived_scenario_lifecycle"
-	ScenarioPublicMockApprovalLifecycle          = "public_mock_approval_lifecycle"
-	ScenarioConversationForkLifecycle            = "conversation_fork_lifecycle"
-	ScenarioConversationForkChatLifecycle        = "conversation_fork_chat_lifecycle"
-	ScenarioConversationForkDeleteLifecycle      = "conversation_fork_delete_lifecycle"
-	ScenarioOperatorChannelConnectLifecycle      = "operator_channel_connect_lifecycle"
-	ScenarioOperatorChannelReconnectLifecycle    = "operator_channel_reconnect_lifecycle"
-	ScenarioOperatorChannelRebindLifecycle       = "operator_channel_rebind_lifecycle"
-	ScenarioOperatorChannelConfirmLifecycle      = "operator_channel_confirm_lifecycle"
-	ScenarioOperatorChannelUnbindLifecycle       = "operator_channel_unbind_lifecycle"
-	ScenarioOperatorChannelProofRevokeLifecycle  = "operator_channel_proof_revoke_lifecycle"
+	ScenarioEventPublishDynamicAutoEmitLifecycle     = "event_publish_dynamic_auto_emit_lifecycle"
+	ScenarioBundleRegisterLifecycle                  = "bundle_register_lifecycle"
+	ScenarioEventReplayLiveAgentLifecycle            = "event_replay_live_agent_lifecycle"
+	ScenarioAgentReplayLiveAgentLifecycle            = "agent_replay_live_agent_lifecycle"
+	ScenarioRunStopControlLifecycle                  = "run_stop_control_lifecycle"
+	ScenarioRunPauseControlLifecycle                 = "run_pause_control_lifecycle"
+	ScenarioRunContinueControlLifecycle              = "run_continue_control_lifecycle"
+	ScenarioRunForkLifecycle                         = "run_fork_lifecycle"
+	ScenarioAgentRestartLifecycle                    = "agent_restart_lifecycle"
+	ScenarioAgentDirectiveOutcomeLifecycle           = "agent_directive_outcome_lifecycle"
+	ScenarioRuntimePauseIngressLifecycle             = "runtime_pause_ingress_lifecycle"
+	ScenarioRuntimeResumeIngressLifecycle            = "runtime_resume_ingress_lifecycle"
+	ScenarioStandingServiceSuspendLifecycle          = "standing_service_suspend_lifecycle"
+	ScenarioStandingServiceResumeLifecycle           = "standing_service_resume_lifecycle"
+	ScenarioStandingServiceResetLifecycle            = "standing_service_reset_lifecycle"
+	ScenarioMailboxNoticeAcknowledgmentLifecycle     = "mailbox_notice_acknowledgment_lifecycle"
+	ScenarioMailboxBeginInputLifecycle               = "mailbox_begin_input_lifecycle"
+	ScenarioMailboxCancelInputLifecycle              = "mailbox_cancel_input_lifecycle"
+	ScenarioMailboxDecisionCardLifecycle             = "mailbox_decision_card_lifecycle"
+	ScenarioMailboxDeferDecisionLifecycle            = "mailbox_defer_decision_lifecycle"
+	ScenarioTestSetupEntitiesLifecycle               = "test_setup_entities_lifecycle"
+	ScenarioGeneratedInputFixtureLifecycle           = "generated_input_fixture_lifecycle"
+	ScenarioDerivedScenarioLifecycle                 = "derived_scenario_lifecycle"
+	ScenarioPublicMockApprovalLifecycle              = "public_mock_approval_lifecycle"
+	ScenarioConversationForkLifecycle                = "conversation_fork_lifecycle"
+	ScenarioConversationForkChatLifecycle            = "conversation_fork_chat_lifecycle"
+	ScenarioConversationForkDeleteLifecycle          = "conversation_fork_delete_lifecycle"
+	ScenarioOperatorChannelConnectLifecycle          = "operator_channel_connect_lifecycle"
+	ScenarioOperatorChannelReconnectLifecycle        = "operator_channel_reconnect_lifecycle"
+	ScenarioOperatorChannelRebindLifecycle           = "operator_channel_rebind_lifecycle"
+	ScenarioOperatorChannelConfirmLifecycle          = "operator_channel_confirm_lifecycle"
+	ScenarioOperatorChannelUnbindLifecycle           = "operator_channel_unbind_lifecycle"
+	ScenarioOperatorChannelProofRevokeLifecycle      = "operator_channel_proof_revoke_lifecycle"
+	ScenarioConnectedChannelOnboardingLifecycle      = "connected_channel_onboarding_lifecycle"
+	ScenarioConnectedChannelOnboardingRetryLifecycle = "connected_channel_onboarding_retry_lifecycle"
 )
 
 type Scenario struct {
@@ -118,6 +120,8 @@ func Scenarios() []Scenario {
 		servedControlScenario(ScenarioOperatorChannelConfirmLifecycle, "channel.confirm", "TestServedParityHarnessOperatorChannelLifecycle"),
 		servedControlScenario(ScenarioOperatorChannelUnbindLifecycle, "channel.unbind", "TestServedParityHarnessOperatorChannelLifecycle"),
 		servedControlScenario(ScenarioOperatorChannelProofRevokeLifecycle, "channel.proof_revoke", "TestServedParityHarnessOperatorChannelLifecycle"),
+		servedControlScenario(ScenarioConnectedChannelOnboardingLifecycle, "channel.onboarding_start", "TestChannelConnectTelegramFirstUserJourney"),
+		servedControlScenario(ScenarioConnectedChannelOnboardingRetryLifecycle, "channel.onboarding_retry", "TestChannelConnectTelegramFirstUserJourney"),
 	}
 }
 

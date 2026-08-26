@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type FileStore struct {
@@ -25,6 +27,8 @@ type fileCredentialSet struct {
 type fileCredentialItem struct {
 	Value     string    `json:"value"`
 	UpdatedAt time.Time `json:"updated_at"`
+	Receipt   string    `json:"receipt,omitempty"`
+	Epoch     string    `json:"epoch"`
 }
 
 func NewFileStore(path string) (*FileStore, error) {
@@ -72,9 +76,43 @@ func (s *FileStore) Set(_ context.Context, key, value string) error {
 		doc.Entries[key] = fileCredentialItem{
 			Value:     value,
 			UpdatedAt: time.Now().UTC(),
+			Epoch:     uuid.NewString(),
 		}
 		return s.saveLocked(doc)
 	})
+}
+
+func (s *FileStore) AdmitWithReceipt(_ context.Context, key, value, receipt string) (WriteReceipt, error) {
+	key = strings.TrimSpace(key)
+	receipt = strings.TrimSpace(receipt)
+	if key == "" || receipt == "" {
+		return WriteReceipt{}, fmt.Errorf("credential key and write receipt are required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out WriteReceipt
+	err := s.withWriteLockLocked(func() error {
+		doc, err := s.loadLocked()
+		if err != nil {
+			return err
+		}
+		if item, ok := doc.Entries[key]; ok && item.Receipt == receipt {
+			if strings.TrimSpace(item.Epoch) == "" {
+				return fmt.Errorf("credential %q receipt exists without an occurrence epoch", key)
+			}
+			out = WriteReceipt{Key: key, Receipt: receipt, Epoch: item.Epoch, UpdatedAt: item.UpdatedAt.UTC()}
+			return nil
+		}
+		now := time.Now().UTC()
+		item := fileCredentialItem{Value: value, UpdatedAt: now, Receipt: receipt, Epoch: uuid.NewString()}
+		doc.Entries[key] = item
+		if err := s.saveLocked(doc); err != nil {
+			return err
+		}
+		out = WriteReceipt{Key: key, Receipt: receipt, Epoch: item.Epoch, UpdatedAt: now}
+		return nil
+	})
+	return out, err
 }
 
 func (s *FileStore) List(_ context.Context) ([]string, error) {
@@ -137,6 +175,7 @@ func (s *FileStore) Snapshot(_ context.Context, key string) (AtomicSnapshot, err
 		snapshot.Source = SourceFile
 		snapshot.UpdatedAt = timePtr(item.UpdatedAt)
 		snapshot.value = item.Value
+		snapshot.occurrenceEpoch = strings.TrimSpace(item.Epoch)
 	}
 	return snapshot, nil
 }

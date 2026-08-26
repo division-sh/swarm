@@ -274,6 +274,114 @@ type ChannelManifest struct {
 	Operations   map[string]ChannelOperationBinding          `yaml:"operations"`
 	Events       map[string]ChannelEventBinding              `yaml:"events"`
 	Registration *ChannelRegistrationProfile                 `yaml:"registration,omitempty"`
+	Onboarding   *ChannelOnboardingProfile                   `yaml:"onboarding,omitempty"`
+}
+
+type ChannelActivationPosture string
+
+const (
+	ChannelActivationWebhookRegistration ChannelActivationPosture = "webhook_registration"
+	ChannelActivationSessionConnection   ChannelActivationPosture = "session_connection"
+)
+
+type ChannelIdentityCeremony string
+
+const (
+	ChannelCeremonyAuthenticatedTextChallenge ChannelIdentityCeremony = "authenticated_text_challenge"
+	ChannelCeremonyProviderPairing            ChannelIdentityCeremony = "provider_pairing"
+)
+
+type ChannelOnboardingProfile struct {
+	Activation             string `yaml:"activation"`
+	Ceremony               string `yaml:"ceremony"`
+	ProviderCredentialRole string `yaml:"provider_credential"`
+	SigningCredentialRole  string `yaml:"signing_credential,omitempty"`
+	Confirmation           string `yaml:"confirmation"`
+	ConnectionHealth       string `yaml:"connection_health,omitempty"`
+}
+
+type CompiledChannelOnboardingProfile struct {
+	provider           channelPlanIdentity
+	activation         ChannelActivationPosture
+	ceremony           ChannelIdentityCeremony
+	providerCredential channelPlanIdentity
+	signingCredential  channelPlanIdentity
+	confirmation       channelPlanIdentity
+	connectionHealth   channelPlanIdentity
+}
+
+func (p CompiledChannelOnboardingProfile) Provider() string { return p.provider.String() }
+func (p CompiledChannelOnboardingProfile) ActivationPosture() ChannelActivationPosture {
+	return p.activation
+}
+func (p CompiledChannelOnboardingProfile) IdentityCeremony() ChannelIdentityCeremony {
+	return p.ceremony
+}
+func (p CompiledChannelOnboardingProfile) ProviderCredential() string {
+	return p.providerCredential.String()
+}
+func (p CompiledChannelOnboardingProfile) SigningCredential() string {
+	return p.signingCredential.String()
+}
+func (p CompiledChannelOnboardingProfile) ConfirmationOperation() string {
+	return p.confirmation.String()
+}
+func (p CompiledChannelOnboardingProfile) ConnectionHealth() string {
+	return p.connectionHealth.String()
+}
+
+func CompileChannelOnboardingProfile(provider string, profile ChannelOnboardingProfile, operations []string) (CompiledChannelOnboardingProfile, error) {
+	providerID, err := admitChannelPlanIdentity("channel onboarding provider", provider)
+	if err != nil {
+		return CompiledChannelOnboardingProfile{}, err
+	}
+	activation := ChannelActivationPosture(strings.TrimSpace(profile.Activation))
+	ceremony := ChannelIdentityCeremony(strings.TrimSpace(profile.Ceremony))
+	if activation != ChannelActivationWebhookRegistration && activation != ChannelActivationSessionConnection {
+		return CompiledChannelOnboardingProfile{}, fmt.Errorf("channel onboarding activation must be webhook_registration or session_connection")
+	}
+	if ceremony != ChannelCeremonyAuthenticatedTextChallenge && ceremony != ChannelCeremonyProviderPairing {
+		return CompiledChannelOnboardingProfile{}, fmt.Errorf("channel onboarding ceremony must be authenticated_text_challenge or provider_pairing")
+	}
+	providerCredential, err := admitChannelPlanIdentity("channel onboarding provider credential", profile.ProviderCredentialRole)
+	if err != nil {
+		return CompiledChannelOnboardingProfile{}, err
+	}
+	confirmation, err := admitChannelPlanIdentity("channel onboarding confirmation operation", profile.Confirmation)
+	if err != nil {
+		return CompiledChannelOnboardingProfile{}, err
+	}
+	operationSet := make(map[string]struct{}, len(operations))
+	for _, operation := range operations {
+		operationSet[strings.TrimSpace(operation)] = struct{}{}
+	}
+	if _, ok := operationSet[confirmation.String()]; !ok {
+		return CompiledChannelOnboardingProfile{}, fmt.Errorf("channel onboarding confirmation operation %q is not compiled", confirmation.String())
+	}
+	compiled := CompiledChannelOnboardingProfile{
+		provider: providerID, activation: activation, ceremony: ceremony,
+		providerCredential: providerCredential, confirmation: confirmation,
+	}
+	if signing := strings.TrimSpace(profile.SigningCredentialRole); signing != "" {
+		compiled.signingCredential, err = admitChannelPlanIdentity("channel onboarding signing credential", signing)
+		if err != nil {
+			return CompiledChannelOnboardingProfile{}, err
+		}
+	}
+	if health := strings.TrimSpace(profile.ConnectionHealth); health != "" {
+		compiled.connectionHealth, err = admitChannelPlanIdentity("channel onboarding connection health", health)
+		if err != nil {
+			return CompiledChannelOnboardingProfile{}, err
+		}
+	}
+	if activation == ChannelActivationWebhookRegistration {
+		if compiled.signingCredential.String() == "" || compiled.connectionHealth.String() != "" {
+			return CompiledChannelOnboardingProfile{}, fmt.Errorf("webhook onboarding requires signing_credential and forbids connection_health")
+		}
+	} else if compiled.signingCredential.String() != "" || compiled.connectionHealth.String() == "" {
+		return CompiledChannelOnboardingProfile{}, fmt.Errorf("session onboarding requires connection_health and forbids signing_credential")
+	}
+	return compiled, nil
 }
 
 type ChannelRegistrationProfile struct {
@@ -552,6 +660,7 @@ type SatisfactionPlan struct {
 	events            map[string]compiledChannelEvent
 	constraints       map[string]runtimecontracts.ToolInputSchema
 	registration      *CompiledChannelRegistration
+	onboarding        *CompiledChannelOnboardingProfile
 	generation        plangeneration.Generation
 }
 
@@ -677,6 +786,10 @@ type OutboundBindingPlan struct {
 
 func (p SatisfactionPlan) ChannelIdentity() PackIdentity {
 	return p.channel
+}
+
+func (p SatisfactionPlan) Provider() string {
+	return p.provider.String()
 }
 
 func (p SatisfactionPlan) InterfaceIdentity() (operatorchannel.InterfaceIdentity, error) {
@@ -815,6 +928,10 @@ func (p SatisfactionPlan) OperationEffectClass(name string) (runtimecontracts.Ac
 
 func (p OutboundBindingPlan) BindingID() string {
 	return p.id.String()
+}
+
+func (p OutboundBindingPlan) InterfaceIdentity() (operatorchannel.InterfaceIdentity, error) {
+	return p.structural.InterfaceIdentity()
 }
 
 func (p OutboundBindingPlan) Destination() semanticvalue.Value {
@@ -1311,6 +1428,16 @@ func CompileChannel(registry *InterfaceRegistry, channel LoadedChannelPack, trig
 		if err != nil {
 			return SatisfactionPlan{}, fmt.Errorf("channel pack %q registration: %w", channel.Envelope.ID, err)
 		}
+	}
+	if channel.Manifest.Onboarding != nil {
+		compiled, compileErr := CompileChannelOnboardingProfile(provider.String(), *channel.Manifest.Onboarding, sortedKeys(plan.operations))
+		if compileErr != nil {
+			return SatisfactionPlan{}, fmt.Errorf("channel pack %q onboarding: %w", channel.Envelope.ID, compileErr)
+		}
+		if compiled.ActivationPosture() == ChannelActivationWebhookRegistration && plan.registration == nil {
+			return SatisfactionPlan{}, fmt.Errorf("channel pack %q webhook onboarding requires registration", channel.Envelope.ID)
+		}
+		plan.onboarding = &compiled
 	}
 	plan.generation, err = compileSatisfactionPlanGeneration(plan)
 	if err != nil {

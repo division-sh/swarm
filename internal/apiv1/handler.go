@@ -260,7 +260,7 @@ func (h *Handler) prepareRequest(raw []byte, transport, fallbackCorrelationID, a
 	req.Transport = transport
 	req.ActorTokenID = strings.TrimSpace(actorTokenID)
 	req.OperatorPrincipalID = h.operatorPrincipalID
-	req.RequestHash = requestBodyHash(req.Method, req.SemanticParams)
+	req.RequestHash = requestBodyHash(req.Method, requestHashParams(req.Method, req.SemanticParams))
 	if method, ok := h.registry.Method(req.Method); ok {
 		if rpcErr := h.admitMethodTransport(req.Method, method, transport, correlationID); rpcErr != nil {
 			return Request{}, &rpcResponse{JSONRPC: jsonRPCVersion, ID: req.ID, Error: rpcErr}
@@ -1152,4 +1152,18 @@ func requestBodyHash(method string, params semanticvalue.Value) string {
 	}
 	sum := sha256.Sum256(raw)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func requestHashParams(method string, params semanticvalue.Value) semanticvalue.Value {
+	switch strings.TrimSpace(method) {
+	case "channel.onboarding_start", "channel.onboarding_retry":
+		if _, present := params.Lookup("provider_credential"); !present {
+			return params
+		}
+		redacted, err := params.With("provider_credential", semanticvalue.MustString("credential-present"))
+		if err == nil {
+			return redacted
+		}
+	}
+	return params
 }

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/google/uuid"
@@ -544,7 +545,7 @@ func TestOperatorChannelRetainedLifecycleProjectionSelectedStoreParity(t *testin
 			}
 			rows := map[string]operatorchannel.Readback{}
 			for _, row := range listed.Channels {
-				rows[row.Interface.Key()] = row
+				rows[row.Identity.Interface.Key()] = row.Identity
 			}
 			if rows[boundIdentity.Key()].Status != operatorchannel.BindingStale || rows[proofOnlyIdentity.Key()].ProofStatus != operatorchannel.ProofActive || rows[proofOnlyIdentity.Key()].ProofID == "" ||
 				rows[operationIdentity.Key()].PendingOperation == nil || rows[operationIdentity.Key()].PendingOperation.OperationID != pending.OperationID || rows[successorIdentity.Key()].Status != operatorchannel.BindingUnbound {
@@ -660,7 +661,7 @@ func runOperatorChannelSupportedSurface(t *testing.T, backend servedparity.Backe
 
 	server := newOperatorChannelSupportedSurfaceServer(t, service, idempotency, principal.ID, operatorChannelSupportedSurfaceToken)
 	list := operatorChannelSupportedSurfaceList(t, server.URL, operatorChannelSupportedSurfaceToken)
-	if list.PrincipalID != principal.ID || len(list.Channels) != 1 || list.Channels[0].Interface.Selector != identity.Selector {
+	if list.PrincipalID != principal.ID || len(list.Channels) != 1 || list.Channels[0].Identity.Interface.Selector != identity.Selector {
 		t.Fatalf("%s initial channel.list = %#v", backend, list)
 	}
 
@@ -736,7 +737,7 @@ func runOperatorChannelSupportedSurface(t *testing.T, backend servedparity.Backe
 
 	rotated := newOperatorChannelSupportedSurfaceServer(t, service, idempotency, principal.ID, "rotated-token")
 	rotatedList := operatorChannelSupportedSurfaceList(t, rotated.URL, "rotated-token")
-	if rotatedList.PrincipalID != principal.ID || rotatedList.Channels[0].BindingRevision != bindingRevision {
+	if rotatedList.PrincipalID != principal.ID || rotatedList.Channels[0].Identity.BindingRevision != bindingRevision {
 		t.Fatalf("%s token rotation changed principal or binding: %#v", backend, rotatedList)
 	}
 	operatorChannelSupportedSurfaceUnauthorized(t, rotated.URL, operatorChannelSupportedSurfaceToken)
@@ -752,8 +753,8 @@ func runOperatorChannelSupportedSurface(t *testing.T, backend servedparity.Backe
 	statuses := map[string]operatorchannel.BindingStatus{}
 	reasons := map[string]string{}
 	for _, row := range replacedList.Channels {
-		statuses[row.Interface.Selector] = row.Status
-		reasons[row.Interface.Selector] = row.Reason
+		statuses[row.Identity.Interface.Selector] = row.Identity.Status
+		reasons[row.Identity.Interface.Selector] = row.Identity.Reason
 	}
 	if statuses[identity.Selector] != operatorchannel.BindingStale || !strings.Contains(reasons[identity.Selector], "semantic generation changed") || statuses[successorIdentity.Selector] != operatorchannel.BindingUnbound {
 		t.Fatalf("%s replacement readback statuses=%#v reasons=%#v", backend, statuses, reasons)
@@ -765,7 +766,7 @@ func runOperatorChannelSupportedSurface(t *testing.T, backend servedparity.Backe
 		t.Fatal(err)
 	}
 	rotatedList = operatorChannelSupportedSurfaceList(t, rotated.URL, "rotated-token")
-	if len(rotatedList.Channels) != 1 || rotatedList.Channels[0].Status != operatorchannel.BindingCurrent {
+	if len(rotatedList.Channels) != 1 || rotatedList.Channels[0].Identity.Status != operatorchannel.BindingCurrent {
 		t.Fatalf("%s restored interface readback = %#v", backend, rotatedList)
 	}
 
@@ -804,7 +805,7 @@ func runOperatorChannelSupportedSurface(t *testing.T, backend servedparity.Backe
 		t.Fatalf("%s proof revoke replay = %#v", backend, replayedRevoke.Proof)
 	}
 	list = operatorChannelSupportedSurfaceList(t, rotated.URL, "rotated-token")
-	if list.Channels[0].Status != operatorchannel.BindingRevoked {
+	if list.Channels[0].Identity.Status != operatorchannel.BindingRevoked {
 		t.Fatalf("%s revoked channel.list = %#v", backend, list)
 	}
 
@@ -839,7 +840,7 @@ func runOperatorChannelSupportedSurface(t *testing.T, backend servedparity.Backe
 		t.Fatalf("%s unbind = %#v", backend, unbound)
 	}
 	list = operatorChannelSupportedSurfaceList(t, rotated.URL, "rotated-token")
-	if list.Channels[0].Status != operatorchannel.BindingUnbound || list.Channels[0].Reason != "explicit local unbind fence" {
+	if list.Channels[0].Identity.Status != operatorchannel.BindingUnbound || list.Channels[0].Identity.Reason != "explicit local unbind fence" {
 		t.Fatalf("%s unbound channel.list = %#v", backend, list)
 	}
 }
@@ -859,7 +860,10 @@ func newOperatorChannelSupportedSurfaceServer(t *testing.T, service *operatorcha
 	}
 	handler, err := apiv1.NewHandler(apiv1.Options{
 		Registry: registry, AuthTokens: []string{token}, OperatorPrincipalID: principalID,
-		Handlers: apiv1.OperatorChannelHandlers(apiv1.OperatorChannelHandlerOptions{Channels: service, Idempotency: idempotency}),
+		Handlers: apiv1.OperatorChannelHandlers(apiv1.OperatorChannelHandlerOptions{
+			Channels: service, Destructive: operatorChannelSupportedSurfaceDestructive{service: service},
+			Readback: operatorChannelSupportedSurfaceReadback{service: service}, Idempotency: idempotency,
+		}),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -869,14 +873,42 @@ func newOperatorChannelSupportedSurfaceServer(t *testing.T, service *operatorcha
 	return server
 }
 
+type operatorChannelSupportedSurfaceReadback struct {
+	service *operatorchannel.Service
+}
+
+func (a operatorChannelSupportedSurfaceReadback) ReadbackConnectedChannels(ctx context.Context) ([]channelonboarding.ConnectedChannelReadback, error) {
+	identities, err := a.service.Readback(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]channelonboarding.ConnectedChannelReadback, 0, len(identities))
+	for _, identity := range identities {
+		rows = append(rows, channelonboarding.ConnectedChannelReadback{Identity: identity})
+	}
+	return rows, nil
+}
+
+type operatorChannelSupportedSurfaceDestructive struct {
+	service *operatorchannel.Service
+}
+
+func (a operatorChannelSupportedSurfaceDestructive) Unbind(ctx context.Context, selector string, revision int64, requestKey, requestHash string) (operatorchannel.Operation, operatorchannel.Binding, error) {
+	return a.service.Unbind(ctx, selector, revision, requestKey, requestHash, time.Now().UTC())
+}
+
+func (a operatorChannelSupportedSurfaceDestructive) RevokeProof(ctx context.Context, selector string, revision int64, _, _ string) (operatorchannel.VerifiedProof, error) {
+	return a.service.RevokeProof(ctx, selector, revision, time.Now().UTC())
+}
+
 func operatorChannelSupportedSurfaceList(t *testing.T, endpoint, token string) struct {
-	PrincipalID string                     `json:"principal_id"`
-	Channels    []operatorchannel.Readback `json:"channels"`
+	PrincipalID string                                       `json:"principal_id"`
+	Channels    []channelonboarding.ConnectedChannelReadback `json:"channels"`
 } {
 	t.Helper()
 	var result struct {
-		PrincipalID string                     `json:"principal_id"`
-		Channels    []operatorchannel.Readback `json:"channels"`
+		PrincipalID string                                       `json:"principal_id"`
+		Channels    []channelonboarding.ConnectedChannelReadback `json:"channels"`
 	}
 	operatorChannelSupportedSurfaceCall(t, endpoint, token, "channel.list", map[string]any{}, &result)
 	return result

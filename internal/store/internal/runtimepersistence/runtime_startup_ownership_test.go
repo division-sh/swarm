@@ -674,7 +674,7 @@ func selectedStoreRegistrationPair(t *testing.T, registration packs.CompiledChan
 		t.Fatalf("plan generation: %v", err)
 	}
 	return runtimepublicingress.RegistrationPair{
-		BindingID: "selected-store-telegram", PlanGeneration: planGeneration, Registration: registration,
+		BindingID: "selected-store-telegram", PlanGeneration: planGeneration, PrebindingOperationID: "test-prebinding-selected-store-telegram", Registration: registration,
 		CredentialKeys: map[string]string{"telegram_bot_token": "bot"},
 		Target: runtimepublicingress.RegistrationTarget{
 			Selector: "ingress:support:telegram:telegram", BundleHash: testCanonicalBundleHash,

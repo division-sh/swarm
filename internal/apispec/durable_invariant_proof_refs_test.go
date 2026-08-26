@@ -59,8 +59,8 @@ func TestDurableInvariantProofReferencesConform(t *testing.T) {
 	}
 
 	registrations := effects.Registrations()
-	if len(registrations) != 17 {
-		problems = append(problems, fmt.Sprintf("managed-effect registration inventory has %d entries, want 17", len(registrations)))
+	if len(registrations) != 18 {
+		problems = append(problems, fmt.Sprintf("managed-effect registration inventory has %d entries, want 18", len(registrations)))
 	}
 	seenAdapters := make(map[string]struct{}, len(registrations))
 	for _, registration := range registrations {

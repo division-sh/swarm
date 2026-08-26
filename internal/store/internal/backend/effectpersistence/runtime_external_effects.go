@@ -122,6 +122,44 @@ func (s *EffectSQLiteOwner) IsExternalEffectAuthorityCurrent(ctx context.Context
 	return externalEffectAuthorityCurrentSQLite(ctx, s.backend, authority)
 }
 
+func (s *EffectPostgresOwner) GetExternalEffectOutcome(ctx context.Context, operationID string) (runtimeeffects.OperationOutcome, bool, error) {
+	var outcome runtimeeffects.OperationOutcome
+	var kind, authorityKind, state, attemptState string
+	err := s.backend.QueryRowContext(ctx, `
+		SELECT operation_id::text,effect_kind,authority_kind,authority_id,state,
+		       (SELECT state FROM runtime_external_effect_attempts WHERE operation_id=runtime_external_effect_operations.operation_id ORDER BY attempt_ordinal DESC LIMIT 1)
+		FROM runtime_external_effect_operations WHERE operation_id=$1::uuid
+	`, strings.TrimSpace(operationID)).Scan(&outcome.OperationID, &kind, &authorityKind, &outcome.AuthorityID, &state, &attemptState)
+	if err == sql.ErrNoRows {
+		return runtimeeffects.OperationOutcome{}, false, nil
+	}
+	if err != nil {
+		return runtimeeffects.OperationOutcome{}, false, err
+	}
+	outcome.Kind, outcome.AuthorityKind = runtimeeffects.Kind(kind), runtimeeffects.AuthorityKind(authorityKind)
+	outcome.State, outcome.AttemptState = runtimeeffects.State(state), runtimeeffects.State(attemptState)
+	return outcome, true, nil
+}
+
+func (s *EffectSQLiteOwner) GetExternalEffectOutcome(ctx context.Context, operationID string) (runtimeeffects.OperationOutcome, bool, error) {
+	var outcome runtimeeffects.OperationOutcome
+	var kind, authorityKind, state, attemptState string
+	err := s.backend.QueryRowContext(ctx, `
+		SELECT operation_id,effect_kind,authority_kind,authority_id,state,
+		       (SELECT state FROM runtime_external_effect_attempts WHERE operation_id=runtime_external_effect_operations.operation_id ORDER BY attempt_ordinal DESC LIMIT 1)
+		FROM runtime_external_effect_operations WHERE operation_id=?
+	`, strings.TrimSpace(operationID)).Scan(&outcome.OperationID, &kind, &authorityKind, &outcome.AuthorityID, &state, &attemptState)
+	if err == sql.ErrNoRows {
+		return runtimeeffects.OperationOutcome{}, false, nil
+	}
+	if err != nil {
+		return runtimeeffects.OperationOutcome{}, false, err
+	}
+	outcome.Kind, outcome.AuthorityKind = runtimeeffects.Kind(kind), runtimeeffects.AuthorityKind(authorityKind)
+	outcome.State, outcome.AttemptState = runtimeeffects.State(state), runtimeeffects.State(attemptState)
+	return outcome, true, nil
+}
+
 func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) (runtimeeffects.Attempt, error) {
 	var err error
 	req.Lineage, err = bindExternalEffectRunLineage(ctx, authority, req.Lineage)
@@ -417,6 +455,7 @@ var externalEffectStoryDispositions = map[string]externalEffectStoryDisposition{
 	"provider_turn/mock_python":                         {Launch: true},
 	"provider_startup_probe/claude_cli_startup_probe":   {Launch: true},
 	"serve_registration/provider_registration":          {Launch: true},
+	"channel_confirmation/channel_confirmation":         {Launch: true},
 	"http_tool_target/authored_http_tool":               {Launch: true},
 	"managed_credential_request/managed_credential":     {},
 	"native_web_search_http/native_web_search":          {Launch: true},
@@ -879,7 +918,7 @@ func authorizePrelaunchRetrySQLite(ctx context.Context, tx *sql.Tx, authority ru
 }
 
 func prelaunchRetryEligible(authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, existing existingExternalAttempt) bool {
-	if (req.Adapter != "claude_cli" && req.Adapter != "provider_registration") || existing.operationState != string(runtimeeffects.StateTerminalFailure) ||
+	if (req.Adapter != "claude_cli" && req.Adapter != "provider_registration" && req.Adapter != "channel_confirmation") || existing.operationState != string(runtimeeffects.StateTerminalFailure) ||
 		existing.attemptState != string(runtimeeffects.StateTerminalFailure) {
 		return false
 	}
@@ -894,6 +933,9 @@ func prelaunchRetryEligible(authority runtimeeffects.Authority, req runtimeeffec
 	if req.Adapter == "provider_registration" {
 		return launchRejected && failure.Retryable
 	}
+	if req.Adapter == "channel_confirmation" && !existing.launched {
+		return failure.Retryable || failure.Detail.Code == "effect_recovery_prelaunch_abandoned"
+	}
 	if !existing.launched {
 		return failure.Retryable || failure.Detail.Code == "effect_recovery_prelaunch_abandoned"
 	}
@@ -901,7 +943,7 @@ func prelaunchRetryEligible(authority runtimeeffects.Authority, req runtimeeffec
 }
 
 func resumeProviderRegistrationAuthorization(authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest, existing existingExternalAttempt) (runtimeeffects.Attempt, bool) {
-	if req.Adapter != "provider_registration" || existing.operationState != string(runtimeeffects.StateAuthorized) ||
+	if (req.Adapter != "provider_registration" && req.Adapter != "channel_confirmation") || existing.operationState != string(runtimeeffects.StateAuthorized) ||
 		existing.attemptState != string(runtimeeffects.StateAuthorized) || existing.launched ||
 		!existing.matchesRetryAuthority(authority) || !existing.matchesRequest(req) {
 		return runtimeeffects.Attempt{}, false
@@ -1143,6 +1185,9 @@ func requiredExternalEffectBundleHash(ctx context.Context, authority runtimeeffe
 	bundleHash := strings.TrimSpace(scope.BundleHash)
 	if authority.Kind == runtimeeffects.AuthorityConversationForkChat && bundleHash != strings.TrimSpace(authority.ForkChat.BundleHash) {
 		return "", fmt.Errorf("external effect operation bundle scope conflicts with forkchat source bundle")
+	}
+	if authority.Kind == runtimeeffects.AuthorityChannelConfirmation && bundleHash != strings.TrimSpace(authority.ChannelConfirmation.BundleHash) {
+		return "", fmt.Errorf("external effect operation bundle scope conflicts with channel confirmation bundle")
 	}
 	return bundleHash, nil
 }

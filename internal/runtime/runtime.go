@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
@@ -26,6 +27,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/budgetspend"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -91,7 +93,8 @@ type RuntimeOptions struct {
 	ProviderTriggerCatalog           *providertriggers.CatalogSnapshot
 	NoticePresentation               runtimetools.InformationalNoticePresentationSink
 	ChannelPlans                     []packs.SatisfactionPlan
-	ChannelOutboundBindings          []packs.OutboundBindingPlan
+	DeclaredChannelPublication       channelonboarding.ChannelActivationPublication
+	ChannelActivationPublication     channelonboarding.ChannelActivationPublication
 	ScenarioDeclarations             []scenarioderivation.Declaration
 	BootStartedAt                    time.Time
 	BootProgress                     func(BootProgressEvent)
@@ -268,6 +271,7 @@ type Runtime struct {
 	ManagedCredentials runtimemanagedcredentials.Store
 	LLMRuntimes        *llm.AgentRuntimeSet
 	ToolExecutor       *runtimetools.Executor
+	ChannelActivations *runtimechannelactivation.Owner
 	Manager            *runtimemanager.AgentManager
 	RuntimeIngress     *runtimeingress.Controller
 	RunControl         *runtimeruncontrol.Controller
@@ -316,6 +320,19 @@ func (rt *Runtime) WorkOccurrence() *worklifetime.RuntimeOccurrence {
 		return nil
 	}
 	return rt.workOccurrence
+}
+
+// ReplaceChannelActivations atomically publishes one complete executable
+// activation snapshot to every channel execution consumer in this runtime.
+func (rt *Runtime) ReplaceChannelActivations(publication channelonboarding.ChannelActivationPublication) error {
+	return rt.ReplaceChannelActivationsContext(context.Background(), publication)
+}
+
+func (rt *Runtime) ReplaceChannelActivationsContext(ctx context.Context, publication channelonboarding.ChannelActivationPublication) error {
+	if rt == nil || rt.ChannelActivations == nil {
+		return fmt.Errorf("runtime channel activation owner is unavailable")
+	}
+	return rt.ChannelActivations.ReplaceContext(ctx, publication)
 }
 
 // CurrentStartupGrantEvidence returns the exact generation authority currently
@@ -654,7 +671,10 @@ func ensureWorkflowBootWiringWithHarnessPolicy(opts RuntimeOptions, profile llms
 	validationOpts.ProviderTriggerCatalog = opts.ProviderTriggerCatalog
 	validationOpts.LLMProfile = profile
 	validationOpts.ChannelPlans = opts.ChannelPlans
-	validationOpts.ChannelOutboundBindings = opts.ChannelOutboundBindings
+	validationOpts.ChannelActivationPublication = opts.DeclaredChannelPublication
+	if !validationOpts.ChannelActivationPublication.Generation().Valid() {
+		validationOpts.ChannelActivationPublication = opts.ChannelActivationPublication
+	}
 	validationOpts.AllowHarnessInputs = allowValidationHarness
 	validationOpts.AllowHarnessOutputs = allowValidationHarness
 	result, err := ValidateWorkflowContractSurface(context.Background(), source, validationOpts)
@@ -671,31 +691,6 @@ type connectorPackWorkflowModule struct {
 
 func (m connectorPackWorkflowModule) SemanticSource() semanticview.Source {
 	return m.source
-}
-
-func compiledChannelActivityTools(bindings []packs.OutboundBindingPlan) (map[string]runtimepipeline.ChannelActivityTarget, error) {
-	out := map[string]runtimepipeline.ChannelActivityTarget{}
-	for _, binding := range bindings {
-		for _, operation := range binding.OperationNames() {
-			identity, err := binding.RuntimeActivityTarget(operation)
-			if err != nil {
-				return nil, fmt.Errorf("channel binding %q operation %q private target: %w", binding.BindingID(), operation, err)
-			}
-			if _, exists := out[identity.ToolID()]; exists {
-				return nil, fmt.Errorf("duplicate private channel activity tool %q", identity.ToolID())
-			}
-			tool, err := binding.OperationTool(operation)
-			if err != nil {
-				return nil, fmt.Errorf("channel binding %q operation %q: %w", binding.BindingID(), operation, err)
-			}
-			target, err := runtimepipeline.NewChannelActivityTargetWithCredentials(tool, identity.Generation(), identity.CredentialStoreKeys())
-			if err != nil {
-				return nil, fmt.Errorf("channel binding %q operation %q private target: %w", binding.BindingID(), operation, err)
-			}
-			out[identity.ToolID()] = target
-		}
-	}
-	return out, nil
 }
 
 func bootWarningsFatal() bool {
@@ -719,6 +714,27 @@ func (deps RuntimeDeps) validated() (validatedRuntimeDeps, error) {
 func (deps RuntimeDeps) validatedWithHarnessPolicy(allowValidationHarness bool) (validatedRuntimeDeps, error) {
 	cfg := deps.Config
 	opts := deps.Options
+	if !opts.DeclaredChannelPublication.Generation().Valid() {
+		var err error
+		opts.DeclaredChannelPublication, err = channelonboarding.NewDeclaredOnlyChannelActivationPublication(nil)
+		if err != nil {
+			return validatedRuntimeDeps{}, fmt.Errorf("compile empty declared-only channel activation publication: %w", err)
+		}
+	}
+	if err := opts.DeclaredChannelPublication.Validate(); err != nil {
+		return validatedRuntimeDeps{}, fmt.Errorf("runtime declared-only channel activation publication is invalid: %w", err)
+	}
+	if opts.DeclaredChannelPublication.Mode() != channelonboarding.ChannelActivationPublicationDeclaredOnly {
+		return validatedRuntimeDeps{}, fmt.Errorf("runtime declared channel activation publication must use declared-only mode")
+	}
+	if opts.ChannelActivationPublication.Generation().Valid() {
+		if err := opts.ChannelActivationPublication.Validate(); err != nil {
+			return validatedRuntimeDeps{}, fmt.Errorf("runtime executable channel activation publication is invalid: %w", err)
+		}
+		if !opts.ChannelActivationPublication.Executable() {
+			return validatedRuntimeDeps{}, fmt.Errorf("runtime channel activation publication must use executable mode")
+		}
+	}
 	if cfg == nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("runtime config is required")
 	}
@@ -768,7 +784,6 @@ func (deps RuntimeDeps) validatedWithHarnessPolicy(allowValidationHarness bool) 
 	projection, err := AdmitEffectiveSourceProjection(EffectiveSourceProjectionRequest{
 		WorkflowModule: opts.WorkflowModule, BundleSourceFact: opts.BundleSourceFact,
 		ProviderTriggerCatalog: opts.ProviderTriggerCatalog, ChannelPlans: opts.ChannelPlans,
-		ChannelOutboundBindings: opts.ChannelOutboundBindings,
 	})
 	if err != nil {
 		return validatedRuntimeDeps{}, fmt.Errorf("admit effective source projection: %w", err)
@@ -1104,6 +1119,18 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 	rt.RuntimeIngress = runtimeingress.NewController(runtimeDeps.RuntimeIngressStore, rt.Bus, runtimeingress.Options{ExecutionPosture: rt.ExecutionPosture})
 	rt.Bus.SetRuntimeIngressDispatchGate(rt.RuntimeIngress)
 	rt.Scheduler = runtimepipeline.NewSchedulerWithWorkOwner(workOccurrence)
+	activationPublication := opts.ChannelActivationPublication
+	if !activationPublication.Generation().Valid() {
+		activationPublication, err = channelonboarding.NewChannelActivationPublication(nil)
+		if err != nil {
+			return nil, fmt.Errorf("compile empty channel activation publication: %w", err)
+		}
+	}
+	channelActivations, err := runtimechannelactivation.NewOwner(activationPublication)
+	if err != nil {
+		return nil, fmt.Errorf("compile executable channel activations: %w", err)
+	}
+	rt.ChannelActivations = channelActivations
 	if runtimeDeps.GenericScheduleStore != nil {
 		genericSchedules, err := runtimegenericschedule.NewLifecycle(
 			runtimeDeps.GenericScheduleStore,
@@ -1119,10 +1146,6 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		rt.GenericSchedules = genericSchedules
 	}
 	if runtimeDeps.WorkflowPersistence.Valid() {
-		channelActivityTools, err := compiledChannelActivityTools(opts.ChannelOutboundBindings)
-		if err != nil {
-			return nil, fmt.Errorf("compile channel activity tools: %w", err)
-		}
 		artifactRoot, err := runtimepipeline.ResolveArtifactRepoRoot("")
 		if err != nil {
 			return nil, fmt.Errorf("artifact repo root validation failed: %w", err)
@@ -1165,7 +1188,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 			MockConnectorResponses:    boot.MockConnectorResponses,
 			ScenarioExecutionProfiles: runtimeDeps.ScenarioExecutionProfiles,
 			EffectiveSourceIdentity:   boot.EffectiveSourceIdentity,
-			ChannelActivityTools:      channelActivityTools,
+			ChannelActivations:        rt.ChannelActivations,
 			ArtifactRoot:              artifactRoot,
 			BundleSourceFact:          opts.BundleSourceFact,
 			DecisionCardCadence: decisioncard.CadencePolicy{
@@ -1255,7 +1278,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		WorkflowInstances:  rt.Pipeline,
 		WorkflowSource:     source,
 		DataAccessStore:    runtimeDeps.DataAccessStore,
-		ChannelBindings:    opts.ChannelOutboundBindings,
+		ChannelActivations: rt.ChannelActivations,
 		ActivityExecutor:   rt.Pipeline,
 		WorkspaceResolver:  rt.Workspace,
 		ModelRuntimes:      rt.LLMRuntimes,

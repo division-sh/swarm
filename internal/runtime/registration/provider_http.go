@@ -34,6 +34,11 @@ type ApplyResult struct {
 	Acknowledged bool
 }
 
+type DeliveryResult struct {
+	OperationID string
+	Output      any
+}
+
 func (e HTTPExecutor) Read(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any) (any, error) {
 	if tool.Category() != runtimecontracts.ToolCategoryProviderRegistration || tool.Effect() != runtimecontracts.ActivityEffectClassReadOnly {
 		return nil, fmt.Errorf("provider registration read tool %q has an invalid contract", strings.TrimSpace(toolID))
@@ -93,6 +98,55 @@ func (e HTTPExecutor) Apply(ctx context.Context, toolID string, tool runtimecont
 	// Provider acknowledgment is not authoritative registration state. Keep the
 	// durable attempt live until readback proves the exact callback intent.
 	return ApplyResult{Output: output, Pending: pending, Acknowledged: true}, nil
+}
+
+func (e HTTPExecutor) DeliverChannelConfirmation(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any, lineage map[string]string) (DeliveryResult, error) {
+	if tool.Category() != runtimecontracts.ToolCategoryProviderConnector || tool.Effect() != runtimecontracts.ActivityEffectClassNonIdempotentWrite {
+		return DeliveryResult{}, fmt.Errorf("channel confirmation tool %q has an invalid contract", strings.TrimSpace(toolID))
+	}
+	prepared, secrets, err := prepareProviderRequest(toolID, tool, input, credentials)
+	if err != nil {
+		return DeliveryResult{}, err
+	}
+	fingerprint, err := semanticProviderRequest(toolID, tool, input)
+	if err != nil {
+		return DeliveryResult{}, err
+	}
+	handle, err := runtimeeffects.BeginChannelConfirmation(ctx, fingerprint, lineage)
+	if err != nil {
+		return DeliveryResult{}, err
+	}
+	operationID := handle.Attempt().OperationID
+	response, raw, launched, err := e.executeProviderApply(ctx, prepared, handle)
+	if err != nil {
+		if !launched {
+			return DeliveryResult{OperationID: operationID}, handle.Fail(
+				ctx, runtimeeffects.StateTerminalFailure, runtimefailures.ClassDependencyUnavailable,
+				"channel_confirmation_prelaunch_rejected", "channel_confirmation", "dispatch",
+				map[string]any{"tool": strings.TrimSpace(toolID), "launch_rejected": true}, err,
+			)
+		}
+		return DeliveryResult{OperationID: operationID}, handle.Fail(
+			ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain,
+			"channel_confirmation_acknowledgment_lost", "channel_confirmation", "dispatch",
+			map[string]any{"tool": strings.TrimSpace(toolID)}, redactProviderError(err, secrets),
+		)
+	}
+	if err := handle.MarkResponseObserved(ctx, map[string]any{"status": response.StatusCode}); err != nil {
+		return DeliveryResult{OperationID: operationID}, err
+	}
+	output, err := projectProviderResponse(toolID, tool, response, raw, secrets)
+	if err != nil {
+		return DeliveryResult{OperationID: operationID}, handle.Fail(
+			ctx, runtimeeffects.StateOutcomeUncertain, runtimefailures.ClassOutcomeUncertain,
+			"channel_confirmation_response_unconfirmed", "channel_confirmation", "validate_response",
+			map[string]any{"tool": strings.TrimSpace(toolID), "status": response.StatusCode}, err,
+		)
+	}
+	if err := handle.Succeed(ctx, map[string]any{"status": response.StatusCode, "response_fingerprint": runtimeeffects.Fingerprint(raw)}); err != nil {
+		return DeliveryResult{OperationID: operationID}, err
+	}
+	return DeliveryResult{OperationID: operationID, Output: output}, nil
 }
 
 func (p *PendingApply) SettleReadback(ctx context.Context, exact bool, cause error) error {

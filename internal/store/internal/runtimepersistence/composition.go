@@ -9,6 +9,7 @@ import (
 	storeactivityjournal "github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
 	storeactivityresult "github.com/division-sh/swarm/internal/store/internal/backend/activityresult"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
+	storechannelonboarding "github.com/division-sh/swarm/internal/store/internal/backend/channelonboarding"
 	storedecision "github.com/division-sh/swarm/internal/store/internal/backend/decisionpersistence"
 	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	storeeffect "github.com/division-sh/swarm/internal/store/internal/backend/effectpersistence"
@@ -93,6 +94,11 @@ func newPostgresStoreComposition(backend *postgresbackend.Backend) (*PostgresSto
 		return nil, err
 	}
 	store.operatorChannelPostgresOwner = operatorChannels
+	channelOnboarding, err := storechannelonboarding.NewPostgres(backend, store.requireCurrentSchema)
+	if err != nil {
+		return nil, err
+	}
+	store.channelOnboardingPostgresOwner = channelOnboarding
 	bundleCatalog, err := storebundlecatalog.NewPostgres(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err
@@ -349,6 +355,11 @@ func newSQLiteStoreComposition(schema *SQLiteSchemaStore, backend *sqlitebackend
 		return nil, err
 	}
 	store.operatorChannelSQLiteOwner = operatorChannels
+	channelOnboarding, err := storechannelonboarding.NewSQLite(backend, store.requireCurrentSchema)
+	if err != nil {
+		return nil, err
+	}
+	store.channelOnboardingSQLiteOwner = channelOnboarding
 	bundleCatalog, err := storebundlecatalog.NewSQLite(backend, store.requireCurrentSchema)
 	if err != nil {
 		return nil, err

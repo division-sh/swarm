@@ -987,7 +987,7 @@ func testRegistrationPair(t *testing.T, registration packs.CompiledChannelRegist
 		t.Fatal(err)
 	}
 	return RegistrationPair{
-		BindingID: bindingID, PlanGeneration: planGeneration, Registration: registration,
+		BindingID: bindingID, PlanGeneration: planGeneration, PrebindingOperationID: "test-prebinding-" + bindingID, Registration: registration,
 		CredentialKeys: map[string]string{"telegram_bot_token": "bot"},
 		Target: RegistrationTarget{
 			Selector: selector, BundleHash: "bundle-v1:sha256:" + strings.Repeat("b", 64), ServiceID: "service-" + bindingID,

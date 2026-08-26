@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -31,24 +32,101 @@ type channelOperation struct {
 	operation string
 }
 
-func compileChannelOperations(bindings []packs.OutboundBindingPlan) map[string]channelOperation {
-	out := map[string]channelOperation{}
-	for _, binding := range bindings {
-		for _, operation := range binding.OperationNames() {
-			out[binding.RuntimeToolID(operation)] = channelOperation{binding: binding, operation: operation}
-		}
+type channelRuntimeLeaseContextKey struct{}
+type channelActivationGenerationContextKey struct{}
+
+type channelActivationPresentation struct {
+	lease *runtimechannelactivation.Lease
+}
+
+type channelRuntimeExecutionLease struct {
+	toolID string
+	lease  *runtimechannelactivation.Lease
+}
+
+func withChannelRuntimeExecutionLease(ctx context.Context, toolID string, lease *runtimechannelactivation.Lease) context.Context {
+	return context.WithValue(ctx, channelRuntimeLeaseContextKey{}, channelRuntimeExecutionLease{
+		toolID: strings.TrimSpace(toolID),
+		lease:  lease,
+	})
+}
+
+func channelRuntimeExecutionLeaseFromContext(ctx context.Context, toolID string) (*runtimechannelactivation.Lease, bool) {
+	if ctx == nil {
+		return nil, false
 	}
-	return out
+	admission, ok := ctx.Value(channelRuntimeLeaseContextKey{}).(channelRuntimeExecutionLease)
+	if !ok || admission.lease == nil || admission.toolID != strings.TrimSpace(toolID) {
+		return nil, false
+	}
+	return admission.lease, true
+}
+
+func channelRuntimeExecutionPublicationFromContext(ctx context.Context) (*runtimechannelactivation.Lease, bool) {
+	if ctx == nil {
+		return nil, false
+	}
+	admission, ok := ctx.Value(channelRuntimeLeaseContextKey{}).(channelRuntimeExecutionLease)
+	return admission.lease, ok && admission.lease != nil
+}
+
+func withChannelActivationGeneration(ctx context.Context, lease *runtimechannelactivation.Lease) context.Context {
+	if ctx == nil || lease == nil || !lease.Generation().Valid() {
+		return ctx
+	}
+	return context.WithValue(ctx, channelActivationGenerationContextKey{}, channelActivationPresentation{lease: lease})
+}
+
+func channelActivationPresentationFromContext(ctx context.Context) (*runtimechannelactivation.Lease, bool) {
+	if ctx == nil {
+		return nil, false
+	}
+	presentation, ok := ctx.Value(channelActivationGenerationContextKey{}).(channelActivationPresentation)
+	return presentation.lease, ok && presentation.lease != nil
+}
+
+func (e *Executor) admitChannelRuntimeExecution(ctx context.Context, toolID string) (context.Context, *runtimechannelactivation.Lease, error) {
+	if e == nil || e.channelActivations == nil {
+		return ctx, nil, nil
+	}
+	toolID = strings.TrimSpace(toolID)
+	if presentation, pinned := channelActivationPresentationFromContext(ctx); pinned {
+		if operation, found := presentation.BorrowRuntimeOperation(toolID); found {
+			return withChannelRuntimeExecutionLease(ctx, toolID, operation), nil, nil
+		}
+		return ctx, nil, nil
+	}
+	var lease *runtimechannelactivation.Lease
+	var found bool
+	lease, found = e.channelActivations.AcquireRuntimeOperation(toolID)
+	if found {
+		return withChannelRuntimeExecutionLease(ctx, toolID, lease), lease, nil
+	}
+	if e.channelActivations.HasRuntimeTool(toolID) {
+		return ctx, nil, runtimefailures.New(
+			runtimefailures.ClassDependencyUnavailable,
+			"channel_activation_replacement_in_progress",
+			"channel-runtime",
+			"admit",
+			map[string]any{"tool": toolID},
+		)
+	}
+	return ctx, nil, nil
 }
 
 func (e *Executor) execChannelOperation(ctx context.Context, actor models.AgentConfig, toolID string, input any) (any, error) {
 	if e == nil || e.activityExecutor == nil {
 		return nil, runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "channel_activity_runtime_unavailable", "channel-runtime", "execute", nil)
 	}
-	operation, ok := e.channelOperations[strings.TrimSpace(toolID)]
-	if !ok {
-		return nil, runtimefailures.New(runtimefailures.ClassTargetUnreachable, "channel_operation_not_configured", "channel-runtime", "execute", map[string]any{"tool": strings.TrimSpace(toolID)})
+	if e.channelActivations == nil {
+		return nil, runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "channel_activation_owner_unavailable", "channel-runtime", "execute", nil)
 	}
+	lease, found := channelRuntimeExecutionLeaseFromContext(ctx, toolID)
+	if !found {
+		return nil, runtimefailures.New(runtimefailures.ClassDependencyUnavailable, "channel_operation_lease_required", "channel-runtime", "execute", map[string]any{"tool": strings.TrimSpace(toolID)})
+	}
+	current := lease.Operation()
+	operation := channelOperation{binding: current.Binding, operation: current.Name}
 	connectorToolID, prepared, err := operation.binding.PrepareOperation(operation.operation, input)
 	if err != nil {
 		return nil, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "channel_operation_input_invalid", "channel-runtime", "prepare", map[string]any{"tool": strings.TrimSpace(toolID)}, err)
@@ -105,32 +183,33 @@ func (e *Executor) execChannelOperation(ctx context.Context, actor models.AgentC
 		return nil, fmt.Errorf("admit channel activity producer source: %w", err)
 	}
 	intent := runtimeengine.ActivityIntent{
-		Context:          events.DeliveryContextFromContext(ctx),
-		ActivityID:       activityID,
-		Tool:             privateTarget.ToolID(),
-		PlanGeneration:   privateTarget.Generation(),
-		BundleHash:       bundleHash,
-		WorkflowVersion:  workflowVersion,
-		Input:            semanticInput,
-		EffectClass:      effectClass,
-		SuccessEvent:     strings.TrimSpace(toolID) + ".succeeded",
-		FailureEvent:     strings.TrimSpace(toolID) + ".failed",
-		RetryMaxAttempts: defaults.MaxAttempts,
-		RetryBackoff:     defaults.Backoff,
-		ForkPolicy:       runtimecontracts.ActivityForkPolicyForEffectClass(effectClass),
-		EntityID:         identity.NormalizeEntityID(entityID),
-		Owner:            activityidentity.MustAgentOwner(actor.ID),
-		ExecutionFlowID:  identity.NormalizeFlowID(flowID),
-		FlowInstance:     flowInstance,
-		HandlerEventKey:  strings.TrimSpace(toolID),
-		SourceEventID:    inbound.ID(),
-		SourceRunID:      inbound.RunID(),
-		SourceTaskID:     inbound.TaskID(),
-		ParentEventID:    inbound.ID(),
-		ChainDepth:       inbound.ChainDepth(),
-		Attempt:          1,
-		ExecutionMode:    actor.ExecutionMode,
-		RoutingSource:    routingSource,
+		Context:                     events.DeliveryContextFromContext(ctx),
+		ActivityID:                  activityID,
+		Tool:                        privateTarget.ToolID(),
+		PlanGeneration:              privateTarget.Generation(),
+		ChannelActivationGeneration: lease.Generation(),
+		BundleHash:                  bundleHash,
+		WorkflowVersion:             workflowVersion,
+		Input:                       semanticInput,
+		EffectClass:                 effectClass,
+		SuccessEvent:                strings.TrimSpace(toolID) + ".succeeded",
+		FailureEvent:                strings.TrimSpace(toolID) + ".failed",
+		RetryMaxAttempts:            defaults.MaxAttempts,
+		RetryBackoff:                defaults.Backoff,
+		ForkPolicy:                  runtimecontracts.ActivityForkPolicyForEffectClass(effectClass),
+		EntityID:                    identity.NormalizeEntityID(entityID),
+		Owner:                       activityidentity.MustAgentOwner(actor.ID),
+		ExecutionFlowID:             identity.NormalizeFlowID(flowID),
+		FlowInstance:                flowInstance,
+		HandlerEventKey:             strings.TrimSpace(toolID),
+		SourceEventID:               inbound.ID(),
+		SourceRunID:                 inbound.RunID(),
+		SourceTaskID:                inbound.TaskID(),
+		ParentEventID:               inbound.ID(),
+		ChainDepth:                  inbound.ChainDepth(),
+		Attempt:                     1,
+		ExecutionMode:               actor.ExecutionMode,
+		RoutingSource:               routingSource,
 	}.Normalized()
 	record, err := e.activityExecutor.ExecuteDurableActivity(ctx, intent)
 	if err != nil {

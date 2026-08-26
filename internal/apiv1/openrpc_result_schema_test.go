@@ -171,6 +171,8 @@ func approvedResultSchemaRuntimeMethods() []string {
 	out = append(out, approvedPermanentOperationHTTPRuntimeMethods()...)
 	out = append(out, approvedWebSocketRuntimeMethods()...)
 	out = append(out,
+		"channel.onboarding_start",
+		"channel.onboarding_retry",
 		"channel.connect",
 		"channel.reconnect",
 		"channel.rebind",
@@ -344,6 +346,32 @@ func successfulOperatorChannelRuntimeResult(methodName string) any {
 	}
 	if methodName == "channel.list" {
 		return map[string]any{"principal_id": "00000000-0000-0000-0000-000000000801", "channels": []any{}}
+	}
+	if strings.HasPrefix(methodName, "channel.onboarding_") {
+		coordinate := map[string]any{
+			"bundle_hash": "bundle-v1:sha256:" + strings.Repeat("a", 64), "bundle_source": "persisted",
+			"bundle_identity": "support@1.0.0#bundle", "pack_inventory_generation": "inventory",
+			"context_publication_generation": 1, "plan_generation": "plan", "target_generation": 1,
+		}
+		operation := map[string]any{
+			"operation_id": "00000000-0000-0000-0000-000000000806", "principal_id": "00000000-0000-0000-0000-000000000801",
+			"verb": "connect", "provider": "telegram", "interface": identity, "coordinate": coordinate,
+			"target_selector": "ingress:support:telegram:telegram", "activation_posture": "webhook_registration",
+			"identity_ceremony": "authenticated_text_challenge", "phase": "awaiting_external_identity", "revision": 2,
+			"save_proof": true, "credential_reservations": []any{map[string]any{"role": "bot_token", "store_key": "channel.telegram.bot_token"}},
+			"requested_at": "2026-08-24T12:00:00Z", "updated_at": "2026-08-24T12:00:01Z",
+		}
+		candidate := map[string]any{
+			"provider": "telegram", "interface": identity, "coordinate": coordinate,
+			"target": map[string]any{
+				"selector": "ingress:support:telegram:telegram", "service_id": "00000000-0000-0000-0000-000000000807",
+				"package_key": "support", "flow_id": "telegram", "alias": "telegram", "provider": "telegram",
+				"generation": 1, "publication_sequence": 1, "admission_generation": strings.Repeat("b", 64),
+			},
+			"activation_posture": "webhook_registration", "identity_ceremony": "authenticated_text_challenge",
+			"provider_credential_role": "bot_token", "signing_credential_role": "signing_secret", "confirmation_operation": "send_message",
+		}
+		return map[string]any{"operation": operation, "candidate": candidate}
 	}
 	if methodName == "channel.proof_revoke" {
 		return map[string]any{"proof": map[string]any{

@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/providerconnectors"
@@ -293,6 +294,145 @@ func TestTelegramChannelPackCompilesThroughAcceptedProductionInventories(t *test
 	}
 }
 
+func TestCompileChannelActivationsRejectsDeclaredLearnedCollisionAndContradiction(t *testing.T) {
+	plan := loadTelegramChannelPlan(t)
+	generation, err := plan.Generation()
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := "ingress:.:telegram-ingress:telegram"
+	declaredPlan, err := packs.NewOutboundBindingPlanWithRegistration(
+		"declared_ops", plan, "-100123", nil,
+		map[string]string{"telegram_bot_token": "telegram.provider", "webhook_signing_secret": "telegram.signing"}, target,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	learnedPlan, err := packs.NewOutboundBindingPlanWithRegistration(
+		"learned_ops", plan, "-100456", nil,
+		map[string]string{"telegram_bot_token": "telegram.provider", "webhook_signing_secret": "telegram.signing"}, target,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
+		BundleHash: "bundle-v1:sha256:" + strings.Repeat("a", 64), BundleSource: "persisted",
+		BundleIdentity: "telegram@1.0.0#bundle", PackInventoryGeneration: "sha256:inventory",
+		ContextPublicationGeneration: 1, PlanGeneration: generation, TargetGeneration: 1,
+	}
+	admissions := []channelonboarding.CredentialAdmission{
+		{Role: "telegram_bot_token", StoreKey: "telegram.provider", Kind: channelonboarding.CredentialAdmissionObserved, Receipt: "provider-receipt", Epoch: "provider-epoch"},
+		{Role: "webhook_signing_secret", StoreKey: "telegram.signing", Kind: channelonboarding.CredentialAdmissionObserved, Receipt: "signing-receipt", Epoch: "signing-epoch"},
+	}
+	for _, plans := range [][2]packs.OutboundBindingPlan{{declaredPlan, learnedPlan}, {learnedPlan, declaredPlan}} {
+		declared := channelonboarding.CompiledActivation{Source: channelonboarding.ActivationSourceDeclared, Coordinate: coordinate, Plan: plans[0], CredentialAdmissions: admissions}
+		learned := channelonboarding.CompiledActivation{Source: channelonboarding.ActivationSourceLearned, Coordinate: coordinate, ActivationRevision: 1, Plan: plans[1], CredentialAdmissions: admissions}
+		if _, err := channelonboarding.MergeCompiledActivations([]channelonboarding.CompiledActivation{declared}, []channelonboarding.CompiledActivation{learned}); err == nil || !strings.Contains(err.Error(), "target collision") {
+			t.Fatalf("declared/learned target collision error = %v", err)
+		}
+	}
+}
+
+func TestChannelActivationPublicationGenerationRetainsCompleteNonSecretProvenance(t *testing.T) {
+	plan := loadTelegramChannelPlan(t)
+	planGeneration, err := plan.Generation()
+	if err != nil {
+		t.Fatal(err)
+	}
+	newBinding := func(destination string) packs.OutboundBindingPlan {
+		binding, bindingErr := packs.NewOutboundBindingPlanWithRegistration(
+			"telegram_ops", plan, destination, nil,
+			map[string]string{"telegram_bot_token": "telegram.provider", "webhook_signing_secret": "telegram.signing"},
+			"ingress:.:telegram-ingress:telegram",
+		)
+		if bindingErr != nil {
+			t.Fatal(bindingErr)
+		}
+		return binding
+	}
+	base := channelonboarding.CompiledActivation{
+		Source: channelonboarding.ActivationSourceDeclared,
+		Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
+			BundleHash: "bundle-v1:sha256:" + strings.Repeat("a", 64), BundleSource: "persisted",
+			BundleIdentity: "telegram@1.0.0#bundle", PackInventoryGeneration: "sha256:inventory",
+			ContextPublicationGeneration: 7, PlanGeneration: planGeneration, TargetGeneration: 3,
+		},
+		Plan: newBinding("-100123"),
+		CredentialAdmissions: []channelonboarding.CredentialAdmission{
+			{Role: "telegram_bot_token", StoreKey: "telegram.provider", Kind: channelonboarding.CredentialAdmissionObserved, Receipt: "provider-receipt", Epoch: "provider-epoch"},
+			{Role: "webhook_signing_secret", StoreKey: "telegram.signing", Kind: channelonboarding.CredentialAdmissionObserved, Receipt: "signing-receipt", Epoch: "signing-epoch"},
+		},
+	}
+	publication, err := channelonboarding.NewChannelActivationPublication([]channelonboarding.CompiledActivation{base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	declaredOnly, err := channelonboarding.NewDeclaredOnlyChannelActivationPublication([]packs.OutboundBindingPlan{base.Plan})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if declaredOnly.Executable() || len(declaredOnly.Activations()) != 0 || len(declaredOnly.Bindings()) != 1 || declaredOnly.Bindings()[0].BindingID() != base.Plan.BindingID() {
+		t.Fatalf("declared-only publication leaked execution or lost configured plan: %#v", declaredOnly)
+	}
+	changedDeclaredOnly, err := channelonboarding.NewDeclaredOnlyChannelActivationPublication([]packs.OutboundBindingPlan{newBinding("-100456")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if declaredOnly.Generation().Equal(changedDeclaredOnly.Generation()) {
+		t.Fatal("declared-only publication ignored behavior-bearing destination change")
+	}
+	if _, err := channelonboarding.NewDeclaredOnlyChannelActivationPublication([]packs.OutboundBindingPlan{base.Plan, base.Plan}); err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("duplicate declared-only publication error = %v", err)
+	}
+	reordered := base
+	reordered.CredentialAdmissions = []channelonboarding.CredentialAdmission{base.CredentialAdmissions[1], base.CredentialAdmissions[0]}
+	repeated, err := channelonboarding.NewChannelActivationPublication([]channelonboarding.CompiledActivation{reordered})
+	if err != nil || !publication.Generation().Equal(repeated.Generation()) {
+		t.Fatalf("deterministic publication generation = %s/%s err=%v", publication.Generation().Diagnostic(), repeated.Generation().Diagnostic(), err)
+	}
+
+	mutations := map[string]func(channelonboarding.CompiledActivation) channelonboarding.CompiledActivation{
+		"source and revision": func(value channelonboarding.CompiledActivation) channelonboarding.CompiledActivation {
+			value.Source = channelonboarding.ActivationSourceLearned
+			value.ActivationRevision = 1
+			return value
+		},
+		"runtime context": func(value channelonboarding.CompiledActivation) channelonboarding.CompiledActivation {
+			value.Coordinate.ContextPublicationGeneration++
+			return value
+		},
+		"destination": func(value channelonboarding.CompiledActivation) channelonboarding.CompiledActivation {
+			value.Plan = newBinding("-100456")
+			return value
+		},
+		"credential epoch": func(value channelonboarding.CompiledActivation) channelonboarding.CompiledActivation {
+			value.CredentialAdmissions = append([]channelonboarding.CredentialAdmission(nil), value.CredentialAdmissions...)
+			value.CredentialAdmissions[0].Epoch = "provider-epoch-2"
+			return value
+		},
+	}
+	for name, mutate := range mutations {
+		t.Run(name, func(t *testing.T) {
+			changed, changedErr := channelonboarding.NewChannelActivationPublication([]channelonboarding.CompiledActivation{mutate(base)})
+			if changedErr != nil {
+				t.Fatal(changedErr)
+			}
+			if publication.Generation().Equal(changed.Generation()) {
+				t.Fatalf("%s did not change publication generation", name)
+			}
+		})
+	}
+
+	incomplete := base
+	incomplete.CredentialAdmissions = incomplete.CredentialAdmissions[:1]
+	if _, err := channelonboarding.NewChannelActivationPublication([]channelonboarding.CompiledActivation{incomplete}); err == nil || !strings.Contains(err.Error(), "missing credential admission") {
+		t.Fatalf("incomplete publication error = %v", err)
+	}
+	if strings.Contains(publication.Generation().Diagnostic(), "provider-secret") {
+		t.Fatal("publication identity exposed credential material")
+	}
+}
+
 func TestTelegramChannelRejectsOutOfRangeDeliveryReferenceBeforeConnectorProjection(t *testing.T) {
 	plan := loadTelegramChannelPlan(t)
 	if _, err := plan.PrepareOperationInput("edit", map[string]any{
@@ -467,6 +607,50 @@ func TestChannelRegistrationCompilerIsProviderNeutralAcrossTelegramAndDifferenti
 	}
 }
 
+func TestTelegramOnboardingProfileCompilesAsWebhookTextChallenge(t *testing.T) {
+	plan := loadTelegramChannelPlan(t)
+	profile, ok := plan.OnboardingProfile()
+	if !ok {
+		t.Fatal("Telegram onboarding profile is missing")
+	}
+	if profile.Provider() != "telegram" || profile.ActivationPosture() != packs.ChannelActivationWebhookRegistration || profile.IdentityCeremony() != packs.ChannelCeremonyAuthenticatedTextChallenge {
+		t.Fatalf("Telegram onboarding profile = %#v", profile)
+	}
+	if profile.ProviderCredential() != "telegram_bot_token" || profile.SigningCredential() != "webhook_signing_secret" || profile.ConfirmationOperation() != "deliver" {
+		t.Fatalf("Telegram onboarding credentials/confirmation = %#v", profile)
+	}
+}
+
+func TestChannelOnboardingProfileAxesAreProviderNeutral(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		profile  packs.ChannelOnboardingProfile
+		posture  packs.ChannelActivationPosture
+		ceremony packs.ChannelIdentityCeremony
+	}{
+		{
+			name:    "discord webhook text",
+			profile: packs.ChannelOnboardingProfile{Activation: "webhook_registration", Ceremony: "authenticated_text_challenge", ProviderCredentialRole: "discord_app_token", SigningCredentialRole: "discord_signature_key", Confirmation: "deliver"},
+			posture: packs.ChannelActivationWebhookRegistration, ceremony: packs.ChannelCeremonyAuthenticatedTextChallenge,
+		},
+		{
+			name:    "whatsapp session pairing",
+			profile: packs.ChannelOnboardingProfile{Activation: "session_connection", Ceremony: "provider_pairing", ProviderCredentialRole: "whatsapp_session", Confirmation: "deliver", ConnectionHealth: "bridge_connection"},
+			posture: packs.ChannelActivationSessionConnection, ceremony: packs.ChannelCeremonyProviderPairing,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			compiled, err := packs.CompileChannelOnboardingProfile("paper-port", tc.profile, []string{"deliver"})
+			if err != nil {
+				t.Fatalf("CompileChannelOnboardingProfile: %v", err)
+			}
+			if compiled.ActivationPosture() != tc.posture || compiled.IdentityCeremony() != tc.ceremony {
+				t.Fatalf("compiled axes = %#v", compiled)
+			}
+		})
+	}
+}
+
 type mockRegistrationEffectStore struct{ *effecttest.Harness }
 
 func (s mockRegistrationEffectStore) IsExternalEffectAuthorityCurrent(context.Context, runtimeeffects.Authority) (bool, error) {
@@ -597,7 +781,7 @@ func TestDifferentialMockRegistrationExecutesThroughProviderNeutralLifecycle(t *
 		StartupAuthorityID: startup.GrantID, ObservedAt: exposure.CreatedAt, ExpiresAt: exposure.CreatedAt.Add(runtimepublicingress.EvidenceTTL),
 	})
 	pair := runtimepublicingress.RegistrationPair{
-		BindingID: "mock-hitl", PlanGeneration: planGeneration, Registration: registration,
+		BindingID: "mock-hitl", PlanGeneration: planGeneration, PrebindingOperationID: "test-prebinding-mock-hitl", Registration: registration,
 		CredentialKeys: map[string]string{"mock_api_key": "api"},
 		Target: runtimepublicingress.RegistrationTarget{
 			Selector: "ingress:support:mock:mock", BundleHash: "bundle-v1:sha256:" + strings.Repeat("e", 64),

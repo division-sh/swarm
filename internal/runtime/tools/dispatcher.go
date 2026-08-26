@@ -16,7 +16,7 @@ type HTTPToolHandler func(ctx context.Context, actor models.AgentConfig, tool Ex
 type MCPToolHandler func(ctx context.Context, actor models.AgentConfig, tool ExecutionTool, input any) (any, error)
 type ChannelToolHandler func(ctx context.Context, actor models.AgentConfig, tool ExecutionTool, input any) (any, error)
 type RoleScopedEntityToolHandler func(ctx context.Context, actor models.AgentConfig, name string, input any) (any, bool, error)
-type ToolResolver func(actor models.AgentConfig, name string) (ExecutionTool, bool, error)
+type ToolResolver func(context.Context, models.AgentConfig, string) (ExecutionTool, bool, error)
 
 type ToolDispatcher struct {
 	emitHandler             EmitToolHandler
@@ -64,7 +64,7 @@ func (d *ToolDispatcher) Dispatch(ctx context.Context, actor models.AgentConfig,
 	if d.resolver == nil {
 		return nil, fmt.Errorf("tool resolver is not configured")
 	}
-	tool, ok, err := d.resolver(actor, name)
+	tool, ok, err := d.resolver(ctx, actor, name)
 	if err != nil {
 		return nil, err
 	}

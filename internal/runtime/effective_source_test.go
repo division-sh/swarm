@@ -113,7 +113,7 @@ func TestEffectiveSourceIdentityChangesWithExternalSemanticGenerations(t *testin
 		}
 	})
 
-	t.Run("channel destination", func(t *testing.T) {
+	t.Run("channel deployment destination is a separate concept", func(t *testing.T) {
 		plan, _ := effectiveSourceTestChannelPlans(t, repoRoot)
 		first, err := packs.NewOutboundBindingPlan("ops", plan, "42", nil)
 		if err != nil {
@@ -123,8 +123,13 @@ func TestEffectiveSourceIdentityChangesWithExternalSemanticGenerations(t *testin
 		if err != nil {
 			t.Fatal(err)
 		}
-		if digestForEffectiveSourceBindings(t, source, fact, []packs.OutboundBindingPlan{first}) == digestForEffectiveSourceBindings(t, source, fact, []packs.OutboundBindingPlan{second}) {
-			t.Fatal("channel destination change retained effective source digest")
+		if first.Destination().Interface() == second.Destination().Interface() {
+			t.Fatal("test bindings do not exercise different deployment destinations")
+		}
+		before := digestForEffectiveSourceValue(t, source, fact, []packs.SatisfactionPlan{plan})
+		after := digestForEffectiveSourceValue(t, source, fact, []packs.SatisfactionPlan{plan})
+		if before != after {
+			t.Fatal("mutable channel deployment contaminated immutable effective source identity")
 		}
 	})
 }
@@ -223,6 +228,9 @@ func TestEffectiveSourceProjectionHasNoProductionCompositionBypass(t *testing.T)
 		},
 		"SourceWithProviderTriggerEvents": {"internal/runtime/effective_source.go": true},
 		"WithRuntimeTools":                {"internal/runtime/effective_source.go": true},
+		"WithChannelRuntimeToolProjection": {
+			"internal/runtime/tools/executor.go": true,
+		},
 	}
 	err := filepath.WalkDir(filepath.Join(repoRoot, "internal"), func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -299,20 +307,7 @@ func digestForConnectorGeneration(t *testing.T, source semanticview.Source, fact
 
 func digestForEffectiveSourceValue(t *testing.T, source semanticview.Source, fact runtimecorrelation.BundleSourceFact, plans []packs.SatisfactionPlan) string {
 	t.Helper()
-	value, err := effectiveSourceIdentityValue(source, fact, plans, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	digest, err := canonicaljson.Hash(value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return digest
-}
-
-func digestForEffectiveSourceBindings(t *testing.T, source semanticview.Source, fact runtimecorrelation.BundleSourceFact, bindings []packs.OutboundBindingPlan) string {
-	t.Helper()
-	value, err := effectiveSourceIdentityValue(source, fact, nil, bindings)
+	value, err := effectiveSourceIdentityValue(source, fact, plans)
 	if err != nil {
 		t.Fatal(err)
 	}

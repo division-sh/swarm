@@ -62,6 +62,7 @@ const (
 	ChannelOperationNotFoundCode           = "CHANNEL_OPERATION_NOT_FOUND"
 	ChannelOperationTerminalCode           = "CHANNEL_OPERATION_TERMINAL"
 	ChannelProofUnavailableCode            = "CHANNEL_PROOF_UNAVAILABLE"
+	ChannelCredentialRequiredCode          = "CHANNEL_CREDENTIAL_REQUIRED"
 )
 
 type Registry struct {

@@ -56,6 +56,7 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/contracts/producer_routing_codemod.go:writeProducerRoutingRewrite:filesystem_write:4":               ownerOperatorInfra,
 	"internal/runtime/contracts/producer_routing_codemod.go:writeProducerRoutingRewrite:filesystem_write:5":               ownerOperatorInfra,
 	"internal/runtime/context_manager.go:Done:http_do:1":                                                                  ownerRuntimeDependency,
+	"internal/runtime/channelactivation/owner.go:Release:http_do:1":                                                       ownerRuntimeDependency,
 	"internal/runtime/bus/eventbus.go:acquire:http_do:1":                                                                  ownerRuntimeDependency,
 	"internal/runtime/bus/eventbus.go:Done:http_do:1":                                                                     ownerRuntimeDependency,
 	"internal/runtime/deliverylifecycle/heartbeat.go:Finish:http_do:1":                                                    ownerRuntimeDependency,
@@ -329,7 +330,7 @@ func serveRegistrationPrimitive(adapters []string, owner primitiveOwner) bool {
 	}
 	for _, adapter := range adapters {
 		registration, ok := RegistrationFor(adapter)
-		if !ok || registration.Kind != KindServeRegistration {
+		if !ok || (registration.Kind != KindServeRegistration && registration.Kind != KindChannelConfirmation) {
 			return false
 		}
 	}

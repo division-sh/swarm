@@ -339,7 +339,7 @@ func TestHITLIdentityLifecycleRejectsDirectDispatchBeforeResolution(t *testing.T
 				var resolverCalls atomic.Int32
 				var mcpCalls atomic.Int32
 				dispatcher := NewToolDispatcher(nil,
-					func(models.AgentConfig, string) (ExecutionTool, bool, error) {
+					func(context.Context, models.AgentConfig, string) (ExecutionTool, bool, error) {
 						resolverCalls.Add(1)
 						entry := retiredToolEntry(
 							runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerMCP),

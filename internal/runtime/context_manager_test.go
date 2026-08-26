@@ -174,6 +174,47 @@ func TestRuntimeContextManagerReplacementTransactionWithdrawsAndPublishesAuthori
 	}
 }
 
+func TestRuntimeContextManagerOwnsPublicationGenerationAcrossReplacementAndRestore(t *testing.T) {
+	predecessor := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	manager, err := newTestRuntimeContextManager(t, nil, predecessor)
+	if err != nil {
+		t.Fatalf("NewRuntimeContextManager: %v", err)
+	}
+	initial := manager.LoadedContexts()[0]
+	if initial.PublicationGeneration == 0 {
+		t.Fatal("initial publication generation = 0")
+	}
+
+	candidate := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	withdrawn, err := manager.BeginBundleHashReplacement(context.Background(), runtimeContextTestHashA, candidate)
+	if err != nil {
+		t.Fatalf("BeginBundleHashReplacement: %v", err)
+	}
+	if withdrawn.PublicationGeneration != initial.PublicationGeneration {
+		t.Fatalf("withdrawn publication generation = %d, want %d", withdrawn.PublicationGeneration, initial.PublicationGeneration)
+	}
+	if err := manager.PublishBundleHashReplacement(runtimeContextTestHashA, candidate); err != nil {
+		t.Fatalf("PublishBundleHashReplacement: %v", err)
+	}
+	replacement := manager.LoadedContexts()[0]
+	if replacement.PublicationGeneration <= initial.PublicationGeneration {
+		t.Fatalf("replacement publication generation = %d, want greater than %d", replacement.PublicationGeneration, initial.PublicationGeneration)
+	}
+
+	secondCandidate := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	if _, err := manager.BeginBundleHashReplacement(context.Background(), runtimeContextTestHashA, secondCandidate); err != nil {
+		t.Fatalf("withdraw replacement: %v", err)
+	}
+	restored := candidate
+	restored.PublicationGeneration = replacement.PublicationGeneration
+	if err := manager.PublishRestoredBundleHashReplacement(runtimeContextTestHashA, restored); err != nil {
+		t.Fatalf("PublishRestoredBundleHashReplacement: %v", err)
+	}
+	if got := manager.LoadedContexts()[0].PublicationGeneration; got != replacement.PublicationGeneration {
+		t.Fatalf("restored publication generation = %d, want predecessor %d", got, replacement.PublicationGeneration)
+	}
+}
+
 func TestRuntimeContextManagerPublishedReplacementCanBeWithdrawn(t *testing.T) {
 	for _, candidateHash := range []string{runtimeContextTestHashA, runtimeContextTestHashB} {
 		candidateHash := candidateHash

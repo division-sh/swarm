@@ -141,6 +141,59 @@ func TestRuntimeToolOverlayPreservesSemanticSourceCapabilities(t *testing.T) {
 	}
 }
 
+func TestChannelRuntimeToolProjectionReplacesOnlyChannelTools(t *testing.T) {
+	base := Wrap(&runtimecontracts.WorkflowContractBundle{})
+	objectSchema := runtimecontracts.MustToolInputSchema(runtimecontracts.ToolSchemaObject)
+	channelTool := func() runtimecontracts.ToolSchemaEntry {
+		return runtimecontracts.MustToolSchemaEntry(
+			runtimecontracts.WithToolCategory("channel_operation"),
+			runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerChannel),
+			runtimecontracts.WithToolSchemas(objectSchema, objectSchema),
+		)
+	}
+	platformTool := runtimecontracts.MustToolSchemaEntry(
+		runtimecontracts.WithToolCategory("platform"),
+		runtimecontracts.WithToolHandler(runtimecontracts.ToolHandlerPlatformBuiltin),
+		runtimecontracts.WithToolSchemas(objectSchema, objectSchema),
+	)
+	predecessor, err := WithRuntimeTools(base, map[string]runtimecontracts.ToolSchemaEntry{
+		"channel.predecessor.deliver": channelTool(),
+		"platform.inspect":            platformTool,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	successor, err := WithChannelRuntimeToolProjection(predecessor, map[string]runtimecontracts.ToolSchemaEntry{
+		"channel.successor.deliver": channelTool(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := successor.ToolEntries()
+	if _, exists := entries["channel.predecessor.deliver"]; exists {
+		t.Fatal("successor projection retained predecessor channel authority")
+	}
+	if _, exists := entries["channel.successor.deliver"]; !exists {
+		t.Fatal("successor projection omitted current channel authority")
+	}
+	if _, exists := entries["platform.inspect"]; !exists {
+		t.Fatal("successor projection removed a non-channel tool")
+	}
+
+	empty, err := WithChannelRuntimeToolProjection(successor, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := empty.ToolEntries()["channel.successor.deliver"]; exists {
+		t.Fatal("empty projection retained successor channel authority")
+	}
+	if _, err := WithChannelRuntimeToolProjection(predecessor, map[string]runtimecontracts.ToolSchemaEntry{
+		"platform.inspect": channelTool(),
+	}); err == nil {
+		t.Fatal("channel projection replaced a non-channel tool identity")
+	}
+}
+
 func TestSemanticSourceCapabilitiesRejectIncompletePayloads(t *testing.T) {
 	base := Wrap(&runtimecontracts.WorkflowContractBundle{})
 	generation := triggergeneration.FromCanonicalBytes([]byte("trigger-generation"))

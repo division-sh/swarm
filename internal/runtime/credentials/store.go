@@ -21,6 +21,18 @@ type Store interface {
 	Delete(ctx context.Context, key string) error
 }
 
+type WriteReceipt struct {
+	Key       string
+	Receipt   string
+	Epoch     string
+	UpdatedAt time.Time
+}
+
+type ReceiptWriter interface {
+	Store
+	AdmitWithReceipt(context.Context, string, string, string) (WriteReceipt, error)
+}
+
 type Inspector interface {
 	Store
 	Inspect(ctx context.Context, key string) (Metadata, error)
@@ -37,6 +49,9 @@ type AtomicSnapshot struct {
 	Shadowed  bool
 	UpdatedAt *time.Time
 	value     string
+	// occurrenceEpoch is store-owned, non-secret currentness metadata. It is
+	// deliberately excluded from JSON and public credential metadata.
+	occurrenceEpoch string
 }
 
 // Snapshotter is the strict credential boundary used when a value and its
@@ -52,6 +67,14 @@ func NewAtomicSnapshot(metadata Metadata, value string) AtomicSnapshot {
 		Key: strings.TrimSpace(metadata.Key), Present: metadata.Present, Source: strings.TrimSpace(metadata.Source),
 		Writable: metadata.Writable, Shadowed: metadata.Shadowed, UpdatedAt: timePtrValue(metadata.UpdatedAt), value: value,
 	}
+}
+
+// NewAtomicSnapshotWithOccurrence is for credential stores that persist an
+// opaque occurrence identity alongside the credential value.
+func NewAtomicSnapshotWithOccurrence(metadata Metadata, value, occurrenceEpoch string) AtomicSnapshot {
+	snapshot := NewAtomicSnapshot(metadata, value)
+	snapshot.occurrenceEpoch = strings.TrimSpace(occurrenceEpoch)
+	return snapshot
 }
 
 func (s AtomicSnapshot) Metadata() Metadata {
@@ -166,7 +189,11 @@ func (o *SnapshotOwner) Observe(ctx context.Context, key string) (AdmittedSnapsh
 	defer o.mu.Unlock()
 	observation, exists := o.seen[key]
 	if !exists || !sameAtomicSnapshot(observation.snapshot, snapshot) {
-		observation = snapshotObservation{snapshot: cloneAtomicSnapshot(snapshot), epoch: uuid.NewString()}
+		epoch := strings.TrimSpace(snapshot.occurrenceEpoch)
+		if epoch == "" {
+			epoch = uuid.NewString()
+		}
+		observation = snapshotObservation{snapshot: cloneAtomicSnapshot(snapshot), epoch: epoch}
 		o.seen[key] = observation
 	}
 	return AdmittedSnapshot{AtomicSnapshot: cloneAtomicSnapshot(snapshot), epoch: observation.epoch}, nil
