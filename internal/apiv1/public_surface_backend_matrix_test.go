@@ -1120,6 +1120,10 @@ func publicSurfaceOperatorReadProofRefCoversMethodBackend(ref publicSurfaceProof
 
 func publicSurfaceSelectedOperatorReadAPIProofs() map[string]publicSurfaceSelectedOperatorReadAPIProof {
 	return map[string]publicSurfaceSelectedOperatorReadAPIProof{
+		"TestServedParityHarnessBundleRegisterLifecycle": {
+			Backends: []string{"default_sqlite", "explicit_postgres"},
+			Methods:  []string{"bundle.get"},
+		},
 		"TestServedParityHarnessOperatorChannelLifecycle": {
 			Backends: []string{"default_sqlite", "explicit_postgres"},
 			Methods:  []string{"channel.list"},
@@ -1528,6 +1532,21 @@ func validatePublicSurfaceServedMutatingLifecycleRows(rowsByID map[string]public
 
 func expectedPublicSurfaceRowShapes() map[string]publicSurfaceExpectedRowShape {
 	return map[string]publicSurfaceExpectedRowShape{
+		"bundle_register_served_lifecycle": {
+			Classification:       "add_to_matrix",
+			Tier:                 "required_smoke",
+			Backends:             []string{"default_sqlite", "explicit_postgres"},
+			APIMethods:           []string{"bundle.register"},
+			OpenRPCMatrixMethods: []string{"bundle.register"},
+			ProofDimensions:      []string{"canonical_store_owner", "cli_v1_path", "openrpc_publication", "real_runtime_startup", "real_v1_handler", "selected_store", "served_mutating_lifecycle"},
+			GoTestProofRefs: []string{
+				"TestBundleRegisterContractsDirectoryUsesCanonicalRPCAndRenders",
+				"TestServedParityHarnessBundleRegisterLifecycle",
+				"TestRunServeRuntimeBundleRegisterLifecycleDefaultSQLite",
+				"TestRunServeRuntimeBundleRegisterLifecyclePostgres",
+				"TestBundleCatalogWriteParity",
+			},
+		},
 		"api_idempotency_selected_store": {
 			Classification:       "already_covered_by_existing_proof",
 			Tier:                 "required_smoke",

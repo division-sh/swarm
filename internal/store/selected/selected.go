@@ -354,6 +354,7 @@ func composeSQLite(selected *private.SQLiteRuntimeStore) (*Owner, error) {
 		},
 		products: productPorts{
 			bundleCatalog: selected, bundleCatalogAvailable: true,
+			bundleRegister: selected, bundleRegisterAvailable: true,
 			conversationFork: ConversationFork{reader: selected, lifecycle: selected}, conversationAvailable: true,
 		},
 	}, nil

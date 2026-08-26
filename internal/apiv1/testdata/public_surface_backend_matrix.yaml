@@ -38,18 +38,16 @@ active_trackers:
     watchlist: operator_surfaces.v1_openrpc_api_conformance
 mutating_api_parity_ledger:
   - method: bundle.register
-    classification: postgres_only_with_spec_ref
-    backends: [postgres_only]
-    spec_ref: platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.bundle_register
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: bundle_register_lifecycle
     proof_refs:
-      - {kind: artifact, path: platform-spec.yaml}
-      - {kind: go_test, name: TestOperatorBundleRegisterHandlersMaterializeCanonicalProjectionAndIdempotency}
-      - {kind: go_test, name: TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed}
+      - {kind: go_test, name: TestServedParityHarnessBundleRegisterLifecycle}
     notes: >
-      Catalog upload/register behavior consumes the bundle catalog register
-      writer capability. SQLite wires read-only bundle catalog support and is
-      served fail-closed for bundle.register until a separately gated SQLite
-      writer owner exists.
+      The real served harness proves canonical insertion, keyed and catalog
+      replay, malformed rejection, exact conflict detection, transaction
+      rollback and retry, catalog-only behavior, and terminal bundle.get
+      readback through the selected SQLite and PostgreSQL owners.
   - method: event.publish
     classification: dual_backend_served_proof
     backends: [default_sqlite, explicit_postgres]
@@ -425,6 +423,7 @@ operator_read_api_parity_ledger:
     classification: dual_backend_api_proof
     backends: [default_sqlite, explicit_postgres]
     proof_refs:
+      - {kind: go_test, name: TestServedParityHarnessBundleRegisterLifecycle, backends: [default_sqlite, explicit_postgres]}
       - {kind: go_test, name: TestSQLiteBundleCatalogOwnerBacksSupportedAPISurface, backends: [default_sqlite]}
       - {kind: go_test, name: TestPostgresBundleCatalogOwnerBacksSupportedAPISurface, backends: [explicit_postgres]}
   - method: bundle.list
@@ -828,6 +827,34 @@ rows:
       The row proves representative mutating public methods consume selected
       store idempotency owners without duplicating every idempotent OpenRPC
       method across both backends.
+
+  - id: bundle_register_served_lifecycle
+    surface: swarm bundle register and /v1/rpc bundle.register selected-backend catalog lifecycle
+    classification: add_to_matrix
+    tier: required_smoke
+    backends: [default_sqlite, explicit_postgres]
+    cli_commands: [bundle]
+    api_methods: [bundle.register]
+    openrpc_matrix_methods: [bundle.register]
+    store_owners:
+      - internal/cliapp bundle register CLI
+      - /v1/rpc bundle.register canonical projection and idempotency owner
+      - internal/store/selected BundleRegisterWriter capability
+      - selected SQLite/PostgreSQL UpsertBundleCatalog transaction
+      - /v1/rpc bundle.get terminal readback
+    proof_dimensions: [selected_store, real_v1_handler, cli_v1_path, real_runtime_startup, canonical_store_owner, openrpc_publication, served_mutating_lifecycle]
+    proof_refs:
+      - {kind: go_test, name: TestBundleRegisterContractsDirectoryUsesCanonicalRPCAndRenders}
+      - {kind: go_test, name: TestServedParityHarnessBundleRegisterLifecycle}
+      - {kind: go_test, name: TestRunServeRuntimeBundleRegisterLifecycleDefaultSQLite}
+      - {kind: go_test, name: TestRunServeRuntimeBundleRegisterLifecyclePostgres}
+      - {kind: go_test, name: TestBundleCatalogWriteParity}
+      - {kind: artifact, path: platform-spec.yaml}
+    notes: >
+      #2359 promotes the public SQLite writer without merging it with private
+      serve ingest. Both served backends prove insert/replay/conflict/malformed/
+      rollback behavior, no runtime source replacement, and exact public
+      catalog readback.
 
   - id: event_publish_cli
     surface: swarm event publish create-new publication and exact v1 RPC command shape

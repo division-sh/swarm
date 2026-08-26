@@ -6209,7 +6209,12 @@ engine:
         method: bundle.register
         selected_capability: optional public BundleRegisterWriter capability, distinct from required serve ingest
         postgres_support: supported through the Postgres persisted bundle source catalog writer
-        sqlite_support: unsupported; SQLite wires bundle catalog read and private required serve ingest but must not expose bundle.register until #2276 promotes the public capability
+        sqlite_support: supported through the SQLite persisted bundle source catalog writer
+        semantic_owner: internal/apiv1 bundle.register canonical projection plus the selected store UpsertBundleCatalog transaction
+        boundary: >
+          Both selected backends expose the optional public writer explicitly. The writer reuses the backend's exact
+          catalog transaction but remains a separate selected capability from required private serve ingest. Public
+          registration is catalog-only and never implies runtime loading, source replacement, or serve-ingest authority.
       bundle_delete:
         method: bundle.delete
         selected_capability: apiv1.BundleDeleteExecutor
@@ -17627,6 +17632,10 @@ multi_bundle_persistence:
         sqlite: private SQLite bundle-catalog UpsertBundleCatalog owner
       source_fact_owner: internal/serveapp.prepareServeBundleSource
       runtime_context_owner: internal/runtime/correlation.BundleSourceFact
+      public_registration_boundary: >
+        The private ServeIngestWriter and optional public BundleRegisterWriter are distinct selected capabilities even
+        though each consumes the same backend UpsertBundleCatalog transaction. Serve ingest establishes the boot source
+        fact; public registration only persists a canonical catalog row and cannot mutate the running source fact.
       applies_to:
         persisted: '`swarm serve --contracts` computes BundleHash, writes or reuses one bundles row, and stamps every new run row with bundle_hash plus bundle_source=persisted.'
         ephemeral: '`swarm serve --contracts --dev` computes the same BundleHash, writes no bundles row, and stamps every new run row with bundle_hash plus bundle_source=ephemeral.'
@@ -17657,7 +17666,7 @@ multi_bundle_persistence:
       split_boundaries:
         - DB-loaded same-bundle source/fork loaders consume the persisted bundle catalog runtime source owner.
         - New-work routing and bundle_hash admission remain #1022.
-        - SQLite public bundle.register and selected-contract run.fork remain #2276; backend-neutral capture remains #2272.
+        - SQLite public bundle.register is implemented by #2359; selected-contract run.fork remains the final #2276 child. Backend-neutral capture is implemented by #2272.
         - Bundle delete remains outside this projection.
         - SQLite DB-loaded `--bundle-hash` bundle-catalog boot remains unsupported unless separately gated.
     serve_db_loaded_runtime_source:
