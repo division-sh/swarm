@@ -212,6 +212,16 @@ func (o *Owner) rejectRunCreationTx(ctx context.Context, tx *sql.Tx, plan RunCre
 			return RunCreationPlan{}, fmt.Errorf("store failed fused child evaluation: %w", err)
 		}
 	}
+	stored, found, err := o.readStoredRunCreationReceipt(ctx, tx, plan.command.RunID)
+	if err != nil {
+		return RunCreationPlan{}, fmt.Errorf("read inserted failed run-creation receipt: %w", err)
+	}
+	if !found {
+		return RunCreationPlan{}, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "inserted run creation operation %s is missing", plan.command.RunID)
+	}
+	if _, _, err := o.validateStoredRunCreationReceipt(ctx, tx, plan.command.RunID, stored, true); err != nil {
+		return RunCreationPlan{}, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "inserted run creation operation %s is contradictory: %v", plan.command.RunID, err)
+	}
 	plan.record = record
 	plan.failed = true
 	return plan, nil
@@ -303,6 +313,16 @@ func CompleteRunCreationTx(o *Owner, ctx context.Context, tx *sql.Tx, plan *RunC
 	if err := o.insertRunCreationReceiptTx(ctx, tx, *plan, record); err != nil {
 		return runtimedata.RunCreationOperationRecord{}, err
 	}
+	stored, found, err := o.readStoredRunCreationReceipt(ctx, tx, plan.command.RunID)
+	if err != nil {
+		return runtimedata.RunCreationOperationRecord{}, fmt.Errorf("read inserted run-creation receipt: %w", err)
+	}
+	if !found {
+		return runtimedata.RunCreationOperationRecord{}, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "inserted run creation operation %s is missing", plan.command.RunID)
+	}
+	if _, _, err := o.validateStoredRunCreationReceipt(ctx, tx, plan.command.RunID, stored, true); err != nil {
+		return runtimedata.RunCreationOperationRecord{}, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "inserted run creation operation %s is contradictory: %v", plan.command.RunID, err)
+	}
 	plan.record = record
 	return record, nil
 }
@@ -336,31 +356,36 @@ func (o *Owner) insertRunCreationReceiptTx(ctx context.Context, tx *sql.Tx, plan
 		VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
 	`, 9), plan.command.RunID, plan.requestHash, plan.command.Actor, plan.command.BundleHash, plan.requestJSON,
 		summaryJSON, bindingJSON, evidenceJSON, record.Summary.CompletedAt)
-	return err
+	if err != nil {
+		return err
+	}
+	stored, found, err := o.readStoredRunCreationReceipt(ctx, tx, plan.command.RunID)
+	if err != nil {
+		return fmt.Errorf("read inserted run-creation receipt: %w", err)
+	}
+	if !found {
+		return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "inserted run creation operation %s is missing", plan.command.RunID)
+	}
+	if _, _, err := o.validateStoredRunCreationReceipt(ctx, tx, plan.command.RunID, stored, false); err != nil {
+		return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "inserted run creation operation %s is contradictory: %v", plan.command.RunID, err)
+	}
+	return nil
 }
 
 func (o *Owner) loadRunCreationReceiptTx(ctx context.Context, tx *sql.Tx, runID, requestHash string) (runtimedata.RunCreationOperationRecord, bool, error) {
-	var storedHash string
-	var requestJSON, summaryJSON, bindingJSON, evidenceJSON []byte
-	err := tx.QueryRowContext(ctx, o.query(`
-		SELECT request_hash, request_json, summary_json, binding_json, evidence_json
-		FROM resource_run_creation_operations WHERE run_id = %s
-	`, 1), runID).Scan(&storedHash, &requestJSON, &summaryJSON, &bindingJSON, &evidenceJSON)
-	if errors.Is(err, sql.ErrNoRows) {
+	stored, found, err := o.readStoredRunCreationReceipt(ctx, tx, runID)
+	if err != nil || !found {
+		if err != nil {
+			return runtimedata.RunCreationOperationRecord{}, false, err
+		}
 		return runtimedata.RunCreationOperationRecord{}, false, nil
 	}
-	if err != nil {
-		return runtimedata.RunCreationOperationRecord{}, false, err
-	}
-	if storedHash != requestHash {
+	if stored.requestHash != requestHash {
 		return runtimedata.RunCreationOperationRecord{}, false, runtimedata.NewDomainError(runtimedata.CodeInvocationConflict, "run_id %s was already used for a different run-creation request", runID)
 	}
-	record, command, err := decodeRunCreationReceipt(runID, storedHash, requestJSON, summaryJSON, bindingJSON, evidenceJSON)
+	record, _, err := o.validateStoredRunCreationReceipt(ctx, tx, runID, stored, true)
 	if err != nil {
-		return runtimedata.RunCreationOperationRecord{}, false, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "run creation operation %s evidence is contradictory", runID)
-	}
-	if err := o.validateStoredRunCreationSourcesTx(ctx, tx, command, record); err != nil {
-		return runtimedata.RunCreationOperationRecord{}, false, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "run creation operation %s source evidence is contradictory: %v", runID, err)
+		return runtimedata.RunCreationOperationRecord{}, false, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "run creation operation %s evidence is contradictory: %v", runID, err)
 	}
 	return record, true, nil
 }
@@ -371,24 +396,16 @@ func (o *Owner) LoadRunCreationOperation(ctx context.Context, runID string) (run
 	}
 	var record runtimedata.RunCreationOperationRecord
 	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		var storedHash string
-		var requestJSON, summaryJSON, bindingJSON, evidenceJSON []byte
-		err := tx.QueryRowContext(txctx, o.query(`
-			SELECT request_hash, request_json, summary_json, binding_json, evidence_json FROM resource_run_creation_operations WHERE run_id = %s
-		`, 1), runID).Scan(&storedHash, &requestJSON, &summaryJSON, &bindingJSON, &evidenceJSON)
-		if errors.Is(err, sql.ErrNoRows) {
-			return runtimedata.NewDomainError(runtimedata.CodeOperationMissing, "run creation operation %s does not exist", runID)
-		}
+		stored, found, err := o.readStoredRunCreationReceipt(txctx, tx, runID)
 		if err != nil {
 			return err
 		}
-		var command runtimedata.RunCreationCommand
-		record, command, err = decodeRunCreationReceipt(runID, storedHash, requestJSON, summaryJSON, bindingJSON, evidenceJSON)
-		if err != nil {
-			return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "run creation operation %s evidence is contradictory", runID)
+		if !found {
+			return runtimedata.NewDomainError(runtimedata.CodeOperationMissing, "run creation operation %s does not exist", runID)
 		}
-		if err := o.validateStoredRunCreationSourcesTx(txctx, tx, command, record); err != nil {
-			return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "run creation operation %s source evidence is contradictory: %v", runID, err)
+		record, _, err = o.validateStoredRunCreationReceipt(txctx, tx, runID, stored, true)
+		if err != nil {
+			return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "run creation operation %s evidence is contradictory: %v", runID, err)
 		}
 		return nil
 	})
@@ -471,7 +488,26 @@ func (o *Owner) validateStoredRunCreationSourcesTx(ctx context.Context, tx *sql.
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	type storedChildEvaluation struct {
+		id                                       string
+		contextJSON, evaluationJSON, defectsJSON []byte
+	}
+	var storedChildren []storedChildEvaluation
+	for rows.Next() {
+		var child storedChildEvaluation
+		if err := rows.Scan(&child.id, &child.contextJSON, &child.evaluationJSON, &child.defectsJSON); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		storedChildren = append(storedChildren, child)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
 	seen := make(map[string]struct{}, len(imports))
 	parentEvaluations := make(map[string]runtimedata.FusedChildEvaluation, len(record.Evidence.ChildEvaluations))
 	parentDefects := make(map[string][]runtimedata.ValidationDefect, len(record.Evidence.ChildEvaluations))
@@ -481,12 +517,8 @@ func (o *Owner) validateStoredRunCreationSourcesTx(ctx context.Context, tx *sql.
 	for _, item := range record.Evidence.ChildDefects {
 		parentDefects[item.SourceInvocationID] = append(parentDefects[item.SourceInvocationID], item.Defect)
 	}
-	for rows.Next() {
-		var id string
-		var contextJSON, evaluationJSON, defectsJSON []byte
-		if err := rows.Scan(&id, &contextJSON, &evaluationJSON, &defectsJSON); err != nil {
-			return err
-		}
+	for _, child := range storedChildren {
+		id := child.id
 		item, ok := imports[id]
 		if !ok {
 			return fmt.Errorf("stored fused child %s is absent from parent request", id)
@@ -494,10 +526,23 @@ func (o *Owner) validateStoredRunCreationSourcesTx(ctx context.Context, tx *sql.
 		var evaluationContext runtimedata.SourceEvaluationContext
 		var projection runtimedata.FusedChildEvaluation
 		var defects []runtimedata.ValidationDefect
-		if json.Unmarshal(contextJSON, &evaluationContext) != nil || json.Unmarshal(evaluationJSON, &projection) != nil || json.Unmarshal(defectsJSON, &defects) != nil {
+		if json.Unmarshal(child.contextJSON, &evaluationContext) != nil || json.Unmarshal(child.evaluationJSON, &projection) != nil || json.Unmarshal(child.defectsJSON, &defects) != nil {
 			return fmt.Errorf("stored fused child %s evidence is not decodable", id)
 		}
 		expected, expectedDefects, err := evaluationContext.FusedProjection(fusedSourceCommand(command, item))
+		sourceCommand := fusedSourceCommand(command, item)
+		if err := o.validateSourceEvaluationContext(ctx, tx, sourceCommand, evaluationContext); err != nil {
+			return fmt.Errorf("stored fused child %s context is not anchored: %w", id, err)
+		}
+		if err := o.requireNoSourceCommitFacts(ctx, tx, id); err != nil {
+			return fmt.Errorf("stored failed fused child %s has commit facts: %w", id, err)
+		}
+		if _, found, err := o.readStoredSourceReceipt(ctx, tx, id); err != nil || found {
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("stored failed fused child %s has a source receipt", id)
+		}
 		if err != nil || !reflect.DeepEqual(expected, projection) || !reflect.DeepEqual(expectedDefects, defects) {
 			return fmt.Errorf("stored fused child %s contradicts canonical evaluation", id)
 		}
@@ -505,9 +550,6 @@ func (o *Owner) validateStoredRunCreationSourcesTx(ctx context.Context, tx *sql.
 			return fmt.Errorf("failed parent projection for fused child %s contradicts stored evaluation", id)
 		}
 		seen[id] = struct{}{}
-	}
-	if err := rows.Err(); err != nil {
-		return err
 	}
 	if len(seen) != len(imports) || len(parentEvaluations) != len(imports) {
 		return fmt.Errorf("failed run child evaluation set contradicts stored canonical evaluations")
