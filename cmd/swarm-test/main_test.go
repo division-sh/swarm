@@ -1,11 +1,16 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/division-sh/swarm/internal/testpostgres"
 )
 
 func TestParseTestArgs(t *testing.T) {
@@ -62,6 +67,79 @@ func TestSwarmTestPreservesChildFailure(t *testing.T) {
 	}
 }
 
+func TestSwarmTestSettlementTimeoutFailsClosed(t *testing.T) {
+	root := t.TempDir()
+	stateHome := filepath.Join(root, "state")
+	stateRoot := filepath.Join(stateHome, "swarm", "test-postgres")
+	started := filepath.Join(root, "descendant-started")
+	release := filepath.Join(root, "descendant-release")
+	finished := filepath.Join(root, "descendant-finished")
+	goBin := filepath.Join(root, "go")
+	script := `#!/bin/sh
+set -eu
+(
+  trap '' INT TERM HUP
+  touch "$SWARM_TEST_TIMEOUT_DESCENDANT_STARTED"
+  while [ ! -f "$SWARM_TEST_TIMEOUT_DESCENDANT_RELEASE" ]; do sleep .01; done
+  touch "$SWARM_TEST_TIMEOUT_DESCENDANT_FINISHED"
+) &
+exit 0
+`
+	if err := os.WriteFile(goBin, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", root+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("XDG_STATE_HOME", stateHome)
+	t.Setenv("SWARM_TEST_POSTGRES_DSN", "postgres://swarm:secret@127.0.0.1:1/postgres?sslmode=disable")
+	t.Setenv("SWARM_TEST_TIMEOUT_DESCENDANT_STARTED", started)
+	t.Setenv("SWARM_TEST_TIMEOUT_DESCENDANT_RELEASE", release)
+	t.Setenv("SWARM_TEST_TIMEOUT_DESCENDANT_FINISHED", finished)
+
+	previousTimeout := authoritySettlementTimeout
+	authoritySettlementTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { authoritySettlementTimeout = previousTimeout })
+	if code := run([]string{"--", "./cmd/swarm-test", "-run", "^TestParseTestArgs$", "-count=1"}); code != 1 {
+		t.Fatalf("run() code = %d, want fail-closed exit 1", code)
+	}
+	waitForTestPath(t, started, time.Second)
+
+	var state struct {
+		Active  []json.RawMessage `json:"active"`
+		History []json.RawMessage `json:"history"`
+	}
+	raw, err := os.ReadFile(filepath.Join(stateRoot, "runs-v1.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &state); err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Active) != 1 || len(state.History) != 0 {
+		t.Fatalf("timeout evidence: active=%d history=%d, want 1/0", len(state.Active), len(state.History))
+	}
+
+	admission := testpostgres.NewRunAdmission(stateRoot, nil)
+	blockedCtx, cancelBlocked := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	if _, err := admission.Acquire(blockedCtx, testpostgres.RunCommand{Args: []string{"go", "test", "./blocked"}}, 1); err == nil {
+		cancelBlocked()
+		t.Fatal("contender acquired after timeout while descendant retained authority")
+	}
+	cancelBlocked()
+	if err := os.WriteFile(release, []byte("release\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	waitForTestPath(t, finished, time.Second)
+	acquireCtx, cancelAcquire := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelAcquire()
+	lease, err := admission.Acquire(acquireCtx, testpostgres.RunCommand{Args: []string{"go", "test", "./after-timeout"}}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lease.Complete(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestTimingFallbackUsesCanonicalModelForFullSuite(t *testing.T) {
 	if duration := timingFallback([]string{"./cmd/swarm-test"}); duration != 0 {
 		t.Fatalf("focused fallback = %s, want unknown", duration)
@@ -93,4 +171,16 @@ func chdirSwarmRepoRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(old) })
+}
+
+func waitForTestPath(t *testing.T, path string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", path)
 }

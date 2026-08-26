@@ -18,6 +18,8 @@ import (
 	"github.com/division-sh/swarm/internal/testpostgres"
 )
 
+var authoritySettlementTimeout = 30 * time.Second
+
 func main() {
 	os.Exit(run(os.Args[1:]))
 }
@@ -86,9 +88,27 @@ func run(args []string) int {
 		}
 		return 1
 	}
+	var service *testpostgres.Service
+	settle := func(success bool) (serviceErr, leaseErr error) {
+		settlementCtx, cancelSettlement := context.WithTimeout(context.Background(), authoritySettlementTimeout)
+		defer cancelSettlement()
+		leaseErr = lease.Join(settlementCtx)
+		if service != nil {
+			serviceErr = service.Close(settlementCtx)
+		}
+		if leaseErr == nil {
+			leaseErr = lease.Complete(settlementCtx, success && serviceErr == nil)
+		}
+		return serviceErr, leaseErr
+	}
 	completeLease := func(success bool) int {
-		if err := lease.Complete(success); err != nil {
-			fmt.Fprintf(os.Stderr, "release test slot: %v\n", err)
+		serviceErr, leaseErr := settle(success)
+		if serviceErr != nil {
+			fmt.Fprintf(os.Stderr, "remove runner-owned Postgres: %v\n", serviceErr)
+			return 1
+		}
+		if leaseErr != nil {
+			fmt.Fprintf(os.Stderr, "release test slot: %v\n", leaseErr)
 			return 1
 		}
 		return 0
@@ -103,21 +123,20 @@ func run(args []string) int {
 	connection, explicit, err := testpostgres.ConnectionFromEnvironmentIfSet()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		_ = lease.Complete(false)
+		_, _ = settle(false)
 		return 1
 	}
-	var service *testpostgres.Service
 	if !explicit {
 		registry, err := testpostgres.DefaultServiceRegistry()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
-			_ = lease.Complete(false)
+			_, _ = settle(false)
 			return 1
 		}
 		executable, err := os.Executable()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "resolve runner executable: %v\n", err)
-			_ = lease.Complete(false)
+			_, _ = settle(false)
 			return 1
 		}
 		provisionCtx, cancelProvision := context.WithTimeout(queueCtx, 3*time.Minute)
@@ -125,25 +144,18 @@ func run(args []string) int {
 		cancelProvision()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "provision runner-owned Postgres: %v\n", err)
-			_ = lease.Complete(false)
+			_, _ = settle(false)
 			return 1
 		}
 		connection = service.Connection
 	}
 
-	closeService := func() error {
-		if service == nil {
-			return nil
-		}
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cleanupCancel()
-		return service.Close(cleanupCtx)
-	}
 	failBeforeStart := func(message string, err error) int {
-		cleanupErr := closeService()
-		_ = lease.Complete(false)
-		if cleanupErr != nil {
-			fmt.Fprintf(os.Stderr, "%s: %v (Postgres cleanup: %v)\n", message, err, cleanupErr)
+		serviceErr, leaseErr := settle(false)
+		settlementErr := errors.Join(serviceErr, leaseErr)
+		if settlementErr != nil {
+			fmt.Fprintf(os.Stderr, "%s: %v (test settlement: %v)\n", message, err, settlementErr)
+			return 1
 		} else {
 			fmt.Fprintf(os.Stderr, "%s: %v\n", message, err)
 		}
@@ -202,11 +214,9 @@ func run(args []string) int {
 	waitErr := cmd.Wait()
 	close(done)
 	<-forwardingDone
-	cleanupErr := closeService()
-	success := waitErr == nil && cleanupErr == nil
-	leaseErr := lease.Complete(success)
-	if cleanupErr != nil {
-		fmt.Fprintf(os.Stderr, "remove runner-owned Postgres: %v (child result: %v)\n", cleanupErr, waitErr)
+	serviceErr, leaseErr := settle(waitErr == nil)
+	if serviceErr != nil {
+		fmt.Fprintf(os.Stderr, "remove runner-owned Postgres: %v (child result: %v)\n", serviceErr, waitErr)
 		return 1
 	}
 	if leaseErr != nil {

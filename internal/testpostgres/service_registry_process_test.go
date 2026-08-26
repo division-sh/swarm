@@ -5,6 +5,7 @@ package testpostgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -85,6 +87,65 @@ func TestCreatorFenceSurvivesRunnerDeathUntilTerminalHandoff(t *testing.T) {
 	if got := countLines(t, filepath.Join(dockerState, "create-count")); got != 1 {
 		t.Fatalf("docker create count after terminal reconciliation = %d, want 1", got)
 	}
+}
+
+func TestServiceCloseTimeoutRetainsDescendantAuthorityForReconciliation(t *testing.T) {
+	registry, record := terminalRegistryRecord(t, ServiceReady)
+	lease, acquired, err := acquireFileLock(registry.leasePath(record.LeaseID), false)
+	if err != nil || !acquired {
+		t.Fatalf("acquire service lease: acquired=%v err=%v", acquired, err)
+	}
+	service := &Service{registry: registry, record: record, lease: lease}
+	root := t.TempDir()
+	started := filepath.Join(root, "descendant-started")
+	release := filepath.Join(root, "descendant-release")
+	finished := filepath.Join(root, "descendant-finished")
+	script := `
+(
+  trap '' INT TERM HUP
+  touch "$1"
+  while [ ! -f "$2" ]; do sleep .01; done
+  touch "$3"
+) &
+`
+	child := exec.Command("sh", "-c", script, "service-child", started, release, finished)
+	if err := service.InheritLeaseTo(child); err != nil {
+		t.Fatal(err)
+	}
+	if err := child.Run(); err != nil {
+		t.Fatal(err)
+	}
+	waitForPath(t, started, 2*time.Second)
+
+	closeCtx, cancelClose := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	err = service.Close(closeCtx)
+	cancelClose()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("service close while descendant retained authority = %v, want deadline", err)
+	}
+	if _, err := registry.record(record.LeaseID); err != nil {
+		t.Fatalf("service evidence removed on timeout: %v", err)
+	}
+	probe, acquired, err := acquireFileLock(registry.leasePath(record.LeaseID), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acquired {
+		_ = probe.Close()
+		t.Fatal("service lease unlocked on timeout while descendant retained authority")
+	}
+	if containsCall(registry.docker.(*fakeDocker).calls, "rm --force") {
+		t.Fatal("service container removal started before descendant quiescence")
+	}
+
+	if err := os.WriteFile(release, []byte("release\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	waitForPath(t, finished, 2*time.Second)
+	if err := registry.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	assertServiceAuthorityAbsent(t, registry, record)
 }
 
 func TestSwarmTestDockerRunnersQueueBeforeSecondProvision(t *testing.T) {
@@ -193,6 +254,289 @@ func TestSwarmTestDockerRunnersQueueBeforeSecondProvision(t *testing.T) {
 		t.Fatalf("second runner: %v", err)
 	}
 	finished[1] = true
+}
+
+func TestSwarmTestJoinsDescendantAuthorityBeforeSettlement(t *testing.T) {
+	docker, err := exec.LookPath("docker")
+	dockerAvailable := err == nil
+	if dockerAvailable {
+		probe := exec.Command(docker, "info")
+		if output, probeErr := probe.CombinedOutput(); probeErr != nil {
+			t.Logf("Docker daemon is unavailable: %v (%s)", probeErr, strings.TrimSpace(string(output)))
+			dockerAvailable = false
+		}
+	}
+
+	root := t.TempDir()
+	runner := filepath.Join(root, "swarm-test")
+	_, thisFile, _, _ := runtime.Caller(0)
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", ".."))
+	build := exec.Command("go", "build", "-o", runner, "./cmd/swarm-test")
+	build.Dir = repoRoot
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build runner: %v\n%s", err, output)
+	}
+
+	goBin := filepath.Join(root, "go")
+	fixture := `#!/bin/sh
+set -eu
+test "$1" = test
+(
+  trap '' INT TERM HUP
+  touch "$SWARM_TEST_DESCENDANT_STARTED"
+  while [ ! -f "$SWARM_TEST_DESCENDANT_RELEASE" ]; do
+    sleep .02 || true
+  done
+  touch "$SWARM_TEST_DESCENDANT_FINISHED"
+) &
+case "$SWARM_TEST_DESCENDANT_MODE" in
+  normal_success|normal_failure)
+    while [ ! -f "$SWARM_TEST_TOP_RELEASE" ]; do sleep .02; done
+    if [ "$SWARM_TEST_DESCENDANT_MODE" = normal_failure ]; then exit 23; fi
+    exit 0
+    ;;
+  signal)
+    while :; do sleep 1; done
+    ;;
+  *)
+    echo "invalid descendant fixture mode" >&2
+    exit 2
+    ;;
+esac
+`
+	if err := os.WriteFile(goBin, []byte(fixture), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		name        string
+		explicitDSN bool
+	}{{name: "explicit_dsn", explicitDSN: true}, {name: "runner_owned_docker"}} {
+		t.Run(test.name, func(t *testing.T) {
+			if !test.explicitDSN && os.Getenv(RunWrapperEnv) == "1" {
+				t.Skip("wrapper-of-wrapper Docker proof runs only from the unwrapped semantic-smoke topology")
+			}
+			if !test.explicitDSN && !dockerAvailable {
+				t.Skip("Docker is required for the runner-owned service proof")
+			}
+			for _, completion := range []struct {
+				name     string
+				mode     string
+				signal   syscall.Signal
+				exitCode int
+				history  int
+			}{
+				{name: "normal_success", mode: "normal_success", exitCode: 0, history: 1},
+				{name: "normal_failure", mode: "normal_failure", exitCode: 23},
+				{name: "interrupt", mode: "signal", signal: syscall.SIGINT, exitCode: 130},
+				{name: "terminate", mode: "signal", signal: syscall.SIGTERM, exitCode: 143},
+			} {
+				t.Run(completion.name, func(t *testing.T) {
+					stateHome := filepath.Join(t.TempDir(), "state-home")
+					stateRoot := filepath.Join(stateHome, "swarm", "test-postgres")
+					started := filepath.Join(t.TempDir(), "descendant-started")
+					release := filepath.Join(t.TempDir(), "descendant-release")
+					finished := filepath.Join(t.TempDir(), "descendant-finished")
+					topRelease := filepath.Join(t.TempDir(), "top-release")
+					logPath := filepath.Join(t.TempDir(), "runner.log")
+					logFile, err := os.Create(logPath)
+					if err != nil {
+						t.Fatal(err)
+					}
+
+					command := exec.Command(runner, "--", "./internal/testpostgres", "-run", "^TestRunCapacityFromEnvironment$", "-count=1")
+					command.Dir = repoRoot
+					command.Env = descendantSettlementEnvironment(os.Environ(), root, stateHome, test.explicitDSN,
+						"SWARM_TEST_DESCENDANT_STARTED="+started,
+						"SWARM_TEST_DESCENDANT_RELEASE="+release,
+						"SWARM_TEST_DESCENDANT_FINISHED="+finished,
+						"SWARM_TEST_DESCENDANT_MODE="+completion.mode,
+						"SWARM_TEST_TOP_RELEASE="+topRelease,
+					)
+					command.Stdout, command.Stderr = logFile, logFile
+					if err := command.Start(); err != nil {
+						_ = logFile.Close()
+						t.Fatal(err)
+					}
+					result := make(chan error, 1)
+					go func() { result <- command.Wait() }()
+					resultRead := false
+					defer func() {
+						_ = os.WriteFile(topRelease, []byte("release\n"), 0o600)
+						_ = os.WriteFile(release, []byte("release\n"), 0o600)
+						if !resultRead {
+							select {
+							case <-result:
+							case <-time.After(5 * time.Second):
+								_ = command.Process.Kill()
+							}
+						}
+						_ = logFile.Close()
+						if !test.explicitDSN {
+							cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+							defer cancel()
+							_ = NewServiceRegistry(stateRoot, docker).Reconcile(cleanupCtx)
+						}
+					}()
+
+					waitForRunnerPath(t, started, result, []string{logPath}, 2*time.Minute)
+					if completion.signal != 0 {
+						if err := command.Process.Signal(completion.signal); err != nil {
+							t.Fatal(err)
+						}
+					} else if err := os.WriteFile(topRelease, []byte("release\n"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+
+					admission := NewRunAdmission(stateRoot, nil)
+					type contenderResult struct {
+						lease *RunLease
+						err   error
+					}
+					contenderCtx, cancelContender := context.WithTimeout(context.Background(), 45*time.Second)
+					defer cancelContender()
+					contender := make(chan contenderResult, 1)
+					go func() {
+						lease, err := admission.Acquire(contenderCtx, RunCommand{Args: []string{"go", "test", "./contender"}}, 1)
+						contender <- contenderResult{lease: lease, err: err}
+					}()
+					select {
+					case got := <-contender:
+						if got.lease != nil {
+							_ = got.lease.Complete(context.Background(), false)
+						}
+						t.Fatalf("contender settled while descendant held authority: %v", got.err)
+					case <-time.After(200 * time.Millisecond):
+					}
+					before, err := admission.loadRegistry()
+					if err != nil {
+						t.Fatal(err)
+					}
+					if len(before.Active) != 1 || len(before.History) != 0 {
+						t.Fatalf("run state before descendant release: active=%d history=%d, want 1/0", len(before.Active), len(before.History))
+					}
+
+					if !test.explicitDSN {
+						registry := NewServiceRegistry(stateRoot, docker)
+						doc, err := registry.loadRegistry()
+						if err != nil {
+							t.Fatal(err)
+						}
+						if len(doc.Services) != 1 {
+							t.Fatalf("services while descendant held authority = %d, want 1", len(doc.Services))
+						}
+						for _, record := range doc.Services {
+							if record.State != ServiceChildRunning {
+								t.Fatalf("service state while descendant held authority = %q, want %q", record.State, ServiceChildRunning)
+							}
+						}
+					}
+
+					select {
+					case err := <-result:
+						resultRead = true
+						raw, _ := os.ReadFile(logPath)
+						t.Fatalf("wrapper settled before descendant release: %v\n%s", err, raw)
+					default:
+					}
+
+					if err := os.WriteFile(release, []byte("release\n"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					waitForPath(t, finished, 5*time.Second)
+					err = waitForProcess(t, result, 45*time.Second)
+					resultRead = true
+					if completion.exitCode == 0 {
+						if err != nil {
+							raw, _ := os.ReadFile(logPath)
+							t.Fatalf("wrapper result after descendant release = %v, want success\n%s", err, raw)
+						}
+					} else {
+						var exitErr *exec.ExitError
+						if !errors.As(err, &exitErr) || exitErr.ExitCode() != completion.exitCode {
+							raw, _ := os.ReadFile(logPath)
+							t.Fatalf("wrapper result after descendant release = %v, want exit %d\n%s", err, completion.exitCode, raw)
+						}
+					}
+
+					var got contenderResult
+					select {
+					case got = <-contender:
+					case <-time.After(5 * time.Second):
+						t.Fatal("contender did not acquire after descendant release")
+					}
+					if got.err != nil {
+						t.Fatalf("contender after descendant release: %v", got.err)
+					}
+					if err := got.lease.Complete(context.Background(), false); err != nil {
+						t.Fatal(err)
+					}
+					probe, acquired, err := acquireFileLock(admission.slotPath(0), true)
+					if err != nil || !acquired {
+						t.Fatalf("settled slot authority: acquired=%v err=%v", acquired, err)
+					}
+					if err := probe.Close(); err != nil {
+						t.Fatal(err)
+					}
+					tickets, err := os.ReadDir(filepath.Join(stateRoot, "run-tickets"))
+					if err != nil {
+						t.Fatal(err)
+					}
+					if len(tickets) != 0 {
+						t.Fatalf("run ticket authorities after settlement = %v, want none", tickets)
+					}
+
+					runs, err := admission.loadRegistry()
+					if err != nil {
+						t.Fatal(err)
+					}
+					if len(runs.Active) != 0 || len(runs.Waiting) != 0 || len(runs.History) != completion.history {
+						t.Fatalf("run state after settlement: active=%d waiting=%d history=%d, want 0/0/%d", len(runs.Active), len(runs.Waiting), len(runs.History), completion.history)
+					}
+
+					if !test.explicitDSN {
+						registry := NewServiceRegistry(stateRoot, docker)
+						doc, err := registry.loadRegistry()
+						if err != nil {
+							t.Fatal(err)
+						}
+						if len(doc.Services) != 0 {
+							t.Fatalf("services after descendant release = %d, want 0", len(doc.Services))
+						}
+						for _, directory := range []string{"leases", "creators", "handoff"} {
+							entries, err := os.ReadDir(filepath.Join(stateRoot, directory))
+							if err != nil {
+								t.Fatal(err)
+							}
+							if len(entries) != 0 {
+								t.Fatalf("service authorities in %s after settlement = %v, want none", directory, entries)
+							}
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+func descendantSettlementEnvironment(env []string, binRoot, stateHome string, explicitDSN bool, extra ...string) []string {
+	filtered := make([]string, 0, len(env)+len(extra)+4)
+	for _, entry := range withoutPostgresConnectionEnv(env) {
+		key, _, _ := strings.Cut(entry, "=")
+		if key == "PATH" || key == "XDG_STATE_HOME" || key == RunWrapperEnv || key == RunCapacityEnv || strings.HasPrefix(key, "SWARM_TEST_DESCENDANT_") {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	filtered = append(filtered,
+		"PATH="+binRoot+string(os.PathListSeparator)+os.Getenv("PATH"),
+		"XDG_STATE_HOME="+stateHome,
+		RunCapacityEnv+"=1",
+	)
+	if explicitDSN {
+		filtered = append(filtered, SourceEnv+"=postgres://swarm:secret@127.0.0.1:1/postgres?sslmode=disable")
+	}
+	return append(filtered, extra...)
 }
 
 func TestSwarmTestProcessFixture(t *testing.T) {

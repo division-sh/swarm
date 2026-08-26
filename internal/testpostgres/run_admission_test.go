@@ -37,7 +37,7 @@ func TestRunAdmissionFIFOWithoutBarging(t *testing.T) {
 	start("third")
 	waitForWaitingRuns(t, firstAdmission, 2)
 
-	if err := first.Complete(true); err != nil {
+	if err := first.Complete(context.Background(), true); err != nil {
 		t.Fatal(err)
 	}
 	second := waitForRunResult(t, results)
@@ -49,14 +49,14 @@ func TestRunAdmissionFIFOWithoutBarging(t *testing.T) {
 		t.Fatalf("third contender barged while second held the slot: %+v", got)
 	case <-time.After(50 * time.Millisecond):
 	}
-	if err := second.lease.Complete(true); err != nil {
+	if err := second.lease.Complete(context.Background(), true); err != nil {
 		t.Fatal(err)
 	}
 	third := waitForRunResult(t, results)
 	if third.err != nil || third.name != "third" {
 		t.Fatalf("second admitted waiter = %q err=%v, want third", third.name, third.err)
 	}
-	if err := third.lease.Complete(true); err != nil {
+	if err := third.lease.Complete(context.Background(), true); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -86,7 +86,7 @@ func TestRunAdmissionQueuedCancellationRemovesOnlyCaller(t *testing.T) {
 	if len(entries) != 0 {
 		t.Fatalf("retired ticket authority survives: %v", entries)
 	}
-	if err := active.Complete(false); err != nil {
+	if err := active.Complete(context.Background(), false); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -95,7 +95,7 @@ func TestRunAdmissionRejectsConflictingLiveCapacity(t *testing.T) {
 	root := t.TempDir()
 	admission := testRunAdmission(root, nil)
 	active := acquireTestRun(t, admission, context.Background(), "active", 1)
-	defer active.Complete(false)
+	defer active.Complete(context.Background(), false)
 
 	_, err := testRunAdmission(root, nil).Acquire(context.Background(), testRunCommand("conflict"), 2)
 	if err == nil || !strings.Contains(err.Error(), "capacity is 1") {
@@ -111,7 +111,7 @@ func TestRunAdmissionPublishesOnlySuccessfulDuration(t *testing.T) {
 
 	failed := acquireTestRun(t, admission, context.Background(), "same", 1)
 	now = now.Add(10 * time.Second)
-	if err := failed.Complete(false); err != nil {
+	if err := failed.Complete(context.Background(), false); err != nil {
 		t.Fatal(err)
 	}
 	doc, err := admission.loadRegistry()
@@ -124,7 +124,7 @@ func TestRunAdmissionPublishesOnlySuccessfulDuration(t *testing.T) {
 
 	succeeded := acquireTestRun(t, admission, context.Background(), "same", 1)
 	now = now.Add(12 * time.Second)
-	if err := succeeded.Complete(true); err != nil {
+	if err := succeeded.Complete(context.Background(), true); err != nil {
 		t.Fatal(err)
 	}
 	doc, err = admission.loadRegistry()
@@ -145,7 +145,7 @@ func TestRunAdmissionReportsPositionETAAndDoesNotRewriteWhilePolling(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer active.Complete(false)
+	defer active.Complete(context.Background(), false)
 
 	var output bytes.Buffer
 	waitingAdmission := testRunAdmission(root, &output)
@@ -218,7 +218,7 @@ func TestRunAdmissionSnapshotUsesDeterministicClock(t *testing.T) {
 func TestRunAdmissionReportsUnknownETAWhenEvidenceIsMissing(t *testing.T) {
 	root := t.TempDir()
 	active := acquireTestRun(t, testRunAdmission(root, nil), context.Background(), "active", 1)
-	defer active.Complete(false)
+	defer active.Complete(context.Background(), false)
 
 	var output bytes.Buffer
 	ctx, cancel := context.WithCancel(context.Background())
@@ -263,7 +263,7 @@ func TestRunAdmissionReconcilesFreeStaleActiveAndWaitingRecords(t *testing.T) {
 	}
 
 	lease := acquireTestRun(t, admission, context.Background(), "new", 1)
-	if err := lease.Complete(false); err != nil {
+	if err := lease.Complete(context.Background(), false); err != nil {
 		t.Fatal(err)
 	}
 	doc, err := admission.loadRegistry()
@@ -370,7 +370,7 @@ func TestRunAndServiceLeasesAttachExactAuthorityToChild(t *testing.T) {
 	root := t.TempDir()
 	admission := testRunAdmission(root, nil)
 	runLease := acquireTestRun(t, admission, context.Background(), "attach", 1)
-	defer runLease.Complete(false)
+	defer runLease.Complete(context.Background(), false)
 	serviceLock, acquired, err := acquireFileLock(filepath.Join(root, "service.lock"), false)
 	if err != nil || !acquired {
 		t.Fatalf("acquire service lock: acquired=%v err=%v", acquired, err)
