@@ -51,6 +51,44 @@ func IsValidName(raw string) bool {
 	return true
 }
 
+// IsCanonicalName reports whether raw is an exact concrete event identity,
+// without accepting whitespace or slash normalization aliases.
+func IsCanonicalName(raw string) bool {
+	return raw == Normalize(raw) && IsValidName(raw)
+}
+
+// IsCanonicalPattern reports whether raw uses the closed authored wildcard
+// grammar: exact path/name tokens plus whole-token * and whole-segment **.
+func IsCanonicalPattern(raw string) bool {
+	if raw == "" || raw != Normalize(raw) || !strings.Contains(raw, "*") {
+		return false
+	}
+	for _, segment := range strings.Split(raw, "/") {
+		if segment == "*" || segment == "**" {
+			continue
+		}
+		if segment == "" || strings.Contains(segment, "**") {
+			return false
+		}
+		if !strings.Contains(segment, ".") {
+			if !eventPathSegmentPattern.MatchString(segment) {
+				return false
+			}
+			continue
+		}
+		for _, part := range strings.Split(segment, ".") {
+			if part != "*" && !eventTypeTokenPattern.MatchString(part) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func IsCanonicalDeclaration(raw string) bool {
+	return IsCanonicalName(raw) || IsCanonicalPattern(raw)
+}
+
 func LeafName(raw string) string {
 	raw = Normalize(raw)
 	if raw == "" {

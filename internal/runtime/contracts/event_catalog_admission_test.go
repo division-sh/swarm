@@ -133,6 +133,49 @@ func TestEventCatalogAdmissionRetainsAliasValues(t *testing.T) {
 	if entry.Payload.Properties["id"].Type != "uuid" || entry.Payload.Properties["correlation_id"].Type != "uuid" {
 		t.Fatalf("alias projection = %#v", entry.Payload.Properties)
 	}
+	provenance := entry.admissionProvenance["fields.correlation_id.type"]
+	if provenance.SourceLine != 3 {
+		t.Fatalf("alias provenance line = %d, want authored alias use on line 3", provenance.SourceLine)
+	}
+}
+
+func TestEventCatalogAdmissionOwnsDeclarationIdentityBeforeMapInsertion(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		source  string
+		wantErr string
+	}{
+		{name: "empty", source: `"": {}`, wantErr: `event declaration name ""`},
+		{name: "whitespace only", source: `"   ": {}`, wantErr: `event declaration name "   "`},
+		{name: "surrounding whitespace", source: "item: {}\n\" item \": {}", wantErr: `event declaration name " item "`},
+		{name: "leading slash", source: `"/item": {}`, wantErr: `event declaration name "/item"`},
+		{name: "uppercase and space", source: `"Item Ready": {}`, wantErr: `event declaration name "Item Ready"`},
+		{name: "hyphenated event token", source: `"addon-a.start": {}`, wantErr: `event declaration name "addon-a.start"`},
+		{name: "unsupported partial glob", source: `"item.pre*": {}`, wantErr: `supported wildcard pattern`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snapshot, err := yamlsource.Load([]byte(tc.source + "\n"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = admitEventCatalogDocument(snapshot.Document("events.yaml"))
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) || !strings.Contains(err.Error(), "events.yaml:") {
+				t.Fatalf("admission error = %v, want %q with key location", err, tc.wantErr)
+			}
+		})
+	}
+
+	snapshot, err := yamlsource.Load([]byte("item.created: {}\n'item.*': {}\n'*.completed': {}\n'*/order.completed': {}\n'**/item.processed': {}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := admitEventCatalogDocument(snapshot.Document("events.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 5 {
+		t.Fatalf("admitted declarations = %#v", entries)
+	}
 }
 
 func TestEventCatalogAdmissionRecordsExactNestedValueProvenance(t *testing.T) {

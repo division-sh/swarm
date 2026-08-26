@@ -302,7 +302,12 @@ contract_formats:
       occurrence without exposing retained yaml.Node pointers. Its closed
       presence vocabulary is missing, null, empty_scalar, scalar,
       empty_sequence, sequence, empty_mapping, and mapping. Typed admission,
-      not the substrate, assigns domain meaning to those states.
+      not the substrate, assigns domain meaning to those states. For an alias,
+      the lexical location is the authored alias-use coordinate and the
+      resolved location is the semantic anchor target; both remain available
+      as immutable value/occurrence facts. Merge-expanded occurrences likewise
+      retain the merge-key, merge-value/alias-use, resolved merge target,
+      expanded key/value, and resolved expanded-value coordinates.
     effective_provenance_ledger: |
       Migrated contract families project each admitted effective value into one
       immutable provenance ledger. Authored values retain the exact nested YAML
@@ -319,7 +324,9 @@ contract_formats:
       every lexical occurrence, including fields introduced through merges;
       shadowing does not hide retired syntax. Two effective occurrences of one
       mapping key fail closed with both source locations. YAML last-wins
-      behavior is never contract authority.
+      behavior is never contract authority. Authored provenance uses the alias
+      occurrence that introduced an effective value; resolving its semantic
+      target never rewrites that authored coordinate to the anchor definition.
     diagnostics: Read failures and parse/decode failures preserve the current source path and fail closed.
   loader_defaults:
     description: Fields and identifiers that the loader derives from context. Entries marked non-authorable are not accepted
@@ -13075,6 +13082,24 @@ flow_model:
       explicit derived provenance. Cross-package boundary snapshots are a
       distinct frozen contract concept and are not classified as intra-package
       restatements.
+    connected_owner_cardinality: >-
+      One effective receiver event has exactly one connected producer schema
+      owner. Distinct producer declaration identities connected to the same
+      canonical receiver event are a hard load error independent of connect row
+      order, even when their schemas are byte-equivalent. Multiple deliveries or
+      runtime instances from that one producer owner remain valid fan-in and do
+      not create additional schema owners. An ambiguous connected lookup fails
+      closed and cannot fall through to a generic same-name declaration.
+    declaration_identity_admission: >-
+      Every events.yaml declaration key is admitted before map insertion as
+      either one exact canonical concrete event identity or one supported
+      wildcard pattern using whole-token `*` and whole-segment `**`. Empty,
+      whitespace-normalized, slash-normalized, uppercase/space-bearing,
+      malformed, and unsupported partial-glob spellings fail at the authored key
+      location. Admitted-identity collisions fail with both locations. The
+      compiled declaration projection may exclude a valid pattern from exact
+      importable schemas, but it must error rather than silently omit an invalid
+      concrete declaration.
   compiled_event_schema_projection:
     status: implemented_presence_preserving_w3
     owner: internal/runtime/contracts.WorkflowContractBundle.CompiledEventSchemas

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -71,11 +72,16 @@ func admitEventCatalogDocument(document yamlsource.Document) (map[string]EventCa
 		return nil, err
 	}
 	out := make(map[string]EventCatalogEntry, len(fields))
+	admitted := make(map[string]yamlsource.Location, len(fields))
 	for _, declaration := range fields {
-		name := strings.TrimSpace(declaration.Name)
-		if name == "" {
-			continue
+		name := declaration.Name
+		if !eventidentity.IsCanonicalDeclaration(name) {
+			return nil, fmt.Errorf("event declaration name %q at %s must be an exact canonical event identity or supported wildcard pattern", name, declaration.KeyLocation)
 		}
+		if previous, exists := admitted[name]; exists {
+			return nil, fmt.Errorf("events.yaml has colliding admitted event declaration %q at %s and %s", name, previous, declaration.KeyLocation)
+		}
+		admitted[name] = declaration.KeyLocation
 		entry, err := admitEventCatalogEntry(name, declaration)
 		if err != nil {
 			return nil, fmt.Errorf("event %q: %w", name, err)

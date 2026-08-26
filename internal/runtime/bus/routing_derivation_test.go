@@ -378,7 +378,7 @@ pins:
   inputs:
     events: [root.start]
 `)
-	write(filepath.Join(root, "flows", "orders", "events.yaml"), "root.start: {}\naddon-a.start: {}\naddon-b.start: {}\n")
+	write(filepath.Join(root, "flows", "orders", "events.yaml"), "root.start: {}\naddon_a.start: {}\naddon_b.start: {}\n")
 	write(filepath.Join(root, "flows", "orders", "agents.yaml"), "{}\n")
 	write(filepath.Join(root, "flows", "orders", "policy.yaml"), "{}\n")
 	write(filepath.Join(root, "flows", "orders", "nodes.yaml"), `
@@ -392,12 +392,13 @@ shared:
 	for _, name := range []string{"addon-a", "addon-b"} {
 		dir := filepath.Join(root, "flows", "orders", name)
 		write(filepath.Join(dir, "package.yaml"), "name: "+name+"\nversion: \"1.0.0\"\nflows: []\n")
+		eventName := strings.ReplaceAll(name, "-", "_")
 		write(filepath.Join(dir, "nodes.yaml"), `
 shared:
   id: shared
   execution_type: system_node
   event_handlers:
-    `+name+`.start:
+    `+eventName+`.start:
       advances_to: done
 `)
 	}
