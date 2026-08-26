@@ -39,7 +39,7 @@ type SubscriptionRuntime struct {
 	observability   ObservabilityReadStore
 	decisionCards   decisioncard.Store
 	proposedEffects decisioncard.ProposedEffectStore
-	bundle          runtimecontracts.BundleIdentity
+	publication     RuntimePublicationReader
 	posture         executionposture.Posture
 	pollInterval    time.Duration
 	healthInterval  time.Duration
@@ -146,7 +146,7 @@ func OperatorSubscriptions(opts SubscriptionOptions, overrides ...SubscriptionRu
 		observability:   opts.Observability,
 		decisionCards:   opts.DecisionCards,
 		proposedEffects: opts.ProposedEffects,
-		bundle:          opts.Bundle,
+		publication:     opts.Publication,
 		posture:         opts.ExecutionPosture,
 	}
 	if len(overrides) > 0 {
@@ -403,7 +403,7 @@ func (r *SubscriptionRuntime) newOwnedSubscriptionWork(session *webSocketSession
 }
 
 func (r *SubscriptionRuntime) runHealthSubscription(ctx context.Context, session *webSocketSession, subscriptionID string) {
-	if !session.notify(subscriptionID, operatorHealthSnapshot(ctx, r.ready, r.database, r.bundle, r.posture)) {
+	if !session.notify(subscriptionID, operatorHealthSnapshot(ctx, r.ready, r.database, r.publication, r.posture)) {
 		return
 	}
 	ticker := time.NewTicker(r.healthInterval)
@@ -413,7 +413,7 @@ func (r *SubscriptionRuntime) runHealthSubscription(ctx context.Context, session
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if !session.notify(subscriptionID, operatorHealthSnapshot(ctx, r.ready, r.database, r.bundle, r.posture)) {
+			if !session.notify(subscriptionID, operatorHealthSnapshot(ctx, r.ready, r.database, r.publication, r.posture)) {
 				return
 			}
 		}
@@ -677,10 +677,18 @@ func advanceRuntimeLogSubscriptionSince(state *runtimeLogSubscriptionState, late
 	state.since = &value
 }
 
-func operatorHealthSnapshot(ctx context.Context, ready func() bool, database Pinger, bundle runtimecontracts.BundleIdentity, posture executionposture.Posture) healthCheckResult {
+func operatorHealthSnapshot(ctx context.Context, ready func() bool, database Pinger, publication RuntimePublicationReader, posture executionposture.Posture) healthCheckResult {
 	runtimeOK := false
 	if ready != nil {
 		runtimeOK = ready()
+	}
+	bundle := runtimecontracts.BundleIdentity{}
+	if publication == nil {
+		runtimeOK = false
+	} else if current, err := publication.CurrentPublication(); err != nil {
+		runtimeOK = false
+	} else {
+		bundle = current.PrimaryBundle
 	}
 	dbOK := false
 	if database != nil {

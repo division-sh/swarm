@@ -791,26 +791,6 @@ func serveOperatorChannelInterfaces(contexts []serveRuntimeBundleContext) ([]ope
 	return identities, nil
 }
 
-func serveRuntimeBundleSourceIdentities(contexts []serveRuntimeBundleContext) ([]apiv1.RuntimeBundleSourceIdentity, error) {
-	identities := make([]apiv1.RuntimeBundleSourceIdentity, 0, len(contexts))
-	seen := make(map[string]struct{}, len(contexts))
-	for _, runtimeContext := range contexts {
-		if err := runtimeContext.bundleSourceFact.Validate(); err != nil {
-			return nil, fmt.Errorf("runtime identity bundle source: %w", err)
-		}
-		bundleHash, bundleSource := runtimeContext.bundleSourceFact.StorageValues()
-		if _, exists := seen[bundleHash]; exists {
-			return nil, fmt.Errorf("runtime identity has duplicate bundle_hash %s", bundleHash)
-		}
-		seen[bundleHash] = struct{}{}
-		identities = append(identities, apiv1.RuntimeBundleSourceIdentity{
-			BundleHash: bundleHash, BundleSource: bundleSource,
-		})
-	}
-	sort.Slice(identities, func(i, j int) bool { return identities[i].BundleHash < identities[j].BundleHash })
-	return identities, nil
-}
-
 func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	ctx, cancelServe := context.WithCancel(ctx)
 	defer cancelServe()
@@ -1337,6 +1317,12 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	supervisor.replacementShutdown = runtime.ShutdownOptions{Grace: opts.ShutdownGrace}
 	supervisor.runtimeLifetime = ctx
 	supervisor.SetRuntimeContextManager(runtimeContextManager, primaryContext.bundleSourceFact, primaryContext.bootIdentity)
+	if opts.TestRuntimeProjectReloadHook != nil {
+		opts.TestRuntimeProjectReloadHook(func(reloadCtx context.Context) error {
+			_, reloadErr := supervisor.ReloadProject(reloadCtx, contractsRoot)
+			return reloadErr
+		})
+	}
 	if len(pinnedBundleHashes) > 0 {
 		supervisor.DisableSourceReplacement("swarm serve --bundle-hash pins persisted bundle contexts for the process; dynamic project reload is not supported in this mode")
 	}
@@ -1373,21 +1359,15 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		RunBundleContext: apiStoreCaps.RunBundleContext, RuntimeContexts: apiStoreCaps.RuntimeContexts,
 		Source: source, Bundle: bootBundleIdentity, ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles(),
 	}
-	runtimeBundleSources, err := serveRuntimeBundleSourceIdentities(runtimeContexts)
-	if err != nil {
-		presenter.fail(5, "runtime_identity", err)
-		return 1
-	}
 	runtimeIdentity := apiv1.RuntimeIdentityResult{
 		RuntimeInstanceID:   runtimeInstanceID,
 		StartedAt:           bootStartedAt.Format(time.RFC3339Nano),
 		APIVersion:          "v1",
 		SupportedTransports: []string{"tcp"},
-		BundleSources:       runtimeBundleSources,
 	}
 	handlers := apiv1.MergeOperatorHandlers(
-		apiv1.OperatorHealthHandlers(apiv1.HealthHandlerOptions{ExecutionPosture: rt.ExecutionPosture, Ready: readyFn, Database: apiStoreCaps.Database, Bundle: bootBundleIdentity}),
-		apiv1.OperatorRuntimeIdentityHandlers(apiv1.RuntimeIdentityHandlerOptions{Identity: runtimeIdentity}),
+		apiv1.OperatorHealthHandlers(apiv1.HealthHandlerOptions{ExecutionPosture: rt.ExecutionPosture, Ready: readyFn, Database: apiStoreCaps.Database, Publication: runtimeContextManager}),
+		apiv1.OperatorRuntimeIdentityHandlers(apiv1.RuntimeIdentityHandlerOptions{Identity: runtimeIdentity, Publication: runtimeContextManager}),
 		apiv1.OperatorRunReadHandlers(apiv1.RunReadHandlerOptions{Runs: apiStoreCaps.Runs}),
 		apiv1.OperatorObservabilityHandlers(apiv1.ObservabilityHandlerOptions{Observability: apiStoreCaps.Observability}),
 		apiv1.OperatorEntityHandlers(apiv1.EntityHandlerOptions{Entities: apiStoreCaps.Entities}),
@@ -1424,7 +1404,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		Subscriptions: apiv1.OperatorSubscriptions(apiv1.SubscriptionOptions{
 			ExecutionPosture: rt.ExecutionPosture,
 			Ready:            readyFn, Database: apiStoreCaps.Database, Observability: apiStoreCaps.Observability,
-			DecisionCards: storeDeps.DecisionCards, ProposedEffects: storeDeps.ProposedEffects, Bundle: bootBundleIdentity,
+			DecisionCards: storeDeps.DecisionCards, ProposedEffects: storeDeps.ProposedEffects, Publication: runtimeContextManager,
 		}),
 	})
 	if err != nil {

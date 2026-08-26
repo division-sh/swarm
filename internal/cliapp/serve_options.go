@@ -1,6 +1,7 @@
 package cliapp
 
 import (
+	"context"
 	"io"
 	"time"
 
@@ -54,6 +55,7 @@ type ServeOptions struct {
 	TestOutboxSweeperConfig          runtimebus.OutboxSweeperConfig
 	TestRuntimeReadyHook             func(*runtime.Runtime)
 	TestRuntimeContextsReadyHook     func(*runtime.RuntimeContextManager)
+	TestRuntimeProjectReloadHook     func(func(context.Context) error)
 	TestBeforeReadinessCommit        func() error
 	TestAfterAuthorActivityHead      func() error
 }

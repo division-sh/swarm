@@ -17,6 +17,7 @@ import (
 const (
 	runtimeContextTestHashA = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	runtimeContextTestHashB = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	runtimeContextTestHashC = "bundle-v1:sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 )
 
 func TestRuntimeContextManagerRegistersAndLooksUpPinnedContexts(t *testing.T) {
@@ -44,8 +45,8 @@ func TestRuntimeContextManagerRegistersAndLooksUpPinnedContexts(t *testing.T) {
 		t.Fatalf("BundleHashes = %#v, want %#v", got, want)
 	}
 	primary, ok := manager.Primary()
-	if !ok || primary.BundleHash() != runtimeContextTestHashA {
-		t.Fatalf("Primary = %#v/%v, want %s", primary, ok, runtimeContextTestHashA)
+	if !ok || primary.BundleHash() != runtimeContextTestHashB {
+		t.Fatalf("Primary = %#v/%v, want first registered semantic primary %s", primary, ok, runtimeContextTestHashB)
 	}
 	contextDef, availabilityResult, loaded, err := manager.LookupRun(testAuthorActivityContext(context.Background()), "run-b")
 	if err != nil {
@@ -57,6 +58,69 @@ func TestRuntimeContextManagerRegistersAndLooksUpPinnedContexts(t *testing.T) {
 	if availabilityResult.BundleHash != runtimeContextTestHashB || !availabilityResult.Available() {
 		t.Fatalf("LookupRun availability = %#v, want available %s", availabilityResult, runtimeContextTestHashB)
 	}
+}
+
+func TestRuntimeContextManagerPublicationTracksSemanticPrimaryAcrossReplacementAndUnload(t *testing.T) {
+	predecessor := testBundleContext(t, runtimeContextTestHashB, "beta.requested")
+	additional := testBundleContext(t, runtimeContextTestHashA, "alpha.requested")
+	manager, err := newTestRuntimeContextManager(t, nil, predecessor, additional)
+	if err != nil {
+		t.Fatalf("NewRuntimeContextManager: %v", err)
+	}
+	assertPublication := func(wantPrimary string, wantFacts ...string) {
+		t.Helper()
+		snapshot, snapshotErr := manager.CurrentPublication()
+		if snapshotErr != nil {
+			t.Fatalf("CurrentPublication: %v", snapshotErr)
+		}
+		if snapshot.PrimaryBundle.BundleHash != wantPrimary {
+			t.Fatalf("primary publication = %s, want %s", snapshot.PrimaryBundle.BundleHash, wantPrimary)
+		}
+		gotFacts := make([]string, 0, len(snapshot.BundleSourceFacts))
+		for _, fact := range snapshot.BundleSourceFacts {
+			gotFacts = append(gotFacts, fact.BundleHash())
+		}
+		if !reflect.DeepEqual(gotFacts, wantFacts) {
+			t.Fatalf("source publications = %#v, want %#v", gotFacts, wantFacts)
+		}
+	}
+	assertUnavailable := func() {
+		t.Helper()
+		if snapshot, snapshotErr := manager.CurrentPublication(); snapshotErr == nil || snapshot.PrimaryBundle.BundleHash != "" || len(snapshot.BundleSourceFacts) != 0 {
+			t.Fatalf("CurrentPublication = %#v err=%v, want fail-closed unavailable", snapshot, snapshotErr)
+		}
+	}
+
+	assertPublication(runtimeContextTestHashB, runtimeContextTestHashA, runtimeContextTestHashB)
+	candidate := testBundleContext(t, runtimeContextTestHashC, "beta.requested")
+	if _, err := manager.BeginBundleHashReplacement(context.Background(), runtimeContextTestHashB, candidate); err != nil {
+		t.Fatalf("BeginBundleHashReplacement: %v", err)
+	}
+	assertUnavailable()
+	publication, err := manager.PrepareBundleHashReplacementPublication(runtimeContextTestHashB, candidate)
+	if err != nil {
+		t.Fatalf("PrepareBundleHashReplacementPublication: %v", err)
+	}
+	if err := publication.Publish(); err != nil {
+		t.Fatalf("Publish replacement: %v", err)
+	}
+	assertPublication(runtimeContextTestHashC, runtimeContextTestHashA, runtimeContextTestHashC)
+
+	if err := publication.Withdraw(context.Background()); err != nil {
+		t.Fatalf("Withdraw replacement: %v", err)
+	}
+	assertUnavailable()
+	restored := testBundleContext(t, runtimeContextTestHashB, "beta.requested")
+	if err := manager.PublishRestoredBundleHashReplacement(runtimeContextTestHashB, restored); err != nil {
+		t.Fatalf("PublishRestoredBundleHashReplacement: %v", err)
+	}
+	assertPublication(runtimeContextTestHashB, runtimeContextTestHashA, runtimeContextTestHashB)
+
+	result := manager.DeactivateBundleHash(runtimeContextTestHashB, RuntimeContextCauseUnloaded)
+	if !result.Found || !result.Changed {
+		t.Fatalf("DeactivateBundleHash = %#v, want primary unload", result)
+	}
+	assertUnavailable()
 }
 
 func TestRuntimeContextManagerRejectsDuplicateBundleHashes(t *testing.T) {

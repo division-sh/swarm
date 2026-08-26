@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/bundlecatalog"
 	operatorread "github.com/division-sh/swarm/internal/operatorread"
 
+	"github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
@@ -114,7 +116,7 @@ func OperatorHealthHandlers(opts HealthHandlerOptions) map[string]MethodHandler 
 			return healthPingResult{OK: true, TS: now().UTC().Format(time.RFC3339Nano)}, nil
 		},
 		"health.check": func(ctx context.Context, _ Request) (any, error) {
-			return operatorHealthSnapshot(ctx, ready, opts.Database, opts.Bundle, opts.ExecutionPosture), nil
+			return operatorHealthSnapshot(ctx, ready, opts.Database, opts.Publication, opts.ExecutionPosture), nil
 		},
 	}
 }
@@ -126,6 +128,17 @@ func OperatorRuntimeIdentityHandlers(opts RuntimeIdentityHandlerOptions) map[str
 			if strings.TrimSpace(identity.RuntimeInstanceID) == "" {
 				return nil, fmt.Errorf("runtime identity is not configured")
 			}
+			if opts.Publication == nil {
+				return nil, fmt.Errorf("runtime publication reader is not configured")
+			}
+			publication, err := opts.Publication.CurrentPublication()
+			if err != nil {
+				return nil, fmt.Errorf("read current runtime publication: %w", err)
+			}
+			identity.BundleSources, err = runtimeBundleSourceIdentities(publication)
+			if err != nil {
+				return nil, err
+			}
 			if identity.SupportedTransports == nil {
 				identity.SupportedTransports = []string{}
 			}
@@ -135,6 +148,24 @@ func OperatorRuntimeIdentityHandlers(opts RuntimeIdentityHandlerOptions) map[str
 			return identity, nil
 		},
 	}
+}
+
+func runtimeBundleSourceIdentities(publication runtime.RuntimeContextPublicationSnapshot) ([]RuntimeBundleSourceIdentity, error) {
+	identities := make([]RuntimeBundleSourceIdentity, 0, len(publication.BundleSourceFacts))
+	seen := make(map[string]struct{}, len(publication.BundleSourceFacts))
+	for _, fact := range publication.BundleSourceFacts {
+		if err := fact.Validate(); err != nil {
+			return nil, fmt.Errorf("runtime identity bundle source: %w", err)
+		}
+		bundleHash, bundleSource := fact.StorageValues()
+		if _, exists := seen[bundleHash]; exists {
+			return nil, fmt.Errorf("runtime identity has duplicate bundle_hash %s", bundleHash)
+		}
+		seen[bundleHash] = struct{}{}
+		identities = append(identities, RuntimeBundleSourceIdentity{BundleHash: bundleHash, BundleSource: bundleSource})
+	}
+	sort.Slice(identities, func(i, j int) bool { return identities[i].BundleHash < identities[j].BundleHash })
+	return identities, nil
 }
 
 func OperatorRunReadHandlers(opts RunReadHandlerOptions) map[string]MethodHandler {

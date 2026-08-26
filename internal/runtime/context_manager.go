@@ -427,9 +427,18 @@ type RuntimeContextManager struct {
 	availability               RunBundleAvailabilityReader
 	contexts                   map[string]*runtimeContextEntry
 	order                      []string
+	primaryBundleHash          string
 	capabilitySubjects         []packs.Subject
 	capabilityRevision         uint64
 	suppressedStandingServices map[string]struct{}
+}
+
+// RuntimeContextPublicationSnapshot is the current public identity of the
+// manager-owned loaded context set. PrimaryBundle identifies the semantic
+// primary slot; BundleSourceFacts contains every currently selectable source.
+type RuntimeContextPublicationSnapshot struct {
+	PrimaryBundle     runtimecontracts.BundleIdentity
+	BundleSourceFacts []runtimecorrelation.BundleSourceFact
 }
 
 type runtimeContextVisibilityUpdate struct {
@@ -568,6 +577,9 @@ func (m *RuntimeContextManager) register(contextDef BundleContext, activateOccur
 	}
 	if activateOccurrences && runtimeOwner != nil && runtimeOwner.Bus != nil {
 		runtimeOwner.Bus.SetStandingRunWorkOwner(m)
+	}
+	if m.primaryBundleHash == "" {
+		m.primaryBundleHash = contextDef.BundleHash()
 	}
 	return nil
 }
@@ -1193,17 +1205,45 @@ func (m *RuntimeContextManager) Primary() (*BundleContext, bool) {
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if len(m.order) == 0 {
+	if m.primaryBundleHash == "" {
 		return nil, false
+	}
+	entry := m.contexts[m.primaryBundleHash]
+	if !runtimeContextEntryLoaded(entry) {
+		return nil, false
+	}
+	return entry.context, true
+}
+
+func (m *RuntimeContextManager) CurrentPublication() (RuntimeContextPublicationSnapshot, error) {
+	if m == nil {
+		return RuntimeContextPublicationSnapshot{}, errors.New("runtime context manager is required")
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	primary := m.contexts[m.primaryBundleHash]
+	if !runtimeContextEntryLoaded(primary) {
+		return RuntimeContextPublicationSnapshot{}, errors.New("primary runtime context is unavailable")
+	}
+	identity := primary.context.BundleIdentity
+	identity.BundleHash = primary.context.BundleHash()
+	snapshot := RuntimeContextPublicationSnapshot{
+		PrimaryBundle:     identity,
+		BundleSourceFacts: make([]runtimecorrelation.BundleSourceFact, 0, len(m.order)),
 	}
 	for _, bundleHash := range m.order {
 		entry := m.contexts[bundleHash]
-		if entry == nil || entry.state != RuntimeContextStateLoaded || entry.context == nil {
+		if !runtimeContextEntryLoaded(entry) {
 			continue
 		}
-		return entry.context, true
+		fact := entry.context.BundleSourceFact
+		if err := fact.Validate(); err != nil {
+			return RuntimeContextPublicationSnapshot{}, fmt.Errorf("loaded runtime context %s source fact: %w", bundleHash, err)
+		}
+		snapshot.BundleSourceFacts = append(snapshot.BundleSourceFacts, fact)
 	}
-	return nil, false
+	return snapshot, nil
 }
 
 func (m *RuntimeContextManager) LookupBundleHash(bundleHash string) (*BundleContext, bool) {
@@ -2021,9 +2061,15 @@ func (m *RuntimeContextManager) restoreWithdrawnReplacementPredecessor(publicati
 	publication.entry.workOwner = publication.predecessorWorkOwner
 	publication.entry.standing = nil
 	publication.entry.parkedStanding = parked
-	return m.publishRuntimeContextVisibilityLocked(runtimeContextVisibilityUpdate{
+	if err := m.publishRuntimeContextVisibilityLocked(runtimeContextVisibilityUpdate{
 		entry: publication.entry, state: RuntimeContextStateUnloaded, cause: RuntimeContextCauseReplacing,
-	})
+	}); err != nil {
+		return err
+	}
+	if m.primaryBundleHash == publication.bundleHash {
+		m.primaryBundleHash = publication.existingHash
+	}
+	return nil
 }
 
 func (m *RuntimeContextManager) applyReplacementPublicationLocked(publication *replacementPublication) (*runtimeContextEntry, error) {
@@ -2054,6 +2100,9 @@ func (m *RuntimeContextManager) applyReplacementPublicationLocked(publication *r
 		entry: entry, state: RuntimeContextStateLoaded,
 	}); err != nil {
 		return entry, err
+	}
+	if m.primaryBundleHash == publication.existingHash {
+		m.primaryBundleHash = publication.bundleHash
 	}
 	return entry, nil
 }

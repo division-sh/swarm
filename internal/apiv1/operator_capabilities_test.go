@@ -1,10 +1,13 @@
 package apiv1
 
 import (
+	"fmt"
+	"sync"
 	"time"
 
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -45,10 +48,63 @@ type testOperatorCapabilities struct {
 	StandingServices          StandingServiceController
 	RuntimeIngress            RuntimeIngressController
 	RuntimeContexts           *runtime.RuntimeContextManager
+	RuntimePublication        RuntimePublicationReader
 	ResetCoordinator          DestructiveResetCoordinator
 	Source                    semanticview.Source
 	Bundle                    runtimecontracts.BundleIdentity
 	RuntimeIdentity           RuntimeIdentityResult
+}
+
+type testRuntimePublicationReader struct {
+	snapshot runtime.RuntimeContextPublicationSnapshot
+	err      error
+}
+
+type mutableTestRuntimePublicationReader struct {
+	mu       sync.RWMutex
+	snapshot runtime.RuntimeContextPublicationSnapshot
+	err      error
+}
+
+func (r *mutableTestRuntimePublicationReader) CurrentPublication() (runtime.RuntimeContextPublicationSnapshot, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.snapshot, r.err
+}
+
+func (r *mutableTestRuntimePublicationReader) set(snapshot runtime.RuntimeContextPublicationSnapshot, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.snapshot = snapshot
+	r.err = err
+}
+
+func (r testRuntimePublicationReader) CurrentPublication() (runtime.RuntimeContextPublicationSnapshot, error) {
+	return r.snapshot, r.err
+}
+
+func (c testOperatorCapabilities) runtimePublication() RuntimePublicationReader {
+	if c.RuntimePublication != nil {
+		return c.RuntimePublication
+	}
+	reader := testRuntimePublicationReader{snapshot: runtime.RuntimeContextPublicationSnapshot{PrimaryBundle: c.Bundle}}
+	for _, source := range c.RuntimeIdentity.BundleSources {
+		fact, err := runtimecorrelation.DecodeBundleSourceFact(source.BundleHash, source.BundleSource)
+		if err != nil {
+			reader.err = fmt.Errorf("decode test runtime publication: %w", err)
+			return reader
+		}
+		reader.snapshot.BundleSourceFacts = append(reader.snapshot.BundleSourceFacts, fact)
+	}
+	if len(reader.snapshot.BundleSourceFacts) == 0 && c.Bundle.BundleHash != "" {
+		fact, err := runtimecorrelation.NewPersistedBundleSourceFact(c.Bundle.BundleHash)
+		if err != nil {
+			reader.err = fmt.Errorf("construct test runtime publication: %w", err)
+			return reader
+		}
+		reader.snapshot.BundleSourceFacts = []runtimecorrelation.BundleSourceFact{fact}
+	}
+	return reader
 }
 
 func (c testOperatorCapabilities) publication() EventPublicationOptions {
@@ -88,8 +144,8 @@ func testOperatorHandlers(c testOperatorCapabilities) map[string]MethodHandler {
 	agents, _ := c.AgentConversations.(AgentReadStore)
 	conversations, _ := c.AgentConversations.(ConversationReadStore)
 	return MergeOperatorHandlers(
-		OperatorHealthHandlers(HealthHandlerOptions{ExecutionPosture: c.posture(), Now: c.Now, Ready: c.Ready, Database: c.Database, Bundle: c.Bundle}),
-		OperatorRuntimeIdentityHandlers(RuntimeIdentityHandlerOptions{Identity: c.RuntimeIdentity}),
+		OperatorHealthHandlers(HealthHandlerOptions{ExecutionPosture: c.posture(), Now: c.Now, Ready: c.Ready, Database: c.Database, Publication: c.runtimePublication()}),
+		OperatorRuntimeIdentityHandlers(RuntimeIdentityHandlerOptions{Identity: c.RuntimeIdentity, Publication: c.runtimePublication()}),
 		OperatorRunReadHandlers(RunReadHandlerOptions{Runs: c.Runs}),
 		OperatorMailboxHandlers(MailboxHandlerOptions{Mailbox: c.Mailbox}),
 		OperatorDecisionCardHandlers(c.decisionCards()),
@@ -119,7 +175,7 @@ func testOperatorSubscriptions(c testOperatorCapabilities, overrides ...Subscrip
 	return OperatorSubscriptions(SubscriptionOptions{
 		ExecutionPosture: c.posture(),
 		Now:              c.Now, Ready: c.Ready, Database: c.Database, Observability: c.Observability,
-		DecisionCards: c.DecisionCards, ProposedEffects: proposedEffects, Bundle: c.Bundle,
+		DecisionCards: c.DecisionCards, ProposedEffects: proposedEffects, Publication: c.runtimePublication(),
 	}, overrides...)
 }
 
