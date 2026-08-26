@@ -207,8 +207,9 @@ func (o *Owner) rejectRunCreationTx(ctx context.Context, tx *sql.Tx, plan RunCre
 		defectsJSON, _ := json.Marshal(source.evidence.Defects)
 		if _, err := tx.ExecContext(ctx, o.query(`
 			INSERT INTO resource_run_creation_child_evaluations
-			(parent_run_id, source_invocation_id, context_json, evaluation_json, defects_json) VALUES (%s, %s, %s, %s, %s)
-		`, 5), plan.command.RunID, source.command.SourceInvocationID, contextJSON, evaluationJSON, defectsJSON); err != nil {
+			(parent_run_id, source_invocation_id, observed_head_revision, context_json, evaluation_json, defects_json)
+			VALUES (%s, %s, %s, %s, %s, %s)
+		`, 6), plan.command.RunID, source.command.SourceInvocationID, source.context.Base.Head.Revision, contextJSON, evaluationJSON, defectsJSON); err != nil {
 			return RunCreationPlan{}, fmt.Errorf("store failed fused child evaluation: %w", err)
 		}
 	}
@@ -482,7 +483,7 @@ func (o *Owner) validateStoredRunCreationSourcesTx(ctx context.Context, tx *sql.
 		return nil
 	}
 	rows, err := tx.QueryContext(ctx, o.query(`
-		SELECT source_invocation_id, context_json, evaluation_json, defects_json
+		SELECT source_invocation_id, observed_head_revision, context_json, evaluation_json, defects_json
 		FROM resource_run_creation_child_evaluations WHERE parent_run_id = %s ORDER BY source_invocation_id
 	`, 1), command.RunID)
 	if err != nil {
@@ -490,12 +491,13 @@ func (o *Owner) validateStoredRunCreationSourcesTx(ctx context.Context, tx *sql.
 	}
 	type storedChildEvaluation struct {
 		id                                       string
+		observedHeadRevision                     uint64
 		contextJSON, evaluationJSON, defectsJSON []byte
 	}
 	var storedChildren []storedChildEvaluation
 	for rows.Next() {
 		var child storedChildEvaluation
-		if err := rows.Scan(&child.id, &child.contextJSON, &child.evaluationJSON, &child.defectsJSON); err != nil {
+		if err := rows.Scan(&child.id, &child.observedHeadRevision, &child.contextJSON, &child.evaluationJSON, &child.defectsJSON); err != nil {
 			_ = rows.Close()
 			return err
 		}
@@ -531,7 +533,7 @@ func (o *Owner) validateStoredRunCreationSourcesTx(ctx context.Context, tx *sql.
 		}
 		expected, expectedDefects, err := evaluationContext.FusedProjection(fusedSourceCommand(command, item))
 		sourceCommand := fusedSourceCommand(command, item)
-		if err := o.validateSourceEvaluationContext(ctx, tx, sourceCommand, evaluationContext); err != nil {
+		if err := o.validateSourceEvaluationContext(ctx, tx, sourceCommand, evaluationContext, child.observedHeadRevision); err != nil {
 			return fmt.Errorf("stored fused child %s context is not anchored: %w", id, err)
 		}
 		if err := o.requireNoSourceCommitFacts(ctx, tx, id); err != nil {

@@ -509,10 +509,11 @@ func (o *Owner) insertSourceReceipt(ctx context.Context, tx *sql.Tx, command run
 	}
 	_, err = tx.ExecContext(ctx, o.query(`
 		INSERT INTO resource_source_invocations
-		(source_invocation_id, request_hash, operation, parent_run_id, actor, bundle_hash, package_key, event_name, request_json, evaluation_json, result_json, evidence_json, completed_at)
-		VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-	`, 13), command.SourceInvocationID, hash, command.Operation, nullableUUID(command.ParentRunID), command.Actor, command.BundleHash,
-		command.Declaration.PackageKey, command.Declaration.EventName, requestJSON, evaluationJSON, resultJSON, evidenceJSON, evaluation.result.CompletedAt)
+		(source_invocation_id, request_hash, operation, parent_run_id, actor, bundle_hash, package_key, event_name, request_json, evaluation_json, result_json, evidence_json, observed_head_revision, completed_at)
+		VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+	`, 14), command.SourceInvocationID, hash, command.Operation, nullableUUID(command.ParentRunID), command.Actor, command.BundleHash,
+		command.Declaration.PackageKey, command.Declaration.EventName, requestJSON, evaluationJSON, resultJSON, evidenceJSON,
+		evaluation.context.Base.Head.Revision, evaluation.result.CompletedAt)
 	if err != nil {
 		return err
 	}

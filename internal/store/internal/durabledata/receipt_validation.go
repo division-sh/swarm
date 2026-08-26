@@ -8,35 +8,35 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"time"
 
 	runtimedata "github.com/division-sh/swarm/internal/durabledata"
 )
 
 type storedSourceReceipt struct {
-	requestHash    string
-	operation      string
-	parentRunID    sql.NullString
-	actor          string
-	bundleHash     string
-	packageKey     string
-	eventName      string
-	requestJSON    []byte
-	evaluationJSON []byte
-	resultJSON     []byte
-	evidenceJSON   []byte
-	completedAt    any
+	requestHash          string
+	operation            string
+	parentRunID          sql.NullString
+	actor                string
+	bundleHash           string
+	packageKey           string
+	eventName            string
+	requestJSON          []byte
+	evaluationJSON       []byte
+	resultJSON           []byte
+	evidenceJSON         []byte
+	observedHeadRevision uint64
+	completedAt          any
 }
 
 func (o *Owner) readStoredSourceReceipt(ctx context.Context, tx *sql.Tx, id string) (storedSourceReceipt, bool, error) {
 	var stored storedSourceReceipt
 	err := tx.QueryRowContext(ctx, o.query(`
 		SELECT request_hash, operation, parent_run_id, actor, bundle_hash, package_key, event_name,
-		       request_json, evaluation_json, result_json, evidence_json, completed_at
+		       request_json, evaluation_json, result_json, evidence_json, observed_head_revision, completed_at
 		FROM resource_source_invocations WHERE source_invocation_id = %s
 	`, 1), id).Scan(&stored.requestHash, &stored.operation, &stored.parentRunID, &stored.actor, &stored.bundleHash,
 		&stored.packageKey, &stored.eventName, &stored.requestJSON, &stored.evaluationJSON, &stored.resultJSON,
-		&stored.evidenceJSON, &stored.completedAt)
+		&stored.evidenceJSON, &stored.observedHeadRevision, &stored.completedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return storedSourceReceipt{}, false, nil
 	}
@@ -59,7 +59,8 @@ func (o *Owner) validateStoredSourceReceipt(ctx context.Context, tx *sql.Tx, id 
 	completedAt, present, err := persistedTime(stored.completedAt)
 	if err != nil || !present || stored.operation != command.Operation || parentRunID != command.ParentRunID ||
 		stored.actor != command.Actor || stored.bundleHash != command.BundleHash || stored.packageKey != command.Declaration.PackageKey ||
-		stored.eventName != command.Declaration.EventName || !completedAt.Equal(record.Result.CompletedAt) {
+		stored.eventName != command.Declaration.EventName || stored.observedHeadRevision != record.Evaluation.Base.Head.Revision ||
+		!completedAt.Equal(record.Result.CompletedAt) {
 		return runtimedata.SourceOperationRecord{}, runtimedata.SourceCommand{}, fmt.Errorf("typed source receipt contradicts canonical operation")
 	}
 	if err := o.validateSourceReceiptAggregate(ctx, tx, command, record); err != nil {
@@ -76,11 +77,11 @@ func (o *Owner) validateSourceReceiptAggregate(ctx context.Context, tx *sql.Tx, 
 	if !declarationsEqual(declaration, record.Evaluation.Declaration) {
 		return fmt.Errorf("source evaluation declaration contradicts immutable admitted declaration")
 	}
-	if err := o.validateSourceEvaluationBase(ctx, tx, record.Evaluation.Base, command.Declaration, record.Result.CompletedAt, command.SourceInvocationID); err != nil {
+	if err := o.validateSourceEvaluationBase(ctx, tx, record.Evaluation.Base, command.Declaration); err != nil {
 		return err
 	}
 	if command.Operation == "import" && record.Result.Outcome == "accepted" {
-		if err := o.validateAcceptedSourceCommit(ctx, tx, command, record.Result); err != nil {
+		if err := o.validateAcceptedSourceCommit(ctx, tx, command, record.Result, record.Evaluation.Base.Head.Revision); err != nil {
 			return err
 		}
 		return nil
@@ -88,7 +89,7 @@ func (o *Owner) validateSourceReceiptAggregate(ctx context.Context, tx *sql.Tx, 
 	return o.requireNoSourceCommitFacts(ctx, tx, command.SourceInvocationID)
 }
 
-func (o *Owner) validateSourceEvaluationContext(ctx context.Context, tx *sql.Tx, command runtimedata.SourceCommand, evaluation runtimedata.SourceEvaluationContext) error {
+func (o *Owner) validateSourceEvaluationContext(ctx context.Context, tx *sql.Tx, command runtimedata.SourceCommand, evaluation runtimedata.SourceEvaluationContext, observedHeadRevision uint64) error {
 	declaration, err := o.loadCatalogDeclaration(ctx, tx, command.BundleHash, command.Declaration)
 	if err != nil {
 		return fmt.Errorf("load admitted source declaration: %w", err)
@@ -96,7 +97,10 @@ func (o *Owner) validateSourceEvaluationContext(ctx context.Context, tx *sql.Tx,
 	if !declarationsEqual(declaration, evaluation.Declaration) {
 		return fmt.Errorf("source evaluation declaration contradicts immutable admitted declaration")
 	}
-	return o.validateSourceEvaluationBase(ctx, tx, evaluation.Base, command.Declaration, evaluation.CompletedAt, command.SourceInvocationID)
+	if evaluation.Base.Head.Revision != observedHeadRevision {
+		return fmt.Errorf("source evaluation base contradicts typed observed head revision")
+	}
+	return o.validateSourceEvaluationBase(ctx, tx, evaluation.Base, command.Declaration)
 }
 
 type immutableVersionFact struct {
@@ -144,16 +148,9 @@ func (o *Owner) loadImmutableVersionFact(ctx context.Context, tx *sql.Tx, ref ru
 	return fact, true, nil
 }
 
-func (o *Owner) validateSourceEvaluationBase(ctx context.Context, tx *sql.Tx, base runtimedata.SourceEvaluationBase, ref runtimedata.DeclarationRef, completedAt time.Time, sourceInvocationID string) error {
+func (o *Owner) validateSourceEvaluationBase(ctx context.Context, tx *sql.Tx, base runtimedata.SourceEvaluationBase, ref runtimedata.DeclarationRef) error {
 	if _, err := base.Validate(ref); err != nil {
 		return fmt.Errorf("source evaluation base is contradictory: %w", err)
-	}
-	latestRevision, err := o.latestHeadRevisionAt(ctx, tx, ref, completedAt, sourceInvocationID)
-	if err != nil {
-		return err
-	}
-	if latestRevision != base.Head.Revision {
-		return fmt.Errorf("source evaluation base revision %d contradicts latest immutable revision %d at completion", base.Head.Revision, latestRevision)
 	}
 	if base.State == "absent" {
 		return nil
@@ -176,17 +173,7 @@ func (o *Owner) validateSourceEvaluationBase(ctx context.Context, tx *sql.Tx, ba
 	}
 	return nil
 }
-
-func (o *Owner) latestHeadRevisionAt(ctx context.Context, tx *sql.Tx, ref runtimedata.DeclarationRef, completedAt time.Time, sourceInvocationID string) (uint64, error) {
-	var revision uint64
-	err := tx.QueryRowContext(ctx, o.query(`
-		SELECT COALESCE(MAX(revision), 0) FROM resource_head_history
-		WHERE package_key = %s AND event_name = %s AND committed_at <= %s AND operation_id <> %s
-	`, 4), ref.PackageKey, ref.EventName, completedAt, sourceInvocationID).Scan(&revision)
-	return revision, err
-}
-
-func (o *Owner) validateAcceptedSourceCommit(ctx context.Context, tx *sql.Tx, command runtimedata.SourceCommand, result runtimedata.SourceOperationResult) error {
+func (o *Owner) validateAcceptedSourceCommit(ctx context.Context, tx *sql.Tx, command runtimedata.SourceCommand, result runtimedata.SourceOperationResult, observedHeadRevision uint64) error {
 	fact, found, err := o.loadImmutableVersionFact(ctx, tx, command.Declaration, result.Candidate.VersionID)
 	if err != nil {
 		return err
@@ -228,7 +215,7 @@ func (o *Owner) validateAcceptedSourceCommit(ctx context.Context, tx *sql.Tx, co
 	if command.ParentRunID != "" {
 		operation = "fused_import"
 	}
-	if !found || historyCount != 1 || history.Operation != operation || history.OperationID != command.SourceInvocationID ||
+	if !found || historyCount != 1 || history.Revision != observedHeadRevision+1 || history.Operation != operation || history.OperationID != command.SourceInvocationID ||
 		!history.Before.Equal(result.Head.Before) || !history.After.Equal(result.Head.After) || !history.CommittedAt.Equal(result.CompletedAt) {
 		return fmt.Errorf("accepted source operation contradicts immutable head-history mutation")
 	}
