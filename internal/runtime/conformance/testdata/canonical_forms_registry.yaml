@@ -345,10 +345,10 @@ rows:
       canonical_candidate: producer_declaration_only_with_compiled_intra_package_projection
       retired_duplicates: [intra_package_consumer_restatement, nested_payload_block, raw_schema_resolver_consumer, non_field_level_optional_marker]
       distinct_overrides: []
-    f2_bug: "connected receivers could lose producer ownership to unrelated same-name declarations or connect order; aliases could rewrite authored provenance to anchor coordinates; invalid declaration identities could normalize, disappear, overwrite, or defer failure"
-    corpus: {event_declarations: 38, migrated_consumer_restatements: 16, intra_package_duplicate_declarations: 0, exact_projection_proofs: 13, named_delivery_projection_deltas: 3, adversarial_owner_collisions: 1, multi_producer_order_proofs: 2, ambiguous_owner_fallback_proofs: 1, supported_single_owner_fan_in_proofs: 2, closed_optional_type_forms: 6, rejected_optional_marker_positions: 6, alias_location_shapes: 5, rejected_declaration_identities: 7, accepted_declaration_patterns: 4}
+    f2_bug: "connected receivers could lose producer ownership to unrelated same-name declarations or connect order, while package-root and owning-flow endpoint aliases could split one producer identity; nested aliases and merge sequences could rewrite authored introduction provenance to anchor coordinates; invalid declaration identities could normalize, disappear, overwrite, or defer failure"
+    corpus: {event_declarations: 38, migrated_consumer_restatements: 16, intra_package_duplicate_declarations: 0, exact_projection_proofs: 13, named_delivery_projection_deltas: 3, adversarial_owner_collisions: 1, multi_producer_order_proofs: 2, ambiguous_owner_fallback_proofs: 1, supported_single_owner_fan_in_proofs: 2, canonical_producer_endpoint_alias_proofs: 1, closed_optional_type_forms: 6, rejected_optional_marker_positions: 6, alias_location_shapes: 9, rejected_declaration_identities: 7, accepted_declaration_patterns: 4}
     effective_consumers: [schema_registry, semantic_flow_proof, semantic_executable_node_proof, emit_lowering, pin_routing, bootverify, instance_source_typing, provider_overlays, operator_publication]
-    provenance: [authored_nested_values, authored_alias_use_and_resolved_target_locations, derived_consumer_projection, payload_alias_carries, intrinsic_generated_carries, package_identified_boundary_snapshots]
+    provenance: [authored_nested_values, authored_alias_and_merge_introduction_locations, authored_alias_use_and_resolved_target_locations, derived_consumer_projection, payload_alias_carries, intrinsic_generated_carries, package_identified_boundary_snapshots]
     divergent_manifestations:
       - fan-in/barrier:operating.report.requested
       - fan-in/stream:operating.report.requested
