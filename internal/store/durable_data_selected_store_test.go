@@ -1098,6 +1098,365 @@ func TestDurableDataPruneReceiptRejectsDestructiveDecisionCorruption(t *testing.
 	})
 }
 
+func TestDurableDataSourceReceiptAnchorsAdmittedContextAndHistoricalBase(t *testing.T) {
+	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
+		ctx := context.Background()
+		catalog, ref := durableDataTestCatalog(t)
+		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
+			t.Fatal(err)
+		}
+		assertIntegrity := func(t *testing.T, id string, command durabledata.SourceCommand) {
+			t.Helper()
+			for _, operation := range []func() error{
+				func() error { _, err := selected.LoadDataSourceOperation(ctx, id); return err },
+				func() error { _, err := selected.ExecuteDataSourceOperation(ctx, command); return err },
+			} {
+				var domainErr *durabledata.DomainError
+				if err := operation(); !errors.As(err, &domainErr) || domainErr.Code != durabledata.CodeIntegrity {
+					t.Fatalf("source aggregate corruption error = %v, want %s", err, durabledata.CodeIntegrity)
+				}
+			}
+		}
+
+		t.Run("valid replacement schema and business-key context", func(t *testing.T) {
+			id := uuid.NewString()
+			command := durabledata.SourceCommand{
+				Operation: "check", SourceInvocationID: id, Actor: "operator", BundleHash: testDataBundle,
+				Declaration: ref, ExpectedHead: durabledata.AbsentHead(), InputFormat: "jsonl", Input: []byte("{\"score\":1}\n"),
+			}
+			if _, err := selected.ExecuteDataSourceOperation(ctx, command); err != nil {
+				t.Fatal(err)
+			}
+			record, err := selected.LoadDataSourceOperation(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			schema := []byte(`{"type":"object","additionalProperties":false,"required":["score"],"properties":{"score":{"type":"integer"}}}`)
+			record.Evaluation.Declaration = durabledata.Declaration{
+				Name: ref.EventName, Ref: ref, OwnerFlowID: "root", SchemaDigest: durabledata.SchemaDigestFor(schema), CanonicalSchema: schema,
+			}
+			_, result, evidence, err := record.Evaluation.Evaluate(command)
+			if err != nil || result.Outcome != "accepted" {
+				t.Fatalf("hostile source context = %#v, %v", result, err)
+			}
+			updateSourceReceiptAggregate(t, ctx, selected, db, id, record.Evaluation, result, evidence)
+			assertIntegrity(t, id, command)
+		})
+
+		first, err := selected.ExecuteDataSourceOperation(ctx, durabledata.SourceCommand{
+			Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: testDataBundle,
+			Declaration: ref, ExpectedHead: durabledata.AbsentHead(), InputFormat: "jsonl", Input: []byte("{\"slug\":\"base\",\"score\":1}\n"),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Run("coordinated historical head replacement", func(t *testing.T) {
+			id := uuid.NewString()
+			command := durabledata.SourceCommand{
+				Operation: "check", SourceInvocationID: id, Actor: "operator", BundleHash: testDataBundle,
+				Declaration: ref, ExpectedHead: first.Head.After, InputFormat: "jsonl", Input: []byte("{\"slug\":\"next\",\"score\":2}\n"),
+			}
+			if _, err := selected.ExecuteDataSourceOperation(ctx, command); err != nil {
+				t.Fatal(err)
+			}
+			record, err := selected.LoadDataSourceOperation(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			record.Evaluation.Base = durabledata.SourceEvaluationBase{
+				State: "absent", Head: durabledata.HeadResult{Before: durabledata.AbsentHead(), After: durabledata.AbsentHead()},
+			}
+			_, result, evidence, err := record.Evaluation.Evaluate(command)
+			if err != nil || result.Outcome != "head_conflict" {
+				t.Fatalf("hostile historical context = %#v, %v", result, err)
+			}
+			updateSourceReceiptAggregate(t, ctx, selected, db, id, record.Evaluation, result, evidence)
+			assertIntegrity(t, id, command)
+		})
+	})
+}
+
+func TestDurableDataSourceReceiptRequiresExactCommitAggregate(t *testing.T) {
+	for _, scenario := range []string{"missing provenance", "missing head history", "wrong head history"} {
+		t.Run(scenario, func(t *testing.T) {
+			forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
+				ctx := context.Background()
+				catalog, ref := durableDataTestCatalog(t)
+				if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
+					t.Fatal(err)
+				}
+				id := uuid.NewString()
+				command := durabledata.SourceCommand{
+					Operation: "import", SourceInvocationID: id, Actor: "operator", BundleHash: testDataBundle,
+					Declaration: ref, ExpectedHead: durabledata.AbsentHead(), InputFormat: "jsonl", Input: []byte("{\"slug\":\"alpha\",\"score\":1}\n"),
+				}
+				result, err := selected.ExecuteDataSourceOperation(ctx, command)
+				if err != nil || !result.Head.Changed {
+					t.Fatalf("source fixture = %#v, %v", result, err)
+				}
+				var statement string
+				switch scenario {
+				case "missing provenance":
+					statement = `DELETE FROM resource_version_provenance WHERE producer_kind = 'import' AND producer_id = ?`
+				case "missing head history":
+					statement = `DELETE FROM resource_head_history WHERE operation_id = ?`
+				case "wrong head history":
+					statement = `UPDATE resource_head_history SET operation_kind = 'fused_import' WHERE operation_id = ?`
+				}
+				if _, ok := selected.(*store.PostgresStore); ok {
+					statement = strings.Replace(statement, "?", "$1::uuid", 1)
+				}
+				if _, err := db.ExecContext(ctx, statement, id); err != nil {
+					t.Fatal(err)
+				}
+				for _, operation := range []func() error{
+					func() error { _, err := selected.LoadDataSourceOperation(ctx, id); return err },
+					func() error { _, err := selected.ExecuteDataSourceOperation(ctx, command); return err },
+				} {
+					var domainErr *durabledata.DomainError
+					if err := operation(); !errors.As(err, &domainErr) || domainErr.Code != durabledata.CodeIntegrity {
+						t.Fatalf("%s error = %v, want %s", scenario, err, durabledata.CodeIntegrity)
+					}
+				}
+			})
+		})
+	}
+}
+
+func TestDurableDataNonMutatingSourceReceiptsRejectCommitFacts(t *testing.T) {
+	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
+		ctx := context.Background()
+		catalog, ref := durableDataTestCatalog(t)
+		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
+			t.Fatal(err)
+		}
+		base, err := selected.ExecuteDataSourceOperation(ctx, durabledata.SourceCommand{
+			Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: testDataBundle,
+			Declaration: ref, ExpectedHead: durabledata.AbsentHead(), InputFormat: "jsonl", Input: []byte("{\"slug\":\"base\",\"score\":1}\n"),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assertIntegrity := func(t *testing.T, id string, command durabledata.SourceCommand) {
+			t.Helper()
+			for _, operation := range []func() error{
+				func() error { _, err := selected.LoadDataSourceOperation(ctx, id); return err },
+				func() error { _, err := selected.ExecuteDataSourceOperation(ctx, command); return err },
+			} {
+				var domainErr *durabledata.DomainError
+				if err := operation(); !errors.As(err, &domainErr) || domainErr.Code != durabledata.CodeIntegrity {
+					t.Fatalf("non-mutating source commit corruption error = %v, want %s", err, durabledata.CodeIntegrity)
+				}
+			}
+		}
+
+		for _, test := range []struct {
+			name    string
+			command durabledata.SourceCommand
+		}{
+			{name: "validation rejection with provenance", command: durabledata.SourceCommand{
+				Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: testDataBundle,
+				Declaration: ref, ExpectedHead: base.Head.After, InputFormat: "jsonl", Input: []byte("{}\n"),
+			}},
+			{name: "head conflict with provenance", command: durabledata.SourceCommand{
+				Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: testDataBundle,
+				Declaration: ref, ExpectedHead: durabledata.AbsentHead(), InputFormat: "jsonl", Input: []byte("{\"slug\":\"conflict\",\"score\":2}\n"),
+			}},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				result, err := selected.ExecuteDataSourceOperation(ctx, test.command)
+				if err != nil || result.Outcome == "accepted" {
+					t.Fatalf("non-mutating source fixture = %#v, %v", result, err)
+				}
+				insertHostileImportProvenance(t, ctx, selected, db, base.Candidate.VersionID, test.command.SourceInvocationID, test.command.Actor, result.CompletedAt)
+				assertIntegrity(t, test.command.SourceInvocationID, test.command)
+			})
+		}
+
+		t.Run("check with head history", func(t *testing.T) {
+			command := durabledata.SourceCommand{
+				Operation: "check", SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: testDataBundle,
+				Declaration: ref, ExpectedHead: base.Head.After, InputFormat: "jsonl", Input: []byte("{\"slug\":\"checked\",\"score\":3}\n"),
+			}
+			result, err := selected.ExecuteDataSourceOperation(ctx, command)
+			if err != nil || result.Outcome != "accepted" {
+				t.Fatalf("check fixture = %#v, %v", result, err)
+			}
+			insertHostileHeadHistory(t, ctx, selected, db, ref, base.Head.Revision+1, base.Head.After, command.SourceInvocationID, result.CompletedAt)
+			assertIntegrity(t, command.SourceInvocationID, command)
+		})
+	})
+}
+
+func TestDurableDataSourceReceiptRejectsTypedColumnCorruption(t *testing.T) {
+	tests := []struct {
+		name, column string
+		value        func() any
+	}{
+		{name: "operation", column: "operation", value: func() any { return "check" }},
+		{name: "parent run", column: "parent_run_id", value: func() any { return uuid.NewString() }},
+		{name: "actor", column: "actor", value: func() any { return "hostile-actor" }},
+		{name: "bundle", column: "bundle_hash", value: func() any { return "bundle-v1:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }},
+		{name: "package", column: "package_key", value: func() any { return "hostile" }},
+		{name: "event", column: "event_name", value: func() any { return "hostile.event" }},
+		{name: "completed at", column: "completed_at", value: func() any { return time.Date(2035, 1, 2, 3, 4, 5, 0, time.UTC) }},
+	}
+	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
+		ctx := context.Background()
+		catalog, ref := durableDataTestCatalog(t)
+		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
+			t.Fatal(err)
+		}
+		head := durabledata.AbsentHead()
+		for index, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				id := uuid.NewString()
+				command := durabledata.SourceCommand{
+					Operation: "import", SourceInvocationID: id, Actor: "operator", BundleHash: testDataBundle,
+					Declaration: ref, ExpectedHead: head, InputFormat: "jsonl",
+					Input: []byte(fmt.Sprintf("{\"slug\":\"typed-%d\",\"score\":%d}\n", index, index)),
+				}
+				result, err := selected.ExecuteDataSourceOperation(ctx, command)
+				if err != nil {
+					t.Fatal(err)
+				}
+				head = result.Head.After
+				corruptDurableDataScalarColumn(t, ctx, selected, db, "resource_source_invocations", test.column, "source_invocation_id", id, test.value())
+				for _, operation := range []func() error{
+					func() error { _, err := selected.LoadDataSourceOperation(ctx, id); return err },
+					func() error { _, err := selected.ExecuteDataSourceOperation(ctx, command); return err },
+				} {
+					var domainErr *durabledata.DomainError
+					if err := operation(); !errors.As(err, &domainErr) || domainErr.Code != durabledata.CodeIntegrity {
+						t.Fatalf("typed %s corruption error = %v, want %s", test.name, err, durabledata.CodeIntegrity)
+					}
+				}
+			})
+		}
+	})
+}
+
+func TestDurableDataPruneReceiptRejectsTypedColumnCorruption(t *testing.T) {
+	tests := []struct {
+		name, column string
+		value        func() any
+	}{
+		{name: "actor", column: "actor", value: func() any { return "hostile-actor" }},
+		{name: "package", column: "package_key", value: func() any { return "hostile" }},
+		{name: "event", column: "event_name", value: func() any { return "hostile.event" }},
+		{name: "version", column: "version_id", value: func() any {
+			return "resource-version-v1:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+		}},
+		{name: "completed at", column: "completed_at", value: func() any { return time.Date(2035, 1, 2, 3, 4, 5, 0, time.UTC) }},
+	}
+	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
+		ctx := context.Background()
+		catalog, ref := durableDataTestCatalog(t)
+		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
+			t.Fatal(err)
+		}
+		head := durabledata.AbsentHead()
+		for index, test := range tests {
+			t.Run(test.name, func(t *testing.T) {
+				target, err := selected.ExecuteDataSourceOperation(ctx, durabledata.SourceCommand{
+					Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: testDataBundle,
+					Declaration: ref, ExpectedHead: head, InputFormat: "jsonl", Input: []byte(fmt.Sprintf("{\"slug\":\"target-%d\",\"score\":%d}\n", index, index)),
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				current, err := selected.ExecuteDataSourceOperation(ctx, durabledata.SourceCommand{
+					Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: testDataBundle,
+					Declaration: ref, ExpectedHead: target.Head.After, InputFormat: "jsonl", Input: []byte(fmt.Sprintf("{\"slug\":\"current-%d\",\"score\":%d}\n", index, index)),
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				head = current.Head.After
+				id := uuid.NewString()
+				command := durabledata.PruneCommand{PruneInvocationID: id, Actor: "operator", Declaration: ref, VersionID: target.Candidate.VersionID, ExpectedHead: head}
+				if result, err := selected.PruneDataResource(ctx, command); err != nil || result.Outcome != "pruned" {
+					t.Fatalf("prune fixture = %#v, %v", result, err)
+				}
+				corruptDurableDataScalarColumn(t, ctx, selected, db, "resource_prune_invocations", test.column, "prune_invocation_id", id, test.value())
+				for _, operation := range []func() error{
+					func() error { _, err := selected.LoadDataPruneOperation(ctx, id); return err },
+					func() error { _, err := selected.PruneDataResource(ctx, command); return err },
+				} {
+					var domainErr *durabledata.DomainError
+					if err := operation(); !errors.As(err, &domainErr) || domainErr.Code != durabledata.CodeIntegrity {
+						t.Fatalf("typed %s corruption error = %v, want %s", test.name, err, durabledata.CodeIntegrity)
+					}
+				}
+			})
+		}
+	})
+}
+
+func updateSourceReceiptAggregate(t testing.TB, ctx context.Context, selected durableDataSelectedStore, db *sql.DB, id string, evaluation durabledata.SourceEvaluationContext, result durabledata.SourceOperationResult, evidence durabledata.SourceEvidence) {
+	t.Helper()
+	evaluationJSON, _ := json.Marshal(evaluation)
+	resultJSON, _ := json.Marshal(result)
+	evidenceJSON, _ := json.Marshal(evidence)
+	query := `UPDATE resource_source_invocations SET evaluation_json = ?, result_json = ?, evidence_json = ? WHERE source_invocation_id = ?`
+	if _, ok := selected.(*store.PostgresStore); ok {
+		query = `UPDATE resource_source_invocations SET evaluation_json = $1, result_json = $2, evidence_json = $3 WHERE source_invocation_id = $4::uuid`
+	}
+	if _, err := db.ExecContext(ctx, query, evaluationJSON, resultJSON, evidenceJSON, id); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func insertHostileImportProvenance(t testing.TB, ctx context.Context, selected durableDataSelectedStore, db *sql.DB, versionID durabledata.VersionID, sourceInvocationID, actor string, committedAt time.Time) {
+	t.Helper()
+	var sequence uint64
+	query := `SELECT COALESCE(MAX(provenance_sequence), 0) + 1 FROM resource_version_provenance WHERE version_id = ?`
+	if _, ok := selected.(*store.PostgresStore); ok {
+		query = `SELECT COALESCE(MAX(provenance_sequence), 0) + 1 FROM resource_version_provenance WHERE version_id = $1`
+	}
+	if err := db.QueryRowContext(ctx, query, versionID).Scan(&sequence); err != nil {
+		t.Fatal(err)
+	}
+	provenance := durabledata.Provenance{
+		Sequence: sequence, VersionID: versionID,
+		ProducerRef: durabledata.ProvenanceRef{Kind: "import", SourceInvocationID: sourceInvocationID},
+		Actor:       actor, CommittedAt: committedAt,
+	}
+	raw, err := json.Marshal(provenance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query = `INSERT INTO resource_version_provenance (version_id, provenance_sequence, producer_kind, producer_id, actor, provenance_json, committed_at) VALUES (?, ?, 'import', ?, ?, ?, ?)`
+	if _, ok := selected.(*store.PostgresStore); ok {
+		query = `INSERT INTO resource_version_provenance (version_id, provenance_sequence, producer_kind, producer_id, actor, provenance_json, committed_at) VALUES ($1, $2, 'import', $3::uuid, $4, $5, $6)`
+	}
+	if _, err := db.ExecContext(ctx, query, versionID, sequence, sourceInvocationID, actor, raw, committedAt); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func insertHostileHeadHistory(t testing.TB, ctx context.Context, selected durableDataSelectedStore, db *sql.DB, ref durabledata.DeclarationRef, revision uint64, head durabledata.ExpectedHead, sourceInvocationID string, committedAt time.Time) {
+	t.Helper()
+	query := `INSERT INTO resource_head_history (package_key, event_name, revision, before_version_id, after_version_id, operation_kind, operation_id, committed_at) VALUES (?, ?, ?, ?, ?, 'source_import', ?, ?)`
+	if _, ok := selected.(*store.PostgresStore); ok {
+		query = `INSERT INTO resource_head_history (package_key, event_name, revision, before_version_id, after_version_id, operation_kind, operation_id, committed_at) VALUES ($1, $2, $3, $4, $5, 'source_import', $6::uuid, $7)`
+	}
+	if _, err := db.ExecContext(ctx, query, ref.PackageKey, ref.EventName, revision, head.VersionID, head.VersionID, sourceInvocationID, committedAt); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func corruptDurableDataScalarColumn(t testing.TB, ctx context.Context, selected durableDataSelectedStore, db *sql.DB, table, column, identityColumn, identity string, value any) {
+	t.Helper()
+	query := fmt.Sprintf("UPDATE %s SET %s = ? WHERE %s = ?", table, column, identityColumn)
+	if _, ok := selected.(*store.PostgresStore); ok {
+		query = fmt.Sprintf("UPDATE %s SET %s = $1 WHERE %s = $2::uuid", table, column, identityColumn)
+	}
+	if _, err := db.ExecContext(ctx, query, value, identity); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func corruptDurableDataJSONColumn(t testing.TB, ctx context.Context, selected durableDataSelectedStore, db *sql.DB, table, column, identityColumn, identity string, mutate func(map[string]any)) {
 	t.Helper()
 	query := fmt.Sprintf("SELECT %s FROM %s WHERE %s = ?", column, table, identityColumn)

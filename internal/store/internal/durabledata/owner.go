@@ -451,21 +451,17 @@ func (o *Owner) allocateProvenanceSequence(ctx context.Context, tx *sql.Tx, vers
 }
 
 func (o *Owner) loadSourceReceipt(ctx context.Context, tx *sql.Tx, id, requestHash string) (runtimedata.SourceOperationResult, bool, error) {
-	var storedHash string
-	var requestJSON, evaluationJSON, resultJSON, evidenceJSON []byte
-	err := tx.QueryRowContext(ctx, o.query(`
-		SELECT request_hash, request_json, evaluation_json, result_json, evidence_json FROM resource_source_invocations WHERE source_invocation_id = %s
-	`, 1), id).Scan(&storedHash, &requestJSON, &evaluationJSON, &resultJSON, &evidenceJSON)
-	if errors.Is(err, sql.ErrNoRows) {
+	stored, found, err := o.readStoredSourceReceipt(ctx, tx, id)
+	if err != nil || !found {
+		if err != nil {
+			return runtimedata.SourceOperationResult{}, false, err
+		}
 		return runtimedata.SourceOperationResult{}, false, nil
 	}
-	if err != nil {
-		return runtimedata.SourceOperationResult{}, false, err
-	}
-	if storedHash != requestHash {
+	if stored.requestHash != requestHash {
 		return runtimedata.SourceOperationResult{}, false, runtimedata.NewDomainError(runtimedata.CodeInvocationConflict, "source_invocation_id %s was already used for a different request", id)
 	}
-	record, err := decodeSourceReceipt(id, storedHash, requestJSON, evaluationJSON, resultJSON, evidenceJSON)
+	record, _, err := o.validateStoredSourceReceipt(ctx, tx, id, stored)
 	if err != nil {
 		return runtimedata.SourceOperationResult{}, false, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "source operation %s result is contradictory: %v", id, err)
 	}
@@ -477,24 +473,19 @@ func (o *Owner) loadSourceRecordTx(ctx context.Context, tx *sql.Tx, command runt
 	if err != nil {
 		return runtimedata.SourceOperationRecord{}, false, err
 	}
-	var storedHash string
-	var requestJSON, evaluationJSON, resultJSON, evidenceJSON []byte
-	err = tx.QueryRowContext(ctx, o.query(`
-		SELECT request_hash, request_json, evaluation_json, result_json, evidence_json
-		FROM resource_source_invocations WHERE source_invocation_id = %s
-	`, 1), command.SourceInvocationID).Scan(&storedHash, &requestJSON, &evaluationJSON, &resultJSON, &evidenceJSON)
-	if errors.Is(err, sql.ErrNoRows) {
+	stored, found, err := o.readStoredSourceReceipt(ctx, tx, command.SourceInvocationID)
+	if err != nil || !found {
+		if err != nil {
+			return runtimedata.SourceOperationRecord{}, false, err
+		}
 		return runtimedata.SourceOperationRecord{}, false, nil
 	}
-	if err != nil {
-		return runtimedata.SourceOperationRecord{}, false, err
-	}
-	if storedHash != requestHash {
+	if stored.requestHash != requestHash {
 		return runtimedata.SourceOperationRecord{}, false, runtimedata.NewDomainError(runtimedata.CodeInvocationConflict, "source_invocation_id %s was already used for a different request", command.SourceInvocationID)
 	}
-	record, err := decodeSourceReceipt(command.SourceInvocationID, storedHash, requestJSON, evaluationJSON, resultJSON, evidenceJSON)
+	record, _, err := o.validateStoredSourceReceipt(ctx, tx, command.SourceInvocationID, stored)
 	if err != nil {
-		return runtimedata.SourceOperationRecord{}, false, err
+		return runtimedata.SourceOperationRecord{}, false, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "source operation %s result is contradictory: %v", command.SourceInvocationID, err)
 	}
 	return record, true, nil
 }
@@ -522,7 +513,20 @@ func (o *Owner) insertSourceReceipt(ctx context.Context, tx *sql.Tx, command run
 		VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 	`, 13), command.SourceInvocationID, hash, command.Operation, nullableUUID(command.ParentRunID), command.Actor, command.BundleHash,
 		command.Declaration.PackageKey, command.Declaration.EventName, requestJSON, evaluationJSON, resultJSON, evidenceJSON, evaluation.result.CompletedAt)
-	return err
+	if err != nil {
+		return err
+	}
+	stored, found, err := o.readStoredSourceReceipt(ctx, tx, command.SourceInvocationID)
+	if err != nil {
+		return fmt.Errorf("read inserted source receipt: %w", err)
+	}
+	if !found {
+		return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "inserted source operation %s is missing", command.SourceInvocationID)
+	}
+	if _, _, err := o.validateStoredSourceReceipt(ctx, tx, command.SourceInvocationID, stored); err != nil {
+		return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "inserted source operation %s is contradictory: %v", command.SourceInvocationID, err)
+	}
+	return nil
 }
 
 func decodeSourceReceipt(id, storedHash string, requestJSON, evaluationJSON, resultJSON, evidenceJSON []byte) (runtimedata.SourceOperationRecord, error) {
@@ -1122,18 +1126,14 @@ func (o *Owner) LoadSourceOperation(ctx context.Context, id string) (runtimedata
 	}
 	var record runtimedata.SourceOperationRecord
 	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		var storedHash string
-		var requestJSON, evaluationJSON, resultJSON, evidenceJSON []byte
-		err := tx.QueryRowContext(txctx, o.query(`
-			SELECT request_hash, request_json, evaluation_json, result_json, evidence_json FROM resource_source_invocations WHERE source_invocation_id = %s
-		`, 1), id).Scan(&storedHash, &requestJSON, &evaluationJSON, &resultJSON, &evidenceJSON)
-		if errors.Is(err, sql.ErrNoRows) {
-			return runtimedata.NewDomainError(runtimedata.CodeOperationMissing, "source operation %s does not exist", id)
-		}
+		stored, found, err := o.readStoredSourceReceipt(txctx, tx, id)
 		if err != nil {
 			return err
 		}
-		record, err = decodeSourceReceipt(id, storedHash, requestJSON, evaluationJSON, resultJSON, evidenceJSON)
+		if !found {
+			return runtimedata.NewDomainError(runtimedata.CodeOperationMissing, "source operation %s does not exist", id)
+		}
+		record, _, err = o.validateStoredSourceReceipt(txctx, tx, id, stored)
 		if err != nil {
 			return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "source operation %s evidence is contradictory: %v", id, err)
 		}
@@ -1148,20 +1148,14 @@ func (o *Owner) LoadPruneOperation(ctx context.Context, id string) (runtimedata.
 	}
 	var result runtimedata.PruneOperationResult
 	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		var storedHash string
-		var requestJSON, resultJSON []byte
-		err := tx.QueryRowContext(txctx, o.query(`SELECT request_hash, request_json, result_json FROM resource_prune_invocations WHERE prune_invocation_id = %s`, 1), id).Scan(&storedHash, &requestJSON, &resultJSON)
-		if errors.Is(err, sql.ErrNoRows) {
+		stored, found, err := o.readStoredPruneReceipt(txctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if !found {
 			return runtimedata.NewDomainError(runtimedata.CodeOperationMissing, "prune operation %s does not exist", id)
 		}
-		if err != nil {
-			return err
-		}
-		pins, err := o.loadPrunePinEvidence(txctx, tx, id)
-		if err != nil {
-			return err
-		}
-		result, err = decodePruneReceipt(id, storedHash, requestJSON, resultJSON, pins)
+		result, _, _, err = o.validateStoredPruneReceipt(txctx, tx, id, stored)
 		if err != nil {
 			return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "prune operation %s evidence is contradictory: %v", id, err)
 		}
@@ -1176,20 +1170,15 @@ func (o *Owner) LoadPruneOperationPins(ctx context.Context, id string) ([]runtim
 	}
 	var pins []runtimedata.Pin
 	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		var storedHash string
-		var requestJSON, resultJSON []byte
-		err := tx.QueryRowContext(txctx, o.query(`SELECT request_hash, request_json, result_json FROM resource_prune_invocations WHERE prune_invocation_id = %s`, 1), id).Scan(&storedHash, &requestJSON, &resultJSON)
-		if errors.Is(err, sql.ErrNoRows) {
+		stored, found, err := o.readStoredPruneReceipt(txctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if !found {
 			return runtimedata.NewDomainError(runtimedata.CodeOperationMissing, "prune operation %s does not exist", id)
 		}
+		_, _, pins, err = o.validateStoredPruneReceipt(txctx, tx, id, stored)
 		if err != nil {
-			return err
-		}
-		pins, err = o.loadPrunePinEvidence(txctx, tx, id)
-		if err != nil {
-			return err
-		}
-		if _, err := decodePruneReceipt(id, storedHash, requestJSON, resultJSON, pins); err != nil {
 			return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "prune operation %s evidence is contradictory: %v", id, err)
 		}
 		return nil
@@ -1672,23 +1661,17 @@ func validateStoredPins(ref runtimedata.DeclarationRef, version runtimedata.Vers
 }
 
 func (o *Owner) loadPruneReceipt(ctx context.Context, tx *sql.Tx, id, requestHash string) (runtimedata.PruneOperationResult, bool, error) {
-	var storedHash string
-	var requestJSON, resultJSON []byte
-	err := tx.QueryRowContext(ctx, o.query(`SELECT request_hash, request_json, result_json FROM resource_prune_invocations WHERE prune_invocation_id = %s`, 1), id).Scan(&storedHash, &requestJSON, &resultJSON)
-	if errors.Is(err, sql.ErrNoRows) {
+	stored, found, err := o.readStoredPruneReceipt(ctx, tx, id)
+	if err != nil || !found {
+		if err != nil {
+			return runtimedata.PruneOperationResult{}, false, err
+		}
 		return runtimedata.PruneOperationResult{}, false, nil
 	}
-	if err != nil {
-		return runtimedata.PruneOperationResult{}, false, err
-	}
-	if storedHash != requestHash {
+	if stored.requestHash != requestHash {
 		return runtimedata.PruneOperationResult{}, false, runtimedata.NewDomainError(runtimedata.CodeInvocationConflict, "prune_invocation_id %s was already used for a different request", id)
 	}
-	pins, err := o.loadPrunePinEvidence(ctx, tx, id)
-	if err != nil {
-		return runtimedata.PruneOperationResult{}, false, err
-	}
-	result, err := decodePruneReceipt(id, storedHash, requestJSON, resultJSON, pins)
+	result, _, _, err := o.validateStoredPruneReceipt(ctx, tx, id, stored)
 	if err != nil {
 		return runtimedata.PruneOperationResult{}, false, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "prune operation %s evidence is contradictory: %v", id, err)
 	}
@@ -1719,6 +1702,16 @@ func (o *Owner) insertPruneReceipt(ctx context.Context, tx *sql.Tx, command runt
 			pin.Declaration.EventName, pin.SchemaDigest, pin.VersionID, pin.Selection); err != nil {
 			return fmt.Errorf("store prune pin evidence: %w", err)
 		}
+	}
+	stored, found, err := o.readStoredPruneReceipt(ctx, tx, command.PruneInvocationID)
+	if err != nil {
+		return fmt.Errorf("read inserted prune receipt: %w", err)
+	}
+	if !found {
+		return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "inserted prune operation %s is missing", command.PruneInvocationID)
+	}
+	if _, _, _, err := o.validateStoredPruneReceipt(ctx, tx, command.PruneInvocationID, stored); err != nil {
+		return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "inserted prune operation %s is contradictory: %v", command.PruneInvocationID, err)
 	}
 	return nil
 }
