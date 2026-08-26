@@ -314,7 +314,7 @@ func readOnlyHTTPRuntimeFixtures() map[string]readOnlyHTTPRuntimeFixture {
 		"run.get":                    {Params: map[string]any{"run_id": "run-1"}, ResultKeys: []string{"run"}},
 		"run.list":                   {Params: map[string]any{}, ResultKeys: []string{"runs"}},
 		"run.trace":                  {Params: map[string]any{"run_id": "run-1"}, ResultKeys: []string{"trace"}},
-		"runtime.identity":           {Params: map[string]any{}, ResultKeys: []string{"runtime_instance_id", "started_at", "api_version", "supported_transports"}},
+		"runtime.identity":           {Params: map[string]any{}, ResultKeys: []string{"runtime_instance_id", "started_at", "api_version", "supported_transports", "bundle_sources"}},
 		"runtime.incidents":          {Params: map[string]any{}, ResultKeys: []string{"incidents"}},
 		"runtime.logs":               {Params: map[string]any{}, ResultKeys: []string{"logs"}},
 	}
@@ -563,6 +563,9 @@ func readOnlyRuntimeProbeOptions(t *testing.T) testOperatorCapabilities {
 			StartedAt:           now.Format(time.RFC3339Nano),
 			APIVersion:          "v1",
 			SupportedTransports: []string{"tcp"},
+			BundleSources: []RuntimeBundleSourceIdentity{{
+				BundleHash: readOnlyProbeBundleHash, BundleSource: "persisted",
+			}},
 		},
 		Runs: &fakeRunReadStore{
 			headers: map[string]operatorread.RunHeader{

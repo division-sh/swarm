@@ -373,6 +373,8 @@ steps:
 		}
 		calls = append(calls, rpc)
 		switch rpc.Method {
+		case "runtime.identity":
+			writeScenarioRuntimeIdentity(t, w, rpc.ID, bundleHash, "persisted")
 		case eventPublishMethod:
 			if rpc.Params["event_name"] != "inbound.telegram.text_message" || rpc.Params["bundle_hash"] != bundleHash {
 				t.Fatalf("event.publish params = %#v", rpc.Params)
@@ -401,7 +403,7 @@ steps:
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	assertScenarioTestMethods(t, calls, []string{eventPublishMethod, "run.diagnose", "run.diagnose"})
+	assertScenarioTestMethods(t, calls, []string{"runtime.identity", eventPublishMethod, "run.diagnose", "run.diagnose"})
 	if !strings.Contains(stdout.String(), "swarm test ok: scenarios=1") || strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}

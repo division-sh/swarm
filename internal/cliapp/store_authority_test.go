@@ -24,6 +24,54 @@ import (
 	"github.com/google/uuid"
 )
 
+type closeErrorAuthorityInspectionStore struct {
+	inspection runtimestartupownership.AuthorityInspection
+	inspectErr error
+	closeErr   error
+	closeCalls int
+}
+
+func (s *closeErrorAuthorityInspectionStore) InspectAuthority(context.Context) (runtimestartupownership.AuthorityInspection, error) {
+	return s.inspection, s.inspectErr
+}
+
+func (s *closeErrorAuthorityInspectionStore) Close() error {
+	s.closeCalls++
+	return s.closeErr
+}
+
+func TestAuthorityInspectionPropagatesOperationAndCloseErrors(t *testing.T) {
+	store := &closeErrorAuthorityInspectionStore{
+		inspectErr: errors.New("inspect failed"), closeErr: errors.New("inspection close failed"),
+	}
+	_, err := inspectAuthorityAndClose(context.Background(), store)
+	for _, want := range []string{"inspect failed", "inspection close failed"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("inspect error = %v, want %q", err, want)
+		}
+	}
+	if store.closeCalls != 1 {
+		t.Fatalf("inspection close calls = %d, want 1", store.closeCalls)
+	}
+}
+
+func TestAuthorityMaintenancePropagatesCloseError(t *testing.T) {
+	resultErr := errors.New("repair failed")
+	closeCalls := 0
+	closeAuthorityResult(&resultErr, func() error {
+		closeCalls++
+		return errors.New("maintenance close failed")
+	})
+	for _, want := range []string{"repair failed", "maintenance close failed"} {
+		if !strings.Contains(resultErr.Error(), want) {
+			t.Fatalf("repair error = %v, want %q", resultErr, want)
+		}
+	}
+	if closeCalls != 1 {
+		t.Fatalf("maintenance close calls = %d, want 1", closeCalls)
+	}
+}
+
 func TestStoreStatusReadsSelectedStoreOwnershipWithoutContextInference(t *testing.T) {
 	unsetStoreSelectorEnv(t)
 	sqlitePath := filepath.Join(t.TempDir(), "missing", "selected.db")
