@@ -839,10 +839,6 @@ flows:
     mode: `+producerMode+`
 `)
 	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: bus-import-boundary-wildcard\n")
-	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "nodes.yaml"), rootNode)
 	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "worker", "package.yaml"), "name: worker\nversion: \"1.0.0\"\n")
 	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "worker", "schema.yaml"), `
@@ -855,8 +851,6 @@ pins:
   outputs:
     events: [task.done]
 `)
-	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "worker", "policy.yaml"), "{}\n")
-	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "worker", "agents.yaml"), "{}\n")
 	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "worker", "events.yaml"), "task.done: {}\n")
 	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "worker", "nodes.yaml"), `
 worker-listener:
@@ -881,8 +875,6 @@ pins:
   outputs:
     events: [task.done]
 `)
-	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
-	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), "{}\n")
 	producerEvents := "task.done: {}\n"
 	if extra := strings.TrimSpace(opts.ProducerExtraEvent); extra != "" {
 		producerEvents += extra + ": {}\n"
@@ -917,16 +909,16 @@ pins:
   outputs:
     events: [task.done]
 `)
-		writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(descendant, "policy.yaml"), "{}\n")
-		writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(descendant, "agents.yaml"), "{}\n")
 		writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(descendant, "events.yaml"), "task.done: {}\n")
-		writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(descendant, "nodes.yaml"), "{}\n")
 	}
 	return root
 }
 
 func writeBusImportBoundaryWildcardFixtureFile(t *testing.T, path, contents string) {
 	t.Helper()
+	if filepath.Base(path) == "nodes.yaml" && strings.TrimSpace(contents) == "{}" {
+		return
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("mkdir fixture dir: %v", err)
 	}

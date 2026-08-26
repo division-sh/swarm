@@ -28,14 +28,14 @@ func loadProjectContractView(contractsRoot string, paths ProjectPackagePaths, ma
 		Tools:     map[string]ToolSchemaEntry{},
 		Policy:    PolicyDocument{Values: map[string]PolicyValue{}},
 	}
-	if err := loadOptionalYAMLMap(paths.ProjectNodesFile, &view.Nodes); err != nil {
+	var err error
+	if view.Nodes, err = loadOptionalNodeDeclarations(paths.ProjectNodesFile); err != nil {
 		return view, err
 	}
-	var err error
 	if view.Events, err = loadOptionalEventCatalog(paths.ProjectEventsFile); err != nil {
 		return view, err
 	}
-	if err := loadOptionalYAMLMap(paths.ProjectAgentsFile, &view.Agents); err != nil {
+	if view.Agents, err = loadOptionalAgentDeclarations(paths.ProjectAgentsFile); err != nil {
 		return view, err
 	}
 	agents, err := normalizeAgentRegistryEntries(view.Agents, paths.ProjectAgentsFile)
@@ -54,10 +54,10 @@ func loadProjectContractView(contractsRoot string, paths ProjectPackagePaths, ma
 	if err != nil {
 		return view, err
 	}
-	if err := loadOptionalYAMLMap(paths.ProjectToolsFile, &view.Tools); err != nil {
+	if view.Tools, err = loadOptionalToolDeclarations(paths.ProjectToolsFile); err != nil {
 		return view, err
 	}
-	if err := loadOptionalYAMLMap(paths.ProjectPolicyFile, &view.Policy); err != nil {
+	if view.Policy, err = loadOptionalPolicyDeclarations(paths.ProjectPolicyFile); err != nil {
 		return view, err
 	}
 	return view, nil
@@ -77,14 +77,14 @@ func loadFlowContractView(contractsRoot string, paths FlowContractPaths, schema 
 		Children:  nil,
 		Parent:    nil,
 	}
-	if err := loadOptionalYAMLMap(paths.NodesFile, &view.Nodes); err != nil {
+	var err error
+	if view.Nodes, err = loadOptionalNodeDeclarations(paths.NodesFile); err != nil {
 		return view, err
 	}
-	var err error
 	if view.Events, err = loadOptionalEventCatalog(paths.EventsFile); err != nil {
 		return view, err
 	}
-	if err := loadOptionalYAMLMap(paths.AgentsFile, &view.Agents); err != nil {
+	if view.Agents, err = loadOptionalAgentDeclarations(paths.AgentsFile); err != nil {
 		return view, err
 	}
 	agents, err := normalizeAgentRegistryEntries(view.Agents, paths.AgentsFile)
@@ -103,10 +103,10 @@ func loadFlowContractView(contractsRoot string, paths FlowContractPaths, schema 
 	if err != nil {
 		return view, err
 	}
-	if err := loadOptionalYAMLMap(paths.ToolsFile, &view.Tools); err != nil {
+	if view.Tools, err = loadOptionalToolDeclarations(paths.ToolsFile); err != nil {
 		return view, err
 	}
-	if err := loadOptionalYAMLMap(paths.PolicyFile, &view.Policy); err != nil {
+	if view.Policy, err = loadOptionalPolicyDeclarations(paths.PolicyFile); err != nil {
 		return view, err
 	}
 	return view, nil

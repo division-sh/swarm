@@ -362,16 +362,10 @@ flows:
     mode: singleton
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: nested-project-agent-demand\n")
-	for _, file := range []string{"agents.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
-		writeBootverifyFixtureFile(t, filepath.Join(root, file), "{}\n")
-	}
 	for _, flowID := range []string{"alpha", "zeta"} {
 		flowDir := filepath.Join(root, "flows", flowID)
 		writeBootverifyFixtureFile(t, filepath.Join(flowDir, "schema.yaml"), "name: "+flowID+"\nmode: singleton\n")
 		writeBootverifyFixtureFile(t, filepath.Join(flowDir, "entities.yaml"), "coordinator_state:\n  verticals: map[text]text\n")
-		for _, file := range []string{"agents.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
-			writeBootverifyFixtureFile(t, filepath.Join(flowDir, file), "{}\n")
-		}
 	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "zeta", "package.yaml"), `
 name: zeta-package
@@ -698,11 +692,6 @@ flows:
     flow: coordinator
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: singleton-coordinator-fixture\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "coordinator", "schema.yaml"), strings.TrimSpace(flowSchema)+"\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "coordinator", "types.yaml"), singletonCoordinatorTypesYAML())
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "coordinator", "entities.yaml"), strings.TrimSpace(flowEntities)+"\n")

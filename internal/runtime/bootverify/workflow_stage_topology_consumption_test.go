@@ -22,9 +22,7 @@ flows:
     flow: support
     mode: static
 `)
-	for _, file := range []string{"schema.yaml", "policy.yaml", "tools.yaml", "agents.yaml", "events.yaml", "nodes.yaml"} {
-		writeBootverifyFixtureFile(t, filepath.Join(root, file), "{}\n")
-	}
+	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), `
 name: support
 stages:
@@ -36,9 +34,6 @@ stages:
   closed:
     terminal: true
 `)
-	for _, file := range []string{"entities.yaml", "policy.yaml", "tools.yaml", "agents.yaml", "events.yaml", "nodes.yaml"} {
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", file), "{}\n")
-	}
 	repoRoot := repoRootForBootverifyTest(t)
 	bundle := loadFixtureBundleAt(t, repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})

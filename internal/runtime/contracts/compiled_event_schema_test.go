@@ -199,8 +199,6 @@ source_scrape:
     properties:
       title: {type: string}
 `)
-	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 	if err != nil {
 		t.Fatalf("load generated/provider fixture: %v", err)
@@ -348,15 +346,9 @@ flows:
 `)
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: compiled-event-package\n")
 	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "root.start: {}\nroot.*: {}\n")
-	for _, name := range []string{"nodes.yaml", "agents.yaml", "tools.yaml", "policy.yaml"} {
-		writeFixtureFile(t, filepath.Join(root, name), "{}\n")
-	}
 
 	writeFixtureFile(t, filepath.Join(root, "child", "package.yaml"), "name: child\nversion: \"1.0.0\"\nflows: []\n")
 	writeFixtureFile(t, filepath.Join(root, "child", "events.yaml"), "child.ready:\n  id: string\n")
-	for _, name := range []string{"nodes.yaml", "agents.yaml", "tools.yaml", "policy.yaml"} {
-		writeFixtureFile(t, filepath.Join(root, "child", name), "{}\n")
-	}
 
 	flowRoot := filepath.Join(root, "flows", "orders")
 	writeFixtureFile(t, filepath.Join(flowRoot, "package.yaml"), "name: orders\nversion: \"1.0.0\"\npackages:\n  - path: child\nflows: []\n")
@@ -371,13 +363,7 @@ pins:
 `)
 	writeFixtureFile(t, filepath.Join(flowRoot, "events.yaml"), "root.start: {}\n")
 	writeFixtureFile(t, filepath.Join(flowRoot, "types.yaml"), "scalars:\n  OrderCode: text\n")
-	for _, name := range []string{"nodes.yaml", "agents.yaml", "tools.yaml", "policy.yaml"} {
-		writeFixtureFile(t, filepath.Join(flowRoot, name), "{}\n")
-	}
 	writeFixtureFile(t, filepath.Join(flowRoot, "child", "package.yaml"), "name: orders-child\nversion: \"1.0.0\"\nflows: []\n")
 	writeFixtureFile(t, filepath.Join(flowRoot, "child", "events.yaml"), "child.ready:\n  order_code: OrderCode\n")
-	for _, name := range []string{"nodes.yaml", "agents.yaml", "tools.yaml", "policy.yaml"} {
-		writeFixtureFile(t, filepath.Join(flowRoot, "child", name), "{}\n")
-	}
 	return root
 }

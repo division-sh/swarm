@@ -1069,6 +1069,28 @@ func TestOperatorBundleRegisterHandlersFailClosed(t *testing.T) {
 			Idempotency:      newRecordingAPIIdempotencyStore(),
 		}),
 	})
+	presentZero := `api_version: swarm.bundle.register.v1
+files:
+  - path: package.yaml
+    text: |
+      name: present-zero-registration
+      version: "1.0.0"
+      platform_version: ">=0.7.0 <0.8.0"
+      flows: []
+  - path: schema.yaml
+    text: |
+      name: present-zero-registration
+  - path: agents.yaml
+    text: |
+      {}
+`
+	rejected := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"present-zero","method":"bundle.register","params":{"content_yaml":%q,"idempotency_key":"present-zero"}}`, presentZero))
+	if rejected.Error == nil || rejected.Error.Code != codeInvalidParams || !strings.Contains(fmt.Sprint(rejected.Error.Data), "agents.yaml declares nothing") {
+		t.Fatalf("bundle.register present-zero error = %#v, want typed invalid params", rejected.Error)
+	}
+	if len(catalog.upserts) != 0 {
+		t.Fatalf("upserts after present-zero registration = %d, want 0", len(catalog.upserts))
+	}
 
 	unconsumed := rpcCall(t, handler, fmt.Sprintf(`{"jsonrpc":"2.0","id":"unconsumed","method":"bundle.register","params":{"content_yaml":%q,"data_blob":{"api_version":"swarm.bundle.data.v1","entries":[{"path":"flows/missing/data/unreferenced.bin","data_base64":"AQI="}]}}}`, testBundleRegistrationEnvelope()))
 	if unconsumed.Error == nil || unconsumed.Error.Code != codeInvalidParams {

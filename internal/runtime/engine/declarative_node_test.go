@@ -208,11 +208,6 @@ flows:
     mode: static
 `)
 	writeEngineFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: engine-import-boundary-wildcard\n")
-	writeEngineFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeEngineFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeEngineFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeEngineFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeEngineFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	writeEngineFixtureFile(t, filepath.Join(root, "flows", "worker", "package.yaml"), "name: worker\nversion: \"1.0.0\"\n")
 	writeEngineFixtureFile(t, filepath.Join(root, "flows", "worker", "schema.yaml"), `
 name: worker
@@ -224,8 +219,6 @@ pins:
   outputs:
     events: [task.done]
 `)
-	writeEngineFixtureFile(t, filepath.Join(root, "flows", "worker", "policy.yaml"), "{}\n")
-	writeEngineFixtureFile(t, filepath.Join(root, "flows", "worker", "agents.yaml"), "{}\n")
 	writeEngineFixtureFile(t, filepath.Join(root, "flows", "worker", "events.yaml"), "task.done: {}\n")
 	writeEngineFixtureFile(t, filepath.Join(root, "flows", "worker", "nodes.yaml"), `
 worker-listener:
@@ -247,10 +240,7 @@ pins:
   outputs:
     events: [task.done]
 `)
-	writeEngineFixtureFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
-	writeEngineFixtureFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), "{}\n")
 	writeEngineFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), "task.done: {}\n")
-	writeEngineFixtureFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), "{}\n")
 	return root
 }
 

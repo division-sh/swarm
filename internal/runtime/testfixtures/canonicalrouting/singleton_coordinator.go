@@ -382,7 +382,7 @@ func singletonCoordinatorFirstMapWriteYAML(operation, target, keyBlock, valueBlo
 func writeSingletonCoordinatorFile(t testing.TB, root, relativePath, contents string) {
 	t.Helper()
 	path := filepath.Join(root, filepath.FromSlash(relativePath))
-	if err := writeFixtureFile(path, strings.TrimLeft(contents, "\n")); err != nil {
+	if err := writeFixtureFile(t, path, strings.TrimLeft(contents, "\n")); err != nil {
 		t.Fatalf("write singleton coordinator pilot fixture %s: %v", path, err)
 	}
 }

@@ -231,9 +231,6 @@ packages:
   - {path: parent}
 `)
 	write(filepath.Join(root, "schema.yaml"), "name: nested-agent-route\n")
-	for _, name := range []string{"agents.yaml", "entities.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
-		write(filepath.Join(root, name), "{}\n")
-	}
 	write(filepath.Join(root, "parent", "package.yaml"), `
 name: parent
 version: "1.0.0"
@@ -267,9 +264,6 @@ worker:
   memory: false
   subscriptions: [work.requested]
 `)
-	for _, name := range []string{"nodes.yaml", "policy.yaml", "tools.yaml"} {
-		write(filepath.Join(flowRoot, name), "{}\n")
-	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
 		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
@@ -362,11 +356,6 @@ pins:
     events: [root.start]
 `)
 	write(filepath.Join(root, "events.yaml"), "root.start: {}\n")
-	write(filepath.Join(root, "entities.yaml"), "{}\n")
-	write(filepath.Join(root, "nodes.yaml"), "{}\n")
-	write(filepath.Join(root, "agents.yaml"), "{}\n")
-	write(filepath.Join(root, "tools.yaml"), "{}\n")
-	write(filepath.Join(root, "policy.yaml"), "{}\n")
 	write(filepath.Join(root, "flows", "orders", "package.yaml"), "name: orders\nversion: \"1.0.0\"\nflows: []\n")
 	write(filepath.Join(root, "flows", "orders", "schema.yaml"), `
 name: orders
@@ -379,8 +368,6 @@ pins:
     events: [root.start]
 `)
 	write(filepath.Join(root, "flows", "orders", "events.yaml"), "root.start: {}\naddon_a.start: {}\naddon_b.start: {}\n")
-	write(filepath.Join(root, "flows", "orders", "agents.yaml"), "{}\n")
-	write(filepath.Join(root, "flows", "orders", "policy.yaml"), "{}\n")
 	write(filepath.Join(root, "flows", "orders", "nodes.yaml"), `
 shared:
   id: shared

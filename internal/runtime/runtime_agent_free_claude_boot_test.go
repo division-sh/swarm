@@ -170,10 +170,6 @@ states:
 terminal_states:
   - idle
 `)
-	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeAgentFreeRuntimeFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

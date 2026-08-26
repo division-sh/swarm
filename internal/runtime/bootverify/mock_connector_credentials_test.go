@@ -372,9 +372,6 @@ flows:
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: scoped-alias-reachability\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "entities.yaml"), "item:\n  item_id: string\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 	writeScopedReachabilityAgentFile(t, filepath.Join(root, "agents.yaml"), "root-mock", "mocks/root-mock.py", false)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "mocks", "root-mock.py"), "def handle(input):\n    return {'text': 'mock'}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
@@ -410,8 +407,6 @@ root-node:
 	} {
 		dir := filepath.Join(root, "flows", flow.id)
 		writeBootverifyFixtureFile(t, filepath.Join(dir, "schema.yaml"), "name: "+flow.id+"\nmode: static\ninitial_state: active\nstates: [active]\n")
-		writeBootverifyFixtureFile(t, filepath.Join(dir, "events.yaml"), "{}\n")
-		writeBootverifyFixtureFile(t, filepath.Join(dir, "policy.yaml"), "{}\n")
 		module := filepath.ToSlash(filepath.Join("flows", flow.id, "mocks", "shared-worker.py"))
 		writeScopedReachabilityAgentFile(t, filepath.Join(dir, "agents.yaml"), "shared-worker", module, flow.live, scopedReachabilityNativeTools(includeInvalidNativeTools))
 		if !flow.live {

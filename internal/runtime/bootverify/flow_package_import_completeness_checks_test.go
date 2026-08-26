@@ -292,10 +292,6 @@ version: "1.0.0"
 	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: flow-import-completeness\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "provider:\n  threshold: 0.8\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	return root
 }
 
@@ -385,10 +381,6 @@ platform_version: ">=0.7.0 <0.8.0"
 flows:
 `+flows)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: flow-package-alias-validation\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), `
 parent.lead_captured: {}
 parent.lead_enriched: {}
@@ -431,11 +423,7 @@ version: "1.0.0"
 name: `+flowID+`
 mode: static
 `+schemaTail)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "agents.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "nodes.yaml"), "{}\n")
 	if outputEvent == "" {
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), "{}\n")
 		return
 	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), outputEvent+": {}\n")

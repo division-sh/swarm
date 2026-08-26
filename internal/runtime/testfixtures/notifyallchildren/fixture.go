@@ -276,6 +276,10 @@ func copyTree(t testing.TB, source, target string) {
 func replaceFile(t testing.TB, path, old, replacement string) {
 	t.Helper()
 	contents, err := os.ReadFile(path)
+	if os.IsNotExist(err) && strings.TrimSpace(old) == "{}" {
+		contents = []byte(old)
+		err = nil
+	}
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}

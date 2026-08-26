@@ -102,11 +102,7 @@ worker:
 
 func writeEmptyFlowDataContractFiles(t *testing.T, root string) {
 	t.Helper()
-	for _, name := range []string{"events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
-		writeFlowDataFixtureFile(t, filepath.Join(root, name), "{}\n")
-	}
 	if _, err := os.Stat(filepath.Join(root, "agents.yaml")); os.IsNotExist(err) {
-		writeFlowDataFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
 	}
 }
 

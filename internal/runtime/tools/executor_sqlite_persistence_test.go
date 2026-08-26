@@ -59,9 +59,7 @@ func TestEntityTools_SQLiteBackendNeutralEntityPersistence(t *testing.T) {
 		Role:          "operator",
 		Tools:         []string{"create_entity", "get_entity", "save_entity_field", "query_entities", "query_metrics", "search_entities"},
 	}
-	bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", `
-types: {}
-`, `
+	bundle := loadWave1EntityToolBundle(t, actor, "review", "accounts", "", `
 accounts:
   status: text
   score: numeric
@@ -178,7 +176,7 @@ func TestEntityTools_CreateEntityPersistsCanonicalEntityContractOnBothStores(t *
 	for _, backend := range []string{"sqlite", "postgres"} {
 		backend := backend
 		t.Run(backend, func(t *testing.T) {
-			bundle := loadWave1EntityToolBundle(t, actor, "review", "account_record", "types: {}\n", "account_record:\n  status: text\n")
+			bundle := loadWave1EntityToolBundle(t, actor, "review", "account_record", "", "account_record:\n  status: text\n")
 			var entityStore runtimetools.EntityPersistence
 			var query string
 			if backend == "sqlite" {
@@ -353,7 +351,7 @@ func TestAskHumanCreatesTypedCardAndContinuationForImportedAgentOnBothStores(t *
 				Role:          "worker", FlowID: "provider", FlowPath: flowPath, EntityID: uuid.NewString(),
 				Tools: []string{"ask_human"}, Permissions: []string{"ask_human"},
 			}
-			bundle := loadWave1EntityToolBundle(t, requester, "provider", "provider_record", "types: {}\n", "provider_record:\n  status: text\n")
+			bundle := loadWave1EntityToolBundle(t, requester, "provider", "provider_record", "", "provider_record:\n  status: text\n")
 			bundle.FlowTree.ByID["provider"].Path = flowPath
 			bundle.FlowTree.ByID["provider"].Paths.PackageKey = "provider-package"
 			source := semanticview.Wrap(bundle)

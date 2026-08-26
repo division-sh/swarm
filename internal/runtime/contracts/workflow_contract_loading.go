@@ -78,10 +78,11 @@ func loadWorkflowContractBundleForPaths(paths ContractPaths, options WorkflowCon
 			}
 			bundle.RootSchema = &rootSchema
 		}
-		if err := loadOptionalYAMLMap(paths.RootTypesFile, &bundle.RootTypes); err != nil {
+		var err error
+		if bundle.RootTypes, err = loadOptionalTypeDeclarations(paths.RootTypesFile); err != nil {
 			return nil, err
 		}
-		if err := loadOptionalYAMLMap(paths.RootEntitiesFile, &bundle.RootEntities); err != nil {
+		if bundle.RootEntities, err = loadOptionalEntityDeclarations(paths.RootEntitiesFile); err != nil {
 			return nil, err
 		}
 		for i, pkgPaths := range paths.ProjectPackages {
@@ -125,15 +126,15 @@ func loadWorkflowContractBundleForPaths(paths ContractPaths, options WorkflowCon
 			}
 			schema.Mode = effectiveMode
 			bundle.FlowSchemas[flow.ID] = schema
-			var flowTypes TypeCatalogDocument
-			if err := loadOptionalYAMLMap(flow.TypesFile, &flowTypes); err != nil {
+			flowTypes, err := loadOptionalTypeDeclarations(flow.TypesFile)
+			if err != nil {
 				return nil, err
 			}
 			if len(flowTypes.Scalars) > 0 || len(flowTypes.Enums) > 0 || len(flowTypes.Types) > 0 {
 				bundle.flowTypes[flow.ID] = flowTypes
 			}
-			var flowEntities EntityContractsDocument
-			if err := loadOptionalYAMLMap(flow.EntitiesFile, &flowEntities); err != nil {
+			flowEntities, err := loadOptionalEntityDeclarations(flow.EntitiesFile)
+			if err != nil {
 				return nil, err
 			}
 			if len(flowEntities) > 0 {

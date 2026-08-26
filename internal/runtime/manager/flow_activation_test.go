@@ -1405,9 +1405,6 @@ func admitFlowActivationEntityContracts(
 	}
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "package.yaml"), fmt.Sprintf("name: flow-activation-test\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n%s", packageFlows.String()))
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: flow-activation-test\n")
-	for _, file := range []string{"agents.yaml", "entities.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml", "types.yaml"} {
-		writeFlowActivationFixtureFile(t, filepath.Join(root, file), "{}\n")
-	}
 	repoRoot := runtimepipeline.WorkflowRepoRoot()
 	admitted, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
@@ -4210,8 +4207,6 @@ flows:
     mode: static
 `)
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: root-and-flow-static-agents\n")
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), "task.assigned: {}\ntask.completed: {}\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "agents.yaml"), `
 test-agent:
@@ -4229,7 +4224,6 @@ version: "1.0.0"
 flows: []
 `)
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "ops-flow", "schema.yaml"), "name: ops-flow\n")
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "ops-flow", "policy.yaml"), "{}\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "ops-flow", "events.yaml"), "work.requested: {}\nwork.completed: {}\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "ops-flow", "agents.yaml"), `
 operator:
@@ -4265,9 +4259,6 @@ item:
   item_id: string
 `)
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), `
 item.created:
   entity_id: string
@@ -4299,7 +4290,6 @@ states:
   - waiting
   - done
 `)
-	writeFlowActivationFixtureFile(t, filepath.Join(flowRoot, "policy.yaml"), "{}\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(flowRoot, "events.yaml"), `
 support/item.created:
   entity_id: string
@@ -4348,9 +4338,6 @@ item:
   item_id: string
 `)
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: session-scope-validation\n")
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), `
 item.created:
   entity_id: string
@@ -4362,7 +4349,6 @@ states:
   - waiting
   - done
 `)
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "support", "policy.yaml"), "{}\n")
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
 support/item.created:
   entity_id: string
@@ -4622,15 +4608,9 @@ flows:
     mode: template
 `)
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: agent-defaults-materialization\n")
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeFlowActivationFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 
 	for _, flowID := range []string{"static_support", "template_support"} {
 		writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), "name: "+flowID+"\n")
-		writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", flowID, "policy.yaml"), "{}\n")
-		writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", flowID, "tools.yaml"), "{}\n")
 		writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), flowID+".requested:\n  entity_id: string\n")
 	}
 	writeFlowActivationFixtureFile(t, filepath.Join(root, "flows", "static_support", "agents.yaml"), `

@@ -344,9 +344,6 @@ pins:
     events:
       - flow.started
 `)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
 	writeRunCompletionFixtureFile(t, filepath.Join(root, "events.yaml"), `
 {}
 `)
@@ -405,10 +402,25 @@ func runCompletionRepoRoot(t *testing.T) string {
 
 func writeRunCompletionFixtureFile(t *testing.T, path, contents string) {
 	t.Helper()
+	if isRunCompletionOptionalDeclarationFixture(path) && strings.TrimSpace(contents) == "{}" {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			t.Fatalf("remove omitted optional declaration fixture %s: %v", path, err)
+		}
+		return
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
 	}
 	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func isRunCompletionOptionalDeclarationFixture(path string) bool {
+	switch filepath.Base(path) {
+	case "agents.yaml", "entities.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml", "types.yaml":
+		return true
+	default:
+		return false
 	}
 }

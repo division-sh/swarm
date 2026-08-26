@@ -410,6 +410,9 @@ func loadProducerRoutingRetirementLedger(t testing.TB) producerRoutingRetirement
 func readProducerRoutingProofYAML(t testing.TB, path string, out ...any) map[string]any {
 	t.Helper()
 	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) && isOptionalProducerRoutingProofFile(path) {
+		return map[string]any{}
+	}
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
@@ -480,6 +483,9 @@ func outputPinSinksInYAML(document map[string]any) map[string]string {
 func hasRetiredProducerRoutingFile(t testing.TB, path string) bool {
 	t.Helper()
 	raw, err := os.ReadFile(path)
+	if os.IsNotExist(err) && isOptionalProducerRoutingProofFile(path) {
+		return false
+	}
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
@@ -488,6 +494,15 @@ func hasRetiredProducerRoutingFile(t testing.TB, path string) bool {
 		t.Fatalf("scan %s: %v", path, err)
 	}
 	return retired
+}
+
+func isOptionalProducerRoutingProofFile(path string) bool {
+	switch filepath.Base(path) {
+	case "agents.yaml", "entities.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml", "types.yaml":
+		return true
+	default:
+		return false
+	}
 }
 
 func repositoryTestEntrypoints(t testing.TB, repoRoot string) map[string]struct{} {

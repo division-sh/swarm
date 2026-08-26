@@ -1123,7 +1123,10 @@ func writeGeneratedTelegramScenarioFixture(t *testing.T, providerURL string) str
 		"flows/telegram-chat/events.yaml",
 		"flows/telegram-chat/tools.yaml",
 	} {
-		writeWorkflowValidationFixtureFile(t, filepath.Join(root, filepath.FromSlash(name)), "{}\n")
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			t.Fatalf("omit generated Telegram declaration file %s: %v", path, err)
+		}
 	}
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "telegram-chat", "nodes.yaml"), `
 telegram-input-observer:

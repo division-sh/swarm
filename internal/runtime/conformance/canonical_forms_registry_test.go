@@ -108,7 +108,7 @@ func TestCanonicalFormsRegistryOwnsCompleteDecoderInventory(t *testing.T) {
 	if record.Kind != "canonical_forms_registry" || record.RegistryVersion != 1 {
 		t.Fatalf("registry identity = %q/v%d", record.Kind, record.RegistryVersion)
 	}
-	if got, want := len(record.Rows), 50; got != want {
+	if got, want := len(record.Rows), 51; got != want {
 		t.Fatalf("registry rows = %d, want %d", got, want)
 	}
 

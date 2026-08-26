@@ -446,11 +446,9 @@ platform_version: ">=0.7.0 <0.8.0"
 flows: []
 `)
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: field-reconciliation\n"+schemaExtra)
-	writeFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), nodes)
+	if strings.TrimSpace(nodes) != "" {
+		writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), nodes)
+	}
 }
 
 func TestAgentRegistryEntryRejectsRetiredModelTierField(t *testing.T) {
@@ -836,7 +834,7 @@ func criteriaValidationTestSet() PolicyCriteriaSet {
 func TestLoadWorkflowContractBundleRejectsLayer2AgentDefaultsBlock(t *testing.T) {
 	repoRoot := contractRepoRoot(t)
 	root := t.TempDir()
-	writeFieldReconciliationBundle(t, root, "", "{}\n")
+	writeFieldReconciliationBundle(t, root, "", "")
 	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), `
 agent_defaults:
   model: regular
@@ -1005,10 +1003,6 @@ flows:
     flow: flow-b
 `)
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: wildcard-owner-test\n")
-	writeFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	writeFixtureFile(t, filepath.Join(root, "flows", "flow-a", "package.yaml"), "name: flow-a\n")
 	writeFixtureFile(t, filepath.Join(root, "flows", "flow-a", "schema.yaml"), `
 name: flow-a
@@ -1019,8 +1013,6 @@ pins:
   outputs:
     events: [task.done]
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "flow-a", "policy.yaml"), "{}\n")
-	writeFixtureFile(t, filepath.Join(root, "flows", "flow-a", "agents.yaml"), "{}\n")
 	writeFixtureFile(t, filepath.Join(root, "flows", "flow-a", "events.yaml"), `
 task.done:
   entity_id: string
@@ -1044,8 +1036,6 @@ pins:
   outputs:
     events: [task.done]
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "flow-b", "policy.yaml"), "{}\n")
-	writeFixtureFile(t, filepath.Join(root, "flows", "flow-b", "agents.yaml"), "{}\n")
 	writeFixtureFile(t, filepath.Join(root, "flows", "flow-b", "events.yaml"), `
 task.done:
   entity_id: string

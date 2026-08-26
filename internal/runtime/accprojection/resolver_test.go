@@ -178,11 +178,6 @@ flows:
     mode: static
 `)
 	writeProjectionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: projection-flow\n")
-	writeProjectionFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeProjectionFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeProjectionFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeProjectionFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeProjectionFixtureFile(t, filepath.Join(root, "entities.yaml"), "{}\n")
 	writeProjectionFixtureFile(t, filepath.Join(root, "flows", "scoring", "schema.yaml"), `
 name: scoring
 initial_state: discovered
@@ -254,12 +249,6 @@ flows:
     mode: static
 `)
 	writeProjectionFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: projection-import-boundary-wildcard\n")
-	writeProjectionFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeProjectionFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeProjectionFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeProjectionFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeProjectionFixtureFile(t, filepath.Join(root, "entities.yaml"), "{}\n")
-	writeProjectionFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	writeProjectionFixtureFile(t, filepath.Join(root, "flows", "worker", "package.yaml"), "name: worker\nversion: \"1.0.0\"\n")
 	writeProjectionFixtureFile(t, filepath.Join(root, "flows", "worker", "schema.yaml"), `
 name: worker
@@ -271,8 +260,6 @@ pins:
   outputs:
     events: [task.done]
 `)
-	writeProjectionFixtureFile(t, filepath.Join(root, "flows", "worker", "policy.yaml"), "{}\n")
-	writeProjectionFixtureFile(t, filepath.Join(root, "flows", "worker", "agents.yaml"), "{}\n")
 	writeProjectionFixtureFile(t, filepath.Join(root, "flows", "worker", "events.yaml"), `
 task.done:
   task_id: text
@@ -301,13 +288,10 @@ pins:
   outputs:
     events: [task.done]
 `)
-	writeProjectionFixtureFile(t, filepath.Join(root, "flows", "producer", "policy.yaml"), "{}\n")
-	writeProjectionFixtureFile(t, filepath.Join(root, "flows", "producer", "agents.yaml"), "{}\n")
 	writeProjectionFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), `
 task.done:
   task_id: text
 `)
-	writeProjectionFixtureFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), "{}\n")
 
 	repoRoot := repoRootForProjectionTest(t)
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))

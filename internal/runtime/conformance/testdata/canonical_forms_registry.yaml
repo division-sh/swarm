@@ -70,6 +70,20 @@ corpus:
   validation_packages: [internal/runtime/contracts, internal/runtime/flowmodel, internal/runtime/agentintent, internal/packs, internal/packartifact]
 
 rows:
+  - id: workflow.optional_declaration_file_liveness
+    ruled: issue-2318
+    paths: "agents.yaml, entities.yaml, events.yaml, nodes.yaml, policy.yaml, tools.yaml, types.yaml at every project, imported-package, and flow scope"
+    owners: [admitOptionalDeclarationFile, optionalDeclarationAdmission.RequireLive, admitEventCatalogDocument]
+    information:
+      fact: [file presence and admitted typed declarations]
+      derived_projection: [missing file means zero declarations]
+    spelling:
+      canonical: "omit an optional declaration file when its admitted declaration count is zero"
+      retired_duplicates: [present empty mapping, present null, present empty or comment-only document, present empty typed containers]
+      distinct_overrides: [empty nested mappings admitted by a live declaration's typed grammar]
+    presence: {missing: admitted_as_zero, present_zero: reject, present_nonzero: typed_admission}
+    corpus: {present_zero_before: 514, present_zero_after: 0}
+
   - id: package.metadata
     ruled: mechanical-ratified
     paths: "package.name, package.version, package.platform_version, package.author, package.description, package.keywords, package.license, package.repository, package.extra"

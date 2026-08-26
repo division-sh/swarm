@@ -465,10 +465,6 @@ item:
   item_id: string
 `)
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: cross-flow-localization\n")
-	writeFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 
 	writeFixtureFile(t, filepath.Join(root, "flows", "scoring", "schema.yaml"), `
 name: scoring
@@ -482,7 +478,6 @@ pins:
     events:
       - vertical.shortlisted
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "scoring", "policy.yaml"), "{}\n")
 	writeFixtureFile(t, filepath.Join(root, "flows", "scoring", "events.yaml"), `
 vertical.shortlisted:
   entity_id: string
@@ -513,7 +508,6 @@ pins:
     events:
       - validation.started
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "validation", "policy.yaml"), "{}\n")
 	writeFixtureFile(t, filepath.Join(root, "flows", "validation", "events.yaml"), `
 validation.started:
   entity_id: string
@@ -567,10 +561,6 @@ item:
   item_id: string
 `)
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: cross-flow-on-success\n")
-	writeFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 
 	writeFixtureFile(t, filepath.Join(root, "flows", "scoring", "schema.yaml"), `
 name: scoring
@@ -584,7 +574,6 @@ pins:
     events:
       - vertical.shortlisted
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "scoring", "policy.yaml"), "{}\n")
 	writeFixtureFile(t, filepath.Join(root, "flows", "scoring", "events.yaml"), `
 vertical.shortlisted:
   entity_id: string
@@ -616,7 +605,6 @@ pins:
       - validation.rule
       - validation.started
 `)
-	writeFixtureFile(t, filepath.Join(root, "flows", "validation", "policy.yaml"), "{}\n")
 	writeFixtureFile(t, filepath.Join(root, "flows", "validation", "events.yaml"), `
 validation.rule:
   entity_id: string
@@ -701,8 +689,6 @@ pins:
     events:
       - evidence.recorded
 `)
-	writeFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 	writeFixtureFile(t, filepath.Join(root, "agents.yaml"), `
 control-plane:
   id: control-plane

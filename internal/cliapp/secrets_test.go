@@ -336,7 +336,6 @@ version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: secrets-command-fixture\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), `
 email_api:
   description: Send email through a provider.
@@ -350,9 +349,6 @@ email_api:
   credentials:
     - sendgrid_api_key
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 	return root
 }
 
@@ -365,8 +361,6 @@ version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: provider-secrets-command-fixture\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "agents.yaml"), `
 provider-agent:
   id: provider-agent
@@ -375,8 +369,6 @@ provider-agent:
   model: regular
 `)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "prompts", "provider-agent.md"), "Handle provider-backed work.\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 	return root
 }
 

@@ -631,7 +631,7 @@ func firstTestValue(values ...string) string {
 
 func writeBootverifyFixtureFile(t testing.TB, path, contents string) {
 	t.Helper()
-	if err := writeFixtureFile(path, strings.TrimLeft(contents, "\n")); err != nil {
+	if err := writeFixtureFile(t, path, strings.TrimLeft(contents, "\n")); err != nil {
 		t.Fatalf("write composition fixture %s: %v", path, err)
 	}
 }

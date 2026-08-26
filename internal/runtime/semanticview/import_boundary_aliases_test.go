@@ -151,9 +151,6 @@ platform_version: ">=0.7.0 <0.8.0"
 flows:
 `+flows)
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: import-boundary-alias\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "events.yaml"), `
 parent.lead_captured: {}
 parent.lead_enriched: {}
@@ -204,10 +201,7 @@ requires:
 name: `+flowID+`
 mode: static
 `+schemaTail)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", flowID, "policy.yaml"), "{}\n")
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", flowID, "agents.yaml"), "{}\n")
 	if outputEvent == "" {
-		writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), "{}\n")
 		return
 	}
 	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), outputEvent+": {}\n")

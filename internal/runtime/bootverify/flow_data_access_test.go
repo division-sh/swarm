@@ -118,11 +118,7 @@ flows:
     mode: static
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: flow-data-access\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), "name: support\nmode: static\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), "{}\n")
 	for name, content := range files {
 		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "data", filepath.FromSlash(name)), content)
 	}
@@ -130,10 +126,8 @@ flows:
 	accessYAML := flowDataAccessYAML(access)
 	if rootAgent {
 		writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "root-agent:\n  id: root-agent\n  role: root_agent\n  intent: {inline: 'Exercise root flow data access.'}\n  memory: false\n"+accessYAML)
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), "{}\n")
 		return root
 	}
-	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), "factory-cto:\n  id: factory-cto\n  role: factory_cto\n  intent: {inline: 'Exercise flow data access.'}\n  memory: false\n"+accessYAML)
 	return root
 }
@@ -149,9 +143,6 @@ packages:
   - {path: parent}
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: nested-flow-data-access\n")
-	for _, name := range []string{"agents.yaml", "events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
-		writeBootverifyFixtureFile(t, filepath.Join(root, name), "{}\n")
-	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "parent", "package.yaml"), `
 name: parent
 version: "1.0.0"
@@ -175,9 +166,6 @@ worker:
   memory: false
   flow_data_access: [missing.md]
 `)
-	for _, name := range []string{"events.yaml", "nodes.yaml", "policy.yaml", "tools.yaml"} {
-		writeBootverifyFixtureFile(t, filepath.Join(flowRoot, name), "{}\n")
-	}
 	writeBootverifyFixtureFile(t, filepath.Join(flowRoot, "data", "placeholder.md"), "placeholder\n")
 	return root
 }

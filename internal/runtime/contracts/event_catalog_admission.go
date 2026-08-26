@@ -39,21 +39,15 @@ var eventCatalogMetadataFields = map[string]struct{}{
 }
 
 func loadOptionalEventCatalog(path string) (map[string]EventCatalogEntry, error) {
-	if strings.TrimSpace(path) == "" {
-		return map[string]EventCatalogEntry{}, nil
+	admission, present, err := admitOptionalDeclarationFile(path, optionalDeclarationEvents)
+	if err != nil || !present {
+		return map[string]EventCatalogEntry{}, err
 	}
-	source, err := yamlsource.LoadFile(path)
-	if err != nil {
-		if cause, ok := yamlsource.ParseCause(err); ok {
-			return nil, wrapLoaderDiagnosticFile(cause, path)
-		}
-		return nil, fmt.Errorf("read %s: %w", path, err)
-	}
-	entries, err := admitEventCatalogDocument(source.Document(path))
+	entries, err := admitEventCatalogDocument(admission.document)
 	if err != nil {
 		return nil, wrapLoaderDiagnosticFile(err, path)
 	}
-	return entries, nil
+	return entries, admission.RequireLive(len(entries))
 }
 
 func admitEventCatalogDocument(document yamlsource.Document) (map[string]EventCatalogEntry, error) {

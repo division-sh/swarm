@@ -1526,10 +1526,6 @@ states:
 terminal_states:
   - idle
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 	return root
 }
 
@@ -1655,7 +1651,6 @@ connector_packs:
       tool: slack.post_message
 flows: []
 `)
-	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
 	return root
 }
 

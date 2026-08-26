@@ -177,8 +177,7 @@ vocabulary:
     description: A self-contained building block with input/output pins (events and data), system nodes that orchestrate state
       transitions, and required agent roles. The marketplace unit. Analogous to an IC chip in circuit design.
     required_files:
-    - nodes.yaml
-    - events.yaml
+    - package.yaml
     - schema.yaml
   flow_identity:
     description: 'A flow has two distinct identity concepts that are NOT interchangeable.'
@@ -283,7 +282,13 @@ contract_formats:
       closed. Multi-document streams fail closed. An authored empty mapping is
       written explicitly as {}. File omission remains governed by
       contract_formats.minimum_flow_package and is not equivalent to a present
-      empty document.
+      empty document. After syntax admission, each present optional workflow
+      declaration file (nodes.yaml, events.yaml, entities.yaml, types.yaml,
+      agents.yaml, tools.yaml, or policy.yaml) MUST contribute at least one
+      declaration according to that file's typed grammar. Missing files mean
+      zero declarations; present files that admit zero declarations fail closed
+      and MUST be deleted. Empty nested mappings inside a live declaration remain
+      governed by the declaration's typed grammar and are not file emptiness.
     lexical_ownership: |
       The process acquires authoritative YAML lexical state through one
       content-addressed immutable owner keyed by SHA-256 of copied source bytes,
@@ -376,8 +381,9 @@ contract_formats:
     - policy.yaml
     optional_directories:
     - flows/
-    rule: A flow with no handlers needs no nodes.yaml. A flow with no events needs no events.yaml. Agent intent files have
-      no reserved directory or filename; only an explicit local `intent:` path gives a file intent semantics.
+    rule: A flow with no handlers needs no nodes.yaml. A flow with no events needs no events.yaml. Every present optional
+      declaration file MUST admit at least one declaration; authors express zero declarations by omitting the file. Agent
+      intent files have no reserved directory or filename; only an explicit local `intent:` path gives a file intent semantics.
   flow_schema:
     description: Canonical `schema.yaml` flow declaration surface for lifecycle stage-node and pin declarations.
     owner_file: contracts/flows/<flow>/schema.yaml
@@ -11768,13 +11774,16 @@ flow_model:
     - '#1538 does not close the #1537 parent.'
   flow_package:
     description: A flow is a directory with a standard file set. package.yaml is the manifest — it declares identity, child
-      flows, and handoffs. All other files are optional depending on what the flow does.
+      flows, and handoffs. schema.yaml remains required. The declaration files are optional depending on what the flow does;
+      when present, each MUST contribute at least one typed declaration and MUST NOT be an empty placeholder.
     files:
       package.yaml: Flow manifest (required)
       schema.yaml: Pins and states. required_agents is optional; omission infers same-scope implementation-local agents,
         while presence declares an explicit interface boundary.
       agents.yaml: Agent definitions (required if flow has agents)
       events.yaml: Event schemas (optional — flow may only compose children)
+      entities.yaml: Entity contracts (optional)
+      types.yaml: Named types, enums, and scalar aliases (optional)
       nodes.yaml: System nodes with handlers (optional)
       tools.yaml: Flow-specific tools (optional — inherits root)
       policy.yaml: Flow-specific config (optional — inherits root)

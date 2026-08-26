@@ -25,9 +25,6 @@ workspace_classes:
   dedicated:
     workspace_scope: per-agent
 `)
-	for _, file := range []string{"agents.yaml", "events.yaml", "nodes.yaml", "tools.yaml"} {
-		writeBootverifyFixtureFile(t, filepath.Join(root, file), "{}\n")
-	}
 	for _, project := range []string{"project-a", "project-b"} {
 		dir := filepath.Join(root, "packages", project)
 		writeBootverifyFixtureFile(t, filepath.Join(dir, "package.yaml"), "name: "+project+"\nversion: \"1.0.0\"\nflows: []\n")
@@ -40,7 +37,6 @@ shared-worker:
     inline: Validate workspace-class ownership for this scoped worker.
   workspace_class: missing
 `)
-		writeBootverifyFixtureFile(t, filepath.Join(dir, "nodes.yaml"), "{}\n")
 	}
 
 	repoRoot := repoRootForBootverifyTest(t)

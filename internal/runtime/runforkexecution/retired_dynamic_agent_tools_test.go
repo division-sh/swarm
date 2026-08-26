@@ -69,9 +69,6 @@ platform_version: ">=0.7.0 <0.8.0"
 flows: []
 `)
 	writeSelectedContractFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: selected-retired-tool\n")
-	writeSelectedContractFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeSelectedContractFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeSelectedContractFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	writeSelectedContractFixtureFile(t, filepath.Join(root, "agents.yaml"), `worker:
   id: worker
   role: worker

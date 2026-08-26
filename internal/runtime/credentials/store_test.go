@@ -159,10 +159,6 @@ flows:
         provider_key: tenant_beta_key
 `)
 	writeCredentialsFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: credential-binding\n")
-	writeCredentialsFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeCredentialsFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeCredentialsFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeCredentialsFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
 	for _, flowID := range []string{"alpha", "beta"} {
 		writeCredentialsFixtureFile(t, filepath.Join(root, "flows", flowID, "package.yaml"), `
 name: worker-package
@@ -171,7 +167,6 @@ requires:
   credentials: [provider_key]
 `)
 		writeCredentialsFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), "name: "+flowID+"\nmode: static\n")
-		writeCredentialsFixtureFile(t, filepath.Join(root, "flows", flowID, "policy.yaml"), "{}\n")
 		writeCredentialsFixtureFile(t, filepath.Join(root, "flows", flowID, "tools.yaml"), `
 call_provider:
   handler_type: http
@@ -180,8 +175,6 @@ call_provider:
     method: GET
     url: https://provider.example.test
 `)
-		writeCredentialsFixtureFile(t, filepath.Join(root, "flows", flowID, "agents.yaml"), "{}\n")
-		writeCredentialsFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), "{}\n")
 	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
@@ -225,11 +218,6 @@ flows:
         provider_key: tenant_provider_key
 `)
 	writeCredentialsFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: native-web-search-credential-binding\n")
-	writeCredentialsFixtureFile(t, filepath.Join(root, "policy.yaml"), "{}\n")
-	writeCredentialsFixtureFile(t, filepath.Join(root, "tools.yaml"), "{}\n")
-	writeCredentialsFixtureFile(t, filepath.Join(root, "agents.yaml"), "{}\n")
-	writeCredentialsFixtureFile(t, filepath.Join(root, "events.yaml"), "{}\n")
-	writeCredentialsFixtureFile(t, filepath.Join(root, "nodes.yaml"), "{}\n")
 	writeCredentialsFixtureFile(t, filepath.Join(root, "flows", "worker", "package.yaml"), `
 name: worker-package
 version: "1.0.0"
@@ -242,7 +230,6 @@ web_search_provider:
   provider: brave
   credentials_key: provider_key
 `)
-	writeCredentialsFixtureFile(t, filepath.Join(root, "flows", "worker", "tools.yaml"), "{}\n")
 	writeCredentialsFixtureFile(t, filepath.Join(root, "flows", "worker", "agents.yaml"), `
 worker-agent:
   id: worker-agent
@@ -252,7 +239,6 @@ worker-agent:
   native_tools:
     web_search: true
 `)
-	writeCredentialsFixtureFile(t, filepath.Join(root, "flows", "worker", "events.yaml"), "{}\n")
 
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
