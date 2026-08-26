@@ -307,7 +307,13 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 			return channelOnboardingResult{}, returnCLIValidationError(errOut, fmt.Errorf("channel onboarding ended in %s: %s", result.Operation.Phase, result.Operation.FailureMessage))
 		}
 		if identity := result.IdentityOperation; identity != nil {
-			if identity.State == "awaiting_claim" {
+			now := time.Now()
+			if opts.apiOptions.now != nil {
+				now = opts.apiOptions.now()
+			}
+			overdue := !identity.ExpiresAt.IsZero() && !identity.ExpiresAt.After(now) &&
+				(identity.State == "awaiting_claim" || identity.State == "awaiting_confirmation")
+			if !overdue && identity.State == "awaiting_claim" {
 				if !identityAnnounced {
 					fmt.Fprintf(progressOut, "Send this exact code through the live %s channel before %s:\n\n  %s\n\nWaiting for an authenticated claimant...\n", result.Operation.Provider, identity.ExpiresAt.Local().Format(time.RFC3339), identity.Challenge)
 					identityAnnounced = true
@@ -319,7 +325,7 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 				}
 				continue
 			}
-			if identity.State == "awaiting_confirmation" {
+			if !overdue && identity.State == "awaiting_confirmation" {
 				fmt.Fprintf(progressOut, "Claimed by %s in a %s conversation.\n", identity.AccountPresentation, identity.ConversationScope)
 				approve := opts.yes
 				var err error
@@ -334,7 +340,14 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 					return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
 				}
 				if !approve {
-					return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("channel claimant was rejected; onboarding remains incomplete"))
+					var settled channelOnboardingResult
+					if err := client.call(ctx, "channel.onboarding_retry", map[string]any{"operation_id": result.Operation.OperationID}, &settled); err != nil {
+						return channelOnboardingResult{}, returnCLIAPIError(errOut, err, channelErrorClassifier())
+					}
+					if settled.Operation.Phase != "failed" && settled.Operation.Phase != "retired" {
+						return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("channel claimant was rejected but onboarding responsibility did not settle"))
+					}
+					return channelOnboardingResult{}, returnCLIValidationError(errOut, errors.New("channel claimant was rejected; onboarding failed and its slot was released"))
 				}
 			}
 		}

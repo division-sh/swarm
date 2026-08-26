@@ -9901,9 +9901,9 @@ tool_model:
         pending or failed proof responsibility blocks every new same-interface connect, reconnect, or rebind regardless
         of whether the new operation would save a proof; replaying the original confirmation is the recovery path.
         Unbind remains available and atomically marks every same-interface unresolved responsibility revoked before its
-        fence commits, so no later boot can recover it against the fence. An expired awaiting-confirmation operation
-        commits its
-        expired terminal revision before returning CHANNEL_OPERATION_TERMINAL. Rejection returns the terminal operation
+        fence commits, so no later boot can recover it against the fence. The selected-store identity owner
+        revision-fences and durably expires an overdue awaiting-claim or awaiting-confirmation operation when its parent
+        responsibility is driven or recovered. An expired confirmation returns CHANNEL_OPERATION_TERMINAL. Rejection returns the terminal operation
         without an invented empty binding. Optional operation timestamps and inapplicable binding fields are absent from
         API results rather than serialized as year-one timestamps or empty enum values.
       challenge_storage_rationale: >
@@ -9982,11 +9982,13 @@ tool_model:
         replay returns that operation, changed input conflicts, and a second same-slot operation conflicts. Client
         cancellation stops response narration only; admitted work continues or is recovered from its persisted phase.
         connect requires absent identity and activation, reconnect preserves current account/conversation identity while
-        repairing deployment activation, and rebind requires a new authenticated identity ceremony. connect --replace,
-        A public resume command consumes one exact durable operation ID and continues that responsibility; a client wait
+        repairing deployment activation, and rebind requires a new authenticated identity ceremony. A public resume
+        command consumes one exact durable operation ID and continues that responsibility; a client wait
         timeout must name that command and cannot imply that a new connect replaces the pending operation. Expired or
         rejected identity ceremony and permanently unavailable activation prerequisites commit a named failed operation,
-        release operation-owned credentials, and refresh activation authority before returning. connect --replace,
+        release operation-owned credentials, and refresh activation authority before returning. Operator rejection drives
+        the parent responsibility once before the CLI returns, so the exact slot and owned credentials are settled.
+        connect --replace,
         implicit verb switching, --force, aliases, and lower identity RPCs as a second whole-journey API are unsupported.
       credential_rule: >
         Provider secret material enters only through the authenticated onboarding API from hidden TTY or stdin. Secret
@@ -10049,10 +10051,14 @@ tool_model:
         standing-target configuration, supplies the webhook signing credential identity used by the registration/readiness
         join; missing or contradictory activation provenance fails closed. Session posture instead joins exact service
         fulfillment and live send health. Any loss,
-        rotation, replacement, reset, revocation, expiry, or supersession removes READY immediately. Proofless current
-        bindings are valid without invented proof evidence, but cannot remint identity after selected-store reset.
+        rotation, replacement, reset, revocation, expiry, or supersession removes READY immediately. Channel list/readiness
+        pairs a current activation only with the exact onboarding operation named by that activation; a newer failed
+        reconnect or rebind attempt cannot replace the activation-owning operation in readiness projection. Proofless
+        current bindings are valid without invented proof evidence, but cannot remint identity after selected-store reset.
       reset_and_recovery_rule: >
-        Startup resumes every nonterminal operation and teardown without replaying settled writes or effects. Selected-store
+        Startup resumes every nonterminal operation and teardown in every serve posture, independently of whether public
+        ingress is enabled, without replaying settled writes or effects. Webhook activation still fails terminally at its
+        ingress admission boundary when no public exposure owner exists. Selected-store
         reset removes learned activation and operation facts. A surviving machine proof may restore identity only; it cannot
         infer target, credential, registration, executable activation, confirmation, or READY. Readback must teach exactly
         that activation was lost and require swarm channel reconnect <provider>. Readback preserves independently retained

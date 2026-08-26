@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestExpiredIdentityTerminalizesOnboardingAndReleasesWrittenCredentials(t *testing.T) {
+func TestOverdueIdentityTerminalizesOnboardingAndReleasesWrittenCredentials(t *testing.T) {
 	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 	candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
 	catalog, err := NewCandidateCatalog([]Candidate{candidate})
@@ -42,7 +42,9 @@ func TestExpiredIdentityTerminalizesOnboardingAndReleasesWrittenCredentials(t *t
 	}
 	op.SlotKey = StartRequest{Provider: op.Provider, Interface: op.Interface, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector}.SlotKey()
 	store := &cancellationTestStore{op: op}
-	identities := &cancellationTestIdentities{operation: operatorchannel.Operation{OperationID: identityOperationID, State: operatorchannel.StateExpired}}
+	identities := &cancellationTestIdentities{operation: operatorchannel.Operation{
+		OperationID: identityOperationID, State: operatorchannel.StateAwaitingClaim, Revision: 1, ExpiresAt: now.Add(-time.Second),
+	}}
 	activations := &cancellationTestActivations{}
 	service, err := NewService(ServiceOptions{
 		Store: store, Identities: identities, Credentials: credentials,
@@ -64,6 +66,123 @@ func TestExpiredIdentityTerminalizesOnboardingAndReleasesWrittenCredentials(t *t
 	}
 	if activations.refreshes != 1 {
 		t.Fatalf("activation refreshes = %d, want 1", activations.refreshes)
+	}
+	if identities.expirations != 1 {
+		t.Fatalf("identity expirations = %d, want 1", identities.expirations)
+	}
+}
+
+func TestOverdueAwaitingConfirmationTerminalizesParentOperation(t *testing.T) {
+	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
+	catalog, err := NewCandidateCatalog([]Candidate{candidate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identityOperationID := uuid.NewString()
+	op := Operation{
+		OperationID: uuid.NewString(), RequestKeyHash: "expired-confirm-key", RequestHash: "expired-confirm-request", PrincipalID: "principal-a",
+		Verb: VerbConnect, Provider: candidate.Provider, Interface: candidate.Interface, Coordinate: candidate.Coordinate,
+		TargetSelector: candidate.Target.Selector, Posture: candidate.Posture, Ceremony: candidate.Ceremony,
+		Phase: PhaseAwaitingOperatorConfirmation, Revision: 4, SaveProof: true, IdentityOperationID: identityOperationID,
+		RequestedAt: now, UpdatedAt: now,
+	}
+	op.SlotKey = StartRequest{Provider: op.Provider, Interface: op.Interface, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector}.SlotKey()
+	store := &cancellationTestStore{op: op}
+	identities := &cancellationTestIdentities{operation: operatorchannel.Operation{
+		OperationID: identityOperationID, State: operatorchannel.StateAwaitingConfirmation, Revision: 2, ExpiresAt: now.Add(-time.Second),
+	}}
+	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := NewCredentialWriter(credentialStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(ServiceOptions{
+		Store: store, Identities: identities, Credentials: credentials,
+		Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: &cancellationTestActivations{},
+		Confirmation: cancellationTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Retry(context.Background(), RetryInput{OperationID: op.OperationID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Operation.Phase != PhaseFailed || result.Operation.FailureCode != "identity_expired" {
+		t.Fatalf("expired confirmation result = %#v", result.Operation)
+	}
+	if identities.expirations != 1 {
+		t.Fatalf("identity expirations = %d, want 1", identities.expirations)
+	}
+}
+
+func TestReadbackUsesCurrentActivationOwningOperationInsteadOfLaterFailedAttempt(t *testing.T) {
+	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
+	catalog, err := NewCandidateCatalog([]Candidate{candidate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := Operation{
+		OperationID: uuid.NewString(), SlotKey: StartRequest{Provider: candidate.Provider, Interface: candidate.Interface, Coordinate: candidate.Coordinate, TargetSelector: candidate.Target.Selector}.SlotKey(),
+		PrincipalID: "principal-a", Verb: VerbConnect, Provider: candidate.Provider, Interface: candidate.Interface,
+		Coordinate: candidate.Coordinate, TargetSelector: candidate.Target.Selector, Posture: candidate.Posture, Ceremony: candidate.Ceremony,
+		Phase: PhaseSucceeded, Revision: 7, BindingRevision: 3, ActivationRevision: 1, RequestedAt: now, UpdatedAt: now,
+	}
+	failed := current
+	failed.OperationID = uuid.NewString()
+	failed.Verb = VerbReconnect
+	failed.Phase = PhaseFailed
+	failed.Revision = 3
+	failed.ActivationRevision = 0
+	failed.FailureCode = "provider_denied"
+	failed.UpdatedAt = now.Add(time.Minute)
+	activation := testCurrentActivation(current, nil, now)
+	activation.OperationID = current.OperationID
+	activation.OperationRevision = current.Revision
+	store := &readbackTestStore{
+		cancellationTestStore: &cancellationTestStore{op: current, activation: activation},
+		operations:            []Operation{current, failed},
+	}
+	identity := operatorchannel.Readback{
+		PrincipalID: "principal-a", Interface: candidate.Interface, Status: operatorchannel.BindingCurrent, BindingRevision: 3,
+	}
+	identities := &readbackTestIdentities{
+		cancellationTestIdentities: &cancellationTestIdentities{binding: operatorchannel.Binding{
+			PrincipalID: "principal-a", Interface: candidate.Interface, Revision: 3, Status: operatorchannel.BindingCurrent,
+		}},
+		rows: []operatorchannel.Readback{identity},
+	}
+	readiness := &operationReadinessProjector{readyOperationID: current.OperationID}
+	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := NewCredentialWriter(credentialStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(ServiceOptions{
+		Store: store, Identities: identities, Credentials: credentials,
+		Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: &cancellationTestActivations{},
+		Confirmation: cancellationTestConfirmation{}, Readiness: readiness, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := service.ReadbackConnectedChannels(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Operation == nil || rows[0].Operation.OperationID != current.OperationID {
+		t.Fatalf("readback rows = %#v, want activation-owning operation %s", rows, current.OperationID)
+	}
+	if rows[0].Readiness == nil || !rows[0].Readiness.Ready || readiness.seenOperationID != current.OperationID {
+		t.Fatalf("readiness = %#v seen=%q, want current activation owner", rows[0].Readiness, readiness.seenOperationID)
 	}
 }
 
@@ -412,6 +531,7 @@ type cancellationTestIdentities struct {
 	operation          operatorchannel.Operation
 	binding            operatorchannel.Binding
 	sawCanceledContext bool
+	expirations        int
 }
 
 func (i *cancellationTestIdentities) observe(ctx context.Context) {
@@ -437,6 +557,24 @@ func (i *cancellationTestIdentities) GetOperation(ctx context.Context, operation
 	if operationID != i.operation.OperationID {
 		return operatorchannel.Operation{}, operatorchannel.ErrNotFound
 	}
+	return i.operation, nil
+}
+
+func (i *cancellationTestIdentities) ExpireOperation(ctx context.Context, operationID string, expectedRevision int64, now time.Time) (operatorchannel.Operation, error) {
+	i.observe(ctx)
+	if operationID != i.operation.OperationID {
+		return operatorchannel.Operation{}, operatorchannel.ErrNotFound
+	}
+	if expectedRevision != i.operation.Revision {
+		return operatorchannel.Operation{}, operatorchannel.ErrRevisionConflict
+	}
+	if i.operation.ExpiresAt.After(now) {
+		return operatorchannel.Operation{}, operatorchannel.ErrConflict
+	}
+	i.expirations++
+	i.operation.State = operatorchannel.StateExpired
+	i.operation.Revision++
+	i.operation.CompletedAt = now
 	return i.operation, nil
 }
 
@@ -487,4 +625,44 @@ type cancellationTestReadiness struct{}
 
 func (cancellationTestReadiness) ProjectConnectedChannelReadiness(context.Context, Operation, Candidate) (ConnectedChannelReadiness, bool, error) {
 	return ConnectedChannelReadiness{}, false, nil
+}
+
+type readbackTestStore struct {
+	*cancellationTestStore
+	operations []Operation
+}
+
+func (s *readbackTestStore) GetChannelOnboarding(ctx context.Context, operationID string) (Operation, error) {
+	s.observe(ctx)
+	for _, operation := range s.operations {
+		if operation.OperationID == operationID {
+			return operation, nil
+		}
+	}
+	return Operation{}, ErrNotFound
+}
+
+func (s *readbackTestStore) ListChannelOnboardingOperations(ctx context.Context) ([]Operation, error) {
+	s.observe(ctx)
+	return append([]Operation(nil), s.operations...), nil
+}
+
+type readbackTestIdentities struct {
+	*cancellationTestIdentities
+	rows []operatorchannel.Readback
+}
+
+func (i *readbackTestIdentities) Readback(ctx context.Context) ([]operatorchannel.Readback, error) {
+	i.observe(ctx)
+	return append([]operatorchannel.Readback(nil), i.rows...), nil
+}
+
+type operationReadinessProjector struct {
+	readyOperationID string
+	seenOperationID  string
+}
+
+func (p *operationReadinessProjector) ProjectConnectedChannelReadiness(_ context.Context, op Operation, _ Candidate) (ConnectedChannelReadiness, bool, error) {
+	p.seenOperationID = op.OperationID
+	return ConnectedChannelReadiness{Ready: op.OperationID == p.readyOperationID, Reason: ReadinessReady}, true, nil
 }

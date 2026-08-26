@@ -271,6 +271,63 @@ func (s *SQLiteOwner) ConfirmChannelBinding(ctx context.Context, req domain.Conf
 	return confirmBinding(ctx, sqliteRunner{s}, req)
 }
 
+func (s *PostgresOwner) ExpireChannelBinding(ctx context.Context, req domain.ExpireRequest) (domain.Operation, error) {
+	return expireBinding(ctx, postgresRunner{s}, req)
+}
+
+func (s *SQLiteOwner) ExpireChannelBinding(ctx context.Context, req domain.ExpireRequest) (domain.Operation, error) {
+	return expireBinding(ctx, sqliteRunner{s}, req)
+}
+
+func expireBinding(ctx context.Context, runner transactionRunner, req domain.ExpireRequest) (domain.Operation, error) {
+	if err := runner.require(); err != nil {
+		return domain.Operation{}, err
+	}
+	if strings.TrimSpace(req.OperationID) == "" || strings.TrimSpace(req.PrincipalID) == "" || req.ExpectedRevision < 1 || req.ExpiredAt.IsZero() {
+		return domain.Operation{}, fmt.Errorf("%w: expiry identity, revision, and time are required", domain.ErrInvalidRequest)
+	}
+	var out domain.Operation
+	err := runner.mutate(ctx, "expire operator channel binding", func(txctx context.Context, tx *sql.Tx) error {
+		op, found, err := loadOperationByID(txctx, tx, runner.dialect(), req.OperationID, true)
+		if err != nil || !found {
+			if !found && err == nil {
+				return domain.ErrNotFound
+			}
+			return err
+		}
+		if op.PrincipalID != req.PrincipalID {
+			return domain.ErrRevisionConflict
+		}
+		if op.State == domain.StateExpired {
+			if op.Revision != req.ExpectedRevision+1 {
+				return domain.ErrRevisionConflict
+			}
+			out = op
+			return nil
+		}
+		if op.State.Terminal() {
+			return domain.ErrOperationTerminal
+		}
+		if op.Revision != req.ExpectedRevision {
+			return domain.ErrRevisionConflict
+		}
+		if op.State != domain.StateAwaitingClaim && op.State != domain.StateAwaitingConfirmation {
+			return fmt.Errorf("%w: operation is %s", domain.ErrConflict, op.State)
+		}
+		now := canonicalTime(req.ExpiredAt)
+		if op.ExpiresAt.After(now) {
+			return fmt.Errorf("%w: operation challenge has not expired", domain.ErrConflict)
+		}
+		op.State, op.Revision, op.CompletedAt = domain.StateExpired, op.Revision+1, now
+		if err := updateOperationTerminal(txctx, tx, runner.dialect(), op); err != nil {
+			return err
+		}
+		out = op
+		return nil
+	})
+	return out, err
+}
+
 func confirmBinding(ctx context.Context, runner transactionRunner, req domain.ConfirmRequest) (domain.Operation, domain.Binding, error) {
 	if err := runner.require(); err != nil {
 		return domain.Operation{}, domain.Binding{}, err

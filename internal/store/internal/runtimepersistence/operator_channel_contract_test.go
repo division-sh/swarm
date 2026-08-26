@@ -316,6 +316,27 @@ func runOperatorChannelContract(t *testing.T, fixture operatorChannelContractFix
 	if err != nil {
 		t.Fatal(err)
 	}
+	expiredByOwner, err := fixture.store.ExpireChannelBinding(ctx, operatorchannel.ExpireRequest{
+		OperationID: expiredOp.OperationID, PrincipalID: principal.ID, ExpectedRevision: expiredOp.Revision, ExpiredAt: now.Add(2 * time.Second),
+	})
+	if err != nil || expiredByOwner.State != operatorchannel.StateExpired || expiredByOwner.Revision != expiredOp.Revision+1 {
+		t.Fatalf("owner expiry = %#v, %v", expiredByOwner, err)
+	}
+	replayedOwnerExpiry, err := fixture.store.ExpireChannelBinding(ctx, operatorchannel.ExpireRequest{
+		OperationID: expiredOp.OperationID, PrincipalID: principal.ID, ExpectedRevision: expiredOp.Revision, ExpiredAt: now.Add(3 * time.Second),
+	})
+	if err != nil || replayedOwnerExpiry != expiredByOwner {
+		t.Fatalf("owner expiry replay = %#v, %v, want %#v", replayedOwnerExpiry, err, expiredByOwner)
+	}
+
+	claimExpiredBegin := expiredBegin
+	claimExpiredBegin.OperationID = uuid.NewString()
+	claimExpiredBegin.RequestKeyHash = "claim-expired-key"
+	claimExpiredBegin.RequestHash = "claim-expired-body"
+	expiredOp, err = fixture.store.BeginChannelBinding(ctx, claimExpiredBegin)
+	if err != nil {
+		t.Fatal(err)
+	}
 	expiredSettlement, err := fixture.settle(ctx, operatorChannelContractClaim(expiredOp, operatorchannel.ConversationScopeDirect, "account-c", "conversation-c", uuid.NewString()), now.Add(2*time.Second))
 	if err != nil || expiredSettlement.Disposition != operatorchannel.DispositionRejectedClaim || expiredSettlement.Operation.State != operatorchannel.StateExpired {
 		t.Fatalf("expired settlement = %#v, %v", expiredSettlement, err)
