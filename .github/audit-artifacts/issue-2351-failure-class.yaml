@@ -2,15 +2,18 @@ version: 1
 kind: pre_implementation_failure_class_artifact
 issue: 2351
 audit_base: 7dd0174cd8bf0c2d36765613105b28e24325087e
-phase: pre_implementation_gate_repair
+phase: pre_implementation_gate_repair_cycle_3
 implementation_frozen: true
 supersedes:
-  audit: https://github.com/division-sh/swarm/issues/2351#issuecomment-5426766949
-  gate: https://github.com/division-sh/swarm/issues/2351#issuecomment-5427779828
+  adoption_only_audit: https://github.com/division-sh/swarm/issues/2351#issuecomment-5426766949
+  cycle_1_gate: https://github.com/division-sh/swarm/issues/2351#issuecomment-5427779828
+  cycle_2_audit: https://github.com/division-sh/swarm/issues/2351#issuecomment-5429037567
+  cycle_3_gate: https://github.com/division-sh/swarm/issues/2351#issuecomment-5429122839
 binding_context:
   issue: https://github.com/division-sh/swarm/issues/2351
   implementation_discovery: https://github.com/division-sh/swarm/issues/2351#issuecomment-5428191484
   insufficient_gate: https://github.com/division-sh/swarm/issues/2351#issuecomment-5428808311
+  source_scope_insufficient_gate: https://github.com/division-sh/swarm/issues/2351#issuecomment-5429122839
   architecture_parent: 2250
   blocked_supported_surface: 2008
   separate_delivery_class: 2339
@@ -23,6 +26,7 @@ binding_context:
     - platform-spec.yaml#runtime.agent_lifecycle_authority.prepared_execution_publication
     - platform-spec.yaml#runtime.startup_progress.steps.manager_recovery_if_enabled
     - platform-spec.yaml#runtime.startup_progress.steps.manager_event_loop_start
+    - platform-spec.yaml#multi_bundle_persistence.persistence_model.serve_db_loaded_runtime_source
   guidelines:
     - /Users/youmew/dev/swarm-docs/docs/IMPLEMENTER_GUIDELINES.md
     - /Users/youmew/dev/swarm-docs/docs/SEMANTIC_DRIFT.md
@@ -35,23 +39,25 @@ class_model:
     topology is reconstructed. The next normalized M5 event commits with no entity,
     recipient, delivery, or dead letter while the run is publicly running.
   exact_concepts:
-    - mandatory_active_dynamic_executable_topology_reconstruction
+    - exact_bundle_source_scoped_active_dynamic_executable_topology_reconstruction
     - optional_interrupted_execution_and_effect_replay
     - startup_refusal_for_incomplete_dynamic_readiness_without_replay_authority
     - current_manager_occurrence_agent_and_route_runnability
-  working_failure_class: active_dynamic_executable_topology_reconstruction_gated_by_optional_execution_recovery
+    - multi_context_startup_isolation_and_all_or_nothing_admission
+  working_failure_class: source_scoped_active_dynamic_executable_topology_reconstruction_gated_by_optional_execution_recovery
   immediate_parent_failure_class: startup_topology_reconstruction_and_execution_replay_policy_coupling
   parent_failure_class: multi_phase_runtime_startup_readiness_and_lifecycle_ownership
   architecture_parent_issue: 2250
   broader_failure_class: process_required_topology_and_durable_work_replay_share_one_startup_switch
-  framing: broad_enough_after_gate_cycle_2_repair
+  framing: broad_enough_after_gate_cycle_3_source_scope_repair
   prior_framing: too_narrow_and_superseded
   entry_point_not_boundary: >-
     The skip at Runtime.Start and registered/stopped adoption are entry points. The
     audit boundary includes every startup consumer in HydrateForStartup, every
     current-format route/readiness producer, execution admission, both Manager run
     modes, process route publication, continuation synchronization, public readiness,
-    refusal, compensation, restart postures, and both stores.
+    refusal, compensation, restart postures, single- and multi-context serving,
+    exact source isolation, and both stores.
   intended_closure_level: chosen_working_failure_class_eliminated
   chosen_class_closure_commitment: true
   closure_feasible_in_one_pr: true
@@ -68,6 +74,29 @@ governing_policy:
   incomplete_active_readiness_recovery_enabled: >-
     The existing keyed readiness reconciler may complete it under existing recovery
     authority before mandatory process reconstruction proves the completed result.
+  source_scoped_startup_projection:
+    operation: InspectDynamicFlowRuntimeStartupProjection
+    input: exact_immutable_BundleSourceFact
+    selected_store_owner: dynamic_flow_runtime_readiness_persistence
+    query_boundary: >-
+      PostgreSQL and SQLite join readiness to flow_instances and runs and constrain
+      canonical runs.bundle_hash plus runs.bundle_source in SQL. An unscoped list,
+      followed by process-side filtering, is forbidden.
+    output:
+      - eligible_completed_rows
+      - eligible_pending_rows
+    fail_closed_validation:
+      - malformed_readiness_plan
+      - persisted_plan_source_disagrees_with_requested_source
+      - source_owned_active_materialized_route_without_exact_readiness
+    excluded_from_process_installation:
+      - terminal_run_rows
+      - inactive_or_terminated_instance_rows
+      - rows_owned_by_another_bundle_source
+    freshness: >-
+      Observation-only all-context preflight is repeated for the current source
+      before Manager.Run and reloaded after Manager.Run; an earlier snapshot never
+      becomes process-topology authority.
   replay_only_work: >-
     Effects, provider drains, budget and diagnostic recovery projection, pipeline
     receipts, delivery replay, timers, creation events, and selected-contract route
@@ -84,16 +113,22 @@ governing_policy:
     - polling_repair
     - second_readiness_or_liveness_owner
     - generic_startup_framework
+    - unscoped_readiness_or_route_list
+    - process_side_source_post_filter
+    - cross_context_adoption_publication_or_refusal
 
 startup_order:
   sequence:
+    - all_context_source_scoped_observation_preflight_completes_before_any_runtime_mutation
     - recovery_snapshot_and_admission_classify_replay_work
     - static_declaration_topology_hydrates
     - system_nodes_start
     - recovery_enabled_only_finalizers_may_reconcile_interrupted_work
     - managed_execution_admission_completes
+    - current_source_startup_projection_is_revalidated_and_unresolved_pending_rows_refuse
     - manager_run_starts_the_current_occurrence
-    - mandatory_topology_only_reconstruction_enumerates_completed_active_readiness
+    - current_source_projection_is_reloaded_after_manager_run
+    - mandatory_topology_only_reconstruction_consumes_only_its_completed_rows
     - exact_agent_lifecycle_routes_loops_and_flow_routes_are_verified
     - delivery_continuation_synchronization_runs
     - outbox_and_public_boot_readiness_may_open
@@ -101,6 +136,12 @@ startup_order:
     Any topology-only reconstruction or verification failure fails Runtime.Start and
     consumes existing start-failure cleanup plus lifecycle/route compensation. It
     cannot leave public readiness open or authorize replay mutation.
+  multi_context_atomicity: >-
+    Existing serve composition MUST inspect every constructed runtime source through
+    the same observation-only typed operation before starting any runtime. A pending,
+    malformed, source-disagreeing, or invalid-route result in any context refuses the
+    all-or-nothing serve before another context can acquire process topology. Each
+    Runtime.Start repeats its own inspection to fence races.
 
 user_visible_flow:
   must_succeed_before_observed_failure:
@@ -156,11 +197,11 @@ startup_posture_matrix:
     proof: issue_2008_dev_new_generation_scenario
   multi_context_persistent_recovery_disabled:
     policy: >-
-      This flag does not authorize unscoped replay or missing executable topology.
-      Any #2351 operation must consume an exact current-context source coordinate;
-      discovery that this requires general multi-context recovery scoping stops and
-      escalates to #2250 rather than weakening readiness.
-    proof: platform_spec_multi_bundle_persistence_serve_db_loaded_runtime_source
+      DisablePersistentStartupRecovery disables unscoped replay, not mandatory
+      topology. Every context is inspected by exact BundleSourceFact before any
+      runtime starts, pending work refuses all-or-nothing serve, and each started
+      context reconstructs only its own completed topology.
+    proof: two_pinned_PostgreSQL_contexts_isolation_refusal_and_no_unscoped_reads
 
 startup_consumer_matrix:
   static_declaration_topology:
@@ -168,13 +209,13 @@ startup_consumer_matrix:
     proof: HydrateStaticTopologyForStartup_is_already_unconditional_and_separate
   completed_active_dynamic_readiness:
     classification: always_run_process_reconstruction
-    proof: completed_eligible_plan_is_durable_desired_topology_not_interrupted_work
+    proof: source_scoped_completed_eligible_plan_is_durable_desired_topology_not_interrupted_work
   incomplete_or_pending_active_dynamic_readiness:
     classification: startup_blocking_when_replay_disabled
     proof: full_reconciler_can_write_topology_timers_completion_and_creation_event
   persisted_dynamic_route_without_readiness:
     classification: invalid_obsolete_and_deleted
-    proof: current_activation_commits_readiness_and_exact_route_topology_together
+    proof: source_scoped_current_activation_commits_readiness_and_exact_route_topology_together
   selected_contract_route_recovery_evidence:
     classification: recovery_only_replay_or_mutation
     proof: selected_fork_evidence_has_its_own_recovery_owner_and_no_serving_topology_authority
@@ -222,8 +263,21 @@ route_producer_census:
   disposition: delete_as_obsolete_fallback
   selected_contract_restorer: restoreSelectedContractRouteRecoveries
   selected_contract_disposition: retain_recovery_gated_as_different_concept
+  source_scoped_invalid_route_detection: >-
+    The startup projection attributes each active materialized route to its active
+    flow instance and run, constrains the run by exact BundleSourceFact in SQL, and
+    requires an exact readiness row for that source. It never lists all routes and
+    never lets one context publish or reject another context's route.
 
 canonical_owners:
+  source_scoped_startup_projection:
+    owner: selected_store_InspectDynamicFlowRuntimeStartupProjection_by_BundleSourceFact
+    real_semantic_owner: true
+    consumers:
+      - serve_all_context_observation_preflight
+      - runtime_start_pre_manager_revalidation
+      - post_manager_completed_topology_reconstruction
+      - source_scoped_invalid_route_validation
   desired_dynamic_topology:
     owner: dynamic_flow_runtime_readiness_plan_keyed_by_run_and_instance
     real_semantic_owner: true
@@ -267,6 +321,12 @@ canonical_owners:
       - recipient_planning_after_publication
 
 systematic_consumption_audit:
+  multi_context_all_source_preflight: moved_to_exact_source_scoped_projection_before_any_runtime_start
+  multi_context_completed_readiness: moved_to_owning_context_only_topology_reconstruction
+  multi_context_pending_readiness: startup_refusal_before_cross_context_mutation
+  hostile_cross_source_similar_paths: excluded_by_selected_store_source_predicate
+  sqlite_source_scoped_projection: moved_to_same_typed_store_contract
+  unscoped_readiness_and_route_lists: invalid_for_mandatory_topology_startup
   fresh_spawn_before_manager_run: moved_to_phase_aware_owner_prepared_before_run
   fresh_spawn_during_manager_run: moved_to_phase_aware_owner_runnable_current_occurrence
   persisted_completed_readiness_default_restart: moved_to_mandatory_topology_only_reconstruction
@@ -291,6 +351,9 @@ invalid_or_non_authoritative_paths:
   - full_HydrateForStartup_as_mandatory_topology_operation
   - generic_persisted_route_without_readiness_fallback
   - route_publication_before_exact_agent_runnability
+  - global_readiness_list_then_bundle_source_post_filter
+  - global_route_list_for_source_scoped_startup_validation
+  - DisablePersistentStartupRecovery_as_permission_to_skip_mandatory_topology
 
 manifestations:
   fresh_first_materialization:
@@ -323,6 +386,18 @@ manifestations:
   invalid_route_without_readiness:
     disposition: in_scope_removed_interpreter
     planned_proof: deletion_census_and_fail_closed_current_format_fixture
+  multi_context_completed_topology_isolation:
+    disposition: in_scope_reproduced_and_fixed
+    planned_proof: two_pinned_PostgreSQL_contexts_reconstruct_only_their_own_agents_and_routes
+  multi_context_pending_all_or_nothing_refusal:
+    disposition: in_scope_reproduced_and_fixed
+    planned_proof: pending_row_in_either_context_refuses_before_any_runtime_or_cross_context_mutation
+  hostile_cross_source_path_alias:
+    disposition: in_scope_reproduced_and_fixed
+    planned_proof: similar_paths_from_another_source_cannot_adopt_publish_or_deny_current_context
+  persistent_recovery_disabled_unscoped_read_boundary:
+    disposition: in_scope_execution_proven_through_canonical_owner
+    planned_proof: existing_unscoped_read_guard_remains_green
   terminal_singleton_materialization_reuse:
     disposition: split_to_issue_2339_as_different_storage_delivery_class
     planned_proof: no_change_to_2339_contract_or_tests
@@ -332,6 +407,9 @@ supported_surface_proof:
   stores:
     - sqlite
     - host_postgresql
+  context_cardinality:
+    - single_context
+    - two_pinned_postgresql_bundle_contexts
   manager_modes:
     - standard
     - authoritative_delivery_only
@@ -340,6 +418,16 @@ supported_surface_proof:
     - explicit_recovery_enabled
     - forced_default_refusal
     - dev_abandon_new_generation
+    - multi_context_persistent_recovery_disabled
+  store_contract_parity:
+    - sqlite_exact_source_projection_classification
+    - postgresql_exact_source_projection_classification
+    - exact_source_disagreement_and_route_without_readiness_fail_closed_on_both
+  multi_context_proof:
+    - completed_topology_isolated_per_source
+    - pending_in_either_source_refuses_all_contexts_before_mutation
+    - hostile_same_path_cross_source_rows_are_inert_to_the_wrong_context
+    - no_unscoped_read_or_process_side_filter
   negative_no_replay_proof:
     - no_timer_arm_or_restore
     - no_creation_event_commit_or_dispatch
@@ -368,10 +456,11 @@ tracker:
   post_pre_audit_parent_action: close_corrected_child_now_keep_architecture_parent_open
   watchlist_promotion_check: >-
     The node already tracks split lifecycle/startup ownership and #2250 tracks broader
-    readiness orchestration. It exposes this startup-policy entrance but no additional
-    live same-concept consumer family requiring absorption into #2351.
+    readiness orchestration. Multi-bundle serving is an additional live consumer of
+    the same mandatory topology concept and is absorbed here through one bounded
+    source-scoped projection; no broader recovery family must be absorbed.
   remaining_parent_tail:
-    grouping: wholesale_Runtime_Start_phase_decomposition_and_multi_context_scoping
+    grouping: wholesale_Runtime_Start_typed_phase_decomposition_and_general_recovery_scoping
     owner: 2250
     estimate: multi_pr_architecture_work
     confidence: high
@@ -393,5 +482,5 @@ gate:
     - another_current_format_active_topology_producer_without_readiness
     - topology_only_reconstruction_requires_durable_replay_mutation
     - existing_lifecycle_compensation_cannot_own_failure
-    - general_startup_or_multi_context_rewrite_required
+    - genuinely_broader_recovery_rewrite_beyond_exact_source_scoped_projection_required
     - second_process_liveness_authority_required
