@@ -3,6 +3,7 @@ package apispec
 import (
 	"fmt"
 	"go/ast"
+	"go/build"
 	"go/parser"
 	"go/token"
 	"os"
@@ -276,6 +277,13 @@ func validateExactRunnableTest(filename, testName string) string {
 	if !goTestNamePattern.MatchString(testName) {
 		return fmt.Sprintf("test %q is not one top-level Go test name", testName)
 	}
+	selected, err := build.Default.MatchFile(filepath.Dir(filename), filepath.Base(filename))
+	if err != nil {
+		return fmt.Sprintf("cannot evaluate active Go build constraints for %s: %v", filename, err)
+	}
+	if !selected {
+		return fmt.Sprintf("exact file %s is excluded by the active Go build", filename)
+	}
 	file, err := parser.ParseFile(token.NewFileSet(), filename, nil, 0)
 	if err != nil {
 		return fmt.Sprintf("cannot parse %s: %v", filename, err)
@@ -359,6 +367,14 @@ func validateManagedEffectProof(rootDir string, reference managedEffectProofRefe
 	var invalidMatches []string
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+		selected, matchErr := build.Default.MatchFile(directory, entry.Name())
+		if matchErr != nil {
+			problems = append(problems, fmt.Sprintf("managed-effect %q proof file %s has invalid Go build constraints: %v", reference.Adapter, entry.Name(), matchErr))
+			continue
+		}
+		if !selected {
 			continue
 		}
 		filename := filepath.Join(directory, entry.Name())
@@ -574,6 +590,17 @@ func TestDurableInvariantRunnableTestMutationsFailClosed(t *testing.T) {
 			assertTextContains(t, validateExactRunnableTest(filename, "TestLive"), testCase.want)
 		})
 	}
+
+	writeFixtureFile(t, rootDir, "tagged_test.go", "//go:build invariant_proof_fixture_disabled\n\npackage pkg\nimport \"testing\"\nfunc TestTagged(t *testing.T) {}\n")
+	assertTextContains(t, validateExactRunnableTest(filepath.Join(rootDir, "tagged_test.go"), "TestTagged"), "excluded by the active Go build")
+
+	excludedGOOS := "windows"
+	if build.Default.GOOS == excludedGOOS {
+		excludedGOOS = "linux"
+	}
+	goosFile := filepath.Join(rootDir, "platform_"+excludedGOOS+"_test.go")
+	writeFixtureFile(t, rootDir, filepath.Base(goosFile), "package pkg\nimport \"testing\"\nfunc TestPlatform(t *testing.T) {}\n")
+	assertTextContains(t, validateExactRunnableTest(goosFile, "TestPlatform"), "excluded by the active Go build")
 }
 
 func TestDurableInvariantScalarSentinel(t *testing.T) {
@@ -628,6 +655,18 @@ func TestManagedEffectProofReferenceMutationsFailClosed(t *testing.T) {
 	writeFixtureFile(t, rootDir, "ambiguous/one_test.go", "package ambiguous\nimport \"testing\"\nfunc TestDuplicate(t *testing.T) {}\n")
 	writeFixtureFile(t, rootDir, "ambiguous/two_test.go", "package ambiguous\nimport \"testing\"\nfunc TestDuplicate(t *testing.T) {}\n")
 	assertProblemsContain(t, validateManagedEffectProof(rootDir, managedEffectProofReference{Adapter: "ambiguous", LaunchSite: "ambiguous/launch.go", Proof: "TestDuplicate"}), "valid=2")
+
+	writeFixtureFile(t, rootDir, "tagged/launch.go", "package tagged\n")
+	writeFixtureFile(t, rootDir, "tagged/proof_test.go", "//go:build managed_effect_proof_fixture_disabled\n\npackage tagged\nimport \"testing\"\nfunc TestTagged(t *testing.T) {}\n")
+	assertProblemsContain(t, validateManagedEffectProof(rootDir, managedEffectProofReference{Adapter: "tagged", LaunchSite: "tagged/launch.go", Proof: "TestTagged"}), "valid=0")
+
+	excludedGOOS := "windows"
+	if build.Default.GOOS == excludedGOOS {
+		excludedGOOS = "linux"
+	}
+	writeFixtureFile(t, rootDir, "platform/launch.go", "package platform\n")
+	writeFixtureFile(t, rootDir, "platform/proof_"+excludedGOOS+"_test.go", "package platform\nimport \"testing\"\nfunc TestPlatform(t *testing.T) {}\n")
+	assertProblemsContain(t, validateManagedEffectProof(rootDir, managedEffectProofReference{Adapter: "platform", LaunchSite: "platform/launch.go", Proof: "TestPlatform"}), "valid=0")
 }
 
 func parseYAMLFixture(t *testing.T, source string) *yaml.Node {
