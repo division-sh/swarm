@@ -767,7 +767,7 @@ func TestRunCreationReceiptRejectsTypedColumnCorruptionAcrossSelectedStores(t *t
 	})
 }
 
-func TestFailedFusedRunRejectsCoordinatedAdmittedContextReplacementAcrossSelectedStores(t *testing.T) {
+func TestFailedFusedRunRejectsTypedRevisionAndCoordinatedContextCorruptionAcrossSelectedStores(t *testing.T) {
 	forEachDataRunLifecycleStore(t, func(t *testing.T, fixture dataRunLifecycleFixture) {
 		ctx := context.Background()
 		catalog, scanRef, _ := dataRunLifecycleCatalog(t, runStartTestBundleHash, false)
@@ -794,6 +794,22 @@ func TestFailedFusedRunRejectsCoordinatedAdmittedContextReplacementAcrossSelecte
 		if response.Error == nil || asMap(t, response.Error.Data)["code"] != string(durabledata.CodeRunDataRejected) {
 			t.Fatalf("failed fused fixture = %#v", response)
 		}
+		observedRevisionUpdate := `UPDATE resource_run_creation_child_evaluations SET observed_head_revision = ? WHERE parent_run_id = ? AND source_invocation_id = ?`
+		if _, ok := fixture.primary.(*store.PostgresStore); ok {
+			observedRevisionUpdate = `UPDATE resource_run_creation_child_evaluations SET observed_head_revision = $1 WHERE parent_run_id = $2::uuid AND source_invocation_id = $3::uuid`
+		}
+		retryRunCreationHostileSQL(t, fixture, func() error {
+			_, err := fixture.db.ExecContext(ctx, observedRevisionUpdate, 1, runID, sourceID)
+			return err
+		})
+		var domainErr *durabledata.DomainError
+		if _, err := fixture.reconstructed.LoadDataRunCreationOperation(ctx, runID); !errors.As(err, &domainErr) || domainErr.Code != durabledata.CodeIntegrity {
+			t.Fatalf("typed failed-fused observed revision corruption error = %v, want %s", err, durabledata.CodeIntegrity)
+		}
+		retryRunCreationHostileSQL(t, fixture, func() error {
+			_, err := fixture.db.ExecContext(ctx, observedRevisionUpdate, 0, runID, sourceID)
+			return err
+		})
 
 		query := `SELECT context_json FROM resource_run_creation_child_evaluations WHERE parent_run_id = ? AND source_invocation_id = ?`
 		if _, ok := fixture.primary.(*store.PostgresStore); ok {
@@ -868,7 +884,7 @@ func TestFailedFusedRunRejectsCoordinatedAdmittedContextReplacementAcrossSelecte
 			t.Fatal(err)
 		}
 
-		var domainErr *durabledata.DomainError
+		domainErr = nil
 		if _, err := fixture.reconstructed.LoadDataRunCreationOperation(ctx, runID); !errors.As(err, &domainErr) || domainErr.Code != durabledata.CodeIntegrity {
 			t.Fatalf("coordinated failed fused corruption load error = %v, want %s", err, durabledata.CodeIntegrity)
 		}
@@ -925,9 +941,10 @@ func TestSuccessfulFusedRunRequiresExactSourceCommitAggregateAcrossSelectedStore
 		if _, ok := fixture.primary.(*store.PostgresStore); ok {
 			query = `DELETE FROM resource_version_provenance WHERE producer_kind = 'import' AND producer_id = $1::uuid`
 		}
-		if _, err := fixture.db.ExecContext(ctx, query, sourceID); err != nil {
-			t.Fatal(err)
-		}
+		retryRunCreationHostileSQL(t, fixture, func() error {
+			_, err := fixture.db.ExecContext(ctx, query, sourceID)
+			return err
+		})
 		var domainErr *durabledata.DomainError
 		if _, err := fixture.reconstructed.LoadDataRunCreationOperation(ctx, runID); !errors.As(err, &domainErr) || domainErr.Code != durabledata.CodeIntegrity {
 			t.Fatalf("missing fused commit aggregate load error = %v, want %s", err, durabledata.CodeIntegrity)

@@ -1176,6 +1176,58 @@ func TestDurableDataSourceReceiptAnchorsAdmittedContextAndHistoricalBase(t *test
 	})
 }
 
+func TestDurableDataSourceReceiptOrdersEvaluationByRevisionNotWallClock(t *testing.T) {
+	for _, scenario := range []struct {
+		name           string
+		firstOperation string
+		secondTime     func(time.Time) time.Time
+	}{
+		{name: "same timestamp after check", firstOperation: "check", secondTime: func(first time.Time) time.Time { return first }},
+		{name: "same timestamp after import", firstOperation: "import", secondTime: func(first time.Time) time.Time { return first }},
+		{name: "backward clock after import", firstOperation: "import", secondTime: func(first time.Time) time.Time { return first.Add(-time.Hour) }},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
+				ctx := context.Background()
+				catalog, ref := durableDataTestCatalog(t)
+				if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
+					t.Fatal(err)
+				}
+				firstCommand := durabledata.SourceCommand{
+					Operation: scenario.firstOperation, SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: testDataBundle,
+					Declaration: ref, ExpectedHead: durabledata.AbsentHead(), InputFormat: "jsonl", Input: []byte("{\"slug\":\"first\",\"score\":1}\n"),
+				}
+				first, err := selected.ExecuteDataSourceOperation(ctx, firstCommand)
+				if err != nil || first.Outcome != "accepted" {
+					t.Fatalf("first source operation = %#v, %v", first, err)
+				}
+				secondCommand := durabledata.SourceCommand{
+					Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: testDataBundle,
+					Declaration: ref, ExpectedHead: first.Head.After, InputFormat: "jsonl", Input: []byte("{\"slug\":\"second\",\"score\":2}\n"),
+				}
+				second, err := selected.ExecuteDataSourceOperation(ctx, secondCommand)
+				if err != nil || second.Outcome != "accepted" || !second.Head.Changed {
+					t.Fatalf("second source operation = %#v, %v", second, err)
+				}
+				rewriteSourceOperationCompletedAt(t, ctx, selected, db, secondCommand.SourceInvocationID, second.Candidate.VersionID, ref, scenario.secondTime(first.CompletedAt))
+
+				for _, replay := range []struct {
+					command durabledata.SourceCommand
+					version durabledata.VersionID
+				}{
+					{command: firstCommand, version: first.Candidate.VersionID},
+					{command: secondCommand, version: second.Candidate.VersionID},
+				} {
+					got, err := selected.ExecuteDataSourceOperation(ctx, replay.command)
+					if err != nil || got.Candidate.VersionID != replay.version {
+						t.Fatalf("exact replay for %s = %#v, %v; want version %s", replay.command.SourceInvocationID, got, err, replay.version)
+					}
+				}
+			})
+		})
+	}
+}
+
 func TestDurableDataSourceReceiptRequiresExactCommitAggregate(t *testing.T) {
 	for _, scenario := range []string{"missing provenance", "missing head history", "wrong head history"} {
 		t.Run(scenario, func(t *testing.T) {
@@ -1299,6 +1351,7 @@ func TestDurableDataSourceReceiptRejectsTypedColumnCorruption(t *testing.T) {
 		{name: "bundle", column: "bundle_hash", value: func() any { return "bundle-v1:sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff" }},
 		{name: "package", column: "package_key", value: func() any { return "hostile" }},
 		{name: "event", column: "event_name", value: func() any { return "hostile.event" }},
+		{name: "observed head revision", column: "observed_head_revision", value: func() any { return 999 }},
 		{name: "completed at", column: "completed_at", value: func() any { return time.Date(2035, 1, 2, 3, 4, 5, 0, time.UTC) }},
 	}
 	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, db *sql.DB) {
@@ -1403,6 +1456,71 @@ func updateSourceReceiptAggregate(t testing.TB, ctx context.Context, selected du
 		query = `UPDATE resource_source_invocations SET evaluation_json = $1, result_json = $2, evidence_json = $3 WHERE source_invocation_id = $4::uuid`
 	}
 	if _, err := db.ExecContext(ctx, query, evaluationJSON, resultJSON, evidenceJSON, id); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func rewriteSourceOperationCompletedAt(t testing.TB, ctx context.Context, selected durableDataSelectedStore, db *sql.DB, id string, versionID durabledata.VersionID, ref durabledata.DeclarationRef, completedAt time.Time) {
+	t.Helper()
+	query := `SELECT evaluation_json, result_json FROM resource_source_invocations WHERE source_invocation_id = ?`
+	provenanceQuery := `SELECT provenance_json FROM resource_version_provenance WHERE producer_kind = 'import' AND producer_id = ?`
+	if _, ok := selected.(*store.PostgresStore); ok {
+		query = `SELECT evaluation_json, result_json FROM resource_source_invocations WHERE source_invocation_id = $1::uuid`
+		provenanceQuery = `SELECT provenance_json FROM resource_version_provenance WHERE producer_kind = 'import' AND producer_id = $1::uuid`
+	}
+	var evaluationJSON, resultJSON, provenanceJSON []byte
+	if err := db.QueryRowContext(ctx, query, id).Scan(&evaluationJSON, &resultJSON); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, provenanceQuery, id).Scan(&provenanceJSON); err != nil {
+		t.Fatal(err)
+	}
+	var evaluation durabledata.SourceEvaluationContext
+	var result durabledata.SourceOperationResult
+	var provenance durabledata.Provenance
+	if json.Unmarshal(evaluationJSON, &evaluation) != nil || json.Unmarshal(resultJSON, &result) != nil || json.Unmarshal(provenanceJSON, &provenance) != nil {
+		t.Fatal("decode source operation time projections")
+	}
+	evaluation.CompletedAt = completedAt
+	result.CompletedAt = completedAt
+	provenance.CommittedAt = completedAt
+	evaluationJSON, _ = json.Marshal(evaluation)
+	resultJSON, _ = json.Marshal(result)
+	provenanceJSON, _ = json.Marshal(provenance)
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiptUpdate := `UPDATE resource_source_invocations SET evaluation_json = ?, result_json = ?, completed_at = ? WHERE source_invocation_id = ?`
+	provenanceUpdate := `UPDATE resource_version_provenance SET provenance_json = ?, committed_at = ? WHERE producer_kind = 'import' AND producer_id = ?`
+	historyUpdate := `UPDATE resource_head_history SET committed_at = ? WHERE operation_id = ?`
+	versionUpdate := `UPDATE resource_versions SET created_at = ? WHERE version_id = ?`
+	headUpdate := `UPDATE resource_heads SET updated_at = ? WHERE package_key = ? AND event_name = ?`
+	if _, ok := selected.(*store.PostgresStore); ok {
+		receiptUpdate = `UPDATE resource_source_invocations SET evaluation_json = $1, result_json = $2, completed_at = $3 WHERE source_invocation_id = $4::uuid`
+		provenanceUpdate = `UPDATE resource_version_provenance SET provenance_json = $1, committed_at = $2 WHERE producer_kind = 'import' AND producer_id = $3::uuid`
+		historyUpdate = `UPDATE resource_head_history SET committed_at = $1 WHERE operation_id = $2::uuid`
+		versionUpdate = `UPDATE resource_versions SET created_at = $1 WHERE version_id = $2`
+		headUpdate = `UPDATE resource_heads SET updated_at = $1 WHERE package_key = $2 AND event_name = $3`
+	}
+	updates := []struct {
+		query string
+		args  []any
+	}{
+		{receiptUpdate, []any{evaluationJSON, resultJSON, completedAt, id}},
+		{provenanceUpdate, []any{provenanceJSON, completedAt, id}},
+		{historyUpdate, []any{completedAt, id}},
+		{versionUpdate, []any{completedAt, versionID}},
+		{headUpdate, []any{completedAt, ref.PackageKey, ref.EventName}},
+	}
+	for _, update := range updates {
+		if _, err := tx.ExecContext(ctx, update.query, update.args...); err != nil {
+			_ = tx.Rollback()
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
 }
