@@ -82,8 +82,11 @@ func TestOptionalDeclarationAdmissionOwnsAbsentPresentAndRootShapeMatrix(t *test
 		{name: "empty mapping", body: "{}\n", wantCode: "contract_loader.optional_declaration_file_empty"},
 		{name: "null", body: "null\n", wantCode: "contract_loader.optional_declaration_file_empty"},
 		{name: "tilde null", body: "~\n", wantCode: "contract_loader.optional_declaration_file_empty"},
+		{name: "explicit empty document", body: "---\n", wantCode: "contract_loader.optional_declaration_file_empty"},
 		{name: "comment only", body: "# no declarations\n", wantCode: "contract_loader.yaml_parse"},
 		{name: "scalar", body: "value\n", wantCode: "contract_loader.optional_declaration_file_shape", wantPresence: "scalar"},
+		{name: "double-quoted empty scalar", body: "\"\"\n", wantCode: "contract_loader.optional_declaration_file_shape", wantPresence: "empty_scalar"},
+		{name: "single-quoted empty scalar", body: "''\n", wantCode: "contract_loader.optional_declaration_file_shape", wantPresence: "empty_scalar"},
 		{name: "empty sequence", body: "[]\n", wantCode: "contract_loader.optional_declaration_file_shape", wantPresence: "empty_sequence"},
 		{name: "sequence", body: "- value\n", wantCode: "contract_loader.optional_declaration_file_shape", wantPresence: "sequence"},
 	}
