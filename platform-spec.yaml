@@ -337,11 +337,13 @@ contract_formats:
       behavior is never contract authority. Authored provenance uses the alias
       occurrence that introduced an effective value; resolving its semantic
       target never rewrites that authored coordinate to the anchor definition.
-      Typed projection and declaration liveness MUST consume that same effective
-      mapping. A custom typed decoder MUST NOT reinterpret raw yaml.Node content
-      as a second mapping owner, and `<<` MUST never publish as a semantic
-      declaration identity. This applies equally to entities.yaml, policy.yaml,
-      types.yaml, and declaration documents decoded by ordinary mappings.
+      Top-level optional workflow declaration-document projection and file
+      liveness MUST consume that same effective mapping. A decoder of such a
+      document MUST NOT reinterpret raw yaml.Node content as a second top-level
+      mapping owner, and `<<` MUST never publish as a top-level declaration
+      identity. This rule applies to the seven optional workflow declaration
+      documents at their supported scopes; nested declaration-body mappings
+      retain their own typed grammar.
     diagnostics: Read failures and parse/decode failures preserve the current source path and fail closed.
   loader_defaults:
     description: Fields and identifiers that the loader derives from context. Entries marked non-authorable are not accepted
