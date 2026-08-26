@@ -506,9 +506,11 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			}).Validate(); err != nil {
 				t.Fatalf("validate creation occurrence: %v", err)
 			}
-			items, err := store.ListDynamicFlowRuntimeReadiness(ctx)
+			projection, err := store.InspectDynamicFlowRuntimeReadinessForSource(ctx, sourceFact)
+			items := append([]DynamicFlowRuntimeReadiness(nil), projection.CurrentCompleted...)
+			items = append(items, projection.CurrentPending...)
 			if err != nil || len(items) != 1 {
-				t.Fatalf("list readiness: items=%#v err=%v", items, err)
+				t.Fatalf("inspect readiness: items=%#v err=%v", items, err)
 			}
 			if items[0].TopologyReadyAt.IsZero() || !items[0].CreationEventEmittedAt.IsZero() {
 				t.Fatalf("topology-only readiness = %#v", items[0])
@@ -532,7 +534,12 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			revisedCtx := runtimecorrelation.WithBundleSourceFact(ctx, revisedSourceFact)
 			revisedPlan := plan
 			revisedPlan.BundleHash, revisedPlan.BundleSource = revisedSourceFact.StorageValues()
-			reconciled, err := store.ReconcileDynamicFlowRuntimeReadinessPlan(revisedCtx, revisedPlan, readyAt.Add(2*time.Second))
+			reviseWorkflowActivationRunSourceForTest(t, store, revisedCtx, runID, revisedSourceFact)
+			observed, found, err := store.LoadDynamicFlowRuntimeReadiness(revisedCtx, runID, runtimeflowidentity.RouteForInstancePath(instance.StorageRef))
+			if err != nil || !found {
+				t.Fatalf("load source-transition readiness: found=%v err=%v", found, err)
+			}
+			reconciled, err := store.ReconcileDynamicFlowRuntimeReadinessPlan(revisedCtx, observed, revisedPlan, readyAt.Add(2*time.Second))
 			if err != nil || !reconciled {
 				t.Fatalf("reconcile same-version revised-source readiness plan: changed=%v err=%v", reconciled, err)
 			}
@@ -552,7 +559,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			conflictingCreationEvent := *revisedPlan.CreationEvent
 			conflictingCreationEvent.EventID = uuid.NewString()
 			conflictingCreation.CreationEvent = &conflictingCreationEvent
-			if _, err := store.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, conflictingCreation, readyAt.Add(3*time.Second)); err == nil {
+			if _, err := store.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, revised, conflictingCreation, readyAt.Add(3*time.Second)); err == nil {
 				t.Fatal("revised readiness replaced an emitted creation occurrence")
 			}
 			if err := store.MarkDynamicFlowRuntimeTopologyReady(revisedCtx, plan, readyAt.Add(4*time.Second)); err == nil {
@@ -577,6 +584,7 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 				TemplateID: "review", ScopeKey: "review", InstanceID: "inst-no-auto",
 				InstancePath: "review/inst-no-auto", EntityID: uuid.NewString(), HasStoredPath: true,
 			}
+			noAutoPlan.BundleHash, noAutoPlan.BundleSource = revisedSourceFact.StorageValues()
 			noAutoPlan.CreationEvent = nil
 			noAutoInstance := instance
 			noAutoInstance.InstanceID = noAutoPlan.Identity.InstanceID
@@ -584,20 +592,24 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			noAutoInstance.EntityID = noAutoPlan.Identity.EntityID
 			noAutoInstance.RuntimeReadiness = &noAutoPlan
 			noAutoInstance.Fields = map[string]any{}
-			if result, err := store.MaterializeInitialEntry(ctx, noAutoInstance, occurredAt); err != nil || result != WorkflowInitialMaterializationCreated {
+			if result, err := store.MaterializeInitialEntry(revisedCtx, noAutoInstance, occurredAt); err != nil || result != WorkflowInitialMaterializationCreated {
 				t.Fatalf("no-auto materialization: result=%d err=%v", result, err)
 			}
-			if err := store.MarkDynamicFlowRuntimeTopologyReady(ctx, noAutoPlan, readyAt); err != nil {
+			if err := store.MarkDynamicFlowRuntimeTopologyReady(revisedCtx, noAutoPlan, readyAt); err != nil {
 				t.Fatalf("mark no-auto topology ready: %v", err)
 			}
 			changedMode := noAutoPlan
 			changedMode.ExecutionMode = executionmode.Mock
-			if _, err := store.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, changedMode, readyAt.Add(5*time.Second)); err == nil {
+			observedNoAuto, found, err := store.LoadDynamicFlowRuntimeReadiness(revisedCtx, runID, runtimeflowidentity.RouteForInstancePath(noAutoInstance.StorageRef))
+			if err != nil || !found {
+				t.Fatalf("load no-auto readiness: found=%v err=%v", found, err)
+			}
+			if _, err := store.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, observedNoAuto, changedMode, readyAt.Add(5*time.Second)); err == nil {
 				t.Fatal("readiness reconciliation changed immutable execution mode")
 			}
 			revisedNoAutoPlan := noAutoPlan
-			revisedNoAutoPlan.BundleHash, revisedNoAutoPlan.BundleSource = revisedSourceFact.StorageValues()
-			if changed, err := store.ReconcileDynamicFlowRuntimeReadinessPlan(revisedCtx, revisedNoAutoPlan, readyAt.Add(5*time.Second)); err != nil || !changed {
+			revisedNoAutoPlan.WorkflowVersion += "-revised"
+			if changed, err := store.ReconcileDynamicFlowRuntimeReadinessPlan(revisedCtx, observedNoAuto, revisedNoAutoPlan, readyAt.Add(5*time.Second)); err != nil || !changed {
 				t.Fatalf("reconcile revised no-auto readiness: changed=%v err=%v", changed, err)
 			}
 			revisedNoAuto, found, err := store.LoadDynamicFlowRuntimeReadiness(revisedCtx, runID, runtimeflowidentity.RouteForInstancePath(noAutoInstance.StorageRef))
@@ -644,7 +656,9 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			if successor, found, err := store.LoadDynamicFlowRuntimeReadiness(nextContext, nextRunID, runtimeflowidentity.RouteForInstancePath(instance.StorageRef)); err != nil || !found || !successor.TopologyReadyAt.IsZero() {
 				t.Fatalf("successor generation readiness: found=%v readiness=%#v err=%v", found, successor, err)
 			}
-			items, err = store.ListDynamicFlowRuntimeReadiness(nextContext)
+			projection, err = store.InspectDynamicFlowRuntimeReadinessForSource(nextContext, sourceFact)
+			items = append(items[:0], projection.CurrentCompleted...)
+			items = append(items, projection.CurrentPending...)
 			if err != nil || len(items) != 1 || items[0].Plan.RunID != nextRunID {
 				t.Fatalf("active generation readiness: items=%#v err=%v", items, err)
 			}
@@ -655,7 +669,9 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 				nextRunID,
 				runtimerunlifecycle.StatePaused,
 			)
-			items, err = store.ListDynamicFlowRuntimeReadiness(nextContext)
+			projection, err = store.InspectDynamicFlowRuntimeReadinessForSource(nextContext, sourceFact)
+			items = append(items[:0], projection.CurrentCompleted...)
+			items = append(items, projection.CurrentPending...)
 			if err != nil || len(items) != 1 || items[0].Plan.RunID != nextRunID {
 				t.Fatalf("paused generation readiness: items=%#v err=%v", items, err)
 			}
@@ -674,7 +690,9 @@ func TestDynamicFlowRuntimeReadinessPersistsAndReplaysExactlyOnBothStores(t *tes
 			} else if successor.Eligible() {
 				t.Fatal("terminal successor readiness remained eligible")
 			}
-			items, err = store.ListDynamicFlowRuntimeReadiness(nextContext)
+			projection, err = store.InspectDynamicFlowRuntimeReadinessForSource(nextContext, sourceFact)
+			items = append(items[:0], projection.CurrentCompleted...)
+			items = append(items, projection.CurrentPending...)
 			if err != nil || len(items) != 0 {
 				t.Fatalf("terminal generation readiness: items=%#v err=%v", items, err)
 			}
@@ -713,6 +731,28 @@ func transitionWorkflowActivationRunForTest(
 		return err
 	}); err != nil {
 		t.Fatalf("transition workflow activation run %s to %s: %v", runID, state, err)
+	}
+}
+
+func reviseWorkflowActivationRunSourceForTest(
+	t *testing.T,
+	store *workflowInstanceStore,
+	ctx context.Context,
+	runID string,
+	source runtimecorrelation.BundleSourceFact,
+) {
+	t.Helper()
+	if store == nil || store.testRuntimeMutation() == nil {
+		t.Fatal("workflow activation source revision requires runtime mutation owner")
+	}
+	if err := store.testRuntimeMutation().RunRuntimeMutationContext(ctx, func(txctx context.Context) error {
+		_, err := store.runLifecycle.ReviseRunSource(txctx, runtimerunlifecycle.SourceRevisionRequest{
+			RunID:  runID,
+			Source: source,
+		})
+		return err
+	}); err != nil {
+		t.Fatalf("revise workflow activation run source: %v", err)
 	}
 }
 

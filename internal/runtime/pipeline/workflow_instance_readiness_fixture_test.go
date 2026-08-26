@@ -99,6 +99,7 @@ func (s *workflowInstanceStore) dynamicFlowRuntimeReadinessPlanEqual(
 // when an existing flow instance is ensured against a revised semantic source.
 func (s *workflowInstanceStore) legacyReconcileDynamicFlowRuntimeReadinessPlan(
 	ctx context.Context,
+	observed DynamicFlowRuntimeReadiness,
 	expected DynamicFlowRuntimeReadinessPlan,
 	observedAt time.Time,
 ) (bool, error) {
@@ -140,6 +141,25 @@ func (s *workflowInstanceStore) legacyReconcileDynamicFlowRuntimeReadinessPlan(
 				"dynamic flow runtime readiness reconciliation requires one active eligible record: %s",
 				instancePath,
 			)
+		}
+		observedJSON, err := canonicaljson.Bytes(observed.Plan)
+		if err != nil {
+			return err
+		}
+		currentObservationJSON, err := canonicaljson.Bytes(current.Plan)
+		if err != nil {
+			return err
+		}
+		if string(observedJSON) != string(currentObservationJSON) ||
+			!observed.OwningRunSource.Matches(current.OwningRunSource) ||
+			strings.TrimSpace(observed.RunStatus) != strings.TrimSpace(current.RunStatus) ||
+			strings.TrimSpace(observed.InstanceStatus) != strings.TrimSpace(current.InstanceStatus) ||
+			!observed.InstanceTerminatedAt.Equal(current.InstanceTerminatedAt) ||
+			!observed.TopologyReadyAt.Equal(current.TopologyReadyAt) ||
+			!observed.CreationEventEmittedAt.Equal(current.CreationEventEmittedAt) {
+			return &DynamicFlowRuntimeReadinessObservationConflict{
+				RunID: normalized.RunID, InstancePath: instancePath, Coordinate: "test_observation",
+			}
 		}
 		if current.Plan.Identity != normalized.Identity || current.Plan.RunID != normalized.RunID {
 			return fmt.Errorf("dynamic flow runtime readiness reconciliation identity changed for %s", instancePath)
@@ -236,7 +256,8 @@ func (s *workflowInstanceStore) legacyLoadDynamicFlowRuntimeReadiness(
 	instancePath := route.InstancePath
 	query := `
 		SELECT readiness.plan, readiness.topology_ready_at, readiness.creation_event_emitted_at,
-		       run.status, instance.status, instance.terminated_at
+		       run.bundle_hash, run.bundle_source, run.status,
+		       instance.status, instance.terminated_at
 		FROM flow_instance_runtime_readiness AS readiness
 		JOIN flow_instances AS instance ON instance.instance_id = readiness.instance_id
 		JOIN runs AS run ON run.run_id = readiness.run_id
@@ -245,7 +266,8 @@ func (s *workflowInstanceStore) legacyLoadDynamicFlowRuntimeReadiness(
 	if s.isSQLite() {
 		query = `
 			SELECT readiness.plan, readiness.topology_ready_at, readiness.creation_event_emitted_at,
-			       run.status, instance.status, instance.terminated_at
+			       run.bundle_hash, run.bundle_source, run.status,
+			       instance.status, instance.terminated_at
 			FROM flow_instance_runtime_readiness AS readiness
 			JOIN flow_instances AS instance ON instance.instance_id = readiness.instance_id
 			JOIN runs AS run ON run.run_id = readiness.run_id
@@ -253,18 +275,18 @@ func (s *workflowInstanceStore) legacyLoadDynamicFlowRuntimeReadiness(
 		`
 	}
 	var raw []byte
-	var runStatus, instanceStatus string
+	var bundleHash, bundleSource, runStatus, instanceStatus string
 	var topologyReadyAt, creationEventEmittedAt, instanceTerminatedAt dynamicFlowRuntimeReadinessTime
 	var err error
 	if tx, ok := sqlTxFromContext(ctx); ok && tx != nil {
 		err = tx.QueryRowContext(ctx, query, runID, instancePath).Scan(
 			&raw, &topologyReadyAt, &creationEventEmittedAt,
-			&runStatus, &instanceStatus, &instanceTerminatedAt,
+			&bundleHash, &bundleSource, &runStatus, &instanceStatus, &instanceTerminatedAt,
 		)
 	} else {
 		err = dbQueryRowContext(ctx, s.testDB(), query, runID, instancePath).Scan(
 			&raw, &topologyReadyAt, &creationEventEmittedAt,
-			&runStatus, &instanceStatus, &instanceTerminatedAt,
+			&bundleHash, &bundleSource, &runStatus, &instanceStatus, &instanceTerminatedAt,
 		)
 	}
 	if err == sql.ErrNoRows {
@@ -277,17 +299,21 @@ func (s *workflowInstanceStore) legacyLoadDynamicFlowRuntimeReadiness(
 		runID, instancePath, raw, runStatus, instanceStatus, instanceTerminatedAt,
 		topologyReadyAt, creationEventEmittedAt,
 	)
+	if err == nil {
+		item.OwningRunSource, err = runtimecorrelation.DecodeBundleSourceFact(bundleHash, bundleSource)
+	}
 	return item, err == nil, err
 }
 
-func (s *workflowInstanceStore) legacyListDynamicFlowRuntimeReadiness(ctx context.Context) ([]DynamicFlowRuntimeReadiness, error) {
+func (s *workflowInstanceStore) legacyQueryAllDynamicFlowRuntimeReadiness(ctx context.Context) ([]DynamicFlowRuntimeReadiness, error) {
 	if s == nil || s.testDB() == nil {
 		return nil, fmt.Errorf("workflow instance store is required")
 	}
 	query := `
 		SELECT readiness.run_id::text, readiness.instance_id, readiness.plan,
 		       readiness.topology_ready_at, readiness.creation_event_emitted_at,
-		       run.status, instance.status, instance.terminated_at
+		       run.bundle_hash, run.bundle_source, run.status,
+		       instance.status, instance.terminated_at
 		FROM flow_instance_runtime_readiness AS readiness
 		JOIN flow_instances AS instance ON instance.instance_id = readiness.instance_id
 		JOIN runs AS run ON run.run_id = readiness.run_id
@@ -299,7 +325,8 @@ func (s *workflowInstanceStore) legacyListDynamicFlowRuntimeReadiness(ctx contex
 		query = `
 			SELECT readiness.run_id, readiness.instance_id, readiness.plan,
 			       readiness.topology_ready_at, readiness.creation_event_emitted_at,
-			       run.status, instance.status, instance.terminated_at
+			       run.bundle_hash, run.bundle_source, run.status,
+			       instance.status, instance.terminated_at
 			FROM flow_instance_runtime_readiness AS readiness
 			JOIN flow_instances AS instance ON instance.instance_id = readiness.instance_id
 			JOIN runs AS run ON run.run_id = readiness.run_id
@@ -317,12 +344,12 @@ func (s *workflowInstanceStore) legacyListDynamicFlowRuntimeReadiness(ctx contex
 	for rows.Next() {
 		var runID, instancePath string
 		var raw []byte
-		var runStatus, instanceStatus string
+		var bundleHash, bundleSource, runStatus, instanceStatus string
 		var topologyReadyAt, creationEventEmittedAt, instanceTerminatedAt dynamicFlowRuntimeReadinessTime
 		if err := rows.Scan(
 			&runID, &instancePath, &raw,
 			&topologyReadyAt, &creationEventEmittedAt,
-			&runStatus, &instanceStatus, &instanceTerminatedAt,
+			&bundleHash, &bundleSource, &runStatus, &instanceStatus, &instanceTerminatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -333,12 +360,16 @@ func (s *workflowInstanceStore) legacyListDynamicFlowRuntimeReadiness(ctx contex
 		if err != nil {
 			return nil, err
 		}
+		item.OwningRunSource, err = runtimecorrelation.DecodeBundleSourceFact(bundleHash, bundleSource)
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, item)
 	}
 	return out, rows.Err()
 }
 
-func (s *workflowInstanceStore) legacyListDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]DynamicFlowRuntimeReadinessKey, error) {
+func (s *workflowInstanceStore) legacyDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]DynamicFlowRuntimeReadinessKey, error) {
 	if s == nil || s.testDB() == nil {
 		return nil, fmt.Errorf("workflow instance store is required")
 	}

@@ -9,11 +9,11 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 )
 
-func (s *workflowInstanceStore) ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error) {
+func (s *workflowInstanceStore) ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, observed DynamicFlowRuntimeReadiness, plan DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error) {
 	if s == nil || s.readiness == nil {
 		return false, fmt.Errorf("dynamic flow runtime readiness owner is required")
 	}
-	return s.readiness.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, plan, observedAt)
+	return s.readiness.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, observed, plan, observedAt)
 }
 
 func (s *workflowInstanceStore) LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID string, route runtimeflowidentity.Route) (DynamicFlowRuntimeReadiness, bool, error) {
@@ -23,18 +23,18 @@ func (s *workflowInstanceStore) LoadDynamicFlowRuntimeReadiness(ctx context.Cont
 	return s.readiness.LoadDynamicFlowRuntimeReadiness(ctx, runID, route)
 }
 
-func (s *workflowInstanceStore) ListDynamicFlowRuntimeReadiness(ctx context.Context) ([]DynamicFlowRuntimeReadiness, error) {
+func (s *workflowInstanceStore) InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source runtimecorrelation.BundleSourceFact) (DynamicFlowRuntimeReadinessProjection, error) {
 	if s == nil || s.readiness == nil {
-		return nil, fmt.Errorf("dynamic flow runtime readiness owner is required")
+		return DynamicFlowRuntimeReadinessProjection{}, fmt.Errorf("dynamic flow runtime readiness persistence is required")
 	}
-	return s.readiness.ListDynamicFlowRuntimeReadiness(ctx)
+	return s.readiness.InspectDynamicFlowRuntimeReadinessForSource(ctx, source)
 }
 
-func (s *workflowInstanceStore) InspectDynamicFlowRuntimeStartupProjection(ctx context.Context, source runtimecorrelation.BundleSourceFact) (DynamicFlowRuntimeStartupProjection, error) {
+func (s *workflowInstanceStore) InspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, runID string, source runtimecorrelation.BundleSourceFact) ([]DynamicFlowRuntimeReadiness, error) {
 	if s == nil || s.readiness == nil {
-		return DynamicFlowRuntimeStartupProjection{}, fmt.Errorf("dynamic flow runtime readiness persistence is required")
+		return nil, fmt.Errorf("dynamic flow runtime readiness persistence is required")
 	}
-	return s.readiness.InspectDynamicFlowRuntimeStartupProjection(ctx, source)
+	return s.readiness.InspectDynamicFlowRuntimeReadinessForRun(ctx, runID, source)
 }
 
 func (s *workflowInstanceStore) MarkDynamicFlowRuntimeTopologyReady(ctx context.Context, plan DynamicFlowRuntimeReadinessPlan, readyAt time.Time) error {

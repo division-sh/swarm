@@ -886,6 +886,7 @@ func scanExactActiveFlowInstanceDescriptors(rows *sql.Rows, runID, label string)
 		readiness, err := runtimepipeline.DecodeDynamicFlowRuntimeReadinessPersistenceRecord(
 			runtimepipeline.DynamicFlowRuntimeReadinessPersistenceRecord{
 				RunID: runID, InstancePath: instancePath, Plan: []byte(planRaw.String),
+				OwningRunBundleHash: bundleHash.String, OwningRunBundleSource: bundleSource.String,
 			},
 		)
 		if err != nil {

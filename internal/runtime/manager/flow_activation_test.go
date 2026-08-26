@@ -426,6 +426,14 @@ func setFlowActivationManagerSemanticSource(
 	}
 	am.semanticSource = source
 	am.semanticReadinessSource = dynamicFlowRuntimeReadinessSource{fact: fact, source: source}
+	if instances, ok := am.workflowInstances.(*flowActivationTestInstanceStore); ok {
+		instances.readinessMu.Lock()
+		for key, item := range instances.readiness {
+			item.OwningRunSource = fact
+			instances.readiness[key] = item
+		}
+		instances.readinessMu.Unlock()
+	}
 }
 
 func activateFlowInstanceForTest(
@@ -528,11 +536,17 @@ func (s *flowActivationTestInstanceStore) MaterializeInitialEntry(_ context.Cont
 		if s.readiness == nil {
 			s.readiness = map[string]runtimepipeline.DynamicFlowRuntimeReadiness{}
 		}
+		owningSource, err := runtimecorrelation.DecodeBundleSourceFact(plan.BundleHash, plan.BundleSource)
+		if err != nil {
+			s.readinessMu.Unlock()
+			return runtimepipeline.WorkflowInitialMaterializationUnknown, err
+		}
 		s.readiness[flowActivationReadinessKey(plan.RunID, instance.StorageRef)] = runtimepipeline.DynamicFlowRuntimeReadiness{
-			InstancePath:   instance.StorageRef,
-			Plan:           plan,
-			RunStatus:      "running",
-			InstanceStatus: "active",
+			InstancePath:    instance.StorageRef,
+			Plan:            plan,
+			OwningRunSource: owningSource,
+			RunStatus:       "running",
+			InstanceStatus:  "active",
 		}
 		s.readinessMu.Unlock()
 	}
@@ -599,6 +613,7 @@ func (s *flowActivationTestInstanceStore) LoadDynamicFlowRuntimeReadiness(ctx co
 
 func (s *flowActivationTestInstanceStore) ReconcileDynamicFlowRuntimeReadinessPlan(
 	_ context.Context,
+	observed runtimepipeline.DynamicFlowRuntimeReadiness,
 	plan runtimepipeline.DynamicFlowRuntimeReadinessPlan,
 	_ time.Time,
 ) (bool, error) {
@@ -612,6 +627,11 @@ func (s *flowActivationTestInstanceStore) ReconcileDynamicFlowRuntimeReadinessPl
 	current, ok := s.readiness[key]
 	if !ok || !current.Eligible() {
 		return false, fmt.Errorf("readiness not found")
+	}
+	if !reflect.DeepEqual(current, observed) {
+		return false, &runtimepipeline.DynamicFlowRuntimeReadinessObservationConflict{
+			RunID: normalized.RunID, InstancePath: normalized.Identity.InstancePath, Coordinate: "test_observation",
+		}
 	}
 	if current.Plan.ExecutionMode != normalized.ExecutionMode {
 		return false, fmt.Errorf("cannot revise readiness execution mode")
@@ -646,42 +666,72 @@ func (s *flowActivationTestInstanceStore) ReconcileDynamicFlowRuntimeReadinessPl
 	return true, nil
 }
 
-func (s *flowActivationTestInstanceStore) ListDynamicFlowRuntimeReadiness(context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
+func (s *flowActivationTestInstanceStore) dynamicFlowRuntimeReadinessForSource(source runtimecorrelation.BundleSourceFact) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
 	s.readinessMu.Lock()
 	defer s.readinessMu.Unlock()
 	out := make([]runtimepipeline.DynamicFlowRuntimeReadiness, 0, len(s.readiness))
 	for _, item := range s.readiness {
-		if item.Eligible() {
+		if item.OwningRunSource.Matches(source) && item.Eligible() {
 			out = append(out, item)
 		}
 	}
 	return out, nil
 }
 
-func (s *flowActivationTestInstanceStore) ListDynamicFlowRuntimeReadinessKeys(context.Context) ([]runtimepipeline.DynamicFlowRuntimeReadinessKey, error) {
-	s.readinessMu.Lock()
-	defer s.readinessMu.Unlock()
-	var keys []runtimepipeline.DynamicFlowRuntimeReadinessKey
-	for _, item := range s.readiness {
-		keys = append(keys, runtimepipeline.DynamicFlowRuntimeReadinessKey{
-			RunID:        item.Plan.RunID,
-			InstancePath: item.InstancePath,
-		})
+func seedForeignMalformedDynamicFlowRuntimeReadiness(t *testing.T, store *flowActivationTestInstanceStore) string {
+	t.Helper()
+	foreignSource, err := runtimecorrelation.NewEphemeralBundleSourceFact(
+		"bundle-v1:sha256:" + strings.Repeat("f", 64),
+	)
+	if err != nil {
+		t.Fatalf("construct foreign readiness source: %v", err)
 	}
-	return keys, nil
+	key := flowActivationReadinessKey(uuid.NewString(), "review/foreign-"+uuid.NewString())
+	store.readinessMu.Lock()
+	if store.readiness == nil {
+		store.readiness = map[string]runtimepipeline.DynamicFlowRuntimeReadiness{}
+	}
+	store.readiness[key] = runtimepipeline.DynamicFlowRuntimeReadiness{
+		InstancePath: "review/foreign", OwningRunSource: foreignSource,
+		RunStatus: "running", InstanceStatus: "active",
+	}
+	store.readinessMu.Unlock()
+	return key
 }
 
-func (s *flowActivationTestInstanceStore) InspectDynamicFlowRuntimeStartupProjection(ctx context.Context, _ runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeStartupProjection, error) {
-	items, err := s.ListDynamicFlowRuntimeReadiness(ctx)
-	projection := runtimepipeline.DynamicFlowRuntimeStartupProjection{}
+func (s *flowActivationTestInstanceStore) InspectDynamicFlowRuntimeReadinessForSource(_ context.Context, source runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error) {
+	items, err := s.dynamicFlowRuntimeReadinessForSource(source)
+	projection := runtimepipeline.DynamicFlowRuntimeReadinessProjection{}
 	for _, item := range items {
+		planSource, sourceErr := runtimecorrelation.DecodeBundleSourceFact(item.Plan.BundleHash, item.Plan.BundleSource)
+		if sourceErr != nil {
+			return projection, sourceErr
+		}
+		if !planSource.Matches(source) {
+			projection.SourceTransitionRequired = append(projection.SourceTransitionRequired, item)
+			continue
+		}
 		if item.Pending() {
-			projection.Pending = append(projection.Pending, item)
+			projection.CurrentPending = append(projection.CurrentPending, item)
 		} else {
-			projection.Completed = append(projection.Completed, item)
+			projection.CurrentCompleted = append(projection.CurrentCompleted, item)
 		}
 	}
 	return projection, err
+}
+
+func (s *flowActivationTestInstanceStore) InspectDynamicFlowRuntimeReadinessForRun(_ context.Context, runID string, source runtimecorrelation.BundleSourceFact) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
+	items, err := s.dynamicFlowRuntimeReadinessForSource(source)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]runtimepipeline.DynamicFlowRuntimeReadiness, 0, len(items))
+	for _, item := range items {
+		if item.Plan.RunID == strings.TrimSpace(runID) {
+			result = append(result, item)
+		}
+	}
+	return result, nil
 }
 
 func (s *flowActivationTestInstanceStore) MarkDynamicFlowRuntimeTopologyReady(
@@ -1842,10 +1892,16 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsConcurrentPlanRevision(t *testing
 
 	var revisionErr error
 	instances.beforeTopologyMark = func(expected runtimepipeline.DynamicFlowRuntimeReadinessPlan) {
+		observed, found, err := instances.LoadDynamicFlowRuntimeReadiness(context.Background(), expected.RunID, expected.Identity.Route())
+		if err != nil || !found {
+			revisionErr = errors.Join(err, errors.New("concurrent readiness observation not found"))
+			return
+		}
 		revised := expected
 		revised.WorkflowVersion += "-concurrent-revision"
 		changed, err := instances.ReconcileDynamicFlowRuntimeReadinessPlan(
 			context.Background(),
+			observed,
 			revised,
 			time.Now().UTC(),
 		)
@@ -1923,6 +1979,7 @@ func TestDynamicFlowRuntimeReadinessRejectsRevisionAfterAdmissionBeforeExecution
 	revised.WorkflowVersion = "v-revised-after-admission"
 	if changed, err := instances.ReconcileDynamicFlowRuntimeReadinessPlan(
 		ctx,
+		current,
 		revised,
 		time.Now().UTC(),
 	); err != nil || !changed {
@@ -2105,10 +2162,16 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 	var staleErr error
 	var staleSourceErr error
 	instances.afterTopologyMark = func(completed runtimepipeline.DynamicFlowRuntimeReadinessPlan) {
+		observed, found, err := instances.LoadDynamicFlowRuntimeReadiness(intermediateCtx, completed.RunID, completed.Identity.Route())
+		if err != nil || !found {
+			revisionErr = errors.Join(err, errors.New("intermediate readiness observation not found"))
+			return
+		}
 		intermediate := completed
 		intermediate.BundleHash, intermediate.BundleSource = intermediateFact.StorageValues()
 		changed, err := instances.ReconcileDynamicFlowRuntimeReadinessPlan(
 			intermediateCtx,
+			observed,
 			intermediate,
 			time.Now().UTC(),
 		)
@@ -2120,10 +2183,16 @@ func TestDynamicFlowRuntimeTopologyReadyRejectsPostCASPlanRevision(t *testing.T)
 			revisionErr = errors.New("post-CAS intermediate readiness plan was not revised")
 			return
 		}
+		observed, found, err = instances.LoadDynamicFlowRuntimeReadiness(successorCtx, completed.RunID, completed.Identity.Route())
+		if err != nil || !found {
+			revisionErr = errors.Join(err, errors.New("successor readiness observation not found"))
+			return
+		}
 		revised := intermediate
 		revised.BundleHash, revised.BundleSource = revisedFact.StorageValues()
 		changed, err = instances.ReconcileDynamicFlowRuntimeReadinessPlan(
 			successorCtx,
+			observed,
 			revised,
 			time.Now().UTC(),
 		)
@@ -2243,6 +2312,7 @@ func TestDynamicFlowRuntimeReadinessSameVersionSourceReplacementQueuesExactPlan(
 		t.Fatalf("revised bundle source fact: %v", err)
 	}
 	setFlowActivationManagerSemanticSource(am, source, revisedFact)
+	foreignKey := seedForeignMalformedDynamicFlowRuntimeReadiness(t, instances)
 	revisedCtx := runtimecorrelation.WithRunID(
 		runtimecorrelation.WithBundleSourceFact(testAuthorActivityContext(context.Background()), revisedFact),
 		req.TriggerEvent.RunID(),
@@ -2270,6 +2340,12 @@ func TestDynamicFlowRuntimeReadinessSameVersionSourceReplacementQueuesExactPlan(
 		completed.TopologyReadyAt.IsZero() ||
 		completed.Pending() {
 		t.Fatalf("same-version revised source did not recomplete exact plan: %#v", completed)
+	}
+	instances.readinessMu.Lock()
+	_, foreignSurvived := instances.readiness[foreignKey]
+	instances.readinessMu.Unlock()
+	if !foreignSurvived {
+		t.Fatal("live source revision mutated foreign malformed readiness")
 	}
 }
 
@@ -2508,7 +2584,7 @@ func TestDynamicFlowRuntimeReadinessSameVersionRouteRevisionReplacesExactTopolog
 	}
 }
 
-func TestDynamicFlowRuntimeReadinessNoAutoEmitArmFailureRemainsPendingUntilAutomaticRetry(t *testing.T) {
+func TestDynamicFlowRuntimeReadinessNoAutoEmitArmFailureConvergesAfterMissedSignal(t *testing.T) {
 	completed := make(chan struct{}, 1)
 	instances := &flowActivationTestInstanceStore{
 		topologyMarked: func() {
@@ -2530,6 +2606,7 @@ func TestDynamicFlowRuntimeReadinessNoAutoEmitArmFailureRemainsPendingUntilAutom
 	am := newFlowActivationManager(t, bus, instances)
 	bundle := testFlowBundle(t, "")
 	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(bundle))
+	foreignKey := seedForeignMalformedDynamicFlowRuntimeReadiness(t, instances)
 	req := testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1")
 
 	if err := activateFlowInstanceForTest(am, testAuthorActivityContext(context.Background()), req); err == nil {
@@ -2546,6 +2623,15 @@ func TestDynamicFlowRuntimeReadinessNoAutoEmitArmFailureRemainsPendingUntilAutom
 	if bus.HasFlowInstanceRoute(req.Instance.Route()) {
 		t.Fatal("failed no-auto readiness left process route published")
 	}
+	for {
+		select {
+		case <-am.dynamicFlowReadinessSignal:
+			continue
+		default:
+		}
+		break
+	}
+	am.dynamicFlowReadinessRetryInterval = 10 * time.Millisecond
 
 	if err := am.Run(managedExecutionTestContext(t, testAuthorActivityContext(context.Background()))); err != nil {
 		t.Fatalf("Run automatic readiness owner: %v", err)
@@ -2565,6 +2651,12 @@ func TestDynamicFlowRuntimeReadinessNoAutoEmitArmFailureRemainsPendingUntilAutom
 	}
 	if armCalls != 2 || len(bus.published) != 0 {
 		t.Fatalf("no-auto retry side effects: arms=%d events=%d, want 2/0", armCalls, len(bus.published))
+	}
+	instances.readinessMu.Lock()
+	_, foreignSurvived := instances.readiness[foreignKey]
+	instances.readinessMu.Unlock()
+	if !foreignSurvived {
+		t.Fatal("automatic retry mutated foreign malformed readiness")
 	}
 }
 
@@ -2611,7 +2703,7 @@ func TestDynamicFlowRuntimeReadinessCoalescesConcurrentAttemptsByRunAndInstance(
 		followerErrs <- am.reconcilePendingDynamicFlowRuntimeReadiness(pendingCtx)
 	}()
 	go func() {
-		followerErrs <- am.ReconcileDynamicFlowRuntimeStartupProjection(startupCtx, authorActivityTestBundleSourceFact)
+		followerErrs <- am.ReconcileDynamicFlowRuntimeStartupReadiness(startupCtx, authorActivityTestBundleSourceFact, true)
 	}()
 	cancelEnsure()
 	cancelPending()
@@ -2731,8 +2823,9 @@ func TestRecoverableStateSnapshotIncludesReadinessOnlyPendingWork(t *testing.T) 
 	instances := &flowActivationTestInstanceStore{
 		readiness: map[string]runtimepipeline.DynamicFlowRuntimeReadiness{
 			flowActivationReadinessKey(runID, path): {
-				InstancePath: path,
-				RunStatus:    "running", InstanceStatus: "active",
+				InstancePath:    path,
+				OwningRunSource: authorActivityTestBundleSourceFact,
+				RunStatus:       "running", InstanceStatus: "active",
 				Plan: runtimepipeline.DynamicFlowRuntimeReadinessPlan{
 					RunID: runID, BundleHash: bundleHash, BundleSource: bundleSource, WorkflowVersion: "1.0.0", ExecutionMode: executionmode.Live,
 					Identity: runtimeflowidentity.Instance{
@@ -2744,6 +2837,8 @@ func TestRecoverableStateSnapshotIncludesReadinessOnlyPendingWork(t *testing.T) 
 		},
 	}
 	am := newFlowActivationManager(t, &flowActivationTestBus{}, instances)
+	setFlowActivationManagerSemanticSource(am, semanticview.Wrap(testFlowBundle(t, "")))
+	seedForeignMalformedDynamicFlowRuntimeReadiness(t, instances)
 	snapshot, err := am.RecoverableStateSnapshot(testAuthorActivityContext(context.Background()))
 	if err != nil {
 		t.Fatalf("RecoverableStateSnapshot: %v", err)
@@ -2781,8 +2876,8 @@ func TestSourceScopedStartupFinalizesIncompleteDynamicFlowRuntimeReadiness(t *te
 	restartBus := &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}
 	restarted := newFlowActivationManager(t, restartBus, instances, agents)
 	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
-	if err := restarted.ReconcileDynamicFlowRuntimeStartupProjection(ctx, authorActivityTestBundleSourceFact); err != nil {
-		t.Fatalf("ReconcileDynamicFlowRuntimeStartupProjection: %v", err)
+	if err := restarted.ReconcileDynamicFlowRuntimeStartupReadiness(ctx, authorActivityTestBundleSourceFact, true); err != nil {
+		t.Fatalf("ReconcileDynamicFlowRuntimeStartupReadiness: %v", err)
 	}
 	if _, ok := testAgentConfig(t, restarted, "reviewer", "review/inst-1"); !ok {
 		t.Fatal("restarted manager did not restore first declared agent")
@@ -2796,11 +2891,84 @@ func TestSourceScopedStartupFinalizesIncompleteDynamicFlowRuntimeReadiness(t *te
 	if len(restartBus.published) != 1 {
 		t.Fatalf("startup creation event count = %d, want one", len(restartBus.published))
 	}
-	if err := restarted.ReconcileDynamicFlowRuntimeStartupProjection(ctx, authorActivityTestBundleSourceFact); err != nil {
-		t.Fatalf("second ReconcileDynamicFlowRuntimeStartupProjection: %v", err)
+	if err := restarted.ReconcileDynamicFlowRuntimeStartupReadiness(ctx, authorActivityTestBundleSourceFact, true); err != nil {
+		t.Fatalf("second ReconcileDynamicFlowRuntimeStartupReadiness: %v", err)
 	}
 	if len(restartBus.published) != 1 {
 		t.Fatalf("creation events after repeated startup recovery = %d, want one", len(restartBus.published))
+	}
+}
+
+func TestSourceScopedStartupCanonicalizesCompletedPredecessorWithoutReplay(t *testing.T) {
+	instances := &flowActivationTestInstanceStore{}
+	agents := &flowActivationTestStore{}
+	initialBundle := testFlowBundleWithTwoAgents(t, "task.started")
+	req := testActivationRequest(initialBundle, "review", "inst-1", "ent-1", "review/inst-1")
+	initial := newFlowActivationManager(t, &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}, instances, agents)
+	if err := activateFlowInstanceForTest(initial, testAuthorActivityContext(context.Background()), req); err != nil {
+		t.Fatalf("activate predecessor source: %v", err)
+	}
+	before, found, err := instances.LoadDynamicFlowRuntimeReadiness(context.Background(), req.TriggerEvent.RunID(), req.Instance.Route())
+	if err != nil || !found || before.Pending() {
+		t.Fatalf("completed predecessor readiness: found=%v readiness=%#v err=%v", found, before, err)
+	}
+
+	revisedFact, err := runtimecorrelation.NewEphemeralBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("d", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	revisedBundle := testFlowBundleWithTwoAgents(t, "task.started")
+	revisedBundle.Semantics.Version = "v-revised"
+	restarted := newFlowActivationManager(t, &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}, instances, agents)
+	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(revisedBundle), revisedFact)
+	revisedCtx := runtimecorrelation.WithBundleSourceFact(testAuthorActivityContext(context.Background()), revisedFact)
+	if err := restarted.ReconcileDynamicFlowRuntimeStartupReadiness(revisedCtx, revisedFact, false); err != nil {
+		t.Fatalf("canonicalize completed predecessor without replay: %v", err)
+	}
+	after, found, err := instances.LoadDynamicFlowRuntimeReadiness(revisedCtx, req.TriggerEvent.RunID(), req.Instance.Route())
+	wantHash, wantSource := revisedFact.StorageValues()
+	if err != nil || !found || after.Pending() || after.Plan.BundleHash != wantHash || after.Plan.BundleSource != wantSource || after.Plan.WorkflowVersion != "v-revised" {
+		t.Fatalf("canonical completed successor: found=%v readiness=%#v err=%v", found, after, err)
+	}
+	if !after.CreationEventEmittedAt.Equal(before.CreationEventEmittedAt) {
+		t.Fatalf("creation completion changed across startup source transition: before=%s after=%s", before.CreationEventEmittedAt, after.CreationEventEmittedAt)
+	}
+}
+
+func TestSourceScopedStartupRequiresReplayForPendingPredecessor(t *testing.T) {
+	instances := &flowActivationTestInstanceStore{}
+	agents := &flowActivationTestStore{failAgentID: "writer"}
+	initialBundle := testFlowBundleWithTwoAgents(t, "task.started")
+	req := testActivationRequest(initialBundle, "review", "inst-1", "ent-1", "review/inst-1")
+	initial := newFlowActivationManager(t, &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}, instances, agents)
+	if err := activateFlowInstanceForTest(initial, testAuthorActivityContext(context.Background()), req); err == nil {
+		t.Fatal("predecessor activation unexpectedly completed")
+	}
+
+	revisedFact, err := runtimecorrelation.NewEphemeralBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("c", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	revisedBundle := testFlowBundleWithTwoAgents(t, "task.started")
+	revisedBundle.Semantics.Version = "v-revised"
+	agents.failAgentID = ""
+	restarted := newFlowActivationManager(t, &flowActivationTestBus{routeStore: &flowActivationTestRouteStore{}}, instances, agents)
+	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(revisedBundle), revisedFact)
+	revisedCtx := runtimecorrelation.WithBundleSourceFact(testAuthorActivityContext(context.Background()), revisedFact)
+	err = restarted.ReconcileDynamicFlowRuntimeStartupReadiness(revisedCtx, revisedFact, false)
+	if !IsDynamicFlowRuntimeReadinessFinalizationError(err) || !strings.Contains(err.Error(), "requires recovery") {
+		t.Fatalf("pending predecessor without replay error = %v", err)
+	}
+	blocked, found, loadErr := instances.LoadDynamicFlowRuntimeReadiness(revisedCtx, req.TriggerEvent.RunID(), req.Instance.Route())
+	if loadErr != nil || !found || !blocked.Pending() || blocked.Plan.BundleHash == revisedFact.BundleHash() {
+		t.Fatalf("blocked predecessor readiness: found=%v readiness=%#v err=%v", found, blocked, loadErr)
+	}
+	if err := restarted.ReconcileDynamicFlowRuntimeStartupReadiness(revisedCtx, revisedFact, true); err != nil {
+		t.Fatalf("recover pending predecessor: %v", err)
+	}
+	completed, found, loadErr := instances.LoadDynamicFlowRuntimeReadiness(revisedCtx, req.TriggerEvent.RunID(), req.Instance.Route())
+	if loadErr != nil || !found || completed.Pending() || completed.Plan.BundleHash != revisedFact.BundleHash() {
+		t.Fatalf("recovered successor readiness: found=%v readiness=%#v err=%v", found, completed, loadErr)
 	}
 }
 
@@ -2873,7 +3041,8 @@ func TestSourceScopedStartupExcludesTerminalDynamicFlowTopology(t *testing.T) {
 		readiness: map[string]runtimepipeline.DynamicFlowRuntimeReadiness{
 			flowActivationReadinessKey(plan.RunID, req.Instance.InstancePath): {
 				InstancePath: req.Instance.InstancePath, Plan: plan,
-				RunStatus: "cancelled", InstanceStatus: "terminated", InstanceTerminatedAt: terminatedAt,
+				OwningRunSource: authorActivityTestBundleSourceFact,
+				RunStatus:       "cancelled", InstanceStatus: "terminated", InstanceTerminatedAt: terminatedAt,
 			},
 		},
 	}
