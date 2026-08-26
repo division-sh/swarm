@@ -5027,16 +5027,33 @@ engine:
           one typed `InspectDynamicFlowRuntimeStartupProjection` operation that requires the runtime's exact immutable
           `BundleSourceFact`. PostgreSQL and SQLite MUST join readiness to its flow instance and run and constrain canonical
           `runs.bundle_hash` plus `runs.bundle_source` in the database query. An unscoped readiness or route list followed by
-          process-side filtering is forbidden. The projection returns only that source's eligible completed and pending rows;
-          rejects malformed plans, plan/source disagreement, and source-owned active materialized routes without exact
-          readiness; and cannot install topology for terminal runs, inactive or terminated instances, or another source.
+          process-side filtering is forbidden. The projection classifies exact-source eligible rows into three disjoint sets.
+          `current_completed` means the owning run and normalized plan both match the requested source and durable readiness is
+          complete. `current_pending` means both source coordinates match but readiness is incomplete. `source_transition_required`
+          means the SQL-selected owning run matches the requested current source while an otherwise valid exact run/instance
+          plan still carries a predecessor source; this class MUST retain whether predecessor readiness was complete. A
+          predecessor plan is never current completed topology and is never reconstructed. Malformed or version-invalid plans,
+          run/instance identity disagreement, changed-between-step state, and source-owned active materialized template routes
+          without exact readiness fail closed. Static routes are not dynamic-readiness-owned. Terminal runs, inactive or
+          terminated instances, and foreign runs cannot install or deny topology for the requested source.
           Serve composition performs observation-only projection inspection for every constructed context before any runtime
-          starts, so a pending or invalid context refuses multi-context serve without cross-context mutation. Runtime startup
-          repeats its own inspection before Manager run to fence races. When replay is disabled, pending readiness refuses
-          before mutation. When replay is enabled, the existing keyed reconciler may complete pending work under its existing
-          authority, but unresolved pending work still refuses before Manager run. After Manager run starts, the operation is
-          reloaded rather than trusting an earlier snapshot. One bounded topology-only consumer reconciles only those freshly
-          returned completed rows through the canonical lifecycle owner, proves each exact agent
+          starts. An invalid row, current pending row without replay authority, or predecessor-pending source transition without
+          replay authority refuses all contexts before cross-context mutation; a predecessor-completed transition is valid
+          required work rather than completed topology. Runtime startup repeats its own source inspection to fence races.
+          Before Manager run, source transitions MUST consume only the exact items returned by that scoped projection. The
+          current semantic source derives the current workflow version, agent set and revisions, exact route projection, and
+          any still-unemitted creation plan. The existing selected-store `ReconcileDynamicFlowRuntimeReadinessPlan` writer and
+          keyed lifecycle reconciler remain the sole canonicalization owners. Previously completed transitions canonicalize
+          and complete the desired current-source topology regardless of recovery policy; previously pending transitions do so
+          only when replay is authorized. This bounded desired-source convergence may reconcile the transitioned item's exact
+          agents, routes, timers, and still-unemitted creation obligation; it does not authorize unrelated effect, drain,
+          receipt, delivery, diagnostic, budget, or selected-contract replay. No unscoped readiness list, second writer,
+          predecessor agent/version trust, or
+          post-start `EnsureStandingTargets` fallback is permitted. Startup then reloads the exact-source projection, requires
+          the source-transition set to be empty, and applies ordinary pending recovery/refusal policy. Unresolved rows refuse
+          before Manager run. After Manager run starts, the operation reloads again rather than trusting an earlier snapshot.
+          One bounded topology-only consumer reconciles only freshly returned current-completed rows through the canonical
+          lifecycle owner, proves each exact agent
           `runnable_current_occurrence`, and publishes/verifies the already-persisted exact flow route process-locally before
           delivery-continuation synchronization, outbox dispatch, boot publication, listener readiness, or public ingress.
           This operation performs no readiness write, route derivation or durable route mutation, timer operation, creation-
@@ -17867,7 +17884,7 @@ multi_bundle_persistence:
         - RuntimeContextManager lifecycle state is fail-closed and monotonic in this slice: once a loaded persisted BundleContext is marked unavailable/unloaded by an authoritative bundle-unavailability operation, supported admission paths must reject that context with BUNDLE_UNAVAILABLE unless a later separately-approved Load/repair owner exists.
         - The bundle-delete coordinator quiesces a loaded matching BundleContext before any real non-force final mutation and before force-controlled cleanup. RuntimeContextManager performs that typed quiescence while the retiring agents still hold the predecessor source-set revision; the API handler never infers deactivation from a returned result. Successful or partial runtime.nuke with include_bundles=true consumes its own coordinator-owned RuntimeContextManager deactivation. runtime.nuke include_bundles=false must not deactivate bundle contexts.
         - Existing-run controls that can be resolved by run_id dispatch through the selected BundleContext. Ambiguous singleton controls such as runtime.pause/resume, mailbox decision event publication, and broad agent restart/backlog replay fail closed in multi-context mode pending dynamic lifecycle work.
-        - When more than one bundle is pinned in the same process, unscoped startup ownership, active schedule restoration, and manager pending-event recovery remain disabled for every context. This does not disable mandatory dynamic process-topology reconstruction. Before any context starts, serve composition invokes the selected-store dynamic readiness startup projection separately with each context's exact immutable BundleSourceFact; a pending, malformed, source-disagreeing, or source-owned route-without-readiness result refuses the all-or-nothing serve before cross-context mutation. Each Runtime.Start revalidates its source before Manager run and, after Manager run, reloads and reconstructs only that source's completed topology. Both stores implement the same typed projection contract, while public multi-bundle boot remains PostgreSQL-only. The database query itself constrains exact runs.bundle_hash and runs.bundle_source; an unscoped list or process-side post-filter is forbidden. One context MUST NOT adopt, publish, reject, or otherwise interpret another context's readiness or route rows. Single-bundle DB-loaded serve may keep the existing startup recovery owner.
+        - When more than one bundle is pinned in the same process, unscoped startup ownership, active schedule restoration, and manager pending-event recovery remain disabled for every context. This does not disable mandatory dynamic process-topology reconstruction or predecessor-completed desired-source transition. Before any context starts, serve composition invokes the selected-store dynamic readiness startup projection separately with each context's exact immutable BundleSourceFact and observes its three disjoint sets. Malformed or invalid-route state, current ordinary pending without replay authority, or predecessor-pending source transition without replay authority refuses the all-or-nothing serve before cross-context mutation. A predecessor-completed transition is mandatory exact-context work, not completed topology: Runtime.Start revalidates it, derives the current plan from that context's semantic source, consumes the existing exact-item writer/keyed reconciler before Manager run, reloads to require no transition or unresolved pending, and never reconstructs the predecessor plan. After Manager run it reloads again and reconstructs only that source's current-completed topology. Both stores implement the same typed projection contract, while public multi-bundle boot remains PostgreSQL-only. The database query itself constrains exact runs.bundle_hash and runs.bundle_source; an unscoped list or process-side post-filter is forbidden. One context MUST NOT canonicalize, adopt, publish, reject, or otherwise interpret another context's readiness or route rows. Single-bundle DB-loaded serve consumes the same three-class policy.
         - Every run writer reachable under the selected runtime context consumes BundleSourceFact with bundle_source=persisted and bundle_hash equal to that context's canonical hash.
         - Runtime project OpenProject/ReloadProject source replacement is disabled while the process is pinned to a DB-loaded bundle source.
         - Workspace/container names, volumes, and managed identity labels for executable context paths include bundle-disambiguated identity when more than one context can be loaded.
