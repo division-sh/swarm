@@ -199,6 +199,7 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 	semantics.StageTopologies = deriveWorkflowStageTopologies(semantics)
 	semantics.Loops = BindWorkflowLoopRegions(semantics.Loops, semantics.StageTopologies)
 	bundle.Semantics = semantics
+	populateEventSchemaOwnershipIndex(bundle)
 }
 
 func deriveWorkflowGatePlans(bundle *WorkflowContractBundle) []WorkflowGatePlan {

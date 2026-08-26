@@ -135,7 +135,7 @@ func populateEffectiveEventProjectionProvenance(bundle *WorkflowContractBundle, 
 	if bundle == nil || builder == nil {
 		return
 	}
-	for _, row := range compileEventSchemaOwnershipRows(bundle) {
+	for _, row := range effectiveEventSchemaOwnershipRows(bundle) {
 		ownerEvent := resolvedEventSchemaKey(bundle, row.producerFlowID, row.producerEvent)
 		ownerPrefix := effectiveEventProvenancePrefix(row.packageKey, ownerEvent)
 		projectionPrefix := effectiveEventProjectionProvenancePrefix(row.packageKey, row.receiverFlowID, row.receiverEvent)
