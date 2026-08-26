@@ -35,6 +35,12 @@ type durableDataSelectedStore interface {
 	PruneDataResource(context.Context, durabledata.PruneCommand) (durabledata.PruneOperationResult, error)
 	ShowDataResource(context.Context, string, durabledata.DeclarationRef) (durabledata.ResourceSnapshot, error)
 	ListDataDeclarationSummaries(context.Context, string) ([]durabledata.DeclarationSummary, error)
+	ListDataVersionSummaries(context.Context, durabledata.DeclarationRef, uint64, int) ([]durabledata.VersionSummary, error)
+	ResolveDataVersionSummary(context.Context, durabledata.DeclarationRef, durabledata.VersionSelector) (durabledata.VersionSummary, error)
+	LoadDataVersionPayload(context.Context, durabledata.DeclarationRef, durabledata.VersionID) (durabledata.Version, error)
+	ListDataVersionProvenance(context.Context, durabledata.VersionID, uint64, int) ([]durabledata.Provenance, error)
+	ListDataPins(context.Context, durabledata.VersionID, string, int) ([]durabledata.Pin, error)
+	ListDataHeadHistory(context.Context, durabledata.DeclarationRef, uint64, int) ([]durabledata.HeadHistory, error)
 	LoadDataSourceOperation(context.Context, string) (durabledata.SourceOperationRecord, error)
 	LoadDataPruneOperation(context.Context, string) (durabledata.PruneOperationResult, error)
 	LoadDataPruneOperationPins(context.Context, string) ([]durabledata.Pin, error)
@@ -161,6 +167,53 @@ func TestDurableDataSelectedStoreLifecycleReplayAndPrune(t *testing.T) {
 			!summary.Head.Equal(second.Head.After) || summary.VersionCount != 2 || summary.MaterializedVersionCount != 1 ||
 			summary.MaterializedBytes != len(snapshot.Versions[1].CanonicalJSONL) {
 			t.Fatalf("bounded declaration summary = %#v", summary)
+		}
+		firstPage, err := primary.ListDataVersionSummaries(ctx, ref, 0, 1)
+		if err != nil || len(firstPage) != 1 || firstPage[0].Alias != "v1" || firstPage[0].PayloadState != "pruned" {
+			t.Fatalf("first bounded version summary page = %#v, %v", firstPage, err)
+		}
+		secondPage, err := primary.ListDataVersionSummaries(ctx, ref, 1, 2)
+		if err != nil || len(secondPage) != 1 || secondPage[0].Alias != "v2" || secondPage[0].VersionID != second.Candidate.VersionID {
+			t.Fatalf("second bounded version summary page = %#v, %v", secondPage, err)
+		}
+		for name, selector := range map[string]durabledata.VersionSelector{
+			"head":    {Kind: "head"},
+			"version": {Kind: "version", VersionID: second.Candidate.VersionID},
+			"alias":   {Kind: "alias", SequenceAlias: 2},
+		} {
+			resolved, err := primary.ResolveDataVersionSummary(ctx, ref, selector)
+			if err != nil || resolved.VersionID != second.Candidate.VersionID {
+				t.Fatalf("resolve %s summary = %#v, %v", name, resolved, err)
+			}
+		}
+		payload, err := primary.LoadDataVersionPayload(ctx, ref, second.Candidate.VersionID)
+		if err != nil || payload.VersionID != second.Candidate.VersionID || payload.Provenance != nil {
+			t.Fatalf("selected version payload = %#v, %v", payload, err)
+		}
+		provenance, err := primary.ListDataVersionProvenance(ctx, second.Candidate.VersionID, 0, 2)
+		if err != nil || len(provenance) != 1 || provenance[0].VersionID != second.Candidate.VersionID {
+			t.Fatalf("bounded provenance = %#v, %v", provenance, err)
+		}
+		pins, err := primary.ListDataPins(ctx, second.Candidate.VersionID, "", 2)
+		if err != nil || len(pins) != 0 {
+			t.Fatalf("bounded pins = %#v, %v", pins, err)
+		}
+		history, err := primary.ListDataHeadHistory(ctx, ref, 0, 1)
+		if err != nil || len(history) != 1 || history[0].Revision != 1 {
+			t.Fatalf("first bounded head history page = %#v, %v", history, err)
+		}
+		history, err = primary.ListDataHeadHistory(ctx, ref, history[0].Revision, 2)
+		if err != nil || len(history) != 1 || history[0].Revision != 2 {
+			t.Fatalf("second bounded head history page = %#v, %v", history, err)
+		}
+		if _, err := primary.ListDataVersionSummaries(ctx, ref, 99, 2); err == nil {
+			t.Fatal("version inventory accepted an absent cursor anchor")
+		}
+		if _, err := primary.ListDataVersionProvenance(ctx, second.Candidate.VersionID, 99, 2); err == nil {
+			t.Fatal("provenance inventory accepted an absent cursor anchor")
+		}
+		if _, err := primary.ListDataHeadHistory(ctx, ref, 99, 2); err == nil {
+			t.Fatal("head history accepted an absent cursor anchor")
 		}
 	})
 }

@@ -87,6 +87,54 @@ func (s *SQLiteRuntimeStore) ListDataDeclarationSummaries(ctx context.Context, b
 	return s.durableDataOwner.ListDeclarationSummaries(ctx, bundleHash)
 }
 
+func (s *PostgresStore) ListDataVersionSummaries(ctx context.Context, ref runtimedata.DeclarationRef, afterSequence uint64, limit int) ([]runtimedata.VersionSummary, error) {
+	return s.durableDataOwner.ListVersionSummaries(ctx, ref, afterSequence, limit)
+}
+
+func (s *SQLiteRuntimeStore) ListDataVersionSummaries(ctx context.Context, ref runtimedata.DeclarationRef, afterSequence uint64, limit int) ([]runtimedata.VersionSummary, error) {
+	return s.durableDataOwner.ListVersionSummaries(ctx, ref, afterSequence, limit)
+}
+
+func (s *PostgresStore) ResolveDataVersionSummary(ctx context.Context, ref runtimedata.DeclarationRef, selector runtimedata.VersionSelector) (runtimedata.VersionSummary, error) {
+	return s.durableDataOwner.ResolveVersionSummary(ctx, ref, selector)
+}
+
+func (s *SQLiteRuntimeStore) ResolveDataVersionSummary(ctx context.Context, ref runtimedata.DeclarationRef, selector runtimedata.VersionSelector) (runtimedata.VersionSummary, error) {
+	return s.durableDataOwner.ResolveVersionSummary(ctx, ref, selector)
+}
+
+func (s *PostgresStore) LoadDataVersionPayload(ctx context.Context, ref runtimedata.DeclarationRef, versionID runtimedata.VersionID) (runtimedata.Version, error) {
+	return s.durableDataOwner.LoadVersionPayload(ctx, ref, versionID)
+}
+
+func (s *SQLiteRuntimeStore) LoadDataVersionPayload(ctx context.Context, ref runtimedata.DeclarationRef, versionID runtimedata.VersionID) (runtimedata.Version, error) {
+	return s.durableDataOwner.LoadVersionPayload(ctx, ref, versionID)
+}
+
+func (s *PostgresStore) ListDataVersionProvenance(ctx context.Context, versionID runtimedata.VersionID, afterSequence uint64, limit int) ([]runtimedata.Provenance, error) {
+	return s.durableDataOwner.ListVersionProvenance(ctx, versionID, afterSequence, limit)
+}
+
+func (s *SQLiteRuntimeStore) ListDataVersionProvenance(ctx context.Context, versionID runtimedata.VersionID, afterSequence uint64, limit int) ([]runtimedata.Provenance, error) {
+	return s.durableDataOwner.ListVersionProvenance(ctx, versionID, afterSequence, limit)
+}
+
+func (s *PostgresStore) ListDataPins(ctx context.Context, versionID runtimedata.VersionID, afterRunID string, limit int) ([]runtimedata.Pin, error) {
+	return s.durableDataOwner.ListPins(ctx, versionID, afterRunID, limit)
+}
+
+func (s *SQLiteRuntimeStore) ListDataPins(ctx context.Context, versionID runtimedata.VersionID, afterRunID string, limit int) ([]runtimedata.Pin, error) {
+	return s.durableDataOwner.ListPins(ctx, versionID, afterRunID, limit)
+}
+
+func (s *PostgresStore) ListDataHeadHistory(ctx context.Context, ref runtimedata.DeclarationRef, afterRevision uint64, limit int) ([]runtimedata.HeadHistory, error) {
+	return s.durableDataOwner.ListHeadHistory(ctx, ref, afterRevision, limit)
+}
+
+func (s *SQLiteRuntimeStore) ListDataHeadHistory(ctx context.Context, ref runtimedata.DeclarationRef, afterRevision uint64, limit int) ([]runtimedata.HeadHistory, error) {
+	return s.durableDataOwner.ListHeadHistory(ctx, ref, afterRevision, limit)
+}
+
 func (s *PostgresStore) LoadDataSourceOperation(ctx context.Context, id string) (runtimedata.SourceOperationRecord, error) {
 	return s.durableDataOwner.LoadSourceOperation(ctx, id)
 }

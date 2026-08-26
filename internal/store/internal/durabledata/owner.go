@@ -759,6 +759,345 @@ func (o *Owner) ListDeclarationSummaries(ctx context.Context, bundleHash string)
 	return summaries, err
 }
 
+func validateReadPageLimit(limit int) error {
+	if limit < 1 || limit > runtimedata.MaxPublicPageItems+1 {
+		return fmt.Errorf("data read limit must be between 1 and %d", runtimedata.MaxPublicPageItems+1)
+	}
+	return nil
+}
+
+func (o *Owner) requireDeclarationExistsTx(ctx context.Context, tx *sql.Tx, ref runtimedata.DeclarationRef) error {
+	var marker int
+	err := tx.QueryRowContext(ctx, o.query(`SELECT 1 FROM resource_declarations WHERE package_key = %s AND event_name = %s`, 2), ref.PackageKey, ref.EventName).Scan(&marker)
+	if errors.Is(err, sql.ErrNoRows) {
+		return runtimedata.NewDomainError(runtimedata.CodeDeclarationMissing, "data declaration %s does not exist", ref.Key())
+	}
+	return err
+}
+
+func (o *Owner) scanVersionSummary(row interface{ Scan(...any) error }, ref runtimedata.DeclarationRef) (runtimedata.VersionSummary, uint64, error) {
+	var summary runtimedata.VersionSummary
+	var sequence uint64
+	var manifestJSON, canonicalSchema []byte
+	var payloadBytes sql.NullInt64
+	var prunedRaw any
+	var provenanceCount int64
+	if err := row.Scan(&summary.VersionID, &sequence, &manifestJSON, &summary.BusinessKey, &canonicalSchema,
+		&payloadBytes, &prunedRaw, &provenanceCount); err != nil {
+		return runtimedata.VersionSummary{}, 0, err
+	}
+	if err := json.Unmarshal(manifestJSON, &summary.Manifest); err != nil {
+		return runtimedata.VersionSummary{}, 0, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s manifest is invalid", summary.VersionID)
+	}
+	summary.Declaration = ref
+	summary.Alias = fmt.Sprintf("v%d", sequence)
+	if _, err := schemaBusinessKey(canonicalSchema, summary.BusinessKey); err != nil ||
+		runtimedata.SchemaDigestFor(canonicalSchema) != summary.Manifest.SchemaDigest || provenanceCount < 1 {
+		return runtimedata.VersionSummary{}, 0, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s metadata is contradictory", summary.VersionID)
+	}
+	_, pruned, err := persistedTime(prunedRaw)
+	if err != nil {
+		return runtimedata.VersionSummary{}, 0, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s prune evidence is contradictory", summary.VersionID)
+	}
+	if pruned {
+		if payloadBytes.Valid {
+			return runtimedata.VersionSummary{}, 0, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s tombstone retains payload", summary.VersionID)
+		}
+		summary.PayloadState = "pruned"
+	} else {
+		if !payloadBytes.Valid || payloadBytes.Int64 < 0 || payloadBytes.Int64 > int64(^uint(0)>>1) {
+			return runtimedata.VersionSummary{}, 0, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s payload metadata is contradictory", summary.VersionID)
+		}
+		summary.PayloadState = "materialized"
+		summary.MaterializedBytes = int(payloadBytes.Int64)
+	}
+	if err := summary.Validate(); err != nil {
+		return runtimedata.VersionSummary{}, 0, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s summary is contradictory: %v", summary.VersionID, err)
+	}
+	return summary, sequence, nil
+}
+
+func (o *Owner) ListVersionSummaries(ctx context.Context, ref runtimedata.DeclarationRef, afterSequence uint64, limit int) ([]runtimedata.VersionSummary, error) {
+	if err := o.requireCurrent(); err != nil {
+		return nil, err
+	}
+	if err := ref.Validate(); err != nil {
+		return nil, err
+	}
+	if err := validateReadPageLimit(limit); err != nil {
+		return nil, err
+	}
+	var summaries []runtimedata.VersionSummary
+	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		if err := o.requireDeclarationExistsTx(txctx, tx, ref); err != nil {
+			return err
+		}
+		if afterSequence != 0 {
+			var marker int
+			if err := tx.QueryRowContext(txctx, o.query(`SELECT 1 FROM resource_versions WHERE package_key = %s AND event_name = %s AND sequence_alias = %s`, 3), ref.PackageKey, ref.EventName, afterSequence).Scan(&marker); err != nil {
+				return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version cursor anchor is absent for declaration %s", ref.Key())
+			}
+		}
+		rows, err := tx.QueryContext(txctx, o.query(`
+			SELECT v.version_id, v.sequence_alias, v.manifest_json, COALESCE(v.business_key_field, ''),
+			       v.canonical_schema_bytes, LENGTH(v.canonical_jsonl), v.pruned_at,
+			       (SELECT COUNT(*) FROM resource_version_provenance p WHERE p.version_id = v.version_id)
+			FROM resource_versions v
+			WHERE v.package_key = %s AND v.event_name = %s AND v.sequence_alias > %s
+			ORDER BY v.sequence_alias LIMIT %s
+		`, 4), ref.PackageKey, ref.EventName, afterSequence, limit)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		last := afterSequence
+		for rows.Next() {
+			summary, sequence, err := o.scanVersionSummary(rows, ref)
+			if err != nil {
+				return err
+			}
+			if sequence <= last {
+				return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version inventory order is contradictory")
+			}
+			last = sequence
+			summaries = append(summaries, summary)
+		}
+		return rows.Err()
+	})
+	return summaries, err
+}
+
+func (o *Owner) ResolveVersionSummary(ctx context.Context, ref runtimedata.DeclarationRef, selector runtimedata.VersionSelector) (runtimedata.VersionSummary, error) {
+	if err := o.requireCurrent(); err != nil {
+		return runtimedata.VersionSummary{}, err
+	}
+	if err := ref.Validate(); err != nil {
+		return runtimedata.VersionSummary{}, err
+	}
+	if err := selector.Validate(); err != nil {
+		return runtimedata.VersionSummary{}, err
+	}
+	var summary runtimedata.VersionSummary
+	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var where string
+		var args []any
+		switch selector.Kind {
+		case "head":
+			where = `v.package_key = %s AND v.event_name = %s AND v.version_id = (SELECT h.version_id FROM resource_heads h WHERE h.package_key = %s AND h.event_name = %s)`
+			args = []any{ref.PackageKey, ref.EventName, ref.PackageKey, ref.EventName}
+		case "version":
+			where = `v.package_key = %s AND v.event_name = %s AND v.version_id = %s`
+			args = []any{ref.PackageKey, ref.EventName, selector.VersionID}
+		case "alias":
+			where = `v.package_key = %s AND v.event_name = %s AND v.sequence_alias = %s`
+			args = []any{ref.PackageKey, ref.EventName, selector.SequenceAlias}
+		}
+		query := `SELECT v.version_id, v.sequence_alias, v.manifest_json, COALESCE(v.business_key_field, ''),
+		                 v.canonical_schema_bytes, LENGTH(v.canonical_jsonl), v.pruned_at,
+		                 (SELECT COUNT(*) FROM resource_version_provenance p WHERE p.version_id = v.version_id)
+		          FROM resource_versions v WHERE ` + where
+		row := tx.QueryRowContext(txctx, o.query(query, len(args)), args...)
+		var err error
+		summary, _, err = o.scanVersionSummary(row, ref)
+		if errors.Is(err, sql.ErrNoRows) {
+			return runtimedata.NewDomainError(runtimedata.CodeVersionMissing, "selected resource version does not exist for declaration %s", ref.Key())
+		}
+		return err
+	})
+	return summary, err
+}
+
+func (o *Owner) LoadVersionPayload(ctx context.Context, ref runtimedata.DeclarationRef, versionID runtimedata.VersionID) (runtimedata.Version, error) {
+	if err := o.requireCurrent(); err != nil {
+		return runtimedata.Version{}, err
+	}
+	if err := ref.Validate(); err != nil {
+		return runtimedata.Version{}, err
+	}
+	if err := versionID.Validate(); err != nil {
+		return runtimedata.Version{}, err
+	}
+	var version runtimedata.Version
+	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var found bool
+		var err error
+		version, found, err = o.loadStoredVersionPayload(txctx, tx, ref, versionID)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return runtimedata.NewDomainError(runtimedata.CodeVersionMissing, "resource version %s does not exist for declaration %s", versionID, ref.Key())
+		}
+		return nil
+	})
+	return version, err
+}
+
+func (o *Owner) ListVersionProvenance(ctx context.Context, versionID runtimedata.VersionID, afterSequence uint64, limit int) ([]runtimedata.Provenance, error) {
+	if err := o.requireCurrent(); err != nil {
+		return nil, err
+	}
+	if err := versionID.Validate(); err != nil {
+		return nil, err
+	}
+	if err := validateReadPageLimit(limit); err != nil {
+		return nil, err
+	}
+	var out []runtimedata.Provenance
+	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var marker int
+		if err := tx.QueryRowContext(txctx, o.query(`SELECT 1 FROM resource_versions WHERE version_id = %s`, 1), versionID).Scan(&marker); errors.Is(err, sql.ErrNoRows) {
+			return runtimedata.NewDomainError(runtimedata.CodeVersionMissing, "resource version %s does not exist", versionID)
+		} else if err != nil {
+			return err
+		}
+		if afterSequence != 0 {
+			if err := tx.QueryRowContext(txctx, o.query(`SELECT 1 FROM resource_version_provenance WHERE version_id = %s AND provenance_sequence = %s`, 2), versionID, afterSequence).Scan(&marker); err != nil {
+				return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s provenance cursor anchor is absent", versionID)
+			}
+		}
+		rows, err := tx.QueryContext(txctx, o.query(`
+			SELECT provenance_sequence, producer_kind, producer_id, actor, provenance_json, committed_at
+			FROM resource_version_provenance
+			WHERE version_id = %s AND provenance_sequence > %s
+			ORDER BY provenance_sequence LIMIT %s
+		`, 3), versionID, afterSequence, limit)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		last := afterSequence
+		for rows.Next() {
+			provenance, err := scanVersionProvenance(rows, versionID)
+			if err != nil {
+				return err
+			}
+			if provenance.Sequence <= last {
+				return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s provenance order is contradictory", versionID)
+			}
+			last = provenance.Sequence
+			out = append(out, provenance)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+func (o *Owner) ListPins(ctx context.Context, versionID runtimedata.VersionID, afterRunID string, limit int) ([]runtimedata.Pin, error) {
+	if err := o.requireCurrent(); err != nil {
+		return nil, err
+	}
+	if err := versionID.Validate(); err != nil {
+		return nil, err
+	}
+	if err := validateReadPageLimit(limit); err != nil {
+		return nil, err
+	}
+	var pins []runtimedata.Pin
+	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var packageKey, eventName string
+		var schemaDigest runtimedata.SchemaDigest
+		if err := tx.QueryRowContext(txctx, o.query(`SELECT package_key, event_name, schema_digest FROM resource_versions WHERE version_id = %s`, 1), versionID).Scan(&packageKey, &eventName, &schemaDigest); errors.Is(err, sql.ErrNoRows) {
+			return runtimedata.NewDomainError(runtimedata.CodeVersionMissing, "resource version %s does not exist", versionID)
+		} else if err != nil {
+			return err
+		}
+		ref := runtimedata.DeclarationRef{PackageKey: packageKey, EventName: eventName}
+		query := `
+			SELECT p.run_id, r.status, p.package_key, p.event_name, p.schema_digest, p.version_id, p.selection
+			FROM resource_version_pins p JOIN runs r ON r.run_id = p.run_id
+			WHERE p.version_id = %s`
+		args := []any{versionID}
+		if afterRunID != "" {
+			query += ` AND p.run_id > %s`
+			args = append(args, afterRunID)
+		}
+		query += ` ORDER BY p.run_id LIMIT %s`
+		args = append(args, limit)
+		rows, err := tx.QueryContext(txctx, o.query(query, len(args)), args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		last := afterRunID
+		for rows.Next() {
+			var pin runtimedata.Pin
+			if err := rows.Scan(&pin.RunID, &pin.RunState, &pin.Declaration.PackageKey, &pin.Declaration.EventName, &pin.SchemaDigest, &pin.VersionID, &pin.Selection); err != nil {
+				return err
+			}
+			if err := pin.Validate(); err != nil || pin.Declaration != ref || pin.SchemaDigest != schemaDigest || pin.VersionID != versionID || pin.RunID <= last {
+				return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s pin aggregate is contradictory", versionID)
+			}
+			last = pin.RunID
+			pins = append(pins, pin)
+		}
+		return rows.Err()
+	})
+	return pins, err
+}
+
+func (o *Owner) ListHeadHistory(ctx context.Context, ref runtimedata.DeclarationRef, afterRevision uint64, limit int) ([]runtimedata.HeadHistory, error) {
+	if err := o.requireCurrent(); err != nil {
+		return nil, err
+	}
+	if err := ref.Validate(); err != nil {
+		return nil, err
+	}
+	if err := validateReadPageLimit(limit); err != nil {
+		return nil, err
+	}
+	var history []runtimedata.HeadHistory
+	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		if err := o.requireDeclarationExistsTx(txctx, tx, ref); err != nil {
+			return err
+		}
+		if afterRevision != 0 {
+			var marker int
+			if err := tx.QueryRowContext(txctx, o.query(`SELECT 1 FROM resource_head_history WHERE package_key = %s AND event_name = %s AND revision = %s`, 3), ref.PackageKey, ref.EventName, afterRevision).Scan(&marker); err != nil {
+				return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource head-history cursor anchor is absent for declaration %s", ref.Key())
+			}
+		}
+		rows, err := tx.QueryContext(txctx, o.query(`
+			SELECT revision, before_version_id, after_version_id, operation_kind, operation_id, committed_at
+			FROM resource_head_history
+			WHERE package_key = %s AND event_name = %s AND revision > %s
+			ORDER BY revision LIMIT %s
+		`, 4), ref.PackageKey, ref.EventName, afterRevision, limit)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		last := afterRevision
+		for rows.Next() {
+			var item runtimedata.HeadHistory
+			var before sql.NullString
+			var after string
+			var committedRaw any
+			item.Declaration = ref
+			if err := rows.Scan(&item.Revision, &before, &after, &item.Operation, &item.OperationID, &committedRaw); err != nil {
+				return err
+			}
+			committedAt, present, err := persistedTime(committedRaw)
+			if err != nil || !present {
+				return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource head history revision %d timestamp is contradictory", item.Revision)
+			}
+			item.CommittedAt = committedAt
+			item.Before = runtimedata.AbsentHead()
+			if before.Valid {
+				item.Before = runtimedata.VersionHead(runtimedata.VersionID(before.String))
+			}
+			item.After = runtimedata.VersionHead(runtimedata.VersionID(after))
+			if item.Revision <= last || item.Before.Validate() != nil || item.After.Validate() != nil {
+				return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource head history revision %d is contradictory", item.Revision)
+			}
+			last = item.Revision
+			history = append(history, item)
+		}
+		return rows.Err()
+	})
+	return history, err
+}
+
 func (o *Owner) LoadSourceOperation(ctx context.Context, id string) (runtimedata.SourceOperationRecord, error) {
 	if err := o.requireCurrent(); err != nil {
 		return runtimedata.SourceOperationRecord{}, err
@@ -1038,30 +1377,9 @@ func (o *Owner) loadVersionProvenance(ctx context.Context, tx *sql.Tx, versionID
 	defer rows.Close()
 	var out []runtimedata.Provenance
 	for rows.Next() {
-		var sequence uint64
-		var kind, producerID, actor string
-		var raw []byte
-		var committedRaw any
-		if err := rows.Scan(&sequence, &kind, &producerID, &actor, &raw, &committedRaw); err != nil {
-			return nil, err
-		}
-		committedAt, present, err := persistedTime(committedRaw)
-		if err != nil || !present {
-			return nil, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s provenance timestamp is contradictory", versionID)
-		}
-		ref, err := runtimedata.NewProvenanceRef(kind, producerID)
+		provenance, err := scanVersionProvenance(rows, versionID)
 		if err != nil {
-			return nil, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s provenance producer is contradictory", versionID)
-		}
-		var provenance runtimedata.Provenance
-		if err := json.Unmarshal(raw, &provenance); err != nil {
-			return nil, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s provenance is contradictory", versionID)
-		}
-		provenance.Sequence = sequence
-		canonicalProjection, _ := json.Marshal(provenance)
-		if err := provenance.Validate(); err != nil || provenance.VersionID != versionID || provenance.ProducerRef != ref ||
-			provenance.Actor != actor || provenance.CommittedAt != committedAt || !jsonEqual(raw, canonicalProjection) {
-			return nil, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s provenance is contradictory", versionID)
+			return nil, err
 		}
 		if len(out) > 0 && out[len(out)-1].Sequence >= provenance.Sequence {
 			return nil, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s provenance order is contradictory", versionID)
@@ -1071,7 +1389,51 @@ func (o *Owner) loadVersionProvenance(ctx context.Context, tx *sql.Tx, versionID
 	return out, rows.Err()
 }
 
+func scanVersionProvenance(row interface{ Scan(...any) error }, versionID runtimedata.VersionID) (runtimedata.Provenance, error) {
+	var sequence uint64
+	var kind, producerID, actor string
+	var raw []byte
+	var committedRaw any
+	if err := row.Scan(&sequence, &kind, &producerID, &actor, &raw, &committedRaw); err != nil {
+		return runtimedata.Provenance{}, err
+	}
+	committedAt, present, err := persistedTime(committedRaw)
+	if err != nil || !present {
+		return runtimedata.Provenance{}, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s provenance timestamp is contradictory", versionID)
+	}
+	ref, err := runtimedata.NewProvenanceRef(kind, producerID)
+	if err != nil {
+		return runtimedata.Provenance{}, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s provenance producer is contradictory", versionID)
+	}
+	var provenance runtimedata.Provenance
+	if err := json.Unmarshal(raw, &provenance); err != nil {
+		return runtimedata.Provenance{}, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s provenance is contradictory", versionID)
+	}
+	provenance.Sequence = sequence
+	canonicalProjection, _ := json.Marshal(provenance)
+	if err := provenance.Validate(); err != nil || provenance.VersionID != versionID || provenance.ProducerRef != ref ||
+		provenance.Actor != actor || provenance.CommittedAt != committedAt || !jsonEqual(raw, canonicalProjection) {
+		return runtimedata.Provenance{}, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s provenance is contradictory", versionID)
+	}
+	return provenance, nil
+}
+
 func (o *Owner) loadStoredVersion(ctx context.Context, tx *sql.Tx, ref runtimedata.DeclarationRef, versionID runtimedata.VersionID) (runtimedata.Version, bool, error) {
+	version, found, err := o.loadStoredVersionPayload(ctx, tx, ref, versionID)
+	if err != nil || !found {
+		return version, found, err
+	}
+	version.Provenance, err = o.loadVersionProvenance(ctx, tx, versionID)
+	if err != nil {
+		return runtimedata.Version{}, false, err
+	}
+	if len(version.Provenance) == 0 {
+		return runtimedata.Version{}, false, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s has no provenance", versionID)
+	}
+	return version, true, nil
+}
+
+func (o *Owner) loadStoredVersionPayload(ctx context.Context, tx *sql.Tx, ref runtimedata.DeclarationRef, versionID runtimedata.VersionID) (runtimedata.Version, bool, error) {
 	var version runtimedata.Version
 	var manifestJSON []byte
 	var pruned any
@@ -1121,13 +1483,6 @@ func (o *Owner) loadStoredVersion(ctx context.Context, tx *sql.Tx, ref runtimeda
 		}
 	} else if version.CanonicalJSONL != nil {
 		return runtimedata.Version{}, false, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s tombstone retains payload", versionID)
-	}
-	version.Provenance, err = o.loadVersionProvenance(ctx, tx, versionID)
-	if err != nil {
-		return runtimedata.Version{}, false, err
-	}
-	if len(version.Provenance) == 0 {
-		return runtimedata.Version{}, false, runtimedata.NewDomainError(runtimedata.CodeIntegrity, "resource version %s has no provenance", versionID)
 	}
 	return version, true, nil
 }

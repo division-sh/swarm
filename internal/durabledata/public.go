@@ -51,6 +51,72 @@ type VersionSummary struct {
 	MaterializedBytes int            `json:"materialized_bytes"`
 }
 
+func (s VersionSummary) Validate() error {
+	if err := s.Declaration.Validate(); err != nil {
+		return err
+	}
+	if err := s.VersionID.Validate(); err != nil {
+		return err
+	}
+	sequence, err := ParseVersionAlias(s.Alias)
+	if err != nil {
+		return err
+	}
+	derived, err := s.Manifest.VersionID()
+	if err != nil || derived != s.VersionID || s.Manifest.Declaration != s.Declaration {
+		return fmt.Errorf("version summary manifest is contradictory")
+	}
+	if sequence == 0 {
+		return fmt.Errorf("version summary alias must be positive")
+	}
+	if s.MaterializedBytes < 0 {
+		return fmt.Errorf("version summary materialized_bytes must be non-negative")
+	}
+	switch s.PayloadState {
+	case "materialized":
+		return nil
+	case "pruned":
+		if s.MaterializedBytes != 0 {
+			return fmt.Errorf("pruned version summary must have zero materialized bytes")
+		}
+		return nil
+	default:
+		return fmt.Errorf("version summary payload_state must be materialized or pruned")
+	}
+}
+
+// VersionSelector is the closed selected-store version lookup contract. Alias
+// text is parsed at the API boundary so the store never accepts alternate
+// spellings for one sequence.
+type VersionSelector struct {
+	Kind          string
+	VersionID     VersionID
+	SequenceAlias uint64
+}
+
+func (s VersionSelector) Validate() error {
+	switch s.Kind {
+	case "head":
+		if s.VersionID != "" || s.SequenceAlias != 0 {
+			return fmt.Errorf("head selector forbids version and alias facts")
+		}
+	case "version":
+		if err := s.VersionID.Validate(); err != nil {
+			return err
+		}
+		if s.SequenceAlias != 0 {
+			return fmt.Errorf("version selector forbids alias fact")
+		}
+	case "alias":
+		if s.VersionID != "" || s.SequenceAlias == 0 {
+			return fmt.Errorf("alias selector requires only a positive sequence")
+		}
+	default:
+		return fmt.Errorf("version selector kind must be head, version, or alias")
+	}
+	return nil
+}
+
 type RowDTO struct {
 	Declaration DeclarationRef `json:"declaration"`
 	VersionID   VersionID      `json:"version_id"`

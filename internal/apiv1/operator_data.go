@@ -21,13 +21,16 @@ import (
 type DurableDataStore interface {
 	ExecuteDataSourceOperation(context.Context, durabledata.SourceCommand) (durabledata.SourceOperationResult, error)
 	PruneDataResource(context.Context, durabledata.PruneCommand) (durabledata.PruneOperationResult, error)
-	ShowDataResource(context.Context, string, durabledata.DeclarationRef) (durabledata.ResourceSnapshot, error)
 	ListDataDeclarationSummaries(context.Context, string) ([]durabledata.DeclarationSummary, error)
+	ListDataVersionSummaries(context.Context, durabledata.DeclarationRef, uint64, int) ([]durabledata.VersionSummary, error)
+	ResolveDataVersionSummary(context.Context, durabledata.DeclarationRef, durabledata.VersionSelector) (durabledata.VersionSummary, error)
+	LoadDataVersionPayload(context.Context, durabledata.DeclarationRef, durabledata.VersionID) (durabledata.Version, error)
+	ListDataVersionProvenance(context.Context, durabledata.VersionID, uint64, int) ([]durabledata.Provenance, error)
+	ListDataPins(context.Context, durabledata.VersionID, string, int) ([]durabledata.Pin, error)
+	ListDataHeadHistory(context.Context, durabledata.DeclarationRef, uint64, int) ([]durabledata.HeadHistory, error)
 	LoadDataSourceOperation(context.Context, string) (durabledata.SourceOperationRecord, error)
 	LoadDataPruneOperation(context.Context, string) (durabledata.PruneOperationResult, error)
 	LoadDataPruneOperationPins(context.Context, string) ([]durabledata.Pin, error)
-	LoadDataPins(context.Context, durabledata.VersionID) ([]durabledata.Pin, error)
-	LoadDataHeadHistory(context.Context, durabledata.DeclarationRef) ([]durabledata.HeadHistory, error)
 	LoadDataRunCreationOperation(context.Context, string) (durabledata.RunCreationOperationRecord, error)
 }
 
@@ -162,7 +165,7 @@ func executeDataShow(ctx context.Context, req Request, store DurableDataStore) (
 
 func executeDataShowResource(ctx context.Context, params map[string]any, store DurableDataStore, view string) (any, error) {
 	allowed := []string{"view", "declaration"}
-	if view != "head_history" {
+	if view != "versions" && view != "head_history" {
 		allowed = append(allowed, "selector")
 	}
 	if view == "row" {
@@ -178,16 +181,17 @@ func executeDataShowResource(ctx context.Context, params map[string]any, store D
 	if err != nil {
 		return nil, err
 	}
-	snapshot, err := store.ShowDataResource(ctx, "", ref)
-	if err != nil {
-		return nil, dataApplicationError(err)
-	}
 	if view == "head_history" {
 		page, err := dataPage(params["page"])
 		if err != nil {
 			return nil, err
 		}
-		history, err := store.LoadDataHeadHistory(ctx, ref)
+		fingerprint := dataCursorFingerprint(view, ref.Key())
+		after, err := dataSequenceCursorValue(page.Cursor, fingerprint, "swarm.data.head-history.cursor.v1")
+		if err != nil {
+			return nil, err
+		}
+		history, err := store.ListDataHeadHistory(ctx, ref, after, page.Limit+1)
 		if err != nil {
 			return nil, dataApplicationError(err)
 		}
@@ -199,43 +203,113 @@ func executeDataShowResource(ctx context.Context, params map[string]any, store D
 				CommittedAt:  item.CommittedAt,
 			}
 		}
-		return pageDataItems(items, page, dataCursorFingerprint(view, ref.Key()))
+		return pageDataItemsFrom(items, page, 0, func(_ int, last durabledata.HeadHistoryDTO) string {
+			return dataSequenceCursor(last.Revision, fingerprint, "swarm.data.head-history.cursor.v1")
+		})
 	}
 	if view == "versions" {
 		page, err := dataPage(params["page"])
 		if err != nil {
 			return nil, err
 		}
-		items := make([]durabledata.VersionSummary, len(snapshot.Versions))
-		for index, version := range snapshot.Versions {
-			items[index] = dataVersionSummary(ref, version)
+		fingerprint := dataCursorFingerprint(view, ref.Key())
+		after, err := dataSequenceCursorValue(page.Cursor, fingerprint, "swarm.data.version.cursor.v1")
+		if err != nil {
+			return nil, err
 		}
-		return pageDataItems(items, page, dataCursorFingerprint(view, ref.Key()))
+		items, err := store.ListDataVersionSummaries(ctx, ref, after, page.Limit+1)
+		if err != nil {
+			return nil, dataApplicationError(err)
+		}
+		last := after
+		for _, item := range items {
+			sequence, parseErr := durabledata.ParseVersionAlias(item.Alias)
+			if err := item.Validate(); err != nil || parseErr != nil || item.Declaration != ref || sequence <= last {
+				return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"reason": "version inventory is contradictory"})
+			}
+			last = sequence
+		}
+		return pageDataItemsFrom(items, page, 0, func(_ int, last durabledata.VersionSummary) string {
+			sequence, _ := durabledata.ParseVersionAlias(last.Alias)
+			return dataSequenceCursor(sequence, fingerprint, "swarm.data.version.cursor.v1")
+		})
 	}
-	version, err := selectDataVersion(snapshot, params["selector"])
+	selector, err := dataVersionSelector(params["selector"])
 	if err != nil {
 		return nil, err
 	}
+	summary, err := store.ResolveDataVersionSummary(ctx, ref, selector)
+	if err != nil {
+		return nil, dataApplicationError(err)
+	}
+	if err := summary.Validate(); err != nil || summary.Declaration != ref ||
+		(selector.Kind == "version" && summary.VersionID != selector.VersionID) {
+		return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"reason": "resolved version summary is contradictory"})
+	}
+	if selector.Kind == "alias" {
+		sequence, parseErr := durabledata.ParseVersionAlias(summary.Alias)
+		if parseErr != nil || sequence != selector.SequenceAlias {
+			return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"reason": "resolved version alias is contradictory"})
+		}
+	}
 	if view == "version" {
-		return dataVersionSummary(ref, version), nil
+		return summary, nil
 	}
 	if view == "provenance" {
 		page, err := dataPage(params["page"])
 		if err != nil {
 			return nil, err
 		}
-		return pageDataProvenance(version.Provenance, page, dataCursorFingerprint(view, string(version.VersionID)), version.VersionID)
+		fingerprint := dataCursorFingerprint(view, string(summary.VersionID))
+		after, err := dataSequenceCursorValue(page.Cursor, fingerprint, "swarm.data.provenance.cursor.v1")
+		if err != nil {
+			return nil, err
+		}
+		items, err := store.ListDataVersionProvenance(ctx, summary.VersionID, after, page.Limit+1)
+		if err != nil {
+			return nil, dataApplicationError(err)
+		}
+		for _, item := range items {
+			if err := item.Validate(); err != nil || item.VersionID != summary.VersionID {
+				return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"reason": "provenance contradicts selected version"})
+			}
+		}
+		return pageDataItemsFrom(items, page, 0, func(_ int, last durabledata.Provenance) string {
+			return dataSequenceCursor(last.Sequence, fingerprint, "swarm.data.provenance.cursor.v1")
+		})
 	}
 	if view == "pins" {
 		page, err := dataPage(params["page"])
 		if err != nil {
 			return nil, err
 		}
-		pins, err := store.LoadDataPins(ctx, version.VersionID)
+		fingerprint := dataCursorFingerprint(view, string(summary.VersionID))
+		after, err := dataPinCursorRunID(page.Cursor, fingerprint)
+		if err != nil {
+			return nil, err
+		}
+		pins, err := store.ListDataPins(ctx, summary.VersionID, after, page.Limit+1)
 		if err != nil {
 			return nil, dataApplicationError(err)
 		}
-		return pageDataPins(pins, page, dataCursorFingerprint(view, string(version.VersionID)), version)
+		for _, pin := range pins {
+			if err := pin.Validate(); err != nil || pin.Declaration != summary.Declaration || pin.SchemaDigest != summary.Manifest.SchemaDigest || pin.VersionID != summary.VersionID {
+				return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"reason": "pin contradicts selected version"})
+			}
+		}
+		return pageDataItemsFrom(pins, page, 0, func(_ int, last durabledata.Pin) string {
+			return dataPinCursorForRun(last.RunID, fingerprint)
+		})
+	}
+	version, err := store.LoadDataVersionPayload(ctx, ref, summary.VersionID)
+	if err != nil {
+		return nil, dataApplicationError(err)
+	}
+	actualSummary := dataVersionSummary(ref, version)
+	wantBytes, wantErr := canonicaljson.Bytes(summary)
+	actualBytes, actualErr := canonicaljson.Bytes(actualSummary)
+	if wantErr != nil || actualErr != nil || !bytes.Equal(wantBytes, actualBytes) {
+		return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"version_id": summary.VersionID, "reason": "version payload contradicts selected metadata"})
 	}
 	if version.PrunedAt != nil {
 		return nil, NewApplicationError(string(durabledata.CodePayloadPruned), false, map[string]any{"version_id": version.VersionID})
@@ -454,60 +528,46 @@ func dataVersionSummary(ref durabledata.DeclarationRef, version durabledata.Vers
 		Manifest: version.Manifest, BusinessKey: version.BusinessKey, PayloadState: state, MaterializedBytes: bytes}
 }
 
-func selectDataVersion(snapshot durabledata.ResourceSnapshot, raw any) (durabledata.Version, error) {
+func dataVersionSelector(raw any) (durabledata.VersionSelector, error) {
 	selector, ok := raw.(map[string]any)
 	if !ok {
-		return durabledata.Version{}, NewInvalidParamsError(map[string]any{"field": "selector", "reason": "must be an object"})
+		return durabledata.VersionSelector{}, NewInvalidParamsError(map[string]any{"field": "selector", "reason": "must be an object"})
 	}
 	kind, err := dataString(selector["kind"], "selector.kind")
 	if err != nil {
-		return durabledata.Version{}, err
+		return durabledata.VersionSelector{}, err
 	}
-	var target durabledata.VersionID
 	switch kind {
 	case "head":
 		if err := exactDataParams(selector, "kind"); err != nil {
-			return durabledata.Version{}, err
+			return durabledata.VersionSelector{}, err
 		}
-		if snapshot.Head.Before.State != "version" {
-			return durabledata.Version{}, NewApplicationError(string(durabledata.CodeVersionMissing), false, map[string]any{"selector": "head"})
-		}
-		target = snapshot.Head.Before.VersionID
+		return durabledata.VersionSelector{Kind: "head"}, nil
 	case "version":
 		if err := exactDataParams(selector, "kind", "version_id"); err != nil {
-			return durabledata.Version{}, err
+			return durabledata.VersionSelector{}, err
 		}
-		target, err = dataVersionID(selector["version_id"], "selector.version_id")
+		target, err := dataVersionID(selector["version_id"], "selector.version_id")
 		if err != nil {
-			return durabledata.Version{}, err
+			return durabledata.VersionSelector{}, err
 		}
+		return durabledata.VersionSelector{Kind: "version", VersionID: target}, nil
 	case "alias":
 		if err := exactDataParams(selector, "kind", "alias"); err != nil {
-			return durabledata.Version{}, err
+			return durabledata.VersionSelector{}, err
 		}
 		alias, err := dataString(selector["alias"], "selector.alias")
 		if err != nil {
-			return durabledata.Version{}, NewInvalidParamsError(map[string]any{"field": "selector.alias", "reason": "must be vN"})
+			return durabledata.VersionSelector{}, NewInvalidParamsError(map[string]any{"field": "selector.alias", "reason": "must be vN"})
 		}
 		sequence, parseErr := durabledata.ParseVersionAlias(alias)
 		if parseErr != nil {
-			return durabledata.Version{}, NewInvalidParamsError(map[string]any{"field": "selector.alias", "reason": "must be vN"})
+			return durabledata.VersionSelector{}, NewInvalidParamsError(map[string]any{"field": "selector.alias", "reason": "must be vN"})
 		}
-		for _, version := range snapshot.Versions {
-			if version.SequenceAlias == sequence {
-				return version, nil
-			}
-		}
-		return durabledata.Version{}, NewApplicationError(string(durabledata.CodeVersionMissing), false, map[string]any{"alias": alias})
+		return durabledata.VersionSelector{Kind: "alias", SequenceAlias: sequence}, nil
 	default:
-		return durabledata.Version{}, NewInvalidParamsError(map[string]any{"field": "selector.kind", "reason": "must be head, version, or alias"})
+		return durabledata.VersionSelector{}, NewInvalidParamsError(map[string]any{"field": "selector.kind", "reason": "must be head, version, or alias"})
 	}
-	for _, version := range snapshot.Versions {
-		if version.VersionID == target {
-			return version, nil
-		}
-	}
-	return durabledata.Version{}, NewApplicationError(string(durabledata.CodeVersionMissing), false, map[string]any{"version_id": target})
 }
 
 func dataExportChunk(version durabledata.Version, rows []durabledata.Row, page durabledata.PageRequest) (any, error) {
@@ -784,15 +844,15 @@ type dataPinCursorEnvelope struct {
 	Checksum string               `json:"checksum"`
 }
 
-type dataProvenanceCursorPayload struct {
+type dataSequenceCursorPayload struct {
 	Format      string `json:"format"`
 	Fingerprint string `json:"fingerprint"`
 	Sequence    uint64 `json:"sequence"`
 }
 
-type dataProvenanceCursorEnvelope struct {
-	Payload  dataProvenanceCursorPayload `json:"payload"`
-	Checksum string                      `json:"checksum"`
+type dataSequenceCursorEnvelope struct {
+	Payload  dataSequenceCursorPayload `json:"payload"`
+	Checksum string                    `json:"checksum"`
 }
 
 func pageDataProvenance(items []durabledata.Provenance, page durabledata.PageRequest, fingerprint string, versionID durabledata.VersionID) (durabledata.PageResult[durabledata.Provenance], error) {
@@ -822,22 +882,38 @@ func pageDataProvenance(items []durabledata.Provenance, page durabledata.PageReq
 }
 
 func dataProvenanceCursor(sequence uint64, fingerprint string) string {
-	payload := dataProvenanceCursorPayload{Format: "swarm.data.provenance.cursor.v1", Fingerprint: fingerprint, Sequence: sequence}
+	return dataSequenceCursor(sequence, fingerprint, "swarm.data.provenance.cursor.v1")
+}
+
+func dataSequenceCursor(sequence uint64, fingerprint, format string) string {
+	payload := dataSequenceCursorPayload{Format: format, Fingerprint: fingerprint, Sequence: sequence}
 	payloadBytes, _ := canonicaljson.Bytes(payload)
-	hash := sha256.Sum256(append([]byte("swarm.data.provenance.cursor.v1\x00"), payloadBytes...))
-	raw, _ := canonicaljson.Bytes(dataProvenanceCursorEnvelope{Payload: payload, Checksum: hex.EncodeToString(hash[:])})
+	hash := sha256.Sum256(append([]byte(format+"\x00"), payloadBytes...))
+	raw, _ := canonicaljson.Bytes(dataSequenceCursorEnvelope{Payload: payload, Checksum: hex.EncodeToString(hash[:])})
 	return base64.RawURLEncoding.EncodeToString(raw)
 }
 
-func dataProvenanceCursorKey(cursor, fingerprint string) (dataProvenanceCursorPayload, error) {
-	invalid := func(reason string) (dataProvenanceCursorPayload, error) {
-		return dataProvenanceCursorPayload{}, NewApplicationError("DATA_CURSOR_INVALID", false, map[string]any{"reason": reason})
+func dataProvenanceCursorKey(cursor, fingerprint string) (dataSequenceCursorPayload, error) {
+	return dataSequenceCursorKey(cursor, fingerprint, "swarm.data.provenance.cursor.v1")
+}
+
+func dataSequenceCursorValue(cursor, fingerprint, format string) (uint64, error) {
+	if cursor == "" {
+		return 0, nil
+	}
+	key, err := dataSequenceCursorKey(cursor, fingerprint, format)
+	return key.Sequence, err
+}
+
+func dataSequenceCursorKey(cursor, fingerprint, format string) (dataSequenceCursorPayload, error) {
+	invalid := func(reason string) (dataSequenceCursorPayload, error) {
+		return dataSequenceCursorPayload{}, NewApplicationError("DATA_CURSOR_INVALID", false, map[string]any{"reason": reason})
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(cursor)
 	if err != nil {
 		return invalid("cursor encoding is invalid")
 	}
-	var envelope dataProvenanceCursorEnvelope
+	var envelope dataSequenceCursorEnvelope
 	if err := json.Unmarshal(raw, &envelope); err != nil {
 		return invalid("cursor payload is invalid")
 	}
@@ -846,11 +922,11 @@ func dataProvenanceCursorKey(cursor, fingerprint string) (dataProvenanceCursorPa
 		return invalid("cursor payload is not canonical")
 	}
 	payload := envelope.Payload
-	if payload.Format != "swarm.data.provenance.cursor.v1" || payload.Fingerprint != fingerprint || payload.Sequence == 0 {
+	if payload.Format != format || payload.Fingerprint != fingerprint || payload.Sequence == 0 {
 		return invalid("cursor does not belong to this query")
 	}
 	payloadBytes, _ := canonicaljson.Bytes(payload)
-	hash := sha256.Sum256(append([]byte("swarm.data.provenance.cursor.v1\x00"), payloadBytes...))
+	hash := sha256.Sum256(append([]byte(format+"\x00"), payloadBytes...))
 	if envelope.Checksum != hex.EncodeToString(hash[:]) {
 		return invalid("cursor checksum is invalid")
 	}
@@ -892,13 +968,25 @@ func compareDataPinKey(left, right durabledata.Pin) int {
 }
 
 func dataPinCursor(pin durabledata.Pin, fingerprint string) string {
+	return dataPinCursorForRun(pin.RunID, fingerprint)
+}
+
+func dataPinCursorForRun(runID, fingerprint string) string {
 	payload := dataPinCursorPayload{
-		Format: "swarm.data.pin.cursor.v1", Fingerprint: fingerprint, RunID: pin.RunID,
+		Format: "swarm.data.pin.cursor.v1", Fingerprint: fingerprint, RunID: runID,
 	}
 	payloadBytes, _ := canonicaljson.Bytes(payload)
 	hash := sha256.Sum256(append([]byte("swarm.data.pin.cursor.v1\x00"), payloadBytes...))
 	raw, _ := canonicaljson.Bytes(dataPinCursorEnvelope{Payload: payload, Checksum: hex.EncodeToString(hash[:])})
 	return base64.RawURLEncoding.EncodeToString(raw)
+}
+
+func dataPinCursorRunID(cursor, fingerprint string) (string, error) {
+	if cursor == "" {
+		return "", nil
+	}
+	key, err := dataPinCursorKey(cursor, fingerprint)
+	return key.RunID, err
 }
 
 func dataPinCursorKey(cursor, fingerprint string) (dataPinCursorPayload, error) {

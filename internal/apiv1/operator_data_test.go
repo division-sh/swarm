@@ -156,6 +156,52 @@ func (s *dataRuntimeProbeStore) ListDataDeclarationSummaries(context.Context, st
 	}}, nil
 }
 
+func (s *dataRuntimeProbeStore) ListDataVersionSummaries(_ context.Context, ref durabledata.DeclarationRef, after uint64, limit int) ([]durabledata.VersionSummary, error) {
+	if s.version.SequenceAlias <= after || limit == 0 {
+		return []durabledata.VersionSummary{}, nil
+	}
+	return []durabledata.VersionSummary{dataVersionSummary(ref, s.version)}, nil
+}
+
+func (s *dataRuntimeProbeStore) ResolveDataVersionSummary(_ context.Context, ref durabledata.DeclarationRef, selector durabledata.VersionSelector) (durabledata.VersionSummary, error) {
+	if err := selector.Validate(); err != nil {
+		return durabledata.VersionSummary{}, err
+	}
+	return dataVersionSummary(ref, s.version), nil
+}
+
+func (s *dataRuntimeProbeStore) LoadDataVersionPayload(context.Context, durabledata.DeclarationRef, durabledata.VersionID) (durabledata.Version, error) {
+	version := s.version
+	version.Provenance = nil
+	return version, nil
+}
+
+func (s *dataRuntimeProbeStore) ListDataVersionProvenance(_ context.Context, _ durabledata.VersionID, after uint64, limit int) ([]durabledata.Provenance, error) {
+	items := make([]durabledata.Provenance, 0, min(limit, len(s.version.Provenance)))
+	for _, item := range s.version.Provenance {
+		if item.Sequence > after && len(items) < limit {
+			items = append(items, item)
+		}
+	}
+	return items, nil
+}
+
+func (s *dataRuntimeProbeStore) ListDataPins(_ context.Context, _ durabledata.VersionID, after string, limit int) ([]durabledata.Pin, error) {
+	pins := append([]durabledata.Pin(nil), s.pins...)
+	durabledata.SortPins(pins)
+	items := make([]durabledata.Pin, 0, min(limit, len(pins)))
+	for _, pin := range pins {
+		if pin.RunID > after && len(items) < limit {
+			items = append(items, pin)
+		}
+	}
+	return items, nil
+}
+
+func (s *dataRuntimeProbeStore) ListDataHeadHistory(context.Context, durabledata.DeclarationRef, uint64, int) ([]durabledata.HeadHistory, error) {
+	return []durabledata.HeadHistory{}, nil
+}
+
 func (s *dataRuntimeProbeStore) LoadDataSourceOperation(_ context.Context, id string) (durabledata.SourceOperationRecord, error) {
 	return durabledata.SourceOperationRecord{
 		Result: s.sourceResult(durabledata.SourceCommand{SourceInvocationID: id, Operation: "check"}),
@@ -636,21 +682,16 @@ func TestDataProvenanceCursorSurvivesConcurrentLineageInsertion(t *testing.T) {
 }
 
 func TestDataVersionAliasSelectorRejectsNoncanonicalSpellings(t *testing.T) {
-	store := newDataRuntimeProbeStore(t)
-	snapshot := durabledata.ResourceSnapshot{
-		Declaration: store.declaration,
-		Versions:    []durabledata.Version{store.version},
-	}
 	for _, alias := range []string{"v0", "v01", "v+1", "V1", "v1 "} {
 		t.Run(alias, func(t *testing.T) {
-			if _, err := selectDataVersion(snapshot, map[string]any{"kind": "alias", "alias": alias}); err == nil {
-				t.Fatalf("selectDataVersion accepted noncanonical alias %q", alias)
+			if _, err := dataVersionSelector(map[string]any{"kind": "alias", "alias": alias}); err == nil {
+				t.Fatalf("dataVersionSelector accepted noncanonical alias %q", alias)
 			}
 		})
 	}
-	version, err := selectDataVersion(snapshot, map[string]any{"kind": "alias", "alias": "v1"})
-	if err != nil || version.VersionID != store.version.VersionID {
-		t.Fatalf("selectDataVersion canonical alias = %#v, %v", version, err)
+	selector, err := dataVersionSelector(map[string]any{"kind": "alias", "alias": "v1"})
+	if err != nil || selector.Kind != "alias" || selector.SequenceAlias != 1 {
+		t.Fatalf("dataVersionSelector canonical alias = %#v, %v", selector, err)
 	}
 }
 
@@ -673,6 +714,7 @@ func TestDurableDataHTTPPublicSurfaceAcrossSelectedStores(t *testing.T) {
 		t.Run(backend.name, func(t *testing.T) {
 			ctx := context.Background()
 			selected := backend.open(t)
+			db := storetest.Database(selected)
 			catalog, ref := dataHTTPProbeCatalog(t)
 			if _, err := selected.UpsertBundleCatalogWithData(ctx, bundlecatalog.Upsert{
 				BundleHash: catalog.BundleHash, ContentYAML: "api_version: swarm.bundle.catalog.test.v1\n",
@@ -776,6 +818,52 @@ func TestDurableDataHTTPPublicSurfaceAcrossSelectedStores(t *testing.T) {
 				"expected_head": map[string]any{"state": "version", "version_id": firstVersion}, "input": input("beta"),
 			})
 			secondVersion := stringValue(t, asMap(t, second["candidate"])["version_id"], "second version")
+			versionsPage := call("data.show", map[string]any{
+				"view": "versions", "declaration": declaration, "page": map[string]any{"limit": 1},
+			})
+			versionItems := asSlice(t, versionsPage["items"])
+			versionContinuation := asMap(t, versionsPage["continuation"])
+			if len(versionItems) != 1 || versionContinuation["state"] != "more" {
+				t.Fatalf("first selector-free versions page = %#v", versionsPage)
+			}
+			versionsPage = call("data.show", map[string]any{
+				"view": "versions", "declaration": declaration,
+				"page": map[string]any{"limit": 1, "cursor": versionContinuation["cursor"]},
+			})
+			versionItems = asSlice(t, versionsPage["items"])
+			if len(versionItems) != 1 || stringValue(t, asMap(t, versionItems[0])["version_id"], "continued version") != secondVersion ||
+				asMap(t, versionsPage["continuation"])["state"] != "end" {
+				t.Fatalf("second selector-free versions page = %#v", versionsPage)
+			}
+
+			corrupt := []byte("{\"slug\":")
+			update := `UPDATE resource_versions SET canonical_jsonl = ? WHERE version_id = ?`
+			if backend.name == "postgres" {
+				update = `UPDATE resource_versions SET canonical_jsonl = $1 WHERE version_id = $2`
+			}
+			if _, err := db.ExecContext(ctx, update, corrupt, firstVersion); err != nil {
+				t.Fatalf("corrupt sibling payload: %v", err)
+			}
+			selectedVersion := map[string]any{"kind": "version", "version_id": secondVersion}
+			for _, probe := range []map[string]any{
+				{"view": "version", "declaration": declaration, "selector": selectedVersion},
+				{"view": "rows", "declaration": declaration, "selector": selectedVersion, "page": map[string]any{}},
+				{"view": "export_chunk", "declaration": declaration, "selector": selectedVersion, "page": map[string]any{}},
+				{"view": "provenance", "declaration": declaration, "selector": selectedVersion, "page": map[string]any{}},
+				{"view": "pins", "declaration": declaration, "selector": selectedVersion, "page": map[string]any{}},
+				{"view": "head_history", "declaration": declaration, "page": map[string]any{}},
+			} {
+				call("data.show", probe)
+			}
+			if err := callError("data.show", map[string]any{
+				"view": "rows", "declaration": declaration,
+				"selector": map[string]any{"kind": "version", "version_id": firstVersion}, "page": map[string]any{},
+			}); asMap(t, err.Data)["code"] != string(durabledata.CodeIntegrity) {
+				t.Fatalf("corrupt selected payload error = %#v", err)
+			}
+			if _, err := db.ExecContext(ctx, update, []byte("{\"slug\":\"alpha\"}\n"), firstVersion); err != nil {
+				t.Fatalf("restore sibling payload: %v", err)
+			}
 			pruned := call("data.prune", map[string]any{
 				"prune_invocation_id": uuid.NewString(), "declaration": declaration, "version_id": firstVersion,
 				"expected_head": map[string]any{"state": "version", "version_id": secondVersion},
