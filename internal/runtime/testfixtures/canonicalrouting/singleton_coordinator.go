@@ -38,9 +38,6 @@ flows:
     mode: singleton
 `)
 	writeSingletonCoordinatorFile(t, root, "schema.yaml", "name: singleton-coordinator-pilot\n")
-	for _, name := range []string{"policy.yaml", "tools.yaml", "agents.yaml", "events.yaml", "nodes.yaml"} {
-		writeSingletonCoordinatorFile(t, root, name, "{}\n")
-	}
 	writeSingletonCoordinatorFlow(t, root, variant)
 	return root
 }
@@ -60,9 +57,6 @@ flows:
   - {id: b, flow: b, mode: singleton}
 `)
 	writeSingletonCoordinatorFile(t, root, "schema.yaml", "name: duplicate-scoped-singleton-demand\n")
-	for _, name := range []string{"policy.yaml", "tools.yaml", "agents.yaml", "events.yaml", "nodes.yaml"} {
-		writeSingletonCoordinatorFile(t, root, name, "{}\n")
-	}
 	for _, flowID := range []string{"a", "b"} {
 		writeSingletonCoordinatorFile(t, root, filepath.Join("flows", flowID, "schema.yaml"), `
 name: `+flowID+`
@@ -74,9 +68,6 @@ pins:
   outputs:
     events: []
 `)
-		for _, name := range []string{"policy.yaml", "tools.yaml", "agents.yaml", "types.yaml"} {
-			writeSingletonCoordinatorFile(t, root, filepath.Join("flows", flowID, name), "{}\n")
-		}
 		writeSingletonCoordinatorFile(t, root, filepath.Join("flows", flowID, "events.yaml"), "item.received:\n  items: '[text]'\n")
 		entities := "state: {}\n"
 		nodes := `
@@ -131,9 +122,6 @@ pins:
   outputs:
     events: []
 `)
-	for _, name := range []string{"policy.yaml", "tools.yaml", "agents.yaml"} {
-		writeSingletonCoordinatorFile(t, root, filepath.Join("flows", "coordinator", name), "{}\n")
-	}
 	writeSingletonCoordinatorFile(t, root, "flows/coordinator/types.yaml", `
 types:
   LeadScore:
@@ -192,9 +180,6 @@ coordinator-indexer:
 
 func writeStatelessPayloadJoinSingletonCoordinatorFlow(t testing.TB, root string) {
 	t.Helper()
-	for _, name := range []string{"policy.yaml", "tools.yaml", "agents.yaml"} {
-		writeSingletonCoordinatorFile(t, root, filepath.Join("flows", "coordinator", name), "{}\n")
-	}
 	writeSingletonCoordinatorFile(t, root, "flows/coordinator/schema.yaml", `
 name: coordinator
 mode: singleton
@@ -241,9 +226,6 @@ types:
 
 func writeStatelessFanInSingletonCoordinatorFlow(t testing.TB, root string) {
 	t.Helper()
-	for _, name := range []string{"policy.yaml", "tools.yaml", "agents.yaml", "types.yaml"} {
-		writeSingletonCoordinatorFile(t, root, filepath.Join("flows", "coordinator", name), "{}\n")
-	}
 	writeSingletonCoordinatorFile(t, root, "flows/coordinator/schema.yaml", `
 name: coordinator
 mode: singleton
@@ -264,7 +246,6 @@ pins:
 `)
 	writeSingletonCoordinatorFile(t, root, "flows/coordinator/entities.yaml", "coordinator_state: {}\n")
 	writeSingletonCoordinatorFile(t, root, "flows/coordinator/events.yaml", "job.received:\n  vertical_id: text\n")
-	writeSingletonCoordinatorFile(t, root, "flows/coordinator/nodes.yaml", "{}\n")
 }
 
 func singletonCoordinatorWritesYAML(t testing.TB, variant SingletonCoordinatorPilotVariant) string {

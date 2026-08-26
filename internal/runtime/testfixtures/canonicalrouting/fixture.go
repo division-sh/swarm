@@ -265,8 +265,7 @@ func applyClosedReplacement(t testing.TB, path, old, replacement string) {
 func writeFixtureFile(t testing.TB, path, source string) error {
 	t.Helper()
 	if isOptionalDeclarationFile(path) && strings.TrimSpace(source) == "{}" {
-		omitOptionalDeclarationFile(t, path)
-		return nil
+		return fmt.Errorf("optional declaration fixture %s must be omitted instead of written as {}", path)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -274,10 +273,15 @@ func writeFixtureFile(t testing.TB, path, source string) error {
 	return os.WriteFile(path, []byte(source), 0o644)
 }
 
-func omitOptionalDeclarationFile(t testing.TB, path string) {
+// removeClosedVariantFiles explicitly removes inherited declarations when a
+// fixture overlays a checked-in example with absence at those paths.
+func removeClosedVariantFiles(t testing.TB, root string, relativePaths ...string) {
 	t.Helper()
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		t.Fatalf("omit empty optional declaration file %s: %v", path, err)
+	for _, relativePath := range relativePaths {
+		path := filepath.Join(root, filepath.FromSlash(relativePath))
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			t.Fatalf("remove inherited fixture file %s: %v", path, err)
+		}
 	}
 }
 
@@ -326,9 +330,6 @@ func AddRetiredStaticFlowForNegativeMutation(t testing.TB, root string, mutation
 	applyClosedReplacement(t, filepath.Join(root, "package.yaml"),
 		"  - id: account\n    flow: account\n    mode: template\n",
 		"  - id: account\n    flow: account\n    mode: template\n  - id: legacy_static\n    flow: legacy_static\n    mode: static\n")
-	for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml"} {
-		writeClosedNegativeFile(t, root, "flows/legacy_static/"+file, "{}\n")
-	}
 	writeClosedNegativeFile(t, root, "flows/legacy_static/schema.yaml", `name: legacy_static
 mode: static
 initial_state: active

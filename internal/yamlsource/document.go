@@ -95,6 +95,17 @@ type Value struct {
 	introduction Location
 }
 
+// ValueFromNode returns an immutable syntax view over a caller-owned decoder
+// node. It exists for typed yaml.Unmarshaler implementations that must consume
+// the same alias- and merge-expanded mapping semantics as file admission.
+func ValueFromNode(node *yaml.Node) Value {
+	copy := cloneNode(node)
+	if copy == nil {
+		return Value{path: "$", missing: true}
+	}
+	return Value{node: copy, path: "$"}
+}
+
 func (v Value) SemanticPath() string { return v.path }
 
 func (v Value) Location() Location {

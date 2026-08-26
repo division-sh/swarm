@@ -103,10 +103,6 @@ pins:
 	writeClosedVariantFile(t, root, "flows/fork-source/events.yaml", `fork.source_message:
   note: text
 `)
-	writeClosedVariantFile(t, root, "flows/fork-source/nodes.yaml", "{}\n")
-	writeClosedVariantFile(t, root, "flows/fork-source/entities.yaml", "{}\n")
-	writeClosedVariantFile(t, root, "flows/fork-source/policy.yaml", "{}\n")
-	writeClosedVariantFile(t, root, "flows/fork-source/tools.yaml", "{}\n")
 	writeClosedVariantFile(t, root, "flows/fork-source/agents.yaml", `fork-source-agent:
   id: fork-source-agent
   role: researcher
@@ -153,10 +149,6 @@ pins:
 	writeClosedVariantFile(t, root, "flows/hold/events.yaml", `item.agent_hold:
   note: text
 `)
-	writeClosedVariantFile(t, root, "flows/hold/nodes.yaml", "{}\n")
-	writeClosedVariantFile(t, root, "flows/hold/entities.yaml", "{}\n")
-	writeClosedVariantFile(t, root, "flows/hold/policy.yaml", "{}\n")
-	writeClosedVariantFile(t, root, "flows/hold/tools.yaml", "{}\n")
 	writeClosedVariantFile(t, root, "flows/hold/agents.yaml", `load-agent:
   id: load-agent
   role: load_agent
@@ -252,7 +244,6 @@ lifecycle-orchestrator:
             target_field: note
       advances_to: ready
 `)
-	addEmptyFlowFiles(t, root, "flows/operating")
 	return root
 }
 
@@ -308,7 +299,6 @@ component-scaffold:
     component_scaffold.spawn_requested:
       advances_to: ready
 `)
-	addEmptyFlowFiles(t, root, "flows/operating")
 	return root
 }
 
@@ -391,11 +381,4 @@ portfolio-node:
         product_id: payload.product_id
       advances_to: done
 `)
-}
-
-func addEmptyFlowFiles(t testing.TB, root, flowRoot string) {
-	t.Helper()
-	for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml"} {
-		writeClosedVariantFile(t, root, flowRoot+"/"+file, "{}")
-	}
 }

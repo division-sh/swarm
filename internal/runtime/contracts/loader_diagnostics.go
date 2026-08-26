@@ -240,6 +240,17 @@ func NewOptionalDeclarationFileEmptyDiagnostic(fileName string) *LoaderDiagnosti
 	)
 }
 
+func NewOptionalDeclarationFileShapeDiagnostic(fileName string, presence yamlsource.Presence) *LoaderDiagnostic {
+	fileName = strings.TrimSpace(fileName)
+	return NewExpectedShapeDiagnostic(
+		"contract_loader.optional_declaration_file_shape",
+		fileName,
+		fmt.Sprintf("%s must contain a declaration mapping, found %s.", fileName, presence),
+		"Use a mapping keyed by declaration name, or delete the optional file when it has no declarations.",
+		nil,
+	)
+}
+
 func NewDeclarationNameInvalidDiagnostic(context, name string, location yamlsource.Location) *LoaderDiagnostic {
 	return &LoaderDiagnostic{
 		Code:        "contract_loader.declaration_name_invalid",
@@ -369,6 +380,8 @@ func isYAMLParseError(raw string) bool {
 		return false
 	}
 	return strings.HasPrefix(raw, "yaml: line ") ||
+		strings.Contains(raw, "YAML input has no document") ||
+		strings.Contains(raw, "YAML input has multiple documents") ||
 		strings.Contains(raw, ": did not find expected ") ||
 		strings.Contains(raw, ": could not find expected ") ||
 		strings.Contains(raw, ": found unexpected ") ||

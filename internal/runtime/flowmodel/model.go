@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
@@ -122,51 +123,62 @@ func (d *PolicyDocument) UnmarshalYAML(node *yaml.Node) error {
 	if d == nil {
 		return nil
 	}
-	values := map[string]PolicyValue{}
 	if node == nil || node.Kind == 0 {
-		d.Values = values
+		d.Values = map[string]PolicyValue{}
 		return nil
 	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("policy document must be a mapping")
+	document, err := ProjectPolicyDocument(yamlsource.ValueFromNode(node))
+	if err != nil {
+		return err
 	}
+	*d = document
+	return nil
+}
+
+// ProjectPolicyDocument builds the typed policy value from the canonical
+// effective mapping inspected during YAML admission.
+func ProjectPolicyDocument(root yamlsource.Value) (PolicyDocument, error) {
+	if root.Presence() != yamlsource.PresenceMapping && root.Presence() != yamlsource.PresenceEmptyMapping {
+		return PolicyDocument{}, fmt.Errorf("policy document must be a mapping")
+	}
+	fields, err := root.Mapping()
+	if err != nil {
+		return PolicyDocument{}, err
+	}
+	values := map[string]PolicyValue{}
 	criteria := map[string]PolicyCriteriaSet{}
 	validation := map[string]PolicyValidationSet{}
 	modules := map[string]PolicyModule{}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
+	for _, field := range fields {
+		key := strings.TrimSpace(field.Name)
 		if key == "" {
 			continue
 		}
 		if key == "criteria" {
-			if err := node.Content[i+1].Decode(&criteria); err != nil {
-				return fmt.Errorf("policy criteria: %w", err)
+			if err := field.Value.Project(&criteria); err != nil {
+				return PolicyDocument{}, fmt.Errorf("policy criteria: %w", err)
 			}
 			continue
 		}
 		if key == "validation" {
-			if err := node.Content[i+1].Decode(&validation); err != nil {
-				return fmt.Errorf("policy validation: %w", err)
+			if err := field.Value.Project(&validation); err != nil {
+				return PolicyDocument{}, fmt.Errorf("policy validation: %w", err)
 			}
 			continue
 		}
 		if key == "modules" {
-			if err := node.Content[i+1].Decode(&modules); err != nil {
-				return fmt.Errorf("policy modules: %w", err)
+			if err := field.Value.Project(&modules); err != nil {
+				return PolicyDocument{}, fmt.Errorf("policy modules: %w", err)
 			}
 			continue
 		}
 		var value PolicyValue
-		if err := node.Content[i+1].Decode(&value); err != nil {
-			return err
+		if err := field.Value.Project(&value); err != nil {
+			return PolicyDocument{}, err
 		}
 		values[key] = value
 	}
-	d.Values = values
-	d.Criteria = criteria
-	d.Validation = validation
-	d.Modules = modules
-	return nil
+	return PolicyDocument{Values: values, Criteria: criteria, Validation: validation, Modules: modules}, nil
 }
 
 func (m *PolicyModule) UnmarshalYAML(node *yaml.Node) error {

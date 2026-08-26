@@ -2,6 +2,7 @@ package canonicalrouting
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -98,9 +99,6 @@ connect:
     to: consumer
 `+secondConnect)
 	writeClosedVariantFile(t, root, "schema.yaml", "name: template-instance-route\n")
-	for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml", "events.yaml", "nodes.yaml"} {
-		writeClosedVariantFile(t, root, file, "{}\n")
-	}
 	writeLegacyInstanceFlow(t, root, "producer", `name: producer
 mode: static
 pins:
@@ -108,17 +106,17 @@ pins:
     events:
       - name: deploy_done
         event: deploy.done
-`, "deploy.done:\n  "+producerField+": string\n", "{}\n", "{}\n")
+`, "deploy.done:\n  "+producerField+": string\n", "", "")
 
 	consumerNodes := "consumer-node:\n  id: consumer-node-{instance_id}\n  execution_type: system_node\n  event_handlers:\n    deploy.done: {}\n" + secondHandler
-	consumerAgents := "{}\n"
+	consumerAgents := ""
 	if opts.Consumer == TemplateInstanceAgentConsumer || opts.Consumer == TemplateInstanceNodeAndAgentConsumer {
 		subscriptions := "deploy.done"
 		if opts.SecondPin == TemplateInstanceSecondPinDistinctEvent {
 			subscriptions += ", deploy.audited"
 		}
 		if opts.Consumer == TemplateInstanceAgentConsumer {
-			consumerNodes = "{}\n"
+			consumerNodes = ""
 		}
 		consumerAgents = "consumer-agent:\n  id: consumer-agent\n  model: regular\n  intent:\n    inline: Consume connected deployment events.\n  subscriptions: [" + subscriptions + "]\n"
 	} else if opts.Consumer != TemplateInstanceNodeConsumer {
@@ -139,10 +137,12 @@ pins:
             from: `+carrySource+`
             type: string
 `+secondPin,
-		"{}\n",
+		"",
 		"deployment:\n  vertical_id:\n    type: string\n",
 		consumerNodes)
-	writeClosedVariantFile(t, root, "flows/consumer/agents.yaml", consumerAgents)
+	if consumerAgents != "" {
+		writeClosedVariantFile(t, root, "flows/consumer/agents.yaml", consumerAgents)
+	}
 	return root
 }
 
@@ -150,10 +150,13 @@ func writeLegacyInstanceFlow(t testing.TB, root, id, schema, events, entities, n
 	t.Helper()
 	base := filepath.ToSlash(filepath.Join("flows", id))
 	writeClosedVariantFile(t, root, base+"/schema.yaml", schema)
-	writeClosedVariantFile(t, root, base+"/events.yaml", events)
-	writeClosedVariantFile(t, root, base+"/entities.yaml", entities)
-	writeClosedVariantFile(t, root, base+"/nodes.yaml", nodes)
-	for _, file := range []string{"policy.yaml", "tools.yaml", "agents.yaml"} {
-		writeClosedVariantFile(t, root, base+"/"+file, "{}\n")
+	if strings.TrimSpace(events) != "" {
+		writeClosedVariantFile(t, root, base+"/events.yaml", events)
+	}
+	if strings.TrimSpace(entities) != "" {
+		writeClosedVariantFile(t, root, base+"/entities.yaml", entities)
+	}
+	if strings.TrimSpace(nodes) != "" {
+		writeClosedVariantFile(t, root, base+"/nodes.yaml", nodes)
 	}
 }

@@ -811,7 +811,7 @@ func writeBusImportBoundaryWildcardFixture(t *testing.T, opts importBoundaryWild
 	if workerSubscription == "" {
 		workerSubscription = "**/task.done"
 	}
-	rootNode := "{}\n"
+	rootNode := ""
 	if opts.RootWildcard {
 		rootNode = `
 root-listener:
@@ -839,7 +839,9 @@ flows:
     mode: `+producerMode+`
 `)
 	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: bus-import-boundary-wildcard\n")
-	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "nodes.yaml"), rootNode)
+	if rootNode != "" {
+		writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "nodes.yaml"), rootNode)
+	}
 	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "worker", "package.yaml"), "name: worker\nversion: \"1.0.0\"\n")
 	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "worker", "schema.yaml"), `
 name: worker
@@ -879,7 +881,7 @@ pins:
 	if extra := strings.TrimSpace(opts.ProducerExtraEvent); extra != "" {
 		producerEvents += extra + ": {}\n"
 	}
-	producerNodes := "{}\n"
+	producerNodes := ""
 	if opts.ProducerAuthored {
 		producerEvents += "task.start: {}\n"
 		producerNodes = `
@@ -895,7 +897,9 @@ producer-source:
 `
 	}
 	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "producer", "events.yaml"), producerEvents)
-	writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), producerNodes)
+	if producerNodes != "" {
+		writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), producerNodes)
+	}
 	if opts.ProducerStaticDescendant {
 		descendant := filepath.Join(root, "flows", "producer", "flows", "child")
 		writeBusImportBoundaryWildcardFixtureFile(t, filepath.Join(descendant, "package.yaml"), "name: child\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n")
@@ -917,7 +921,7 @@ pins:
 func writeBusImportBoundaryWildcardFixtureFile(t *testing.T, path, contents string) {
 	t.Helper()
 	if filepath.Base(path) == "nodes.yaml" && strings.TrimSpace(contents) == "{}" {
-		return
+		t.Fatalf("optional declaration fixture %s must be omitted instead of written as {}", path)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("mkdir fixture dir: %v", err)

@@ -366,7 +366,7 @@ func TestLoadWorkflowContractBundleRejectsRetiredPublicNodeAndSchemaFields(t *te
 		{
 			name:        "schema namespace is not public schema YAML",
 			schemaExtra: "namespace: legacy\n",
-			nodes:       "{}\n",
+			nodes:       "",
 			wantErr:     "schema field \"namespace\" is not supported",
 		},
 		{

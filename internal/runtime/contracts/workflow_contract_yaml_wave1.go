@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
@@ -928,34 +929,46 @@ func (d *TypeCatalogDocument) UnmarshalYAML(node *yaml.Node) error {
 		*d = TypeCatalogDocument{}
 		return nil
 	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("type catalog must be a mapping")
+	doc, err := projectTypeCatalogDocument(yamlsource.ValueFromNode(node))
+	if err != nil {
+		return err
+	}
+	*d = doc
+	return nil
+}
+
+func projectTypeCatalogDocument(root yamlsource.Value) (TypeCatalogDocument, error) {
+	if root.Presence() != yamlsource.PresenceMapping && root.Presence() != yamlsource.PresenceEmptyMapping {
+		return TypeCatalogDocument{}, fmt.Errorf("type catalog must be a mapping")
+	}
+	fields, err := root.Mapping()
+	if err != nil {
+		return TypeCatalogDocument{}, err
 	}
 	doc := TypeCatalogDocument{
 		Scalars: map[string]ScalarTypeDecl{},
 		Enums:   map[string]EnumTypeDecl{},
 		Types:   map[string]NamedTypeDecl{},
 	}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		value := node.Content[i+1]
+	for _, field := range fields {
+		key := strings.TrimSpace(field.Name)
 		switch key {
 		case "":
 			continue
 		case "scalars":
-			if err := value.Decode(&doc.Scalars); err != nil {
-				return err
+			if err := field.Value.Project(&doc.Scalars); err != nil {
+				return TypeCatalogDocument{}, err
 			}
 		case "enums":
-			if err := value.Decode(&doc.Enums); err != nil {
-				return err
+			if err := field.Value.Project(&doc.Enums); err != nil {
+				return TypeCatalogDocument{}, err
 			}
 		case "types":
-			if err := value.Decode(&doc.Types); err != nil {
-				return err
+			if err := field.Value.Project(&doc.Types); err != nil {
+				return TypeCatalogDocument{}, err
 			}
 		default:
-			return NewUndefinedFieldDiagnostic("type catalog", key, typeCatalogFieldOptions)
+			return TypeCatalogDocument{}, NewUndefinedFieldDiagnostic("type catalog", key, typeCatalogFieldOptions)
 		}
 	}
 	enumNames := make([]string, 0, len(doc.Enums))
@@ -966,17 +979,16 @@ func (d *TypeCatalogDocument) UnmarshalYAML(node *yaml.Node) error {
 	for _, name := range enumNames {
 		trimmed := strings.TrimSpace(name)
 		if trimmed == "" {
-			return fmt.Errorf("type catalog declares an enum with an empty name")
+			return TypeCatalogDocument{}, fmt.Errorf("type catalog declares an enum with an empty name")
 		}
 		if trimmed != name {
-			return fmt.Errorf("type catalog enum name %q must not have surrounding whitespace", name)
+			return TypeCatalogDocument{}, fmt.Errorf("type catalog enum name %q must not have surrounding whitespace", name)
 		}
 		if err := doc.Enums[name].Validate(trimmed); err != nil {
-			return err
+			return TypeCatalogDocument{}, err
 		}
 	}
-	*d = doc
-	return nil
+	return doc, nil
 }
 
 func (s *ScalarTypeDecl) UnmarshalYAML(node *yaml.Node) error {
@@ -1151,23 +1163,35 @@ func (d *EntityContractsDocument) UnmarshalYAML(node *yaml.Node) error {
 		*d = EntityContractsDocument{}
 		return nil
 	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("entity contracts document must be a mapping")
+	document, err := projectEntityContractsDocument(yamlsource.ValueFromNode(node))
+	if err != nil {
+		return err
 	}
-	out := make(EntityContractsDocument, len(node.Content)/2)
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
+	*d = document
+	return nil
+}
+
+func projectEntityContractsDocument(root yamlsource.Value) (EntityContractsDocument, error) {
+	if root.Presence() != yamlsource.PresenceMapping && root.Presence() != yamlsource.PresenceEmptyMapping {
+		return nil, fmt.Errorf("entity contracts document must be a mapping")
+	}
+	fields, err := root.Mapping()
+	if err != nil {
+		return nil, err
+	}
+	out := make(EntityContractsDocument, len(fields))
+	for _, field := range fields {
+		key := strings.TrimSpace(field.Name)
 		if key == "" {
 			continue
 		}
 		var entity EntityContract
-		if err := node.Content[i+1].Decode(&entity); err != nil {
-			return err
+		if err := field.Value.Project(&entity); err != nil {
+			return nil, err
 		}
 		out[key] = entity
 	}
-	*d = out
-	return nil
+	return out, nil
 }
 
 func (e *EntityContract) UnmarshalYAML(node *yaml.Node) error {

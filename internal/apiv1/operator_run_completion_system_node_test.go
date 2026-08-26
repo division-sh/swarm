@@ -344,12 +344,6 @@ pins:
     events:
       - flow.started
 `)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "events.yaml"), `
-{}
-`)
-	writeRunCompletionFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
-{}
-`)
 	writeRunCompletionFixtureFile(t, filepath.Join(root, "flows", "discovery", "schema.yaml"), `
 name: discovery
 initial_state: active
@@ -403,10 +397,7 @@ func runCompletionRepoRoot(t *testing.T) string {
 func writeRunCompletionFixtureFile(t *testing.T, path, contents string) {
 	t.Helper()
 	if isRunCompletionOptionalDeclarationFixture(path) && strings.TrimSpace(contents) == "{}" {
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			t.Fatalf("remove omitted optional declaration fixture %s: %v", path, err)
-		}
-		return
+		t.Fatalf("optional declaration fixture %s must be omitted instead of written as {}", path)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)

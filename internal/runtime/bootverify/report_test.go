@@ -2958,7 +2958,7 @@ root-missing-model:
 }
 
 func TestRun_AcceptsFlowAgentMemoryInStatelessFlow(t *testing.T) {
-	root := writeAgentMemoryValidationFixture(t, "{}\n", `
+	root := writeAgentMemoryValidationFixture(t, "", `
 name: support
 `, `
 entity-agent:
@@ -2978,7 +2978,7 @@ entity-agent:
 }
 
 func TestRun_AcceptsExplicitFlowAgentMemoryDeclarations(t *testing.T) {
-	root := writeAgentMemoryValidationFixture(t, "{}\n", `
+	root := writeAgentMemoryValidationFixture(t, "", `
 name: support
 initial_state: waiting
 states:
@@ -7242,10 +7242,7 @@ func writeBootverifyFixtureFile(t *testing.T, path, contents string) {
 	t.Helper()
 	contents = strings.TrimLeft(contents, "\n")
 	if isOptionalBootverifyDeclarationFile(path) && strings.TrimSpace(contents) == "{}" {
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			t.Fatalf("omit empty optional declaration file %s: %v", path, err)
-		}
-		return
+		t.Fatalf("optional declaration fixture %s must be omitted instead of written as {}", path)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
@@ -7293,23 +7290,21 @@ item:
 item.created:
   entity_id: string
 `)
-	if strings.TrimSpace(rootAgents) == "" {
-		rootAgents = "{}\n"
+	if strings.TrimSpace(rootAgents) != "" {
+		writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), rootAgents)
 	}
-	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), rootAgents)
 	if strings.TrimSpace(flowSchema) != "" || strings.TrimSpace(flowAgents) != "" {
 		if strings.TrimSpace(flowSchema) == "" {
 			flowSchema = "name: support\n"
-		}
-		if strings.TrimSpace(flowAgents) == "" {
-			flowAgents = "{}\n"
 		}
 		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), flowSchema)
 		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "events.yaml"), `
 support/item.created:
   entity_id: string
 `)
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), flowAgents)
+		if strings.TrimSpace(flowAgents) != "" {
+			writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "support", "agents.yaml"), flowAgents)
+		}
 	}
 	return root
 }
@@ -8098,10 +8093,10 @@ func writeDeadEventSchemaFixture(t *testing.T, opts deadEventSchemaFixtureOption
 		rootSchema = "name: " + name
 	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), rootSchema+"\n")
-	writeBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), defaultFixtureYAML(opts.rootPolicy))
-	writeBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), defaultFixtureYAML(opts.rootAgents))
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), defaultFixtureYAML(opts.rootEvents))
-	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), defaultFixtureYAML(opts.rootNodes))
+	writeOptionalBootverifyFixtureFile(t, filepath.Join(root, "policy.yaml"), opts.rootPolicy)
+	writeOptionalBootverifyFixtureFile(t, filepath.Join(root, "agents.yaml"), opts.rootAgents)
+	writeOptionalBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), opts.rootEvents)
+	writeOptionalBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), opts.rootNodes)
 
 	for _, flowID := range flowIDs {
 		files := opts.flows[flowID]
@@ -8110,23 +8105,24 @@ func writeDeadEventSchemaFixture(t *testing.T, opts deadEventSchemaFixtureOption
 			schema = "name: " + flowID + "\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: []\n  outputs:\n    events: []"
 		}
 		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), schema+"\n")
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "policy.yaml"), defaultFixtureYAML(files.policy))
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "agents.yaml"), defaultFixtureYAML(files.agents))
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), defaultFixtureYAML(files.events))
-		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "nodes.yaml"), defaultFixtureYAML(files.nodes))
+		writeOptionalBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "policy.yaml"), files.policy)
+		writeOptionalBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "agents.yaml"), files.agents)
+		writeOptionalBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), files.events)
+		writeOptionalBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "nodes.yaml"), files.nodes)
 	}
 
 	return root
 }
 
-func defaultFixtureYAML(contents string) string {
+func writeOptionalBootverifyFixtureFile(t *testing.T, path, contents string) {
+	t.Helper()
 	if strings.TrimSpace(contents) == "" {
-		return "{}\n"
+		return
 	}
-	if strings.HasSuffix(contents, "\n") {
-		return contents
+	if !strings.HasSuffix(contents, "\n") {
+		contents += "\n"
 	}
-	return contents + "\n"
+	writeBootverifyFixtureFile(t, path, contents)
 }
 
 func gateSchemaValidationBundle(t testing.TB, gateState runtimecontracts.NodeGateStateSchema, handler runtimecontracts.SystemNodeEventHandler) *runtimecontracts.WorkflowContractBundle {

@@ -322,7 +322,7 @@ backend:
 func writeSemanticviewFixtureFile(t *testing.T, path, contents string) {
 	t.Helper()
 	if filepath.Base(path) == "nodes.yaml" && strings.TrimSpace(contents) == "{}" {
-		return
+		t.Fatalf("optional declaration fixture %s must be omitted instead of written as {}", path)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
