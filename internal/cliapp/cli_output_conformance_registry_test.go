@@ -75,6 +75,7 @@ var cliOutputSharedOwnerProofs = map[string]cliOutputSharedOwnerProof{
 	"swarm channel rebind":               {Constructor: "newChannelLifecycleCommand", Runner: "runChannelConnect"},
 	"swarm channel resume":               {Constructor: "newChannelResumeCommand", Runner: "runChannelResume"},
 	"swarm channel list":                 {Constructor: "newChannelListCommand", Runner: "runChannelList"},
+	"swarm channel status":               {Constructor: "newChannelStatusCommand", Runner: "runChannelStatus"},
 	"swarm channel unbind":               {Constructor: "newChannelUnbindCommand", Runner: "runChannelUnbind"},
 }
 
@@ -162,6 +163,7 @@ var cliOutputExpectedFactOwners = map[string]string{
 	"swarm channel rebind":    "/v1/rpc channel.onboarding_start|get|retry plus channel.confirm",
 	"swarm channel resume":    "/v1/rpc channel.onboarding_get|retry plus channel.confirm",
 	"swarm channel list":      "/v1/rpc channel.list",
+	"swarm channel status":    "/v1/rpc channel.list",
 	"swarm channel unbind":    "/v1/rpc channel.unbind",
 }
 

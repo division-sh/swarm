@@ -247,33 +247,22 @@ func (s *Service) ReadbackConnectedChannels(ctx context.Context) ([]ConnectedCha
 	if err != nil {
 		return nil, err
 	}
-	latestBySlot := make(map[string]Operation, len(operations))
 	operationByID := make(map[string]Operation, len(operations))
 	for _, operation := range operations {
 		operationByID[operation.OperationID] = operation
-		current, found := latestBySlot[operation.SlotKey]
-		if !found || operation.UpdatedAt.After(current.UpdatedAt) || (operation.UpdatedAt.Equal(current.UpdatedAt) && operation.Revision > current.Revision) {
-			latestBySlot[operation.SlotKey] = operation
-		}
 	}
-	slots := make([]string, 0, len(latestBySlot))
-	for slot := range latestBySlot {
-		slots = append(slots, slot)
+	activations, err := s.store.ListCurrentConnectedChannelActivations(ctx)
+	if err != nil {
+		return nil, err
 	}
-	sort.Strings(slots)
-	rows := make([]ConnectedChannelReadback, 0, len(slots)+len(identities))
+	sort.Slice(activations, func(i, j int) bool { return activations[i].SlotKey < activations[j].SlotKey })
+	rows := make([]ConnectedChannelReadback, 0, len(activations)+len(identities))
 	representedIdentity := map[string]struct{}{}
-	for _, slot := range slots {
-		operation := latestBySlot[slot]
-		activation, activationErr := s.store.GetConnectedChannelActivation(ctx, slot)
-		if activationErr == nil {
-			owner, found := operationByID[activation.OperationID]
-			if !found || owner.SlotKey != slot {
-				return nil, fmt.Errorf("%w: current activation %s has no exact owning onboarding operation", ErrConflict, activation.ActivationID)
-			}
-			operation = owner
-		} else if !errors.Is(activationErr, ErrNotFound) {
-			return nil, activationErr
+	for index := range activations {
+		activation := activations[index]
+		operation, found := operationByID[activation.OperationID]
+		if !found || operation.SlotKey != activation.SlotKey {
+			return nil, fmt.Errorf("%w: current activation %s has no exact owning onboarding operation", ErrConflict, activation.ActivationID)
 		}
 		identityKey := operation.Interface.Normalized().Key()
 		identity, found := identityByKey[identityKey]
@@ -284,10 +273,7 @@ func (s *Service) ReadbackConnectedChannels(ctx context.Context) ([]ConnectedCha
 		if err != nil {
 			return nil, err
 		}
-		row := ConnectedChannelReadback{Identity: identity, Operation: &result.Operation, Readiness: result.Readiness}
-		if activationErr == nil {
-			row.Activation = &activation
-		}
+		row := ConnectedChannelReadback{Identity: identity, Operation: &result.Operation, Activation: &activation, Readiness: result.Readiness}
 		rows = append(rows, row)
 		representedIdentity[identityKey] = struct{}{}
 	}
@@ -452,7 +438,8 @@ func (s *Service) drive(ctx context.Context, op Operation, candidate Candidate, 
 			if err != nil {
 				return Result{}, err
 			}
-			op, _, err = s.store.PublishConnectedChannelActivation(ctx, PublishActivationRequest{
+			var activation ConnectedChannelActivation
+			op, activation, err = s.store.PublishConnectedChannelActivation(ctx, PublishActivationRequest{
 				OperationID: op.OperationID, ExpectedRevision: op.Revision, ActivationID: uuid.NewString(),
 				BindingRevision: binding.Revision, ProofID: binding.ProofID, ProofRevision: binding.ProofRevision, Now: s.now().UTC(),
 			})
@@ -460,6 +447,9 @@ func (s *Service) drive(ctx context.Context, op Operation, candidate Candidate, 
 				return Result{}, err
 			}
 			if err := s.activations.RefreshChannelActivations(ctx); err != nil {
+				return s.blockedResult(ctx, op, candidate, err)
+			}
+			if err := s.releaseSupersededCredentials(ctx, op, activation); err != nil {
 				return s.blockedResult(ctx, op, candidate, err)
 			}
 		case PhaseDeliveringConfirmation:
@@ -480,6 +470,9 @@ func (s *Service) drive(ctx context.Context, op Operation, candidate Candidate, 
 			activation, err := s.store.GetConnectedChannelActivation(ctx, op.SlotKey)
 			if err != nil {
 				return Result{}, err
+			}
+			if err := s.releaseSupersededCredentials(ctx, op, activation); err != nil {
+				return s.blockedResult(ctx, op, candidate, err)
 			}
 			binding, err := s.identities.CurrentBinding(ctx, op.Interface)
 			if err != nil {
@@ -511,6 +504,20 @@ func (s *Service) drive(ctx context.Context, op Operation, candidate Candidate, 
 }
 
 func (s *Service) admitCredentials(ctx context.Context, op Operation, candidate Candidate, providerCredential string) ([]CredentialAdmission, error) {
+	currentByRole := map[string]CredentialAdmission{}
+	if current, err := s.store.GetConnectedChannelActivation(ctx, op.SlotKey); err == nil {
+		for _, admission := range current.CredentialAdmissions {
+			if err := admission.Validate(); err != nil {
+				return nil, err
+			}
+			if _, duplicate := currentByRole[admission.Role]; duplicate {
+				return nil, fmt.Errorf("%w: current activation has duplicate credential role %q", ErrConflict, admission.Role)
+			}
+			currentByRole[admission.Role] = admission
+		}
+	} else if !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
 	admissions := make([]CredentialAdmission, 0, len(op.CredentialReservations))
 	for _, reservation := range op.CredentialReservations {
 		value := ""
@@ -518,6 +525,12 @@ func (s *Service) admitCredentials(ctx context.Context, op Operation, candidate 
 		case candidate.ProviderCredentialRole:
 			value = providerCredential
 		case candidate.SigningCredentialRole:
+			if current, ok := currentByRole[reservation.Role]; ok {
+				if observed, err := s.credentials.Observe(ctx, current.StoreKey); err == nil {
+					admissions = append(admissions, observedCredentialAdmissionForKey(op.OperationID, reservation.Role, current.StoreKey, observed))
+					continue
+				}
+			}
 			if observed, err := s.credentials.Observe(ctx, reservation.StoreKey); err == nil {
 				admissions = append(admissions, observedCredentialAdmission(op.OperationID, reservation, observed))
 				continue
@@ -529,14 +542,19 @@ func (s *Service) admitCredentials(ctx context.Context, op Operation, candidate 
 			}
 		}
 		if strings.TrimSpace(value) == "" {
-			observed, err := s.credentials.Observe(ctx, reservation.StoreKey)
-			if err != nil {
-				return nil, errors.Join(&CredentialRequiredError{Role: reservation.Role, StoreKey: reservation.StoreKey}, err)
+			storeKey := reservation.StoreKey
+			if current, ok := currentByRole[reservation.Role]; ok {
+				storeKey = current.StoreKey
 			}
-			admissions = append(admissions, observedCredentialAdmission(op.OperationID, reservation, observed))
+			observed, err := s.credentials.Observe(ctx, storeKey)
+			if err != nil {
+				return nil, errors.Join(&CredentialRequiredError{Role: reservation.Role, StoreKey: storeKey}, err)
+			}
+			admissions = append(admissions, observedCredentialAdmissionForKey(op.OperationID, reservation.Role, storeKey, observed))
 			continue
 		}
-		written, err := s.credentials.Admit(ctx, CredentialWriteRequest{StoreKey: reservation.StoreKey, Value: value, Receipt: credentialReceipt(op.OperationID, reservation.Role)})
+		storeKey := operationCredentialStoreKey(reservation.StoreKey, op.OperationID, reservation.Role)
+		written, err := s.credentials.Admit(ctx, CredentialWriteRequest{StoreKey: storeKey, Value: value, Receipt: credentialReceipt(op.OperationID, reservation.Role)})
 		if err != nil {
 			return nil, err
 		}
@@ -629,6 +647,35 @@ func (s *Service) failOperation(ctx context.Context, op Operation, code, message
 		return failed, fmt.Errorf("refresh channel activations after terminal onboarding failure: %w", err)
 	}
 	return failed, nil
+}
+
+func (s *Service) releaseSupersededCredentials(ctx context.Context, current Operation, activation ConnectedChannelActivation) error {
+	operations, err := s.store.ListChannelOnboardingOperations(ctx)
+	if err != nil {
+		return err
+	}
+	retained := make(map[string]struct{}, len(activation.CredentialAdmissions))
+	for _, admission := range activation.CredentialAdmissions {
+		retained[credentialAdmissionOccurrence(admission)] = struct{}{}
+	}
+	for _, operation := range operations {
+		if operation.OperationID == current.OperationID || operation.SlotKey != current.SlotKey {
+			continue
+		}
+		for _, admission := range operation.CredentialAdmissions {
+			if _, keep := retained[credentialAdmissionOccurrence(admission)]; keep {
+				continue
+			}
+			if _, err := s.credentials.Release(context.WithoutCancel(ctx), admission); err != nil {
+				return fmt.Errorf("release superseded channel credential %q: %w", admission.StoreKey, err)
+			}
+		}
+	}
+	return nil
+}
+
+func credentialAdmissionOccurrence(admission CredentialAdmission) string {
+	return admission.StoreKey + "\x00" + admission.Epoch
 }
 
 func (s *Service) confirmedBinding(ctx context.Context, op Operation) (operatorchannel.Binding, bool, error) {
@@ -762,14 +809,24 @@ func credentialReservations(candidate Candidate) []CredentialReservation {
 	return reservations
 }
 
+func operationCredentialStoreKey(baseKey, operationID, role string) string {
+	return strings.TrimSpace(baseKey) + ".operation." + operatorchannel.Hash(
+		"channel-onboarding-credential-occurrence-v1", strings.TrimSpace(operationID), strings.TrimSpace(role),
+	)
+}
+
 func credentialReceipt(operationID, role string) string {
 	return operatorchannel.Hash("channel-onboarding-credential-receipt-v1", operationID, role)
 }
 
 func observedCredentialAdmission(operationID string, reservation CredentialReservation, observed CredentialWriteResult) CredentialAdmission {
+	return observedCredentialAdmissionForKey(operationID, reservation.Role, reservation.StoreKey, observed)
+}
+
+func observedCredentialAdmissionForKey(operationID, role, storeKey string, observed CredentialWriteResult) CredentialAdmission {
 	return CredentialAdmission{
-		Role: reservation.Role, StoreKey: reservation.StoreKey, Kind: CredentialAdmissionObserved,
-		Receipt: operatorchannel.Hash("channel-onboarding-credential-observation-v1", operationID, reservation.Role, observed.Epoch),
+		Role: role, StoreKey: storeKey, Kind: CredentialAdmissionObserved,
+		Receipt: operatorchannel.Hash("channel-onboarding-credential-observation-v1", operationID, role, observed.Epoch),
 		Epoch:   observed.Epoch,
 	}
 }

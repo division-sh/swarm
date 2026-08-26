@@ -261,15 +261,15 @@ type serveConnectedChannelRecovery interface {
 	Recover(context.Context) error
 }
 
-func recoverServeConnectedChannelLifecycle(ctx context.Context, teardown, onboarding serveConnectedChannelRecovery) error {
-	if teardown == nil || onboarding == nil {
-		return fmt.Errorf("connected channel recovery requires teardown and onboarding owners")
+func activateServeAfterConnectedChannelTeardownRecovery(ctx context.Context, teardown serveConnectedChannelRecovery, activate func() error) error {
+	if teardown == nil || activate == nil {
+		return fmt.Errorf("connected channel recovery requires teardown and activation owners")
 	}
 	if err := teardown.Recover(ctx); err != nil {
 		return fmt.Errorf("recover connected channel teardown: %w", err)
 	}
-	if err := onboarding.Recover(ctx); err != nil {
-		return fmt.Errorf("recover connected channel onboarding: %w", err)
+	if err := activate(); err != nil {
+		return fmt.Errorf("activate serve runtime after channel teardown recovery: %w", err)
 	}
 	return nil
 }
