@@ -14,6 +14,8 @@ import (
 	"github.com/google/uuid"
 )
 
+var errOnboardingRuntimeContextRetired = errors.New("onboarding runtime context retired")
+
 type IdentityLifecycle interface {
 	Principal() (operatorchannel.Principal, error)
 	Begin(context.Context, string, operatorchannel.OperationKind, int64, string, string, bool, time.Time) (operatorchannel.Operation, error)
@@ -352,6 +354,18 @@ func (s *Service) Recover(ctx context.Context) error {
 		}
 		candidate, err := s.currentCandidate(op)
 		if err != nil {
+			if errors.Is(err, errOnboardingRuntimeContextRetired) {
+				_, failErr := s.failOperation(
+					context.WithoutCancel(ctx),
+					op,
+					"runtime_context_retired",
+					fmt.Sprintf("onboarding runtime context for operation %s is no longer current", op.OperationID),
+				)
+				if failErr != nil {
+					return fmt.Errorf("retire obsolete channel onboarding %s: %w", op.OperationID, failErr)
+				}
+				continue
+			}
 			return err
 		}
 		if _, err := s.drive(context.WithoutCancel(ctx), op, candidate, ""); err != nil {
@@ -740,7 +754,7 @@ func (s *Service) currentCandidate(op Operation) (Candidate, error) {
 	}
 	candidate, current := catalog.FindExact(op.Provider, op.Interface, op.Coordinate, op.TargetSelector)
 	if !current {
-		return Candidate{}, fmt.Errorf("%w: onboarding runtime context was replaced; explicit retry against a new operation is required", ErrConflict)
+		return Candidate{}, fmt.Errorf("%w: %w; explicit retry against a new operation is required", ErrConflict, errOnboardingRuntimeContextRetired)
 	}
 	return candidate, nil
 }

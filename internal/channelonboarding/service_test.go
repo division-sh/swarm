@@ -3,6 +3,7 @@ package channelonboarding
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -117,6 +118,110 @@ func TestOverdueAwaitingConfirmationTerminalizesParentOperation(t *testing.T) {
 	}
 	if identities.expirations != 1 {
 		t.Fatalf("identity expirations = %d, want 1", identities.expirations)
+	}
+}
+
+func TestRecoveryTerminalizesOperationWhoseRuntimeContextIsNoLongerCurrent(t *testing.T) {
+	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
+	emptyCatalog, err := NewCandidateCatalog(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := NewCredentialWriter(credentialStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	written, err := credentials.Admit(context.Background(), CredentialWriteRequest{StoreKey: "channel.telegram.provider.operation", Value: "token", Receipt: "obsolete/provider"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	op := Operation{
+		OperationID: uuid.NewString(), RequestKeyHash: "obsolete-key", RequestHash: "obsolete-request", PrincipalID: "principal-a",
+		Verb: VerbConnect, Provider: candidate.Provider, Interface: candidate.Interface, Coordinate: candidate.Coordinate,
+		TargetSelector: candidate.Target.Selector, Posture: candidate.Posture, Ceremony: candidate.Ceremony,
+		Phase: PhaseAwaitingExternalIdentity, Revision: 3, SaveProof: true, CredentialReservations: credentialReservations(candidate),
+		CredentialAdmissions: []CredentialAdmission{{Role: candidate.ProviderCredentialRole, StoreKey: written.StoreKey, Kind: CredentialAdmissionWritten, Receipt: written.Receipt, Epoch: written.Epoch}},
+		RequestedAt:          now, UpdatedAt: now,
+	}
+	op.SlotKey = StartRequest{Provider: op.Provider, Interface: op.Interface, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector}.SlotKey()
+	store := &cancellationTestStore{op: op}
+	activations := &cancellationTestActivations{}
+	service, err := NewService(ServiceOptions{
+		Store: store, Identities: &cancellationTestIdentities{}, Credentials: credentials,
+		Catalog: func() (*CandidateCatalog, error) { return emptyCatalog, nil }, Activations: activations,
+		Confirmation: cancellationTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := service.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover obsolete operation: %v", err)
+	}
+	if store.op.Phase != PhaseFailed || store.op.FailureCode != "runtime_context_retired" {
+		t.Fatalf("obsolete operation = %#v, want terminal runtime_context_retired", store.op)
+	}
+	if _, found, err := credentialStore.Get(context.Background(), written.StoreKey); err != nil || found {
+		t.Fatalf("obsolete operation credential found=%v err=%v", found, err)
+	}
+	if activations.refreshes != 1 {
+		t.Fatalf("activation refreshes = %d, want 1", activations.refreshes)
+	}
+}
+
+func TestRecoveryFailsClosedWhenCurrentCandidateCatalogCannotBeBuilt(t *testing.T) {
+	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
+	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := NewCredentialWriter(credentialStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	written, err := credentials.Admit(context.Background(), CredentialWriteRequest{StoreKey: "channel.telegram.provider.operation", Value: "token", Receipt: "blocked/provider"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	op := Operation{
+		OperationID: uuid.NewString(), RequestKeyHash: "blocked-key", RequestHash: "blocked-request", PrincipalID: "principal-a",
+		Verb: VerbConnect, Provider: candidate.Provider, Interface: candidate.Interface, Coordinate: candidate.Coordinate,
+		TargetSelector: candidate.Target.Selector, Posture: candidate.Posture, Ceremony: candidate.Ceremony,
+		Phase: PhaseAwaitingExternalIdentity, Revision: 3, SaveProof: true, CredentialReservations: credentialReservations(candidate),
+		CredentialAdmissions: []CredentialAdmission{{Role: candidate.ProviderCredentialRole, StoreKey: written.StoreKey, Kind: CredentialAdmissionWritten, Receipt: written.Receipt, Epoch: written.Epoch}},
+		RequestedAt:          now, UpdatedAt: now,
+	}
+	op.SlotKey = StartRequest{Provider: op.Provider, Interface: op.Interface, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector}.SlotKey()
+	store := &cancellationTestStore{op: op}
+	activations := &cancellationTestActivations{}
+	service, err := NewService(ServiceOptions{
+		Store: store, Identities: &cancellationTestIdentities{}, Credentials: credentials,
+		Catalog: func() (*CandidateCatalog, error) {
+			return nil, fmt.Errorf("%w: duplicate current coordinates", ErrConflict)
+		}, Activations: activations,
+		Confirmation: cancellationTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := service.Recover(context.Background()); !errors.Is(err, ErrConflict) {
+		t.Fatalf("Recover malformed current catalog error = %v, want conflict", err)
+	}
+	if store.op.Phase != op.Phase || store.op.Revision != op.Revision {
+		t.Fatalf("operation mutated after catalog failure = %#v", store.op)
+	}
+	if _, found, err := credentialStore.Get(context.Background(), written.StoreKey); err != nil || !found {
+		t.Fatalf("credential retained found=%v err=%v", found, err)
+	}
+	if activations.refreshes != 0 {
+		t.Fatalf("activation refreshes = %d, want 0", activations.refreshes)
 	}
 }
 

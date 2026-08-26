@@ -265,6 +265,27 @@ func (s *contextAwareRoleScopedExecutorStub) ToolCapabilitiesForActorInContext(c
 	return roleScopedGatewayCapabilities(names, requestAllowed, roleScopedCurrentEntityEligibleInGatewayTest(ctx))
 }
 
+type leasedCatalogExecutorStub struct {
+	actorScopedToolExecutorStub
+	unleasedDefinitions []llm.ToolDefinition
+	leasedDefinitions   []llm.ToolDefinition
+	acquired            int
+	released            int
+}
+
+func (s *leasedCatalogExecutorStub) ToolDefinitionsForActorInContext(context.Context, models.AgentConfig) []llm.ToolDefinition {
+	return append([]llm.ToolDefinition(nil), s.unleasedDefinitions...)
+}
+
+func (s *leasedCatalogExecutorStub) AcquireToolDefinitionsForActorInContext(ctx context.Context, _ models.AgentConfig) (context.Context, []llm.ToolDefinition, func(), error) {
+	s.acquired++
+	return ctx, append([]llm.ToolDefinition(nil), s.leasedDefinitions...), func() { s.released++ }, nil
+}
+
+func (s *leasedCatalogExecutorStub) ToolCapabilitiesForActorInContext(_ context.Context, actor models.AgentConfig, names []string, requestAllowed map[string]struct{}) toolcapabilities.Set {
+	return s.ToolCapabilitiesForActor(actor, names, requestAllowed)
+}
+
 func roleScopedCurrentEntityEligibleInGatewayTest(ctx context.Context) bool {
 	inbound, ok := runtimebus.InboundEventFromContext(ctx)
 	return ok && strings.HasPrefix(inbound.EntityID(), "valid-")
@@ -1237,6 +1258,33 @@ func TestGatewayMCPToolsForRequest_PreservesExecutorOrderAndRejectsCanonicalDupl
 				t.Fatalf("duplicate canonical catalog cause = %v", cause)
 			}
 		})
+	}
+}
+
+func TestGatewayMCPToolsForRequestUsesLeasedActivationCatalog(t *testing.T) {
+	actor := models.AgentConfig{ID: "analysis-agent", Role: "analysis"}
+	channelDefinition := llm.ToolDefinition{
+		Name: "channel.ops.deliver", Description: "Deliver through the pinned channel activation.",
+		Schema: map[string]any{"type": "object", "properties": map[string]any{"text": map[string]any{"type": "string"}}},
+	}
+	registry := newTestTurnContextRegistry()
+	putTestTurnContext(t, registry, "ctx-channel-activation", TurnContext{
+		Actor: actor, CapabilitySurface: testCapabilitySurfaceForDefinitions(t, actor, channelDefinition),
+		CreatedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Hour),
+	})
+	executor := &leasedCatalogExecutorStub{
+		actorScopedToolExecutorStub: actorScopedToolExecutorStub{actorDefs: []llm.ToolDefinition{{Name: "read_file"}}},
+		unleasedDefinitions:         []llm.ToolDefinition{{Name: "read_file"}},
+		leasedDefinitions:           []llm.ToolDefinition{{Name: "read_file"}, channelDefinition},
+	}
+	gateway := NewGateway(executor, "", GatewayHooks{ResolveTurnContext: registry.ResolveTurnContext})
+
+	tools := mustMCPToolsForRequest(t, gateway, withContextToken(httptest.NewRequest(http.MethodPost, "/mcp", nil), "ctx-channel-activation"))
+	if len(tools) != 1 || tools[0].Name != channelDefinition.Name {
+		t.Fatalf("leased MCP catalog = %#v, want exact channel definition", tools)
+	}
+	if executor.acquired != 1 || executor.released != 1 {
+		t.Fatalf("leased MCP catalog lifecycle = acquired:%d released:%d, want 1/1", executor.acquired, executor.released)
 	}
 }
 
