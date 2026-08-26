@@ -818,13 +818,12 @@ wave_1:
     tests_and_testdata: {files: 12, rows: 17}
     total: {files: 20, rows: 33}
   go_connect_corpus:
-    total_files: 16
+    total_files: 15
     canonicalrouting_occurrences: 35
     files:
       internal/cliapp/describe.go: non_authoring_text
       internal/cliapp/describe_test.go: non_authoring_text
       internal/cliapp/local_context_registry.go: non_authoring_text
-      internal/runtime/contracts/event_schema_ownership_test.go: non_authoring_text
       internal/runtime/testfixtures/canonicalrouting/composition_connect_variants.go: positive_producer_and_mutation_base
       internal/runtime/testfixtures/canonicalrouting/import_boundary_variants.go: positive_producer_and_mutation_base
       internal/runtime/testfixtures/canonicalrouting/legacy_instance_routes.go: positive_producer_and_mutation_base
