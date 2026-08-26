@@ -2099,19 +2099,25 @@ func TestServedParityHarnessConversationForkLifecycle(t *testing.T) {
 	servedparity.RunScenarioGroup(t, scenarios, runServedConversationForkBackendProof)
 }
 
+func TestRunServeRuntimeBundleRegisterLifecycleDefaultSQLite(t *testing.T) {
+	runServedBundleRegisterBackendProof(t, servedparity.BackendDefaultSQLite)
+}
+
+func TestRunServeRuntimeBundleRegisterLifecyclePostgres(t *testing.T) {
+	runServedBundleRegisterBackendProof(t, servedparity.BackendExplicitPostgres)
+}
+
+func TestServedParityHarnessBundleRegisterLifecycle(t *testing.T) {
+	scenario := servedparity.MustScenario(servedparity.ScenarioBundleRegisterLifecycle)
+	servedparity.Run(t, scenario, runServedBundleRegisterBackendProof)
+}
+
 func TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed(t *testing.T) {
 	rt := startServedControlProofRuntime(t, servedparity.BackendDefaultSQLite)
 	cases := []struct {
 		method string
 		params map[string]any
 	}{
-		{
-			method: "bundle.register",
-			params: map[string]any{
-				"content_yaml":    "api_version: swarm.bundle.register.v1\nfiles: []\n",
-				"idempotency_key": "issue-1386-sqlite-bundle-register",
-			},
-		},
 		{
 			method: "bundle.delete",
 			params: map[string]any{
@@ -2354,6 +2360,231 @@ func runServedRunControlBackendProof(t *testing.T, backend servedparity.Backend)
 	t.Helper()
 	rt := startServedControlProofRuntime(t, backend)
 	runServedRunControlLifecycleProof(t, rt)
+}
+
+func runServedBundleRegisterBackendProof(t *testing.T, backend servedparity.Backend) {
+	t.Helper()
+	rt := startServedControlProofRuntime(t, backend)
+	if rt.Runtime == nil {
+		t.Fatal("served bundle.register proof requires the running runtime")
+	}
+	initialSource := rt.Runtime.Options.BundleSourceFact
+	initialRuns := servedBundleRegisterTableCount(t, rt.DB, "runs")
+
+	insert := writeServedBundleRegistrationFixture(t, "1.0.1")
+	firstParams := servedBundleRegisterParams(insert.Upload, "issue-2359-"+rt.Backend+"-insert")
+	first := requireServedBundleRegisterResult(t, rt.Endpoint, firstParams)
+	if !first.Registered || first.BundleHash != insert.BundleHash {
+		t.Fatalf("%s first bundle.register = %#v, want registered %s", rt.Backend, first, insert.BundleHash)
+	}
+	requireServedBundleRegisterReadback(t, rt.Endpoint, insert.BundleHash)
+
+	keyedReplay := requireServedBundleRegisterResult(t, rt.Endpoint, firstParams)
+	if keyedReplay != first {
+		t.Fatalf("%s keyed bundle.register replay = %#v, want exact %#v", rt.Backend, keyedReplay, first)
+	}
+	catalogReplayParams := servedBundleRegisterParams(insert.Upload, "issue-2359-"+rt.Backend+"-catalog-replay")
+	catalogReplay := requireServedBundleRegisterResult(t, rt.Endpoint, catalogReplayParams)
+	if catalogReplay.Registered || catalogReplay.BundleHash != insert.BundleHash {
+		t.Fatalf("%s catalog bundle.register replay = %#v, want existing %s", rt.Backend, catalogReplay, insert.BundleHash)
+	}
+
+	beforeMalformed := servedBundleRegisterTableCount(t, rt.DB, "bundles")
+	malformed := requireServedJSONRPCError(t, rt.Endpoint, "bundle.register", map[string]any{
+		"content_yaml":    "api_version: swarm.bundle.register.v1\nfiles: []\n",
+		"idempotency_key": "issue-2359-" + rt.Backend + "-malformed",
+	})
+	if malformed.Code != -32602 || malformed.Data["details"] == nil {
+		t.Fatalf("%s malformed bundle.register error = %#v, want invalid params with details", rt.Backend, malformed)
+	}
+	if got := servedBundleRegisterTableCount(t, rt.DB, "bundles"); got != beforeMalformed {
+		t.Fatalf("%s malformed bundle.register bundle rows = %d, want %d", rt.Backend, got, beforeMalformed)
+	}
+
+	conflictFixture := writeServedBundleRegistrationFixture(t, "1.0.2")
+	conflictParams := servedBundleRegisterParams(conflictFixture.Upload, "issue-2359-"+rt.Backend+"-conflict-seed")
+	seed := requireServedBundleRegisterResult(t, rt.Endpoint, conflictParams)
+	if !seed.Registered || seed.BundleHash != conflictFixture.BundleHash {
+		t.Fatalf("%s conflict seed bundle.register = %#v", rt.Backend, seed)
+	}
+	forceServedBundleRegisterConflict(t, rt, conflictFixture.BundleHash)
+	conflictParams["idempotency_key"] = "issue-2359-" + rt.Backend + "-conflict"
+	conflict := requireServedJSONRPCError(t, rt.Endpoint, "bundle.register", conflictParams)
+	if conflict.Data["code"] != apiv1.BundleRegisterConflictCode {
+		t.Fatalf("%s conflicting bundle.register data = %#v, want %s", rt.Backend, conflict.Data, apiv1.BundleRegisterConflictCode)
+	}
+
+	rollbackFixture := writeServedBundleRegistrationFixture(t, "1.0.3")
+	rollbackParams := servedBundleRegisterParams(rollbackFixture.Upload, "issue-2359-"+rt.Backend+"-rollback")
+	dropRollbackFault := installServedBundleRegisterRollbackFault(t, rt, rollbackFixture.BundleHash)
+	if failed := requestServedJSONRPC(t, rt.Endpoint, "bundle.register", rollbackParams); failed.Error == nil {
+		t.Fatalf("%s forced-rollback bundle.register error = nil, result=%s", rt.Backend, string(failed.Result))
+	}
+	if got := servedBundleRegisterRowCount(t, rt, rollbackFixture.BundleHash); got != 0 {
+		t.Fatalf("%s forced-rollback bundle row count = %d, want 0", rt.Backend, got)
+	}
+	dropRollbackFault()
+	rollbackRetry := requireServedBundleRegisterResult(t, rt.Endpoint, rollbackParams)
+	if !rollbackRetry.Registered || rollbackRetry.BundleHash != rollbackFixture.BundleHash {
+		t.Fatalf("%s rollback retry bundle.register = %#v, want registered %s", rt.Backend, rollbackRetry, rollbackFixture.BundleHash)
+	}
+	requireServedBundleRegisterReadback(t, rt.Endpoint, rollbackFixture.BundleHash)
+
+	if got := servedBundleRegisterTableCount(t, rt.DB, "runs"); got != initialRuns {
+		t.Fatalf("%s bundle.register run rows = %d, want unchanged %d", rt.Backend, got, initialRuns)
+	}
+	if !rt.Runtime.Options.BundleSourceFact.Matches(initialSource) {
+		t.Fatalf("%s bundle.register changed running source from %#v to %#v", rt.Backend, initialSource, rt.Runtime.Options.BundleSourceFact)
+	}
+}
+
+type servedBundleRegistrationFixture struct {
+	Upload     runtimecontracts.BundleRegistrationUpload
+	BundleHash string
+}
+
+type servedBundleRegisterResult struct {
+	BundleHash    string `json:"bundle_hash"`
+	Registered    bool   `json:"registered"`
+	HasData       bool   `json:"has_data"`
+	DataSizeBytes int64  `json:"data_size_bytes"`
+}
+
+func writeServedBundleRegistrationFixture(t *testing.T, version string) servedBundleRegistrationFixture {
+	t.Helper()
+	root := writeServedEventPublishFollowUpFixture(t)
+	packagePath := filepath.Join(root, "package.yaml")
+	raw, err := os.ReadFile(packagePath)
+	if err != nil {
+		t.Fatalf("read bundle.register package: %v", err)
+	}
+	amended := strings.Replace(string(raw), `version: "1.0.0"`, fmt.Sprintf("version: %q", version), 1)
+	if amended == string(raw) {
+		t.Fatalf("bundle.register fixture package does not declare version 1.0.0: %s", packagePath)
+	}
+	if err := os.WriteFile(packagePath, []byte(amended), 0o644); err != nil {
+		t.Fatalf("write bundle.register package: %v", err)
+	}
+	repoRoot := runtimepipeline.WorkflowRepoRoot()
+	upload, err := runtimecontracts.BuildBundleRegistrationDirectoryUpload(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("BuildBundleRegistrationDirectoryUpload(%s): %v", version, err)
+	}
+	return servedBundleRegistrationFixture{Upload: upload, BundleHash: servedEventPublishFixtureBundleHash(t, root)}
+}
+
+func servedBundleRegisterParams(upload runtimecontracts.BundleRegistrationUpload, idempotencyKey string) map[string]any {
+	params := map[string]any{"content_yaml": upload.ContentYAML}
+	if upload.DataBlob != nil {
+		params["data_blob"] = upload.DataBlob
+	}
+	if strings.TrimSpace(idempotencyKey) != "" {
+		params["idempotency_key"] = idempotencyKey
+	}
+	return params
+}
+
+func requireServedBundleRegisterResult(t *testing.T, endpoint string, params map[string]any) servedBundleRegisterResult {
+	t.Helper()
+	var result servedBundleRegisterResult
+	requireServedJSONRPCResult(t, endpoint, "bundle.register", params, &result)
+	return result
+}
+
+func requireServedBundleRegisterReadback(t *testing.T, endpoint, bundleHash string) {
+	t.Helper()
+	var detail bundlecatalog.Detail
+	requireServedJSONRPCResult(t, endpoint, "bundle.get", map[string]any{"bundle_hash": bundleHash}, &detail)
+	if detail.BundleHash != bundleHash || strings.TrimSpace(detail.ContentYAML) == "" || detail.Metadata["registered_by"] != "bundle.register" {
+		t.Fatalf("bundle.get(%s) = %#v, want exact public registration record", bundleHash, detail)
+	}
+}
+
+func servedBundleRegisterTableCount(t *testing.T, db *sql.DB, table string) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRowContext(context.Background(), "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil {
+		t.Fatalf("count %s: %v", table, err)
+	}
+	return count
+}
+
+func servedBundleRegisterRowCount(t *testing.T, rt servedControlProofRuntime, bundleHash string) int {
+	t.Helper()
+	query := `SELECT COUNT(*) FROM bundles WHERE bundle_hash = ?`
+	if rt.Backend == "postgres" {
+		query = `SELECT COUNT(*) FROM bundles WHERE bundle_hash = $1`
+	}
+	var count int
+	if err := rt.DB.QueryRowContext(context.Background(), query, bundleHash).Scan(&count); err != nil {
+		t.Fatalf("%s count bundle %s: %v", rt.Backend, bundleHash, err)
+	}
+	return count
+}
+
+func forceServedBundleRegisterConflict(t *testing.T, rt servedControlProofRuntime, bundleHash string) {
+	t.Helper()
+	query := `UPDATE bundles SET content_yaml = ? WHERE bundle_hash = ?`
+	args := []any{"forced conflict", bundleHash}
+	if rt.Backend == "postgres" {
+		query = `UPDATE bundles SET content_yaml = $1 WHERE bundle_hash = $2`
+	}
+	result, err := rt.DB.ExecContext(context.Background(), query, args...)
+	if err != nil {
+		t.Fatalf("%s force bundle.register conflict: %v", rt.Backend, err)
+	}
+	if rows, err := result.RowsAffected(); err != nil || rows != 1 {
+		t.Fatalf("%s force bundle.register conflict rows = %d, err=%v", rt.Backend, rows, err)
+	}
+}
+
+func installServedBundleRegisterRollbackFault(t *testing.T, rt servedControlProofRuntime, bundleHash string) func() {
+	t.Helper()
+	var install, drop string
+	if rt.Backend == "postgres" {
+		install = `
+			CREATE FUNCTION swarm_test_reject_bundle_register() RETURNS trigger LANGUAGE plpgsql AS $$
+			BEGIN
+				IF NEW.bundle_hash = '` + bundleHash + `' THEN
+					RAISE EXCEPTION 'forced served bundle register rollback';
+				END IF;
+				RETURN NEW;
+			END
+			$$;
+			CREATE TRIGGER swarm_test_reject_bundle_register
+			AFTER INSERT ON bundles
+			FOR EACH ROW EXECUTE FUNCTION swarm_test_reject_bundle_register()
+		`
+		drop = `
+			DROP TRIGGER IF EXISTS swarm_test_reject_bundle_register ON bundles;
+			DROP FUNCTION IF EXISTS swarm_test_reject_bundle_register()
+		`
+	} else {
+		install = `
+			CREATE TRIGGER swarm_test_reject_bundle_register
+			AFTER INSERT ON bundles
+			WHEN NEW.bundle_hash = '` + bundleHash + `'
+			BEGIN
+				SELECT RAISE(ABORT, 'forced served bundle register rollback');
+			END
+		`
+		drop = `DROP TRIGGER IF EXISTS swarm_test_reject_bundle_register`
+	}
+	if _, err := rt.DB.ExecContext(context.Background(), install); err != nil {
+		t.Fatalf("%s install bundle.register rollback fault: %v", rt.Backend, err)
+	}
+	dropped := false
+	cleanup := func() {
+		if dropped {
+			return
+		}
+		dropped = true
+		if _, err := rt.DB.ExecContext(context.Background(), drop); err != nil {
+			t.Fatalf("%s drop bundle.register rollback fault: %v", rt.Backend, err)
+		}
+	}
+	t.Cleanup(cleanup)
+	return cleanup
 }
 
 func runServedLiveAgentEventReplayBackendProof(t *testing.T, backend servedparity.Backend) {

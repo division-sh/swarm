@@ -46,6 +46,7 @@ const (
 	ScenarioGeneratedInputFixtureLifecycle       = "generated_input_fixture_lifecycle"
 	ScenarioDerivedScenarioLifecycle             = "derived_scenario_lifecycle"
 	ScenarioPublicMockApprovalLifecycle          = "public_mock_approval_lifecycle"
+	ScenarioBundleRegisterLifecycle              = "bundle_register_lifecycle"
 	ScenarioConversationForkLifecycle            = "conversation_fork_lifecycle"
 	ScenarioConversationForkChatLifecycle        = "conversation_fork_chat_lifecycle"
 	ScenarioConversationForkDeleteLifecycle      = "conversation_fork_delete_lifecycle"
@@ -105,6 +106,7 @@ func Scenarios() []Scenario {
 		servedControlScenario(ScenarioGeneratedInputFixtureLifecycle, "event.publish", "TestServedParityHarnessGeneratedInputFixtureLifecycle"),
 		servedControlScenario(ScenarioDerivedScenarioLifecycle, "event.publish", "TestServedParityHarnessDerivedScenarioLifecycle"),
 		servedControlScenario(ScenarioPublicMockApprovalLifecycle, "event.publish", "TestServedParityHarnessPublicMockApprovalLifecycle"),
+		servedControlScenario(ScenarioBundleRegisterLifecycle, "bundle.register", "TestServedParityHarnessBundleRegisterLifecycle"),
 		servedControlScenario(ScenarioConversationForkLifecycle, "conversation.fork", "TestServedParityHarnessConversationForkLifecycle"),
 		servedControlScenario(ScenarioConversationForkChatLifecycle, "conversation.fork_chat", "TestServedParityHarnessConversationForkLifecycle"),
 		servedControlScenario(ScenarioConversationForkDeleteLifecycle, "conversation.fork_delete", "TestServedParityHarnessConversationForkLifecycle"),

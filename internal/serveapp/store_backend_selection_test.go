@@ -376,6 +376,7 @@ func TestSelectedOwnerAPICapabilityMatrixIsExplicitAcrossBackends(t *testing.T) 
 		"sqlite run bundle context":          sqliteCaps.RunBundleContext != nil,
 		"sqlite test setup":                  sqliteCaps.TestSetup != nil,
 		"sqlite bundle catalog":              sqliteCaps.BundleCatalog != nil,
+		"sqlite bundle register":             sqliteCaps.BundleRegister != nil,
 		"sqlite conversation reads":          sqliteCaps.ConversationForks != nil,
 		"sqlite conversation lifecycle":      sqliteCaps.ConversationForkLifecycle != nil,
 		"postgres bundle register":           postgresCaps.BundleRegister != nil,
@@ -391,7 +392,6 @@ func TestSelectedOwnerAPICapabilityMatrixIsExplicitAcrossBackends(t *testing.T) 
 		}
 	}
 	for name, available := range map[string]bool{
-		"sqlite bundle register":   sqliteCaps.BundleRegister != nil,
 		"sqlite bundle delete":     sqliteCaps.BundleDelete != nil,
 		"sqlite run fork":          sqliteCaps.RunFork != nil,
 		"sqlite run fork selector": sqliteCaps.RunForkSelector != nil,
