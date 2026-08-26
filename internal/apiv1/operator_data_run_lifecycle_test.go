@@ -41,7 +41,7 @@ type dataRunLifecycleStore interface {
 	ListDataDeclarationSummaries(context.Context, string) ([]durabledata.DeclarationSummary, error)
 	ListDataVersionSummaries(context.Context, durabledata.DeclarationRef, uint64, int) ([]durabledata.VersionSummary, error)
 	ResolveDataVersionSummary(context.Context, durabledata.DeclarationRef, durabledata.VersionSelector) (durabledata.VersionSummary, error)
-	LoadDataVersionPayload(context.Context, durabledata.DeclarationRef, durabledata.VersionID) (durabledata.Version, error)
+	ResolveDataVersionPayload(context.Context, durabledata.DeclarationRef, durabledata.VersionSelector) (durabledata.VersionSummary, durabledata.Version, error)
 	ListDataVersionProvenance(context.Context, durabledata.VersionID, uint64, int) ([]durabledata.Provenance, error)
 	ListDataPins(context.Context, durabledata.VersionID, string, int) ([]durabledata.Pin, error)
 	ListDataHeadHistory(context.Context, durabledata.DeclarationRef, uint64, int) ([]durabledata.HeadHistory, error)

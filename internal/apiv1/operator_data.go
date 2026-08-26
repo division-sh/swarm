@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,7 +23,7 @@ type DurableDataStore interface {
 	ListDataDeclarationSummaries(context.Context, string) ([]durabledata.DeclarationSummary, error)
 	ListDataVersionSummaries(context.Context, durabledata.DeclarationRef, uint64, int) ([]durabledata.VersionSummary, error)
 	ResolveDataVersionSummary(context.Context, durabledata.DeclarationRef, durabledata.VersionSelector) (durabledata.VersionSummary, error)
-	LoadDataVersionPayload(context.Context, durabledata.DeclarationRef, durabledata.VersionID) (durabledata.Version, error)
+	ResolveDataVersionPayload(context.Context, durabledata.DeclarationRef, durabledata.VersionSelector) (durabledata.VersionSummary, durabledata.Version, error)
 	ListDataVersionProvenance(context.Context, durabledata.VersionID, uint64, int) ([]durabledata.Provenance, error)
 	ListDataPins(context.Context, durabledata.VersionID, string, int) ([]durabledata.Pin, error)
 	ListDataHeadHistory(context.Context, durabledata.DeclarationRef, uint64, int) ([]durabledata.HeadHistory, error)
@@ -238,47 +237,40 @@ func executeDataShowResource(ctx context.Context, params map[string]any, store D
 	if err != nil {
 		return nil, err
 	}
-	summary, err := store.ResolveDataVersionSummary(ctx, ref, selector)
-	if err != nil {
-		return nil, dataApplicationError(err)
-	}
-	if err := summary.Validate(); err != nil || summary.Declaration != ref ||
-		(selector.Kind == "version" && summary.VersionID != selector.VersionID) {
-		return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"reason": "resolved version summary is contradictory"})
-	}
-	if selector.Kind == "alias" {
-		sequence, parseErr := durabledata.ParseVersionAlias(summary.Alias)
-		if parseErr != nil || sequence != selector.SequenceAlias {
-			return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"reason": "resolved version alias is contradictory"})
-		}
-	}
-	if view == "version" {
-		return summary, nil
-	}
-	if view == "provenance" {
-		page, err := dataPage(params["page"])
-		if err != nil {
-			return nil, err
-		}
-		fingerprint := dataCursorFingerprint(view, string(summary.VersionID))
-		after, err := dataSequenceCursorValue(page.Cursor, fingerprint, "swarm.data.provenance.cursor.v1")
-		if err != nil {
-			return nil, err
-		}
-		items, err := store.ListDataVersionProvenance(ctx, summary.VersionID, after, page.Limit+1)
+	if view == "version" || view == "provenance" || view == "pins" {
+		summary, err := store.ResolveDataVersionSummary(ctx, ref, selector)
 		if err != nil {
 			return nil, dataApplicationError(err)
 		}
-		for _, item := range items {
-			if err := item.Validate(); err != nil || item.VersionID != summary.VersionID {
-				return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"reason": "provenance contradicts selected version"})
-			}
+		if err := validateResolvedDataVersionSummary(summary, ref, selector); err != nil {
+			return nil, err
 		}
-		return pageDataItemsFrom(items, page, 0, func(_ int, last durabledata.Provenance) string {
-			return dataSequenceCursor(last.Sequence, fingerprint, "swarm.data.provenance.cursor.v1")
-		})
-	}
-	if view == "pins" {
+		if view == "version" {
+			return summary, nil
+		}
+		if view == "provenance" {
+			page, err := dataPage(params["page"])
+			if err != nil {
+				return nil, err
+			}
+			fingerprint := dataCursorFingerprint(view, string(summary.VersionID))
+			after, err := dataSequenceCursorValue(page.Cursor, fingerprint, "swarm.data.provenance.cursor.v1")
+			if err != nil {
+				return nil, err
+			}
+			items, err := store.ListDataVersionProvenance(ctx, summary.VersionID, after, page.Limit+1)
+			if err != nil {
+				return nil, dataApplicationError(err)
+			}
+			for _, item := range items {
+				if err := item.Validate(); err != nil || item.VersionID != summary.VersionID {
+					return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"reason": "provenance contradicts selected version"})
+				}
+			}
+			return pageDataItemsFrom(items, page, 0, func(_ int, last durabledata.Provenance) string {
+				return dataSequenceCursor(last.Sequence, fingerprint, "swarm.data.provenance.cursor.v1")
+			})
+		}
 		page, err := dataPage(params["page"])
 		if err != nil {
 			return nil, err
@@ -301,14 +293,14 @@ func executeDataShowResource(ctx context.Context, params map[string]any, store D
 			return dataPinCursorForRun(last.RunID, fingerprint)
 		})
 	}
-	version, err := store.LoadDataVersionPayload(ctx, ref, summary.VersionID)
+	summary, version, err := store.ResolveDataVersionPayload(ctx, ref, selector)
 	if err != nil {
 		return nil, dataApplicationError(err)
 	}
-	actualSummary := dataVersionSummary(ref, version)
-	wantBytes, wantErr := canonicaljson.Bytes(summary)
-	actualBytes, actualErr := canonicaljson.Bytes(actualSummary)
-	if wantErr != nil || actualErr != nil || !bytes.Equal(wantBytes, actualBytes) {
+	if err := validateResolvedDataVersionSummary(summary, ref, selector); err != nil {
+		return nil, err
+	}
+	if err := summary.ValidateVersion(version); err != nil {
 		return nil, NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"version_id": summary.VersionID, "reason": "version payload contradicts selected metadata"})
 	}
 	if version.PrunedAt != nil {
@@ -517,15 +509,18 @@ func executeDataShowOperation(ctx context.Context, params map[string]any, store 
 	}
 }
 
-func dataVersionSummary(ref durabledata.DeclarationRef, version durabledata.Version) durabledata.VersionSummary {
-	state := "materialized"
-	bytes := len(version.CanonicalJSONL)
-	if version.PrunedAt != nil {
-		state = "pruned"
-		bytes = 0
+func validateResolvedDataVersionSummary(summary durabledata.VersionSummary, ref durabledata.DeclarationRef, selector durabledata.VersionSelector) error {
+	if err := summary.Validate(); err != nil || summary.Declaration != ref ||
+		(selector.Kind == "version" && summary.VersionID != selector.VersionID) {
+		return NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"reason": "resolved version summary is contradictory"})
 	}
-	return durabledata.VersionSummary{Declaration: ref, VersionID: version.VersionID, Alias: fmt.Sprintf("v%d", version.SequenceAlias),
-		Manifest: version.Manifest, BusinessKey: version.BusinessKey, PayloadState: state, MaterializedBytes: bytes}
+	if selector.Kind == "alias" {
+		sequence, parseErr := durabledata.ParseVersionAlias(summary.Alias)
+		if parseErr != nil || sequence != selector.SequenceAlias {
+			return NewApplicationError(string(durabledata.CodeIntegrity), false, map[string]any{"reason": "resolved version alias is contradictory"})
+		}
+	}
+	return nil
 }
 
 func dataVersionSelector(raw any) (durabledata.VersionSelector, error) {

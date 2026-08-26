@@ -85,6 +85,46 @@ func (s VersionSummary) Validate() error {
 	}
 }
 
+// Summary returns the canonical public metadata projection of one stored
+// version. Provenance is intentionally outside this projection.
+func (v Version) Summary() VersionSummary {
+	state := "materialized"
+	materializedBytes := len(v.CanonicalJSONL)
+	if v.PrunedAt != nil {
+		state = "pruned"
+		materializedBytes = 0
+	}
+	return VersionSummary{
+		Declaration:       v.Manifest.Declaration,
+		VersionID:         v.VersionID,
+		Alias:             fmt.Sprintf("v%d", v.SequenceAlias),
+		Manifest:          v.Manifest,
+		BusinessKey:       v.BusinessKey,
+		PayloadState:      state,
+		MaterializedBytes: materializedBytes,
+	}
+}
+
+func (s VersionSummary) ValidateVersion(version Version) error {
+	if err := s.Validate(); err != nil {
+		return err
+	}
+	if version.PrunedAt == nil && version.CanonicalJSONL == nil {
+		return fmt.Errorf("materialized version requires payload bytes")
+	}
+	if version.PrunedAt != nil && version.CanonicalJSONL != nil {
+		return fmt.Errorf("pruned version forbids payload bytes")
+	}
+	actual := version.Summary()
+	if err := actual.Validate(); err != nil {
+		return err
+	}
+	if s != actual {
+		return fmt.Errorf("version summary contradicts payload")
+	}
+	return nil
+}
+
 // VersionSelector is the closed selected-store version lookup contract. Alias
 // text is parsed at the API boundary so the store never accepts alternate
 // spellings for one sequence.

@@ -879,58 +879,76 @@ func (o *Owner) ResolveVersionSummary(ctx context.Context, ref runtimedata.Decla
 	}
 	var summary runtimedata.VersionSummary
 	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		var where string
-		var args []any
-		switch selector.Kind {
-		case "head":
-			where = `v.package_key = %s AND v.event_name = %s AND v.version_id = (SELECT h.version_id FROM resource_heads h WHERE h.package_key = %s AND h.event_name = %s)`
-			args = []any{ref.PackageKey, ref.EventName, ref.PackageKey, ref.EventName}
-		case "version":
-			where = `v.package_key = %s AND v.event_name = %s AND v.version_id = %s`
-			args = []any{ref.PackageKey, ref.EventName, selector.VersionID}
-		case "alias":
-			where = `v.package_key = %s AND v.event_name = %s AND v.sequence_alias = %s`
-			args = []any{ref.PackageKey, ref.EventName, selector.SequenceAlias}
-		}
-		query := `SELECT v.version_id, v.sequence_alias, v.manifest_json, COALESCE(v.business_key_field, ''),
-		                 v.canonical_schema_bytes, LENGTH(v.canonical_jsonl), v.pruned_at,
-		                 (SELECT COUNT(*) FROM resource_version_provenance p WHERE p.version_id = v.version_id)
-		          FROM resource_versions v WHERE ` + where
-		row := tx.QueryRowContext(txctx, o.query(query, len(args)), args...)
 		var err error
-		summary, _, err = o.scanVersionSummary(row, ref)
-		if errors.Is(err, sql.ErrNoRows) {
-			return runtimedata.NewDomainError(runtimedata.CodeVersionMissing, "selected resource version does not exist for declaration %s", ref.Key())
-		}
+		summary, err = o.resolveVersionSummaryTx(txctx, tx, ref, selector, false)
 		return err
 	})
 	return summary, err
 }
 
-func (o *Owner) LoadVersionPayload(ctx context.Context, ref runtimedata.DeclarationRef, versionID runtimedata.VersionID) (runtimedata.Version, error) {
+func (o *Owner) resolveVersionSummaryTx(ctx context.Context, tx *sql.Tx, ref runtimedata.DeclarationRef, selector runtimedata.VersionSelector, lock bool) (runtimedata.VersionSummary, error) {
+	if err := o.requireDeclarationExistsTx(ctx, tx, ref); err != nil {
+		return runtimedata.VersionSummary{}, err
+	}
+	var where string
+	var args []any
+	switch selector.Kind {
+	case "head":
+		where = `v.package_key = %s AND v.event_name = %s AND v.version_id = (SELECT h.version_id FROM resource_heads h WHERE h.package_key = %s AND h.event_name = %s)`
+		args = []any{ref.PackageKey, ref.EventName, ref.PackageKey, ref.EventName}
+	case "version":
+		where = `v.package_key = %s AND v.event_name = %s AND v.version_id = %s`
+		args = []any{ref.PackageKey, ref.EventName, selector.VersionID}
+	case "alias":
+		where = `v.package_key = %s AND v.event_name = %s AND v.sequence_alias = %s`
+		args = []any{ref.PackageKey, ref.EventName, selector.SequenceAlias}
+	}
+	query := `SELECT v.version_id, v.sequence_alias, v.manifest_json, COALESCE(v.business_key_field, ''),
+	                 v.canonical_schema_bytes, LENGTH(v.canonical_jsonl), v.pruned_at,
+	                 (SELECT COUNT(*) FROM resource_version_provenance p WHERE p.version_id = v.version_id)
+	          FROM resource_versions v WHERE ` + where
+	if lock && o.dialect == dialectPostgres {
+		query += ` FOR UPDATE`
+	}
+	summary, _, err := o.scanVersionSummary(tx.QueryRowContext(ctx, o.query(query, len(args)), args...), ref)
+	if errors.Is(err, sql.ErrNoRows) {
+		return runtimedata.VersionSummary{}, runtimedata.NewDomainError(runtimedata.CodeVersionMissing, "selected resource version does not exist for declaration %s", ref.Key())
+	}
+	return summary, err
+}
+
+func (o *Owner) ResolveVersionPayload(ctx context.Context, ref runtimedata.DeclarationRef, selector runtimedata.VersionSelector) (runtimedata.VersionSummary, runtimedata.Version, error) {
 	if err := o.requireCurrent(); err != nil {
-		return runtimedata.Version{}, err
+		return runtimedata.VersionSummary{}, runtimedata.Version{}, err
 	}
 	if err := ref.Validate(); err != nil {
-		return runtimedata.Version{}, err
+		return runtimedata.VersionSummary{}, runtimedata.Version{}, err
 	}
-	if err := versionID.Validate(); err != nil {
-		return runtimedata.Version{}, err
+	if err := selector.Validate(); err != nil {
+		return runtimedata.VersionSummary{}, runtimedata.Version{}, err
 	}
+	var summary runtimedata.VersionSummary
 	var version runtimedata.Version
 	err := o.runTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		var found bool
 		var err error
-		version, found, err = o.loadStoredVersionPayload(txctx, tx, ref, versionID)
+		summary, err = o.resolveVersionSummaryTx(txctx, tx, ref, selector, true)
+		if err != nil {
+			return err
+		}
+		var found bool
+		version, found, err = o.loadStoredVersionPayload(txctx, tx, ref, summary.VersionID)
 		if err != nil {
 			return err
 		}
 		if !found {
-			return runtimedata.NewDomainError(runtimedata.CodeVersionMissing, "resource version %s does not exist for declaration %s", versionID, ref.Key())
+			return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "selected resource version %s disappeared during payload resolution", summary.VersionID)
+		}
+		if err := summary.ValidateVersion(version); err != nil {
+			return runtimedata.NewDomainError(runtimedata.CodeIntegrity, "selected resource version %s metadata contradicts payload: %v", summary.VersionID, err)
 		}
 		return nil
 	})
-	return version, err
+	return summary, version, err
 }
 
 func (o *Owner) ListVersionProvenance(ctx context.Context, versionID runtimedata.VersionID, afterSequence uint64, limit int) ([]runtimedata.Provenance, error) {

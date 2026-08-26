@@ -37,7 +37,7 @@ type durableDataSelectedStore interface {
 	ListDataDeclarationSummaries(context.Context, string) ([]durabledata.DeclarationSummary, error)
 	ListDataVersionSummaries(context.Context, durabledata.DeclarationRef, uint64, int) ([]durabledata.VersionSummary, error)
 	ResolveDataVersionSummary(context.Context, durabledata.DeclarationRef, durabledata.VersionSelector) (durabledata.VersionSummary, error)
-	LoadDataVersionPayload(context.Context, durabledata.DeclarationRef, durabledata.VersionID) (durabledata.Version, error)
+	ResolveDataVersionPayload(context.Context, durabledata.DeclarationRef, durabledata.VersionSelector) (durabledata.VersionSummary, durabledata.Version, error)
 	ListDataVersionProvenance(context.Context, durabledata.VersionID, uint64, int) ([]durabledata.Provenance, error)
 	ListDataPins(context.Context, durabledata.VersionID, string, int) ([]durabledata.Pin, error)
 	ListDataHeadHistory(context.Context, durabledata.DeclarationRef, uint64, int) ([]durabledata.HeadHistory, error)
@@ -186,9 +186,9 @@ func TestDurableDataSelectedStoreLifecycleReplayAndPrune(t *testing.T) {
 				t.Fatalf("resolve %s summary = %#v, %v", name, resolved, err)
 			}
 		}
-		payload, err := primary.LoadDataVersionPayload(ctx, ref, second.Candidate.VersionID)
-		if err != nil || payload.VersionID != second.Candidate.VersionID || payload.Provenance != nil {
-			t.Fatalf("selected version payload = %#v, %v", payload, err)
+		payloadSummary, payload, err := primary.ResolveDataVersionPayload(ctx, ref, durabledata.VersionSelector{Kind: "version", VersionID: second.Candidate.VersionID})
+		if err != nil || payloadSummary.VersionID != second.Candidate.VersionID || payload.VersionID != second.Candidate.VersionID || payload.Provenance != nil {
+			t.Fatalf("selected version payload = %#v, %#v, %v", payloadSummary, payload, err)
 		}
 		provenance, err := primary.ListDataVersionProvenance(ctx, second.Candidate.VersionID, 0, 2)
 		if err != nil || len(provenance) != 1 || provenance[0].VersionID != second.Candidate.VersionID {
@@ -214,6 +214,101 @@ func TestDurableDataSelectedStoreLifecycleReplayAndPrune(t *testing.T) {
 		}
 		if _, err := primary.ListDataHeadHistory(ctx, ref, 99, 2); err == nil {
 			t.Fatal("head history accepted an absent cursor anchor")
+		}
+	})
+}
+
+func TestResolveDataVersionPayloadIsAtomicAcrossPruneAndRematerialize(t *testing.T) {
+	forEachDurableDataStore(t, func(t *testing.T, selected durableDataSelectedStore, _ *sql.DB) {
+		ctx := context.Background()
+		catalog, ref := durableDataTestCatalog(t)
+		if err := registerDurableDataTestCatalog(ctx, selected, catalog); err != nil {
+			t.Fatalf("register durable data test catalog: %v", err)
+		}
+		firstInput := []byte("{\"slug\":\"alpha\",\"score\":1}\n")
+		secondInput := []byte("{\"slug\":\"beta\",\"score\":2}\n")
+		first, err := selected.ExecuteDataSourceOperation(ctx, durabledata.SourceCommand{
+			Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: testDataBundle,
+			Declaration: ref, ExpectedHead: durabledata.AbsentHead(), InputFormat: "jsonl", Input: firstInput,
+		})
+		if err != nil || first.Outcome != "accepted" {
+			t.Fatalf("first import = %#v, %v", first, err)
+		}
+		second, err := selected.ExecuteDataSourceOperation(ctx, durabledata.SourceCommand{
+			Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: testDataBundle,
+			Declaration: ref, ExpectedHead: first.Head.After, InputFormat: "jsonl", Input: secondInput,
+		})
+		if err != nil || second.Outcome != "accepted" {
+			t.Fatalf("second import = %#v, %v", second, err)
+		}
+
+		writerErr := make(chan error, 1)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for cycle := 0; cycle < 12; cycle++ {
+				pruned, err := selected.PruneDataResource(ctx, durabledata.PruneCommand{
+					PruneInvocationID: uuid.NewString(), Actor: "operator", Declaration: ref,
+					VersionID: first.Candidate.VersionID, ExpectedHead: second.Head.After,
+				})
+				if err != nil || pruned.Outcome != "pruned" {
+					writerErr <- fmt.Errorf("cycle %d prune = %#v: %w", cycle, pruned, err)
+					return
+				}
+				rematerialized, err := selected.ExecuteDataSourceOperation(ctx, durabledata.SourceCommand{
+					Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: testDataBundle,
+					Declaration: ref, ExpectedHead: second.Head.After, InputFormat: "jsonl", Input: firstInput,
+				})
+				if err != nil || rematerialized.Outcome != "accepted" || rematerialized.Candidate.VersionID != first.Candidate.VersionID {
+					writerErr <- fmt.Errorf("cycle %d rematerialize = %#v: %w", cycle, rematerialized, err)
+					return
+				}
+				restoredHead, err := selected.ExecuteDataSourceOperation(ctx, durabledata.SourceCommand{
+					Operation: "import", SourceInvocationID: uuid.NewString(), Actor: "operator", BundleHash: testDataBundle,
+					Declaration: ref, ExpectedHead: rematerialized.Head.After, InputFormat: "jsonl", Input: secondInput,
+				})
+				if err != nil || restoredHead.Outcome != "accepted" || restoredHead.Candidate.VersionID != second.Candidate.VersionID {
+					writerErr <- fmt.Errorf("cycle %d restore head = %#v: %w", cycle, restoredHead, err)
+					return
+				}
+			}
+			writerErr <- nil
+		}()
+
+		selector := durabledata.VersionSelector{Kind: "version", VersionID: first.Candidate.VersionID}
+		observations := 0
+		var readerErr error
+	readLoop:
+		for {
+			select {
+			case <-done:
+				break readLoop
+			default:
+			}
+			summary, version, err := selected.ResolveDataVersionPayload(ctx, ref, selector)
+			if err != nil {
+				readerErr = fmt.Errorf("atomic payload resolution: %w", err)
+				<-done
+				break readLoop
+			}
+			if err := summary.ValidateVersion(version); err != nil {
+				readerErr = fmt.Errorf("non-atomic summary/payload pair: %#v / %#v: %w", summary, version, err)
+				<-done
+				break readLoop
+			}
+			observations++
+		}
+		if err := <-writerErr; err != nil {
+			t.Fatal(err)
+		}
+		if readerErr != nil {
+			t.Fatal(readerErr)
+		}
+		if observations == 0 {
+			summary, version, err := selected.ResolveDataVersionPayload(ctx, ref, selector)
+			if err != nil || summary.ValidateVersion(version) != nil {
+				t.Fatalf("final atomic payload resolution = %#v / %#v: %v", summary, version, err)
+			}
 		}
 	})
 }
