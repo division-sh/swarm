@@ -1665,15 +1665,15 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		serveHTTPServer("mcp", mcpServer, mcpListener, runtimeFailure)
 	}()
 	presenter.recordBootWarnings(bootReport)
-	if err := startServeRuntimeContexts(ctx, runtimeContexts, runtimeContextManager); err != nil {
-		presenter.fail(22, "ready", err)
-		return 1
-	}
-	if err := reportServeStandingReadiness(ctx, rt.Pipeline, opts.Output); err != nil {
-		presenter.fail(22, "ready", err)
-		return 1
-	}
-	if err := channelActivationRefresher.publishChannelActivations(ctx); err != nil {
+	if err := activateServeAfterConnectedChannelTeardownRecovery(ctx, channelDestructive, func() error {
+		if err := startServeRuntimeContexts(ctx, runtimeContexts, runtimeContextManager); err != nil {
+			return err
+		}
+		if err := reportServeStandingReadiness(ctx, rt.Pipeline, opts.Output); err != nil {
+			return err
+		}
+		return channelActivationRefresher.publishChannelActivations(ctx)
+	}); err != nil {
 		presenter.fail(22, "channel_onboarding", err)
 		return 1
 	}
@@ -1704,8 +1704,8 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 			return 1
 		}
 	}
-	if err := recoverServeConnectedChannelLifecycle(ctx, channelDestructive, channelOnboarding); err != nil {
-		presenter.fail(22, "channel_onboarding", err)
+	if err := channelOnboarding.Recover(ctx); err != nil {
+		presenter.fail(22, "channel_onboarding", fmt.Errorf("recover connected channel onboarding: %w", err))
 		return 1
 	}
 	if publicIngressEnabled {

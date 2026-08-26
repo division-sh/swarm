@@ -43,6 +43,13 @@ type channelConnectOptions struct {
 	resumeCredential string
 }
 
+type channelStatusOptions struct {
+	apiOptions rootCommandOptions
+	output     cliOutputOptions
+	bundle     string
+	target     string
+}
+
 type channelOnboardingResult = channelonboarding.Result
 
 func newChannelCommand(opts rootCommandOptions) *cobra.Command {
@@ -60,6 +67,7 @@ func newChannelCommand(opts rootCommandOptions) *cobra.Command {
 		newChannelLifecycleCommand(opts, "rebind"),
 		newChannelResumeCommand(opts),
 		newChannelListCommand(opts),
+		newChannelStatusCommand(opts),
 		newChannelUnbindCommand(opts),
 		newChannelProofRevokeCommand(opts),
 	)
@@ -137,6 +145,23 @@ func newChannelListCommand(opts rootCommandOptions) *cobra.Command {
 	return cmd
 }
 
+func newChannelStatusCommand(opts rootCommandOptions) *cobra.Command {
+	commandOpts := channelStatusOptions{apiOptions: opts}
+	cmd := &cobra.Command{
+		Use:   "status <interface>",
+		Short: "Inspect one exact connected-channel activation.",
+		Args:  argcount.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runChannelStatus(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args[0], commandOpts)
+		},
+	}
+	cmd.Flags().StringVar(&commandOpts.bundle, "bundle", "", "Select the exact bundle hash")
+	cmd.Flags().StringVar(&commandOpts.target, "target", "", "Select the exact provider activation target")
+	bindCLIAPIConnectionFlagsWithClass(cmd, &commandOpts.apiOptions, cliAPICommandClassReadOnly, "swarm channel status")
+	bindCLIOutputFlags(cmd, &commandOpts.output)
+	return cmd
+}
+
 func newChannelUnbindCommand(opts rootCommandOptions) *cobra.Command {
 	commandOpts := opts
 	var output cliOutputOptions
@@ -172,7 +197,7 @@ func newChannelProofRevokeCommand(opts rootCommandOptions) *cobra.Command {
 			if err != nil {
 				return returnCLIAPIError(cmd.ErrOrStderr(), err, channelErrorClassifier())
 			}
-			row, err := selectChannelReadback(list.Channels, args[0])
+			row, err := selectChannelIdentityReadback(list.Channels, args[0])
 			if err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
@@ -422,6 +447,29 @@ func runChannelList(ctx context.Context, out, errOut io.Writer, opts rootCommand
 	})
 }
 
+func runChannelStatus(ctx context.Context, out, errOut io.Writer, selector string, opts channelStatusOptions) error {
+	if err := opts.output.validate(); err != nil {
+		return returnCLIValidationError(errOut, err)
+	}
+	client, err := newCLIAPIClient(opts.apiOptions)
+	if err != nil {
+		return returnCLIAPIError(errOut, err, channelErrorClassifier())
+	}
+	result, err := fetchChannelList(ctx, client)
+	if err != nil {
+		return returnCLIAPIError(errOut, err, channelErrorClassifier())
+	}
+	row, err := selectChannelActivationReadback(result.Channels, selector, opts.bundle, opts.target)
+	if err != nil {
+		return returnCLIValidationError(errOut, err)
+	}
+	return renderCLIOutput(out, errOut, opts.output, row, func(w io.Writer) {
+		writeChannelList(w, channelListResult{PrincipalID: result.PrincipalID, Channels: []channelReadbackResult{row}})
+	}, func() ([]string, error) {
+		return []string{row.Activation.ActivationID}, nil
+	})
+}
+
 func runChannelUnbind(ctx context.Context, out, errOut io.Writer, selector, idempotencyKey string, opts rootCommandOptions, output cliOutputOptions) error {
 	if err := output.validate(); err != nil {
 		return returnCLIValidationError(errOut, err)
@@ -434,7 +482,7 @@ func runChannelUnbind(ctx context.Context, out, errOut io.Writer, selector, idem
 	if err != nil {
 		return returnCLIAPIError(errOut, err, channelErrorClassifier())
 	}
-	row, err := selectChannelReadback(list.Channels, selector)
+	row, err := selectChannelIdentityReadback(list.Channels, selector)
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
@@ -524,7 +572,7 @@ func fetchChannelList(ctx context.Context, client *cliAPIClient) (channelListRes
 	return result, err
 }
 
-func selectChannelReadback(rows []channelReadbackResult, selector string) (channelReadbackResult, error) {
+func selectChannelIdentityReadback(rows []channelReadbackResult, selector string) (channelReadbackResult, error) {
 	selector = strings.TrimSpace(selector)
 	matches := []channelReadbackResult{}
 	for _, row := range rows {
@@ -544,10 +592,51 @@ func selectChannelReadback(rows []channelReadbackResult, selector string) (chann
 	if len(active) == 1 {
 		return active[0], nil
 	}
+	if len(active) > 1 {
+		first := active[0].Identity
+		for _, row := range active[1:] {
+			if !sameChannelIdentityReadback(first, row.Identity) {
+				return channelReadbackResult{}, fmt.Errorf("operator channel interface %q has contradictory retained identities", selector)
+			}
+		}
+		return active[0], nil
+	}
 	if len(active) == 0 && len(matches) == 1 {
 		return matches[0], nil
 	}
-	return channelReadbackResult{}, fmt.Errorf("operator channel interface %q is ambiguous; use the exact selector shown by `swarm channel list`", selector)
+	return channelReadbackResult{}, fmt.Errorf("operator channel interface %q is ambiguous", selector)
+}
+
+func sameChannelIdentityReadback(left, right operatorchannel.Readback) bool {
+	return left.PrincipalID == right.PrincipalID && left.Interface.Normalized() == right.Interface.Normalized() &&
+		left.Status == right.Status && left.BindingRevision == right.BindingRevision && left.ExternalAccountRef == right.ExternalAccountRef &&
+		left.ConversationRef == right.ConversationRef && left.ConversationScope == right.ConversationScope &&
+		left.AccountPresentation == right.AccountPresentation && left.Source == right.Source && left.ProofID == right.ProofID &&
+		left.ProofRevision == right.ProofRevision && left.ProofStatus == right.ProofStatus
+}
+
+func selectChannelActivationReadback(rows []channelReadbackResult, selector, bundle, target string) (channelReadbackResult, error) {
+	selector, bundle, target = strings.TrimSpace(selector), strings.TrimSpace(bundle), strings.TrimSpace(target)
+	if (bundle == "") != (target == "") {
+		return channelReadbackResult{}, errors.New("channel status requires --bundle and --target together")
+	}
+	matches := []channelReadbackResult{}
+	for _, row := range rows {
+		if row.Identity.Interface.Selector != selector || row.Activation == nil || row.Activation.Status != channelonboarding.ActivationCurrent {
+			continue
+		}
+		if bundle != "" && (row.Activation.Coordinate.BundleHash != bundle || row.Activation.TargetSelector != target) {
+			continue
+		}
+		matches = append(matches, row)
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	if len(matches) == 0 {
+		return channelReadbackResult{}, fmt.Errorf("connected channel activation %q is not active", selector)
+	}
+	return channelReadbackResult{}, fmt.Errorf("connected channel activation %q is ambiguous; provide --bundle and --target from `swarm channel list`", selector)
 }
 
 func writeChannelList(out io.Writer, result channelListResult) {
@@ -571,13 +660,18 @@ func writeChannelList(out io.Writer, result channelListResult) {
 				footers = append(footers, fmt.Sprintf("channel %s: identity verified, activation lost with store - run %s", row.Recovery.Provider, command))
 			}
 		}
-		rows = append(rows, []string{row.Identity.Interface.ChannelPackID, string(row.Identity.Status), ready, account, fmt.Sprintf("%d", row.Identity.BindingRevision), string(row.Identity.ConversationScope), reason, row.Identity.Interface.Selector})
+		bundle, target := "-", "-"
+		if row.Activation != nil {
+			bundle = row.Activation.Coordinate.BundleHash
+			target = row.Activation.TargetSelector
+		}
+		rows = append(rows, []string{row.Identity.Interface.ChannelPackID, string(row.Identity.Status), ready, account, fmt.Sprintf("%d", row.Identity.BindingRevision), string(row.Identity.ConversationScope), reason, bundle, target, row.Identity.Interface.Selector})
 		if row.Identity.PendingOperation != nil {
 			footers = append(footers, fmt.Sprintf("%s pending %s: %s (expires %s)", row.Identity.Interface.ChannelPackID, row.Identity.PendingOperation.Kind, row.Identity.PendingOperation.State, row.Identity.PendingOperation.ExpiresAt.Local().Format(time.RFC3339)))
 		}
 	}
 	writeCLITable(out, cliTable{
-		Columns: []cliTableColumn{{Header: "PACK"}, {Header: "STATUS"}, {Header: "READY"}, {Header: "ACCOUNT"}, {Header: "REVISION"}, {Header: "SCOPE"}, {Header: "REASON"}, {Header: "SELECTOR", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyOperatorChannel}},
+		Columns: []cliTableColumn{{Header: "PACK"}, {Header: "STATUS"}, {Header: "READY"}, {Header: "ACCOUNT"}, {Header: "REVISION"}, {Header: "SCOPE"}, {Header: "REASON"}, {Header: "BUNDLE"}, {Header: "TARGET"}, {Header: "SELECTOR", KeyColumn: true, IdentifierFamily: cliIdentifierFamilyOperatorChannel}},
 		Rows:    rows, EmptyMessage: "No operator channels are active.", FooterLines: footers,
 	})
 }

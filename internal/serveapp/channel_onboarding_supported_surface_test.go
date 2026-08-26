@@ -665,12 +665,15 @@ func TestWebhookOnboardingAdmissionIsRejectedAtActivationWithoutPublicIngress(t 
 func TestConnectedChannelRecoveryRunsWithoutPublicIngressOwner(t *testing.T) {
 	order := []string{}
 	teardown := &serveChannelRecoveryProbe{name: "teardown", order: &order}
-	onboarding := &serveChannelRecoveryProbe{name: "onboarding", order: &order}
-	if err := recoverServeConnectedChannelLifecycle(context.Background(), teardown, onboarding); err != nil {
+	activate := func() error {
+		order = append(order, "runtime_activation")
+		return nil
+	}
+	if err := activateServeAfterConnectedChannelTeardownRecovery(context.Background(), teardown, activate); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(order, ","); got != "teardown,onboarding" {
-		t.Fatalf("recovery order = %s, want teardown,onboarding", got)
+	if got := strings.Join(order, ","); got != "teardown,runtime_activation" {
+		t.Fatalf("recovery order = %s, want teardown,runtime_activation", got)
 	}
 }
 

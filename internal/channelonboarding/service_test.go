@@ -186,6 +186,243 @@ func TestReadbackUsesCurrentActivationOwningOperationInsteadOfLaterFailedAttempt
 	}
 }
 
+func TestReadbackIgnoresTerminalOperationWithoutRetainedIdentity(t *testing.T) {
+	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
+	catalog, err := NewCandidateCatalog([]Candidate{candidate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := Operation{
+		OperationID: uuid.NewString(), PrincipalID: "principal-a", Verb: VerbConnect, Provider: candidate.Provider,
+		Interface: candidate.Interface, Coordinate: candidate.Coordinate, TargetSelector: candidate.Target.Selector,
+		Posture: candidate.Posture, Ceremony: candidate.Ceremony, Phase: PhaseSucceeded, Revision: 9,
+		BindingRevision: 3, RequestedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour),
+	}
+	current.SlotKey = StartRequest{Provider: current.Provider, Interface: current.Interface, Coordinate: current.Coordinate, TargetSelector: current.TargetSelector}.SlotKey()
+	orphanCandidate := testCandidate("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "orphan")
+	orphanCandidate.Interface.ChannelPackID = "provider.telegram.orphan_hitl_channel"
+	orphanCandidate.Interface.SemanticGeneration = "sha256:orphan-plan"
+	orphanCandidate.Interface = orphanCandidate.Interface.Normalized()
+	orphan := Operation{
+		OperationID: uuid.NewString(), PrincipalID: "principal-a", Verb: VerbConnect, Provider: orphanCandidate.Provider,
+		Interface: orphanCandidate.Interface, Coordinate: orphanCandidate.Coordinate, TargetSelector: orphanCandidate.Target.Selector,
+		Posture: orphanCandidate.Posture, Ceremony: orphanCandidate.Ceremony, Phase: PhaseFailed, Revision: 4,
+		RequestedAt: now, UpdatedAt: now,
+	}
+	orphan.SlotKey = StartRequest{Provider: orphan.Provider, Interface: orphan.Interface, Coordinate: orphan.Coordinate, TargetSelector: orphan.TargetSelector}.SlotKey()
+	activation := testCurrentActivation(current, nil, now)
+	store := &readbackTestStore{
+		cancellationTestStore: &cancellationTestStore{},
+		operations:            []Operation{current, orphan},
+		activations:           []ConnectedChannelActivation{activation},
+	}
+	identities := &readbackTestIdentities{
+		cancellationTestIdentities: &cancellationTestIdentities{binding: operatorchannel.Binding{
+			PrincipalID: "principal-a", Interface: candidate.Interface, Revision: 3, Status: operatorchannel.BindingCurrent,
+		}},
+		rows: []operatorchannel.Readback{{PrincipalID: "principal-a", Interface: candidate.Interface, Status: operatorchannel.BindingCurrent, BindingRevision: 3}},
+	}
+	service, err := NewService(ServiceOptions{
+		Store: store, Identities: identities, Credentials: testCredentialWriter(t),
+		Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: &cancellationTestActivations{},
+		Confirmation: cancellationTestConfirmation{}, Readiness: &operationReadinessProjector{readyOperationID: current.OperationID}, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := service.ReadbackConnectedChannels(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Activation == nil || rows[0].Activation.OperationID != current.OperationID {
+		t.Fatalf("readback rows = %#v, want only retained current authority", rows)
+	}
+}
+
+func TestReadbackRetainsExactRowsForMultipleCurrentContexts(t *testing.T) {
+	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	firstCandidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support-a")
+	secondCandidate := testCandidate("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "support-b")
+	first := testSucceededOperation(firstCandidate, now.Add(-time.Minute))
+	second := testSucceededOperation(secondCandidate, now)
+	firstActivation := testCurrentActivation(first, nil, now)
+	secondActivation := testCurrentActivation(second, nil, now)
+	store := &readbackTestStore{
+		cancellationTestStore: &cancellationTestStore{}, operations: []Operation{first, second},
+		activations: []ConnectedChannelActivation{firstActivation, secondActivation},
+	}
+	identity := operatorchannel.Readback{PrincipalID: "principal-a", Interface: firstCandidate.Interface, Status: operatorchannel.BindingCurrent, BindingRevision: 3}
+	identities := &readbackTestIdentities{
+		cancellationTestIdentities: &cancellationTestIdentities{binding: operatorchannel.Binding{PrincipalID: "principal-a", Interface: firstCandidate.Interface, Revision: 3, Status: operatorchannel.BindingCurrent}},
+		rows:                       []operatorchannel.Readback{identity},
+	}
+	catalog, err := NewCandidateCatalog([]Candidate{firstCandidate, secondCandidate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(ServiceOptions{
+		Store: store, Identities: identities, Credentials: testCredentialWriter(t),
+		Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: &cancellationTestActivations{},
+		Confirmation: cancellationTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := service.ReadbackConnectedChannels(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 || rows[0].Activation == nil || rows[1].Activation == nil || rows[0].Activation.SlotKey == rows[1].Activation.SlotKey {
+		t.Fatalf("readback rows = %#v, want two exact activation coordinates", rows)
+	}
+}
+
+func TestReplacementCredentialHandoffPreservesPredecessorOnFailureAndRetiresItAfterPublication(t *testing.T) {
+	for _, test := range []struct {
+		name            string
+		activationError error
+		wantSucceeded   bool
+	}{
+		{name: "failed successor preserves predecessor", activationError: NewTerminalActivationError("replacement_denied", errors.New("replacement denied"))},
+		{name: "published successor retires predecessor", wantSucceeded: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+			candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
+			catalog, err := NewCandidateCatalog([]Candidate{candidate})
+			if err != nil {
+				t.Fatal(err)
+			}
+			credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			credentials, err := NewCredentialWriter(credentialStore)
+			if err != nil {
+				t.Fatal(err)
+			}
+			predecessor := testSucceededOperation(candidate, now.Add(-time.Hour))
+			predecessorAdmissions := make([]CredentialAdmission, 0, len(predecessor.CredentialReservations))
+			for _, reservation := range predecessor.CredentialReservations {
+				written, writeErr := credentials.Admit(context.Background(), CredentialWriteRequest{StoreKey: operationCredentialStoreKey(reservation.StoreKey, predecessor.OperationID, reservation.Role), Value: "predecessor-" + reservation.Role, Receipt: credentialReceipt(predecessor.OperationID, reservation.Role)})
+				if writeErr != nil {
+					t.Fatal(writeErr)
+				}
+				predecessorAdmissions = append(predecessorAdmissions, CredentialAdmission{Role: reservation.Role, StoreKey: written.StoreKey, Kind: CredentialAdmissionWritten, Receipt: written.Receipt, Epoch: written.Epoch})
+			}
+			predecessor.CredentialAdmissions = predecessorAdmissions
+			store := &cancellationTestStore{activation: testCurrentActivation(predecessor, predecessorAdmissions, now), history: []Operation{predecessor}}
+			identities := &cancellationTestIdentities{binding: operatorchannel.Binding{PrincipalID: "principal-a", Interface: candidate.Interface, ConversationRef: "conversation-a", Revision: 3, Status: operatorchannel.BindingCurrent}}
+			service, err := NewService(ServiceOptions{
+				Store: store, Identities: identities, Credentials: credentials, Catalog: func() (*CandidateCatalog, error) { return catalog, nil },
+				Activations: &cancellationTestActivations{err: test.activationError}, Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := service.Start(context.Background(), StartInput{Verb: VerbReconnect, Selection: CandidateSelection{Provider: candidate.Provider}, ProviderCredential: "successor-token"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.wantSucceeded != (result.Operation.Phase == PhaseSucceeded) {
+				t.Fatalf("operation phase = %s", result.Operation.Phase)
+			}
+			providerPredecessor := predecessorAdmissions[0]
+			_, predecessorFound, readErr := credentialStore.Get(context.Background(), providerPredecessor.StoreKey)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if predecessorFound == test.wantSucceeded {
+				t.Fatalf("predecessor credential found=%v, want %v", predecessorFound, !test.wantSucceeded)
+			}
+			if len(predecessorAdmissions) > 1 {
+				if _, signingFound, signingErr := credentialStore.Get(context.Background(), predecessorAdmissions[1].StoreKey); signingErr != nil || !signingFound {
+					t.Fatalf("retained signing credential found=%v err=%v", signingFound, signingErr)
+				}
+			}
+			if !test.wantSucceeded && store.activation.OperationID != predecessor.OperationID {
+				t.Fatalf("failed replacement changed activation = %#v", store.activation)
+			}
+			if len(result.Operation.CredentialAdmissions) == 0 || result.Operation.CredentialAdmissions[0].StoreKey == providerPredecessor.StoreKey {
+				t.Fatalf("successor admissions = %#v, want operation-owned occurrence", result.Operation.CredentialAdmissions)
+			}
+		})
+	}
+}
+
+func TestReplacementRecoveryRetiresPredecessorCredentialAfterDurableHandoff(t *testing.T) {
+	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
+	catalog, err := NewCandidateCatalog([]Candidate{candidate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := NewCredentialWriter(credentialStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	predecessor := testSucceededOperation(candidate, now.Add(-time.Hour))
+	predecessorAdmissions := writeTestOperationCredentials(t, credentials, predecessor, "predecessor")
+	predecessor.CredentialAdmissions = predecessorAdmissions
+	successor := testSucceededOperation(candidate, now)
+	successor.Verb = VerbReconnect
+	successor.Phase = PhaseDeliveringConfirmation
+	successor.CompletedAt = time.Time{}
+	successor.ConfirmationOperationID = uuid.NewString()
+	successorAdmissions := writeTestOperationCredentials(t, credentials, successor, "successor")
+	// The signing occurrence is intentionally retained across the handoff.
+	if _, err := credentials.Release(context.Background(), successorAdmissions[1]); err != nil {
+		t.Fatal(err)
+	}
+	successorAdmissions[1] = observedCredentialAdmissionForKey(successor.OperationID, predecessorAdmissions[1].Role, predecessorAdmissions[1].StoreKey, CredentialWriteResult{StoreKey: predecessorAdmissions[1].StoreKey, Epoch: predecessorAdmissions[1].Epoch})
+	successor.CredentialAdmissions = successorAdmissions
+	activation := testCurrentActivation(successor, successorAdmissions, now)
+	store := &cancellationTestStore{op: successor, activation: activation, history: []Operation{predecessor}}
+	identities := &cancellationTestIdentities{binding: operatorchannel.Binding{PrincipalID: "principal-a", Interface: candidate.Interface, ConversationRef: "conversation-a", Revision: 3, Status: operatorchannel.BindingCurrent}}
+	service, err := NewService(ServiceOptions{
+		Store: store, Identities: identities, Credentials: credentials, Catalog: func() (*CandidateCatalog, error) { return catalog, nil },
+		Activations: &cancellationTestActivations{}, Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if store.op.Phase != PhaseSucceeded {
+		t.Fatalf("recovered phase = %s", store.op.Phase)
+	}
+	if _, found, err := credentialStore.Get(context.Background(), predecessorAdmissions[0].StoreKey); err != nil || found {
+		t.Fatalf("predecessor provider credential found=%v err=%v", found, err)
+	}
+	for _, admission := range successorAdmissions {
+		if _, found, err := credentialStore.Get(context.Background(), admission.StoreKey); err != nil || !found {
+			t.Fatalf("successor credential %q found=%v err=%v", admission.StoreKey, found, err)
+		}
+	}
+}
+
+func writeTestOperationCredentials(t *testing.T, credentials *CredentialWriter, op Operation, prefix string) []CredentialAdmission {
+	t.Helper()
+	admissions := make([]CredentialAdmission, 0, len(op.CredentialReservations))
+	for _, reservation := range op.CredentialReservations {
+		written, err := credentials.Admit(context.Background(), CredentialWriteRequest{
+			StoreKey: operationCredentialStoreKey(reservation.StoreKey, op.OperationID, reservation.Role),
+			Value:    prefix + "-" + reservation.Role, Receipt: credentialReceipt(op.OperationID, reservation.Role),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		admissions = append(admissions, CredentialAdmission{Role: reservation.Role, StoreKey: written.StoreKey, Kind: CredentialAdmissionWritten, Receipt: written.Receipt, Epoch: written.Epoch})
+	}
+	return admissions
+}
+
 func TestPermanentActivationFailureTerminalizesAndReleasesWrittenCredentials(t *testing.T) {
 	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 	candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
@@ -380,9 +617,35 @@ func testCurrentActivation(op Operation, admissions []CredentialAdmission, now t
 	}
 }
 
+func testSucceededOperation(candidate Candidate, now time.Time) Operation {
+	op := Operation{
+		OperationID: uuid.NewString(), RequestKeyHash: uuid.NewString(), RequestHash: uuid.NewString(), PrincipalID: "principal-a",
+		Verb: VerbConnect, Provider: candidate.Provider, Interface: candidate.Interface, Coordinate: candidate.Coordinate,
+		TargetSelector: candidate.Target.Selector, Posture: candidate.Posture, Ceremony: candidate.Ceremony,
+		Phase: PhaseSucceeded, Revision: 9, BindingRevision: 3, CredentialReservations: credentialReservations(candidate),
+		RequestedAt: now, UpdatedAt: now, CompletedAt: now,
+	}
+	op.SlotKey = StartRequest{Provider: op.Provider, Interface: op.Interface, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector}.SlotKey()
+	return op
+}
+
+func testCredentialWriter(t *testing.T) *CredentialWriter {
+	t.Helper()
+	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := NewCredentialWriter(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return writer
+}
+
 type cancellationTestStore struct {
 	op                 Operation
 	activation         ConnectedChannelActivation
+	history            []Operation
 	cancelAfterReserve context.CancelFunc
 	cancelled          bool
 	sawCanceledContext bool
@@ -424,10 +687,17 @@ func (s *cancellationTestStore) GetChannelOnboarding(ctx context.Context, operat
 
 func (s *cancellationTestStore) ListChannelOnboardingOperations(ctx context.Context) ([]Operation, error) {
 	s.observe(ctx)
+	out := append([]Operation(nil), s.history...)
 	if s.op.OperationID == "" {
-		return nil, nil
+		return out, nil
 	}
-	return []Operation{s.op}, nil
+	for index := range out {
+		if out[index].OperationID == s.op.OperationID {
+			out[index] = s.op
+			return out, nil
+		}
+	}
+	return append(out, s.op), nil
 }
 
 func (s *cancellationTestStore) AdvanceChannelOnboarding(ctx context.Context, req AdvanceRequest) (Operation, error) {
@@ -629,7 +899,8 @@ func (cancellationTestReadiness) ProjectConnectedChannelReadiness(context.Contex
 
 type readbackTestStore struct {
 	*cancellationTestStore
-	operations []Operation
+	operations  []Operation
+	activations []ConnectedChannelActivation
 }
 
 func (s *readbackTestStore) GetChannelOnboarding(ctx context.Context, operationID string) (Operation, error) {
@@ -645,6 +916,30 @@ func (s *readbackTestStore) GetChannelOnboarding(ctx context.Context, operationI
 func (s *readbackTestStore) ListChannelOnboardingOperations(ctx context.Context) ([]Operation, error) {
 	s.observe(ctx)
 	return append([]Operation(nil), s.operations...), nil
+}
+
+func (s *readbackTestStore) GetConnectedChannelActivation(ctx context.Context, slotKey string) (ConnectedChannelActivation, error) {
+	s.observe(ctx)
+	for _, activation := range s.activations {
+		if activation.SlotKey == slotKey && activation.Status == ActivationCurrent {
+			return activation, nil
+		}
+	}
+	if s.cancellationTestStore != nil {
+		return s.cancellationTestStore.GetConnectedChannelActivation(ctx, slotKey)
+	}
+	return ConnectedChannelActivation{}, ErrNotFound
+}
+
+func (s *readbackTestStore) ListCurrentConnectedChannelActivations(ctx context.Context) ([]ConnectedChannelActivation, error) {
+	s.observe(ctx)
+	if len(s.activations) > 0 {
+		return append([]ConnectedChannelActivation(nil), s.activations...), nil
+	}
+	if s.cancellationTestStore != nil {
+		return s.cancellationTestStore.ListCurrentConnectedChannelActivations(ctx)
+	}
+	return nil, nil
 }
 
 type readbackTestIdentities struct {

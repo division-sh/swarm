@@ -9955,7 +9955,7 @@ tool_model:
         registration: public_ingress.provider_registration
         readiness: ConnectedChannelReadiness exact-current projection
         api: /v1/rpc channel.onboarding_start|channel.onboarding_get|channel.onboarding_retry and channel.list
-        cli: swarm channel connect|reconnect|rebind|resume|list|unbind
+        cli: swarm channel connect|reconnect|rebind|resume|list|status|unbind
       context_coordinate_rule: >
         Every candidate, operation, pre-binding intent, learned activation, provider effect, compiled executable plan,
         confirmation, readiness result, and API/CLI readback retains one exact bundle source fact, bundle identity,
@@ -9994,12 +9994,16 @@ tool_model:
         Provider secret material enters only through the authenticated onboarding API from hidden TTY or stdin. Secret
         values and reusable digests are forbidden in semantic request hashes, API idempotency rows, selected-store rows,
         logs, traces, progress, errors, and readback. The operation first reserves exact credential roles and keys, then
-        stores only non-secret receipt and epoch evidence. Fresh webhook connect generates a missing signing value;
+        stores only non-secret receipt and epoch evidence. Every newly written value is staged under an
+        operation-owned store occurrence; replacement never overwrites the credential occurrence referenced by the
+        current predecessor activation. Fresh webhook connect generates a missing signing value;
         replay, reconnect, and rebind do not rotate credentials without an explicit newly admitted epoch. Reconnect,
         rebind, and resume accept explicit hidden replacement credential input when the exact reserved occurrence is no
         longer current. Every operation-written credential occurrence is owned by its receipt and epoch: terminal
         onboarding failure and destructive teardown compare-delete only that exact occurrence after executable authority
-        retires. A successor occurrence and an observed pre-existing credential are never deleted by stale cleanup.
+        retires. Durable successor publication and process-owner refresh precede predecessor occurrence retirement;
+        nonterminal recovery derives any still-pending predecessor cleanup from retained operation evidence. A successor
+        occurrence and an observed pre-existing credential are never deleted by stale cleanup.
       activation_rule: >
         Operator-declared config and selected-store learned activations are closed source variants lowered through one
         compiler into immutable OutboundBindingPlan values. Source artifact presence is not backend or activation
@@ -10055,10 +10059,17 @@ tool_model:
         pairs a current activation only with the exact onboarding operation named by that activation; a newer failed
         reconnect or rebind attempt cannot replace the activation-owning operation in readiness projection. Proofless
         current bindings are valid without invented proof evidence, but cannot remint identity after selected-store reset.
+        Public channel readback is rooted in retained identities and current activations, never historical operations;
+        terminal pre-binding history cannot create a row or make another healthy row unreadable. Multiple current bundle
+        contexts sharing one retained identity remain separate activation rows. Activation-specific status accepts the
+        exact interface, bundle, and target coordinate, while identity-scoped unbind and proof revocation deduplicate those
+        rows to the one retained identity they mutate.
       reset_and_recovery_rule: >
         Startup resumes every nonterminal operation and teardown in every serve posture, independently of whether public
-        ingress is enabled, without replaying settled writes or effects. Webhook activation still fails terminally at its
-        ingress admission boundary when no public exposure owner exists. Selected-store
+        ingress is enabled, without replaying settled writes or effects. Destructive teardown recovery is a barrier before
+        runtime-context activation, executable publication, registration, or public readiness; onboarding recovery runs
+        unconditionally after posture-specific exposure activation, when present, and before ready hooks. Webhook activation
+        still fails terminally at its ingress admission boundary when no public exposure owner exists. Selected-store
         reset removes learned activation and operation facts. A surviving machine proof may restore identity only; it cannot
         infer target, credential, registration, executable activation, confirmation, or READY. Readback must teach exactly
         that activation was lost and require swarm channel reconnect <provider>. Readback preserves independently retained
@@ -23372,6 +23383,9 @@ cli_specification:
           channel_rebind_interface: {command: swarm channel rebind, selector: 'flag:interface', family: operator_channel, mode: full_only, safety: mutating}
           channel_rebind_target: {command: swarm channel rebind, selector: 'flag:target', family: none, mode: different_concept, scope_rule: exact package-qualified provider activation target, safety: mutating}
           channel_resume_operation: {command: swarm channel resume, selector: 'arg:operation-id', family: none, mode: different_concept, scope_rule: exact durable channel onboarding operation identifier, safety: mutating}
+          channel_status_interface: {command: swarm channel status, selector: 'arg:interface', family: operator_channel, mode: full_only}
+          channel_status_bundle: {command: swarm channel status, selector: 'flag:bundle', family: bundle, mode: full_only}
+          channel_status_target: {command: swarm channel status, selector: 'flag:target', family: none, mode: different_concept, scope_rule: exact package-qualified provider activation target}
           channel_unbind_interface: {command: swarm channel unbind, selector: 'arg:interface', family: operator_channel, mode: full_only, safety: mutating}
           mutating_idempotency: {command: 'swarm <mutating>', selector: 'flag:idempotency-key', family: none, mode: different_concept, scope_rule: caller-authored retry key}
           connections_key: {command: 'swarm connections <key>', selector: 'arg:key', family: none, mode: different_concept, scope_rule: authored stable connection key}
@@ -23831,6 +23845,13 @@ cli_specification:
               json_shape: principal_id and ordered generation-aware channel readback rows
               quiet_values:
               - exact interface selector per row
+            channel_status:
+              command: swarm channel status
+              classification: shared_output
+              fact_owner: /v1/rpc channel.list
+              json_shape: one exact activation row selected by interface, bundle, and target
+              quiet_values:
+              - activation_id
             channel_unbind:
               command: swarm channel unbind
               classification: shared_output
@@ -25543,7 +25564,7 @@ cli_specification:
         - DB/AWS SigV4/non-HTTP/native connector auth
         - external vault/team managed credential UI/API
     channel:
-      command: swarm channel connect|reconnect|rebind|list|unbind
+      command: swarm channel connect|reconnect|rebind|resume|list|status|unbind
       group: run_operate
       tier: must_have
       implementation_status: implemented
@@ -25554,7 +25575,8 @@ cli_specification:
         operation through start/get/retry. The nested satisfier-authenticated identity ceremony remains owned by
         channel.connect|reconnect|rebind plus channel.confirm, but those lower RPCs are not a second whole-journey CLI.
         Provider credentials enter only through hidden TTY input or stdin and are never accepted in argv. `list`
-        consumes the composed identity/activation/readiness projection. `unbind` durably retires selected-store
+        consumes the composed identity/activation/readiness projection. `status` selects one activation by exact
+        interface/bundle/target coordinate. `unbind` durably retires selected-store
         execution authority before committing the identity fence. Non-exact selectors fail closed; the CLI never reads
         the selected store, provider payload, credential file, or provider HTTP directly.
       subcommands:
@@ -25569,6 +25591,9 @@ cli_specification:
           api_owner: /v1/rpc channel.onboarding_start|get|retry plus nested channel.confirm
         list:
           command: swarm channel list [--json|--quiet]
+          api_owner: /v1/rpc channel.list
+        status:
+          command: swarm channel status <interface> [--bundle <bundle-hash> --target <exact-target>] [--json|--quiet]
           api_owner: /v1/rpc channel.list
         unbind:
           command: swarm channel unbind <interface> [--json|--quiet]

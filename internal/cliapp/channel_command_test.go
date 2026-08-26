@@ -64,6 +64,51 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 		}
 	})
 
+	t.Run("status selects one exact activation coordinate", func(t *testing.T) {
+		firstBundle := "bundle-v1:sha256:" + strings.Repeat("b", 64)
+		secondBundle := "bundle-v1:sha256:" + strings.Repeat("c", 64)
+		firstTarget, secondTarget := "ingress:workflow:support-a:telegram", "ingress:workflow:support-b:telegram"
+		server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
+			if request.Method != "channel.list" {
+				t.Fatalf("method = %q, want channel.list", request.Method)
+			}
+			return map[string]any{"principal_id": "principal-1", "channels": []any{
+				operatorChannelCLIActivationReadback("activation-a", firstBundle, firstTarget),
+				operatorChannelCLIActivationReadback("activation-b", secondBundle, secondTarget),
+			}}
+		})
+		stdout, stderr, code := runOperatorChannelCLI(t, server, "channel", "status", operatorChannelCLISelector, "--bundle", secondBundle, "--target", secondTarget, "--quiet")
+		if code != 0 || stderr != "" || stdout != "activation-b\n" {
+			t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+		}
+	})
+
+	t.Run("identity destructive selection deduplicates shared activation contexts", func(t *testing.T) {
+		var methods []string
+		server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
+			methods = append(methods, request.Method)
+			switch request.Method {
+			case "channel.list":
+				return map[string]any{"principal_id": "principal-1", "channels": []any{
+					operatorChannelCLIActivationReadback("activation-a", "bundle-v1:sha256:"+strings.Repeat("b", 64), "ingress:workflow:support-a:telegram"),
+					operatorChannelCLIActivationReadback("activation-b", "bundle-v1:sha256:"+strings.Repeat("c", 64), "ingress:workflow:support-b:telegram"),
+				}}
+			case "channel.unbind":
+				if request.Params["interface"] != operatorChannelCLISelector || request.Params["expected_revision"] != float64(1) {
+					t.Fatalf("unbind params = %#v", request.Params)
+				}
+				return map[string]any{"operation": operatorChannelCLIOperationResult("unbound", 3, 2)}
+			default:
+				t.Fatalf("unexpected method %q", request.Method)
+			}
+			return nil
+		})
+		_, stderr, code := runOperatorChannelCLI(t, server, "channel", "unbind", operatorChannelCLISelector)
+		if code != 0 || stderr != "" || strings.Join(methods, ",") != "channel.list,channel.unbind" {
+			t.Fatalf("code=%d methods=%v stderr=%q", code, methods, stderr)
+		}
+	})
+
 	t.Run("connect uses durable onboarding and confirms nested identity", func(t *testing.T) {
 		var methods []string
 		server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, call int) map[string]any {
@@ -395,6 +440,17 @@ func operatorChannelCLIListResult(status string, pending map[string]any) map[str
 	}
 	row := map[string]any{"identity": identity, "readiness": operatorChannelCLIReadiness(status == "current")}
 	return map[string]any{"principal_id": "principal-1", "channels": []any{row}}
+}
+
+func operatorChannelCLIActivationReadback(activationID, bundle, target string) map[string]any {
+	result := operatorChannelCLIListResult("current", nil)
+	row := result["channels"].([]any)[0].(map[string]any)
+	coordinate := operatorChannelCLIReadiness(true)["coordinate"].(map[string]any)
+	coordinate["bundle_hash"] = bundle
+	row["activation"] = map[string]any{
+		"activation_id": activationID, "status": "current", "target_selector": target, "coordinate": coordinate,
+	}
+	return row
 }
 
 func operatorChannelCLIReadiness(ready bool) map[string]any {
