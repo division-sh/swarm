@@ -10,11 +10,12 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
 // applyRunForkSourceFreeze is the only writer of the terminal forked source
 // state. The caller owns the surrounding serializable transaction.
-func (s *RunForkPostgresOwner) applyRunForkSourceFreeze(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, lineage runForkActivationLineage, now time.Time, confirmed bool, handoff *runLifecycleCandidateHandoffReservation) error {
+func (s *RunForkPostgresOwner) applyRunForkSourceFreeze(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *runforkrevision.Effects, lineage runForkActivationLineage, now time.Time, confirmed bool, handoff *runLifecycleCandidateHandoffReservation) error {
 	if tx == nil {
 		return fmt.Errorf("run fork source freeze transaction is required")
 	}
@@ -32,7 +33,7 @@ func (s *RunForkPostgresOwner) applyRunForkSourceFreeze(ctx context.Context, tx 
 	if err := requireRunForkSourceFreezeReady(ctx, tx, lineage.SourceRunID, now); err != nil {
 		return err
 	}
-	if _, _, err := s.RunLifecyclePostgresOwner.ForkSourceTx(ctx, tx, story, runtimerunlifecycle.ForkSourceRequest{
+	if _, _, err := s.RunLifecyclePostgresOwner.ForkSourceTx(ctx, tx, story, effects, runtimerunlifecycle.ForkSourceRequest{
 		RunID:            lineage.SourceRunID,
 		ContinuedAsRunID: lineage.ForkRunID,
 		EndedAt:          now,
@@ -51,8 +52,8 @@ func (s *RunForkPostgresOwner) applyRunForkSourceFreeze(ctx context.Context, tx 
 	return nil
 }
 
-func (s *RunForkPostgresOwner) ApplyRunForkSourceFreezeTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, lineage RunForkActivationLineage, now time.Time, confirmed bool, handoff *runLifecycleCandidateHandoffReservation) error {
-	return s.applyRunForkSourceFreeze(ctx, tx, story, lineage, now, confirmed, handoff)
+func (s *RunForkPostgresOwner) ApplyRunForkSourceFreezeTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *runforkrevision.Effects, lineage RunForkActivationLineage, now time.Time, confirmed bool, handoff *runLifecycleCandidateHandoffReservation) error {
+	return s.applyRunForkSourceFreeze(ctx, tx, story, effects, lineage, now, confirmed, handoff)
 }
 
 func requireRunForkSourceFreezeReady(ctx context.Context, tx *sql.Tx, sourceRunID string, now time.Time) error {

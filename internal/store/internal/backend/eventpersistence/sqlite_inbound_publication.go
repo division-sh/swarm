@@ -47,16 +47,11 @@ func (s *EventSQLiteOwner) CommitInboundPublication(ctx context.Context, command
 		if err := insertSQLiteInboundPublicationPreparedTx(txctx, tx, request); err != nil {
 			return err
 		}
-		result, err = commitInboundPublicationTx(txctx, tx, story, s, s, false, command, handoff)
+		result, err = commitInboundPublicationTx(txctx, tx, story, effects, s, s, false, command, handoff)
 		if err != nil {
 			return err
 		}
-		for _, publication := range command.Finalization.Events {
-			if err := declareEventCommitEffects(effects, publication.Event.RunID()); err != nil {
-				return err
-			}
-		}
-		return declareEventCommitEffects(effects, command.Finalization.EvidenceEvent.RunID())
+		return nil
 	})
 	if err != nil {
 		return runtimeinbound.CommitResult{}, err

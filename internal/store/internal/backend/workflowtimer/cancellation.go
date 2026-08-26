@@ -9,11 +9,12 @@ import (
 	"time"
 
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
-func CancelRunsTx(ctx context.Context, tx *sql.Tx, postgres bool, runIDs []string) ([]runtimetimercancellation.Ref, error) {
-	if tx == nil {
-		return nil, errors.New("workflow timer run cancellation requires transaction")
+func CancelRunsTx(ctx context.Context, tx *sql.Tx, postgres bool, effects *privaterunforkrevision.Effects, runIDs []string) ([]runtimetimercancellation.Ref, error) {
+	if tx == nil || effects == nil {
+		return nil, errors.New("workflow timer run cancellation requires transaction and revision effects")
 	}
 	ids := normalizedIDs(runIDs)
 	if len(ids) == 0 {
@@ -63,6 +64,9 @@ func CancelRunsTx(ctx context.Context, tx *sql.Tx, postgres bool, runIDs []strin
 		changed, err := result.RowsAffected()
 		if err != nil || changed != 1 {
 			return nil, fmt.Errorf("workflow timer %s cancellation changed %d rows: %w", ref.ActivationID, changed, err)
+		}
+		if err := effects.Add(ref.RunID, privaterunforkrevision.FamilyTimers); err != nil {
+			return nil, err
 		}
 	}
 	return refs, nil

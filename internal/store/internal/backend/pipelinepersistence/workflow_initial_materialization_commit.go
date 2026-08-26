@@ -19,6 +19,7 @@ func commitWorkflowInitialMaterialization(
 	ctx context.Context,
 	store eventCommitTxStore,
 	postgres bool,
+	effects *revisionEffects,
 	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error,
 	command runtimepipeline.WorkflowInitialMaterializationCommand,
 ) (runtimepipeline.CommittedWorkflowInitialMaterialization, error) {
@@ -82,7 +83,7 @@ func commitWorkflowInitialMaterialization(
 			}
 		}
 
-		if err := commitWorkflowEngineState(txctx, tx, postgres, record.State, occupancy.Flow); err != nil {
+		if err := commitWorkflowEngineState(txctx, tx, postgres, effects, record.State, occupancy.Flow); err != nil {
 			return err
 		}
 		if err := insertWorkflowInitialMaterializationRecord(txctx, tx, postgres, record); err != nil {
@@ -97,17 +98,18 @@ func commitWorkflowInitialMaterialization(
 			story,
 			store,
 			postgres,
+			effects,
 			record.State,
 			runtimemutationlog.EntityStateProjection{},
 		)
 		if err != nil {
 			return err
 		}
-		result.Lifecycle, err = commitWorkflowEngineLifecycle(txctx, tx, runtimeAuthorActivityMutation(story), store.workflowDecisionLifecycleOwner(), store.genericScheduleTxOwner(), postgres, command.Lifecycle)
+		result.Lifecycle, err = commitWorkflowEngineLifecycle(txctx, tx, runtimeAuthorActivityMutation(story), store.workflowDecisionLifecycleOwner(), store.genericScheduleTxOwner(), postgres, effects, command.Lifecycle)
 		if err != nil {
 			return err
 		}
-		if err := commitWorkflowEngineMutationLog(txctx, tx, story, store, postgres, record.State, before); err != nil {
+		if err := commitWorkflowEngineMutationLog(txctx, tx, story, store, postgres, effects, record.State, before); err != nil {
 			return err
 		}
 		result.Result = runtimepipeline.WorkflowInitialMaterializationCreated
@@ -158,21 +160,15 @@ func workflowInitialMaterializationSnapshotExists(
 }
 
 func (s *PipelinePostgresOwner) CommitWorkflowInitialMaterialization(ctx context.Context, command runtimepipeline.WorkflowInitialMaterializationCommand) (runtimepipeline.CommittedWorkflowInitialMaterialization, error) {
-	effects, err := workflowLifecycleRevisionEffects(command.Record.State.RunID)
-	if err != nil {
-		return runtimepipeline.CommittedWorkflowInitialMaterialization{}, err
-	}
-	return commitWorkflowInitialMaterialization(ctx, s, true, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+	effects := newRevisionEffects()
+	return commitWorkflowInitialMaterialization(ctx, s, true, effects, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 		return s.runPrivateAuthorActivityMutation(ctx, effects, fn)
 	}, command)
 }
 
 func (s *PipelineSQLiteOwner) CommitWorkflowInitialMaterialization(ctx context.Context, command runtimepipeline.WorkflowInitialMaterializationCommand) (runtimepipeline.CommittedWorkflowInitialMaterialization, error) {
-	effects, err := workflowLifecycleRevisionEffects(command.Record.State.RunID)
-	if err != nil {
-		return runtimepipeline.CommittedWorkflowInitialMaterialization{}, err
-	}
-	return commitWorkflowInitialMaterialization(ctx, s, false, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+	effects := newRevisionEffects()
+	return commitWorkflowInitialMaterialization(ctx, s, false, effects, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 		return s.runPrivateAuthorActivityMutation(ctx, "sqlite workflow initial materialization", effects, fn)
 	}, command)
 }

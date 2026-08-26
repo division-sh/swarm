@@ -154,22 +154,23 @@ func (s *RunLifecyclePostgresOwner) ApplyActiveRunQuiescence(ctx context.Context
 	if req.DryRun {
 		return out, nil
 	}
+	effects := runforkrevision.NewEffects()
 
 	for _, runID := range runIDs {
-		if _, err := s.delivery.TerminalizeRunDeliveriesTx(ctx, tx, story, runID, out.ReasonCode); err != nil {
+		if _, err := s.delivery.TerminalizeRunDeliveriesTx(ctx, tx, story, effects, runID, out.ReasonCode); err != nil {
 			return runtimerunquiescence.Result{}, err
 		}
-		terminalized, err := s.pipeline.TerminalizeRunTx(ctx, tx, runID, runtimepipelineobligation.DeadLetter(out.ReasonCode, nil), now)
+		terminalized, err := s.pipeline.TerminalizeRunTx(ctx, tx, effects, runID, runtimepipelineobligation.DeadLetter(out.ReasonCode, nil), now)
 		if err != nil {
 			return runtimerunquiescence.Result{}, err
 		}
 		out.PipelineReceiptCount += terminalized
 	}
-	out.SessionCount, err = terminateActiveRunSessionsTx(ctx, tx, runIDs, out.ReasonCode, now)
+	out.SessionCount, err = terminateActiveRunSessionsTx(ctx, tx, effects, runIDs, out.ReasonCode, now)
 	if err != nil {
 		return runtimerunquiescence.Result{}, err
 	}
-	out.TimerCancellations, err = cancelActiveRunTimerFamiliesTx(ctx, tx, true, runIDs, out.ReasonCode, now)
+	out.TimerCancellations, err = cancelActiveRunTimerFamiliesTx(ctx, tx, true, effects, runIDs, out.ReasonCode, now)
 	if err != nil {
 		return runtimerunquiescence.Result{}, err
 	}
@@ -178,7 +179,7 @@ func (s *RunLifecyclePostgresOwner) ApplyActiveRunQuiescence(ctx context.Context
 		if !activeRunQuiescenceRunStatusActive(run.Status) {
 			continue
 		}
-		if _, _, err := (postgresRunLifecycleMutation{store: s, tx: tx, story: story}).MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
+		if _, _, err := (postgresRunLifecycleMutation{store: s, tx: tx, story: story, effects: effects}).MarkTerminal(ctx, runtimerunlifecycle.TerminalRequest{
 			RunID: run.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: now,
 		}); err != nil {
 			return runtimerunquiescence.Result{}, fmt.Errorf("mark active run quiescence run terminal: %w", err)
@@ -187,14 +188,8 @@ func (s *RunLifecyclePostgresOwner) ApplyActiveRunQuiescence(ctx context.Context
 			return runtimerunquiescence.Result{}, err
 		}
 	}
-	effects, err := runTerminationRevisionEffects(runIDs...)
-	if err != nil {
+	if _, err := runforkrevision.FinalizePostgres(ctx, tx, effects); err != nil {
 		return runtimerunquiescence.Result{}, err
-	}
-	if len(active) > 0 {
-		if _, err := runforkrevision.FinalizePostgres(ctx, tx, effects); err != nil {
-			return runtimerunquiescence.Result{}, err
-		}
 	}
 	if err := story.Finalize(ctx); err != nil {
 		return runtimerunquiescence.Result{}, err
@@ -306,31 +301,20 @@ func (s *RunLifecycleSQLiteOwner) ApplyActiveRunQuiescence(ctx context.Context, 
 			return nil
 		}
 		for _, runID := range attemptRunIDs {
-			if err := effects.Add(runID,
-				runforkrevision.FamilyEventDeliveries,
-				runforkrevision.FamilyEventReceipts,
-				runforkrevision.FamilyAgentSessions,
-				runforkrevision.FamilyTimers,
-			); err != nil {
+			if _, err := s.delivery.TerminalizeRunDeliveriesTx(txctx, tx, story, effects, runID, attemptOut.ReasonCode); err != nil {
 				return err
 			}
-		}
-
-		for _, runID := range attemptRunIDs {
-			if _, err := s.delivery.TerminalizeRunDeliveriesTx(txctx, tx, story, runID, attemptOut.ReasonCode); err != nil {
-				return err
-			}
-			terminalized, err := s.pipeline.TerminalizeRunTx(txctx, tx, runID, runtimepipelineobligation.DeadLetter(attemptOut.ReasonCode, nil), now)
+			terminalized, err := s.pipeline.TerminalizeRunTx(txctx, tx, effects, runID, runtimepipelineobligation.DeadLetter(attemptOut.ReasonCode, nil), now)
 			if err != nil {
 				return err
 			}
 			attemptOut.PipelineReceiptCount += terminalized
 		}
-		attemptOut.SessionCount, err = sqliteTerminateActiveRunSessionsTx(txctx, tx, attemptRunIDs, attemptOut.ReasonCode, now)
+		attemptOut.SessionCount, err = sqliteTerminateActiveRunSessionsTx(txctx, tx, effects, attemptRunIDs, attemptOut.ReasonCode, now)
 		if err != nil {
 			return err
 		}
-		attemptOut.TimerCancellations, err = cancelActiveRunTimerFamiliesTx(txctx, tx, false, attemptRunIDs, attemptOut.ReasonCode, now)
+		attemptOut.TimerCancellations, err = cancelActiveRunTimerFamiliesTx(txctx, tx, false, effects, attemptRunIDs, attemptOut.ReasonCode, now)
 		if err != nil {
 			return err
 		}
@@ -339,7 +323,7 @@ func (s *RunLifecycleSQLiteOwner) ApplyActiveRunQuiescence(ctx context.Context, 
 			if !activeRunQuiescenceRunStatusActive(run.Status) {
 				continue
 			}
-			if _, _, err := (sqliteRunLifecycleMutation{store: s, tx: tx, story: story}).MarkTerminal(txctx, runtimerunlifecycle.TerminalRequest{
+			if _, _, err := (sqliteRunLifecycleMutation{store: s, tx: tx, story: story, effects: effects}).MarkTerminal(txctx, runtimerunlifecycle.TerminalRequest{
 				RunID: run.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: now,
 			}); err != nil {
 				return err
@@ -477,8 +461,8 @@ func sqliteLockActiveQuiescenceRunsTx(ctx context.Context, tx *sql.Tx, runIDs []
 	return scanActiveRunQuiescenceRuns(rows)
 }
 
-func terminateActiveRunSessionsTx(ctx context.Context, tx *sql.Tx, runIDs []string, reason string, at time.Time) (int, error) {
-	result, err := tx.ExecContext(ctx, `
+func terminateActiveRunSessionsTx(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, runIDs []string, reason string, at time.Time) (int, error) {
+	rows, err := tx.QueryContext(ctx, `
 		UPDATE agent_sessions
 		SET status = 'terminated',
 		    termination_reason = 'cancelled',
@@ -489,24 +473,40 @@ func terminateActiveRunSessionsTx(ctx context.Context, tx *sql.Tx, runIDs []stri
 		    updated_at = $3
 		WHERE run_id = ANY($1::uuid[])
 		  AND status IN ('active', 'suspended')
+		RETURNING run_id::text
 	`, pq.Array(runIDs), reason, at.UTC())
 	if err != nil {
 		return 0, fmt.Errorf("terminate active run sessions: %w", err)
 	}
-	count, err := result.RowsAffected()
-	if err != nil {
+	defer rows.Close()
+	changedRuns := make(map[string]struct{})
+	count := 0
+	for rows.Next() {
+		var runID string
+		if err := rows.Scan(&runID); err != nil {
+			return 0, err
+		}
+		changedRuns[runID] = struct{}{}
+		count++
+	}
+	if err := rows.Err(); err != nil {
 		return 0, err
 	}
-	return int(count), nil
+	for runID := range changedRuns {
+		if err := effects.Add(runID, runforkrevision.FamilyAgentSessions); err != nil {
+			return 0, err
+		}
+	}
+	return count, nil
 }
 
-func sqliteTerminateActiveRunSessionsTx(ctx context.Context, tx *sql.Tx, runIDs []string, reason string, at time.Time) (int, error) {
+func sqliteTerminateActiveRunSessionsTx(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, runIDs []string, reason string, at time.Time) (int, error) {
 	args := make([]any, 0, len(runIDs)+3)
 	args = append(args, reason, at.UTC(), at.UTC())
 	for _, runID := range runIDs {
 		args = append(args, runID)
 	}
-	result, err := tx.ExecContext(ctx, `
+	rows, err := tx.QueryContext(ctx, `
 		UPDATE agent_sessions
 		SET status = 'terminated',
 		    termination_reason = 'cancelled',
@@ -517,27 +517,43 @@ func sqliteTerminateActiveRunSessionsTx(ctx context.Context, tx *sql.Tx, runIDs 
 		    updated_at = ?
 		WHERE run_id IN (`+sqlitePlaceholders(len(runIDs))+`)
 		  AND status IN ('active', 'suspended')
+		RETURNING run_id
 	`, args...)
 	if err != nil {
 		return 0, fmt.Errorf("terminate sqlite active run sessions: %w", err)
 	}
-	count, err := result.RowsAffected()
-	if err != nil {
+	defer rows.Close()
+	changedRuns := make(map[string]struct{})
+	count := 0
+	for rows.Next() {
+		var runID string
+		if err := rows.Scan(&runID); err != nil {
+			return 0, err
+		}
+		changedRuns[runID] = struct{}{}
+		count++
+	}
+	if err := rows.Err(); err != nil {
 		return 0, err
 	}
-	return int(count), nil
+	for runID := range changedRuns {
+		if err := effects.Add(runID, runforkrevision.FamilyAgentSessions); err != nil {
+			return 0, err
+		}
+	}
+	return count, nil
 }
 
-func (s *RunLifecycleSQLiteOwner) TerminateActiveSessionsTx(ctx context.Context, tx *sql.Tx, runIDs []string, reason string, at time.Time) (int, error) {
-	return sqliteTerminateActiveRunSessionsTx(ctx, tx, runIDs, reason, at)
+func (s *RunLifecycleSQLiteOwner) TerminateActiveSessionsTx(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, runIDs []string, reason string, at time.Time) (int, error) {
+	return sqliteTerminateActiveRunSessionsTx(ctx, tx, effects, runIDs, reason, at)
 }
 
-func cancelActiveRunTimerFamiliesTx(ctx context.Context, tx *sql.Tx, postgres bool, runIDs []string, cause string, at time.Time) ([]runtimetimercancellation.Ref, error) {
-	generic, err := storegenericschedule.CancelRunsTx(ctx, tx, postgres, runIDs, cause, at)
+func cancelActiveRunTimerFamiliesTx(ctx context.Context, tx *sql.Tx, postgres bool, effects *runforkrevision.Effects, runIDs []string, cause string, at time.Time) ([]runtimetimercancellation.Ref, error) {
+	generic, err := storegenericschedule.CancelRunsTx(ctx, tx, postgres, effects, runIDs, cause, at)
 	if err != nil {
 		return nil, fmt.Errorf("cancel active generic schedules: %w", err)
 	}
-	workflow, err := storeworkflowtimer.CancelRunsTx(ctx, tx, postgres, runIDs)
+	workflow, err := storeworkflowtimer.CancelRunsTx(ctx, tx, postgres, effects, runIDs)
 	if err != nil {
 		return nil, fmt.Errorf("cancel active workflow timers: %w", err)
 	}

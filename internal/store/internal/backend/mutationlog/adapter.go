@@ -14,6 +14,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecurrentstate "github.com/division-sh/swarm/internal/runtime/currentstate"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
 
@@ -21,7 +22,7 @@ type ActiveRunSourceOwner interface {
 	RequireActiveRunSource(context.Context, string) (runtimecorrelation.BundleSourceFact, error)
 }
 
-func InsertWithStory(ctx context.Context, tx *sql.Tx, runLifecycle ActiveRunSourceOwner, story runtimeauthoractivity.Mutation, rec runtimemutationlog.Record) error {
+func InsertWithStory(ctx context.Context, tx *sql.Tx, runLifecycle ActiveRunSourceOwner, story runtimeauthoractivity.Mutation, effects *runforkrevision.Effects, rec runtimemutationlog.Record) error {
 	if tx == nil {
 		return runtimemutationlog.ErrInvalidMutationLogWriter("mutation log transaction is required")
 	}
@@ -85,6 +86,9 @@ func InsertWithStory(ctx context.Context, tx *sql.Tx, runLifecycle ActiveRunSour
 	`, mutationID, runID, entityID, string(domain), path, oldValue, newValue, causedByEvent, writerType, writerID, strings.TrimSpace(rec.HandlerStep), occurredAt); err != nil {
 		return err
 	}
+	if err := effects.Add(runID, runforkrevision.FamilyEntityMutations); err != nil {
+		return err
+	}
 	draft, admitted, err := runtimemutationlog.AuthorActivityDraft(ctx, runID, mutationID, rec, occurredAt)
 	if err != nil || !admitted {
 		return err
@@ -92,7 +96,7 @@ func InsertWithStory(ctx context.Context, tx *sql.Tx, runLifecycle ActiveRunSour
 	return story.Record(ctx, draft)
 }
 
-func InsertEntityStateDiffWithStory(ctx context.Context, tx *sql.Tx, runLifecycle ActiveRunSourceOwner, story runtimeauthoractivity.Mutation, entityID string, before, after runtimemutationlog.EntityStateProjection, writer runtimemutationlog.Writer) error {
+func InsertEntityStateDiffWithStory(ctx context.Context, tx *sql.Tx, runLifecycle ActiveRunSourceOwner, story runtimeauthoractivity.Mutation, effects *runforkrevision.Effects, entityID string, before, after runtimemutationlog.EntityStateProjection, writer runtimemutationlog.Writer) error {
 	if story == nil {
 		return runtimemutationlog.ErrInvalidMutationLogWriter("author activity owner is required")
 	}
@@ -101,7 +105,7 @@ func InsertEntityStateDiffWithStory(ctx context.Context, tx *sql.Tx, runLifecycl
 		return err
 	}
 	for _, record := range records {
-		if err := InsertWithStory(ctx, tx, runLifecycle, story, record); err != nil {
+		if err := InsertWithStory(ctx, tx, runLifecycle, story, effects, record); err != nil {
 			return err
 		}
 	}

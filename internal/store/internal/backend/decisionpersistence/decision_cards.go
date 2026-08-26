@@ -23,6 +23,7 @@ import (
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storeentity "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	"github.com/google/uuid"
 )
@@ -1019,7 +1020,7 @@ func (fn decisionRunSourceOwner) RequireActiveRunSource(ctx context.Context, run
 	return fn(ctx, runID)
 }
 
-func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, runID, reason string, now time.Time, includeCommitted bool, postgres bool) error {
+func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, runID, reason string, now time.Time, includeCommitted bool, postgres bool) error {
 	if story == nil {
 		return fmt.Errorf("run decision-card supersession requires private story ownership")
 	}
@@ -1035,7 +1036,7 @@ func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, story runtime
 	if now.IsZero() {
 		now = decisioncard.CanonicalTimestamp(time.Now())
 	}
-	if err := supersedeRunGateActivations(ctx, tx, story, runID, reason, now, includeCommitted, postgres); err != nil {
+	if err := supersedeRunGateActivations(ctx, tx, story, effects, runID, reason, now, includeCommitted, postgres); err != nil {
 		return err
 	}
 	cardFilter := `c.status = 'pending'`
@@ -1108,12 +1109,12 @@ func supersedeDecisionCardsForRun(ctx context.Context, tx *sql.Tx, story runtime
 	return err
 }
 
-func (s *DecisionPostgresOwner) SupersedeRunTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, runID, reason string, now time.Time, includeCommitted bool) error {
-	return supersedeDecisionCardsForRun(ctx, tx, story, runID, reason, now, includeCommitted, true)
+func (s *DecisionPostgresOwner) SupersedeRunTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, runID, reason string, now time.Time, includeCommitted bool) error {
+	return supersedeDecisionCardsForRun(ctx, tx, story, effects, runID, reason, now, includeCommitted, true)
 }
 
-func (s *DecisionSQLiteOwner) SupersedeRunTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, runID, reason string, now time.Time, includeCommitted bool) error {
-	return supersedeDecisionCardsForRun(ctx, tx, story, runID, reason, now, includeCommitted, false)
+func (s *DecisionSQLiteOwner) SupersedeRunTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, runID, reason string, now time.Time, includeCommitted bool) error {
+	return supersedeDecisionCardsForRun(ctx, tx, story, effects, runID, reason, now, includeCommitted, false)
 }
 
 func (s *DecisionPostgresOwner) ExpireDecisionCardInputDrafts(ctx context.Context, now time.Time) (int, error) {
@@ -1136,7 +1137,7 @@ func (s *DecisionSQLiteOwner) ExpireDecisionCardInputDrafts(ctx context.Context,
 	return count, err
 }
 
-func supersedeRunGateActivations(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, runID, reason string, now time.Time, includeCommitted bool, postgres bool) error {
+func supersedeRunGateActivations(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, runID, reason string, now time.Time, includeCommitted bool, postgres bool) error {
 	mutationCtx := runtimecorrelation.WithRunID(ctx, runID)
 	query := `SELECT entity_id, accumulator FROM entity_state WHERE run_id = ? ORDER BY entity_id`
 	if postgres {
@@ -1239,6 +1240,7 @@ func supersedeRunGateActivations(ctx context.Context, tx *sql.Tx, story runtimea
 					return storerunstate.RequirePostgresActiveSourceTx(ctx, tx, runID)
 				}),
 				story,
+				effects,
 				item.entityID,
 				before,
 				after,
@@ -1246,7 +1248,7 @@ func supersedeRunGateActivations(ctx context.Context, tx *sql.Tx, story runtimea
 			); err != nil {
 				return fmt.Errorf("record run gate activation supersession: %w", err)
 			}
-		} else if err := storeentity.InsertSQLiteEntityStateDiff(mutationCtx, story, tx, runID, item.entityID, before, after, writer, now); err != nil {
+		} else if err := storeentity.InsertSQLiteEntityStateDiff(mutationCtx, story, tx, effects, runID, item.entityID, before, after, writer, now); err != nil {
 			return fmt.Errorf("record run gate activation supersession: %w", err)
 		}
 	}

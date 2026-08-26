@@ -10,7 +10,9 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	"github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/gateruntime"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	"github.com/division-sh/swarm/internal/runtime/preservationcleanup"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
@@ -52,6 +54,7 @@ func TestPreservationCleanupPublishesOneCompleteRunForkRevisionPostgres(t *testi
 		generic     runtimegenericschedule.Activation
 		workflow    workflowTimerDDLProofRow
 		beforeHead  int64
+		gateChanged bool
 	}
 	seeded := map[string]seededRun{}
 	for _, source := range []runbundle.AvailabilitySource{
@@ -61,6 +64,26 @@ func TestPreservationCleanupPublishesOneCompleteRunForkRevisionPostgres(t *testi
 		runID := uuid.NewString()
 		sessionID := uuid.NewString()
 		requireRunFixtureForTest(t, ctx, newPostgresStoreWithBackend(mustPostgresBackend(pg.backend.ConstructionHandle())), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, BundleHash: testCanonicalBundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
+		gateChanged := !source.IsDeleted()
+		if gateChanged {
+			entityID := uuid.NewString()
+			activation, err := gateruntime.New(runID, "preservation/review", entityID, "preservation", "awaiting_review", "preservation_review", testCanonicalBundleHash, testGateRoutes(t), "state:awaiting_review", now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			card := newDecisionCardTestCard(t, runID, now)
+			card.CardID = activation.CardID
+			card.Anchor = newDecisionCardTestStageAnchor("preservation/review", "preservation", entityID, activation.Stage, activation.ActivationID)
+			card.Snapshot.Decision, card.BundleHash = activation.DecisionID, activation.BundleHash
+			card, err = decisioncard.New(card)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := pg.CreateDecisionCard(ctx, card); err != nil {
+				t.Fatal(err)
+			}
+			seedDecisionCardGateEntity(t, pg.backend.ConstructionHandle(), true, runID, entityID, activation, now)
+		}
 		if _, err := pg.backend.ExecContext(ctx, `
 			INSERT INTO agent_sessions (
 				session_id, run_id, agent_id, agent_name_owner, agent_name_source,
@@ -96,6 +119,7 @@ func TestPreservationCleanupPublishesOneCompleteRunForkRevisionPostgres(t *testi
 		if err := insertWorkflowTimerDDLProofRow(runCtx, pg.backend.ConstructionHandle(), pg, workflow); err != nil {
 			t.Fatalf("seed workflow timer %s: %v", source, err)
 		}
+		publishCompleteRunForkRevisionBaseline(t, ctx, pg.backend.ConstructionHandle(), true, runID)
 		if source.IsDeleted() {
 			runlifecyclefixture.CorruptPostgresSource(
 				t, ctx, pg.backend.ConstructionHandle(), runID, testCanonicalBundleHash, source.String(),
@@ -110,7 +134,7 @@ func TestPreservationCleanupPublishesOneCompleteRunForkRevisionPostgres(t *testi
 		byRun[runID] = target
 		seeded[source.String()] = seededRun{
 			runID: runID, eventID: eventID, untouchedID: untouchedID, sessionID: sessionID,
-			generic: admitted.Activation, workflow: workflow,
+			generic: admitted.Activation, workflow: workflow, gateChanged: gateChanged,
 		}
 	}
 	for source, item := range seeded {
@@ -170,6 +194,7 @@ func assertPreservationCleanupRunForkRevision(t *testing.T, ctx context.Context,
 	generic     runtimegenericschedule.Activation
 	workflow    workflowTimerDDLProofRow
 	beforeHead  int64
+	gateChanged bool
 }) {
 	t.Helper()
 	var terminalRevision int64
@@ -206,6 +231,10 @@ func assertPreservationCleanupRunForkRevision(t *testing.T, ctx context.Context,
 		string(privaterunforkrevision.FamilyEventDeliveries),
 		string(privaterunforkrevision.FamilyEventReceipts),
 		string(privaterunforkrevision.FamilyTimers),
+	}
+	if item.gateChanged {
+		wantFamilies = append(wantFamilies, string(privaterunforkrevision.FamilyEntityMutations))
+		slices.Sort(wantFamilies)
 	}
 	if !slices.Equal(families, wantFamilies) {
 		t.Fatalf("preservation cleanup revision families %s = %v, want %v", item.runID, families, wantFamilies)

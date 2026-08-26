@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	sessionstore "github.com/division-sh/swarm/internal/store/internal/backend/sessions"
 	"github.com/google/uuid"
@@ -74,13 +75,16 @@ func ensurePostgresStatelessAuditTx(ctx context.Context, tx *sql.Tx, rec runtime
 	return nil
 }
 
-func (s *LLMPostgresOwner) EnsureCompletionTurnMemoryTx(ctx context.Context, tx *sql.Tx, rec runtimellm.AgentTurnRecord) error {
+func (s *LLMPostgresOwner) EnsureCompletionTurnMemoryTx(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, rec runtimellm.AgentTurnRecord) error {
 	plan, identity, err := validateTurnMemory(rec)
 	if err != nil {
 		return err
 	}
 	if !plan.Enabled {
-		return ensurePostgresStatelessAuditTx(ctx, tx, rec, plan, identity)
+		if err := ensurePostgresStatelessAuditTx(ctx, tx, rec, plan, identity); err != nil {
+			return err
+		}
+		return effects.Add(identity.RunID, runforkrevision.FamilyAgentConversationAudits)
 	}
 	fields, err := storeagent.IdentityFields(identity.Agent)
 	if err != nil {
@@ -152,7 +156,7 @@ func (s *LLMPostgresOwner) UpsertConversation(ctx context.Context, rec runtimell
 	})
 }
 
-func (s *LLMPostgresOwner) ProjectCompletionConversationTx(ctx context.Context, tx *sql.Tx, rec runtimellm.ConversationRecord, expectedTurnCount int) error {
+func (s *LLMPostgresOwner) ProjectCompletionConversationTx(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, rec runtimellm.ConversationRecord, expectedTurnCount int) error {
 	plan, identity, err := validateConversationMemory(rec)
 	if err != nil {
 		return err
@@ -190,7 +194,7 @@ func (s *LLMPostgresOwner) ProjectCompletionConversationTx(ctx context.Context, 
 	if rows, _ := res.RowsAffected(); rows != 1 {
 		return fmt.Errorf("completion conversation projection turn conflict: run=%s agent=%s session=%s expected_turn=%d", identity.RunID, identity.AgentID(), rec.SessionID, expectedTurnCount)
 	}
-	return nil
+	return effects.Add(identity.RunID, runforkrevision.FamilyAgentSessions)
 }
 
 func validateConversationMemory(rec runtimellm.ConversationRecord) (agentmemory.Plan, agentmemory.Identity, error) {

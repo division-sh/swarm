@@ -98,11 +98,12 @@ func TestPostgresMarkRunTerminalLocksRunBeforeDeliverySettlement(t *testing.T) {
 	}
 	terminalDone := make(chan terminalResult, 1)
 	go func() {
-		snapshot, _, err := terminalStore.runLifecyclePostgresOwner.MarkTerminalTx(storyCtx, terminalTx, story, runtimerunlifecycle.TerminalRequest{
+		effects := privaterunforkrevision.NewEffects()
+		snapshot, _, err := terminalStore.runLifecyclePostgresOwner.MarkTerminalTx(storyCtx, terminalTx, story, effects, runtimerunlifecycle.TerminalRequest{
 			RunID: fixture.RunID, State: runtimerunlifecycle.StateCancelled, EndedAt: time.Now().UTC(),
 		})
 		if err == nil {
-			_, err = finalizePostgresRunForkTestRevision(storyCtx, terminalTx, fixture.RunID, privaterunforkrevision.FamilyEventDeliveries)
+			_, err = privaterunforkrevision.FinalizePostgres(storyCtx, terminalTx, effects)
 		}
 		if err == nil {
 			err = authoractivityfixture.Finalize(storyCtx)

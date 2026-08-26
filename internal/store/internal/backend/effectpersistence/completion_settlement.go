@@ -17,6 +17,7 @@ import (
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storellm "github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
 	storemanagedcapability "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
 
@@ -65,10 +66,7 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 					attemptSettlement = completionProviderHeadUncertainty(attemptSettlement, providerHeadErr)
 				}
 			}
-			if err := insertCompletionTargetPostgres(txctx, tx, s.llm, attempt, attemptSettlement, permit.Kind == completionSettlementCurrent); err != nil {
-				return err
-			}
-			if err := declareCompletionTargetEffects(effects, attemptSettlement); err != nil {
+			if err := insertCompletionTargetPostgres(txctx, tx, s.llm, effects, attempt, attemptSettlement, permit.Kind == completionSettlementCurrent); err != nil {
 				return err
 			}
 			if err := s.llm.RecordCompletionTurnAuthorActivityTx(txctx, story, attempt, attemptSettlement); err != nil {
@@ -93,11 +91,8 @@ func (s *EffectPostgresOwner) SettleCompletion(ctx context.Context, attempt runt
 				continuation = &admitted
 			}
 			if permit.Kind == completionSettlementDrained {
-				finalization, err = s.settleProviderDrainTx(txctx, tx, story, attempt, attemptSettlement, permit.Drain)
+				finalization, err = s.settleProviderDrainTx(txctx, tx, story, effects, attempt, attemptSettlement, permit.Drain)
 				if err != nil {
-					return err
-				}
-				if err := declareProviderOriginEffects(effects, permit.Drain.Origin, attempt.Authority.Target.RunID); err != nil {
 					return err
 				}
 				originSettled = true
@@ -172,10 +167,7 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 					attemptSettlement = completionProviderHeadUncertainty(attemptSettlement, providerHeadErr)
 				}
 			}
-			if err := insertCompletionTargetSQLite(txctx, tx, s.llm, attempt, attemptSettlement, permit.Kind == completionSettlementCurrent); err != nil {
-				return err
-			}
-			if err := declareCompletionTargetEffects(effects, attemptSettlement); err != nil {
+			if err := insertCompletionTargetSQLite(txctx, tx, s.llm, effects, attempt, attemptSettlement, permit.Kind == completionSettlementCurrent); err != nil {
 				return err
 			}
 			if err := s.llm.RecordCompletionTurnAuthorActivityTx(txctx, story, attempt, attemptSettlement); err != nil {
@@ -200,11 +192,8 @@ func (s *EffectSQLiteOwner) SettleCompletion(ctx context.Context, attempt runtim
 				continuation = &admitted
 			}
 			if permit.Kind == completionSettlementDrained {
-				finalization, err = s.settleProviderDrainTx(txctx, tx, story, attempt, attemptSettlement, permit.Drain)
+				finalization, err = s.settleProviderDrainTx(txctx, tx, story, effects, attempt, attemptSettlement, permit.Drain)
 				if err != nil {
-					return err
-				}
-				if err := declareProviderOriginEffects(effects, permit.Drain.Origin, attempt.Authority.Target.RunID); err != nil {
 					return err
 				}
 				originSettled = true
@@ -382,13 +371,13 @@ func validateCompletionAgentFrame(raw []byte, attempt runtimeeffects.Attempt, tu
 	return append([]byte(nil), raw...), nil
 }
 
-func insertCompletionTargetPostgres(ctx context.Context, tx *sql.Tx, llm *storellm.LLMPostgresOwner, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement, projectCurrentMemory ...bool) error {
+func insertCompletionTargetPostgres(ctx context.Context, tx *sql.Tx, llm *storellm.LLMPostgresOwner, effects *revisionEffects, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement, projectCurrentMemory ...bool) error {
 	if attempt.Authority.Target.Kind == runtimeeffects.UsageTargetConversationForkCompletion {
 		return insertForkCompletionPostgres(ctx, tx, attempt, settlement)
 	}
 	t := settlement.AgentTurn
 	if len(projectCurrentMemory) == 0 || projectCurrentMemory[0] {
-		if err := llm.EnsureCompletionTurnMemoryTx(ctx, tx, completionTurnRecord(t)); err != nil {
+		if err := llm.EnsureCompletionTurnMemoryTx(ctx, tx, effects, completionTurnRecord(t)); err != nil {
 			return err
 		}
 	}
@@ -440,16 +429,16 @@ func insertCompletionTargetPostgres(ctx context.Context, tx *sql.Tx, llm *storel
 	if err != nil {
 		return fmt.Errorf("insert completion agent turn: %w", err)
 	}
-	return nil
+	return effects.Add(t.RunID, privaterunforkrevision.FamilyAgentTurns)
 }
 
-func insertCompletionTargetSQLite(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement, projectCurrentMemory ...bool) error {
+func insertCompletionTargetSQLite(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, effects *revisionEffects, attempt runtimeeffects.Attempt, settlement runtimeeffects.CompletionSettlement, projectCurrentMemory ...bool) error {
 	if attempt.Authority.Target.Kind == runtimeeffects.UsageTargetConversationForkCompletion {
 		return insertForkCompletionSQLite(ctx, tx, attempt, settlement)
 	}
 	t := settlement.AgentTurn
 	if len(projectCurrentMemory) == 0 || projectCurrentMemory[0] {
-		if err := llm.EnsureCompletionTurnMemoryTx(ctx, tx, completionTurnRecord(t), settlement.Now.UTC()); err != nil {
+		if err := llm.EnsureCompletionTurnMemoryTx(ctx, tx, effects, completionTurnRecord(t), settlement.Now.UTC()); err != nil {
 			return err
 		}
 	}
@@ -497,7 +486,7 @@ func insertCompletionTargetSQLite(ctx context.Context, tx *sql.Tx, llm *storellm
 	if err != nil {
 		return fmt.Errorf("insert sqlite completion agent turn: %w", err)
 	}
-	return nil
+	return effects.Add(t.RunID, privaterunforkrevision.FamilyAgentTurns)
 }
 
 func completionTurnRecord(t *runtimeeffects.CompletionAgentTurn) runtimellm.AgentTurnRecord {

@@ -27,6 +27,7 @@ import (
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -764,11 +765,11 @@ func freezeDecisionCardRunInTestMutation(ctx context.Context, cards decisioncard
 	switch selected := cards.(type) {
 	case *PostgresStore:
 		return selected.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-			return selected.decisionPostgresOwner.SupersedeRunTx(txctx, tx, runtimeAuthorActivityMutation(story), runID, "run_forked", at, true)
+			return selected.decisionPostgresOwner.SupersedeRunTx(txctx, tx, runtimeAuthorActivityMutation(story), privaterunforkrevision.NewEffects(), runID, "run_forked", at, true)
 		})
 	case *SQLiteRuntimeStore:
 		return selected.runPrivateAuthorActivityMutation(ctx, "sqlite test decision-card run freeze", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
-			return selected.decisionSQLiteOwner.SupersedeRunTx(txctx, tx, runtimeAuthorActivityMutation(story), runID, "run_forked", at, true)
+			return selected.decisionSQLiteOwner.SupersedeRunTx(txctx, tx, runtimeAuthorActivityMutation(story), privaterunforkrevision.NewEffects(), runID, "run_forked", at, true)
 		})
 	default:
 		return fmt.Errorf("unexpected decision card store %T", cards)
@@ -868,6 +869,7 @@ func TestTerminalDecisionCardSupersessionStateChangeOnlyProducerParity(t *testin
 					t.Fatal(err)
 				}
 				seedDecisionCardGateEntity(t, db, postgres, runID, entityID, activation, now)
+				publishCompleteRunForkRevisionBaseline(t, ctx, db, postgres, runID)
 
 				if err := producer.invoke(ctx, cardStore, runID, now.Add(time.Minute)); err != nil {
 					t.Fatalf("first terminal producer: %v", err)
@@ -948,6 +950,8 @@ func TestNormalRunCompletionDecisionGateAuthorityParity(t *testing.T) {
 			entityID := uuid.NewString()
 			seedDecisionCardCompletionEntity(t, db, postgres, runID, entityID, "done", now)
 			eventID := seedDecisionCardCompletionEvent(t, ctx, cardStore, runID, entityID, now)
+			publishCompleteRunForkRevisionBaseline(t, ctx, db, postgres, runID)
+			beforeRevision := runForkRevisionHeadForProof(t, ctx, db, postgres, runID)
 			if err := convergeDecisionCardRunCompletion(ctx, cardStore, eventID); err != nil {
 				t.Fatalf("ConvergeNormalRunCompletion: %v", err)
 			}
@@ -959,8 +963,81 @@ func TestNormalRunCompletionDecisionGateAuthorityParity(t *testing.T) {
 			if err := db.QueryRowContext(ctx, query, runID).Scan(&status); err != nil || status != "completed" {
 				t.Fatalf("eligible run status = %q, %v, want completed", status, err)
 			}
+			if afterRevision := runForkRevisionHeadForProof(t, ctx, db, postgres, runID); afterRevision != beforeRevision {
+				t.Fatalf("no-gate completion revision = %d, want unchanged %d", afterRevision, beforeRevision)
+			}
+			requireCompleteRunForkRevision(t, ctx, decisionCardRevisionFixture(t, cardStore, db), runID)
+		})
+
+	}
+}
+
+func TestStandaloneCompletionCandidatePublishesChangedGateRevisionParity(t *testing.T) {
+	for _, backend := range []struct {
+		name string
+		open func(*testing.T) authorActivityReceiptFixture
+	}{
+		{name: "sqlite", open: openSQLiteAuthorActivityReceiptFixture},
+		{name: "postgres", open: openPostgresAuthorActivityReceiptFixture},
+	} {
+		backend := backend
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			ctx := testAuthorActivityContext()
+			eventBus, err := newRunConvergenceEventBus(t, fixture.store)
+			if err != nil {
+				t.Fatalf("NewEventBus: %v", err)
+			}
+			now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
+			event := eventtest.RuntimeControl(uuid.NewString(), "platform.paused", "runtime", "", json.RawMessage(`{}`), 0, "", "", events.EventEnvelope{}, now)
+			if err := eventBus.Publish(ctx, event); err != nil {
+				t.Fatalf("publish standalone completion trigger: %v", err)
+			}
+			_, runID, _, _ := loadRunConvergenceFacts(t, fixture, ctx, event.ID())
+			entityID := uuid.NewString()
+			activation, err := gateruntime.New(runID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", authorActivityTestBundleHash, testGateRoutes(t), "state:awaiting_review", now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			seedDecisionCardGateEntity(t, fixture.db, backend.name == "postgres", runID, entityID, activation, now)
+			setDecisionCardCompletionEntityState(t, fixture.db, backend.name == "postgres", runID, entityID, "done")
+			publishCompleteRunForkRevisionBaseline(t, ctx, fixture.db, backend.name == "postgres", runID)
+			beforeRevision := runForkRevisionHeadForProof(t, ctx, fixture.db, backend.name == "postgres", runID)
+
+			executeStandaloneCompletionCandidateWithCatalog(t, ctx, fixture.store, runID, runtimerunlifecycle.NewTerminalCatalog(
+				nil, map[string][]string{"launch/review": {"done"}},
+			))
+			if got := loadDecisionCardGateActivation(t, fixture.db, backend.name == "postgres", runID, entityID); got.Status != gateruntime.StatusSuperseded || got.SupersededReason != "run_completed" {
+				t.Fatalf("standalone completion gate activation = %#v, want run_completed supersession", got)
+			}
+			if afterRevision := runForkRevisionHeadForProof(t, ctx, fixture.db, backend.name == "postgres", runID); afterRevision != beforeRevision+1 {
+				t.Fatalf("changed-gate completion revision = %d, want %d", afterRevision, beforeRevision+1)
+			}
+			requireCompleteRunForkRevision(t, ctx, fixture, runID)
 		})
 	}
+}
+
+func decisionCardRevisionFixture(t testing.TB, cards decisioncard.Store, db *sql.DB) authorActivityReceiptFixture {
+	t.Helper()
+	store, ok := cards.(authorActivityReceiptStore)
+	if !ok {
+		t.Fatalf("decision-card store %T has no revision proof surface", cards)
+	}
+	return authorActivityReceiptFixture{store: store, db: db}
+}
+
+func runForkRevisionHeadForProof(t testing.TB, ctx context.Context, db *sql.DB, postgres bool, runID string) int64 {
+	t.Helper()
+	query := `SELECT last_revision FROM run_fork_revision_heads WHERE run_id = ?`
+	if postgres {
+		query = `SELECT last_revision FROM run_fork_revision_heads WHERE run_id = $1::uuid`
+	}
+	var revision int64
+	if err := db.QueryRowContext(ctx, query, runID).Scan(&revision); err != nil {
+		t.Fatalf("load run-fork revision head: %v", err)
+	}
+	return revision
 }
 
 func convergeDecisionCardRunCompletion(ctx context.Context, cards decisioncard.Store, eventID string) error {
@@ -1190,6 +1267,22 @@ func assertTerminalDecisionCardStateChangeOnly(t *testing.T, ctx context.Context
 	}
 	if mutationCount == 0 || !statusRecorded {
 		t.Fatalf("run supersession accumulator mutations count=%d status_recorded=%v", mutationCount, statusRecorded)
+	}
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if postgres {
+		err = privaterunforkrevision.ValidateCompletePostgres(ctx, tx, runID)
+	} else {
+		err = privaterunforkrevision.ValidateCompleteSQLite(ctx, tx, runID)
+	}
+	if err != nil {
+		t.Fatalf("validate terminal gate revision: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
 	}
 }
 

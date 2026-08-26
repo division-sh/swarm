@@ -12,6 +12,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
 const runLifecycleActiveStateSQLValues = "'" +
@@ -316,32 +317,35 @@ func (s *RunLifecyclePostgresOwner) markRunTerminalTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	story runtimeauthoractivity.Mutation,
+	effects *privaterunforkrevision.Effects,
 	request runtimerunlifecycle.TerminalRequest,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	mutation, err := terminalRunMutationFromRequest(request)
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
-	return s.markRunTerminalStateTx(ctx, tx, story, mutation)
+	return s.markRunTerminalStateTx(ctx, tx, story, effects, mutation)
 }
 
 func (s *RunLifecyclePostgresOwner) markForkSourceTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	story runtimeauthoractivity.Mutation,
+	effects *privaterunforkrevision.Effects,
 	request runtimerunlifecycle.ForkSourceRequest,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	mutation, err := terminalRunMutationFromForkSource(request)
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
-	return s.markRunTerminalStateTx(ctx, tx, story, mutation)
+	return s.markRunTerminalStateTx(ctx, tx, story, effects, mutation)
 }
 
 func (s *RunLifecyclePostgresOwner) completeRunTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	story runtimeauthoractivity.Mutation,
+	effects *privaterunforkrevision.Effects,
 	runID string,
 	endedAt time.Time,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
@@ -349,13 +353,14 @@ func (s *RunLifecyclePostgresOwner) completeRunTx(
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
-	return s.markRunTerminalStateTx(ctx, tx, story, mutation)
+	return s.markRunTerminalStateTx(ctx, tx, story, effects, mutation)
 }
 
 func (s *RunLifecyclePostgresOwner) markRunTerminalStateTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	story runtimeauthoractivity.Mutation,
+	effects *privaterunforkrevision.Effects,
 	request terminalRunMutation,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	if tx == nil {
@@ -381,16 +386,19 @@ func (s *RunLifecyclePostgresOwner) markRunTerminalStateTx(
 		}
 		return current, runtimerunlifecycle.MutationExactNoop, nil
 	}
-	if err := (postgresRunLifecycleMutation{store: s, tx: tx, story: story}).SyncCounters(ctx, request.RunID); err != nil {
+	if effects == nil {
+		return runtimerunlifecycle.Snapshot{}, "", errors.New("terminal run lifecycle mutation requires revision effects")
+	}
+	if err := (postgresRunLifecycleMutation{store: s, tx: tx, story: story, effects: effects}).SyncCounters(ctx, request.RunID); err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
 	if request.State != runtimerunlifecycle.StateCompleted {
-		if _, err := s.delivery.TerminalizeRunDeliveriesTx(ctx, tx, story, request.RunID, "run_"+string(request.State)); err != nil {
+		if _, err := s.delivery.TerminalizeRunDeliveriesTx(ctx, tx, story, effects, request.RunID, "run_"+string(request.State)); err != nil {
 			return runtimerunlifecycle.Snapshot{}, "", err
 		}
 	}
 	if err := s.decisionCards.SupersedeRunTx(
-		ctx, tx, story, request.RunID, "run_"+string(request.State), request.EndedAt.UTC(), request.IncludeCommittedDecisionCards,
+		ctx, tx, story, effects, request.RunID, "run_"+string(request.State), request.EndedAt.UTC(), request.IncludeCommittedDecisionCards,
 	); err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
@@ -430,19 +438,21 @@ func (s *RunLifecycleSQLiteOwner) markRunTerminalTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	story runtimeauthoractivity.Mutation,
+	effects *privaterunforkrevision.Effects,
 	request runtimerunlifecycle.TerminalRequest,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	mutation, err := terminalRunMutationFromRequest(request)
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
-	return s.markRunTerminalStateTx(ctx, tx, story, mutation)
+	return s.markRunTerminalStateTx(ctx, tx, story, effects, mutation)
 }
 
 func (s *RunLifecycleSQLiteOwner) markRunTerminalStateTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	story runtimeauthoractivity.Mutation,
+	effects *privaterunforkrevision.Effects,
 	request terminalRunMutation,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
 	if tx == nil {
@@ -468,16 +478,19 @@ func (s *RunLifecycleSQLiteOwner) markRunTerminalStateTx(
 		}
 		return current, runtimerunlifecycle.MutationExactNoop, nil
 	}
-	if err := (sqliteRunLifecycleMutation{store: s, tx: tx, story: story}).SyncCounters(ctx, request.RunID); err != nil {
+	if effects == nil {
+		return runtimerunlifecycle.Snapshot{}, "", errors.New("terminal run lifecycle mutation requires revision effects")
+	}
+	if err := (sqliteRunLifecycleMutation{store: s, tx: tx, story: story, effects: effects}).SyncCounters(ctx, request.RunID); err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
 	if request.State != runtimerunlifecycle.StateCompleted {
-		if _, err := s.delivery.TerminalizeRunDeliveriesTx(ctx, tx, story, request.RunID, "run_"+string(request.State)); err != nil {
+		if _, err := s.delivery.TerminalizeRunDeliveriesTx(ctx, tx, story, effects, request.RunID, "run_"+string(request.State)); err != nil {
 			return runtimerunlifecycle.Snapshot{}, "", err
 		}
 	}
 	if err := s.decisionCards.SupersedeRunTx(
-		ctx, tx, story, request.RunID, "run_"+string(request.State), request.EndedAt.UTC(), request.IncludeCommittedDecisionCards,
+		ctx, tx, story, effects, request.RunID, "run_"+string(request.State), request.EndedAt.UTC(), request.IncludeCommittedDecisionCards,
 	); err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
@@ -517,6 +530,7 @@ func (s *RunLifecycleSQLiteOwner) completeRunTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	story runtimeauthoractivity.Mutation,
+	effects *privaterunforkrevision.Effects,
 	runID string,
 	endedAt time.Time,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
@@ -524,7 +538,7 @@ func (s *RunLifecycleSQLiteOwner) completeRunTx(
 	if err != nil {
 		return runtimerunlifecycle.Snapshot{}, "", err
 	}
-	return s.markRunTerminalStateTx(ctx, tx, story, mutation)
+	return s.markRunTerminalStateTx(ctx, tx, story, effects, mutation)
 }
 
 func recordTerminalRunActivity(
@@ -576,18 +590,18 @@ func sameRunLifecycleFailure(left, right *runtimefailures.Envelope) bool {
 
 type TerminalRunMutation = terminalRunMutation
 
-func (s *RunLifecyclePostgresOwner) CompleteRunTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, runID string, endedAt time.Time) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return s.completeRunTx(ctx, tx, story, runID, endedAt)
+func (s *RunLifecyclePostgresOwner) CompleteRunTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, runID string, endedAt time.Time) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return s.completeRunTx(ctx, tx, story, effects, runID, endedAt)
 }
 
-func (s *RunLifecycleSQLiteOwner) CompleteRunTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, runID string, endedAt time.Time) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return s.completeRunTx(ctx, tx, story, runID, endedAt)
+func (s *RunLifecycleSQLiteOwner) CompleteRunTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, runID string, endedAt time.Time) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return s.completeRunTx(ctx, tx, story, effects, runID, endedAt)
 }
 
-func (s *RunLifecyclePostgresOwner) MarkRunTerminalStateTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, request TerminalRunMutation) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return s.markRunTerminalStateTx(ctx, tx, story, request)
+func (s *RunLifecyclePostgresOwner) MarkRunTerminalStateTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, request TerminalRunMutation) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return s.markRunTerminalStateTx(ctx, tx, story, effects, request)
 }
 
-func (s *RunLifecycleSQLiteOwner) MarkRunTerminalStateTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, request TerminalRunMutation) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return s.markRunTerminalStateTx(ctx, tx, story, request)
+func (s *RunLifecycleSQLiteOwner) MarkRunTerminalStateTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, request TerminalRunMutation) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return s.markRunTerminalStateTx(ctx, tx, story, effects, request)
 }

@@ -48,11 +48,8 @@ var _ runtimereplycontext.Store = (*ReplySQLiteOwner)(nil)
 
 func (s *ReplyPostgresOwner) CreateReplyContext(ctx context.Context, record runtimereplycontext.Record) error {
 	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		if err := createPostgresReplyContext(txctx, tx, record); err != nil {
-			return err
-		}
 		effects := runforkrevision.NewEffects()
-		if err := effects.Add(record.RunID, runforkrevision.FamilyReplyContexts); err != nil {
+		if err := s.CreateWithinTransaction(txctx, tx, effects, record); err != nil {
 			return err
 		}
 		_, err := runforkrevision.FinalizePostgres(txctx, tx, effects)
@@ -106,17 +103,17 @@ func createPostgresReplyContext(ctx context.Context, db *sql.Tx, record runtimer
 	return resolveReplyContextCreateConflict(record, existing, loadErr)
 }
 
-func (s *ReplyPostgresOwner) CreateWithinTransaction(ctx context.Context, tx *sql.Tx, record runtimereplycontext.Record) error {
-	return createPostgresReplyContext(ctx, tx, record)
+func (s *ReplyPostgresOwner) CreateWithinTransaction(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, record runtimereplycontext.Record) error {
+	if err := createPostgresReplyContext(ctx, tx, record); err != nil {
+		return err
+	}
+	return effects.Add(record.RunID, runforkrevision.FamilyReplyContexts)
 }
 
 func (s *ReplySQLiteOwner) CreateReplyContext(ctx context.Context, record runtimereplycontext.Record) error {
 	return s.backend.RunTransaction(ctx, "sqlite reply context create", func(txctx context.Context, tx *sql.Tx) error {
-		if err := createSQLiteReplyContextTx(txctx, tx, record); err != nil {
-			return err
-		}
 		effects := runforkrevision.NewEffects()
-		if err := effects.Add(record.RunID, runforkrevision.FamilyReplyContexts); err != nil {
+		if err := s.CreateWithinTransaction(txctx, tx, effects, record); err != nil {
 			return err
 		}
 		_, err := runforkrevision.FinalizeSQLite(txctx, tx, effects)
@@ -164,8 +161,11 @@ func createSQLiteReplyContextTx(ctx context.Context, db *sql.Tx, record runtimer
 	return resolveReplyContextCreateConflict(record, existing, loadErr)
 }
 
-func (s *ReplySQLiteOwner) CreateWithinTransaction(ctx context.Context, tx *sql.Tx, record runtimereplycontext.Record) error {
-	return createSQLiteReplyContextTx(ctx, tx, record)
+func (s *ReplySQLiteOwner) CreateWithinTransaction(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, record runtimereplycontext.Record) error {
+	if err := createSQLiteReplyContextTx(ctx, tx, record); err != nil {
+		return err
+	}
+	return effects.Add(record.RunID, runforkrevision.FamilyReplyContexts)
 }
 
 func resolveReplyContextCreateConflict(record, existing runtimereplycontext.Record, loadErr error) error {
@@ -308,7 +308,7 @@ func claimLoadedReplyContextTx(ctx context.Context, db *sql.Tx, record runtimere
 	return record.Normalized(), runtimereplycontext.ClaimAccepted, nil
 }
 
-func (s *ReplyPostgresOwner) ClaimWithinTransaction(ctx context.Context, tx *sql.Tx, command runtimereplycontext.ClaimCommand) error {
+func (s *ReplyPostgresOwner) ClaimWithinTransaction(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, command runtimereplycontext.ClaimCommand) error {
 	command = command.Normalized()
 	if err := command.Validate(); err != nil {
 		return err
@@ -317,10 +317,13 @@ func (s *ReplyPostgresOwner) ClaimWithinTransaction(ctx context.Context, tx *sql
 	if err != nil {
 		return err
 	}
-	return commitExpectedReplyContextClaim(ctx, tx, loaded, command, true)
+	if err := commitExpectedReplyContextClaim(ctx, tx, loaded, command, true); err != nil {
+		return err
+	}
+	return effects.Add(loaded.RunID, runforkrevision.FamilyReplyContexts)
 }
 
-func (s *ReplySQLiteOwner) ClaimWithinTransaction(ctx context.Context, tx *sql.Tx, command runtimereplycontext.ClaimCommand) error {
+func (s *ReplySQLiteOwner) ClaimWithinTransaction(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, command runtimereplycontext.ClaimCommand) error {
 	command = command.Normalized()
 	if err := command.Validate(); err != nil {
 		return err
@@ -329,7 +332,10 @@ func (s *ReplySQLiteOwner) ClaimWithinTransaction(ctx context.Context, tx *sql.T
 	if err != nil {
 		return err
 	}
-	return commitExpectedReplyContextClaim(ctx, tx, loaded, command, false)
+	if err := commitExpectedReplyContextClaim(ctx, tx, loaded, command, false); err != nil {
+		return err
+	}
+	return effects.Add(loaded.RunID, runforkrevision.FamilyReplyContexts)
 }
 
 func commitExpectedReplyContextClaim(ctx context.Context, tx *sql.Tx, loaded runtimereplycontext.Record, command runtimereplycontext.ClaimCommand, postgres bool) error {

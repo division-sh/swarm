@@ -321,6 +321,10 @@ func TestConcurrentTerminalReceiptsConvergeAdmittedStandaloneRuntimeRun(t *testi
 }
 
 func executeStandaloneCompletionCandidate(t *testing.T, ctx context.Context, selected any, runID string) {
+	executeStandaloneCompletionCandidateWithCatalog(t, ctx, selected, runID, runtimerunlifecycle.TerminalCatalog{})
+}
+
+func executeStandaloneCompletionCandidateWithCatalog(t *testing.T, ctx context.Context, selected any, runID string, catalog runtimerunlifecycle.TerminalCatalog) {
 	t.Helper()
 	owner, ok := selected.(runtimerunlifecycle.CandidateStore)
 	if !ok {
@@ -339,12 +343,12 @@ func executeStandaloneCompletionCandidate(t *testing.T, ctx context.Context, sel
 		if candidate.RunID != runID {
 			continue
 		}
-		result, err := owner.ExecuteCompletionCandidate(ctx, candidate, runtimerunlifecycle.TerminalCatalog{})
+		result, err := owner.ExecuteCompletionCandidate(ctx, candidate, catalog)
 		if err != nil {
 			t.Fatalf("ExecuteCompletionCandidate: %v", err)
 		}
 		if result.Outcome != runtimerunlifecycle.OutcomeTerminallyEligible {
-			t.Fatalf("completion outcome = %s, want %s", result.Outcome, runtimerunlifecycle.OutcomeTerminallyEligible)
+			t.Fatalf("completion result = %#v retryable=%v, want outcome %s", result, result.Retryable, runtimerunlifecycle.OutcomeTerminallyEligible)
 		}
 		return
 	}

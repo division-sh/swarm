@@ -111,6 +111,7 @@ func TestActiveRunDeliveryQuiescenceReadbackParity(t *testing.T) {
 			if !found {
 				t.Fatalf("terminalized delivery %s missing from trace: %#v", claimed.Snapshot.DeliveryID, rows)
 			}
+			requireCompleteRunForkRevision(t, ctx, fixture, runID)
 		})
 	}
 }

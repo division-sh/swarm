@@ -16,6 +16,7 @@ import (
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storeentity "github.com/division-sh/swarm/internal/store/internal/backend/entityruntime"
 	privatemutationlog "github.com/division-sh/swarm/internal/store/internal/backend/mutationlog"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storescenarioexecution "github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
 )
 
@@ -29,9 +30,6 @@ func (s *PipelinePostgresOwner) SetupScenarioEntities(ctx context.Context, req r
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, req.RunID)
 	effects := newRevisionEffects()
-	if err := addEntityMetadataRevisionEffects(effects, req.RunID); err != nil {
-		return runtimepipeline.ScenarioSetupResult{}, err
-	}
 	if err := s.runPrivateAuthorActivityMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		fact, ok := runtimecorrelation.BundleSourceFactFromContext(txctx)
 		if !ok {
@@ -79,9 +77,12 @@ func (s *PipelinePostgresOwner) SetupScenarioEntities(ctx context.Context, req r
 				}
 				continue
 			}
+			if err := effects.Add(req.RunID, privaterunforkrevision.FamilyEntityMetadata); err != nil {
+				return err
+			}
 			if err := privatemutationlog.InsertEntityStateDiffWithStory(txctx, tx, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
 				return s.RunLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID)
-			}), story, entity.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
+			}), story, effects, entity.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
 				CurrentState: entity.CurrentState,
 				Fields:       fieldsAny,
 				Gates:        gatesAny,
@@ -106,9 +107,6 @@ func (s *PipelineSQLiteOwner) SetupScenarioEntities(ctx context.Context, req run
 	}
 	ctx = runtimecorrelation.WithRunID(ctx, req.RunID)
 	effects := newRevisionEffects()
-	if err := addEntityMetadataRevisionEffects(effects, req.RunID); err != nil {
-		return runtimepipeline.ScenarioSetupResult{}, err
-	}
 	if err := s.runPrivateAuthorActivityMutation(ctx, "sqlite scenario setup", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		fact, ok := runtimecorrelation.BundleSourceFactFromContext(txctx)
 		if !ok {
@@ -153,7 +151,10 @@ func (s *PipelineSQLiteOwner) SetupScenarioEntities(ctx context.Context, req run
 				}
 				continue
 			}
-			if err := storeentity.InsertSQLiteEntityStateDiff(txctx, story, tx, req.RunID, entity.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
+			if err := effects.Add(req.RunID, privaterunforkrevision.FamilyEntityMetadata); err != nil {
+				return err
+			}
+			if err := storeentity.InsertSQLiteEntityStateDiff(txctx, story, tx, effects, req.RunID, entity.EntityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
 				CurrentState: entity.CurrentState,
 				Fields:       fieldsAny,
 				Gates:        gatesAny,

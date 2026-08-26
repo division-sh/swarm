@@ -403,11 +403,8 @@ func (s *AgentPostgresOwner) CommitAgentLifecycleTransitionTx(ctx context.Contex
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
-	result, err := commitPostgresAgentLifecycleTransitionTx(ctx, tx, story, req, s.providerDrains)
-	if err != nil {
-		return runtimemanager.AgentLifecycleTransitionResult{}, err
-	}
-	effects, err := lifecycleRevisionEffects(result)
+	effects := privaterunforkrevision.NewEffects()
+	result, err := commitPostgresAgentLifecycleTransitionTx(ctx, tx, story, effects, req, s.providerDrains)
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
@@ -435,11 +432,8 @@ func (s *AgentSQLiteOwner) CommitAgentLifecycleTransitionTx(ctx context.Context,
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
-	result, err := commitSQLiteAgentLifecycleTransitionTx(ctx, tx, story, req, s.providerDrains)
-	if err != nil {
-		return runtimemanager.AgentLifecycleTransitionResult{}, err
-	}
-	effects, err := lifecycleRevisionEffects(result)
+	effects := privaterunforkrevision.NewEffects()
+	result, err := commitSQLiteAgentLifecycleTransitionTx(ctx, tx, story, effects, req, s.providerDrains)
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
@@ -452,7 +446,7 @@ func (s *AgentSQLiteOwner) CommitAgentLifecycleTransitionTx(ctx context.Context,
 	return result, nil
 }
 
-func commitPostgresAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, req runtimemanager.AgentLifecycleTransition, drains ProviderAttemptDrainPostgresCapturer) (runtimemanager.AgentLifecycleTransitionResult, error) {
+func commitPostgresAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *privaterunforkrevision.Effects, req runtimemanager.AgentLifecycleTransition, drains ProviderAttemptDrainPostgresCapturer) (runtimemanager.AgentLifecycleTransitionResult, error) {
 	fingerprint, err := req.Identity.Fingerprint()
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
@@ -477,7 +471,7 @@ func commitPostgresAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, s
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	result := lifecycleResult(req, previous, exists)
-	if err := captureLifecycleProviderDrainsPostgres(ctx, tx, story, drains, req, previous, exists, &result); err != nil {
+	if err := captureLifecycleProviderDrainsPostgres(ctx, tx, story, effects, drains, req, previous, exists, &result); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	result.Subordinate, err = applyPostgresLifecycleSubordinate(ctx, tx, req)
@@ -490,10 +484,13 @@ func commitPostgresAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, s
 	if err == nil {
 		err = story.Record(ctx, agentLifecycleAuthorActivityDraft(req, result))
 	}
+	if err == nil {
+		err = addLifecycleRevisionEffects(effects, result)
+	}
 	return result, err
 }
 
-func commitSQLiteAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, req runtimemanager.AgentLifecycleTransition, drains ProviderAttemptDrainSQLiteCapturer) (runtimemanager.AgentLifecycleTransitionResult, error) {
+func commitSQLiteAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *privaterunforkrevision.Effects, req runtimemanager.AgentLifecycleTransition, drains ProviderAttemptDrainSQLiteCapturer) (runtimemanager.AgentLifecycleTransitionResult, error) {
 	previous, exists, err := loadSQLiteLifecycleCell(ctx, tx, req.Identity)
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
@@ -511,7 +508,7 @@ func commitSQLiteAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, sto
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	result := lifecycleResult(req, previous, exists)
-	if err := captureLifecycleProviderDrainsSQLite(ctx, tx, story, drains, req, previous, exists, &result); err != nil {
+	if err := captureLifecycleProviderDrainsSQLite(ctx, tx, story, effects, drains, req, previous, exists, &result); err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	result.Subordinate, err = applySQLiteLifecycleSubordinate(ctx, tx, req)
@@ -523,6 +520,9 @@ func commitSQLiteAgentLifecycleTransitionTx(ctx context.Context, tx *sql.Tx, sto
 	}
 	if err == nil {
 		err = story.Record(ctx, agentLifecycleAuthorActivityDraft(req, result))
+	}
+	if err == nil {
+		err = addLifecycleRevisionEffects(effects, result)
 	}
 	return result, err
 }
@@ -575,14 +575,13 @@ func (s *AgentPostgresOwner) runPostgresLifecycleMutation(ctx context.Context, o
 	})
 }
 
-func lifecycleRevisionEffects(result runtimemanager.AgentLifecycleTransitionResult) (*privaterunforkrevision.Effects, error) {
-	effects := privaterunforkrevision.NewEffects()
+func addLifecycleRevisionEffects(effects *privaterunforkrevision.Effects, result runtimemanager.AgentLifecycleTransitionResult) error {
 	for _, session := range result.Subordinate.Sessions {
 		if err := effects.Add(session.RunID, privaterunforkrevision.FamilyAgentSessions); err != nil {
-			return nil, err
+			return err
 		}
 	}
-	return effects, nil
+	return nil
 }
 
 func (s *AgentSQLiteOwner) runSQLiteLifecycleMutation(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
@@ -740,6 +739,7 @@ func captureLifecycleProviderDrainsPostgres(
 	ctx context.Context,
 	tx *sql.Tx,
 	story runtimeauthoractivity.Mutation,
+	effects *privaterunforkrevision.Effects,
 	drains ProviderAttemptDrainPostgresCapturer,
 	req runtimemanager.AgentLifecycleTransition,
 	previous lifecycleCell,
@@ -753,7 +753,7 @@ func captureLifecycleProviderDrainsPostgres(
 	if drains == nil {
 		return fmt.Errorf("agent lifecycle PostgreSQL provider-drain owner is not bound")
 	}
-	captured, err := drains.CaptureProviderAttemptDrainsPostgresTx(ctx, tx, story, capture)
+	captured, err := drains.CaptureProviderAttemptDrainsPostgresTx(ctx, tx, story, effects, capture)
 	if err != nil {
 		return err
 	}
@@ -765,6 +765,7 @@ func captureLifecycleProviderDrainsSQLite(
 	ctx context.Context,
 	tx *sql.Tx,
 	story runtimeauthoractivity.Mutation,
+	effects *privaterunforkrevision.Effects,
 	drains ProviderAttemptDrainSQLiteCapturer,
 	req runtimemanager.AgentLifecycleTransition,
 	previous lifecycleCell,
@@ -778,7 +779,7 @@ func captureLifecycleProviderDrainsSQLite(
 	if drains == nil {
 		return fmt.Errorf("agent lifecycle SQLite provider-drain owner is not bound")
 	}
-	captured, err := drains.CaptureProviderAttemptDrainsSQLiteTx(ctx, tx, story, capture)
+	captured, err := drains.CaptureProviderAttemptDrainsSQLiteTx(ctx, tx, story, effects, capture)
 	if err != nil {
 		return err
 	}

@@ -352,14 +352,11 @@ func (s *EffectPostgresOwner) ProjectCompletionConversation(ctx context.Context,
 			return fmt.Errorf("completion continuation has invalid projection phase %q", locked.phase)
 		}
 		if projection.Memory.Enabled {
-			if err := declareAgentSessionProjectionEffects(effects, projection.Identity.RunID); err != nil {
-				return err
-			}
 			record, err := completionConversationRecord(projection)
 			if err != nil {
 				return err
 			}
-			if err := s.llm.ProjectCompletionConversationTx(txctx, tx, record, projection.ExpectedTurnCount); err != nil {
+			if err := s.llm.ProjectCompletionConversationTx(txctx, tx, effects, record, projection.ExpectedTurnCount); err != nil {
 				return err
 			}
 		}
@@ -385,14 +382,11 @@ func (s *EffectSQLiteOwner) ProjectCompletionConversation(ctx context.Context, a
 		}
 		now := time.Now().UTC()
 		if projection.Memory.Enabled {
-			if err := declareAgentSessionProjectionEffects(effects, projection.Identity.RunID); err != nil {
-				return err
-			}
 			record, err := completionConversationRecord(projection)
 			if err != nil {
 				return err
 			}
-			if err := s.llm.ProjectCompletionConversationTx(txctx, tx, record, projection.ExpectedTurnCount, now); err != nil {
+			if err := s.llm.ProjectCompletionConversationTx(txctx, tx, effects, record, projection.ExpectedTurnCount, now); err != nil {
 				return err
 			}
 		}

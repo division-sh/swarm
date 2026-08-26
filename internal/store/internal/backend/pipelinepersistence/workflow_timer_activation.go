@@ -163,6 +163,7 @@ func commitWorkflowTimerReconciliation(
 	decisions workflowDecisionLifecycleTxOwner,
 	genericSchedules GenericScheduleTxOwner,
 	postgres bool,
+	effects *revisionEffects,
 	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error,
 	reserve func(context.Context) (*runLifecycleCandidateHandoffReservation, error),
 	prepare func(*runLifecycleCandidateHandoffReservation, runtimerunlifecycle.CandidateRequestResult) error,
@@ -180,7 +181,7 @@ func commitWorkflowTimerReconciliation(
 	var result runtimepipeline.CommittedWorkflowLifecycleMutation
 	err = run(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 		var err error
-		result, err = commitWorkflowEngineLifecycle(txctx, tx, runtimeAuthorActivityMutation(story), decisions, genericSchedules, postgres, command.Plan)
+		result, err = commitWorkflowEngineLifecycle(txctx, tx, runtimeAuthorActivityMutation(story), decisions, genericSchedules, postgres, effects, command.Plan)
 		if err != nil {
 			return err
 		}
@@ -207,10 +208,7 @@ func commitWorkflowTimerReconciliation(
 
 func (s *PipelinePostgresOwner) CommitWorkflowTimerReconciliation(ctx context.Context, command runtimepipeline.WorkflowTimerReconciliationCommand) (runtimepipeline.CommittedWorkflowLifecycleMutation, error) {
 	effects := newRevisionEffects()
-	if err := addTimerRevisionEffects(effects, command.RunID); err != nil {
-		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
-	}
-	return commitWorkflowTimerReconciliation(ctx, s.DecisionPostgresOwner, s.genericScheduleTxOwner(), true, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+	return commitWorkflowTimerReconciliation(ctx, s.DecisionPostgresOwner, s.genericScheduleTxOwner(), true, effects, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 		return s.runPrivateAuthorActivityMutation(ctx, effects, fn)
 	}, reserveRunLifecycleCandidateHandoff,
 		func(reservation *runLifecycleCandidateHandoffReservation, result runtimerunlifecycle.CandidateRequestResult) error {
@@ -223,10 +221,7 @@ func (s *PipelinePostgresOwner) CommitWorkflowTimerReconciliation(ctx context.Co
 
 func (s *PipelineSQLiteOwner) CommitWorkflowTimerReconciliation(ctx context.Context, command runtimepipeline.WorkflowTimerReconciliationCommand) (runtimepipeline.CommittedWorkflowLifecycleMutation, error) {
 	effects := newRevisionEffects()
-	if err := addTimerRevisionEffects(effects, command.RunID); err != nil {
-		return runtimepipeline.CommittedWorkflowLifecycleMutation{}, err
-	}
-	return commitWorkflowTimerReconciliation(ctx, s.DecisionSQLiteOwner, s.genericScheduleTxOwner(), false,
+	return commitWorkflowTimerReconciliation(ctx, s.DecisionSQLiteOwner, s.genericScheduleTxOwner(), false, effects,
 		func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 			return s.runPrivateAuthorActivityMutation(ctx, "sqlite workflow timer reconciliation", effects, fn)
 		}, reserveRunLifecycleCandidateHandoff,

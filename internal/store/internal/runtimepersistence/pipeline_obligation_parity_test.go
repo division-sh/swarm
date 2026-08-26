@@ -18,6 +18,7 @@ import (
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
+	runforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
@@ -141,6 +142,7 @@ func provePipelineExactPayloadRecovery(
 	if _, err := selected.PipelineObligations().Settle(ctx, work.Claim, runtimepipelineobligation.Acknowledged("processed")); err != nil {
 		t.Fatalf("settle recovery event: %v", err)
 	}
+	requireCompleteRunForkRevision(t, ctx, fixture, runID)
 }
 
 func provePipelineCommittedSettlementCleanupOutcome(
@@ -513,6 +515,7 @@ func provePipelineDecisionRouteDispositions(
 	if err := owner.MarkDecisionProcessed(ctx, processed.Claim); err != nil {
 		t.Fatalf("MarkDecisionProcessed: %v", err)
 	}
+	requireCompleteRunForkRevision(t, ctx, fixture, runID)
 	pendingSummary, err := owner.SummarizeRun(ctx, runID)
 	if err != nil || pendingSummary.Acknowledged != 1 || pendingSummary.Deferred != 1 ||
 		pendingSummary.ProcessedDeferred != 1 || pendingSummary.BlocksCompletion() || !pendingSummary.HasOpenWork() {
@@ -521,6 +524,7 @@ func provePipelineDecisionRouteDispositions(
 	if _, err := owner.Settle(ctx, processed.Claim, runtimepipelineobligation.Acknowledged("decision_route_converged")); err != nil {
 		t.Fatalf("complete processed decision route: %v", err)
 	}
+	requireCompleteRunForkRevision(t, ctx, fixture, runID)
 	if status := readDecisionRouteStatus(t, ctx, fixture, processedID); status != "completed" {
 		t.Fatalf("processed decision route status = %q, want completed", status)
 	}
@@ -534,6 +538,7 @@ func provePipelineDecisionRouteDispositions(
 	if _, err := owner.Settle(ctx, quarantined.Claim, runtimepipelineobligation.Quarantined("invalid_decision", nil)); err != nil {
 		t.Fatalf("quarantine decision route: %v", err)
 	}
+	requireCompleteRunForkRevision(t, ctx, fixture, runID)
 	if status := readDecisionRouteStatus(t, ctx, fixture, quarantineID); status != "quarantined" {
 		t.Fatalf("quarantined decision route status = %q", status)
 	}
@@ -611,13 +616,21 @@ func terminalizePipelineRunForTest(
 	var err error
 	switch store := selected.(type) {
 	case *PostgresStore:
+		effects := runforkrevision.NewEffects()
 		err = store.runPostgresRuntimeMutation(ctx, func(txctx context.Context, tx *sql.Tx) error {
-			count, err = store.TerminalizeRunTx(txctx, tx, runID, disposition, at)
+			count, err = store.TerminalizeRunTx(txctx, tx, effects, runID, disposition, at)
+			if err == nil {
+				_, err = runforkrevision.FinalizePostgres(txctx, tx, effects)
+			}
 			return err
 		})
 	case *SQLiteRuntimeStore:
+		effects := runforkrevision.NewEffects()
 		err = store.runRuntimeMutation(ctx, "sqlite pipeline terminalization fixture", func(txctx context.Context, tx *sql.Tx) error {
-			count, err = store.TerminalizeRunTx(txctx, tx, runID, disposition, at)
+			count, err = store.TerminalizeRunTx(txctx, tx, effects, runID, disposition, at)
+			if err == nil {
+				_, err = runforkrevision.FinalizeSQLite(txctx, tx, effects)
+			}
 			return err
 		})
 	default:

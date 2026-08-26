@@ -20,6 +20,7 @@ type postgresRunLifecycleMutation struct {
 	store   *RunLifecyclePostgresOwner
 	tx      *sql.Tx
 	story   runtimeauthoractivity.Mutation
+	effects *privaterunforkrevision.Effects
 	handoff *CandidateHandoff
 }
 
@@ -27,6 +28,7 @@ type sqliteRunLifecycleMutation struct {
 	store   *RunLifecycleSQLiteOwner
 	tx      *sql.Tx
 	story   runtimeauthoractivity.Mutation
+	effects *privaterunforkrevision.Effects
 	handoff *CandidateHandoff
 }
 
@@ -40,12 +42,12 @@ type TransactionMutation interface {
 	SyncCounters(context.Context, string) error
 }
 
-func NewPostgresTransactionMutation(owner *RunLifecyclePostgresOwner, tx *sql.Tx, story runtimeauthoractivity.Mutation) TransactionMutation {
-	return postgresRunLifecycleMutation{store: owner, tx: tx, story: story}
+func NewPostgresTransactionMutation(owner *RunLifecyclePostgresOwner, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects) TransactionMutation {
+	return postgresRunLifecycleMutation{store: owner, tx: tx, story: story, effects: effects}
 }
 
-func NewSQLiteTransactionMutation(owner *RunLifecycleSQLiteOwner, tx *sql.Tx, story runtimeauthoractivity.Mutation) TransactionMutation {
-	return sqliteRunLifecycleMutation{store: owner, tx: tx, story: story}
+func NewSQLiteTransactionMutation(owner *RunLifecycleSQLiteOwner, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects) TransactionMutation {
+	return sqliteRunLifecycleMutation{store: owner, tx: tx, story: story, effects: effects}
 }
 
 type activeRunSourceOwnerFunc func(context.Context, string) (runtimecorrelation.BundleSourceFact, error)
@@ -122,16 +124,16 @@ func (s *RunLifecycleSQLiteOwner) TransitionActiveTx(ctx context.Context, tx *sq
 	return (sqliteRunLifecycleMutation{store: s, tx: tx, story: story, handoff: handoff}).TransitionActive(ctx, request)
 }
 
-func (s *RunLifecyclePostgresOwner) MarkTerminalTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, request runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return (postgresRunLifecycleMutation{store: s, tx: tx, story: story}).MarkTerminal(ctx, request)
+func (s *RunLifecyclePostgresOwner) MarkTerminalTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, request runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return (postgresRunLifecycleMutation{store: s, tx: tx, story: story, effects: effects}).MarkTerminal(ctx, request)
 }
 
-func (s *RunLifecycleSQLiteOwner) MarkTerminalTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, request runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return (sqliteRunLifecycleMutation{store: s, tx: tx, story: story}).MarkTerminal(ctx, request)
+func (s *RunLifecycleSQLiteOwner) MarkTerminalTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, request runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return (sqliteRunLifecycleMutation{store: s, tx: tx, story: story, effects: effects}).MarkTerminal(ctx, request)
 }
 
-func (s *RunLifecyclePostgresOwner) ForkSourceTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, request runtimerunlifecycle.ForkSourceRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return (postgresRunLifecycleMutation{store: s, tx: tx, story: story}).ForkSource(ctx, request)
+func (s *RunLifecyclePostgresOwner) ForkSourceTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, request runtimerunlifecycle.ForkSourceRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return (postgresRunLifecycleMutation{store: s, tx: tx, story: story, effects: effects}).ForkSource(ctx, request)
 }
 
 func (s *RunLifecyclePostgresOwner) ReviseSourceTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, handoff *CandidateHandoff, request runtimerunlifecycle.SourceRevisionRequest) (runtimerunlifecycle.MutationDisposition, error) {
@@ -165,10 +167,11 @@ func runPostgresLifecycleOperation[T any](
 ) (T, error) {
 	return WithCandidateHandoffResult(ctx, func(handoff *CandidateHandoff) (T, error) {
 		var result T
-		err := store.runPrivateAuthorActivityMutation(ctx, privaterunforkrevision.NewEffects(), func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		effects := privaterunforkrevision.NewEffects()
+		err := store.runPrivateAuthorActivityMutation(ctx, effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 			var err error
 			result, err = fn(txctx, postgresRunLifecycleMutation{
-				store: store, tx: tx, story: runtimeAuthorActivityMutation(story), handoff: handoff,
+				store: store, tx: tx, story: runtimeAuthorActivityMutation(story), effects: effects, handoff: handoff,
 			})
 			return err
 		})
@@ -183,10 +186,11 @@ func runSQLiteLifecycleOperation[T any](
 ) (T, error) {
 	return WithCandidateHandoffResult(ctx, func(handoff *CandidateHandoff) (T, error) {
 		var result T
-		err := store.runPrivateAuthorActivityMutation(ctx, "sqlite run lifecycle operation", privaterunforkrevision.NewEffects(), func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+		effects := privaterunforkrevision.NewEffects()
+		err := store.runPrivateAuthorActivityMutation(ctx, "sqlite run lifecycle operation", effects, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
 			var err error
 			result, err = fn(txctx, sqliteRunLifecycleMutation{
-				store: store, tx: tx, story: runtimeAuthorActivityMutation(story), handoff: handoff,
+				store: store, tx: tx, story: runtimeAuthorActivityMutation(story), effects: effects, handoff: handoff,
 			})
 			return err
 		})
@@ -878,7 +882,7 @@ func (m postgresRunLifecycleMutation) MarkTerminal(
 	if m.store == nil {
 		return runtimerunlifecycle.Snapshot{}, "", errors.New("PostgreSQL terminal run lifecycle transition requires selected store")
 	}
-	return m.store.markRunTerminalTx(ctx, m.tx, m.story, request)
+	return m.store.markRunTerminalTx(ctx, m.tx, m.story, m.effects, request)
 }
 
 func (m sqliteRunLifecycleMutation) MarkTerminal(
@@ -888,7 +892,7 @@ func (m sqliteRunLifecycleMutation) MarkTerminal(
 	if m.store == nil {
 		return runtimerunlifecycle.Snapshot{}, "", errors.New("SQLite terminal run lifecycle transition requires selected store")
 	}
-	return m.store.markRunTerminalTx(ctx, m.tx, m.story, request)
+	return m.store.markRunTerminalTx(ctx, m.tx, m.story, m.effects, request)
 }
 
 func (m postgresRunLifecycleMutation) ForkSource(
@@ -898,7 +902,7 @@ func (m postgresRunLifecycleMutation) ForkSource(
 	if m.store == nil {
 		return runtimerunlifecycle.Snapshot{}, "", errors.New("PostgreSQL fork source lifecycle transition requires selected store")
 	}
-	return m.store.markForkSourceTx(ctx, m.tx, m.story, request)
+	return m.store.markForkSourceTx(ctx, m.tx, m.story, m.effects, request)
 }
 
 func (m sqliteRunLifecycleMutation) ForkSource(

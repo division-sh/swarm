@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
 
@@ -46,7 +47,7 @@ func TestDirectiveEventPersistsTypedNoSubscriberByDesign(t *testing.T) {
 				}
 				switch selected := store.(type) {
 				case *PostgresStore:
-					_, err = selected.eventPostgresOwner.CommitDirectiveEventTx(txctx, tx, story, admitted)
+					_, err = selected.eventPostgresOwner.CommitDirectiveEventTx(txctx, tx, story, privaterunforkrevision.NewEffects(), admitted)
 					if err == nil {
 						var restored events.AdmittedEvent
 						var found bool
@@ -56,7 +57,7 @@ func TestDirectiveEventPersistsTypedNoSubscriberByDesign(t *testing.T) {
 						}
 					}
 				case *SQLiteRuntimeStore:
-					_, err = selected.eventSQLiteOwner.CommitDirectiveEventTx(txctx, tx, story, admitted)
+					_, err = selected.eventSQLiteOwner.CommitDirectiveEventTx(txctx, tx, story, privaterunforkrevision.NewEffects(), admitted)
 					if err == nil {
 						var restored events.AdmittedEvent
 						var found bool

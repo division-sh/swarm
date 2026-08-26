@@ -23,6 +23,7 @@ import (
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	"github.com/division-sh/swarm/internal/store/internal/backend/eventrecord"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storescenarioexecution "github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
 	"github.com/google/uuid"
 )
@@ -118,7 +119,7 @@ func (s *EventPostgresOwner) validateEventPayload(ctx context.Context, eventType
 	return nil
 }
 
-func (s *EventPostgresOwner) appendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
+func (s *EventPostgresOwner) appendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *revisionEffects, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
@@ -126,11 +127,8 @@ func (s *EventPostgresOwner) appendAdmittedEventTxOutcome(ctx context.Context, t
 		outcome := runtimebus.EventAppendOutcomeUnknown
 		err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *revisionEffects) error {
 			var err error
-			outcome, err = s.appendAdmittedEventTxOutcome(txctx, tx, runtimeAuthorActivityMutation(story), admitted, settlement)
-			if err != nil {
-				return err
-			}
-			return declareEventCommitEffects(effects, admitted.Event().RunID())
+			outcome, err = s.appendAdmittedEventTxOutcome(txctx, tx, runtimeAuthorActivityMutation(story), effects, admitted, settlement)
+			return err
 		})
 		return outcome, err
 	}
@@ -140,11 +138,19 @@ func (s *EventPostgresOwner) appendAdmittedEventTxOutcome(ctx context.Context, t
 		outcome, err = s.appendEventSpec(ctx, tx, story, admitted, settlement)
 		return err
 	})
-	return outcome, err
+	if err != nil {
+		return runtimebus.EventAppendOutcomeUnknown, err
+	}
+	if runID := strings.TrimSpace(admitted.Event().RunID()); runID != "" {
+		if err := effects.Add(runID, privaterunforkrevision.FamilyEvents); err != nil {
+			return runtimebus.EventAppendOutcomeUnknown, err
+		}
+	}
+	return outcome, nil
 }
 
-func (s *EventPostgresOwner) AppendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
-	return s.appendAdmittedEventTxOutcome(ctx, tx, story, admitted, settlement)
+func (s *EventPostgresOwner) AppendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *revisionEffects, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
+	return s.appendAdmittedEventTxOutcome(ctx, tx, story, effects, admitted, settlement)
 }
 
 func sanitizeOptionalUUID(raw string) string {

@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	storeagent "github.com/division-sh/swarm/internal/store/internal/backend/agentpersistence"
+	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 )
 
@@ -41,13 +42,16 @@ func ensureSQLiteStatelessAuditTx(ctx context.Context, tx *sql.Tx, rec runtimell
 	return nil
 }
 
-func (s *LLMSQLiteOwner) EnsureCompletionTurnMemoryTx(ctx context.Context, tx *sql.Tx, rec runtimellm.AgentTurnRecord, now time.Time) error {
+func (s *LLMSQLiteOwner) EnsureCompletionTurnMemoryTx(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, rec runtimellm.AgentTurnRecord, now time.Time) error {
 	plan, identity, err := validateTurnMemory(rec)
 	if err != nil {
 		return err
 	}
 	if !plan.Enabled {
-		return ensureSQLiteStatelessAuditTx(ctx, tx, rec, plan, identity, now)
+		if err := ensureSQLiteStatelessAuditTx(ctx, tx, rec, plan, identity, now); err != nil {
+			return err
+		}
+		return effects.Add(identity.RunID, runforkrevision.FamilyAgentConversationAudits)
 	}
 	fields, err := storeagent.IdentityFields(identity.Agent)
 	if err != nil {
@@ -114,7 +118,7 @@ func (s *LLMSQLiteOwner) UpsertConversation(ctx context.Context, rec runtimellm.
 	})
 }
 
-func (s *LLMSQLiteOwner) ProjectCompletionConversationTx(ctx context.Context, tx *sql.Tx, rec runtimellm.ConversationRecord, expectedTurnCount int, now time.Time) error {
+func (s *LLMSQLiteOwner) ProjectCompletionConversationTx(ctx context.Context, tx *sql.Tx, effects *runforkrevision.Effects, rec runtimellm.ConversationRecord, expectedTurnCount int, now time.Time) error {
 	plan, identity, err := validateConversationMemory(rec)
 	if err != nil {
 		return err
@@ -151,7 +155,7 @@ func (s *LLMSQLiteOwner) ProjectCompletionConversationTx(ctx context.Context, tx
 	if rows, _ := res.RowsAffected(); rows != 1 {
 		return fmt.Errorf("sqlite completion conversation projection turn conflict: run=%s agent=%s session=%s expected_turn=%d", identity.RunID, identity.AgentID(), rec.SessionID, expectedTurnCount)
 	}
-	return nil
+	return effects.Add(identity.RunID, runforkrevision.FamilyAgentSessions)
 }
 
 func (s *LLMSQLiteOwner) LoadActiveConversation(ctx context.Context, identity agentmemory.Identity) (runtimellm.ConversationRecord, bool, error) {

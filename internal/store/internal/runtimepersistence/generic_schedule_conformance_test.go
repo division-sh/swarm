@@ -20,6 +20,7 @@ import (
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
+	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -484,10 +485,10 @@ func admitGenericScheduleInRollbackTransaction(
 	switch store := selected.(type) {
 	case *PostgresStore:
 		store.genericSchedulePostgresOwner.SetNowFnForTest(func() time.Time { return now })
-		return store.genericSchedulePostgresOwner.AdmitTx(ctx, tx, command)
+		return store.genericSchedulePostgresOwner.AdmitTx(ctx, tx, privaterunforkrevision.NewEffects(), command)
 	case *SQLiteRuntimeStore:
 		store.genericScheduleSQLiteOwner.SetNowFnForTest(func() time.Time { return now })
-		return store.genericScheduleSQLiteOwner.AdmitTx(ctx, tx, command)
+		return store.genericScheduleSQLiteOwner.AdmitTx(ctx, tx, privaterunforkrevision.NewEffects(), command)
 	default:
 		return runtimegenericschedule.AdmissionResult{}, fmt.Errorf("unsupported selected store %T", selected)
 	}

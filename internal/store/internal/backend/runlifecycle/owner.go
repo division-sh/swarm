@@ -38,12 +38,12 @@ type RunLifecycleSQLiteOwner struct {
 }
 
 type pipelineTerminalizer interface {
-	TerminalizeRunTx(context.Context, *sql.Tx, string, runtimepipelineobligation.Disposition, time.Time) (int, error)
+	TerminalizeRunTx(context.Context, *sql.Tx, *privaterunforkrevision.Effects, string, runtimepipelineobligation.Disposition, time.Time) (int, error)
 	SummarizeRunTx(context.Context, *sql.Tx, string) (runtimepipelineobligation.RunSummary, error)
 }
 
 type decisionCardTerminalizer interface {
-	SupersedeRunTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, string, string, time.Time, bool) error
+	SupersedeRunTx(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, *privaterunforkrevision.Effects, string, string, time.Time, bool) error
 }
 
 func (s *RunLifecyclePostgresOwner) BindPipeline(owner pipelineTerminalizer) error {
@@ -209,21 +209,6 @@ func (s *RunLifecycleSQLiteOwner) runPrivateAuthorActivityMutation(
 		}
 		return story.Finalize(txctx)
 	})
-}
-
-func runTerminationRevisionEffects(runIDs ...string) (*privaterunforkrevision.Effects, error) {
-	effects := privaterunforkrevision.NewEffects()
-	for _, runID := range runIDs {
-		if err := effects.Add(runID,
-			privaterunforkrevision.FamilyEventDeliveries,
-			privaterunforkrevision.FamilyEventReceipts,
-			privaterunforkrevision.FamilyAgentSessions,
-			privaterunforkrevision.FamilyTimers,
-		); err != nil {
-			return nil, err
-		}
-	}
-	return effects, nil
 }
 
 func runtimeAuthorActivityMutation(story *privateauthoractivity.Mutation) runtimeauthoractivity.Mutation {

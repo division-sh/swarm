@@ -168,6 +168,19 @@ func TestRunForkSourceFreezeCommitsCoupledLifecycleDecisionAndActivityOutcome(t 
 	if changeCount != 3 || activityCount != 2 {
 		t.Fatalf("change/activity counts = %d/%d, want 3/2", changeCount, activityCount)
 	}
+	validationTx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer validationTx.Rollback()
+	for _, runID := range []string{lineage.SourceRunID, lineage.ForkRunID} {
+		if err := privaterunforkrevision.ValidateCompletePostgres(ctx, validationTx, runID); err != nil {
+			t.Fatalf("validate source-freeze revision %s: %v", runID, err)
+		}
+	}
+	if err := validationTx.Commit(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestRunForkSourceFreezeRollbackLeavesNoPartialOutcome(t *testing.T) {
@@ -499,10 +512,11 @@ func commitRunForkSourceFreezeForTest(ctx context.Context, store *PostgresStore,
 		return err
 	}
 	defer handoff.Rollback()
-	if err := store.runForkPostgresOwner.ApplyRunForkSourceFreezeTx(ctx, tx, story, lineage, now, confirmed, handoff); err != nil {
+	effects := privaterunforkrevision.NewEffects()
+	if err := store.runForkPostgresOwner.ApplyRunForkSourceFreezeTx(ctx, tx, story, effects, lineage, now, confirmed, handoff); err != nil {
 		return err
 	}
-	if err := commitRunForkAuthorActivityTransaction(ctx, tx, story, privaterunforkrevision.NewEffects()); err != nil {
+	if err := commitRunForkAuthorActivityTransaction(ctx, tx, story, effects); err != nil {
 		return err
 	}
 	return handoff.Commit()

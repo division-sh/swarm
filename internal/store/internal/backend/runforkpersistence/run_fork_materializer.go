@@ -119,6 +119,7 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 	if err != nil {
 		return runfork.RunForkMaterialization{}, err
 	}
+	effects := privaterunforkrevision.NewEffects()
 	now := time.Now().UTC()
 	ctx = runtimecorrelation.WithBundleSourceFact(ctx, identity.BundleSourceFact)
 	forkScope, err := runtimeauthoractivity.BundleScopeForTarget(ctx, identity.BundleSourceFact.BundleHash())
@@ -139,7 +140,7 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 	for _, entity := range plan.Entities {
 		if err := materializeRunForkEntityState(forkCtx, s.DecisionPostgresOwner, tx, story, activeRunSourceOwnerFunc(func(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
 			return s.RunLifecyclePostgresOwner.RequireActiveSourceTx(ctx, tx, runID)
-		}), forkRunID, plan, entity, metadata[entity.EntityID], now); err != nil {
+		}), effects, forkRunID, plan, entity, metadata[entity.EntityID], now); err != nil {
 			return runfork.RunForkMaterialization{}, err
 		}
 	}
@@ -155,10 +156,6 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 			return runfork.RunForkMaterialization{}, err
 		}
 		selectedContractBinding = &binding
-	}
-	effects := privaterunforkrevision.NewEffects()
-	if err := effects.Add(forkRunID, privaterunforkrevision.FamilyEntityMutations, privaterunforkrevision.FamilyEntityMetadata); err != nil {
-		return runfork.RunForkMaterialization{}, err
 	}
 	if err := commitRunForkAuthorActivityTransaction(ctx, tx, story, effects); err != nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("commit fork materialization: %w", err)
@@ -378,7 +375,7 @@ func loadRunForkEntityMetadata(plan runfork.RunForkPlan) (map[string]runForkEnti
 	return out, nil
 }
 
-func materializeRunForkEntityState(ctx context.Context, decisions *storedecision.DecisionPostgresOwner, tx *sql.Tx, story runtimeauthoractivity.Mutation, runLifecycle privatemutationlog.ActiveRunSourceOwner, forkRunID string, plan runfork.RunForkPlan, entity runfork.RunForkEntityState, meta runForkEntityMetadata, now time.Time) error {
+func materializeRunForkEntityState(ctx context.Context, decisions *storedecision.DecisionPostgresOwner, tx *sql.Tx, story runtimeauthoractivity.Mutation, runLifecycle privatemutationlog.ActiveRunSourceOwner, effects *privaterunforkrevision.Effects, forkRunID string, plan runfork.RunForkPlan, entity runfork.RunForkEntityState, meta runForkEntityMetadata, now time.Time) error {
 	entityID := strings.TrimSpace(entity.EntityID)
 	currentState := strings.TrimSpace(entity.CurrentState)
 	if currentState == "" {
@@ -426,13 +423,16 @@ func materializeRunForkEntityState(ctx context.Context, decisions *storedecision
 		currentState, gatesJSON, fieldsJSON, bookkeepingJSON, accJSON, entity.EnteredStateAt, now); err != nil {
 		return fmt.Errorf("insert fork entity_state %s: %w", entityID, err)
 	}
+	if err := effects.Add(forkRunID, privaterunforkrevision.FamilyEntityMetadata); err != nil {
+		return err
+	}
 	if err := materializeRunForkDecisionCards(ctx, decisions, tx, story, forkRunID, entityID, gateBindings, now); err != nil {
 		return err
 	}
 	if err := materializeRunForkProposedEffectCards(ctx, decisions, tx, story, plan.SourceRunID, forkRunID, entityID, plan.ForkPoint, now); err != nil {
 		return err
 	}
-	return privatemutationlog.InsertEntityStateDiffWithStory(ctx, tx, runLifecycle, story, entityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
+	return privatemutationlog.InsertEntityStateDiffWithStory(ctx, tx, runLifecycle, story, effects, entityID, runtimemutationlog.EntityStateProjection{}, runtimemutationlog.EntityStateProjection{
 		CurrentState: currentState,
 		Fields:       entity.Fields,
 		Bookkeeping:  entity.Bookkeeping,

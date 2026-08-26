@@ -24,6 +24,7 @@ func commitHumanTaskExpirations(
 	store eventCommitTxStore,
 	decisions humanTaskExpiryTxOwner,
 	postgres bool,
+	effects *revisionEffects,
 	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error,
 	command runtimepipeline.HumanTaskExpiryCommand,
 ) (runtimepipeline.CommittedHumanTaskExpiry, error) {
@@ -51,7 +52,7 @@ func commitHumanTaskExpirations(
 			if strings.TrimSpace(expired[index].ID()) != strings.TrimSpace(plan.DurablePublicationEventID()) {
 				return fmt.Errorf("human-task expiry authority changed before commit at index %d", index)
 			}
-			committed, err := store.commitPublicationTx(txctx, tx, story, plan.PublicationCommand(), nil)
+			committed, err := store.commitPublicationTx(txctx, tx, story, effects, plan.PublicationCommand(), nil)
 			if err != nil {
 				return fmt.Errorf("commit human-task expiry publication %d: %w", index, err)
 			}
@@ -74,24 +75,14 @@ func commitHumanTaskExpirations(
 
 func (s *PipelinePostgresOwner) CommitHumanTaskExpirations(ctx context.Context, command runtimepipeline.HumanTaskExpiryCommand) (runtimepipeline.CommittedHumanTaskExpiry, error) {
 	effects := newRevisionEffects()
-	for _, publication := range command.Publications {
-		if err := addPublicationRevisionEffects(effects, publication); err != nil {
-			return runtimepipeline.CommittedHumanTaskExpiry{}, err
-		}
-	}
-	return commitHumanTaskExpirations(ctx, s, s.DecisionPostgresOwner, true, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+	return commitHumanTaskExpirations(ctx, s, s.DecisionPostgresOwner, true, effects, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 		return s.runPrivateAuthorActivityMutation(ctx, effects, fn)
 	}, command)
 }
 
 func (s *PipelineSQLiteOwner) CommitHumanTaskExpirations(ctx context.Context, command runtimepipeline.HumanTaskExpiryCommand) (runtimepipeline.CommittedHumanTaskExpiry, error) {
 	effects := newRevisionEffects()
-	for _, publication := range command.Publications {
-		if err := addPublicationRevisionEffects(effects, publication); err != nil {
-			return runtimepipeline.CommittedHumanTaskExpiry{}, err
-		}
-	}
-	return commitHumanTaskExpirations(ctx, s, s.DecisionSQLiteOwner, false, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+	return commitHumanTaskExpirations(ctx, s, s.DecisionSQLiteOwner, false, effects, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 		return s.runPrivateAuthorActivityMutation(ctx, "sqlite human-task expiry", effects, fn)
 	}, command)
 }

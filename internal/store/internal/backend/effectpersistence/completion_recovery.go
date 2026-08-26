@@ -82,7 +82,7 @@ type completionRecoveryAuthorityEvidence struct {
 
 type CompletionRecoveryAuthorityEvidence = completionRecoveryAuthorityEvidence
 
-func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *storellm.LLMPostgresOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, story *privateauthoractivity.Mutation, now time.Time) (runtimeeffects.RecoverySummary, error) {
+func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *storellm.LLMPostgresOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, story *privateauthoractivity.Mutation, effects *revisionEffects, now time.Time) (runtimeeffects.RecoverySummary, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT o.operation_id::text,a.attempt_id::text,o.authority_kind,o.authority_id,o.authority_evidence::text,o.agent_frame_bytes,
 		       o.execution_mode,a.execution_mode,
@@ -131,10 +131,10 @@ func reconcileCompletionAttemptsPostgres(ctx context.Context, tx *sql.Tx, llm *s
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, err
 	}
-	return reconcileCompletionAttempts(ctx, tx, llm, nil, delivery, directives, story, true, attempts, now)
+	return reconcileCompletionAttempts(ctx, tx, llm, nil, delivery, directives, story, effects, true, attempts, now)
 }
 
-func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, story *privateauthoractivity.Mutation, now time.Time) (runtimeeffects.RecoverySummary, error) {
+func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, story *privateauthoractivity.Mutation, effects *revisionEffects, now time.Time) (runtimeeffects.RecoverySummary, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT o.operation_id,a.attempt_id,o.authority_kind,o.authority_id,o.authority_evidence,o.agent_frame_bytes,
 		       o.execution_mode,a.execution_mode,
@@ -182,7 +182,7 @@ func reconcileCompletionAttemptsSQLite(ctx context.Context, tx *sql.Tx, llm *sto
 	if err != nil {
 		return runtimeeffects.RecoverySummary{}, err
 	}
-	return reconcileCompletionAttempts(ctx, tx, nil, llm, delivery, directives, story, false, attempts, now)
+	return reconcileCompletionAttempts(ctx, tx, nil, llm, delivery, directives, story, effects, false, attempts, now)
 }
 
 func scanCompletionRecoveryAttempts(rows *sql.Rows) ([]completionRecoveryAttempt, error) {
@@ -216,7 +216,7 @@ func scanCompletionRecoveryAttempts(rows *sql.Rows) ([]completionRecoveryAttempt
 	return attempts, nil
 }
 
-func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *storellm.LLMPostgresOwner, sqliteLLM *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, story *privateauthoractivity.Mutation, postgres bool, attempts []completionRecoveryAttempt, now time.Time) (runtimeeffects.RecoverySummary, error) {
+func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *storellm.LLMPostgresOwner, sqliteLLM *storellm.LLMSQLiteOwner, delivery providerDrainDeliveryOwner, directives providerDrainDirectiveOwner, story *privateauthoractivity.Mutation, effects *revisionEffects, postgres bool, attempts []completionRecoveryAttempt, now time.Time) (runtimeeffects.RecoverySummary, error) {
 	var summary runtimeeffects.RecoverySummary
 	for _, recovered := range attempts {
 		prelaunch := recovered.State == string(runtimeeffects.StateAuthorized)
@@ -263,7 +263,7 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *s
 		projectCurrent := resolution.Kind == completionSettlementCurrent
 		if postgres {
 			if !prelaunch {
-				if err := insertCompletionTargetPostgres(ctx, tx, postgresLLM, attempt, settlement, projectCurrent); err != nil {
+				if err := insertCompletionTargetPostgres(ctx, tx, postgresLLM, effects, attempt, settlement, projectCurrent); err != nil {
 					return runtimeeffects.RecoverySummary{}, err
 				}
 				if err := postgresLLM.RecordCompletionTurnAuthorActivityTx(ctx, story, attempt, settlement); err != nil {
@@ -282,7 +282,7 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *s
 			}
 		} else {
 			if !prelaunch {
-				if err := insertCompletionTargetSQLite(ctx, tx, sqliteLLM, attempt, settlement, projectCurrent); err != nil {
+				if err := insertCompletionTargetSQLite(ctx, tx, sqliteLLM, effects, attempt, settlement, projectCurrent); err != nil {
 					return runtimeeffects.RecoverySummary{}, err
 				}
 				if err := sqliteLLM.RecordCompletionTurnAuthorActivityTx(ctx, story, attempt, settlement); err != nil {
@@ -302,10 +302,10 @@ func reconcileCompletionAttempts(ctx context.Context, tx *sql.Tx, postgresLLM *s
 		}
 		if attempt.Authority.Kind == runtimeeffects.AuthorityNormalAgent {
 			if resolution.Kind == completionSettlementDrained {
-				if _, err := settleProviderDrainRecovery(ctx, tx, story, attempt, settlement, resolution.Drain, resolution.Expired, postgres, delivery, directives); err != nil {
+				if _, err := settleProviderDrainRecovery(ctx, tx, story, effects, attempt, settlement, resolution.Drain, resolution.Expired, postgres, delivery, directives); err != nil {
 					return runtimeeffects.RecoverySummary{}, err
 				}
-			} else if err := settleProviderDrainOriginRecovery(ctx, tx, story, settlement, attempt.Origin, delivery, directives); err != nil {
+			} else if err := settleProviderDrainOriginRecovery(ctx, tx, story, effects, settlement, attempt.Origin, delivery, directives); err != nil {
 				return runtimeeffects.RecoverySummary{}, err
 			}
 		}

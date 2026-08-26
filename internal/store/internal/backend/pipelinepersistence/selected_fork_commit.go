@@ -20,16 +20,13 @@ func (s *PipelinePostgresOwner) CommitSelectedForkEvent(ctx context.Context, req
 	}
 	defer state.operationMu.Unlock()
 	effects := newRevisionEffects()
-	if err := addEventCommitRevisionEffects(effects, request.Commit.Event.Event().RunID()); err != nil {
-		return runtimebus.CommittedSelectedForkEvent{}, err
-	}
 	var result runtimebus.CommittedSelectedForkEvent
 	err = state.postgresLease.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
 		if err != nil {
 			return err
 		}
-		result, err = s.selectedFork.CommitSelectedForkTx(txctx, tx, story, request)
+		result, err = s.selectedFork.CommitSelectedForkTx(txctx, tx, story, effects, request)
 		if err != nil {
 			return err
 		}
@@ -51,16 +48,13 @@ func (s *PipelineSQLiteOwner) CommitSelectedForkEvent(ctx context.Context, reque
 	}
 	defer state.operationMu.Unlock()
 	effects := newRevisionEffects()
-	if err := addEventCommitRevisionEffects(effects, request.Commit.Event.Event().RunID()); err != nil {
-		return runtimebus.CommittedSelectedForkEvent{}, err
-	}
 	var result runtimebus.CommittedSelectedForkEvent
 	err = s.backend.RunTransaction(ctx, "sqlite selected-fork event commit", func(txctx context.Context, tx *sql.Tx) error {
 		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
 		if err != nil {
 			return err
 		}
-		result, err = s.selectedFork.CommitSelectedForkTx(txctx, tx, story, request)
+		result, err = s.selectedFork.CommitSelectedForkTx(txctx, tx, story, effects, request)
 		if err != nil {
 			return err
 		}
