@@ -202,7 +202,7 @@ func eventSchemaDeclarationForFlowEvent(bundle *WorkflowContractBundle, flowID, 
 		return EventCatalogEntry{}, "", TypeCatalogDocument{}, false
 	}
 	if bundle.FlowTree.Root == nil {
-		entry, key, ok := bundle.ResolveFlowEventCatalogEntry(flowID, eventType)
+		entry, key, ok := bundle.resolveAuthoredFlowEventCatalogEntry(flowID, eventType)
 		if !ok {
 			if platformEntry, platformKey, platformOK := PlatformEventCatalogEntry(bundle.Platform, eventType); platformOK && len(platformEntry.Payload.Properties) > 0 {
 				return platformEntry, platformKey, TypeCatalogDocument{}, true
@@ -224,7 +224,7 @@ func eventSchemaDeclarationForFlowEvent(bundle *WorkflowContractBundle, flowID, 
 		}
 	}
 
-	entry, key, ok := bundle.ResolveFlowEventCatalogEntry(flowID, eventType)
+	entry, key, ok := bundle.resolveAuthoredFlowEventCatalogEntry(flowID, eventType)
 	if !ok {
 		if platformEntry, platformKey, platformOK := PlatformEventCatalogEntry(bundle.Platform, eventType); platformOK && len(platformEntry.Payload.Properties) > 0 {
 			return platformEntry, platformKey, TypeCatalogDocument{}, true

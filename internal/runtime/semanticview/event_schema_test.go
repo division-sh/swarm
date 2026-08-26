@@ -1,13 +1,35 @@
 package semanticview
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"gopkg.in/yaml.v3"
 )
+
+func TestSemanticSourceEventProofConsumesEffectiveReceiverCarries(t *testing.T) {
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	root := filepath.Join(repoRoot, "examples", "routing", "template-create-minted-key")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := Wrap(bundle)
+
+	flowProof := ResolveFlowEventProof(source, "validator", "validation.requested")
+	if !flowProof.HasSchema || flowProof.Entry.Payload.Properties["validation_case_id"].Type != "uuid" {
+		t.Fatalf("flow proof omitted effective receiver carry: %#v", flowProof)
+	}
+	node := identitytest.ExecutableNode(t, ".", "validator", "validator-node")
+	nodeProof := ResolveExecutableNodeEventProof(source, node, "validation.requested")
+	if !nodeProof.HasSchema || nodeProof.Entry.Payload.Properties["validation_case_id"].Type != "uuid" {
+		t.Fatalf("executable-node proof omitted effective receiver carry: %#v", nodeProof)
+	}
+}
 
 func TestResolveEventSchema_ReportsUnresolvedTypesAfterBundleResolution(t *testing.T) {
 	root := &runtimecontracts.FlowContractView{

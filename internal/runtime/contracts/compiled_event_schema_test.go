@@ -199,6 +199,12 @@ source_scrape:
 	if len(generated) == 0 {
 		t.Fatal("fixture did not materialize generated activity events")
 	}
+	for generatedName, want := range generated {
+		got, key, ok := bundle.ResolveFlowEventCatalogEntry("", generatedName)
+		if !ok || key != generatedName || len(got.Payload.Properties) != len(want.Payload.Properties) {
+			t.Fatalf("generated event effective resolution %q = key:%q ok:%t entry:%#v", generatedName, key, ok, got)
+		}
+	}
 	if len(bundle.Package.ProviderTriggerEvents.Imports) != 1 {
 		t.Fatalf("fixture provider imports = %#v", bundle.Package.ProviderTriggerEvents.Imports)
 	}

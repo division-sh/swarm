@@ -335,18 +335,20 @@ rows:
 
   - id: event.schema_ownership
     ruled: mechanical-ratified
-    paths: "events.<event>, events.<event>.key, events.<event>.<payload_field>, events.<event>.<payload_field>.type?"
-    owners: [yamlsource.Document, admitEventCatalogDocument, admitEventCatalogEntry, admitEventPayloadField, effectiveEventDeclarationForFlowEvent]
+    paths: "events.<event>, events.<event>.key, events.<event>.swarm, events.<event>.<payload_field>, events.<event>.<payload_field>.type?"
+    owners: [yamlsource.Document, admitEventCatalogDocument, admitEventCatalogEntry, admitEventPayloadField, effectiveEventDeclarationForFlowEvent, EffectiveProvenanceLedger]
     information:
       fact: [producer-owned event ID and payload schema]
       derived_projection: [intra-package consumer schema]
       boundary_snapshot: [cross-package consumer schema]
     spelling:
       canonical_candidate: producer_declaration_only_with_compiled_intra_package_projection
-      retired_duplicates: [intra_package_consumer_restatement, nested_payload_block]
+      retired_duplicates: [intra_package_consumer_restatement, nested_payload_block, raw_schema_resolver_consumer, non_field_level_optional_marker]
       distinct_overrides: []
-    f2_bug: "3 intra-package duplicate event declarations disagree instead of consuming one producer projection"
-    corpus: {event_declarations: 38, migrated_consumer_restatements: 16, intra_package_duplicate_declarations: 0, exact_projection_proofs: 13, named_delivery_projection_deltas: 3}
+    f2_bug: "connected receivers could lose producer ownership to unrelated same-name declarations; public/raw consumers omitted delivery projections"
+    corpus: {event_declarations: 38, migrated_consumer_restatements: 16, intra_package_duplicate_declarations: 0, exact_projection_proofs: 13, named_delivery_projection_deltas: 3, adversarial_owner_collisions: 1, closed_optional_type_forms: 6, rejected_optional_marker_positions: 6}
+    effective_consumers: [schema_registry, semantic_flow_proof, semantic_executable_node_proof, emit_lowering, pin_routing, bootverify, instance_source_typing, provider_overlays, operator_publication]
+    provenance: [authored_nested_values, derived_consumer_projection, payload_alias_carries, intrinsic_generated_carries, package_identified_boundary_snapshots]
     divergent_manifestations:
       - fan-in/barrier:operating.report.requested
       - fan-in/stream:operating.report.requested

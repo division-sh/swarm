@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -46,6 +47,57 @@ note: text?
 	}
 }
 
+func TestEventCatalogAdmissionAcceptsExactlyOneFieldLevelOptionalMarkerAcrossTypeForms(t *testing.T) {
+	tests := []struct {
+		name     string
+		field    string
+		wantType string
+	}{
+		{name: "scalar", field: "value: text?", wantType: "text"},
+		{name: "named", field: "value: Customer?", wantType: "Customer"},
+		{name: "list scalar", field: "value: '[text]?'", wantType: "[text]"},
+		{name: "map scalar", field: "value: 'map[text]uuid?'", wantType: "map[text]uuid"},
+		{name: "mapping scalar", field: "value:\n  type: text?", wantType: "text"},
+		{name: "mapping list", field: "value:\n  type: list?\n  of: Customer", wantType: "[Customer]"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			entry, err := admitEventCatalogEntryForTest(t, tc.field)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := entry.Payload.Properties["value"].Type; got != tc.wantType {
+				t.Fatalf("type = %q, want %q", got, tc.wantType)
+			}
+			if slices.Contains(entry.Payload.Required, "value") {
+				t.Fatalf("optional value appears in required fields: %v", entry.Payload.Required)
+			}
+		})
+	}
+}
+
+func TestEventCatalogAdmissionRejectsEveryNonFieldLevelOptionalMarker(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string
+	}{
+		{name: "sequence element", field: "value: ['text?']"},
+		{name: "list element", field: "value: '[text?]'"},
+		{name: "map key", field: "value: 'map[text?]uuid'"},
+		{name: "map value", field: "value: 'map[text]u?uid?'"},
+		{name: "internal scalar", field: "value: te?xt"},
+		{name: "mapping list element", field: "value:\n  type: list\n  of: Customer?"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := admitEventCatalogEntryForTest(t, tc.field)
+			if err == nil || !strings.Contains(err.Error(), "exactly one trailing ?") {
+				t.Fatalf("error = %v, want closed optional-marker rejection", err)
+			}
+		})
+	}
+}
+
 func TestEventCatalogAdmissionRejectsRetiredAndAmbiguousSyntax(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -60,6 +112,8 @@ func TestEventCatalogAdmissionRejectsRetiredAndAmbiguousSyntax(t *testing.T) {
 		{name: "optional business key", source: "key: id\nid: uuid?", wantErr: "must be required"},
 		{name: "missing business key field", source: "key: id\nname: text", wantErr: "is not a declared payload field"},
 		{name: "null declaration", source: "null", wantErr: "want mapping"},
+		{name: "unknown swarm metadata", source: "swarm:\n  producerr: external", wantErr: `event swarm metadata field "producerr" is not supported`},
+		{name: "unknown swarm metadata through merge", source: "swarm:\n  <<: &metadata\n    producerr: external", wantErr: `event swarm metadata field "producerr" is not supported`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -78,6 +132,48 @@ func TestEventCatalogAdmissionRetainsAliasValues(t *testing.T) {
 	}
 	if entry.Payload.Properties["id"].Type != "uuid" || entry.Payload.Properties["correlation_id"].Type != "uuid" {
 		t.Fatalf("alias projection = %#v", entry.Payload.Properties)
+	}
+}
+
+func TestEventCatalogAdmissionRecordsExactNestedValueProvenance(t *testing.T) {
+	entry, err := admitEventCatalogEntryForTest(t, `
+swarm:
+  note: delivery contract
+value:
+  type: text?
+  description: Human-readable value
+  pattern: ^[a-z]+$
+  length:
+    min: 1
+    max: 20
+  citation:
+    criteria: source field
+    allowed_classes: [public]
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := []string{
+		"fields.value.type",
+		"fields.value.is_optional",
+		"fields.value.description",
+		"fields.value.refinements.pattern",
+		"fields.value.refinements.length.min",
+		"fields.value.refinements.length.max",
+		"fields.value.citation.criteria",
+		"fields.value.citation.allowed_classes",
+		"metadata.swarm.note",
+	}
+	for _, path := range paths {
+		provenance, ok := entry.admissionProvenance[path]
+		if !ok || provenance.SourceFile != "events.yaml" || provenance.SourceLine <= 0 || provenance.SourceColumn <= 0 {
+			t.Fatalf("provenance %s = %#v, found=%t", path, provenance, ok)
+		}
+	}
+	typeSource := entry.admissionProvenance["fields.value.type"]
+	descriptionSource := entry.admissionProvenance["fields.value.description"]
+	if typeSource.SourceLine == descriptionSource.SourceLine {
+		t.Fatalf("mapping type provenance points at outer field instead of nested type: type=%#v description=%#v", typeSource, descriptionSource)
 	}
 }
 

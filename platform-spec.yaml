@@ -303,6 +303,17 @@ contract_formats:
       presence vocabulary is missing, null, empty_scalar, scalar,
       empty_sequence, sequence, empty_mapping, and mapping. Typed admission,
       not the substrate, assigns domain meaning to those states.
+    effective_provenance_ledger: |
+      Migrated contract families project each admitted effective value into one
+      immutable provenance ledger. Authored values retain the exact nested YAML
+      value location. Derived values retain one rule ID and their exact semantic
+      input paths. An input event snapshot declared by a non-root consumer
+      package in `requires.inputs` is a boundary_snapshot and carries that
+      package's canonical package key as pack identity; producer-owned
+      `requires.outputs` and unrelated package-local events remain authored.
+      Consumer projections copy every
+      producer-owned semantic value, including metadata and refinements, and
+      receiver carries record both their owner field and exact carry row.
     aliases_merges_and_duplicates: |
       YAML aliases and `<<` merge keys remain supported syntax. Admission sees
       every lexical occurrence, including fields introduced through merges;
@@ -707,12 +718,18 @@ contract_formats:
       connect routes, runtime owners, and effective system-node helpers.
       Authored metadata that deterministically restates those internal
       roles is a hard invalidity, not an alternate semantic owner.
-      Payload fields are required by default. Exactly one trailing `?` on the
-      authored type marks a field optional and is removed from the admitted
-      semantic type. The retired event-level `required:` list fails closed on
+      Payload fields are required by default. Exactly one trailing field-level
+      `?` on the complete authored type marks a field optional and is removed
+      before scalar, named, list, or map type semantics are admitted. Mapping
+      list form may write `type: list?` with `of: T`; a `?` inside a list
+      element, map key/value, named type, or any other non-trailing position is
+      invalid. The retired event-level `required:` list fails closed on
       presence, including through a YAML merge. Optional `key:` names one
       required declared payload field whose admitted semantics are boolean,
       number, or string; it is the sole event business-key authoring surface.
+      `swarm:` is a closed metadata mapping containing only note, source,
+      producer, consumer, and status. Unknown direct, alias, or merge-expanded
+      keys fail closed with the supported key set.
       Validation ownership is layered, not competing: supported emit
       surfaces validate producer-authored payloads before publish, while
       canonical event-store admission validates every event payload that
@@ -13042,12 +13059,22 @@ flow_model:
       not by copy.
     enforcement: >-
       Intra-package connect consumers compile their effective payload view from
-      the producer declaration. A consumer-authored restatement is a hard load
+      the exact connected producer declaration before any generic same-name
+      declaration lookup. Schema registry, semantic event proof, executable-node
+      proof, emit lowering, pin routing, boot verification, instance-source
+      typing, provider overlays, and operator publication consume this one
+      effective resolver. Its producer catalog key is schema identity only and
+      never selects a receiver pin; receiver endpoint identity remains the
+      exact pin name and receiver-side authored/local/canonical event spelling.
+      Raw authored lookup remains private to admission and compilation. A
+      consumer-authored restatement is a hard load
       error naming both declarations, even when byte-equivalent. Receiver input
       carries may add delivery-owned fields to the effective consumer projection;
-      generated.uuid and event.id lower with intrinsic UUID semantics and explicit
-      derived provenance. Cross-package boundary snapshots are a distinct frozen
-      contract concept and are not classified as intra-package restatements.
+      payload aliases copy the producer field's complete admitted semantics,
+      while generated.uuid and event.id lower with intrinsic UUID semantics and
+      explicit derived provenance. Cross-package boundary snapshots are a
+      distinct frozen contract concept and are not classified as intra-package
+      restatements.
   compiled_event_schema_projection:
     status: implemented_presence_preserving_w3
     owner: internal/runtime/contracts.WorkflowContractBundle.CompiledEventSchemas
@@ -13076,8 +13103,12 @@ flow_model:
     migration_boundary: >-
       The stable compiled interface and W3 event-family migration are complete.
       Producer-only intra-package ownership and receiver delivery projections
-      consume the immutable provenance ledger. The remaining decoder families
-      continue under #2300 without reopening event grammar or compatibility paths.
+      consume the immutable provenance ledger. The ledger covers declarations,
+      business keys, field types and optionality, descriptions, refinements,
+      citations, payload requiredness, event metadata, receiver aliases and
+      generated carries, plus package-identified boundary snapshots. The
+      remaining decoder families continue under #2300 without reopening event
+      grammar or compatibility paths.
   stateless_flows:
     description: 'Some flows are stateless producers — they process events without tracking entity lifecycle. A signal-processing
       flow is an example: it receives inputs, filters them, and emits results without maintaining per-entity state.'

@@ -1213,7 +1213,6 @@ func declaredInputIdentityMatches(source Source, endpoint AuthoredEventEndpoint,
 		endpoint.Event.Authored,
 		endpoint.Event.Local,
 		endpoint.Event.Canonical,
-		endpoint.Event.CatalogKey,
 	}
 	for _, candidate := range candidates {
 		if eventidentity.Normalize(candidate) == identity {
