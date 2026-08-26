@@ -117,8 +117,13 @@ func populateEffectiveEventProvenance(bundle *WorkflowContractBundle) {
 			continue
 		}
 		owners[prefix] = record.layer
+		packIdentity, boundarySnapshot := eventBoundarySnapshotPackIdentity(bundle, record)
 		for relativePath, provenance := range record.entry.admissionProvenance {
 			provenance.InputPaths = qualifyEffectiveEventInputPaths(prefix, provenance.InputPaths)
+			if boundarySnapshot {
+				provenance.Origin = EffectiveValueOriginBoundarySnapshot
+				provenance.PackIdentity = packIdentity
+			}
 			builder.set(prefix+"."+relativePath, provenance)
 		}
 	}
@@ -137,16 +142,11 @@ func populateEffectiveEventProjectionProvenance(bundle *WorkflowContractBundle, 
 		if ownerPrefix == "" || projectionPrefix == "" {
 			continue
 		}
-		builder.set(projectionPrefix+".declaration", EffectiveValueProvenance{
-			Origin:     EffectiveValueOriginDerived,
-			RuleID:     eventConsumerProjectionRule,
-			InputPaths: []string{ownerPrefix + ".declaration"},
-		})
-		for fieldName := range row.producer.Payload.Properties {
-			builder.set(projectionPrefix+".fields."+fieldName+".type", EffectiveValueProvenance{
+		for relativePath := range row.producer.admissionProvenance {
+			builder.set(projectionPrefix+"."+relativePath, EffectiveValueProvenance{
 				Origin:     EffectiveValueOriginDerived,
 				RuleID:     eventConsumerProjectionRule,
-				InputPaths: []string{ownerPrefix + ".fields." + fieldName + ".type"},
+				InputPaths: []string{ownerPrefix + "." + relativePath},
 			})
 		}
 		if row.receiverFlowID == "" {
@@ -156,20 +156,66 @@ func populateEffectiveEventProjectionProvenance(bundle *WorkflowContractBundle, 
 			if !bundle.FlowEventMatches(row.receiverFlowID, pin.EventType(), row.receiverEvent) {
 				continue
 			}
+			carryInputPaths := make([]string, 0, len(pin.Carries)+1)
+			carryInputPaths = append(carryInputPaths, ownerPrefix+".payload.required")
 			for fieldName, carry := range pin.Carries {
 				source := strings.TrimSpace(carry.From)
-				if source != FlowInputCarrySourceGeneratedUUID && source != FlowInputCarrySourceEventID {
-					continue
-				}
 				inputPath := "flows[" + strconv.Quote(row.receiverFlowID) + "].pins.inputs[" + strconv.Quote(pin.PinName()) + "].carries[" + strconv.Quote(strings.TrimSpace(fieldName)) + "]"
-				builder.set(projectionPrefix+".fields."+strings.TrimSpace(fieldName)+".type", EffectiveValueProvenance{
-					Origin:     EffectiveValueOriginDerived,
-					RuleID:     eventDeliveryCarryRule,
-					InputPaths: []string{inputPath},
-				})
+				carryInputPaths = append(carryInputPaths, inputPath)
+				targetPrefix := projectionPrefix + ".fields." + strings.TrimSpace(fieldName) + "."
+				switch {
+				case strings.HasPrefix(source, "payload."):
+					sourceName := strings.TrimSpace(strings.TrimPrefix(source, "payload."))
+					sourcePrefix := "fields." + sourceName + "."
+					for relativePath := range row.producer.admissionProvenance {
+						if !strings.HasPrefix(relativePath, sourcePrefix) {
+							continue
+						}
+						suffix := strings.TrimPrefix(relativePath, sourcePrefix)
+						builder.set(targetPrefix+suffix, EffectiveValueProvenance{
+							Origin:     EffectiveValueOriginDerived,
+							RuleID:     eventDeliveryCarryRule,
+							InputPaths: []string{ownerPrefix + "." + relativePath, inputPath},
+						})
+					}
+				case source == FlowInputCarrySourceGeneratedUUID, source == FlowInputCarrySourceEventID:
+					for _, suffix := range []string{"type", "is_optional"} {
+						builder.set(targetPrefix+suffix, EffectiveValueProvenance{
+							Origin:     EffectiveValueOriginDerived,
+							RuleID:     eventDeliveryCarryRule,
+							InputPaths: []string{inputPath},
+						})
+					}
+				}
 			}
+			builder.set(projectionPrefix+".payload.required", EffectiveValueProvenance{
+				Origin:     EffectiveValueOriginDerived,
+				RuleID:     eventDeliveryCarryRule,
+				InputPaths: carryInputPaths,
+			})
 		}
 	}
+}
+
+func eventBoundarySnapshotPackIdentity(bundle *WorkflowContractBundle, record currentEventDeclarationRecord) (string, bool) {
+	packageKey := strings.TrimSpace(record.packageKey)
+	if bundle == nil || packageKey == "" || packageKey == "." || record.layer != "project" {
+		return "", false
+	}
+	view, ok := bundle.projectContracts[packageKey]
+	if !ok {
+		return "", false
+	}
+	candidates := map[string]struct{}{
+		strings.TrimSpace(record.localName):     {},
+		strings.TrimSpace(record.qualifiedName): {},
+	}
+	for _, name := range view.Manifest.Requires.Inputs {
+		if _, ok := candidates[strings.TrimSpace(name)]; ok {
+			return packageKey, true
+		}
+	}
+	return "", false
 }
 
 func effectiveEventProvenancePrefix(packageKey, eventName string) string {

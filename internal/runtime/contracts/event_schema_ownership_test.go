@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 )
 
@@ -87,6 +89,119 @@ func TestIntraPackageEventConsumerProjectionCensus(t *testing.T) {
 	}
 }
 
+func TestEffectiveEventResolutionPrefersConnectedProducerOverUnrelatedSameNameRoot(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	source := filepath.Join(repo, "examples", "routing", "template-create-minted-key")
+	root := filepath.Join(t.TempDir(), "template-create-minted-key")
+	copyTree(t, source, root)
+	if err := os.WriteFile(filepath.Join(root, "events.yaml"), []byte("validation.requested:\n  wrong: text\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	producerEvents := filepath.Join(root, "flows", "producer", "events.yaml")
+	if err := os.WriteFile(producerEvents, []byte(`validation.triggered:
+  candidate: text?
+validation.requested:
+  swarm:
+    note: Producer-owned request schema
+  candidate:
+    type: ProducerCandidate?
+    description: Candidate under validation
+    pattern: ^[a-z]+$
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "flows", "producer", "types.yaml"), []byte("scalars:\n  ProducerCandidate: text\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entry, key, ok := bundle.ResolveFlowEventCatalogEntry("validator", "validation.requested")
+	if !ok || key != "validation.requested" {
+		t.Fatalf("effective resolution = key:%q ok:%t", key, ok)
+	}
+	for _, field := range []string{"candidate", "validation_case_id"} {
+		if _, found := entry.Payload.Properties[field]; !found {
+			t.Fatalf("effective producer projection omitted %s: %#v", field, entry.Payload.Properties)
+		}
+	}
+	if _, found := entry.Payload.Properties["wrong"]; found {
+		t.Fatalf("unrelated root schema won effective ownership: %#v", entry.Payload.Properties)
+	}
+	if !slices.Contains(entry.Payload.Required, "validation_case_id") {
+		t.Fatalf("receiver carry missing from required fields: %v", entry.Payload.Required)
+	}
+	schema, _, ok := EventSchemaForFlowEvent(bundle, "validator", "validation.requested")
+	properties, _ := schema.Schema["properties"].(map[string]any)
+	candidate, _ := properties["candidate"].(map[string]any)
+	if !ok || candidate["type"] != "string" {
+		t.Fatalf("receiver schema did not consume producer type catalog: schema=%#v ok=%t", schema.Schema, ok)
+	}
+	projectionPrefix := effectiveEventProjectionProvenancePrefix(".", "validator", "validation.requested")
+	for _, suffix := range []string{"metadata.swarm.note", "fields.candidate.description", "fields.candidate.refinements.pattern"} {
+		provenance, found := bundle.EffectiveProvenance().Lookup(projectionPrefix + "." + suffix)
+		if !found || provenance.Origin != EffectiveValueOriginDerived || provenance.RuleID != eventConsumerProjectionRule || len(provenance.InputPaths) != 1 || !strings.Contains(provenance.InputPaths[0], suffix) {
+			t.Fatalf("complete projection provenance %s = %#v, found=%t", suffix, provenance, found)
+		}
+	}
+
+	node := identitytest.ExecutableNode(t, ".", "validator", "validator-node")
+	nodeEntry, _, ok := bundle.ResolveExecutableNodeEventCatalogEntry(node, "validation.requested")
+	if !ok || nodeEntry.Payload.Properties["validation_case_id"].Type != "uuid" {
+		t.Fatalf("executable-node proof missed effective carry: entry=%#v ok=%t", nodeEntry, ok)
+	}
+	candidateType, ok := ResolveExecutableNodeEventFieldType(bundle, node, "validation.requested", "candidate")
+	if !ok {
+		t.Fatal("executable-node field typing omitted producer-owned candidate")
+	}
+	resolvedCandidate, err := candidateType.Resolve()
+	if err != nil || resolvedCandidate.Kind != CatalogTypeText {
+		t.Fatalf("executable-node field typing lost producer catalog: resolved=%#v err=%v", resolvedCandidate, err)
+	}
+
+	lowered, err := bundle.LowerEmitSpecFields(EmitFieldLoweringContext{
+		Node:             node,
+		TriggerEventType: "validation.requested",
+		Site:             "validator-node.validation.requested.emit",
+	}, EmitSpec{
+		Event: "validation.started",
+		Fields: map[string]ExpressionValue{
+			"candidate":          CELExpression("payload"),
+			"validation_case_id": CELExpression("payload"),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found := lowered.Fields["validation_case_id"]; !found {
+		t.Fatalf("emit lowering omitted effective receiver carry: %#v", lowered.Fields)
+	}
+}
+
+func TestEffectiveEventResolutionPreservesConnectedRenameOwnership(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := filepath.Join(repo, "tests", "tier11-flow-composition", "test-dynamic-flow-instance")
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry, key, ok := bundle.ResolveFlowEventCatalogEntry("worker", "work.assign")
+	if !ok || key != "worker/work.assign" {
+		t.Fatalf("renamed effective resolution = key:%q ok:%t entry:%#v", key, ok, entry)
+	}
+	for _, field := range []string{"worker_id", "task_label"} {
+		if entry.Payload.Properties[field].Type != "string" {
+			t.Fatalf("renamed producer field %s = %#v", field, entry.Payload.Properties[field])
+		}
+	}
+	provenance, ok := bundle.EffectiveProvenance().Lookup(effectiveEventProjectionProvenancePrefix(".", "worker", "work.assign") + ".declaration")
+	if !ok || provenance.Origin != EffectiveValueOriginDerived || provenance.RuleID != eventConsumerProjectionRule {
+		t.Fatalf("renamed projection provenance = %#v, found=%t", provenance, ok)
+	}
+}
+
 func TestIntraPackageEventConsumerRestatementFailsClosed(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	source := filepath.Join(repo, "examples", "routing", "parent-connect")
@@ -120,6 +235,26 @@ func TestIntraPackageEventConsumerProjectionProvenance(t *testing.T) {
 	}
 }
 
+func TestIntraPackageEventConsumerProjectionCarriesAllOwnerAndAliasProvenance(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := filepath.Join(repo, "examples", "routing", "template-select-existing")
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix := effectiveEventProjectionProvenancePrefix(".", "account", "account.setup")
+	for _, suffix := range []string{"declaration", "payload.required", "fields.account_id.type", "fields.account_id.is_optional"} {
+		provenance, ok := bundle.EffectiveProvenance().Lookup(prefix + "." + suffix)
+		if !ok || provenance.Origin != EffectiveValueOriginDerived {
+			t.Fatalf("projection provenance %s = %#v, found=%t", suffix, provenance, ok)
+		}
+	}
+	alias, ok := bundle.EffectiveProvenance().Lookup(prefix + ".fields.account_id.type")
+	if !ok || alias.RuleID != eventDeliveryCarryRule || len(alias.InputPaths) != 2 || !strings.Contains(strings.Join(alias.InputPaths, " "), "fields.account_id.type") || !strings.Contains(strings.Join(alias.InputPaths, " "), "carries") {
+		t.Fatalf("payload alias provenance = %#v, found=%t", alias, ok)
+	}
+}
+
 func TestCrossPackageBoundarySnapshotIsNotClassifiedAsConsumerRestatement(t *testing.T) {
 	bundle := &WorkflowContractBundle{
 		projectContracts: map[string]ProjectContractView{
@@ -135,6 +270,50 @@ func TestCrossPackageBoundarySnapshotIsNotClassifiedAsConsumerRestatement(t *tes
 	}
 	if errs := validateIntraPackageEventSchemaOwnership(bundle); len(errs) != 0 {
 		t.Fatalf("cross-package snapshot was rejected as a same-package restatement: %v", errs)
+	}
+}
+
+func TestCrossPackageBoundarySnapshotProvenanceCarriesPackageIdentity(t *testing.T) {
+	snapshot, err := admitEventCatalogEntryForTest(t, "work_id: uuid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	internal, err := admitEventCatalogEntryForTest(t, "detail: text")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle := &WorkflowContractBundle{projectContracts: map[string]ProjectContractView{
+		"packages/worker": {
+			Paths: ProjectPackagePaths{Key: "packages/worker", ProjectEventsFile: "packages/worker/events.yaml"},
+			Manifest: ProjectPackageDocument{
+				Name: "worker", Version: "1.0.0",
+				Requires: FlowPackageRequires{Inputs: []string{"work.ready"}, Outputs: []string{"work.completed"}},
+			},
+			Events: map[string]EventCatalogEntry{
+				"work.ready":      snapshot,
+				"work.completed":  internal,
+				"worker.internal": internal,
+			},
+		},
+	}}
+	populateEffectiveEventProvenance(bundle)
+
+	prefix := effectiveEventProvenancePrefix("packages/worker", "work.ready")
+	for _, suffix := range []string{"declaration", "fields.work_id.type", "fields.work_id.is_optional", "payload.required"} {
+		provenance, ok := bundle.EffectiveProvenance().Lookup(prefix + "." + suffix)
+		if !ok || provenance.Origin != EffectiveValueOriginBoundarySnapshot || provenance.PackIdentity != "packages/worker" {
+			t.Fatalf("boundary provenance %s = %#v, found=%t", suffix, provenance, ok)
+		}
+	}
+	internalPrefix := effectiveEventProvenancePrefix("packages/worker", "worker.internal")
+	provenance, ok := bundle.EffectiveProvenance().Lookup(internalPrefix + ".declaration")
+	if !ok || provenance.Origin != EffectiveValueOriginAuthored || provenance.PackIdentity != "" {
+		t.Fatalf("package-local event misclassified as boundary snapshot: %#v, found=%t", provenance, ok)
+	}
+	outputPrefix := effectiveEventProvenancePrefix("packages/worker", "work.completed")
+	provenance, ok = bundle.EffectiveProvenance().Lookup(outputPrefix + ".declaration")
+	if !ok || provenance.Origin != EffectiveValueOriginAuthored || provenance.PackIdentity != "" {
+		t.Fatalf("producer-owned package output misclassified as boundary snapshot: %#v, found=%t", provenance, ok)
 	}
 }
 

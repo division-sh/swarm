@@ -424,7 +424,7 @@ func (b *WorkflowContractBundle) ResolveExecutableNodeEventReference(ref runtime
 	return resolution.resolveEvent(eventType)
 }
 
-func (b *WorkflowContractBundle) ResolveExecutableNodeEventCatalogEntry(ref runtimeidentity.ExecutableNode, eventType string) (EventCatalogEntry, string, bool) {
+func (b *WorkflowContractBundle) resolveAuthoredExecutableNodeEventCatalogEntry(ref runtimeidentity.ExecutableNode, eventType string) (EventCatalogEntry, string, bool) {
 	if b == nil || !ref.Valid() {
 		return EventCatalogEntry{}, "", false
 	}
@@ -835,7 +835,7 @@ func (b *WorkflowContractBundle) ResolvedEventCatalog() map[string]EventCatalogE
 	}
 	return out
 }
-func (b *WorkflowContractBundle) ResolveFlowEventCatalogEntry(flowID, eventType string) (EventCatalogEntry, string, bool) {
+func (b *WorkflowContractBundle) resolveAuthoredFlowEventCatalogEntry(flowID, eventType string) (EventCatalogEntry, string, bool) {
 	if b == nil {
 		return EventCatalogEntry{}, "", false
 	}

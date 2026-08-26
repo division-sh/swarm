@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 )
 
 const (
@@ -174,43 +175,92 @@ func packageEndpointLabel(endpoint string) string {
 }
 
 func effectiveEventDeclarationForFlowEvent(bundle *WorkflowContractBundle, flowID, eventType string) (EventCatalogEntry, string, TypeCatalogDocument, bool) {
-	entry, key, types, ok := eventSchemaDeclarationForFlowEvent(bundle, flowID, eventType)
-	if !ok && bundle != nil {
-		flowID = strings.TrimSpace(flowID)
-		for _, row := range compileEventSchemaOwnershipRows(bundle) {
-			if row.receiverFlowID != flowID || !bundle.FlowEventMatches(flowID, row.receiverEvent, eventType) {
-				continue
-			}
-			entry = row.producer
-			key = row.producerName
-			types = bundle.RootTypeCatalog()
-			if row.producerFlowID != "" {
-				types = bundle.ResolvedTypeCatalogForFlow(row.producerFlowID)
-			}
-			ok = true
-			break
+	entry, key, types, _, ok := resolveEffectiveEventDeclarationForFlowEvent(bundle, flowID, eventType)
+	return entry, key, types, ok
+}
+
+func resolveEffectiveEventDeclarationForFlowEvent(bundle *WorkflowContractBundle, flowID, eventType string) (EventCatalogEntry, string, TypeCatalogDocument, bool, bool) {
+	flowID = strings.TrimSpace(flowID)
+	var entry EventCatalogEntry
+	var key string
+	var types TypeCatalogDocument
+	connected := false
+	var ok bool
+	if row, found := connectedEventSchemaOwnershipRow(bundle, flowID, eventType); found {
+		entry = row.producer
+		key = row.producerName
+		types = bundle.RootTypeCatalog()
+		if row.producerFlowID != "" {
+			types = bundle.ResolvedTypeCatalogForFlow(row.producerFlowID)
 		}
+		connected = true
+		ok = true
+	}
+	if !ok {
+		entry, key, types, ok = eventSchemaDeclarationForFlowEvent(bundle, flowID, eventType)
 	}
 	if !ok || bundle == nil || strings.TrimSpace(flowID) == "" {
-		return entry, key, types, ok
+		return entry, key, types, connected, ok
 	}
 	for _, pin := range bundle.FlowInputEventPins(flowID) {
 		if !bundle.FlowEventMatches(flowID, pin.EventType(), eventType) {
 			continue
 		}
-		return projectReceiverDeliveryCarries(entry, pin), key, types, true
+		return projectReceiverDeliveryCarries(entry, pin), key, types, connected, true
 	}
-	return entry, key, types, true
+	return entry, key, types, connected, true
 }
 
-// EffectiveEventCatalogEntryForFlowEvent returns the producer-owned event
-// declaration projected into the named flow's delivery context.
-func (b *WorkflowContractBundle) EffectiveEventCatalogEntryForFlowEvent(flowID, eventType string) (EventCatalogEntry, string, bool) {
-	if entry, key, ok := b.ResolveFlowEventCatalogEntry(flowID, eventType); ok {
-		return entry, key, true
+func connectedEventSchemaOwnershipRow(bundle *WorkflowContractBundle, flowID, eventType string) (eventSchemaOwnershipRow, bool) {
+	if bundle == nil {
+		return eventSchemaOwnershipRow{}, false
 	}
-	entry, key, _, ok := effectiveEventDeclarationForFlowEvent(b, flowID, eventType)
+	flowID = strings.TrimSpace(flowID)
+	for _, row := range compileEventSchemaOwnershipRows(bundle) {
+		if row.receiverFlowID == flowID && bundle.FlowEventMatches(flowID, row.receiverEvent, eventType) {
+			return row, true
+		}
+	}
+	return eventSchemaOwnershipRow{}, false
+}
+
+// ResolveFlowEventCatalogEntry returns the producer-owned event declaration
+// projected into the named flow's delivery context.
+func (b *WorkflowContractBundle) ResolveFlowEventCatalogEntry(flowID, eventType string) (EventCatalogEntry, string, bool) {
+	entry, key, _, connected, ok := resolveEffectiveEventDeclarationForFlowEvent(b, flowID, eventType)
+	if ok && !connected {
+		if _, authoredKey, found := b.resolveAuthoredFlowEventCatalogEntry(flowID, eventType); found {
+			key = authoredKey
+		}
+	}
 	return entry, key, ok
+}
+
+// EffectiveEventCatalogEntryForFlowEvent is the contracts-facing name for the
+// same canonical resolver exposed through semanticview.Source.
+func (b *WorkflowContractBundle) EffectiveEventCatalogEntryForFlowEvent(flowID, eventType string) (EventCatalogEntry, string, bool) {
+	return b.ResolveFlowEventCatalogEntry(flowID, eventType)
+}
+
+// ResolveExecutableNodeEventCatalogEntry resolves executable-node spelling,
+// then delegates schema semantics to the same effective flow resolver.
+func (b *WorkflowContractBundle) ResolveExecutableNodeEventCatalogEntry(ref runtimeidentity.ExecutableNode, eventType string) (EventCatalogEntry, string, bool) {
+	entry, key, _, ok := b.resolveEffectiveExecutableNodeEventDeclaration(ref, eventType)
+	return entry, key, ok
+}
+
+func (b *WorkflowContractBundle) resolveEffectiveExecutableNodeEventDeclaration(ref runtimeidentity.ExecutableNode, eventType string) (EventCatalogEntry, string, TypeCatalogDocument, bool) {
+	if b == nil || !ref.Valid() {
+		return EventCatalogEntry{}, "", TypeCatalogDocument{}, false
+	}
+	canonical := b.ResolveExecutableNodeEventReference(ref, eventType)
+	if strings.TrimSpace(ref.FlowID()) != "" {
+		if entry, key, types, _, ok := resolveEffectiveEventDeclarationForFlowEvent(b, ref.FlowID(), canonical); ok {
+			return entry, key, types, true
+		}
+	}
+	entry, key, ok := b.resolveAuthoredExecutableNodeEventCatalogEntry(ref, canonical)
+	return entry, key, b.RootTypeCatalog(), ok
 }
 
 func projectReceiverDeliveryCarries(owner EventCatalogEntry, pin FlowInputEventPin) EventCatalogEntry {

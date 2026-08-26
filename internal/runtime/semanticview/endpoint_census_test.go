@@ -10,6 +10,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -194,6 +195,30 @@ func TestResolveDeclaredInputEndpointRejectsAmbiguousIdentity(t *testing.T) {
 	result := BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint("worker", "work.requested")
 	if result.Status != EndpointAssociationAmbiguous || len(result.Candidates) != 2 {
 		t.Fatalf("result = %#v, want two-candidate ambiguity", result)
+	}
+}
+
+func TestResolveDeclaredInputEndpointDoesNotUseProducerSchemaKeyAsReceiverIdentity(t *testing.T) {
+	repoRoot := canonicalrouting.RepoRoot(t)
+	fixtureRoot := canonicalrouting.CopyTemplateCreateThenSelectSameEvent(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatal(err)
+	}
+	census := BuildAuthoredEventEndpointCensus(Wrap(bundle))
+
+	setup := census.ResolveDeclaredInputEndpoint("account", "account.setup")
+	setupEndpoint, ok := setup.Endpoint()
+	if !ok || setupEndpoint.PinName != "account_create" {
+		t.Fatalf("account.setup association = %#v, want account_create only", setup)
+	}
+	ready := census.ResolveDeclaredInputEndpoint("account", "account.ready")
+	readyEndpoint, ok := ready.Endpoint()
+	if !ok || readyEndpoint.PinName != "account_ready" {
+		t.Fatalf("account.ready association = %#v, want renamed account_ready only", ready)
+	}
+	if setupEndpoint.Event.CatalogKey != readyEndpoint.Event.CatalogKey {
+		t.Fatalf("fixture did not prove shared producer schema key: setup=%#v ready=%#v", setupEndpoint.Event, readyEndpoint.Event)
 	}
 }
 

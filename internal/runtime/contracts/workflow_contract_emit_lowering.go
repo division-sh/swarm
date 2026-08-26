@@ -150,7 +150,7 @@ func (b *WorkflowContractBundle) emitPayloadTargetFields(ctx EmitFieldLoweringCo
 	if b == nil {
 		return nil, nil, fmt.Errorf("emit field lowering requires a workflow contract bundle")
 	}
-	entry, resolved, ok := b.ResolveFlowEventCatalogEntry(ctx.Node.FlowID(), eventType)
+	entry, resolved, ok := b.EffectiveEventCatalogEntryForFlowEvent(ctx.Node.FlowID(), eventType)
 	if !ok {
 		if platformEntry, platformKey, platformOK := PlatformEventCatalogEntry(b.Platform, eventType); platformOK {
 			entry = platformEntry
@@ -188,7 +188,7 @@ func (b *WorkflowContractBundle) emitFieldSourceFields(ctx EmitFieldLoweringCont
 		}
 		return fields, nil
 	case EmitFromPayload:
-		entry, resolved, ok := b.ResolveFlowEventCatalogEntry(ctx.Node.FlowID(), ctx.TriggerEventType)
+		entry, resolved, ok := b.EffectiveEventCatalogEntryForFlowEvent(ctx.Node.FlowID(), ctx.TriggerEventType)
 		if !ok {
 			if platformEntry, platformKey, platformOK := PlatformEventCatalogEntry(b.Platform, ctx.TriggerEventType); platformOK {
 				entry = platformEntry

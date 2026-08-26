@@ -132,9 +132,10 @@ func ResolveExecutableNodeEventFieldType(bundle *WorkflowContractBundle, node ru
 	if bundle == nil || !node.Valid() || field == "" {
 		return CatalogTypeReference{}, false
 	}
-	entry, _, ok := bundle.ResolveExecutableNodeEventCatalogEntry(node, eventType)
+	entry, _, catalog, ok := bundle.resolveEffectiveExecutableNodeEventDeclaration(node, eventType)
 	if !ok {
 		entry, _, ok = PlatformEventCatalogEntry(bundle.Platform, eventType)
+		catalog = bundle.RootTypeCatalog()
 	}
 	if !ok {
 		return CatalogTypeReference{}, false
@@ -145,6 +146,6 @@ func ResolveExecutableNodeEventFieldType(bundle *WorkflowContractBundle, node ru
 	}
 	return CatalogTypeReference{
 		Type:    strings.TrimSpace(decl.Type),
-		Catalog: cloneTypeCatalogDocument(bundle.ResolvedTypeCatalogForFlow(node.FlowID())),
+		Catalog: cloneTypeCatalogDocument(catalog),
 	}, true
 }
