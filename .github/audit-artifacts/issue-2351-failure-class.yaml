@@ -52,6 +52,7 @@ class_model:
     - exact_source_scoped_readiness_observation_for_startup_retry_and_recovery_diagnostics
     - exact_run_and_source_scoped_readiness_observation_for_live_source_revision
     - observed_state_guarded_readiness_plan_replacement
+    - generation_owned_signal_and_periodic_retry_reachability
     - optional_interrupted_execution_and_effect_replay
     - startup_refusal_for_incomplete_dynamic_readiness_without_replay_authority
     - current_manager_occurrence_agent_and_route_runnability
@@ -111,7 +112,7 @@ governing_policy:
       followed by process-side filtering, is forbidden.
     consumers:
       - all_context_startup_preflight_and_runtime_revalidation
-      - generation_owned_automatic_pending_retry
+      - generation_owned_signal_and_periodic_automatic_pending_retry
       - manager_recovery_diagnostic_and_admission_snapshot
       - post_manager_completed_topology_reconstruction
     output:
@@ -328,8 +329,11 @@ startup_consumer_matrix:
     replacement: InspectDynamicFlowRuntimeReadinessForSource
     proof: >-
       The manager-owned immutable BundleSourceFact selects rows in SQL before decode;
-      the loop retries only current ordinary pending rows for its own source. Source
-      transitions retain their separate authorization and foreign rows are invisible.
+      the existing generation-owned loop retries only current ordinary pending rows
+      for its own source on both explicit signal and bounded periodic wakeup. The
+      periodic path uses the same loop, lease, projection, and keyed reconciler; it is
+      not a second scheduler or owner. Source transitions retain their separate
+      authorization and foreign rows are invisible.
   manager_recovery_diagnostic_and_admission_snapshot:
     classification: exact_source_scoped_observation_only_consumer
     replacement: InspectDynamicFlowRuntimeReadinessForSource
@@ -483,6 +487,7 @@ systematic_consumption_audit:
   cold_revision_predecessor_pending_plan: remains_recovery_gated_and_refuses_without_recovery
   standing_EnsureStandingTargets_post_start_source_revision: moved_to_exact_run_and_source_SQL_projection_plus_guarded_writer
   reconcilePendingDynamicFlowRuntimeReadiness_automatic_retry: moved_to_exact_source_projection_current_pending_only
+  readinessReconciliationLoop_periodic_reachability: existing_generation_owned_loop_gains_bounded_wakeup_without_second_owner
   RecoverableStateSnapshot_readiness_inspection: moved_to_exact_source_projection_observation_only
   ReconcileDynamicFlowRuntimeReadinessPlansForRun_live_revision: moved_to_exact_run_and_source_SQL_projection
   ListDynamicFlowRuntimeReadiness_interface_and_adapters: removed_end_to_end_with_zero_production_symbol_census
@@ -574,6 +579,9 @@ manifestations:
   foreign_malformed_or_pending_row_vs_automatic_retry:
     disposition: in_scope_reproduced_and_fixed
     planned_proof: dual_store_local_retry_decodes_and_retries_only_exact_source_rows_without_foreign_error_or_mutation
+  pending_row_without_post_commit_signal:
+    disposition: in_scope_reproduced_and_fixed
+    planned_proof: bounded_periodic_wakeup_on_the_existing_generation_owned_loop_converges_exact_source_pending_work_without_a_signal_or_second_scheduler
   foreign_malformed_or_pending_row_vs_recovery_snapshot:
     disposition: in_scope_reproduced_and_fixed
     planned_proof: dual_store_local_snapshot_counts_only_exact_source_recoverable_rows_without_foreign_error_or_interpretation
@@ -630,6 +638,7 @@ supported_surface_proof:
     - source_transition_exact_item_writes_never_cross_context
   scoped_consumer_proof:
     - automatic_retry_consumes_exact_source_current_pending_only
+    - missed_or_absent_signal_converges_on_the_same_bounded_generation_owned_periodic_loop
     - recovery_snapshot_consumes_exact_source_pending_postures_observation_only
     - live_source_revision_consumes_exact_run_and_source_rows_only
     - old_ListDynamicFlowRuntimeReadiness_symbol_port_adapters_forwarders_and_production_callers_are_zero
@@ -672,7 +681,9 @@ tracker:
     retry, live source revision, and recovery diagnostics are live consumers of the
     same readiness observation concept and are absorbed here through one source-
     scoped three-class projection, one exact-run derivative, and the existing writer
-    evolved with an observed-state guard; no broader recovery family must be absorbed.
+    evolved with an observed-state guard. The existing retry loop also receives its
+    already-specified bounded periodic wakeup so durable pending work does not depend
+    on an in-memory signal; no broader recovery family must be absorbed.
   remaining_parent_tail:
     grouping: wholesale_Runtime_Start_typed_phase_decomposition_and_general_recovery_scoping
     owner: 2250
@@ -709,3 +720,4 @@ gate:
     - any_production_ListDynamicFlowRuntimeReadiness_interpreter_survives
     - exact_source_or_exact_run_SQL_scoping_cannot_serve_every_named_consumer
     - existing_writer_cannot_compare_the_complete_observed_coordinate_under_its_current_lock
+    - generation_owned_retry_cannot_provide_signal_and_bounded_periodic_reachability_through_one_loop
