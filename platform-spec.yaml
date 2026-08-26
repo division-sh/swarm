@@ -289,6 +289,11 @@ contract_formats:
       zero declarations; present files that admit zero declarations fail closed
       and MUST be deleted. Empty nested mappings inside a live declaration remain
       governed by the declaration's typed grammar and are not file emptiness.
+      The supported role matrix is seven roles at the root package, five roles
+      (nodes, events, agents, tools, and policy) at a non-root project package,
+      and seven roles at a declared flow. Package-scoped types.yaml and
+      entities.yaml outside a declared flow are retired syntax and fail closed;
+      they are not optional project-package declaration roles.
     lexical_ownership: |
       The process acquires authoritative YAML lexical state through one
       content-addressed immutable owner keyed by SHA-256 of copied source bytes,
