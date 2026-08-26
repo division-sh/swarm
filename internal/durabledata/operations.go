@@ -634,7 +634,7 @@ type Store interface {
 	ExecuteSourceOperation(context.Context, SourceCommand) (SourceOperationResult, error)
 	Prune(context.Context, PruneCommand) (PruneOperationResult, error)
 	Show(context.Context, string, DeclarationRef) (ResourceSnapshot, error)
-	ListDeclarations(context.Context, string) ([]Declaration, error)
+	ListDeclarationSummaries(context.Context, string) ([]DeclarationSummary, error)
 	LoadSourceOperation(context.Context, string) (SourceOperationRecord, error)
 	LoadPruneOperation(context.Context, string) (PruneOperationResult, error)
 	LoadPruneOperationPins(context.Context, string) ([]Pin, error)

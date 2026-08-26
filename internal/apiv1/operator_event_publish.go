@@ -211,6 +211,9 @@ func executeOperatorEventPublication(
 		if err != nil {
 			return apiidempotency.Completion{}, err
 		}
+		if params.DataPresent && !params.NewRunCreated {
+			return apiidempotency.Completion{}, NewApplicationError(string(durabledata.CodeRunDataImmutable), false, map[string]any{"run_id": params.RunID})
+		}
 		ctx, err = admitScenarioExecutionSelector(ctx, selectedOpts, params.RunID, params.NewRunCreated, params.ScenarioExecution)
 		if err != nil {
 			return apiidempotency.Completion{}, err
@@ -404,9 +407,6 @@ func eventPublicationParamsFromRequest(req Request, cfg eventPublicationConfig) 
 	}
 	if dataPresent && !runIDProvided {
 		return eventPublicationParams{}, bundleIdentityParam{}, NewInvalidParamsError(map[string]any{"field": "run_id", "reason": "is required for data-bearing create-new publication"})
-	}
-	if dataPresent && !newRun {
-		return eventPublicationParams{}, bundleIdentityParam{}, NewApplicationError(string(durabledata.CodeRunDataImmutable), false, map[string]any{"run_id": runID})
 	}
 	payload, payloadEntityIDPresent, err := eventPublicationPayload(req.Params)
 	if err != nil {

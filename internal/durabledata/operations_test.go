@@ -11,6 +11,44 @@ import (
 
 const aggregateTestBundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
+func TestDeclarationSummaryClosesHeadAndInventoryStates(t *testing.T) {
+	ref, err := ParseDeclarationRef(".", "records.loaded")
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := SchemaDigest("resource-schema-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	version := VersionID("resource-version-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	valid := DeclarationSummary{
+		Declaration: ref, LocalName: "records.loaded", SchemaDigest: digest, Head: VersionHead(version),
+		VersionCount: 2, MaterializedVersionCount: 1, MaterializedBytes: 128,
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("valid summary: %v", err)
+	}
+	if err := (DeclarationSummary{Declaration: ref, LocalName: "records.loaded", SchemaDigest: digest, Head: AbsentHead()}).Validate(); err != nil {
+		t.Fatalf("valid empty summary: %v", err)
+	}
+	for _, test := range []struct {
+		name   string
+		mutate func(*DeclarationSummary)
+	}{
+		{name: "missing name", mutate: func(summary *DeclarationSummary) { summary.LocalName = "" }},
+		{name: "invalid schema digest", mutate: func(summary *DeclarationSummary) { summary.SchemaDigest = "bad" }},
+		{name: "negative versions", mutate: func(summary *DeclarationSummary) { summary.VersionCount = -1 }},
+		{name: "materialized exceeds versions", mutate: func(summary *DeclarationSummary) { summary.MaterializedVersionCount = 3 }},
+		{name: "absent head with versions", mutate: func(summary *DeclarationSummary) { summary.Head = AbsentHead() }},
+		{name: "version head without inventory", mutate: func(summary *DeclarationSummary) { summary.VersionCount = 0; summary.MaterializedVersionCount = 0 }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			summary := valid
+			test.mutate(&summary)
+			if err := summary.Validate(); err == nil {
+				t.Fatal("Validate error = nil, want closed aggregate rejection")
+			}
+		})
+	}
+}
+
 func TestCandidateVersionClosedStates(t *testing.T) {
 	ref, err := ParseDeclarationRef(".", "records.loaded")
 	if err != nil {
