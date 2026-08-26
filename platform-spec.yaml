@@ -5054,9 +5054,12 @@ engine:
           any still-unemitted creation plan. Every projection item carries the exact observed normalized plan, owning-run source,
           topology completion posture, creation-emission posture, run status, and instance status/termination posture. The
           existing selected-store `ReconcileDynamicFlowRuntimeReadinessPlan` writer and
-          keyed lifecycle reconciler remain the sole canonicalization owners. Previously completed transitions canonicalize
-          and complete the desired current-source topology regardless of recovery policy; previously pending transitions do so
-          only when replay is authorized. This bounded desired-source convergence may reconcile the transitioned item's exact
+          keyed lifecycle reconciler remain the sole canonicalization owners. Startup MUST derive and guarded-replace every
+          authorized source-transition plan in the exact-source projection before invoking keyed lifecycle finalization for
+          any item. A per-item replace-then-finalize loop is forbidden because aggregate route/descriptor consumers would
+          observe sibling predecessor plans and create mixed-source topology or reject a valid revision. Previously completed
+          transitions replace and then complete the desired current-source topology regardless of recovery policy; previously
+          pending transitions do so only when replay is authorized. This bounded desired-source convergence may reconcile the transitioned item's exact
           agents, routes, timers, and still-unemitted creation obligation; it does not authorize unrelated effect, drain,
           receipt, delivery, diagnostic, budget, or selected-contract replay. The existing writer MUST accept the exact observed
           readiness item together with the desired plan. Under its existing transaction lock it MUST compare normalized plan
@@ -5067,14 +5070,19 @@ engine:
           predecessor agent/version trust, or
           post-start `EnsureStandingTargets` fallback is permitted. Startup then reloads the exact-source projection, requires
           the source-transition set to be empty, and applies ordinary pending recovery/refusal policy. Unresolved rows refuse
-          before Manager run. After Manager run starts, the operation reloads again rather than trusting an earlier snapshot.
+          before Manager run. Managed-execution admission binds the exact execution and delivery authorities but MUST NOT yet
+          replay pipeline work, start delivery-continuation execution, or enumerate executable deliveries. After Manager run
+          starts, the operation reloads again rather than trusting an earlier snapshot.
           One bounded topology-only consumer reconciles only freshly returned current-completed rows through the canonical
           lifecycle owner, proves each exact agent
           `runnable_current_occurrence`, and publishes/verifies the already-persisted exact flow route process-locally before
           delivery-continuation synchronization, outbox dispatch, boot publication, listener readiness, or public ingress.
           This operation performs no readiness write, route derivation or durable route mutation, timer operation, creation-
           event publication, external-effect or provider-drain settlement, budget or diagnostic projection, receipt recovery,
-          delivery replay, or selected-contract recovery. Failure fails startup and consumes existing lifecycle/route/start-
+          delivery replay, or selected-contract recovery. Only after this process-topology proof may recovery-enabled startup
+          drive event-level pipeline obligations to exhaustion, start the already-bound delivery-continuation owner, and
+          synchronize its exact scope. Authority admission and recovery execution are ordered phases, not separate semantic
+          owners or a generic startup framework. Failure fails startup and consumes existing lifecycle/route/start-
           failure compensation; it cannot degrade into public readiness or affect another source.
       auto_emit: Flow schemas may declare auto_emit_on_create. When the platform creates an instance, it automatically emits
         the declared event after the exact route and complete declared-agent topology are verified and initial timers are
@@ -6188,10 +6196,11 @@ engine:
         infer rollback or commit from the auxiliary error alone. A freshly committed row without that handoff remains
         publication-owned and cannot be discovered or executed by the coordinator; startup recovers the event-level
         obligation before enumerating delivery continuations.
-        Recovery-enabled startup first drives the event-level pipeline scope to explicit exhaustion, then performs the
-        normal coordinator's bounded authority-scoped selected-store scan to explicit exhaustion. After restored agent
-        routes and manager execution loops become live, startup synchronizes one further event-driven scan through that
-        same coordinator before runtime readiness; the synchronization returns the exact scan or dispatch failure and
+        Recovery-enabled startup first admits the exact managed-execution and delivery authorities without executing replay
+        or starting the coordinator. After manager execution loops and completed dynamic agent/flow routes become live, it
+        drives the event-level pipeline scope to explicit exhaustion, then starts the normal coordinator and performs its
+        bounded authority-scoped selected-store scan to explicit exhaustion. Startup synchronizes one further event-driven
+        scan through that same coordinator before runtime readiness; the synchronization returns the exact scan or dispatch failure and
         cannot manufacture eligibility or wait for a future durable due time.
         Recovery-disabled startup inventories the exact bundle-source delivery scope and rejects pending, failed, busy, or
         reclaimable agent or node work before execution-authority activation. It never silently adopts that work. The
@@ -25649,14 +25658,15 @@ cli_specification:
             name: manager_event_loop_start
             owner: internal/runtime
             ordering: >
-              Managed execution admission synchronously recovers the exact pipeline-obligation scope to explicit
-              exhaustion, activates and enumerates the exact executable-delivery scope to explicit exhaustion,
-              and only then starts manager event loops when recovery is authorized. Independently of recovery policy, the
+              Managed execution admission binds exact execution and delivery authority without replaying pipeline work,
+              starting delivery-continuation execution, or enumerating executable deliveries. Independently of recovery policy, the
               runtime's exact BundleSourceFact-scoped startup projection has already refused pending or invalid topology before
-              Manager run. After the Manager run occurrence starts, the same selected-store operation is reloaded and mandatory
+              Manager run. Every authorized source-transition plan is guarded-replaced before any keyed finalizer may consume
+              aggregate route/descriptor state. After the Manager run occurrence starts, the same selected-store operation is reloaded and mandatory
               completed dynamic topology reconstruction consumes only that source's rows, proving exact current-occurrence
-              agent routes/loops plus the persisted flow route before delivery-continuation synchronization or any later
-              readiness step. Multi-context serve completes the observation-only projection preflight for every context before
+              agent routes/loops plus the persisted flow route. Recovery-enabled startup then drives the exact pipeline-
+              obligation scope to explicit exhaustion, starts and exhausts the exact delivery-continuation scope, and
+              synchronizes it before any later readiness step. Multi-context serve completes the observation-only projection preflight for every context before
               starting any runtime. No unscoped readiness/route scan, process-side source filter, periodic pipeline/outbox
               sweeper, or foreign context may race this sequence or publish readiness while a handoff-hidden delivery or
               missing executable receiver remains.
