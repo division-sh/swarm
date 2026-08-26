@@ -21,16 +21,16 @@ import (
 )
 
 const (
-	goldenAPIToken        = "golden-agent-release-e2e-token"
-	goldenPostgresEnv     = "SWARM_TEST_POSTGRES_DSN"
-	goldenPostgresPass    = "SWARM_GOLDEN_POSTGRES_PASSWORD"
-	goldenProofProfileEnv = "SWARM_TEST_PROOF_PROFILE"
-	goldenRunDeadline     = 90 * time.Second
-	goldenBurstDeadline   = 150 * time.Second
-	goldenStartupTimeout  = 60 * time.Second
-	goldenBurstCandidateN = 10
-	goldenBurstIterations = 2
-	goldenBurstGOMAXPROCS = 2
+	goldenAPIToken             = "golden-agent-release-e2e-token"
+	releasePostgresEnv         = "SWARM_TEST_POSTGRES_DSN"
+	releasePostgresPasswordEnv = "SWARM_RELEASE_POSTGRES_PASSWORD"
+	releaseProofProfileEnv     = "SWARM_TEST_PROOF_PROFILE"
+	goldenRunDeadline          = 90 * time.Second
+	goldenBurstDeadline        = 150 * time.Second
+	goldenStartupTimeout       = 60 * time.Second
+	goldenBurstCandidateN      = 10
+	goldenBurstIterations      = 2
+	goldenBurstGOMAXPROCS      = 2
 )
 
 var goldenSmokeCandidateIDs = []string{"alpha", "beta"}
@@ -42,50 +42,50 @@ type goldenWorkloadOptions struct {
 }
 
 func TestGoldenAgentWorkloadSQLiteSmoke(t *testing.T) {
-	if profile, continuous := goldenContinuousProofProfile(t); continuous {
+	if profile, continuous := releaseContinuousProofProfile(t); continuous {
 		t.Skipf("N=%d burst proof supersedes the N=2 smoke in %s", goldenBurstCandidateN, profile)
 	}
-	releaseRoot := goldenReleaseRoot(t)
+	releaseRoot := releaseRoot(t)
 	binaryPath := buildReleaseBinary(t, releaseRoot)
-	runGoldenAgentWorkload(t, binaryPath, releaseRoot, goldenSQLiteStore(releaseRoot), false, goldenWorkloadOptions{
+	runGoldenAgentWorkload(t, binaryPath, releaseRoot, releaseSQLiteStore(releaseRoot), false, goldenWorkloadOptions{
 		candidateIDs: goldenSmokeCandidateIDs,
 	})
 }
 
 func TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends(t *testing.T) {
-	if profile, continuous := goldenContinuousProofProfile(t); profile != "" && !continuous {
+	if profile, continuous := releaseContinuousProofProfile(t); profile != "" && !continuous {
 		t.Skipf("forced-restart proof runs in full/nightly, not %s", profile)
 	}
-	releaseRoot := goldenReleaseRoot(t)
+	releaseRoot := releaseRoot(t)
 	binaryPath := buildReleaseBinary(t, releaseRoot)
 	t.Run("sqlite", func(t *testing.T) {
 		root := filepath.Join(releaseRoot, "sqlite-restart")
-		runGoldenAgentWorkload(t, binaryPath, root, goldenSQLiteStore(root), true, goldenWorkloadOptions{
+		runGoldenAgentWorkload(t, binaryPath, root, releaseSQLiteStore(root), true, goldenWorkloadOptions{
 			candidateIDs: goldenSmokeCandidateIDs,
 		})
 	})
 	t.Run("postgres", func(t *testing.T) {
-		dsn := strings.TrimSpace(os.Getenv(goldenPostgresEnv))
+		dsn := strings.TrimSpace(os.Getenv(releasePostgresEnv))
 		if dsn == "" {
-			t.Skipf("%s is required for the supported host-PostgreSQL proof", goldenPostgresEnv)
+			t.Skipf("%s is required for the supported host-PostgreSQL proof", releasePostgresEnv)
 		}
 		root := filepath.Join(releaseRoot, "postgres-restart")
-		runGoldenAgentWorkload(t, binaryPath, root, goldenPostgresStore(t, dsn), true, goldenWorkloadOptions{
+		runGoldenAgentWorkload(t, binaryPath, root, releasePostgresStore(t, dsn), true, goldenWorkloadOptions{
 			candidateIDs: goldenSmokeCandidateIDs,
 		})
 	})
 }
 
 func TestGoldenAgentWorkloadBurstConcurrencyOnBothBackends(t *testing.T) {
-	profile, continuous := goldenContinuousProofProfile(t)
+	profile, continuous := releaseContinuousProofProfile(t)
 	if !continuous {
 		t.Skipf("burst proof requires full/nightly profile, got %q", profile)
 	}
-	dsn := strings.TrimSpace(os.Getenv(goldenPostgresEnv))
+	dsn := strings.TrimSpace(os.Getenv(releasePostgresEnv))
 	if dsn == "" {
-		t.Fatalf("%s is required for the supported host-PostgreSQL proof", goldenPostgresEnv)
+		t.Fatalf("%s is required for the supported host-PostgreSQL proof", releasePostgresEnv)
 	}
-	releaseRoot := goldenReleaseRoot(t)
+	releaseRoot := releaseRoot(t)
 	binaryPath := buildRaceReleaseBinary(t, releaseRoot)
 	options := goldenWorkloadOptions{
 		candidateIDs:      goldenBurstCandidateIDs(),
@@ -97,12 +97,12 @@ func TestGoldenAgentWorkloadBurstConcurrencyOnBothBackends(t *testing.T) {
 			t.Run("sqlite", func(t *testing.T) {
 				t.Parallel()
 				root := filepath.Join(releaseRoot, fmt.Sprintf("burst-%d-sqlite", iteration))
-				runGoldenAgentWorkload(t, binaryPath, root, goldenSQLiteStore(root), false, options)
+				runGoldenAgentWorkload(t, binaryPath, root, releaseSQLiteStore(root), false, options)
 			})
 			t.Run("postgres", func(t *testing.T) {
 				t.Parallel()
 				root := filepath.Join(releaseRoot, fmt.Sprintf("burst-%d-postgres", iteration))
-				runGoldenAgentWorkload(t, binaryPath, root, goldenPostgresStore(t, dsn), false, options)
+				runGoldenAgentWorkload(t, binaryPath, root, releasePostgresStore(t, dsn), false, options)
 			})
 		})
 	}
@@ -116,9 +116,9 @@ func goldenBurstCandidateIDs() []string {
 	return ids
 }
 
-func goldenContinuousProofProfile(t *testing.T) (string, bool) {
+func releaseContinuousProofProfile(t *testing.T) (string, bool) {
 	t.Helper()
-	profile := strings.TrimSpace(os.Getenv(goldenProofProfileEnv))
+	profile := strings.TrimSpace(os.Getenv(releaseProofProfileEnv))
 	switch profile {
 	case "":
 		return "", false
@@ -127,16 +127,16 @@ func goldenContinuousProofProfile(t *testing.T) (string, bool) {
 	case "full", "nightly":
 		return profile, true
 	default:
-		t.Fatalf("%s has unsupported value %q", goldenProofProfileEnv, profile)
+		t.Fatalf("%s has unsupported value %q", releaseProofProfileEnv, profile)
 		return profile, false
 	}
 }
 
 func TestGoldenAgentWorkloadSQLiteDevRestartFailsClosed(t *testing.T) {
-	releaseRoot := goldenReleaseRoot(t)
+	releaseRoot := releaseRoot(t)
 	binaryPath := buildReleaseBinary(t, releaseRoot)
 	root := filepath.Join(releaseRoot, "sqlite-dev-restart")
-	store := goldenSQLiteStore(root)
+	store := releaseSQLiteStore(root)
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("create release project: %v", err)
 	}
@@ -154,12 +154,12 @@ func TestGoldenAgentWorkloadSQLiteDevRestartFailsClosed(t *testing.T) {
 	writeReleaseFile(t, configPath, goldenRuntimeConfig(store, workspaceDir))
 	tokenFile := filepath.Join(root, "api-token")
 	writeReleaseFile(t, tokenFile, goldenAPIToken+"\n")
-	env := goldenProcessEnv(t, root, "", 0)
-	assertGoldenProcessHasNoExternalExecutables(t, env)
+	env := releaseIsolatedProcessEnv(t, root, "", 0)
+	assertReleaseProcessHasNoExternalExecutables(t, env)
 
 	apiPort := freeReleaseTCPPort(t)
 	mcpPort := freeReleaseTCPPort(t)
-	start := func(dev bool) *releaseServeProcess {
+	start := func(mode releaseServeMode) *releaseServeProcess {
 		return startReleaseServe(t, releaseProcessSpec{
 			BinaryPath: binaryPath,
 			WorkingDir: root,
@@ -167,7 +167,7 @@ func TestGoldenAgentWorkloadSQLiteDevRestartFailsClosed(t *testing.T) {
 			Contracts:  contracts,
 			Data:       dataDir,
 			Store:      store.name,
-			Dev:        dev,
+			Mode:       mode,
 			APIPort:    apiPort,
 			MCPPort:    mcpPort,
 			TokenFile:  tokenFile,
@@ -176,7 +176,7 @@ func TestGoldenAgentWorkloadSQLiteDevRestartFailsClosed(t *testing.T) {
 		})
 	}
 
-	process := start(true)
+	process := start(releaseServeDev)
 	readyCtx, readyCancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
 	if err := process.waitReady(readyCtx); err != nil {
 		readyCancel()
@@ -189,7 +189,7 @@ func TestGoldenAgentWorkloadSQLiteDevRestartFailsClosed(t *testing.T) {
 	if err := process.killAndWait(5 * time.Second); err != nil {
 		t.Fatalf("force-kill dev release serve: %v\n%s", err, process.output.String())
 	}
-	restarted := start(false)
+	restarted := start(releaseServePlain)
 	restartCtx, restartCancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
 	err := restarted.waitReady(restartCtx)
 	restartCancel()
@@ -203,13 +203,13 @@ func TestGoldenAgentWorkloadSQLiteDevRestartFailsClosed(t *testing.T) {
 	}
 }
 
-type goldenStoreSelection struct {
+type releaseStoreSelection struct {
 	name        string
 	configYAML  string
 	passwordEnv string
 }
 
-func goldenReleaseRoot(t *testing.T) string {
+func releaseRoot(t *testing.T) string {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -218,9 +218,9 @@ func goldenReleaseRoot(t *testing.T) string {
 	return root
 }
 
-func goldenSQLiteStore(root string) goldenStoreSelection {
+func releaseSQLiteStore(root string) releaseStoreSelection {
 	path := filepath.Join(root, "runtime.db")
-	return goldenStoreSelection{
+	return releaseStoreSelection{
 		name: "sqlite",
 		configYAML: "store:\n" +
 			"  backend: sqlite\n" +
@@ -229,21 +229,21 @@ func goldenSQLiteStore(root string) goldenStoreSelection {
 	}
 }
 
-func goldenPostgresStore(t *testing.T, dsn string) goldenStoreSelection {
+func releasePostgresStore(t *testing.T, dsn string) releaseStoreSelection {
 	t.Helper()
 	config, err := pq.NewConfig(strings.TrimSpace(dsn))
 	if err != nil {
-		t.Fatalf("parse %s: %v", goldenPostgresEnv, err)
+		t.Fatalf("parse %s: %v", releasePostgresEnv, err)
 	}
 	if len(config.Multi) != 0 || strings.TrimSpace(config.Host) == "" || config.Port == 0 ||
 		strings.TrimSpace(config.User) == "" || config.Password == "" {
-		t.Fatalf("%s must name one TCP host, port, user, and password", goldenPostgresEnv)
+		t.Fatalf("%s must name one TCP host, port, user, and password", releasePostgresEnv)
 	}
 	sslMode := strings.TrimSpace(string(config.SSLMode))
 	if sslMode == "" {
 		sslMode = "require"
 	}
-	databaseName := goldenDatabaseName(t)
+	databaseName := releaseDatabaseName(t)
 	admin, err := sql.Open("postgres", dsn)
 	if err != nil {
 		t.Fatalf("open host PostgreSQL: %v", err)
@@ -274,20 +274,20 @@ database:
   password_env: %s
   sslmode: %s
   pool_size: 5
-`, strconv.Quote(config.Host), config.Port, strconv.Quote(databaseName), strconv.Quote(config.User), goldenPostgresPass, strconv.Quote(sslMode))
-	return goldenStoreSelection{name: "postgres", configYAML: configYAML, passwordEnv: config.Password}
+`, strconv.Quote(config.Host), config.Port, strconv.Quote(databaseName), strconv.Quote(config.User), releasePostgresPasswordEnv, strconv.Quote(sslMode))
+	return releaseStoreSelection{name: "postgres", configYAML: configYAML, passwordEnv: config.Password}
 }
 
-func goldenDatabaseName(t *testing.T) string {
+func releaseDatabaseName(t *testing.T) string {
 	t.Helper()
 	random := make([]byte, 6)
 	if _, err := rand.Read(random); err != nil {
 		t.Fatalf("generate PostgreSQL database suffix: %v", err)
 	}
-	return fmt.Sprintf("swarm_golden_%d_%s", os.Getpid(), hex.EncodeToString(random))
+	return fmt.Sprintf("swarm_release_%d_%s", os.Getpid(), hex.EncodeToString(random))
 }
 
-func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenStoreSelection, restart bool, options goldenWorkloadOptions) {
+func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store releaseStoreSelection, restart bool, options goldenWorkloadOptions) {
 	t.Helper()
 	if len(options.candidateIDs) < 2 {
 		t.Fatalf("golden workload requires at least two candidates, got %v", options.candidateIDs)
@@ -317,8 +317,8 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	writeReleaseFile(t, configPath, goldenRuntimeConfig(store, workspaceDir))
 	tokenFile := filepath.Join(root, "api-token")
 	writeReleaseFile(t, tokenFile, goldenAPIToken+"\n")
-	env := goldenProcessEnv(t, root, store.passwordEnv, options.processGOMAXPROCS)
-	assertGoldenProcessHasNoExternalExecutables(t, env)
+	env := releaseIsolatedProcessEnv(t, root, store.passwordEnv, options.processGOMAXPROCS)
+	assertReleaseProcessHasNoExternalExecutables(t, env)
 	verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binaryPath, "verify", "--config", configPath, "--contracts", contracts, "--json")
 	if verify.err != nil {
 		t.Fatalf("golden release verify failed: %v\n%s", verify.err, verify.output)
@@ -409,7 +409,7 @@ func assertGoldenFixtureHasSingleMockOwner(t *testing.T) {
 	}
 }
 
-func goldenRuntimeConfig(store goldenStoreSelection, workspaceDir string) string {
+func goldenRuntimeConfig(store releaseStoreSelection, workspaceDir string) string {
 	return "runtime:\n" +
 		"  execution_posture: mock_only\n" +
 		"  recovery_on_startup: true\n" +
@@ -421,7 +421,7 @@ func goldenRuntimeConfig(store goldenStoreSelection, workspaceDir string) string
 		store.configYAML
 }
 
-func goldenProcessEnv(t *testing.T, root, postgresPassword string, processGOMAXPROCS int) []string {
+func releaseIsolatedProcessEnv(t *testing.T, root, postgresPassword string, processGOMAXPROCS int) []string {
 	t.Helper()
 	blockedPrefixes := []string{"SWARM_", "ANTHROPIC_", "CLAUDE_", "OPENAI_", "PG"}
 	blockedExact := map[string]bool{"GOMAXPROCS": true, "HOME": true, "PATH": true}
@@ -453,7 +453,7 @@ func goldenProcessEnv(t *testing.T, root, postgresPassword string, processGOMAXP
 		"NO_COLOR=1",
 	)
 	if postgresPassword != "" {
-		env = append(env, goldenPostgresPass+"="+postgresPassword)
+		env = append(env, releasePostgresPasswordEnv+"="+postgresPassword)
 	}
 	if processGOMAXPROCS > 0 {
 		env = append(env, "GOMAXPROCS="+strconv.Itoa(processGOMAXPROCS))
@@ -461,7 +461,7 @@ func goldenProcessEnv(t *testing.T, root, postgresPassword string, processGOMAXP
 	return env
 }
 
-func assertGoldenProcessHasNoExternalExecutables(t *testing.T, env []string) {
+func assertReleaseProcessHasNoExternalExecutables(t *testing.T, env []string) {
 	t.Helper()
 	path := ""
 	for _, entry := range env {
@@ -1356,8 +1356,8 @@ func TestGoldenAgentWorkloadFixtureHasSingleMockOwner(t *testing.T) {
 }
 
 func TestGoldenProcessEnvironmentDoesNotResolveExternalExecutables(t *testing.T) {
-	env := goldenProcessEnv(t, t.TempDir(), "", 0)
-	assertGoldenProcessHasNoExternalExecutables(t, env)
+	env := releaseIsolatedProcessEnv(t, t.TempDir(), "", 0)
+	assertReleaseProcessHasNoExternalExecutables(t, env)
 	for _, entry := range env {
 		if strings.HasPrefix(entry, "CLAUDE_CODE_OAUTH_TOKEN=") || strings.HasPrefix(entry, "ANTHROPIC_API_KEY=") {
 			t.Fatalf("golden process environment carries an LLM credential: %s", entry)
@@ -1381,8 +1381,8 @@ func TestGoldenContinuousProofProfileSelection(t *testing.T) {
 			name = "local"
 		}
 		t.Run(name, func(t *testing.T) {
-			t.Setenv(goldenProofProfileEnv, test.profile)
-			profile, continuous := goldenContinuousProofProfile(t)
+			t.Setenv(releaseProofProfileEnv, test.profile)
+			profile, continuous := releaseContinuousProofProfile(t)
 			if profile != test.profile || continuous != test.continuous {
 				t.Fatalf("golden profile = %q/%t, want %q/%t", profile, continuous, test.profile, test.continuous)
 			}

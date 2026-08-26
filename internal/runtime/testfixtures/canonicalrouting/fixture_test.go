@@ -111,6 +111,10 @@ func TestReleaseE2EGoldenAgentWorkloadFixtureLoadsAndVerifies(t *testing.T) {
 	Prove(t, ArtifactID("internal/releasee2e/testdata/golden_agent_workload"))
 }
 
+func TestReleaseE2EFullLifecycleFixtureLoadsAndVerifies(t *testing.T) {
+	Prove(t, ArtifactID("internal/releasee2e/testdata/full_lifecycle/standing_telegram"))
+}
+
 func TestSelectedForkFlowScopedMCPFixtureLoadsAndVerifies(t *testing.T) {
 	const fixture = ArtifactID("internal/runtime/runforkexecution/testdata/selected_fork_flow_scoped_mcp")
 	Prove(t, ArtifactID("internal/runtime/runforkexecution/testdata/selected_fork_flow_scoped_mcp"))

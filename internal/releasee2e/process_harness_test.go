@@ -60,12 +60,32 @@ type releaseProcessSpec struct {
 	Contracts  string
 	Data       string
 	Store      string
-	Dev        bool
 	APIPort    int
 	MCPPort    int
 	TokenFile  string
 	Token      string
 	Env        []string
+	Mode       releaseServeMode
+}
+
+type releaseServeMode uint8
+
+const (
+	releaseServePlain releaseServeMode = iota
+	releaseServeDev
+)
+
+func (m releaseServeMode) args(t *testing.T) []string {
+	t.Helper()
+	switch m {
+	case releaseServePlain:
+		return nil
+	case releaseServeDev:
+		return []string{"--dev"}
+	default:
+		t.Fatalf("unsupported release serve mode %d", m)
+		return nil
+	}
 }
 
 type releaseServeProcess struct {
@@ -96,9 +116,7 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 		"--shutdown-grace", "2s",
 		"--no-color",
 	}
-	if options.Dev {
-		args = append(args, "--dev")
-	}
+	args = append(args, options.Mode.args(t)...)
 	cmd := exec.Command(options.BinaryPath, args...)
 	cmd.Dir = options.WorkingDir
 	cmd.Env = options.Env
@@ -171,6 +189,29 @@ func (p *releaseServeProcess) killAndWait(timeout time.Duration) error {
 	select {
 	case <-p.exited:
 		return nil
+	case <-timer.C:
+		return fmt.Errorf("serve did not exit within %s", timeout)
+	}
+}
+
+func (p *releaseServeProcess) interruptAndWait(timeout time.Duration) error {
+	if err := p.cmd.Process.Signal(os.Interrupt); err != nil {
+		select {
+		case <-p.exited:
+			return p.waitError()
+		default:
+			return err
+		}
+	}
+	return p.waitForExit(timeout)
+}
+
+func (p *releaseServeProcess) waitForExit(timeout time.Duration) error {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-p.exited:
+		return p.waitError()
 	case <-timer.C:
 		return fmt.Errorf("serve did not exit within %s", timeout)
 	}
