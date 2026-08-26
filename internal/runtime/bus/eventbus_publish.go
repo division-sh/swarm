@@ -301,14 +301,15 @@ func (eb *EventBus) LookupAPIEventPublication(ctx context.Context, request apiid
 }
 
 type eventBusCommitPublishPlan struct {
-	bus                 *EventBus
-	event               events.Event
-	direct              bool
-	directRecipients    []string
-	directRoutes        []events.DeliveryRoute
-	admitted            events.AdmittedEvent
-	publicationClaim    *pipelinePublicationClaim
-	dynamicFlowCreation *runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest
+	bus                   *EventBus
+	event                 events.Event
+	providerRawSettlement providerRawSettlementAdmission
+	direct                bool
+	directRecipients      []string
+	directRoutes          []events.DeliveryRoute
+	admitted              events.AdmittedEvent
+	publicationClaim      *pipelinePublicationClaim
+	dynamicFlowCreation   *runtimepipeline.DynamicFlowRuntimeCreationOccurrenceRequest
 }
 
 func (eb *EventBus) commitPublish(ctx context.Context, plan eventBusCommitPublishPlan) (PreparedPublish, error) {
@@ -515,15 +516,16 @@ func (eb *EventBus) prepareClosedPublication(ctx context.Context, publication ev
 	}
 	prepared := PreparedPublish{
 		Event: evt, admitted: admitted, plan: routePlan,
-		direct:             replayScope == runtimepipelineobligation.ScopeDirect,
-		publicationClaim:   claim,
-		targetFailureInput: targetFailureInput,
+		direct:                replayScope == runtimepipelineobligation.ScopeDirect,
+		publicationClaim:      claim,
+		targetFailureInput:    targetFailureInput,
+		providerRawSettlement: publication.providerRawSettlement,
 	}
-	prepared.settlement, err = eb.routeSettlementForPlan(evt, routePlan, events.EventWriteNormalPublication)
+	prepared.settlement, err = eb.routeSettlementForPlan(evt, targetFailureInput, routePlan, events.EventWriteNormalPublication, prepared.providerRawSettlement)
 	if err != nil {
 		return releaseFailure(err)
 	}
-	if !routePlan.TargetFailure.Empty() {
+	if !routePlan.TargetFailure.Empty() && !prepared.providerRawSettlement.authorizes(evt, targetFailureInput, routePlan) {
 		prepared.targetFailure = true
 	}
 	if reason, err := eb.dispatchQueueReason(ctx, evt); err != nil {
@@ -646,19 +648,20 @@ func publicationAuthorDescriptor(ctx context.Context, evt events.Event) (runtime
 // Its route plan remains EventBus-owned; callers may persist the exported
 // delivery-route manifest but cannot reinterpret or replace the plan.
 type PreparedPublish struct {
-	Event              events.Event
-	admitted           events.AdmittedEvent
-	plan               RoutePlan
-	settlement         events.RouteSettlement
-	exactDuplicate     bool
-	targetFailure      bool
-	dispatchQueued     bool
-	queueReason        string
-	direct             bool
-	publicationClaim   *pipelinePublicationClaim
-	targetFailureInput events.Event
-	receiver           receiverDispatchProjection
-	committedHandoffs  []runtimedelivery.DurableHandoffProof
+	Event                 events.Event
+	admitted              events.AdmittedEvent
+	plan                  RoutePlan
+	settlement            events.RouteSettlement
+	exactDuplicate        bool
+	targetFailure         bool
+	dispatchQueued        bool
+	queueReason           string
+	direct                bool
+	publicationClaim      *pipelinePublicationClaim
+	targetFailureInput    events.Event
+	providerRawSettlement providerRawSettlementAdmission
+	receiver              receiverDispatchProjection
+	committedHandoffs     []runtimedelivery.DurableHandoffProof
 }
 
 func validateEventAppendOutcome(outcome EventAppendOutcome) error {
@@ -691,7 +694,7 @@ func (p PreparedPublish) CommitRequest() CommitPublishRequest {
 		ReplyCreations:    append([]runtimereplycontext.Record(nil), p.plan.ReplyCreations...),
 		ReplyClaims:       append([]runtimereplycontext.ClaimCommand(nil), p.plan.ReplyClaims...),
 	}
-	if failure := p.plan.TargetFailure; !failure.Empty() {
+	if failure := p.plan.TargetFailure; !failure.Empty() && !p.providerRawSettlement.authorizes(p.Event, p.targetFailureInput, p.plan) {
 		disposition := runtimepipelineobligation.DeadLetter(failure.Code(), targetDeliveryFailureEnvelope(failure))
 		request.Disposition = &disposition
 		failureEvent := p.targetFailureInput
@@ -704,13 +707,15 @@ func (p PreparedPublish) CommitRequest() CommitPublishRequest {
 	return request
 }
 
-func (eb *EventBus) routeSettlementForPlan(evt events.Event, plan RoutePlan, class events.EventWriteClass) (events.RouteSettlement, error) {
+func (eb *EventBus) routeSettlementForPlan(evt, inbound events.Event, plan RoutePlan, class events.EventWriteClass, providerRaw providerRawSettlementAdmission) (events.RouteSettlement, error) {
 	routes := plan.DeliveryRoutes()
 	if len(routes) > 0 {
 		return events.NewDeliverySettlement(class, plan.ConnectEvaluation)
 	}
 	reason := events.NoDeliveryDeclaredConsumerNoPlan
 	switch {
+	case providerRaw.authorizes(evt, inbound, plan):
+		reason = events.NoDeliveryNoSubscriberByDesign
 	case !plan.TargetFailure.Empty():
 		reason = events.NoDeliveryResolutionBlocked
 	case plan.CanonicalRouteOwnerMatched():
@@ -838,7 +843,7 @@ func (eb *EventBus) PrepareSelectedForkPublish(ctx context.Context, evt events.E
 		publicationClaim:   publicationClaim,
 		targetFailureInput: targetFailureInput,
 	}
-	prepared.settlement, err = eb.routeSettlementForPlan(evt, plan, events.EventWriteSelectedForkPublication)
+	prepared.settlement, err = eb.routeSettlementForPlan(evt, evt, plan, events.EventWriteSelectedForkPublication, providerRawSettlementAdmission{})
 	if err != nil {
 		return PreparedPublish{}, errors.Join(err, publicationClaim.Release(preparedCtx))
 	}

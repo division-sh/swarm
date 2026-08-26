@@ -1426,7 +1426,12 @@ contract_formats:
             compiled publication without its evaluation ledger, historical replay with no-delivery, and historical replay
             with zero authorized work fail before event mutation. Direct platform facts use no_subscriber_by_design and
             cannot carry current-plan evidence; historical replay copies exact durable routes and cannot carry current-plan
-            evidence. Duplicate and recovery paths compare and preserve the original settlement and never replan it.
+            evidence. A private inbound-only provider-raw admission may select no_subscriber_by_design only when typed raw
+            kind, external-ingress provider-admission source, the exact standing target, the matching external raw input pin,
+            a live target, and zero executable routes all agree. A real route wins; missing, malformed, foreign, terminated,
+            or ordinary non-subscribing targets retain their fail-closed target failure. Generic publication, selected fork,
+            replay, and direct writers cannot acquire this admission. Duplicate and recovery paths compare and preserve the
+            original settlement and never replan it.
           per_plan_evidence: |
             The compiled evaluator persists one normalized typed ledger for every publication, including an explicit zero-plan
             result. Every matching plan has one opaque identity derived from the canonical plan-only codec, its normalized
@@ -1440,7 +1445,9 @@ contract_formats:
             target projection derived from DeliveryRoute; no-delivery events expose the closed reason and persisted per-plan
             evidence. Missing delivery rows, SQL joins, diagnostic strings, and current topology cannot reconstruct this fact.
             Unexpected no-delivery reasons project as warning-class author activity/NDJSON; typed deliberate empty outputs and
-            direct platform facts do not warn. Unknown or malformed durable/public variants fail decoding.
+            direct platform facts do not warn. Consumerless admitted provider-raw outputs expose no_subscriber_by_design with
+            zero deliveries and zero dead letters through list, get, and subscribe; duplicate, restart, and replay hydrate the
+            same persisted arm without producing executable work. Unknown or malformed durable/public variants fail decoding.
           string_boundary: |
             Routing semantic values do not implement fmt.Stringer. Explicit persistence codecs and diagnostic projections are
             one-way boundaries and cannot re-enter graph compilation or evaluation. DeliveryRoute, Subscriber, and selected-
@@ -4660,7 +4667,12 @@ engine:
       internal_observation_hooks: Audit logging, debug streams, metric taps, and test-only live observers are not routing-execution
         subscribers and may observe all events regardless of target.
       match_count_behavior:
-        zero_target_set: Dead-letter target_unreachable_no_subscriber or target_not_subscribed depending on whether the target instance exists.
+        zero_target_set: >
+          Dead-letter target_unreachable_no_subscriber or target_not_subscribed depending on whether the target instance
+          exists. The sole exception is an accepted typed raw provider output whose private inbound admission proves the
+          matching provider-admission external ingress, exact live standing target, matching external raw input pin, and zero
+          executable routes; that exact event settles no_subscriber_by_design. A real route wins, and missing, malformed,
+          foreign, terminated, or ordinary non-subscribing targets remain fail-closed.
         one_target_set: Normal delivery.
         many_target_set: Concrete topology-owned target_set routes persist one delivery target per recipient.
         no_target: External-ingress event-type delivery only; producer output cannot select this path.
@@ -10083,7 +10095,8 @@ tool_model:
         `RunInboundPublicationMutation` is the sole provider-delivery mutation owner. In one selected-store transaction it
         reserves the provider request identity, persists the `platform.inbound_recorded` evidence event, appends the raw
         event and zero or one exclusive normalized event as an ordered immutable batch, plans exact routes, materializes
-        select-or-create run/entity/flow-instance/route state, and persists each event's delivery, replay, and receipt rows.
+        select-or-create run/entity/flow-instance/route state, and persists each event's exact delivery or typed no-delivery
+        settlement, replay scope, recipient manifest, and receipt rows.
         Any failure rolls back the parent, every child, every event, and all derived state; no compensating marker deletion
         path or EventBus-owned claim remains. Commit precedes durable webhook acknowledgement. Runtime agent process startup
         is a post-commit side effect queued before event dispatch; persisted flow-instance and route authority remain
@@ -10291,7 +10304,11 @@ tool_model:
           pack id/version/manifest_hash/catalog-generation authorization into route planning, which must match the composed
           plan authorization byte-for-byte. Missing, partial, stale, or mismatched authorization fails before mutation.
           Only composed pack-owned normalized events may enter the target-free external input-plan lowering path; ordinary
-          events cannot gain this authority by event name, catalog presence, source-agent label, or payload shape.
+          events cannot gain this authority by event name, catalog presence, source-agent label, or payload shape. The batch
+          also privately carries raw kind into settlement. When the exact provider-admission source and standing target match
+          a composed external raw input pin, generic planning proves that target live, and no executable route exists, the raw
+          event settles no_subscriber_by_design. This authority is unavailable outside inbound publication and cannot weaken
+          malformed, foreign, terminated, or ordinary target failure.
         source_composition: >
           Before boot verification, exact package.yaml `provider_trigger_events.imports[]` declarations import one named
           normalized schema from the immutable verified trigger-pack catalog, and packs selected by effective standing ingress
