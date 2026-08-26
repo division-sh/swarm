@@ -258,12 +258,11 @@ func doctorTargetProjectOwner(ctx context.Context, repo string, cmd *cobra.Comma
 	}
 	inspectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	selected, closeStore, err := openAuthorityInspectionStore(inspectCtx, repo, cmd, opts)
+	selected, _, err := openAuthorityInspectionStore(inspectCtx, repo, cmd, opts)
 	if err != nil {
 		return doctorTargetPendingFact{Status: "unavailable", Owner: selectedStoreOwnerReader, Detail: "Project owner: unavailable because the selected store cannot be inspected: " + err.Error()}
 	}
-	defer closeStore()
-	inspection, err := selected.InspectAuthority(inspectCtx)
+	inspection, err := inspectAuthorityAndClose(inspectCtx, selected)
 	if err != nil {
 		return doctorTargetPendingFact{Status: "unavailable", Owner: selectedStoreOwnerReader, Detail: "Project owner: unavailable because the selected store cannot be inspected: " + err.Error()}
 	}

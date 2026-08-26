@@ -42,6 +42,8 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 		}
 		calls = append(calls, req)
 		switch req.Method {
+		case "runtime.identity":
+			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash, "persisted")
 		case eventPublishMethod:
 			publishCalls++
 			switch publishCalls {
@@ -115,6 +117,7 @@ func TestSwarmTestRunsScenarioThroughPublicRPC(t *testing.T) {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
 	assertScenarioTestMethods(t, calls, []string{
+		"runtime.identity",
 		eventPublishMethod,
 		"run.diagnose",
 		eventPublishMethod,
@@ -152,6 +155,8 @@ func TestSwarmTestSetupEntitiesSeedsAliasTargetAndExpectationThroughPublicRPC(t 
 		}
 		calls = append(calls, req)
 		switch req.Method {
+		case "runtime.identity":
+			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash, "persisted")
 		case scenarioTestSetupEntitiesMethod:
 			if req.Params["bundle_hash"] != bundleHash {
 				t.Fatalf("test.setup_entities bundle_hash = %#v, want %s", req.Params["bundle_hash"], bundleHash)
@@ -241,6 +246,7 @@ func TestSwarmTestSetupEntitiesSeedsAliasTargetAndExpectationThroughPublicRPC(t 
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
 	assertScenarioTestMethods(t, calls, []string{
+		"runtime.identity",
 		scenarioTestSetupEntitiesMethod,
 		eventPublishMethod,
 		"run.diagnose",
@@ -269,6 +275,8 @@ func TestSwarmTestSetupEntitiesSeedsRootRunEntityThroughPublicRPC(t *testing.T) 
 		}
 		calls = append(calls, req)
 		switch req.Method {
+		case "runtime.identity":
+			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash, "persisted")
 		case scenarioTestSetupEntitiesMethod:
 			if req.Params["bundle_hash"] != bundleHash {
 				t.Fatalf("test.setup_entities bundle_hash = %#v, want %s", req.Params["bundle_hash"], bundleHash)
@@ -353,6 +361,7 @@ func TestSwarmTestSetupEntitiesSeedsRootRunEntityThroughPublicRPC(t *testing.T) 
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
 	assertScenarioTestMethods(t, calls, []string{
+		"runtime.identity",
 		scenarioTestSetupEntitiesMethod,
 		eventPublishMethod,
 		"run.diagnose",
@@ -379,6 +388,8 @@ func TestSwarmTestRunsCatalogSmokeCompanionVisibleBehavior(t *testing.T) {
 		}
 		calls = append(calls, req)
 		switch req.Method {
+		case "runtime.identity":
+			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash, "persisted")
 		case eventPublishMethod:
 			if req.Params["event_name"] != "item.received" || req.Params["bundle_hash"] != bundleHash {
 				t.Fatalf("event.publish params = %#v", req.Params)
@@ -430,6 +441,7 @@ func TestSwarmTestRunsCatalogSmokeCompanionVisibleBehavior(t *testing.T) {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
 	assertScenarioTestMethods(t, calls, []string{
+		"runtime.identity",
 		eventPublishMethod,
 		"run.diagnose",
 		"run.diagnose",
@@ -551,6 +563,8 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, contractsPath string,
 		}
 		calls = append(calls, req)
 		switch req.Method {
+		case "runtime.identity":
+			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash, "persisted")
 		case scenarioTestSetupEntitiesMethod:
 			if req.Params["bundle_hash"] != bundleHash {
 				t.Fatalf("test.setup_entities bundle_hash = %#v, want %s", req.Params["bundle_hash"], bundleHash)
@@ -735,7 +749,8 @@ func assertSwarmTestScenarioThroughPublicRPC(t *testing.T, contractsPath string,
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
-	wantMethods := make([]string, 0, len(doc.Steps)*2+4)
+	wantMethods := make([]string, 0, len(doc.Steps)*2+5)
+	wantMethods = append(wantMethods, "runtime.identity")
 	if len(doc.Setup.Entities) > 0 {
 		wantMethods = append(wantMethods, scenarioTestSetupEntitiesMethod)
 	}
@@ -770,6 +785,7 @@ func TestSwarmTestRejectsInvalidFixtureSchemaBeforePublish(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
 	contractsPath := writeServedEventPublishFollowUpFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsPath, "tests", "invalid-type.yaml"), `
 name: invalid type fixture
 steps:
@@ -779,8 +795,16 @@ steps:
 `)
 	var called bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		if req.Method == "runtime.identity" {
+			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash, "persisted")
+			return
+		}
 		called = true
-		writeJSONRPCResult(t, w, "unexpected", map[string]any{})
+		writeJSONRPCResult(t, w, req.ID, map[string]any{})
 	}))
 	defer server.Close()
 
@@ -801,10 +825,11 @@ steps:
 	}
 }
 
-func TestSwarmTestRejectsInvalidSetupBeforeRPC(t *testing.T) {
+func TestSwarmTestRejectsInvalidSetupBeforeMutation(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
 	contractsPath := writeScenarioSetupFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 	scenarioPath := filepath.Join(contractsPath, "flows", "operating", "tests", "bad-setup.yaml")
 	writeWorkflowValidationFixtureFile(t, scenarioPath, `
 name: bad setup
@@ -821,8 +846,16 @@ steps:
 `)
 	var called bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		if req.Method == "runtime.identity" {
+			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash, "persisted")
+			return
+		}
 		called = true
-		writeJSONRPCResult(t, w, "unexpected", map[string]any{})
+		writeJSONRPCResult(t, w, req.ID, map[string]any{})
 	}))
 	defer server.Close()
 
@@ -914,6 +947,7 @@ func TestSwarmTestRejectsSymlinkFixtureEscapeBeforePublish(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
 	contractsPath := writeServedEventPublishFollowUpFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 	outside := filepath.Join(t.TempDir(), "outside.yaml")
 	writeWorkflowValidationFixtureFile(t, outside, `
 amount: 7
@@ -935,8 +969,16 @@ steps:
 `)
 	var called bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		if req.Method == "runtime.identity" {
+			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash, "persisted")
+			return
+		}
 		called = true
-		writeJSONRPCResult(t, w, "unexpected", map[string]any{})
+		writeJSONRPCResult(t, w, req.ID, map[string]any{})
 	}))
 	defer server.Close()
 
@@ -961,6 +1003,7 @@ func TestSwarmTestMailboxDecideFindsExactlyOneThenMutates(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
 	contractsPath := writeServedEventPublishFollowUpFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsPath, "tests", "mailbox.yaml"), `
 name: mailbox scenario
 steps:
@@ -981,6 +1024,8 @@ steps:
 		}
 		calls = append(calls, req)
 		switch req.Method {
+		case "runtime.identity":
+			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash, "persisted")
 		case eventPublishMethod:
 			writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(true))
 		case "run.diagnose":
@@ -1021,6 +1066,7 @@ steps:
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
 	assertScenarioTestMethods(t, calls, []string{
+		"runtime.identity",
 		eventPublishMethod,
 		"run.diagnose",
 		"mailbox.list",
@@ -1037,6 +1083,7 @@ func TestSwarmTestHumanTaskDecideAndDeferUsePublicMailboxRPC(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
 			setCLIAPITestToken(t, "test-token")
 			contractsPath := writeServedEventPublishFollowUpFixture(t)
+			bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 			step := `
   - mailbox.decide:
       match:
@@ -1071,6 +1118,8 @@ steps:
 				}
 				calls = append(calls, req)
 				switch req.Method {
+				case "runtime.identity":
+					writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash, "persisted")
 				case eventPublishMethod:
 					writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(true))
 				case "run.diagnose":
@@ -1112,7 +1161,7 @@ steps:
 				t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 			}
 			assertScenarioTestMethods(t, calls, []string{
-				eventPublishMethod, "run.diagnose", "mailbox.list", "mailbox.get", action, "run.diagnose", "run.diagnose",
+				"runtime.identity", eventPublishMethod, "run.diagnose", "mailbox.list", "mailbox.get", action, "run.diagnose", "run.diagnose",
 			})
 		})
 	}
@@ -1133,6 +1182,7 @@ func TestSwarmTestRejectsCrossAnchorDecisionCardSelectorsBeforeLookup(t *testing
 			isolateCLIAPIConfigEnv(t)
 			setCLIAPITestToken(t, "test-token")
 			contractsPath := writeServedEventPublishFollowUpFixture(t)
+			bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 			writeWorkflowValidationFixtureFile(t, filepath.Join(contractsPath, "tests", "invalid-card-match.yaml"), `
 name: invalid card match
 steps:
@@ -1150,6 +1200,8 @@ steps:
 					t.Errorf("decode request: %v", err)
 				}
 				switch req.Method {
+				case "runtime.identity":
+					writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash, "persisted")
 				case eventPublishMethod:
 					writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(true))
 				case "run.diagnose":
@@ -1179,6 +1231,7 @@ func TestSwarmTestMailboxDecideMissingVerdictFailsBeforeMailboxLookup(t *testing
 	isolateCLIAPIConfigEnv(t)
 	setCLIAPITestToken(t, "test-token")
 	contractsPath := writeServedEventPublishFollowUpFixture(t)
+	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsPath, "tests", "mailbox-reject-missing-reason.yaml"), `
 name: mailbox decide missing verdict
 steps:
@@ -1196,6 +1249,8 @@ steps:
 		}
 		calls = append(calls, req)
 		switch req.Method {
+		case "runtime.identity":
+			writeScenarioRuntimeIdentity(t, w, req.ID, bundleHash, "persisted")
 		case eventPublishMethod:
 			writeJSONRPCResult(t, w, req.ID, eventPublishTestResult(true))
 		case "run.diagnose":
@@ -1217,7 +1272,7 @@ steps:
 	if code != scenarioTestExitValidation {
 		t.Fatalf("code = %d, want %d stdout=%s stderr=%s", code, scenarioTestExitValidation, stdout.String(), stderr.String())
 	}
-	assertScenarioTestMethods(t, calls, []string{eventPublishMethod, "run.diagnose"})
+	assertScenarioTestMethods(t, calls, []string{"runtime.identity", eventPublishMethod, "run.diagnose"})
 	if !strings.Contains(stderr.String(), "mailbox.decide verdict is required") {
 		t.Fatalf("stderr = %q, want decide verdict validation failure", stderr.String())
 	}
@@ -1566,6 +1621,71 @@ func mustScenarioExpressionEvaluator(t *testing.T, vars map[string]any) *scenari
 		t.Fatalf("newScenarioExpressionEvaluator: %v", err)
 	}
 	return evaluator
+}
+
+func TestScenarioTestBundleSourceFactConsumesExactRuntimeIdentity(t *testing.T) {
+	bundleHash := "bundle-v1:sha256:" + strings.Repeat("a", 64)
+	otherHash := "bundle-v1:sha256:" + strings.Repeat("b", 64)
+	for _, tc := range []struct {
+		name    string
+		sources []map[string]any
+		want    string
+		wantErr string
+	}{
+		{name: "persisted", sources: []map[string]any{{"bundle_hash": bundleHash, "bundle_source": "persisted"}}, want: "persisted"},
+		{name: "ephemeral", sources: []map[string]any{{"bundle_hash": otherHash, "bundle_source": "persisted"}, {"bundle_hash": bundleHash, "bundle_source": "ephemeral"}}, want: "ephemeral"},
+		{name: "missing", sources: []map[string]any{{"bundle_hash": otherHash, "bundle_source": "persisted"}}, wantErr: "does not serve bundle_hash"},
+		{name: "duplicate", sources: []map[string]any{{"bundle_hash": bundleHash, "bundle_source": "persisted"}, {"bundle_hash": bundleHash, "bundle_source": "persisted"}}, wantErr: "duplicate source facts"},
+		{name: "invalid", sources: []map[string]any{{"bundle_hash": bundleHash, "bundle_source": "derived"}}, wantErr: "invalid source fact"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var req jsonRPCRequest
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					t.Fatalf("decode request: %v", err)
+				}
+				if req.Method != "runtime.identity" {
+					t.Fatalf("method = %q, want runtime.identity", req.Method)
+				}
+				writeJSONRPCResult(t, w, req.ID, map[string]any{
+					"runtime_instance_id": "runtime-test", "started_at": "2026-01-01T00:00:00Z",
+					"api_version": "v1", "supported_transports": []string{"tcp"}, "bundle_sources": tc.sources,
+				})
+			}))
+			defer server.Close()
+			client, err := newCLIAPIClient(rootCommandOptions{apiServer: server.URL})
+			if err != nil {
+				t.Fatalf("client: %v", err)
+			}
+			fact, err := scenarioTestBundleSourceFact(context.Background(), client, bundleHash)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("error = %v, want %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("source fact: %v", err)
+			}
+			gotHash, gotSource := fact.StorageValues()
+			if gotHash != bundleHash || gotSource != tc.want {
+				t.Fatalf("source fact = %s/%s, want %s/%s", gotHash, gotSource, bundleHash, tc.want)
+			}
+		})
+	}
+}
+
+func writeScenarioRuntimeIdentity(t *testing.T, w http.ResponseWriter, id string, bundleHash, bundleSource string) {
+	t.Helper()
+	writeJSONRPCResult(t, w, id, map[string]any{
+		"runtime_instance_id":  "runtime-test",
+		"started_at":           "2026-01-01T00:00:00Z",
+		"api_version":          "v1",
+		"supported_transports": []string{"tcp"},
+		"bundle_sources": []map[string]any{{
+			"bundle_hash": bundleHash, "bundle_source": bundleSource,
+		}},
+	})
 }
 
 func assertScenarioTestMethods(t *testing.T, calls []jsonRPCRequest, want []string) {

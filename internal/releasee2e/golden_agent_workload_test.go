@@ -154,8 +154,8 @@ func TestGoldenAgentWorkloadSQLiteDevRestartFailsClosed(t *testing.T) {
 	writeReleaseFile(t, configPath, goldenRuntimeConfig(store, workspaceDir))
 	tokenFile := filepath.Join(root, "api-token")
 	writeReleaseFile(t, tokenFile, goldenAPIToken+"\n")
-	env := goldenProcessEnv(root, "")
-	assertGoldenProcessHasNoClaudeBinary(t, env)
+	env := goldenProcessEnv(t, root, "", 0)
+	assertGoldenProcessHasNoExternalExecutables(t, env)
 
 	apiPort := freeReleaseTCPPort(t)
 	mcpPort := freeReleaseTCPPort(t)
@@ -184,8 +184,8 @@ func TestGoldenAgentWorkloadSQLiteDevRestartFailsClosed(t *testing.T) {
 	}
 	readyCancel()
 	bundleHash := goldenServedBundleHash(t, process.rpc)
-	runID := goldenPublishIngress(t, process.rpc, bundleHash)
-	waitForGoldenCrashCheckpoint(t, process.rpc, runID)
+	runID := goldenPublishIngress(t, process.rpc, bundleHash, goldenSmokeCandidateIDs)
+	waitForGoldenCrashCheckpoint(t, process.rpc, runID, goldenSmokeCandidateIDs, goldenRunDeadline)
 	if err := process.killAndWait(5 * time.Second); err != nil {
 		t.Fatalf("force-kill dev release serve: %v\n%s", err, process.output.String())
 	}

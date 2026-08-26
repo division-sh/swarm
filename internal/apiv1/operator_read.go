@@ -55,10 +55,16 @@ type healthCheckResult struct {
 }
 
 type RuntimeIdentityResult struct {
-	RuntimeInstanceID   string   `json:"runtime_instance_id"`
-	StartedAt           string   `json:"started_at"`
-	APIVersion          string   `json:"api_version"`
-	SupportedTransports []string `json:"supported_transports"`
+	RuntimeInstanceID   string                        `json:"runtime_instance_id"`
+	StartedAt           string                        `json:"started_at"`
+	APIVersion          string                        `json:"api_version"`
+	SupportedTransports []string                      `json:"supported_transports"`
+	BundleSources       []RuntimeBundleSourceIdentity `json:"bundle_sources"`
+}
+
+type RuntimeBundleSourceIdentity struct {
+	BundleHash   string `json:"bundle_hash"`
+	BundleSource string `json:"bundle_source"`
 }
 
 type runGetResult struct {
@@ -122,6 +128,9 @@ func OperatorRuntimeIdentityHandlers(opts RuntimeIdentityHandlerOptions) map[str
 			}
 			if identity.SupportedTransports == nil {
 				identity.SupportedTransports = []string{}
+			}
+			if identity.BundleSources == nil {
+				identity.BundleSources = []RuntimeBundleSourceIdentity{}
 			}
 			return identity, nil
 		},

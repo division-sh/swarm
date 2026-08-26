@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
@@ -28,7 +29,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/scenarioderivation"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
@@ -62,8 +62,9 @@ type scenarioTestCommandOptions struct {
 }
 
 type scenarioTestFile struct {
-	Path   string
-	FlowID string
+	Path     string
+	FlowID   string
+	Document *scenarioDocument
 }
 
 type scenarioDocument struct {
@@ -291,6 +292,12 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("load contract bundle: %w", err))
 	}
+	if deriveFlow == "" {
+		files, err = prepareScenarioTestFiles(files)
+		if err != nil {
+			return returnScenarioTestValidationError(errOut, err)
+		}
+	}
 	providerCredentials, err := BuildProviderCredentialStore()
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("configure provider credentials: %w", err))
@@ -309,20 +316,15 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	if err != nil {
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("compute bundle_hash: %w", err))
 	}
-	storeSelection, err := resolveRuntimeStoreSelectionWithDefault(
-		RepoRoot,
-		storebackend.ActiveDefaultBackend().String(),
-		false,
-		configResult.Config,
-		filepath.Join(RepoRoot, ".swarm", "swarm.db"),
-		storebackend.SourceProjectDefault,
-	)
+	client, err := newCLIAPIClientFromConfig(opts.apiOptions, configResult.cli)
 	if err != nil {
-		return returnScenarioTestValidationError(errOut, fmt.Errorf("resolve runtime store for effective source: %w", err))
+		writeCLIAPIError(errOut, err)
+		return commandExitError{code: scenarioTestAPIErrorExitCode(err)}
 	}
-	sourceFact, err := scenarioTestBundleSourceFact(bundleHash, storeSelection.Backend)
+	sourceFact, err := scenarioTestBundleSourceFact(ctx, client, bundleHash)
 	if err != nil {
-		return returnScenarioTestValidationError(errOut, fmt.Errorf("derive bundle source fact: %w", err))
+		writeCLIAPIError(errOut, err)
+		return commandExitError{code: scenarioTestAPIErrorExitCode(err)}
 	}
 	projection, err := runtime.AdmitEffectiveSourceProjection(runtime.EffectiveSourceProjectionRequest{
 		Source: semanticview.Wrap(bundle), BundleSourceFact: sourceFact,
@@ -333,11 +335,6 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 		return returnScenarioTestValidationError(errOut, fmt.Errorf("admit effective source: %w", err))
 	}
 	source := projection.Source()
-	client, err := newCLIAPIClientFromConfig(opts.apiOptions, configResult.cli)
-	if err != nil {
-		writeCLIAPIError(errOut, err)
-		return commandExitError{code: scenarioTestAPIErrorExitCode(err)}
-	}
 	runner := scenarioRunner{
 		client:                  client,
 		bundle:                  bundle,
@@ -375,13 +372,36 @@ func runScenarioTestCommand(ctx context.Context, RepoRoot string, out, errOut io
 	return nil
 }
 
-func scenarioTestBundleSourceFact(bundleHash string, backend storebackend.Backend) (runtimecorrelation.BundleSourceFact, error) {
-	switch backend {
-	case storebackend.BackendSQLite, storebackend.BackendPostgres:
-		return runtimecorrelation.NewPersistedBundleSourceFact(bundleHash)
-	default:
-		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("unsupported runtime store backend %q", backend)
+func scenarioTestBundleSourceFact(ctx context.Context, client *cliAPIClient, bundleHash string) (runtimecorrelation.BundleSourceFact, error) {
+	if client == nil {
+		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("runtime API client is required for scenario source identity")
 	}
+	var identity apiv1.RuntimeIdentityResult
+	if err := client.call(ctx, "runtime.identity", map[string]any{}, &identity); err != nil {
+		return runtimecorrelation.BundleSourceFact{}, err
+	}
+	var matched *apiv1.RuntimeBundleSourceIdentity
+	available := make([]string, 0, len(identity.BundleSources))
+	for i := range identity.BundleSources {
+		candidate := identity.BundleSources[i]
+		available = append(available, candidate.BundleHash)
+		if candidate.BundleHash != bundleHash {
+			continue
+		}
+		if matched != nil {
+			return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("runtime identity returned duplicate source facts for bundle_hash %s", bundleHash)
+		}
+		matched = &candidate
+	}
+	if matched == nil {
+		sort.Strings(available)
+		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("target runtime does not serve bundle_hash %s (available: %s)", bundleHash, strings.Join(available, ", "))
+	}
+	fact, err := runtimecorrelation.DecodeBundleSourceFact(matched.BundleHash, matched.BundleSource)
+	if err != nil {
+		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("target runtime returned invalid source fact for bundle_hash %s: %w", bundleHash, err)
+	}
+	return fact, nil
 }
 
 func resolveScenarioTestSources(RepoRoot, contractsFlag string, cfg cliCommandConfig) (string, string, error) {
@@ -533,13 +553,18 @@ func splitPath(path string) []string {
 }
 
 func (r scenarioRunner) runScenarioFile(ctx context.Context, file scenarioTestFile) error {
-	raw, err := os.ReadFile(file.Path)
-	if err != nil {
-		return scenarioTestValidationError{err: fmt.Errorf("%s: read scenario: %w", file.Path, err)}
-	}
-	doc, err := parseScenarioDocument(raw)
-	if err != nil {
-		return scenarioTestValidationError{err: fmt.Errorf("%s: %w", file.Path, err)}
+	var doc scenarioDocument
+	if file.Document != nil {
+		doc = *file.Document
+	} else {
+		raw, err := os.ReadFile(file.Path)
+		if err != nil {
+			return scenarioTestValidationError{err: fmt.Errorf("%s: read scenario: %w", file.Path, err)}
+		}
+		doc, err = parseScenarioDocument(raw)
+		if err != nil {
+			return scenarioTestValidationError{err: fmt.Errorf("%s: %w", file.Path, err)}
+		}
 	}
 	if doc.Derive != nil {
 		plans, err := scenarioderivation.Compile(r.source, r.effectiveSourceIdentity, scenarioderivation.Request{
@@ -604,6 +629,22 @@ func (r scenarioRunner) runScenarioFile(ctx context.Context, file scenarioTestFi
 	}
 	fmt.Fprintf(r.out, "scenario ok: %s\n", file.Path)
 	return nil
+}
+
+func prepareScenarioTestFiles(files []scenarioTestFile) ([]scenarioTestFile, error) {
+	prepared := append([]scenarioTestFile(nil), files...)
+	for i := range prepared {
+		raw, err := os.ReadFile(prepared[i].Path)
+		if err != nil {
+			return nil, fmt.Errorf("%s: read scenario: %w", prepared[i].Path, err)
+		}
+		doc, err := parseScenarioDocument(raw)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", prepared[i].Path, err)
+		}
+		prepared[i].Document = &doc
+	}
+	return prepared, nil
 }
 
 func (r scenarioRunner) runDerivedPlan(ctx context.Context, plan scenarioderivation.Plan) error {

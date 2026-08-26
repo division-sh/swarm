@@ -28336,7 +28336,8 @@ api_specification:
         description: >
           Nonsensitive identity for one served runtime process instance. This is the canonical descriptor-trust identity:
           clients compare runtime_instance_id against local context descriptors after authenticating to the operator API.
-          It is not a bundle fingerprint, PID, port, URL, or unauthenticated process probe.
+          bundle_sources reports the exact bundle-keyed effective-source posture admitted by this live runtime. It is
+          not a persisted bundle catalog, PID, port, URL, or unauthenticated process probe.
         type: object
         additionalProperties: false
         required:
@@ -28344,6 +28345,7 @@ api_specification:
         - started_at
         - api_version
         - supported_transports
+        - bundle_sources
         properties:
           runtime_instance_id:
             $ref: '#/components/schemas/OpaqueId'
@@ -28359,6 +28361,23 @@ api_specification:
               enum:
               - tcp
               - unix
+          bundle_sources:
+            type: array
+            items:
+              $ref: '#/components/schemas/RuntimeBundleSourceIdentity'
+      RuntimeBundleSourceIdentity:
+        description: Exact effective-source posture for one bundle served by the live runtime process.
+        type: object
+        additionalProperties: false
+        required:
+        - bundle_hash
+        - bundle_source
+        properties:
+          bundle_hash:
+            $ref: '#/components/schemas/BundleHash'
+          bundle_source:
+            type: string
+            enum: [persisted, ephemeral]
       RunStatus:
         type: string
         enum:
@@ -32455,8 +32474,9 @@ api_specification:
       tier: must_have
       description: >
         Authenticated nonsensitive identity for the live runtime process instance. Local context descriptors use this
-        method to prove that a discovered API endpoint is the same runtime instance named by the descriptor. It is not
-        bundle identity, PID, port, URL, /healthz, or /readyz.
+        method to prove that a discovered API endpoint is the same runtime instance named by the descriptor. Target-bound
+        clients also consume its exact bundle-keyed effective-source posture rather than inferring it from the selected
+        backend. It is not a persisted bundle catalog, PID, port, URL, /healthz, or /readyz.
       scope:
         required:
         - read:runtime
@@ -35074,7 +35094,8 @@ api_specification:
       methods: []
       rationale: >
         runtime.identity is promoted in v1 as the canonical runtime-instance descriptor trust owner by #1613.
-        Future non-sensitive identity dimensions may extend RuntimeIdentityResult additively.
+        RuntimeIdentityResult also owns the exact bundle-keyed effective-source posture of this live process so
+        target-bound clients never infer persisted versus ephemeral admission from backend selection.
   migration:
     description: How the previous dual-API surface is retired in favor of v1.
     builder_api_disposition:
@@ -35251,11 +35272,13 @@ process_local_work_lifetime_authority:
   shutdown_and_store_release:
     manager_transition: AgentManager shutdown and reset use one retained transition object under the lifecycle coordinator lock. The first Manager admission creates the Manager run occurrence and one distinct parent-runtime transition-executor lease atomically; idle construction creates neither. Explicit shutdown/reset never admits an executor after the runtime fence. A running Manager's watcher already owns the reserved executor and claims the retained transition after run cancellation; a pre-Run shutdown/reset claims and consumes the same reserved executor directly. The executor joins Manager work without owning a Manager lease itself, settles before transition completion, and is released on startup abort or construction rollback. The runtime watcher, explicit shutdown, reset, runtime cancellation, and auth-breaker requests select the same completion and result. Reset is one shared successor transition that starts cleanup only after terminal shutdown. Duplicate callers join rather than interpreting a phase flag, and a shutdown arriving during reset joins the reset transition. Startup abort completes every already-issued shutdown/reset transition with the startup error before clearing its authority, then retires and joins the aborted Manager run occurrence; no caller may retain an open completion that startup discards.
     ordering:
+      - Activate the selected store against the process root before constructing runtimes, watchers, or any other process-owned work.
       - Fence HTTP, API, MCP, runtime, standing-service, route, scheduler, timer-recovery, monitor, and selected-fork admission.
       - Cancel and join every accepted process-local occurrence, preserving exact durable handoff requirements.
       - Complete runtime-owned cleanup and release loaded bundle resources.
       - Retire and join the process root, producing one opaque join receipt.
-      - Close an activated selected store only when presented with that exact process-root receipt.
+      - Release the exact process capability, retaining and retrying transient release failures until terminal settlement.
+      - Close an activated selected store only when presented with that exact process-root receipt, retaining ownership and retrying until exact close completes.
     timeout: The serve shutdown grace is one reporting and cancellation-escalation budget. Timeout is reported, but serve remains the reachable cleanup owner and does not return, detach a reaper, release project/test ownership, or close the store until accepted work settles and exact close completes.
     store_states: An unactivated store may close through its distinct construction-failure owner. Once activated, no unconditional close, fallback close, inferred receipt, or compatibility cleanup path exists.
   sibling_boundaries:

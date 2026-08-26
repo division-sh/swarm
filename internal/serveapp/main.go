@@ -705,6 +705,12 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	if err != nil {
 		return serveRuntimeBundleContext{}, err
 	}
+	runtimeOwned := true
+	defer func() {
+		if runtimeOwned {
+			_ = rt.ShutdownWithOptions(runtime.ShutdownOptions{Grace: req.Options.ShutdownGrace})
+		}
+	}()
 	if !rt.EffectiveSourceIdentity.Equal(projection.Identity()) {
 		return serveRuntimeBundleContext{}, fmt.Errorf(
 			"runtime effective source changed after prevalidation: validated=%s admitted=%s",
@@ -722,6 +728,7 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 	if loaded.bundle == nil || loaded.bundle.PackInventory == nil {
 		return serveRuntimeBundleContext{}, fmt.Errorf("bundle-specific effective pack inventory is required")
 	}
+	runtimeOwned = false
 	return serveRuntimeBundleContext{
 		loaded:                    loaded,
 		stateStoreSummary:         stateStoreSummary,
@@ -781,6 +788,26 @@ func serveOperatorChannelInterfaces(contexts []serveRuntimeBundleContext) ([]ope
 			identities = append(identities, identity)
 		}
 	}
+	return identities, nil
+}
+
+func serveRuntimeBundleSourceIdentities(contexts []serveRuntimeBundleContext) ([]apiv1.RuntimeBundleSourceIdentity, error) {
+	identities := make([]apiv1.RuntimeBundleSourceIdentity, 0, len(contexts))
+	seen := make(map[string]struct{}, len(contexts))
+	for _, runtimeContext := range contexts {
+		if err := runtimeContext.bundleSourceFact.Validate(); err != nil {
+			return nil, fmt.Errorf("runtime identity bundle source: %w", err)
+		}
+		bundleHash, bundleSource := runtimeContext.bundleSourceFact.StorageValues()
+		if _, exists := seen[bundleHash]; exists {
+			return nil, fmt.Errorf("runtime identity has duplicate bundle_hash %s", bundleHash)
+		}
+		seen[bundleHash] = struct{}{}
+		identities = append(identities, apiv1.RuntimeBundleSourceIdentity{
+			BundleHash: bundleHash, BundleSource: bundleSource,
+		})
+	}
+	sort.Slice(identities, func(i, j int) bool { return identities[i].BundleHash < identities[j].BundleHash })
 	return identities, nil
 }
 
@@ -916,7 +943,11 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	}
 	presenter.recordStore(storeSelection)
 	runtimePersistence := projectRuntimePersistenceForServe(stores)
+	closeUnactivatedStore := true
 	defer func() {
+		if !closeUnactivatedStore {
+			return
+		}
 		if err := stores.CloseUnactivated(); err != nil {
 			presenter.cleanupFailure("store shutdown", err)
 		}
@@ -1057,7 +1088,52 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	}
 
 	processWorkOwner := worklifetime.NewProcess()
+	selectedLifecycle, err := activateServeLifecycle(stores, processWorkOwner)
+	if err != nil {
+		presenter.fail(5, "runtime_context", err)
+		return 1
+	}
+	closeUnactivatedStore = false
 	runtimeContexts := make([]serveRuntimeBundleContext, 0, len(loadedBundles))
+	var runtimeContextManager *runtime.RuntimeContextManager
+	var supervisor *runtimeProjectSupervisor
+	var workspaces cliapp.ServeWorkspaceLifecycle
+	var processCapability runtimestartupownership.ProcessCapability
+	cancelOwnershipWatch := func() {}
+	var apiServer, mcpServer *http.Server
+	var publicExposure *runtimepublicingress.Controller
+	var storyFollower *serveAuthorActivityFollower
+	defer func() {
+		cancelServe()
+		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), opts.ShutdownGrace)
+		defer cancelShutdown()
+		deadline, _ := shutdownCtx.Deadline()
+		if storyFollower != nil {
+			storyFollower.StopAndWait()
+		}
+		var shutdownErr error
+		if publicExposure != nil {
+			shutdownErr = publicExposure.Stop(shutdownCtx)
+		}
+		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer(shutdownCtx, "api", apiServer))
+		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer(shutdownCtx, "mcp", mcpServer))
+		if len(runtimeContexts) > 1 {
+			shutdownErr = errors.Join(shutdownErr, closeAdditionalServeRuntimeContexts(context.Background(), runtimeContexts[1:], runtimeContextManager, opts, deadline))
+		}
+		if supervisor != nil {
+			shutdownErr = errors.Join(shutdownErr, closeServeRuntime(context.Background(), supervisor, opts, workspaces, deadline))
+		} else if len(runtimeContexts) > 0 && runtimeContexts[0].runtime != nil {
+			shutdownErr = errors.Join(shutdownErr, runtimeContexts[0].runtime.ShutdownWithOptions(runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadline)}))
+			if opts.Dev && workspaces != nil {
+				_, cleanupErr := workspaces.CleanupDevEntityContainers(context.Background())
+				shutdownErr = errors.Join(shutdownErr, cleanupErr)
+			}
+		}
+		shutdownErr = errors.Join(shutdownErr, cleanupLoadedBundleSources())
+		bundleSourcesCleaned = true
+		cancelOwnershipWatch()
+		presenter.shutdown(selectedLifecycle.Finalize(shutdownCtx, shutdownErr))
+	}()
 	workspaceLabels := serveLifecycleWorkspaceLabels(loadedBundles)
 	for i, loaded := range loadedBundles {
 		contextToolGatewayBinding := toolgateway.Binding{}
@@ -1117,19 +1193,17 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		presenter.fail(5, "startup_topology", err)
 		return 3
 	}
-	processCapability, err := stores.StartupOwnership().AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
+	processCapability, err = stores.StartupOwnership().AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{
 		OwnerID: "serve:" + runtimeInstanceID, BootID: uuid.NewString(), RuntimeInstanceID: runtimeInstanceID,
 	})
 	if err != nil {
 		presenter.fail(5, "startup_ownership_lease", serveOwnershipAcquisitionError(err))
 		return 3
 	}
-	processCapabilityShutdownOwned := false
-	defer func() {
-		if !processCapabilityShutdownOwned {
-			_ = processCapability.Release(context.Background())
-		}
-	}()
+	if err := selectedLifecycle.SetProcessCapability(processCapability); err != nil {
+		presenter.fail(5, "startup_ownership_lease", err)
+		return 3
+	}
 	processAuthority, err := processCapability.Evidence()
 	if err != nil {
 		presenter.fail(5, "startup_ownership_lease", err)
@@ -1138,8 +1212,8 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	if processAuthority.AcquisitionKind == runtimestartupownership.AcquisitionCrashTakeover {
 		presenter.recordRecoveredPreviousSession()
 	}
-	ownershipWatchCtx, cancelOwnershipWatch := context.WithCancel(ctx)
-	defer cancelOwnershipWatch()
+	ownershipWatchCtx, watchCancel := context.WithCancel(ctx)
+	cancelOwnershipWatch = watchCancel
 	ownershipLoss, err := startServeOwnershipWatch(ownershipWatchCtx, processWorkOwner, processCapability, presenter, cancelServe)
 	if err != nil {
 		presenter.fail(5, "startup_ownership_lease", err)
@@ -1167,7 +1241,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	bundle := primaryContext.loaded.bundle
 	contractsRoot := primaryContext.loaded.contractsRoot
 	bootBundleIdentity := primaryContext.bootIdentity
-	workspaces := primaryContext.workspaces
+	workspaces = primaryContext.workspaces
 	primaryWorkspaceBackend = primaryContext.workspaceBackend
 	rt := primaryContext.runtime
 	channelInterfaces, err := serveOperatorChannelInterfaces(runtimeContexts)
@@ -1235,7 +1309,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		runtimeContexts[i].startupStandingTargets = targets
 		runtimeContexts[i].startupStandingActivations = activations
 	}
-	runtimeContextManager, err := runtime.NewRuntimeContextManager(stores.RunBundleAvailability())
+	runtimeContextManager, err = runtime.NewRuntimeContextManager(stores.RunBundleAvailability())
 	if err != nil {
 		presenter.fail(5, "runtime_context", err)
 		return 1
@@ -1248,7 +1322,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	}
 
 	ready := runtimepublicingress.NewReadinessOwner(publicIngressEnabled)
-	supervisor := newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, runtimePersistence, ready, mountSources, workspaceBackendPreference, credentialStore, providerCredentialStore, primaryPackLoad.ProviderTriggers.Catalog, platformPackBase, contractsRoot, bundle, source, rt, opts.Dev)
+	supervisor = newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, runtimePersistence, ready, mountSources, workspaceBackendPreference, credentialStore, providerCredentialStore, primaryPackLoad.ProviderTriggers.Catalog, platformPackBase, contractsRoot, bundle, source, rt, opts.Dev)
 	supervisor.noticePresentation = noticePresentation
 	supervisor.SetPlatformPackBaseGenerationOwner(platformPackBases)
 	supervisor.SetProcessCapability(processCapability)
@@ -1266,45 +1340,6 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	if len(pinnedBundleHashes) > 0 {
 		supervisor.DisableSourceReplacement("swarm serve --bundle-hash pins persisted bundle contexts for the process; dynamic project reload is not supported in this mode")
 	}
-	if err := stores.Activate(processWorkOwner); err != nil {
-		presenter.fail(5, "runtime_context", err)
-		return 1
-	}
-	var apiServer, mcpServer *http.Server
-	var publicExposure *runtimepublicingress.Controller
-	var storyFollower *serveAuthorActivityFollower
-	processCapabilityShutdownOwned = true
-	defer func() {
-		shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), opts.ShutdownGrace)
-		defer cancelShutdown()
-		deadline, _ := shutdownCtx.Deadline()
-		storyFollower.StopAndWait()
-		var shutdownErr error
-		if publicExposure != nil {
-			shutdownErr = publicExposure.Stop(shutdownCtx)
-		}
-		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer(shutdownCtx, "api", apiServer))
-		shutdownErr = errors.Join(shutdownErr, shutdownHTTPServer(shutdownCtx, "mcp", mcpServer))
-		shutdownErr = errors.Join(shutdownErr, closeAdditionalServeRuntimeContexts(context.Background(), runtimeContexts[1:], runtimeContextManager, opts, deadline))
-		shutdownErr = errors.Join(shutdownErr, closeServeRuntime(context.Background(), supervisor, opts, workspaces, deadline))
-		shutdownErr = errors.Join(shutdownErr, cleanupLoadedBundleSources())
-		bundleSourcesCleaned = true
-		cancelOwnershipWatch()
-		processWorkOwner.Retire()
-		receipt, joinErr := processWorkOwner.Join(shutdownCtx)
-		if joinErr != nil {
-			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("process work join timed out after %s: %w", opts.ShutdownGrace, joinErr))
-			receipt, joinErr = processWorkOwner.Join(context.Background())
-		}
-		shutdownErr = errors.Join(shutdownErr, joinErr)
-		if joinErr == nil {
-			shutdownErr = errors.Join(shutdownErr, processCapability.Release(context.Background()))
-			if shutdownErr == nil {
-				shutdownErr = errors.Join(shutdownErr, stores.CloseActivated(receipt))
-			}
-		}
-		presenter.shutdown(shutdownErr)
-	}()
 	apiStoreCaps, err := buildSelectedAPICapabilities(stores, selectedAPICapabilityRequest{
 		RepoRoot:                repo,
 		PlatformSpecPath:        resolvedPlatformSpecPath,
@@ -1338,11 +1373,17 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		RunBundleContext: apiStoreCaps.RunBundleContext, RuntimeContexts: apiStoreCaps.RuntimeContexts,
 		Source: source, Bundle: bootBundleIdentity, ScenarioExecutionProfiles: stores.ScenarioExecutionProfiles(),
 	}
+	runtimeBundleSources, err := serveRuntimeBundleSourceIdentities(runtimeContexts)
+	if err != nil {
+		presenter.fail(5, "runtime_identity", err)
+		return 1
+	}
 	runtimeIdentity := apiv1.RuntimeIdentityResult{
 		RuntimeInstanceID:   runtimeInstanceID,
 		StartedAt:           bootStartedAt.Format(time.RFC3339Nano),
 		APIVersion:          "v1",
 		SupportedTransports: []string{"tcp"},
+		BundleSources:       runtimeBundleSources,
 	}
 	handlers := apiv1.MergeOperatorHandlers(
 		apiv1.OperatorHealthHandlers(apiv1.HealthHandlerOptions{ExecutionPosture: rt.ExecutionPosture, Ready: readyFn, Database: apiStoreCaps.Database, Bundle: bootBundleIdentity}),

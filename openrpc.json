@@ -9580,7 +9580,7 @@
     },
     {
       "name": "runtime.identity",
-      "description": "Authenticated nonsensitive identity for the live runtime process instance. Local context descriptors use this method to prove that a discovered API endpoint is the same runtime instance named by the descriptor. It is not bundle identity, PID, port, URL, /healthz, or /readyz.\n",
+      "description": "Authenticated nonsensitive identity for the live runtime process instance. Local context descriptors use this method to prove that a discovered API endpoint is the same runtime instance named by the descriptor. Target-bound clients also consume its exact bundle-keyed effective-source posture rather than inferring it from the selected backend. It is not a persisted bundle catalog, PID, port, URL, /healthz, or /readyz.\n",
       "params": [],
       "result": {
         "name": "result",
@@ -16618,13 +16618,40 @@
         ],
         "type": "object"
       },
+      "RuntimeBundleSourceIdentity": {
+        "additionalProperties": false,
+        "description": "Exact effective-source posture for one bundle served by the live runtime process.",
+        "properties": {
+          "bundle_hash": {
+            "$ref": "#/components/schemas/BundleHash"
+          },
+          "bundle_source": {
+            "enum": [
+              "persisted",
+              "ephemeral"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "bundle_hash",
+          "bundle_source"
+        ],
+        "type": "object"
+      },
       "RuntimeIdentityResult": {
         "additionalProperties": false,
-        "description": "Nonsensitive identity for one served runtime process instance. This is the canonical descriptor-trust identity: clients compare runtime_instance_id against local context descriptors after authenticating to the operator API. It is not a bundle fingerprint, PID, port, URL, or unauthenticated process probe.\n",
+        "description": "Nonsensitive identity for one served runtime process instance. This is the canonical descriptor-trust identity: clients compare runtime_instance_id against local context descriptors after authenticating to the operator API. bundle_sources reports the exact bundle-keyed effective-source posture admitted by this live runtime. It is not a persisted bundle catalog, PID, port, URL, or unauthenticated process probe.\n",
         "properties": {
           "api_version": {
             "const": "v1",
             "type": "string"
+          },
+          "bundle_sources": {
+            "items": {
+              "$ref": "#/components/schemas/RuntimeBundleSourceIdentity"
+            },
+            "type": "array"
           },
           "runtime_instance_id": {
             "$ref": "#/components/schemas/OpaqueId"
@@ -16647,7 +16674,8 @@
           "runtime_instance_id",
           "started_at",
           "api_version",
-          "supported_transports"
+          "supported_transports",
+          "bundle_sources"
         ],
         "type": "object"
       },

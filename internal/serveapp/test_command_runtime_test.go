@@ -81,6 +81,79 @@ func TestServedParityHarnessDerivedScenarioLifecycle(t *testing.T) {
 	servedparity.Run(t, servedparity.MustScenario(servedparity.ScenarioDerivedScenarioLifecycle), runServedDerivedScenarioBackendProof)
 }
 
+func TestSwarmTestConsumesLiveBundleSourceAcrossBackendsAndModes(t *testing.T) {
+	for _, backend := range []storebackend.Backend{storebackend.BackendSQLite, storebackend.BackendPostgres} {
+		for _, dev := range []bool{false, true} {
+			name := backend.String() + "/nondev"
+			if dev {
+				name = backend.String() + "/dev"
+			}
+			t.Run(name, func(t *testing.T) {
+				isolateCLIAPIConfigEnv(t)
+				unsetStoreSelectorEnv(t)
+				t.Setenv("PATH", t.TempDir())
+				t.Setenv("ANTHROPIC_API_KEY", "")
+				t.Setenv("TELEGRAM_BOT_TOKEN", "")
+				t.Setenv("SWARM_CREDENTIALS_FILE", filepath.Join(t.TempDir(), "credentials.json"))
+				contractsPath := canonicalrouting.WriteNovelDerivedScenarioBundle(t)
+				testsDir := filepath.Join(contractsPath, "tests")
+				if err := os.MkdirAll(testsDir, 0o755); err != nil {
+					t.Fatalf("create authored scenario directory: %v", err)
+				}
+				if err := os.WriteFile(filepath.Join(testsDir, "authored.yaml"), []byte(`
+name: authored source posture
+steps:
+  - publish: fulfillment.requested
+    payload: {order_id: authored}
+expect:
+  events:
+    include: [fulfillment.requested]
+  no_dead_letters: true
+`), 0o644); err != nil {
+					t.Fatalf("write authored scenario: %v", err)
+				}
+
+				configPath := ""
+				opts := cliapp.ServeOptions{
+					ContractsPath: contractsPath, PlatformSpecPath: filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath),
+					APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", Dev: dev,
+					SelfCheck: true, RequireBundleMatch: false, NoRequireBundleMatch: true, Verbose: true,
+					TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
+				}
+				switch backend {
+				case storebackend.BackendSQLite:
+					stubServeRuntimeWorkspaceLifecycle(t)
+					configPath = writeMockAgentRuntimeConfig(t, backend.String(), filepath.Join(t.TempDir(), "source-posture.sqlite"))
+				case storebackend.BackendPostgres:
+					_, _, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
+					configPath = writeMockAgentRuntimeConfig(t, backend.String(), "")
+					opts.StoreMode = backend.String()
+					opts.StoreModeSet = true
+				default:
+					t.Fatalf("unsupported backend %q", backend)
+				}
+				opts.ConfigPath = configPath
+				process := startServeRuntimeTestProcess(t, opts)
+				process.waitForReadyLine()
+				endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString())
+				for _, args := range [][]string{
+					{"test", "--contracts", contractsPath, "--timeout", "5s", "--poll-interval", "10ms"},
+					{"test", "--contracts", contractsPath, "--derive", "fulfillment", "--input", "request", "--timeout", "5s", "--poll-interval", "10ms"},
+				} {
+					var stdout, stderr bytes.Buffer
+					commandArgs := append(append([]string(nil), args...), "--api-server", endpoint, "--config", configPath)
+					if code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), commandArgs, &stdout, &stderr, nil); code != 0 {
+						t.Fatalf("%s command %v code=%d stdout=%s stderr=%s", name, args, code, stdout.String(), stderr.String())
+					}
+					if !strings.Contains(stdout.String(), "swarm test ok: scenarios=1") {
+						t.Fatalf("%s command %v output missing success: %s", name, args, stdout.String())
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestServeRuntimeConfiguredChannelBindingProjectsOnce(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	unsetStoreSelectorEnv(t)

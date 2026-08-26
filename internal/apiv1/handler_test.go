@@ -569,6 +569,10 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 				StartedAt:           now.Format(time.RFC3339Nano),
 				APIVersion:          "v1",
 				SupportedTransports: []string{"tcp"},
+				BundleSources: []RuntimeBundleSourceIdentity{{
+					BundleHash:   "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+					BundleSource: "persisted",
+				}},
 			},
 		}),
 	})
@@ -610,6 +614,9 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 	}
 	if identityResult["runtime_instance_id"] == bundle["bundle_hash"] {
 		t.Fatalf("runtime.identity reused bundle hash: %#v", identityResult)
+	}
+	if sources, ok := identityResult["bundle_sources"].([]any); !ok || len(sources) != 1 {
+		t.Fatalf("runtime.identity bundle_sources = %#v, want one exact source fact", identityResult["bundle_sources"])
 	}
 
 	get := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"get","method":"run.get","params":{"run_id":"run-1"}}`)

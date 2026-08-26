@@ -594,7 +594,7 @@ operator_read_api_parity_ledger:
     proof_refs:
       - {kind: go_test, name: TestOperatorReadHandlersExposeHealthAndRunReadMethods}
       - {kind: go_test, name: TestOpenRPCReadOnlyHTTPRuntimeProbes}
-    notes: Static non-store runtime identity method; no selected operator-read store is involved.
+    notes: Non-store live process identity and bundle-keyed effective-source posture; static after process admission and no selected operator-read store call is involved.
   - method: runtime.incidents
     classification: dual_backend_api_proof
     backends: [default_sqlite, explicit_postgres]
