@@ -103,12 +103,12 @@ func (s *SQLiteRuntimeStore) ResolveDataVersionSummary(ctx context.Context, ref 
 	return s.durableDataOwner.ResolveVersionSummary(ctx, ref, selector)
 }
 
-func (s *PostgresStore) LoadDataVersionPayload(ctx context.Context, ref runtimedata.DeclarationRef, versionID runtimedata.VersionID) (runtimedata.Version, error) {
-	return s.durableDataOwner.LoadVersionPayload(ctx, ref, versionID)
+func (s *PostgresStore) ResolveDataVersionPayload(ctx context.Context, ref runtimedata.DeclarationRef, selector runtimedata.VersionSelector) (runtimedata.VersionSummary, runtimedata.Version, error) {
+	return s.durableDataOwner.ResolveVersionPayload(ctx, ref, selector)
 }
 
-func (s *SQLiteRuntimeStore) LoadDataVersionPayload(ctx context.Context, ref runtimedata.DeclarationRef, versionID runtimedata.VersionID) (runtimedata.Version, error) {
-	return s.durableDataOwner.LoadVersionPayload(ctx, ref, versionID)
+func (s *SQLiteRuntimeStore) ResolveDataVersionPayload(ctx context.Context, ref runtimedata.DeclarationRef, selector runtimedata.VersionSelector) (runtimedata.VersionSummary, runtimedata.Version, error) {
+	return s.durableDataOwner.ResolveVersionPayload(ctx, ref, selector)
 }
 
 func (s *PostgresStore) ListDataVersionProvenance(ctx context.Context, versionID runtimedata.VersionID, afterSequence uint64, limit int) ([]runtimedata.Provenance, error) {

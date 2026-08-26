@@ -66,6 +66,24 @@ func TestVersionReadTypesCloseSummaryAndSelectorStates(t *testing.T) {
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("valid version summary: %v", err)
 	}
+	stored := Version{
+		VersionID: compiled.VersionID, SequenceAlias: 1, Manifest: compiled.Manifest,
+		CanonicalJSONL: compiled.CanonicalJSONL,
+	}
+	if err := valid.ValidateVersion(stored); err != nil {
+		t.Fatalf("valid summary/payload pair: %v", err)
+	}
+	missingPayload := stored
+	missingPayload.CanonicalJSONL = nil
+	if err := valid.ValidateVersion(missingPayload); err == nil {
+		t.Fatal("materialized summary accepted absent payload")
+	}
+	prunedWithPayload := stored
+	now := time.Now().UTC()
+	prunedWithPayload.PrunedAt = &now
+	if err := valid.ValidateVersion(prunedWithPayload); err == nil {
+		t.Fatal("pruned version retained payload")
+	}
 	for _, test := range []struct {
 		name   string
 		mutate func(*VersionSummary)

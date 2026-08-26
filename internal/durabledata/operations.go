@@ -637,7 +637,7 @@ type Store interface {
 	ListDeclarationSummaries(context.Context, string) ([]DeclarationSummary, error)
 	ListVersionSummaries(context.Context, DeclarationRef, uint64, int) ([]VersionSummary, error)
 	ResolveVersionSummary(context.Context, DeclarationRef, VersionSelector) (VersionSummary, error)
-	LoadVersionPayload(context.Context, DeclarationRef, VersionID) (Version, error)
+	ResolveVersionPayload(context.Context, DeclarationRef, VersionSelector) (VersionSummary, Version, error)
 	ListVersionProvenance(context.Context, VersionID, uint64, int) ([]Provenance, error)
 	ListPins(context.Context, VersionID, string, int) ([]Pin, error)
 	ListHeadHistory(context.Context, DeclarationRef, uint64, int) ([]HeadHistory, error)

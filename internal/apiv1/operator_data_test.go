@@ -160,20 +160,23 @@ func (s *dataRuntimeProbeStore) ListDataVersionSummaries(_ context.Context, ref 
 	if s.version.SequenceAlias <= after || limit == 0 {
 		return []durabledata.VersionSummary{}, nil
 	}
-	return []durabledata.VersionSummary{dataVersionSummary(ref, s.version)}, nil
+	return []durabledata.VersionSummary{s.version.Summary()}, nil
 }
 
 func (s *dataRuntimeProbeStore) ResolveDataVersionSummary(_ context.Context, ref durabledata.DeclarationRef, selector durabledata.VersionSelector) (durabledata.VersionSummary, error) {
 	if err := selector.Validate(); err != nil {
 		return durabledata.VersionSummary{}, err
 	}
-	return dataVersionSummary(ref, s.version), nil
+	return s.version.Summary(), nil
 }
 
-func (s *dataRuntimeProbeStore) LoadDataVersionPayload(context.Context, durabledata.DeclarationRef, durabledata.VersionID) (durabledata.Version, error) {
+func (s *dataRuntimeProbeStore) ResolveDataVersionPayload(_ context.Context, _ durabledata.DeclarationRef, selector durabledata.VersionSelector) (durabledata.VersionSummary, durabledata.Version, error) {
+	if err := selector.Validate(); err != nil {
+		return durabledata.VersionSummary{}, durabledata.Version{}, err
+	}
 	version := s.version
 	version.Provenance = nil
-	return version, nil
+	return version.Summary(), version, nil
 }
 
 func (s *dataRuntimeProbeStore) ListDataVersionProvenance(_ context.Context, _ durabledata.VersionID, after uint64, limit int) ([]durabledata.Provenance, error) {
@@ -744,6 +747,19 @@ func TestDurableDataHTTPPublicSurfaceAcrossSelectedStores(t *testing.T) {
 				return map[string]any{"format": "jsonl", "content_base64": base64.StdEncoding.EncodeToString([]byte("{\"slug\":\"" + slug + "\"}\n"))}
 			}
 			declaration := map[string]any{"package_key": ref.PackageKey, "event": ref.EventName}
+			missingDeclaration := map[string]any{"package_key": ref.PackageKey, "event": "missing.loaded"}
+			for _, probe := range []map[string]any{
+				{"view": "version", "declaration": missingDeclaration, "selector": map[string]any{"kind": "head"}},
+				{"view": "rows", "declaration": missingDeclaration, "selector": map[string]any{"kind": "head"}, "page": map[string]any{}},
+				{"view": "row", "declaration": missingDeclaration, "selector": map[string]any{"kind": "head"}, "row_selector": map[string]any{"position": 1}},
+				{"view": "export_chunk", "declaration": missingDeclaration, "selector": map[string]any{"kind": "head"}, "page": map[string]any{}},
+				{"view": "provenance", "declaration": missingDeclaration, "selector": map[string]any{"kind": "head"}, "page": map[string]any{}},
+				{"view": "pins", "declaration": missingDeclaration, "selector": map[string]any{"kind": "head"}, "page": map[string]any{}},
+			} {
+				if err := callError("data.show", probe); asMap(t, err.Data)["code"] != string(durabledata.CodeDeclarationMissing) {
+					t.Fatalf("missing declaration error = %#v for %#v", err, probe)
+				}
+			}
 			emptyCheck := call("data.check", map[string]any{
 				"source_invocation_id": uuid.NewString(), "bundle_hash": dataProbeBundleHash,
 				"declaration": declaration, "expected_head": map[string]any{"state": "absent"},
