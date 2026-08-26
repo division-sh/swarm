@@ -126,9 +126,9 @@ func admitEventCatalogEntry(name string, declaration yamlsource.MappingField) (E
 	}
 	entry.admissionProvenance["declaration"] = EffectiveValueProvenance{
 		Origin:         EffectiveValueOriginAuthored,
-		SourceFile:     declaration.KeyLocation.File,
-		SourceLine:     declaration.KeyLocation.Line,
-		SourceColumn:   declaration.KeyLocation.Column,
+		SourceFile:     declaration.IntroductionLocation().File,
+		SourceLine:     declaration.IntroductionLocation().Line,
+		SourceColumn:   declaration.IntroductionLocation().Column,
 		SourcePresence: value.Presence().String(),
 	}
 
@@ -164,7 +164,7 @@ func admitEventCatalogEntry(name string, declaration yamlsource.MappingField) (E
 		if optional {
 			entry.admissionProvenance[optionalPath] = authoredEventProvenance(typeSource)
 		} else {
-			location := typeSource.Location()
+			location := typeSource.IntroductionLocation()
 			entry.admissionProvenance[optionalPath] = EffectiveValueProvenance{
 				Origin:       EffectiveValueOriginDerived,
 				RuleID:       eventRequiredByDefaultRule,
@@ -896,7 +896,7 @@ func optionalEventEmitter(value yamlsource.Value) (EventEmitterRef, []string, er
 }
 
 func authoredEventProvenance(value yamlsource.Value) EffectiveValueProvenance {
-	location := value.Location()
+	location := value.IntroductionLocation()
 	return EffectiveValueProvenance{
 		Origin:         EffectiveValueOriginAuthored,
 		SourceFile:     location.File,

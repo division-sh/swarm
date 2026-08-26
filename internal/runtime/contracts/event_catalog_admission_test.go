@@ -139,6 +139,58 @@ func TestEventCatalogAdmissionRetainsAliasValues(t *testing.T) {
 	}
 }
 
+func TestEventCatalogAdmissionRetainsAliasAndMergeIntroductionLocations(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		source   string
+		wantLine int
+	}{
+		{
+			name: "nested mapping alias",
+			source: `
+defaults: &defaults
+  type: text
+value: *defaults
+`,
+			wantLine: 4,
+		},
+		{
+			name: "merge alias",
+			source: `
+defaults: &defaults
+  type: text
+value:
+  <<: *defaults
+`,
+			wantLine: 5,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			entry, err := admitEventCatalogEntryForTest(t, tc.source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			provenance := entry.admissionProvenance["fields.value.type"]
+			if provenance.SourceLine != tc.wantLine {
+				t.Fatalf("provenance line = %d, want authored introduction on line %d", provenance.SourceLine, tc.wantLine)
+			}
+		})
+	}
+
+	snapshot, err := yamlsource.Load([]byte("<<: &defaults\n  test.event: {}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := admitEventCatalogDocument(snapshot.Document("events.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	provenance := entries["test.event"].admissionProvenance["declaration"]
+	if provenance.SourceLine != 1 {
+		t.Fatalf("merged declaration provenance line = %d, want authored merge occurrence on line 1", provenance.SourceLine)
+	}
+}
+
 func TestEventCatalogAdmissionOwnsDeclarationIdentityBeforeMapInsertion(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

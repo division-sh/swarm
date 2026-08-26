@@ -88,10 +88,11 @@ func (d Document) Root() Value {
 
 // Value exposes syntax and location without exposing the retained yaml.Node.
 type Value struct {
-	node    *yaml.Node
-	file    string
-	path    string
-	missing bool
+	node         *yaml.Node
+	file         string
+	path         string
+	missing      bool
+	introduction Location
 }
 
 func (v Value) SemanticPath() string { return v.path }
@@ -102,6 +103,17 @@ func (v Value) Location() Location {
 		return Location{File: v.file}
 	}
 	return Location{File: v.file, Line: node.Line, Column: node.Column}
+}
+
+// IntroductionLocation identifies the lexical occurrence that introduced this
+// effective value. For descendants projected through an alias or merge it is
+// the outer alias/merge use; Location and ResolvedLocation still expose the
+// retained value and target coordinates separately.
+func (v Value) IntroductionLocation() Location {
+	if validLocation(v.introduction) {
+		return v.introduction
+	}
+	return v.Location()
 }
 
 // ResolvedLocation identifies the semantic target of a YAML alias. Location
@@ -174,9 +186,10 @@ func (v Value) Sequence() ([]Value, error) {
 	if node == nil || node.Kind != yaml.SequenceNode {
 		return nil, fmt.Errorf("%s at %s is %s, want sequence", v.path, v.Location(), v.Presence())
 	}
+	introduction := v.descendantIntroduction()
 	out := make([]Value, 0, len(node.Content))
 	for i, child := range node.Content {
-		out = append(out, Value{node: child, file: v.file, path: v.path + "[" + strconv.Itoa(i) + "]"})
+		out = append(out, Value{node: child, file: v.file, path: v.path + "[" + strconv.Itoa(i) + "]", introduction: introduction})
 	}
 	return out, nil
 }
@@ -189,6 +202,18 @@ type MappingField struct {
 	MergeLocation              Location
 	MergeValueLocation         Location
 	MergeResolvedValueLocation Location
+}
+
+// IntroductionLocation identifies where this field entered the effective
+// mapping while KeyLocation retains the expanded key coordinate.
+func (f MappingField) IntroductionLocation() Location {
+	if validLocation(f.Value.introduction) {
+		return f.Value.introduction
+	}
+	if f.FromMerge && validLocation(f.MergeValueLocation) {
+		return f.MergeValueLocation
+	}
+	return f.KeyLocation
 }
 
 type Occurrence struct {
@@ -214,7 +239,7 @@ func (v Value) Mapping() ([]MappingField, error) {
 	if node == nil || node.Kind != yaml.MappingNode {
 		return nil, fmt.Errorf("%s at %s is %s, want mapping", v.path, v.Location(), v.Presence())
 	}
-	return collectMappingFields(node, v.file, v.path, false, Location{}, Location{}, Location{}, map[*yaml.Node]bool{})
+	return collectMappingFields(node, v.file, v.path, v.descendantIntroduction(), false, Location{}, Location{}, Location{}, map[*yaml.Node]bool{})
 }
 
 func (v Value) Lookup(name string) (Lookup, error) {
@@ -293,7 +318,7 @@ func (v Value) Project(target any) error {
 	return node.Decode(target)
 }
 
-func collectMappingFields(node *yaml.Node, file, path string, fromMerge bool, mergeLocation, mergeValueLocation, mergeResolvedValueLocation Location, stack map[*yaml.Node]bool) ([]MappingField, error) {
+func collectMappingFields(node *yaml.Node, file, path string, introduction Location, fromMerge bool, mergeLocation, mergeValueLocation, mergeResolvedValueLocation Location, stack map[*yaml.Node]bool) ([]MappingField, error) {
 	node = resolvedValueNode(node)
 	if node == nil || node.Kind != yaml.MappingNode {
 		return nil, fmt.Errorf("%s is not a mapping", path)
@@ -313,7 +338,7 @@ func collectMappingFields(node *yaml.Node, file, path string, fromMerge bool, me
 		}
 		keyLocation := Location{File: file, Line: node.Content[i].Line, Column: node.Content[i].Column}
 		if keyNode.Value == "<<" || strings.EqualFold(strings.TrimSpace(keyNode.Tag), "!!merge") {
-			merged, err := collectMergeFields(valueNode, file, path, keyLocation, stack)
+			merged, err := collectMergeFields(valueNode, file, path, introduction, keyLocation, stack)
 			if err != nil {
 				return nil, err
 			}
@@ -324,7 +349,7 @@ func collectMappingFields(node *yaml.Node, file, path string, fromMerge bool, me
 		out = append(out, MappingField{
 			Name:                       name,
 			KeyLocation:                keyLocation,
-			Value:                      Value{node: valueNode, file: file, path: mappingChildPath(path, name)},
+			Value:                      Value{node: valueNode, file: file, path: mappingChildPath(path, name), introduction: introduction},
 			FromMerge:                  fromMerge,
 			MergeLocation:              mergeLocation,
 			MergeValueLocation:         mergeValueLocation,
@@ -334,7 +359,7 @@ func collectMappingFields(node *yaml.Node, file, path string, fromMerge bool, me
 	return out, nil
 }
 
-func collectMergeFields(node *yaml.Node, file, path string, mergeLocation Location, stack map[*yaml.Node]bool) ([]MappingField, error) {
+func collectMergeFields(node *yaml.Node, file, path string, introduction, mergeLocation Location, stack map[*yaml.Node]bool) ([]MappingField, error) {
 	mergeValueLocation := nodeLocation(file, authoredValueNode(node))
 	resolved := resolvedValueNode(node)
 	if resolved == nil {
@@ -343,7 +368,11 @@ func collectMergeFields(node *yaml.Node, file, path string, mergeLocation Locati
 	mergeResolvedValueLocation := nodeLocation(file, resolved)
 	switch resolved.Kind {
 	case yaml.MappingNode:
-		return collectMappingFields(resolved, file, path, true, mergeLocation, mergeValueLocation, mergeResolvedValueLocation, stack)
+		mappingIntroduction := introduction
+		if !validLocation(mappingIntroduction) {
+			mappingIntroduction = mergeValueLocation
+		}
+		return collectMappingFields(resolved, file, path, mappingIntroduction, true, mergeLocation, mergeValueLocation, mergeResolvedValueLocation, stack)
 	case yaml.SequenceNode:
 		var out []MappingField
 		for _, item := range resolved.Content {
@@ -352,7 +381,11 @@ func collectMergeFields(node *yaml.Node, file, path string, mergeLocation Locati
 			if resolvedItem == nil || resolvedItem.Kind != yaml.MappingNode {
 				return nil, fmt.Errorf("YAML merge sequence at %s contains a non-mapping value", mergeLocation)
 			}
-			fields, err := collectMappingFields(resolvedItem, file, path, true, mergeLocation, itemValueLocation, nodeLocation(file, resolvedItem), stack)
+			itemIntroduction := introduction
+			if !validLocation(itemIntroduction) {
+				itemIntroduction = itemValueLocation
+			}
+			fields, err := collectMappingFields(resolvedItem, file, path, itemIntroduction, true, mergeLocation, itemValueLocation, nodeLocation(file, resolvedItem), stack)
 			if err != nil {
 				return nil, err
 			}
@@ -362,6 +395,21 @@ func collectMergeFields(node *yaml.Node, file, path string, mergeLocation Locati
 	default:
 		return nil, fmt.Errorf("YAML merge at %s requires a mapping or sequence of mappings", mergeLocation)
 	}
+}
+
+func (v Value) descendantIntroduction() Location {
+	if validLocation(v.introduction) {
+		return v.introduction
+	}
+	node := authoredValueNode(v.node)
+	if node != nil && node.Kind == yaml.AliasNode {
+		return v.Location()
+	}
+	return Location{}
+}
+
+func validLocation(location Location) bool {
+	return location.Line > 0 || location.Column > 0
 }
 
 func authoredValueNode(node *yaml.Node) *yaml.Node {
