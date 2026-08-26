@@ -144,7 +144,7 @@ func (c *agentLifecycleCoordinator) executableReadinessByIdentity(identity runti
 	switch c.phase {
 	case runtimeLifecycleStopped:
 		if !executionPreparedBeforeRunLocked(cell) {
-			return executableAgentReadiness{}, executableReadinessError(identity, c.phase, state, "projection is not exactly registered/stopped preparation")
+			return executableAgentReadiness{}, executableReadinessError(identity, c.phase, state, "projection is not an exact pre-run preparation")
 		}
 		return executableAgentReadiness{Kind: executableAgentPreparedBeforeRun, State: state}, nil
 	case runtimeLifecycleRunning:
@@ -174,7 +174,9 @@ func executionPreparedBeforeRunLocked(cell *agentLifecycleCell) bool {
 	}
 	execution := cell.execution
 	token := lifecycleToken(cell.identity, cell.epoch, cell.generation)
-	return cell.phase == AgentLifecycleRegistered && cell.runMode == AgentRunModeStopped &&
+	phasePrepared := (cell.phase == AgentLifecycleRegistered && cell.runMode == AgentRunModeStopped) ||
+		cell.phase == AgentLifecycleRunning
+	return phasePrepared &&
 		execution.agent != nil && execution.token == token && !execution.fenced &&
 		execution.generationCtx != nil && execution.generationCtx.Err() == nil &&
 		execution.loopCancel == nil && execution.loopDone == nil && execution.loopSettled == nil &&

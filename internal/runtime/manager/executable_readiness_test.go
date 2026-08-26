@@ -154,6 +154,31 @@ func TestExecutableAgentPreparationUpgradesExactlyOnceWhenManagerStarts(t *testi
 	}
 }
 
+func TestExecutablePreparationAcceptsTakenOverRunningDurableState(t *testing.T) {
+	am := newProjectionTestManager(t, newProjectionTestBus(), (&projectionTestFactory{handled: make(chan int, 1)}).Build)
+	cfg := managerTestAgentConfig(models.AgentConfig{
+		ExecutionMode: "live", ID: "taken-over-agent",
+		Identity:      runtimeagentidentitytest.RootRuntime(t, "taken-over-agent", "taken-over-test"),
+		Subscriptions: []string{"test.old"},
+	})
+	if err := spawnManagerTestAgent(am, cfg); err != nil {
+		t.Fatal(err)
+	}
+	identity, err := cfg.ConcreteIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	am.lifecycle.mu.Lock()
+	cell := am.lifecycle.cells[identity]
+	cell.phase = AgentLifecycleRunning
+	cell.runMode = AgentRunModeStandard
+	am.lifecycle.mu.Unlock()
+	readiness, err := am.lifecycle.executableReadinessByIdentity(identity)
+	if err != nil || readiness.Kind != executableAgentPreparedBeforeRun || readiness.State.Phase != AgentLifecycleRunning {
+		t.Fatalf("taken-over readiness = %#v err=%v", readiness, err)
+	}
+}
+
 func TestFreshSpawnDuringLiveManagerReturnsRunnableProjection(t *testing.T) {
 	bus := newProjectionTestBus()
 	factory := &projectionTestFactory{handled: make(chan int, 1)}
