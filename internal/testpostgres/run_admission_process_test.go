@@ -219,3 +219,22 @@ func waitForRunSettlementFence(t *testing.T, admission *RunAdmission, slot int, 
 	}
 	t.Fatalf("timed out waiting for slot %d settlement fence", slot)
 }
+
+func waitForRunSettlementFenceRelease(t *testing.T, admission *RunAdmission, slot int, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		probe, acquired, err := acquireFileLock(admission.settlementPath(slot), true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if acquired {
+			if err := probe.Close(); err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for slot %d settlement fence release", slot)
+}

@@ -51,29 +51,45 @@ func run(args []string) int {
 	signals := make(chan os.Signal, 2)
 	forwardSignals := make(chan os.Signal, 2)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
-	stopSignalRelay := make(chan struct{})
+	signalRelayStop := make(chan struct{})
 	var signalRelay sync.WaitGroup
+	handleSignal := func(sig os.Signal) {
+		if value, ok := sig.(syscall.Signal); ok {
+			receivedSignal.CompareAndSwap(0, int32(value))
+		}
+		cancelQueue()
+		select {
+		case forwardSignals <- sig:
+		default:
+		}
+	}
 	signalRelay.Add(1)
-	defer func() {
-		close(stopSignalRelay)
-		signal.Stop(signals)
-		signalRelay.Wait()
-	}()
+	var stopSignalRelayOnce sync.Once
+	stopSignalRelay := func() {
+		stopSignalRelayOnce.Do(func() {
+			signal.Stop(signals)
+			close(signalRelayStop)
+			signalRelay.Wait()
+		})
+	}
+	defer stopSignalRelay()
 	go func() {
 		defer signalRelay.Done()
 		for {
 			select {
 			case sig := <-signals:
-				if value, ok := sig.(syscall.Signal); ok {
-					receivedSignal.CompareAndSwap(0, int32(value))
+				handleSignal(sig)
+			case <-signalRelayStop:
+				// signal.Stop guarantees no new sends. Drain signals already
+				// accepted by os/signal before freezing result publication.
+				for {
+					select {
+					case sig := <-signals:
+						handleSignal(sig)
+					default:
+						return
+					}
 				}
-				cancelQueue()
-				select {
-				case forwardSignals <- sig:
-				default:
-				}
-			case <-stopSignalRelay:
-				return
 			}
 		}
 	}()
@@ -89,12 +105,15 @@ func run(args []string) int {
 		return 1
 	}
 	var service *testpostgres.Service
-	settle := func(success bool) (serviceErr, leaseErr error) {
+	settle := func(success bool, beforeComplete func()) (serviceErr, leaseErr error) {
 		settlementCtx, cancelSettlement := context.WithTimeout(context.Background(), authoritySettlementTimeout)
 		defer cancelSettlement()
 		leaseErr = lease.Join(settlementCtx)
 		if service != nil {
 			serviceErr = service.Close(settlementCtx)
+		}
+		if beforeComplete != nil {
+			beforeComplete()
 		}
 		if leaseErr == nil {
 			leaseErr = lease.Complete(settlementCtx, success && serviceErr == nil && receivedSignal.Load() == 0)
@@ -102,7 +121,7 @@ func run(args []string) int {
 		return serviceErr, leaseErr
 	}
 	completeLease := func(success bool) int {
-		serviceErr, leaseErr := settle(success)
+		serviceErr, leaseErr := settle(success, nil)
 		if serviceErr != nil {
 			fmt.Fprintf(os.Stderr, "remove runner-owned Postgres: %v\n", serviceErr)
 			return 1
@@ -123,20 +142,20 @@ func run(args []string) int {
 	connection, explicit, err := testpostgres.ConnectionFromEnvironmentIfSet()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		_, _ = settle(false)
+		_, _ = settle(false, nil)
 		return 1
 	}
 	if !explicit {
 		registry, err := testpostgres.DefaultServiceRegistry()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
-			_, _ = settle(false)
+			_, _ = settle(false, nil)
 			return 1
 		}
 		executable, err := os.Executable()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "resolve runner executable: %v\n", err)
-			_, _ = settle(false)
+			_, _ = settle(false, nil)
 			return 1
 		}
 		provisionCtx, cancelProvision := context.WithTimeout(queueCtx, 3*time.Minute)
@@ -144,14 +163,14 @@ func run(args []string) int {
 		cancelProvision()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "provision runner-owned Postgres: %v\n", err)
-			_, _ = settle(false)
+			_, _ = settle(false, nil)
 			return 1
 		}
 		connection = service.Connection
 	}
 
 	failBeforeStart := func(message string, err error) int {
-		serviceErr, leaseErr := settle(false)
+		serviceErr, leaseErr := settle(false, nil)
 		settlementErr := errors.Join(serviceErr, leaseErr)
 		if settlementErr != nil {
 			fmt.Fprintf(os.Stderr, "%s: %v (test settlement: %v)\n", message, err, settlementErr)
@@ -196,25 +215,21 @@ func run(args []string) int {
 		return failBeforeStart("start go test", err)
 	}
 
-	done := make(chan struct{})
 	forwardingDone := make(chan struct{})
 	go func() {
 		defer close(forwardingDone)
-		for {
-			select {
-			case sig := <-forwardSignals:
-				if err := signalChildProcessTree(cmd, sig); err != nil && !errors.Is(err, os.ErrProcessDone) {
-					fmt.Fprintf(os.Stderr, "signal test process tree: %v\n", err)
-				}
-			case <-done:
-				return
+		for sig := range forwardSignals {
+			if err := signalChildProcessTree(cmd, sig); err != nil && !errors.Is(err, os.ErrProcessDone) {
+				fmt.Fprintf(os.Stderr, "signal test process tree: %v\n", err)
 			}
 		}
 	}()
 	waitErr := cmd.Wait()
-	serviceErr, leaseErr := settle(waitErr == nil)
-	close(done)
-	<-forwardingDone
+	serviceErr, leaseErr := settle(waitErr == nil, func() {
+		stopSignalRelay()
+		close(forwardSignals)
+		<-forwardingDone
+	})
 	if serviceErr != nil {
 		fmt.Fprintf(os.Stderr, "remove runner-owned Postgres: %v (child result: %v)\n", serviceErr, waitErr)
 		return 1

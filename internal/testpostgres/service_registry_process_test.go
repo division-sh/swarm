@@ -295,6 +295,9 @@ case "$SWARM_TEST_DESCENDANT_MODE" in
   post_exit_signal)
     exit 0
     ;;
+  post_exit_completion)
+    exit 0
+    ;;
   *)
     echo "invalid descendant fixture mode" >&2
     exit 2
@@ -317,12 +320,14 @@ esac
 				t.Skip("Docker is required for the runner-owned service proof")
 			}
 			for _, completion := range []struct {
-				name     string
-				mode     string
-				signal   syscall.Signal
-				postExit bool
-				exitCode int
-				history  int
+				name         string
+				mode         string
+				signal       syscall.Signal
+				postExit     bool
+				lateSignal   bool
+				terminatedBy syscall.Signal
+				exitCode     int
+				history      int
 			}{
 				{name: "normal_success", mode: "normal_success", exitCode: 0, history: 1},
 				{name: "normal_failure", mode: "normal_failure", exitCode: 23},
@@ -330,8 +335,12 @@ esac
 				{name: "terminate", mode: "signal", signal: syscall.SIGTERM, exitCode: 143},
 				{name: "post_exit_interrupt", mode: "post_exit_signal", signal: syscall.SIGINT, postExit: true, exitCode: 130},
 				{name: "post_exit_terminate", mode: "post_exit_signal", signal: syscall.SIGTERM, postExit: true, exitCode: 143},
+				{name: "pre_history_terminate", mode: "post_exit_completion", signal: syscall.SIGTERM, postExit: true, lateSignal: true, terminatedBy: syscall.SIGTERM},
 			} {
 				t.Run(completion.name, func(t *testing.T) {
+					if completion.lateSignal && !test.explicitDSN {
+						t.Skip("late history-publication signal proof is backend-independent")
+					}
 					stateHome := filepath.Join(t.TempDir(), "state-home")
 					stateRoot := filepath.Join(stateHome, "swarm", "test-postgres")
 					started := filepath.Join(t.TempDir(), "descendant-started")
@@ -364,6 +373,8 @@ esac
 					result := make(chan error, 1)
 					go func() { result <- command.Wait() }()
 					resultRead := false
+					resultReady := false
+					var earlyResult error
 					defer func() {
 						_ = os.WriteFile(topRelease, []byte("release\n"), 0o600)
 						_ = os.WriteFile(release, []byte("release\n"), 0o600)
@@ -445,7 +456,34 @@ esac
 					default:
 					}
 
-					if completion.postExit {
+					if completion.lateSignal {
+						registryLock, acquired, err := acquireFileLock(filepath.Join(stateRoot, "runs-v1.lock"), false)
+						if err != nil || !acquired {
+							t.Fatalf("hold run registry before history publication: acquired=%v err=%v", acquired, err)
+						}
+						if err := os.WriteFile(release, []byte("release\n"), 0o600); err != nil {
+							_ = registryLock.Close()
+							t.Fatal(err)
+						}
+						waitForPath(t, finished, 5*time.Second)
+						waitForRunSettlementFenceRelease(t, admission, 0, 5*time.Second)
+						time.Sleep(50 * time.Millisecond)
+						if err := command.Process.Signal(completion.signal); err != nil {
+							_ = registryLock.Close()
+							t.Fatal(err)
+						}
+						select {
+						case earlyResult = <-result:
+							resultRead = true
+							resultReady = true
+						case <-time.After(500 * time.Millisecond):
+							// A signal accepted just before the relay froze settles
+							// normally after the registry fence is released.
+						}
+						if err := registryLock.Close(); err != nil {
+							t.Fatal(err)
+						}
+					} else if completion.postExit {
 						if err := command.Process.Signal(completion.signal); err != nil {
 							t.Fatal(err)
 						}
@@ -456,9 +494,24 @@ esac
 						}
 					}
 					waitForPath(t, finished, 5*time.Second)
-					err = waitForProcess(t, result, 45*time.Second)
-					resultRead = true
-					if completion.exitCode == 0 {
+					if resultReady {
+						err = earlyResult
+					} else {
+						err = waitForProcess(t, result, 45*time.Second)
+						resultRead = true
+					}
+					if completion.terminatedBy != 0 {
+						var exitErr *exec.ExitError
+						if !errors.As(err, &exitErr) {
+							t.Fatalf("wrapper result after signal freeze = %v, want signal %v", err, completion.terminatedBy)
+						}
+						status, ok := exitErr.Sys().(syscall.WaitStatus)
+						mappedExit := exitErr.ExitCode() == 128+int(completion.terminatedBy)
+						processSignal := ok && status.Signaled() && status.Signal() == completion.terminatedBy
+						if !mappedExit && !processSignal {
+							t.Fatalf("wrapper status after signal freeze = %v, want signal %v", exitErr.Sys(), completion.terminatedBy)
+						}
+					} else if completion.exitCode == 0 {
 						if err != nil {
 							raw, _ := os.ReadFile(logPath)
 							t.Fatalf("wrapper result after descendant release = %v, want success\n%s", err, raw)
@@ -539,18 +592,21 @@ func TestSwarmTestDescendantProcessFixture(t *testing.T) {
 	started := os.Getenv("SWARM_TEST_DESCENDANT_STARTED")
 	release := os.Getenv("SWARM_TEST_DESCENDANT_RELEASE")
 	finished := os.Getenv("SWARM_TEST_DESCENDANT_FINISHED")
-	if err := os.WriteFile(started, []byte("started\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
 	if mode == "post_exit_signal" {
 		signals := make(chan os.Signal, 1)
 		signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 		defer signal.Stop(signals)
+		if err := os.WriteFile(started, []byte("started\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 		<-signals
 		if err := os.WriteFile(os.Getenv("SWARM_TEST_DESCENDANT_SIGNALLED"), []byte("signalled\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	} else {
+		if err := os.WriteFile(started, []byte("started\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 		signal.Ignore(os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 		for {
 			if _, err := os.Stat(release); err == nil {
