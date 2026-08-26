@@ -4999,7 +4999,10 @@ engine:
           as live replacement, including terminated-to-successor reintroduction; a stale predecessor generation or generic
           desired-topology mutation cannot mutate its successor. Missing, malformed,
           version-drifted, identity-mismatched, or changed-between-step projections fail startup closed;
-          terminal/inactive projections install, mark, arm, and emit nothing.
+          terminal/inactive projections install, mark, arm, and emit nothing. Every current-format active dynamic route is
+          owned by an exact readiness row committed with its activation topology. An active persisted route without that
+          owner is invalid state and fails closed; startup MUST NOT publish it through a generic no-readiness fallback,
+          compatibility reader, migration, or inferred run/source projection.
         process_visibility: Persisting `routing_rules` is not process publication. The process route table and EventBus
           recipient manifest MUST remain unaware of a dynamic route until the keyed readiness reconciler has verified every
           declared agent. Verification consumes the phase-aware AgentManager handoff; preparation may satisfy pre-Run topology
@@ -5013,7 +5016,21 @@ engine:
           on both explicit post-commit signal and bounded periodic wakeup. It retries from a freshly loaded row, coalesces
           concurrent activation/Ensure/startup attempts by exact key, and never creates a second callback, scheduler, or
           readiness ledger. A pending readiness row is startup-recoverable work even when no persisted agent, generic route,
-          selected-route recovery, or event receipt is otherwise present.
+          selected-route recovery, or event receipt is otherwise present. Interrupted-work replay and mandatory process
+          reconstruction are distinct startup policies. When replay is disabled, any eligible pending readiness row refuses
+          startup before mutation; startup MUST NOT complete its topology, arm timers, emit its creation event, settle effects
+          or drains, recover receipts, or replay deliveries. When replay is enabled, this keyed reconciler may complete that
+          durable work under the existing recovery authority.
+        serving_generation_reconstruction: >-
+          Every allowed serving generation MUST reconstruct completed, eligible, current-format dynamic topology regardless
+          of `runtime.recovery_on_startup`. After managed execution admission and Manager run start, but before delivery-
+          continuation synchronization, outbox dispatch, boot publication, listener readiness, or public ingress, one bounded
+          topology-only operation reloads each completed readiness plan, reconciles its exact expected agents through the
+          canonical lifecycle owner, proves each agent `runnable_current_occurrence`, and publishes/verifies the already-
+          persisted exact flow route process-locally. This operation performs no readiness write, route derivation or durable
+          route mutation, timer operation, creation-event publication, external-effect or provider-drain settlement, budget or
+          diagnostic projection, receipt recovery, delivery replay, or selected-contract recovery. Failure fails startup and
+          consumes existing lifecycle/route/start-failure compensation; it cannot degrade into public readiness.
       auto_emit: Flow schemas may declare auto_emit_on_create. When the platform creates an instance, it automatically emits
         the declared event after the exact route and complete declared-agent topology are verified and initial timers are
         armed. Event ID, lineage, payload, execution mode, delivery context, and occurrence time belong to the durable
@@ -25544,9 +25561,10 @@ cli_specification:
             name: manager_recovery_if_enabled
             owner: internal/runtime
             ordering: >
-              When persistent startup recovery is enabled, the runtime MUST hydrate persisted agent state and register
-              every admitted live agent receiver, reconcile every active dynamic-flow readiness key, retire terminal
-              crash-left dynamic topology, and restore only routes not owned by readiness before it recovers any executable
+              This step owns optional interrupted-work replay, not mandatory serving-process topology. When persistent startup
+              recovery is enabled, the runtime MUST hydrate persisted agent state and register every admitted live agent
+              receiver, reconcile every active dynamic-flow readiness key, retire terminal crash-left dynamic topology, and
+              refuse invalid routes without readiness ownership before it recovers any executable
               workflow-node delivery. Dynamic readiness reconciliation is boot-fatal and must finish before the successful
               agent-hydration boundary authorizes the initial node-delivery recovery pass, which in turn opens standing node
               recovery and runnable workflow-timer restoration. A recovered node handler or due workflow timer therefore
@@ -25588,8 +25606,11 @@ cli_specification:
             ordering: >
               Managed execution admission synchronously recovers the exact pipeline-obligation scope to explicit
               exhaustion, activates and enumerates the exact executable-delivery scope to explicit exhaustion,
-              and only then starts manager event loops. No periodic pipeline/outbox sweeper may race this admission
-              sequence or publish readiness while a handoff-hidden delivery remains.
+              and only then starts manager event loops when recovery is authorized. After the Manager run occurrence starts,
+              mandatory completed dynamic topology reconstruction runs independently of recovery policy and proves exact
+              current-occurrence agent routes/loops plus the persisted flow route before delivery-continuation synchronization
+              or any later readiness step. No periodic pipeline/outbox sweeper may race this admission and reconstruction
+              sequence or publish readiness while a handoff-hidden delivery or missing executable receiver remains.
           - step: 17
             name: outbox_sweeper
             owner: internal/runtime
