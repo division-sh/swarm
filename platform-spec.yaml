@@ -5017,7 +5017,8 @@ engine:
           periodic wakeup. The store MUST constrain the owning run source before decoding any row; a manager MUST NOT enumerate
           a global readiness list or interpret another source's malformed or pending row. It retries from a freshly loaded row, coalesces
           concurrent activation/Ensure/startup attempts by exact key, and never creates a second callback, scheduler, or
-          readiness ledger. A pending readiness row is startup-recoverable work even when no persisted agent, generic route,
+          readiness ledger. The bounded wakeup belongs to that same generation-owned loop and MUST converge an exact-source
+          pending row when the process signal is absent or lost. A pending readiness row is startup-recoverable work even when no persisted agent, generic route,
           selected-route recovery, or event receipt is otherwise present. Interrupted-work replay and mandatory process
           reconstruction are distinct startup policies. When replay is disabled, any eligible pending readiness row refuses
           startup before mutation; startup MUST NOT complete its topology, arm timers, emit its creation event, settle effects
