@@ -3,6 +3,7 @@ package serveapp
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -2377,7 +2378,7 @@ func runServedBundleRegisterBackendProof(t *testing.T, backend servedparity.Back
 	if !first.Registered || first.BundleHash != insert.BundleHash {
 		t.Fatalf("%s first bundle.register = %#v, want registered %s", rt.Backend, first, insert.BundleHash)
 	}
-	requireServedBundleRegisterReadback(t, rt.Endpoint, insert.BundleHash)
+	requireServedBundleRegisterReadback(t, rt.Endpoint, insert.Expected)
 
 	keyedReplay := requireServedBundleRegisterResult(t, rt.Endpoint, firstParams)
 	if keyedReplay != first {
@@ -2398,7 +2399,8 @@ func runServedBundleRegisterBackendProof(t *testing.T, backend servedparity.Back
 		t.Fatalf("%s publication against registered-only bundle data = %#v, want %s", rt.Backend, unavailable.Data, apiv1.BundleUnavailableCode)
 	}
 
-	beforeMalformed := servedBundleRegisterTableCount(t, rt.DB, "bundles")
+	beforeMalformedBundles := servedBundleRegisterTableCount(t, rt.DB, "bundles")
+	beforeMalformedIdempotency := servedBundleRegisterTableCount(t, rt.DB, "api_idempotency")
 	malformed := requireServedJSONRPCError(t, rt.Endpoint, "bundle.register", map[string]any{
 		"content_yaml":    "api_version: swarm.bundle.register.v1\nfiles: []\n",
 		"idempotency_key": "issue-2359-" + rt.Backend + "-malformed",
@@ -2406,8 +2408,37 @@ func runServedBundleRegisterBackendProof(t *testing.T, backend servedparity.Back
 	if malformed.Code != -32602 || malformed.Data["details"] == nil {
 		t.Fatalf("%s malformed bundle.register error = %#v, want invalid params with details", rt.Backend, malformed)
 	}
-	if got := servedBundleRegisterTableCount(t, rt.DB, "bundles"); got != beforeMalformed {
-		t.Fatalf("%s malformed bundle.register bundle rows = %d, want %d", rt.Backend, got, beforeMalformed)
+	if got := servedBundleRegisterTableCount(t, rt.DB, "bundles"); got != beforeMalformedBundles {
+		t.Fatalf("%s malformed bundle.register bundle rows = %d, want %d", rt.Backend, got, beforeMalformedBundles)
+	}
+	if got := servedBundleRegisterTableCount(t, rt.DB, "api_idempotency"); got != beforeMalformedIdempotency {
+		t.Fatalf("%s malformed bundle.register idempotency rows = %d, want %d", rt.Backend, got, beforeMalformedIdempotency)
+	}
+
+	malformedDataKey := "issue-2359-" + rt.Backend + "-malformed-data"
+	malformedDataParams := servedBundleRegisterParams(insert.Upload, malformedDataKey)
+	malformedDataParams["data_blob"] = map[string]any{
+		"api_version": "swarm.bundle.data.v1",
+		"entries": []any{map[string]any{
+			"path":        "flows/receive/data/malformed.bin",
+			"data_base64": "not-standard-base64",
+		}},
+	}
+	beforeMalformedDataBundles := servedBundleRegisterTableCount(t, rt.DB, "bundles")
+	beforeMalformedDataIdempotency := servedBundleRegisterTableCount(t, rt.DB, "api_idempotency")
+	malformedData := requireServedJSONRPCError(t, rt.Endpoint, "bundle.register", malformedDataParams)
+	details, ok := malformedData.Data["details"].(map[string]any)
+	if malformedData.Code != -32602 || !ok || details["field"] != "data_blob.entries[0].data_base64" {
+		t.Fatalf("%s malformed bundle.register data_blob error = %#v, want typed invalid params for data_blob entry", rt.Backend, malformedData)
+	}
+	if got := servedBundleRegisterTableCount(t, rt.DB, "bundles"); got != beforeMalformedDataBundles {
+		t.Fatalf("%s malformed data_blob bundle rows = %d, want %d", rt.Backend, got, beforeMalformedDataBundles)
+	}
+	if got := servedBundleRegisterTableCount(t, rt.DB, "api_idempotency"); got != beforeMalformedDataIdempotency {
+		t.Fatalf("%s malformed data_blob idempotency rows = %d, want %d", rt.Backend, got, beforeMalformedDataIdempotency)
+	}
+	if got := servedEventPublishAPIIdempotencyCount(t, rt.DB, rt.Backend, "bundle.register", malformedDataKey); got != 0 {
+		t.Fatalf("%s malformed data_blob idempotency key rows = %d, want 0", rt.Backend, got)
 	}
 
 	conflictFixture := writeServedBundleRegistrationFixture(t, "1.0.2")
@@ -2437,7 +2468,7 @@ func runServedBundleRegisterBackendProof(t *testing.T, backend servedparity.Back
 	if !rollbackRetry.Registered || rollbackRetry.BundleHash != rollbackFixture.BundleHash {
 		t.Fatalf("%s rollback retry bundle.register = %#v, want registered %s", rt.Backend, rollbackRetry, rollbackFixture.BundleHash)
 	}
-	requireServedBundleRegisterReadback(t, rt.Endpoint, rollbackFixture.BundleHash)
+	requireServedBundleRegisterReadback(t, rt.Endpoint, rollbackFixture.Expected)
 
 	if got := servedBundleRegisterTableCount(t, rt.DB, "runs"); got != initialRuns {
 		t.Fatalf("%s bundle.register run rows = %d, want unchanged %d", rt.Backend, got, initialRuns)
@@ -2450,6 +2481,7 @@ func runServedBundleRegisterBackendProof(t *testing.T, backend servedparity.Back
 type servedBundleRegistrationFixture struct {
 	Upload     runtimecontracts.BundleRegistrationUpload
 	BundleHash string
+	Expected   bundlecatalog.Detail
 }
 
 type servedBundleRegisterResult struct {
@@ -2479,7 +2511,59 @@ func writeServedBundleRegistrationFixture(t *testing.T, version string) servedBu
 	if err != nil {
 		t.Fatalf("BuildBundleRegistrationDirectoryUpload(%s): %v", version, err)
 	}
-	return servedBundleRegistrationFixture{Upload: upload, BundleHash: servedEventPublishFixtureBundleHash(t, root)}
+	bundle := loadWorkflowValidationBundleAt(t, root)
+	platformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
+	platformSpec, err := os.ReadFile(platformSpecPath)
+	if err != nil {
+		t.Fatalf("read bundle.register platform spec: %v", err)
+	}
+	platformSpecHash := fmt.Sprintf("%x", sha256.Sum256(platformSpec))
+	projection, err := runtimecontracts.BuildBundleCatalogProjectionWithOptions(bundle, runtimecontracts.BundleCatalogProjectionOptions{
+		Source:             "bundle.register",
+		PlatformSpecSHA256: platformSpecHash,
+	})
+	if err != nil {
+		t.Fatalf("BuildBundleCatalogProjection(%s): %v", version, err)
+	}
+	expectedMetadata := map[string]any{
+		"api_version":               "swarm.bundle.metadata.v1",
+		"registered_by":             "bundle.register",
+		"platform_spec_source":      "server_effective",
+		"platform_spec_hash":        "sha256:" + platformSpecHash,
+		"platform_spec_path_policy": "server_internal_not_user_supplied",
+	}
+	for _, key := range []string{
+		"projection_version",
+		"workflow_name",
+		"workflow_version",
+		"file_count",
+		"data_file_count",
+		"package_name",
+		"package_version",
+		"package_platform_version",
+		"package_keywords",
+		"package_license",
+		"package_repository",
+		"package_extra",
+	} {
+		if value, ok := projection.Metadata[key]; ok {
+			expectedMetadata[key] = value
+		}
+	}
+	agents, ok := projection.ParsedJSON["agents"].([]any)
+	if !ok {
+		t.Fatalf("bundle.register canonical agents projection = %T, want []any", projection.ParsedJSON["agents"])
+	}
+	expected := bundlecatalog.Detail{
+		BundleHash:    projection.BundleHash,
+		ContentYAML:   projection.ContentYAML,
+		ParsedJSON:    projection.ParsedJSON,
+		Metadata:      expectedMetadata,
+		AgentCount:    len(agents),
+		HasData:       len(projection.DataBlob) > 0,
+		DataSizeBytes: int64(len(projection.DataBlob)),
+	}
+	return servedBundleRegistrationFixture{Upload: upload, BundleHash: projection.BundleHash, Expected: expected}
 }
 
 func servedBundleRegisterParams(upload runtimecontracts.BundleRegistrationUpload, idempotencyKey string) map[string]any {
@@ -2500,12 +2584,39 @@ func requireServedBundleRegisterResult(t *testing.T, endpoint string, params map
 	return result
 }
 
-func requireServedBundleRegisterReadback(t *testing.T, endpoint, bundleHash string) {
+func requireServedBundleRegisterReadback(t *testing.T, endpoint string, expected bundlecatalog.Detail) {
 	t.Helper()
 	var detail bundlecatalog.Detail
-	requireServedJSONRPCResult(t, endpoint, "bundle.get", map[string]any{"bundle_hash": bundleHash}, &detail)
-	if detail.BundleHash != bundleHash || strings.TrimSpace(detail.ContentYAML) == "" || detail.Metadata["registered_by"] != "bundle.register" {
-		t.Fatalf("bundle.get(%s) = %#v, want exact public registration record", bundleHash, detail)
+	requireServedJSONRPCResult(t, endpoint, "bundle.get", map[string]any{"bundle_hash": expected.BundleHash}, &detail)
+	if detail.BundleHash != expected.BundleHash ||
+		detail.ContentYAML != expected.ContentYAML ||
+		detail.AgentCount != expected.AgentCount ||
+		detail.HasData != expected.HasData ||
+		detail.DataSizeBytes != expected.DataSizeBytes {
+		t.Fatalf("bundle.get(%s) stable fields = %#v, want %#v", expected.BundleHash, detail, expected)
+	}
+	requireServedBundleRegisterCanonicalJSONEqual(t, "parsed_json", detail.ParsedJSON, expected.ParsedJSON)
+	requireServedBundleRegisterCanonicalJSONEqual(t, "metadata", detail.Metadata, expected.Metadata)
+	if detail.IngestedAt.IsZero() {
+		t.Fatalf("bundle.get(%s) ingested_at is zero", expected.BundleHash)
+	}
+	if detail.IngestedAt.Location() != time.UTC {
+		t.Fatalf("bundle.get(%s) ingested_at location = %s, want UTC", expected.BundleHash, detail.IngestedAt.Location())
+	}
+}
+
+func requireServedBundleRegisterCanonicalJSONEqual(t *testing.T, field string, got, want any) {
+	t.Helper()
+	gotRaw, err := canonicaljson.Bytes(got)
+	if err != nil {
+		t.Fatalf("canonicalize bundle.get %s: %v", field, err)
+	}
+	wantRaw, err := canonicaljson.Bytes(want)
+	if err != nil {
+		t.Fatalf("canonicalize expected bundle.get %s: %v", field, err)
+	}
+	if !bytes.Equal(gotRaw, wantRaw) {
+		t.Fatalf("bundle.get %s = %s, want %s", field, gotRaw, wantRaw)
 	}
 }
 
