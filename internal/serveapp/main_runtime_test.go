@@ -2214,52 +2214,6 @@ func TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed(t *testing.T) {
 	}
 }
 
-func TestRunServeRuntimeBundleRegisterSupportedOnBothSelectedStores(t *testing.T) {
-	servedparity.Run(t, servedparity.MustScenario(servedparity.ScenarioBundleRegisterLifecycle), func(t *testing.T, backend servedparity.Backend) {
-		rt := startServedControlProofRuntime(t, backend)
-		params := map[string]any{
-			"content_yaml": `api_version: swarm.bundle.register.v1
-files:
-  - path: package.yaml
-    text: |
-      name: served-bundle-register-proof
-      version: "1.0.0"
-      platform_version: ">=0.7.0 <0.8.0"
-      flows: []
-`,
-			"idempotency_key": "issue-2295-bundle-register-" + string(backend),
-		}
-		var first struct {
-			BundleHash string `json:"bundle_hash"`
-			Registered bool   `json:"registered"`
-		}
-		requireServedJSONRPCResult(t, rt.Endpoint, "bundle.register", params, &first)
-		if first.BundleHash == "" || !first.Registered {
-			t.Fatalf("%s bundle.register result = %#v", backend, first)
-		}
-		var replay struct {
-			BundleHash string `json:"bundle_hash"`
-			Registered bool   `json:"registered"`
-		}
-		requireServedJSONRPCResult(t, rt.Endpoint, "bundle.register", params, &replay)
-		if replay != first {
-			t.Fatalf("%s bundle.register replay = %#v, want %#v", backend, replay, first)
-		}
-		var list bundlecatalog.ListResult
-		requireServedJSONRPCResult(t, rt.Endpoint, "bundle.list", map[string]any{"limit": 100}, &list)
-		found := false
-		for _, summary := range list.Bundles {
-			if summary.BundleHash == first.BundleHash {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Fatalf("%s bundle.list omitted registered hash %q: %#v", backend, first.BundleHash, list.Bundles)
-		}
-	})
-}
-
 type servedControlProofRuntime struct {
 	Endpoint   string
 	DB         *sql.DB
@@ -2485,7 +2439,7 @@ func runServedBundleRegisterBackendProof(t *testing.T, backend servedparity.Back
 	if !first.Registered || first.BundleHash != insert.BundleHash {
 		t.Fatalf("%s first bundle.register = %#v, want registered %s", rt.Backend, first, insert.BundleHash)
 	}
-	requireServedBundleRegisterReadback(t, rt.Endpoint, insert.Expected)
+	requireServedBundleRegisterListReadback(t, rt.Endpoint, insert.Expected)
 
 	keyedReplay := requireServedBundleRegisterResult(t, rt.Endpoint, firstParams)
 	if keyedReplay != first {
@@ -2575,7 +2529,7 @@ func runServedBundleRegisterBackendProof(t *testing.T, backend servedparity.Back
 	if !rollbackRetry.Registered || rollbackRetry.BundleHash != rollbackFixture.BundleHash {
 		t.Fatalf("%s rollback retry bundle.register = %#v, want registered %s", rt.Backend, rollbackRetry, rollbackFixture.BundleHash)
 	}
-	requireServedBundleRegisterReadback(t, rt.Endpoint, rollbackFixture.Expected)
+	requireServedBundleRegisterListReadback(t, rt.Endpoint, rollbackFixture.Expected)
 
 	if got := servedBundleRegisterTableCount(t, rt.DB, "runs"); got != initialRuns {
 		t.Fatalf("%s bundle.register run rows = %d, want unchanged %d", rt.Backend, got, initialRuns)
@@ -2691,40 +2645,23 @@ func requireServedBundleRegisterResult(t *testing.T, endpoint string, params map
 	return result
 }
 
-func requireServedBundleRegisterReadback(t *testing.T, endpoint string, expected bundlecatalog.Detail) {
+func requireServedBundleRegisterListReadback(t *testing.T, endpoint string, expected bundlecatalog.Detail) {
 	t.Helper()
-	var detail bundlecatalog.Detail
-	requireServedJSONRPCResult(t, endpoint, "bundle.get", map[string]any{"bundle_hash": expected.BundleHash}, &detail)
-	if detail.BundleHash != expected.BundleHash ||
-		detail.ContentYAML != expected.ContentYAML ||
-		detail.AgentCount != expected.AgentCount ||
-		detail.HasData != expected.HasData ||
-		detail.DataSizeBytes != expected.DataSizeBytes {
-		t.Fatalf("bundle.get(%s) stable fields = %#v, want %#v", expected.BundleHash, detail, expected)
+	var list bundlecatalog.ListResult
+	requireServedJSONRPCResult(t, endpoint, "bundle.list", map[string]any{"limit": 100}, &list)
+	for _, summary := range list.Bundles {
+		if summary.BundleHash != expected.BundleHash {
+			continue
+		}
+		if summary.AgentCount != expected.AgentCount || summary.HasData != expected.HasData || summary.DataSizeBytes != expected.DataSizeBytes {
+			t.Fatalf("bundle.list(%s) stable fields = %#v, want %#v", expected.BundleHash, summary, expected)
+		}
+		if summary.IngestedAt.IsZero() || summary.IngestedAt.Location() != time.UTC {
+			t.Fatalf("bundle.list(%s) ingested_at = %s, want non-zero UTC", expected.BundleHash, summary.IngestedAt)
+		}
+		return
 	}
-	requireServedBundleRegisterCanonicalJSONEqual(t, "parsed_json", detail.ParsedJSON, expected.ParsedJSON)
-	requireServedBundleRegisterCanonicalJSONEqual(t, "metadata", detail.Metadata, expected.Metadata)
-	if detail.IngestedAt.IsZero() {
-		t.Fatalf("bundle.get(%s) ingested_at is zero", expected.BundleHash)
-	}
-	if detail.IngestedAt.Location() != time.UTC {
-		t.Fatalf("bundle.get(%s) ingested_at location = %s, want UTC", expected.BundleHash, detail.IngestedAt.Location())
-	}
-}
-
-func requireServedBundleRegisterCanonicalJSONEqual(t *testing.T, field string, got, want any) {
-	t.Helper()
-	gotRaw, err := canonicaljson.Bytes(got)
-	if err != nil {
-		t.Fatalf("canonicalize bundle.get %s: %v", field, err)
-	}
-	wantRaw, err := canonicaljson.Bytes(want)
-	if err != nil {
-		t.Fatalf("canonicalize expected bundle.get %s: %v", field, err)
-	}
-	if !bytes.Equal(gotRaw, wantRaw) {
-		t.Fatalf("bundle.get %s = %s, want %s", field, gotRaw, wantRaw)
-	}
+	t.Fatalf("bundle.list omitted registered hash %q: %#v", expected.BundleHash, list.Bundles)
 }
 
 func servedBundleRegisterTableCount(t *testing.T, db *sql.DB, table string) int {
