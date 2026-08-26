@@ -190,28 +190,54 @@ func TestOptionalDeclarationAdmissionPreservesSpecificTypedDiagnostics(t *testin
 	}
 }
 
-func TestOptionalDeclarationAdmissionIsConsumedAtProjectAndFlowScopes(t *testing.T) {
+func TestOptionalDeclarationAdmissionIsConsumedAtSupportedScopes(t *testing.T) {
 	repoRoot := contractRepoRoot(t)
-	for _, scope := range []string{"project", "flow"} {
+	for _, scope := range []struct {
+		name          string
+		supportedRole func(string) bool
+		targetRoot    func(string) string
+	}{
+		{
+			name:          "root package",
+			supportedRole: func(string) bool { return true },
+			targetRoot:    func(root string) string { return root },
+		},
+		{
+			name: "nested package",
+			supportedRole: func(role string) bool {
+				return role != "types" && role != "entities"
+			},
+			targetRoot: func(root string) string { return filepath.Join(root, "packages", "child") },
+		},
+		{
+			name:          "flow",
+			supportedRole: func(string) bool { return true },
+			targetRoot:    func(root string) string { return filepath.Join(root, "flows", "child") },
+		},
+	} {
 		for _, role := range optionalDeclarationRoleTestCases() {
+			if !scope.supportedRole(role.name) {
+				continue
+			}
 			scope, role := scope, role
-			t.Run(scope+"/"+role.name, func(t *testing.T) {
+			t.Run(scope.name+"/"+role.name, func(t *testing.T) {
 				root := t.TempDir()
 				writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: optional-declaration-scope
 version: "1.0.0"
 platform_version: ">=0.7.0 <0.8.0"
+packages:
+  - path: packages/child
 flows:
   - {id: child, flow: child, mode: static}
 `)
 				writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: optional-declaration-scope\n")
+				packageRoot := filepath.Join(root, "packages", "child")
+				writeFixtureFile(t, filepath.Join(packageRoot, "package.yaml"), "name: child-package\nversion: \"1.0.0\"\nflows: []\n")
 				flowRoot := filepath.Join(root, "flows", "child")
 				writeFixtureFile(t, filepath.Join(flowRoot, "package.yaml"), "name: child\nversion: \"1.0.0\"\nflows: []\n")
 				writeFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: child\nmode: static\ninitial_state: active\nstates: [active]\n")
-				targetRoot := root
-				if scope == "flow" {
-					targetRoot = flowRoot
-				}
+				targetRoot := scope.targetRoot(root)
 				target := filepath.Join(targetRoot, role.fileName)
 				writeFixtureFile(t, target, "{}\n")
 
@@ -222,6 +248,33 @@ flows:
 				}
 			})
 		}
+	}
+}
+
+func TestPresentZeroPackageScopedTypesAndEntitiesRemainRetired(t *testing.T) {
+	repoRoot := contractRepoRoot(t)
+	for _, fileName := range []string{"types.yaml", "entities.yaml"} {
+		fileName := fileName
+		t.Run(fileName, func(t *testing.T) {
+			root := t.TempDir()
+			writeFixtureFile(t, filepath.Join(root, "package.yaml"), `
+name: retired-package-contract-scope
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+packages:
+  - path: packages/child
+flows: []
+`)
+			writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: retired-package-contract-scope\n")
+			packageRoot := filepath.Join(root, "packages", "child")
+			writeFixtureFile(t, filepath.Join(packageRoot, "package.yaml"), "name: child\nversion: \"1.0.0\"\nflows: []\n")
+			writeFixtureFile(t, filepath.Join(packageRoot, fileName), "{}\n")
+
+			_, err := LoadWorkflowContractBundleWithOverrides(repoRoot, root, DefaultPlatformSpecFile(repoRoot))
+			if err == nil || !strings.Contains(err.Error(), "RETIRED: package-scoped "+fileName+" is not supported") {
+				t.Fatalf("LoadWorkflowContractBundleWithOverrides error = %v, want retired %s rejection", err, fileName)
+			}
+		})
 	}
 }
 
