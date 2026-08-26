@@ -21,9 +21,10 @@ import (
 const platformSpecRefPrefix = "platform-spec.yaml#"
 
 var (
-	invariantIDPattern = regexp.MustCompile(`^(?:[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+|PPO-[A-Z]{3}-[0-9]{3})$`)
-	goTestNamePattern  = regexp.MustCompile(`^Test[A-Z0-9_][A-Za-z0-9_]*$`)
-	goTestTokenPattern = regexp.MustCompile(`Test[A-Z0-9_][A-Za-z0-9_]*`)
+	invariantIDPattern   = regexp.MustCompile(`^(?:[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+|PPO-[A-Z]{3}-[0-9]{3})$`)
+	goPackagePathPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_./-]*/[A-Za-z0-9_./-]+$`)
+	goTestNamePattern    = regexp.MustCompile(`^Test[A-Z0-9_][A-Za-z0-9_]*$`)
+	goTestTokenPattern   = regexp.MustCompile(`Test[A-Z0-9_][A-Za-z0-9_]*`)
 )
 
 type invariantProofReference struct {
@@ -462,6 +463,10 @@ func findUnclassifiedGoTestScalars(root *yaml.Node) []string {
 
 func closedGoTestList(value string) bool {
 	value = strings.TrimSpace(value)
+	fields := strings.Fields(value)
+	if len(fields) > 1 && goPackagePathPattern.MatchString(fields[0]) {
+		value = strings.TrimSpace(strings.TrimPrefix(value, fields[0]))
+	}
 	if value == "" || !strings.HasPrefix(value, "Test") || len(goTestTokenPattern.FindAllString(value, -1)) == 0 {
 		return false
 	}
@@ -606,8 +611,10 @@ func TestDurableInvariantRunnableTestMutationsFailClosed(t *testing.T) {
 func TestDurableInvariantScalarSentinel(t *testing.T) {
 	unclassified := parseYAMLFixture(t, "owner:\n  proof: TestUnclassified and TestStillUnclassified\n")
 	assertProblemsContain(t, findUnclassifiedGoTestScalars(unclassified), "owner.proof")
+	packageQualified := parseYAMLFixture(t, "owner:\n  proof: internal/example TestUnclassified\n")
+	assertProblemsContain(t, findUnclassifiedGoTestScalars(packageQualified), "owner.proof")
 
-	guarded := parseYAMLFixture(t, "tool_model:\n  provider_capability_surface:\n    guarantee_enforcement_registry:\n      claims:\n        exact_claim:\n          execution_proof: TestGuarded\n")
+	guarded := parseYAMLFixture(t, "tool_model:\n  provider_capability_surface:\n    guarantee_enforcement_registry:\n      claims:\n        exact_claim:\n          execution_proof: internal/runtime TestGuarded\n")
 	if problems := findUnclassifiedGoTestScalars(guarded); len(problems) != 0 {
 		t.Fatalf("guarded provider guarantee was classified as unguarded: %v", problems)
 	}
