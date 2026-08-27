@@ -605,9 +605,6 @@ flows:
     flow: support
     mode: static
 `)
-	for _, name := range []string{"agents.yaml", "events.yaml", "policy.yaml", "tools.yaml"} {
-		writeToolFlowDataFixtureFile(t, filepath.Join(root, name), "{}\n")
-	}
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: resource-data-test\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "package.yaml"), "name: support\nversion: \"1.0.0\"\nflows: []\n")
 	writeToolFlowDataFixtureFile(t, filepath.Join(root, "flows", "support", "schema.yaml"), "name: support\nmode: static\n")
