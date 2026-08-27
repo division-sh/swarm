@@ -8,6 +8,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/config"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	"github.com/division-sh/swarm/internal/store/devscratch"
 )
 
 const (
@@ -48,6 +49,11 @@ type LocalRuntimeStateOptions struct {
 	EnforceLegacySQLite     bool
 }
 
+type DevScratchResolution struct {
+	Coordinate devscratch.Coordinate
+	Selection  storebackend.Selection
+}
+
 func ResolveLocalRuntimeState(in LocalRuntimeStateOptions) (LocalRuntimeStateResolution, error) {
 	if in.Config == nil {
 		return LocalRuntimeStateResolution{}, fmt.Errorf("runtime config is required")
@@ -74,6 +80,29 @@ func ResolveLocalRuntimeState(in LocalRuntimeStateOptions) (LocalRuntimeStateRes
 		StoreSelection: storeSelection,
 		MountSources:   mountSources,
 	}, nil
+}
+
+// ResolveDevScratch projects an already-resolved local state into the only
+// supported serve --dev store posture. It performs no filesystem mutation.
+func ResolveDevScratch(state LocalRuntimeStateResolution) (DevScratchResolution, error) {
+	project := state.Project
+	if !project.ProjectLocal || strings.TrimSpace(project.CanonicalProjectRoot) == "" {
+		return DevScratchResolution{}, fmt.Errorf("swarm serve --dev scratch storage requires project-local contracts; run from the contracts-owning project root, or use non-dev serve with an explicitly owned store")
+	}
+	selection := state.StoreSelection
+	if selection.Backend != storebackend.BackendSQLite {
+		return DevScratchResolution{}, fmt.Errorf("swarm serve --dev supports only its project-local SQLite scratch store; remove the PostgreSQL store selection or use non-dev serve")
+	}
+	if selection.SQLitePathSource != storebackend.SourceProjectDefault {
+		return DevScratchResolution{}, fmt.Errorf("swarm serve --dev cannot use authored or shared SQLite path %q; remove store.sqlite.path and use the project-local scratch store, or use non-dev serve", strings.TrimSpace(selection.SQLitePath))
+	}
+	coordinate, err := devscratch.Resolve(project.CanonicalProjectRoot)
+	if err != nil {
+		return DevScratchResolution{}, err
+	}
+	selection.SQLitePath = coordinate.DatabasePath
+	selection.SQLitePathSource = storebackend.SourceProjectScratch
+	return DevScratchResolution{Coordinate: coordinate, Selection: selection}, nil
 }
 
 func resolveLocalRuntimeStateProject(RepoRoot string, resolvedPaths CLIContractPlatformSpecPaths) localRuntimeStateProject {

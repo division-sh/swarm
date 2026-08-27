@@ -57,6 +57,7 @@ import (
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	"github.com/division-sh/swarm/internal/store/devscratch"
 	storeselected "github.com/division-sh/swarm/internal/store/selected"
 	"github.com/division-sh/swarm/internal/versionmetadata"
 	"github.com/division-sh/swarm/internal/yamlsource"
@@ -590,7 +591,7 @@ func prepareLoadedServeBundleSource(ctx context.Context, persistence serveRuntim
 		}
 		return prepared, nil
 	}
-	return prepareServeBundleSource(ctx, persistence.bundleWriter, loaded.bundle, dev)
+	return prepareServeBundleSource(ctx, persistence.bundleWriter, loaded.bundle)
 }
 
 func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serveRuntimeBundleContext, error) {
@@ -875,13 +876,6 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		presenter.fail(2, "config_load", err)
 		return 1
 	}
-	projectContextRegistration, err := cliapp.PrepareServeProjectContextRegistration(ctx, repo, opts, resolvedPaths)
-	if err != nil {
-		presenter.fail(2, "serve_admission", err)
-		return 3
-	}
-	defer projectContextRegistration.Release()
-
 	cfgResult, err := cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{
 		RepoRoot:        repo,
 		ExplicitPath:    opts.ConfigPath,
@@ -936,6 +930,42 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		return 1
 	}
 	storeSelection := localState.StoreSelection
+	var scratchAuthority *devscratch.EpochAuthority
+	var scratchRegistrationGrant devscratch.RegistrationGrant
+	if opts.Dev && !opts.LocalRun {
+		scratch, err := cliapp.ResolveDevScratch(localState)
+		if err != nil {
+			presenter.fail(2, "serve_admission", err)
+			return 3
+		}
+		storeSelection = scratch.Selection
+		scratchAuthority, err = devscratch.Acquire(scratch.Coordinate)
+		if err != nil {
+			presenter.fail(2, "serve_admission", err)
+			return 3
+		}
+		defer func() {
+			if scratchAuthority != nil {
+				_ = scratchAuthority.AbortBeforeStoreOpen()
+			}
+		}()
+		scratchRegistrationGrant, err = scratchAuthority.RegistrationGrant()
+		if err != nil {
+			presenter.fail(2, "serve_admission", err)
+			return 3
+		}
+	}
+	projectContextRegistration, err := cliapp.PrepareServeProjectContextRegistration(opts, resolvedPaths, scratchRegistrationGrant)
+	if err != nil {
+		presenter.fail(2, "serve_admission", err)
+		return 3
+	}
+	if scratchAuthority != nil {
+		if err := scratchAuthority.PrepareFreshStore(); err != nil {
+			presenter.fail(3, "db_connection", err)
+			return 3
+		}
+	}
 	stores, err := buildStoresForServe(ctx, storeSelection, cfg)
 	if err != nil {
 		var acquisitionErr *runtimestartupownership.AcquisitionError
@@ -946,6 +976,17 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		presenter.fail(3, "db_connection", err)
 		return 1
 	}
+	storeLifetime := selectedStoreLifecycle(stores)
+	if scratchAuthority != nil {
+		lifetime, bindErr := scratchAuthority.BindOpenedStore(stores)
+		if bindErr != nil {
+			_ = stores.CloseUnactivated()
+			presenter.fail(3, "db_connection", bindErr)
+			return 1
+		}
+		storeLifetime = lifetime
+		scratchAuthority = nil
+	}
 	presenter.recordStore(storeSelection)
 	runtimePersistence := projectRuntimePersistenceForServe(stores)
 	closeUnactivatedStore := true
@@ -953,7 +994,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		if !closeUnactivatedStore {
 			return
 		}
-		if err := stores.CloseUnactivated(); err != nil {
+		if err := storeLifetime.CloseUnactivated(); err != nil {
 			presenter.cleanupFailure("store shutdown", err)
 		}
 	}()
@@ -1093,7 +1134,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	}
 
 	processWorkOwner := worklifetime.NewProcess()
-	selectedLifecycle, err := activateServeLifecycle(stores, processWorkOwner)
+	selectedLifecycle, err := activateServeLifecycle(storeLifetime, processWorkOwner)
 	if err != nil {
 		presenter.fail(5, "runtime_context", err)
 		return 1
@@ -1327,7 +1368,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	}
 
 	ready := runtimepublicingress.NewReadinessOwner(publicIngressEnabled)
-	supervisor = newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, runtimePersistence, ready, mountSources, workspaceBackendPreference, credentialStore, providerCredentialStore, primaryPackLoad.ProviderTriggers.Catalog, platformPackBase, contractsRoot, bundle, source, rt, opts.Dev)
+	supervisor = newRuntimeProjectSupervisor(repo, resolvedPlatformSpecPath, cfg, runtimePersistence, ready, mountSources, workspaceBackendPreference, credentialStore, providerCredentialStore, primaryPackLoad.ProviderTriggers.Catalog, platformPackBase, contractsRoot, bundle, source, rt)
 	supervisor.noticePresentation = noticePresentation
 	supervisor.SetPlatformPackBaseGenerationOwner(platformPackBases)
 	supervisor.SetProcessCapability(processCapability)
@@ -1342,11 +1383,8 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	supervisor.replacementShutdown = runtime.ShutdownOptions{Grace: opts.ShutdownGrace}
 	supervisor.runtimeLifetime = ctx
 	supervisor.SetRuntimeContextManager(runtimeContextManager, primaryContext.bundleSourceFact, primaryContext.bootIdentity)
-	if opts.TestRuntimeProjectReloadHook != nil {
-		opts.TestRuntimeProjectReloadHook(func(reloadCtx context.Context) error {
-			_, reloadErr := supervisor.ReloadProject(reloadCtx, contractsRoot)
-			return reloadErr
-		})
+	if opts.Dev && !opts.LocalRun {
+		supervisor.DisableSourceReplacement("one swarm serve --dev scratch epoch owns exactly one source generation")
 	}
 	if len(pinnedBundleHashes) > 0 {
 		supervisor.DisableSourceReplacement("swarm serve --bundle-hash pins persisted bundle contexts for the process; dynamic project reload is not supported in this mode")

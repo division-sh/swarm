@@ -369,6 +369,8 @@ func TestMultiBundleSourceAuthorityPublishesOnlyImplementedBundleReadAndRunForkM
 	assertScalarContains(t, mustMappingValue(t, serveIngest, "data_blob"), "raw bytes as base64")
 	assertScalarContains(t, mustMappingValue(t, serveIngest, "parsed_json"), "Runtime-owned fields")
 	assertScalarContains(t, mustMappingValue(t, serveIngest, "idempotency"), "fails closed before runtime construction")
+	serveIngestApplications := mustMappingValue(t, serveIngest, "applies_to")
+	assertScalarContains(t, mustMappingValue(t, serveIngestApplications, "project_local_dev_scratch"), "bundle_source=persisted")
 	serveDBLoaded := mustMappingValue(t, persistence, "serve_db_loaded_runtime_source")
 	assertScalarValue(t, mustMappingValue(t, serveDBLoaded, "status"), "implemented_for_boot_pinned_postgres_serve_bundle_hash_contexts")
 	assertScalarContains(t, mustMappingValue(t, serveDBLoaded, "cli_flag"), "[--bundle-hash")

@@ -82,9 +82,12 @@ func TestServedParityHarnessDerivedScenarioLifecycle(t *testing.T) {
 	servedparity.Run(t, servedparity.MustScenario(servedparity.ScenarioDerivedScenarioLifecycle), runServedDerivedScenarioBackendProof)
 }
 
-func TestSwarmTestConsumesLiveBundleSourceAcrossBackendsAndModes(t *testing.T) {
+func TestSwarmTestConsumesLiveBundleSourceAcrossSupportedBackendsAndModes(t *testing.T) {
 	for _, backend := range []storebackend.Backend{storebackend.BackendSQLite, storebackend.BackendPostgres} {
 		for _, dev := range []bool{false, true} {
+			if dev && backend != storebackend.BackendSQLite {
+				continue
+			}
 			name := backend.String() + "/nondev"
 			if dev {
 				name = backend.String() + "/dev"
@@ -115,6 +118,7 @@ expect:
 				}
 
 				configPath := ""
+				repo := cliapp.RepoRoot()
 				opts := cliapp.ServeOptions{
 					ContractsPath: contractsPath, PlatformSpecPath: filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath),
 					APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", Dev: dev,
@@ -124,7 +128,12 @@ expect:
 				switch backend {
 				case storebackend.BackendSQLite:
 					stubServeRuntimeWorkspaceLifecycle(t)
-					configPath = writeMockAgentRuntimeConfig(t, backend.String(), filepath.Join(t.TempDir(), "source-posture.sqlite"))
+					sqlitePath := filepath.Join(t.TempDir(), "source-posture.sqlite")
+					if dev {
+						repo = contractsPath
+						sqlitePath = ""
+					}
+					configPath = writeMockAgentRuntimeConfig(t, backend.String(), sqlitePath)
 				case storebackend.BackendPostgres:
 					_, _, _ = installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle { return serveRuntimeWorkspaceStub{} })
 					configPath = writeMockAgentRuntimeConfig(t, backend.String(), "")
@@ -134,7 +143,7 @@ expect:
 					t.Fatalf("unsupported backend %q", backend)
 				}
 				opts.ConfigPath = configPath
-				process := startServeRuntimeTestProcess(t, opts)
+				process := startServeRuntimeTestProcessAtRepo(t, repo, opts)
 				process.waitForReadyLine()
 				endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString())
 				for _, args := range [][]string{
@@ -155,7 +164,7 @@ expect:
 	}
 }
 
-func TestChangedHashDevReplacementPublishesCurrentIdentityToSupportedClients(t *testing.T) {
+func TestServeDoesNotExposeRetiredProjectReloadSurface(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	unsetStoreSelectorEnv(t)
 	stubServeRuntimeWorkspaceLifecycle(t)
@@ -180,18 +189,14 @@ expect:
 `), 0o644); err != nil {
 		t.Fatalf("write authored scenario: %v", err)
 	}
-	configPath := writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "replacement-readback.sqlite"))
-	reloaderReady := make(chan func(context.Context) error, 1)
+	configPath := writeMockAgentRuntimeConfig(t, storebackend.BackendSQLite.String(), "")
 	managerReady := make(chan *runtimepkg.RuntimeContextManager, 1)
-	process := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
+	process := startServeRuntimeTestProcessAtRepo(t, contractsPath, cliapp.ServeOptions{
 		ConfigPath: configPath, ContractsPath: contractsPath,
 		PlatformSpecPath: filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath),
 		APIListenAddr:    "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		Dev: true, NoFeed: true, SelfCheck: true, RequireBundleMatch: false, NoRequireBundleMatch: true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
-		TestRuntimeProjectReloadHook: func(reload func(context.Context) error) {
-			reloaderReady <- reload
-		},
 		TestRuntimeContextsReadyHook: func(manager *runtimepkg.RuntimeContextManager) {
 			managerReady <- manager
 		},
@@ -219,26 +224,20 @@ expect:
 	if err := os.WriteFile(packagePath, []byte(replaced), 0o644); err != nil {
 		t.Fatalf("write changed-hash package manifest: %v", err)
 	}
-	reload := <-reloaderReady
-	reloadCtx, cancelReload := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancelReload()
-	if err := reload(reloadCtx); err != nil {
-		t.Fatalf("reload changed-hash development runtime: %v\nserve output:\n%s", err, process.outputString())
-	}
 	manager := <-managerReady
 	publication, err := manager.CurrentPublication()
 	if err != nil {
 		t.Fatalf("current replacement publication: %v", err)
 	}
 	successorHash := publication.PrimaryBundle.BundleHash
-	if successorHash == "" || successorHash == predecessorHash {
-		t.Fatalf("replacement primary hash = %q, want changed from %q", successorHash, predecessorHash)
+	if successorHash != predecessorHash {
+		t.Fatalf("current primary hash = %q after disk edit, want retained source generation %q", successorHash, predecessorHash)
 	}
 
 	var successorIdentity apiv1.RuntimeIdentityResult
 	requireServedJSONRPCResult(t, rpcEndpoint, "runtime.identity", map[string]any{}, &successorIdentity)
-	if len(successorIdentity.BundleSources) != 1 || successorIdentity.BundleSources[0].BundleHash != successorHash || successorIdentity.BundleSources[0].BundleSource != "ephemeral" {
-		t.Fatalf("successor runtime identity = %#v, want current ephemeral %s", successorIdentity, successorHash)
+	if len(successorIdentity.BundleSources) != 1 || successorIdentity.BundleSources[0].BundleHash != successorHash || successorIdentity.BundleSources[0].BundleSource != "persisted" {
+		t.Fatalf("runtime identity = %#v, want retained persisted source %s", successorIdentity, successorHash)
 	}
 	var health struct {
 		Bundle runtimecontracts.BundleIdentity `json:"bundle"`
@@ -255,11 +254,11 @@ expect:
 	} {
 		var stdout, stderr bytes.Buffer
 		commandArgs := append(append([]string(nil), args...), "--api-server", endpoint, "--config", configPath)
-		if code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), commandArgs, &stdout, &stderr, nil); code != 0 {
-			t.Fatalf("replacement command %v code=%d stdout=%s stderr=%s", args, code, stdout.String(), stderr.String())
+		if code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), commandArgs, &stdout, &stderr, nil); code != 3 {
+			t.Fatalf("changed-source command %v code=%d stdout=%s stderr=%s, want bundle mismatch", args, code, stdout.String(), stderr.String())
 		}
-		if !strings.Contains(stdout.String(), "swarm test ok: scenarios=1") {
-			t.Fatalf("replacement command %v output missing success: %s", args, stdout.String())
+		if !strings.Contains(stderr.String(), "target runtime does not serve bundle_hash") {
+			t.Fatalf("changed-source command %v stderr=%s, want retained-generation mismatch", args, stderr.String())
 		}
 	}
 

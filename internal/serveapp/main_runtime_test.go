@@ -7477,7 +7477,7 @@ func TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsSer
 	}
 }
 
-func TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDevAbandon(t *testing.T) {
+func TestRunLocalRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDevAbandon(t *testing.T) {
 	_, db, _ := installServeRuntimeEmptyPostgresTestStores(t, func() cliapp.ServeWorkspaceLifecycle {
 		return serveRuntimeWorkspaceStub{}
 	})
@@ -7490,6 +7490,7 @@ func TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDevAbandon(t *te
 		MCPListenAddr:        "127.0.0.1:0",
 		SelfCheck:            true,
 		Dev:                  true,
+		LocalRun:             true,
 		RequireBundleMatch:   false,
 		NoRequireBundleMatch: true,
 		AbandonActiveRuns:    true,
@@ -7508,7 +7509,7 @@ func TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDevAbandon(t *te
 	}
 }
 
-func TestRunServeRuntimeFreshEmptySQLiteBootsWithDevAbandon(t *testing.T) {
+func TestRunLocalRuntimeFreshEmptySQLiteBootsWithDevAbandon(t *testing.T) {
 	runServeRuntimeFreshEmptySQLiteBootsWithAbandon(t, true)
 }
 
@@ -7516,18 +7517,18 @@ func TestRunServeRuntimeFreshEmptySQLiteBootsWithDirectAbandon(t *testing.T) {
 	runServeRuntimeFreshEmptySQLiteBootsWithAbandon(t, false)
 }
 
-func TestServeExplicitContextOwnershipMatrix(t *testing.T) {
+func TestServeDevContextAndSwarmDirCannotPartitionScratchEpoch(t *testing.T) {
 	stubServeRuntimeWorkspaceLifecycle(t)
 	unsetStoreSelectorEnv(t)
-	swarmDir := t.TempDir()
-	storeA := filepath.Join(t.TempDir(), "store-a.db")
-	storeB := filepath.Join(t.TempDir(), "store-b.db")
-	contractsPath := filepath.Join("examples", "routing", "root-ingress")
-	base := func(contextName, storePath string) cliapp.ServeOptions {
+	swarmDirA := t.TempDir()
+	swarmDirB := t.TempDir()
+	contractsPath := canonicalrouting.WriteNovelDerivedScenarioBundleWithRootInput(t)
+	repo := contractsPath
+	base := func(contextName, swarmDir string) cliapp.ServeOptions {
 		return cliapp.ServeOptions{
-			ConfigPath:           writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), storePath),
+			ConfigPath:           writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), ""),
 			ContractsPath:        contractsPath,
-			PlatformSpecPath:     defaultPlatformSpecPath,
+			PlatformSpecPath:     filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath),
 			SwarmDir:             swarmDir,
 			SwarmDirSet:          true,
 			ContextName:          contextName,
@@ -7542,41 +7543,32 @@ func TestServeExplicitContextOwnershipMatrix(t *testing.T) {
 			Verbose:              true,
 		}
 	}
-	first := startServeRuntimeTestProcess(t, base("first", storeA))
+	first := startServeRuntimeTestProcessAtRepo(t, repo, base("first", swarmDirA))
 	first.waitForReadyLine()
 
-	t.Run("same context and different store remains an endpoint collision", func(t *testing.T) {
+	assertEpochCollision := func(t *testing.T, opts cliapp.ServeOptions) {
+		t.Helper()
 		var out lockedBuffer
-		opts := base("first", storeB)
 		opts.Output = &out
-		code := Run(context.Background(), cliapp.RepoRoot(), opts)
-		if code != 3 || !strings.Contains(out.String(), "context first already exists") {
-			t.Fatalf("same-context/different-store code=%d output:\n%s", code, out.String())
+		code := Run(context.Background(), repo, opts)
+		if code != 3 || !strings.Contains(out.String(), "another swarm serve --dev runtime owns this canonical project scratch epoch") {
+			t.Fatalf("second dev owner code=%d output:\n%s", code, out.String())
 		}
 		if strings.Contains(out.String(), "Recovered previous session") {
-			t.Fatalf("context collision reached selected-store takeover:\n%s", out.String())
+			t.Fatalf("epoch collision reached selected-store takeover:\n%s", out.String())
 		}
+	}
+
+	t.Run("same context", func(t *testing.T) {
+		assertEpochCollision(t, base("first", swarmDirA))
 	})
 
-	t.Run("different context and same store reaches selected-store refusal", func(t *testing.T) {
-		var out lockedBuffer
-		opts := base("second", storeA)
-		opts.Output = &out
-		code := Run(context.Background(), cliapp.RepoRoot(), opts)
-		if code != 3 || !strings.Contains(out.String(), "Another swarm serve is already running for this project") {
-			t.Fatalf("different-context/same-store code=%d output:\n%s", code, out.String())
-		}
-		if strings.Contains(out.String(), "--context") {
-			t.Fatalf("same-store refusal advertised context as a store selector:\n%s", out.String())
-		}
+	t.Run("different context", func(t *testing.T) {
+		assertEpochCollision(t, base("second", swarmDirA))
 	})
 
-	t.Run("different context and different store reaches readiness", func(t *testing.T) {
-		second := startServeRuntimeTestProcess(t, base("second", storeB))
-		second.waitForReadyLine()
-		if code := second.stop(); code != 0 {
-			t.Fatalf("different-context/different-store code=%d output:\n%s", code, second.outputString())
-		}
+	t.Run("different context and Swarm directory", func(t *testing.T) {
+		assertEpochCollision(t, base("second", swarmDirB))
 	})
 
 	if code := first.stop(); code != 0 {
@@ -7806,7 +7798,7 @@ func TestRunStartLocalCrashRecoveryParity(t *testing.T) {
 	})
 }
 
-func TestServeDevStaleContextAndAbandonedStoreRecovers(t *testing.T) {
+func TestLocalRunStaleContextAndAbandonedStoreRecovers(t *testing.T) {
 	contractsPath := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
 	canonicalProject, err := filepath.EvalSymlinks(filepath.Join(cliapp.RepoRoot(), contractsPath))
 	if err != nil {
@@ -7817,7 +7809,7 @@ func TestServeDevStaleContextAndAbandonedStoreRecovers(t *testing.T) {
 			ConfigPath: configPath, ContractsPath: contractsPath, PlatformSpecPath: defaultPlatformSpecPath,
 			StoreMode: backend, StoreModeSet: true, SwarmDir: swarmDir, SwarmDirSet: true,
 			APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", ShutdownGrace: runtimepkg.DefaultShutdownGrace,
-			Dev: true, SelfCheck: true, NoRequireBundleMatch: true, NoFeed: true, Verbose: true,
+			Dev: true, LocalRun: true, SelfCheck: true, NoRequireBundleMatch: true, NoFeed: true, Verbose: true,
 		}
 	}
 	run := func(t *testing.T, opts cliapp.ServeOptions, storePath string) {
@@ -7927,6 +7919,7 @@ func runServeRuntimeFreshEmptySQLiteBootsWithAbandon(t *testing.T, dev bool) {
 		MCPListenAddr:        "127.0.0.1:0",
 		SelfCheck:            true,
 		Dev:                  dev,
+		LocalRun:             dev,
 		RequireBundleMatch:   requireBundleMatch,
 		NoRequireBundleMatch: noRequireBundleMatch,
 		AbandonActiveRuns:    true,
@@ -7966,6 +7959,7 @@ func TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForUnusableArtifac
 		MCPListenAddr:        "127.0.0.1:0",
 		SelfCheck:            true,
 		Dev:                  true,
+		LocalRun:             true,
 		RequireBundleMatch:   false,
 		NoRequireBundleMatch: true,
 		Verbose:              true,
@@ -8011,6 +8005,7 @@ func TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForBlockedRepoStor
 		MCPListenAddr:        "127.0.0.1:0",
 		SelfCheck:            true,
 		Dev:                  true,
+		LocalRun:             true,
 		RequireBundleMatch:   false,
 		NoRequireBundleMatch: true,
 		Verbose:              true,
@@ -8055,6 +8050,7 @@ func TestRunServeRuntimeNonArtifactBundleDoesNotExerciseUnusableArtifactRoot(t *
 		MCPListenAddr:        "127.0.0.1:0",
 		SelfCheck:            true,
 		Dev:                  true,
+		LocalRun:             true,
 		RequireBundleMatch:   false,
 		NoRequireBundleMatch: true,
 		Verbose:              true,
@@ -9130,7 +9126,7 @@ func TestPrepareServeBundleSourcePersistsCatalogForContractsServe(t *testing.T) 
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := context.Background()
 	bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier12-runtime-tools/test-flow-data-access")
-	fact, err := prepareServeBundleSource(ctx, pg, bundle, false)
+	fact, err := prepareServeBundleSource(ctx, pg, bundle)
 	if err != nil {
 		t.Fatalf("prepareServeBundleSource: %v", err)
 	}
@@ -9146,20 +9142,20 @@ func TestPrepareServeBundleSourcePersistsCatalogForContractsServe(t *testing.T) 
 	}
 }
 
-func TestPrepareServeBundleSourceDevStampsEphemeralWithoutCatalogRow(t *testing.T) {
+func TestPrepareServeBundleSourceDevPersistsCatalogRow(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := context.Background()
 	bundle := loadWorkflowValidationFixtureBundle(t, "tests/tier12-runtime-tools/test-flow-data-access")
-	fact, err := prepareServeBundleSource(ctx, pg, bundle, true)
+	fact, err := prepareServeBundleSource(ctx, pg, bundle)
 	if err != nil {
 		t.Fatalf("prepareServeBundleSource(dev): %v", err)
 	}
-	if !fact.IsEphemeral() || fact.BundleHash() == "" {
+	if !fact.IsPersisted() || fact.BundleHash() == "" {
 		t.Fatalf("source fact = %#v", fact)
 	}
-	if _, err := pg.LoadBundleCatalog(ctx, fact.BundleHash()); err != bundlecatalog.ErrNotFound {
-		t.Fatalf("LoadBundleCatalog(dev hash) error = %v, want ErrBundleNotFound", err)
+	if _, err := pg.LoadBundleCatalog(ctx, fact.BundleHash()); err != nil {
+		t.Fatalf("LoadBundleCatalog(dev hash): %v", err)
 	}
 }
 
@@ -9171,7 +9167,7 @@ func TestPrepareServeBundleSourceSQLitePersistsCatalogForContractsServe(t *testi
 		t.Fatalf("initialize SQLite platform state: %v", err)
 	}
 	bundle := loadWorkflowValidationFixtureBundle(t, "examples/routing/root-ingress")
-	fact, err := prepareServeBundleSource(ctx, stores.ServeBundleIngestWriter(), bundle, false)
+	fact, err := prepareServeBundleSource(ctx, stores.ServeBundleIngestWriter(), bundle)
 	if err != nil {
 		t.Fatalf("prepareServeBundleSource(sqlite local): %v", err)
 	}
@@ -9187,7 +9183,7 @@ func TestPrepareServeBundleSourceSQLitePersistsCatalogForContractsServe(t *testi
 	}
 }
 
-func TestPrepareServeBundleSourceSQLiteDevStampsEphemeralWithoutCatalogRow(t *testing.T) {
+func TestPrepareServeBundleSourceSQLiteDevPersistsCatalogRow(t *testing.T) {
 	ctx := context.Background()
 	stores := openSelectedSQLiteOwner(t, filepath.Join(t.TempDir(), "runtime.sqlite"), nil)
 	t.Cleanup(func() { closeUnactivatedSelectedStore(t, stores) })
@@ -9195,25 +9191,25 @@ func TestPrepareServeBundleSourceSQLiteDevStampsEphemeralWithoutCatalogRow(t *te
 		t.Fatalf("initialize SQLite platform state: %v", err)
 	}
 	bundle := loadWorkflowValidationFixtureBundle(t, "examples/routing/root-ingress")
-	fact, err := prepareServeBundleSource(ctx, stores.ServeBundleIngestWriter(), bundle, true)
+	fact, err := prepareServeBundleSource(ctx, stores.ServeBundleIngestWriter(), bundle)
 	if err != nil {
 		t.Fatalf("prepareServeBundleSource(sqlite dev): %v", err)
 	}
-	if !fact.IsEphemeral() || fact.BundleHash() == "" {
-		t.Fatalf("source fact = %#v, want ephemeral", fact)
+	if !fact.IsPersisted() || fact.BundleHash() == "" {
+		t.Fatalf("source fact = %#v, want persisted", fact)
 	}
 	catalog, available := stores.BundleCatalog()
 	if !available {
 		t.Fatal("SQLite bundle catalog reader unavailable")
 	}
-	if _, err := catalog.LoadBundleCatalog(ctx, fact.BundleHash()); !errors.Is(err, bundlecatalog.ErrNotFound) {
-		t.Fatalf("LoadBundleCatalog(dev hash) error = %v, want ErrNotFound", err)
+	if _, err := catalog.LoadBundleCatalog(ctx, fact.BundleHash()); err != nil {
+		t.Fatalf("LoadBundleCatalog(dev hash): %v", err)
 	}
 }
 
-func TestPrepareServeBundleSourceNonDevRequiresSelectedIngestWriter(t *testing.T) {
+func TestPrepareServeBundleSourceRequiresSelectedIngestWriter(t *testing.T) {
 	bundle := loadWorkflowValidationFixtureBundle(t, "examples/routing/root-ingress")
-	if _, err := prepareServeBundleSource(context.Background(), nil, bundle, false); err == nil || !strings.Contains(err.Error(), "selected bundle ingest writer") {
+	if _, err := prepareServeBundleSource(context.Background(), nil, bundle); err == nil || !strings.Contains(err.Error(), "selected bundle ingest writer") {
 		t.Fatalf("prepareServeBundleSource error = %v, want required ingest writer", err)
 	}
 }
@@ -9812,7 +9808,7 @@ func TestRunServeRuntimeDevClaudeCLIStaleGatewayEnvUsesTypedBinding(t *testing.T
 
 	bindingCh := make(chan toolgateway.Binding, 1)
 	opts := cliapp.ServeOptions{
-		ConfigPath:         writeDoctorClaudeConfig(t, ""),
+		ConfigPath:         writeDoctorClaudeDevScratchConfig(t),
 		Backend:            "claude_cli",
 		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
 		PlatformSpecPath:   defaultPlatformSpecPath,
@@ -9836,6 +9832,28 @@ func TestRunServeRuntimeDevClaudeCLIStaleGatewayEnvUsesTypedBinding(t *testing.T
 	if code := process.stop(); code != 0 {
 		t.Fatalf("serve exited with code %d, want 0\noutput:\n%s", code, process.outputString())
 	}
+}
+
+func writeDoctorClaudeDevScratchConfig(t *testing.T) string {
+	t.Helper()
+	path := writeDoctorClaudeConfig(t, "")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(string(raw), "\n")
+	filtered := make([]string, 0, len(lines))
+	for i := 0; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "sqlite:" && i+1 < len(lines) && strings.HasPrefix(strings.TrimSpace(lines[i+1]), "path:") {
+			i++
+			continue
+		}
+		filtered = append(filtered, lines[i])
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(filtered, "\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func TestStartLocalRunServeClaudeCLIStaleGatewayEnvUsesTypedBinding(t *testing.T) {
@@ -10462,6 +10480,10 @@ type serveRuntimeTestProcess struct {
 }
 
 func startServeRuntimeTestProcess(t *testing.T, opts cliapp.ServeOptions) *serveRuntimeTestProcess {
+	return startServeRuntimeTestProcessAtRepo(t, cliapp.RepoRoot(), opts)
+}
+
+func startServeRuntimeTestProcessAtRepo(t *testing.T, repo string, opts cliapp.ServeOptions) *serveRuntimeTestProcess {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	out := &lockedBuffer{}
@@ -10484,7 +10506,7 @@ func startServeRuntimeTestProcess(t *testing.T, opts cliapp.ServeOptions) *serve
 	}
 	t.Cleanup(process.cleanup)
 	go func() {
-		done <- Run(ctx, cliapp.RepoRoot(), opts)
+		done <- Run(ctx, repo, opts)
 	}()
 	return process
 }

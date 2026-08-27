@@ -63,15 +63,16 @@ rows:
       - {kind: go_test, name: TestPrepareServeBundleSourcePersistsCatalogForContractsServe}
       - {kind: go_test, name: TestBundleCatalogWriteSurfaceUpsertsAndRejectsHashCollision}
 
-  - id: serve_dev_ephemeral_source
+  - id: serve_dev_persisted_source
     category: serve_boot
-    concept: swarm serve --contracts --dev stamps ephemeral source facts without catalog persistence.
+    concept: swarm serve --contracts --dev persists the exact canonical bundle and stamps persisted source facts in its project-local scratch epoch.
     classification: implemented_proof
     owner_refs:
       - {kind: spec_ref, path: platform-spec.yaml, ref: serve_ingest_projection}
     proof_refs:
-      - {kind: go_test, name: TestPrepareServeBundleSourceDevStampsEphemeralWithoutCatalogRow}
-      - {kind: go_test, name: TestPrepareServeBundleSourceSQLiteDevStampsEphemeralWithoutCatalogRow}
+      - {kind: go_test, name: TestPrepareServeBundleSourceDevPersistsCatalogRow}
+      - {kind: go_test, name: TestPrepareServeBundleSourceSQLiteDevPersistsCatalogRow}
+      - {kind: go_test, name: TestRunServeRuntimeDevScratchPersistsExactBundleAndRunSource}
 
   - id: db_loaded_serve_boot
     category: serve_boot

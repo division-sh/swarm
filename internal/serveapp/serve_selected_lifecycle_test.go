@@ -19,7 +19,7 @@ func TestServeActivatesSelectedStoreBeforeProcessOwnedConstruction(t *testing.T)
 	if err != nil {
 		t.Fatalf("read serve owner: %v", err)
 	}
-	activation := bytes.Index(source, []byte("activateServeLifecycle(stores, processWorkOwner)"))
+	activation := bytes.Index(source, []byte("activateServeLifecycle(storeLifetime, processWorkOwner)"))
 	if activation < 0 {
 		t.Fatal("serve selected-store activation owner is missing")
 	}

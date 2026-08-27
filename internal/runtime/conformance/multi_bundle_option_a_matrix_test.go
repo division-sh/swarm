@@ -151,7 +151,7 @@ func requiredMultiBundleOptionARows() []string {
 		"schema_foundation",
 		"run_source_availability",
 		"serve_contracts_persisted_ingest",
-		"serve_dev_ephemeral_source",
+		"serve_dev_persisted_source",
 		"db_loaded_serve_boot",
 		"dynamic_post_boot_load",
 		"bundle_catalog_api",

@@ -2494,6 +2494,11 @@ private-domain-adapter	interface-method	typed	internal/store/internal/workspace/
 private-domain-adapter	interface-method	typed	internal/store/internal/workspace/lookup.go	rowIterator	method:Next	func() bool
 private-domain-adapter	interface-method	typed	internal/store/internal/workspace/lookup.go	rowIterator	method:Scan	func(...any) error
 private-domain-adapter	interface-method	typed	internal/store/internal/workspace/lookup.go	rowScanner	method:Scan	func(...any) error
+typed-process-local	interface-method	typed	internal/store/devscratch/epoch_unix.go	platformLock	method:release	func() error
+typed-process-local	interface-method	typed	internal/store/devscratch/epoch_unix.go	platformLock	method:rewrite	func([]byte) error
+typed-process-local	interface-method	typed	internal/store/devscratch/lifecycle.go	SelectedStore	method:Activate	func(*github.com/division-sh/swarm/internal/runtime/core/worklifetime.Process) error
+typed-process-local	interface-method	typed	internal/store/devscratch/lifecycle.go	SelectedStore	method:CloseActivated	func(*github.com/division-sh/swarm/internal/runtime/core/worklifetime.ProcessJoinReceipt) error
+typed-process-local	interface-method	typed	internal/store/devscratch/lifecycle.go	SelectedStore	method:CloseUnactivated	func() error
 typed-process-local	interface-method	typed	internal/store/selected/authority.go	authorityInspectionPort	method:InspectAuthority	func(context.Context) (github.com/division-sh/swarm/internal/runtime/startupownership.AuthorityInspection, error)
 typed-process-local	interface-method	typed	internal/store/selected/selected.go	closeResource	method:Close	func() error
 typed-process-local	interface-method	typed	internal/store/selected/selected.go	runForkPlannerMaterializer	method:MaterializeRunFork	func(context.Context, github.com/division-sh/swarm/internal/runtime/runfork.RunForkMaterializeRequest) (github.com/division-sh/swarm/internal/runtime/runfork.RunForkMaterialization, error)
