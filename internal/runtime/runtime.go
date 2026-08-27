@@ -1347,7 +1347,7 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 			return err
 		},
 		NativeToolAdmissionValidator: func(ctx context.Context, cfg runtimeactors.AgentConfig) error {
-			return rt.ToolExecutor.ValidateNativeToolAdmission(ctx, cfg)
+			return rt.ToolExecutor.ValidateNativeToolCapabilityAdmission(ctx, cfg)
 		},
 		ThrottleSuppressPrefixes: runtimeThrottleSuppressPrefixes(source),
 		DisableSpinupControl:     true,

@@ -1,6 +1,8 @@
 package tools
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,6 +37,22 @@ func (s nativeCapabilityRuntimeStub) ProviderContract() llm.ProviderContract {
 
 type staticAgentRuntimeResolver struct {
 	runtime llm.Runtime
+}
+
+type nativeCapabilityAdmissionWorkspace struct {
+	regularCalls   *int
+	admissionCalls *int
+	target         *workspace.Target
+}
+
+func (s nativeCapabilityAdmissionWorkspace) ResolveWorkspace(context.Context, models.AgentConfig) (*workspace.Target, error) {
+	(*s.regularCalls)++
+	return nil, fmt.Errorf("execution resolver was called during boot admission")
+}
+
+func (s nativeCapabilityAdmissionWorkspace) ResolveWorkspaceForCapabilityAdmission(context.Context, models.AgentConfig) (*workspace.Target, error) {
+	(*s.admissionCalls)++
+	return s.target, nil
 }
 
 func (r staticAgentRuntimeResolver) ResolveAgentRuntime(actor models.AgentConfig) (llm.AgentRuntimeResolution, error) {
@@ -99,6 +117,30 @@ func TestExecutorNativeToolAdmissionUsesActorSelectedProviderContract(t *testing
 	}
 	if err := ValidateNativeToolAgentAdmission(unmanagedToolTestContext(), liveActor, liveOpts); err != nil {
 		t.Fatalf("live native admission: %v", err)
+	}
+}
+
+func TestExecutorNativeToolCapabilityAdmissionUsesNonExecutingResolver(t *testing.T) {
+	actor := models.AgentConfig{
+		ExecutionMode: "live",
+		ID:            "live-agent",
+		NativeTools:   models.NativeToolConfig{FileIO: true},
+	}
+	regularCalls := 0
+	admissionCalls := 0
+	exec := NewExecutorWithOptions(nil, ExecutorOptions{
+		ModelRuntimes: mappedAgentRuntimeResolver{actor.ID: nativeCapabilityRuntimeStub{}},
+		WorkspaceResolver: nativeCapabilityAdmissionWorkspace{
+			regularCalls: &regularCalls, admissionCalls: &admissionCalls,
+			target: &workspace.Target{Backend: workspace.BackendHost, Workdir: t.TempDir()},
+		},
+	})
+
+	if err := exec.ValidateNativeToolCapabilityAdmission(unmanagedToolTestContext(), actor); err != nil {
+		t.Fatalf("ValidateNativeToolCapabilityAdmission: %v", err)
+	}
+	if regularCalls != 0 || admissionCalls != 2 {
+		t.Fatalf("workspace resolutions = regular:%d admission:%d, want 0/2", regularCalls, admissionCalls)
 	}
 }
 
@@ -270,6 +312,32 @@ func TestValidateNativeToolBootConfig_FallbackFileIORequiresWorkspaceExecutionTa
 	}
 	if len(warnings) != 0 {
 		t.Fatalf("warnings = %#v, want none", warnings)
+	}
+}
+
+func TestValidateNativeToolBootConfigUsesNonExecutingCapabilityAdmission(t *testing.T) {
+	source := wrapRootAgentBundle(&runtimecontracts.WorkflowContractBundle{
+		Agents: map[string]runtimecontracts.AgentRegistryEntry{
+			"agent-1": {
+				ID: "agent-1",
+				NativeTools: map[string]any{
+					"file_io": true,
+				},
+			},
+		},
+	})
+	regularCalls := 0
+	admissionCalls := 0
+	resolver := nativeCapabilityAdmissionWorkspace{
+		regularCalls: &regularCalls, admissionCalls: &admissionCalls,
+		target: &workspace.Target{Backend: workspace.BackendHost, Workdir: t.TempDir()},
+	}
+
+	if _, err := ValidateNativeToolBootConfig(unmanagedToolTestContext(), source, nil, nativeCapabilityRuntimeSet(t, nativeCapabilityRuntimeStub{}), resolver); err != nil {
+		t.Fatalf("ValidateNativeToolBootConfig: %v", err)
+	}
+	if regularCalls != 0 || admissionCalls != 2 {
+		t.Fatalf("workspace resolutions = regular:%d admission:%d, want 0/2", regularCalls, admissionCalls)
 	}
 }
 

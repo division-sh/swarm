@@ -36,6 +36,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
+	runtimedataaccess "github.com/division-sh/swarm/internal/runtime/dataaccess"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
@@ -1884,6 +1885,9 @@ type stubWorkspaceLifecycle struct {
 func (s stubWorkspaceLifecycle) ResolveWorkspace(context.Context, runtimeactors.AgentConfig) (*workspace.Target, error) {
 	return nil, nil
 }
+func (s stubWorkspaceLifecycle) ResolveWorkspaceForCapabilityAdmission(context.Context, runtimeactors.AgentConfig) (*workspace.Target, error) {
+	return nil, nil
+}
 func (s stubWorkspaceLifecycle) ValidateSource(context.Context, semanticview.Source) error {
 	return s.validateErr
 }
@@ -1891,8 +1895,9 @@ func (s stubWorkspaceLifecycle) EnsurePrereqs(context.Context) error { return s.
 func (s stubWorkspaceLifecycle) EnsureSystemWorkspaces(context.Context) error {
 	return s.systemErr
 }
-func (stubWorkspaceLifecycle) EnsureEntityWorkspace(context.Context, string) error { return nil }
-func (stubWorkspaceLifecycle) StopEntityWorkspace(context.Context, string) error   { return nil }
+func (stubWorkspaceLifecycle) EnsureEntityWorkspace(context.Context, string) error  { return nil }
+func (stubWorkspaceLifecycle) StopEntityWorkspace(context.Context, string) error    { return nil }
+func (stubWorkspaceLifecycle) SetDataProjectionProvider(runtimedataaccess.Provider) {}
 
 func writeProjectRoot(t *testing.T) string {
 	t.Helper()

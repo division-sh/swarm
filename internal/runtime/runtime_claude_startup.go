@@ -290,7 +290,7 @@ func validateClaudeManagedAgentWorkspaces(ctx context.Context, cfg *config.Confi
 		if profile.ID != llmselection.BackendClaudeCLI {
 			continue
 		}
-		target, err := workspaces.ResolveWorkspace(ctx, agentCfg)
+		target, err := workspace.ResolveForCapabilityAdmission(ctx, workspaces, agentCfg)
 		if err != nil {
 			return fmt.Errorf("resolve workspace for agent %s: %w", strings.TrimSpace(agentCfg.ID), err)
 		}

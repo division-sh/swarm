@@ -24,6 +24,10 @@ func (s relayWorkspaceResolverStub) ResolveWorkspace(context.Context, models.Age
 	return s.target, nil
 }
 
+func (s relayWorkspaceResolverStub) ResolveWorkspaceForCapabilityAdmission(context.Context, models.AgentConfig) (*workspace.Target, error) {
+	return s.target, nil
+}
+
 func TestExecutorPersistOversizedToolResultRelay_DockerChunksLargeReadFileResultsThroughWorkspaceCommand(t *testing.T) {
 	tmpDir := t.TempDir()
 	var commandCalls int

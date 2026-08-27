@@ -2020,6 +2020,10 @@ func (s selectedForkWorkspaceLifecycle) ResolveWorkspace(context.Context, runtim
 	return s.target, nil
 }
 
+func (s selectedForkWorkspaceLifecycle) ResolveWorkspaceForCapabilityAdmission(context.Context, runtimeactors.AgentConfig) (*workspace.Target, error) {
+	return s.target, nil
+}
+
 func (selectedForkWorkspaceLifecycle) ValidateSource(context.Context, semanticview.Source) error {
 	return nil
 }

@@ -147,6 +147,14 @@ func (m *HostManager) StopEntityWorkspace(context.Context, string) error {
 }
 
 func (m *HostManager) ResolveWorkspace(ctx context.Context, actor models.AgentConfig) (*Target, error) {
+	return m.resolveWorkspace(ctx, actor, true)
+}
+
+func (m *HostManager) ResolveWorkspaceForCapabilityAdmission(ctx context.Context, actor models.AgentConfig) (*Target, error) {
+	return m.resolveWorkspace(ctx, actor, false)
+}
+
+func (m *HostManager) resolveWorkspace(ctx context.Context, actor models.AgentConfig, materializeData bool) (*Target, error) {
 	if m == nil {
 		return nil, fmt.Errorf("host workspace manager is required")
 	}
@@ -161,7 +169,7 @@ func (m *HostManager) ResolveWorkspace(ctx context.Context, actor models.AgentCo
 		return m.hostTarget("system", "")
 	}
 	dataRoot := ""
-	if m.data != nil {
+	if materializeData && m.data != nil {
 		projection, err := m.data.Materialize(ctx, actor)
 		if err != nil {
 			return nil, fmt.Errorf("materialize workspace data projection: %w", err)

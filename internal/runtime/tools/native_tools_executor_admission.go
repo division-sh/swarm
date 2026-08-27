@@ -9,7 +9,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 )
 
-func (e *Executor) ValidateNativeToolAdmission(ctx context.Context, actor models.AgentConfig) error {
+func (e *Executor) ValidateNativeToolCapabilityAdmission(ctx context.Context, actor models.AgentConfig) error {
 	if e == nil || !actor.NativeTools.Any() {
 		return nil
 	}
@@ -20,7 +20,7 @@ func (e *Executor) ValidateNativeToolAdmission(ctx context.Context, actor models
 	if resolvedActor.ExecutionMode == runtimeeffects.ExecutionModeMock {
 		return nil
 	}
-	return ValidateNativeToolAgentAdmission(ctx, resolvedActor, opts)
+	return validateNativeToolAgentCapabilityAdmission(ctx, resolvedActor, opts)
 }
 
 func (e *Executor) nativeToolAdmissionOptions(actor models.AgentConfig) (models.AgentConfig, NativeToolAdmissionOptions, error) {

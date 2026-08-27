@@ -45,8 +45,26 @@ type Resolver interface {
 	ResolveWorkspace(ctx context.Context, actor models.AgentConfig) (*Target, error)
 }
 
-type Lifecycle interface {
+// CapabilityAdmissionResolver resolves a workspace target for startup
+// capability checks without materializing run-bound execution data.
+type CapabilityAdmissionResolver interface {
 	Resolver
+	ResolveWorkspaceForCapabilityAdmission(ctx context.Context, actor models.AgentConfig) (*Target, error)
+}
+
+func ResolveForCapabilityAdmission(ctx context.Context, resolver Resolver, actor models.AgentConfig) (*Target, error) {
+	if resolver == nil {
+		return nil, fmt.Errorf("workspace resolver is not configured")
+	}
+	admission, ok := resolver.(CapabilityAdmissionResolver)
+	if !ok {
+		return nil, fmt.Errorf("workspace resolver does not expose capability-admission resolution")
+	}
+	return admission.ResolveWorkspaceForCapabilityAdmission(ctx, actor)
+}
+
+type Lifecycle interface {
+	CapabilityAdmissionResolver
 	ValidateSource(ctx context.Context, source semanticview.Source) error
 	EnsurePrereqs(ctx context.Context) error
 	EnsureSystemWorkspaces(ctx context.Context) error
@@ -548,6 +566,14 @@ func (m *DockerManager) RuntimeWorkspaceContainers(ctx context.Context) ([]strin
 }
 
 func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.AgentConfig) (*Target, error) {
+	return m.resolveWorkspace(ctx, actor, true)
+}
+
+func (m *DockerManager) ResolveWorkspaceForCapabilityAdmission(ctx context.Context, actor models.AgentConfig) (*Target, error) {
+	return m.resolveWorkspace(ctx, actor, false)
+}
+
+func (m *DockerManager) resolveWorkspace(ctx context.Context, actor models.AgentConfig, materializeData bool) (*Target, error) {
 	class, err := m.workspaceClass(actor)
 	if err != nil {
 		return nil, err
@@ -592,7 +618,7 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 		return nil, err
 	}
 	var projection runtimedataaccess.Projection
-	if m.data != nil {
+	if materializeData && m.data != nil {
 		projection, err = m.data.Materialize(ctx, actor)
 		if err != nil {
 			return nil, fmt.Errorf("materialize workspace data projection: %w", err)

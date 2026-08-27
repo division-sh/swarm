@@ -2,6 +2,7 @@ package releasee2e
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +13,14 @@ func TestReleaseDockerCommandAdmissionRejectsMalformedShapes(t *testing.T) {
 	validCreate := validReleaseScaffoldCreateArgs(root)
 	if err := validateReleaseDockerCommand(root, validCreate); err != nil {
 		t.Fatalf("valid fixture create rejected: %v", err)
+	}
+	validAdmissionAgent := validReleaseAgentCreateArgs(root, false)
+	if err := validateReleaseDockerCommand(root, validAdmissionAgent); err != nil {
+		t.Fatalf("valid run-independent agent create rejected: %v", err)
+	}
+	validExecutionAgent := validReleaseAgentCreateArgs(root, true)
+	if err := validateReleaseDockerCommand(root, validExecutionAgent); err != nil {
+		t.Fatalf("valid run-bound agent create rejected: %v", err)
 	}
 	if err := validateReleaseDockerCommand(root, []string{"inspect", "--format", "{{json .Config.Labels}}", "swarm-scaffold"}); err != nil {
 		t.Fatalf("runtime identity label inspection rejected: %v", err)
@@ -55,6 +64,34 @@ func TestReleaseDockerCommandAdmissionRejectsMalformedShapes(t *testing.T) {
 			t.Fatal("wrong create identity was accepted")
 		}
 	})
+	for name, mutate := range map[string]func([]string) []string{
+		"missing data mount": func(args []string) []string {
+			return removeReleaseCreateMount(args, "/data")
+		},
+		"writable data mount": func(args []string) []string {
+			return replaceReleaseCreateMount(args, "/data", filepath.Join(os.TempDir(), "swarm", "data-projections", "a_"+strings.Repeat("b", 64))+":/data:rw")
+		},
+		"wrong projection source": func(args []string) []string {
+			return replaceReleaseCreateMount(args, "/data", filepath.Join(os.TempDir(), "swarm", "data-projections", "a_"+strings.Repeat("c", 64))+":/data:ro")
+		},
+		"missing projection identity": func(args []string) []string {
+			return removeReleaseOptionPair(args, "--label", "dev.swarm.data_projection_id=")
+		},
+		"malformed projection identity": func(args []string) []string {
+			replaceReleaseArgValuePrefix(args, "--label", "dev.swarm.data_projection_id=", "dev.swarm.data_projection_id=data-projection-v1:sha256:deadbeef")
+			return args
+		},
+		"projection without run": func(args []string) []string {
+			return removeReleaseOptionPair(args, "--label", "dev.swarm.run_id=")
+		},
+	} {
+		t.Run("run-bound agent "+name, func(t *testing.T) {
+			args := mutate(append([]string(nil), validExecutionAgent...))
+			if err := validateReleaseDockerCommand(root, args); err == nil {
+				t.Fatalf("run-bound agent create with %s was accepted", name)
+			}
+		})
+	}
 
 	releaseRoot := filepath.Dir(root)
 	projectMounts := map[string]string{
@@ -307,6 +344,45 @@ func validReleaseScaffoldCreateArgs(root string) []string {
 		"-w", "/opt/swarm/scaffold",
 		releaseE2EWorkspaceImage, "sleep", "infinity",
 	}
+}
+
+func validReleaseAgentCreateArgs(root string, runBound bool) []string {
+	args := []string{
+		"create",
+		"--name", releaseE2EAgentContainer,
+		"--network", releaseE2ENetwork,
+		"--label", "dev.swarm.agent_flow_instance_id=worker",
+		"--label", "dev.swarm.agent_flow_instance_path=worker",
+		"--label", "dev.swarm.agent_flow_scope_key=worker",
+		"--label", "dev.swarm.agent_id=release-worker",
+		"--label", "dev.swarm.agent_name_owner=claude-cli-release-lifecycle://flows/worker/release-worker",
+		"--label", "dev.swarm.agent_name_source=declared",
+		"--label", "dev.swarm.agent_route_presence=present",
+		"--label", "dev.swarm.container.kind=agent",
+		"--label", "dev.swarm.container.name=" + releaseE2EAgentContainer,
+		"--label", "dev.swarm.creation_source=workspace.ResolveWorkspace",
+		"--label", "dev.swarm.owner=runtime",
+		"--label", "dev.swarm.reset.eligible=true",
+		"--label", "dev.swarm.workspace.scope=per-agent",
+	}
+	if runBound {
+		digest := strings.Repeat("b", 64)
+		args = append(args,
+			"--label", "dev.swarm.data_projection_id=data-projection-v1:sha256:"+digest,
+			"--label", "dev.swarm.run_id=11111111-1111-4111-8111-111111111111",
+		)
+	}
+	args = append(args,
+		"-v", filepath.Join(filepath.Dir(filepath.Clean(root)), "contracts")+":/opt/swarm/contracts:ro",
+	)
+	if runBound {
+		args = append(args, "-v", filepath.Join(os.TempDir(), "swarm", "data-projections", "a_"+strings.Repeat("b", 64))+":/data:ro")
+	}
+	return append(args,
+		"-v", releaseE2EAgentVolume+":"+releaseE2EAgentWorkdir,
+		"-w", releaseE2EAgentWorkdir,
+		releaseE2EWorkspaceImage, "sleep", "infinity",
+	)
 }
 
 func validReleaseEvidence() []fakeDockerRecord {

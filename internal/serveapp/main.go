@@ -749,10 +749,10 @@ func buildServeRuntimeBundleContext(req serveRuntimeBundleContextRequest) (serve
 }
 
 func configureWorkspaceDataProjection(workspaces workspace.Lifecycle, source semanticview.Source, stores serveRuntimePersistence) error {
-	if workspaces == nil || source == nil || !source.DataProjectionRequired() {
+	if workspaces == nil || source == nil {
 		return nil
 	}
-	if stores.data == nil {
+	if source.DataProjectionRequired() && stores.data == nil {
 		return fmt.Errorf("selected store does not expose durable data access projection")
 	}
 	materializer, err := runtimedataaccess.NewMaterializer(runtimedataaccess.DefaultProjectionRoot(), source, stores.data)

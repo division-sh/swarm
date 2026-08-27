@@ -622,6 +622,73 @@ func TestResolveWorkspaceRejectsMalformedProjectionBeforeDockerMutation(t *testi
 	}
 }
 
+func TestResolveWorkspaceForCapabilityAdmissionDoesNotMaterializeRunBoundData(t *testing.T) {
+	contractsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
+		t.Fatalf("write package.yaml: %v", err)
+	}
+	manager := NewDockerManager(nil)
+	cfg := DefaultDockerConfig()
+	cfg.ContractsSource = contractsDir
+	cfg.WorkspaceImage = "test-image"
+	cfg.WorkspaceNetwork = ""
+	manager.SetConfig(cfg)
+	manager.SetSemanticSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}))
+	materializeCalls := 0
+	manager.SetDataProjectionProvider(workspaceProjectionProviderFunc(func(context.Context, models.AgentConfig) (runtimedataaccess.Projection, error) {
+		materializeCalls++
+		return runtimedataaccess.Projection{}, errors.New("run-bound projection requested")
+	}))
+	var created []string
+	manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
+		switch args[0] {
+		case "inspect":
+			return "", fmt.Errorf("no such object")
+		case "create":
+			created = append([]string(nil), args...)
+		}
+		return "", nil
+	})
+	actor := models.AgentConfig{
+		ExecutionMode: "live",
+		ID:            "preflight-reader",
+		Identity:      runtimeagentidentitytest.RootDeclared(t, "preflight-reader", "test/agents.yaml"),
+	}
+
+	target, err := manager.ResolveWorkspaceForCapabilityAdmission(context.Background(), actor)
+	if err != nil {
+		t.Fatalf("ResolveWorkspaceForCapabilityAdmission: %v", err)
+	}
+	if materializeCalls != 0 {
+		t.Fatalf("capability admission materialized run-bound data %d times", materializeCalls)
+	}
+	if !target.ExecutionTarget().Supports(ExecutionCapabilityClaudeCLI) {
+		t.Fatalf("capability-admission target = %#v, want Claude CLI support", target)
+	}
+	if strings.Contains(strings.Join(created, " "), ":/data:ro") {
+		t.Fatalf("capability-admission container received a run-bound data mount: %v", created)
+	}
+	if _, err := manager.ResolveWorkspace(context.Background(), actor); err == nil || !strings.Contains(err.Error(), "run-bound projection requested") {
+		t.Fatalf("execution ResolveWorkspace error = %v, want strict run-bound materialization", err)
+	}
+	if materializeCalls != 1 {
+		t.Fatalf("execution materialization calls = %d, want 1", materializeCalls)
+	}
+}
+
+type executionOnlyWorkspaceResolver struct{}
+
+func (executionOnlyWorkspaceResolver) ResolveWorkspace(context.Context, models.AgentConfig) (*Target, error) {
+	return &Target{Backend: BackendHost, Workdir: "/workspace"}, nil
+}
+
+func TestResolveForCapabilityAdmissionRejectsExecutionOnlyResolver(t *testing.T) {
+	_, err := ResolveForCapabilityAdmission(context.Background(), executionOnlyWorkspaceResolver{}, models.AgentConfig{})
+	if err == nil || err.Error() != "workspace resolver does not expose capability-admission resolution" {
+		t.Fatalf("ResolveForCapabilityAdmission error = %v", err)
+	}
+}
+
 func TestRuntimeWorkspaceContainersWithoutRunContextReturnsStaticContainers(t *testing.T) {
 	manager := NewDockerManager(nil)
 	containers, err := manager.RuntimeWorkspaceContainers(context.Background())

@@ -77,6 +77,10 @@ func (s claudeStartupWorkspaceStub) ResolveWorkspace(context.Context, runtimeact
 	return s.target, nil
 }
 
+func (s claudeStartupWorkspaceStub) ResolveWorkspaceForCapabilityAdmission(ctx context.Context, actor runtimeactors.AgentConfig) (*workspace.Target, error) {
+	return s.ResolveWorkspace(ctx, actor)
+}
+
 func (s claudeStartupWorkspaceStub) ValidateSource(context.Context, semanticview.Source) error {
 	return nil
 }
@@ -84,6 +88,22 @@ func (s claudeStartupWorkspaceStub) EnsurePrereqs(context.Context) error        
 func (s claudeStartupWorkspaceStub) EnsureSystemWorkspaces(context.Context) error        { return nil }
 func (s claudeStartupWorkspaceStub) EnsureEntityWorkspace(context.Context, string) error { return nil }
 func (s claudeStartupWorkspaceStub) StopEntityWorkspace(context.Context, string) error   { return nil }
+
+type claudeStartupCapabilityWorkspaceStub struct {
+	claudeStartupWorkspaceStub
+	regularCalls   *int
+	admissionCalls *int
+}
+
+func (s claudeStartupCapabilityWorkspaceStub) ResolveWorkspace(context.Context, runtimeactors.AgentConfig) (*workspace.Target, error) {
+	(*s.regularCalls)++
+	return nil, errors.New("execution resolver must not be used during capability admission")
+}
+
+func (s claudeStartupCapabilityWorkspaceStub) ResolveWorkspaceForCapabilityAdmission(context.Context, runtimeactors.AgentConfig) (*workspace.Target, error) {
+	(*s.admissionCalls)++
+	return &workspace.Target{Backend: workspace.BackendDocker, Container: "admission-container", Workdir: "/workspace"}, nil
+}
 
 func claudeStartupAgentFreeSource() semanticview.Source {
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
@@ -204,6 +224,27 @@ func TestValidateClaudeManagedAgentWorkspaces_AcceptsContainerTargets(t *testing
 	}, manager)
 	if err != nil {
 		t.Fatalf("validateClaudeManagedAgentWorkspaces: %v", err)
+	}
+}
+
+func TestValidateClaudeManagedAgentWorkspacesUsesNonExecutingCapabilityAdmission(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.LLM.Backend = "claude_cli"
+	manager := newClaudeStartupManager()
+	if err := registerRuntimeTestAgent(manager, runtimeTestAgentConfig(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "campaign-coordinator", Role: "campaign_coordinator"})); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+	regularCalls := 0
+	admissionCalls := 0
+	workspaces := claudeStartupCapabilityWorkspaceStub{
+		regularCalls: &regularCalls, admissionCalls: &admissionCalls,
+	}
+
+	if err := validateClaudeManagedAgentWorkspaces(testAuthorActivityContext(context.Background()), cfg, claudeStartupAgentSource("campaign-coordinator"), workspaces, manager); err != nil {
+		t.Fatalf("validateClaudeManagedAgentWorkspaces: %v", err)
+	}
+	if regularCalls != 0 || admissionCalls != 1 {
+		t.Fatalf("workspace resolutions = regular:%d admission:%d, want 0/1", regularCalls, admissionCalls)
 	}
 }
 
