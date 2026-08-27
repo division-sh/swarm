@@ -260,7 +260,6 @@ search_dimensions:
       - platform-spec.yaml
       - internal/events/types.go
       - internal/runtime/bus/route_plan.go
-      - internal/store/internal/backend/eventpersistence/events.go
     canonical_layer: event_context
   - id: workflow_runtime_carrier
     pattern: 'workflow-runtime'
