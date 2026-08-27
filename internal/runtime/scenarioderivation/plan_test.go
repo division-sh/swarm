@@ -61,7 +61,7 @@ func TestCompileInputSelectionFailsClosedAndAllInputsIsDeterministic(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(plans) != 2 || plans[0].PinName != "alternate" || plans[1].PinName != "primary" {
+	if len(plans) != 2 || plans[0].PinName != "work.requested" || plans[1].PinName != "work.alternate" {
 		t.Fatalf("all-input plans = %#v", plans)
 	}
 }
@@ -70,7 +70,7 @@ func TestCompileGeneratedBaseOverlayUsesCanonicalValidation(t *testing.T) {
 	canonicalrouting.Prove(t, canonicalrouting.ArtifactID("internal/runtime/scenarioderivation/testdata/hostile"))
 	source, identity := derivationHostileTestSource(t)
 	plans, err := Compile(source, identity, Request{
-		FlowID: "work", Input: "primary",
+		FlowID: "work", Input: "work.requested",
 		Set: map[string]any{
 			"mode": "fast", "details": map[string]any{"count": 7}, "tags": []any{"alpha", "beta"},
 		},
@@ -98,7 +98,7 @@ func TestCompileGeneratedBaseOverlayUsesCanonicalValidation(t *testing.T) {
 		{name: "array item mismatch", set: map[string]any{"tags": []any{1}}, want: "tags"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Compile(source, identity, Request{FlowID: "work", Input: "primary", Set: tc.set})
+			_, err := Compile(source, identity, Request{FlowID: "work", Input: "work.requested", Set: tc.set})
 			if err == nil || !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tc.want)) {
 				t.Fatalf("overlay error = %v, want %q", err, tc.want)
 			}
@@ -109,8 +109,8 @@ func TestCompileGeneratedBaseOverlayUsesCanonicalValidation(t *testing.T) {
 func TestCompileCatalogRejectsDuplicateExactFlowInputCoordinates(t *testing.T) {
 	source, identity := derivationHostileTestSource(t)
 	declarations := []Declaration{
-		{Name: "first", FlowID: "work", Input: "primary"},
-		{Name: "second", FlowID: "work", Input: "primary"},
+		{Name: "first", FlowID: "work", Input: "work.requested"},
+		{Name: "second", FlowID: "work", Input: "work.requested"},
 	}
 	if _, err := CompileCatalog(source, identity, declarations...); err == nil || !strings.Contains(err.Error(), "same exact flow/input coordinate") {
 		t.Fatalf("duplicate catalog coordinate error = %v", err)

@@ -907,21 +907,17 @@ func TestFlowPackageConnectDecodeRejectsRetiredUsingInstanceOnPresence(t *testin
 
 func TestFlowSchemaDocumentDecode_PreservesClosedInputPinSourceEnum(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		source string
-		want   FlowInputPinSource
+		name     string
+		specimen canonicalrouting.InputPinSourceSnippet
+		want     FlowInputPinSource
 	}{
-		{name: "empty", source: "", want: FlowInputPinSourceNone},
-		{name: "external", source: "external", want: FlowInputPinSourceExternal},
-		{name: "harness", source: "harness", want: FlowInputPinSourceHarness},
+		{name: "empty", specimen: canonicalrouting.InputPinSourceDefault, want: FlowInputPinSourceNone},
+		{name: "external", specimen: canonicalrouting.InputPinSourceExternal, want: FlowInputPinSourceExternal},
+		{name: "harness", specimen: canonicalrouting.InputPinSourceHarness, want: FlowInputPinSourceHarness},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var doc FlowSchemaDocument
-			raw := "name: source-enum\npins:\n  inputs:\n    events:\n      - work.requested\n"
-			if tc.source != "" {
-				raw = "name: source-enum\npins:\n  inputs:\n    events:\n      - event: work.requested\n        source: '" + tc.source + "'\n"
-			}
-			if err := yaml.Unmarshal([]byte(raw), &doc); err != nil {
+			if err := canonicalrouting.InputPinSourceParserSnippet(t, tc.specimen).Decode(&doc); err != nil {
 				t.Fatalf("yaml.Unmarshal: %v", err)
 			}
 			if got := doc.Pins.Inputs.EventPins[0].Source; got != tc.want {
@@ -931,7 +927,7 @@ func TestFlowSchemaDocumentDecode_PreservesClosedInputPinSourceEnum(t *testing.T
 	}
 
 	var doc FlowSchemaDocument
-	err := yaml.Unmarshal([]byte("name: source-enum\npins:\n  inputs:\n    events:\n      - event: work.requested\n        source: fallback\n"), &doc)
+	err := canonicalrouting.InputPinSourceParserSnippet(t, canonicalrouting.InputPinSourceInvalid).Decode(&doc)
 	if err == nil || !strings.Contains(err.Error(), "input event pin source must be") {
 		t.Fatalf("yaml.Unmarshal error = %v, want closed source-enum rejection", err)
 	}
@@ -2248,25 +2244,7 @@ compute:
 
 func TestFlowPinsDecode_AcceptsOptionMappingsAndScalarPermissions(t *testing.T) {
 	var schema FlowSchemaDocument
-	if err := yaml.Unmarshal([]byte(`
-states:
-  - pending
-initial_state: pending
-terminal_states: []
-pins:
-  inputs:
-    events:
-      - event: check.requested
-        source: external
-    reads:
-      - entity.score
-  outputs:
-    events:
-      - event: check.passed
-        sink: harness
-    writes:
-      - entity.status
-`), &schema); err != nil {
+	if err := canonicalrouting.W2OptionPinsParserSnippet(t).Decode(&schema); err != nil {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	if got := len(schema.Pins.Inputs.EventPins); got != 1 {
@@ -2368,7 +2346,6 @@ func TestW2RejectsNullEmptyAndRedundantPinForms(t *testing.T) {
 		{name: "empty outputs", raw: "pins:\n  outputs: {}\n", want: "flow output pins are explicitly empty_mapping"},
 		{name: "null input events", raw: "pins:\n  inputs:\n    events: null\n", want: "flow input pin events are explicitly null"},
 		{name: "empty output events", raw: "pins:\n  outputs:\n    events: []\n", want: "flow output pin events are explicitly empty_sequence"},
-		{name: "empty resolution", raw: "pins:\n  inputs:\n    events:\n      - event: work.requested\n        resolution: {}\n", want: "input pin resolution is explicitly empty"},
 		{name: "optionless input mapping", raw: "pins:\n  inputs:\n    events:\n      - event: work.requested\n", want: "mapping requires a non-default source or resolution"},
 		{name: "optionless output mapping", raw: "pins:\n  outputs:\n    events:\n      - event: work.completed\n", want: "mapping requires a non-default sink"},
 		{name: "duplicate event", raw: "pins:\n  inputs:\n    events: [work.requested, work.requested]\n", want: "declared more than once"},
@@ -2384,6 +2361,10 @@ func TestW2RejectsNullEmptyAndRedundantPinForms(t *testing.T) {
 				t.Fatalf("yaml.Unmarshal error = %v, want %q", err, tc.want)
 			}
 		})
+	}
+	var schema FlowSchemaDocument
+	if err := canonicalrouting.W2EmptyResolutionParserSnippet(t).Decode(&schema); err == nil || !strings.Contains(err.Error(), "input pin resolution is explicitly empty") {
+		t.Fatalf("empty resolution error = %v, want explicit-empty rejection", err)
 	}
 }
 

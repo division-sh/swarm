@@ -1,7 +1,7 @@
 name: zero-agent automation smoke
 derive:
   flow: automation
-  input: request
+  input: automation.requested
   payload:
     generate: true
     set:

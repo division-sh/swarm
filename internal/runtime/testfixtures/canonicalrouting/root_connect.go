@@ -13,6 +13,73 @@ const (
 	RootConnectCanonicalEmit
 )
 
+// WritePublicTemplateInputRoute owns the API publication fixture with one root
+// input and one public template input. Callers load the returned contract tree.
+func WritePublicTemplateInputRoute(t testing.TB) string {
+	t.Helper()
+	root := t.TempDir()
+	files := map[string]string{
+		"package.yaml": `name: review
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: operating
+    flow: operating
+    mode: template
+`,
+		"schema.yaml": `name: review
+pins:
+  inputs:
+    events:
+      - event: bootstrap.requested
+        source: external
+`,
+		"events.yaml": `bootstrap.requested:
+  topic: text?
+`,
+		"nodes.yaml": `bootstrap-node:
+  id: bootstrap-node
+  execution_type: system_node
+  subscribes_to: [bootstrap.requested]
+  event_handlers:
+    bootstrap.requested: {}
+`,
+		"flows/operating/schema.yaml": `name: operating
+mode: template
+instance: operating_id
+pins:
+  inputs:
+    events:
+      - event: opco.product_initialization_requested
+        source: external
+        resolution:
+          mode: create
+          from: event.id
+`,
+		"flows/operating/entities.yaml": `operating:
+  operating_id:
+    type: uuid
+    immutable: true
+`,
+		"flows/operating/events.yaml": `opco.product_initialization_requested:
+  topic: text?
+`,
+		"flows/operating/nodes.yaml": `lifecycle-orchestrator:
+  id: lifecycle-orchestrator
+  execution_type: system_node
+  subscribes_to: [opco.product_initialization_requested]
+  event_handlers:
+    opco.product_initialization_requested:
+      guard:
+        check: _entity.id != ""
+`,
+	}
+	for relative, source := range files {
+		writeClosedVariantFile(t, root, relative, source)
+	}
+	return root
+}
+
 // CopyRootOutputConnect derives the closed root-output-to-child route matrix
 // from the checked-in parent-connect artifact.
 func CopyRootOutputConnect(t testing.TB, emit RootConnectEmit) string {

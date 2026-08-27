@@ -2260,11 +2260,11 @@ typed-process-local	interface-method	typed	internal/runtime/semanticview/source.
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:FlowHasInputEvent	func(flowID string, eventType string) bool
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:FlowHasOutputEvent	func(flowID string, eventType string) bool
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:FlowInitialStage	func(flowID string) string
-typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:FlowInputEventPin	func(flowID string, pinName string) (github.com/division-sh/swarm/internal/runtime/contracts.FlowInputEventPin, bool)
-typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:FlowInputEventPins	func(flowID string) []github.com/division-sh/swarm/internal/runtime/contracts.FlowInputEventPin
+typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:FlowInputEventPin	func(flowID string, pinName string) (github.com/division-sh/swarm/internal/runtime/contracts.CompiledFlowInputPin, bool)
+typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:FlowInputEventPins	func(flowID string) []github.com/division-sh/swarm/internal/runtime/contracts.CompiledFlowInputPin
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:FlowInputEvents	func(flowID string) []string
-typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:FlowOutputEventPin	func(flowID string, pinName string) (github.com/division-sh/swarm/internal/runtime/contracts.FlowOutputEventPin, bool)
-typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:FlowOutputEventPins	func(flowID string) []github.com/division-sh/swarm/internal/runtime/contracts.FlowOutputEventPin
+typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:FlowOutputEventPin	func(flowID string, pinName string) (github.com/division-sh/swarm/internal/runtime/contracts.CompiledFlowOutputPin, bool)
+typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:FlowOutputEventPins	func(flowID string) []github.com/division-sh/swarm/internal/runtime/contracts.CompiledFlowOutputPin
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:FlowOutputEvents	func(flowID string) []string
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:FlowPath	func(flowID string) string
 typed-process-local	interface-method	typed	internal/runtime/semanticview/source.go	Source	method:FlowRequiredAgents	func(flowID string) []github.com/division-sh/swarm/internal/runtime/contracts.FlowRequiredAgent

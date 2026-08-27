@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -38,6 +37,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -2514,72 +2514,7 @@ func eventPublishFollowUpTestBundle() *runtimecontracts.WorkflowContractBundle {
 
 func eventPublishTargetRouteTestBundle(t testing.TB) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	root := t.TempDir()
-	files := map[string]string{
-		"package.yaml": `name: review
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: operating
-    flow: operating
-    mode: template
-`,
-		"schema.yaml": `name: review
-pins:
-  inputs:
-    events:
-      - event: bootstrap.requested
-        source: external
-`,
-		"events.yaml": `bootstrap.requested:
-  topic: text?
-`,
-		"nodes.yaml": `bootstrap-node:
-  id: bootstrap-node
-  execution_type: system_node
-  subscribes_to: [bootstrap.requested]
-  event_handlers:
-    bootstrap.requested: {}
-`,
-		"flows/operating/schema.yaml": `name: operating
-mode: template
-instance: operating_id
-pins:
-  inputs:
-    events:
-      - event: opco.product_initialization_requested
-        source: external
-        resolution:
-          mode: create
-          from: event.id
-`,
-		"flows/operating/entities.yaml": `operating:
-  operating_id:
-    type: uuid
-    immutable: true
-`,
-		"flows/operating/events.yaml": `opco.product_initialization_requested:
-  topic: text?
-`,
-		"flows/operating/nodes.yaml": `lifecycle-orchestrator:
-  id: lifecycle-orchestrator
-  execution_type: system_node
-  subscribes_to: [opco.product_initialization_requested]
-  event_handlers:
-    opco.product_initialization_requested:
-      guard:
-        check: _entity.id != ""
-`,
-	}
-	for name, contents := range files {
-		path := filepath.Join(root, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			t.Fatalf("create event-publish fixture directory: %v", err)
-		}
-		if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
-			t.Fatalf("write event-publish fixture %s: %v", name, err)
-		}
-	}
+	root := canonicalrouting.WritePublicTemplateInputRoute(t)
 	repoRoot := filepath.Join("..", "..")
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {

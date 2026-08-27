@@ -184,8 +184,6 @@ initial_state: discovered
 states: [discovered, scored]
 terminal_states: [scored]
 pins:
-  inputs:
-    events: []
   outputs:
     events:
       - score.dimension_complete

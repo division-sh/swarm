@@ -11703,20 +11703,19 @@ flow_model:
       producer_emit_routing:
         status: retired_unsupported
         implementation_tracker: '#2086'
-        adapter_boundary_tracker: '#1546'
+        adapter_retirement_tracker: '#2352'
         rule: >
           Producer `emit.target` and `emit.broadcast` are retired on presence.
           Dynamic routing is receiver/topology-owned through `connect`, typed
-          carries, instance keys, select/reply resolution, and RoutePlan facts.
-          Explicit key adapters remain parent-owned and cannot restore producer
-          recipient or cardinality authority.
+          compiled input resolution, instance keys, select/reply resolution, and
+          RoutePlan facts. No adapter can restore producer recipient or cardinality authority.
       custom_adapters:
-        status: explicit_adapter_escape_hatch
-        implementation_tracker: '#1546'
+        status: retired_unsupported
+        implementation_tracker: '#2352'
         rule: >
-          Custom adapters remain valid when interface names or key names differ.
-          They must be explicit parent-owned mappings, not implicit receiver
-          entity selection or producer-owned target matching.
+          `connect.adapter` is invalid on presence. Exact `connect.rename` owns
+          receiver event-name adaptation; payload transformation requires a
+          distinct declared event contract, not an adapter or compatibility path.
     migration_model:
       status: child_tracked
       rule: >

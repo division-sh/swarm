@@ -92,7 +92,7 @@ func TestClaudeCLIManagedLifecycleFromReleaseBinaryDefaults(t *testing.T) {
 		"run", "start",
 		"--backend", "claude_cli",
 		"--api-port", fmt.Sprint(apiPort),
-		"--event", "worker/task.assigned",
+		"--event", "task.assigned",
 		"--payload", payloadPath,
 		"--run-id", runID,
 	)

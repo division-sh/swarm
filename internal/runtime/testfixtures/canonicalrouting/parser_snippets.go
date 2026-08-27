@@ -21,6 +21,16 @@ const (
 	ConflictingEventMetadata       EventMetadataSnippet = "conflicting"
 )
 
+// InputPinSourceSnippet identifies one closed source-enum parser specimen.
+type InputPinSourceSnippet string
+
+const (
+	InputPinSourceDefault  InputPinSourceSnippet = "default"
+	InputPinSourceExternal InputPinSourceSnippet = "external"
+	InputPinSourceHarness  InputPinSourceSnippet = "harness"
+	InputPinSourceInvalid  InputPinSourceSnippet = "invalid"
+)
+
 // RetiredReceiverRoutingSnippet identifies one non-materializing old-form
 // parser specimen. These sources cannot create a complete fixture bundle.
 type RetiredReceiverRoutingSnippet string
@@ -45,6 +55,52 @@ const (
 func PackageConnectSourceSnippet(t testing.TB) ParserSnippet {
 	t.Helper()
 	return NewParserSnippet(t, "name: test\nversion: 1.0.0\nconnect:\n  - event: work.done\n    from: producer\n    to: consumer\n")
+}
+
+func InputPinSourceParserSnippet(t testing.TB, id InputPinSourceSnippet) ParserSnippet {
+	t.Helper()
+	var source string
+	switch id {
+	case InputPinSourceDefault:
+		source = "name: source-enum\npins:\n  inputs:\n    events:\n      - work.requested\n"
+	case InputPinSourceExternal:
+		source = "name: source-enum\npins:\n  inputs:\n    events:\n      - event: work.requested\n        source: external\n"
+	case InputPinSourceHarness:
+		source = "name: source-enum\npins:\n  inputs:\n    events:\n      - event: work.requested\n        source: harness\n"
+	case InputPinSourceInvalid:
+		source = "name: source-enum\npins:\n  inputs:\n    events:\n      - event: work.requested\n        source: fallback\n"
+	default:
+		t.Fatalf("unsupported input pin source parser snippet %q", id)
+	}
+	return NewParserSnippet(t, source)
+}
+
+func W2OptionPinsParserSnippet(t testing.TB) ParserSnippet {
+	t.Helper()
+	return NewParserSnippet(t, `
+states:
+  - pending
+initial_state: pending
+terminal_states: []
+pins:
+  inputs:
+    events:
+      - event: check.requested
+        source: external
+    reads:
+      - entity.score
+  outputs:
+    events:
+      - event: check.passed
+        sink: harness
+    writes:
+      - entity.status
+`)
+}
+
+func W2EmptyResolutionParserSnippet(t testing.TB) ParserSnippet {
+	t.Helper()
+	return NewParserSnippet(t, "pins:\n  inputs:\n    events:\n      - event: work.requested\n        resolution: {}\n")
 }
 
 func PackageRequiresBindConnectSnippet(t testing.TB) ParserSnippet {
