@@ -70,6 +70,35 @@ func (s *OverlayStore) AdmitWithReceipt(ctx context.Context, key, value, receipt
 	return writer.AdmitWithReceipt(ctx, key, value, receipt)
 }
 
+func (s *OverlayStore) ObserveReceipt(ctx context.Context, key, receipt string) (WriteReceipt, bool, error) {
+	if s == nil || s.writable == nil {
+		return WriteReceipt{}, false, ErrNotWritable
+	}
+	key = strings.TrimSpace(key)
+	receipt = strings.TrimSpace(receipt)
+	if key == "" || receipt == "" {
+		return WriteReceipt{}, false, fmt.Errorf("credential key and write receipt are required")
+	}
+	if s.primary != nil {
+		snapshotter, ok := s.primary.(Snapshotter)
+		if !ok || snapshotter == nil {
+			return WriteReceipt{}, false, fmt.Errorf("primary credential store does not provide atomic snapshots")
+		}
+		primary, err := snapshotter.Snapshot(ctx, key)
+		if err != nil {
+			return WriteReceipt{}, false, err
+		}
+		if primary.Present {
+			return WriteReceipt{}, false, nil
+		}
+	}
+	observer, ok := s.writable.(ReceiptObserver)
+	if !ok || observer == nil {
+		return WriteReceipt{}, false, fmt.Errorf("writable credential store does not support receipt observation")
+	}
+	return observer.ObserveReceipt(ctx, key, receipt)
+}
+
 func (s *OverlayStore) List(ctx context.Context) ([]string, error) {
 	if s == nil {
 		return nil, nil

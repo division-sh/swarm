@@ -1450,7 +1450,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 	}
 	channelActivationRefresher := &serveChannelActivationRefresher{
 		manager: runtimeContextManager, store: channelOnboardingStore, identities: operatorChannels,
-		credentials: providerCredentialOwner,
+		credentials: providerCredentialOwner, ingress: ready,
 	}
 	if !publicIngressEnabled {
 		channelActivationRefresher.preflight = func(_ context.Context, intent servePrebindingActivation) error {
@@ -1659,27 +1659,25 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		}
 		return channelActivationRefresher.RefreshChannelActivations(hookCtx)
 	})
-	apiServerLease, err := processWorkOwner.Begin(ctx)
-	if err != nil {
-		presenter.fail(20, "http_listener_bind", fmt.Errorf("admit api server: %w", err))
-		return 1
-	}
-	mcpServerLease, err := processWorkOwner.Begin(ctx)
-	if err != nil {
-		_ = apiServerLease.Done()
-		presenter.fail(20, "http_listener_bind", fmt.Errorf("admit mcp server: %w", err))
-		return 1
-	}
-	go func() {
-		defer func() { _ = apiServerLease.Done() }()
-		serveHTTPServer("api", apiServer, apiListener, runtimeFailure)
-	}()
-	go func() {
-		defer func() { _ = mcpServerLease.Done() }()
-		serveHTTPServer("mcp", mcpServer, mcpListener, runtimeFailure)
-	}()
 	presenter.recordBootWarnings(bootReport)
-	if err := activateServeAfterConnectedChannelTeardownRecovery(ctx, channelDestructive, func() error {
+	if err := activateServeAfterConnectedChannelTeardownRecovery(ctx, channelDestructive, channelOnboarding, func() error {
+		apiServerLease, err := processWorkOwner.Begin(ctx)
+		if err != nil {
+			return fmt.Errorf("admit api server: %w", err)
+		}
+		mcpServerLease, err := processWorkOwner.Begin(ctx)
+		if err != nil {
+			_ = apiServerLease.Done()
+			return fmt.Errorf("admit mcp server: %w", err)
+		}
+		go func() {
+			defer func() { _ = apiServerLease.Done() }()
+			serveHTTPServer("api", apiServer, apiListener, runtimeFailure)
+		}()
+		go func() {
+			defer func() { _ = mcpServerLease.Done() }()
+			serveHTTPServer("mcp", mcpServer, mcpListener, runtimeFailure)
+		}()
 		if err := startServeRuntimeContexts(ctx, runtimeContexts, runtimeContextManager); err != nil {
 			return err
 		}

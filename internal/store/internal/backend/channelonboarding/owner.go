@@ -265,7 +265,7 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 		if !validTransition(op.Phase, req.Phase) {
 			return domain.ErrConflict
 		}
-		if len(req.CredentialAdmissions) > 0 {
+		if req.ReplaceCredentialAdmissions {
 			op.CredentialAdmissions = append([]domain.CredentialAdmission(nil), req.CredentialAdmissions...)
 		}
 		if strings.TrimSpace(req.IdentityOperationID) != "" {
@@ -302,11 +302,18 @@ func validTransition(from, to domain.Phase) bool {
 		return true
 	}
 	allowed := map[domain.Phase]domain.Phase{
-		domain.PhasePreparing:                    domain.PhaseActivatingProvider,
+		domain.PhasePreparing:                    domain.PhaseCredentialsAdmitted,
+		domain.PhaseCredentialsAdmitted:          domain.PhaseActivatingProvider,
 		domain.PhaseActivatingProvider:           domain.PhaseAwaitingExternalIdentity,
 		domain.PhaseAwaitingExternalIdentity:     domain.PhaseAwaitingOperatorConfirmation,
 		domain.PhaseAwaitingOperatorConfirmation: domain.PhasePublishingActivation,
+		domain.PhasePublishingProcessActivation:  domain.PhasePromotingRegistration,
+		domain.PhasePromotingRegistration:        domain.PhaseRetiringPredecessor,
+		domain.PhaseRetiringPredecessor:          domain.PhaseDeliveringConfirmation,
 		domain.PhaseDeliveringConfirmation:       domain.PhaseSucceeded,
+	}
+	if from == domain.PhaseCredentialsAdmitted && to == domain.PhasePreparing {
+		return true
 	}
 	return allowed[from] == to
 }
@@ -322,7 +329,7 @@ func publishActivation(ctx context.Context, r runner, req domain.PublishActivati
 	if err := r.require(); err != nil {
 		return domain.Operation{}, domain.ConnectedChannelActivation{}, err
 	}
-	if _, err := uuid.Parse(req.ActivationID); err != nil || req.ExpectedRevision < 1 || req.BindingRevision < 1 || req.Now.IsZero() || ((req.ProofID == "") != (req.ProofRevision == 0)) {
+	if _, err := uuid.Parse(req.ActivationID); err != nil || req.ExpectedRevision < 1 || req.BindingRevision < 1 || strings.TrimSpace(req.ConversationRef) == "" || req.Now.IsZero() || ((req.ProofID == "") != (req.ProofRevision == 0)) {
 		return domain.Operation{}, domain.ConnectedChannelActivation{}, domain.ErrInvalidRequest
 	}
 	var outOp domain.Operation
@@ -368,19 +375,19 @@ func publishActivation(ctx context.Context, r runner, req domain.PublishActivati
 			activation_id,slot_key,operation_id,operation_revision,principal_id,provider,
 			interface_key,interface_ref,channel_pack_id,channel_pack_version,channel_manifest_hash,semantic_generation,
 			bundle_hash,bundle_source,bundle_identity,pack_inventory_generation,context_publication_generation,plan_generation,
-			target_selector,target_generation,activation_posture,binding_revision,proof_id,proof_revision,credential_admissions,
+			target_selector,target_generation,activation_posture,binding_revision,conversation_reference,proof_id,proof_revision,credential_admissions,
 			activation_revision,status,created_at,updated_at
-		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'current',?,?)`),
+		) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'current',?,?)`),
 			req.ActivationID, op.SlotKey, op.OperationID, op.Revision+1, op.PrincipalID, op.Provider,
 			i.Key(), i.InterfaceRef, i.ChannelPackID, i.ChannelPackVersion, i.ChannelManifestHash, i.SemanticGeneration,
 			c.BundleHash, c.BundleSource, c.BundleIdentity, c.PackInventoryGeneration, c.ContextPublicationGeneration, c.PlanGeneration.Diagnostic(),
-			op.TargetSelector, c.TargetGeneration, string(op.Posture), req.BindingRevision, nullable(req.ProofID), nullableInt(req.ProofRevision), string(admissions),
+			op.TargetSelector, c.TargetGeneration, string(op.Posture), req.BindingRevision, strings.TrimSpace(req.ConversationRef), nullable(req.ProofID), nullableInt(req.ProofRevision), string(admissions),
 			activationRevision, now, now)
 		if err != nil {
 			return fmt.Errorf("insert connected channel activation: %w", err)
 		}
 		op.BindingRevision, op.ActivationRevision = req.BindingRevision, activationRevision
-		op.Phase, op.Revision, op.UpdatedAt = domain.PhaseDeliveringConfirmation, op.Revision+1, now
+		op.Phase, op.Revision, op.UpdatedAt = domain.PhasePublishingProcessActivation, op.Revision+1, now
 		if err := updateOperation(txctx, tx, r.dialect(), op); err != nil {
 			return err
 		}
@@ -856,7 +863,7 @@ func updateOperation(ctx context.Context, tx *sql.Tx, d dialect, op domain.Opera
 const activationSelect = `SELECT activation_id,slot_key,operation_id,operation_revision,principal_id,provider,
 	interface_ref,channel_pack_id,channel_pack_version,channel_manifest_hash,semantic_generation,
 	bundle_hash,bundle_source,bundle_identity,pack_inventory_generation,context_publication_generation,plan_generation,
-	target_selector,target_generation,activation_posture,binding_revision,proof_id,proof_revision,credential_admissions,
+	target_selector,target_generation,activation_posture,binding_revision,conversation_reference,proof_id,proof_revision,credential_admissions,
 	activation_revision,status,retirement_reason,created_at,updated_at,retired_at FROM connected_channel_activations`
 
 func loadActivationBySlot(ctx context.Context, q queryer, d dialect, slot string, lock bool) (domain.ConnectedChannelActivation, bool, error) {
@@ -885,7 +892,7 @@ func scanActivationRow(row rowScanner) (domain.ConnectedChannelActivation, bool,
 	err := row.Scan(&a.ActivationID, &a.SlotKey, &a.OperationID, &a.OperationRevision, &a.PrincipalID, &a.Provider,
 		&a.Interface.InterfaceRef, &a.Interface.ChannelPackID, &a.Interface.ChannelPackVersion, &a.Interface.ChannelManifestHash, &a.Interface.SemanticGeneration,
 		&a.Coordinate.BundleHash, &a.Coordinate.BundleSource, &a.Coordinate.BundleIdentity, &a.Coordinate.PackInventoryGeneration, &a.Coordinate.ContextPublicationGeneration, &planGeneration,
-		&a.TargetSelector, &a.Coordinate.TargetGeneration, &posture, &a.BindingRevision, &proofID, &proofRevision, &admissions, &a.Revision, &status, &retirement, &created, &updated, &retired)
+		&a.TargetSelector, &a.Coordinate.TargetGeneration, &posture, &a.BindingRevision, &a.ConversationRef, &proofID, &proofRevision, &admissions, &a.Revision, &status, &retirement, &created, &updated, &retired)
 	if err == sql.ErrNoRows {
 		return domain.ConnectedChannelActivation{}, false, nil
 	}

@@ -71,18 +71,15 @@ func LearnedBindingID(slotKey string) string {
 	return "learned_" + operatorchannel.Hash("connected-channel-binding-v1", strings.TrimSpace(slotKey))
 }
 
-func CompileLearnedActivation(candidate Candidate, activation ConnectedChannelActivation, binding operatorchannel.Binding) (CompiledActivation, error) {
+func CompileLearnedActivation(candidate Candidate, activation ConnectedChannelActivation) (CompiledActivation, error) {
 	if err := candidate.Validate(); err != nil {
 		return CompiledActivation{}, err
 	}
 	if activation.Status != ActivationCurrent || activation.SlotKey == "" || !activation.Coordinate.Matches(candidate.Coordinate) || activation.Interface.Normalized() != candidate.Interface.Normalized() || activation.Provider != candidate.Provider || activation.TargetSelector != candidate.Target.Selector || activation.Posture != candidate.Posture {
 		return CompiledActivation{}, fmt.Errorf("current learned activation contradicts the exact candidate")
 	}
-	if binding.Status != operatorchannel.BindingCurrent || binding.PrincipalID != activation.PrincipalID || binding.Interface.Normalized() != activation.Interface.Normalized() || binding.Revision != activation.BindingRevision || strings.TrimSpace(binding.ConversationRef) == "" {
-		return CompiledActivation{}, fmt.Errorf("current operator binding contradicts the learned activation")
-	}
-	if strings.TrimSpace(activation.ProofID) != strings.TrimSpace(binding.ProofID) || activation.ProofRevision != binding.ProofRevision {
-		return CompiledActivation{}, fmt.Errorf("operator proof linkage contradicts the learned activation")
+	if activation.BindingRevision < 1 || strings.TrimSpace(activation.ConversationRef) == "" {
+		return CompiledActivation{}, fmt.Errorf("learned activation has no exact bound conversation destination")
 	}
 	credentialKeys := make(map[string]string, len(activation.CredentialAdmissions))
 	for _, admission := range activation.CredentialAdmissions {
@@ -101,7 +98,7 @@ func CompileLearnedActivation(candidate Candidate, activation ConnectedChannelAc
 		}
 	}
 	plan, err := packs.NewOutboundBindingPlanWithRegistration(
-		LearnedBindingID(activation.SlotKey), candidate.Plan, binding.ConversationRef, nil, credentialKeys, candidate.Target.Selector,
+		LearnedBindingID(activation.SlotKey), candidate.Plan, activation.ConversationRef, nil, credentialKeys, candidate.Target.Selector,
 	)
 	if err != nil {
 		return CompiledActivation{}, err

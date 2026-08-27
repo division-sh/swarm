@@ -440,6 +440,9 @@ func (o *ReadinessOwner) ChannelRegistrationCurrent(ctx context.Context, now tim
 		if state.Pair.BindingID != bindingID || state.Pair.Target.Selector != target || state.Pair.Target.Provider != provider {
 			continue
 		}
+		if !state.Pair.ChannelActivationGeneration.Valid() {
+			continue
+		}
 		if found {
 			return ChannelRegistrationCurrentness{}, false
 		}

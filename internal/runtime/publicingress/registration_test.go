@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packs"
 	"github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -352,6 +353,84 @@ func TestProviderRegistrationRejectedReplacementPreservesVerifiedPredecessor(t *
 	}
 	if !controller.CallbackCurrent(ctx, predecessor.Target.Alias, predecessor.Target.Provider, callbackToken) {
 		t.Fatal("rejected replacement revoked the predecessor callback")
+	}
+}
+
+func TestProviderRegistrationHandoffKeepsAuthoritiesDistinctUntilPromotion(t *testing.T) {
+	registration := loadTelegramRegistrationPlan(t)
+	candidate := testRegistrationPair(t, registration, "replacement", "ingress:support:telegram:telegram")
+	publication, err := channelonboarding.NewChannelActivationPublication(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	predecessor := candidate
+	predecessor.PrebindingOperationID = ""
+	predecessor.ChannelActivationGeneration = publication.Generation()
+
+	for _, test := range []struct {
+		name    string
+		pairs   []admittedPair
+		want    int
+		wantPre bool
+		wantErr bool
+	}{
+		{
+			name: "same slot preserves activation authority",
+			pairs: []admittedPair{
+				{pair: candidate, slotID: "telegram:bot_webhook:42"},
+				{pair: predecessor, slotID: "telegram:bot_webhook:42"},
+			},
+			want: 1,
+		},
+		{
+			name: "same slot ordering is irrelevant",
+			pairs: []admittedPair{
+				{pair: predecessor, slotID: "telegram:bot_webhook:42"},
+				{pair: candidate, slotID: "telegram:bot_webhook:42"},
+			},
+			want: 1,
+		},
+		{
+			name: "distinct provider slots coexist",
+			pairs: []admittedPair{
+				{pair: predecessor, slotID: "telegram:bot_webhook:42"},
+				{pair: candidate, slotID: "telegram:bot_webhook:84"},
+			},
+			want: 2, wantPre: true,
+		},
+		{
+			name: "same provider slot with different semantic pair fails closed",
+			pairs: []admittedPair{
+				{pair: predecessor, slotID: "telegram:bot_webhook:42"},
+				{pair: func() RegistrationPair { changed := candidate; changed.BindingID = "other"; return changed }(), slotID: "telegram:bot_webhook:42"},
+			},
+			wantErr: true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			selected, err := resolveSlotCollisions(test.pairs)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("resolve error = %v, want error %v", err, test.wantErr)
+			}
+			if test.wantErr {
+				return
+			}
+			if len(selected) != test.want {
+				t.Fatalf("selected pairs = %d, want %d", len(selected), test.want)
+			}
+			prebindings := 0
+			for _, pair := range selected {
+				if pair.pair.PrebindingOperationID != "" {
+					prebindings++
+				}
+			}
+			if test.wantPre && prebindings != 1 {
+				t.Fatalf("selected prebindings = %d, want 1", prebindings)
+			}
+			if !test.wantPre && prebindings != 0 {
+				t.Fatalf("same-slot candidate replaced predecessor: %#v", selected)
+			}
+		})
 	}
 }
 

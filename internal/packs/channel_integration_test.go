@@ -621,6 +621,63 @@ func TestTelegramOnboardingProfileCompilesAsWebhookTextChallenge(t *testing.T) {
 	}
 }
 
+func TestLearnedActivationCompilationUsesDurableConversationDestination(t *testing.T) {
+	plan := loadTelegramChannelPlan(t)
+	profile, ok := plan.OnboardingProfile()
+	if !ok {
+		t.Fatal("Telegram onboarding profile is missing")
+	}
+	generation, err := plan.Generation()
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity, err := plan.InterfaceIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
+		BundleHash: "bundle-v1:sha256:" + strings.Repeat("a", 64), BundleSource: "persisted",
+		BundleIdentity: "telegram@1.0.0#bundle", PackInventoryGeneration: "sha256:inventory",
+		ContextPublicationGeneration: 1, PlanGeneration: generation, TargetGeneration: 1,
+	}
+	target := "ingress:.:telegram-ingress:telegram"
+	candidate := channelonboarding.Candidate{
+		Provider: profile.Provider(), Interface: identity, Coordinate: coordinate,
+		Target: channelonboarding.CandidateTarget{
+			Selector: target, ServiceID: "telegram-ingress", PackageKey: ".", FlowID: "telegram-ingress",
+			Alias: "telegram", Provider: profile.Provider(), Generation: 1, PublicationSequence: 1,
+			AdmissionGeneration: triggergeneration.FromCanonicalBytes([]byte("telegram-admission")), SigningCredentialKey: "telegram.signing",
+		},
+		Posture: channelonboarding.ActivationWebhookRegistration, Ceremony: channelonboarding.CeremonyAuthenticatedTextChallenge,
+		ProviderCredentialRole: profile.ProviderCredential(), SigningCredentialRole: profile.SigningCredential(),
+		ConfirmationOperation: profile.ConfirmationOperation(), Plan: plan,
+	}
+	activation := channelonboarding.ConnectedChannelActivation{
+		ActivationID: uuid.NewString(), SlotKey: "slot-a", OperationID: uuid.NewString(), OperationRevision: 8,
+		PrincipalID: "principal-a", Provider: candidate.Provider, Interface: candidate.Interface,
+		Coordinate: candidate.Coordinate, TargetSelector: target, Posture: candidate.Posture,
+		BindingRevision: 3, ConversationRef: "-100123",
+		CredentialAdmissions: []channelonboarding.CredentialAdmission{
+			{Role: profile.ProviderCredential(), StoreKey: "telegram.provider", Kind: channelonboarding.CredentialAdmissionObserved, Receipt: "provider-receipt", Epoch: "provider-epoch"},
+			{Role: profile.SigningCredential(), StoreKey: "telegram.signing", Kind: channelonboarding.CredentialAdmissionObserved, Receipt: "signing-receipt", Epoch: "signing-epoch"},
+		},
+		Revision: 1, Status: channelonboarding.ActivationCurrent,
+	}
+
+	compiled, err := channelonboarding.CompileLearnedActivation(candidate, activation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := compiled.Plan.Destination().Interface(); got != activation.ConversationRef {
+		t.Fatalf("compiled destination = %q, want durable predecessor %q", got, activation.ConversationRef)
+	}
+
+	activation.ConversationRef = ""
+	if _, err := channelonboarding.CompileLearnedActivation(candidate, activation); err == nil || !strings.Contains(err.Error(), "conversation") {
+		t.Fatalf("missing durable destination error = %v", err)
+	}
+}
+
 func TestChannelOnboardingProfileAxesAreProviderNeutral(t *testing.T) {
 	for _, tc := range []struct {
 		name     string

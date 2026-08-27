@@ -57,10 +57,14 @@ type Phase string
 
 const (
 	PhasePreparing                    Phase = "preparing"
+	PhaseCredentialsAdmitted          Phase = "credentials_admitted"
 	PhaseActivatingProvider           Phase = "activating_provider"
 	PhaseAwaitingExternalIdentity     Phase = "awaiting_external_identity"
 	PhaseAwaitingOperatorConfirmation Phase = "awaiting_operator_confirmation"
 	PhasePublishingActivation         Phase = "publishing_activation"
+	PhasePublishingProcessActivation  Phase = "publishing_process_activation"
+	PhasePromotingRegistration        Phase = "promoting_registration"
+	PhaseRetiringPredecessor          Phase = "retiring_predecessor"
 	PhaseDeliveringConfirmation       Phase = "delivering_confirmation"
 	PhaseSucceeded                    Phase = "succeeded"
 	PhaseFailed                       Phase = "failed"
@@ -73,8 +77,9 @@ func (p Phase) Terminal() bool {
 
 func (p Phase) Valid() bool {
 	switch p {
-	case PhasePreparing, PhaseActivatingProvider, PhaseAwaitingExternalIdentity,
-		PhaseAwaitingOperatorConfirmation, PhasePublishingActivation,
+	case PhasePreparing, PhaseCredentialsAdmitted, PhaseActivatingProvider, PhaseAwaitingExternalIdentity,
+		PhaseAwaitingOperatorConfirmation, PhasePublishingActivation, PhasePublishingProcessActivation,
+		PhasePromotingRegistration, PhaseRetiringPredecessor,
 		PhaseDeliveringConfirmation, PhaseSucceeded, PhaseFailed, PhaseRetired:
 		return true
 	default:
@@ -430,16 +435,17 @@ type Operation struct {
 }
 
 type AdvanceRequest struct {
-	OperationID             string
-	ExpectedRevision        int64
-	Phase                   Phase
-	CredentialAdmissions    []CredentialAdmission
-	IdentityOperationID     string
-	BindingRevision         int64
-	ConfirmationOperationID string
-	FailureCode             string
-	FailureMessage          string
-	Now                     time.Time
+	OperationID                 string
+	ExpectedRevision            int64
+	Phase                       Phase
+	CredentialAdmissions        []CredentialAdmission
+	ReplaceCredentialAdmissions bool
+	IdentityOperationID         string
+	BindingRevision             int64
+	ConfirmationOperationID     string
+	FailureCode                 string
+	FailureMessage              string
+	Now                         time.Time
 }
 
 type ActivationStatus string
@@ -461,6 +467,7 @@ type ConnectedChannelActivation struct {
 	TargetSelector       string                            `json:"target_selector"`
 	Posture              ActivationPosture                 `json:"activation_posture"`
 	BindingRevision      int64                             `json:"binding_revision"`
+	ConversationRef      string                            `json:"conversation_reference"`
 	ProofID              string                            `json:"proof_id,omitempty"`
 	ProofRevision        int64                             `json:"proof_revision,omitempty"`
 	CredentialAdmissions []CredentialAdmission             `json:"credential_admissions"`
@@ -477,6 +484,7 @@ type PublishActivationRequest struct {
 	ExpectedRevision int64
 	ActivationID     string
 	BindingRevision  int64
+	ConversationRef  string
 	ProofID          string
 	ProofRevision    int64
 	Now              time.Time
