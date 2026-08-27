@@ -32,7 +32,298 @@ policy:
     Postgres; fake-store OpenRPC probes and store-unit tests alone do not count
     as selected-backend parity proof. Non-HTTP subscription/protocol methods must
     be classified explicitly rather than omitted.
+store_parity:
+  issue: 2275
+  closure_level: store_prevention_first_slice_eliminated
+  claims_parent_closure: false
+  proof_policy_path: .github/test-proof-plan.yaml
+  selected_purposes:
+    - id: runtime
+      constructor: OpenRuntime
+      consumers: [internal/serveapp/main.go, internal/serveapp/store_runtime.go, internal/serveapp/store_capabilities.go]
+      semantic_owner: internal/store/selected.Owner
+      claim_ids: [store_infrastructure, resource_data, bundle_catalog, bundle_delete, event_delivery, author_activity, run_fork_revision, operator_channels, agent_lifecycle, external_effects, selected_contract_fork, workflow_runtime, session_conversation, mailbox_decision, api_idempotency, runtime_controls, budget_spend, timer_schedule, scenario_execution, observability, destructive_reset, non_store_transport]
+      proof_profile: pr-common
+      proof_refs:
+        - {kind: go_test, name: TestOpenRuntimeSQLiteResolvesRequiredAndOptionalProductsOnce}
+        - {kind: go_test, name: TestOpenRuntimePostgresResolvesRequiredAndOptionalBundleWritersOnce}
+        - {kind: go_test, name: TestServeCompositionProvidesExactRuntimePorts}
+      close_proof_refs:
+        - {kind: go_test, name: TestPostgresFailedPingClosesTheConstructedPool}
+        - {kind: go_test, name: TestOwnerUnactivatedCloseFailureRetainsCloseAuthority}
+    - id: authority_inspection
+      constructor: OpenAuthorityInspection
+      consumers: [internal/cliapp/store_authority.go]
+      semantic_owner: internal/runtime/startupownership inspection through internal/store/selected
+      claim_ids: [startup_authority]
+      proof_profile: pr-common
+      proof_refs:
+        - {kind: go_test, name: TestStoreStatusReadsCurrentSQLiteStoreWithoutMutationBootstrap}
+        - {kind: go_test, name: TestStoreStatusDoesNotBootstrapEmptyPostgres}
+      close_proof_refs:
+        - {kind: go_test, name: TestAuthorityInspectionPropagatesOperationAndCloseErrors}
+    - id: authority_maintenance
+      constructor: OpenAuthorityMaintenance
+      consumers: [internal/cliapp/store_authority.go]
+      semantic_owner: internal/runtime/startupownership maintenance through internal/store/selected
+      claim_ids: [startup_authority]
+      proof_profile: pr-common
+      proof_refs:
+        - {kind: go_test, name: TestAuthorityRepairParity}
+        - {kind: go_test, name: TestSQLiteAuthorityMaintenanceConstructionRetainsBackendPossession}
+      close_proof_refs:
+        - {kind: go_test, name: TestAuthorityMaintenancePropagatesCloseError}
+  different_construction:
+    runtime_deps: [Config, Options, StartupGrant]
+    manager_persistence_roles: [AgentRoutes, FlowActivation, RouteInstaller, RouteVerifier, RouteRestorer, RouteRetirer, RouteRemover, FlowTermination, CreationPublisher, DeliveryRuntime]
+  claims:
+    - id: store_infrastructure
+      semantic_owners: [internal/store/selected, internal/store/internal/schemastore]
+      backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
+      spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
+      proof_profile: pr-common
+      proof_refs: [{kind: go_test, name: TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore}, {kind: go_test, name: TestGeneratePlatformTableDDLs}]
+      risk_dimensions: [structural_census, selected_construction, schema_coherence, proof_schedule]
+      required_ports: [schema, workspace, pinger]
+      platform_tables: [runtime_store_metadata]
+      public_methods: [health.check]
+    - id: resource_data
+      semantic_owners: [internal/store/resource, internal/apiv1 data surface]
+      backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
+      spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
+      proof_profile: pr-common
+      proof_refs: [{kind: go_test, name: TestDurableDataHTTPPublicSurfaceAcrossSelectedStores}]
+      risk_dimensions: [real_v1_handler, served_lifecycle, restart]
+      required_ports: [data, dataAccess]
+      runtime_deps: [ToolEntityStore, DataAccessStore]
+      platform_tables: [resource_bundle_declarations, resource_declarations, resource_head_history, resource_heads, resource_prune_invocations, resource_prune_pin_evidence, resource_run_creation_child_evaluations, resource_run_creation_child_reservations, resource_run_creation_operations, resource_source_invocations, resource_version_pins, resource_version_provenance, resource_versions, bundle_static_data]
+      public_methods: [data.check, data.import, data.prune, data.show]
+    - id: bundle_catalog
+      semantic_owners: [internal/store/selected bundle catalog and ingest]
+      backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
+      spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
+      proof_profile: pr-common
+      proof_refs: [{kind: go_test, name: TestServedParityHarnessBundleRegisterLifecycle}]
+      risk_dimensions: [selected_construction, real_v1_handler, served_lifecycle, restart]
+      required_ports: [runBundleContext, runBundleAvailability, serveBundleIngest]
+      runtime_deps: [RunBundleAvailability]
+      optional_products: [bundleCatalog, bundleRegister]
+      platform_tables: [bundles]
+      public_methods: [bundle.register, bundle.agents, bundle.get, bundle.list]
+    - id: bundle_delete
+      semantic_owners: [internal/apiv1 bundle.delete, internal/store/selected.BundleDelete]
+      backend_dispositions: {default_sqlite: split_with_active_issue_and_fail_closed_proof, explicit_postgres: supported_with_dual_backend_proof}
+      split_issue: 2276
+      spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.bundle_delete]
+      proof_profile: pr-common
+      proof_refs: [{kind: go_test, name: TestOperatorBundleDeleteForceUsesOwnerChainAndIdempotency}]
+      teaching_proof_refs: [{kind: go_test, name: TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed}]
+      risk_dimensions: [fail_closed, writer_ownership, restart]
+      risk_trackers: [{kind: tracker, issue: 2276, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+      optional_products: [bundleDelete]
+      optional_subroles: [BundleDelete.planner, BundleDelete.cleaner, BundleDelete.locks]
+      platform_tables: [agent_topology_source_set_head, agent_topology_source_set_operations, bundle_delete_final_mutation_replays]
+      public_methods: [bundle.delete]
+    - id: event_delivery
+      semantic_owners: [internal/runtime/bus, internal/store event persistence]
+      backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
+      spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
+      proof_profile: pr-common
+      proof_refs: [{kind: go_test, name: TestServedParityHarnessEventPublishDynamicAutoEmitLifecycle}, {kind: go_test, name: TestServedParityHarnessLiveAgentEventReplayLifecycle}, {kind: go_test, name: TestEventBusDurableDependenciesAreExplicit}]
+      risk_dimensions: [served_lifecycle, restart, contention, writer_ownership]
+      runtime_deps: [EventStore, EventBusDurable, EventPayloadValidationBinder, DeliveryStore]
+      event_bus_durable_roles: [ReplyContext, RunLifecycle, DeliveryLifecycle, FlowRoutes, FlowRouteRecords, FlowRouteSets, FlowRouteTopology, FlowRouteRollback, ActiveAgents, ActiveFlows, TargetOwners, WorkflowInstances, PreparedEvents, TargetFailureRecorder, RunOrigins]
+      platform_tables: [events, event_deliveries, event_delivery_handler_rule_selections, event_delivery_attempts, event_delivery_outcomes, committed_replay_scopes, run_fork_delivery_event_replays, event_receipts]
+      public_methods: [event.publish, event.replay, event.get, event.list, agent.replay, run.start]
+    - id: author_activity
+      semantic_owners: [internal/store author activity]
+      backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
+      spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
+      proof_profile: pr-common
+      proof_refs: [{kind: go_test, name: TestAuthorActivityRollbackReusesSequenceOnBothStores}]
+      risk_dimensions: [writer_ownership, contention]
+      required_ports: [authorActivity]
+      runtime_deps: [AuthorActivityRegistrars]
+      platform_tables: [author_activity_order, author_activity_occurrences]
+    - id: run_fork_revision
+      semantic_owners: [internal/store/internal/runtimepersistence run fork revision]
+      backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
+      spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
+      proof_profile: pr-common
+      proof_refs: [{kind: go_test, name: TestRunForkRevisionTwelveFamilySelectedStoreParity}]
+      risk_dimensions: [structural_census, writer_ownership, contention]
+      platform_tables: [run_fork_revision_heads, run_fork_revisions, run_fork_fact_revisions]
+    - id: operator_channels
+      semantic_owners: [internal/store operator channels]
+      backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
+      spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
+      proof_profile: pr-common
+      proof_refs: [{kind: go_test, name: TestServedParityHarnessOperatorChannelLifecycle}]
+      risk_dimensions: [real_v1_handler, served_lifecycle, restart]
+      required_ports: [operatorChannels]
+      runtime_deps: [InboundPayloadValidationBinder, InboundStore]
+      platform_tables: [operator_principals, operator_channel_operations, operator_channel_bindings, inbound_publications, inbound_publication_events, operator_channel_claim_receipts]
+      public_methods: [channel.connect, channel.reconnect, channel.rebind, channel.confirm, channel.unbind, channel.proof_revoke, channel.list]
+    - id: agent_lifecycle
+      semantic_owners: [internal/runtime/manager, internal/store agent lifecycle]
+      backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
+      spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
+      proof_profile: pr-common
+      proof_refs: [{kind: go_test, name: TestServedParityHarnessAgentRestartLifecycle}, {kind: go_test, name: TestServedParityHarnessAgentDirectiveOutcomeLifecycle}, {kind: go_test, name: TestAgentManagerPersistenceRolesAreExplicit}]
+      risk_dimensions: [served_lifecycle, restart, forced_death, contention]
+      required_ports: [agentUsage, agentDeliveryLifecycle, agents]
+      runtime_deps: [ManagerStore, ManagerLifecycleDiagnostics, ManagerPersistenceRoles]
+      manager_selected_roles: [LifecycleCensus, LifecycleState, LifecycleEffects, LifecycleDiagnostics, EffectsRecovery, DeliveryQuiescence, EventExistence, DirectiveOperations, DirectiveTargets, FlowRoutes]
+      platform_tables: [agents, agent_directive_operations, agent_lifecycle_operations, agent_lifecycle_transition_facts, agent_lifecycle_diagnostic_outbox]
+      public_methods: [agent.delivery_diagnostics, agent.delivery_lifecycle, agent.diagnose, agent.get, agent.list, agent.usage, agent.send_directive, agent.restart]
+    - id: external_effects
+      semantic_owners: [internal/runtime external effects]
+      backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
+      spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
+      proof_profile: pr-common
+      proof_refs: [{kind: go_test, name: TestExternalEffectRecoveryPostureAdmissionGenericSQLiteAndPostgres}]
+      risk_dimensions: [restart, forced_death, writer_ownership]
+      runtime_deps: [EffectsStore, CompletionStore, CompletionHeartbeatStore, EffectsRecoveryStore, ManagedCapabilitiesStore]
+      platform_tables: [runtime_external_effect_operations, runtime_external_effect_attempts, runtime_provider_attempt_drains, reply_contexts, activity_attempts]
+    - id: selected_contract_fork
+      semantic_owners: [internal/store/selected.RunFork]
+      backend_dispositions: {default_sqlite: split_with_active_issue_and_fail_closed_proof, explicit_postgres: supported_with_dual_backend_proof}
+      split_issue: 2276
+      spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork]
+      proof_profile: pr-common
+      proof_refs: [{kind: go_test, name: TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersistedIdentity}]
+      teaching_proof_refs: [{kind: go_test, name: TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed}]
+      risk_dimensions: [fail_closed, served_lifecycle, restart]
+      risk_trackers: [{kind: tracker, issue: 2276, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}]
+      optional_products: [bundleRuntimeCatalog, runFork]
+      optional_subroles: [RunFork.planner, RunFork.availability, RunFork.activation, RunFork.executionOwner]
+      platform_tables: [run_fork_selected_contract_bindings, run_fork_selected_contract_branch_divergences, run_fork_selected_contract_executions, run_fork_selected_contract_route_recoveries, run_fork_selected_contract_runtime_executions]
+      public_methods: [run.fork]
+    - id: workflow_runtime
+      semantic_owners: [internal/runtime/pipeline workflow persistence]
+      backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
+      spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
+      proof_profile: pr-common
+      proof_refs: [{kind: go_test, name: TestWorkflowEngineMutationSettlesExactNodeDeliveryAtomicallyOnBothStores}, {kind: go_test, name: TestServedParityHarnessTestSetupEntitiesLifecycle}, {kind: go_test, name: TestWorkflowPersistenceIsOpaqueAndConcreteStoreDoesNotEscape}]
+      risk_dimensions: [writer_ownership, served_lifecycle, restart]
+      required_ports: [runs, entities, testSetup]
+      runtime_deps: [WorkflowPersistence, PipelineObligations, MailboxMaterializer]
+      workflow_persistence_roles: [entityquery.Reader, runtimeworkflowroute.RecoveryReader, runtimeactivityresult.Reader, ActivityAttemptJournal, GateRouteAdmissionReader, runtimetimerobligation.Reader, WorkflowEngineMutationOwner, DecisionCardMutationOwner, WorkflowTimerOccurrenceOwner, WorkflowTimerActivationPersistence, DynamicFlowRuntimeReadinessPersistence, StandingServicePersistence, WorkflowDecisionRouteOwner, WorkflowInstancePersistenceReader, WorkflowEntityStatePersistenceReader, WorkflowTargetPersistenceReader, WorkflowInitialMaterializationCommitOwner]
+      platform_tables: [entity_state, workflow_instance_initial_materializations, routing_rules, flow_instances, flow_instance_runtime_readiness, runs, entity_mutations, standing_service_generations, standing_service_journal, standing_services]
+      public_methods: [entity.aggregate, entity.get, entity.list, run.diagnose, run.get, run.list, test.setup_entities, standing.suspend, standing.resume, standing.reset]
+    - id: session_conversation
+      semantic_owners: [internal/runtime session registry, internal/store conversation]
+      backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
+      spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
+      proof_profile: pr-common
+      proof_refs: [{kind: go_test, name: TestSQLiteAgentConversationOwnerBacksSupportedAPISurface}, {kind: go_test, name: TestPostgresAgentConversationOwnerBacksSupportedAPISurface}, {kind: go_test, name: TestServedParityHarnessConversationForkLifecycle}]
+      risk_dimensions: [real_v1_handler, restart, read_snapshot]
+      required_ports: [conversations]
+      runtime_deps: [SessionRegistry, LiveSessionAcquirer, SessionResetter, ConversationStore]
+      optional_products: [conversationFork]
+      optional_subroles: [ConversationFork.reader, ConversationFork.lifecycle]
+      platform_tables: [agent_sessions, managed_agent_capability_surfaces, agent_turns, agent_conversation_audits, conversation_fork_snapshots, conversation_fork_turn_completions, conversation_fork_turns, conversation_forks]
+      public_methods: [conversation.fork, conversation.fork_chat, conversation.fork_delete, conversation.fork_list, conversation.fork_view, conversation.get_turn, conversation.list, conversation.list_turns]
+    - id: startup_authority
+      semantic_owners: [internal/runtime/startupownership, internal/store/selected authority purposes]
+      backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
+      spec_refs: [platform-spec.yaml#agent_topology_authority]
+      proof_profile: pr-common
+      proof_refs: [{kind: go_test, name: TestAuthorityRepairParity}, {kind: go_test, name: TestStoreStatusReadsSelectedStoreOwnershipWithoutContextInference}]
+      risk_dimensions: [selected_construction, restart, forced_death, fail_closed]
+      required_ports: [startupOwnership]
+      platform_tables: [runtime_startup_authority_facts, runtime_startup_authority_repairs, runtime_generation_grants]
+    - id: mailbox_decision
+      semantic_owners: [internal/runtime mailbox]
+      backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
+      spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
+      proof_profile: pr-common
+      proof_refs: [{kind: go_test, name: TestServedParityHarnessMailboxDecisionLifecycle}]
+      risk_dimensions: [served_lifecycle, restart, contention]
+      required_ports: [mailboxAPI, mailboxNoticeAck]
+      runtime_deps: [DecisionCards, ProposedEffects, DecisionCardHumanTasks, DecisionCardDraftExpiry, HumanTaskExpiry, MailboxStore, HumanTaskStore]
+      platform_tables: [mailbox, decision_cards, proposed_effect_continuations, human_task_continuations, decision_card_input_drafts, decision_card_changes, decision_card_route_obligations]
+      public_methods: [mailbox.acknowledge, mailbox.begin_input, mailbox.cancel_input, mailbox.decide, mailbox.defer, mailbox.get, mailbox.list]
+    - id: api_idempotency
+      semantic_owners: [internal/apiv1 idempotency]
+      backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
+      spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
+      proof_profile: pr-common
+      proof_refs: [{kind: go_test, name: TestOperatorRunStartHandlersPersistRootEventAndReplayIdempotency}]
+      risk_dimensions: [real_v1_handler, writer_ownership]
+      required_ports: [idempotency]
+      platform_tables: [api_idempotency]
+    - id: runtime_controls
+      semantic_owners: [internal/runtime run and ingress controls]
+      backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
+      spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
+      proof_profile: pr-common
+      proof_refs: [{kind: go_test, name: TestServedParityHarnessRunControlLifecycle}, {kind: go_test, name: TestServedParityHarnessRuntimeIngressControlLifecycle}]
+      risk_dimensions: [served_lifecycle, restart, contention]
+      required_ports: [runQuiescence, runStalled]
+      runtime_deps: [RunControlStore, RunLifecycleCandidates, RuntimeIngressStore]
+      platform_tables: [run_control_state, runtime_ingress_state]
+      public_methods: [run.stop, run.pause, run.continue, runtime.pause, runtime.resume]
+    - id: budget_spend
+      semantic_owners: [internal/runtime budget]
+      backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
+      spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
+      proof_profile: pr-common
+      proof_refs: [{kind: go_test, name: TestCompletionBudgetRecoveryProjectionParity}]
+      risk_dimensions: [restart, writer_ownership]
+      runtime_deps: [BudgetSpendStore]
+      platform_tables: [budget_admission_scopes, runtime_effect_budget_reservations, spend_ledger]
+    - id: timer_schedule
+      semantic_owners: [internal/runtime timer obligations]
+      backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
+      spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
+      proof_profile: pr-common
+      proof_refs: [{kind: go_test, name: TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRuntimeOnBothStores}]
+      risk_dimensions: [restart, contention, writer_ownership]
+      runtime_deps: [GenericScheduleStore, TimerObligationReader]
+      platform_tables: [timers, dead_letters]
+    - id: scenario_execution
+      semantic_owners: [internal/store scenario execution profiles]
+      backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
+      spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
+      proof_profile: pr-common
+      proof_refs: [{kind: go_test, name: TestSQLiteScenarioSetupPersistsExactExecutionProfileAtomically}, {kind: go_test, name: TestPostgresScenarioSetupPersistsExactExecutionProfileAtomically}]
+      risk_dimensions: [writer_ownership, restart]
+      runtime_deps: [ScenarioExecutionProfiles]
+      platform_tables: [run_scenario_execution_profiles]
+    - id: observability
+      semantic_owners: [internal/store runtime logs, internal/apiv1 observability]
+      backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
+      spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
+      proof_profile: pr-common
+      proof_refs: [{kind: go_test, name: TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability}, {kind: go_test, name: TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage}]
+      risk_dimensions: [read_snapshot, restart, writer_ownership]
+      required_ports: [observability]
+      runtime_deps: [RuntimeLogStore]
+      public_methods: [run.trace, runtime.incidents, runtime.logs]
+    - id: destructive_reset
+      semantic_owners: [internal/store/selected destructive reset and startup recovery]
+      backend_dispositions: {default_sqlite: unsupported_with_exact_spec_and_teaching_proof, explicit_postgres: supported_with_dual_backend_proof}
+      spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.runtime_nuke]
+      proof_profile: pr-common
+      proof_refs: [{kind: go_test, name: TestOperatorRuntimeNukeDryRunUsesDestructiveResetOwners}]
+      teaching_proof_refs: [{kind: go_test, name: TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed}]
+      risk_dimensions: [fail_closed, restart, writer_ownership]
+      optional_products: [destructiveReset, startupRecovery]
+      optional_subroles: [DestructiveReset.inventory, DestructiveReset.locks, DestructiveReset.quiescence, StartupRecovery.availability, StartupRecovery.cleanup]
+      public_methods: [runtime.nuke]
+    - id: non_store_transport
+      semantic_owners: [internal/apiv1 websocket runtime]
+      backend_dispositions: {default_sqlite: not_applicable_different_semantic_concept_with_proof, explicit_postgres: not_applicable_different_semantic_concept_with_proof}
+      spec_refs: [platform-spec.yaml#api_specification]
+      proof_profile: pr-common
+      proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes}]
+      risk_dimensions: [structural_census, proof_schedule]
+      public_methods: [agent.frame, event.subscribe, health.ping, health.subscribe, mailbox.subscribe, rpc.unsubscribe, run.subscribe_trace, runtime.identity, runtime.subscribe_logs]
 active_trackers:
+  - kind: github_issue
+    issue: 2276
+    watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
   - kind: watchlist
     issue: 0
     watchlist: operator_surfaces.v1_openrpc_api_conformance
