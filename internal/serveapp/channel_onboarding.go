@@ -154,19 +154,8 @@ func compileServeChannelActivationSnapshot(ctx context.Context, manager *runtime
 				// execution or registration authority to a successor publication.
 				continue
 			}
-			binding, err := identities.CurrentBinding(ctx, activation.Interface)
+			compiled, err := channelonboarding.CompileLearnedActivation(candidate, activation)
 			if err != nil {
-				return serveChannelActivationSnapshot{}, err
-			}
-			compiled, err := channelonboarding.CompileLearnedActivation(candidate, activation, binding)
-			if err != nil {
-				superseded, supersededErr := activationSupersededByExactRebind(activation, binding, operations)
-				if supersededErr != nil {
-					return serveChannelActivationSnapshot{}, supersededErr
-				}
-				if superseded {
-					continue
-				}
 				return serveChannelActivationSnapshot{}, err
 			}
 			learned = append(learned, compiled)
@@ -188,29 +177,6 @@ func compileServeChannelActivationSnapshot(ctx context.Context, manager *runtime
 	}
 	sort.Slice(prebinding, func(i, j int) bool { return prebinding[i].Operation.SlotKey < prebinding[j].Operation.SlotKey })
 	return serveChannelActivationSnapshot{Activations: merged, Prebinding: prebinding}, nil
-}
-
-func activationSupersededByExactRebind(activation channelonboarding.ConnectedChannelActivation, binding operatorchannel.Binding, operations []channelonboarding.Operation) (bool, error) {
-	identity := activation.Interface.Normalized()
-	if binding.Status != operatorchannel.BindingCurrent || binding.Interface.Normalized() != identity || binding.PrincipalID != activation.PrincipalID {
-		return false, fmt.Errorf("current operator binding contradicts activation ownership while resolving rebind")
-	}
-	if activation.BindingRevision == binding.Revision {
-		return false, nil
-	}
-	matches := 0
-	for _, op := range operations {
-		if op.Phase.Terminal() || op.Verb != channelonboarding.VerbRebind || op.PrincipalID != activation.PrincipalID ||
-			op.Interface.Normalized() != identity || strings.TrimSpace(op.IdentityOperationID) == "" ||
-			op.IdentityOperationID != binding.OperationID {
-			continue
-		}
-		matches++
-	}
-	if matches > 1 {
-		return false, fmt.Errorf("current operator binding resolves to %d active channel rebind owners; require one", matches)
-	}
-	return matches == 1, nil
 }
 
 func declaredActivationCredentialAdmissions(ctx context.Context, owner *runtimecredentials.SnapshotOwner, coordinate channelonboarding.ChannelRuntimeContextCoordinate, binding packs.OutboundBindingPlan) ([]channelonboarding.CredentialAdmission, error) {
@@ -279,12 +245,17 @@ type serveChannelActivationRefresher struct {
 	store       channelonboarding.Store
 	identities  *operatorchannel.Service
 	credentials *runtimecredentials.SnapshotOwner
+	ingress     *runtimepublicingress.ReadinessOwner
 	preflight   func(context.Context, servePrebindingActivation) error
 	reconcile   func(context.Context) error
 }
 
 type serveConnectedChannelRecovery interface {
 	Recover(context.Context) error
+}
+
+type serveConnectedChannelLocalReconciler interface {
+	ReconcileLocal(context.Context) error
 }
 
 func (r *serveChannelActivationRefresher) PreflightChannelActivation(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate) error {
@@ -304,12 +275,15 @@ func (r *serveChannelActivationRefresher) PreflightChannelActivation(ctx context
 	return r.preflight(ctx, servePrebindingActivation{Operation: op, Candidate: candidate})
 }
 
-func activateServeAfterConnectedChannelTeardownRecovery(ctx context.Context, teardown serveConnectedChannelRecovery, activate func() error) error {
-	if teardown == nil || activate == nil {
-		return fmt.Errorf("connected channel recovery requires teardown and activation owners")
+func activateServeAfterConnectedChannelTeardownRecovery(ctx context.Context, teardown serveConnectedChannelRecovery, onboarding serveConnectedChannelLocalReconciler, activate func() error) error {
+	if teardown == nil || onboarding == nil || activate == nil {
+		return fmt.Errorf("connected channel recovery requires teardown, onboarding, and activation owners")
 	}
 	if err := teardown.Recover(ctx); err != nil {
 		return fmt.Errorf("recover connected channel teardown: %w", err)
+	}
+	if err := onboarding.ReconcileLocal(ctx); err != nil {
+		return fmt.Errorf("reconcile local connected channel onboarding: %w", err)
 	}
 	if err := activate(); err != nil {
 		return fmt.Errorf("activate serve runtime after channel teardown recovery: %w", err)
@@ -472,7 +446,7 @@ func (d *serveChannelConfirmationDispatcher) DispatchChannelConfirmation(ctx con
 		binding.Status != operatorchannel.BindingCurrent || binding.Revision != op.BindingRevision {
 		return channelonboarding.ConfirmationResult{}, fmt.Errorf("channel confirmation request is not exact-current")
 	}
-	compiled, err := channelonboarding.CompileLearnedActivation(request.Candidate, activation, binding)
+	compiled, err := channelonboarding.CompileLearnedActivation(request.Candidate, activation)
 	if err != nil {
 		return channelonboarding.ConfirmationResult{}, err
 	}
@@ -581,6 +555,83 @@ func (r *serveChannelActivationRefresher) RefreshChannelActivations(ctx context.
 	if err := r.publishChannelActivations(ctx); err != nil {
 		return err
 	}
+	return r.reconcileChannelRegistrations(ctx)
+}
+
+func (r *serveChannelActivationRefresher) RefreshChannelActivationCandidates(ctx context.Context) error {
+	if r == nil {
+		return fmt.Errorf("serve channel activation refresher is required")
+	}
+	return r.reconcileChannelRegistrations(ctx)
+}
+
+func (r *serveChannelActivationRefresher) PublishChannelActivation(ctx context.Context, op channelonboarding.Operation, activation channelonboarding.ConnectedChannelActivation) error {
+	if r == nil {
+		return fmt.Errorf("serve channel activation refresher is required")
+	}
+	if op.Phase != channelonboarding.PhasePublishingProcessActivation || !exactChannelActivationHandoff(op, activation) {
+		return fmt.Errorf("successor channel activation process publication request is contradictory")
+	}
+	if err := r.publishChannelActivations(ctx); err != nil {
+		return err
+	}
+	lease, current, err := r.manager.AcquireChannelActivationPublication(activation.Coordinate.BundleHash, activation.Coordinate.ContextPublicationGeneration)
+	if err != nil {
+		return err
+	}
+	if !current {
+		return fmt.Errorf("successor channel activation process publication is unavailable")
+	}
+	defer lease.Release()
+	wantBinding := channelonboarding.LearnedBindingID(activation.SlotKey)
+	for _, compiled := range lease.Activations() {
+		if compiled.Source == channelonboarding.ActivationSourceLearned && compiled.Plan.BindingID() == wantBinding &&
+			compiled.ActivationRevision == activation.Revision && compiled.Coordinate.Matches(activation.Coordinate) {
+			return nil
+		}
+	}
+	return fmt.Errorf("successor channel activation %s is absent from exact process publication %s", op.OperationID, lease.Generation().Diagnostic())
+}
+
+func (r *serveChannelActivationRefresher) PromoteChannelRegistration(ctx context.Context, op channelonboarding.Operation, activation channelonboarding.ConnectedChannelActivation) error {
+	if r == nil {
+		return fmt.Errorf("serve channel activation refresher is required")
+	}
+	if op.Phase != channelonboarding.PhasePromotingRegistration || !exactChannelActivationHandoff(op, activation) {
+		return fmt.Errorf("successor channel registration promotion request is contradictory")
+	}
+	if err := r.reconcileChannelRegistrations(ctx); err != nil {
+		return err
+	}
+	if activation.Posture != channelonboarding.ActivationWebhookRegistration {
+		return nil
+	}
+	if r.ingress == nil {
+		return fmt.Errorf("webhook channel activation registration owner is unavailable")
+	}
+	lease, current, err := r.manager.AcquireChannelActivationPublication(activation.Coordinate.BundleHash, activation.Coordinate.ContextPublicationGeneration)
+	if err != nil {
+		return err
+	}
+	if !current {
+		return fmt.Errorf("successor channel activation process publication is unavailable during registration promotion")
+	}
+	defer lease.Release()
+	registration, found := r.ingress.ChannelRegistrationCurrent(ctx, time.Now().UTC(), channelonboarding.LearnedBindingID(activation.SlotKey), activation.TargetSelector, activation.Provider)
+	if !found || !registration.Current || !registration.ActivationGeneration.Equal(lease.Generation()) {
+		return fmt.Errorf("successor channel registration is not current for exact process publication")
+	}
+	return nil
+}
+
+func exactChannelActivationHandoff(op channelonboarding.Operation, activation channelonboarding.ConnectedChannelActivation) bool {
+	return activation.Status == channelonboarding.ActivationCurrent &&
+		activation.OperationID == op.OperationID && activation.SlotKey == op.SlotKey &&
+		activation.Revision == op.ActivationRevision && activation.BindingRevision == op.BindingRevision &&
+		activation.Coordinate.Matches(op.Coordinate)
+}
+
+func (r *serveChannelActivationRefresher) reconcileChannelRegistrations(ctx context.Context) error {
 	if r.reconcile != nil {
 		err := r.reconcile(ctx)
 		var failure *runtimefailures.Error

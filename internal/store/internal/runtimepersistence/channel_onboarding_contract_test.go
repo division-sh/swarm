@@ -96,13 +96,13 @@ func publishChannelOnboardingTestActivation(t *testing.T, selected channelonboar
 		})
 	}
 	op, err = selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
-		OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: channelonboarding.PhaseActivatingProvider,
-		CredentialAdmissions: admissions, Now: now.Add(time.Second),
+		OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: channelonboarding.PhaseCredentialsAdmitted,
+		CredentialAdmissions: admissions, ReplaceCredentialAdmissions: true, Now: now.Add(time.Second),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, phase := range []channelonboarding.Phase{channelonboarding.PhaseAwaitingExternalIdentity, channelonboarding.PhaseAwaitingOperatorConfirmation, channelonboarding.PhasePublishingActivation} {
+	for _, phase := range []channelonboarding.Phase{channelonboarding.PhaseActivatingProvider, channelonboarding.PhaseAwaitingExternalIdentity, channelonboarding.PhaseAwaitingOperatorConfirmation, channelonboarding.PhasePublishingActivation} {
 		op, err = selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
 			OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: phase,
 			IdentityOperationID: uuid.NewString(), BindingRevision: bindingRevision, Now: now.Add(time.Duration(op.Revision) * time.Second),
@@ -113,16 +113,18 @@ func publishChannelOnboardingTestActivation(t *testing.T, selected channelonboar
 	}
 	op, activation, err := selected.PublishConnectedChannelActivation(ctx, channelonboarding.PublishActivationRequest{
 		OperationID: op.OperationID, ExpectedRevision: op.Revision, ActivationID: uuid.NewString(), BindingRevision: bindingRevision,
-		ProofID: uuid.NewString(), ProofRevision: bindingRevision, Now: now.Add(8 * time.Second),
+		ConversationRef: "conversation-" + request.OperationID, ProofID: uuid.NewString(), ProofRevision: bindingRevision, Now: now.Add(8 * time.Second),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	op, err = selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
-		OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: channelonboarding.PhaseSucceeded, Now: now.Add(9 * time.Second),
-	})
-	if err != nil {
-		t.Fatal(err)
+	for _, phase := range []channelonboarding.Phase{channelonboarding.PhasePromotingRegistration, channelonboarding.PhaseRetiringPredecessor, channelonboarding.PhaseDeliveringConfirmation, channelonboarding.PhaseSucceeded} {
+		op, err = selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+			OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: phase, Now: now.Add(time.Duration(op.Revision) * time.Second),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	return op, activation
 }
@@ -166,8 +168,8 @@ func runChannelOnboardingStoreContract(t *testing.T, store channelonboarding.Sto
 		{Role: "webhook_signing_secret", StoreKey: "channel.telegram.signing", Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-signing", Epoch: "epoch-signing"},
 	}
 	op, err = store.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
-		OperationID: op.OperationID, ExpectedRevision: 1, Phase: channelonboarding.PhaseActivatingProvider,
-		CredentialAdmissions: admissions, Now: now.Add(time.Second),
+		OperationID: op.OperationID, ExpectedRevision: 1, Phase: channelonboarding.PhaseCredentialsAdmitted,
+		CredentialAdmissions: admissions, ReplaceCredentialAdmissions: true, Now: now.Add(time.Second),
 	})
 	if err != nil || op.Revision != 2 || len(op.CredentialAdmissions) != 2 {
 		t.Fatalf("advance credentials = %#v, %v", op, err)
@@ -175,7 +177,7 @@ func runChannelOnboardingStoreContract(t *testing.T, store channelonboarding.Sto
 	if _, err := store.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{OperationID: op.OperationID, ExpectedRevision: 1, Phase: channelonboarding.PhaseAwaitingExternalIdentity, Now: now.Add(2 * time.Second)}); !errors.Is(err, channelonboarding.ErrRevisionConflict) {
 		t.Fatalf("stale phase advance = %v", err)
 	}
-	for _, phase := range []channelonboarding.Phase{channelonboarding.PhaseAwaitingExternalIdentity, channelonboarding.PhaseAwaitingOperatorConfirmation, channelonboarding.PhasePublishingActivation} {
+	for _, phase := range []channelonboarding.Phase{channelonboarding.PhaseActivatingProvider, channelonboarding.PhaseAwaitingExternalIdentity, channelonboarding.PhaseAwaitingOperatorConfirmation, channelonboarding.PhasePublishingActivation} {
 		op, err = store.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
 			OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: phase,
 			IdentityOperationID: uuid.NewString(), BindingRevision: 4, Now: now.Add(time.Duration(op.Revision) * time.Second),
@@ -186,9 +188,9 @@ func runChannelOnboardingStoreContract(t *testing.T, store channelonboarding.Sto
 	}
 	op, activation, err := store.PublishConnectedChannelActivation(ctx, channelonboarding.PublishActivationRequest{
 		OperationID: op.OperationID, ExpectedRevision: op.Revision, ActivationID: uuid.NewString(), BindingRevision: 4,
-		ProofID: uuid.NewString(), ProofRevision: 2, Now: now.Add(8 * time.Second),
+		ConversationRef: "conversation-a", ProofID: uuid.NewString(), ProofRevision: 2, Now: now.Add(8 * time.Second),
 	})
-	if err != nil || activation.Status != channelonboarding.ActivationCurrent || activation.Revision != 1 || op.Phase != channelonboarding.PhaseDeliveringConfirmation {
+	if err != nil || activation.Status != channelonboarding.ActivationCurrent || activation.Revision != 1 || activation.ConversationRef != "conversation-a" || op.Phase != channelonboarding.PhasePublishingProcessActivation {
 		t.Fatalf("publish = op:%#v activation:%#v err:%v", op, activation, err)
 	}
 	current, err := store.GetConnectedChannelActivation(ctx, activation.SlotKey)

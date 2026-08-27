@@ -10000,17 +10000,20 @@ tool_model:
         logs, traces, progress, errors, and readback. The operation first reserves exact credential roles and keys, then
         stores only non-secret receipt and epoch evidence. Every newly written value is staged under an
         operation-owned store occurrence; replacement never overwrites the credential occurrence referenced by the
-        current predecessor activation. Before preparing advances, provider activation preflight validates the staged
+        current predecessor activation. A deterministic operation-owned write is recovered by observing its exact receipt
+        and epoch, never by rewriting or guessing the secret, and the complete admission set commits in a
+        credentials_admitted checkpoint before provider preflight. Provider activation preflight validates the staged
         candidate's exact credential occurrence and provider identity without changing registration selection or launching
-        a registration effect. Rejection compare-deletes operation-written candidate occurrences and leaves the operation
-        in preparing, so resume can admit a different credential while the predecessor activation and registration remain
+        a registration effect. Rejection compare-deletes operation-written candidate occurrences and returns the operation
+        to preparing, so resume can admit a different credential while the predecessor activation and registration remain
         current. Fresh webhook connect generates a missing signing value;
         replay, reconnect, and rebind do not rotate credentials without an explicit newly admitted epoch. Reconnect,
         rebind, and resume accept explicit hidden replacement credential input when the exact reserved occurrence is no
         longer current. Every operation-written credential occurrence is owned by its receipt and epoch: terminal
         onboarding failure and destructive teardown compare-delete only that exact occurrence after executable authority
-        retires. Durable successor publication and process-owner refresh precede predecessor occurrence retirement;
-        nonterminal recovery derives any still-pending predecessor cleanup from retained operation evidence. A successor
+        retires. Durable successor activation publication, exact process publication, and activation-backed registration
+        promotion each commit before predecessor occurrence retirement; nonterminal recovery resumes from the last durable
+        checkpoint and derives any still-pending predecessor cleanup from retained operation evidence. A successor
         occurrence and an observed pre-existing credential are never deleted by stale cleanup.
       activation_rule: >
         Operator-declared config and selected-store learned activations are closed source variants lowered through one
@@ -10037,18 +10040,21 @@ tool_model:
         validation, authorization, agent-origin dispatch, private activity dispatch/recovery, registration selection,
         readiness, and runtime-context readback consume that owner; no config-only map or independent current-state copy
         survives. The selected-store ConnectedChannelActivation remains the durable learned source; the process
-        publication is its exact-current compiled projection, not a second durable owner.
-        When a bound rebind has advanced the interface revision but its parent activation publication has not committed,
-        compilation excludes stale same-interface activations only when the current binding names that exact active rebind
-        identity operation. Missing, terminal, unrelated, or duplicate rebind ownership remains a fail-closed contradiction.
+        publication is its exact-current compiled projection, not a second durable owner. Each learned activation retains
+        the exact conversation destination and binding revision admitted at publication. Compilation consumes those durable
+        activation facts rather than rereading mutable current identity, so an activation remains reconstructable while a
+        rebind advances identity and until the successor process publication is exact-current. Missing or contradictory
+        activation-owned destination, coordinate, credential, or revision facts fail closed.
       registration_handoff_rule: >
         A pre-binding webhook intent carries only exact registration plan, target, credential epoch, and generation facts.
         It grants no conversation destination or outbound authority. After operator_account_binding settles the external
         identity, selected-store activation publication revision-fences handoff to the current registration selection.
         Candidate credential/provider-identity admission completes before registration selection changes; failed admission
-        cannot replace, fail, or revoke a verified predecessor selection. A validated same-slot pre-binding intent becomes
-        the exact registration candidate during provider activation and is replaced by activation-generation authority only
-        after durable activation publication.
+        cannot replace, fail, or revoke a verified predecessor selection. Predecessor activation authority and pre-binding
+        candidate intent remain separately typed during handoff. A same-slot candidate with the same semantic registration
+        pair reuses the verified predecessor callback without replacing its selected activation; a distinct-slot candidate
+        may coexist, and every other provider-slot collision fails closed. Activation-generation authority replaces the
+        candidate only after durable activation publication, exact process publication, and registration promotion.
         Temporary authority cannot survive successful handoff, and an uncertain provider acknowledgment prevents blind
         resend, cleanup, or successor publication. Candidate catalog declaration remains available without public ingress;
         webhook pre-binding is rejected at activation when no exposure owner exists, while non-webhook catalog candidates
@@ -10091,9 +10097,12 @@ tool_model:
         rows to the one retained identity they mutate.
       reset_and_recovery_rule: >
         Startup resumes every nonterminal operation and teardown in every serve posture, independently of whether public
-        ingress is enabled, without replaying settled writes or effects. Destructive teardown recovery is a barrier before
-        runtime-context activation, executable publication, registration, or public readiness; onboarding recovery runs
-        unconditionally after posture-specific exposure activation, when present, and before ready hooks. Webhook activation
+        ingress is enabled, without replaying settled writes or effects. Destructive teardown recovery followed by local-only
+        onboarding reconciliation is a barrier before runtime-context activation, API/MCP mutation, executable publication,
+        registration, or public readiness. API/MCP listeners may begin serving only after that local barrier and before
+        runtime-context activation because managed agent startup consumes the runtime-owned MCP endpoint; public readiness
+        and ready hooks remain closed. Effectful onboarding recovery runs unconditionally after posture-specific exposure
+        and runtime activation, when present, and before ready hooks or public readiness. Webhook activation
         still fails terminally at its ingress admission boundary when no public exposure owner exists. Selected-store
         reset removes learned activation and operation facts. A surviving machine proof may restore identity only; it cannot
         infer target, credential, registration, executable activation, confirmation, or READY. Readback must teach exactly
@@ -14349,7 +14358,8 @@ platform_tables:
         Durable whole-journey responsibility for one exact runtime-context-scoped channel connect,
         reconnect, or rebind operation. Secret values and reusable secret digests are forbidden;
         only admitted credential key, receipt, and epoch metadata may be stored. Request-key replay,
-        target-slot exclusion, phase transitions, and activation publication are revision fenced.
+        target-slot exclusion, phase transitions, selected-store activation publication, exact process
+        publication, registration promotion, and predecessor cleanup are revision fenced.
       ddl: |
         CREATE TABLE channel_onboarding_operations (
             operation_id UUID PRIMARY KEY,
@@ -14375,7 +14385,7 @@ platform_tables:
             target_generation BIGINT NOT NULL CHECK (target_generation > 0),
             activation_posture TEXT NOT NULL CHECK (activation_posture IN ('webhook_registration','session_connection')),
             identity_ceremony TEXT NOT NULL CHECK (identity_ceremony IN ('authenticated_text_challenge','provider_pairing')),
-            phase TEXT NOT NULL CHECK (phase IN ('preparing','activating_provider','awaiting_external_identity','awaiting_operator_confirmation','publishing_activation','delivering_confirmation','succeeded','failed','retired')),
+            phase TEXT NOT NULL CHECK (phase IN ('preparing','credentials_admitted','activating_provider','awaiting_external_identity','awaiting_operator_confirmation','publishing_activation','publishing_process_activation','promoting_registration','retiring_predecessor','delivering_confirmation','succeeded','failed','retired')),
             operation_revision BIGINT NOT NULL CHECK (operation_revision > 0),
             save_proof BOOLEAN NOT NULL,
             credential_reservations TEXT NOT NULL,
@@ -14465,6 +14475,7 @@ platform_tables:
             target_generation BIGINT NOT NULL CHECK (target_generation > 0),
             activation_posture TEXT NOT NULL CHECK (activation_posture IN ('webhook_registration','session_connection')),
             binding_revision BIGINT NOT NULL CHECK (binding_revision > 0),
+            conversation_reference TEXT NOT NULL,
             proof_id UUID,
             proof_revision BIGINT CHECK (proof_revision IS NULL OR proof_revision > 0),
             credential_admissions TEXT NOT NULL,

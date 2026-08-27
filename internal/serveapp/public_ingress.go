@@ -130,21 +130,11 @@ func resolveServeRegistrationPairs(snapshot serveChannelActivationSnapshot, mana
 			},
 		})
 	}
-	pairIndexes := make(map[string]int, len(pairs))
-	for index, pair := range pairs {
-		pairIndexes[serveRegistrationPairKey(pair)] = index
-	}
 	for _, intent := range snapshot.Prebinding {
 		pair, err := resolveServePrebindingRegistrationPair(intent)
 		if err != nil {
 			return fail(err)
 		}
-		key := serveRegistrationPairKey(pair)
-		if index, replacing := pairIndexes[key]; replacing {
-			pairs[index] = pair
-			continue
-		}
-		pairIndexes[key] = len(pairs)
 		pairs = append(pairs, pair)
 	}
 	sort.Slice(pairs, func(i, j int) bool {
@@ -185,10 +175,6 @@ func resolveServePrebindingRegistrationPair(intent servePrebindingActivation) (r
 			AdmissionPlanGeneration: target.AdmissionGeneration, SigningCredentialKey: credentials[intent.Candidate.SigningCredentialRole],
 		},
 	}, nil
-}
-
-func serveRegistrationPairKey(pair runtimepublicingress.RegistrationPair) string {
-	return strings.TrimSpace(pair.BindingID) + "\x00" + strings.TrimSpace(pair.Target.Selector)
 }
 
 func exactActivationContext(contexts []runtime.BundleContext, coordinate channelonboarding.ChannelRuntimeContextCoordinate) (runtime.BundleContext, error) {

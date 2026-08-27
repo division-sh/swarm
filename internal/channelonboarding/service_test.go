@@ -458,64 +458,292 @@ func TestReplacementCredentialHandoffPreservesPredecessorOnFailureAndRetiresItAf
 }
 
 func TestReplacementCredentialPreflightFailureKeepsOperationRetryableAndPredecessorCurrent(t *testing.T) {
-	now := time.Date(2026, 8, 27, 2, 0, 0, 0, time.UTC)
+	for _, verb := range []Verb{VerbReconnect, VerbRebind} {
+		t.Run(string(verb), func(t *testing.T) {
+			now := time.Date(2026, 8, 27, 2, 0, 0, 0, time.UTC)
+			candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
+			catalog, err := NewCandidateCatalog([]Candidate{candidate})
+			if err != nil {
+				t.Fatal(err)
+			}
+			credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			credentials, err := NewCredentialWriter(credentialStore)
+			if err != nil {
+				t.Fatal(err)
+			}
+			predecessor := testSucceededOperation(candidate, now.Add(-time.Hour))
+			predecessorAdmissions := writeTestOperationCredentials(t, credentials, predecessor, "predecessor")
+			predecessor.CredentialAdmissions = predecessorAdmissions
+			store := &cancellationTestStore{activation: testCurrentActivation(predecessor, predecessorAdmissions, now), history: []Operation{predecessor}}
+			identities := &cancellationTestIdentities{binding: operatorchannel.Binding{
+				PrincipalID: "principal-a", Interface: candidate.Interface, ConversationRef: "conversation-a",
+				Revision: 3, Status: operatorchannel.BindingCurrent,
+			}}
+			activations := &cancellationTestActivations{preflightErr: errors.New("telegram rejected replacement token")}
+			service, err := NewService(ServiceOptions{
+				Store: store, Identities: identities, Credentials: credentials,
+				Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: activations,
+				Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			blocked, err := service.Start(context.Background(), StartInput{
+				Verb: verb, Selection: CandidateSelection{Provider: candidate.Provider}, ProviderCredential: "invalid-successor-token",
+			})
+			if err == nil || !strings.Contains(err.Error(), "rejected replacement token") {
+				t.Fatalf("invalid replacement error = %v", err)
+			}
+			if blocked.Operation.Phase != PhasePreparing || store.op.Phase != PhasePreparing || len(store.op.CredentialAdmissions) != 0 {
+				t.Fatalf("blocked replacement operation = %#v, want retryable preparing without admitted credentials", store.op)
+			}
+			if store.activation.OperationID != predecessor.OperationID || store.activation.Status != ActivationCurrent {
+				t.Fatalf("blocked replacement changed predecessor activation = %#v", store.activation)
+			}
+			for _, reservation := range store.op.CredentialReservations {
+				key := operationCredentialStoreKey(reservation.StoreKey, store.op.OperationID, reservation.Role)
+				if _, found, getErr := credentialStore.Get(context.Background(), key); getErr != nil || found {
+					t.Fatalf("failed successor credential %q found=%v err=%v", key, found, getErr)
+				}
+			}
+
+			activations.preflightErr = nil
+			retried, err := service.Retry(context.Background(), RetryInput{OperationID: store.op.OperationID, ProviderCredential: "valid-successor-token"})
+			if err != nil {
+				t.Fatalf("retry replacement credential: %v", err)
+			}
+			if retried.Operation.Phase == PhasePreparing {
+				t.Fatalf("retried replacement remained in preparing: %#v", retried.Operation)
+			}
+			if verb == VerbReconnect && (retried.Operation.Phase != PhaseSucceeded || store.activation.OperationID != store.op.OperationID) {
+				t.Fatalf("retried reconnect = operation:%#v activation:%#v", retried.Operation, store.activation)
+			}
+			if verb == VerbRebind && store.activation.OperationID != predecessor.OperationID {
+				t.Fatalf("pending rebind replaced predecessor before identity settlement: %#v", store.activation)
+			}
+		})
+	}
+}
+
+func TestStartupLocalReconciliationSettlesOnlyProcessIndependentStates(t *testing.T) {
+	now := time.Date(2026, 8, 27, 5, 0, 0, 0, time.UTC)
+	candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
+	currentCatalog, err := NewCandidateCatalog([]Candidate{candidate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	retiredCatalog, err := NewCandidateCatalog(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name        string
+		catalog     *CandidateCatalog
+		state       operatorchannel.OperationState
+		expiresAt   time.Time
+		wantPhase   Phase
+		wantFailure string
+	}{
+		{name: "valid pending remains pending", catalog: currentCatalog, state: operatorchannel.StateAwaitingClaim, expiresAt: now.Add(time.Hour), wantPhase: PhaseAwaitingExternalIdentity},
+		{name: "expired settles parent", catalog: currentCatalog, state: operatorchannel.StateExpired, wantPhase: PhaseFailed, wantFailure: "identity_expired"},
+		{name: "rejected settles parent", catalog: currentCatalog, state: operatorchannel.StateRejected, wantPhase: PhaseFailed, wantFailure: "identity_rejected"},
+		{name: "retired context settles parent", catalog: retiredCatalog, state: operatorchannel.StateAwaitingClaim, expiresAt: now.Add(time.Hour), wantPhase: PhaseFailed, wantFailure: "runtime_context_retired"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			identityOperationID := uuid.NewString()
+			op := Operation{
+				OperationID: uuid.NewString(), RequestKeyHash: uuid.NewString(), RequestHash: uuid.NewString(),
+				PrincipalID: "principal-a", Verb: VerbConnect, Provider: candidate.Provider, Interface: candidate.Interface,
+				Coordinate: candidate.Coordinate, TargetSelector: candidate.Target.Selector, Posture: candidate.Posture,
+				Ceremony: candidate.Ceremony, Phase: PhaseAwaitingExternalIdentity, Revision: 3,
+				IdentityOperationID: identityOperationID, RequestedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour),
+			}
+			op.SlotKey = StartRequest{Provider: op.Provider, Interface: op.Interface, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector}.SlotKey()
+			store := &cancellationTestStore{op: op}
+			identities := &cancellationTestIdentities{operation: operatorchannel.Operation{
+				OperationID: identityOperationID, State: test.state, Revision: 2, ExpiresAt: test.expiresAt,
+			}}
+			activations := &cancellationTestActivations{}
+			service, err := NewService(ServiceOptions{
+				Store: store, Identities: identities, Credentials: testCredentialWriter(t),
+				Catalog: func() (*CandidateCatalog, error) { return test.catalog, nil }, Activations: activations,
+				Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := service.ReconcileLocal(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if store.op.Phase != test.wantPhase || store.op.FailureCode != test.wantFailure {
+				t.Fatalf("local reconciliation = phase %s failure %q, want %s/%q", store.op.Phase, store.op.FailureCode, test.wantPhase, test.wantFailure)
+			}
+			if activations.preflights != 0 || activations.refreshes != 0 || activations.publications != 0 || activations.promotions != 0 {
+				t.Fatalf("local barrier executed external/runtime effects: %#v", activations)
+			}
+		})
+	}
+}
+
+func TestChannelOnboardingRecoversStagedCredentialAfterAdmissionCommitFailure(t *testing.T) {
+	for _, verb := range []Verb{VerbConnect, VerbReconnect, VerbRebind} {
+		t.Run(string(verb), func(t *testing.T) {
+			now := time.Date(2026, 8, 27, 3, 0, 0, 0, time.UTC)
+			candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
+			catalog, err := NewCandidateCatalog([]Candidate{candidate})
+			if err != nil {
+				t.Fatal(err)
+			}
+			credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			credentials, err := NewCredentialWriter(credentialStore)
+			if err != nil {
+				t.Fatal(err)
+			}
+			store := &cancellationTestStore{advanceErrOnce: errors.New("selected-store admission unavailable")}
+			identities := &cancellationTestIdentities{}
+			if verb != VerbConnect {
+				predecessor := testSucceededOperation(candidate, now.Add(-time.Hour))
+				admissions := writeTestOperationCredentials(t, credentials, predecessor, "predecessor")
+				predecessor.CredentialAdmissions = admissions
+				store.activation = testCurrentActivation(predecessor, admissions, now.Add(-time.Hour))
+				store.history = []Operation{predecessor}
+				identities.binding = operatorchannel.Binding{
+					PrincipalID: "principal-a", Interface: candidate.Interface, ConversationRef: "conversation-a",
+					Revision: 3, Status: operatorchannel.BindingCurrent,
+				}
+			}
+			service, err := NewService(ServiceOptions{
+				Store: store, Identities: identities, Credentials: credentials,
+				Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: &cancellationTestActivations{},
+				Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := service.Start(context.Background(), StartInput{
+				Verb: verb, Selection: CandidateSelection{Provider: candidate.Provider}, ProviderCredential: "operation-token",
+			}); err == nil || !strings.Contains(err.Error(), "selected-store admission unavailable") {
+				t.Fatalf("initial advance error = %v", err)
+			}
+			if store.op.Phase != PhasePreparing || len(store.op.CredentialAdmissions) != 0 {
+				t.Fatalf("operation after lost admission = %#v", store.op)
+			}
+
+			if err := service.Recover(context.Background()); err != nil {
+				t.Fatalf("recover deterministic credential occurrence: %v", err)
+			}
+			if store.op.Phase == PhasePreparing || len(store.op.CredentialAdmissions) != len(store.op.CredentialReservations) {
+				t.Fatalf("recovered operation = %#v", store.op)
+			}
+			for _, admission := range store.op.CredentialAdmissions {
+				if admission.Receipt != credentialReceipt(store.op.OperationID, admission.Role) && admission.Kind == CredentialAdmissionWritten {
+					t.Fatalf("recovered written admission = %#v", admission)
+				}
+			}
+		})
+	}
+}
+
+func TestChannelOnboardingIdentityExpiryRevisionRaceConvergesParent(t *testing.T) {
+	for _, successorState := range []operatorchannel.OperationState{
+		operatorchannel.StateExpired,
+		operatorchannel.StateAwaitingConfirmation,
+		operatorchannel.StateBound,
+	} {
+		t.Run(string(successorState), func(t *testing.T) {
+			now := time.Date(2026, 8, 27, 3, 30, 0, 0, time.UTC)
+			candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
+			catalog, err := NewCandidateCatalog([]Candidate{candidate})
+			if err != nil {
+				t.Fatal(err)
+			}
+			identityOperationID := uuid.NewString()
+			op := Operation{
+				OperationID: uuid.NewString(), RequestKeyHash: uuid.NewString(), RequestHash: uuid.NewString(), SlotKey: "slot-a",
+				PrincipalID: "principal-a", Verb: VerbConnect, Provider: candidate.Provider, Interface: candidate.Interface,
+				Coordinate: candidate.Coordinate, TargetSelector: candidate.Target.Selector, Posture: candidate.Posture,
+				Ceremony: candidate.Ceremony, Phase: PhaseAwaitingExternalIdentity, Revision: 3,
+				IdentityOperationID: identityOperationID, RequestedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Hour),
+			}
+			store := &cancellationTestStore{op: op}
+			identities := &cancellationTestIdentities{
+				operation:       operatorchannel.Operation{OperationID: identityOperationID, State: operatorchannel.StateAwaitingClaim, Revision: 1, ExpiresAt: now.Add(-time.Second)},
+				expiryRaceState: successorState,
+				binding:         operatorchannel.Binding{PrincipalID: "principal-a", Interface: candidate.Interface, ConversationRef: "conversation-a", Revision: 2, Status: operatorchannel.BindingCurrent},
+			}
+			service, err := NewService(ServiceOptions{
+				Store: store, Identities: identities, Credentials: testCredentialWriter(t),
+				Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: &cancellationTestActivations{},
+				Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := service.Recover(context.Background()); err != nil {
+				t.Fatalf("recover raced identity state: %v", err)
+			}
+			if successorState == operatorchannel.StateExpired && store.op.Phase != PhaseFailed {
+				t.Fatalf("expired parent phase = %s", store.op.Phase)
+			}
+			if successorState != operatorchannel.StateExpired && store.op.Phase == PhaseAwaitingExternalIdentity {
+				t.Fatalf("parent did not consume raced identity state: %#v", store.op)
+			}
+		})
+	}
+}
+
+func TestChannelOnboardingRecoveryRetriesProcessPublicationBeforePromotion(t *testing.T) {
+	now := time.Date(2026, 8, 27, 4, 0, 0, 0, time.UTC)
 	candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
 	catalog, err := NewCandidateCatalog([]Candidate{candidate})
 	if err != nil {
 		t.Fatal(err)
 	}
-	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	credentials, err := NewCredentialWriter(credentialStore)
-	if err != nil {
-		t.Fatal(err)
-	}
-	predecessor := testSucceededOperation(candidate, now.Add(-time.Hour))
-	predecessorAdmissions := writeTestOperationCredentials(t, credentials, predecessor, "predecessor")
-	predecessor.CredentialAdmissions = predecessorAdmissions
-	store := &cancellationTestStore{activation: testCurrentActivation(predecessor, predecessorAdmissions, now), history: []Operation{predecessor}}
-	identities := &cancellationTestIdentities{binding: operatorchannel.Binding{
-		PrincipalID: "principal-a", Interface: candidate.Interface, ConversationRef: "conversation-a",
-		Revision: 3, Status: operatorchannel.BindingCurrent,
-	}}
-	activations := &cancellationTestActivations{preflightErr: errors.New("telegram rejected replacement token")}
+	op := testSucceededOperation(candidate, now)
+	op.Phase = PhasePublishingActivation
+	op.CompletedAt = time.Time{}
+	op.Revision = 5
+	op.BindingRevision = 3
+	store := &cancellationTestStore{op: op}
+	activations := &cancellationTestActivations{publishErrOnce: errors.New("process publication unavailable")}
 	service, err := NewService(ServiceOptions{
-		Store: store, Identities: identities, Credentials: credentials,
-		Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: activations,
+		Store: store,
+		Identities: &cancellationTestIdentities{binding: operatorchannel.Binding{
+			PrincipalID: "principal-a", Interface: candidate.Interface, ConversationRef: "conversation-a", Revision: 3, Status: operatorchannel.BindingCurrent,
+		}},
+		Credentials: testCredentialWriter(t), Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: activations,
 		Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	blocked, err := service.Start(context.Background(), StartInput{
-		Verb: VerbReconnect, Selection: CandidateSelection{Provider: candidate.Provider}, ProviderCredential: "invalid-successor-token",
-	})
-	if err == nil || !strings.Contains(err.Error(), "rejected replacement token") {
-		t.Fatalf("invalid replacement error = %v", err)
+	if _, err := service.Retry(context.Background(), RetryInput{OperationID: op.OperationID}); err == nil || !strings.Contains(err.Error(), "process publication unavailable") {
+		t.Fatalf("first process publication error = %v", err)
 	}
-	if blocked.Operation.Phase != PhasePreparing || store.op.Phase != PhasePreparing || len(store.op.CredentialAdmissions) != 0 {
-		t.Fatalf("blocked replacement operation = %#v, want retryable preparing without admitted credentials", store.op)
+	if store.op.Phase != PhasePublishingProcessActivation || activations.promotions != 0 {
+		t.Fatalf("operation crossed failed process handoff: phase=%s promotions=%d", store.op.Phase, activations.promotions)
 	}
-	if store.activation.OperationID != predecessor.OperationID || store.activation.Status != ActivationCurrent {
-		t.Fatalf("blocked replacement changed predecessor activation = %#v", store.activation)
+	activations.publishErrOnce = errors.New("process publication still unavailable after restart")
+	if err := service.Recover(context.Background()); err == nil || !strings.Contains(err.Error(), "still unavailable") {
+		t.Fatalf("repeated process publication error = %v", err)
 	}
-	for _, reservation := range store.op.CredentialReservations {
-		key := operationCredentialStoreKey(reservation.StoreKey, store.op.OperationID, reservation.Role)
-		if _, found, getErr := credentialStore.Get(context.Background(), key); getErr != nil || found {
-			t.Fatalf("failed successor credential %q found=%v err=%v", key, found, getErr)
-		}
+	if store.op.Phase != PhasePublishingProcessActivation || activations.promotions != 0 {
+		t.Fatalf("operation crossed repeated failed process handoff: phase=%s promotions=%d", store.op.Phase, activations.promotions)
 	}
-
-	activations.preflightErr = nil
-	retried, err := service.Retry(context.Background(), RetryInput{OperationID: store.op.OperationID, ProviderCredential: "valid-successor-token"})
-	if err != nil {
-		t.Fatalf("retry replacement credential: %v", err)
+	if err := service.Recover(context.Background()); err != nil {
+		t.Fatalf("recover process publication: %v", err)
 	}
-	if retried.Operation.Phase != PhaseSucceeded || store.activation.OperationID != store.op.OperationID {
-		t.Fatalf("retried replacement = operation:%#v activation:%#v", retried.Operation, store.activation)
+	if store.op.Phase != PhaseSucceeded || activations.publications != 3 || activations.promotions != 1 {
+		t.Fatalf("recovered handoff phase=%s publications=%d promotions=%d", store.op.Phase, activations.publications, activations.promotions)
 	}
 }
 
@@ -539,7 +767,8 @@ func TestReplacementRecoveryRetiresPredecessorCredentialAfterDurableHandoff(t *t
 	predecessor.CredentialAdmissions = predecessorAdmissions
 	successor := testSucceededOperation(candidate, now)
 	successor.Verb = VerbReconnect
-	successor.Phase = PhaseDeliveringConfirmation
+	successor.Phase = PhaseRetiringPredecessor
+	successor.ActivationRevision = 1
 	successor.CompletedAt = time.Time{}
 	successor.ConfirmationOperationID = uuid.NewString()
 	successorAdmissions := writeTestOperationCredentials(t, credentials, successor, "successor")
@@ -683,10 +912,14 @@ func TestChannelOnboardingClientCancellationStopsNarrationNotOperation(t *testin
 func TestChannelOnboardingRecoveryEveryNonterminalPhase(t *testing.T) {
 	for _, phase := range []Phase{
 		PhasePreparing,
+		PhaseCredentialsAdmitted,
 		PhaseActivatingProvider,
 		PhaseAwaitingExternalIdentity,
 		PhaseAwaitingOperatorConfirmation,
 		PhasePublishingActivation,
+		PhasePublishingProcessActivation,
+		PhasePromotingRegistration,
+		PhaseRetiringPredecessor,
 		PhaseDeliveringConfirmation,
 	} {
 		t.Run(string(phase), func(t *testing.T) {
@@ -733,14 +966,16 @@ func TestChannelOnboardingRecoveryEveryNonterminalPhase(t *testing.T) {
 			if phase != PhasePreparing {
 				op.CredentialAdmissions = admissions
 			}
-			if phase == PhaseAwaitingExternalIdentity || phase == PhaseAwaitingOperatorConfirmation || phase == PhasePublishingActivation || phase == PhaseDeliveringConfirmation {
+			if phase == PhaseAwaitingExternalIdentity || phase == PhaseAwaitingOperatorConfirmation || phase == PhasePublishingActivation ||
+				phase == PhasePublishingProcessActivation || phase == PhasePromotingRegistration || phase == PhaseRetiringPredecessor || phase == PhaseDeliveringConfirmation {
 				op.IdentityOperationID = identityOperationID
 			}
-			if phase == PhaseAwaitingOperatorConfirmation || phase == PhasePublishingActivation || phase == PhaseDeliveringConfirmation {
+			if phase == PhaseAwaitingOperatorConfirmation || phase == PhasePublishingActivation ||
+				phase == PhasePublishingProcessActivation || phase == PhasePromotingRegistration || phase == PhaseRetiringPredecessor || phase == PhaseDeliveringConfirmation {
 				op.BindingRevision = 4
 			}
 			store := &cancellationTestStore{op: op}
-			if phase == PhaseDeliveringConfirmation {
+			if phase == PhasePublishingProcessActivation || phase == PhasePromotingRegistration || phase == PhaseRetiringPredecessor || phase == PhaseDeliveringConfirmation {
 				store.activation = testCurrentActivation(op, admissions, now)
 				store.op.ActivationRevision = store.activation.Revision
 			}
@@ -779,7 +1014,7 @@ func testCurrentActivation(op Operation, admissions []CredentialAdmission, now t
 	return ConnectedChannelActivation{
 		ActivationID: uuid.NewString(), SlotKey: op.SlotKey, OperationID: op.OperationID, OperationRevision: op.Revision,
 		PrincipalID: op.PrincipalID, Provider: op.Provider, Interface: op.Interface, Coordinate: op.Coordinate,
-		TargetSelector: op.TargetSelector, Posture: op.Posture, BindingRevision: op.BindingRevision,
+		TargetSelector: op.TargetSelector, Posture: op.Posture, BindingRevision: op.BindingRevision, ConversationRef: "conversation-a",
 		CredentialAdmissions: append([]CredentialAdmission(nil), admissions...), Revision: 1, Status: ActivationCurrent,
 		CreatedAt: now, UpdatedAt: now,
 	}
@@ -817,6 +1052,7 @@ type cancellationTestStore struct {
 	cancelAfterReserve context.CancelFunc
 	cancelled          bool
 	sawCanceledContext bool
+	advanceErrOnce     error
 }
 
 func (s *cancellationTestStore) observe(ctx context.Context) {
@@ -870,6 +1106,11 @@ func (s *cancellationTestStore) ListChannelOnboardingOperations(ctx context.Cont
 
 func (s *cancellationTestStore) AdvanceChannelOnboarding(ctx context.Context, req AdvanceRequest) (Operation, error) {
 	s.observe(ctx)
+	if s.advanceErrOnce != nil {
+		err := s.advanceErrOnce
+		s.advanceErrOnce = nil
+		return Operation{}, err
+	}
 	if req.OperationID != s.op.OperationID {
 		return Operation{}, ErrNotFound
 	}
@@ -879,7 +1120,7 @@ func (s *cancellationTestStore) AdvanceChannelOnboarding(ctx context.Context, re
 	s.op.Phase = req.Phase
 	s.op.Revision++
 	s.op.UpdatedAt = req.Now
-	if len(req.CredentialAdmissions) > 0 {
+	if req.ReplaceCredentialAdmissions {
 		s.op.CredentialAdmissions = append([]CredentialAdmission(nil), req.CredentialAdmissions...)
 	}
 	if req.IdentityOperationID != "" {
@@ -909,10 +1150,11 @@ func (s *cancellationTestStore) PublishConnectedChannelActivation(ctx context.Co
 	s.activation = testCurrentActivation(s.op, s.op.CredentialAdmissions, req.Now)
 	s.activation.ActivationID = req.ActivationID
 	s.activation.BindingRevision = req.BindingRevision
+	s.activation.ConversationRef = req.ConversationRef
 	s.activation.ProofID = req.ProofID
 	s.activation.ProofRevision = req.ProofRevision
 	s.op.Revision++
-	s.op.Phase = PhaseDeliveringConfirmation
+	s.op.Phase = PhasePublishingProcessActivation
 	s.op.ActivationRevision = s.activation.Revision
 	s.op.BindingRevision = req.BindingRevision
 	s.op.UpdatedAt = req.Now
@@ -970,6 +1212,7 @@ type cancellationTestIdentities struct {
 	binding            operatorchannel.Binding
 	sawCanceledContext bool
 	expirations        int
+	expiryRaceState    operatorchannel.OperationState
 }
 
 func (i *cancellationTestIdentities) observe(ctx context.Context) {
@@ -1006,6 +1249,18 @@ func (i *cancellationTestIdentities) ExpireOperation(ctx context.Context, operat
 	if expectedRevision != i.operation.Revision {
 		return operatorchannel.Operation{}, operatorchannel.ErrRevisionConflict
 	}
+	if i.expiryRaceState != "" {
+		i.operation.State = i.expiryRaceState
+		i.operation.Revision++
+		if i.expiryRaceState == operatorchannel.StateAwaitingConfirmation || i.expiryRaceState == operatorchannel.StateBound {
+			i.operation.BindingRevision = i.binding.Revision
+		}
+		if i.expiryRaceState.Terminal() {
+			i.operation.CompletedAt = now
+		}
+		i.expiryRaceState = ""
+		return operatorchannel.Operation{}, operatorchannel.ErrRevisionConflict
+	}
 	if i.operation.ExpiresAt.After(now) {
 		return operatorchannel.Operation{}, operatorchannel.ErrConflict
 	}
@@ -1035,6 +1290,9 @@ type cancellationTestActivations struct {
 	preflights         int
 	refreshes          int
 	err                error
+	publishErrOnce     error
+	publications       int
+	promotions         int
 }
 
 func (a *cancellationTestActivations) PreflightChannelActivation(ctx context.Context, _ Operation, _ Candidate) error {
@@ -1055,6 +1313,31 @@ func (a *cancellationTestActivations) RefreshChannelActivations(ctx context.Cont
 		a.err = nil
 	}
 	return err
+}
+
+func (a *cancellationTestActivations) RefreshChannelActivationCandidates(ctx context.Context) error {
+	return a.RefreshChannelActivations(ctx)
+}
+
+func (a *cancellationTestActivations) PublishChannelActivation(ctx context.Context, _ Operation, _ ConnectedChannelActivation) error {
+	if ctx.Err() != nil {
+		a.sawCanceledContext = true
+	}
+	a.publications++
+	if a.publishErrOnce != nil {
+		err := a.publishErrOnce
+		a.publishErrOnce = nil
+		return err
+	}
+	return nil
+}
+
+func (a *cancellationTestActivations) PromoteChannelRegistration(ctx context.Context, _ Operation, _ ConnectedChannelActivation) error {
+	if ctx.Err() != nil {
+		a.sawCanceledContext = true
+	}
+	a.promotions++
+	return nil
 }
 
 type cancellationTestConfirmation struct{}

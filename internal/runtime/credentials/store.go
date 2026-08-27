@@ -33,6 +33,13 @@ type ReceiptWriter interface {
 	AdmitWithReceipt(context.Context, string, string, string) (WriteReceipt, error)
 }
 
+// ReceiptObserver reports whether one exact receipt still owns the current
+// writable occurrence without exposing the credential value.
+type ReceiptObserver interface {
+	Store
+	ObserveReceipt(context.Context, string, string) (WriteReceipt, bool, error)
+}
+
 // ReceiptDeleter removes only the exact writable occurrence created by a
 // receipt-bearing admission. A stale receipt can never delete its successor.
 type ReceiptDeleter interface {

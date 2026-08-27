@@ -631,13 +631,19 @@ flows:
     flow: telegram-chat
     mode: template
 `,
-		filepath.Join("bot", "flows", "telegram-chat", "agents.yaml"): "{}\n",
-		filepath.Join("bot", "flows", "telegram-chat", "nodes.yaml"):  "{}\n",
-		filepath.Join("bot", "flows", "telegram-chat", "events.yaml"): "{}\n",
 	}
 	for relative, contents := range files {
 		if err := os.WriteFile(filepath.Join(contractsRoot, relative), []byte(contents), 0o644); err != nil {
 			t.Fatalf("disable onboarding fixture business consumer %s: %v", relative, err)
+		}
+	}
+	for _, relative := range []string{
+		filepath.Join("bot", "flows", "telegram-chat", "agents.yaml"),
+		filepath.Join("bot", "flows", "telegram-chat", "nodes.yaml"),
+		filepath.Join("bot", "flows", "telegram-chat", "events.yaml"),
+	} {
+		if err := os.Remove(filepath.Join(contractsRoot, relative)); err != nil && !os.IsNotExist(err) {
+			t.Fatalf("remove empty onboarding fixture declaration %s: %v", relative, err)
 		}
 	}
 }
@@ -665,24 +671,68 @@ func TestWebhookOnboardingAdmissionIsRejectedAtActivationWithoutPublicIngress(t 
 func TestConnectedChannelRecoveryRunsWithoutPublicIngressOwner(t *testing.T) {
 	order := []string{}
 	teardown := &serveChannelRecoveryProbe{name: "teardown", order: &order}
+	onboarding := &serveChannelRecoveryProbe{name: "onboarding", order: &order}
 	activate := func() error {
 		order = append(order, "runtime_activation")
 		return nil
 	}
-	if err := activateServeAfterConnectedChannelTeardownRecovery(context.Background(), teardown, activate); err != nil {
+	if err := activateServeAfterConnectedChannelTeardownRecovery(context.Background(), teardown, onboarding, activate); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(order, ","); got != "teardown,runtime_activation" {
-		t.Fatalf("recovery order = %s, want teardown,runtime_activation", got)
+	if got := strings.Join(order, ","); got != "teardown,onboarding,runtime_activation" {
+		t.Fatalf("recovery order = %s, want teardown,onboarding,runtime_activation", got)
+	}
+}
+
+func TestConnectedChannelLocalRecoveryFailureBlocksRuntimeActivation(t *testing.T) {
+	order := []string{}
+	teardown := &serveChannelRecoveryProbe{name: "teardown", order: &order}
+	onboarding := &serveChannelRecoveryProbe{name: "onboarding", order: &order, localErr: fmt.Errorf("stale onboarding responsibility")}
+	activated := false
+	err := activateServeAfterConnectedChannelTeardownRecovery(context.Background(), teardown, onboarding, func() error {
+		activated = true
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "stale onboarding responsibility") {
+		t.Fatalf("local recovery error = %v", err)
+	}
+	if activated || strings.Join(order, ",") != "teardown,onboarding" {
+		t.Fatalf("activation crossed local recovery barrier: activated=%v order=%v", activated, order)
+	}
+}
+
+func TestServeStartsControlPlaneAfterLocalRecoveryBeforeRuntimeActivation(t *testing.T) {
+	raw, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+	localBarrier := strings.Index(source, "activateServeAfterConnectedChannelTeardownRecovery(ctx, channelDestructive, channelOnboarding")
+	apiServing := strings.Index(source, "apiServerLease, err := processWorkOwner.Begin(ctx)")
+	mcpServing := strings.Index(source, "mcpServerLease, err := processWorkOwner.Begin(ctx)")
+	runtimeActivation := strings.Index(source, "if err := startServeRuntimeContexts(ctx, runtimeContexts, runtimeContextManager)")
+	effectRecovery := strings.Index(source, "if err := channelOnboarding.Recover(ctx)")
+	if localBarrier < 0 || apiServing < 0 || mcpServing < 0 || runtimeActivation < 0 || effectRecovery < 0 {
+		t.Fatalf("serve startup lifecycle markers missing: local=%d api=%d mcp=%d runtime=%d recovery=%d", localBarrier, apiServing, mcpServing, runtimeActivation, effectRecovery)
+	}
+	if !(localBarrier < apiServing && apiServing < mcpServing && mcpServing < runtimeActivation && runtimeActivation < effectRecovery) {
+		t.Fatalf("serve startup order local=%d api=%d mcp=%d runtime=%d recovery=%d", localBarrier, apiServing, mcpServing, runtimeActivation, effectRecovery)
 	}
 }
 
 type serveChannelRecoveryProbe struct {
-	name  string
-	order *[]string
+	name       string
+	order      *[]string
+	recoverErr error
+	localErr   error
 }
 
 func (p *serveChannelRecoveryProbe) Recover(context.Context) error {
 	*p.order = append(*p.order, p.name)
-	return nil
+	return p.recoverErr
+}
+
+func (p *serveChannelRecoveryProbe) ReconcileLocal(context.Context) error {
+	*p.order = append(*p.order, p.name)
+	return p.localErr
 }

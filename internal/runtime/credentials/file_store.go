@@ -115,6 +115,28 @@ func (s *FileStore) AdmitWithReceipt(_ context.Context, key, value, receipt stri
 	return out, err
 }
 
+func (s *FileStore) ObserveReceipt(_ context.Context, key, receipt string) (WriteReceipt, bool, error) {
+	key = strings.TrimSpace(key)
+	receipt = strings.TrimSpace(receipt)
+	if key == "" || receipt == "" {
+		return WriteReceipt{}, false, fmt.Errorf("credential key and write receipt are required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	doc, err := s.loadLocked()
+	if err != nil {
+		return WriteReceipt{}, false, err
+	}
+	item, found := doc.Entries[key]
+	if !found || strings.TrimSpace(item.Receipt) != receipt {
+		return WriteReceipt{}, false, nil
+	}
+	if strings.TrimSpace(item.Epoch) == "" {
+		return WriteReceipt{}, false, fmt.Errorf("credential %q receipt exists without an occurrence epoch", key)
+	}
+	return WriteReceipt{Key: key, Receipt: receipt, Epoch: item.Epoch, UpdatedAt: item.UpdatedAt.UTC()}, true, nil
+}
+
 func (s *FileStore) List(_ context.Context) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

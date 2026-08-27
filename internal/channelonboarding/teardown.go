@@ -173,11 +173,11 @@ type DestructiveService struct {
 	store       DestructiveStore
 	identities  DestructiveIdentityLifecycle
 	credentials CredentialReleaser
-	activations ActivationRefresher
+	activations ActivationAuthorityRefresher
 	now         func() time.Time
 }
 
-func NewDestructiveService(store DestructiveStore, identities DestructiveIdentityLifecycle, credentials CredentialReleaser, activations ActivationRefresher, now func() time.Time) (*DestructiveService, error) {
+func NewDestructiveService(store DestructiveStore, identities DestructiveIdentityLifecycle, credentials CredentialReleaser, activations ActivationAuthorityRefresher, now func() time.Time) (*DestructiveService, error) {
 	if store == nil || identities == nil || credentials == nil || activations == nil {
 		return nil, fmt.Errorf("channel destructive lifecycle requires teardown, identity, credential, and activation owners")
 	}

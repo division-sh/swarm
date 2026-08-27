@@ -22,6 +22,7 @@ type CredentialWriteResult struct {
 
 type CredentialWriter struct {
 	store     runtimecredentials.ReceiptWriter
+	observer  runtimecredentials.ReceiptObserver
 	deleter   runtimecredentials.ReceiptDeleter
 	snapshots *runtimecredentials.SnapshotOwner
 }
@@ -39,7 +40,11 @@ func NewCredentialWriter(store runtimecredentials.Store) (*CredentialWriter, err
 	if err != nil {
 		return nil, err
 	}
-	return &CredentialWriter{store: receiptWriter, deleter: receiptDeleter, snapshots: snapshots}, nil
+	receiptObserver, ok := store.(runtimecredentials.ReceiptObserver)
+	if !ok || receiptObserver == nil {
+		return nil, fmt.Errorf("channel onboarding requires receipt-capable credential observation")
+	}
+	return &CredentialWriter{store: receiptWriter, observer: receiptObserver, deleter: receiptDeleter, snapshots: snapshots}, nil
 }
 
 func (w *CredentialWriter) Release(ctx context.Context, admission CredentialAdmission) (bool, error) {
@@ -96,4 +101,26 @@ func (w *CredentialWriter) Observe(ctx context.Context, storeKey string) (Creden
 		return CredentialWriteResult{}, fmt.Errorf("channel onboarding credential %q is missing", key)
 	}
 	return CredentialWriteResult{StoreKey: key, Epoch: observed.Epoch()}, nil
+}
+
+func (w *CredentialWriter) ObserveWritten(ctx context.Context, storeKey, receipt string) (CredentialWriteResult, bool, error) {
+	if w == nil || w.observer == nil || w.snapshots == nil {
+		return CredentialWriteResult{}, false, fmt.Errorf("channel onboarding credential writer is required")
+	}
+	key, receipt := storeKey, strings.TrimSpace(receipt)
+	if key == "" || key != strings.TrimSpace(key) || receipt == "" {
+		return CredentialWriteResult{}, false, fmt.Errorf("channel onboarding credential key and receipt are required")
+	}
+	written, found, err := w.observer.ObserveReceipt(ctx, key, receipt)
+	if err != nil || !found {
+		return CredentialWriteResult{}, found, err
+	}
+	observed, err := w.snapshots.ObserveSecretBinding(ctx, key)
+	if err != nil {
+		return CredentialWriteResult{}, false, err
+	}
+	if !observed.Bound() || observed.Epoch() != written.Epoch {
+		return CredentialWriteResult{}, false, fmt.Errorf("credential write receipt does not match the current credential occurrence")
+	}
+	return CredentialWriteResult{StoreKey: key, Receipt: receipt, Epoch: observed.Epoch()}, true, nil
 }

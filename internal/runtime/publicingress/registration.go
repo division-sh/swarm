@@ -210,10 +210,15 @@ func (c *ProviderRegistrationController) Reconcile(ctx context.Context, exposure
 		}
 		admitted = append(admitted, candidate)
 	}
-	if err := rejectSlotCollisions(admitted); err != nil {
+	admitted, err = resolveSlotCollisions(admitted)
+	if err != nil {
 		return err
 	}
-	c.snapshot.replaceSelected(pairs)
+	selected := make([]RegistrationPair, 0, len(admitted))
+	for _, pair := range admitted {
+		selected = append(selected, pair.pair)
+	}
+	c.snapshot.replaceSelected(selected)
 	for _, pair := range admitted {
 		if err := c.reconcilePair(ctx, exposure, startup, pair); err != nil {
 			return err
@@ -730,6 +735,25 @@ func cloneStringMap(source map[string]string) map[string]string {
 }
 
 func pairKey(pair RegistrationPair) string {
+	return pairSemanticKey(pair)
+}
+
+func pairAuthorityKey(pair RegistrationPair) string {
+	base := pairSemanticKey(pair)
+	if base == "" {
+		return ""
+	}
+	if pair.ChannelActivationGeneration.Valid() {
+		return base + "\x00activation:" + pair.ChannelActivationGeneration.Diagnostic()
+	}
+	operationID := strings.TrimSpace(pair.PrebindingOperationID)
+	if operationID == "" {
+		return ""
+	}
+	return base + "\x00prebinding:" + operationID
+}
+
+func pairSemanticKey(pair RegistrationPair) string {
 	binding := strings.TrimSpace(pair.BindingID)
 	target := strings.TrimSpace(pair.Target.Selector)
 	if binding == "" || target == "" {
@@ -742,16 +766,42 @@ func registrationRouteKey(alias, provider string) string {
 	return strings.TrimSpace(alias) + "\x00" + strings.TrimSpace(provider)
 }
 
-func rejectSlotCollisions(pairs []admittedPair) error {
-	seen := map[string]string{}
-	for _, pair := range pairs {
-		key := pairKey(pair.pair)
-		if prior, duplicate := seen[pair.slotID]; duplicate {
-			return fmt.Errorf("provider registration slot %q is selected by both %s and %s; no provider registration was applied", pair.slotID, prior, key)
-		}
-		seen[pair.slotID] = key
+func resolveSlotCollisions(pairs []admittedPair) ([]admittedPair, error) {
+	bySlot := map[string][]int{}
+	for index, pair := range pairs {
+		bySlot[pair.slotID] = append(bySlot[pair.slotID], index)
 	}
-	return nil
+	drop := map[int]struct{}{}
+	for slot, indexes := range bySlot {
+		if len(indexes) == 1 {
+			continue
+		}
+		if len(indexes) == 2 {
+			left, right := pairs[indexes[0]].pair, pairs[indexes[1]].pair
+			leftActivation, rightActivation := left.ChannelActivationGeneration.Valid(), right.ChannelActivationGeneration.Valid()
+			if leftActivation != rightActivation && pairSemanticKey(left) == pairSemanticKey(right) {
+				if leftActivation {
+					drop[indexes[1]] = struct{}{}
+				} else {
+					drop[indexes[0]] = struct{}{}
+				}
+				continue
+			}
+		}
+		keys := make([]string, 0, len(indexes))
+		for _, index := range indexes {
+			keys = append(keys, pairAuthorityKey(pairs[index].pair))
+		}
+		sort.Strings(keys)
+		return nil, fmt.Errorf("provider registration slot %q is selected by both %s; no provider registration was applied", slot, strings.Join(keys, ", "))
+	}
+	out := make([]admittedPair, 0, len(pairs)-len(drop))
+	for index, pair := range pairs {
+		if _, omitted := drop[index]; !omitted {
+			out = append(out, pair)
+		}
+	}
+	return out, nil
 }
 
 func registrationBaseFingerprint(exposure Generation, pair RegistrationPair, provider map[string]runtimecredentials.AdmittedSnapshot, signing runtimecredentials.AdmittedSnapshot, slotID string) (string, error) {
