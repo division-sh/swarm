@@ -19,9 +19,37 @@ import (
 
 const AccessManifestPath = "/data/.swarm/access.v1.json"
 
+const projectionIDPrefix = "data-projection-v1:sha256:"
+
+type ProjectionID string
+
+func (id ProjectionID) Validate() error {
+	raw := strings.TrimSpace(string(id))
+	if raw != string(id) || !strings.HasPrefix(raw, projectionIDPrefix) {
+		return fmt.Errorf("data projection identity must use %s", projectionIDPrefix)
+	}
+	digest := strings.TrimPrefix(raw, projectionIDPrefix)
+	decoded, err := hex.DecodeString(digest)
+	if err != nil || len(decoded) != sha256.Size || digest != strings.ToLower(digest) {
+		return fmt.Errorf("data projection identity requires one canonical SHA-256 digest")
+	}
+	return nil
+}
+
 type Projection struct {
+	ID         ProjectionID
 	Root       string
 	AccessList durabledata.AccessList
+}
+
+func (p Projection) Validate() error {
+	if err := p.ID.Validate(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(p.Root) == "" || filepath.Clean(p.Root) != p.Root || !filepath.IsAbs(p.Root) {
+		return fmt.Errorf("data projection requires one canonical absolute root")
+	}
+	return nil
 }
 
 type Provider interface {
@@ -68,10 +96,17 @@ func (m *Materializer) Materialize(ctx context.Context, actor models.AgentConfig
 		return Projection{}, fmt.Errorf("encode data access manifest: %w", err)
 	}
 	digest := sha256.Sum256(manifest)
+	projectionID := ProjectionID(projectionIDPrefix + hex.EncodeToString(digest[:]))
 	target := filepath.Join(m.root, "a_"+hex.EncodeToString(digest[:]))
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if err := os.MkdirAll(m.root, 0o700); err != nil {
+		return Projection{}, err
+	}
+	if err := os.Chmod(m.root, 0o700); err != nil {
+		return Projection{}, fmt.Errorf("secure data projection root: %w", err)
+	}
 	manifestFile := append(append([]byte(nil), manifest...), '\n')
 	if existing, err := os.ReadFile(projectionHostPath(target, AccessManifestPath)); err == nil {
 		if string(existing) != string(manifestFile) {
@@ -80,11 +115,8 @@ func (m *Materializer) Materialize(ctx context.Context, actor models.AgentConfig
 		if err := verifyProjection(target, access, manifestFile); err != nil {
 			return Projection{}, err
 		}
-		return Projection{Root: target, AccessList: access}, nil
+		return Projection{ID: projectionID, Root: target, AccessList: access}, nil
 	} else if !os.IsNotExist(err) {
-		return Projection{}, err
-	}
-	if err := os.MkdirAll(m.root, 0o700); err != nil {
 		return Projection{}, err
 	}
 	tmp, err := os.MkdirTemp(m.root, ".projection-")
@@ -130,7 +162,7 @@ func (m *Materializer) Materialize(ctx context.Context, actor models.AgentConfig
 			return Projection{}, err
 		}
 	}
-	return Projection{Root: target, AccessList: access}, nil
+	return Projection{ID: projectionID, Root: target, AccessList: access}, nil
 }
 
 func verifyProjection(root string, access durabledata.AccessList, manifest []byte) error {
@@ -174,7 +206,7 @@ func verifyProjection(root string, access durabledata.AccessList, manifest []byt
 			if _, ok := expectedDirs[path]; !ok {
 				return fmt.Errorf("data access projection %s contains unexpected directory %s", root, path)
 			}
-			if info.Mode().Perm() != 0o500 {
+			if info.Mode().Perm() != 0o555 {
 				return fmt.Errorf("data access projection %s directory mode is mutable", path)
 			}
 			return nil
@@ -183,7 +215,7 @@ func verifyProjection(root string, access durabledata.AccessList, manifest []byt
 		if !ok || !info.Mode().IsRegular() {
 			return fmt.Errorf("data access projection %s contains unexpected entry %s", root, path)
 		}
-		if info.Mode().Perm() != 0o400 {
+		if info.Mode().Perm() != 0o444 {
 			return fmt.Errorf("data access projection %s file mode is mutable", path)
 		}
 		actual, err := os.ReadFile(path)
@@ -239,8 +271,8 @@ func makeProjectionReadOnly(root string) error {
 			return err
 		}
 		if info.IsDir() {
-			return os.Chmod(path, 0o500)
+			return os.Chmod(path, 0o555)
 		}
-		return os.Chmod(path, 0o400)
+		return os.Chmod(path, 0o444)
 	})
 }

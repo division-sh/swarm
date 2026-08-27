@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	runtimedataaccess "github.com/division-sh/swarm/internal/runtime/dataaccess"
 )
 
 const (
@@ -26,6 +27,7 @@ const (
 	LabelAgentFlowInstanceID   = "dev.swarm.agent_flow_instance_id"
 	LabelAgentFlowInstancePath = "dev.swarm.agent_flow_instance_path"
 	LabelFlowInstance          = "dev.swarm.flow_instance"
+	LabelDataProjectionID      = "dev.swarm.data_projection_id"
 
 	OwnerRuntime = "runtime"
 
@@ -48,6 +50,7 @@ type Identity struct {
 	EntityID       string
 	AgentIdentity  runtimeagentidentity.Identity
 	FlowInstance   string
+	DataProjection runtimedataaccess.ProjectionID
 }
 
 func (i Identity) Normalized() Identity {
@@ -61,6 +64,7 @@ func (i Identity) Normalized() Identity {
 	i.EntityID = strings.TrimSpace(i.EntityID)
 	i.AgentIdentity = i.AgentIdentity.Normalize()
 	i.FlowInstance = strings.Trim(strings.TrimSpace(i.FlowInstance), "/")
+	i.DataProjection = runtimedataaccess.ProjectionID(strings.TrimSpace(string(i.DataProjection)))
 	return i
 }
 
@@ -94,6 +98,7 @@ func (i Identity) Labels() map[string]string {
 		}
 	}
 	addOptionalLabel(labels, LabelFlowInstance, i.FlowInstance)
+	addOptionalLabel(labels, LabelDataProjectionID, string(i.DataProjection))
 	for key, value := range labels {
 		if strings.TrimSpace(value) == "" {
 			delete(labels, key)
@@ -129,9 +134,20 @@ func (i Identity) Validate() error {
 		if i.FlowInstance == "" {
 			return fmt.Errorf("flow container identity requires flow_instance")
 		}
+		if err := i.AgentIdentity.Validate(); err != nil {
+			return fmt.Errorf("flow container identity requires complete concrete agent identity: %w", err)
+		}
 	}
-	if i.Kind != KindAgent && !i.AgentIdentity.IsZero() {
+	if i.Kind != KindAgent && i.Kind != KindFlow && !i.AgentIdentity.IsZero() {
 		return fmt.Errorf("container kind %q must not carry agent identity", i.Kind)
+	}
+	if i.DataProjection != "" {
+		if i.Kind != KindAgent && i.Kind != KindFlow {
+			return fmt.Errorf("container kind %q must not carry data projection identity", i.Kind)
+		}
+		if err := i.DataProjection.Validate(); err != nil {
+			return fmt.Errorf("container data projection identity is invalid: %w", err)
+		}
 	}
 	return nil
 }
@@ -173,6 +189,7 @@ func FromLabels(labels map[string]string) (Identity, bool, error) {
 		RunID:          labels[LabelRunID],
 		EntityID:       labels[LabelEntityID],
 		FlowInstance:   labels[LabelFlowInstance],
+		DataProjection: runtimedataaccess.ProjectionID(labels[LabelDataProjectionID]),
 	}.Normalized()
 	if hasAnyAgentIdentityLabel(labels) {
 		agentIdentity, err := runtimeagentidentity.FromStorageFields(runtimeagentidentity.StorageFields{

@@ -68,6 +68,7 @@ var sourcePrimitiveOwners = map[string]primitiveOwner{
 	"internal/runtime/dataaccess/materializer.go:Materialize:filesystem_write:1":                                          ownerRuntimeDependency,
 	"internal/runtime/dataaccess/materializer.go:Materialize:filesystem_write:2":                                          ownerRuntimeDependency,
 	"internal/runtime/dataaccess/materializer.go:Materialize:filesystem_write:3":                                          ownerRuntimeDependency,
+	"internal/runtime/dataaccess/materializer.go:Materialize:filesystem_write:4":                                          ownerRuntimeDependency,
 	"internal/runtime/dataaccess/materializer.go:makeProjectionReadOnly:filesystem_write:1":                               ownerRuntimeDependency,
 	"internal/runtime/dataaccess/materializer.go:makeProjectionReadOnly:filesystem_write:2":                               ownerRuntimeDependency,
 	"internal/runtime/dataaccess/materializer.go:writeProjectionFile:filesystem_write:1":                                  ownerRuntimeDependency,

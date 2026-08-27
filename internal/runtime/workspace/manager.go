@@ -591,18 +591,26 @@ func (m *DockerManager) ResolveWorkspace(ctx context.Context, actor models.Agent
 	if err != nil {
 		return nil, err
 	}
-	container, volume := m.workspaceContainerAndVolume(scope, scopeKey)
-	identity, err := m.workspaceContainerIdentity(ctx, container, scope, scopeKey, actor)
-	if err != nil {
-		return nil, err
-	}
-	mounts := m.standardMountArgs()
 	var projection runtimedataaccess.Projection
 	if m.data != nil {
 		projection, err = m.data.Materialize(ctx, actor)
 		if err != nil {
 			return nil, fmt.Errorf("materialize workspace data projection: %w", err)
 		}
+		if err := projection.Validate(); err != nil {
+			return nil, fmt.Errorf("materialize workspace data projection: %w", err)
+		}
+	}
+	container, volume, err := m.workspaceContainerAndVolume(scope, scopeKey, actor)
+	if err != nil {
+		return nil, err
+	}
+	identity, err := m.workspaceContainerIdentity(ctx, container, scope, scopeKey, actor, projection.ID)
+	if err != nil {
+		return nil, err
+	}
+	mounts := m.standardMountArgs()
+	if projection.Root != "" {
 		mounts = append(mounts, "-v", fmt.Sprintf("%s:%s:ro", projection.Root, strings.TrimSpace(m.cfg.DataMountPoint)))
 	}
 	if err := m.EnsureContainerRunningWithIdentity(ctx, container, identity, append(mounts,
@@ -721,23 +729,35 @@ func workspaceScopeForActor(source semanticview.Source, actor models.AgentConfig
 	}
 }
 
-func (m *DockerManager) workspaceContainerAndVolume(scope, scopeKey string) (string, string) {
+func (m *DockerManager) workspaceContainerAndVolume(scope, scopeKey string, actor models.AgentConfig) (string, string, error) {
 	scope = strings.TrimSpace(scope)
 	scopeKey = SanitizeSlug(scopeKey)
+	containerScopeKey := scopeKey
+	if scope == "per-flow-instance" {
+		identity, err := actor.ConcreteIdentity()
+		if err != nil {
+			return "", "", fmt.Errorf("workspace container selection: %w", err)
+		}
+		fingerprint, err := identity.Fingerprint()
+		if err != nil {
+			return "", "", fmt.Errorf("workspace container selection: fingerprint concrete agent identity: %w", err)
+		}
+		containerScopeKey += "-agent-" + fingerprint
+	}
 	if strings.TrimSpace(m.cfg.BundleScope) == "" {
 		switch scope {
 		case "per-flow-instance":
-			return "swarm-flow-" + scopeKey, "workspaces_flow_" + scopeKey
+			return "swarm-flow-" + containerScopeKey, "workspaces_flow_" + scopeKey, nil
 		default:
-			return "swarm-agent-" + scopeKey, "workspaces_agent_" + scopeKey
+			return "swarm-agent-" + scopeKey, "workspaces_agent_" + scopeKey, nil
 		}
 	}
 	containerPrefix := m.bundleScopedPrefix()
 	switch scope {
 	case "per-flow-instance":
-		return containerPrefix + "flow-" + scopeKey, "workspaces_" + volumeScopeKey(containerPrefix+"flow_"+scopeKey)
+		return containerPrefix + "flow-" + containerScopeKey, "workspaces_" + volumeScopeKey(containerPrefix+"flow_"+scopeKey), nil
 	default:
-		return containerPrefix + "agent-" + scopeKey, "workspaces_" + volumeScopeKey(containerPrefix+"agent_"+scopeKey)
+		return containerPrefix + "agent-" + scopeKey, "workspaces_" + volumeScopeKey(containerPrefix+"agent_"+scopeKey), nil
 	}
 }
 
@@ -759,7 +779,7 @@ func (m *DockerManager) systemContainerIdentity(source, kind string) runtimecont
 	}
 }
 
-func (m *DockerManager) workspaceContainerIdentity(ctx context.Context, container, scope, scopeKey string, actor models.AgentConfig) (runtimecontaineridentity.Identity, error) {
+func (m *DockerManager) workspaceContainerIdentity(ctx context.Context, container, scope, scopeKey string, actor models.AgentConfig, projectionID runtimedataaccess.ProjectionID) (runtimecontaineridentity.Identity, error) {
 	runID, err := workspaceRunID(ctx)
 	if err != nil {
 		return runtimecontaineridentity.Identity{}, err
@@ -772,11 +792,17 @@ func (m *DockerManager) workspaceContainerIdentity(ctx context.Context, containe
 		WorkspaceScope: strings.TrimSpace(scope),
 		BundleHash:     m.bundleHashLabel(),
 		RunID:          runID,
+		DataProjection: projectionID,
 	}
 	switch strings.TrimSpace(scope) {
 	case "per-flow-instance":
 		identity.Kind = runtimecontaineridentity.KindFlow
 		identity.FlowInstance = strings.Trim(strings.TrimSpace(scopeKey), "/")
+		agentIdentity, err := actor.ConcreteIdentity()
+		if err != nil {
+			return runtimecontaineridentity.Identity{}, fmt.Errorf("workspace container identity: %w", err)
+		}
+		identity.AgentIdentity = agentIdentity
 	default:
 		identity.Kind = runtimecontaineridentity.KindAgent
 		agentIdentity, err := actor.ConcreteIdentity()
