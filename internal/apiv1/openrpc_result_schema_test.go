@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apispec"
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/google/uuid"
 )
 
@@ -38,6 +39,22 @@ func TestOpenRPCSuccessfulResultSchemas(t *testing.T) {
 			result := successfulRuntimeResult(t, methodName)
 			validator.validateMethodResult(t, methodName, result)
 		})
+	}
+}
+
+func TestChannelOnboardingCheckpointPhasesMatchOpenRPC(t *testing.T) {
+	root := repoRoot(t)
+	openRPC, _ := loadComplianceOpenRPC(t, complianceOpenRPCPath(root))
+	validator := newOpenRPCResultSchemaValidator(t, openRPC)
+	for _, methodName := range []string{"channel.onboarding_start", "channel.onboarding_get", "channel.onboarding_retry"} {
+		for _, phase := range channelonboarding.ValidPhases() {
+			t.Run(methodName+"/"+string(phase), func(t *testing.T) {
+				result := successfulOperatorChannelRuntimeResult(methodName).(map[string]any)
+				operation := result["operation"].(map[string]any)
+				operation["phase"] = string(phase)
+				validator.validateMethodResult(t, methodName, result)
+			})
+		}
 	}
 }
 

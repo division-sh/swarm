@@ -15955,10 +15955,14 @@
           "phase": {
             "enum": [
               "preparing",
+              "credentials_admitted",
               "activating_provider",
               "awaiting_external_identity",
               "awaiting_operator_confirmation",
               "publishing_activation",
+              "publishing_process_activation",
+              "promoting_registration",
+              "retiring_predecessor",
               "delivering_confirmation",
               "succeeded",
               "failed",

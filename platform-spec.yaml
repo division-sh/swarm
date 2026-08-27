@@ -32486,7 +32486,7 @@ api_specification:
           target_selector: {type: string, minLength: 1}
           activation_posture: {type: string, enum: [webhook_registration, session_connection]}
           identity_ceremony: {type: string, enum: [authenticated_text_challenge, provider_pairing]}
-          phase: {type: string, enum: [preparing, activating_provider, awaiting_external_identity, awaiting_operator_confirmation, publishing_activation, delivering_confirmation, succeeded, failed, retired]}
+          phase: {type: string, enum: [preparing, credentials_admitted, activating_provider, awaiting_external_identity, awaiting_operator_confirmation, publishing_activation, publishing_process_activation, promoting_registration, retiring_predecessor, delivering_confirmation, succeeded, failed, retired]}
           revision: {type: integer, minimum: 1}
           save_proof: {type: boolean}
           credential_reservations:

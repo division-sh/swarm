@@ -3,12 +3,14 @@ package channelonboarding
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 )
 
 func TestConnectedChannelProofOptionalLifecycle(t *testing.T) {
@@ -115,6 +117,57 @@ func TestChannelUnbindReleasesOnlyOperationOwnedCredentialsAfterAuthorityRetirem
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("credential teardown order = %#v, want %#v", calls, want)
 	}
+}
+
+func TestChannelUnbindReleasesUncheckpointedOperationCredentialAfterAuthorityRetirement(t *testing.T) {
+	identity := testTeardownInterface()
+	calls := []string{}
+	reservation := CredentialReservation{Role: "provider", StoreKey: "channel.telegram.provider"}
+	op := Operation{OperationID: "operation-a", Interface: identity, CredentialReservations: []CredentialReservation{reservation}}
+	store := &recordingTeardownStore{calls: &calls, onboarding: []Operation{op}}
+	identities := &recordingDestructiveIdentities{
+		calls: &calls, identity: identity, principal: operatorchannel.Principal{ID: "principal-a"},
+		binding: operatorchannel.Binding{Interface: identity, Revision: 4, Status: operatorchannel.BindingCurrent},
+	}
+	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := NewCredentialWriter(credentialStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	written, err := credentials.Admit(context.Background(), CredentialWriteRequest{
+		StoreKey: operationCredentialStoreKey(reservation.StoreKey, op.OperationID, reservation.Role),
+		Value:    "operation-secret", Receipt: credentialReceipt(op.OperationID, reservation.Role),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewDestructiveService(store, identities, credentials, recordingActivationRefresher{calls: &calls}, testTeardownNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.Unbind(context.Background(), identity.Selector, 4, "unbind-key", "unbind-hash"); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := credentialStore.Get(context.Background(), written.StoreKey); err != nil || found {
+		t.Fatalf("uncheckpointed teardown credential found=%v err=%v", found, err)
+	}
+	refresh := indexOfCall(calls, "refresh")
+	unbound := indexOfCall(calls, "unbind")
+	if refresh < 0 || unbound < 0 || refresh >= unbound {
+		t.Fatalf("destructive cleanup order = %#v", calls)
+	}
+}
+
+func indexOfCall(calls []string, want string) int {
+	for index, call := range calls {
+		if call == want {
+			return index
+		}
+	}
+	return -1
 }
 
 func TestChannelActivationRetiresAuthorityBeforeRuntimeContextUnload(t *testing.T) {
@@ -389,6 +442,15 @@ func (r recordingCredentialReleaser) Release(_ context.Context, admission Creden
 		*r.calls = append(*r.calls, "release:"+admission.StoreKey)
 	}
 	return admission.Kind == CredentialAdmissionWritten, nil
+}
+
+func (r recordingCredentialReleaser) ReleaseOperation(ctx context.Context, operation Operation) error {
+	for _, admission := range operation.CredentialAdmissions {
+		if _, err := r.Release(ctx, admission); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r recordingActivationRefresher) RefreshChannelActivations(ctx context.Context) error {

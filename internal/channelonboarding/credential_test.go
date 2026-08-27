@@ -114,3 +114,112 @@ func TestOnboardingCredentialReleaseOwnsOnlyWrittenCurrentOccurrence(t *testing.
 		t.Fatalf("observed credential = %q, %v, %v", value, found, err)
 	}
 }
+
+func TestCredentialWriterReleaseOperationReconcilesPhysicalAndCheckpointedWrites(t *testing.T) {
+	for _, test := range []struct {
+		name             string
+		writtenRoles     int
+		checkpointWrites bool
+	}{
+		{name: "partial physical write before checkpoint", writtenRoles: 1},
+		{name: "complete physical writes before checkpoint", writtenRoles: 2},
+		{name: "complete checkpointed writes", writtenRoles: 2, checkpointWrites: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			writer, err := NewCredentialWriter(store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			op := Operation{
+				OperationID: "operation-a",
+				CredentialReservations: []CredentialReservation{
+					{Role: "provider", StoreKey: "channel.telegram.provider"},
+					{Role: "signing", StoreKey: "channel.telegram.signing"},
+				},
+			}
+			written := make([]CredentialAdmission, 0, test.writtenRoles)
+			for _, reservation := range op.CredentialReservations[:test.writtenRoles] {
+				result, err := writer.Admit(context.Background(), CredentialWriteRequest{
+					StoreKey: operationCredentialStoreKey(reservation.StoreKey, op.OperationID, reservation.Role),
+					Value:    "operation-secret-" + reservation.Role, Receipt: credentialReceipt(op.OperationID, reservation.Role),
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				written = append(written, CredentialAdmission{
+					Role: reservation.Role, StoreKey: result.StoreKey, Kind: CredentialAdmissionWritten,
+					Receipt: result.Receipt, Epoch: result.Epoch,
+				})
+			}
+			if test.checkpointWrites {
+				op.CredentialAdmissions = append([]CredentialAdmission(nil), written...)
+			}
+
+			predecessor, err := writer.Admit(context.Background(), CredentialWriteRequest{
+				StoreKey: "channel.telegram.predecessor", Value: "predecessor-secret", Receipt: "predecessor-receipt",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			op.CredentialAdmissions = append(op.CredentialAdmissions, CredentialAdmission{
+				Role: "provider", StoreKey: predecessor.StoreKey, Kind: CredentialAdmissionObserved,
+				Receipt: "predecessor-observation", Epoch: predecessor.Epoch,
+			})
+			successorReservation := op.CredentialReservations[0]
+			successor, err := writer.Admit(context.Background(), CredentialWriteRequest{
+				StoreKey: operationCredentialStoreKey(successorReservation.StoreKey, "operation-b", successorReservation.Role),
+				Value:    "successor-secret", Receipt: credentialReceipt("operation-b", successorReservation.Role),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if err := writer.ReleaseOperation(context.Background(), op); err != nil {
+				t.Fatal(err)
+			}
+			for _, admission := range written {
+				if _, found, err := store.Get(context.Background(), admission.StoreKey); err != nil || found {
+					t.Fatalf("operation credential %q found=%v err=%v", admission.StoreKey, found, err)
+				}
+			}
+			for _, retained := range []CredentialWriteResult{predecessor, successor} {
+				if _, found, err := store.Get(context.Background(), retained.StoreKey); err != nil || !found {
+					t.Fatalf("foreign credential %q found=%v err=%v", retained.StoreKey, found, err)
+				}
+			}
+		})
+	}
+}
+
+func TestCredentialWriterReleaseOperationRejectsForeignWrittenAdmission(t *testing.T) {
+	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := NewCredentialWriter(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation := CredentialReservation{Role: "provider", StoreKey: "channel.telegram.provider"}
+	foreign, err := writer.Admit(context.Background(), CredentialWriteRequest{
+		StoreKey: operationCredentialStoreKey(reservation.StoreKey, "operation-b", reservation.Role),
+		Value:    "successor-secret", Receipt: credentialReceipt("operation-b", reservation.Role),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	op := Operation{OperationID: "operation-a", CredentialReservations: []CredentialReservation{reservation}, CredentialAdmissions: []CredentialAdmission{{
+		Role: reservation.Role, StoreKey: foreign.StoreKey, Kind: CredentialAdmissionWritten,
+		Receipt: foreign.Receipt, Epoch: foreign.Epoch,
+	}}}
+	if err := writer.ReleaseOperation(context.Background(), op); err == nil || !strings.Contains(err.Error(), "not owned") {
+		t.Fatalf("foreign written cleanup error = %v", err)
+	}
+	if _, found, err := store.Get(context.Background(), foreign.StoreKey); err != nil || !found {
+		t.Fatalf("foreign credential found=%v err=%v", found, err)
+	}
+}
