@@ -49,7 +49,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
-	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -98,25 +97,6 @@ func (testServeIngestWriter) UpsertBundleCatalogWithData(context.Context, bundle
 
 func testServeRuntimePersistence() serveRuntimePersistence {
 	return serveRuntimePersistence{bundleWriter: testServeIngestWriter{}}
-}
-
-type failOnceFinalizeStartupOwnershipStore struct {
-	delegate runtimestartupownership.Store
-
-	mu               sync.Mutex
-	prepareCount     int
-	finalizeAttempts int
-	failed           bool
-}
-
-func (s *failOnceFinalizeStartupOwnershipStore) AcquireProcessCapability(ctx context.Context, req runtimestartupownership.AcquireRequest) (runtimestartupownership.ProcessCapability, error) {
-	return s.delegate.AcquireProcessCapability(ctx, req)
-}
-
-func (s *failOnceFinalizeStartupOwnershipStore) counts() (int, int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.prepareCount, s.finalizeAttempts
 }
 
 func TestRuntimeProjectSupervisorRejectsHarnessInputReplacementBeforeQuiesce(t *testing.T) {
@@ -1850,43 +1830,6 @@ func (stubWorkflowModule) WorkflowDefinition() *runtimepipeline.WorkflowDefiniti
 func (stubWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode  { return nil }
 func (stubWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry   { return nil }
 func (stubWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry { return nil }
-
-type replacementProviderEventSource struct {
-	semanticview.Source
-	generation triggergeneration.Generation
-	eventName  string
-}
-
-func (s replacementProviderEventSource) SemanticCapabilities() semanticview.Capabilities {
-	return s.Source.SemanticCapabilities().WithProviderTriggerEvents(s.Source, s.generation, nil)
-}
-
-func (s replacementProviderEventSource) EventEntry(eventType string) (runtimecontracts.EventCatalogEntry, bool) {
-	if strings.TrimSpace(eventType) == s.eventName {
-		return runtimecontracts.EventCatalogEntry{Source: "test_provider_trigger_import"}, true
-	}
-	return s.Source.EventEntry(eventType)
-}
-
-func (s replacementProviderEventSource) EventEntries() map[string]runtimecontracts.EventCatalogEntry {
-	base := s.Source.EventEntries()
-	entries := make(map[string]runtimecontracts.EventCatalogEntry, len(base)+1)
-	for name, entry := range base {
-		entries[name] = entry
-	}
-	entries[s.eventName] = runtimecontracts.EventCatalogEntry{Source: "test_provider_trigger_import"}
-	return entries
-}
-
-func (s replacementProviderEventSource) ResolvedEventCatalog() map[string]runtimecontracts.EventCatalogEntry {
-	base := s.Source.ResolvedEventCatalog()
-	entries := make(map[string]runtimecontracts.EventCatalogEntry, len(base)+1)
-	for name, entry := range base {
-		entries[name] = entry
-	}
-	entries[s.eventName] = runtimecontracts.EventCatalogEntry{Source: "test_provider_trigger_import"}
-	return entries
-}
 
 type stubWorkspaceLifecycle struct {
 	validateErr error

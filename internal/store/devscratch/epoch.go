@@ -326,13 +326,6 @@ func (e *storeEpoch) releaseAfterStoreClose() error {
 	return err
 }
 
-func (e *storeEpoch) coordinateValue() Coordinate {
-	if e == nil {
-		return Coordinate{}
-	}
-	return e.coordinate
-}
-
 func predecessorPaths(databasePath string) []string {
 	paths := make([]string, 0, len(predecessorSuffixes))
 	for _, suffix := range predecessorSuffixes {
