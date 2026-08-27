@@ -220,6 +220,13 @@ func (c ChannelRuntimeContextCoordinate) MatchesDurableIdentity(other ChannelRun
 	return c.DurableIdentity().Matches(other.DurableIdentity())
 }
 
+func (c ChannelRuntimeContextCoordinate) MatchesContextOccurrence(runtimeInstanceID string, publicationGeneration uint64) bool {
+	c = c.Normalized()
+	runtimeInstanceID = strings.TrimSpace(runtimeInstanceID)
+	return c.ValidateContext() == nil && runtimeInstanceID != "" && publicationGeneration != 0 &&
+		c.RuntimeInstanceID == runtimeInstanceID && c.ContextPublicationGeneration == publicationGeneration
+}
+
 func (c ChannelRuntimeContextCoordinate) Matches(other ChannelRuntimeContextCoordinate) bool {
 	c, other = c.Normalized(), other.Normalized()
 	return c.Validate() == nil && other.Validate() == nil && c == other

@@ -397,14 +397,11 @@ func CorruptPostgresState(
 	endedAt time.Time,
 ) {
 	t.Helper()
-	if endedAt.IsZero() {
-		endedAt = time.Now().UTC()
-	}
 	if _, err := db.ExecContext(ctx, `
 		UPDATE runs
 		SET status = $2, ended_at = $3
 		WHERE run_id = $1::uuid
-	`, strings.TrimSpace(runID), strings.TrimSpace(state), endedAt.UTC()); err != nil {
+	`, strings.TrimSpace(runID), strings.TrimSpace(state), nullableFixtureTime(endedAt)); err != nil {
 		t.Fatalf("corrupt PostgreSQL run state %s: %v", runID, err)
 	}
 }
@@ -418,14 +415,11 @@ func CorruptSQLiteState(
 	endedAt time.Time,
 ) {
 	t.Helper()
-	if endedAt.IsZero() {
-		endedAt = time.Now().UTC()
-	}
 	if _, err := db.ExecContext(ctx, `
 		UPDATE runs
 		SET status = ?, ended_at = ?
 		WHERE run_id = ?
-	`, strings.TrimSpace(state), endedAt.UTC(), strings.TrimSpace(runID)); err != nil {
+	`, strings.TrimSpace(state), nullableFixtureTime(endedAt), strings.TrimSpace(runID)); err != nil {
 		t.Fatalf("corrupt SQLite run state %s: %v", runID, err)
 	}
 }

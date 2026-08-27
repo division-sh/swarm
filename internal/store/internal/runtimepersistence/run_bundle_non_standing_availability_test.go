@@ -243,13 +243,15 @@ func (f runBundleAvailabilityParityFixture) rewriteCurrentStanding(t *testing.T,
 
 func (f runBundleAvailabilityParityFixture) rewriteRun(t *testing.T, ctx context.Context, runID, state, bundleHash, bundleSource string) {
 	t.Helper()
-	var err error
-	if f.backend == "sqlite" {
-		_, err = f.db.ExecContext(ctx, `UPDATE runs SET status = ?, bundle_hash = ?, bundle_source = ?, ended_at = NULL WHERE run_id = ?`, state, bundleHash, bundleSource, runID)
-	} else {
-		_, err = f.db.ExecContext(ctx, `UPDATE runs SET status = $2, bundle_hash = $3, bundle_source = $4, ended_at = NULL WHERE run_id = $1::uuid`, runID, state, bundleHash, bundleSource)
+	parsedState, err := runtimerunlifecycle.ParseState(state)
+	if err != nil || !parsedState.Active() {
+		t.Fatalf("rewrite active run %s state %q: %v", runID, state, err)
 	}
-	if err != nil {
-		t.Fatalf("rewrite run %s: %v", runID, err)
+	if f.backend == "sqlite" {
+		runlifecyclefixture.CorruptSQLiteState(t, ctx, f.db, runID, state, time.Time{})
+		runlifecyclefixture.CorruptSQLiteSource(t, ctx, f.db, runID, bundleHash, bundleSource)
+	} else {
+		runlifecyclefixture.CorruptPostgresState(t, ctx, f.db, runID, state, time.Time{})
+		runlifecyclefixture.CorruptPostgresSource(t, ctx, f.db, runID, bundleHash, bundleSource)
 	}
 }

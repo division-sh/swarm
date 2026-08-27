@@ -107,6 +107,10 @@ func TestReleaseE2EClaudeLifecycleFixtureLoadsAndVerifies(t *testing.T) {
 	}
 }
 
+func TestReleaseE2EChannelOnboardingFixtureIsRegistered(t *testing.T) {
+	Prove(t, ArtifactID("internal/releasee2e/testdata/channel_onboarding_release"))
+}
+
 func TestReleaseE2EGoldenAgentWorkloadFixtureLoadsAndVerifies(t *testing.T) {
 	Prove(t, ArtifactID("internal/releasee2e/testdata/golden_agent_workload"))
 }

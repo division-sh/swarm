@@ -209,15 +209,13 @@ func TestCanonicalTelegramAgentExplicitLiveGraduation(t *testing.T) {
 	}
 	providerRecorder.waitForInitialCount(t, 1)
 	waitForStandingMemoryCompletion(t, "sqlite", sqlitePath, "live", 1)
+	requireStandingLiveTelegramCalls(t, telegramCalls, "Live turn 1: hello 201")
 	if got := sendStandingTelegramUpdate(t, baseURL, 202, 42, diagnostics); got != entityID {
 		t.Fatalf("live graduation second entity = %q, want same conversation owner %q", got, entityID)
 	}
 	providerRecorder.waitForInitialCount(t, 2)
 	waitForStandingMemoryCompletion(t, "sqlite", sqlitePath, "live", 2)
-	requireStandingLiveTelegramCalls(t, telegramCalls,
-		"Live turn 1: hello 201",
-		"Live turn 2: hello 202",
-	)
+	requireStandingLiveTelegramCalls(t, telegramCalls, "Live turn 2: hello 202")
 	requireStandingPayloadOnlyTargetReadback(t, baseURL, bundleHash, "live", 1, []string{
 		"Live turn 1: hello 201",
 		"Live turn 2: hello 202",
