@@ -30,6 +30,103 @@ func TestChannelOnboardingSelectedStoreContractParity(t *testing.T) {
 	}
 }
 
+func TestChannelRebindPublicationRetiresEverySiblingActivationForInterface(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var selected channelonboarding.Store
+			switch backend {
+			case "sqlite":
+				selected = newBootstrappedSQLiteRuntimeStoreForTest(t)
+			case "postgres":
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				selected = admitTestPostgresStore(t, db)
+			}
+			ctx := context.Background()
+			now := time.Date(2026, 8, 27, 2, 0, 0, 0, time.UTC)
+			principal, err := selected.(operatorchannel.Store).EnsureOperatorPrincipal(ctx, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			first := channelOnboardingStartRequest(principal.ID, now)
+			first.RequestKeyHash, first.RequestHash = "first-key", "first-request"
+			_, firstActivation := publishChannelOnboardingTestActivation(t, selected, first, 1, now)
+
+			sibling := first
+			sibling.OperationID = uuid.NewString()
+			sibling.RequestKeyHash, sibling.RequestHash = "sibling-key", "sibling-request"
+			sibling.Coordinate.BundleHash = "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+			sibling.TargetSelector = "ingress:support:sibling:telegram"
+			_, siblingActivation := publishChannelOnboardingTestActivation(t, selected, sibling, 1, now.Add(time.Minute))
+
+			rebind := first
+			rebind.OperationID = uuid.NewString()
+			rebind.RequestKeyHash, rebind.RequestHash = "rebind-key", "rebind-request"
+			rebind.Verb = channelonboarding.VerbRebind
+			_, successor := publishChannelOnboardingTestActivation(t, selected, rebind, 2, now.Add(2*time.Minute))
+
+			current, err := selected.ListCurrentConnectedChannelActivations(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(current) != 1 || current[0].ActivationID != successor.ActivationID || current[0].BindingRevision != 2 {
+				t.Fatalf("current activations after rebind = %#v, want only successor %s", current, successor.ActivationID)
+			}
+			for _, retired := range []channelonboarding.ConnectedChannelActivation{firstActivation, siblingActivation} {
+				if _, err := selected.GetConnectedChannelActivation(ctx, retired.SlotKey); !errors.Is(err, channelonboarding.ErrNotFound) && retired.SlotKey != successor.SlotKey {
+					t.Fatalf("retired sibling slot %s remained current: %v", retired.SlotKey, err)
+				}
+			}
+		})
+	}
+}
+
+func publishChannelOnboardingTestActivation(t *testing.T, selected channelonboarding.Store, request channelonboarding.StartRequest, bindingRevision int64, now time.Time) (channelonboarding.Operation, channelonboarding.ConnectedChannelActivation) {
+	t.Helper()
+	ctx := context.Background()
+	op, err := selected.ReserveChannelOnboarding(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	admissions := make([]channelonboarding.CredentialAdmission, 0, len(request.CredentialReservations))
+	for _, reservation := range request.CredentialReservations {
+		admissions = append(admissions, channelonboarding.CredentialAdmission{
+			Role: reservation.Role, StoreKey: reservation.StoreKey + "." + request.OperationID,
+			Kind: channelonboarding.CredentialAdmissionWritten, Receipt: "receipt-" + request.OperationID, Epoch: "epoch-" + request.OperationID,
+		})
+	}
+	op, err = selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+		OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: channelonboarding.PhaseActivatingProvider,
+		CredentialAdmissions: admissions, Now: now.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, phase := range []channelonboarding.Phase{channelonboarding.PhaseAwaitingExternalIdentity, channelonboarding.PhaseAwaitingOperatorConfirmation, channelonboarding.PhasePublishingActivation} {
+		op, err = selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+			OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: phase,
+			IdentityOperationID: uuid.NewString(), BindingRevision: bindingRevision, Now: now.Add(time.Duration(op.Revision) * time.Second),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	op, activation, err := selected.PublishConnectedChannelActivation(ctx, channelonboarding.PublishActivationRequest{
+		OperationID: op.OperationID, ExpectedRevision: op.Revision, ActivationID: uuid.NewString(), BindingRevision: bindingRevision,
+		ProofID: uuid.NewString(), ProofRevision: bindingRevision, Now: now.Add(8 * time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	op, err = selected.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+		OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: channelonboarding.PhaseSucceeded, Now: now.Add(9 * time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return op, activation
+}
+
 func runChannelOnboardingStoreContract(t *testing.T, store channelonboarding.Store) {
 	t.Helper()
 	ctx := context.Background()

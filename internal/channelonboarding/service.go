@@ -26,6 +26,7 @@ type IdentityLifecycle interface {
 }
 
 type ActivationRefresher interface {
+	PreflightChannelActivation(context.Context, Operation, Candidate) error
 	RefreshChannelActivations(context.Context) error
 }
 
@@ -387,6 +388,19 @@ func (s *Service) drive(ctx context.Context, op Operation, candidate Candidate, 
 			if err != nil {
 				return s.blockedResult(ctx, op, candidate, err)
 			}
+			candidateOperation := op
+			candidateOperation.CredentialAdmissions = append([]CredentialAdmission(nil), admissions...)
+			if err := s.activations.PreflightChannelActivation(ctx, candidateOperation, candidate); err != nil {
+				releaseErr := s.releaseCandidateCredentials(context.WithoutCancel(ctx), admissions)
+				if terminal, ok := AsTerminalActivationError(err); ok {
+					failed, failErr := s.failOperation(ctx, op, terminal.Code, terminal.Error())
+					if failErr != nil || releaseErr != nil {
+						return Result{}, errors.Join(err, releaseErr, failErr)
+					}
+					return s.result(ctx, failed, candidate)
+				}
+				return s.blockedResult(ctx, op, candidate, errors.Join(err, releaseErr))
+			}
 			op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{
 				OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: PhaseActivatingProvider,
 				CredentialAdmissions: admissions, Now: s.now().UTC(),
@@ -515,6 +529,16 @@ func (s *Service) drive(ctx context.Context, op Operation, candidate Candidate, 
 			return Result{}, fmt.Errorf("%w: unsupported onboarding phase %q", ErrConflict, op.Phase)
 		}
 	}
+}
+
+func (s *Service) releaseCandidateCredentials(ctx context.Context, admissions []CredentialAdmission) error {
+	var releaseErr error
+	for _, admission := range admissions {
+		if _, err := s.credentials.Release(ctx, admission); err != nil {
+			releaseErr = errors.Join(releaseErr, fmt.Errorf("release rejected channel credential %q: %w", admission.StoreKey, err))
+		}
+	}
+	return releaseErr
 }
 
 func (s *Service) admitCredentials(ctx context.Context, op Operation, candidate Candidate, providerCredential string) ([]CredentialAdmission, error) {
@@ -673,7 +697,14 @@ func (s *Service) releaseSupersededCredentials(ctx context.Context, current Oper
 		retained[credentialAdmissionOccurrence(admission)] = struct{}{}
 	}
 	for _, operation := range operations {
-		if operation.OperationID == current.OperationID || operation.SlotKey != current.SlotKey {
+		if operation.OperationID == current.OperationID {
+			continue
+		}
+		sameSupersededOwner := operation.SlotKey == current.SlotKey
+		if current.Verb == VerbRebind {
+			sameSupersededOwner = operation.Interface.Normalized() == current.Interface.Normalized()
+		}
+		if !sameSupersededOwner {
 			continue
 		}
 		for _, admission := range operation.CredentialAdmissions {

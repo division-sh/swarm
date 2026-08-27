@@ -1453,6 +1453,9 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		credentials: providerCredentialOwner,
 	}
 	if !publicIngressEnabled {
+		channelActivationRefresher.preflight = func(_ context.Context, intent servePrebindingActivation) error {
+			return rejectWebhookPrebindingWithoutPublicIngress(serveChannelActivationSnapshot{Prebinding: []servePrebindingActivation{intent}})
+		}
 		channelActivationRefresher.reconcile = func(refreshCtx context.Context) error {
 			snapshot, snapshotErr := compileServeChannelActivationSnapshot(refreshCtx, runtimeContextManager, channelOnboardingStore, operatorChannels, providerCredentialOwner)
 			if snapshotErr != nil {
@@ -1609,6 +1612,17 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		if controllerErr != nil {
 			presenter.fail(20, "public_ingress", controllerErr)
 			return 1
+		}
+		channelActivationRefresher.preflight = func(preflightCtx context.Context, intent servePrebindingActivation) error {
+			generation := publicExposure.Generation()
+			if generation.ID == "" {
+				return fmt.Errorf("public exposure generation is unavailable for channel activation preflight")
+			}
+			pair, pairErr := resolveServePrebindingRegistrationPair(intent)
+			if pairErr != nil {
+				return pairErr
+			}
+			return registrationController.Preflight(preflightCtx, generation, pair)
 		}
 		channelActivationRefresher.reconcile = func(refreshCtx context.Context) error {
 			generation := publicExposure.Generation()

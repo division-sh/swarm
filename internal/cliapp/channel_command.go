@@ -281,7 +281,19 @@ func runChannelResume(ctx context.Context, out, errOut io.Writer, operationID st
 	if operationID == "" {
 		return returnCLIValidationError(errOut, errors.New("channel onboarding operation ID is required"))
 	}
-	if !opts.yes && !controlStdinIsTerminal(opts.apiOptions) {
+	client, err := newCLIAPIClient(opts.apiOptions)
+	if err != nil {
+		return returnCLIAPIError(errOut, err, channelErrorClassifier())
+	}
+	var current channelOnboardingResult
+	if err := client.call(ctx, "channel.onboarding_get", map[string]any{"operation_id": operationID}, &current); err != nil {
+		return returnCLIAPIError(errOut, err, channelErrorClassifier())
+	}
+	now := time.Now()
+	if opts.apiOptions.now != nil {
+		now = opts.apiOptions.now()
+	}
+	if channelClaimantConfirmationRequired(current, now) && !opts.yes && !controlStdinIsTerminal(opts.apiOptions) {
 		return returnCLIValidationError(errOut, errors.New("channel claimant confirmation requires a terminal or --yes"))
 	}
 	if opts.credentialStdin {
@@ -291,14 +303,6 @@ func runChannelResume(ctx context.Context, out, errOut io.Writer, operationID st
 		}
 		opts.resumeCredential = credential
 		defer func() { opts.resumeCredential = "" }()
-	}
-	client, err := newCLIAPIClient(opts.apiOptions)
-	if err != nil {
-		return returnCLIAPIError(errOut, err, channelErrorClassifier())
-	}
-	var current channelOnboardingResult
-	if err := client.call(ctx, "channel.onboarding_get", map[string]any{"operation_id": operationID}, &current); err != nil {
-		return returnCLIAPIError(errOut, err, channelErrorClassifier())
 	}
 	progressOut := out
 	if opts.output.asJSON || opts.output.quiet {
@@ -350,7 +354,7 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 				}
 				continue
 			}
-			if !overdue && identity.State == "awaiting_confirmation" {
+			if channelClaimantConfirmationRequired(result, now) {
 				fmt.Fprintf(progressOut, "Claimed by %s in a %s conversation.\n", identity.AccountPresentation, identity.ConversationScope)
 				approve := opts.yes
 				var err error
@@ -391,6 +395,14 @@ func completeChannelOnboarding(ctx context.Context, client *cliAPIClient, result
 		}
 		result = next
 	}
+}
+
+func channelClaimantConfirmationRequired(result channelOnboardingResult, now time.Time) bool {
+	identity := result.IdentityOperation
+	if result.Operation.Phase != "awaiting_operator_confirmation" || identity == nil || identity.State != "awaiting_confirmation" {
+		return false
+	}
+	return identity.ExpiresAt.IsZero() || identity.ExpiresAt.After(now)
 }
 
 func waitForChannelOnboardingClaim(ctx context.Context, client *cliAPIClient, begun channelOnboardingResult, opts rootCommandOptions) (channelOnboardingResult, error) {

@@ -296,6 +296,59 @@ func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
 		}
 	})
 
+	t.Run("noninteractive resume requires yes only for claimant confirmation", func(t *testing.T) {
+		for _, test := range []struct {
+			name       string
+			phase      string
+			credential string
+		}{
+			{name: "preparing with replacement credential", phase: "preparing", credential: "replacement-token\n"},
+			{name: "provider activation", phase: "activating_provider"},
+			{name: "confirmation delivery", phase: "delivering_confirmation"},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				var methods []string
+				server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
+					methods = append(methods, request.Method)
+					switch request.Method {
+					case "channel.onboarding_get":
+						return channelOnboardingCLIResult(test.phase, "", false)
+					case "channel.onboarding_retry":
+						if test.credential != "" && request.Params["provider_credential"] != "replacement-token" {
+							t.Fatalf("resume credential params = %#v", request.Params)
+						}
+						return channelOnboardingCLIResult("succeeded", "bound", true)
+					default:
+						t.Fatalf("unexpected method %q", request.Method)
+					}
+					return nil
+				})
+				args := []string{"channel", "resume", operatorChannelCLIOperation}
+				if test.credential != "" {
+					args = append(args, "--credential-stdin")
+				}
+				stdout, stderr, code := runOperatorChannelCLINonterminal(t, server, test.credential, args...)
+				if code != 0 || stderr != "" || !strings.Contains(stdout, "Connected telegram channel READY") {
+					t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout, stderr)
+				}
+				if got := strings.Join(methods, ","); got != "channel.onboarding_get,channel.onboarding_retry" {
+					t.Fatalf("resume methods = %s", got)
+				}
+			})
+		}
+
+		server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
+			if request.Method != "channel.onboarding_get" {
+				t.Fatalf("unexpected method %q", request.Method)
+			}
+			return channelOnboardingCLIResult("awaiting_operator_confirmation", "awaiting_confirmation", false)
+		})
+		_, stderr, code := runOperatorChannelCLINonterminal(t, server, "", "channel", "resume", operatorChannelCLIOperation)
+		if code != CLIExitValidation || !strings.Contains(stderr, "terminal or --yes") {
+			t.Fatalf("claimant confirmation code=%d stderr=%q", code, stderr)
+		}
+	})
+
 	t.Run("claim timeout names the exact durable resume command", func(t *testing.T) {
 		server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
 			switch request.Method {
@@ -394,6 +447,20 @@ func runOperatorChannelCLIWithInput(t *testing.T, server *httptest.Server, input
 	opts.channelConnectPoll = time.Millisecond
 	opts.now = func() time.Time { return time.Date(2026, 8, 24, 23, 0, 0, 0, time.UTC) }
 	opts.input = strings.NewReader(input)
+	var stdout, stderr bytes.Buffer
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, opts)
+	return stdout.String(), stderr.String(), code
+}
+
+func runOperatorChannelCLINonterminal(t *testing.T, server *httptest.Server, input string, args ...string) (string, string, int) {
+	t.Helper()
+	setCLIAPITestToken(t, operatorChannelCLIToken)
+	opts := testRootCommandOptions(server)
+	opts.channelConnectWait = time.Second
+	opts.channelConnectPoll = time.Millisecond
+	opts.now = func() time.Time { return time.Date(2026, 8, 24, 23, 0, 0, 0, time.UTC) }
+	opts.input = strings.NewReader(input)
+	opts.stdinIsTerminal = func() bool { return false }
 	var stdout, stderr bytes.Buffer
 	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, opts)
 	return stdout.String(), stderr.String(), code

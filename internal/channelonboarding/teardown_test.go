@@ -398,3 +398,10 @@ func (r recordingActivationRefresher) RefreshChannelActivations(ctx context.Cont
 	*r.calls = append(*r.calls, "refresh")
 	return nil
 }
+
+func (r recordingActivationRefresher) PreflightChannelActivation(ctx context.Context, _ Operation, _ Candidate) error {
+	if r.sawCanceledContext != nil && ctx.Err() != nil {
+		*r.sawCanceledContext = true
+	}
+	return nil
+}
