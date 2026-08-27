@@ -6,28 +6,16 @@ states: [active]
 pins:
   inputs:
     events:
-      - name: requester_setup
-        event: requester.setup
+      - event: requester.setup
         resolution:
           mode: select-or-create
-        carries:
-          account_id:
-            from: payload.account_id
-            type: text
-      - name: request_submitted
-        event: requester.requested
+      - event: requester.requested
         resolution:
           mode: select
-        carries:
-          account_id:
-            from: payload.account_id
-            type: text
-      - name: provider_replied
-        event: provider.replied
+      - event: provider.replied
         resolution:
           mode: reply
-          replies_to: provider_requested
+          replies_to: provider.requested
   outputs:
     events:
-      - name: provider_requested
-        event: provider.requested
+      - provider.requested

@@ -16,6 +16,17 @@ func wrapRootAgentBundle(bundle *runtimecontracts.WorkflowContractBundle) semant
 func toolTestSourceWithDeclaredAgent(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, agentID, flowID string) semanticview.Source {
 	t.Helper()
 	toolTestDeclareAgent(t, bundle, agentID, flowID)
+	if bundle.FlowSchemas == nil {
+		bundle.FlowSchemas = map[string]runtimecontracts.FlowSchemaDocument{}
+	}
+	for id, view := range bundle.FlowTree.ByID {
+		if view != nil {
+			bundle.FlowSchemas[id] = view.Schema
+		}
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatalf("compile tool-test workflow semantics: %v", err)
+	}
 	return wrapRootAgentBundle(bundle)
 }
 

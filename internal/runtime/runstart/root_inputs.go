@@ -61,14 +61,7 @@ func DeriveRootInputSet(source semanticview.Source) (RootInputSet, error) {
 	if source == nil {
 		return RootInputSet{}, fmt.Errorf("semantic source is required")
 	}
-	bundle, ok := semanticview.Bundle(source)
-	if !ok || bundle == nil {
-		return RootInputSet{}, fmt.Errorf("workflow contract bundle is required")
-	}
-	if bundle.RootSchema == nil {
-		return RootInputSet{Declared: []string{}, Routable: []string{}}, nil
-	}
-	declared := normalizeUnique(bundle.RootSchema.Pins.Inputs.Events)
+	declared := normalizeUnique(source.FlowInputEvents(""))
 	routeTable, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {
 		return RootInputSet{}, err

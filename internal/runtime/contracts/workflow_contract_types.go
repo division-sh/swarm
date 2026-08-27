@@ -110,17 +110,15 @@ type WorkflowSemanticView struct {
 	FlowNamespace          map[string]string
 	FlowPrefix             map[string]string
 	FlowRules              map[string]string
-	FlowInputs             map[string][]string
-	FlowOutputs            map[string][]string
-	FlowInputEventPins     map[string][]FlowInputEventPin
-	FlowOutputEventPins    map[string][]FlowOutputEventPin
-	FlowReads              map[string][]string
-	FlowWrites             map[string][]string
+	flowInputEventPins     map[string][]CompiledFlowInputPin
+	flowOutputEventPins    map[string][]CompiledFlowOutputPin
+	flowReads              map[string]CompiledFlowEntityPermissions
+	flowWrites             map[string]CompiledFlowEntityPermissions
 	CompositionConnects    []FlowPackageConnect
 	FlowAgents             map[string][]FlowRequiredAgent
 	RootAgentFacts         []RequiredAgentFact
 	FlowAgentFacts         map[string][]RequiredAgentFact
-	WritePinOwners         map[string][]string
+	writePinOwners         map[string][]string
 	EffectiveNodes         map[string]SystemNodeEffectiveSemantics
 	NodeHandlers           map[string]map[string]SystemNodeEventHandler
 	EventOwners            map[string][]string
@@ -1439,8 +1437,8 @@ const (
 )
 
 const (
-	FlowInputCarrySourceGeneratedUUID = "generated.uuid"
-	FlowInputCarrySourceEventID       = "event.id"
+	FlowInputInstanceSourceGeneratedUUIDPath = "generated.uuid"
+	FlowInputInstanceSourceEventIDPath       = "event.id"
 )
 
 type FlowToolSurfaceContract struct {
@@ -1504,28 +1502,62 @@ type FlowPins struct {
 	Outputs FlowOutputPins `yaml:"outputs"`
 }
 type FlowInputPins struct {
-	Events    []string            `yaml:"events"`
 	EventPins []FlowInputEventPin `yaml:"-"`
 	Reads     []string            `yaml:"reads"`
 }
 type FlowOutputPins struct {
-	Events    []string             `yaml:"events"`
 	EventPins []FlowOutputEventPin `yaml:"-"`
 	Writes    []string             `yaml:"writes"`
 }
 type FlowInputEventPin struct {
-	Name       string                 `yaml:"name"`
 	Event      string                 `yaml:"event"`
-	Source     string                 `yaml:"source"`
+	Source     FlowInputPinSource     `yaml:"source"`
 	Resolution FlowInputPinResolution `yaml:"resolution"`
-	Carries    FlowInputPinCarries    `yaml:"carries"`
+	sourceLine int
+	sourceCol  int
 }
 type FlowOutputEventPin struct {
-	Name    string         `yaml:"name"`
-	Event   string         `yaml:"event"`
-	Sink    FlowOutputSink `yaml:"sink,omitempty"`
-	Key     string         `yaml:"key"`
-	Carries []string       `yaml:"carries"`
+	Event      string         `yaml:"event"`
+	Sink       FlowOutputSink `yaml:"sink,omitempty"`
+	sourceLine int
+	sourceCol  int
+}
+
+type FlowInputPinSource uint8
+
+const (
+	FlowInputPinSourceNone FlowInputPinSource = iota
+	FlowInputPinSourceExternal
+	FlowInputPinSourceHarness
+)
+
+func ParseFlowInputPinSource(raw string) (FlowInputPinSource, error) {
+	switch raw {
+	case "external":
+		return FlowInputPinSourceExternal, nil
+	case "harness":
+		return FlowInputPinSourceHarness, nil
+	default:
+		return FlowInputPinSourceNone, fmt.Errorf("input event pin source must be %q or %q", "external", "harness")
+	}
+}
+
+func FlowInputPinSourceCode(source FlowInputPinSource) string {
+	switch source {
+	case FlowInputPinSourceNone:
+		return ""
+	case FlowInputPinSourceExternal:
+		return "external"
+	case FlowInputPinSourceHarness:
+		return "harness"
+	default:
+		return "invalid"
+	}
+}
+
+func (s FlowInputPinSource) Empty() bool { return s == FlowInputPinSourceNone }
+func (s FlowInputPinSource) Valid() bool {
+	return s == FlowInputPinSourceNone || s == FlowInputPinSourceExternal || s == FlowInputPinSourceHarness
 }
 
 type FlowOutputSink uint8
@@ -1536,7 +1568,7 @@ const (
 )
 
 func ParseFlowOutputSink(raw string) (FlowOutputSink, error) {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
+	switch raw {
 	case "harness":
 		return FlowOutputSinkHarness, nil
 	default:
@@ -1563,15 +1595,9 @@ func (s FlowOutputSink) Valid() bool {
 	return s == FlowOutputSinkNone || s == FlowOutputSinkHarness
 }
 
-type FlowInputPinCarries map[string]FlowInputPinCarry
-type FlowInputPinCarry struct {
-	From     string `yaml:"from"`
-	Type     string `yaml:"type"`
-	Optional bool   `yaml:"optional,omitempty"`
-	Convert  string `yaml:"convert,omitempty"`
-}
 type FlowInputPinResolution struct {
 	Mode           FlowInputResolutionMode `yaml:"mode"`
+	From           string                  `yaml:"from"`
 	Aggregation    string                  `yaml:"aggregation"`
 	Window         string                  `yaml:"window"`
 	DedupBy        []string                `yaml:"dedup_by"`
@@ -1587,7 +1613,6 @@ type FlowPackageConnect struct {
 	From       string `yaml:"from"`
 	To         string `yaml:"to"`
 	Rename     string `yaml:"rename"`
-	Adapter    string `yaml:"adapter"`
 }
 type FlowRequiredAgent struct {
 	Role         string   `yaml:"role"`

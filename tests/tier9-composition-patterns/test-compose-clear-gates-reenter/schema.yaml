@@ -7,6 +7,5 @@ pins:
     events: [review.done, review.insufficient]
   outputs:
     events:
-      - name: review.approved
-        event: review.approved
+      - event: review.approved
         sink: harness

@@ -5,5 +5,3 @@ states: [idle, done]
 pins:
   inputs:
     events: [sub.requested]
-  outputs:
-    events: []

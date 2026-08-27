@@ -137,7 +137,7 @@ func owningFlowIDFromView(view *runtimecontracts.FlowContractView) string {
 	return ""
 }
 
-func flowScopeFromView(view runtimecontracts.FlowContractView) FlowScope {
+func flowScopeFromView(view runtimecontracts.FlowContractView, inputEvents, outputEvents []string) FlowScope {
 	return FlowScope{
 		ID:            strings.TrimSpace(view.Paths.ID),
 		OwningFlowID:  owningFlowIDFromView(&view),
@@ -145,8 +145,8 @@ func flowScopeFromView(view runtimecontracts.FlowContractView) FlowScope {
 		PackageKey:    strings.TrimSpace(view.Paths.PackageKey),
 		Mode:          flowModeFromView(view),
 		DataDir:       strings.TrimSpace(view.Paths.DataDir),
-		InputEvents:   append([]string{}, view.Schema.Pins.Inputs.Events...),
-		OutputEvents:  append([]string{}, view.Schema.Pins.Outputs.Events...),
+		InputEvents:   append([]string{}, inputEvents...),
+		OutputEvents:  append([]string{}, outputEvents...),
 		AutoEmitEvent: strings.TrimSpace(view.Schema.AutoEmitOnCreate.Event),
 		Nodes:         view.Nodes,
 		Events:        view.Events,

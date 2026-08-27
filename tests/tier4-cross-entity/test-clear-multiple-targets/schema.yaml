@@ -6,6 +6,5 @@ pins:
     events: [state.reset_requested]
   outputs:
     events:
-      - name: state.reset_completed
-        event: state.reset_completed
+      - event: state.reset_completed
         sink: harness

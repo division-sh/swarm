@@ -149,50 +149,13 @@ func populateEffectiveEventProjectionProvenance(bundle *WorkflowContractBundle, 
 				InputPaths: []string{ownerPrefix + "." + relativePath},
 			})
 		}
-		if row.receiverFlowID == "" {
-			continue
-		}
-		for _, pin := range bundle.FlowInputEventPins(row.receiverFlowID) {
-			if !bundle.FlowEventMatches(row.receiverFlowID, pin.EventType(), row.receiverEvent) {
-				continue
+		if pin, ok := bundle.FlowInputEventPin(row.receiverFlowID, row.receiverEvent); ok {
+			if projection, projected := pin.Projection(); projected {
+				inputPath := pin.Provenance().SourceFile
+				builder.set(projectionPrefix+".fields."+projection.Field+".type", EffectiveValueProvenance{
+					Origin: EffectiveValueOriginDerived, RuleID: eventReceiverProjectionRule, InputPaths: []string{inputPath},
+				})
 			}
-			carryInputPaths := make([]string, 0, len(pin.Carries)+1)
-			carryInputPaths = append(carryInputPaths, ownerPrefix+".payload.required")
-			for fieldName, carry := range pin.Carries {
-				source := strings.TrimSpace(carry.From)
-				inputPath := "flows[" + strconv.Quote(row.receiverFlowID) + "].pins.inputs[" + strconv.Quote(pin.PinName()) + "].carries[" + strconv.Quote(strings.TrimSpace(fieldName)) + "]"
-				carryInputPaths = append(carryInputPaths, inputPath)
-				targetPrefix := projectionPrefix + ".fields." + strings.TrimSpace(fieldName) + "."
-				switch {
-				case strings.HasPrefix(source, "payload."):
-					sourceName := strings.TrimSpace(strings.TrimPrefix(source, "payload."))
-					sourcePrefix := "fields." + sourceName + "."
-					for relativePath := range row.producer.admissionProvenance {
-						if !strings.HasPrefix(relativePath, sourcePrefix) {
-							continue
-						}
-						suffix := strings.TrimPrefix(relativePath, sourcePrefix)
-						builder.set(targetPrefix+suffix, EffectiveValueProvenance{
-							Origin:     EffectiveValueOriginDerived,
-							RuleID:     eventDeliveryCarryRule,
-							InputPaths: []string{ownerPrefix + "." + relativePath, inputPath},
-						})
-					}
-				case source == FlowInputCarrySourceGeneratedUUID, source == FlowInputCarrySourceEventID:
-					for _, suffix := range []string{"type", "is_optional"} {
-						builder.set(targetPrefix+suffix, EffectiveValueProvenance{
-							Origin:     EffectiveValueOriginDerived,
-							RuleID:     eventDeliveryCarryRule,
-							InputPaths: []string{inputPath},
-						})
-					}
-				}
-			}
-			builder.set(projectionPrefix+".payload.required", EffectiveValueProvenance{
-				Origin:     EffectiveValueOriginDerived,
-				RuleID:     eventDeliveryCarryRule,
-				InputPaths: carryInputPaths,
-			})
 		}
 	}
 }

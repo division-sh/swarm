@@ -6,6 +6,5 @@ pins:
     events: [eval.submitted]
   outputs:
     events:
-      - name: eval.tier_b
-        event: eval.tier_b
+      - event: eval.tier_b
         sink: harness

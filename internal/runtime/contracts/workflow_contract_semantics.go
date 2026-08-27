@@ -6,13 +6,19 @@ import (
 	"strings"
 )
 
-func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
+func populateWorkflowSemantics(bundle *WorkflowContractBundle) error {
 	if bundle == nil {
-		return
+		return nil
 	}
 	name := strings.TrimSpace(bundle.Package.Name)
 	version := strings.TrimSpace(bundle.Package.Version)
 	entitySchema := legacyWorkflowEntitySchema(bundle)
+	compositionConnects := make([]FlowPackageConnect, 0)
+	for _, pkg := range bundle.PackageTree {
+		for _, connect := range pkg.Manifest.Connect {
+			compositionConnects = append(compositionConnects, connect.WithPackageSource(pkg.Key, pkg.Paths.PackageFile))
+		}
+	}
 	semantics := WorkflowSemanticView{
 		Name:                   name,
 		Version:                version,
@@ -35,26 +41,47 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 		FlowNamespace:          map[string]string{},
 		FlowPrefix:             map[string]string{},
 		FlowRules:              map[string]string{},
-		FlowInputs:             map[string][]string{},
-		FlowOutputs:            map[string][]string{},
-		FlowInputEventPins:     map[string][]FlowInputEventPin{},
-		FlowOutputEventPins:    map[string][]FlowOutputEventPin{},
-		FlowReads:              map[string][]string{},
-		FlowWrites:             map[string][]string{},
-		CompositionConnects:    nil,
+		flowInputEventPins:     map[string][]CompiledFlowInputPin{},
+		flowOutputEventPins:    map[string][]CompiledFlowOutputPin{},
+		flowReads:              map[string]CompiledFlowEntityPermissions{},
+		flowWrites:             map[string]CompiledFlowEntityPermissions{},
+		CompositionConnects:    compositionConnects,
 		FlowAgents:             map[string][]FlowRequiredAgent{},
 		RootAgentFacts:         nil,
 		FlowAgentFacts:         map[string][]RequiredAgentFact{},
-		WritePinOwners:         map[string][]string{},
+		writePinOwners:         map[string][]string{},
 		EffectiveNodes:         map[string]SystemNodeEffectiveSemantics{},
 		NodeHandlers:           map[string]map[string]SystemNodeEventHandler{},
 		EventOwners:            map[string][]string{},
 		HandlerTransitionIndex: map[string]map[string]HandlerTransitionSemantic{},
 		StageTopologies:        map[string]WorkflowStageTopology{},
 	}
+	// Connected producer ownership is an input to independent pin compilation,
+	// not a reader-side reconstruction performed by route-plan consumers.
+	bundle.Semantics = semantics
+	populateEventSchemaOwnershipIndex(bundle)
 	semantics.Guards = appendPlatformBuiltinGuardEntries(semantics.Guards, bundle.Platform.BuiltinHooks.Guards)
 	semantics.Actions = appendPlatformBuiltinActionEntries(semantics.Actions, bundle.Platform.BuiltinHooks.Actions)
 	semantics.RootAgentFacts = bundle.RootRequiredAgentFacts()
+	if bundle.RootSchema != nil {
+		var err error
+		semantics.flowInputEventPins[""], err = compileFlowInputPins(bundle, "", "", bundle.Paths.RootSchemaFile, bundle.RootSchema.Pins.Inputs.EventPins)
+		if err != nil {
+			return fmt.Errorf("compile root input pins: %w", err)
+		}
+		semantics.flowOutputEventPins[""], err = compileFlowOutputPins(bundle, "", "", bundle.Paths.RootSchemaFile, bundle.RootSchema.Pins.Outputs.EventPins)
+		if err != nil {
+			return fmt.Errorf("compile root output pins: %w", err)
+		}
+		semantics.flowReads[""], err = CompileFlowEntityPermissions(bundle.RootSchema.Pins.Inputs.Reads)
+		if err != nil {
+			return fmt.Errorf("compile root input entity permissions: %w", err)
+		}
+		semantics.flowWrites[""], err = CompileFlowEntityPermissions(bundle.RootSchema.Pins.Outputs.Writes)
+		if err != nil {
+			return fmt.Errorf("compile root output entity permissions: %w", err)
+		}
+	}
 	for _, entry := range semantics.Guards {
 		if id := strings.TrimSpace(entry.ID); id != "" {
 			semantics.GuardByID[id] = entry
@@ -80,26 +107,33 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 		semantics.FlowNamespace[flowID] = assignedNamespace
 		semantics.FlowPrefix[flowID] = strings.TrimSpace(schema.NamespacePrefix)
 		semantics.FlowRules[flowID] = strings.TrimSpace(schema.NamespaceRule)
-		semantics.FlowInputs[flowID] = append([]string{}, schema.Pins.Inputs.Events...)
-		semantics.FlowOutputs[flowID] = append([]string{}, schema.Pins.Outputs.Events...)
-		semantics.FlowInputEventPins[flowID] = semanticInputEventPins(schema.Pins.Inputs)
-		semantics.FlowOutputEventPins[flowID] = semanticOutputEventPins(schema.Pins.Outputs)
-		semantics.FlowReads[flowID] = append([]string{}, schema.Pins.Inputs.Reads...)
-		semantics.FlowWrites[flowID] = append([]string{}, schema.Pins.Outputs.Writes...)
+		flowPath := bundle.FlowPath(flowID)
+		schemaFile := ""
+		if view, ok := bundle.FlowViewByID(flowID); ok && view != nil {
+			schemaFile = view.Paths.SchemaFile
+		}
+		var err error
+		semantics.flowInputEventPins[flowID], err = compileFlowInputPins(bundle, flowID, flowPath, schemaFile, schema.Pins.Inputs.EventPins)
+		if err != nil {
+			return fmt.Errorf("compile flow %s input pins: %w", flowID, err)
+		}
+		semantics.flowOutputEventPins[flowID], err = compileFlowOutputPins(bundle, flowID, flowPath, schemaFile, schema.Pins.Outputs.EventPins)
+		if err != nil {
+			return fmt.Errorf("compile flow %s output pins: %w", flowID, err)
+		}
+		semantics.flowReads[flowID], err = CompileFlowEntityPermissions(schema.Pins.Inputs.Reads)
+		if err != nil {
+			return fmt.Errorf("compile flow %s input entity permissions: %w", flowID, err)
+		}
+		semantics.flowWrites[flowID], err = CompileFlowEntityPermissions(schema.Pins.Outputs.Writes)
+		if err != nil {
+			return fmt.Errorf("compile flow %s output entity permissions: %w", flowID, err)
+		}
 		facts := bundle.FlowRequiredAgentFacts(flowID)
 		semantics.FlowAgentFacts[flowID] = facts
 		semantics.FlowAgents[flowID] = FlowRequiredAgentsFromFacts(facts)
-		for _, writePin := range schema.Pins.Outputs.Writes {
-			writePin = strings.TrimSpace(writePin)
-			if writePin == "" {
-				continue
-			}
-			semantics.WritePinOwners[writePin] = appendIfMissingString(semantics.WritePinOwners[writePin], flowID)
-		}
-	}
-	for _, pkg := range bundle.PackageTree {
-		for _, connect := range pkg.Manifest.Connect {
-			semantics.CompositionConnects = append(semantics.CompositionConnects, connect.WithPackageSource(pkg.Key, pkg.Paths.PackageFile))
+		for _, writePin := range semantics.flowWrites[flowID].Fields() {
+			semantics.writePinOwners[writePin] = appendIfMissingString(semantics.writePinOwners[writePin], flowID)
 		}
 	}
 	for _, record := range bundle.ScopedNodeRecords() {
@@ -200,6 +234,14 @@ func populateWorkflowSemantics(bundle *WorkflowContractBundle) {
 	semantics.Loops = BindWorkflowLoopRegions(semantics.Loops, semantics.StageTopologies)
 	bundle.Semantics = semantics
 	populateEventSchemaOwnershipIndex(bundle)
+	return nil
+}
+
+// CompileWorkflowSemantics compiles a fully admitted in-memory bundle through
+// the same immutable semantic owner used by the loader. Callers cannot inject
+// or mutate compiled pins directly.
+func CompileWorkflowSemantics(bundle *WorkflowContractBundle) error {
+	return populateWorkflowSemantics(bundle)
 }
 
 func deriveWorkflowGatePlans(bundle *WorkflowContractBundle) []WorkflowGatePlan {
@@ -314,20 +356,6 @@ func joinOutputField(path string) string {
 		return ""
 	}
 	return field
-}
-
-func semanticInputEventPins(pins FlowInputPins) []FlowInputEventPin {
-	if len(pins.EventPins) > 0 {
-		return cloneFlowInputEventPins(pins.EventPins)
-	}
-	return inputEventPinsFromEvents(pins.Events)
-}
-
-func semanticOutputEventPins(pins FlowOutputPins) []FlowOutputEventPin {
-	if len(pins.EventPins) > 0 {
-		return cloneFlowOutputEventPins(pins.EventPins)
-	}
-	return outputEventPinsFromEvents(pins.Events)
 }
 
 func legacyWorkflowEntitySchema(bundle *WorkflowContractBundle) EntitySchema {

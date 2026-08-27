@@ -4,5 +4,3 @@ states: [pending, done, routed]
 pins:
   inputs:
     events: [task.submitted]
-  outputs:
-    events: []

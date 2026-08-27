@@ -1,17 +1,16 @@
 initial_state: retrying
 terminal_states:
-- done
-- escalated
+  - done
+  - escalated
 states:
-- retrying
-- done
-- escalated
+  - retrying
+  - done
+  - escalated
 pins:
   inputs:
     events:
-    - attempt.requested
+      - attempt.requested
   outputs:
     events:
-    - name: attempt.limit_hit
-      event: attempt.limit_hit
-      sink: harness
+      - event: attempt.limit_hit
+        sink: harness

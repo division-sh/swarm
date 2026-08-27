@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -45,7 +46,7 @@ type targetOwnerArcCase struct {
 
 func TestEventBusCrossFlowMaterializingTargetOwnershipMatrix(t *testing.T) {
 	tests := []targetOwnerArcCase{
-		{name: "root node to direct singleton", sourceKind: targetOwnerArcRoot, receiverMode: runtimecontracts.FlowModeSingleton, receiverPath: "child", producerType: events.EventProducerNode},
+		{name: "root node to direct singleton", sourceKind: targetOwnerArcRoot, receiverMode: runtimecontracts.FlowModeSingleton, receiverPath: "receiver", producerType: events.EventProducerNode},
 		{name: "static child node to nested singleton", sourceKind: targetOwnerArcStatic, sourcePath: "left/worker", receiverMode: runtimecontracts.FlowModeSingleton, receiverPath: "left/worker/result", producerType: events.EventProducerNode},
 		{name: "singleton child node to nested singleton", sourceKind: targetOwnerArcSingleton, sourcePath: "left/worker", receiverMode: runtimecontracts.FlowModeSingleton, receiverPath: "left/worker/result", producerType: events.EventProducerNode},
 		{name: "singleton child agent to nested singleton", sourceKind: targetOwnerArcSingleton, sourcePath: "left/agent", receiverMode: runtimecontracts.FlowModeSingleton, receiverPath: "left/agent/result", producerType: events.EventProducerAgent},
@@ -262,7 +263,7 @@ func runTargetOwnerArc(t *testing.T, test targetOwnerArcCase) {
 		t.Fatalf("preflight: %v", err)
 	}
 	if preflight.TargetFailure != "" || len(preflight.DeliveryRoutes) != 1 {
-		t.Fatalf("preflight failure/routes = %q/%#v, want one exact receiver route", preflight.TargetFailure, preflight.DeliveryRoutes)
+		t.Fatalf("preflight failure/routes = %q/%#v, want one exact receiver route; connect plans=%#v issues=%#v", preflight.TargetFailure, preflight.DeliveryRoutes, runtimepinrouting.CompileConnectGraph(source).Plans(), runtimepinrouting.CompileConnectGraph(source).Issues())
 	}
 	assertTargetOwnerArcRoute(t, preflight.DeliveryRoutes[0], wantOwner)
 	preflightRoute := preflight.DeliveryRoutes[0]
@@ -385,7 +386,7 @@ func targetOwnerArcFixture(
 	const localEvent = "work.ready"
 	receiver := connectRoutePlanTestFlow{
 		id: "receiver", path: test.receiverPath, mode: test.receiverMode,
-		inputs: []runtimecontracts.FlowInputEventPin{{Name: "work_ready", Event: localEvent}},
+		inputs: []runtimecontracts.FlowInputEventPin{{Event: localEvent}},
 		nodes: map[string]runtimecontracts.SystemNodeContract{
 			"arc-receiver": {
 				ID: "arc-receiver", SubscribesTo: []string{localEvent},
@@ -407,18 +408,15 @@ func targetOwnerArcFixture(
 		sourceEntityID = eventtest.UUID("arc-source-" + test.name)
 	}
 	if test.sourceKind == targetOwnerArcRoot {
-		bundle = connectRoutePlanTestBundle([]connectRoutePlanTestFlow{receiver}, []runtimecontracts.FlowPackageConnect{{
-			Event: localEvent, From: ".", To: "receiver",
-		}})
-		bundle.Semantics.Name = "root-workflow"
-		bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{
-			Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Name: "work_ready", Event: localEvent}}},
-		}}
-		bundle.FlowTree.Root.Schema = *bundle.RootSchema
-		bundle.Events = map[string]runtimecontracts.EventCatalogEntry{localEvent: {}}
-		sourceRoute = events.RouteIdentity{FlowID: bundle.Semantics.Name, FlowInstance: runID, EntityID: sourceEntityID}.Normalized()
+		repoRoot := canonicalrouting.RepoRoot(t)
+		fixtureRoot := canonicalrouting.CopyRootOutputSingletonArc(t)
+		bundle, err = runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, fixtureRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+		if err != nil {
+			t.Fatalf("load root target-owner arc fixture: %v", err)
+		}
+		sourceRoute = events.RouteIdentity{FlowID: semanticview.Wrap(bundle).WorkflowName(), FlowInstance: runID, EntityID: sourceEntityID}.Normalized()
 		routingSource, err = events.NewRootRoutingSource(sourceEntityID)
-		eventType = localEvent
+		eventType = "root.ready"
 	} else {
 		sourceMode := runtimecontracts.FlowModeStatic
 		if test.sourceKind == targetOwnerArcSingleton {
@@ -428,7 +426,7 @@ func targetOwnerArcFixture(
 		}
 		producer := connectRoutePlanTestFlow{
 			id: "producer", path: test.sourcePath, mode: sourceMode,
-			outputs: []runtimecontracts.FlowOutputEventPin{{Name: "work_ready", Event: localEvent}},
+			outputs: []runtimecontracts.FlowOutputEventPin{{Event: localEvent}},
 		}
 		bundle = connectRoutePlanTestBundle([]connectRoutePlanTestFlow{producer, receiver}, []runtimecontracts.FlowPackageConnect{{
 			Event: localEvent, From: "producer", To: "receiver",
@@ -618,12 +616,12 @@ func TestEventBusPoisonedMixedOwnerFanOutFailsAtomicallyThenLegalOwnersAgree(t *
 	const eventName = "work.ready"
 	producer := connectRoutePlanTestFlow{
 		id: "producer", mode: runtimecontracts.FlowModeStatic,
-		outputs: []runtimecontracts.FlowOutputEventPin{{Name: "ready", Event: eventName}},
+		outputs: []runtimecontracts.FlowOutputEventPin{{Event: eventName}},
 	}
 	receiver := func(id, mode string, handler runtimecontracts.SystemNodeEventHandler) connectRoutePlanTestFlow {
 		return connectRoutePlanTestFlow{
 			id: id, path: "fanout/" + id, mode: mode,
-			inputs: []runtimecontracts.FlowInputEventPin{{Name: "ready", Event: eventName}},
+			inputs: []runtimecontracts.FlowInputEventPin{{Event: eventName}},
 			nodes: map[string]runtimecontracts.SystemNodeContract{
 				id + "-node": {ID: id + "-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{eventName: handler}},
 			},

@@ -10,10 +10,10 @@ import (
 
 const (
 	ProducerFlowID       = "operating"
-	ProducerOutputPin    = "operating_reported"
+	ProducerOutputPin    = "operating.reported"
 	ProducerEvent        = "operating.reported"
 	ReceiverFlowID       = "portfolio"
-	ReceiverInputPin     = "operating_reported"
+	ReceiverInputPin     = "operating.reported"
 	ReceiverEvent        = "operating.reported"
 	ReceiverNodeID       = "portfolio-collector"
 	ReceiverFlowInstance = "portfolio"

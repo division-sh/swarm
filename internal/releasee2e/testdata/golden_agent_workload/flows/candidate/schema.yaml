@@ -7,15 +7,9 @@ states: [pending, active, complete]
 pins:
   inputs:
     events:
-      - name: candidate_requested
-        event: candidate.requested
+      - event: candidate.requested
         resolution:
           mode: select-or-create
-        carries:
-          candidate_id:
-            from: payload.candidate_id
-            type: text
   outputs:
     events:
-      - name: candidate_completed
-        event: candidate.completed
+      - candidate.completed

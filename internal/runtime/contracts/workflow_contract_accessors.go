@@ -334,7 +334,9 @@ func (b *WorkflowContractBundle) executableNodeEventScope(ref runtimeidentity.Ex
 	if !ok {
 		return eventidentity.Scope{}
 	}
-	localEvents := make([]string, 0, len(view.Events)+len(view.Schema.Pins.Inputs.Events)+len(view.Schema.Pins.Outputs.Events)+1)
+	inputEvents := b.FlowInputEvents(view.Paths.ID)
+	outputEvents := b.FlowOutputEvents(view.Paths.ID)
+	localEvents := make([]string, 0, len(view.Events)+len(inputEvents)+len(outputEvents)+1)
 	for eventType := range view.Events {
 		localEvents = append(localEvents, strings.TrimSpace(eventType))
 	}
@@ -343,16 +345,16 @@ func (b *WorkflowContractBundle) executableNodeEventScope(ref runtimeidentity.Ex
 			localEvents = append(localEvents, strings.TrimSpace(eventType))
 		}
 	}
-	localEvents = append(localEvents, view.Schema.Pins.Inputs.Events...)
-	localEvents = append(localEvents, view.Schema.Pins.Outputs.Events...)
+	localEvents = append(localEvents, inputEvents...)
+	localEvents = append(localEvents, outputEvents...)
 	if eventType := strings.TrimSpace(view.Schema.AutoEmitOnCreate.Event); eventType != "" {
 		localEvents = append(localEvents, eventType)
 	}
 	return eventidentity.Scope{
 		Path:         strings.Trim(strings.TrimSpace(view.Path), "/"),
 		LocalEvents:  normalizedStrings(localEvents),
-		InputEvents:  append([]string{}, view.Schema.Pins.Inputs.Events...),
-		OutputEvents: append([]string{}, view.Schema.Pins.Outputs.Events...),
+		InputEvents:  inputEvents,
+		OutputEvents: outputEvents,
 	}
 }
 
@@ -375,12 +377,14 @@ func (b *WorkflowContractBundle) executableNodeEventDescendants(semanticScope Ex
 			candidatePackageKey := b.executableFlowViewPackageKey(&candidate)
 			packageVisible := candidatePackageKey == declarationPackageKey || strings.HasPrefix(candidatePackageKey, declarationPackageKey+"/")
 			if packageVisible && candidatePath != "" && candidatePath != parentPath && strings.HasPrefix(candidatePath, parentPath+"/") {
-				localEvents := make([]string, 0, len(candidate.Events)+len(candidate.Schema.Pins.Inputs.Events)+len(candidate.Schema.Pins.Outputs.Events))
+				inputEvents := b.FlowInputEvents(candidate.Paths.ID)
+				outputEvents := b.FlowOutputEvents(candidate.Paths.ID)
+				localEvents := make([]string, 0, len(candidate.Events)+len(inputEvents)+len(outputEvents))
 				for eventType := range candidate.Events {
 					localEvents = append(localEvents, strings.TrimSpace(eventType))
 				}
-				localEvents = append(localEvents, candidate.Schema.Pins.Inputs.Events...)
-				localEvents = append(localEvents, candidate.Schema.Pins.Outputs.Events...)
+				localEvents = append(localEvents, inputEvents...)
+				localEvents = append(localEvents, outputEvents...)
 				if len(localEvents) != 0 {
 					out = append(out, eventidentity.DescendantScope{Path: candidatePath, LocalEvents: normalizedStrings(localEvents)})
 				}
@@ -997,77 +1001,61 @@ func (b *WorkflowContractBundle) FlowInputEvents(flowID string) []string {
 	if b == nil {
 		return nil
 	}
-	flowID = strings.TrimSpace(flowID)
-	if flowID == "" && b.RootSchema != nil {
-		return append([]string{}, b.RootSchema.Pins.Inputs.Events...)
+	pins := b.FlowInputEventPins(flowID)
+	out := make([]string, 0, len(pins))
+	for _, pin := range pins {
+		out = append(out, pin.EventType())
 	}
-	return append([]string{}, b.Semantics.FlowInputs[flowID]...)
+	return out
 }
 func (b *WorkflowContractBundle) FlowOutputEvents(flowID string) []string {
 	if b == nil {
 		return nil
 	}
-	flowID = strings.TrimSpace(flowID)
-	if flowID == "" && b.RootSchema != nil {
-		return append([]string{}, b.RootSchema.Pins.Outputs.Events...)
+	pins := b.FlowOutputEventPins(flowID)
+	out := make([]string, 0, len(pins))
+	for _, pin := range pins {
+		out = append(out, pin.EventType())
 	}
-	return append([]string{}, b.Semantics.FlowOutputs[flowID]...)
+	return out
 }
-func (b *WorkflowContractBundle) FlowInputEventPins(flowID string) []FlowInputEventPin {
+func (b *WorkflowContractBundle) FlowInputEventPins(flowID string) []CompiledFlowInputPin {
 	if b == nil {
 		return nil
 	}
 	flowID = strings.TrimSpace(flowID)
-	if flowID == "" && b.RootSchema != nil {
-		return semanticInputEventPins(b.RootSchema.Pins.Inputs)
-	}
-	if pins := b.Semantics.FlowInputEventPins[flowID]; len(pins) > 0 {
-		return cloneFlowInputEventPins(pins)
-	}
-	if schema, ok := b.FlowSchemas[flowID]; ok {
-		return semanticInputEventPins(schema.Pins.Inputs)
-	}
-	return inputEventPinsFromEvents(b.Semantics.FlowInputs[flowID])
+	return cloneCompiledFlowInputPins(b.Semantics.flowInputEventPins[flowID])
 }
-func (b *WorkflowContractBundle) FlowOutputEventPins(flowID string) []FlowOutputEventPin {
+func (b *WorkflowContractBundle) FlowOutputEventPins(flowID string) []CompiledFlowOutputPin {
 	if b == nil {
 		return nil
 	}
 	flowID = strings.TrimSpace(flowID)
-	if flowID == "" && b.RootSchema != nil {
-		return semanticOutputEventPins(b.RootSchema.Pins.Outputs)
-	}
-	if pins := b.Semantics.FlowOutputEventPins[flowID]; len(pins) > 0 {
-		return cloneFlowOutputEventPins(pins)
-	}
-	if schema, ok := b.FlowSchemas[flowID]; ok {
-		return semanticOutputEventPins(schema.Pins.Outputs)
-	}
-	return outputEventPinsFromEvents(b.Semantics.FlowOutputs[flowID])
+	return cloneCompiledFlowOutputPins(b.Semantics.flowOutputEventPins[flowID])
 }
-func (b *WorkflowContractBundle) FlowInputEventPin(flowID, pinName string) (FlowInputEventPin, bool) {
+func (b *WorkflowContractBundle) FlowInputEventPin(flowID, pinName string) (CompiledFlowInputPin, bool) {
 	pinName = strings.TrimSpace(pinName)
 	if pinName == "" {
-		return FlowInputEventPin{}, false
+		return CompiledFlowInputPin{}, false
 	}
 	for _, pin := range b.FlowInputEventPins(flowID) {
-		if strings.TrimSpace(pin.Name) == pinName {
+		if pin.EventType() == pinName {
 			return pin, true
 		}
 	}
-	return FlowInputEventPin{}, false
+	return CompiledFlowInputPin{}, false
 }
-func (b *WorkflowContractBundle) FlowOutputEventPin(flowID, pinName string) (FlowOutputEventPin, bool) {
+func (b *WorkflowContractBundle) FlowOutputEventPin(flowID, pinName string) (CompiledFlowOutputPin, bool) {
 	pinName = strings.TrimSpace(pinName)
 	if pinName == "" {
-		return FlowOutputEventPin{}, false
+		return CompiledFlowOutputPin{}, false
 	}
 	for _, pin := range b.FlowOutputEventPins(flowID) {
-		if strings.TrimSpace(pin.Name) == pinName {
+		if pin.EventType() == pinName {
 			return pin, true
 		}
 	}
-	return FlowOutputEventPin{}, false
+	return CompiledFlowOutputPin{}, false
 }
 func (b *WorkflowContractBundle) CompositionConnects() []FlowPackageConnect {
 	if b == nil {
@@ -1079,13 +1067,13 @@ func (b *WorkflowContractBundle) FlowReadPins(flowID string) []string {
 	if b == nil {
 		return nil
 	}
-	return append([]string{}, b.Semantics.FlowReads[strings.TrimSpace(flowID)]...)
+	return b.Semantics.flowReads[strings.TrimSpace(flowID)].Fields()
 }
 func (b *WorkflowContractBundle) FlowWritePins(flowID string) []string {
 	if b == nil {
 		return nil
 	}
-	return append([]string{}, b.Semantics.FlowWrites[strings.TrimSpace(flowID)]...)
+	return b.Semantics.flowWrites[strings.TrimSpace(flowID)].Fields()
 }
 func (b *WorkflowContractBundle) FlowHasInputEvent(flowID, eventType string) bool {
 	return b.flowEventScope(flowID).HasInput(eventType)
@@ -1123,7 +1111,7 @@ func (b *WorkflowContractBundle) resolveDeclaredLocalFlowEventReference(flowID, 
 	}
 	local := false
 	if _, local = view.Events[eventType]; !local {
-		local = slices.Contains(eventidentity.NormalizeList(view.Schema.Pins.Outputs.Events), eventType)
+		local = slices.Contains(eventidentity.NormalizeList(b.FlowOutputEvents(flowID)), eventType)
 	}
 	if !local {
 		for _, row := range eventSchemaOwnershipRowsForReceiver(b, flowID) {
@@ -1223,7 +1211,7 @@ func (b *WorkflowContractBundle) WritePinOwners(pin string) []string {
 	if b == nil {
 		return nil
 	}
-	return append([]string{}, b.Semantics.WritePinOwners[strings.TrimSpace(pin)]...)
+	return append([]string{}, b.Semantics.writePinOwners[strings.TrimSpace(pin)]...)
 }
 func (b *WorkflowContractBundle) EventContractSource(eventType string) (ContractItemSource, bool) {
 	if b == nil {
@@ -1275,7 +1263,7 @@ func (b *WorkflowContractBundle) flowLocalEvents(flowID string) []string {
 			out = append(out, eventType)
 		}
 	}
-	for _, eventType := range view.Schema.Pins.Outputs.Events {
+	for _, eventType := range b.FlowOutputEvents(flowID) {
 		eventType = strings.TrimSpace(eventType)
 		if eventType != "" {
 			out = append(out, eventType)
@@ -1327,8 +1315,8 @@ func (b *WorkflowContractBundle) flowEventScope(flowID string) eventidentity.Sco
 	return eventidentity.Scope{
 		Path:         strings.Trim(strings.TrimSpace(view.Path), "/"),
 		LocalEvents:  b.flowLocalEvents(flowID),
-		InputEvents:  append([]string{}, view.Schema.Pins.Inputs.Events...),
-		OutputEvents: append([]string{}, view.Schema.Pins.Outputs.Events...),
+		InputEvents:  b.FlowInputEvents(flowID),
+		OutputEvents: b.FlowOutputEvents(flowID),
 	}
 }
 
@@ -1350,10 +1338,10 @@ func (b *WorkflowContractBundle) rootLocalEvents() []string {
 		out = append(out, eventType)
 	}
 	if b.RootSchema != nil {
-		for _, eventType := range b.RootSchema.Pins.Inputs.Events {
+		for _, eventType := range b.FlowInputEvents("") {
 			appendEvent(eventType)
 		}
-		for _, eventType := range b.RootSchema.Pins.Outputs.Events {
+		for _, eventType := range b.FlowOutputEvents("") {
 			appendEvent(eventType)
 		}
 		if autoEmit := strings.TrimSpace(b.RootSchema.AutoEmitOnCreate.Event); autoEmit != "" {

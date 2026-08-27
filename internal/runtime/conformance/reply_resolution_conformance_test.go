@@ -120,7 +120,7 @@ func TestReplyResolutionConformance_VerifierFailsClosedForInvalidPairedTopology(
 		want string
 	}{
 		{name: "missing replies_to", opts: templatereply.Options{MissingRepliesTo: true}, want: "requires replies_to"},
-		{name: "correlation key not carried", opts: templatereply.Options{MissingCorrelationCarry: true}, want: "must name a carry"},
+		{name: "correlation field not declared", opts: templatereply.Options{MissingCorrelationField: true}, want: "must name a required payload field"},
 		{name: "ambiguous request counterpart", opts: templatereply.Options{AmbiguousRequestEdge: true}, want: "exactly one connected counterpart"},
 		{name: "different provider counterpart", opts: templatereply.Options{MismatchedProvider: true}, want: "same provider flow"},
 	} {

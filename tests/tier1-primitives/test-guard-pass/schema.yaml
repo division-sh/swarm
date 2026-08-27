@@ -7,10 +7,8 @@ terminal_states:
 pins:
   inputs:
     events:
-      - name: check.requested
-    reads: []
+      - check.requested
   outputs:
     events:
-      - name: check.passed
+      - event: check.passed
         sink: harness
-    writes: []

@@ -67,9 +67,11 @@ search_dimensions:
       - internal/runtime/core/pinrouting/pinrouting.go
       - internal/runtime/bus/connect_route_plan_dispatch.go
       - internal/runtime/bus/connect_route_plan_dispatch_test.go
+      - internal/runtime/runforkadmission/selected_route_history_test.go
       - internal/runtime/bus/public_input_admission.go
       - internal/runtime/bus/route_plan.go
       - internal/apispec/platform_spec_composition_routing_test.go
+      - internal/runtime/conformance/canonical_forms_registry_test.go
       - internal/runtime/semantic_ownership_guard_test.go
     canonical_layer: route_plan_authority
     classified_paths_required: true
@@ -631,6 +633,7 @@ seam_families:
       - internal/events/types.go
       - internal/runtime/deliverylifecycle/model.go
       - internal/runtime/pipeline/workflow_nodes.go
+      - internal/runtime/runforkadmission/selected_route_history_test.go
       - internal/store/internal/runtimepersistence/event_record_contract_test.go
     search_dimensions: [connect_route_plan, delivery_route_model]
     invalid_authority:
@@ -1213,6 +1216,7 @@ seam_families:
       - internal/runtime/conformance/testdata/route_authority_matrix.yaml
       - internal/runtime/conformance/route_authority_matrix_test.go
       - internal/runtime/conformance/testdata/route_authority_drift_inventory.yaml
+      - internal/runtime/conformance/canonical_forms_registry_test.go
       - internal/runtime/testfixtures/canonicalrouting/artifact_registry.yaml
     search_dimensions: [route_plan, event_deliveries, workflow_runtime_carrier, connect_route_plan, event_delivery_plan_compatibility]
     notes: >

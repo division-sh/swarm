@@ -825,11 +825,6 @@ auto_emit_on_create:
 initial_state: idle
 terminal_states: [done]
 states: [idle, done]
-pins:
-  inputs:
-    events: []
-  outputs:
-    events: []
 `,
 						events: "ticket.ready: {}\n",
 					},
@@ -1202,6 +1197,7 @@ payload:
   mailbox_id: uuid
 `),
 	}
+	recompileBootverifySemantics(t, bundle)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -1216,7 +1212,7 @@ func TestRun_RejectsFlowOutputPinClaimOfPlatformEmittedEvent(t *testing.T) {
 			Name: "approval",
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{
-					Events: []string{"mailbox.card_decided"},
+					EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "mailbox.card_decided"}},
 				},
 			},
 		},
@@ -1229,6 +1225,7 @@ payload:
   mailbox_id: uuid
 `),
 	}
+	recompileBootverifySemantics(t, bundle)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -4418,9 +4415,10 @@ func TestRun_RejectsHarnessUnknownEventAndDuplicatePin(t *testing.T) {
 		root      func(testing.TB) string
 		wantCheck string
 		want      string
+		loadError bool
 	}{
 		{name: "unknown event", root: canonicalrouting.CopyHarnessInjectionWithUnknownEvent, wantCheck: "transition_reference_validation", want: "work.unknown"},
-		{name: "duplicate pin", root: canonicalrouting.CopyHarnessInjectionWithDuplicatePin, wantCheck: "input_pin_wiring", want: "work.requested"},
+		{name: "duplicate pin", root: canonicalrouting.CopyHarnessInjectionWithDuplicatePin, want: "declared more than once", loadError: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -4430,6 +4428,12 @@ func TestRun_RejectsHarnessUnknownEventAndDuplicatePin(t *testing.T) {
 				test.root(t),
 				runtimecontracts.DefaultPlatformSpecFile(repoRoot),
 			)
+			if test.loadError {
+				if err == nil || !strings.Contains(err.Error(), test.want) {
+					t.Fatalf("load harness mutation error = %v, want %q", err, test.want)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("load harness mutation: %v", err)
 			}
@@ -4576,7 +4580,15 @@ func TestRun_ConstrainsExternalInputProducerPathToConsumingScope(t *testing.T) {
 func TestRun_DoesNotErrorForSiblingFlowOutputPinInputProducerPath(t *testing.T) {
 	root := writeCrossFlowPinAmbiguityFixture(t, false)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-	bundle.Semantics.FlowOutputs["producer_b"] = nil
+	producer, ok := bundle.FlowViewByID("producer_b")
+	if !ok {
+		t.Fatal("producer_b flow missing")
+	}
+	producer.Schema.Pins.Outputs.EventPins = nil
+	schema := bundle.FlowSchemas["producer_b"]
+	schema.Pins.Outputs.EventPins = nil
+	bundle.FlowSchemas["producer_b"] = schema
+	recompileBootverifySemantics(t, bundle)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -4704,9 +4716,17 @@ func TestRun_DoesNotUseEventMetadataAsInputProducerPathProof(t *testing.T) {
 func TestRun_ReportsConflictingWritePinOwners(t *testing.T) {
 	root := writeCrossFlowPinAmbiguityFixture(t, false)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-	bundle.Semantics.FlowWrites["producer_a"] = []string{"ticket.status"}
-	bundle.Semantics.FlowWrites["producer_b"] = []string{"ticket.status"}
-	bundle.Semantics.WritePinOwners["ticket.status"] = []string{"producer_a", "producer_b"}
+	for _, flowID := range []string{"producer_a", "producer_b"} {
+		flow, ok := bundle.FlowViewByID(flowID)
+		if !ok {
+			t.Fatalf("flow %s missing", flowID)
+		}
+		flow.Schema.Pins.Outputs.Writes = []string{"ticket.status"}
+		schema := bundle.FlowSchemas[flowID]
+		schema.Pins.Outputs.Writes = []string{"ticket.status"}
+		bundle.FlowSchemas[flowID] = schema
+	}
+	recompileBootverifySemantics(t, bundle)
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -5353,10 +5373,7 @@ terminal_states: [done]
 states: [idle, done]
 pins:
   inputs:
-    events: []
     reads: [priority]
-  outputs:
-    events: []
 `)
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
@@ -6478,12 +6495,27 @@ func TestRun_ReportsCrossFlowPinAmbiguityForOverlappingBoundarySources(t *testin
 	if bundle.RootSchema == nil {
 		bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{}
 	}
+	child, ok := bundle.FlowViewByID("child")
+	if !ok || child == nil {
+		t.Fatal("child flow missing")
+	}
+	feedbackSchema, ok := child.Events["task.feedback"]
+	if !ok {
+		t.Fatal("child task.feedback schema missing")
+	}
+	bundle.Events["task.feedback"] = feedbackSchema
+	for _, project := range bundle.RootProjectViews() {
+		project.Events["task.feedback"] = feedbackSchema
+	}
 	bundle.RootSchema.Pins.Outputs.EventPins = append(bundle.RootSchema.Pins.Outputs.EventPins, runtimecontracts.FlowOutputEventPin{
-		Name: "task.feedback", Event: "task.feedback",
+		Event: "task.feedback",
 	})
 	bundle.Semantics.CompositionConnects = append(bundle.Semantics.CompositionConnects, runtimecontracts.FlowPackageConnect{
 		Event: "task.feedback", From: ".", To: "child", SourceFile: "package.yaml", SourceLine: 1,
 	})
+	connects := bundle.CompositionConnects()
+	recompileBootverifySemantics(t, bundle)
+	bundle.Semantics.CompositionConnects = connects
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -6664,8 +6696,8 @@ func TestRun_ReportsMissingRuntimeExecutorForOwnedRuntimeEvent(t *testing.T) {
 }
 
 func TestBootCheckRegistry_HasSpecCheckCount(t *testing.T) {
-	if got := len(bootCheckRegistry); got != 79 {
-		t.Fatalf("bootCheckRegistry count = %d, want 79", got)
+	if got := len(bootCheckRegistry); got != 78 {
+		t.Fatalf("bootCheckRegistry count = %d, want 78", got)
 	}
 	if got := len(supplementalChecks); got != 3 {
 		t.Fatalf("supplementalChecks count = %d, want 3", got)
@@ -6910,7 +6942,7 @@ func TestRun_HarnessInputSatisfiesTimerTriggerProducerProofOnly(t *testing.T) {
 	repoRoot := repoRootForBootverifyTest(t)
 	bundle := loadFixtureBundleAt(t, repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	addFlowInputPin(t, bundle, "support", runtimecontracts.FlowInputEventPin{
-		Name: "ticket_closed", Event: "ticket.closed", Source: "harness",
+		Event: "ticket.closed", Source: runtimecontracts.FlowInputPinSourceHarness,
 	})
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -7218,8 +7250,6 @@ states: [active]
 pins:
   inputs:
     events: [opco.spend_requested]
-  outputs:
-    events: []
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "treasury", "events.yaml"), `
 opco.spend_requested:
@@ -7495,8 +7525,6 @@ initial_state: idle
 terminal_states: [done]
 states: [idle, done]
 pins:
-  inputs:
-    events: []
   outputs:
     events:
       - ticket.ready
@@ -7781,8 +7809,6 @@ pins:
   inputs:
     events: [task.assigned]
     reads: [priority]
-  outputs:
-    events: []
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "child", "events.yaml"), `
 task.assigned:
@@ -8102,7 +8128,7 @@ func writeDeadEventSchemaFixture(t *testing.T, opts deadEventSchemaFixtureOption
 		files := opts.flows[flowID]
 		schema := strings.TrimSpace(files.schema)
 		if schema == "" {
-			schema = "name: " + flowID + "\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: []\n  outputs:\n    events: []"
+			schema = "name: " + flowID + "\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, done]"
 		}
 		writeBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), schema+"\n")
 		writeOptionalBootverifyFixtureFile(t, filepath.Join(root, "flows", flowID, "policy.yaml"), files.policy)
@@ -8450,12 +8476,10 @@ func writeFlowHandler(t *testing.T, bundle *runtimecontracts.WorkflowContractBun
 	}
 	bundle.Nodes[nodeID] = node
 	if bundle.Semantics.NodeHandlers == nil {
-		bundle.Semantics.NodeHandlers = map[string]map[string]runtimecontracts.SystemNodeEventHandler{}
+		recompileBootverifySemantics(t, bundle)
+		return
 	}
-	if bundle.Semantics.NodeHandlers[nodeID] == nil {
-		bundle.Semantics.NodeHandlers[nodeID] = map[string]runtimecontracts.SystemNodeEventHandler{}
-	}
-	bundle.Semantics.NodeHandlers[nodeID][eventType] = handler
+	recompileBootverifySemantics(t, bundle)
 }
 
 func renameFlowHandlerEvent(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, flowID, nodeID, oldEventType, newEventType string, handler runtimecontracts.SystemNodeEventHandler) {
@@ -8472,53 +8496,33 @@ func renameFlowHandlerEvent(t *testing.T, bundle *runtimecontracts.WorkflowContr
 		bundle.Nodes = map[string]runtimecontracts.SystemNodeContract{}
 	}
 	bundle.Nodes[nodeID] = node
-	if bundle.Semantics.NodeHandlers == nil {
-		bundle.Semantics.NodeHandlers = map[string]map[string]runtimecontracts.SystemNodeEventHandler{}
-	}
-	if bundle.Semantics.NodeHandlers[nodeID] == nil {
-		bundle.Semantics.NodeHandlers[nodeID] = map[string]runtimecontracts.SystemNodeEventHandler{}
-	}
-	delete(bundle.Semantics.NodeHandlers[nodeID], oldEventType)
-	bundle.Semantics.NodeHandlers[nodeID][newEventType] = handler
-	if len(bundle.Semantics.FlowInputs[flowID]) > 0 {
-		inputs := append([]string{}, bundle.Semantics.FlowInputs[flowID]...)
-		for idx, eventType := range inputs {
-			if strings.TrimSpace(eventType) == strings.TrimSpace(oldEventType) {
-				inputs[idx] = newEventType
-			}
-		}
-		bundle.Semantics.FlowInputs[flowID] = inputs
-	}
 	renameFlowInputPinEvent(t, bundle, flowID, oldEventType, newEventType)
 }
 
 func markFlowInputPinSource(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, flowID, eventType, source string) {
 	t.Helper()
+	typedSource, err := runtimecontracts.ParseFlowInputPinSource(source)
+	if err != nil {
+		t.Fatalf("parse input pin source %q: %v", source, err)
+	}
 	flowView, ok := bundle.FlowViewByID(flowID)
 	if !ok || flowView == nil {
 		t.Fatalf("flow view %s missing", flowID)
 	}
-	ensureFlowInputEventPins(&flowView.Schema.Pins.Inputs)
 	for idx := range flowView.Schema.Pins.Inputs.EventPins {
 		if strings.TrimSpace(flowView.Schema.Pins.Inputs.EventPins[idx].EventType()) == strings.TrimSpace(eventType) {
-			flowView.Schema.Pins.Inputs.EventPins[idx].Source = source
+			flowView.Schema.Pins.Inputs.EventPins[idx].Source = typedSource
 		}
 	}
 	if schema, ok := bundle.FlowSchemas[flowID]; ok {
-		ensureFlowInputEventPins(&schema.Pins.Inputs)
 		for idx := range schema.Pins.Inputs.EventPins {
 			if strings.TrimSpace(schema.Pins.Inputs.EventPins[idx].EventType()) == strings.TrimSpace(eventType) {
-				schema.Pins.Inputs.EventPins[idx].Source = source
+				schema.Pins.Inputs.EventPins[idx].Source = typedSource
 			}
 		}
 		bundle.FlowSchemas[flowID] = schema
 	}
-	ensureSemanticFlowInputPins(bundle, flowID)
-	for idx := range bundle.Semantics.FlowInputEventPins[flowID] {
-		if strings.TrimSpace(bundle.Semantics.FlowInputEventPins[flowID][idx].EventType()) == strings.TrimSpace(eventType) {
-			bundle.Semantics.FlowInputEventPins[flowID][idx].Source = source
-		}
-	}
+	recompileBootverifySemantics(t, bundle)
 }
 
 func addFlowInputPin(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, flowID string, pin runtimecontracts.FlowInputEventPin) {
@@ -8527,44 +8531,34 @@ func addFlowInputPin(t *testing.T, bundle *runtimecontracts.WorkflowContractBund
 	if !ok || flowView == nil {
 		t.Fatalf("flow view %s missing", flowID)
 	}
-	eventType := strings.TrimSpace(pin.EventType())
-	flowView.Schema.Pins.Inputs.Events = append(flowView.Schema.Pins.Inputs.Events, eventType)
 	flowView.Schema.Pins.Inputs.EventPins = append(flowView.Schema.Pins.Inputs.EventPins, pin)
 	schema := bundle.FlowSchemas[flowID]
-	schema.Pins.Inputs.Events = append(schema.Pins.Inputs.Events, eventType)
 	schema.Pins.Inputs.EventPins = append(schema.Pins.Inputs.EventPins, pin)
 	bundle.FlowSchemas[flowID] = schema
-	if bundle.Semantics.FlowInputs == nil {
-		bundle.Semantics.FlowInputs = map[string][]string{}
-	}
-	bundle.Semantics.FlowInputs[flowID] = append(bundle.Semantics.FlowInputs[flowID], eventType)
-	if bundle.Semantics.FlowInputEventPins == nil {
-		bundle.Semantics.FlowInputEventPins = map[string][]runtimecontracts.FlowInputEventPin{}
-	}
-	bundle.Semantics.FlowInputEventPins[flowID] = append(bundle.Semantics.FlowInputEventPins[flowID], pin)
+	recompileBootverifySemantics(t, bundle)
 }
 
 func markRootInputPinSource(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, eventType, source string) {
 	t.Helper()
+	typedSource, err := runtimecontracts.ParseFlowInputPinSource(source)
+	if err != nil {
+		t.Fatalf("parse root input pin source %q: %v", source, err)
+	}
 	if bundle.RootSchema == nil {
 		t.Fatal("root schema missing")
 	}
-	ensureFlowInputEventPins(&bundle.RootSchema.Pins.Inputs)
 	found := false
 	for idx := range bundle.RootSchema.Pins.Inputs.EventPins {
 		if strings.TrimSpace(bundle.RootSchema.Pins.Inputs.EventPins[idx].EventType()) != strings.TrimSpace(eventType) {
 			continue
 		}
-		bundle.RootSchema.Pins.Inputs.EventPins[idx].Source = source
+		bundle.RootSchema.Pins.Inputs.EventPins[idx].Source = typedSource
 		found = true
 	}
 	if !found {
 		t.Fatalf("root input event %s missing", eventType)
 	}
-	if bundle.Semantics.FlowInputEventPins == nil {
-		bundle.Semantics.FlowInputEventPins = map[string][]runtimecontracts.FlowInputEventPin{}
-	}
-	bundle.Semantics.FlowInputEventPins[""] = append([]runtimecontracts.FlowInputEventPin(nil), bundle.RootSchema.Pins.Inputs.EventPins...)
+	recompileBootverifySemantics(t, bundle)
 }
 
 func loadHarnessBootverifyBundle(t *testing.T, root string) *runtimecontracts.WorkflowContractBundle {
@@ -8593,13 +8587,7 @@ func addHarnessAccumulator(t *testing.T, bundle *runtimecontracts.WorkflowContra
 	node.EventHandlers["work.requested"] = handler
 	worker.Nodes["worker-node"] = node
 	bundle.Nodes["worker-node"] = node
-	if bundle.Semantics.NodeHandlers == nil {
-		bundle.Semantics.NodeHandlers = map[string]map[string]runtimecontracts.SystemNodeEventHandler{}
-	}
-	if bundle.Semantics.NodeHandlers["worker-node"] == nil {
-		bundle.Semantics.NodeHandlers["worker-node"] = map[string]runtimecontracts.SystemNodeEventHandler{}
-	}
-	bundle.Semantics.NodeHandlers["worker-node"]["work.requested"] = handler
+	recompileBootverifySemantics(t, bundle)
 }
 
 func renameFlowInputPinEvent(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, flowID, oldEventType, newEventType string) {
@@ -8613,60 +8601,24 @@ func renameFlowInputPinEvent(t *testing.T, bundle *runtimecontracts.WorkflowCont
 		renameFlowInputPins(&schema.Pins.Inputs, oldEventType, newEventType)
 		bundle.FlowSchemas[flowID] = schema
 	}
-	ensureSemanticFlowInputPins(bundle, flowID)
-	for idx := range bundle.Semantics.FlowInputEventPins[flowID] {
-		if strings.TrimSpace(bundle.Semantics.FlowInputEventPins[flowID][idx].EventType()) == strings.TrimSpace(oldEventType) {
-			bundle.Semantics.FlowInputEventPins[flowID][idx].Name = newEventType
-			bundle.Semantics.FlowInputEventPins[flowID][idx].Event = newEventType
-		}
-	}
+	recompileBootverifySemantics(t, bundle)
 }
 
 func renameFlowInputPins(pins *runtimecontracts.FlowInputPins, oldEventType, newEventType string) {
 	if pins == nil {
 		return
 	}
-	for idx, eventType := range pins.Events {
-		if strings.TrimSpace(eventType) == strings.TrimSpace(oldEventType) {
-			pins.Events[idx] = newEventType
-		}
-	}
-	ensureFlowInputEventPins(pins)
 	for idx := range pins.EventPins {
 		if strings.TrimSpace(pins.EventPins[idx].EventType()) == strings.TrimSpace(oldEventType) {
-			pins.EventPins[idx].Name = newEventType
 			pins.EventPins[idx].Event = newEventType
 		}
 	}
 }
 
-func ensureSemanticFlowInputPins(bundle *runtimecontracts.WorkflowContractBundle, flowID string) {
-	if bundle.Semantics.FlowInputEventPins == nil {
-		bundle.Semantics.FlowInputEventPins = map[string][]runtimecontracts.FlowInputEventPin{}
-	}
-	if len(bundle.Semantics.FlowInputEventPins[flowID]) == 0 {
-		inputs := bundle.Semantics.FlowInputs[flowID]
-		pins := make([]runtimecontracts.FlowInputEventPin, 0, len(inputs))
-		for _, eventType := range inputs {
-			eventType = strings.TrimSpace(eventType)
-			if eventType != "" {
-				pins = append(pins, runtimecontracts.FlowInputEventPin{Name: eventType, Event: eventType})
-			}
-		}
-		bundle.Semantics.FlowInputEventPins[flowID] = pins
-	}
-}
-
-func ensureFlowInputEventPins(pins *runtimecontracts.FlowInputPins) {
-	if pins == nil || len(pins.EventPins) > 0 {
-		return
-	}
-	pins.EventPins = make([]runtimecontracts.FlowInputEventPin, 0, len(pins.Events))
-	for _, eventType := range pins.Events {
-		eventType = strings.TrimSpace(eventType)
-		if eventType != "" {
-			pins.EventPins = append(pins.EventPins, runtimecontracts.FlowInputEventPin{Name: eventType, Event: eventType})
-		}
+func recompileBootverifySemantics(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle) {
+	t.Helper()
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatalf("CompileWorkflowSemantics: %v", err)
 	}
 }
 

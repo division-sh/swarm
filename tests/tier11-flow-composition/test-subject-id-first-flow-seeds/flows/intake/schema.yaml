@@ -7,6 +7,5 @@ pins:
     events: [work.assigned]
   outputs:
     events:
-      - name: item.processed
-        event: item.processed
+      - event: item.processed
         sink: harness

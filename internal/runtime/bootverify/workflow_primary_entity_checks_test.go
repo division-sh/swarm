@@ -16,11 +16,6 @@ name: scoring
 initial_state: pending
 states: [pending, done]
 terminal_states: [done]
-pins:
-  inputs:
-    events: []
-  outputs:
-    events: []
 `, `
 vertical:
   name: text
@@ -39,11 +34,6 @@ name: scoring
 initial_state: pending
 states: [pending, done]
 terminal_states: [done]
-pins:
-  inputs:
-    events: []
-  outputs:
-    events: []
 `, "")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -61,11 +51,6 @@ stages:
     initial: true
   done:
     terminal: true
-pins:
-  inputs:
-    events: []
-  outputs:
-    events: []
 `, "")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -78,11 +63,6 @@ pins:
 func TestRun_AllowsStatelessFlowWithoutPrimaryEntity(t *testing.T) {
 	bundle := loadPrimaryEntityFixtureBundle(t, `
 name: scoring
-pins:
-  inputs:
-    events: []
-  outputs:
-    events: []
 `, "")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})

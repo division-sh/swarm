@@ -6,6 +6,5 @@ pins:
     events: [task.done, timer.check]
   outputs:
     events:
-      - name: task.timed_out
-        event: task.timed_out
+      - event: task.timed_out
         sink: harness

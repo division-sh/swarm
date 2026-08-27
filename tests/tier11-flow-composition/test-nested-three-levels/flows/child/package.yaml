@@ -13,4 +13,3 @@ connect:
   - event: micro.done
     from: grandchild
     to: .
-    adapter: grandchild_micro_done_to_child_micro_done

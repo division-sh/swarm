@@ -4,5 +4,3 @@ states: [pending, done, failed]
 pins:
   inputs:
     events: [task.requested]
-  outputs:
-    events: []

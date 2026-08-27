@@ -7,6 +7,5 @@ pins:
     events: [alpha.start]
   outputs:
     events:
-      - name: alpha.complete
-        event: alpha.complete
+      - event: alpha.complete
         sink: harness

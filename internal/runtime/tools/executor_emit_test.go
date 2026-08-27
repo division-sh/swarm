@@ -727,7 +727,7 @@ func TestHandleEmitTool_KeepsFlowOutputPinAtParentScope(t *testing.T) {
 						Mode: runtimecontracts.FlowModeStatic,
 						Pins: runtimecontracts.FlowPins{
 							Outputs: runtimecontracts.FlowOutputPins{
-								Events: []string{"vertical.discovered"},
+								EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "vertical.discovered"}},
 							},
 						},
 					},
@@ -798,7 +798,7 @@ func TestHandleEmitTool_TargetsParentRouteForChildPinOutput(t *testing.T) {
 			Mode: runtimecontracts.FlowModeTemplate,
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{
-					Events: []string{"analysis.done"},
+					EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "analysis.done"}},
 				},
 			},
 		},
@@ -892,7 +892,7 @@ func TestHandleEmitTool_FailsClosedOnIncompleteStoredParentRoute(t *testing.T) {
 			Mode: runtimecontracts.FlowModeTemplate,
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{
-					Events: []string{"analysis.done"},
+					EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "analysis.done"}},
 				},
 			},
 		},
@@ -1045,7 +1045,7 @@ func staticChildPinOutputTestSource(t testing.TB) semanticview.Source {
 		Paths: runtimecontracts.FlowContractPaths{ID: "analyzer-flow", Flow: "analyzer-flow"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: runtimecontracts.FlowModeStatic,
-			Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{Events: []string{"analysis.done"}}},
+			Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "analysis.done"}}}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"analysis.done": {}},
 		Path:   "root/analyzer-flow",
@@ -1074,7 +1074,7 @@ func TestHandleEmitTool_RootStaticPinOutputStillRequiresTarget(t *testing.T) {
 			Mode: runtimecontracts.FlowModeStatic,
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{
-					Events: []string{"analysis.done"},
+					EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "analysis.done"}},
 				},
 			},
 		},
@@ -1130,7 +1130,7 @@ func TestHandleEmitTool_RootSchemaPinOutputStillRequiresTarget(t *testing.T) {
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{
-					Events: []string{"root.ready"},
+					EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "root.ready"}},
 				},
 			},
 		},
@@ -1204,10 +1204,10 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNode(t *testing.
 		id:   "review",
 		mode: runtimecontracts.FlowModeTemplate,
 		inputs: []runtimecontracts.FlowInputEventPin{{
-			Name: "assessment_received", Event: "assessment.reported",
+			Event: "assessment.reported",
 		}},
 		outputs: []runtimecontracts.FlowOutputEventPin{{
-			Name: "assessment_reported", Event: "assessment.reported",
+			Event: "assessment.reported",
 		}},
 		nodes: map[string]runtimecontracts.SystemNodeContract{
 			"review-finalize": {
@@ -1251,11 +1251,10 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNode(t *testing.
 
 func TestHandleEmitTool_RoutesConnectedOutputPinThroughCanonicalRouteAuthority(t *testing.T) {
 	source := emitRoutePlanStaticSource(t, runtimecontracts.FlowPackageConnect{
-		Event:   "deploy.done",
-		From:    "producer",
-		To:      "consumer",
-		Rename:  "deploy.completed",
-		Adapter: "deploy_done_to_completed",
+		Event:  "deploy.done",
+		From:   "producer",
+		To:     "consumer",
+		Rename: "deploy.completed",
 	})
 	store := newEmitRoutePlanStore()
 	eb := newEmitRoutePlanEventBus(t, store, source)
@@ -1896,7 +1895,6 @@ func emitRoutePlanSource(t testing.TB, connects []runtimecontracts.FlowPackageCo
 			id:   "producer",
 			mode: "static",
 			outputs: []runtimecontracts.FlowOutputEventPin{{
-				Name:  "deploy_done",
 				Event: "deploy.done",
 			}},
 		},
@@ -1904,7 +1902,6 @@ func emitRoutePlanSource(t testing.TB, connects []runtimecontracts.FlowPackageCo
 			id:   "consumer",
 			mode: "static",
 			inputs: []runtimecontracts.FlowInputEventPin{{
-				Name:  "deploy_completed",
 				Event: "deploy.completed",
 			}},
 			nodes: map[string]runtimecontracts.SystemNodeContract{
@@ -1927,33 +1924,22 @@ func emitRoutePlanTestBundle(flows []emitRoutePlanTestFlow, connects []runtimeco
 	children := make([]runtimecontracts.FlowContractView, 0, len(flows))
 	byID := make(map[string]*runtimecontracts.FlowContractView, len(flows))
 	flowSchemas := make(map[string]runtimecontracts.FlowSchemaDocument, len(flows))
-	flowInputs := make(map[string][]string, len(flows))
-	flowOutputs := make(map[string][]string, len(flows))
-	flowInputPins := make(map[string][]runtimecontracts.FlowInputEventPin, len(flows))
-	flowOutputPins := make(map[string][]runtimecontracts.FlowOutputEventPin, len(flows))
-	nodeHandlers := map[string]map[string]runtimecontracts.SystemNodeEventHandler{}
 	eventCatalog := map[string]runtimecontracts.EventCatalogEntry{}
 	for _, flow := range flows {
 		schema := runtimecontracts.FlowSchemaDocument{
 			Mode: flow.mode,
 			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{
-					Events:    emitRoutePlanInputEvents(flow.inputs),
-					EventPins: flow.inputs,
-				},
-				Outputs: runtimecontracts.FlowOutputPins{
-					Events:    emitRoutePlanOutputEvents(flow.outputs),
-					EventPins: flow.outputs,
-				},
+				Inputs:  runtimecontracts.FlowInputPins{EventPins: flow.inputs},
+				Outputs: runtimecontracts.FlowOutputPins{EventPins: flow.outputs},
 			},
 		}
 		flowEvents := map[string]runtimecontracts.EventCatalogEntry{}
-		for _, eventType := range append(schema.Pins.Inputs.Events, schema.Pins.Outputs.Events...) {
+		for _, eventType := range append(emitRoutePlanInputEvents(flow.inputs), emitRoutePlanOutputEvents(flow.outputs)...) {
 			eventCatalog[eventType] = runtimecontracts.EventCatalogEntry{Payload: runtimecontracts.EventPayloadSpec{Type: "object"}}
 			flowEvents[eventType] = runtimecontracts.EventCatalogEntry{}
 		}
 		view := runtimecontracts.FlowContractView{
-			Paths:  runtimecontracts.FlowContractPaths{ID: flow.id, Flow: flow.id},
+			Paths:  runtimecontracts.FlowContractPaths{ID: flow.id, Flow: flow.id, PackageKey: "."},
 			Schema: schema,
 			Events: flowEvents,
 			Path:   flow.id,
@@ -1963,33 +1949,23 @@ func emitRoutePlanTestBundle(flows []emitRoutePlanTestFlow, connects []runtimeco
 		viewCopy := view
 		byID[flow.id] = &viewCopy
 		flowSchemas[flow.id] = schema
-		flowInputs[flow.id] = append([]string(nil), schema.Pins.Inputs.Events...)
-		flowOutputs[flow.id] = append([]string(nil), schema.Pins.Outputs.Events...)
-		flowInputPins[flow.id] = append([]runtimecontracts.FlowInputEventPin(nil), flow.inputs...)
-		flowOutputPins[flow.id] = append([]runtimecontracts.FlowOutputEventPin(nil), flow.outputs...)
-		for _, node := range flow.nodes {
-			if len(node.EventHandlers) > 0 {
-				nodeHandlers[node.ID] = node.EventHandlers
-			}
-		}
 	}
-	root := runtimecontracts.FlowContractView{Children: children}
+	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{PackageKey: "."}, Children: children}
+	for index := range root.Children {
+		byID[root.Children[index].Paths.ID] = &root.Children[index]
+	}
 	return &runtimecontracts.WorkflowContractBundle{
+		Package: runtimecontracts.ProjectPackageDocument{Name: "root", Version: "1.0.0", Connect: connects},
+		PackageTree: []runtimecontracts.LoadedProjectPackage{{
+			Key: ".", Paths: runtimecontracts.ProjectPackagePaths{PackageFile: "package.yaml"},
+			Manifest: runtimecontracts.ProjectPackageDocument{Connect: connects},
+		}},
 		Events: eventCatalog,
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: byID,
 		},
 		FlowSchemas: flowSchemas,
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:                "root",
-			FlowInputs:          flowInputs,
-			FlowOutputs:         flowOutputs,
-			FlowInputEventPins:  flowInputPins,
-			FlowOutputEventPins: flowOutputPins,
-			CompositionConnects: connects,
-			NodeHandlers:        nodeHandlers,
-		},
 	}
 }
 

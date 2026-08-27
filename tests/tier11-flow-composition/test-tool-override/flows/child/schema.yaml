@@ -7,5 +7,4 @@ pins:
     events: [child.start]
   outputs:
     events:
-      - name: child_done
-        event: child.done
+      - child.done

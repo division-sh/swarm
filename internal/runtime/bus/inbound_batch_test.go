@@ -153,7 +153,7 @@ func TestProviderRawSettlementAdmissionRequiresCompleteInboundAuthority(t *testi
 	exactTarget := events.RouteIdentity{FlowInstance: "telegram-ingress/standing", EntityID: entityID}
 	externalSource := inboundRawSettlementRoutingSource(t, entityID)
 	exactEvent := inboundRawSettlementEvent(externalSource, exactTarget)
-	exactBus := &EventBus{semanticSource: inboundRawSettlementSource("external")}
+	exactBus := &EventBus{semanticSource: inboundRawSettlementSource(runtimecontracts.FlowInputPinSourceExternal)}
 
 	admission := exactBus.admitProviderRawSettlement(runtimeprovideroutput.KindRaw, exactEvent)
 	liveNoSubscriber := RoutePlan{TargetFailure: runtimepinrouting.FailureTargetNotSubscribed}
@@ -169,7 +169,7 @@ func TestProviderRawSettlementAdmissionRequiresCompleteInboundAuthority(t *testi
 		plan  RoutePlan
 	}{
 		{name: "raw kind alone", bus: exactBus, kind: runtimeprovideroutput.KindRaw, event: inboundRawSettlementEvent(events.NoRoutingSource(), exactTarget), plan: liveNoSubscriber},
-		{name: "provider source alone", bus: &EventBus{semanticSource: inboundRawSettlementSource("harness")}, kind: runtimeprovideroutput.KindRaw, event: exactEvent, plan: liveNoSubscriber},
+		{name: "provider source alone", bus: &EventBus{semanticSource: inboundRawSettlementSource(runtimecontracts.FlowInputPinSourceHarness)}, kind: runtimeprovideroutput.KindRaw, event: exactEvent, plan: liveNoSubscriber},
 		{name: "external input alone", bus: exactBus, kind: runtimeprovideroutput.KindRaw, event: inboundRawSettlementEvent(events.NoRoutingSource(), exactTarget), plan: liveNoSubscriber},
 		{name: "normalized kind", bus: exactBus, kind: runtimeprovideroutput.KindNormalized, event: exactEvent, plan: liveNoSubscriber},
 		{name: "foreign entity target", bus: exactBus, kind: runtimeprovideroutput.KindRaw, event: inboundRawSettlementEvent(externalSource, events.RouteIdentity{FlowInstance: exactTarget.FlowInstance, EntityID: eventtest.UUID("foreign-provider-raw-target")}), plan: liveNoSubscriber},
@@ -194,7 +194,7 @@ func TestPrepareInboundDeliveryBatchPreservesLiveTargetPlanAndSettlesConsumerles
 	target := events.RouteIdentity{FlowInstance: "telegram-ingress/standing", EntityID: entityID}
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwners(ActiveTargetDescriptor{ID: "standing", FlowInstance: target.FlowInstance, EntityID: target.EntityID})
-	bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: inboundRawSettlementSource("external")})
+	bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: inboundRawSettlementSource(runtimecontracts.FlowInputPinSourceExternal)})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestGenericPublicationCannotMintProviderRawSettlementAdmission(t *testing.T
 	target := events.RouteIdentity{FlowInstance: "telegram-ingress/standing", EntityID: entityID}
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwners(ActiveTargetDescriptor{ID: "standing", FlowInstance: target.FlowInstance, EntityID: target.EntityID})
-	bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: inboundRawSettlementSource("external")})
+	bus, err := newScopedTestEventBus(store, EventBusOptions{ContractBundle: inboundRawSettlementSource(runtimecontracts.FlowInputPinSourceExternal)})
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
@@ -256,10 +256,10 @@ func TestGenericPublicationCannotMintProviderRawSettlementAdmission(t *testing.T
 		prepared.providerRawSettlement, prepared.targetFailure, command.Commit.RouteSettlement.Reason().Code(), command.Commit.Disposition, command.Commit.DeadLetter)
 }
 
-func inboundRawSettlementSource(pinSource string) semanticview.Source {
+func inboundRawSettlementSource(pinSource runtimecontracts.FlowInputPinSource) semanticview.Source {
 	return semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{{
 		id: "telegram-ingress", mode: "singleton",
-		inputs: []runtimecontracts.FlowInputEventPin{{Name: "telegram_raw", Event: "inbound.telegram", Source: pinSource}},
+		inputs: []runtimecontracts.FlowInputEventPin{{Event: "inbound.telegram", Source: pinSource}},
 	}}, nil))
 }
 

@@ -11,8 +11,5 @@ instance_variables:
 pins:
   inputs:
     events:
-      - name: task_assign
-        event: task.assign
+      - event: task.assign
         source: external
-  outputs:
-    events: []

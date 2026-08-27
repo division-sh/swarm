@@ -6,6 +6,5 @@ pins:
     events: [task.submitted]
   outputs:
     events:
-      - name: task.accepted
-        event: task.accepted
+      - event: task.accepted
         sink: harness

@@ -6,6 +6,5 @@ pins:
     events: [pipeline.start]
   outputs:
     events:
-      - name: pipeline.complete
-        event: pipeline.complete
+      - event: pipeline.complete
         sink: harness

@@ -333,7 +333,7 @@ rows:
       - {kind: go_test, name: TestCompileConnectPlansUsesFanInStreamSingularTarget}
       - {kind: go_test, name: TestCompileConnectPlansAllowsFanInStreamEventIDDedup}
       - {kind: go_test, name: TestCompileConnectPlansFailsClosedForInvalidFanInStream}
-      - {kind: go_test, name: TestLowerCompositionConnectRoutePlanWithLocationDoesNotDependOnRawPinNamesOrProducerTargets}
+      - {kind: go_test, name: TestLowerCompositionConnectRoutePlanUsesExactEventPinIdentity}
       - {kind: go_test, name: TestEventBusPublish_RootConnectRoutePlanPersistsSingularTarget}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget}
       - {kind: go_test, name: TestEventBusPublish_ConnectRoutePlanPersistsRenamedTemplateInstanceKeyTarget}

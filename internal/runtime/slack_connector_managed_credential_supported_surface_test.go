@@ -365,7 +365,7 @@ func slackManagedConnectorSource(t *testing.T, baseURL, flowInstance string) sem
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{
-					Events: []string{"inbound.telegram"},
+					EventPins: []runtimecontracts.FlowInputEventPin{{Event: "inbound.telegram"}},
 				},
 			},
 		},

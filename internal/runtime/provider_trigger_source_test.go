@@ -298,20 +298,17 @@ func TestSourceWithProviderTriggerEvents_HarnessInputIsNotIngress(t *testing.T) 
 	if !ok {
 		t.Fatal("fixture bundle missing")
 	}
-	pins := bundle.Semantics.FlowInputEventPins["coordinator"]
-	if len(pins) != 1 {
-		t.Fatalf("coordinator pins = %#v, want one", pins)
-	}
-	pins[0].Source = "harness"
-	bundle.Semantics.FlowInputEventPins["coordinator"] = pins
 	flow, ok := bundle.FlowViewByID("coordinator")
 	if !ok || len(flow.Schema.Pins.Inputs.EventPins) != 1 {
 		t.Fatal("coordinator typed input pin missing")
 	}
-	flow.Schema.Pins.Inputs.EventPins[0].Source = "harness"
+	flow.Schema.Pins.Inputs.EventPins[0].Source = runtimecontracts.FlowInputPinSourceHarness
 	schema := bundle.FlowSchemas["coordinator"]
-	schema.Pins.Inputs.EventPins[0].Source = "harness"
+	schema.Pins.Inputs.EventPins[0].Source = runtimecontracts.FlowInputPinSourceHarness
 	bundle.FlowSchemas["coordinator"] = schema
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatalf("compile harness input semantics: %v", err)
+	}
 
 	wrapped, err := SourceWithProviderTriggerEvents(source, catalog)
 	if err != nil {
@@ -367,6 +364,47 @@ func TestProviderTriggerNormalizedEventLowersThroughExactExternalInputPin(t *tes
 	}
 	if rawPlans := graph.MatchingSourceEvent(rawEvent); len(rawPlans) != 0 {
 		t.Fatalf("raw standing event acquired target-free route plans=%#v", rawPlans)
+	}
+}
+
+func TestW2ProviderTriggerImportBindsCompiledInputPinOnce(t *testing.T) {
+	source, catalog := standingTelegramDeclarationSource(t, "inbound.telegram.text_message")
+	basePin, ok := source.FlowInputEventPin("coordinator", "inbound.telegram.text_message")
+	if !ok {
+		t.Fatal("base provider input pin is unavailable")
+	}
+	if _, ownsSchema := basePin.EventSchema(); ownsSchema {
+		t.Fatal("provider input pin owned a schema before the provider catalog was admitted")
+	}
+
+	wrapped, err := SourceWithProviderTriggerEvents(source, catalog)
+	if err != nil {
+		t.Fatalf("SourceWithProviderTriggerEvents: %v", err)
+	}
+	bound, ok := wrapped.FlowInputEventPin("coordinator", "inbound.telegram.text_message")
+	if !ok {
+		t.Fatal("provider input pin is unavailable after catalog admission")
+	}
+	schema, ownsSchema := bound.EventSchema()
+	if !ownsSchema || schema.Classification() != runtimecontracts.CompiledEventSchemaImported || schema.EventName() != bound.EventType() {
+		t.Fatalf("bound provider input schema = (%#v, %v), pin=%#v", schema, ownsSchema, bound)
+	}
+	if bound.Digest() == "" || bound.Digest() == basePin.Digest() {
+		t.Fatalf("bound provider input digest = %q, base=%q", bound.Digest(), basePin.Digest())
+	}
+
+	pins := wrapped.FlowInputEventPins("coordinator")
+	pins[0] = runtimecontracts.CompiledFlowInputPin{}
+	again, ok := wrapped.FlowInputEventPin("coordinator", "inbound.telegram.text_message")
+	if !ok || again.Digest() != bound.Digest() {
+		t.Fatalf("compiled provider input readback was mutable: (%#v, %v)", again, ok)
+	}
+	acceptance := schema.AcceptanceSchema()
+	acceptance["required"] = []string{"changed"}
+	againSchema, _ := again.EventSchema()
+	required, ok := againSchema.AcceptanceSchema()["required"].([]string)
+	if !ok || strings.Join(required, ",") == "changed" {
+		t.Fatal("compiled provider schema readback mutation leaked into the owner")
 	}
 }
 

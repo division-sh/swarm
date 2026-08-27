@@ -376,7 +376,7 @@ func microsoftGraphConnectorSource(t *testing.T, baseURL, flowInstance string) s
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{
-					Events: []string{"inbound.telegram"},
+					EventPins: []runtimecontracts.FlowInputEventPin{{Event: "inbound.telegram"}},
 				},
 			},
 		},

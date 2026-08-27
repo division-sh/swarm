@@ -51,7 +51,8 @@ func ResolveExecutableNodeSemanticScope(source Source, node runtimeidentity.Exec
 			result.declarationProject = &project
 		}
 		if view, found := contractScope.OwningFlow(); found {
-			flow := flowScopeFromView(*view)
+			flowID := strings.TrimSpace(view.Paths.ID)
+			flow := flowScopeFromView(*view, source.FlowInputEvents(flowID), source.FlowOutputEvents(flowID))
 			flow.PackageKey = bundle.ExecutableFlowViewPackageKey(view)
 			result.owningFlow = &flow
 		}

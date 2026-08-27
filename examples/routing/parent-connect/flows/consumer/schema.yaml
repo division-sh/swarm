@@ -3,7 +3,4 @@ mode: static
 pins:
   inputs:
     events:
-      - name: work_ready
-        event: work.ready
-  outputs:
-    events: []
+      - work.ready

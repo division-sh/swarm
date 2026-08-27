@@ -6,6 +6,5 @@ pins:
     events: [scores.ready]
   outputs:
     events:
-      - name: scores.computed
-        event: scores.computed
+      - event: scores.computed
         sink: harness

@@ -38,11 +38,11 @@ func CopyParentConnectEventMetadataAuthority(t testing.TB) string {
 	consumerSchema := filepath.Join(root, "flows", "consumer", "schema.yaml")
 	applyClosedReplacement(t, producerSchema, "pins:\n", "auto_emit_on_create:\n  event: flow.started\npins:\n")
 	applyClosedReplacement(t, producerSchema,
-		"      - name: work_ready\n        event: work.ready\n",
-		"      - name: work_ready\n        event: work.ready\n      - name: deploy_done\n        event: deploy.done\n")
+		"      - work.ready\n",
+		"      - work.ready\n      - deploy.done\n")
 	applyClosedReplacement(t, consumerSchema,
-		"      - name: work_ready\n        event: work.ready\n",
-		"      - name: work_ready\n        event: work.ready\n      - name: deploy_completed\n        event: deploy.completed\n        source: external\n")
+		"      - work.ready\n",
+		"      - work.ready\n      - event: deploy.completed\n        source: external\n")
 	return root
 }
 
@@ -72,21 +72,21 @@ func CopyParentConnectEventMetadataInvalidity(t testing.TB, invalidity ParentCon
 	case ParentConnectMetadataProducerFlowAutoEmit:
 		flowStartedRole = "producer: producer"
 	case ParentConnectMetadataProducerFlowOutput:
-		producerWorkReadyRole = "producer: deploy_done"
+		producerWorkReadyRole = "producer: deploy.done"
 	case ParentConnectMetadataConsumerFlowInput:
 		consumerWorkReadyRole = "consumer: consumer"
 	case ParentConnectMetadataProducerConnectOutput:
-		producerWorkReadyRole = "producer: producer.work_ready"
+		producerWorkReadyRole = "producer: producer.work.ready"
 	case ParentConnectMetadataConsumerConnectInput:
-		consumerWorkReadyRole = "consumer: consumer.work_ready"
+		consumerWorkReadyRole = "consumer: consumer.work.ready"
 	case ParentConnectMetadataProducerWrongFlowEvent:
-		flowStartedRole = "producer: deploy_done"
+		flowStartedRole = "producer: deploy.done"
 	case ParentConnectMetadataConsumerWrongFlowEvent:
-		producerWorkReadyRole = "consumer: deploy_completed"
+		producerWorkReadyRole = "consumer: deploy.completed"
 	case ParentConnectMetadataProducerWrongConnectEvent:
-		flowStartedRole = "producer: producer.work_ready"
+		flowStartedRole = "producer: producer.work.ready"
 	case ParentConnectMetadataConsumerWrongConnectEvent:
-		producerWorkReadyRole = "consumer: consumer.work_ready"
+		producerWorkReadyRole = "consumer: consumer.work.ready"
 	default:
 		t.Fatalf("unsupported parent-connect event metadata invalidity %d", invalidity)
 	}

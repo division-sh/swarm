@@ -65,13 +65,13 @@ terminal_states: [done]
 pins:
   inputs:
     events:
-      - {name: deploy_requested, event: deploy.requested, source: external}
+      - {event: deploy.requested, source: external}
   outputs:
     events:
-      - {name: deploy_done, event: deploy.done, key: vertical_id, carries: [vertical_id]}
+      - deploy.done
 `)
 	writeClosedVariantFile(t, root, "flows/producer/entities.yaml", "producer_request:\n  vertical_id:\n    type: string\n    _unused_reason: select_entity demotion producer proof field\n")
-	writeClosedVariantFile(t, root, "flows/producer/events.yaml", "deploy.requested:\n  vertical_id: string\ndeploy.done:\n  vertical_id: string\n")
+	writeClosedVariantFile(t, root, "flows/producer/events.yaml", "deploy.requested:\n  vertical_id: string\ndeploy.done:\n  key: vertical_id\n  vertical_id: string\n")
 	writeClosedVariantFile(t, root, "flows/producer/nodes.yaml", `producer-node:
   id: producer-node
   execution_type: system_node
@@ -93,9 +93,7 @@ terminal_states: [done]
 pins:
   inputs:
     events:
-      - name: deploy_done
-        event: deploy.done
-  outputs: {events: []}
+      - deploy.done
 `)
 	writeClosedVariantFile(t, root, "flows/other_consumer/events.yaml", "deploy.done:\n  vertical_id: string\n")
 	writeClosedVariantFile(t, root, "flows/other_consumer/entities.yaml", "deployment:\n  vertical_id:\n    type: string\n    indexed: true\n    _unused_reason: select_entity demotion other receiver route-key proof field\n")
@@ -109,20 +107,21 @@ func writeSelectEntityDemotionConsumer(t testing.TB, root string, opts SelectEnt
 		mode = "template"
 		instance = "instance: vertical_id\n"
 	}
-	pinName := "deploy_done"
 	eventName := "deploy.done"
 	if opts.RenameReceiverPin {
-		pinName = "deploy_completed"
 		eventName = "deploy.completed"
 	}
-	pin := "      - name: " + pinName + "\n        event: " + eventName + "\n"
+	pin := "      - " + eventName + "\n"
+	if opts.TemplateReceiver || opts.External {
+		pin = "      - event: " + eventName + "\n"
+	}
 	if opts.TemplateReceiver {
-		pin += "        resolution:\n          mode: select\n        carries:\n          vertical_id:\n            from: payload.vertical_id\n"
+		pin += "        resolution:\n          mode: select\n"
 	}
 	if opts.External {
 		pin += "        source: external\n"
 	}
-	writeClosedVariantFile(t, root, "flows/consumer/schema.yaml", "name: consumer\nmode: "+mode+"\n"+instance+"initial_state: pending\nstates: [pending, done]\nterminal_states: [done]\npins:\n  inputs:\n    events:\n"+pin+"  outputs: {events: []}\n")
+	writeClosedVariantFile(t, root, "flows/consumer/schema.yaml", "name: consumer\nmode: "+mode+"\n"+instance+"initial_state: pending\nstates: [pending, done]\nterminal_states: [done]\npins:\n  inputs:\n    events:\n"+pin)
 	writeClosedVariantFile(t, root, "flows/consumer/events.yaml", eventName+":\n  vertical_id: string\n")
 	writeClosedVariantFile(t, root, "flows/consumer/entities.yaml", "deployment:\n  vertical_id:\n    type: string\n    indexed: true\n    _unused_reason: select_entity demotion route-key proof field\n")
 	acquisition := ""

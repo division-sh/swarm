@@ -211,7 +211,9 @@ func loadWorkflowContractBundleForPaths(paths ContractPaths, options WorkflowCon
 	bundle.PackSelectionBody = receiptBody
 	bundle.ProjectPacks = projectPacks
 	bundle.PackInventory = effective
-	populateWorkflowSemantics(bundle)
+	if err := populateWorkflowSemantics(bundle); err != nil {
+		return nil, fmt.Errorf("compile workflow semantics: %w", err)
+	}
 	if err := validateWorkflowContractBundleLoadConstraints(bundle); err != nil {
 		return nil, err
 	}

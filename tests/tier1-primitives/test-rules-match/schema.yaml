@@ -6,6 +6,5 @@ pins:
     events: [item.received]
   outputs:
     events:
-      - name: routed.a
-        event: routed.a
+      - event: routed.a
         sink: harness

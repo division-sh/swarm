@@ -3,9 +3,8 @@ terminal_states: [done]
 states: [listening, matched, done]
 pins:
   inputs:
-    events: ["*.completed"]
+    events: [task.completed]
   outputs:
     events:
-      - name: match.found
-        event: match.found
+      - event: match.found
         sink: harness

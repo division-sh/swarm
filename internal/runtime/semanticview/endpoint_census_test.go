@@ -15,8 +15,7 @@ import (
 )
 
 func TestAuthoredEventEndpointCensusEnumeratesExecutableFactsAndAssertions(t *testing.T) {
-	source := endpointCensusFixture([]runtimecontracts.FlowInputEventPin{{
-		Name:  "work",
+	source := endpointCensusFixture(t, []runtimecontracts.FlowInputEventPin{{
 		Event: "work.requested",
 		Resolution: runtimecontracts.FlowInputPinResolution{
 			Mode:        runtimecontracts.FlowInputResolutionModeFanIn,
@@ -52,12 +51,13 @@ func TestAuthoredEventEndpointCensusReportsHarnessSinkWithoutConsumer(t *testing
 	bundle := endpointCensusBundle(nil)
 	schema := bundle.FlowSchemas["worker"]
 	schema.Pins.Outputs.EventPins = []runtimecontracts.FlowOutputEventPin{{
-		Name: "work_completed", Event: "work.completed", Sink: runtimecontracts.FlowOutputSinkHarness,
+		Event: "work.completed", Sink: runtimecontracts.FlowOutputSinkHarness,
 	}}
 	bundle.FlowSchemas["worker"] = schema
 	bundle.FlowTree.ByID["worker"].Schema = schema
 
-	census := BuildAuthoredEventEndpointCensus(Wrap(bundle))
+	source := withCompiledTestPins(t, Wrap(bundle), nil, map[string][]runtimecontracts.FlowOutputEventPin{"worker": {{Event: "work.completed", Sink: runtimecontracts.FlowOutputSinkHarness}}})
+	census := BuildAuthoredEventEndpointCensus(source)
 	outputs := census.OutputPins()
 	if len(outputs) != 1 || outputs[0].Sink != "harness" {
 		t.Fatalf("output endpoints = %#v, want harness sink readback", outputs)
@@ -103,8 +103,8 @@ func TestAuthoredEventEndpointCensusEnumeratesEveryProducerConsumerFamily(t *tes
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			AutoEmitOnCreate: runtimecontracts.AutoEmitOnCreateContract{Event: "flow.created"},
 			Pins: runtimecontracts.FlowPins{
-				Inputs:  runtimecontracts.FlowInputPins{Events: []string{"flow.started"}},
-				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"flow.completed"}},
+				Inputs:  runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "flow.started"}}},
+				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "flow.completed"}}},
 			},
 			RequiredAgents: []runtimecontracts.FlowRequiredAgent{{Role: "reviewer", SubscribesTo: []string{"review.requested"}, Emits: []string{"review.completed"}}},
 		},
@@ -129,7 +129,7 @@ func TestAuthoredEventEndpointCensusEnumeratesEveryProducerConsumerFamily(t *tes
 			Timers: []runtimecontracts.WorkflowTimerContract{{ID: "reminder", Event: "timer.fired", StartOn: "event:timer.started"}},
 		},
 	}
-	base := Wrap(bundle)
+	base := withCompiledTestPins(t, Wrap(bundle), map[string][]runtimecontracts.FlowInputEventPin{"": {{Event: "flow.started"}}}, map[string][]runtimecontracts.FlowOutputEventPin{"": {{Event: "flow.completed"}}})
 	source := endpointCensusRootAgentSource{Source: base, scope: ProjectScope{
 		Key: ".", Agents: bundle.Agents,
 		AgentURIs: map[string]string{"analyst": "test://endpoint-census/analyst"},
@@ -162,17 +162,16 @@ func (s endpointCensusRootAgentSource) ProjectScopes() []ProjectScope {
 }
 
 func TestResolveDeclaredInputEndpointUsesAllDeclaredIdentitiesAndFailsClosed(t *testing.T) {
-	source := endpointCensusFixture([]runtimecontracts.FlowInputEventPin{{
-		Name:  "work",
+	source := endpointCensusFixture(t, []runtimecontracts.FlowInputEventPin{{
 		Event: "work.requested",
 	}})
 	census := BuildAuthoredEventEndpointCensus(source)
 
-	for _, identity := range []string{"work", "work.requested"} {
+	for _, identity := range []string{"work.requested"} {
 		result := census.ResolveDeclaredInputEndpoint("worker", identity)
 		endpoint, ok := result.Endpoint()
-		if !ok || endpoint.PinName != "work" {
-			t.Fatalf("identity %q result = %#v, want work input", identity, result)
+		if !ok || endpoint.PinName != "work.requested" {
+			t.Fatalf("identity %q result = %#v, want exact work.requested input", identity, result)
 		}
 	}
 
@@ -186,18 +185,6 @@ func TestResolveDeclaredInputEndpointUsesAllDeclaredIdentitiesAndFailsClosed(t *
 	}
 }
 
-func TestResolveDeclaredInputEndpointRejectsAmbiguousIdentity(t *testing.T) {
-	source := endpointCensusFixture([]runtimecontracts.FlowInputEventPin{
-		{Name: "work-primary", Event: "work.requested"},
-		{Name: "work-secondary", Event: "work.requested"},
-	})
-
-	result := BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint("worker", "work.requested")
-	if result.Status != EndpointAssociationAmbiguous || len(result.Candidates) != 2 {
-		t.Fatalf("result = %#v, want two-candidate ambiguity", result)
-	}
-}
-
 func TestResolveDeclaredInputEndpointDoesNotUseProducerSchemaKeyAsReceiverIdentity(t *testing.T) {
 	repoRoot := canonicalrouting.RepoRoot(t)
 	fixtureRoot := canonicalrouting.CopyTemplateCreateThenSelectSameEvent(t)
@@ -207,24 +194,23 @@ func TestResolveDeclaredInputEndpointDoesNotUseProducerSchemaKeyAsReceiverIdenti
 	}
 	census := BuildAuthoredEventEndpointCensus(Wrap(bundle))
 
-	setup := census.ResolveDeclaredInputEndpoint("account", "account.setup")
+	setup := census.ResolveDeclaredInputEndpoint("account", "account.create")
 	setupEndpoint, ok := setup.Endpoint()
-	if !ok || setupEndpoint.PinName != "account_create" {
-		t.Fatalf("account.setup association = %#v, want account_create only", setup)
+	if !ok || setupEndpoint.PinName != "account.create" {
+		t.Fatalf("account.create association = %#v, want exact account.create only", setup)
 	}
 	ready := census.ResolveDeclaredInputEndpoint("account", "account.ready")
 	readyEndpoint, ok := ready.Endpoint()
-	if !ok || readyEndpoint.PinName != "account_ready" {
-		t.Fatalf("account.ready association = %#v, want renamed account_ready only", ready)
+	if !ok || readyEndpoint.PinName != "account.ready" {
+		t.Fatalf("account.ready association = %#v, want exact account.ready only", ready)
 	}
 	if setupEndpoint.Event.CatalogKey != readyEndpoint.Event.CatalogKey {
 		t.Fatalf("fixture did not prove shared producer schema key: setup=%#v ready=%#v", setupEndpoint.Event, readyEndpoint.Event)
 	}
 }
 
-func TestResolveFanInInputForHandlerSupportsEventAndPinNameAndRejectsAmbiguity(t *testing.T) {
-	source := endpointCensusFixture([]runtimecontracts.FlowInputEventPin{{
-		Name:       "work",
+func TestResolveFanInInputForHandlerUsesExactEventIdentity(t *testing.T) {
+	source := endpointCensusFixture(t, []runtimecontracts.FlowInputEventPin{{
 		Event:      "work.requested",
 		Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeFanIn},
 	}})
@@ -233,22 +219,14 @@ func TestResolveFanInInputForHandlerSupportsEventAndPinNameAndRejectsAmbiguity(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, identity := range []string{"work.requested", "work"} {
+	for _, identity := range []string{"work.requested"} {
 		result := census.ResolveFanInInputForHandler(node, identity)
 		endpoint, ok := result.Endpoint()
-		if !ok || endpoint.PinName != "work" {
-			t.Fatalf("handler identity %q result = %#v, want work input", identity, result)
+		if !ok || endpoint.PinName != "work.requested" {
+			t.Fatalf("handler identity %q result = %#v, want exact work.requested input", identity, result)
 		}
 	}
 
-	ambiguousSource := endpointCensusFixture([]runtimecontracts.FlowInputEventPin{
-		{Name: "work-a", Event: "work.requested", Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeFanIn}},
-		{Name: "work-b", Event: "work.requested", Resolution: runtimecontracts.FlowInputPinResolution{Mode: runtimecontracts.FlowInputResolutionModeFanIn}},
-	})
-	ambiguous := BuildAuthoredEventEndpointCensus(ambiguousSource).ResolveFanInInputForHandler(node, "work.requested")
-	if ambiguous.Status != EndpointAssociationAmbiguous || len(ambiguous.Candidates) != 2 {
-		t.Fatalf("ambiguous result = %#v, want two candidates", ambiguous)
-	}
 }
 
 func TestAuthoredEventEndpointCensusMatchesScopedWildcardConsumers(t *testing.T) {
@@ -366,7 +344,7 @@ func TestAuthoredEventEndpointCensusConsumesScopedLocalWildcardAdmission(t *test
 }
 
 func TestAuthoredEventEndpointCensusTypedRelationClassifiesSameFlowExactlyOnce(t *testing.T) {
-	source := endpointCensusFixture(nil)
+	source := endpointCensusFixture(t, nil)
 	producer := AuthoredEventEndpoint{
 		ID:        "producer",
 		Direction: EventEndpointProducer,
@@ -428,7 +406,7 @@ func TestAuthoredEventEndpointCensusClassifiesImportedPackageOwnPatternAsSameFlo
 }
 
 func TestAuthoredEventEndpointCensusTypedRelationRejectsCrossFlowExactEquality(t *testing.T) {
-	source := endpointCensusFixture(nil)
+	source := endpointCensusFixture(t, nil)
 	producer := AuthoredEventEndpoint{ID: "producer", Direction: EventEndpointProducer, FlowID: "worker", Event: ResolveFlowEventProof(source, "worker", "work.completed")}
 	consumer := AuthoredEventEndpoint{ID: "root-consumer", Direction: EventEndpointConsumer, FlowID: "", Event: producer.Event}
 	census := AuthoredEventEndpointCensus{source: source, consumers: []AuthoredEventEndpoint{consumer}}
@@ -622,8 +600,9 @@ func TestInvalidAuthoredSubscriptionsExcludeConnectedInputDelivery(t *testing.T)
 	}
 }
 
-func endpointCensusFixture(inputPins []runtimecontracts.FlowInputEventPin) Source {
-	return Wrap(endpointCensusBundle(inputPins))
+func endpointCensusFixture(t testing.TB, inputPins []runtimecontracts.FlowInputEventPin) Source {
+	t.Helper()
+	return withCompiledTestPins(t, Wrap(endpointCensusBundle(inputPins)), map[string][]runtimecontracts.FlowInputEventPin{"worker": inputPins}, map[string][]runtimecontracts.FlowOutputEventPin{"worker": {{Event: "work.completed"}}})
 }
 
 func endpointCensusBundle(inputPins []runtimecontracts.FlowInputEventPin) *runtimecontracts.WorkflowContractBundle {
@@ -637,16 +616,12 @@ func endpointCensusBundle(inputPins []runtimecontracts.FlowInputEventPin) *runti
 			},
 		},
 	}
-	inputEvents := make([]string, 0, len(inputPins))
-	for _, pin := range inputPins {
-		inputEvents = append(inputEvents, pin.EventType())
-	}
 	worker := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "worker", Flow: "worker", PackageKey: "flows/worker"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Inputs:  runtimecontracts.FlowInputPins{Events: inputEvents, EventPins: inputPins},
-				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"work.completed"}},
+				Inputs:  runtimecontracts.FlowInputPins{EventPins: inputPins},
+				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "work.completed"}}},
 			},
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{"worker-node": node},

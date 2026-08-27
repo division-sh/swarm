@@ -246,28 +246,37 @@ type SingletonContainedFieldView struct {
 }
 
 type InputPinView struct {
-	Name           string                       `json:"name"`
-	Event          string                       `json:"event"`
-	ResolvedEvent  string                       `json:"resolved_event"`
-	Source         string                       `json:"source,omitempty"`
-	ResolutionMode string                       `json:"resolution_mode,omitempty"`
-	Carries        map[string]InputPinCarryView `json:"carries,omitempty"`
-}
-
-type InputPinCarryView struct {
-	From     string `json:"from"`
-	Type     string `json:"type,omitempty"`
-	Optional bool   `json:"optional,omitempty"`
-	Convert  string `json:"convert,omitempty"`
+	Event                    string   `json:"event"`
+	ResolvedEvent            string   `json:"resolved_event"`
+	FlowPath                 string   `json:"flow_path,omitempty"`
+	Source                   string   `json:"source,omitempty"`
+	ResolutionMode           string   `json:"resolution_mode,omitempty"`
+	ResolutionFrom           string   `json:"resolution_from,omitempty"`
+	ResolutionAggregation    string   `json:"resolution_aggregation,omitempty"`
+	ResolutionWindow         string   `json:"resolution_window,omitempty"`
+	ResolutionDedupBy        []string `json:"resolution_dedup_by,omitempty"`
+	ResolutionSingleton      string   `json:"resolution_singleton,omitempty"`
+	ResolutionRepliesTo      string   `json:"resolution_replies_to,omitempty"`
+	ResolutionCorrelationKey string   `json:"resolution_correlation_key,omitempty"`
+	SchemaDigest             string   `json:"schema_digest,omitempty"`
+	BusinessKey              string   `json:"business_key,omitempty"`
+	PinDigest                string   `json:"pin_digest"`
+	SourceFile               string   `json:"source_file,omitempty"`
+	SourceLine               int      `json:"source_line,omitempty"`
+	SourceColumn             int      `json:"source_column,omitempty"`
 }
 
 type OutputPinView struct {
-	Name          string   `json:"name"`
-	Event         string   `json:"event"`
-	ResolvedEvent string   `json:"resolved_event"`
-	Sink          string   `json:"sink,omitempty"`
-	Key           string   `json:"key,omitempty"`
-	Carries       []string `json:"carries,omitempty"`
+	Event         string `json:"event"`
+	ResolvedEvent string `json:"resolved_event"`
+	FlowPath      string `json:"flow_path,omitempty"`
+	Sink          string `json:"sink,omitempty"`
+	SchemaDigest  string `json:"schema_digest,omitempty"`
+	BusinessKey   string `json:"business_key,omitempty"`
+	PinDigest     string `json:"pin_digest"`
+	SourceFile    string `json:"source_file,omitempty"`
+	SourceLine    int    `json:"source_line,omitempty"`
+	SourceColumn  int    `json:"source_column,omitempty"`
 }
 
 type ContainedOperationView struct {
@@ -460,8 +469,8 @@ func buildFlows(source semanticview.Source, bundle *runtimecontracts.WorkflowCon
 				flow.Paths.SchemaFile,
 				flow.Paths.AgentsFile,
 			),
-			InputPins:  inputPinViews(source, flowID, schema.Pins.Inputs.EventPins),
-			OutputPins: outputPinViews(source, flowID, schema.Pins.Outputs.EventPins),
+			InputPins:  inputPinViews(source, flowID, source.FlowInputEventPins(flowID)),
+			OutputPins: outputPinViews(source, flowID, source.FlowOutputEventPins(flowID)),
 		}
 		if ref, ok := refsByFlow[flowID]; ok {
 			item.Activation = strings.TrimSpace(ref.Activation)
@@ -1026,42 +1035,39 @@ func singletonCoordinatorView(singleton runtimecontracts.SingletonCoordinatorCon
 	}
 }
 
-func inputPinViews(source semanticview.Source, flowID string, pins []runtimecontracts.FlowInputEventPin) []InputPinView {
+func inputPinViews(source semanticview.Source, flowID string, pins []runtimecontracts.CompiledFlowInputPin) []InputPinView {
 	out := make([]InputPinView, 0, len(pins))
 	for _, pin := range pins {
+		resolution := pin.Resolution()
+		provenance := pin.Provenance()
+		schema, _ := pin.EventSchema()
+		businessKey, _ := schema.BusinessKey()
 		item := InputPinView{
-			Name:           strings.TrimSpace(pin.PinName()),
-			Event:          strings.TrimSpace(pin.EventType()),
-			ResolvedEvent:  strings.TrimSpace(source.ResolveFlowEventReference(flowID, pin.EventType())),
-			Source:         strings.TrimSpace(pin.Source),
-			ResolutionMode: runtimecontracts.FlowInputResolutionModeCode(pin.Resolution.Mode),
-		}
-		if len(pin.Carries) > 0 {
-			item.Carries = make(map[string]InputPinCarryView, len(pin.Carries))
-			for name, carry := range pin.Carries {
-				item.Carries[strings.TrimSpace(name)] = InputPinCarryView{
-					From:     strings.TrimSpace(carry.From),
-					Type:     strings.TrimSpace(carry.Type),
-					Optional: carry.Optional,
-					Convert:  strings.TrimSpace(carry.Convert),
-				}
-			}
+			Event: pin.EventType(), ResolvedEvent: source.ResolveFlowEventReference(flowID, pin.EventType()),
+			FlowPath: pin.FlowPath(), Source: runtimecontracts.FlowInputPinSourceCode(pin.Source()),
+			ResolutionMode: runtimecontracts.FlowInputResolutionModeCode(resolution.Mode), ResolutionFrom: resolution.From,
+			ResolutionAggregation: resolution.Aggregation, ResolutionWindow: resolution.Window,
+			ResolutionDedupBy: resolution.DedupBy, ResolutionSingleton: resolution.Singleton,
+			ResolutionRepliesTo: resolution.RepliesTo, ResolutionCorrelationKey: resolution.CorrelationKey,
+			SchemaDigest: schema.AcceptanceSchemaDigest(), BusinessKey: businessKey.Field, PinDigest: pin.Digest(),
+			SourceFile: provenance.SourceFile, SourceLine: provenance.SourceLine, SourceColumn: provenance.SourceColumn,
 		}
 		out = append(out, item)
 	}
 	return out
 }
 
-func outputPinViews(source semanticview.Source, flowID string, pins []runtimecontracts.FlowOutputEventPin) []OutputPinView {
+func outputPinViews(source semanticview.Source, flowID string, pins []runtimecontracts.CompiledFlowOutputPin) []OutputPinView {
 	out := make([]OutputPinView, 0, len(pins))
 	for _, pin := range pins {
+		provenance := pin.Provenance()
+		schema, _ := pin.EventSchema()
+		businessKey, _ := schema.BusinessKey()
 		out = append(out, OutputPinView{
-			Name:          strings.TrimSpace(pin.PinName()),
-			Event:         strings.TrimSpace(pin.EventType()),
-			ResolvedEvent: strings.TrimSpace(source.ResolveFlowEventReference(flowID, pin.EventType())),
-			Sink:          runtimecontracts.FlowOutputSinkCode(pin.Sink),
-			Key:           strings.TrimSpace(pin.Key),
-			Carries:       normalizedStrings(pin.Carries),
+			Event: pin.EventType(), ResolvedEvent: source.ResolveFlowEventReference(flowID, pin.EventType()),
+			FlowPath: pin.FlowPath(), Sink: runtimecontracts.FlowOutputSinkCode(pin.Sink()),
+			SchemaDigest: schema.AcceptanceSchemaDigest(), BusinessKey: businessKey.Field, PinDigest: pin.Digest(),
+			SourceFile: provenance.SourceFile, SourceLine: provenance.SourceLine, SourceColumn: provenance.SourceColumn,
 		})
 	}
 	return out

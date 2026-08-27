@@ -216,7 +216,7 @@ func sqliteDynamicActivationBundle(t *testing.T) *runtimecontracts.WorkflowContr
 				InitialState: "pending",
 				States:       []string{"pending"},
 				Pins: runtimecontracts.FlowPins{
-					Inputs: runtimecontracts.FlowInputPins{Events: []string{"component_scaffold.spawn_requested"}},
+					Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "component_scaffold.spawn_requested"}}},
 				},
 			},
 		},

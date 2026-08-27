@@ -6,9 +6,7 @@ states: [pending, active, complete]
 pins:
   inputs:
     events:
-      - name: scout_requested
-        event: scout.requested
+      - scout.requested
   outputs:
     events:
-      - name: scout_completed
-        event: scout.completed
+      - scout.completed

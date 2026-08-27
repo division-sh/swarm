@@ -4,5 +4,3 @@ states: [idle, done]
 pins:
   inputs:
     events: [task.requested]
-  outputs:
-    events: []

@@ -105,7 +105,7 @@ func TestResolveFlowEventProof_TemplateInstanceOutputUsesTemplateCatalog(t *test
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: "template",
 			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"child.done"}},
+				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "child.done"}}},
 			},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{

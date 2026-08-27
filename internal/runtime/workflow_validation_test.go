@@ -64,17 +64,19 @@ func TestProductionValidationRejectsRootHarnessOutput(t *testing.T) {
 		Pins: runtimecontracts.FlowPins{
 			Outputs: runtimecontracts.FlowOutputPins{
 				EventPins: []runtimecontracts.FlowOutputEventPin{{
-					Name:  "root_completed",
 					Event: "root.completed",
 					Sink:  runtimecontracts.FlowOutputSinkHarness,
 				}},
 			},
 		},
 	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatalf("compile root harness output semantics: %v", err)
+	}
 	source := semanticview.Wrap(bundle)
 	opts := DefaultWorkflowContractValidationOptions(nil, executionposture.Live)
 	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, opts)
-	if err == nil || !strings.Contains(err.Error(), "production validation rejects test-only output sink: harness at root_completed") {
+	if err == nil || !strings.Contains(err.Error(), "production validation rejects test-only output sink: harness at root.completed") {
 		t.Fatalf("ValidateWorkflowContractSurface error = %v, want root harness output production rejection", err)
 	}
 	if result.HarnessObservedOutputCount != 1 || result.ProductionValid {
@@ -86,18 +88,11 @@ func TestValidateWorkflowContractSurfaceRejectsProgrammaticUnknownOutputSink(t *
 	bundle := testRuntimeWorkflowValidationBundle()
 	bundle.RootSchema = &runtimecontracts.FlowSchemaDocument{
 		Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{
-			Name: "root_completed", Event: "root.completed", Sink: runtimecontracts.FlowOutputSink(255),
+			Event: "root.completed", Sink: runtimecontracts.FlowOutputSink(255),
 		}}}},
 	}
-	bundle.Semantics.FlowOutputEventPins = map[string][]runtimecontracts.FlowOutputEventPin{
-		"": bundle.RootSchema.Pins.Outputs.EventPins,
-	}
-	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), semanticview.Wrap(bundle), DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
-	if err == nil || !strings.Contains(err.Error(), "output pin sink is invalid at root_completed") {
-		t.Fatalf("ValidateWorkflowContractSurface error = %v, want invalid sink rejection", err)
-	}
-	if result.ProductionValid {
-		t.Fatalf("validation result = %#v, want production_valid=false", result)
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err == nil || !strings.Contains(err.Error(), "output pin sink is invalid") {
+		t.Fatalf("CompileWorkflowSemantics error = %v, want invalid sink rejection", err)
 	}
 }
 

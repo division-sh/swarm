@@ -4,15 +4,10 @@ instance: operating_id
 pins:
   inputs:
     events:
-      - name: operating_report_requested
-        event: operating.report.requested
+      - event: operating.report.requested
         resolution:
           mode: create
-        carries:
-          operating_id:
-            from: event.id
-            type: text
+          from: event.id
   outputs:
     events:
-      - name: operating_reported
-        event: operating.reported
+      - operating.reported

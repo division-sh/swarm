@@ -104,7 +104,7 @@ func TestResolveFlowInputAutoWire_DoesNotInferSiblingProducerForUniquePinMatch(t
 		Paths: FlowContractPaths{ID: "producer", Flow: "producer"},
 		Schema: FlowSchemaDocument{
 			Pins: FlowPins{
-				Outputs: FlowOutputPins{Events: []string{"scan.requested"}},
+				Outputs: FlowOutputPins{EventPins: []FlowOutputEventPin{{Event: "scan.requested"}}},
 			},
 		},
 		Path: "producer",
@@ -113,7 +113,7 @@ func TestResolveFlowInputAutoWire_DoesNotInferSiblingProducerForUniquePinMatch(t
 		Paths: FlowContractPaths{ID: "consumer", Flow: "consumer"},
 		Schema: FlowSchemaDocument{
 			Pins: FlowPins{
-				Inputs: FlowInputPins{Events: []string{"scan.requested"}},
+				Inputs: FlowInputPins{EventPins: []FlowInputEventPin{{Event: "scan.requested"}}},
 			},
 		},
 		Path: "consumer",
@@ -143,7 +143,7 @@ func TestResolveFlowInputAutoWire_DoesNotExposeAmbiguousSiblingProducerFallback(
 		Paths: FlowContractPaths{ID: "producer_a", Flow: "producer_a"},
 		Schema: FlowSchemaDocument{
 			Pins: FlowPins{
-				Outputs: FlowOutputPins{Events: []string{"ticket.ready"}},
+				Outputs: FlowOutputPins{EventPins: []FlowOutputEventPin{{Event: "ticket.ready"}}},
 			},
 		},
 		Path: "producer_a",
@@ -152,7 +152,7 @@ func TestResolveFlowInputAutoWire_DoesNotExposeAmbiguousSiblingProducerFallback(
 		Paths: FlowContractPaths{ID: "producer_b", Flow: "producer_b"},
 		Schema: FlowSchemaDocument{
 			Pins: FlowPins{
-				Outputs: FlowOutputPins{Events: []string{"ticket.ready"}},
+				Outputs: FlowOutputPins{EventPins: []FlowOutputEventPin{{Event: "ticket.ready"}}},
 			},
 		},
 		Path: "producer_b",
@@ -161,7 +161,7 @@ func TestResolveFlowInputAutoWire_DoesNotExposeAmbiguousSiblingProducerFallback(
 		Paths: FlowContractPaths{ID: "consumer", Flow: "consumer"},
 		Schema: FlowSchemaDocument{
 			Pins: FlowPins{
-				Inputs: FlowInputPins{Events: []string{"ticket.ready"}},
+				Inputs: FlowInputPins{EventPins: []FlowInputEventPin{{Event: "ticket.ready"}}},
 			},
 		},
 		Path: "consumer",

@@ -6,6 +6,5 @@ pins:
     events: [export.requested]
   outputs:
     events:
-      - name: item.exported
-        event: item.exported
+      - event: item.exported
         sink: harness

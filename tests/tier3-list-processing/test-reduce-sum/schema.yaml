@@ -6,6 +6,5 @@ pins:
     events: [values.submitted]
   outputs:
     events:
-      - name: values.totaled
-        event: values.totaled
+      - event: values.totaled
         sink: harness

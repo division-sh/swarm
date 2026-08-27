@@ -6,6 +6,5 @@ pins:
     events: [score.final]
   outputs:
     events:
-      - name: result.demoted
-        event: result.demoted
+      - event: result.demoted
         sink: harness

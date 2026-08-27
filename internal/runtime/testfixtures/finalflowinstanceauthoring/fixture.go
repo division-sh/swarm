@@ -13,15 +13,15 @@ const (
 
 	ProducerFlowID    = "producer"
 	ProducerNodeID    = "producer-node"
-	ProducerInputPin  = "account_requested"
-	ProducerOutputPin = "account_ready"
+	ProducerInputPin  = "account.requested"
+	ProducerOutputPin = "account.ready"
 	ProducerInput     = "account.requested"
 	ProducerOutput    = "account.ready"
 
 	TemplateFlowID       = "account"
 	TemplateNodeID       = "account-node"
 	TemplateEntityType   = "account_state"
-	TemplateInputPin     = "account_ready"
+	TemplateInputPin     = "account.ready"
 	TemplateInstanceBy   = "account_id"
 	TemplatePayloadKey   = "account_id"
 	TemplateFlowInstance = TemplateFlowID
@@ -31,7 +31,7 @@ const (
 
 type Options struct {
 	RetiredInstanceKey          bool
-	MissingOutputCarries        bool
+	OptionalProducerIdentity    bool
 	UnsupportedReceiverSelector bool
 	ProducerTarget              bool
 	ProducerBroadcast           bool
@@ -90,8 +90,8 @@ func applyRoutingMutation(t testing.TB, root string, opts Options) {
 	if opts.RetiredInstanceKey {
 		canonicalrouting.ApplyTemplateSelectOrCreateNegativeMutation(t, root, canonicalrouting.TemplateSelectOrCreateRetiredInstanceKey)
 	}
-	if opts.MissingOutputCarries {
-		canonicalrouting.ApplyTemplateSelectOrCreateNegativeMutation(t, root, canonicalrouting.TemplateSelectOrCreateMissingCarry)
+	if opts.OptionalProducerIdentity {
+		canonicalrouting.ApplyTemplateSelectOrCreateNegativeMutation(t, root, canonicalrouting.TemplateSelectOrCreateOptionalIdentitySource)
 	}
 	if opts.UnsupportedReceiverSelector {
 		canonicalrouting.ApplyTemplateSelectOrCreateNegativeMutation(t, root, canonicalrouting.TemplateSelectOrCreateReceiverSelector)

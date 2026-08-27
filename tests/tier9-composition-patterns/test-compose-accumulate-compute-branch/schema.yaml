@@ -7,6 +7,5 @@ pins:
     events: [score.submitted]
   outputs:
     events:
-      - name: result.high
-        event: result.high
+      - event: result.high
         sink: harness

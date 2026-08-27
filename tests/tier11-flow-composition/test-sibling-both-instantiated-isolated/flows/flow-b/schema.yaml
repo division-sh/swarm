@@ -5,5 +5,3 @@ states: [new, active, finished]
 pins:
   inputs:
     events: [work.begin]
-  outputs:
-    events: []

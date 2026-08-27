@@ -6,4 +6,4 @@ pins:
   inputs:
     events: [task.completed]
   outputs:
-    events: [task.logged, tracker/task.record]
+    events: [task.logged, task.record]

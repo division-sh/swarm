@@ -16,14 +16,12 @@ platform_version: ">=0.7.0 <0.8.0"
 pins:
   inputs:
     events:
-      - {name: rules_selected, event: rules.selected, source: external}
-      - {name: rules_no_match, event: rules.no_match, source: external}
-      - {name: rules_evaluation_failed, event: rules.evaluation_failed, source: external}
-      - {name: complete_selected, event: complete.selected, source: external}
-      - {name: complete_no_match, event: complete.no_match, source: external}
-      - {name: direct, event: direct, source: external}
-  outputs:
-    events: []
+      - {event: rules.selected, source: external}
+      - {event: rules.no_match, source: external}
+      - {event: rules.evaluation_failed, source: external}
+      - {event: complete.selected, source: external}
+      - {event: complete.no_match, source: external}
+      - {event: direct, source: external}
 `)
 	writeClosedVariantFile(t, root, "events.yaml", `rules.selected: {swarm: {source: external}}
 rules.no_match: {swarm: {source: external}}
@@ -89,8 +87,7 @@ stages:
 pins:
   inputs:
     events:
-      - name: item_completed
-        event: item.completed
+      - event: item.completed
         source: external
 `
 	joinEntities := `join_state:
@@ -171,8 +168,7 @@ stages:
 pins:
   inputs:
     events:
-      - name: timer_cancel
-        event: timer.cancel
+      - event: timer.cancel
         source: external
 `)
 	writeClosedVariantFile(t, root, "events.yaml", `timer.cancel:
@@ -212,8 +208,7 @@ connect:
 pins:
   inputs:
     events:
-      - name: deploy_completed
-        event: deploy.done
+      - deploy.done
 `)
 	writeClosedVariantFile(t, root, "entities.yaml", "root_state: {}\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-receiver:
@@ -232,8 +227,7 @@ instance: producer_id
 pins:
   outputs:
     events:
-      - name: deploy_done
-        event: deploy.done
+      - deploy.done
 `, "deploy.done: {}\n", "producer_state:\n  producer_id: string\n", "")
 	return root
 }

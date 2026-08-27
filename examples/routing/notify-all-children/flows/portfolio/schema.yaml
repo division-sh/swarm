@@ -5,28 +5,17 @@ states: [active]
 pins:
   inputs:
     events:
-      - name: portfolio_opened
-        event: portfolio.opened
+      - event: portfolio.opened
         source: external
-      - name: account_register_requested
-        event: portfolio.account.register.requested
+      - event: portfolio.account.register.requested
         source: external
-      - name: accounts_register_requested
-        event: portfolio.accounts.register.requested
+      - event: portfolio.accounts.register.requested
         source: external
-      - name: membership_seeded
-        event: portfolio.membership.seeded
+      - event: portfolio.membership.seeded
         source: external
-      - name: notify_requested
-        event: portfolio.notify.requested
+      - event: portfolio.notify.requested
         source: external
   outputs:
     events:
-      - name: account_registered
-        event: account.registered
-        key: account_id
-        carries: [account_id]
-      - name: account_notify_requested
-        event: account.notify.requested
-        key: account_id
-        carries: [account_id, command]
+      - account.registered
+      - account.notify.requested

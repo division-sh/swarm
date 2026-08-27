@@ -1300,13 +1300,13 @@ func normalizedConfiguredEventList(raw []string, vars map[string]string) []strin
 
 func flowLocalEventSet(schema runtimecontracts.FlowSchemaDocument, scope semanticview.FlowScope) map[string]struct{} {
 	out := map[string]struct{}{}
-	for _, eventType := range schema.Pins.Inputs.Events {
+	for _, eventType := range scope.InputEvents {
 		eventType = strings.TrimSpace(eventType)
 		if eventType != "" {
 			out[eventType] = struct{}{}
 		}
 	}
-	for _, eventType := range schema.Pins.Outputs.Events {
+	for _, eventType := range scope.OutputEvents {
 		eventType = strings.TrimSpace(eventType)
 		if eventType != "" {
 			out[eventType] = struct{}{}

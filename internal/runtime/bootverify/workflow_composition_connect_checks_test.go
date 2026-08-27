@@ -73,7 +73,7 @@ func TestRun_AllowsTemplateInstanceKeyCompositionConnectWithoutAddress(t *testin
 func TestRun_AllowsCreateInputResolutionCompositionConnect(t *testing.T) {
 	root := writeCreateResolutionCompositionConnectFixture(t, createResolutionCompositionFixtureOptions{
 		mode:         runtimecontracts.FlowInputResolutionModeCreate,
-		source:       runtimecontracts.FlowInputCarrySourceGeneratedUUID,
+		source:       runtimecontracts.FlowInputInstanceSourceGeneratedUUIDPath,
 		includeCarry: true,
 	})
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
@@ -99,7 +99,7 @@ func TestCreateSyntheticCarryRejectsStaticallyAuthoredProducerCollision(t *testi
 	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-	if !reportContains(report.Errors(), "composition_connect_validation", "emit field validation_case_id conflicts with receiver-owned carry generated.uuid") {
+	if !reportContains(report.Errors(), "composition_connect_validation", "producer event validation.requested field validation_case_id conflicts with receiver-owned resolution projection generated.uuid") {
 		t.Fatalf("expected producer/synthetic carry collision blocker, got %#v", report.Errors())
 	}
 }
@@ -140,28 +140,6 @@ func TestRun_AllowsSelectOrCreateInputResolutionCompositionConnect(t *testing.T)
 	}
 }
 
-func TestRunRejectsProviderOnlyProjectionOptionsOnFlowInputCarries(t *testing.T) {
-	root := writeSelectResolutionCompositionConnectFixture(t, selectResolutionCompositionFixtureOptions{})
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-	pins := bundle.Semantics.FlowInputEventPins["account"]
-	if len(pins) == 0 {
-		t.Fatal("account input pin fixture is unavailable")
-	}
-	pin := &pins[0]
-	for name, carry := range pin.Carries {
-		carry.Optional = true
-		carry.Convert = runtimecontracts.FieldProjectionConvertNumberToText
-		pin.Carries[name] = carry
-		break
-	}
-	bundle.Semantics.FlowInputEventPins["account"] = pins
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-	if !reportContains(report.Errors(), "composition_connect_validation", "reserved for provider normalized-event projections") {
-		t.Fatalf("expected flow carry projection blocker, got %#v", report.Errors())
-	}
-}
-
 func TestRun_FailsClosedForInvalidSelectInputResolution(t *testing.T) {
 	tests := []struct {
 		name string
@@ -169,12 +147,12 @@ func TestRun_FailsClosedForInvalidSelectInputResolution(t *testing.T) {
 		want string
 	}{
 		{
-			name: "undeclared carried key",
+			name: "undeclared instance source",
 			opts: selectResolutionCompositionFixtureOptions{instanceKey: "missing_account_id"},
-			want: "must declare a carry named account_id",
+			want: "has no declared type",
 		},
 		{
-			name: "type mismatch",
+			name: "source type mismatch",
 			opts: selectResolutionCompositionFixtureOptions{carryType: "integer"},
 			want: "key_types_incompatible",
 		},
@@ -211,7 +189,7 @@ func TestRun_FailsClosedForInvalidCreateInputResolution(t *testing.T) {
 			name: "non-runnable modes are design-locked but not runnable",
 			opts: createResolutionCompositionFixtureOptions{
 				mode:         runtimecontracts.FlowInputResolutionModeFanOut,
-				source:       runtimecontracts.FlowInputCarrySourceGeneratedUUID,
+				source:       runtimecontracts.FlowInputInstanceSourceGeneratedUUIDPath,
 				includeCarry: true,
 			},
 			want: "instance_resolution_unimplemented",
@@ -225,18 +203,18 @@ func TestRun_FailsClosedForInvalidCreateInputResolution(t *testing.T) {
 			},
 			want: "only generated.uuid is supported",
 		},
-		{
-			name: "missing carried instance key",
-			opts: createResolutionCompositionFixtureOptions{
-				mode:   runtimecontracts.FlowInputResolutionModeCreate,
-				source: runtimecontracts.FlowInputCarrySourceGeneratedUUID,
-			},
-			want: "must declare a carry named validation_case_id",
-		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			root := writeCreateResolutionCompositionConnectFixture(t, tc.opts)
+			if tc.opts.mode == runtimecontracts.FlowInputResolutionModeFanOut {
+				repoRoot := repoRootForBootverifyTest(t)
+				_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+				if err == nil || !strings.Contains(err.Error(), "generated.uuid is only valid for resolution mode create") {
+					t.Fatalf("expected immutable pin compilation rejection, got %v", err)
+				}
+				return
+			}
 			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
 
 			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -264,13 +242,6 @@ func TestRun_ValidatesAuthoritativeInstanceSourceTypeMatrix(t *testing.T) {
 			name: "select rejects omitted annotation with incompatible schema source",
 			root: func(t *testing.T) string {
 				return canonicalrouting.CopyTemplateSelectResolution(t, canonicalrouting.TemplateSelectResolutionOptions{Invalidity: canonicalrouting.SelectResolutionSourceTypeMismatchWithoutCarryType})
-			},
-			wantError: true,
-		},
-		{
-			name: "select-or-create rejects dishonest annotation",
-			root: func(t *testing.T) string {
-				return canonicalrouting.CopyTemplateSelectResolution(t, canonicalrouting.TemplateSelectResolutionOptions{Mode: canonicalrouting.SelectResolutionSelectOrCreate, Invalidity: canonicalrouting.SelectResolutionDishonestCarryType})
 			},
 			wantError: true,
 		},
@@ -318,13 +289,6 @@ func TestRun_ValidatesAuthoritativeInstanceSourceTypeMatrix(t *testing.T) {
 			name: "create generated uuid rejects incompatible receiver without annotation",
 			root: func(t *testing.T) string {
 				return canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: canonicalrouting.CreateMintUUID, Invalidity: canonicalrouting.CreateResolutionSourceTypeMismatchWithoutCarryType})
-			},
-			wantError: true,
-		},
-		{
-			name: "create event id rejects dishonest annotation",
-			root: func(t *testing.T) string {
-				return canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{Mint: canonicalrouting.CreateMintEventID, Invalidity: canonicalrouting.CreateResolutionDishonestCarryType})
 			},
 			wantError: true,
 		},
@@ -543,7 +507,7 @@ func TestRun_FailsClosedForInvalidParentCompositionConnect(t *testing.T) {
 		{name: "missing producer output pin", variant: canonicalrouting.CompositionConnectMissingProducerPin, want: "producer_output_pin_missing"},
 		{name: "missing receiver flow", variant: canonicalrouting.CompositionConnectMissingReceiverFlow, want: "receiver_flow_missing"},
 		{name: "missing receiver input pin", variant: canonicalrouting.CompositionConnectMissingReceiverPin, want: "receiver_input_pin_missing"},
-		{name: "adapter cannot rename event", variant: canonicalrouting.CompositionConnectAdapterWithoutRename, want: "receiver_input_pin_missing"},
+		{name: "missing explicit rename", variant: canonicalrouting.CompositionConnectWithoutRename, want: "receiver_input_pin_missing"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -572,84 +536,6 @@ func TestRun_AcceptsParentCompositionConnectToRootInput(t *testing.T) {
 		if finding.CheckID == "composition_connect_validation" {
 			t.Fatalf("unexpected composition connect finding: %#v", finding)
 		}
-	}
-}
-
-func TestRun_FailsClosedForInvalidOutputPinKeyCarriesEvidence(t *testing.T) {
-	tests := []struct {
-		name    string
-		variant canonicalrouting.CompositionConnectVariant
-		want    string
-	}{
-		{name: "connected output missing key", variant: canonicalrouting.CompositionConnectMissingOutputKey, want: "missing_key"},
-		{name: "connected output missing carries", variant: canonicalrouting.CompositionConnectMissingOutputCarries, want: "key_not_carried"},
-		{name: "key not listed in carries", variant: canonicalrouting.CompositionConnectKeyNotCarried, want: "key_not_carried"},
-		{name: "duplicate carried field", variant: canonicalrouting.CompositionConnectDuplicateCarry, want: "duplicate_carry_field"},
-		{name: "ambiguous output key", variant: canonicalrouting.CompositionConnectAmbiguousOutputKey, want: "ambiguous_output_key"},
-		{name: "declared key missing from event payload schema", variant: canonicalrouting.CompositionConnectMissingPayloadKey, want: "does not declare payload field component_id"},
-		{name: "declared key is not scalar", variant: canonicalrouting.CompositionConnectNonScalarKey, want: "not a scalar key type"},
-		{name: "node emit does not prove carried field", variant: canonicalrouting.CompositionConnectEmitMissingKey, want: "emit_payload_missing_key"},
-		{name: "agent emit_events cannot prove carried field", variant: canonicalrouting.CompositionConnectAgentEmitUnproven, want: "agent_emit_payload_unproven"},
-		{name: "auto_emit_on_create cannot prove carried field", variant: canonicalrouting.CompositionConnectAutoEmitUnproven, want: "auto_emit_payload_unproven"},
-		{name: "workflow timer cannot prove carried field", variant: canonicalrouting.CompositionConnectTimerUnproven, want: "timer_payload_unproven"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			root := writeCompositionConnectBootverifyFixture(t, tc.variant)
-			bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-			if !reportContains(report.Errors(), "output_pin_key_carries_validation", tc.want) {
-				t.Fatalf("expected output_pin_key_carries_validation %q, got %#v", tc.want, report.Errors())
-			}
-		})
-	}
-}
-
-func TestRun_FailsClosedForRootAutoEmitOutputPinKeyCarriesEvidence(t *testing.T) {
-	root := writeRootAutoEmitOutputPinKeyCarriesFixture(t)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if !reportContains(report.Errors(), "output_pin_key_carries_validation", "auto_emit_payload_unproven") {
-		t.Fatalf("expected root auto_emit output_pin_key_carries_validation error, got %#v", report.Errors())
-	}
-}
-
-func TestOutputPinKeyCarriesPinsForEventIgnoresPublicPinName(t *testing.T) {
-	root := writeCompositionConnectBootverifyFixture(t, canonicalrouting.CompositionConnectValid)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-	source := semanticview.Wrap(bundle)
-
-	if got := outputPinKeyCarriesPinsForEvent(source, "producer", "deploy_done"); len(got) != 0 {
-		t.Fatalf("output pins for public pin name deploy_done = %#v, want none", got)
-	}
-	if got := outputPinKeyCarriesPinsForEvent(source, "producer", "deploy.done"); len(got) != 1 || got[0].PinName() != "deploy_done" {
-		t.Fatalf("output pins for emitted event deploy.done = %#v, want deploy_done pin", got)
-	}
-}
-
-func TestRun_AllowsImportBoundaryAliasAsConnectEventAdapter(t *testing.T) {
-	root := writeCompositionConnectBootverifyFixture(t, canonicalrouting.CompositionConnectInputAlias)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if reportContains(report.Errors(), "composition_connect_validation", "event_alias_or_adapter_invalid") {
-		t.Fatalf("import-boundary alias should satisfy connect event adaptation, got %#v", report.Errors())
-	}
-}
-
-func TestRun_AllowsOutputBoundaryAliasAsConnectEventAdapter(t *testing.T) {
-	root := writeCompositionConnectBootverifyFixture(t, canonicalrouting.CompositionConnectOutputAlias)
-	bundle := loadFixtureBundleAt(t, repoRootForBootverifyTest(t), root, runtimecontracts.DefaultPlatformSpecFile(repoRootForBootverifyTest(t)))
-
-	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
-
-	if reportContains(report.Errors(), "composition_connect_validation", "event_alias_or_adapter_invalid") {
-		t.Fatalf("producer import-boundary alias should satisfy connect event adaptation, got %#v", report.Errors())
 	}
 }
 
@@ -709,11 +595,6 @@ func writeRootCompositionConnectBootverifyFixture(t *testing.T) string {
 	return canonicalrouting.CopyRootOutputConnect(t, canonicalrouting.RootConnectCanonicalEmit)
 }
 
-func writeRootAutoEmitOutputPinKeyCarriesFixture(t *testing.T) string {
-	t.Helper()
-	return canonicalrouting.CopyRootAutoEmitKeyCarries(t)
-}
-
 type createResolutionCompositionFixtureOptions struct {
 	mode         runtimecontracts.FlowInputResolutionMode
 	source       string
@@ -736,9 +617,9 @@ func writeSelectResolutionCompositionConnectFixture(t *testing.T, opts selectRes
 	invalidity := canonicalrouting.SelectResolutionValid
 	switch {
 	case strings.TrimSpace(opts.instanceKey) == "missing_account_id":
-		invalidity = canonicalrouting.SelectResolutionUndeclaredCarry
+		invalidity = canonicalrouting.SelectResolutionUndeclaredSource
 	case strings.TrimSpace(opts.carryType) == "integer":
-		invalidity = canonicalrouting.SelectResolutionCarryTypeMismatch
+		invalidity = canonicalrouting.SelectResolutionSourceTypeMismatch
 	case strings.TrimSpace(opts.receiverMode) == "static":
 		invalidity = canonicalrouting.SelectResolutionStaticReceiver
 	}
@@ -753,8 +634,6 @@ func writeCreateResolutionCompositionConnectFixture(t *testing.T, opts createRes
 		invalidity = canonicalrouting.CreateResolutionNonRunnableMode
 	case opts.source == "generated.random":
 		invalidity = canonicalrouting.CreateResolutionInvalidMint
-	case !opts.includeCarry:
-		invalidity = canonicalrouting.CreateResolutionMissingCarry
 	}
 	return canonicalrouting.CopyTemplateCreateResolution(t, canonicalrouting.TemplateCreateResolutionOptions{
 		Mint:       canonicalrouting.CreateMintUUID,

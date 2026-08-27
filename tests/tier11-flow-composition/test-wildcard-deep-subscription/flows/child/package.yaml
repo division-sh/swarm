@@ -10,4 +10,3 @@ connect:
   - event: task.done
     from: grandchild
     to: .
-    adapter: grandchild_task_done_to_child_task_done

@@ -74,12 +74,12 @@ steps:
 	}
 }
 
-func TestGeneratedInputFixturePlanResolvesExactPinAndIsContextDeterministic(t *testing.T) {
-	bundle := generatedInputFixtureBundle()
+func TestGeneratedInputFixturePlanResolvesExactEventAndIsContextDeterministic(t *testing.T) {
+	bundle := generatedInputFixtureBundle(t)
 	runner := scenarioRunner{bundle: bundle, source: semanticview.Wrap(bundle)}
 	evaluator := mustScenarioExpressionEvaluatorWithSeed(t, "scenario-a")
 
-	first, err := runner.compileGeneratedInputFixture(scenarioTestFile{FlowID: "alpha"}, evaluator, "entry")
+	first, err := runner.compileGeneratedInputFixture(scenarioTestFile{FlowID: "alpha"}, evaluator, "shared.received")
 	if err != nil {
 		t.Fatalf("compile alpha fixture: %v", err)
 	}
@@ -88,9 +88,9 @@ func TestGeneratedInputFixturePlanResolvesExactPinAndIsContextDeterministic(t *t
 		t.Fatalf("compile alpha fixture by event: %v", err)
 	}
 	if !reflect.DeepEqual(first, second) {
-		t.Fatalf("pin and event identity produced different plans:\npin=%#v\nevent=%#v", first, second)
+		t.Fatalf("repeated exact event identity produced different plans:\nfirst=%#v\nsecond=%#v", first, second)
 	}
-	if first.flowID != "alpha" || first.pinName != "entry" || first.eventKey == "" || first.schemaDigest == "" || len(first.canonicalSchema) == 0 {
+	if first.flowID != "alpha" || first.pinName != "shared.received" || first.eventKey == "" || first.schemaDigest == "" || len(first.canonicalSchema) == 0 {
 		t.Fatalf("alpha plan omitted exact evidence: %#v", first)
 	}
 	alphaPayload, err := first.materializePayload()
@@ -105,7 +105,7 @@ func TestGeneratedInputFixturePlanResolvesExactPinAndIsContextDeterministic(t *t
 		t.Fatalf("alpha payload = %#v, want context-derived UUID", alphaPayload)
 	}
 
-	beta, err := runner.compileGeneratedInputFixture(scenarioTestFile{FlowID: "beta"}, evaluator, "entry")
+	beta, err := runner.compileGeneratedInputFixture(scenarioTestFile{FlowID: "beta"}, evaluator, "shared.received")
 	if err != nil {
 		t.Fatalf("compile beta fixture: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestGeneratedInputFixturePlanResolvesExactPinAndIsContextDeterministic(t *t
 		t.Fatalf("flow-scoped plans were not isolated: alpha=%#v beta=%#v", first, beta)
 	}
 
-	otherScenario, err := runner.compileGeneratedInputFixture(scenarioTestFile{FlowID: "alpha"}, mustScenarioExpressionEvaluatorWithSeed(t, "scenario-b"), "entry")
+	otherScenario, err := runner.compileGeneratedInputFixture(scenarioTestFile{FlowID: "alpha"}, mustScenarioExpressionEvaluatorWithSeed(t, "scenario-b"), "shared.received")
 	if err != nil {
 		t.Fatalf("compile other scenario: %v", err)
 	}
@@ -129,23 +129,21 @@ func TestGeneratedInputFixturePlanResolvesExactPinAndIsContextDeterministic(t *t
 	}
 }
 
-func TestGeneratedInputFixtureCompilesOnlyRequestedInputAndNamesAmbiguousPins(t *testing.T) {
-	bundle := generatedInputFixtureBundle()
+func TestGeneratedInputFixtureCompilesOnlyRequestedInputAndRejectsDuplicateExactPins(t *testing.T) {
+	bundle := generatedInputFixtureBundle(t)
 	runner := scenarioRunner{bundle: bundle, source: semanticview.Wrap(bundle)}
 	evaluator := mustScenarioExpressionEvaluatorWithSeed(t, "requested-only")
-	if _, err := runner.compileGeneratedInputFixture(scenarioTestFile{FlowID: "alpha"}, evaluator, "entry"); err != nil {
+	if _, err := runner.compileGeneratedInputFixture(scenarioTestFile{FlowID: "alpha"}, evaluator, "shared.received"); err != nil {
 		t.Fatalf("unsupported sibling blocked requested fixture: %v", err)
 	}
 
 	alpha := bundle.FlowTree.ByID["alpha"]
 	alpha.Schema.Pins.Inputs.EventPins = append(alpha.Schema.Pins.Inputs.EventPins,
-		runtimecontracts.FlowInputEventPin{Name: "entry-copy", Event: "shared.received"},
+		runtimecontracts.FlowInputEventPin{Event: "shared.received"},
 	)
-	alpha.Schema.Pins.Inputs.Events = append(alpha.Schema.Pins.Inputs.Events, "shared.received")
 	bundle.FlowSchemas["alpha"] = alpha.Schema
-	_, err := runner.compileGeneratedInputFixture(scenarioTestFile{FlowID: "alpha"}, evaluator, "shared.received")
-	if err == nil || !strings.Contains(err.Error(), "entry (alpha/shared.received)") || !strings.Contains(err.Error(), "entry-copy (alpha/shared.received)") {
-		t.Fatalf("ambiguity error = %v, want every candidate pin", err)
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err == nil || !strings.Contains(err.Error(), "declared more than once") {
+		t.Fatalf("duplicate exact pin compile error = %v, want fail-closed", err)
 	}
 }
 
@@ -184,7 +182,7 @@ func TestGeneratedInputFixturePublishesResolvedEventThroughPublicRPC(t *testing.
 	}
 	runner := scenarioRunner{client: client, bundle: bundle, source: semanticview.Wrap(bundle), bundleHash: bundleHash}
 	state := &scenarioRunState{SetupEntities: map[string]scenarioSetupEntityBinding{}}
-	step := scenarioStep{Action: "publish", PublishEvent: "item_received", GeneratePayload: true}
+	step := scenarioStep{Action: "publish", PublishEvent: "item.received", GeneratePayload: true}
 	if err := runner.runPublishStep(context.Background(), scenarioTestFile{}, mustScenarioExpressionEvaluatorWithSeed(t, "public-rpc"), state, step); err != nil {
 		t.Fatalf("run generated publish step: %v", err)
 	}
@@ -213,10 +211,10 @@ func TestGeneratedInputFixtureLoadsComposedTelegramSchemaAndPublishesNormalizedE
 		t.Fatalf("composed source did not resolve imported Telegram schema: %#v", resolved)
 	}
 	census := semanticview.BuildAuthoredEventEndpointCensus(source)
-	association := census.ResolveDeclaredInputEndpoint("telegram-chat", "telegram_text_message")
+	association := census.ResolveDeclaredInputEndpoint("telegram-chat", eventName)
 	endpoint, ok := association.Endpoint()
-	if !ok || endpoint.PinName != "telegram_text_message" || endpoint.Event.EventKey() != eventName {
-		t.Fatalf("exact input census association = %#v, want telegram_text_message -> %s", association, eventName)
+	if !ok || endpoint.PinName != eventName || endpoint.Event.EventKey() != eventName {
+		t.Fatalf("exact input census association = %#v, want %s", association, eventName)
 	}
 
 	bundleHash, err := runtimecontracts.BundleHash(bundle)
@@ -250,7 +248,7 @@ func TestGeneratedInputFixtureLoadsComposedTelegramSchemaAndPublishesNormalizedE
 	}
 	runner := scenarioRunner{client: client, bundle: bundle, source: source, bundleHash: bundleHash}
 	state := &scenarioRunState{SetupEntities: map[string]scenarioSetupEntityBinding{}}
-	step := scenarioStep{Action: "publish", PublishEvent: "telegram_text_message", GeneratePayload: true}
+	step := scenarioStep{Action: "publish", PublishEvent: eventName, GeneratePayload: true}
 	if err := runner.runPublishStep(context.Background(), scenarioTestFile{FlowID: "telegram-chat"}, mustScenarioExpressionEvaluatorWithSeed(t, "telegram-normalized"), state, step); err != nil {
 		t.Fatalf("run generated Telegram publish step: %v", err)
 	}
@@ -329,7 +327,7 @@ text: authored fixture
 				bundleHash:   bundleHash,
 				contractsDir: contractsPath,
 			}
-			step := scenarioStep{Action: "publish", PublishEvent: "telegram_text_message", Payload: test.payload}
+			step := scenarioStep{Action: "publish", PublishEvent: "inbound.telegram.text_message", Payload: test.payload}
 			state := &scenarioRunState{SetupEntities: map[string]scenarioSetupEntityBinding{}}
 			if err := runner.runPublishStep(
 				context.Background(),
@@ -354,7 +352,7 @@ func TestSwarmTestGeneratesConfiguredTelegramInputThroughProductionCommand(t *te
 	writeWorkflowValidationFixtureFile(t, scenarioPath, `
 name: generated Telegram normalized input
 steps:
-  - publish: telegram_text_message
+  - publish: inbound.telegram.text_message
     payload: generate
 `)
 	bundleHash := servedEventPublishFixtureBundleHash(t, contractsPath)
@@ -434,7 +432,8 @@ func mustScenarioExpressionEvaluatorWithSeed(t *testing.T, seed string) *scenari
 	return evaluator
 }
 
-func generatedInputFixtureBundle() *runtimecontracts.WorkflowContractBundle {
+func generatedInputFixtureBundle(t testing.TB) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
 	alphaEntry := runtimecontracts.EventCatalogEntry{
 		Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
 			"alpha": {ExactSchema: exactToolInputSchema(runtimecontracts.MustToolInputSchema(
@@ -469,10 +468,9 @@ func generatedInputFixtureBundle() *runtimecontracts.WorkflowContractBundle {
 		Paths: runtimecontracts.FlowContractPaths{ID: "alpha", Flow: "alpha", PackageKey: "flows/alpha"},
 		Path:  "alpha",
 		Schema: runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{
-			Events: []string{"shared.received", "unsupported.received"},
 			EventPins: []runtimecontracts.FlowInputEventPin{
-				{Name: "entry", Event: "shared.received"},
-				{Name: "unsupported", Event: "unsupported.received"},
+				{Event: "shared.received"},
+				{Event: "unsupported.received"},
 			},
 		}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
@@ -484,15 +482,14 @@ func generatedInputFixtureBundle() *runtimecontracts.WorkflowContractBundle {
 		Paths: runtimecontracts.FlowContractPaths{ID: "beta", Flow: "beta", PackageKey: "flows/beta"},
 		Path:  "beta",
 		Schema: runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{
-			Events:    []string{"shared.received"},
-			EventPins: []runtimecontracts.FlowInputEventPin{{Name: "entry", Event: "shared.received"}},
+			EventPins: []runtimecontracts.FlowInputEventPin{{Event: "shared.received"}},
 		}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"shared.received": betaEntry},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{alpha, beta}}
 	root.Children[0].Parent = &root
 	root.Children[1].Parent = &root
-	return &runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
@@ -509,6 +506,10 @@ func generatedInputFixtureBundle() *runtimecontracts.WorkflowContractBundle {
 			"beta":  root.Children[1].Schema,
 		},
 	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatalf("compile generated-input fixture semantics: %v", err)
+	}
+	return bundle
 }
 
 func exactToolInputSchema(schema runtimecontracts.ToolInputSchema) *runtimecontracts.ToolInputSchema {

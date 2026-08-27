@@ -862,7 +862,7 @@ func sqliteFlowActivationBundle(t *testing.T) *runtimecontracts.WorkflowContract
 			"review": {
 				Mode: "template",
 				Pins: runtimecontracts.FlowPins{
-					Inputs: runtimecontracts.FlowInputPins{Events: []string{"task.started"}},
+					Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "task.started"}}},
 				},
 			},
 		},

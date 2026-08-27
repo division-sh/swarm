@@ -45,7 +45,7 @@ func TestFinalFlowInstanceAuthoringFixture_CoversSealedContractOwners(t *testing
 	if !ok {
 		t.Fatalf("producer output pin %s missing", finalflowinstanceauthoring.ProducerOutputPin)
 	}
-	if output.Event != finalflowinstanceauthoring.ProducerOutput || output.Key != "" || len(output.Carries) != 0 {
+	if output.EventType() != finalflowinstanceauthoring.ProducerOutput || output.Digest() == "" {
 		t.Fatalf("producer output = %#v, want canonical event without duplicate key ownership", output)
 	}
 
@@ -62,7 +62,7 @@ func TestFinalFlowInstanceAuthoringFixture_CoversSealedContractOwners(t *testing
 	if plan.ResolutionKind() != pinrouting.ConnectResolutionInstanceKey || !plan.RequiresRuntimeResolution() {
 		t.Fatalf("route plan resolution = %s runtime=%v, want instance_key runtime resolution", plan.ResolutionKind().Code(), plan.RequiresRuntimeResolution())
 	}
-	if sourceEndpoint.FlowID != finalflowinstanceauthoring.ProducerFlowID || sourceEndpoint.Pin != finalflowinstanceauthoring.ProducerOutputPin || sourceEndpoint.Key != "" {
+	if sourceEndpoint.FlowID != finalflowinstanceauthoring.ProducerFlowID || sourceEndpoint.Pin != finalflowinstanceauthoring.ProducerOutputPin || sourceEndpoint.PinDigest == "" {
 		t.Fatalf("route plan source = %#v, want %s.%s without producer key authority", sourceEndpoint, finalflowinstanceauthoring.ProducerFlowID, finalflowinstanceauthoring.ProducerOutputPin)
 	}
 	if receiverEndpoint.FlowID != finalflowinstanceauthoring.TemplateFlowID || receiverEndpoint.Pin != finalflowinstanceauthoring.TemplateInputPin || !plan.ReceiverEndpoint().IsTemplate() {
@@ -92,10 +92,10 @@ func TestFinalFlowInstanceAuthoringFixture_FailClosedMatrix(t *testing.T) {
 			loadError:   true,
 		},
 		{
-			name:        "missing receiver carry evidence",
-			opts:        finalflowinstanceauthoring.Options{MissingOutputCarries: true},
-			checkID:     "composition_connect_validation",
-			wantMessage: "must declare a carry named account_id",
+			name:        "optional producer identity source",
+			opts:        finalflowinstanceauthoring.Options{OptionalProducerIdentity: true},
+			wantMessage: "event key field \"account_id\" must be required",
+			loadError:   true,
 		},
 		{
 			name:        "normal connected receiver select_entity is illegal",

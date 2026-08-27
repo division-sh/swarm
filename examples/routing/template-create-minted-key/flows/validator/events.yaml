@@ -1,3 +1,4 @@
 validation.started:
+  key: validation_case_id
   candidate: text?
-  validation_case_id: uuid?
+  validation_case_id: uuid

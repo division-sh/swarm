@@ -13,8 +13,5 @@ stages:
 pins:
   inputs:
     events:
-      - name: telegram_update
-        event: inbound.telegram
+      - event: inbound.telegram
         source: external
-  outputs:
-    events: []

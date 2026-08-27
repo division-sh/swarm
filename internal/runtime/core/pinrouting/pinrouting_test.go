@@ -287,35 +287,35 @@ func testPinRoutingSource(sink runtimecontracts.FlowOutputSink, events map[strin
 	child := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
 		Schema: runtimecontracts.FlowSchemaDocument{Mode: "template", Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
-			EventPins: []runtimecontracts.FlowOutputEventPin{{Name: "child.done", Event: "child.done", Sink: sink}},
+			EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "child.done", Sink: sink}},
 		}}},
 		Path: "child",
 	}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		Events:      events,
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"child": child.Schema},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			FlowOutputs:         map[string][]string{"child": {"child.done"}},
-			FlowOutputEventPins: map[string][]runtimecontracts.FlowOutputEventPin{"child": child.Schema.Pins.Outputs.EventPins},
-		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child}},
 			ByID: map[string]*runtimecontracts.FlowContractView{"child": &child},
 		},
-	})
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
+	return semanticview.Wrap(bundle)
 }
 
 func testRootPinRoutingSource(sink runtimecontracts.FlowOutputSink, catalog map[string]runtimecontracts.EventCatalogEntry) semanticview.Source {
 	if catalog == nil {
 		catalog = map[string]runtimecontracts.EventCatalogEntry{"root.ready": {}}
 	}
-	pin := runtimecontracts.FlowOutputEventPin{Name: "root.ready", Event: "root.ready", Sink: sink}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	pin := runtimecontracts.FlowOutputEventPin{Event: "root.ready", Sink: sink}
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{pin}}}},
 		Events:     catalog,
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			FlowOutputs:         map[string][]string{"": {"root.ready"}},
-			FlowOutputEventPins: map[string][]runtimecontracts.FlowOutputEventPin{"": {pin}},
-		},
-	})
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
+	return semanticview.Wrap(bundle)
 }

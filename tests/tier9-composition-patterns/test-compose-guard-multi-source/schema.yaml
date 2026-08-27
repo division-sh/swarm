@@ -6,6 +6,5 @@ pins:
     events: [candidate.submitted]
   outputs:
     events:
-      - name: candidate.accepted
-        event: candidate.accepted
+      - event: candidate.accepted
         sink: harness

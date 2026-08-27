@@ -3,15 +3,11 @@ mode: static
 pins:
   inputs:
     events:
-      - name: requester_setup_requested
-        event: requester.setup.requested
+      - event: requester.setup.requested
         source: external
-      - name: request_submitted
-        event: request.submitted
+      - event: request.submitted
         source: external
   outputs:
     events:
-      - name: requester_setup
-        event: requester.setup
-      - name: request_submitted
-        event: requester.requested
+      - requester.setup
+      - requester.requested

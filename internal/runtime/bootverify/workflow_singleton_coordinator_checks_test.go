@@ -18,8 +18,6 @@ mode: singleton
 pins:
   inputs:
     events: [job.received]
-  outputs:
-    events: []
 `, singletonCoordinatorEntitiesYAML(), "", "")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -36,8 +34,6 @@ mode: singleton
 pins:
   inputs:
     events: [job.received]
-  outputs:
-    events: []
 `, `
 coordinator_state: {}
 `, `
@@ -66,8 +62,6 @@ instance: vertical_id
 pins:
   inputs:
     events: [job.received]
-  outputs:
-    events: []
 `, singletonCoordinatorEntitiesYAML(), "", "")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
@@ -84,8 +78,6 @@ mode: singleton
 pins:
   inputs:
     events: [job.received]
-  outputs:
-    events: []
 `, `
 coordinator_state:
   verticals: map[text]MissingType
@@ -105,8 +97,6 @@ mode: static
 pins:
   inputs:
     events: [job.received]
-  outputs:
-    events: []
 `, `
 coordinator_state:
   status: text
@@ -126,8 +116,6 @@ mode: singleton
 pins:
   inputs:
     events: [job.received]
-  outputs:
-    events: []
 `, singletonCoordinatorEntitiesYAML(), "", `
 coordinator-node:
   id: coordinator-node
@@ -267,8 +255,6 @@ states: [active, done, failed]
 pins:
   inputs:
     events: [job.received]
-  outputs:
-    events: []
 `, tc.entities, "", tc.nodes)
 			demands := BuildSingletonCoordinatorDemandProjection(semanticview.Wrap(bundle))
 			for _, demand := range demands {
@@ -304,8 +290,6 @@ mode: singleton
 pins:
   inputs:
     events: [job.received]
-  outputs:
-    events: []
 `, `
 coordinator_state:
   verticals:
@@ -426,8 +410,6 @@ mode: singleton
 pins:
   inputs:
     events: [job.received]
-  outputs:
-    events: []
 `, `
 coordinator_state:
   verticals:
@@ -541,8 +523,6 @@ mode: singleton
 pins:
   inputs:
     events: [job.received]
-  outputs:
-    events: []
 `, `
 coordinator_state:
   verticals:
@@ -584,8 +564,6 @@ loops:
 pins:
   inputs:
     events: [job.received]
-  outputs:
-    events: []
 `, `
 coordinator_state:
   verticals:
@@ -622,8 +600,6 @@ states: [active, done, failed]
 pins:
   inputs:
     events: [job.received]
-  outputs:
-    events: []
 `
 	const nodes = `
 coordinator-node:

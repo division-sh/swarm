@@ -6,6 +6,5 @@ pins:
     events: [items.submitted]
   outputs:
     events:
-      - name: items.counted
-        event: items.counted
+      - event: items.counted
         sink: harness

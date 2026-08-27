@@ -17,11 +17,11 @@ assigner:
   id: assigner
   execution_type: system_node
   subscribes_to: [assign.requested]
-  produces: [worker/work.assign]
+  produces: [work.assign]
   event_handlers:
     assign.requested:
       emit:
-        event: worker/work.assign
+        event: work.assign
         fields:
           worker_id: payload.worker_id
           task_label: payload.task_label

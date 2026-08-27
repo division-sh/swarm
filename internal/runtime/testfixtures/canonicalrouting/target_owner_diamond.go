@@ -36,14 +36,12 @@ connect:
 pins:
   inputs:
     events:
-      - name: branch_done
-        event: branch.done
+      - branch.done
   outputs:
     events:
-      - name: branch_start
-        event: branch.start
+      - branch.start
 `,
-		"events.yaml": "branch.start:\n  branch_id: string\n",
+		"events.yaml": "branch.start:\n  key: branch_id\n  branch_id: string\n",
 		"nodes.yaml": `root-collector:
   id: root-collector
   execution_type: system_node
@@ -59,20 +57,13 @@ instance: branch_id
 pins:
   inputs:
     events:
-      - name: branch_start
-        event: branch.start
+      - event: branch.start
         resolution:
           mode: select
-        carries:
-          branch_id:
-            from: payload.branch_id
-            type: string
   outputs:
     events:
-      - name: work_ready
-        event: work.ready
-      - name: branch_done
-        event: branch.done
+      - work.ready
+      - branch.done
 `,
 		"flows/branch/entities.yaml": "branch_state:\n  branch_id:\n    type: string\n    _unused_reason: concrete diamond branch identity\n",
 		"flows/branch/events.yaml":   "work.ready:\n  branch_id: string\nbranch.done:\n  branch_id: string\n",
@@ -108,8 +99,7 @@ mode: static
 pins:
   inputs:
     events:
-      - name: work_ready
-        event: work.ready
+      - work.ready
 `,
 		"flows/branch/flows/worker/result-static/nodes.yaml": `static-result-node:
   id: static-result-node
@@ -125,8 +115,7 @@ mode: singleton
 pins:
   inputs:
     events:
-      - name: work_ready
-        event: work.ready
+      - work.ready
 `,
 		"flows/branch/flows/worker/result/nodes.yaml": `singleton-result-node:
   id: singleton-result-node
@@ -140,8 +129,7 @@ mode: static
 pins:
   outputs:
     events:
-      - name: work_ready
-        event: work.ready
+      - work.ready
 `,
 		"flows/decoy/events.yaml": "work.ready:\n  branch_id: string\n",
 		"flows/unrelated/worker/result/schema.yaml": `name: hostile
@@ -149,8 +137,7 @@ mode: static
 pins:
   inputs:
     events:
-      - name: work_ready
-        event: work.ready
+      - work.ready
 `,
 		"flows/unrelated/worker/result/nodes.yaml": `hostile-node:
   id: hostile-node

@@ -7,6 +7,5 @@ pins:
     events: [score.requested]
   outputs:
     events:
-      - name: score.done
-        event: score.done
+      - event: score.done
         sink: harness

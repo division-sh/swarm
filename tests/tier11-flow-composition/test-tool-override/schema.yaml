@@ -6,10 +6,8 @@ pins:
   inputs:
     events:
       - task.requested
-      - name: child_done
-        event: child.done
+      - child.done
   outputs:
     events:
-      - name: task.done
-        event: task.done
+      - event: task.done
         sink: harness

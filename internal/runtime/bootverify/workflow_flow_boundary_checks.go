@@ -670,7 +670,7 @@ func (c *checkerContext) flowAcquisitionValidationScopes() []flowAcquisitionVali
 				stateful:       bootverifyFlowStateful(c.source, "", schema),
 				retiredStatic:  retiredStaticMultiEntityAcquisitionFlow(c.source, "", schema),
 				normalPrimary:  normalPrimaryEntityFlow(c.source, "", schema),
-				inputs:         normalizeStringSet(bundle.RootSchema.Pins.Inputs.Events),
+				inputs:         normalizeStringSet(c.source.FlowInputEvents("")),
 				nodes:          rootNodes,
 			})
 		}

@@ -74,7 +74,6 @@ var stableHardInvalidityRemediation = map[string]string{
 	"missing_external_select_entity":          "Add an explicit select_entity/select_or_create_entity for the external input or make the event topology in-flow.",
 	"native_tools_valid":                      "Fix the native tool declaration so it references a supported runtime tool surface.",
 	"node_state_schema_typed_counterpart":     "Add the typed node-state counterpart required by the schema or remove the unsupported jsonb-only state field.",
-	"output_pin_key_carries_validation":       "Declare the output pin key/carries fields and ensure every authored emit site populates those payload fields.",
 	"payload_field_coverage":                  "Populate every required emitted payload field or make the target event schema optional where appropriate.",
 	"platform_tool_usage_hints":               "Fix platform tool usage hints so every referenced tool exists and every required usage hint is declared.",
 	"platform_namespace_violation":            "Rename authored business fields away from platform-reserved namespace roots.",

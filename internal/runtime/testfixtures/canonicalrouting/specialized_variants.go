@@ -30,11 +30,9 @@ states: [idle, done]
 pins:
   inputs:
     events:
-      - name: task.assigned
+      - event: task.assigned
         source: external
     reads: [priority]
-  outputs:
-    events: []
 `, `task.assigned:
   swarm:
     source: external (output mode verify test)
@@ -252,13 +250,12 @@ states: [active]
 pins:
   inputs:
     events:
-      - {name: telegram, event: inbound.telegram, source: external}
-      - {name: intercom, event: inbound.intercom, source: external}
-      - {name: acme_public, event: inbound.acme_public, source: external}
-      - {name: partner_auth, event: inbound.partner_auth, source: external}
-      - {name: partner_open, event: inbound.partner_open, source: external}
-      - {name: partner_ack, event: inbound.partner_ack, source: external}
-  outputs: {events: []}
+      - {event: inbound.telegram, source: external}
+      - {event: inbound.intercom, source: external}
+      - {event: inbound.acme_public, source: external}
+      - {event: inbound.partner_auth, source: external}
+      - {event: inbound.partner_open, source: external}
+      - {event: inbound.partner_ack, source: external}
 `,
 		"flows/matrix/entities.yaml": "matrix_service:\n  service_id:\n    type: text\n    initial: standing\n",
 		"flows/matrix/events.yaml":   inboundAdmissionEvents(),
@@ -304,11 +301,9 @@ states: [waiting, done]
 pins:
   inputs:
     events:
-      - name: widget_started
-        event: widget.started
+      - event: widget.started
         source: external
-      - name: widget_scored
-        event: widget.scored
+      - event: widget.scored
         source: external
 `)
 	writeClosedVariantFile(t, root, "entities.yaml", "widget:\n  score: integer\n")
@@ -539,7 +534,7 @@ func CopyRunForkTarget(t testing.TB) string {
 	root := CopyExample(t, RootIngress)
 	removeClosedVariantFiles(t, root, "entities.yaml")
 	writeClosedVariantFile(t, root, "package.yaml", "name: cross-bundle-target\nversion: 1.0.0\ndescription: Cross-bundle target fixture for run.fork.\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n")
-	writeClosedVariantFile(t, root, "schema.yaml", "initial_state: pending\nterminal_states: [done]\nstates: [pending, done]\npins:\n  inputs:\n    events: [task.requested]\n  outputs:\n    events: []\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "initial_state: pending\nterminal_states: [done]\nstates: [pending, done]\npins:\n  inputs:\n    events: [task.requested]\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", "test-node:\n  id: test-node\n  execution_type: system_node\n  subscribes_to: [task.requested]\n  produces: []\n  event_handlers:\n    task.requested:\n      advances_to: done\n")
 	writeClosedVariantFile(t, root, "events.yaml", "task.requested:\n  swarm:\n    source: external\n")
 	return root
@@ -629,7 +624,7 @@ func CopyInputPinExternalScope(t testing.TB) string {
 	removeClosedVariantFiles(t, root, "events.yaml", "nodes.yaml", "entities.yaml")
 	writeClosedVariantFile(t, root, "package.yaml", "name: input-pin-external-scope\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n  - id: external_consumer\n    flow: external_consumer\n    mode: static\n  - id: plain_consumer\n    flow: plain_consumer\n    mode: static\n")
 	writeClosedVariantFile(t, root, "schema.yaml", "name: input-pin-external-scope\n")
-	writeLegacyInstanceFlow(t, root, "external_consumer", "name: external_consumer\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events:\n      - name: ticket.ready\n        source: external\n  outputs:\n    events: []\n", "ticket.ready:\n  entity_id: string\n", "", "")
-	writeLegacyInstanceFlow(t, root, "plain_consumer", "name: plain_consumer\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events:\n      - ticket.ready\n  outputs:\n    events: []\n", "ticket.ready:\n  entity_id: string\n", "", "")
+	writeLegacyInstanceFlow(t, root, "external_consumer", "name: external_consumer\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events:\n      - event: ticket.ready\n        source: external\n", "ticket.ready:\n  entity_id: string\n", "", "")
+	writeLegacyInstanceFlow(t, root, "plain_consumer", "name: plain_consumer\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events:\n      - ticket.ready\n", "ticket.ready:\n  entity_id: string\n", "", "")
 	return root
 }

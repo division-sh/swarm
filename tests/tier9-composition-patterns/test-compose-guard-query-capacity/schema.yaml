@@ -6,6 +6,5 @@ pins:
     events: [admission.requested]
   outputs:
     events:
-      - name: admission.granted
-        event: admission.granted
+      - event: admission.granted
         sink: harness

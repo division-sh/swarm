@@ -9,10 +9,9 @@ import (
 )
 
 func TestResolveFlowInputProducer_ClassifiesIntrinsicInputPinSource(t *testing.T) {
-	source := flowInputProducerFixture(runtimecontracts.FlowInputEventPin{
-		Name:   "work.requested",
+	source := flowInputProducerFixture(t, runtimecontracts.FlowInputEventPin{
 		Event:  "work.requested",
-		Source: "external",
+		Source: runtimecontracts.FlowInputPinSourceExternal,
 	}, nil)
 
 	resolution := ResolveNonConnectFlowInputProducer(source, "worker", "work.requested")
@@ -29,12 +28,13 @@ func TestResolveFlowInputProducer_ClassifiesRootBoundaryExternalIngress(t *testi
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{Events: []string{"work.requested"}},
+				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "work.requested"}}},
 			},
 		},
 	}
 
-	resolution := ResolveNonConnectFlowInputProducer(Wrap(bundle), "", "work.requested")
+	source := withCompiledTestPins(t, Wrap(bundle), map[string][]runtimecontracts.FlowInputEventPin{"": {{Event: "work.requested"}}}, nil)
+	resolution := ResolveNonConnectFlowInputProducer(source, "", "work.requested")
 
 	if !resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress) {
 		t.Fatalf("evidence = %#v, want boundary external ingress", resolution.Evidence)
@@ -45,13 +45,7 @@ func TestResolveNonConnectFlowInputProducer_DoesNotInterpretRootConnect(t *testi
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{
-					Events: []string{"work.requested"},
-					EventPins: []runtimecontracts.FlowInputEventPin{{
-						Name:  "work_requested",
-						Event: "work.requested",
-					}},
-				},
+				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "work.requested"}}},
 			},
 		},
 		Semantics: runtimecontracts.WorkflowSemanticView{
@@ -63,7 +57,8 @@ func TestResolveNonConnectFlowInputProducer_DoesNotInterpretRootConnect(t *testi
 		},
 	}
 
-	resolution := ResolveNonConnectFlowInputProducer(Wrap(bundle), "", "work.requested")
+	source := withCompiledTestPins(t, Wrap(bundle), map[string][]runtimecontracts.FlowInputEventPin{"": {{Event: "work.requested"}}}, nil)
+	resolution := ResolveNonConnectFlowInputProducer(source, "", "work.requested")
 
 	if resolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryParentConnect) {
 		t.Fatalf("evidence = %#v, non-connect projection must not interpret authored connects", resolution.Evidence)
@@ -74,22 +69,16 @@ func TestResolveNonConnectFlowInputProducer_DoesNotInterpretRootConnect(t *testi
 }
 
 func TestResolveFlowInputProducer_NestedPackageRootConnectDoesNotSuppressRepositoryRootIngress(t *testing.T) {
-	rootInput := runtimecontracts.FlowInputEventPin{Name: "work_requested", Event: "root.work.requested"}
-	childInput := runtimecontracts.FlowInputEventPin{Name: "work_requested", Event: "child.work.requested"}
+	rootInput := runtimecontracts.FlowInputEventPin{Event: "root.work.requested"}
+	childInput := runtimecontracts.FlowInputEventPin{Event: "child.work.requested"}
 	child := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "flows/child"},
-		Schema: runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{
-			Events:    []string{childInput.EventType()},
-			EventPins: []runtimecontracts.FlowInputEventPin{childInput},
-		}}},
-		Path: "child",
+		Paths:  runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "flows/child"},
+		Schema: runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{childInput}}}},
+		Path:   "child",
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		RootSchema: &runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{
-			Events:    []string{rootInput.EventType()},
-			EventPins: []runtimecontracts.FlowInputEventPin{rootInput},
-		}}},
+		RootSchema: &runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{rootInput}}}},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{"child": &root.Children[0]},
@@ -102,7 +91,7 @@ func TestResolveFlowInputProducer_NestedPackageRootConnectDoesNotSuppressReposit
 			To:         ".",
 		}}},
 	}
-	source := Wrap(bundle)
+	source := withCompiledTestPins(t, Wrap(bundle), map[string][]runtimecontracts.FlowInputEventPin{"": {rootInput}, "child": {childInput}}, nil)
 
 	rootResolution := ResolveNonConnectFlowInputProducer(source, "", rootInput.EventType())
 	if !rootResolution.HasEvidenceKind(runtimecontracts.FlowInputProducerBoundaryExternalIngress) {
@@ -119,8 +108,7 @@ func TestResolveFlowInputProducer_NestedPackageRootConnectDoesNotSuppressReposit
 }
 
 func TestResolveNonConnectFlowInputProducer_DoesNotClassifyParentConnect(t *testing.T) {
-	source := flowInputProducerFixture(runtimecontracts.FlowInputEventPin{
-		Name:  "work.requested",
+	source := flowInputProducerFixture(t, runtimecontracts.FlowInputEventPin{
 		Event: "work.requested",
 	}, []runtimecontracts.FlowPackageConnect{{Event: "work.requested", From: ".", To: "worker"}})
 
@@ -135,10 +123,9 @@ func TestResolveNonConnectFlowInputProducer_DoesNotClassifyParentConnect(t *test
 }
 
 func TestResolveFlowInputProducer_ClassifiesDeclaredHarnessSource(t *testing.T) {
-	source := harnessOnlyFlowInputProducerFixture(runtimecontracts.FlowInputEventPin{
-		Name:   "work.requested",
+	source := harnessOnlyFlowInputProducerFixture(t, runtimecontracts.FlowInputEventPin{
 		Event:  "work.requested",
-		Source: "harness",
+		Source: runtimecontracts.FlowInputPinSourceHarness,
 	}, nil)
 
 	resolution := ResolveNonConnectFlowInputProducer(source, "worker", "work.requested")
@@ -158,8 +145,8 @@ func TestResolveFlowInputProducer_ClassifiesDeclaredHarnessSource(t *testing.T) 
 }
 
 func TestResolveFlowInputAutoWire_HarnessEvidenceHasNoPatternsOrProducerFlows(t *testing.T) {
-	source := harnessOnlyFlowInputProducerFixture(runtimecontracts.FlowInputEventPin{
-		Name: "work.requested", Event: "work.requested", Source: "harness",
+	source := harnessOnlyFlowInputProducerFixture(t, runtimecontracts.FlowInputEventPin{
+		Event: "work.requested", Source: runtimecontracts.FlowInputPinSourceHarness,
 	}, nil)
 
 	resolution := ResolveFlowInputAutoWire(source, "worker", "work.requested")
@@ -172,8 +159,8 @@ func TestResolveFlowInputAutoWire_HarnessEvidenceHasNoPatternsOrProducerFlows(t 
 }
 
 func TestImportBoundaryHarnessInputCreatesNoAlias(t *testing.T) {
-	source := harnessOnlyFlowInputProducerFixture(runtimecontracts.FlowInputEventPin{
-		Name: "work.requested", Event: "work.requested", Source: "harness",
+	source := harnessOnlyFlowInputProducerFixture(t, runtimecontracts.FlowInputEventPin{
+		Event: "work.requested", Source: runtimecontracts.FlowInputPinSourceHarness,
 	}, nil)
 
 	if ImportBoundaryInputAliasRequired(source, "worker", "work.requested") {
@@ -185,8 +172,7 @@ func TestImportBoundaryHarnessInputCreatesNoAlias(t *testing.T) {
 }
 
 func TestResolveFlowInputProducer_ClassifiesPlatformSource(t *testing.T) {
-	source := flowInputProducerFixture(runtimecontracts.FlowInputEventPin{
-		Name:  "platform.runtime_log",
+	source := flowInputProducerFixture(t, runtimecontracts.FlowInputEventPin{
 		Event: "platform.runtime_log",
 	}, nil)
 
@@ -198,8 +184,7 @@ func TestResolveFlowInputProducer_ClassifiesPlatformSource(t *testing.T) {
 }
 
 func TestResolveFlowInputProducer_ClassifiesInternalTopologyWithoutAutoWirePattern(t *testing.T) {
-	source := flowInputProducerFixture(runtimecontracts.FlowInputEventPin{
-		Name:  "work.requested",
+	source := flowInputProducerFixture(t, runtimecontracts.FlowInputEventPin{
 		Event: "work.requested",
 	}, nil)
 
@@ -217,8 +202,7 @@ func TestResolveFlowInputProducer_ClassifiesInternalTopologyWithoutAutoWirePatte
 }
 
 func TestResolveFlowInputProducer_ClassifiesAutoEmitOnCreateAsInternalTopology(t *testing.T) {
-	source := flowInputProducerFixture(runtimecontracts.FlowInputEventPin{
-		Name:  "work.created",
+	source := flowInputProducerFixture(t, runtimecontracts.FlowInputEventPin{
 		Event: "work.created",
 	}, nil)
 	bundle, ok := Bundle(source)
@@ -227,9 +211,7 @@ func TestResolveFlowInputProducer_ClassifiesAutoEmitOnCreateAsInternalTopology(t
 	}
 	worker := bundle.FlowSchemas["worker"]
 	worker.AutoEmitOnCreate = runtimecontracts.AutoEmitOnCreateContract{Event: "work.created"}
-	worker.Pins.Inputs.Events = []string{"work.created"}
 	worker.Pins.Inputs.EventPins = []runtimecontracts.FlowInputEventPin{{
-		Name:  "work.created",
 		Event: "work.created",
 	}}
 	bundle.FlowSchemas["worker"] = worker
@@ -243,8 +225,7 @@ func TestResolveFlowInputProducer_ClassifiesAutoEmitOnCreateAsInternalTopology(t
 }
 
 func TestResolveFlowInputProducer_ReportsMissingAndInvalidContext(t *testing.T) {
-	source := flowInputProducerFixture(runtimecontracts.FlowInputEventPin{
-		Name:  "work.requested",
+	source := flowInputProducerFixture(t, runtimecontracts.FlowInputEventPin{
 		Event: "work.requested",
 	}, nil)
 
@@ -253,8 +234,7 @@ func TestResolveFlowInputProducer_ReportsMissingAndInvalidContext(t *testing.T) 
 		t.Fatalf("missing input evidence = %#v, want invalid context outcome without proof", missing.Evidence)
 	}
 
-	noProducer := flowInputProducerFixture(runtimecontracts.FlowInputEventPin{
-		Name:  "work.unproduced",
+	noProducer := flowInputProducerFixture(t, runtimecontracts.FlowInputEventPin{
 		Event: "work.unproduced",
 	}, nil)
 	resolution := ResolveNonConnectFlowInputProducer(noProducer, "worker", "work.unproduced")
@@ -263,12 +243,13 @@ func TestResolveFlowInputProducer_ReportsMissingAndInvalidContext(t *testing.T) 
 	}
 }
 
-func flowInputProducerFixture(inputPin runtimecontracts.FlowInputEventPin, connects []runtimecontracts.FlowPackageConnect) Source {
+func flowInputProducerFixture(t testing.TB, inputPin runtimecontracts.FlowInputEventPin, connects []runtimecontracts.FlowPackageConnect) Source {
+	t.Helper()
 	producer := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"work.requested"}},
+				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "work.requested"}}},
 			},
 		},
 		Path: "producer",
@@ -277,10 +258,7 @@ func flowInputProducerFixture(inputPin runtimecontracts.FlowInputEventPin, conne
 		Paths: runtimecontracts.FlowContractPaths{ID: "worker", Flow: "worker"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{
-					Events:    []string{inputPin.EventType()},
-					EventPins: []runtimecontracts.FlowInputEventPin{inputPin},
-				},
+				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{inputPin}},
 			},
 		},
 		Path: "worker",
@@ -305,11 +283,12 @@ func flowInputProducerFixture(inputPin runtimecontracts.FlowInputEventPin, conne
 	bundle.Platform.PlatformEvents.Catalog = map[string]yaml.Node{
 		"platform.runtime_log": {},
 	}
-	return Wrap(bundle)
+	return withCompiledTestPins(t, Wrap(bundle), map[string][]runtimecontracts.FlowInputEventPin{"worker": {inputPin}}, map[string][]runtimecontracts.FlowOutputEventPin{"producer": {{Event: "work.requested"}}})
 }
 
-func harnessOnlyFlowInputProducerFixture(inputPin runtimecontracts.FlowInputEventPin, connects []runtimecontracts.FlowPackageConnect) Source {
-	source := flowInputProducerFixture(inputPin, connects)
+func harnessOnlyFlowInputProducerFixture(t testing.TB, inputPin runtimecontracts.FlowInputEventPin, connects []runtimecontracts.FlowPackageConnect) Source {
+	t.Helper()
+	source := flowInputProducerFixture(t, inputPin, connects)
 	bundle, ok := Bundle(source)
 	if !ok || bundle == nil {
 		panic("flow input producer fixture did not expose its bundle")
@@ -317,9 +296,6 @@ func harnessOnlyFlowInputProducerFixture(inputPin runtimecontracts.FlowInputEven
 	producer := bundle.FlowTree.ByID["producer"]
 	producer.Schema.Pins.Outputs = runtimecontracts.FlowOutputPins{}
 	bundle.FlowSchemas["producer"] = producer.Schema
-	if bundle.Semantics.FlowOutputs == nil {
-		bundle.Semantics.FlowOutputs = map[string][]string{}
-	}
-	bundle.Semantics.FlowOutputs["producer"] = nil
+	source.(*compiledPinTestSource).outputs["producer"] = nil
 	return source
 }

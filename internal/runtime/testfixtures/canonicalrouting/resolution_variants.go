@@ -16,13 +16,12 @@ type SelectResolutionInvalidity uint8
 
 const (
 	SelectResolutionValid SelectResolutionInvalidity = iota
-	SelectResolutionUndeclaredCarry
-	SelectResolutionCarryTypeMismatch
+	SelectResolutionUndeclaredSource
+	SelectResolutionSourceTypeMismatch
 	SelectResolutionStaticReceiver
 	SelectResolutionExtraAggregation
 	SelectResolutionEntityTypeMismatch
 	SelectResolutionSourceTypeMismatchWithoutCarryType
-	SelectResolutionDishonestCarryType
 	SelectResolutionNumberSourceToIntegerReceiver
 )
 
@@ -54,17 +53,17 @@ func CopyTemplateCreateThenSelectSameEvent(t testing.TB) string {
 	t.Helper()
 	root := CopyExample(t, TemplateSelectExisting)
 	applyClosedReplacement(t, filepath.Join(root, "flows/account/schema.yaml"),
-		"      - name: account_setup\n",
-		"      - name: account_create\n")
+		"      - event: account.setup\n",
+		"      - event: account.create\n")
 	applyClosedReplacement(t, filepath.Join(root, "package.yaml"),
-		"  - event: account.ready\n    from: producer\n    to: account\n",
-		"  - event: account.setup\n    from: producer\n    to: account\n    rename: account.ready\n    adapter: account_setup_to_account_ready\n")
+		"  - event: account.setup\n    from: producer\n    to: account\n  - event: account.ready\n    from: producer\n    to: account\n",
+		"  - event: account.setup\n    from: producer\n    to: account\n    rename: account.create\n  - event: account.setup\n    from: producer\n    to: account\n    rename: account.ready\n")
 	writeClosedVariantFile(t, root, "flows/account/nodes.yaml", `account-setup-node:
   id: account-setup-node-{instance_id}
   execution_type: system_node
-  subscribes_to: [account.setup]
+  subscribes_to: [account.create]
   event_handlers:
-    account.setup: {}
+    account.create: {}
 account-ready-node:
   id: account-ready-node-{instance_id}
   execution_type: system_node
@@ -101,9 +100,14 @@ func applyTemplateSelectOrCreateAccumulation(t testing.TB, root, terminalState s
 	t.Helper()
 	producerEvents := filepath.Join(root, "flows", "producer", "events.yaml")
 	for _, event := range []string{"account.requested", "account.ready"} {
+		key, fieldType := "", "text?"
+		if event == "account.ready" {
+			key = "  key: account_id\n"
+			fieldType = "text"
+		}
 		applyClosedReplacement(t, producerEvents,
-			event+":\n  account_id: text?\n",
-			event+":\n  account_id: text?\n  score: text\n  decision: text\n")
+			event+":\n"+key+"  account_id: "+fieldType+"\n",
+			event+":\n"+key+"  account_id: "+fieldType+"\n  score: text\n  decision: text\n")
 	}
 	applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "nodes.yaml"),
 		"          account_id: payload.account_id\n",
@@ -144,39 +148,30 @@ func CopyTemplateSelectResolution(t testing.TB, opts TemplateSelectResolutionOpt
 	applyClosedReplacement(t, filepath.Join(root, "flows", "account", "nodes.yaml"),
 		"  id: account-node\n", "  id: account-node-{instance_id}\n")
 	applyClosedReplacement(t, packageFile, "  - event: account.setup\n    from: producer\n    to: account\n", "")
-	// The historical lowering matrix deliberately exercises the accepted
-	// string/text alias while keeping the checked example's entity type.
-	selectedPin := "      - name: account_ready\n        event: account.ready\n        resolution:\n          mode: " + mode + "\n        carries:\n          account_id:\n            from: payload.account_id\n            type: string\n"
+	selectedPin := "      - event: account.ready\n        resolution:\n          mode: " + mode + "\n"
 	applyClosedReplacement(t, accountSchema,
-		"      - name: account_ready\n        event: account.ready\n        resolution:\n          mode: select\n        carries:\n          account_id:\n            from: payload.account_id\n            type: text\n",
+		"      - event: account.ready\n        resolution:\n          mode: select\n",
 		selectedPin)
 
 	switch opts.Invalidity {
 	case SelectResolutionValid:
-	case SelectResolutionUndeclaredCarry:
+	case SelectResolutionUndeclaredSource:
 		applyClosedReplacement(t, accountSchema, selectedPin,
-			"      - name: account_ready\n        event: account.ready\n        resolution:\n          mode: "+mode+"\n        carries:\n          missing_account_id:\n            from: payload.account_id\n            type: string\n")
-	case SelectResolutionCarryTypeMismatch:
-		applyClosedReplacement(t, accountSchema, selectedPin,
-			"      - name: account_ready\n        event: account.ready\n        resolution:\n          mode: "+mode+"\n        carries:\n          account_id:\n            from: payload.account_id\n            type: integer\n")
+			"      - event: account.ready\n        resolution:\n          mode: "+mode+"\n          from: payload.missing_account_id\n")
+	case SelectResolutionSourceTypeMismatch:
+		applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"), "account.ready:\n  key: account_id\n  account_id: text\n", "account.ready:\n  key: account_id\n  account_id: integer\n")
 	case SelectResolutionStaticReceiver:
 		applyClosedReplacement(t, packageFile, "    mode: template\nconnect:\n", "    mode: static\nconnect:\n")
 		applyClosedReplacement(t, accountSchema, "mode: template\n", "mode: static\n")
 	case SelectResolutionExtraAggregation:
 		applyClosedReplacement(t, accountSchema, selectedPin,
-			"      - name: account_ready\n        event: account.ready\n        resolution:\n          mode: "+mode+"\n          aggregation: stream\n        carries:\n          account_id:\n            from: payload.account_id\n            type: string\n")
+			"      - event: account.ready\n        resolution:\n          mode: "+mode+"\n          aggregation: stream\n")
 	case SelectResolutionEntityTypeMismatch:
 		applyClosedReplacement(t, filepath.Join(root, "flows", "account", "entities.yaml"), "    type: text\n", "    type: integer\n")
 	case SelectResolutionSourceTypeMismatchWithoutCarryType:
-		applyClosedReplacement(t, accountSchema, selectedPin,
-			"      - name: account_ready\n        event: account.ready\n        resolution:\n          mode: "+mode+"\n        carries:\n          account_id:\n            from: payload.account_id\n")
-		applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"), "account.ready:\n  account_id: text?\n", "account.ready:\n  account_id: integer?\n")
-	case SelectResolutionDishonestCarryType:
-		applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"), "account.ready:\n  account_id: text?\n", "account.ready:\n  account_id: integer?\n")
+		applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"), "account.ready:\n  key: account_id\n  account_id: text\n", "account.ready:\n  key: account_id\n  account_id: integer\n")
 	case SelectResolutionNumberSourceToIntegerReceiver:
-		applyClosedReplacement(t, accountSchema, selectedPin,
-			"      - name: account_ready\n        event: account.ready\n        resolution:\n          mode: "+mode+"\n        carries:\n          account_id:\n            from: payload.account_id\n")
-		applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"), "account.ready:\n  account_id: text?\n", "account.ready:\n  account_id: number?\n")
+		applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"), "account.ready:\n  key: account_id\n  account_id: text\n", "account.ready:\n  key: account_id\n  account_id: number\n")
 		applyClosedReplacement(t, filepath.Join(root, "flows", "account", "entities.yaml"), "    type: text\n", "    type: integer\n")
 	default:
 		t.Fatalf("unsupported select resolution invalidity %d", opts.Invalidity)
@@ -194,10 +189,10 @@ func CopyTemplateSelectResolutionRenamedSource(t testing.TB, opts TemplateSelect
 		mode = "select-or-create"
 	}
 	applyClosedReplacement(t, filepath.Join(root, "flows", "account", "schema.yaml"),
-		"event: account.ready\n        resolution:\n          mode: "+mode+"\n        carries:\n          account_id:\n            from: payload.account_id\n",
-		"event: account.ready\n        resolution:\n          mode: "+mode+"\n        carries:\n          account_id:\n            from: payload.external_account_id\n")
+		"event: account.ready\n        resolution:\n          mode: "+mode+"\n",
+		"event: account.ready\n        resolution:\n          mode: "+mode+"\n          from: payload.external_account_id\n")
 	applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"),
-		"account.ready:\n  account_id: text?\n", "account.ready:\n  account_id: text?\n  external_account_id: text\n")
+		"account.ready:\n  key: account_id\n  account_id: text\n", "account.ready:\n  key: account_id\n  account_id: text\n  external_account_id: text\n")
 	return root
 }
 
@@ -215,10 +210,8 @@ const (
 	CreateResolutionValid CreateResolutionInvalidity = iota
 	CreateResolutionNonRunnableMode
 	CreateResolutionInvalidMint
-	CreateResolutionMissingCarry
 	CreateResolutionProducerCollision
 	CreateResolutionSourceTypeMismatchWithoutCarryType
-	CreateResolutionDishonestCarryType
 	CreateResolutionNumberSourceToIntegerReceiver
 )
 
@@ -237,9 +230,12 @@ func CopyTemplateCreateResolution(t testing.TB, opts TemplateCreateResolutionOpt
 	switch opts.Mint {
 	case CreateMintUUID:
 	case CreateMintEventID:
-		applyClosedReplacement(t, validatorSchema, "            from: generated.uuid\n", "            from: event.id\n")
+		applyClosedReplacement(t, validatorSchema, "          from: generated.uuid\n", "          from: event.id\n")
 	case CreateMintPayload:
-		applyClosedReplacement(t, validatorSchema, "            from: generated.uuid\n", "            from: payload.candidate\n")
+		applyClosedReplacement(t, validatorSchema, "          from: generated.uuid\n", "          from: payload.candidate\n")
+		applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"),
+			"validation.requested:\n  candidate: text?\n",
+			"validation.requested:\n  key: candidate\n  candidate: text\n")
 	default:
 		t.Fatalf("unsupported create mint %d", opts.Mint)
 	}
@@ -248,28 +244,21 @@ func CopyTemplateCreateResolution(t testing.TB, opts TemplateCreateResolutionOpt
 	case CreateResolutionNonRunnableMode:
 		applyClosedReplacement(t, validatorSchema, "          mode: create\n", "          mode: fan-out\n")
 	case CreateResolutionInvalidMint:
-		applyClosedReplacement(t, validatorSchema, "            from: generated.uuid\n", "            from: generated.random\n")
-	case CreateResolutionMissingCarry:
-		applyClosedReplacement(t, validatorSchema, "        carries:\n          validation_case_id:\n            from: generated.uuid\n            type: uuid\n", "")
+		applyClosedReplacement(t, validatorSchema, "          from: generated.uuid\n", "          from: generated.random\n")
 	case CreateResolutionProducerCollision:
 		applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"), "validation.requested:\n  candidate: text?\n", "validation.requested:\n  candidate: text?\n  validation_case_id: uuid\n")
 		applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "nodes.yaml"), "          candidate: payload.candidate\n", "          candidate: payload.candidate\n          validation_case_id: payload.candidate\n")
 	case CreateResolutionSourceTypeMismatchWithoutCarryType:
-		applyClosedReplacement(t, validatorSchema, "            type: uuid\n", "")
 		if opts.Mint == CreateMintPayload {
-			applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"), "validation.requested:\n  candidate: text?\n", "validation.requested:\n  candidate: integer?\n")
+			applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"), "validation.requested:\n  key: candidate\n  candidate: text\n", "validation.requested:\n  key: candidate\n  candidate: integer\n")
 		} else {
 			applyClosedReplacement(t, filepath.Join(root, "flows", "validator", "entities.yaml"), "    type: uuid\n", "    type: integer\n")
 		}
-	case CreateResolutionDishonestCarryType:
-		applyClosedReplacement(t, validatorSchema, "            type: uuid\n", "            type: integer\n")
-		applyClosedReplacement(t, filepath.Join(root, "flows", "validator", "entities.yaml"), "    type: uuid\n", "    type: integer\n")
 	case CreateResolutionNumberSourceToIntegerReceiver:
 		if opts.Mint != CreateMintPayload {
 			t.Fatal("number-to-integer create fixture requires payload minting")
 		}
-		applyClosedReplacement(t, validatorSchema, "            type: uuid\n", "")
-		applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"), "validation.requested:\n  candidate: text?\n", "validation.requested:\n  candidate: number?\n")
+		applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"), "validation.requested:\n  key: candidate\n  candidate: text\n", "validation.requested:\n  key: candidate\n  candidate: number\n")
 		applyClosedReplacement(t, filepath.Join(root, "flows", "validator", "entities.yaml"), "    type: uuid\n", "    type: integer\n")
 	default:
 		t.Fatalf("unsupported create resolution invalidity %d", opts.Invalidity)

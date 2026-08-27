@@ -31,7 +31,7 @@ func checkPinTargetResolution(c *checkerContext) []Finding {
 				findings = append(findings, Finding{
 					CheckID:  "pin_target_resolution",
 					Severity: SeverityHardInvalidity,
-					Message:  fmt.Sprintf("output pin %s in %s declares an invalid sink; the only supported value is sink: harness", pin.PinName(), location),
+					Message:  fmt.Sprintf("output pin %s in %s declares an invalid sink; the only supported value is sink: harness", pin.EventType(), location),
 					Location: location,
 				})
 				continue
@@ -46,7 +46,7 @@ func checkPinTargetResolution(c *checkerContext) []Finding {
 			findings = append(findings, Finding{
 				CheckID:  "pin_target_resolution",
 				Severity: SeverityHardInvalidity,
-				Message:  fmt.Sprintf("output pin %s in %s declares validation-only sink: harness and a canonical runtime consumer; remove sink: harness or remove the runtime consumer", pin.PinName(), location),
+				Message:  fmt.Sprintf("output pin %s in %s declares validation-only sink: harness and a canonical runtime consumer; remove sink: harness or remove the runtime consumer", pin.EventType(), location),
 				Location: location,
 			})
 		}

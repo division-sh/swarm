@@ -6,6 +6,5 @@ pins:
     events: [digest.requested]
   outputs:
     events:
-      - name: digest.compiled
-        event: digest.compiled
+      - event: digest.compiled
         sink: harness

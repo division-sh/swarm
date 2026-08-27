@@ -7,5 +7,4 @@ pins:
     events: [task.start]
   outputs:
     events:
-      - name: task_done
-        event: task.done
+      - task.done

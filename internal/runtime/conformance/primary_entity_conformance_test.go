@@ -92,11 +92,6 @@ func primaryEntityConformanceSchema(extra string) string {
 	return "name: scoring\n" + extra + `initial_state: pending
 states: [pending, done]
 terminal_states: [done]
-pins:
-  inputs:
-    events: []
-  outputs:
-    events: []
 `
 }
 

@@ -20,10 +20,10 @@ import (
 
 func TestWorkflowFlowInputProducerAliases_DoNotInferSiblingProducerAlias(t *testing.T) {
 	producer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
+		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer", PackageKey: "."},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"scan.requested"}},
+				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "scan.requested"}}},
 			},
 		},
 		Path: "producer",
@@ -32,7 +32,7 @@ func TestWorkflowFlowInputProducerAliases_DoNotInferSiblingProducerAlias(t *test
 		Paths: runtimecontracts.FlowContractPaths{ID: "discovery", Flow: "discovery"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{Events: []string{"scan.requested"}},
+				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "scan.requested"}}},
 			},
 		},
 		Path: "discovery",
@@ -45,6 +45,7 @@ func TestWorkflowFlowInputProducerAliases_DoNotInferSiblingProducerAlias(t *test
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{producer, discovery}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"producer": producer.Schema, "discovery": discovery.Schema},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
@@ -52,6 +53,9 @@ func TestWorkflowFlowInputProducerAliases_DoNotInferSiblingProducerAlias(t *test
 				"discovery": &root.Children[1],
 			},
 		},
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatalf("compile exact input identity semantics: %v", err)
 	}
 
 	aliases := workflowFlowInputProducerAliases(semanticview.Wrap(bundle), "discovery", "scan.requested")
@@ -65,7 +69,7 @@ func TestWorkflowFlowInputProducerAliases_DoNotAutoWireCrossFlowInputPinsToProdu
 		Paths: runtimecontracts.FlowContractPaths{ID: "scoring", Flow: "scoring"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"vertical.shortlisted"}},
+				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "vertical.shortlisted"}}},
 			},
 		},
 		Path: "scoring",
@@ -74,7 +78,7 @@ func TestWorkflowFlowInputProducerAliases_DoNotAutoWireCrossFlowInputPinsToProdu
 		Paths: runtimecontracts.FlowContractPaths{ID: "validation", Flow: "validation"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{Events: []string{"vertical.shortlisted"}},
+				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "vertical.shortlisted"}}},
 			},
 		},
 		Path: "validation",
@@ -87,6 +91,7 @@ func TestWorkflowFlowInputProducerAliases_DoNotAutoWireCrossFlowInputPinsToProdu
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{scoring, validation}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"scoring": scoring.Schema, "validation": validation.Schema},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
@@ -94,6 +99,9 @@ func TestWorkflowFlowInputProducerAliases_DoNotAutoWireCrossFlowInputPinsToProdu
 				"validation": &root.Children[1],
 			},
 		},
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatalf("compile cross-flow exact input semantics: %v", err)
 	}
 
 	aliases := workflowFlowInputProducerAliases(semanticview.Wrap(bundle), "validation", "vertical.shortlisted")
@@ -233,19 +241,20 @@ func TestWorkflowNodeExternalEventType_ExternalizesLocalFlowOutputs(t *testing.T
 
 func TestLoadWorkflowNodes_DoesNotUseSiblingOutputForCrossFlowPinAutoWire(t *testing.T) {
 	producer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
+		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer", PackageKey: "."},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"scan.requested"}},
+				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "scan.requested"}}},
 			},
 		},
-		Path: "producer",
+		Path:   "producer",
+		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
 	}
 	consumer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer"},
+		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer", PackageKey: "."},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{Events: []string{"scan.requested"}},
+				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "scan.requested"}}},
 			},
 		},
 		Path: "consumer",
@@ -261,23 +270,18 @@ func TestLoadWorkflowNodes_DoesNotUseSiblingOutputForCrossFlowPinAutoWire(t *tes
 			},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"scan.requested": {OwningNode: "consumer-node"},
 			"scan.completed": {OwningNode: "consumer-node"},
 		},
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{producer, consumer}}
+	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{PackageKey: "."}, Children: []runtimecontracts.FlowContractView{producer, consumer}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"producer": producer.Schema, "consumer": consumer.Schema},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
 				"producer": &root.Children[0],
 				"consumer": &root.Children[1],
-			},
-		},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				"consumer-node": {
-					"scan.requested": {},
-				},
 			},
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
@@ -286,6 +290,9 @@ func TestLoadWorkflowNodes_DoesNotUseSiblingOutputForCrossFlowPinAutoWire(t *tes
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"consumer/scan.completed": {OwningNode: "consumer-node"},
 		},
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatalf("compile no-autowire semantics: %v", err)
 	}
 
 	nodes, err := LoadWorkflowNodes(semanticview.Wrap(bundle))
@@ -352,16 +359,21 @@ func TestLoadWorkflowNodes_NestedProjectPackageUsesOwningFlowForSubscriptionAndE
 		Path:  "orders",
 		Paths: runtimecontracts.FlowContractPaths{ID: "orders", PackageKey: "flows/orders"},
 		Schema: runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{
-			Inputs:  runtimecontracts.FlowInputPins{Events: []string{"task.start"}},
-			Outputs: runtimecontracts.FlowOutputPins{Events: []string{"task.done"}},
+			Inputs:  runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "task.start"}}},
+			Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "task.done"}}},
 		}},
 		Events:   map[string]runtimecontracts.EventCatalogEntry{"task.start": {}, "task.done": {}},
 		Children: []runtimecontracts.FlowContractView{childPackage},
 	}
 	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{PackageKey: "."}, Children: []runtimecontracts.FlowContractView{flow}}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-		Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{"orders": &root.Children[0]},
-	}})
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"orders": flow.Schema},
+		FlowTree:    flowmodel.Tree[runtimecontracts.FlowContractView]{Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{"orders": &root.Children[0]}},
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatalf("compile nested package semantics: %v", err)
+	}
+	source := semanticview.Wrap(bundle)
 	ref := pipelinePackageNode(t, "packages/a", "orders", "shared")
 
 	nodes, err := LoadWorkflowNodes(source)
@@ -485,7 +497,7 @@ func TestWorkflowNodeConnectedInputEventHandlerResolution_ConsumesStampedPackage
 	}
 
 	evt := eventtest.RunCreatingRootIngress("", events.EventType(producerEvent), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
-	route := workflowNodeStampedConnectRoute(t, source, "child", "micro_done", "child-relay")
+	route := workflowNodeStampedConnectRoute(t, source, "child", "micro.done", "child-relay")
 	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, pipelineSourceNode(t, source, "child", "child-relay"), evt)
 	if !resolved.Matched || resolved.HandlerEventKey != "micro.done" {
 		t.Fatalf("package-root connect handler resolution = %#v, want child-relay micro.done", resolved)
@@ -501,7 +513,7 @@ func TestWorkflowNodeConnectedInputEventHandlerResolution_ConsumesStampedRootRec
 	}
 
 	evt := eventtest.RunCreatingRootIngress("", events.EventType(producerEvent), "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
-	route := workflowNodeStampedConnectRoute(t, source, "", "micro_done", "root-collector")
+	route := workflowNodeStampedConnectRoute(t, source, "", "micro.done", "root-collector")
 	node := pipelineSourceNode(t, source, "", "root-collector")
 	loaded, err := LoadWorkflowNodes(source)
 	if err != nil {
@@ -549,7 +561,7 @@ func TestWorkflowNodeConnectedInputHandlerMatchesConcreteTemplateProducer(t *tes
 		Target:       events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: "receiver-entity"},
 	}, time.Unix(1, 0).UTC())
 
-	route := workflowNodeStampedConnectRoute(t, source, "receiver", "deploy_requested", "receiver-node")
+	route := workflowNodeStampedConnectRoute(t, source, "receiver", "deploy.requested", "receiver-node")
 	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, pipelineSourceNode(t, source, "receiver", "receiver-node"), evt)
 	if !resolved.Matched || resolved.HandlerEventKey != "deploy.requested" {
 		t.Fatalf("concrete template connect handler resolution = %#v, want receiver deploy.requested", resolved)
@@ -584,7 +596,7 @@ func TestWorkflowNodeConnectedInputHandlerEnforcesProducerMode(t *testing.T) {
 			}, time.Unix(1, 0).UTC())
 			ctx := context.Background()
 			if tc.want {
-				route := workflowNodeStampedConnectRoute(t, source, "receiver", "deploy_requested", "receiver-node")
+				route := workflowNodeStampedConnectRoute(t, source, "receiver", "deploy.requested", "receiver-node")
 				ctx = withWorkflowNodeDeliveryRoute(ctx, route)
 			}
 			resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, pipelineSourceNode(t, source, "receiver", "receiver-node"), evt)
@@ -604,7 +616,7 @@ func TestWorkflowNodeConnectedInputHandlerUsesExactStampedReceiverPin(t *testing
 		Target:       events.RouteIdentity{FlowID: "receiver", FlowInstance: "receiver", EntityID: "receiver-entity"},
 	}, time.Unix(1, 0).UTC())
 
-	route := workflowNodeStampedConnectRoute(t, source, "receiver", "deploy_accepted", "receiver-node")
+	route := workflowNodeStampedConnectRoute(t, source, "receiver", "deploy.accepted", "receiver-node")
 	ctx := withWorkflowNodeDeliveryRoute(context.Background(), route)
 	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(ctx, source, pipelineSourceNode(t, source, "receiver", "receiver-node"), evt)
 	if !resolved.Matched || resolved.HandlerEventKey != "deploy.accepted" {
@@ -677,23 +689,23 @@ func workflowNodeStampedConnectRoute(t testing.TB, source semanticview.Source, r
 
 func testWorkflowNodeConnectedInputSource(producerMode string) semanticview.Source {
 	producer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
+		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer", PackageKey: "."},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: producerMode,
 			Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{
-				Name: "deploy_done", Event: "deploy.done",
+				Event: "deploy.done",
 			}}}},
 		},
-		Path: "producer",
+		Path: "producer", Events: map[string]runtimecontracts.EventCatalogEntry{"deploy.done": {}},
 	}
 	receiver := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "receiver", Flow: "receiver"},
+		Paths: runtimecontracts.FlowContractPaths{ID: "receiver", Flow: "receiver", PackageKey: "."},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{
-				Name: "deploy_requested", Event: "deploy.requested",
+				Event: "deploy.requested",
 			}}}},
 		},
-		Path: "receiver",
+		Path: "receiver", Events: map[string]runtimecontracts.EventCatalogEntry{"deploy.requested": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"receiver-node": {
 				ID:           "receiver-node",
@@ -704,25 +716,13 @@ func testWorkflowNodeConnectedInputSource(producerMode string) semanticview.Sour
 			},
 		},
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{producer, receiver}}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{PackageKey: "."}, Children: []runtimecontracts.FlowContractView{producer, receiver}}
+	connect := runtimecontracts.FlowPackageConnect{SourceLine: 1, Event: "deploy.done", From: "producer", To: "receiver", Rename: "deploy.requested"}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		PackageTree: []runtimecontracts.LoadedProjectPackage{{Key: ".", Paths: runtimecontracts.ProjectPackagePaths{PackageFile: "package.yaml"}, Manifest: runtimecontracts.ProjectPackageDocument{Connect: []runtimecontracts.FlowPackageConnect{connect}}}},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
 			"producer": producer.Schema,
 			"receiver": receiver.Schema,
-		},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			FlowOutputEventPins: map[string][]runtimecontracts.FlowOutputEventPin{
-				"producer": {{Name: "deploy_done", Event: "deploy.done"}},
-			},
-			FlowInputEventPins: map[string][]runtimecontracts.FlowInputEventPin{
-				"receiver": {{Name: "deploy_requested", Event: "deploy.requested"}},
-			},
-			CompositionConnects: []runtimecontracts.FlowPackageConnect{{
-				SourceFile: "package.yaml", SourceLine: 1, Event: "deploy.done", From: "producer", To: "receiver", Rename: "deploy.requested", Adapter: "deploy_done_to_deploy_requested",
-			}},
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				"receiver-node": {"deploy.requested": {}},
-			},
 		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
@@ -731,7 +731,11 @@ func testWorkflowNodeConnectedInputSource(producerMode string) semanticview.Sour
 				"receiver": &root.Children[1],
 			},
 		},
-	})
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
+	return semanticview.Wrap(bundle)
 }
 
 func TestWorkflowPersistedFlowModeUsesClosedStoreRepresentation(t *testing.T) {
@@ -758,45 +762,40 @@ func TestWorkflowPersistedFlowModeUsesClosedStoreRepresentation(t *testing.T) {
 
 func testWorkflowNodeConnectedInputCollisionSource() semanticview.Source {
 	producer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
+		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer", PackageKey: "."},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: "static",
-			Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Name: "deploy_done", Event: "deploy.done"}}}},
+			Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "deploy.done"}}}},
 		},
-		Path: "producer",
+		Path: "producer", Events: map[string]runtimecontracts.EventCatalogEntry{"deploy.done": {}},
 	}
 	receiverInputs := []runtimecontracts.FlowInputEventPin{
-		{Name: "deploy_accepted", Event: "deploy.accepted"},
-		{Name: "deploy_audited", Event: "deploy.audited"},
+		{Event: "deploy.accepted"},
+		{Event: "deploy.audited"},
 	}
 	receiverHandlers := map[string]runtimecontracts.SystemNodeEventHandler{
 		"deploy.accepted": {},
 		"deploy.audited":  {},
 	}
 	receiver := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "receiver", Flow: "receiver"},
+		Paths: runtimecontracts.FlowContractPaths{ID: "receiver", Flow: "receiver", PackageKey: "."},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: "static",
 			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: receiverInputs}},
 		},
-		Path: "receiver",
+		Path: "receiver", Events: map[string]runtimecontracts.EventCatalogEntry{"deploy.accepted": {}, "deploy.audited": {}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"receiver-node": {ID: "receiver-node", EventHandlers: receiverHandlers},
 		},
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{producer, receiver}}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			FlowOutputEventPins: map[string][]runtimecontracts.FlowOutputEventPin{
-				"producer": {{Name: "deploy_done", Event: "deploy.done"}},
-			},
-			FlowInputEventPins: map[string][]runtimecontracts.FlowInputEventPin{"receiver": receiverInputs},
-			CompositionConnects: []runtimecontracts.FlowPackageConnect{
-				{SourceFile: "package.yaml", SourceLine: 1, Event: "deploy.done", From: "producer", To: "receiver", Rename: "deploy.accepted", Adapter: "deploy_done_to_deploy_accepted"},
-				{SourceFile: "package.yaml", SourceLine: 2, Event: "deploy.done", From: "producer", To: "receiver", Rename: "deploy.audited", Adapter: "deploy_done_to_deploy_audited"},
-			},
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{"receiver-node": receiverHandlers},
-		},
+	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{PackageKey: "."}, Children: []runtimecontracts.FlowContractView{producer, receiver}}
+	connects := []runtimecontracts.FlowPackageConnect{
+		{SourceLine: 1, Event: "deploy.done", From: "producer", To: "receiver", Rename: "deploy.accepted"},
+		{SourceLine: 2, Event: "deploy.done", From: "producer", To: "receiver", Rename: "deploy.audited"},
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		PackageTree: []runtimecontracts.LoadedProjectPackage{{Key: ".", Paths: runtimecontracts.ProjectPackagePaths{PackageFile: "package.yaml"}, Manifest: runtimecontracts.ProjectPackageDocument{Connect: connects}}},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"producer": producer.Schema, "receiver": receiver.Schema},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
@@ -804,10 +803,14 @@ func testWorkflowNodeConnectedInputCollisionSource() semanticview.Source {
 				"receiver": &root.Children[1],
 			},
 		},
-	})
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
+	return semanticview.Wrap(bundle)
 }
 
-func TestWorkflowNodeHandlerResolution_TargetRouteDoesNotAuthorizeProducerScopedEvent(t *testing.T) {
+func TestWorkflowNodeHandlerResolution_TargetRouteConsumesDeclaredInputEventIdentity(t *testing.T) {
 	source := workflowNodeDirectTemplateDeliverySource()
 	evt := eventtest.RunCreatingRootIngress("", "intake/account.ready", "", "", []byte(`{}`), 0, "", "", events.EventEnvelope{}, time.Unix(1, 0).UTC())
 	evt = eventtest.TargetRouted(evt, events.RouteIdentity{
@@ -818,8 +821,8 @@ func TestWorkflowNodeHandlerResolution_TargetRouteDoesNotAuthorizeProducerScoped
 	accountNode := pipelineNode(t, "account_case", "account-case-worker")
 	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(accountNode), Target: events.MustExistingEntityTarget(evt.TargetRoute())}
 	resolved := workflowNodeEventHandlerResolutionForDeliveryContext(withWorkflowNodeDeliveryRoute(context.Background(), route), source, accountNode, evt)
-	if resolved.Matched || !strings.Contains(resolved.Failure, "stamped connect claim") {
-		t.Fatalf("target-route-only resolution = %#v, want fail-closed stamped-claim error", resolved)
+	if !resolved.Matched || resolved.HandlerEventKey != "account.ready" {
+		t.Fatalf("target-route declared input resolution = %#v, want account.ready", resolved)
 	}
 }
 
@@ -862,7 +865,6 @@ func workflowNodeDirectTemplateDeliverySource() semanticview.Source {
 			Mode: "template",
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{
-					Name:  "account_ready",
 					Event: "account.ready",
 				}}},
 			},
@@ -879,21 +881,19 @@ func workflowNodeDirectTemplateDeliverySource() semanticview.Source {
 		},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{accountCase}}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				"account-case-worker": {
-					"account.ready": {},
-				},
-			},
-		},
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"account_case": accountCase.Schema},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
 				"account_case": &root.Children[0],
 			},
 		},
-	})
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
+	return semanticview.Wrap(bundle)
 }
 
 func TestWorkflowNodeHandlerResolution_PreservesAuthoredKeyForCanonicalCrossFlowEvent(t *testing.T) {

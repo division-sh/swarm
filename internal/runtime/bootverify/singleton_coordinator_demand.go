@@ -197,17 +197,17 @@ func BuildSingletonCoordinatorDemandProjection(source semanticview.Source) []Sin
 		}
 	}
 
-	for flowID, schema := range source.FlowSchemaEntries() {
+	for flowID := range source.FlowSchemaEntries() {
 		if _, singleton := flows[flowID]; !singleton {
 			continue
 		}
-		for _, pin := range schema.Pins.Inputs.EventPins {
-			if pin.Resolution.Mode != runtimecontracts.FlowInputResolutionModeFanIn {
+		for _, pin := range source.FlowInputEventPins(flowID) {
+			if pin.Resolution().Mode != runtimecontracts.FlowInputResolutionModeFanIn {
 				continue
 			}
 			add(SingletonCoordinatorDemand{
 				FlowID: flowID, SourceFile: singletonFlowSchemaFile(bundle, flowID), Location: flowID,
-				Kind: "fan_in_input", Target: pin.PinName() + " (" + pin.EventType() + ")",
+				Kind: "fan_in_input", Target: pin.EventType() + " (" + pin.EventType() + ")",
 			}, false)
 		}
 	}

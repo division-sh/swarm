@@ -7,9 +7,7 @@ pins:
     events: [stage.one_done, stage.two_done]
   outputs:
     events:
-      - name: stage.two_start
-        event: stage.two_start
+      - event: stage.two_start
         sink: harness
-      - name: stage.complete
-        event: stage.complete
+      - event: stage.complete
         sink: harness

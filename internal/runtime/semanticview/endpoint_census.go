@@ -940,16 +940,16 @@ func (b *endpointCensusBuilder) addPinEndpoints() {
 	for _, flowID := range flowIDs {
 		for _, pin := range sortedInputPins(b.source.FlowInputEventPins(flowID)) {
 			endpoint := b.endpoint(EventEndpointInputPin, EventEndpointFlowInputPin, flowID, pin.EventType())
-			endpoint.PinName = strings.TrimSpace(pin.PinName())
+			endpoint.PinName = strings.TrimSpace(pin.EventType())
 			endpoint.SourceLocation = "pins.inputs.events." + endpoint.PinName
-			endpoint.ResolutionMode = pin.Resolution.Mode
+			endpoint.ResolutionMode = pin.Resolution().Mode
 			b.add(endpoint)
 		}
 		for _, pin := range sortedOutputPins(b.source.FlowOutputEventPins(flowID)) {
 			endpoint := b.endpoint(EventEndpointOutputPin, EventEndpointFlowOutputPin, flowID, pin.EventType())
-			endpoint.PinName = strings.TrimSpace(pin.PinName())
+			endpoint.PinName = strings.TrimSpace(pin.EventType())
 			endpoint.SourceLocation = "pins.outputs.events." + endpoint.PinName
-			endpoint.Sink = runtimecontracts.FlowOutputSinkCode(pin.Sink)
+			endpoint.Sink = runtimecontracts.FlowOutputSinkCode(pin.Sink())
 			b.add(endpoint)
 		}
 	}
@@ -1335,14 +1335,14 @@ func sortedFlowScopes(scopes []FlowScope) []FlowScope {
 	return out
 }
 
-func sortedInputPins(pins []runtimecontracts.FlowInputEventPin) []runtimecontracts.FlowInputEventPin {
-	out := append([]runtimecontracts.FlowInputEventPin(nil), pins...)
-	sort.SliceStable(out, func(i, j int) bool { return strings.TrimSpace(out[i].PinName()) < strings.TrimSpace(out[j].PinName()) })
+func sortedInputPins(pins []runtimecontracts.CompiledFlowInputPin) []runtimecontracts.CompiledFlowInputPin {
+	out := append([]runtimecontracts.CompiledFlowInputPin(nil), pins...)
+	sort.SliceStable(out, func(i, j int) bool { return strings.TrimSpace(out[i].EventType()) < strings.TrimSpace(out[j].EventType()) })
 	return out
 }
 
-func sortedOutputPins(pins []runtimecontracts.FlowOutputEventPin) []runtimecontracts.FlowOutputEventPin {
-	out := append([]runtimecontracts.FlowOutputEventPin(nil), pins...)
-	sort.SliceStable(out, func(i, j int) bool { return strings.TrimSpace(out[i].PinName()) < strings.TrimSpace(out[j].PinName()) })
+func sortedOutputPins(pins []runtimecontracts.CompiledFlowOutputPin) []runtimecontracts.CompiledFlowOutputPin {
+	out := append([]runtimecontracts.CompiledFlowOutputPin(nil), pins...)
+	sort.SliceStable(out, func(i, j int) bool { return strings.TrimSpace(out[i].EventType()) < strings.TrimSpace(out[j].EventType()) })
 	return out
 }

@@ -23,7 +23,7 @@ func TestVerifyHarnessInjectionLabelsNonProductionBundle(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("verify exit = %d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	want := " -- 1 harness-injected input at [worker.work_requested], 1 harness-observed output at [worker.work_completed]; not production-valid"
+	want := " -- 1 harness-injected input at [worker.work.requested], 1 harness-observed output at [worker.work.completed]; not production-valid"
 	if !strings.Contains(stdout.String(), want) {
 		t.Fatalf("verify stdout missing %q:\n%s", want, stdout.String())
 	}
@@ -53,7 +53,7 @@ func TestVerifyHarnessInjectionJSONMarksNonProductionBundle(t *testing.T) {
 	if !output.OK || output.HarnessInjectedInputs != 1 || output.HarnessObservedOutputs != 1 || output.ProductionValid {
 		t.Fatalf("verify JSON = %#v, want ok validation-only result", output)
 	}
-	if strings.Join(output.HarnessInputProvenance, ",") != "worker.work_requested" || strings.Join(output.HarnessOutputProvenance, ",") != "worker.work_completed" {
+	if strings.Join(output.HarnessInputProvenance, ",") != "worker.work.requested" || strings.Join(output.HarnessOutputProvenance, ",") != "worker.work.completed" {
 		t.Fatalf("verify JSON harness provenance = inputs %v outputs %v", output.HarnessInputProvenance, output.HarnessOutputProvenance)
 	}
 }
@@ -62,7 +62,7 @@ func TestVerifyHarnessInjectionMissingDeclarationRestoresProducerFailure(t *test
 	root := canonicalrouting.CopyHarnessInjectionWithoutSource(t)
 	var stdout, stderr bytes.Buffer
 	code := runVerifyCommandWithContractsOutputForTest(t, context.Background(), RepoRoot(), root, &stdout, &stderr)
-	want := "[BLOCKER] input_pin_wiring @ worker: Flow worker declares input pin event work.requested but no accepted producer source was found in the authored bundle. Expected a producer proof for input pin target worker.work_requested."
+	want := "[BLOCKER] input_pin_wiring @ worker: Flow worker declares input pin event work.requested but no accepted producer source was found in the authored bundle. Expected a producer proof for input pin target worker.work.requested."
 	if code == 0 || !strings.Contains(stderr.String(), want) {
 		t.Fatalf("verify missing-source exit = %d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}

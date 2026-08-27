@@ -28,7 +28,6 @@ pins:
     reads:
       - score
   outputs:
-    events: []
     writes:
       - status
 required_agents:

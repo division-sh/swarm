@@ -6,6 +6,5 @@ pins:
     events: [gate.requested]
   outputs:
     events:
-      - name: gate.set
-        event: gate.set
+      - event: gate.set
         sink: harness

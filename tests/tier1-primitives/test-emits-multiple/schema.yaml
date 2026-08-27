@@ -6,6 +6,5 @@ pins:
     events: [item.received]
   outputs:
     events:
-      - name: item.processed
-        event: item.processed
+      - event: item.processed
         sink: harness

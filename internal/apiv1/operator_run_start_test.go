@@ -856,7 +856,7 @@ func runStartTestBundle(eventName string) *runtimecontracts.WorkflowContractBund
 		Path:  "discovery",
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{Events: []string{eventName}},
+				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: eventName}}},
 			},
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
@@ -870,8 +870,8 @@ func runStartTestBundle(eventName string) *runtimecontracts.WorkflowContractBund
 		},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
-	return &runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{Name: "review", Version: "1.0.0"},
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Package: runtimecontracts.ProjectPackageDocument{Name: "review", Version: "1.0.0"},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			eventName: {},
 		},
@@ -880,8 +880,11 @@ func runStartTestBundle(eventName string) *runtimecontracts.WorkflowContractBund
 		},
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{Events: []string{eventName}},
+				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: eventName}}},
 			},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"discovery": flow.Schema,
 		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
@@ -890,4 +893,8 @@ func runStartTestBundle(eventName string) *runtimecontracts.WorkflowContractBund
 			},
 		},
 	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(fmt.Sprintf("compile run-start test bundle: %v", err))
+	}
+	return bundle
 }

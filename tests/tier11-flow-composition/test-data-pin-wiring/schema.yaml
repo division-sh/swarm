@@ -6,8 +6,6 @@ pins:
   inputs:
     events:
       - job.start
-      - name: process_done
-        event: process.done
+      - process.done
   outputs:
-    events: []
     writes: [task_config]

@@ -472,8 +472,6 @@ initial_state: discovered
 terminal_states: [done]
 states: [discovered, done]
 pins:
-  inputs:
-    events: []
   outputs:
     events:
       - vertical.shortlisted
@@ -568,8 +566,6 @@ initial_state: discovered
 terminal_states: [done]
 states: [discovered, done]
 pins:
-  inputs:
-    events: []
   outputs:
     events:
       - vertical.shortlisted

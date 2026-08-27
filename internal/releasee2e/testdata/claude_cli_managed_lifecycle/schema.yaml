@@ -1,9 +1,1 @@
 name: claude-cli-release-lifecycle
-pins:
-  inputs:
-    events:
-      - name: worker_task_assigned
-        event: worker/task.assigned
-        source: external
-  outputs:
-    events: []

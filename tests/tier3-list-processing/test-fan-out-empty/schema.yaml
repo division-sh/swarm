@@ -6,6 +6,5 @@ pins:
     events: [batch.submitted]
   outputs:
     events:
-      - name: item_assigned
-        event: item.assigned
+      - event: item.assigned
         sink: harness

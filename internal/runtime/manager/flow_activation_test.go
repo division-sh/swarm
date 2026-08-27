@@ -1318,7 +1318,7 @@ func testFlowBundle(t *testing.T, autoEmit string) *runtimecontracts.WorkflowCon
 			"review": {
 				Mode: "template",
 				Pins: runtimecontracts.FlowPins{
-					Inputs: runtimecontracts.FlowInputPins{Events: []string{"task.started"}},
+					Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "task.started"}}},
 				},
 				AutoEmitOnCreate: runtimecontracts.AutoEmitOnCreateContract{Event: autoEmit},
 			},
@@ -1415,7 +1415,7 @@ func testNestedFlowBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle
 			"grandchild": {
 				Mode: "template",
 				Pins: runtimecontracts.FlowPins{
-					Inputs: runtimecontracts.FlowInputPins{Events: []string{"micro.started"}},
+					Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "micro.started"}}},
 				},
 			},
 		},
@@ -1481,7 +1481,8 @@ func testStaticFlowBundle() *runtimecontracts.WorkflowContractBundle {
 		},
 		AgentURIs: map[string]string{"analyzer": analyzerRef.Full},
 	}
-	return &runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Package: runtimecontracts.ProjectPackageDocument{Name: "manager-test", Version: "v-test"},
 		URIRegistry: runtimecontracts.ContractURIRegistry{
 			Agents: map[string]runtimecontracts.ContractURIRef{
 				"analyzer-flow/analyzer": analyzerRef,
@@ -1504,31 +1505,16 @@ func testStaticFlowBundle() *runtimecontracts.WorkflowContractBundle {
 					Emits:        []string{"analysis.done"},
 				}},
 				Pins: runtimecontracts.FlowPins{
-					Inputs:  runtimecontracts.FlowInputPins{Events: []string{"analysis.requested"}},
-					Outputs: runtimecontracts.FlowOutputPins{Events: []string{"analysis.done"}},
+					Inputs:  runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "analysis.requested"}}},
+					Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "analysis.done"}}},
 				},
 			},
 		},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Version: "v-test",
-			FlowAgents: map[string][]runtimecontracts.FlowRequiredAgent{
-				"analyzer-flow": {{
-					Role:         "analyzer",
-					SubscribesTo: []string{"analysis.requested"},
-					Emits:        []string{"analysis.done"},
-				}},
-			},
-			FlowInputs: map[string][]string{
-				"analyzer-flow": {"analysis.requested"},
-			},
-			FlowOutputs: map[string][]string{
-				"analyzer-flow": {"analysis.done"},
-			},
-			FlowPrefix: map[string]string{
-				"analyzer-flow": "analyzer-flow",
-			},
-		},
 	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(fmt.Sprintf("compile static flow test semantics: %v", err))
+	}
+	return bundle
 }
 
 func testActivationRequest(bundle *runtimecontracts.WorkflowContractBundle, templateID, instanceID, sourceEntityID, flowPath string) runtimepipeline.FlowInstanceActivationRequest {

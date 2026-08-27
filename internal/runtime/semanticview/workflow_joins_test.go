@@ -32,7 +32,7 @@ func TestFanInBarrierContractDerivesEffectiveJoinPlan(t *testing.T) {
 	if effective.Spec.Window == nil || effective.Spec.Window.By != "payload.period_id" || effective.Derivation.WindowByFrom != "resolution.window" {
 		t.Fatalf("effective window derivation = %#v", effective)
 	}
-	if effective.Derivation.FanInPin != "operating_reported" {
+	if effective.Derivation.FanInPin != "operating.reported" {
 		t.Fatalf("effective fan-in pin = %q", effective.Derivation.FanInPin)
 	}
 

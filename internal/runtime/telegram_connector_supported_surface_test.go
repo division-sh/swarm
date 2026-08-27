@@ -313,7 +313,7 @@ func telegramConnectorSupportedSurfaceSource(t *testing.T, baseURL, flowInstance
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{
-					Events: []string{"inbound.telegram"},
+					EventPins: []runtimecontracts.FlowInputEventPin{{Event: "inbound.telegram"}},
 				},
 			},
 		},

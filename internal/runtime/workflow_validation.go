@@ -211,10 +211,10 @@ func workflowHarnessInputDeclarations(source semanticview.Source) []string {
 	var declarations []string
 	for flowID := range source.FlowSchemaEntries() {
 		for _, pin := range source.FlowInputEventPins(flowID) {
-			if strings.TrimSpace(pin.Source) != "harness" {
+			if pin.Source() != runtimecontracts.FlowInputPinSourceHarness {
 				continue
 			}
-			location := strings.TrimSpace(pin.PinName())
+			location := strings.TrimSpace(pin.EventType())
 			if flowID != "" {
 				location = strings.TrimSpace(flowID) + "." + location
 			}
@@ -238,10 +238,10 @@ func workflowHarnessOutputDeclarations(source semanticview.Source) []string {
 	}
 	for _, flowID := range flowIDs {
 		for _, pin := range source.FlowOutputEventPins(flowID) {
-			if pin.Sink != runtimecontracts.FlowOutputSinkHarness {
+			if pin.Sink() != runtimecontracts.FlowOutputSinkHarness {
 				continue
 			}
-			location := strings.TrimSpace(pin.PinName())
+			location := strings.TrimSpace(pin.EventType())
 			if flowID != "" {
 				location = strings.TrimSpace(flowID) + "." + location
 			}
@@ -265,10 +265,10 @@ func workflowInvalidOutputSinkDeclarations(source semanticview.Source) []string 
 	}
 	for _, flowID := range flowIDs {
 		for _, pin := range source.FlowOutputEventPins(flowID) {
-			if pin.Sink.Valid() {
+			if pin.Sink().Valid() {
 				continue
 			}
-			location := strings.TrimSpace(pin.PinName())
+			location := strings.TrimSpace(pin.EventType())
 			if flowID != "" {
 				location = strings.TrimSpace(flowID) + "." + location
 			}

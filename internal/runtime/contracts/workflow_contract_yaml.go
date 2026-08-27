@@ -34,6 +34,11 @@ func (d *FlowSchemaDocument) UnmarshalYAML(node *yaml.Node) error {
 	if err := validateFlowSchemaDocumentFields(node); err != nil {
 		return err
 	}
+	if pinsNode := yamlMappingValue(node, "pins"); pinsNode != nil {
+		if err := validateFlowPinsNode(pinsNode); err != nil {
+			return err
+		}
+	}
 	if instanceNode := yamlMappingValue(node, "instance"); instanceNode != nil && strings.EqualFold(strings.TrimSpace(instanceNode.Tag), "!!null") {
 		return fmt.Errorf("retired template instance form; use `instance: <field>` with one non-empty scalar identity field")
 	}

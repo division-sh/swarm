@@ -6,6 +6,5 @@ pins:
     events: [step.a_done, step.b_done, step.c_done]
   outputs:
     events:
-      - name: release.ready
-        event: release.ready
+      - event: release.ready
         sink: harness

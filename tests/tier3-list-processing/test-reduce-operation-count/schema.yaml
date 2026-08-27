@@ -6,6 +6,5 @@ pins:
     events: [batch.submitted]
   outputs:
     events:
-      - name: batch.counted
-        event: batch.counted
+      - event: batch.counted
         sink: harness

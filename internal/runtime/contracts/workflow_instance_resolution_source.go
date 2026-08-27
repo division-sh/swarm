@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -20,12 +21,11 @@ type FlowInputInstanceSource struct {
 
 // FlowInputInstanceSourceTypeEvidence is the complete type evidence for one
 // receiver-owned instance key. SourceType always comes from the event contract
-// or an intrinsic platform source; CarryType is only an optional assertion.
+// or an intrinsic platform source.
 type FlowInputInstanceSourceTypeEvidence struct {
 	Field        TemplateInstanceField
 	Source       FlowInputInstanceSource
 	SourceType   CatalogTypeReference
-	CarryType    CatalogTypeReference
 	ReceiverType CatalogTypeReference
 }
 
@@ -39,12 +39,12 @@ type FlowInputInstanceEventCatalog interface {
 func ResolveFlowInputInstanceSource(mode FlowInputResolutionMode, raw string) (FlowInputInstanceSource, error) {
 	path := strings.TrimSpace(raw)
 	switch path {
-	case FlowInputCarrySourceGeneratedUUID:
+	case FlowInputInstanceSourceGeneratedUUIDPath:
 		if mode != FlowInputResolutionModeCreate {
 			return FlowInputInstanceSource{}, fmt.Errorf("generated.uuid is only valid for resolution mode create; selecting pins must source an existing payload field")
 		}
 		return FlowInputInstanceSource{Kind: FlowInputInstanceSourceGeneratedUUID, Path: path}, nil
-	case FlowInputCarrySourceEventID:
+	case FlowInputInstanceSourceEventIDPath:
 		if mode != FlowInputResolutionModeCreate {
 			return FlowInputInstanceSource{}, fmt.Errorf("event.id is only valid for resolution mode create; selecting pins must source an existing payload field")
 		}
@@ -64,19 +64,27 @@ func (s FlowInputInstanceSource) RequiresDeliveryProjection() bool {
 }
 
 // ResolveFlowInputInstanceSourceType centralizes source parsing, authoritative
-// source-type resolution, optional carry assertion, and receiver compatibility.
-func (b *WorkflowContractBundle) ResolveFlowInputInstanceSourceType(eventCatalog FlowInputInstanceEventCatalog, flowID string, pin FlowInputEventPin, instance TemplateInstanceContract) (FlowInputInstanceSourceTypeEvidence, error) {
+// source-type resolution, and receiver compatibility.
+func (b *WorkflowContractBundle) ResolveFlowInputInstanceSourceType(eventCatalog FlowInputInstanceEventCatalog, flowID string, pin CompiledFlowInputPin, instance TemplateInstanceContract) (FlowInputInstanceSourceTypeEvidence, error) {
+	return b.resolveFlowInputInstanceSourceType(eventCatalog, flowID, pin, instance, true)
+}
+
+func (b *WorkflowContractBundle) resolveFlowInputInstanceSourceType(eventCatalog FlowInputInstanceEventCatalog, flowID string, pin CompiledFlowInputPin, instance TemplateInstanceContract, requireCompatibility bool) (FlowInputInstanceSourceTypeEvidence, error) {
 	if instance.Field.Empty() {
 		return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("receiver flow %s must declare instance: <field>", strings.TrimSpace(flowID))
 	}
 	field := instance.Field.Path()
-	carry, ok := pin.Carries[field]
-	if !ok {
-		return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("flow %s is one instance per %s; input pin %s must declare a carry named %s (add carries: %s: {from: payload.<field>})", strings.TrimSpace(flowID), field, pin.PinName(), field, field)
+	resolution := pin.Resolution()
+	rawSource := strings.TrimSpace(resolution.From)
+	defaultSource := "payload." + field
+	if rawSource == "" {
+		rawSource = defaultSource
+	} else if rawSource == defaultSource {
+		return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("resolution.from %q is redundant; omit it to derive the receiver instance source", rawSource)
 	}
-	source, err := ResolveFlowInputInstanceSource(pin.Resolution.Mode, carry.From)
+	source, err := ResolveFlowInputInstanceSource(resolution.Mode, rawSource)
 	if err != nil {
-		return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("carry %s source %q is invalid for resolution mode %s: %w", field, strings.TrimSpace(carry.From), FlowInputResolutionModeCode(pin.Resolution.Mode), err)
+		return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("resolution source %q is invalid for mode %s: %w", rawSource, FlowInputResolutionModeCode(resolution.Mode), err)
 	}
 
 	receiverDecl, ok := instance.PrimaryEntity.Contract.Fields[field]
@@ -92,49 +100,48 @@ func (b *WorkflowContractBundle) ResolveFlowInputInstanceSourceType(eventCatalog
 	switch source.Kind {
 	case FlowInputInstanceSourcePayload:
 		sourceField := strings.TrimPrefix(source.Path, "payload.")
-		resolved, ok := resolveFlowInputInstanceEventFieldType(b, eventCatalog, flowID, pin.EventType(), sourceField)
+		resolved, required, ok := resolveFlowInputInstanceEventFieldType(b, eventCatalog, flowID, pin.EventType(), sourceField)
 		if !ok {
-			return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("carry %s source %s has no declared type on input event %s", field, source.Path, pin.EventType())
+			return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("resolution source %s has no declared type on input event %s", source.Path, pin.EventType())
+		}
+		if !required {
+			return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("resolution source %s must be a required producer event field", source.Path)
 		}
 		evidence.SourceType = resolved
 	case FlowInputInstanceSourceGeneratedUUID, FlowInputInstanceSourceEventID:
 		evidence.SourceType = CatalogTypeReference{Type: "uuid"}
 	default:
-		return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("carry %s source %q has unsupported typed source kind %q", field, source.Path, source.Kind)
+		return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("resolution source %q has unsupported typed source kind %q", source.Path, source.Kind)
 	}
 
-	if declared := strings.TrimSpace(carry.Type); declared != "" {
-		evidence.CarryType = CatalogTypeReference{Type: declared, Catalog: cloneTypeCatalogDocument(instance.PrimaryEntity.Types)}
-		if err := requireInstanceSourceTypesCompatible(evidence.SourceType, evidence.CarryType); err != nil {
-			return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("key_types_incompatible: carry %s source %s actual type %s is incompatible with declared carry type %s: %w", field, source.Path, evidence.SourceType.Type, declared, err)
+	if requireCompatibility {
+		if err := requireInstanceSourceTypesCompatible(evidence.SourceType, evidence.ReceiverType); err != nil {
+			return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("key_types_incompatible: resolution source %s type %s is incompatible with receiver entity.%s type %s: %w", source.Path, evidence.SourceType.Type, field, evidence.ReceiverType.Type, err)
 		}
-	}
-	if err := requireInstanceSourceTypesCompatible(evidence.SourceType, evidence.ReceiverType); err != nil {
-		return FlowInputInstanceSourceTypeEvidence{}, fmt.Errorf("key_types_incompatible: carry %s source %s actual type %s is incompatible with receiver entity.%s type %s: %w", field, source.Path, evidence.SourceType.Type, field, evidence.ReceiverType.Type, err)
 	}
 	return evidence, nil
 }
 
-func resolveFlowInputInstanceEventFieldType(bundle *WorkflowContractBundle, eventCatalog FlowInputInstanceEventCatalog, flowID, eventType, field string) (CatalogTypeReference, bool) {
-	if resolved, ok := ResolveEventFieldType(bundle, flowID, eventType, field); ok {
-		return resolved, true
+func resolveFlowInputInstanceEventFieldType(bundle *WorkflowContractBundle, eventCatalog FlowInputInstanceEventCatalog, flowID, eventType, field string) (CatalogTypeReference, bool, bool) {
+	var entry EventCatalogEntry
+	var ok bool
+	if eventCatalog != nil {
+		entry, _, ok = eventCatalog.ResolveFlowEventCatalogEntry(flowID, eventType)
+	} else if bundle != nil {
+		entry, _, ok = bundle.ResolveFlowEventCatalogEntry(flowID, eventType)
 	}
-	if eventCatalog == nil {
-		return CatalogTypeReference{}, false
-	}
-	entry, _, ok := eventCatalog.ResolveFlowEventCatalogEntry(flowID, eventType)
 	if !ok {
-		return CatalogTypeReference{}, false
+		return CatalogTypeReference{}, false, false
 	}
 	decl, ok := entry.Payload.Properties[strings.TrimSpace(field)]
 	if !ok || strings.TrimSpace(decl.Type) == "" {
-		return CatalogTypeReference{}, false
+		return CatalogTypeReference{}, false, false
 	}
 	var catalog TypeCatalogDocument
 	if bundle != nil {
 		catalog = bundle.ResolvedTypeCatalogForFlow(flowID)
 	}
-	return CatalogTypeReference{Type: strings.TrimSpace(decl.Type), Catalog: cloneTypeCatalogDocument(catalog)}, true
+	return CatalogTypeReference{Type: strings.TrimSpace(decl.Type), Catalog: cloneTypeCatalogDocument(catalog)}, slices.Contains(entry.Payload.Required, strings.TrimSpace(field)), true
 }
 
 func requireInstanceSourceTypesCompatible(source, target CatalogTypeReference) error {
