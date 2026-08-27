@@ -14,25 +14,21 @@ type serveBundleSourcePlan struct {
 	projection *runtimecontracts.BundleCatalogProjection
 }
 
-func prepareServeBundleSource(ctx context.Context, writer bundlecatalog.ServeIngestWriter, bundle *runtimecontracts.WorkflowContractBundle, dev bool) (runtimecorrelation.BundleSourceFact, error) {
-	plan, err := planServeBundleSource(writer, bundle, dev)
+func prepareServeBundleSource(ctx context.Context, writer bundlecatalog.ServeIngestWriter, bundle *runtimecontracts.WorkflowContractBundle) (runtimecorrelation.BundleSourceFact, error) {
+	plan, err := planServeBundleSource(writer, bundle)
 	if err != nil {
 		return runtimecorrelation.BundleSourceFact{}, err
 	}
 	return persistServeBundleSourcePlan(ctx, writer, plan)
 }
 
-func planServeBundleSource(writer bundlecatalog.ServeIngestWriter, bundle *runtimecontracts.WorkflowContractBundle, dev bool) (serveBundleSourcePlan, error) {
+func planServeBundleSource(writer bundlecatalog.ServeIngestWriter, bundle *runtimecontracts.WorkflowContractBundle) (serveBundleSourcePlan, error) {
 	bundleHash, err := runtimecontracts.BundleHash(bundle)
 	if err != nil {
 		return serveBundleSourcePlan{}, fmt.Errorf("derive canonical bundle hash: %w", err)
 	}
-	if dev {
-		fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(bundleHash)
-		return serveBundleSourcePlan{fact: fact}, err
-	}
 	if writer == nil {
-		return serveBundleSourcePlan{}, fmt.Errorf("non-dev serve requires the selected bundle ingest writer")
+		return serveBundleSourcePlan{}, fmt.Errorf("serve requires the selected bundle ingest writer")
 	}
 	projection, err := runtimecontracts.BuildBundleCatalogProjection(bundle)
 	if err != nil {
@@ -53,7 +49,7 @@ func persistServeBundleSourcePlan(ctx context.Context, writer bundlecatalog.Serv
 		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("planned bundle source fact: %w", err)
 	}
 	if plan.fact.IsEphemeral() {
-		return plan.fact, nil
+		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("serve bundle source plan must be persisted")
 	}
 	if plan.projection == nil {
 		return runtimecorrelation.BundleSourceFact{}, fmt.Errorf("persisted bundle source plan requires a catalog projection")

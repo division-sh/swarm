@@ -5485,6 +5485,7 @@ engine:
       runtime_config_key: store.sqlite.path
       default_authority: platform-spec.yaml#cli_specification.foundations.local_runtime_state_authority
       project_default_path: .swarm/stores/dev.db
+      project_dev_scratch_path: .swarm/stores/dev-scratch.db
       no_project_default_path: <swarm-dir>/stores/default/dev.db
       borrowed_project_default_path: <swarm-dir>/stores/projects/<project-key>/dev.db
       legacy_repo_relative_path: .swarm/dev.db
@@ -5500,6 +5501,11 @@ engine:
       - Runtime SQLite support must create parent directories on demand when the SQLite backend is implemented.
       - The SQLite file is persistent until the operator deletes it.
       - The runtime must never silently replace the local/dev SQLite store with an in-memory database.
+      - >
+        Project-local `swarm serve --dev` is the sole exception to normal durable-path selection: after resolving an
+        otherwise default SQLite posture, it consumes local_runtime_state_authority.dev_scratch_epoch and selects the
+        dedicated project-local scratch coordinate. Authored SQLite paths, borrowed projects, and PostgreSQL are rejected
+        before store mutation; the normal project `dev.db` remains untouched.
     postgres_connection_details:
       retired_env_vars:
       - SWARM_DB_HOST
@@ -5549,10 +5555,11 @@ engine:
     - Explicit postgres selection must remain available through flag, runtime config, and deprecated environment fallback
       and must reach the existing Postgres runtime store path.
     - >
-      Selected non-dev `swarm serve --contracts` and inherited `swarm run start --contracts` persist the canonical bundle
-      projection and stamp bundle_source=persisted on PostgreSQL and SQLite. Explicit --dev writes no bundle row and stamps
-      bundle_source=ephemeral. DB-loaded `--bundle-hash` boot remains Postgres-only until a separately gated catalog runtime
-      loader promotes SQLite support.
+      Selected `swarm serve --contracts`, project-local `swarm serve --dev`, and inherited `swarm run start --contracts`
+      persist the canonical bundle projection through the private selected-store ingest owner and stamp
+      bundle_source=persisted on PostgreSQL and SQLite. Project-local dev uses a fresh session-durable SQLite scratch epoch;
+      it is not an ephemeral-source exception. DB-loaded `--bundle-hash` boot remains Postgres-only until a separately gated
+      catalog runtime loader promotes SQLite support.
     required_consumers:
     - internal/cliapp DefaultServeOptions
     - swarm serve --store command surface
@@ -5745,14 +5752,14 @@ engine:
       - name: required_serve_bundle_ingest
         owner: internal/bundlecatalog.ServeIngestWriter projected by internal/store/selected.Owner
         capabilities:
-        - canonical bundle catalog upsert for selected non-dev contracts-source startup
+        - canonical bundle catalog upsert for every selected contracts-source startup
         consumers:
         - internal/serveapp.prepareServeBundleSource
         rule: >
           PostgreSQL and SQLite selected runtime construction must provide this required private ingest projection. It is
-          consumed only by non-dev contracts-source preparation and does not grant or imply public bundle.register,
-          DB-loaded bundle reconstruction, bundle deletion, or run.fork support. Explicit --dev bypasses the write by
-          selecting an ephemeral source plan, not by treating the required projection as unavailable.
+          consumed by contracts-source preparation, including the project-local SQLite scratch epoch selected by
+          `swarm serve --dev`, and does not grant or imply public bundle.register, DB-loaded bundle reconstruction, bundle
+          deletion, or run.fork support. There is no dev-only ephemeral source plan.
       - name: workspace_and_process_db_capabilities
         owner: internal/cliapp workspace lifecycle plus typed selected-store health projection
         capabilities:
@@ -17870,7 +17877,7 @@ multi_bundle_persistence:
         fact; public registration only persists a canonical catalog row and cannot mutate the running source fact.
       applies_to:
         persisted: '`swarm serve --contracts` computes BundleHash, writes or reuses one bundles row, and stamps every new run row with bundle_hash plus bundle_source=persisted.'
-        ephemeral: '`swarm serve --contracts --dev` computes the same BundleHash, writes no bundles row, and stamps every new run row with bundle_hash plus bundle_source=ephemeral.'
+        project_local_dev_scratch: '`swarm serve --contracts --dev` opens one fresh project-local scratch epoch, writes the same canonical bundles row, and stamps every new run row with bundle_hash plus bundle_source=persisted.'
       content_yaml: >
         Deterministic YAML archive named `swarm.bundle.catalog.v2`. The archive lists every non-data canonical bundle
         input by canonical label and stores the bundle_hash v1 canonical content bytes as base64, plus a canonical_inputs list containing all
@@ -18311,13 +18318,13 @@ multi_bundle_persistence:
       reason: Production readers consume canonical bundle_hash plus typed bundle_source availability.
     bundle_ingest_and_run_stamping:
       tracker: '#1015'
-      implementation_status: live_for_supported_postgres_serve_contracts
+      implementation_status: live_for_selected_postgres_sqlite_and_project_dev_scratch_contracts
       runtime_owners:
         - internal/runtime/contracts.BuildBundleCatalogProjection
-        - internal/store.PostgresStore.UpsertBundleCatalog
+        - internal/bundlecatalog.ServeIngestWriter projected by internal/store/selected.Owner
         - internal/serveapp.prepareServeBundleSource
         - internal/runtime/correlation.BundleSourceFact
-      reason: serve --contracts / --dev ingest, canonical hashing, bundle row writes, and persisted/ephemeral run stamping are runtime boot implementation.
+      reason: serve --contracts, including project-local dev scratch, performs canonical hashing, exact bundle-row ingest, and persisted run stamping during runtime boot.
     startup_recovery_unavailable_bundle:
       tracker: '#1016'
       reason: Restart recovery for active persisted/ephemeral/deleted bundle-source runs is lifecycle implementation.
@@ -24228,9 +24235,10 @@ cli_specification:
           - swarm serve --dev
           - swarm run start
           fallthrough: >
-            `serve --dev` registers a project-scoped TCP context after a pre-bind project claim and after the final API
-            target/runtime_instance_id are known. Default foreground `swarm run start` consumes the same local runtime state
-            authority and project live-runtime guard; it fails closed inside a project that already has a live runtime
+            `serve --dev` registers a project-scoped TCP context only under its retained project scratch epoch grant and
+            after the final API target/runtime_instance_id are known. The context descriptor is discovery metadata, not
+            liveness authority. Default foreground `swarm run start` consumes the local runtime state authority and its
+            descriptor-based project live-runtime guard; it fails closed inside a project that already has a live runtime
             unless the user targets that runtime explicitly through connected API mode.
       doctor_target_surface:
         command: swarm doctor --target [--json] [--swarm-dir <path>] [--api-server <url>] [--api-token-file <path>]
@@ -24266,6 +24274,23 @@ cli_specification:
         project root matches the active repo root, local state is project-local. If there is no project, Swarm-dir
         managed store state is allowed but workspace data must be explicit. If contracts point at a borrowed project
         outside the active repo root, Swarm MUST NOT write `.swarm` state into that borrowed tree.
+      dev_scratch_epoch:
+        promoted_by: '#2360'
+        owner: internal/store/devscratch.EpochAuthority
+        coordinate: <canonical-project-root>/.swarm/stores/dev-scratch.db
+        authority_file: <canonical-project-root>/.swarm/stores/dev-scratch.epoch.lock
+        rule: >
+          Project-local `swarm serve --dev` supports exactly one runtime per canonical project, independent of `--context`
+          and `--swarm-dir`. The endpoint context is a discovery label only. Before SQLite construction, the runtime retains
+          a nonblocking kernel lock on the stable adjacent authority file, validates and removes the predecessor database
+          plus `-wal`, `-shm`, and `-journal` sidecars, and opens a fresh selected SQLite store. The epoch lock remains held
+          until process work joins and selected-store close releases exact file possession. File existence, recorded PID,
+          descriptors, context claims, and database contents are never liveness authority; process death makes the kernel
+          locks reclaimable while the diagnostic authority file remains. Unsupported filesystems or aliases, borrowed
+          contracts, authored SQLite paths, and PostgreSQL fail closed before store mutation. No migration, row cleanup,
+          compatibility adoption, per-context store, memory fallback, or hot reload is supported. One epoch owns one source
+          generation and persists its exact canonical bundle/source fact through required_serve_bundle_ingest. The normal
+          project-local `dev.db` is not read, replaced, or modified by this posture.
       project_resolution:
         owner: cli_specification.foundations.contract_platform_spec_path_resolution
         local_project_rule: >
@@ -24277,6 +24302,7 @@ cli_specification:
         - project_default_or_swarm_dir_default
         retired_environment: SWARM_SQLITE_PATH
         project_default: <project-root>/.swarm/stores/dev.db
+        project_dev_scratch: <project-root>/.swarm/stores/dev-scratch.db
         no_project_default: <swarm-dir>/stores/default/dev.db
         borrowed_project_default: <swarm-dir>/stores/projects/<project-key>/dev.db
         legacy_rule: >
@@ -24320,6 +24346,10 @@ cli_specification:
         current_selector: <swarm-dir>/contexts/current
         lock: <swarm-dir>/contexts/.lock
         project_claims: <swarm-dir>/contexts/.project-claims/<hash>.claim
+        project_claim_scope: >
+          Project claims are registration/startup coordination for their remaining named consumers. They are not
+          `serve --dev` scratch exclusion or crash-reclamation authority; that authority is the canonical project-local
+          dev_scratch_epoch and is independent of context name and Swarm-dir.
         name_rule: >
           Context names are trimmed UTF-8 strings that cannot be empty, '.', '..', contain path separators, contain NUL,
           or start with '.'. #1614 auto-generates project context names from the project basename plus a short hash of
@@ -36560,6 +36590,10 @@ api_specification:
         \ Use `swarm verify` CLI for static contract validation in v1."
       - "[PROPOSED] methods that were never implemented \u2192 either v1 method on the equivalent namespace, deferred namespace,\
         \ or removed from spec entirely. None remain as [PROPOSED] in v1."
+      source_replacement: >
+        Retired Builder project reload/source replacement is not reachable from production serve construction or test
+        hooks. A project-local dev scratch epoch loads exactly one source generation; changing files on disk does not mutate
+        that running generation. Any future reload product requires a new lifecycle owner and specification.
     operator_api_disposition:
       transport: "REST at /api/* is retired as an operator-facing compatibility surface. It MUST NOT remain reachable in\
         \ production; consumers use /v1/rpc or /v1/ws."

@@ -1,7 +1,6 @@
 package cliapp
 
 import (
-	"context"
 	"net"
 	"os"
 	"path/filepath"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	"github.com/division-sh/swarm/internal/store/devscratch"
 )
 
 func TestServeProjectContextRegistrationWritesFinalDescriptor(t *testing.T) {
@@ -21,11 +21,10 @@ func TestServeProjectContextRegistrationWritesFinalDescriptor(t *testing.T) {
 	opts.SwarmDir = swarmDir
 	opts.SwarmDirSet = true
 
-	reg, err := PrepareServeProjectContextRegistration(context.Background(), project.root, opts, CLIContractPlatformSpecPaths{ContractsPath: project.contracts})
+	reg, err := prepareServeProjectContextRegistrationForTest(t, project, opts)
 	if err != nil {
 		t.Fatalf("prepare registration: %v", err)
 	}
-	defer reg.Release()
 	listener := listenLoopbackTestListener(t)
 	defer listener.Close()
 	storePath := filepath.Join(t.TempDir(), "dev.db")
@@ -56,7 +55,7 @@ func TestServeProjectContextRegistrationWritesFinalDescriptor(t *testing.T) {
 	}
 }
 
-func TestServeDevLiveProjectContextRefusal(t *testing.T) {
+func TestServeDevEpochAuthorityReplacesSameProjectDescriptor(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	project := writeCLIAPIProjectFixture(t)
 	swarmDir := t.TempDir()
@@ -68,16 +67,16 @@ func TestServeDevLiveProjectContextRefusal(t *testing.T) {
 	opts.SwarmDir = swarmDir
 	opts.SwarmDirSet = true
 
-	reg, err := PrepareServeProjectContextRegistration(context.Background(), project.root, opts, CLIContractPlatformSpecPaths{ContractsPath: project.contracts})
-	if err == nil {
-		reg.Release()
-		t.Fatal("prepare registration returned nil error")
+	_, err := prepareServeProjectContextRegistrationForTest(t, project, opts)
+	if err != nil {
+		t.Fatalf("prepare registration under epoch authority: %v", err)
 	}
-	if !strings.Contains(err.Error(), "already has context descriptors") {
-		t.Fatalf("err = %q, want double-serve guard", err.Error())
+	path, err := registry.descriptorPath(localProjectContextName(project.canonicalRoot))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(err.Error(), "--context") {
-		t.Fatalf("same-project refusal advertised context as a store selector: %v", err)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("predecessor same-project descriptor survived epoch reconciliation: %v", err)
 	}
 }
 
@@ -96,11 +95,10 @@ func TestServeProjectContextRegistrationReclaimsDeadProjectDescriptor(t *testing
 	opts.SwarmDir = swarmDir
 	opts.SwarmDirSet = true
 
-	reg, err := PrepareServeProjectContextRegistration(context.Background(), project.root, opts, CLIContractPlatformSpecPaths{ContractsPath: project.contracts})
+	_, err := prepareServeProjectContextRegistrationForTest(t, project, opts)
 	if err != nil {
 		t.Fatalf("prepare registration: %v", err)
 	}
-	defer reg.Release()
 	path, err := registry.descriptorPath(contextName)
 	if err != nil {
 		t.Fatalf("descriptor path: %v", err)
@@ -113,7 +111,7 @@ func TestServeProjectContextRegistrationReclaimsDeadProjectDescriptor(t *testing
 	}
 }
 
-func TestServeProjectContextRegistrationAllowsExplicitSecondContext(t *testing.T) {
+func TestServeProjectContextRegistrationTreatsExplicitNameAsDescriptorLabel(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	project := writeCLIAPIProjectFixture(t)
 	swarmDir := t.TempDir()
@@ -127,11 +125,10 @@ func TestServeProjectContextRegistrationAllowsExplicitSecondContext(t *testing.T
 	opts.ContextName = "second"
 	opts.ContextNameSet = true
 
-	reg, err := PrepareServeProjectContextRegistration(context.Background(), project.root, opts, CLIContractPlatformSpecPaths{ContractsPath: project.contracts})
+	_, err := prepareServeProjectContextRegistrationForTest(t, project, opts)
 	if err != nil {
 		t.Fatalf("prepare explicit context: %v", err)
 	}
-	defer reg.Release()
 }
 
 func TestServeProjectContextRegistrationRejectsCrossProjectExplicitContextName(t *testing.T) {
@@ -148,13 +145,44 @@ func TestServeProjectContextRegistrationRejectsCrossProjectExplicitContextName(t
 	opts.ContextName = "shared"
 	opts.ContextNameSet = true
 
-	reg, err := PrepareServeProjectContextRegistration(context.Background(), project.root, opts, CLIContractPlatformSpecPaths{ContractsPath: project.contracts})
+	_, err := prepareServeProjectContextRegistrationForTest(t, project, opts)
 	if err == nil {
-		reg.Release()
 		t.Fatal("prepare explicit context returned nil error")
 	}
 	if !strings.Contains(err.Error(), "context shared already exists for project "+otherProject.canonicalRoot) || !strings.Contains(err.Error(), "context names are global") {
 		t.Fatalf("err = %q, want cross-project name collision", err.Error())
+	}
+}
+
+func TestServeProjectContextRegistrationRequiresMatchingEpochGrant(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	project := writeCLIAPIProjectFixture(t)
+	otherProject := writeCLIAPIProjectFixture(t)
+	opts := DefaultServeOptions()
+	opts.Dev = true
+	opts.SwarmDir = t.TempDir()
+	opts.SwarmDirSet = true
+
+	paths := CLIContractPlatformSpecPaths{ContractsPath: project.contracts}
+	if _, err := PrepareServeProjectContextRegistration(opts, paths, devscratch.RegistrationGrant{}); err == nil || !strings.Contains(err.Error(), "registration grant is required") {
+		t.Fatalf("zero grant error = %v, want fail-closed epoch admission", err)
+	}
+
+	coordinate, err := devscratch.Resolve(otherProject.canonicalRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority, err := devscratch.Acquire(coordinate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer authority.AbortBeforeStoreOpen()
+	grant, err := authority.RegistrationGrant()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PrepareServeProjectContextRegistration(opts, paths, grant); err == nil || !strings.Contains(err.Error(), "belongs to another canonical project") {
+		t.Fatalf("foreign grant error = %v, want project-bound epoch admission", err)
 	}
 }
 
@@ -166,11 +194,10 @@ func TestServeProjectContextRegistrationRejectsUnsafeAuthDescriptor(t *testing.T
 	opts.Dev = true
 	opts.SwarmDir = swarmDir
 	opts.SwarmDirSet = true
-	reg, err := PrepareServeProjectContextRegistration(context.Background(), project.root, opts, CLIContractPlatformSpecPaths{ContractsPath: project.contracts})
+	reg, err := prepareServeProjectContextRegistrationForTest(t, project, opts)
 	if err != nil {
 		t.Fatalf("prepare registration: %v", err)
 	}
-	defer reg.Release()
 	listener := listenLoopbackTestListener(t)
 	defer listener.Close()
 	err = reg.WriteFinal("runtime-1", listener.Addr(), apiv1.AuthTokenResolution{
@@ -191,11 +218,10 @@ func TestServeProjectContextRegistrationWritesTokenFileAuthDescriptor(t *testing
 	opts.Dev = true
 	opts.SwarmDir = swarmDir
 	opts.SwarmDirSet = true
-	reg, err := PrepareServeProjectContextRegistration(context.Background(), project.root, opts, CLIContractPlatformSpecPaths{ContractsPath: project.contracts})
+	reg, err := prepareServeProjectContextRegistrationForTest(t, project, opts)
 	if err != nil {
 		t.Fatalf("prepare registration: %v", err)
 	}
-	defer reg.Release()
 	listener := listenLoopbackTestListener(t)
 	defer listener.Close()
 	tokenFile := writeCLIAPITokenFile(t, "serve-secret")
@@ -229,6 +255,24 @@ func TestServeProjectContextRegistrationWritesTokenFileAuthDescriptor(t *testing
 	if token != "serve-secret" {
 		t.Fatalf("descriptor token = %q, want serve-secret", token)
 	}
+}
+
+func prepareServeProjectContextRegistrationForTest(t *testing.T, project cliAPITestProject, opts ServeOptions) (*ServeProjectContextRegistration, error) {
+	t.Helper()
+	coordinate, err := devscratch.Resolve(project.canonicalRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority, err := devscratch.Acquire(coordinate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = authority.AbortBeforeStoreOpen() })
+	grant, err := authority.RegistrationGrant()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return PrepareServeProjectContextRegistration(opts, CLIContractPlatformSpecPaths{ContractsPath: project.contracts}, grant)
 }
 
 func listenLoopbackTestListener(t *testing.T) net.Listener {

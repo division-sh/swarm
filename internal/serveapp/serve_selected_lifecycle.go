@@ -17,6 +17,11 @@ type activatedSelectedStore interface {
 	CloseActivated(*worklifetime.ProcessJoinReceipt) error
 }
 
+type selectedStoreLifecycle interface {
+	activatedSelectedStore
+	CloseUnactivated() error
+}
+
 type serveProcessCapability interface {
 	Release(context.Context) error
 	TerminalResult() (runtimestartupownership.TerminalResult, bool)

@@ -9,8 +9,8 @@ import (
 )
 
 // ServeIngestWriter persists the canonical source projection required by
-// non-dev contracts-based serve startup. Public bundle registration is a
-// separate optional product capability.
+// every contracts-based serve startup, including project-local dev scratch.
+// Public bundle registration is a separate optional product capability.
 type ServeIngestWriter interface {
 	UpsertBundleCatalogWithData(context.Context, Upsert, durabledata.Catalog) (UpsertResult, error)
 }

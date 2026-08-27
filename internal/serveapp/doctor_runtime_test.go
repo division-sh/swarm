@@ -54,6 +54,7 @@ func TestRunServeRuntimeConsumesLocalClaudePreflightAfterBundleDecision(t *testi
 		Verbose:            true,
 		Output:             &out,
 		Dev:                true,
+		LocalRun:           true,
 	})
 	if code == 0 {
 		t.Fatalf("Run unexpectedly succeeded\noutput:\n%s", out.String())
@@ -100,6 +101,7 @@ func TestRunServeRuntimeRejectsDeclaredDevelopmentPackInventoryBeforeStoreSelect
 		Verbose:            true,
 		Output:             &out,
 		Dev:                true,
+		LocalRun:           true,
 	})
 	if code != 1 {
 		t.Fatalf("Run code = %d, want config load failure\noutput:\n%s", code, out.String())

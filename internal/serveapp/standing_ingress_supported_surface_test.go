@@ -861,7 +861,7 @@ func TestServeAuthorActivityAttachmentFailureKeepsRuntimeHealthy(t *testing.T) {
 		ConfigPath:    writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil),
 		ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		SelfCheck: true, RequireBundleMatch: false, Dev: true, TestLLMRuntime: telegramPhraseBotLLMRuntime{},
+		SelfCheck: true, RequireBundleMatch: false, Dev: true, LocalRun: true, TestLLMRuntime: telegramPhraseBotLLMRuntime{},
 		TestAfterAuthorActivityHead: func() error { return errors.New("author activity head unavailable") },
 	})
 	process.waitForReadyLine()
@@ -912,7 +912,7 @@ func TestStandingIngressUnsupportedAliasFailsBeforeServeReadiness(t *testing.T) 
 		ConfigPath:    writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil),
 		ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		StoreMode: "sqlite", APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		SelfCheck: true, Dev: true, Verbose: true,
+		SelfCheck: true, Dev: true, LocalRun: true, Verbose: true,
 	})
 	code, exited := process.waitForExit(15 * time.Second)
 	if !exited {

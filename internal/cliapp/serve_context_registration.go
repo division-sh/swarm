@@ -1,7 +1,6 @@
 package cliapp
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"net"
@@ -10,17 +9,17 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
+	"github.com/division-sh/swarm/internal/store/devscratch"
 )
 
 type ServeProjectContextRegistration struct {
 	registry    localContextRegistry
 	project     cliProjectResolution
 	contextName string
-	release     func()
 	registered  bool
 }
 
-func PrepareServeProjectContextRegistration(ctx context.Context, repo string, opts ServeOptions, resolvedPaths CLIContractPlatformSpecPaths) (*ServeProjectContextRegistration, error) {
+func PrepareServeProjectContextRegistration(opts ServeOptions, resolvedPaths CLIContractPlatformSpecPaths, grant devscratch.RegistrationGrant) (*ServeProjectContextRegistration, error) {
 	if !opts.Dev || opts.LocalRun {
 		return nil, nil
 	}
@@ -38,6 +37,9 @@ func PrepareServeProjectContextRegistration(ctx context.Context, repo string, op
 	if canonical == "" {
 		return nil, fmt.Errorf("serve --dev project context registration requires a canonical project root")
 	}
+	if err := grant.ValidateProject(canonical); err != nil {
+		return nil, err
+	}
 	contextName := strings.TrimSpace(opts.ContextName)
 	if contextName == "" {
 		contextName = localProjectContextName(canonical)
@@ -52,19 +54,39 @@ func PrepareServeProjectContextRegistration(ctx context.Context, repo string, op
 		projectRoot:          projectRoot,
 		canonicalProjectRoot: canonical,
 	}
-	if err := guardServeProjectContext(ctx, registry, project, contextName, opts.ContextNameSet); err != nil {
-		return nil, err
-	}
-	release, err := registry.AcquireProjectClaim(canonical, contextName)
-	if err != nil {
+	if err := reconcileServeProjectContextRegistration(registry, project, contextName); err != nil {
 		return nil, err
 	}
 	return &ServeProjectContextRegistration{
 		registry:    registry,
 		project:     project,
 		contextName: contextName,
-		release:     release,
 	}, nil
+}
+
+func reconcileServeProjectContextRegistration(registry localContextRegistry, project cliProjectResolution, contextName string) error {
+	entries, err := registry.ListDescriptors()
+	if err != nil {
+		return fmt.Errorf("inspect context registry: %w", err)
+	}
+	for _, entry := range entries {
+		entryName := strings.TrimSpace(entry.Descriptor.Name)
+		entryProject := strings.TrimSpace(entry.Descriptor.ProjectRoot)
+		canonicalEntryProject, _ := canonicalizeDoctorTargetPath(entryProject)
+		if strings.TrimSpace(canonicalEntryProject) == project.canonicalProjectRoot {
+			if err := registry.DeleteDescriptor(entryName); err != nil {
+				return fmt.Errorf("replace predecessor project context %s: %w", entryName, err)
+			}
+			continue
+		}
+		if entryName == contextName {
+			if entryProject == "" {
+				entryProject = "<unknown>"
+			}
+			return fmt.Errorf("context %s already exists for project %s; context names are global, choose another --context", contextName, entryProject)
+		}
+	}
+	return nil
 }
 
 func ResolveServeContextRegistrationSwarmDir(opts ServeOptions) (CLISwarmDirResolution, error) {
@@ -77,14 +99,6 @@ func ResolveServeContextRegistrationSwarmDir(opts ServeOptions) (CLISwarmDirReso
 		return CLISwarmDirResolution{}, err
 	}
 	return resolveCLISwarmDirFromConfig(cliSwarmDirOptions{}, cfg)
-}
-
-func (r *ServeProjectContextRegistration) Release() {
-	if r == nil || r.release == nil {
-		return
-	}
-	r.release()
-	r.release = nil
 }
 
 func (r *ServeProjectContextRegistration) Unregister() {

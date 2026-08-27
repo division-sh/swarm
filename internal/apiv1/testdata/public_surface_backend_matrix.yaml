@@ -1078,12 +1078,12 @@ rows:
       - kind: go_test
         name: TestOperatorMailboxWriteSupportedSurfacePublishesAndReadsAcrossBackends
 
-  - id: serve_dev_abandon_active_runs
-    surface: swarm serve --dev and --abandon-active-runs selected-store quiescence
+  - id: local_runtime_abandon_active_runs
+    surface: local foreground runtime and --abandon-active-runs selected-store quiescence
     classification: already_covered_by_existing_proof
     tier: required_smoke
     backends: [default_sqlite, explicit_postgres]
-    cli_commands: [serve]
+    cli_commands: [run]
     store_owners:
       - runtimerunquiescence.ServeAbandonStore
       - SQLiteRuntimeStore.ApplyServeAbandonActiveRunQuiescence
@@ -1091,13 +1091,13 @@ rows:
     proof_dimensions: [selected_store, canonical_store_owner, real_runtime_startup]
     proof_refs:
       - kind: go_test
-        name: TestRunServeRuntimeFreshEmptySQLiteBootsWithDevAbandon
+        name: TestRunLocalRuntimeFreshEmptySQLiteBootsWithDevAbandon
       - kind: go_test
         name: TestRunServeRuntimeFreshEmptySQLiteBootsWithDirectAbandon
       - kind: go_test
         name: TestRunServeRuntimeSQLiteAbandonActiveRunsQuiescesBeforeReadiness
       - kind: go_test
-        name: TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDevAbandon
+        name: TestRunLocalRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDevAbandon
 
   - id: handler_static_create_entity_retirement
     surface: retired static create_entity handler fail-closed admission after #1554

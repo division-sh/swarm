@@ -194,7 +194,7 @@ func TestCanonicalTelegramAgentExplicitLiveGraduation(t *testing.T) {
 	opts := cliapp.ServeOptions{
 		ConfigPath: configPath, ContractsPath: contractsRoot, PlatformSpecPath: filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath),
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-		SelfCheck: true, RequireBundleMatch: false, Dev: true, Verbose: true,
+		SelfCheck: true, RequireBundleMatch: false, Dev: true, LocalRun: true, Verbose: true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
 	}
 	process := startTelegramAgentServeRuntimeTestProcess(t, contractsRoot, opts)

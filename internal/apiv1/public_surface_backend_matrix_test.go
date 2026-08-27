@@ -368,8 +368,8 @@ func TestPublicSurfaceBackendMatrixRejectsStaleReferences(t *testing.T) {
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
 				row := publicSurfaceMatrixRowByID(t, matrix, "event_publish_dynamic_auto_emit_served_lifecycle")
 				row.ProofRefs = []publicSurfaceProofRef{
-					{Kind: "go_test", Name: "TestRunServeRuntimeFreshEmptySQLiteBootsWithDevAbandon"},
-					{Kind: "go_test", Name: "TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDevAbandon"},
+					{Kind: "go_test", Name: "TestRunLocalRuntimeFreshEmptySQLiteBootsWithDevAbandon"},
+					{Kind: "go_test", Name: "TestRunLocalRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDevAbandon"},
 				}
 			},
 			want: "event_publish_dynamic_auto_emit_served_lifecycle missing default SQLite served-runtime go_test proof_ref for api_method event.publish",
@@ -2121,7 +2121,7 @@ func requiredPublicSurfaceRows() map[string]struct{} {
 		"runtime_log_readback_api",
 		"mailbox_read_api_after_mailbox_write",
 		"mailbox_read_cli",
-		"serve_dev_abandon_active_runs",
+		"local_runtime_abandon_active_runs",
 		"handler_static_create_entity_retirement",
 		"bundle_hash_catalog_boot_postgres_only",
 	})

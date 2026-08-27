@@ -132,11 +132,11 @@ func goldenContinuousProofProfile(t *testing.T) (string, bool) {
 	}
 }
 
-func TestGoldenAgentWorkloadSQLiteDevRestartFailsClosed(t *testing.T) {
+func TestGoldenAgentWorkloadSQLiteDevScratchRestartStartsFreshEpoch(t *testing.T) {
 	releaseRoot := goldenReleaseRoot(t)
 	binaryPath := buildReleaseBinary(t, releaseRoot)
 	root := filepath.Join(releaseRoot, "sqlite-dev-restart")
-	store := goldenSQLiteStore(root)
+	store := goldenStoreSelection{name: "sqlite", configYAML: "store:\n  backend: sqlite\n"}
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("create release project: %v", err)
 	}
@@ -181,17 +181,21 @@ func TestGoldenAgentWorkloadSQLiteDevRestartFailsClosed(t *testing.T) {
 	if err := process.killAndWait(5 * time.Second); err != nil {
 		t.Fatalf("force-kill dev release serve: %v\n%s", err, process.output.String())
 	}
-	restarted := start(false)
+	restarted := start(true)
 	restartCtx, restartCancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
 	err := restarted.waitReady(restartCtx)
 	restartCancel()
-	if err == nil {
-		t.Fatal("non-dev restart unexpectedly resumed an active SQLite dev run")
+	if err != nil {
+		t.Fatalf("restart fresh dev scratch epoch: %v", err)
 	}
-	for _, want := range []string{"bundle match admission", "BUNDLE_UNAVAILABLE", "bundle_source=ephemeral", runID} {
-		if !strings.Contains(restarted.output.String(), want) {
-			t.Fatalf("non-dev restart output missing %q:\n%s", want, restarted.output.String())
-		}
+	if restartedHash := goldenServedBundleHash(t, restarted.rpc); restartedHash != bundleHash {
+		t.Fatalf("restarted bundle hash = %q, want unchanged persisted source %q", restartedHash, bundleHash)
+	}
+	missingCtx, missingCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer missingCancel()
+	var predecessor any
+	if err := restarted.rpc.call(missingCtx, "run.get", map[string]any{"run_id": runID}, &predecessor); err == nil || !strings.Contains(err.Error(), "RUN_NOT_FOUND") {
+		t.Fatalf("predecessor run readback error = %v, want fresh-epoch RUN_NOT_FOUND", err)
 	}
 }
 

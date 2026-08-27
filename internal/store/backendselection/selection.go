@@ -25,6 +25,7 @@ const (
 	SourceRuntimeConfig   Source = "runtime_config"
 	SourceRolloutDefault  Source = "rollout_default"
 	SourceProjectDefault  Source = "project_default"
+	SourceProjectScratch  Source = "project_dev_scratch"
 	SourceSwarmDirDefault Source = "swarm_dir_default"
 )
 

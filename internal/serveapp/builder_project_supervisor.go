@@ -42,7 +42,6 @@ type runtimeProjectSupervisor struct {
 	cfg                  *config.Config
 	stores               serveRuntimePersistence
 	ready                serveReadiness
-	dev                  bool
 	mountSources         cliapp.WorkspaceMountSources
 	workspaceBackend     cliapp.WorkspaceBackendSelection
 	credentials          runtimecredentials.Store
@@ -199,12 +198,7 @@ func newRuntimeProjectSupervisor(
 	initialBundle *runtimecontracts.WorkflowContractBundle,
 	initialSource semanticview.Source,
 	initialRT *runtime.Runtime,
-	devMode ...bool,
 ) *runtimeProjectSupervisor {
-	dev := false
-	if len(devMode) > 0 {
-		dev = devMode[0]
-	}
 	packBases, _ := packartifact.NewPlatformPackBaseGenerationOwner(platformPackBase)
 	supervisor := &runtimeProjectSupervisor{
 		RepoRoot:            strings.TrimSpace(RepoRoot),
@@ -212,7 +206,6 @@ func newRuntimeProjectSupervisor(
 		cfg:                 cfg,
 		stores:              stores,
 		ready:               ready,
-		dev:                 dev,
 		mountSources:        mountSources,
 		workspaceBackend:    workspaceBackend,
 		credentials:         credentials,
@@ -482,7 +475,7 @@ func (s *runtimeProjectSupervisor) loadProject(ctx context.Context, projectDir s
 	}
 	candidateChannelPlans := append([]packs.SatisfactionPlan(nil), candidatePacks.Channels.Plans...)
 	candidateChannelBindings := append([]packs.OutboundBindingPlan(nil), candidatePacks.Channels.Bindings...)
-	bundleSourcePlan, err := planServeBundleSource(s.stores.bundleWriter, bundle, s.dev)
+	bundleSourcePlan, err := planServeBundleSource(s.stores.bundleWriter, bundle)
 	if err != nil {
 		return builderpkg.ProjectStatus{}, fmt.Errorf("plan project bundle source: %w", err)
 	}

@@ -16,8 +16,10 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/apiv1"
+	"github.com/division-sh/swarm/internal/bundlecatalog"
 	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
+	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/packadmission"
@@ -88,6 +90,16 @@ func testPlatformPackBaseGenerations(t *testing.T) *packartifact.PlatformPackBas
 	return owner
 }
 
+type testServeIngestWriter struct{}
+
+func (testServeIngestWriter) UpsertBundleCatalogWithData(context.Context, bundlecatalog.Upsert, durabledata.Catalog) (bundlecatalog.UpsertResult, error) {
+	return bundlecatalog.UpsertResult{}, nil
+}
+
+func testServeRuntimePersistence() serveRuntimePersistence {
+	return serveRuntimePersistence{bundleWriter: testServeIngestWriter{}}
+}
+
 type failOnceFinalizeStartupOwnershipStore struct {
 	delegate runtimestartupownership.Store
 
@@ -120,10 +132,10 @@ func TestRuntimeProjectSupervisorRejectsHarnessInputReplacementBeforeQuiesce(t *
 	var ready atomic.Bool
 	ready.Store(true)
 	supervisor := newRuntimeProjectSupervisor(
-		repo, spec, nil, serveRuntimePersistence{}, &ready, cliapp.WorkspaceMountSources{},
+		repo, spec, nil, testServeRuntimePersistence(), &ready, cliapp.WorkspaceMountSources{},
 		cliapp.WorkspaceBackendSelection{NoWorkspace: true, Source: "test"},
 		nil, nil, catalog, packfixture.EmbeddedBase(t), "/old", &runtimecontracts.WorkflowContractBundle{},
-		semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), oldRuntime, true,
+		semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), oldRuntime,
 	)
 	supervisor.loadWorkflow = func(_, contractsRoot, _ string, _ *packartifact.PlatformPackInventory) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
 		if contractsRoot != root {
@@ -1902,7 +1914,7 @@ func (stubWorkspaceLifecycle) SetDataProjectionProvider(runtimedataaccess.Provid
 func writeProjectRoot(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "package.yaml"), []byte("name: test\nversion: 1.0.0\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "package.yaml"), []byte("name: test\nversion: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\n"), 0o644); err != nil {
 		t.Fatalf("write package.yaml: %v", err)
 	}
 	return dir
@@ -1914,7 +1926,7 @@ func testBuilderSupervisorBundle(t *testing.T) *runtimecontracts.WorkflowContrac
 	repoRoot := cliapp.RepoRoot()
 	platformPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	packagePath := filepath.Join(dir, "package.yaml")
-	if err := os.WriteFile(packagePath, []byte("name: test\nversion: 1.0.0\nflows: []\n"), 0o644); err != nil {
+	if err := os.WriteFile(packagePath, []byte("name: test\nversion: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n"), 0o644); err != nil {
 		t.Fatalf("write package.yaml: %v", err)
 	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(repoRoot, dir, platformPath, runtimecontracts.WorkflowContractLoadOptions{
@@ -1938,14 +1950,13 @@ func newSupervisorForLoadProjectFailureTest(
 	module := stubWorkflowModule{source: source}
 	base := packfixture.EmbeddedBase(t)
 	catalog := testProviderTriggerCatalog(t)
-	supervisor := newRuntimeProjectSupervisor("", "", nil, serveRuntimePersistence{}, new(atomic.Bool), cliapp.WorkspaceMountSources{}, cliapp.WorkspaceBackendSelection{Backend: workspace.BackendDocker, Source: "test"}, nil, nil, catalog, base, "", nil, nil, nil)
+	supervisor := newRuntimeProjectSupervisor("", "", nil, testServeRuntimePersistence(), new(atomic.Bool), cliapp.WorkspaceMountSources{}, cliapp.WorkspaceBackendSelection{Backend: workspace.BackendDocker, Source: "test"}, nil, nil, catalog, base, "", nil, nil, nil)
 	supervisor.executionPosture = executionposture.Live
 	supervisor.processWorkOwner = worklifetime.NewProcess()
 	supervisor.providerTriggers = catalog
 	supervisor.SetBundlePackRuntimeLoader(func(ctx context.Context, _ cliapp.RuntimeConfigLoadResult, candidate *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
 		return cliapp.LoadBundlePackRuntime(ctx, cliapp.RuntimeConfigLoadResult{Config: &config.Config{}}, candidate, nil, nil)
 	})
-	supervisor.dev = true
 	supervisor.loadWorkflow = func(RepoRoot, contractsRoot, platformSpecPath string, _ *packartifact.PlatformPackInventory) (runtimepipeline.WorkflowModule, *runtimecontracts.WorkflowContractBundle, error) {
 		if got := strings.TrimSpace(contractsRoot); got != strings.TrimSpace(projectRoot) {
 			return nil, nil, fmt.Errorf("contracts root = %q, want %q", got, projectRoot)
@@ -2094,7 +2105,7 @@ func TestRuntimeProjectSupervisorDerivesProcessOwnerFromInitialRuntime(t *testin
 	processOwner := worklifetime.NewProcess()
 	initial := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Options: runtimepkg.RuntimeOptions{ProcessWorkOwner: processOwner}}
 	supervisor := newRuntimeProjectSupervisor(
-		"", "", nil, serveRuntimePersistence{}, new(atomic.Bool), cliapp.WorkspaceMountSources{},
+		"", "", nil, testServeRuntimePersistence(), new(atomic.Bool), cliapp.WorkspaceMountSources{},
 		cliapp.WorkspaceBackendSelection{}, nil, nil, nil, nil, "", nil, nil, initial,
 	)
 	if supervisor.processWorkOwner != processOwner {
@@ -2476,11 +2487,10 @@ func TestRuntimeProjectSupervisorOpenProjectExecutesExplicitHostRefusal(t *testi
 	module := stubWorkflowModule{source: source}
 	cfg := testWorkspaceBackendConfig(llmselection.BackendClaudeCLI)
 	supervisor := newRuntimeProjectSupervisor(
-		"", "", cfg, serveRuntimePersistence{}, new(atomic.Bool), cliapp.WorkspaceMountSources{},
+		"", "", cfg, testServeRuntimePersistence(), new(atomic.Bool), cliapp.WorkspaceMountSources{},
 		cliapp.WorkspaceBackendSelection{Backend: workspace.BackendHost, Source: "workspace.backend", PreferenceExplicit: true},
 		nil, nil, nil, packfixture.EmbeddedBase(t), "", nil, nil, nil,
 	)
-	supervisor.dev = true
 	catalog := emptyProviderTriggerCatalog(t)
 	supervisor.providerTriggers = catalog
 	supervisor.SetBundlePackRuntimeLoader(func(ctx context.Context, _ cliapp.RuntimeConfigLoadResult, candidate *runtimecontracts.WorkflowContractBundle) (cliapp.BundlePackRuntimeLoad, error) {
@@ -2629,8 +2639,8 @@ func TestRuntimeProjectSupervisorLoadProjectPassesBundleSourceFactToRuntime(t *t
 	if !status.Loaded {
 		t.Fatalf("status.Loaded = false, want true")
 	}
-	if gotSourceFact.BundleHash() != expectedHash || !gotSourceFact.IsEphemeral() {
-		t.Fatalf("BundleSourceFact = %#v, want hash=%q ephemeral source", gotSourceFact, expectedHash)
+	if gotSourceFact.BundleHash() != expectedHash || !gotSourceFact.IsPersisted() {
+		t.Fatalf("BundleSourceFact = %#v, want hash=%q persisted source", gotSourceFact, expectedHash)
 	}
 }
 

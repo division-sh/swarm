@@ -118,7 +118,7 @@ func TestInboundAdmissionSupportedSurfaceStartupFailuresSQLiteAndPostgres(t *tes
 					process := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
 						ConfigPath: configPath, ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
 						StoreMode: backend, APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
-						SelfCheck: true, RequireBundleMatch: false, Dev: true, Verbose: true,
+						SelfCheck: true, RequireBundleMatch: false, Dev: true, LocalRun: true, Verbose: true,
 					})
 					code, exited := process.waitForExit(15 * time.Second)
 					if !exited {
