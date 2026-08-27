@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 )
 
 type Pinger interface {
@@ -90,6 +91,7 @@ type runDiagnosis struct {
 	BlockingReason   string                                 `json:"blocking_reason"`
 	Heuristics       []string                               `json:"heuristics"`
 	FailedDeliveries []operatorread.RunDebugFailureDelivery `json:"failed_deliveries"`
+	FanOut           fanoutobligation.RunSummary            `json:"fan_out"`
 	TestQuiescence   operatorread.RunTestQuiescence         `json:"test_quiescence"`
 }
 
@@ -238,10 +240,18 @@ func OperatorRunReadHandlers(opts RunReadHandlerOptions) map[string]MethodHandle
 				BlockingReason:   strings.TrimSpace(status.BlockingReason),
 				Heuristics:       status.Heuristics,
 				FailedDeliveries: failedDeliveries,
+				FanOut:           normalizeRunFanOut(report.FanOut),
 				TestQuiescence:   normalizeRunTestQuiescence(report.TestQuiescence),
 			}, nil
 		},
 	}
+}
+
+func normalizeRunFanOut(value fanoutobligation.RunSummary) fanoutobligation.RunSummary {
+	if value.BlockedIntents == nil {
+		value.BlockedIntents = []fanoutobligation.BlockedIntentDiagnosis{}
+	}
+	return value
 }
 
 func normalizeRunTestQuiescence(value operatorread.RunTestQuiescence) operatorread.RunTestQuiescence {

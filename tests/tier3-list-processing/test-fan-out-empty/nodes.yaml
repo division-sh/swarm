@@ -6,6 +6,7 @@ fan-out-node:
   event_handlers:
     batch.submitted:
       fan_out:
+        element_id: fce2e6f2-70e6-48f1-805e-9ae37d971bd9
         items_from: payload.items
         as: line_item
         identity: line_item.id

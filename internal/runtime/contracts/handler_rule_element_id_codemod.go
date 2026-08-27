@@ -27,7 +27,8 @@ type handlerRuleElementIDRewrite struct {
 
 type handlerRuleElementIDMintState struct {
 	// Alias occurrences resolve to the same node; one node cannot own two rows.
-	rows map[*yaml.Node]struct{}
+	rows    map[*yaml.Node]struct{}
+	fanOuts map[*yaml.Node]struct{}
 }
 
 // MintHandlerRuleElementIDs performs the explicit one-time authored corpus
@@ -122,7 +123,7 @@ func prepareHandlerRuleElementIDRewrite(path string) (handlerRuleElementIDRewrit
 }
 
 func mintHandlerRuleElementIDsInNode(node *yaml.Node) (int, error) {
-	return mintHandlerRuleElementIDsInNodeWithState(node, &handlerRuleElementIDMintState{rows: map[*yaml.Node]struct{}{}})
+	return mintHandlerRuleElementIDsInNodeWithState(node, &handlerRuleElementIDMintState{rows: map[*yaml.Node]struct{}{}, fanOuts: map[*yaml.Node]struct{}{}})
 }
 
 func mintHandlerRuleElementIDsInNodeWithState(node *yaml.Node, state *handlerRuleElementIDMintState) (int, error) {
@@ -180,6 +181,8 @@ func mintEventHandlerRuleElementIDs(handlers *yaml.Node, state *handlerRuleEleme
 			var minted int
 			var err error
 			switch key {
+			case "fan_out":
+				minted, err = ensureFanOutElementID(value, state)
 			case "rules":
 				minted, err = mintRuleCollectionElementIDs(value, handlerRuleDecodeContextRules, state)
 			case "on_complete":
@@ -289,8 +292,16 @@ func ensureRuleElementID(row *yaml.Node, ignored map[string]struct{}, state *han
 		return 0, err
 	}
 	hasElementID := false
+	mintedNested := 0
 	for index := 0; index+1 < len(row.Content); index += 2 {
 		key := strings.TrimSpace(row.Content[index].Value)
+		if key == "fan_out" {
+			minted, err := ensureFanOutElementID(row.Content[index+1], state)
+			if err != nil {
+				return 0, err
+			}
+			mintedNested += minted
+		}
 		if key == "element_id" {
 			if hasElementID {
 				return 0, fmt.Errorf("element_id may appear only once")
@@ -313,13 +324,48 @@ func ensureRuleElementID(row *yaml.Node, ignored map[string]struct{}, state *han
 		}
 	}
 	if hasElementID {
-		return 0, nil
+		return mintedNested, nil
 	}
 	id := contractelementidentity.MintContractElementID()
 	row.Content = append([]*yaml.Node{
 		{Kind: yaml.ScalarNode, Tag: "!!str", Value: "element_id"},
 		{Kind: yaml.ScalarNode, Tag: "!!str", Value: id.String()},
 	}, row.Content...)
+	return 1 + mintedNested, nil
+}
+
+func ensureFanOutElementID(node *yaml.Node, state *handlerRuleElementIDMintState) (int, error) {
+	for node != nil && node.Kind == yaml.AliasNode {
+		node = node.Alias
+	}
+	if node == nil || node.Kind != yaml.MappingNode {
+		return 0, fmt.Errorf("fan_out must be a mapping")
+	}
+	if _, exists := state.fanOuts[node]; exists {
+		return 0, fmt.Errorf("YAML-ALIAS-REUSE: one YAML mapping cannot represent multiple authored fan_out declarations; expand the alias into distinct mappings")
+	}
+	state.fanOuts[node] = struct{}{}
+	if err := validateUniqueNormalizedMappingKeys(node, "fan_out"); err != nil {
+		return 0, err
+	}
+	for index := 0; index+1 < len(node.Content); index += 2 {
+		if strings.TrimSpace(node.Content[index].Value) != "element_id" {
+			continue
+		}
+		value := node.Content[index+1]
+		if value.Kind != yaml.ScalarNode {
+			return 0, fmt.Errorf("fan_out element_id must be a scalar")
+		}
+		if _, err := contractelementidentity.ParseContractElementID(value.Value); err != nil {
+			return 0, err
+		}
+		return 0, nil
+	}
+	id := contractelementidentity.MintContractElementID()
+	node.Content = append([]*yaml.Node{
+		{Kind: yaml.ScalarNode, Tag: "!!str", Value: "element_id"},
+		{Kind: yaml.ScalarNode, Tag: "!!str", Value: id.String()},
+	}, node.Content...)
 	return 1, nil
 }
 

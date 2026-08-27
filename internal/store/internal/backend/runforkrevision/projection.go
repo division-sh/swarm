@@ -281,6 +281,34 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 			query:   `SELECT CAST(d.dead_letter_id AS TEXT), CAST(d.dead_letter_id AS TEXT), CAST(d.original_event_id AS TEXT), COALESCE(CAST(d.delivery_id AS TEXT), ''), d.handler_node, d.created_at FROM dead_letters d JOIN events e ON e.event_id = d.original_event_id WHERE e.run_id = $1`,
 			columns: typedColumns(map[string]valueKind{"created_at": valueTime}, "dead_letter_id", "original_event_id", "delivery_id", "handler_node", "created_at"),
 		}
+	case FamilyFanOutObligations:
+		names := []string{
+			"fact_kind", "triggering_delivery_id", "package_key", "element_id", "bundle_hash", "semantic_digest",
+			"source_kind", "source_event_id", "source_run_id", "source_entity_id", "source_field", "source_mutation_id",
+			"source_resource_package_key", "source_resource_event_name", "source_resource_version_id",
+			"cardinality", "cursor", "status", "capsule", "blocked_reason",
+			"created_at", "ordinal", "outcome_kind", "event_id", "outcome_source_event_id", "failure",
+		}
+		spec = projectionSpec{
+			query: `
+				SELECT 'intent|' || CAST(i.triggering_delivery_id AS TEXT) || '|' || i.package_key || '|' || i.element_id,
+					'intent', CAST(i.triggering_delivery_id AS TEXT), i.package_key, i.element_id, i.bundle_hash, i.semantic_digest,
+					i.source_kind, CAST(i.source_event_id AS TEXT), CAST(i.source_run_id AS TEXT), CAST(i.source_entity_id AS TEXT), i.source_field, CAST(i.source_mutation_id AS TEXT),
+					i.source_resource_package_key, i.source_resource_event_name, i.source_resource_version_id,
+					i.cardinality, i.cursor, i.status, i.capsule, i.blocked_reason,
+					i.created_at, NULL, NULL, NULL, NULL, NULL
+				FROM fan_out_intents i WHERE i.run_id=$1
+				UNION ALL
+				SELECT 'outcome|' || CAST(o.triggering_delivery_id AS TEXT) || '|' || o.package_key || '|' || o.element_id || '|' || CAST(o.ordinal AS TEXT),
+					'outcome', CAST(o.triggering_delivery_id AS TEXT), o.package_key, o.element_id, NULL, NULL,
+					NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+					NULL, NULL, NULL, NULL, NULL,
+					o.created_at, o.ordinal, o.outcome_kind, CAST(o.event_id AS TEXT), CAST(o.source_event_id AS TEXT), o.failure
+				FROM fan_out_outcomes o WHERE o.run_id=$1`,
+			columns: typedColumns(map[string]valueKind{
+				"capsule": valueJSON, "failure": valueJSON, "created_at": valueTime,
+			}, names...),
+		}
 	case FamilyTimers:
 		names := []string{"timer_id", "timer_name", "schedule_scope", "schedule_key", "immutable_hash", "run_id", "source_timer_id", "forked_from_run_id", "forked_from_event_id", "reconstruction_owner", "entity_id", "flow_scope_key", "flow_instance_id", "flow_instance", "fire_event", "fire_payload", "routing_source", "execution_mode", "fire_at", "initial_fire_at", "recurring", "recurrence_interval", "owner_node", "owner_agent", "owner_kind", "agent_name_owner", "agent_name_source", "agent_route_presence", "agent_flow_scope_key", "agent_flow_instance_id", "reply_context_id", "task_id", "due_basis_kind", "due_basis_absolute", "due_basis_duration", "due_basis_cron", "occurrence_event_id", "occurrence_admitted_at", "accepted_at", "cancel_cause", "cancelled_at", "failure_code", "failure_message", "failed_at", "task_type", "status", "fired_at", "created_at"}
 		spec = projectionSpec{

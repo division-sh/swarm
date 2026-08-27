@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 )
@@ -75,6 +76,7 @@ type EngineMutation struct {
 	ActivityIntents      []ActivityIntent
 	EmitIntents          []EmitIntent
 	EmitPrerequisites    EmitPersistencePrerequisites
+	FanOutIntent         *fanoutobligation.IntentRequest
 }
 
 // DurablePublicationPlan is an immutable, already-admitted publication plan.

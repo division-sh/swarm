@@ -25,7 +25,11 @@ type Source interface {
 	WorkflowInitialStage() string
 	WorkflowTimers() []runtimecontracts.WorkflowTimerContract
 	WorkflowJoins() []runtimecontracts.WorkflowJoinPlan
-	ResolveFanOutEffectiveSemantics(node runtimeidentity.ExecutableNode, eventType string, spec runtimecontracts.FanOutSpec) (runtimecontracts.FanOutEffectiveSemantics, error)
+	FanOutPlanForSite(site runtimecontracts.FanOutSiteRef) (runtimecontracts.FanOutCompiledPlan, bool)
+	FanOutPlanForElement(ref runtimecontracts.FanOutElementRef) (runtimecontracts.FanOutCompiledPlan, bool)
+	FanOutPlans() []runtimecontracts.FanOutCompiledPlan
+	FanOutPlansForHandler(node runtimeidentity.ExecutableNode, eventType string) []runtimecontracts.FanOutCompiledPlan
+	FanOutPlanFailures() []runtimecontracts.FanOutPlanFailure
 	WorkflowGates() []runtimecontracts.WorkflowGatePlan
 	WorkflowGateForStage(flowID, stage string) (runtimecontracts.WorkflowGatePlan, bool)
 	WorkflowStageTimerByID(flowID, id string) (runtimecontracts.WorkflowTimerContract, bool)

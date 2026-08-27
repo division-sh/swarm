@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 )
 
@@ -18,66 +17,81 @@ func (c *checkerContext) fanOutValidation() []Finding {
 		return c.fanOutFindings
 	}
 	c.fanOutLoaded = true
-	for _, record := range c.source.ExecutableNodeRecords() {
-		node, err := record.Identity()
-		if err != nil {
-			continue
-		}
-		for eventType, handler := range c.source.ExecutableNodeEventHandlers(node) {
-			eventType = strings.TrimSpace(eventType)
-			for _, site := range runtimecontracts.HandlerFanOutSites(handler) {
-				c.fanOutFindings = append(c.fanOutFindings, c.validateFanOutSite(node, eventType, site)...)
-			}
-		}
+	for _, failure := range c.source.FanOutPlanFailures() {
+		c.fanOutFindings = append(c.fanOutFindings, Finding{
+			CheckID: fanOutValidationCheckID, Severity: SeverityHardInvalidity,
+			Message: failure.Error(), Location: failure.Node.Key(),
+		})
+	}
+	for _, plan := range c.source.FanOutPlans() {
+		c.fanOutFindings = append(c.fanOutFindings, c.validateFanOutPlan(plan)...)
 	}
 	return c.fanOutFindings
 }
 
-func (c *checkerContext) validateFanOutSite(node runtimeidentity.ExecutableNode, eventType string, site runtimecontracts.WorkflowFanOutSite) []Finding {
-	flowID := node.FlowID()
-	nodeID := node.Key()
-	spec := site.Spec
-	if spec == nil {
-		return nil
-	}
+func (c *checkerContext) validateFanOutPlan(plan runtimecontracts.FanOutCompiledPlan) []Finding {
+	flowID := plan.Site.Node.FlowID()
+	nodeID := plan.Site.Node.Key()
+	eventType := strings.TrimSpace(plan.Site.EventType)
+	siteSource := fanOutPlanSiteSource(plan.Site)
 	out := make([]Finding, 0, 4)
 	add := func(detail string) {
 		out = append(out, Finding{
 			CheckID:  fanOutValidationCheckID,
 			Severity: SeverityHardInvalidity,
-			Message:  fmt.Sprintf("flow %s node %s handler %s %s: %s", defaultFlowLabel(flowID), nodeID, eventType, site.Source, detail),
+			Message:  fmt.Sprintf("flow %s node %s handler %s %s: %s", defaultFlowLabel(flowID), nodeID, eventType, siteSource, detail),
 			Location: nodeID,
 		})
 	}
-	if err := runtimecontracts.ValidateFanOutAlias(spec.As); err != nil {
-		add("fan_out." + err.Error())
+	if err := workflowexpr.ValidateValueExpressionWithOptions(plan.Identity, workflowexpr.ValueExpressionOptions{ItemAlias: plan.ItemAlias}); err != nil {
+		add(fmt.Sprintf("fan_out.identity %q is invalid: %v", plan.Identity, err))
 	}
-	effective, effectiveErr := c.source.ResolveFanOutEffectiveSemantics(node, eventType, *spec)
-	if effectiveErr != nil {
-		add(effectiveErr.Error())
-	} else {
-		if err := workflowexpr.ValidateValueExpressionWithOptions(effective.Identity, workflowexpr.ValueExpressionOptions{ItemAlias: effective.ItemAlias}); err != nil {
-			add(fmt.Sprintf("fan_out.identity %q is invalid: %v", effective.Identity, err))
-		}
-		if workflowexpr.ExpressionReferencesFanOutFieldForValidation(effective.Identity, "index") {
-			add("fan_out.identity must use the stable item alias, not fan_out.index")
-		}
-		if !expressionReferencesAlias(effective.Identity, effective.ItemAlias) {
-			add(fmt.Sprintf("fan_out.identity %q must reference item alias %q", effective.Identity, effective.ItemAlias))
-		}
-		if !fanOutEmitCarriesIdentity(*spec, effective.Identity) {
-			add(fmt.Sprintf("fan_out.emit.fields must carry identity expression %q", effective.Identity))
+	if workflowexpr.ExpressionReferencesFanOutFieldForValidation(plan.Identity, "index") {
+		add("fan_out.identity must use the stable item alias, not fan_out.index")
+	}
+	if !expressionReferencesAlias(plan.Identity, plan.ItemAlias) {
+		add(fmt.Sprintf("fan_out.identity %q must reference item alias %q", plan.Identity, plan.ItemAlias))
+	}
+	if !fanOutEmitCarriesIdentity(plan.Emit, plan.Identity) {
+		add(fmt.Sprintf("fan_out.emit.fields must carry identity expression %q", plan.Identity))
+	}
+	if plan.SourceAfterWrites {
+		for _, write := range plan.Writes {
+			if fanOutWriteReferencesCount(write) {
+				add(fmt.Sprintf("%s mutates fan_out.items_from and a same-handler data write references fan_out.count; remove the cycle or source the count outside this handler", plan.ItemsFrom))
+				break
+			}
 		}
 	}
 	return out
 }
 
-func fanOutEmitCarriesIdentity(spec runtimecontracts.FanOutSpec, identity string) bool {
+func fanOutPlanSiteSource(site runtimecontracts.FanOutSiteRef) string {
+	switch site.Kind {
+	case runtimecontracts.FanOutSiteRule:
+		return fmt.Sprintf("handler.rules[%d].fan_out", site.Index)
+	case runtimecontracts.FanOutSiteOnComplete:
+		return fmt.Sprintf("handler.on_complete[%d].fan_out", site.Index)
+	default:
+		return "handler.fan_out"
+	}
+}
+
+func fanOutWriteReferencesCount(write runtimecontracts.WorkflowDataWrite) bool {
+	for _, expression := range []runtimecontracts.ExpressionValue{write.SourceExpression(), write.Value, write.Key, write.Index} {
+		if workflowexpr.ExpressionReferencesFanOutFieldForValidation(fanOutExpressionText(expression), "count") {
+			return true
+		}
+	}
+	return false
+}
+
+func fanOutEmitCarriesIdentity(spec runtimecontracts.EmitSpec, identity string) bool {
 	want := strings.TrimSpace(identity)
 	if want == "" {
 		return false
 	}
-	for _, expr := range spec.Emit.Fields {
+	for _, expr := range spec.Fields {
 		if strings.TrimSpace(fanOutExpressionText(expr)) == want {
 			return true
 		}

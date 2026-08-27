@@ -164,6 +164,7 @@ coordinator-indexer:
 ` + singletonCoordinatorWritesYAML(t, variant)
 	if variant == SingletonCoordinatorPilotDemandProjection {
 		nodes += `      fan_out:
+        element_id: 73e46db5-c23c-47ea-ae6a-fb981020582d
         items_from: entity.audit_log
         as: entry
         identity: entry.ref

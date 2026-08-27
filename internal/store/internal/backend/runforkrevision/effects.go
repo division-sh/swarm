@@ -27,6 +27,7 @@ const (
 	FamilyAgentTurns              Family = "agent_turns"
 	FamilyAgentConversationAudits Family = "agent_conversation_audits"
 	FamilyReplyContexts           Family = "reply_contexts"
+	FamilyFanOutObligations       Family = "fan_out_obligations"
 )
 
 var allFamilies = []Family{
@@ -42,6 +43,7 @@ var allFamilies = []Family{
 	FamilyAgentTurns,
 	FamilyAgentConversationAudits,
 	FamilyReplyContexts,
+	FamilyFanOutObligations,
 }
 
 func AllFamilies() []Family { return append([]Family(nil), allFamilies...) }

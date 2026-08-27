@@ -27,6 +27,7 @@ scout-collector:
           - source_field: candidate_ids
             target_field: candidate_ids
       fan_out:
+        element_id: af92a627-060e-4bd4-8b15-41add01a9217
         items_from: payload.candidate_ids
         as: candidate_id
         max_items: 10

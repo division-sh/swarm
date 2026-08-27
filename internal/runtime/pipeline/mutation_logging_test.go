@@ -366,6 +366,12 @@ func seedMutationLoggingInstance(t *testing.T, store *workflowInstanceStore, ent
 
 func dropEntityMutationsTable(t *testing.T, db *sql.DB) {
 	t.Helper()
+	if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `DROP TABLE fan_out_outcomes`); err != nil {
+		t.Fatalf("drop fan_out_outcomes: %v", err)
+	}
+	if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `DROP TABLE fan_out_intents`); err != nil {
+		t.Fatalf("drop fan_out_intents: %v", err)
+	}
 	if _, err := db.ExecContext(testAuthorActivityContext(t, context.Background()), `DROP TABLE entity_mutations`); err != nil {
 		t.Fatalf("drop entity_mutations: %v", err)
 	}

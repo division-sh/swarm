@@ -2,13 +2,17 @@ package contracts
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 )
 
 type FanOutEffectiveSemantics struct {
+	PlanRef          FanOutPlanRef
 	ItemsFrom        string
 	ItemsPath        paths.Path
 	CollectionType   CatalogTypeReference
@@ -21,26 +25,400 @@ type FanOutEffectiveSemantics struct {
 	MaxItemsSet      bool
 }
 
+type FanOutPlanRef struct {
+	BundleHash     string           `json:"bundle_hash"`
+	ElementRef     FanOutElementRef `json:"element_ref"`
+	SemanticDigest string           `json:"semantic_digest"`
+}
+
+type FanOutElementRef struct {
+	PackageKey string `json:"package_key"`
+	ElementID  string `json:"element_id"`
+}
+
+func FanOutElementRefFrom(ref contractelementidentity.ContractElementRef) FanOutElementRef {
+	if !ref.Valid() {
+		return FanOutElementRef{}
+	}
+	return FanOutElementRef{PackageKey: ref.PackageKey().String(), ElementID: ref.ElementID().String()}
+}
+
+func (r FanOutElementRef) ContractElementRef() (contractelementidentity.ContractElementRef, error) {
+	return contractelementidentity.ParseContractElementRef(strings.TrimSpace(r.PackageKey), strings.TrimSpace(r.ElementID))
+}
+
+type FanOutCompiledPlan struct {
+	Site              FanOutSiteRef        `json:"site"`
+	Ref               FanOutPlanRef        `json:"ref"`
+	ItemsFrom         string               `json:"items_from"`
+	ItemsPath         paths.Path           `json:"items_path"`
+	CollectionType    CatalogTypeReference `json:"collection_type"`
+	ItemType          ResolvedCatalogType  `json:"item_type"`
+	ItemAlias         string               `json:"item_alias"`
+	Identity          string               `json:"identity"`
+	IdentityDerived   bool                 `json:"identity_derived"`
+	MaxItems          int                  `json:"max_items"`
+	AuthoredMaxItems  int                  `json:"authored_max_items"`
+	MaxItemsSet       bool                 `json:"max_items_set"`
+	SourceAfterWrites bool                 `json:"source_after_writes"`
+	Writes            []WorkflowDataWrite  `json:"-"`
+	Emit              EmitSpec             `json:"emit"`
+}
+
+type FanOutSiteKind string
+
+const (
+	FanOutSiteHandler    FanOutSiteKind = "handler"
+	FanOutSiteRule       FanOutSiteKind = "rule"
+	FanOutSiteOnComplete FanOutSiteKind = "on_complete"
+)
+
+type FanOutSiteRef struct {
+	Node      runtimeidentity.ExecutableNode `json:"node"`
+	EventType string                         `json:"event_type"`
+	Kind      FanOutSiteKind                 `json:"kind"`
+	Index     int                            `json:"index"`
+}
+
+func NewFanOutSiteRef(node runtimeidentity.ExecutableNode, eventType string, kind FanOutSiteKind, index int) (FanOutSiteRef, error) {
+	ref := FanOutSiteRef{Node: node, EventType: strings.TrimSpace(eventType), Kind: kind, Index: index}
+	if err := ref.Validate(); err != nil {
+		return FanOutSiteRef{}, err
+	}
+	return ref, nil
+}
+
+func (r FanOutSiteRef) Validate() error {
+	if !r.Node.Valid() || strings.TrimSpace(r.EventType) == "" {
+		return fmt.Errorf("fan_out site requires exact executable node and handler event")
+	}
+	switch r.Kind {
+	case FanOutSiteHandler:
+		if r.Index != -1 {
+			return fmt.Errorf("handler fan_out site index must be -1")
+		}
+	case FanOutSiteRule, FanOutSiteOnComplete:
+		if r.Index < 0 {
+			return fmt.Errorf("%s fan_out site index must be non-negative", r.Kind)
+		}
+	default:
+		return fmt.Errorf("fan_out site kind %q is unsupported", r.Kind)
+	}
+	return nil
+}
+
 type WorkflowFanOutSite struct {
 	Source string
+	Kind   FanOutSiteKind
+	Index  int
 	Spec   *FanOutSpec
+	Writes []WorkflowDataWrite
+}
+
+type FanOutPlanFailure struct {
+	Node      runtimeidentity.ExecutableNode
+	EventType string
+	Source    string
+	Detail    string
+}
+
+func (f FanOutPlanFailure) Error() string {
+	return fmt.Sprintf("node %s handler %s %s: %s", f.Node.Key(), strings.TrimSpace(f.EventType), strings.TrimSpace(f.Source), strings.TrimSpace(f.Detail))
+}
+
+func (b *WorkflowContractBundle) CompileFanOutPlan(node runtimeidentity.ExecutableNode, eventType string, handler SystemNodeEventHandler, site WorkflowFanOutSite) (FanOutCompiledPlan, error) {
+	if site.Spec == nil {
+		return FanOutCompiledPlan{}, fmt.Errorf("fan_out compiled plan requires an authored site")
+	}
+	spec := *site.Spec
+	siteRef, err := NewFanOutSiteRef(node, eventType, site.Kind, site.Index)
+	if err != nil {
+		return FanOutCompiledPlan{}, err
+	}
+	effective, err := b.ResolveFanOutEffectiveSemantics(node, eventType, spec)
+	if err != nil {
+		return FanOutCompiledPlan{}, err
+	}
+	ref, ok := spec.ContractElementRef()
+	if !ok {
+		return FanOutCompiledPlan{}, fmt.Errorf("fan_out requires canonical package-qualified element_id; run `swarm mint-element-ids --contracts <path>`")
+	}
+	bundleHash, err := BundleHash(b)
+	if err != nil {
+		return FanOutCompiledPlan{}, fmt.Errorf("fan_out bundle identity: %w", err)
+	}
+	emit, err := b.LowerEmitSpecFields(EmitFieldLoweringContext{
+		Node: node, TriggerEventType: strings.TrimSpace(eventType), Site: "fan_out.emit",
+	}, spec.Emit)
+	if err != nil {
+		return FanOutCompiledPlan{}, err
+	}
+	plan := FanOutCompiledPlan{
+		Site:      siteRef,
+		ItemsFrom: effective.ItemsFrom, ItemsPath: effective.ItemsPath,
+		CollectionType: effective.CollectionType, ItemType: effective.ItemType,
+		ItemAlias: effective.ItemAlias, Identity: effective.Identity,
+		IdentityDerived: effective.IdentityDerived, MaxItems: effective.MaxItems,
+		AuthoredMaxItems: effective.AuthoredMaxItems, MaxItemsSet: effective.MaxItemsSet,
+		SourceAfterWrites: b.fanOutSourceAfterWrites(node, handler, spec, effective.ItemsPath),
+		Writes:            cloneFanOutWrites(site.Writes),
+		Emit:              emit,
+	}
+	digest, err := canonicaljson.Hash(struct {
+		ElementRef        FanOutElementRef     `json:"element_ref"`
+		ItemsFrom         string               `json:"items_from"`
+		CollectionType    CatalogTypeReference `json:"collection_type"`
+		ItemType          ResolvedCatalogType  `json:"item_type"`
+		ItemAlias         string               `json:"item_alias"`
+		Identity          string               `json:"identity"`
+		IdentityDerived   bool                 `json:"identity_derived"`
+		MaxItems          int                  `json:"max_items"`
+		SourceAfterWrites bool                 `json:"source_after_writes"`
+		Emit              EmitSpec             `json:"emit"`
+	}{
+		ElementRef: FanOutElementRefFrom(ref), ItemsFrom: plan.ItemsFrom,
+		CollectionType: plan.CollectionType, ItemType: plan.ItemType,
+		ItemAlias: plan.ItemAlias, Identity: plan.Identity, IdentityDerived: plan.IdentityDerived,
+		MaxItems: plan.MaxItems, SourceAfterWrites: plan.SourceAfterWrites, Emit: plan.Emit,
+	})
+	if err != nil {
+		return FanOutCompiledPlan{}, fmt.Errorf("fan_out semantic plan digest: %w", err)
+	}
+	plan.Ref = FanOutPlanRef{BundleHash: bundleHash, ElementRef: FanOutElementRefFrom(ref), SemanticDigest: digest}
+	return plan, nil
+}
+
+// CompileFanOutHandlerPlans admits every fan-out site in one handler into the
+// bundle-owned immutable runtime projection. It is called by strict loading;
+// test fixtures may call it after constructing an in-memory bundle.
+func (b *WorkflowContractBundle) CompileFanOutHandlerPlans(node runtimeidentity.ExecutableNode, eventType string, handler SystemNodeEventHandler) error {
+	if b == nil {
+		return fmt.Errorf("fan_out plans require a loaded contract bundle")
+	}
+	qualified, err := QualifySystemNodeHandlerRuleRefs(node, handler)
+	if err != nil {
+		return err
+	}
+	plans := make([]FanOutCompiledPlan, 0, 5)
+	for _, site := range HandlerFanOutSites(qualified) {
+		plan, err := b.CompileFanOutPlan(node, eventType, qualified, site)
+		if err != nil {
+			return fmt.Errorf("compile %s: %w", site.Source, err)
+		}
+		plans = append(plans, plan)
+	}
+	for _, plan := range plans {
+		if err := b.storeFanOutCompiledPlan(plan); err != nil {
+			return err
+		}
+	}
+	b.fanOutPlansPrepared = true
+	return nil
+}
+
+// PrepareFanOutPlans compiles every authored site once at semantic-source
+// admission. Invalid sites remain typed compiler failures; downstream
+// consumers never receive a partial raw-spec fallback.
+func (b *WorkflowContractBundle) PrepareFanOutPlans() []FanOutPlanFailure {
+	if b == nil {
+		return nil
+	}
+	b.resetFanOutPlans()
+	for _, record := range b.ScopedNodeRecords() {
+		node, err := record.Identity()
+		if err != nil {
+			b.fanOutPlanFailures = append(b.fanOutPlanFailures, FanOutPlanFailure{Detail: err.Error()})
+			continue
+		}
+		for eventType, handler := range record.Entry.EventHandlers {
+			qualified, err := QualifySystemNodeHandlerRuleRefs(node, handler)
+			if err != nil {
+				b.fanOutPlanFailures = append(b.fanOutPlanFailures, FanOutPlanFailure{Node: node, EventType: eventType, Source: "handler", Detail: err.Error()})
+				continue
+			}
+			for _, site := range HandlerFanOutSites(qualified) {
+				plan, err := b.CompileFanOutPlan(node, eventType, qualified, site)
+				if err != nil {
+					b.fanOutPlanFailures = append(b.fanOutPlanFailures, FanOutPlanFailure{Node: node, EventType: eventType, Source: site.Source, Detail: err.Error()})
+					continue
+				}
+				if err := b.storeFanOutCompiledPlan(plan); err != nil {
+					b.fanOutPlanFailures = append(b.fanOutPlanFailures, FanOutPlanFailure{Node: node, EventType: eventType, Source: site.Source, Detail: err.Error()})
+				}
+			}
+		}
+	}
+	b.fanOutPlansPrepared = true
+	return b.FanOutPlanFailures()
+}
+
+func (b *WorkflowContractBundle) storeFanOutCompiledPlan(plan FanOutCompiledPlan) error {
+	if b.fanOutPlansBySite == nil {
+		b.fanOutPlansBySite = make(map[FanOutSiteRef]FanOutCompiledPlan)
+	}
+	if b.fanOutPlansByElement == nil {
+		b.fanOutPlansByElement = make(map[FanOutElementRef]FanOutCompiledPlan)
+	}
+	if prior, exists := b.fanOutPlansByElement[plan.Ref.ElementRef]; exists && prior.Site != plan.Site {
+		return fmt.Errorf("fan_out element %s/%s has multiple compiled sites", plan.Ref.ElementRef.PackageKey, plan.Ref.ElementRef.ElementID)
+	}
+	b.fanOutPlansBySite[plan.Site] = cloneFanOutCompiledPlan(plan)
+	b.fanOutPlansByElement[plan.Ref.ElementRef] = cloneFanOutCompiledPlan(plan)
+	return nil
+}
+
+func (b *WorkflowContractBundle) FanOutPlansArePrepared() bool {
+	return b != nil && b.fanOutPlansPrepared
+}
+
+func (b *WorkflowContractBundle) FanOutPlanFailures() []FanOutPlanFailure {
+	if b == nil {
+		return nil
+	}
+	return append([]FanOutPlanFailure(nil), b.fanOutPlanFailures...)
+}
+
+func (b *WorkflowContractBundle) FanOutPlanForSite(site FanOutSiteRef) (FanOutCompiledPlan, bool) {
+	if b == nil || site.Validate() != nil {
+		return FanOutCompiledPlan{}, false
+	}
+	plan, ok := b.fanOutPlansBySite[site]
+	return cloneFanOutCompiledPlan(plan), ok
+}
+
+func (b *WorkflowContractBundle) FanOutPlanForElement(ref FanOutElementRef) (FanOutCompiledPlan, bool) {
+	if b == nil {
+		return FanOutCompiledPlan{}, false
+	}
+	plan, ok := b.fanOutPlansByElement[ref]
+	return cloneFanOutCompiledPlan(plan), ok
+}
+
+func (b *WorkflowContractBundle) FanOutPlans() []FanOutCompiledPlan {
+	if b == nil {
+		return nil
+	}
+	out := make([]FanOutCompiledPlan, 0, len(b.fanOutPlansBySite))
+	for _, plan := range b.fanOutPlansBySite {
+		out = append(out, cloneFanOutCompiledPlan(plan))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Site.Node.Key() != out[j].Site.Node.Key() {
+			return out[i].Site.Node.Key() < out[j].Site.Node.Key()
+		}
+		if out[i].Site.EventType != out[j].Site.EventType {
+			return out[i].Site.EventType < out[j].Site.EventType
+		}
+		if out[i].Site.Kind != out[j].Site.Kind {
+			return out[i].Site.Kind < out[j].Site.Kind
+		}
+		return out[i].Site.Index < out[j].Site.Index
+	})
+	return out
+}
+
+func (b *WorkflowContractBundle) FanOutPlansForHandler(node runtimeidentity.ExecutableNode, eventType string) []FanOutCompiledPlan {
+	eventType = strings.TrimSpace(eventType)
+	all := b.FanOutPlans()
+	out := make([]FanOutCompiledPlan, 0, 3)
+	for _, plan := range all {
+		if plan.Site.Node.Equal(node) && plan.Site.EventType == eventType {
+			out = append(out, plan)
+		}
+	}
+	return out
+}
+
+func (b *WorkflowContractBundle) resetFanOutPlans() {
+	b.fanOutPlansBySite = nil
+	b.fanOutPlansByElement = nil
+	b.fanOutPlanFailures = nil
+	b.fanOutPlansPrepared = false
+}
+
+func cloneFanOutCompiledPlan(plan FanOutCompiledPlan) FanOutCompiledPlan {
+	plan.ItemsPath.Segments = append([]string(nil), plan.ItemsPath.Segments...)
+	plan.Writes = cloneFanOutWrites(plan.Writes)
+	plan.Emit = cloneEmitSpec(plan.Emit)
+	return plan
+}
+
+func cloneFanOutWrites(writes []WorkflowDataWrite) []WorkflowDataWrite {
+	out := append([]WorkflowDataWrite(nil), writes...)
+	for i := range out {
+		out[i].SourcePath.Segments = append([]string(nil), out[i].SourcePath.Segments...)
+		out[i].TargetPath.Segments = append([]string(nil), out[i].TargetPath.Segments...)
+		out[i].Value.RefPath.Segments = append([]string(nil), out[i].Value.RefPath.Segments...)
+		out[i].Key.RefPath.Segments = append([]string(nil), out[i].Key.RefPath.Segments...)
+		out[i].Index.RefPath.Segments = append([]string(nil), out[i].Index.RefPath.Segments...)
+	}
+	return out
 }
 
 func HandlerFanOutSites(handler SystemNodeEventHandler) []WorkflowFanOutSite {
 	out := make([]WorkflowFanOutSite, 0, 5)
-	add := func(source string, spec *FanOutSpec) {
+	topLevelWrites := append([]WorkflowDataWrite(nil), handler.DataAccumulation.Writes...)
+	add := func(source string, kind FanOutSiteKind, index int, spec *FanOutSpec, writes []WorkflowDataWrite) {
 		if spec != nil {
-			out = append(out, WorkflowFanOutSite{Source: strings.TrimSpace(source), Spec: spec})
+			out = append(out, WorkflowFanOutSite{Source: strings.TrimSpace(source), Kind: kind, Index: index, Spec: spec, Writes: append([]WorkflowDataWrite(nil), writes...)})
 		}
 	}
-	add("handler.fan_out", handler.FanOut)
+	add("handler.fan_out", FanOutSiteHandler, -1, handler.FanOut, topLevelWrites)
 	for idx := range handler.Rules {
-		add(indexedFanOutSiteSource("handler.rules", idx, handler.Rules[idx].ID), handler.Rules[idx].FanOut)
+		writes := append([]WorkflowDataWrite(nil), handler.Rules[idx].DataAccumulation.Writes...)
+		writes = append(writes, topLevelWrites...)
+		add(indexedFanOutSiteSource("handler.rules", idx, handler.Rules[idx].ID), FanOutSiteRule, idx, handler.Rules[idx].FanOut, writes)
 	}
 	for idx := range handler.OnComplete {
-		add(indexedFanOutSiteSource("handler.on_complete", idx, handler.OnComplete[idx].ID), handler.OnComplete[idx].FanOut)
+		writes := append([]WorkflowDataWrite(nil), handler.OnComplete[idx].DataAccumulation.Writes...)
+		writes = append(writes, topLevelWrites...)
+		add(indexedFanOutSiteSource("handler.on_complete", idx, handler.OnComplete[idx].ID), FanOutSiteOnComplete, idx, handler.OnComplete[idx].FanOut, writes)
 	}
 	return out
+}
+
+func (b *WorkflowContractBundle) fanOutSourceAfterWrites(node runtimeidentity.ExecutableNode, handler SystemNodeEventHandler, spec FanOutSpec, source paths.Path) bool {
+	if source.Root != paths.RootEntity || len(source.Segments) == 0 {
+		return false
+	}
+	sourceField := strings.TrimSpace(source.Segments[0])
+	writes := fanOutSiteWrites(handler, spec)
+	for _, write := range writes {
+		target := paths.Parse(write.Target())
+		if target.Root == paths.RootEntity && len(target.Segments) > 0 && strings.TrimSpace(target.Segments[0]) == sourceField {
+			return true
+		}
+		if !target.HasExplicitRoot() && len(target.Segments) > 0 && strings.TrimSpace(target.Segments[0]) == sourceField {
+			return true
+		}
+	}
+	if handler.Accumulate == nil || strings.TrimSpace(handler.Accumulate.Into) == "" {
+		return false
+	}
+	primary, err := b.ResolveFlowPrimaryEntity(node.FlowID())
+	if err != nil {
+		return false
+	}
+	decl, ok := primary.Contract.Fields[sourceField]
+	if !ok {
+		return false
+	}
+	want := strings.TrimSpace(node.NodeID()) + "." + strings.TrimSpace(handler.Accumulate.Into)
+	return strings.TrimSpace(decl.MaterializeFrom) == want
+}
+
+func fanOutSiteWrites(handler SystemNodeEventHandler, spec FanOutSpec) []WorkflowDataWrite {
+	want, ok := spec.ContractElementRef()
+	if !ok {
+		return nil
+	}
+	for _, site := range HandlerFanOutSites(handler) {
+		got, present := site.Spec.ContractElementRef()
+		if present && got == want {
+			return append([]WorkflowDataWrite(nil), site.Writes...)
+		}
+	}
+	return nil
 }
 
 func indexedFanOutSiteSource(scope string, index int, id string) string {

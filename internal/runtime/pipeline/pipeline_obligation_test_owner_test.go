@@ -17,6 +17,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -25,6 +26,40 @@ import (
 var errPipelineTestObligationUnavailable = errors.New("pipeline unit fixture has no selected-store obligation owner")
 
 type unavailablePipelineTestObligationOwner struct{}
+
+type unavailablePipelineTestFanOutOwner struct{}
+
+func (unavailablePipelineTestFanOutOwner) ClaimFanOutIntent(context.Context, FanOutClaimRequest) (fanoutobligation.Intent, fanoutobligation.Claim, bool, error) {
+	return fanoutobligation.Intent{}, fanoutobligation.Claim{}, false, errPipelineTestObligationUnavailable
+}
+
+func (unavailablePipelineTestFanOutOwner) LoadFanOutEvaluation(context.Context, fanoutobligation.Claim) (FanOutEvaluationInput, error) {
+	return FanOutEvaluationInput{}, errPipelineTestObligationUnavailable
+}
+
+func (unavailablePipelineTestFanOutOwner) CommitFanOutChunk(context.Context, FanOutChunkCommand) (CommittedFanOutChunk, error) {
+	return CommittedFanOutChunk{}, errPipelineTestObligationUnavailable
+}
+
+func (unavailablePipelineTestFanOutOwner) ReleaseFanOutClaim(context.Context, fanoutobligation.Claim) error {
+	return errPipelineTestObligationUnavailable
+}
+
+func (unavailablePipelineTestFanOutOwner) ReleaseFanOutRetryable(context.Context, FanOutRetryableRelease) error {
+	return errPipelineTestObligationUnavailable
+}
+
+func (unavailablePipelineTestFanOutOwner) BlockFanOutClaim(context.Context, FanOutBlockRequest) error {
+	return errPipelineTestObligationUnavailable
+}
+
+func (unavailablePipelineTestFanOutOwner) CancelRunFanOut(context.Context, string, string, time.Time) error {
+	return errPipelineTestObligationUnavailable
+}
+
+func (unavailablePipelineTestFanOutOwner) FanOutRunSummary(context.Context, string, time.Time) (fanoutobligation.RunSummary, error) {
+	return fanoutobligation.RunSummary{}, errPipelineTestObligationUnavailable
+}
 
 func (unavailablePipelineTestObligationOwner) ClaimPublication(context.Context, string) (runtimepipelineobligation.Claim, error) {
 	return runtimepipelineobligation.Claim{}, errPipelineTestObligationUnavailable
@@ -261,6 +296,7 @@ func missingWorkflowPersistenceTestRoles(p WorkflowPersistence) []string {
 		{"activity_journal", p.store.activityJournal == nil},
 		{"gate_routes", p.store.gateRoutes == nil},
 		{"timer_obligations", p.store.timerObligations == nil},
+		{"fan_out_obligations", p.store.fanOutObligations == nil},
 		{"engine_mutations", p.store.engineMutations == nil},
 		{"card_mutations", p.store.cardMutations == nil},
 		{"timer_occurrences", p.store.timerOccurrences == nil},

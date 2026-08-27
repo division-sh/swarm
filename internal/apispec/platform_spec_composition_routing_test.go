@@ -315,17 +315,18 @@ func TestPlatformSpecCompositionRoutingRetiresProducerTargetAuthority(t *testing
 	assertScalarContains(t, mustYAMLPath(t, fanOut, "sub_fields", "items_from"), "hard load error")
 	assertScalarContains(t, mustYAMLPath(t, fanOut, "sub_fields", "identity"), "statically scalar list item")
 	assertScalarContains(t, mustYAMLPath(t, fanOut, "sub_fields", "identity"), "require an explicit identity")
-	assertScalarValue(t, mustYAMLPath(t, fanOut, "effective_semantics", "canonical_owner"), "contracts.WorkflowContractBundle.ResolveFanOutEffectiveSemantics")
+	assertScalarValue(t, mustYAMLPath(t, fanOut, "effective_semantics", "canonical_owner"), "contracts.WorkflowContractBundle.CompileFanOutPlan")
+	assertScalarContains(t, mustYAMLPath(t, fanOut, "collection_iteration"), "constant-size obligation")
 	assertScalarContains(t, mustYAMLPath(t, fanOut, "collection_iteration"), "declared list order")
 	assertScalarContains(t, mustYAMLPath(t, fanOut, "collection_iteration"), "never sorts or deduplicates")
-	assertScalarContains(t, mustYAMLPath(t, fanOut, "collection_iteration"), "exact microsecond precision")
-	assertScalarContains(t, mustYAMLPath(t, fanOut, "collection_iteration"), "event_id is never an order owner")
+	assertScalarContains(t, mustYAMLPath(t, fanOut, "collection_iteration"), "stable per-entry activation identity")
+	assertScalarContains(t, mustYAMLPath(t, fanOut, "collection_iteration"), "event_id never own")
 	assertScalarContains(t, mustYAMLPath(t, fanOut, "retired_target_field"), "retired on presence")
 	if !sequenceContainsScalar(mustYAMLPath(t, fanOut, "effective_semantics", "consumers"), "engine") ||
 		!sequenceContainsScalar(mustYAMLPath(t, fanOut, "effective_semantics", "consumers"), "authoring_view") {
 		t.Fatal("fan_out effective semantics must name runtime and authoring consumers")
 	}
-	assertScalarContains(t, mustYAMLPath(t, fanOut, "platform_ceiling", "overrun"), "raise max_items or split the batch")
+	assertScalarContains(t, mustYAMLPath(t, fanOut, "platform_ceiling", "overrun"), "never recommends author-side batching or pacing")
 }
 
 func TestPlatformSpecE1aRetirementCloseoutIsCanonicalOnly(t *testing.T) {

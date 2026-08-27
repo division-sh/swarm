@@ -173,6 +173,10 @@ func (s *RunSQLite) LoadRunDebugReport(ctx context.Context, runID string, opts o
 	}
 	report.RuntimeLogSummary = logSummary
 	report.WarnErrorLogCount = warnErrorCount
+	report.FanOut, err = s.pipeline.FanOutRunSummary(ctx, report.RunID, s.now())
+	if err != nil {
+		return operatorread.RunDebugReport{}, fmt.Errorf("load sqlite run fan-out diagnostics: %w", err)
+	}
 	return report, nil
 }
 
@@ -191,6 +195,11 @@ func (s *RunSQLite) LoadRunTestQuiescence(ctx context.Context, runID string, obs
 		return operatorread.RunTestQuiescence{}, fmt.Errorf("load sqlite run test quiescence unsettled pipeline events: %w", err)
 	}
 	out.UnsettledPipelineEvents = pipelineSummary.Replayable + pipelineSummary.Deferred
+	fanOut, err := s.pipeline.FanOutRunSummary(ctx, runID, observedAt)
+	if err != nil {
+		return operatorread.RunTestQuiescence{}, fmt.Errorf("load sqlite run test quiescence fan-out obligations: %w", err)
+	}
+	out.FanOutOwed = fanOut.Owed
 	scope, err := runtimetimerobligation.Run(runID)
 	if err != nil {
 		return operatorread.RunTestQuiescence{}, err

@@ -2,10 +2,15 @@ package bootverify
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/google/uuid"
 )
 
 func TestRun_ValidatesFanOutCollectionContract(t *testing.T) {
@@ -109,6 +114,7 @@ func TestRun_ValidatesFanOutCollectionContract(t *testing.T) {
 				tc.mutate(handler.FanOut, bundle)
 				bundle.Nodes["dispatcher"].EventHandlers["order.accepted"] = handler
 			}
+			completeBootverifyFanOutFixture(t, bundle, "dispatcher", "order.accepted")
 
 			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 
@@ -122,6 +128,132 @@ func TestRun_ValidatesFanOutCollectionContract(t *testing.T) {
 				t.Fatalf("expected fan_out_validation %q, got %#v", tc.wantError, report.HardInvalidities())
 			}
 		})
+	}
+}
+
+func TestRun_RejectsFanOutCountDependencyWhenEntitySourceIsMutated(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*runtimecontracts.SystemNodeEventHandler, *runtimecontracts.WorkflowContractBundle)
+	}{
+		{
+			name: "direct write",
+			mutate: func(handler *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
+				handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{
+					{TargetRef: "entity.line_items", Value: runtimecontracts.CELExpression("payload.line_items")},
+					{TargetRef: "metadata.observed_count", Value: runtimecontracts.CELExpression("fan_out.count")},
+				}
+			},
+		},
+		{
+			name: "contained write",
+			mutate: func(handler *runtimecontracts.SystemNodeEventHandler, _ *runtimecontracts.WorkflowContractBundle) {
+				handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{
+					{Operation: runtimecontracts.WorkflowDataOperationAppend, TargetRef: "entity.line_items", Value: runtimecontracts.LiteralExpression(map[string]any{"id": "later"})},
+					{TargetRef: "metadata.observed_count", Value: runtimecontracts.CELExpression("fan_out.count")},
+				}
+			},
+		},
+		{
+			name: "accumulator projection",
+			mutate: func(handler *runtimecontracts.SystemNodeEventHandler, bundle *runtimecontracts.WorkflowContractBundle) {
+				handler.Accumulate = &runtimecontracts.AccumulateSpec{Into: "collected"}
+				handler.DataAccumulation.Writes = []runtimecontracts.WorkflowDataWrite{{TargetRef: "metadata.observed_count", Value: runtimecontracts.CELExpression("fan_out.count")}}
+				node := bundle.Nodes["dispatcher"]
+				node.StateSchema.Fields = []runtimecontracts.NodeStateField{{Name: "collected", Type: "[LineItem]"}}
+				bundle.Nodes["dispatcher"] = node
+				entity := bundle.RootEntities["subject"]
+				field := entity.Fields["line_items"]
+				field.MaterializeFrom = "dispatcher.collected"
+				entity.Fields["line_items"] = field
+				bundle.RootEntities["subject"] = entity
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spec := runtimecontracts.FanOutSpec{
+				ItemsFrom: "entity.line_items",
+				As:        "line_item",
+				Identity:  "line_item.id",
+				Emit: runtimecontracts.EmitSpec{Event: "line_item.requested", Fields: map[string]runtimecontracts.ExpressionValue{
+					"line_item_id": runtimecontracts.CELExpression("line_item.id"),
+				}},
+			}
+			bundle := fanOutValidationBundle(spec)
+			bundle.RootEntities = runtimecontracts.EntityContractsDocument{
+				"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{
+					"line_items": {Type: "[LineItem]"},
+				}},
+			}
+			node := bundle.Nodes["dispatcher"]
+			handler := node.EventHandlers["order.accepted"]
+			tc.mutate(&handler, bundle)
+			node = bundle.Nodes["dispatcher"]
+			node.EventHandlers["order.accepted"] = handler
+			bundle.Nodes["dispatcher"] = node
+			completeBootverifyFanOutFixture(t, bundle, "dispatcher", "order.accepted")
+
+			report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+			if !reportContains(report.HardInvalidities(), fanOutValidationCheckID, "mutates fan_out.items_from and a same-handler data write references fan_out.count") {
+				t.Fatalf("missing source/count cycle invalidity: %#v", report.HardInvalidities())
+			}
+		})
+	}
+}
+
+func completeBootverifyFanOutFixture(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle, nodeID, eventType string) {
+	t.Helper()
+	node := bundle.Nodes[nodeID]
+	handler := node.EventHandlers[eventType]
+	assign := func(context string, index int, spec *runtimecontracts.FanOutSpec) {
+		if spec == nil || spec.ElementID.Valid() {
+			return
+		}
+		value := uuid.NewSHA1(uuid.NameSpaceOID, []byte("bootverify-fan-out\x00"+nodeID+"\x00"+eventType+"\x00"+context+"\x00"+string(rune(index)))).String()
+		elementID, err := contractelementidentity.ParseContractElementID(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		spec.ElementID = elementID
+	}
+	assign("handler", 0, handler.FanOut)
+	for index := range handler.Rules {
+		assign("rules", index, handler.Rules[index].FanOut)
+	}
+	for index := range handler.OnComplete {
+		assign("on_complete", index, handler.OnComplete[index].FanOut)
+	}
+	owner, err := runtimeidentity.AdmitExecutableNodeDeclaration(runtimeidentity.RootPackageKey, "", nodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err = runtimecontracts.QualifySystemNodeHandlerRuleRefs(owner, handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node.EventHandlers[eventType] = handler
+	bundle.Nodes[nodeID] = node
+	if bundle.Semantics.NodeHandlers == nil {
+		bundle.Semantics.NodeHandlers = map[string]map[string]runtimecontracts.SystemNodeEventHandler{}
+	}
+	if bundle.Semantics.NodeHandlers[nodeID] == nil {
+		bundle.Semantics.NodeHandlers[nodeID] = map[string]runtimecontracts.SystemNodeEventHandler{}
+	}
+	bundle.Semantics.NodeHandlers[nodeID][eventType] = handler
+
+	root := t.TempDir()
+	packageFile := filepath.Join(root, "package.yaml")
+	platformFile := filepath.Join(root, "platform-spec.yaml")
+	if err := os.WriteFile(packageFile, []byte("name: bootverify-fan-out-test\nversion: 1.0.0\nflows: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(platformFile, []byte("version: 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bundle.Paths = runtimecontracts.ContractPaths{
+		ContractsRoot:      root,
+		ProjectPackageFile: packageFile,
+		PlatformSpecFile:   platformFile,
 	}
 }
 

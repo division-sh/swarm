@@ -10,11 +10,13 @@ import (
 	"fmt"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 
 	"sort"
 	"strings"
@@ -270,6 +272,7 @@ type RunForkMaterializeRequest struct {
 	BundleSourceFact        runtimecorrelation.BundleSourceFact
 	EffectiveSourceIdentity scenarioexecution.EffectiveSourceIdentity
 	DataPinOverrides        []durabledata.ExplicitPin
+	FanOutPlanRefs          []runtimecontracts.FanOutPlanRef
 }
 
 type RunForkMaterialization struct {
@@ -278,6 +281,7 @@ type RunForkMaterialization struct {
 	ForkRunStatus            string                          `json:"fork_run_status"`
 	ForkPoint                RunForkPoint                    `json:"fork_point"`
 	MaterializedEntityCount  int                             `json:"materialized_entity_count"`
+	MaterializedFanOutCount  int                             `json:"materialized_fan_out_count"`
 	ExecutionReady           bool                            `json:"execution_ready"`
 	ReplayResumeAdmission    RunForkReplayResumeAdmission    `json:"replay_resume_admission"`
 	SelectedContractBinding  *RunForkSelectedContractBinding `json:"selected_contract_binding,omitempty"`
@@ -311,6 +315,7 @@ type RunForkPlan struct {
 	EventCountAtFork          int                               `json:"event_count_at_fork"`
 	ReconstructedEntityCount  int                               `json:"reconstructed_entity_count"`
 	PendingWorkCount          int                               `json:"pending_work_count"`
+	FanOutObligationCount     int                               `json:"fan_out_obligation_count"`
 	UnsupportedBlockerCount   int                               `json:"unsupported_blocker_count"`
 	ExecutionReady            bool                              `json:"execution_ready"`
 	ReplayResumeAdmission     RunForkReplayResumeAdmission      `json:"replay_resume_admission"`
@@ -319,10 +324,19 @@ type RunForkPlan struct {
 	SelectedContractReadiness *RunForkSelectedContractReadiness `json:"selected_contract_readiness,omitempty"`
 	Entities                  []RunForkEntityState              `json:"entities,omitempty"`
 	PendingWork               []RunForkPendingWork              `json:"pending_work,omitempty"`
+	FanOutObligations         []RunForkFanOutObligation         `json:"fan_out_obligations,omitempty"`
 	UnsupportedBlockers       []RunForkUnsupportedBlocker       `json:"unsupported_blockers,omitempty"`
 	RouteHistory              RunForkRouteHistoryProjection     `json:"route_history"`
 	historicalRevision        int64
 	historicalEventIDs        []string
+}
+
+// RunForkFanOutObligation is the exact semantic fan-out progress visible at a
+// fixed fork revision. Claim, lease, pacing, and service timestamps are not
+// historical authority and are reset when this fact is materialized.
+type RunForkFanOutObligation struct {
+	Intent   fanoutobligation.Intent    `json:"intent"`
+	Outcomes []fanoutobligation.Outcome `json:"outcomes,omitempty"`
 }
 
 func (p RunForkPlan) WithHistoricalEvents(revision int64, eventIDs []string) RunForkPlan {
@@ -982,6 +996,7 @@ type RunForkSelectedContractExecutionMaterializeRequest struct {
 	RecipientPlanning       RunForkSelectedContractRecipientPlanning
 	WorkflowStates          []RunForkSelectedContractWorkflowState
 	DataPinOverrides        []durabledata.ExplicitPin
+	FanOutPlanRefs          []runtimecontracts.FanOutPlanRef
 }
 
 type RunForkSelectedContractWorkflowStateAddressKind string

@@ -745,7 +745,7 @@ func TestCompileDeliveryTargetCompatibilityPolicyKeepsDependencyAndAcquisitionIn
 		}}},
 		Accumulate: &runtimecontracts.AccumulateSpec{Into: "items", From: "payload"},
 	}
-	policy, err := CompileDeliveryTargetCompatibilityPolicy(nil, "review", "work.keyed", handler)
+	policy, err := CompileDeliveryTargetCompatibilityPolicy(nil, runtimeidentity.ExecutableNode{}, "review", "work.keyed", handler)
 	if err != nil {
 		t.Fatal(err)
 	}

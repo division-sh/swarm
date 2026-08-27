@@ -176,7 +176,7 @@ func TestLoopReturningCarrierAdmissionRejectsPriorAndAcceptsCurrentGeneration(t 
 		MaxAttempts: runtimecontracts.LoopAttemptLimit{Literal: 3}, EntryStage: "drafting",
 		RegionStages: []string{"drafting", "review"}, Escape: runtimecontracts.LoopEscapeSpec{AdvancesTo: "escalated"},
 	}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	source := fanOutSourceWithBundleIdentity(t, &runtimecontracts.WorkflowContractBundle{
 		Semantics: runtimecontracts.WorkflowSemanticView{Loops: []runtimecontracts.WorkflowLoopPlan{plan}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"line_item.completed": {
@@ -249,11 +249,17 @@ func TestLoopReturningCarrierAdmissionRejectsPriorAndAcceptsCurrentGeneration(t 
 			if err != nil {
 				t.Fatalf("current generation: %v", err)
 			}
-			if len(result.EmitIntents) != 1 {
-				t.Fatalf("current generation emit intents = %d, want 1", len(result.EmitIntents))
-			}
-			if got := eventPayloadMap(t, result.EmitIntents[0].Event)["revision_id"]; got != activation.RevisionID {
-				t.Fatalf("current generation emitted revision = %#v, want %s", got, activation.RevisionID)
+			if tc.name == "fan_out_result" {
+				if result.FanOutIntent == nil || result.FanOutIntent.Cardinality != 1 || len(result.EmitIntents) != 0 {
+					t.Fatalf("current generation fan-out = intent:%#v immediate:%d, want one durable item and no eager event", result.FanOutIntent, len(result.EmitIntents))
+				}
+			} else {
+				if len(result.EmitIntents) != 1 {
+					t.Fatalf("current generation emit intents = %d, want 1", len(result.EmitIntents))
+				}
+				if got := eventPayloadMap(t, result.EmitIntents[0].Event)["revision_id"]; got != activation.RevisionID {
+					t.Fatalf("current generation emitted revision = %#v, want %s", got, activation.RevisionID)
+				}
 			}
 		})
 	}

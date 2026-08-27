@@ -823,7 +823,7 @@ func buildStageGraphFanOutsForFlow(source semanticview.Source, flowID, initial s
 					from = []string{strings.TrimSpace(initial)}
 				}
 			}
-			out = append(out, fanOutViewsForHandler(source, node, from, eventType, handler)...)
+			out = append(out, fanOutViewsForHandler(source, node, from, eventType)...)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -846,42 +846,38 @@ func buildStageGraphFanOutsForFlow(source semanticview.Source, flowID, initial s
 	return out
 }
 
-func fanOutViewsForHandler(source semanticview.Source, node runtimeidentity.ExecutableNode, from []string, eventType string, handler runtimecontracts.SystemNodeEventHandler) []StageGraphFanOutView {
+func fanOutViewsForHandler(source semanticview.Source, node runtimeidentity.ExecutableNode, from []string, eventType string) []StageGraphFanOutView {
 	out := make([]StageGraphFanOutView, 0, 5)
-	add := func(siteSource string, spec *runtimecontracts.FanOutSpec) {
-		if spec == nil {
-			return
-		}
-		emit := strings.TrimSpace(spec.Emit.EventType())
+	for _, plan := range source.FanOutPlansForHandler(node, eventType) {
+		emit := strings.TrimSpace(plan.Emit.EventType())
 		if emit == "" {
-			return
-		}
-		effective, err := source.ResolveFanOutEffectiveSemantics(node, eventType, *spec)
-		if err != nil {
-			return
+			continue
 		}
 		out = append(out, StageGraphFanOutView{
 			From:      append([]string{}, from...),
 			Emit:      emit,
-			ItemsFrom: effective.ItemsFrom,
-			ItemAlias: effective.ItemAlias,
-			Identity:  effective.Identity,
-			MaxItems:  effective.MaxItems,
-			Source:    strings.TrimSpace(siteSource),
+			ItemsFrom: plan.ItemsFrom,
+			ItemAlias: plan.ItemAlias,
+			Identity:  plan.Identity,
+			MaxItems:  plan.MaxItems,
+			Source:    authoringFanOutSiteSource(plan.Site),
 			NodeID:    node.Key(),
 			EventType: strings.TrimSpace(eventType),
 		})
 	}
-	add("handler.fan_out", handler.FanOut)
-	for idx := range handler.Rules {
-		add(indexedHandlerGraphSource("handler.rules", idx, handler.Rules[idx].ID)+".fan_out", handler.Rules[idx].FanOut)
-	}
-	for idx := range handler.OnComplete {
-		add(indexedHandlerGraphSource("handler.on_complete", idx, handler.OnComplete[idx].ID)+".fan_out", handler.OnComplete[idx].FanOut)
-	}
 	return out
 }
 
+func authoringFanOutSiteSource(site runtimecontracts.FanOutSiteRef) string {
+	switch site.Kind {
+	case runtimecontracts.FanOutSiteRule:
+		return fmt.Sprintf("handler.rules[%d].fan_out", site.Index)
+	case runtimecontracts.FanOutSiteOnComplete:
+		return fmt.Sprintf("handler.on_complete[%d].fan_out", site.Index)
+	default:
+		return "handler.fan_out"
+	}
+}
 func indexedHandlerGraphSource(prefix string, idx int, id string) string {
 	id = strings.TrimSpace(id)
 	if id != "" {

@@ -296,13 +296,28 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 				errs = append(errs, fmt.Errorf("%w: node %s handler %s: %v", ErrInvalidField, nodeID, strings.TrimSpace(eventType), qualifyErr))
 				continue
 			}
-			for _, rule := range HandlerRuleEntries(qualified) {
+			handler = qualified
+			for _, rule := range HandlerRuleEntries(handler) {
 				ref, ok := rule.ContractElementRef()
 				if !ok {
 					continue
 				}
 				key := ref.PackageKey().String() + "|" + ref.ElementID().String()
 				owner := nodeID + ":" + strings.TrimSpace(eventType)
+				if previous, exists := elementOwners[key]; exists {
+					errs = append(errs, fmt.Errorf("%w: contract element_id %s is duplicated in package %s by %s and %s", ErrInvalidField, ref.ElementID().String(), ref.PackageKey().String(), previous, owner))
+				} else {
+					elementOwners[key] = owner
+				}
+			}
+			for _, site := range HandlerFanOutSites(handler) {
+				ref, ok := site.Spec.ContractElementRef()
+				if !ok {
+					errs = append(errs, fmt.Errorf("%w: node %s handler %s %s requires canonical element_id", ErrInvalidField, nodeID, strings.TrimSpace(eventType), site.Source))
+					continue
+				}
+				key := ref.PackageKey().String() + "|" + ref.ElementID().String()
+				owner := nodeID + ":" + strings.TrimSpace(eventType) + ":" + site.Source
 				if previous, exists := elementOwners[key]; exists {
 					errs = append(errs, fmt.Errorf("%w: contract element_id %s is duplicated in package %s by %s and %s", ErrInvalidField, ref.ElementID().String(), ref.PackageKey().String(), previous, owner))
 				} else {
@@ -323,14 +338,10 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 			}
 		}
 		for eventType, handler := range record.Entry.EventHandlers {
+			handler, _ = QualifySystemNodeHandlerRuleRefs(node, handler)
 			eventType = strings.TrimSpace(eventType)
 			if err := ValidateAccumulateHandlerIsolation(handler); err != nil {
 				errs = append(errs, fmt.Errorf("%w: node %s handler %s: %v", ErrInvalidField, nodeID, eventType, err))
-			}
-			for _, site := range HandlerFanOutSites(handler) {
-				if _, err := bundle.ResolveFanOutEffectiveSemantics(node, eventType, *site.Spec); err != nil {
-					errs = append(errs, fmt.Errorf("%w: node %s handler %s %s: %v", ErrInvalidField, nodeID, eventType, site.Source, err))
-				}
 			}
 			if workflowHandlerDeclaresConflictingCompletion(handler) {
 				errs = append(errs, fmt.Errorf("%w: node %s handler %s declares both on_complete and rules", ErrConflictingCompletion, nodeID, eventType))
@@ -342,6 +353,9 @@ func validateWorkflowContractBundleLoadConstraints(bundle *WorkflowContractBundl
 				errs = append(errs, fmt.Errorf("%w: node %s handler %s action %s is not in platform spec", ErrInvalidField, nodeID, eventType, strings.TrimSpace(handler.Action.ID)))
 			}
 		}
+	}
+	for _, failure := range bundle.PrepareFanOutPlans() {
+		errs = append(errs, fmt.Errorf("%w: %s", ErrInvalidField, failure.Error()))
 	}
 	for eventType, owners := range bundle.Semantics.EventOwners {
 		if len(normalizeStrings(owners)) > 1 {

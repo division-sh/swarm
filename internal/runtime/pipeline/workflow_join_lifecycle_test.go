@@ -15,6 +15,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
@@ -861,7 +862,9 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 			bundle := workflowJoinLifecycleBundle(t)
 			schedules := &recordingGenericScheduleWakeupOwner{}
 			newCoordinator := func() *PipelineCoordinator {
-				return newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(bundle)}, Persistence: workflowPersistenceForTest(store), GenericSchedules: schedules})
+				pc := newWorkflowJoinPipelineCoordinator(&recordingPipelineBus{}, store.testDB(), PipelineCoordinatorOptions{Module: &pipelineFixtureWorkflowModule{source: workflowJoinLifecycleSource(bundle)}, Persistence: workflowPersistenceForTest(store), GenericSchedules: schedules})
+				configurePipelineTestDeliveryOwner(t, pc)
+				return pc
 			}
 			pc := newCoordinator()
 			path := "orders/" + uuid.NewString()
@@ -871,10 +874,15 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 				t.Fatal(err)
 			}
 			dispatchHandler := bundle.Nodes["dispatcher"].EventHandlers["order.accepted"]
-			dispatch := eventtest.RunCreatingRootIngress("fan-out-empty", events.EventType("order.accepted"), "", "", json.RawMessage(`{"line_items":[]}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), time.Now().UTC())
-			result, err := pc.executeNodeContractHandler(ctx, mustPipelineNode("orders", "dispatcher"), dispatchHandler, workflowTriggerContext{Event: dispatch, State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(path), entityID), HandlerEventKey: "order.accepted"}, false)
-			if err != nil || !result.Handled || result.Outcome == nil || result.Outcome.FanOutCount != 0 {
-				t.Fatalf("empty fan_out = handled:%v outcome:%#v err:%v", result.Handled, result.Outcome, err)
+			dispatch := eventtest.RunCreatingRootIngress(eventtest.UUID("fan-out-empty"), events.EventType("order.accepted"), "", "", json.RawMessage(`{"line_items":[]}`), 0, runtimecorrelation.RunIDFromContext(ctx), "", workflowJoinTestEnvelope(path, entityID), time.Now().UTC())
+			if dispatchHandler.FanOut == nil {
+				t.Fatal("dispatcher fixture lost fan_out")
+			}
+			dispatchNode := mustPipelineNode("orders", "dispatcher")
+			route := seedExactOnceEventDelivery(t, pc, ctx, dispatch, dispatchNode)
+			handled, err := pc.executeNodeHandlerPlanResult(withWorkflowNodeDeliveryRoute(ctx, route), dispatchNode, dispatch)
+			if err != nil || !handled {
+				t.Fatalf("empty fan_out = handled:%v err:%v", handled, err)
 			}
 			runner := store.engineMutations.(*recordingRuntimeMutationRunner)
 			runner.mu.Lock()
@@ -897,7 +905,7 @@ func TestWorkflowJoinExpectedZeroCompletesAfterRestartOnBothStores(t *testing.T)
 			schedule := committedSchedules[0]
 			pc = newCoordinator()
 			fire := workflowJoinScheduleEventForTest(t, "join-zero-fire", schedule, runtimecorrelation.RunIDFromContext(ctx), workflowJoinTestEnvelope(path, entityID), time.Now().UTC())
-			result, err = pc.executeAuthoritativeNodeHandler(ctx, fire, workflowTriggerContext{Event: fire, State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(path), entityID)})
+			result, err := pc.executeAuthoritativeNodeHandler(ctx, fire, workflowTriggerContext{Event: fire, State: mustCurrentWorkflowState(t, pc, ctx, testWorkflowInstanceRoute(path), entityID)})
 			if err != nil || !result.Handled {
 				t.Fatalf("completion fire = handled:%v err:%v", result.Handled, err)
 			}
@@ -1084,14 +1092,22 @@ func workflowJoinLifecycleBundle(t *testing.T) *runtimecontracts.WorkflowContrac
 		Timeout: runtimecontracts.JoinTimeoutSpec{After: "1h", Outcome: runtimecontracts.HandlerRuleEntry{AdvancesTo: "attention"}}, TimeoutFound: true,
 	}
 	fanOut := runtimecontracts.FanOutSpec{
+		ElementID: contractelementidentity.MintContractElementID(),
 		ItemsFrom: "payload.line_items", ItemsPath: runtimepaths.Parse("payload.line_items"), As: "line_item", Identity: "line_item.id",
 		Emit: runtimecontracts.EmitSpec{Event: "line_item.requested", Fields: map[string]runtimecontracts.ExpressionValue{"line_item_id": runtimecontracts.CELExpression("line_item.id")}},
 	}
 	joinNode := runtimecontracts.SystemNodeContract{EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
 		"item.completed": {Join: &spec},
 	}}
+	dispatchHandler, err := runtimecontracts.QualifySystemNodeHandlerRuleRefs(
+		mustPipelineNode("orders", "dispatcher"),
+		runtimecontracts.SystemNodeEventHandler{FanOut: &fanOut, AdvancesTo: "awaiting"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
 	dispatcher := runtimecontracts.SystemNodeContract{EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-		"order.accepted": {FanOut: &fanOut, AdvancesTo: "awaiting"},
+		"order.accepted": dispatchHandler,
 	}}
 	eventCatalog := map[string]runtimecontracts.EventCatalogEntry{
 		"item.completed":      {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"member_id": {Type: "text"}, "result": {Type: "jsonb"}}}},

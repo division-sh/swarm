@@ -3,6 +3,7 @@ package pipelinepersistence
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -110,6 +111,49 @@ func persistedReplayEvents[T eventDecoder](records []T) ([]events.PersistedRepla
 		out = append(out, record)
 	}
 	return out, nil
+}
+
+func loadFanOutSourceEvent(ctx context.Context, q eventReadQueryer, eventID string, postgres bool) (events.Event, events.RouteSettlement, error) {
+	var (
+		record     eventDecoder
+		settlement events.RouteSettlement
+	)
+	if postgres {
+		loaded, found, err := eventrecordpostgres.Load(ctx, q, eventID)
+		if err != nil {
+			return events.Event{}, settlement, err
+		}
+		if !found {
+			return events.Event{}, settlement, fmt.Errorf("event %s not found", strings.TrimSpace(eventID))
+		}
+		record = loaded
+		settlement, err = loaded.DecodeSettlement()
+		if err != nil {
+			return events.Event{}, events.RouteSettlement{}, err
+		}
+	} else {
+		loaded, found, err := eventrecordsqlite.Load(ctx, q, eventID)
+		if err != nil {
+			return events.Event{}, settlement, err
+		}
+		if !found {
+			return events.Event{}, settlement, fmt.Errorf("event %s not found", strings.TrimSpace(eventID))
+		}
+		record = loaded
+		settlement, err = loaded.DecodeSettlement()
+		if err != nil {
+			return events.Event{}, events.RouteSettlement{}, err
+		}
+	}
+	admitted, err := record.Decode()
+	if err != nil {
+		return events.Event{}, events.RouteSettlement{}, err
+	}
+	return admitted.Event(), settlement, nil
+}
+
+func marshalPipelineReceiptSideEffects(value pipelineReceiptSideEffects) ([]byte, error) {
+	return json.Marshal(value)
 }
 
 func mustDeliveryAdapter(dialect deliverystore.Dialect) *deliverystore.Adapter {

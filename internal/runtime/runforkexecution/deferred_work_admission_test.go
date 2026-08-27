@@ -13,6 +13,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -96,6 +97,49 @@ func TestSelectedContractDeferredWorkAdmissionCapabilityMatrix(t *testing.T) {
 				t.Fatalf("capabilities = %#v, want %q", failure.Detail.Attributes["capabilities"], tc.capability)
 			}
 		})
+	}
+}
+
+func TestSelectedContractFanOutAdmissionRequiresExactElementAndSemanticDigest(t *testing.T) {
+	bundle := loadRunForkExecutionFixtureBundle(t, filepath.Join("internal", "runtime", "testdata", "generic-swarm-bundle"))
+	source := semanticview.Wrap(bundle)
+	compiled, err := selectedContractCompiledFanOutPlans(source)
+	if err != nil {
+		t.Fatalf("selectedContractCompiledFanOutPlans: %v", err)
+	}
+	if len(compiled) == 0 {
+		t.Fatal("generic fixture has no compiled fan-out plans")
+	}
+	var selected runtimecontracts.FanOutPlanRef
+	for _, ref := range compiled {
+		selected = ref
+		break
+	}
+	sourceRef := selected
+	sourceRef.BundleHash = "bundle-v1:sha256:" + strings.Repeat("0", 64)
+	plan := runfork.RunForkPlan{FanOutObligations: []runfork.RunForkFanOutObligation{{
+		Intent: fanoutobligation.Intent{Request: fanoutobligation.IntentRequest{PlanRef: sourceRef}},
+	}}}
+	refs, err := admitSelectedContractFanOutPlans(plan, source)
+	if err != nil {
+		t.Fatalf("admit selected fan-out with unchanged semantics: %v", err)
+	}
+	if len(refs) != 1 || refs[0] != selected {
+		t.Fatalf("selected fan-out proof = %#v, want %#v", refs, selected)
+	}
+
+	changed := plan
+	changed.FanOutObligations = append([]runfork.RunForkFanOutObligation(nil), plan.FanOutObligations...)
+	changed.FanOutObligations[0].Intent.Request.PlanRef.SemanticDigest = "sha256:" + strings.Repeat("f", 64)
+	if _, err := admitSelectedContractFanOutPlans(changed, source); err == nil || !strings.Contains(err.Error(), "changed semantic digest") {
+		t.Fatalf("changed semantic digest error = %v", err)
+	}
+
+	missing := plan
+	missing.FanOutObligations = append([]runfork.RunForkFanOutObligation(nil), plan.FanOutObligations...)
+	missing.FanOutObligations[0].Intent.Request.PlanRef.ElementRef.ElementID = uuid.NewString()
+	if _, err := admitSelectedContractFanOutPlans(missing, source); err == nil || !strings.Contains(err.Error(), "missing pending fan_out element") {
+		t.Fatalf("missing element error = %v", err)
 	}
 }
 

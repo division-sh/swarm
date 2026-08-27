@@ -229,6 +229,10 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		return &HandlerOutcome{Handled: false}, nil
 	}
 	source := e.coordinator.SemanticSource()
+	handlerEventKey = strings.TrimSpace(handlerEventKey)
+	if handlerEventKey == "" {
+		handlerEventKey = workflowNodeHandlerEventKeyForExecution(ctx, source, e.nodeRef, evt)
+	}
 	entityID := workflowEventEntityID(evt)
 	handlerFact := MustDeliveryTargetHandler(e.nodeRef)
 	flowID := handlerFact.ExecutionFlowID(source)
@@ -286,7 +290,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		hasSelectedState = true
 	}
 	if !exactDelivery {
-		resolvedEntityID, resolvedEvent, err := ensureHandlerEntityID(source, flowID, handler, entityID, evt)
+		resolvedEntityID, resolvedEvent, err := ensureHandlerEntityIDAtNode(source, e.nodeRef, events.EventType(handlerEventKey), flowID, handler, entityID, evt)
 		if err != nil {
 			return nil, err
 		}
@@ -326,15 +330,11 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 		currentState = selectedState
 	}
 	if !exactDelivery {
-		if err := prepareHandlerMaterializationState(source, flowID, handler, stateRoute, entityID, &currentState); err != nil {
+		if err := prepareHandlerMaterializationStateAtNode(source, e.nodeRef, events.EventType(handlerEventKey), flowID, handler, stateRoute, entityID, &currentState); err != nil {
 			return nil, err
 		}
 	}
 	node := e.node
-	handlerEventKey = strings.TrimSpace(handlerEventKey)
-	if handlerEventKey == "" {
-		handlerEventKey = workflowNodeHandlerEventKeyForExecution(ctx, source, e.nodeRef, evt)
-	}
 	workflowVersion := ""
 	if source != nil {
 		workflowVersion = source.WorkflowVersion()
@@ -406,6 +406,10 @@ func canonicalHandlerMaterializationTarget(source semanticview.Source, flowID st
 }
 
 func ensureHandlerEntityID(source semanticview.Source, flowID string, handler SystemNodeEventHandler, entityID string, evt Event) (string, Event, error) {
+	return ensureHandlerEntityIDAtNode(source, identity.ExecutableNode{}, evt.Type(), flowID, handler, entityID, evt)
+}
+
+func ensureHandlerEntityIDAtNode(source semanticview.Source, node identity.ExecutableNode, handlerEvent events.EventType, flowID string, handler SystemNodeEventHandler, entityID string, evt Event) (string, Event, error) {
 	entityID = strings.TrimSpace(firstNonEmptyString(entityID, evt.TargetRoute().EntityID))
 	if entityID != "" {
 		if strings.TrimSpace(evt.EntityID()) == "" {
@@ -417,7 +421,7 @@ func ensureHandlerEntityID(source semanticview.Source, flowID string, handler Sy
 		}
 		return entityID, evt, nil
 	}
-	if !handlerExecutionEntityRequirement(source, flowID, handler).materializes() {
+	if !handlerExecutionEntityRequirementForNode(source, node, handlerEvent, flowID, handler).materializes() {
 		return "", evt, nil
 	}
 	route, err := canonicalHandlerRoute(source, flowID, "", evt)
@@ -461,7 +465,11 @@ func canonicalHandlerRoute(source semanticview.Source, flowID, statePath string,
 }
 
 func prepareHandlerMaterializationState(source semanticview.Source, flowID string, handler SystemNodeEventHandler, route runtimeflowidentity.Route, entityID string, state *WorkflowState) error {
-	if state == nil || !handlerExecutionEntityRequirement(source, flowID, handler).materializes() {
+	return prepareHandlerMaterializationStateAtNode(source, identity.ExecutableNode{}, "", flowID, handler, route, entityID, state)
+}
+
+func prepareHandlerMaterializationStateAtNode(source semanticview.Source, node identity.ExecutableNode, handlerEvent events.EventType, flowID string, handler SystemNodeEventHandler, route runtimeflowidentity.Route, entityID string, state *WorkflowState) error {
+	if state == nil || !handlerExecutionEntityRequirementForNode(source, node, handlerEvent, flowID, handler).materializes() {
 		return nil
 	}
 	if !route.Valid() {

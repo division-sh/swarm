@@ -19823,6 +19823,139 @@
         ],
         "type": "object"
       },
+      "FanOutBlockedIntentDiagnosis": {
+        "additionalProperties": false,
+        "description": "Exact blocked fan-out intent identity, remaining suffix, and typed owning failure.",
+        "properties": {
+          "cursor": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "element_id": {
+            "type": "string"
+          },
+          "failure": {
+            "$ref": "#/components/schemas/FailureEnvelope"
+          },
+          "owed": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "package_key": {
+            "type": "string"
+          },
+          "triggering_delivery_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "triggering_delivery_id",
+          "package_key",
+          "element_id",
+          "cursor",
+          "owed",
+          "failure"
+        ],
+        "type": "object"
+      },
+      "FanOutRunSummary": {
+        "additionalProperties": false,
+        "description": "Canonical run-scoped durable fan-out issuance and downstream-settlement diagnostic projection.",
+        "properties": {
+          "blocked": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "blocked_intents": {
+            "description": "Exact durable fan-out intents blocked by typed pump failures; cardinality equals blocked.",
+            "items": {
+              "$ref": "#/components/schemas/FanOutBlockedIntentDiagnosis"
+            },
+            "type": "array"
+          },
+          "canceled": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "cardinality": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "committed": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "cursor": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "intents": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "last_chunk_max_ms": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "max_next_chunk": {
+            "maximum": 32,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "min_next_chunk": {
+            "maximum": 32,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "oldest_age_ms": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "open": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "owed": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "rejected": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "settled": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "unsettled": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "run_id",
+          "intents",
+          "open",
+          "blocked",
+          "blocked_intents",
+          "cardinality",
+          "cursor",
+          "owed",
+          "committed",
+          "rejected",
+          "canceled",
+          "settled",
+          "unsettled",
+          "min_next_chunk",
+          "max_next_chunk",
+          "last_chunk_max_ms",
+          "oldest_age_ms"
+        ],
+        "type": "object"
+      },
       "HealthCheckResult": {
         "additionalProperties": false,
         "properties": {
@@ -21175,6 +21308,9 @@
             },
             "type": "array"
           },
+          "fan_out": {
+            "$ref": "#/components/schemas/FanOutRunSummary"
+          },
           "heuristics": {
             "description": "Free-form diagnostic notes from the projection. Current owner\nemits one entry per detected condition, e.g. \"dead letters\nexist for this run\".\n",
             "items": {
@@ -21199,6 +21335,7 @@
           "blocking_reason",
           "heuristics",
           "failed_deliveries",
+          "fan_out",
           "test_quiescence"
         ],
         "type": "object"
@@ -21458,8 +21595,13 @@
             "minimum": 0,
             "type": "integer"
           },
+          "fan_out_owed": {
+            "description": "Unissued fan-out ordinals still owned by open or blocked durable fan-out intents for the run.",
+            "minimum": 0,
+            "type": "integer"
+          },
           "ready": {
-            "description": "True exactly when active_deliveries, unsettled_pipeline_events, due_timers, and active_session_leases are all zero.",
+            "description": "True exactly when active_deliveries, unsettled_pipeline_events, fan_out_owed, due_timers, and active_session_leases are all zero.",
             "type": "boolean"
           },
           "unsettled_pipeline_events": {
@@ -21472,6 +21614,7 @@
           "ready",
           "active_deliveries",
           "unsettled_pipeline_events",
+          "fan_out_owed",
           "due_timers",
           "active_session_leases"
         ],

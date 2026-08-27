@@ -15,6 +15,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
@@ -159,6 +160,11 @@ func (r *recordingRuntimeMutationRunner) CommitWorkflowEngineMutation(ctx contex
 			}
 			result.Publications = append(result.Publications, pipelineTestCommittedPublication{eventID: plan.intent.Event.ID(), intent: plan.intent})
 		}
+		if command.FanOutIntent != nil {
+			if err := commitPipelineTestFanOutIntent(txctx, tx, r.dialect, *command.FanOutIntent, command.State.UpdatedAt); err != nil {
+				return err
+			}
+		}
 		if success := command.DeliverySuccess; success != nil {
 			dialect := deliveryfixture.DialectSQLite
 			if r.dialect == workflowStoreDialectPostgres {
@@ -191,6 +197,63 @@ func (r *recordingRuntimeMutationRunner) CommitWorkflowEngineMutation(ctx contex
 	r.committedGenericScheduleCancellations = append(r.committedGenericScheduleCancellations, result.Lifecycle.GenericScheduleCancellations...)
 	r.mu.Unlock()
 	return result, nil
+}
+
+func commitPipelineTestFanOutIntent(ctx context.Context, tx *sql.Tx, dialect workflowStoreDialect, request fanoutobligation.IntentRequest, createdAt time.Time) error {
+	if err := request.Validate(); err != nil {
+		return err
+	}
+	if request.Source.Kind != fanoutobligation.SourceEventPayloadField {
+		return fmt.Errorf("pipeline test fan-out owner does not support source %s", request.Source.Kind)
+	}
+	query := `SELECT payload_bytes FROM events WHERE event_id=? AND run_id=?`
+	if dialect == workflowStoreDialectPostgres {
+		query = `SELECT payload_bytes FROM events WHERE event_id=$1 AND run_id=$2`
+	}
+	var raw []byte
+	if err := tx.QueryRowContext(ctx, query, request.Source.EventID, request.Key.RunID).Scan(&raw); err != nil {
+		return fmt.Errorf("pipeline test load fan-out payload source: %w", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return fmt.Errorf("pipeline test decode fan-out payload source: %w", err)
+	}
+	items, ok := payload[request.Source.Field].([]any)
+	if !ok || len(items) != request.Cardinality {
+		return fmt.Errorf("pipeline test fan-out source cardinality disagrees with intent")
+	}
+	capsule, err := json.Marshal(request.Capsule)
+	if err != nil {
+		return err
+	}
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+	status := "open"
+	if request.Cardinality == 0 {
+		status = "closed"
+	}
+	args := []any{
+		request.Key.RunID, request.Key.TriggeringDeliveryID, request.Key.ElementRef.PackageKey, request.Key.ElementRef.ElementID,
+		request.PlanRef.BundleHash, request.PlanRef.SemanticDigest, string(request.Source.Kind), request.Source.EventID,
+		request.Source.Field, request.Cardinality, status, fanoutobligation.InitialChunkSize, string(capsule), createdAt.UTC(),
+	}
+	insert := `INSERT INTO fan_out_intents (
+		run_id,triggering_delivery_id,package_key,element_id,bundle_hash,semantic_digest,
+		source_kind,source_event_id,source_field,cardinality,cursor,status,next_chunk_size,capsule,created_at,updated_at
+	) VALUES (?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?)`
+	if dialect == workflowStoreDialectPostgres {
+		insert = `INSERT INTO fan_out_intents (
+			run_id,triggering_delivery_id,package_key,element_id,bundle_hash,semantic_digest,
+			source_kind,source_event_id,source_field,cardinality,cursor,status,next_chunk_size,capsule,created_at,updated_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,0,$11,$12,$13::jsonb,$14,$14)`
+	} else {
+		args = append(args, createdAt.UTC())
+	}
+	if _, err := tx.ExecContext(ctx, insert, args...); err != nil {
+		return fmt.Errorf("pipeline test insert fan-out intent: %w", err)
+	}
+	return nil
 }
 
 func (r *recordingRuntimeMutationRunner) CommitHumanTaskDeferredRoute(ctx context.Context, command HumanTaskDeferredRouteCommand) (CommittedHumanTaskRoute, error) {

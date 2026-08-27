@@ -2892,7 +2892,7 @@ func TestExecuteNodeContractHandler_GuardEscalateObjectFieldsUseExplicitPayloadO
 	}
 }
 
-func TestExecuteNodeContractHandler_RejectsUndeclaredBusinessPayloadAcrossSupportedEmitSites(t *testing.T) {
+func TestExecuteNodeContractHandler_RejectsUndeclaredBusinessPayloadAcrossImmediateEmitSites(t *testing.T) {
 	tests := []struct {
 		name    string
 		event   events.Event
@@ -2947,37 +2947,6 @@ func TestExecuteNodeContractHandler_RejectsUndeclaredBusinessPayloadAcrossSuppor
 						},
 					},
 				}},
-			},
-		},
-		{
-			name: "fan_out",
-			event: handlerTestRootIngress(
-				"",
-				events.EventType("batch.submitted"),
-				"",
-				"",
-				mustJSON(map[string]any{"items": []any{map[string]any{"label": "x"}}}),
-				0,
-				"",
-				"",
-				events.EnvelopeForEntityID(events.EventEnvelope{}, "ent-1"),
-				time.Time{},
-			),
-
-			state: WorkflowState{EntityID: "ent-1", Stage: WorkflowStateID("queued"), Metadata: map[string]any{}},
-			handler: runtimecontracts.SystemNodeEventHandler{
-				FanOut: &runtimecontracts.FanOutSpec{
-					ItemsFrom: "payload.items",
-					As:        "payload_item",
-					Identity:  "payload_item.label",
-					Emit: runtimecontracts.EmitSpec{
-						Event: "custom.emitted",
-						Fields: map[string]runtimecontracts.ExpressionValue{
-							"label": runtimecontracts.CELExpression(`payload_item.label`),
-							"extra": runtimecontracts.CELExpression(`"bad"`),
-						},
-					},
-				},
 			},
 		},
 	}

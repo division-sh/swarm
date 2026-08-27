@@ -92,7 +92,10 @@ func newTestSQLiteWorkflowInstanceStoreWithRuntimeMutationRunner(db *sql.DB, run
 }
 
 func newWorkflowPersistenceFixtureStore(runner *recordingRuntimeMutationRunner) *workflowInstanceStore {
-	store := &workflowInstanceStore{runLifecycle: runner}
+	store := &workflowInstanceStore{
+		runLifecycle:      runner,
+		fanOutObligations: unavailablePipelineTestFanOutOwner{},
+	}
 	if owner, ok := any(runner).(entityquery.Reader); ok {
 		store.entityQuery = owner
 	}
@@ -595,6 +598,9 @@ func admitSyntheticEntityContractsForTest(
 	}
 	if base.FlowTree.Root != nil {
 		admitted.FlowTree = base.FlowTree
+	}
+	if failures := admitted.PrepareFanOutPlans(); len(failures) != 0 {
+		t.Fatalf("prepare synthetic fan-out plans: %v", failures)
 	}
 	return admitted
 }

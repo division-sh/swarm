@@ -19,6 +19,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/runtime/platformcontext"
@@ -254,6 +255,7 @@ type ExecutionRequest struct {
 	// runtime dispatch. Concrete Event.Type remains event provenance.
 	HandlerEventKey string
 	Handler         runtimecontracts.SystemNodeEventHandler
+	FanOutPlans     []runtimecontracts.FanOutCompiledPlan
 	// JoinDeclaration is the exact authored join identity selected before
 	// execution. Internal timer occurrences carry the same declaration plus
 	// their durable window and generation.
@@ -490,6 +492,7 @@ type ExecutionResult struct {
 	SetsGate             string
 	HandlerRuleSelection handlerselection.HandlerRuleSelectionFact
 	FanOutCount          int
+	FanOutIntent         *fanoutobligation.IntentRequest
 	Computed             map[string]any
 	StateMutation        StateMutation
 	EmitIntents          []EmitIntent

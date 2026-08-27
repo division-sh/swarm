@@ -13,6 +13,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 )
 
 // EnginePublicationPlanner converts engine emission intents into immutable
@@ -170,6 +171,7 @@ type WorkflowEngineMutationCommand struct {
 	RouteRetirement         *WorkflowEngineRouteRetirement
 	DeliverySuccess         *WorkflowEngineDeliverySuccess
 	PostCommit              WorkflowEnginePostCommitPlan
+	FanOutIntent            *fanoutobligation.IntentRequest
 }
 
 // WorkflowEngineDeliverySuccess declares the exact inbound node claim that
@@ -281,6 +283,17 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 	if c.DeliverySuccess != nil {
 		if err := c.DeliverySuccess.Validate(runID); err != nil {
 			return err
+		}
+	}
+	if c.FanOutIntent != nil {
+		if err := c.FanOutIntent.Validate(); err != nil {
+			return fmt.Errorf("workflow engine fan-out intent: %w", err)
+		}
+		if c.DeliverySuccess == nil {
+			return fmt.Errorf("workflow engine fan-out intent requires exact delivery settlement")
+		}
+		if c.FanOutIntent.Key.RunID != runID || c.FanOutIntent.Key.TriggeringDeliveryID != c.DeliverySuccess.Claim.DeliveryID() {
+			return fmt.Errorf("workflow engine fan-out intent disagrees with the settled delivery")
 		}
 	}
 	seen := make(map[string]struct{}, len(c.Publications))

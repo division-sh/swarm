@@ -1108,6 +1108,10 @@ func assertReadOnlyProbeSuccess(t *testing.T, methodName string, resp rpcRespons
 		if len(heuristics) != 0 {
 			t.Fatalf("run.diagnose heuristics = %#v, want empty array", heuristics)
 		}
+		fanOut := asMap(t, result["fan_out"])
+		if blocked, ok := fanOut["blocked_intents"].([]any); !ok || len(blocked) != 0 {
+			t.Fatalf("run.diagnose fan_out.blocked_intents = %#v, want empty array", fanOut["blocked_intents"])
+		}
 		quiescence := asMap(t, result["test_quiescence"])
 		if quiescence["ready"] != true {
 			t.Fatalf("run.diagnose test_quiescence = %#v, want ready", quiescence)

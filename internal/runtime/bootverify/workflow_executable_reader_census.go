@@ -16,9 +16,11 @@ type handlerExecutableReaderCollector func(*[]expressionReference, executableRea
 type handlerRuleExecutableReaderCollector func(*[]expressionReference, executableReaderContext, string, runtimecontracts.HandlerRuleEntry)
 
 type executableReaderContext struct {
-	source    semanticview.Source
-	node      runtimeidentity.ExecutableNode
-	eventType string
+	source         semanticview.Source
+	node           runtimeidentity.ExecutableNode
+	eventType      string
+	ruleCollection string
+	ruleIndex      int
 }
 
 // Every executable handler field has one explicit reader disposition. This is
@@ -81,8 +83,8 @@ var systemNodeEventHandlerExecutableReaderCensus = map[string]handlerExecutableR
 	"Query": func(out *[]expressionReference, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
 		appendQueryExecutableReaders(out, "query", handler.Query)
 	},
-	"FanOut": func(out *[]expressionReference, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
-		appendFanOutExecutableReaders(out, "fan_out", handler.FanOut, runtimepipeline.WorkflowEntityFieldLifecycleFanOut)
+	"FanOut": func(out *[]expressionReference, ctx executableReaderContext, _ runtimecontracts.SystemNodeEventHandler) {
+		appendCompiledFanOutExecutableReaders(out, ctx, runtimecontracts.FanOutSiteHandler, -1, "fan_out", runtimepipeline.WorkflowEntityFieldLifecycleFanOut)
 	},
 	"GroupBy": func(out *[]expressionReference, _ executableReaderContext, handler runtimecontracts.SystemNodeEventHandler) {
 		appendGroupByExecutableReaders(out, handler.GroupBy)
@@ -121,8 +123,15 @@ var handlerRuleEntryExecutableReaderCensus = map[string]handlerRuleExecutableRea
 	"Compute": func(out *[]expressionReference, _ executableReaderContext, prefix string, rule runtimecontracts.HandlerRuleEntry) {
 		appendComputeExecutableReaders(out, prefix+".compute", rule.Compute, runtimepipeline.WorkflowEntityFieldLifecycleRule)
 	},
-	"FanOut": func(out *[]expressionReference, _ executableReaderContext, prefix string, rule runtimecontracts.HandlerRuleEntry) {
-		appendFanOutExecutableReaders(out, prefix+".fan_out", rule.FanOut, runtimepipeline.WorkflowEntityFieldLifecycleRule)
+	"FanOut": func(out *[]expressionReference, ctx executableReaderContext, prefix string, _ runtimecontracts.HandlerRuleEntry) {
+		if ctx.ruleCollection != "rules" && ctx.ruleCollection != "on_complete" {
+			return
+		}
+		kind := runtimecontracts.FanOutSiteRule
+		if ctx.ruleCollection == "on_complete" {
+			kind = runtimecontracts.FanOutSiteOnComplete
+		}
+		appendCompiledFanOutExecutableReaders(out, ctx, kind, ctx.ruleIndex, prefix+".fan_out", runtimepipeline.WorkflowEntityFieldLifecycleRule)
 	},
 	"elementRef": noHandlerRuleExecutableReaders,
 	"authored":   noHandlerRuleExecutableReaders,
@@ -293,7 +302,10 @@ func appendRulesExecutableReaders(out *[]expressionReference, ctx executableRead
 				continue
 			}
 			fieldBefore := len(*out)
-			handlerRuleEntryExecutableReaderCensus[field](out, ctx, prefix, rule)
+			ruleCtx := ctx
+			ruleCtx.ruleCollection = kind
+			ruleCtx.ruleIndex = i
+			handlerRuleEntryExecutableReaderCensus[field](out, ruleCtx, prefix, rule)
 			for index := fieldBefore; index < len(*out); index++ {
 				(*out)[index].RuleCollection = kind
 				(*out)[index].RuleField = field
@@ -388,12 +400,20 @@ func appendQueryExecutableReaders(out *[]expressionReference, kind string, query
 	// Sequence rows in Queries are retained source data that stepQuery does not execute.
 }
 
-func appendFanOutExecutableReaders(out *[]expressionReference, kind string, fanOut *runtimecontracts.FanOutSpec, phase runtimepipeline.WorkflowEntityFieldLifecyclePhase) {
-	if fanOut == nil {
+func appendCompiledFanOutExecutableReaders(out *[]expressionReference, ctx executableReaderContext, siteKind runtimecontracts.FanOutSiteKind, index int, kind string, phase runtimepipeline.WorkflowEntityFieldLifecyclePhase) {
+	if ctx.source == nil {
 		return
 	}
-	appendExecutableReader(out, kind+".items_from", fanOut.ItemsFrom, phase)
-	appendExecutableReader(out, kind+".identity", fanOut.Identity, phase)
+	site, err := runtimecontracts.NewFanOutSiteRef(ctx.node, ctx.eventType, siteKind, index)
+	if err != nil {
+		return
+	}
+	plan, ok := ctx.source.FanOutPlanForSite(site)
+	if !ok {
+		return
+	}
+	appendExecutableReader(out, kind+".items_from", plan.ItemsFrom, phase)
+	appendExecutableReader(out, kind+".identity", plan.Identity, phase)
 }
 
 func appendGroupByExecutableReaders(out *[]expressionReference, groupBy *runtimecontracts.GroupBySpec) {

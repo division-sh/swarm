@@ -602,6 +602,21 @@ func commitWorkflowEngineMutation(
 				}
 			}
 		}
+		if command.FanOutIntent != nil {
+			runID := command.State.RunID
+			fields := command.State.Fields
+			triggerEventID := command.FanOutIntent.Capsule.Lineage.ParentEventID
+			createdAt := command.State.UpdatedAt
+			if entityless {
+				runID = command.EntitylessRunID
+				fields = nil
+				triggerEventID = command.FanOutIntent.Source.EventID
+				createdAt = time.Now().UTC()
+			}
+			if err := commitFanOutIntentTx(txctx, tx, postgres, effects, *command.FanOutIntent, runID, fields, triggerEventID, createdAt); err != nil {
+				return err
+			}
+		}
 		for index, value := range command.Publications {
 			plan, ok := value.(runtimebus.EnginePublicationPlan)
 			if !ok {

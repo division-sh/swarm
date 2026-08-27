@@ -3165,8 +3165,8 @@ handler_specification:
         with_accumulate: 'PROHIBITED. create_entity establishes the canonical receiving-flow lifecycle entity for this handler.
           Accumulate waits across multiple arrivals and must not be combined with same-handler lifecycle materialization.
           Boot error if both are declared on the same handler.'
-        with_fan_out: 'ALLOWED. create_entity materializes ONE canonical entity, then fan_out emits multiple events all carrying
-          that entity_id. Fan_out items share the canonical entity.'
+        with_fan_out: 'ALLOWED. create_entity materializes ONE canonical entity, then fan_out commits one durable obligation
+          whose later ordinary publications all carry that entity_id. Fan-out ordinals share the canonical entity.'
         with_guard: 'ALLOWED. Guards evaluate against the materialized canonical entity state after schema initial values materialize.
           Guards may read any declared entity field directly. Declared fields are universally present with either their
           explicit initial or their type default.'
@@ -3775,28 +3775,30 @@ handler_specification:
       platform_ceiling:
         max_items: 1000
         overrun: >
-          Runtime evaluates items_from once per handler activation and checks the resulting count before any
-          per-item emit. If the count exceeds the effective limit, the handler fails closed with non-retryable
-          typed platform error `platform.fan_out_bound_exceeded`. The runtime must not silently truncate and
-          must not emit a partial prefix. The diagnostic names the actual count, authored limit when present,
-          effective limit, and tells the author to raise max_items or split the batch.
+          Runtime resolves the immutable source cardinality once per handler activation and checks it before the
+          constant-size intent is persisted. If the count exceeds the effective limit, the handler fails closed with
+          non-retryable typed platform error `platform.fan_out_bound_exceeded`. The runtime must not silently truncate,
+          persist an intent, or publish a partial prefix. The diagnostic names the actual count, authored limit when
+          present, and effective limit; it never recommends author-side batching or pacing as a runtime workaround.
       effective_semantics:
-        canonical_owner: contracts.WorkflowContractBundle.ResolveFanOutEffectiveSemantics
-        fields: [items_from, collection_type, item_type, as, identity, identity_derived, authored_max_items, effective_max_items]
+        canonical_owner: contracts.WorkflowContractBundle.CompileFanOutPlan
+        fields: [bundle_hash, package_key, element_id, semantic_digest, items_from, collection_type, item_type, as, identity, identity_derived, authored_max_items, effective_max_items, source_after_writes, emit]
         consumers: [parser_lowering, bootverify, engine, authoring_view, describe_graph, policy_expression_validation, supported_proof_runners]
-        rule: Every consumer uses this typed effective row. Consumers must not independently re-derive item type,
-          omitted scalar identity, or effective bound from raw fan_out syntax.
+        rule: Every execution consumer uses this bundle-qualified compiled row. Raw fan_out syntax remains parser and
+          composition input. Consumers must not independently re-derive item type, omitted scalar identity, effective
+          bound, source/write ordering, or emitted payload semantics.
       empty_collection: >
-        An empty collection emits zero events and still completes the fan_out row. Handler `advances_to` runs once
-        after fan_out completion, including the empty path, and `fan_out.count` is 0 for later data_accumulation.
+        An empty collection persists one immediately closed fan-out intent and publishes zero events. Handler
+        `advances_to` runs once after that constant-size intent commit, and `fan_out.count` is 0 for same-handler
+        data_accumulation.
       collection_iteration: >
-        Runtime emits exactly one intent for each source-list entry in declared list order. Duplicate values remain
-        separate entries and produce separate intents; fan_out never sorts or deduplicates the source collection.
-        Before persistence, the engine normalizes emitted_at to exact microsecond precision and advances every
-        non-increasing clock value by one microsecond from the preceding intent in the same execution. This precision-safe
-        monotonic sequence is authoritative for persisted child order on both PostgreSQL and SQLite; event_id is never
-        an order owner or tie-breaker for fan_out iteration.
-      transition_order: Handler `advances_to` fires once after per-item emission, not once per item.
+        Runtime persists one constant-size obligation for the complete ordered collection. Zero-based ordinal is the
+        stable per-entry activation identity. Duplicate values and duplicate business identities remain distinct
+        ordinals; fan_out never sorts or deduplicates the source collection. The pump later publishes each ordinal in
+        declared list order through ordinary EventBus publication. Chunk boundaries, retries, bisection, process identity,
+        and event_id never own or change iteration order.
+      transition_order: Handler `advances_to` fires once after the durable intent is committed, not once per item and not
+        after asynchronous issuance or downstream delivery settlement.
       graph_surface: describe --graph renders multiplicity-bearing fan-out edges such as `waiting ->xN line_item.requested`.
       route_authority: >
         `fan_out.emit` is a normal authored emit site. When it emits a
@@ -3823,8 +3825,59 @@ handler_specification:
         routes each emitted event to the intended flow instance by correlation
         key. No `batch_agent`, `map_agent`, inline runtime LLM invocation, or
         runtime-owned JSON result contract is part of this pattern.
-      side_effect: Writes fan_out.count to handler context (available for data_accumulation). `fan_out.index`
-        is scoped to per-item emit field evaluation and is not a durable handler value.
+      side_effect: Writes immutable obligation cardinality to handler context as fan_out.count (available for
+        data_accumulation). `fan_out.index` is scoped to deferred per-item emit field evaluation and is not a durable
+        handler value.
+      durable_issuance:
+        canonical_owner: runtime.pipeline.FanOutObligationOwner backed by the selected SQLite or PostgreSQL store
+        intent_identity: '{run_id, triggering_delivery_id, package_key, element_id}'
+        activation_identity: '{intent_identity, zero_based_ordinal}'
+        trigger_transaction: >-
+          The handler transaction commits state, the immutable source reference and evaluation capsule, cardinality,
+          one intent, and fork-revision effects atomically. Fan-out effect creation is constant-size with respect to N;
+          no event, delivery, activation, or per-ordinal row is created in the trigger transaction.
+        immutable_sources:
+          event_payload_field: Exact triggering event_id plus one declared top-level payload field.
+          entity_field_revision: Exact source run_id, entity_id, top-level field, and immutable entity_mutations mutation_id.
+          resource_version: Exact declaration and version_id, admitted only while the intent run owns the matching durable pin.
+          rule: >-
+            Missing, contradictory, pruned, current-state-only, or non-lineage source evidence fails closed. The pump never
+            rereads mutable current entity state or the process-current contract. Same-handler source mutation binds the
+            post-write immutable revision. Source/count cycles fail strict load and boot verification.
+        evaluation_capsule: >-
+          Carries the exact bundle-qualified compiled plan reference, trigger/run/delivery/route lineage, and only mutable
+          or turn-local expression values needed after the handler returns. The retained bundle and semantic digest must
+          still prove the same element before any ordinal is evaluated.
+        progress: >-
+          Cardinality plus one contiguous cursor represents the unissued suffix. Each visited ordinal receives exactly
+          one immutable committed-publication or deterministic semantic-rejection outcome. Cancellation terminalizes the
+          remaining suffix as one compact range fact. Issuance never copies delivery lifecycle or settlement state.
+        claim_and_fairness: >-
+          The selected store claims least-recently-served intent, then creation order and structured intent identity.
+          Claim owner, monotonically increasing generation, and lease expiry fence every mutation. One claim advances at
+          most one chunk and releases before reacquisition; process-local wakeups are advisory and periodic scanning owns
+          lost-wakeup recovery.
+        chunk_policy: >-
+          Internal, observable, and not author-overridable: floor 1, initial 4, ceiling 32. A successful selected-store
+          call taking at most 250ms increments by one; over 250ms through 1s is unchanged; over 1s halves with ceiling
+          division. A typed retryable selected-store failure advances nothing and applies the same halving. Restart and
+          fork without valid tuning state use 4. Chunk boundaries never change semantic output.
+        failure_isolation: >-
+          Publication plans, outcomes, cursor advancement, and closure commit atomically. A typed item-semantic error may
+          become semantic_rejected. A typed safe aggregate error is bisected lower-half first. Retryable infrastructure
+          errors advance nothing. Outcome-uncertain results are read back by structured operation identity before retry.
+          Unknown errors, raw database strings, invariants, and internal failures block the intent with typed diagnosis;
+          they are never parsed into rejection or blindly retried.
+        lifecycle: >-
+          Open or blocked owed suffix prevents normal run completion and test quiescence. Run stop/cancel atomically
+          preserves the issued prefix and terminalizes the suffix. Startup, multiprocess serving, destructive reset,
+          diagnostics, and global-work accounting consume this same owner.
+        fork: >-
+          fan_out_obligations is a closed fixed-revision family. A child inherits exact capsule, source, cardinality,
+          cursor, and terminal prefix at the selected revision, resets operational claim/tuning facts, and never reissues
+          the prefix. Same-contract and selected-contract execution require the same stable element identity and semantic
+          digest. Unsupported historical prefix work, missing retained bundle/source, or digest disagreement fails closed;
+          source event and delivery rows are never copied.
     join:
       field: join
       type: object
@@ -4300,11 +4353,11 @@ handler_specification:
           payload extras outside the source named type are stripped before
           writing the entity field and are not addressable as `source.*`.
       fan_out:
-        resolves_to: 'Handler context produced by the fan_out step. fan_out.count is the number of items
-          that were dispatched. Populated after fan_out executes, before data_accumulation. fan_out.index is
-          scoped to fan_out.emit.fields only.'
+        resolves_to: 'Handler context produced while creating the durable fan_out obligation. fan_out.count is the
+          immutable source cardinality owed by that obligation, not publications committed, deliveries settled,
+          successes, or remaining work. fan_out.index is scoped to deferred fan_out.emit.fields evaluation only.'
         available_in: 'data_accumulation.expression — the canonical way to write fan_out results to entity
-          state. Example: expression: fan_out.count writes the dispatch count to an entity field for
+          state. Example: expression: fan_out.count writes the obligation cardinality to an entity field for
           downstream open-stream processing.'
         not_available_in: 'guard.check — guards run before fan_out. on_complete.condition — use entity
           fields written by data_accumulation instead.'
@@ -8163,7 +8216,7 @@ engine:
           retryable: false
           deterministic: true
           message_template: Fan-out bound was exceeded (%s).
-          remediation_template: Raise max_items or split the batch (%s).
+          remediation_template: Keep source cardinality within the effective max_items bound (%s).
         platform.chain_depth_exceeded:
           family: routing_control
           task_failure: true
@@ -13830,6 +13883,8 @@ platform_tables:
         - run_fork_selected_contract_bindings
       delete_by_run_id:
         - resource_version_pins
+        - fan_out_outcomes
+        - fan_out_intents
         - author_activity_occurrences
         - run_scenario_execution_profiles
         - run_fork_fact_revisions
@@ -14276,9 +14331,11 @@ platform_tables:
         );
     run_fork_fact_revisions:
       description: >-
-        Append-only, closed-registry projection of the twelve source fact families consumed by supported
+        Append-only, closed-registry projection of the thirteen source fact families consumed by supported
         fork planning. PostgreSQL and SQLite private adapters consume one backend-neutral declared-effect
-        and canonical-projection contract. This table is not a general temporal database and has no trigger,
+        and canonical-projection contract. Each revision records only facts whose canonical value changed
+        plus explicit tombstones; an exact selected-revision snapshot folds the latest fact at or before that
+        revision. Unchanged facts MUST NOT be copied into later revisions. This table is not a general temporal database and has no trigger,
         migration, compatibility, or arbitrary-history API. The events family stores payload_base64 derived
         from events.payload_bytes so historical revision hydration reconstructs the exact admitted payload
         bytes; the derived events.payload JSON projection is not revision or replay evidence.
@@ -14286,7 +14343,7 @@ platform_tables:
         CREATE TABLE run_fork_fact_revisions (
             run_id    UUID NOT NULL,
             revision  BIGINT NOT NULL,
-            family    TEXT NOT NULL CHECK (family IN ('events', 'entity_mutations', 'entity_metadata', 'event_deliveries', 'committed_replay_scopes', 'event_receipts', 'dead_letters', 'timers', 'agent_sessions', 'agent_turns', 'agent_conversation_audits', 'reply_contexts')),
+            family    TEXT NOT NULL CHECK (family IN ('events', 'entity_mutations', 'entity_metadata', 'event_deliveries', 'committed_replay_scopes', 'event_receipts', 'dead_letters', 'timers', 'agent_sessions', 'agent_turns', 'agent_conversation_audits', 'reply_contexts', 'fan_out_obligations')),
             fact_key  TEXT NOT NULL CHECK (fact_key <> ''),
             fact      JSONB NOT NULL,
             present   BOOLEAN NOT NULL DEFAULT TRUE,
@@ -16697,13 +16754,80 @@ platform_tables:
           handler_step = the handler step name (e.g., data_accumulation, compute, sets_gate).'
         agent_tool_calls: 'save_entity_field tool calls. writer_type = agent, writer_id = agent ID,
           handler_step = save_entity_field.'
-        platform_operations: 'create_entity (initial field population), entity state fixes during recovery.
+        platform_operations: 'create_entity (initial field population), entity state fixes during recovery, and immutable
+          fan-out entity-source revision binding.
           writer_type = platform, writer_id = operation name.'
       not_logged: 'Event payloads (already in events table). Agent conversation turns (already in agent_turns).
         Read operations (get_entity, search_entities, query_entities). Timer creation/cancellation.'
       hot_path_cost: 'One extra read (old value) + one insert per field write. The read is a single JSONB field
         extraction from entity_state — sub-millisecond. The insert is append-only with no unique constraints
         on the hot path. Given LLM calls at 1-30 seconds per agent turn, the overhead is negligible.'
+    fan_out_intents:
+      description: >-
+        Constant-size durable fan-out issuance owner. The structured primary key binds one triggering delivery to one
+        bundle-qualified authored fan-out element. Source identity is immutable, the cursor is contiguous, and claim
+        generation fences every advancing writer. Process-local wakeups are advisory only.
+      ddl: |
+        CREATE TABLE fan_out_intents (
+            run_id                    UUID NOT NULL REFERENCES runs(run_id),
+            triggering_delivery_id    UUID NOT NULL REFERENCES event_deliveries(delivery_id),
+            package_key               TEXT NOT NULL,
+            element_id                TEXT NOT NULL,
+            bundle_hash               TEXT NOT NULL CHECK (bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),
+            semantic_digest           TEXT NOT NULL,
+            source_kind               TEXT NOT NULL CHECK (source_kind IN ('event_payload_field', 'entity_field_revision', 'resource_version')),
+            source_event_id           UUID REFERENCES events(event_id),
+            source_run_id             UUID REFERENCES runs(run_id),
+            source_entity_id          UUID,
+            source_field              TEXT,
+            source_mutation_id        UUID REFERENCES entity_mutations(mutation_id),
+            source_resource_package_key TEXT,
+            source_resource_event_name TEXT,
+            source_resource_version_id TEXT REFERENCES resource_versions(version_id),
+            cardinality               BIGINT NOT NULL CHECK (cardinality >= 0),
+            cursor                    BIGINT NOT NULL DEFAULT 0 CHECK (cursor >= 0 AND cursor <= cardinality),
+            status                    TEXT NOT NULL CHECK (status IN ('open', 'closed', 'canceled', 'blocked')),
+            next_chunk_size           BIGINT NOT NULL CHECK (next_chunk_size >= 1 AND next_chunk_size <= 32),
+            last_chunk_ms             BIGINT NOT NULL DEFAULT 0 CHECK (last_chunk_ms >= 0),
+            capsule                   JSONB NOT NULL,
+            claim_owner               TEXT,
+            claim_generation          BIGINT NOT NULL DEFAULT 0 CHECK (claim_generation >= 0),
+            lease_expires_at          TIMESTAMPTZ,
+            last_served_at            TIMESTAMPTZ,
+            blocked_reason            TEXT,
+            created_at                TIMESTAMPTZ NOT NULL,
+            updated_at                TIMESTAMPTZ NOT NULL,
+            PRIMARY KEY (run_id, triggering_delivery_id, package_key, element_id),
+            CHECK ((status = 'open' AND cursor < cardinality AND blocked_reason IS NULL) OR (status = 'closed' AND cursor = cardinality AND blocked_reason IS NULL AND claim_owner IS NULL) OR (status = 'blocked' AND cursor < cardinality AND NULLIF(TRIM(blocked_reason), '') IS NOT NULL AND claim_owner IS NULL) OR (status = 'canceled' AND NULLIF(TRIM(blocked_reason), '') IS NOT NULL AND claim_owner IS NULL)),
+            CHECK ((claim_owner IS NULL AND lease_expires_at IS NULL) OR (claim_owner IS NOT NULL AND claim_generation > 0 AND lease_expires_at IS NOT NULL)),
+            CHECK ((source_kind = 'event_payload_field' AND source_event_id IS NOT NULL AND source_run_id IS NULL AND source_entity_id IS NULL AND source_mutation_id IS NULL AND NULLIF(source_field, '') IS NOT NULL AND source_resource_package_key IS NULL AND source_resource_event_name IS NULL AND source_resource_version_id IS NULL) OR (source_kind = 'entity_field_revision' AND source_event_id IS NULL AND source_run_id IS NOT NULL AND source_entity_id IS NOT NULL AND source_mutation_id IS NOT NULL AND NULLIF(source_field, '') IS NOT NULL AND source_resource_package_key IS NULL AND source_resource_event_name IS NULL AND source_resource_version_id IS NULL) OR (source_kind = 'resource_version' AND source_event_id IS NULL AND source_run_id IS NULL AND source_entity_id IS NULL AND source_mutation_id IS NULL AND source_field IS NULL AND source_resource_package_key IS NOT NULL AND source_resource_event_name IS NOT NULL AND source_resource_version_id IS NOT NULL)),
+            INDEX idx_fan_out_intents_work (status, last_served_at, created_at, run_id),
+            INDEX idx_fan_out_intents_run (run_id, status)
+        );
+    fan_out_outcomes:
+      description: >-
+        Immutable per-ordinal terminal issuance evidence. Committed events and deterministic semantic rejections advance
+        the same contiguous cursor. Cancellation is represented compactly by the intent's canceled status and remaining
+        cursor range, without inventing per-item outcomes or event identities.
+      ddl: |
+        CREATE TABLE fan_out_outcomes (
+            run_id                    UUID NOT NULL,
+            triggering_delivery_id    UUID NOT NULL,
+            package_key               TEXT NOT NULL,
+            element_id                TEXT NOT NULL,
+            ordinal                   BIGINT NOT NULL CHECK (ordinal >= 0),
+            outcome_kind              TEXT NOT NULL CHECK (outcome_kind IN ('committed', 'semantic_rejected')),
+            event_id                  UUID REFERENCES events(event_id),
+            source_event_id           UUID REFERENCES events(event_id),
+            failure                   JSONB,
+            created_at                TIMESTAMPTZ NOT NULL,
+            PRIMARY KEY (run_id, triggering_delivery_id, package_key, element_id, ordinal),
+            FOREIGN KEY (run_id, triggering_delivery_id, package_key, element_id) REFERENCES fan_out_intents(run_id, triggering_delivery_id, package_key, element_id),
+            CHECK ((outcome_kind = 'committed') = ((event_id IS NOT NULL) <> (source_event_id IS NOT NULL))),
+            CHECK ((outcome_kind = 'semantic_rejected') = (failure IS NOT NULL)),
+            UNIQUE (event_id),
+            INDEX idx_fan_out_outcomes_run (run_id, outcome_kind)
+        );
     runtime_store_metadata:
       description: 'Immutable creation-origin evidence for a selected runtime store. The stored versions explain which Swarm
         build and exact platform specification created the store; they never decide whether a later build may open it.
@@ -17082,6 +17206,7 @@ run_model:
       - agent_turns
       - agent_conversation_audits
       - reply_contexts
+      - fan_out_obligations
       write_contract: >-
         Every named selected-store mutation declares a closed typed set of affected run IDs and families before its
         private PostgreSQL or SQLite transaction finalizes. Private family writers contribute to that aggregate; they
@@ -17092,9 +17217,9 @@ run_model:
         revision facts. Multi-run finalization locks parent runs in deterministic run-ID order. No revision lock spans
         external work. Retained-run deletion emits present=false for every removed fact in the same transaction.
       read_contract: >-
-        PostgreSQL and SQLite private adapters validate and decode the same twelve-family historical projection.
+        PostgreSQL and SQLite private adapters validate and decode the same thirteen-family historical projection.
         PlanRunFork exposes the same selected-store consumer on both backends: it resolves the event UUID to its first revision
-        and reads all twelve families through one read-only repeatable-read snapshot. Every generic and selected
+        and reads all thirteen families through one read-only repeatable-read snapshot. Every generic and selected
         planning, readiness, materialization, and historical activation replan consumes that projection. RunForkPoint carries the exact selected event's
         normalized revisioned source_route and a canonical UTC timestamp for both explicit event and implicit latest
         selection. Selected route-history
@@ -17109,14 +17234,14 @@ run_model:
         unknown_unversioned only with matching selected binding, frontier, static/dynamic topology, and recipient proof;
         activation revalidates the persisted selected route recovery and never queries current routing_rules.
       distinct_current_evidence: >-
-        activity_attempts are post-frontier selected-execution evidence, not a twelfth historical family. Source
+        activity_attempts are post-frontier selected-execution evidence, not a historical family. Source
         preparation reads the immutable selected request event and current terminal attempt in one source/fork
         lifecycle-row-locked selected-store transaction and copies accepted evidence under fork-local identity. Missing
         or nonterminal evidence fails closed without changing PlanRunFork membership or readiness. Fresh
         source-advancement validation is likewise an activation safety owner and is not answered from the historical
         snapshot.
       retention: >-
-        The twelve authoritative source families remain available while a live dependent fork requires them. A named
+        The thirteen authoritative source families remain available while a live dependent fork requires them. A named
         operation that retains the run while deleting current governed facts MUST retain prior revision authority and
         append present=false facts for the exact removed projection in the same transaction. Whole-parent deletion may
         remove the run and cascade-owned ledger together only when dependency guards allow it. Historical event
@@ -19618,8 +19743,9 @@ observation_model:
       terminal_reject: Event targeted an entity in terminal state. Rejected before handler execution.
       waiting: A finite join admitted an arrival but its declared membership completion condition is not yet met. The durable
         join activation records the admitted arrival; later handler steps do not execute until the join selects an outcome.
-      fanned_out: Fan-out dispatched. Handler emitted the declared per-item events. Downstream result coordination, when needed,
-        is authored independently through fan-in stream or finite join semantics rather than implied by fan-out.
+      fanned_out: Fan-out obligation committed. The handler transaction did not emit the per-item events; the durable pump
+        owes their ordered ordinary publication. Downstream result coordination, when needed, is authored independently
+        through fan-in stream or finite join semantics rather than implied by fan-out issuance.
   agent_vs_node_observability: System node handler emissions are recorded in the entity emission chain and appear in emitted_events.
     Agent emissions are NOT part of the entity emission chain — they are independent events that enter the event loop separately.
     An agent emitting ticket.classified creates a new event in the events table that is then delivered to subscribers. The
@@ -22274,7 +22400,8 @@ test_specification:
         After each mutating step and before final assertions, the runner waits
         by reading `/v1/rpc run.diagnose` result.test_quiescence until the
         current run has no active deliveries, no unsettled same-run pipeline
-        receipt work represented by committed typed post-commit evidence, no currently due
+        receipt work represented by committed typed post-commit evidence, no owed durable
+        fan-out issuance, no currently due
         timer work, and no active session lease/callback evidence that can
         synchronously enqueue more work for the same run.
       timers: >
@@ -29521,12 +29648,13 @@ api_specification:
         - ready
         - active_deliveries
         - unsettled_pipeline_events
+        - fan_out_owed
         - due_timers
         - active_session_leases
         properties:
           ready:
             type: boolean
-            description: True exactly when active_deliveries, unsettled_pipeline_events, due_timers, and active_session_leases are all zero.
+            description: True exactly when active_deliveries, unsettled_pipeline_events, fan_out_owed, due_timers, and active_session_leases are all zero.
           active_deliveries:
             type: integer
             minimum: 0
@@ -29538,6 +29666,10 @@ api_specification:
               Same-run non-runtime-log events whose platform/pipeline receipt is absent or whose canonical decision-route
               disposition remains deferred. Terminal non-success receipts are immutable settled evidence: they block
               successful normal completion but are not live work.
+          fan_out_owed:
+            type: integer
+            minimum: 0
+            description: Unissued fan-out ordinals still owned by open or blocked durable fan-out intents for the run.
           due_timers:
             type: integer
             minimum: 0
@@ -29546,6 +29678,44 @@ api_specification:
             type: integer
             minimum: 0
             description: Active agent/session leases for the run whose lease has not expired.
+      FanOutRunSummary:
+        description: Canonical run-scoped durable fan-out issuance and downstream-settlement diagnostic projection.
+        type: object
+        additionalProperties: false
+        required: [run_id, intents, open, blocked, blocked_intents, cardinality, cursor, owed, committed, rejected, canceled, settled, unsettled, min_next_chunk, max_next_chunk, last_chunk_max_ms, oldest_age_ms]
+        properties:
+          run_id: {type: string}
+          intents: {type: integer, minimum: 0}
+          open: {type: integer, minimum: 0}
+          blocked: {type: integer, minimum: 0}
+          blocked_intents:
+            type: array
+            description: Exact durable fan-out intents blocked by typed pump failures; cardinality equals blocked.
+            items: {$ref: '#/components/schemas/FanOutBlockedIntentDiagnosis'}
+          cardinality: {type: integer, minimum: 0}
+          cursor: {type: integer, minimum: 0}
+          owed: {type: integer, minimum: 0}
+          committed: {type: integer, minimum: 0}
+          rejected: {type: integer, minimum: 0}
+          canceled: {type: integer, minimum: 0}
+          settled: {type: integer, minimum: 0}
+          unsettled: {type: integer, minimum: 0}
+          min_next_chunk: {type: integer, minimum: 0, maximum: 32}
+          max_next_chunk: {type: integer, minimum: 0, maximum: 32}
+          last_chunk_max_ms: {type: integer, minimum: 0}
+          oldest_age_ms: {type: integer, minimum: 0}
+      FanOutBlockedIntentDiagnosis:
+        description: Exact blocked fan-out intent identity, remaining suffix, and typed owning failure.
+        type: object
+        additionalProperties: false
+        required: [triggering_delivery_id, package_key, element_id, cursor, owed, failure]
+        properties:
+          triggering_delivery_id: {type: string}
+          package_key: {type: string}
+          element_id: {type: string}
+          cursor: {type: integer, minimum: 0}
+          owed: {type: integer, minimum: 1}
+          failure: {$ref: '#/components/schemas/FailureEnvelope'}
       RunDiagnosis:
         description: "Run header plus the canonical operator-state projection and concrete failed-delivery evidence. Source\
           \ of truth: ProjectRunOperationalStatus for operational_state/blocking fields, RunDebugReport.FailedDeliveries\
@@ -29560,6 +29730,7 @@ api_specification:
         - blocking_reason
         - heuristics
         - failed_deliveries
+        - fan_out
         - test_quiescence
         properties:
           run:
@@ -29589,6 +29760,8 @@ api_specification:
             description: Failed or dead-letter delivery rows with persisted reason/error/retry/dead-letter evidence for this run.
             items:
               $ref: '#/components/schemas/RunDebugFailureDelivery'
+          fan_out:
+            $ref: '#/components/schemas/FanOutRunSummary'
           test_quiescence:
             $ref: '#/components/schemas/RunTestQuiescence'
       EntitySummary:

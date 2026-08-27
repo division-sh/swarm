@@ -128,7 +128,7 @@ func (pc *PipelineCoordinator) prepareDeliveryTargetApplication(
 	if handlerFact.eventType != "" {
 		handlerEventType = handlerFact.eventType
 	}
-	policy, err := CompileDeliveryTargetCompatibilityPolicy(source, flowID, handlerEventType, handler)
+	policy, err := CompileDeliveryTargetCompatibilityPolicy(source, handlerFact.Node(), flowID, handlerEventType, handler)
 	if err != nil {
 		return DeliveryTargetApplication{}, err
 	}

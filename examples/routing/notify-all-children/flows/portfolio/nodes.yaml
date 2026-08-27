@@ -31,6 +31,7 @@ portfolio-coordinator:
           - source_field: account_ids
             target_field: account_ids
       fan_out:
+        element_id: 10e670bd-a679-493d-9c8e-91f6df2ec3b2
         items_from: payload.account_ids
         as: account_id
         max_items: 100
@@ -51,6 +52,7 @@ portfolio-coordinator:
         by:
           portfolio_id: payload.portfolio_id
       fan_out:
+        element_id: cf377b4f-e952-4ddb-9ecc-a1f380af032d
         items_from: entity.account_ids
         as: account_id
         max_items: 100

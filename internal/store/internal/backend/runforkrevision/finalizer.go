@@ -80,6 +80,10 @@ func finalize(ctx context.Context, adapter ledgerAdapter, effects *Effects) (map
 			currentKeys := make(map[string]struct{}, len(family.current))
 			for _, fact := range family.current {
 				currentKeys[fact.key] = struct{}{}
+				stored, exists := family.latest[fact.key]
+				if exists && stored.present && canonicalJSONEqual(fact.fact, stored.fact) {
+					continue
+				}
 				if err := adapter.insertFact(ctx, change.runID, revision, family.family, fact.key, fact.fact, true); err != nil {
 					return nil, err
 				}

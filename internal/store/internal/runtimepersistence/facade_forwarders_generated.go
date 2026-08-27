@@ -36,6 +36,7 @@ import (
 	executionmode "github.com/division-sh/swarm/internal/runtime/executionmode"
 	executionposture "github.com/division-sh/swarm/internal/runtime/executionposture"
 	failures "github.com/division-sh/swarm/internal/runtime/failures"
+	fanoutobligation "github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	inboundpublication "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	ingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
@@ -165,8 +166,16 @@ func (s *PostgresStore) BindOperatorChannelFromProof(ctx context.Context, req op
 	return s.operatorChannelPostgresOwner.BindOperatorChannelFromProof(ctx, req)
 }
 
+func (s *PostgresStore) BlockFanOutClaim(ctx context.Context, request pipeline.FanOutBlockRequest) error {
+	return s.pipelinePostgresOwner.BlockFanOutClaim(ctx, request)
+}
+
 func (s *PostgresStore) CancelDecisionCardInput(ctx context.Context, req decisioncard.CancelInputRequest) (decisioncard.InputDraft, error) {
 	return s.decisionPostgresOwner.CancelDecisionCardInput(ctx, req)
+}
+
+func (s *PostgresStore) CancelRunFanOut(ctx context.Context, runID string, reason string, at time.Time) error {
+	return s.pipelinePostgresOwner.CancelRunFanOut(ctx, runID, reason, at)
 }
 
 func (s *PostgresStore) ClaimActivityAttemptForLoopGeneration(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, bool, error) {
@@ -175,6 +184,10 @@ func (s *PostgresStore) ClaimActivityAttemptForLoopGeneration(ctx context.Contex
 
 func (s *PostgresStore) ClaimDelivery(ctx context.Context, authority deliverylifecycle.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (deliverylifecycle.ClaimResult, error) {
 	return s.deliveryPostgresOwner.ClaimDelivery(ctx, authority, event, route)
+}
+
+func (s *PostgresStore) ClaimFanOutIntent(ctx context.Context, request pipeline.FanOutClaimRequest) (fanoutobligation.Intent, fanoutobligation.Claim, bool, error) {
+	return s.pipelinePostgresOwner.ClaimFanOutIntent(ctx, request)
 }
 
 func (s *PostgresStore) ClaimReplyContext(ctx context.Context, id string, replyEventID string) (replycontext.Record, replycontext.ClaimOutcome, error) {
@@ -195,6 +208,10 @@ func (s *PostgresStore) CommitAPIEventPublication(ctx context.Context, command b
 
 func (s *PostgresStore) CommitDecisionCardOperation(ctx context.Context, command pipeline.DecisionCardMutationCommand) (pipeline.CommittedDecisionCardMutation, error) {
 	return s.pipelinePostgresOwner.CommitDecisionCardOperation(ctx, command)
+}
+
+func (s *PostgresStore) CommitFanOutChunk(ctx context.Context, command pipeline.FanOutChunkCommand) (pipeline.CommittedFanOutChunk, error) {
+	return s.pipelinePostgresOwner.CommitFanOutChunk(ctx, command)
 }
 
 func (s *PostgresStore) CommitFlowInstanceActivation(ctx context.Context, command bus.FlowInstanceActivationCommand) (pipeline.CommittedFlowInstanceActivation, error) {
@@ -399,6 +416,10 @@ func (s *PostgresStore) FailOperatorConversationForkChat(ctx context.Context, re
 
 func (s *PostgresStore) FailRunForkSelectedContractRuntimeExecution(ctx context.Context, authority effects.Authority, failure json.RawMessage) error {
 	return s.runForkPostgresOwner.FailRunForkSelectedContractRuntimeExecution(ctx, authority, failure)
+}
+
+func (s *PostgresStore) FanOutRunSummary(ctx context.Context, runID string, now time.Time) (fanoutobligation.RunSummary, error) {
+	return s.pipelinePostgresOwner.FanOutRunSummary(ctx, runID, now)
 }
 
 func (s *PostgresStore) FinalizeDirectiveFailure(ctx context.Context, operationID string, ownerID string, failure failures.Envelope, now time.Time, ttl time.Duration) (agentcontrol.DirectiveOperation, error) {
@@ -711,6 +732,10 @@ func (s *PostgresStore) LoadDynamicFlowRuntimeReadiness(ctx context.Context, run
 
 func (s *PostgresStore) LoadEntityState(ctx context.Context, identity tools.EntityIdentity) (map[string]any, bool, error) {
 	return s.entityPostgresOwner.LoadEntityState(ctx, identity)
+}
+
+func (s *PostgresStore) LoadFanOutEvaluation(ctx context.Context, claim fanoutobligation.Claim) (pipeline.FanOutEvaluationInput, error) {
+	return s.pipelinePostgresOwner.LoadFanOutEvaluation(ctx, claim)
 }
 
 func (s *PostgresStore) LoadHumanTaskContinuation(ctx context.Context, cardID string) (decisioncard.HumanTaskContinuation, error) {
@@ -1035,6 +1060,14 @@ func (s *PostgresStore) RegisterCompletionCandidateSink(ctx context.Context, sco
 
 func (s *PostgresStore) Release(ctx context.Context, lease *sessions.Lease) error {
 	return s.lLMPostgresOwner.Release(ctx, lease)
+}
+
+func (s *PostgresStore) ReleaseFanOutClaim(ctx context.Context, claim fanoutobligation.Claim) error {
+	return s.pipelinePostgresOwner.ReleaseFanOutClaim(ctx, claim)
+}
+
+func (s *PostgresStore) ReleaseFanOutRetryable(ctx context.Context, request pipeline.FanOutRetryableRelease) error {
+	return s.pipelinePostgresOwner.ReleaseFanOutRetryable(ctx, request)
 }
 
 func (s *PostgresStore) RenewClaim(ctx context.Context, claim deliverylifecycle.Claim) (deliverylifecycle.Snapshot, error) {
@@ -1381,8 +1414,16 @@ func (s *SQLiteRuntimeStore) BindOperatorChannelFromProof(ctx context.Context, r
 	return s.operatorChannelSQLiteOwner.BindOperatorChannelFromProof(ctx, req)
 }
 
+func (s *SQLiteRuntimeStore) BlockFanOutClaim(ctx context.Context, request pipeline.FanOutBlockRequest) error {
+	return s.pipelineSQLiteOwner.BlockFanOutClaim(ctx, request)
+}
+
 func (s *SQLiteRuntimeStore) CancelDecisionCardInput(ctx context.Context, req decisioncard.CancelInputRequest) (decisioncard.InputDraft, error) {
 	return s.decisionSQLiteOwner.CancelDecisionCardInput(ctx, req)
+}
+
+func (s *SQLiteRuntimeStore) CancelRunFanOut(ctx context.Context, runID string, reason string, at time.Time) error {
+	return s.pipelineSQLiteOwner.CancelRunFanOut(ctx, runID, reason, at)
 }
 
 func (s *SQLiteRuntimeStore) ClaimActivityAttemptForLoopGeneration(ctx context.Context, record pipeline.ActivityAttemptRecord) (pipeline.ActivityAttemptRecord, bool, error) {
@@ -1391,6 +1432,10 @@ func (s *SQLiteRuntimeStore) ClaimActivityAttemptForLoopGeneration(ctx context.C
 
 func (s *SQLiteRuntimeStore) ClaimDelivery(ctx context.Context, authority deliverylifecycle.ExecutionAuthority, event events.Event, route events.DeliveryRoute) (deliverylifecycle.ClaimResult, error) {
 	return s.deliverySQLiteOwner.ClaimDelivery(ctx, authority, event, route)
+}
+
+func (s *SQLiteRuntimeStore) ClaimFanOutIntent(ctx context.Context, request pipeline.FanOutClaimRequest) (fanoutobligation.Intent, fanoutobligation.Claim, bool, error) {
+	return s.pipelineSQLiteOwner.ClaimFanOutIntent(ctx, request)
 }
 
 func (s *SQLiteRuntimeStore) ClaimReplyContext(ctx context.Context, id string, replyEventID string) (replycontext.Record, replycontext.ClaimOutcome, error) {
@@ -1411,6 +1456,10 @@ func (s *SQLiteRuntimeStore) CommitAPIEventPublication(ctx context.Context, comm
 
 func (s *SQLiteRuntimeStore) CommitDecisionCardOperation(ctx context.Context, command pipeline.DecisionCardMutationCommand) (pipeline.CommittedDecisionCardMutation, error) {
 	return s.pipelineSQLiteOwner.CommitDecisionCardOperation(ctx, command)
+}
+
+func (s *SQLiteRuntimeStore) CommitFanOutChunk(ctx context.Context, command pipeline.FanOutChunkCommand) (pipeline.CommittedFanOutChunk, error) {
+	return s.pipelineSQLiteOwner.CommitFanOutChunk(ctx, command)
 }
 
 func (s *SQLiteRuntimeStore) CommitFlowInstanceActivation(ctx context.Context, command bus.FlowInstanceActivationCommand) (pipeline.CommittedFlowInstanceActivation, error) {
@@ -1615,6 +1664,10 @@ func (s *SQLiteRuntimeStore) FailOperatorConversationForkChat(ctx context.Contex
 
 func (s *SQLiteRuntimeStore) FailRunForkSelectedContractRuntimeExecution(ctx context.Context, authority effects.Authority, failure json.RawMessage) error {
 	return s.runForkSQLiteOwner.FailRunForkSelectedContractRuntimeExecution(ctx, authority, failure)
+}
+
+func (s *SQLiteRuntimeStore) FanOutRunSummary(ctx context.Context, runID string, now time.Time) (fanoutobligation.RunSummary, error) {
+	return s.pipelineSQLiteOwner.FanOutRunSummary(ctx, runID, now)
 }
 
 func (s *SQLiteRuntimeStore) FinalizeDirectiveFailure(ctx context.Context, operationID string, ownerID string, failure failures.Envelope, now time.Time, ttl time.Duration) (agentcontrol.DirectiveOperation, error) {
@@ -1899,6 +1952,10 @@ func (s *SQLiteRuntimeStore) LoadDynamicFlowRuntimeReadiness(ctx context.Context
 
 func (s *SQLiteRuntimeStore) LoadEntityState(ctx context.Context, identity tools.EntityIdentity) (map[string]any, bool, error) {
 	return s.entitySQLiteOwner.LoadEntityState(ctx, identity)
+}
+
+func (s *SQLiteRuntimeStore) LoadFanOutEvaluation(ctx context.Context, claim fanoutobligation.Claim) (pipeline.FanOutEvaluationInput, error) {
+	return s.pipelineSQLiteOwner.LoadFanOutEvaluation(ctx, claim)
 }
 
 func (s *SQLiteRuntimeStore) LoadHumanTaskContinuation(ctx context.Context, cardID string) (decisioncard.HumanTaskContinuation, error) {
@@ -2211,6 +2268,14 @@ func (s *SQLiteRuntimeStore) Release(ctx context.Context, lease *sessions.Lease)
 
 func (s *SQLiteRuntimeStore) ReleaseConstructionPossession() error {
 	return s.startupSQLiteOwner.ReleaseConstructionPossession()
+}
+
+func (s *SQLiteRuntimeStore) ReleaseFanOutClaim(ctx context.Context, claim fanoutobligation.Claim) error {
+	return s.pipelineSQLiteOwner.ReleaseFanOutClaim(ctx, claim)
+}
+
+func (s *SQLiteRuntimeStore) ReleaseFanOutRetryable(ctx context.Context, request pipeline.FanOutRetryableRelease) error {
+	return s.pipelineSQLiteOwner.ReleaseFanOutRetryable(ctx, request)
 }
 
 func (s *SQLiteRuntimeStore) RenewClaim(ctx context.Context, claim deliverylifecycle.Claim) (deliverylifecycle.Snapshot, error) {

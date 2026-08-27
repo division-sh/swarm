@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	deliveryadapter "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
@@ -17,6 +18,7 @@ import (
 
 type PipelineObligationSource interface {
 	PipelineObligations() runtimepipelineobligation.Store
+	FanOutRunSummary(context.Context, string, time.Time) (fanoutobligation.RunSummary, error)
 }
 
 type TimerObligationSource interface {

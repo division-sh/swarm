@@ -95,6 +95,8 @@ type PipelineCoordinator struct {
 	receiverExecution                eventreceiver.ExecutionVariant
 	runtimeReceiver                  bool
 	testMaintenanceInterval          time.Duration
+	fanOutOwnerID                    string
+	fanOutWake                       chan struct{}
 }
 
 type WorkflowNodeHandlerStartHook func(context.Context, string, events.Event) error
@@ -313,6 +315,8 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 		receiverExecution:                opts.ReceiverExecution,
 		runtimeReceiver:                  requireObligationOwner,
 		entityLocks:                      make(map[string]*sync.Mutex),
+		fanOutOwnerID:                    uuid.NewString(),
+		fanOutWake:                       make(chan struct{}, 1),
 	}
 	var workflowStore *workflowInstanceStore
 	if storeTemplate != nil {
@@ -324,6 +328,7 @@ func newPipelineCoordinatorWithOptions(bus Bus, opts PipelineCoordinatorOptions,
 			gateRoutes:        storeTemplate.gateRoutes,
 			timerObligations:  storeTemplate.timerObligations,
 			engineMutations:   storeTemplate.engineMutations,
+			fanOutObligations: storeTemplate.fanOutObligations,
 			cardMutations:     storeTemplate.cardMutations,
 			timerOccurrences:  storeTemplate.timerOccurrences,
 			timerActivations:  storeTemplate.timerActivations,
@@ -422,6 +427,15 @@ func (pc *PipelineCoordinator) RunMaintenance(ctx context.Context) {
 				pc.logRuntimeWarn(ctx, runtimeWorkflowID, "expire_human_task_cards", "", "", runtimeWorkflowID, "", nil, err)
 			}
 		}
+		if pc.workflowStore != nil && pc.workflowStore.fanOutObligations != nil {
+			served, err := pc.serveFanOutTurn(ctx, now)
+			if err != nil {
+				pc.logRuntimeWarn(ctx, runtimeWorkflowID, "serve_fan_out_obligation", "", "", runtimeWorkflowID, "", nil, err)
+			}
+			if served {
+				pc.signalFanOutWork()
+			}
+		}
 	}
 	run()
 	interval := time.Minute
@@ -436,9 +450,21 @@ func (pc *PipelineCoordinator) RunMaintenance(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-pc.fanOutWake:
+			run()
 		case <-ticker.C:
 			run()
 		}
+	}
+}
+
+func (pc *PipelineCoordinator) signalFanOutWork() {
+	if pc == nil || pc.fanOutWake == nil {
+		return
+	}
+	select {
+	case pc.fanOutWake <- struct{}{}:
+	default:
 	}
 }
 
