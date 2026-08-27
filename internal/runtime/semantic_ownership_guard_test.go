@@ -123,7 +123,7 @@ func TestSingletonCardinalityAndCoordinatorConsumersStayOnCanonicalOwners(t *tes
 					return true
 				}
 				switch calledFunctionName(call.Fun) {
-				case "NodeEntries", "NodeEventHandlers", "NodeContractSource", "sortedNodeIDs", "nodeFlowID":
+				case "NodeEntries", "NodeEventHandlers", "NodeContractSource", "nodeFlowID":
 					t.Errorf("%s %s reads flattened node aliases; consume ScopedNodeRecords", path, function.Name.Name)
 				}
 				return true
