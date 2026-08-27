@@ -2549,7 +2549,7 @@ func TestRouteTableRootInputFlowNodeResolvesRootInputRoute(t *testing.T) {
 	}
 }
 
-func TestRouteTableQualifiedRootInputFlowUsesSemanticLocalizationOwner(t *testing.T) {
+func TestRouteTableExactRootInputFlowUsesSemanticLocalizationOwner(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	fixtureRoot := filepath.Join(repoRoot, "internal", "releasee2e", "testdata", "claude_cli_managed_lifecycle")
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
@@ -2562,17 +2562,20 @@ func TestRouteTableQualifiedRootInputFlowUsesSemanticLocalizationOwner(t *testin
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
-	got := rt.Resolve("worker/task.assigned")
+	got := rt.Resolve("task.assigned")
 	if len(got) != 2 {
-		t.Fatalf("Resolve(worker/task.assigned) = %#v, want exact subscription and root-input roles", got)
+		t.Fatalf("Resolve(task.assigned) = %#v, want exact subscription and root-input roles", got)
 	}
 	wantSources := map[string]bool{"subscription": false, "root_input_flow": false}
 	for _, subscriber := range got {
-		if subscriber.Recipient.LocalID() != "intake" || subscriber.Path != "worker" || subscriber.MatchPattern != "worker/task.assigned" || subscriber.LocalizedEvent != "task.assigned" {
+		if subscriber.Recipient.LocalID() != "intake" || subscriber.MatchPattern != "task.assigned" || subscriber.LocalizedEvent != "task.assigned" {
 			t.Fatalf("resolved subscriber = %#v, want worker/intake exact localized role", subscriber)
 		}
 		if _, ok := wantSources[subscriber.RouteSourceCode()]; !ok {
 			t.Fatalf("resolved semantic authority = %#v, want subscription or root_input_flow", subscriber)
+		}
+		if subscriber.RouteSourceCode() == "root_input_flow" && subscriber.Path != "worker" {
+			t.Fatalf("root-input subscriber = %#v, want worker flow path", subscriber)
 		}
 		wantSources[subscriber.RouteSourceCode()] = true
 	}
@@ -2580,6 +2583,10 @@ func TestRouteTableQualifiedRootInputFlowUsesSemanticLocalizationOwner(t *testin
 		if !found {
 			t.Fatalf("missing %s role in %#v", source, got)
 		}
+	}
+	qualified := rt.Resolve("worker/task.assigned")
+	if len(qualified) != 1 || qualified[0].RouteSourceCode() != "subscription" || qualified[0].LocalizedEvent != "task.assigned" {
+		t.Fatalf("Resolve(worker/task.assigned) = %#v, want one localized subscription role", qualified)
 	}
 }
 

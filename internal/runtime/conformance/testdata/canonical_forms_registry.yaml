@@ -837,8 +837,8 @@ wave_1:
   rows: [package.child_collection, package.child_reference, package.connect]
   checked_in_package_corpus:
     examples: {files: 8, rows: 16}
-    tests_and_testdata: {files: 13, rows: 18}
-    total: {files: 21, rows: 34}
+    tests_and_testdata: {files: 14, rows: 19}
+    total: {files: 22, rows: 35}
   go_connect_corpus:
     total_files: 16
     canonicalrouting_occurrences: 32

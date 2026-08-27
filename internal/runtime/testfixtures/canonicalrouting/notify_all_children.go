@@ -48,7 +48,8 @@ type NotifyAllChildrenOptions struct {
 // CopyNotifyAllChildren derives one closed variant from the checked-in owner.
 func CopyNotifyAllChildren(t testing.TB, opts NotifyAllChildrenOptions) string {
 	t.Helper()
-	root := CopyExample(t, NotifyAllChildren)
+	root := t.TempDir()
+	copyTree(t, filepath.Join(RepoRoot(t), "examples", "routing", "notify-all-children"), root)
 	packageFile := filepath.Join(root, "package.yaml")
 	ownerSchema := filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "schema.yaml")
 	ownerNodes := filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "nodes.yaml")

@@ -1,6 +1,7 @@
 package notifyallchildren
 
 import (
+	"path/filepath"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -45,7 +46,7 @@ func LoadSource(t testing.TB, opts Options) semanticview.Source {
 
 func ExampleRoot(t testing.TB) string {
 	t.Helper()
-	return canonicalrouting.ExampleRoot(t, canonicalrouting.NotifyAllChildren)
+	return filepath.Join(canonicalrouting.RepoRoot(t), "examples", "routing", "notify-all-children")
 }
 
 func WriteVariant(t testing.TB, opts Options) string {
