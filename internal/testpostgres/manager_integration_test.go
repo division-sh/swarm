@@ -1315,6 +1315,12 @@ func TestManagerReconcileRefreshesIntentSnapshotAfterTakingLease(t *testing.T) {
 			if err := <-done; err != nil {
 				t.Fatal(err)
 			}
+			// Another account-scoped manager may win the resource lease after the
+			// creator releases it. Join that exact lease before observing terminal
+			// cleanup; this Reconcile is allowed to skip a currently owned resource.
+			if err := waitForAdvisoryLockFree(ctx, manager, name, kind); err != nil {
+				t.Fatal(err)
+			}
 			assertDatabaseAbsent(t, manager.admin, name)
 			if _, found, err := manager.intent(ctx, name); err != nil || found {
 				t.Fatalf("intent found=%v err=%v, want retired after exact reconciliation", found, err)
