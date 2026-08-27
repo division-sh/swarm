@@ -20065,6 +20065,12 @@ workspace_model:
       and pinned resource rows into a private generated directory immediately before execution. Docker and host backends
       consume that same provider and mount/map only its returned root. The projection may be rebuilt because its canonical
       bytes remain owned by the admitted bundle and selected store.
+    identity_and_permissions: >
+      The typed projection result carries a content identity derived from the canonical access manifest. Docker managed-
+      container identity includes that projection identity and the exact concrete actor. A per-flow-instance workspace may
+      share its writable /workspace volume across actors, but each actor executes in an isolated container with only that
+      actor's /data projection. Projection directories are readable/traversable and files are readable by the configured
+      non-root workspace user while carrying no write bits; Docker additionally mounts the projection read-only.
     absence_rule: >
       A run with no accessible static data and no resource pins receives an empty projection; startup never invents a
       project, cwd, repository, or user-global data directory.
@@ -20300,11 +20306,11 @@ workspace_model:
         per-flow-instance: Created on create_flow_instance. Preserved on instance termination (for post-mortem). Archival is
           an operational concern.
     /data:
-      description: Read-only shared reference data. Products populate this via deployment configuration. The platform treats
-        /data as opaque — it never reads, writes, indexes, or validates /data contents.
+      description: Read-only reference data projected from the exact actor's compiled static-data grants and selected run's
+        immutable resource-version pins.
       access: read-only
-      scope: global — identical content visible to every agent regardless of workspace class
-      lifecycle: Mounted at boot. Contents managed outside the platform (deployment, CI, admin).
+      scope: actor-specific; workspace class changes only /workspace scope and never widens /data authority
+      lifecycle: Materialized immediately before execution from canonical bundle/store facts and mounted for that actor.
     /opt/swarm/contracts:
       description: Loaded flow contracts. Agents can read their own flow's contract files for self-reference.
       access: read-only
@@ -20319,7 +20325,8 @@ workspace_model:
           description: string — human-readable purpose
           workspace_scope: string — per-agent | per-flow-instance
     rules:
-    - /data and /opt/swarm/contracts are always global, read-only. Products cannot override their scope or access.
+    - /data is always actor-authorized and read-only; /opt/swarm/contracts is global and read-only. Products cannot override
+      either mount's scope or access.
     - workspace_scope controls the /workspace mount only — the sole configurable dimension.
     - Every workspace_class referenced by an agent in agents.yaml must be defined in policy.yaml workspace_classes.
     - The platform validates this at boot. Missing class definition is a boot error.
@@ -20333,7 +20340,8 @@ workspace_model:
     - Every agent session has all three standard logical mounts available through platform workspace/file surfaces. Docker-backed
       command execution exposes those logical mounts as OS paths; trusted host native command execution is full host-user shell
       execution from the resolved workspace backing directory and does not synthesize absolute OS mount paths.
-    - /data is the SAME mount point across all workspace classes. An agent in any class sees identical /data contents.
+    - /data uses the same logical mount point across all workspace classes, but its contents are the exact immutable projection
+      authorized for the concrete execution actor and selected run.
     - /workspace isolation follows the workspace_scope declared by the agent's workspace class. per-agent workspaces are never
       visible to other agents. per-flow-instance workspaces are visible to all agents in that flow instance only.
     - Read-only mounts are enforced at the filesystem level for backends that expose the logical mounts as OS paths
@@ -20341,12 +20349,12 @@ workspace_model:
       /opt/swarm/contracts through logical path authority. Trusted host native commands are full host-user shell execution
       and do not provide Docker-equivalent read-only mount isolation.
     - The runtime MUST NOT vary mount availability based on agent memory, model, or any other agent property. Workspace
-      class is the sole determinant of /workspace scope.
+      class is the sole determinant of /workspace scope; compiled static/resource access facts determine /data contents.
   boot_validation:
     description: The platform verifies workspace infrastructure at boot.
     checks:
     - Every workspace_class referenced in agents.yaml is defined in policy.yaml workspace_classes
-    - /data mount exists and is readable
+    - The typed /data projection provider is configured for execution and rejects unreadable or contradictory projections
     - /opt/swarm/contracts is populated from contract loader
     - For each registered agent, /workspace path is creatable under the declared scope
     failure: Boot aborts if any workspace mount cannot be satisfied. Error message identifies the failing mount, workspace class,
@@ -20355,15 +20363,15 @@ workspace_model:
     description: How standard logical mounts map to deployment environments. Platform logical paths are invariant; command
       process namespace behavior differs by backend as explicitly documented.
     local_dev:
-      /data: Host directory bind-mounted read-only. Same path for all agent processes.
+      /data: Private actor-specific generated directory mapped read-only through the host execution target.
       /workspace: Host directory under a platform-managed root (e.g., ~/.swarm/workspaces/{scope}/{id}).
       /opt/swarm/contracts: Host directory populated by contract loader at boot.
     docker:
-      /data: Named volume or bind mount, shared across all containers. Read-only flag required.
+      /data: Private actor-specific generated directory bind-mounted read-only into an actor-isolated execution container.
       /workspace: Per-scope volumes. per-agent classes get per-agent volumes. per-flow-instance classes share an instance volume.
       /opt/swarm/contracts: Read-only volume populated by init container or bind mount.
     production:
-      /data: Network-attached storage (NFS, EFS, GCS FUSE) mounted read-only. Consistent across all compute nodes.
+      /data: Read-only actor-specific projection from canonical bundle/store facts; backing implementation is deployment-specific.
       /workspace: 'Storage persistence follows the selected workspace class and its lifecycle owner. Agent memory does not
         change workspace scope, availability, or persistence.'
       /opt/swarm/contracts: Read-only volume from deployment artifact.
@@ -20381,8 +20389,9 @@ workspace_model:
       creation_source: dev.swarm.creation_source names the workspace creation owner
       container_name: dev.swarm.container.name records the exact container name stamped at creation
       workspace_scope: dev.swarm.workspace.scope records scaffold, system, entity, per-agent, or per-flow-instance scope
-      lineage: dev.swarm.run_id, dev.swarm.entity_id, dev.swarm.agent_id, and dev.swarm.flow_instance are stamped when
-        that lineage is available to the creation owner
+      lineage: dev.swarm.run_id, dev.swarm.entity_id, dev.swarm.agent_id, dev.swarm.flow_instance, and
+        dev.swarm.data_projection_id are stamped when that lineage/projection is available to the creation owner. Flow-scoped
+        containers always carry the concrete actor because /data authority is actor-specific.
     reset_policy:
     - Destructive reset may stop only containers whose typed identity proves owner=runtime, reset_eligible=true, and kind
       is entity, agent, or flow.

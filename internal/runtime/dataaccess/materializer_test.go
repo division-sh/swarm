@@ -19,6 +19,9 @@ import (
 func TestMaterializerCreatesImmutableContentAddressedProjectionAndReusesIt(t *testing.T) {
 	root := t.TempDir()
 	registerProjectionCleanup(t, root)
+	if err := os.Chmod(root, 0o755); err != nil {
+		t.Fatalf("make hostile projection parent permissive: %v", err)
+	}
 	materializer, err := NewMaterializer(root, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), nil)
 	if err != nil {
 		t.Fatalf("NewMaterializer: %v", err)
@@ -40,6 +43,12 @@ func TestMaterializerCreatesImmutableContentAddressedProjectionAndReusesIt(t *te
 	if first.Root != second.Root || !strings.HasPrefix(first.Root, filepath.Join(root, "a_")) {
 		t.Fatalf("projection roots = %q and %q, want one content-addressed root under %q", first.Root, second.Root, root)
 	}
+	if first.ID != second.ID {
+		t.Fatalf("projection identities = %q and %q, want one exact content identity", first.ID, second.ID)
+	}
+	if err := first.Validate(); err != nil {
+		t.Fatalf("projection validation: %v", err)
+	}
 	manifestPath := projectionHostPath(first.Root, AccessManifestPath)
 	manifest, err := os.ReadFile(manifestPath)
 	if err != nil {
@@ -48,11 +57,40 @@ func TestMaterializerCreatesImmutableContentAddressedProjectionAndReusesIt(t *te
 	if !strings.Contains(string(manifest), `"run_id":"11111111-1111-1111-1111-111111111111"`) || !strings.HasSuffix(string(manifest), "\n") {
 		t.Fatalf("projection manifest = %q, want exact run identity and final newline", manifest)
 	}
-	if info, err := os.Stat(manifestPath); err != nil || info.Mode().Perm() != 0o400 {
-		t.Fatalf("manifest mode = %#v, %v; want 0400", info, err)
+	if info, err := os.Stat(manifestPath); err != nil || info.Mode().Perm() != 0o444 {
+		t.Fatalf("manifest mode = %#v, %v; want 0444", info, err)
 	}
-	if info, err := os.Stat(first.Root); err != nil || info.Mode().Perm() != 0o500 {
-		t.Fatalf("projection root mode = %#v, %v; want 0500", info, err)
+	if info, err := os.Stat(first.Root); err != nil || info.Mode().Perm() != 0o555 {
+		t.Fatalf("projection root mode = %#v, %v; want 0555", info, err)
+	}
+	if info, err := os.Stat(root); err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("projection parent mode = %#v, %v; want private 0700", info, err)
+	}
+}
+
+func TestMaterializerSeparatesConcreteActorsWithIdenticalEmptyGrants(t *testing.T) {
+	root := t.TempDir()
+	registerProjectionCleanup(t, root)
+	materializer, err := NewMaterializer(root, semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}), nil)
+	if err != nil {
+		t.Fatalf("NewMaterializer: %v", err)
+	}
+	ctx := runtimecorrelation.WithRunID(context.Background(), "12121212-1212-1212-1212-121212121212")
+	actorA := models.AgentConfig{ID: "reader-a", Identity: runtimeagentidentitytest.RootDeclared(t, "reader-a", "test/agents.yaml")}
+	actorB := models.AgentConfig{ID: "reader-b", Identity: runtimeagentidentitytest.RootDeclared(t, "reader-b", "test/agents.yaml")}
+	projectionA, err := materializer.Materialize(ctx, actorA)
+	if err != nil {
+		t.Fatalf("Materialize actor A: %v", err)
+	}
+	projectionB, err := materializer.Materialize(ctx, actorB)
+	if err != nil {
+		t.Fatalf("Materialize actor B: %v", err)
+	}
+	if projectionA.ID == projectionB.ID || projectionA.Root == projectionB.Root {
+		t.Fatalf("distinct actors share projection: A=%#v B=%#v", projectionA, projectionB)
+	}
+	if projectionA.AccessList.AgentIdentity.AgentID() != "reader-a" || projectionB.AccessList.AgentIdentity.AgentID() != "reader-b" {
+		t.Fatalf("projection actor ownership drifted: A=%#v B=%#v", projectionA.AccessList.AgentIdentity, projectionB.AccessList.AgentIdentity)
 	}
 }
 
@@ -100,7 +138,7 @@ func TestMaterializerRejectsUnexpectedFileOnReuse(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(projection.Root, "unexpected"), []byte("hostile"), 0o400); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(projection.Root, 0o500); err != nil {
+	if err := os.Chmod(projection.Root, 0o555); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := materializer.Materialize(ctx, actor); err == nil || !strings.Contains(err.Error(), "unexpected entry") {
@@ -142,8 +180,36 @@ func TestProjectionReuseRejectsMissingModifiedAndUnexpectedFiles(t *testing.T) {
 	}
 
 	t.Run("valid", func(t *testing.T) {
-		if err := verifyProjection(build(t), access, manifest); err != nil {
+		root := build(t)
+		if err := verifyProjection(root, access, manifest); err != nil {
 			t.Fatalf("verifyProjection: %v", err)
+		}
+		if err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if info.Mode().Perm()&0o222 != 0 {
+				t.Fatalf("projection path %s is writable: %04o", path, info.Mode().Perm())
+			}
+			if info.IsDir() && info.Mode().Perm()&0o005 != 0o005 {
+				t.Fatalf("projection directory %s is not traversable/readable by Docker UID 10001: %04o", path, info.Mode().Perm())
+			}
+			if !info.IsDir() && info.Mode().Perm()&0o004 != 0o004 {
+				t.Fatalf("projection file %s is not readable by Docker UID 10001: %04o", path, info.Mode().Perm())
+			}
+			return nil
+		}); err != nil {
+			t.Fatalf("walk readable projection: %v", err)
+		}
+	})
+	t.Run("writable", func(t *testing.T) {
+		root := build(t)
+		path := projectionHostPath(root, staticPath)
+		if err := os.Chmod(path, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := verifyProjection(root, access, manifest); err == nil || !strings.Contains(err.Error(), "mode is mutable") {
+			t.Fatalf("verifyProjection error = %v, want writable-mode rejection", err)
 		}
 	})
 	t.Run("modified", func(t *testing.T) {
@@ -155,7 +221,7 @@ func TestProjectionReuseRejectsMissingModifiedAndUnexpectedFiles(t *testing.T) {
 		if err := os.WriteFile(path, []byte("tampered\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Chmod(path, 0o400); err != nil {
+		if err := os.Chmod(path, 0o444); err != nil {
 			t.Fatal(err)
 		}
 		if err := verifyProjection(root, access, manifest); err == nil || !strings.Contains(err.Error(), "contradict canonical content") {
@@ -171,7 +237,7 @@ func TestProjectionReuseRejectsMissingModifiedAndUnexpectedFiles(t *testing.T) {
 		if err := os.Remove(projectionHostPath(root, staticPath)); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Chmod(parent, 0o500); err != nil {
+		if err := os.Chmod(parent, 0o555); err != nil {
 			t.Fatal(err)
 		}
 		if err := verifyProjection(root, access, manifest); err == nil || !strings.Contains(err.Error(), "missing canonical file") {
@@ -186,13 +252,27 @@ func TestProjectionReuseRejectsMissingModifiedAndUnexpectedFiles(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(root, "unexpected"), []byte("hostile"), 0o400); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Chmod(root, 0o500); err != nil {
+		if err := os.Chmod(root, 0o555); err != nil {
 			t.Fatal(err)
 		}
 		if err := verifyProjection(root, access, manifest); err == nil || !strings.Contains(err.Error(), "unexpected entry") {
 			t.Fatalf("verifyProjection error = %v", err)
 		}
 	})
+}
+
+func TestProjectionValidateRejectsMissingOrMalformedIdentity(t *testing.T) {
+	root := filepath.Clean(t.TempDir())
+	for _, projection := range []Projection{
+		{Root: root},
+		{ID: ProjectionID("data-projection-v1:sha256:deadbeef"), Root: root},
+		{ID: ProjectionID("data-projection-v1:sha256:" + strings.Repeat("A", 64)), Root: root},
+		{ID: ProjectionID("data-projection-v1:sha256:" + strings.Repeat("a", 64)), Root: "relative"},
+	} {
+		if err := projection.Validate(); err == nil {
+			t.Fatalf("Projection.Validate(%#v) error = nil, want fail-closed rejection", projection)
+		}
+	}
 }
 
 func TestProjectionHostPathRejectsEscapesAndNonDataPaths(t *testing.T) {

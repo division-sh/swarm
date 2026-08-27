@@ -2,6 +2,8 @@ package workspace
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -220,6 +222,7 @@ func TestResolveWorkspace_PerAgentMountsStandardPaths(t *testing.T) {
 		"--label dev.swarm.agent_name_source=declared",
 		"--label dev.swarm.agent_route_presence=root",
 		"--label dev.swarm.run_id=11111111-1111-1111-1111-111111111111",
+		"--label dev.swarm.data_projection_id=data-projection-v1:sha256:",
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("create args missing %q: %v", expected, created)
@@ -237,9 +240,12 @@ func TestEnsureWorkspaceContainerReplacesDifferentRunProjectionIdentity(t *testi
 		Owner: runtimecontaineridentity.OwnerRuntime, Kind: runtimecontaineridentity.KindFlow,
 		ResetEligible: true, CreationSource: "workspace.ResolveWorkspace", ContainerName: name,
 		WorkspaceScope: "per-flow-instance", RunID: "11111111-1111-1111-1111-111111111111", FlowInstance: "shared/work",
+		AgentIdentity:  runtimeagentidentitytest.Declared(t, "worker", "test/agents.yaml", "shared", "work", "shared/work"),
+		DataProjection: testDataProjectionID("a"),
 	}
 	requested := existing
 	requested.RunID = "22222222-2222-2222-2222-222222222222"
+	requested.DataProjection = testDataProjectionID("b")
 	labels, err := json.Marshal(existing.Labels())
 	if err != nil {
 		t.Fatal(err)
@@ -266,6 +272,7 @@ func TestEnsureWorkspaceContainerReplacesDifferentRunProjectionIdentity(t *testi
 		"rm --force " + name,
 		"create --name " + name,
 		"--label dev.swarm.run_id=22222222-2222-2222-2222-222222222222",
+		"--label dev.swarm.data_projection_id=" + string(testDataProjectionID("b")),
 		"/projection/run-b:/data:ro",
 	} {
 		if !strings.Contains(joined, required) {
@@ -286,6 +293,8 @@ func TestEnsureWorkspaceContainerReusesExactRunProjectionIdentity(t *testing.T) 
 		Owner: runtimecontaineridentity.OwnerRuntime, Kind: runtimecontaineridentity.KindFlow,
 		ResetEligible: true, CreationSource: "workspace.ResolveWorkspace", ContainerName: "swarm-flow-shared-work",
 		WorkspaceScope: "per-flow-instance", RunID: "22222222-2222-2222-2222-222222222222", FlowInstance: "shared/work",
+		AgentIdentity:  runtimeagentidentitytest.Declared(t, "worker", "test/agents.yaml", "shared", "work", "shared/work"),
+		DataProjection: testDataProjectionID("b"),
 	}
 	labels, err := json.Marshal(identity.Labels())
 	if err != nil {
@@ -322,6 +331,8 @@ func TestEnsureWorkspaceContainerRejectsUnownedNameCollision(t *testing.T) {
 		Owner: runtimecontaineridentity.OwnerRuntime, Kind: runtimecontaineridentity.KindFlow,
 		ResetEligible: true, CreationSource: "workspace.ResolveWorkspace", ContainerName: "swarm-flow-shared-work",
 		WorkspaceScope: "per-flow-instance", RunID: "22222222-2222-2222-2222-222222222222", FlowInstance: "shared/work",
+		AgentIdentity:  runtimeagentidentitytest.Declared(t, "worker", "test/agents.yaml", "shared", "work", "shared/work"),
+		DataProjection: testDataProjectionID("b"),
 	}
 	var mutatingCall bool
 	manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
@@ -464,18 +475,24 @@ func TestResolveWorkspace_PerFlowInstanceSharesByFlowPath(t *testing.T) {
 		}
 	})
 	ctx := runtimecorrelation.WithRunID(context.Background(), "22222222-2222-2222-2222-222222222222")
-	target, err := manager.ResolveWorkspace(ctx, models.AgentConfig{
+	actor := models.AgentConfig{
 		ExecutionMode:  "live",
 		ID:             "shared-work-lead",
 		Identity:       runtimeagentidentitytest.Declared(t, "shared-work-lead", "test/agents.yaml", "shared", "work-001", "shared/work-001"),
 		WorkspaceClass: "shared_flow",
 		FlowPath:       "shared/work-001",
-	})
+	}
+	target, err := manager.ResolveWorkspace(ctx, actor)
 	if err != nil {
 		t.Fatalf("ResolveWorkspace: %v", err)
 	}
-	if target == nil || target.Container != "swarm-flow-shared-work-001" {
-		t.Fatalf("target = %#v, want swarm-flow-shared-work-001", target)
+	fingerprint, err := actor.Identity.Fingerprint()
+	if err != nil {
+		t.Fatalf("Fingerprint: %v", err)
+	}
+	wantContainer := "swarm-flow-shared-work-001-agent-" + fingerprint
+	if target == nil || target.Container != wantContainer {
+		t.Fatalf("target = %#v, want %s", target, wantContainer)
 	}
 	joined := strings.Join(created, " ")
 	if !strings.Contains(joined, "workspaces_flow_shared-work-001:/workspace") {
@@ -485,11 +502,123 @@ func TestResolveWorkspace_PerFlowInstanceSharesByFlowPath(t *testing.T) {
 		"--label dev.swarm.container.kind=flow",
 		"--label dev.swarm.reset.eligible=true",
 		"--label dev.swarm.flow_instance=shared/work-001",
+		"--label dev.swarm.agent_id=shared-work-lead",
 		"--label dev.swarm.run_id=22222222-2222-2222-2222-222222222222",
 	} {
 		if !strings.Contains(joined, expected) {
 			t.Fatalf("create args missing %q: %v", expected, created)
 		}
+	}
+}
+
+func TestResolveWorkspace_PerFlowInstanceIsolatesActorDataAndSharesWorkspaceVolume(t *testing.T) {
+	contractsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(contractsDir, "package.yaml"), []byte("name: test\n"), 0o644); err != nil {
+		t.Fatalf("write package.yaml: %v", err)
+	}
+	rootA := filepath.Clean(t.TempDir())
+	rootB := filepath.Clean(t.TempDir())
+	manager := NewDockerManager(nil)
+	cfg := DefaultDockerConfig()
+	cfg.ContractsSource = contractsDir
+	cfg.WorkspaceNetwork = ""
+	cfg.WorkspaceImage = "test-image"
+	manager.SetConfig(cfg)
+	manager.SetDataProjectionProvider(workspaceDataProjectionStub{roots: map[string]string{
+		"reader-a": rootA,
+		"reader-b": rootB,
+	}})
+	manager.SetSemanticSource(semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+		Policy: runtimecontracts.PolicyDocument{Values: map[string]runtimecontracts.PolicyValue{
+			"workspace_classes": {Value: map[string]any{
+				"shared_flow": map[string]any{"workspace_scope": "per-flow-instance"},
+			}},
+		}},
+	}))
+
+	var creates [][]string
+	manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
+		switch args[0] {
+		case "inspect":
+			return "", fmt.Errorf("no such object")
+		case "create":
+			creates = append(creates, append([]string(nil), args...))
+			return "", nil
+		case "start":
+			return "", nil
+		default:
+			return "", nil
+		}
+	})
+	ctx := runtimecorrelation.WithRunID(context.Background(), "33333333-3333-3333-3333-333333333333")
+	actorA := models.AgentConfig{
+		ExecutionMode: "live", ID: "reader-a", WorkspaceClass: "shared_flow", FlowPath: "shared/work-002",
+		Identity: runtimeagentidentitytest.Declared(t, "reader-a", "test/agents.yaml", "shared", "work-002", "shared/work-002"),
+	}
+	actorB := models.AgentConfig{
+		ExecutionMode: "live", ID: "reader-b", WorkspaceClass: "shared_flow", FlowPath: "shared/work-002",
+		Identity: runtimeagentidentitytest.Declared(t, "reader-b", "test/agents.yaml", "shared", "work-002", "shared/work-002"),
+	}
+	targetA, err := manager.ResolveWorkspace(ctx, actorA)
+	if err != nil {
+		t.Fatalf("ResolveWorkspace actor A: %v", err)
+	}
+	targetB, err := manager.ResolveWorkspace(ctx, actorB)
+	if err != nil {
+		t.Fatalf("ResolveWorkspace actor B: %v", err)
+	}
+	if targetA.Container == targetB.Container {
+		t.Fatalf("distinct actors reused container %q", targetA.Container)
+	}
+	if len(creates) != 2 {
+		t.Fatalf("create calls = %d, want one isolated container per actor", len(creates))
+	}
+	joinedA := strings.Join(creates[0], " ")
+	joinedB := strings.Join(creates[1], " ")
+	sharedVolume := "workspaces_flow_shared-work-002:/workspace"
+	for label, joined := range map[string]string{"actor A": joinedA, "actor B": joinedB} {
+		if !strings.Contains(joined, sharedVolume) {
+			t.Fatalf("%s container does not share exact flow workspace volume: %s", label, joined)
+		}
+	}
+	if !strings.Contains(joinedA, rootA+":/data:ro") || strings.Contains(joinedA, rootB+":/data:ro") {
+		t.Fatalf("actor A data mount is not isolated: %s", joinedA)
+	}
+	if !strings.Contains(joinedB, rootB+":/data:ro") || strings.Contains(joinedB, rootA+":/data:ro") {
+		t.Fatalf("actor B data mount is not isolated: %s", joinedB)
+	}
+	if !strings.Contains(joinedA, "--label dev.swarm.agent_id=reader-a") || !strings.Contains(joinedB, "--label dev.swarm.agent_id=reader-b") {
+		t.Fatalf("per-flow container identities do not carry exact actors:\nA: %s\nB: %s", joinedA, joinedB)
+	}
+}
+
+func TestResolveWorkspaceRejectsMalformedProjectionBeforeDockerMutation(t *testing.T) {
+	manager := NewDockerManager(nil)
+	cfg := DefaultDockerConfig()
+	cfg.WorkspaceNetwork = ""
+	manager.SetConfig(cfg)
+	manager.SetDataProjectionProvider(workspaceProjectionProviderFunc(func(context.Context, models.AgentConfig) (runtimedataaccess.Projection, error) {
+		return runtimedataaccess.Projection{
+			ID:   runtimedataaccess.ProjectionID("data-projection-v1:sha256:deadbeef"),
+			Root: filepath.Clean(t.TempDir()),
+		}, nil
+	}))
+	mutated := false
+	manager.SetRunDockerFnForTest(func(_ context.Context, args ...string) (string, error) {
+		mutated = true
+		return "", nil
+	})
+	ctx := runtimecorrelation.WithRunID(context.Background(), "44444444-4444-4444-4444-444444444444")
+	_, err := manager.ResolveWorkspace(ctx, models.AgentConfig{
+		ExecutionMode: "live",
+		ID:            "reader",
+		Identity:      runtimeagentidentitytest.RootDeclared(t, "reader", "test/agents.yaml"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "data projection identity requires one canonical SHA-256 digest") {
+		t.Fatalf("ResolveWorkspace error = %v, want malformed projection rejection", err)
+	}
+	if mutated {
+		t.Fatal("malformed projection reached Docker mutation")
 	}
 }
 
@@ -538,11 +667,30 @@ type workspaceLookupStub struct {
 }
 
 type workspaceDataProjectionStub struct {
-	root string
+	root  string
+	roots map[string]string
 }
 
-func (s workspaceDataProjectionStub) Materialize(context.Context, models.AgentConfig) (runtimedataaccess.Projection, error) {
-	return runtimedataaccess.Projection{Root: s.root}, nil
+type workspaceProjectionProviderFunc func(context.Context, models.AgentConfig) (runtimedataaccess.Projection, error)
+
+func (f workspaceProjectionProviderFunc) Materialize(ctx context.Context, actor models.AgentConfig) (runtimedataaccess.Projection, error) {
+	return f(ctx, actor)
+}
+
+func testDataProjectionID(hexDigit string) runtimedataaccess.ProjectionID {
+	return runtimedataaccess.ProjectionID("data-projection-v1:sha256:" + strings.Repeat(hexDigit, 64))
+}
+
+func (s workspaceDataProjectionStub) Materialize(_ context.Context, actor models.AgentConfig) (runtimedataaccess.Projection, error) {
+	root := s.root
+	if s.roots != nil {
+		root = s.roots[strings.TrimSpace(actor.ID)]
+	}
+	digest := sha256.Sum256([]byte(root))
+	return runtimedataaccess.Projection{
+		ID:   runtimedataaccess.ProjectionID("data-projection-v1:sha256:" + hex.EncodeToString(digest[:])),
+		Root: filepath.Clean(root),
+	}, nil
 }
 
 func (s workspaceLookupStub) LookupWorkspaceEntity(context.Context, runtimecurrentstate.Identity) (WorkspaceEntityLookup, error) {
@@ -612,18 +760,24 @@ func TestResolveWorkspace_UsesInjectedSemanticSourceForRoleLookup(t *testing.T) 
 		}
 	})
 
-	target, err := manager.ResolveWorkspace(context.Background(), models.AgentConfig{
+	actor := models.AgentConfig{
 		ExecutionMode: "live",
 		ID:            "worker-1",
 		Identity:      runtimeagentidentitytest.Declared(t, "worker-1", owner, "ops", "instance-1", "ops/instance-1"),
 		Role:          "worker",
 		FlowPath:      "ops/instance-1",
-	})
+	}
+	target, err := manager.ResolveWorkspace(context.Background(), actor)
 	if err != nil {
 		t.Fatalf("ResolveWorkspace: %v", err)
 	}
-	if target == nil || target.Container != "swarm-flow-ops-instance-1" {
-		t.Fatalf("target = %#v, want swarm-flow-ops-instance-1", target)
+	fingerprint, err := actor.Identity.Fingerprint()
+	if err != nil {
+		t.Fatalf("Fingerprint: %v", err)
+	}
+	wantContainer := "swarm-flow-ops-instance-1-agent-" + fingerprint
+	if target == nil || target.Container != wantContainer {
+		t.Fatalf("target = %#v, want %s", target, wantContainer)
 	}
 }
 
@@ -893,13 +1047,20 @@ func TestCleanupDevEntityContainersStopsOnlyIdentityProvenEntityContainers(t *te
 			}, true), nil
 		case len(args) >= 4 && args[0] == "inspect" && args[2] == "{{json .}}" && args[len(args)-1] == "swarm-flow-flow-a":
 			return managedContainerInspectJSON(map[string]string{
-				"dev.swarm.owner":           "runtime",
-				"dev.swarm.container.kind":  "flow",
-				"dev.swarm.reset.eligible":  "true",
-				"dev.swarm.creation_source": "workspace.ResolveWorkspace",
-				"dev.swarm.container.name":  "swarm-flow-flow-a",
-				"dev.swarm.workspace.scope": "per-flow-instance",
-				"dev.swarm.flow_instance":   "flow-a",
+				"dev.swarm.owner":                    "runtime",
+				"dev.swarm.container.kind":           "flow",
+				"dev.swarm.reset.eligible":           "true",
+				"dev.swarm.creation_source":          "workspace.ResolveWorkspace",
+				"dev.swarm.container.name":           "swarm-flow-flow-a",
+				"dev.swarm.workspace.scope":          "per-flow-instance",
+				"dev.swarm.flow_instance":            "flow-a",
+				"dev.swarm.agent_id":                 "agent-a",
+				"dev.swarm.agent_name_owner":         "test/agents.yaml",
+				"dev.swarm.agent_name_source":        "declared",
+				"dev.swarm.agent_route_presence":     "present",
+				"dev.swarm.agent_flow_scope_key":     "flow",
+				"dev.swarm.agent_flow_instance_id":   "a",
+				"dev.swarm.agent_flow_instance_path": "flow/a",
 			}, true), nil
 		case len(args) >= 4 && args[0] == "inspect" && args[2] == "{{json .}}" && args[len(args)-1] == "swarm-system":
 			return managedContainerInspectJSON(map[string]string{

@@ -166,6 +166,9 @@ func (m *HostManager) ResolveWorkspace(ctx context.Context, actor models.AgentCo
 		if err != nil {
 			return nil, fmt.Errorf("materialize workspace data projection: %w", err)
 		}
+		if err := projection.Validate(); err != nil {
+			return nil, fmt.Errorf("materialize workspace data projection: %w", err)
+		}
 		dataRoot = projection.Root
 	}
 	scope, scopeKey, err := workspaceScopeForActor(m.source, actor)
