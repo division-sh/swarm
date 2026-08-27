@@ -98,7 +98,7 @@ func TestLoadAvailabilityReadsSourceBeforeBundleRows(t *testing.T) {
 	}
 }
 
-func TestListActiveUsesAvailabilityOwner(t *testing.T) {
+func TestListActiveNonStandingUsesAvailabilityOwner(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	ctx := testAuthorActivityContext()
 	owner := newPostgresOwnerForTest(t, db)
@@ -113,9 +113,9 @@ func TestListActiveUsesAvailabilityOwner(t *testing.T) {
 		t.Fatalf("seed bundle row: %v", err)
 	}
 
-	availabilities, err := owner.ListActive(ctx)
+	availabilities, err := owner.ListActiveNonStanding(ctx)
 	if err != nil {
-		t.Fatalf("ListActive: %v", err)
+		t.Fatalf("ListActiveNonStanding: %v", err)
 	}
 	conflicts := make([]runtimerunbundle.Availability, 0, len(availabilities))
 	for _, availability := range availabilities {

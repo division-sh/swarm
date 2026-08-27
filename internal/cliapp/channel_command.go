@@ -669,13 +669,20 @@ func writeChannelList(out io.Writer, result channelListResult) {
 		if row.Recovery != nil {
 			reason = string(row.Recovery.Reason)
 			for _, command := range row.Recovery.Commands {
-				footers = append(footers, fmt.Sprintf("channel %s: identity verified, activation lost with store - run %s", row.Recovery.Provider, command))
+				if row.Operation != nil && !row.Operation.Phase.Terminal() {
+					footers = append(footers, fmt.Sprintf("channel %s: onboarding %s (%s) - run %s", row.Recovery.Provider, row.Operation.Phase, row.Operation.OperationID, command))
+				} else {
+					footers = append(footers, fmt.Sprintf("channel %s: identity verified, activation lost with store - run %s", row.Recovery.Provider, command))
+				}
 			}
 		}
 		bundle, target := "-", "-"
 		if row.Activation != nil {
 			bundle = row.Activation.Coordinate.BundleHash
 			target = row.Activation.TargetSelector
+		} else if row.Operation != nil {
+			bundle = row.Operation.Coordinate.BundleHash
+			target = row.Operation.TargetSelector
 		}
 		rows = append(rows, []string{row.Identity.Interface.ChannelPackID, string(row.Identity.Status), ready, account, fmt.Sprintf("%d", row.Identity.BindingRevision), string(row.Identity.ConversationScope), reason, bundle, target, row.Identity.Interface.Selector})
 		if row.Identity.PendingOperation != nil {

@@ -333,11 +333,42 @@ func runChannelOnboardingStoreContract(t *testing.T, store channelonboarding.Sto
 	if err != nil || len(listed) != 1 || listed[0].ActivationID != activation.ActivationID {
 		t.Fatalf("list activations = %#v, %v", listed, err)
 	}
+	semanticMismatch := op.Coordinate
+	semanticMismatch.BundleSource = "ephemeral"
+	if _, err := store.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+		OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: op.Phase,
+		RebindCoordinate: &semanticMismatch, Now: now.Add(9 * time.Second),
+	}); !errors.Is(err, channelonboarding.ErrConflict) {
+		t.Fatalf("semantic coordinate rebind = %v, want conflict", err)
+	}
+	successorCoordinate := op.Coordinate
+	successorCoordinate.RuntimeInstanceID = uuid.NewString()
+	successorCoordinate.ContextPublicationGeneration += 17
+	successorCoordinate.TargetGeneration += 19
+	predecessorOperationRevision := op.Revision
+	predecessorActivationRevision := activation.Revision
+	op, err = store.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+		OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: op.Phase,
+		RebindCoordinate: &successorCoordinate, Now: now.Add(9 * time.Second),
+	})
+	if err != nil || !op.Coordinate.Matches(successorCoordinate) || op.Revision != predecessorOperationRevision+1 || op.ActivationRevision != predecessorActivationRevision+1 {
+		t.Fatalf("successor occurrence rebind = %#v, %v", op, err)
+	}
+	reboundActivation, err := store.GetConnectedChannelActivation(ctx, activation.SlotKey)
+	if err != nil || !reboundActivation.Coordinate.Matches(successorCoordinate) || reboundActivation.Revision != predecessorActivationRevision+1 || reboundActivation.OperationRevision != op.Revision {
+		t.Fatalf("rebound activation = %#v, %v", reboundActivation, err)
+	}
+	if _, err := store.AdvanceChannelOnboarding(ctx, channelonboarding.AdvanceRequest{
+		OperationID: op.OperationID, ExpectedRevision: predecessorOperationRevision, Phase: op.Phase,
+		RebindCoordinate: &successorCoordinate, Now: now.Add(10 * time.Second),
+	}); !errors.Is(err, channelonboarding.ErrRevisionConflict) {
+		t.Fatalf("stale successor occurrence rebind = %v, want revision conflict", err)
+	}
 	teardownRequest := channelonboarding.ReserveTeardownRequest{
 		TeardownID: uuid.NewString(), RequestKeyHash: "teardown-key", RequestHash: "teardown-input",
 		Kind: channelonboarding.TeardownUnbind, PrincipalID: principal.ID,
 		Scope: channelonboarding.TeardownScope{Interface: activation.Interface}, ExpectedBindingRevision: activation.BindingRevision,
-		RequestedAt: now.Add(9 * time.Second),
+		RequestedAt: now.Add(11 * time.Second),
 	}
 	teardown, err := store.ReserveChannelTeardown(ctx, teardownRequest)
 	if err != nil || teardown.Phase != channelonboarding.TeardownReserved || teardown.Revision != 1 {
@@ -394,7 +425,7 @@ func channelOnboardingStartRequest(principalID string, now time.Time) channelonb
 		Verb: channelonboarding.VerbConnect, Provider: "telegram", Interface: identity,
 		Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
 			BundleHash: "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", BundleSource: "persisted",
-			BundleIdentity: "support-bundle", PackInventoryGeneration: "sha256:inventory", ContextPublicationGeneration: 2,
+			BundleIdentity: "support-bundle", PackInventoryGeneration: "sha256:inventory", RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 2,
 			PlanGeneration: planGeneration, TargetGeneration: 3,
 		},
 		TargetSelector: "ingress:support:flow:telegram", Posture: channelonboarding.ActivationWebhookRegistration,

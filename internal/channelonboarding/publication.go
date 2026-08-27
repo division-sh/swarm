@@ -175,6 +175,9 @@ func canonicalActivationPublication(activations []CompiledActivation) (canonical
 		if left.Coordinate.BundleHash != right.Coordinate.BundleHash {
 			return left.Coordinate.BundleHash < right.Coordinate.BundleHash
 		}
+		if left.Coordinate.RuntimeInstanceID != right.Coordinate.RuntimeInstanceID {
+			return left.Coordinate.RuntimeInstanceID < right.Coordinate.RuntimeInstanceID
+		}
 		if left.Coordinate.ContextPublicationGeneration != right.Coordinate.ContextPublicationGeneration {
 			return left.Coordinate.ContextPublicationGeneration < right.Coordinate.ContextPublicationGeneration
 		}
@@ -195,7 +198,7 @@ func canonicalActivationPublication(activations []CompiledActivation) (canonical
 		coordinate := activation.Coordinate.Normalized()
 		key := strings.Join([]string{
 			coordinate.BundleHash, coordinate.BundleSource, coordinate.BundleIdentity,
-			coordinate.PackInventoryGeneration, fmt.Sprint(coordinate.ContextPublicationGeneration),
+			coordinate.PackInventoryGeneration, coordinate.RuntimeInstanceID, fmt.Sprint(coordinate.ContextPublicationGeneration),
 		}, "\x00")
 		if contextKey == "" {
 			contextKey = key
@@ -214,11 +217,12 @@ func canonicalActivationPublication(activations []CompiledActivation) (canonical
 			return admissions[i].StoreKey < admissions[j].StoreKey
 		})
 		values = append(values, map[string]any{
-			"source":                activation.Source,
-			"coordinate":            coordinate,
-			"activation_revision":   activation.ActivationRevision,
-			"plan":                  planValue,
-			"credential_admissions": admissions,
+			"source":                  activation.Source,
+			"onboarding_operation_id": activation.OnboardingOperationID,
+			"coordinate":              coordinate,
+			"activation_revision":     activation.ActivationRevision,
+			"plan":                    planValue,
+			"credential_admissions":   admissions,
 		})
 	}
 	return canonicalPublication{activations: ordered, value: []any{string(ChannelActivationPublicationExecutable), values}}, nil

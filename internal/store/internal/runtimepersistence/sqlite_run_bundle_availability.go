@@ -18,15 +18,15 @@ func (s *SQLiteRuntimeStore) LoadRunBundleAvailability(ctx context.Context, runI
 	return availability, err
 }
 
-func (s *SQLiteRuntimeStore) ActiveRunBundleAvailabilities(ctx context.Context) ([]runbundle.Availability, error) {
+func (s *SQLiteRuntimeStore) ActiveNonStandingRunBundleAvailabilities(ctx context.Context) ([]runbundle.Availability, error) {
 	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
-	return s.runBundles.ListActive(ctx)
+	return s.runBundles.ListActiveNonStanding(ctx)
 }
 
-func (s *SQLiteRuntimeStore) ActiveRunBundleAvailabilityConflicts(ctx context.Context) ([]runbundle.Availability, error) {
-	availabilities, err := s.ActiveRunBundleAvailabilities(ctx)
+func (s *SQLiteRuntimeStore) ActiveNonStandingRunBundleAvailabilityConflicts(ctx context.Context) ([]runbundle.Availability, error) {
+	availabilities, err := s.ActiveNonStandingRunBundleAvailabilities(ctx)
 	if err != nil {
 		return nil, err
 	}

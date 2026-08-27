@@ -494,6 +494,7 @@ func TestPreDispatchValidatorsNormalizeRootPersistentFlags(t *testing.T) {
 		// api-connection flags, same matrix
 		{"run list api-server", []string{"run", "list"}, []string{"--api-server", "http://127.0.0.1:9"}, true},
 		{"channel connect api-server", []string{"channel", "connect", "telegram"}, []string{"--api-server", "http://127.0.0.1:9"}, true},
+		{"channel resume api-server", []string{"channel", "resume", "00000000-0000-4000-8000-000000000000"}, []string{"--api-server", "http://127.0.0.1:9"}, true},
 		{"channel list api-server", []string{"channel", "list"}, []string{"--api-server", "http://127.0.0.1:9"}, true},
 		{"retired fork api-server", []string{"fork"}, []string{"--api-server", "http://127.0.0.1:9"}, true},
 		{"bare run api-server", []string{"run"}, []string{"--api-server", "http://127.0.0.1:9"}, true},

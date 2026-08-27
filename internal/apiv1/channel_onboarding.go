@@ -121,8 +121,9 @@ func channelOnboardingError(err error) error {
 	switch {
 	case errors.As(err, &credentialRequired):
 		return NewApplicationError(ChannelCredentialRequiredCode, false, map[string]any{
-			"reason": err.Error(), "role": credentialRequired.Role, "store_key": credentialRequired.StoreKey,
-			"remediation": "provide the credential through hidden input or restore the exact admitted file-tier key",
+			"reason": err.Error(), "operation_id": credentialRequired.OperationID,
+			"role": credentialRequired.Role, "store_key": credentialRequired.StoreKey,
+			"remediation": credentialRequired.ResumeCommand(),
 		})
 	case errors.Is(err, channelonboarding.ErrNotFound):
 		return NewApplicationError(ChannelOperationNotFoundCode, false, details)

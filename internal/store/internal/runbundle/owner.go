@@ -125,31 +125,37 @@ func loadSQLitePersistedBundlePresence(ctx context.Context, queryer rowQueryer, 
 	return nil
 }
 
-func (o *Postgres) ListActive(ctx context.Context) ([]runtimerunbundle.Availability, error) {
+func (o *Postgres) ListActiveNonStanding(ctx context.Context) ([]runtimerunbundle.Availability, error) {
 	rows, err := o.backend.QueryContext(ctx, `
 		SELECT run_id::text, status, bundle_hash, bundle_source,
 		       EXISTS (SELECT 1 FROM bundles b WHERE b.bundle_hash = runs.bundle_hash)
 		FROM runs
 		WHERE status IN ($1, $2)
+		  AND NOT EXISTS (
+		      SELECT 1 FROM standing_services ss WHERE ss.current_run_id = runs.run_id
+		  )
 		ORDER BY run_id
 	`, string(runtimerunlifecycle.StateRunning), string(runtimerunlifecycle.StatePaused))
 	if err != nil {
-		return nil, fmt.Errorf("list active postgres run bundle availability: %w", err)
+		return nil, fmt.Errorf("list active non-standing postgres run bundle availability: %w", err)
 	}
 	defer rows.Close()
 	return scanAvailabilities(rows)
 }
 
-func (o *SQLite) ListActive(ctx context.Context) ([]runtimerunbundle.Availability, error) {
+func (o *SQLite) ListActiveNonStanding(ctx context.Context) ([]runtimerunbundle.Availability, error) {
 	rows, err := o.backend.QueryContext(ctx, `
 		SELECT run_id, status, bundle_hash, bundle_source,
 		       EXISTS (SELECT 1 FROM bundles b WHERE b.bundle_hash = runs.bundle_hash)
 		FROM runs
 		WHERE status IN (?, ?)
+		  AND NOT EXISTS (
+		      SELECT 1 FROM standing_services ss WHERE ss.current_run_id = runs.run_id
+		  )
 		ORDER BY run_id
 	`, string(runtimerunlifecycle.StateRunning), string(runtimerunlifecycle.StatePaused))
 	if err != nil {
-		return nil, fmt.Errorf("list active sqlite run bundle availability: %w", err)
+		return nil, fmt.Errorf("list active non-standing sqlite run bundle availability: %w", err)
 	}
 	defer rows.Close()
 	return scanAvailabilities(rows)
@@ -174,7 +180,7 @@ func scanAvailabilities(rows rowIterator) ([]runtimerunbundle.Availability, erro
 	for rows.Next() {
 		var row availabilityRow
 		if err := rows.Scan(&row.RunID, &row.Status, &row.BundleHash, &row.BundleSource, &row.BundleRowPresent); err != nil {
-			return nil, fmt.Errorf("scan active run bundle availability: %w", err)
+			return nil, fmt.Errorf("scan active non-standing run bundle availability: %w", err)
 		}
 		availability, err := classify(row)
 		if err != nil {
@@ -183,7 +189,7 @@ func scanAvailabilities(rows rowIterator) ([]runtimerunbundle.Availability, erro
 		result = append(result, availability)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate active run bundle availability: %w", err)
+		return nil, fmt.Errorf("iterate active non-standing run bundle availability: %w", err)
 	}
 	return result, nil
 }

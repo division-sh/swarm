@@ -9958,12 +9958,15 @@ tool_model:
         cli: swarm channel connect|reconnect|rebind|resume|list|status|unbind
       context_coordinate_rule: >
         Every candidate, operation, pre-binding intent, learned activation, provider effect, compiled executable plan,
-        confirmation, readiness result, and API/CLI readback retains one exact bundle source fact, bundle identity,
-        effective-pack inventory generation, runtime-context publication generation, channel-plan generation, and target
-        generation. Provider, pack id, target shape, primary context, or load order never substitutes for that coordinate.
-        Stable --bundle, --interface, and --target selectors are required when provider shorthand is ambiguous. A successor
-        publication may consume retained selected-store facts only after exact source, inventory, plan, target, identity,
-        and revision reconciliation; stale publication identity grants no execution or READY authority.
+        confirmation, readiness result, and API/CLI readback separates one restart-stable durable identity from one live
+        process occurrence. The durable identity is the exact bundle source fact, bundle identity, effective-pack inventory
+        generation, channel-plan generation, interface, and target selector. The live occurrence is the runtime instance,
+        runtime-context publication generation, and target generation. Provider, pack id, target shape, primary context, or
+        load order never substitutes for either projection. Stable --bundle, --interface, and --target selectors are
+        required when provider shorthand is ambiguous. After restart or replacement, a successor publication may consume
+        retained selected-store facts only after exact durable resolution and revision-fenced rebinding to its live
+        occurrence. A repeated numeric publication or target generation in another runtime instance is ABA coincidence and
+        grants no execution, provider effect, registration, confirmation, readback, or READY authority.
       provider_axes:
         activation:
         - webhook_registration
@@ -10072,7 +10075,9 @@ tool_model:
         exact operation-written credential occurrence through its receipt/epoch fence. Recovery resumes every reserved or
         authority-retired teardown idempotently, including credential cleanup. Runtime-context shutdown performs this
         retirement while the exact context and public-ingress owner remain current, and aborts withdrawal if retirement
-        fails. Proofless revocation fails before mutation because no proof authority exists.
+        fails. Public project.close, explicit unload/source removal, and completed replacement are semantic retirement;
+        ordinary serve process shutdown only quiesces process work and withdraws the live occurrence, and must not invoke
+        context retirement or terminalize its durable onboarding responsibility. Proofless revocation fails before mutation because no proof authority exists.
         Rebind successor publication is also the selected-store transaction that retires every current activation sharing
         the rebound interface, including sibling bundle/target slots; sibling credential occurrences are released only
         after the successor process publication becomes current.
@@ -10097,12 +10102,15 @@ tool_model:
         rows to the one retained identity they mutate.
       reset_and_recovery_rule: >
         Startup resumes every nonterminal operation and teardown in every serve posture, independently of whether public
-        ingress is enabled, without replaying settled writes or effects. Destructive teardown recovery followed by local-only
-        onboarding reconciliation is a barrier before runtime-context activation, API/MCP mutation, executable publication,
-        registration, or public readiness. API/MCP listeners may begin serving only after that local barrier and before
-        runtime-context activation because managed agent startup consumes the runtime-owned MCP endpoint; public readiness
-        and ready hooks remain closed. Effectful onboarding recovery runs unconditionally after posture-specific exposure
-        and runtime activation, when present, and before ready hooks or public readiness. Webhook activation
+        ingress is enabled, without replaying settled writes or effects. Destructive teardown recovery is a barrier before
+        loading successor runtime contexts. API/MCP listeners then begin serving and the successor contexts load because
+        managed agent startup consumes the runtime-owned MCP endpoint, but public readiness and ready hooks remain closed.
+        Before executable publication, registration, or public readiness, startup retires every selected current activation
+        whose exact durable source/identity/inventory/plan/interface/target responsibility has no unique successor, preserving
+        retained identity while removing activation and credential authority. It then CAS-rebinds every surviving operation
+        and semantic current activation to the exact successor live occurrence and completes local-only onboarding
+        reconciliation. Effectful onboarding recovery runs unconditionally after posture-specific exposure and runtime
+        activation, when present, and before ready hooks or public readiness. Webhook activation
         still fails terminally at its ingress admission boundary when no public exposure owner exists. Selected-store
         reset removes learned activation and operation facts. A surviving machine proof may restore identity only; it cannot
         infer target, credential, registration, executable activation, confirmation, or READY. Readback must teach exactly
@@ -10112,6 +10120,11 @@ tool_model:
         finds a nonterminal onboarding operation whose exact runtime-context coordinate is no longer present, it records a
         runtime_context_retired terminal failure, compare-deletes only that operation's receipt/epoch-owned credentials,
         refreshes activation authority, and continues; catalog construction or contradiction errors still fail startup closed.
+        Graceful process restart preserves each nonterminal operation and semantic current activation, resolves them by
+        durable identity without registration-order or primary-context inference, and CAS-rebinds operation and activation
+        rows to the successor runtime instance/publication/target occurrence before any process publication or external
+        effect. Every nonterminal phase reconciles already admitted effects through its durable effect owner before
+        rebinding or retry; startup reconstructs executable activation and readiness only under the successor occurrence.
       no_legacy_rule: >
         No config writer, migration, adoption, export, purge, selected-store fallback, provider-specific generic-runtime
         branch, placeholder destination, manual callback/conversation/signing value, compatibility flag, dual executable
@@ -11745,6 +11758,11 @@ flow_model:
         declaration is explicitly orphaned: its current generation is quiesced, its run is paused, publication is withdrawn,
         and its durable identity and lineage remain inspectable. A new declaration creates generation one. Operator suspend,
         resume, and reset consume the same desired-state owner and survive restart.
+        The current standing generation named by standing_services.current_run_id is excluded from the generic non-standing
+        active-run bundle availability projection and from every startup-cleanup, availability-admission, and pinned-hash
+        admission consumer of that projection. This exclusion is exactly the current pointer, not all standing lineage:
+        an active historical generation that is no longer current remains subject to generic non-standing handling. Exact
+        run-scoped bundle diagnosis remains inclusive and reports the current standing run's actual source and availability.
         First materialization consumes the full canonical ActivateFlowInstance path, including routes, agents, initial
         timers, schedules, and creation effects. Restart rehydrates durable state and process-local effects without replaying
         creation effects. A restart-abandoned generation may advance only through the explicit repair rule after proving the
@@ -14379,6 +14397,7 @@ platform_tables:
             bundle_source TEXT NOT NULL CHECK (bundle_source IN ('persisted','ephemeral')),
             bundle_identity TEXT NOT NULL,
             pack_inventory_generation TEXT NOT NULL,
+            runtime_instance_id UUID NOT NULL,
             context_publication_generation BIGINT NOT NULL CHECK (context_publication_generation > 0),
             plan_generation TEXT NOT NULL,
             target_selector TEXT NOT NULL,
@@ -14469,6 +14488,7 @@ platform_tables:
             bundle_source TEXT NOT NULL CHECK (bundle_source IN ('persisted','ephemeral')),
             bundle_identity TEXT NOT NULL,
             pack_inventory_generation TEXT NOT NULL,
+            runtime_instance_id UUID NOT NULL,
             context_publication_generation BIGINT NOT NULL CHECK (context_publication_generation > 0),
             plan_generation TEXT NOT NULL,
             target_selector TEXT NOT NULL,
@@ -18376,6 +18396,14 @@ multi_bundle_persistence:
         result_error: BUNDLE_UNAVAILABLE
         rationale: The server lacks authoritative bundle bytes for resume/fork after restart or deletion.
     active_restart_recovery:
+      availability_projection:
+        owner: internal/runtime/runbundle.AvailabilityStore.ActiveNonStandingRunBundleAvailabilities
+        rule: >
+          Generic startup cleanup, active availability admission, and pinned-hash admission consume one projection of active
+          non-standing runs. PostgreSQL and SQLite exclude exactly rows referenced by standing_services.current_run_id; they
+          do not infer standing ownership from origin, source, status prose, package path, or historical generation lineage.
+          Active generations no longer referenced by the current pointer remain in the projection. Exact
+          LoadRunBundleAvailability(run_id) remains inclusive for run-scoped diagnosis and selection.
       startup_owner:
         implemented_by:
           - internal/runtime/startuprecovery
@@ -18386,11 +18414,11 @@ multi_bundle_persistence:
           runtime_boot.active_run_abandon_quiescence, but before runtime start,
           API readiness, or late delivery recovery.
         persisted_missing_rule: >
-          Any active run classified as BUNDLE_DATA_INTEGRITY_ERROR by the canonical run bundle availability owner
+          Any non-standing active run classified as BUNDLE_DATA_INTEGRITY_ERROR by the canonical run bundle availability owner
           fails serve before cleanup/readiness. Mixed persisted-missing and orphanable active rows must not apply
           partial preservation cleanup.
         orphan_cleanup_scope: >
-          Active ephemeral and deleted runs are cancelled with no failure envelope; the bundle orphan reason is
+          Non-standing active ephemeral and deleted runs are cancelled with no failure envelope; the bundle orphan reason is
           written only to stopped run_control_state.reason. Pending/in-progress same-run agent/node deliveries are
           dead-lettered with receipts, active/suspended agent sessions terminate with reason orphaned and the bundle
           cause as detail, active run-scoped timers are cancelled, and run-scoped managed containers are stopped when
@@ -18398,9 +18426,9 @@ multi_bundle_persistence:
       persisted_bundle_present: restart_may_resume_or_recover_the_run_under_runtime_recovery_owners
       persisted_bundle_missing: fail_serve_with_BUNDLE_DATA_INTEGRITY_ERROR_until_operator_repairs_data
       ephemeral_or_deleted: >
-        Active mid-flight runs cannot be resumed after process restart. Runtime recovery must orphan/terminalize them
+        Non-standing active mid-flight runs cannot be resumed after process restart. Runtime recovery must orphan/terminalize them
         through the active-run and delivery cleanup owner chain instead of pretending their filesystem bundle is still
-        authoritative.
+        authoritative. Current standing generations are reconciled only by the standing lifecycle owner.
     completed_run_fork_after_bundle_delete:
       rule: >
         Completed runs whose source bundle row has been deleted are not forkable from bundle bytes. Same-bundle fork
@@ -32446,12 +32474,13 @@ api_specification:
       ChannelRuntimeContextCoordinate:
         type: object
         additionalProperties: false
-        required: [bundle_hash, bundle_source, bundle_identity, pack_inventory_generation, context_publication_generation, plan_generation, target_generation]
+        required: [bundle_hash, bundle_source, bundle_identity, pack_inventory_generation, runtime_instance_id, context_publication_generation, plan_generation, target_generation]
         properties:
           bundle_hash: {type: string, pattern: '^bundle-v1:sha256:[0-9a-f]{64}$'}
           bundle_source: {type: string, enum: [persisted, ephemeral]}
           bundle_identity: {type: string, minLength: 1}
           pack_inventory_generation: {type: string, minLength: 1}
+          runtime_instance_id: {$ref: '#/components/schemas/OpaqueId'}
           context_publication_generation: {type: integer, minimum: 1}
           plan_generation: {type: string, minLength: 1}
           target_generation: {type: integer, minimum: 1}
@@ -33650,12 +33679,18 @@ api_specification:
       CHANNEL_CREDENTIAL_REQUIRED:
         type: object
         additionalProperties: false
-        required: [reason, role, store_key, remediation]
+        required: [reason, operation_id, role, store_key, remediation]
         properties:
           reason: {type: string}
+          operation_id:
+            $ref: '#/components/schemas/OpaqueId'
+            description: Exact durable onboarding responsibility reserved before credential admission; callers must resume this operation rather than start another.
           role: {type: string, minLength: 1}
           store_key: {type: string, minLength: 1}
-          remediation: {type: string, minLength: 1}
+          remediation:
+            type: string
+            minLength: 1
+            description: Exact executable command `swarm channel resume <operation_id> --credential-stdin` for continuing the same responsibility.
       IDEMPOTENCY_CONFLICT:
         type: object
         additionalProperties: false

@@ -17,11 +17,12 @@ const (
 )
 
 type CompiledActivation struct {
-	Source               ActivationSource
-	Coordinate           ChannelRuntimeContextCoordinate
-	ActivationRevision   int64
-	Plan                 packs.OutboundBindingPlan
-	CredentialAdmissions []CredentialAdmission
+	Source                ActivationSource
+	OnboardingOperationID string
+	Coordinate            ChannelRuntimeContextCoordinate
+	ActivationRevision    int64
+	Plan                  packs.OutboundBindingPlan
+	CredentialAdmissions  []CredentialAdmission
 }
 
 func (a CompiledActivation) Validate() error {
@@ -43,6 +44,12 @@ func (a CompiledActivation) Validate() error {
 	}
 	if a.Source == ActivationSourceLearned && a.ActivationRevision < 1 {
 		return fmt.Errorf("learned channel activation requires a positive revision")
+	}
+	if a.Source == ActivationSourceLearned && strings.TrimSpace(a.OnboardingOperationID) == "" {
+		return fmt.Errorf("learned channel activation requires its exact onboarding operation")
+	}
+	if a.Source == ActivationSourceDeclared && strings.TrimSpace(a.OnboardingOperationID) != "" {
+		return fmt.Errorf("declared channel activation cannot claim an onboarding operation")
 	}
 	credentialKeys := a.Plan.CredentialStoreKeys()
 	admitted := make(map[string]string, len(a.CredentialAdmissions))
@@ -104,7 +111,7 @@ func CompileLearnedActivation(candidate Candidate, activation ConnectedChannelAc
 		return CompiledActivation{}, err
 	}
 	compiled := CompiledActivation{
-		Source: ActivationSourceLearned, Coordinate: activation.Coordinate,
+		Source: ActivationSourceLearned, OnboardingOperationID: activation.OperationID, Coordinate: activation.Coordinate,
 		ActivationRevision: activation.Revision, Plan: plan,
 		CredentialAdmissions: append([]CredentialAdmission(nil), activation.CredentialAdmissions...),
 	}

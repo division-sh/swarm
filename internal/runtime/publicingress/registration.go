@@ -47,6 +47,8 @@ type RegistrationTarget struct {
 type RegistrationPair struct {
 	BindingID                   string
 	PlanGeneration              plangeneration.Generation
+	ActivationSource            channelonboarding.ActivationSource
+	OnboardingOperationID       string
 	ChannelActivationGeneration channelonboarding.ChannelActivationGeneration
 	PrebindingOperationID       string
 	Registration                packs.CompiledChannelRegistration
@@ -297,6 +299,24 @@ func (c *ProviderRegistrationController) admitAndIdentify(ctx context.Context, e
 	prebindingAuthority := strings.TrimSpace(pair.PrebindingOperationID) != ""
 	if key == "" || !pair.PlanGeneration.Valid() || activationAuthority == prebindingAuthority || !pair.Target.AdmissionPlanGeneration.Valid() || strings.TrimSpace(pair.Target.BundleHash) == "" {
 		return admittedPair{}, fmt.Errorf("provider registration pair identity is incomplete")
+	}
+	operationID := strings.TrimSpace(pair.OnboardingOperationID)
+	if prebindingAuthority && operationID != strings.TrimSpace(pair.PrebindingOperationID) {
+		return admittedPair{}, fmt.Errorf("provider registration prebinding authority contradicts its onboarding operation")
+	}
+	if activationAuthority {
+		switch pair.ActivationSource {
+		case channelonboarding.ActivationSourceDeclared:
+			if operationID != "" {
+				return admittedPair{}, fmt.Errorf("declared provider registration cannot claim an onboarding operation")
+			}
+		case channelonboarding.ActivationSourceLearned:
+			if operationID == "" {
+				return admittedPair{}, fmt.Errorf("learned provider registration requires its exact onboarding operation")
+			}
+		default:
+			return admittedPair{}, fmt.Errorf("provider registration activation source is invalid")
+		}
 	}
 	if pair.Registration.Provider() != strings.TrimSpace(pair.Target.Provider) {
 		return admittedPair{}, fmt.Errorf("provider registration pair %s provider conflicts with compiled channel registration", key)
@@ -825,12 +845,11 @@ func registrationBaseFingerprint(exposure Generation, pair RegistrationPair, pro
 			"generation": pair.Target.Generation, "publication_sequence": pair.Target.PublicationSequence,
 			"admission_plan_generation": pair.Target.AdmissionPlanGeneration.Diagnostic(),
 		},
-		"plan_generation":               pair.PlanGeneration.Diagnostic(),
-		"channel_activation_generation": pair.ChannelActivationGeneration.Diagnostic(),
-		"prebinding_operation_id":       strings.TrimSpace(pair.PrebindingOperationID),
-		"slot_id":                       slotID,
-		"provider_credentials":          providerEvidence,
-		"signing_credential":            map[string]any{"key": signing.Key, "source": signing.Source, "epoch": signing.Epoch()},
+		"plan_generation":         pair.PlanGeneration.Diagnostic(),
+		"onboarding_operation_id": strings.TrimSpace(pair.OnboardingOperationID),
+		"slot_id":                 slotID,
+		"provider_credentials":    providerEvidence,
+		"signing_credential":      map[string]any{"key": signing.Key, "source": signing.Source, "epoch": signing.Epoch()},
 	})
 	if err != nil {
 		return "", err

@@ -3270,10 +3270,15 @@
               "details": {
                 "additionalProperties": false,
                 "properties": {
+                  "operation_id": {
+                    "$ref": "#/components/schemas/OpaqueId",
+                    "description": "Exact durable onboarding responsibility reserved before credential admission; callers must resume this operation rather than start another."
+                  },
                   "reason": {
                     "type": "string"
                   },
                   "remediation": {
+                    "description": "Exact executable command `swarm channel resume \u003coperation_id\u003e --credential-stdin` for continuing the same responsibility.",
                     "minLength": 1,
                     "type": "string"
                   },
@@ -3288,6 +3293,7 @@
                 },
                 "required": [
                   "reason",
+                  "operation_id",
                   "role",
                   "store_key",
                   "remediation"
@@ -3596,10 +3602,15 @@
               "details": {
                 "additionalProperties": false,
                 "properties": {
+                  "operation_id": {
+                    "$ref": "#/components/schemas/OpaqueId",
+                    "description": "Exact durable onboarding responsibility reserved before credential admission; callers must resume this operation rather than start another."
+                  },
                   "reason": {
                     "type": "string"
                   },
                   "remediation": {
+                    "description": "Exact executable command `swarm channel resume \u003coperation_id\u003e --credential-stdin` for continuing the same responsibility.",
                     "minLength": 1,
                     "type": "string"
                   },
@@ -3614,6 +3625,7 @@
                 },
                 "required": [
                   "reason",
+                  "operation_id",
                   "role",
                   "store_key",
                   "remediation"
@@ -16077,6 +16089,9 @@
             "minLength": 1,
             "type": "string"
           },
+          "runtime_instance_id": {
+            "$ref": "#/components/schemas/OpaqueId"
+          },
           "target_generation": {
             "minimum": 1,
             "type": "integer"
@@ -16087,6 +16102,7 @@
           "bundle_source",
           "bundle_identity",
           "pack_inventory_generation",
+          "runtime_instance_id",
           "context_publication_generation",
           "plan_generation",
           "target_generation"
@@ -23166,10 +23182,15 @@
             "details": {
               "additionalProperties": false,
               "properties": {
+                "operation_id": {
+                  "$ref": "#/components/schemas/OpaqueId",
+                  "description": "Exact durable onboarding responsibility reserved before credential admission; callers must resume this operation rather than start another."
+                },
                 "reason": {
                   "type": "string"
                 },
                 "remediation": {
+                  "description": "Exact executable command `swarm channel resume \u003coperation_id\u003e --credential-stdin` for continuing the same responsibility.",
                   "minLength": 1,
                   "type": "string"
                 },
@@ -23184,6 +23205,7 @@
               },
               "required": [
                 "reason",
+                "operation_id",
                 "role",
                 "store_key",
                 "remediation"

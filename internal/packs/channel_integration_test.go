@@ -318,6 +318,7 @@ func TestCompileChannelActivationsRejectsDeclaredLearnedCollisionAndContradictio
 	coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
 		BundleHash: "bundle-v1:sha256:" + strings.Repeat("a", 64), BundleSource: "persisted",
 		BundleIdentity: "telegram@1.0.0#bundle", PackInventoryGeneration: "sha256:inventory",
+		RuntimeInstanceID:            "11111111-1111-4111-8111-111111111111",
 		ContextPublicationGeneration: 1, PlanGeneration: generation, TargetGeneration: 1,
 	}
 	admissions := []channelonboarding.CredentialAdmission{
@@ -326,7 +327,7 @@ func TestCompileChannelActivationsRejectsDeclaredLearnedCollisionAndContradictio
 	}
 	for _, plans := range [][2]packs.OutboundBindingPlan{{declaredPlan, learnedPlan}, {learnedPlan, declaredPlan}} {
 		declared := channelonboarding.CompiledActivation{Source: channelonboarding.ActivationSourceDeclared, Coordinate: coordinate, Plan: plans[0], CredentialAdmissions: admissions}
-		learned := channelonboarding.CompiledActivation{Source: channelonboarding.ActivationSourceLearned, Coordinate: coordinate, ActivationRevision: 1, Plan: plans[1], CredentialAdmissions: admissions}
+		learned := channelonboarding.CompiledActivation{Source: channelonboarding.ActivationSourceLearned, OnboardingOperationID: "collision-operation", Coordinate: coordinate, ActivationRevision: 1, Plan: plans[1], CredentialAdmissions: admissions}
 		if _, err := channelonboarding.MergeCompiledActivations([]channelonboarding.CompiledActivation{declared}, []channelonboarding.CompiledActivation{learned}); err == nil || !strings.Contains(err.Error(), "target collision") {
 			t.Fatalf("declared/learned target collision error = %v", err)
 		}
@@ -355,6 +356,7 @@ func TestChannelActivationPublicationGenerationRetainsCompleteNonSecretProvenanc
 		Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
 			BundleHash: "bundle-v1:sha256:" + strings.Repeat("a", 64), BundleSource: "persisted",
 			BundleIdentity: "telegram@1.0.0#bundle", PackInventoryGeneration: "sha256:inventory",
+			RuntimeInstanceID:            "11111111-1111-4111-8111-111111111111",
 			ContextPublicationGeneration: 7, PlanGeneration: planGeneration, TargetGeneration: 3,
 		},
 		Plan: newBinding("-100123"),
@@ -394,6 +396,7 @@ func TestChannelActivationPublicationGenerationRetainsCompleteNonSecretProvenanc
 	mutations := map[string]func(channelonboarding.CompiledActivation) channelonboarding.CompiledActivation{
 		"source and revision": func(value channelonboarding.CompiledActivation) channelonboarding.CompiledActivation {
 			value.Source = channelonboarding.ActivationSourceLearned
+			value.OnboardingOperationID = "publication-provenance-operation"
 			value.ActivationRevision = 1
 			return value
 		},
@@ -638,6 +641,7 @@ func TestLearnedActivationCompilationUsesDurableConversationDestination(t *testi
 	coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
 		BundleHash: "bundle-v1:sha256:" + strings.Repeat("a", 64), BundleSource: "persisted",
 		BundleIdentity: "telegram@1.0.0#bundle", PackInventoryGeneration: "sha256:inventory",
+		RuntimeInstanceID:            "11111111-1111-4111-8111-111111111111",
 		ContextPublicationGeneration: 1, PlanGeneration: generation, TargetGeneration: 1,
 	}
 	target := "ingress:.:telegram-ingress:telegram"

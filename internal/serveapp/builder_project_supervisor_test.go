@@ -1556,9 +1556,9 @@ func TestRuntimeProjectSupervisorManagerBackedClosePropagatesShutdownOptions(t *
 		currentRoot: "/tmp/current", currentSource: source, currentBundle: &runtimecontracts.WorkflowContractBundle{}, currentRT: rt, executionPosture: executionposture.Live,
 		currentBundleSourceFact: fact, runtimeContexts: manager,
 	}
-	hookCalled := false
+	hookCalls := 0
 	supervisor.SetRuntimeRetiredHook(func(context.Context, runtimepkg.BundleContext) error {
-		hookCalled = true
+		hookCalls++
 		if supervisor.CurrentRuntime() == nil {
 			t.Fatal("retirement hook ran after the current runtime was detached")
 		}
@@ -1571,8 +1571,50 @@ func TestRuntimeProjectSupervisorManagerBackedClosePropagatesShutdownOptions(t *
 	if err == nil || !strings.Contains(err.Error(), "shutdown grace") {
 		t.Fatalf("manager-backed configured shutdown error = %v", err)
 	}
-	if !hookCalled {
-		t.Fatal("runtime retirement hook was not called")
+	if hookCalls != 1 {
+		t.Fatalf("runtime retirement hook calls = %d, want 1", hookCalls)
+	}
+	lookup := manager.LookupBundleHashStatus(hash)
+	if lookup.Loaded() || lookup.Cause != runtimepkg.RuntimeContextCauseUnloaded {
+		t.Fatalf("semantic close lookup = %#v", lookup)
+	}
+}
+
+func TestRuntimeProjectSupervisorProcessShutdownDoesNotRetireSemanticAuthority(t *testing.T) {
+	bus, err := runtimebus.NewEphemeralEventBus(nil)
+	if err != nil {
+		t.Fatalf("NewEventBus: %v", err)
+	}
+	rt := &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus}
+	hash := "bundle-v1:sha256:" + strings.Repeat("8", 64)
+	workOwner := newSupervisorTestRuntimeOccurrence(t, hash)
+	fact := mustServeTestPersistedBundleSourceFact(hash)
+	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
+	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{BundleSourceFact: fact, Source: source, Runtime: rt, WorkOwner: workOwner})
+	if err != nil {
+		t.Fatalf("NewRuntimeContextManager: %v", err)
+	}
+	supervisor := &runtimeProjectSupervisor{
+		currentRoot: "/tmp/current", currentSource: source, currentBundle: &runtimecontracts.WorkflowContractBundle{}, currentRT: rt, executionPosture: executionposture.Live,
+		currentBundleSourceFact: fact, runtimeContexts: manager,
+	}
+	hookCalls := 0
+	supervisor.SetRuntimeRetiredHook(func(context.Context, runtimepkg.BundleContext) error {
+		hookCalls++
+		return nil
+	})
+	if _, err := supervisor.ShutdownProcessWithOptions(context.Background(), runtimepkg.DefaultShutdownOptions()); err != nil {
+		t.Fatalf("ShutdownProcessWithOptions: %v", err)
+	}
+	if hookCalls != 0 {
+		t.Fatalf("runtime retirement hook calls = %d, want 0", hookCalls)
+	}
+	lookup := manager.LookupBundleHashStatus(hash)
+	if lookup.Loaded() || lookup.Cause != runtimepkg.RuntimeContextCauseUnavailable {
+		t.Fatalf("process shutdown lookup = %#v", lookup)
+	}
+	if supervisor.CurrentRuntime() != nil {
+		t.Fatal("current runtime remained attached after process shutdown")
 	}
 }
 

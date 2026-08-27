@@ -36,6 +36,7 @@ type RunBundleAvailabilityReader interface {
 type BundleContext struct {
 	BundleSourceFact            runtimecorrelation.BundleSourceFact
 	BundleIdentity              runtimecontracts.BundleIdentity
+	RuntimeInstanceID           string
 	PublicationGeneration       uint64
 	Source                      semanticview.Source
 	ContractsRoot               string
@@ -69,6 +70,7 @@ const (
 )
 
 func (c BundleContext) normalized() BundleContext {
+	c.RuntimeInstanceID = strings.TrimSpace(c.RuntimeInstanceID)
 	c.ContractsRoot = strings.TrimSpace(c.ContractsRoot)
 	c.PlatformSpecPath = strings.TrimSpace(c.PlatformSpecPath)
 	c.WorkspaceScopeKey = strings.TrimSpace(c.WorkspaceScopeKey)
@@ -683,6 +685,11 @@ func validateRuntimeContextDefinition(contextDef BundleContext) (BundleContext, 
 	if contextDef.Runtime == nil {
 		return BundleContext{}, fmt.Errorf("runtime context %s runtime is required", bundleHash)
 	}
+	runtimeInstanceID := strings.TrimSpace(contextDef.Runtime.Options.RuntimeInstanceID)
+	if contextDef.RuntimeInstanceID != "" && contextDef.RuntimeInstanceID != runtimeInstanceID {
+		return BundleContext{}, fmt.Errorf("runtime context %s runtime instance does not belong to runtime", bundleHash)
+	}
+	contextDef.RuntimeInstanceID = runtimeInstanceID
 	runtimeIdentity := contextDef.Runtime.EffectiveSourceIdentity
 	if runtimeIdentity.Validate() == nil {
 		if err := contextDef.EffectiveSourceIdentity.Validate(); err == nil && !contextDef.EffectiveSourceIdentity.Equal(runtimeIdentity) {
@@ -1035,6 +1042,7 @@ func currentChannelActivationSigningKeys(entry *runtimeContextEntry) (map[string
 			continue
 		}
 		if activation.Coordinate.BundleHash != entry.context.BundleSourceFact.BundleHash() ||
+			activation.Coordinate.RuntimeInstanceID != entry.context.RuntimeInstanceID ||
 			activation.Coordinate.ContextPublicationGeneration != entry.context.PublicationGeneration {
 			return nil, fmt.Errorf("channel activation registration target %q contradicts its runtime context", selector)
 		}
@@ -1270,6 +1278,13 @@ func (m *RuntimeContextManager) ReplaceChannelActivationsContext(ctx context.Con
 	}
 	if entry.context.PublicationGeneration != publicationGeneration {
 		return fmt.Errorf("runtime context %s publication changed before channel activation replacement", bundleHash)
+	}
+	for _, activation := range publication.Activations() {
+		if activation.Coordinate.BundleHash != entry.context.BundleHash() ||
+			activation.Coordinate.RuntimeInstanceID != entry.context.RuntimeInstanceID ||
+			activation.Coordinate.ContextPublicationGeneration != entry.context.PublicationGeneration {
+			return fmt.Errorf("runtime context %s channel activation occurrence contradicts current publication", bundleHash)
+		}
 	}
 	if err := entry.runtime.ReplaceChannelActivationsContext(ctx, publication); err != nil {
 		return err

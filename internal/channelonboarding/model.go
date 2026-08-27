@@ -104,16 +104,86 @@ func (p Phase) Valid() bool {
 	return false
 }
 
-// ChannelRuntimeContextCoordinate identifies one exact durable bundle source
-// and the current runtime, plan, and target generations admitted for it.
+// ChannelDurableContextIdentity identifies the source semantics that survive a
+// process restart. It deliberately excludes process-local publication and
+// target occurrences.
+type ChannelDurableContextIdentity struct {
+	BundleHash              string
+	BundleSource            string
+	BundleIdentity          string
+	PackInventoryGeneration string
+	PlanGeneration          plangeneration.Generation
+}
+
+func (i ChannelDurableContextIdentity) Normalized() ChannelDurableContextIdentity {
+	i.BundleHash = strings.TrimSpace(i.BundleHash)
+	i.BundleSource = strings.TrimSpace(i.BundleSource)
+	i.BundleIdentity = strings.TrimSpace(i.BundleIdentity)
+	i.PackInventoryGeneration = strings.TrimSpace(i.PackInventoryGeneration)
+	return i
+}
+
+func (i ChannelDurableContextIdentity) Validate() error {
+	i = i.Normalized()
+	if _, err := runtimecorrelation.DecodeBundleSourceFact(i.BundleHash, i.BundleSource); err != nil {
+		return fmt.Errorf("channel durable context source: %w", err)
+	}
+	if i.BundleIdentity == "" || i.PackInventoryGeneration == "" || !i.PlanGeneration.Valid() {
+		return fmt.Errorf("channel durable context requires exact bundle identity, inventory, and plan generation")
+	}
+	return nil
+}
+
+func (i ChannelDurableContextIdentity) Matches(other ChannelDurableContextIdentity) bool {
+	i, other = i.Normalized(), other.Normalized()
+	return i.Validate() == nil && other.Validate() == nil && i == other
+}
+
+type ChannelLiveRuntimeOccurrence struct {
+	RuntimeInstanceID            string
+	ContextPublicationGeneration uint64
+	TargetGeneration             uint64
+}
+
+func (o ChannelLiveRuntimeOccurrence) Validate() error {
+	o.RuntimeInstanceID = strings.TrimSpace(o.RuntimeInstanceID)
+	if o.RuntimeInstanceID == "" || o.ContextPublicationGeneration == 0 || o.TargetGeneration == 0 {
+		return fmt.Errorf("channel live runtime occurrence requires runtime instance, publication, and target generations")
+	}
+	return nil
+}
+
+func (o ChannelLiveRuntimeOccurrence) Matches(other ChannelLiveRuntimeOccurrence) bool {
+	return o.Validate() == nil && other.Validate() == nil && o == other
+}
+
+// ChannelRuntimeContextCoordinate combines restart-stable source semantics
+// with the exact live runtime occurrence currently admitted for execution.
 type ChannelRuntimeContextCoordinate struct {
 	BundleHash                   string                    `json:"bundle_hash"`
 	BundleSource                 string                    `json:"bundle_source"`
 	BundleIdentity               string                    `json:"bundle_identity"`
 	PackInventoryGeneration      string                    `json:"pack_inventory_generation"`
+	RuntimeInstanceID            string                    `json:"runtime_instance_id"`
 	ContextPublicationGeneration uint64                    `json:"context_publication_generation"`
 	PlanGeneration               plangeneration.Generation `json:"plan_generation"`
 	TargetGeneration             uint64                    `json:"target_generation"`
+}
+
+func (c ChannelRuntimeContextCoordinate) DurableIdentity() ChannelDurableContextIdentity {
+	c = c.Normalized()
+	return ChannelDurableContextIdentity{
+		BundleHash: c.BundleHash, BundleSource: c.BundleSource, BundleIdentity: c.BundleIdentity,
+		PackInventoryGeneration: c.PackInventoryGeneration, PlanGeneration: c.PlanGeneration,
+	}
+}
+
+func (c ChannelRuntimeContextCoordinate) LiveOccurrence() ChannelLiveRuntimeOccurrence {
+	return ChannelLiveRuntimeOccurrence{
+		RuntimeInstanceID:            c.RuntimeInstanceID,
+		ContextPublicationGeneration: c.ContextPublicationGeneration,
+		TargetGeneration:             c.TargetGeneration,
+	}
 }
 
 func (c ChannelRuntimeContextCoordinate) Normalized() ChannelRuntimeContextCoordinate {
@@ -121,6 +191,7 @@ func (c ChannelRuntimeContextCoordinate) Normalized() ChannelRuntimeContextCoord
 	c.BundleSource = strings.TrimSpace(c.BundleSource)
 	c.BundleIdentity = strings.TrimSpace(c.BundleIdentity)
 	c.PackInventoryGeneration = strings.TrimSpace(c.PackInventoryGeneration)
+	c.RuntimeInstanceID = strings.TrimSpace(c.RuntimeInstanceID)
 	return c
 }
 
@@ -136,13 +207,17 @@ func (c ChannelRuntimeContextCoordinate) Validate() error {
 
 func (c ChannelRuntimeContextCoordinate) ValidateContext() error {
 	c = c.Normalized()
-	if _, err := runtimecorrelation.DecodeBundleSourceFact(c.BundleHash, c.BundleSource); err != nil {
-		return fmt.Errorf("channel runtime context source: %w", err)
+	if err := c.DurableIdentity().Validate(); err != nil {
+		return err
 	}
-	if c.BundleIdentity == "" || c.PackInventoryGeneration == "" || c.ContextPublicationGeneration == 0 || !c.PlanGeneration.Valid() {
-		return fmt.Errorf("channel runtime context requires exact bundle, inventory, publication, and plan generations")
+	if c.RuntimeInstanceID == "" || c.ContextPublicationGeneration == 0 {
+		return fmt.Errorf("channel runtime context requires an exact runtime instance and publication generation")
 	}
 	return nil
+}
+
+func (c ChannelRuntimeContextCoordinate) MatchesDurableIdentity(other ChannelRuntimeContextCoordinate) bool {
+	return c.DurableIdentity().Matches(other.DurableIdentity())
 }
 
 func (c ChannelRuntimeContextCoordinate) Matches(other ChannelRuntimeContextCoordinate) bool {
@@ -455,6 +530,7 @@ type AdvanceRequest struct {
 	OperationID                 string
 	ExpectedRevision            int64
 	Phase                       Phase
+	RebindCoordinate            *ChannelRuntimeContextCoordinate
 	CredentialAdmissions        []CredentialAdmission
 	ReplaceCredentialAdmissions bool
 	IdentityOperationID         string

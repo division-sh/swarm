@@ -8,18 +8,18 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
 )
 
-func (s *PostgresStore) ActiveRunBundleAvailabilities(ctx context.Context) ([]runbundle.Availability, error) {
+func (s *PostgresStore) ActiveNonStandingRunBundleAvailabilities(ctx context.Context) ([]runbundle.Availability, error) {
 	if s == nil || s.runBundles == nil {
 		return nil, fmt.Errorf("postgres store is required")
 	}
 	if err := s.requireCurrentSchema(); err != nil {
 		return nil, err
 	}
-	return s.runBundles.ListActive(ctx)
+	return s.runBundles.ListActiveNonStanding(ctx)
 }
 
-func (s *PostgresStore) ActiveRunBundleAvailabilityConflicts(ctx context.Context) ([]runbundle.Availability, error) {
-	availabilities, err := s.ActiveRunBundleAvailabilities(ctx)
+func (s *PostgresStore) ActiveNonStandingRunBundleAvailabilityConflicts(ctx context.Context) ([]runbundle.Availability, error) {
+	availabilities, err := s.ActiveNonStandingRunBundleAvailabilities(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -62,6 +62,67 @@ func TestCandidateCatalogRejectsDuplicateExactCoordinate(t *testing.T) {
 	}
 }
 
+func TestCandidateCatalogResolvesOnlyExactDurableSuccessor(t *testing.T) {
+	predecessor := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
+	successor := predecessor
+	successor.Coordinate.RuntimeInstanceID = "22222222-2222-4222-8222-222222222222"
+	successor.Coordinate.ContextPublicationGeneration++
+	successor.Coordinate.TargetGeneration++
+	successor.Target.Generation = successor.Coordinate.TargetGeneration
+	catalog, err := NewCandidateCatalog([]Candidate{successor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, found := catalog.FindDurableSuccessor(
+		predecessor.Provider, predecessor.Interface, predecessor.Coordinate, predecessor.Target.Selector,
+		predecessor.Posture, predecessor.Ceremony,
+	)
+	if !found || !resolved.Coordinate.Matches(successor.Coordinate) {
+		t.Fatalf("durable successor = %#v found=%v", resolved, found)
+	}
+	if _, found := catalog.FindExact(predecessor.Provider, predecessor.Interface, predecessor.Coordinate, predecessor.Target.Selector); found {
+		t.Fatal("predecessor live occurrence remained exact-current")
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*Candidate)
+	}{
+		{name: "bundle source", mutate: func(c *Candidate) { c.Coordinate.BundleSource = "ephemeral" }},
+		{name: "bundle identity", mutate: func(c *Candidate) { c.Coordinate.BundleIdentity = "bundle:changed@sha256:identity" }},
+		{name: "pack inventory", mutate: func(c *Candidate) { c.Coordinate.PackInventoryGeneration = "sha256:changed" }},
+		{name: "plan", mutate: func(c *Candidate) { c.Coordinate.PlanGeneration = testPlanGeneration("changed") }},
+		{name: "target", mutate: func(c *Candidate) { c.Target.Selector = "ingress:workflow:other:telegram" }},
+		{name: "posture", mutate: func(c *Candidate) { c.Posture = ActivationSessionConnection }},
+		{name: "ceremony", mutate: func(c *Candidate) { c.Ceremony = CeremonyProviderPairing }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			changed := successor
+			tc.mutate(&changed)
+			changedCatalog := &CandidateCatalog{candidates: []Candidate{changed}}
+			if _, found := changedCatalog.FindDurableSuccessor(
+				predecessor.Provider, predecessor.Interface, predecessor.Coordinate, predecessor.Target.Selector,
+				predecessor.Posture, predecessor.Ceremony,
+			); found {
+				t.Fatal("changed candidate was accepted as durable successor")
+			}
+		})
+	}
+}
+
+func TestCandidateCatalogRejectsAmbiguousDurableSuccessorOccurrences(t *testing.T) {
+	predecessor := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
+	successor := predecessor
+	successor.Coordinate.RuntimeInstanceID = "22222222-2222-4222-8222-222222222222"
+	successor.Coordinate.ContextPublicationGeneration++
+	successor.Coordinate.TargetGeneration++
+	successor.Target.Generation = successor.Coordinate.TargetGeneration
+	if _, err := NewCandidateCatalog([]Candidate{predecessor, successor}); err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("ambiguous durable successor error = %v", err)
+	}
+}
+
 func testCandidate(hashSuffix, flow string) Candidate {
 	identity := operatorchannel.InterfaceIdentity{
 		InterfaceRef: operatorchannel.InterfaceHITLChannelV2, ChannelPackID: "provider.telegram.hitl_channel",

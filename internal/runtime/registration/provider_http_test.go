@@ -44,7 +44,8 @@ func channelConfirmationTestContext(harness *channelConfirmationHarness, operati
 		ChannelConfirmation: runtimeeffects.ChannelConfirmationAuthority{
 			EffectOperationID: operationID, OnboardingOperationID: uuid.NewString(), OnboardingRevision: 4,
 			ActivationID: uuid.NewString(), ActivationRevision: 2, BindingRevision: 3, PrincipalID: uuid.NewString(),
-			BundleHash: "bundle-v1:sha256:" + strings.Repeat("a", 64), ContextPublicationGeneration: 7, PlanGeneration: planGeneration,
+			BundleHash: "bundle-v1:sha256:" + strings.Repeat("a", 64), RuntimeInstanceID: uuid.NewString(),
+			ContextPublicationGeneration: 7, PlanGeneration: planGeneration,
 		},
 	}
 	ctx := runtimeeffects.WithExecutionMode(context.Background(), runtimeeffects.ExecutionModeLive)
@@ -279,6 +280,18 @@ func TestProviderRegistrationApplyEffectOutcomes(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+}
+
+func TestProviderRegistrationReadClassifiesCredentialRejection(t *testing.T) {
+	tool := packfixture.ConnectorTool(t, "telegram", "telegram.identify_bot").Tool
+	executor := HTTPExecutor{Client: &http.Client{Transport: registrationRoundTripFunc(func(*http.Request) (*http.Response, error) {
+		return registrationResponse(http.StatusUnauthorized, `{"ok":false,"error_code":401,"description":"Unauthorized"}`), nil
+	})}}
+	_, err := executor.Read(context.Background(), "telegram.identify_bot", tool, map[string]any{}, map[string]any{"telegram_bot_token": "rejected-secret"})
+	var rejected *ProviderCredentialRejectedError
+	if !errors.As(err, &rejected) || rejected.StatusCode != http.StatusUnauthorized || strings.Contains(err.Error(), "rejected-secret") {
+		t.Fatalf("credential rejection = %#v, %v", rejected, err)
+	}
 }
 
 func TestProviderRegistrationTransportFailsClosedBeforeCredentialsLeaveProcess(t *testing.T) {

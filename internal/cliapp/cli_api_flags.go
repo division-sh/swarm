@@ -92,6 +92,7 @@ func cliAPIConnectionFlagAfterLeafCommand(prefix []string) bool {
 		{"channel", "connect"},
 		{"channel", "reconnect"},
 		{"channel", "rebind"},
+		{"channel", "resume"},
 		{"channel", "list"},
 		{"channel", "status"},
 		{"channel", "unbind"},
