@@ -25,6 +25,7 @@ type publicSurfaceBackendMatrix struct {
 	IssueRole          string                                    `yaml:"issue_role"`
 	Source             publicSurfaceMatrixSource                 `yaml:"source"`
 	Policy             publicSurfaceMatrixPolicy                 `yaml:"policy"`
+	StoreParity        publicSurfaceStoreParity                  `yaml:"store_parity"`
 	ActiveTrackers     []complianceActiveTracker                 `yaml:"active_trackers"`
 	MutatingLedger     []publicSurfaceMutatingAPIParityEntry     `yaml:"mutating_api_parity_ledger"`
 	OperatorReadLedger []publicSurfaceOperatorReadAPIParityEntry `yaml:"operator_read_api_parity_ledger"`
@@ -109,6 +110,7 @@ type publicSurfaceValidationContext struct {
 	cliCommands            map[string]struct{}
 	goTests                map[string]string
 	servedScenarios        map[string]servedparity.Scenario
+	storeParity            publicSurfaceStoreParityValidationContext
 }
 
 type publicSurfaceSelectedOperatorReadAPIProof struct {
@@ -670,6 +672,10 @@ func newPublicSurfaceValidationContext(t *testing.T, root string) publicSurfaceV
 	if err != nil {
 		t.Fatalf("load public surface go test symbols: %v", err)
 	}
+	storeParity, err := newPublicSurfaceStoreParityValidationContext(root)
+	if err != nil {
+		t.Fatalf("load public surface store parity owners: %v", err)
+	}
 
 	apiMethods := map[string]struct{}{}
 	apiMethodInfo := map[string]publicSurfaceAPIMethodInfo{}
@@ -714,6 +720,7 @@ func newPublicSurfaceValidationContext(t *testing.T, root string) publicSurfaceV
 		cliCommands:            loadPublicSurfaceCLICommands(t, root),
 		goTests:                goTests,
 		servedScenarios:        loadPublicSurfaceServedParityScenarios(),
+		storeParity:            storeParity,
 	}
 }
 
@@ -789,6 +796,7 @@ func validatePublicSurfaceBackendMatrix(root string, matrix publicSurfaceBackend
 	if _, ok := activeTrackers[trackerKey(0, "operator_surfaces.v1_openrpc_api_conformance")]; !ok {
 		problems = append(problems, "active_trackers missing operator_surfaces.v1_openrpc_api_conformance watchlist")
 	}
+	problems = append(problems, validatePublicSurfaceStoreParity(root, matrix.StoreParity, matrix.MutatingLedger, matrix.OperatorReadLedger, ctx, activeTrackers)...)
 	problems = append(problems, validatePublicSurfaceMutatingAPIParityLedger(root, matrix.MutatingLedger, ctx, activeTrackers)...)
 	problems = append(problems, validatePublicSurfaceOperatorReadAPIParityLedger(root, matrix.OperatorReadLedger, ctx, activeTrackers)...)
 
