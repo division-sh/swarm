@@ -182,6 +182,67 @@ func TestDevScratchEpochCanonicalPathAliasesConverge(t *testing.T) {
 	}
 }
 
+func TestDevScratchEpochRejectsAliasedStateDirectoryBeforeExternalMutation(t *testing.T) {
+	root := t.TempDir()
+	external := t.TempDir()
+	if err := os.Symlink(external, filepath.Join(root, ".swarm")); err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := devscratch.Resolve(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := devscratch.Acquire(coordinate); err == nil || !strings.Contains(err.Error(), "unalias") {
+		t.Fatalf("Acquire error = %v, want aliased state-directory refusal", err)
+	}
+	requireEmptyDirectory(t, external)
+}
+
+func TestDevScratchEpochRejectsAliasedStoreDirectoryBeforeExternalMutation(t *testing.T) {
+	root := t.TempDir()
+	statePath := filepath.Join(root, ".swarm")
+	if err := os.Mkdir(statePath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	external := t.TempDir()
+	if err := os.Symlink(external, filepath.Join(statePath, "stores")); err != nil {
+		t.Fatal(err)
+	}
+	coordinate, err := devscratch.Resolve(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := devscratch.Acquire(coordinate); err == nil || !strings.Contains(err.Error(), "unalias") {
+		t.Fatalf("Acquire error = %v, want aliased store-directory refusal", err)
+	}
+	requireEmptyDirectory(t, external)
+}
+
+func TestDevScratchEpochCreatesMissingStateDirectories(t *testing.T) {
+	root := t.TempDir()
+	coordinate, err := devscratch.Resolve(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, ".swarm")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("initial state-directory stat error = %v, want absent", err)
+	}
+	authority, err := devscratch.Acquire(coordinate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer authority.AbortBeforeStoreOpen()
+	for _, path := range []string{filepath.Join(root, ".swarm"), filepath.Join(root, ".swarm", "stores")} {
+		info, err := os.Lstat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			t.Fatalf("created state component %q mode = %s, want unaliased directory", path, info.Mode())
+		}
+	}
+}
+
 func TestDevScratchEpochReplacementIsAllOrFailClosed(t *testing.T) {
 	coordinate := scratchCoordinate(t)
 	if err := os.MkdirAll(filepath.Dir(coordinate.DatabasePath), 0o700); err != nil {
@@ -301,6 +362,17 @@ func requireContended(t *testing.T, coordinate devscratch.Coordinate) {
 	if err == nil {
 		_ = authority.AbortBeforeStoreOpen()
 		t.Fatal("acquired a live dev scratch epoch")
+	}
+}
+
+func requireEmptyDirectory(t *testing.T, path string) {
+	t.Helper()
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("external directory %q was mutated: %v", path, entries)
 	}
 }
 
