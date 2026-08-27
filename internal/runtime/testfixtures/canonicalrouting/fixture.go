@@ -25,7 +25,6 @@ const (
 	FanInStream             ArtifactID = "fan-in/stream"
 	FanInBarrier            ArtifactID = "fan-in/barrier"
 	HarnessInjection        ArtifactID = "harness-injection"
-	NotifyAllChildren       ArtifactID = "notify-all-children"
 	TelegramAgent           ArtifactID = "telegram-agent"
 )
 
@@ -186,7 +185,6 @@ func canonicalExamplePath(id ArtifactID) (string, bool) {
 		FanInStream:             "examples/routing/fan-in/stream",
 		FanInBarrier:            "examples/routing/fan-in/barrier",
 		HarnessInjection:        "examples/routing/harness-injection",
-		NotifyAllChildren:       "examples/routing/notify-all-children",
 		TelegramAgent:           telegramAgentExamplePath,
 	}
 	for canonical, root := range paths {
