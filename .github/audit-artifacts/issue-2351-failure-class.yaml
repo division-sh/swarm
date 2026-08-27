@@ -82,7 +82,7 @@ class_model:
     recovery diagnostics, observed-state batch replacement, execution admission, both Manager run
     modes, process route publication, pending finalization, run-lifecycle execution,
     maintenance, schedule and timer restoration, pipeline recovery, continuation synchronization,
-    outbox, listeners, ingress, public readiness,
+    managed-provider startup probing, outbox, listeners, ingress, public readiness,
     refusal, compensation, restart postures, single- and multi-context serving,
     exact source isolation, and both stores.
   intended_closure_level: chosen_working_failure_class_eliminated
@@ -432,6 +432,15 @@ startup_consumer_matrix:
   directive_operation_reconciliation:
     classification: state_or_authority_only_safe_before_topology
     proof: settles_persisted_operation_state_and_author_activity_without_constructing_or_dispatching_dynamic_work
+  managed_provider_startup_probe:
+    classification: synchronous_provider_contract_precondition_different_semantic_concept_safe_before_topology
+    proof: >-
+      ValidateManagedProviderPreflight uses the disjoint startup-probe authority,
+      excludes emit tools, joins every optional empty-object tool probe before
+      returning, and cannot admit managed execution or release EventBus delivery.
+      It may persist provider capability/effect evidence, but it is not an
+      autonomous retained-work producer and does not consume dynamic process
+      topology.
   current_source_completed_active_dynamic_readiness:
     classification: prerequisite_consumer_safe_before_topology
     proof: source_scoped_completed_eligible_plan_is_durable_desired_topology_not_interrupted_work
