@@ -2,8 +2,6 @@ package builder
 
 import (
 	"strings"
-
-	"github.com/google/uuid"
 )
 
 func coercePayload(raw any) map[string]any {
@@ -30,22 +28,6 @@ func stringSet(values []string) map[string]struct{} {
 		}
 	}
 	return out
-}
-
-func nonEmptyOrUUID(value string) string {
-	if value = strings.TrimSpace(value); value != "" {
-		return value
-	}
-	return uuid.NewString()
-}
-
-func payloadMap(raw any) map[string]any {
-	switch typed := raw.(type) {
-	case map[string]any:
-		return typed
-	default:
-		return map[string]any{}
-	}
 }
 
 func cloneRunEvent(in RunEventEnvelope) RunEventEnvelope {

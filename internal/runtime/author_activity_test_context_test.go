@@ -51,16 +51,6 @@ type runtimeTestCandidateOwner struct{}
 
 type runtimeTestCandidateRegistration struct{}
 
-type runtimeTestMutationOwner interface {
-	RunRuntimeMutationContext(context.Context, func(context.Context) error) error
-}
-
-type runtimeTestRejectedMutationOwner struct{}
-
-func (runtimeTestRejectedMutationOwner) RunRuntimeMutationContext(context.Context, func(context.Context) error) error {
-	return errors.New("unexpected runtime test workflow mutation")
-}
-
 type runtimeTestUnavailableDecisionCards struct{ decisioncard.Store }
 
 type runtimeTestRetainedSession struct {
@@ -370,13 +360,6 @@ type runtimeTestUnavailableProposedEffects struct {
 type runtimeTestUnavailableHumanTasks struct{ decisioncard.HumanTaskStore }
 type runtimeTestUnavailableDecisionCardDraftExpiry struct{}
 type runtimeTestUnavailableHumanTaskExpiry struct{}
-type runtimeTestUnavailableDeliveryStore struct{ runtimedelivery.Store }
-type runtimeTestUnavailableDeadLetterRecorder struct {
-	runtimebus.TargetFailureDeadLetterRecorder
-}
-type runtimeTestUnavailableRunLifecycle struct {
-	runtimerunlifecycle.OperationOwner
-}
 
 func (*runtimeTestUnavailableDecisionCardDraftExpiry) ExpireDecisionCardInputDrafts(context.Context, time.Time) (int, error) {
 	return 0, nil
@@ -392,43 +375,6 @@ func (*runtimeTestUnavailableHumanTaskExpiry) ListDueHumanTaskExpiryEvents(conte
 
 func (*runtimeTestUnavailableHumanTaskExpiry) CommitHumanTaskExpirations(context.Context, runtimepipeline.HumanTaskExpiryCommand) (runtimepipeline.CommittedHumanTaskExpiry, error) {
 	return runtimepipeline.CommittedHumanTaskExpiry{}, nil
-}
-
-func completeRuntimeTestPipelineOptions(bus *runtimebus.EventBus, opts runtimepipeline.PipelineCoordinatorOptions) runtimepipeline.PipelineCoordinatorOptions {
-	if !opts.ExecutionPosture.Valid() {
-		opts.ExecutionPosture = executionposture.Live
-	}
-	if !opts.ReceiverExecution.Configured() {
-		opts.ReceiverExecution = eventreceiver.NormalExecution()
-	}
-	if opts.DeliveryStore == nil {
-		opts.DeliveryStore = &runtimeTestUnavailableDeliveryStore{}
-	}
-	if opts.DeadLetters == nil {
-		opts.DeadLetters = &runtimeTestUnavailableDeadLetterRecorder{}
-	}
-	if opts.DecisionCards == nil {
-		opts.DecisionCards = &runtimeTestUnavailableDecisionCards{}
-	}
-	if opts.ProposedEffects == nil {
-		opts.ProposedEffects = &runtimeTestUnavailableProposedEffects{}
-	}
-	if opts.HumanTasks == nil {
-		opts.HumanTasks = &runtimeTestUnavailableHumanTasks{}
-	}
-	if opts.DecisionCardDraftExpiry == nil {
-		opts.DecisionCardDraftExpiry = &runtimeTestUnavailableDecisionCardDraftExpiry{}
-	}
-	if opts.HumanTaskExpiry == nil {
-		opts.HumanTaskExpiry = &runtimeTestUnavailableHumanTaskExpiry{}
-	}
-	if opts.DeliveryRuntime == nil {
-		opts.DeliveryRuntime = bus
-	}
-	if opts.RunLifecycle == nil {
-		opts.RunLifecycle = &runtimeTestUnavailableRunLifecycle{}
-	}
-	return opts
 }
 
 type runtimeTestDurableEventStore interface {

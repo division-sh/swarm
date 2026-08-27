@@ -257,12 +257,6 @@ func (s *ConversationSQLite) requireCurrentSchema() error {
 	}
 	return requireSchema("conversation sqlite", s.schemaGuard)
 }
-func (s *ObservabilitySQLite) requireCurrentSchema() error {
-	if s == nil {
-		return fmt.Errorf("operator observability sqlite schema guard is required")
-	}
-	return requireSchema("observability sqlite", s.schemaGuard)
-}
 
 func (s *RunSQLite) RequireCurrentSchema() error          { return s.requireCurrentSchema() }
 func (s *AgentSQLite) RequireCurrentSchema() error        { return s.requireCurrentSchema() }

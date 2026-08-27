@@ -24,7 +24,6 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/scenarioderivation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -1605,18 +1604,6 @@ func (s *runtimeProjectSupervisor) setReady(ready bool) {
 	}
 }
 
-func (s *runtimeProjectSupervisor) swapCurrentRuntime(resolvedRoot string, source semanticview.Source, bundle *runtimecontracts.WorkflowContractBundle, fact runtimecorrelation.BundleSourceFact, identity runtimecontracts.BundleIdentity, newRT *runtime.Runtime) *runtime.Runtime {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	old := s.currentRT
-	s.currentRoot, s.currentSource, s.currentBundle, s.currentRT = strings.TrimSpace(resolvedRoot), source, bundle, newRT
-	s.currentBundleSourceFact, s.currentBundleIdentity = fact, identity
-	if s.ready != nil {
-		s.ready.Store(true)
-	}
-	return old
-}
-
 func (s *runtimeProjectSupervisor) detachCurrentRuntime() *runtime.Runtime {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1820,10 +1807,6 @@ func (s *runtimeProjectSupervisor) projectStatusLocked() builderpkg.ProjectStatu
 	return status
 }
 
-type dashboardDynamicRuntimeControl struct {
-	supervisor *runtimeProjectSupervisor
-}
-
 type runtimeProcessInboundHandler struct {
 	contexts *runtime.RuntimeContextManager
 }
@@ -1871,40 +1854,6 @@ func parseProcessWebhookPath(path string) (string, string, bool) {
 	alias := strings.TrimSpace(parts[1])
 	provider := strings.TrimSpace(parts[2])
 	return alias, provider, alias != "" && provider != ""
-}
-
-func (c dashboardDynamicRuntimeControl) PauseIngress() error {
-	use, err := c.supervisor.acquireCurrentRuntime(context.Background())
-	if err != nil {
-		return err
-	}
-	defer func() { _ = use.Done() }()
-	rt := use.Runtime()
-	if rt == nil || rt.RuntimeIngress == nil {
-		return fmt.Errorf("runtime ingress controller unavailable")
-	}
-	_, err = rt.RuntimeIngress.Pause(use.WorkContext(), runtimeingress.TransitionRequest{
-		Reason:       "dashboard_action",
-		ControlledBy: "dashboard",
-	})
-	return err
-}
-
-func (c dashboardDynamicRuntimeControl) ResumeIngress() error {
-	use, err := c.supervisor.acquireCurrentRuntime(context.Background())
-	if err != nil {
-		return err
-	}
-	defer func() { _ = use.Done() }()
-	rt := use.Runtime()
-	if rt == nil || rt.RuntimeIngress == nil {
-		return fmt.Errorf("runtime ingress controller unavailable")
-	}
-	_, err = rt.RuntimeIngress.Resume(use.WorkContext(), runtimeingress.TransitionRequest{
-		Reason:       "dashboard_action",
-		ControlledBy: "dashboard",
-	})
-	return err
 }
 
 type dashboardDynamicAgentControl struct {

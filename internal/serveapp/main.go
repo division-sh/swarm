@@ -2,7 +2,6 @@ package serveapp
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -2609,27 +2608,6 @@ func enforceServeBundleMatchAdmissionForHashes(ctx context.Context, availability
 	return fmt.Errorf("active run pinned bundle_hash conflict: DB-loaded serve bundle_hash set %s cannot resume %d active run(s) with different bundle_hash: %s", strings.Join(pinnedBundleHashes, ","), len(mismatches), strings.Join(details, "; "))
 }
 
-func activeRunPinnedBundleHashConflicts(ctx context.Context, availability runbundle.AvailabilityStore, pinnedBundleHash string) ([]runbundle.Availability, error) {
-	pinnedBundleHash = strings.TrimSpace(pinnedBundleHash)
-	if pinnedBundleHash == "" {
-		return nil, nil
-	}
-	availabilities, err := availability.ActiveRunBundleAvailabilities(ctx)
-	if err != nil {
-		return nil, err
-	}
-	conflicts := make([]runbundle.Availability, 0, len(availabilities))
-	for _, availability := range availabilities {
-		if !availability.Available() {
-			continue
-		}
-		if strings.TrimSpace(availability.BundleHash) != pinnedBundleHash {
-			conflicts = append(conflicts, availability)
-		}
-	}
-	return conflicts, nil
-}
-
 func activeRunPinnedBundleHashesConflicts(ctx context.Context, availability runbundle.AvailabilityStore, pinnedBundleHashes []string) ([]runbundle.Availability, error) {
 	allowed := map[string]struct{}{}
 	for _, hash := range uniqueTrimmedServeBundleHashes(pinnedBundleHashes) {
@@ -3094,13 +3072,4 @@ func splitListenerHostPort(addr net.Addr) (string, string, error) {
 func isLocalListenerHost(host string) bool {
 	host = strings.TrimSpace(strings.Trim(host, "[]"))
 	return host == "" || host == "::" || host == "0.0.0.0" || host == "127.0.0.1" || host == "::1" || strings.EqualFold(host, "localhost")
-}
-
-func closeDB(db *sql.DB) {
-	if db == nil {
-		return
-	}
-	if err := db.Close(); err != nil {
-		log.Printf("close db: %v", err)
-	}
 }

@@ -1,25 +1,9 @@
 package operatorsurface
 
 import (
-	"context"
-	"strings"
-
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
-
-type operatorPublicConversationProjectionSource interface {
-	ListOperatorConversationTurns(context.Context, operatorread.OperatorConversationTurnListOptions) (operatorread.OperatorConversationTurnListResult, error)
-	LoadOperatorPublicConversationTurn(context.Context, string, string) (operatorread.OperatorPublicConversationTurnDetail, error)
-	LoadLatestPublicConversationTurn(context.Context, string) (*operatorread.OperatorPublicConversationTurn, error)
-}
-
-func loadOperatorLatestConversationTurn(ctx context.Context, source operatorPublicConversationProjectionSource, sessionID string) (*operatorread.OperatorPublicConversationTurn, error) {
-	if source == nil || strings.TrimSpace(sessionID) == "" {
-		return nil, nil
-	}
-	return source.LoadLatestPublicConversationTurn(ctx, sessionID)
-}
 
 func operatorLiveTurnFromPublic(turn *operatorread.OperatorPublicConversationTurn) *operatorread.OperatorLiveTurn {
 	if turn == nil {

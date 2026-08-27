@@ -42,7 +42,3 @@ func appendProviderConnectorCapabilitySubjects(ctx context.Context, report *Loca
 	}
 	report.addCapabilitySubjects(subjects)
 }
-
-func connectorFindingCode(toolID string) string {
-	return findingCode(toolID)
-}

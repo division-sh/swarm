@@ -96,10 +96,6 @@ func (s *DecisionSQLiteOwner) CreateHumanTaskCard(ctx context.Context, card deci
 	})
 }
 
-func insertHumanTaskCard(ctx context.Context, tx *sql.Tx, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation, postgres bool) error {
-	return insertHumanTaskCardWithStory(ctx, nil, tx, card, continuation, postgres)
-}
-
 func insertHumanTaskCardWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, card decisioncard.Card, continuation decisioncard.HumanTaskContinuation, postgres bool) error {
 	continuation = continuation.Canonical()
 	if err := continuation.Validate(card); err != nil {

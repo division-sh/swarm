@@ -1637,10 +1637,6 @@ func (eb *EventBus) AdmitBundleSourceFact(ctx context.Context) (context.Context,
 	return eb.admitBundleSourceFact(ctx)
 }
 
-func (eb *EventBus) runInterceptors(ctx context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
-	return eb.runInterceptorSet(ctx, evt, eb.interceptorsSnapshot())
-}
-
 func (eb *EventBus) interceptorsSnapshot() []EventInterceptor {
 	eb.mu.RLock()
 	interceptors := append([]EventInterceptor(nil), eb.interceptors...)
@@ -1864,20 +1860,6 @@ func (eb *EventBus) logQueuedDeliveries(ctx context.Context, evt events.Event, r
 		}
 		eb.logRuntime(ctx, "debug", "Delivery entered queued state", "eventbus", "delivery_lifecycle_transition", evt.ID(), string(evt.Type()), strings.TrimSpace(recipient), evt.EntityID(), "", nil, detail, nil, 0)
 	}
-}
-
-func subscriberIDs(in []Subscriber) []string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(in))
-	for _, subscriber := range in {
-		if subscriber.Recipient.Empty() {
-			continue
-		}
-		out = append(out, subscriber.Recipient.ID())
-	}
-	return uniqueStrings(out)
 }
 
 func publishDiagnosticRecipientMaps(in []PublishDiagnosticRecipient) []map[string]any {

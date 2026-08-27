@@ -28,11 +28,6 @@ import (
 	"github.com/lib/pq"
 )
 
-const (
-	runForkSelectedContractExecutionLineageTable = "run_fork_selected_contract_executions"
-	runForkSelectedContractBranchDivergenceTable = "run_fork_selected_contract_branch_divergences"
-)
-
 func prepareRunForkSelectedContractRouteResolution(
 	plan runfork.RunForkPlan,
 	forkRunID string,
@@ -1178,10 +1173,6 @@ func insertRunForkSelectedContractBranchDivergence(ctx context.Context, tx *sql.
 		return fmt.Errorf("record selected-contract branch divergence: %w", err)
 	}
 	return nil
-}
-
-func runForkSelectedContractExecutionPlanBlockers(plan runfork.RunForkPlan, allowedSourceEventIDs []string) []runfork.RunForkUnsupportedBlocker {
-	return runForkSelectedContractExecutionPlanBlockersFromAdmission(plan, runfork.RunForkSelectedContractReplayResumeAdmission(plan), allowedSourceEventIDs)
 }
 
 func runForkSelectedContractExecutionPlanBlockersFromAdmission(plan runfork.RunForkPlan, admission runfork.RunForkReplayResumeAdmission, allowedSourceEventIDs []string) []runfork.RunForkUnsupportedBlocker {

@@ -673,14 +673,3 @@ func printRunForkPlan(w io.Writer, plan runfork.RunForkPlan) {
 		)
 	}
 }
-
-func asString(v any) string {
-	switch typed := v.(type) {
-	case string:
-		return typed
-	case []byte:
-		return string(typed)
-	default:
-		return ""
-	}
-}

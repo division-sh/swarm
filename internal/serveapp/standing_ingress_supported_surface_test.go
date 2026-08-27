@@ -22,8 +22,6 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
-	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/managedcapabilities"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
@@ -37,7 +35,6 @@ import (
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/store/storetest"
-	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
@@ -60,18 +57,6 @@ func (telegramPhraseBotLLMRuntime) StartSession(ctx context.Context, agentID, sy
 		ID: uuid.NewString(), AgentID: agentID, SystemPrompt: systemPrompt,
 		Tools: append([]runtimellm.ToolDefinition(nil), tools...), Memory: memory, MemoryIdentity: execution.Identity,
 	}, nil
-}
-
-type authorActivityHeadFailureEventStore struct {
-	runtimebus.EventStore
-}
-
-func (authorActivityHeadFailureEventStore) HeadAuthorActivity(context.Context) (int64, error) {
-	return 0, errors.New("author activity head unavailable")
-}
-
-func (authorActivityHeadFailureEventStore) ListAuthorActivity(context.Context, runtimeauthoractivity.ListOptions) (runtimeauthoractivity.ListResult, error) {
-	return runtimeauthoractivity.ListResult{}, errors.New("author activity list must not run after head failure")
 }
 
 func (telegramPhraseBotLLMRuntime) PrepareManagedSession(context.Context, *runtimellm.Session) error {
@@ -1441,61 +1426,4 @@ func writeStandingTelegramServeFixture(t testing.TB, telegramBaseURL string) str
 	removeExactCanonicalTelegramAgentMock(t, root)
 	redirectExternalHosts(t, map[string]string{"api.telegram.org": telegramBaseURL})
 	return root
-}
-
-func commitReadinessHandoffAuthorActivity(sqlitePath string, rt *runtimepkg.Runtime) error {
-	selected, err := store.NewSQLiteRuntimeStore(sqlitePath)
-	if err != nil {
-		return err
-	}
-	defer selected.Close()
-	scope := runtimeauthoractivity.BundleScope(rt.Options.RuntimeInstanceID, rt.Options.BundleSourceFact.BundleHash())
-	ctx := runtimeauthoractivity.WithScope(context.Background(), scope)
-	tx, err := storetest.DatabaseForTest(selected).BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	story, err := authoractivityfixture.Begin(ctx, tx, authoractivityfixture.DialectSQLite)
-	if err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	identity := uuid.NewString()
-	if err := authoractivityfixture.Record(story, runtimeauthoractivity.Draft{
-		Kind: runtimeauthoractivity.KindInboundReceived, Version: runtimeauthoractivity.Version, Transition: "received",
-		SourceOwner: "events", SourceIdentity: identity, DedupKey: "readiness-handoff:" + identity,
-		OccurredAt: time.Now().UTC(), Scope: scope, AuthorSafeSummary: "across head",
-		Projection: runtimeauthoractivity.Projection{
-			SubjectType: "entity", SubjectID: uuid.NewString(), Provider: "handoff",
-			AuthorSubjectType: "chat", AuthorSubjectID: "readiness",
-		},
-	}); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if err := authoractivityfixture.Finalize(story); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	return tx.Commit()
-}
-
-func waitForStandingStoryOutput(t testing.TB, process *serveRuntimeTestProcess, fragments ...string) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		output := process.outputString()
-		matched := true
-		for _, fragment := range fragments {
-			if !strings.Contains(output, fragment) {
-				matched = false
-				break
-			}
-		}
-		if matched {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for story output %q:\n%s", fragments, process.outputString())
 }

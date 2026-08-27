@@ -3,7 +3,6 @@ package builder
 import (
 	"encoding/json"
 	"errors"
-	"net/http"
 	"strings"
 	"time"
 
@@ -22,12 +21,6 @@ func internalError(err error) *RPCError {
 }
 
 func errUnavailable(message string) error { return errors.New(strings.TrimSpace(message)) }
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("content-type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
 
 func asString(v any) string {
 	switch typed := v.(type) {
@@ -89,12 +82,4 @@ func credentialRecord(item runtimecredentials.Descriptor) CredentialRecord {
 		})
 	}
 	return record
-}
-
-func strconvQuote(value string) string {
-	raw, err := json.Marshal(strings.TrimSpace(value))
-	if err != nil {
-		return `""`
-	}
-	return string(raw)
 }

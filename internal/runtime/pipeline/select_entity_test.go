@@ -541,25 +541,6 @@ func newSelectEntityTestCoordinator(t *testing.T, db *sql.DB) (*PipelineCoordina
 	return newSelectEntityTestCoordinatorWithNodes(t, db, selectEntityTestNodes)
 }
 
-func newSelectOrCreateEntityTestCoordinator(t *testing.T, db *sql.DB) (*PipelineCoordinator, semanticview.Source) {
-	t.Helper()
-	return newSelectEntityTestCoordinatorWithNodes(t, db, `
-treasury-orchestrator:
-  id: treasury-orchestrator
-  execution_type: system_node
-  subscribes_to: [opco.spend_recorded]
-  event_handlers:
-    opco.spend_recorded:
-      select_or_create_entity:
-        by:
-          vertical_id: payload.vertical_id
-      data_accumulation:
-        writes:
-          - source_field: amount_usd
-            target_field: spent_usd
-`)
-}
-
 func persistedSelectEntityIngress(t *testing.T, ctx context.Context, db *sql.DB, payload map[string]any, envelope events.EventEnvelope) events.Event {
 	t.Helper()
 	const sourceEntityID = "22222222-2222-2222-2222-222222222222"

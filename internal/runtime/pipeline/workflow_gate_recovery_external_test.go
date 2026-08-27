@@ -274,18 +274,6 @@ type gateRecoveryPoisonInterceptor struct {
 	poisonEventID string
 }
 
-type gateRecoveryCountingInterceptor struct {
-	delegate runtimebus.EventInterceptor
-	calls    atomic.Int32
-}
-
-func (i *gateRecoveryCountingInterceptor) Intercept(ctx context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
-	if evt.Type() == events.EventType("mailbox.card_decided") {
-		i.calls.Add(1)
-	}
-	return i.delegate.Intercept(ctx, evt)
-}
-
 func (i gateRecoveryPoisonInterceptor) Intercept(_ context.Context, evt events.Event) (bool, []events.Event, runtimepipelineobligation.ExecutionOutcome, error) {
 	if evt.ID() != i.poisonEventID {
 		return true, nil, runtimepipelineobligation.Continue(), nil
@@ -1176,11 +1164,6 @@ func seedGateRecoveryRouteObligation(t *testing.T, tc gateRecoveryStoreCase, run
 	return eventID
 }
 
-func persistGateRecoveryRouteEvent(t *testing.T, tc gateRecoveryStoreCase, evt events.Event) {
-	t.Helper()
-	storetest.CommitSemanticEventWithRoutes(t, testAuthorActivityContext(t, context.Background()), tc.events, evt, nil, runtimepipelineobligation.ScopeSubscribed)
-}
-
 func setGateRecoveryRouteAttempt(t *testing.T, tc gateRecoveryStoreCase, eventID string, attempt int) {
 	t.Helper()
 	query := `UPDATE decision_card_route_obligations SET attempt_count = ?, next_attempt_at = ? WHERE event_id = ?`
@@ -1190,21 +1173,6 @@ func setGateRecoveryRouteAttempt(t *testing.T, tc gateRecoveryStoreCase, eventID
 	}
 	if _, err := tc.db.ExecContext(testAuthorActivityContext(t, context.Background()), query, args...); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func assertGateRecoveryObligationAttempt(t *testing.T, tc gateRecoveryStoreCase, eventID string, want int) {
-	t.Helper()
-	query := `SELECT attempt_count FROM decision_card_route_obligations WHERE event_id = ?`
-	if tc.postgres {
-		query = `SELECT attempt_count FROM decision_card_route_obligations WHERE event_id = $1::uuid`
-	}
-	var got int
-	if err := tc.db.QueryRowContext(testAuthorActivityContext(t, context.Background()), query, eventID).Scan(&got); err != nil {
-		t.Fatal(err)
-	}
-	if got != want {
-		t.Fatalf("decision route attempt count for %s = %d, want %d", eventID, got, want)
 	}
 }
 

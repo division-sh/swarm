@@ -546,11 +546,6 @@ func (pc *PipelineCoordinator) interceptPolicy(ctx context.Context, eventType st
 	return pc.workflowNodeInterceptPolicy(ctx, eventType, evt)
 }
 
-func (pc *PipelineCoordinator) handleEvent(ctx context.Context, evt events.Event) bool {
-	handled, _, _ := pc.handleEventResult(ctx, evt)
-	return handled
-}
-
 func (pc *PipelineCoordinator) handleEventResult(ctx context.Context, evt events.Event) (bool, runtimepipelineobligation.ExecutionOutcome, error) {
 	return pc.handleEventResultWithEmissionPlan(ctx, evt, nil)
 }

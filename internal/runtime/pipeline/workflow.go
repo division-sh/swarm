@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -251,52 +250,6 @@ func workflowSetStateBucket(instance *WorkflowInstance, key string, value map[st
 	instance.StateBuckets[strings.TrimSpace(key)] = cloneMap(value)
 }
 
-func workflowDeleteStateBucket(instance *WorkflowInstance, key string) {
-	if instance == nil || instance.StateBuckets == nil {
-		return
-	}
-	delete(instance.StateBuckets, strings.TrimSpace(key))
-}
-
-func workflowMutableFields(instance *WorkflowInstance) map[string]any {
-	if instance == nil {
-		return map[string]any{}
-	}
-	if instance.Fields == nil {
-		instance.Fields = map[string]any{}
-	}
-	return instance.Fields
-}
-
-func truthyMetadataFlag(v any) bool {
-	switch t := v.(type) {
-	case bool:
-		return t
-	case string:
-		switch strings.ToLower(strings.TrimSpace(t)) {
-		case "1", "true", "yes", "on":
-			return true
-		}
-	}
-	return asInt(v) > 0
-}
-
-func parseWorkflowTime(v any) time.Time {
-	raw := strings.TrimSpace(asString(v))
-	if raw == "" {
-		return time.Time{}
-	}
-	parsed, err := time.Parse(time.RFC3339Nano, raw)
-	if err != nil {
-		return time.Time{}
-	}
-	return parsed.UTC()
-}
-
-func workflowFieldsSnapshot(instance WorkflowInstance) map[string]any {
-	return cloneStringAnyMap(instance.Fields)
-}
-
 func LoadWorkflowDefinition(source semanticview.Source) (*WorkflowDefinition, error) {
 	if source == nil {
 		return nil, ErrContractBundleNil
@@ -422,16 +375,4 @@ func WorkflowRepoRoot() string {
 		return "."
 	}
 	return filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
-}
-
-func workflowHasTransition(transitions []WorkflowTransition, from, to WorkflowStateID) bool {
-	for _, transition := range transitions {
-		if transition.To != to {
-			continue
-		}
-		if containsWorkflowStateID(transition.From, from) {
-			return true
-		}
-	}
-	return false
 }

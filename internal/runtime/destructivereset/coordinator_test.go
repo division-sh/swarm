@@ -177,12 +177,6 @@ func (m *recordingLockManager) AcquireDestructiveReset(context.Context) (LockLea
 	return m.lease, true, nil
 }
 
-type lockManagerFunc func(context.Context) (LockLease, bool, error)
-
-func (f lockManagerFunc) AcquireDestructiveReset(ctx context.Context) (LockLease, bool, error) {
-	return f(ctx)
-}
-
 type recordingLease struct {
 	releases int
 	err      error

@@ -933,15 +933,6 @@ func writeMCPResult(t *testing.T, w http.ResponseWriter, id any, result any) {
 	})
 }
 
-func mustToolConfigJSON(t *testing.T, value any) json.RawMessage {
-	t.Helper()
-	raw, err := json.Marshal(value)
-	if err != nil {
-		t.Fatalf("json.Marshal: %v", err)
-	}
-	return raw
-}
-
 type toolImportDependencyOptions struct {
 	serverURL              string
 	credentialBind         string

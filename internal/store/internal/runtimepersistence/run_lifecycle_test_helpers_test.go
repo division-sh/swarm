@@ -540,30 +540,6 @@ func forkRunForTest(
 	return owner.ForkRunSource(ctx, request)
 }
 
-func reviseRunSourceForTest(
-	ctx context.Context,
-	selected any,
-	request runtimerunlifecycle.SourceRevisionRequest,
-) (runtimerunlifecycle.MutationDisposition, error) {
-	owner, ok := selected.(runLifecycleTerminalTestStore)
-	if !ok || owner == nil {
-		return "", fmt.Errorf("test run lifecycle owner is required, got %T", selected)
-	}
-	return owner.ReviseRunSource(ctx, request)
-}
-
-func syncRunCountersForTest(
-	ctx context.Context,
-	selected any,
-	runID string,
-) error {
-	owner, ok := selected.(runLifecycleTerminalTestStore)
-	if !ok || owner == nil {
-		return fmt.Errorf("test run lifecycle owner is required, got %T", selected)
-	}
-	return owner.SyncRunCounters(ctx, strings.TrimSpace(runID))
-}
-
 func executeRunCompletionCandidateForEvent(
 	ctx context.Context,
 	selected any,

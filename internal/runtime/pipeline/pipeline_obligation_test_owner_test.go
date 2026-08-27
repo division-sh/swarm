@@ -158,7 +158,6 @@ func (*unavailablePipelineTestHumanTaskExpiry) CommitHumanTaskExpirations(contex
 	return CommittedHumanTaskExpiry{}, errors.New("human-task expiry is unavailable")
 }
 
-type unavailablePipelineTestStandingServices struct{ StandingServicePersistence }
 type unavailablePipelineTestDecisionCardMutations struct{ DecisionCardMutationOwner }
 type unavailablePipelineTestDeliveryRuntime struct{ WorkflowDeliveryRuntime }
 type unavailablePipelineTestDeadLetters struct{ runtimedeadletters.Recorder }

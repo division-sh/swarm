@@ -207,13 +207,6 @@ func agentPersistedStatus(raw string) string {
 	}
 }
 
-func coalesceStringList(primary, fallback []string) []string {
-	if len(primary) > 0 {
-		return primary
-	}
-	return fallback
-}
-
 func coalesce(vals ...string) string {
 	for _, val := range vals {
 		if trimmed := strings.TrimSpace(val); trimmed != "" {

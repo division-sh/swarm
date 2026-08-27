@@ -872,17 +872,6 @@ func fanOutViewsForHandler(source semanticview.Source, node runtimeidentity.Exec
 	return out
 }
 
-func sortedAuthoringNodeIDs(nodes map[string]runtimecontracts.SystemNodeContract) []string {
-	nodeIDs := make([]string, 0, len(nodes))
-	for nodeID := range nodes {
-		if nodeID = strings.TrimSpace(nodeID); nodeID != "" {
-			nodeIDs = append(nodeIDs, nodeID)
-		}
-	}
-	sort.Strings(nodeIDs)
-	return nodeIDs
-}
-
 func indexedHandlerGraphSource(prefix string, idx int, id string) string {
 	id = strings.TrimSpace(id)
 	if id != "" {
@@ -1273,18 +1262,6 @@ func packageSourceFile(bundle *runtimecontracts.WorkflowContractBundle, packageK
 func sortedEntityFields(fields map[string]runtimecontracts.EntityFieldDecl) []string {
 	keys := make([]string, 0, len(fields))
 	for key := range fields {
-		key = strings.TrimSpace(key)
-		if key != "" {
-			keys = append(keys, key)
-		}
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-func sortedNodeIDs(nodes map[string]runtimecontracts.SystemNodeContract) []string {
-	keys := make([]string, 0, len(nodes))
-	for key := range nodes {
 		key = strings.TrimSpace(key)
 		if key != "" {
 			keys = append(keys, key)

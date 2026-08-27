@@ -887,16 +887,6 @@ func (h *runtimeHarness) publishConcurrentAndWait(steps []catalogTriggerStep, ti
 	}
 }
 
-func (h *runtimeHarness) publishRuntimeEvent(eventType, sourceAgent string, payload map[string]any, timeout time.Duration, recordOutcome bool, excludeFromEmitted bool) {
-	if err := h.publishRuntimeEventResult(eventType, sourceAgent, payload, timeout, recordOutcome, excludeFromEmitted); err != nil {
-		h.t.Fatalf("Publish(%s): %v", strings.TrimSpace(eventType), err)
-	}
-}
-
-func (h *runtimeHarness) publishRuntimeEventResult(eventType, sourceAgent string, payload map[string]any, timeout time.Duration, recordOutcome bool, excludeFromEmitted bool) error {
-	return h.publishRuntimeEventResultWithIdentity(eventType, sourceAgent, payload, uuid.NewString(), time.Now().UTC(), timeout, recordOutcome, excludeFromEmitted)
-}
-
 func (h *runtimeHarness) publishRuntimeEventResultForStep(step catalogTriggerStep, timeout time.Duration, recordOutcome bool) error {
 	eventID := strings.TrimSpace(step.eventID)
 	if eventID == "" {
@@ -1469,21 +1459,5 @@ func asString(v any) string {
 		return string(typed)
 	default:
 		return ""
-	}
-}
-
-func boolFromAny(v any) bool {
-	switch typed := v.(type) {
-	case bool:
-		return typed
-	case string:
-		switch strings.ToLower(strings.TrimSpace(typed)) {
-		case "1", "true", "yes", "on":
-			return true
-		default:
-			return false
-		}
-	default:
-		return false
 	}
 }

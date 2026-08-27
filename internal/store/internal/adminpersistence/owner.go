@@ -50,13 +50,6 @@ func (s *BundleDeletePostgresOwner) requireCurrentSchema() error {
 	return s.schemaGuard()
 }
 
-func (s *DestructiveResetPostgresOwner) requireCurrentSchema() error {
-	if s == nil || s.schemaGuard == nil {
-		return fmt.Errorf("destructive reset postgres schema guard is required")
-	}
-	return s.schemaGuard()
-}
-
 func quoteIdent(value string) string {
 	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
 }

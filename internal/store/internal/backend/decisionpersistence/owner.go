@@ -48,13 +48,6 @@ func NewSQLite(backend *sqlitebackend.Backend, requireCurrent func() error, cand
 	return &DecisionSQLiteOwner{backend: backend, requireCurrent: requireCurrent, candidateRequests: candidates, nowFn: now}, nil
 }
 
-func (s *DecisionSQLiteOwner) now() time.Time {
-	if s == nil || s.nowFn == nil {
-		return time.Now().UTC()
-	}
-	return s.nowFn().UTC()
-}
-
 func (s *DecisionPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 	if s == nil || s.backend == nil || s.requireCurrent == nil {
 		return errors.New("decision-card PostgreSQL owner is required")

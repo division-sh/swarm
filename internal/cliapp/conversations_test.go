@@ -508,21 +508,6 @@ func validConversationTurnDetail(sessionID string, index int) map[string]any {
 	}
 }
 
-func validConversationRuntimeLog() map[string]any {
-	return map[string]any{
-		"log_id":     "log-1",
-		"ts":         "2026-05-20T01:01:01Z",
-		"level":      "info",
-		"component":  "agent",
-		"source":     "runtime",
-		"run_id":     "run-1",
-		"entity_id":  "entity-1",
-		"session_id": "sess-1",
-		"message":    "turn completed",
-		"details":    map[string]any{"turn": 2},
-	}
-}
-
 func writeConversationJSONRPCError(t *testing.T, w http.ResponseWriter, id string, code string) {
 	t.Helper()
 	w.Header().Set("content-type", "application/json")

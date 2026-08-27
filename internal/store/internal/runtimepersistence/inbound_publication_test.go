@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -477,96 +476,6 @@ func assertInboundEvidenceProducedByPlatform(t *testing.T, db *sql.DB, sqlite bo
 	}
 }
 
-func runInboundPublicationStandingGenerationRebindProof(t *testing.T, db *sql.DB, sqlite bool, store inboundPublicationProofStore, workflowStore *runtimepipeline.PipelineCoordinator) {
-	t.Helper()
-	candidate := runtimepipeline.StandingServiceCandidate{
-		ServiceID:  runtimeflowidentity.StandingServiceID("publication-reset-proof", "ingress"),
-		PackageKey: "publication-reset-proof",
-		FlowID:     "ingress",
-		InstanceID: uuid.NewString(),
-		EntityID:   uuid.NewString(),
-		Source:     mustStoreTestPersistedBundleSourceFact("bundle-v1:sha256:" + strings.Repeat("9", 64)),
-	}
-	ctx := runtimecorrelation.WithBundleSourceFact(
-		testAuthorActivityContextForBundle(candidate.Source.BundleHash()),
-		candidate.Source,
-	)
-	seedStoreTestPersistedBundle(t, db, candidate.Source.BundleHash())
-	registrar, ok := store.(testAuthorActivityCatalogRegistrar)
-	if !ok {
-		t.Fatalf("inbound publication proof store %T cannot register reset author activity catalog", store)
-	}
-	registerTestAuthorActivityCatalogForContext(t, registrar, ctx)
-	first, err := workflowStore.ReconcileStandingService(ctx, candidate)
-	if err != nil {
-		t.Fatalf("reconcile reset proof standing service: %v", err)
-	}
-	firstSequence, err := workflowStore.PublishStandingService(ctx, candidate.ServiceID, first.RunID, first.Generation)
-	if err != nil {
-		t.Fatalf("publish reset proof standing service: %v", err)
-	}
-	const childPath = "child/stable"
-	child := runtimepipeline.WorkflowInstance{
-		InstanceID:      "stable",
-		StorageRef:      childPath,
-		EntityID:        runtimepipeline.FlowInstanceEntityID(childPath),
-		WorkflowName:    "child",
-		WorkflowVersion: "v1",
-		CurrentState:    "created",
-		EnteredStageAt:  time.Now().UTC(),
-		EntityType:      "test_entity",
-	}
-	if _, err := workflowStore.MaterializeInitialEntry(runtimecorrelation.WithRunID(ctx, first.RunID), child, child.EnteredStageAt); err != nil {
-		t.Fatalf("seed first-generation child: %v", err)
-	}
-
-	firstRequest := inboundPublicationProofRequest(t, candidate, first.RunID, first.Generation, firstSequence, "delivery-same-generation-rebind")
-	firstCtx := runtimecorrelation.WithRunID(ctx, first.RunID)
-	if _, err := runInboundPublicationProofMutation(t, store, firstCtx, firstRequest, func(mutation inboundPublicationProofMutation) error {
-		result, err := workflowStore.MaterializeInitialEntry(mutation.Context(), child, child.EnteredStageAt)
-		if err != nil {
-			return err
-		}
-		if result != runtimepipeline.WorkflowInitialMaterializationCreated {
-			return errors.New("flow_instance_already_exists")
-		}
-		return nil
-	}); err == nil || !strings.Contains(err.Error(), "flow_instance_already_exists") {
-		t.Fatalf("same-generation rebind error = %v", err)
-	}
-	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM inbound_publications WHERE provider_event_id = `, firstRequest.ProviderEventID, 0)
-
-	reset, err := workflowStore.ResetStandingService(ctx, runtimepipeline.StandingServiceOperation{ServiceID: candidate.ServiceID, Actor: "test"})
-	if err != nil {
-		t.Fatalf("reset standing service: %v", err)
-	}
-	resetSequence, err := workflowStore.PublishStandingService(ctx, candidate.ServiceID, reset.RunID, reset.Generation)
-	if err != nil {
-		t.Fatalf("publish reset standing generation: %v", err)
-	}
-	resetRequest := inboundPublicationProofRequest(t, candidate, reset.RunID, reset.Generation, resetSequence, "delivery-reset-generation-rebind")
-	publications, evidence := inboundPublicationProofEvents(t, resetRequest)
-	resetCtx := runtimecorrelation.WithRunID(ctx, reset.RunID)
-	if _, err := runInboundPublicationProofMutation(t, store, resetCtx, resetRequest, func(mutation inboundPublicationProofMutation) error {
-		result, err := workflowStore.MaterializeInitialEntry(mutation.Context(), child, child.EnteredStageAt)
-		if err != nil {
-			return err
-		}
-		if result != runtimepipeline.WorkflowInitialMaterializationCreated {
-			return errors.New("flow_instance_already_exists")
-		}
-		for index := range publications {
-			if err := commitInboundPublicationTestEvent(t, store, mutation, &publications[index]); err != nil {
-				return err
-			}
-		}
-		return mutation.FinalizeInboundPublication(mutation.Context(), runtimeinbound.Finalization{EvidenceEvent: evidence, Events: publications})
-	}); err != nil {
-		t.Fatalf("reset-generation inbound rebind: %v", err)
-	}
-	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM entity_state WHERE run_id = `, reset.RunID, 1)
-}
-
 func runInboundPublicationRawOnlyProof(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, store inboundPublicationProofStore, candidate runtimepipeline.StandingServiceCandidate, runID string, generation, sequence int64) {
 	t.Helper()
 	request := inboundPublicationProofRequest(t, candidate, runID, generation, sequence, "delivery-raw-only")
@@ -642,59 +551,6 @@ func runInboundPublicationOrdinalRollbackProof(t *testing.T, ctx context.Context
 		t.Fatalf("invalid evidence error = %v", err)
 	}
 	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM inbound_publications WHERE provider_event_id = `, request.ProviderEventID, 0)
-}
-
-func runInboundPublicationConcurrentRetryProof(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, store inboundPublicationProofStore, candidate runtimepipeline.StandingServiceCandidate, runID string, generation, sequence int64) {
-	t.Helper()
-	request := inboundPublicationProofRequest(t, candidate, runID, generation, sequence, "delivery-concurrent")
-	publications, evidence := inboundPublicationProofEvents(t, request)
-	var callbackCalls atomic.Int32
-	start := make(chan struct{})
-	results := make(chan struct {
-		record runtimeinbound.Record
-		err    error
-	}, 2)
-	var workers sync.WaitGroup
-	for range 2 {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
-			<-start
-			record, err := runInboundPublicationProofMutation(t, store, ctx, request, func(mutation inboundPublicationProofMutation) error {
-				callbackCalls.Add(1)
-				for index := range publications {
-					if err := commitInboundPublicationTestEvent(t, store, mutation, &publications[index]); err != nil {
-						return err
-					}
-				}
-				return mutation.FinalizeInboundPublication(mutation.Context(), runtimeinbound.Finalization{EvidenceEvent: evidence, Events: publications})
-			})
-			results <- struct {
-				record runtimeinbound.Record
-				err    error
-			}{record: record, err: err}
-		}()
-	}
-	close(start)
-	workers.Wait()
-	close(results)
-	created := 0
-	for result := range results {
-		if result.err != nil {
-			t.Fatalf("concurrent publication: %v", result.err)
-		}
-		if result.record.Created {
-			created++
-		}
-		if len(result.record.Events) != 2 {
-			t.Fatalf("concurrent record = %#v", result.record)
-		}
-	}
-	if created != 1 || callbackCalls.Load() != 1 {
-		t.Fatalf("concurrent created=%d callback_calls=%d, want one owner", created, callbackCalls.Load())
-	}
-	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM inbound_publications WHERE provider_event_id = `, request.ProviderEventID, 1)
-	assertInboundPublicationProofCount(t, db, sqlite, `SELECT COUNT(*) FROM inbound_publication_events WHERE publication_id = `, request.PublicationID, 2)
 }
 
 func commitInboundPublicationProof(t *testing.T, ctx context.Context, store inboundPublicationProofStore, request runtimeinbound.Request, outputCount int) runtimeinbound.Record {

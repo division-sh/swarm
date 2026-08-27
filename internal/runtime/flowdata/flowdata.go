@@ -204,47 +204,6 @@ func resolveAgentFlowDataDeclaration(source semanticview.Source, actor models.Ag
 	}, true
 }
 
-func projectScopeLabel(key, name string) string {
-	key = strings.TrimSpace(key)
-	name = strings.TrimSpace(name)
-	switch {
-	case key != "" && name != "":
-		return fmt.Sprintf("project:%s:%s", key, name)
-	case key != "":
-		return "project:" + key
-	case name != "":
-		return "project:" + name
-	default:
-		return "project"
-	}
-}
-
-func flowScopeLabel(id, path string) string {
-	id = strings.TrimSpace(id)
-	path = strings.Trim(strings.TrimSpace(path), "/")
-	switch {
-	case id != "" && path != "":
-		return fmt.Sprintf("flow:%s:%s", id, path)
-	case id != "":
-		return "flow:" + id
-	case path != "":
-		return "flow:" + path
-	default:
-		return "flow"
-	}
-}
-
-func scopedLabel(scopeLabel, localID string) string {
-	localID = strings.TrimSpace(localID)
-	if localID == "" {
-		return scopeLabel
-	}
-	if strings.TrimSpace(scopeLabel) == "" {
-		return localID
-	}
-	return scopeLabel + "/" + localID
-}
-
 func FlowDataAccessFromEntry(entry runtimecontracts.AgentRegistryEntry) []string {
 	return NormalizeAccessList(entry.FlowDataAccess)
 }

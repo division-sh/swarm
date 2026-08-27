@@ -302,10 +302,6 @@ func (s *postgresSession) ReplayBundleDeleteResult(ctx context.Context, req runt
 	return result, err
 }
 
-type sourceSetOperationResult struct {
-	runtimeagenttopology.SourceSetCommitResult
-}
-
 type bundleDeleteFinalMutationReplayRecord struct {
 	OperationID   string
 	RequestHash   string

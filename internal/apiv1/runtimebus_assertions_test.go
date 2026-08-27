@@ -61,16 +61,6 @@ func requireNoAPIV1RuntimeBusEvent(t *testing.T, ch <-chan *runtimebus.LocalDeli
 	}
 }
 
-func requireAPIV1RuntimeBusSignal(t *testing.T, ch <-chan string, description string) string {
-	t.Helper()
-	return requireAPIV1RuntimeBusValue[string](t, ch, description)
-}
-
-func requireNoAPIV1RuntimeBusSignal(t *testing.T, ch <-chan string, description string) {
-	t.Helper()
-	requireNoAPIV1RuntimeBusValue[string](t, ch, description)
-}
-
 func requireAPIV1RuntimeBusValue[T any](t *testing.T, ch <-chan T, description string) T {
 	t.Helper()
 	timer := time.NewTimer(apiv1RuntimeBusAssertionTimeout)
@@ -85,16 +75,4 @@ func requireAPIV1RuntimeBusValue[T any](t *testing.T, ch <-chan T, description s
 
 	var zero T
 	return zero
-}
-
-func requireNoAPIV1RuntimeBusValue[T any](t *testing.T, ch <-chan T, description string) {
-	t.Helper()
-	timer := time.NewTimer(apiv1RuntimeBusAbsenceTimeout)
-	defer timer.Stop()
-
-	select {
-	case got := <-ch:
-		t.Fatalf("%s delivered unexpected runtimebus value: %#v", description, got)
-	case <-timer.C:
-	}
 }

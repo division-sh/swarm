@@ -115,33 +115,6 @@ func assertCapturedRuntimeLog(t testing.TB, capture *runtimeLogPersistenceCaptur
 	}
 }
 
-func expectRuntimeLogStoryBegin(mock sqlmock.Sqlmock) {
-	mock.ExpectExec(`INSERT INTO author_activity_order`).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectQuery(`SELECT last_sequence FROM author_activity_order`).
-		WillReturnRows(sqlmock.NewRows([]string{"last_sequence"}).AddRow(0))
-}
-
-func expectRuntimeLogRunAbsent(mock sqlmock.Sqlmock, runID string) {
-	mock.ExpectQuery(`SELECT EXISTS \(SELECT 1 FROM runs`).
-		WithArgs(runID).
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
-}
-
-func expectRuntimeLogStoryFinalize(mock sqlmock.Sqlmock, runID string) {
-	mock.ExpectQuery(`SELECT CAST\(occurrence_id AS TEXT\).*FROM author_activity_occurrences.*WHERE dedup_key`).
-		WithArgs("run-created:" + runID).
-		WillReturnRows(sqlmock.NewRows([]string{
-			"occurrence_id", "sequence", "kind", "version", "transition", "source_owner", "source_identity", "dedup_key",
-			"run_id", "entity_id", "agent_id", "flow_id", "projection", "failure", "occurred_at",
-		}))
-	mock.ExpectExec(`UPDATE author_activity_order SET last_sequence`).
-		WithArgs(int64(1), int64(0)).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec(`INSERT INTO author_activity_occurrences`).
-		WillReturnResult(sqlmock.NewResult(0, 1))
-}
-
 func TestRuntimeLogger_Log_AppendsSpecShapedFlightRecorderEntry(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

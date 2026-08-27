@@ -12,11 +12,6 @@ import (
 
 const outputPinKeyCarriesCheckID = "output_pin_key_carries_validation"
 
-type outputPinKeyCarriesIdentity struct {
-	FlowID  string
-	PinName string
-}
-
 func checkOutputPinKeyCarriesValidation(c *checkerContext) []Finding {
 	if c == nil || c.source == nil {
 		return nil

@@ -2960,17 +2960,6 @@ func assertStoredEventEntitylessReceiverTarget(t *testing.T, targetRouteRaw, tar
 	}
 }
 
-func assertEventSourceEventID(t *testing.T, db *sql.DB, eventID, wantSourceEventID string) {
-	t.Helper()
-	var got string
-	if err := db.QueryRow(`SELECT COALESCE(source_event_id::text, '') FROM events WHERE event_id = $1::uuid`, eventID).Scan(&got); err != nil {
-		t.Fatalf("load event source_event_id: %v", err)
-	}
-	if got != wantSourceEventID {
-		t.Fatalf("event source_event_id = %q, want %q", got, wantSourceEventID)
-	}
-}
-
 func assertOperatorEventReference(t *testing.T, db *sql.DB, eventID, wantReferenceEventID string) {
 	t.Helper()
 	var sourceEventID, referenceEventID string

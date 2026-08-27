@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/operatorchannel"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunfork "github.com/division-sh/swarm/internal/runtime/runfork"
@@ -137,7 +136,6 @@ func (s *EventSQLiteOwner) BindOperatorChannelClaims(owner operatorChannelClaimS
 
 func (s *EventPostgresOwner) requireCurrentSchema() error { return s.requireCurrent() }
 func (s *EventSQLiteOwner) requireCurrentSchema() error   { return s.requireCurrent() }
-func (s *EventSQLiteOwner) now() time.Time                { return s.nowFn().UTC() }
 
 func (s *EventPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *revisionEffects) error) error {
 	if err := s.requireCurrentSchema(); err != nil {
@@ -197,10 +195,6 @@ func requirePostgresRunActive(ctx context.Context, tx *sql.Tx, runID string) err
 	return storerunstate.RequirePostgresActiveTx(ctx, tx, runID)
 }
 
-func requireSQLiteRunActive(ctx context.Context, tx *sql.Tx, runID string) error {
-	return storerunstate.RequireSQLiteActiveTx(ctx, tx, runID)
-}
-
 func loadCommittedPipelineScope(ctx context.Context, queryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, eventID string, postgres bool) (runtimepipelineobligation.CommittedScope, error) {
@@ -216,11 +210,6 @@ func nullUUIDString(raw string) string {
 		return ""
 	}
 	return raw
-}
-
-func replayAdmissionFailure(reasonCode string) *runtimefailures.Envelope {
-	failure := runtimefailures.Normalize(runtimefailures.New(runtimefailures.ClassSchemaInvalid, "persisted_replay_run_identity_invalid", "event-store", "load_replay", map[string]any{"reason_code": strings.TrimSpace(reasonCode)}), "event-store", "load_replay")
-	return &failure
 }
 
 func jsonRawMessageValue(raw any) json.RawMessage {
@@ -275,7 +264,6 @@ func parseSQLiteTime(raw string) (time.Time, bool, error) {
 }
 
 var postgresDeliveryAdapter = mustDeliveryAdapter(storedelivery.DialectPostgres)
-var sqliteDeliveryAdapter = mustDeliveryAdapter(storedelivery.DialectSQLite)
 
 func mustDeliveryAdapter(dialect storedelivery.Dialect) *storedelivery.Adapter {
 	adapter, err := storedelivery.NewAdapter(dialect)

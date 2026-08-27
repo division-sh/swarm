@@ -40,14 +40,6 @@ func resolveWorkspaceMountSourcesFromInput(in workspaceDataSourceInput) (Workspa
 	return WorkspaceMountSources{}, nil
 }
 
-func defaultWorkspaceDataSourceSourceLabel(source string) string {
-	source = strings.TrimSpace(source)
-	if source == "" {
-		return defaultWorkspaceDataSourceSource
-	}
-	return source
-}
-
 func runtimeConfigWorkspaceDataSource(cfg *config.Config) (string, bool) {
 	if cfg == nil {
 		return "", false

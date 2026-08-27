@@ -16,11 +16,6 @@ type agentReceiptSideEffects struct {
 
 type AgentReceiptSideEffects = agentReceiptSideEffects
 
-type pipelineReceiptSideEffects struct {
-	ManagerStatus string `json:"manager_status"`
-	ReasonCode    string `json:"reason_code,omitempty"`
-}
-
 func newAgentReceiptSideEffects(status runtimemanager.ReceiptStatus, reasonCode string, retryCount int) agentReceiptSideEffects {
 	return agentReceiptSideEffects{
 		ManagerStatus: runtimemanager.ReceiptStatus(strings.TrimSpace(string(status))),

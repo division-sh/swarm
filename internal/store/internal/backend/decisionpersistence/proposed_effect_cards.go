@@ -39,10 +39,6 @@ func (s *DecisionSQLiteOwner) CreateProposedEffectCard(ctx context.Context, card
 	})
 }
 
-func insertProposedEffectCard(ctx context.Context, tx *sql.Tx, card decisioncard.Card, continuation decisioncard.ProposedEffectContinuation, postgres bool) error {
-	return insertProposedEffectCardWithStory(ctx, nil, tx, card, continuation, postgres)
-}
-
 func (s *DecisionPostgresOwner) InsertProposedEffectTx(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, card decisioncard.Card, continuation decisioncard.ProposedEffectContinuation) error {
 	return insertProposedEffectCardWithStory(ctx, story, tx, card, continuation, true)
 }

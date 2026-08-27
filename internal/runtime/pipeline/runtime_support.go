@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -23,14 +22,6 @@ func pipelineRuntimeFailure(err error, component, operation string) *runtimefail
 		return nil
 	}
 	failure := runtimefailures.Normalize(err, component, operation)
-	return &failure
-}
-
-func pipelineDependencyFailure(err error, detailCode, component, operation string) *runtimefailures.Envelope {
-	if err == nil {
-		return nil
-	}
-	failure := runtimefailures.Normalize(runtimefailures.Wrap(runtimefailures.ClassDependencyUnavailable, detailCode, component, operation, nil, err), component, operation)
 	return &failure
 }
 
@@ -187,22 +178,6 @@ func asString(v any) string {
 	return strings.TrimSpace(runtimesharedjson.AsString(v))
 }
 
-func boolFromAny(v any) bool {
-	switch typed := v.(type) {
-	case bool:
-		return typed
-	case string:
-		switch strings.ToLower(strings.TrimSpace(typed)) {
-		case "1", "true", "yes", "on":
-			return true
-		default:
-			return false
-		}
-	default:
-		return asInt(v) > 0
-	}
-}
-
 func firstNonEmptyString(vals ...string) string {
 	for _, val := range vals {
 		if trimmed := strings.TrimSpace(val); trimmed != "" {
@@ -210,13 +185,6 @@ func firstNonEmptyString(vals ...string) string {
 		}
 	}
 	return ""
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 func workflowExpressionLookupPath(root map[string]any, path string) (any, bool) {
@@ -249,17 +217,6 @@ func processWarn(component string, format string, args ...any) {
 		return
 	}
 	diaglog.ProcessLog("warn", component, msg)
-}
-
-func snippetForLog(raw string, max int) string {
-	raw = strings.TrimSpace(raw)
-	if max <= 0 {
-		max = 180
-	}
-	if len(raw) <= max {
-		return raw
-	}
-	return raw[:max] + "..."
 }
 
 func uniqueStrings(in []string) []string {
@@ -303,14 +260,6 @@ func asInt(v any) int {
 	}
 }
 
-func asFloat64(v any) (float64, bool) {
-	return runtimesharedjson.AsFloat64(v)
-}
-
-func asArray(v any) ([]any, bool) {
-	return runtimesharedjson.AsArray(v)
-}
-
 func asObject(v any) (map[string]any, bool) {
 	m, ok := v.(map[string]any)
 	return m, ok
@@ -328,17 +277,4 @@ func cloneEmitIntents(intents []runtimeengine.EmitIntent) []runtimeengine.EmitIn
 		cloned = append(cloned, copyIntent)
 	}
 	return cloned
-}
-
-func shouldSQLDebugLog() bool {
-	v := strings.TrimSpace(strings.ToLower(os.Getenv("SWARM_SQL_DEBUG")))
-	return v == "1" || v == "true" || v == "yes" || v == "on"
-}
-
-func compactSQLSnippet(q string) string {
-	q = strings.Join(strings.Fields(strings.TrimSpace(q)), " ")
-	if len(q) > 240 {
-		return q[:240] + "..."
-	}
-	return q
 }

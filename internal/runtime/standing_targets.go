@@ -460,11 +460,6 @@ func validateStandingIngressRawPin(source semanticview.Source, flowID, provider 
 	return fmt.Errorf("ingress provider %q emits template %q; add at least one exact external input pin matching that template to flow %s", provider, template, flowID)
 }
 
-func standingInputPinAdmitted(source semanticview.Source, flowID, eventName string) bool {
-	_, err := resolveStandingInputEndpoint(source, flowID, eventName)
-	return err == nil
-}
-
 func resolveStandingInputEndpoint(source semanticview.Source, flowID, eventName string) (semanticview.AuthoredEventEndpoint, error) {
 	return resolveStandingInputEndpointWithCensus(source, semanticview.BuildAuthoredEventEndpointCensus(source), flowID, eventName)
 }

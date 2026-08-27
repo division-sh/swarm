@@ -442,18 +442,3 @@ func assertMetadataString(t *testing.T, metadata map[string]any, key, want strin
 		t.Fatalf("metadata[%s] = %#v, want %q", key, metadata[key], want)
 	}
 }
-
-func assertGateSet(t *testing.T, metadata map[string]any, gate string) {
-	t.Helper()
-	gates := payloadMap(metadata["gates"])
-	if truthyMetadataFlag(gates[gate]) {
-		return
-	}
-	for key, value := range gates {
-		key = strings.TrimSpace(key)
-		if (strings.HasSuffix(key, "."+gate) || strings.HasSuffix(key, "/"+gate)) && truthyMetadataFlag(value) {
-			return
-		}
-	}
-	t.Fatalf("gates = %#v, want %s true", gates, gate)
-}

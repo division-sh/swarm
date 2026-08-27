@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 )
@@ -29,16 +28,6 @@ func testAuthorActivityContext(ctx context.Context) context.Context {
 		authorActivityTestRuntimeInstanceID,
 		authorActivityTestBundleSourceFact.BundleHash(),
 	))
-}
-
-func testAuthorActivityRuntimeOptions(opts runtimepkg.RuntimeOptions) runtimepkg.RuntimeOptions {
-	if strings.TrimSpace(opts.RuntimeInstanceID) == "" {
-		opts.RuntimeInstanceID = authorActivityTestRuntimeInstanceID
-	}
-	if strings.TrimSpace(opts.BundleSourceFact.BundleHash()) == "" {
-		opts.BundleSourceFact = authorActivityTestBundleSourceFact
-	}
-	return opts
 }
 
 type testAuthorActivityCatalogRegistrar interface {

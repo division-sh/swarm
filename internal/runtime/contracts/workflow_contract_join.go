@@ -258,10 +258,6 @@ func (s JoinSpec) TimeoutOutcome() HandlerRuleEntry {
 	return s.Timeout.Outcome
 }
 
-func joinOutcomeEmpty(rule HandlerRuleEntry) bool {
-	return strings.TrimSpace(rule.AdvancesTo) == "" && rule.Emit.Empty() && !rule.DataAccumulation.HasWrites()
-}
-
 func ValidateJoinHandlerIsolation(handler SystemNodeEventHandler) error {
 	if handler.Join == nil {
 		return nil

@@ -22,13 +22,10 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
-	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/store"
@@ -913,14 +910,6 @@ auto_emit_on_create:
   subscriptions: [opco.product_initialization_requested]
 `,
 	}
-}
-
-type providerRollbackBackend interface {
-	runtimebus.EventStore
-	runtimeinbound.Runner
-	runtimerunlifecycle.OperationOwner
-	runtimedelivery.Store
-	PipelineObligations() runtimepipelineobligation.Store
 }
 
 type routeMaterializationDBProofStore struct {

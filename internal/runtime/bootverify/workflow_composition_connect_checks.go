@@ -428,16 +428,3 @@ func compositionConnectTypeFamily(raw string) string {
 		return raw
 	}
 }
-
-func stringSliceContains(values []string, needle string) bool {
-	needle = strings.TrimSpace(needle)
-	if needle == "" {
-		return false
-	}
-	for _, value := range values {
-		if strings.TrimSpace(value) == needle {
-			return true
-		}
-	}
-	return false
-}

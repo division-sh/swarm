@@ -196,26 +196,6 @@ func appendPostgresReplayTestEvent(t *testing.T, ctx context.Context, pg *Postgr
 	}
 }
 
-func assertReplayEventIDs(t *testing.T, got []events.PersistedReplayEvent, want []string) {
-	t.Helper()
-	if len(got) != len(want) {
-		t.Fatalf("replay event IDs = %#v, want %#v", replayEventIDs(got), want)
-	}
-	for i, eventID := range want {
-		if got[i].Event.ID() != eventID {
-			t.Fatalf("replay event IDs = %#v, want %#v", replayEventIDs(got), want)
-		}
-	}
-}
-
-func replayEventIDs(records []events.PersistedReplayEvent) []string {
-	out := make([]string, 0, len(records))
-	for _, record := range records {
-		out = append(out, record.Event.ID())
-	}
-	return out
-}
-
 func assertNoSQLitePipelineReceipt(t *testing.T, ctx context.Context, store *SQLiteRuntimeStore, eventID string) {
 	t.Helper()
 	var count int

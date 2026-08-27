@@ -1236,11 +1236,6 @@ func writeRunCommandReattached(out io.Writer, run diagnosticRunHeader) {
 	fmt.Fprintf(out, "reattached: run_id=%s status=%s\n", run.RunID, formatCLIHumanCode(cliHumanCodeRunStatus, run.Status))
 }
 
-func writeRunCommandTraceRow(out io.Writer, row diagnosticRunTraceRow) {
-	writer := &runTraceRowLineWriter{}
-	writer.Write(out, row)
-}
-
 type runTraceRowLineWriter struct {
 	startedAt *time.Time
 }

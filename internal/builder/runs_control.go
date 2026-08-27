@@ -526,20 +526,6 @@ func builderFailureValue(failure runtimefailures.Envelope) map[string]any {
 	return value
 }
 
-func durationMillis(snapshot runtimebus.RunLifecycleSnapshot) int64 {
-	if snapshot.StartedAt.IsZero() {
-		return 0
-	}
-	endedAt := time.Now().UTC()
-	if snapshot.EndedAt != nil && !snapshot.EndedAt.IsZero() {
-		endedAt = snapshot.EndedAt.UTC()
-	}
-	if endedAt.Before(snapshot.StartedAt) {
-		return 0
-	}
-	return endedAt.Sub(snapshot.StartedAt).Milliseconds()
-}
-
 func (h *runHub) isTerminal(runID string) bool {
 	if h == nil {
 		return false

@@ -861,11 +861,6 @@ func mustFanInBarrierRoutes(t *testing.T, backend fanInBarrierConformanceStore) 
 	return out
 }
 
-func publishFanInBarrierIngress(t *testing.T, ctx context.Context, eventBus *runtimebus.EventBus, source semanticview.Source, eventID, localEvent string, payload map[string]any) {
-	t.Helper()
-	publishFanInBarrierEvent(t, ctx, eventBus, source, eventID, "ingress", localEvent, payload)
-}
-
 func publishFanInBarrierEvent(t *testing.T, ctx context.Context, eventBus *runtimebus.EventBus, source semanticview.Source, eventID, flowID, localEvent string, payload map[string]any) {
 	t.Helper()
 	raw, err := json.Marshal(payload)

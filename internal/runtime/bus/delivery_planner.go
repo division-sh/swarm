@@ -726,22 +726,6 @@ func deliveryRecipientIDs(in []deliveryRecipientCandidate) []string {
 	return uniqueStrings(out)
 }
 
-func persistedDeliveryRecipientIDs(in []deliveryRecipientCandidate) []string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(in))
-	for _, candidate := range in {
-		if !candidate.PersistAsDelivery {
-			continue
-		}
-		if candidate.ID = strings.TrimSpace(candidate.ID); candidate.ID != "" {
-			out = append(out, candidate.ID)
-		}
-	}
-	return uniqueStrings(out)
-}
-
 func persistedDeliveryRecipientCandidates(in []deliveryRecipientCandidate) []deliveryRecipientCandidate {
 	if len(in) == 0 {
 		return nil
@@ -1295,19 +1279,6 @@ func routedNodeMatchesConcreteFlowInstanceEvent(evt events.Event, subscriber Sub
 	return routedNodeConcreteEventKey(evt, subscriber) != ""
 }
 
-func routedNodeMatchesConcreteEventTypeFlowInstance(evt events.Event, subscriber Subscriber) bool {
-	if !subscriber.Recipient.IsNode() {
-		return false
-	}
-	instancePath := strings.Trim(strings.TrimSpace(subscriber.Path), "/")
-	flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/")
-	eventType := strings.Trim(strings.TrimSpace(string(evt.Type())), "/")
-	if instancePath == "" || flowInstance == "" || eventType == "" {
-		return false
-	}
-	return instancePath == flowInstance && strings.HasPrefix(eventType, flowInstance+"/")
-}
-
 func routedNodeConcreteEventKey(evt events.Event, subscriber Subscriber) string {
 	if !subscriber.Recipient.IsNode() {
 		return ""
@@ -1328,27 +1299,6 @@ func routedNodeConcreteEventKey(evt events.Event, subscriber Subscriber) string 
 		return ""
 	}
 	return concreteFlowInstanceEventKey(evt)
-}
-
-func matchedInternalDeliveryTargets(source semanticview.Source, evt events.Event, subscribers []Subscriber) []events.RouteIdentity {
-	targets := eventDeliveryTargetRoutes(evt)
-	if len(targets) == 0 {
-		return nil
-	}
-	out := make([]events.RouteIdentity, 0, len(targets))
-	root := rootExecutionCoordinate(source, evt.RunID())
-	for _, target := range targets {
-		for _, subscriber := range subscribers {
-			if !subscriber.Recipient.IsNode() {
-				continue
-			}
-			if routeMatchesInternalSubscriber(target, subscriber, root) {
-				out = append(out, target.Normalized())
-				break
-			}
-		}
-	}
-	return uniqueRouteIdentities(out)
 }
 
 func uniqueRouteIdentities(in []events.RouteIdentity) []events.RouteIdentity {

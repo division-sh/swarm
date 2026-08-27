@@ -7,15 +7,6 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 )
 
-func testPipelineFailure(class runtimefailures.Class, detailCode string) *runtimefailures.Envelope {
-	failure := runtimefailures.Normalize(
-		runtimefailures.New(class, detailCode, "pipeline-test", "execute", nil),
-		"pipeline-test",
-		"execute",
-	)
-	return &failure
-}
-
 func TestActivityHTTPStatusFailureUsesCanonicalProviderMapping(t *testing.T) {
 	tests := []struct {
 		status        int

@@ -398,20 +398,6 @@ func toolMessageHasSuccessfulResult(raw string) bool {
 	return false
 }
 
-func transitionContextKey(primary events.Event, fallback events.Event) string {
-	entityID, taskID := extractContextIDs(primary)
-	if strings.TrimSpace(entityID) == "" || strings.TrimSpace(taskID) == "" {
-		fallbackEntity, fallbackTask := extractContextIDs(fallback)
-		if strings.TrimSpace(entityID) == "" {
-			entityID = fallbackEntity
-		}
-		if strings.TrimSpace(taskID) == "" {
-			taskID = fallbackTask
-		}
-	}
-	return entityID + "|" + taskID
-}
-
 func extractContextIDs(evt events.Event) (entityID, taskID string) {
 	entityID = strings.TrimSpace(evt.EntityID())
 	taskID = strings.TrimSpace(evt.TaskID())

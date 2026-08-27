@@ -24,14 +24,11 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
-	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
-	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -46,50 +43,10 @@ import (
 	"github.com/google/uuid"
 )
 
-type unavailableFlowActivationDeliveryStore struct{ runtimedelivery.Store }
-
 func deactivateFlowInstanceForTest(am *AgentManager, ctx context.Context, templateID, instanceID, flowPath, entityID string) error {
 	return am.DeactivateFlowInstanceModel(ctx, runtimepipeline.FlowInstanceDeactivationRequest{
 		Instance: runtimeflowidentity.Stored(nil, templateID, flowPath, instanceID, entityID, ""),
 	})
-}
-
-type unavailableFlowActivationDeadLetterRecorder struct {
-	runtimebus.TargetFailureDeadLetterRecorder
-}
-type unavailableFlowActivationDecisionCards struct{ decisioncard.Store }
-type unavailableFlowActivationProposedEffects struct {
-	decisioncard.ProposedEffectStore
-}
-type unavailableFlowActivationHumanTasks struct{ decisioncard.HumanTaskStore }
-type unavailableFlowActivationDeliveryRuntime struct {
-	runtimepipeline.WorkflowDeliveryRuntime
-}
-type unavailableFlowActivationDecisionCardDraftExpiry struct{}
-type unavailableFlowActivationHumanTaskExpiry struct{}
-
-func (*unavailableFlowActivationDecisionCardDraftExpiry) ExpireDecisionCardInputDrafts(context.Context, time.Time) (int, error) {
-	return 0, nil
-}
-
-func (*unavailableFlowActivationHumanTaskExpiry) ListDueHumanTaskExpiryEvents(context.Context, time.Time, int) ([]events.Event, error) {
-	return nil, nil
-}
-func (*unavailableFlowActivationHumanTaskExpiry) CommitHumanTaskExpirations(context.Context, runtimepipeline.HumanTaskExpiryCommand) (runtimepipeline.CommittedHumanTaskExpiry, error) {
-	return runtimepipeline.CommittedHumanTaskExpiry{}, errors.New("human-task expiry is unavailable")
-}
-
-func completeFlowActivationWorkflowOptions(opts runtimepipeline.PipelineCoordinatorOptions) runtimepipeline.PipelineCoordinatorOptions {
-	opts.ReceiverExecution = eventreceiver.NormalExecution()
-	opts.DeliveryStore = &unavailableFlowActivationDeliveryStore{}
-	opts.DeadLetters = &unavailableFlowActivationDeadLetterRecorder{}
-	opts.DecisionCards = &unavailableFlowActivationDecisionCards{}
-	opts.ProposedEffects = &unavailableFlowActivationProposedEffects{}
-	opts.HumanTasks = &unavailableFlowActivationHumanTasks{}
-	opts.DecisionCardDraftExpiry = &unavailableFlowActivationDecisionCardDraftExpiry{}
-	opts.HumanTaskExpiry = &unavailableFlowActivationHumanTaskExpiry{}
-	opts.DeliveryRuntime = &unavailableFlowActivationDeliveryRuntime{}
-	return opts
 }
 
 func TestRebuildPendingDynamicFlowRuntimeCreationEventPlanUsesRevisedCanonicalSchema(t *testing.T) {
@@ -206,12 +163,6 @@ type flowActivationSemanticRouteBus struct {
 	durableRoutes map[string][]runtimebus.FlowInstanceRouteRecord
 }
 
-type flowActivationWorkflowModule struct {
-	source  semanticview.Source
-	guards  runtimepipeline.GuardRegistry
-	actions runtimepipeline.ActionRegistry
-}
-
 type flowActivationTestAgentRoutePreparation struct {
 	deliveries chan *worklifetime.EventDelivery
 }
@@ -222,36 +173,6 @@ func (p *flowActivationTestAgentRoutePreparation) Deliveries() <-chan *worklifet
 
 func (*flowActivationTestAgentRoutePreparation) Publish() error { return nil }
 func (*flowActivationTestAgentRoutePreparation) Discard() error { return nil }
-
-func newFlowActivationWorkflowModule(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle) runtimepipeline.WorkflowModule {
-	t.Helper()
-	source := semanticview.Wrap(bundle)
-	return flowActivationWorkflowModule{
-		source:  source,
-		guards:  runtimepipeline.NewContractGuardRegistry(source),
-		actions: runtimepipeline.NewContractActionRegistry(source),
-	}
-}
-
-func (m flowActivationWorkflowModule) SemanticSource() semanticview.Source {
-	return m.source
-}
-
-func (m flowActivationWorkflowModule) WorkflowDefinition() *runtimepipeline.WorkflowDefinition {
-	return nil
-}
-
-func (m flowActivationWorkflowModule) WorkflowNodes() []runtimepipeline.WorkflowNode {
-	return nil
-}
-
-func (m flowActivationWorkflowModule) GuardRegistry() runtimepipeline.GuardRegistry {
-	return m.guards
-}
-
-func (m flowActivationWorkflowModule) ActionRegistry() runtimepipeline.ActionRegistry {
-	return m.actions
-}
 
 type flowActivationTestRouteStore struct {
 	statusByPath map[string]string
@@ -1335,15 +1256,6 @@ func (b *flowActivationTestBus) RemoveFlowInstanceRouteContext(ctx context.Conte
 
 func flowActivationRunContext() context.Context {
 	return runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
-}
-
-type flowActivationStubAgent struct{ id string }
-
-func (a flowActivationStubAgent) ID() string                      { return a.id }
-func (flowActivationStubAgent) Type() string                      { return "generic" }
-func (flowActivationStubAgent) Subscriptions() []events.EventType { return nil }
-func (flowActivationStubAgent) OnEvent(context.Context, events.Event) ([]events.Event, error) {
-	return nil, nil
 }
 
 func testFlowAgentURIRef(flowID, logicalID string) runtimecontracts.ContractURIRef {
@@ -4772,28 +4684,6 @@ func managerTestFlowAgentNamePlan(t *testing.T, source semanticview.Source, flow
 		t.Fatalf("flow scope %q agent %q name plan: %v", flowID, logicalID, err)
 	}
 	return plan
-}
-
-func managerTestAgentNamePlan(t *testing.T, source semanticview.Source, ownerFlowID, logicalID string) semanticview.AgentNamePlan {
-	t.Helper()
-	var matched semanticview.AgentNamePlan
-	for _, declaration := range semanticview.AgentDeclarations(source) {
-		if strings.TrimSpace(declaration.LocalID) != strings.TrimSpace(logicalID) || strings.TrimSpace(declaration.OwnerFlowID) != strings.TrimSpace(ownerFlowID) {
-			continue
-		}
-		plan, err := semanticview.ScopedAgentNamePlan(source, declaration)
-		if err != nil {
-			t.Fatalf("agent %q name plan: %v", logicalID, err)
-		}
-		if matched.LocalID != "" {
-			t.Fatalf("agent %q resolved multiple test name plans", logicalID)
-		}
-		matched = plan
-	}
-	if matched.LocalID == "" {
-		t.Fatalf("agent %q name plan not found", logicalID)
-	}
-	return matched
 }
 
 func TestBuildFlowAgentConfig_PassesContractToolsAndEmitEvents(t *testing.T) {

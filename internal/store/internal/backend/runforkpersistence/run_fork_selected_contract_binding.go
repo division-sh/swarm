@@ -12,10 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const (
-	runForkSelectedContractBindingTable = "run_fork_selected_contract_bindings"
-)
-
 func (s *RunForkPostgresOwner) requireRunForkSelectedContractBindingAccess() error {
 	return s.requireCurrentSchema()
 }

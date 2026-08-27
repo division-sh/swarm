@@ -186,10 +186,6 @@ func testEntitylessNodeDeliveryRoute(nodeID string) events.DeliveryRoute {
 	}
 }
 
-func commitAgentDeliveryObligationFixture(ctx context.Context, store deliveryFixtureStore, event events.Event, route events.DeliveryRoute) error {
-	return commitDeliveryObligationFixture(ctx, store, event, route)
-}
-
 func commitDeliveryObligationFixture(ctx context.Context, store deliveryFixtureStore, event events.Event, route events.DeliveryRoute) error {
 	route = canonicalDeliveryFixtureRouteValue(route)
 	switch selected := store.(type) {
@@ -259,10 +255,6 @@ func claimDeliveryFixture(ctx context.Context, store deliveryFixtureStore, event
 		return runtimedelivery.ClaimedObligation{}, fmt.Errorf("delivery %s was not acquired: %s", deliveryID, result.Disposition)
 	}
 	return claimed, nil
-}
-
-func loadAgentDeliverySnapshotFixture(t testing.TB, ctx context.Context, store deliveryFixtureStore, eventID string, route events.DeliveryRoute) runtimedelivery.Snapshot {
-	return loadDeliverySnapshotFixture(t, ctx, store, eventID, route)
 }
 
 func loadDeliverySnapshotFixture(t testing.TB, ctx context.Context, store deliveryFixtureStore, eventID string, route events.DeliveryRoute) runtimedelivery.Snapshot {

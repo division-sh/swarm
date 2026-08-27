@@ -2,7 +2,6 @@ package providertriggers
 
 import (
 	"crypto/hmac"
-	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -348,10 +347,4 @@ func admissionTestManifest(provider, signatureType string, secretRequired bool) 
 		DeliveryID: ValueSource{Header: "X-Delivery", Required: true}, EventType: ValueSource{Literal: "event", Required: true},
 		EventName: EventNameManifest{Literal: "inbound." + provider}, Ack: AckManifest{Mode: "after_publish"},
 	}
-}
-
-func signAdmissionTestHMACSHA1(secret string, body []byte) string {
-	mac := hmac.New(sha1.New, []byte(secret))
-	_, _ = mac.Write(body)
-	return hex.EncodeToString(mac.Sum(nil))
 }

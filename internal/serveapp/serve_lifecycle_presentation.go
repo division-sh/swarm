@@ -298,15 +298,6 @@ func (p *serveLifecyclePresenter) recordOperatorChannelProofReuse(binding operat
 	p.mu.Unlock()
 }
 
-func (p *serveLifecyclePresenter) recordBundleMatchDisabledWarning() {
-	if p == nil {
-		return
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.operatorWarnings = append(p.operatorWarnings, "bundle matching is disabled for this startup")
-}
-
 func (p *serveLifecyclePresenter) recordAbandonedWork(runs, deliveries, pipelineReceipts int) {
 	if p == nil {
 		return

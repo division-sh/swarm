@@ -262,34 +262,6 @@ func conversationForkSandboxObservedCanonicalTools(tools []ToolDefinition, obser
 	return filtered
 }
 
-func conversationForkSandboxAllowedToolNames(tools []ToolDefinition) []string {
-	surface := buildConversationForkSandboxTransportSurface(tools)
-	allowed := make([]string, 0, len(surface.ProviderMCPTools)+len(surface.LocalFallbackTools)+len(claudeControlToolNames()))
-	seen := make(map[string]struct{}, cap(allowed))
-	addAllowed := func(name string) {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			return
-		}
-		if _, ok := seen[name]; ok {
-			return
-		}
-		seen[name] = struct{}{}
-		allowed = append(allowed, name)
-	}
-	for _, name := range surface.ProviderMCPTools {
-		addAllowed(name)
-	}
-	for _, name := range surface.LocalFallbackTools {
-		addAllowed(name)
-	}
-	for _, name := range claudeControlToolNames() {
-		addAllowed(name)
-	}
-	slices.Sort(allowed)
-	return allowed
-}
-
 func conversationForkSandboxObservedToolsForTurn(tools []ToolDefinition, resp *Response) []string {
 	if resp == nil {
 		return nil
@@ -365,10 +337,6 @@ func appendCanonicalToolNames(dst []string, names []string) []string {
 	}
 	slices.Sort(dst)
 	return dst
-}
-
-func toolNamesCSV(tools []ToolDefinition) string {
-	return strings.Join(toolNames(tools), ",")
 }
 
 func toolNames(tools []ToolDefinition) []string {

@@ -55,10 +55,6 @@ func defaultVerifyCommandOptions() verifyCommandOptions {
 	}
 }
 
-func runVerifyCommand(ctx context.Context, repo string, opts verifyCommandOptions, out io.Writer) int {
-	return runVerifyCommandWithOutput(ctx, repo, opts, out, out)
-}
-
 func runVerifyCommandWithOutput(ctx context.Context, repo string, opts verifyCommandOptions, out, errOut io.Writer) int {
 	if err := opts.logging.validate(); err != nil {
 		if errOut != nil {

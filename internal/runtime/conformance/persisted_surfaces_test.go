@@ -2046,15 +2046,6 @@ func trackedStatesEqual(left, right runtimemutationlog.EntityStateProjection) bo
 	return mustCanonicalJSON(nil, left) == mustCanonicalJSON(nil, right)
 }
 
-func decodeJSONMap(t *testing.T, raw []byte) map[string]any {
-	t.Helper()
-	out, err := decodeJSONMapErr(raw)
-	if err != nil {
-		t.Fatalf("json.Unmarshal map: %v", err)
-	}
-	return out
-}
-
 func decodeJSONMapErr(raw []byte) (map[string]any, error) {
 	if len(raw) == 0 {
 		return map[string]any{}, nil
@@ -2064,15 +2055,6 @@ func decodeJSONMapErr(raw []byte) (map[string]any, error) {
 		return nil, err
 	}
 	return out, nil
-}
-
-func decodeJSONValue(t *testing.T, raw []byte) any {
-	t.Helper()
-	out, err := decodeJSONValueErr(raw)
-	if err != nil {
-		t.Fatalf("json.Unmarshal value: %v", err)
-	}
-	return out
 }
 
 func decodeJSONValueErr(raw []byte) (any, error) {

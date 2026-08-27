@@ -931,15 +931,6 @@ func typeFieldParticipatesInEquality(fields map[string]runtimecontracts.TypeFiel
 	return false
 }
 
-func leafKind(contract Contract, typeRef string) (string, error) {
-	switch kind := pathKind(contract, typeRef); kind {
-	case "scalar", "enum":
-		return kind, nil
-	default:
-		return "", fmt.Errorf("path does not resolve to scalar or enum leaf")
-	}
-}
-
 func pathKind(contract Contract, typeRef string) string {
 	switch {
 	case isTextType(typeRef):

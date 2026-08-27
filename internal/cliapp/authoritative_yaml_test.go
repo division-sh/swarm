@@ -16,14 +16,3 @@ func decodeAuthoritativeYAMLFileForTest(t testing.TB, path string, target any) {
 		t.Fatalf("decode authoritative YAML %s: %v", path, err)
 	}
 }
-
-func decodeAuthoritativeYAMLBytesForTest(t testing.TB, raw []byte, target any) {
-	t.Helper()
-	source, err := yamlsource.Load(raw)
-	if err != nil {
-		t.Fatalf("parse authoritative YAML: %v", err)
-	}
-	if err := source.Decode(target); err != nil {
-		t.Fatalf("decode authoritative YAML: %v", err)
-	}
-}

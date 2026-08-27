@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -11,10 +10,6 @@ import (
 )
 
 const runtimeWorkflowID = "workflow-runtime"
-
-func isRuntimeWorkflowSource(source string) bool {
-	return strings.TrimSpace(source) == runtimeWorkflowID
-}
 
 type WorkflowRuntime interface {
 	SemanticSource() semanticview.Source

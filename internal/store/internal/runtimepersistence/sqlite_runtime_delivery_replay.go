@@ -2,7 +2,6 @@ package runtimepersistence
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -37,23 +36,4 @@ func (s *SQLiteRuntimeStore) ListPendingAgentDeliveryFacts(ctx context.Context, 
 
 func (s *SQLiteRuntimeStore) ListPendingAgentDeliveryDetails(ctx context.Context, opts operatorread.PendingAgentDeliveryListOptions) (operatorread.PendingAgentDeliveryPage, error) {
 	return s.operatorAgentSQLite.ListPendingAgentDeliveryDetails(ctx, opts)
-}
-
-func sqliteJSONRawMessage(raw any) json.RawMessage {
-	switch v := raw.(type) {
-	case nil:
-		return nil
-	case json.RawMessage:
-		return append(json.RawMessage(nil), v...)
-	case []byte:
-		return json.RawMessage(append([]byte(nil), v...))
-	case string:
-		return json.RawMessage(v)
-	default:
-		encoded, err := json.Marshal(v)
-		if err != nil {
-			return nil
-		}
-		return encoded
-	}
 }

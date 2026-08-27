@@ -35,10 +35,8 @@ type recoveryTestBus struct {
 	pipelineSweeps          int
 	restored                []string
 	restoredRequests        []runtimebus.FlowInstanceRouteMaterializationRequest
-	replayable              []events.PersistedReplayEvent
 	deliveries              map[string][]string
 	runtimeLogs             []runtimepipeline.RuntimeLogEntry
-	direct                  []events.Event
 }
 
 type directiveRecoveryTestBus struct {
@@ -373,31 +371,6 @@ func TestMockOnlyPostureRejectsLiveAgentRestartBeforeSuccessorFactory(t *testing
 type startupReplayTestStore struct {
 	recoveryTestStore
 	*managerDeliveryTestStore
-}
-
-func newStartupReplayTestStore(t *testing.T, persistence recoveryTestStore, pending map[string][]events.Event) *startupReplayTestStore {
-	t.Helper()
-	deliveryStore := newManagerDeliveryTestStore(t)
-	for agentID, events := range pending {
-		deliveryStore.seedAgentDeliveries(t, agentID, events)
-	}
-	return &startupReplayTestStore{recoveryTestStore: persistence, managerDeliveryTestStore: deliveryStore}
-}
-
-type startupReplayTestAgent struct{ id string }
-
-func (a startupReplayTestAgent) ID() string                      { return a.id }
-func (startupReplayTestAgent) Type() string                      { return "generic" }
-func (startupReplayTestAgent) Subscriptions() []events.EventType { return nil }
-func (startupReplayTestAgent) OnEvent(_ context.Context, evt events.Event) ([]events.Event, error) {
-	switch evt.Type() {
-	case events.EventType("system.recover.drop"):
-		return nil, errors.New("boom")
-	case events.EventType("system.recover.leased"):
-		return nil, errors.New("session currently leased")
-	default:
-		return nil, nil
-	}
 }
 
 func TestRecoverRestoresPersistedFlowInstanceRoutes(t *testing.T) {

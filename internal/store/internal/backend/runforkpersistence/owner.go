@@ -25,7 +25,6 @@ import (
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	sqlitebackend "github.com/division-sh/swarm/internal/store/internal/backend/sqlite"
 	storedurabledata "github.com/division-sh/swarm/internal/store/internal/durabledata"
-	storefailurecodec "github.com/division-sh/swarm/internal/store/internal/failurecodec"
 	storeoperatorsurface "github.com/division-sh/swarm/internal/store/internal/operatorsurface"
 	storerunhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
 )
@@ -51,16 +50,13 @@ type persistedAgentProjection = storeagent.PersistedAgentProjection
 
 var agentIdentityFields = storeagent.IdentityFields
 var hydratePersistedAgentConfig = storeagent.HydrateAgentConfig
-var decodeStoredFailure = storefailurecodec.Decode
 var DecodeConversationRuntimeStateDescriptor = storeoperatorsurface.DecodeConversationRuntimeStateDescriptor
-var projectOperatorConversationSummaryMetadata = storeoperatorsurface.ProjectOperatorConversationSummaryMetadata
 
 func traceTimePtr(value time.Time) *time.Time { return storeoperatorsurface.TraceTimePtr(value) }
 
 var cloneRawMessage = storeoperatorsurface.CloneRawMessage
 var cloneConversationToolCalls = storeoperatorsurface.CloneConversationToolCalls
 var cloneConversationToolResults = storeoperatorsurface.CloneConversationToolResults
-var operatorConversationReadQueryError = storeoperatorsurface.OperatorConversationReadQueryError
 
 type RunForkPostgresOwner struct {
 	*storerunlifecycle.RunLifecyclePostgresOwner
@@ -189,7 +185,6 @@ func mustDeliveryAdapter(dialect storedelivery.Dialect) *storedelivery.Adapter {
 
 func (s *RunForkPostgresOwner) requireCurrentSchema() error { return s.requireCurrent() }
 func (s *RunForkSQLiteOwner) requireCurrentSchema() error   { return s.requireCurrent() }
-func (s *RunForkSQLiteOwner) now() time.Time                { return s.nowFn().UTC() }
 
 func (s *RunForkSQLiteOwner) runRuntimeMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx) error) error {
 	if err := s.requireCurrentSchema(); err != nil {

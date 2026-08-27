@@ -23,9 +23,7 @@ type runtimeConstructorCallsite struct {
 
 var productionProjectionEventAllowlist = map[eventConstructorCallsite]int{}
 
-var productionRouteProbeEventAllowlist = map[eventConstructorCallsite]int{
-	{Path: "internal/runtime/bus/eventbus_routing.go", Scope: "EventBus.resolveRoutedSubscribers"}: 1,
-}
+var productionRouteProbeEventAllowlist = map[eventConstructorCallsite]int{}
 
 var productionRuntimeConstructorAllowlist = map[runtimeConstructorCallsite]int{
 	{Path: "internal/runtime/pipeline/decision_card_mutation.go", Scope: "decisionCardRuntimeControlEvent", Constructor: "NewRunScopedRuntimeControlEvent"}:            1,
@@ -33,7 +31,6 @@ var productionRuntimeConstructorAllowlist = map[runtimeConstructorCallsite]int{
 	{Path: "internal/runtime/agentcontrol/control.go", Scope: "NewDirectiveEvent", Constructor: "NewRunScopedDiagnosticDirectEvent"}:                                   1,
 	{Path: "internal/runtime/budget.go", Scope: "BudgetTracker.evaluateScope", Constructor: "NewCausalRuntimeDiagnosticEvent"}:                                         1,
 	{Path: "internal/runtime/budget.go", Scope: "BudgetTracker.evaluateScope", Constructor: "NewStandaloneRuntimeDiagnosticEvent"}:                                     1,
-	{Path: "internal/runtime/event_construction.go", Scope: "newStandaloneRuntimePlatformControlEvent", Constructor: "NewStandaloneRuntimeControlEvent"}:               1,
 	{Path: "internal/runtime/event_construction.go", Scope: "newStandaloneRuntimePlatformDiagnosticEvent", Constructor: "NewStandaloneRuntimeDiagnosticEvent"}:         1,
 	{Path: "internal/runtime/genericschedule/owner.go", Scope: "occurrenceEvent", Constructor: "NewRunScopedRuntimeControlEvent"}:                                      1,
 	{Path: "internal/runtime/genericschedule/owner.go", Scope: "occurrenceEvent", Constructor: "NewStandaloneRuntimeControlEvent"}:                                     1,

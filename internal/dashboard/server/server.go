@@ -477,29 +477,6 @@ func (h *Handler) handleRuntimeIncidents(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{"incidents": rows})
 }
 
-func (h *Handler) handleRunTrace(w http.ResponseWriter, r *http.Request) {
-	if h.runTrace == nil {
-		writeJSONError(w, http.StatusNotImplemented, errors.New("run trace reader is not configured"))
-		return
-	}
-	runID := strings.TrimSpace(r.PathValue("runID"))
-	if runID == "" {
-		writeJSONError(w, http.StatusBadRequest, errors.New("run id is required"))
-		return
-	}
-	rows, err := h.runTrace.LoadRunDebugTrace(r.Context(), runID, operatorread.RunDebugTraceQueryOptions{
-		Limit: intQuery(r, "limit", 200),
-	})
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"run_id": runID,
-		"trace":  rows,
-	})
-}
-
 func (h *Handler) handleEventStream(w http.ResponseWriter, r *http.Request) {
 	if h.observability == nil {
 		writeJSONError(w, http.StatusNotImplemented, errors.New("observability reader is not configured"))
@@ -627,39 +604,6 @@ func dashboardEventFilterFromRequest(r *http.Request) (EventFilter, error) {
 var dashboardEventSubscriberTypes = map[string]struct{}{
 	"agent": {},
 	"node":  {},
-}
-
-func (h *Handler) handleMailbox(w http.ResponseWriter, r *http.Request) {
-	if h.mailbox == nil {
-		writeJSONError(w, http.StatusNotImplemented, errors.New("mailbox reader is not configured"))
-		return
-	}
-	status := strings.TrimSpace(r.URL.Query().Get("status"))
-	limit := intQuery(r, "limit", 150)
-	items, err := h.mailbox.ListMailboxItems(r.Context(), status, limit)
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
-}
-
-func (h *Handler) handleMailboxDetail(w http.ResponseWriter, r *http.Request) {
-	if h.mailbox == nil {
-		writeJSONError(w, http.StatusNotImplemented, errors.New("mailbox reader is not configured"))
-		return
-	}
-	id := strings.TrimSpace(r.PathValue("id"))
-	if id == "" {
-		writeJSONError(w, http.StatusBadRequest, errors.New("mailbox id is required"))
-		return
-	}
-	item, err := h.mailbox.GetMailboxItem(r.Context(), id)
-	if err != nil {
-		writeJSONError(w, http.StatusInternalServerError, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, item)
 }
 
 func (h *Handler) handleInstances(w http.ResponseWriter, r *http.Request) {

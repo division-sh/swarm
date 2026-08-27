@@ -3,7 +3,6 @@ package operatorsurface
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -344,14 +343,6 @@ func applyRouteSettlement(e *operatorread.OperatorEventFull, settlement events.R
 	}
 	e.NoDelivery = &operatorread.OperatorNoDelivery{Reason: settlement.Reason().Code(), Plans: plans}
 	return nil
-}
-
-func nullTimePtr(value sql.NullTime) *time.Time {
-	if !value.Valid {
-		return nil
-	}
-	at := value.Time.UTC()
-	return &at
 }
 
 func (r *ObservabilityPostgres) loadOperatorEventDeadLetters(ctx context.Context, eventID string) ([]operatorread.OperatorDeadLetterRecord, error) {
@@ -841,11 +832,6 @@ func operatorIncidentID(key string) string {
 	return "inc_" + hex.EncodeToString(sum[:8])
 }
 
-func readStoreString(value any) string {
-	text, _ := value.(string)
-	return strings.TrimSpace(text)
-}
-
 func firstNonEmptyStore(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
@@ -864,11 +850,4 @@ func sortedStoreStringSet(values map[string]struct{}) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

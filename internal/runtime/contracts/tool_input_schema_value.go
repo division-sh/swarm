@@ -193,14 +193,6 @@ func ToolSchemaEnum(values ...any) ToolInputSchemaOption {
 	})
 }
 
-func toolSchemaSemanticEnum(values []semanticvalue.Value) ToolInputSchemaOption {
-	return toolInputSchemaOption(func(draft *toolInputSchemaDraft) error {
-		draft.value.enumDeclared = true
-		draft.value.enum = append([]semanticvalue.Value(nil), values...)
-		return nil
-	})
-}
-
 func ToolSchemaAdditionalPropertiesAllowed(allowed bool) ToolInputSchemaOption {
 	return toolInputSchemaOption(func(draft *toolInputSchemaDraft) error {
 		draft.value.additionalAllowed = allowed

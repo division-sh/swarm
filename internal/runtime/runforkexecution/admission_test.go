@@ -1344,11 +1344,6 @@ func testSelectedContractExecutionModel(t *testing.T, frontier runfork.RunForkCo
 	return model
 }
 
-func testSelectedContractRouteTopology(t *testing.T, frontier runfork.RunForkContractFrontierAdmission) runfork.RunForkSelectedContractRouteTopology {
-	t.Helper()
-	return testSelectedContractRouteTopologyFromAdmission(t, frontier, testSelectedContractRouteAdmission(frontier))
-}
-
 func testSelectedContractRouteTopologyFromAdmission(t *testing.T, frontier runfork.RunForkContractFrontierAdmission, routeAdmission runfork.RunForkSelectedContractRouteAdmission) runfork.RunForkSelectedContractRouteTopology {
 	t.Helper()
 	routeTopology, err := BuildSelectedContractRouteTopology(SelectedContractRouteTopologyRequest{

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
@@ -1106,5 +1105,3 @@ func asString(v any) string {
 		return ""
 	}
 }
-
-func _unusedTimeRef() time.Time { return time.Time{} }

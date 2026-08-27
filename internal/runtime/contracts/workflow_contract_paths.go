@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/platform"
-	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/yamlsource"
 )
 
@@ -318,28 +317,8 @@ func validateDiscoveredPackageTree(pkgs []LoadedProjectPackage) error {
 	}
 	return nil
 }
-func cloneSystemNodeContractMap(in map[string]SystemNodeContract) map[string]SystemNodeContract {
-	if len(in) == 0 {
-		return map[string]SystemNodeContract{}
-	}
-	out := make(map[string]SystemNodeContract, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
-}
 func cloneEventCatalogEntryMap(in map[string]EventCatalogEntry) map[string]EventCatalogEntry {
 	return cloneEventCatalogEntries(in)
-}
-func cloneAgentRegistryEntryMap(in map[string]AgentRegistryEntry) map[string]AgentRegistryEntry {
-	if len(in) == 0 {
-		return map[string]AgentRegistryEntry{}
-	}
-	out := make(map[string]AgentRegistryEntry, len(in))
-	for key, value := range in {
-		out[key] = cloneAgentRegistryEntry(value)
-	}
-	return out
 }
 func cloneAgentRegistryEntry(in AgentRegistryEntry) AgentRegistryEntry {
 	out := in
@@ -426,24 +405,6 @@ func appendIfMissingString(items []string, value string) []string {
 		}
 	}
 	return append(items, value)
-}
-func handlerPatternMatches(pattern, eventType string) bool {
-	pattern = strings.TrimSpace(pattern)
-	eventType = strings.TrimSpace(eventType)
-	if pattern == "" || eventType == "" {
-		return false
-	}
-	if pattern == eventType {
-		return true
-	}
-	if !strings.Contains(pattern, "*") {
-		return false
-	}
-	return contractRouteMatches(pattern, eventType)
-}
-
-func contractRouteMatches(pattern, eventType string) bool {
-	return eventidentity.MatchPattern(pattern, eventType)
 }
 func sortedContractKeys[T any](m map[string]T) []string {
 	if len(m) == 0 {

@@ -267,22 +267,6 @@ var eventObservationValidSubscriberTypes = map[string]struct{}{
 	"agent": {},
 }
 
-func newEventsCommand(opts rootCommandOptions) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "events",
-		Short: "List or follow the event stream.",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return cmd.Help()
-		},
-	}
-	cmd.AddCommand(
-		newEventsListCommand(opts),
-		newEventsFollowCommand(opts),
-	)
-	return cmd
-}
-
 func newEventCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "event",

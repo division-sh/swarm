@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -13,7 +12,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/flowdata"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemcp "github.com/division-sh/swarm/internal/runtime/mcp"
-	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerequiredagents "github.com/division-sh/swarm/internal/runtime/requiredagents"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
@@ -1275,43 +1273,6 @@ func sortedSetKeys(items map[string]struct{}) []string {
 	return out
 }
 
-var bootverifyEntityReferencePattern = regexp.MustCompile(`entity\.([a-zA-Z_][a-zA-Z0-9_]*)`)
-
-func entityReferences(expression string) []string {
-	refs := runtimepipeline.WorkflowEntityReferences(expression)
-	out := make([]string, 0, len(refs))
-	seen := map[string]struct{}{}
-	for _, ref := range refs {
-		field := runtimepipeline.WorkflowEntityReferenceField(ref)
-		if field == "" {
-			continue
-		}
-		if _, ok := seen[field]; ok {
-			continue
-		}
-		seen[field] = struct{}{}
-		out = append(out, field)
-	}
-	return out
-}
-
-func entitySchemaFields(source semanticview.Source) map[string]struct{} {
-	if source == nil {
-		return nil
-	}
-	out := map[string]struct{}{}
-	schema := source.WorkflowEntitySchema()
-	for _, group := range schema.Groups {
-		for _, field := range group.Fields {
-			name := strings.TrimSpace(field.Name)
-			if name != "" {
-				out[name] = struct{}{}
-			}
-		}
-	}
-	return out
-}
-
 func flowSchemaIsTemplate(source semanticview.Source, flowID string) bool {
 	if source == nil {
 		return false
@@ -1384,15 +1345,6 @@ func flowUsesAuthoredStages(source semanticview.Source, flowID string) bool {
 	for _, entry := range lifecycleFlowSchemas(source) {
 		if strings.TrimSpace(entry.flowID) == flowID {
 			return entry.schema.UsesAuthoredStages()
-		}
-	}
-	return false
-}
-
-func bundleUsesAuthoredStages(source semanticview.Source) bool {
-	for _, entry := range lifecycleFlowSchemas(source) {
-		if entry.schema.UsesAuthoredStages() {
-			return true
 		}
 	}
 	return false
@@ -1471,14 +1423,6 @@ func uniqueFindings(items []Finding) []Finding {
 		out = append(out, item)
 	}
 	return out
-}
-
-func handlerEmits(handler runtimecontracts.SystemNodeEventHandler) []string {
-	return runtimecontracts.HandlerEmitEvents(handler)
-}
-
-func branchRuleEmits(rule runtimecontracts.HandlerRuleEntry) []string {
-	return runtimecontracts.RuleEmitEvents(rule)
 }
 
 type permissionWarning struct {
@@ -1678,21 +1622,6 @@ func eventExists(source semanticview.Source, eventType string) bool {
 		}
 	}
 	return false
-}
-
-func handlerPatternMatchesLocal(pattern, eventType string) bool {
-	pattern = strings.TrimSpace(pattern)
-	eventType = strings.TrimSpace(eventType)
-	if pattern == "" || eventType == "" {
-		return false
-	}
-	if pattern == eventType {
-		return true
-	}
-	if !strings.Contains(pattern, "*") {
-		return false
-	}
-	return routeMatchesLocal(pattern, eventType)
 }
 
 func routeMatchesLocal(pattern, eventType string) bool {

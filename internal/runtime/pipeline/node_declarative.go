@@ -30,11 +30,6 @@ type HandlerExecutionEngine interface {
 	ExecuteHandlerSteps(ctx context.Context, handler SystemNodeEventHandler, evt Event, handlerEventKey string) (*HandlerOutcome, error)
 }
 
-type declarativeWorkflowNode struct {
-	node        identity.ExecutableNode
-	coordinator *PipelineCoordinator
-}
-
 type DeclarativeNode struct {
 	node     identity.ExecutableNode
 	contract SystemNodeContract
@@ -72,47 +67,6 @@ func NewNode(node identity.ExecutableNode, contract SystemNodeContract, source s
 		engine:   engine,
 		hooks:    hooks,
 	}
-}
-
-func (n *declarativeWorkflowNode) ExecutableNode() identity.ExecutableNode {
-	if n == nil {
-		return identity.ExecutableNode{}
-	}
-	return n.node
-}
-
-func (n *declarativeWorkflowNode) Subscriptions() []events.EventType {
-	if n == nil || n.coordinator == nil {
-		return nil
-	}
-	return workflowNodeSubscriptions(n.coordinator.WorkflowNodes(), n.ExecutableNode())
-}
-
-func (n *declarativeWorkflowNode) InterceptPolicy(eventType string, evt events.Event) (bool, bool) {
-	if n == nil {
-		return false, false
-	}
-	eventType = strings.TrimSpace(eventType)
-	if eventType == "" {
-		eventType = strings.TrimSpace(string(evt.Type()))
-	}
-	policy, ok := workflowNodeEventPolicy(n.coordinator.WorkflowNodes(), n.ExecutableNode(), eventType)
-	if !ok && isJoinLifecycleEvent(events.EventType(eventType)) {
-		if resolution, refOK, err := resolveWorkflowJoinOccurrence(n.coordinator.SemanticSource(), evt); err == nil && refOK && resolution.Ref.Node().Equal(n.ExecutableNode()) {
-			policy, ok = workflowNodeEventPolicy(n.coordinator.WorkflowNodes(), n.ExecutableNode(), resolution.Ref.HandlerEvent())
-		}
-	}
-	if !ok {
-		return false, false
-	}
-	return policy.Consume, true
-}
-
-func (n *declarativeWorkflowNode) Handle(ctx context.Context, evt events.Event) bool {
-	if n == nil || n.coordinator == nil {
-		return false
-	}
-	return n.coordinator.executeNodeHandlerPlan(ctx, n.ExecutableNode(), evt)
 }
 
 func (n *DeclarativeNode) ExecutableNode() identity.ExecutableNode {
@@ -203,27 +157,6 @@ func (n *DeclarativeNode) HandleEvent(ctx context.Context, evt Event) (*HandlerO
 		return nil, err
 	}
 	return outcome, nil
-}
-
-func (n *DeclarativeNode) resolvedHandlerForDelivery(evt Event) (SystemNodeEventHandler, bool) {
-	if n == nil || n.source == nil {
-		return SystemNodeEventHandler{}, false
-	}
-	resolved := workflowNodeEventHandlerResolutionForDelivery(n.source, n.node, evt)
-	return resolved.Handler, resolved.Matched
-}
-
-func containsEventType(values []events.EventType, want events.EventType) bool {
-	want = events.EventType(strings.TrimSpace(string(want)))
-	if want == "" {
-		return false
-	}
-	for _, value := range values {
-		if events.EventType(strings.TrimSpace(string(value))) == want {
-			return true
-		}
-	}
-	return false
 }
 
 func (r *ProductHookRegistry) Register(actionID string, handler ActionHandler) {
@@ -525,25 +458,6 @@ func canonicalHandlerRoute(source semanticview.Source, flowID, statePath string,
 		return workflowInstanceRouteForPath(runID)
 	}
 	return runtimeflowidentity.Route{}, fmt.Errorf("materializing handler requires an exact workflow instance route")
-}
-
-func canonicalHandlerEntityID(source semanticview.Source, flowID string, evt Event) string {
-	if flowInstance := strings.Trim(strings.TrimSpace(evt.FlowInstance()), "/"); flowInstance != "" {
-		return FlowInstanceEntityID(flowInstance)
-	}
-	flowID = strings.TrimSpace(flowID)
-	if flowID != "" {
-		if source != nil {
-			if flowPath := strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/"); flowPath != "" {
-				return FlowInstanceEntityID(flowPath)
-			}
-		}
-		return FlowInstanceEntityID(flowID)
-	}
-	if runID := strings.TrimSpace(evt.RunID()); runID != "" {
-		return FlowInstanceEntityID(runID)
-	}
-	return FlowInstanceEntityID("root")
 }
 
 func prepareHandlerMaterializationState(source semanticview.Source, flowID string, handler SystemNodeEventHandler, route runtimeflowidentity.Route, entityID string, state *WorkflowState) error {

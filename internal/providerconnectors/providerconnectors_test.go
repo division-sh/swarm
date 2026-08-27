@@ -1549,14 +1549,6 @@ func joinErrors(errs []error) string {
 	return strings.Join(parts, "\n")
 }
 
-func joinRequirementStatuses(requirements []packs.Requirement) string {
-	parts := make([]string, 0, len(requirements))
-	for _, req := range requirements {
-		parts = append(parts, req.Kind+":"+req.Name+"="+req.Status)
-	}
-	return strings.Join(parts, "; ")
-}
-
 func requirementSatisfied(requirement packs.Requirement) bool {
 	return requirement.Satisfied != nil && *requirement.Satisfied
 }

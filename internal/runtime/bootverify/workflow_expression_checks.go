@@ -217,55 +217,6 @@ func (c *checkerContext) expressionFieldReferences() []Finding {
 	return c.entityRefFindings
 }
 
-func createEntityFieldInitializationFinding(flowID, nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler, expr expressionReference, field string) *Finding {
-	if createEntityTopLevelDataAccumulationWritesField(handler, field) && createEntityTopLevelDataAccumulationMakesFieldAvailable(expr.Phase) {
-		return nil
-	}
-	if createEntityComputeStoresField(handler, field) && createEntityComputeMakesFieldAvailable(expr.Phase) {
-		return nil
-	}
-	return &Finding{
-		CheckID:  "expression_field_reference_validation",
-		Severity: "error",
-		Message:  fmt.Sprintf("flow %s node %s handler %s references entity.%s in %s but the create_entity handler does not provably initialize %s before that position", flowID, nodeID, eventType, field, expr.Kind, field),
-		Location: nodeID,
-	}
-}
-
-func createEntityTopLevelDataAccumulationWritesField(handler runtimecontracts.SystemNodeEventHandler, field string) bool {
-	for _, write := range handler.DataAccumulation.Writes {
-		targetField, ok := runtimepipeline.WorkflowEntityFieldNameFromTarget(write.Target())
-		if ok && targetField == field {
-			return true
-		}
-	}
-	return false
-}
-
-func createEntityComputeStoresField(handler runtimecontracts.SystemNodeEventHandler, field string) bool {
-	if handler.Compute == nil {
-		return false
-	}
-	targetField, ok := runtimepipeline.WorkflowEntityFieldNameFromTarget(handler.Compute.StoreAs)
-	return ok && targetField == field
-}
-
-func createEntityTopLevelDataAccumulationMakesFieldAvailable(phase runtimepipeline.WorkflowEntityFieldLifecyclePhase) bool {
-	return phase == runtimepipeline.WorkflowEntityFieldLifecycleEmitFields
-}
-
-func createEntityComputeMakesFieldAvailable(phase runtimepipeline.WorkflowEntityFieldLifecyclePhase) bool {
-	switch phase {
-	case runtimepipeline.WorkflowEntityFieldLifecycleOnComplete,
-		runtimepipeline.WorkflowEntityFieldLifecycleRule,
-		runtimepipeline.WorkflowEntityFieldLifecycleDataAccumulation,
-		runtimepipeline.WorkflowEntityFieldLifecycleEmitFields:
-		return true
-	default:
-		return false
-	}
-}
-
 type expressionReference struct {
 	Kind                    string
 	Expression              string
@@ -374,42 +325,6 @@ func handlerEmitExpressionsForSource(source semanticview.Source, node runtimeide
 		if failureSpec, err := handler.Guard.FailureSpec(); err == nil {
 			if parsed, err := runtimeengine.GuardFailureFromSpec(failureSpec); err == nil && parsed.Action == runtimeengine.GuardFailureEscalate {
 				appendSpec("guard escalation", "guard.on_fail.escalate", failureSpec.EscalationEmitSpec(), runtimepipeline.WorkflowEntityFieldLifecycleGuardEscalation, "")
-			}
-		}
-	}
-	return out
-}
-
-func availableEntityFieldsForExpression(handler runtimecontracts.SystemNodeEventHandler, expr expressionReference) map[string]struct{} {
-	switch expr.Phase {
-	case runtimepipeline.WorkflowEntityFieldLifecycleDataAccumulation:
-		return runtimepipeline.WorkflowEntityFieldsAvailableBeforeDataAccumulation(handler)
-	case runtimepipeline.WorkflowEntityFieldLifecycleGuard,
-		runtimepipeline.WorkflowEntityFieldLifecycleGuardEscalation:
-		return runtimepipeline.WorkflowEntityFieldsAvailableBeforeCondition(handler, runtimepipeline.WorkflowConditionContextGuard)
-	case runtimepipeline.WorkflowEntityFieldLifecycleFilter:
-		return runtimepipeline.WorkflowEntityFieldsAvailableBeforeCondition(handler, runtimepipeline.WorkflowConditionContextFilter)
-	case runtimepipeline.WorkflowEntityFieldLifecycleCount:
-		return runtimepipeline.WorkflowEntityFieldsAvailableBeforeCondition(handler, runtimepipeline.WorkflowConditionContextCount)
-	case runtimepipeline.WorkflowEntityFieldLifecycleOnComplete:
-		return runtimepipeline.WorkflowEntityFieldsAvailableBeforeCondition(handler, runtimepipeline.WorkflowConditionContextOnComplete)
-	case runtimepipeline.WorkflowEntityFieldLifecycleRule:
-		return runtimepipeline.WorkflowEntityFieldsAvailableBeforeCondition(handler, runtimepipeline.WorkflowConditionContextRule)
-	case runtimepipeline.WorkflowEntityFieldLifecycleReduce:
-		return runtimepipeline.WorkflowEntityFieldsAvailableBeforeDataAccumulation(handler)
-	case runtimepipeline.WorkflowEntityFieldLifecycleEmitFields:
-		return runtimepipeline.WorkflowEntityFieldsAvailableBeforeEmitFields(handler)
-	default:
-		return map[string]struct{}{}
-	}
-}
-
-func flowEntityFieldWriters(nodes map[string]runtimecontracts.SystemNodeContract) map[string]struct{} {
-	out := map[string]struct{}{}
-	for _, node := range nodes {
-		for _, handler := range node.EventHandlers {
-			for field := range handlerEntityFieldWriters(handler) {
-				out[field] = struct{}{}
 			}
 		}
 	}

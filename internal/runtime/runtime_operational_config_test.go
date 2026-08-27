@@ -171,16 +171,6 @@ func (s *recoveryDisabledScheduleStore) ReadTimerObligations(_ context.Context, 
 	return snapshot, nil
 }
 
-type recoveryDisabledManagerStore struct {
-	recoveryGuardManagerStore
-	loadCalls atomic.Int32
-}
-
-func (s *recoveryDisabledManagerStore) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
-	s.loadCalls.Add(1)
-	return s.recoveryGuardManagerStore.LoadAgents(ctx)
-}
-
 func testOperationalRuntimeConfig() *config.Config {
 	return &config.Config{
 		Runtime: config.RuntimeConfig{

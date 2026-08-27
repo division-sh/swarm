@@ -17,10 +17,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const (
-	runForkSelectedContractRouteRecoveryTable = "run_fork_selected_contract_route_recoveries"
-)
-
 func (s *RunForkPostgresOwner) requireRunForkSelectedContractRouteRecoveryAccess() error {
 	return s.requireCurrentSchema()
 }

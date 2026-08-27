@@ -673,11 +673,3 @@ func capabilitySurfaceForResponse(response *Response) (managedcapabilities.Surfa
 	}
 	return response.CapabilitySurface.Clone(), true
 }
-
-func effectiveCapabilitySetForResponse(response *Response) (toolcapabilities.Set, bool) {
-	surface, ok := capabilitySurfaceForResponse(response)
-	if !ok {
-		return toolcapabilities.Set{}, false
-	}
-	return surface.CapabilitySet(), true
-}

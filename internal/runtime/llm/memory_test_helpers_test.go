@@ -53,10 +53,6 @@ func testAgentIdentity(agentID, flowInstance string) agentidentity.Identity {
 	}
 }
 
-func withTestActorIdentity(ctx context.Context, agentID, flowInstance string) context.Context {
-	return withTestActorConcreteIdentity(ctx, testAgentIdentity(agentID, flowInstance))
-}
-
 func withTestActorConcreteIdentity(ctx context.Context, identity agentidentity.Identity) context.Context {
 	actor, ok := actors.ActorFromContext(ctx)
 	if !ok {

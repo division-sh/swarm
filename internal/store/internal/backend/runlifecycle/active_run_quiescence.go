@@ -23,8 +23,6 @@ import (
 	"github.com/lib/pq"
 )
 
-const activeRunQuiescencePipelineSubscriberID = "pipeline"
-
 func (s *RunLifecyclePostgresOwner) ApplyServeAbandonActiveRunQuiescence(ctx context.Context, at time.Time) (runtimerunquiescence.Result, error) {
 	return s.ApplyActiveRunQuiescence(ctx, runtimerunquiescence.Request{
 		OperationName: runtimerunquiescence.ServeAbandonOperationName,

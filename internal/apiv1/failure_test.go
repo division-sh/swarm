@@ -16,15 +16,6 @@ func testFailure(detailCode string) *runtimefailures.Envelope {
 	return &failure
 }
 
-func mustMarshalTestFailure(t testing.TB, failure *runtimefailures.Envelope) string {
-	t.Helper()
-	raw, err := json.Marshal(failure)
-	if err != nil {
-		t.Fatalf("marshal test failure: %v", err)
-	}
-	return string(raw)
-}
-
 func requireRPCFailure(t testing.TB, rpcErr *rpcError, class runtimefailures.Class, detailCode string) runtimefailures.Envelope {
 	t.Helper()
 	if rpcErr == nil {

@@ -312,7 +312,6 @@ type ListItem struct {
 }
 
 func (i ListItem) MarshalJSON() ([]byte, error) {
-	type listItemAlias ListItem
 	var deferredUntil *time.Time
 	if !i.DeferredUntil.IsZero() {
 		value := i.DeferredUntil.UTC()

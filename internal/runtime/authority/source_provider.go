@@ -226,13 +226,6 @@ func containsCanonical(items []string, target string) bool {
 	})
 }
 
-func containsNormalized(items []string, target string) bool {
-	target = strings.TrimSpace(strings.ToLower(target))
-	return slices.ContainsFunc(items, func(item string) bool {
-		return strings.TrimSpace(strings.ToLower(item)) == target
-	})
-}
-
 func appendUniqueSortedEvent(events []string, eventType string) []string {
 	eventType = strings.TrimSpace(eventType)
 	if eventType == "" {

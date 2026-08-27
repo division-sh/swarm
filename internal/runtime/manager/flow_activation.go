@@ -418,22 +418,6 @@ func (am *AgentManager) installFlowInstanceRoute(ctx context.Context, req runtim
 	return fmt.Errorf("event bus does not support context-aware derived flow-instance routing for %s", instance.InstancePath)
 }
 
-func (am *AgentManager) logFlowInstanceActivationSideEffectFailure(req runtimepipeline.FlowInstanceActivationRequest, action, operation string, err error) {
-	if am == nil || am.bus == nil || err == nil {
-		return
-	}
-	_ = am.bus.LogRuntime(context.Background(), runtimepipeline.RuntimeLogEntry{
-		Level: "error", Message: "Flow instance runtime activation failed after commit",
-		Component: "flow_activation", Action: strings.TrimSpace(action),
-		EntityID: strings.TrimSpace(req.Instance.EntityID),
-		Detail: map[string]any{
-			"flow_path": strings.TrimSpace(req.Instance.InstancePath),
-			"error":     err.Error(),
-		},
-		Failure: failureEnvelope(err, "flow_activation", strings.TrimSpace(operation)),
-	})
-}
-
 var dynamicFlowCreationEventNamespace = uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm.dynamic-flow.creation-event.v1"))
 
 func (am *AgentManager) buildDynamicFlowRuntimeReadinessPlan(

@@ -311,7 +311,3 @@ func executableNodeDiagnostic(node runtimeidentity.ExecutableNode) string {
 	parts = append(parts, "node "+node.NodeID())
 	return strings.Join(parts, " ")
 }
-
-func wave1EntityEnvelopeField(field string) bool {
-	return platformcontext.LegacyEntityMetadataField(field)
-}

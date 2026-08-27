@@ -78,10 +78,6 @@ func (b *recordingReceiptBus) RetainDeliveryContinuation(snapshot runtimedeliver
 	return nil
 }
 
-type recordingCompletionReceiptBus struct {
-	recordingReceiptBus
-}
-
 type projectedEmergencyBudgetGuard struct{}
 
 func (projectedEmergencyBudgetGuard) ProjectRecoveryBudgetState(context.Context) error {

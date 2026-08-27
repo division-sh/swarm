@@ -32,34 +32,6 @@ func (r contractIDRegistry) sortedIDs() []string {
 	return out
 }
 
-func workflowGuardExecutionKey(entry runtimecontracts.GuardActionEntry) string {
-	if builtin := strings.TrimSpace(entry.PlatformBuiltin); builtin != "" {
-		return normalizeWorkflowBuiltinGuardID(builtin)
-	}
-	return strings.TrimSpace(entry.ID)
-}
-
-func workflowActionExecutionKey(entry runtimecontracts.GuardActionEntry) string {
-	if builtin := strings.TrimSpace(entry.PlatformBuiltin); builtin != "" {
-		return normalizeWorkflowBuiltinActionID(builtin)
-	}
-	return strings.TrimSpace(entry.ID)
-}
-
-func isExecutableWorkflowGuardEntry(entry runtimecontracts.GuardActionEntry) bool {
-	if strings.TrimSpace(entry.Check) != "" {
-		return true
-	}
-	return isSupportedWorkflowGuardBuiltin(firstNonEmptyString(entry.PlatformBuiltin, entry.ID))
-}
-
-func isExecutableWorkflowActionEntry(entry runtimecontracts.GuardActionEntry) bool {
-	if strings.TrimSpace(entry.Emits) != "" {
-		return true
-	}
-	return isSupportedWorkflowHandlerActionID(firstNonEmptyString(entry.PlatformBuiltin, entry.ID))
-}
-
 func isSupportedWorkflowHandlerActionID(id string) bool {
 	return runtimecontracts.IsSupportedHandlerActionID(normalizeWorkflowBuiltinActionID(id))
 }
@@ -171,8 +143,4 @@ func isSupportedWorkflowGuardBuiltin(id string) bool {
 	default:
 		return false
 	}
-}
-
-func isSupportedWorkflowActionBuiltin(id string) bool {
-	return runtimecontracts.IsSupportedHandlerActionID(normalizeWorkflowBuiltinActionID(id))
 }

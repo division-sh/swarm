@@ -58,7 +58,6 @@ type TemplateInstanceLifecycleDecision struct {
 	KeyMaterial   []runtimecontracts.TemplateInstanceKeyValue
 	SourceEventID string
 	Activation    *runtimepipeline.FlowInstanceActivationPlan
-	activation    *runtimepipeline.FlowInstanceActivationRequest
 	receiver      runtimepinrouting.ConnectRoutePlanEndpoint
 }
 

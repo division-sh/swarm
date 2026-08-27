@@ -188,17 +188,6 @@ func (r *EmitRegistry) GeneratedEmitSchemasForAgentRoles() []string {
 	return out
 }
 
-func closeGeneratedEmitSchemaRegistry(in map[string]EmitSchema) map[string]EmitSchema {
-	if len(in) == 0 {
-		return map[string]EmitSchema{}
-	}
-	out := make(map[string]EmitSchema, len(in))
-	for eventType, schema := range in {
-		out[eventType] = closeGeneratedEmitSchema(schema)
-	}
-	return out
-}
-
 func closeGeneratedEmitSchema(schema EmitSchema) EmitSchema {
 	schema.Schema = closeGeneratedJSONSchema(schema.Schema)
 	return schema

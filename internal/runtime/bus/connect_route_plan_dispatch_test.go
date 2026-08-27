@@ -32,7 +32,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
-	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/google/uuid"
 )
 
@@ -809,19 +808,6 @@ func connectReceiverPinLegalSource(shape string) semanticview.Source {
 		{id: "producer", mode: "static", outputs: []runtimecontracts.FlowOutputEventPin{{Name: "work_ready", Event: "work.ready"}}},
 		{id: "consumer", mode: "static", inputs: inputs, nodes: nodes},
 	}, connects))
-}
-
-func runConnectRoutePlanCommitScope(ctx context.Context, _ any, fn func(context.Context) error) error {
-	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 2)
-	rollback := make([]runtimepipelinefixture.OwnerAction, 0, 2)
-	ctx = runtimepipelinefixture.WithPostCommitActions(ctx, &postCommit)
-	ctx = runtimepipelinefixture.WithRollbackActions(ctx, &rollback)
-	if err := fn(ctx); err != nil {
-		runtimepipelinefixture.FlushRollbackActions(rollback)
-		return err
-	}
-	runtimepipelinefixture.FlushPostCommitActions(postCommit)
-	return nil
 }
 
 func (s *connectRoutePlanDescriptorStore) ListActiveFlowInstanceDescriptors(context.Context) ([]ActiveFlowInstanceDescriptor, error) {
@@ -5020,15 +5006,6 @@ func requireNoConnectRoutePlanBusEvent(t testing.TB, ch <-chan *LocalDelivery, c
 		t.Fatalf("%s: unexpected lower-precedence bus event: %#v", context, delivery.Event())
 	default:
 	}
-}
-
-func subscriberListContains(in []Subscriber, id, path string) bool {
-	for _, subscriber := range in {
-		if subscriber.Recipient.LocalID() == id && subscriber.Path == path {
-			return true
-		}
-	}
-	return false
 }
 
 func subscriberListContainsRouteSource(in []Subscriber, id, path, routeSource string) bool {

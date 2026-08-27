@@ -168,15 +168,6 @@ func releaseServeTestAgentFixtureCapability(t testing.TB, selected storetest.Age
 	}
 }
 
-func servedRuntimeRootIdentityFields(t testing.TB, agentID string) runtimeagentidentity.StorageFields {
-	t.Helper()
-	fields, err := servedRuntimeRootIdentity(t, agentID).StorageFields()
-	if err != nil {
-		t.Fatalf("project served runtime agent identity: %v", err)
-	}
-	return fields
-}
-
 func servedRuntimeFlowIdentity(t testing.TB, agentID, scopeKey, instanceID string) runtimeagentidentity.Identity {
 	t.Helper()
 	return agentidentitytest.Runtime(
@@ -9377,10 +9368,6 @@ func captureRunForkCLIRevision(t *testing.T, db *sql.DB, runID string, families 
 		t.Fatalf("commit run-fork revision fixture: %v", err)
 	}
 	return revision
-}
-
-type verifyAccumulatorSafetyCommandFixtureOptions struct {
-	eventSource string
 }
 
 func seedServeRuntimeBundleCatalog(t *testing.T, ctx context.Context, pg *store.PostgresStore, relativeRoot string) string {

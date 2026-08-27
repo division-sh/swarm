@@ -55,10 +55,6 @@ func (s *DecisionSQLiteOwner) CreateDecisionCard(ctx context.Context, card decis
 	})
 }
 
-func insertDecisionCard(ctx context.Context, db decisionCardSQL, card decisioncard.Card, postgres bool) error {
-	return insertDecisionCardWithStory(ctx, nil, db, card, postgres)
-}
-
 func (s *DecisionPostgresOwner) InsertTx(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, card decisioncard.Card) error {
 	return insertDecisionCardWithStory(ctx, story, tx, card, true)
 }
@@ -449,10 +445,6 @@ func (s *DecisionSQLiteOwner) DecideDecisionCard(ctx context.Context, req decisi
 	return out, err
 }
 
-func decideDecisionCard(ctx context.Context, tx *sql.Tx, req decisioncard.DecideRequest, postgres bool) (decisioncard.DecisionOutcome, error) {
-	return decideDecisionCardWithStory(ctx, nil, tx, req, postgres)
-}
-
 func decideDecisionCardWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, req decisioncard.DecideRequest, postgres bool) (decisioncard.DecisionOutcome, error) {
 	if story == nil {
 		return decisioncard.DecisionOutcome{}, fmt.Errorf("decision card decision requires private story ownership")
@@ -598,10 +590,6 @@ func (s *DecisionSQLiteOwner) DeferDecisionCard(ctx context.Context, req decisio
 		return err
 	})
 	return out, err
-}
-
-func deferDecisionCard(ctx context.Context, tx *sql.Tx, req decisioncard.DeferRequest, postgres bool) (decisioncard.DecisionOutcome, error) {
-	return deferDecisionCardWithStory(ctx, nil, tx, req, postgres)
 }
 
 func deferDecisionCardWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, req decisioncard.DeferRequest, postgres bool) (decisioncard.DecisionOutcome, error) {
@@ -957,10 +945,6 @@ func (s *DecisionSQLiteOwner) SupersedeDecisionCardsForStage(ctx context.Context
 			return err
 		})
 	})
-}
-
-func supersedeDecisionCardsForStage(ctx context.Context, tx *sql.Tx, runID, entityID, activationID, reason string, now time.Time, postgres bool) (bool, error) {
-	return supersedeDecisionCardsForStageWithStory(ctx, nil, tx, runID, entityID, activationID, reason, now, postgres)
 }
 
 func (s *DecisionPostgresOwner) SupersedeStageTx(ctx context.Context, story runtimeauthoractivity.Mutation, tx *sql.Tx, runID, entityID, activationID, reason string, now time.Time) (bool, error) {
@@ -1326,10 +1310,6 @@ func appendDecisionCardChangeDTOWithStory(ctx context.Context, story runtimeauth
 		return 0, fmt.Errorf("admit decision card change payload: %w", err)
 	}
 	return appendDecisionCardChangeWithStory(ctx, story, db, runID, cardID, changeType, admitted, now, postgres)
-}
-
-func appendDecisionCardChange(ctx context.Context, db decisionCardSQL, runID, cardID, changeType string, payload semanticvalue.Value, now time.Time, postgres bool) (int64, error) {
-	return appendDecisionCardChangeWithStory(ctx, nil, db, runID, cardID, changeType, payload, now, postgres)
 }
 
 func appendDecisionCardChangeWithStory(ctx context.Context, story runtimeauthoractivity.Mutation, db decisionCardSQL, runID, cardID, changeType string, payload semanticvalue.Value, now time.Time, postgres bool) (int64, error) {

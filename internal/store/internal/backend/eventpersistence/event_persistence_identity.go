@@ -92,26 +92,6 @@ func (s *EventSQLiteOwner) LoadDirectiveEventTx(ctx context.Context, tx *sql.Tx,
 	return admitted, err == nil, err
 }
 
-func (s *EventPostgresOwner) loadPreparedPublishEventTx(ctx context.Context, tx *sql.Tx, eventID string) (runtimebus.PreparedPublishEvent, bool, error) {
-	row, found, err := loadPostgresEventIdentity(ctx, tx, eventID)
-	if err != nil || !found {
-		return runtimebus.PreparedPublishEvent{}, found, err
-	}
-	admitted, err := decodeEventRecord(row)
-	if err != nil {
-		return runtimebus.PreparedPublishEvent{}, false, err
-	}
-	settlement, err := row.DecodeSettlement()
-	if err != nil {
-		return runtimebus.PreparedPublishEvent{}, false, err
-	}
-	snapshots, err := s.DeliverySnapshotsForEventTx(ctx, tx, eventID)
-	if err != nil {
-		return runtimebus.PreparedPublishEvent{}, false, err
-	}
-	return preparedPublishEvent(admitted, settlement, deliveryRoutesFromSnapshots(snapshots))
-}
-
 func (s *EventPostgresOwner) LoadPreparedPublishEvent(ctx context.Context, eventID string) (runtimebus.PreparedPublishEvent, bool, error) {
 	if s == nil || s.backend == nil {
 		return runtimebus.PreparedPublishEvent{}, false, fmt.Errorf("postgres store is required")
@@ -129,26 +109,6 @@ func (s *EventPostgresOwner) LoadPreparedPublishEvent(ctx context.Context, event
 		return runtimebus.PreparedPublishEvent{}, false, err
 	}
 	snapshots, err := s.DeliverySnapshotsForEvent(ctx, eventID)
-	if err != nil {
-		return runtimebus.PreparedPublishEvent{}, false, err
-	}
-	return preparedPublishEvent(admitted, settlement, deliveryRoutesFromSnapshots(snapshots))
-}
-
-func (s *EventSQLiteOwner) loadPreparedPublishEventTx(ctx context.Context, tx *sql.Tx, eventID string) (runtimebus.PreparedPublishEvent, bool, error) {
-	row, found, err := loadSQLiteEventIdentity(ctx, tx, eventID)
-	if err != nil || !found {
-		return runtimebus.PreparedPublishEvent{}, found, err
-	}
-	admitted, err := decodeEventRecord(row)
-	if err != nil {
-		return runtimebus.PreparedPublishEvent{}, false, err
-	}
-	settlement, err := row.DecodeSettlement()
-	if err != nil {
-		return runtimebus.PreparedPublishEvent{}, false, err
-	}
-	snapshots, err := s.DeliverySnapshotsForEventTx(ctx, tx, eventID)
 	if err != nil {
 		return runtimebus.PreparedPublishEvent{}, false, err
 	}
@@ -194,89 +154,6 @@ func preparedPublishEvent(admitted events.AdmittedEvent, settlement events.Route
 		return runtimebus.PreparedPublishEvent{}, false, fmt.Errorf("validate persisted prepared publication: %w", err)
 	}
 	return prepared, true, nil
-}
-
-func loadPostgresEventIdentities(ctx context.Context, q eventReadQueryer, eventIDs []string) ([]persistedEventIdentity, error) {
-	return eventrecordpostgres.LoadMany(ctx, q, eventIDs)
-}
-
-func loadSQLiteEventIdentities(ctx context.Context, q eventReadQueryer, eventIDs []string) ([]persistedEventIdentity, error) {
-	return eventrecordsqlite.LoadMany(ctx, q, eventIDs)
-}
-
-func hydratePostgresPersistedReplayEvents(ctx context.Context, q eventReadQueryer, eventIDs []string) ([]events.PersistedReplayEvent, error) {
-	records, err := loadPostgresEventIdentities(ctx, q, eventIDs)
-	if err != nil {
-		return nil, err
-	}
-	return persistedReplayEventsFromRecords(records)
-}
-
-func hydrateSQLitePersistedReplayEvents(ctx context.Context, q eventReadQueryer, eventIDs []string) ([]events.PersistedReplayEvent, error) {
-	records, err := loadSQLiteEventIdentities(ctx, q, eventIDs)
-	if err != nil {
-		return nil, err
-	}
-	return persistedReplayEventsFromRecords(records)
-}
-
-func persistedReplayEventsFromRecords(records []persistedEventIdentity) ([]events.PersistedReplayEvent, error) {
-	out := make([]events.PersistedReplayEvent, 0, len(records))
-	for _, durable := range records {
-		admitted, err := decodeEventRecord(durable)
-		if err != nil {
-			return nil, err
-		}
-		event := admitted.Event()
-		record := events.PersistedReplayEvent{Event: event}
-		if event.RunID() == "" {
-			record.ReplayFailure = replayAdmissionFailure("missing_canonical_run_id")
-		}
-		out = append(out, record)
-	}
-	return out, nil
-}
-
-func scanOrderedEventIDs(rows *sql.Rows, label string) ([]string, error) {
-	if rows == nil {
-		return nil, fmt.Errorf("%s rows are required", label)
-	}
-	defer rows.Close()
-	var eventIDs []string
-	for rows.Next() {
-		var eventID string
-		if err := rows.Scan(&eventID); err != nil {
-			return nil, fmt.Errorf("scan %s event id: %w", label, err)
-		}
-		eventIDs = append(eventIDs, eventID)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read %s event ids: %w", label, err)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, fmt.Errorf("close %s event ids: %w", label, err)
-	}
-	return eventIDs, nil
-}
-
-// pendingDeliveryEventRecordIDs collapses the intentional one-event-to-many-
-// deliveries fan-out before canonical hydration. Blank IDs are durable
-// corruption and never disappear as a normalization side effect.
-func pendingDeliveryEventRecordIDs(ids []string) ([]string, error) {
-	seen := make(map[string]struct{}, len(ids))
-	out := make([]string, 0, len(ids))
-	for index, raw := range ids {
-		id := strings.TrimSpace(raw)
-		if id == "" {
-			return nil, fmt.Errorf("pending delivery event id at index %d is required", index)
-		}
-		if _, exists := seen[id]; exists {
-			continue
-		}
-		seen[id] = struct{}{}
-		out = append(out, id)
-	}
-	return out, nil
 }
 
 func jsonSemanticallyEqual(left, right []byte) bool {

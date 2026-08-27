@@ -2890,26 +2890,6 @@ func mustCreateEntityID(t *testing.T, ctx context.Context, exec *runtimetools.Ex
 	return entityID
 }
 
-func mustJSONRaw(t *testing.T, value any) json.RawMessage {
-	t.Helper()
-	raw, err := json.Marshal(value)
-	if err != nil {
-		t.Fatalf("json.Marshal: %v", err)
-	}
-	return raw
-}
-
-func loadEntityToolFixtureBundle(t *testing.T, fixtureRoot string) *runtimecontracts.WorkflowContractBundle {
-	t.Helper()
-	repoRoot := runtimepipeline.WorkflowRepoRoot()
-	platformSpec := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, filepath.Join(repoRoot, fixtureRoot), platformSpec)
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides(%s): %v", fixtureRoot, err)
-	}
-	return bundle
-}
-
 func loadWave1EntityToolBundle(t *testing.T, actor models.AgentConfig, flowID, entityType, typesYAML, entitiesYAML string) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	repoRoot := runtimepipeline.WorkflowRepoRoot()

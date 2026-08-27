@@ -282,12 +282,6 @@ type projectionDirectiveAgent struct {
 	boardRelease <-chan struct{}
 }
 
-type projectionBacklogAgent struct {
-	projectionTestAgent
-	eventStarted chan<- runtimeeffects.LifecycleToken
-	eventRelease <-chan struct{}
-}
-
 type projectionSelfRetiringAgent struct {
 	projectionTestAgent
 	identity runtimeagentidentity.Identity
@@ -295,13 +289,6 @@ type projectionSelfRetiringAgent struct {
 	release  <-chan struct{}
 	retire   func(context.Context, runtimeagentidentity.Identity) error
 	handled  atomic.Int32
-}
-
-func (a *projectionBacklogAgent) OnEvent(ctx context.Context, _ events.Event) ([]events.Event, error) {
-	token, _ := runtimeeffects.LifecycleTokenFromContext(ctx)
-	a.eventStarted <- token
-	<-a.eventRelease
-	return nil, nil
 }
 
 func (a *projectionSelfRetiringAgent) OnEvent(ctx context.Context, _ events.Event) ([]events.Event, error) {

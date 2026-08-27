@@ -26,47 +26,6 @@ func (s *recordingGenericScheduleWakeupOwner) ReconcileWakeupWithRecovery(_ cont
 	return false, nil
 }
 
-func stageTimerLifecycleBundle() *runtimecontracts.WorkflowContractBundle {
-	return &runtimecontracts.WorkflowContractBundle{
-		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			StageDeclarations: runtimecontracts.FlowStageDeclarations{
-				Declared: true,
-				Entries: []runtimecontracts.FlowStageDeclaration{
-					{ID: "awaiting_review", Initial: true},
-					{ID: "expired", Terminal: true},
-				},
-			},
-		},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:           "stage-timer-test",
-			Version:        "1.0.0",
-			InitialStage:   "awaiting_review",
-			TerminalStages: []string{"expired"},
-			Timers: []runtimecontracts.WorkflowTimerContract{
-				{
-					ID:         "awaiting_review.review.sla_escalated",
-					Stage:      "awaiting_review",
-					Event:      "review.sla_escalated",
-					Owner:      "runtime",
-					StageOwned: true,
-					Delay:      "48h",
-					StartOn:    "state:awaiting_review",
-				},
-				{
-					ID:         "awaiting_review.expired",
-					Stage:      "awaiting_review",
-					Event:      runtimecontracts.WorkflowStageTimerInternalEvent,
-					Owner:      "runtime",
-					StageOwned: true,
-					AdvancesTo: "expired",
-					Delay:      "72h",
-					StartOn:    "state:awaiting_review",
-				},
-			},
-		},
-	}
-}
-
 func stageTimerTemplateLifecycleBundle() *runtimecontracts.WorkflowContractBundle {
 	review := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "review", Flow: "review"},

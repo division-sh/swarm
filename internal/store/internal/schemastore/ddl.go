@@ -15,20 +15,6 @@ type SchemaTableDDL = platformschema.TableDDL
 
 var ErrUnknownSchemaType = storeerrors.ErrUnknownSchemaType
 
-func sanitizeSchemaIdent(raw string) string {
-	raw = strings.ToLower(strings.TrimSpace(raw))
-	if raw == "" {
-		return ""
-	}
-	var b strings.Builder
-	for _, r := range raw {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
 func quoteIdent(value string) string {
 	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
 }
@@ -179,23 +165,6 @@ func validateSchemaDDLIdentifier(name, context string) (string, error) {
 	return name, nil
 }
 
-func schemaDDLIndexName(parts ...string) string {
-	raw := strings.Join(parts, "_")
-	name := sanitizeSchemaIdent(raw)
-	if name == "" {
-		return "idx_generated"
-	}
-	return name
-}
-
 func QuoteIdent(v string) string {
 	return quoteIdent(v)
-}
-
-func schemaDDLExtractTableName(statement string) string {
-	return platformschema.ExtractTableName(statement)
-}
-
-func schemaDDLPlanColumnNames(plan SchemaTableDDL) []string {
-	return platformschema.PlanColumnNames(plan)
 }

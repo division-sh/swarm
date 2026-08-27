@@ -212,8 +212,6 @@ func (o *sourceMutationProbeOwner) sourceFact(action string) runtimecorrelation.
 	}
 }
 
-type sourceMutationProbeTransaction struct{}
-
 type sourceBoundaryProbeStore struct {
 	InMemoryEventStore
 	runtimedelivery.Store
@@ -437,14 +435,6 @@ func sourceMutationEvent() events.Event {
 		events.EventEnvelope{},
 		time.Now().UTC(),
 	)
-}
-
-func sourceMutationContext(ctx context.Context, _ any) (context.Context, *[]runtimepipelinefixture.OwnerAction) {
-	rollback := make([]runtimepipelinefixture.OwnerAction, 0, 2)
-	postCommit := make([]runtimepipelinefixture.OwnerAction, 0, 2)
-	ctx = runtimepipelinefixture.WithRollbackActions(ctx, &rollback)
-	ctx = runtimepipelinefixture.WithPostCommitActions(ctx, &postCommit)
-	return ctx, &postCommit
 }
 
 func TestDurableEventBusConstructionRequiresImmutableBundleSourceFact(t *testing.T) {

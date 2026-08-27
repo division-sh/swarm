@@ -79,14 +79,6 @@ func TestCanonicalStatelessConversationVisibilitySourceProjectsRunID(t *testing.
 	}
 }
 
-func testOperatorAgent(agentID string) runtimemanager.PersistedAgent {
-	return runtimemanager.PersistedAgent{
-		Config:    testOperatorAgentConfig(agentID, "researcher"),
-		Status:    "active",
-		StartedAt: time.Date(2026, 5, 12, 8, 0, 0, 0, time.UTC),
-	}
-}
-
 func testOperatorAgentConfig(agentID, role string) runtimeactors.AgentConfig {
 	return runtimePersistenceTestAgentConfig(runtimeactors.AgentConfig{
 		Identity:      testOperatorAgentIdentity(agentID),

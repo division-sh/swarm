@@ -420,37 +420,6 @@ func (s *managerDeliveryTestStore) TerminalizeRun(ctx context.Context, runID, re
 	return terminalizations, err
 }
 
-func (s *managerDeliveryTestStore) markDelivered(t *testing.T, evt events.Event, agentID string) {
-	t.Helper()
-	ctx := testAuthorActivityContext(context.Background())
-	claimed, err := s.claimExact(ctx, evt, events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID)})
-	if err != nil {
-		t.Fatalf("claim delivered manager fixture event %s: %v", evt.ID(), err)
-	}
-	if claimed.Claim.DeliveryID() == "" || claimed.Claim.Version() == 0 {
-		t.Fatalf("claim delivered manager fixture event %s returned an empty capability: %#v", evt.ID(), claimed)
-	}
-	if _, err := s.SettleSuccess(ctx, claimed.Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
-		t.Fatalf("settle delivered manager fixture event %s: %v", evt.ID(), err)
-	}
-}
-
-func (s *managerDeliveryTestStore) markInProgress(t *testing.T, evt events.Event, agentID string) {
-	t.Helper()
-	result, err := s.ClaimDelivery(
-		testAuthorActivityContext(context.Background()),
-		s.authority,
-		evt,
-		managerAgentDeliveryRoute(agentID),
-	)
-	if err != nil {
-		t.Fatalf("claim in-progress manager fixture event %s: %v", evt.ID(), err)
-	}
-	if _, ok := result.Acquired(); !ok {
-		t.Fatalf("claim in-progress manager fixture event %s disposition = %s", evt.ID(), result.Disposition)
-	}
-}
-
 func managerAgentDeliveryRoute(agentID string) events.DeliveryRoute {
 	identity := managerAgentIdentity(agentID)
 	return events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(identity.AgentID()), AgentIdentity: identity}

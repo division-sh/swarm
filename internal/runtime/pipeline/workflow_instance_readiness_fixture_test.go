@@ -13,89 +13,6 @@ import (
 	"github.com/google/uuid"
 )
 
-func (s *workflowInstanceStore) insertDynamicFlowRuntimeReadinessPlan(
-	ctx context.Context,
-	instancePath string,
-	plan DynamicFlowRuntimeReadinessPlan,
-	createdAt time.Time,
-) error {
-	tx, ok := sqlTxFromContext(ctx)
-	if !ok || tx == nil {
-		return fmt.Errorf("dynamic flow runtime readiness creation requires selected mutation")
-	}
-	normalized, err := plan.Normalized()
-	if err != nil {
-		return err
-	}
-	if normalized.Identity.InstancePath != strings.Trim(strings.TrimSpace(instancePath), "/") {
-		return fmt.Errorf("dynamic flow runtime readiness identity disagrees with flow instance")
-	}
-	encoded, err := canonicaljson.Bytes(normalized)
-	if err != nil {
-		return fmt.Errorf("encode dynamic flow runtime readiness: %w", err)
-	}
-	if s.isSQLite() {
-		_, err = tx.ExecContext(ctx, `
-			INSERT INTO flow_instance_runtime_readiness (
-				run_id, instance_id, plan, topology_ready_at, creation_event_emitted_at, created_at, updated_at
-			) VALUES (?, ?, ?, NULL, NULL, ?, ?)
-		`, normalized.RunID, instancePath, encoded, createdAt.UTC(), createdAt.UTC())
-	} else {
-		_, err = tx.ExecContext(ctx, `
-			INSERT INTO flow_instance_runtime_readiness (
-				run_id, instance_id, plan, topology_ready_at, creation_event_emitted_at, created_at, updated_at
-			) VALUES ($1::uuid, $2, $3::jsonb, NULL, NULL, $4, $4)
-		`, normalized.RunID, instancePath, encoded, createdAt.UTC())
-	}
-	if err != nil {
-		return fmt.Errorf("persist dynamic flow runtime readiness %s: %w", instancePath, err)
-	}
-	return nil
-}
-
-func (s *workflowInstanceStore) dynamicFlowRuntimeReadinessPlanEqual(
-	ctx context.Context,
-	instancePath string,
-	expected *DynamicFlowRuntimeReadinessPlan,
-) (bool, error) {
-	runID := strings.TrimSpace(runtimecorrelation.RunIDFromContext(ctx))
-	var normalized DynamicFlowRuntimeReadinessPlan
-	if expected != nil {
-		var err error
-		normalized, err = expected.Normalized()
-		if err != nil {
-			return false, err
-		}
-		if runID != "" && runID != normalized.RunID {
-			return false, fmt.Errorf("dynamic flow runtime readiness run_id conflicts with selected mutation")
-		}
-		runID = normalized.RunID
-	}
-	if runID == "" {
-		return false, fmt.Errorf("dynamic flow runtime readiness comparison requires run_id")
-	}
-	actual, found, err := s.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(instancePath))
-	if err != nil {
-		return false, err
-	}
-	if expected == nil {
-		return !found, nil
-	}
-	if !found {
-		return false, nil
-	}
-	actualJSON, actualErr := canonicaljson.Bytes(actual.Plan)
-	if actualErr != nil {
-		return false, fmt.Errorf("encode persisted dynamic flow runtime readiness: %w", actualErr)
-	}
-	expectedJSON, expectedErr := canonicaljson.Bytes(normalized)
-	if expectedErr != nil {
-		return false, fmt.Errorf("encode expected dynamic flow runtime readiness: %w", expectedErr)
-	}
-	return string(actualJSON) == string(expectedJSON), nil
-}
-
-// ReconcileDynamicFlowRuntimeReadinessPlan advances the durable topology owner
 // when an existing flow instance is ensured against a revised semantic source.
 func (s *workflowInstanceStore) legacyReconcileDynamicFlowRuntimeReadinessPlan(
 	ctx context.Context,
@@ -376,40 +293,6 @@ func (s *workflowInstanceStore) legacyQueryAllDynamicFlowRuntimeReadiness(ctx co
 		out = append(out, item)
 	}
 	return out, rows.Err()
-}
-
-func (s *workflowInstanceStore) legacyDynamicFlowRuntimeReadinessKeys(ctx context.Context) ([]DynamicFlowRuntimeReadinessKey, error) {
-	if s == nil || s.testDB() == nil {
-		return nil, fmt.Errorf("workflow instance store is required")
-	}
-	query := `
-		SELECT run_id::text, instance_id
-		FROM flow_instance_runtime_readiness
-		ORDER BY run_id, instance_id
-	`
-	if s.isSQLite() {
-		query = `
-			SELECT run_id, instance_id
-			FROM flow_instance_runtime_readiness
-			ORDER BY run_id, instance_id
-		`
-	}
-	rows, err := dbQueryContext(ctx, s.testDB(), query)
-	if err != nil {
-		return nil, fmt.Errorf("list dynamic flow runtime readiness keys: %w", err)
-	}
-	defer rows.Close()
-	var keys []DynamicFlowRuntimeReadinessKey
-	for rows.Next() {
-		var key DynamicFlowRuntimeReadinessKey
-		if err := rows.Scan(&key.RunID, &key.InstancePath); err != nil {
-			return nil, err
-		}
-		key.RunID = strings.TrimSpace(key.RunID)
-		key.InstancePath = strings.Trim(strings.TrimSpace(key.InstancePath), "/")
-		keys = append(keys, key)
-	}
-	return keys, rows.Err()
 }
 
 func (s *workflowInstanceStore) legacyMarkDynamicFlowRuntimeTopologyReady(

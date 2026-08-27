@@ -45,10 +45,3 @@ func NewDeliverySQLiteOwner(deadLetters *DeadLetterSQLiteOwner, candidates Compl
 	}
 	return &DeliverySQLiteOwner{DeadLetterSQLiteOwner: deadLetters, backend: deadLetters.backend, candidateRequests: candidates, nowFn: now}, nil
 }
-
-func (s *DeliverySQLiteOwner) now() time.Time {
-	if s == nil || s.nowFn == nil {
-		return time.Now().UTC()
-	}
-	return s.nowFn().UTC()
-}

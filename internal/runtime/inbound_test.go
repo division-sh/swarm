@@ -203,7 +203,6 @@ func (failingInboundEventStore) ListEventDeliveryRecipients(context.Context, str
 type capturingInboundEventStore struct {
 	events          []events.Event
 	dispositions    []events.AdmittedRunDisposition
-	seen            map[string]struct{}
 	duplicate       bool
 	recorded        bool
 	providerEventID string

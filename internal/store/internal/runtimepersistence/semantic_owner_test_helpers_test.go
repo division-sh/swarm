@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
@@ -57,7 +56,6 @@ type runCompletionOwnerSummaries = storerunlifecycle.RunCompletionOwnerSummaries
 type terminalRunMutation = storerunlifecycle.TerminalRunMutation
 type standaloneRuntimePlatformRunRecord = storerunlifecycle.StandaloneRuntimePlatformRunRecord
 type conversationForkTimeValue = storerunfork.ConversationForkTimeValue
-type conversationTurnRecord = storeoperatorsurface.ConversationTurnRecord
 type externalEffectStorySource = storeeffect.ExternalEffectStorySource
 type completionRecoveryAttempt = storeeffect.CompletionRecoveryAttempt
 type completionRecoveryAuthorityEvidence = storeeffect.CompletionRecoveryAuthorityEvidence
@@ -103,16 +101,12 @@ var newAgentReceiptSideEffects = storeevent.NewAgentReceiptSideEffects
 var marshalAgentReceiptSideEffects = storeevent.MarshalAgentReceiptSideEffects
 var decodeAgentReceiptSideEffects = storeevent.DecodeAgentReceiptSideEffects
 var insertCommittedPipelineScopeTx = storepipeline.InsertCommittedPipelineScopeTx
-var writePipelineDispositionTx = storepipeline.WritePipelineDispositionTx
 var replayClaimLockKey = storepipeline.ReplayClaimLockKey
 var expireHumanTaskCards = storedecision.ExpireHumanTaskCards
 var completionRecoverySettlement = storeeffect.CompletionRecoverySettlement
 var operatorConversationTurnListItemFromPublic = storeoperatorsurface.OperatorConversationTurnListItemFromPublic
-var projectPublicConversationTurn = storeoperatorsurface.ProjectPublicConversationTurn
 var corruptPipelineScopeDisposition = storepipeline.CorruptPipelineScopeDisposition
 var projectBusRunLifecycleSnapshot = storerunlifecycle.ProjectBusRunLifecycleSnapshot
-var externalEffectAuthorityCurrentPostgres = storeeffect.ExternalEffectAuthorityCurrentPostgres
-var externalEffectAuthorityCurrentSQLite = storeeffect.ExternalEffectAuthorityCurrentSQLite
 
 func postgresActiveRunSourceOwner(store *PostgresStore, tx *sql.Tx) storerunfork.ActiveRunSourceOwnerFunc {
 	return func(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
@@ -131,33 +125,8 @@ func mustTestDeliveryAdapter(dialect storedelivery.Dialect) *storedelivery.Adapt
 	return adapter
 }
 
-func loadCommittedPipelineScope(ctx context.Context, queryer interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}, eventID string, postgres bool) (runtimepipelineobligation.CommittedScope, error) {
-	return storepipeline.LoadCommittedScope(ctx, queryer, eventID, postgres)
-}
-
 func requirePostgresRunActive(ctx context.Context, tx *sql.Tx, runID string) error {
 	return storerunstate.RequirePostgresActiveTx(ctx, tx, runID)
-}
-
-func requireSQLiteRunActive(ctx context.Context, tx *sql.Tx, runID string) error {
-	return storerunstate.RequireSQLiteActiveTx(ctx, tx, runID)
-}
-
-func requirePostgresRunActiveQuery(ctx context.Context, queryer storerunstate.RowQueryer, runID string) error {
-	return storerunstate.RequirePostgresActiveQuery(ctx, queryer, runID)
-}
-
-func requireSQLiteRunActiveQuery(ctx context.Context, queryer storerunstate.RowQueryer, runID string) error {
-	return storerunstate.RequireSQLiteActiveQuery(ctx, queryer, runID)
-}
-
-func sqlitePlaceholders(count int) string {
-	if count <= 0 {
-		return ""
-	}
-	return strings.TrimSuffix(strings.Repeat("?,", count), ",")
 }
 
 func requestPostgresCompletionCandidateTx(ctx context.Context, tx *sql.Tx, runID string, dueAt *time.Time, force bool) (runtimerunlifecycle.CandidateRequestResult, error) {
@@ -176,10 +145,6 @@ func requestSQLiteCompletionCandidateTx(ctx context.Context, tx *sql.Tx, runID s
 		}
 	}
 	return storerunlifecycle.RequestSQLiteCompletionCandidateTx(ctx, tx, runID, dueAt, now)
-}
-
-func postgresRunSessionNextWakeTx(ctx context.Context, tx *sql.Tx, runID string, selectedNow time.Time) (*time.Time, error) {
-	return storerunlifecycle.PostgresRunSessionNextWakeTx(ctx, tx, runID, selectedNow)
 }
 
 type eventCommitTxStore interface {

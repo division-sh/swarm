@@ -111,13 +111,3 @@ func writeRootCompositionConnectSemanticFixture(t *testing.T) string {
 	t.Helper()
 	return canonicalrouting.CopyRootOutputConnect(t, canonicalrouting.RootConnectNoEmitter)
 }
-
-func writeCompositionConnectFlow(t *testing.T, root, flowID, schemaTail, events, entities string) {
-	t.Helper()
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", flowID, "schema.yaml"), `
-name: `+flowID+`
-mode: static
-`+schemaTail)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", flowID, "events.yaml"), events)
-	writeSemanticviewFixtureFile(t, filepath.Join(root, "flows", flowID, "entities.yaml"), entities)
-}

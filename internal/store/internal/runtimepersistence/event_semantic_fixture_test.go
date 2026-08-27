@@ -88,33 +88,6 @@ func commitSemanticParentFixture(ctx context.Context, store any, runID, parentEv
 	return commitSemanticPipelineProcessedEventFixture(ctx, store, parent)
 }
 
-func commitSemanticParentFixtureTx(ctx context.Context, store eventCommitTxStore, tx *sql.Tx, runID, parentEventID string, createdAt time.Time) error {
-	parent := eventtest.ExistingRunRootIngress(
-		parentEventID, "test.fixture_parent", "fixture", "", []byte(`{}`), 0,
-		runID, events.EventEnvelope{}, createdAt,
-	)
-	if err := commitSemanticEventFixtureTx(ctx, store, tx, parent); err != nil {
-		return err
-	}
-	postgres := false
-	switch store.(type) {
-	case *PostgresStore:
-		postgres = true
-	case *SQLiteRuntimeStore:
-	default:
-		return fmt.Errorf("semantic parent fixture store %T is unsupported", store)
-	}
-	return writePipelineDispositionTx(
-		ctx,
-		tx,
-		parentEventID,
-		runtimepipelineobligation.PurposeRecovery,
-		runtimepipelineobligation.Acknowledged("pipeline_persisted"),
-		postgres,
-		createdAt,
-	)
-}
-
 func pipelineObligationFixtureOwner(selectedStore any) (runtimepipelineobligation.Store, error) {
 	switch selected := selectedStore.(type) {
 	case *PostgresStore:
@@ -416,18 +389,6 @@ func commitAdmittedSemanticEventFixtureOutcomeWithDisposition(
 		return runtimebus.EventAppendOutcomeUnknown, err
 	}
 	return outcome, nil
-}
-
-func commitSemanticEventFixtureTx(ctx context.Context, store eventCommitTxStore, tx *sql.Tx, event events.Event) error {
-	return commitSemanticEventFixtureWithRoutesTx(ctx, store, tx, event, nil)
-}
-
-func commitSemanticEventFixtureWithRoutesTx(ctx context.Context, store eventCommitTxStore, tx *sql.Tx, event events.Event, routes []events.DeliveryRoute) (err error) {
-	story, err := eventFixtureStory(ctx)
-	if err != nil {
-		return err
-	}
-	return commitSemanticEventFixtureWithRoutesStoryTx(ctx, store, tx, story, event, routes)
 }
 
 func commitSemanticEventFixtureWithRoutesStoryTx(ctx context.Context, store eventCommitTxStore, tx *sql.Tx, story runtimeauthoractivity.Mutation, event events.Event, routes []events.DeliveryRoute) (err error) {

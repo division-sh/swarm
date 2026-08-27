@@ -457,17 +457,6 @@ func (r *recordingDeliveryRouteInterceptor) InterceptDeliveryRoute(_ context.Con
 	return false, nil, runtimepipelineobligation.Continue(), nil
 }
 
-func (r *recordingDeliveryRouteInterceptor) seen(route events.DeliveryRoute) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, got := range events.NormalizeDeliveryRoutes(r.routes) {
-		if got.Recipient == route.Recipient && got.Target == route.Target {
-			return true
-		}
-	}
-	return false
-}
-
 func TestEngineDispatcherDispatchesCommittedIntentWithoutHiddenCollector(t *testing.T) {
 	store := &recordingEventStore{}
 	eb, err := newScopedTestEventBus(store)

@@ -3,7 +3,6 @@ package cliapp
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -1276,54 +1275,6 @@ steps:
 	if !strings.Contains(stderr.String(), "mailbox.decide verdict is required") {
 		t.Fatalf("stderr = %q, want decide verdict validation failure", stderr.String())
 	}
-}
-
-func canonicalRoutingSQLiteDebug(t *testing.T, db *sql.DB) string {
-	t.Helper()
-	if db == nil {
-		return "served SQLite database unavailable"
-	}
-	rows, err := db.QueryContext(context.Background(), `
-		SELECT e.event_name,
-		       COALESCE(e.flow_instance, ''),
-		       COALESCE((SELECT r.outcome FROM event_receipts r
-		                 WHERE r.event_id = e.event_id AND r.subscriber_type = 'platform' AND r.subscriber_id = 'pipeline'), ''),
-		       COALESCE((SELECT r.reason_code || ':' || r.side_effects FROM event_receipts r
-		                 WHERE r.event_id = e.event_id AND r.subscriber_type = 'platform' AND r.subscriber_id = 'pipeline'), ''),
-		       COALESCE((SELECT group_concat(d.subscriber_type || '/' || d.subscriber_id || '=' || d.status || '@' || d.delivery_context, ',')
-		                 FROM event_deliveries d WHERE d.event_id = e.event_id), '')
-		FROM events e
-		WHERE e.event_name <> 'platform.runtime_log'
-		ORDER BY e.created_at, e.event_id
-	`)
-	if err != nil {
-		return "query canonical routing debug: " + err.Error()
-	}
-	defer rows.Close()
-	var lines []string
-	for rows.Next() {
-		var eventName, flowInstance, pipelineOutcome, pipelineDetail, deliveries string
-		if err := rows.Scan(&eventName, &flowInstance, &pipelineOutcome, &pipelineDetail, &deliveries); err != nil {
-			return "scan canonical routing debug: " + err.Error()
-		}
-		lines = append(lines, fmt.Sprintf("event=%s flow=%s pipeline=%s detail=%s deliveries=%s", eventName, flowInstance, pipelineOutcome, pipelineDetail, deliveries))
-	}
-	if err := rows.Err(); err != nil {
-		return "read canonical routing debug: " + err.Error()
-	}
-	deadRows, err := db.QueryContext(context.Background(), `SELECT original_event, failure FROM dead_letters ORDER BY created_at`)
-	if err != nil {
-		return strings.Join(lines, "\n") + "\nquery dead letters: " + err.Error()
-	}
-	defer deadRows.Close()
-	for deadRows.Next() {
-		var eventName, failure string
-		if err := deadRows.Scan(&eventName, &failure); err != nil {
-			return strings.Join(lines, "\n") + "\nscan dead letters: " + err.Error()
-		}
-		lines = append(lines, fmt.Sprintf("dead_letter event=%s failure=%s", eventName, failure))
-	}
-	return strings.Join(lines, "\n")
 }
 
 func TestScenarioEventExpectationsDeduplicateRunTraceDeliveryRows(t *testing.T) {

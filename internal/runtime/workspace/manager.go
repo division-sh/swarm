@@ -918,27 +918,6 @@ func (m *DockerManager) validateSharedMounts(ctx context.Context) error {
 	return nil
 }
 
-func (m *DockerManager) inspectContainerMountDestinations(ctx context.Context, container string) (map[string]struct{}, error) {
-	out, err := m.RunDocker(ctx, "inspect", "--format", "{{json .Mounts}}", strings.TrimSpace(container))
-	if err != nil {
-		return nil, err
-	}
-	var mounts []struct {
-		Destination string `json:"Destination"`
-	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &mounts); err != nil {
-		return nil, err
-	}
-	destinations := make(map[string]struct{}, len(mounts))
-	for _, mount := range mounts {
-		dest := strings.TrimSpace(mount.Destination)
-		if dest != "" {
-			destinations[dest] = struct{}{}
-		}
-	}
-	return destinations, nil
-}
-
 func workspaceClassScope(source semanticview.Source, class string) (string, bool, error) {
 	classes, err := workspaceClassesForSource(source)
 	if err != nil {

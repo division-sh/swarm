@@ -79,10 +79,6 @@ func toolContextRequirementPolicy(toolName string) toolcapabilities.ContextRequi
 	}
 }
 
-func toolStartupProbeModePolicy(toolName string) toolcapabilities.StartupProbeMode {
-	return toolcapabilities.StartupProbeModeVisibilityOnly
-}
-
 func extractAllowedTools(actor models.AgentConfig) (map[string]struct{}, bool) {
 	allowed := make(map[string]struct{})
 	if len(actor.Tools) == 0 {

@@ -90,10 +90,6 @@ func applyTestInitialEntryEffect(ctx context.Context, pc *PipelineCoordinator, r
 	return commitTestWorkflowLifecycleMutation(ctx, pc, route, instance, instance.CurrentState, []runtimeworkflowlifecycle.Effect{effect})
 }
 
-func (pc *PipelineCoordinator) applyWorkflowJoinIntents(ctx context.Context, route runtimeflowidentity.Route, entityID, currentStage, nextStage string, occurredAt time.Time) error {
-	return applyTestAcceptedLifecycleEffect(ctx, pc, route, entityID, currentStage, nextStage, "test.join_transition", occurredAt)
-}
-
 func (pc *PipelineCoordinator) applyWorkflowGateIntents(ctx context.Context, route runtimeflowidentity.Route, entityID, currentStage, nextStage, sourceEvent string, occurredAt time.Time) error {
 	return applyTestAcceptedLifecycleEffect(ctx, pc, route, entityID, currentStage, nextStage, sourceEvent, occurredAt)
 }

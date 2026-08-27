@@ -7,8 +7,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
 )
 
-const runtimeToolsMCPPrefix = toolidentity.RuntimeToolsMCPPrefix
-
 func nativeFallbackExecutionTool(actor models.AgentConfig, name string) (ExecutionTool, bool, error) {
 	name = strings.TrimSpace(name)
 	var draft builtinToolDraft

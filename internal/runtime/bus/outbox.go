@@ -342,22 +342,6 @@ func (d engineDispatcher) dispatchAndRecord(ctx context.Context, intent runtimee
 	return settle(runtimepipelineobligation.Acknowledged("pipeline_persisted"))
 }
 
-func clonePostCommitEmitIntents(intents []runtimeengine.EmitIntent) []runtimeengine.EmitIntent {
-	if len(intents) == 0 {
-		return nil
-	}
-	cloned := make([]runtimeengine.EmitIntent, 0, len(intents))
-	for _, intent := range intents {
-		copyIntent := intent
-		copyIntent.Event = clonePostCommitPublish(intent.Event)
-		if intent.Recipients != nil {
-			copyIntent.Recipients = append([]string(nil), intent.Recipients...)
-		}
-		cloned = append(cloned, copyIntent)
-	}
-	return cloned
-}
-
 func clonePostCommitPublish(evt events.Event) events.Event {
 	return evt.Clone()
 }
@@ -464,13 +448,6 @@ func (eb *EventBus) deliveryRoutesForPostCommitIntent(ctx context.Context, event
 		return nil, err
 	}
 	return prepared.DeliveryRoutes, nil
-}
-
-func replayScopeForEmitIntent(intent runtimeengine.EmitIntent) runtimepipelineobligation.CommittedScope {
-	if len(intent.Recipients) > 0 {
-		return runtimepipelineobligation.ScopeDirect
-	}
-	return runtimepipelineobligation.ScopeSubscribed
 }
 
 type pendingInternalDelivery struct {

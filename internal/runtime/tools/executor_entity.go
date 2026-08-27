@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -158,22 +157,4 @@ func numericEntityValue(value any) (float64, bool) {
 	default:
 		return 0, false
 	}
-}
-
-func decodeEntityJSONMap(raw []byte) (map[string]any, error) {
-	if len(raw) == 0 {
-		return map[string]any{}, nil
-	}
-	var out map[string]any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, err
-	}
-	if out == nil {
-		return map[string]any{}, nil
-	}
-	return out, nil
-}
-
-func subjectStatusFlowID(source semanticview.Source, flowInstance string) string {
-	return entityruntime.ResolveFlowIDForInstance(source, flowInstance)
 }

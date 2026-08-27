@@ -30,13 +30,6 @@ type completionCandidateOwner interface {
 
 type revisionEffects = privaterunforkrevision.Effects
 
-func declareRevisionEffects(effects *revisionEffects, runID string, families ...privaterunforkrevision.Family) error {
-	if strings.TrimSpace(runID) == "" {
-		return nil
-	}
-	return effects.Add(runID, families...)
-}
-
 type schemaQueryer interface {
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row

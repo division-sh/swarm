@@ -1,9 +1,7 @@
 package cliapp
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -174,19 +172,6 @@ var agentValidStatuses = map[string]struct{}{
 var agentValidMemorySources = map[string]struct{}{
 	"authored":         {},
 	"platform_default": {},
-}
-
-func newAgentsCommand(opts rootCommandOptions) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "agents",
-		Short: "List agents and their current state.",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return cmd.Help()
-		},
-	}
-	cmd.AddCommand(newAgentsListCommand(opts))
-	return cmd
 }
 
 func newAgentCommand(opts rootCommandOptions) *cobra.Command {
@@ -1055,17 +1040,6 @@ func agentOptionalStringDash(value *string) string {
 		return "-"
 	}
 	return agentDash(*value)
-}
-
-func agentJSONRawMessageDash(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return "-"
-	}
-	var compact bytes.Buffer
-	if err := json.Compact(&compact, raw); err != nil {
-		return string(raw)
-	}
-	return compact.String()
 }
 
 func agentDash(value string) string {

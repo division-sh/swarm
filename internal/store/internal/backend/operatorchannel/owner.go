@@ -914,17 +914,3 @@ func nullableTimeValue(value any) (time.Time, error) {
 	}
 	return timeValue(value)
 }
-func int64Value(value any) (int64, error) {
-	switch typed := value.(type) {
-	case int64:
-		return typed, nil
-	case int:
-		return int64(typed), nil
-	case []byte:
-		return strconv.ParseInt(string(typed), 10, 64)
-	case string:
-		return strconv.ParseInt(typed, 10, 64)
-	default:
-		return 0, fmt.Errorf("decode stored integer %T", value)
-	}
-}

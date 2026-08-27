@@ -134,6 +134,7 @@ func TestCompiledRoutingBoundaryRejectsSemanticStringOperations(t *testing.T) {
 	type hostileRecursiveString struct {
 		variant struct{ code string }
 	}
+	_ = hostileRecursiveString{}.variant
 	if !semanticTypeContainsString(reflect.TypeOf(hostileRecursiveString{}), map[reflect.Type]struct{}{}) {
 		t.Fatal("semantic string guard accepted recursively nested string storage")
 	}
@@ -410,38 +411,6 @@ func assertFileDeclaresNoFunctions(t testing.TB, path string, prohibited map[str
 			t.Errorf("%s redeclares retired authority %s", path, function.Name.Name)
 		}
 	}
-}
-
-func assertFunctionUsesNoSelectorsOrStrings(t testing.TB, path, functionName string, selectors, literals map[string]struct{}) {
-	t.Helper()
-	parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
-	if err != nil {
-		t.Fatalf("parse %s: %v", path, err)
-	}
-	for _, declaration := range parsed.Decls {
-		function, ok := declaration.(*ast.FuncDecl)
-		if !ok || function.Name.Name != functionName || function.Body == nil {
-			continue
-		}
-		ast.Inspect(function.Body, func(node ast.Node) bool {
-			switch typed := node.(type) {
-			case *ast.SelectorExpr:
-				if _, blocked := selectors[typed.Sel.Name]; blocked {
-					t.Errorf("%s.%s consumes prohibited display selector %s", path, functionName, typed.Sel.Name)
-				}
-			case *ast.BasicLit:
-				if typed.Kind == token.STRING {
-					value := strings.Trim(typed.Value, "\"")
-					if _, blocked := literals[value]; blocked {
-						t.Errorf("%s.%s consumes prohibited display literal %q", path, functionName, value)
-					}
-				}
-			}
-			return true
-		})
-		return
-	}
-	t.Fatalf("function %s not found in %s", functionName, path)
 }
 
 func assertFileImportsNoPath(t testing.TB, path, prohibited string) {
