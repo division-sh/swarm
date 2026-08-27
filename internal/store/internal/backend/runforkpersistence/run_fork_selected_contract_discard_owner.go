@@ -97,8 +97,8 @@ func discardMaterializedSelectedContractExecutionFork(ctx context.Context, forkR
 			runforkrevision.FamilyEvents, runforkrevision.FamilyEntityMutations,
 			runforkrevision.FamilyEntityMetadata, runforkrevision.FamilyEventDeliveries,
 			runforkrevision.FamilyCommittedReplayScopes, runforkrevision.FamilyEventReceipts,
-			runforkrevision.FamilyDeadLetters, runforkrevision.FamilyTimers,
-			runforkrevision.FamilyAgentSessions,
+			 runforkrevision.FamilyDeadLetters, runforkrevision.FamilyTimers,
+			runforkrevision.FamilyAgentSessions, runforkrevision.FamilyFanOutObligations,
 		); err != nil {
 			return err
 		}
@@ -111,6 +111,8 @@ func deleteSelectedContractForkState(ctx context.Context, tx *sql.Tx, forkRunID 
 		label string
 		query string
 	}{
+		{"fan-out outcomes", `DELETE FROM fan_out_outcomes WHERE run_id = $1`},
+		{"fan-out intents", `DELETE FROM fan_out_intents WHERE run_id = $1`},
 		{"dead letters", `DELETE FROM dead_letters WHERE original_event_id IN (SELECT event_id FROM events WHERE run_id = $1)`},
 		{"replay lineage", `DELETE FROM run_fork_delivery_event_replays WHERE fork_run_id = $1`},
 		{"handler rule selections", `DELETE FROM event_delivery_handler_rule_selections WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id = $1 OR event_id IN (SELECT event_id FROM events WHERE run_id = $1))`},

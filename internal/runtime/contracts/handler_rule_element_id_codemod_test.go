@@ -70,6 +70,108 @@ func TestMintHandlerRuleElementIDsCoversEveryAdoptedGrammarContext(t *testing.T)
 	}
 }
 
+func TestMintHandlerRuleElementIDsCoversEveryFanOutGrammarContext(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "nodes.yaml")
+	raw := []byte(`node:
+  event_handlers:
+    top.event:
+      fan_out: {items_from: payload.items, as: fan_item, emit: item.ready}
+    rule.event:
+      rules:
+        - id: selected
+          condition: else
+          fan_out: {items_from: payload.items, as: fan_item, emit: item.ready}
+    complete.event:
+      on_complete:
+        - id: completed
+          condition: else
+          fan_out: {items_from: payload.items, as: fan_item, emit: item.ready}
+`)
+	if err := os.WriteFile(path, raw, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	result, err := MintHandlerRuleElementIDs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FilesChanged != 1 || result.IDsMinted != 5 {
+		t.Fatalf("fan-out mint result = %#v, want three fan-out and two containing rule IDs", result)
+	}
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(updated), "element_id:"); got != 5 {
+		t.Fatalf("fan-out element IDs = %d, want 5\n%s", got, updated)
+	}
+	second, err := MintHandlerRuleElementIDs(root)
+	if err != nil || second != (HandlerRuleElementIDMintResult{}) {
+		t.Fatalf("idempotent fan-out mint = %#v, %v", second, err)
+	}
+}
+
+func TestMintHandlerRuleElementIDsRejectsHostileFanOutIdentityShapesWithoutWriting(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{name: "scalar", body: "fan_out: retired-scalar", want: "fan_out must be a mapping"},
+		{name: "null", body: "fan_out: null", want: "fan_out must be a mapping"},
+		{name: "duplicate identity", body: "fan_out: {element_id: 00000000-0000-4000-8000-000000000451, element_id: 00000000-0000-4000-8000-000000000452, items_from: payload.items, emit: item.ready}", want: "duplicate normalized key"},
+		{name: "malformed identity", body: "fan_out: {element_id: not-a-uuid, items_from: payload.items, emit: item.ready}", want: "must be one canonical non-zero lowercase UUID"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, "nodes.yaml")
+			raw := []byte("node:\n  event_handlers:\n    event:\n      " + tc.body + "\n")
+			if err := os.WriteFile(path, raw, 0o640); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := MintHandlerRuleElementIDs(root); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("fan-out hostile mint error = %v, want %q", err, tc.want)
+			}
+			updated, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(updated) != string(raw) {
+				t.Fatalf("failed fan-out preflight changed file\n got: %s\nwant: %s", updated, raw)
+			}
+		})
+	}
+}
+
+func TestMintHandlerRuleElementIDsRejectsReusedFanOutAliasWithoutWriting(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "nodes.yaml")
+	raw := []byte(`template: &shared {items_from: payload.items, as: fan_item, emit: item.ready}
+node:
+  event_handlers:
+    first.event:
+      fan_out: *shared
+    second.event:
+      rules:
+        selected:
+          condition: else
+          fan_out: *shared
+`)
+	if err := os.WriteFile(path, raw, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := MintHandlerRuleElementIDs(root); err == nil || !strings.Contains(err.Error(), "YAML-ALIAS-REUSE") {
+		t.Fatalf("reused fan-out alias error = %v, want YAML-ALIAS-REUSE", err)
+	}
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(updated) != string(raw) {
+		t.Fatalf("failed fan-out alias preflight changed file\n got: %s\nwant: %s", updated, raw)
+	}
+}
+
 func TestMintHandlerRuleElementIDsPreflightsWholeTreeBeforeWriting(t *testing.T) {
 	root := t.TempDir()
 	goodPath := filepath.Join(root, "a", "nodes.yaml")

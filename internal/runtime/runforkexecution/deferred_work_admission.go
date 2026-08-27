@@ -29,6 +29,7 @@ type selectedContractDeferredWorkAdmission struct {
 	forkEventID     string
 	workflowName    string
 	workflowVersion string
+	fanOutPlanRefs  []runtimecontracts.FanOutPlanRef
 }
 
 func admitSelectedContractDeferredWork(plan runfork.RunForkPlan, source semanticview.Source) (selectedContractDeferredWorkAdmission, error) {
@@ -44,6 +45,10 @@ func admitSelectedContractDeferredWork(plan runfork.RunForkPlan, source semantic
 	workflowVersion := strings.TrimSpace(source.WorkflowVersion())
 	if workflowName == "" || workflowVersion == "" {
 		return selectedContractDeferredWorkAdmission{}, fmt.Errorf("selected-contract deferred-work admission requires workflow name and version")
+	}
+	fanOutPlanRefs, err := admitSelectedContractFanOutPlans(plan, source)
+	if err != nil {
+		return selectedContractDeferredWorkAdmission{}, err
 	}
 
 	capabilities, revisionTimerHistory := selectedContractDeferredWorkCapabilities(plan, source)
@@ -66,6 +71,7 @@ func admitSelectedContractDeferredWork(plan runfork.RunForkPlan, source semantic
 		forkEventID:     forkEventID,
 		workflowName:    workflowName,
 		workflowVersion: workflowVersion,
+		fanOutPlanRefs:  fanOutPlanRefs,
 	}, nil
 }
 
@@ -84,10 +90,63 @@ func (a selectedContractDeferredWorkAdmission) validate(sourceRunID, forkEventID
 	if a.workflowName != strings.TrimSpace(source.WorkflowName()) || a.workflowVersion != strings.TrimSpace(source.WorkflowVersion()) {
 		return fmt.Errorf("selected-contract deferred-work admission workflow identity does not match selected source")
 	}
+	wantFanOutPlanRefs, err := selectedContractCompiledFanOutPlans(source)
+	if err != nil {
+		return err
+	}
+	if len(a.fanOutPlanRefs) > 0 {
+		for _, ref := range a.fanOutPlanRefs {
+			if want, ok := wantFanOutPlanRefs[ref.ElementRef]; !ok || want != ref {
+				return fmt.Errorf("selected-contract deferred-work fan-out proof no longer matches selected source")
+			}
+		}
+	}
 	if capabilities, _ := selectedContractDeferredWorkCapabilities(runfork.RunForkPlan{}, source); len(capabilities) > 0 {
 		return fmt.Errorf("selected-contract deferred-work admission source now declares unsupported capabilities: %s", strings.Join(capabilities, ","))
 	}
 	return nil
+}
+
+func admitSelectedContractFanOutPlans(plan runfork.RunForkPlan, source semanticview.Source) ([]runtimecontracts.FanOutPlanRef, error) {
+	compiled, err := selectedContractCompiledFanOutPlans(source)
+	if err != nil {
+		return nil, err
+	}
+	if len(plan.FanOutObligations) == 0 {
+		return nil, nil
+	}
+	refs := make([]runtimecontracts.FanOutPlanRef, 0, len(plan.FanOutObligations))
+	seen := make(map[runtimecontracts.FanOutElementRef]struct{}, len(plan.FanOutObligations))
+	for _, obligation := range plan.FanOutObligations {
+		sourceRef := obligation.Intent.Request.PlanRef
+		selectedRef, ok := compiled[sourceRef.ElementRef]
+		if !ok {
+			return nil, fmt.Errorf("selected contract is missing pending fan_out element %s/%s", sourceRef.ElementRef.PackageKey, sourceRef.ElementRef.ElementID)
+		}
+		if selectedRef.SemanticDigest != sourceRef.SemanticDigest {
+			return nil, fmt.Errorf("selected contract fan_out element %s/%s changed semantic digest", sourceRef.ElementRef.PackageKey, sourceRef.ElementRef.ElementID)
+		}
+		if _, duplicate := seen[selectedRef.ElementRef]; duplicate {
+			continue
+		}
+		seen[selectedRef.ElementRef] = struct{}{}
+		refs = append(refs, selectedRef)
+	}
+	return refs, nil
+}
+
+func selectedContractCompiledFanOutPlans(source semanticview.Source) (map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef, error) {
+	if source == nil {
+		return nil, fmt.Errorf("selected-contract fan-out admission requires selected semantic source")
+	}
+	out := make(map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef)
+	for _, plan := range source.FanOutPlans() {
+		if prior, duplicate := out[plan.Ref.ElementRef]; duplicate && prior != plan.Ref {
+			return nil, fmt.Errorf("selected contract has contradictory fan_out plan for %s/%s", plan.Ref.ElementRef.PackageKey, plan.Ref.ElementRef.ElementID)
+		}
+		out[plan.Ref.ElementRef] = plan.Ref
+	}
+	return out, nil
 }
 
 func selectedContractDeferredWorkCapabilities(plan runfork.RunForkPlan, source semanticview.Source) ([]string, bool) {

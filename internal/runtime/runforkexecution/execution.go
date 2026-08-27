@@ -211,6 +211,7 @@ func ExecuteSelectedContractRunFork(ctx context.Context, req SelectedContractExe
 		RecipientPlanning:       *model.RecipientPlanning,
 		WorkflowStates:          workflowStates,
 		DataPinOverrides:        req.DataPinOverrides,
+		FanOutPlanRefs:          deferredWorkAdmission.fanOutPlanRefs,
 	})
 	if err != nil {
 		return SelectedContractExecutionResult{Owner: runfork.RunForkSelectedContractExecutionOwner, Materialization: materialization}, err

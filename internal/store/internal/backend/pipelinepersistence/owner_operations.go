@@ -2580,7 +2580,7 @@ func (s *postgresPipelineObligationStore) GlobalWorkPresence(ctx context.Context
 	var out runtimepipelineobligation.GlobalWorkPresence
 	args := diagnosticDirectReplayEventArgs()
 	err := s.backend.QueryRowContext(ctx, fmt.Sprintf(`
-		SELECT EXISTS (
+		SELECT (EXISTS (
 			SELECT 1 FROM events e
 			LEFT JOIN runs run ON run.run_id = e.run_id
 			LEFT JOIN event_receipts receipt ON receipt.event_id = e.event_id AND receipt.subscriber_type = 'platform' AND receipt.subscriber_id = 'pipeline'
@@ -2588,7 +2588,10 @@ func (s *postgresPipelineObligationStore) GlobalWorkPresence(ctx context.Context
 			  AND (e.run_id IS NULL OR run.status IN (`+runLifecycleActiveStateSQLValues+`))
 			  AND NOT EXISTS (SELECT 1 FROM decision_card_route_obligations route WHERE route.event_id = e.event_id AND route.status <> 'completed')
 			  AND %s
-		), EXISTS (
+		) OR EXISTS (
+			SELECT 1 FROM fan_out_intents intent JOIN runs run ON run.run_id = intent.run_id
+			WHERE intent.status = 'open' AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
+		)), EXISTS (
 			SELECT 1 FROM decision_card_route_obligations route JOIN runs run ON run.run_id = route.run_id
 				WHERE route.status = 'pending' AND route.next_attempt_at <= now() AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
 		), COALESCE((
@@ -2616,7 +2619,7 @@ func (s *sqlitePipelineObligationStore) GlobalWorkPresence(ctx context.Context) 
 	args = append(args, time.Now().UTC())
 	args = append(args, diagnostics...)
 	err := s.backend.QueryRowContext(ctx, `
-		SELECT EXISTS (
+		SELECT (EXISTS (
 			SELECT 1 FROM events e
 			LEFT JOIN runs run ON run.run_id = e.run_id
 			LEFT JOIN event_receipts receipt ON receipt.event_id = e.event_id AND receipt.subscriber_type = 'platform' AND receipt.subscriber_id = 'pipeline'
@@ -2624,7 +2627,10 @@ func (s *sqlitePipelineObligationStore) GlobalWorkPresence(ctx context.Context) 
 			  AND (e.run_id IS NULL OR run.status IN (`+runLifecycleActiveStateSQLValues+`))
 			  AND NOT EXISTS (SELECT 1 FROM decision_card_route_obligations route WHERE route.event_id = e.event_id AND route.status <> 'completed')
 			  AND `+sqliteDiagnosticDirectReplayExclusionSQL("e")+`
-		), EXISTS (
+		) OR EXISTS (
+			SELECT 1 FROM fan_out_intents intent JOIN runs run ON run.run_id = intent.run_id
+			WHERE intent.status = 'open' AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
+		)), EXISTS (
 			SELECT 1 FROM decision_card_route_obligations route JOIN runs run ON run.run_id = route.run_id
 				WHERE route.status = 'pending' AND route.next_attempt_at <= ? AND run.status IN (`+runLifecycleActiveStateSQLValues+`)
 		), (
@@ -2710,6 +2716,9 @@ func (s *PipelinePostgresOwner) TerminalizeRunTx(
 			return 0, fmt.Errorf("terminalize PostgreSQL pipeline event %s: %w", eventID, err)
 		}
 	}
+	if err := cancelRunFanOut(ctx, true, effects, tx, runID, disposition.ReasonCode(), at); err != nil {
+		return 0, fmt.Errorf("cancel PostgreSQL fan-out obligations: %w", err)
+	}
 	return len(eventIDs), nil
 }
 
@@ -2756,6 +2765,9 @@ func (s *PipelineSQLiteOwner) TerminalizeRunTx(
 		if err := s.TerminalizePipelineObligationTx(ctx, tx, effects, eventID, disposition, at); err != nil {
 			return 0, fmt.Errorf("terminalize SQLite pipeline event %s: %w", eventID, err)
 		}
+	}
+	if err := cancelRunFanOut(ctx, false, effects, tx, runID, disposition.ReasonCode(), at); err != nil {
+		return 0, fmt.Errorf("cancel SQLite fan-out obligations: %w", err)
 	}
 	return len(eventIDs), nil
 }

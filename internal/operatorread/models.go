@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 )
@@ -892,33 +893,35 @@ type RunTestQuiescence struct {
 	Ready                   bool `json:"ready"`
 	ActiveDeliveries        int  `json:"active_deliveries"`
 	UnsettledPipelineEvents int  `json:"unsettled_pipeline_events"`
+	FanOutOwed              int  `json:"fan_out_owed"`
 	DueTimers               int  `json:"due_timers"`
 	ActiveSessionLeases     int  `json:"active_session_leases"`
 }
 
 type RunDebugReport struct {
-	RunID             string                    `json:"run_id"`
-	RunTableStatus    string                    `json:"run_table_status,omitempty"`
-	RootEventID       string                    `json:"root_event_id,omitempty"`
-	RootEventType     string                    `json:"root_event_type,omitempty"`
-	Failure           *runtimefailures.Envelope `json:"failure,omitempty"`
-	ControlReason     string                    `json:"control_reason,omitempty"`
-	StartedAt         time.Time                 `json:"started_at,omitempty"`
-	LastEventAt       time.Time                 `json:"last_event_at,omitempty"`
-	EndedAt           *time.Time                `json:"ended_at,omitempty"`
-	EventCount        int                       `json:"event_count"`
-	EntityCount       int                       `json:"entity_count"`
-	WarnErrorLogCount int                       `json:"warn_error_log_count"`
-	EventCounts       []RunDebugEventCount      `json:"event_counts,omitempty"`
-	Deliveries        []RunDebugDeliveryCount   `json:"deliveries,omitempty"`
-	Events            []RunDebugEvent           `json:"events,omitempty"`
-	FailedDeliveries  []RunDebugFailureDelivery `json:"failed_deliveries,omitempty"`
-	DeadLetters       []RunDebugDeadLetter      `json:"dead_letters,omitempty"`
-	AgentTurns        []RunDebugAgentTurn       `json:"agent_turns,omitempty"`
-	Mutations         []RunDebugMutation        `json:"mutations,omitempty"`
-	RuntimeLogSummary []RunDebugRuntimeSummary  `json:"runtime_log_summary,omitempty"`
-	RuntimeLogs       []RunDebugRuntimeLog      `json:"runtime_logs,omitempty"`
-	TestQuiescence    RunTestQuiescence         `json:"test_quiescence"`
+	RunID             string                      `json:"run_id"`
+	RunTableStatus    string                      `json:"run_table_status,omitempty"`
+	RootEventID       string                      `json:"root_event_id,omitempty"`
+	RootEventType     string                      `json:"root_event_type,omitempty"`
+	Failure           *runtimefailures.Envelope   `json:"failure,omitempty"`
+	ControlReason     string                      `json:"control_reason,omitempty"`
+	StartedAt         time.Time                   `json:"started_at,omitempty"`
+	LastEventAt       time.Time                   `json:"last_event_at,omitempty"`
+	EndedAt           *time.Time                  `json:"ended_at,omitempty"`
+	EventCount        int                         `json:"event_count"`
+	EntityCount       int                         `json:"entity_count"`
+	WarnErrorLogCount int                         `json:"warn_error_log_count"`
+	EventCounts       []RunDebugEventCount        `json:"event_counts,omitempty"`
+	Deliveries        []RunDebugDeliveryCount     `json:"deliveries,omitempty"`
+	Events            []RunDebugEvent             `json:"events,omitempty"`
+	FailedDeliveries  []RunDebugFailureDelivery   `json:"failed_deliveries,omitempty"`
+	DeadLetters       []RunDebugDeadLetter        `json:"dead_letters,omitempty"`
+	AgentTurns        []RunDebugAgentTurn         `json:"agent_turns,omitempty"`
+	Mutations         []RunDebugMutation          `json:"mutations,omitempty"`
+	RuntimeLogSummary []RunDebugRuntimeSummary    `json:"runtime_log_summary,omitempty"`
+	RuntimeLogs       []RunDebugRuntimeLog        `json:"runtime_logs,omitempty"`
+	FanOut            fanoutobligation.RunSummary `json:"fan_out"`
+	TestQuiescence    RunTestQuiescence           `json:"test_quiescence"`
 }
 
 type RunDebugTraceQueryOptions struct {

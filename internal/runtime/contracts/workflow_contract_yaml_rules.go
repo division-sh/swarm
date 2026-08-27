@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"gopkg.in/yaml.v3"
 )
@@ -204,11 +205,12 @@ func (f *FanOutSpec) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	var aux struct {
-		ItemsFrom string   `yaml:"items_from"`
-		As        string   `yaml:"as"`
-		Identity  string   `yaml:"identity"`
-		MaxItems  *int     `yaml:"max_items"`
-		Emit      EmitSpec `yaml:"emit"`
+		ElementID contractelementidentity.ContractElementID `yaml:"element_id"`
+		ItemsFrom string                                    `yaml:"items_from"`
+		As        string                                    `yaml:"as"`
+		Identity  string                                    `yaml:"identity"`
+		MaxItems  *int                                      `yaml:"max_items"`
+		Emit      EmitSpec                                  `yaml:"emit"`
 	}
 	if err := node.Decode(&aux); err != nil {
 		return err
@@ -225,6 +227,7 @@ func (f *FanOutSpec) UnmarshalYAML(node *yaml.Node) error {
 		maxItems = *aux.MaxItems
 	}
 	*f = FanOutSpec{
+		ElementID:   aux.ElementID,
 		ItemsFrom:   strings.TrimSpace(aux.ItemsFrom),
 		As:          strings.TrimSpace(aux.As),
 		Identity:    strings.TrimSpace(aux.Identity),
@@ -268,6 +271,7 @@ func validateFanOutFieldNodes(node *yaml.Node) error {
 }
 
 var fanOutFieldOptions = map[string]struct{}{
+	"element_id": {},
 	"items_from": {},
 	"as":         {},
 	"identity":   {},

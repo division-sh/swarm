@@ -2733,7 +2733,7 @@ emit:
 	if got := diagnostic.Problem; got != `fan_out field "foreach" is not supported.` {
 		t.Fatalf("diagnostic problem = %q, want unknown fan_out field problem", got)
 	}
-	if !reflect.DeepEqual(diagnostic.ValidOptions, []string{"as", "emit", "identity", "items_from", "max_items"}) {
+	if !reflect.DeepEqual(diagnostic.ValidOptions, []string{"as", "element_id", "emit", "identity", "items_from", "max_items"}) {
 		t.Fatalf("diagnostic valid options = %#v, want canonical fan_out options", diagnostic.ValidOptions)
 	}
 }

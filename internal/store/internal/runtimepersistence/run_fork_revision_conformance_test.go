@@ -43,13 +43,14 @@ func TestRunForkRevisionRegistryIsClosed(t *testing.T) {
 		runforkrevision.FamilyEventDeliveries,
 		runforkrevision.FamilyEventReceipts,
 		runforkrevision.FamilyEvents,
+		runforkrevision.FamilyFanOutObligations,
 		runforkrevision.FamilyReplyContexts,
 		runforkrevision.FamilyTimers,
 	}
 	got := runforkrevision.AllFamilies()
 	sort.Slice(got, func(i, j int) bool { return got[i] < got[j] })
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("run-fork revision registry = %q, want exact 12-family registry %q", got, want)
+		t.Fatalf("run-fork revision registry = %q, want exact 13-family registry %q", got, want)
 	}
 }
 
@@ -360,8 +361,8 @@ func TestRunForkRevisionCaptureSerializesSameRunCommitVisibility(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM run_fork_fact_revisions WHERE run_id=$1::uuid AND family='events' AND revision=2 AND present`, runID).Scan(&secondCount); err != nil {
 		t.Fatalf("count second revision facts: %v", err)
 	}
-	if firstCount != 1 || secondCount != 2 {
-		t.Fatalf("visible event facts = revision1:%d revision2:%d, want 1/2", firstCount, secondCount)
+	if firstCount != 1 || secondCount != 1 {
+		t.Fatalf("changed event facts = revision1:%d revision2:%d, want one append-only delta per revision", firstCount, secondCount)
 	}
 }
 
@@ -476,7 +477,7 @@ func TestRunForkRevisionCaptureLocksParentBeforeRevisionState(t *testing.T) {
 		t.Fatalf("count revision ledger: %v", err)
 	}
 	if publishedFacts != 2 || ledgerRows != 3 {
-		t.Fatalf("revision evidence = events:%d ledger:%d, want 2/3", publishedFacts, ledgerRows)
+		t.Fatalf("revision evidence = changed_events:%d ledger:%d, want 2/3", publishedFacts, ledgerRows)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimebootverify "github.com/division-sh/swarm/internal/runtime/bootverify"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/routingtopology"
@@ -511,6 +512,7 @@ func TestBuildStageGraphShowsFanOutMultiplicity(t *testing.T) {
 					"order.accepted": {
 						CreateEntity: true,
 						FanOut: &runtimecontracts.FanOutSpec{
+							ElementID: contractelementidentity.MintContractElementID(),
 							ItemsFrom: "payload.line_items",
 							As:        "line_item",
 							Identity:  "line_item.id",
@@ -529,6 +531,16 @@ func TestBuildStageGraphShowsFanOutMultiplicity(t *testing.T) {
 	if effective.Identity != "line_item.id" {
 		t.Fatalf("effective fan-out identity = %q, want line_item.id", effective.Identity)
 	}
+	root := t.TempDir()
+	packageFile := filepath.Join(root, "package.yaml")
+	platformFile := filepath.Join(root, "platform-spec.yaml")
+	if err := os.WriteFile(packageFile, []byte("name: authoring-fan-out-test\nversion: 1.0.0\nflows: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(platformFile, []byte("version: 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bundle.Paths = runtimecontracts.ContractPaths{ContractsRoot: root, ProjectPackageFile: packageFile, PlatformSpecFile: platformFile}
 
 	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{IncludeStageGraph: true})
 	if err != nil {

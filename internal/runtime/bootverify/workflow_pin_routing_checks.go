@@ -149,7 +149,8 @@ func checkMissingExternalSelectEntity(c *checkerContext) []Finding {
 				if _, ok := inputs[eventType]; !ok {
 					continue
 				}
-				policy, err := runtimepipeline.CompileDeliveryTargetCompatibilityPolicy(c.source, flowID, events.EventType(eventType), handler)
+				nodeRef, _ := semanticview.ResolveExecutableNodeDeclaration(c.source, flowID, nodeID)
+				policy, err := runtimepipeline.CompileDeliveryTargetCompatibilityPolicy(c.source, nodeRef, flowID, events.EventType(eventType), handler)
 				if err == nil && policy.Acquisition != runtimepipeline.DeliveryTargetAcquisitionNone {
 					continue
 				}

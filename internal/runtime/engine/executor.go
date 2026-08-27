@@ -30,6 +30,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
@@ -101,6 +102,7 @@ type Executor struct {
 type executionFrame struct {
 	ctx                       context.Context
 	req                       ExecutionRequest
+	emitLineage               *events.EventLineage
 	base                      BaseContext
 	state                     ExecutionState
 	result                    ExecutionResult
@@ -180,7 +182,7 @@ func (e *Executor) ValidateRequest(req ExecutionRequest) error {
 	if err := validateUnsupportedRuleActions(req.Handler); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
-	if err := validateHandlerActivityRuntime(req.Handler); err != nil {
+	if err := validateHandlerActivityRuntime(req.Handler, req.FanOutPlans); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidConfig, err)
 	}
 	if req.Handler.CreateEntity && req.Handler.Accumulate != nil {
@@ -237,7 +239,7 @@ func validateUnsupportedRuleActions(handler runtimecontracts.SystemNodeEventHand
 	return nil
 }
 
-func validateHandlerActivityRuntime(handler runtimecontracts.SystemNodeEventHandler) error {
+func validateHandlerActivityRuntime(handler runtimecontracts.SystemNodeEventHandler, fanOutPlans []runtimecontracts.FanOutCompiledPlan) error {
 	hasTopLevelActivity := !handler.Activity.Empty()
 	hasRuleActivity := false
 	for _, rule := range handler.Rules {
@@ -271,7 +273,14 @@ func validateHandlerActivityRuntime(handler runtimecontracts.SystemNodeEventHand
 			if strings.TrimSpace(rule.Action.ID) != "" {
 				return fmt.Errorf("handler.rules[%d] activity and action are mutually exclusive", idx)
 			}
-			if !rule.Emit.Empty() || (rule.FanOut != nil && !rule.FanOut.Emit.Empty()) {
+			fanOutEmit := false
+			for _, plan := range fanOutPlans {
+				if plan.Site.Kind == runtimecontracts.FanOutSiteRule && plan.Site.Index == idx && !plan.Emit.Empty() {
+					fanOutEmit = true
+					break
+				}
+			}
+			if !rule.Emit.Empty() || fanOutEmit {
 				return fmt.Errorf("handler.rules[%d] activity and authored emit/fan_out emit are mutually exclusive in Stage 1", idx)
 			}
 		}
@@ -1684,49 +1693,20 @@ func specialHandlerClearTarget(target string) bool {
 }
 
 func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
-	active := e.selectedFanOut(frame)
-	if active.Spec == nil {
+	active := selectedFanOutPlan(frame)
+	if !active.Found {
 		return false, nil
 	}
-	spec := active.Spec
-	if e.deps.Source == nil {
-		return false, fmt.Errorf("%w: semantic source is required for fan_out", ErrInvalidConfig)
+	plan := active.Plan
+	resolveItems := func() []any {
+		itemsValue, _ := resolveContractPath(e.currentContext(frame), frame.state, plan.ItemsPath, plan.ItemsFrom)
+		return sliceFromAny(itemsValue)
 	}
-	handlerEvent := strings.TrimSpace(frame.req.HandlerEventKey)
-	if handlerEvent == "" {
-		handlerEvent = strings.TrimSpace(string(frame.req.Event.Type()))
-	}
-	effective, err := e.deps.Source.ResolveFanOutEffectiveSemantics(frame.req.Node, handlerEvent, *spec)
-	if err != nil {
-		return false, fmt.Errorf("%w: %v", ErrInvalidConfig, err)
-	}
-	itemsValue, _ := resolveContractPath(frame.base, frame.state, effective.ItemsPath, effective.ItemsFrom)
-	items := sliceFromAny(itemsValue)
-	frame.result.FanOutCount = len(items)
-	frame.state.FanOut = map[string]any{}
-	frame.state.SetFanOut("count", len(items))
-	// fan_out_count is platform-populated runtime bookkeeping, not an authored
-	// entity write target.
-	frame.state.State.SetBookkeeping("fan_out_count", len(items))
-	frame.result.StateMutation.StateCarrier.Fields = cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
-	frame.result.StateMutation.StateCarrier.Bookkeeping = cloneStringAnyMap(frame.state.State.StateCarrier.Bookkeeping)
-	limit := effective.MaxItems
-	if len(items) > limit {
-		return false, failures.Wrap(
-			failures.ClassFanOutBoundExceeded,
-			"fan_out_bound",
-			"runtime.engine",
-			string(StepFanOut),
-			map[string]any{
-				"source":          strings.TrimSpace(string(active.Source)),
-				"items_from":      effective.ItemsFrom,
-				"actual":          len(items),
-				"authored_limit":  effective.AuthoredMaxItems,
-				"effective_limit": limit,
-				"remediation":     "raise max_items or split the batch",
-			},
-			ErrFanOutBoundExceeded,
-		)
+	var items []any
+	if !plan.SourceAfterWrites {
+		items = resolveItems()
+		frame.state.FanOut = map[string]any{}
+		frame.state.SetFanOut("count", len(items))
 	}
 	if err := e.stepDataWrites(frame); err != nil {
 		return false, err
@@ -1734,47 +1714,95 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 	if err := e.stepProjection(frame); err != nil {
 		return false, err
 	}
-	for index, item := range items {
-		eventType := fanOutEventType(spec)
-		if eventType == "" {
-			continue
-		}
-		eventType = e.resolveDeclarativeEmitEventType(frame, eventType)
-		emitSpec, err := e.lowerEmitSpecForFrame(frame, string(active.EmitSource()), spec.Emit)
-		if err != nil {
-			return false, err
-		}
-		emitSpec.Event = eventType
-		frame.state.SetFanOut("item", item)
-		frame.state.SetFanOut("index", index)
-		payload := map[string]any{}
-		transformed, err := emitFieldsPayload(e.currentContext(frame), frame.state, emitSpec, workflowexpr.ValueExpressionOptions{ItemAlias: effective.ItemAlias})
-		if err != nil {
-			return false, err
-		}
-		if len(transformed) > 0 {
-			payload = transformed
-		}
-		shaped, err := e.shapeEmitPayload(frame, eventType, payload)
-		if err != nil {
-			return false, err
-		}
-		if _, err := e.queueEmitIntentForSpec(frame, emitSpec, eventType, shaped); err != nil {
-			return false, err
-		}
+	if plan.SourceAfterWrites {
+		items = resolveItems()
+		frame.state.FanOut = map[string]any{}
+		frame.state.SetFanOut("count", len(items))
 	}
-	if len(frame.result.EmitIntents) == 0 && len(frame.result.DeadLetterIntents) == 0 {
-		if err := e.stepAdvancesTo(frame); err != nil {
+	frame.result.FanOutCount = len(items)
+	limit := plan.MaxItems
+	if len(items) > limit {
+		return false, failures.Wrap(
+			failures.ClassFanOutBoundExceeded,
+			"fan_out_bound",
+			"runtime.engine",
+			string(StepFanOut),
+			map[string]any{
+				"source":          active.Source,
+				"items_from":      plan.ItemsFrom,
+				"actual":          len(items),
+				"authored_limit":  plan.AuthoredMaxItems,
+				"effective_limit": limit,
+				"remediation":     "keep source cardinality within the effective max_items bound",
+			},
+			ErrFanOutBoundExceeded,
+		)
+	}
+	if !frame.req.Preview {
+		intent, err := e.buildFanOutIntent(frame, plan, len(items))
+		if err != nil {
 			return false, err
 		}
-		frame.result.Status = OutcomeFannedOut
-		return true, nil
+		frame.result.FanOutIntent = &intent
 	}
 	if err := e.stepAdvancesTo(frame); err != nil {
 		return false, err
 	}
 	frame.result.Status = OutcomeFannedOut
 	return true, nil
+}
+
+func (e *Executor) buildFanOutIntent(frame *executionFrame, plan runtimecontracts.FanOutCompiledPlan, cardinality int) (fanoutobligation.IntentRequest, error) {
+	claim, claimed := runtimedelivery.ClaimFromContext(frame.ctx)
+	if !claimed {
+		return fanoutobligation.IntentRequest{}, fmt.Errorf("fan_out durable intent requires the exact inbound delivery claim")
+	}
+	ctx := e.currentContext(frame)
+	source := fanoutobligation.SourceRef{Field: strings.TrimSpace(plan.ItemsPath.Segments[0])}
+	switch plan.ItemsPath.Root {
+	case paths.RootPayload:
+		source.Kind = fanoutobligation.SourceEventPayloadField
+		source.EventID = strings.TrimSpace(frame.req.Event.ID())
+	case paths.RootEntity:
+		source.Kind = fanoutobligation.SourceEntityField
+		source.RunID = strings.TrimSpace(frame.req.Event.RunID())
+		source.EntityID = strings.TrimSpace(frame.req.EntityID.String())
+	default:
+		return fanoutobligation.IntentRequest{}, fmt.Errorf("fan_out compiled source %q has no immutable adapter", plan.ItemsFrom)
+	}
+	entity := cloneStringAnyMap(ctx.Entity.Raw())
+	stateFields := cloneStringAnyMap(frame.state.State.StateCarrier.Fields)
+	if source.Kind == fanoutobligation.SourceEntityField {
+		delete(entity, source.Field)
+		delete(stateFields, source.Field)
+	}
+	var deliveryRoute *events.DeliveryRoute
+	if route, ok := runtimedelivery.RouteFromContext(frame.ctx); ok {
+		copy := route
+		deliveryRoute = &copy
+	}
+	request := fanoutobligation.IntentRequest{
+		Key: fanoutobligation.IntentKey{
+			RunID: strings.TrimSpace(frame.req.Event.RunID()), TriggeringDeliveryID: claim.DeliveryID(), ElementRef: plan.Ref.ElementRef,
+		},
+		PlanRef:     plan.Ref,
+		Source:      source,
+		Cardinality: cardinality,
+		Capsule: fanoutobligation.Capsule{
+			NodeKey: frame.req.Node.Key(), ExecutionFlowID: frame.req.ExecutionFlowID.String(), Route: frame.req.Route,
+			EntityID: frame.req.EntityID.String(), HandlerEventKey: frame.req.HandlerEventKey,
+			CurrentState: frame.state.State.CurrentState, ChainDepth: frame.req.ChainDepth,
+			ProducerSource: frame.req.ProducerSource, DeliveryRoute: deliveryRoute, Lineage: events.LineageFromEvent(frame.req.Event),
+			Entity: entity, PlatformEntity: cloneStringAnyMap(ctx.PlatformEntity.Raw()), Computed: cloneStringAnyMap(ctx.Computed.Raw()),
+			Accumulated: cloneStringAnyMap(ctx.Accumulated.Raw()), Join: cloneStringAnyMap(ctx.Join.Raw()), Loop: cloneStringAnyMap(ctx.Loop.Raw()),
+			StateFields: stateFields, StateBookkeeping: cloneStringAnyMap(frame.state.State.StateCarrier.Bookkeeping),
+			StateGates: mapsClone(frame.state.State.StateCarrier.Gates),
+		},
+	}
+	if err := request.Validate(); err != nil {
+		return fanoutobligation.IntentRequest{}, err
+	}
+	return request, nil
 }
 
 func (e *Executor) stepGroupBy(frame *executionFrame) error {
@@ -1822,10 +1850,8 @@ func (e *Executor) stepOnComplete(frame *executionFrame) error {
 		if err := e.applyRule(frame, rule); err != nil {
 			return err
 		}
-		if rule.FanOut != nil {
-			if _, err := e.stepFanOut(frame); err != nil {
-				return err
-			}
+		if _, err := e.stepFanOut(frame); err != nil {
+			return err
 		}
 		if rule.Compute != nil {
 			return e.stepCompute(frame)
@@ -1849,10 +1875,8 @@ func (e *Executor) stepRules(frame *executionFrame) error {
 		if err := e.applyRule(frame, rule); err != nil {
 			return err
 		}
-		if rule.FanOut != nil {
-			if _, err := e.stepFanOut(frame); err != nil {
-				return err
-			}
+		if _, err := e.stepFanOut(frame); err != nil {
+			return err
 		}
 		if rule.Compute != nil {
 			return e.stepCompute(frame)
@@ -2528,6 +2552,7 @@ func (e *Executor) persist(ctx context.Context, frame executionFrame) (Committed
 		ActivityIntents:      append([]ActivityIntent(nil), frame.result.ActivityIntents...),
 		EmitIntents:          append([]EmitIntent(nil), frame.result.EmitIntents...),
 		EmitPrerequisites:    prerequisites,
+		FanOutIntent:         frame.result.FanOutIntent,
 	})
 }
 
@@ -2999,27 +3024,46 @@ func (e *Executor) selectedCompute(frame *executionFrame) *runtimecontracts.Comp
 	return frame.req.Handler.Compute
 }
 
-type activeFanOutSpec struct {
-	Spec   *runtimecontracts.FanOutSpec
-	Source handlerRuleSource
+type activeFanOutPlan struct {
+	Plan   runtimecontracts.FanOutCompiledPlan
+	Source string
+	Found  bool
 }
 
-func (a activeFanOutSpec) EmitSource() string {
-	switch a.Source {
-	case handlerRuleSourceRules:
+func (a activeFanOutPlan) EmitSource() string {
+	switch a.Plan.Site.Kind {
+	case runtimecontracts.FanOutSiteRule:
 		return "handler.rules.fan_out.emit"
-	case handlerRuleSourceOnComplete:
+	case runtimecontracts.FanOutSiteOnComplete:
 		return "handler.on_complete.fan_out.emit"
 	default:
 		return "handler.fan_out.emit"
 	}
 }
 
-func (e *Executor) selectedFanOut(frame *executionFrame) activeFanOutSpec {
-	if frame.rule != nil && frame.rule.FanOut != nil {
-		return activeFanOutSpec{Spec: frame.rule.FanOut, Source: frame.ruleSource}
+func selectedFanOutPlan(frame *executionFrame) activeFanOutPlan {
+	if frame == nil {
+		return activeFanOutPlan{}
 	}
-	return activeFanOutSpec{Spec: frame.req.Handler.FanOut}
+	kind := runtimecontracts.FanOutSiteHandler
+	index := -1
+	source := "handler.fan_out"
+	if frame.rule != nil {
+		switch frame.ruleSource {
+		case handlerRuleSourceRules:
+			kind, index, source = runtimecontracts.FanOutSiteRule, frame.ruleIndex, "handler.rules.fan_out"
+		case handlerRuleSourceOnComplete:
+			kind, index, source = runtimecontracts.FanOutSiteOnComplete, frame.ruleIndex, "handler.on_complete.fan_out"
+		default:
+			return activeFanOutPlan{}
+		}
+	}
+	for _, plan := range frame.req.FanOutPlans {
+		if plan.Site.Kind == kind && plan.Site.Index == index {
+			return activeFanOutPlan{Plan: plan, Source: source, Found: true}
+		}
+	}
+	return activeFanOutPlan{}
 }
 
 type activeDeclarativeEmitSpec struct {
@@ -3222,6 +3266,10 @@ func (e *Executor) newEmitIntent(frame *executionFrame, spec runtimecontracts.Em
 	} else {
 		resolution.Envelope.Source = events.RouteIdentity{}
 	}
+	lineage := events.LineageFromEvent(frame.req.Event)
+	if frame.emitLineage != nil {
+		lineage = *frame.emitLineage
+	}
 	evt, err := events.NewChildEvent(events.ChildEventInput{
 		Facts: events.EventFacts{
 			Type:     events.EventType(strings.TrimSpace(eventType)),
@@ -3229,7 +3277,7 @@ func (e *Executor) newEmitIntent(frame *executionFrame, spec runtimecontracts.Em
 			Payload:  encoded, ChainDepth: chainDepth, Envelope: resolution.Envelope,
 			RoutingSource: routingSource, CreatedAt: createdAt,
 		},
-		Lineage: events.LineageFromEvent(frame.req.Event),
+		Lineage: lineage,
 	})
 	if err != nil {
 		return EmitIntent{}, fmt.Errorf("construct emitted event: %w", err)
@@ -3238,7 +3286,7 @@ func (e *Executor) newEmitIntent(frame *executionFrame, spec runtimecontracts.Em
 	return EmitIntent{
 		Event:         evt,
 		ChainDepth:    chainDepth,
-		ParentEventID: strings.TrimSpace(frame.req.Event.ID()),
+		ParentEventID: strings.TrimSpace(lineage.ParentEventID),
 	}, nil
 }
 
@@ -3323,13 +3371,6 @@ func (e *Executor) queueEmitIntentForSpec(frame *executionFrame, spec runtimecon
 	frame.result.EmitIntents = append(frame.result.EmitIntents, intent)
 	frame.result.ChainDepth = nextDepth
 	return true, nil
-}
-
-func fanOutEventType(spec *runtimecontracts.FanOutSpec) string {
-	if spec == nil {
-		return ""
-	}
-	return spec.Emit.EventType()
 }
 
 func (e *Executor) resolveClearGates(frame *executionFrame) []string {

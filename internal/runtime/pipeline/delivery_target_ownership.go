@@ -231,7 +231,7 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 	if req.Handler.eventType != "" {
 		handlerEventType = req.Handler.eventType
 	}
-	policy, err := CompileDeliveryTargetCompatibilityPolicy(req.Source, flowID, handlerEventType, handler)
+	policy, err := CompileDeliveryTargetCompatibilityPolicy(req.Source, req.Handler.Node(), flowID, handlerEventType, handler)
 	if err != nil {
 		return events.DeliveryTargetOwnership{}, err
 	}
@@ -391,7 +391,7 @@ func ValidateStampedDeliveryTargetOwnership(source semanticview.Source, evt even
 	if handlerFact.eventType != "" {
 		handlerEventType = handlerFact.eventType
 	}
-	policy, err := CompileDeliveryTargetCompatibilityPolicy(source, flowID, handlerEventType, handler)
+	policy, err := CompileDeliveryTargetCompatibilityPolicy(source, handlerFact.Node(), flowID, handlerEventType, handler)
 	if err != nil {
 		return err
 	}
@@ -427,10 +427,13 @@ func ValidateStampedDeliveryTargetOwnership(source semanticview.Source, evt even
 // CompileDeliveryTargetCompatibilityPolicy is the shared verifier/runtime
 // policy owner. Handler fields own execution dependency; explicit acquisition
 // declarations and exact input resolution own acquisition independently.
-func CompileDeliveryTargetCompatibilityPolicy(source semanticview.Source, flowID string, eventType events.EventType, handler SystemNodeEventHandler) (DeliveryTargetCompatibilityPolicy, error) {
+func CompileDeliveryTargetCompatibilityPolicy(source semanticview.Source, node runtimeidentity.ExecutableNode, flowID string, eventType events.EventType, handler SystemNodeEventHandler) (DeliveryTargetCompatibilityPolicy, error) {
 	flowID = strings.TrimSpace(flowID)
+	if source != nil && !node.Valid() {
+		return DeliveryTargetCompatibilityPolicy{}, fmt.Errorf("delivery target compatibility requires exact executable node identity")
+	}
 	policy := DeliveryTargetCompatibilityPolicy{
-		Dependency:  handlerExecutionEntityRequirement(source, flowID, handler),
+		Dependency:  handlerExecutionEntityRequirementForNode(source, node, eventType, flowID, handler),
 		Acquisition: deliveryTargetHandlerAcquisition(handler),
 	}
 	endpointAcquisition, err := deliveryTargetEndpointAcquisition(source, flowID, eventType)
@@ -834,9 +837,7 @@ var systemNodeEventHandlerEntityClassifiers = map[string]handlerEntityFieldClass
 	"Query": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
 		return existingWhen(queryReferencesEntity(handler.Query))
 	},
-	"FanOut": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
-		return fanOutEntityRequirement(handler.FanOut)
-	},
+	"FanOut": noHandlerEntityRequirement,
 	"GroupBy": func(_ semanticview.Source, _ string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
 		return existingWhen(groupByReferencesEntity(handler.GroupBy))
 	},
@@ -888,9 +889,7 @@ var handlerRuleEntryEntityClassifiers = map[string]handlerRuleEntityFieldClassif
 		}
 		return existingWhen(computeReferencesEntity(rule.Compute))
 	},
-	"FanOut": func(_ semanticview.Source, _ string, rule runtimecontracts.HandlerRuleEntry) DeliveryTargetEntityDependency {
-		return fanOutEntityRequirement(rule.FanOut)
-	},
+	"FanOut":     noHandlerRuleEntityRequirement,
 	"elementRef": noHandlerRuleEntityRequirement,
 	"authored":   noHandlerRuleEntityRequirement,
 }
@@ -900,6 +899,12 @@ func handlerExecutionEntityRequirement(source semanticview.Source, flowID string
 	for _, classify := range systemNodeEventHandlerEntityClassifiers {
 		requirement = requirement.merge(classify(source, flowID, handler))
 	}
+	return requirement
+}
+
+func handlerExecutionEntityRequirementForNode(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType events.EventType, flowID string, handler SystemNodeEventHandler) DeliveryTargetEntityDependency {
+	requirement := handlerExecutionEntityRequirement(source, flowID, handler)
+	requirement = requirement.merge(compiledFanOutEntityRequirement(source, node, eventType))
 	return requirement
 }
 
@@ -965,14 +970,20 @@ func guardEntityRequirement(guard *runtimecontracts.GuardSpec) DeliveryTargetEnt
 	return existingWhen((err == nil && failure.Action == runtimecontracts.GuardFailureActionKill) || guardReferencesEntity(guard))
 }
 
-func fanOutEntityRequirement(spec *runtimecontracts.FanOutSpec) DeliveryTargetEntityDependency {
-	if spec == nil {
+func compiledFanOutEntityRequirement(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType events.EventType) DeliveryTargetEntityDependency {
+	if source == nil || !node.Valid() {
 		return DeliveryTargetEntityOptional
 	}
-	if emitSpecReferencesEntity(spec.Emit) {
-		return DeliveryTargetEntityMaterializing
+	requirement := DeliveryTargetEntityOptional
+	for _, plan := range source.FanOutPlansForHandler(node, strings.TrimSpace(string(eventType))) {
+		if emitSpecReferencesEntity(plan.Emit) {
+			requirement = requirement.merge(DeliveryTargetEntityMaterializing)
+			continue
+		}
+		referencesEntity := plan.ItemsPath.Root == paths.RootEntity || pathReferencesEntity(plan.Identity) || emitSpecReferencesEntity(plan.Emit)
+		requirement = requirement.merge(existingWhen(referencesEntity))
 	}
-	return existingWhen(fanOutReferencesEntity(spec))
+	return requirement
 }
 
 func guardReferencesEntity(guard *runtimecontracts.GuardSpec) bool {
@@ -1073,15 +1084,6 @@ func dataAccumulationReferencesEntity(spec runtimecontracts.WorkflowDataAccumula
 
 func emitSpecReferencesEntity(spec runtimecontracts.EmitSpec) bool {
 	return pathReferencesEntity(spec.From) || expressionValueMapReferencesEntity(spec.Fields)
-}
-
-func fanOutReferencesEntity(spec *runtimecontracts.FanOutSpec) bool {
-	if spec == nil {
-		return false
-	}
-	return typedPathReferencesEntity(spec.ItemsFrom, spec.ItemsPath) ||
-		pathReferencesEntity(spec.Identity) ||
-		emitSpecReferencesEntity(spec.Emit)
 }
 
 func groupByReferencesEntity(spec *runtimecontracts.GroupBySpec) bool {

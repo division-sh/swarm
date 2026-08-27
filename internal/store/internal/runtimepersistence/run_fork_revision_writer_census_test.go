@@ -33,7 +33,7 @@ func TestPlatformSpecRunForkRevisionRegistryIsClosed(t *testing.T) {
 	for _, family := range []string{
 		"events", "entity_mutations", "entity_metadata", "event_deliveries",
 		"committed_replay_scopes", "event_receipts", "dead_letters", "timers",
-		"agent_sessions", "agent_turns", "agent_conversation_audits", "reply_contexts",
+		"agent_sessions", "agent_turns", "agent_conversation_audits", "reply_contexts", "fan_out_obligations",
 	} {
 		if strings.Count(contract, "      - "+family+"\n") != 1 {
 			t.Fatalf("platform spec historical registry does not contain %q exactly once", family)
@@ -329,6 +329,7 @@ func scanRunForkRevisionPhysicalWriters(t *testing.T, root string) map[string]st
 		"event_deliveries": {}, "event_delivery_attempts": {}, "event_delivery_outcomes": {},
 		"committed_replay_scopes": {}, "event_receipts": {}, "dead_letters": {}, "timers": {},
 		"agent_sessions": {}, "agent_turns": {}, "agent_conversation_audits": {}, "reply_contexts": {},
+		"fan_out_intents": {}, "fan_out_outcomes": {},
 	}
 	dml := regexp.MustCompile(`(?is)\b(?:INSERT(?:\s+OR\s+[A-Z_]+)?\s+INTO|UPDATE|DELETE\s+FROM)\s+(?:[A-Z_]+\.)?([A-Z_]+)`)
 	got := make(map[string]struct{})
@@ -391,7 +392,7 @@ func sortedStringKeys(values map[string]struct{}) []string {
 
 func runForkRevisionWriterCensus() []runForkRevisionWriterCensusRow {
 	const (
-		matrixProof   = "TestRunForkRevisionTwelveFamilySelectedStoreParity"
+		matrixProof   = "TestRunForkRevisionThirteenFamilySelectedStoreParity"
 		sessionProof  = "TestRunForkRevisionSessionProjectionIgnoresExcludedWriterChurnAndTracksStatusPresence"
 		discardProof  = "TestSelectedForkRetainedDiscardPublishesHistoricalTombstoneRevisionPostgres"
 		discardParity = "TestSelectedForkDiscardSelectedStoreParity"
@@ -439,6 +440,10 @@ func runForkRevisionWriterCensus() []runForkRevisionWriterCensusRow {
 
 		row("internal/store/internal/backend/pipelinepersistence/owner_operations.go", []string{"insertCommittedPipelineScopeTx"}, []string{"committed_replay_scopes"}, "committed_replay_scopes", "event/pipeline named commit", "scope insert", "admitted event run ID", "outer pipeline finalizer", matrixProof),
 		row("internal/store/internal/backend/pipelinepersistence/owner_operations.go", []string{"writeExactPlatformPipelineReceipt"}, []string{"event_receipts"}, "event_receipts", "pipeline disposition/settlement", "exact receipt insert", "immutable event run lookup", "outer pipeline finalizer", matrixProof),
+		row("internal/store/internal/backend/pipelinepersistence/fan_out_obligation.go", []string{"commitFanOutIntentTx"}, []string{"fan_out_intents"}, "fan_out_obligations", "CommitWorkflowEngineMutation", "constant-size intent insert", "validated engine mutation run ID", "pipeline owner finalizer", matrixProof),
+		row("internal/store/internal/backend/pipelinepersistence/fan_out_obligation.go", []string{"insertFanOutEntitySourceRevisionTx"}, []string{"entity_mutations"}, "entity_mutations", "CommitWorkflowEngineMutation", "immutable source revision append", "validated intent run and entity IDs", "pipeline owner finalizer", matrixProof),
+		row("internal/store/internal/backend/pipelinepersistence/fan_out_owner.go", []string{"claimFanOutIntentRow", "releaseFanOutClaim", "releaseFanOutRetryable", "finishFanOutSuccessfulTurn", "blockFanOutClaim", "commitFanOutChunk", "cancelRunFanOut"}, []string{"fan_out_intents"}, "fan_out_obligations", "fan-out claim/retry/success/block/chunk/cancel named mutations", "intent operational state, typed blocking, and semantic progress", "validated or locked intent run ID", "pipeline owner finalizer for semantic changes; operational claim and tuning changes are excluded", matrixProof),
+		row("internal/store/internal/backend/pipelinepersistence/fan_out_owner.go", []string{"commitFanOutChunk"}, []string{"fan_out_outcomes"}, "fan_out_obligations", "CommitFanOutChunk", "immutable ordinal outcome append", "locked intent run ID", "pipeline owner finalizer", matrixProof),
 		row("internal/store/internal/backend/pipelinepersistence/scenario_setup.go", []string{"SetupScenarioEntities"}, []string{"entity_state"}, "entity_metadata + entity_mutations", "SetupScenarioEntities", "scenario materialization", "created run ID", "pipeline owner finalizer", matrixProof),
 		row("internal/store/internal/backend/pipelinepersistence/standing_service.go", []string{"copyStandingEntityStateTx"}, []string{"entity_state"}, "entity_metadata + entity_mutations", "standing service reconciliation", "standing run copy", "new standing run ID", "standing pipeline owner finalizer", matrixProof),
 		row("internal/store/internal/backend/pipelinepersistence/standing_service.go", []string{"quiesceStandingRunTx"}, []string{"agent_sessions"}, "agent_sessions", "standing service reconciliation", "run quiescence", "locked standing run ID", "standing pipeline owner finalizer", matrixProof),
@@ -448,9 +453,10 @@ func runForkRevisionWriterCensus() []runForkRevisionWriterCensusRow {
 
 		row("internal/store/internal/backend/replycontext/owner.go", []string{"createPostgresReplyContext", "createSQLiteReplyContextTx", "claimLoadedReplyContextTx"}, []string{"reply_contexts"}, "reply_contexts", "CreateReplyContext/ClaimReplyContext or outer event commit", "create/claim", "validated reply record run ID", "reply-context or outer event finalizer", matrixProof),
 		row("internal/store/internal/backend/runforkpersistence/run_fork_materializer.go", []string{"materializeRunForkEntityState"}, []string{"entity_state"}, "entity_metadata", "MaterializeRunFork", "fork entity materialization", "deterministic fork run ID", "run-fork owner finalizer", matrixProof),
+		row("internal/store/internal/backend/runforkpersistence/run_fork_fan_out_materializer.go", []string{"materializeRunForkFanOutObligations"}, []string{"fan_out_intents", "fan_out_outcomes"}, "fan_out_obligations", "MaterializeRunFork/MaterializeRunForkForSelectedContractExecution", "fork fan-out intent and inherited-prefix materialization", "deterministic fork run ID plus fixed source revision", "run-fork owner finalizer", matrixProof),
 		row("internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_execution_mutation.go", []string{"materializeSelectedContractWorkflowState"}, []string{"entity_state"}, "entity_metadata", "MaterializeRunForkForSelectedContractExecution", "selected workflow materialization", "deterministic fork run ID", "run-fork owner finalizer", matrixProof),
 		row("internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_discard_owner.go", []string{"discardMaterializedSelectedContractExecutionFork"}, []string{"entity_state"}, "entity_metadata", "DiscardMaterializedSelectedContractExecutionFork", "retained tombstone or whole-parent deletion", "locked selected fork run ID", "retained branch finalizes; parent branch deletes parent and cascade ledger", discardProof+"; "+discardParity+"; "+rollbackProof),
-		row("internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_discard_owner.go", []string{"deleteSelectedContractForkState"}, []string{"agent_conversation_audits", "agent_sessions", "agent_turns", "committed_replay_scopes", "dead_letters", "entity_mutations", "event_deliveries", "event_delivery_attempts", "event_delivery_outcomes", "event_receipts", "timers"}, "nine retained families or parent-owned complete state", "DiscardMaterializedSelectedContractExecutionFork", "retained completion-evidence branch and distinct parent-deleting branch", "locked selected fork run ID", "retained branch finalizes nine families; parent branch deletes parent and cascade ledger", discardProof+"; "+discardParity+"; "+rollbackProof),
+		row("internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_discard_owner.go", []string{"deleteSelectedContractForkState"}, []string{"agent_conversation_audits", "agent_sessions", "agent_turns", "committed_replay_scopes", "dead_letters", "entity_mutations", "event_deliveries", "event_delivery_attempts", "event_delivery_outcomes", "event_receipts", "fan_out_intents", "fan_out_outcomes", "timers"}, "retained revision families or parent-owned complete state", "DiscardMaterializedSelectedContractExecutionFork", "retained completion-evidence branch and distinct parent-deleting branch", "locked selected fork run ID", "retained branch finalizes every affected family; parent branch deletes parent and cascade ledger", discardProof+"; "+discardParity+"; "+rollbackProof),
 
 		row("internal/store/internal/backend/runlifecycle/active_run_quiescence.go", []string{"terminateActiveRunSessionsTx", "sqliteTerminateActiveRunSessionsTx"}, []string{"agent_sessions"}, "agent_sessions", "ApplyActiveRunQuiescence/run control", "run quiescence", "locked target run IDs", "run-lifecycle owner finalizer", matrixProof),
 		row("internal/store/internal/preservationpersistence/preservation_cleanup.go", []string{"terminateUnavailableBundlePreservationSessionTx"}, []string{"agent_sessions"}, "agent_sessions", "ApplyPreservationCleanup", "retained-run cleanup", "locked active run IDs", "preservation owner finalizer", matrixProof),

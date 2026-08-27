@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"gopkg.in/yaml.v3"
 )
@@ -241,6 +242,44 @@ func TestLoadWorkflowContractBundleQualifiesElementIdentityByPackage(t *testing.
 	}
 }
 
+func TestFanOutElementIdentityKeepsSiblingPackageScopesDistinct(t *testing.T) {
+	elementID, err := contractelementidentity.ParseContractElementID("00000000-0000-4000-8000-000000000307")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootNode, err := runtimeidentity.AdmitExecutableNodeDeclaration(".", "", "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	childNode, err := runtimeidentity.AdmitExecutableNodeDeclaration("flows/child", "child", "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := SystemNodeEventHandler{FanOut: &FanOutSpec{
+		ElementID: elementID,
+		ItemsFrom: "payload.items",
+		As:        "item",
+		Identity:  "item.id",
+		Emit:      EmitSpec{Event: "item.ready"},
+	}}
+	root, err := QualifySystemNodeHandlerRuleRefs(rootNode, handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := QualifySystemNodeHandlerRuleRefs(childNode, handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootRef, rootOK := root.FanOut.ContractElementRef()
+	childRef, childOK := child.FanOut.ContractElementRef()
+	if !rootOK || !childOK {
+		t.Fatalf("qualified fan-out refs are unavailable: root=%v child=%v", rootOK, childOK)
+	}
+	if rootRef.Equal(childRef) || rootRef.ElementID() != childRef.ElementID() {
+		t.Fatalf("sibling package fan-outs collapsed or changed authored identity: root=%#v child=%#v", rootRef, childRef)
+	}
+}
+
 func TestLoadWorkflowContractBundleRejectsDuplicateElementIdentityWithinPackage(t *testing.T) {
 	const sharedElementID = "00000000-0000-4000-8000-000000000306"
 	repo := repoRootForContractsTest(t)
@@ -249,6 +288,9 @@ func TestLoadWorkflowContractBundleRejectsDuplicateElementIdentityWithinPackage(
 	_, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
 	if err == nil || !strings.Contains(err.Error(), "contract element_id "+sharedElementID+" is duplicated in package .") {
 		t.Fatalf("duplicate package-local element identity error = %v", err)
+	}
+	if !strings.Contains(err.Error(), "handler.fan_out") {
+		t.Fatalf("duplicate package-local element identity did not name the fan-out owner: %v", err)
 	}
 }
 
@@ -263,6 +305,12 @@ flows:
   - id: child
     flow: child
 `)
+	rootInputs := "[root.started]"
+	rootEvents := "root.started: {entity_id: string}\n"
+	if duplicateRoot {
+		rootInputs = "[root.started, root.fanout]"
+		rootEvents += "root.fanout: {items: '[string]'}\nitem.ready: {item: string}\n"
+	}
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), `
 name: handler-rule-identity-package-proof
 initial_state: active
@@ -270,16 +318,27 @@ terminal_states: [done]
 states: [active, done]
 pins:
   inputs:
-    events: [root.started]
+    events: `+rootInputs+`
 `)
-	writeFixtureFile(t, filepath.Join(root, "events.yaml"), "root.started: {entity_id: string}\n")
-	rootRules := ""
+	writeFixtureFile(t, filepath.Join(root, "events.yaml"), rootEvents)
+	rootFanOut := ""
 	if duplicateRoot {
-		rootRules = `
-        duplicate:
-          element_id: ` + sharedElementID + `
-          condition: else
-          advances_to: done`
+		rootFanOut = `
+root-fanout:
+  id: root-fanout
+  execution_type: system_node
+  subscribes_to: [root.fanout]
+  event_handlers:
+    root.fanout:
+      fan_out:
+        element_id: ` + sharedElementID + `
+        items_from: payload.items
+        as: fan_item
+        identity: fan_item
+        emit:
+          event: item.ready
+          fields: {item: fan_item}
+`
 	}
 	writeFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 root-handler:
@@ -292,8 +351,8 @@ root-handler:
         selected:
           element_id: `+sharedElementID+`
           condition: else
-          advances_to: done`+rootRules+`
-`)
+          advances_to: done
+`+rootFanOut)
 	childRoot := filepath.Join(root, "flows", "child")
 	writeFixtureFile(t, filepath.Join(childRoot, "package.yaml"), "name: child\n")
 	writeFixtureFile(t, filepath.Join(childRoot, "schema.yaml"), `

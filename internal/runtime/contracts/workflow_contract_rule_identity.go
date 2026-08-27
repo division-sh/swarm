@@ -33,6 +33,21 @@ func QualifySystemNodeHandlerRuleRefs(node runtimeidentity.ExecutableNode, handl
 		rule.elementRef = ref
 		return rule, nil
 	}
+	qualifyFanOut := func(context string, spec *FanOutSpec) (*FanOutSpec, error) {
+		if spec == nil {
+			return nil, nil
+		}
+		out := *spec
+		if !out.ElementID.Valid() {
+			return nil, fmt.Errorf("%s requires canonical element_id; run `swarm mint-element-ids --contracts <path>`", context)
+		}
+		ref, err := contractelementidentity.NewContractElementRef(packageKey, out.ElementID)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", context, err)
+		}
+		out.elementRef = ref
+		return &out, nil
+	}
 	qualifyMany := func(context string, rules []HandlerRuleEntry) ([]HandlerRuleEntry, error) {
 		out := append([]HandlerRuleEntry(nil), rules...)
 		for index := range out {
@@ -66,6 +81,22 @@ func QualifySystemNodeHandlerRuleRefs(node runtimeidentity.ExecutableNode, handl
 			}
 		}
 		handler.Join = &join
+	}
+	handler.FanOut, err = qualifyFanOut("handler.fan_out", handler.FanOut)
+	if err != nil {
+		return SystemNodeEventHandler{}, err
+	}
+	for index := range handler.Rules {
+		handler.Rules[index].FanOut, err = qualifyFanOut("handler.rules.fan_out", handler.Rules[index].FanOut)
+		if err != nil {
+			return SystemNodeEventHandler{}, err
+		}
+	}
+	for index := range handler.OnComplete {
+		handler.OnComplete[index].FanOut, err = qualifyFanOut("handler.on_complete.fan_out", handler.OnComplete[index].FanOut)
+		if err != nil {
+			return SystemNodeEventHandler{}, err
+		}
 	}
 	return handler, nil
 }

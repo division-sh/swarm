@@ -21,8 +21,8 @@ func TestPlatformAPISpecValidationCoverage(t *testing.T) {
 	if report.MethodCount != 78 {
 		t.Fatalf("method count = %d, want 78", report.MethodCount)
 	}
-	if report.SchemaCount != 244 {
-		t.Fatalf("schema count = %d, want 244", report.SchemaCount)
+	if report.SchemaCount != 246 {
+		t.Fatalf("schema count = %d, want 246", report.SchemaCount)
 	}
 	if report.ErrorCodeCount != 72 {
 		t.Fatalf("error code count = %d, want 72", report.ErrorCodeCount)
@@ -78,6 +78,36 @@ func TestAgentMemoryPlanStateInvariantMatchesFreshSchema(t *testing.T) {
 	assertScalarContains(t, agentsDDL, "CHECK (NOT memory_enabled OR memory_source = 'authored')")
 }
 
+func TestFanOutSpecMakesDurableIssuanceTheOnlyRuntimeContract(t *testing.T) {
+	root := loadPlatformSpecYAMLNode(t)
+	handlerSpec := mustMappingValue(t, root, "handler_specification")
+	handlerFields := mustMappingValue(t, handlerSpec, "handler_fields")
+	fanOut := mustMappingValue(t, handlerFields, "fan_out")
+	effective := mustMappingValue(t, fanOut, "effective_semantics")
+	assertScalarValue(t, mustMappingValue(t, effective, "canonical_owner"), "contracts.WorkflowContractBundle.CompileFanOutPlan")
+	durable := mustMappingValue(t, fanOut, "durable_issuance")
+	assertScalarContains(t, mustMappingValue(t, durable, "trigger_transaction"), "one intent")
+	assertScalarContains(t, mustMappingValue(t, durable, "trigger_transaction"), "constant-size")
+	assertScalarContains(t, mustMappingValue(t, durable, "progress"), "contiguous cursor")
+	assertScalarContains(t, mustMappingValue(t, durable, "failure_isolation"), "Outcome-uncertain")
+	assertScalarContains(t, mustMappingValue(t, durable, "fork"), "never reissues")
+
+	raw, err := os.ReadFile(platform.DefaultPlatformSpecFile(repoRoot(t)))
+	if err != nil {
+		t.Fatalf("read platform spec: %v", err)
+	}
+	for _, retired := range []string{
+		"raise max_items or split the batch",
+		"number of items that were dispatched",
+		"Runtime emits exactly one intent for each source-list entry",
+		"Fan-out dispatched. Handler emitted the declared per-item events",
+	} {
+		if strings.Contains(string(raw), retired) {
+			t.Fatalf("platform spec retains eager/author-batching fan-out contract %q", retired)
+		}
+	}
+}
+
 func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	api := loadRepoAPISpec(t)
 	generated, err := GenerateOpenRPC(api)
@@ -100,8 +130,8 @@ func TestGeneratedOpenRPCArtifactMatchesPlatformSpec(t *testing.T) {
 	if len(doc.Methods) != 78 {
 		t.Fatalf("generated OpenRPC methods = %d, want 78", len(doc.Methods))
 	}
-	if len(doc.Components.Schemas) != 244 {
-		t.Fatalf("generated OpenRPC schemas = %d, want 244", len(doc.Components.Schemas))
+	if len(doc.Components.Schemas) != 246 {
+		t.Fatalf("generated OpenRPC schemas = %d, want 246", len(doc.Components.Schemas))
 	}
 	if len(doc.Components.Errors) != 72 {
 		t.Fatalf("generated OpenRPC errors = %d, want 72", len(doc.Components.Errors))

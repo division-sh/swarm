@@ -100,7 +100,6 @@ func allowedHandlerRuleDisplayLabelReaders() map[string]handlerRuleDisplayLabelA
 	return map[string]handlerRuleDisplayLabelAllowance{
 		"internal/runtime/activity_validation.go::validateHandlerActivitySurface":                                                  {Count: 3, Reason: "diagnostic rule label"},
 		"internal/runtime/authoringview/view.go::containedOperationRefs":                                                           {Count: 2, Reason: "authoring presentation label"},
-		"internal/runtime/authoringview/view.go::fanOutViewsForHandler":                                                            {Count: 2, Reason: "authoring presentation label"},
 		"internal/runtime/bootverify/workflow_compute_module_checks.go::checkComputeModuleValueRows":                               {Count: 1, Reason: "diagnostic row label"},
 		"internal/runtime/bootverify/workflow_contained_state_operation_checks.go::wave1ContainedStateOperations":                  {Count: 2, Reason: "diagnostic operation label"},
 		"internal/runtime/bootverify/workflow_entity_contract_coverage_checks.go::wave1HandlerWriteTargets":                        {Count: 2, Reason: "diagnostic write-site label"},

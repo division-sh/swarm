@@ -21,6 +21,9 @@ func Wrap(bundle *runtimecontracts.WorkflowContractBundle) Source {
 	if bundle == nil {
 		return nil
 	}
+	if !bundle.FanOutPlansArePrepared() {
+		bundle.PrepareFanOutPlans()
+	}
 	return bundleSource{bundle: bundle}
 }
 
@@ -69,8 +72,20 @@ func (s bundleSource) WorkflowTimers() []runtimecontracts.WorkflowTimerContract 
 func (s bundleSource) WorkflowJoins() []runtimecontracts.WorkflowJoinPlan {
 	return effectiveWorkflowJoins(s, s.bundle.WorkflowJoins())
 }
-func (s bundleSource) ResolveFanOutEffectiveSemantics(node runtimeidentity.ExecutableNode, eventType string, spec runtimecontracts.FanOutSpec) (runtimecontracts.FanOutEffectiveSemantics, error) {
-	return s.bundle.ResolveFanOutEffectiveSemantics(node, eventType, spec)
+func (s bundleSource) FanOutPlanForSite(site runtimecontracts.FanOutSiteRef) (runtimecontracts.FanOutCompiledPlan, bool) {
+	return s.bundle.FanOutPlanForSite(site)
+}
+func (s bundleSource) FanOutPlanForElement(ref runtimecontracts.FanOutElementRef) (runtimecontracts.FanOutCompiledPlan, bool) {
+	return s.bundle.FanOutPlanForElement(ref)
+}
+func (s bundleSource) FanOutPlans() []runtimecontracts.FanOutCompiledPlan {
+	return s.bundle.FanOutPlans()
+}
+func (s bundleSource) FanOutPlansForHandler(node runtimeidentity.ExecutableNode, eventType string) []runtimecontracts.FanOutCompiledPlan {
+	return s.bundle.FanOutPlansForHandler(node, eventType)
+}
+func (s bundleSource) FanOutPlanFailures() []runtimecontracts.FanOutPlanFailure {
+	return s.bundle.FanOutPlanFailures()
 }
 func (s bundleSource) WorkflowGates() []runtimecontracts.WorkflowGatePlan {
 	return s.bundle.WorkflowGates()

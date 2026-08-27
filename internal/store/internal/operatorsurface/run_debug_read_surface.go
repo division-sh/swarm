@@ -409,6 +409,10 @@ func (s *RunPostgres) LoadRunDebugReport(ctx context.Context, runID string, opts
 	if err := s.loadRunDebugRuntimeLogs(ctx, report.RunID, opts, &report); err != nil {
 		return operatorread.RunDebugReport{}, err
 	}
+	report.FanOut, err = s.pipeline.FanOutRunSummary(ctx, report.RunID, time.Now().UTC())
+	if err != nil {
+		return operatorread.RunDebugReport{}, fmt.Errorf("load run fan-out diagnostics: %w", err)
+	}
 
 	return report, nil
 }
@@ -428,6 +432,11 @@ func (s *RunPostgres) LoadRunTestQuiescence(ctx context.Context, runID string, o
 		return operatorread.RunTestQuiescence{}, fmt.Errorf("load run test quiescence unsettled pipeline events: %w", err)
 	}
 	out.UnsettledPipelineEvents = pipelineSummary.Replayable + pipelineSummary.Deferred
+	fanOut, err := s.pipeline.FanOutRunSummary(ctx, runID, observedAt)
+	if err != nil {
+		return operatorread.RunTestQuiescence{}, fmt.Errorf("load run test quiescence fan-out obligations: %w", err)
+	}
+	out.FanOutOwed = fanOut.Owed
 	scope, err := runtimetimerobligation.Run(runID)
 	if err != nil {
 		return operatorread.RunTestQuiescence{}, err
@@ -459,6 +468,7 @@ func (s *RunPostgres) LoadRunTestQuiescence(ctx context.Context, runID string, o
 func runTestQuiescenceReady(value operatorread.RunTestQuiescence) bool {
 	return value.ActiveDeliveries == 0 &&
 		value.UnsettledPipelineEvents == 0 &&
+		value.FanOutOwed == 0 &&
 		value.DueTimers == 0 &&
 		value.ActiveSessionLeases == 0
 }

@@ -800,6 +800,7 @@ fanout-node:
   event_handlers:
     start:
       fan_out:
+        element_id: c7f43531-71cd-42f4-9d45-5cbece4384ac
         items_from: payload.items
         as: ticket
         identity: ticket.id
@@ -3461,6 +3462,7 @@ func TestRun_AcceptsYAMLScalarFanOutEmitAliasExpressions(t *testing.T) {
 	var handler runtimecontracts.SystemNodeEventHandler
 	if err := yaml.Unmarshal([]byte(`
 fan_out:
+  element_id: f080f569-a621-4682-bba9-bc01240589a7
   items_from: payload.industries
   as: industry
   identity: industry
@@ -4217,6 +4219,7 @@ func TestRun_ErrorsForFanOutEmitSitePayloadDrift(t *testing.T) {
 	node.EventHandlers["scan.corpus_dispatch"] = handler
 	bundle.Nodes["dispatcher"] = node
 	bundle.Semantics.NodeHandlers["dispatcher"]["scan.corpus_dispatch"] = handler
+	completeBootverifyFanOutFixture(t, bundle, "dispatcher", "scan.corpus_dispatch")
 
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 

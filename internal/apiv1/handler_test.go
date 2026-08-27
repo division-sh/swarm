@@ -739,6 +739,10 @@ func TestOperatorReadHandlersExposeHealthAndRunReadMethods(t *testing.T) {
 	if got := asMap(t, diagnose.Result)["operational_state"]; got != "running" {
 		t.Fatalf("run.diagnose operational_state = %v, want running", got)
 	}
+	fanOut := asMap(t, asMap(t, diagnose.Result)["fan_out"])
+	if blocked, ok := fanOut["blocked_intents"].([]any); !ok || len(blocked) != 0 {
+		t.Fatalf("run.diagnose fan_out.blocked_intents = %#v, want empty array", fanOut["blocked_intents"])
+	}
 	quiescence := asMap(t, asMap(t, diagnose.Result)["test_quiescence"])
 	if quiescence["ready"] != true || quiescence["active_deliveries"] != float64(0) {
 		t.Fatalf("run.diagnose test_quiescence = %#v, want ready zero-count projection", quiescence)

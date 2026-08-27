@@ -241,7 +241,11 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 		committed, commitErr := o.store.engineMutations.CommitWorkflowEngineMutation(ctx, WorkflowEngineMutationCommand{
 			State: state, Lifecycle: lifecycle.Commit,
 			ProposedEffects: proposedEffects, Publications: publications, DeliverySuccess: deliverySuccess, PostCommit: postCommit,
+			FanOutIntent: mutation.FanOutIntent,
 		})
+		if commitErr == nil && mutation.FanOutIntent != nil {
+			o.state.coordinator.signalFanOutWork()
+		}
 		settledClaim, settlementErr := finishWorkflowEngineDeliverySuccess(deliverySuccess, settlementGuard, committed.DeliverySuccess)
 		commitErr = errors.Join(commitErr, settlementErr)
 		if commitErr != nil && settledClaim == nil {
@@ -288,6 +292,9 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 		return engineCommit, nil
 	}
 	commit := func(txctx context.Context) error {
+		if mutation.FanOutIntent != nil {
+			return fmt.Errorf("durable fan-out intent requires selected workflow persistence")
+		}
 		if o.state.coordinator == nil {
 			return runtimeengine.ErrMissingStateRepo
 		}
@@ -374,7 +381,11 @@ func (o pipelineEngineMutationOwner) commitEntitylessEngineMutation(ctx context.
 		EntitylessRunID:  runID,
 		Publications:     publications,
 		DeliverySuccess:  deliverySuccess,
+		FanOutIntent:     mutation.FanOutIntent,
 	})
+	if commitErr == nil && mutation.FanOutIntent != nil {
+		o.state.coordinator.signalFanOutWork()
+	}
 	settledClaim, settlementErr := finishWorkflowEngineDeliverySuccess(deliverySuccess, settlementGuard, committed.DeliverySuccess)
 	commitErr = errors.Join(commitErr, settlementErr)
 	if commitErr != nil && settledClaim == nil {

@@ -9,7 +9,10 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 )
@@ -24,12 +27,29 @@ func (e *Executor) ExecuteSemanticFixture(ctx context.Context, req ExecutionRequ
 	if err != nil {
 		return ExecutionResult{}, err
 	}
+	hasFanOut := len(runtimecontracts.HandlerFanOutSites(req.Handler)) > 0
 	if strings.TrimSpace(req.ExecutionFlowID.String()) == "" {
 		flowID := strings.TrimSpace(req.Node.FlowID())
 		if flowID == "" && e != nil && e.deps.Source != nil {
 			flowID = strings.TrimSpace(e.deps.Source.WorkflowName())
 		}
+		if flowID == "" && hasFanOut {
+			flowID = "root"
+		}
 		req.ExecutionFlowID = identity.NormalizeFlowID(flowID)
+	}
+	if strings.TrimSpace(req.HandlerEventKey) == "" {
+		req.HandlerEventKey = string(req.Event.Type())
+	}
+	if hasFanOut {
+		bundle, ok := semanticview.Bundle(e.deps.Source)
+		if !ok || bundle == nil {
+			return ExecutionResult{}, fmt.Errorf("complete fan-out fixture: contract bundle is required")
+		}
+		if err := bundle.CompileFanOutHandlerPlans(req.Node, req.HandlerEventKey, req.Handler); err != nil {
+			return ExecutionResult{}, fmt.Errorf("%w: complete fan-out fixture plan: %v", ErrInvalidConfig, err)
+		}
+		req.FanOutPlans = bundle.FanOutPlansForHandler(req.Node, req.HandlerEventKey)
 	}
 	if req.Event.AdmissionClass() == events.EventAdmissionRootIngress && strings.TrimSpace(req.Event.RunID()) == "" {
 		if req.Event.ProducerType() == "" {
@@ -70,10 +90,51 @@ func (e *Executor) ExecuteSemanticFixture(ctx context.Context, req ExecutionRequ
 			req.ProducerSource = source
 		}
 	}
+	if hasFanOut && !req.Route.Valid() {
+		scope := strings.Trim(strings.TrimSpace(req.ExecutionFlowID.String()), "/")
+		if scope == "" {
+			scope = "root"
+		}
+		req.Route = runtimeflowidentity.DeriveRoute(scope, req.Event.RunID())
+	}
+	if hasFanOut {
+		if _, claimed := runtimedelivery.ClaimFromContext(ctx); !claimed {
+			deliveryID := uuid.NewSHA1(uuid.NameSpaceOID, []byte("engine-fan-out-delivery\x00"+req.Event.ID()+"\x00"+req.Node.Key())).String()
+			token := uuid.NewSHA1(uuid.NameSpaceOID, []byte("engine-fan-out-claim\x00"+deliveryID)).String()
+			claim, claimErr := runtimedelivery.AdmitPersistedClaim(
+				deliveryID,
+				req.Event.RunID(),
+				"engine-semantic-fixture:"+req.Node.Key(),
+				token,
+				1,
+				runtimedelivery.SubscriberNode,
+				req.Node.Key(),
+			)
+			if claimErr != nil {
+				return ExecutionResult{}, claimErr
+			}
+			ctx = runtimedelivery.WithClaim(ctx, claim)
+		}
+	}
 	return e.Execute(ctx, req)
 }
 
 func completeSemanticFixtureHandlerRuleIdentity(node identity.ExecutableNode, handler runtimecontracts.SystemNodeEventHandler) (runtimecontracts.SystemNodeEventHandler, error) {
+	admitFanOut := func(context string, index int, fanOut *runtimecontracts.FanOutSpec) (*runtimecontracts.FanOutSpec, error) {
+		if fanOut == nil {
+			return nil, nil
+		}
+		admitted := *fanOut
+		if !admitted.ElementID.Valid() {
+			value := uuid.NewSHA1(uuid.NameSpaceOID, []byte(node.Key()+"\x00fan_out\x00"+context+"\x00"+fmt.Sprint(index))).String()
+			var err error
+			admitted.ElementID, err = contractelementidentity.ParseContractElementID(value)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return &admitted, nil
+	}
 	admit := func(context string, index int, rule runtimecontracts.HandlerRuleEntry) (runtimecontracts.HandlerRuleEntry, error) {
 		if !rule.ElementID.Valid() {
 			value := uuid.NewSHA1(uuid.NameSpaceOID, []byte(node.Key()+"\x00"+context+"\x00"+fmt.Sprint(index))).String()
@@ -97,7 +158,11 @@ func completeSemanticFixtureHandlerRuleIdentity(node identity.ExecutableNode, ha
 		admitted.Activity = rule.Activity
 		admitted.DataAccumulation = rule.DataAccumulation
 		admitted.Compute = rule.Compute
-		admitted.FanOut = rule.FanOut
+		admittedFanOut, fanOutErr := admitFanOut(context, index, rule.FanOut)
+		if fanOutErr != nil {
+			return runtimecontracts.HandlerRuleEntry{}, fanOutErr
+		}
+		admitted.FanOut = admittedFanOut
 		return admitted, nil
 	}
 	admitMany := func(context string, rules []runtimecontracts.HandlerRuleEntry) ([]runtimecontracts.HandlerRuleEntry, error) {
@@ -113,6 +178,10 @@ func completeSemanticFixtureHandlerRuleIdentity(node identity.ExecutableNode, ha
 	}
 	var err error
 	handler.Rules, err = admitMany("rules", handler.Rules)
+	if err != nil {
+		return runtimecontracts.SystemNodeEventHandler{}, err
+	}
+	handler.FanOut, err = admitFanOut("handler", 0, handler.FanOut)
 	if err != nil {
 		return runtimecontracts.SystemNodeEventHandler{}, err
 	}

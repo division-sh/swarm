@@ -13,6 +13,9 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/store/eventfixture"
@@ -49,7 +52,7 @@ type runForkRevisionMatrixFact struct {
 	Present bool
 }
 
-func TestRunForkRevisionTwelveFamilySelectedStoreParity(t *testing.T) {
+func TestRunForkRevisionThirteenFamilySelectedStoreParity(t *testing.T) {
 	fixture := runForkRevisionMatrixFixture{
 		runID:        "00000000-0000-0000-0000-000000002272",
 		eventID:      "00000000-0000-0000-0000-000000002273",
@@ -74,11 +77,11 @@ func TestRunForkRevisionTwelveFamilySelectedStoreParity(t *testing.T) {
 	t.Run("sqlite", func(t *testing.T) {
 		store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 		db := store.backend.ConstructionHandle()
-		results["sqlite"] = proveRunForkRevisionTwelveFamilyMatrix(t, db, false, fixture)
+		results["sqlite"] = proveRunForkRevisionThirteenFamilyMatrix(t, db, false, fixture)
 	})
 	t.Run("postgres", func(t *testing.T) {
 		_, db, _ := testutil.StartPostgres(t)
-		results["postgres"] = proveRunForkRevisionTwelveFamilyMatrix(t, db, true, fixture)
+		results["postgres"] = proveRunForkRevisionThirteenFamilyMatrix(t, db, true, fixture)
 	})
 	if !reflect.DeepEqual(results["sqlite"], results["postgres"]) {
 		t.Fatalf("selected-store canonical revision facts differ:\nsqlite=%#v\npostgres=%#v", results["sqlite"], results["postgres"])
@@ -408,7 +411,7 @@ func newRunForkRevisionMatrixFixture() runForkRevisionMatrixFixture {
 	}
 }
 
-func proveRunForkRevisionTwelveFamilyMatrix(t *testing.T, db *sql.DB, postgres bool, fixture runForkRevisionMatrixFixture) []runForkRevisionMatrixFact {
+func proveRunForkRevisionThirteenFamilyMatrix(t *testing.T, db *sql.DB, postgres bool, fixture runForkRevisionMatrixFixture) []runForkRevisionMatrixFact {
 	t.Helper()
 	ctx := testAuthorActivityContext()
 	var selected any = NewSQLiteRuntimeStoreForTest(db)
@@ -423,26 +426,26 @@ func proveRunForkRevisionTwelveFamilyMatrix(t *testing.T, db *sql.DB, postgres b
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		t.Fatalf("begin twelve-family transaction: %v", err)
+		t.Fatalf("begin thirteen-family transaction: %v", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	seedRunForkRevisionMatrixFacts(t, ctx, tx, fixture, true, postgres)
 	effects, err := runforkrevision.ForRun(fixture.runID, runforkrevision.AllFamilies()...)
 	if err != nil {
-		t.Fatalf("declare twelve-family effects: %v", err)
+		t.Fatalf("declare thirteen-family effects: %v", err)
 	}
 	result, err := finalizeRunForkRevisionMatrix(ctx, tx, postgres, effects)
 	if err != nil {
-		t.Fatalf("finalize twelve-family revision: %v", err)
+		t.Fatalf("finalize thirteen-family revision: %v", err)
 	}
 	if got := result[fixture.runID]; !got.Changed || got.Revision != 1 {
-		t.Fatalf("initial twelve-family result = %#v, want changed revision 1", got)
+		t.Fatalf("initial thirteen-family result = %#v, want changed revision 1", got)
 	}
 	if err := validateRunForkRevisionMatrix(ctx, tx, postgres, fixture.runID); err != nil {
-		t.Fatalf("validate initial twelve-family revision: %v", err)
+		t.Fatalf("validate initial thirteen-family revision: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit twelve-family revision: %v", err)
+		t.Fatalf("commit thirteen-family revision: %v", err)
 	}
 
 	noChangeTx, err := db.BeginTx(ctx, nil)
@@ -467,22 +470,22 @@ func proveRunForkRevisionTwelveFamilyMatrix(t *testing.T, db *sql.DB, postgres b
 
 	deleteTx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		t.Fatalf("begin twelve-family deletion: %v", err)
+		t.Fatalf("begin thirteen-family deletion: %v", err)
 	}
 	defer func() { _ = deleteTx.Rollback() }()
 	deleteRunForkRevisionMatrixFacts(t, ctx, deleteTx, fixture)
 	deleted, err := finalizeRunForkRevisionMatrix(ctx, deleteTx, postgres, effects)
 	if err != nil {
-		t.Fatalf("finalize twelve-family deletion: %v", err)
+		t.Fatalf("finalize thirteen-family deletion: %v", err)
 	}
 	if got := deleted[fixture.runID]; !got.Changed || got.Revision != 2 {
-		t.Fatalf("twelve-family deletion result = %#v, want changed revision 2", got)
+		t.Fatalf("thirteen-family deletion result = %#v, want changed revision 2", got)
 	}
 	if err := validateRunForkRevisionMatrix(ctx, deleteTx, postgres, fixture.runID); err != nil {
-		t.Fatalf("validate twelve-family deletion: %v", err)
+		t.Fatalf("validate thirteen-family deletion: %v", err)
 	}
 	if err := deleteTx.Commit(); err != nil {
-		t.Fatalf("commit twelve-family deletion: %v", err)
+		t.Fatalf("commit thirteen-family deletion: %v", err)
 	}
 	assertRunForkRevisionMatrixShape(t, loadRunForkRevisionMatrixFacts(t, ctx, db, fixture.runID, 2), false)
 
@@ -625,7 +628,27 @@ func seedRunForkRevisionMatrixFacts(t *testing.T, ctx context.Context, tx *sql.T
 			t.Fatalf("encode revision matrix delivery target: %v", err)
 		}
 		seedRunForkRevisionMatrixEvent(t, ctx, tx, f.runID, f.eventID, f.at, postgres)
+		producer, err := events.NewRootRoutingSource(f.entityID)
+		if err != nil {
+			t.Fatalf("construct revision matrix fan-out producer: %v", err)
+		}
+		capsuleJSON, err := json.Marshal(fanoutobligation.Capsule{
+			NodeKey:         "root.matrix-node",
+			ExecutionFlowID: "root",
+			Route:           runtimeflowidentity.StoredRoute("root", "root", "root"),
+			HandlerEventKey: "matrix.event",
+			ProducerSource:  producer,
+			Lineage: events.EventLineage{
+				RunID:         f.runID,
+				ParentEventID: f.eventID,
+				ExecutionMode: executionmode.Live,
+			},
+		})
+		if err != nil {
+			t.Fatalf("encode revision matrix fan-out capsule: %v", err)
+		}
 		mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO event_deliveries (delivery_id,run_id,event_id,route_identity,subscriber_type,subscriber_id,agent_name_owner,agent_name_source,agent_route_presence,agent_flow_scope_key,agent_flow_instance_id,agent_flow_instance_path,delivery_target_route,delivery_context,delivery_payload_projection,connect_execution_claim,execution_authority_kind,authority_bundle_hash,authority_bundle_source,execution_authority_id,execution_authority_generation,status,retry_count,max_retries,next_eligible_at,claim_version,created_at,updated_at) VALUES ($1,$2,$3,$4,'node',$5,'','','','','','',$6,$7,$7,$7,'normal_runtime',$8,'persisted','revision-matrix',1,'pending',0,3,$9,0,$9,$9)`, f.deliveryID, f.runID, f.eventID, events.EncodeDeliveryRouteIdentity(routeIdentity), route.Recipient.ID(), string(targetJSON), `{}`, "bundle-v1:sha256:"+strings.Repeat("1", 64), f.at)
+		mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO fan_out_intents (run_id,triggering_delivery_id,package_key,element_id,bundle_hash,semantic_digest,source_kind,source_event_id,source_field,cardinality,cursor,status,next_chunk_size,capsule,created_at,updated_at) VALUES ($1,$2,'root','00000000-0000-0000-0000-000000002291',$3,'sha256:revision-matrix','event_payload_field',$4,'items',1,0,'open',4,$5,$6,$6)`, f.runID, f.deliveryID, "bundle-v1:sha256:"+strings.Repeat("1", 64), f.eventID, string(capsuleJSON), f.at)
 	}
 	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO entity_state (run_id,entity_id,flow_instance,entity_type,slug,name,current_state,created_at,updated_at) VALUES ($1,$2,'matrix-flow','matrix-type','matrix-slug','Matrix Entity','ready',$3,$3)`, f.runID, f.entityID, f.at)
 	mustExecRunForkRevisionMatrix(t, ctx, tx, `INSERT INTO entity_mutations (mutation_id,run_id,entity_id,domain,path,new_value,caused_by_event,writer_type,writer_id,created_at) VALUES ($1,$2,$3,'authored_field','name',$4,$5,'platform','revision-matrix',$6)`, f.mutationID, f.runID, f.entityID, `"Matrix Entity"`, f.eventID, f.at)
@@ -657,7 +680,7 @@ func seedRunForkRevisionMatrixEvent(t *testing.T, ctx context.Context, tx *sql.T
 		events.EventType("matrix.event"),
 		"revision-matrix",
 		"",
-		json.RawMessage(`{"matrix":true}`),
+		json.RawMessage(`{"matrix":true,"items":["matrix"]}`),
 		0,
 		runID,
 		events.EventEnvelope{Scope: events.EventScopeGlobal},
@@ -674,6 +697,8 @@ func deleteRunForkRevisionMatrixFacts(t *testing.T, ctx context.Context, tx *sql
 		query string
 		arg   string
 	}{
+		{`DELETE FROM fan_out_outcomes WHERE run_id=$1`, f.runID},
+		{`DELETE FROM fan_out_intents WHERE run_id=$1`, f.runID},
 		{`DELETE FROM reply_contexts WHERE run_id=$1`, f.runID},
 		{`DELETE FROM dead_letters WHERE original_event_id=$1`, f.eventID},
 		{`DELETE FROM event_receipts WHERE event_id=$1`, f.eventID},

@@ -18,6 +18,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/computemodule"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
@@ -27,6 +28,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
@@ -47,7 +49,8 @@ func mustCompileEngineSource(bundle *runtimecontracts.WorkflowContractBundle) se
 	return semanticview.Wrap(bundle)
 }
 
-func fanOutPayloadSource(eventTypes ...string) semanticview.Source {
+func fanOutPayloadSource(t testing.TB, eventTypes ...string) semanticview.Source {
+	t.Helper()
 	events := make(map[string]runtimecontracts.EventCatalogEntry, len(eventTypes))
 	for _, eventType := range eventTypes {
 		events[eventType] = runtimecontracts.EventCatalogEntry{
@@ -56,7 +59,46 @@ func fanOutPayloadSource(eventTypes ...string) semanticview.Source {
 			}},
 		}
 	}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Events: events})
+	return fanOutSourceWithBundleIdentity(t, &runtimecontracts.WorkflowContractBundle{Events: events})
+}
+
+func fanOutEntitySource(t testing.TB) semanticview.Source {
+	t.Helper()
+	return fanOutSourceWithBundleIdentity(t, &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{Name: "root", Version: "v-test"},
+		RootEntities: runtimecontracts.EntityContractsDocument{
+			"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{
+				"items": {Type: "[text]"},
+			}},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"task.completed": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
+				"replacement": {Type: "[text]"},
+			}}},
+			"item.requested": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
+				"item": {Type: "text"},
+			}}},
+		},
+	})
+}
+
+func fanOutSourceWithBundleIdentity(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle) semanticview.Source {
+	t.Helper()
+	root := t.TempDir()
+	packageFile := filepath.Join(root, "package.yaml")
+	platformFile := filepath.Join(root, "platform-spec.yaml")
+	if err := os.WriteFile(packageFile, []byte("name: engine-fan-out-test\nversion: 1.0.0\nflows: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(platformFile, []byte("version: 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bundle.Paths = runtimecontracts.ContractPaths{
+		ContractsRoot:      root,
+		ProjectPackageFile: packageFile,
+		PlatformSpecFile:   platformFile,
+	}
+	return semanticview.Wrap(bundle)
 }
 
 func sourceWithStructuredRendererModule(t *testing.T) (semanticview.Source, runtimecontracts.PolicyModule) {
@@ -1254,8 +1296,10 @@ func TestExecutor_ShapeEmitPayloadUsesUpdatedState(t *testing.T) {
 	}
 }
 
-func accumulatorProjectionTestSource() semanticview.Source {
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+func accumulatorProjectionTestSource(t testing.TB) semanticview.Source {
+	t.Helper()
+	return fanOutSourceWithBundleIdentity(t, &runtimecontracts.WorkflowContractBundle{
+		Semantics: runtimecontracts.WorkflowSemanticView{Name: "root", Version: "v-test"},
 		RootTypes: runtimecontracts.TypeCatalogDocument{
 			Types: map[string]runtimecontracts.NamedTypeDecl{
 				"DimensionScore": {
@@ -1343,7 +1387,7 @@ func accumulatorProjectionTestSource() semanticview.Source {
 }
 
 func TestExecutor_AccumulatorProjectionMaterializesTypedEntityFieldBeforeEmit(t *testing.T) {
-	source := accumulatorProjectionTestSource()
+	source := accumulatorProjectionTestSource(t)
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        source,
 		StateRepo:     stubStateRepo{},
@@ -1691,7 +1735,7 @@ func TestExecutor_AccumulatorProjectionMaterializesBeforeTopLevelFanOutEmitField
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		Node:     testRootExecutableNode(t, "scoring-node"),
-		Event: eventtest.RunCreatingRootIngress("evt-1",
+		Event: eventtest.RunCreatingRootIngress(eventtest.UUID("fan-out-accumulator"),
 			"score.dimension_complete", "", "", json.RawMessage(`{"vertical_id":"11111111-1111-1111-1111-111111111111","dimension":"market","tier":2,"score":87,"evidence":"strong","confidence":"high","targets":["agent-a"]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: handler,
 		State:   testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
@@ -1706,29 +1750,87 @@ func TestExecutor_AccumulatorProjectionMaterializesBeforeTopLevelFanOutEmitField
 	if got := result.StateMutation.Fields["handler_marker"]; got != "top-level" {
 		t.Fatalf("handler_marker state mutation = %#v, want top-level", got)
 	}
-	if len(result.EmitIntents) != 1 {
-		t.Fatalf("EmitIntents count = %d, want 1", len(result.EmitIntents))
+	if len(result.EmitIntents) != 0 {
+		t.Fatalf("trigger transaction created eager fan-out emits: %#v", result.EmitIntents)
 	}
-	var emitted map[string]any
-	if err := json.Unmarshal(result.EmitIntents[0].Event.Payload(), &emitted); err != nil {
-		t.Fatalf("emit payload json: %v", err)
+	if result.FanOutIntent == nil || result.FanOutIntent.Cardinality != 1 {
+		t.Fatalf("durable fan-out intent = %#v, want cardinality 1", result.FanOutIntent)
 	}
-	emittedScores, ok := emitted["scores"].([]any)
-	if !ok || len(emittedScores) != 1 {
-		t.Fatalf("fan_out emit payload scores = %#v", emitted["scores"])
+	if got := result.FanOutIntent.Capsule.StateFields["handler_marker"]; got != "top-level" {
+		t.Fatalf("fan-out capsule handler_marker = %#v, want top-level", got)
 	}
-	if got := emitted["handler_marker"]; got != "top-level" {
-		t.Fatalf("fan_out emit handler_marker = %#v, want top-level", got)
+	if scores, ok := result.FanOutIntent.Capsule.Entity["scores"].([]any); !ok || len(scores) != 1 {
+		t.Fatalf("fan-out capsule projected scores = %#v, want one score", result.FanOutIntent.Capsule.Entity["scores"])
 	}
-	if got := emitted["target"]; got != "agent-a" {
-		t.Fatalf("fan_out emit target = %#v, want agent-a", got)
+}
+
+func TestExecutor_AccumulatorProjectionBindsEntityFanOutSourceAfterProjection(t *testing.T) {
+	exec := newAccumulatorProjectionTestExecutor(t, nil)
+	handler := runtimecontracts.SystemNodeEventHandler{
+		Accumulate: &runtimecontracts.AccumulateSpec{
+			Into:      "dimensions_received",
+			DedupBy:   "payload.dimension",
+			DedupPath: runtimecontracts.RefExpression("payload.dimension").RefPath,
+		},
+		FanOut: &runtimecontracts.FanOutSpec{
+			ItemsFrom: "entity.scores",
+			As:        "score_item",
+			Identity:  "score_item.dimension",
+			Emit: runtimecontracts.EmitSpec{
+				Event: "vertical.scored",
+				Fields: map[string]runtimecontracts.ExpressionValue{
+					"dimension": runtimecontracts.CELExpression("score_item.dimension"),
+				},
+			},
+		},
+	}
+	node := testRootExecutableNode(t, "scoring-node")
+	qualified, err := completeSemanticFixtureHandlerRuleIdentity(node, handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle, ok := semanticview.Bundle(exec.deps.Source)
+	if !ok || bundle == nil {
+		t.Fatal("fan-out source has no contract bundle")
+	}
+	if err := bundle.CompileFanOutHandlerPlans(node, "score.dimension_complete", qualified); err != nil {
+		t.Fatal(err)
+	}
+	plans := bundle.FanOutPlansForHandler(node, "score.dimension_complete")
+	if len(plans) != 1 {
+		t.Fatalf("compiled fan-out plans = %d, want 1", len(plans))
+	}
+	plan := plans[0]
+	if !plan.SourceAfterWrites {
+		t.Fatal("compiled fan-out plan did not classify accumulator projection as a source mutation")
+	}
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+		EntityID: identity.NormalizeEntityID("00000000-0000-4000-8000-000000002276"),
+		Node:     node,
+		Event: eventtest.RunCreatingRootIngress(eventtest.UUID("fan-out-projected-source"),
+			"score.dimension_complete", "", "", json.RawMessage(`{"vertical_id":"11111111-1111-1111-1111-111111111111","dimension":"market","tier":2,"score":87,"evidence":"strong","confidence":"high"}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: handler,
+		State:   testStateSnapshot("pending", map[string]any{"scores": []any{}}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	requireProjectedScore(t, result, "scores")
+	if result.FanOutIntent == nil || result.FanOutIntent.Cardinality != 1 {
+		t.Fatalf("projected fan-out intent = %#v, want cardinality 1", result.FanOutIntent)
+	}
+	if result.FanOutIntent.Source.Kind != "entity_field_revision" || result.FanOutIntent.Source.Field != "scores" {
+		t.Fatalf("projected fan-out source = %#v", result.FanOutIntent.Source)
+	}
+	if _, copied := result.FanOutIntent.Capsule.Entity["scores"]; copied {
+		t.Fatalf("projected source was redundantly copied into capsule: %#v", result.FanOutIntent.Capsule.Entity)
 	}
 }
 
 func newAccumulatorProjectionTestExecutor(t *testing.T, evaluator Evaluator) *Executor {
 	t.Helper()
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        accumulatorProjectionTestSource(),
+		Source:        accumulatorProjectionTestSource(t),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -4324,7 +4426,7 @@ func TestExecutor_ChainDepthOverflowInterceptsEmitsButSucceeds(t *testing.T) {
 
 func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        fanOutPayloadSource("task.completed"),
+		Source:        fanOutPayloadSource(t, "task.completed"),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -4339,7 +4441,7 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 		EntityID:   "entity-1",
 		Node:       testFlowExecutableNode(t, "flow-1", "node-1"),
 		ChainDepth: 1,
-		Event:      eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"items":["a","b"]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:      eventtest.RunCreatingRootIngress(eventtest.UUID("fan-out-shaped"), "task.completed", "", "", json.RawMessage(`{"items":["a","b"]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
 				ItemsFrom: "payload.items",
@@ -4361,30 +4463,192 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 	if result.NextState != "processing" {
 		t.Fatalf("NextState = %q", result.NextState)
 	}
-	if result.FanOutCount != 2 || len(result.EmitIntents) != 2 {
-		t.Fatalf("fan_out results wrong: count=%d intents=%d", result.FanOutCount, len(result.EmitIntents))
+	if result.FanOutCount != 2 || result.FanOutIntent == nil || result.FanOutIntent.Cardinality != 2 {
+		t.Fatalf("fan_out results wrong: count=%d intent=%#v", result.FanOutCount, result.FanOutIntent)
 	}
-	if got := result.StateMutation.Bookkeeping["fan_out_count"]; got != 2 {
-		t.Fatalf("fan_out_count metadata = %#v", got)
+	if len(result.EmitIntents) != 0 {
+		t.Fatalf("trigger transaction created eager fan-out emits: %#v", result.EmitIntents)
 	}
-	if result.ChainDepth != 2 {
-		t.Fatalf("ChainDepth = %d", result.ChainDepth)
+	if _, found := result.StateMutation.Bookkeeping["fan_out_count"]; found {
+		t.Fatalf("retired fan_out_count metadata survived: %#v", result.StateMutation.Bookkeeping)
+	}
+	if result.FanOutIntent.Capsule.ChainDepth != 1 {
+		t.Fatalf("capsule chain depth = %d, want trigger depth 1", result.FanOutIntent.Capsule.ChainDepth)
 	}
 	if got := result.ActionsExecuted; len(got) != 4 {
-		t.Fatalf("ActionsExecuted = %#v", got)
+		t.Fatalf("fan-out transition actions = %#v, want four lifecycle actions and no authored action", got)
+	} else {
+		for _, action := range got {
+			if action == "should_not_run" {
+				t.Fatalf("post-fan-out authored action executed: %#v", got)
+			}
+		}
 	}
-	var payload map[string]any
-	if err := json.Unmarshal(result.EmitIntents[0].Event.Payload(), &payload); err != nil {
-		t.Fatalf("unmarshal payload: %v", err)
+}
+
+func TestExecutor_DeferredFanOutRejectsUndeclaredBusinessPayload(t *testing.T) {
+	node := testRootExecutableNode(t, "fan-out-node")
+	elementID, err := contractelementidentity.ParseContractElementID("418dadf9-0ebd-418d-a904-53d3a849b7df")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if payload["shaped_for"] != "item.process" {
-		t.Fatalf("shaped payload missing marker: %#v", payload)
+	handler := runtimecontracts.SystemNodeEventHandler{FanOut: &runtimecontracts.FanOutSpec{
+		ElementID: elementID,
+		ItemsFrom: "payload.items", As: "fan_item", Identity: "fan_item.label",
+		Emit: runtimecontracts.EmitSpec{Event: "item.emitted", Fields: map[string]runtimecontracts.ExpressionValue{
+			"label": runtimecontracts.CELExpression("fan_item.label"),
+			"extra": runtimecontracts.CELExpression(`"not-declared"`),
+		}},
+	}}
+	qualified, err := runtimecontracts.QualifySystemNodeHandlerRuleRefs(node, handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"fan-out-node": {ID: "fan-out-node", EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"batch.ready": qualified}},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{Name: "root", Version: "v-test", NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
+			"fan-out-node": {"batch.ready": qualified},
+		}},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"batch.ready": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"items": {Type: "[json]"}}}},
+		},
+	}
+	shaper := &recordingPayloadShaper{err: errors.Join(ErrEmitPayloadContractViolation, errors.New("undeclared fan-out field"))}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source: fanOutSourceWithBundleIdentity(t, bundle), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{},
+		Locker: stubLocker{}, Dispatcher: stubDispatcher{}, PayloadShaper: shaper,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger := eventtest.RunCreatingRootIngress(
+		eventtest.UUID("deferred-fan-out-payload"), "batch.ready", "", "", json.RawMessage(`{"items":[{"label":"x"}]}`), 0,
+		semanticExecutionFixtureRunID, "", events.EventEnvelope{}, time.Now().UTC(),
+	)
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+		EntityID: "entity-1", Node: node, Event: trigger, Handler: qualified,
+		State: testStateSnapshot("pending", map[string]any{}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FanOutIntent == nil || result.FanOutIntent.Cardinality != 1 {
+		t.Fatalf("durable fan-out intent = %#v, want one item", result.FanOutIntent)
+	}
+	now := time.Now().UTC()
+	intent := fanoutobligation.Intent{
+		Request: *result.FanOutIntent, Source: result.FanOutIntent.Source,
+		Status: fanoutobligation.StatusOpen, NextChunkSize: fanoutobligation.InitialChunkSize,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	_, err = exec.EvaluateFanOutOrdinal(context.Background(), intent, trigger, map[string]any{"label": "x"}, 0)
+	if !errors.Is(err, ErrEmitPayloadContractViolation) {
+		t.Fatalf("deferred fan-out payload error = %v, want %v", err, ErrEmitPayloadContractViolation)
+	}
+}
+
+func TestExecutor_FanOutCountPreservesRuleThenTopLevelWriteSnapshots(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:        fanOutEntitySource(t),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
+	}, stubEvaluator{bools: map[string]bool{"payload.enabled": true}})
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+		EntityID: identity.NormalizeEntityID("00000000-0000-4000-8000-000000002274"),
+		Node:     testRootExecutableNode(t, "dispatcher"),
+		Event:    eventtest.RunCreatingRootIngress(eventtest.UUID("fan-out-count-order"), "task.completed", "", "", json.RawMessage(`{"enabled":true}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
+				{TargetRef: "metadata.top_count", Value: runtimecontracts.CELExpression("fan_out.count")},
+				{TargetRef: "metadata.top_saw_rule", Value: runtimecontracts.CELExpression("entity.rule_count")},
+			}},
+			Rules: []runtimecontracts.HandlerRuleEntry{{
+				Condition: "payload.enabled",
+				DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{
+					{TargetRef: "metadata.rule_count", Value: runtimecontracts.CELExpression("fan_out.count")},
+				}},
+				FanOut: &runtimecontracts.FanOutSpec{
+					ItemsFrom: "entity.items", As: "fan_item", Identity: "fan_item",
+					Emit: runtimecontracts.EmitSpec{Event: "item.requested", Fields: map[string]runtimecontracts.ExpressionValue{
+						"item": runtimecontracts.CELExpression("fan_item"),
+					}},
+				},
+			}},
+		},
+		State: testStateSnapshot("pending", map[string]any{"items": []any{"a", "b", "c"}}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if result.FanOutIntent == nil || result.FanOutIntent.Cardinality != 3 {
+		t.Fatalf("fan-out intent = %#v, want cardinality 3", result.FanOutIntent)
+	}
+	if got := result.StateMutation.Fields["rule_count"]; got != int64(3) && got != 3 {
+		t.Fatalf("rule_count = %#v, want 3", got)
+	}
+	if got := result.StateMutation.Fields["top_count"]; got != int64(3) && got != 3 {
+		t.Fatalf("top_count = %#v, want 3", got)
+	}
+	if got := result.StateMutation.Fields["top_saw_rule"]; got != int64(3) && got != 3 {
+		t.Fatalf("top_saw_rule = %#v, want rule-layer value 3", got)
+	}
+}
+
+func TestExecutor_FanOutEntitySourceBindsAfterSameHandlerMutation(t *testing.T) {
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source:        fanOutEntitySource(t),
+		StateRepo:     stubStateRepo{},
+		MutationOwner: stubMutationOwner{},
+		Locker:        stubLocker{},
+		Dispatcher:    stubDispatcher{},
+	}, nil)
+	if err != nil {
+		t.Fatalf("NewExecutor error: %v", err)
+	}
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+		EntityID: identity.NormalizeEntityID("00000000-0000-4000-8000-000000002275"),
+		Node:     testRootExecutableNode(t, "dispatcher"),
+		Event:    eventtest.RunCreatingRootIngress(eventtest.UUID("fan-out-post-write-source"), "task.completed", "", "", json.RawMessage(`{"replacement":["new-a","new-b","new-c"]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Handler: runtimecontracts.SystemNodeEventHandler{
+			DataAccumulation: runtimecontracts.WorkflowDataAccumulation{Writes: []runtimecontracts.WorkflowDataWrite{{
+				TargetRef: "entity.items", Value: runtimecontracts.CELExpression("payload.replacement"),
+			}}},
+			FanOut: &runtimecontracts.FanOutSpec{
+				ItemsFrom: "entity.items", As: "fan_item", Identity: "fan_item",
+				Emit: runtimecontracts.EmitSpec{Event: "item.requested", Fields: map[string]runtimecontracts.ExpressionValue{
+					"item": runtimecontracts.CELExpression("fan_item"),
+				}},
+			},
+		},
+		State: testStateSnapshot("pending", map[string]any{"items": []any{"old"}}, nil, map[string]map[string]any{}),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if result.FanOutIntent == nil || result.FanOutIntent.Cardinality != 3 || result.FanOutCount != 3 {
+		t.Fatalf("post-write fan-out = count:%d intent:%#v, want cardinality 3", result.FanOutCount, result.FanOutIntent)
+	}
+	if got := result.StateMutation.Fields["items"]; !reflect.DeepEqual(got, []any{"new-a", "new-b", "new-c"}) {
+		t.Fatalf("persisted source = %#v", got)
+	}
+	if result.FanOutIntent.Source.Kind != "entity_field_revision" || result.FanOutIntent.Source.Field != "items" {
+		t.Fatalf("fan-out source = %#v", result.FanOutIntent.Source)
+	}
+	if _, copied := result.FanOutIntent.Capsule.Entity["items"]; copied {
+		t.Fatalf("entity source was redundantly copied into capsule: %#v", result.FanOutIntent.Capsule.Entity)
 	}
 }
 
 func TestExecutor_FanOutBoundExceededFailsClosedBeforeEmit(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        fanOutPayloadSource("task.completed"),
+		Source:        fanOutPayloadSource(t, "task.completed"),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -4399,7 +4663,7 @@ func TestExecutor_FanOutBoundExceededFailsClosedBeforeEmit(t *testing.T) {
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
-		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"items":["a","b"]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress(eventtest.UUID("fan-out-bound"), "task.completed", "", "", json.RawMessage(`{"items":["a","b"]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
 				ItemsFrom: "payload.items",
@@ -4436,7 +4700,7 @@ func TestExecutor_FanOutBoundExceededFailsClosedBeforeEmit(t *testing.T) {
 	if fmt.Sprint(attributes["actual"]) != "2" || fmt.Sprint(attributes["authored_limit"]) != "1" || fmt.Sprint(attributes["effective_limit"]) != "1" {
 		t.Fatalf("bound failure attributes = %#v, want actual/authored/effective 2/1/1", attributes)
 	}
-	if got := fmt.Sprint(attributes["remediation"]); got != "raise max_items or split the batch" {
+	if got := fmt.Sprint(attributes["remediation"]); got != "keep source cardinality within the effective max_items bound" {
 		t.Fatalf("bound failure remediation attribute = %q", got)
 	}
 	if got := FailureDispositionFor(err); got != FailureDispositionTerminal {
@@ -4492,7 +4756,6 @@ func TestExecutor_FanOutRuleContextsPreserveOrderMultiplicityAndBounds(t *testin
 	payloadItems := json.RawMessage(`{"items":[{"id":"item-b"},{"id":"item-a"},{"id":"item-b"}]}`)
 	wantItemOrder := []string{"item-b", "item-a", "item-b"}
 	fixedEmitNow := time.Date(2026, time.July, 12, 12, 0, 0, 1, time.UTC)
-	wantFirstEmitAt := fixedEmitNow.Truncate(persistedEmitTimeResolution)
 	state := func() StateSnapshot {
 		return testStateSnapshot("ready", map[string]any{}, nil, map[string]map[string]any{})
 	}
@@ -4501,7 +4764,7 @@ func TestExecutor_FanOutRuleContextsPreserveOrderMultiplicityAndBounds(t *testin
 		t.Run(tc.name, func(t *testing.T) {
 			transition := &recordingTransitionValidator{}
 			exec, err := NewExecutor(RuntimeDependencies{
-				Source:              fanOutPayloadSource("batch.ready"),
+				Source:              fanOutPayloadSource(t, "batch.ready"),
 				StateRepo:           stubStateRepo{},
 				MutationOwner:       stubMutationOwner{},
 				Locker:              stubLocker{},
@@ -4527,7 +4790,7 @@ func TestExecutor_FanOutRuleContextsPreserveOrderMultiplicityAndBounds(t *testin
 			result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				EntityID:        "entity-1",
 				Node:            testFlowExecutableNode(t, "flow-1", "node-1"),
-				Event:           eventtest.RunCreatingRootIngress("evt-1", tc.eventType, "", "", payload, 0, "", "", events.EventEnvelope{}, time.Time{}),
+				Event:           eventtest.RunCreatingRootIngress(eventtest.UUID("fan-out-"+tc.name), tc.eventType, "", "", payload, 0, "", "", events.EventEnvelope{}, time.Time{}),
 				HandlerEventKey: tc.handlerEventKey,
 				Handler:         tc.handler(newSpec(0)),
 				State:           state(),
@@ -4535,23 +4798,11 @@ func TestExecutor_FanOutRuleContextsPreserveOrderMultiplicityAndBounds(t *testin
 			if err != nil {
 				t.Fatalf("Execute error: %v", err)
 			}
-			if result.FanOutCount != len(wantItemOrder) || len(result.EmitIntents) != len(wantItemOrder) {
-				t.Fatalf("fan_out result count=%d intents=%d, want %d/%d", result.FanOutCount, len(result.EmitIntents), len(wantItemOrder), len(wantItemOrder))
+			if result.FanOutCount != len(wantItemOrder) || result.FanOutIntent == nil || result.FanOutIntent.Cardinality != len(wantItemOrder) {
+				t.Fatalf("fan_out result count=%d intent=%#v, want cardinality %d", result.FanOutCount, result.FanOutIntent, len(wantItemOrder))
 			}
-			for index, intent := range result.EmitIntents {
-				var emitted map[string]any
-				if err := json.Unmarshal(intent.Event.Payload(), &emitted); err != nil {
-					t.Fatalf("emit %d payload: %v", index, err)
-				}
-				if got, want := emitted["item_id"], wantItemOrder[index]; got != want {
-					t.Fatalf("emit %d item_id = %#v, want %q", index, got, want)
-				}
-				if got := emitted["item_index"]; got != float64(index) {
-					t.Fatalf("emit %d item_index = %#v, want %d", index, got, index)
-				}
-				if got, want := intent.Event.CreatedAt(), wantFirstEmitAt.Add(time.Duration(index)*persistedEmitTimeResolution); !got.Equal(want) {
-					t.Fatalf("emit %d created_at = %s, want persistence-safe %s", index, got, want)
-				}
+			if len(result.EmitIntents) != 0 {
+				t.Fatalf("trigger transaction created eager fan-out emits: %#v", result.EmitIntents)
 			}
 			if got := result.NextState; got != "dispatched" {
 				t.Fatalf("NextState = %q, want dispatched", got)
@@ -4565,7 +4816,7 @@ func TestExecutor_FanOutRuleContextsPreserveOrderMultiplicityAndBounds(t *testin
 			result, err = exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 				EntityID:        "entity-1",
 				Node:            testFlowExecutableNode(t, "flow-1", "node-1"),
-				Event:           eventtest.RunCreatingRootIngress("evt-bound", tc.eventType, "", "", payload, 0, "", "", events.EventEnvelope{}, time.Time{}),
+				Event:           eventtest.RunCreatingRootIngress(eventtest.UUID("fan-out-bound-"+tc.name), tc.eventType, "", "", payload, 0, "", "", events.EventEnvelope{}, time.Time{}),
 				HandlerEventKey: tc.handlerEventKey,
 				Handler:         tc.handler(newSpec(1)),
 				State:           state(),
@@ -4621,23 +4872,40 @@ func TestExecutor_FanOutRejectsInvalidSourceAndExplicitZeroBound(t *testing.T) {
 	}
 }
 
-func TestActiveFanOutSpecEmitSourceNamesOwningSite(t *testing.T) {
+func TestActiveFanOutPlanEmitSourceNamesOwningSite(t *testing.T) {
 	tests := []struct {
-		name   string
-		source handlerRuleSource
-		want   string
+		name string
+		kind runtimecontracts.FanOutSiteKind
+		want string
 	}{
 		{name: "handler", want: "handler.fan_out.emit"},
-		{name: "rules", source: handlerRuleSourceRules, want: "handler.rules.fan_out.emit"},
-		{name: "on_complete", source: handlerRuleSourceOnComplete, want: "handler.on_complete.fan_out.emit"},
+		{name: "rules", kind: runtimecontracts.FanOutSiteRule, want: "handler.rules.fan_out.emit"},
+		{name: "on_complete", kind: runtimecontracts.FanOutSiteOnComplete, want: "handler.on_complete.fan_out.emit"},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := (activeFanOutSpec{Source: tc.source}).EmitSource(); got != tc.want {
+			if got := (activeFanOutPlan{Plan: runtimecontracts.FanOutCompiledPlan{Site: runtimecontracts.FanOutSiteRef{Kind: tc.kind}}}).EmitSource(); got != tc.want {
 				t.Fatalf("EmitSource = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSelectedFanOutPlanIgnoresContradictoryRawHandlerSpec(t *testing.T) {
+	canonical := runtimecontracts.FanOutCompiledPlan{
+		Site:      runtimecontracts.FanOutSiteRef{Kind: runtimecontracts.FanOutSiteHandler, Index: -1},
+		ItemsFrom: "payload.canonical", Identity: "item.id", Emit: runtimecontracts.EmitSpec{Event: "canonical.requested"},
+	}
+	frame := &executionFrame{req: ExecutionRequest{
+		Handler: runtimecontracts.SystemNodeEventHandler{FanOut: &runtimecontracts.FanOutSpec{
+			ItemsFrom: "entity.hostile", Identity: "hostile", Emit: runtimecontracts.EmitSpec{Event: "hostile.requested"},
+		}},
+		FanOutPlans: []runtimecontracts.FanOutCompiledPlan{canonical},
+	}}
+	selected := selectedFanOutPlan(frame)
+	if !selected.Found || selected.Plan.ItemsFrom != canonical.ItemsFrom || selected.Plan.Emit.EventType() != "canonical.requested" {
+		t.Fatalf("selected plan = %#v, want canonical compiled owner", selected)
 	}
 }
 
@@ -5007,6 +5275,11 @@ func TestExecutor_DeclarativeEmitSurfacesUseProducerSourceRouteNamespace(t *test
 
 func TestExecutor_FanOutEmitUsesProducerSourceRouteNamespace(t *testing.T) {
 	source := sourceWithDeclarativeEmitExternalizationFlows()
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("fan-out route namespace fixture has no contract bundle")
+	}
+	source = fanOutSourceWithBundleIdentity(t, bundle)
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source:        source,
 		StateRepo:     stubStateRepo{},
@@ -5021,7 +5294,7 @@ func TestExecutor_FanOutEmitUsesProducerSourceRouteNamespace(t *testing.T) {
 		EntityID:        "component-entity",
 		Node:            testFlowExecutableNode(t, "component-scaffold", "component-node"),
 		HandlerEventKey: "repo_scaffold.repo_scaffolded",
-		Event:           eventtest.RunCreatingRootIngress("evt-1", "repo-scaffold/repo_scaffold.repo_scaffolded", "", "", json.RawMessage(`{"items":[{"id":"a"},{"id":"b"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:           eventtest.RunCreatingRootIngress(eventtest.UUID("fan-out-route-namespace"), "repo-scaffold/repo_scaffold.repo_scaffolded", "", "", json.RawMessage(`{"items":[{"id":"a"},{"id":"b"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
 				ItemsFrom: "payload.items",
@@ -5042,16 +5315,14 @@ func TestExecutor_FanOutEmitUsesProducerSourceRouteNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if got := len(result.EmitIntents); got != 2 {
-		t.Fatalf("EmitIntents count = %d, want 2", got)
+	if got := len(result.EmitIntents); got != 0 {
+		t.Fatalf("trigger transaction created %d eager fan-out emits", got)
 	}
-	for i, intent := range result.EmitIntents {
-		if got, want := string(intent.Event.Type()), "component-scaffold/component-1/component.scaffolded"; got != want {
-			t.Fatalf("emit %d type = %q, want %q", i, got, want)
-		}
-		if got := intent.Event.SourceRoute().FlowInstance; got != "component-scaffold/component-1" {
-			t.Fatalf("emit %d source flow_instance = %q, want component-scaffold/component-1", i, got)
-		}
+	if result.FanOutIntent == nil || result.FanOutIntent.Cardinality != 2 {
+		t.Fatalf("durable fan-out intent = %#v, want cardinality 2", result.FanOutIntent)
+	}
+	if got := result.FanOutIntent.Capsule.ProducerSource.Route().FlowInstance; got != "component-scaffold/component-1" {
+		t.Fatalf("pinned producer source flow_instance = %q, want component-scaffold/component-1", got)
 	}
 }
 
@@ -5825,7 +6096,7 @@ func TestExecutor_EmitFieldsCELFailureReturnsError(t *testing.T) {
 
 func TestExecutor_FanOutEmptyPersistsCountAndContinues(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        fanOutPayloadSource("task.completed"),
+		Source:        fanOutPayloadSource(t, "task.completed"),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -5837,7 +6108,7 @@ func TestExecutor_FanOutEmptyPersistsCountAndContinues(t *testing.T) {
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		Node:     testFlowExecutableNode(t, "flow-1", "node-1"),
-		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"items":[]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress(eventtest.UUID("fan-out-empty"), "task.completed", "", "", json.RawMessage(`{"items":[]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
 				ItemsFrom: "payload.items",
@@ -5858,14 +6129,30 @@ func TestExecutor_FanOutEmptyPersistsCountAndContinues(t *testing.T) {
 	if result.NextState != "scanning" {
 		t.Fatalf("NextState = %q", result.NextState)
 	}
-	if got := result.StateMutation.Bookkeeping["fan_out_count"]; got != 0 {
-		t.Fatalf("fan_out_count metadata = %#v", got)
+	if result.FanOutIntent == nil || result.FanOutIntent.Cardinality != 0 {
+		t.Fatalf("empty fan-out intent = %#v, want closed cardinality 0", result.FanOutIntent)
+	}
+	if _, found := result.StateMutation.Bookkeeping["fan_out_count"]; found {
+		t.Fatalf("retired fan_out_count metadata survived: %#v", result.StateMutation.Bookkeeping)
 	}
 }
 
-func TestExecutor_FanOutInternalCountBypassesEntityContractValidation(t *testing.T) {
+func TestExecutor_FanOutDoesNotPersistHiddenCountInEntityBookkeeping(t *testing.T) {
+	source := stubSourceWithRootEntityContract()
+	bundle, ok := semanticview.Bundle(source)
+	if !ok {
+		t.Fatal("fan-out hidden-count fixture has no contract bundle")
+	}
+	bundle.Events = map[string]runtimecontracts.EventCatalogEntry{
+		"task.completed": {
+			Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
+				"items": {Type: "[json]"},
+			}},
+		},
+	}
+	source = fanOutSourceWithBundleIdentity(t, bundle)
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        stubSourceWithRootEntityContract(),
+		Source:        source,
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -5877,7 +6164,7 @@ func TestExecutor_FanOutInternalCountBypassesEntityContractValidation(t *testing
 	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
 		EntityID: "entity-1",
 		Node:     testFlowExecutableNode(t, "root", "node-1"),
-		Event:    eventtest.RunCreatingRootIngress("evt-1", "task.completed", "", "", json.RawMessage(`{"items":[]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:    eventtest.RunCreatingRootIngress(eventtest.UUID("fan-out-no-hidden-count"), "task.completed", "", "", json.RawMessage(`{"items":[]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
 				ItemsFrom: "payload.items",
@@ -5892,14 +6179,17 @@ func TestExecutor_FanOutInternalCountBypassesEntityContractValidation(t *testing
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if got := result.StateMutation.Bookkeeping["fan_out_count"]; got != 0 {
-		t.Fatalf("fan_out_count metadata = %#v", got)
+	if result.FanOutIntent == nil || result.FanOutIntent.Cardinality != 0 {
+		t.Fatalf("empty fan-out intent = %#v, want cardinality 0", result.FanOutIntent)
+	}
+	if _, found := result.StateMutation.Bookkeeping["fan_out_count"]; found {
+		t.Fatalf("retired fan_out_count metadata survived: %#v", result.StateMutation.Bookkeeping)
 	}
 }
 
 func TestExecutor_FanOutUsesExplicitEmitEvent(t *testing.T) {
 	exec, err := NewExecutor(RuntimeDependencies{
-		Source:        fanOutPayloadSource("batch.submitted"),
+		Source:        fanOutPayloadSource(t, "batch.submitted"),
 		StateRepo:     stubStateRepo{},
 		MutationOwner: stubMutationOwner{},
 		Locker:        stubLocker{},
@@ -5914,7 +6204,7 @@ func TestExecutor_FanOutUsesExplicitEmitEvent(t *testing.T) {
 		EntityID:   "entity-1",
 		Node:       testFlowExecutableNode(t, "flow-1", "node-1"),
 		ChainDepth: 1,
-		Event:      eventtest.RunCreatingRootIngress("evt-1", "batch.submitted", "", "", json.RawMessage(`{"items":[{"kind":"a"},{"kind":"b"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
+		Event:      eventtest.RunCreatingRootIngress(eventtest.UUID("fan-out-explicit-event"), "batch.submitted", "", "", json.RawMessage(`{"items":[{"kind":"a"},{"kind":"b"}]}`), 0, "", "", events.EventEnvelope{}, time.Time{}),
 		Handler: runtimecontracts.SystemNodeEventHandler{
 			FanOut: &runtimecontracts.FanOutSpec{
 				ItemsFrom: "payload.items",
@@ -5928,17 +6218,11 @@ func TestExecutor_FanOutUsesExplicitEmitEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
 	}
-	if got := len(result.EmitIntents); got != 2 {
-		t.Fatalf("EmitIntents count = %d", got)
+	if got := len(result.EmitIntents); got != 0 {
+		t.Fatalf("trigger transaction created %d eager fan-out emits", got)
 	}
-	if got := string(result.EmitIntents[0].Event.Type()); got != "routed.item" {
-		t.Fatalf("first emit type = %q", got)
-	}
-	if got := string(result.EmitIntents[1].Event.Type()); got != "routed.item" {
-		t.Fatalf("second emit type = %q", got)
-	}
-	if !result.EmitIntents[1].Event.CreatedAt().After(result.EmitIntents[0].Event.CreatedAt()) {
-		t.Fatalf("emit CreatedAt ordering = [%s, %s]", result.EmitIntents[0].Event.CreatedAt(), result.EmitIntents[1].Event.CreatedAt())
+	if result.FanOutIntent == nil || result.FanOutIntent.Cardinality != 2 || result.FanOutIntent.PlanRef.SemanticDigest == "" {
+		t.Fatalf("explicit-event fan-out intent = %#v", result.FanOutIntent)
 	}
 }
 

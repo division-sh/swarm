@@ -28,7 +28,7 @@ type handlerExecutionPlan struct {
 	ConfigFrom       *runtimecontracts.ConfigFromSpec
 	Accumulate       *runtimecontracts.AccumulateSpec
 	Compute          *runtimecontracts.ComputeSpec
-	FanOut           *runtimecontracts.FanOutSpec
+	FanOutPlans      []runtimecontracts.FanOutCompiledPlan
 	AdvancesTo       string
 	SetsGate         string
 	ClearGates       bool
@@ -66,7 +66,9 @@ func gateSpecString(spec *runtimecontracts.GateSpec) string {
 	return strings.TrimSpace(spec.Name)
 }
 
-func handlerExecutionPlanFromNodeHandler(node runtimeidentity.ExecutableNode, eventType string, handler runtimecontracts.SystemNodeEventHandler) handlerExecutionPlan {
+func handlerExecutionPlanFromNodeHandler(source interface {
+	FanOutPlansForHandler(runtimeidentity.ExecutableNode, string) []runtimecontracts.FanOutCompiledPlan
+}, node runtimeidentity.ExecutableNode, eventType string, handler runtimecontracts.SystemNodeEventHandler) handlerExecutionPlan {
 	plan := handlerExecutionPlan{
 		Node:             node,
 		EventType:        strings.TrimSpace(eventType),
@@ -80,7 +82,7 @@ func handlerExecutionPlanFromNodeHandler(node runtimeidentity.ExecutableNode, ev
 		ConfigFrom:       handler.Action.ConfigFrom,
 		Accumulate:       handler.Accumulate,
 		Compute:          handler.Compute,
-		FanOut:           handler.FanOut,
+		FanOutPlans:      source.FanOutPlansForHandler(node, strings.TrimSpace(eventType)),
 		AdvancesTo:       strings.TrimSpace(handler.AdvancesTo),
 		SetsGate:         gateSpecString(handler.SetsGate),
 		ClearGates:       len(handler.ClearGates) > 0,
@@ -109,7 +111,7 @@ func handlerExecutionOrderForPlan(plan handlerExecutionPlan) []string {
 	if plan.Compute != nil {
 		steps = append(steps, "compute")
 	}
-	if plan.FanOut != nil {
+	if len(plan.FanOutPlans) > 0 {
 		steps = append(steps, "fan_out")
 	}
 	if len(plan.OnComplete) > 0 {
@@ -155,22 +157,18 @@ func handlerPlanHasEmitFields(plan handlerExecutionPlan) bool {
 	if plan.OnSuccess.Emit.HasFields() {
 		return true
 	}
-	if plan.FanOut != nil && plan.FanOut.Emit.HasFields() {
-		return true
+	for _, fanOut := range plan.FanOutPlans {
+		if fanOut.Emit.HasFields() {
+			return true
+		}
 	}
 	for _, rule := range plan.Rules {
 		if rule.Emit.HasFields() {
 			return true
 		}
-		if rule.FanOut != nil && rule.FanOut.Emit.HasFields() {
-			return true
-		}
 	}
 	for _, rule := range plan.OnComplete {
 		if rule.Emit.HasFields() {
-			return true
-		}
-		if rule.FanOut != nil && rule.FanOut.Emit.HasFields() {
 			return true
 		}
 	}

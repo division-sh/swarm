@@ -100,6 +100,10 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		if err != nil {
 			return fmt.Errorf("resolve selected-contract fork bundle identity: %w", err)
 		}
+		fanOutPlanRefs, err := resolveRunForkFanOutPlanRefs(plan, identity.BundleSourceFact.BundleHash(), req.FanOutPlanRefs)
+		if err != nil {
+			return err
+		}
 		scenarioProfile, sourceProfiled, err := port.admitProfile(txctx, tx, plan.SourceRunID, req.EffectiveSourceIdentity, identity.BundleSourceFact)
 		if err != nil {
 			return err
@@ -109,6 +113,9 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			return err
 		}
 		if found {
+			if err := requireExactMaterializedRunForkFanOut(txctx, tx, forkRunID, plan, fanOutPlanRefs); err != nil {
+				return err
+			}
 			if err := port.requireProfile(txctx, tx, forkRunID, scenarioProfile, sourceProfiled); err != nil {
 				return err
 			}
@@ -117,6 +124,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 				return err
 			}
 			existing.DataPins = pins
+			existing.MaterializedFanOutCount = len(plan.FanOutObligations)
 			if routeResolved {
 				if err := validateRunForkSelectedContractRouteRecoveryAtActivation(txctx, tx, routeRecovery); err != nil {
 					return err
@@ -173,6 +181,10 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 				return err
 			}
 		}
+		materializedFanOutCount, err := materializeRunForkFanOutObligations(txctx, tx, effects, forkRunID, plan, fanOutPlanRefs, now)
+		if err != nil {
+			return err
+		}
 		for _, state := range workflowStates {
 			if err := materializeSelectedContractWorkflowState(txctx, tx, state, now); err != nil {
 				return err
@@ -191,7 +203,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 		}
 		materialization = runfork.RunForkMaterialization{
 			SourceRunID: plan.SourceRunID, ForkRunID: forkRunID, ForkRunStatus: runfork.RunForkMaterializedStatus,
-			ForkPoint: plan.ForkPoint, MaterializedEntityCount: len(plan.Entities), ExecutionReady: false,
+			ForkPoint: plan.ForkPoint, MaterializedEntityCount: len(plan.Entities), MaterializedFanOutCount: materializedFanOutCount, ExecutionReady: false,
 			ReplayResumeAdmission: replayAdmission, SelectedContractBinding: &binding,
 			UnsupportedBlockers:   runForkSelectedContractExecutionPlanBlockersFromAdmission(plan, replayAdmission, nil),
 			DeliveryResumeBlocked: true, SourceRunStatusUnchanged: true, DataPins: pins,

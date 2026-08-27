@@ -187,6 +187,36 @@ type runForkRevisionReplyContext struct {
 	TerminalAt     *time.Time `json:"terminal_at"`
 }
 
+type runForkRevisionFanOutFact struct {
+	runForkRevisionedFact
+	FactKind                 string          `json:"fact_kind"`
+	TriggeringDeliveryID     string          `json:"triggering_delivery_id"`
+	PackageKey               string          `json:"package_key"`
+	ElementID                string          `json:"element_id"`
+	BundleHash               string          `json:"bundle_hash"`
+	SemanticDigest           string          `json:"semantic_digest"`
+	SourceKind               string          `json:"source_kind"`
+	SourceEventID            string          `json:"source_event_id"`
+	SourceRunID              string          `json:"source_run_id"`
+	SourceEntityID           string          `json:"source_entity_id"`
+	SourceField              string          `json:"source_field"`
+	SourceMutationID         string          `json:"source_mutation_id"`
+	SourceResourcePackageKey string          `json:"source_resource_package_key"`
+	SourceResourceEventName  string          `json:"source_resource_event_name"`
+	SourceResourceVersionID  string          `json:"source_resource_version_id"`
+	Cardinality              int             `json:"cardinality"`
+	Cursor                   int             `json:"cursor"`
+	Status                   string          `json:"status"`
+	Capsule                  json.RawMessage `json:"capsule"`
+	BlockedReason            string          `json:"blocked_reason"`
+	CreatedAt                time.Time       `json:"created_at"`
+	Ordinal                  *int            `json:"ordinal"`
+	OutcomeKind              string          `json:"outcome_kind"`
+	EventID                  string          `json:"event_id"`
+	SourceOutcomeEventID     string          `json:"outcome_source_event_id"`
+	Failure                  json.RawMessage `json:"failure"`
+}
+
 type runForkRevisionSnapshot struct {
 	RunID                 string
 	Revision              int64
@@ -202,6 +232,7 @@ type runForkRevisionSnapshot struct {
 	Turns                 []runForkRevisionTurn
 	ConversationAudits    []runForkRevisionConversationAudit
 	ReplyContexts         []runForkRevisionReplyContext
+	FanOutFacts           []runForkRevisionFanOutFact
 }
 
 type RunForkRevisionSnapshot = runForkRevisionSnapshot
@@ -457,6 +488,13 @@ func appendRunForkRevisionFact(snapshot *runForkRevisionSnapshot, family runfork
 		}
 		fact.runForkRevisionedFact = stamp
 		snapshot.ReplyContexts = append(snapshot.ReplyContexts, fact)
+	case runforkrevision.FamilyFanOutObligations:
+		var fact runForkRevisionFanOutFact
+		if err := decode(&fact); err != nil {
+			return err
+		}
+		fact.runForkRevisionedFact = stamp
+		snapshot.FanOutFacts = append(snapshot.FanOutFacts, fact)
 	default:
 		return fmt.Errorf("run fork revision snapshot contains unsupported family %q", family)
 	}
@@ -479,6 +517,11 @@ func (s *runForkRevisionSnapshot) sort() {
 	})
 	sort.Slice(s.CommittedReplayScopes, func(i, j int) bool {
 		return revisionFactLess(s.CommittedReplayScopes[i].FirstRevision, s.CommittedReplayScopes[i].EventID, s.CommittedReplayScopes[j].FirstRevision, s.CommittedReplayScopes[j].EventID)
+	})
+	sort.Slice(s.FanOutFacts, func(i, j int) bool {
+		left := strings.Join([]string{s.FanOutFacts[i].TriggeringDeliveryID, s.FanOutFacts[i].PackageKey, s.FanOutFacts[i].ElementID, fmt.Sprint(outcomeOrdinal(s.FanOutFacts[i]))}, "|")
+		right := strings.Join([]string{s.FanOutFacts[j].TriggeringDeliveryID, s.FanOutFacts[j].PackageKey, s.FanOutFacts[j].ElementID, fmt.Sprint(outcomeOrdinal(s.FanOutFacts[j]))}, "|")
+		return revisionFactLess(s.FanOutFacts[i].FirstRevision, left, s.FanOutFacts[j].FirstRevision, right)
 	})
 }
 

@@ -201,7 +201,8 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	originalEntityID := entityID
 	originalStateEntityID := strings.TrimSpace(triggerCtx.State.EntityID)
 	if !exactDelivery {
-		resolvedEntityID, resolvedEvent, err := resolveHandlerEntityIDForFlow(source, flowID, handler, entityID, triggerCtx.Event, &triggerCtx.State)
+		handlerEvent := events.EventType(firstNonEmptyString(triggerCtx.HandlerEventKey, string(triggerCtx.Event.Type())))
+		resolvedEntityID, resolvedEvent, err := resolveHandlerEntityIDForFlowAtNode(source, node, handlerEvent, flowID, handler, entityID, triggerCtx.Event, &triggerCtx.State)
 		if err != nil {
 			return contractHandlerExecutionResult{}, err
 		}
@@ -235,7 +236,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 			GuardsEvaluated: []string{"not_in_terminal_state"},
 			RuleSelection:   handlerselection.NotApplicable(),
 		}
-		plan := handlerExecutionPlanFromNodeHandler(node, strings.TrimSpace(string(triggerCtx.Event.Type())), handler)
+		plan := handlerExecutionPlanFromNodeHandler(source, node, strings.TrimSpace(string(triggerCtx.Event.Type())), handler)
 		return contractHandlerExecutionResult{
 			Transition:      workflowTransitionFromHandlerOutcome(triggerCtx.State, node, strings.TrimSpace(string(triggerCtx.Event.Type())), outcome),
 			Plan:            plan,
@@ -302,6 +303,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		JoinDeclaration:        joinDeclaration,
 		ChainDepth:             triggerCtx.Event.ChainDepth(),
 		Handler:                handler,
+		FanOutPlans:            source.FanOutPlansForHandler(node, handlerEventKey),
 		Preview:                preview,
 		State:                  stateSnapshot,
 		InitialFieldValues:     initialFieldValues,
@@ -354,7 +356,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		}, nil
 	}
 	outcome := handlerOutcomeFromExecutionResult(result)
-	plan := handlerExecutionPlanFromNodeHandler(node, strings.TrimSpace(string(triggerCtx.Event.Type())), handler)
+	plan := handlerExecutionPlanFromNodeHandler(source, node, strings.TrimSpace(string(triggerCtx.Event.Type())), handler)
 	plan.AdvancesTo = firstNonEmptyString(outcome.AdvancesTo, plan.AdvancesTo)
 	if len(outcome.Emits) > 0 {
 		plan.EmitEvents = append([]string{}, outcome.Emits...)
@@ -400,6 +402,20 @@ func logLoopExecution(ctx context.Context, bus Bus, nodeID string, evt events.Ev
 
 func resolveHandlerEntityIDForFlow(
 	source semanticview.Source,
+	flowID string,
+	handler runtimecontracts.SystemNodeEventHandler,
+	entityID string,
+	evt events.Event,
+	state *WorkflowState,
+	targetOwnership ...events.DeliveryTargetOwnership,
+) (string, events.Event, error) {
+	return resolveHandlerEntityIDForFlowAtNode(source, identity.ExecutableNode{}, evt.Type(), flowID, handler, entityID, evt, state, targetOwnership...)
+}
+
+func resolveHandlerEntityIDForFlowAtNode(
+	source semanticview.Source,
+	node identity.ExecutableNode,
+	handlerEvent events.EventType,
 	flowID string,
 	handler runtimecontracts.SystemNodeEventHandler,
 	entityID string,
@@ -457,11 +473,11 @@ func resolveHandlerEntityIDForFlow(
 		return entityID, resolved, nil
 	}
 	var err error
-	entityID, evt, err = ensureHandlerEntityID(source, flowID, handler, entityID, evt)
+	entityID, evt, err = ensureHandlerEntityIDAtNode(source, node, handlerEvent, flowID, handler, entityID, evt)
 	if err != nil {
 		return "", evt, err
 	}
-	if handlerExecutionEntityRequirement(source, flowID, handler).materializes() {
+	if handlerExecutionEntityRequirementForNode(source, node, handlerEvent, flowID, handler).materializes() {
 		statePath := ""
 		if state != nil {
 			statePath = state.Control.FlowPath
@@ -470,7 +486,7 @@ func resolveHandlerEntityIDForFlow(
 		if routeErr != nil {
 			return "", evt, routeErr
 		}
-		if err := prepareHandlerMaterializationState(source, flowID, handler, route, entityID, state); err != nil {
+		if err := prepareHandlerMaterializationStateAtNode(source, node, handlerEvent, flowID, handler, route, entityID, state); err != nil {
 			return "", evt, err
 		}
 	}

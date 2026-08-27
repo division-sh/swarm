@@ -158,6 +158,12 @@ func planRunForkSnapshot(
 	}
 	plan.PendingWork = pending
 	plan.PendingWorkCount = len(pending)
+	fanOutObligations, err := loadRunForkFanOutObligationsFromRevision(snapshot)
+	if err != nil {
+		return runfork.RunForkPlan{}, err
+	}
+	plan.FanOutObligations = fanOutObligations
+	plan.FanOutObligationCount = len(fanOutObligations)
 	evidence, err := loadRunForkAdmissionEvidenceFromRevision(snapshot, entities, pending)
 	if err != nil {
 		return runfork.RunForkPlan{}, err

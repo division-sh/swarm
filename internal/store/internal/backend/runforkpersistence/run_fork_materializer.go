@@ -112,6 +112,10 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 	if err != nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("resolve fork bundle identity: %w", err)
 	}
+	fanOutPlanRefs, err := resolveRunForkFanOutPlanRefs(plan, identity.BundleSourceFact.BundleHash(), req.FanOutPlanRefs)
+	if err != nil {
+		return runfork.RunForkMaterialization{}, err
+	}
 	scenarioProfile, sourceProfiled, err := admitRunForkScenarioProfile(ctx, tx, plan.SourceRunID, req.EffectiveSourceIdentity, identity.BundleSourceFact)
 	if err != nil {
 		return runfork.RunForkMaterialization{}, err
@@ -125,6 +129,9 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 		return runfork.RunForkMaterialization{}, err
 	}
 	if found {
+		if err := requireExactMaterializedRunForkFanOut(ctx, tx, forkRunID, plan, fanOutPlanRefs); err != nil {
+			return runfork.RunForkMaterialization{}, err
+		}
 		if err := requireExactRunForkScenarioProfile(ctx, tx, forkRunID, scenarioProfile, sourceProfiled); err != nil {
 			return runfork.RunForkMaterialization{}, err
 		}
@@ -133,6 +140,7 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 			return runfork.RunForkMaterialization{}, err
 		}
 		existing.DataPins = pins
+		existing.MaterializedFanOutCount = len(plan.FanOutObligations)
 		return existing, nil
 	}
 	metadata, err := loadRunForkEntityMetadata(plan)
@@ -168,6 +176,10 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 			return runfork.RunForkMaterialization{}, err
 		}
 	}
+	materializedFanOutCount, err := materializeRunForkFanOutObligations(ctx, tx, effects, forkRunID, plan, fanOutPlanRefs, now)
+	if err != nil {
+		return runfork.RunForkMaterialization{}, err
+	}
 	var selectedContractBinding *runfork.RunForkSelectedContractBinding
 	if selection != nil {
 		binding, err := insertRunForkSelectedContractBinding(ctx, tx, runfork.RunForkSelectedContractBindingRequest{
@@ -191,6 +203,7 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 		ForkRunStatus:            runfork.RunForkMaterializedStatus,
 		ForkPoint:                plan.ForkPoint,
 		MaterializedEntityCount:  len(plan.Entities),
+		MaterializedFanOutCount:  materializedFanOutCount,
 		ExecutionReady:           true,
 		ReplayResumeAdmission:    plan.ReplayResumeAdmission,
 		SelectedContractBinding:  selectedContractBinding,

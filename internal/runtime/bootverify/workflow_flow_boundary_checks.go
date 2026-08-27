@@ -7,6 +7,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
@@ -339,7 +340,8 @@ func (c *checkerContext) selectEntityValidation() []Finding {
 			nodeID = strings.TrimSpace(nodeID)
 			for eventType, handler := range node.EventHandlers {
 				eventType = strings.TrimSpace(eventType)
-				if _, err := runtimepipeline.CompileDeliveryTargetCompatibilityPolicy(c.source, validationScope.semanticFlowID, events.EventType(eventType), handler); err != nil {
+				nodeRef, _ := semanticview.ResolveExecutableNodeDeclaration(c.source, validationScope.semanticFlowID, nodeID)
+				if _, err := runtimepipeline.CompileDeliveryTargetCompatibilityPolicy(c.source, nodeRef, validationScope.semanticFlowID, events.EventType(eventType), handler); err != nil {
 					findings = append(findings, Finding{
 						CheckID: "select_entity_validation", Severity: "error",
 						Message:  fmt.Sprintf("flow %s handler %s on node %s has invalid receiver target compatibility: %v", validationScope.displayFlowID, eventType, nodeID, err),
@@ -581,7 +583,8 @@ func (c *checkerContext) flowBoundaryCreateEntityValidation() []Finding {
 				if _, ok := validationScope.inputs[eventType]; !ok {
 					continue
 				}
-				policy, policyErr := runtimepipeline.CompileDeliveryTargetCompatibilityPolicy(c.source, validationScope.semanticFlowID, events.EventType(eventType), handler)
+				nodeRef, _ := semanticview.ResolveExecutableNodeDeclaration(c.source, validationScope.semanticFlowID, nodeID)
+				policy, policyErr := runtimepipeline.CompileDeliveryTargetCompatibilityPolicy(c.source, nodeRef, validationScope.semanticFlowID, events.EventType(eventType), handler)
 				if validationScope.retiredStatic {
 					if handler.CreateEntity {
 						c.flowBoundaryCreateEntityFindings = append(c.flowBoundaryCreateEntityFindings, Finding{
@@ -594,7 +597,7 @@ func (c *checkerContext) flowBoundaryCreateEntityValidation() []Finding {
 					if !handler.CreateEntity &&
 						(handler.SelectEntity == nil || handler.SelectEntity.Empty()) &&
 						(handler.SelectOrCreateEntity == nil || handler.SelectOrCreateEntity.Empty()) &&
-						bootverifyHandlerMaterializesEntity(c.source, validationScope.semanticFlowID, handler) {
+						bootverifyHandlerMaterializesEntity(c.source, nodeRef, eventType, validationScope.semanticFlowID, handler) {
 						c.flowBoundaryCreateEntityFindings = append(c.flowBoundaryCreateEntityFindings, Finding{
 							CheckID:  "flow_boundary_create_entity_validation",
 							Severity: "error",
@@ -605,7 +608,7 @@ func (c *checkerContext) flowBoundaryCreateEntityValidation() []Finding {
 					continue
 				}
 				if validationScope.normalPrimary &&
-					bootverifyHandlerMaterializesEntity(c.source, validationScope.semanticFlowID, handler) &&
+					bootverifyHandlerMaterializesEntity(c.source, nodeRef, eventType, validationScope.semanticFlowID, handler) &&
 					flowInputEventDeclaresPayloadField(c.source, validationScope.semanticFlowID, eventType, "entity_id") {
 					c.flowBoundaryCreateEntityFindings = append(c.flowBoundaryCreateEntityFindings, Finding{
 						CheckID:  "flow_boundary_create_entity_validation",
@@ -764,7 +767,7 @@ func eventEntryDeclaresPayloadField(entry runtimecontracts.EventCatalogEntry, fi
 	return false
 }
 
-func bootverifyHandlerMaterializesEntity(source semanticview.Source, flowID string, handler runtimecontracts.SystemNodeEventHandler) bool {
+func bootverifyHandlerMaterializesEntity(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType, flowID string, handler runtimecontracts.SystemNodeEventHandler) bool {
 	if handler.CreateEntity {
 		return true
 	}
@@ -774,7 +777,7 @@ func bootverifyHandlerMaterializesEntity(source semanticview.Source, flowID stri
 	if bootverifyHandlerMutatesEntityLifecycle(handler) {
 		return true
 	}
-	if bootverifyEmitSitesReferenceEntity(handler) {
+	if bootverifyEmitSitesReferenceEntity(source, node, eventType, handler) {
 		return true
 	}
 	if bootverifyAccumulateReferencesEntity(handler.Accumulate) {
@@ -890,18 +893,12 @@ func bootverifyComputeStoresEntityField(spec *runtimecontracts.ComputeSpec, allo
 	return ok
 }
 
-func bootverifyEmitSitesReferenceEntity(handler runtimecontracts.SystemNodeEventHandler) bool {
+func bootverifyEmitSitesReferenceEntity(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string, handler runtimecontracts.SystemNodeEventHandler) bool {
 	if bootverifyEmitReferencesEntity(handler.Emit) {
-		return true
-	}
-	if handler.FanOut != nil && bootverifyEmitReferencesEntity(handler.FanOut.Emit) {
 		return true
 	}
 	for _, rule := range handler.Rules {
 		if bootverifyEmitReferencesEntity(rule.Emit) {
-			return true
-		}
-		if rule.FanOut != nil && bootverifyEmitReferencesEntity(rule.FanOut.Emit) {
 			return true
 		}
 	}
@@ -909,8 +906,12 @@ func bootverifyEmitSitesReferenceEntity(handler runtimecontracts.SystemNodeEvent
 		if bootverifyEmitReferencesEntity(rule.Emit) {
 			return true
 		}
-		if rule.FanOut != nil && bootverifyEmitReferencesEntity(rule.FanOut.Emit) {
-			return true
+	}
+	if source != nil {
+		for _, plan := range source.FanOutPlansForHandler(node, strings.TrimSpace(eventType)) {
+			if bootverifyEmitReferencesEntity(plan.Emit) {
+				return true
+			}
 		}
 	}
 	return false

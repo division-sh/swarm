@@ -16,6 +16,7 @@ intake-router:
         id: accept_item
         check: payload.item_id != ''
       fan_out:
+        element_id: 9c0030a3-accf-4842-ba26-756d2b18ffee
         items_from: payload.items
         as: intake_item
         identity: intake_item.id

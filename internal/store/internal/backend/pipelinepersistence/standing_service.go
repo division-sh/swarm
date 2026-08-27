@@ -15,6 +15,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -1357,6 +1358,18 @@ func (s *standingServiceAdapter) standingRunHasLiveWorkTx(ctx context.Context, t
 		return false, fmt.Errorf("inspect standing run pipeline work: %w", err)
 	}
 	if pipelineSummary.HasOpenWork() {
+		return true, nil
+	}
+	var fanOutSummary fanoutobligation.RunSummary
+	if s.isSQLite() {
+		fanOutSummary, err = s.sqliteStore.SummarizeFanOutRunTx(ctx, tx, runID, observedAt)
+	} else {
+		fanOutSummary, err = s.postgresStore.SummarizeFanOutRunTx(ctx, tx, runID, observedAt)
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect standing run fan-out work: %w", err)
+	}
+	if fanOutSummary.BlocksCompletion() {
 		return true, nil
 	}
 	query := `SELECT EXISTS (SELECT 1 FROM agent_sessions WHERE run_id = ? AND status IN ('active', 'suspended'))`

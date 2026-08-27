@@ -87,6 +87,10 @@ type WorkflowContractBundle struct {
 	ProjectPacks          packartifact.ProjectPackSet
 	PackSelectionPath     string
 	PackSelectionBody     []byte
+	fanOutPlansBySite     map[FanOutSiteRef]FanOutCompiledPlan
+	fanOutPlansByElement  map[FanOutElementRef]FanOutCompiledPlan
+	fanOutPlanFailures    []FanOutPlanFailure
+	fanOutPlansPrepared   bool
 }
 type WorkflowSemanticView struct {
 	Name                   string
@@ -688,13 +692,19 @@ const (
 )
 
 type FanOutSpec struct {
-	ItemsFrom   string     `yaml:"items_from"`
-	ItemsPath   paths.Path `yaml:"-"`
-	As          string     `yaml:"as"`
-	Identity    string     `yaml:"identity"`
-	MaxItems    int        `yaml:"max_items"`
-	MaxItemsSet bool       `yaml:"-"`
-	Emit        EmitSpec   `yaml:"emit"`
+	ElementID   contractelementidentity.ContractElementID `yaml:"element_id"`
+	ItemsFrom   string                                    `yaml:"items_from"`
+	ItemsPath   paths.Path                                `yaml:"-"`
+	As          string                                    `yaml:"as"`
+	Identity    string                                    `yaml:"identity"`
+	MaxItems    int                                       `yaml:"max_items"`
+	MaxItemsSet bool                                      `yaml:"-"`
+	Emit        EmitSpec                                  `yaml:"emit"`
+	elementRef  contractelementidentity.ContractElementRef
+}
+
+func (f FanOutSpec) ContractElementRef() (contractelementidentity.ContractElementRef, bool) {
+	return f.elementRef, f.elementRef.Valid()
 }
 
 func EffectiveFanOutMaxItems(spec FanOutSpec) int {

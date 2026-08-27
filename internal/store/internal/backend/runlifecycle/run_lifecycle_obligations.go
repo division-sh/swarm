@@ -11,6 +11,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeentity "github.com/division-sh/swarm/internal/runtime/entityruntime"
+	runtimefanout "github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
@@ -39,6 +40,7 @@ func mustDeliveryAdapter(dialect deliverystore.Dialect) *deliverystore.Adapter {
 type runCompletionOwnerSummaries struct {
 	Delivery  runtimedelivery.RunSummary
 	Pipeline  runtimepipelineobligation.RunSummary
+	FanOut    runtimefanout.RunSummary
 	Timers    runtimetimers.RunSummary
 	Sessions  runtimesessions.RunSummary
 	Decisions runtimedecision.RunSummary
@@ -53,6 +55,9 @@ func (s runCompletionOwnerSummaries) validate() error {
 		return err
 	}
 	if err := s.Pipeline.Validate(); err != nil {
+		return err
+	}
+	if err := s.FanOut.Validate(); err != nil {
 		return err
 	}
 	if err := s.Timers.Validate(); err != nil {
@@ -73,6 +78,7 @@ func (s runCompletionOwnerSummaries) validate() error {
 	runID := strings.TrimSpace(s.Delivery.RunID)
 	for owner, candidate := range map[string]string{
 		"pipeline": s.Pipeline.RunID,
+		"fan_out":  s.FanOut.RunID,
 		"timer":    s.Timers.RunID,
 		"session":  s.Sessions.RunID,
 		"decision": s.Decisions.RunID,
@@ -89,6 +95,7 @@ func (s runCompletionOwnerSummaries) validate() error {
 func (s runCompletionOwnerSummaries) blocksCompletion() bool {
 	return !s.Delivery.Settled() ||
 		s.Pipeline.BlocksCompletion() ||
+		s.FanOut.BlocksCompletion() ||
 		s.Timers.BlocksCompletion() ||
 		s.Sessions.BlocksCompletion() ||
 		s.Decisions.BlocksCompletion() ||
@@ -111,6 +118,10 @@ func (s *RunLifecyclePostgresOwner) loadPostgresRunCompletionOwnerSummaries(
 	if err != nil {
 		return runCompletionOwnerSummaries{}, fmt.Errorf("summarize pipeline obligations: %w", err)
 	}
+	fanOut, err := s.pipeline.SummarizeFanOutRunTx(ctx, tx, runID, selectedNow)
+	if err != nil {
+		return runCompletionOwnerSummaries{}, fmt.Errorf("summarize fan-out obligations: %w", err)
+	}
 	timers, err := summarizeTimerRun(ctx, tx, runID, selectedNow, true)
 	if err != nil {
 		return runCompletionOwnerSummaries{}, err
@@ -132,7 +143,7 @@ func (s *RunLifecyclePostgresOwner) loadPostgresRunCompletionOwnerSummaries(
 		return runCompletionOwnerSummaries{}, err
 	}
 	out := runCompletionOwnerSummaries{
-		Delivery: delivery, Pipeline: pipeline, Timers: timers, Sessions: sessions,
+		Delivery: delivery, Pipeline: pipeline, FanOut: fanOut, Timers: timers, Sessions: sessions,
 		Decisions: decisions, Effects: effects, Entities: entities,
 	}
 	return out, out.validate()
@@ -152,6 +163,10 @@ func (s *RunLifecycleSQLiteOwner) loadSQLiteRunCompletionOwnerSummaries(
 	pipeline, err := s.pipeline.SummarizeRunTx(ctx, tx, runID)
 	if err != nil {
 		return runCompletionOwnerSummaries{}, fmt.Errorf("summarize sqlite pipeline obligations: %w", err)
+	}
+	fanOut, err := s.pipeline.SummarizeFanOutRunTx(ctx, tx, runID, selectedNow)
+	if err != nil {
+		return runCompletionOwnerSummaries{}, fmt.Errorf("summarize sqlite fan-out obligations: %w", err)
 	}
 	timers, err := summarizeTimerRun(ctx, tx, runID, selectedNow, false)
 	if err != nil {
@@ -174,7 +189,7 @@ func (s *RunLifecycleSQLiteOwner) loadSQLiteRunCompletionOwnerSummaries(
 		return runCompletionOwnerSummaries{}, err
 	}
 	out := runCompletionOwnerSummaries{
-		Delivery: delivery, Pipeline: pipeline, Timers: timers, Sessions: sessions,
+		Delivery: delivery, Pipeline: pipeline, FanOut: fanOut, Timers: timers, Sessions: sessions,
 		Decisions: decisions, Effects: effects, Entities: entities,
 	}
 	return out, out.validate()

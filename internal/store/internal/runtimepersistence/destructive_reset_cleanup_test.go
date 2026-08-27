@@ -67,6 +67,8 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 	assertCleanupTableResult(t, result, "event_receipts", 1, 1)
 	assertCleanupTableResult(t, result, "dead_letters", 2, 2)
 	assertCleanupTableResult(t, result, "event_delivery_handler_rule_selections", 3, 3)
+	assertCleanupTableResult(t, result, "fan_out_outcomes", 1, 1)
+	assertCleanupTableResult(t, result, "fan_out_intents", 1, 1)
 	assertCleanupTableResult(t, result, "timers", 3, 3)
 	assertCleanupTableResult(t, result, "conversation_forks", 1, 1)
 	assertCleanupTableResult(t, result, "human_task_continuations", 1, 1)
@@ -78,6 +80,8 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 		"runs",
 		"event_delivery_handler_rule_selections",
 		"event_deliveries",
+		"fan_out_outcomes",
+		"fan_out_intents",
 		"run_fork_delivery_event_replays",
 		"run_fork_selected_contract_executions",
 		"run_fork_selected_contract_branch_divergences",
@@ -155,6 +159,8 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunCountsWithoutMutation(
 	}
 	assertCleanupTableResult(t, result, "runs", 2, 0)
 	assertCleanupTableResult(t, result, "events", 6, 0)
+	assertCleanupTableResult(t, result, "fan_out_outcomes", 1, 0)
+	assertCleanupTableResult(t, result, "fan_out_intents", 1, 0)
 	assertCleanupTableResult(t, result, "conversation_forks", 1, 0)
 	assertCleanupTableResult(t, result, "human_task_continuations", 1, 0)
 	assertCleanupTableResult(t, result, "decision_cards", 1, 0)
@@ -164,6 +170,12 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunCountsWithoutMutation(
 	}
 	if got := countRows(t, ctx, pg, "events"); got != 7 {
 		t.Fatalf("events after dry-run = %d, want 7 including preserved no-run event", got)
+	}
+	if got := countRows(t, ctx, pg, "fan_out_intents"); got != 1 {
+		t.Fatalf("fan_out_intents after dry-run = %d, want preserved", got)
+	}
+	if got := countRows(t, ctx, pg, "fan_out_outcomes"); got != 1 {
+		t.Fatalf("fan_out_outcomes after dry-run = %d, want preserved", got)
 	}
 	if got := countRows(t, ctx, pg, "mailbox"); got != 1 {
 		t.Fatalf("mailbox after dry-run = %d, want preserved", got)
@@ -1298,6 +1310,33 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 	sourceRoute := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient("agent-a")}
 	sourceFailure := testFailureEnvelope(runtimefailures.ClassRetryExhausted, "cleanup_source_exhausted", nil)
 	sourceDeliverySnapshot := seedAgentDeliveryStateFixture(t, ctx, pg, sourceSemanticEvent, sourceRoute, "exhausted", &sourceFailure)
+	var fanOutBundleHash string
+	if err := pg.backend.QueryRowContext(ctx, `SELECT bundle_hash FROM runs WHERE run_id=$1::uuid`, runA).Scan(&fanOutBundleHash); err != nil {
+		t.Fatalf("load destructive-reset fan-out bundle: %v", err)
+	}
+	if _, err := pg.backend.ExecContext(ctx, `
+		INSERT INTO fan_out_intents (
+			run_id, triggering_delivery_id, package_key, element_id,
+			bundle_hash, semantic_digest, source_kind, source_event_id, source_field,
+			cardinality, cursor, status, next_chunk_size, capsule, created_at, updated_at
+		) VALUES (
+			$1::uuid, $2::uuid, '.', $3, $4, $5, 'event_payload_field', $6::uuid, 'items',
+			1, 1, 'closed', 4, '{}'::jsonb, $7, $7
+		)
+	`, runA, sourceDeliverySnapshot.DeliveryID, uuid.NewString(), fanOutBundleHash, "sha256:"+strings.Repeat("2", 64), sourceEvent, seededAt); err != nil {
+		t.Fatalf("seed destructive-reset fan-out intent: %v", err)
+	}
+	if _, err := pg.backend.ExecContext(ctx, `
+		INSERT INTO fan_out_outcomes (
+			run_id, triggering_delivery_id, package_key, element_id,
+			ordinal, outcome_kind, failure, created_at
+		)
+		SELECT run_id, triggering_delivery_id, package_key, element_id,
+			0, 'semantic_rejected', '{}'::jsonb, $2
+		FROM fan_out_intents WHERE run_id=$1::uuid
+	`, runA, seededAt); err != nil {
+		t.Fatalf("seed destructive-reset fan-out outcome: %v", err)
+	}
 	if err := commitDeliveryReplayEventFixture(
 		ctx, pg, sourceSemanticEvent, runB, sourceDeliverySnapshot.DeliveryID, "", "agent", "agent-a", seededAt.Add(4*time.Second),
 	); err != nil {
