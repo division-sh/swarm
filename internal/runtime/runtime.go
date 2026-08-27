@@ -1490,9 +1490,6 @@ func (rt *Runtime) Start(ctx context.Context) error {
 			return fmt.Errorf("register run lifecycle completion executor: %w", err)
 		}
 		rt.runLifecycleRegistration = registration
-		if err := rt.runLifecycleExecutor.Start(startCtx); err != nil {
-			return fmt.Errorf("start run lifecycle completion executor: %w", err)
-		}
 	}
 	bindRuntimeStorePayloadValidator(rt.eventPayloadBinder, rt.inboundPayloadBinder, rt.payloadValidator)
 	if rt.RuntimeIngress != nil {
@@ -1551,106 +1548,12 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		rt.emitBootProgress(7, "recovery_decision", string(startupRecoveryDecision.Outcome), string(startupRecoveryDecision.ReasonCode))
 	}
 
-	if rt.Pipeline != nil {
-		lease, beginErr := rt.workOccurrence.Begin(startCtx)
-		if beginErr != nil {
-			return fmt.Errorf("admit pipeline maintenance: %w", beginErr)
-		}
-		go func() {
-			defer func() { _ = lease.Done() }()
-			rt.Pipeline.RunMaintenance(lease.Context())
-		}()
-		rt.emitBootProgress(8, "pipeline_maintenance", "started", "")
-	} else {
-		rt.emitBootProgress(8, "pipeline_maintenance", "skipped", "pipeline unavailable")
-	}
 	systemNodeCount, err := rt.startSystemNodesAndWaitForSubscriptions(ctx, startCtx)
 	if err != nil {
 		rt.emitBootProgress(9, "system_nodes_start", "FAILED", err.Error())
 		return err
 	}
 	rt.emitBootProgress(9, "system_nodes_start", "ok", fmt.Sprintf("%d nodes subscribed", systemNodeCount))
-	workflowTimerRestoreReady := true
-	if skipPersistentStartupRecovery {
-		rt.emitBootProgress(10, "manager_recovery_if_enabled", "skipped", "persistent startup recovery disabled")
-	} else if !rt.Config.Runtime.RecoveryOnStartup {
-		rt.emitBootProgress(10, "manager_recovery_if_enabled", "skipped", "recovery_on_startup disabled")
-	} else {
-		recovered := make([]string, 0, 2)
-		agentHydrationSucceeded := true
-		if rt.Manager != nil {
-			startupRecoveryDecision.ManagerRecoveryAttempted = true
-			_, err := rt.Manager.HydrateForStartup(ctx)
-			if err != nil {
-				if runtimemanager.IsDynamicFlowRuntimeReadinessFinalizationError(err) {
-					rt.emitBootProgress(10, "manager_recovery_if_enabled", "FAILED", err.Error())
-					return fmt.Errorf("finalize dynamic flow runtime readiness during startup: %w", err)
-				}
-				agentHydrationSucceeded = false
-				workflowTimerRestoreReady = false
-				rt.recordStartupManagerRecoveryFailure(ctx, &startupRecoveryDecision, err)
-				if !startupRecoverySnapshot.InspectionComplete || startupRecoverySnapshot.StartupBlockingWorkflowTimers > 0 {
-					rt.emitBootProgress(10, "manager_recovery_if_enabled", "FAILED", err.Error())
-					return fmt.Errorf("hydrate manager before workflow timer restoration: %w", err)
-				}
-			} else {
-				recovered = append(recovered, "agent state")
-			}
-		}
-		status := "ok"
-		if startupRecoveryDecision.Outcome == startupRecoveryOutcomeDegraded {
-			status = string(startupRecoveryDecision.Outcome)
-		}
-		detail := "no executable delivery consumers available"
-		if !agentHydrationSucceeded && rt.Pipeline != nil {
-			detail = "agent state hydration failed; workflow-node delivery recovery withheld"
-		} else if !agentHydrationSucceeded {
-			detail = "agent state hydration failed"
-		} else if len(recovered) > 0 {
-			detail = strings.Join(recovered, " and ") + " hydrated; delivery continuations await execution admission"
-		}
-		rt.emitBootProgress(10, "manager_recovery_if_enabled", status, detail)
-	}
-	if skipPersistentStartupRecovery {
-		rt.emitBootProgress(11, "schedule_restoration", "skipped", "persistent startup recovery disabled")
-	} else if rt.Scheduler != nil {
-		restoredFamilies := make([]string, 0, 2)
-		scheduleRestoreStatus := "ok"
-		if rt.GenericSchedules != nil {
-			startupRecoveryDecision.ScheduleRestoreAttempted = true
-			reconciled, err := rt.GenericSchedules.Restore(ctx)
-			if err != nil {
-				rt.emitBootProgress(11, "schedule_restoration", "FAILED", err.Error())
-				return fmt.Errorf("restore generic schedules: %w", err)
-			}
-			startupRecoveryDecision.ScheduleReplayCount = reconciled
-			if err := ensureBootWorkflowSchedules(ctx, rt.GenericSchedules, rt.Pipeline, rt.ExecutionPosture); err != nil {
-				rt.emitBootProgress(11, "schedule_restoration", "FAILED", err.Error())
-				return fmt.Errorf("ensure boot generic schedules: %w", err)
-			}
-			restoredFamilies = append(restoredFamilies, "generic schedules reconciled")
-		}
-		if rt.Pipeline != nil {
-			if !workflowTimerRestoreReady {
-				scheduleRestoreStatus = string(startupRecoveryOutcomeDegraded)
-				restoredFamilies = append(restoredFamilies, "workflow timers withheld until manager recovery succeeds")
-			} else {
-				startupRecoveryDecision.ScheduleRestoreAttempted = true
-				if err := rt.Pipeline.RestoreWorkflowTimers(ctx); err != nil {
-					rt.emitBootProgress(11, "schedule_restoration", "FAILED", err.Error())
-					return fmt.Errorf("restore workflow timers: %w", err)
-				}
-				restoredFamilies = append(restoredFamilies, "workflow timers restored")
-			}
-		}
-		if len(restoredFamilies) == 0 {
-			rt.emitBootProgress(11, "schedule_restoration", "skipped", "no persistent timer owner available")
-		} else {
-			rt.emitBootProgress(11, "schedule_restoration", scheduleRestoreStatus, strings.Join(restoredFamilies, "; "))
-		}
-	} else {
-		rt.emitBootProgress(11, "schedule_restoration", "skipped", "scheduler unavailable")
-	}
 	staticAgentIDs := []string{}
 	if rt.Manager != nil {
 		staticAgentIDs, err = staticBootAgentIDs(rt.Options.WorkflowModule.SemanticSource())
@@ -1721,78 +1624,66 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		rt.emitBootProgress(15, "mcp_tool_validation", "FAILED", err.Error())
 		return fmt.Errorf("claude runtime mcp validation failed: %w", err)
 	}
+	rt.emitBootProgress(15, "mcp_tool_validation", "ok", fmt.Sprintf("%d capability surfaces settled", len(surfaceIDs)))
+	replayAllowed := rt.Config.Runtime.RecoveryOnStartup && !skipPersistentStartupRecovery
+	var startupTopology runtimemanager.DynamicFlowRuntimeStartupReadiness
+	if rt.Manager != nil {
+		startupTopology, err = rt.Manager.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx, rt.Options.BundleSourceFact, replayAllowed)
+		if err != nil {
+			return fmt.Errorf("canonicalize source-scoped dynamic topology before execution admission: %w", err)
+		}
+	}
 	settledAuthority, err := rt.settleManagedStartupPreflight(ctx, surfaceIDs)
 	if err != nil {
 		rt.emitBootProgress(15, "mcp_tool_validation", "FAILED", err.Error())
 		return fmt.Errorf("settle managed startup preflight: %w", err)
 	}
-	rt.emitBootProgress(15, "mcp_tool_validation", "ok", fmt.Sprintf("%d capability surfaces settled", len(surfaceIDs)))
 	if rt.Manager != nil {
-		replayAllowed := rt.Config.Runtime.RecoveryOnStartup && !skipPersistentStartupRecovery
-		projection, err := rt.Manager.InspectDynamicFlowRuntimeReadinessForSource(ctx, rt.Options.BundleSourceFact)
-		if err != nil {
-			return fmt.Errorf("revalidate source-scoped dynamic topology before startup: %w", err)
-		}
-		pendingTransitions := 0
-		for _, item := range projection.SourceTransitionRequired {
-			if item.Pending() {
-				pendingTransitions++
-			}
-		}
-		if !replayAllowed && (len(projection.CurrentPending) != 0 || pendingTransitions != 0) {
-			return fmt.Errorf(
-				"dynamic topology startup requires recovery: current_pending=%d predecessor_pending_transitions=%d",
-				len(projection.CurrentPending), pendingTransitions,
-			)
-		}
-		activation, activateErr := rt.admitManagedExecution(startCtx, settledAuthority, replayAllowed)
+		activation, activateErr := rt.admitManagedExecution(startCtx, settledAuthority)
 		if activateErr != nil {
-			if activation.ReplayErr != nil {
-				rt.recordStartupManagerRecoveryFailure(ctx, &startupRecoveryDecision, activation.ReplayErr)
-				rt.logStartupRecoveryDecision(ctx, startupRecoveryDecision)
-			}
 			rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", activateErr.Error())
 			return fmt.Errorf("activate managed execution: %w", activateErr)
 		}
 		startCtx = managedexecution.WithAdmission(startCtx, activation.Admission)
-		if replayAllowed {
-			startupRecoveryDecision.ManagerReplayCount = activation.ReplaySummary.ReplayedCount
-			startupRecoveryDecision.ManagerSkipCount = activation.ReplaySummary.SkippedCount
-			startupRecoveryDecision.ManagerDropCount = activation.ReplaySummary.DroppedCount
-			if activation.ReplayErr != nil {
-				rt.recordStartupManagerRecoveryFailure(ctx, &startupRecoveryDecision, activation.ReplayErr)
-			} else if startupRecoveryDecision.Outcome != startupRecoveryOutcomeDegraded && startupRecoveryDecision.ManagerDropCount > 0 {
-				startupRecoveryDecision.Outcome = startupRecoveryOutcomeDegraded
-				startupRecoveryDecision.ReasonCode = startupRecoveryReasonRecoverFailed
-				startupRecoveryDecision.Failure = runtimefailures.CloneEnvelope(activation.ReplaySummary.FirstDroppedFailure)
-				if startupRecoveryDecision.Failure == nil {
-					startupRecoveryDecision.Failure = newStartupRecoveryFailure(runtimefailures.ClassInternalFailure, "startup_manager_replay_dropped_without_failure", "recover_manager", map[string]any{"dropped_count": startupRecoveryDecision.ManagerDropCount}, nil)
-				}
-			}
-		}
-		if err := rt.Manager.ReconcileDynamicFlowRuntimeStartupReadiness(startCtx, rt.Options.BundleSourceFact, replayAllowed); err != nil {
-			if runtimemanager.IsDynamicFlowRuntimeReadinessFinalizationError(err) {
-				return fmt.Errorf("finalize dynamic flow runtime readiness during startup: %w", err)
-			}
-			return fmt.Errorf("reconcile source-scoped dynamic topology before manager run: %w", err)
-		}
 		if err := rt.Manager.Run(startCtx); err != nil {
 			rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", err.Error())
 			return fmt.Errorf("start managed execution loops: %w", err)
 		}
-		if err := rt.Manager.ReconstructDynamicFlowRuntimeStartupTopology(startCtx, rt.Options.BundleSourceFact); err != nil {
+		if err := rt.Manager.CompleteDynamicFlowRuntimeStartupTopology(startCtx, startupTopology); err != nil {
 			rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", err.Error())
-			return fmt.Errorf("reconstruct source-scoped dynamic topology: %w", err)
+			return fmt.Errorf("complete source-scoped dynamic topology: %w", err)
 		}
-		if rt.deliveryContinuations != nil {
-			if err := rt.deliveryContinuations.Synchronize(startCtx); err != nil {
-				rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", err.Error())
-				return fmt.Errorf("converge startup delivery continuations after route activation: %w", err)
+		if replayAllowed {
+			startupRecoveryDecision.ManagerRecoveryAttempted = true
+			if _, err := rt.Manager.HydrateForStartup(startCtx); err != nil {
+				rt.recordStartupManagerRecoveryFailure(ctx, &startupRecoveryDecision, err)
+				rt.emitBootProgress(10, "manager_recovery_if_enabled", "FAILED", err.Error())
+				return fmt.Errorf("hydrate manager after dynamic topology completion: %w", err)
 			}
+			rt.emitBootProgress(10, "manager_recovery_if_enabled", "ok", "agent state hydrated after topology completion")
+		} else {
+			rt.emitBootProgress(10, "manager_recovery_if_enabled", "skipped", "startup recovery disabled")
+		}
+		recovery := rt.recoverManagedExecution(startCtx, replayAllowed)
+		startupRecoveryDecision.ManagerReplayCount = recovery.ReplaySummary.ReplayedCount
+		startupRecoveryDecision.ManagerSkipCount = recovery.ReplaySummary.SkippedCount
+		startupRecoveryDecision.ManagerDropCount = recovery.ReplaySummary.DroppedCount
+		if recovery.ReplayErr != nil {
+			rt.recordStartupManagerRecoveryFailure(ctx, &startupRecoveryDecision, recovery.ReplayErr)
+			rt.logStartupRecoveryDecision(ctx, startupRecoveryDecision)
+			rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", recovery.ReplayErr.Error())
+			return fmt.Errorf("recover pipeline obligations before delivery enumeration: %w", recovery.ReplayErr)
+		}
+		if err := rt.startAndSynchronizeDeliveryContinuations(startCtx); err != nil {
+			rt.emitBootProgress(16, "manager_event_loop_start", "FAILED", err.Error())
+			return fmt.Errorf("start and converge delivery continuations after recovery: %w", err)
 		}
 		rt.emitBootProgress(16, "manager_event_loop_start", "ok", "")
 	} else {
 		rt.emitBootProgress(16, "manager_event_loop_start", "skipped", "manager unavailable")
+	}
+	if err := rt.releaseAutonomousStartupProducers(ctx, startCtx, skipPersistentStartupRecovery, &startupRecoveryDecision); err != nil {
+		return err
 	}
 	if rt.Bus != nil {
 		if err := rt.startOutboxSweeper(startCtx); err != nil {
@@ -1838,6 +1729,62 @@ func (rt *Runtime) Start(ctx context.Context) error {
 		}
 	}
 	started = true
+	return nil
+}
+
+func (rt *Runtime) releaseAutonomousStartupProducers(ctx, startCtx context.Context, skipPersistentStartupRecovery bool, decision *startupRecoveryDecisionReport) error {
+	if skipPersistentStartupRecovery {
+		rt.emitBootProgress(11, "schedule_restoration", "skipped", "persistent startup recovery disabled")
+	} else if rt.Scheduler == nil {
+		rt.emitBootProgress(11, "schedule_restoration", "skipped", "scheduler unavailable")
+	} else {
+		restoredFamilies := make([]string, 0, 2)
+		if rt.GenericSchedules != nil {
+			decision.ScheduleRestoreAttempted = true
+			reconciled, err := rt.GenericSchedules.Restore(ctx)
+			if err != nil {
+				rt.emitBootProgress(11, "schedule_restoration", "FAILED", err.Error())
+				return fmt.Errorf("restore generic schedules after topology completion: %w", err)
+			}
+			decision.ScheduleReplayCount = reconciled
+			if err := ensureBootWorkflowSchedules(ctx, rt.GenericSchedules, rt.Pipeline, rt.ExecutionPosture); err != nil {
+				rt.emitBootProgress(11, "schedule_restoration", "FAILED", err.Error())
+				return fmt.Errorf("ensure boot generic schedules after topology completion: %w", err)
+			}
+			restoredFamilies = append(restoredFamilies, "generic schedules reconciled")
+		}
+		if rt.Pipeline != nil {
+			decision.ScheduleRestoreAttempted = true
+			if err := rt.Pipeline.RestoreWorkflowTimers(ctx); err != nil {
+				rt.emitBootProgress(11, "schedule_restoration", "FAILED", err.Error())
+				return fmt.Errorf("restore workflow timers after topology completion: %w", err)
+			}
+			restoredFamilies = append(restoredFamilies, "workflow timers restored")
+		}
+		if len(restoredFamilies) == 0 {
+			rt.emitBootProgress(11, "schedule_restoration", "skipped", "no persistent timer owner available")
+		} else {
+			rt.emitBootProgress(11, "schedule_restoration", "ok", strings.Join(restoredFamilies, "; "))
+		}
+	}
+	if rt.Pipeline != nil {
+		lease, err := rt.workOccurrence.Begin(startCtx)
+		if err != nil {
+			return fmt.Errorf("admit pipeline maintenance after topology completion: %w", err)
+		}
+		go func() {
+			defer func() { _ = lease.Done() }()
+			rt.Pipeline.RunMaintenance(lease.Context())
+		}()
+		rt.emitBootProgress(8, "pipeline_maintenance", "started", "")
+	} else {
+		rt.emitBootProgress(8, "pipeline_maintenance", "skipped", "pipeline unavailable")
+	}
+	if rt.runLifecycleExecutor != nil {
+		if err := rt.runLifecycleExecutor.Start(startCtx); err != nil {
+			return fmt.Errorf("start run lifecycle completion executor after topology completion: %w", err)
+		}
+	}
 	return nil
 }
 

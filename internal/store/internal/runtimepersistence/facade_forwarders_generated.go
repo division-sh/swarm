@@ -932,8 +932,8 @@ func (s *PostgresStore) ReconcileDirectiveOperations(ctx context.Context, now ti
 	return s.agentPostgresOwner.ReconcileDirectiveOperations(ctx, now, ttl)
 }
 
-func (s *PostgresStore) ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, observed pipeline.DynamicFlowRuntimeReadiness, expected pipeline.DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error) {
-	return s.pipelinePostgresOwner.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, observed, expected, observedAt)
+func (s *PostgresStore) ReconcileDynamicFlowRuntimeReadinessPlans(ctx context.Context, requests []pipeline.DynamicFlowRuntimeReadinessPlanReconciliation, observedAt time.Time) ([]pipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult, error) {
+	return s.pipelinePostgresOwner.ReconcileDynamicFlowRuntimeReadinessPlans(ctx, requests, observedAt)
 }
 
 func (s *PostgresStore) ReconcileExternalEffectAttempts(ctx context.Context, request effects.RecoveryRequest) (effects.RecoverySummary, error) {
@@ -1988,8 +1988,8 @@ func (s *SQLiteRuntimeStore) ReconcileDirectiveOperations(ctx context.Context, n
 	return s.agentSQLiteOwner.ReconcileDirectiveOperations(ctx, now, ttl)
 }
 
-func (s *SQLiteRuntimeStore) ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, observed pipeline.DynamicFlowRuntimeReadiness, expected pipeline.DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error) {
-	return s.pipelineSQLiteOwner.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, observed, expected, observedAt)
+func (s *SQLiteRuntimeStore) ReconcileDynamicFlowRuntimeReadinessPlans(ctx context.Context, requests []pipeline.DynamicFlowRuntimeReadinessPlanReconciliation, observedAt time.Time) ([]pipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult, error) {
+	return s.pipelineSQLiteOwner.ReconcileDynamicFlowRuntimeReadinessPlans(ctx, requests, observedAt)
 }
 
 func (s *SQLiteRuntimeStore) ReconcileExternalEffectAttempts(ctx context.Context, request effects.RecoveryRequest) (effects.RecoverySummary, error) {

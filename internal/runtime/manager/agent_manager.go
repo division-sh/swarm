@@ -86,6 +86,7 @@ type AgentManager struct {
 	dynamicFlowReadinessAttempts      map[dynamicFlowRuntimeReadinessKey]*dynamicFlowRuntimeReadinessAttempt
 	dynamicFlowReadinessSignal        chan struct{}
 	dynamicFlowReadinessRetryInterval time.Duration
+	dynamicFlowStartupTopologyPending bool
 
 	testAfterDynamicFlowReadinessAdmission func()
 }

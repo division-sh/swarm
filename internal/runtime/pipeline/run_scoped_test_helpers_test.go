@@ -159,8 +159,18 @@ type pipelineTestDynamicFlowRuntimeReadinessPersistence struct {
 	store *workflowInstanceStore
 }
 
-func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, observed DynamicFlowRuntimeReadiness, plan DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error) {
-	return p.store.legacyReconcileDynamicFlowRuntimeReadinessPlan(ctx, observed, plan, observedAt)
+func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) ReconcileDynamicFlowRuntimeReadinessPlans(ctx context.Context, requests []DynamicFlowRuntimeReadinessPlanReconciliation, observedAt time.Time) ([]DynamicFlowRuntimeReadinessPlanReconciliationResult, error) {
+	results := make([]DynamicFlowRuntimeReadinessPlanReconciliationResult, 0, len(requests))
+	for _, request := range requests {
+		changed, err := p.store.legacyReconcileDynamicFlowRuntimeReadinessPlan(ctx, request.Observed, request.Expected, observedAt)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, DynamicFlowRuntimeReadinessPlanReconciliationResult{
+			RunID: request.Expected.RunID, InstancePath: request.Expected.Identity.InstancePath, Changed: changed,
+		})
+	}
+	return results, nil
 }
 
 func (p pipelineTestDynamicFlowRuntimeReadinessPersistence) LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID string, route runtimeflowidentity.Route) (DynamicFlowRuntimeReadiness, bool, error) {

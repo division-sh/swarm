@@ -112,6 +112,19 @@ type DynamicFlowRuntimeReadinessProjection struct {
 	SourceTransitionRequired []DynamicFlowRuntimeReadiness
 }
 
+// DynamicFlowRuntimeReadinessPlanReconciliation carries one exact observed
+// row and its desired replacement into the selected-store batch owner.
+type DynamicFlowRuntimeReadinessPlanReconciliation struct {
+	Observed DynamicFlowRuntimeReadiness
+	Expected DynamicFlowRuntimeReadinessPlan
+}
+
+type DynamicFlowRuntimeReadinessPlanReconciliationResult struct {
+	RunID        string
+	InstancePath string
+	Changed      bool
+}
+
 var ErrDynamicFlowRuntimeReadinessObservationStale = errors.New("dynamic flow runtime readiness observation is stale")
 
 type DynamicFlowRuntimeReadinessObservationConflict struct {
@@ -145,7 +158,7 @@ func IsDynamicFlowRuntimeReadinessObservationConflict(err error) bool {
 // readiness projection. Runtime consumers receive only typed records and
 // named mutations; transaction and query authority remain private.
 type DynamicFlowRuntimeReadinessPersistence interface {
-	ReconcileDynamicFlowRuntimeReadinessPlan(context.Context, DynamicFlowRuntimeReadiness, DynamicFlowRuntimeReadinessPlan, time.Time) (bool, error)
+	ReconcileDynamicFlowRuntimeReadinessPlans(context.Context, []DynamicFlowRuntimeReadinessPlanReconciliation, time.Time) ([]DynamicFlowRuntimeReadinessPlanReconciliationResult, error)
 	LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (DynamicFlowRuntimeReadiness, bool, error)
 	InspectDynamicFlowRuntimeReadinessForSource(context.Context, runtimecorrelation.BundleSourceFact) (DynamicFlowRuntimeReadinessProjection, error)
 	InspectDynamicFlowRuntimeReadinessForRun(context.Context, string, runtimecorrelation.BundleSourceFact) ([]DynamicFlowRuntimeReadiness, error)

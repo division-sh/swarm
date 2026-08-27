@@ -10,6 +10,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentitytest "github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
 
@@ -430,7 +431,7 @@ func TestSourceScopedCompletedTopologyReconstructsIntoLiveManagerOccurrence(t *t
 		_ = restarted.ShutdownWithOptions(ShutdownOptions{Grace: time.Second})
 	})
 	armedBefore := len(instances.armedEntries)
-	if err := restarted.ReconstructDynamicFlowRuntimeStartupTopology(ctx, authorActivityTestBundleSourceFact); err != nil {
+	if err := reconcileDynamicFlowRuntimeStartupForTest(restarted, ctx, authorActivityTestBundleSourceFact, false); err != nil {
 		t.Fatalf("ReconstructDynamicFlowRuntimeStartupTopology: %v", err)
 	}
 	if !restartBus.HasFlowInstanceRoute(req.Instance.Route()) {
@@ -451,6 +452,95 @@ func TestSourceScopedCompletedTopologyReconstructsIntoLiveManagerOccurrence(t *t
 		readiness, err := restarted.lifecycle.executableReadinessByIdentity(identity)
 		if err != nil || readiness.Kind != executableAgentRunnableCurrentOccurrence || readiness.State.RunMode != AgentRunModeStandard {
 			t.Fatalf("restored agent %s readiness = %#v err=%v", agentID, readiness, err)
+		}
+	}
+}
+
+func TestSourceScopedStartupPreparesEverySiblingBeforeFirstPendingFinalizer(t *testing.T) {
+	instances := &flowActivationTestInstanceStore{}
+	agents := &flowActivationTestStore{}
+	routeStore := &flowActivationTestRouteStore{}
+	firstBus := &flowActivationTestBus{routeStore: routeStore}
+	first := newFlowActivationManager(t, firstBus, instances, agents)
+	bundle := testFlowBundleWithTwoAgents(t, "")
+	requests := []runtimepipeline.FlowInstanceActivationRequest{
+		testActivationRequest(bundle, "review", "inst-1", "ent-1", "review/inst-1"),
+		testActivationRequest(bundle, "review", "inst-2", "ent-2", "review/inst-2"),
+	}
+	ctx := testAuthorActivityContext(context.Background())
+	for _, req := range requests {
+		if err := activateFlowInstanceForTest(first, ctx, req); err != nil {
+			t.Fatalf("activate initial process %s: %v", req.Instance.InstancePath, err)
+		}
+	}
+
+	instances.readinessMu.Lock()
+	for _, req := range requests {
+		key := flowActivationReadinessKey(req.TriggerEvent.RunID(), req.Instance.InstancePath)
+		readiness := instances.readiness[key]
+		readiness.TopologyReadyAt = time.Time{}
+		instances.readiness[key] = readiness
+	}
+	instances.readinessMu.Unlock()
+	armsBefore := len(instances.armedEntries)
+
+	restartBus := &flowActivationTestBus{routeStore: routeStore}
+	restarted := newFlowActivationManager(t, restartBus, instances, agents)
+	setFlowActivationManagerSemanticSource(restarted, semanticview.Wrap(bundle))
+	startup, err := restarted.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx, authorActivityTestBundleSourceFact, true)
+	if err != nil {
+		t.Fatalf("canonicalize sibling startup topology: %v", err)
+	}
+	runCtx, cancelRun := context.WithCancel(ctx)
+	if err := restarted.Run(managedExecutionTestContext(t, runCtx)); err != nil {
+		cancelRun()
+		t.Fatalf("start sibling topology manager: %v", err)
+	}
+	t.Cleanup(func() {
+		cancelRun()
+		_ = restarted.ShutdownWithOptions(ShutdownOptions{Grace: time.Second})
+	})
+
+	verifiedBeforeFirstFinalizer := false
+	instances.armInitialEntry = func(string) error {
+		if verifiedBeforeFirstFinalizer {
+			return nil
+		}
+		if len(instances.armedEntries) != armsBefore+1 {
+			t.Fatalf("first startup finalizer observed %d timer arms after baseline %d", len(instances.armedEntries), armsBefore)
+		}
+		for _, req := range requests {
+			if !restartBus.HasFlowInstanceRoute(req.Instance.Route()) {
+				t.Fatalf("flow route %s was absent before the first pending finalizer", req.Instance.InstancePath)
+			}
+			for _, agentID := range []string{"reviewer", "writer"} {
+				cfg, ok := testAgentConfig(t, restarted, agentID, req.Instance.InstancePath)
+				if !ok {
+					t.Fatalf("agent %s@%s was absent before the first pending finalizer", agentID, req.Instance.InstancePath)
+				}
+				identity, identityErr := cfg.ConcreteIdentity()
+				if identityErr != nil {
+					t.Fatal(identityErr)
+				}
+				readiness, readinessErr := restarted.lifecycle.executableReadinessByIdentity(identity)
+				if readinessErr != nil || readiness.Kind != executableAgentRunnableCurrentOccurrence || readiness.State.RunMode != AgentRunModeStandard {
+					t.Fatalf("agent %s@%s readiness before first finalizer = %#v err=%v", agentID, req.Instance.InstancePath, readiness, readinessErr)
+				}
+			}
+		}
+		verifiedBeforeFirstFinalizer = true
+		return nil
+	}
+	if err := restarted.CompleteDynamicFlowRuntimeStartupTopology(ctx, startup); err != nil {
+		t.Fatalf("complete sibling startup topology: %v", err)
+	}
+	if !verifiedBeforeFirstFinalizer || len(instances.armedEntries) != armsBefore+len(requests) {
+		t.Fatalf("startup finalization barrier verified=%t timer arms=%d want=%d", verifiedBeforeFirstFinalizer, len(instances.armedEntries), armsBefore+len(requests))
+	}
+	for _, req := range requests {
+		readiness, found, err := instances.LoadDynamicFlowRuntimeReadiness(ctx, req.TriggerEvent.RunID(), req.Instance.Route())
+		if err != nil || !found || readiness.Pending() {
+			t.Fatalf("completed sibling readiness %s: found=%v readiness=%#v err=%v", req.Instance.InstancePath, found, readiness, err)
 		}
 	}
 }

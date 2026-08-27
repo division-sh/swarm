@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,10 +16,10 @@ import (
 	"github.com/google/uuid"
 )
 
-func (s *PipelinePostgresOwner) ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, observed runtimepipeline.DynamicFlowRuntimeReadiness, expected runtimepipeline.DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error) {
-	return reconcileDynamicFlowRuntimeReadinessPlan(ctx, true, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+func (s *PipelinePostgresOwner) ReconcileDynamicFlowRuntimeReadinessPlans(ctx context.Context, requests []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation, observedAt time.Time) ([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult, error) {
+	return reconcileDynamicFlowRuntimeReadinessPlans(ctx, true, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 		return s.runPrivateAuthorActivityMutation(ctx, newRevisionEffects(), fn)
-	}, observed, expected, observedAt)
+	}, requests, observedAt)
 }
 
 func (s *PipelinePostgresOwner) InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error) {
@@ -209,119 +210,163 @@ func queryDynamicFlowRuntimeReadiness(ctx context.Context, db dynamicFlowReadine
 	return items, rows.Err()
 }
 
-func (s *PipelineSQLiteOwner) ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, observed runtimepipeline.DynamicFlowRuntimeReadiness, expected runtimepipeline.DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error) {
-	return reconcileDynamicFlowRuntimeReadinessPlan(ctx, false, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+func (s *PipelineSQLiteOwner) ReconcileDynamicFlowRuntimeReadinessPlans(ctx context.Context, requests []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation, observedAt time.Time) ([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult, error) {
+	return reconcileDynamicFlowRuntimeReadinessPlans(ctx, false, func(ctx context.Context, fn func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 		return s.runPrivateAuthorActivityMutation(ctx, "sqlite dynamic flow readiness reconciliation", newRevisionEffects(), fn)
-	}, observed, expected, observedAt)
+	}, requests, observedAt)
 }
 
-func reconcileDynamicFlowRuntimeReadinessPlan(
+type preparedDynamicFlowRuntimeReadinessReconciliation struct {
+	observed     runtimepipeline.DynamicFlowRuntimeReadiness
+	expected     runtimepipeline.DynamicFlowRuntimeReadinessPlan
+	expectedJSON []byte
+}
+
+func reconcileDynamicFlowRuntimeReadinessPlans(
 	ctx context.Context,
 	postgres bool,
 	run func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error,
-	observed runtimepipeline.DynamicFlowRuntimeReadiness,
-	expected runtimepipeline.DynamicFlowRuntimeReadinessPlan,
+	requests []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation,
 	observedAt time.Time,
-) (bool, error) {
-	observedPlan, err := observed.Plan.Normalized()
-	if err != nil {
-		return false, fmt.Errorf("normalize observed dynamic flow runtime readiness: %w", err)
-	}
-	normalized, err := expected.Normalized()
-	if err != nil {
-		return false, err
-	}
-	if !observed.Eligible() || observedPlan.RunID != normalized.RunID ||
-		observedPlan.Identity.InstancePath != normalized.Identity.InstancePath ||
-		strings.Trim(strings.TrimSpace(observed.InstancePath), "/") != normalized.Identity.InstancePath {
-		return false, fmt.Errorf("dynamic flow runtime readiness reconciliation requires one exact eligible observation")
-	}
-	if err := observed.OwningRunSource.Validate(); err != nil {
-		return false, fmt.Errorf("dynamic flow runtime readiness observed owning source: %w", err)
+) ([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult, error) {
+	if len(requests) == 0 {
+		return nil, nil
 	}
 	observedAt = observedAt.UTC().Truncate(time.Microsecond)
 	if observedAt.IsZero() {
-		return false, fmt.Errorf("dynamic flow runtime readiness reconciliation requires an exact occurrence time")
+		return nil, fmt.Errorf("dynamic flow runtime readiness reconciliation requires an exact occurrence time")
 	}
-	expectedJSON, err := runtimecanonicaljson.Bytes(normalized)
-	if err != nil {
-		return false, fmt.Errorf("encode expected dynamic flow runtime readiness %s: %w", normalized.Identity.InstancePath, err)
-	}
-	changed := false
-	err = run(ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
-		current, found, err := loadDynamicFlowRuntimeReadiness(txctx, tx, postgres, normalized.RunID, normalized.Identity.Route(), true)
+	prepared := make([]preparedDynamicFlowRuntimeReadinessReconciliation, 0, len(requests))
+	seen := make(map[runtimepipeline.DynamicFlowRuntimeReadinessKey]struct{}, len(requests))
+	var requestedSource runtimecorrelation.BundleSourceFact
+	for index, request := range requests {
+		observedPlan, err := request.Observed.Plan.Normalized()
 		if err != nil {
-			return err
+			return nil, fmt.Errorf("normalize observed dynamic flow runtime readiness: %w", err)
+		}
+		normalized, err := request.Expected.Normalized()
+		if err != nil {
+			return nil, err
 		}
 		instancePath := normalized.Identity.InstancePath
-		if !found {
-			return fmt.Errorf("dynamic flow runtime readiness reconciliation requires one active eligible record: %s", instancePath)
+		if !request.Observed.Eligible() || observedPlan.RunID != normalized.RunID ||
+			observedPlan.Identity.InstancePath != instancePath ||
+			strings.Trim(strings.TrimSpace(request.Observed.InstancePath), "/") != instancePath {
+			return nil, fmt.Errorf("dynamic flow runtime readiness reconciliation requires exact eligible observations")
 		}
-		coordinate, err := changedDynamicFlowRuntimeReadinessObservationCoordinate(observed, current)
-		if err != nil {
-			return err
-		}
-		if coordinate != "" {
-			return &runtimepipeline.DynamicFlowRuntimeReadinessObservationConflict{
-				RunID: normalized.RunID, InstancePath: instancePath, Coordinate: coordinate,
-			}
-		}
-		if !current.Eligible() {
-			return fmt.Errorf("dynamic flow runtime readiness reconciliation requires one active eligible record: %s", instancePath)
+		if err := request.Observed.OwningRunSource.Validate(); err != nil {
+			return nil, fmt.Errorf("dynamic flow runtime readiness observed owning source: %w", err)
 		}
 		desiredSource, err := runtimecorrelation.DecodeBundleSourceFact(normalized.BundleHash, normalized.BundleSource)
 		if err != nil {
-			return fmt.Errorf("dynamic flow runtime readiness desired source for %s: %w", instancePath, err)
+			return nil, fmt.Errorf("dynamic flow runtime readiness desired source for %s: %w", instancePath, err)
 		}
-		if !desiredSource.Matches(current.OwningRunSource) {
-			return fmt.Errorf("dynamic flow runtime readiness desired source is not the owning run source for %s", instancePath)
+		if index == 0 {
+			requestedSource = desiredSource
+		} else if !desiredSource.Matches(requestedSource) {
+			return nil, fmt.Errorf("dynamic flow runtime readiness batch requires one exact owning source")
 		}
-		if current.Plan.Identity != normalized.Identity || current.Plan.RunID != normalized.RunID {
-			return fmt.Errorf("dynamic flow runtime readiness reconciliation identity changed for %s", instancePath)
+		key := runtimepipeline.DynamicFlowRuntimeReadinessKey{RunID: normalized.RunID, InstancePath: instancePath}
+		if _, duplicate := seen[key]; duplicate {
+			return nil, fmt.Errorf("dynamic flow runtime readiness batch contains duplicate identity %s/%s", key.RunID, key.InstancePath)
 		}
-		if current.Plan.ExecutionMode != normalized.ExecutionMode {
-			return fmt.Errorf("dynamic flow runtime readiness reconciliation execution mode changed for %s", instancePath)
-		}
-		actualJSON, err := runtimecanonicaljson.Bytes(current.Plan)
+		seen[key] = struct{}{}
+		expectedJSON, err := runtimecanonicaljson.Bytes(normalized)
 		if err != nil {
-			return fmt.Errorf("encode persisted dynamic flow runtime readiness %s: %w", instancePath, err)
+			return nil, fmt.Errorf("encode expected dynamic flow runtime readiness %s: %w", instancePath, err)
 		}
-		if string(actualJSON) == string(expectedJSON) {
-			return nil
+		prepared = append(prepared, preparedDynamicFlowRuntimeReadinessReconciliation{
+			observed: request.Observed, expected: normalized, expectedJSON: expectedJSON,
+		})
+	}
+	sort.Slice(prepared, func(i, j int) bool {
+		if prepared[i].expected.RunID != prepared[j].expected.RunID {
+			return prepared[i].expected.RunID < prepared[j].expected.RunID
 		}
-		if !current.CreationEventEmittedAt.IsZero() {
-			actualCreationJSON, err := runtimecanonicaljson.Bytes(current.Plan.CreationEvent)
+		return prepared[i].expected.Identity.InstancePath < prepared[j].expected.Identity.InstancePath
+	})
+	results := make([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult, len(prepared))
+	err := run(ctx, func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
+		for index, request := range prepared {
+			instancePath := request.expected.Identity.InstancePath
+			loaded, found, err := loadDynamicFlowRuntimeReadiness(txctx, tx, postgres, request.expected.RunID, request.expected.Identity.Route(), true)
 			if err != nil {
-				return fmt.Errorf("encode emitted dynamic flow creation plan %s: %w", instancePath, err)
+				return err
 			}
-			expectedCreationJSON, err := runtimecanonicaljson.Bytes(normalized.CreationEvent)
+			if !found {
+				return fmt.Errorf("dynamic flow runtime readiness reconciliation requires one active eligible record: %s", instancePath)
+			}
+			coordinate, err := changedDynamicFlowRuntimeReadinessObservationCoordinate(request.observed, loaded)
 			if err != nil {
-				return fmt.Errorf("encode revised dynamic flow creation plan %s: %w", instancePath, err)
+				return err
 			}
-			if string(actualCreationJSON) != string(expectedCreationJSON) {
-				return fmt.Errorf("dynamic flow runtime readiness cannot revise emitted creation occurrence for %s", instancePath)
+			if coordinate != "" {
+				return &runtimepipeline.DynamicFlowRuntimeReadinessObservationConflict{
+					RunID: request.expected.RunID, InstancePath: instancePath, Coordinate: coordinate,
+				}
+			}
+			if !loaded.Eligible() {
+				return fmt.Errorf("dynamic flow runtime readiness reconciliation requires one active eligible record: %s", instancePath)
+			}
+			desiredSource, err := runtimecorrelation.DecodeBundleSourceFact(request.expected.BundleHash, request.expected.BundleSource)
+			if err != nil || !desiredSource.Matches(loaded.OwningRunSource) {
+				return fmt.Errorf("dynamic flow runtime readiness desired source is not the owning run source for %s", instancePath)
+			}
+			if loaded.Plan.Identity != request.expected.Identity || loaded.Plan.RunID != request.expected.RunID {
+				return fmt.Errorf("dynamic flow runtime readiness reconciliation identity changed for %s", instancePath)
+			}
+			if loaded.Plan.ExecutionMode != request.expected.ExecutionMode {
+				return fmt.Errorf("dynamic flow runtime readiness reconciliation execution mode changed for %s", instancePath)
+			}
+			actualJSON, err := runtimecanonicaljson.Bytes(loaded.Plan)
+			if err != nil {
+				return fmt.Errorf("encode persisted dynamic flow runtime readiness %s: %w", instancePath, err)
+			}
+			changed := string(actualJSON) != string(request.expectedJSON)
+			if changed && !loaded.CreationEventEmittedAt.IsZero() {
+				actualCreationJSON, err := runtimecanonicaljson.Bytes(loaded.Plan.CreationEvent)
+				if err != nil {
+					return fmt.Errorf("encode emitted dynamic flow creation plan %s: %w", instancePath, err)
+				}
+				expectedCreationJSON, err := runtimecanonicaljson.Bytes(request.expected.CreationEvent)
+				if err != nil {
+					return fmt.Errorf("encode revised dynamic flow creation plan %s: %w", instancePath, err)
+				}
+				if string(actualCreationJSON) != string(expectedCreationJSON) {
+					return fmt.Errorf("dynamic flow runtime readiness cannot revise emitted creation occurrence for %s", instancePath)
+				}
+			}
+			results[index] = runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult{
+				RunID: request.expected.RunID, InstancePath: instancePath, Changed: changed,
 			}
 		}
-		query := `UPDATE flow_instance_runtime_readiness SET plan = $1::jsonb, topology_ready_at = NULL, updated_at = $2 WHERE run_id = $3::uuid AND instance_id = $4`
-		args := []any{expectedJSON, observedAt, normalized.RunID, instancePath}
-		if !postgres {
-			query = `UPDATE flow_instance_runtime_readiness SET plan = ?, topology_ready_at = NULL, updated_at = ? WHERE run_id = ? AND instance_id = ?`
+		for index, request := range prepared {
+			if !results[index].Changed {
+				continue
+			}
+			query := `UPDATE flow_instance_runtime_readiness SET plan = $1::jsonb, topology_ready_at = NULL, updated_at = $2 WHERE run_id = $3::uuid AND instance_id = $4`
+			args := []any{request.expectedJSON, observedAt, request.expected.RunID, request.expected.Identity.InstancePath}
+			if !postgres {
+				query = `UPDATE flow_instance_runtime_readiness SET plan = ?, topology_ready_at = NULL, updated_at = ? WHERE run_id = ? AND instance_id = ?`
+			}
+			result, err := tx.ExecContext(txctx, query, args...)
+			if err != nil {
+				return err
+			}
+			rows, err := result.RowsAffected()
+			if err != nil {
+				return fmt.Errorf("count dynamic flow runtime readiness reconciliation rows for %s: %w", request.expected.Identity.InstancePath, err)
+			}
+			if rows != 1 {
+				return fmt.Errorf("dynamic flow runtime readiness reconciliation changed %d rows for %s", rows, request.expected.Identity.InstancePath)
+			}
 		}
-		result, err := tx.ExecContext(txctx, query, args...)
-		if err != nil {
-			return err
-		}
-		rows, err := result.RowsAffected()
-		if err != nil {
-			return fmt.Errorf("count dynamic flow runtime readiness reconciliation rows for %s: %w", instancePath, err)
-		}
-		if rows != 1 {
-			return fmt.Errorf("dynamic flow runtime readiness reconciliation changed %d rows for %s", rows, instancePath)
-		}
-		changed = true
 		return nil
 	})
-	return changed, err
+	if err != nil {
+		return nil, err
+	}
+	return results, nil
 }
 
 func changedDynamicFlowRuntimeReadinessObservationCoordinate(observed, current runtimepipeline.DynamicFlowRuntimeReadiness) (string, error) {

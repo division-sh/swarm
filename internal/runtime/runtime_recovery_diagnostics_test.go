@@ -401,13 +401,12 @@ func (*startupReadinessFinalizationStore) RetireInitialEntryTimerWakeups(context
 	return errors.New("unexpected readiness timer retirement")
 }
 
-func (*startupReadinessFinalizationStore) ReconcileDynamicFlowRuntimeReadinessPlan(
+func (*startupReadinessFinalizationStore) ReconcileDynamicFlowRuntimeReadinessPlans(
 	context.Context,
-	runtimepipeline.DynamicFlowRuntimeReadiness,
-	runtimepipeline.DynamicFlowRuntimeReadinessPlan,
+	[]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation,
 	time.Time,
-) (bool, error) {
-	return false, errors.New("unexpected readiness plan reconciliation")
+) ([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult, error) {
+	return nil, errors.New("unexpected readiness plan reconciliation")
 }
 
 func (s *startupReadinessFinalizationStore) LoadDynamicFlowRuntimeReadiness(
