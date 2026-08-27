@@ -72,7 +72,7 @@ func (o *SQLite) Load(ctx context.Context, runID string) (runtimerunbundle.Avail
 		return runtimerunbundle.Availability{}, fmt.Errorf("run %s not found: %w", runID, runtimerunbundle.ErrRunNotFound)
 	}
 	var availability runtimerunbundle.Availability
-	err := o.backend.RunTransaction(ctx, "sqlite run bundle availability read", func(txctx context.Context, tx *sql.Tx) error {
+	err := o.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		availability, err = loadSQLite(txctx, tx, runID)
 		return err

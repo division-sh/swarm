@@ -165,8 +165,11 @@ func (s *DeliverySQLiteOwner) ClaimDelivery(ctx context.Context, authority runti
 }
 
 func (s *DeliveryPostgresOwner) ScanDeliveryContinuations(ctx context.Context, authority runtimedelivery.ExecutionAuthority, cursor runtimedelivery.ContinuationCursor, limit int) (runtimedelivery.ContinuationPage, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimedelivery.ContinuationPage{}, err
+	}
 	var page runtimedelivery.ContinuationPage
-	err := s.runPrivateAuthorActivityMutation(ctx, privaterunforkrevision.NewEffects(), func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		page, err = postgresDeliveryAdapter.ScanContinuations(txctx, tx, authority, cursor, limit)
 		if err != nil {
@@ -199,8 +202,11 @@ func (s *DeliveryPostgresOwner) ScanDeliveryContinuations(ctx context.Context, a
 }
 
 func (s *DeliverySQLiteOwner) ScanDeliveryContinuations(ctx context.Context, authority runtimedelivery.ExecutionAuthority, cursor runtimedelivery.ContinuationCursor, limit int) (runtimedelivery.ContinuationPage, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimedelivery.ContinuationPage{}, err
+	}
 	var page runtimedelivery.ContinuationPage
-	err := s.runPrivateAuthorActivityMutation(ctx, "sqlite scan delivery continuations", privaterunforkrevision.NewEffects(), func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		page, err = sqliteDeliveryAdapter.ScanContinuations(txctx, tx, authority, cursor, limit)
 		if err != nil {
@@ -237,8 +243,11 @@ func (s *DeliveryPostgresOwner) ObserveDeliveryContinuation(
 	authority runtimedelivery.ExecutionAuthority,
 	deliveryID string,
 ) (runtimedelivery.ContinuationObservation, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimedelivery.ContinuationObservation{}, err
+	}
 	var observation runtimedelivery.ContinuationObservation
-	err := s.runPrivateAuthorActivityMutation(ctx, privaterunforkrevision.NewEffects(), func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		observation, err = postgresDeliveryAdapter.ObserveContinuation(txctx, tx, authority, deliveryID)
 		return err
@@ -251,8 +260,11 @@ func (s *DeliverySQLiteOwner) ObserveDeliveryContinuation(
 	authority runtimedelivery.ExecutionAuthority,
 	deliveryID string,
 ) (runtimedelivery.ContinuationObservation, error) {
+	if err := s.requireCurrentSchema(); err != nil {
+		return runtimedelivery.ContinuationObservation{}, err
+	}
 	var observation runtimedelivery.ContinuationObservation
-	err := s.runPrivateAuthorActivityMutation(ctx, "sqlite observe delivery continuation", privaterunforkrevision.NewEffects(), func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		observation, err = sqliteDeliveryAdapter.ObserveContinuation(txctx, tx, authority, deliveryID)
 		return err

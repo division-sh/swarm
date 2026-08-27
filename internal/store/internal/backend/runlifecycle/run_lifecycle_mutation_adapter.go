@@ -17,19 +17,21 @@ import (
 )
 
 type postgresRunLifecycleMutation struct {
-	store   *RunLifecyclePostgresOwner
-	tx      *sql.Tx
-	story   runtimeauthoractivity.Mutation
-	effects *privaterunforkrevision.Effects
-	handoff *CandidateHandoff
+	store    *RunLifecyclePostgresOwner
+	tx       *sql.Tx
+	readOnly bool
+	story    runtimeauthoractivity.Mutation
+	effects  *privaterunforkrevision.Effects
+	handoff  *CandidateHandoff
 }
 
 type sqliteRunLifecycleMutation struct {
-	store   *RunLifecycleSQLiteOwner
-	tx      *sql.Tx
-	story   runtimeauthoractivity.Mutation
-	effects *privaterunforkrevision.Effects
-	handoff *CandidateHandoff
+	store    *RunLifecycleSQLiteOwner
+	tx       *sql.Tx
+	readOnly bool
+	story    runtimeauthoractivity.Mutation
+	effects  *privaterunforkrevision.Effects
+	handoff  *CandidateHandoff
 }
 
 // TransactionMutation exposes the lifecycle operations that legitimately share
@@ -198,6 +200,34 @@ func runSQLiteLifecycleOperation[T any](
 	})
 }
 
+func runPostgresLifecycleRead[T any](
+	ctx context.Context,
+	store *RunLifecyclePostgresOwner,
+	fn func(context.Context, postgresRunLifecycleMutation) (T, error),
+) (T, error) {
+	var result T
+	err := store.runRead(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = fn(txctx, postgresRunLifecycleMutation{store: store, tx: tx, readOnly: true})
+		return err
+	})
+	return result, err
+}
+
+func runSQLiteLifecycleRead[T any](
+	ctx context.Context,
+	store *RunLifecycleSQLiteOwner,
+	fn func(context.Context, sqliteRunLifecycleMutation) (T, error),
+) (T, error) {
+	var result T
+	err := store.runRead(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		result, err = fn(txctx, sqliteRunLifecycleMutation{store: store, tx: tx, readOnly: true})
+		return err
+	})
+	return result, err
+}
+
 func (s *RunLifecyclePostgresOwner) TransitionActiveRun(ctx context.Context, request runtimerunlifecycle.ActiveTransitionRequest) (runtimerunlifecycle.MutationDisposition, error) {
 	return runPostgresLifecycleOperation(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (runtimerunlifecycle.MutationDisposition, error) {
 		return mutation.TransitionActive(ctx, request)
@@ -211,28 +241,28 @@ func (s *RunLifecycleSQLiteOwner) TransitionActiveRun(ctx context.Context, reque
 }
 
 func (s *RunLifecyclePostgresOwner) RequirePresentRun(ctx context.Context, runID string) error {
-	_, err := runPostgresLifecycleOperation(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (struct{}, error) {
+	_, err := runPostgresLifecycleRead(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (struct{}, error) {
 		return struct{}{}, mutation.RequirePresent(ctx, runID)
 	})
 	return err
 }
 
 func (s *RunLifecycleSQLiteOwner) RequirePresentRun(ctx context.Context, runID string) error {
-	_, err := runSQLiteLifecycleOperation(ctx, s, func(ctx context.Context, mutation sqliteRunLifecycleMutation) (struct{}, error) {
+	_, err := runSQLiteLifecycleRead(ctx, s, func(ctx context.Context, mutation sqliteRunLifecycleMutation) (struct{}, error) {
 		return struct{}{}, mutation.RequirePresent(ctx, runID)
 	})
 	return err
 }
 
 func (s *RunLifecyclePostgresOwner) RequireActiveRun(ctx context.Context, runID string) error {
-	_, err := runPostgresLifecycleOperation(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (struct{}, error) {
+	_, err := runPostgresLifecycleRead(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (struct{}, error) {
 		return struct{}{}, mutation.RequireActive(ctx, runID)
 	})
 	return err
 }
 
 func (s *RunLifecycleSQLiteOwner) RequireActiveRun(ctx context.Context, runID string) error {
-	_, err := runSQLiteLifecycleOperation(ctx, s, func(ctx context.Context, mutation sqliteRunLifecycleMutation) (struct{}, error) {
+	_, err := runSQLiteLifecycleRead(ctx, s, func(ctx context.Context, mutation sqliteRunLifecycleMutation) (struct{}, error) {
 		return struct{}{}, mutation.RequireActive(ctx, runID)
 	})
 	return err
@@ -243,37 +273,37 @@ func (s *RunLifecycleSQLiteOwner) RequireActiveRun(ctx context.Context, runID st
 // operation only guarantees that terminal-run refusal cannot be shadowed by a
 // later route-planning error.
 func (s *RunLifecyclePostgresOwner) RequirePublicationRunActive(ctx context.Context, runID string) error {
-	return s.runPrivateAuthorActivityMutation(ctx, privaterunforkrevision.NewEffects(), func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
-		return (postgresRunLifecycleMutation{store: s, tx: tx}).RequireActive(txctx, runID)
+	return s.runRead(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return (postgresRunLifecycleMutation{store: s, tx: tx, readOnly: true}).RequireActive(txctx, runID)
 	})
 }
 
 func (s *RunLifecycleSQLiteOwner) RequirePublicationRunActive(ctx context.Context, runID string) error {
-	return s.runPrivateAuthorActivityMutation(ctx, "sqlite publication run preflight", privaterunforkrevision.NewEffects(), func(txctx context.Context, tx *sql.Tx, _ *privateauthoractivity.Mutation) error {
-		return (sqliteRunLifecycleMutation{store: s, tx: tx}).RequireActive(txctx, runID)
+	return s.runRead(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		return (sqliteRunLifecycleMutation{store: s, tx: tx, readOnly: true}).RequireActive(txctx, runID)
 	})
 }
 
 func (s *RunLifecyclePostgresOwner) RequirePresentRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
-	return runPostgresLifecycleOperation(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (runtimecorrelation.BundleSourceFact, error) {
+	return runPostgresLifecycleRead(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (runtimecorrelation.BundleSourceFact, error) {
 		return mutation.RequirePresentSource(ctx, runID)
 	})
 }
 
 func (s *RunLifecycleSQLiteOwner) RequirePresentRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
-	return runSQLiteLifecycleOperation(ctx, s, func(ctx context.Context, mutation sqliteRunLifecycleMutation) (runtimecorrelation.BundleSourceFact, error) {
+	return runSQLiteLifecycleRead(ctx, s, func(ctx context.Context, mutation sqliteRunLifecycleMutation) (runtimecorrelation.BundleSourceFact, error) {
 		return mutation.RequirePresentSource(ctx, runID)
 	})
 }
 
 func (s *RunLifecyclePostgresOwner) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
-	return runPostgresLifecycleOperation(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (runtimecorrelation.BundleSourceFact, error) {
+	return runPostgresLifecycleRead(ctx, s, func(ctx context.Context, mutation postgresRunLifecycleMutation) (runtimecorrelation.BundleSourceFact, error) {
 		return mutation.RequireActiveSource(ctx, runID)
 	})
 }
 
 func (s *RunLifecycleSQLiteOwner) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
-	return runSQLiteLifecycleOperation(ctx, s, func(ctx context.Context, mutation sqliteRunLifecycleMutation) (runtimecorrelation.BundleSourceFact, error) {
+	return runSQLiteLifecycleRead(ctx, s, func(ctx context.Context, mutation sqliteRunLifecycleMutation) (runtimecorrelation.BundleSourceFact, error) {
 		return mutation.RequireActiveSource(ctx, runID)
 	})
 }
@@ -443,12 +473,15 @@ func (m postgresRunLifecycleMutation) RequirePresent(ctx context.Context, runID 
 		return errors.New("PostgreSQL run lifecycle mutation requires transaction")
 	}
 	var state string
-	err := m.tx.QueryRowContext(ctx, `
+	query := `
 		SELECT status
 		FROM runs
 		WHERE run_id = $1::uuid
-		FOR UPDATE
-	`, strings.TrimSpace(runID)).Scan(&state)
+	`
+	if !m.readOnly {
+		query += ` FOR UPDATE`
+	}
+	err := m.tx.QueryRowContext(ctx, query, strings.TrimSpace(runID)).Scan(&state)
 	if errors.Is(err, sql.ErrNoRows) {
 		return &runtimerunlifecycle.RunNotFoundError{RunID: runID}
 	}
@@ -515,12 +548,15 @@ func (m postgresRunLifecycleMutation) loadSource(
 	}
 	runID = strings.TrimSpace(runID)
 	var state, bundleHash, bundleSource string
-	err := m.tx.QueryRowContext(ctx, `
+	query := `
 		SELECT status, bundle_hash, bundle_source
 		FROM runs
 		WHERE run_id = $1::uuid
-		FOR UPDATE
-	`, runID).Scan(&state, &bundleHash, &bundleSource)
+	`
+	if !m.readOnly {
+		query += ` FOR UPDATE`
+	}
+	err := m.tx.QueryRowContext(ctx, query, runID).Scan(&state, &bundleHash, &bundleSource)
 	if errors.Is(err, sql.ErrNoRows) {
 		return runtimecorrelation.BundleSourceFact{}, &runtimerunlifecycle.RunNotFoundError{RunID: runID}
 	}
