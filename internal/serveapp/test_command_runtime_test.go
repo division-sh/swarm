@@ -148,7 +148,7 @@ expect:
 				endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString())
 				for _, args := range [][]string{
 					{"test", "--contracts", contractsPath, "--timeout", "5s", "--poll-interval", "10ms"},
-					{"test", "--contracts", contractsPath, "--derive", "fulfillment", "--input", "request", "--timeout", "5s", "--poll-interval", "10ms"},
+					{"test", "--contracts", contractsPath, "--derive", "fulfillment", "--input", "fulfillment.requested", "--timeout", "5s", "--poll-interval", "10ms"},
 				} {
 					var stdout, stderr bytes.Buffer
 					commandArgs := append(append([]string(nil), args...), "--api-server", endpoint, "--config", configPath)
@@ -250,7 +250,7 @@ expect:
 
 	for _, args := range [][]string{
 		{"test", "--contracts", contractsPath, "--timeout", "5s", "--poll-interval", "10ms"},
-		{"test", "--contracts", contractsPath, "--derive", "fulfillment", "--input", "request", "--timeout", "5s", "--poll-interval", "10ms"},
+		{"test", "--contracts", contractsPath, "--derive", "fulfillment", "--input", "fulfillment.requested", "--timeout", "5s", "--poll-interval", "10ms"},
 	} {
 		var stdout, stderr bytes.Buffer
 		commandArgs := append(append([]string(nil), args...), "--api-server", endpoint, "--config", configPath)
@@ -696,7 +696,7 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 		t.Fatalf("%s derived scenario runtime is incomplete", backend)
 	}
 
-	plans, err := scenarioderivation.Compile(rt.Options.WorkflowModule.SemanticSource(), rt.EffectiveSourceIdentity, scenarioderivation.Request{FlowID: "fulfillment", Input: "request"})
+	plans, err := scenarioderivation.Compile(rt.Options.WorkflowModule.SemanticSource(), rt.EffectiveSourceIdentity, scenarioderivation.Request{FlowID: "fulfillment", Input: "fulfillment.requested"})
 	if err != nil || len(plans) != 1 {
 		t.Fatalf("%s compile negative selector plan: plans=%d err=%v", backend, len(plans), err)
 	}
@@ -749,7 +749,7 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 	var stdout, stderr bytes.Buffer
 	started := time.Now()
 	code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
-		"test", "--derive", "fulfillment", "--input", "request",
+		"test", "--derive", "fulfillment", "--input", "fulfillment.requested",
 		"--contracts", contractsPath, "--config", configPath,
 		"--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"),
 		"--timeout", "20s", "--poll-interval", "25ms",
@@ -760,7 +760,7 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 	if elapsed := time.Since(started); elapsed >= 60*time.Second {
 		t.Fatalf("%s derived scenario took %s, want under 60s", backend, elapsed)
 	}
-	if !strings.Contains(stdout.String(), "scenario ok: derived:fulfillment/request") || strings.TrimSpace(stderr.String()) != "" {
+	if !strings.Contains(stdout.String(), "scenario ok: derived:fulfillment/fulfillment.requested") || strings.TrimSpace(stderr.String()) != "" {
 		t.Fatalf("%s derived output stdout=%q stderr=%q", backend, stdout.String(), stderr.String())
 	}
 	requireExactScenarioExecutionProfile(t, db, backend, rt.EffectiveSourceIdentity)
@@ -1138,7 +1138,7 @@ telegram-input-observer:
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "telegram-chat", "tests", "generated-input.yaml"), `
 name: generated Telegram normalized input
 steps:
-  - publish: telegram_text_message
+  - publish: inbound.telegram.text_message
     payload: generate
 `)
 	return root
@@ -1172,7 +1172,7 @@ telegram-revision:
 	writeWorkflowValidationFixtureFile(t, filepath.Join(root, "flows", "telegram-chat", "tests", "public-mock-approval.yaml"), `
 name: public generated Telegram mock approval
 steps:
-  - publish: telegram_text_message
+  - publish: inbound.telegram.text_message
     payload: generate
   - mailbox.decide:
       match:

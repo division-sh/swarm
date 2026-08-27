@@ -6,5 +6,4 @@ states: [pending, active, done]
 pins:
   inputs:
     events:
-      - event: task.assigned
-        source: external
+      - task.assigned

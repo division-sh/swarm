@@ -22,16 +22,16 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 
 	authored := mustMappingValue(t, composition, "authored_shapes")
 	outputPin := mustMappingValue(t, authored, "output_event_pin")
-	assertScalarContains(t, mustMappingValue(t, outputPin, "canonical_form"), "{name, event, sink, key, carries}")
-	assertScalarContains(t, mustMappingValue(t, outputPin, "canonical_form"), "MUST include `key`")
+	assertScalarContains(t, mustMappingValue(t, outputPin, "canonical_form"), "{event, sink}")
+	assertScalarContains(t, mustMappingValue(t, outputPin, "canonical_form"), "Event-level schema and business-key declarations")
 	assertScalarContains(t, mustMappingValue(t, outputPin, "canonical_form"), "production_valid:false")
 	assertScalarContains(t, mustMappingValue(t, outputPin, "harness_sink"), "mutually exclusive")
 	assertScalarContains(t, mustMappingValue(t, outputPin, "harness_sink"), "creates no semantic")
 	assertScalarContains(t, mustMappingValue(t, outputPin, "scalar_form"), "never inferred")
 	resolved := mustMappingValue(t, authored, "resolved_input_pin")
-	assertScalarContains(t, mustMappingValue(t, resolved, "canonical_form"), "{name, event, source, resolution, carries}")
+	assertScalarContains(t, mustMappingValue(t, resolved, "canonical_form"), "{event, source, resolution}")
 	assertScalarContains(t, mustYAMLPath(t, resolved, "instance_fields", "identity"), "instance: <field>")
-	assertScalarContains(t, mustYAMLPath(t, resolved, "instance_fields", "source"), "typed source")
+	assertScalarContains(t, mustYAMLPath(t, resolved, "instance_fields", "source"), "resolution.from")
 	assertScalarContains(t, mustYAMLPath(t, resolved, "instance_fields", "mode"), "exhaustive typed value")
 
 	connect := mustMappingValue(t, authored, "parent_connect")
@@ -41,7 +41,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarContains(t, mustYAMLPath(t, connect, "fields", "from"), "producer flow ID")
 	assertScalarContains(t, mustYAMLPath(t, connect, "fields", "to"), "receiver flow ID")
 	assertScalarContains(t, mustYAMLPath(t, connect, "fields", "rename"), "receiver-visible event identity")
-	assertScalarContains(t, mustYAMLPath(t, connect, "fields", "adapter"), "payload transformation")
+	assertScalarContains(t, mustYAMLPath(t, connect, "retired_fields", "adapter"), "Retired on presence")
 	if hasMappingKey(mustMappingValue(t, connect, "fields"), "delivery") || hasMappingKey(mustMappingValue(t, connect, "fields"), "reply") {
 		t.Fatal("parent connect fields retain retired delivery/reply authoring")
 	}
@@ -64,8 +64,8 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 		"receiver_flow_exists",
 		"receiver_input_pin_exists",
 		"event_rename_valid",
-		"adapter_valid",
-		"output_carries_instance_field",
+		"adapter_retired",
+		"output_metadata_retired",
 		"receiver_route_key_present",
 		"key_types_compatible",
 		"receiver_resolution_valid",
@@ -81,11 +81,11 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarValue(t, mustMappingValue(t, lowering, "owner"), "platform-spec.yaml#flow_model.flow_package.composition_routing.route_plan_lowering")
 	for _, want := range []string{
 		"parent package.yaml connect entries",
-		"producer output pin event identity and verified interface evidence resolved from event-centric flow endpoints",
+		"producer output pin exact event identity and immutable producer event schema resolved from event-centric flow endpoints",
 		"receiver scalar template instance identity from WorkflowContractBundle.ResolveFlowTemplateInstance",
-		"receiver input same-named typed carry source and resolution mode",
-		"import-boundary pin alias bindings",
-		"explicit receiver-event rename and payload-adapter entries",
+		"receiver input same-named required payload source or exact resolution.from override and resolution mode",
+		"import-boundary event bindings",
+		"explicit receiver-event rename",
 	} {
 		if !sequenceContainsScalar(mustMappingValue(t, lowering, "consumes"), want) {
 			t.Fatalf("route_plan_lowering consumes missing %q", want)
@@ -130,7 +130,7 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	slice1546 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1546")
 	assertScalarValue(t, mustMappingValue(t, slice1546, "status"), "retired_by_2087")
 	assertScalarContains(t, mustMappingValue(t, slice1546, "canonical_code_owner"), "ConnectRoutePlan.InstanceKey.Source")
-	assertScalarContains(t, mustMappingValue(t, slice1546, "rule"), "receiver input carry")
+	assertScalarContains(t, mustMappingValue(t, slice1546, "rule"), "resolution.from")
 	assertScalarContains(t, mustMappingValue(t, slice1546, "rule"), "ConnectRoutePlan.InstanceKey.Mappings are removed")
 
 	slice1475 := mustYAMLPath(t, composition, "route_plan_lowering", "implementation_slice_1475")
@@ -195,7 +195,7 @@ func TestPlatformSpecInstanceIdentityAuthoringSourceAuthority(t *testing.T) {
 	owner := mustMappingValue(t, slice, "instance_identity_owner_2021")
 	assertScalarValue(t, mustMappingValue(t, owner, "status"), "scalar_typed_owner_finalized_by_2087")
 	assertScalarValue(t, mustMappingValue(t, owner, "authored_identity_owner"), "flow instance: <field>")
-	assertScalarValue(t, mustMappingValue(t, owner, "authored_source_owner"), "receiver input carries.<instance>.from")
+	assertScalarValue(t, mustMappingValue(t, owner, "authored_source_owner"), "receiver input resolution.from, with omission deriving the same-named payload field")
 	assertScalarValue(t, mustMappingValue(t, owner, "authored_behavior_owner"), "receiver input resolution.mode")
 	assertScalarContains(t, mustMappingValue(t, owner, "effective_owner"), "opaque validated Field")
 	assertScalarContains(t, mustMappingValue(t, owner, "effective_owner"), "No second representation")
@@ -212,7 +212,7 @@ func TestPlatformSpecInstanceIdentityAuthoringSourceAuthority(t *testing.T) {
 
 	selectMode := mustYAMLPath(t, slice, "modes", "select")
 	selectOrCreate := mustYAMLPath(t, slice, "modes", "select-or-create")
-	assertScalarContains(t, mustMappingValue(t, selectMode, "contract"), "carry whose name equals")
+	assertScalarContains(t, mustMappingValue(t, selectMode, "contract"), "required producer payload field whose name equals")
 	assertScalarContains(t, mustMappingValue(t, selectMode, "contract"), "typed payload")
 	assertScalarContains(t, mustMappingValue(t, selectOrCreate, "contract"), "scalar `instance`")
 	if strings.Contains(mustMappingValue(t, slice, "authoring_shape").Value, "instance_key") {
@@ -221,10 +221,10 @@ func TestPlatformSpecInstanceIdentityAuthoringSourceAuthority(t *testing.T) {
 
 	proofs := mustMappingValue(t, slice, "proof_obligations")
 	for _, want := range []string{
-		"route-plan lowering records typed create mode, the scalar instance Field, and typed Source derived from the same-named carry, with no policy facts or producer output-key dependency",
+		"route-plan lowering records typed create mode, the scalar instance Field, and typed Source derived from the required same-named payload field or exact resolution.from, with no policy facts or producer output-key dependency",
 		"downstream receiver routes can render the receiver-targeted identity projection derived from typed Source as payload.<instance>",
-		"route-plan lowering records typed select mode, scalar instance Field, and typed payload Source derived from the same-named carry, with no policy facts",
-		"route-plan lowering records typed select-or-create mode, scalar instance Field, and typed payload Source derived from the same-named carry, with no policy facts",
+		"route-plan lowering records typed select mode, scalar instance Field, and typed payload Source derived from the required same-named payload field or exact resolution.from, with no policy facts",
+		"route-plan lowering records typed select-or-create mode, scalar instance Field, and typed payload Source derived from the required same-named payload field or exact resolution.from, with no policy facts",
 	} {
 		if !sequenceContainsScalar(proofs, want) {
 			t.Fatalf("instance identity proof obligations missing canonical typed-source proof %q", want)
@@ -460,10 +460,8 @@ func TestPlatformSpecCompositionRoutingCatalogSurfacesConsumeConnectAuthority(t 
 	assertScalarContains(t, mustMappingValue(t, pinTargetResolution, "trigger"), "fail strict loading on presence")
 
 	outputPinKeyCarries := mustSequenceMappingByScalarField(t, checks, "id", "output_pin_key_carries_validation")
-	assertScalarContains(t, mustMappingValue(t, outputPinKeyCarries, "trigger"), "missing key/carries evidence")
-	assertScalarContains(t, mustMappingValue(t, outputPinKeyCarries, "trigger"), "Agent emit_events")
-	assertScalarContains(t, mustMappingValue(t, outputPinKeyCarries, "trigger"), "auto_emit_on_create")
-	assertScalarContains(t, mustMappingValue(t, outputPinKeyCarries, "trigger"), "workflow timers")
+	assertScalarContains(t, mustMappingValue(t, outputPinKeyCarries, "trigger"), "key or carries is present")
+	assertScalarContains(t, mustMappingValue(t, outputPinKeyCarries, "trigger"), "event schema/business key")
 
 	bootSteps := mustYAMLPath(t, root, "engine", "boot_sequence", "steps")
 	validatePins := mustSequenceMappingByScalarField(t, bootSteps, "name", "validate_pins")

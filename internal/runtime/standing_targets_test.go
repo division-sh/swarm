@@ -79,7 +79,7 @@ func TestResolveStandingTargetDeclarationsRejectsDuplicateExactInputIdentity(t *
 	schema := bundle.FlowSchemas["coordinator"]
 	schema.Pins.Inputs.EventPins = append(schema.Pins.Inputs.EventPins, schema.Pins.Inputs.EventPins[0])
 	bundle.FlowSchemas["coordinator"] = schema
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err == nil || !strings.Contains(err.Error(), "duplicate") {
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err == nil || !strings.Contains(err.Error(), "declared more than once") {
 		t.Fatalf("duplicate exact input compile error = %v, want fail-closed", err)
 	}
 }

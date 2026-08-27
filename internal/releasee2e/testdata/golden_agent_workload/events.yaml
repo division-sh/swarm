@@ -6,4 +6,4 @@ scout.requested:
   candidate_ids: "[text]?"
 candidate.requested:
   batch_id: text?
-  candidate_id: text?
+  candidate_id: text

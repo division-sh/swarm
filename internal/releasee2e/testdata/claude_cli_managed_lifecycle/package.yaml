@@ -5,3 +5,7 @@ flows:
   - id: worker
     flow: worker
     mode: singleton
+connect:
+  - event: task.assigned
+    from: .
+    to: worker

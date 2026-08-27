@@ -21,7 +21,7 @@ import (
 func TestDefaultWorkflowContractValidationRejectsHarnessInput(t *testing.T) {
 	source := loadHarnessInjectionValidationSource(t)
 	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, DefaultWorkflowContractValidationOptions(nil, executionposture.Live))
-	if err == nil || !strings.Contains(err.Error(), "production validation rejects test-only input source: harness at worker.work_requested") {
+	if err == nil || !strings.Contains(err.Error(), "production validation rejects test-only input source: harness at worker.work.requested") {
 		t.Fatalf("ValidateWorkflowContractSurface error = %v, want harness production rejection", err)
 	}
 	if result.HarnessInjectedInputCount != 1 || result.HarnessObservedOutputCount != 1 || result.ProductionValid {
@@ -50,7 +50,7 @@ func TestProductionValidationRejectsHarnessOutputIndependently(t *testing.T) {
 	opts := DefaultWorkflowContractValidationOptions(nil, executionposture.Live)
 	opts.AllowHarnessInputs = true
 	result, err := ValidateWorkflowContractSurface(testAuthorActivityContext(context.Background()), source, opts)
-	if err == nil || !strings.Contains(err.Error(), "production validation rejects test-only output sink: harness at worker.work_completed") {
+	if err == nil || !strings.Contains(err.Error(), "production validation rejects test-only output sink: harness at worker.work.completed") {
 		t.Fatalf("ValidateWorkflowContractSurface error = %v, want harness output production rejection", err)
 	}
 	if result.HarnessInjectedInputCount != 0 || result.HarnessObservedOutputCount != 1 || result.ProductionValid {
@@ -91,7 +91,7 @@ func TestValidateWorkflowContractSurfaceRejectsProgrammaticUnknownOutputSink(t *
 			Event: "root.completed", Sink: runtimecontracts.FlowOutputSink(255),
 		}}}},
 	}
-	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err == nil || !strings.Contains(err.Error(), "output pin sink is invalid") {
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err == nil || !strings.Contains(err.Error(), "invalid sink") {
 		t.Fatalf("CompileWorkflowSemantics error = %v, want invalid sink rejection", err)
 	}
 }
