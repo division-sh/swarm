@@ -115,15 +115,8 @@ func Acquire(coordinate Coordinate) (*EpochAuthority, error) {
 	if filepath.Clean(coordinate.DatabasePath) != canonical.DatabasePath || filepath.Clean(coordinate.AuthorityPath) != canonical.AuthorityPath {
 		return nil, errors.New("dev scratch coordinate does not match its canonical project owner")
 	}
-	if err := os.MkdirAll(filepath.Dir(canonical.DatabasePath), 0o700); err != nil {
-		return nil, fmt.Errorf("create dev scratch state directory: %w", err)
-	}
-	resolvedParent, err := filepath.EvalSymlinks(filepath.Dir(canonical.DatabasePath))
-	if err != nil {
-		return nil, fmt.Errorf("resolve dev scratch state directory: %w", err)
-	}
-	if filepath.Clean(resolvedParent) != filepath.Dir(canonical.DatabasePath) {
-		return nil, errors.New("dev scratch state directory aliases are not ownership authority")
+	if err := establishStateDirectory(canonical); err != nil {
+		return nil, err
 	}
 	lock, err := acquirePlatformLock(canonical.AuthorityPath)
 	if err != nil {
@@ -144,6 +137,75 @@ func Acquire(coordinate Coordinate) (*EpochAuthority, error) {
 		return nil, errors.Join(fmt.Errorf("write dev scratch epoch diagnostic: %w", err), lock.release())
 	}
 	return &EpochAuthority{coordinate: canonical, epochID: epochID, lock: lock, state: authorityAcquired}, nil
+}
+
+type directoryIdentity struct {
+	path string
+	info os.FileInfo
+}
+
+func establishStateDirectory(coordinate Coordinate) error {
+	project, err := inspectCanonicalDirectory(coordinate.ProjectRoot, "project root")
+	if err != nil {
+		return err
+	}
+	statePath := filepath.Join(coordinate.ProjectRoot, ".swarm")
+	state, err := ensureCanonicalDirectory(statePath, "state directory")
+	if err != nil {
+		return err
+	}
+	if err := revalidateDirectoryIdentities(project, state); err != nil {
+		return err
+	}
+	storesPath := filepath.Dir(coordinate.DatabasePath)
+	stores, err := ensureCanonicalDirectory(storesPath, "store directory")
+	if err != nil {
+		return err
+	}
+	return revalidateDirectoryIdentities(project, state, stores)
+}
+
+func ensureCanonicalDirectory(path, label string) (directoryIdentity, error) {
+	_, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		if err := os.Mkdir(path, 0o700); err != nil {
+			return directoryIdentity{}, fmt.Errorf("create dev scratch %s: %w", label, err)
+		}
+	} else if err != nil {
+		return directoryIdentity{}, fmt.Errorf("inspect dev scratch %s: %w", label, err)
+	}
+	return inspectCanonicalDirectory(path, label)
+}
+
+func inspectCanonicalDirectory(path, label string) (directoryIdentity, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return directoryIdentity{}, fmt.Errorf("inspect dev scratch %s: %w", label, err)
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return directoryIdentity{}, fmt.Errorf("dev scratch %s must be an unaliased directory", label)
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return directoryIdentity{}, fmt.Errorf("resolve dev scratch %s identity: %w", label, err)
+	}
+	if filepath.Clean(resolved) != filepath.Clean(path) {
+		return directoryIdentity{}, fmt.Errorf("dev scratch %s aliases are not ownership authority", label)
+	}
+	return directoryIdentity{path: path, info: info}, nil
+}
+
+func revalidateDirectoryIdentities(identities ...directoryIdentity) error {
+	for _, identity := range identities {
+		current, err := inspectCanonicalDirectory(identity.path, "state ancestor")
+		if err != nil {
+			return err
+		}
+		if !os.SameFile(identity.info, current.info) {
+			return fmt.Errorf("dev scratch state ancestor %s changed during acquisition", identity.path)
+		}
+	}
+	return nil
 }
 
 // PrepareFreshStore validates every predecessor artifact before removing any
