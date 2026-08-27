@@ -380,7 +380,7 @@ func validateReleaseDockerCreate(root string, args []string) error {
 	if create.workdir != expected.workdir || create.privileged != expected.privileged {
 		return fmt.Errorf("unexpected create workdir or privilege for %s", create.name)
 	}
-	if err := validateReleaseDockerMounts(root, create.mounts, expected.requiredMount); err != nil {
+	if err := validateReleaseDockerMounts(root, create.mounts, expected.requiredMount, create.labels["dev.swarm.data_projection_id"]); err != nil {
 		return fmt.Errorf("create %s mounts: %w", create.name, err)
 	}
 	if err := validateReleaseDockerLabels(create, expected.kind, expected.resetEligible, expected.source, expected.scope); err != nil {
@@ -447,7 +447,7 @@ func parseReleaseDockerCreate(args []string) (releaseDockerCreate, error) {
 	return create, nil
 }
 
-func validateReleaseDockerMounts(root string, raw []string, required map[string]string) error {
+func validateReleaseDockerMounts(root string, raw []string, required map[string]string, dataProjectionID string) error {
 	releaseRoot := filepath.Dir(filepath.Clean(root))
 	requiredProjectMounts := map[string]string{
 		"/opt/swarm/contracts": filepath.Join(releaseRoot, "contracts"),
@@ -472,6 +472,15 @@ func validateReleaseDockerMounts(root string, raw []string, required map[string]
 			if mode != "ro" || !filepath.IsAbs(source) || !releasePathsEqual(source, wantSource) {
 				return fmt.Errorf("project mount %q does not match %s:%s:ro", mount, wantSource, target)
 			}
+		case "/data":
+			if !validReleaseDataProjectionID(dataProjectionID) {
+				return fmt.Errorf("data mount %q has no typed projection identity", mount)
+			}
+			digest := strings.TrimPrefix(dataProjectionID, "data-projection-v1:sha256:")
+			wantRoot := filepath.Join(os.TempDir(), "swarm", "data-projections")
+			if mode != "ro" || filepath.Dir(source) != wantRoot || filepath.Base(source) != "a_"+digest {
+				return fmt.Errorf("data mount %q does not match typed projection %s", mount, dataProjectionID)
+			}
 		default:
 			wantSource, ok := required[target]
 			if !ok || mode != "" || source != wantSource {
@@ -491,6 +500,11 @@ func validateReleaseDockerMounts(root string, raw []string, required map[string]
 	for target := range required {
 		if _, ok := seen[target]; !ok {
 			return fmt.Errorf("missing required mount target %q", target)
+		}
+	}
+	if dataProjectionID != "" {
+		if _, ok := seen["/data"]; !ok {
+			return fmt.Errorf("missing required data projection mount")
 		}
 	}
 	return nil
@@ -549,11 +563,19 @@ func validateReleaseDockerLabels(create releaseDockerCreate, kind, resetEligible
 				return fmt.Errorf("create agent identity label %s = %q, want %q", key, create.labels[key], want)
 			}
 		}
-		if runID := create.labels["dev.swarm.run_id"]; runID != "" {
+		runID := create.labels["dev.swarm.run_id"]
+		projectionID := create.labels["dev.swarm.data_projection_id"]
+		if runID != "" {
 			allowed["dev.swarm.run_id"] = true
 			if !validReleaseUUID(runID) {
 				return fmt.Errorf("create agent run identity is invalid")
 			}
+			allowed["dev.swarm.data_projection_id"] = true
+			if !validReleaseDataProjectionID(projectionID) {
+				return fmt.Errorf("create agent data projection identity is invalid")
+			}
+		} else if projectionID != "" {
+			return fmt.Errorf("create run-independent agent carries data projection identity")
 		}
 	}
 	if len(create.labels) != len(allowed) {
@@ -565,6 +587,16 @@ func validateReleaseDockerLabels(create releaseDockerCreate, kind, resetEligible
 		}
 	}
 	return nil
+}
+
+func validReleaseDataProjectionID(value string) bool {
+	const prefix = "data-projection-v1:sha256:"
+	digest := strings.TrimPrefix(strings.TrimSpace(value), prefix)
+	if len(digest) != 64 || prefix+digest != value || strings.ToLower(digest) != digest {
+		return false
+	}
+	decoded, err := hex.DecodeString(digest)
+	return err == nil && len(decoded) == 32
 }
 
 func releaseE2EContainerName(name string) bool {

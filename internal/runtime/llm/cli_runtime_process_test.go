@@ -22,8 +22,10 @@ import (
 )
 
 type workspaceResolverStub struct {
-	target *workspace.Target
-	err    error
+	target          *workspace.Target
+	err             error
+	admissionTarget *workspace.Target
+	admissionErr    error
 }
 
 func beginClaudeTestCompletion(t *testing.T, parent context.Context, request string) (*effecttest.Harness, context.Context, *completionDispatch) {
@@ -89,6 +91,16 @@ func (s workspaceResolverStub) ResolveWorkspace(context.Context, runtimeactors.A
 	return s.target, nil
 }
 
+func (s workspaceResolverStub) ResolveWorkspaceForCapabilityAdmission(context.Context, runtimeactors.AgentConfig) (*workspace.Target, error) {
+	if s.admissionErr != nil {
+		return nil, s.admissionErr
+	}
+	if s.admissionTarget != nil {
+		return s.admissionTarget, nil
+	}
+	return s.ResolveWorkspace(context.Background(), runtimeactors.AgentConfig{})
+}
+
 func TestClaudeCLIRuntimeResolveWorkspace_RequiresResolver(t *testing.T) {
 	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", nil, nil, nil)
 	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
@@ -112,6 +124,31 @@ func TestClaudeCLIRuntimeResolveWorkspace_RequiresContainerTarget(t *testing.T) 
 	_, err := runtime.resolveWorkspace(ctx)
 	if !errors.Is(err, ErrClaudeWorkspaceRequired) {
 		t.Fatalf("expected ErrClaudeWorkspaceRequired, got %v", err)
+	}
+}
+
+func TestClaudeCLIRuntimeResolveWorkspaceForCapabilityAdmissionUsesNonExecutingResolver(t *testing.T) {
+	resolver := workspaceResolverStub{
+		err: errors.New("execution resolver was called"),
+		admissionTarget: &workspace.Target{
+			Backend: workspace.BackendDocker, Container: "admission-container", Workdir: "/workspace",
+		},
+	}
+	runtime := NewClaudeCLIRuntime(&config.Config{}, sessions.NewInMemoryRegistry(0), "worker-1", resolver, nil, nil)
+	ctx := runtimeactors.WithActor(unmanagedLLMTestContext(), runtimeactors.AgentConfig{
+		ExecutionMode: "live",
+		ID:            "campaign-coordinator",
+	})
+
+	target, err := runtime.resolveWorkspaceForCapabilityAdmission(ctx)
+	if err != nil {
+		t.Fatalf("resolveWorkspaceForCapabilityAdmission: %v", err)
+	}
+	if target.Container != "admission-container" {
+		t.Fatalf("capability admission target = %#v", target)
+	}
+	if _, err := runtime.resolveWorkspace(ctx); err == nil || !strings.Contains(err.Error(), "execution resolver was called") {
+		t.Fatalf("execution resolveWorkspace error = %v", err)
 	}
 }
 

@@ -359,6 +359,14 @@ func (r *ClaudeCLIRuntime) buildCommand(ctx context.Context, args []string, targ
 }
 
 func (r *ClaudeCLIRuntime) resolveWorkspace(ctx context.Context) (*workspace.Target, error) {
+	return r.resolveWorkspaceTarget(ctx, false)
+}
+
+func (r *ClaudeCLIRuntime) resolveWorkspaceForCapabilityAdmission(ctx context.Context) (*workspace.Target, error) {
+	return r.resolveWorkspaceTarget(ctx, true)
+}
+
+func (r *ClaudeCLIRuntime) resolveWorkspaceTarget(ctx context.Context, capabilityAdmission bool) (*workspace.Target, error) {
 	if r.workspaces == nil {
 		return nil, fmt.Errorf("%w: workspace resolver is not configured", ErrClaudeWorkspaceRequired)
 	}
@@ -366,7 +374,13 @@ func (r *ClaudeCLIRuntime) resolveWorkspace(ctx context.Context) (*workspace.Tar
 	if !ok {
 		return nil, fmt.Errorf("%w: actor context is missing", ErrClaudeWorkspaceRequired)
 	}
-	target, err := r.workspaces.ResolveWorkspace(ctx, actor)
+	var target *workspace.Target
+	var err error
+	if capabilityAdmission {
+		target, err = workspace.ResolveForCapabilityAdmission(ctx, r.workspaces, actor)
+	} else {
+		target, err = r.workspaces.ResolveWorkspace(ctx, actor)
+	}
 	if err != nil {
 		return nil, err
 	}

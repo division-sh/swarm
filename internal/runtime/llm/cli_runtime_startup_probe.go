@@ -27,7 +27,7 @@ type cliStartupProbeResult struct {
 
 func (r *ClaudeCLIRuntime) ProbeStartupVisibleToolSurface(ctx context.Context, actor models.AgentConfig, systemPrompt string, tools []ToolDefinition) (*Response, error) {
 	ctx = models.WithActor(ctx, actor)
-	target, err := r.resolveWorkspace(ctx)
+	target, err := r.resolveWorkspaceForCapabilityAdmission(ctx)
 	if err != nil {
 		return nil, err
 	}

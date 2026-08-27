@@ -21,6 +21,13 @@ type NativeToolAdmissionOptions struct {
 	Workspaces  workspace.Resolver
 }
 
+type workspaceResolutionPurpose uint8
+
+const (
+	workspaceResolutionExecution workspaceResolutionPurpose = iota + 1
+	workspaceResolutionCapabilityAdmission
+)
+
 type NativeToolAdmissionDecision struct {
 	Capability             string
 	ToolNames              []string
@@ -39,7 +46,15 @@ const (
 )
 
 func ValidateNativeToolAgentAdmission(ctx context.Context, actor models.AgentConfig, opts NativeToolAdmissionOptions) error {
-	decisions := NativeToolAdmissionDecisions(ctx, actor, opts)
+	return validateNativeToolAgentAdmission(ctx, actor, opts, workspaceResolutionExecution)
+}
+
+func validateNativeToolAgentCapabilityAdmission(ctx context.Context, actor models.AgentConfig, opts NativeToolAdmissionOptions) error {
+	return validateNativeToolAgentAdmission(ctx, actor, opts, workspaceResolutionCapabilityAdmission)
+}
+
+func validateNativeToolAgentAdmission(ctx context.Context, actor models.AgentConfig, opts NativeToolAdmissionOptions, purpose workspaceResolutionPurpose) error {
+	decisions := nativeToolAdmissionDecisions(ctx, actor, opts, purpose)
 	var denied []string
 	for _, decision := range decisions {
 		if decision.Admitted {
@@ -59,6 +74,10 @@ func ValidateNativeToolAgentAdmission(ctx context.Context, actor models.AgentCon
 }
 
 func NativeToolAdmissionDecisions(ctx context.Context, actor models.AgentConfig, opts NativeToolAdmissionOptions) []NativeToolAdmissionDecision {
+	return nativeToolAdmissionDecisions(ctx, actor, opts, workspaceResolutionExecution)
+}
+
+func nativeToolAdmissionDecisions(ctx context.Context, actor models.AgentConfig, opts NativeToolAdmissionOptions, purpose workspaceResolutionPurpose) []NativeToolAdmissionDecision {
 	if !actor.NativeTools.Any() {
 		return nil
 	}
@@ -66,12 +85,12 @@ func NativeToolAdmissionDecisions(ctx context.Context, actor models.AgentConfig,
 	sort.Strings(capabilities)
 	decisions := make([]NativeToolAdmissionDecision, 0, len(capabilities))
 	for _, capability := range capabilities {
-		decisions = append(decisions, nativeToolAdmissionDecision(ctx, actor, capability, opts))
+		decisions = append(decisions, nativeToolAdmissionDecision(ctx, actor, capability, opts, purpose))
 	}
 	return decisions
 }
 
-func nativeToolAdmissionDecision(ctx context.Context, actor models.AgentConfig, capability string, opts NativeToolAdmissionOptions) NativeToolAdmissionDecision {
+func nativeToolAdmissionDecision(ctx context.Context, actor models.AgentConfig, capability string, opts NativeToolAdmissionOptions, purpose workspaceResolutionPurpose) NativeToolAdmissionDecision {
 	capability = strings.TrimSpace(capability)
 	decision := NativeToolAdmissionDecision{
 		Capability: capability,
@@ -99,13 +118,13 @@ func nativeToolAdmissionDecision(ctx context.Context, actor models.AgentConfig, 
 	}
 	switch capability {
 	case "bash":
-		return admitWorkspaceCapability(ctx, actor, decision, opts.Workspaces, workspace.ExecutionCapabilityNativeCommand)
+		return admitWorkspaceCapability(ctx, actor, decision, opts.Workspaces, workspace.ExecutionCapabilityNativeCommand, purpose)
 	case "file_io":
-		if first := workspaceCapabilityDenial(ctx, actor, opts.Workspaces, workspace.ExecutionCapabilityFileRead); first != "" {
+		if first := workspaceCapabilityDenial(ctx, actor, opts.Workspaces, workspace.ExecutionCapabilityFileRead, purpose); first != "" {
 			decision.DenialReason = first
 			return decision
 		}
-		if second := workspaceCapabilityDenial(ctx, actor, opts.Workspaces, workspace.ExecutionCapabilityFileWrite); second != "" {
+		if second := workspaceCapabilityDenial(ctx, actor, opts.Workspaces, workspace.ExecutionCapabilityFileWrite, purpose); second != "" {
 			decision.DenialReason = second
 			return decision
 		}
@@ -134,8 +153,8 @@ func nativeToolCapabilitySupported(caps llm.NativeToolCapabilities, capability s
 	}
 }
 
-func admitWorkspaceCapability(ctx context.Context, actor models.AgentConfig, decision NativeToolAdmissionDecision, resolver workspace.Resolver, capability workspace.ExecutionCapability) NativeToolAdmissionDecision {
-	if reason := workspaceCapabilityDenial(ctx, actor, resolver, capability); reason != "" {
+func admitWorkspaceCapability(ctx context.Context, actor models.AgentConfig, decision NativeToolAdmissionDecision, resolver workspace.Resolver, capability workspace.ExecutionCapability, purpose workspaceResolutionPurpose) NativeToolAdmissionDecision {
+	if reason := workspaceCapabilityDenial(ctx, actor, resolver, capability, purpose); reason != "" {
 		decision.DenialReason = reason
 		return decision
 	}
@@ -145,11 +164,20 @@ func admitWorkspaceCapability(ctx context.Context, actor models.AgentConfig, dec
 	return decision
 }
 
-func workspaceCapabilityDenial(ctx context.Context, actor models.AgentConfig, resolver workspace.Resolver, capability workspace.ExecutionCapability) string {
+func workspaceCapabilityDenial(ctx context.Context, actor models.AgentConfig, resolver workspace.Resolver, capability workspace.ExecutionCapability, purpose workspaceResolutionPurpose) string {
 	if resolver == nil {
 		return "workspace resolver is not configured"
 	}
-	target, err := resolver.ResolveWorkspace(ctx, actor)
+	var target *workspace.Target
+	var err error
+	switch purpose {
+	case workspaceResolutionCapabilityAdmission:
+		target, err = workspace.ResolveForCapabilityAdmission(ctx, resolver, actor)
+	case workspaceResolutionExecution:
+		target, err = resolver.ResolveWorkspace(ctx, actor)
+	default:
+		return "workspace resolution purpose is invalid"
+	}
 	if err != nil {
 		return err.Error()
 	}

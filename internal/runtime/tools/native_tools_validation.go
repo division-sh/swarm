@@ -82,7 +82,7 @@ func ValidateNativeToolBootConfig(ctx context.Context, source semanticview.Sourc
 			failures = append(failures, err.Error())
 			continue
 		}
-		if err := ValidateNativeToolAgentAdmission(ctx, actor, NativeToolAdmissionOptions{
+		if err := validateNativeToolAgentCapabilityAdmission(ctx, actor, NativeToolAdmissionOptions{
 			Runtime:     resolved.Runtime,
 			Credentials: store,
 			Source:      source,

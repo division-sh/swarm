@@ -20064,7 +20064,8 @@ workspace_model:
       The workspace lifecycle asks the typed projection provider to materialize the actor's exact accessible static files
       and pinned resource rows into a private generated directory immediately before execution. Docker and host backends
       consume that same provider and mount/map only its returned root. The projection may be rebuilt because its canonical
-      bytes remain owned by the admitted bundle and selected store.
+      bytes remain owned by the admitted bundle and selected store. Run-independent startup capability admission resolves
+      only the workspace execution shape and MUST NOT materialize, mount, or inspect a run-bound data projection.
     identity_and_permissions: >
       The typed projection result carries a content identity derived from the canonical access manifest. Docker managed-
       container identity includes that projection identity and the exact concrete actor. A per-flow-instance workspace may
