@@ -3,11 +3,14 @@ package runtimepersistence
 import (
 	"context"
 	"errors"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/operatorchannel"
+	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -28,6 +31,135 @@ func TestChannelOnboardingSelectedStoreContractParity(t *testing.T) {
 			runChannelOnboardingStoreContract(t, store)
 		})
 	}
+}
+
+func TestRetiredPreparingOnboardingReleasesUncheckpointedCredentialSelectedStoreParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			var selected channelonboarding.Store
+			switch backend {
+			case "sqlite":
+				selected = newBootstrappedSQLiteRuntimeStoreForTest(t)
+			case "postgres":
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				selected = admitTestPostgresStore(t, db)
+			}
+			ctx := context.Background()
+			now := time.Date(2026, 8, 27, 14, 15, 0, 0, time.UTC)
+			principal, err := selected.(operatorchannel.Store).EnsureOperatorPrincipal(ctx, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := channelOnboardingStartRequest(principal.ID, now)
+			op, err := selected.ReserveChannelOnboarding(ctx, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reservation := op.CredentialReservations[0]
+			storeKey := strings.TrimSpace(reservation.StoreKey) + ".operation." + operatorchannel.Hash(
+				"channel-onboarding-credential-occurrence-v1", strings.TrimSpace(op.OperationID), strings.TrimSpace(reservation.Role),
+			)
+			receipt := operatorchannel.Hash("channel-onboarding-credential-receipt-v1", op.OperationID, reservation.Role)
+			credentialPath := filepath.Join(t.TempDir(), "credentials.json")
+			credentialStore, err := runtimecredentials.NewFileStore(credentialPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writer, err := channelonboarding.NewCredentialWriter(credentialStore)
+			if err != nil {
+				t.Fatal(err)
+			}
+			written, err := writer.Admit(ctx, channelonboarding.CredentialWriteRequest{StoreKey: storeKey, Value: "operation-secret", Receipt: receipt})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Reconstruct the credential and onboarding owners before startup reconciliation.
+			reopenedStore, err := runtimecredentials.NewFileStore(credentialPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reopenedWriter, err := channelonboarding.NewCredentialWriter(reopenedStore)
+			if err != nil {
+				t.Fatal(err)
+			}
+			emptyCatalog, err := channelonboarding.NewCandidateCatalog(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			service, err := channelonboarding.NewService(channelonboarding.ServiceOptions{
+				Store: selected, Identities: retiredOnboardingIdentities{principal: principal}, Credentials: reopenedWriter,
+				Catalog:     func() (*channelonboarding.CandidateCatalog, error) { return emptyCatalog, nil },
+				Activations: retiredOnboardingActivations{}, Confirmation: retiredOnboardingConfirmation{},
+				Readiness: retiredOnboardingReadiness{}, Now: func() time.Time { return now.Add(time.Minute) },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := service.ReconcileLocal(ctx); err != nil {
+				t.Fatal(err)
+			}
+			retired, err := selected.GetChannelOnboarding(ctx, op.OperationID)
+			if err != nil || retired.Phase != channelonboarding.PhaseFailed || retired.FailureCode != "runtime_context_retired" {
+				t.Fatalf("retired operation = %#v err=%v", retired, err)
+			}
+			if _, found, err := reopenedStore.Get(ctx, written.StoreKey); err != nil || found {
+				t.Fatalf("restarted operation credential found=%v err=%v", found, err)
+			}
+		})
+	}
+}
+
+type retiredOnboardingIdentities struct {
+	principal operatorchannel.Principal
+}
+
+func (i retiredOnboardingIdentities) Principal() (operatorchannel.Principal, error) {
+	return i.principal, nil
+}
+func (retiredOnboardingIdentities) Begin(context.Context, string, operatorchannel.OperationKind, int64, string, string, bool, time.Time) (operatorchannel.Operation, error) {
+	return operatorchannel.Operation{}, operatorchannel.ErrNotFound
+}
+func (retiredOnboardingIdentities) GetOperation(context.Context, string) (operatorchannel.Operation, error) {
+	return operatorchannel.Operation{}, operatorchannel.ErrNotFound
+}
+func (retiredOnboardingIdentities) ExpireOperation(context.Context, string, int64, time.Time) (operatorchannel.Operation, error) {
+	return operatorchannel.Operation{}, operatorchannel.ErrNotFound
+}
+func (retiredOnboardingIdentities) CurrentBinding(context.Context, operatorchannel.InterfaceIdentity) (operatorchannel.Binding, error) {
+	return operatorchannel.Binding{}, operatorchannel.ErrNotFound
+}
+func (retiredOnboardingIdentities) Readback(context.Context) ([]operatorchannel.Readback, error) {
+	return nil, nil
+}
+
+type retiredOnboardingActivations struct{}
+
+func (retiredOnboardingActivations) RefreshChannelActivations(context.Context) error { return nil }
+func (retiredOnboardingActivations) PreflightChannelActivation(context.Context, channelonboarding.Operation, channelonboarding.Candidate) error {
+	return nil
+}
+func (retiredOnboardingActivations) RefreshChannelActivationCandidates(context.Context) error {
+	return nil
+}
+func (retiredOnboardingActivations) PublishChannelActivation(context.Context, channelonboarding.Operation, channelonboarding.ConnectedChannelActivation) error {
+	return nil
+}
+func (retiredOnboardingActivations) PromoteChannelRegistration(context.Context, channelonboarding.Operation, channelonboarding.ConnectedChannelActivation) error {
+	return nil
+}
+
+type retiredOnboardingConfirmation struct{}
+
+func (retiredOnboardingConfirmation) DispatchChannelConfirmation(context.Context, channelonboarding.ConfirmationRequest) (channelonboarding.ConfirmationResult, error) {
+	return channelonboarding.ConfirmationResult{}, nil
+}
+
+type retiredOnboardingReadiness struct{}
+
+func (retiredOnboardingReadiness) ProjectConnectedChannelReadiness(context.Context, channelonboarding.Operation, channelonboarding.Candidate) (channelonboarding.ConnectedChannelReadiness, bool, error) {
+	return channelonboarding.ConnectedChannelReadiness{}, false, nil
 }
 
 func TestChannelRebindPublicationRetiresEverySiblingActivationForInterface(t *testing.T) {

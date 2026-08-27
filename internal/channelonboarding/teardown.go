@@ -156,8 +156,8 @@ type DestructiveStore interface {
 	ListChannelOnboardingOperations(context.Context) ([]Operation, error)
 }
 
-type CredentialReleaser interface {
-	Release(context.Context, CredentialAdmission) (bool, error)
+type OperationCredentialReleaser interface {
+	ReleaseOperation(context.Context, Operation) error
 }
 
 type DestructiveIdentityLifecycle interface {
@@ -172,12 +172,12 @@ type DestructiveIdentityLifecycle interface {
 type DestructiveService struct {
 	store       DestructiveStore
 	identities  DestructiveIdentityLifecycle
-	credentials CredentialReleaser
+	credentials OperationCredentialReleaser
 	activations ActivationAuthorityRefresher
 	now         func() time.Time
 }
 
-func NewDestructiveService(store DestructiveStore, identities DestructiveIdentityLifecycle, credentials CredentialReleaser, activations ActivationAuthorityRefresher, now func() time.Time) (*DestructiveService, error) {
+func NewDestructiveService(store DestructiveStore, identities DestructiveIdentityLifecycle, credentials OperationCredentialReleaser, activations ActivationAuthorityRefresher, now func() time.Time) (*DestructiveService, error) {
 	if store == nil || identities == nil || credentials == nil || activations == nil {
 		return nil, fmt.Errorf("channel destructive lifecycle requires teardown, identity, credential, and activation owners")
 	}
@@ -402,10 +402,8 @@ func (s *DestructiveService) releaseScopedCredentials(ctx context.Context, scope
 		if !teardownScopeMatchesOperation(scope, operation) {
 			continue
 		}
-		for _, admission := range operation.CredentialAdmissions {
-			if _, err := s.credentials.Release(ctx, admission); err != nil {
-				return fmt.Errorf("release channel credential %q: %w", admission.StoreKey, err)
-			}
+		if err := s.credentials.ReleaseOperation(ctx, operation); err != nil {
+			return fmt.Errorf("release channel onboarding operation %s credentials: %w", operation.OperationID, err)
 		}
 	}
 	return nil

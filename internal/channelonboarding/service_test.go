@@ -29,16 +29,22 @@ func TestOverdueIdentityTerminalizesOnboardingAndReleasesWrittenCredentials(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	written, err := credentials.Admit(context.Background(), CredentialWriteRequest{StoreKey: "channel.telegram.provider", Value: "token", Receipt: "operation/provider"})
+	operationID := uuid.NewString()
+	reservations := credentialReservations(candidate)
+	providerReservation := reservations[0]
+	written, err := credentials.Admit(context.Background(), CredentialWriteRequest{
+		StoreKey: operationCredentialStoreKey(providerReservation.StoreKey, operationID, providerReservation.Role),
+		Value:    "token", Receipt: credentialReceipt(operationID, providerReservation.Role),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	identityOperationID := uuid.NewString()
 	op := Operation{
-		OperationID: uuid.NewString(), RequestKeyHash: "expired-key", RequestHash: "expired-request", PrincipalID: "principal-a",
+		OperationID: operationID, RequestKeyHash: "expired-key", RequestHash: "expired-request", PrincipalID: "principal-a",
 		Verb: VerbConnect, Provider: candidate.Provider, Interface: candidate.Interface, Coordinate: candidate.Coordinate,
 		TargetSelector: candidate.Target.Selector, Posture: candidate.Posture, Ceremony: candidate.Ceremony,
-		Phase: PhaseAwaitingExternalIdentity, Revision: 3, SaveProof: true, CredentialReservations: credentialReservations(candidate),
+		Phase: PhaseAwaitingExternalIdentity, Revision: 3, SaveProof: true, CredentialReservations: reservations,
 		CredentialAdmissions: []CredentialAdmission{{Role: candidate.ProviderCredentialRole, StoreKey: written.StoreKey, Kind: CredentialAdmissionWritten, Receipt: written.Receipt, Epoch: written.Epoch}},
 		IdentityOperationID:  identityOperationID, RequestedAt: now, UpdatedAt: now,
 	}
@@ -137,15 +143,21 @@ func TestRecoveryTerminalizesOperationWhoseRuntimeContextIsNoLongerCurrent(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	written, err := credentials.Admit(context.Background(), CredentialWriteRequest{StoreKey: "channel.telegram.provider.operation", Value: "token", Receipt: "obsolete/provider"})
+	operationID := uuid.NewString()
+	reservations := credentialReservations(candidate)
+	providerReservation := reservations[0]
+	written, err := credentials.Admit(context.Background(), CredentialWriteRequest{
+		StoreKey: operationCredentialStoreKey(providerReservation.StoreKey, operationID, providerReservation.Role),
+		Value:    "token", Receipt: credentialReceipt(operationID, providerReservation.Role),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	op := Operation{
-		OperationID: uuid.NewString(), RequestKeyHash: "obsolete-key", RequestHash: "obsolete-request", PrincipalID: "principal-a",
+		OperationID: operationID, RequestKeyHash: "obsolete-key", RequestHash: "obsolete-request", PrincipalID: "principal-a",
 		Verb: VerbConnect, Provider: candidate.Provider, Interface: candidate.Interface, Coordinate: candidate.Coordinate,
 		TargetSelector: candidate.Target.Selector, Posture: candidate.Posture, Ceremony: candidate.Ceremony,
-		Phase: PhaseAwaitingExternalIdentity, Revision: 3, SaveProof: true, CredentialReservations: credentialReservations(candidate),
+		Phase: PhaseAwaitingExternalIdentity, Revision: 3, SaveProof: true, CredentialReservations: reservations,
 		CredentialAdmissions: []CredentialAdmission{{Role: candidate.ProviderCredentialRole, StoreKey: written.StoreKey, Kind: CredentialAdmissionWritten, Receipt: written.Receipt, Epoch: written.Epoch}},
 		RequestedAt:          now, UpdatedAt: now,
 	}
@@ -649,6 +661,105 @@ func TestChannelOnboardingRecoversStagedCredentialAfterAdmissionCommitFailure(t 
 				}
 			}
 		})
+	}
+}
+
+func TestRetiredPreparingOperationReleasesUncommittedStagedCredentials(t *testing.T) {
+	for _, verb := range []Verb{VerbConnect, VerbReconnect, VerbRebind} {
+		for _, recovery := range []string{"local", "startup"} {
+			t.Run(string(verb)+"/"+recovery, func(t *testing.T) {
+				now := time.Date(2026, 8, 27, 13, 45, 0, 0, time.UTC)
+				candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
+				currentCatalog, err := NewCandidateCatalog([]Candidate{candidate})
+				if err != nil {
+					t.Fatal(err)
+				}
+				retiredCatalog, err := NewCandidateCatalog(nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				catalog := currentCatalog
+				credentialPath := filepath.Join(t.TempDir(), "credentials.json")
+				credentialStore, err := runtimecredentials.NewFileStore(credentialPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				credentials, err := NewCredentialWriter(credentialStore)
+				if err != nil {
+					t.Fatal(err)
+				}
+				store := &cancellationTestStore{advanceErrOnce: errors.New("selected-store admission unavailable")}
+				identities := &cancellationTestIdentities{}
+				var predecessorAdmissions []CredentialAdmission
+				if verb != VerbConnect {
+					predecessor := testSucceededOperation(candidate, now.Add(-time.Hour))
+					predecessorAdmissions = writeTestOperationCredentials(t, credentials, predecessor, "predecessor")
+					predecessor.CredentialAdmissions = predecessorAdmissions
+					store.activation = testCurrentActivation(predecessor, predecessorAdmissions, now.Add(-time.Hour))
+					store.history = []Operation{predecessor}
+					identities.binding = operatorchannel.Binding{
+						PrincipalID: "principal-a", Interface: candidate.Interface, ConversationRef: "conversation-a",
+						Revision: 3, Status: operatorchannel.BindingCurrent,
+					}
+				}
+				newService := func(writer *CredentialWriter) *Service {
+					service, serviceErr := NewService(ServiceOptions{
+						Store: store, Identities: identities, Credentials: writer,
+						Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: &cancellationTestActivations{},
+						Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
+					})
+					if serviceErr != nil {
+						t.Fatal(serviceErr)
+					}
+					return service
+				}
+
+				if _, err := newService(credentials).Start(context.Background(), StartInput{
+					Verb: verb, Selection: CandidateSelection{Provider: candidate.Provider}, ProviderCredential: "operation-token",
+				}); err == nil || !strings.Contains(err.Error(), "selected-store admission unavailable") {
+					t.Fatalf("initial advance error = %v", err)
+				}
+				if store.op.Phase != PhasePreparing || len(store.op.CredentialAdmissions) != 0 {
+					t.Fatalf("operation after lost admission checkpoint = %#v", store.op)
+				}
+				providerReservation := store.op.CredentialReservations[0]
+				stagedKey := operationCredentialStoreKey(providerReservation.StoreKey, store.op.OperationID, providerReservation.Role)
+				if _, found, err := credentialStore.Get(context.Background(), stagedKey); err != nil || !found {
+					t.Fatalf("staged credential before retirement found=%v err=%v", found, err)
+				}
+
+				// Reopen the credential owner to prove crash/startup rediscovery rather than in-memory cleanup.
+				reopenedStore, err := runtimecredentials.NewFileStore(credentialPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				reopenedCredentials, err := NewCredentialWriter(reopenedStore)
+				if err != nil {
+					t.Fatal(err)
+				}
+				catalog = retiredCatalog
+				restarted := newService(reopenedCredentials)
+				if recovery == "local" {
+					err = restarted.ReconcileLocal(context.Background())
+				} else {
+					err = restarted.Recover(context.Background())
+				}
+				if err != nil {
+					t.Fatalf("%s retirement recovery: %v", recovery, err)
+				}
+				if store.op.Phase != PhaseFailed || store.op.FailureCode != "runtime_context_retired" {
+					t.Fatalf("retired operation = %#v", store.op)
+				}
+				if _, found, err := reopenedStore.Get(context.Background(), stagedKey); err != nil || found {
+					t.Fatalf("retired staged credential found=%v err=%v", found, err)
+				}
+				for _, admission := range predecessorAdmissions {
+					if _, found, err := reopenedStore.Get(context.Background(), admission.StoreKey); err != nil || !found {
+						t.Fatalf("predecessor credential %q found=%v err=%v", admission.StoreKey, found, err)
+					}
+				}
+			})
+		}
 	}
 }
 

@@ -71,20 +71,37 @@ const (
 	PhaseRetired                      Phase = "retired"
 )
 
+var validPhases = [...]Phase{
+	PhasePreparing,
+	PhaseCredentialsAdmitted,
+	PhaseActivatingProvider,
+	PhaseAwaitingExternalIdentity,
+	PhaseAwaitingOperatorConfirmation,
+	PhasePublishingActivation,
+	PhasePublishingProcessActivation,
+	PhasePromotingRegistration,
+	PhaseRetiringPredecessor,
+	PhaseDeliveringConfirmation,
+	PhaseSucceeded,
+	PhaseFailed,
+	PhaseRetired,
+}
+
+func ValidPhases() []Phase {
+	return append([]Phase(nil), validPhases[:]...)
+}
+
 func (p Phase) Terminal() bool {
 	return p == PhaseSucceeded || p == PhaseFailed || p == PhaseRetired
 }
 
 func (p Phase) Valid() bool {
-	switch p {
-	case PhasePreparing, PhaseCredentialsAdmitted, PhaseActivatingProvider, PhaseAwaitingExternalIdentity,
-		PhaseAwaitingOperatorConfirmation, PhasePublishingActivation, PhasePublishingProcessActivation,
-		PhasePromotingRegistration, PhaseRetiringPredecessor,
-		PhaseDeliveringConfirmation, PhaseSucceeded, PhaseFailed, PhaseRetired:
-		return true
-	default:
-		return false
+	for _, valid := range validPhases {
+		if p == valid {
+			return true
+		}
 	}
+	return false
 }
 
 // ChannelRuntimeContextCoordinate identifies one exact durable bundle source

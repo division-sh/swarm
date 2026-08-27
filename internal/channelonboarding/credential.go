@@ -2,6 +2,7 @@ package channelonboarding
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -58,6 +59,98 @@ func (w *CredentialWriter) Release(ctx context.Context, admission CredentialAdmi
 		return false, nil
 	}
 	return w.deleter.DeleteWithReceipt(ctx, admission.StoreKey, admission.Receipt, admission.Epoch)
+}
+
+// ReleaseOperation reconciles both checkpointed admissions and deterministic
+// operation writes that may exist before their selected-store checkpoint.
+func (w *CredentialWriter) ReleaseOperation(ctx context.Context, op Operation) error {
+	operationID := strings.TrimSpace(op.OperationID)
+	if operationID == "" {
+		return fmt.Errorf("channel onboarding credential cleanup requires an operation identity")
+	}
+	type expectedOccurrence struct {
+		storeKey string
+		receipt  string
+	}
+	expectedByRole := make(map[string]expectedOccurrence, len(op.CredentialReservations))
+	var cleanupErr error
+	for _, reservation := range op.CredentialReservations {
+		if err := reservation.Validate(); err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
+			continue
+		}
+		if _, duplicate := expectedByRole[reservation.Role]; duplicate {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("duplicate channel credential reservation role %q", reservation.Role))
+			continue
+		}
+		expectedByRole[reservation.Role] = expectedOccurrence{
+			storeKey: operationCredentialStoreKey(reservation.StoreKey, operationID, reservation.Role),
+			receipt:  credentialReceipt(operationID, reservation.Role),
+		}
+	}
+
+	releases := make([]CredentialAdmission, 0, len(op.CredentialAdmissions)+len(expectedByRole))
+	seen := make(map[string]struct{}, cap(releases))
+	addRelease := func(admission CredentialAdmission) {
+		occurrence := credentialAdmissionOccurrence(admission)
+		if _, duplicate := seen[occurrence]; duplicate {
+			return
+		}
+		seen[occurrence] = struct{}{}
+		releases = append(releases, admission)
+	}
+	for _, admission := range op.CredentialAdmissions {
+		if err := admission.Validate(); err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
+			continue
+		}
+		if admission.Kind != CredentialAdmissionWritten {
+			continue
+		}
+		expected, found := expectedByRole[admission.Role]
+		if !found || admission.StoreKey != expected.storeKey || admission.Receipt != expected.receipt {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("written channel credential %q is not owned by operation %s", admission.StoreKey, operationID))
+			continue
+		}
+		addRelease(admission)
+	}
+	for role, expected := range expectedByRole {
+		written, found, err := w.ObserveWritten(ctx, expected.storeKey, expected.receipt)
+		if err != nil {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("observe operation credential %q: %w", expected.storeKey, err))
+			continue
+		}
+		if !found {
+			observed, observeErr := w.snapshots.ObserveSecretBinding(ctx, expected.storeKey)
+			if observeErr != nil {
+				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("observe operation credential key %q: %w", expected.storeKey, observeErr))
+			} else if observed.Bound() {
+				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("operation credential %q is bound to a contradictory receipt", expected.storeKey))
+			}
+			continue
+		}
+		addRelease(CredentialAdmission{
+			Role: role, StoreKey: written.StoreKey, Kind: CredentialAdmissionWritten,
+			Receipt: written.Receipt, Epoch: written.Epoch,
+		})
+	}
+	for _, admission := range releases {
+		released, err := w.Release(ctx, admission)
+		if err != nil {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("release channel credential %q: %w", admission.StoreKey, err))
+			continue
+		}
+		if released {
+			continue
+		}
+		observed, observeErr := w.snapshots.ObserveSecretBinding(ctx, admission.StoreKey)
+		if observeErr != nil {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("verify released channel credential %q: %w", admission.StoreKey, observeErr))
+		} else if observed.Bound() {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("channel credential %q changed before exact release", admission.StoreKey))
+		}
+	}
+	return cleanupErr
 }
 
 func (w *CredentialWriter) Admit(ctx context.Context, req CredentialWriteRequest) (CredentialWriteResult, error) {

@@ -930,10 +930,8 @@ func (s *Service) failOperation(ctx context.Context, op Operation, code, message
 }
 
 func (s *Service) failOperationLocal(ctx context.Context, op Operation, code, message string) (Operation, error) {
-	for _, admission := range op.CredentialAdmissions {
-		if _, err := s.credentials.Release(context.WithoutCancel(ctx), admission); err != nil {
-			return op, fmt.Errorf("release failed onboarding credential %q: %w", admission.StoreKey, err)
-		}
+	if err := s.credentials.ReleaseOperation(context.WithoutCancel(ctx), op); err != nil {
+		return op, fmt.Errorf("release failed onboarding operation credentials: %w", err)
 	}
 	failed, err := s.store.AdvanceChannelOnboarding(context.WithoutCancel(ctx), AdvanceRequest{
 		OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: PhaseFailed,
