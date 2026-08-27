@@ -181,14 +181,20 @@ func (t ChannelActivityTarget) Generation() plangeneration.Generation {
 	return t.value.generation
 }
 
-func (pc *PipelineCoordinator) channelActivityTarget(toolID string, generation channelonboarding.ChannelActivationGeneration) (ChannelActivityTarget, bool, *runtimechannelactivation.Lease, error) {
+func (pc *PipelineCoordinator) channelActivityTarget(ctx context.Context, toolID string, generation channelonboarding.ChannelActivationGeneration) (ChannelActivityTarget, bool, *runtimechannelactivation.Lease, error) {
 	if pc == nil {
 		return ChannelActivityTarget{}, false, nil, nil
 	}
 	if pc.channelActivations == nil {
 		return ChannelActivityTarget{}, false, nil, nil
 	}
-	lease, ok := pc.channelActivations.AcquireActivityOperation(toolID, generation)
+	var lease *runtimechannelactivation.Lease
+	var ok bool
+	if admitted, inherited := runtimechannelactivation.ExecutionLeaseFromContext(ctx); inherited {
+		lease, ok = pc.channelActivations.BorrowActivityOperation(admitted, toolID, generation)
+	} else {
+		lease, ok = pc.channelActivations.AcquireActivityOperation(toolID, generation)
+	}
 	if !ok {
 		return ChannelActivityTarget{}, false, nil, nil
 	}

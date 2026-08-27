@@ -45,6 +45,7 @@ type channelRuntimeExecutionLease struct {
 }
 
 func withChannelRuntimeExecutionLease(ctx context.Context, toolID string, lease *runtimechannelactivation.Lease) context.Context {
+	ctx = runtimechannelactivation.WithExecutionLease(ctx, lease)
 	return context.WithValue(ctx, channelRuntimeLeaseContextKey{}, channelRuntimeExecutionLease{
 		toolID: strings.TrimSpace(toolID),
 		lease:  lease,

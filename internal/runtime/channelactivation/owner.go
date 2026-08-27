@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/packs"
@@ -31,7 +32,52 @@ type Lease struct {
 	owner     *Owner
 	snapshot  *snapshot
 	operation Operation
+	authority *leaseAuthority
+	borrowed  bool
 	once      sync.Once
+}
+
+type leaseAuthority struct {
+	released atomic.Bool
+}
+
+type executionLeaseContextKey struct{}
+
+// WithExecutionLease carries one already-admitted process-local activation
+// authority into child execution. It is never serialized or reconstructed.
+func WithExecutionLease(ctx context.Context, lease *Lease) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if !lease.live() {
+		return ctx
+	}
+	return context.WithValue(ctx, executionLeaseContextKey{}, lease)
+}
+
+func ExecutionLeaseFromContext(ctx context.Context) (*Lease, bool) {
+	if ctx == nil {
+		return nil, false
+	}
+	lease, ok := ctx.Value(executionLeaseContextKey{}).(*Lease)
+	return lease, ok && lease.live()
+}
+
+// WithoutExecutionLease prevents an admitted child from forwarding its
+// parent's authority into later publications.
+func WithoutExecutionLease(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, executionLeaseContextKey{}, (*Lease)(nil))
+}
+
+func newOwnedLease(owner *Owner, current *snapshot, operation Operation) *Lease {
+	return &Lease{owner: owner, snapshot: current, operation: operation, authority: &leaseAuthority{}}
+}
+
+func (l *Lease) live() bool {
+	return l != nil && l.snapshot != nil && l.authority != nil && !l.authority.released.Load()
 }
 
 func (l *Lease) Operation() Operation {
@@ -70,11 +116,28 @@ func (l *Lease) RuntimeOperation(toolID string) (Operation, bool) {
 // BorrowRuntimeOperation binds one operation to an already-held presentation
 // lease without acquiring or releasing another owner refcount.
 func (l *Lease) BorrowRuntimeOperation(toolID string) (*Lease, bool) {
+	if !l.live() {
+		return nil, false
+	}
 	operation, ok := l.RuntimeOperation(toolID)
 	if !ok {
 		return nil, false
 	}
-	return &Lease{snapshot: l.snapshot, operation: operation}, true
+	return &Lease{owner: l.owner, snapshot: l.snapshot, operation: operation, authority: l.authority, borrowed: true}, true
+}
+
+// BorrowActivityOperation admits a child activity from the exact snapshot
+// already pinned by its parent operation. It does not reopen owner admission
+// after replacement has fenced new consumers.
+func (o *Owner) BorrowActivityOperation(parent *Lease, toolID string, generation channelonboarding.ChannelActivationGeneration) (*Lease, bool) {
+	if o == nil || !parent.live() || parent.owner != o || !generation.Valid() || !parent.snapshot.publication.Generation().Equal(generation) {
+		return nil, false
+	}
+	operation, ok := parent.snapshot.activities[strings.TrimSpace(toolID)]
+	if !ok {
+		return nil, false
+	}
+	return &Lease{owner: o, snapshot: parent.snapshot, operation: operation, authority: parent.authority, borrowed: true}, true
 }
 
 func (l *Lease) Activations() []channelonboarding.CompiledActivation {
@@ -89,6 +152,12 @@ func (l *Lease) Release() {
 		return
 	}
 	l.once.Do(func() {
+		if l.borrowed {
+			return
+		}
+		if l.authority != nil {
+			l.authority.released.Store(true)
+		}
 		if l.owner == nil || l.snapshot == nil {
 			return
 		}
@@ -229,7 +298,7 @@ func (o *Owner) AcquirePresentation() (*Lease, bool) {
 		return nil, false
 	}
 	o.current.leases++
-	return &Lease{owner: o, snapshot: o.current}, true
+	return newOwnedLease(o, o.current, Operation{}), true
 }
 
 // AcquirePresentationContext waits through a fenced replacement and returns
@@ -264,7 +333,7 @@ func (o *Owner) AcquirePresentationContext(ctx context.Context) (*Lease, error) 
 		return nil, fmt.Errorf("current channel activation publication is unavailable")
 	}
 	o.current.leases++
-	lease := &Lease{owner: o, snapshot: o.current}
+	lease := newOwnedLease(o, o.current, Operation{})
 	o.mu.Unlock()
 	return lease, nil
 }
@@ -313,7 +382,7 @@ func (o *Owner) acquire(toolID string, activity bool) (*Lease, bool) {
 		return nil, false
 	}
 	o.current.leases++
-	return &Lease{owner: o, snapshot: o.current, operation: operation}, true
+	return newOwnedLease(o, o.current, operation), true
 }
 
 func (o *Owner) acquireAt(toolID string, generation channelonboarding.ChannelActivationGeneration, activity bool) (*Lease, bool) {
@@ -334,5 +403,5 @@ func (o *Owner) acquireAt(toolID string, generation channelonboarding.ChannelAct
 		return nil, false
 	}
 	o.current.leases++
-	return &Lease{owner: o, snapshot: o.current, operation: operation}, true
+	return newOwnedLease(o, o.current, operation), true
 }

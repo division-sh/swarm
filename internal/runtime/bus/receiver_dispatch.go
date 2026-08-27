@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -20,6 +21,7 @@ type receiverDispatchProjection struct {
 	runtimeInstanceID string
 	bundleSourceFact  runtimecorrelation.BundleSourceFact
 	deliveryContext   events.DeliveryContext
+	channelExecution  *runtimechannelactivation.Lease
 	completion        *localDeliveryCompletionGroup
 }
 
@@ -46,11 +48,13 @@ func (eb *EventBus) receiverProjection(ctx context.Context, deliveryContext even
 	}
 	runtimeInstanceID, _ := runtimecorrelation.RuntimeInstanceIDFromContext(ctx)
 	bundleSourceFact, _ := runtimecorrelation.BundleSourceFactFromContext(ctx)
+	channelExecution, _ := runtimechannelactivation.ExecutionLeaseFromContext(ctx)
 	projection := receiverDispatchProjection{
 		occurrence:        eb.workOwner,
 		runtimeInstanceID: runtimeInstanceID,
 		bundleSourceFact:  bundleSourceFact,
 		deliveryContext:   deliveryContext.Normalized(),
+		channelExecution:  channelExecution,
 		completion:        localDeliveryCompletionGroupFromContext(ctx),
 	}
 	return projection, projection.validate()
@@ -85,6 +89,7 @@ func (eb *EventBus) beginReceiverDispatch(parent context.Context, projection rec
 		}
 	}
 	ctx = worklifetime.WithOccurrence(ctx, projection.occurrence)
+	ctx = runtimechannelactivation.WithExecutionLease(ctx, projection.channelExecution)
 	ctx = withReceiverBundleSource(ctx, projection.runtimeInstanceID, projection.bundleSourceFact)
 	ctx, err = eb.admitBundleSourceFact(ctx)
 	if err != nil {
