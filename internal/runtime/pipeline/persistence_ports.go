@@ -215,8 +215,8 @@ func (pc *PipelineCoordinator) RetireInitialEntryTimerWakeups(ctx context.Contex
 	return pc.workflowStore.RetireInitialEntryTimerWakeups(ctx, route)
 }
 
-func (pc *PipelineCoordinator) ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, observed DynamicFlowRuntimeReadiness, plan DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error) {
-	return pc.workflowStore.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, observed, plan, observedAt)
+func (pc *PipelineCoordinator) ReconcileDynamicFlowRuntimeReadinessPlans(ctx context.Context, requests []DynamicFlowRuntimeReadinessPlanReconciliation, observedAt time.Time) ([]DynamicFlowRuntimeReadinessPlanReconciliationResult, error) {
+	return pc.workflowStore.ReconcileDynamicFlowRuntimeReadinessPlans(ctx, requests, observedAt)
 }
 
 func (pc *PipelineCoordinator) LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID string, route runtimeflowidentity.Route) (DynamicFlowRuntimeReadiness, bool, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -35,7 +36,7 @@ type dynamicFlowSourceProjectionStore interface {
 	InspectDynamicFlowRuntimeReadinessForSource(context.Context, runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error)
 	InspectDynamicFlowRuntimeReadinessForRun(context.Context, string, runtimecorrelation.BundleSourceFact) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error)
 	LoadDynamicFlowRuntimeReadiness(context.Context, string, runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
-	ReconcileDynamicFlowRuntimeReadinessPlan(context.Context, runtimepipeline.DynamicFlowRuntimeReadiness, runtimepipeline.DynamicFlowRuntimeReadinessPlan, time.Time) (bool, error)
+	ReconcileDynamicFlowRuntimeReadinessPlans(context.Context, []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation, time.Time) ([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult, error)
 }
 
 func TestDynamicFlowRuntimeReadinessForSourceScopesInSQLBothStores(t *testing.T) {
@@ -261,9 +262,9 @@ func TestDynamicFlowRuntimeReadinessObservedStateGuardBothStores(t *testing.T) {
 					case "terminated_at":
 						setReadinessCoordinate(t, db, sqlite, runID, path, "instance_terminated_at", time.Now().UTC())
 					}
-					changed, err := selected.ReconcileDynamicFlowRuntimeReadinessPlan(callCtx, observed, desired, time.Now().UTC())
-					if changed || !runtimepipeline.IsDynamicFlowRuntimeReadinessObservationConflict(err) {
-						t.Fatalf("stale observation changed=%v err=%v", changed, err)
+					results, err := selected.ReconcileDynamicFlowRuntimeReadinessPlans(callCtx, []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation{{Observed: observed, Expected: desired}}, time.Now().UTC())
+					if len(results) != 0 || !runtimepipeline.IsDynamicFlowRuntimeReadinessObservationConflict(err) {
+						t.Fatalf("stale observation results=%v err=%v", results, err)
 					}
 					stored, found, loadErr := selected.LoadDynamicFlowRuntimeReadiness(callCtx, runID, runtimeflowidentity.RouteForInstancePath(path))
 					if loadErr != nil || !found {
@@ -274,6 +275,114 @@ func TestDynamicFlowRuntimeReadinessObservedStateGuardBothStores(t *testing.T) {
 					}
 				})
 			}
+		})
+	}
+}
+
+func TestDynamicFlowRuntimeReadinessPlanBatchIsAtomicBothStores(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		open func(*testing.T) (dynamicFlowSourceProjectionStore, *sql.DB, bool)
+	}{
+		{"postgres", func(t *testing.T) (dynamicFlowSourceProjectionStore, *sql.DB, bool) {
+			_, db, cleanup := testutil.StartPostgres(t)
+			t.Cleanup(cleanup)
+			return storetest.AdmitPostgresRuntimeStore(t, db), db, false
+		}},
+		{"sqlite", func(t *testing.T) (dynamicFlowSourceProjectionStore, *sql.DB, bool) {
+			selected := storetest.StartSQLiteRuntimeStore(t)
+			return selected, storetest.Database(selected), true
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			selected, db, sqlite := tc.open(t)
+			source := mustExternalStoreTestBundleSourceFact()
+			bundleHash, bundleSource := source.StorageValues()
+			seedBatch := func(t *testing.T, label string) (context.Context, []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation) {
+				t.Helper()
+				runID := uuid.NewString()
+				ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(), runID)
+				requireReadinessRun(t, ctx, db, sqlite, runID, bundleHash, bundleSource)
+				requests := make([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation, 0, 2)
+				for index := range 2 {
+					path := fmt.Sprintf("account/%s-%d-%s", label, index, uuid.NewString())
+					seedExactFlowInstanceDescriptorOwner(t, db, sqlite, runID, uuid.NewString(), path, bundleHash, bundleSource)
+					observed, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(path))
+					if err != nil || !found {
+						t.Fatalf("load batch observation %s: found=%v err=%v", path, found, err)
+					}
+					expected := observed.Plan
+					expected.WorkflowVersion = "2.0.0"
+					requests = append(requests, runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation{Observed: observed, Expected: expected})
+				}
+				return ctx, requests
+			}
+			assertVersion := func(t *testing.T, ctx context.Context, requests []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation, version string) {
+				t.Helper()
+				for _, request := range requests {
+					stored, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, request.Expected.RunID, request.Expected.Identity.Route())
+					if err != nil || !found || stored.Plan.WorkflowVersion != version {
+						t.Fatalf("stored batch row %s version=%q found=%v err=%v", request.Expected.Identity.InstancePath, stored.Plan.WorkflowVersion, found, err)
+					}
+				}
+			}
+
+			t.Run("success", func(t *testing.T) {
+				ctx, requests := seedBatch(t, "success")
+				results, err := selected.ReconcileDynamicFlowRuntimeReadinessPlans(ctx, requests, time.Now().UTC())
+				if err != nil || len(results) != 2 || !results[0].Changed || !results[1].Changed {
+					t.Fatalf("batch success results=%#v err=%v", results, err)
+				}
+				assertVersion(t, ctx, requests, "2.0.0")
+			})
+
+			t.Run("last_row_validation_failure_changes_none", func(t *testing.T) {
+				ctx, requests := seedBatch(t, "validation")
+				requests[1].Expected.WorkflowVersion = ""
+				results, err := selected.ReconcileDynamicFlowRuntimeReadinessPlans(ctx, requests, time.Now().UTC())
+				if err == nil || len(results) != 0 {
+					t.Fatalf("batch validation results=%#v err=%v", results, err)
+				}
+				assertVersion(t, ctx, requests, "1.0.0")
+			})
+
+			t.Run("last_row_conflict_changes_none", func(t *testing.T) {
+				ctx, requests := seedBatch(t, "conflict")
+				last := requests[1]
+				setReadinessCoordinate(t, db, sqlite, last.Expected.RunID, last.Expected.Identity.InstancePath, "topology_ready_at", time.Now().UTC())
+				results, err := selected.ReconcileDynamicFlowRuntimeReadinessPlans(ctx, requests, time.Now().UTC())
+				if len(results) != 0 || !runtimepipeline.IsDynamicFlowRuntimeReadinessObservationConflict(err) {
+					t.Fatalf("batch conflict results=%#v err=%v", results, err)
+				}
+				assertVersion(t, ctx, requests, "1.0.0")
+			})
+
+			t.Run("later_update_failure_rolls_back", func(t *testing.T) {
+				ctx, requests := seedBatch(t, "rollback")
+				lastPath := requests[1].Expected.Identity.InstancePath
+				triggerName := "fail_readiness_batch_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+				if sqlite {
+					query := fmt.Sprintf(`CREATE TRIGGER %s BEFORE UPDATE OF plan ON flow_instance_runtime_readiness WHEN NEW.instance_id = '%s' BEGIN SELECT RAISE(ABORT, 'injected readiness batch failure'); END`, triggerName, strings.ReplaceAll(lastPath, "'", "''"))
+					if _, err := db.Exec(query); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					functionName := triggerName + "_fn"
+					functionSQL := fmt.Sprintf(`CREATE FUNCTION %s() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.instance_id = '%s' THEN RAISE EXCEPTION 'injected readiness batch failure'; END IF; RETURN NEW; END $$`, functionName, strings.ReplaceAll(lastPath, "'", "''"))
+					if _, err := db.Exec(functionSQL); err != nil {
+						t.Fatal(err)
+					}
+					triggerSQL := fmt.Sprintf(`CREATE TRIGGER %s BEFORE UPDATE OF plan ON flow_instance_runtime_readiness FOR EACH ROW EXECUTE FUNCTION %s()`, triggerName, functionName)
+					if _, err := db.Exec(triggerSQL); err != nil {
+						t.Fatal(err)
+					}
+				}
+				results, err := selected.ReconcileDynamicFlowRuntimeReadinessPlans(ctx, requests, time.Now().UTC())
+				if err == nil || len(results) != 0 {
+					t.Fatalf("injected batch failure results=%#v err=%v", results, err)
+				}
+				assertVersion(t, ctx, requests, "1.0.0")
+			})
 		})
 	}
 }

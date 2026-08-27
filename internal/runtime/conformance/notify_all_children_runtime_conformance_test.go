@@ -534,14 +534,18 @@ func proveDynamicFlowSourceRevisionConvergence(
 	}
 
 	runtimeV3 := newNotifyAllChildrenRuntime(t, selected, db, sourceV2, time.Now, notifyAllChildrenRuntimeOptions{processTopology: processTopology})
-	if _, err := runtimeV3.manager.HydrateForStartup(ctx); err != nil {
-		t.Fatalf("restart hydration: %v", err)
+	startupV3, err := runtimeV3.manager.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx, authorActivityTestBundleSourceFact, true)
+	if err != nil {
+		t.Fatalf("canonicalize v2 restart topology: %v", err)
 	}
 	if err := runtimeV3.manager.Run(managedConformanceExecutionContext(t, ctx, "dynamic-flow-source-v2-restart")); err != nil {
 		t.Fatalf("run v2 restart manager: %v", err)
 	}
-	if err := runtimeV3.manager.ReconstructDynamicFlowRuntimeStartupTopology(ctx, authorActivityTestBundleSourceFact); err != nil {
+	if err := runtimeV3.manager.CompleteDynamicFlowRuntimeStartupTopology(ctx, startupV3); err != nil {
 		t.Fatalf("reconstruct v2 restart topology: %v", err)
+	}
+	if _, err := runtimeV3.manager.HydrateForStartup(ctx); err != nil {
+		t.Fatalf("restart hydration: %v", err)
 	}
 	for _, agentID := range []string{readerID, writerID} {
 		if _, err := runtimeV3.manager.ResolveAgentConfig(agentID, descriptor.FlowInstance); err != nil {
@@ -596,14 +600,18 @@ func proveDynamicFlowSourceRevisionConvergence(
 	}
 
 	runtimeV5 := newNotifyAllChildrenRuntime(t, selected, db, sourceV3, time.Now, notifyAllChildrenRuntimeOptions{processTopology: processTopology})
-	if _, err := runtimeV5.manager.HydrateForStartup(ctx); err != nil {
-		t.Fatalf("reintroduced restart hydration: %v", err)
+	startupV5, err := runtimeV5.manager.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx, authorActivityTestBundleSourceFact, true)
+	if err != nil {
+		t.Fatalf("canonicalize v3 restart topology: %v", err)
 	}
 	if err := runtimeV5.manager.Run(managedConformanceExecutionContext(t, ctx, "dynamic-flow-source-v3-restart")); err != nil {
 		t.Fatalf("run v3 restart manager: %v", err)
 	}
-	if err := runtimeV5.manager.ReconstructDynamicFlowRuntimeStartupTopology(ctx, authorActivityTestBundleSourceFact); err != nil {
+	if err := runtimeV5.manager.CompleteDynamicFlowRuntimeStartupTopology(ctx, startupV5); err != nil {
 		t.Fatalf("reconstruct v3 restart topology: %v", err)
+	}
+	if _, err := runtimeV5.manager.HydrateForStartup(ctx); err != nil {
+		t.Fatalf("reintroduced restart hydration: %v", err)
 	}
 	for _, agentID := range []string{readerID, writerID, retiredID} {
 		if _, err := runtimeV5.manager.ResolveAgentConfig(agentID, descriptor.FlowInstance); err != nil {

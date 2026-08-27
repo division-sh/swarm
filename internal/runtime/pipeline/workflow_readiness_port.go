@@ -9,11 +9,11 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 )
 
-func (s *workflowInstanceStore) ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, observed DynamicFlowRuntimeReadiness, plan DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error) {
+func (s *workflowInstanceStore) ReconcileDynamicFlowRuntimeReadinessPlans(ctx context.Context, requests []DynamicFlowRuntimeReadinessPlanReconciliation, observedAt time.Time) ([]DynamicFlowRuntimeReadinessPlanReconciliationResult, error) {
 	if s == nil || s.readiness == nil {
-		return false, fmt.Errorf("dynamic flow runtime readiness owner is required")
+		return nil, fmt.Errorf("dynamic flow runtime readiness owner is required")
 	}
-	return s.readiness.ReconcileDynamicFlowRuntimeReadinessPlan(ctx, observed, plan, observedAt)
+	return s.readiness.ReconcileDynamicFlowRuntimeReadinessPlans(ctx, requests, observedAt)
 }
 
 func (s *workflowInstanceStore) LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID string, route runtimeflowidentity.Route) (DynamicFlowRuntimeReadiness, bool, error) {

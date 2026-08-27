@@ -1193,6 +1193,12 @@ func (am *AgentManager) readinessReconciliationLoop(ctx context.Context) {
 }
 
 func (am *AgentManager) retryPendingDynamicFlowRuntimeReadiness(ctx context.Context) {
+	am.dynamicFlowReadinessMu.Lock()
+	startupPending := am.dynamicFlowStartupTopologyPending
+	am.dynamicFlowReadinessMu.Unlock()
+	if startupPending {
+		return
+	}
 	if err := am.reconcilePendingDynamicFlowRuntimeReadiness(ctx); err != nil && am.bus != nil {
 		_ = am.bus.LogRuntime(ctx, runtimepipeline.RuntimeLogEntry{
 			Level:     "error",

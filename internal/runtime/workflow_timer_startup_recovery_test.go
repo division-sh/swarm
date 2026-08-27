@@ -26,6 +26,7 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testutil"
@@ -53,6 +54,34 @@ type workflowTimerStartupFlakyManagerStore struct {
 	mu     sync.Mutex
 	loads  int
 	failAt int
+}
+
+type workflowTimerStartupTopologyFailureOwner struct {
+	runtimepipeline.WorkflowPersistenceOwner
+	readiness runtimepipeline.DynamicFlowRuntimeReadiness
+}
+
+func (o workflowTimerStartupTopologyFailureOwner) InspectDynamicFlowRuntimeReadinessForSource(_ context.Context, source runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error) {
+	if !o.readiness.OwningRunSource.Matches(source) {
+		return runtimepipeline.DynamicFlowRuntimeReadinessProjection{}, nil
+	}
+	return runtimepipeline.DynamicFlowRuntimeReadinessProjection{
+		CurrentPending: []runtimepipeline.DynamicFlowRuntimeReadiness{o.readiness},
+	}, nil
+}
+
+func (o workflowTimerStartupTopologyFailureOwner) InspectDynamicFlowRuntimeReadinessForRun(_ context.Context, runID string, source runtimecorrelation.BundleSourceFact) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error) {
+	if strings.TrimSpace(runID) != o.readiness.Plan.RunID || !o.readiness.OwningRunSource.Matches(source) {
+		return nil, nil
+	}
+	return []runtimepipeline.DynamicFlowRuntimeReadiness{o.readiness}, nil
+}
+
+func (o workflowTimerStartupTopologyFailureOwner) LoadDynamicFlowRuntimeReadiness(_ context.Context, runID string, route runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error) {
+	if strings.TrimSpace(runID) != o.readiness.Plan.RunID || route.InstancePath != o.readiness.InstancePath {
+		return runtimepipeline.DynamicFlowRuntimeReadiness{}, false, nil
+	}
+	return o.readiness, true, nil
 }
 
 func (s *workflowTimerStartupFlakyManagerStore) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
@@ -256,6 +285,197 @@ func TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRunt
 			time.Sleep(120 * time.Millisecond)
 			if after, _, _ := countEvents(); after != settledCount {
 				t.Fatalf("recurring generic schedule published after cancellation: before=%d after=%d", settledCount, after)
+			}
+		})
+	}
+}
+
+func TestRuntimeStartWithholdsDueSchedulesAndTimersUntilDynamicTopologyCompletesOnBothStores(t *testing.T) {
+	for _, backend := range []struct {
+		name string
+		open func(*testing.T) (*sql.DB, workflowTimerStartupStore, bool)
+	}{
+		{
+			name: "sqlite",
+			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, bool) {
+				selected := storetest.StartSQLiteRuntimeStore(t)
+				return storetest.Database(selected), selected, false
+			},
+		},
+		{
+			name: "postgres",
+			open: func(t *testing.T) (*sql.DB, workflowTimerStartupStore, bool) {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				return db, storetest.AdmitPostgresRuntimeStore(t, db), true
+			},
+		},
+	} {
+		t.Run(backend.name, func(t *testing.T) {
+			db, selected, postgres := backend.open(t)
+			workflowRunID := uuid.NewString()
+			genericRunID := uuid.NewString()
+			workflowEntityID := uuid.NewString()
+			genericEntityID := uuid.NewString()
+			ctx := testAuthorActivityContext(context.Background())
+			workflowCtx := runtimecorrelation.WithRunID(ctx, workflowRunID)
+			genericCtx := runtimecorrelation.WithRunID(ctx, genericRunID)
+			for _, run := range []struct {
+				ctx   context.Context
+				runID string
+			}{{workflowCtx, workflowRunID}, {genericCtx, genericRunID}} {
+				fixture := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: run.runID, Source: authorActivityTestBundleSourceFact}
+				if postgres {
+					runlifecyclefixture.RequirePostgres(t, run.ctx, db, fixture)
+				} else {
+					runlifecyclefixture.RequireSQLite(t, run.ctx, db, fixture)
+				}
+			}
+
+			bundle := workflowTimerStartupRecoveryBundleWithDelay(t, "1s")
+			source := semanticview.Wrap(bundle)
+			module := newRuntimeTestWorkflowModule(t, source)
+			newRuntime := func(owner runtimepipeline.WorkflowPersistenceOwner) (*swarmruntime.Runtime, *worklifetime.Process) {
+				t.Helper()
+				process := worklifetime.NewProcess()
+				rt, err := swarmruntime.NewRuntime(ctx, completeExternalRuntimeTestWorkflowDeps(t, selected, swarmruntime.RuntimeDeps{
+					Config: &config.Config{
+						Runtime: config.RuntimeConfig{RecoveryOnStartup: true},
+						LLM:     config.LLMConfig{Backend: "anthropic"},
+					},
+					EventStore:                   selected,
+					EventBusDurable:              externalRuntimeTestDurableDependencies(selected),
+					EventPayloadValidationBinder: selected,
+					AuthorActivityRegistrars:     []swarmruntime.AuthorActivityCatalogRegistrar{selected},
+					RunLifecycleCandidates:       selected,
+					GenericScheduleStore:         selected,
+					TimerObligationReader:        selected,
+					WorkflowPersistence:          runtimepipeline.NewWorkflowPersistence(owner),
+					ManagerStore:                 selected,
+					ManagerPersistenceRoles:      externalRuntimeTestSelectedManagerRoles(selected),
+					DeliveryStore:                selected,
+					PipelineObligations:          selected.PipelineObligations(),
+					Options: swarmruntime.RuntimeOptions{
+						SelfCheck:         false,
+						WorkflowModule:    module,
+						LLMRuntime:        workflowTimerStartupLLM{},
+						RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
+						BundleSourceFact:  authorActivityTestBundleSourceFact,
+						ProcessWorkOwner:  process,
+					},
+				}))
+				if err != nil {
+					t.Fatalf("NewRuntime: %v", err)
+				}
+				return rt, process
+			}
+			closeRuntime := func(label string, rt *swarmruntime.Runtime, process *worklifetime.Process, capability runtimestartupownership.ProcessCapability) {
+				t.Helper()
+				if err := closeExternalRuntimeTestGeneration(rt, process, capability); err != nil {
+					t.Fatalf("close %s runtime: %v", label, err)
+				}
+			}
+
+			seedRuntime, seedProcess := newRuntime(selected)
+			seedCtx := testLiveExecutionContext(worklifetime.WithRuntimeOccurrence(workflowCtx, seedRuntime.WorkOccurrence()))
+			occurredAt := time.Now().UTC()
+			result, err := seedRuntime.Pipeline.MaterializeInitialEntry(seedCtx, runtimepipeline.WorkflowInstance{
+				InstanceID: workflowRunID, StorageRef: workflowRunID,
+				WorkflowName: "workflow-timer-startup", WorkflowVersion: "1", CurrentState: "waiting",
+				Fields: map[string]any{
+					"run_id": workflowRunID, "entity_id": workflowEntityID,
+					"flow_path": workflowRunID, "instance_id": workflowRunID,
+				},
+				EntityType: "test_entity",
+			}, occurredAt)
+			if err != nil || result != runtimepipeline.WorkflowInitialMaterializationCreated {
+				t.Fatalf("materialize withheld workflow timer: result=%v err=%v", result, err)
+			}
+			closeRuntime("seed", seedRuntime, seedProcess, nil)
+			dueAt := occurredAt.Add(time.Second)
+
+			routingSource, err := events.NewRootRoutingSource(genericEntityID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			genericCommand := runtimegenericschedule.AdmissionCommand{
+				RunID: genericRunID, ScheduleKey: "topology-latch-generic", TaskID: "topology-latch-generic",
+				OwnerID: "runtime", OwnerKind: runtimegenericschedule.OwnerAgent,
+				AgentIdentity: agentidentitytest.RootRuntime(t, "runtime", "topology-latch-generic"),
+				EventType:     "generic.tick", EntityID: genericEntityID, Payload: semanticvalue.EmptyObject(),
+				RoutingSource: routingSource, Due: runtimegenericschedule.AbsoluteDue(dueAt), ExecutionMode: executionmode.Mock,
+			}
+			genericAdmission, err := selected.AdmitGenericSchedule(genericCtx, genericCommand)
+			if err != nil {
+				t.Fatalf("persist overdue generic schedule: %v", err)
+			}
+			time.Sleep(time.Until(dueAt) + 50*time.Millisecond)
+			countGenericEvents := func() int {
+				t.Helper()
+				query := `SELECT COUNT(*) FROM events WHERE task_id = ? AND produced_by = ? AND produced_by_type = 'platform'`
+				if postgres {
+					query = `SELECT COUNT(*) FROM events WHERE task_id = $1 AND produced_by = $2 AND produced_by_type = 'platform'`
+				}
+				var count int
+				if err := db.QueryRowContext(genericCtx, query, genericCommand.TaskID, runtimegenericschedule.OccurrenceProducerID()).Scan(&count); err != nil {
+					t.Fatalf("count generic schedule events: %v", err)
+				}
+				return count
+			}
+
+			bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
+			failureOwner := workflowTimerStartupTopologyFailureOwner{
+				WorkflowPersistenceOwner: selected,
+				readiness: runtimepipeline.DynamicFlowRuntimeReadiness{
+					InstancePath: "review/inst-1", OwningRunSource: authorActivityTestBundleSourceFact,
+					RunStatus: "running", InstanceStatus: "active",
+					Plan: runtimepipeline.DynamicFlowRuntimeReadinessPlan{
+						RunID: workflowRunID, BundleHash: bundleHash, BundleSource: bundleSource,
+						WorkflowVersion: source.WorkflowVersion() + "-stale", ExecutionMode: executionmode.Live,
+						Identity: runtimeflowidentity.Instance{
+							TemplateID: "review", ScopeKey: "review", InstanceID: "inst-1",
+							InstancePath: "review/inst-1", EntityID: uuid.NewString(), HasStoredPath: true,
+						},
+					},
+				},
+			}
+			failedRuntime, failedProcess := newRuntime(failureOwner)
+			failedCapability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, failedRuntime)
+			err = failedRuntime.Start(ctx)
+			if err == nil || !strings.Contains(err.Error(), "workflow version changed") {
+				closeRuntime("unexpected successful topology-failure", failedRuntime, failedProcess, failedCapability)
+				t.Fatalf("Start error = %v, want dynamic topology completion failure", err)
+			}
+			closeRuntime("failed topology", failedRuntime, failedProcess, failedCapability)
+			time.Sleep(100 * time.Millisecond)
+			instance, found, err := failedRuntime.Pipeline.Load(workflowCtx, runtimeflowidentity.RouteForInstancePath(workflowRunID))
+			if err != nil || !found || instance.CurrentState != "waiting" {
+				t.Fatalf("workflow timer crossed failed topology latch: found=%v state=%q err=%v", found, instance.CurrentState, err)
+			}
+			activation, found, err := selected.LoadGenericScheduleActivation(genericCtx, genericAdmission.Activation.ID)
+			if err != nil || !found || activation.Status != runtimegenericschedule.StatusActive || countGenericEvents() != 0 {
+				t.Fatalf("generic schedule crossed failed topology latch: found=%v activation=%#v events=%d err=%v", found, activation, countGenericEvents(), err)
+			}
+
+			recoveredRuntime, recoveredProcess := newRuntime(selected)
+			recoveredCapability, _ := installExternalRuntimeTestGeneration(t, ctx, selected, recoveredRuntime)
+			if err := recoveredRuntime.Start(ctx); err != nil {
+				closeRuntime("failed recovery", recoveredRuntime, recoveredProcess, recoveredCapability)
+				t.Fatalf("Start after completed topology: %v", err)
+			}
+			defer closeRuntime("recovered", recoveredRuntime, recoveredProcess, recoveredCapability)
+			deadline := time.Now().Add(8 * time.Second)
+			for {
+				instance, instanceFound, loadErr := recoveredRuntime.Pipeline.Load(workflowCtx, runtimeflowidentity.RouteForInstancePath(workflowRunID))
+				activation, activationFound, activationErr := selected.LoadGenericScheduleActivation(genericCtx, genericAdmission.Activation.ID)
+				if loadErr == nil && instanceFound && instance.CurrentState == "done" && activationErr == nil && activationFound &&
+					activation.Status == runtimegenericschedule.StatusFired && countGenericEvents() == 1 {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("post-topology producers did not converge: instance=%#v found=%v load_err=%v activation=%#v found=%v activation_err=%v events=%d", instance, instanceFound, loadErr, activation, activationFound, activationErr, countGenericEvents())
+				}
+				time.Sleep(20 * time.Millisecond)
 			}
 		})
 	}

@@ -77,7 +77,7 @@ func (rt *Runtime) settleManagedStartupPreflight(ctx context.Context, surfaceIDs
 	return rt.startupGrant.AdmitExecution(ctx)
 }
 
-func (rt *Runtime) admitManagedExecution(ctx context.Context, authority runtimestartupownership.GrantEvidence, replay bool) (managedExecutionActivation, error) {
+func (rt *Runtime) admitManagedExecution(ctx context.Context, authority runtimestartupownership.GrantEvidence) (managedExecutionActivation, error) {
 	actorFingerprint, err := rt.managedActorCensusFingerprint()
 	if err != nil {
 		return managedExecutionActivation{}, err
@@ -105,7 +105,6 @@ func (rt *Runtime) admitManagedExecution(ctx context.Context, authority runtimes
 	if err := rt.Bus.SetDeliveryAuthority(deliveryAuthority); err != nil {
 		return managedExecutionActivation{}, err
 	}
-	var deliveryCoordinator *runtimedeliverycontinuation.Coordinator
 	if rt.deliveryStore != nil {
 		if err := rt.deliveryStore.ActivateDeliveryAuthority(ctx, deliveryAuthority); err != nil {
 			return managedExecutionActivation{}, fmt.Errorf("activate delivery execution authority: %w", err)
@@ -141,7 +140,6 @@ func (rt *Runtime) admitManagedExecution(ctx context.Context, authority runtimes
 			rt.deliverySignalRegistration = registration
 		}
 		rt.deliveryContinuations = coordinator
-		deliveryCoordinator = coordinator
 	}
 	result := managedExecutionActivation{Admission: admission}
 	rt.lifecycleMu.Lock()
@@ -151,22 +149,32 @@ func (rt *Runtime) admitManagedExecution(ctx context.Context, authority runtimes
 		ctx = rt.startCtx
 	}
 	rt.lifecycleMu.Unlock()
-	if replay {
-		if rt.deliveryStore != nil {
-			result.ReplayErr = runtimepipeline.NewRecoveryManagerWith(rt.Bus).RecoverToExhaustion(ctx)
-			if result.ReplayErr != nil {
-				return result, fmt.Errorf("recover pipeline obligations before delivery enumeration: %w", result.ReplayErr)
-			}
-		} else if rt.Manager != nil {
-			result.ReplaySummary, result.ReplayErr = rt.Manager.RecoverAfterStartupAdmission(ctx)
-		}
-	}
-	if deliveryCoordinator != nil {
-		if err := deliveryCoordinator.Start(ctx); err != nil {
-			return managedExecutionActivation{}, err
-		}
-	}
 	return result, nil
+}
+
+func (rt *Runtime) recoverManagedExecution(ctx context.Context, replay bool) managedExecutionActivation {
+	result := managedExecutionActivation{}
+	if !replay {
+		return result
+	}
+	if rt.deliveryStore != nil {
+		result.ReplayErr = runtimepipeline.NewRecoveryManagerWith(rt.Bus).RecoverToExhaustion(ctx)
+		return result
+	}
+	if rt.Manager != nil {
+		result.ReplaySummary, result.ReplayErr = rt.Manager.RecoverAfterStartupAdmission(ctx)
+	}
+	return result
+}
+
+func (rt *Runtime) startAndSynchronizeDeliveryContinuations(ctx context.Context) error {
+	if rt == nil || rt.deliveryContinuations == nil {
+		return nil
+	}
+	if err := rt.deliveryContinuations.Start(ctx); err != nil {
+		return err
+	}
+	return rt.deliveryContinuations.Synchronize(ctx)
 }
 
 func (rt *Runtime) failDeliveryContinuation(err error) {

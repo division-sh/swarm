@@ -237,6 +237,15 @@ func (s *workflowInstanceStore) legacyReconcileDynamicFlowRuntimeReadinessPlan(
 	return changed, nil
 }
 
+func (s *workflowInstanceStore) ReconcileDynamicFlowRuntimeReadinessPlan(
+	ctx context.Context,
+	observed DynamicFlowRuntimeReadiness,
+	expected DynamicFlowRuntimeReadinessPlan,
+	observedAt time.Time,
+) (bool, error) {
+	return s.legacyReconcileDynamicFlowRuntimeReadinessPlan(ctx, observed, expected, observedAt)
+}
+
 func (s *workflowInstanceStore) legacyLoadDynamicFlowRuntimeReadiness(
 	ctx context.Context,
 	runID string,

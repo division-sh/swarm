@@ -36,7 +36,7 @@ type flowInstancePersistence interface {
 	ArmInitialEntryTimers(ctx context.Context, route runtimeflowidentity.Route) error
 	ReconcileInitialEntryTimers(ctx context.Context, route runtimeflowidentity.Route) error
 	RetireInitialEntryTimerWakeups(ctx context.Context, route runtimeflowidentity.Route) error
-	ReconcileDynamicFlowRuntimeReadinessPlan(ctx context.Context, observed runtimepipeline.DynamicFlowRuntimeReadiness, plan runtimepipeline.DynamicFlowRuntimeReadinessPlan, observedAt time.Time) (bool, error)
+	ReconcileDynamicFlowRuntimeReadinessPlans(ctx context.Context, requests []runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliation, observedAt time.Time) ([]runtimepipeline.DynamicFlowRuntimeReadinessPlanReconciliationResult, error)
 	LoadDynamicFlowRuntimeReadiness(ctx context.Context, runID string, route runtimeflowidentity.Route) (runtimepipeline.DynamicFlowRuntimeReadiness, bool, error)
 	InspectDynamicFlowRuntimeReadinessForSource(ctx context.Context, source runtimecorrelation.BundleSourceFact) (runtimepipeline.DynamicFlowRuntimeReadinessProjection, error)
 	InspectDynamicFlowRuntimeReadinessForRun(ctx context.Context, runID string, source runtimecorrelation.BundleSourceFact) ([]runtimepipeline.DynamicFlowRuntimeReadiness, error)
