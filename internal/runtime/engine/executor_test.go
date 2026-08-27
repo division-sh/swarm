@@ -40,6 +40,13 @@ func stubSource() semanticview.Source {
 	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{})
 }
 
+func mustCompileEngineSource(bundle *runtimecontracts.WorkflowContractBundle) semanticview.Source {
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(fmt.Sprintf("compile engine test semantics: %v", err))
+	}
+	return semanticview.Wrap(bundle)
+}
+
 func fanOutPayloadSource(eventTypes ...string) semanticview.Source {
 	events := make(map[string]runtimecontracts.EventCatalogEntry, len(eventTypes))
 	for _, eventType := range eventTypes {
@@ -299,33 +306,25 @@ func structuredRendererExecutionRequest(t *testing.T, moduleSpec *runtimecontrac
 
 func sourceWithDeclarativeEmitExternalizationFlows() semanticview.Source {
 	component := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "component-scaffold", Flow: "component-scaffold", Mode: "template"},
+		Paths: runtimecontracts.FlowContractPaths{ID: "component-scaffold", Flow: "component-scaffold", Mode: "template", PackageKey: "."},
 		Path:  "component-scaffold",
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: runtimecontracts.FlowModeTemplate,
-			Pins: runtimecontracts.FlowPins{
-				Inputs:  runtimecontracts.FlowInputPins{Events: []string{"repo_scaffold.repo_scaffolded"}},
-				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"component.scaffolded"}},
-			},
+			Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "component.scaffolded"}}}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"component.scaffolded": {},
-			"repo_scaffold.repo_scaffolded": {
-				Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{
-					"items": {Type: "[json]"},
-				}},
-			},
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"component-node": {ID: "component-node"},
 		},
 	}
 	repo := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "repo-scaffold", Flow: "repo-scaffold"},
+		Paths: runtimecontracts.FlowContractPaths{ID: "repo-scaffold", Flow: "repo-scaffold", PackageKey: "."},
 		Path:  "repo-scaffold",
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"repo_scaffold.repo_scaffolded"}},
+				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "repo_scaffold.repo_scaffolded"}}},
 			},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
@@ -337,11 +336,20 @@ func sourceWithDeclarativeEmitExternalizationFlows() semanticview.Source {
 		},
 	}
 	operating := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "operating", Flow: "operating"},
+		Paths: runtimecontracts.FlowContractPaths{ID: "operating", Flow: "operating", PackageKey: "."},
 		Path:  "operating",
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{component, repo, operating}}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{PackageKey: "."}, Children: []runtimecontracts.FlowContractView{component, repo, operating}}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"component.scaffolded":          component.Events["component.scaffolded"],
+			"repo_scaffold.repo_scaffolded": repo.Events["repo_scaffold.repo_scaffolded"],
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"component-scaffold": component.Schema,
+			"repo-scaffold":      repo.Schema,
+			"operating":          operating.Schema,
+		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
@@ -355,7 +363,8 @@ func sourceWithDeclarativeEmitExternalizationFlows() semanticview.Source {
 				"operating":          &root.Children[2],
 			},
 		},
-	})
+	}
+	return mustCompileEngineSource(bundle)
 }
 
 func sourceWithPolicy(values map[string]any) semanticview.Source {
@@ -5263,13 +5272,14 @@ func TestExecutor_ChildPinOutputRejectsIncompleteStoredParentRoute(t *testing.T)
 func sourceWithChildOutputPin() semanticview.Source {
 	child := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{
-			ID:   "child",
-			Flow: "child",
+			ID:         "child",
+			Flow:       "child",
+			PackageKey: ".",
 		},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Outputs: runtimecontracts.FlowOutputPins{
-					Events: []string{"child.done"},
+					EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "child.done"}},
 				},
 			},
 		},
@@ -5278,67 +5288,65 @@ func sourceWithChildOutputPin() semanticview.Source {
 		},
 		Path: "child",
 	}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Events:      map[string]runtimecontracts.EventCatalogEntry{"child.done": {}},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"child": child.Schema},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &runtimecontracts.FlowContractView{
+				Paths:    runtimecontracts.FlowContractPaths{PackageKey: "."},
 				Children: []runtimecontracts.FlowContractView{child},
 			},
 			ByID: map[string]*runtimecontracts.FlowContractView{
 				"child": &child,
 			},
 		},
-	})
+	}
+	return mustCompileEngineSource(bundle)
 }
 
 func sourceWithNestedStaticOutputPin() semanticview.Source {
 	child := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
+		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "."},
 		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeStatic, Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
-			EventPins: []runtimecontracts.FlowOutputEventPin{{Name: "child_done", Event: "child.done"}},
+			EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "child.done"}},
 		}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"child.done": {}},
 		Path:   "root/child",
 	}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		Events:      map[string]runtimecontracts.EventCatalogEntry{"child.done": {}},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"child": child.Schema},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "root", FlowOutputs: map[string][]string{"child": {"child.done"}},
-			FlowOutputEventPins: map[string][]runtimecontracts.FlowOutputEventPin{"child": child.Schema.Pins.Outputs.EventPins},
-		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child}},
+			Root: &runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{PackageKey: "."}, Children: []runtimecontracts.FlowContractView{child}},
 			ByID: map[string]*runtimecontracts.FlowContractView{"child": &child},
 		},
-	})
+	}
+	return mustCompileEngineSource(bundle)
 }
 
 func sourceWithChildOutputPinAndRootConnect() semanticview.Source {
 	child := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
+		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "."},
 		Schema: runtimecontracts.FlowSchemaDocument{Mode: runtimecontracts.FlowModeTemplate, Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
-			EventPins: []runtimecontracts.FlowOutputEventPin{{Name: "child_done", Event: "child.done"}},
+			EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "child.done"}},
 		}}},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"child.done": {}},
 		Path:   "child",
 	}
-	rootInput := runtimecontracts.FlowInputEventPin{Name: "child_done", Event: "child.done"}
+	rootInput := runtimecontracts.FlowInputEventPin{Event: "child.done"}
 	connect := runtimecontracts.FlowPackageConnect{Event: "child.done", From: "child", To: ".", SourceFile: "package.yaml", SourceLine: 1}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Package:     runtimecontracts.ProjectPackageDocument{Name: "engine-test", Version: "1.0.0", Connect: []runtimecontracts.FlowPackageConnect{connect}},
+		PackageTree: []runtimecontracts.LoadedProjectPackage{{Key: ".", Paths: runtimecontracts.ProjectPackagePaths{PackageFile: "package.yaml"}, Manifest: runtimecontracts.ProjectPackageDocument{Connect: []runtimecontracts.FlowPackageConnect{connect}}}},
 		RootSchema:  &runtimecontracts.FlowSchemaDocument{Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{rootInput}}}},
 		Events:      map[string]runtimecontracts.EventCatalogEntry{"child.done": {}},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"child": child.Schema},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "root", FlowInputs: map[string][]string{"": {"child.done"}}, FlowOutputs: map[string][]string{"child": {"child.done"}},
-			FlowInputEventPins:  map[string][]runtimecontracts.FlowInputEventPin{"": {rootInput}},
-			FlowOutputEventPins: map[string][]runtimecontracts.FlowOutputEventPin{"child": child.Schema.Pins.Outputs.EventPins},
-			CompositionConnects: []runtimecontracts.FlowPackageConnect{connect},
-		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child}},
+			Root: &runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{PackageKey: "."}, Children: []runtimecontracts.FlowContractView{child}},
 			ByID: map[string]*runtimecontracts.FlowContractView{"child": &child},
 		},
-	})
+	}
+	return mustCompileEngineSource(bundle)
 }
 
 func TestExecutor_DataAccumulationTargetPathWritesNestedEntityLeaf(t *testing.T) {
@@ -6598,8 +6606,7 @@ pins:
       - score.dimension_complete
   outputs:
     events:
-      - name: vertical_scored
-        event: vertical.scored
+      - event: vertical.scored
         sink: harness
 `)
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "flows", "scoring", "types.yaml"), `
@@ -6670,8 +6677,6 @@ pins:
   inputs:
     events:
       - job.received
-  outputs:
-    events: []
 `)
 	writeEngineProjectionFixtureFile(t, filepath.Join(root, "flows", "coordinator", "types.yaml"), `
 types:

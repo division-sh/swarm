@@ -24,8 +24,7 @@ name: derived-novel-flow
 pins:
   inputs:
     events:
-      - {name: request, event: fulfillment.requested, source: external}
-  outputs: {events: []}
+      - {event: fulfillment.requested, source: external}
 `
 	}
 	files := map[string]string{
@@ -43,8 +42,7 @@ mode: static
 pins:
   inputs:
     events:
-      - {name: request, event: fulfillment.requested, source: external}
-  outputs: {events: []}
+      - {event: fulfillment.requested, source: external}
 `,
 		"flows/fulfillment/events.yaml": `
 fulfillment.requested:

@@ -6,6 +6,5 @@ pins:
     events: [gates.clear_requested]
   outputs:
     events:
-      - name: gates.cleared
-        event: gates.cleared
+      - event: gates.cleared
         sink: harness

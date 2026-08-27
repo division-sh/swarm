@@ -202,9 +202,7 @@ states: [active, done, failed]
 pins:
   inputs:
     events:
-      - {name: item_received, event: item.received, source: harness}
-  outputs:
-    events: []
+      - {event: item.received, source: harness}
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "a", "entities.yaml"), `
 state:

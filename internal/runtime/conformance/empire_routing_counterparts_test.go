@@ -27,7 +27,7 @@ func TestEmpireValidationCreateMintedKeyCounterpart(t *testing.T) {
 	plan := requireCounterpartPlan(t, plans, func(plan runtimepinrouting.ConnectRoutePlan) bool {
 		return plan.InstanceKey() != nil && plan.InstanceKey().Mode() == runtimecontracts.FlowInputResolutionModeCreate
 	})
-	if key := plan.InstanceKey().Readback(); key.SourceKind != string(runtimecontracts.FlowInputInstanceSourceGeneratedUUID) || key.SourcePath != runtimecontracts.FlowInputCarrySourceGeneratedUUID || key.Field != "validation_case_id" {
+	if key := plan.InstanceKey().Readback(); key.SourceKind != string(runtimecontracts.FlowInputInstanceSourceGeneratedUUID) || key.SourcePath != runtimecontracts.FlowInputInstanceSourceGeneratedUUIDPath || key.Field != "validation_case_id" {
 		t.Fatalf("%s counterpart = %#v, want UUID-minted validation_case_id", empireValidationNodes, plan.InstanceKey())
 	}
 }

@@ -2,8 +2,11 @@ package contracts
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
+	"github.com/division-sh/swarm/internal/yamlsource"
 	"gopkg.in/yaml.v3"
 )
 
@@ -137,6 +140,9 @@ func (p *FlowInputPins) UnmarshalYAML(node *yaml.Node) error {
 	if p == nil {
 		return nil
 	}
+	if err := validateFlowPinDirectionNode(node, "input", map[string]struct{}{"events": {}, "reads": {}}); err != nil {
+		return err
+	}
 	var aux struct {
 		Events yaml.Node `yaml:"events"`
 		Reads  yaml.Node `yaml:"reads"`
@@ -144,7 +150,7 @@ func (p *FlowInputPins) UnmarshalYAML(node *yaml.Node) error {
 	if err := node.Decode(&aux); err != nil {
 		return err
 	}
-	events, eventPins, err := decodeFlowInputPinEventsNode(&aux.Events)
+	eventPins, err := decodeFlowInputPinEventsNode(&aux.Events)
 	if err != nil {
 		return err
 	}
@@ -153,7 +159,6 @@ func (p *FlowInputPins) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	*p = FlowInputPins{
-		Events:    events,
 		EventPins: eventPins,
 		Reads:     reads,
 	}
@@ -164,6 +169,9 @@ func (p *FlowOutputPins) UnmarshalYAML(node *yaml.Node) error {
 	if p == nil {
 		return nil
 	}
+	if err := validateFlowPinDirectionNode(node, "output", map[string]struct{}{"events": {}, "writes": {}}); err != nil {
+		return err
+	}
 	var aux struct {
 		Events yaml.Node `yaml:"events"`
 		Writes yaml.Node `yaml:"writes"`
@@ -171,7 +179,7 @@ func (p *FlowOutputPins) UnmarshalYAML(node *yaml.Node) error {
 	if err := node.Decode(&aux); err != nil {
 		return err
 	}
-	events, eventPins, err := decodeFlowOutputPinEventsNode(&aux.Events)
+	eventPins, err := decodeFlowOutputPinEventsNode(&aux.Events)
 	if err != nil {
 		return err
 	}
@@ -180,9 +188,59 @@ func (p *FlowOutputPins) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	*p = FlowOutputPins{
-		Events:    events,
 		EventPins: eventPins,
 		Writes:    writes,
+	}
+	return nil
+}
+
+func validateFlowPinsNode(node *yaml.Node) error {
+	presence := yamlsource.ValueFromNode(node).Presence()
+	if presence == yamlsource.PresenceNull || presence == yamlsource.PresenceEmptyMapping {
+		return fmt.Errorf("flow pins are explicitly %s; omit pins when no boundary is declared", presence)
+	}
+	if presence != yamlsource.PresenceMapping {
+		return fmt.Errorf("flow pins must be a non-empty mapping")
+	}
+	if err := validateUniqueNormalizedMappingKeys(node, "flow pins"); err != nil {
+		return err
+	}
+	allowed := map[string]struct{}{"inputs": {}, "outputs": {}}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if _, ok := allowed[key]; !ok {
+			return NewUndefinedFieldDiagnostic("flow pins", key, allowed)
+		}
+		switch key {
+		case "inputs":
+			if err := validateFlowPinDirectionNode(node.Content[i+1], "input", map[string]struct{}{"events": {}, "reads": {}}); err != nil {
+				return err
+			}
+		case "outputs":
+			if err := validateFlowPinDirectionNode(node.Content[i+1], "output", map[string]struct{}{"events": {}, "writes": {}}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateFlowPinDirectionNode(node *yaml.Node, direction string, allowed map[string]struct{}) error {
+	presence := yamlsource.ValueFromNode(node).Presence()
+	if presence == yamlsource.PresenceNull || presence == yamlsource.PresenceEmptyMapping {
+		return fmt.Errorf("flow %s pins are explicitly %s; omit %ss when no facts are declared", direction, presence, direction)
+	}
+	if presence != yamlsource.PresenceMapping {
+		return fmt.Errorf("flow %s pins must be a non-empty mapping", direction)
+	}
+	if err := validateUniqueNormalizedMappingKeys(node, "flow "+direction+" pins"); err != nil {
+		return err
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		key := strings.TrimSpace(node.Content[i].Value)
+		if _, ok := allowed[key]; !ok {
+			return NewUndefinedFieldDiagnostic("flow "+direction+" pins", key, allowed)
+		}
 	}
 	return nil
 }
@@ -205,80 +263,75 @@ func (i *TemplateInstanceField) UnmarshalYAML(node *yaml.Node) error {
 	return nil
 }
 
-func decodeFlowInputPinEventsNode(node *yaml.Node) ([]string, []FlowInputEventPin, error) {
+func decodeFlowInputPinEventsNode(node *yaml.Node) ([]FlowInputEventPin, error) {
 	if node == nil || node.Kind == 0 {
-		return nil, nil, nil
+		return nil, nil
 	}
-	if node.Kind != yaml.SequenceNode {
-		return nil, nil, fmt.Errorf("flow pin events must be a sequence")
+	presence := yamlsource.ValueFromNode(node).Presence()
+	if presence == yamlsource.PresenceNull || presence == yamlsource.PresenceEmptySequence {
+		return nil, fmt.Errorf("flow input pin events are explicitly %s; omit events when no inputs are declared", presence)
 	}
-	events := make([]string, 0, len(node.Content))
+	if presence != yamlsource.PresenceSequence {
+		return nil, fmt.Errorf("flow input pin events must be a non-empty sequence")
+	}
 	pins := make([]FlowInputEventPin, 0, len(node.Content))
+	seen := map[string]struct{}{}
 	for _, entry := range node.Content {
 		pin, err := decodeFlowInputPinEventNode(entry)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		pin = pin.normalized()
-		if pin.PinName() == "" {
-			continue
+		if _, duplicate := seen[pin.EventType()]; duplicate {
+			return nil, fmt.Errorf("flow input pin event %q is declared more than once", pin.EventType())
 		}
-		events = append(events, pin.EventType())
+		seen[pin.EventType()] = struct{}{}
 		pins = append(pins, pin)
 	}
-	return events, pins, nil
+	return pins, nil
 }
 
-func decodeFlowOutputPinEventsNode(node *yaml.Node) ([]string, []FlowOutputEventPin, error) {
+func decodeFlowOutputPinEventsNode(node *yaml.Node) ([]FlowOutputEventPin, error) {
 	if node == nil || node.Kind == 0 {
-		return nil, nil, nil
+		return nil, nil
 	}
-	if node.Kind != yaml.SequenceNode {
-		return nil, nil, fmt.Errorf("flow pin events must be a sequence")
+	presence := yamlsource.ValueFromNode(node).Presence()
+	if presence == yamlsource.PresenceNull || presence == yamlsource.PresenceEmptySequence {
+		return nil, fmt.Errorf("flow output pin events are explicitly %s; omit events when no outputs are declared", presence)
 	}
-	events := make([]string, 0, len(node.Content))
+	if presence != yamlsource.PresenceSequence {
+		return nil, fmt.Errorf("flow output pin events must be a non-empty sequence")
+	}
 	pins := make([]FlowOutputEventPin, 0, len(node.Content))
+	seen := map[string]struct{}{}
 	for _, entry := range node.Content {
 		pin, err := decodeFlowOutputPinEventNode(entry)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		pin = pin.normalized()
-		if pin.PinName() == "" {
-			continue
+		if _, duplicate := seen[pin.EventType()]; duplicate {
+			return nil, fmt.Errorf("flow output pin event %q is declared more than once", pin.EventType())
 		}
-		events = append(events, pin.EventType())
+		seen[pin.EventType()] = struct{}{}
 		pins = append(pins, pin)
 	}
-	return events, pins, nil
+	return pins, nil
 }
 
 var inputEventPinFieldOptions = map[string]struct{}{
-	"name":       {},
 	"event":      {},
 	"source":     {},
 	"address":    {},
 	"resolution": {},
-	"carries":    {},
 }
 
 var outputEventPinFieldOptions = map[string]struct{}{
-	"name":    {},
-	"event":   {},
-	"sink":    {},
-	"key":     {},
-	"carries": {},
-}
-
-var inputEventPinCarryFieldOptions = map[string]struct{}{
-	"from":     {},
-	"type":     {},
-	"optional": {},
-	"convert":  {},
+	"event": {},
+	"sink":  {},
 }
 
 var inputEventPinResolutionFieldOptions = map[string]struct{}{
 	"mode":            {},
+	"from":            {},
 	"aggregation":     {},
 	"window":          {},
 	"dedup_by":        {},
@@ -297,91 +350,96 @@ var computeFieldOptions = map[string]struct{}{
 }
 
 func decodeFlowInputPinEventNode(node *yaml.Node) (FlowInputEventPin, error) {
-	if node == nil || node.Kind == 0 {
-		return FlowInputEventPin{}, nil
-	}
+	presence := yamlsource.ValueFromNode(node).Presence()
 	if node.Kind == yaml.ScalarNode {
-		value := strings.TrimSpace(node.Value)
-		return FlowInputEventPin{Name: value, Event: value}, nil
+		eventType, err := decodeExactFlowPinEvent(node, "input")
+		if err != nil {
+			return FlowInputEventPin{}, err
+		}
+		out := FlowInputEventPin{Event: eventType, sourceLine: node.Line, sourceCol: node.Column}
+		return out, validateAuthoredFlowInputPin(out)
 	}
-	if node.Kind != yaml.MappingNode {
+	if presence != yamlsource.PresenceMapping {
 		return FlowInputEventPin{}, fmt.Errorf("flow input event pin must be a string or mapping")
 	}
-	var out FlowInputEventPin
+	if err := validateUniqueNormalizedMappingKeys(node, "flow input event pin"); err != nil {
+		return FlowInputEventPin{}, err
+	}
+	out := FlowInputEventPin{sourceLine: node.Line, sourceCol: node.Column}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
 		value := node.Content[i+1]
 		switch key {
-		case "":
-			continue
 		case "name":
-			if err := value.Decode(&out.Name); err != nil {
-				return FlowInputEventPin{}, fmt.Errorf("input event pin name: %w", err)
-			}
+			return FlowInputEventPin{}, fmt.Errorf("RETIRED: input event pin name is unsupported; use the exact local event identity")
 		case "event":
-			if err := value.Decode(&out.Event); err != nil {
-				return FlowInputEventPin{}, fmt.Errorf("input event pin event: %w", err)
+			eventType, err := decodeExactFlowPinEvent(value, "input")
+			if err != nil {
+				return FlowInputEventPin{}, err
 			}
+			out.Event = eventType
 		case "source":
-			if err := value.Decode(&out.Source); err != nil {
-				return FlowInputEventPin{}, fmt.Errorf("input event pin source: %w", err)
+			if yamlsource.ValueFromNode(value).Presence() != yamlsource.PresenceScalar {
+				return FlowInputEventPin{}, fmt.Errorf("input event pin source must be an exact non-empty scalar")
 			}
-			if source := strings.ToLower(strings.TrimSpace(out.Source)); source != "" && source != "external" && source != "harness" {
-				return FlowInputEventPin{}, fmt.Errorf("input event pin source must be external or harness")
+			source, err := ParseFlowInputPinSource(value.Value)
+			if err != nil {
+				return FlowInputEventPin{}, err
 			}
+			out.Source = source
 		case "address":
-			return FlowInputEventPin{}, fmt.Errorf("retired input pin address; declare `instance: <field>`, a same-named carry source, and `resolution.mode`")
+			return FlowInputEventPin{}, fmt.Errorf("RETIRED: input pin address is unsupported; declare instance plus resolution")
 		case "resolution":
 			if err := value.Decode(&out.Resolution); err != nil {
 				return FlowInputEventPin{}, fmt.Errorf("input event pin resolution: %w", err)
 			}
 		case "carries":
-			if err := value.Decode(&out.Carries); err != nil {
-				return FlowInputEventPin{}, fmt.Errorf("input event pin carries: %w", err)
-			}
+			return FlowInputEventPin{}, fmt.Errorf("RETIRED: input event pin carries are unsupported; use instance plus resolution.from/window/dedup_by")
 		default:
 			return FlowInputEventPin{}, NewUndefinedFieldDiagnostic("input event pin", key, inputEventPinFieldOptions)
 		}
 	}
-	out = out.normalized()
-	if out.PinName() == "" {
-		return FlowInputEventPin{}, NewExpectedShapeDiagnostic(
-			"contract_loader.input_event_pin_name_required",
-			"schema.yaml.pins.inputs.events",
-			"input event pins must name the pin or use a scalar event name.",
-			"Use `events: [item.received]` or `events: [{name: item_received, event: item.received, source: external}]`.",
-			nil,
-		)
+	if out.Event == "" {
+		return FlowInputEventPin{}, fmt.Errorf("input event pin mapping requires event; use a scalar event when no options are needed")
+	}
+	if out.Source == FlowInputPinSourceNone && out.Resolution.Empty() {
+		return FlowInputEventPin{}, fmt.Errorf("input event pin mapping requires a non-default source or resolution; use a scalar event when no options are needed")
+	}
+	if err := validateAuthoredFlowInputPin(out); err != nil {
+		return FlowInputEventPin{}, err
 	}
 	return out, nil
 }
 
 func decodeFlowOutputPinEventNode(node *yaml.Node) (FlowOutputEventPin, error) {
-	if node == nil || node.Kind == 0 {
-		return FlowOutputEventPin{}, nil
-	}
+	presence := yamlsource.ValueFromNode(node).Presence()
 	if node.Kind == yaml.ScalarNode {
-		value := strings.TrimSpace(node.Value)
-		return FlowOutputEventPin{Name: value, Event: value}, nil
+		eventType, err := decodeExactFlowPinEvent(node, "output")
+		if err != nil {
+			return FlowOutputEventPin{}, err
+		}
+		out := FlowOutputEventPin{Event: eventType, sourceLine: node.Line, sourceCol: node.Column}
+		return out, validateAuthoredFlowOutputPin(out)
 	}
-	if node.Kind != yaml.MappingNode {
+	if presence != yamlsource.PresenceMapping {
 		return FlowOutputEventPin{}, fmt.Errorf("flow output event pin must be a string or mapping")
 	}
-	var out FlowOutputEventPin
+	if err := validateUniqueNormalizedMappingKeys(node, "flow output event pin"); err != nil {
+		return FlowOutputEventPin{}, err
+	}
+	out := FlowOutputEventPin{sourceLine: node.Line, sourceCol: node.Column}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		key := strings.TrimSpace(node.Content[i].Value)
 		value := node.Content[i+1]
 		switch key {
-		case "":
-			continue
 		case "name":
-			if err := value.Decode(&out.Name); err != nil {
-				return FlowOutputEventPin{}, fmt.Errorf("output event pin name: %w", err)
-			}
+			return FlowOutputEventPin{}, fmt.Errorf("RETIRED: output event pin name is unsupported; use the exact local event identity")
 		case "event":
-			if err := value.Decode(&out.Event); err != nil {
-				return FlowOutputEventPin{}, fmt.Errorf("output event pin event: %w", err)
+			eventType, err := decodeExactFlowPinEvent(value, "output")
+			if err != nil {
+				return FlowOutputEventPin{}, err
 			}
+			out.Event = eventType
 		case "sink":
 			if value.Kind != yaml.ScalarNode || strings.EqualFold(strings.TrimSpace(value.Tag), "!!null") {
 				return FlowOutputEventPin{}, fmt.Errorf("output event pin sink must be %q", FlowOutputSinkCode(FlowOutputSinkHarness))
@@ -392,122 +450,35 @@ func decodeFlowOutputPinEventNode(node *yaml.Node) (FlowOutputEventPin, error) {
 				return FlowOutputEventPin{}, err
 			}
 		case "key":
-			if err := value.Decode(&out.Key); err != nil {
-				return FlowOutputEventPin{}, fmt.Errorf("output event pin key: %w", err)
-			}
+			return FlowOutputEventPin{}, fmt.Errorf("RETIRED: output event pin key is unsupported; use the producer event business key")
 		case "carries":
-			carries, err := decodeFlowOutputPinCarriesNode(value)
-			if err != nil {
-				return FlowOutputEventPin{}, fmt.Errorf("output event pin carries: %w", err)
-			}
-			out.Carries = carries
+			return FlowOutputEventPin{}, fmt.Errorf("RETIRED: output event pin carries are unsupported; route evidence is compiled from event schema and receiver resolution")
 		default:
 			return FlowOutputEventPin{}, NewUndefinedFieldDiagnostic("output event pin", key, outputEventPinFieldOptions)
 		}
 	}
-	out = out.normalized()
-	if out.PinName() == "" {
-		return FlowOutputEventPin{}, NewOutputEventPinNameRequiredDiagnostic(nil)
+	if out.Event == "" {
+		return FlowOutputEventPin{}, fmt.Errorf("output event pin mapping requires event; use a scalar event when no options are needed")
+	}
+	if out.Sink == FlowOutputSinkNone {
+		return FlowOutputEventPin{}, fmt.Errorf("output event pin mapping requires a non-default sink; use a scalar event when no options are needed")
+	}
+	if err := validateAuthoredFlowOutputPin(out); err != nil {
+		return FlowOutputEventPin{}, err
 	}
 	return out, nil
 }
 
-func decodeFlowOutputPinCarriesNode(node *yaml.Node) ([]string, error) {
-	if node == nil || node.Kind == 0 {
-		return nil, nil
+func decodeExactFlowPinEvent(node *yaml.Node, direction string) (string, error) {
+	value := yamlsource.ValueFromNode(node)
+	if value.Presence() != yamlsource.PresenceScalar {
+		return "", fmt.Errorf("flow %s pin event must be an exact non-empty scalar", direction)
 	}
-	switch node.Kind {
-	case yaml.ScalarNode:
-		if strings.EqualFold(strings.TrimSpace(node.Tag), "!!null") || strings.TrimSpace(node.Value) == "" {
-			return nil, nil
-		}
-		return []string{strings.TrimSpace(node.Value)}, nil
-	case yaml.SequenceNode:
-		out := make([]string, 0, len(node.Content))
-		for _, item := range node.Content {
-			if item == nil || item.Kind != yaml.ScalarNode {
-				return nil, fmt.Errorf("carries entries must be strings")
-			}
-			out = append(out, strings.TrimSpace(item.Value))
-		}
-		return out, nil
-	default:
-		return nil, fmt.Errorf("carries must be a string or sequence")
+	eventType := node.Value
+	if eventType != strings.TrimSpace(eventType) || !eventidentity.IsValidName(eventType) || strings.ContainsAny(eventType, "/*") {
+		return "", fmt.Errorf("flow %s pin event %q must be an exact local canonical event identity", direction, eventType)
 	}
-}
-
-func (c *FlowInputPinCarries) UnmarshalYAML(node *yaml.Node) error {
-	if c == nil {
-		return nil
-	}
-	if node == nil || node.Kind == 0 {
-		*c = nil
-		return nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("input pin carries must be a mapping")
-	}
-	out := FlowInputPinCarries{}
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		name := strings.TrimSpace(node.Content[i].Value)
-		value := node.Content[i+1]
-		if name == "" {
-			continue
-		}
-		var carry FlowInputPinCarry
-		if err := value.Decode(&carry); err != nil {
-			return fmt.Errorf("carry %s: %w", name, err)
-		}
-		out[name] = carry.normalized()
-	}
-	*c = out.normalized()
-	return nil
-}
-
-func (c *FlowInputPinCarry) UnmarshalYAML(node *yaml.Node) error {
-	if c == nil {
-		return nil
-	}
-	if node == nil || node.Kind == 0 {
-		*c = FlowInputPinCarry{}
-		return nil
-	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("input pin carry must be a mapping")
-	}
-	var out FlowInputPinCarry
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
-		value := node.Content[i+1]
-		switch key {
-		case "":
-			continue
-		case "from":
-			if err := value.Decode(&out.From); err != nil {
-				return fmt.Errorf("carry.from: %w", err)
-			}
-			from := strings.TrimSpace(out.From)
-			if from == "instance.key" || strings.HasPrefix(from, "instance.key.") {
-				return NewRetiredInstanceKeyCarrySourceDiagnostic()
-			}
-		case "type":
-			if err := value.Decode(&out.Type); err != nil {
-				return fmt.Errorf("carry.type: %w", err)
-			}
-		case "optional":
-			if err := value.Decode(&out.Optional); err != nil {
-				return fmt.Errorf("carry.optional: %w", err)
-			}
-		case "convert":
-			if err := value.Decode(&out.Convert); err != nil {
-				return fmt.Errorf("carry.convert: %w", err)
-			}
-		default:
-			return NewUndefinedFieldDiagnostic("input event pin carry", key, inputEventPinCarryFieldOptions)
-		}
-	}
-	*c = out.normalized()
-	return nil
+	return eventType, nil
 }
 
 func (r *FlowInputPinResolution) UnmarshalYAML(node *yaml.Node) error {
@@ -518,8 +489,14 @@ func (r *FlowInputPinResolution) UnmarshalYAML(node *yaml.Node) error {
 		*r = FlowInputPinResolution{}
 		return nil
 	}
-	if node.Kind != yaml.MappingNode {
-		return fmt.Errorf("input pin resolution must be a mapping")
+	if yamlsource.ValueFromNode(node).Presence() == yamlsource.PresenceEmptyMapping {
+		return fmt.Errorf("input pin resolution is explicitly empty; omit resolution when no options are declared")
+	}
+	if yamlsource.ValueFromNode(node).Presence() != yamlsource.PresenceMapping {
+		return fmt.Errorf("input pin resolution must be a non-empty mapping")
+	}
+	if err := validateUniqueNormalizedMappingKeys(node, "input event pin resolution"); err != nil {
+		return err
 	}
 	var out FlowInputPinResolution
 	for i := 0; i+1 < len(node.Content); i += 2 {
@@ -529,74 +506,117 @@ func (r *FlowInputPinResolution) UnmarshalYAML(node *yaml.Node) error {
 		case "":
 			continue
 		case "mode":
-			var raw string
-			if err := value.Decode(&raw); err != nil {
-				return fmt.Errorf("resolution.mode: %w", err)
+			raw, err := decodeExactNonEmptyFlowPinScalar(value, "resolution.mode")
+			if err != nil {
+				return err
 			}
 			mode, err := ParseFlowInputResolutionMode(raw)
 			if err != nil {
 				return fmt.Errorf("resolution.mode: %w", err)
 			}
 			out.Mode = mode
+		case "from":
+			if yamlsource.ValueFromNode(value).Presence() != yamlsource.PresenceScalar {
+				return fmt.Errorf("resolution.from must be an exact non-empty scalar")
+			}
+			if value.Value != strings.TrimSpace(value.Value) {
+				return fmt.Errorf("resolution.from must not contain surrounding whitespace")
+			}
+			out.From = value.Value
 		case "instance_key":
 			return NewRetiredResolutionInstanceKeyDiagnostic()
 		case "aggregation":
-			if err := value.Decode(&out.Aggregation); err != nil {
-				return fmt.Errorf("resolution.aggregation: %w", err)
+			decoded, err := decodeExactNonEmptyFlowPinScalar(value, "resolution.aggregation")
+			if err != nil {
+				return err
 			}
+			out.Aggregation = decoded
 		case "window":
-			if err := value.Decode(&out.Window); err != nil {
-				return fmt.Errorf("resolution.window: %w", err)
+			decoded, err := decodeExactNonEmptyFlowPinScalar(value, "resolution.window")
+			if err != nil {
+				return err
 			}
+			out.Window = decoded
 		case "dedup_by":
-			dedup, err := decodeFlowOutputPinCarriesNode(value)
+			dedup, err := decodeExactFlowPinFieldSequence(value, "resolution.dedup_by")
 			if err != nil {
 				return fmt.Errorf("resolution.dedup_by: %w", err)
 			}
 			out.DedupBy = dedup
 		case "singleton":
-			if err := value.Decode(&out.Singleton); err != nil {
-				return fmt.Errorf("resolution.singleton: %w", err)
+			decoded, err := decodeExactNonEmptyFlowPinScalar(value, "resolution.singleton")
+			if err != nil {
+				return err
 			}
+			out.Singleton = decoded
 		case "replies_to":
-			if err := value.Decode(&out.RepliesTo); err != nil {
-				return fmt.Errorf("resolution.replies_to: %w", err)
+			decoded, err := decodeExactNonEmptyFlowPinScalar(value, "resolution.replies_to")
+			if err != nil {
+				return err
 			}
+			out.RepliesTo = decoded
 		case "correlation_key":
-			if err := value.Decode(&out.CorrelationKey); err != nil {
-				return fmt.Errorf("resolution.correlation_key: %w", err)
+			decoded, err := decodeExactNonEmptyFlowPinScalar(value, "resolution.correlation_key")
+			if err != nil {
+				return err
 			}
+			out.CorrelationKey = decoded
 		default:
 			return NewUndefinedFieldDiagnostic("input event pin resolution", key, inputEventPinResolutionFieldOptions)
 		}
 	}
-	*r = out.normalized()
+	*r = out
 	return nil
+}
+
+func decodeExactNonEmptyFlowPinScalar(node *yaml.Node, owner string) (string, error) {
+	if yamlsource.ValueFromNode(node).Presence() != yamlsource.PresenceScalar {
+		return "", fmt.Errorf("%s must be an exact non-empty scalar", owner)
+	}
+	if node.Value != strings.TrimSpace(node.Value) {
+		return "", fmt.Errorf("%s must not contain surrounding whitespace", owner)
+	}
+	if node.Value == "" {
+		return "", fmt.Errorf("%s must be an exact non-empty scalar", owner)
+	}
+	return node.Value, nil
 }
 
 func decodeFlowPinFieldNamesNode(node *yaml.Node) ([]string, error) {
 	if node == nil || node.Kind == 0 {
 		return nil, nil
 	}
-	var legacy []string
-	if err := node.Decode(&legacy); err == nil {
-		return append([]string{}, legacy...), nil
+	presence := yamlsource.ValueFromNode(node).Presence()
+	if presence == yamlsource.PresenceNull || presence == yamlsource.PresenceEmptySequence {
+		return nil, fmt.Errorf("flow pin entity fields are explicitly %s; omit the field when no permissions are declared", presence)
 	}
+	if presence != yamlsource.PresenceSequence {
+		return nil, fmt.Errorf("flow pin entity fields must be a non-empty scalar sequence")
+	}
+	return decodeExactFlowPinFieldSequence(node, "flow pin entity fields")
+}
 
-	var structured []struct {
-		Field string `yaml:"field"`
+func decodeExactFlowPinFieldSequence(node *yaml.Node, owner string) ([]string, error) {
+	if yamlsource.ValueFromNode(node).Presence() != yamlsource.PresenceSequence {
+		return nil, fmt.Errorf("%s must be a non-empty scalar sequence", owner)
 	}
-	if err := node.Decode(&structured); err != nil {
-		return nil, err
-	}
-	fields := make([]string, 0, len(structured))
-	for _, entry := range structured {
-		field := strings.TrimSpace(entry.Field)
-		if field == "" {
-			continue
+	fields := make([]string, 0, len(node.Content))
+	seen := map[string]struct{}{}
+	for _, entry := range node.Content {
+		if yamlsource.ValueFromNode(entry).Presence() != yamlsource.PresenceScalar {
+			return nil, fmt.Errorf("%s entries must be exact non-empty scalars", owner)
 		}
+		field := entry.Value
+		if field == "" || field != strings.TrimSpace(field) {
+			return nil, fmt.Errorf("%s field %q must not contain surrounding whitespace", owner, field)
+		}
+		if _, duplicate := seen[field]; duplicate {
+			return nil, fmt.Errorf("%s field %q is declared more than once", owner, field)
+		}
+		seen[field] = struct{}{}
 		fields = append(fields, field)
 	}
+	sort.Strings(fields)
 	return fields, nil
 }
 

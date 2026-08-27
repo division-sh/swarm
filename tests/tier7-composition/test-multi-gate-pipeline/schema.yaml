@@ -7,9 +7,7 @@ pins:
     events: [gate.g1_set, gate.g2_set, gate.g3_set, approval.requested]
   outputs:
     events:
-      - name: approval.granted
-        event: approval.granted
+      - event: approval.granted
         sink: harness
-      - name: gate.set
-        event: gate.set
+      - event: gate.set
         sink: harness

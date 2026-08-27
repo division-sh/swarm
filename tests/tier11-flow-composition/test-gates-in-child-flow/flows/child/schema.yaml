@@ -7,11 +7,8 @@ terminal_states:
 pins:
   inputs:
     events:
-      - name: validate.start
-    reads: []
+      - validate.start
   outputs:
     events:
-      - name: validation_done
-        event: validation.done
-    writes: []
+      - validation.done
 name: child

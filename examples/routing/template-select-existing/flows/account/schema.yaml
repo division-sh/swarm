@@ -4,21 +4,9 @@ instance: account_id
 pins:
   inputs:
     events:
-      - name: account_setup
-        event: account.setup
+      - event: account.setup
         resolution:
           mode: select-or-create
-        carries:
-          account_id:
-            from: payload.account_id
-            type: text
-      - name: account_ready
-        event: account.ready
+      - event: account.ready
         resolution:
           mode: select
-        carries:
-          account_id:
-            from: payload.account_id
-            type: text
-  outputs:
-    events: []

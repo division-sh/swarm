@@ -890,12 +890,11 @@ func routeAdmittedFlowIngressEventSet(source semanticview.Source, scope semantic
 }
 
 func routeRootInputEventSet(source semanticview.Source) map[string]struct{} {
-	bundle, ok := semanticview.Bundle(source)
-	if !ok || bundle == nil || bundle.RootSchema == nil {
+	if source == nil {
 		return nil
 	}
 	out := make(map[string]struct{})
-	for _, eventType := range normalizeStringList(bundle.RootSchema.Pins.Inputs.Events) {
+	for _, eventType := range normalizeStringList(source.FlowInputEvents("")) {
 		out[eventType] = struct{}{}
 	}
 	return out

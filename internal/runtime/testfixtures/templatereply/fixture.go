@@ -10,12 +10,12 @@ import (
 
 const (
 	RequesterFlowID     = "requester"
-	RequesterRequestPin = "provider_requested"
-	RequesterReplyPin   = "provider_replied"
+	RequesterRequestPin = "provider.requested"
+	RequesterReplyPin   = "provider.replied"
 	RequesterNodeID     = "requester-node"
 	ProviderFlowID      = "provider"
-	ProviderRequestPin  = "provider_requested"
-	ProviderReplyPin    = "provider_replied"
+	ProviderRequestPin  = "provider.requested"
+	ProviderReplyPin    = "provider.replied"
 	ProviderNodeID      = "provider-node"
 	RequestEvent        = "provider.requested"
 	ReplyEvent          = "provider.replied"
@@ -25,7 +25,7 @@ const (
 
 type Options struct {
 	MissingRepliesTo          bool
-	MissingCorrelationCarry   bool
+	MissingCorrelationField   bool
 	AmbiguousRequestEdge      bool
 	MismatchedProvider        bool
 	DefaultEventIDCorrelation bool
@@ -86,8 +86,8 @@ func Write(t testing.TB, opts Options) string {
 	if opts.MissingRepliesTo {
 		canonicalrouting.ApplyTemplateReplyNegativeMutation(t, root, canonicalrouting.TemplateReplyMissingRepliesTo)
 	}
-	if opts.MissingCorrelationCarry {
-		canonicalrouting.ApplyTemplateReplyNegativeMutation(t, root, canonicalrouting.TemplateReplyMissingCorrelationCarry)
+	if opts.MissingCorrelationField {
+		canonicalrouting.ApplyTemplateReplyNegativeMutation(t, root, canonicalrouting.TemplateReplyMissingCorrelationField)
 	}
 	if opts.AmbiguousRequestEdge {
 		canonicalrouting.ApplyTemplateReplyNegativeMutation(t, root, canonicalrouting.TemplateReplyAmbiguousRequestEdge)
@@ -99,7 +99,7 @@ func Write(t testing.TB, opts Options) string {
 }
 
 func requiresExplicitCorrelation(opts Options) bool {
-	return opts.ExplicitCorrelation || opts.MissingRepliesTo || opts.MissingCorrelationCarry ||
+	return opts.ExplicitCorrelation || opts.MissingRepliesTo || opts.MissingCorrelationField ||
 		opts.AmbiguousRequestEdge || opts.MismatchedProvider || opts.OptionalReplyCorrelation ||
 		opts.ProviderContinuation != ""
 }

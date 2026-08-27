@@ -6,7 +6,4 @@ pins:
   inputs:
     events:
       - work.begin
-      - name: task_done
-        event: task.done
-  outputs:
-    events: []
+      - task.done

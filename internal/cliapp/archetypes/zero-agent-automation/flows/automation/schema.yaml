@@ -5,5 +5,4 @@ states: [ready]
 pins:
   inputs:
     events:
-      - {name: request, event: automation.requested, source: external}
-  outputs: {events: []}
+      - {event: automation.requested, source: external}

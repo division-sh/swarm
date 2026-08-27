@@ -1,7 +1,2 @@
 name: stage-lifecycle-identity-root
 stages: []
-pins:
-  inputs:
-    events: []
-  outputs:
-    events: []

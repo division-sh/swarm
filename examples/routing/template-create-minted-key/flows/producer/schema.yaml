@@ -3,12 +3,9 @@ mode: static
 pins:
   inputs:
     events:
-      - name: validation_triggered
-        event: validation.triggered
+      - event: validation.triggered
         source: external
-      - name: validation_started
-        event: validation.started
+      - validation.started
   outputs:
     events:
-      - name: validation_requested
-        event: validation.requested
+      - validation.requested

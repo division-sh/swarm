@@ -28,17 +28,15 @@ func TestCompositionConnectFactsExposeCanonicalReceiverResolution(t *testing.T) 
 		t.Fatalf("FlowInputEventPins = %#v, want two", inputPins)
 	}
 	inputPin := inputPins[1]
-	if got, want := inputPin.PinName(), "account_ready"; got != want {
-		t.Fatalf("input pin name = %q, want %q", got, want)
-	}
 	if got, want := inputPin.EventType(), "account.ready"; got != want {
 		t.Fatalf("input pin event = %q, want %q", got, want)
 	}
-	if inputPin.Resolution.Mode != runtimecontracts.FlowInputResolutionModeSelect {
-		t.Fatalf("input pin resolution = %#v, want select", inputPin.Resolution)
+	resolution := inputPin.Resolution()
+	if resolution.Mode != runtimecontracts.FlowInputResolutionModeSelect {
+		t.Fatalf("input pin resolution = %#v, want select", resolution)
 	}
-	if carry := inputPin.Carries["account_id"]; carry.From != "payload.account_id" {
-		t.Fatalf("input pin carry = %#v, want payload.account_id", carry)
+	if resolution.From != "" {
+		t.Fatalf("input pin resolution.from = %q, want canonical same-name derivation", resolution.From)
 	}
 
 	outputPins := source.FlowOutputEventPins("producer")
@@ -46,11 +44,11 @@ func TestCompositionConnectFactsExposeCanonicalReceiverResolution(t *testing.T) 
 		t.Fatalf("FlowOutputEventPins = %#v, want two", outputPins)
 	}
 	outputPin := outputPins[1]
-	if got, want := outputPin.PinName(), "account_ready"; got != want {
-		t.Fatalf("output pin name = %q, want %q", got, want)
+	if got, want := outputPin.EventType(), "account.ready"; got != want {
+		t.Fatalf("output pin event = %q, want %q", got, want)
 	}
-	if outputPin.Key != "" || len(outputPin.Carries) != 0 {
-		t.Fatalf("output pin key/carries = %q/%#v, want no receiver authority", outputPin.Key, outputPin.Carries)
+	if outputPin.Digest() == "" {
+		t.Fatal("output pin has no immutable digest")
 	}
 
 	connects := bundle.CompositionConnects()
@@ -86,7 +84,7 @@ func TestCompositionConnectFactsExposeRootProducerEndpoint(t *testing.T) {
 	if len(outputPins) != 1 {
 		t.Fatalf("root FlowOutputEventPins = %#v, want one", outputPins)
 	}
-	if got, want := outputPins[0].PinName(), "root_ready"; got != want {
+	if got, want := outputPins[0].EventType(), "root.ready"; got != want {
 		t.Fatalf("root output pin name = %q, want %q", got, want)
 	}
 

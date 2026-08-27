@@ -43,26 +43,19 @@ func applyTemplateReplyExplicitCorrelation(t testing.TB, root string) {
 	t.Helper()
 	requesterSchema := filepath.Join(root, "flows", "requester", "schema.yaml")
 	applyClosedReplacement(t, requesterSchema,
-		"          replies_to: provider_requested\n",
-		"          replies_to: provider_requested\n          correlation_key: provider_request_id\n")
-	applyClosedReplacement(t, requesterSchema,
-		"      - name: provider_requested\n        event: provider.requested\n",
-		"      - name: provider_requested\n        event: provider.requested\n        key: provider_request_id\n        carries: [provider_request_id]\n")
-	providerSchema := filepath.Join(root, "flows", "provider", "schema.yaml")
-	applyClosedReplacement(t, providerSchema,
-		"      - name: provider_replied\n        event: provider.replied\n",
-		"      - name: provider_replied\n        event: provider.replied\n        key: provider_request_id\n        carries: [provider_request_id]\n")
+		"          replies_to: provider.requested\n",
+		"          replies_to: provider.requested\n          correlation_key: provider_request_id\n")
 	applyClosedReplacement(t, filepath.Join(root, "flows", "requester", "events.yaml"),
-		"provider.requested:\n", "provider.requested:\n  provider_request_id: text\n")
+		"provider.requested:\n", "provider.requested:\n  key: provider_request_id\n  provider_request_id: text\n")
 	applyClosedReplacement(t, filepath.Join(root, "flows", "provider", "events.yaml"),
-		"provider.replied:\n", "provider.replied:\n  provider_request_id: text\n")
+		"provider.replied:\n", "provider.replied:\n  key: provider_request_id\n  provider_request_id: text\n")
 	initiatorEvents := filepath.Join(root, "flows", "initiator", "events.yaml")
 	applyClosedReplacement(t, initiatorEvents,
 		"request.submitted:\n  account_id: text?\n",
 		"request.submitted:\n  account_id: text?\n  provider_request_id: text\n")
 	applyClosedReplacement(t, initiatorEvents,
-		"requester.requested:\n  account_id: text?\n",
-		"requester.requested:\n  account_id: text?\n  provider_request_id: text\n")
+		"requester.requested:\n  account_id: text\n",
+		"requester.requested:\n  account_id: text\n  provider_request_id: text\n")
 	initiatorNodes := filepath.Join(root, "flows", "initiator", "nodes.yaml")
 	applyClosedReplacement(t, initiatorNodes,
 		"    request.submitted:\n      emit:\n        event: requester.requested\n        fields:\n          account_id: payload.account_id\n",
@@ -82,10 +75,9 @@ func applyTemplateReplyHumanContinuation(t testing.TB, root, requestKey, account
 	requestKey = closedScalarLiteral(t, "request key", requestKey, "human-request")
 	accountID = closedScalarLiteral(t, "account ID", accountID, "account-a")
 	providerSchema := filepath.Join(root, "flows", "provider", "schema.yaml")
-	applyClosedReplacement(t, providerSchema, "  outputs:\n", `      - name: human_task_deferred
-        event: human_task.deferred
-      - name: human_task_approved
-        event: human_task.approved
+	applyClosedReplacement(t, providerSchema, "      - provider.requested\n  outputs:\n", `      - provider.requested
+      - human_task.deferred
+      - human_task.approved
   outputs:
 `)
 	writeClosedVariantFile(t, root, "flows/provider/nodes.yaml", `provider-node:

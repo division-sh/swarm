@@ -93,7 +93,7 @@ func TestRootInputAPIEventPublicationAdmissionIsExactAndClosed(t *testing.T) {
 
 func TestTemplateAPIEventPublicationEndpointRejectsForgedCensusFacts(t *testing.T) {
 	source := connectRoutePlanTemplateInstanceSource(t, canonicalrouting.TemplateInstanceRouteCreate, false)
-	association := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint("consumer", "deploy_completed")
+	association := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint("consumer", "deploy.done")
 	endpoint, ok := association.Endpoint()
 	if !ok {
 		t.Fatalf("resolve template endpoint: %v", association.Err())

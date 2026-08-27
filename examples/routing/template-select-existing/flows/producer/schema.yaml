@@ -3,15 +3,11 @@ mode: static
 pins:
   inputs:
     events:
-      - name: account_setup_requested
-        event: account.setup.requested
+      - event: account.setup.requested
         source: external
-      - name: account_work_requested
-        event: account.work.requested
+      - event: account.work.requested
         source: external
   outputs:
     events:
-      - name: account_setup
-        event: account.setup
-      - name: account_ready
-        event: account.ready
+      - account.setup
+      - account.ready

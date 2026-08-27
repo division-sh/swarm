@@ -29,17 +29,18 @@ func effectiveWorkflowJoins(source Source, plans []runtimecontracts.WorkflowJoin
 			continue
 		}
 		pin, ok := source.FlowInputEventPin(plan.Node.FlowID(), endpoint.PinName)
-		if !ok || !strings.EqualFold(strings.TrimSpace(pin.Resolution.Aggregation), "barrier") {
+		if !ok || !strings.EqualFold(strings.TrimSpace(pin.Resolution().Aggregation), "barrier") {
 			continue
 		}
-		dedup := normalizedJoinDerivationValues(pin.Resolution.DedupBy)
+		resolution := pin.Resolution()
+		dedup := normalizedJoinDerivationValues(resolution.DedupBy)
 		if len(dedup) == 1 {
 			plan.Spec.Members.By = dedup[0]
 			plan.Spec.Members.ByPath = paths.Parse(dedup[0])
 			plan.Derivation.MembersBy = dedup[0]
 			plan.Derivation.MembersByFrom = "resolution.dedup_by"
 		}
-		if window := strings.TrimSpace(pin.Resolution.Window); window != "" && plan.Spec.Window != nil {
+		if window := strings.TrimSpace(resolution.Window); window != "" && plan.Spec.Window != nil {
 			plan.Spec.Window.By = window
 			plan.Spec.Window.ByPath = paths.Parse(window)
 			plan.Derivation.WindowBy = window

@@ -32,7 +32,7 @@ func (*runStartAppendStore) ListEventDeliveryRecipients(context.Context, string)
 func (*runStartAppendStore) SupportsPersistedReplay() bool { return false }
 
 func TestHandlerRunStartRejectsUndeclaredInputBeforePublish(t *testing.T) {
-	source := semanticview.Wrap(runStartInputBundle("scan.corpus_file_requested"))
+	source := semanticview.Wrap(runStartInputBundle(t, "scan.corpus_file_requested"))
 	store := &runStartAppendStore{}
 	_, acquirer := newTestOwnedEventBus(t, store, runtimebus.EventBusOptions{ContractBundle: source})
 	handler := NewHandler(Options{
@@ -65,12 +65,15 @@ func TestHandlerRunStartRejectsUndeclaredInputBeforePublish(t *testing.T) {
 
 func TestHandlerRunStartRejectsDeclaredUnroutableInputBeforePublish(t *testing.T) {
 	const eventName = "scan.unroutable_requested"
-	bundle := runStartInputBundle(eventName)
+	bundle := runStartInputBundle(t, eventName)
 	bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"] = runtimecontracts.SystemNodeContract{
 		ID:           "scan-orchestrator",
 		SubscribesTo: []string{"scan.other_requested"},
 	}
 	bundle.Nodes["scan-orchestrator"] = bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"]
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatalf("compile mutated run-start input bundle: %v", err)
+	}
 	source := semanticview.Wrap(bundle)
 	store := &runStartAppendStore{}
 	_, acquirer := newTestOwnedEventBus(t, store, runtimebus.EventBusOptions{ContractBundle: source})
@@ -136,7 +139,7 @@ func assertBuilderRootInputDiagnostic(t *testing.T, rpcErr *RPCError, eventName,
 func TestHandlerRunStartAcceptsDeclaredRoutableInput(t *testing.T) {
 	const eventName = "scan.corpus_file_requested"
 	runID := eventtest.UUID("builder-run-start-accepts-routable-input")
-	source := semanticview.Wrap(runStartInputBundle(eventName))
+	source := semanticview.Wrap(runStartInputBundle(t, eventName))
 	store := &runStartAppendStore{}
 	_, acquirer := newTestOwnedEventBus(t, store, runtimebus.EventBusOptions{ContractBundle: source})
 	handler := NewHandler(Options{
@@ -176,13 +179,14 @@ func callBuilderRPCRaw(t *testing.T, httpHandler http.Handler, req Request) RPCR
 	return RPCResponse{JSONRPC: "2.0", ID: req.ID, Result: result, Error: rpcErr}
 }
 
-func runStartInputBundle(eventName string) *runtimecontracts.WorkflowContractBundle {
+func runStartInputBundle(t testing.TB, eventName string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
 	flow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "discovery", Flow: "discovery"},
 		Path:  "discovery",
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{Events: []string{eventName}},
+				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: eventName}}},
 			},
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
@@ -196,14 +200,18 @@ func runStartInputBundle(eventName string) *runtimecontracts.WorkflowContractBun
 		},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
-	return &runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Package: runtimecontracts.ProjectPackageDocument{Name: "review", Version: "1.0.0"},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"scan-orchestrator": flow.Nodes["scan-orchestrator"],
 		},
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{Events: []string{eventName}},
+				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: eventName}}},
 			},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"discovery": flow.Schema,
 		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
@@ -212,4 +220,8 @@ func runStartInputBundle(eventName string) *runtimecontracts.WorkflowContractBun
 			},
 		},
 	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatalf("compile run-start input bundle: %v", err)
+	}
+	return bundle
 }

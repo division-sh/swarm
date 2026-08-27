@@ -2,11 +2,60 @@ package contracts
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 )
+
+func TestW2RejectsInvalidCompiledPinAndPermissionInputs(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		bundle *WorkflowContractBundle
+		want   string
+	}{
+		{
+			name: "root duplicate read",
+			bundle: &WorkflowContractBundle{RootSchema: &FlowSchemaDocument{Pins: FlowPins{
+				Inputs: FlowInputPins{Reads: []string{"entity.status", "entity.status"}},
+			}}},
+			want: "compile root input entity permissions",
+		},
+		{
+			name: "flow inexact write",
+			bundle: &WorkflowContractBundle{FlowSchemas: map[string]FlowSchemaDocument{
+				"worker": {Pins: FlowPins{Outputs: FlowOutputPins{Writes: []string{" entity.status"}}}},
+			}},
+			want: "compile flow worker output entity permissions",
+		},
+		{
+			name: "flow duplicate input pin",
+			bundle: &WorkflowContractBundle{FlowSchemas: map[string]FlowSchemaDocument{
+				"worker": {Pins: FlowPins{Inputs: FlowInputPins{EventPins: []FlowInputEventPin{
+					{Event: "work.requested"}, {Event: "work.requested"},
+				}}}},
+			}},
+			want: "input pin event \"work.requested\" is declared more than once",
+		},
+		{
+			name: "root duplicate output pin",
+			bundle: &WorkflowContractBundle{RootSchema: &FlowSchemaDocument{Pins: FlowPins{
+				Outputs: FlowOutputPins{EventPins: []FlowOutputEventPin{
+					{Event: "work.completed"}, {Event: "work.completed"},
+				}},
+			}}},
+			want: "output pin event \"work.completed\" is declared more than once",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := CompileWorkflowSemantics(tc.bundle)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("CompileWorkflowSemantics error = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
 
 func TestWorkflowSemanticsRuleActionUsesHandlerAdvancesToFallback(t *testing.T) {
 	bundle := &WorkflowContractBundle{

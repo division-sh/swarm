@@ -3087,7 +3087,7 @@ func TestEventBusPublish_RecordsNoRoutedDiagnosticsForRetiredSiblingAutoWire(t *
 		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"scan.requested"}},
+				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "scan.requested"}}},
 			},
 		},
 		Path: "producer",
@@ -3096,7 +3096,7 @@ func TestEventBusPublish_RecordsNoRoutedDiagnosticsForRetiredSiblingAutoWire(t *
 		Paths: runtimecontracts.FlowContractPaths{ID: "discovery", Flow: "discovery"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{Events: []string{"scan.requested"}},
+				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "scan.requested"}}},
 			},
 		},
 		Path: "discovery",
@@ -3524,7 +3524,7 @@ func mixedNodeRouteWorkflowModule(t *testing.T) (runtimepipeline.WorkflowModule,
 		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: runtimecontracts.FlowModeStatic,
-			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{Events: []string{"route.start"}}},
+			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "route.start"}}}},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
 			"route.start": {},
@@ -4172,65 +4172,12 @@ func TestEventBusPublish_UndeclaredDescendantEmissionFailsClosedBeforeChildMutat
 }
 
 func TestEventBusPublish_RecordsNestedPackageConnectLocalizedEvent(t *testing.T) {
-	grandchild := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "grandchild", Flow: "grandchild", PackageKey: "flows/child/flows/grandchild"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Name: "micro_done", Event: "micro.done"}}},
-			},
-		},
-		Path: "child/grandchild",
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"micro.done": {},
-		},
-	}
-	child := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "flows/child"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Inputs:  runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Name: "micro_done", Event: "micro.done"}}},
-				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"step.result"}},
-			},
-		},
-		Path: "child",
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"child-aggregator": {
-				ID:           "child-aggregator",
-				SubscribesTo: []string{"micro.done"},
-				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"micro.done": {},
-				},
-			},
-		},
-		Events:   map[string]runtimecontracts.EventCatalogEntry{"micro.done": {}},
-		Children: []runtimecontracts.FlowContractView{grandchild},
-	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child}}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		PackageTree: []runtimecontracts.LoadedProjectPackage{{
-			Key:       "flows/child/flows/grandchild",
-			ParentKey: "flows/child",
-			Paths:     runtimecontracts.ProjectPackagePaths{OwningFlowID: "grandchild"},
-		}},
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				"child":      &root.Children[0],
-				"grandchild": &root.Children[0].Children[0],
-			},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			"child":      child.Schema,
-			"grandchild": grandchild.Schema,
-		},
-		Semantics: runtimecontracts.WorkflowSemanticView{CompositionConnects: []runtimecontracts.FlowPackageConnect{{
-			PackageKey: "flows/child",
-			SourceFile: "flows/child/package.yaml",
-			SourceLine: 10,
-			Event:      "micro.done",
-			From:       "grandchild",
-			To:         ".",
-		}}},
+	repoRoot := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot, canonicalrouting.CopyNestedPackageConnect(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load nested package connect fixture: %v", err)
 	}
 	eb, err := newScopedTestEventBus(newRouteSetEventStore(), runtimebus.EventBusOptions{
 		ContractBundle: semanticview.Wrap(bundle),

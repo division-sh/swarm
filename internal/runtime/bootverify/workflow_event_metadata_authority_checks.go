@@ -144,10 +144,10 @@ func eventMetadataAddGlobalFlowTopologyNames(source semanticview.Source, names e
 		names.add(flowID, eventMetadataFlowLabel(flowID))
 	}
 	for _, pin := range source.FlowOutputEventPins(flowID) {
-		eventMetadataAddFlowRole(names, flowID, pin.PinName(), "output pin producer")
+		eventMetadataAddFlowRole(names, flowID, pin.EventType(), "output pin producer")
 	}
 	for _, pin := range source.FlowInputEventPins(flowID) {
-		eventMetadataAddFlowRole(names, flowID, pin.PinName(), "input pin consumer")
+		eventMetadataAddFlowRole(names, flowID, pin.EventType(), "input pin consumer")
 	}
 }
 

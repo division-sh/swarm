@@ -53,7 +53,6 @@ terminal_states: [archived]
 pins:
   inputs:
     events: [opco.spend_requested]
-  outputs: {events: []}
 `)
 	writeClosedVariantFile(t, root, "flows/treasury/events.yaml", `opco.spend_requested:
   swarm: {source: external}
@@ -190,9 +189,9 @@ stages:
 pins:
   inputs:
     events:
-      - {name: order_started, event: order.started, source: external}
-      - {name: order_dispatched, event: order.dispatched, source: external}
-      - {name: item_completed, event: item.completed, source: external}
+      - {event: order.started, source: external}
+      - {event: order.dispatched, source: external}
+      - {event: item.completed, source: external}
 `,
 		"entities.yaml": `order:
   expected:
@@ -344,20 +343,17 @@ mode: static
 pins:
   outputs:
     events:
-      - {name: deploy_done, event: deploy.done, key: vertical_id, carries: [vertical_id]}
+      - deploy.done
 `,
-		"flows/producer/events.yaml": "deploy.done:\n  vertical_id: string\n",
+		"flows/producer/events.yaml": "deploy.done:\n  key: vertical_id\n  vertical_id: string\n",
 		"flows/consumer/schema.yaml": `name: consumer
 mode: template
 instance: vertical_id
 pins:
   inputs:
     events:
-      - name: deploy_completed
-        event: deploy.done
+      - event: deploy.done
         resolution: {mode: select-or-create}
-        carries:
-          vertical_id: {from: payload.vertical_id, type: string}
 `,
 		"flows/consumer/entities.yaml": "deployment:\n  vertical_id:\n    type: string\n",
 		"flows/consumer/nodes.yaml":    "consumer-node:\n  id: consumer-node-{instance_id}\n  execution_type: system_node\n  event_handlers:\n    deploy.done: {}\n",
@@ -446,11 +442,11 @@ component_scaffold.spawn_requested:
 	return root
 }
 
-func CopyProviderRollback(t testing.TB, withCarrier bool) string {
+func CopyProviderRollback(t testing.TB, withHandler bool) string {
 	t.Helper()
 	root := CopyExample(t, TemplateSelectOrCreate)
 	nodes := ""
-	if withCarrier {
+	if withHandler {
 		nodes = "consumer-node:\n  id: consumer-node-{instance_id}\n  execution_type: system_node\n  event_handlers:\n    inbound.telegram.text_message: {}\n"
 	}
 	files := map[string]string{
@@ -468,12 +464,9 @@ instance: chat_id
 pins:
   inputs:
     events:
-      - name: telegram_text
-        event: inbound.telegram.text_message
+      - event: inbound.telegram.text_message
         source: external
         resolution: {mode: select-or-create}
-        carries:
-          chat_id: {from: payload.chat_id, type: text}
 `,
 		"flows/consumer/entities.yaml": "chat:\n  chat_id:\n    type: text\n    indexed: true\n",
 		"flows/consumer/nodes.yaml":    nodes,
@@ -491,37 +484,19 @@ func CopyProviderRollbackRenamedSource(t testing.TB, withCarrier bool) string {
 	t.Helper()
 	root := CopyProviderRollback(t, withCarrier)
 	applyClosedReplacement(t, filepath.Join(root, "flows", "consumer", "schema.yaml"),
-		"chat_id: {from: payload.chat_id, type: text}",
-		"chat_id: {from: payload.external_chat_id, type: text}")
+		"        resolution: {mode: select-or-create}",
+		"        resolution: {mode: select-or-create, from: payload.external_chat_id}")
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
 		"inbound.telegram.text_message:\n  chat_id: text\n",
 		"inbound.telegram.text_message:\n  chat_id: text\n  external_chat_id: text\n")
 	return root
 }
 
-type ProviderRollbackSourceTypeInvalidity uint8
-
-const (
-	ProviderRollbackSourceTypeOmittedMismatch ProviderRollbackSourceTypeInvalidity = iota + 1
-	ProviderRollbackSourceTypeDishonestAnnotation
-)
-
-func CopyProviderRollbackInvalidSourceType(t testing.TB, invalidity ProviderRollbackSourceTypeInvalidity) string {
+func CopyProviderRollbackInvalidSourceType(t testing.TB) string {
 	t.Helper()
 	root := CopyProviderRollback(t, true)
 	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
 		"inbound.telegram.text_message:\n  chat_id: text\n",
 		"inbound.telegram.text_message:\n  chat_id: integer\n")
-	switch invalidity {
-	case ProviderRollbackSourceTypeOmittedMismatch:
-		applyClosedReplacement(t, filepath.Join(root, "flows", "consumer", "schema.yaml"),
-			"chat_id: {from: payload.chat_id, type: text}",
-			"chat_id: {from: payload.chat_id}")
-	case ProviderRollbackSourceTypeDishonestAnnotation:
-	case 0:
-		t.Fatal("provider rollback source type invalidity is required")
-	default:
-		t.Fatalf("unsupported provider rollback source type invalidity %d", invalidity)
-	}
 	return root
 }

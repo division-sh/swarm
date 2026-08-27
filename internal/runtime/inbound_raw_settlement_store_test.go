@@ -281,10 +281,10 @@ func seedProviderRawSettlementRuntime(t *testing.T, ctx context.Context, selecte
 }
 
 func providerRawSettlementSemanticSource(flowID, flowInstance, eventName string) semanticview.Source {
-	pin := runtimecontracts.FlowInputEventPin{Name: "provider_raw", Event: eventName, Source: "external"}
+	pin := runtimecontracts.FlowInputEventPin{Event: eventName, Source: runtimecontracts.FlowInputPinSourceExternal}
 	schema := runtimecontracts.FlowSchemaDocument{
 		Name: flowID, Mode: runtimecontracts.FlowModeStatic,
-		Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{Events: []string{eventName}, EventPins: []runtimecontracts.FlowInputEventPin{pin}}},
+		Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{pin}}},
 	}
 	flow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: flowID, Flow: flowID, Mode: runtimecontracts.FlowModeStatic},
@@ -292,15 +292,14 @@ func providerRawSettlementSemanticSource(flowID, flowInstance, eventName string)
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "provider_raw_settlement", Version: "1.0.0",
-			FlowInputs:         map[string][]string{flowID: {eventName}},
-			FlowInputEventPins: map[string][]runtimecontracts.FlowInputEventPin{flowID: {pin}},
-		},
+		Package:     runtimecontracts.ProjectPackageDocument{Name: "provider_raw_settlement", Version: "1.0.0"},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{flowID: schema},
 		FlowTree: runtimecontracts.FlowTree{
 			Root: &root, ByID: map[string]*runtimecontracts.FlowContractView{flowID: &root.Children[0]},
 		},
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
 	}
 	return semanticview.Wrap(bundle)
 }

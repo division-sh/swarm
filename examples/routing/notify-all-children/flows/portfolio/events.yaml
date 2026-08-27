@@ -13,7 +13,9 @@ portfolio.notify.requested:
   portfolio_id: text
   command: text
 account.registered:
+  key: account_id
   account_id: text
 account.notify.requested:
+  key: account_id
   account_id: text
   command: text

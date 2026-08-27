@@ -6,6 +6,5 @@ pins:
     events: [items.submitted]
   outputs:
     events:
-      - name: items.grouped
-        event: items.grouped
+      - event: items.grouped
         sink: harness

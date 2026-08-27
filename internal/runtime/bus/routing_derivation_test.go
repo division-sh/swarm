@@ -19,6 +19,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/flowownedprojectagent"
 	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 )
@@ -1133,7 +1134,11 @@ func TestRouteTableConcreteTemplateInstanceNodeSubscriberResolvesBeforeDeliveryP
 			},
 		},
 	}
-	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatalf("compile route-table test semantics: %v", err)
+	}
+	source := semanticview.Wrap(bundle)
+	rt, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
@@ -1278,7 +1283,7 @@ func routeMaterializationConfigVarBundle() *runtimecontracts.WorkflowContractBun
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: "template",
 			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{Events: []string{"opco.product_initialization_requested"}},
+				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "opco.product_initialization_requested"}}},
 			},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
@@ -1314,7 +1319,7 @@ func routeMaterializationConfigVarBundle() *runtimecontracts.WorkflowContractBun
 			"operating": {
 				Mode: "template",
 				Pins: runtimecontracts.FlowPins{
-					Inputs: runtimecontracts.FlowInputPins{Events: []string{"opco.product_initialization_requested"}},
+					Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "opco.product_initialization_requested"}}},
 				},
 			},
 		},
@@ -1359,36 +1364,39 @@ func routeMaterializationAgentRoute(
 }
 
 func TestRouteTableTemplateOutputPinWildcardSubscriberResolvesThroughDerivedInstance(t *testing.T) {
-	root := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "root", Flow: "root"},
-		Path:  "",
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"operating-accumulator": {
-				ID:           "operating-accumulator",
-				SubscribesTo: []string{"component-scaffold/*/component.scaffolded"},
-			},
-		},
-		Children: []runtimecontracts.FlowContractView{
-			{
-				Paths: runtimecontracts.FlowContractPaths{ID: "component-scaffold", Flow: "component-scaffold"},
-				Path:  "component-scaffold",
-				Schema: runtimecontracts.FlowSchemaDocument{
-					Mode: "template",
-					Pins: runtimecontracts.FlowPins{
-						Outputs: runtimecontracts.FlowOutputPins{Events: []string{"component.scaffolded"}},
-					},
-				},
-			},
-		},
-	}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				"root":               &root,
-				"component-scaffold": &root.Children[0],
-			},
-		},
+	repoRoot := canonicalrouting.RepoRoot(t)
+	root := t.TempDir()
+	writeRoutingFixtureFile(t, root, "package.yaml", `
+name: template-output-observer
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: component-scaffold
+    flow: component-scaffold
+    mode: template
+`)
+	writeRoutingFixtureFile(t, root, "schema.yaml", "name: template-output-observer\n")
+	writeRoutingFixtureFile(t, root, "nodes.yaml", `
+operating-accumulator:
+  id: operating-accumulator
+  execution_type: system_node
+  subscribes_to: ["component-scaffold/*/component.scaffolded"]
+  event_handlers:
+    "component-scaffold/*/component.scaffolded": {}
+`)
+	writeRoutingFixtureFile(t, root, "flows/component-scaffold/schema.yaml", `
+name: component-scaffold
+mode: template
+pins:
+  outputs:
+    events: [component.scaffolded]
+`)
+	writeRoutingFixtureFile(t, root, "flows/component-scaffold/events.yaml", "component.scaffolded: {}\n")
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load template-output observer fixture: %v", err)
 	}
 	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
 	if err != nil {
@@ -1423,7 +1431,7 @@ func TestDeriveRouteTable_InputPinsDoNotAutoWireFromProducerOutput(t *testing.T)
 		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"scan.requested"}},
+				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "scan.requested"}}},
 			},
 		},
 		Path: "producer",
@@ -1432,7 +1440,7 @@ func TestDeriveRouteTable_InputPinsDoNotAutoWireFromProducerOutput(t *testing.T)
 		Paths: runtimecontracts.FlowContractPaths{ID: "discovery", Flow: "discovery"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{Events: []string{"scan.requested"}},
+				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "scan.requested"}}},
 			},
 		},
 		Path: "discovery",
@@ -1473,7 +1481,7 @@ func TestDeriveRouteTable_HandlerOnlyInputPinsDoNotAutoWireFromProducerOutput(t 
 		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"scan.requested"}},
+				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "scan.requested"}}},
 			},
 		},
 		Path: "producer",
@@ -1482,7 +1490,7 @@ func TestDeriveRouteTable_HandlerOnlyInputPinsDoNotAutoWireFromProducerOutput(t 
 		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{Events: []string{"scan.requested"}},
+				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "scan.requested"}}},
 			},
 		},
 		Path: "consumer",
@@ -1637,7 +1645,7 @@ func TestDeriveRouteTable_AmbiguousInputPinsFailClosedWithoutEscapeHatch(t *test
 		Paths: runtimecontracts.FlowContractPaths{ID: "producer_a", Flow: "producer_a"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"ticket.ready"}},
+				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "ticket.ready"}}},
 			},
 		},
 		Path: "producer_a",
@@ -1646,7 +1654,7 @@ func TestDeriveRouteTable_AmbiguousInputPinsFailClosedWithoutEscapeHatch(t *test
 		Paths: runtimecontracts.FlowContractPaths{ID: "producer_b", Flow: "producer_b"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"ticket.ready"}},
+				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "ticket.ready"}}},
 			},
 		},
 		Path: "producer_b",
@@ -1655,7 +1663,7 @@ func TestDeriveRouteTable_AmbiguousInputPinsFailClosedWithoutEscapeHatch(t *test
 		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{Events: []string{"ticket.ready"}},
+				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "ticket.ready"}}},
 			},
 		},
 		Path: "consumer",
@@ -1703,7 +1711,7 @@ func TestDeriveRouteTable_InputPinsStayLocalWithoutExternalProducer(t *testing.T
 		Paths: runtimecontracts.FlowContractPaths{ID: "scoring", Flow: "scoring"},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{Events: []string{"score.dimension_complete"}},
+				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "score.dimension_complete"}}},
 			},
 		},
 		Path: "scoring",
@@ -1740,68 +1748,19 @@ func TestDeriveRouteTable_InputPinsStayLocalWithoutExternalProducer(t *testing.T
 }
 
 func TestDeriveRouteTable_NestedPackageConnectLocalizesWithinParentFlow(t *testing.T) {
-	grandchild := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "grandchild", Flow: "grandchild", PackageKey: "flows/child/flows/grandchild"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Name: "micro_done", Event: "micro.done"}}},
-			},
-		},
-		Path: "child/grandchild",
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"micro.done": {},
-		},
+	repoRoot := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot, canonicalrouting.CopyNestedPackageConnect(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load nested package connect fixture: %v", err)
 	}
-	child := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "child", Flow: "child", PackageKey: "flows/child"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Inputs:  runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Name: "micro_done", Event: "micro.done"}}},
-				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"step.result"}},
-			},
-		},
-		Path: "child",
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"child-aggregator": {
-				ID:           "child-aggregator",
-				SubscribesTo: []string{"micro.done"},
-			},
-		},
-		Events:   map[string]runtimecontracts.EventCatalogEntry{"micro.done": {}},
-		Children: []runtimecontracts.FlowContractView{grandchild},
-	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{child}}
-	bundle := &runtimecontracts.WorkflowContractBundle{
-		PackageTree: []runtimecontracts.LoadedProjectPackage{{
-			Key:       "flows/child/flows/grandchild",
-			ParentKey: "flows/child",
-			Paths:     runtimecontracts.ProjectPackagePaths{OwningFlowID: "grandchild"},
-		}},
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				"child":      &root.Children[0],
-				"grandchild": &root.Children[0].Children[0],
-			},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
-			"child":      child.Schema,
-			"grandchild": grandchild.Schema,
-		},
-		Semantics: runtimecontracts.WorkflowSemanticView{CompositionConnects: []runtimecontracts.FlowPackageConnect{{
-			PackageKey: "flows/child",
-			SourceFile: "flows/child/package.yaml",
-			SourceLine: 10,
-			Event:      "micro.done",
-			From:       "grandchild",
-			To:         ".",
-		}}},
-	}
-	plans, issues := compiledConnectPlans(semanticview.Wrap(bundle))
+	source := semanticview.Wrap(bundle)
+	plans, issues := compiledConnectPlans(source)
 	if len(issues) != 0 || len(plans) != 1 {
 		t.Fatalf("nested connect plans = %#v issues = %#v, want one valid plan", plans, issues)
 	}
-	rt, err := runtimebus.DeriveRouteTable(semanticview.Wrap(bundle))
+	rt, err := runtimebus.DeriveRouteTable(source)
 	if err != nil {
 		t.Fatalf("DeriveRouteTable: %v", err)
 	}
@@ -1814,6 +1773,17 @@ func TestDeriveRouteTable_NestedPackageConnectLocalizesWithinParentFlow(t *testi
 	}
 	if got[0].Path != "child" {
 		t.Fatalf("receiver carrier path = %q, want child", got[0].Path)
+	}
+}
+
+func writeRoutingFixtureFile(t testing.TB, root, relative, body string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(relative))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("create routing fixture directory: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(strings.TrimPrefix(body, "\n")), 0o600); err != nil {
+		t.Fatalf("write routing fixture %s: %v", relative, err)
 	}
 }
 

@@ -53,12 +53,12 @@ func TestTemplateFlowPilotConformance_CoversInstanceCenteredAuthoringOwners(t *t
 	if got := instance.Field.Path(); got != "account_id" {
 		t.Fatalf("account instance fields = %q, want account_id", got)
 	}
-	output, ok := bundle.FlowOutputEventPin("producer", "account_ready")
+	output, ok := bundle.FlowOutputEventPin("producer", "account.ready")
 	if !ok {
 		t.Fatal("producer account_ready output pin missing")
 	}
-	if output.Event != "account.ready" {
-		t.Fatalf("producer output event = %q, want account.ready", output.Event)
+	if output.EventType() != "account.ready" {
+		t.Fatalf("producer output event = %q, want account.ready", output.EventType())
 	}
 
 	plans, issues := compiledConnectPlans(source)
@@ -74,10 +74,10 @@ func TestTemplateFlowPilotConformance_CoversInstanceCenteredAuthoringOwners(t *t
 	if plan.ResolutionKind() != runtimepinrouting.ConnectResolutionInstanceKey || !plan.RequiresRuntimeResolution() {
 		t.Fatalf("route plan resolution = %s runtime=%v, want select-or-create runtime resolution", plan.ResolutionKind().Code(), plan.RequiresRuntimeResolution())
 	}
-	if sourceEndpoint.FlowID != "producer" || sourceEndpoint.Pin != "account_ready" {
+	if sourceEndpoint.FlowID != "producer" || sourceEndpoint.Pin != "account.ready" {
 		t.Fatalf("route plan source = %#v, want producer.account_ready", sourceEndpoint)
 	}
-	if receiverEndpoint.FlowID != "account" || receiverEndpoint.Pin != "account_ready" || !plan.ReceiverEndpoint().IsTemplate() {
+	if receiverEndpoint.FlowID != "account" || receiverEndpoint.Pin != "account.ready" || !plan.ReceiverEndpoint().IsTemplate() {
 		t.Fatalf("route plan receiver = %#v, want template account.account_ready", receiverEndpoint)
 	}
 	if plan.InstanceKey() == nil || plan.InstanceKey().Mode() != runtimecontracts.FlowInputResolutionModeSelectOrCreate || plan.InstanceKey().Field().Path() != "account_id" {
@@ -264,7 +264,7 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 	}
 	sourceEndpoint := plan.SourceEndpoint().Readback()
 	receiverEndpoint := plan.ReceiverEndpoint().Readback()
-	if sourceEndpoint.FlowID != notifyallchildren.OwnerFlowID || sourceEndpoint.Pin != notifyallchildren.OwnerOutputPin || sourceEndpoint.Key != "account_id" {
+	if sourceEndpoint.FlowID != notifyallchildren.OwnerFlowID || sourceEndpoint.Pin != notifyallchildren.OwnerOutputPin || sourceEndpoint.PinDigest == "" {
 		t.Fatalf("route plan source = %#v, want portfolio.account_notify_requested keyed by account_id", sourceEndpoint)
 	}
 	if receiverEndpoint.FlowID != notifyallchildren.ChildFlowID || receiverEndpoint.Pin != notifyallchildren.ChildInputPin || !plan.ReceiverEndpoint().IsTemplate() {

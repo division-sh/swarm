@@ -109,7 +109,7 @@ func CopyDeadEventSchemaExternalSource(t testing.TB) string {
 	removeClosedVariantFiles(t, root, "events.yaml", "nodes.yaml")
 	writeClosedVariantFile(t, root, "package.yaml", "name: dead-event-schema-external-source\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows:\n  - id: support\n    flow: support\n    mode: static\n")
 	writeClosedVariantFile(t, root, "schema.yaml", "name: dead-event-schema-external-source\n")
-	writeClosedVariantFile(t, root, "flows/support/schema.yaml", "name: support\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, done]\npins:\n  inputs:\n    events: []\n  outputs:\n    events: []\n")
+	writeClosedVariantFile(t, root, "flows/support/schema.yaml", "name: support\ninitial_state: idle\nterminal_states: [done]\nstates: [idle, done]\n")
 	writeClosedVariantFile(t, root, "flows/support/events.yaml", "ticket.ready:\n  swarm:\n    source: external (manual handoff)\n")
 	return root
 }
@@ -199,7 +199,7 @@ func copyTimerValidation(t testing.TB, settings timerValidationSettings) string 
 	writeClosedVariantFile(t, root, "schema.yaml", "name: timer-validation\n")
 	flowPins := ""
 	if settings.flowOutput {
-		flowPins = "pins:\n  inputs:\n    events: []\n  outputs:\n    events:\n      - timer.reminder\n"
+		flowPins = "pins:\n  outputs:\n    events:\n      - timer.reminder\n"
 	}
 	writeClosedVariantFile(t, root, "flows/support/schema.yaml", "name: support\ninitial_state: waiting\nterminal_states: [done]\nstates: [waiting, active, done]\n"+flowPins)
 	agents := ""
@@ -343,7 +343,7 @@ func CopyVerifyAccumulatorEntityProjection(t testing.TB) string {
 	root := CopyExample(t, RootIngress)
 	removeInheritedScenarios(t, root)
 	writeClosedVariantFile(t, root, "package.yaml", "name: verify-accumulator-entity-projection\nversion: \"1.0.0\"\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n")
-	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-accumulator-entity-projection\ninitial_state: collecting\nterminal_states: [complete]\nstates: [collecting, complete]\npins:\n  inputs:\n    events: [score.dimension_complete]\n  outputs:\n    events:\n      - name: score_completed\n        event: score.completed\n        sink: harness\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: verify-accumulator-entity-projection\ninitial_state: collecting\nterminal_states: [complete]\nstates: [collecting, complete]\npins:\n  inputs:\n    events: [score.dimension_complete]\n  outputs:\n    events:\n      - event: score.completed\n        sink: harness\n")
 	writeClosedVariantFile(t, root, "types.yaml", "types:\n  DimensionScore:\n    dimension: text\n    tier: integer\n    score: integer\n    evidence: text\n    confidence: text\n")
 	writeClosedVariantFile(t, root, "entities.yaml", "vertical:\n  scores:\n    type: list<DimensionScore>\n    materialize_from: scorer.dimensions_received\n")
 	writeClosedVariantFile(t, root, "events.yaml", "score.dimension_complete:\n  swarm:\n    source: external (verify accumulator projection fixture)\n  expected_dimensions: integer\n  vertical_id: string\n  dimension: text\n  tier: integer\n  score: integer\n  evidence: text\n  confidence: text\nscore.completed: {}\n")

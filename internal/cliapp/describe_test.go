@@ -273,7 +273,7 @@ func TestDescribeRoutesRendersCanonicalRootConnectWithoutLegacyDebt(t *testing.T
 	}
 	foundConnect := false
 	for _, edge := range topology.Edges {
-		if edge.Scope == routingtopology.DeliveryScopeInterFlowConnect && edge.Boundary != nil && edge.Boundary.To == ".task_done" {
+		if edge.Scope == routingtopology.DeliveryScopeInterFlowConnect && edge.Boundary != nil && edge.Boundary.To == ".task.done" {
 			foundConnect = true
 		}
 	}
@@ -285,7 +285,7 @@ func TestDescribeRoutesRendersCanonicalRootConnectWithoutLegacyDebt(t *testing.T
 	if code := executeRootCommandWithOptions(context.Background(), RepoRoot(), []string{"describe", "routes", "--contracts", contractsRoot}, &humanOut, &humanErr, defaultRootCommandOptions()); code != 0 {
 		t.Fatalf("describe routes code=%d stderr=%s", code, humanErr.String())
 	}
-	for _, want := range []string{"[inter_flow_connect]", "connect: child.task_done -> .task_done"} {
+	for _, want := range []string{"[inter_flow_connect]", "connect: child.task.done -> .task.done"} {
 		if !strings.Contains(humanOut.String(), want) {
 			t.Fatalf("human routes missing %q:\n%s", want, humanOut.String())
 		}
@@ -611,7 +611,7 @@ func TestDescribeFanInBarrierShowsEffectiveJoinProvenance(t *testing.T) {
 		for _, want := range []string{
 			"members entity.expected_operating_ids by payload.operating_id <- resolution.dedup_by",
 			"window entity.period_id by payload.period_id <- resolution.window",
-			"fan_in_pin operating_reported",
+			"fan_in_pin operating.reported",
 		} {
 			if !strings.Contains(stdout.String(), want) {
 				t.Fatalf("describe barrier output missing %q:\n%s", want, stdout.String())
@@ -751,11 +751,6 @@ flows:
 name: scoring
 mode: template
 instance: account_id
-pins:
-  inputs:
-    events: []
-  outputs:
-    events: []
 `)
 	writeDescribeTestFile(t, filepath.Join(root, "flows", "scoring", "entities.yaml"), `
 account:

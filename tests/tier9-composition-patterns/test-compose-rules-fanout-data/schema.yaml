@@ -6,6 +6,5 @@ pins:
     events: [batch.requested]
   outputs:
     events:
-      - name: batch.dispatched
-        event: batch.dispatched
+      - event: batch.dispatched
         sink: harness

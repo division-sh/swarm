@@ -45,6 +45,7 @@ func CopyImportBoundaryAlias(t testing.TB, variant ImportBoundaryAliasVariant) s
 
 	connect := ""
 	rootSchema := "name: import-boundary-alias\n"
+	rootEvents := "\nparent.lead_captured: {}\nparent.lead_enriched: {}\n"
 	if connected {
 		connect = `
 connect:
@@ -60,13 +61,12 @@ name: import-boundary-alias
 pins:
   inputs:
     events:
-      - name: lead_enriched
-        event: parent.lead_enriched
+      - parent.lead_enriched
   outputs:
     events:
-      - name: lead_captured
-        event: parent.lead_captured
+      - parent.lead_captured
 `
+		rootEvents = "\nparent.lead_captured: {}\n"
 	}
 	writeBootverifyFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: import-boundary-alias
@@ -83,10 +83,7 @@ flows:
         work.completed: parent.lead_enriched
 `+connect)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "schema.yaml"), rootSchema)
-	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), `
-parent.lead_captured: {}
-parent.lead_enriched: {}
-`)
+	writeBootverifyFixtureFile(t, filepath.Join(root, "events.yaml"), rootEvents)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "nodes.yaml"), `
 parent-listener:
   id: parent-listener
@@ -108,12 +105,10 @@ mode: `+mode+`
 pins:
   inputs:
     events:
-      - name: work_requested
-        event: work.requested
+      - work.requested
   outputs:
     events:
-      - name: work_completed
-        event: work.completed
+      - work.completed
 `)
 	writeBootverifyFixtureFile(t, filepath.Join(root, "flows", "worker", "events.yaml"), "work.completed: {}\n")
 	workerNodes := `

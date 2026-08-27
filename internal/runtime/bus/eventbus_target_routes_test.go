@@ -3010,12 +3010,15 @@ func TestEventBusRootInputFlowAcceptsExactOperatorAPIAdmission(t *testing.T) {
 
 func addRoutedRootInputFlowNodeSibling(bundle *runtimecontracts.WorkflowContractBundle) {
 	audit := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "audit", Flow: "audit"},
-		Path:  "audit",
+		Paths: runtimecontracts.FlowContractPaths{
+			ID: "audit", Flow: "audit", PackageKey: ".",
+			SchemaFile: "flows/audit/schema.yaml", EventsFile: "flows/audit/events.yaml",
+		},
+		Path: "audit",
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: "static",
 			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{Events: []string{"thing.created"}},
+				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "thing.created"}}},
 			},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{"thing.created": {}},
@@ -3036,18 +3039,23 @@ func addRoutedRootInputFlowNodeSibling(bundle *runtimecontracts.WorkflowContract
 		"validation": &bundle.FlowTree.Root.Children[0],
 		"audit":      &bundle.FlowTree.Root.Children[1],
 	}
-	bundle.Semantics.FlowInputs["audit"] = []string{"thing.created"}
 	bundle.FlowSchemas["audit"] = audit.Schema
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
 }
 
 func duplicateIDScopedRootInputAuthorityFixture(t testing.TB) (semanticview.Source, *RouteTable) {
 	t.Helper()
 	flow := func(id string) runtimecontracts.FlowContractView {
 		return runtimecontracts.FlowContractView{
-			Path: id, Paths: runtimecontracts.FlowContractPaths{ID: id, Flow: id},
+			Path: id, Paths: runtimecontracts.FlowContractPaths{
+				ID: id, Flow: id, PackageKey: ".",
+				SchemaFile: "flows/" + id + "/schema.yaml", EventsFile: "flows/" + id + "/events.yaml",
+			},
 			Schema: runtimecontracts.FlowSchemaDocument{
 				Mode: "static",
-				Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{Events: []string{"thing.created"}}},
+				Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "thing.created"}}}},
 			},
 			Events: map[string]runtimecontracts.EventCatalogEntry{"thing.created": {}},
 			Nodes: map[string]runtimecontracts.SystemNodeContract{
@@ -3063,10 +3071,7 @@ func duplicateIDScopedRootInputAuthorityFixture(t testing.TB) (semanticview.Sour
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{ordinary, validation}}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{Events: []string{"thing.created"}}},
-		},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			FlowInputs: map[string][]string{"validation": {"thing.created"}},
+			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "thing.created"}}}},
 		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
@@ -3077,6 +3082,9 @@ func duplicateIDScopedRootInputAuthorityFixture(t testing.TB) (semanticview.Sour
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
 			"ordinary": ordinary.Schema, "validation": validation.Schema,
 		},
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatalf("CompileWorkflowSemantics: %v", err)
 	}
 	source := semanticview.Wrap(bundle)
 	ordinaryNode := testFlowNode(t, "ordinary", "shared-writer")
@@ -3751,12 +3759,18 @@ version: 1.0.0
 
 func routedRootInputFlowNodeBundle() *runtimecontracts.WorkflowContractBundle {
 	validation := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "validation", Flow: "validation"},
-		Path:  "validation",
+		Paths: runtimecontracts.FlowContractPaths{
+			ID:         "validation",
+			Flow:       "validation",
+			PackageKey: ".",
+			SchemaFile: "flows/validation/schema.yaml",
+			EventsFile: "flows/validation/events.yaml",
+		},
+		Path: "validation",
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: "static",
 			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{Events: []string{"thing.created"}},
+				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "thing.created"}}},
 			},
 		},
 		Events: map[string]runtimecontracts.EventCatalogEntry{
@@ -3774,15 +3788,10 @@ func routedRootInputFlowNodeBundle() *runtimecontracts.WorkflowContractBundle {
 		},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{validation}}
-	return &runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{Events: []string{"thing.created"}},
-			},
-		},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			FlowInputs: map[string][]string{
-				"validation": []string{"thing.created"},
+				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "thing.created"}}},
 			},
 		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
@@ -3795,6 +3804,10 @@ func routedRootInputFlowNodeBundle() *runtimecontracts.WorkflowContractBundle {
 			"validation": validation.Schema,
 		},
 	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
+	return bundle
 }
 
 func routedTopLevelProjectNodeBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {

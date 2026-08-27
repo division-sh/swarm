@@ -7,8 +7,5 @@ states: [pending, done]
 pins:
   inputs:
     events:
-      - name: task_submitted
-        event: task.submitted
+      - event: task.submitted
         source: external
-  outputs:
-    events: []

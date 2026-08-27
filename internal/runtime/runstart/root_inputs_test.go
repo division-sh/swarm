@@ -11,7 +11,7 @@ import (
 )
 
 func TestDeriveRootInputSetRequiresDeclaredAndRoutableRootInput(t *testing.T) {
-	bundle := rootInputTestBundle("scan.corpus_file_requested")
+	bundle := rootInputTestBundle(t, "scan.corpus_file_requested")
 	set, err := DeriveRootInputSet(semanticview.Wrap(bundle))
 	if err != nil {
 		t.Fatalf("DeriveRootInputSet: %v", err)
@@ -38,7 +38,7 @@ func TestDeriveRootInputSetRequiresDeclaredAndRoutableRootInput(t *testing.T) {
 
 func TestValidateInputEventsRejectsDeclaredUnroutableRootInput(t *testing.T) {
 	const eventName = "scan.unroutable_requested"
-	bundle := rootInputTestBundle(eventName)
+	bundle := rootInputTestBundle(t, eventName)
 	bundle.FlowTree.Root.Children[0].Nodes["scan-orchestrator"] = runtimecontracts.SystemNodeContract{
 		ID:           "scan-orchestrator",
 		SubscribesTo: []string{"scan.other_requested"},
@@ -105,13 +105,14 @@ func TestValidateInputEventsTreatsAbsentRootSchemaAsEmptyDomain(t *testing.T) {
 	}
 }
 
-func rootInputTestBundle(eventName string) *runtimecontracts.WorkflowContractBundle {
+func rootInputTestBundle(t testing.TB, eventName string) *runtimecontracts.WorkflowContractBundle {
+	t.Helper()
 	flow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: "discovery", Flow: "discovery"},
 		Path:  "discovery",
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{Events: []string{eventName}},
+				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: eventName}}},
 			},
 		},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
@@ -122,14 +123,17 @@ func rootInputTestBundle(eventName string) *runtimecontracts.WorkflowContractBun
 		},
 	}
 	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{flow}}
-	return &runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			"scan-orchestrator": flow.Nodes["scan-orchestrator"],
 		},
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{Events: []string{eventName}},
+				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: eventName}}},
 			},
+		},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
+			"discovery": flow.Schema,
 		},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
@@ -138,4 +142,8 @@ func rootInputTestBundle(eventName string) *runtimecontracts.WorkflowContractBun
 			},
 		},
 	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatalf("compile root-input test semantics: %v", err)
+	}
+	return bundle
 }

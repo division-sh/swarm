@@ -1,18 +1,16 @@
 initial_state: pending
 terminal_states:
-- done
+  - done
 states:
-- pending
-- done
+  - pending
+  - done
 pins:
   inputs:
     events:
-    - check.requested
+      - check.requested
   outputs:
     events:
-    - name: check.escalated
-      event: check.escalated
-      sink: harness
-    - name: check.passed
-      event: check.passed
-      sink: harness
+      - event: check.escalated
+        sink: harness
+      - event: check.passed
+        sink: harness

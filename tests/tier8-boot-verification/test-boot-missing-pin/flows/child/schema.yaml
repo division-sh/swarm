@@ -7,5 +7,4 @@ pins:
     events: [task.assigned, task.feedback]
   outputs:
     events:
-      - name: task_result
-        event: task.result
+      - task.result

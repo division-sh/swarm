@@ -39,7 +39,7 @@ type TemplateInstanceRouteOptions struct {
 }
 
 // CopyTemplateInstanceRoute derives a closed scalar-identity lifecycle matrix.
-// Every route uses receiver-owned resolution and a same-named typed carry.
+// Every route uses receiver-owned resolution over the producer event contract.
 func CopyTemplateInstanceRoute(t testing.TB, opts TemplateInstanceRouteOptions) string {
 	t.Helper()
 	if opts.Mode == 0 {
@@ -59,10 +59,10 @@ func CopyTemplateInstanceRoute(t testing.TB, opts TemplateInstanceRouteOptions) 
 
 	root := CopyExample(t, ParentConnect)
 	producerField := "vertical_id"
-	carrySource := "payload.vertical_id"
+	resolutionFrom := ""
 	if opts.RenamedSource {
 		producerField = "source_vertical_id"
-		carrySource = "payload.source_vertical_id"
+		resolutionFrom = "\n          from: payload.source_vertical_id"
 	}
 
 	secondConnect := ""
@@ -74,13 +74,13 @@ func CopyTemplateInstanceRoute(t testing.TB, opts TemplateInstanceRouteOptions) 
 		secondConnect = "  - event: deploy.done\n    from: producer\n    to: consumer\n"
 		secondEvent := "deploy.done"
 		if opts.SecondPin == TemplateInstanceSecondPinDistinctEvent {
-			secondConnect += "    rename: deploy.audited\n    adapter: deploy_done_to_deploy_audited\n"
+			secondConnect += "    rename: deploy.audited\n"
 			secondEvent = "deploy.audited"
 			secondHandler = "    " + secondEvent + ": {}\n"
 		} else if opts.SecondPin != TemplateInstanceSecondPinSameEvent {
 			t.Fatalf("unsupported template instance second pin %d", opts.SecondPin)
 		}
-		secondPin = "      - name: deploy_audited\n        event: " + secondEvent + "\n        resolution:\n          mode: " + mode + "\n        carries:\n          vertical_id:\n            from: " + carrySource + "\n            type: string\n"
+		secondPin = "      - event: " + secondEvent + "\n        resolution:\n          mode: " + mode + resolutionFrom + "\n"
 	}
 
 	writeClosedVariantFile(t, root, "package.yaml", `name: template-instance-route
@@ -104,9 +104,8 @@ mode: static
 pins:
   outputs:
     events:
-      - name: deploy_done
-        event: deploy.done
-`, "deploy.done:\n  "+producerField+": string\n", "", "")
+      - deploy.done
+`, "deploy.done:\n  key: "+producerField+"\n  "+producerField+": string\n", "", "")
 
 	consumerNodes := "consumer-node:\n  id: consumer-node-{instance_id}\n  execution_type: system_node\n  event_handlers:\n    deploy.done: {}\n" + secondHandler
 	consumerAgents := ""
@@ -128,14 +127,9 @@ instance: vertical_id
 pins:
   inputs:
     events:
-      - name: deploy_completed
-        event: deploy.done
+      - event: deploy.done
         resolution:
-          mode: `+mode+`
-        carries:
-          vertical_id:
-            from: `+carrySource+`
-            type: string
+          mode: `+mode+resolutionFrom+`
 `+secondPin,
 		"",
 		"deployment:\n  vertical_id:\n    type: string\n",

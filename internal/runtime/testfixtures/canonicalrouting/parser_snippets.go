@@ -109,45 +109,31 @@ name: resolution-pins
 pins:
   inputs:
     events:
-      - name: create_requested
-        event: validation.requested
+      - event: validation.requested
         resolution:
           mode: create
-        carries:
-          validation_case_id:
-            from: generated.uuid
-            type: uuid
-      - name: select_requested
-        event: account.selected
+          from: generated.uuid
+      - event: account.selected
         resolution:
           mode: select
-        carries:
-          account_id:
-            from: payload.account_id
-      - name: select_or_create_requested
-        event: account.requested
+      - event: account.requested
         resolution:
           mode: select-or-create
-        carries:
-          account_id:
-            from: payload.account_id
-      - name: fan_in_requested
-        event: report.ready
+          from: payload.external_account_id
+      - event: report.ready
         resolution:
           mode: fan-in
           aggregation: stream
           window: report_period
           dedup_by: [event.id, payload.operating_id]
           singleton: portfolio/default
-      - name: fan_out_requested
-        event: operating.requested
+      - event: operating.requested
         resolution:
           mode: fan-out
-      - name: reply_received
-        event: provider.replied
+      - event: provider.replied
         resolution:
           mode: reply
-          replies_to: provider_requested
+          replies_to: provider.requested
           correlation_key: payload.provider_request_id
 `)
 }
@@ -162,8 +148,7 @@ name: invalid-resolution
 pins:
   inputs:
     events:
-      - name: requested
-        event: work.requested
+      - event: work.requested
         resolution:
           mode: create
           unsupported: true
@@ -174,8 +159,7 @@ name: invalid-resolution-instance-key
 pins:
   inputs:
     events:
-      - name: requested
-        event: work.requested
+      - event: work.requested
         resolution:
           mode: create
           instance_key:
@@ -189,8 +173,7 @@ name: invalid-resolution-carries
 pins:
   inputs:
     events:
-      - name: requested
-        event: work.requested
+      - event: work.requested
         carries:
           work_id:
             from: payload.work_id
@@ -204,8 +187,7 @@ instance: work_id
 pins:
   inputs:
     events:
-      - name: work_requested
-        event: work.requested
+      - event: work.requested
         resolution:
           mode: create
         carries:
@@ -224,15 +206,15 @@ func RetiredReceiverRoutingParserSnippet(t testing.TB, id RetiredReceiverRouting
 	var source string
 	switch id {
 	case RetiredInputAddressEmpty:
-		source = "name: retired-address\npins: {inputs: {events: [{name: requested, event: work.requested, address: {}}]}}\n"
+		source = "name: retired-address\npins: {inputs: {events: [{event: work.requested, address: {}}]}}\n"
 	case RetiredInputAddressMalformed:
-		source = "name: retired-address\npins: {inputs: {events: [{name: requested, event: work.requested, address: unsupported}]}}\n"
+		source = "name: retired-address\npins: {inputs: {events: [{event: work.requested, address: unsupported}]}}\n"
 	case RetiredInputAddressPopulated:
-		source = "name: retired-address\npins: {inputs: {events: [{name: requested, event: work.requested, address: {by: work_id, source: payload.work_id, target: entity.work_id}}]}}\n"
+		source = "name: retired-address\npins: {inputs: {events: [{event: work.requested, address: {by: work_id, source: payload.work_id, target: entity.work_id}}]}}\n"
 	case RetiredInputAddressMixed:
-		source = "name: retired-address\npins: {inputs: {events: [{name: requested, event: work.requested, address: {by: work_id, resolution: {mode: select}}}]}}\n"
+		source = "name: retired-address\npins: {inputs: {events: [{event: work.requested, address: {by: work_id, resolution: {mode: select}}}]}}\n"
 	case RetiredInputAddressUnsupportedNested:
-		source = "name: retired-address\npins: {inputs: {events: [{name: requested, event: work.requested, address: {by: work_id, unsupported: nope}}]}}\n"
+		source = "name: retired-address\npins: {inputs: {events: [{event: work.requested, address: {by: work_id, unsupported: nope}}]}}\n"
 	case RetiredConnectMapEmpty:
 		source = "name: retired-map\nconnect: [{event: work.done, from: producer, to: consumer, map: {}}]\n"
 	case RetiredConnectMapMalformed:

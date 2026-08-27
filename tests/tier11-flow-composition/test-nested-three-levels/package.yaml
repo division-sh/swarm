@@ -14,4 +14,3 @@ connect:
     from: child
     to: .
     rename: micro.done
-    adapter: child_micro_relayed_to_root_micro_done

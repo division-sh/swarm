@@ -185,11 +185,9 @@ func (p FlowEventProof) CrossesDeclaredOutputBoundary(source Source) bool {
 	}
 	flowID := strings.TrimSpace(p.FlowID)
 	if flowID == "" {
-		if bundle, ok := Bundle(source); ok && bundle != nil && bundle.RootSchema != nil {
-			for _, output := range bundle.RootSchema.Pins.Outputs.Events {
-				if source.ResolveFlowEventReference("", output) == canonical {
-					return true
-				}
+		for _, output := range source.FlowOutputEvents("") {
+			if source.ResolveFlowEventReference("", output) == canonical {
+				return true
 			}
 		}
 		return false

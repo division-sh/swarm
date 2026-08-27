@@ -5,9 +5,7 @@ pins:
   inputs:
     events:
       - pipeline.start
-      - name: micro_done
-        event: micro.done
+      - micro.done
   outputs:
     events:
-      - name: step_begin
-        event: step.begin
+      - step.begin

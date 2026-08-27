@@ -380,7 +380,7 @@ func githubAppIssueCommentSource(t *testing.T, baseURL, flowInstance string) sem
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
 				Inputs: runtimecontracts.FlowInputPins{
-					Events: []string{"inbound.github.issue_comment"},
+					EventPins: []runtimecontracts.FlowInputEventPin{{Event: "inbound.github.issue_comment"}},
 				},
 			},
 		},

@@ -12,15 +12,7 @@ auto_emit_on_create:
 pins:
   inputs:
     events:
-      - name: work_setup
-        event: work.setup
-      - name: work_assign
-        event: work.assign
+      - work.setup
+      - event: work.assign
         resolution:
           mode: select
-        carries:
-          worker_id:
-            from: payload.worker_id
-            type: string
-  outputs:
-    events: []

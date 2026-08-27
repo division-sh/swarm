@@ -59,37 +59,28 @@ func TestResolveStandingTargetDeclarationsRequiresExactProviderPin(t *testing.T)
 }
 
 func TestResolveStandingTargetDeclarationsConsumesCanonicalInputAssociation(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		mutate func(*runtimecontracts.WorkflowContractBundle)
-	}{
-		{
-			name: "non_external",
-			mutate: func(bundle *runtimecontracts.WorkflowContractBundle) {
-				pins := bundle.Semantics.FlowInputEventPins["coordinator"]
-				pins[0].Source = "internal"
-				bundle.Semantics.FlowInputEventPins["coordinator"] = pins
-			},
-		},
-		{
-			name: "ambiguous",
-			mutate: func(bundle *runtimecontracts.WorkflowContractBundle) {
-				pins := bundle.Semantics.FlowInputEventPins["coordinator"]
-				duplicate := pins[0]
-				duplicate.Name = "telegram_update_duplicate"
-				bundle.Semantics.FlowInputEventPins["coordinator"] = append(pins, duplicate)
-			},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			source, registry := standingTelegramDeclarationSource(t, "inbound.telegram")
-			bundle, _ := semanticview.Bundle(source)
-			tc.mutate(bundle)
-			_, err := ResolveStandingTargetDeclarations(source, registry)
-			if err == nil || !strings.Contains(err.Error(), `add an exact external input pin for "inbound.telegram"`) {
-				t.Fatalf("canonical input-association error = %v", err)
-			}
-		})
+	source, registry := standingTelegramDeclarationSource(t, "inbound.telegram")
+	bundle, _ := semanticview.Bundle(source)
+	schema := bundle.FlowSchemas["coordinator"]
+	schema.Pins.Inputs.EventPins[0].Source = runtimecontracts.FlowInputPinSourceNone
+	bundle.FlowSchemas["coordinator"] = schema
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatalf("compile non-external input semantics: %v", err)
+	}
+	_, err := ResolveStandingTargetDeclarations(source, registry)
+	if err == nil || !strings.Contains(err.Error(), `add an exact external input pin for "inbound.telegram"`) {
+		t.Fatalf("canonical input-association error = %v", err)
+	}
+}
+
+func TestResolveStandingTargetDeclarationsRejectsDuplicateExactInputIdentity(t *testing.T) {
+	source, _ := standingTelegramDeclarationSource(t, "inbound.telegram")
+	bundle, _ := semanticview.Bundle(source)
+	schema := bundle.FlowSchemas["coordinator"]
+	schema.Pins.Inputs.EventPins = append(schema.Pins.Inputs.EventPins, schema.Pins.Inputs.EventPins[0])
+	bundle.FlowSchemas["coordinator"] = schema
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("duplicate exact input compile error = %v, want fail-closed", err)
 	}
 }
 

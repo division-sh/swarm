@@ -12,11 +12,11 @@ const (
 	PackageName = "template-select-or-create"
 
 	ProducerFlowID    = "producer"
-	ProducerOutputPin = "account_ready"
+	ProducerOutputPin = "account.ready"
 	ProducerOutput    = "account.ready"
 
 	TemplateFlowID     = "account"
-	TemplateInputPin   = "account_ready"
+	TemplateInputPin   = "account.ready"
 	TemplateInput      = "account.ready"
 	TemplateInstanceBy = "account_id"
 )

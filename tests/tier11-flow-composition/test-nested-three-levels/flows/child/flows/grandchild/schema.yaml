@@ -5,9 +5,7 @@ states: [ready, finished]
 pins:
   inputs:
     events:
-      - name: micro_start
-        event: micro.start
+      - micro.start
   outputs:
     events:
-      - name: micro_done
-        event: micro.done
+      - micro.done

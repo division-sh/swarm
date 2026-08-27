@@ -78,7 +78,7 @@ func TestRouteTargetOwnerResolutionMatrix(t *testing.T) {
 
 func testRootStaticStructuralOwnerProof(t testing.TB, entityID string) runtimepinrouting.StructuralTargetOwnerProof {
 	t.Helper()
-	plans := runtimepinrouting.CompileConnectGraph(connectRoutePlanRootProducerStaticSource()).Plans()
+	plans := runtimepinrouting.CompileConnectGraph(connectRoutePlanRootProducerStaticSource(t)).Plans()
 	if len(plans) != 1 {
 		t.Fatalf("compiled root-to-static plans = %d, want 1", len(plans))
 	}
@@ -108,7 +108,7 @@ func testRootStaticStructuralOwnerProof(t testing.TB, entityID string) runtimepi
 }
 
 func TestStructuralTargetOwnerProofDuplicateAgreementFailsClosed(t *testing.T) {
-	source := connectRoutePlanRootProducerStaticSource()
+	source := connectRoutePlanRootProducerStaticSource(t)
 	consumerNode := testFlowNode(t, "consumer", "consumer-node")
 	handler, err := runtimepipeline.AdmitDeliveryTargetHandler(source, consumerNode)
 	if err != nil {
@@ -323,7 +323,7 @@ func TestSameFlowAgentPolicyDerivesExactSelectedRunOwners(t *testing.T) {
 	runID := eventtest.UUID("same-flow-agent-run")
 	rootOwner := eventtest.UUID("same-flow-agent-root-owner")
 	nestedOwner := eventtest.UUID("same-flow-agent-nested-owner")
-	source := connectRoutePlanRootProducerSingletonSource()
+	source := connectRoutePlanRootProducerSingletonSource(t)
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle.FlowTree.Root == nil {
 		t.Fatal("declared-agent source requires a root flow")
@@ -385,7 +385,7 @@ func TestSameFlowRuntimeCreatedAgentDoesNotConsumeSelectedOwner(t *testing.T) {
 		descriptors:      []ActiveTargetDescriptor{{ID: "root", FlowInstance: runID, EntityID: ownerID, Materializing: true}},
 		targetsAvailable: true,
 		required:         true,
-		source:           connectRoutePlanRootProducerSingletonSource(),
+		source:           connectRoutePlanRootProducerSingletonSource(t),
 	}
 	plan := RoutePlan{
 		Event: eventtest.RunCreatingRootIngress("", "work.ready", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}),
@@ -421,7 +421,7 @@ func TestSameFlowDeclaredEntitylessAgentsDoNotInheritSelectedNodeOwners(t *testi
 		},
 		targetsAvailable: true,
 		required:         true,
-		source:           connectRoutePlanRootProducerSingletonSource(),
+		source:           connectRoutePlanRootProducerSingletonSource(t),
 	}
 	plan := RoutePlan{
 		Event: eventtest.RunCreatingRootIngress("", "work.ready", "", "", nil, 0, runID, "", events.EventEnvelope{}, time.Time{}),
@@ -445,7 +445,7 @@ func TestSameFlowDeclaredEntitylessAgentsDoNotInheritSelectedNodeOwners(t *testi
 func TestSameFlowRootAgentOwnerContradictionFailsClosed(t *testing.T) {
 	identity := agentidentitytest.RootDeclared(t, "reviewer", "same-flow-agent-contradiction")
 	runID := eventtest.UUID("same-flow-agent-contradiction-run")
-	source := connectRoutePlanRootProducerSingletonSource()
+	source := connectRoutePlanRootProducerSingletonSource(t)
 	activeOwner := eventtest.UUID("root-active-owner")
 	projection := selectedRunTargetOwnerProjection{
 		agentsAvailable: true,

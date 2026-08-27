@@ -86,13 +86,13 @@ func appendBoundaryIngressEvidence(source Source, flowID, eventType string, opts
 		return
 	}
 	for _, pin := range flowInputPinsForEvent(source, flowID, eventType) {
-		if strings.TrimSpace(pin.Source) != "external" {
+		if pin.Source() != runtimecontracts.FlowInputPinSourceExternal {
 			continue
 		}
 		appendEvidence(runtimecontracts.FlowInputProducerEvidence{
 			Kind:      runtimecontracts.FlowInputProducerBoundaryIntrinsicIngress,
 			EventType: eventType,
-			Pin:       pin.PinName(),
+			Pin:       pin.EventType(),
 			Detail:    "input pin declares source: external",
 		})
 	}
@@ -100,14 +100,14 @@ func appendBoundaryIngressEvidence(source Source, flowID, eventType string, opts
 
 func appendHarnessInputEvidence(source Source, flowID, eventType string, appendEvidence func(runtimecontracts.FlowInputProducerEvidence)) {
 	for _, pin := range flowInputPinsForEvent(source, flowID, eventType) {
-		if strings.TrimSpace(pin.Source) != "harness" {
+		if pin.Source() != runtimecontracts.FlowInputPinSourceHarness {
 			continue
 		}
 		appendEvidence(runtimecontracts.FlowInputProducerEvidence{
 			Kind:      runtimecontracts.FlowInputProducerBoundaryHarnessInjection,
 			FlowID:    flowID,
 			EventType: eventType,
-			Pin:       pin.PinName(),
+			Pin:       pin.EventType(),
 			Detail:    "input pin declares source: harness",
 		})
 	}
@@ -178,7 +178,7 @@ func appendInternalTopologyEvidence(source Source, flowID, eventType string, app
 	}
 }
 
-func flowInputPinsForEvent(source Source, flowID, eventType string) []runtimecontracts.FlowInputEventPin {
+func flowInputPinsForEvent(source Source, flowID, eventType string) []runtimecontracts.CompiledFlowInputPin {
 	if source == nil || eventidentity.Normalize(eventType) == "" {
 		return nil
 	}
@@ -191,7 +191,7 @@ func flowInputPinsForEvent(source Source, flowID, eventType string) []runtimecon
 	if !ok {
 		return nil
 	}
-	return []runtimecontracts.FlowInputEventPin{pin}
+	return []runtimecontracts.CompiledFlowInputPin{pin}
 }
 
 func endpointProducerEvidenceDetail(endpoint AuthoredEventEndpoint) string {

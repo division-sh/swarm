@@ -39,9 +39,9 @@ func ApplyFanInNegativeMutation(t testing.TB, root string, mutation FanInNegativ
 	receiverNodes := filepath.Join(root, "flows", "portfolio", "default", "nodes.yaml")
 	switch mutation {
 	case FanInMissingDedup:
-		applyClosedReplacement(t, receiverSchema, "          dedup_by: payload.operating_id\n", "")
+		applyClosedReplacement(t, receiverSchema, "          dedup_by: [payload.operating_id]\n", "")
 	case FanInDedupTuple:
-		applyClosedReplacement(t, receiverSchema, "          dedup_by: payload.operating_id\n", "          dedup_by: [payload.operating_id, payload.period_id]\n")
+		applyClosedReplacement(t, receiverSchema, "          dedup_by: [payload.operating_id]\n", "          dedup_by: [payload.operating_id, payload.period_id]\n")
 	case FanInMissingWindow:
 		applyClosedReplacement(t, receiverSchema, "          window: payload.period_id\n", "")
 	case FanInMissingSingleton:
@@ -53,7 +53,7 @@ func ApplyFanInNegativeMutation(t testing.TB, root string, mutation FanInNegativ
 	case FanInAccumulateWindowRedeclaration:
 		applyClosedReplacement(t, receiverNodes, "        from: payload\n", "        from: payload\n        window: payload.operating_id\n")
 	case FanInEventIDDedup:
-		applyClosedReplacement(t, receiverSchema, "          dedup_by: payload.operating_id\n", "          dedup_by: event.id\n")
+		applyClosedReplacement(t, receiverSchema, "          dedup_by: [payload.operating_id]\n", "          dedup_by: [event.id]\n")
 	case FanInNonSingletonReceiver:
 		applyClosedReplacement(t, packageFile, "    mode: singleton\n", "    mode: static\n")
 		applyClosedReplacement(t, receiverSchema, "mode: singleton\n", "mode: static\n")
@@ -64,8 +64,8 @@ func ApplyFanInNegativeMutation(t testing.TB, root string, mutation FanInNegativ
 		applyClosedReplacement(t, receiverNodes, "      accumulate:\n        into: operating_reports\n        from: payload\n", "      advances_to: active\n")
 	case FanInAmbiguousReceiverInput:
 		applyClosedReplacement(t, receiverSchema,
-			"      - name: operating_reported\n        event: operating.reported\n",
-			"      - name: operating_reported_duplicate\n        event: operating.reported\n        resolution:\n          mode: fan-in\n          aggregation: stream\n          window: payload.period_id\n          dedup_by: payload.operating_id\n          singleton: portfolio\n      - name: operating_reported\n        event: operating.reported\n")
+			"      - event: operating.reported\n",
+			"      - event: operating.reported\n        resolution:\n          mode: fan-in\n          aggregation: stream\n          window: payload.period_id\n          dedup_by: [payload.operating_id]\n          singleton: portfolio\n      - event: operating.reported\n")
 	case FanInAuthoredMembersBy:
 		applyClosedReplacement(t, receiverNodes, "          from: entity.expected_operating_ids\n", "          from: entity.expected_operating_ids\n          by: payload.operating_id\n")
 	case FanInAuthoredWindowBy:

@@ -11,5 +11,3 @@ auto_emit_on_create:
 pins:
   inputs:
     events: [auto.started]
-  outputs:
-    events: []

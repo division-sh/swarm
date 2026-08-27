@@ -8,6 +8,5 @@ pins:
   outputs:
     events:
       - timer.check
-      - name: timer.cancelled
-        event: timer.cancelled
+      - event: timer.cancelled
         sink: harness

@@ -11,22 +11,23 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestIntraPackageEventConsumerProjectionCensus(t *testing.T) {
 	type manifestation struct {
-		bundle       string
-		from         string
-		to           string
-		event        string
-		derivedField string
+		bundle          string
+		from            string
+		to              string
+		event           string
+		projectionField string
 	}
 	manifestations := []manifestation{
-		{bundle: "fan-in/barrier", from: "ingress", to: "operating", event: "operating.report.requested", derivedField: "operating_id"},
+		{bundle: "fan-in/barrier", from: "ingress", to: "operating", event: "operating.report.requested", projectionField: "operating_id"},
 		{bundle: "fan-in/barrier", from: "operating", to: "portfolio", event: "operating.reported"},
-		{bundle: "fan-in/stream", from: "ingress", to: "operating", event: "operating.report.requested", derivedField: "operating_id"},
+		{bundle: "fan-in/stream", from: "ingress", to: "operating", event: "operating.report.requested", projectionField: "operating_id"},
 		{bundle: "fan-in/stream", from: "operating", to: "portfolio", event: "operating.reported"},
-		{bundle: "template-create-minted-key", from: "producer", to: "validator", event: "validation.requested", derivedField: "validation_case_id"},
+		{bundle: "template-create-minted-key", from: "producer", to: "validator", event: "validation.requested", projectionField: "validation_case_id"},
 		{bundle: "template-create-minted-key", from: "validator", to: "producer", event: "validation.started"},
 		{bundle: "notify-all-children", from: "portfolio", to: "account", event: "account.registered"},
 		{bundle: "notify-all-children", from: "portfolio", to: "account", event: "account.notify.requested"},
@@ -44,7 +45,7 @@ func TestIntraPackageEventConsumerProjectionCensus(t *testing.T) {
 	}
 
 	repo := repoRootForContractsTest(t)
-	exact, divergent := 0, 0
+	exact, projected := 0, 0
 	for _, item := range manifestations {
 		item := item
 		t.Run(item.bundle+"/"+item.event, func(t *testing.T) {
@@ -63,30 +64,61 @@ func TestIntraPackageEventConsumerProjectionCensus(t *testing.T) {
 			}
 			producerBytes := canonicalEventSchemaBytes(t, producer)
 			consumerBytes := canonicalEventSchemaBytes(t, consumer)
-			if item.derivedField == "" {
+			if item.projectionField == "" {
 				exact++
 				if !bytes.Equal(producerBytes, consumerBytes) {
-					t.Fatalf("exact consumer projection differs from producer: producer=%s consumer=%s", producerBytes, consumerBytes)
+					t.Fatalf("consumer event schema differs from producer-owned schema: producer=%s consumer=%s", producerBytes, consumerBytes)
 				}
 				return
 			}
-			divergent++
+			projected++
 			if bytes.Equal(producerBytes, consumerBytes) {
-				t.Fatalf("derived delivery field %s did not produce the named plan delta", item.derivedField)
+				t.Fatalf("compiled receiver projection %s did not change the acceptance schema", item.projectionField)
 			}
 			properties, _ := consumer.Schema["properties"].(map[string]any)
-			field, _ := properties[item.derivedField].(map[string]any)
+			field, _ := properties[item.projectionField].(map[string]any)
 			if field["type"] != "string" || field["format"] != "uuid" {
-				t.Fatalf("derived field %s = %#v, want intrinsic uuid schema", item.derivedField, field)
+				t.Fatalf("compiled receiver projection %s = %#v, want intrinsic uuid schema", item.projectionField, field)
 			}
-			if !stringSliceContains(eventSchemaRequired(consumer.Schema), item.derivedField) {
-				t.Fatalf("derived field %s is not required in consumer projection %#v", item.derivedField, consumer.Schema)
+			if !stringSliceContains(eventSchemaRequired(consumer.Schema), item.projectionField) {
+				t.Fatalf("compiled receiver projection %s is not required in %#v", item.projectionField, consumer.Schema)
 			}
 		})
 	}
-	if exact != 13 || divergent != 3 {
-		t.Fatalf("census classes exact=%d divergent=%d, want 13/3", exact, divergent)
+	if exact != 13 || projected != 3 {
+		t.Fatalf("consumer schema classes exact=%d projected=%d, want 13/3", exact, projected)
 	}
+}
+
+func TestConnectedOutputBindingCompilesProducerSchemaIntoReceiverPin(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	root := canonicalrouting.CopySealedParentConnect(t, canonicalrouting.SealedParentConnectOptions{})
+	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, found, ambiguous := connectedEventSchemaOwnershipRow(bundle, "consumer", "work.ready")
+	if !found || ambiguous {
+		t.Fatalf("connected producer row = found:%t ambiguous:%t row:%#v", found, ambiguous, row)
+	}
+	if row.producerFlowID != "producer" || row.producerName != "work.ready" {
+		t.Fatalf("connected producer = flow:%q declaration:%q, want producer/work.ready", row.producerFlowID, row.producerName)
+	}
+	pins := bundle.FlowInputEventPins("consumer")
+	if len(pins) != 2 {
+		t.Fatalf("consumer input pins = %#v, want work.ready and control.start", pins)
+	}
+	for _, pin := range pins {
+		if pin.EventType() != "work.ready" {
+			continue
+		}
+		schema, ok := pin.EventSchema()
+		if !ok || schema.EventName() != "producer/work.ready" {
+			t.Fatalf("work.ready receiver schema = %#v, found=%t", schema, ok)
+		}
+		return
+	}
+	t.Fatal("consumer work.ready input pin not found")
 }
 
 func TestDeclaredLocalEventReferenceFastPathMatchesCanonicalScopeResolution(t *testing.T) {
@@ -218,7 +250,7 @@ func TestEffectiveEventResolutionPreservesConnectedRenameOwnership(t *testing.T)
 		t.Fatal(err)
 	}
 	entry, key, ok := bundle.ResolveFlowEventCatalogEntry("worker", "work.assign")
-	if !ok || key != "worker/work.assign" {
+	if !ok || key != "work.assign" {
 		t.Fatalf("renamed effective resolution = key:%q ok:%t entry:%#v", key, ok, entry)
 	}
 	for _, field := range []string{"worker_id", "task_label"} {
@@ -261,8 +293,8 @@ func TestConnectedEventSchemaOwnershipRejectsDistinctProducersIndependentOfConne
 			bundle := &WorkflowContractBundle{
 				Events:         map[string]EventCatalogEntry{"work.ready": wrong},
 				eventOwnership: rows,
-				Semantics: WorkflowSemanticView{FlowInputs: map[string][]string{
-					"consumer": {"work.ready"},
+				Semantics: WorkflowSemanticView{flowInputEventPins: map[string][]CompiledFlowInputPin{
+					"consumer": {mustCompileInputPinForTest(t, "consumer", "work.ready")},
 				}},
 				eventOwnersByFlow: map[string][]eventSchemaOwnershipRow{"consumer": rows},
 			}
@@ -317,7 +349,9 @@ func TestConnectedEventSchemaOwnershipTreatsPackageRootAndOwningFlowAsOneProduce
 				{PackageKey: "flows/child", Event: "work.ready", From: ".", To: "consumer"},
 				{PackageKey: "flows/child", Event: "work.ready", From: "child", To: "consumer"},
 			},
-			FlowInputs: map[string][]string{"consumer": {"work.ready"}},
+			flowInputEventPins: map[string][]CompiledFlowInputPin{
+				"consumer": {mustCompileInputPinForTest(t, "consumer", "work.ready")},
+			},
 		},
 	}
 	rows := compileEventSchemaOwnershipRows(bundle)
@@ -360,12 +394,12 @@ func TestIntraPackageEventConsumerProjectionProvenance(t *testing.T) {
 		t.Fatalf("projection declaration provenance = %#v, found=%t", declaration, ok)
 	}
 	generated, ok := bundle.EffectiveProvenance().Lookup(prefix + ".fields.validation_case_id.type")
-	if !ok || generated.Origin != EffectiveValueOriginDerived || generated.RuleID != eventDeliveryCarryRule || len(generated.InputPaths) != 1 || !strings.Contains(generated.InputPaths[0], "carries") {
-		t.Fatalf("generated carry provenance = %#v, found=%t", generated, ok)
+	if !ok || generated.Origin != EffectiveValueOriginDerived || generated.RuleID != eventReceiverProjectionRule || len(generated.InputPaths) != 1 {
+		t.Fatalf("synthetic route projection provenance = %#v, found=%t", generated, ok)
 	}
 }
 
-func TestIntraPackageEventConsumerProjectionCarriesAllOwnerAndAliasProvenance(t *testing.T) {
+func TestIntraPackageEventConsumerProjectionUsesOnlyProducerProvenance(t *testing.T) {
 	repo := repoRootForContractsTest(t)
 	root := filepath.Join(repo, "examples", "routing", "template-select-existing")
 	bundle, err := LoadWorkflowContractBundleWithOverrides(repo, root, DefaultPlatformSpecFile(repo))
@@ -380,8 +414,8 @@ func TestIntraPackageEventConsumerProjectionCarriesAllOwnerAndAliasProvenance(t 
 		}
 	}
 	alias, ok := bundle.EffectiveProvenance().Lookup(prefix + ".fields.account_id.type")
-	if !ok || alias.RuleID != eventDeliveryCarryRule || len(alias.InputPaths) != 2 || !strings.Contains(strings.Join(alias.InputPaths, " "), "fields.account_id.type") || !strings.Contains(strings.Join(alias.InputPaths, " "), "carries") {
-		t.Fatalf("payload alias provenance = %#v, found=%t", alias, ok)
+	if !ok || alias.RuleID != eventConsumerProjectionRule || len(alias.InputPaths) != 1 || !strings.Contains(alias.InputPaths[0], "fields.account_id.type") || strings.Contains(strings.Join(alias.InputPaths, " "), "carries") {
+		t.Fatalf("producer projection provenance = %#v, found=%t", alias, ok)
 	}
 }
 

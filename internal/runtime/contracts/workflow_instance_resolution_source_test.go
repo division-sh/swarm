@@ -8,7 +8,7 @@ import (
 func TestInputPinResolutionGeneratedSourceModeMatrix(t *testing.T) {
 	for _, mode := range []FlowInputResolutionMode{FlowInputResolutionModeSelect, FlowInputResolutionModeSelectOrCreate, FlowInputResolutionModeFanIn, FlowInputResolutionModeReply} {
 		t.Run(FlowInputResolutionModeCode(mode), func(t *testing.T) {
-			_, err := ResolveFlowInputInstanceSource(mode, FlowInputCarrySourceGeneratedUUID)
+			_, err := ResolveFlowInputInstanceSource(mode, FlowInputInstanceSourceGeneratedUUIDPath)
 			if err == nil || !strings.Contains(err.Error(), "only valid for resolution mode create") {
 				t.Fatalf("ResolveFlowInputInstanceSource error = %v, want create-only rejection", err)
 			}
@@ -21,8 +21,8 @@ func TestInputPinResolutionCreateSourceMatrix(t *testing.T) {
 		path string
 		kind FlowInputInstanceSourceKind
 	}{
-		{path: FlowInputCarrySourceGeneratedUUID, kind: FlowInputInstanceSourceGeneratedUUID},
-		{path: FlowInputCarrySourceEventID, kind: FlowInputInstanceSourceEventID},
+		{path: FlowInputInstanceSourceGeneratedUUIDPath, kind: FlowInputInstanceSourceGeneratedUUID},
+		{path: FlowInputInstanceSourceEventIDPath, kind: FlowInputInstanceSourceEventID},
 		{path: "payload.external_account_id", kind: FlowInputInstanceSourcePayload},
 	}
 	for _, tc := range tests {
@@ -67,7 +67,7 @@ func TestInputPinResolutionPayloadSourceUsesCanonicalPathSpelling(t *testing.T) 
 	}
 }
 
-func TestResolveFlowInputInstanceSourceTypeUsesAuthoritativeSourceEvidence(t *testing.T) {
+func TestResolveFlowInputInstanceSourceTypeRejectsProducerReceiverTypeMismatch(t *testing.T) {
 	field, err := ParseTemplateInstanceField("account_id")
 	if err != nil {
 		t.Fatalf("ParseTemplateInstanceField: %v", err)
@@ -86,31 +86,12 @@ func TestResolveFlowInputInstanceSourceTypeUsesAuthoritativeSourceEvidence(t *te
 	bundle := &WorkflowContractBundle{Events: map[string]EventCatalogEntry{
 		"account.ready": {Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{
 			"account_id": {Type: "integer"},
-		}}},
+		}, Required: []string{"account_id"}}},
 	}}
-
-	for _, tc := range []struct {
-		name      string
-		carryType string
-		want      string
-	}{
-		{name: "omitted annotation cannot hide mismatch", want: "actual type integer is incompatible with receiver"},
-		{name: "dishonest annotation cannot replace source evidence", carryType: "text", want: "actual type integer is incompatible with declared carry type text"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			pin := FlowInputEventPin{
-				Name:       "account_ready",
-				Event:      "account.ready",
-				Resolution: FlowInputPinResolution{Mode: FlowInputResolutionModeSelect},
-				Carries: FlowInputPinCarries{
-					"account_id": {From: "payload.account_id", Type: tc.carryType},
-				},
-			}
-			_, err := bundle.ResolveFlowInputInstanceSourceType(bundle, "account", pin, instance)
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("ResolveFlowInputInstanceSourceType error = %v, want %q", err, tc.want)
-			}
-		})
+	pin := mustCompileInputPinForTest(t, "account", "account.ready")
+	_, err = bundle.ResolveFlowInputInstanceSourceType(bundle, "account", pin, instance)
+	if err == nil || !strings.Contains(err.Error(), "key_types_incompatible") {
+		t.Fatalf("ResolveFlowInputInstanceSourceType error = %v, want producer/receiver mismatch", err)
 	}
 }
 
@@ -132,7 +113,7 @@ func TestResolveFlowInputInstanceSourceTypeAcceptsScalarAliasesAndIntrinsicUUID(
 	bundle := &WorkflowContractBundle{Events: map[string]EventCatalogEntry{
 		"account.ready": {Payload: EventPayloadSpec{Properties: map[string]EventFieldSpec{
 			"external_account_id": {Type: "string"},
-		}}},
+		}, Required: []string{"external_account_id"}}},
 	}}
 
 	for _, tc := range []struct {
@@ -142,17 +123,16 @@ func TestResolveFlowInputInstanceSourceTypeAcceptsScalarAliasesAndIntrinsicUUID(
 		kind FlowInputInstanceSourceKind
 	}{
 		{name: "payload string to uuid", mode: FlowInputResolutionModeSelect, from: "payload.external_account_id", kind: FlowInputInstanceSourcePayload},
-		{name: "generated uuid", mode: FlowInputResolutionModeCreate, from: FlowInputCarrySourceGeneratedUUID, kind: FlowInputInstanceSourceGeneratedUUID},
-		{name: "event id", mode: FlowInputResolutionModeCreate, from: FlowInputCarrySourceEventID, kind: FlowInputInstanceSourceEventID},
+		{name: "generated uuid", mode: FlowInputResolutionModeCreate, from: FlowInputInstanceSourceGeneratedUUIDPath, kind: FlowInputInstanceSourceGeneratedUUID},
+		{name: "event id", mode: FlowInputResolutionModeCreate, from: FlowInputInstanceSourceEventIDPath, kind: FlowInputInstanceSourceEventID},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			pin := FlowInputEventPin{
-				Name:       "account_ready",
-				Event:      "account.ready",
-				Resolution: FlowInputPinResolution{Mode: tc.mode},
-				Carries: FlowInputPinCarries{
-					"account_id": {From: tc.from, Type: "text"},
-				},
+			pin, err := CompileFlowInputPin(
+				FlowPinCompilationContext{FlowID: "account", FlowPath: "account"},
+				FlowInputEventPin{Event: "account.ready", Resolution: FlowInputPinResolution{Mode: tc.mode, From: tc.from}},
+			)
+			if err != nil {
+				t.Fatalf("CompileFlowInputPin: %v", err)
 			}
 			evidence, err := bundle.ResolveFlowInputInstanceSourceType(bundle, "account", pin, instance)
 			if err != nil {

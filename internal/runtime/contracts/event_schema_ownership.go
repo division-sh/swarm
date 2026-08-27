@@ -2,7 +2,7 @@ package contracts
 
 import (
 	"fmt"
-	"slices"
+	"path"
 	"sort"
 	"strings"
 
@@ -12,7 +12,7 @@ import (
 
 const (
 	eventConsumerProjectionRule = "intra_package_event_consumer_projection/v1"
-	eventDeliveryCarryRule      = "receiver_delivery_carry_projection/v1"
+	eventReceiverProjectionRule = "compiled_receiver_delivery_projection/v1"
 )
 
 type eventSchemaOwnershipRow struct {
@@ -87,7 +87,11 @@ func eventSchemaOwnershipRowsForReceiver(bundle *WorkflowContractBundle, flowID 
 }
 
 func compileEventSchemaOwnershipRow(bundle *WorkflowContractBundle, connect FlowPackageConnect) (eventSchemaOwnershipRow, bool) {
-	producer, producerName, producerOK := packageEndpointEventDeclaration(bundle, connect.PackageKey, connect.From, connect.Event, false)
+	producerEvent := connect.Event
+	if boundEvent, ok := packageEndpointBoundEvent(bundle, connect.PackageKey, connect.From, producerEvent, false); ok {
+		producerEvent = boundEvent
+	}
+	producer, producerName, producerOK := packageEndpointEventDeclaration(bundle, connect.PackageKey, connect.From, producerEvent, false)
 	if !producerOK {
 		return eventSchemaOwnershipRow{}, false
 	}
@@ -95,13 +99,16 @@ func compileEventSchemaOwnershipRow(bundle *WorkflowContractBundle, connect Flow
 	if strings.TrimSpace(connect.Rename) != "" {
 		receiverEvent = connect.Rename
 	}
+	if boundEvent, ok := packageEndpointBoundInputEvent(bundle, connect.PackageKey, connect.To, receiverEvent); ok {
+		receiverEvent = boundEvent
+	}
 	receiver, receiverName, receiverOK := packageEndpointEventDeclaration(bundle, connect.PackageKey, connect.To, receiverEvent, true)
 	receiverFlowID := packageEndpointOwningFlowID(bundle, connect.PackageKey, connect.To)
 	return eventSchemaOwnershipRow{
 		packageKey:          strings.TrimSpace(connect.PackageKey),
 		producerEndpoint:    strings.TrimSpace(connect.From),
 		producerFlowID:      packageEndpointOwningFlowID(bundle, connect.PackageKey, connect.From),
-		producerEvent:       eventidentity.Normalize(connect.Event),
+		producerEvent:       eventidentity.Normalize(producerEvent),
 		producerName:        producerName,
 		producer:            producer,
 		receiverEndpoint:    strings.TrimSpace(connect.To),
@@ -111,6 +118,97 @@ func compileEventSchemaOwnershipRow(bundle *WorkflowContractBundle, connect Flow
 		receiver:            receiver,
 		receiverRestatement: receiverOK,
 	}, true
+}
+
+func packageEndpointBoundInputEvent(bundle *WorkflowContractBundle, packageKey, endpoint, parentEvent string) (string, bool) {
+	return packageEndpointBoundEvent(bundle, packageKey, endpoint, parentEvent, true)
+}
+
+func packageEndpointBoundEvent(bundle *WorkflowContractBundle, packageKey, endpoint, parentEvent string, input bool) (string, bool) {
+	packageKey = strings.Trim(strings.TrimSpace(packageKey), "/")
+	if packageKey == "" {
+		packageKey = "."
+	}
+	endpoint = strings.TrimSpace(endpoint)
+	parentEvent = eventidentity.Normalize(parentEvent)
+	if bundle == nil || endpoint == "" || endpoint == "." || parentEvent == "" {
+		return "", false
+	}
+	view, ok := bundle.FlowTree.ByID[endpoint]
+	if !ok || view == nil {
+		return "", false
+	}
+	declaredEvents := make(map[string]struct{})
+	if input {
+		for _, pin := range view.Schema.Pins.Inputs.EventPins {
+			declaredEvents[eventidentity.Normalize(pin.EventType())] = struct{}{}
+		}
+	} else {
+		for _, pin := range view.Schema.Pins.Outputs.EventPins {
+			declaredEvents[eventidentity.Normalize(pin.EventType())] = struct{}{}
+		}
+	}
+	if len(declaredEvents) == 0 {
+		return "", false
+	}
+
+	var bindings []map[string]string
+	for _, pkg := range bundle.PackageTree {
+		key := strings.Trim(strings.TrimSpace(pkg.Key), "/")
+		if key == "" {
+			key = "."
+		}
+		if key != packageKey {
+			continue
+		}
+		for _, flow := range pkg.Manifest.Flows {
+			if strings.TrimSpace(flow.ID) == endpoint {
+				binding := flow.Bind.Outputs
+				if input {
+					binding = flow.Bind.Inputs
+				}
+				bindings = append(bindings, binding)
+			}
+		}
+		flowPackageKey := strings.Trim(strings.TrimSpace(view.Paths.PackageKey), "/")
+		for _, ref := range pkg.Manifest.ChildPackages() {
+			location := strings.Trim(path.Clean(strings.ReplaceAll(ref.ResolveLocation(), "\\", "/")), "/")
+			if strings.HasSuffix(strings.ToLower(location), ".yaml") {
+				location = strings.Trim(path.Dir(location), "/")
+			}
+			childKey := location
+			if packageKey != "." {
+				childKey = strings.Trim(path.Join(packageKey, location), "/")
+			}
+			if location != "" && location != "." && childKey == flowPackageKey {
+				binding := ref.Bind.Outputs
+				if input {
+					binding = ref.Bind.Inputs
+				}
+				bindings = append(bindings, binding)
+			}
+		}
+	}
+
+	matches := make(map[string]struct{})
+	for _, binding := range bindings {
+		for localEvent, boundEvent := range binding {
+			localEvent = eventidentity.Normalize(localEvent)
+			if eventidentity.Normalize(boundEvent) != parentEvent {
+				continue
+			}
+			if _, declared := declaredEvents[localEvent]; declared {
+				matches[localEvent] = struct{}{}
+			}
+		}
+	}
+	if len(matches) != 1 {
+		return "", false
+	}
+	for localEvent := range matches {
+		return localEvent, true
+	}
+	return "", false
 }
 
 func validateIntraPackageEventSchemaOwnership(bundle *WorkflowContractBundle) []error {
@@ -307,16 +405,31 @@ func resolveEffectiveEventDeclarationForFlowEvent(bundle *WorkflowContractBundle
 	if !ok {
 		entry, key, types, ok = eventSchemaDeclarationForFlowEvent(bundle, flowID, eventType)
 	}
-	if !ok || bundle == nil || strings.TrimSpace(flowID) == "" {
-		return entry, key, types, connected, ok
-	}
-	for _, pin := range bundle.FlowInputEventPins(flowID) {
-		if !bundle.flowInputEventMatches(flowID, pin.EventType(), eventType) {
-			continue
+	if ok && bundle != nil {
+		if pin, found := bundle.flowInputEventPinForResolvedEvent(flowID, eventType); found {
+			if projection, projected := pin.Projection(); projected {
+				entry = cloneEventCatalogEntry(entry)
+				if entry.Payload.Properties == nil {
+					entry.Payload.Properties = map[string]EventFieldSpec{}
+				}
+				entry.Payload.Properties[projection.Field] = EventFieldSpec{Type: projection.SourceType}
+				entry.Payload.Required = normalizeStrings(append(entry.Payload.Required, projection.Field))
+			}
 		}
-		return projectReceiverDeliveryCarries(entry, pin), key, types, connected, true
 	}
-	return entry, key, types, connected, true
+	return entry, key, types, connected, ok
+}
+
+func (b *WorkflowContractBundle) flowInputEventPinForResolvedEvent(flowID, eventType string) (CompiledFlowInputPin, bool) {
+	requested := eventidentity.Normalize(eventType)
+	for _, pin := range b.FlowInputEventPins(flowID) {
+		local := eventidentity.Normalize(pin.EventType())
+		resolved := eventidentity.Normalize(b.ResolveFlowEventReference(flowID, local))
+		if requested == local || requested == resolved {
+			return pin, true
+		}
+	}
+	return CompiledFlowInputPin{}, false
 }
 
 func (b *WorkflowContractBundle) flowInputEventMatches(flowID, subscription, eventType string) bool {
@@ -338,7 +451,10 @@ func connectedEventSchemaOwnershipRow(bundle *WorkflowContractBundle, flowID, ev
 	var selected eventSchemaOwnershipRow
 	found := false
 	for _, row := range eventSchemaOwnershipRowsForReceiver(bundle, flowID) {
-		if !bundle.flowInputEventMatches(flowID, row.receiverEvent, eventType) {
+		localEvent := eventidentity.Normalize(row.receiverEvent)
+		resolvedEvent := eventidentity.Normalize(bundle.ResolveFlowEventReference(flowID, localEvent))
+		requestedEvent := eventidentity.Normalize(eventType)
+		if localEvent != requestedEvent && resolvedEvent != requestedEvent {
 			continue
 		}
 		if !found {
@@ -390,51 +506,4 @@ func (b *WorkflowContractBundle) resolveEffectiveExecutableNodeEventDeclaration(
 	}
 	entry, key, ok := b.resolveAuthoredExecutableNodeEventCatalogEntry(ref, canonical)
 	return entry, key, b.RootTypeCatalog(), ok
-}
-
-func projectReceiverDeliveryCarries(owner EventCatalogEntry, pin FlowInputEventPin) EventCatalogEntry {
-	projected := cloneEventCatalogEntry(owner)
-	if projected.Payload.Properties == nil {
-		projected.Payload.Properties = map[string]EventFieldSpec{}
-	}
-	carryNames := make([]string, 0, len(pin.Carries))
-	for name := range pin.Carries {
-		carryNames = append(carryNames, strings.TrimSpace(name))
-	}
-	sort.Strings(carryNames)
-	for _, name := range carryNames {
-		if name == "" {
-			continue
-		}
-		carry := pin.Carries[name]
-		source := strings.TrimSpace(carry.From)
-		field, exists := projected.Payload.Properties[name]
-		required := slices.Contains(projected.Payload.Required, name)
-		switch {
-		case strings.HasPrefix(source, "payload."):
-			sourceName := strings.TrimPrefix(source, "payload.")
-			if sourceField, ok := owner.Payload.Properties[sourceName]; ok {
-				field = sourceField
-				exists = true
-				required = slices.Contains(owner.Payload.Required, sourceName)
-			}
-		case source == FlowInputCarrySourceGeneratedUUID, source == FlowInputCarrySourceEventID:
-			field = EventFieldSpec{Type: "uuid"}
-			exists = true
-			required = !carry.Optional
-		}
-		if !exists {
-			continue
-		}
-		projected.Payload.Properties[name] = field
-		if !required {
-			projected.Payload.Required = slices.DeleteFunc(projected.Payload.Required, func(required string) bool {
-				return strings.TrimSpace(required) == name
-			})
-		} else if !slices.Contains(projected.Payload.Required, name) {
-			projected.Payload.Required = append(projected.Payload.Required, name)
-		}
-	}
-	projected.Payload.Required = normalizeStrings(projected.Payload.Required)
-	return projected
 }

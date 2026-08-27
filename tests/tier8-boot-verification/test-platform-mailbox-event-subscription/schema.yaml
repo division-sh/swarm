@@ -4,5 +4,3 @@ states: [pending, awaiting_decision, done]
 pins:
   inputs:
     events: [review.requested]
-  outputs:
-    events: []

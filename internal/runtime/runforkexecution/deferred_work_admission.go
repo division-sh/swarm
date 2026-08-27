@@ -125,7 +125,7 @@ func selectedContractSourceCanCreateDynamicFlow(source semanticview.Source) bool
 	graph := runtimepinrouting.CompileConnectGraph(source)
 	for flowID := range source.FlowSchemaEntries() {
 		for _, pin := range source.FlowInputEventPins(flowID) {
-			if !selectedContractFlowInputResolutionRequiresDynamicFlowOwner(pin.Resolution.Mode) {
+			if !selectedContractFlowInputResolutionRequiresDynamicFlowOwner(pin.Resolution().Mode) {
 				continue
 			}
 			for _, edge := range graph.Edges() {

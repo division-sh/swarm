@@ -5,7 +5,4 @@ pins:
   inputs:
     events:
       - job.submit
-      - name: work_completed
-        event: work.completed
-  outputs:
-    events: []
+      - work.completed

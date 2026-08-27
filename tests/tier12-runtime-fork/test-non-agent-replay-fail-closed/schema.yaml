@@ -5,5 +5,3 @@ states: [pending, done]
 pins:
   inputs:
     events: [task.assigned]
-  outputs:
-    events: []

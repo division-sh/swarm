@@ -13,11 +13,6 @@ func TestRunValidatesScalarTemplateInstanceIdentity(t *testing.T) {
 name: scoring
 mode: template
 instance: account_id
-pins:
-  inputs:
-    events: []
-  outputs:
-    events: []
 `, `
 account:
   tenant_id: text
@@ -60,11 +55,6 @@ func TestRun_RejectsInvalidTemplateInstanceDeclarations(t *testing.T) {
 			flowSchema: `
 name: scoring
 mode: template
-pins:
-  inputs:
-    events: []
-  outputs:
-    events: []
 `,
 			flowEntities: `
 account:
@@ -78,11 +68,6 @@ account:
 name: scoring
 mode: template
 instance: missing_id
-pins:
-  inputs:
-    events: []
-  outputs:
-    events: []
 `,
 			flowEntities: `
 account:
@@ -96,11 +81,6 @@ account:
 name: scoring
 mode: template
 instance: tags
-pins:
-  inputs:
-    events: []
-  outputs:
-    events: []
 `,
 			flowEntities: `
 account:
@@ -114,11 +94,6 @@ account:
 name: scoring
 mode: static
 instance: account_id
-pins:
-  inputs:
-    events: []
-  outputs:
-    events: []
 `,
 			flowEntities: `
 account:

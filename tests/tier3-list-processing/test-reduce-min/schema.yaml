@@ -6,6 +6,5 @@ pins:
     events: [values.submitted]
   outputs:
     events:
-      - name: values.reduced
-        event: values.reduced
+      - event: values.reduced
         sink: harness

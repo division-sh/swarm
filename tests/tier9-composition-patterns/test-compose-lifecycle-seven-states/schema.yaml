@@ -6,6 +6,5 @@ pins:
     events: [phase.init, phase.activate, phase.start, phase.stabilize, phase.wind_down, phase.close]
   outputs:
     events:
-      - name: lifecycle.complete
-        event: lifecycle.complete
+      - event: lifecycle.complete
         sink: harness

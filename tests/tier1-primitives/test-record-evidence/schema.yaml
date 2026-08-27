@@ -6,6 +6,5 @@ pins:
     events: [evidence.submitted]
   outputs:
     events:
-      - name: evidence.recorded
-        event: evidence.recorded
+      - event: evidence.recorded
         sink: harness

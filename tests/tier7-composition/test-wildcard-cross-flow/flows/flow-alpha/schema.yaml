@@ -4,9 +4,10 @@ terminal_states: [done]
 states: [pending, done]
 pins:
   inputs:
-    events: [trigger.alpha]
+    events:
+      - event: trigger.alpha
+        source: external
   outputs:
     events:
-      - name: job.alpha_done
-        event: job.alpha_done
+      - event: job.alpha_done
         sink: harness

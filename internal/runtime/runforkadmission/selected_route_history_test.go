@@ -1,14 +1,17 @@
 package runforkadmission
 
 import (
-	"crypto/sha256"
 	"testing"
 
 	"github.com/google/uuid"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
+	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
+	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestAdmitSelectedContractRouteHistoryDerivesSelectedRoutesWithoutMutating(t *testing.T) {
@@ -96,16 +99,12 @@ func TestAdmitSelectedContractRouteHistoryConnectMatchesConcreteTemplateSourceEn
 	}
 }
 
-func TestAdmitSelectedContractRouteHistoryRetainsEveryStampedRecipient(t *testing.T) {
-	plan := testRunForkPlan("producer/scan.requested", runfork.RunForkPendingClassificationDeliveredCompleted, "node", "consumer-a")
-	plan.PendingWork[0].DeliveryRoute = testStampedConnectRoute(t, "consumer-a")
-	second := plan.PendingWork[0]
-	second.DeliveryID = uuid.NewString()
-	second.SubscriberID = "consumer-b"
-	second.DeliveryRoute = testStampedConnectRoute(t, "consumer-b")
-	plan.PendingWork = append(plan.PendingWork, second)
-	plan.PendingWorkCount = len(plan.PendingWork)
+func TestW2SelectedForkUsesPersistedCompiledEdgeAfterCurrentGraphChanges(t *testing.T) {
+	plan := testRunForkPlan("producer/scan.requested", runfork.RunForkPendingClassificationDeliveredCompleted, "node", "consumer-b")
+	plan.PendingWork[0].DeliveryRoute = testW2CompiledConnectRoute(t, "consumer-b")
 
+	// The selected source no longer routes to consumer-b. Historical selection
+	// must use the exact stamped compiled-edge claim rather than rematching it.
 	source := testContractFrontierSource("consumer-a")
 	frontier, err := AdmitContractFrontier(ContractFrontierRequest{
 		Plan:              plan,
@@ -128,22 +127,50 @@ func TestAdmitSelectedContractRouteHistoryRetainsEveryStampedRecipient(t *testin
 		t.Fatalf("selected route events = %#v, want one source event", history.SelectedRouteEvents)
 	}
 	recipients := history.SelectedRouteEvents[0].DerivedRecipients
-	if len(recipients) != 2 || recipients[0].Recipient.ID() != identitytest.RootNode(t, "consumer-a").Key() || recipients[1].Recipient.ID() != identitytest.RootNode(t, "consumer-b").Key() {
-		t.Fatalf("derived recipients = %#v, want both stamped fan-out recipients", recipients)
+	if len(recipients) != 1 || recipients[0].Recipient.ID() != identitytest.RootNode(t, "consumer-b").Key() {
+		t.Fatalf("derived recipients = %#v, want persisted consumer-b only", recipients)
 	}
 }
 
-func testStampedConnectRoute(t testing.TB, subscriberID string) events.DeliveryRoute {
+func testW2CompiledConnectRoute(t testing.TB, subscriberID string) events.DeliveryRoute {
 	t.Helper()
-	route := events.DeliveryRoute{Recipient: events.MustNodeDeliveryRecipient(identitytest.RootNode(t, subscriberID)), Target: events.MustExistingEntityTarget(events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: "consumer-entity"})}
-	digest := sha256.Sum256([]byte("edge:" + subscriberID))
-	pinDigest := sha256.Sum256([]byte("pin:consumer.scan.requested"))
-	claim, err := events.AdmitConnectExecutionClaim(digest, pinDigest, route.Recipient, identitytest.FlowNode(t, "scan", "scan-node"), events.EventType("scan.requested"))
+	root := canonicalrouting.CopyTemplateInstanceRoute(t, canonicalrouting.TemplateInstanceRouteOptions{
+		Mode:      canonicalrouting.TemplateInstanceRouteSelect,
+		SecondPin: canonicalrouting.TemplateInstanceNoSecondPin,
+	})
+	repoRoot := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
 	if err != nil {
-		t.Fatalf("admit connect execution claim: %v", err)
+		t.Fatalf("load canonical connect fixture: %v", err)
 	}
-	route.ConnectClaim = claim
-	return route
+	var selected runtimepinrouting.ConnectRoutePlan
+	for _, candidate := range runtimepinrouting.CompileConnectGraph(semanticview.Wrap(bundle)).Plans() {
+		if candidate.ReceiverEndpoint().Readback().Pin == "deploy.done" {
+			selected = candidate
+			break
+		}
+	}
+	if selected.ReceiverEndpoint().Readback().Pin == "" {
+		t.Fatal("compiled connect graph has no deploy.done receiver pin")
+	}
+	recipientNode := identitytest.RootNode(t, subscriberID)
+	target := events.RouteIdentity{FlowID: "consumer", FlowInstance: "consumer", EntityID: "consumer-entity"}
+	blueprint := runtimepinrouting.ConnectDeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient(recipientNode),
+		Target:    target,
+		Handler:   runtimepinrouting.MustConnectReceiverHandler(recipientNode),
+	}
+	claim, err := runtimepinrouting.ConnectExecutionClaim(selected, blueprint)
+	if err != nil {
+		t.Fatalf("mint compiled connect execution claim: %v", err)
+	}
+	return events.DeliveryRoute{
+		Recipient:    blueprint.Recipient,
+		Target:       events.MustExistingEntityTarget(target),
+		ConnectClaim: claim,
+	}
 }
 
 func TestAdmitSelectedContractRouteHistoryRejectsConcreteTemplateIdentityWhenSourceRouteIsAbsent(t *testing.T) {

@@ -166,7 +166,7 @@ func TestMixedPubsubConnectCompositionNodeAgentConnect(t *testing.T) {
 	source := semanticview.Wrap(connectRoutePlanTestBundle([]connectRoutePlanTestFlow{
 		{
 			id: "producer", mode: runtimecontracts.FlowModeStatic,
-			outputs: []runtimecontracts.FlowOutputEventPin{{Name: "done", Event: eventName}},
+			outputs: []runtimecontracts.FlowOutputEventPin{{Event: eventName}},
 			nodes: map[string]runtimecontracts.SystemNodeContract{
 				"producer-local": {
 					ID: "producer-local", SubscribesTo: []string{eventName},
@@ -179,7 +179,7 @@ func TestMixedPubsubConnectCompositionNodeAgentConnect(t *testing.T) {
 		},
 		{
 			id: "consumer", mode: runtimecontracts.FlowModeStatic,
-			inputs: []runtimecontracts.FlowInputEventPin{{Name: "accepted", Event: "deploy.accepted"}},
+			inputs: []runtimecontracts.FlowInputEventPin{{Event: "deploy.accepted"}},
 			nodes: map[string]runtimecontracts.SystemNodeContract{
 				"consumer-node": {
 					ID:            "consumer-node",
@@ -187,7 +187,7 @@ func TestMixedPubsubConnectCompositionNodeAgentConnect(t *testing.T) {
 				},
 			},
 		},
-	}, []runtimecontracts.FlowPackageConnect{{Event: eventName, From: "producer", To: "consumer", Rename: "deploy.accepted", Adapter: "done_to_accepted"}}))
+	}, []runtimecontracts.FlowPackageConnect{{Event: eventName, From: "producer", To: "consumer", Rename: "deploy.accepted"}}))
 	owners := mixedStaticOwners("producer", "consumer")
 	store := newTargetRouteMemoryStore()
 	store.setTargetOwners(owners...)
@@ -291,13 +291,13 @@ func mixedFanoutToFanoutSource(reverse bool) semanticview.Source {
 	flows := []connectRoutePlanTestFlow{
 		{
 			id: "producer", mode: runtimecontracts.FlowModeStatic,
-			outputs: []runtimecontracts.FlowOutputEventPin{{Name: "ready", Event: "branch.ready"}},
+			outputs: []runtimecontracts.FlowOutputEventPin{{Event: "branch.ready"}},
 			nodes:   localNode("producer-local", "branch.ready"),
 		},
 		{
 			id: "left", mode: runtimecontracts.FlowModeStatic,
-			inputs:  []runtimecontracts.FlowInputEventPin{{Name: "accepted", Event: "branch.accepted"}},
-			outputs: []runtimecontracts.FlowOutputEventPin{{Name: "done", Event: "branch.done"}},
+			inputs:  []runtimecontracts.FlowInputEventPin{{Event: "branch.accepted"}},
+			outputs: []runtimecontracts.FlowOutputEventPin{{Event: "branch.done"}},
 			nodes: map[string]runtimecontracts.SystemNodeContract{
 				"left-receiver": receiver("left-receiver", "branch.accepted")["left-receiver"],
 				"left-local":    localNode("left-local", "branch.done")["left-local"],
@@ -305,8 +305,8 @@ func mixedFanoutToFanoutSource(reverse bool) semanticview.Source {
 		},
 		{
 			id: "right", mode: runtimecontracts.FlowModeStatic,
-			inputs:  []runtimecontracts.FlowInputEventPin{{Name: "accepted", Event: "branch.accepted"}},
-			outputs: []runtimecontracts.FlowOutputEventPin{{Name: "done", Event: "branch.done"}},
+			inputs:  []runtimecontracts.FlowInputEventPin{{Event: "branch.accepted"}},
+			outputs: []runtimecontracts.FlowOutputEventPin{{Event: "branch.done"}},
 			nodes: map[string]runtimecontracts.SystemNodeContract{
 				"right-receiver": receiver("right-receiver", "branch.accepted")["right-receiver"],
 				"right-local":    localNode("right-local", "branch.done")["right-local"],
@@ -314,20 +314,20 @@ func mixedFanoutToFanoutSource(reverse bool) semanticview.Source {
 		},
 		{
 			id: "left-sink", mode: runtimecontracts.FlowModeStatic,
-			inputs: []runtimecontracts.FlowInputEventPin{{Name: "final", Event: "branch.final"}},
+			inputs: []runtimecontracts.FlowInputEventPin{{Event: "branch.final"}},
 			nodes:  receiver("left-sink-node", "branch.final"),
 		},
 		{
 			id: "right-sink", mode: runtimecontracts.FlowModeStatic,
-			inputs: []runtimecontracts.FlowInputEventPin{{Name: "final", Event: "branch.final"}},
+			inputs: []runtimecontracts.FlowInputEventPin{{Event: "branch.final"}},
 			nodes:  receiver("right-sink-node", "branch.final"),
 		},
 	}
 	connects := []runtimecontracts.FlowPackageConnect{
-		{Event: "branch.ready", From: "producer", To: "left", Rename: "branch.accepted", Adapter: "ready_to_left"},
-		{Event: "branch.ready", From: "producer", To: "right", Rename: "branch.accepted", Adapter: "ready_to_right"},
-		{Event: "branch.done", From: "left", To: "left-sink", Rename: "branch.final", Adapter: "left_to_sink"},
-		{Event: "branch.done", From: "right", To: "right-sink", Rename: "branch.final", Adapter: "right_to_sink"},
+		{Event: "branch.ready", From: "producer", To: "left", Rename: "branch.accepted"},
+		{Event: "branch.ready", From: "producer", To: "right", Rename: "branch.accepted"},
+		{Event: "branch.done", From: "left", To: "left-sink", Rename: "branch.final"},
+		{Event: "branch.done", From: "right", To: "right-sink", Rename: "branch.final"},
 	}
 	if reverse {
 		for left, right := 0, len(connects)-1; left < right; left, right = left+1, right-1 {

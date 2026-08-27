@@ -4,6 +4,6 @@ spawn.requested:
 assign.requested:
   worker_id: string?
   task_label: string?
-worker/work.assign:
-  worker_id: string?
+work.assign:
+  worker_id: string
   task_label: string?

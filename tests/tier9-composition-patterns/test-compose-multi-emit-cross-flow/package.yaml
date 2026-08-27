@@ -8,3 +8,7 @@ flows:
   - id: tracker
     flow: tracker
     mode: static
+connect:
+  - event: task.record
+    from: .
+    to: tracker

@@ -6,6 +6,5 @@ pins:
     events: [state.clear_requested]
   outputs:
     events:
-      - name: state.cleared
-        event: state.cleared
+      - event: state.cleared
         sink: harness

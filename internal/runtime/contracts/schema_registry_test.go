@@ -509,7 +509,7 @@ func TestEventSchemaForFlowEvent_UsesDeclaringRootTypeCatalogForChildOutput(t *t
 		Path:  "child",
 		Schema: FlowSchemaDocument{
 			Pins: FlowPins{
-				Outputs: FlowOutputPins{Events: []string{"handoff.completed"}},
+				Outputs: FlowOutputPins{EventPins: []FlowOutputEventPin{{Event: "handoff.completed"}}},
 			},
 		},
 	}

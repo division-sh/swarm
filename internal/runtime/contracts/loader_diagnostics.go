@@ -161,7 +161,7 @@ func NewRetiredResolutionInstanceKeyDiagnostic() *LoaderDiagnostic {
 		"contract_loader.retired_resolution_instance_key",
 		"schema.yaml.pins.inputs.events.resolution.instance_key",
 		"resolution.instance_key is retired; scalar instance: <field> is the sole receiver identity owner.",
-		"Remove instance_key and declare carries.<field>.from explicitly for the field named by instance.",
+		"Remove instance_key; the receiver instance field and resolution.from own identity and its source.",
 		nil,
 	)
 }
@@ -170,8 +170,8 @@ func NewRetiredInstanceKeyCarrySourceDiagnostic() *LoaderDiagnostic {
 	return NewExpectedShapeDiagnostic(
 		"contract_loader.retired_instance_key_carry_source",
 		"schema.yaml.pins.inputs.events.carries.*.from",
-		"instance.key.* carry sources are retired; carries.<field>.from is the sole input identity source owner for scalar instance: <field>.",
-		"For create mode use generated.uuid, event.id, or one payload.<field>; selecting modes require one payload.<field>.",
+		"Input pin carries and instance.key.* carry sources are retired; resolution.from is the sole exceptional instance source owner.",
+		"Remove carries; omit resolution.from for the same-named payload default, or use generated.uuid, event.id, or one payload.<field> where the selected mode permits it.",
 		nil,
 	)
 }
@@ -219,12 +219,12 @@ func NewSchemaDocumentMappingDiagnostic(cause error) *LoaderDiagnostic {
 	)
 }
 
-func NewOutputEventPinNameRequiredDiagnostic(cause error) *LoaderDiagnostic {
+func NewOutputEventPinOptionsRequiredDiagnostic(cause error) *LoaderDiagnostic {
 	return NewExpectedShapeDiagnostic(
-		"contract_loader.output_event_pin_name_required",
+		"contract_loader.output_event_pin_options_required",
 		"schema.yaml.pins.outputs.events",
-		"output event pins must name the pin or use a scalar event name.",
-		"Use `events: [item.processed]` or `events: [{name: item_processed, event: item.processed}]`.",
+		"output event pin mappings require a non-default sink.",
+		"Use `events: [item.processed]` unless the validation-only `sink: harness` option is required.",
 		cause,
 	)
 }
@@ -312,17 +312,17 @@ func diagnoseLegacyLoaderError(err error) (*LoaderDiagnostic, bool) {
 	if strings.Contains(raw, "flow schema document must be a mapping") {
 		return NewSchemaDocumentMappingDiagnostic(err), true
 	}
-	if strings.Contains(raw, "input event pin name is required") {
+	if strings.Contains(raw, "input event pin mapping requires a non-default source or resolution") {
 		return NewExpectedShapeDiagnostic(
-			"contract_loader.input_event_pin_name_required",
+			"contract_loader.input_event_pin_options_required",
 			"schema.yaml.pins.inputs.events",
-			"input event pins must name the pin or use a scalar event name.",
-			"Use `events: [item.received]` or `events: [{name: item_received, event: item.received, source: external}]`.",
+			"input event pin mappings require a non-default source or resolution.",
+			"Use `events: [item.received]` unless `source` or `resolution` is required.",
 			err,
 		), true
 	}
-	if strings.Contains(raw, "output event pin name is required") {
-		return NewOutputEventPinNameRequiredDiagnostic(err), true
+	if strings.Contains(raw, "output event pin mapping requires a non-default sink") {
+		return NewOutputEventPinOptionsRequiredDiagnostic(err), true
 	}
 	if strings.Contains(raw, "ProjectFlowRef") {
 		return NewExpectedShapeDiagnostic(
@@ -402,8 +402,6 @@ func loaderFieldOptionsForContext(context string) map[string]struct{} {
 		return inputEventPinFieldOptions
 	case "output event pin":
 		return outputEventPinFieldOptions
-	case "input event pin carry":
-		return inputEventPinCarryFieldOptions
 	case "input event pin resolution":
 		return inputEventPinResolutionFieldOptions
 	case "rule":

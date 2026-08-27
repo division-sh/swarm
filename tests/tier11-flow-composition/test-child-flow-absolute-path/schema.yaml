@@ -5,10 +5,8 @@ pins:
   inputs:
     events:
       - work.start
-      - name: task_done
-        event: task.done
+      - task.done
   outputs:
     events:
-      - name: work.finished
-        event: work.finished
+      - event: work.finished
         sink: harness

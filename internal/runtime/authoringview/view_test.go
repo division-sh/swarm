@@ -65,7 +65,7 @@ func TestBuildIncludesHarnessInputSourceAndOutputSink(t *testing.T) {
 	if len(worker.InputPins) != 1 || worker.InputPins[0].Source != "harness" {
 		t.Fatalf("worker input pins = %#v, want effective source harness", worker.InputPins)
 	}
-	if got := outputPinByName(t, worker, "work_completed").Sink; got != "harness" {
+	if got := outputPinByName(t, worker, "work.completed").Sink; got != "harness" {
 		t.Fatalf("worker output sink = %q, want harness", got)
 	}
 }
@@ -145,7 +145,7 @@ func TestBuildStageGraphShowsFanInBarrierEffectiveJoinProvenance(t *testing.T) {
 	}
 	join := joins[0]
 	if join.MembersBy != "payload.operating_id" || join.MembersBySource != "resolution.dedup_by" ||
-		join.WindowBy != "payload.period_id" || join.WindowBySource != "resolution.window" || join.FanInPin != "operating_reported" {
+		join.WindowBy != "payload.period_id" || join.WindowBySource != "resolution.window" || join.FanInPin != "operating.reported" {
 		t.Fatalf("effective join readback = %#v", join)
 	}
 }
@@ -184,7 +184,7 @@ func TestBuildStageGraphShowsSameFlowPackageQualifiedJoins(t *testing.T) {
 	}
 }
 
-func TestBuildShowsTemplateInstanceRouteKeysAndCarries(t *testing.T) {
+func TestBuildShowsTemplateInstanceRouteIdentityAndProjection(t *testing.T) {
 	source := templateflowpilot.LoadSource(t, templateflowpilot.Options{})
 	report := runtimebootverify.Run(context.Background(), source, runtimebootverify.Options{})
 	view := mustBuild(t, source, &report)
@@ -205,9 +205,9 @@ func TestBuildShowsTemplateInstanceRouteKeysAndCarries(t *testing.T) {
 	}
 
 	producer := flowByID(t, view, "producer")
-	output := outputPinByName(t, producer, "account_ready")
-	if output.Event != "account.ready" || output.Key != "" || len(output.Carries) != 0 {
-		t.Fatalf("producer output = %#v, want canonical account.ready without duplicate key ownership", output)
+	output := outputPinByName(t, producer, "account.ready")
+	if output.Event != "account.ready" || output.PinDigest == "" {
+		t.Fatalf("producer output = %#v, want canonical immutable account.ready pin", output)
 	}
 
 	edges := interFlowRouteEdges(view.RoutingTopology)
@@ -215,11 +215,11 @@ func TestBuildShowsTemplateInstanceRouteKeysAndCarries(t *testing.T) {
 		t.Fatalf("inter-flow route edge count = %d, want 1: %#v", len(edges), edges)
 	}
 	edge := edges[0]
-	if edge.Producer.FlowID != "producer" || edge.Boundary == nil || edge.Boundary.OutputPin != "account_ready" {
-		t.Fatalf("route producer/boundary = %#v, want producer.account_ready", edge)
+	if edge.Producer.FlowID != "producer" || edge.Boundary == nil || edge.Boundary.OutputPin != "account.ready" {
+		t.Fatalf("route producer/boundary = %#v, want producer.account.ready", edge)
 	}
-	if edge.Consumer.FlowID != "account" || edge.Boundary.InputPin != "account_ready" {
-		t.Fatalf("route consumer/boundary = %#v, want account.account_ready", edge)
+	if edge.Consumer.FlowID != "account" || edge.Boundary.InputPin != "account.ready" {
+		t.Fatalf("route consumer/boundary = %#v, want account.account.ready", edge)
 	}
 	if edge.Resolution == nil || edge.Resolution.Mode != "select-or-create" {
 		t.Fatalf("route resolution = %#v, want select-or-create", edge.Resolution)
@@ -848,8 +848,8 @@ func TestBuildShowsFinalFlowInstanceAuthoringFixture(t *testing.T) {
 
 	producer := flowByID(t, view, finalflowinstanceauthoring.ProducerFlowID)
 	output := outputPinByName(t, producer, finalflowinstanceauthoring.ProducerOutputPin)
-	if output.Event != finalflowinstanceauthoring.ProducerOutput || output.Key != "" || len(output.Carries) != 0 {
-		t.Fatalf("producer output = %#v, want canonical event without duplicate key ownership", output)
+	if output.Event != finalflowinstanceauthoring.ProducerOutput || output.PinDigest == "" {
+		t.Fatalf("producer output = %#v, want canonical immutable event pin", output)
 	}
 	edges := interFlowRouteEdges(view.RoutingTopology)
 	if len(edges) != 1 {
@@ -910,7 +910,7 @@ func flowByID(t testing.TB, view View, id string) FlowView {
 func outputPinByName(t testing.TB, flow FlowView, name string) OutputPinView {
 	t.Helper()
 	for _, pin := range flow.OutputPins {
-		if pin.Name == name {
+		if pin.Event == name {
 			return pin
 		}
 	}
@@ -1047,11 +1047,6 @@ flows:
 name: scoring
 mode: template
 instance: account_id
-pins:
-  inputs:
-    events: []
-  outputs:
-    events: []
 `)
 	writeAuthoringViewTestFile(t, filepath.Join(root, "flows", "scoring", "entities.yaml"), `
 account:
@@ -1121,10 +1116,7 @@ states: [active]
 pins:
   inputs:
     events:
-      - name: observed
-        event: observed
-  outputs:
-    events: []
+      - observed
 `)
 	writeAuthoringViewTestFile(t, filepath.Join(dir, "types.yaml"), `
 types:

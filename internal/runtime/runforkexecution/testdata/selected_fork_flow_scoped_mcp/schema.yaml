@@ -6,9 +6,7 @@ pins:
   inputs:
     events:
       - task.assigned
-      - name: task_completed
-        event: task.completed
+      - task.completed
   outputs:
     events:
-      - name: task_assigned
-        event: task.assigned
+      - task.assigned

@@ -259,7 +259,7 @@ func dynamicFlowCreationAtomicityBundle() *runtimecontracts.WorkflowContractBund
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
 			"review": {
 				Mode:             "template",
-				Pins:             runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{Events: []string{"task.started"}}},
+				Pins:             runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "task.started"}}}},
 				AutoEmitOnCreate: runtimecontracts.AutoEmitOnCreateContract{Event: "task.started"},
 			},
 		},

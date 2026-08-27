@@ -4,8 +4,5 @@ states: [idle, spawned]
 pins:
   inputs:
     events:
-      - name: flow_created
-        event: flow.created
+      - event: flow.created
         source: external
-  outputs:
-    events: []

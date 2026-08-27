@@ -24,6 +24,7 @@ import (
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	eventtestsql "github.com/division-sh/swarm/internal/store/testsql"
+	authoractivityfixture "github.com/division-sh/swarm/internal/store/testutil/authoractivityfixture"
 	"github.com/google/uuid"
 )
 
@@ -181,9 +182,9 @@ func TestEventRoutingSourceRoundTripParity(t *testing.T) {
 	}
 }
 
-func TestConnectExecutionClaimRoundTripAndGraphMutationParity(t *testing.T) {
-	original := compiledConnectClaimFixture(t, canonicalrouting.TemplateInstanceRouteSelect, canonicalrouting.TemplateInstanceNoSecondPin, "deploy_completed")
-	changed := compiledConnectClaimFixture(t, canonicalrouting.TemplateInstanceRouteSelect, canonicalrouting.TemplateInstanceSecondPinDistinctEvent, "deploy_audited")
+func TestW2CompiledRouteClaimPersistenceRestartAndGraphMutationParity(t *testing.T) {
+	original := compiledConnectClaimFixture(t, canonicalrouting.TemplateInstanceRouteSelect, canonicalrouting.TemplateInstanceNoSecondPin, "deploy.done")
+	changed := compiledConnectClaimFixture(t, canonicalrouting.TemplateInstanceRouteSelect, canonicalrouting.TemplateInstanceSecondPinDistinctEvent, "deploy.audited")
 	if original.ConnectClaim.Equal(changed.ConnectClaim) {
 		t.Fatal("fixture mutation did not change the compiled connect claim")
 	}
@@ -199,7 +200,8 @@ func TestConnectExecutionClaimRoundTripAndGraphMutationParity(t *testing.T) {
 			if err := commitSemanticEventFixtureWithRoutes(ctx, fixture.store, event, []events.DeliveryRoute{original}); err != nil {
 				t.Fatalf("commit event and route: %v", err)
 			}
-			routes, err := fixture.store.(eventDeliveryRouteReadbackStore).ListEventDeliveryRoutes(ctx, event.ID())
+			restarted := restartedEventDeliveryRouteReadbackStore(t, ctx, fixture)
+			routes, err := restarted.ListEventDeliveryRoutes(ctx, event.ID())
 			if err != nil {
 				t.Fatalf("list event delivery routes: %v", err)
 			}
@@ -222,6 +224,27 @@ func TestConnectExecutionClaimRoundTripAndGraphMutationParity(t *testing.T) {
 			}
 		})
 	}
+}
+
+func restartedEventDeliveryRouteReadbackStore(t testing.TB, ctx context.Context, fixture authorActivityReceiptFixture) eventDeliveryRouteReadbackStore {
+	t.Helper()
+	var restarted interface {
+		eventDeliveryRouteReadbackStore
+		BootstrapSchema(context.Context, SchemaBootstrapRequest) error
+	}
+	switch fixture.dialect {
+	case authoractivityfixture.DialectSQLite:
+		restarted = NewSQLiteRuntimeStoreForTest(fixture.db)
+	case authoractivityfixture.DialectPostgres:
+		restarted = NewPostgresStoreForTest(fixture.db)
+	default:
+		t.Fatalf("unsupported event-record restart dialect %q", fixture.dialect)
+		return nil
+	}
+	if err := restarted.BootstrapSchema(ctx, canonicalSchemaBootstrapTestRequest(t)); err != nil {
+		t.Fatalf("bootstrap reconstructed %s store: %v", fixture.dialect, err)
+	}
+	return restarted
 }
 
 func routingSourceRoundTripFixtures(t testing.TB) []events.RoutingSource {

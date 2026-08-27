@@ -6,6 +6,5 @@ pins:
     events: [flow.spawn_requested]
   outputs:
     events:
-      - name: flow.spawned
-        event: flow.spawned
+      - event: flow.spawned
         sink: harness

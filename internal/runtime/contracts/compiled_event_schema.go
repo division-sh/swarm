@@ -18,6 +18,7 @@ type CompiledEventSchemaClassification string
 
 const (
 	CompiledEventSchemaAuthored  CompiledEventSchemaClassification = "authored"
+	CompiledEventSchemaImported  CompiledEventSchemaClassification = "imported"
 	CompiledEventSchemaGenerated CompiledEventSchemaClassification = "generated"
 	CompiledEventSchemaPattern   CompiledEventSchemaClassification = "pattern"
 )
@@ -114,7 +115,7 @@ func (s CompiledEventSchema) Classification() CompiledEventSchemaClassification 
 }
 
 func (s CompiledEventSchema) Importable() bool {
-	return s.Classification() == CompiledEventSchemaAuthored
+	return s.Classification() == CompiledEventSchemaAuthored || s.Classification() == CompiledEventSchemaImported
 }
 
 func (s CompiledEventSchema) Fields() []CompiledEventField {
@@ -159,7 +160,78 @@ func (s CompiledEventSchema) Source() CompiledEventSchemaSource {
 	return s.value.source
 }
 
+func (s CompiledEventSchema) withRequiredField(name string, fieldSchema map[string]any) (CompiledEventSchema, error) {
+	name = strings.TrimSpace(name)
+	if s.value == nil {
+		return CompiledEventSchema{}, fmt.Errorf("receiver event schema is unavailable")
+	}
+	if name == "" || strings.Contains(name, ".") {
+		return CompiledEventSchema{}, fmt.Errorf("receiver projection field %q must be one exact top-level field", name)
+	}
+	acceptanceSchema := s.AcceptanceSchema()
+	properties, _ := acceptanceSchema["properties"].(map[string]any)
+	if properties == nil {
+		properties = map[string]any{}
+		acceptanceSchema["properties"] = properties
+	}
+	if _, exists := properties[name]; exists {
+		// The compiled projection remains explicit so edge validation can report
+		// the producer/receiver ownership collision through the supported verify
+		// surface instead of failing before a report can be produced.
+		return s, nil
+	}
+	properties[name] = cloneEventSchemaMap(fieldSchema)
+	required := compiledEventRequiredFields(acceptanceSchema)
+	required[name] = struct{}{}
+	requiredNames := make([]string, 0, len(required))
+	for field := range required {
+		if field != "" {
+			requiredNames = append(requiredNames, field)
+		}
+	}
+	sort.Strings(requiredNames)
+	acceptanceSchema["required"] = requiredNames
+	canonicalSchema, err := canonicaljson.Bytes(acceptanceSchema)
+	if err != nil {
+		return CompiledEventSchema{}, fmt.Errorf("canonical receiver acceptance schema: %w", err)
+	}
+	fields := append([]CompiledEventField(nil), s.value.fields...)
+	fields = append(fields, CompiledEventField{value: &compiledEventFieldValue{
+		name: name, schema: cloneEventSchemaMap(fieldSchema),
+	}})
+	sort.Slice(fields, func(i, j int) bool { return fields[i].Name() < fields[j].Name() })
+	value := *s.value
+	value.fields = fields
+	value.acceptanceSchema = cloneEventSchemaMap(acceptanceSchema)
+	value.canonicalSchema = append([]byte(nil), canonicalSchema...)
+	value.acceptanceSchemaDigest = canonicaljson.HashBytes(canonicalSchema)
+	return CompiledEventSchema{value: &value}, nil
+}
+
 var _ CompiledEventSchemaProvider = (*WorkflowContractBundle)(nil)
+
+// ResolveCompiledFlowEventSchema returns the immutable producer declaration
+// for one exact flow-local event. It never rebuilds evidence from reader-side
+// authored maps.
+func (b *WorkflowContractBundle) ResolveCompiledFlowEventSchema(flowID, eventType string) (CompiledEventSchema, bool, error) {
+	if b == nil {
+		return CompiledEventSchema{}, false, nil
+	}
+	resolved := eventidentity.Normalize(b.ResolveFlowEventReference(flowID, eventType))
+	if resolved == "" {
+		return CompiledEventSchema{}, false, nil
+	}
+	schemas, err := b.CompiledEventSchemas()
+	if err != nil {
+		return CompiledEventSchema{}, false, err
+	}
+	for _, schema := range schemas {
+		if eventidentity.Normalize(schema.EventName()) == resolved {
+			return schema, true, nil
+		}
+	}
+	return CompiledEventSchema{}, false, nil
+}
 
 type currentEventDeclarationRecord struct {
 	packageKey    string
@@ -361,6 +433,26 @@ func (b *WorkflowContractBundle) compileCurrentEventDeclaration(
 		return CompiledEventSchema{}, false, fmt.Errorf("compile event %s:%s: %w", admittedPackage.String(), qualifiedName, err)
 	}
 	return compiled, true, nil
+}
+
+// CompileImportedEventSchema admits an externally owned event declaration
+// once so late-bound provider catalogs can supply immutable pin evidence
+// without exposing a reader-side EventCatalogEntry fallback.
+func CompileImportedEventSchema(packageKey, eventName string, entry EventCatalogEntry, source CompiledEventSchemaSource) (CompiledEventSchema, error) {
+	if !eventidentity.IsCanonicalName(eventName) {
+		return CompiledEventSchema{}, fmt.Errorf("imported event declaration %q is not an exact canonical event identity", eventName)
+	}
+	admittedPackage, err := runtimeidentity.ParsePackageKey(packageKey)
+	if err != nil {
+		return CompiledEventSchema{}, fmt.Errorf("imported event %q has invalid package owner %q: %w", eventName, packageKey, err)
+	}
+	compiled, err := newCompiledEventSchema(admittedPackage.String(), eventName, entry, TypeCatalogDocument{}, entry.BusinessKeyField, source)
+	if err != nil {
+		return CompiledEventSchema{}, fmt.Errorf("compile imported event %s:%s: %w", admittedPackage.String(), eventName, err)
+	}
+	value := *compiled.value
+	value.classification = CompiledEventSchemaImported
+	return CompiledEventSchema{value: &value}, nil
 }
 
 func newCompiledEventSchema(

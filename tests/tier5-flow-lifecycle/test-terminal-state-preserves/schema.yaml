@@ -7,6 +7,5 @@ pins:
     events: [task.completed, task.updated]
   outputs:
     events:
-      - name: task.finished
-        event: task.finished
+      - event: task.finished
         sink: harness

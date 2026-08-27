@@ -14,11 +14,11 @@ import (
 
 const (
 	OwnerFlowID            = "portfolio"
-	OwnerOutputPin         = "account_notify_requested"
+	OwnerOutputPin         = "account.notify.requested"
 	OwnerTriggerEvent      = "portfolio.notify.requested"
 	NotifyEvent            = "account.notify.requested"
 	ChildFlowID            = "account"
-	ChildInputPin          = "account_notify_requested"
+	ChildInputPin          = "account.notify.requested"
 	canonicalAccountAgents = `account-worker:
   type: generic
   role: account_worker
@@ -39,7 +39,7 @@ const (
 type Options struct {
 	OmitOutputPin               bool
 	OmitConnect                 bool
-	MissingEmitCarry            bool
+	MissingEmitField            bool
 	ProducerTarget              bool
 	ProducerBroadcast           bool
 	ObjectMembership            bool
@@ -98,13 +98,9 @@ func WriteVariant(t testing.TB, opts Options) string {
 `, "")
 	}
 	if opts.OmitOutputPin {
-		replaceFile(t, ownerSchema, `      - name: account_notify_requested
-        event: account.notify.requested
-        key: account_id
-        carries: [account_id, command]
-`, "")
+		replaceFile(t, ownerSchema, "      - account.notify.requested\n", "")
 	}
-	if opts.MissingEmitCarry {
+	if opts.MissingEmitField {
 		replaceFile(t, ownerNodes, "            command: payload.command\n", "")
 	}
 	if opts.ProducerTarget {
@@ -145,14 +141,15 @@ account.created:
 auto_emit_on_create:
   event: account.created
 `)
-		replaceFile(t, accountSchema, `  outputs:
-    events: []
-`, `  outputs:
+		replaceFile(t, accountSchema, `      - event: account.notify.requested
+        resolution:
+          mode: select
+`, `      - event: account.notify.requested
+        resolution:
+          mode: select
+  outputs:
     events:
-      - name: account_created
-        event: account.created
-        key: account_id
-        carries: [account_id]
+      - account.created
 `)
 	}
 	if opts.AutoEmitEventRevision == 2 {

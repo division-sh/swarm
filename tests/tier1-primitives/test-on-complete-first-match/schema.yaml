@@ -6,6 +6,5 @@ pins:
     events: [item.evaluated]
   outputs:
     events:
-      - name: item.passed
-        event: item.passed
+      - event: item.passed
         sink: harness

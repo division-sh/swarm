@@ -64,9 +64,7 @@ mode: singleton
 pins:
   inputs:
     events:
-      - {name: item_received, event: item.received, source: harness}
-  outputs:
-    events: []
+      - {event: item.received, source: harness}
 `)
 		writeSingletonCoordinatorFile(t, root, filepath.Join("flows", flowID, "events.yaml"), "item.received:\n  items: '[text]'\n")
 		entities := "state: {}\n"
@@ -116,11 +114,8 @@ states: [active]
 pins:
   inputs:
     events:
-      - name: lead_observed
-        event: lead.observed
+      - event: lead.observed
         source: external
-  outputs:
-    events: []
 `)
 	writeSingletonCoordinatorFile(t, root, "flows/coordinator/types.yaml", `
 types:
@@ -188,9 +183,7 @@ states: [active, done, failed]
 pins:
   inputs:
     events:
-      - {name: job_received, event: job.received, source: harness}
-  outputs:
-    events: []
+      - {event: job.received, source: harness}
 `)
 	writeSingletonCoordinatorFile(t, root, "flows/coordinator/types.yaml", singletonCoordinatorTypesYAMLForFixture())
 	writeSingletonCoordinatorFile(t, root, "flows/coordinator/entities.yaml", "coordinator_state: {}\n")
@@ -232,17 +225,14 @@ mode: singleton
 pins:
   inputs:
     events:
-      - name: job_received
-        event: job.received
+      - event: job.received
         source: harness
         resolution:
           mode: fan-in
           aggregation: stream
           window: payload.vertical_id
-          dedup_by: event.id
+          dedup_by: [event.id]
           singleton: coordinator
-  outputs:
-    events: []
 `)
 	writeSingletonCoordinatorFile(t, root, "flows/coordinator/entities.yaml", "coordinator_state: {}\n")
 	writeSingletonCoordinatorFile(t, root, "flows/coordinator/events.yaml", "job.received:\n  vertical_id: text\n")

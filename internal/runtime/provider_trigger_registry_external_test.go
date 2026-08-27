@@ -163,16 +163,16 @@ func boundedStandingConnectorBundle(t *testing.T, flowInstance string, bundle *r
 	if bundle == nil || flowInstance == "" {
 		return bundle
 	}
-	inputs := []string(nil)
+	inputs := []runtimecontracts.FlowInputEventPin(nil)
 	if bundle.RootSchema != nil {
-		inputs = append(inputs, bundle.RootSchema.Pins.Inputs.Events...)
+		inputs = append(inputs, bundle.RootSchema.Pins.Inputs.EventPins...)
 	}
 	flow := runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{ID: boundedProviderFlowID, Flow: boundedProviderFlowID},
 		Path:  flowInstance,
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: runtimecontracts.FlowModeStatic,
-			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{Events: inputs}},
+			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{EventPins: inputs}},
 		},
 		Nodes:  bundle.Nodes,
 		Events: bundle.Events,
@@ -193,10 +193,6 @@ func boundedStandingConnectorBundle(t *testing.T, flowInstance string, bundle *r
 	bundle.FlowSchemas = map[string]runtimecontracts.FlowSchemaDocument{
 		boundedProviderFlowID: flow.Schema,
 	}
-	if bundle.Semantics.FlowInputs == nil {
-		bundle.Semantics.FlowInputs = map[string][]string{}
-	}
-	bundle.Semantics.FlowInputs[boundedProviderFlowID] = append([]string(nil), inputs...)
 	admitted := loadRuntimeTempBundle(t, map[string]string{
 		"package.yaml":                        "name: bounded-standing-connector\nversion: 1.0.0\nflows:\n  - id: bounded_inbound\n    flow: bounded_inbound\n    mode: static\n",
 		"flows/bounded_inbound/schema.yaml":   "name: bounded_inbound\nmode: static\ninitial_state: active\nstates: [active]\n",
@@ -207,9 +203,11 @@ func boundedStandingConnectorBundle(t *testing.T, flowInstance string, bundle *r
 	admitted.Events = bundle.Events
 	admitted.Agents = bundle.Agents
 	admitted.Tools = bundle.Tools
-	admitted.Semantics = bundle.Semantics
 	admitted.FlowTree = bundle.FlowTree
 	admitted.FlowSchemas = bundle.FlowSchemas
+	if err := runtimecontracts.CompileWorkflowSemantics(admitted); err != nil {
+		t.Fatalf("compile bounded standing connector semantics: %v", err)
+	}
 	return admitted
 }
 

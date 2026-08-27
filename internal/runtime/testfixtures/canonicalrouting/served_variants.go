@@ -94,11 +94,8 @@ mode: static
 pins:
   inputs:
     events:
-      - name: fork_source_message
-        event: fork.source_message
+      - event: fork.source_message
         source: external
-  outputs:
-    events: []
 `)
 	writeClosedVariantFile(t, root, "flows/fork-source/events.yaml", `fork.source_message:
   note: text
@@ -140,11 +137,8 @@ mode: static
 pins:
   inputs:
     events:
-      - name: item_agent_hold
-        event: item.agent_hold
+      - event: item.agent_hold
         source: external
-  outputs:
-    events: []
 `)
 	writeClosedVariantFile(t, root, "flows/hold/events.yaml", `item.agent_hold:
   note: text
@@ -200,10 +194,8 @@ states: [initializing, waiting, ready]
 pins:
   inputs:
     events:
-      - name: product_initialization_requested
-        event: opco.product_initialization_requested
-      - name: product_review_requested
-        event: opco.product_review_requested
+      - opco.product_initialization_requested
+      - event: opco.product_review_requested
         source: external
 auto_emit_on_create:
   event: opco.product_initialization_requested
@@ -316,11 +308,8 @@ states: [pending, processed, done]
 pins:
   inputs:
     events:
-      - name: item_received
-        event: item.received
+      - event: item.received
         source: external
-  outputs:
-    events: []
 `, `name: routing-root-ingress
 initial_state: new
 terminal_states: [done]
@@ -328,17 +317,12 @@ states: [new, waiting, done]
 pins:
   inputs:
     events:
-      - name: item_received
-        event: item.received
+      - event: item.received
         source: external
-      - name: opco_bootstrap_requested
-        event: opco.bootstrap_requested
+      - event: opco.bootstrap_requested
         source: external
-      - name: opco_spinup_requested
-        event: opco.spinup_requested
+      - event: opco.spinup_requested
         source: external
-  outputs:
-    events: []
 `)
 	applyClosedReplacement(t, filepath.Join(root, "nodes.yaml"), "      advances_to: processed\n", "      advances_to: waiting\n")
 	applyClosedReplacement(t, filepath.Join(root, "entities.yaml"), "item: {}\n", `portfolio:

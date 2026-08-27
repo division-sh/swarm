@@ -392,11 +392,10 @@ var flowPackageRequiresPolicyFieldOptions = map[string]struct{}{
 }
 
 var flowPackageConnectFieldOptions = map[string]struct{}{
-	"event":   {},
-	"from":    {},
-	"to":      {},
-	"rename":  {},
-	"adapter": {},
+	"event":  {},
+	"from":   {},
+	"to":     {},
+	"rename": {},
 }
 
 var typeCatalogFieldOptions = map[string]struct{}{
@@ -849,29 +848,35 @@ func (c *FlowPackageConnect) UnmarshalYAML(node *yaml.Node) error {
 		case "":
 			continue
 		case "event":
-			if err := value.Decode(&out.Event); err != nil {
-				return fmt.Errorf("connect.event: %w", err)
+			decoded, err := decodeExactNonEmptyFlowPinScalar(value, "connect.event")
+			if err != nil {
+				return err
 			}
+			out.Event = decoded
 		case "from":
-			if err := value.Decode(&out.From); err != nil {
-				return fmt.Errorf("connect.from: %w", err)
+			decoded, err := decodeExactNonEmptyFlowPinScalar(value, "connect.from")
+			if err != nil {
+				return err
 			}
+			out.From = decoded
 		case "to":
-			if err := value.Decode(&out.To); err != nil {
-				return fmt.Errorf("connect.to: %w", err)
+			decoded, err := decodeExactNonEmptyFlowPinScalar(value, "connect.to")
+			if err != nil {
+				return err
 			}
+			out.To = decoded
 		case "rename":
-			if err := value.Decode(&out.Rename); err != nil {
-				return fmt.Errorf("connect.rename: %w", err)
+			decoded, err := decodeExactNonEmptyFlowPinScalar(value, "connect.rename")
+			if err != nil {
+				return err
 			}
+			out.Rename = decoded
 		case "adapter":
-			if err := value.Decode(&out.Adapter); err != nil {
-				return fmt.Errorf("connect.adapter: %w", err)
-			}
+			return fmt.Errorf("RETIRED: connect.adapter is unsupported; declare an exact event contract or a distinct event")
 		case "using":
-			return fmt.Errorf("retired connect.using.instance; declare receiver-owned `instance: <field>`, a same-named carry source, and `resolution.mode`")
+			return fmt.Errorf("retired connect.using.instance; declare receiver-owned `instance: <field>` and `resolution.mode`, with `resolution.from` only for an exceptional source")
 		case "map":
-			return fmt.Errorf("retired connect.map; declare receiver-owned `instance: <field>` and source it from the same-named input carry")
+			return fmt.Errorf("retired connect.map; declare receiver-owned `instance: <field>` and use `resolution.from` only for an exceptional source")
 		case "delivery":
 			return NewRetiredConnectDeliveryDiagnostic()
 		case "reply":
@@ -880,8 +885,8 @@ func (c *FlowPackageConnect) UnmarshalYAML(node *yaml.Node) error {
 			return NewUndefinedFieldDiagnostic("connect", key, flowPackageConnectFieldOptions)
 		}
 	}
-	event := strings.TrimSpace(out.Event)
-	rename := strings.TrimSpace(out.Rename)
+	event := out.Event
+	rename := out.Rename
 	if event == "" {
 		return fmt.Errorf("RETIRED: endpoint-centric connect rows are no longer supported; declare event plus flow-only from and to endpoints")
 	}
@@ -894,7 +899,6 @@ func (c *FlowPackageConnect) UnmarshalYAML(node *yaml.Node) error {
 	if rename != out.Rename || (rename != "" && !eventidentity.IsValidName(out.Rename)) {
 		return fmt.Errorf("connect.rename %q must be an exact canonical event identity", out.Rename)
 	}
-	out = out.normalized()
 	if out.From == "" || out.To == "" {
 		return fmt.Errorf("connect entry requires non-empty event, from, and to")
 	}

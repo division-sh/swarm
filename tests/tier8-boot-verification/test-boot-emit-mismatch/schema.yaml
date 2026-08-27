@@ -4,8 +4,6 @@ states: [pending, done]
 pins:
   inputs:
     events: [task.requested]
-  outputs:
-    events: []
 required_agents:
   - role: worker
     subscribes_to: [task.requested]

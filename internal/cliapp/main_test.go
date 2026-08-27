@@ -3796,6 +3796,7 @@ test-node:
 				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: invalid-input-pin
 version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []
 `)
 				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
@@ -3807,12 +3808,12 @@ pins:
 `)
 			},
 			wants: []string{
-				"ERROR: input event pins must name the pin or use a scalar event name.",
+				"ERROR: input event pin mappings require a non-default source or resolution.",
 				"Location:",
 				"schema.yaml.pins.inputs.events",
-				"Remediation: Use `events: [item.received]`",
+				"Remediation: Use `events: [item.received]` unless `source` or `resolution` is required.",
 			},
-			notWants: []string{"input event pin name is required", "load Swarm contracts", "resolve contracts"},
+			notWants: []string{"input event pin name", "load Swarm contracts", "resolve contracts"},
 		},
 		{
 			name: "output event pin required shape",
@@ -3820,6 +3821,7 @@ pins:
 				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "package.yaml"), `
 name: invalid-output-pin
 version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
 flows: []
 `)
 				writeWorkflowValidationFixtureFile(t, filepath.Join(root, "schema.yaml"), `
@@ -3831,12 +3833,12 @@ pins:
 `)
 			},
 			wants: []string{
-				"ERROR: output event pins must name the pin or use a scalar event name.",
+				"ERROR: output event pin mappings require a non-default sink.",
 				"Location:",
 				"schema.yaml.pins.outputs.events",
-				"Remediation: Use `events: [item.processed]`",
+				"Remediation: Use `events: [item.processed]` unless the validation-only `sink: harness` option is required.",
 			},
-			notWants: []string{"output event pin name is required", "load Swarm contracts", "resolve contracts"},
+			notWants: []string{"output event pin name", "load Swarm contracts", "resolve contracts"},
 		},
 	}
 	for _, tt := range tests {

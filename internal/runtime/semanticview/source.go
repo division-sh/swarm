@@ -44,10 +44,10 @@ type Source interface {
 	FlowPath(flowID string) string
 	FlowInputEvents(flowID string) []string
 	FlowOutputEvents(flowID string) []string
-	FlowInputEventPins(flowID string) []runtimecontracts.FlowInputEventPin
-	FlowOutputEventPins(flowID string) []runtimecontracts.FlowOutputEventPin
-	FlowInputEventPin(flowID, pinName string) (runtimecontracts.FlowInputEventPin, bool)
-	FlowOutputEventPin(flowID, pinName string) (runtimecontracts.FlowOutputEventPin, bool)
+	FlowInputEventPins(flowID string) []runtimecontracts.CompiledFlowInputPin
+	FlowOutputEventPins(flowID string) []runtimecontracts.CompiledFlowOutputPin
+	FlowInputEventPin(flowID, pinName string) (runtimecontracts.CompiledFlowInputPin, bool)
+	FlowOutputEventPin(flowID, pinName string) (runtimecontracts.CompiledFlowOutputPin, bool)
 	FlowWritePins(flowID string) []string
 	WritePinOwners(pin string) []string
 	FlowHasInputEvent(flowID, eventType string) bool

@@ -72,11 +72,11 @@ func ApplyRetiredResolutionInstanceKeyBlocker(t testing.TB, root string, blocker
 func ApplyCompositionConnectReceiverPinCollisionMutation(t testing.TB, root string) {
 	t.Helper()
 	applyClosedReplacement(t, filepath.Join(root, "package.yaml"),
-		"    adapter: deploy_done_to_completed\n",
-		"    adapter: deploy_done_to_completed\n  - event: deploy.done\n    from: producer\n    to: consumer\n    rename: deploy.audited\n    adapter: deploy_done_to_audited\n")
+		"    rename: deploy.completed\n",
+		"    rename: deploy.completed\n  - event: deploy.done\n    from: producer\n    to: consumer\n    rename: deploy.audited\n")
 	applyClosedReplacement(t, filepath.Join(root, "flows", "consumer", "schema.yaml"),
-		"        event: deploy.completed\n",
-		"        event: deploy.completed\n      - name: deploy_audited\n        event: deploy.audited\n")
+		"      - deploy.completed\n",
+		"      - deploy.completed\n      - deploy.audited\n")
 	applyClosedReplacement(t, filepath.Join(root, "flows", "consumer", "nodes.yaml"),
 		"  subscribes_to: [deploy.completed]\n",
 		"  subscribes_to: [deploy.completed, deploy.audited]\n")
@@ -153,7 +153,7 @@ type TemplateSelectOrCreateNegativeMutation uint8
 
 const (
 	TemplateSelectOrCreateRetiredInstanceKey TemplateSelectOrCreateNegativeMutation = iota + 1
-	TemplateSelectOrCreateMissingCarry
+	TemplateSelectOrCreateOptionalIdentitySource
 	TemplateSelectOrCreateReceiverSelector
 	TemplateSelectOrCreateProducerTarget
 	TemplateSelectOrCreateProducerBroadcast
@@ -167,9 +167,9 @@ func ApplyTemplateSelectOrCreateNegativeMutation(t testing.TB, root string, muta
 	switch mutation {
 	case TemplateSelectOrCreateRetiredInstanceKey:
 		applyClosedReplacement(t, receiverSchema, "          mode: select-or-create\n", "          mode: select-or-create\n          instance_key: account_id\n")
-	case TemplateSelectOrCreateMissingCarry:
-		applyClosedReplacement(t, receiverSchema,
-			"        carries:\n          account_id:\n            from: payload.account_id\n            type: text\n", "")
+	case TemplateSelectOrCreateOptionalIdentitySource:
+		applyClosedReplacement(t, filepath.Join(root, "flows", "producer", "events.yaml"),
+			"  account_id: text\n", "  account_id: text?\n")
 	case TemplateSelectOrCreateReceiverSelector:
 		applyClosedReplacement(t, receiverNodes,
 			"    account.ready:\n      data_accumulation:\n",
@@ -193,7 +193,7 @@ type TemplateReplyNegativeMutation uint8
 
 const (
 	TemplateReplyMissingRepliesTo TemplateReplyNegativeMutation = iota + 1
-	TemplateReplyMissingCorrelationCarry
+	TemplateReplyMissingCorrelationField
 	TemplateReplyAmbiguousRequestEdge
 	TemplateReplyMismatchedProvider
 )
@@ -204,9 +204,10 @@ func ApplyTemplateReplyNegativeMutation(t testing.TB, root string, mutation Temp
 	packageFile := filepath.Join(root, "package.yaml")
 	switch mutation {
 	case TemplateReplyMissingRepliesTo:
-		applyClosedReplacement(t, requesterSchema, "          replies_to: provider_requested\n", "")
-	case TemplateReplyMissingCorrelationCarry:
-		applyClosedReplacement(t, requesterSchema, "        carries: [provider_request_id]\n", "")
+		applyClosedReplacement(t, requesterSchema, "          replies_to: provider.requested\n", "")
+	case TemplateReplyMissingCorrelationField:
+		applyClosedReplacement(t, filepath.Join(root, "flows", "requester", "events.yaml"),
+			"  key: provider_request_id\n  provider_request_id: text\n", "")
 	case TemplateReplyAmbiguousRequestEdge:
 		applyClosedReplacement(t, packageFile,
 			"  - event: provider.requested\n    from: requester\n    to: provider\n",

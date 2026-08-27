@@ -6,6 +6,5 @@ pins:
     events: [entity.create_requested]
   outputs:
     events:
-      - name: entity.created
-        event: entity.created
+      - event: entity.created
         sink: harness

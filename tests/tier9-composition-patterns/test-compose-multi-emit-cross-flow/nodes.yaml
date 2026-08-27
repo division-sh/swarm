@@ -2,10 +2,10 @@ notifier:
   id: notifier
   execution_type: system_node
   subscribes_to: [task.completed]
-  produces: [task.logged, tracker/task.record]
+  produces: [task.logged, task.record]
   event_handlers:
     task.completed:
       advances_to: done
       emit:
         - task.logged
-        - tracker/task.record
+        - task.record

@@ -6,6 +6,5 @@ pins:
     events: [conflict.submitted]
   outputs:
     events:
-      - name: conflict.resolved
-        event: conflict.resolved
+      - event: conflict.resolved
         sink: harness

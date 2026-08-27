@@ -178,7 +178,7 @@ func TestRunForkPointRevisionedSourceRouteDrivesSelectedHistoryMatrixPostgres(t 
 			sourceRoute:      events.RouteIdentity{EntityID: "33333333-3333-4333-8333-333333333333"},
 			routingSource:    eventtest.RootRoutingSource("33333333-3333-4333-8333-333333333333"),
 			explicitSelector: true,
-			source:           testContractFrontierRootConnectSource,
+			source:           func() semanticview.Source { return testContractFrontierRootConnectSource(t) },
 			wantHistory:      []string{consumerNode}, wantHistoryEvents: 1,
 			wantHistoryCodes: []string{nonMutating},
 		},

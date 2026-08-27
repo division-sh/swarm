@@ -59,8 +59,7 @@ func validateInputPinResolutions(source semanticview.Source) []Finding {
 			continue
 		}
 		for _, pin := range source.FlowInputEventPins(flowID) {
-			findings = append(findings, validateFlowInputCarryProjectionPolicy(flowID, pin)...)
-			if pin.Resolution.Empty() {
+			if pin.Resolution().Empty() {
 				continue
 			}
 			findings = append(findings, validateInputPinResolution(source, flowID, pin)...)
@@ -68,24 +67,9 @@ func validateInputPinResolutions(source semanticview.Source) []Finding {
 	}
 	return findings
 }
-
-func validateFlowInputCarryProjectionPolicy(flowID string, pin runtimecontracts.FlowInputEventPin) []Finding {
+func validateInputPinResolution(source semanticview.Source, flowID string, pin runtimecontracts.CompiledFlowInputPin) []Finding {
 	var findings []Finding
-	for name, carry := range pin.Carries {
-		name = strings.TrimSpace(name)
-		if carry.Optional {
-			findings = append(findings, inputPinResolutionFinding(flowID, pin, "carry_projection_unsupported", fmt.Sprintf("carry %s optional is reserved for provider normalized-event projections and is not supported on flow input carries", name), flowID))
-		}
-		if conversion := strings.TrimSpace(carry.Convert); conversion != "" {
-			findings = append(findings, inputPinResolutionFinding(flowID, pin, "carry_projection_unsupported", fmt.Sprintf("carry %s conversion %q is reserved for provider normalized-event projections and is not supported on flow input carries", name, conversion), flowID))
-		}
-	}
-	return findings
-}
-
-func validateInputPinResolution(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin) []Finding {
-	var findings []Finding
-	resolution := pin.Resolution
+	resolution := pin.Resolution()
 	location := flowID
 	switch resolution.Mode {
 	case runtimecontracts.FlowInputResolutionModeCreate, runtimecontracts.FlowInputResolutionModeSelect, runtimecontracts.FlowInputResolutionModeSelectOrCreate:
@@ -104,8 +88,8 @@ func validateInputPinResolution(source semanticview.Source, flowID string, pin r
 	return findings
 }
 
-func validateReplyInputPinResolution(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin) []Finding {
-	resolution := pin.Resolution
+func validateReplyInputPinResolution(source semanticview.Source, flowID string, pin runtimecontracts.CompiledFlowInputPin) []Finding {
+	resolution := pin.Resolution()
 	location := flowID
 	var findings []Finding
 	if resolution.Aggregation != "" || resolution.Window != "" || len(resolution.DedupBy) > 0 || resolution.Singleton != "" {
@@ -120,8 +104,8 @@ func validateReplyInputPinResolution(source semanticview.Source, flowID string, 
 		return append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", fmt.Sprintf("resolution mode reply replies_to %q must name a same-flow output pin", requestPinName), location))
 	}
 	correlationKey := strings.TrimSpace(resolution.CorrelationKey)
-	if correlationKey != "" && !containsTrimmedString(requestPin.Carries, correlationKey) {
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", fmt.Sprintf("resolution mode reply correlation_key %q must name a carry declared by output pin %s", correlationKey, requestPinName), location))
+	if correlationKey != "" && !outputPinRequiredPayloadFieldExists(source, flowID, requestPin, correlationKey) {
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", fmt.Sprintf("resolution mode reply correlation_key %q must name a required payload field declared by output event %s", correlationKey, requestPin.EventType()), location))
 	}
 	graph := runtimepinrouting.CompileConnectGraph(source)
 	requestConnects := graph.PlansFromOutputPin(strings.TrimSpace(flowID), requestPin)
@@ -131,7 +115,7 @@ func validateReplyInputPinResolution(source semanticview.Source, flowID string, 
 		return findings
 	}
 	if len(replyConnects) != 1 {
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", fmt.Sprintf("resolution mode reply input pin %s.%s must have exactly one connected provider output, got %d", flowID, pin.PinName(), len(replyConnects)), location))
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", fmt.Sprintf("resolution mode reply input pin %s.%s must have exactly one connected provider output, got %d", flowID, pin.EventType(), len(replyConnects)), location))
 		return findings
 	}
 	requestTarget := requestConnects[0].ReceiverEndpoint()
@@ -142,23 +126,13 @@ func validateReplyInputPinResolution(source semanticview.Source, flowID string, 
 	return findings
 }
 
-func containsTrimmedString(values []string, want string) bool {
-	want = strings.TrimSpace(want)
-	for _, value := range values {
-		if strings.TrimSpace(value) == want {
-			return true
-		}
-	}
-	return false
-}
-
-func validateFanInInputPinResolution(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin) []Finding {
+func validateFanInInputPinResolution(source semanticview.Source, flowID string, pin runtimecontracts.CompiledFlowInputPin) []Finding {
 	var findings []Finding
-	resolution := pin.Resolution
+	resolution := pin.Resolution()
 	aggregation := strings.ToLower(strings.TrimSpace(resolution.Aggregation))
 	location := flowID
 	if resolution.RepliesTo != "" || resolution.CorrelationKey != "" {
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", "resolution mode fan-in may only declare aggregation, window, dedup_by, singleton, and carries", location))
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", "resolution mode fan-in may only declare aggregation, window, dedup_by, and singleton", location))
 	}
 	if aggregation != "stream" && aggregation != "barrier" {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode fan-in aggregation must be stream or barrier, got %q", resolution.Aggregation), location))
@@ -203,7 +177,7 @@ func validateFanInInputPinResolution(source semanticview.Source, flowID string, 
 	return findings
 }
 
-func validateFanInDedupBy(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin, aggregation string, dedupBy []string) (string, bool, string) {
+func validateFanInDedupBy(source semanticview.Source, flowID string, pin runtimecontracts.CompiledFlowInputPin, aggregation string, dedupBy []string) (string, bool, string) {
 	dedupBy = normalizeCompositionFields(dedupBy)
 	if len(dedupBy) == 0 {
 		return "", false, fmt.Sprintf("resolution mode fan-in %s requires dedup_by; sender identity is not an implicit default", aggregation)
@@ -231,7 +205,7 @@ func validateFanInDedupBy(source semanticview.Source, flowID string, pin runtime
 	return dedup, true, ""
 }
 
-func validateFanInBarrierJoinConsistency(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin) []Finding {
+func validateFanInBarrierJoinConsistency(source semanticview.Source, flowID string, pin runtimecontracts.CompiledFlowInputPin) []Finding {
 	if _, ok := source.FlowScopeByID(flowID); !ok {
 		return []Finding{inputPinResolutionFinding(flowID, pin, "receiver_flow_missing", fmt.Sprintf("receiver flow %s does not exist", flowID), flowID)}
 	}
@@ -244,7 +218,7 @@ func validateFanInBarrierJoinConsistency(source semanticview.Source, flowID stri
 		}
 		association := census.ResolveFanInInputForHandler(plan.Node, plan.HandlerEvent)
 		matchedPin, ok := association.Endpoint()
-		if !ok || strings.TrimSpace(matchedPin.PinName) != strings.TrimSpace(pin.PinName()) {
+		if !ok || strings.TrimSpace(matchedPin.PinName) != strings.TrimSpace(pin.EventType()) {
 			continue
 		}
 		label := plan.Node.PackageKey() + ":" + plan.Node.FlowID() + ":" + plan.Node.NodeID()
@@ -256,10 +230,11 @@ func validateFanInBarrierJoinConsistency(source semanticview.Source, flowID stri
 		if handler.Accumulate != nil {
 			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s declares accumulate for a barrier fan-in; use handler.join as the sole finite-barrier owner", label, plan.HandlerEvent), flowID))
 		}
+		resolution := pin.Resolution()
 		if authored := strings.TrimSpace(handler.Join.Members.By); authored != "" {
-			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s join.members.by derives from resolution.dedup_by (%s); remove authored by: %s", label, plan.HandlerEvent, strings.Join(pin.Resolution.DedupBy, ", "), authored), flowID))
+			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s join.members.by derives from resolution.dedup_by (%s); remove authored by: %s", label, plan.HandlerEvent, strings.Join(resolution.DedupBy, ", "), authored), flowID))
 		}
-		window := strings.TrimSpace(pin.Resolution.Window)
+		window := strings.TrimSpace(resolution.Window)
 		if window == "" && handler.Join.Window != nil {
 			findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver handler %s.%s join.window requires resolution.window on the barrier input pin; declare the payload window once on the pin or remove join.window", label, plan.HandlerEvent), flowID))
 		}
@@ -274,15 +249,15 @@ func validateFanInBarrierJoinConsistency(source semanticview.Source, flowID stri
 	sort.Strings(candidates)
 	switch len(candidates) {
 	case 0:
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver flow %s fan-in barrier input %s requires exactly one handler.join row for event %s; add the join row with members.from, output, on_complete, and timeout", flowID, pin.PinName(), pin.EventType()), flowID))
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver flow %s fan-in barrier input %s requires exactly one handler.join row for event %s; add the join row with members.from, output, on_complete, and timeout", flowID, pin.EventType(), pin.EventType()), flowID))
 	case 1:
 	default:
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver flow %s fan-in barrier input %s matches multiple join rows %v; use distinct events or distinct stages per join", flowID, pin.PinName(), candidates), flowID))
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("receiver flow %s fan-in barrier input %s matches multiple join rows %v; use distinct events or distinct stages per join", flowID, pin.EventType(), candidates), flowID))
 	}
 	return findings
 }
 
-func validateFanInAccumulatorConsistency(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin) []Finding {
+func validateFanInAccumulatorConsistency(source semanticview.Source, flowID string, pin runtimecontracts.CompiledFlowInputPin) []Finding {
 	var findings []Finding
 	if _, ok := source.FlowScopeByID(flowID); !ok {
 		return []Finding{inputPinResolutionFinding(flowID, pin, "receiver_flow_missing", fmt.Sprintf("receiver flow %s does not exist", flowID), flowID)}
@@ -299,7 +274,7 @@ func validateFanInAccumulatorConsistency(source semanticview.Source, flowID stri
 		}
 		association := census.ResolveFanInInputForHandler(node, endpoint.HandlerEvent)
 		matchedPin, ok := association.Endpoint()
-		if !ok || strings.TrimSpace(matchedPin.PinName) != strings.TrimSpace(pin.PinName()) {
+		if !ok || strings.TrimSpace(matchedPin.PinName) != strings.TrimSpace(pin.EventType()) {
 			continue
 		}
 		handler, ok := source.ExecutableNodeEventHandler(node, endpoint.HandlerEvent)
@@ -333,13 +308,10 @@ func validTopLevelPayloadPath(path string) bool {
 	return field != "" && !strings.Contains(field, ".")
 }
 
-func inputPinPayloadFieldExists(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin, path string) bool {
+func inputPinPayloadFieldExists(source semanticview.Source, flowID string, pin runtimecontracts.CompiledFlowInputPin, path string) bool {
 	field := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(path), "payload."))
 	if field == "" || strings.Contains(field, ".") {
 		return false
-	}
-	if carry, ok := pin.Carries[field]; ok && strings.TrimSpace(carry.From) == "payload."+field {
-		return true
 	}
 	entry, _, ok := source.ResolveFlowEventCatalogEntry(flowID, pin.EventType())
 	if !ok {
@@ -356,9 +328,29 @@ func inputPinPayloadFieldExists(source semanticview.Source, flowID string, pin r
 	return false
 }
 
-func validateCanonicalInstanceInputPinResolution(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin) []Finding {
+func outputPinRequiredPayloadFieldExists(source semanticview.Source, flowID string, pin runtimecontracts.CompiledFlowOutputPin, field string) bool {
+	field = strings.TrimSpace(field)
+	if field == "" || strings.Contains(field, ".") {
+		return false
+	}
+	entry, _, ok := source.ResolveFlowEventCatalogEntry(flowID, pin.EventType())
+	if !ok {
+		return false
+	}
+	if _, ok := entry.Payload.Properties[field]; !ok {
+		return false
+	}
+	for _, required := range entry.Payload.Required {
+		if strings.TrimSpace(required) == field {
+			return true
+		}
+	}
+	return false
+}
+
+func validateCanonicalInstanceInputPinResolution(source semanticview.Source, flowID string, pin runtimecontracts.CompiledFlowInputPin) []Finding {
 	var findings []Finding
-	resolution := pin.Resolution
+	resolution := pin.Resolution()
 	mode := resolution.Mode
 	modeText := runtimecontracts.FlowInputResolutionModeCode(mode)
 	location := flowID
@@ -387,14 +379,14 @@ func validateCanonicalInstanceInputPinResolution(source semanticview.Source, flo
 	return findings
 }
 
-func inputPinResolutionFinding(flowID string, pin runtimecontracts.FlowInputEventPin, reason, detail, location string) Finding {
+func inputPinResolutionFinding(flowID string, pin runtimecontracts.CompiledFlowInputPin, reason, detail, location string) Finding {
 	if strings.TrimSpace(location) == "" {
 		location = flowID
 	}
 	return Finding{
 		CheckID:  "composition_connect_validation",
 		Severity: "error",
-		Message:  fmt.Sprintf("input pin %s.%s resolution is invalid: %s: %s", strings.TrimSpace(flowID), strings.TrimSpace(pin.PinName()), reason, detail),
+		Message:  fmt.Sprintf("input pin %s.%s resolution is invalid: %s: %s", strings.TrimSpace(flowID), strings.TrimSpace(pin.EventType()), reason, detail),
 		Location: location,
 	}
 }

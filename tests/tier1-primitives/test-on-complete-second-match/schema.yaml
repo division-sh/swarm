@@ -6,6 +6,5 @@ pins:
     events: [item.evaluated]
   outputs:
     events:
-      - name: item.failed
-        event: item.failed
+      - event: item.failed
         sink: harness

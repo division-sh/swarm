@@ -338,10 +338,7 @@ terminal_states: [archived]
 pins:
   inputs:
     events:
-      - name: legacy_seen
-        event: legacy.seen
-  outputs:
-    events: []
+      - legacy.seen
 `)
 	writeClosedNegativeFile(t, root, "flows/legacy_static/events.yaml", `legacy.seen:
   legacy_id: text
@@ -380,10 +377,7 @@ states: [active]
 pins:
   inputs:
     events:
-      - name: subject_created
-        event: subject.created
-  outputs:
-    events: []
+      - subject.created
 `)
 	writeClosedNegativeFile(t, root, "nodes.yaml", `root-node:
   id: root-node

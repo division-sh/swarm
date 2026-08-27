@@ -49,6 +49,7 @@ type canonicalFormsRegistry struct {
 	DecoderCoverage   map[string]map[string][]string `yaml:"decoder_coverage"`
 	DecoderExclusions map[string]map[string][]string `yaml:"decoder_exclusions"`
 	Wave1             canonicalFormsWave1            `yaml:"wave_1"`
+	Wave2             canonicalFormsWave2            `yaml:"wave_2"`
 	Wave3             canonicalFormsWave3            `yaml:"wave_3"`
 }
 
@@ -83,6 +84,14 @@ type canonicalFormsWave3 struct {
 	Rows               []string `yaml:"rows"`
 	MigratedDecoders   []string `yaml:"migrated_decoders"`
 	RemainingReachable int      `yaml:"remaining_reachable_decoders"`
+}
+
+type canonicalFormsWave2 struct {
+	Issue           int      `yaml:"issue"`
+	Status          string   `yaml:"status"`
+	Rows            []string `yaml:"rows"`
+	RetiredSurfaces []string `yaml:"retired_surfaces"`
+	CanonicalOwners []string `yaml:"canonical_owners"`
 }
 
 type canonicalFormsPackageCorpus struct {
@@ -168,8 +177,8 @@ func TestCanonicalFormsRegistryOwnsCompleteDecoderInventory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("collect custom YAML decoders: %v", err)
 	}
-	if record.Inventory.CustomUnmarshalTotal != 103 || record.Inventory.CustomUnmarshalReachable != 102 || record.Inventory.CustomUnmarshalExcluded != 1 || len(expectedReachable) != 102 || len(expectedExcluded) != 1 || len(actual) != 103 {
-		t.Fatalf("decoder inventory total/reachable/excluded/coverage/exclusion/source = %d/%d/%d/%d/%d/%d, want 103/102/1/102/1/103", record.Inventory.CustomUnmarshalTotal, record.Inventory.CustomUnmarshalReachable, record.Inventory.CustomUnmarshalExcluded, len(expectedReachable), len(expectedExcluded), len(actual))
+	if record.Inventory.CustomUnmarshalTotal != 101 || record.Inventory.CustomUnmarshalReachable != 100 || record.Inventory.CustomUnmarshalExcluded != 1 || len(expectedReachable) != 100 || len(expectedExcluded) != 1 || len(actual) != 101 {
+		t.Fatalf("decoder inventory total/reachable/excluded/coverage/exclusion/source = %d/%d/%d/%d/%d/%d, want 101/100/1/100/1/101", record.Inventory.CustomUnmarshalTotal, record.Inventory.CustomUnmarshalReachable, record.Inventory.CustomUnmarshalExcluded, len(expectedReachable), len(expectedExcluded), len(actual))
 	}
 	if err := validateCustomYAMLDecoderInventory(expectedReachable, expectedExcluded, actual); err != nil {
 		t.Fatal(err)
@@ -183,7 +192,7 @@ func TestCanonicalFormsRegistryPinsWave3EventAdmission(t *testing.T) {
 		"workflow_contract_yaml_handlers.go:EventCatalogEntry",
 		"workflow_contract_yaml_schema.go:EventFieldSpec",
 	}
-	if record.Wave3.Issue != 2300 || record.Wave3.Status != "closed" || !reflect.DeepEqual(record.Wave3.Rows, []string{"event.schema_ownership"}) || !reflect.DeepEqual(record.Wave3.MigratedDecoders, wantDecoders) || record.Wave3.RemainingReachable != 101 {
+	if record.Wave3.Issue != 2300 || record.Wave3.Status != "closed" || !reflect.DeepEqual(record.Wave3.Rows, []string{"event.schema_ownership"}) || !reflect.DeepEqual(record.Wave3.MigratedDecoders, wantDecoders) || record.Wave3.RemainingReachable != 99 {
 		t.Fatalf("wave 3 registry = %#v", record.Wave3)
 	}
 
@@ -339,7 +348,118 @@ func TestCanonicalFormsRegistryPinsWave1RetirementsAndEffectiveStructs(t *testin
 
 	assertNoYAMLFields(t, reflect.TypeOf(runtimecontracts.ProjectPackageDocument{}), "children", "subpackages")
 	assertNoYAMLFields(t, reflect.TypeOf(runtimecontracts.ProjectPackageRef{}), "package", "dir")
-	assertExactYAMLFields(t, reflect.TypeOf(runtimecontracts.FlowPackageConnect{}), []string{"adapter", "event", "from", "rename", "to"})
+	assertExactYAMLFields(t, reflect.TypeOf(runtimecontracts.FlowPackageConnect{}), []string{"event", "from", "rename", "to"})
+}
+
+func TestCanonicalFormsRegistryPinsWave2RetirementsAndOwners(t *testing.T) {
+	record := loadCanonicalFormsRegistry(t, conformanceRepoRoot(t))
+	wantRows := []string{"flow.pin_event_entry", "flow.input_pin_resolution", "flow.output_pin_route_projection", "package.connect"}
+	wantRetired := []string{"pin.name", "input.carries", "carry.type", "carry.optional", "carry.convert", "output.key", "output.carries", "qualified_or_wildcard_flow_pin_event", "connect.adapter"}
+	wantOwners := []string{"CompiledFlowInputPin", "CompiledFlowOutputPin", "CompiledFlowEntityPermissions", "CompiledEventSchema", "ConnectRoutePlan"}
+	if record.Wave2.Issue != 2352 || record.Wave2.Status != "closed" || !reflect.DeepEqual(record.Wave2.Rows, wantRows) || !reflect.DeepEqual(record.Wave2.RetiredSurfaces, wantRetired) || !reflect.DeepEqual(record.Wave2.CanonicalOwners, wantOwners) {
+		t.Fatalf("wave 2 registry = %#v", record.Wave2)
+	}
+	assertExactYAMLFields(t, reflect.TypeOf(runtimecontracts.FlowInputEventPin{}), []string{"event", "resolution", "source"})
+	assertExactYAMLFields(t, reflect.TypeOf(runtimecontracts.FlowOutputEventPin{}), []string{"event", "sink"})
+	for _, owner := range []reflect.Type{
+		reflect.TypeOf(runtimecontracts.CompiledFlowInputPin{}),
+		reflect.TypeOf(runtimecontracts.CompiledFlowOutputPin{}),
+		reflect.TypeOf(runtimecontracts.CompiledFlowEntityPermissions{}),
+		reflect.TypeOf(runtimepinrouting.ConnectRoutePlan{}),
+	} {
+		for index := 0; index < owner.NumField(); index++ {
+			if owner.Field(index).IsExported() {
+				t.Fatalf("W2 owner %s exposes mutable field %s", owner, owner.Field(index).Name)
+			}
+		}
+	}
+}
+
+func TestCanonicalFormsRegistryWave2ProductionConsumersUseCompiledPins(t *testing.T) {
+	root := conformanceRepoRoot(t)
+	allowedAdmissionOwners := map[string]struct{}{
+		"internal/runtime/contracts/event_schema_ownership.go":      {},
+		"internal/runtime/contracts/workflow_contract_connect.go":   {},
+		"internal/runtime/contracts/workflow_contract_semantics.go": {},
+	}
+	var bypasses []string
+	err := filepath.WalkDir(filepath.Join(root, "internal", "runtime"), func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		relative = filepath.ToSlash(relative)
+		if _, allowed := allowedAdmissionOwners[relative]; allowed {
+			return nil
+		}
+		files := token.NewFileSet()
+		parsed, err := parser.ParseFile(files, path, nil, 0)
+		if err != nil {
+			return err
+		}
+		ast.Inspect(parsed, func(node ast.Node) bool {
+			selector, ok := node.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			path := canonicalSelectorPath(selector)
+			joined := strings.Join(path, ".")
+			if strings.HasSuffix(joined, ".Pins.Inputs") || strings.HasSuffix(joined, ".Pins.Outputs") || strings.HasSuffix(joined, ".EventPins") {
+				position := files.Position(selector.Pos())
+				bypasses = append(bypasses, fmt.Sprintf("%s:%d:%s", relative, position.Line, joined))
+			}
+			return true
+		})
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan W2 production consumers: %v", err)
+	}
+	if len(bypasses) != 0 {
+		sort.Strings(bypasses)
+		t.Fatalf("production consumers reconstruct flow-pin semantics outside admission owners: %s", strings.Join(bypasses, ", "))
+	}
+
+	planPath := filepath.Join(root, "internal", "runtime", "core", "pinrouting", "connect_route_plan.go")
+	files := token.NewFileSet()
+	parsed, err := parser.ParseFile(files, planPath, nil, 0)
+	if err != nil {
+		t.Fatalf("parse compiled edge owner: %v", err)
+	}
+	constructors := 0
+	ast.Inspect(parsed, func(node ast.Node) bool {
+		literal, ok := node.(*ast.CompositeLit)
+		if !ok || len(literal.Elts) == 0 {
+			return true
+		}
+		name, ok := literal.Type.(*ast.Ident)
+		if ok && name.Name == "ConnectRoutePlan" {
+			constructors++
+		}
+		return true
+	})
+	if constructors != 1 {
+		t.Fatalf("ConnectRoutePlan populated constructors = %d, want one closed constructor", constructors)
+	}
+}
+
+func canonicalSelectorPath(expr ast.Expr) []string {
+	switch value := expr.(type) {
+	case *ast.Ident:
+		return []string{value.Name}
+	case *ast.SelectorExpr:
+		return append(canonicalSelectorPath(value.X), value.Sel.Name)
+	case *ast.IndexExpr:
+		return canonicalSelectorPath(value.X)
+	default:
+		return nil
+	}
 }
 
 func TestCanonicalFormsRegistryPinsWave1CorpusLedger(t *testing.T) {

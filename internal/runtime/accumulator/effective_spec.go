@@ -21,8 +21,8 @@ func EffectiveSpecForHandler(source semanticview.Source, node runtimeidentity.Ex
 	if !ok {
 		return spec, nil
 	}
-	if aggregation := strings.ToLower(strings.TrimSpace(pin.Resolution.Aggregation)); aggregation != "stream" {
-		return nil, fmt.Errorf("receiver handler %s.%s declares accumulate but fan-in input pin %s.%s uses aggregation %q; accumulate accepts only aggregation: stream and finite barriers must use handler.join", node.NodeID(), strings.TrimSpace(handlerEvent), node.FlowID(), pin.PinName(), aggregation)
+	if aggregation := strings.ToLower(strings.TrimSpace(pin.Resolution().Aggregation)); aggregation != "stream" {
+		return nil, fmt.Errorf("receiver handler %s.%s declares accumulate but fan-in input pin %s.%s uses aggregation %q; accumulate accepts only aggregation: stream and finite barriers must use handler.join", node.NodeID(), strings.TrimSpace(handlerEvent), node.FlowID(), pin.EventType(), aggregation)
 	}
 	handlerEvent = strings.TrimSpace(handlerEvent)
 	if handlerEvent == "" {
@@ -34,17 +34,17 @@ func EffectiveSpecForHandler(source semanticview.Source, node runtimeidentity.Ex
 	if window := strings.TrimSpace(spec.Window); window != "" {
 		return nil, fmt.Errorf("receiver handler %s.%s accumulate.window %q must not redeclare fan-in window; declare it once on the receiver input pin resolution", node.NodeID(), handlerEvent, window)
 	}
-	resolution := pin.Resolution
+	resolution := pin.Resolution()
 	window := strings.TrimSpace(resolution.Window)
 	if window == "" {
-		return nil, fmt.Errorf("resolution mode fan-in stream requires window for receiver input pin %s.%s", node.FlowID(), pin.PinName())
+		return nil, fmt.Errorf("resolution mode fan-in stream requires window for receiver input pin %s.%s", node.FlowID(), pin.EventType())
 	}
 	dedupBy := normalizedStrings(resolution.DedupBy)
 	if len(dedupBy) == 0 {
-		return nil, fmt.Errorf("resolution mode fan-in stream requires dedup_by for receiver input pin %s.%s; sender identity is not an implicit default", node.FlowID(), pin.PinName())
+		return nil, fmt.Errorf("resolution mode fan-in stream requires dedup_by for receiver input pin %s.%s; sender identity is not an implicit default", node.FlowID(), pin.EventType())
 	}
 	if len(dedupBy) != 1 {
-		return nil, fmt.Errorf("resolution mode fan-in stream supports exactly one dedup_by field in this slice for receiver input pin %s.%s, got %v", node.FlowID(), pin.PinName(), dedupBy)
+		return nil, fmt.Errorf("resolution mode fan-in stream supports exactly one dedup_by field in this slice for receiver input pin %s.%s, got %v", node.FlowID(), pin.EventType(), dedupBy)
 	}
 	effective := *spec
 	effective.Window = window
@@ -54,32 +54,32 @@ func EffectiveSpecForHandler(source semanticview.Source, node runtimeidentity.Ex
 	return &effective, nil
 }
 
-func FanInInputPinForHandler(source semanticview.Source, node runtimeidentity.ExecutableNode, handlerEvent string) (runtimecontracts.FlowInputEventPin, bool, error) {
+func FanInInputPinForHandler(source semanticview.Source, node runtimeidentity.ExecutableNode, handlerEvent string) (runtimecontracts.CompiledFlowInputPin, bool, error) {
 	if source == nil {
-		return runtimecontracts.FlowInputEventPin{}, false, nil
+		return runtimecontracts.CompiledFlowInputPin{}, false, nil
 	}
 	handlerEvent = strings.TrimSpace(handlerEvent)
 	if !node.Valid() || handlerEvent == "" {
-		return runtimecontracts.FlowInputEventPin{}, false, nil
+		return runtimecontracts.CompiledFlowInputPin{}, false, nil
 	}
 	result := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveFanInInputForHandler(node, handlerEvent)
 	if result.Status == semanticview.EndpointAssociationNotFound {
-		return runtimecontracts.FlowInputEventPin{}, false, nil
+		return runtimecontracts.CompiledFlowInputPin{}, false, nil
 	}
 	if result.Status == semanticview.EndpointAssociationAmbiguous {
 		matchedPins := make([]string, 0, len(result.Candidates))
 		for _, candidate := range result.Candidates {
 			matchedPins = append(matchedPins, strings.TrimSpace(candidate.PinName))
 		}
-		return runtimecontracts.FlowInputEventPin{}, false, fmt.Errorf("receiver handler %s.%s matches multiple fan-in input pins %v; fan-in accumulator semantics require exactly one receiver input pin owner", node.NodeID(), handlerEvent, matchedPins)
+		return runtimecontracts.CompiledFlowInputPin{}, false, fmt.Errorf("receiver handler %s.%s matches multiple fan-in input pins %v; fan-in accumulator semantics require exactly one receiver input pin owner", node.NodeID(), handlerEvent, matchedPins)
 	}
 	endpoint, ok := result.Endpoint()
 	if !ok {
-		return runtimecontracts.FlowInputEventPin{}, false, result.Err()
+		return runtimecontracts.CompiledFlowInputPin{}, false, result.Err()
 	}
 	pin, ok := source.FlowInputEventPin(node.FlowID(), endpoint.PinName)
 	if !ok {
-		return runtimecontracts.FlowInputEventPin{}, false, fmt.Errorf("canonical fan-in endpoint %s references missing receiver input pin %s.%s", endpoint.ID, node.FlowID(), endpoint.PinName)
+		return runtimecontracts.CompiledFlowInputPin{}, false, fmt.Errorf("canonical fan-in endpoint %s references missing receiver input pin %s.%s", endpoint.ID, node.FlowID(), endpoint.PinName)
 	}
 	return pin, true, nil
 }

@@ -6,7 +6,4 @@ pins:
   inputs:
     events:
       - task.requested
-      - name: task_result
-        event: task.result
-  outputs:
-    events: []
+      - task.result

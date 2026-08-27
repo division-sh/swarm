@@ -45,7 +45,7 @@ const (
 )
 
 func ParseFlowInputResolutionMode(raw string) (FlowInputResolutionMode, error) {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
+	switch raw {
 	case "create":
 		return FlowInputResolutionModeCreate, nil
 	case "select":
@@ -61,7 +61,7 @@ func ParseFlowInputResolutionMode(raw string) (FlowInputResolutionMode, error) {
 	case "":
 		return FlowInputResolutionModeNone, nil
 	default:
-		return FlowInputResolutionModeNone, fmt.Errorf("unsupported resolution mode %q", strings.TrimSpace(raw))
+		return FlowInputResolutionModeNone, fmt.Errorf("unsupported resolution mode %q", raw)
 	}
 }
 

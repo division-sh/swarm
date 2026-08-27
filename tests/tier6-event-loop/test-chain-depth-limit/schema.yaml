@@ -5,5 +5,3 @@ states: [pending, processing, done]
 pins:
   inputs:
     events: [chain.start]
-  outputs:
-    events: []

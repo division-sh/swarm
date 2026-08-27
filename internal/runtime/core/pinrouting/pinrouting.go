@@ -202,11 +202,11 @@ func classifyOutputConsumer(source semanticview.Source, flowID, eventType string
 	outputPins := outputPinsForEvent(source, flowID, eventType)
 	graph := CompileConnectGraph(source)
 	for _, pin := range outputPins {
-		if !pin.Sink.Valid() {
+		if !pin.Sink().Valid() {
 			classification.invalidSink = true
 			continue
 		}
-		if pin.Sink == runtimecontracts.FlowOutputSinkHarness {
+		if pin.Sink() == runtimecontracts.FlowOutputSinkHarness {
 			classification.classes[OutputConsumerHarness] = struct{}{}
 		}
 		if routingSource.Empty() {
@@ -270,7 +270,7 @@ func PinDeclaredOutput(source semanticview.Source, flowID, eventType string) boo
 	return false
 }
 
-func outputPinsForEvent(source semanticview.Source, flowID, eventType string) []runtimecontracts.FlowOutputEventPin {
+func outputPinsForEvent(source semanticview.Source, flowID, eventType string) []runtimecontracts.CompiledFlowOutputPin {
 	if source == nil {
 		return nil
 	}
@@ -278,13 +278,10 @@ func outputPinsForEvent(source semanticview.Source, flowID, eventType string) []
 	if eventKey == "" {
 		return nil
 	}
-	out := []runtimecontracts.FlowOutputEventPin{}
+	out := []runtimecontracts.CompiledFlowOutputPin{}
 	for _, pin := range source.FlowOutputEventPins(flowID) {
-		for _, authored := range []string{pin.PinName(), pin.EventType()} {
-			if semanticview.ResolveFlowEventProof(source, flowID, authored).EventKey() == eventKey {
-				out = append(out, pin)
-				break
-			}
+		if semanticview.ResolveFlowEventProof(source, flowID, pin.EventType()).EventKey() == eventKey {
+			out = append(out, pin)
 		}
 	}
 	return out

@@ -13,8 +13,8 @@ func CopyHarnessInjectionWithoutSource(t testing.TB) string {
 	applyClosedReplacement(
 		t,
 		filepath.Join(root, "flows", "worker", "schema.yaml"),
-		"        source: harness\n",
-		"",
+		"      - event: work.requested\n        source: harness\n",
+		"      - work.requested\n",
 	)
 	return root
 }
@@ -27,8 +27,8 @@ func CopyHarnessInjectionWithUnknownEvent(t testing.TB) string {
 	applyClosedReplacement(
 		t,
 		filepath.Join(root, "flows", "worker", "schema.yaml"),
-		"        event: work.requested\n",
-		"        event: work.unknown\n",
+		"      - event: work.requested\n",
+		"      - event: work.unknown\n",
 	)
 	return root
 }
@@ -42,7 +42,7 @@ func CopyHarnessInjectionWithDuplicatePin(t testing.TB) string {
 		t,
 		filepath.Join(root, "flows", "worker", "schema.yaml"),
 		"        source: harness\n",
-		"        source: harness\n      - name: work_requested_duplicate\n        event: work.requested\n        source: harness\n",
+		"        source: harness\n      - event: work.requested\n        source: harness\n",
 	)
 	return root
 }

@@ -11,16 +11,11 @@ stages:
 pins:
   inputs:
     events:
-      - name: search_requested
-        event: search.requested
+      - event: search.requested
         source: external
-      - name: scout_completed
-        event: scout.completed
-      - name: candidate_completed
-        event: candidate.completed
+      - scout.completed
+      - candidate.completed
   outputs:
     events:
-      - name: scout_requested
-        event: scout.requested
-      - name: candidate_requested
-        event: candidate.requested
+      - scout.requested
+      - candidate.requested

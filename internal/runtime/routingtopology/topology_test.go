@@ -101,7 +101,7 @@ func TestBuildProjectsFanInConnectWithCompleteResolution(t *testing.T) {
 	if edge == nil {
 		t.Fatalf("edges = %#v, want inter-flow fan-in edge", topology.Edges)
 	}
-	if edge.Boundary.From != "operating.operating_reported" || edge.Boundary.To != "portfolio.operating_reported" {
+	if edge.Boundary.From != "operating.operating.reported" || edge.Boundary.To != "portfolio.operating.reported" {
 		t.Fatalf("boundary = %#v, want authored endpoints", edge.Boundary)
 	}
 	if !strings.Contains(edge.Boundary.AuthoredLocation, "package.yaml:") {
@@ -177,35 +177,33 @@ func TestBuildProjectsSelectAndSelectOrCreateModes(t *testing.T) {
 func TestBuildProjectsRunnableStaticConnect(t *testing.T) {
 	connect := runtimecontracts.FlowPackageConnect{SourceFile: "package.yaml", SourceLine: 1, Event: "work.ready", From: "producer", To: "consumer"}
 	producer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
+		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer", PackageKey: "."},
 		Schema: runtimecontracts.FlowSchemaDocument{Mode: "static", Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{
-			Events: []string{"work.ready"}, EventPins: []runtimecontracts.FlowOutputEventPin{{Name: "ready", Event: "work.ready"}},
+			EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "work.ready"}},
 		}}},
-		Path: "producer",
+		Path: "producer", Events: map[string]runtimecontracts.EventCatalogEntry{"work.ready": {}},
 	}
 	consumer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer"},
+		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer", PackageKey: "."},
 		Schema: runtimecontracts.FlowSchemaDocument{Mode: "static", Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{
-			Events: []string{"work.ready"}, EventPins: []runtimecontracts.FlowInputEventPin{{Name: "ready", Event: "work.ready"}},
+			EventPins: []runtimecontracts.FlowInputEventPin{{Event: "work.ready"}},
 		}}},
-		Path: "consumer",
+		Path: "consumer", Events: map[string]runtimecontracts.EventCatalogEntry{"work.ready": {}},
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{producer, consumer}}
-	source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Package: runtimecontracts.ProjectPackageDocument{Connect: []runtimecontracts.FlowPackageConnect{connect}},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			FlowInputs:          map[string][]string{"consumer": {"work.ready"}},
-			FlowOutputs:         map[string][]string{"producer": {"work.ready"}},
-			FlowInputEventPins:  map[string][]runtimecontracts.FlowInputEventPin{"consumer": consumer.Schema.Pins.Inputs.EventPins},
-			FlowOutputEventPins: map[string][]runtimecontracts.FlowOutputEventPin{"producer": producer.Schema.Pins.Outputs.EventPins},
-			CompositionConnects: []runtimecontracts.FlowPackageConnect{connect},
-		},
+	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{PackageKey: "."}, Children: []runtimecontracts.FlowContractView{producer, consumer}}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Package:     runtimecontracts.ProjectPackageDocument{Name: "topology-test", Version: "1.0.0", Connect: []runtimecontracts.FlowPackageConnect{connect}},
+		PackageTree: []runtimecontracts.LoadedProjectPackage{{Key: ".", Paths: runtimecontracts.ProjectPackagePaths{PackageFile: "package.yaml"}, Manifest: runtimecontracts.ProjectPackageDocument{Connect: []runtimecontracts.FlowPackageConnect{connect}}}},
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"producer": producer.Schema, "consumer": consumer.Schema},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{"producer": &root.Children[0], "consumer": &root.Children[1]},
 		},
-	})
+	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		t.Fatalf("compile topology semantics: %v", err)
+	}
+	source := semanticview.Wrap(bundle)
 	edge := firstInterFlowEdge(t, Build(source))
 	if edge.Resolution == nil || edge.Resolution.Mode != pinrouting.ConnectResolutionStatic.Code() || edge.RequiresRuntimeResolution {
 		t.Fatalf("static route = %#v, want complete runnable static resolution", edge)
@@ -255,7 +253,7 @@ func TestResolutionViewPreservesCreateAndStaticDeclarations(t *testing.T) {
 			if resolution == nil || resolution.Mode != tc.want {
 				t.Fatalf("resolution = %#v, want mode %s", resolution, tc.want)
 			}
-			if tc.name == "create" && (resolution.InstanceKey == nil || resolution.InstanceKey.SourceKind != string(runtimecontracts.FlowInputInstanceSourceGeneratedUUID) || resolution.InstanceKey.SourcePath != runtimecontracts.FlowInputCarrySourceGeneratedUUID) {
+			if tc.name == "create" && (resolution.InstanceKey == nil || resolution.InstanceKey.SourceKind != string(runtimecontracts.FlowInputInstanceSourceGeneratedUUID) || resolution.InstanceKey.SourcePath != runtimecontracts.FlowInputInstanceSourceGeneratedUUIDPath) {
 				t.Fatalf("create resolution = %#v, want generated UUID source", resolution)
 			}
 		})
@@ -351,12 +349,12 @@ func TestBuildProjectsCanonicalRootConnectInsteadOfQualifiedSubscriptionDebt(t *
 	topology := Build(semanticview.Wrap(bundle))
 	found := false
 	for _, edge := range topology.Edges {
-		if edge.Scope == DeliveryScopeInterFlowConnect && edge.Boundary != nil && edge.Boundary.To == ".task_done" {
+		if edge.Scope == DeliveryScopeInterFlowConnect && edge.Boundary != nil && edge.Boundary.To == ".task.done" {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("topology edges = %#v, want canonical connect to root task_done", topology.Edges)
+		t.Fatalf("topology edges = %#v, want canonical connect to root task.done", topology.Edges)
 	}
 }
 

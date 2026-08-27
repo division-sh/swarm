@@ -13,10 +13,9 @@ pins:
       - item.review_requested
       - item.rejected
     reads:
-      - results
       - priority
+      - results
   outputs:
-    events: []
     writes:
       - score
       - status

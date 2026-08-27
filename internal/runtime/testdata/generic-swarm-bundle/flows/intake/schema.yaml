@@ -17,7 +17,6 @@ pins:
     reads:
       - priority
   outputs:
-    events: []
     writes:
       - priority
       - results

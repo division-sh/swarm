@@ -42,11 +42,11 @@ classification_tests:
   f2_bug: "An accepted spelling changes, disappears, or is independently reinterpreted after decode."
 
 inventory:
-  custom_unmarshal_total: 103
-  custom_unmarshal_reachable: 102
+  custom_unmarshal_total: 101
+  custom_unmarshal_reachable: 100
   custom_unmarshal_excluded: 1
   custom_unmarshal_breakdown:
-    contracts: 88
+    contracts: 86
     flowmodel_policy: 11
     agentintent: 1
     contract_element_identity: 1
@@ -146,17 +146,16 @@ rows:
 
   - id: package.connect
     ruled: mechanical-ratified
-    paths: "package.connect[].event, package.connect[].from, package.connect[].to, package.connect[].rename, package.connect[].adapter"
+    paths: "package.connect[].event, package.connect[].from, package.connect[].to, package.connect[].rename"
     owners: [FlowPackageConnect.UnmarshalYAML, CompileConnectGraph]
     information:
       fact: [event_and_endpoint_ownership]
-      derived_projection: [default_pin_names]
-      choice: [rename_override, adapter]
+      choice: [rename_override]
     spelling:
       canonical_candidate: "{event, from, to} with endpoint flow IDs and optional one rename override"
-      retired_duplicates: ["{from: flow.pin, to: flow.pin} when both pins are derivable"]
+      retired_duplicates: ["{from: flow.pin, to: flow.pin} when both pins are derivable", adapter]
       distinct_overrides: [rename]
-    corpus: {legacy_from_to_rows: 0, event_centric_rows: 29, adapters: 4, derivable_pin_pairs: 29}
+    corpus: {legacy_from_to_rows: 0, event_centric_rows: 34, adapters: 0}
 
   - id: package.pack_imports
     ruled: mechanical-ratified
@@ -246,43 +245,42 @@ rows:
     corpus: {loops: 0}
 
   - id: flow.pin_event_entry
-    ruled: mechanical-ratified
-    paths: "schema.pins.inputs.events[], schema.pins.outputs.events[]"
-    owners: [decodeFlowInputPinEventNode, decodeFlowOutputPinEventNode]
+    ruled: issue-2352
+    paths: "schema.pins.inputs.events[].event/source, schema.pins.outputs.events[].event/sink"
+    owners: [decodeFlowInputPinEventNode, decodeFlowOutputPinEventNode, CompileFlowInputPin, CompileFlowOutputPin]
     information:
-      fact: [event]
-      derived_projection: [name]
+      fact: [exact_local_event_identity]
       choice: [source, sink]
     spelling:
-      canonical_candidate: mapping_with_event_and_only_non_default_fields
-      retired_duplicates: [scalar_event, explicit_name_equal_to_derived_name]
-      distinct_overrides: [name_different_from_derived_name]
+      canonical_candidate: scalar_event_by_default_mapping_only_for_non_default_source_or_sink
+      retired_duplicates: [authored_name, qualified_event, wildcard_event]
+      distinct_overrides: [external_or_harness_source, harness_sink]
     corpus:
-      input: {rows: 35, mapping: 35, scalar: 0, derived_name_would_suffice: 28, rename_override_required: 7}
-      output: {rows: 17, mapping: 17, scalar: 0, derived_name_would_suffice: 16, rename_override_required: 1}
+      input: {rows: 280, scalar: 210, mapping: 70, authored_names: 0, qualified_or_wildcard: 0}
+      output: {rows: 147, scalar: 16, mapping: 131, authored_names: 0, qualified_or_wildcard: 0}
 
-  - id: flow.input_pin_carries_resolution
-    ruled: mechanical-ratified
-    paths: "schema.pins.inputs.events[].carries.<field>.from, schema.pins.inputs.events[].carries.<field>.type, schema.pins.inputs.events[].carries.<field>.optional, schema.pins.inputs.events[].carries.<field>.convert, schema.pins.inputs.events[].resolution.*"
-    owners: [FlowInputPinCarries.UnmarshalYAML, FlowInputPinCarry.UnmarshalYAML, FlowInputPinResolution.UnmarshalYAML]
+  - id: flow.input_pin_resolution
+    ruled: issue-2352
+    paths: "schema.pins.inputs.events[].resolution.*"
+    owners: [FlowInputPinResolution.UnmarshalYAML, CompileFlowInputPin, CompileConnectGraph]
     information:
-      derived_projection: [same_named_payload_from, producer_schema_type]
-      choice: [from_override, optional, convert, resolution mode/aggregation/window/dedup/singleton/replies_to/correlation_key]
+      derived_projection: [same_named_required_payload_instance_source, producer_schema_type]
+      choice: [from_override, resolution_mode, aggregation, window, dedup_by, singleton, replies_to, correlation_key]
     spelling:
-      canonical_candidate: carry_key_with_only_non_default_fields
-      retired_duplicates: [scalar_carry, explicit_from_equal_to_payload_field, explicit_type_equal_to_producer_schema, scalar_dedup_by_when_one_item]
-      distinct_overrides: [different_from, optional, convert, multi_item_dedup_by]
-    corpus: {carry_rows: 15, same_named_payload_from: 11, from_override: 4, explicit_derived_type: 15, scalar_carries: 0, mapping_carries: 15}
+      canonical_candidate: omit_from_for_same_named_required_payload_else_one_exact_resolution_from
+      retired_duplicates: [carries, carry_type, carry_optional, carry_convert, explicit_from_equal_to_same_named_payload]
+      distinct_overrides: [generated.uuid, event.id, different_top_level_payload_field, multi_item_dedup_by]
+    corpus: {carry_rows: 0, from_overrides: 4}
 
   - id: flow.output_pin_route_projection
-    ruled: mechanical-ratified
-    paths: "schema.pins.outputs.events[].key, schema.pins.outputs.events[].carries"
-    owner: decodeFlowOutputPinCarriesNode
-    information: {derived_projection: [receiver-specific route key and carries]}
+    ruled: issue-2352
+    paths: "events.<event>.key plus receiver input resolution and immutable compiled edge evidence"
+    owners: [CompiledEventSchema, CompiledFlowInputPin, ConnectRoutePlan]
+    information: {fact: [producer_event_business_key], derived_projection: [receiver_specific_delivery_projection]}
     spelling:
       canonical_candidate: omitted_and_compiled_on_route_edge
-      retired_duplicates: [output_pin_key, output_pin_carries, scalar_carries, one_item_carries_sequence]
-    corpus: {authored_key_rows: 3, authored_carries_rows: 3, one_item_sequences: 2, defaults_would_suffice: 3}
+      retired_duplicates: [output_pin_key, output_pin_carries]
+    corpus: {authored_key_rows: 0, authored_carries_rows: 0}
 
   - id: flow.pin_entity_fields
     ruled: mechanical-ratified
@@ -763,7 +761,7 @@ decoder_coverage:
     handler.rules_shape: [HandlerRuleEntry]
     flow.pin_event_entry: [FlowInputPins, FlowOutputPins]
     flow.identity_mode: [TemplateInstanceField]
-    flow.input_pin_carries_resolution: [FlowInputPinCarries, FlowInputPinCarry, FlowInputPinResolution]
+    flow.input_pin_resolution: [FlowInputPinResolution]
     handler.collection_compute: [ComputeSpec]
     flow.other_surface: [FlowVariable]
     flow.lifecycle: [WorkflowTransitionContract]
@@ -813,8 +811,9 @@ decoder_exclusions:
     deployment.swarm_yaml: [WorkspaceConfig]
 
 registry_result:
-  completeness: "all 103 remaining production custom unmarshallers classified as 102 bundle-reachable row owners and 1 deployment swarm.yaml exclusion; the two W3 event decoders are retired behind yamlsource admission and durable_data.go adds one reachable data-access decoder"
+  completeness: "all 101 remaining production custom unmarshallers classified as 100 bundle-reachable row owners and 1 deployment swarm.yaml exclusion; W2 retires the two carry decoders and W3 retires the two event decoders behind typed admission"
   wave_1_status: closed
+  wave_2_status: closed
   later_wave_gate: "presence-sensitive retirements remain blocked on the effective-model/presence-substrate design gate"
 
 wave_3:
@@ -824,18 +823,25 @@ wave_3:
   migrated_decoders:
     - workflow_contract_yaml_handlers.go:EventCatalogEntry
     - workflow_contract_yaml_schema.go:EventFieldSpec
-  remaining_reachable_decoders: 101
+  remaining_reachable_decoders: 99
+
+wave_2:
+  issue: 2352
+  status: closed
+  rows: [flow.pin_event_entry, flow.input_pin_resolution, flow.output_pin_route_projection, package.connect]
+  retired_surfaces: [pin.name, input.carries, carry.type, carry.optional, carry.convert, output.key, output.carries, qualified_or_wildcard_flow_pin_event, connect.adapter]
+  canonical_owners: [CompiledFlowInputPin, CompiledFlowOutputPin, CompiledFlowEntityPermissions, CompiledEventSchema, ConnectRoutePlan]
 
 wave_1:
   issue: 2309
   rows: [package.child_collection, package.child_reference, package.connect]
   checked_in_package_corpus:
     examples: {files: 8, rows: 16}
-    tests_and_testdata: {files: 12, rows: 17}
-    total: {files: 20, rows: 33}
+    tests_and_testdata: {files: 13, rows: 18}
+    total: {files: 21, rows: 34}
   go_connect_corpus:
-    total_files: 15
-    canonicalrouting_occurrences: 35
+    total_files: 16
+    canonicalrouting_occurrences: 32
     files:
       internal/cliapp/describe.go: non_authoring_text
       internal/cliapp/describe_test.go: non_authoring_text
@@ -843,6 +849,7 @@ wave_1:
       internal/runtime/testfixtures/canonicalrouting/composition_connect_variants.go: positive_producer_and_mutation_base
       internal/runtime/testfixtures/canonicalrouting/import_boundary_variants.go: positive_producer_and_mutation_base
       internal/runtime/testfixtures/canonicalrouting/legacy_instance_routes.go: positive_producer_and_mutation_base
+      internal/runtime/testfixtures/canonicalrouting/nested_package_connect.go: positive_producer_and_mutation_base
       internal/runtime/testfixtures/canonicalrouting/ownership_guard_test.go: non_authoring_text
       internal/runtime/testfixtures/canonicalrouting/parser_snippets.go: positive_producer_and_explicit_retired_negative
       internal/runtime/testfixtures/canonicalrouting/remaining_variants.go: positive_producer_and_mutation_base

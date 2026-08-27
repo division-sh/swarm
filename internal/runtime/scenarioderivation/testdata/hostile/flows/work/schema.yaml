@@ -5,6 +5,5 @@ states: [ready]
 pins:
   inputs:
     events:
-      - {name: primary, event: work.requested, source: external}
-      - {name: alternate, event: work.alternate, source: external}
-  outputs: {events: []}
+      - {event: work.requested, source: external}
+      - {event: work.alternate, source: external}

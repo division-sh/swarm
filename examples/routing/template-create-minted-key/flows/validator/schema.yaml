@@ -4,17 +4,10 @@ instance: validation_case_id
 pins:
   inputs:
     events:
-      - name: validation_requested
-        event: validation.requested
+      - event: validation.requested
         resolution:
           mode: create
-        carries:
-          validation_case_id:
-            from: generated.uuid
-            type: uuid
+          from: generated.uuid
   outputs:
     events:
-      - name: validation_started
-        event: validation.started
-        key: validation_case_id
-        carries: [validation_case_id]
+      - validation.started

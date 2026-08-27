@@ -1,6 +1,10 @@
 package canonicalrouting
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 type RootConnectEmit uint8
 
@@ -36,7 +40,7 @@ connect:
 		}
 		rootNodes = "root-node:\n  id: root-node\n  execution_type: system_node\n  event_handlers:\n    root.start:\n" + emitBody
 	}
-	writeClosedVariantFile(t, root, "schema.yaml", "name: root-output-connect\npins:\n"+rootInput+"  outputs:\n    events:\n      - name: root_ready\n        event: root.ready\n")
+	writeClosedVariantFile(t, root, "schema.yaml", "name: root-output-connect\npins:\n"+rootInput+"  outputs:\n    events: [root.ready]\n")
 	writeClosedVariantFile(t, root, "events.yaml", "root.start:\n  entity_id: text\nroot.ready:\n  entity_id: text\n")
 	if rootNodes != "" {
 		writeClosedVariantFile(t, root, "nodes.yaml", rootNodes)
@@ -45,10 +49,24 @@ connect:
 mode: static
 pins:
   inputs:
-    events:
-      - name: ready
-        event: root.ready
-`, "", "", "")
+    events: [root.ready]
+`, "", "consumer_state:\n  entity_id: text\n", `consumer-node:
+  id: consumer-node
+  execution_type: system_node
+  subscribes_to: [root.ready]
+  event_handlers:
+    root.ready:
+      guard:
+        id: selected_owner
+        check: '_entity.id != ""'
+`)
+	return root
+}
+
+func CopyRootOutputConnectMissingReceiver(t testing.TB) string {
+	t.Helper()
+	root := CopyRootOutputConnect(t, RootConnectNoEmitter)
+	applyClosedReplacement(t, root+"/package.yaml", "    to: consumer\n", "    to: missing\n")
 	return root
 }
 
@@ -73,9 +91,7 @@ connect:
 mode: singleton
 pins:
   inputs:
-    events:
-      - name: ready
-        event: root.ready
+    events: [root.ready]
 `, "", "consumer_state:\n  entity_id: text\n", `consumer-node:
   id: consumer-node
   execution_type: system_node
@@ -84,6 +100,23 @@ pins:
     root.ready:
       create_entity: true
 `)
+	return root
+}
+
+func CopyRootOutputSingletonArc(t testing.TB) string {
+	t.Helper()
+	root := CopyRootOutputSingletonConnect(t)
+	applyClosedReplacement(t, filepath.Join(root, "package.yaml"), "  - id: consumer\n    flow: consumer\n", "  - id: receiver\n    flow: receiver\n")
+	applyClosedReplacement(t, filepath.Join(root, "package.yaml"), "    to: consumer\n", "    to: receiver\n")
+	consumerDir := filepath.Join(root, "flows", "consumer")
+	receiverDir := filepath.Join(root, "flows", "receiver")
+	if err := os.Rename(consumerDir, receiverDir); err != nil {
+		t.Fatalf("rename singleton receiver fixture: %v", err)
+	}
+	applyClosedReplacement(t, filepath.Join(receiverDir, "schema.yaml"), "name: consumer\n", "name: receiver\n")
+	applyClosedReplacement(t, filepath.Join(receiverDir, "entities.yaml"), "consumer_state:", "receiver_state:")
+	applyClosedReplacement(t, filepath.Join(receiverDir, "nodes.yaml"), "consumer-node", "arc-receiver")
+	applyClosedReplacement(t, filepath.Join(receiverDir, "nodes.yaml"), "  id: consumer-node", "  id: arc-receiver")
 	return root
 }
 
@@ -107,9 +140,7 @@ connect:
 	writeClosedVariantFile(t, root, "schema.yaml", `name: singleton-output-root-connect
 pins:
   inputs:
-    events:
-      - name: scout_completed
-        event: scout.completed
+    events: [scout.completed]
 `)
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-collector:
   id: root-collector
@@ -125,9 +156,7 @@ pins:
 mode: singleton
 pins:
   outputs:
-    events:
-      - name: completed
-        event: scout.completed
+    events: [scout.completed]
 `, "scout.completed:\n  proof: string\n", "", "")
 	return root
 }
@@ -154,13 +183,9 @@ connect:
 	writeClosedVariantFile(t, root, "schema.yaml", `name: root-singleton-boomerang
 pins:
   inputs:
-    events:
-      - name: pong
-        event: work.pong
+    events: [work.pong]
   outputs:
-    events:
-      - name: ping
-        event: work.ping
+    events: [work.ping]
 `)
 	writeClosedVariantFile(t, root, "events.yaml", "work.ping:\n  turn: integer\n")
 	writeClosedVariantFile(t, root, "nodes.yaml", `root-boomerang:
@@ -177,13 +202,9 @@ pins:
 mode: singleton
 pins:
   inputs:
-    events:
-      - name: ping
-        event: work.ping
+    events: [work.ping]
   outputs:
-    events:
-      - name: pong
-        event: work.pong
+    events: [work.pong]
 `, "work.pong:\n  turn: integer\n", "boomerang_state:\n  turn: integer\n", `boomerang-worker:
   id: boomerang-worker
   execution_type: system_node
@@ -194,45 +215,5 @@ pins:
         id: selected_owner
         check: '_entity.id != ""'
 `)
-	return root
-}
-
-// CopyRootAutoEmitKeyCarries owns the fixed root output key/carries proof used
-// by boot verification. It is not an open overlay surface.
-func CopyRootAutoEmitKeyCarries(t testing.TB) string {
-	t.Helper()
-	root := CopyRootOutputConnect(t, RootConnectNoEmitter)
-	writeClosedVariantFile(t, root, "package.yaml", `name: root-auto-emit-key-carries
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-flows:
-  - id: consumer
-    flow: consumer
-    mode: static
-connect:
-  - event: root.ready
-    from: .
-    to: consumer
-`)
-	writeClosedVariantFile(t, root, "schema.yaml", `name: root-auto-emit-key-carries
-auto_emit_on_create:
-  event: root.ready
-pins:
-  outputs:
-    events:
-      - name: root_ready
-        event: root.ready
-        key: entity_id
-        carries: [entity_id]
-`)
-	writeClosedVariantFile(t, root, "events.yaml", "root.ready:\n  entity_id: string\n")
-	writeLegacyInstanceFlow(t, root, "consumer", `name: consumer
-mode: static
-pins:
-  inputs:
-    events:
-      - name: ready
-        event: root.ready
-`, "", "", "")
 	return root
 }

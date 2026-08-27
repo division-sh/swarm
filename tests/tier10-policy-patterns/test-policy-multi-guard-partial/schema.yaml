@@ -4,5 +4,3 @@ states: [pending, accepted]
 pins:
   inputs:
     events: [check.requested]
-  outputs:
-    events: []

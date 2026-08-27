@@ -6,6 +6,5 @@ pins:
     events: [filter.requested]
   outputs:
     events:
-      - name: filter.completed
-        event: filter.completed
+      - event: filter.completed
         sink: harness

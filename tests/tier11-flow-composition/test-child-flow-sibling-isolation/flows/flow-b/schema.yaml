@@ -5,5 +5,3 @@ states: [waiting, finished]
 pins:
   inputs:
     events: [beta.start]
-  outputs:
-    events: []

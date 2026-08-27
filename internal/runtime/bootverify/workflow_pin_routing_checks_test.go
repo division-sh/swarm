@@ -78,19 +78,12 @@ func TestPinTargetResolutionRejectsHarnessConflictWithoutProducer(t *testing.T) 
 	}
 }
 
-func TestPinTargetResolutionRejectsProgrammaticUnknownOutputSink(t *testing.T) {
-	report := Run(context.Background(), semanticview.Wrap(pinRoutingCheckBundle(runtimecontracts.FlowOutputSink(255), true, false)), Options{})
-	if !reportContains(report.Errors(), "pin_target_resolution", "invalid sink") {
-		t.Fatalf("expected invalid sink rejection, got %#v", report.Errors())
-	}
-}
-
 func pinRoutingCheckBundle(sink runtimecontracts.FlowOutputSink, sameFlowConsumer, externalConsumer bool) *runtimecontracts.WorkflowContractBundle {
 	ready := runtimecontracts.EventCatalogEntry{}
 	if externalConsumer {
 		ready.Swarm.Consumer = []string{"external"}
 	}
-	pin := runtimecontracts.FlowOutputEventPin{Name: "result_ready", Event: "result.ready", Sink: sink}
+	pin := runtimecontracts.FlowOutputEventPin{Event: "result.ready", Sink: sink}
 	bundle := &runtimecontracts.WorkflowContractBundle{
 		RootSchema: &runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{pin}}},
@@ -110,10 +103,6 @@ func pinRoutingCheckBundle(sink runtimecontracts.FlowOutputSink, sameFlowConsume
 				},
 			},
 		},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			FlowOutputs:         map[string][]string{"": {"result.ready"}},
-			FlowOutputEventPins: map[string][]runtimecontracts.FlowOutputEventPin{"": {pin}},
-		},
 	}
 	if sameFlowConsumer {
 		bundle.Nodes["consumer"] = runtimecontracts.SystemNodeContract{
@@ -127,6 +116,9 @@ func pinRoutingCheckBundle(sink runtimecontracts.FlowOutputSink, sameFlowConsume
 	}
 	bundle.Platform.Platform.Name = "swarm"
 	bundle.Platform.Platform.Version = "test"
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
 	return bundle
 }
 

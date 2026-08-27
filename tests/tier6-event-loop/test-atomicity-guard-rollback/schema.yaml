@@ -5,5 +5,3 @@ states: [pending, processed]
 pins:
   inputs:
     events: [process.requested]
-  outputs:
-    events: []

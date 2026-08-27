@@ -863,11 +863,6 @@ name: scoring
 initial_state: pending
 states: [pending, done]
 terminal_states: [done]
-pins:
-  inputs:
-    events: []
-  outputs:
-    events: []
 `)
 	writeFixtureFile(t, root+"/flows/scoring/entities.yaml", `
 vertical:
@@ -931,11 +926,6 @@ entity: vertical
 initial_state: pending
 states: [pending, done]
 terminal_states: [done]
-pins:
-  inputs:
-    events: []
-  outputs:
-    events: []
 `)
 	writeFixtureFile(t, root+"/flows/scoring/entities.yaml", `
 vertical:
@@ -996,11 +986,6 @@ entity: missing
 initial_state: pending
 states: [pending, done]
 terminal_states: [done]
-pins:
-  inputs:
-    events: []
-  outputs:
-    events: []
 `)
 	writeFixtureFile(t, root+"/flows/scoring/entities.yaml", `
 vertical:

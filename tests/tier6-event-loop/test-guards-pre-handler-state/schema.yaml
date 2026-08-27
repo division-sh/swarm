@@ -5,5 +5,3 @@ states: [active, processing]
 pins:
   inputs:
     events: [process.requested]
-  outputs:
-    events: []

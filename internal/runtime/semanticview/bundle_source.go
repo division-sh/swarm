@@ -228,7 +228,7 @@ func (s bundleSource) FlowScopes() []FlowScope {
 	views := s.bundle.FlowViews()
 	out := make([]FlowScope, 0, len(views))
 	for _, view := range views {
-		out = append(out, flowScopeFromView(view))
+		out = append(out, flowScopeFromView(view, s.bundle.FlowInputEvents(view.Paths.ID), s.bundle.FlowOutputEvents(view.Paths.ID)))
 	}
 	return out
 }
@@ -241,7 +241,7 @@ func (s bundleSource) FlowScopeByID(id string) (FlowScope, bool) {
 	if !ok || view == nil {
 		return FlowScope{}, false
 	}
-	return flowScopeFromView(*view), true
+	return flowScopeFromView(*view, s.bundle.FlowInputEvents(id), s.bundle.FlowOutputEvents(id)), true
 }
 func (s bundleSource) FlowSchemaByID(id string) (runtimecontracts.FlowSchemaDocument, bool) {
 	return s.bundle.FlowSchemaByID(id)
@@ -253,16 +253,16 @@ func (s bundleSource) FlowInputEvents(flowID string) []string {
 func (s bundleSource) FlowOutputEvents(flowID string) []string {
 	return s.bundle.FlowOutputEvents(flowID)
 }
-func (s bundleSource) FlowInputEventPins(flowID string) []runtimecontracts.FlowInputEventPin {
+func (s bundleSource) FlowInputEventPins(flowID string) []runtimecontracts.CompiledFlowInputPin {
 	return s.bundle.FlowInputEventPins(flowID)
 }
-func (s bundleSource) FlowOutputEventPins(flowID string) []runtimecontracts.FlowOutputEventPin {
+func (s bundleSource) FlowOutputEventPins(flowID string) []runtimecontracts.CompiledFlowOutputPin {
 	return s.bundle.FlowOutputEventPins(flowID)
 }
-func (s bundleSource) FlowInputEventPin(flowID, pinName string) (runtimecontracts.FlowInputEventPin, bool) {
+func (s bundleSource) FlowInputEventPin(flowID, pinName string) (runtimecontracts.CompiledFlowInputPin, bool) {
 	return s.bundle.FlowInputEventPin(flowID, pinName)
 }
-func (s bundleSource) FlowOutputEventPin(flowID, pinName string) (runtimecontracts.FlowOutputEventPin, bool) {
+func (s bundleSource) FlowOutputEventPin(flowID, pinName string) (runtimecontracts.CompiledFlowOutputPin, bool) {
 	return s.bundle.FlowOutputEventPin(flowID, pinName)
 }
 func (s bundleSource) FlowWritePins(flowID string) []string { return s.bundle.FlowWritePins(flowID) }

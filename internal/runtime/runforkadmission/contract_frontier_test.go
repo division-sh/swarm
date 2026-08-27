@@ -509,19 +509,20 @@ func testRunForkPlan(eventName, classification, subscriberType, subscriberID str
 
 func testContractFrontierSource(nodeID string) semanticview.Source {
 	producer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
+		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer", PackageKey: "."},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"scan.requested"}},
+				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "scan.requested"}}},
 			},
 		},
-		Path: "producer",
+		Path:   "producer",
+		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
 	}
 	consumer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer"},
+		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer", PackageKey: "."},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{Events: []string{"scan.requested"}},
+				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "scan.requested"}}},
 			},
 		},
 		Path: "consumer",
@@ -531,26 +532,17 @@ func testContractFrontierSource(nodeID string) semanticview.Source {
 				SubscribesTo: []string{"scan.requested"},
 			},
 		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{producer, consumer}}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:    "test-workflow",
-			Version: "v-test",
-			FlowOutputEventPins: map[string][]runtimecontracts.FlowOutputEventPin{
-				"producer": {{Name: "scan_requested", Event: "scan.requested"}},
-			},
-			FlowInputEventPins: map[string][]runtimecontracts.FlowInputEventPin{
-				"consumer": {{Name: "scan_requested", Event: "scan.requested"}},
-			},
-			CompositionConnects: []runtimecontracts.FlowPackageConnect{{
-				SourceFile: "package.yaml",
-				SourceLine: 1,
-				Event:      "scan.requested",
-				From:       "producer",
-				To:         "consumer",
-			}},
-		},
+	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{PackageKey: "."}, Children: []runtimecontracts.FlowContractView{producer, consumer}}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Package: runtimecontracts.ProjectPackageDocument{Name: "test-workflow", Version: "v-test"},
+		Events:  map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
+		PackageTree: []runtimecontracts.LoadedProjectPackage{{
+			Key: ".", Paths: runtimecontracts.ProjectPackagePaths{PackageFile: "package.yaml"},
+			Manifest: runtimecontracts.ProjectPackageDocument{Connect: []runtimecontracts.FlowPackageConnect{{SourceLine: 1, Event: "scan.requested", From: "producer", To: "consumer"}}},
+		}},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"producer": producer.Schema, "consumer": consumer.Schema},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
@@ -558,7 +550,8 @@ func testContractFrontierSource(nodeID string) semanticview.Source {
 				"consumer": &root.Children[1],
 			},
 		},
-	})
+	}
+	return semanticview.Wrap(mustCompileContractFrontierBundle(bundle))
 }
 
 func testContractFrontierTemplateSource() semanticview.Source {
@@ -598,59 +591,26 @@ func testContractFrontierTemplateConnectSource() semanticview.Source {
 	return testContractFrontierConnectSource("template")
 }
 
-func testContractFrontierRootConnectSource() semanticview.Source {
-	consumer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer"},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Mode: "static",
-			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{
-					Events:    []string{"root.ready"},
-					EventPins: []runtimecontracts.FlowInputEventPin{{Name: "ready", Event: "root.ready"}},
-				},
-			},
-		},
-		Path: "consumer",
-		Nodes: map[string]runtimecontracts.SystemNodeContract{
-			"consumer-node": {ID: "consumer-node", SubscribesTo: []string{"root.ready"}},
-		},
+func testContractFrontierRootConnectSource(t testing.TB) semanticview.Source {
+	t.Helper()
+	repoRoot := canonicalrouting.RepoRoot(t)
+	bundleRoot := canonicalrouting.CopyRootOutputConnect(t, canonicalrouting.RootConnectNoEmitter)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot, bundleRoot, runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load root connect fixture: %v", err)
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{consumer}}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		RootSchema: &runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{
-					Events:    []string{"root.ready"},
-					EventPins: []runtimecontracts.FlowOutputEventPin{{Name: "root_ready", Event: "root.ready"}},
-				},
-			},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{"root.ready": {}},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "test-workflow", Version: "v-test",
-			FlowInputs: map[string][]string{"consumer": {"root.ready"}},
-			FlowInputEventPins: map[string][]runtimecontracts.FlowInputEventPin{
-				"consumer": {{Name: "ready", Event: "root.ready"}},
-			},
-			CompositionConnects: []runtimecontracts.FlowPackageConnect{{
-				SourceFile: "package.yaml", SourceLine: 1, Event: "root.ready", From: ".", To: "consumer",
-			}},
-		},
-		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"consumer": consumer.Schema},
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &root,
-			ByID: map[string]*runtimecontracts.FlowContractView{"consumer": &root.Children[0]},
-		},
-	})
+	return semanticview.Wrap(bundle)
 }
 
 func testContractFrontierConnectSource(producerMode string) semanticview.Source {
 	producer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"},
+		Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer", PackageKey: "."},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: producerMode,
 			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"scan.requested"}},
+				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "scan.requested"}}},
 			},
 		},
 		Path: "producer",
@@ -659,11 +619,11 @@ func testContractFrontierConnectSource(producerMode string) semanticview.Source 
 		},
 	}
 	unrelated := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "unrelated", Flow: "unrelated"},
+		Paths: runtimecontracts.FlowContractPaths{ID: "unrelated", Flow: "unrelated", PackageKey: "."},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Mode: "template",
 			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{Events: []string{"scan.requested"}},
+				Outputs: runtimecontracts.FlowOutputPins{EventPins: []runtimecontracts.FlowOutputEventPin{{Event: "scan.requested"}}},
 			},
 		},
 		Path: "unrelated",
@@ -672,10 +632,10 @@ func testContractFrontierConnectSource(producerMode string) semanticview.Source 
 		},
 	}
 	consumer := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer"},
+		Paths: runtimecontracts.FlowContractPaths{ID: "consumer", Flow: "consumer", PackageKey: "."},
 		Schema: runtimecontracts.FlowSchemaDocument{
 			Pins: runtimecontracts.FlowPins{
-				Inputs: runtimecontracts.FlowInputPins{Events: []string{"scan.requested"}},
+				Inputs: runtimecontracts.FlowInputPins{EventPins: []runtimecontracts.FlowInputEventPin{{Event: "scan.requested"}}},
 			},
 		},
 		Path: "consumer",
@@ -685,27 +645,16 @@ func testContractFrontierConnectSource(producerMode string) semanticview.Source 
 				SubscribesTo: []string{"scan.requested"},
 			},
 		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{"scan.requested": {}},
 	}
-	root := runtimecontracts.FlowContractView{Children: []runtimecontracts.FlowContractView{producer, unrelated, consumer}}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name:    "test-workflow",
-			Version: "v-test",
-			FlowOutputEventPins: map[string][]runtimecontracts.FlowOutputEventPin{
-				"producer":  {{Name: "scan_requested", Event: "scan.requested"}},
-				"unrelated": {{Name: "scan_requested", Event: "scan.requested"}},
-			},
-			FlowInputEventPins: map[string][]runtimecontracts.FlowInputEventPin{
-				"consumer": {{Name: "scan_requested", Event: "scan.requested"}},
-			},
-			CompositionConnects: []runtimecontracts.FlowPackageConnect{{
-				SourceFile: "package.yaml",
-				SourceLine: 1,
-				Event:      "scan.requested",
-				From:       "producer",
-				To:         "consumer",
-			}},
-		},
+	root := runtimecontracts.FlowContractView{Paths: runtimecontracts.FlowContractPaths{PackageKey: "."}, Children: []runtimecontracts.FlowContractView{producer, unrelated, consumer}}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Package: runtimecontracts.ProjectPackageDocument{Name: "test-workflow", Version: "v-test"},
+		PackageTree: []runtimecontracts.LoadedProjectPackage{{
+			Key: ".", Paths: runtimecontracts.ProjectPackagePaths{PackageFile: "package.yaml"},
+			Manifest: runtimecontracts.ProjectPackageDocument{Connect: []runtimecontracts.FlowPackageConnect{{SourceLine: 1, Event: "scan.requested", From: "producer", To: "consumer"}}},
+		}},
+		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{"producer": producer.Schema, "unrelated": unrelated.Schema, "consumer": consumer.Schema},
 		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
 			Root: &root,
 			ByID: map[string]*runtimecontracts.FlowContractView{
@@ -714,7 +663,15 @@ func testContractFrontierConnectSource(producerMode string) semanticview.Source 
 				"consumer":  &root.Children[2],
 			},
 		},
-	})
+	}
+	return semanticview.Wrap(mustCompileContractFrontierBundle(bundle))
+}
+
+func mustCompileContractFrontierBundle(bundle *runtimecontracts.WorkflowContractBundle) *runtimecontracts.WorkflowContractBundle {
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
+	return bundle
 }
 
 func testContractFrontierMixedReceiverSource(t testing.TB, includeRuntimeReceiver bool) semanticview.Source {
