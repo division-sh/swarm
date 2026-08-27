@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -220,14 +221,17 @@ func TestRunAdmissionReportsUnknownETAWhenEvidenceIsMissing(t *testing.T) {
 	active := acquireTestRun(t, testRunAdmission(root, nil), context.Background(), "active", 1)
 	defer active.Complete(context.Background(), false)
 
-	var output bytes.Buffer
+	output := newObservedOutput("Estimated completion: unknown")
+	waitingAdmission := testRunAdmission(root, nil)
+	waitingAdmission.Output = output
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)
 	go func() {
-		_, err := testRunAdmission(root, &output).Acquire(ctx, testRunCommand("waiting"), 1)
+		_, err := waitingAdmission.Acquire(ctx, testRunCommand("waiting"), 1)
 		result <- err
 	}()
 	waitForWaitingRuns(t, testRunAdmission(root, nil), 1)
+	output.Wait(t)
 	cancel()
 	if err := <-result; !errors.Is(err, context.Canceled) {
 		t.Fatalf("queued result = %v", err)
@@ -237,6 +241,44 @@ func TestRunAdmissionReportsUnknownETAWhenEvidenceIsMissing(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("queue output missing %q:\n%s", want, text)
 		}
+	}
+}
+
+type observedOutput struct {
+	mu       sync.Mutex
+	buffer   bytes.Buffer
+	needle   []byte
+	observed chan struct{}
+	once     sync.Once
+}
+
+func newObservedOutput(needle string) *observedOutput {
+	return &observedOutput{needle: []byte(needle), observed: make(chan struct{})}
+}
+
+func (o *observedOutput) Write(p []byte) (int, error) {
+	o.mu.Lock()
+	n, err := o.buffer.Write(p)
+	matched := bytes.Contains(o.buffer.Bytes(), o.needle)
+	o.mu.Unlock()
+	if matched {
+		o.once.Do(func() { close(o.observed) })
+	}
+	return n, err
+}
+
+func (o *observedOutput) String() string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.buffer.String()
+}
+
+func (o *observedOutput) Wait(t *testing.T) {
+	t.Helper()
+	select {
+	case <-o.observed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for queue report")
 	}
 }
 
