@@ -76,6 +76,20 @@ func TestChannelRuntimeContextCoordinateSeparatesDurableIdentityFromLiveOccurren
 	}
 }
 
+func TestChannelRuntimeContextCoordinateMatchesContextOccurrenceWithoutStandingTarget(t *testing.T) {
+	coordinate := testCoordinate()
+	coordinate.TargetGeneration = 0
+	if !coordinate.MatchesContextOccurrence("  "+coordinate.RuntimeInstanceID+"  ", coordinate.ContextPublicationGeneration) {
+		t.Fatal("declared activation context occurrence required a standing target")
+	}
+	if coordinate.MatchesContextOccurrence("22222222-2222-4222-8222-222222222222", coordinate.ContextPublicationGeneration) {
+		t.Fatal("successor runtime instance matched predecessor context occurrence")
+	}
+	if coordinate.MatchesContextOccurrence(coordinate.RuntimeInstanceID, coordinate.ContextPublicationGeneration+1) {
+		t.Fatal("successor publication matched predecessor context occurrence")
+	}
+}
+
 func TestVerbAdmissionMatrix(t *testing.T) {
 	states := []SlotState{SlotAbsent, SlotIdentityCurrentActivationAbsent, SlotOperationPending, SlotReady, SlotActivationStale, SlotUncertain, SlotRetired}
 	wants := map[Verb]map[SlotState]AdmissionDecision{

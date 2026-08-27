@@ -1,0 +1,11 @@
+name: telegram-channel-onboarding
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+provider_trigger_events:
+  imports:
+    - provider: telegram
+      event: inbound.telegram.text_message
+flows:
+  - id: telegram-chat
+    flow: telegram-chat
+    mode: template

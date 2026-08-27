@@ -842,7 +842,7 @@ func TestDifferentialMockRegistrationExecutesThroughProviderNeutralLifecycle(t *
 		StartupAuthorityID: startup.GrantID, ObservedAt: exposure.CreatedAt, ExpiresAt: exposure.CreatedAt.Add(runtimepublicingress.EvidenceTTL),
 	})
 	pair := runtimepublicingress.RegistrationPair{
-		BindingID: "mock-hitl", PlanGeneration: planGeneration, PrebindingOperationID: "test-prebinding-mock-hitl", Registration: registration,
+		BindingID: "mock-hitl", PlanGeneration: planGeneration, OnboardingOperationID: "test-prebinding-mock-hitl", PrebindingOperationID: "test-prebinding-mock-hitl", Registration: registration,
 		CredentialKeys: map[string]string{"mock_api_key": "api"},
 		Target: runtimepublicingress.RegistrationTarget{
 			Selector: "ingress:support:mock:mock", BundleHash: "bundle-v1:sha256:" + strings.Repeat("e", 64),

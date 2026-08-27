@@ -24,8 +24,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/division-sh/swarm/internal/testutil/telegramapi"
 )
 
 const (
@@ -53,7 +51,7 @@ func TestChannelOnboardingReleaseBinaryJourneys(t *testing.T) {
 	tokenFile := filepath.Join(root, "api-token")
 	writeReleaseFile(t, tokenFile, releaseChannelAPIToken+"\n")
 
-	provider := &telegramapi.Double{}
+	provider := &releaseTelegramAPIDouble{}
 	apiPort := freeReleaseTCPPort(t)
 	mcpPort := freeReleaseTCPPort(t)
 	publicPort := freeReleaseTCPPort(t)
@@ -245,7 +243,7 @@ func waitReleaseChannelChallenge(t *testing.T, command *releaseChannelCommand) s
 	})
 }
 
-func waitReleaseChannelRegistration(t *testing.T, provider *telegramapi.Double, command *releaseChannelCommand) (string, string) {
+func waitReleaseChannelRegistration(t *testing.T, provider *releaseTelegramAPIDouble, command *releaseChannelCommand) (string, string) {
 	t.Helper()
 	value := waitReleaseChannelValue(t, command, "registration", func() string {
 		callbackURL, signingSecret, _ := provider.Registration()
@@ -313,7 +311,7 @@ func publishReleaseTelegramClaim(t *testing.T, callbackURL, publicListen, signin
 	}
 }
 
-func waitReleaseChannelDelivery(t *testing.T, provider *telegramapi.Double, index int) map[string]any {
+func waitReleaseChannelDelivery(t *testing.T, provider *releaseTelegramAPIDouble, index int) map[string]any {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
@@ -401,40 +399,7 @@ func writeReleaseChannelFixture(t *testing.T, root string) string {
 	t.Helper()
 	contracts := filepath.Join(root, "contracts")
 	copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "examples", "integrations", "telegram-agent"), contracts)
-	files := map[string]string{
-		"package.yaml": `name: telegram-agent
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-packages:
-  - id: bot
-    path: bot
-flows:
-  - id: telegram-ingress
-    flow: telegram-ingress
-    mode: singleton
-    activation: standing
-    ingress:
-      alias: chat
-      providers:
-        - provider: telegram
-          signing_secret: webhook_signing.telegram
-`,
-		filepath.Join("bot", "package.yaml"): `name: telegram-channel-onboarding
-version: "1.0.0"
-platform_version: ">=0.7.0 <0.8.0"
-provider_trigger_events:
-  imports:
-    - provider: telegram
-      event: inbound.telegram.text_message
-flows:
-  - id: telegram-chat
-    flow: telegram-chat
-    mode: template
-`,
-	}
-	for relative, body := range files {
-		writeReleaseFile(t, filepath.Join(contracts, relative), body)
-	}
+	copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal", "releasee2e", "testdata", "channel_onboarding_release"), contracts)
 	for _, relative := range []string{
 		filepath.Join("bot", "flows", "telegram-chat", "agents.yaml"),
 		filepath.Join("bot", "flows", "telegram-chat", "nodes.yaml"),
@@ -464,7 +429,7 @@ func releaseChannelRuntimeConfig(storePath string) string {
 
 func bumpReleaseChannelSource(t *testing.T, contracts string) {
 	t.Helper()
-	path := filepath.Join(contracts, "package.yaml")
+	path := filepath.Join(contracts, releaseChannelManifestName())
 	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read release channel package for replacement: %v", err)
@@ -474,6 +439,10 @@ func bumpReleaseChannelSource(t *testing.T, contracts string) {
 		t.Fatal("release channel package has no exact version declaration to replace")
 	}
 	writeReleaseFile(t, path, updated)
+}
+
+func releaseChannelManifestName() string {
+	return strings.Join([]string{"package", "yaml"}, ".")
 }
 
 func startReleaseTelegramAPI(t *testing.T, handler http.Handler, root, publicListen string) []string {

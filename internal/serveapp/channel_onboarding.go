@@ -740,10 +740,7 @@ func (r *serveChannelActivationRefresher) publishChannelActivations(ctx context.
 	for _, contextDef := range r.manager.LoadedContexts() {
 		bundleHash := contextDef.BundleSourceFact.BundleHash()
 		key := bundleHash + "\x00" + contextDef.RuntimeInstanceID + "\x00" + fmt.Sprint(contextDef.PublicationGeneration)
-		if coordinate, found := coordinates[key]; found && !coordinate.LiveOccurrence().Matches(channelonboarding.ChannelLiveRuntimeOccurrence{
-			RuntimeInstanceID: contextDef.RuntimeInstanceID, ContextPublicationGeneration: contextDef.PublicationGeneration,
-			TargetGeneration: coordinate.TargetGeneration,
-		}) {
+		if coordinate, found := coordinates[key]; found && !coordinate.MatchesContextOccurrence(contextDef.RuntimeInstanceID, contextDef.PublicationGeneration) {
 			return fmt.Errorf("channel activation runtime publication changed during refresh")
 		}
 		publication, err := channelonboarding.NewChannelActivationPublication(byContext[key])
