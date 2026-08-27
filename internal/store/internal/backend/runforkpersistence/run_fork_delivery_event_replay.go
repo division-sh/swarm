@@ -19,10 +19,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const (
-	runForkDeliveryEventReplayTable = "run_fork_delivery_event_replays"
-)
-
 func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *runforkrevision.Effects, store *RunForkPostgresOwner, lineage runForkActivationLineage, execution runfork.RunForkHistoricalReplayExecution, now time.Time) (runfork.RunForkDeliveryEventReplayResult, error) {
 	result := runfork.RunForkDeliveryEventReplayResult{
 		Owner:       runfork.RunForkDeliveryEventReplayOwner,
@@ -311,13 +307,6 @@ func DeterministicRunForkReplayEventID(forkRunID, sourceEventID string) string {
 
 func deterministicRunForkReplayLineageID(forkRunID, sourceDeliveryID string) string {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("swarm/run-fork/delivery-event-replay/lineage/"+strings.TrimSpace(forkRunID)+"/"+strings.TrimSpace(sourceDeliveryID))).String()
-}
-
-func nullStringText(value sql.NullString) string {
-	if !value.Valid {
-		return ""
-	}
-	return strings.TrimSpace(value.String)
 }
 
 func rowsAffected(res sql.Result) (bool, error) {

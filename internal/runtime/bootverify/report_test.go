@@ -8670,31 +8670,6 @@ func ensureFlowInputEventPins(pins *runtimecontracts.FlowInputPins) {
 	}
 }
 
-func flowEventEntry(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, flowID, eventType string) runtimecontracts.EventCatalogEntry {
-	t.Helper()
-	flowView, ok := bundle.FlowViewByID(flowID)
-	if !ok || flowView == nil {
-		t.Fatalf("flow view %s missing", flowID)
-	}
-	entry, ok := flowView.Events[eventType]
-	if !ok {
-		t.Fatalf("flow %s event %s missing", flowID, eventType)
-	}
-	return entry
-}
-
-func writeFlowEventEntry(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, flowID, eventType string, entry runtimecontracts.EventCatalogEntry) {
-	t.Helper()
-	flowView, ok := bundle.FlowViewByID(flowID)
-	if !ok || flowView == nil {
-		t.Fatalf("flow view %s missing", flowID)
-	}
-	if flowView.Events == nil {
-		flowView.Events = map[string]runtimecontracts.EventCatalogEntry{}
-	}
-	flowView.Events[eventType] = entry
-}
-
 func addProjectHandler(t *testing.T, bundle *runtimecontracts.WorkflowContractBundle, nodeID, eventType string, handler runtimecontracts.SystemNodeEventHandler) {
 	t.Helper()
 	if bundle.FlowTree.Root == nil {

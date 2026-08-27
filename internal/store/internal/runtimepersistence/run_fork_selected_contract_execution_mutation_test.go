@@ -2204,23 +2204,6 @@ func assertNoCopiedReplayScopeMarkers(t *testing.T, db *sql.DB, forkRunID string
 	}
 }
 
-func assertOnlySelectedForkReplayScopeMarker(t *testing.T, db *sql.DB, forkRunID, forkEventID string) {
-	t.Helper()
-	var exact, copied int
-	if err := db.QueryRowContext(testAuthorActivityContext(), `
-		SELECT
-			COUNT(*) FILTER (WHERE event_id = $2::uuid AND scope = 'direct'),
-			COUNT(*) FILTER (WHERE event_id <> $2::uuid)
-		FROM committed_replay_scopes
-		WHERE run_id = $1::uuid
-	`, forkRunID, forkEventID).Scan(&exact, &copied); err != nil {
-		t.Fatalf("count selected-fork committed replay scopes: %v", err)
-	}
-	if exact != 1 || copied != 0 {
-		t.Fatalf("selected-fork replay-scope markers exact=%d copied=%d, want exact=1 copied=0", exact, copied)
-	}
-}
-
 func runForkTestHasPlanBlocker(plan runfork.RunForkPlan, code string) bool {
 	for _, blocker := range plan.UnsupportedBlockers {
 		if blocker.Code == code {

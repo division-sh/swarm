@@ -2,7 +2,6 @@ package cliapp
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -194,12 +193,6 @@ func bindCLIYAMLOutputFlag(cmd *cobra.Command, opts *cliOutputOptions) {
 // projection explicitly.
 func bindCLIOutputVerboseFlag(cmd *cobra.Command, opts *cliOutputOptions) {
 	cmd.Flags().BoolVar(&opts.verbose, cliOutputVerboseFlag, false, cliOutputVerboseFlagHelp)
-}
-
-func bindCLIOutputFlagSet(fs *flag.FlagSet, opts *cliOutputOptions) {
-	fs.BoolVar(&opts.asJSON, cliOutputJSONFlag, false, cliOutputJSONFlagHelp)
-	fs.BoolVar(&opts.quiet, cliOutputQuietFlag, false, cliOutputQuietFlagHelp)
-	fs.BoolVar(&opts.noColor, cliOutputNoColorFlag, false, cliOutputNoColorFlagHelp)
 }
 
 func (opts cliOutputOptions) validate() error {

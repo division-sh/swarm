@@ -238,35 +238,6 @@ func (s *runtimeShutdownDeliveryStore) ClaimDelivery(
 	return result, err
 }
 
-func (s *runtimeShutdownDeliveryStore) seedAgentDelivery(
-	t *testing.T,
-	ctx context.Context,
-	evt events.Event,
-	agentID string,
-) {
-	t.Helper()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := eventfixture.Insert(ctx, s.db, authoractivityfixture.DialectSQLite, evt); err != nil {
-		t.Fatalf("seed runtime delivery event: %v", err)
-	}
-	s.events[evt.ID()] = evt
-	route := events.DeliveryRoute{Recipient: events.MustAgentDeliveryRecipient(agentID)}
-	if err := s.mutate(ctx, func(story context.Context, tx *sql.Tx) error {
-		_, err := s.adapter.CommitInitial(
-			story,
-			tx,
-			evt.ID(),
-			evt.RunID(),
-			[]events.DeliveryRoute{route},
-			s.authority,
-		)
-		return err
-	}); err != nil {
-		t.Fatalf("seed runtime delivery obligation: %v", err)
-	}
-}
-
 func (s *runtimeShutdownDeliveryStore) ActivateDeliveryAuthority(
 	ctx context.Context,
 	authority runtimedelivery.ExecutionAuthority,

@@ -650,36 +650,6 @@ func (e ConnectRoutePlanEndpoint) receiverPinIdentity() ConnectReceiverPinIdenti
 	return ConnectReceiverPinIdentity{digest: digest, diagnostic: e.flowID.value + "." + e.pin.value + ":" + string(e.event.value)}
 }
 
-func (e ConnectRoutePlanEndpoint) receiverEventTypes(target events.RouteIdentity) []events.EventType {
-	seen := map[events.EventType]struct{}{}
-	add := func(eventType events.EventType) {
-		if eventType != "" {
-			seen[eventType] = struct{}{}
-		}
-	}
-	add(e.resolvedEvent.value)
-	receiverPath := e.flowPath.value
-	if receiverPath == "" {
-		receiverPath = e.flowID.value
-	}
-	if receiverPath != "" && e.event.value != "" {
-		add(events.EventType(receiverPath + "/" + string(e.event.value)))
-	}
-	target = target.Normalized()
-	if target.FlowInstance != "" && e.event.value != "" {
-		add(events.EventType(target.FlowInstance + "/" + string(e.event.value)))
-	}
-	if e.IsRoot() {
-		add(e.event.value)
-	}
-	out := make([]events.EventType, 0, len(seen))
-	for eventType := range seen {
-		out = append(out, eventType)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
-	return out
-}
-
 func (p ConnectRoutePlan) ReceiverPinIdentity() ConnectReceiverPinIdentity {
 	return p.receiver.receiverPinIdentity()
 }
@@ -3155,61 +3125,4 @@ func stringListContains(values []string, needle string) bool {
 		}
 	}
 	return false
-}
-
-func duplicateString(values []string) string {
-	seen := map[string]struct{}{}
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			return value
-		}
-		seen[value] = struct{}{}
-	}
-	return ""
-}
-
-func sameStringSet(left, right []string) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	seen := map[string]struct{}{}
-	for _, value := range left {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			return false
-		}
-		seen[value] = struct{}{}
-	}
-	for _, value := range right {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			return false
-		}
-		if _, ok := seen[value]; !ok {
-			return false
-		}
-	}
-	return true
-}
-
-func cloneStringMap(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(in))
-	for key, value := range in {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		out[key] = strings.TrimSpace(value)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
 }

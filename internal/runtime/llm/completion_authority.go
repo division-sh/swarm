@@ -393,17 +393,6 @@ func (h *completionAttemptHeartbeat) renew() error {
 	return h.handle.Heartbeat(h.ctx, h.lease)
 }
 
-func finishCompletionAttemptHeartbeat(heartbeat *completionAttemptHeartbeat, prior error) error {
-	if heartbeat == nil {
-		return prior
-	}
-	heartbeatErr := heartbeat.Stop()
-	if heartbeatErr == nil {
-		return prior
-	}
-	return errors.Join(prior, completionAttemptHeartbeatLoss(heartbeatErr))
-}
-
 func finishCompletionDispatchHeartbeat(dispatch *completionDispatch, heartbeat *completionAttemptHeartbeat, prior error) error {
 	if heartbeat == nil {
 		return prior
@@ -763,14 +752,6 @@ func claudeCompletionUsageFromRaw(raw []byte, fallbackModel string) (runtimeeffe
 		return runtimeeffects.CompletionUsage{}, fmt.Errorf("claude ResultMessage usage is invalid: %w", err)
 	}
 	return usage, nil
-}
-
-func completionFailure(err error, component, operation string) *runtimefailures.Envelope {
-	if err == nil {
-		return nil
-	}
-	envelope := runtimefailures.FromError(err, component, operation)
-	return &envelope.Failure
 }
 
 func completionRaw(raw []byte) json.RawMessage {

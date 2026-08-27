@@ -58,7 +58,6 @@ type Executor struct {
 	externalDispatchAdmission      *externalDispatchAdmissionController
 	allowInternalLegacyEntityTools bool
 	execWorkspaceFn                func(ctx context.Context, target workspace.ExecutionTarget, timeout time.Duration, stdin string, args ...string) ([]byte, []byte, int, error)
-	oneShotMu                      sync.Mutex
 	oneShotEmits                   map[string]struct{}
 }
 
@@ -449,18 +448,6 @@ func (e *Executor) validateRuntimeToolInput(actor models.AgentConfig, name strin
 	return e.validator.Validate(&actor, name, input)
 }
 
-func runtimeToolSchemaForName(defs []llm.ToolDefinition, name string) (map[string]any, bool) {
-	name = strings.TrimSpace(name)
-	for _, def := range defs {
-		if strings.TrimSpace(def.Name) != name {
-			continue
-		}
-		schema, ok := def.Schema.(map[string]any)
-		return schema, ok
-	}
-	return nil, false
-}
-
 func normalizeRuntimeToolInput(name string, input any) any {
 	return canonicalRuntimeToolInput(name, input)
 }
@@ -639,20 +626,6 @@ func (e *Executor) runtimeLogSink() runtimeToolLogSink {
 	return logger
 }
 
-func (e *Executor) getManager() Manager {
-	e.mu.RLock()
-	manager := e.manager
-	provider := e.managerProvider
-	e.mu.RUnlock()
-	if manager != nil {
-		return manager
-	}
-	if provider != nil {
-		return provider()
-	}
-	return nil
-}
-
 func decodeToolInput(input any, out any) error {
 	b, err := json.Marshal(input)
 	if err != nil {
@@ -727,13 +700,4 @@ func (e *Executor) ExecAskHumanDirect(ctx context.Context, actor models.AgentCon
 
 func authorizeNotifyHuman(provider runtimeauthority.Provider, actor models.AgentConfig) error {
 	return runtimeauthority.ProviderOrNoop(provider).AuthorizeNotifyHuman(actor)
-}
-
-func coalesce(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
 }

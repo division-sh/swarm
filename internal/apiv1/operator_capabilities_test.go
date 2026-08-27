@@ -200,11 +200,3 @@ func testOperatorRunForkHandlers(c testOperatorCapabilities) map[string]MethodHa
 	selector, _ := c.RunFork.(RunForkExecutorSelector)
 	return OperatorRunForkHandlers(RunForkHandlerOptions{Now: c.Now, Availability: c.RunForkAvailability, Executor: c.RunFork, Selector: selector, Idempotency: c.Idempotency, RuntimeContexts: c.RuntimeContexts})
 }
-
-func testOperatorRunControlHandlers(c testOperatorCapabilities) map[string]MethodHandler {
-	return OperatorRunControlHandlers(RunControlHandlerOptions{Now: c.Now, Controller: c.RunControl, Idempotency: c.Idempotency, RuntimeContexts: c.RuntimeContexts})
-}
-
-func testOperatorBundleDeleteHandlers(c testOperatorCapabilities) map[string]MethodHandler {
-	return OperatorBundleDeleteHandlers(BundleDeleteHandlerOptions{Now: c.Now, Executor: c.BundleDelete, Idempotency: c.Idempotency})
-}

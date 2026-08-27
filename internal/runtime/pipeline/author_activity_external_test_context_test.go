@@ -2,7 +2,6 @@ package pipeline_test
 
 import (
 	"context"
-	"database/sql"
 	"sort"
 	"strings"
 	"sync"
@@ -22,8 +21,6 @@ import (
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	"github.com/division-sh/swarm/internal/store"
-	"github.com/division-sh/swarm/internal/store/storetest"
 )
 
 const authorActivityTestRuntimeInstanceID = "11111111-1111-1111-1111-111111111111"
@@ -115,27 +112,6 @@ type scopedTestDurableStore interface {
 	runtimebus.TargetFailureDeadLetterRecorder
 	runtimebus.RunOriginReader
 	PipelineObligations() runtimepipelineobligation.Store
-}
-
-func registerDifferentTestAuthorActivityEvents(t *testing.T, eventStore any, eventTypes ...string) {
-	t.Helper()
-	registrar, ok := eventStore.(testAuthorActivityCatalogRegistrar)
-	if !ok {
-		t.Fatalf("event store %T lacks author activity catalog registration", eventStore)
-	}
-	descriptors := make([]runtimeauthoractivity.EventDescriptor, 0, len(eventTypes))
-	for _, eventType := range eventTypes {
-		descriptors = append(descriptors, runtimeauthoractivity.EventDescriptor{
-			EventType: strings.TrimSpace(eventType), Disposition: runtimeauthoractivity.StoryDifferent,
-		})
-	}
-	lease, err := registrar.RegisterAuthorActivityEventCatalog(
-		runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash()), descriptors,
-	)
-	if err != nil {
-		t.Fatalf("register test author activity event catalog: %v", err)
-	}
-	t.Cleanup(lease.Release)
 }
 
 func newScopedTestEventBus(t *testing.T, eventStore scopedTestDurableStore, opts runtimebus.EventBusOptions, differentEvents ...string) (*runtimebus.EventBus, error) {
@@ -262,36 +238,4 @@ func testAuthorActivityEventDescriptors(t *testing.T, opts runtimebus.EventBusOp
 		descriptors = append(descriptors, byName[name])
 	}
 	return descriptors
-}
-
-func newRecoveryTestPostgresStore(t *testing.T, db *sql.DB) *store.PostgresStore {
-	t.Helper()
-	pg := storetest.AdmitPostgresRuntimeStore(t, db)
-	descriptors := make([]runtimeauthoractivity.EventDescriptor, 0, len(recoveryTestEventTypes))
-	for _, eventType := range recoveryTestEventTypes {
-		descriptors = append(descriptors, runtimeauthoractivity.EventDescriptor{
-			EventType: eventType, Disposition: runtimeauthoractivity.StoryDifferent,
-		})
-	}
-	lease, err := pg.RegisterAuthorActivityEventCatalog(
-		runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash()),
-		descriptors,
-	)
-	if err != nil {
-		t.Fatalf("register recovery test author activity catalog: %v", err)
-	}
-	t.Cleanup(lease.Release)
-	return pg
-}
-
-var recoveryTestEventTypes = []string{
-	"fork.ready",
-	"system.parent",
-	"system.recover",
-	"system.recover.direct_empty",
-	"system.recover.explicit",
-	"system.recover.good",
-	"system.recover.internal",
-	"system.recover.no-run-id",
-	"system.recover.no_recipients",
 }

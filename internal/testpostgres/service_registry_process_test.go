@@ -684,62 +684,6 @@ func readRunnerLogs(paths []string) string {
 	return strings.Join(values, "\n")
 }
 
-func waitForRunnerServiceRecord(t *testing.T, registry *ServiceRegistry, dsnPath string, timeout time.Duration) ServiceRecord {
-	t.Helper()
-	raw, err := os.ReadFile(dsnPath)
-	if err != nil {
-		t.Fatalf("read runner DSN: %v", err)
-	}
-	connection, err := ParseConnection(string(raw))
-	if err != nil {
-		t.Fatalf("parse runner DSN: %v", err)
-	}
-	wantPort := connection.Parameters().Port
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		doc, loadErr := registry.loadRegistry()
-		if loadErr == nil {
-			for _, record := range doc.Services {
-				if record.State != ServiceChildRunning {
-					continue
-				}
-				portOutput, portErr := registry.dockerOutput(context.Background(), "port", record.ContainerID, "5432/tcp")
-				if portErr != nil {
-					continue
-				}
-				port, parseErr := parseDockerPort(portOutput)
-				if parseErr == nil && port == wantPort {
-					return record
-				}
-			}
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("timed out resolving runner record for port %d", wantPort)
-	return ServiceRecord{}
-}
-
-func waitForServiceRecordAbsent(t *testing.T, registry *ServiceRegistry, leaseID string, timeout time.Duration) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if _, err := registry.record(leaseID); os.IsNotExist(err) {
-			for _, path := range []string{
-				registry.leasePath(leaseID),
-				registry.creatorPath(leaseID),
-				filepath.Join(registry.StateRoot, "handoff", leaseID+".cid"),
-			} {
-				if _, statErr := os.Lstat(path); !os.IsNotExist(statErr) {
-					t.Fatalf("retired runner authority remains at %s: %v", path, statErr)
-				}
-			}
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for runner lease %s to retire", leaseID)
-}
-
 func waitForProcess(t *testing.T, result <-chan error, timeout time.Duration) error {
 	t.Helper()
 	select {

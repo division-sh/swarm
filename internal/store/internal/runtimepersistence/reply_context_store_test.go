@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -405,28 +404,6 @@ func setupPostgresReplyContextStoreTest(t *testing.T) (replyContextStoreTestSurf
 			)
 			if err := commitSemanticEventFixture(ctx, store, event); err != nil {
 				return err
-			}
-		}
-		return nil
-	}
-}
-
-func setupSQLiteReplyContextStoreTest(t *testing.T) (replyContextStoreTestSurface, func(context.Context, string, ...string) error) {
-	t.Helper()
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	return store, func(ctx context.Context, runID string, eventIDs ...string) error {
-		requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: time.Now().UTC(), BundleHash: authorActivityTestBundleHash})
-		for i, eventID := range eventIDs {
-			eventName := "provider.replied"
-			if i == 0 {
-				eventName = "provider.requested"
-			}
-			event := eventtest.PersistedProjectionForProducer(
-				eventID, events.EventType(eventName), eventtest.Producer(events.EventProducerPlatform, "test"), "",
-				json.RawMessage(`{}`), 0, runID, "", events.EventEnvelope{}, time.Now().UTC(),
-			)
-			if err := commitSemanticEventFixture(ctx, store, event); err != nil {
-				return fmt.Errorf("insert sqlite event: %w", err)
 			}
 		}
 		return nil

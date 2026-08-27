@@ -3,7 +3,6 @@ package pipelinepersistence
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -111,10 +110,6 @@ func persistedReplayEvents[T eventDecoder](records []T) ([]events.PersistedRepla
 		out = append(out, record)
 	}
 	return out, nil
-}
-
-func marshalPipelineReceiptSideEffects(value pipelineReceiptSideEffects) ([]byte, error) {
-	return json.Marshal(value)
 }
 
 func mustDeliveryAdapter(dialect deliverystore.Dialect) *deliverystore.Adapter {

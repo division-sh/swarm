@@ -448,26 +448,6 @@ func assertSelectedContractDeferredWorkRejectionHasNoForkMutation(t testing.TB, 
 	}
 }
 
-func seedRunForkAgentTurnCapabilitySurface(t testing.TB, ctx context.Context, pg *store.PostgresStore, runID, turnID, sessionID string, identity agentidentity.Identity, runtimeMode string) string {
-	t.Helper()
-	surface, err := managedcapabilities.New(managedcapabilities.Plan{
-		ActorIdentity: identity, RuntimeMode: runtimeMode, Provider: "test", Transport: "api", ProviderContract: "run-fork-test",
-		Authority: managedcapabilities.Authority{
-			Kind: managedcapabilities.AuthorityProviderTurn, ID: turnID,
-			ExecutionKind: managedcapabilities.ExecutionNormalAgent, ExecutionAuthorityID: "run-fork-test-runtime",
-			RunID: runID, SessionID: sessionID, TurnOrdinal: 1,
-		},
-		CreatedAt: time.Unix(1, 0).UTC(),
-	})
-	if err != nil {
-		t.Fatalf("build run-fork agent-turn capability surface: %v", err)
-	}
-	if err := pg.SaveManagedCapabilitySurface(ctx, surface); err != nil {
-		t.Fatalf("persist run-fork agent-turn capability surface: %v", err)
-	}
-	return surface.ID
-}
-
 func selectedForkExecutionTestContext(t testing.TB, ctx context.Context, authority runtimeeffects.Authority) context.Context {
 	t.Helper()
 	admission, err := managedexecution.New(
@@ -5070,22 +5050,6 @@ func assertNoSelectedContractExecutionMutationForSource(t *testing.T, db *sql.DB
 	}
 	if forkEvents != 0 {
 		t.Fatalf("fork event rows for blocked selected fork source event = %d, want 0", forkEvents)
-	}
-}
-
-func assertNoCopiedSourceReplayScopeMarkers(t *testing.T, db *sql.DB, forkRunID, sourceEventID string) {
-	t.Helper()
-	var copied int
-	if err := db.QueryRowContext(context.Background(), `
-		SELECT COUNT(*)
-		FROM committed_replay_scopes
-		WHERE run_id = $1::uuid
-		  AND event_id = $2::uuid
-	`, forkRunID, sourceEventID).Scan(&copied); err != nil {
-		t.Fatalf("count copied source replay-scope facts: %v", err)
-	}
-	if copied != 0 {
-		t.Fatalf("copied source replay-scope facts = %d, want 0", copied)
 	}
 }
 

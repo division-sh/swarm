@@ -2203,19 +2203,6 @@ func validateTargetsGeneration(contextDef BundleContext, generation triggergener
 	return nil
 }
 
-func validateContextSetCollisions(contexts []BundleContext) error {
-	seenAlias := map[string]string{}
-	for _, contextDef := range contexts {
-		for _, target := range contextDef.StandingTargets {
-			if previous, ok := seenAlias[target.Alias]; ok {
-				return fmt.Errorf("duplicate standing ingress alias %q across loaded BundleContexts: existing %s; incoming %s; rename one package flow ingress alias", target.Alias, previous, contextDef.BundleHash())
-			}
-			seenAlias[target.Alias] = contextDef.BundleHash()
-		}
-	}
-	return nil
-}
-
 func (m *RuntimeContextManager) ReplaceBundleHash(existingHash string, contextDef BundleContext) error {
 	if _, err := m.BeginBundleHashReplacement(context.Background(), existingHash, contextDef); err != nil {
 		return err

@@ -292,35 +292,6 @@ func wrapLoaderDiagnosticFile(err error, file string) error {
 	return fmt.Errorf("parse %s: %w", file, err)
 }
 
-func loaderDiagnosticForPackageDecode(err error) error {
-	if err == nil {
-		return nil
-	}
-	if diagnostic, ok := AsLoaderDiagnostic(err); ok {
-		return diagnostic
-	}
-	raw := err.Error()
-	if strings.Contains(raw, "ProjectFlowRef") {
-		return NewExpectedShapeDiagnostic(
-			"contract_loader.package_flows_shape",
-			"package.yaml.flows",
-			"package.yaml flows entries must be mappings with id, flow, and optional mode.",
-			"Use entries like `flows: [{id: child, flow: child, mode: child}]`.",
-			err,
-		)
-	}
-	if strings.Contains(raw, "ProjectPackageRef") {
-		return NewExpectedShapeDiagnostic(
-			"contract_loader.package_imports_shape",
-			"package.yaml.packages",
-			"package.yaml package entries must be mappings with id and path or package.",
-			"Use entries like `packages: [{id: shared, path: flows/shared}]`.",
-			err,
-		)
-	}
-	return err
-}
-
 func diagnoseLegacyLoaderError(err error) (*LoaderDiagnostic, bool) {
 	if err == nil {
 		return nil, false

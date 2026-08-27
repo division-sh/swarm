@@ -158,10 +158,6 @@ func evalExpressionValue(base BaseContext, state ExecutionState, expr runtimecon
 	}
 }
 
-func setValuePath(target map[string]any, path string, value any) {
-	setParsedValuePath(target, paths.Parse(path), value)
-}
-
 func setParsedValuePath(target map[string]any, path paths.Path, value any) {
 	values.Wrap(target).SetPath(path, value)
 }
@@ -485,17 +481,6 @@ func compileExecutionCondition(expr string) (*compiledExecutionCondition, error)
 		expression: expr,
 		program:    program,
 	}, nil
-}
-
-func executionEvalCondition(expr string, scope executionScope) (bool, error) {
-	compiled, err := compileExecutionCondition(expr)
-	if err != nil {
-		return false, err
-	}
-	if compiled == nil {
-		return true, nil
-	}
-	return compiled.Eval(scope)
 }
 
 func (c *compiledExecutionCondition) Eval(scope executionScope) (bool, error) {
@@ -961,38 +946,6 @@ func computeWeightedAverageFromItems(acc *Accumulator, spec *runtimecontracts.Co
 	return total / weightSum
 }
 
-func computeWeightedPayload(payload map[string]any, tiers []runtimecontracts.ComputeTier) float64 {
-	if len(payload) == 0 || len(tiers) == 0 {
-		return 0
-	}
-	total := 0.0
-	for _, tier := range tiers {
-		sum := 0.0
-		count := 0
-		for _, dimension := range tier.Dimensions {
-			var value any
-			if resolved, ok := lookupPath(payload, strings.TrimPrefix(strings.TrimSpace(dimension), "payload.")); ok {
-				value = resolved
-			}
-			score := firstNumeric(value)
-			if math.IsNaN(score) {
-				continue
-			}
-			sum += score
-			count++
-		}
-		if count == 0 {
-			continue
-		}
-		weight := tier.Weight
-		if weight <= 0 {
-			weight = 1
-		}
-		total += (sum / float64(count)) * weight
-	}
-	return total
-}
-
 func aggregateAccumulatorNumbers(acc *Accumulator, keys runtimecontracts.ComputeKeyConfig, combine func(current, next float64, idx int) float64) float64 {
 	if acc == nil {
 		return 0
@@ -1118,34 +1071,6 @@ func normalizeStrings(values []string) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-func uniqueOrderedStrings(values []string) []string {
-	out := make([]string, 0, len(values))
-	seen := map[string]struct{}{}
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-	return out
-}
-
-func truthy(raw any) bool {
-	switch typed := raw.(type) {
-	case bool:
-		return typed
-	case string:
-		return strings.EqualFold(strings.TrimSpace(typed), "true")
-	default:
-		return false
-	}
 }
 
 func stringifyDedupValue(value any) string {

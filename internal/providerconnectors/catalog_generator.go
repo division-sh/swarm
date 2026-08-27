@@ -1105,11 +1105,6 @@ func decodeJSONStrict(body []byte, target any) error {
 	return nil
 }
 
-func cloneHTTPResponseSuccess(check runtimecontracts.HTTPResponseSuccess) *runtimecontracts.HTTPResponseSuccess {
-	out := check
-	return &out
-}
-
 func cloneStringMap(in map[string]string) map[string]string {
 	out := make(map[string]string, len(in))
 	for key, value := range in {

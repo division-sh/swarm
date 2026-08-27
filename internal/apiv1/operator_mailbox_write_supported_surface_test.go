@@ -563,15 +563,6 @@ func mailboxWriteParseDBTime(raw string) time.Time {
 	return time.Now().UTC()
 }
 
-func waitForMailboxWriteBusQuiescence(t *testing.T, bus *runtimebus.EventBus, description string) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := drainMailboxWriteBus(ctx, bus); err != nil {
-		t.Fatalf("%s bus drain: %v", description, err)
-	}
-}
-
 func waitForMailboxWriteSupportedSurface(t *testing.T, handler *Handler, db *sql.DB, bus *runtimebus.EventBus, runID, eventID, backend string) {
 	t.Helper()
 	requireAPIV1Convergence(t, fmt.Sprintf("mailbox_write supported surface for %s", backend), func() (bool, error) {

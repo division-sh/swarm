@@ -26,8 +26,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const gateLifecycleRequesterEntityID = "11111111-1111-4111-8111-111111111111"
-
 type gateLifecycleCardStore struct {
 	decisioncard.Store
 	createErr     error

@@ -3,7 +3,6 @@ package runforkadmission
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -349,13 +348,4 @@ func blockerCodes(blockers []runfork.RunForkUnsupportedBlocker) []string {
 		out = append(out, blocker.Code)
 	}
 	return out
-}
-
-func mustJSON(t *testing.T, value any) string {
-	t.Helper()
-	raw, err := json.Marshal(value)
-	if err != nil {
-		t.Fatalf("marshal JSON: %v", err)
-	}
-	return string(raw)
 }

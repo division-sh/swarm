@@ -107,19 +107,6 @@ var (
 	}
 )
 
-func newEntitiesCommand(opts rootCommandOptions) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "entities",
-		Short: "List workflow entities.",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return cmd.Help()
-		},
-	}
-	cmd.AddCommand(newEntitiesListCommand(opts))
-	return cmd
-}
-
 func newEntityCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "entity",

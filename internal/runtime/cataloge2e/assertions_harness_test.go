@@ -395,15 +395,6 @@ func catalogFlowInstanceForCausalFlow(db *sql.DB, workflow catalogWorkflowPersis
 	return runtimepipeline.WorkflowInstance{}, false, nil
 }
 
-func catalogPayloadMap(v any) map[string]any {
-	switch typed := v.(type) {
-	case map[string]any:
-		return cloneStringAnyMap(typed)
-	default:
-		return nil
-	}
-}
-
 func workflowStateDebugRows(db *sql.DB) (string, error) {
 	if db == nil {
 		return "", nil

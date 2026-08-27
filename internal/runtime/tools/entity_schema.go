@@ -14,17 +14,6 @@ type entityToolSchema struct {
 	Contract entityruntime.Contract
 }
 
-func entityToolSchemaForActor(source semanticview.Source, actor models.AgentConfig) (entityToolSchema, error) {
-	if source == nil {
-		return entityToolSchema{}, fmt.Errorf("workflow source is not configured")
-	}
-	contract, ok := entityruntime.ResolveForActor(source, actor)
-	if !ok {
-		return entityToolSchema{}, fmt.Errorf("flow-owned entity contract is not available for actor %s", strings.TrimSpace(actor.ID))
-	}
-	return entityToolSchema{Defined: true, Contract: contract}, nil
-}
-
 func entityToolSchemaForReadTarget(source semanticview.Source, actor models.AgentConfig, payload map[string]any) (entityToolSchema, error) {
 	if source == nil {
 		return entityToolSchema{}, fmt.Errorf("workflow source is not configured")

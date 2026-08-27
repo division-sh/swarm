@@ -743,8 +743,6 @@ func (p DurableHandoffProof) Validate() error {
 	return nil
 }
 
-func (p DurableHandoffProof) valid() bool { return p.Validate() == nil }
-
 type FailureDisposition string
 
 const (

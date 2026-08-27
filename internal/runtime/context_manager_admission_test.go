@@ -1051,27 +1051,6 @@ func runtimeAdmissionTestCatalog(t *testing.T, hashToken string) *providertrigge
 	return catalog
 }
 
-func runtimeAdmissionUnsignedTestCatalog(t *testing.T, hashToken string) *providertriggers.CatalogSnapshot {
-	t.Helper()
-	manifest := providertriggers.Manifest{
-		Provider: "acme", Secret: providertriggers.SecretManifest{Required: false},
-		DeliveryID: providertriggers.ValueSource{Header: "X-Acme-Delivery", Required: true},
-		EventType:  providertriggers.ValueSource{Literal: "event", Required: true},
-		EventName:  providertriggers.EventNameManifest{Literal: "inbound.acme"},
-		Ack:        providertriggers.AckManifest{Mode: "after_publish"},
-	}
-	catalog, err := providertriggers.NewCatalogSnapshot(providertriggers.CatalogEntry{
-		Identity: providertriggers.PackIdentity{
-			ID: "provider.acme", Version: "1.0.0", ManifestHash: "sha256:" + strings.Repeat(hashToken, 64), Provenance: packs.ProvenanceExternal,
-		},
-		Manifest: manifest, Source: "test", SourcePath: "/packs/acme",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return catalog
-}
-
 func runtimeAdmissionTestContext(t *testing.T, hash, alias string, catalog *providertriggers.CatalogSnapshot) BundleContext {
 	t.Helper()
 	contextDef := testBundleContext(t, hash, "inbound.acme")

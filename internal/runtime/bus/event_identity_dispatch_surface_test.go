@@ -439,34 +439,6 @@ func (f completeEventDispatchFixture) updateChainDepth(depth int) error {
 	return err
 }
 
-func (f completeEventDispatchFixture) assertNoDispatchMutation(t *testing.T) {
-	t.Helper()
-	var pipelineReceipts int
-	query := `SELECT COUNT(*) FROM event_receipts WHERE event_id = ? AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`
-	if f.dialect == "postgres" {
-		query = `SELECT COUNT(*) FROM event_receipts WHERE event_id = $1::uuid AND subscriber_type = 'platform' AND subscriber_id = 'pipeline'`
-	}
-	if err := f.db.QueryRowContext(f.ctx, query, f.event.ID()).Scan(&pipelineReceipts); err != nil {
-		t.Fatalf("count pipeline receipts: %v", err)
-	}
-	if pipelineReceipts != 0 {
-		t.Fatalf("pipeline receipts after corrupt readback = %d, want 0", pipelineReceipts)
-	}
-	if f.hasDecisionObligation(t) {
-		var status string
-		query = `SELECT status FROM decision_card_route_obligations WHERE event_id = ?`
-		if f.dialect == "postgres" {
-			query = `SELECT status FROM decision_card_route_obligations WHERE event_id = $1::uuid`
-		}
-		if err := f.db.QueryRowContext(f.ctx, query, f.event.ID()).Scan(&status); err != nil {
-			t.Fatalf("load decision obligation status: %v", err)
-		}
-		if status != "pending" {
-			t.Fatalf("decision obligation status after corrupt readback = %q, want pending", status)
-		}
-	}
-}
-
 func (f completeEventDispatchFixture) assertNoAgentDispatchMutation(t *testing.T) {
 	t.Helper()
 	var outcomes int
@@ -481,19 +453,6 @@ func (f completeEventDispatchFixture) assertNoAgentDispatchMutation(t *testing.T
 	if outcomes != 0 {
 		t.Fatalf("agent delivery outcomes after corrupt readback = %d, want 0", outcomes)
 	}
-}
-
-func (f completeEventDispatchFixture) hasDecisionObligation(t *testing.T) bool {
-	t.Helper()
-	var count int
-	query := `SELECT COUNT(*) FROM decision_card_route_obligations WHERE event_id = ?`
-	if f.dialect == "postgres" {
-		query = `SELECT COUNT(*) FROM decision_card_route_obligations WHERE event_id = $1::uuid`
-	}
-	if err := f.db.QueryRowContext(f.ctx, query, f.event.ID()).Scan(&count); err != nil {
-		t.Fatalf("count decision obligations: %v", err)
-	}
-	return count > 0
 }
 
 func (f completeEventDispatchFixture) decisionObligationStatus(t *testing.T, eventID string) string {
@@ -764,15 +723,6 @@ func assertCompleteLocalDelivery(t *testing.T, delivered <-chan *runtimebus.Loca
 		assertCompleteEventSnapshot(t, got, want)
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for complete event dispatch")
-	}
-}
-
-func assertNoCompleteEventDelivery(t *testing.T, delivered <-chan events.Event) {
-	t.Helper()
-	select {
-	case got := <-delivered:
-		t.Fatalf("corrupt event dispatched: %#v", got)
-	case <-time.After(50 * time.Millisecond):
 	}
 }
 

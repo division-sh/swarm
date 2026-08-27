@@ -491,23 +491,3 @@ func flowStatesForTimer(source semanticview.Source, flowID string) []string {
 	}
 	return source.FlowStates("")
 }
-
-func participantExistsLocal(source semanticview.Source, participant string) bool {
-	participant = strings.TrimSpace(participant)
-	if participant == "" || source == nil {
-		return false
-	}
-	if participant == "runtime" || participant == "human" {
-		return true
-	}
-	for _, declaration := range semanticview.AgentDeclarations(source) {
-		plan, err := semanticview.ScopedAgentNamePlan(source, declaration)
-		if err != nil {
-			continue
-		}
-		if plan.AgentID == participant || strings.TrimSpace(declaration.Entry.Role) == participant {
-			return true
-		}
-	}
-	return false
-}

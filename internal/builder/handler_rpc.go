@@ -2,7 +2,6 @@ package builder
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -16,32 +15,6 @@ import (
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
-}
-
-func (h *handler) handleRPC(w http.ResponseWriter, r *http.Request) {
-	var req Request
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, RPCResponse{
-			JSONRPC: "2.0",
-			Error: &RPCError{
-				Code:    -32700,
-				Message: err.Error(),
-			},
-		})
-		return
-	}
-	resp := RPCResponse{
-		JSONRPC: "2.0",
-		ID:      req.ID,
-	}
-	result, rpcErr := h.dispatchRPC(r.Context(), strings.TrimSpace(req.Method), req.Params)
-	if rpcErr != nil {
-		resp.Error = rpcErr
-		writeJSON(w, http.StatusOK, resp)
-		return
-	}
-	resp.Result = result
-	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *handler) dispatchRPC(ctx context.Context, method string, params map[string]any) (any, *RPCError) {

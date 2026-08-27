@@ -34,24 +34,3 @@ func cloneRouteActivationVariables(in map[string]string) map[string]string {
 	}
 	return out
 }
-
-func flowInstanceRouteMaterializationVars(req FlowInstanceRouteMaterializationRequest, templateFlowID string) map[string]string {
-	identity := req.Identity
-	out := cloneRouteActivationVariables(req.ActivationVariables)
-	if out == nil {
-		out = map[string]string{}
-	}
-	setRouteBuiltin(out, "flow_instance_path", identity.InstancePath)
-	setRouteBuiltin(out, "instance_id", identity.InstanceID)
-	setRouteBuiltin(out, "template_id", templateFlowID)
-	setRouteBuiltin(out, "flow_scope_key", identity.ScopeKey)
-	return out
-}
-
-func setRouteBuiltin(vars map[string]string, key, value string) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return
-	}
-	vars[key] = value
-}

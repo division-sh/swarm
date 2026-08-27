@@ -78,29 +78,6 @@ func hasNodeDeliveryRoute(routes []events.DeliveryRoute) bool {
 	return false
 }
 
-func hasDeliveryRouteRecipient(routes []events.DeliveryRoute, recipient events.DeliveryRecipient) bool {
-	if recipient.Empty() {
-		return false
-	}
-	for _, route := range events.NormalizeDeliveryRoutes(routes) {
-		if route.Recipient == recipient {
-			return true
-		}
-	}
-	return false
-}
-
-func deliveryRouteRecipientIDs(routes []events.DeliveryRoute) []string {
-	routes = events.NormalizeDeliveryRoutes(routes)
-	out := make([]string, 0, len(routes))
-	for _, route := range routes {
-		if !route.Recipient.Empty() {
-			out = append(out, route.Recipient.ID())
-		}
-	}
-	return uniqueStrings(out)
-}
-
 func deliveryRouteNodeRecipientIDs(routes []events.DeliveryRoute) []string {
 	routes = events.NormalizeDeliveryRoutes(routes)
 	out := make([]string, 0, len(routes))

@@ -7,7 +7,6 @@ import (
 )
 
 var agentIdentityFields = storeagent.IdentityFields
-var agentIdentityFromColumns = storeagent.IdentityFromColumns
 
 func IsAgentTargetAmbiguous(err error) bool {
 	return operatorread.IsAgentTargetAmbiguous(err)

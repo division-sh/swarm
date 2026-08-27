@@ -8,7 +8,6 @@ import (
 )
 
 type persistedAgentProjection = storeagent.PersistedAgentProjection
-type persistedAgentRuntimeDescriptor = storeagent.PersistedAgentRuntimeDescriptor
 
 var projectPersistedAgentConfig = storeagent.ProjectAgentConfig
 var hydratePersistedAgentConfig = storeagent.HydrateAgentConfig
@@ -23,9 +22,6 @@ var redactPayloadValue = storeagent.RedactPayloadValue
 var redactText = storeagent.RedactText
 var redactName = storeagent.RedactName
 var isNameKey = storeagent.IsNameKey
-var isPaymentKey = storeagent.IsPaymentKey
-var agentPersistedStatus = storeagent.PersistedStatus
-var coalesce = storeagent.Coalesce
 
 func (s *PostgresStore) LoadAgents(ctx context.Context) ([]runtimemanager.PersistedAgent, error) {
 	return s.agentPostgresOwner.LoadAgents(ctx)

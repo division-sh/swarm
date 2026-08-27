@@ -27,7 +27,6 @@ type handler struct {
 	processWorkOwner *worklifetime.Process
 	projectControl   ProjectController
 	runHub           *runHub
-	mux              *http.ServeMux
 }
 
 var healthHeartbeatInterval = 5 * time.Second

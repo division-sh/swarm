@@ -559,22 +559,6 @@ func rejectSQLitePendingDrainTransition(ctx context.Context, tx *sql.Tx, req run
 	return runtimefailures.New(runtimefailures.ClassLifecycleConflict, "provider_attempt_drain_transition_blocked", "agent-lifecycle-store", req.OperationKind, map[string]any{"agent_id": req.AgentID, "runtime_epoch": previous.Epoch, "generation": previous.Generation, "target_phase": req.TargetPhase})
 }
 
-func (s *AgentPostgresOwner) runPostgresLifecycleMutation(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-	if err := s.requireCurrentSchema(); err != nil {
-		return err
-	}
-	return s.backend.RunTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectPostgres)
-		if err != nil {
-			return err
-		}
-		if err := operation(txctx, tx, story); err != nil {
-			return err
-		}
-		return story.Finalize(txctx)
-	})
-}
-
 func addLifecycleRevisionEffects(effects *privaterunforkrevision.Effects, result runtimemanager.AgentLifecycleTransitionResult) error {
 	for _, session := range result.Subordinate.Sessions {
 		if err := effects.Add(session.RunID, privaterunforkrevision.FamilyAgentSessions); err != nil {
@@ -582,22 +566,6 @@ func addLifecycleRevisionEffects(effects *privaterunforkrevision.Effects, result
 		}
 	}
 	return nil
-}
-
-func (s *AgentSQLiteOwner) runSQLiteLifecycleMutation(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
-	if err := s.requireCurrentSchema(); err != nil {
-		return err
-	}
-	return s.backend.RunTransaction(ctx, "sqlite commit agent lifecycle transition", func(txctx context.Context, tx *sql.Tx) error {
-		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
-		if err != nil {
-			return err
-		}
-		if err := operation(txctx, tx, story); err != nil {
-			return err
-		}
-		return story.Finalize(txctx)
-	})
 }
 
 func agentLifecycleAuthorActivityDraft(req runtimemanager.AgentLifecycleTransition, result runtimemanager.AgentLifecycleTransitionResult) runtimeauthoractivity.Draft {

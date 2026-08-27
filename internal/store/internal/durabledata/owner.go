@@ -1807,18 +1807,6 @@ func persistedTime(raw any) (time.Time, bool, error) {
 	return time.Time{}, false, fmt.Errorf("invalid persisted time %q", text)
 }
 
-func pageDefects(defects []runtimedata.ValidationDefect) runtimedata.PageResult[runtimedata.ValidationDefect] {
-	return runtimedata.FirstEvidencePage(defects)
-}
-
-func deltaKeys(keys []runtimedata.BusinessKey) []runtimedata.DeltaKey {
-	out := make([]runtimedata.DeltaKey, len(keys))
-	for index, key := range keys {
-		out[index] = runtimedata.DeltaKey{Key: key}
-	}
-	return out
-}
-
 func pagePins(pins []runtimedata.Pin) runtimedata.PageResult[runtimedata.Pin] {
 	runtimedata.SortPins(pins)
 	return runtimedata.FirstEvidencePage(pins)
@@ -1826,13 +1814,4 @@ func pagePins(pins []runtimedata.Pin) runtimedata.PageResult[runtimedata.Pin] {
 
 func pagePruneDefects(defects []runtimedata.PruneDefect) runtimedata.PageResult[runtimedata.PruneDefect] {
 	return runtimedata.FirstEvidencePage(defects)
-}
-
-func sortedDeclarationKeys(declarations []runtimedata.Declaration) []string {
-	keys := make([]string, 0, len(declarations))
-	for _, declaration := range declarations {
-		keys = append(keys, declaration.Ref.Key())
-	}
-	sort.Strings(keys)
-	return keys
 }

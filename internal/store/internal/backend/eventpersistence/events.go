@@ -3,7 +3,6 @@ package eventpersistence
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -13,10 +12,8 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
-	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
-	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storeactivityjournal "github.com/division-sh/swarm/internal/store/internal/backend/activityjournal"
@@ -25,7 +22,6 @@ import (
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storescenarioexecution "github.com/division-sh/swarm/internal/store/internal/backend/scenarioexecutionpersistence"
-	"github.com/google/uuid"
 )
 
 const (
@@ -45,46 +41,6 @@ type rowQueryer interface {
 type eventReadQueryer interface {
 	rowQueryer
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-}
-
-type execQueryer interface {
-	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
-	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
-}
-
-func requireActiveRunForEvent(ctx context.Context, tx *sql.Tx, eventID string, postgres bool) error {
-	return requireActiveRunForEventMode(ctx, tx, eventID, postgres, false)
-}
-
-func requireActiveRunForEventMode(ctx context.Context, tx *sql.Tx, eventID string, postgres, allowMissing bool) error {
-	eventID = strings.TrimSpace(eventID)
-	if eventID == "" {
-		return fmt.Errorf("event_id is required")
-	}
-	if tx == nil {
-		return errors.New("require active event run: transaction is required")
-	}
-	query := `SELECT COALESCE(CAST(run_id AS TEXT), '') FROM events WHERE event_id = ?`
-	if postgres {
-		query = `SELECT COALESCE(run_id::text, '') FROM events WHERE event_id = $1::uuid`
-	}
-	var runID string
-	if err := tx.QueryRowContext(ctx, query, eventID).Scan(&runID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			if allowMissing {
-				return nil
-			}
-			return fmt.Errorf("require active event run: event %s not found", eventID)
-		}
-		return fmt.Errorf("require active event run: %w", err)
-	}
-	if strings.TrimSpace(runID) == "" {
-		return nil
-	}
-	if postgres {
-		return requirePostgresRunActive(ctx, tx, runID)
-	}
-	return requireSQLiteRunActive(ctx, tx, runID)
 }
 
 func eventReadQueryerFromDB(db eventReadQueryer) eventReadQueryer {
@@ -151,28 +107,6 @@ func (s *EventPostgresOwner) appendAdmittedEventTxOutcome(ctx context.Context, t
 
 func (s *EventPostgresOwner) AppendAdmittedEventTxOutcome(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *revisionEffects, admitted events.AdmittedEvent, settlement events.RouteSettlement) (runtimebus.EventAppendOutcome, error) {
 	return s.appendAdmittedEventTxOutcome(ctx, tx, story, effects, admitted, settlement)
-}
-
-func sanitizeOptionalUUID(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ""
-	}
-	if _, err := uuid.Parse(raw); err != nil {
-		return ""
-	}
-	return raw
-}
-
-func validateOptionalEntityUUID(raw string) (string, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", nil
-	}
-	if _, err := uuid.Parse(raw); err != nil {
-		return "", fmt.Errorf("invalid entity_id %q: must be a UUID", raw)
-	}
-	return raw, nil
 }
 
 func (s *EventPostgresOwner) EventExists(ctx context.Context, eventID string) (bool, error) {
@@ -387,74 +321,6 @@ func isTransientEventStoreConnectionError(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "bad connection")
 }
 
-func deliveryContextJSON(deliveryContext events.DeliveryContext) json.RawMessage {
-	deliveryContext = deliveryContext.Normalized()
-	if deliveryContext.Empty() {
-		return json.RawMessage(`{}`)
-	}
-	raw, err := json.Marshal(deliveryContext)
-	if err != nil {
-		return json.RawMessage(`{}`)
-	}
-	return raw
-}
-
-func decodeDeliveryContextJSON(raw []byte) events.DeliveryContext {
-	if len(raw) == 0 {
-		return events.DeliveryContext{}
-	}
-	var deliveryContext events.DeliveryContext
-	if err := json.Unmarshal(raw, &deliveryContext); err != nil {
-		return events.DeliveryContext{}
-	}
-	return deliveryContext.Normalized()
-}
-
-func deliveryPayloadProjectionJSON(projection events.DeliveryPayloadProjection) (json.RawMessage, error) {
-	canonical, err := projection.Canonical()
-	if err != nil {
-		return nil, err
-	}
-	raw, err := canonicaljson.Bytes(canonical)
-	if err != nil {
-		return nil, err
-	}
-	return json.RawMessage(raw), nil
-}
-
-func decodeDeliveryPayloadProjectionJSON(raw []byte) (events.DeliveryPayloadProjection, error) {
-	if len(raw) == 0 {
-		return events.DeliveryPayloadProjection{}, nil
-	}
-	var projection events.DeliveryPayloadProjection
-	if err := canonicaljson.DecodeInto(raw, &projection); err != nil {
-		return events.DeliveryPayloadProjection{}, err
-	}
-	return projection.Canonical()
-}
-
-func deliveryRouteReasonCode(route events.DeliveryRoute) string {
-	switch {
-	case route.Recipient.IsAgent():
-		return "matched_agent_subscription"
-	case route.Recipient.IsNode():
-		return "matched_node_subscription"
-	default:
-		return "matched_subscription"
-	}
-}
-
-func committedReplayScopeReasonCode(scope runtimepipelineobligation.CommittedScope) (string, error) {
-	switch scope {
-	case runtimepipelineobligation.ScopeDirect:
-		return replayScopeReasonDirect, nil
-	case runtimepipelineobligation.ScopeSubscribed:
-		return replayScopeReasonSubscribed, nil
-	default:
-		return "", fmt.Errorf("committed replay scope: unsupported scope %q", strings.TrimSpace(string(scope)))
-	}
-}
-
 func committedReplayScopeFromReasonCode(reasonCode string) (runtimepipelineobligation.CommittedScope, bool) {
 	switch strings.TrimSpace(reasonCode) {
 	case replayScopeReasonDirect:
@@ -475,30 +341,6 @@ func chooseRowQueryer(db rowQueryer, tx *sql.Tx) rowQueryer {
 		return tx
 	}
 	return db
-}
-
-func chooseExecQueryer(db execQueryer, tx *sql.Tx) execQueryer {
-	if tx != nil {
-		return tx
-	}
-	return db
-}
-
-func lookupEventRunID(ctx context.Context, q rowQueryer, eventID string) string {
-	eventID = strings.TrimSpace(eventID)
-	if q == nil || eventID == "" {
-		return ""
-	}
-	var runID string
-	if err := q.QueryRowContext(ctx, `
-		SELECT COALESCE(run_id::text, '')
-		FROM events
-		WHERE event_id = $1::uuid
-		LIMIT 1
-	`, eventID).Scan(&runID); err != nil {
-		return ""
-	}
-	return strings.TrimSpace(runID)
 }
 
 func (s *EventPostgresOwner) ensureRunRow(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, runID, triggerEventID, triggerEventType string) error {
@@ -529,106 +371,4 @@ func (s *EventPostgresOwner) ensureRuntimeLogRunRow(ctx context.Context, tx *sql
 		return nil
 	}
 	return s.RunLifecyclePostgresOwner.RequirePresentTx(ctx, tx, runID)
-}
-
-func eventRouteStorageEnvelope(evt events.Event) (sourceRoute, targetRoute, targetSet []byte) {
-	envelope := evt.NormalizedEnvelope()
-	sourceRoute = routeIdentityJSON(envelope.Source)
-	targetRoute = routeIdentityJSON(envelope.Target)
-	targetSet = routeIdentitySetJSON(envelope.TargetSet)
-	return sourceRoute, targetRoute, targetSet
-}
-
-func eventHasRouteIdentity(evt events.Event) bool {
-	envelope := evt.NormalizedEnvelope()
-	return !envelope.Source.Empty() || !envelope.Target.Empty() || len(envelope.TargetSet) > 0
-}
-
-func routeIdentityJSON(route events.RouteIdentity) []byte {
-	route = route.Normalized()
-	if route.Empty() {
-		return []byte("{}")
-	}
-	payload := map[string]string{}
-	if route.FlowInstance != "" {
-		payload["flow_instance"] = route.FlowInstance
-	}
-	if route.EntityID != "" {
-		payload["entity_id"] = route.EntityID
-	}
-	if route.FlowID != "" {
-		payload["flow_id"] = route.FlowID
-	}
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return []byte("{}")
-	}
-	return encoded
-}
-
-func routeIdentitySetJSON(routes []events.RouteIdentity) []byte {
-	if len(routes) == 0 {
-		return []byte("[]")
-	}
-	payload := make([]map[string]string, 0, len(routes))
-	for _, route := range routes {
-		route = route.Normalized()
-		if route.Empty() {
-			continue
-		}
-		item := map[string]string{}
-		if route.FlowInstance != "" {
-			item["flow_instance"] = route.FlowInstance
-		}
-		if route.EntityID != "" {
-			item["entity_id"] = route.EntityID
-		}
-		if route.FlowID != "" {
-			item["flow_id"] = route.FlowID
-		}
-		payload = append(payload, item)
-	}
-	if len(payload) == 0 {
-		return []byte("[]")
-	}
-	encoded, err := json.Marshal(payload)
-	if err != nil {
-		return []byte("[]")
-	}
-	return encoded
-}
-
-func decodeRouteIdentityJSON(raw []byte) events.RouteIdentity {
-	if len(raw) == 0 {
-		return events.RouteIdentity{}
-	}
-	var route events.RouteIdentity
-	if err := json.Unmarshal(raw, &route); err != nil {
-		return events.RouteIdentity{}
-	}
-	return route.Normalized()
-}
-
-func mapPipelineStatusToOutcome(status string) string {
-	switch strings.TrimSpace(strings.ToLower(status)) {
-	case "error", "dead_letter":
-		return "dead_letter"
-	default:
-		return "success"
-	}
-}
-
-func pipelineReceiptReasonCode(status string, failure *runtimefailures.Envelope) string {
-	status = strings.TrimSpace(strings.ToLower(status))
-	if failure != nil {
-		return strings.TrimSpace(failure.Detail.Code)
-	}
-	switch status {
-	case "dead_letter":
-		return "pipeline_dead_letter"
-	case "error":
-		return "pipeline_error"
-	default:
-		return "pipeline_persisted"
-	}
 }

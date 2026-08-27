@@ -954,33 +954,6 @@ func exactDescriptorAddressFields(raw any) (map[string]string, error) {
 	return out, nil
 }
 
-func descriptorAddressFields(fieldsRaw any) map[string]string {
-	return descriptorAddressFieldsFromJSON(fieldsRaw, "entity.")
-}
-
-func descriptorAddressFieldsFromJSON(raw any, prefix string) map[string]string {
-	values, err := decodeDescriptorJSONMap(raw)
-	if err != nil || len(values) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(values))
-	for key, value := range values {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		scalar, ok := descriptorScalarString(value)
-		if !ok || scalar == "" {
-			continue
-		}
-		out[prefix+key] = scalar
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
 func decodeDescriptorJSONMap(raw any) (map[string]any, error) {
 	data := jsonRawMessageValue(raw)
 	if len(data) == 0 || strings.TrimSpace(string(data)) == "" || strings.TrimSpace(string(data)) == "null" {

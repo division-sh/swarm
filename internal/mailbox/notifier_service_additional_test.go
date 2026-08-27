@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -71,89 +70,6 @@ func TestEmailNotifier_ContextCancellation(t *testing.T) {
 		t.Fatal("expected context cancellation error")
 	}
 }
-
-type fakeMailboxStore struct {
-	items map[string]runtimetools.MailboxItem
-}
-
-func newFakeMailbox(items ...runtimetools.MailboxItem) *fakeMailboxStore {
-	m := &fakeMailboxStore{items: map[string]runtimetools.MailboxItem{}}
-	for _, it := range items {
-		m.items[it.ID] = it
-	}
-	return m
-}
-
-func (m *fakeMailboxStore) InsertMailboxItem(_ context.Context, item runtimetools.MailboxItem) (string, error) {
-	if strings.TrimSpace(item.ID) == "" {
-		item.ID = "id-" + strings.TrimSpace(item.Type)
-	}
-	if strings.TrimSpace(item.Status) == "" {
-		item.Status = "pending"
-	}
-	m.items[item.ID] = item
-	return item.ID, nil
-}
-
-func (m *fakeMailboxStore) ListMailboxItems(_ context.Context, status string, limit int) ([]runtimetools.MailboxItem, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	if strings.TrimSpace(status) == "" {
-		status = "pending"
-	}
-	out := make([]runtimetools.MailboxItem, 0, len(m.items))
-	for _, it := range m.items {
-		if it.Status == status {
-			out = append(out, it)
-		}
-	}
-	if len(out) > limit {
-		out = out[:limit]
-	}
-	return out, nil
-}
-
-func (m *fakeMailboxStore) CountMailboxItems(_ context.Context, status string) (int, error) {
-	if strings.TrimSpace(status) == "" {
-		status = "pending"
-	}
-	n := 0
-	for _, it := range m.items {
-		if it.Status == status {
-			n++
-		}
-	}
-	return n, nil
-}
-
-func (m *fakeMailboxStore) CountUnreadInformationalNotices(_ context.Context) (int, error) {
-	n := 0
-	for _, item := range m.items {
-		if item.Type == runtimetools.NotifyHumanMailboxItemType && item.Status == "pending" && !item.Notified {
-			n++
-		}
-	}
-	return n, nil
-}
-
-func (m *fakeMailboxStore) GetMailboxItem(_ context.Context, id string) (runtimetools.MailboxItem, error) {
-	it, ok := m.items[id]
-	if !ok {
-		return runtimetools.MailboxItem{}, context.Canceled
-	}
-	return it, nil
-}
-
-func (m *fakeMailboxStore) ExpireMailboxItems(context.Context, int) ([]runtimetools.MailboxItem, error) {
-	return nil, nil
-}
-
-func (m *fakeMailboxStore) ListUnnotifiedCriticalMailboxItems(context.Context, int) ([]runtimetools.MailboxItem, error) {
-	return nil, nil
-}
-
-func (m *fakeMailboxStore) MarkMailboxItemNotified(context.Context, string) error { return nil }
 
 func TestMailbox_FilterHelpers(t *testing.T) {
 	items := []runtimetools.MailboxItem{

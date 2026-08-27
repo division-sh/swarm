@@ -276,14 +276,6 @@ func IsRuntimePlatformEvent(event Event) bool {
 	return event.AdmissionClass() == EventAdmissionRuntimeControl || event.AdmissionClass() == EventAdmissionRuntimeDiagnostic
 }
 
-func mustProducerIdentity(producerType EventProducerType, producerID string) ProducerIdentity {
-	producer, err := NewProducerIdentity(producerType, producerID)
-	if err != nil {
-		panic(err)
-	}
-	return producer
-}
-
 // IntegrityProjection is the canonical exact semantic input for integrity
 // fingerprints. It includes every event-owned authority fact.
 func IntegrityProjection(event Event) (any, error) {

@@ -8,16 +8,7 @@ import (
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
-	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 )
-
-type ownerDeclaringEventStore struct {
-	runtimebus.InMemoryEventStore
-}
-
-func (ownerDeclaringEventStore) PipelineObligations() runtimepipelineobligation.Store {
-	return nil
-}
 
 func TestEventBusDurabilityBoundaryRequiresOneDeclaredOwner(t *testing.T) {
 	if _, err := runtimebus.NewEventBusWithOptions(runtimebus.InMemoryEventStore{}, runtimebus.EventBusOptions{ReceiverExecution: eventreceiver.NormalExecution(), ExecutionPosture: executionposture.Live}); err == nil ||

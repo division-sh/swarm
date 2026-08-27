@@ -301,30 +301,6 @@ func importBoundaryFlowWildcardSubscriptions(scope FlowScope) []string {
 	return sortedStringSet(seen)
 }
 
-func importBoundaryRuntimeDirectOwners(bundle *runtimecontracts.WorkflowContractBundle, eventType string) []string {
-	if bundle == nil {
-		return nil
-	}
-	if owners := bundle.Semantics.EventOwners[eventType]; len(owners) > 0 {
-		return append([]string{}, owners...)
-	}
-	if strings.Contains(eventType, "/") {
-		return nil
-	}
-	var matched []string
-	for canonical, owners := range bundle.Semantics.EventOwners {
-		canonical = eventidentity.Normalize(canonical)
-		if eventidentity.LeafName(canonical) != eventType {
-			continue
-		}
-		if matched != nil {
-			return nil
-		}
-		matched = append([]string{}, owners...)
-	}
-	return matched
-}
-
 func importBoundaryWildcardGrantIssues(source Source, parent, child ProjectScope, site importBoundarySite, grant runtimecontracts.FlowPackageObserveGrant) []ImportBoundaryWildcardIssue {
 	sourceRef := strings.TrimSpace(grant.Source)
 	base := ImportBoundaryWildcardIssue{
@@ -811,22 +787,6 @@ func importBoundaryBasePathForFlow(source Source, flowID string) string {
 	return eventidentity.Normalize(source.FlowPath(flowID))
 }
 
-func importBoundaryNodeLocalEvents(source Source, nodeID string, itemSource runtimecontracts.ContractItemSource) map[string]struct{} {
-	if source == nil {
-		return nil
-	}
-	if flowID := strings.TrimSpace(itemSource.FlowID); flowID != "" {
-		if flow, ok := source.FlowScopeByID(flowID); ok {
-			return importBoundaryFlowLocalEventSet(source, flow)
-		}
-	}
-	projectByKey, _ := importBoundaryScopeIndexes(source)
-	if project, ok := projectByKey[normalizeImportPackageKey(itemSource.PackageKey)]; ok {
-		return importBoundaryProjectLocalEventSet(project)
-	}
-	return nil
-}
-
 func importBoundaryFlowLocalEventSet(source Source, scope FlowScope) map[string]struct{} {
 	out := map[string]struct{}{}
 	for eventType := range scope.Events {
@@ -908,19 +868,6 @@ func normalizeImportBoundaryWildcardPattern(value ImportBoundaryWildcardPattern)
 	value.LocalizedEvent = eventidentity.Normalize(value.LocalizedEvent)
 	value.RouteSource = strings.TrimSpace(value.RouteSource)
 	return value
-}
-
-func appendUniqueStringLocal(in []string, value string) []string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return in
-	}
-	for _, existing := range in {
-		if strings.TrimSpace(existing) == value {
-			return in
-		}
-	}
-	return append(in, value)
 }
 
 func sortImportBoundaryWildcardPatterns(values []ImportBoundaryWildcardPattern) {

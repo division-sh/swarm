@@ -425,9 +425,6 @@ type stubStateRepo struct{}
 type recordingStateRepo struct {
 	saves int
 }
-type actionMergeStateRepo struct {
-	snapshot StateSnapshot
-}
 type testPublicationCommitter interface {
 	CommitPublications(context.Context, []EmitIntent) error
 }
@@ -443,7 +440,6 @@ type composedMutationOwner struct {
 	order        *[]string
 }
 type stubLocker struct{}
-type stubPublicationCommitter struct{}
 type recordingPublicationCommitter struct {
 	intents []EmitIntent
 	err     error
@@ -497,12 +493,6 @@ func (r *recordingStateRepo) LoadState(context.Context, StateAddress) (StateSnap
 }
 func (r *recordingStateRepo) SaveState(context.Context, StateAddress, StateMutation) error {
 	r.saves++
-	return nil
-}
-func (r actionMergeStateRepo) LoadState(context.Context, StateAddress) (StateSnapshot, bool, error) {
-	return r.snapshot, true, nil
-}
-func (actionMergeStateRepo) SaveState(context.Context, StateAddress, StateMutation) error {
 	return nil
 }
 func (o stubMutationOwner) CommitEngineMutation(ctx context.Context, mutation EngineMutation) (CommittedEngineMutation, error) {
@@ -568,7 +558,6 @@ func (l lockOrderLocker) WithEntityLock(ctx context.Context, _ identity.EntityID
 	}
 	return fn(ctx)
 }
-func (stubPublicationCommitter) CommitPublications(context.Context, []EmitIntent) error { return nil }
 func (o *recordingPublicationCommitter) CommitPublications(_ context.Context, intents []EmitIntent) error {
 	if o.err != nil {
 		return o.err
@@ -1775,13 +1764,6 @@ func requireProjectedScore(t *testing.T, result ExecutionResult, field string) m
 		t.Fatalf("projected score leaked payload extra field: %#v", score)
 	}
 	return score
-}
-
-func requireNoProjectedScores(t *testing.T, result ExecutionResult) {
-	t.Helper()
-	if _, exists := result.StateMutation.Fields["scores"]; exists {
-		t.Fatalf("projected scores unexpectedly present: %#v", result.StateMutation.Fields["scores"])
-	}
 }
 
 func TestExecutor_AccumulatorProjectionMaterializesForQualifiedRuntimeEvent(t *testing.T) {

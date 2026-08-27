@@ -316,10 +316,6 @@ func (e *Executor) execMCPTool(ctx context.Context, actor models.AgentConfig, to
 	})
 }
 
-func (e *Executor) resolveToolCredentials(ctx context.Context, keys []string) (map[string]any, error) {
-	return e.resolveToolCredentialsWithMapper(ctx, keys, func(key string) (string, error) { return key, nil })
-}
-
 func (e *Executor) resolveToolCredentialsForActor(ctx context.Context, actor models.AgentConfig, keys []string) (map[string]any, error) {
 	e.mu.RLock()
 	source := e.workflowSource

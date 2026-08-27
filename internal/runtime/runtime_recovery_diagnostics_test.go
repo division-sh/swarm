@@ -3,7 +3,6 @@ package runtime
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -486,53 +485,6 @@ func (*startupReadinessFinalizationStore) LoadRouteRecoveryProjection(
 	return runtimepipeline.WorkflowInstanceRouteRecoveryProjection{}, errors.New("unexpected readiness route projection")
 }
 
-type startupRecoveryFlakyManagerStore struct {
-	remainingFailures int
-	loadErr           error
-}
-
-func (*startupRecoveryFlakyManagerStore) CommitAgentLifecycleTransition(_ context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
-	return startupRecoveryLifecycleResult(req), nil
-}
-
-func (s *startupRecoveryFlakyManagerStore) UpsertAgent(context.Context, runtimemanager.PersistedAgent) error {
-	return nil
-}
-
-func (s *startupRecoveryFlakyManagerStore) LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error) {
-	if s.remainingFailures > 0 {
-		s.remainingFailures--
-		if s.loadErr != nil {
-			return nil, s.loadErr
-		}
-	}
-	return nil, nil
-}
-
-func (*startupRecoveryFlakyManagerStore) EnsureEntitySchema(context.Context, string) error {
-	return nil
-}
-
-type startupManagerReplayRuntimeStore struct {
-	agents []runtimemanager.PersistedAgent
-}
-
-func (*startupManagerReplayRuntimeStore) CommitAgentLifecycleTransition(_ context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
-	return startupRecoveryLifecycleResult(req), nil
-}
-
-func (*startupManagerReplayRuntimeStore) UpsertAgent(context.Context, runtimemanager.PersistedAgent) error {
-	return nil
-}
-
-func (s *startupManagerReplayRuntimeStore) LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error) {
-	return append([]runtimemanager.PersistedAgent(nil), s.agents...), nil
-}
-
-func (*startupManagerReplayRuntimeStore) EnsureEntitySchema(context.Context, string) error {
-	return nil
-}
-
 type startupManagerReplayRuntimeAgent struct{ id string }
 
 func (a startupManagerReplayRuntimeAgent) ID() string                      { return a.id }
@@ -639,72 +591,11 @@ func latestStartupRecoveryDecisionLog(t *testing.T, db *sql.DB) (level, message 
 	return payload.LogLevel, payload.Message, payload.Failure, payload.Detail
 }
 
-type runtimeAftermathLog struct {
-	level     string
-	action    string
-	failure   *runtimefailures.Envelope
-	eventType string
-	detail    map[string]any
-}
-
 func requireFailureCode(t testing.TB, failure *runtimefailures.Envelope, code string) {
 	t.Helper()
 	if failure == nil || failure.Detail.Code != code {
 		t.Fatalf("failure = %#v, want detail code %q", failure, code)
 	}
-}
-
-func requireNestedFailureCode(t testing.TB, detail map[string]any, key, code string) {
-	t.Helper()
-	raw, err := json.Marshal(detail[key])
-	if err != nil {
-		t.Fatalf("marshal %s: %v", key, err)
-	}
-	failure, err := runtimefailures.UnmarshalEnvelope(raw)
-	if err != nil {
-		t.Fatalf("decode %s: %v (value=%#v)", key, err, detail[key])
-	}
-	if failure.Detail.Code != code {
-		t.Fatalf("%s failure = %#v, want detail code %q", key, failure, code)
-	}
-}
-
-func listRuntimeLogsByAction(t *testing.T, db *sql.DB, action string) []runtimeAftermathLog {
-	t.Helper()
-	rows, err := db.QueryContext(testAuthorActivityContext(context.Background()), `
-		SELECT payload
-		FROM events
-		WHERE event_name = 'platform.runtime_log'
-		  AND payload->'details'->>'action' = $1
-		ORDER BY created_at ASC
-	`, action)
-	if err != nil {
-		t.Fatalf("query runtime logs by action: %v", err)
-	}
-	defer rows.Close()
-
-	out := []runtimeAftermathLog{}
-	for rows.Next() {
-		var payloadRaw []byte
-		if err := rows.Scan(&payloadRaw); err != nil {
-			t.Fatalf("scan runtime log payload: %v", err)
-		}
-		payload, err := DecodeCanonicalRuntimeLogPayload(payloadRaw)
-		if err != nil {
-			t.Fatalf("DecodeCanonicalRuntimeLogPayload: %v", err)
-		}
-		out = append(out, runtimeAftermathLog{
-			level:     payload.LogLevel,
-			action:    payload.Action,
-			failure:   payload.Failure,
-			eventType: payload.EventType,
-			detail:    payload.Detail,
-		})
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("runtime log rows: %v", err)
-	}
-	return out
 }
 
 func detailString(v any) string {

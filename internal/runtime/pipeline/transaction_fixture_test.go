@@ -119,13 +119,6 @@ func FlushPipelineRollbackActions(actions []OwnerAction) {
 	flushPipelineRollbackActions(actions)
 }
 
-func dbExecContext(ctx context.Context, db *sql.DB, query string, args ...any) (sql.Result, error) {
-	if tx, ok := sqlTxFromContext(ctx); ok {
-		return tx.ExecContext(ctx, query, args...)
-	}
-	return db.ExecContext(ctx, query, args...)
-}
-
 func dbQueryContext(ctx context.Context, db *sql.DB, query string, args ...any) (*sql.Rows, error) {
 	if tx, ok := sqlTxFromContext(ctx); ok {
 		return tx.QueryContext(ctx, query, args...)

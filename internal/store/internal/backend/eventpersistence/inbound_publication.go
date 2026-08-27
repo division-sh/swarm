@@ -574,26 +574,6 @@ func canonicalInboundRecipientManifest(raw json.RawMessage) (json.RawMessage, st
 	return runtimeinbound.CanonicalRecipientManifest(routes)
 }
 
-func decodeInboundEventEnvelope(entityID, flowInstance, scope string, sourceRouteRaw, targetRouteRaw, targetSetRaw []byte) (events.EventEnvelope, error) {
-	envelope := events.EventEnvelope{EntityID: strings.TrimSpace(entityID), FlowInstance: strings.Trim(strings.TrimSpace(flowInstance), "/"), Scope: events.EventScope(strings.TrimSpace(scope))}
-	if len(sourceRouteRaw) > 0 {
-		if err := json.Unmarshal(sourceRouteRaw, &envelope.Source); err != nil {
-			return events.EventEnvelope{}, fmt.Errorf("decode inbound event source route: %w", err)
-		}
-	}
-	if len(targetRouteRaw) > 0 {
-		if err := json.Unmarshal(targetRouteRaw, &envelope.Target); err != nil {
-			return events.EventEnvelope{}, fmt.Errorf("decode inbound event target route: %w", err)
-		}
-	}
-	if len(targetSetRaw) > 0 {
-		if err := json.Unmarshal(targetSetRaw, &envelope.TargetSet); err != nil {
-			return events.EventEnvelope{}, fmt.Errorf("decode inbound event target set: %w", err)
-		}
-	}
-	return envelope.Normalized(), nil
-}
-
 var _ runtimeinbound.Runner = (*EventPostgresOwner)(nil)
 
 func inboundEventIdempotencyKey(providerEventID, entityID, provider string) string {

@@ -251,10 +251,6 @@ func normalizeWorkflowBuiltinActionID(id string) string {
 	return strings.TrimSpace(strings.ToLower(id))
 }
 
-func isSupportedWorkflowActionBuiltin(id string) bool {
-	return runtimecontracts.IsSupportedHandlerActionID(normalizeWorkflowBuiltinActionID(id))
-}
-
 func isSupportedWorkflowHandlerActionID(id string) bool {
 	return runtimecontracts.IsSupportedHandlerActionID(normalizeWorkflowBuiltinActionID(id))
 }

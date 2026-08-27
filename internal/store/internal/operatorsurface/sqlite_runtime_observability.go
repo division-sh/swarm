@@ -391,14 +391,6 @@ func (s *ObservabilitySQLite) LoadOperatorDeliveryDeadLetters(ctx context.Contex
 	return out, nil
 }
 
-func sqliteTraceTimePtr(raw any) *time.Time {
-	at, ok, err := sqliteTimeValue(raw)
-	if err != nil || !ok {
-		return nil
-	}
-	return &at
-}
-
 func applySQLiteRuntimeLogPayload(log *operatorread.OperatorRuntimeLogEntry, raw json.RawMessage) error {
 	if log == nil {
 		return fmt.Errorf("runtime log target is required")
@@ -438,19 +430,4 @@ func coalesceRuntimeIncidentLevel(level string) string {
 		return level
 	}
 	return "error"
-}
-
-func sqliteObservabilityString(v any) string {
-	switch typed := v.(type) {
-	case nil:
-		return ""
-	case string:
-		return typed
-	case []byte:
-		return string(typed)
-	case fmt.Stringer:
-		return typed.String()
-	default:
-		return fmt.Sprint(typed)
-	}
 }

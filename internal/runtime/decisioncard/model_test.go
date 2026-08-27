@@ -494,14 +494,6 @@ func testSnapshot(t *testing.T, outcomes map[string]runtimecontracts.WorkflowGat
 	return snapshot
 }
 
-func semanticObject(values map[string]any) semanticvalue.Value {
-	value, err := canonicaljson.FromGo(values)
-	if err != nil {
-		panic(err)
-	}
-	return value
-}
-
 func TestRegisteredAnchorKindsAreClosedAndProjectScope(t *testing.T) {
 	source := testRootRoutingSource("entity-1")
 	stage, err := NewStageGateAnchor(StageGateAnchor{

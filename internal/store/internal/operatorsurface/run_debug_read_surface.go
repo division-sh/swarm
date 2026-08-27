@@ -491,14 +491,6 @@ func (s *RunPostgres) loadRunDebugFailureDeliveries(ctx context.Context, runID s
 		})
 }
 
-func normalizeRunDebugFailureDelivery(item *operatorread.RunDebugFailureDelivery) {
-	if item == nil {
-		return
-	}
-	item.Status = strings.TrimSpace(item.Status)
-	item.ReasonCode = strings.TrimSpace(item.ReasonCode)
-}
-
 func runDebugDeliveryCounts(counts []runtimedelivery.RunDiagnosticCount) []operatorread.RunDebugDeliveryCount {
 	out := make([]operatorread.RunDebugDeliveryCount, 0, len(counts))
 	for _, count := range counts {
@@ -641,13 +633,6 @@ func decodeRunDebugTraceCursor(cursor string) (runDebugTraceCursor, error) {
 	return decoded, nil
 }
 
-func nullableCursorTimestamp(timestamp string) string {
-	if strings.TrimSpace(timestamp) == "" {
-		return "-infinity"
-	}
-	return strings.TrimSpace(timestamp)
-}
-
 func RunDebugTraceSessionSources() string {
 	sources := []string{`
 			SELECT
@@ -671,14 +656,6 @@ func RunDebugTraceSessionSources() string {
 			FROM agent_conversation_audits
 		`}
 	return strings.Join(sources, "\nUNION ALL\n")
-}
-
-func nullableTimePtr(value sql.NullTime) *time.Time {
-	if !value.Valid {
-		return nil
-	}
-	tm := value.Time
-	return &tm
 }
 
 func (s *RunPostgres) loadRunDebugRuntimeLogs(ctx context.Context, runID string, opts operatorread.RunDebugQueryOptions, report *operatorread.RunDebugReport) error {

@@ -14,7 +14,6 @@ import (
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 	sessionstore "github.com/division-sh/swarm/internal/store/internal/backend/sessions"
-	"github.com/google/uuid"
 )
 
 type ConversationRuntimeWatchdogDescriptor = sessionstore.ConversationRuntimeWatchdogDescriptor
@@ -320,41 +319,6 @@ func (s *LLMPostgresOwner) UpdateLiveSessionWatchdog(ctx context.Context, update
 		return fmt.Errorf("update live session watchdog commit: %w", err)
 	}
 	return nil
-}
-
-func mustJSON(v any) []byte {
-	if v == nil {
-		return nil
-	}
-	raw, _ := json.Marshal(v)
-	return raw
-}
-
-func normalizeJSONArray(v any) string {
-	raw := storeagent.NormalizeJSONPayload(mustJSON(v))
-	if raw == "" || raw == "null" {
-		return "[]"
-	}
-	return raw
-}
-
-func normalizeJSONObject(v any) string {
-	raw := storeagent.NormalizeJSONPayload(mustJSON(v))
-	if raw == "" || raw == "null" {
-		return "{}"
-	}
-	return raw
-}
-
-func nullUUIDString(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return ""
-	}
-	if _, err := uuid.Parse(raw); err != nil {
-		return ""
-	}
-	return raw
 }
 
 func marshalConversationRuntimeStatePatch(summary *string, watchdog *runtimellm.ConversationWatchdog) (string, error) {

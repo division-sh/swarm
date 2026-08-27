@@ -36,12 +36,6 @@ func postgresEntityRunSourceOwner(tx *sql.Tx) entityRunSourceOwner {
 	}
 }
 
-func sqliteEntityRunSourceOwner(tx *sql.Tx) entityRunSourceOwner {
-	return func(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
-		return storerunstate.RequireSQLiteActiveSourceTx(ctx, tx, runID)
-	}
-}
-
 func (s *EntityPostgresOwner) runPrivateAuthorActivityMutation(ctx context.Context, effects *privaterunforkrevision.Effects, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
 	if s == nil || s.schemaGuard == nil {
 		return fmt.Errorf("entity postgres owner is required")
@@ -853,26 +847,6 @@ func toolJSONSQLArg(value any) (any, error) {
 			return nil, err
 		}
 		return string(data), nil
-	}
-}
-
-func toolIntValue(raw any) int {
-	switch v := raw.(type) {
-	case int:
-		return v
-	case int64:
-		return int(v)
-	case float64:
-		return int(v)
-	case json.Number:
-		n, _ := v.Int64()
-		return int(n)
-	case string:
-		var n int
-		_, _ = fmt.Sscanf(strings.TrimSpace(v), "%d", &n)
-		return n
-	default:
-		return 0
 	}
 }
 

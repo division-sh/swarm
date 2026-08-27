@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
-	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -33,28 +32,6 @@ func workflowLoopGenerationForStage(source semanticview.Source, instance *Workfl
 		}
 		if found.Valid() {
 			return attemptgeneration.Generation{}, false, fmt.Errorf("stage %s is owned by overlapping active loops", stage)
-		}
-		found = activation.Generation()
-	}
-	return found, found.Valid(), nil
-}
-
-func workflowLoopGenerationFromBuckets(source semanticview.Source, raw map[string]any) (attemptgeneration.Generation, bool, error) {
-	carrier, err := runtimeengine.StateCarrierFromPersisted(nil, nil, nil, raw)
-	if err != nil {
-		return attemptgeneration.Generation{}, false, fmt.Errorf("decode loop state: %w", err)
-	}
-	activations, err := loopruntime.List(carrier.StateBuckets)
-	if err != nil {
-		return attemptgeneration.Generation{}, false, fmt.Errorf("list loop state: %w", err)
-	}
-	var found attemptgeneration.Generation
-	for _, activation := range activations {
-		if activation.Status != loopruntime.StatusOpen || !loopPlanOwnsStage(source, activation.FlowID, activation.LoopID, activation.CurrentStage) {
-			continue
-		}
-		if found.Valid() {
-			return attemptgeneration.Generation{}, false, fmt.Errorf("state buckets contain overlapping active loop generations")
 		}
 		found = activation.Generation()
 	}

@@ -10,7 +10,6 @@ import (
 
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
-	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedeadletters "github.com/division-sh/swarm/internal/runtime/deadletters"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -808,54 +807,6 @@ func (s *DeliverySQLiteOwner) SummarizeRunTx(ctx context.Context, tx *sql.Tx, ru
 		return runtimedelivery.RunSummary{}, errors.New("delivery SQLite transaction owner is required")
 	}
 	return sqliteDeliveryAdapter.SummarizeRun(ctx, tx, runID)
-}
-
-func (s *DeliveryPostgresOwner) deliveryRunDiagnosticCounts(ctx context.Context, runID string) ([]runtimedelivery.RunDiagnosticCount, error) {
-	return postgresDeliveryAdapter.RunDiagnosticCounts(ctx, s.backend, runID)
-}
-
-func (s *DeliverySQLiteOwner) deliveryRunDiagnosticCounts(ctx context.Context, runID string) ([]runtimedelivery.RunDiagnosticCount, error) {
-	return sqliteDeliveryAdapter.RunDiagnosticCounts(ctx, s.backend, runID)
-}
-
-func (s *DeliveryPostgresOwner) deliveryRunDiagnosticFailures(ctx context.Context, runID string, limit int) ([]runtimedelivery.Snapshot, error) {
-	return postgresDeliveryAdapter.RunDiagnosticFailures(ctx, s.backend, runID, limit)
-}
-
-func (s *DeliverySQLiteOwner) deliveryRunDiagnosticFailures(ctx context.Context, runID string, limit int) ([]runtimedelivery.Snapshot, error) {
-	return sqliteDeliveryAdapter.RunDiagnosticFailures(ctx, s.backend, runID, limit)
-}
-
-func (s *DeliveryPostgresOwner) deliveryRunTraceReferencePage(ctx context.Context, query runtimedelivery.RunTracePageQuery) (runtimedelivery.RunTraceReferencePage, error) {
-	return postgresDeliveryAdapter.RunTraceReferencePage(ctx, s.backend, query)
-}
-
-func (s *DeliverySQLiteOwner) deliveryRunTraceReferencePage(ctx context.Context, query runtimedelivery.RunTracePageQuery) (runtimedelivery.RunTraceReferencePage, error) {
-	return sqliteDeliveryAdapter.RunTraceReferencePage(ctx, s.backend, query)
-}
-
-func (s *DeliveryPostgresOwner) deliveryLifecycleSnapshotPageForAgent(ctx context.Context, query runtimedelivery.AgentLifecyclePageQuery) (runtimedelivery.SnapshotPage, error) {
-	return postgresDeliveryAdapter.LifecycleSnapshotPageForAgent(ctx, s.backend, query)
-}
-
-func (s *DeliverySQLiteOwner) deliveryLifecycleSnapshotPageForAgent(ctx context.Context, query runtimedelivery.AgentLifecyclePageQuery) (runtimedelivery.SnapshotPage, error) {
-	return sqliteDeliveryAdapter.LifecycleSnapshotPageForAgent(ctx, s.backend, query)
-}
-
-func (s *DeliveryPostgresOwner) deliveryDiagnosticSnapshotPageForAgent(ctx context.Context, query runtimedelivery.AgentDiagnosticPageQuery) (runtimedelivery.SnapshotPage, error) {
-	return postgresDeliveryAdapter.DiagnosticSnapshotPageForAgent(ctx, s.backend, query)
-}
-
-func (s *DeliverySQLiteOwner) deliveryDiagnosticSnapshotPageForAgent(ctx context.Context, query runtimedelivery.AgentDiagnosticPageQuery) (runtimedelivery.SnapshotPage, error) {
-	return sqliteDeliveryAdapter.DiagnosticSnapshotPageForAgent(ctx, s.backend, query)
-}
-
-func (s *DeliveryPostgresOwner) deliveryDiagnosticCountsForAgentSince(ctx context.Context, identity agentidentity.Identity, since time.Time) (runtimedelivery.AgentDiagnosticCounts, error) {
-	return postgresDeliveryAdapter.DiagnosticCountsForAgentSince(ctx, s.backend, identity, since)
-}
-
-func (s *DeliverySQLiteOwner) deliveryDiagnosticCountsForAgentSince(ctx context.Context, identity agentidentity.Identity, since time.Time) (runtimedelivery.AgentDiagnosticCounts, error) {
-	return sqliteDeliveryAdapter.DiagnosticCountsForAgentSince(ctx, s.backend, identity, since)
 }
 
 func (s *DeliveryPostgresOwner) TerminalizeRunDeliveriesTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, runID, reason string) ([]runtimedelivery.Terminalization, error) {

@@ -416,14 +416,6 @@ func executionToolFromAdmitted(name string, entry runtimecontracts.ToolSchemaEnt
 	return ExecutionTool{value: &value}, true
 }
 
-func cloneRuntimeStringMap(in map[string]string) map[string]string {
-	out := make(map[string]string, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
-}
-
 func deepCloneMap(in map[string]any) map[string]any {
 	if len(in) == 0 {
 		return nil

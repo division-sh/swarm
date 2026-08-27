@@ -753,19 +753,3 @@ func optionalWake(value time.Time) *time.Time {
 	value = value.UTC()
 	return &value
 }
-
-func eventRunIDForCompletionCandidateTx(ctx context.Context, tx *sql.Tx, eventID string, postgres bool) (string, error) {
-	if tx == nil {
-		return "", errors.New("completion candidate event lookup requires transaction")
-	}
-	var runID string
-	query := `SELECT COALESCE(run_id, '') FROM events WHERE event_id = ?`
-	if postgres {
-		query = `SELECT COALESCE(run_id::text, '') FROM events WHERE event_id = $1::uuid`
-	}
-	if err := tx.QueryRowContext(ctx, query, strings.TrimSpace(eventID)).Scan(&runID); err != nil {
-		return "", fmt.Errorf("load completion candidate event run: %w", err)
-	}
-	runID = strings.TrimSpace(runID)
-	return runID, nil
-}

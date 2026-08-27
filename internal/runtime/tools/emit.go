@@ -79,5 +79,4 @@ func ValidatePayloadAgainstSchema(schema map[string]any, payload map[string]any)
 func schemaProperties(raw any) map[string]map[string]any {
 	return runtimesharedjson.SchemaProperties(raw)
 }
-func schemaAdditionalProps(raw any) bool { return runtimesharedjson.SchemaAdditionalProps(raw) }
-func asString(v any) string              { return runtimesharedjson.AsString(v) }
+func asString(v any) string { return runtimesharedjson.AsString(v) }

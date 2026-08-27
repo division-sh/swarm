@@ -40,20 +40,8 @@ type connectRoutePlanEvaluationMemo struct {
 	applied  bool
 }
 
-func withConnectRoutePlanEvaluationMemo(ctx context.Context) context.Context {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if memo, _ := ctx.Value(connectRoutePlanEvaluationMemoKey{}).(*connectRoutePlanEvaluationMemo); memo != nil {
-		return ctx
-	}
-	return context.WithValue(ctx, connectRoutePlanEvaluationMemoKey{}, &connectRoutePlanEvaluationMemo{})
-}
-
 type connectRoutePlanSnapshot struct {
-	base    routeTableSnapshotGeneration
-	staged  routeTableSnapshotGeneration
-	staging bool
+	base routeTableSnapshotGeneration
 }
 
 type staleConnectRoutePlanSnapshotError struct{}
@@ -67,11 +55,6 @@ func withClosedPublicationPlanning(ctx context.Context) context.Context {
 		ctx = context.Background()
 	}
 	return context.WithValue(ctx, closedPublicationPlanningKey{}, true)
-}
-
-func closedPublicationPlanning(ctx context.Context) bool {
-	enabled, _ := ctx.Value(closedPublicationPlanningKey{}).(bool)
-	return enabled
 }
 
 type connectRoutePlanResolver struct {
@@ -865,10 +848,6 @@ func mergeConnectEvaluation(target *events.ConnectEvaluationLedger, addition eve
 	}
 	*target = merged
 	return nil
-}
-
-func connectRoutePlanMatchesEvent(ctx context.Context, plan runtimepinrouting.ConnectRoutePlan, evt events.Event) bool {
-	return (runtimepinrouting.CompiledConnectGraph{}).PlanMatchesEvent(plan, evt) && providerOutputAuthorizationMatches(ctx, plan.ProviderOutputAuthorization())
 }
 
 func connectMaterializedTargets(materialized runtimepinrouting.ConnectRoutePlanMaterialization) []events.RouteIdentity {

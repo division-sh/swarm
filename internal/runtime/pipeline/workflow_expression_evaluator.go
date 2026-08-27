@@ -17,7 +17,6 @@ import (
 var workflowExpressionKeywordReplacer = regexp.MustCompile(`\b(AND|OR|NOT|TRUE|FALSE)\b`)
 var workflowExpressionPolicyPlaceholder = regexp.MustCompile(`\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}`)
 var workflowExpressionCountGEPattern = regexp.MustCompile(`count\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*>=\s*([0-9]+(?:\.[0-9]+)?)\s*\)`)
-var workflowExpressionStageRangeCountPattern = regexp.MustCompile(`count\(\s*entities\s+in\s+\[([a-zA-Z_][a-zA-Z0-9_]*)\.\.([a-zA-Z_][a-zA-Z0-9_]*)\]\s*\)`)
 var workflowExpressionQueryEntitiesCountPattern = regexp.MustCompile(`query_entities\(\s*([^()]+?)\s*\)\.count`)
 var workflowExpressionQueryPredicatePattern = regexp.MustCompile(`^\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s*(==|!=|>=|<=|>|<)\s*(.+?)\s*$`)
 

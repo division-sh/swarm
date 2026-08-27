@@ -174,10 +174,6 @@ func (r *ClaudeCLIRuntime) buildMCPConfigArg(ctx context.Context, s *Session) (c
 	return string(raw), contextToken, true, nil
 }
 
-func (r *ClaudeCLIRuntime) mcpContextTokenTTL(ctx context.Context) time.Duration {
-	return mcpContextTokenTTLForConfig(ctx, r.cfg)
-}
-
 func mcpContextTokenTTLForConfig(ctx context.Context, cfg *config.Config) time.Duration {
 	timeout := effectiveCLITimeoutForConfig(ctx, cfg)
 	if timeout <= 0 {

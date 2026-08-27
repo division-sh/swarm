@@ -841,19 +841,6 @@ func loadClaudeAttemptProofProviderHead(t *testing.T, backend claudeAttemptProof
 	return head
 }
 
-func loadClaudeAttemptProofDeliveryReason(t *testing.T, backend claudeAttemptProofBackend, eventID string) string {
-	t.Helper()
-	query := `SELECT COALESCE(reason_code, '') FROM event_deliveries WHERE event_id=? AND subscriber_id=?`
-	if backend.name == "postgres" {
-		query = `SELECT COALESCE(reason_code, '') FROM event_deliveries WHERE event_id=$1::uuid AND subscriber_id=$2`
-	}
-	var reason string
-	if err := backend.db.QueryRowContext(claudeAttemptProofContext(), query, eventID, claudeAttemptProofAgentConfig().ID).Scan(&reason); err != nil {
-		t.Fatalf("load Claude delivery reason: %v", err)
-	}
-	return reason
-}
-
 func requireClaudeAttemptProofSessionSurface(t *testing.T, backend claudeAttemptProofBackend, surface claudeAttemptProofSurface, attemptID string) {
 	t.Helper()
 	if !surface.memory {

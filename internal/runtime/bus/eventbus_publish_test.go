@@ -1212,38 +1212,6 @@ func (s *failPipelineSettlementOnceStore) Settle(ctx context.Context, claim runt
 	return s.Store.Settle(ctx, claim, disposition)
 }
 
-func loadPipelineReceiptOutcomeAndFailure(t *testing.T, ctx context.Context, db *sql.DB, eventID string) (string, *runtimefailures.Envelope) {
-	t.Helper()
-	var outcome string
-	var raw []byte
-	if err := db.QueryRowContext(ctx, `
-		SELECT outcome, failure
-		FROM event_receipts
-		WHERE event_id = $1::uuid
-		  AND subscriber_type = 'platform'
-		  AND subscriber_id = 'pipeline'
-	`, eventID).Scan(&outcome, &raw); err != nil {
-		t.Fatalf("load pipeline receipt for %s: %v", eventID, err)
-	}
-	if len(raw) == 0 {
-		return outcome, nil
-	}
-	failure, err := runtimefailures.UnmarshalEnvelope(raw)
-	if err != nil {
-		t.Fatalf("decode pipeline receipt failure for %s: %v", eventID, err)
-	}
-	return outcome, &failure
-}
-
-func hasRuntimeLogAction(entries []recordedLogEntry, action string) bool {
-	for _, entry := range entries {
-		if entry.Action == action {
-			return true
-		}
-	}
-	return false
-}
-
 func loadAgentDeliveryForEvent(t *testing.T, ctx context.Context, db *sql.DB, eventID, agentID string) (string, string) {
 	t.Helper()
 	var status, runStatus string

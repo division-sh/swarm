@@ -538,36 +538,6 @@ func cloneStateBucketSet(in map[string]map[string]any) map[string]map[string]any
 	return out
 }
 
-func stateCarrierGatesFromMetadata(metadata map[string]any) (map[string]bool, error) {
-	if len(metadata) == 0 {
-		return map[string]bool{}, nil
-	}
-	raw, ok := metadata["gates"]
-	if !ok || raw == nil {
-		return map[string]bool{}, nil
-	}
-	switch typed := raw.(type) {
-	case map[string]any:
-		out := make(map[string]bool, len(typed))
-		for key, rawValue := range typed {
-			key = strings.TrimSpace(key)
-			if key == "" {
-				continue
-			}
-			value, ok := rawValue.(bool)
-			if !ok {
-				return nil, fmt.Errorf("invalid workflow gates shape: gate %q = %T", key, rawValue)
-			}
-			out[key] = value
-		}
-		return out, nil
-	case map[string]bool:
-		return mapsClone(typed), nil
-	default:
-		return nil, fmt.Errorf("invalid workflow gates shape: %T", raw)
-	}
-}
-
 func stateBucketSetFromRaw(raw map[string]any) (map[string]map[string]any, error) {
 	if len(raw) == 0 {
 		return map[string]map[string]any{}, nil

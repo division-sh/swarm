@@ -94,19 +94,6 @@ func resolveProviderModelForCall(ctx context.Context, cfg *config.Config, profil
 	return resolveAdmissionModel(ctx, cfg, profile)
 }
 
-func providerAdmissionPolicyDeclared(policy config.LLMProviderLimitPolicy) bool {
-	if strings.TrimSpace(policy.RateLimit) != "" || strings.TrimSpace(policy.RateLimitMaxWait) != "" ||
-		policy.MaxConcurrency != 0 || strings.TrimSpace(policy.MaxConcurrencyMaxWait) != "" {
-		return true
-	}
-	for _, modelPolicy := range policy.Models {
-		if providerAdmissionPolicyDeclared(modelPolicy) {
-			return true
-		}
-	}
-	return false
-}
-
 func (r *ProviderAdmissionRegistry) policy(profile llmselection.Profile, resolvedModel llmselection.ResolvedModel) (llmProviderAdmissionPolicy, bool, error) {
 	if r == nil || r.cfg == nil || len(r.cfg.LLM.ProviderLimits) == 0 {
 		return llmProviderAdmissionPolicy{}, false, nil

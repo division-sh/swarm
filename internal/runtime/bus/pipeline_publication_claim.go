@@ -17,10 +17,6 @@ type pipelinePublicationClaim struct {
 	released atomic.Bool
 }
 
-func (c *pipelinePublicationClaim) durable() bool {
-	return c != nil && c.bus != nil && c.bus.pipelineObligations != nil
-}
-
 func (eb *EventBus) claimPipelinePublication(ctx context.Context, eventID string) (*pipelinePublicationClaim, error) {
 	var err error
 	ctx, err = eb.admitBundleSourceFact(ctx)

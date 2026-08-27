@@ -679,39 +679,6 @@ func eventListItemType(typeRef string) string {
 	}
 }
 
-func cloneEventSchemaRegistry(in map[string]EventSchema) map[string]EventSchema {
-	if len(in) == 0 {
-		return map[string]EventSchema{}
-	}
-	out := make(map[string]EventSchema, len(in))
-	for eventType, schema := range in {
-		out[strings.TrimSpace(eventType)] = EventSchema{
-			Description:    strings.TrimSpace(schema.Description),
-			Schema:         cloneEventSchemaMap(schema.Schema),
-			CitationFields: cloneCriteriaCitationMap(schema.CitationFields),
-		}
-	}
-	return out
-}
-
-func cloneCriteriaCitationMap(in map[string]CriteriaCitation) map[string]CriteriaCitation {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]CriteriaCitation, len(in))
-	for key, value := range in {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		out[key] = CriteriaCitation{
-			Criteria:       strings.TrimSpace(value.Criteria),
-			AllowedClasses: normalizeStrings(value.AllowedClasses),
-		}
-	}
-	return out
-}
-
 func cloneEventSchemaMap(in map[string]any) map[string]any {
 	if len(in) == 0 {
 		return map[string]any{}

@@ -152,19 +152,6 @@ var (
 	conversationFrameContentPattern = regexp.MustCompile(`^agent-frame-content:v1:sha256:[0-9a-f]{64}$`)
 )
 
-func newConversationsCommand(opts rootCommandOptions) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "conversations",
-		Short: "List agent conversations.",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return cmd.Help()
-		},
-	}
-	cmd.AddCommand(newConversationsListCommand(opts))
-	return cmd
-}
-
 func newConversationCommand(opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "conversation",

@@ -385,13 +385,6 @@ func workspaceBackendDecisionDetail(decision WorkspaceBackendSelection) string {
 	return fmt.Sprintf("workspace backend: %s (%s)", backend, reason)
 }
 
-func workspaceBackendUnsafeWarning(decision WorkspaceBackendSelection) string {
-	if !decision.UnsafeHost {
-		return ""
-	}
-	return fmt.Sprintf("UNSAFE: grants the agent execution on this machine via workspace backend host (%s)", workspaceBackendReasonSummary(decision.Reasons))
-}
-
 func uniqueWorkspaceCapabilityReasons(values []WorkspaceCapabilityReason) []WorkspaceCapabilityReason {
 	seen := map[WorkspaceCapabilityReason]struct{}{}
 	out := make([]WorkspaceCapabilityReason, 0, len(values))

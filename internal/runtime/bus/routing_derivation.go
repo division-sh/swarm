@@ -732,25 +732,6 @@ func (rt *RouteTable) snapshotGenerationCurrent(snapshot routeTableSnapshotGener
 	return snapshot.value != 0 && rt.generation == snapshot.value
 }
 
-func (rt *RouteTable) applyAtGeneration(ctx context.Context, snapshot routeTableSnapshotGeneration, apply func(context.Context) error) (bool, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if rt == nil {
-		if snapshot.value != 0 {
-			return false, nil
-		}
-		return true, apply(ctx)
-	}
-	rt.generationMu.Lock()
-	defer rt.generationMu.Unlock()
-	if !rt.snapshotGenerationCurrent(snapshot) {
-		return false, nil
-	}
-	leaseCtx := context.WithValue(ctx, routeTableGenerationLeaseKey{}, routeTableGenerationLease{table: rt})
-	return true, apply(leaseCtx)
-}
-
 func (rt *RouteTable) addFlowInstanceRouteForContext(ctx context.Context, req FlowInstanceRouteMaterializationRequest) error {
 	if ctx != nil {
 		if lease, _ := ctx.Value(routeTableGenerationLeaseKey{}).(routeTableGenerationLease); lease.table == rt {
@@ -1703,30 +1684,6 @@ func routeImportBoundarySubscriberPath(source semanticview.Source, packageKey, f
 	return ""
 }
 
-func routeFlowHasInputEvent(inputEvents []string, eventType string) bool {
-	return eventidentity.Scope{InputEvents: inputEvents}.HasInput(eventType)
-}
-
-func workflowScopeLocalEvents(scope semanticview.FlowScope) map[string]struct{} {
-	out := make(map[string]struct{}, len(scope.Events)+len(scope.OutputEvents)+1)
-	for eventType := range scope.Events {
-		eventType = strings.TrimSpace(eventType)
-		if eventType != "" {
-			out[eventType] = struct{}{}
-		}
-	}
-	for _, eventType := range scope.OutputEvents {
-		eventType = strings.TrimSpace(eventType)
-		if eventType != "" {
-			out[eventType] = struct{}{}
-		}
-	}
-	if autoEmit := strings.TrimSpace(scope.AutoEmitEvent); autoEmit != "" {
-		out[autoEmit] = struct{}{}
-	}
-	return out
-}
-
 func routeInputProducerPatterns(resolution runtimecontracts.FlowInputAutoWireResolution) []routeResolvedPattern {
 	out := make([]routeResolvedPattern, 0, len(resolution.Patterns))
 	for _, pattern := range resolution.Patterns {
@@ -1748,22 +1705,6 @@ func routeEventIdentityScope(basePath string, localEvents map[string]struct{}, i
 		LocalEvents: sortedStringKeys(localEvents),
 		InputEvents: append([]string{}, inputEvents...),
 	}
-}
-
-func routeRenderTemplate(raw string, vars map[string]string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || len(vars) == 0 {
-		return raw
-	}
-	replacements := make([]string, 0, len(vars)*4)
-	for key, value := range vars {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		replacements = append(replacements, "{"+key+"}", value, "{{"+key+"}}", value)
-	}
-	return strings.NewReplacer(replacements...).Replace(raw)
 }
 
 func normalizedStringListContains(values []string, needle string) bool {

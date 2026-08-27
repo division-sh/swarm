@@ -220,14 +220,3 @@ func requiredSemanticString(values map[string]semanticvalue.Value, name string) 
 	}
 	return text, nil
 }
-
-func semanticObjectProjection(value semanticvalue.Value, label string) (map[string]any, error) {
-	if value.Kind() != semanticvalue.KindObject {
-		return nil, fmt.Errorf("%s must be an object", label)
-	}
-	out, ok := value.Interface().(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("%s has an invalid object projection", label)
-	}
-	return out, nil
-}

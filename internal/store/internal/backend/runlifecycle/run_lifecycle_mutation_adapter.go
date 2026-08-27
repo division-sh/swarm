@@ -13,7 +13,6 @@ import (
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
-	storerunstate "github.com/division-sh/swarm/internal/store/internal/backend/runstate"
 )
 
 type postgresRunLifecycleMutation struct {
@@ -50,40 +49,6 @@ func NewPostgresTransactionMutation(owner *RunLifecyclePostgresOwner, tx *sql.Tx
 
 func NewSQLiteTransactionMutation(owner *RunLifecycleSQLiteOwner, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects) TransactionMutation {
 	return sqliteRunLifecycleMutation{store: owner, tx: tx, story: story, effects: effects}
-}
-
-type activeRunSourceOwnerFunc func(context.Context, string) (runtimecorrelation.BundleSourceFact, error)
-
-func (fn activeRunSourceOwnerFunc) RequireActiveRunSource(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
-	return fn(ctx, runID)
-}
-
-func postgresActiveRunSourceOwner(store *RunLifecyclePostgresOwner, tx *sql.Tx) activeRunSourceOwnerFunc {
-	return func(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
-		return (postgresRunLifecycleMutation{store: store, tx: tx}).RequireActiveSource(ctx, runID)
-	}
-}
-
-func sqliteActiveRunSourceOwner(store *RunLifecycleSQLiteOwner, tx *sql.Tx) activeRunSourceOwnerFunc {
-	return func(ctx context.Context, runID string) (runtimecorrelation.BundleSourceFact, error) {
-		return (sqliteRunLifecycleMutation{store: store, tx: tx}).RequireActiveSource(ctx, runID)
-	}
-}
-
-func requirePostgresRunPresent(ctx context.Context, tx *sql.Tx, runID string) error {
-	return (postgresRunLifecycleMutation{tx: tx}).RequirePresent(ctx, runID)
-}
-
-func requireSQLiteRunPresent(ctx context.Context, tx *sql.Tx, runID string) error {
-	return (sqliteRunLifecycleMutation{tx: tx}).RequirePresent(ctx, runID)
-}
-
-func requirePostgresRunActive(ctx context.Context, tx *sql.Tx, runID string) error {
-	return storerunstate.RequirePostgresActiveTx(ctx, tx, runID)
-}
-
-func requireSQLiteRunActive(ctx context.Context, tx *sql.Tx, runID string) error {
-	return storerunstate.RequireSQLiteActiveTx(ctx, tx, runID)
 }
 
 func (s *RunLifecyclePostgresOwner) RequireActiveTx(ctx context.Context, tx *sql.Tx, runID string) error {
@@ -360,112 +325,6 @@ func (s *RunLifecycleSQLiteOwner) SyncRunCounters(ctx context.Context, runID str
 		return struct{}{}, mutation.SyncCounters(ctx, runID)
 	})
 	return err
-}
-
-func requirePostgresRunActiveQuery(ctx context.Context, queryer rowQueryer, runID string) error {
-	if queryer == nil {
-		return errors.New("PostgreSQL run lifecycle query authority is required")
-	}
-	runID = strings.TrimSpace(runID)
-	var state, bundleHash, bundleSource string
-	err := queryer.QueryRowContext(ctx, `
-		SELECT status, bundle_hash, bundle_source
-		FROM runs
-		WHERE run_id = $1::uuid
-	`, runID).Scan(&state, &bundleHash, &bundleSource)
-	if errors.Is(err, sql.ErrNoRows) {
-		return &runtimerunlifecycle.RunNotFoundError{RunID: runID}
-	}
-	if err != nil {
-		return fmt.Errorf("read PostgreSQL active run lifecycle: %w", err)
-	}
-	parsed, err := runtimerunlifecycle.ParseState(state)
-	if err != nil {
-		return err
-	}
-	if !parsed.Active() {
-		return &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: parsed}
-	}
-	fact, err := runtimecorrelation.DecodeBundleSourceFact(bundleHash, bundleSource)
-	if err != nil {
-		return fmt.Errorf("decode PostgreSQL active run lifecycle source: %w", err)
-	}
-	if fact.IsPersisted() {
-		var exists bool
-		if err := queryer.QueryRowContext(ctx, `
-			SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = $1)
-		`, fact.BundleHash()).Scan(&exists); err != nil {
-			return fmt.Errorf("validate PostgreSQL active run lifecycle source: %w", err)
-		}
-		if !exists {
-			return &runtimerunlifecycle.PersistedBundleUnavailableError{
-				BundleHash: fact.BundleHash(), BundleSource: runtimerunlifecycle.BundleSourcePersisted,
-				Cause: "persisted_missing_bundle_row",
-			}
-		}
-	}
-	return nil
-}
-
-func requireSQLiteRunActiveQuery(ctx context.Context, queryer rowQueryer, runID string) error {
-	if queryer == nil {
-		return errors.New("SQLite run lifecycle query authority is required")
-	}
-	runID = strings.TrimSpace(runID)
-	var state, bundleHash, bundleSource string
-	err := queryer.QueryRowContext(ctx, `
-		SELECT status, bundle_hash, bundle_source
-		FROM runs
-		WHERE run_id = ?
-	`, runID).Scan(&state, &bundleHash, &bundleSource)
-	if errors.Is(err, sql.ErrNoRows) {
-		return &runtimerunlifecycle.RunNotFoundError{RunID: runID}
-	}
-	if err != nil {
-		return fmt.Errorf("read SQLite active run lifecycle: %w", err)
-	}
-	parsed, err := runtimerunlifecycle.ParseState(state)
-	if err != nil {
-		return err
-	}
-	if !parsed.Active() {
-		return &runtimerunlifecycle.RunNotActiveError{RunID: runID, State: parsed}
-	}
-	fact, err := runtimecorrelation.DecodeBundleSourceFact(bundleHash, bundleSource)
-	if err != nil {
-		return fmt.Errorf("decode SQLite active run lifecycle source: %w", err)
-	}
-	if fact.IsPersisted() {
-		var exists bool
-		if err := queryer.QueryRowContext(ctx, `
-			SELECT EXISTS (SELECT 1 FROM bundles WHERE bundle_hash = ?)
-		`, fact.BundleHash()).Scan(&exists); err != nil {
-			return fmt.Errorf("validate SQLite active run lifecycle source: %w", err)
-		}
-		if !exists {
-			return &runtimerunlifecycle.PersistedBundleUnavailableError{
-				BundleHash: fact.BundleHash(), BundleSource: runtimerunlifecycle.BundleSourcePersisted,
-				Cause: "persisted_missing_bundle_row",
-			}
-		}
-	}
-	return nil
-}
-
-func requirePostgresRunActiveSource(
-	ctx context.Context,
-	tx *sql.Tx,
-	runID string,
-) (runtimecorrelation.BundleSourceFact, error) {
-	return (postgresRunLifecycleMutation{tx: tx}).RequireActiveSource(ctx, runID)
-}
-
-func requireSQLiteRunActiveSource(
-	ctx context.Context,
-	tx *sql.Tx,
-	runID string,
-) (runtimecorrelation.BundleSourceFact, error) {
-	return (sqliteRunLifecycleMutation{tx: tx}).RequireActiveSource(ctx, runID)
 }
 
 func (m postgresRunLifecycleMutation) RequirePresent(ctx context.Context, runID string) error {
@@ -1010,10 +869,6 @@ func (m postgresRunLifecycleMutation) requirePersistedSourceForWrite(
 	return m.requirePersistedSource(ctx, fact)
 }
 
-func recordRunStarted(ctx context.Context, request runtimerunlifecycle.CreateRequest) error {
-	return recordRunStartedWithStory(ctx, nil, request)
-}
-
 func (m postgresRunLifecycleMutation) recordRunStarted(ctx context.Context, request runtimerunlifecycle.CreateRequest) error {
 	return recordRunStartedWithStory(ctx, m.story, request)
 }
@@ -1166,11 +1021,4 @@ func deleteMaterializedForkRunTx(ctx context.Context, tx *sql.Tx, runID string) 
 
 func (s *RunLifecyclePostgresOwner) DeleteMaterializedForkRunTx(ctx context.Context, tx *sql.Tx, runID string) error {
 	return deleteMaterializedForkRunTx(ctx, tx, runID)
-}
-
-func normalizedRunLifecycleTime(value time.Time) time.Time {
-	if value.IsZero() {
-		value = time.Now().UTC()
-	}
-	return runtimerunlifecycle.CanonicalTimestamp(value)
 }

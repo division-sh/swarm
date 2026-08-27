@@ -197,15 +197,6 @@ func TestFinalFlowInstanceAuthoringFixture_RouteAuthorityBypassInventoryStaysCla
 	}
 }
 
-func finalFixtureContainsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
-}
-
 func finalFixtureFindingContains(findings []runtimebootverify.Finding, checkID, substr string) bool {
 	for _, finding := range findings {
 		if strings.TrimSpace(finding.CheckID) != checkID {

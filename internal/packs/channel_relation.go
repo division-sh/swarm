@@ -15,17 +15,6 @@ type compiledChannelMappingTopology struct {
 	ItemTargets map[string][]string
 }
 
-func (t compiledChannelMappingTopology) clone() compiledChannelMappingTopology {
-	out := compiledChannelMappingTopology{
-		Targets:     append([]string(nil), t.Targets...),
-		ItemTargets: make(map[string][]string, len(t.ItemTargets)),
-	}
-	for target, paths := range t.ItemTargets {
-		out.ItemTargets[target] = append([]string(nil), paths...)
-	}
-	return out
-}
-
 func compileChannelMappingTopology(subject string, mappings map[string]ChannelMapping) (compiledChannelMappingTopology, error) {
 	topology := compiledChannelMappingTopology{ItemTargets: map[string][]string{}}
 	targets := newChannelPathCardinality(subject + " target")

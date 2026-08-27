@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"fmt"
 	"strings"
 
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
@@ -29,21 +28,6 @@ func entityToolExistingFlowInstanceMatches(source semanticview.Source, requested
 		return false
 	}
 	return stored == root || strings.HasPrefix(stored, root+"/")
-}
-
-func appendEntityToolExistingFlowInstanceFilter(source semanticview.Source, clauses []string, args []any, requested string) ([]string, []any) {
-	requested = normalizeEntityToolFlowInstance(requested)
-	if requested == "" {
-		return clauses, args
-	}
-	if root, ok := entityToolDeclaredFlowScopeRoot(source, requested); ok {
-		args = append(args, root, root+"/%")
-		clauses = append(clauses, fmt.Sprintf("(flow_instance = $%d OR flow_instance LIKE $%d)", len(args)-1, len(args)))
-		return clauses, args
-	}
-	args = append(args, requested)
-	clauses = append(clauses, fmt.Sprintf("flow_instance = $%d", len(args)))
-	return clauses, args
 }
 
 func entityToolDeclaredFlowScopeRoot(source semanticview.Source, requested string) (string, bool) {

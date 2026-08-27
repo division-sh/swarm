@@ -430,55 +430,6 @@ func extractSubscriptions(raw []byte) []string {
 	return obj.Subscriptions
 }
 
-func extractPermissions(raw []byte) []string {
-	if len(raw) == 0 || !json.Valid(raw) {
-		return nil
-	}
-	var obj struct {
-		Permissions []string `json:"permissions"`
-	}
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		return nil
-	}
-	return obj.Permissions
-}
-
-func extractStringField(raw []byte, key string) string {
-	if len(raw) == 0 || !json.Valid(raw) {
-		return ""
-	}
-	var obj map[string]any
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		return ""
-	}
-	val, _ := obj[strings.TrimSpace(key)].(string)
-	return strings.TrimSpace(val)
-}
-
-func extractStringListField(raw []byte, key string) []string {
-	if len(raw) == 0 || !json.Valid(raw) {
-		return nil
-	}
-	var obj map[string]any
-	if err := json.Unmarshal(raw, &obj); err != nil {
-		return nil
-	}
-	list, _ := obj[strings.TrimSpace(key)].([]any)
-	if len(list) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(list))
-	for _, item := range list {
-		if v, ok := item.(string); ok {
-			v = strings.TrimSpace(v)
-			if v != "" {
-				out = append(out, v)
-			}
-		}
-	}
-	return out
-}
-
 func validateOpaqueAgentConfig(raw []byte) error {
 	if len(raw) == 0 {
 		return fmt.Errorf("config is required")

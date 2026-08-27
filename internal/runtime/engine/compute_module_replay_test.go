@@ -292,12 +292,6 @@ func (replayLocker) WithEntityLock(ctx context.Context, _ identity.EntityID, fn 
 	return fn(ctx)
 }
 
-type replayOutbox struct{}
-
-func (replayOutbox) WriteOutbox(context.Context, []runtimeengine.EmitIntent) error {
-	return nil
-}
-
 type replayDispatcher struct{}
 
 func (replayDispatcher) DispatchPostCommit(context.Context, []runtimeengine.EmitIntent) error {

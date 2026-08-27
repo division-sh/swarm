@@ -396,13 +396,3 @@ func storedScopeKey(source semanticview.Source, workflowName, instancePath strin
 	}
 	return normalizeRef(ScopeKey(source, workflowName))
 }
-
-func contains(items []string, target string) bool {
-	target = strings.TrimSpace(target)
-	for _, item := range items {
-		if strings.TrimSpace(item) == target {
-			return true
-		}
-	}
-	return false
-}

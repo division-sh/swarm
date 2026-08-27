@@ -224,15 +224,6 @@ func sealedPackageConformanceFindingContains(findings []runtimebootverify.Findin
 	return false
 }
 
-func sealedPackageConformanceSubscribersContain(subscribers []runtimebus.Subscriber, id, path, source string) bool {
-	for _, subscriber := range subscribers {
-		if subscriber.Recipient.ID() == id && subscriber.Path == path && subscriber.RouteSourceCode() == source {
-			return true
-		}
-	}
-	return false
-}
-
 func sealedPackageConformanceRoutesContain(routes []events.DeliveryRoute, want events.DeliveryRoute) bool {
 	want = want.Normalized()
 	wantNode, ok := want.Recipient.Node()

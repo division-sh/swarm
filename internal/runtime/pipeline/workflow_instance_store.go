@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,7 +28,6 @@ import (
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
 	runtimeworkflowroute "github.com/division-sh/swarm/internal/runtime/workflowroute"
-	"github.com/lib/pq"
 )
 
 func (s *workflowInstanceStore) ReadTimerObligations(ctx context.Context, scope runtimetimerobligation.Scope, observedAt time.Time) (runtimetimerobligation.Snapshot, error) {
@@ -1403,21 +1401,4 @@ func containsString(items []string, target string) bool {
 		}
 	}
 	return false
-}
-
-type pqStringArray []string
-
-func (a pqStringArray) Value() (driver.Value, error) {
-	return pq.Array([]string(a)).Value()
-}
-
-func jsonOrDefault(raw []byte, fallback string) string {
-	if len(raw) == 0 {
-		return fallback
-	}
-	trimmed := strings.TrimSpace(string(raw))
-	if trimmed == "" {
-		return fallback
-	}
-	return trimmed
 }

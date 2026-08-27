@@ -432,11 +432,6 @@ func (e *emptyTurnCapabilityToolExec) ToolCapabilitiesForActorInContext(_ contex
 	return toolcapabilities.NewSet(nil)
 }
 
-func testAsString(v any) string {
-	s, _ := v.(string)
-	return s
-}
-
 func TestConversationStep_ResolvesToolCalls(t *testing.T) {
 	rt := &fakeRuntime{}
 	te := &fakeToolExec{}

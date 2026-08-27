@@ -92,18 +92,6 @@ var runtimeLogRedundantMessageTuples = map[runtimeLogMessageTuple]struct{}{
 	}: {},
 }
 
-func projectRuntimeLogEntries(prefix string, logs []runtimeLogEntry) ([]runtimeLogSemanticProjection, error) {
-	projections := make([]runtimeLogSemanticProjection, 0, len(logs))
-	for i, log := range logs {
-		projection, err := projectRuntimeLogEntry(fmt.Sprintf("%s[%d]", prefix, i), log)
-		if err != nil {
-			return nil, err
-		}
-		projections = append(projections, projection)
-	}
-	return projections, nil
-}
-
 func projectRuntimeLogEntry(prefix string, log runtimeLogEntry) (runtimeLogSemanticProjection, error) {
 	projection := runtimeLogSemanticProjection{
 		Action:  runtimeLogAction(log),

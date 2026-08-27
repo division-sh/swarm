@@ -318,12 +318,3 @@ func sealedFlowPackageDeliveryRoutesContain(routes []events.DeliveryRoute, want 
 	}
 	return false
 }
-
-func sealedFlowPackageSubscriberListContains(subscribers []runtimebus.Subscriber, id, path, source string) bool {
-	for _, subscriber := range subscribers {
-		if subscriber.Recipient.LocalID() == id && subscriber.Path == path && subscriber.RouteSourceCode() == source {
-			return true
-		}
-	}
-	return false
-}

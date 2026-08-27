@@ -8,7 +8,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/google/uuid"
 )
@@ -197,41 +196,4 @@ func cloneToolSchemaFloat(value *float64) *float64 {
 	}
 	cloned := *value
 	return &cloned
-}
-
-func cloneToolStringMap(in map[string]string) map[string]string {
-	if in == nil {
-		return nil
-	}
-	out := make(map[string]string, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
-}
-
-func cloneToolSchemaCarrierMap(in map[string]any) (map[string]any, error) {
-	if in == nil {
-		return nil, nil
-	}
-	cloned, err := cloneToolSchemaCarrierValue(in)
-	if err != nil {
-		return nil, err
-	}
-	out, ok := cloned.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("semantic JSON object projected as %T", cloned)
-	}
-	return out, nil
-}
-
-func cloneToolSchemaCarrierValue(value any) (any, error) {
-	if value == nil {
-		return nil, nil
-	}
-	admitted, err := canonicaljson.FromGo(value)
-	if err != nil {
-		return nil, fmt.Errorf("value is not semantic JSON: %w", err)
-	}
-	return admitted.Interface(), nil
 }

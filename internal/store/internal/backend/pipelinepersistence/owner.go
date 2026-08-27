@@ -145,16 +145,6 @@ func nullUUIDString(raw string) string {
 	return raw
 }
 
-func sqliteNullString(raw string) any {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil
-	}
-	return raw
-}
-
-func sqliteNullUUID(raw string) any { return sqliteNullString(raw) }
-
 type PipelinePostgresOwner struct {
 	*storerunlifecycle.RunLifecyclePostgresOwner
 	*storedecision.DecisionPostgresOwner

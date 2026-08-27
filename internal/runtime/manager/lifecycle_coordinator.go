@@ -749,86 +749,6 @@ func (c *agentLifecycleCoordinator) registerExecutionWithTopology(
 	return nil
 }
 
-func (c *agentLifecycleCoordinator) persistRegistration(ctx context.Context, rec PersistedAgent) (AgentLifecycleTransitionResult, error) {
-	return c.persistRegistrationWithTopology(ctx, rec, rec.Topology)
-}
-
-func (c *agentLifecycleCoordinator) persistRegistrationWithTopology(
-	ctx context.Context,
-	rec PersistedAgent,
-	topology runtimeagenttopology.Admission,
-) (AgentLifecycleTransitionResult, error) {
-	store := c.persistence()
-	if c == nil || store == nil {
-		return AgentLifecycleTransitionResult{}, fmt.Errorf("agent lifecycle persistence is required")
-	}
-	if err := topology.Validate(); err != nil {
-		return AgentLifecycleTransitionResult{}, fmt.Errorf("agent lifecycle topology admission: %w", err)
-	}
-	rec.Topology = topology
-	agentID := strings.TrimSpace(rec.Config.ID)
-	revision, err := lifecycleConfigRevision(rec)
-	if err != nil {
-		return AgentLifecycleTransitionResult{}, err
-	}
-	epoch := rec.LifecycleEpoch
-	if epoch <= 0 {
-		epoch = runtimebus.CurrentRuntimeEpoch()
-	}
-	generation := rec.LifecycleGeneration
-	if generation == 0 {
-		generation = 1
-	}
-	plan, planHash, err := normalizedLifecycleSubordinate(runtimesessions.LifecycleMutationPlan{})
-	if err != nil {
-		return AgentLifecycleTransitionResult{}, err
-	}
-	identity, err := rec.Config.ConcreteIdentity()
-	if err != nil {
-		return AgentLifecycleTransitionResult{}, err
-	}
-	previous, terminated, err := c.terminatedLifecycleState(ctx, identity, nil)
-	if err != nil {
-		return AgentLifecycleTransitionResult{}, err
-	}
-	if terminated {
-		operationKind, targetBinding, authorityErr := lifecycleReintroductionAuthority(store, previous.ProcessBinding)
-		if authorityErr != nil {
-			return AgentLifecycleTransitionResult{}, authorityErr
-		}
-		operationID := lifecycleReintroductionOperationID(
-			identity,
-			previous.RuntimeEpoch,
-			previous.Generation,
-			previous.Phase,
-			operationKind,
-			revision,
-			planHash,
-			topology,
-			targetBinding,
-		)
-		return store.CommitAgentLifecycleTransition(ctx, AgentLifecycleTransition{
-			OperationID: operationID, OperationKind: operationKind, Identity: identity, AgentID: agentID, Trigger: operationKind,
-			RequestHash: lifecycleRequestHashForIdentity(
-				identity, topology, operationKind, revision, planHash,
-				previous.ProcessBinding.ProcessAuthorityID, previous.ProcessBinding.ProcessBootID,
-				targetBinding.ProcessAuthorityID, targetBinding.ProcessBootID, targetBinding.GenerationGrantID,
-			),
-			ExpectedEpoch: previous.RuntimeEpoch, ExpectedGeneration: previous.Generation, ExpectedPhase: previous.Phase,
-			TargetEpoch: runtimebus.CurrentRuntimeEpoch(), TargetGeneration: previous.Generation + 1,
-			TargetPhase: AgentLifecycleRegistered, ConfigRevision: revision, RunMode: AgentRunModeStopped,
-			Agent: &rec, Subordinate: plan, Topology: topology, Now: time.Now().UTC(),
-		})
-	}
-	return store.CommitAgentLifecycleTransition(ctx, AgentLifecycleTransition{
-		OperationID: uuid.NewString(), OperationKind: "spawn", Identity: identity, AgentID: agentID, Trigger: "spawn",
-		RequestHash: lifecycleRequestHashForIdentity(identity, topology, "spawn", revision, planHash), TargetEpoch: epoch,
-		TargetGeneration: generation, TargetPhase: AgentLifecycleRegistered,
-		ConfigRevision: revision, RunMode: AgentRunModeStopped, Agent: &rec, Subordinate: plan,
-		Topology: topology, Now: time.Now().UTC(),
-	})
-}
-
 func (c *agentLifecycleCoordinator) terminatedLifecycleState(
 	ctx context.Context,
 	identity runtimeagentidentity.Identity,
@@ -857,15 +777,6 @@ func (c *agentLifecycleCoordinator) terminatedLifecycleState(
 		return AgentLifecycleState{}, false, fmt.Errorf("%w: %s", ErrAgentAlreadyExists, agentID)
 	}
 	return state, true, nil
-}
-
-func (c *agentLifecycleCoordinator) unregisterIdentity(identity runtimeagentidentity.Identity) {
-	if c == nil {
-		return
-	}
-	c.mu.Lock()
-	delete(c.cells, identity.Normalize())
-	c.mu.Unlock()
 }
 
 func (c *agentLifecycleCoordinator) beginRun(parent context.Context, mode AgentRunMode, owner worklifetime.Occurrence) (context.Context, bool, error) {

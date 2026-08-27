@@ -1168,22 +1168,6 @@ func computeModuleInputPaths(spec *runtimecontracts.ComputeSpec) map[string]path
 	return spec.Module.InputPaths
 }
 
-func joinReferencesEntity(source semanticview.Source, flowID string, spec *runtimecontracts.JoinSpec) bool {
-	if spec == nil {
-		return false
-	}
-	if typedPathReferencesEntity(spec.Members.From, spec.Members.FromPath) ||
-		typedPathReferencesEntity(spec.Members.By, spec.Members.ByPath) ||
-		typedPathReferencesEntity(spec.Output, spec.OutputPath) ||
-		expressionReferencesEntity(spec.CompleteWhen) {
-		return true
-	}
-	if spec.Window != nil && (typedPathReferencesEntity(spec.Window.From, spec.Window.FromPath) || typedPathReferencesEntity(spec.Window.By, spec.Window.ByPath)) {
-		return true
-	}
-	return completionRulesEntityRequirement(source, flowID, []runtimecontracts.HandlerRuleEntry{spec.OnComplete, spec.Timeout.Outcome}) != DeliveryTargetEntityOptional
-}
-
 func expressionValueMapReferencesEntity(values map[string]runtimecontracts.ExpressionValue) bool {
 	for _, value := range values {
 		if expressionValueReferencesEntity(value) {

@@ -585,18 +585,6 @@ func countTelegramConnectorSupportedSurfaceNodeDeliveries(t *testing.T, backend 
 	return count
 }
 
-func loadTelegramConnectorSupportedSurfaceActivityAttempt(t *testing.T, backend telegramConnectorSupportedSurfaceBackend) runtimepipeline.ActivityAttemptRecord {
-	t.Helper()
-	rec, ok, err := tryLoadTelegramConnectorSupportedSurfaceActivityAttempt(backend)
-	if err != nil {
-		t.Fatalf("%s load activity attempt: %v", backend.name, err)
-	}
-	if !ok {
-		t.Fatalf("%s activity attempt not found", backend.name)
-	}
-	return rec
-}
-
 func waitForTelegramConnectorSupportedSurfaceTerminalActivityAttempt(t *testing.T, backend telegramConnectorSupportedSurfaceBackend) runtimepipeline.ActivityAttemptRecord {
 	t.Helper()
 	deadline := time.Now().Add(telegramConnectorSupportedSurfaceTimeout)

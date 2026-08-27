@@ -108,20 +108,3 @@ func mergePreservedResources(p PreservedResources) PreservedResources {
 	p.BundleContracts = p.BundleContracts || defaults.BundleContracts
 	return copyPreservedResources(p)
 }
-
-func copyResult(result Result) Result {
-	result.Plan = copyPlan(result.Plan)
-	return result
-}
-
-func copyPlan(plan Plan) Plan {
-	plan.ActiveRuns = append([]RunRef(nil), plan.ActiveRuns...)
-	plan.CleanupRuns = append([]RunRef(nil), plan.CleanupRuns...)
-	plan.ActiveDeliveries = append([]DeliveryRef(nil), plan.ActiveDeliveries...)
-	plan.RunScopedTables = append([]TableRef(nil), plan.RunScopedTables...)
-	plan.EntityContainers = append([]ContainerRef(nil), plan.EntityContainers...)
-	plan.Preserved = copyPreservedResources(plan.Preserved)
-	plan.DownstreamContracts = append([]DownstreamContract(nil), plan.DownstreamContracts...)
-	plan.ResetSeams = append([]ResetSeam(nil), plan.ResetSeams...)
-	return plan
-}

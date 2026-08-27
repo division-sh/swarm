@@ -363,27 +363,6 @@ func lookupPolicyValue(policy map[string]any, ref string) (any, bool) {
 	return current, true
 }
 
-func eventPayloadFields(source semanticview.Source, eventType string) map[string]struct{} {
-	fields, ok := eventPayloadFieldsForExistingEvent(source, eventType)
-	if !ok {
-		return nil
-	}
-	return fields
-}
-
-func eventPayloadFieldsForExistingEvent(source semanticview.Source, eventType string) (map[string]struct{}, bool) {
-	if source == nil {
-		return nil, false
-	}
-	proof := semanticview.ResolveFlowEventProof(source, "", strings.TrimSpace(eventType))
-	if !proof.HasSchema {
-		return nil, false
-	}
-	out := map[string]struct{}{}
-	collectPayloadFields("", proof.Entry.Payload.Properties, out)
-	return out, true
-}
-
 func executableNodeEventPayloadFields(source semanticview.Source, node runtimeidentity.ExecutableNode, eventType string) (map[string]struct{}, bool) {
 	if source == nil || !node.Valid() {
 		return nil, false

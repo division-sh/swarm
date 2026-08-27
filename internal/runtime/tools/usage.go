@@ -161,15 +161,6 @@ func validateEmitToolUsageHintCoverage(source semanticview.Source) []UsageHintFi
 	return findings
 }
 
-func coalesceNonEmpty(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
-}
-
 func runeLen(value string) int {
 	return len([]rune(strings.TrimSpace(value)))
 }

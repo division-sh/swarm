@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -878,14 +877,6 @@ func assertSelectedCompletionEvidencePresent(t *testing.T, db *sql.DB, name, que
 	}
 }
 
-func assertSelectedCompletionEvidenceAbsent(t *testing.T, db *sql.DB, name, query string, args ...any) {
-	t.Helper()
-	var count int
-	if err := db.QueryRow(query, args...).Scan(&count); err != nil || count != 0 {
-		t.Fatalf("retained %s rows=%d err=%v, want 0", name, count, err)
-	}
-}
-
 func requireSelectedAttemptUsesCurrentLease(t *testing.T, fixture selectedCompletionFixture, attemptID string, originalLease time.Time) {
 	t.Helper()
 	query := `
@@ -1008,16 +999,5 @@ func settleSelectedCompletionForTest(t *testing.T, ctx context.Context, handle *
 	_, err := handle.SettleCompletion(ctx, settlement)
 	if err != nil {
 		t.Fatalf("settle selected completion: %v", err)
-	}
-}
-
-func requireSelectedFixtureRows(t *testing.T, fixture selectedCompletionFixture) {
-	t.Helper()
-	for _, table := range []string{"runs", "events", "run_fork_selected_contract_bindings"} {
-		var count int
-		query := fmt.Sprintf("SELECT COUNT(*) FROM %s", table)
-		if err := fixture.db.QueryRow(query).Scan(&count); err != nil || count == 0 {
-			t.Fatalf("fixture table %s count=%d err=%v", table, count, err)
-		}
 	}
 }

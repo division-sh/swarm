@@ -1367,21 +1367,6 @@ func fileContainsAuthoredRouting(t testing.TB, path string) bool {
 	}
 }
 
-func yamlTextContainsAuthoredRouting(text string) bool {
-	decoder := yaml.NewDecoder(strings.NewReader(text))
-	for {
-		var doc yaml.Node
-		if err := decoder.Decode(&doc); err != nil {
-			return false
-		}
-		for _, node := range doc.Content {
-			if yamlNodeContainsAuthoredRouting(node) {
-				return true
-			}
-		}
-	}
-}
-
 func difference[A any, B any](left map[ArtifactID]A, right map[ArtifactID]B) []string {
 	var out []string
 	for key := range left {

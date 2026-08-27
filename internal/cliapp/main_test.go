@@ -3,13 +3,11 @@ package cliapp
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,32 +16,19 @@ import (
 
 	"github.com/division-sh/swarm/internal/apiv1"
 	"github.com/division-sh/swarm/internal/config"
-	"github.com/division-sh/swarm/internal/events"
-	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
-	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
-	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/semanticviewtest"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/requiredagentsparentconnect"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/store"
-	"github.com/division-sh/swarm/internal/store/storetest"
 	"github.com/division-sh/swarm/internal/testpostgres"
-	"github.com/google/uuid"
 )
-
-type delayedRunStatusAgent struct {
-	id            string
-	subscriptions []events.EventType
-	started       chan struct{}
-	release       chan struct{}
-}
 
 func chdirForTest(t *testing.T, dir string) {
 	t.Helper()
@@ -72,80 +57,6 @@ func chdirForTest(t *testing.T, dir string) {
 			t.Fatalf("unset PWD after chdir: %v", err)
 		}
 	})
-}
-
-func (a delayedRunStatusAgent) ID() string { return a.id }
-func (delayedRunStatusAgent) Type() string { return "test" }
-func (a delayedRunStatusAgent) Subscriptions() []events.EventType {
-	return append([]events.EventType(nil), a.subscriptions...)
-}
-
-func (a delayedRunStatusAgent) OnEvent(ctx context.Context, evt events.Event) ([]events.Event, error) {
-	select {
-	case a.started <- struct{}{}:
-	default:
-	}
-	select {
-	case <-a.release:
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
-	return []events.Event{eventtest.RunCreatingRootIngress(uuid.NewString(), events.EventType("scan.completed"), a.id, "", []byte(`{}`), 0, evt.RunID(), "", events.EnvelopeForEntityID(events.EventEnvelope{}, evt.EntityID()), time.Now().UTC())}, nil
-}
-
-func publishRunStatusRootEvent(t *testing.T, bus *runtimebus.EventBus, runID, entityID string) string {
-	t.Helper()
-	eventID := uuid.NewString()
-	if err := bus.Publish(context.Background(), eventtest.RunCreatingRootIngress(
-		eventID,
-		events.EventType("scan.requested"),
-		"api.v1",
-		"",
-		[]byte(`{"topic":"sample"}`),
-		0,
-		runID,
-		"",
-		events.EnvelopeForEntityID(events.EventEnvelope{}, entityID),
-		time.Now().UTC(),
-	)); err != nil {
-		t.Fatalf("publish root event: %v", err)
-	}
-	return eventID
-}
-
-func seedRunStatusEntityState(t *testing.T, db *sql.DB, runID, entityID string) {
-	t.Helper()
-	now := time.Now().UTC()
-	if _, err := db.ExecContext(context.Background(), `
-		INSERT INTO entity_state (
-			run_id, entity_id, flow_instance, entity_type, slug, name, current_state,
-			gates, fields, accumulator, revision, entered_state_at, created_at, updated_at
-		) VALUES (
-			$1::uuid, $2::uuid, 'run-status-test', 'default', 'status-entity', 'Status Entity', 'ready',
-			'{}'::jsonb, '{}'::jsonb, '{}'::jsonb, 1, $3, $3, $3
-		)
-	`, runID, entityID, now); err != nil {
-		t.Fatalf("seed run status entity_state: %v", err)
-	}
-}
-
-func markRunStatusCompleted(t *testing.T, pg *store.PostgresStore, eventID string) {
-	t.Helper()
-	var runID, bundleHash string
-	if err := storetest.DatabaseForTest(pg).QueryRowContext(context.Background(), `
-		SELECT r.run_id::text, r.bundle_hash
-		FROM events e
-		JOIN runs r ON r.run_id = e.run_id
-		WHERE e.event_id = $1::uuid
-	`, eventID).Scan(&runID, &bundleHash); err != nil {
-		t.Fatalf("load completion candidate identity: %v", err)
-	}
-	if _, err := storetest.ExecuteRunCompletionCandidate(
-		context.Background(), pg, bundleHash, runID,
-		storerunlifecycle.NewTerminalCatalog([]string{"ready"}, map[string][]string{"run-status-test": {"ready"}}),
-	); err != nil {
-		t.Fatalf("execute normal run completion candidate: %v", err)
-	}
 }
 
 func TestCLI_RootNoArgsPrintsHelpAndDoesNotStartRuntime(t *testing.T) {
@@ -3069,30 +2980,6 @@ func TestCLI_VerifyPreservesLocalContractCarveOut(t *testing.T) {
 	}
 }
 
-func waitRunStatusEventSettlement(t *testing.T, db *sql.DB, runID string, wantEvents int) {
-	t.Helper()
-	ctx := context.Background()
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		var (
-			eventCount       int
-			activeDeliveries int
-		)
-		err := db.QueryRowContext(ctx, `
-			SELECT
-				(SELECT COUNT(*) FROM events WHERE run_id = $1::uuid),
-				(SELECT COUNT(*) FROM event_deliveries WHERE run_id = $1::uuid AND status IN ('pending', 'in_progress'))
-		`, runID).Scan(&eventCount, &activeDeliveries)
-		if err == nil && eventCount >= wantEvents && activeDeliveries == 0 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("run %s did not settle after release: last err=%v event_count=%d want_events=%d active_deliveries=%d", runID, err, eventCount, wantEvents, activeDeliveries)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
 func TestProjectRunOperationalStatus_UsesDeliveryLifecycleWhenRunIsOperationallyStalled(t *testing.T) {
 	report := operatorread.RunDebugReport{
 		RunTableStatus: "running",
@@ -5092,112 +4979,6 @@ func mapValueContains(values map[string]string, want string) bool {
 		}
 	}
 	return false
-}
-
-type lockedBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (b *lockedBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-
-func (b *lockedBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.String()
-}
-
-const (
-	serveRuntimeReadyTimeout = 30 * time.Second
-	serveRuntimeStopTimeout  = runtimepkg.DefaultShutdownGrace + 15*time.Second
-)
-
-type serveRuntimeTestProcess struct {
-	t      *testing.T
-	cancel context.CancelFunc
-	done   <-chan int
-	out    *lockedBuffer
-
-	mu      sync.Mutex
-	stopped bool
-	code    int
-}
-
-func (p *serveRuntimeTestProcess) outputString() string {
-	return p.out.String()
-}
-
-func (p *serveRuntimeTestProcess) stop() int {
-	p.t.Helper()
-	p.cancel()
-	code, ok := p.waitForExit(serveRuntimeStopTimeout)
-	if !ok {
-		p.t.Fatalf("timed out stopping Run\noutput:\n%s", p.outputString())
-	}
-	return code
-}
-
-func (p *serveRuntimeTestProcess) waitForExit(timeout time.Duration) (int, bool) {
-	p.t.Helper()
-	p.mu.Lock()
-	if p.stopped {
-		code := p.code
-		p.mu.Unlock()
-		return code, true
-	}
-	p.mu.Unlock()
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	select {
-	case code := <-p.done:
-		p.recordStopped(code)
-		return code, true
-	case <-timer.C:
-		return 0, false
-	}
-}
-
-func (p *serveRuntimeTestProcess) recordStopped(code int) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.stopped = true
-	p.code = code
-}
-
-func writeStoreBackendRuntimeConfigWithWorkspaceFields(t *testing.T, backend string, sqlitePath string, workspaceFields []string) string {
-	t.Helper()
-	lines := []string{
-		"runtime:",
-		"  recovery_on_startup: false",
-		"workspace:",
-	}
-	lines = append(lines, workspaceFields...)
-	if strings.TrimSpace(backend) != "" || strings.TrimSpace(sqlitePath) != "" {
-		lines = append(lines,
-			"store:",
-			"  backend: "+backend,
-			"  sqlite:",
-			"    path: "+sqlitePath,
-		)
-	}
-	lines = append(lines,
-		"llm:",
-		"  backend: anthropic",
-		"  session:",
-		"    lock_ttl: 10s",
-		"    rotate_after_turns: 40",
-		"    rotate_on_parse_failures: 3",
-	)
-	path := filepath.Join(t.TempDir(), "swarm.yaml")
-	configText := withTestProviderTriggerPlatformInventory(t, strings.Join(lines, "\n")+"\n")
-	if err := os.WriteFile(path, []byte(configText), 0o644); err != nil {
-		t.Fatalf("write runtime config: %v", err)
-	}
-	return path
 }
 
 func writeRuntimeConfigText(t *testing.T, path, configText string) {

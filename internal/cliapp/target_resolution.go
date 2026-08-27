@@ -560,21 +560,6 @@ func resolveDoctorTargetStore(repo string, swarmDir CLISwarmDirResolution, proje
 	}, nil
 }
 
-func normalizeDoctorTargetSQLitePath(repo, raw, source string) (string, error) {
-	path := strings.TrimSpace(raw)
-	if path == "" {
-		return "", fmt.Errorf("sqlite path from %s must be non-empty", source)
-	}
-	if filepath.IsAbs(path) {
-		return filepath.Clean(path), nil
-	}
-	root := strings.TrimSpace(repo)
-	if root == "" {
-		return filepath.Clean(path), nil
-	}
-	return filepath.Clean(filepath.Join(root, path)), nil
-}
-
 func resolveDoctorTargetData(repo string, opts doctorOptions, project localRuntimeStateProject, cfg *config.Config) doctorTargetPath {
 	mountSources, err := resolveWorkspaceMountSourcesForLocalState(repo, doctorTargetDataSourceFlag(opts), cfg, project, false)
 	if err != nil {

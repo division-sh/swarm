@@ -3,7 +3,6 @@ package pipeline
 import (
 	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
@@ -11,13 +10,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
-
-func stringValue(v any) string {
-	if typed, ok := v.(string); ok {
-		return typed
-	}
-	return ""
-}
 
 func asBool(v any) bool {
 	typed, ok := v.(bool)
@@ -60,18 +52,6 @@ func WorkflowEntitySchemaInitialValueFields(source semanticview.Source) map[stri
 		return nil
 	}
 	return workflowEntitySchemaInitialValueFieldsFromRaw(source.WorkflowEntitySchema())
-}
-
-func workflowEntitySchemaInitialValueFieldsForFlow(source semanticview.Source, flowID string) map[string]struct{} {
-	values := workflowEntitySchemaInitialValues(source, flowID)
-	if len(values) == 0 {
-		return nil
-	}
-	out := map[string]struct{}{}
-	for field := range values {
-		out[field] = struct{}{}
-	}
-	return out
 }
 
 func workflowEntitySchemaInitialValueFieldsFromRaw(raw any) map[string]struct{} {
@@ -256,27 +236,4 @@ func runtimecontractsHandlerPatternMatches(pattern, eventType string) bool {
 
 func workflowRouteMatches(pattern, eventType string) bool {
 	return eventidentity.MatchPattern(pattern, eventType)
-}
-
-func normalizeStringSet(values []string) map[string]struct{} {
-	out := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value != "" {
-			out[value] = struct{}{}
-		}
-	}
-	return out
-}
-
-func sortedWorkflowValidationKeys[T any](m map[string]T) []string {
-	if len(m) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(m))
-	for key := range m {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }

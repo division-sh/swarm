@@ -73,12 +73,6 @@ func AuthoredEmitSites(source Source) []AuthoredEmitSite {
 	return builder.sites
 }
 
-func authoredEmitSiteSkipsProjectScope(scope ProjectScope) bool {
-	// The loader can expose a flow-owned "." project projection for the root
-	// package; the corresponding FlowScope is the canonical authored source.
-	return strings.TrimSpace(scope.Key) == "." && strings.TrimSpace(scope.OwningFlowID) != ""
-}
-
 type authoredEmitSiteBuilder struct {
 	bundle *runtimecontracts.WorkflowContractBundle
 	seen   map[string]struct{}
@@ -139,39 +133,6 @@ func executableNodeFlowPath(source Source, node runtimeidentity.ExecutableNode) 
 	return ""
 }
 
-func sortedAuthoredProjectScopes(scopes []ProjectScope) []ProjectScope {
-	out := append([]ProjectScope{}, scopes...)
-	sort.SliceStable(out, func(i, j int) bool {
-		if strings.TrimSpace(out[i].Key) != strings.TrimSpace(out[j].Key) {
-			return strings.TrimSpace(out[i].Key) < strings.TrimSpace(out[j].Key)
-		}
-		return strings.TrimSpace(out[i].OwningFlowID) < strings.TrimSpace(out[j].OwningFlowID)
-	})
-	return out
-}
-
-func sortedAuthoredFlowScopes(scopes []FlowScope) []FlowScope {
-	out := append([]FlowScope{}, scopes...)
-	sort.SliceStable(out, func(i, j int) bool {
-		if strings.TrimSpace(out[i].ID) != strings.TrimSpace(out[j].ID) {
-			return strings.TrimSpace(out[i].ID) < strings.TrimSpace(out[j].ID)
-		}
-		return strings.TrimSpace(out[i].Path) < strings.TrimSpace(out[j].Path)
-	})
-	return out
-}
-
-func sortedAuthoredNodeKeys(nodes map[string]runtimecontracts.SystemNodeContract) []string {
-	keys := make([]string, 0, len(nodes))
-	for key := range nodes {
-		if key = strings.TrimSpace(key); key != "" {
-			keys = append(keys, key)
-		}
-	}
-	sort.Strings(keys)
-	return keys
-}
-
 func sortedAuthoredHandlerEvents(handlers map[string]runtimecontracts.SystemNodeEventHandler) []string {
 	keys := make([]string, 0, len(handlers))
 	for key := range handlers {
@@ -181,104 +142,6 @@ func sortedAuthoredHandlerEvents(handlers map[string]runtimecontracts.SystemNode
 	}
 	sort.Strings(keys)
 	return keys
-}
-
-func authoredEmitSiteFlowIdentity(source Source, flowID string) (string, string) {
-	flowID = strings.TrimSpace(flowID)
-	if source == nil || flowID == "" {
-		return "", ""
-	}
-	scope, ok := source.FlowScopeByID(flowID)
-	if !ok {
-		return "", ""
-	}
-	return strings.Trim(strings.TrimSpace(scope.Path), "/"), strings.TrimSpace(scope.PackageKey)
-}
-
-func authoredEmitSiteFlowScopeKey(scope FlowScope) string {
-	if key := strings.TrimSpace(scope.PackageKey); key != "" {
-		return key
-	}
-	path := strings.Trim(strings.TrimSpace(scope.Path), "/")
-	if path != "" {
-		return path
-	}
-	if id := strings.TrimSpace(scope.ID); id != "" {
-		return "flows/" + id
-	}
-	return ""
-}
-
-func authoredPreferredFlowScopeKeys(projectScopes []ProjectScope, flowScopes []FlowScope) map[string]string {
-	out := map[string]string{}
-	flowRootProjectScopeKeys := authoredFlowRootProjectScopeKeys(flowScopes)
-	for _, scope := range projectScopes {
-		flowID := strings.TrimSpace(scope.OwningFlowID)
-		if flowID == "" {
-			continue
-		}
-		key := strings.TrimSpace(scope.Key)
-		if key == "" {
-			continue
-		}
-		if _, ok := flowRootProjectScopeKeys[flowID][key]; !ok {
-			continue
-		}
-		current := out[flowID]
-		if current == "" || authoredFlowScopeKeyRank(key) > authoredFlowScopeKeyRank(current) {
-			out[flowID] = key
-		}
-	}
-	for _, scope := range flowScopes {
-		flowID := strings.TrimSpace(scope.ID)
-		if flowID == "" {
-			continue
-		}
-		key := authoredEmitSiteFlowScopeKey(scope)
-		if key == "" {
-			continue
-		}
-		current := out[flowID]
-		if current == "" || authoredFlowScopeKeyRank(key) > authoredFlowScopeKeyRank(current) {
-			out[flowID] = key
-		}
-	}
-	return out
-}
-
-func authoredFlowRootProjectScopeKeys(flowScopes []FlowScope) map[string]map[string]struct{} {
-	out := map[string]map[string]struct{}{}
-	for _, scope := range flowScopes {
-		flowID := strings.TrimSpace(scope.ID)
-		if flowID == "" {
-			continue
-		}
-		keys := out[flowID]
-		if keys == nil {
-			keys = map[string]struct{}{}
-			out[flowID] = keys
-		}
-		if key := strings.TrimSpace(scope.PackageKey); key != "" && key != "." {
-			keys[key] = struct{}{}
-		}
-		if path := strings.Trim(strings.TrimSpace(scope.Path), "/"); path != "" && path != "." {
-			keys[path] = struct{}{}
-		}
-		keys["flows/"+flowID] = struct{}{}
-	}
-	return out
-}
-
-func authoredFlowScopeKeyRank(key string) int {
-	key = strings.TrimSpace(key)
-	switch {
-	case key == "" || key == ".":
-		return 0
-	case strings.HasPrefix(key, "flows/"):
-		return 2
-	default:
-		return 1
-	}
 }
 
 func authoredEmitSiteIdentity(flowID, scopeKey, nodeKey, handlerEvent, siteKey string) string {

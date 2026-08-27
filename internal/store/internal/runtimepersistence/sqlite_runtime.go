@@ -185,22 +185,6 @@ func (s *SQLiteRuntimeStore) ListEventDeliveryRecipients(ctx context.Context, ev
 	return out, nil
 }
 
-func sqliteNullString(raw string) any {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil
-	}
-	return raw
-}
-
-func sqliteNullUUID(raw string) any {
-	raw = nullUUIDString(raw)
-	if raw == "" {
-		return nil
-	}
-	return raw
-}
-
 func sqliteTimeValue(raw any) (time.Time, bool, error) {
 	switch v := raw.(type) {
 	case nil:

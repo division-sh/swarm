@@ -21,7 +21,6 @@ import (
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
-	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -617,91 +616,6 @@ func proveDynamicFlowSourceRevisionConvergence(
 		if _, err := runtimeV5.manager.ResolveAgentConfig(agentID, descriptor.FlowInstance); err != nil {
 			t.Fatalf("reintroduced restart omitted active agent %s", agentID)
 		}
-	}
-}
-
-func assertNotifyAllChildrenReadinessOwnershipFailure(t *testing.T, action string, err error) {
-	t.Helper()
-	if err == nil || !strings.Contains(err.Error(), "dynamic_agent_topology_owned_by_readiness") {
-		t.Fatalf("%s error = %v, want dynamic readiness ownership rejection", action, err)
-	}
-}
-
-func notifyAllChildrenRuntimeCreatedAgentConfig(
-	t testing.TB,
-	cfg runtimeactors.AgentConfig,
-	agentID string,
-	owner string,
-	flowInstance string,
-) runtimeactors.AgentConfig {
-	t.Helper()
-	name, err := runtimeagentidentity.RuntimeName(agentID, owner)
-	if err != nil {
-		t.Fatalf("runtime-created agent name: %v", err)
-	}
-	route := runtimeagentidentity.RootRoute()
-	if strings.Trim(strings.TrimSpace(flowInstance), "/") != "" {
-		route, err = runtimeflowidentity.StoredRoute("", "", flowInstance).AgentIdentityRoute()
-		if err != nil {
-			t.Fatalf("runtime-created agent route: %v", err)
-		}
-	}
-	identity, err := runtimeagentidentity.New(name, route)
-	if err != nil {
-		t.Fatalf("runtime-created agent identity: %v", err)
-	}
-	cfg.ID = agentID
-	cfg.Identity = identity
-	cfg.FlowPath = identity.FlowInstance()
-	return cfg
-}
-
-type notifyAllChildrenTopologySnapshot struct {
-	agents    string
-	readiness string
-	routes    string
-	process   string
-}
-
-func snapshotNotifyAllChildrenTopology(
-	t *testing.T,
-	ctx context.Context,
-	selected notifyAllChildrenStore,
-	runtime *notifyAllChildrenRuntime,
-	runID string,
-	descriptor runtimebus.ActiveFlowInstanceDescriptor,
-) notifyAllChildrenTopologySnapshot {
-	t.Helper()
-	readiness, found, err := runtime.pipeline.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(descriptor.FlowInstance))
-	if err != nil || !found {
-		t.Fatalf("snapshot readiness: readiness=%#v found=%t err=%v", readiness, found, err)
-	}
-	route := runtimeflowidentity.StoredRoute(
-		notifyallchildren.ChildFlowID,
-		descriptor.InstanceID,
-		descriptor.FlowInstance,
-	)
-	routes, err := selected.ListFlowInstanceRouteRecords(ctx, route)
-	if err != nil {
-		t.Fatalf("snapshot route records: %v", err)
-	}
-	marshal := func(name string, value any) string {
-		t.Helper()
-		raw, err := json.Marshal(value)
-		if err != nil {
-			t.Fatalf("snapshot %s: %v", name, err)
-		}
-		return string(raw)
-	}
-	processAgents := runtime.manager.ListAgentConfigs()
-	slices.SortFunc(processAgents, func(a, b runtimeactors.AgentConfig) int {
-		return strings.Compare(a.ID, b.ID)
-	})
-	return notifyAllChildrenTopologySnapshot{
-		agents:    marshal("agents", loadNotifyAllChildrenAgentsByID(t, ctx, selected)),
-		readiness: marshal("readiness", readiness),
-		routes:    marshal("routes", routes),
-		process:   marshal("process agents", processAgents),
 	}
 }
 

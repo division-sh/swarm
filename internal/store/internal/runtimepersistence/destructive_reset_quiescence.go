@@ -9,8 +9,6 @@ import (
 	runtimerunquiescence "github.com/division-sh/swarm/internal/runtime/runquiescence"
 )
 
-const destructiveResetPipelineSubscriberID = activeRunQuiescencePipelineSubscriberID
-
 func (s *PostgresStore) ApplyDestructiveResetQuiescence(ctx context.Context, req destructivereset.QuiescenceRequest) (destructivereset.QuiescenceResult, error) {
 	requestedAt := req.RequestedAt.UTC()
 	if requestedAt.IsZero() {

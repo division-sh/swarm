@@ -499,41 +499,6 @@ type managedCapabilityTestStore interface {
 	SaveManagedCapabilitySurface(context.Context, managedcapabilities.Surface) error
 }
 
-func seedManagedAgentTurnCapabilitySurface(
-	t testing.TB,
-	store managedCapabilityTestStore,
-	runID string,
-	identity agentidentity.Identity,
-	sessionID, turnID, runtimeMode, scopeKey string,
-) string {
-	t.Helper()
-	now := time.Unix(1, 0).UTC()
-	authority := runtimeeffects.NormalAgentAuthority(
-		runtimeeffects.LifecycleToken{
-			RuntimeEpoch: 1,
-			Identity:     identity,
-			AgentID:      identity.AgentID(),
-			Generation:   1,
-		},
-		"store-test-owner",
-		now.Add(time.Hour),
-	)
-	authority.Target = runtimeeffects.UsageTarget{
-		Kind: runtimeeffects.UsageTargetAgentTurn, ID: turnID, RunID: runID,
-		AgentID: identity.AgentID(), AgentIdentity: identity, SessionID: sessionID,
-		Memory: agentmemory.PlatformDefault(), FlowInstance: identity.FlowInstance(),
-		EntityID: scopeKey,
-	}
-	if runtimeMode != "task" {
-		authority.Target.Memory = agentmemory.Authored(true)
-	}
-	surface := managedCompletionTestSurface(t, authority, "anthropic_api")
-	if err := store.SaveManagedCapabilitySurface(context.Background(), surface); err != nil {
-		t.Fatalf("seed managed agent-turn capability surface: %v", err)
-	}
-	return surface.ID
-}
-
 func TestCompletionRecoveryRejectsSameSlugSiblingCapabilityPrincipal(t *testing.T) {
 	identityA := testAgentIdentity(t, "recovery-worker", "review/inst-a")
 	identityB := testAgentIdentity(t, "recovery-worker", "review/inst-b")

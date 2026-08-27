@@ -24,7 +24,6 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimeruncontrol "github.com/division-sh/swarm/internal/runtime/runcontrol"
-	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -68,11 +67,6 @@ func cloneAnyMap(values map[string]any) map[string]any {
 
 func ptrTime(v time.Time) *time.Time { return &v }
 
-func parseTestTime(raw string) time.Time {
-	ts, _ := time.Parse(time.RFC3339Nano, strings.TrimSpace(raw))
-	return ts
-}
-
 func setOperatorAuth(req *http.Request) {
 	req.Header.Set("Authorization", "Bearer "+testOperatorAuthToken)
 }
@@ -107,19 +101,6 @@ func TestDashboardRejectsLegacySubscriberParameter(t *testing.T) {
 	if _, err := dashboardEventFilterFromRequest(req); err == nil || !strings.Contains(err.Error(), "subscriber is unsupported") {
 		t.Fatalf("dashboardEventFilterFromRequest error = %v, want legacy subscriber rejection", err)
 	}
-}
-
-type stubMailbox struct {
-	items map[string]runtimetools.MailboxItem
-	list  []runtimetools.MailboxItem
-}
-
-func (s stubMailbox) ListMailboxItems(context.Context, string, int) ([]runtimetools.MailboxItem, error) {
-	return s.list, nil
-}
-
-func (s stubMailbox) GetMailboxItem(_ context.Context, id string) (runtimetools.MailboxItem, error) {
-	return s.items[id], nil
 }
 
 type stubInstances struct {

@@ -8,10 +8,6 @@ import (
 	runtimesharedjson "github.com/division-sh/swarm/internal/runtime/sharedjson"
 )
 
-func canonicalRuntimeRole(role string) string {
-	return strings.ToLower(strings.TrimSpace(role))
-}
-
 func processWarn(component string, format string, args ...any) {
 	component = strings.TrimSpace(component)
 	if component == "" {

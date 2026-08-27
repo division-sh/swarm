@@ -10,7 +10,6 @@ import (
 
 	mailboxcontract "github.com/division-sh/swarm/internal/mailbox"
 
-	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 )
@@ -103,14 +102,6 @@ func (s *MailboxPostgresOwner) GetV1MailboxItem(ctx context.Context, id string) 
 		return mailboxcontract.V1ItemDetail{}, err
 	}
 	return row.projectDetail(), nil
-}
-
-func replyDeliveryContext(replyContextID string) events.DeliveryContext {
-	replyContextID = strings.TrimSpace(replyContextID)
-	if replyContextID == "" {
-		return events.DeliveryContext{}
-	}
-	return events.DeliveryContext{Reply: &events.ReplyContextRef{ID: replyContextID}}.Normalized()
 }
 
 func mailboxV1ListWhere(opts mailboxcontract.V1ListOptions, cursor mailboxcontract.V1Cursor) (string, []any) {

@@ -24,7 +24,6 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
-	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
@@ -91,12 +90,6 @@ func commitProjectedWorkflowEvidenceForTest(ctx context.Context, pc *PipelineCoo
 
 func testEngineStateMutation(metadata map[string]any, gates map[string]bool, buckets map[string]map[string]any) runtimeengine.StateMutation {
 	return runtimeengine.StateMutation{
-		StateCarrier: runtimeengine.NewStateCarrier(metadata, gates, buckets),
-	}
-}
-
-func testEngineStateSnapshot(metadata map[string]any, gates map[string]bool, buckets map[string]map[string]any) runtimeengine.StateSnapshot {
-	return runtimeengine.StateSnapshot{
 		StateCarrier: runtimeengine.NewStateCarrier(metadata, gates, buckets),
 	}
 }
@@ -405,36 +398,6 @@ func TestApplyEngineStateMutationKeepsTypedParentRouteIndependent(t *testing.T) 
 	if instance.ParentFlowID != "typed-root" || instance.ParentFlowInstance != "typed-root/inst-1" || instance.ParentEntityID != "typed-parent" {
 		t.Fatalf("typed parent route = %q/%q/%q, want original", instance.ParentFlowID, instance.ParentFlowInstance, instance.ParentEntityID)
 	}
-}
-
-func mutationParentRoutePinOutputSource() semanticview.Source {
-	child := runtimecontracts.FlowContractView{
-		Paths: runtimecontracts.FlowContractPaths{
-			ID:   "child",
-			Flow: "child",
-		},
-		Schema: runtimecontracts.FlowSchemaDocument{
-			Pins: runtimecontracts.FlowPins{
-				Outputs: runtimecontracts.FlowOutputPins{
-					Events: []string{"child.done"},
-				},
-			},
-		},
-		Events: map[string]runtimecontracts.EventCatalogEntry{
-			"child.done": {},
-		},
-		Path: "child",
-	}
-	return semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{
-		FlowTree: flowmodel.Tree[runtimecontracts.FlowContractView]{
-			Root: &runtimecontracts.FlowContractView{
-				Children: []runtimecontracts.FlowContractView{child},
-			},
-			ByID: map[string]*runtimecontracts.FlowContractView{
-				"child": &child,
-			},
-		},
-	})
 }
 
 func TestMaybeDeactivateTerminalFlowInstance_IgnoresRootWorkflowEntity(t *testing.T) {

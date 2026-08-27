@@ -489,10 +489,6 @@ func (e *Executor) resolveWebSearchProviderConfig(actor models.AgentConfig) (web
 	return resolveWebSearchProviderConfigFromSourceForFlow(source, flowID)
 }
 
-func resolveWebSearchProviderConfigFromSource(source semanticview.Source) (webSearchProviderConfig, error) {
-	return resolveWebSearchProviderConfigFromSourceForFlow(source, "")
-}
-
 func resolveWebSearchProviderConfigFromSourceForFlow(source semanticview.Source, flowID string) (webSearchProviderConfig, error) {
 	if source == nil {
 		return webSearchProviderConfig{}, fmt.Errorf("web_search provider is unavailable without a workflow source")

@@ -458,12 +458,6 @@ func (am *AgentManager) maybeTripAuthCircuitBreaker(ctx context.Context, identit
 	return running
 }
 
-func (am *AgentManager) isAuthBreakerTripped() bool {
-	am.runMu.Lock()
-	defer am.runMu.Unlock()
-	return am.authBreakerTripped
-}
-
 func (am *AgentManager) writeReceipt(ctx context.Context, evt events.Event, status ReceiptStatus, failure *runtimefailures.Envelope, heartbeats ...*runtimedelivery.ClaimHeartbeat) (runtimedelivery.Snapshot, error) {
 	eventID := strings.TrimSpace(evt.ID())
 	route, routeOK := runtimedelivery.RouteFromContext(ctx)
@@ -734,18 +728,4 @@ func (am *AgentManager) recordDeadLetterEscalation(flowInstance string, sample d
 		})
 	}
 	return len(window), sampleEvents, true
-}
-
-func (am *AgentManager) resolveManagerAgentID(identity runtimeagentidentity.Identity) string {
-	execution, ok := am.lifecycle.executionSnapshotByIdentity(identity)
-	cfg := execution.Config
-	if ok {
-		if p := strings.TrimSpace(cfg.ParentAgent); p != "" {
-			return p
-		}
-		if managerID := normalizedManagerFallback(cfg, cfg.ManagerFallback); managerID != "" {
-			return managerID
-		}
-	}
-	return am.defaultManagerAgentID(cfg)
 }

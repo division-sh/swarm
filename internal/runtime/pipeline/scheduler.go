@@ -54,13 +54,6 @@ func (p scheduledProjection) key() string {
 	}
 }
 
-func (p scheduledProjection) mode() string {
-	if p.kind == scheduledProjectionWorkflowTimer || p.kind == scheduledProjectionGenericActivation {
-		return "once"
-	}
-	return ""
-}
-
 func (p scheduledProjection) dueAt() time.Time {
 	if p.kind == scheduledProjectionWorkflowTimer {
 		return p.workflow.DueAt()
