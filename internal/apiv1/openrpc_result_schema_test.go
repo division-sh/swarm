@@ -368,6 +368,7 @@ func successfulOperatorChannelRuntimeResult(methodName string) any {
 		coordinate := map[string]any{
 			"bundle_hash": "bundle-v1:sha256:" + strings.Repeat("a", 64), "bundle_source": "persisted",
 			"bundle_identity": "support@1.0.0#bundle", "pack_inventory_generation": "inventory",
+			"runtime_instance_id":            "11111111-1111-4111-8111-111111111111",
 			"context_publication_generation": 1, "plan_generation": "plan", "target_generation": 1,
 		}
 		operation := map[string]any{

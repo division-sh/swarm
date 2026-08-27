@@ -73,7 +73,7 @@ func TestRunLifecycleOwnerRejectsPersistedSourceWithoutBundleRow(t *testing.T) {
 	assertRunRowAbsent(t, db, runID)
 }
 
-func TestPostgresStore_ActiveRunBundleAvailabilityConflicts(t *testing.T) {
+func TestPostgresStore_ActiveNonStandingRunBundleAvailabilityConflicts(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := newTestPostgresStore(t, db)
 	persistedMissingRunID := uuid.NewString()
@@ -99,9 +99,9 @@ func TestPostgresStore_ActiveRunBundleAvailabilityConflicts(t *testing.T) {
 		)
 	}
 
-	conflicts, err := pg.ActiveRunBundleAvailabilityConflicts(testAuthorActivityContext())
+	conflicts, err := pg.ActiveNonStandingRunBundleAvailabilityConflicts(testAuthorActivityContext())
 	if err != nil {
-		t.Fatalf("ActiveRunBundleAvailabilityConflicts: %v", err)
+		t.Fatalf("ActiveNonStandingRunBundleAvailabilityConflicts: %v", err)
 	}
 	if len(conflicts) != 2 {
 		t.Fatalf("conflicts = %#v, want persisted-missing and deleted active conflicts", conflicts)

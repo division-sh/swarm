@@ -23,6 +23,26 @@ type HTTPExecutor struct {
 	Client *http.Client
 }
 
+type ProviderCredentialRejectedError struct {
+	ToolID     string
+	StatusCode int
+	Err        error
+}
+
+func (e *ProviderCredentialRejectedError) Error() string {
+	if e == nil {
+		return "provider credential rejected"
+	}
+	return fmt.Sprintf("provider registration tool %q rejected its credential with HTTP %d: %v", strings.TrimSpace(e.ToolID), e.StatusCode, e.Err)
+}
+
+func (e *ProviderCredentialRejectedError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
 type PendingApply struct {
 	handle           *runtimeeffects.Handle
 	responseObserved bool
@@ -51,7 +71,11 @@ func (e HTTPExecutor) Read(ctx context.Context, toolID string, tool runtimecontr
 	if err != nil {
 		return nil, redactProviderError(err, secrets)
 	}
-	return projectProviderResponse(toolID, tool, response, raw, secrets)
+	result, err := projectProviderResponse(toolID, tool, response, raw, secrets)
+	if err != nil && (response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden) {
+		return nil, &ProviderCredentialRejectedError{ToolID: toolID, StatusCode: response.StatusCode, Err: err}
+	}
+	return result, err
 }
 
 func (e HTTPExecutor) Apply(ctx context.Context, toolID string, tool runtimecontracts.ToolSchemaEntry, input, credentials map[string]any, lineage map[string]string) (ApplyResult, error) {

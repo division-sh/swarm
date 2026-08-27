@@ -149,7 +149,7 @@ func (c *CandidateCatalog) Resolve(selection CandidateSelection) (Candidate, err
 }
 
 // FindExact returns only a candidate owned by the same current runtime
-// publication. A selector-compatible successor is intentionally not a match.
+// occurrence.
 func (c *CandidateCatalog) FindExact(provider string, identity operatorchannel.InterfaceIdentity, coordinate ChannelRuntimeContextCoordinate, targetSelector string) (Candidate, bool) {
 	if c == nil {
 		return Candidate{}, false
@@ -159,6 +159,26 @@ func (c *CandidateCatalog) FindExact(provider string, identity operatorchannel.I
 	targetSelector = strings.TrimSpace(targetSelector)
 	for _, candidate := range c.candidates {
 		if candidate.Provider == provider && candidate.Interface.Normalized() == identity && candidate.Target.Selector == targetSelector && candidate.Coordinate.Matches(coordinate) {
+			return candidate, true
+		}
+	}
+	return Candidate{}, false
+}
+
+// FindDurableSuccessor resolves the current live occurrence for one exact
+// restart-stable onboarding responsibility. Every behavior-bearing semantic
+// field remains exact; only publication and target generations may change.
+func (c *CandidateCatalog) FindDurableSuccessor(provider string, identity operatorchannel.InterfaceIdentity, coordinate ChannelRuntimeContextCoordinate, targetSelector string, posture ActivationPosture, ceremony IdentityCeremony) (Candidate, bool) {
+	if c == nil {
+		return Candidate{}, false
+	}
+	provider = strings.TrimSpace(provider)
+	identity = identity.Normalized()
+	targetSelector = strings.TrimSpace(targetSelector)
+	for _, candidate := range c.candidates {
+		if candidate.Provider == provider && candidate.Interface.Normalized() == identity &&
+			candidate.Target.Selector == targetSelector && candidate.Posture == posture && candidate.Ceremony == ceremony &&
+			candidate.Coordinate.MatchesDurableIdentity(coordinate) {
 			return candidate, true
 		}
 	}

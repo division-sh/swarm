@@ -1627,7 +1627,10 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		channelActivationRefresher.reconcile = func(refreshCtx context.Context) error {
 			generation := publicExposure.Generation()
 			if generation.ID == "" {
-				return fmt.Errorf("public exposure generation is unavailable for channel activation refresh")
+				// Startup teardown and stale-context retirement precede public
+				// exposure. Process publication is refreshed immediately; provider
+				// registration is reconciled after publicExposure.Start below.
+				return nil
 			}
 			return reconcilePublicIngress(refreshCtx, generation)
 		}
@@ -1660,7 +1663,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		return channelActivationRefresher.RefreshChannelActivations(hookCtx)
 	})
 	presenter.recordBootWarnings(bootReport)
-	if err := activateServeAfterConnectedChannelTeardownRecovery(ctx, channelDestructive, channelOnboarding, func() error {
+	if err := activateServeAfterConnectedChannelTeardownRecovery(ctx, channelDestructive, func() error {
 		apiServerLease, err := processWorkOwner.Begin(ctx)
 		if err != nil {
 			return fmt.Errorf("admit api server: %w", err)
@@ -1681,11 +1684,16 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		if err := startServeRuntimeContexts(ctx, runtimeContexts, runtimeContextManager); err != nil {
 			return err
 		}
-		if err := reportServeStandingReadiness(ctx, rt.Pipeline, opts.Output); err != nil {
-			return err
-		}
-		return channelActivationRefresher.publishChannelActivations(ctx)
-	}); err != nil {
+		return reconcileRetiredConnectedChannelContexts(ctx, runtimeContextManager, channelOnboardingStore, channelDestructive)
+	}, channelOnboarding); err != nil {
+		presenter.fail(22, "channel_onboarding", err)
+		return 1
+	}
+	if err := reportServeStandingReadiness(ctx, rt.Pipeline, opts.Output); err != nil {
+		presenter.fail(22, "channel_onboarding", err)
+		return 1
+	}
+	if err := channelActivationRefresher.publishChannelActivations(ctx); err != nil {
 		presenter.fail(22, "channel_onboarding", err)
 		return 1
 	}
@@ -2388,7 +2396,7 @@ func closeServeRuntime(ctx context.Context, supervisor *runtimeProjectSupervisor
 	var shutdownErr error
 	if supervisor != nil {
 		shutdownOpts := runtime.ShutdownOptions{Grace: remainingServeShutdownGrace(opts.ShutdownGrace, deadlines...)}
-		_, shutdownErr = supervisor.CloseProjectWithShutdownOptions(ctx, shutdownOpts)
+		_, shutdownErr = supervisor.ShutdownProcessWithOptions(ctx, shutdownOpts)
 	}
 	var cleanupErr error
 	if opts.Dev && workspaces != nil {
@@ -2697,7 +2705,7 @@ func enforceServeBundleMatchAdmissionForHashes(ctx context.Context, availability
 		return nil
 	}
 	if enforceActiveAvailability {
-		conflicts, err := availability.ActiveRunBundleAvailabilityConflicts(ctx)
+		conflicts, err := availability.ActiveNonStandingRunBundleAvailabilityConflicts(ctx)
 		if err != nil {
 			return err
 		}
@@ -2706,13 +2714,13 @@ func enforceServeBundleMatchAdmissionForHashes(ctx context.Context, availability
 			for _, conflict := range conflicts {
 				details = append(details, conflict.DetailString())
 			}
-			return fmt.Errorf("active run bundle availability conflict: boot bundle %s cannot resume %d active run(s): %s", bootIdentity, len(conflicts), strings.Join(details, "; "))
+			return fmt.Errorf("active non-standing run bundle availability conflict: boot bundle %s cannot resume %d active non-standing run(s): %s", bootIdentity, len(conflicts), strings.Join(details, "; "))
 		}
 	}
 	if len(pinnedBundleHashes) == 0 {
 		return nil
 	}
-	mismatches, err := activeRunPinnedBundleHashesConflicts(ctx, availability, pinnedBundleHashes)
+	mismatches, err := activeNonStandingRunPinnedBundleHashesConflicts(ctx, availability, pinnedBundleHashes)
 	if err != nil {
 		return err
 	}
@@ -2723,10 +2731,10 @@ func enforceServeBundleMatchAdmissionForHashes(ctx context.Context, availability
 	for _, mismatch := range mismatches {
 		details = append(details, mismatch.DetailString())
 	}
-	return fmt.Errorf("active run pinned bundle_hash conflict: DB-loaded serve bundle_hash set %s cannot resume %d active run(s) with different bundle_hash: %s", strings.Join(pinnedBundleHashes, ","), len(mismatches), strings.Join(details, "; "))
+	return fmt.Errorf("active non-standing run pinned bundle_hash conflict: DB-loaded serve bundle_hash set %s cannot resume %d active non-standing run(s) with different bundle_hash: %s", strings.Join(pinnedBundleHashes, ","), len(mismatches), strings.Join(details, "; "))
 }
 
-func activeRunPinnedBundleHashesConflicts(ctx context.Context, availability runbundle.AvailabilityStore, pinnedBundleHashes []string) ([]runbundle.Availability, error) {
+func activeNonStandingRunPinnedBundleHashesConflicts(ctx context.Context, availability runbundle.AvailabilityStore, pinnedBundleHashes []string) ([]runbundle.Availability, error) {
 	allowed := map[string]struct{}{}
 	for _, hash := range uniqueTrimmedServeBundleHashes(pinnedBundleHashes) {
 		allowed[hash] = struct{}{}
@@ -2734,7 +2742,7 @@ func activeRunPinnedBundleHashesConflicts(ctx context.Context, availability runb
 	if len(allowed) == 0 {
 		return nil, nil
 	}
-	availabilities, err := availability.ActiveRunBundleAvailabilities(ctx)
+	availabilities, err := availability.ActiveNonStandingRunBundleAvailabilities(ctx)
 	if err != nil {
 		return nil, err
 	}

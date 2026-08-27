@@ -396,6 +396,11 @@ func TestCloseServeRuntimeDevCleanupRunsAfterShutdownAndJoinsErrors(t *testing.T
 	supervisor := &runtimeProjectSupervisor{
 		currentRT: &runtimepkg.Runtime{},
 	}
+	retiredHookCalls := 0
+	supervisor.SetRuntimeRetiredHook(func(context.Context, runtimepkg.BundleContext) error {
+		retiredHookCalls++
+		return nil
+	})
 	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error {
 		order = append(order, "shutdown")
 		return shutdownErr
@@ -419,6 +424,9 @@ func TestCloseServeRuntimeDevCleanupRunsAfterShutdownAndJoinsErrors(t *testing.T
 	}
 	if got := supervisor.CurrentRuntime(); got != nil {
 		t.Fatalf("CurrentRuntime after close = %p, want nil", got)
+	}
+	if retiredHookCalls != 0 {
+		t.Fatalf("closeServeRuntime retirement hook calls = %d, want 0", retiredHookCalls)
 	}
 }
 
@@ -525,13 +533,14 @@ func TestCLI_ServeLifecycleRoutesDiagnosticsToStderr(t *testing.T) {
 	}
 }
 
-func TestServeBundleMatchAdmissionRejectsActiveAvailabilityConflicts(t *testing.T) {
+func TestServeBundleMatchAvailabilityAdmissionExcludesCurrentStandingAndRejectsOrdinaryConflicts(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := context.Background()
 	bootHash := "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111"
 	persistedMissingRunID := uuid.NewString()
 	deletedRunID := uuid.NewString()
+	standingDeletedRunID := uuid.NewString()
 
 	runlifecyclefixture.RequireCorruptPostgresSnapshot(t, ctx, db, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
 		RunID: persistedMissingRunID, State: "running",
@@ -542,6 +551,11 @@ func TestServeBundleMatchAdmissionRejectsActiveAvailabilityConflicts(t *testing.
 		RunID: deletedRunID, State: "paused",
 		BundleHash: bootHash, BundleSource: storerunlifecycle.BundleSourceDeleted,
 	})
+	runlifecyclefixture.RequireCorruptPostgresSnapshot(t, ctx, db, runlifecyclefixture.CorruptSnapshot{OriginKind: runlifecyclefixture.ScenarioSetupOriginKind(),
+		RunID: standingDeletedRunID, State: "paused",
+		BundleHash: bootHash, BundleSource: storerunlifecycle.BundleSourceDeleted,
+	})
+	seedServeBundleAdmissionCurrentStandingRun(t, ctx, db, standingDeletedRunID, bootHash, storerunlifecycle.BundleSourcePersisted)
 
 	err := enforceServeBundleMatchAdmission(ctx, pg, bootHash, true, "")
 	if err == nil {
@@ -549,7 +563,7 @@ func TestServeBundleMatchAdmissionRejectsActiveAvailabilityConflicts(t *testing.
 	}
 	got := err.Error()
 	for _, want := range []string{
-		"active run bundle availability conflict",
+		"active non-standing run bundle availability conflict",
 		persistedMissingRunID,
 		"BUNDLE_DATA_INTEGRITY_ERROR",
 		"persisted_missing_bundle_row",
@@ -561,10 +575,13 @@ func TestServeBundleMatchAdmissionRejectsActiveAvailabilityConflicts(t *testing.
 			t.Fatalf("admission error = %q, want detail %q", got, want)
 		}
 	}
+	if strings.Contains(got, standingDeletedRunID) {
+		t.Fatalf("availability admission claimed current standing run %s: %q", standingDeletedRunID, got)
+	}
 
 	pinnedHash := "bundle-v1:sha256:3333333333333333333333333333333333333333333333333333333333333333"
 	err = enforceServeBundleMatchAdmission(ctx, pg, pinnedHash, false, pinnedHash)
-	if err == nil || !strings.Contains(err.Error(), "active run bundle availability conflict") {
+	if err == nil || !strings.Contains(err.Error(), "active non-standing run bundle availability conflict") {
 		t.Fatalf("DB-loaded disabled legacy admission error = %v, want active availability conflict", err)
 	}
 }
@@ -605,13 +622,14 @@ func TestServeBundleMatchAdmissionAllowsPersistedPresentAndDisabled(t *testing.T
 	}
 }
 
-func TestServeBundleMatchAdmissionRejectsDifferentPersistedActiveRunInDBLoadedMode(t *testing.T) {
+func TestServePinnedHashAdmissionExcludesCurrentStandingAndRejectsOrdinaryMismatch(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := storetest.AdmitPostgresRuntimeStore(t, db)
 	ctx := context.Background()
 	pinnedHash := "bundle-v1:sha256:1111111111111111111111111111111111111111111111111111111111111111"
 	otherHash := "bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222"
 	otherRunID := uuid.NewString()
+	standingOtherRunID := uuid.NewString()
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO bundles (bundle_hash, content_yaml, parsed_json)
@@ -630,6 +648,11 @@ func TestServeBundleMatchAdmissionRejectsDifferentPersistedActiveRunInDBLoadedMo
 		BundleHash: otherHash, BundleSource: storerunlifecycle.BundleSourcePersisted,
 	})
 	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
+		RunID: standingOtherRunID, State: storerunlifecycle.StatePaused,
+		BundleHash: otherHash, BundleSource: storerunlifecycle.BundleSourcePersisted,
+	})
+	seedServeBundleAdmissionCurrentStandingRun(t, ctx, db, standingOtherRunID, otherHash, storerunlifecycle.BundleSourcePersisted)
+	storetest.RequireRun(t, ctx, pg, storetest.RunFixture{Origin: storetest.ScenarioSetupOrigin(),
 		RunID: uuid.NewString(), State: storerunlifecycle.StateCancelled,
 		BundleHash: otherHash, BundleSource: storerunlifecycle.BundleSourcePersisted,
 	})
@@ -640,7 +663,7 @@ func TestServeBundleMatchAdmissionRejectsDifferentPersistedActiveRunInDBLoadedMo
 	}
 	got := err.Error()
 	for _, want := range []string{
-		"active run pinned bundle_hash conflict",
+		"active non-standing run pinned bundle_hash conflict",
 		pinnedHash,
 		otherRunID,
 		otherHash,
@@ -650,10 +673,28 @@ func TestServeBundleMatchAdmissionRejectsDifferentPersistedActiveRunInDBLoadedMo
 			t.Fatalf("admission error = %q, want detail %q", got, want)
 		}
 	}
+	if strings.Contains(got, standingOtherRunID) {
+		t.Fatalf("pinned-hash admission claimed current standing run %s: %q", standingOtherRunID, got)
+	}
 
 	err = enforceServeBundleMatchAdmission(ctx, pg, pinnedHash, false, pinnedHash)
-	if err == nil || !strings.Contains(err.Error(), "active run pinned bundle_hash conflict") {
+	if err == nil || !strings.Contains(err.Error(), "active non-standing run pinned bundle_hash conflict") {
 		t.Fatalf("disabled legacy admission error = %v, want DB-loaded pinned conflict", err)
+	}
+}
+
+func seedServeBundleAdmissionCurrentStandingRun(t *testing.T, ctx context.Context, db *sql.DB, runID, bundleHash, bundleSource string) {
+	t.Helper()
+	serviceID := uuid.NewString()
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO standing_services (
+			service_id, package_key, flow_id, instance_id, entity_id, declaration_present,
+			operator_override, effective_state, current_bundle_hash, current_bundle_source,
+			revision_sequence, current_generation, current_run_id, publication_state,
+			publication_sequence, created_at, updated_at
+		) VALUES ($1::uuid, $2, $3, $4, $5::uuid, TRUE, 'none', 'active', $6, $7, 1, 1, $8::uuid, 'pending', 0, NOW(), NOW())
+	`, serviceID, "bundle-admission-proof", "flow-"+serviceID, uuid.NewString(), uuid.NewString(), bundleHash, bundleSource, runID); err != nil {
+		t.Fatalf("seed current standing bundle admission run: %v", err)
 	}
 }
 

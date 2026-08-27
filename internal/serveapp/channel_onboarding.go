@@ -72,6 +72,7 @@ func serveChannelOnboardingCatalog(manager *runtime.RuntimeContextManager) (*cha
 				coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
 					BundleHash: bundleHash, BundleSource: bundleSource, BundleIdentity: bundleIdentity,
 					PackInventoryGeneration:      contextDef.PackInventoryDigest,
+					RuntimeInstanceID:            contextDef.RuntimeInstanceID,
 					ContextPublicationGeneration: contextDef.PublicationGeneration,
 					PlanGeneration:               generation, TargetGeneration: uint64(target.Generation),
 				}
@@ -207,7 +208,7 @@ func declaredActivationCredentialAdmissions(ctx context.Context, owner *runtimec
 			Role: role, StoreKey: key, Kind: channelonboarding.CredentialAdmissionObserved,
 			Receipt: operatorchannel.Hash(
 				"declared-channel-credential-observation-v1", coordinate.BundleHash,
-				fmt.Sprint(coordinate.ContextPublicationGeneration), binding.BindingID(), role, epoch,
+				coordinate.RuntimeInstanceID, fmt.Sprint(coordinate.ContextPublicationGeneration), binding.BindingID(), role, epoch,
 			),
 			Epoch: epoch,
 		})
@@ -224,8 +225,9 @@ func declaredActivationCoordinate(contextDef runtime.BundleContext, binding pack
 	}
 	coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
 		BundleHash: bundleHash, BundleSource: bundleSource, BundleIdentity: bundleIdentity,
-		PackInventoryGeneration: contextDef.PackInventoryDigest, ContextPublicationGeneration: contextDef.PublicationGeneration,
-		PlanGeneration: generation,
+		PackInventoryGeneration: contextDef.PackInventoryDigest, RuntimeInstanceID: contextDef.RuntimeInstanceID,
+		ContextPublicationGeneration: contextDef.PublicationGeneration,
+		PlanGeneration:               generation,
 	}
 	if selector := binding.RegistrationTarget(); selector != "" {
 		target, err := exactContextTarget(contextDef, selector)
@@ -258,6 +260,66 @@ type serveConnectedChannelLocalReconciler interface {
 	ReconcileLocal(context.Context) error
 }
 
+type serveConnectedChannelContextRetirer interface {
+	RetireContext(context.Context, string, string, uint64, string, string, string) (channelonboarding.TeardownOperation, error)
+}
+
+func reconcileRetiredConnectedChannelContexts(ctx context.Context, manager *runtime.RuntimeContextManager, store channelonboarding.Store, retire serveConnectedChannelContextRetirer) error {
+	if manager == nil || store == nil || retire == nil {
+		return fmt.Errorf("connected channel context retirement reconciliation requires manager, store, and retirement owner")
+	}
+	catalog, err := serveChannelOnboardingCatalog(manager)
+	if err != nil {
+		return err
+	}
+	operations, err := store.ListChannelOnboardingOperations(ctx)
+	if err != nil {
+		return err
+	}
+	operationByID := make(map[string]channelonboarding.Operation, len(operations))
+	for _, operation := range operations {
+		if _, duplicate := operationByID[operation.OperationID]; duplicate {
+			return fmt.Errorf("duplicate connected channel onboarding operation %s during context retirement reconciliation", operation.OperationID)
+		}
+		operationByID[operation.OperationID] = operation
+	}
+	activations, err := store.ListCurrentConnectedChannelActivations(ctx)
+	if err != nil {
+		return err
+	}
+	retired := map[string]struct{}{}
+	for _, activation := range activations {
+		operation, found := operationByID[activation.OperationID]
+		if !found || operation.SlotKey != activation.SlotKey || !operation.Coordinate.Matches(activation.Coordinate) {
+			return fmt.Errorf("current connected channel activation %s has no exact owning onboarding operation", activation.ActivationID)
+		}
+		if _, current := catalog.FindDurableSuccessor(
+			operation.Provider, operation.Interface, operation.Coordinate, operation.TargetSelector, operation.Posture, operation.Ceremony,
+		); current {
+			continue
+		}
+		coordinate := activation.Coordinate
+		key := coordinate.BundleHash + "\x00" + coordinate.BundleSource + "\x00" + fmt.Sprint(coordinate.ContextPublicationGeneration)
+		if _, alreadyRetired := retired[key]; alreadyRetired {
+			continue
+		}
+		requestKey := operatorchannel.Hash(
+			"channel-context-retirement-key-v1", coordinate.BundleHash, coordinate.BundleSource, fmt.Sprint(coordinate.ContextPublicationGeneration),
+		)
+		requestHash := operatorchannel.Hash(
+			"channel-context-retirement-request-v1", coordinate.BundleHash, coordinate.BundleSource, fmt.Sprint(coordinate.ContextPublicationGeneration),
+		)
+		if _, err := retire.RetireContext(
+			context.WithoutCancel(ctx), coordinate.BundleHash, coordinate.BundleSource, coordinate.ContextPublicationGeneration,
+			requestKey, requestHash, "runtime_context_retired",
+		); err != nil {
+			return fmt.Errorf("retire unavailable connected channel runtime context %s: %w", coordinate.BundleHash, err)
+		}
+		retired[key] = struct{}{}
+	}
+	return nil
+}
+
 func (r *serveChannelActivationRefresher) PreflightChannelActivation(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate) error {
 	if r == nil {
 		return fmt.Errorf("serve channel activation refresher is required")
@@ -272,21 +334,38 @@ func (r *serveChannelActivationRefresher) PreflightChannelActivation(ctx context
 	if r.preflight == nil {
 		return nil
 	}
-	return r.preflight(ctx, servePrebindingActivation{Operation: op, Candidate: candidate})
+	err := r.preflight(ctx, servePrebindingActivation{Operation: op, Candidate: candidate})
+	var rejected *runtimeregistration.ProviderCredentialRejectedError
+	if !errors.As(err, &rejected) {
+		return err
+	}
+	storeKey := ""
+	for _, admission := range op.CredentialAdmissions {
+		if admission.Role == candidate.ProviderCredentialRole {
+			storeKey = admission.StoreKey
+			break
+		}
+	}
+	if storeKey == "" {
+		return fmt.Errorf("provider rejected a channel credential without an exact admitted occurrence: %w", err)
+	}
+	return errors.Join(&channelonboarding.CredentialRequiredError{
+		OperationID: op.OperationID, Role: candidate.ProviderCredentialRole, StoreKey: storeKey,
+	}, err)
 }
 
-func activateServeAfterConnectedChannelTeardownRecovery(ctx context.Context, teardown serveConnectedChannelRecovery, onboarding serveConnectedChannelLocalReconciler, activate func() error) error {
+func activateServeAfterConnectedChannelTeardownRecovery(ctx context.Context, teardown serveConnectedChannelRecovery, activate func() error, onboarding serveConnectedChannelLocalReconciler) error {
 	if teardown == nil || onboarding == nil || activate == nil {
 		return fmt.Errorf("connected channel recovery requires teardown, onboarding, and activation owners")
 	}
 	if err := teardown.Recover(ctx); err != nil {
 		return fmt.Errorf("recover connected channel teardown: %w", err)
 	}
-	if err := onboarding.ReconcileLocal(ctx); err != nil {
-		return fmt.Errorf("reconcile local connected channel onboarding: %w", err)
-	}
 	if err := activate(); err != nil {
 		return fmt.Errorf("activate serve runtime after channel teardown recovery: %w", err)
+	}
+	if err := onboarding.ReconcileLocal(ctx); err != nil {
+		return fmt.Errorf("reconcile local connected channel onboarding against loaded runtime contexts: %w", err)
 	}
 	return nil
 }
@@ -518,7 +597,7 @@ func (d *serveChannelConfirmationDispatcher) DispatchChannelConfirmation(ctx con
 		ChannelConfirmation: runtimeeffects.ChannelConfirmationAuthority{
 			EffectOperationID: operationID, OnboardingOperationID: op.OperationID, OnboardingRevision: op.Revision,
 			ActivationID: activation.ActivationID, ActivationRevision: activation.Revision, BindingRevision: binding.Revision,
-			PrincipalID: binding.PrincipalID, BundleHash: op.Coordinate.BundleHash,
+			PrincipalID: binding.PrincipalID, BundleHash: op.Coordinate.BundleHash, RuntimeInstanceID: op.Coordinate.RuntimeInstanceID,
 			ContextPublicationGeneration: op.Coordinate.ContextPublicationGeneration, PlanGeneration: op.Coordinate.PlanGeneration,
 		},
 	}
@@ -654,14 +733,17 @@ func (r *serveChannelActivationRefresher) publishChannelActivations(ctx context.
 	byContext := map[string][]channelonboarding.CompiledActivation{}
 	coordinates := map[string]channelonboarding.ChannelRuntimeContextCoordinate{}
 	for _, activation := range snapshot.Activations {
-		key := activation.Coordinate.BundleHash + "\x00" + fmt.Sprint(activation.Coordinate.ContextPublicationGeneration)
+		key := activation.Coordinate.BundleHash + "\x00" + activation.Coordinate.RuntimeInstanceID + "\x00" + fmt.Sprint(activation.Coordinate.ContextPublicationGeneration)
 		byContext[key] = append(byContext[key], activation)
 		coordinates[key] = activation.Coordinate
 	}
 	for _, contextDef := range r.manager.LoadedContexts() {
 		bundleHash := contextDef.BundleSourceFact.BundleHash()
-		key := bundleHash + "\x00" + fmt.Sprint(contextDef.PublicationGeneration)
-		if coordinate, found := coordinates[key]; found && coordinate.ContextPublicationGeneration != contextDef.PublicationGeneration {
+		key := bundleHash + "\x00" + contextDef.RuntimeInstanceID + "\x00" + fmt.Sprint(contextDef.PublicationGeneration)
+		if coordinate, found := coordinates[key]; found && !coordinate.LiveOccurrence().Matches(channelonboarding.ChannelLiveRuntimeOccurrence{
+			RuntimeInstanceID: contextDef.RuntimeInstanceID, ContextPublicationGeneration: contextDef.PublicationGeneration,
+			TargetGeneration: coordinate.TargetGeneration,
+		}) {
 			return fmt.Errorf("channel activation runtime publication changed during refresh")
 		}
 		publication, err := channelonboarding.NewChannelActivationPublication(byContext[key])

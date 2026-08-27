@@ -12,7 +12,7 @@ import (
 )
 
 type AvailabilityReader interface {
-	ActiveRunBundleAvailabilities(context.Context) ([]runbundle.Availability, error)
+	ActiveNonStandingRunBundleAvailabilities(context.Context) ([]runbundle.Availability, error)
 }
 
 type PreservationCleanupStore interface {
@@ -54,7 +54,7 @@ func (e DataIntegrityError) Error() string {
 	for _, conflict := range e.Conflicts {
 		details = append(details, conflict.DetailString())
 	}
-	return fmt.Sprintf("%s: persisted bundle data integrity failure for %d active run(s): %s", runbundle.CodeBundleDataIntegrityError, len(e.Conflicts), strings.Join(details, "; "))
+	return fmt.Sprintf("%s: persisted bundle data integrity failure for %d active non-standing run(s): %s", runbundle.CodeBundleDataIntegrityError, len(e.Conflicts), strings.Join(details, "; "))
 }
 
 func IsDataIntegrityError(err error) bool {
@@ -74,7 +74,7 @@ func Recover(ctx context.Context, req Request) (Result, error) {
 		at = time.Now().UTC()
 	}
 
-	availabilities, err := req.AvailabilityReader.ActiveRunBundleAvailabilities(ctx)
+	availabilities, err := req.AvailabilityReader.ActiveNonStandingRunBundleAvailabilities(ctx)
 	if err != nil {
 		return Result{}, err
 	}

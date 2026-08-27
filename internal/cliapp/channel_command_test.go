@@ -20,6 +20,74 @@ const (
 )
 
 func TestOperatorChannelCLIUsesAuthenticatedAPIAndExactSelectors(t *testing.T) {
+	t.Run("credential-required and list expose one exact resume path", func(t *testing.T) {
+		remediation := "swarm channel resume " + operatorChannelCLIOperation + " --credential-stdin"
+		errorServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+			var rpcRequest jsonRPCRequest
+			if err := json.NewDecoder(request.Body).Decode(&rpcRequest); err != nil {
+				t.Fatal(err)
+			}
+			if rpcRequest.Method != "channel.onboarding_start" {
+				t.Fatalf("method = %q, want channel.onboarding_start", rpcRequest.Method)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(map[string]any{
+				"jsonrpc": "2.0", "id": rpcRequest.ID,
+				"error": map[string]any{"code": -32000, "message": "Application error: CHANNEL_CREDENTIAL_REQUIRED", "data": map[string]any{
+					"code": "CHANNEL_CREDENTIAL_REQUIRED", "retryable": false, "details": map[string]any{
+						"reason": "credential required", "operation_id": operatorChannelCLIOperation,
+						"role": "bot_token", "store_key": "channel.telegram.bot_token", "remediation": remediation,
+					},
+				}},
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}))
+		t.Cleanup(errorServer.Close)
+		_, stderr, code := runOperatorChannelCLI(t, errorServer, "channel", "reconnect", "telegram")
+		if code != CLIExitRuntime || !strings.Contains(stderr, operatorChannelCLIOperation) || !strings.Contains(stderr, remediation) {
+			t.Fatalf("credential-required code=%d stderr=%q", code, stderr)
+		}
+
+		listResult := operatorChannelCLIListResult("current", nil)
+		row := listResult["channels"].([]any)[0].(map[string]any)
+		delete(row, "readiness")
+		operation := channelOnboardingCLIResult("preparing", "", false)["operation"].(map[string]any)
+		operation["principal_id"] = "principal-1"
+		operation["interface"] = row["identity"].(map[string]any)["interface"]
+		operation["coordinate"] = operatorChannelCLIReadiness(false)["coordinate"]
+		operation["target_selector"] = "ingress:support:telegram:telegram"
+		operation["activation_posture"] = "webhook_registration"
+		operation["identity_ceremony"] = "authenticated_text_challenge"
+		operation["save_proof"] = true
+		operation["credential_reservations"] = []any{map[string]any{"role": "bot_token", "store_key": "channel.telegram.bot_token"}}
+		operation["requested_at"] = "2026-08-27T15:00:00Z"
+		operation["updated_at"] = "2026-08-27T15:00:00Z"
+		row["operation"] = operation
+		row["recovery"] = map[string]any{"reason": "activation_not_current", "provider": "telegram", "commands": []string{remediation}}
+		listServer := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
+			if request.Method != "channel.list" {
+				t.Fatalf("method = %q, want channel.list", request.Method)
+			}
+			return listResult
+		})
+		human, stderr, code := runOperatorChannelCLI(t, listServer, "channel", "list")
+		if code != 0 || stderr != "" || !strings.Contains(human, remediation) {
+			t.Fatalf("human list code=%d stderr=%q output=%q", code, stderr, human)
+		}
+		jsonOutput, stderr, code := runOperatorChannelCLI(t, listServer, "channel", "list", "--json")
+		if code != 0 || stderr != "" {
+			t.Fatalf("JSON list code=%d stderr=%q", code, stderr)
+		}
+		var decoded channelListResult
+		if err := json.Unmarshal([]byte(jsonOutput), &decoded); err != nil {
+			t.Fatal(err)
+		}
+		if len(decoded.Channels) != 1 || decoded.Channels[0].Operation == nil || decoded.Channels[0].Operation.OperationID != operatorChannelCLIOperation || decoded.Channels[0].Recovery == nil || len(decoded.Channels[0].Recovery.Commands) != 1 || decoded.Channels[0].Recovery.Commands[0] != remediation {
+			t.Fatalf("JSON recovery = %#v", decoded.Channels)
+		}
+	})
+
 	t.Run("list output modes", func(t *testing.T) {
 		server := newOperatorChannelCLIServer(t, func(t *testing.T, request jsonRPCRequest, _ int) map[string]any {
 			if request.Method != "channel.list" {

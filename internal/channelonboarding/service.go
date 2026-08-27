@@ -93,12 +93,17 @@ type ReadinessProjector interface {
 }
 
 type CredentialRequiredError struct {
-	Role     string
-	StoreKey string
+	OperationID string
+	Role        string
+	StoreKey    string
 }
 
 func (e *CredentialRequiredError) Error() string {
 	return fmt.Sprintf("credential role %q requires hidden input or an existing admitted credential at %q", e.Role, e.StoreKey)
+}
+
+func (e *CredentialRequiredError) ResumeCommand() string {
+	return "swarm channel resume " + strings.TrimSpace(e.OperationID) + " --credential-stdin"
 }
 
 type CatalogProvider func() (*CandidateCatalog, error)
@@ -181,11 +186,11 @@ func (s *Service) Start(ctx context.Context, input StartInput) (Result, error) {
 		return Result{}, err
 	}
 	reservations := credentialReservations(candidate)
+	durable := candidate.Coordinate.DurableIdentity()
 	requestHash := operatorchannel.Hash(
-		"channel-onboarding-request-v1", principal.ID, string(input.Verb), candidate.Provider,
-		candidate.Coordinate.BundleHash, candidate.Coordinate.BundleSource, candidate.Coordinate.BundleIdentity,
-		candidate.Coordinate.PackInventoryGeneration, fmt.Sprint(candidate.Coordinate.ContextPublicationGeneration),
-		candidate.Coordinate.PlanGeneration.Diagnostic(), fmt.Sprint(candidate.Coordinate.TargetGeneration),
+		"channel-onboarding-request-v2", principal.ID, string(input.Verb), candidate.Provider,
+		durable.BundleHash, durable.BundleSource, durable.BundleIdentity,
+		durable.PackInventoryGeneration, durable.PlanGeneration.Diagnostic(),
 		candidate.Interface.Key(), candidate.Target.Selector, string(candidate.Posture), string(candidate.Ceremony),
 		candidate.ProviderCredentialRole, candidate.SigningCredentialRole, candidate.ConfirmationOperation,
 		candidate.ConnectionHealth, fmt.Sprint(input.SaveProof),
@@ -205,6 +210,10 @@ func (s *Service) Start(ctx context.Context, input StartInput) (Result, error) {
 	} else if found {
 		if existing.RequestHash != requestHash {
 			return Result{}, fmt.Errorf("%w: onboarding idempotency key was already used with different semantic input", ErrConflict)
+		}
+		existing, candidate, err = s.bindCurrentCandidate(context.WithoutCancel(ctx), existing)
+		if err != nil {
+			return Result{Operation: existing}, err
 		}
 		return s.drive(context.WithoutCancel(ctx), existing, candidate, input.ProviderCredential)
 	}
@@ -238,9 +247,9 @@ func (s *Service) Get(ctx context.Context, operationID string) (Result, error) {
 	return s.result(ctx, op, candidate)
 }
 
-// ReadbackConnectedChannels composes retained identity state with the operation
-// that owns each current activation, falling back to the latest operation only
-// when no current activation exists. It is the only list/status projection.
+// ReadbackConnectedChannels composes retained identity state with every exact
+// current activation and active onboarding responsibility. It is the only
+// list/status projection.
 func (s *Service) ReadbackConnectedChannels(ctx context.Context) ([]ConnectedChannelReadback, error) {
 	if s == nil {
 		return nil, fmt.Errorf("channel onboarding service is required")
@@ -259,8 +268,17 @@ func (s *Service) ReadbackConnectedChannels(ctx context.Context) ([]ConnectedCha
 	}
 	operationByID := make(map[string]Operation, len(operations))
 	for _, operation := range operations {
+		if _, duplicate := operationByID[operation.OperationID]; duplicate {
+			return nil, fmt.Errorf("%w: duplicate onboarding operation %s in canonical readback", ErrConflict, operation.OperationID)
+		}
 		operationByID[operation.OperationID] = operation
 	}
+	sort.Slice(operations, func(i, j int) bool {
+		if operations[i].SlotKey != operations[j].SlotKey {
+			return operations[i].SlotKey < operations[j].SlotKey
+		}
+		return operations[i].OperationID < operations[j].OperationID
+	})
 	activations, err := s.store.ListCurrentConnectedChannelActivations(ctx)
 	if err != nil {
 		return nil, err
@@ -268,6 +286,7 @@ func (s *Service) ReadbackConnectedChannels(ctx context.Context) ([]ConnectedCha
 	sort.Slice(activations, func(i, j int) bool { return activations[i].SlotKey < activations[j].SlotKey })
 	rows := make([]ConnectedChannelReadback, 0, len(activations)+len(identities))
 	representedIdentity := map[string]struct{}{}
+	representedOperation := map[string]struct{}{}
 	for index := range activations {
 		activation := activations[index]
 		operation, found := operationByID[activation.OperationID]
@@ -286,6 +305,33 @@ func (s *Service) ReadbackConnectedChannels(ctx context.Context) ([]ConnectedCha
 		row := ConnectedChannelReadback{Identity: identity, Operation: &result.Operation, Activation: &activation, Readiness: result.Readiness}
 		rows = append(rows, row)
 		representedIdentity[identityKey] = struct{}{}
+		representedOperation[operation.OperationID] = struct{}{}
+	}
+	for index := range operations {
+		operation := operations[index]
+		if operation.Phase.Terminal() {
+			continue
+		}
+		if _, represented := representedOperation[operation.OperationID]; represented {
+			continue
+		}
+		identityKey := operation.Interface.Normalized().Key()
+		identity, found := identityByKey[identityKey]
+		if !found {
+			continue
+		}
+		if identity.PrincipalID != operation.PrincipalID {
+			return nil, fmt.Errorf("%w: onboarding operation %s contradicts its retained channel principal", ErrConflict, operation.OperationID)
+		}
+		result, err := s.Get(ctx, operation.OperationID)
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, ConnectedChannelReadback{
+			Identity: identity, Operation: &result.Operation, Readiness: result.Readiness,
+			Recovery: activeOperationRecovery(result.Operation),
+		})
+		representedIdentity[identityKey] = struct{}{}
 	}
 	for _, identity := range identities {
 		if _, represented := representedIdentity[identity.Interface.Normalized().Key()]; represented {
@@ -302,6 +348,16 @@ func (s *Service) ReadbackConnectedChannels(ctx context.Context) ([]ConnectedCha
 		rows = append(rows, row)
 	}
 	return rows, nil
+}
+
+func activeOperationRecovery(operation Operation) *ConnectedChannelRecovery {
+	command := "swarm channel resume " + operation.OperationID
+	if operation.Phase == PhasePreparing {
+		command += " --credential-stdin"
+	}
+	return &ConnectedChannelRecovery{
+		Reason: ReadinessActivationUnavailable, Provider: operation.Provider, Commands: []string{command},
+	}
 }
 
 func (s *Service) activationRecovery(identity operatorchannel.InterfaceIdentity) (*ConnectedChannelRecovery, error) {
@@ -344,11 +400,11 @@ func (s *Service) Retry(ctx context.Context, input RetryInput) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	candidate, err := s.currentCandidate(op)
+	rebound, candidate, err := s.bindCurrentCandidate(context.WithoutCancel(ctx), op)
 	if err != nil {
 		return Result{Operation: op}, err
 	}
-	return s.drive(context.WithoutCancel(ctx), op, candidate, input.ProviderCredential)
+	return s.drive(context.WithoutCancel(ctx), rebound, candidate, input.ProviderCredential)
 }
 
 // ReconcileLocal settles durable, process-independent onboarding facts before
@@ -361,16 +417,22 @@ func (s *Service) ReconcileLocal(ctx context.Context) error {
 		return err
 	}
 	for _, initial := range operations {
-		if initial.Phase.Terminal() {
-			continue
-		}
 		op := initial
-		candidate, err := s.currentCandidate(op)
+		if op.Phase.Terminal() {
+			activation, activationErr := s.store.GetConnectedChannelActivation(ctx, op.SlotKey)
+			if activationErr != nil || activation.OperationID != op.OperationID {
+				continue
+			}
+		}
+		op, candidate, err := s.bindCurrentCandidate(context.WithoutCancel(ctx), op)
 		if err != nil {
+			if op.Phase.Terminal() {
+				continue
+			}
 			if !errors.Is(err, errOnboardingRuntimeContextRetired) {
 				return err
 			}
-			if _, err := s.failOperationLocal(context.WithoutCancel(ctx), op, "runtime_context_retired", fmt.Sprintf("onboarding runtime context for operation %s is no longer current", op.OperationID)); err != nil {
+			if _, err := s.failOperationLocal(context.WithoutCancel(ctx), op, "runtime_context_retired", fmt.Sprintf("onboarding runtime context for operation %s is no longer current: %v", op.OperationID, err)); err != nil {
 				return fmt.Errorf("retire obsolete channel onboarding %s: %w", op.OperationID, err)
 			}
 			continue
@@ -482,7 +544,7 @@ func (s *Service) Recover(ctx context.Context) error {
 		if op.Phase.Terminal() {
 			continue
 		}
-		candidate, err := s.currentCandidate(op)
+		rebound, candidate, err := s.bindCurrentCandidate(context.WithoutCancel(ctx), op)
 		if err != nil {
 			if errors.Is(err, errOnboardingRuntimeContextRetired) {
 				_, failErr := s.failOperation(
@@ -498,6 +560,7 @@ func (s *Service) Recover(ctx context.Context) error {
 			}
 			return err
 		}
+		op = rebound
 		if _, err := s.drive(context.WithoutCancel(ctx), op, candidate, ""); err != nil {
 			var credentialRequired *CredentialRequiredError
 			if errors.As(err, &credentialRequired) {
@@ -510,6 +573,9 @@ func (s *Service) Recover(ctx context.Context) error {
 }
 
 func (s *Service) drive(ctx context.Context, op Operation, candidate Candidate, providerCredential string) (Result, error) {
+	if !op.Coordinate.Matches(candidate.Coordinate) {
+		return Result{Operation: op, Candidate: candidate}, fmt.Errorf("%w: onboarding operation is not fenced to the exact current runtime occurrence", ErrRevisionConflict)
+	}
 	for {
 		switch op.Phase {
 		case PhasePreparing:
@@ -785,7 +851,7 @@ func (s *Service) admitCredentials(ctx context.Context, op Operation, candidate 
 			}
 			observed, err := s.credentials.Observe(ctx, storeKey)
 			if err != nil {
-				return nil, errors.Join(&CredentialRequiredError{Role: reservation.Role, StoreKey: storeKey}, err)
+				return nil, errors.Join(&CredentialRequiredError{OperationID: op.OperationID, Role: reservation.Role, StoreKey: storeKey}, err)
 			}
 			admissions = append(admissions, observedCredentialAdmissionForKey(op.OperationID, reservation.Role, storeKey, observed))
 			continue
@@ -1039,11 +1105,30 @@ func (s *Service) currentCandidate(op Operation) (Candidate, error) {
 	if err != nil {
 		return Candidate{}, err
 	}
-	candidate, current := catalog.FindExact(op.Provider, op.Interface, op.Coordinate, op.TargetSelector)
+	candidate, current := catalog.FindDurableSuccessor(op.Provider, op.Interface, op.Coordinate, op.TargetSelector, op.Posture, op.Ceremony)
 	if !current {
 		return Candidate{}, fmt.Errorf("%w: %w; explicit retry against a new operation is required", ErrConflict, errOnboardingRuntimeContextRetired)
 	}
 	return candidate, nil
+}
+
+func (s *Service) bindCurrentCandidate(ctx context.Context, op Operation) (Operation, Candidate, error) {
+	candidate, err := s.currentCandidate(op)
+	if err != nil {
+		return op, Candidate{}, err
+	}
+	if op.Coordinate.Matches(candidate.Coordinate) {
+		return op, candidate, nil
+	}
+	coordinate := candidate.Coordinate
+	rebound, err := s.store.AdvanceChannelOnboarding(context.WithoutCancel(ctx), AdvanceRequest{
+		OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: op.Phase,
+		RebindCoordinate: &coordinate, Now: s.now().UTC(),
+	})
+	if err != nil {
+		return op, Candidate{}, fmt.Errorf("rebind onboarding operation %s to current runtime occurrence: %w", op.OperationID, err)
+	}
+	return rebound, candidate, nil
 }
 
 func historicalCandidate(op Operation) Candidate {

@@ -13,12 +13,12 @@ type RuntimeCatalogReader interface {
 	LoadBundleCatalogRuntimeRecord(context.Context, string) (BundleCatalogRuntimeRecord, error)
 }
 
-// AvailabilityStore is the complete availability projection consumed by
-// runtime selection, startup recovery, and fixed-bundle admission.
+// AvailabilityStore separates exact run diagnosis from the generic
+// non-standing active-run projection used by startup and admission owners.
 type AvailabilityStore interface {
 	LoadRunBundleAvailability(context.Context, string) (Availability, error)
-	ActiveRunBundleAvailabilities(context.Context) ([]Availability, error)
-	ActiveRunBundleAvailabilityConflicts(context.Context) ([]Availability, error)
+	ActiveNonStandingRunBundleAvailabilities(context.Context) ([]Availability, error)
+	ActiveNonStandingRunBundleAvailabilityConflicts(context.Context) ([]Availability, error)
 }
 
 const (

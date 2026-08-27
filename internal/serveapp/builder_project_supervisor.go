@@ -377,6 +377,14 @@ func (s *runtimeProjectSupervisor) CloseProject(ctx context.Context) (builderpkg
 }
 
 func (s *runtimeProjectSupervisor) CloseProjectWithShutdownOptions(ctx context.Context, opts runtime.ShutdownOptions) (builderpkg.ProjectStatus, error) {
+	return s.closeCurrentProjectWithShutdownOptions(ctx, opts, true)
+}
+
+func (s *runtimeProjectSupervisor) ShutdownProcessWithOptions(ctx context.Context, opts runtime.ShutdownOptions) (builderpkg.ProjectStatus, error) {
+	return s.closeCurrentProjectWithShutdownOptions(ctx, opts, false)
+}
+
+func (s *runtimeProjectSupervisor) closeCurrentProjectWithShutdownOptions(ctx context.Context, opts runtime.ShutdownOptions, retireSemanticAuthority bool) (builderpkg.ProjectStatus, error) {
 	s.operationMu.Lock()
 	defer s.operationMu.Unlock()
 	var finalizationErr error
@@ -413,13 +421,17 @@ func (s *runtimeProjectSupervisor) CloseProjectWithShutdownOptions(ctx context.C
 	retiredHook := s.onRuntimeRetired
 	s.mu.RUnlock()
 	if manager != nil && bundleHash != "" {
-		retiredContext, _ := manager.LookupBundleHash(bundleHash)
-		if retiredContext != nil && retiredHook != nil {
-			if retirementErr := retiredHook(context.WithoutCancel(ctx), *retiredContext); retirementErr != nil {
-				return s.CurrentProject(), errors.Join(finalizationErr, retirementErr)
+		cause := runtime.RuntimeContextCauseUnavailable
+		if retireSemanticAuthority {
+			retiredContext, _ := manager.LookupBundleHash(bundleHash)
+			if retiredContext != nil && retiredHook != nil {
+				if retirementErr := retiredHook(context.WithoutCancel(ctx), *retiredContext); retirementErr != nil {
+					return s.CurrentProject(), errors.Join(finalizationErr, retirementErr)
+				}
 			}
+			cause = runtime.RuntimeContextCauseUnloaded
 		}
-		result := manager.DeactivateBundleHashWithOptions(bundleHash, runtime.RuntimeContextCauseUnloaded, opts)
+		result := manager.DeactivateBundleHashWithOptions(bundleHash, cause, opts)
 		_ = s.detachCurrentRuntime()
 		return builderpkg.ProjectStatus{}, errors.Join(finalizationErr, result.ShutdownErr)
 	}

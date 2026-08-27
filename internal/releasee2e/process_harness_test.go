@@ -54,17 +54,19 @@ func (o *releaseProcessOutput) String() string {
 }
 
 type releaseProcessSpec struct {
-	BinaryPath string
-	WorkingDir string
-	ConfigPath string
-	Contracts  string
-	Store      string
-	Dev        bool
-	APIPort    int
-	MCPPort    int
-	TokenFile  string
-	Token      string
-	Env        []string
+	BinaryPath           string
+	WorkingDir           string
+	ConfigPath           string
+	Contracts            string
+	Store                string
+	Dev                  bool
+	APIPort              int
+	MCPPort              int
+	PublicWebhookBaseURL string
+	PublicWebhookListen  string
+	TokenFile            string
+	Token                string
+	Env                  []string
 }
 
 type releaseServeProcess struct {
@@ -96,6 +98,12 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 	}
 	if options.Dev {
 		args = append(args, "--dev")
+	}
+	if options.PublicWebhookBaseURL != "" {
+		args = append(args, "--public-webhook-base-url", options.PublicWebhookBaseURL)
+	}
+	if options.PublicWebhookListen != "" {
+		args = append(args, "--public-webhook-listen", options.PublicWebhookListen)
 	}
 	cmd := exec.Command(options.BinaryPath, args...)
 	cmd.Dir = options.WorkingDir
@@ -171,6 +179,30 @@ func (p *releaseServeProcess) killAndWait(timeout time.Duration) error {
 		return nil
 	case <-timer.C:
 		return fmt.Errorf("serve did not exit within %s", timeout)
+	}
+}
+
+func (p *releaseServeProcess) stopAndWait(timeout time.Duration) error {
+	select {
+	case <-p.exited:
+		return p.waitError()
+	default:
+	}
+	if err := p.cmd.Process.Signal(os.Interrupt); err != nil {
+		select {
+		case <-p.exited:
+			return p.waitError()
+		default:
+			return err
+		}
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-p.exited:
+		return p.waitError()
+	case <-timer.C:
+		return fmt.Errorf("serve did not stop within %s", timeout)
 	}
 }
 

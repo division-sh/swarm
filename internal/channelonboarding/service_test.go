@@ -304,6 +304,98 @@ func TestReadbackUsesCurrentActivationOwningOperationInsteadOfLaterFailedAttempt
 	}
 }
 
+func TestCredentialRequiredErrorCarriesExactOperationForEveryVerb(t *testing.T) {
+	now := time.Date(2026, 8, 27, 15, 0, 0, 0, time.UTC)
+	candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
+	catalog, err := NewCandidateCatalog([]Candidate{candidate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, verb := range []Verb{VerbConnect, VerbReconnect, VerbRebind} {
+		t.Run(string(verb), func(t *testing.T) {
+			op := Operation{
+				OperationID: uuid.NewString(), RequestKeyHash: uuid.NewString(), RequestHash: uuid.NewString(), PrincipalID: "principal-a",
+				Verb: verb, Provider: candidate.Provider, Interface: candidate.Interface, Coordinate: candidate.Coordinate,
+				TargetSelector: candidate.Target.Selector, Posture: candidate.Posture, Ceremony: candidate.Ceremony,
+				Phase: PhasePreparing, Revision: 1, CredentialReservations: credentialReservations(candidate), RequestedAt: now, UpdatedAt: now,
+			}
+			op.SlotKey = StartRequest{Provider: op.Provider, Interface: op.Interface, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector}.SlotKey()
+			service, err := NewService(ServiceOptions{
+				Store: &cancellationTestStore{op: op}, Identities: &cancellationTestIdentities{}, Credentials: testCredentialWriter(t),
+				Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: &cancellationTestActivations{},
+				Confirmation: cancellationTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, driveErr := service.drive(context.Background(), op, candidate, "")
+			var required *CredentialRequiredError
+			if !errors.As(driveErr, &required) {
+				t.Fatalf("drive error = %v, want CredentialRequiredError", driveErr)
+			}
+			if required.OperationID != op.OperationID || result.Operation.OperationID != op.OperationID {
+				t.Fatalf("credential-required operation = %q result=%q, want %q", required.OperationID, result.Operation.OperationID, op.OperationID)
+			}
+		})
+	}
+}
+
+func TestReadbackRetainsEveryActiveOperationAcrossExactContexts(t *testing.T) {
+	now := time.Date(2026, 8, 27, 15, 0, 0, 0, time.UTC)
+	firstCandidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support-a")
+	secondCandidate := testCandidate("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "support-b")
+	operations := make([]Operation, 0, 2)
+	for index, candidate := range []Candidate{firstCandidate, secondCandidate} {
+		op := testSucceededOperation(candidate, now.Add(time.Duration(index)*time.Minute))
+		op.Verb = VerbReconnect
+		op.Phase = PhasePreparing
+		op.Revision = 1
+		op.CompletedAt = time.Time{}
+		operations = append(operations, op)
+	}
+	catalog, err := NewCandidateCatalog([]Candidate{firstCandidate, secondCandidate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := operatorchannel.Readback{PrincipalID: "principal-a", Interface: firstCandidate.Interface, Status: operatorchannel.BindingCurrent, BindingRevision: 3}
+	service, err := NewService(ServiceOptions{
+		Store: &readbackTestStore{cancellationTestStore: &cancellationTestStore{}, operations: operations},
+		Identities: &readbackTestIdentities{
+			cancellationTestIdentities: &cancellationTestIdentities{binding: operatorchannel.Binding{PrincipalID: "principal-a", Interface: firstCandidate.Interface, Revision: 3, Status: operatorchannel.BindingCurrent}},
+			rows:                       []operatorchannel.Readback{identity},
+		},
+		Credentials: testCredentialWriter(t), Catalog: func() (*CandidateCatalog, error) { return catalog, nil },
+		Activations: &cancellationTestActivations{}, Confirmation: cancellationTestConfirmation{},
+		Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := service.ReadbackConnectedChannels(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("readback row count = %d, want one per active exact context: %#v", len(rows), rows)
+	}
+	seen := map[string]bool{}
+	for _, row := range rows {
+		if row.Operation == nil || row.Operation.Phase != PhasePreparing || row.Activation != nil || row.Recovery == nil {
+			t.Fatalf("active operation readback = %#v", row)
+		}
+		wantCommand := "swarm channel resume " + row.Operation.OperationID + " --credential-stdin"
+		if len(row.Recovery.Commands) != 1 || row.Recovery.Commands[0] != wantCommand {
+			t.Fatalf("operation %s recovery = %#v, want %q", row.Operation.OperationID, row.Recovery, wantCommand)
+		}
+		seen[row.Operation.OperationID] = true
+	}
+	for _, operation := range operations {
+		if !seen[operation.OperationID] {
+			t.Fatalf("active operation %s was collapsed from readback", operation.OperationID)
+		}
+	}
+}
+
 func TestReadbackIgnoresTerminalOperationWithoutRetainedIdentity(t *testing.T) {
 	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 	candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
@@ -1035,6 +1127,11 @@ func TestChannelOnboardingRecoveryEveryNonterminalPhase(t *testing.T) {
 	} {
 		t.Run(string(phase), func(t *testing.T) {
 			candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
+			predecessorCoordinate := candidate.Coordinate
+			candidate.Coordinate.RuntimeInstanceID = "22222222-2222-4222-8222-222222222222"
+			candidate.Coordinate.ContextPublicationGeneration += 9
+			candidate.Coordinate.TargetGeneration += 13
+			candidate.Target.Generation = candidate.Coordinate.TargetGeneration
 			catalog, err := NewCandidateCatalog([]Candidate{candidate})
 			if err != nil {
 				t.Fatal(err)
@@ -1067,7 +1164,7 @@ func TestChannelOnboardingRecoveryEveryNonterminalPhase(t *testing.T) {
 			op := Operation{
 				OperationID: uuid.NewString(), RequestKeyHash: "recovery-key", RequestHash: "recovery-request",
 				PrincipalID: "principal-a", Verb: VerbConnect, Provider: candidate.Provider,
-				Interface: candidate.Interface, Coordinate: candidate.Coordinate, TargetSelector: candidate.Target.Selector,
+				Interface: candidate.Interface, Coordinate: predecessorCoordinate, TargetSelector: candidate.Target.Selector,
 				Posture: candidate.Posture, Ceremony: candidate.Ceremony, Phase: phase, Revision: 1, SaveProof: true,
 				CredentialReservations: reservations, RequestedAt: now, UpdatedAt: now,
 			}
@@ -1114,8 +1211,121 @@ func TestChannelOnboardingRecoveryEveryNonterminalPhase(t *testing.T) {
 			if store.op.Phase != PhaseSucceeded {
 				t.Fatalf("recovered phase = %s, want %s", store.op.Phase, PhaseSucceeded)
 			}
+			if !store.op.Coordinate.Matches(candidate.Coordinate) {
+				t.Fatalf("recovered operation coordinate = %#v, want successor %#v", store.op.Coordinate, candidate.Coordinate)
+			}
 			if store.activation.Status != ActivationCurrent || store.activation.OperationID != store.op.OperationID {
 				t.Fatalf("recovered activation = %#v", store.activation)
+			}
+			if !store.activation.Coordinate.Matches(candidate.Coordinate) {
+				t.Fatalf("recovered activation coordinate = %#v, want successor %#v", store.activation.Coordinate, candidate.Coordinate)
+			}
+		})
+	}
+}
+
+func TestStartupLocalReconciliationRebindsSucceededActivationToSuccessorOccurrence(t *testing.T) {
+	for _, reversed := range []bool{false, true} {
+		name := "selected_source_first"
+		if reversed {
+			name = "selected_source_last"
+		}
+		t.Run(name, func(t *testing.T) {
+			now := time.Date(2026, 8, 27, 15, 45, 0, 0, time.UTC)
+			predecessor := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
+			successor := predecessor
+			successor.Coordinate.RuntimeInstanceID = "22222222-2222-4222-8222-222222222222"
+			successor.Coordinate.ContextPublicationGeneration += 17
+			successor.Coordinate.TargetGeneration += 19
+			successor.Target.Generation = successor.Coordinate.TargetGeneration
+			unrelated := testCandidate("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "support")
+			unrelated.Coordinate.RuntimeInstanceID = "33333333-3333-4333-8333-333333333333"
+			candidates := []Candidate{successor, unrelated}
+			if reversed {
+				candidates[0], candidates[1] = candidates[1], candidates[0]
+			}
+			catalog, err := NewCandidateCatalog(candidates)
+			if err != nil {
+				t.Fatal(err)
+			}
+			op := testSucceededOperation(predecessor, now.Add(-time.Hour))
+			op.ActivationRevision = 4
+			activation := testCurrentActivation(op, nil, now.Add(-time.Hour))
+			activation.Revision = op.ActivationRevision
+			store := &cancellationTestStore{op: op, activation: activation}
+			service, err := NewService(ServiceOptions{
+				Store: store, Identities: &cancellationTestIdentities{}, Credentials: testCredentialWriter(t),
+				Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: &cancellationTestActivations{},
+				Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := service.ReconcileLocal(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if store.op.Phase != PhaseSucceeded || !store.op.Coordinate.Matches(successor.Coordinate) || store.op.Coordinate.MatchesDurableIdentity(unrelated.Coordinate) {
+				t.Fatalf("rebound succeeded operation = %#v", store.op)
+			}
+			if !store.activation.Coordinate.Matches(successor.Coordinate) || store.activation.Revision != 5 || store.op.ActivationRevision != 5 {
+				t.Fatalf("rebound succeeded activation = %#v operation=%#v", store.activation, store.op)
+			}
+		})
+	}
+}
+
+func TestChannelOnboardingRestartResolvesExactDurableSourceAcrossContextOrder(t *testing.T) {
+	for _, reversed := range []bool{false, true} {
+		name := "selected_source_first"
+		if reversed {
+			name = "selected_source_last"
+		}
+		t.Run(name, func(t *testing.T) {
+			now := time.Date(2026, 8, 27, 16, 30, 0, 0, time.UTC)
+			predecessor := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
+			successor := predecessor
+			successor.Coordinate.RuntimeInstanceID = "22222222-2222-4222-8222-222222222222"
+			successor.Coordinate.ContextPublicationGeneration = 2
+			successor.Coordinate.TargetGeneration = 9
+			successor.Target.Generation = 9
+			unrelated := testCandidate("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "support")
+			unrelated.Coordinate.RuntimeInstanceID = "33333333-3333-4333-8333-333333333333"
+			unrelated.Coordinate.ContextPublicationGeneration = 1
+			candidates := []Candidate{successor, unrelated}
+			if reversed {
+				candidates[0], candidates[1] = candidates[1], candidates[0]
+			}
+			catalog, err := NewCandidateCatalog(candidates)
+			if err != nil {
+				t.Fatal(err)
+			}
+			op := Operation{
+				OperationID: uuid.NewString(), RequestKeyHash: "multi-context-key", RequestHash: "multi-context-request",
+				PrincipalID: "principal-a", Verb: VerbReconnect, Provider: predecessor.Provider,
+				Interface: predecessor.Interface, Coordinate: predecessor.Coordinate, TargetSelector: predecessor.Target.Selector,
+				Posture: predecessor.Posture, Ceremony: predecessor.Ceremony, Phase: PhasePreparing, Revision: 1,
+				CredentialReservations: credentialReservations(predecessor), RequestedAt: now, UpdatedAt: now,
+			}
+			op.SlotKey = StartRequest{Provider: op.Provider, Interface: op.Interface, Coordinate: op.Coordinate, TargetSelector: op.TargetSelector}.SlotKey()
+			store := &cancellationTestStore{op: op}
+			service, err := NewService(ServiceOptions{
+				Store: store, Identities: &cancellationTestIdentities{}, Credentials: testCredentialWriter(t),
+				Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: &cancellationTestActivations{},
+				Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = service.Retry(context.Background(), RetryInput{OperationID: op.OperationID})
+			var required *CredentialRequiredError
+			if !errors.As(err, &required) {
+				t.Fatalf("restart retry error = %v, want credential-required after exact rebind", err)
+			}
+			if !store.op.Coordinate.Matches(successor.Coordinate) {
+				t.Fatalf("restart selected context = %#v, want exact durable successor %#v", store.op.Coordinate, successor.Coordinate)
+			}
+			if store.op.Coordinate.MatchesDurableIdentity(unrelated.Coordinate) {
+				t.Fatal("restart selected unrelated primary/registration-order context")
 			}
 		})
 	}
@@ -1227,6 +1437,23 @@ func (s *cancellationTestStore) AdvanceChannelOnboarding(ctx context.Context, re
 	}
 	if req.ExpectedRevision != s.op.Revision {
 		return Operation{}, ErrRevisionConflict
+	}
+	if req.RebindCoordinate != nil {
+		if !s.op.Coordinate.MatchesDurableIdentity(*req.RebindCoordinate) {
+			return Operation{}, ErrConflict
+		}
+		previous := s.op.Coordinate
+		s.op.Coordinate = *req.RebindCoordinate
+		if s.activation.OperationID == s.op.OperationID {
+			if !s.activation.Coordinate.Matches(previous) || s.activation.Revision != s.op.ActivationRevision {
+				return Operation{}, ErrRevisionConflict
+			}
+			s.activation.Coordinate = *req.RebindCoordinate
+			s.activation.Revision++
+			s.activation.OperationRevision = s.op.Revision + 1
+			s.activation.UpdatedAt = req.Now
+			s.op.ActivationRevision = s.activation.Revision
+		}
 	}
 	s.op.Phase = req.Phase
 	s.op.Revision++

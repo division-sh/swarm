@@ -652,8 +652,9 @@ func testChannelActivationPublication(t *testing.T, bindings ...packs.OutboundBi
 		}
 		coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
 			BundleHash: bundleHash, BundleSource: bundleSource, BundleIdentity: "channel-runtime@1.0.0#test",
-			PackInventoryGeneration: "sha256:test-inventory", ContextPublicationGeneration: 1,
-			PlanGeneration: generation,
+			PackInventoryGeneration: "sha256:test-inventory", RuntimeInstanceID: "11111111-1111-4111-8111-111111111111",
+			ContextPublicationGeneration: 1,
+			PlanGeneration:               generation,
 		}
 		if binding.RegistrationTarget() != "" {
 			coordinate.TargetGeneration = 1

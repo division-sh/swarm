@@ -315,15 +315,16 @@ func requireCurrentExternalEffectAuthorityPostgres(ctx context.Context, tx *sql.
 			WHERE activation.activation_id=$1::uuid AND activation.operation_id=operation.operation_id
 			  AND activation.status='current' AND activation.activation_revision=$2
 			  AND activation.binding_revision=$3 AND activation.principal_id=$4::uuid
-			  AND activation.bundle_hash=$5 AND activation.context_publication_generation=$6
-			  AND activation.plan_generation=$7
-			  AND operation.operation_id=$8::uuid AND operation.operation_revision=$9
+			  AND activation.bundle_hash=$5 AND activation.runtime_instance_id=$6::uuid
+			  AND activation.context_publication_generation=$7 AND activation.plan_generation=$8
+			  AND operation.operation_id=$9::uuid AND operation.operation_revision=$10
 			  AND operation.phase='delivering_confirmation'
-			  AND operation.confirmation_operation_id=$10::uuid
+			  AND operation.confirmation_operation_id=$11::uuid
 			  AND operation.activation_revision=activation.activation_revision
 			  AND operation.binding_revision=activation.binding_revision
+			  AND operation.runtime_instance_id=activation.runtime_instance_id
 		`, confirmation.ActivationID, confirmation.ActivationRevision, confirmation.BindingRevision,
-			confirmation.PrincipalID, confirmation.BundleHash, confirmation.ContextPublicationGeneration,
+			confirmation.PrincipalID, confirmation.BundleHash, confirmation.RuntimeInstanceID, confirmation.ContextPublicationGeneration,
 			confirmation.PlanGeneration.Diagnostic(), confirmation.OnboardingOperationID, confirmation.OnboardingRevision,
 			confirmation.EffectOperationID)
 	default:
@@ -405,7 +406,7 @@ func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx
 			UPDATE connected_channel_activations SET updated_at=updated_at
 			WHERE activation_id=? AND status='current' AND activation_revision=?
 			  AND binding_revision=? AND principal_id=? AND bundle_hash=?
-			  AND context_publication_generation=? AND plan_generation=?
+			  AND runtime_instance_id=? AND context_publication_generation=? AND plan_generation=?
 			  AND operation_id=? AND EXISTS (
 			    SELECT 1 FROM channel_onboarding_operations operation
 			    WHERE operation.operation_id=connected_channel_activations.operation_id
@@ -413,9 +414,10 @@ func requireCurrentExternalEffectAuthoritySQLite(ctx context.Context, tx *sql.Tx
 			      AND operation.confirmation_operation_id=?
 			      AND operation.activation_revision=connected_channel_activations.activation_revision
 			      AND operation.binding_revision=connected_channel_activations.binding_revision
+			      AND operation.runtime_instance_id=connected_channel_activations.runtime_instance_id
 			  )
 		`, confirmation.ActivationID, confirmation.ActivationRevision, confirmation.BindingRevision,
-			confirmation.PrincipalID, confirmation.BundleHash, confirmation.ContextPublicationGeneration,
+			confirmation.PrincipalID, confirmation.BundleHash, confirmation.RuntimeInstanceID, confirmation.ContextPublicationGeneration,
 			confirmation.PlanGeneration.Diagnostic(), confirmation.OnboardingOperationID, confirmation.OnboardingRevision,
 			confirmation.EffectOperationID)
 	default:
@@ -609,14 +611,16 @@ func channelConfirmationAuthorityCurrentPostgres(ctx context.Context, q schemaQu
 		WHERE activation.activation_id=$1::uuid AND activation.status='current'
 		  AND activation.activation_revision=$2 AND activation.binding_revision=$3
 		  AND activation.principal_id=$4::uuid AND activation.bundle_hash=$5
-		  AND activation.context_publication_generation=$6 AND activation.plan_generation=$7
-		  AND operation.operation_id=$8::uuid AND operation.operation_revision=$9
+		  AND activation.runtime_instance_id=$6::uuid
+		  AND activation.context_publication_generation=$7 AND activation.plan_generation=$8
+		  AND operation.operation_id=$9::uuid AND operation.operation_revision=$10
 		  AND operation.phase='delivering_confirmation'
-		  AND operation.confirmation_operation_id=$10::uuid
+		  AND operation.confirmation_operation_id=$11::uuid
 		  AND operation.activation_revision=activation.activation_revision
 		  AND operation.binding_revision=activation.binding_revision
+		  AND operation.runtime_instance_id=activation.runtime_instance_id
 	`, confirmation.ActivationID, confirmation.ActivationRevision, confirmation.BindingRevision,
-		confirmation.PrincipalID, confirmation.BundleHash, confirmation.ContextPublicationGeneration,
+		confirmation.PrincipalID, confirmation.BundleHash, confirmation.RuntimeInstanceID, confirmation.ContextPublicationGeneration,
 		confirmation.PlanGeneration.Diagnostic(), confirmation.OnboardingOperationID, confirmation.OnboardingRevision,
 		confirmation.EffectOperationID).Scan(&count)
 	return count == 1, err
@@ -632,14 +636,16 @@ func channelConfirmationAuthorityCurrentSQLite(ctx context.Context, q schemaQuer
 		WHERE activation.activation_id=? AND activation.status='current'
 		  AND activation.activation_revision=? AND activation.binding_revision=?
 		  AND activation.principal_id=? AND activation.bundle_hash=?
+		  AND activation.runtime_instance_id=?
 		  AND activation.context_publication_generation=? AND activation.plan_generation=?
 		  AND operation.operation_id=? AND operation.operation_revision=?
 		  AND operation.phase='delivering_confirmation'
 		  AND operation.confirmation_operation_id=?
 		  AND operation.activation_revision=activation.activation_revision
 		  AND operation.binding_revision=activation.binding_revision
+		  AND operation.runtime_instance_id=activation.runtime_instance_id
 	`, confirmation.ActivationID, confirmation.ActivationRevision, confirmation.BindingRevision,
-		confirmation.PrincipalID, confirmation.BundleHash, confirmation.ContextPublicationGeneration,
+		confirmation.PrincipalID, confirmation.BundleHash, confirmation.RuntimeInstanceID, confirmation.ContextPublicationGeneration,
 		confirmation.PlanGeneration.Diagnostic(), confirmation.OnboardingOperationID, confirmation.OnboardingRevision,
 		confirmation.EffectOperationID).Scan(&count)
 	return count == 1, err

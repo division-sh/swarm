@@ -66,7 +66,8 @@ func TestChannelOnboardingAPIContractEvidence(t *testing.T) {
 	}
 	coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
 		BundleHash: "bundle-v1:sha256:" + strings.Repeat("b", 64), BundleSource: "persisted", BundleIdentity: "support@1.0.0#bundle",
-		PackInventoryGeneration: "inventory", ContextPublicationGeneration: 1, PlanGeneration: planGeneration, TargetGeneration: 1,
+		PackInventoryGeneration: "inventory", RuntimeInstanceID: "11111111-1111-4111-8111-111111111111",
+		ContextPublicationGeneration: 1, PlanGeneration: planGeneration, TargetGeneration: 1,
 	}
 	lifecycle := &recordingChannelOnboardingLifecycle{result: channelonboarding.Result{
 		Operation: channelonboarding.Operation{OperationID: operationID, Verb: channelonboarding.VerbConnect, Provider: "telegram", Interface: identity, Coordinate: coordinate},
@@ -116,11 +117,11 @@ func TestChannelOnboardingAPIContractEvidence(t *testing.T) {
 		}
 	}
 
-	lifecycle.startErr = &channelonboarding.CredentialRequiredError{Role: "telegram_bot_token", StoreKey: "telegram_bot_token"}
+	lifecycle.startErr = &channelonboarding.CredentialRequiredError{OperationID: operationID, Role: "telegram_bot_token", StoreKey: "telegram_bot_token"}
 	credentialRequired := rpcCall(t, handler, `{"jsonrpc":"2.0","id":"credential","method":"channel.onboarding_start","params":{"verb":"connect","provider":"telegram"}}`)
 	requireOperatorChannelAPIErrorCode(t, credentialRequired, ChannelCredentialRequiredCode)
 	details := asMap(t, asMap(t, credentialRequired.Error.Data)["details"])
-	if details["role"] != "telegram_bot_token" || details["store_key"] != "telegram_bot_token" || !strings.Contains(details["remediation"].(string), "hidden input") {
+	if details["operation_id"] != operationID || details["role"] != "telegram_bot_token" || details["store_key"] != "telegram_bot_token" || details["remediation"] != "swarm channel resume "+operationID+" --credential-stdin" {
 		t.Fatalf("credential-required details = %#v", details)
 	}
 }

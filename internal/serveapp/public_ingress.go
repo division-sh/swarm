@@ -78,7 +78,7 @@ func resolveServeRegistrationPairs(snapshot serveChannelActivationSnapshot, mana
 		if current {
 			selection.leases = append(selection.leases, lease)
 			activations = append(activations, lease.Activations()...)
-			activationGenerations[contextDef.BundleHash()+"\x00"+fmt.Sprint(contextDef.PublicationGeneration)] = lease.Generation()
+			activationGenerations[contextDef.BundleHash()+"\x00"+contextDef.RuntimeInstanceID+"\x00"+fmt.Sprint(contextDef.PublicationGeneration)] = lease.Generation()
 		}
 	}
 	for _, activation := range activations {
@@ -119,7 +119,9 @@ func resolveServeRegistrationPairs(snapshot serveChannelActivationSnapshot, mana
 		}
 		pairs = append(pairs, runtimepublicingress.RegistrationPair{
 			BindingID: binding.BindingID(), PlanGeneration: planGeneration,
-			ChannelActivationGeneration: activationGenerations[activation.Coordinate.BundleHash+"\x00"+fmt.Sprint(activation.Coordinate.ContextPublicationGeneration)],
+			ActivationSource:            activation.Source,
+			OnboardingOperationID:       activation.OnboardingOperationID,
+			ChannelActivationGeneration: activationGenerations[activation.Coordinate.BundleHash+"\x00"+activation.Coordinate.RuntimeInstanceID+"\x00"+fmt.Sprint(activation.Coordinate.ContextPublicationGeneration)],
 			Registration:                registration,
 			CredentialKeys:              credentialKeys,
 			Target: runtimepublicingress.RegistrationTarget{
@@ -166,8 +168,8 @@ func resolveServePrebindingRegistrationPair(intent servePrebindingActivation) (r
 	target := intent.Candidate.Target
 	return runtimepublicingress.RegistrationPair{
 		BindingID: channelonboarding.LearnedBindingID(intent.Operation.SlotKey), PlanGeneration: generation,
-		PrebindingOperationID: intent.Operation.OperationID,
-		Registration:          registration, CredentialKeys: credentials,
+		OnboardingOperationID: intent.Operation.OperationID, PrebindingOperationID: intent.Operation.OperationID,
+		Registration: registration, CredentialKeys: credentials,
 		Target: runtimepublicingress.RegistrationTarget{
 			Selector: target.Selector, BundleHash: intent.Candidate.Coordinate.BundleHash, ServiceID: target.ServiceID,
 			PackageKey: target.PackageKey, FlowID: target.FlowID, Alias: target.Alias, Provider: target.Provider,
@@ -181,7 +183,8 @@ func exactActivationContext(contexts []runtime.BundleContext, coordinate channel
 	matches := []runtime.BundleContext{}
 	for _, contextDef := range contexts {
 		bundleHash, bundleSource := contextDef.BundleSourceFact.StorageValues()
-		if bundleHash == coordinate.BundleHash && bundleSource == coordinate.BundleSource && contextDef.PublicationGeneration == coordinate.ContextPublicationGeneration {
+		if bundleHash == coordinate.BundleHash && bundleSource == coordinate.BundleSource &&
+			contextDef.RuntimeInstanceID == coordinate.RuntimeInstanceID && contextDef.PublicationGeneration == coordinate.ContextPublicationGeneration {
 			matches = append(matches, contextDef)
 		}
 	}

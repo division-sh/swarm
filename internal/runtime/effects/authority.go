@@ -184,6 +184,7 @@ type ChannelConfirmationAuthority struct {
 	BindingRevision              int64
 	PrincipalID                  string
 	BundleHash                   string
+	RuntimeInstanceID            string
 	ContextPublicationGeneration uint64
 	PlanGeneration               plangeneration.Generation
 }
@@ -247,7 +248,7 @@ func (a Authority) Valid() bool {
 			a.ID == strings.TrimSpace(a.ServeRegistration.IntentID) && a.ServeRegistration.StartupStateVersion > 0
 	case AuthorityChannelConfirmation:
 		confirmation := a.ChannelConfirmation
-		return validUUIDs(confirmation.EffectOperationID, confirmation.OnboardingOperationID, confirmation.ActivationID, confirmation.PrincipalID) &&
+		return validUUIDs(confirmation.EffectOperationID, confirmation.OnboardingOperationID, confirmation.ActivationID, confirmation.PrincipalID, confirmation.RuntimeInstanceID) &&
 			a.ID == strings.TrimSpace(confirmation.EffectOperationID) && confirmation.OnboardingRevision > 0 &&
 			confirmation.ActivationRevision > 0 && confirmation.BindingRevision > 0 &&
 			confirmation.ContextPublicationGeneration == a.FenceGeneration &&
@@ -337,6 +338,7 @@ func (a Authority) Evidence() map[string]any {
 		evidence["binding_revision"] = confirmation.BindingRevision
 		evidence["principal_id"] = confirmation.PrincipalID
 		evidence["bundle_hash"] = confirmation.BundleHash
+		evidence["runtime_instance_id"] = confirmation.RuntimeInstanceID
 		evidence["context_publication_generation"] = confirmation.ContextPublicationGeneration
 		evidence["plan_generation"] = confirmation.PlanGeneration.Diagnostic()
 	}

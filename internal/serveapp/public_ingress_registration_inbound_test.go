@@ -145,7 +145,8 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	}
 	manager, err := runtimepkg.NewRuntimeContextManager(nil, completeServeTestPackContext(t, runtimepkg.BundleContext{
 		BundleSourceFact: mustServeTestEphemeralBundleSourceFact(bundleHash), Source: source,
-		Runtime: &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, InboundGateway: gateway, ChannelActivations: activationOwner}, WorkOwner: workOwner,
+		Runtime: &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, InboundGateway: gateway, ChannelActivations: activationOwner,
+			Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: uuid.NewString()}}, WorkOwner: workOwner,
 		StandingTargets: []runtimepkg.StandingTarget{target}, ProviderTriggerGeneration: catalog.Generation(), InstalledTriggerSubjects: installed,
 	}))
 	if err != nil {
@@ -169,11 +170,12 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	}
 	bundleHash, bundleSource := loadedContext.BundleSourceFact.StorageValues()
 	learnedPublication, err := channelonboarding.NewChannelActivationPublication([]channelonboarding.CompiledActivation{{
-		Source: channelonboarding.ActivationSourceLearned,
+		Source: channelonboarding.ActivationSourceLearned, OnboardingOperationID: "activation-readiness-operation",
 		Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
 			BundleHash: bundleHash, BundleSource: bundleSource, BundleIdentity: "telegram@1.0.0#activation-readiness",
-			PackInventoryGeneration: loadedContext.PackInventoryDigest, ContextPublicationGeneration: loadedContext.PublicationGeneration,
-			PlanGeneration: activationPlanGeneration, TargetGeneration: 1,
+			PackInventoryGeneration: loadedContext.PackInventoryDigest, RuntimeInstanceID: loadedContext.RuntimeInstanceID,
+			ContextPublicationGeneration: loadedContext.PublicationGeneration,
+			PlanGeneration:               activationPlanGeneration, TargetGeneration: 1,
 		},
 		ActivationRevision: 1, Plan: learnedBinding,
 		CredentialAdmissions: []channelonboarding.CredentialAdmission{
@@ -241,7 +243,7 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 		t.Fatalf("PlanGeneration: %v", err)
 	}
 	pair := runtimepublicingress.RegistrationPair{
-		BindingID: "telegram", PlanGeneration: planGeneration, PrebindingOperationID: "test-prebinding-telegram", Registration: registration,
+		BindingID: "telegram", PlanGeneration: planGeneration, OnboardingOperationID: "test-prebinding-telegram", PrebindingOperationID: "test-prebinding-telegram", Registration: registration,
 		CredentialKeys: map[string]string{"telegram_bot_token": "bot"},
 		Target: runtimepublicingress.RegistrationTarget{
 			Selector: "ingress:telegram-package:telegram-chat:telegram", BundleHash: bundleHash, ServiceID: target.ServiceID,
@@ -345,9 +347,10 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 		t.Fatal(err)
 	}
 	manager, err := runtimepkg.NewRuntimeContextManager(nil, runtimepkg.BundleContext{
-		BundleSourceFact:          mustServeTestEphemeralBundleSourceFact(bundleHash),
-		Source:                    semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
-		Runtime:                   &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, ChannelActivations: activationOwner},
+		BundleSourceFact: mustServeTestEphemeralBundleSourceFact(bundleHash),
+		Source:           semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{}),
+		Runtime: &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Bus: bus, ChannelActivations: activationOwner,
+			Options: runtimepkg.RuntimeOptions{RuntimeInstanceID: uuid.NewString()}},
 		WorkOwner:                 workOwner,
 		StandingTargets:           []runtimepkg.StandingTarget{target},
 		ProviderTriggerGeneration: catalog.Generation(),
@@ -376,8 +379,9 @@ func TestResolveServeRegistrationPairsRejectsUnsignedIngressTarget(t *testing.T)
 		Source: channelonboarding.ActivationSourceDeclared,
 		Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
 			BundleHash: bundleHash, BundleSource: bundleSource, BundleIdentity: "test-bundle",
-			PackInventoryGeneration: "sha256:test", ContextPublicationGeneration: contextDef.PublicationGeneration,
-			PlanGeneration: generation, TargetGeneration: 1,
+			PackInventoryGeneration: "sha256:test", RuntimeInstanceID: contextDef.RuntimeInstanceID,
+			ContextPublicationGeneration: contextDef.PublicationGeneration,
+			PlanGeneration:               generation, TargetGeneration: 1,
 		},
 		Plan: binding,
 		CredentialAdmissions: []channelonboarding.CredentialAdmission{{

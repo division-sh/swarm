@@ -156,7 +156,7 @@ rows:
 
   - id: startup_recovery
     category: recovery
-    concept: startup recovery owns active-run unavailable-bundle orphaning and persisted-missing fail-fast behavior.
+    concept: startup recovery and fixed-bundle admission consume the active non-standing run availability projection; current standing generations remain standing-owned while exact run diagnosis stays inclusive.
     classification: implemented_proof
     owner_refs:
       - {kind: spec_ref, path: platform-spec.yaml, ref: startup_recovery_unavailable_bundle}
@@ -164,6 +164,11 @@ rows:
       - {kind: go_test, name: TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBeforeCleanup}
       - {kind: go_test, name: TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailableRuns}
       - {kind: go_test, name: TestRunServeRuntimeFreshEmptyPostgresBootstrapsSchemaBeforeDiskContractsServe}
+      - {kind: go_test, name: TestActiveNonStandingRunBundleAvailabilitySelectorParity}
+      - {kind: go_test, name: TestLoadRunBundleAvailabilityIncludesCurrentStandingRunParity}
+      - {kind: go_test, name: TestStartupRecoveryCleansOrdinaryUnavailableRunWithoutClaimingCurrentStanding}
+      - {kind: go_test, name: TestServeBundleMatchAvailabilityAdmissionExcludesCurrentStandingAndRejectsOrdinaryConflicts}
+      - {kind: go_test, name: TestServePinnedHashAdmissionExcludesCurrentStandingAndRejectsOrdinaryMismatch}
 
   - id: sqlite_first_event_run_lock
     category: sqlite

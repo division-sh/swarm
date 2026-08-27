@@ -343,6 +343,7 @@ func TestProviderRegistrationRejectedReplacementPreservesVerifiedPredecessor(t *
 	transport.identifyErr = errors.New("telegram rejected replacement token")
 	replacement := predecessor
 	replacement.PrebindingOperationID = "replacement-operation"
+	replacement.OnboardingOperationID = replacement.PrebindingOperationID
 	replacement.CredentialKeys = map[string]string{"telegram_bot_token": "replacement-bot"}
 	if err := controller.Reconcile(ctx, exposure, []RegistrationPair{replacement}); err == nil || !strings.Contains(err.Error(), "rejected replacement token") {
 		t.Fatalf("replacement error = %v", err)
@@ -365,6 +366,8 @@ func TestProviderRegistrationHandoffKeepsAuthoritiesDistinctUntilPromotion(t *te
 	}
 	predecessor := candidate
 	predecessor.PrebindingOperationID = ""
+	predecessor.ActivationSource = channelonboarding.ActivationSourceLearned
+	predecessor.OnboardingOperationID = candidate.PrebindingOperationID
 	predecessor.ChannelActivationGeneration = publication.Generation()
 
 	for _, test := range []struct {
@@ -519,6 +522,25 @@ func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testin
 		t.Fatalf("converged readiness = %#v", first)
 	}
 	firstCallback := first.Registrations[0].CallbackURL
+	publication, err := channelonboarding.NewChannelActivationPublication(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	promoted := pair
+	promoted.PrebindingOperationID = ""
+	promoted.ActivationSource = channelonboarding.ActivationSourceLearned
+	promoted.ChannelActivationGeneration = publication.Generation()
+	if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{promoted}); err != nil {
+		t.Fatalf("promote prebinding registration authority: %v", err)
+	}
+	if _, applied := transport.counts(); applied != 1 {
+		t.Fatalf("same-operation registration promotion resent provider apply: count=%d", applied)
+	}
+	promotedReadiness := readiness.Snapshot(time.Now().UTC())
+	if len(promotedReadiness.Registrations) != 1 || promotedReadiness.Registrations[0].ChannelActivationGeneration != promoted.ChannelActivationGeneration.Diagnostic() {
+		t.Fatalf("promoted registration readiness = %#v", promotedReadiness)
+	}
+	pair = promoted
 
 	if err := controller.Reconcile(context.Background(), exposure, []RegistrationPair{pair}); err != nil {
 		t.Fatalf("same-intent readback reconcile: %v", err)
@@ -1123,7 +1145,7 @@ func testRegistrationPair(t *testing.T, registration packs.CompiledChannelRegist
 		t.Fatal(err)
 	}
 	return RegistrationPair{
-		BindingID: bindingID, PlanGeneration: planGeneration, PrebindingOperationID: "test-prebinding-" + bindingID, Registration: registration,
+		BindingID: bindingID, PlanGeneration: planGeneration, OnboardingOperationID: "test-prebinding-" + bindingID, PrebindingOperationID: "test-prebinding-" + bindingID, Registration: registration,
 		CredentialKeys: map[string]string{"telegram_bot_token": "bot"},
 		Target: RegistrationTarget{
 			Selector: selector, BundleHash: "bundle-v1:sha256:" + strings.Repeat("b", 64), ServiceID: "service-" + bindingID,

@@ -100,7 +100,7 @@ type fakeAvailabilityReader struct {
 	err   error
 }
 
-func (r fakeAvailabilityReader) ActiveRunBundleAvailabilities(context.Context) ([]runbundle.Availability, error) {
+func (r fakeAvailabilityReader) ActiveNonStandingRunBundleAvailabilities(context.Context) ([]runbundle.Availability, error) {
 	if r.err != nil {
 		return nil, r.err
 	}

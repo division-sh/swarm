@@ -1,6 +1,7 @@
 package channelonboarding
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +21,7 @@ func TestChannelRuntimeContextCoordinateRequiresEveryExactGeneration(t *testing.
 		{name: "source", mutate: func(c *ChannelRuntimeContextCoordinate) { c.BundleSource = "" }},
 		{name: "bundle identity", mutate: func(c *ChannelRuntimeContextCoordinate) { c.BundleIdentity = "" }},
 		{name: "inventory", mutate: func(c *ChannelRuntimeContextCoordinate) { c.PackInventoryGeneration = "" }},
+		{name: "runtime instance", mutate: func(c *ChannelRuntimeContextCoordinate) { c.RuntimeInstanceID = "" }},
 		{name: "publication", mutate: func(c *ChannelRuntimeContextCoordinate) { c.ContextPublicationGeneration = 0 }},
 		{name: "plan", mutate: func(c *ChannelRuntimeContextCoordinate) { c.PlanGeneration = plangeneration.Generation{} }},
 		{name: "target", mutate: func(c *ChannelRuntimeContextCoordinate) { c.TargetGeneration = 0 }},
@@ -30,6 +32,45 @@ func TestChannelRuntimeContextCoordinateRequiresEveryExactGeneration(t *testing.
 			tc.mutate(&candidate)
 			if err := candidate.Validate(); err == nil {
 				t.Fatal("incomplete coordinate was accepted")
+			}
+		})
+	}
+}
+
+func TestChannelRuntimeContextCoordinateSeparatesDurableIdentityFromLiveOccurrence(t *testing.T) {
+	original := testCoordinate()
+	abaSuccessor := original
+	abaSuccessor.RuntimeInstanceID = "22222222-2222-4222-8222-222222222222"
+	if !original.MatchesDurableIdentity(abaSuccessor) || original.LiveOccurrence().Matches(abaSuccessor.LiveOccurrence()) || original.Matches(abaSuccessor) {
+		t.Fatal("process restart reused numeric generations as live occurrence authority")
+	}
+	successor := original
+	successor.RuntimeInstanceID = abaSuccessor.RuntimeInstanceID
+	successor.ContextPublicationGeneration++
+	successor.TargetGeneration++
+	if !original.MatchesDurableIdentity(successor) {
+		t.Fatal("process-local successor changed durable channel context identity")
+	}
+	if original.LiveOccurrence().Matches(successor.LiveOccurrence()) || original.Matches(successor) {
+		t.Fatal("successor live occurrence was accepted as the predecessor occurrence")
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*ChannelRuntimeContextCoordinate)
+	}{
+		{name: "bundle hash", mutate: func(c *ChannelRuntimeContextCoordinate) { c.BundleHash = "bundle-v1:sha256:" + strings.Repeat("b", 64) }},
+		{name: "bundle source", mutate: func(c *ChannelRuntimeContextCoordinate) { c.BundleSource = "ephemeral" }},
+		{name: "bundle identity", mutate: func(c *ChannelRuntimeContextCoordinate) { c.BundleIdentity = "bundle:changed@sha256:identity" }},
+		{name: "pack inventory", mutate: func(c *ChannelRuntimeContextCoordinate) { c.PackInventoryGeneration = "sha256:changed" }},
+		{name: "plan generation", mutate: func(c *ChannelRuntimeContextCoordinate) { c.PlanGeneration = testPlanGeneration("changed") }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			changed := successor
+			tc.mutate(&changed)
+			if original.MatchesDurableIdentity(changed) {
+				t.Fatal("changed source semantics retained durable channel identity")
 			}
 		})
 	}
@@ -138,6 +179,7 @@ func testCoordinate() ChannelRuntimeContextCoordinate {
 		BundleSource:                 "persisted",
 		BundleIdentity:               "bundle:customer-support@sha256:identity",
 		PackInventoryGeneration:      "sha256:inventory",
+		RuntimeInstanceID:            "11111111-1111-4111-8111-111111111111",
 		ContextPublicationGeneration: 7,
 		PlanGeneration:               testPlanGeneration("current"),
 		TargetGeneration:             11,
