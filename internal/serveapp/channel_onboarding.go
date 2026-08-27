@@ -131,12 +131,15 @@ func compileServeChannelActivationSnapshot(ctx context.Context, manager *runtime
 	}
 	learned := []channelonboarding.CompiledActivation{}
 	prebinding := []servePrebindingActivation{}
-	currentLearnedSlots := map[string]struct{}{}
 	if store != nil || identities != nil {
 		if store == nil || identities == nil {
 			return serveChannelActivationSnapshot{}, fmt.Errorf("learned channel activations require both selected store and identity owner")
 		}
 		catalog, err := serveChannelOnboardingCatalog(manager)
+		if err != nil {
+			return serveChannelActivationSnapshot{}, err
+		}
+		operations, err := store.ListChannelOnboardingOperations(ctx)
 		if err != nil {
 			return serveChannelActivationSnapshot{}, err
 		}
@@ -157,14 +160,16 @@ func compileServeChannelActivationSnapshot(ctx context.Context, manager *runtime
 			}
 			compiled, err := channelonboarding.CompileLearnedActivation(candidate, activation, binding)
 			if err != nil {
+				superseded, supersededErr := activationSupersededByExactRebind(activation, binding, operations)
+				if supersededErr != nil {
+					return serveChannelActivationSnapshot{}, supersededErr
+				}
+				if superseded {
+					continue
+				}
 				return serveChannelActivationSnapshot{}, err
 			}
 			learned = append(learned, compiled)
-			currentLearnedSlots[activation.SlotKey] = struct{}{}
-		}
-		operations, err := store.ListChannelOnboardingOperations(ctx)
-		if err != nil {
-			return serveChannelActivationSnapshot{}, err
 		}
 		for _, op := range operations {
 			if op.Phase != channelonboarding.PhaseActivatingProvider && op.Phase != channelonboarding.PhaseAwaitingExternalIdentity && op.Phase != channelonboarding.PhaseAwaitingOperatorConfirmation && op.Phase != channelonboarding.PhasePublishingActivation {
@@ -172,9 +177,6 @@ func compileServeChannelActivationSnapshot(ctx context.Context, manager *runtime
 			}
 			candidate, current := catalog.FindExact(op.Provider, op.Interface, op.Coordinate, op.TargetSelector)
 			if !current {
-				continue
-			}
-			if _, activated := currentLearnedSlots[op.SlotKey]; activated {
 				continue
 			}
 			prebinding = append(prebinding, servePrebindingActivation{Operation: op, Candidate: candidate})
@@ -186,6 +188,29 @@ func compileServeChannelActivationSnapshot(ctx context.Context, manager *runtime
 	}
 	sort.Slice(prebinding, func(i, j int) bool { return prebinding[i].Operation.SlotKey < prebinding[j].Operation.SlotKey })
 	return serveChannelActivationSnapshot{Activations: merged, Prebinding: prebinding}, nil
+}
+
+func activationSupersededByExactRebind(activation channelonboarding.ConnectedChannelActivation, binding operatorchannel.Binding, operations []channelonboarding.Operation) (bool, error) {
+	identity := activation.Interface.Normalized()
+	if binding.Status != operatorchannel.BindingCurrent || binding.Interface.Normalized() != identity || binding.PrincipalID != activation.PrincipalID {
+		return false, fmt.Errorf("current operator binding contradicts activation ownership while resolving rebind")
+	}
+	if activation.BindingRevision == binding.Revision {
+		return false, nil
+	}
+	matches := 0
+	for _, op := range operations {
+		if op.Phase.Terminal() || op.Verb != channelonboarding.VerbRebind || op.PrincipalID != activation.PrincipalID ||
+			op.Interface.Normalized() != identity || strings.TrimSpace(op.IdentityOperationID) == "" ||
+			op.IdentityOperationID != binding.OperationID {
+			continue
+		}
+		matches++
+	}
+	if matches > 1 {
+		return false, fmt.Errorf("current operator binding resolves to %d active channel rebind owners; require one", matches)
+	}
+	return matches == 1, nil
 }
 
 func declaredActivationCredentialAdmissions(ctx context.Context, owner *runtimecredentials.SnapshotOwner, coordinate channelonboarding.ChannelRuntimeContextCoordinate, binding packs.OutboundBindingPlan) ([]channelonboarding.CredentialAdmission, error) {
@@ -254,11 +279,29 @@ type serveChannelActivationRefresher struct {
 	store       channelonboarding.Store
 	identities  *operatorchannel.Service
 	credentials *runtimecredentials.SnapshotOwner
+	preflight   func(context.Context, servePrebindingActivation) error
 	reconcile   func(context.Context) error
 }
 
 type serveConnectedChannelRecovery interface {
 	Recover(context.Context) error
+}
+
+func (r *serveChannelActivationRefresher) PreflightChannelActivation(ctx context.Context, op channelonboarding.Operation, candidate channelonboarding.Candidate) error {
+	if r == nil {
+		return fmt.Errorf("serve channel activation refresher is required")
+	}
+	if err := candidate.Validate(); err != nil {
+		return err
+	}
+	if op.Provider != candidate.Provider || op.Interface.Normalized() != candidate.Interface.Normalized() ||
+		!op.Coordinate.Matches(candidate.Coordinate) || op.TargetSelector != candidate.Target.Selector || op.Posture != candidate.Posture {
+		return fmt.Errorf("channel activation preflight candidate contradicts its exact onboarding operation")
+	}
+	if r.preflight == nil {
+		return nil
+	}
+	return r.preflight(ctx, servePrebindingActivation{Operation: op, Candidate: candidate})
 }
 
 func activateServeAfterConnectedChannelTeardownRecovery(ctx context.Context, teardown serveConnectedChannelRecovery, activate func() error) error {

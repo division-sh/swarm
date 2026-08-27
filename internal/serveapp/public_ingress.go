@@ -130,34 +130,22 @@ func resolveServeRegistrationPairs(snapshot serveChannelActivationSnapshot, mana
 			},
 		})
 	}
+	pairIndexes := make(map[string]int, len(pairs))
+	for index, pair := range pairs {
+		pairIndexes[serveRegistrationPairKey(pair)] = index
+	}
 	for _, intent := range snapshot.Prebinding {
-		registration, ok := intent.Candidate.Plan.Registration()
-		if !ok {
-			return fail(fmt.Errorf("channel onboarding operation %s has no compiled registration owner", intent.Operation.OperationID))
-		}
-		generation, err := intent.Candidate.Plan.Generation()
+		pair, err := resolveServePrebindingRegistrationPair(intent)
 		if err != nil {
 			return fail(err)
 		}
-		credentials := map[string]string{}
-		for _, admission := range intent.Operation.CredentialAdmissions {
-			credentials[admission.Role] = admission.StoreKey
+		key := serveRegistrationPairKey(pair)
+		if index, replacing := pairIndexes[key]; replacing {
+			pairs[index] = pair
+			continue
 		}
-		if len(credentials) == 0 {
-			return fail(fmt.Errorf("channel onboarding operation %s has no admitted credentials", intent.Operation.OperationID))
-		}
-		target := intent.Candidate.Target
-		pairs = append(pairs, runtimepublicingress.RegistrationPair{
-			BindingID: channelonboarding.LearnedBindingID(intent.Operation.SlotKey), PlanGeneration: generation,
-			PrebindingOperationID: intent.Operation.OperationID,
-			Registration:          registration, CredentialKeys: credentials,
-			Target: runtimepublicingress.RegistrationTarget{
-				Selector: target.Selector, BundleHash: intent.Candidate.Coordinate.BundleHash, ServiceID: target.ServiceID,
-				PackageKey: target.PackageKey, FlowID: target.FlowID, Alias: target.Alias, Provider: target.Provider,
-				Generation: int64(target.Generation), PublicationSequence: target.PublicationSequence,
-				AdmissionPlanGeneration: target.AdmissionGeneration, SigningCredentialKey: credentials[intent.Candidate.SigningCredentialRole],
-			},
-		})
+		pairIndexes[key] = len(pairs)
+		pairs = append(pairs, pair)
 	}
 	sort.Slice(pairs, func(i, j int) bool {
 		if pairs[i].BindingID != pairs[j].BindingID {
@@ -167,6 +155,40 @@ func resolveServeRegistrationPairs(snapshot serveChannelActivationSnapshot, mana
 	})
 	selection.Pairs = pairs
 	return selection, nil
+}
+
+func resolveServePrebindingRegistrationPair(intent servePrebindingActivation) (runtimepublicingress.RegistrationPair, error) {
+	registration, ok := intent.Candidate.Plan.Registration()
+	if !ok {
+		return runtimepublicingress.RegistrationPair{}, fmt.Errorf("channel onboarding operation %s has no compiled registration owner", intent.Operation.OperationID)
+	}
+	generation, err := intent.Candidate.Plan.Generation()
+	if err != nil {
+		return runtimepublicingress.RegistrationPair{}, err
+	}
+	credentials := map[string]string{}
+	for _, admission := range intent.Operation.CredentialAdmissions {
+		credentials[admission.Role] = admission.StoreKey
+	}
+	if len(credentials) == 0 {
+		return runtimepublicingress.RegistrationPair{}, fmt.Errorf("channel onboarding operation %s has no admitted credentials", intent.Operation.OperationID)
+	}
+	target := intent.Candidate.Target
+	return runtimepublicingress.RegistrationPair{
+		BindingID: channelonboarding.LearnedBindingID(intent.Operation.SlotKey), PlanGeneration: generation,
+		PrebindingOperationID: intent.Operation.OperationID,
+		Registration:          registration, CredentialKeys: credentials,
+		Target: runtimepublicingress.RegistrationTarget{
+			Selector: target.Selector, BundleHash: intent.Candidate.Coordinate.BundleHash, ServiceID: target.ServiceID,
+			PackageKey: target.PackageKey, FlowID: target.FlowID, Alias: target.Alias, Provider: target.Provider,
+			Generation: int64(target.Generation), PublicationSequence: target.PublicationSequence,
+			AdmissionPlanGeneration: target.AdmissionGeneration, SigningCredentialKey: credentials[intent.Candidate.SigningCredentialRole],
+		},
+	}, nil
+}
+
+func serveRegistrationPairKey(pair runtimepublicingress.RegistrationPair) string {
+	return strings.TrimSpace(pair.BindingID) + "\x00" + strings.TrimSpace(pair.Target.Selector)
 }
 
 func exactActivationContext(contexts []runtime.BundleContext, coordinate channelonboarding.ChannelRuntimeContextCoordinate) (runtime.BundleContext, error) {

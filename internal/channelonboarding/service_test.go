@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -453,6 +454,68 @@ func TestReplacementCredentialHandoffPreservesPredecessorOnFailureAndRetiresItAf
 				t.Fatalf("successor admissions = %#v, want operation-owned occurrence", result.Operation.CredentialAdmissions)
 			}
 		})
+	}
+}
+
+func TestReplacementCredentialPreflightFailureKeepsOperationRetryableAndPredecessorCurrent(t *testing.T) {
+	now := time.Date(2026, 8, 27, 2, 0, 0, 0, time.UTC)
+	candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
+	catalog, err := NewCandidateCatalog([]Candidate{candidate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := NewCredentialWriter(credentialStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	predecessor := testSucceededOperation(candidate, now.Add(-time.Hour))
+	predecessorAdmissions := writeTestOperationCredentials(t, credentials, predecessor, "predecessor")
+	predecessor.CredentialAdmissions = predecessorAdmissions
+	store := &cancellationTestStore{activation: testCurrentActivation(predecessor, predecessorAdmissions, now), history: []Operation{predecessor}}
+	identities := &cancellationTestIdentities{binding: operatorchannel.Binding{
+		PrincipalID: "principal-a", Interface: candidate.Interface, ConversationRef: "conversation-a",
+		Revision: 3, Status: operatorchannel.BindingCurrent,
+	}}
+	activations := &cancellationTestActivations{preflightErr: errors.New("telegram rejected replacement token")}
+	service, err := NewService(ServiceOptions{
+		Store: store, Identities: identities, Credentials: credentials,
+		Catalog: func() (*CandidateCatalog, error) { return catalog, nil }, Activations: activations,
+		Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{}, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blocked, err := service.Start(context.Background(), StartInput{
+		Verb: VerbReconnect, Selection: CandidateSelection{Provider: candidate.Provider}, ProviderCredential: "invalid-successor-token",
+	})
+	if err == nil || !strings.Contains(err.Error(), "rejected replacement token") {
+		t.Fatalf("invalid replacement error = %v", err)
+	}
+	if blocked.Operation.Phase != PhasePreparing || store.op.Phase != PhasePreparing || len(store.op.CredentialAdmissions) != 0 {
+		t.Fatalf("blocked replacement operation = %#v, want retryable preparing without admitted credentials", store.op)
+	}
+	if store.activation.OperationID != predecessor.OperationID || store.activation.Status != ActivationCurrent {
+		t.Fatalf("blocked replacement changed predecessor activation = %#v", store.activation)
+	}
+	for _, reservation := range store.op.CredentialReservations {
+		key := operationCredentialStoreKey(reservation.StoreKey, store.op.OperationID, reservation.Role)
+		if _, found, getErr := credentialStore.Get(context.Background(), key); getErr != nil || found {
+			t.Fatalf("failed successor credential %q found=%v err=%v", key, found, getErr)
+		}
+	}
+
+	activations.preflightErr = nil
+	retried, err := service.Retry(context.Background(), RetryInput{OperationID: store.op.OperationID, ProviderCredential: "valid-successor-token"})
+	if err != nil {
+		t.Fatalf("retry replacement credential: %v", err)
+	}
+	if retried.Operation.Phase != PhaseSucceeded || store.activation.OperationID != store.op.OperationID {
+		t.Fatalf("retried replacement = operation:%#v activation:%#v", retried.Operation, store.activation)
 	}
 }
 
@@ -968,8 +1031,18 @@ func (i *cancellationTestIdentities) Readback(ctx context.Context) ([]operatorch
 
 type cancellationTestActivations struct {
 	sawCanceledContext bool
+	preflightErr       error
+	preflights         int
 	refreshes          int
 	err                error
+}
+
+func (a *cancellationTestActivations) PreflightChannelActivation(ctx context.Context, _ Operation, _ Candidate) error {
+	if ctx.Err() != nil {
+		a.sawCanceledContext = true
+	}
+	a.preflights++
+	return a.preflightErr
 }
 
 func (a *cancellationTestActivations) RefreshChannelActivations(ctx context.Context) error {

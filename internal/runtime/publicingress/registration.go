@@ -201,28 +201,37 @@ func (c *ProviderRegistrationController) Reconcile(ctx context.Context, exposure
 	if err := startup.Validate(); err != nil {
 		return fmt.Errorf("provider registration startup authority: %w", err)
 	}
-	c.snapshot.replaceSelected(pairs)
 	admitted := make([]admittedPair, 0, len(pairs))
 	for _, pair := range pairs {
 		candidate, err := c.admitAndIdentify(ctx, exposure, pair)
 		if err != nil {
-			c.recordFailure(pairKey(pair), pair, err)
+			c.snapshot.recordAdmissionFailure(pair, err.Error())
 			return err
 		}
 		admitted = append(admitted, candidate)
 	}
 	if err := rejectSlotCollisions(admitted); err != nil {
-		for _, pair := range admitted {
-			c.recordFailure(pairKey(pair.pair), pair.pair, err)
-		}
 		return err
 	}
+	c.snapshot.replaceSelected(pairs)
 	for _, pair := range admitted {
 		if err := c.reconcilePair(ctx, exposure, startup, pair); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// Preflight verifies one staged registration's exact credentials and provider
+// identity without changing selected registration or external effect state.
+func (c *ProviderRegistrationController) Preflight(ctx context.Context, exposure Generation, pair RegistrationPair) error {
+	if c == nil {
+		return fmt.Errorf("provider registration controller is required")
+	}
+	c.reconcileMu.Lock()
+	defer c.reconcileMu.Unlock()
+	_, err := c.admitAndIdentify(ctx, exposure, pair)
+	return err
 }
 
 // PrepareStartupHandoff settles predecessor-owned registration attempts and
@@ -638,16 +647,6 @@ func (c *ProviderRegistrationController) Handler(next http.Handler) http.Handler
 
 func (c *ProviderRegistrationController) publishState(key string, state registrationState) {
 	c.snapshot.publishState(key, state)
-}
-
-func (c *ProviderRegistrationController) recordFailure(key string, pair RegistrationPair, err error) {
-	state, _ := c.snapshot.state(key)
-	state.Pair = pair
-	state.Failure = err.Error()
-	if state.Phase == "" {
-		state.Phase = registrationPhaseNoAttempt
-	}
-	c.publishState(key, state)
 }
 
 func (s registrationState) activeIntent() *registrationIntent {

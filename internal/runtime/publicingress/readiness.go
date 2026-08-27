@@ -155,6 +155,22 @@ func (o *RegistrationSnapshotOwner) replaceSelected(pairs []RegistrationPair) {
 	})
 }
 
+func (o *RegistrationSnapshotOwner) recordAdmissionFailure(pair RegistrationPair, failure string) {
+	o.mutate(func(next *registrationProcessSnapshot) {
+		key := pairKey(pair)
+		state, selected := next.registrations[key]
+		if selected && !sameRegistrationSelection(state.Pair, pair) {
+			return
+		}
+		if !selected {
+			state = registrationState{Pair: pair, Phase: registrationPhaseNoAttempt}
+		}
+		state.Failure = strings.TrimSpace(failure)
+		next.registrations[key] = state
+		next.routes[registrationRouteKey(pair.Target.Alias, pair.Target.Provider)] = struct{}{}
+	})
+}
+
 func sameRegistrationSelection(left, right RegistrationPair) bool {
 	return left.BindingID == right.BindingID &&
 		left.PlanGeneration.Diagnostic() == right.PlanGeneration.Diagnostic() &&

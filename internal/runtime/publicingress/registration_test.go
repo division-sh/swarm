@@ -298,6 +298,63 @@ func TestProviderRegistrationRejectsUnusableSigningBeforeAnySideEffect(t *testin
 	}
 }
 
+func TestProviderRegistrationRejectedReplacementPreservesVerifiedPredecessor(t *testing.T) {
+	ctx := context.Background()
+	registration := loadTelegramRegistrationPlan(t)
+	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range map[string]string{"bot": "predecessor-token", "replacement-bot": "invalid-token", "signing": "signing-secret"} {
+		if err := credentialStore.Set(ctx, key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	owner, err := runtimecredentials.NewSnapshotOwner(credentialStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := &telegramRegistrationTransport{t: t}
+	readiness := NewReadinessOwner(true)
+	startup := testStartupAuthority(t, "runtime-replacement")
+	controller, err := NewProviderRegistrationController(RegistrationControllerOptions{
+		CredentialOwner: owner, EffectsStore: &registrationEffectStore{Harness: effecttest.New(), current: true},
+		HTTP: runtimeregistration.HTTPExecutor{Client: &http.Client{Transport: transport}}, Posture: executionposture.Live,
+		RuntimeInstanceID: uuid.NewString(), StartupAuthority: func() (startupownership.GrantEvidence, error) { return startup, nil }, Readiness: readiness,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	exposure := Generation{ID: uuid.NewString(), Mode: ModeExternalOrigin, PublicOrigin: "https://hooks.example.test", ListenAddress: "127.0.0.1:8443", CreatedAt: now}
+	readiness.SetRuntimeReady(true)
+	readiness.SetExposure(ExposureEvidence{GenerationID: exposure.ID, StartupAuthorityID: startup.GrantID, ObservedAt: now, ExpiresAt: now.Add(EvidenceTTL)})
+	predecessor := testRegistrationPair(t, registration, "replacement", "ingress:support:telegram:telegram")
+	if err := controller.Reconcile(ctx, exposure, []RegistrationPair{predecessor}); err != nil {
+		t.Fatalf("reconcile predecessor: %v", err)
+	}
+	before := readiness.Snapshot(time.Now().UTC())
+	if !before.PublicIngressReady || len(before.Registrations) != 1 {
+		t.Fatalf("predecessor readiness = %#v", before)
+	}
+	callbackURL := before.Registrations[0].CallbackURL
+	callbackToken := strings.TrimSpace(strings.Split(callbackURL, "swarm_callback_generation=")[1])
+	transport.identifyErr = errors.New("telegram rejected replacement token")
+	replacement := predecessor
+	replacement.PrebindingOperationID = "replacement-operation"
+	replacement.CredentialKeys = map[string]string{"telegram_bot_token": "replacement-bot"}
+	if err := controller.Reconcile(ctx, exposure, []RegistrationPair{replacement}); err == nil || !strings.Contains(err.Error(), "rejected replacement token") {
+		t.Fatalf("replacement error = %v", err)
+	}
+	after := readiness.Snapshot(time.Now().UTC())
+	if !after.PublicIngressReady || len(after.Registrations) != 1 || after.Registrations[0].CallbackURL != callbackURL {
+		t.Fatalf("rejected replacement changed predecessor readiness: before=%#v after=%#v", before, after)
+	}
+	if !controller.CallbackCurrent(ctx, predecessor.Target.Alias, predecessor.Target.Provider, callbackToken) {
+		t.Fatal("rejected replacement revoked the predecessor callback")
+	}
+}
+
 func TestProviderRegistrationReconcilerCollisionConvergenceAndNoResend(t *testing.T) {
 	registration := loadTelegramRegistrationPlan(t)
 	credentialStore, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))

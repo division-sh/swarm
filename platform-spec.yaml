@@ -9990,13 +9990,21 @@ tool_model:
         the parent responsibility once before the CLI returns, so the exact slot and owned credentials are settled.
         connect --replace,
         implicit verb switching, --force, aliases, and lower identity RPCs as a second whole-journey API are unsupported.
+        Resume reads the exact durable operation before deciding whether operator input is reachable: nonterminal input
+        requires --yes only while that operation and its nested identity operation are currently awaiting claimant
+        confirmation, never while provider activation, credential admission, claim polling, activation publication, or
+        confirmation delivery owns the next step.
       credential_rule: >
         Provider secret material enters only through the authenticated onboarding API from hidden TTY or stdin. Secret
         values and reusable digests are forbidden in semantic request hashes, API idempotency rows, selected-store rows,
         logs, traces, progress, errors, and readback. The operation first reserves exact credential roles and keys, then
         stores only non-secret receipt and epoch evidence. Every newly written value is staged under an
         operation-owned store occurrence; replacement never overwrites the credential occurrence referenced by the
-        current predecessor activation. Fresh webhook connect generates a missing signing value;
+        current predecessor activation. Before preparing advances, provider activation preflight validates the staged
+        candidate's exact credential occurrence and provider identity without changing registration selection or launching
+        a registration effect. Rejection compare-deletes operation-written candidate occurrences and leaves the operation
+        in preparing, so resume can admit a different credential while the predecessor activation and registration remain
+        current. Fresh webhook connect generates a missing signing value;
         replay, reconnect, and rebind do not rotate credentials without an explicit newly admitted epoch. Reconnect,
         rebind, and resume accept explicit hidden replacement credential input when the exact reserved occurrence is no
         longer current. Every operation-written credential occurrence is owned by its receipt and epoch: terminal
@@ -10030,10 +10038,17 @@ tool_model:
         readiness, and runtime-context readback consume that owner; no config-only map or independent current-state copy
         survives. The selected-store ConnectedChannelActivation remains the durable learned source; the process
         publication is its exact-current compiled projection, not a second durable owner.
+        When a bound rebind has advanced the interface revision but its parent activation publication has not committed,
+        compilation excludes stale same-interface activations only when the current binding names that exact active rebind
+        identity operation. Missing, terminal, unrelated, or duplicate rebind ownership remains a fail-closed contradiction.
       registration_handoff_rule: >
         A pre-binding webhook intent carries only exact registration plan, target, credential epoch, and generation facts.
         It grants no conversation destination or outbound authority. After operator_account_binding settles the external
         identity, selected-store activation publication revision-fences handoff to the current registration selection.
+        Candidate credential/provider-identity admission completes before registration selection changes; failed admission
+        cannot replace, fail, or revoke a verified predecessor selection. A validated same-slot pre-binding intent becomes
+        the exact registration candidate during provider activation and is replaced by activation-generation authority only
+        after durable activation publication.
         Temporary authority cannot survive successful handoff, and an uncertain provider acknowledgment prevents blind
         resend, cleanup, or successor publication. Candidate catalog declaration remains available without public ingress;
         webhook pre-binding is rejected at activation when no exposure owner exists, while non-webhook catalog candidates
@@ -10052,6 +10067,9 @@ tool_model:
         authority-retired teardown idempotently, including credential cleanup. Runtime-context shutdown performs this
         retirement while the exact context and public-ingress owner remain current, and aborts withdrawal if retirement
         fails. Proofless revocation fails before mutation because no proof authority exists.
+        Rebind successor publication is also the selected-store transaction that retires every current activation sharing
+        the rebound interface, including sibling bundle/target slots; sibling credential occurrences are released only
+        after the successor process publication becomes current.
       readiness_rule: >
         ConnectedChannelReadiness is derived, never persisted as a boolean, and reports the exact activation-publication
         generation used by API/CLI readback. READY requires one exact current coordinate,

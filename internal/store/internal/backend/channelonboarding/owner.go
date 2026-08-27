@@ -342,6 +342,12 @@ func publishActivation(ctx context.Context, r runner, req domain.PublishActivati
 			return domain.ErrConflict
 		}
 		now := canonicalTime(req.Now)
+		if op.Verb == domain.VerbRebind {
+			identityKey := op.Interface.Normalized().Key()
+			if _, err := tx.ExecContext(txctx, r.dialect().bind(`UPDATE connected_channel_activations SET status='retired',activation_revision=activation_revision+1,retirement_reason='identity_rebound',retired_at=?,updated_at=? WHERE interface_key=? AND slot_key<>? AND status='current'`), now, now, identityKey, op.SlotKey); err != nil {
+				return fmt.Errorf("retire sibling channel activations for rebound identity: %w", err)
+			}
+		}
 		activationRevision := int64(1)
 		prior, priorFound, err := loadActivationBySlot(txctx, tx, r.dialect(), op.SlotKey, true)
 		if err != nil {
