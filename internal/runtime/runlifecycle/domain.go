@@ -834,9 +834,9 @@ type CandidateOwner interface {
 	CandidateRegistrar
 }
 
-// OperationOwner owns lifecycle transitions performed inside the caller's
-// current named selected-store mutation. SQL, candidate revisions, and
-// post-commit handoff remain private to the selected-store adapter.
+// OperationOwner owns standalone lifecycle reads and named lifecycle mutations.
+// SQL, candidate revisions, and post-commit handoff remain private to the
+// selected-store adapter.
 type OperationOwner interface {
 	RequirePresentRun(context.Context, string) error
 	RequireActiveRun(context.Context, string) error

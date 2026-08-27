@@ -69,7 +69,7 @@ func (s *EventSQLiteOwner) LoadInboundPublicationByIdentity(ctx context.Context,
 func (s *EventSQLiteOwner) loadInboundPublicationByIdentity(ctx context.Context, provider, entityID, providerEventID string) (runtimeinbound.Record, bool, error) {
 	var record runtimeinbound.Record
 	var found bool
-	err := s.backend.RunTransaction(ctx, "sqlite inbound publication read", func(txctx context.Context, tx *sql.Tx) error {
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		record, found, err = loadSQLiteInboundPublicationTx(txctx, tx, provider, entityID, providerEventID)
 		if err != nil || !found {

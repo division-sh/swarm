@@ -584,7 +584,7 @@ func (s *sqliteSession) RecordGenerationGrantTransition(ctx context.Context, pre
 func (s *sqliteSession) LoadSourceSet(ctx context.Context) (runtimeagenttopology.SourceSetPlan, bool, error) {
 	var plan runtimeagenttopology.SourceSetPlan
 	var exists bool
-	err := s.owner.backend.RunTransaction(ctx, "load agent topology source set", func(txctx context.Context, tx *sql.Tx) error {
+	err := s.owner.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
 		var err error
 		plan, exists, err = loadSourceSetTx(txctx, tx, true)
 		return err

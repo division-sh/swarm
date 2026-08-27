@@ -170,6 +170,20 @@ func (s *RunLifecycleSQLiteOwner) runRuntimeMutation(ctx context.Context, label 
 	return s.backend.RunTransaction(ctx, label, operation)
 }
 
+func (s *RunLifecyclePostgresOwner) runRead(ctx context.Context, operation func(context.Context, *sql.Tx) error) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	return s.backend.RunReadTransaction(ctx, operation)
+}
+
+func (s *RunLifecycleSQLiteOwner) runRead(ctx context.Context, operation func(context.Context, *sql.Tx) error) error {
+	if err := s.requireCurrentSchema(); err != nil {
+		return err
+	}
+	return s.backend.RunReadTransaction(ctx, operation)
+}
+
 func (s *RunLifecyclePostgresOwner) runPrivateAuthorActivityMutation(
 	ctx context.Context,
 	effects *privaterunforkrevision.Effects,

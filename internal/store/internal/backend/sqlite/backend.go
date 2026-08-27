@@ -11,19 +11,35 @@ import (
 // persistence adapters may retain it; public selected-store facades expose
 // closed semantic operations instead.
 type Backend struct {
-	db         *sql.DB
-	mutationMu sync.Mutex
+	db *sql.DB
+
+	mutationToken chan struct{}
+	mutationState struct {
+		sync.Mutex
+		active        mutationOperation
+		waiting       int
+		nextSequence  uint64
+		ring          [mutationDiagnosticRingCapacity]mutationAttemptTrace
+		ringNext      int
+		ringCount     int
+		labelActivity map[string]mutationLabelAggregate
+	}
+	firstBusyObservation                  sync.Once
+	firstCancellationObservation          sync.Once
+	firstAdmissionCancellationObservation sync.Once
 }
 
 func New(db *sql.DB) (*Backend, error) {
 	if db == nil {
 		return nil, fmt.Errorf("sqlite database is required")
 	}
-	return &Backend{db: db}, nil
+	backend := &Backend{db: db, mutationToken: make(chan struct{}, 1)}
+	backend.mutationToken <- struct{}{}
+	return backend, nil
 }
 
 func (b *Backend) Valid() bool {
-	return b != nil && b.db != nil
+	return b != nil && b.db != nil && b.mutationToken != nil
 }
 
 func (b *Backend) Ping(ctx context.Context) error {
