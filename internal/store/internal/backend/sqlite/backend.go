@@ -16,17 +16,10 @@ type Backend struct {
 	mutationToken chan struct{}
 	mutationState struct {
 		sync.Mutex
-		active        mutationOperation
-		waiting       int
-		nextSequence  uint64
-		ring          [mutationDiagnosticRingCapacity]mutationAttemptTrace
-		ringNext      int
-		ringCount     int
-		labelActivity map[string]mutationLabelAggregate
+		waiting int
 	}
-	firstBusyObservation                  sync.Once
-	firstCancellationObservation          sync.Once
-	firstAdmissionCancellationObservation sync.Once
+	firstBusyObservation         sync.Once
+	firstCancellationObservation sync.Once
 }
 
 func New(db *sql.DB) (*Backend, error) {
