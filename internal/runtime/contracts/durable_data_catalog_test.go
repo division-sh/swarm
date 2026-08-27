@@ -87,9 +87,6 @@ flows:
     mode: static
 `)
 	writeFixtureFile(t, filepath.Join(root, "schema.yaml"), "name: static-catalog-test\n")
-	for _, name := range []string{"agents.yaml", "events.yaml", "policy.yaml", "tools.yaml"} {
-		writeFixtureFile(t, filepath.Join(root, name), "{}\n")
-	}
 	writeStaticDataCatalogFlow(t, root, "alpha", "11111111-1111-4111-8111-111111111111", alpha, alphaAccess)
 	writeStaticDataCatalogFlow(t, root, "beta", "22222222-2222-4222-8222-222222222222", beta, true)
 	return root
@@ -100,7 +97,6 @@ func writeStaticDataCatalogFlow(t *testing.T, root, flowID, agentID string, cont
 	flowRoot := filepath.Join(root, "flows", flowID)
 	writeFixtureFile(t, filepath.Join(flowRoot, "package.yaml"), "name: "+flowID+"\nversion: \"1.0.0\"\nflows: []\n")
 	writeFixtureFile(t, filepath.Join(flowRoot, "schema.yaml"), "name: "+flowID+"\nmode: static\n")
-	writeFixtureFile(t, filepath.Join(flowRoot, "events.yaml"), "{}\n")
 	agent := "worker:\n  id: " + agentID + "\n  role: worker\n  intent: {inline: \"Read admitted static data.\"}\n"
 	if access {
 		agent += "  flow_data_access:\n    - resume.md\n"
