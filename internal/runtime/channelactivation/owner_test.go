@@ -280,6 +280,59 @@ func TestConnectedChannelActivationSupersessionFencesEveryPredecessorConsumer(t 
 	}
 }
 
+func TestAdmittedRuntimeLeaseBorrowsPredecessorActivityAcrossReplacementFence(t *testing.T) {
+	owner, err := NewOwner(testEmptyPublication(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner.mu.Lock()
+	owner.current.runtime["channel.test.deliver"] = Operation{Name: "deliver"}
+	owner.current.activities["platform.channel_activity.test.deliver"] = Operation{Name: "deliver"}
+	owner.mu.Unlock()
+	runtimeLease, found := owner.AcquireRuntimeOperation("channel.test.deliver")
+	if !found {
+		t.Fatal("predecessor runtime operation was not admitted")
+	}
+	predecessorGeneration := runtimeLease.Generation()
+
+	replaced := make(chan error, 1)
+	go func() { replaced <- owner.Replace(testEmptyPublication(t)) }()
+	deadline := time.Now().Add(time.Second)
+	for {
+		probe, open := owner.AcquireRuntimeOperation("channel.test.deliver")
+		if open {
+			probe.Release()
+		} else {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("replacement did not fence new runtime operations")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if _, open := owner.AcquireActivityOperation("platform.channel_activity.test.deliver", predecessorGeneration); open {
+		t.Fatal("new activity operation crossed the replacement fence")
+	}
+
+	activityLease, found := owner.BorrowActivityOperation(runtimeLease, "platform.channel_activity.test.deliver", predecessorGeneration)
+	if !found || activityLease.Operation().Name != "deliver" {
+		t.Fatal("admitted runtime operation could not borrow its predecessor activity")
+	}
+	activityLease.Release()
+	select {
+	case err := <-replaced:
+		t.Fatalf("replacement completed before admitted runtime operation settled: %v", err)
+	default:
+	}
+	runtimeLease.Release()
+	if err := <-replaced; err != nil {
+		t.Fatal(err)
+	}
+	if _, found := owner.BorrowActivityOperation(runtimeLease, "platform.channel_activity.test.deliver", predecessorGeneration); found {
+		t.Fatal("released predecessor authority admitted a stale child activity")
+	}
+}
+
 func testEmptyPublication(t *testing.T) channelonboarding.ChannelActivationPublication {
 	t.Helper()
 	publication, err := channelonboarding.NewChannelActivationPublication(nil)

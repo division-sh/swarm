@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/durabledata"
 	"github.com/division-sh/swarm/internal/events"
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -2082,6 +2083,9 @@ func bindWorkContext(ctx context.Context, lease *worklifetime.Lease, owner workl
 	}
 	if runtimeID, ok := runtimecorrelation.RuntimeInstanceIDFromContext(ctx); ok {
 		workCtx = runtimecorrelation.WithRuntimeInstanceID(workCtx, runtimeID)
+	}
+	if activationLease, ok := runtimechannelactivation.ExecutionLeaseFromContext(ctx); ok {
+		workCtx = runtimechannelactivation.WithExecutionLease(workCtx, activationLease)
 	}
 	return context.WithValue(workCtx, runtimeWorkAdmissionContextKey{}, runtimeWorkAdmission{
 		owner: owner, context: workCtx,

@@ -36,6 +36,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
 	llm "github.com/division-sh/swarm/internal/runtime/llm"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
@@ -49,6 +50,27 @@ import (
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"github.com/google/uuid"
 )
+
+type channelActivityDispatchFenceProbe struct {
+	armed   atomic.Bool
+	started chan struct{}
+	release chan struct{}
+}
+
+func newChannelActivityDispatchFenceProbe() *channelActivityDispatchFenceProbe {
+	return &channelActivityDispatchFenceProbe{started: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (p *channelActivityDispatchFenceProbe) NotifyLifecycle(ctx context.Context, signal runtimelifecycleprobe.Signal) {
+	if p == nil || signal.Kind != runtimelifecycleprobe.PostCommitDispatchStarted || signal.EventType != "platform.activity_requested" || !p.armed.CompareAndSwap(true, false) {
+		return
+	}
+	close(p.started)
+	select {
+	case <-p.release:
+	case <-ctx.Done():
+	}
+}
 
 func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedStores(t *testing.T) {
 	const bundleHash = "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -146,9 +168,11 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 				t.Fatalf("WithRuntimeTools: %v", err)
 			}
 			var coordinator *runtimepipeline.PipelineCoordinator
+			dispatchFence := newChannelActivityDispatchFenceProbe()
 			bus, err := newScopedTestEventBus(t, eventStore, runtimebus.EventBusOptions{
-				ContractBundle:   source,
-				BundleSourceFact: testBundleSourceFact(t, bundleHash),
+				ContractBundle:     source,
+				BundleSourceFact:   testBundleSourceFact(t, bundleHash),
+				TestLifecycleProbe: dispatchFence,
 				InterceptorProvider: func() []runtimebus.EventInterceptor {
 					if coordinator == nil {
 						return nil
@@ -225,7 +249,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 			if calls.Load() != 1 {
 				t.Fatalf("provider calls after replay = %d, want one", calls.Load())
 			}
-			assertConfiguredChannelJournal(t, ctx, db, selected, runID, privateToolID, flowInstance, entityID, 1)
+			assertConfiguredChannelJournal(t, ctx, db, selected, runID, privateToolID, flowInstance, entityID, 1, 1)
 
 			if _, err := executor.Execute(callCtx, "channel.ops.deliver", map[string]any{
 				"presentation": map[string]any{"text": "Changed under same identity"}, "actions": []any{},
@@ -250,7 +274,7 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 			if calls.Load() != 2 {
 				t.Fatalf("provider calls after ack-loss replay = %d, want two total distinct operations", calls.Load())
 			}
-			assertConfiguredChannelJournal(t, ctx, db, selected, runID, privateToolID, flowInstance, entityID, 2)
+			assertConfiguredChannelJournal(t, ctx, db, selected, runID, privateToolID, flowInstance, entityID, 2, 2)
 
 			if err := credentialStore.Delete(ctx, "telegram_bot_token"); err != nil {
 				t.Fatalf("delete Telegram credential: %v", err)
@@ -322,6 +346,75 @@ func TestConfiguredChannelRuntimeDispatchesImportedAgentDurablyAcrossSelectedSto
 			if calls.Load() != 2 {
 				t.Fatalf("stale plan generation reached provider: calls=%d", calls.Load())
 			}
+
+			fencedOwner := testChannelActivationOwner(t, binding)
+			fencedCoordinator := newExternalRuntimeTestPipelineCoordinator(t, bus, db, eventStore, runtimepipeline.PipelineCoordinatorOptions{
+				WorkOwner:           runtimeTestEventBusWorkOwner(t, bus),
+				Module:              telegramConnectorSupportedSurfaceModule{source: source},
+				Persistence:         workflowPersistence,
+				RunLifecycle:        runLifecycle,
+				DeliveryStore:       deliveryStore,
+				PipelineObligations: pipelineObligations,
+				Credentials:         credentialStore,
+				FlowRoutes:          bus,
+				ChannelActivations:  fencedOwner,
+			})
+			stopActivityNode()
+			coordinator = fencedCoordinator
+			stopActivityNode = startConfiguredChannelActivityNode(t, ctx, coordinator, bus, db)
+			fencedExecutor := configuredChannelExecutor(source, fencedOwner, credentialStore, fencedCoordinator)
+			fencedCtx := configuredChannelCallContext(t, ctx, eventStore, actor, runID, entityID, flowInstance, "replacement-fence")
+			type executionResult struct {
+				value any
+				err   error
+			}
+			executed := make(chan executionResult, 1)
+			dispatchFence.armed.Store(true)
+			go func() {
+				value, err := fencedExecutor.Execute(fencedCtx, "channel.ops.deliver", input)
+				executed <- executionResult{value: value, err: err}
+			}()
+			select {
+			case <-dispatchFence.started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("durable channel activity did not reach the post-commit receiver fence")
+			}
+			replaced := make(chan error, 1)
+			go func() { replaced <- fencedOwner.Replace(testChannelActivationPublication(t, replacementBinding)) }()
+			deadline := time.Now().Add(time.Second)
+			for {
+				probe, open := fencedOwner.AcquireRuntimeOperation(binding.RuntimeToolID("deliver"))
+				if open {
+					probe.Release()
+				} else {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("activation replacement did not fence new channel operations")
+				}
+				time.Sleep(time.Millisecond)
+			}
+			select {
+			case err := <-replaced:
+				t.Fatalf("activation replacement completed before admitted activity resumed: %v", err)
+			default:
+			}
+			close(dispatchFence.release)
+			select {
+			case result := <-executed:
+				if result.err != nil || !reflect.DeepEqual(result.value, wantResult) {
+					t.Fatalf("predecessor activity across replacement fence = %#v, err=%v", result.value, result.err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("admitted predecessor activity did not settle")
+			}
+			if err := <-replaced; err != nil {
+				t.Fatalf("replace channel activation: %v", err)
+			}
+			if calls.Load() != 3 {
+				t.Fatalf("predecessor activity calls after replacement fence = %d, want three total distinct operations", calls.Load())
+			}
+			assertConfiguredChannelJournal(t, ctx, db, selected, runID, privateToolID, flowInstance, entityID, 6, 3)
 		})
 	}
 }
@@ -792,7 +885,7 @@ func channelRuntimeCredentialStore(t *testing.T, token string) runtimecredential
 	return credentials
 }
 
-func assertConfiguredChannelJournal(t *testing.T, ctx context.Context, db *sql.DB, selected, runID, privateTool, flowInstance, entityID string, want int) {
+func assertConfiguredChannelJournal(t *testing.T, ctx context.Context, db *sql.DB, selected, runID, privateTool, flowInstance, entityID string, wantRequests, wantAttempts int) {
 	t.Helper()
 	requestQuery := `SELECT COUNT(*) FROM events WHERE run_id = $1::uuid AND event_name = 'platform.activity_requested'`
 	attemptQuery := `SELECT COUNT(*) FROM activity_attempts WHERE run_id = $1::uuid AND tool = $2 AND status = 'succeeded'`
@@ -811,8 +904,8 @@ func assertConfiguredChannelJournal(t *testing.T, ctx context.Context, db *sql.D
 	if err := db.QueryRowContext(ctx, attemptQuery, attemptArgs...).Scan(&attempts); err != nil {
 		t.Fatalf("count channel activity attempts: %v", err)
 	}
-	if requests != want || attempts != want {
-		t.Fatalf("durable channel journal = requests:%d attempts:%d, want %d/%d", requests, attempts, want, want)
+	if requests != wantRequests || attempts != wantAttempts {
+		t.Fatalf("durable channel journal = requests:%d attempts:%d, want %d/%d", requests, attempts, wantRequests, wantAttempts)
 	}
 	var rawRoute []byte
 	if err := db.QueryRowContext(ctx, sourceQuery, runID).Scan(&rawRoute); err != nil {

@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/providerconnectors"
 	runtimeactivityresult "github.com/division-sh/swarm/internal/runtime/activityresult"
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/activityidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
@@ -239,7 +240,8 @@ func (d pipelineActivityDispatcher) executeActivityIntent(ctx context.Context, i
 	if source == nil {
 		return runtimefailures.New(runtimefailures.ClassInternalFailure, "activity_semantic_source_missing", "activity-runtime", "execute_activity", nil)
 	}
-	target, privateTarget, activationLease, targetErr := d.coordinator.channelActivityTarget(intent.Tool, intent.ChannelActivationGeneration)
+	target, privateTarget, activationLease, targetErr := d.coordinator.channelActivityTarget(ctx, intent.Tool, intent.ChannelActivationGeneration)
+	ctx = runtimechannelactivation.WithoutExecutionLease(ctx)
 	if targetErr != nil {
 		return d.publishActivityFailure(ctx, intent, runtimefailures.Wrap(runtimefailures.ClassSchemaInvalid, "channel_activity_plan_invalid", "activity-runtime", "resolve_private_target", map[string]any{"tool": intent.Tool}, targetErr))
 	}

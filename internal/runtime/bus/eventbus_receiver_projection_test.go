@@ -7,8 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimechannelactivation "github.com/division-sh/swarm/internal/runtime/channelactivation"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
@@ -150,6 +152,57 @@ func TestAcceptedReceiverDispatchDoesNotReadmitAfterOwnerFence(t *testing.T) {
 	process.Retire()
 	if _, err := process.Join(context.Background()); err != nil {
 		t.Fatalf("join receiver process: %v", err)
+	}
+}
+
+func TestAcceptedReceiverDispatchRetainsChannelExecutionAuthority(t *testing.T) {
+	process := worklifetime.NewProcess()
+	owner := newReceiverProjectionRuntimeOwner(t, process, "channel-execution-authority")
+	eventBus, err := newScopedTestEventBus(InMemoryEventStore{}, EventBusOptions{WorkOwner: owner})
+	if err != nil {
+		t.Fatalf("create event bus: %v", err)
+	}
+	publication, err := channelonboarding.NewChannelActivationPublication(nil)
+	if err != nil {
+		t.Fatalf("create channel activation publication: %v", err)
+	}
+	activationOwner, err := runtimechannelactivation.NewOwner(publication)
+	if err != nil {
+		t.Fatalf("create channel activation owner: %v", err)
+	}
+	activationLease, found := activationOwner.AcquirePresentation()
+	if !found {
+		t.Fatal("acquire channel activation lease")
+	}
+	defer activationLease.Release()
+
+	ctx := runtimechannelactivation.WithExecutionLease(hostilePublisherContext(t), activationLease)
+	acceptedCtx, workLease, err := eventBus.beginRuntimeWork(ctx)
+	if err != nil {
+		t.Fatalf("accept receiver dispatch work: %v", err)
+	}
+	defer func() { _ = workLease.Done() }()
+	evt := receiverProjectionEvent("channel-execution-authority")
+	projection, err := eventBus.receiverProjection(acceptedCtx, evt.DeliveryContext())
+	if err != nil {
+		t.Fatalf("project accepted receiver dispatch: %v", err)
+	}
+	executionCtx, closeExecution, err := acceptedWorkExecutionContext(acceptedCtx)
+	if err != nil {
+		t.Fatalf("project accepted dispatch execution context: %v", err)
+	}
+	defer closeExecution()
+	receiver, closeReceiver, err := eventBus.beginReceiverDispatch(executionCtx, projection, evt)
+	if err != nil {
+		t.Fatalf("begin receiver dispatch: %v", err)
+	}
+	defer func() { _ = closeReceiver() }()
+	got, retained := runtimechannelactivation.ExecutionLeaseFromContext(receiver.Context)
+	if !retained || got != activationLease {
+		t.Fatalf("receiver channel activation lease = %p, retained=%v; want %p", got, retained, activationLease)
+	}
+	if _, retained := runtimechannelactivation.ExecutionLeaseFromContext(runtimechannelactivation.WithoutExecutionLease(receiver.Context)); retained {
+		t.Fatal("child receiver could not clear inherited channel execution authority")
 	}
 }
 

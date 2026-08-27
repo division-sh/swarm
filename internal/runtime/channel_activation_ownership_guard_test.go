@@ -105,8 +105,8 @@ func TestChannelActivationExecutionConsumersUseCanonicalOwner(t *testing.T) {
 	checks := map[string][]string{
 		"internal/runtime/mcp/gateway.go":              {"AcquireToolDefinitionsForActorInContext"},
 		"internal/runtime/tools/channel_runtime.go":    {"channelActivationPresentationFromContext", "RuntimeOperation"},
-		"internal/runtime/pipeline/coordinator.go":     {"AcquireActivityOperation"},
-		"internal/runtime/pipeline/activity_engine.go": {"ChannelActivationGeneration"},
+		"internal/runtime/pipeline/coordinator.go":     {"AcquireActivityOperation", "BorrowActivityOperation"},
+		"internal/runtime/pipeline/activity_engine.go": {"ChannelActivationGeneration", "WithoutExecutionLease"},
 		"internal/runtime/tools/executor.go":           {"AcquireToolDefinitionsForActorInContext", "AcquirePresentation"},
 		"internal/runtime/context_manager.go":          {"ReplaceChannelActivationsContext", "AcquireChannelActivationPublication"},
 		"internal/serveapp/public_ingress.go":          {"AcquireChannelActivationPublication"},
