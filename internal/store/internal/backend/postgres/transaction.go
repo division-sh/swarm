@@ -14,7 +14,7 @@ func (b *Backend) RunTransaction(ctx context.Context, operation func(context.Con
 
 // RunReadTransaction owns one caller-scoped, transactionally consistent read.
 func (b *Backend) RunReadTransaction(ctx context.Context, operation func(context.Context, *sql.Tx) error) error {
-	return b.runTransaction(ctx, &sql.TxOptions{ReadOnly: true}, operation)
+	return b.runTransaction(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true}, operation)
 }
 
 func (b *Backend) runTransaction(ctx context.Context, opts *sql.TxOptions, operation func(context.Context, *sql.Tx) error) (err error) {
