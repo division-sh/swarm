@@ -235,6 +235,30 @@ func TestBuildShowsTemplateInstanceRouteIdentityAndProjection(t *testing.T) {
 	}
 }
 
+func TestBuildShowsDistinctProducerAndReceiverSchemasForIntrinsicProjection(t *testing.T) {
+	repoRoot := canonicalrouting.RepoRoot(t)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
+		repoRoot,
+		canonicalrouting.ExampleRoot(t, canonicalrouting.TemplateCreateMintedKey),
+		runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+	)
+	if err != nil {
+		t.Fatalf("load generated-key artifact: %v", err)
+	}
+	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	validator := flowByID(t, view, "validator")
+	if len(validator.InputPins) != 1 {
+		t.Fatalf("validator input pins = %#v, want one", validator.InputPins)
+	}
+	pin := validator.InputPins[0]
+	if pin.ProducerSchemaDigest == "" || pin.ReceiverSchemaDigest == "" || pin.ProducerSchemaDigest == pin.ReceiverSchemaDigest {
+		t.Fatalf("validator schema roles = producer:%q receiver:%q, want distinct immutable digests", pin.ProducerSchemaDigest, pin.ReceiverSchemaDigest)
+	}
+}
+
 func TestBuildDiagnosticsPreservesRemediationAndEvidence(t *testing.T) {
 	report := runtimebootverify.Report{}
 	report.Add(runtimebootverify.Finding{

@@ -2368,6 +2368,59 @@ func TestW2RejectsNullEmptyAndRedundantPinForms(t *testing.T) {
 	}
 }
 
+func TestW2RejectsNonExactAndBlankMappingKeysAtEveryLayer(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		raw     string
+		project bool
+	}{
+		{name: "flow pins surrounding", raw: "pins:\n  \" inputs \":\n    events: [work.requested]\n"},
+		{name: "flow pins blank", raw: "pins:\n  \" \": {}\n"},
+		{name: "input direction surrounding", raw: "pins:\n  inputs:\n    \" events \": [work.requested]\n"},
+		{name: "input direction blank", raw: "pins:\n  inputs:\n    \" \": [work.requested]\n"},
+		{name: "input event surrounding", raw: "pins:\n  inputs:\n    events:\n      - \" event \": work.requested\n        source: external\n"},
+		{name: "input event blank", raw: "pins:\n  inputs:\n    events:\n      - \" \": ignored\n        event: work.requested\n        source: external\n"},
+		{name: "output event surrounding", raw: "pins:\n  outputs:\n    events:\n      - event: work.completed\n        \" sink \": harness\n"},
+		{name: "output event blank", raw: "pins:\n  outputs:\n    events:\n      - \" \": ignored\n        event: work.completed\n        sink: harness\n"},
+		{name: "resolution surrounding", raw: "pins:\n  inputs:\n    events:\n      - event: work.requested\n        resolution:\n          \" mode \": create\n"},
+		{name: "resolution blank", raw: "pins:\n  inputs:\n    events:\n      - event: work.requested\n        resolution:\n          \" \": ignored\n          mode: create\n"},
+		{name: "connect surrounding", project: true, raw: "name: hostile-connect\nconnect:\n  - \" event \": work.requested\n    from: producer\n    to: consumer\n"},
+		{name: "connect blank", project: true, raw: "name: hostile-connect\nconnect:\n  - \" \": ignored\n    event: work.requested\n    from: producer\n    to: consumer\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var err error
+			if tc.project {
+				var project ProjectPackageDocument
+				err = yaml.Unmarshal([]byte(tc.raw), &project)
+			} else {
+				var schema FlowSchemaDocument
+				err = yaml.Unmarshal([]byte(tc.raw), &schema)
+			}
+			if err == nil || !strings.Contains(err.Error(), "must be one exact non-empty canonical spelling") {
+				t.Fatalf("yaml.Unmarshal error = %v, want byte-exact W2 key rejection", err)
+			}
+		})
+	}
+}
+
+func TestW2LoaderRejectsResolutionFromOutsideInstanceSelectionModes(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	for _, tc := range []struct {
+		name string
+		root func(testing.TB) string
+	}{
+		{name: "fan-in", root: canonicalrouting.CopyFanInWithInertFrom},
+		{name: "reply", root: canonicalrouting.CopyTemplateReplyWithInertFrom},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := LoadWorkflowContractBundleWithOverrides(repo, tc.root(t), DefaultPlatformSpecFile(repo))
+			if err == nil || !strings.Contains(err.Error(), "may only declare") {
+				t.Fatalf("bundle load error = %v, want %s resolution.from rejection", err, tc.name)
+			}
+		})
+	}
+}
+
 func TestSystemNodeContractDecode_PreservesSupportedTopLevelFields(t *testing.T) {
 	var node SystemNodeContract
 	if err := yaml.Unmarshal([]byte(`

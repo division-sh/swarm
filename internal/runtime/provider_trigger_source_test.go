@@ -6,10 +6,12 @@ import (
 	"testing"
 
 	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/packadmission"
 	"github.com/division-sh/swarm/internal/providertriggers"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestSourceWithProviderTriggerEventsImportsEffectivePackSchemasWithoutAuthoredOwnership(t *testing.T) {
@@ -373,7 +375,7 @@ func TestW2ProviderTriggerImportBindsCompiledInputPinOnce(t *testing.T) {
 	if !ok {
 		t.Fatal("base provider input pin is unavailable")
 	}
-	if _, ownsSchema := basePin.EventSchema(); ownsSchema {
+	if _, ownsSchema := basePin.ProducerEventSchema(); ownsSchema {
 		t.Fatal("provider input pin owned a schema before the provider catalog was admitted")
 	}
 
@@ -385,7 +387,7 @@ func TestW2ProviderTriggerImportBindsCompiledInputPinOnce(t *testing.T) {
 	if !ok {
 		t.Fatal("provider input pin is unavailable after catalog admission")
 	}
-	schema, ownsSchema := bound.EventSchema()
+	schema, ownsSchema := bound.ProducerEventSchema()
 	if !ownsSchema || schema.Classification() != runtimecontracts.CompiledEventSchemaImported || schema.EventName() != bound.EventType() {
 		t.Fatalf("bound provider input schema = (%#v, %v), pin=%#v", schema, ownsSchema, bound)
 	}
@@ -401,11 +403,123 @@ func TestW2ProviderTriggerImportBindsCompiledInputPinOnce(t *testing.T) {
 	}
 	acceptance := schema.AcceptanceSchema()
 	acceptance["required"] = []string{"changed"}
-	againSchema, _ := again.EventSchema()
+	againSchema, _ := again.ProducerEventSchema()
 	required, ok := againSchema.AcceptanceSchema()["required"].([]string)
 	if !ok || strings.Join(required, ",") == "changed" {
 		t.Fatal("compiled provider schema readback mutation leaked into the owner")
 	}
+}
+
+func TestW2ProviderTriggerImportBindsIntrinsicProjectionAfterProducerSchema(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mint canonicalrouting.CreateMint
+	}{
+		{name: "generated_uuid", mint: canonicalrouting.CreateMintUUID},
+		{name: "event_id", mint: canonicalrouting.CreateMintEventID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source, catalog := importedSyntheticProjectionSource(t, tc.mint, false)
+			flowID, basePin := importedSyntheticProjectionPin(t, source)
+			if _, present := basePin.ProducerEventSchema(); present {
+				t.Fatal("schema-only provider pin bound producer schema before catalog composition")
+			}
+			if _, present := basePin.ReceiverEventSchema(); present {
+				t.Fatal("schema-only provider pin derived receiver schema before producer binding")
+			}
+			projection, present := basePin.Projection()
+			if !present || projection.Field != "chat_id" {
+				t.Fatalf("staged intrinsic projection = (%#v, %t)", projection, present)
+			}
+
+			wrapped, err := SourceWithProviderTriggerEvents(source, catalog)
+			if err != nil {
+				t.Fatalf("SourceWithProviderTriggerEvents: %v", err)
+			}
+			bound, ok := wrapped.FlowInputEventPin(flowID, "inbound.telegram.text_message")
+			if !ok {
+				t.Fatal("bound schema-only provider input pin is unavailable")
+			}
+			producer, producerOK := bound.ProducerEventSchema()
+			receiver, receiverOK := bound.ReceiverEventSchema()
+			if !producerOK || !receiverOK || producer.Classification() != runtimecontracts.CompiledEventSchemaImported {
+				t.Fatalf("bound schema roles = producer:(%#v,%t) receiver:(%#v,%t)", producer, producerOK, receiver, receiverOK)
+			}
+			if producer.AcceptanceSchemaDigest() == receiver.AcceptanceSchemaDigest() || !compiledSchemaHasField(receiver, "chat_id") || compiledSchemaHasField(producer, "chat_id") {
+				t.Fatalf("bound schema roles did not preserve producer and projected receiver: producer=%#v receiver=%#v", producer.Fields(), receiver.Fields())
+			}
+			graph := runtimepinrouting.CompileConnectGraph(wrapped)
+			if issues := graph.Issues(); len(issues) != 0 {
+				t.Fatalf("provider target-free route issues = %#v", issues)
+			}
+			var matched *runtimepinrouting.ConnectRoutePlanReadback
+			for _, plan := range graph.Plans() {
+				readback := plan.Readback()
+				if readback.Receiver.FlowID == flowID && readback.Receiver.LocalEvent == "inbound.telegram.text_message" {
+					matched = &readback
+					break
+				}
+			}
+			if matched == nil || matched.ProducerEvent == nil || matched.ReceiverEvent == nil || matched.ProducerEvent.AcceptanceSchemaDigest == matched.ReceiverEvent.AcceptanceSchemaDigest {
+				t.Fatalf("schema-only provider target-free plan = %#v, want distinct producer/receiver evidence", matched)
+			}
+		})
+	}
+}
+
+func TestW2ProviderTriggerImportRejectsIntrinsicProjectionCollisionAtBinding(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mint canonicalrouting.CreateMint
+	}{
+		{name: "generated_uuid", mint: canonicalrouting.CreateMintUUID},
+		{name: "event_id", mint: canonicalrouting.CreateMintEventID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source, catalog := importedSyntheticProjectionSource(t, tc.mint, true)
+			if _, err := SourceWithProviderTriggerEvents(source, catalog); err == nil || !strings.Contains(err.Error(), "field conversation_reference conflicts with receiver-owned resolution projection") {
+				t.Fatalf("SourceWithProviderTriggerEvents error = %v, want imported projection collision", err)
+			}
+		})
+	}
+}
+
+func importedSyntheticProjectionSource(t testing.TB, mint canonicalrouting.CreateMint, collision bool) (semanticview.Source, *providertriggers.CatalogSnapshot) {
+	t.Helper()
+	repoRoot := canonicalrouting.RepoRoot(t)
+	root := canonicalrouting.CopyTelegramAgentImportedSyntheticProjection(t, mint, collision)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOptions(
+		repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot),
+		runtimecontracts.WorkflowContractLoadOptions{AdmitPackInventory: packadmission.AdmitInventory},
+	)
+	if err != nil {
+		t.Fatalf("load schema-only imported projection fixture: %v", err)
+	}
+	projection, err := packadmission.FromBundle(bundle)
+	if err != nil {
+		t.Fatalf("load provider-trigger catalog: %v", err)
+	}
+	return semanticview.Wrap(bundle), projection.ProviderTriggers
+}
+
+func importedSyntheticProjectionPin(t testing.TB, source semanticview.Source) (string, runtimecontracts.CompiledFlowInputPin) {
+	t.Helper()
+	for _, scope := range source.FlowScopes() {
+		if pin, ok := source.FlowInputEventPin(scope.ID, "inbound.telegram.text_message"); ok {
+			return scope.ID, pin
+		}
+	}
+	t.Fatal("schema-only provider input pin is unavailable")
+	return "", runtimecontracts.CompiledFlowInputPin{}
+}
+
+func compiledSchemaHasField(schema runtimecontracts.CompiledEventSchema, field string) bool {
+	for _, candidate := range schema.Fields() {
+		if candidate.Name() == field {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSourceWithProviderTriggerEventsRebuildsOnCatalogGenerationChange(t *testing.T) {

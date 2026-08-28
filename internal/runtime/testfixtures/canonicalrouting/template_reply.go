@@ -39,6 +39,14 @@ func CopyTemplateReplyVariant(t testing.TB, opts TemplateReplyVariantOptions) st
 	return root
 }
 
+func CopyTemplateReplyWithInertFrom(t testing.TB) string {
+	t.Helper()
+	root := CopyExample(t, TemplateReply)
+	applyClosedReplacement(t, filepath.Join(root, "flows", "requester", "schema.yaml"),
+		"          mode: reply", "          mode: reply\n          from: payload.ignored")
+	return root
+}
+
 func applyTemplateReplyExplicitCorrelation(t testing.TB, root string) {
 	t.Helper()
 	requesterSchema := filepath.Join(root, "flows", "requester", "schema.yaml")

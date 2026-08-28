@@ -258,7 +258,8 @@ type InputPinView struct {
 	ResolutionSingleton      string   `json:"resolution_singleton,omitempty"`
 	ResolutionRepliesTo      string   `json:"resolution_replies_to,omitempty"`
 	ResolutionCorrelationKey string   `json:"resolution_correlation_key,omitempty"`
-	SchemaDigest             string   `json:"schema_digest,omitempty"`
+	ProducerSchemaDigest     string   `json:"producer_schema_digest,omitempty"`
+	ReceiverSchemaDigest     string   `json:"receiver_schema_digest,omitempty"`
 	BusinessKey              string   `json:"business_key,omitempty"`
 	PinDigest                string   `json:"pin_digest"`
 	SourceFile               string   `json:"source_file,omitempty"`
@@ -1040,8 +1041,9 @@ func inputPinViews(source semanticview.Source, flowID string, pins []runtimecont
 	for _, pin := range pins {
 		resolution := pin.Resolution()
 		provenance := pin.Provenance()
-		schema, _ := pin.EventSchema()
-		businessKey, _ := schema.BusinessKey()
+		producerSchema, _ := pin.ProducerEventSchema()
+		receiverSchema, _ := pin.ReceiverEventSchema()
+		businessKey, _ := producerSchema.BusinessKey()
 		item := InputPinView{
 			Event: pin.EventType(), ResolvedEvent: source.ResolveFlowEventReference(flowID, pin.EventType()),
 			FlowPath: pin.FlowPath(), Source: runtimecontracts.FlowInputPinSourceCode(pin.Source()),
@@ -1049,7 +1051,8 @@ func inputPinViews(source semanticview.Source, flowID string, pins []runtimecont
 			ResolutionAggregation: resolution.Aggregation, ResolutionWindow: resolution.Window,
 			ResolutionDedupBy: resolution.DedupBy, ResolutionSingleton: resolution.Singleton,
 			ResolutionRepliesTo: resolution.RepliesTo, ResolutionCorrelationKey: resolution.CorrelationKey,
-			SchemaDigest: schema.AcceptanceSchemaDigest(), BusinessKey: businessKey.Field, PinDigest: pin.Digest(),
+			ProducerSchemaDigest: producerSchema.AcceptanceSchemaDigest(), ReceiverSchemaDigest: receiverSchema.AcceptanceSchemaDigest(),
+			BusinessKey: businessKey.Field, PinDigest: pin.Digest(),
 			SourceFile: provenance.SourceFile, SourceLine: provenance.SourceLine, SourceColumn: provenance.SourceColumn,
 		}
 		out = append(out, item)

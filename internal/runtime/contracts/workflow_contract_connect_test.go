@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -59,5 +60,30 @@ func TestW2CanonicalPinAndPermissionEvidenceIgnoresSetAuthorOrderAndIsImmutable(
 	fields[0] = "entity.changed_again"
 	if got := permissionsA.Fields(); !reflect.DeepEqual(got, []string{"entity.status", "entity.updated_at"}) {
 		t.Fatalf("permission readback mutation escaped into compiled owner: %#v", got)
+	}
+}
+
+func TestW2CompiledResolutionRejectsFieldsOutsideClosedMode(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		resolution FlowInputPinResolution
+	}{
+		{name: "fan-in from", resolution: FlowInputPinResolution{
+			Mode: FlowInputResolutionModeFanIn, From: "payload.ignored", Aggregation: "stream",
+			Window: "payload.batch_id", DedupBy: []string{"event.id"}, Singleton: "collector",
+		}},
+		{name: "reply from", resolution: FlowInputPinResolution{
+			Mode: FlowInputResolutionModeReply, From: "payload.ignored", RepliesTo: "work.requested",
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := CompileFlowInputPin(
+				FlowPinCompilationContext{FlowID: "collector", FlowPath: "collector", SourceFile: "flows/collector/schema.yaml"},
+				FlowInputEventPin{Event: "work.completed", Resolution: tc.resolution},
+			)
+			if err == nil || !strings.Contains(err.Error(), "may only declare") {
+				t.Fatalf("CompileFlowInputPin error = %v, want closed-mode rejection", err)
+			}
+		})
 	}
 }
