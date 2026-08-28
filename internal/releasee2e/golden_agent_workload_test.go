@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/lib/pq"
 	"gopkg.in/yaml.v3"
 )
@@ -683,22 +684,7 @@ type goldenEvent struct {
 	DeadLetters []json.RawMessage     `json:"dead_letters"`
 }
 
-type goldenRuntimeLog struct {
-	LogID         string `json:"log_id"`
-	TS            string `json:"ts"`
-	Level         string `json:"level"`
-	Component     string `json:"component"`
-	Source        string `json:"source"`
-	RunID         string `json:"run_id"`
-	EntityID      string `json:"entity_id"`
-	SessionID     string `json:"session_id"`
-	Message       string `json:"message"`
-	EventID       string `json:"event_id"`
-	Action        string `json:"action"`
-	EventType     string `json:"event_type"`
-	ParentEventID string `json:"parent_event_id"`
-	AgentID       string `json:"agent_id"`
-}
+type goldenRuntimeLog = operatorread.OperatorRuntimeLogEntry
 
 func waitForGoldenPreRestartRuntimeLog(t *testing.T, rpc *releaseRPCClient, runID string, deadline time.Duration) goldenRuntimeLog {
 	t.Helper()
