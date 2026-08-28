@@ -112,13 +112,46 @@ func TestConnectedOutputBindingCompilesProducerSchemaIntoReceiverPin(t *testing.
 		if pin.EventType() != "work.ready" {
 			continue
 		}
-		schema, ok := pin.EventSchema()
+		schema, ok := pin.ProducerEventSchema()
 		if !ok || schema.EventName() != "producer/work.ready" {
 			t.Fatalf("work.ready receiver schema = %#v, found=%t", schema, ok)
 		}
 		return
 	}
 	t.Fatal("consumer work.ready input pin not found")
+}
+
+func TestIntrinsicProjectionKeepsProducerAndReceiverSchemasDistinct(t *testing.T) {
+	repo := repoRootForContractsTest(t)
+	bundle, err := LoadWorkflowContractBundleWithOverrides(
+		repo,
+		canonicalrouting.ExampleRoot(t, canonicalrouting.TemplateCreateMintedKey),
+		DefaultPlatformSpecFile(repo),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin, ok := bundle.FlowInputEventPin("validator", "validation.requested")
+	if !ok {
+		t.Fatal("validator input pin is unavailable")
+	}
+	producer, producerOK := pin.ProducerEventSchema()
+	receiver, receiverOK := pin.ReceiverEventSchema()
+	if !producerOK || !receiverOK || producer.AcceptanceSchemaDigest() == receiver.AcceptanceSchemaDigest() {
+		t.Fatalf("compiled schema roles = producer:(%#v,%t) receiver:(%#v,%t)", producer, producerOK, receiver, receiverOK)
+	}
+	for _, field := range producer.Fields() {
+		if field.Name() == "validation_case_id" {
+			t.Fatal("receiver-owned projection leaked into producer declaration schema")
+		}
+	}
+	foundProjection := false
+	for _, field := range receiver.Fields() {
+		foundProjection = foundProjection || field.Name() == "validation_case_id"
+	}
+	if !foundProjection {
+		t.Fatal("receiver acceptance schema is missing validation_case_id projection")
+	}
 }
 
 func TestDeclaredLocalEventReferenceFastPathMatchesCanonicalScopeResolution(t *testing.T) {

@@ -202,12 +202,12 @@ func validateFlowPinsNode(node *yaml.Node) error {
 	if presence != yamlsource.PresenceMapping {
 		return fmt.Errorf("flow pins must be a non-empty mapping")
 	}
-	if err := validateUniqueNormalizedMappingKeys(node, "flow pins"); err != nil {
+	if err := validateExactW2MappingKeys(node, "flow pins"); err != nil {
 		return err
 	}
 	allowed := map[string]struct{}{"inputs": {}, "outputs": {}}
 	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
+		key := node.Content[i].Value
 		if _, ok := allowed[key]; !ok {
 			return NewUndefinedFieldDiagnostic("flow pins", key, allowed)
 		}
@@ -233,11 +233,11 @@ func validateFlowPinDirectionNode(node *yaml.Node, direction string, allowed map
 	if presence != yamlsource.PresenceMapping {
 		return fmt.Errorf("flow %s pins must be a non-empty mapping", direction)
 	}
-	if err := validateUniqueNormalizedMappingKeys(node, "flow "+direction+" pins"); err != nil {
+	if err := validateExactW2MappingKeys(node, "flow "+direction+" pins"); err != nil {
 		return err
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
+		key := node.Content[i].Value
 		if _, ok := allowed[key]; !ok {
 			return NewUndefinedFieldDiagnostic("flow "+direction+" pins", key, allowed)
 		}
@@ -362,12 +362,12 @@ func decodeFlowInputPinEventNode(node *yaml.Node) (FlowInputEventPin, error) {
 	if presence != yamlsource.PresenceMapping {
 		return FlowInputEventPin{}, fmt.Errorf("flow input event pin must be a string or mapping")
 	}
-	if err := validateUniqueNormalizedMappingKeys(node, "flow input event pin"); err != nil {
+	if err := validateExactW2MappingKeys(node, "flow input event pin"); err != nil {
 		return FlowInputEventPin{}, err
 	}
 	out := FlowInputEventPin{sourceLine: node.Line, sourceCol: node.Column}
 	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
+		key := node.Content[i].Value
 		value := node.Content[i+1]
 		switch key {
 		case "name":
@@ -424,12 +424,12 @@ func decodeFlowOutputPinEventNode(node *yaml.Node) (FlowOutputEventPin, error) {
 	if presence != yamlsource.PresenceMapping {
 		return FlowOutputEventPin{}, fmt.Errorf("flow output event pin must be a string or mapping")
 	}
-	if err := validateUniqueNormalizedMappingKeys(node, "flow output event pin"); err != nil {
+	if err := validateExactW2MappingKeys(node, "flow output event pin"); err != nil {
 		return FlowOutputEventPin{}, err
 	}
 	out := FlowOutputEventPin{sourceLine: node.Line, sourceCol: node.Column}
 	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
+		key := node.Content[i].Value
 		value := node.Content[i+1]
 		switch key {
 		case "name":
@@ -495,16 +495,14 @@ func (r *FlowInputPinResolution) UnmarshalYAML(node *yaml.Node) error {
 	if yamlsource.ValueFromNode(node).Presence() != yamlsource.PresenceMapping {
 		return fmt.Errorf("input pin resolution must be a non-empty mapping")
 	}
-	if err := validateUniqueNormalizedMappingKeys(node, "input event pin resolution"); err != nil {
+	if err := validateExactW2MappingKeys(node, "input event pin resolution"); err != nil {
 		return err
 	}
 	var out FlowInputPinResolution
 	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
+		key := node.Content[i].Value
 		value := node.Content[i+1]
 		switch key {
-		case "":
-			continue
 		case "mode":
 			raw, err := decodeExactNonEmptyFlowPinScalar(value, "resolution.mode")
 			if err != nil {
@@ -566,6 +564,24 @@ func (r *FlowInputPinResolution) UnmarshalYAML(node *yaml.Node) error {
 		}
 	}
 	*r = out
+	return nil
+}
+
+func validateExactW2MappingKeys(node *yaml.Node, owner string) error {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(node.Content)/2)
+	for index := 0; index+1 < len(node.Content); index += 2 {
+		key := node.Content[index].Value
+		if key == "" || key != strings.TrimSpace(key) {
+			return fmt.Errorf("%s key %q must be one exact non-empty canonical spelling", owner, key)
+		}
+		if _, duplicate := seen[key]; duplicate {
+			return fmt.Errorf("%s repeats key %q", owner, key)
+		}
+		seen[key] = struct{}{}
+	}
 	return nil
 }
 

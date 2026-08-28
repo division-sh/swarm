@@ -210,7 +210,7 @@ func TestRun_FailsClosedForInvalidCreateInputResolution(t *testing.T) {
 			if tc.opts.mode == runtimecontracts.FlowInputResolutionModeFanOut {
 				repoRoot := repoRootForBootverifyTest(t)
 				_, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-				if err == nil || !strings.Contains(err.Error(), "generated.uuid is only valid for resolution mode create") {
+				if err == nil || !strings.Contains(err.Error(), "mode fan-out may only declare mode") {
 					t.Fatalf("expected immutable pin compilation rejection, got %v", err)
 				}
 				return
@@ -221,6 +221,23 @@ func TestRun_FailsClosedForInvalidCreateInputResolution(t *testing.T) {
 
 			if !reportContains(report.Errors(), "composition_connect_validation", tc.want) {
 				t.Fatalf("expected composition_connect_validation %q, got %#v", tc.want, report.Errors())
+			}
+		})
+	}
+}
+
+func TestCanonicalResolutionAdmissionBlocksOutOfModeFromBeforeBootVerification(t *testing.T) {
+	repoRoot := repoRootForBootverifyTest(t)
+	for _, tc := range []struct {
+		name string
+		root func(testing.TB) string
+	}{
+		{name: "fan-in", root: canonicalrouting.CopyFanInWithInertFrom},
+		{name: "reply", root: canonicalrouting.CopyTemplateReplyWithInertFrom},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, tc.root(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot)); err == nil || !strings.Contains(err.Error(), "may only declare") {
+				t.Fatalf("bundle load error = %v, want canonical rejection before boot verification", err)
 			}
 		})
 	}

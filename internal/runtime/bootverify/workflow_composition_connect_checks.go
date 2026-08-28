@@ -92,7 +92,7 @@ func validateReplyInputPinResolution(source semanticview.Source, flowID string, 
 	resolution := pin.Resolution()
 	location := flowID
 	var findings []Finding
-	if resolution.Aggregation != "" || resolution.Window != "" || len(resolution.DedupBy) > 0 || resolution.Singleton != "" {
+	if resolution.From != "" || resolution.Aggregation != "" || resolution.Window != "" || len(resolution.DedupBy) > 0 || resolution.Singleton != "" {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", "resolution mode reply may only declare replies_to and correlation_key", location))
 	}
 	requestPinName := strings.TrimSpace(resolution.RepliesTo)
@@ -131,7 +131,7 @@ func validateFanInInputPinResolution(source semanticview.Source, flowID string, 
 	resolution := pin.Resolution()
 	aggregation := strings.ToLower(strings.TrimSpace(resolution.Aggregation))
 	location := flowID
-	if resolution.RepliesTo != "" || resolution.CorrelationKey != "" {
+	if resolution.From != "" || resolution.RepliesTo != "" || resolution.CorrelationKey != "" {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", "resolution mode fan-in may only declare aggregation, window, dedup_by, and singleton", location))
 	}
 	if aggregation != "stream" && aggregation != "barrier" {
@@ -355,7 +355,7 @@ func validateCanonicalInstanceInputPinResolution(source semanticview.Source, flo
 	modeText := runtimecontracts.FlowInputResolutionModeCode(mode)
 	location := flowID
 	if resolution.Aggregation != "" || resolution.Window != "" || len(resolution.DedupBy) > 0 || resolution.Singleton != "" || resolution.RepliesTo != "" || resolution.CorrelationKey != "" {
-		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode %s may only declare mode and carries", modeText), location))
+		findings = append(findings, inputPinResolutionFinding(flowID, pin, "instance_resolution_invalid", fmt.Sprintf("resolution mode %s may only declare mode and from", modeText), location))
 	}
 	bundle, ok := semanticview.Bundle(source)
 	if !ok || bundle == nil {

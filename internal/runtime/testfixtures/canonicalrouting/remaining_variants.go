@@ -516,5 +516,43 @@ func CopyProviderRollbackSyntheticCollision(t testing.TB, mint CreateMint) strin
 	applyClosedReplacement(t, filepath.Join(root, "flows", "consumer", "schema.yaml"),
 		"        resolution: {mode: select-or-create}",
 		"        resolution: {mode: create, from: "+source+"}")
+	applyClosedReplacement(t, filepath.Join(root, "flows", "consumer", "entities.yaml"),
+		"    type: text", "    type: uuid")
+	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
+		"  chat_id: text", "  chat_id: uuid")
+	return root
+}
+
+func CopyProviderRollbackSyntheticProjection(t testing.TB, mint CreateMint) string {
+	t.Helper()
+	root := CopyProviderRollbackSyntheticCollision(t, mint)
+	applyClosedReplacement(t, filepath.Join(root, "events.yaml"),
+		"  chat_id: uuid", "  message: text")
+	return root
+}
+
+func CopyTelegramAgentImportedSyntheticProjection(t testing.TB, mint CreateMint, collision bool) string {
+	t.Helper()
+	root := CopyExample(t, TelegramAgent)
+	botRoot := filepath.Join(root, "bot")
+	var source string
+	switch mint {
+	case CreateMintUUID:
+		source = "generated.uuid"
+	case CreateMintEventID:
+		source = "event.id"
+	default:
+		t.Fatalf("imported synthetic projection requires UUID or event-ID source, got %d", mint)
+	}
+	field := "chat_id"
+	if collision {
+		field = "conversation_reference"
+	}
+	applyClosedReplacement(t, filepath.Join(botRoot, "flows", "telegram-chat", "schema.yaml"),
+		"instance: conversation_reference", "instance: "+field)
+	applyClosedReplacement(t, filepath.Join(botRoot, "flows", "telegram-chat", "schema.yaml"),
+		"          mode: select-or-create", "          mode: create\n          from: "+source)
+	applyClosedReplacement(t, filepath.Join(botRoot, "flows", "telegram-chat", "entities.yaml"),
+		"  conversation_reference:\n    type: text", "  "+field+":\n    type: uuid")
 	return root
 }

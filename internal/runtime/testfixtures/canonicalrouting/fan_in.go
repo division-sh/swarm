@@ -96,3 +96,11 @@ func ApplyFanInNegativeMutation(t testing.TB, root string, mutation FanInNegativ
 		t.Fatalf("unsupported fan-in negative mutation %d", mutation)
 	}
 }
+
+func CopyFanInWithInertFrom(t testing.TB) string {
+	t.Helper()
+	root := CopyExample(t, FanInStream)
+	applyClosedReplacement(t, filepath.Join(root, "flows", "portfolio", "default", "schema.yaml"),
+		"          mode: fan-in", "          mode: fan-in\n          from: payload.ignored")
+	return root
+}

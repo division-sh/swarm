@@ -175,7 +175,7 @@ func bindProviderTriggerInputPins(source semanticview.Source, compiledByProject 
 		compiledSchemas := compiledByProject[normalizedProviderTriggerProjectKey(projectKey)]
 		bound := append([]runtimecontracts.CompiledFlowInputPin(nil), pins...)
 		for index, pin := range bound {
-			if _, exists := pin.EventSchema(); exists {
+			if _, exists := pin.ProducerEventSchema(); exists {
 				continue
 			}
 			schema, imported := compiledSchemas[pin.EventType()]

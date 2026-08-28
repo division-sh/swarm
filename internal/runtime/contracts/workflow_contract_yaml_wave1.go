@@ -835,18 +835,14 @@ func (c *FlowPackageConnect) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind != yaml.MappingNode {
 		return fmt.Errorf("connect entry must be a mapping")
 	}
+	if err := validateExactW2MappingKeys(node, "connect entry"); err != nil {
+		return err
+	}
 	out := FlowPackageConnect{SourceLine: node.Line}
-	seen := map[string]struct{}{}
 	for i := 0; i+1 < len(node.Content); i += 2 {
-		key := strings.TrimSpace(node.Content[i].Value)
+		key := node.Content[i].Value
 		value := node.Content[i+1]
-		if _, duplicate := seen[key]; duplicate {
-			return fmt.Errorf("connect entry repeats key %q", key)
-		}
-		seen[key] = struct{}{}
 		switch key {
-		case "":
-			continue
 		case "event":
 			decoded, err := decodeExactNonEmptyFlowPinScalar(value, "connect.event")
 			if err != nil {

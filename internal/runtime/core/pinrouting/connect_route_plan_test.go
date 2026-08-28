@@ -1191,14 +1191,39 @@ func TestLowerTargetFreeInputRoutePlansRejectsAuthoritativeSourceTypeMismatch(t 
 	}
 }
 
+func TestLowerPublicInputRoutePlanAcceptsSyntheticProjectionWithDistinctSchemaEvidence(t *testing.T) {
+	for _, tc := range targetFreeSyntheticProjectionCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			source, endpoint := targetFreeSyntheticProjectionFixture(t, tc.mint, false)
+			plan, issue := LowerPublicInputRoutePlan(source, endpoint)
+			if !issue.Failure.Empty() {
+				t.Fatalf("public input issue = %#v, want accepted synthetic projection", issue)
+			}
+			assertTargetFreeSchemaRoles(t, plan)
+		})
+	}
+}
+
+func TestLowerTargetFreeInputRoutePlansAcceptsSyntheticProjectionWithDistinctSchemaEvidence(t *testing.T) {
+	for _, tc := range targetFreeSyntheticProjectionCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			source, _ := targetFreeSyntheticProjectionFixture(t, tc.mint, false)
+			authorization := runtimeprovideroutput.MustAuthorization(
+				"telegram", "inbound.telegram.text_message", "provider.telegram", "1.0.0",
+				"sha256:"+strings.Repeat("a", 64),
+				triggergeneration.FromCanonicalBytes([]byte("target-free-synthetic-positive")),
+			)
+			plans, issues := lowerTargetFreeInputRoutePlans(source, []runtimeprovideroutput.Authorization{authorization})
+			if len(issues) != 0 || len(plans) != 1 {
+				t.Fatalf("provider plans/issues = %#v/%#v, want one accepted synthetic projection", plans, issues)
+			}
+			assertTargetFreeSchemaRoles(t, plans[0])
+		})
+	}
+}
+
 func TestLowerPublicInputRoutePlanRejectsSyntheticProjectionCollision(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		mint canonicalrouting.CreateMint
-	}{
-		{name: "generated_uuid", mint: canonicalrouting.CreateMintUUID},
-		{name: "event_id", mint: canonicalrouting.CreateMintEventID},
-	} {
+	for _, tc := range targetFreeSyntheticProjectionCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			source, endpoint := targetFreeSyntheticCollisionFixture(t, tc.mint)
 			_, issue := LowerPublicInputRoutePlan(source, endpoint)
@@ -1210,13 +1235,7 @@ func TestLowerPublicInputRoutePlanRejectsSyntheticProjectionCollision(t *testing
 }
 
 func TestLowerTargetFreeInputRoutePlansRejectsSyntheticProjectionCollision(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		mint canonicalrouting.CreateMint
-	}{
-		{name: "generated_uuid", mint: canonicalrouting.CreateMintUUID},
-		{name: "event_id", mint: canonicalrouting.CreateMintEventID},
-	} {
+	for _, tc := range targetFreeSyntheticProjectionCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			source, _ := targetFreeSyntheticCollisionFixture(t, tc.mint)
 			authorization := runtimeprovideroutput.MustAuthorization(
@@ -1232,13 +1251,39 @@ func TestLowerTargetFreeInputRoutePlansRejectsSyntheticProjectionCollision(t *te
 	}
 }
 
-func targetFreeSyntheticCollisionFixture(t testing.TB, mint canonicalrouting.CreateMint) (semanticview.Source, semanticview.AuthoredEventEndpoint) {
+func targetFreeSyntheticProjectionCases() []struct {
+	name string
+	mint canonicalrouting.CreateMint
+} {
+	return []struct {
+		name string
+		mint canonicalrouting.CreateMint
+	}{
+		{name: "generated_uuid", mint: canonicalrouting.CreateMintUUID},
+		{name: "event_id", mint: canonicalrouting.CreateMintEventID},
+	}
+}
+
+func assertTargetFreeSchemaRoles(t testing.TB, plan ConnectRoutePlan) {
+	t.Helper()
+	if plan.producerEvent == nil || plan.receiverEvent == nil {
+		t.Fatalf("target-free schema evidence = producer:%#v receiver:%#v", plan.producerEvent, plan.receiverEvent)
+	}
+	if plan.producerEvent.acceptanceSchemaDigest == "" || plan.receiverEvent.acceptanceSchemaDigest == "" || plan.producerEvent.acceptanceSchemaDigest == plan.receiverEvent.acceptanceSchemaDigest {
+		t.Fatalf("target-free schema digests = producer:%q receiver:%q, want distinct immutable roles", plan.producerEvent.acceptanceSchemaDigest, plan.receiverEvent.acceptanceSchemaDigest)
+	}
+}
+
+func targetFreeSyntheticProjectionFixture(t testing.TB, mint canonicalrouting.CreateMint, collision bool) (semanticview.Source, semanticview.AuthoredEventEndpoint) {
 	t.Helper()
 	repoRoot := canonicalrouting.RepoRoot(t)
-	root := canonicalrouting.CopyProviderRollbackSyntheticCollision(t, mint)
+	root := canonicalrouting.CopyProviderRollbackSyntheticProjection(t, mint)
+	if collision {
+		root = canonicalrouting.CopyProviderRollbackSyntheticCollision(t, mint)
+	}
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
 	if err != nil {
-		t.Fatalf("load target-free synthetic collision artifact: %v", err)
+		t.Fatalf("load target-free synthetic projection artifact: %v", err)
 	}
 	source := semanticview.Wrap(bundle)
 	association := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint("consumer", "inbound.telegram.text_message")
@@ -1247,6 +1292,10 @@ func targetFreeSyntheticCollisionFixture(t testing.TB, mint canonicalrouting.Cre
 		t.Fatalf("resolve target-free input endpoint: %v", association.Err())
 	}
 	return source, endpoint
+}
+
+func targetFreeSyntheticCollisionFixture(t testing.TB, mint canonicalrouting.CreateMint) (semanticview.Source, semanticview.AuthoredEventEndpoint) {
+	return targetFreeSyntheticProjectionFixture(t, mint, true)
 }
 
 func TestConnectRoutePlanProductionAPIHasNoRetiredIdentityOrPolicyFacts(t *testing.T) {
@@ -1399,27 +1448,32 @@ func TestCompileConnectPlansUsesSelectOrCreateInputResolution(t *testing.T) {
 	}
 }
 
-func TestCompileConnectPlansRejectsExtraSelectResolutionFields(t *testing.T) {
+func TestCompiledPinAdmissionRejectsExtraSelectResolutionFieldsBeforeRouteLowering(t *testing.T) {
 	repoRoot, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("Getwd: %v", err)
 	}
 	repoRoot = filepath.Clean(filepath.Join(repoRoot, "..", "..", "..", ".."))
 	root := writeSelectResolutionConnectRoutePlanPackageFixtureWithExtraResolution(t, "          aggregation: stream\n")
-	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
-	if err != nil {
-		t.Fatalf("LoadWorkflowContractBundleWithOverrides: %v", err)
+	if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot)); err == nil || !strings.Contains(err.Error(), "mode select may only declare mode and from") {
+		t.Fatalf("bundle load error = %v, want canonical compiled-pin rejection before route lowering", err)
 	}
+}
 
-	plans, issues := compileConnectPlans(semanticview.Wrap(bundle))
-	if len(plans) != 0 {
-		t.Fatalf("plans = %#v, want none for invalid select resolution", plans)
-	}
-	if len(issues) != 1 {
-		t.Fatalf("issues = %#v, want one fail-closed issue", issues)
-	}
-	if issues[0].Failure != ConnectFailureInstanceResolutionInvalid || !strings.Contains(issues[0].Detail, "may only declare mode and carries") {
-		t.Fatalf("issue = %#v, want instance resolution invalid for extra select field", issues[0])
+func TestCanonicalResolutionAdmissionBlocksOutOfModeFromBeforeRouteLowering(t *testing.T) {
+	repoRoot := canonicalrouting.RepoRoot(t)
+	for _, tc := range []struct {
+		name string
+		root func(testing.TB) string
+	}{
+		{name: "fan-in", root: canonicalrouting.CopyFanInWithInertFrom},
+		{name: "reply", root: canonicalrouting.CopyTemplateReplyWithInertFrom},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, tc.root(t), runtimecontracts.DefaultPlatformSpecFile(repoRoot)); err == nil || !strings.Contains(err.Error(), "may only declare") {
+				t.Fatalf("bundle load error = %v, want canonical rejection before CompileConnectGraph", err)
+			}
+		})
 	}
 }
 

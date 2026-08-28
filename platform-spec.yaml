@@ -12174,14 +12174,21 @@ flow_model:
           or resolution choice. Missing event containers mean no pins. Null, explicit
           empty, duplicate, non-exact, qualified, wildcard, alias-bearing, carry-bearing,
           or output-key/carries entries fail at admission. Producer event declarations
-          own payload schema and business key. Receiver input resolution owns instance
-          source and mode. The compiler produces immutable defensive pin values and one
+          own payload schema and business key. Every W2 mapping key is byte-exact;
+          trimmed, blank, or otherwise alternate spellings fail rather than normalize.
+          Receiver input resolution owns instance source and mode, and every mode admits
+          only its closed field set; reply and fan-in cannot declare resolution.from.
+          The compiled input pin owns distinct immutable producer-declaration and
+          receiver-acceptance schemas. A schema-only imported pin may stage typed
+          intrinsic projection metadata before provider schema binding; binding occurs
+          once, rejects producer-field collision, derives the receiver schema, and
+          recomputes pin identity. The compiler produces immutable defensive pin values and one
           closed immutable edge containing endpoint, schema, projection, resolution,
           reply/fan-in, provenance, and digest evidence. Verify, runtime, durable claims,
           restart, retry, replay, selected fork, graph, and readback consume those values
           without authored-map fallback or reconstruction. Compiled composed edges and
           target-free public/provider input edges uniformly reject a receiver-owned
-          synthetic resolution projection when the bound event schema already declares
+          synthetic resolution projection when the bound producer schema already declares
           the receiver instance field.
         retired_on_presence:
         - pins.inputs.events[].name
