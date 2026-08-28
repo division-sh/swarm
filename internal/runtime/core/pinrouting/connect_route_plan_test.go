@@ -359,6 +359,81 @@ func TestW2CanonicalConnectPlanIdentityIgnoresTargetSetAuthorOrderAndReadbackIsI
 	}
 }
 
+func TestW2ConnectPlanIdentityIgnoresDiagnosticEventSchemaProvenance(t *testing.T) {
+	first := testW2ConnectPlanWithEventSchemaProvenance(t, "producer", "events.yaml", "worker", "events.yaml")
+	relocated := testW2ConnectPlanWithEventSchemaProvenance(t, "producer-moved", "moved/events.yaml", "worker-moved", "moved/events.yaml")
+
+	firstID, err := ConnectPlanIdentity(first)
+	if err != nil {
+		t.Fatalf("first connect plan identity: %v", err)
+	}
+	relocatedID, err := ConnectPlanIdentity(relocated)
+	if err != nil {
+		t.Fatalf("relocated connect plan identity: %v", err)
+	}
+	if firstID.Empty() || firstID.String() != relocatedID.String() {
+		t.Fatalf("connect plan identity changed with diagnostic schema provenance: %q != %q", firstID.String(), relocatedID.String())
+	}
+
+	firstReadback := first.Readback()
+	relocatedReadback := relocated.Readback()
+	if firstReadback.ProducerEvent.SourceFile != "events.yaml" || relocatedReadback.ProducerEvent.SourceFile != "moved/events.yaml" ||
+		firstReadback.ReceiverEvent.SourceFlowID != "worker" || relocatedReadback.ReceiverEvent.SourceFlowID != "worker-moved" {
+		t.Fatalf("diagnostic schema provenance was not retained in readback: first=%#v relocated=%#v", firstReadback, relocatedReadback)
+	}
+}
+
+func TestW2ConnectExecutionClaimIgnoresDiagnosticEventSchemaProvenance(t *testing.T) {
+	first := testW2ConnectPlanWithEventSchemaProvenance(t, "producer", "events.yaml", "worker", "events.yaml")
+	relocated := testW2ConnectPlanWithEventSchemaProvenance(t, "producer-moved", "moved/events.yaml", "worker-moved", "moved/events.yaml")
+	route := ConnectDeliveryRoute{
+		Recipient: events.MustNodeDeliveryRecipient(identitytest.FlowNode(t, "worker", "worker-node")),
+		Target:    events.RouteIdentity{FlowID: "worker", FlowInstance: "worker", EntityID: eventtest.UUID("worker-owner")},
+		Handler:   MustConnectReceiverHandler(identitytest.FlowNode(t, "worker", "worker-node")),
+	}
+
+	firstClaim, err := ConnectExecutionClaim(first, route)
+	if err != nil {
+		t.Fatalf("first connect execution claim: %v", err)
+	}
+	relocatedClaim, err := ConnectExecutionClaim(relocated, route)
+	if err != nil {
+		t.Fatalf("relocated connect execution claim: %v", err)
+	}
+	if firstClaim.Empty() || !firstClaim.Equal(relocatedClaim) {
+		t.Fatal("connect execution claim changed with diagnostic schema provenance")
+	}
+}
+
+func testW2ConnectPlanWithEventSchemaProvenance(t testing.TB, producerFlowID, producerFile, receiverFlowID, receiverFile string) ConnectRoutePlan {
+	t.Helper()
+	producerEvent := &connectProducerEventEvidence{
+		packageKey: ".", eventName: "work.ready", acceptanceSchemaDigest: "producer-schema-digest",
+		businessKeyField: "work_id", businessKeyType: "string", sourceFlowID: producerFlowID, sourceFile: producerFile,
+	}
+	receiverEvent := &connectProducerEventEvidence{
+		packageKey: ".", eventName: "work.ready", acceptanceSchemaDigest: "receiver-schema-digest",
+		businessKeyField: "work_id", businessKeyType: "string", sourceFlowID: receiverFlowID, sourceFile: receiverFile,
+	}
+	plan, err := newConnectRoutePlan(connectRoutePlanSpec{
+		source: newConnectRoutePlanEndpoint(
+			ConnectEndpointRoleProducer, false, "producer", "producer", runtimecontracts.FlowModeStatic,
+			"work.ready", "work.ready", "producer/work.ready",
+		).withCompiledPinDigest("source-pin-digest"),
+		receiver: newConnectRoutePlanEndpoint(
+			ConnectEndpointRoleConsumer, false, "worker", "worker", runtimecontracts.FlowModeStatic,
+			"work.ready", "work.ready", "worker/work.ready",
+		).withCompiledPinDigest("receiver-pin-digest"),
+		producerEvent: producerEvent, receiverEvent: receiverEvent,
+		targetKind: ConnectTargetKindTarget, resolutionKind: ConnectResolutionStatic,
+		target: events.RouteIdentity{FlowID: "worker", FlowInstance: "worker"},
+	})
+	if err != nil {
+		t.Fatalf("compile connect plan with diagnostic schema provenance: %v", err)
+	}
+	return plan
+}
+
 func TestW2CompiledEdgeClosedOwner(t *testing.T) {
 	source := newConnectRoutePlanEndpoint(
 		ConnectEndpointRoleProducer, true, "", "", "root", "work.ready", "work.ready", "work.ready",
