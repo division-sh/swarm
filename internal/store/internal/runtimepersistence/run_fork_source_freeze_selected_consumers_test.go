@@ -1,12 +1,9 @@
 package runtimepersistence
 
 import (
-	"context"
-	"encoding/json"
 	"testing"
 	"time"
 
-	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	storerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/google/uuid"
@@ -14,10 +11,9 @@ import (
 
 type forkedSelectedExecutionSurface interface {
 	selectedCompletionAuthorityStore
-	FailRunForkSelectedContractRuntimeExecution(context.Context, runtimeeffects.Authority, json.RawMessage) error
 }
 
-func TestForkedRunSelectedContractExecutionIssueClaimHeartbeatAndTerminalMutationsRefuse(t *testing.T) {
+func TestForkedRunSelectedContractExecutionRefusesAdmissionAndAllowsExactFinalization(t *testing.T) {
 	for _, backend := range []string{"postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var surface forkedSelectedExecutionSurface
@@ -49,9 +45,12 @@ func TestForkedRunSelectedContractExecutionIssueClaimHeartbeatAndTerminalMutatio
 			_, err = surface.ClaimRunForkSelectedContractRuntimeExecution(ctx, issued, "other-worker", time.Minute)
 			requireForkedSourceRefusal(t, "claim selected execution", err)
 			requireForkedSourceRefusal(t, "heartbeat selected execution", surface.HeartbeatRunForkSelectedContractRuntimeExecution(ctx, authority, time.Minute))
-			requireForkedSourceRefusal(t, "quiesce selected execution", surface.QuiesceRunForkSelectedContractRuntimeExecution(ctx, authority))
-			requireForkedSourceRefusal(t, "fail selected execution", surface.FailRunForkSelectedContractRuntimeExecution(ctx, authority, json.RawMessage(`{"reason":"frozen"}`)))
-			requireForkedSourceRefusal(t, "close selected execution", surface.CloseRunForkSelectedContractRuntimeExecution(ctx, issued.ExecutionID))
+			if err := surface.QuiesceRunForkSelectedContractRuntimeExecution(ctx, authority); err != nil {
+				t.Fatalf("quiesce accepted selected execution after source retirement: %v", err)
+			}
+			if err := surface.CloseRunForkSelectedContractRuntimeExecution(ctx, issued.ExecutionID); err != nil {
+				t.Fatalf("close accepted selected execution after source retirement: %v", err)
+			}
 			if current, err := surface.IsExternalEffectAuthorityCurrent(ctx, authority); err != nil || current {
 				t.Fatalf("frozen selected authority current=%v err=%v", current, err)
 			}
@@ -61,7 +60,7 @@ func TestForkedRunSelectedContractExecutionIssueClaimHeartbeatAndTerminalMutatio
 			if !fixture.sqlite {
 				query = `SELECT state FROM run_fork_selected_contract_runtime_executions WHERE execution_id = $1::uuid`
 			}
-			if err := fixture.db.QueryRowContext(ctx, query, issued.ExecutionID).Scan(&state); err != nil || state != "running" {
+			if err := fixture.db.QueryRowContext(ctx, query, issued.ExecutionID).Scan(&state); err != nil || state != "closed" {
 				t.Fatalf("frozen selected execution state = %q, %v", state, err)
 			}
 		})

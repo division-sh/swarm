@@ -136,7 +136,7 @@ func planRunForkSnapshot(
 		ProducedBy:     cursor.ProducedBy,
 		ProducedByType: cursor.ProducedByType,
 		RoutingSource:  forkEvent.RoutingSource,
-		Timestamp:      cursor.CreatedAt,
+		Timestamp:      cursor.CreatedAt.UTC(),
 		Revision:       cursor.Revision,
 	}
 	plan.EventCountAtFork = len(snapshot.Events)

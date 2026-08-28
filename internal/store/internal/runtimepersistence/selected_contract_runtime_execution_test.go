@@ -33,6 +33,8 @@ type selectedCompletionAuthorityStore interface {
 	HeartbeatRunForkSelectedContractRuntimeExecution(context.Context, runtimeeffects.Authority, time.Duration) error
 	QuiesceRunForkSelectedContractRuntimeExecution(context.Context, runtimeeffects.Authority) error
 	CloseRunForkSelectedContractRuntimeExecution(context.Context, string) error
+	FailRunForkSelectedContractRuntimeExecution(context.Context, runtimeeffects.Authority, json.RawMessage) error
+	MarkTerminalRun(context.Context, runtimerunlifecycle.TerminalRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error)
 }
 
 type selectedCompletionFixture struct {
@@ -234,6 +236,87 @@ func TestSelectedForkCompletionAuthoritySingleCurrentGenerationSQLite(t *testing
 func TestSelectedForkCompletionAuthoritySingleCurrentGenerationPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	proveSelectedForkCompletionAuthoritySingleCurrentGeneration(t, newSelectedCompletionFixture(t, admitTestPostgresStore(t, db), db, false))
+}
+
+func TestSelectedForkRuntimeAuthorityFinalizationAfterRunTerminalSelectedStoreParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := testAuthorActivityContext()
+			var store selectedCompletionAuthorityStore
+			var db *sql.DB
+			var sqlite bool
+			if backend == "sqlite" {
+				selected := newBootstrappedSQLiteRuntimeStoreForTest(t)
+				store, db, sqlite = selected, selected.backend.ConstructionHandle(), true
+			} else {
+				_, db, _ = testutil.StartPostgres(t)
+				store = admitTestPostgresStore(t, db)
+			}
+
+			quiesceFixture := newSelectedCompletionFixture(t, store, db, sqlite)
+			issued, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, quiesceFixture.request)
+			if err != nil {
+				t.Fatalf("issue quiesce authority: %v", err)
+			}
+			authority, err := store.ClaimRunForkSelectedContractRuntimeExecution(ctx, issued, "terminal-quiesce-owner", time.Minute)
+			if err != nil {
+				t.Fatalf("claim quiesce authority: %v", err)
+			}
+			candidateStore, ok := store.(runLifecycleCandidateParityStore)
+			if !ok {
+				t.Fatalf("%T does not expose the run completion owner", store)
+			}
+			if _, _, err := completeRunLifecycleCandidateParity(runLifecycleCandidateParityFixture{
+				store: candidateStore, db: db, postgres: !sqlite,
+			}, ctx, quiesceFixture.forkRun, time.Now().UTC()); err != nil {
+				t.Fatalf("complete fork before quiesce: %v", err)
+			}
+			if err := store.HeartbeatRunForkSelectedContractRuntimeExecution(ctx, authority, time.Minute); err == nil {
+				t.Fatal("terminal fork accepted runtime heartbeat")
+			}
+			stale := authority
+			stale.FenceGeneration++
+			if err := store.QuiesceRunForkSelectedContractRuntimeExecution(ctx, stale); err == nil {
+				t.Fatal("terminal fork accepted stale quiesce authority")
+			}
+			if err := store.QuiesceRunForkSelectedContractRuntimeExecution(ctx, authority); err != nil {
+				t.Fatalf("quiesce terminal fork authority: %v", err)
+			}
+			if err := store.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); err != nil {
+				t.Fatalf("close terminal fork authority: %v", err)
+			}
+
+			failFixture := newSelectedCompletionFixture(t, store, db, sqlite)
+			issued, err = store.IssueRunForkSelectedContractRuntimeExecution(ctx, failFixture.request)
+			if err != nil {
+				t.Fatalf("issue failure authority: %v", err)
+			}
+			authority, err = store.ClaimRunForkSelectedContractRuntimeExecution(ctx, issued, "terminal-failure-owner", time.Minute)
+			if err != nil {
+				t.Fatalf("claim failure authority: %v", err)
+			}
+			if _, _, err := store.MarkTerminalRun(ctx, runtimerunlifecycle.TerminalRequest{
+				RunID: failFixture.forkRun, State: runtimerunlifecycle.StateCancelled, EndedAt: time.Now().UTC(),
+			}); err != nil {
+				t.Fatalf("cancel fork before failure finalization: %v", err)
+			}
+			if err := store.HeartbeatRunForkSelectedContractRuntimeExecution(ctx, authority, time.Minute); err == nil {
+				t.Fatal("cancelled fork accepted runtime heartbeat")
+			}
+			stale = authority
+			stale.FenceGeneration++
+			failure := json.RawMessage(`{"reason":"terminal fork"}`)
+			if err := store.FailRunForkSelectedContractRuntimeExecution(ctx, stale, failure); err == nil {
+				t.Fatal("terminal fork accepted stale failure authority")
+			}
+			if err := store.FailRunForkSelectedContractRuntimeExecution(ctx, authority, failure); err != nil {
+				t.Fatalf("fail terminal fork authority: %v", err)
+			}
+			if err := store.CloseRunForkSelectedContractRuntimeExecution(ctx, authority.ID); err != nil {
+				t.Fatalf("close failed terminal fork authority: %v", err)
+			}
+		})
+	}
 }
 
 func proveSelectedForkCompletionAuthoritySingleCurrentGeneration(t *testing.T, fixture selectedCompletionFixture) {

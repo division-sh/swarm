@@ -708,6 +708,7 @@ func TestPipelineObligationHasNoLegacyCapabilityAssemblers(t *testing.T) {
 		"internal/store/internal/backend/runforkpersistence/run_fork_activation.go":                           true,
 		"internal/store/internal/backend/runforkpersistence/run_fork_revision_snapshot.go":                    true,
 		"internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_execution_mutation.go": true,
+		"internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_discard_owner.go":      true,
 		"internal/runtime/destructivereset/cleanup_catalog.go":                                                true,
 		"internal/store/internal/backend/runforkrevision/effects.go":                                          true,
 		"internal/store/internal/backend/runforkrevision/projection.go":                                       true,

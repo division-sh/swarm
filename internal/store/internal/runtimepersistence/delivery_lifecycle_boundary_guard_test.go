@@ -20,7 +20,7 @@ var executableDeliverySQLOwners = map[string]string{
 	"internal/store/internal/backend/delivery/read_projections.go":                                        "private canonical bounded executable-delivery read projections",
 	"internal/store/internal/backend/runforkrevision/projection.go":                                       "private immutable fork-revision canonical projection",
 	"internal/store/internal/adminpersistence/destructive_reset_cleanup.go":                               "named destructive-reset physical cleanup",
-	"internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_execution_mutation.go": "selected-fork physical cleanup after typed terminalization",
+	"internal/store/internal/backend/runforkpersistence/run_fork_selected_contract_discard_owner.go":      "selected-fork physical cleanup after typed terminalization",
 	"internal/store/internal/backend/pipelinepersistence/standing_service.go":                             "standing-service pre-mutation execution-posture inspection",
 	"internal/store/testsql/event.go":                                                                     "named hostile rollback injection used only by tests",
 }
