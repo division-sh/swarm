@@ -200,7 +200,7 @@ func (p deliveryPlanner) planForRecipientMaterialization(ctx context.Context, ev
 			return planned, nil
 		}
 	}
-	return RoutePlan{}, staleConnectRoutePlanSnapshotError{}
+	return RoutePlan{}, exhaustedConnectRoutePlanSnapshotError()
 }
 
 func (p deliveryPlanner) planAtGeneration(ctx context.Context, evt events.Event) (RoutePlan, error) {

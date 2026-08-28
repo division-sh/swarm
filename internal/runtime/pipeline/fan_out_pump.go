@@ -32,15 +32,17 @@ func (pc *PipelineCoordinator) serveFanOutTurn(ctx context.Context, now time.Tim
 	if err != nil || !found {
 		return false, err
 	}
+	turnStarted := time.Now()
 	release := true
 	defer func() {
 		if release {
 			_ = owner.ReleaseFanOutClaim(context.WithoutCancel(ctx), claim)
 		}
 	}()
-	blockClaim := func(cause error, plans []runtimeengine.DurablePublicationPlan) error {
+	blockClaim := func(stage string, ordinal int, cause error, plans []runtimeengine.DurablePublicationPlan) error {
 		releaseErr := plannerReleaseFanOutPlans(context.WithoutCancel(ctx), pc.bus, plans)
-		failure := runtimefailures.Normalize(cause, "runtime.fan_out", "blocked_turn")
+		cause = fanOutBlockedTurnCause(stage, ordinal, intent, cause)
+		failure := runtimefailures.Normalize(cause, "runtime.fan_out", stage)
 		blockErr := owner.BlockFanOutClaim(context.WithoutCancel(ctx), FanOutBlockRequest{Claim: claim, Now: time.Now().UTC(), Failure: failure})
 		if blockErr == nil {
 			release = false
@@ -50,21 +52,21 @@ func (pc *PipelineCoordinator) serveFanOutTurn(ctx context.Context, now time.Tim
 
 	input, err := owner.LoadFanOutEvaluation(ctx, claim)
 	if err != nil {
-		return false, blockClaim(err, nil)
+		return false, blockClaim("load_evaluation", -1, err, nil)
 	}
 	if err := input.Validate(intent); err != nil {
-		return false, blockClaim(err, nil)
+		return false, blockClaim("validate_evaluation", -1, err, nil)
 	}
 	planner, ok := pc.bus.(EnginePublicationPlanner)
 	if !ok {
-		return false, blockClaim(fmt.Errorf("fan-out pump requires the canonical engine publication planner"), nil)
+		return false, blockClaim("resolve_publication_planner", -1, fmt.Errorf("fan-out pump requires the canonical engine publication planner"), nil)
 	}
 	executor, err := runtimeengine.NewExecutor(coordinatorEngineDependencies(pc), pipelineEngineEvaluator{evaluator: pc.expressionEval, coordinator: pc})
 	if err != nil {
-		return false, blockClaim(err, nil)
+		return false, blockClaim("create_executor", -1, err, nil)
 	}
 	if intent.Request.PlanRef.BundleHash != pc.bundleSourceFact.BundleHash() {
-		return false, blockClaim(fmt.Errorf("fan-out claimed plan bundle disagrees with admitted runtime source"), nil)
+		return false, blockClaim("validate_plan_source", -1, fmt.Errorf("fan-out claimed plan bundle disagrees with admitted runtime source"), nil)
 	}
 	workCtx := runtimecorrelation.WithBundleSourceFact(ctx, pc.bundleSourceFact)
 	workCtx = runtimecorrelation.WithRunID(workCtx, intent.Request.Key.RunID)
@@ -84,12 +86,16 @@ func (pc *PipelineCoordinator) serveFanOutTurn(ctx context.Context, now time.Tim
 			case fanOutFailureYield:
 				return false, errors.Join(evalErr, planner.ReleaseEnginePublications(context.WithoutCancel(workCtx), prepared))
 			case fanOutFailureRetry:
-				return false, errors.Join(evalErr, planner.ReleaseEnginePublications(context.WithoutCancel(workCtx), prepared))
+				retryReleased, retryErr := releaseFanOutPrecommitRetry(workCtx, owner, planner, claim, prepared, evalErr, turnStarted)
+				if retryReleased {
+					release = false
+				}
+				return retryReleased, retryErr
 			case fanOutFailureBlock:
-				return false, blockClaim(evalErr, prepared)
+				return false, blockClaim("evaluate_ordinal", ordinal, evalErr, prepared)
 			case fanOutFailureItemSemantic:
 			default:
-				return false, blockClaim(fmt.Errorf("fan-out evaluation returned invalid failure disposition"), prepared)
+				return false, blockClaim("classify_evaluation_failure", ordinal, fmt.Errorf("fan-out evaluation returned invalid failure disposition"), prepared)
 			}
 			outcomes = append(outcomes, FanOutChunkOutcome{Ordinal: ordinal, Failure: failure})
 			continue
@@ -101,18 +107,22 @@ func (pc *PipelineCoordinator) serveFanOutTurn(ctx context.Context, now time.Tim
 			case fanOutFailureYield:
 				return false, errors.Join(prepareErr, planner.ReleaseEnginePublications(context.WithoutCancel(workCtx), prepared))
 			case fanOutFailureRetry:
-				return false, errors.Join(prepareErr, planner.ReleaseEnginePublications(context.WithoutCancel(workCtx), prepared))
+				retryReleased, retryErr := releaseFanOutPrecommitRetry(workCtx, owner, planner, claim, prepared, prepareErr, turnStarted)
+				if retryReleased {
+					release = false
+				}
+				return retryReleased, retryErr
 			case fanOutFailureBlock:
-				return false, blockClaim(prepareErr, prepared)
+				return false, blockClaim("prepare_publication", ordinal, prepareErr, prepared)
 			case fanOutFailureItemSemantic:
 			default:
-				return false, blockClaim(fmt.Errorf("fan-out planner returned invalid failure disposition"), prepared)
+				return false, blockClaim("classify_publication_failure", ordinal, fmt.Errorf("fan-out planner returned invalid failure disposition"), prepared)
 			}
 			outcomes = append(outcomes, FanOutChunkOutcome{Ordinal: ordinal, Failure: failure})
 			continue
 		}
 		if len(plans) != 1 {
-			return false, blockClaim(fmt.Errorf("fan-out planner returned %d plans for ordinal %d", len(plans), ordinal), append(prepared, plans...))
+			return false, blockClaim("validate_publication_cardinality", ordinal, fmt.Errorf("fan-out planner returned %d plans for ordinal %d", len(plans), ordinal), append(prepared, plans...))
 		}
 		prepared = append(prepared, plans[0])
 		outcomes = append(outcomes, FanOutChunkOutcome{Ordinal: ordinal, Publication: plans[0]})
@@ -148,6 +158,47 @@ func (pc *PipelineCoordinator) serveFanOutTurn(ctx context.Context, now time.Tim
 		}
 	}
 	return committed.Intent.Status == fanoutobligation.StatusOpen, committed.PostCommitFailure
+}
+
+func releaseFanOutPrecommitRetry(
+	ctx context.Context,
+	owner FanOutObligationOwner,
+	planner EnginePublicationPlanner,
+	claim fanoutobligation.Claim,
+	plans []runtimeengine.DurablePublicationPlan,
+	cause error,
+	started time.Time,
+) (bool, error) {
+	releasePlansErr := planner.ReleaseEnginePublications(context.WithoutCancel(ctx), plans)
+	releaseClaimErr := owner.ReleaseFanOutRetryable(context.WithoutCancel(ctx), FanOutRetryableRelease{
+		Claim: claim, Now: time.Now().UTC(), ObservedDuration: time.Since(started),
+	})
+	return releaseClaimErr == nil, errors.Join(cause, releasePlansErr, releaseClaimErr)
+}
+
+func fanOutBlockedTurnCause(stage string, ordinal int, intent fanoutobligation.Intent, cause error) error {
+	if _, ok := runtimefailures.As(cause); ok {
+		return cause
+	}
+	attributes := map[string]any{
+		"run_id":                 intent.Request.Key.RunID,
+		"triggering_delivery_id": intent.Request.Key.TriggeringDeliveryID,
+		"package_key":            intent.Request.Key.ElementRef.PackageKey,
+		"element_id":             intent.Request.Key.ElementRef.ElementID,
+		"cursor":                 intent.Cursor,
+		"cause":                  cause.Error(),
+	}
+	if ordinal >= 0 {
+		attributes["ordinal"] = ordinal
+	}
+	return runtimefailures.Wrap(
+		runtimefailures.ClassInternalFailure,
+		"fan_out_"+stage+"_failed",
+		"runtime.fan_out",
+		stage,
+		attributes,
+		cause,
+	)
 }
 
 func (pc *PipelineCoordinator) commitFanOutRange(

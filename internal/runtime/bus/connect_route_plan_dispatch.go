@@ -15,6 +15,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -48,6 +49,17 @@ type staleConnectRoutePlanSnapshotError struct{}
 
 func (staleConnectRoutePlanSnapshotError) Error() string {
 	return "connect route snapshot generation is stale"
+}
+
+func exhaustedConnectRoutePlanSnapshotError() error {
+	return runtimefailures.Wrap(
+		runtimefailures.ClassDependencyUnavailable,
+		"connect_route_snapshot_stale",
+		"eventbus",
+		"plan_connect_routes",
+		map[string]any{"reason": "route_table_generation_changed"},
+		staleConnectRoutePlanSnapshotError{},
+	)
 }
 
 func withClosedPublicationPlanning(ctx context.Context) context.Context {
@@ -164,7 +176,7 @@ func (r connectRoutePlanResolver) Plan(ctx context.Context, evt events.Event) (c
 			memo.ready = false
 		}
 	}
-	return connectRoutePlanDispatch{}, staleConnectRoutePlanSnapshotError{}
+	return connectRoutePlanDispatch{}, exhaustedConnectRoutePlanSnapshotError()
 }
 
 func (r connectRoutePlanResolver) planMatched(ctx context.Context, evt events.Event, matched []runtimepinrouting.ConnectRoutePlan, descriptors []runtimepinrouting.Descriptor, values map[string]string) (connectRoutePlanDispatch, error) {
