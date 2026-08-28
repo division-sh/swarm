@@ -24,6 +24,7 @@ type publicSurfaceStoreParity struct {
 	ClosureLevel          string                                  `yaml:"closure_level"`
 	ClaimsParentClosure   bool                                    `yaml:"claims_parent_closure"`
 	ProofPolicyPath       string                                  `yaml:"proof_policy_path"`
+	ProofCatalog          []publicSurfaceStoreParityProof         `yaml:"proof_catalog"`
 	SelectedPurposes      []publicSurfaceSelectedPurposeClaim     `yaml:"selected_purposes"`
 	DifferentConstruction publicSurfaceDifferentConstructionRoles `yaml:"different_construction"`
 	CompositeOwners       []publicSurfaceStoreCompositeOwner      `yaml:"composite_owners"`
@@ -31,14 +32,12 @@ type publicSurfaceStoreParity struct {
 }
 
 type publicSurfaceSelectedPurposeClaim struct {
-	ID             string                  `yaml:"id"`
-	Constructor    string                  `yaml:"constructor"`
-	Consumers      []string                `yaml:"consumers"`
-	SemanticOwner  string                  `yaml:"semantic_owner"`
-	ClaimIDs       []string                `yaml:"claim_ids"`
-	ProofProfile   string                  `yaml:"proof_profile"`
-	ProofRefs      []publicSurfaceProofRef `yaml:"proof_refs"`
-	CloseProofRefs []publicSurfaceProofRef `yaml:"close_proof_refs"`
+	ID            string   `yaml:"id"`
+	Constructor   string   `yaml:"constructor"`
+	Consumers     []string `yaml:"consumers"`
+	SemanticOwner string   `yaml:"semantic_owner"`
+	ProofIDs      []string `yaml:"proof_ids"`
+	CloseProofIDs []string `yaml:"close_proof_ids"`
 }
 
 type publicSurfaceDifferentConstructionRoles struct {
@@ -48,9 +47,10 @@ type publicSurfaceDifferentConstructionRoles struct {
 type publicSurfaceStoreParityClaim struct {
 	ID                  string                             `yaml:"id"`
 	SemanticOwners      []string                           `yaml:"semantic_owners"`
+	SelectedPurposes    []string                           `yaml:"selected_purposes,omitempty"`
 	BackendDispositions map[string]string                  `yaml:"backend_dispositions"`
 	SplitIssue          int                                `yaml:"split_issue,omitempty"`
-	SplitTracker        *publicSurfaceProofRef             `yaml:"split_tracker,omitempty"`
+	SplitProofID        string                             `yaml:"split_proof_id,omitempty"`
 	SpecRefs            []string                           `yaml:"spec_refs"`
 	Evidence            []publicSurfaceStoreParityEvidence `yaml:"evidence"`
 	RiskDimensions      []string                           `yaml:"risk_dimensions"`
@@ -63,12 +63,28 @@ type publicSurfaceStoreParityClaim struct {
 }
 
 type publicSurfaceStoreParityEvidence struct {
-	Role           string                  `yaml:"role"`
-	Backends       []string                `yaml:"backends,omitempty"`
-	RiskDimensions []string                `yaml:"risk_dimensions,omitempty"`
-	ProofProfile   string                  `yaml:"proof_profile,omitempty"`
-	ProofRefs      []publicSurfaceProofRef `yaml:"proof_refs,omitempty"`
-	Tracker        *publicSurfaceProofRef  `yaml:"tracker,omitempty"`
+	Role           string   `yaml:"role"`
+	Backends       []string `yaml:"backends,omitempty"`
+	RiskDimensions []string `yaml:"risk_dimensions,omitempty"`
+	ProofIDs       []string `yaml:"proof_ids"`
+}
+
+type publicSurfaceStoreParityProof struct {
+	ID           string                              `yaml:"id"`
+	Kind         string                              `yaml:"kind"`
+	Name         string                              `yaml:"name,omitempty"`
+	Path         string                              `yaml:"path,omitempty"`
+	Profile      string                              `yaml:"profile,omitempty"`
+	Issue        int                                 `yaml:"issue,omitempty"`
+	Watchlist    string                              `yaml:"watchlist,omitempty"`
+	Backends     []string                            `yaml:"backends,omitempty"`
+	PurposeIDs   []string                            `yaml:"purpose_ids,omitempty"`
+	Capabilities []publicSurfaceStoreProofCapability `yaml:"capabilities,omitempty"`
+}
+
+type publicSurfaceStoreProofCapability struct {
+	ClaimID        string   `yaml:"claim_id"`
+	RiskDimensions []string `yaml:"risk_dimensions,omitempty"`
 }
 
 type publicSurfaceStoreCompositeOwner struct {
@@ -128,18 +144,28 @@ func TestPublicSurfaceStoreParityRejectsCoverageDrift(t *testing.T) {
 		{
 			name: "claim linked from selected purpose",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
-				purpose := storeParityPurposeByID(t, matrix, "runtime")
-				purpose.ClaimIDs = storeParityStringsExcept(purpose.ClaimIDs, "event_delivery")
+				claim := storeParityClaimByID(t, matrix, "event_delivery")
+				claim.SelectedPurposes = storeParityStringsExcept(claim.SelectedPurposes, "runtime")
 			},
 			want: "store parity claim event_delivery is not linked to any selected purpose",
 		},
 		{
 			name: "duplicate claim within selected purpose",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
-				purpose := storeParityPurposeByID(t, matrix, "runtime")
-				purpose.ClaimIDs = append(purpose.ClaimIDs, "event_delivery")
+				claim := storeParityClaimByID(t, matrix, "event_delivery")
+				claim.SelectedPurposes = append(claim.SelectedPurposes, "runtime")
 			},
-			want: "selected purpose runtime references claim event_delivery more than once",
+			want: "store parity claim event_delivery references selected purpose runtime more than once",
+		},
+		{
+			name: "purpose semantic reassignment",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				startup := storeParityClaimByID(t, matrix, "startup_authority")
+				startup.SelectedPurposes = storeParityStringsExcept(startup.SelectedPurposes, "authority_inspection")
+				events := storeParityClaimByID(t, matrix, "event_delivery")
+				events.SelectedPurposes = append(events.SelectedPurposes, "authority_inspection")
+			},
+			want: "selected purpose authority_inspection has no catalog-scoped proof for claim event_delivery",
 		},
 		{
 			name: "required port",
@@ -236,14 +262,12 @@ func TestPublicSurfaceStoreParityRejectsCoverageDrift(t *testing.T) {
 			want: "store parity claim event_delivery default_sqlite disposition requires exactly one backend_support evidence record, got 0",
 		},
 		{
-			name: "backend-bearing proof",
+			name: "backend proof substitution",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
-				evidence := storeParityEvidenceByRole(t, storeParityClaimByID(t, matrix, "event_delivery"), "backend_support")
-				for index := range evidence.ProofRefs {
-					evidence.ProofRefs[index].Backends = []string{"explicit_postgres"}
-				}
+				evidence := storeParityEvidenceByRole(t, storeParityClaimByID(t, matrix, "api_idempotency"), "backend_support")
+				evidence.ProofIDs = []string{"api-idempotency-sqlite"}
 			},
-			want: "backend default_sqlite lacks backend-bearing proof",
+			want: "backend explicit_postgres lacks catalog-owned proof",
 		},
 		{
 			name: "public method disposition link",
@@ -258,9 +282,9 @@ func TestPublicSurfaceStoreParityRejectsCoverageDrift(t *testing.T) {
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
 				claim := storeParityClaimByID(t, matrix, "selected_contract_fork")
 				claim.SplitIssue = 999999
-				claim.SplitTracker.Issue = 999999
+				storeParityProofByID(t, matrix, claim.SplitProofID).Issue = 999999
 			},
-			want: "store parity claim selected_contract_fork split issue #999999 is not active",
+			want: "store parity proof backend-split-2276 issue #999999",
 		},
 		{
 			name: "teaching proof",
@@ -273,14 +297,24 @@ func TestPublicSurfaceStoreParityRejectsCoverageDrift(t *testing.T) {
 		{
 			name: "executable selector",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
-				storeParityEvidenceByRole(t, storeParityClaimByID(t, matrix, "event_delivery"), "backend_support").ProofRefs[0].Name = "TestMissingStoreParityProof"
+				storeParityProofByID(t, matrix, "served-event-publish").Name = "TestMissingStoreParityProof"
 			},
 			want: "go_test proof_ref TestMissingStoreParityProof does not resolve",
 		},
 		{
+			name: "duplicate proof identity",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				duplicate := *storeParityProofByID(t, matrix, "served-event-publish")
+				duplicate.ID = "duplicate-event-publish"
+				matrix.StoreParity.ProofCatalog = append(matrix.StoreParity.ProofCatalog, duplicate)
+				storeParityEvidenceByRole(t, storeParityClaimByID(t, matrix, "event_delivery"), "backend_support").ProofIDs = append(storeParityEvidenceByRole(t, storeParityClaimByID(t, matrix, "event_delivery"), "backend_support").ProofIDs, duplicate.ID)
+			},
+			want: "store parity proof duplicate-event-publish duplicates selector identity owned by proof served-event-publish",
+		},
+		{
 			name: "package-exact selector",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
-				storeParityEvidenceByRole(t, storeParityClaimByID(t, matrix, "event_delivery"), "backend_support").ProofRefs[0].Path = "internal/apiv1/wrong_package_test.go"
+				storeParityProofByID(t, matrix, "served-event-publish").Path = "internal/apiv1/wrong_package_test.go"
 			},
 			want: "does not resolve at package-exact path internal/apiv1/wrong_package_test.go",
 		},
@@ -295,18 +329,35 @@ func TestPublicSurfaceStoreParityRejectsCoverageDrift(t *testing.T) {
 		{
 			name: "risk proof skipped profile",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
-				storeParityEvidenceByRisk(t, storeParityClaimByID(t, matrix, "event_delivery"), "restart").ProofProfile = "pr-common"
+				storeParityProofByID(t, matrix, "golden-forced-restart").Profile = "pr-common"
 			},
-			want: "risk_dimension restart proof profile \"pr-common\" does not execute the canonical proof",
+			want: "risk_dimension restart proof golden-forced-restart profile \"pr-common\" does not execute escalated risk proof",
 		},
 		{
-			name: "risk proof mismatched selector",
+			name: "risk proof claim overreach",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
-				evidence := storeParityEvidenceByRisk(t, storeParityClaimByID(t, matrix, "event_delivery"), "restart")
-				evidence.ProofRefs[0].Name = "TestGoldenAgentWorkloadBurstConcurrencyOnBothBackends"
-				evidence.ProofRefs[0].Path = "internal/releasee2e/golden_agent_workload_test.go"
+				claim := storeParityClaimByID(t, matrix, "bundle_delete")
+				claim.RiskDimensions = append(claim.RiskDimensions, "restart")
+				claim.Evidence = append(claim.Evidence, publicSurfaceStoreParityEvidence{Role: "risk_proof", RiskDimensions: []string{"restart"}, ProofIDs: []string{"golden-forced-restart"}})
 			},
-			want: "risk_dimension restart missing canonical dual-backend proof TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends",
+			want: "proof golden-forced-restart does not own claim bundle_delete",
+		},
+		{
+			name: "unused risk capability",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				proof := storeParityProofByID(t, matrix, "golden-forced-restart")
+				proof.Capabilities = append(proof.Capabilities, publicSurfaceStoreProofCapability{ClaimID: "mailbox_decision", RiskDimensions: []string{"restart"}})
+			},
+			want: "store parity proof golden-forced-restart claim mailbox_decision risk capability restart is not consumed",
+		},
+		{
+			name: "risk tracker claim overreach",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				claim := storeParityClaimByID(t, matrix, "mailbox_decision")
+				claim.RiskDimensions = append(claim.RiskDimensions, "contention")
+				claim.Evidence = append(claim.Evidence, publicSurfaceStoreParityEvidence{Role: "risk_split", RiskDimensions: []string{"contention"}, ProofIDs: []string{"fanout-contention-2274"}})
+			},
+			want: "tracker fanout-contention-2274 does not own claim mailbox_decision risk_dimension contention",
 		},
 	}
 
@@ -352,7 +403,7 @@ func TestPublicSurfaceStoreParityRejectsAmbiguousUnqualifiedSelector(t *testing.
 	goTests[selector] = append(goTests[selector], "internal/other/collision_test.go")
 	ctx.goTests = goTests
 	matrix := loadPublicSurfaceBackendMatrix(t, root)
-	storeParityEvidenceByRole(t, storeParityClaimByID(t, &matrix, "event_delivery"), "backend_support").ProofRefs[0].Path = ""
+	storeParityProofByID(t, &matrix, "served-event-publish").Path = ""
 	problems := validatePublicSurfaceBackendMatrix(root, matrix, ctx)
 	want := "go_test proof_ref " + selector + " missing package-exact path"
 	if !publicSurfaceProblemsContain(problems, want) {
@@ -387,6 +438,17 @@ func storeParityClaimByID(t *testing.T, matrix *publicSurfaceBackendMatrix, id s
 		}
 	}
 	t.Fatalf("store parity claim %s not found", id)
+	return nil
+}
+
+func storeParityProofByID(t *testing.T, matrix *publicSurfaceBackendMatrix, id string) *publicSurfaceStoreParityProof {
+	t.Helper()
+	for index := range matrix.StoreParity.ProofCatalog {
+		if matrix.StoreParity.ProofCatalog[index].ID == id {
+			return &matrix.StoreParity.ProofCatalog[index]
+		}
+	}
+	t.Fatalf("store parity proof %s not found", id)
 	return nil
 }
 
@@ -482,13 +544,22 @@ func validatePublicSurfaceStoreParity(root string, layer publicSurfaceStoreParit
 			problems = append(problems, fmt.Sprintf("store parity claim %s appears more than once", id))
 		}
 		claimsByID[id] = claim
-		problems = append(problems, validatePublicSurfaceStoreParityClaim(root, claim, ctx, policy, activeTrackers)...)
 	}
 	if len(claimsByID) == 0 {
 		problems = append(problems, "store parity claims are required")
 	}
+	purposeIDs := map[string]struct{}{}
+	for _, purpose := range layer.SelectedPurposes {
+		purposeIDs[strings.TrimSpace(purpose.ID)] = struct{}{}
+	}
+	proofsByID, proofProblems := validatePublicSurfaceStoreParityProofCatalog(layer.ProofCatalog, claimsByID, purposeIDs, ctx, policy, activeTrackers)
+	problems = append(problems, proofProblems...)
+	for _, claim := range layer.Claims {
+		problems = append(problems, validatePublicSurfaceStoreParityClaim(root, claim, ctx, policy, proofsByID)...)
+	}
 
-	problems = append(problems, validatePublicSurfaceSelectedPurposes(layer.SelectedPurposes, claimsByID, sources, ctx, policy)...)
+	problems = append(problems, validatePublicSurfaceSelectedPurposes(layer.SelectedPurposes, claimsByID, proofsByID, sources)...)
+	problems = append(problems, validatePublicSurfaceStoreParityProofReferences(layer, proofsByID)...)
 	problems = append(problems, validatePublicSurfaceStoreParityValues("required port", collectStoreParityClaimValues(layer.Claims, func(c publicSurfaceStoreParityClaim) []string { return c.RequiredPorts }), sources.requiredPorts)...)
 	problems = append(problems, validatePublicSurfaceStoreParityValues("optional product", collectStoreParityClaimValues(layer.Claims, func(c publicSurfaceStoreParityClaim) []string { return c.OptionalProducts }), sources.optionalProducts)...)
 	problems = append(problems, validatePublicSurfaceStoreParityPartition("RuntimeDeps", collectStoreParityClaimValues(layer.Claims, func(c publicSurfaceStoreParityClaim) []string { return c.RuntimeDeps }), layer.DifferentConstruction.RuntimeDeps, sources.runtimeDeps)...)
@@ -504,6 +575,163 @@ func validatePublicSurfaceStoreParity(root string, layer publicSurfaceStoreParit
 	problems = append(problems, validatePublicSurfaceStoreParityValues("public method", collectStoreParityClaimValues(layer.Claims, func(c publicSurfaceStoreParityClaim) []string { return c.PublicMethods }), ctx.apiMethods)...)
 	problems = append(problems, validatePublicSurfaceStoreParityMethodLinks(layer.Claims, mutating, reads)...)
 	sort.Strings(problems)
+	return problems
+}
+
+func validatePublicSurfaceStoreParityProofCatalog(catalog []publicSurfaceStoreParityProof, claims map[string]publicSurfaceStoreParityClaim, purposes map[string]struct{}, ctx publicSurfaceValidationContext, policy testplanning.Policy, activeTrackers map[string]struct{}) (map[string]publicSurfaceStoreParityProof, []string) {
+	proofs := map[string]publicSurfaceStoreParityProof{}
+	goTestOwners := map[string]string{}
+	var problems []string
+	for _, proof := range catalog {
+		id := strings.TrimSpace(proof.ID)
+		label := "store parity proof " + id
+		if id == "" {
+			problems = append(problems, "store parity proof missing id")
+			continue
+		}
+		if _, ok := proofs[id]; ok {
+			problems = append(problems, label+" appears more than once")
+		}
+		proofs[id] = proof
+
+		seenBackends := map[string]struct{}{}
+		for _, backend := range proof.Backends {
+			if backend != "default_sqlite" && backend != "explicit_postgres" {
+				problems = append(problems, fmt.Sprintf("%s backend %q is not allowed", label, backend))
+			}
+			if _, ok := seenBackends[backend]; ok {
+				problems = append(problems, fmt.Sprintf("%s repeats backend %s", label, backend))
+			}
+			seenBackends[backend] = struct{}{}
+		}
+		seenPurposes := map[string]struct{}{}
+		for _, purposeID := range proof.PurposeIDs {
+			if _, ok := purposes[purposeID]; !ok {
+				problems = append(problems, fmt.Sprintf("%s references unknown selected purpose %s", label, purposeID))
+			}
+			if _, ok := seenPurposes[purposeID]; ok {
+				problems = append(problems, fmt.Sprintf("%s repeats selected purpose %s", label, purposeID))
+			}
+			seenPurposes[purposeID] = struct{}{}
+		}
+		seenClaims := map[string]struct{}{}
+		for _, capability := range proof.Capabilities {
+			if _, ok := claims[capability.ClaimID]; !ok {
+				problems = append(problems, fmt.Sprintf("%s capability references unknown claim %s", label, capability.ClaimID))
+			}
+			if _, ok := seenClaims[capability.ClaimID]; ok {
+				problems = append(problems, fmt.Sprintf("%s repeats claim capability %s", label, capability.ClaimID))
+			}
+			seenClaims[capability.ClaimID] = struct{}{}
+			seenRisks := map[string]struct{}{}
+			for _, risk := range capability.RiskDimensions {
+				if _, ok := allowedPublicSurfaceStoreParityRisks()[risk]; !ok {
+					problems = append(problems, fmt.Sprintf("%s claim %s risk_dimension %q is not allowed", label, capability.ClaimID, risk))
+				}
+				if _, ok := seenRisks[risk]; ok {
+					problems = append(problems, fmt.Sprintf("%s claim %s repeats risk_dimension %s", label, capability.ClaimID, risk))
+				}
+				seenRisks[risk] = struct{}{}
+			}
+		}
+
+		switch proof.Kind {
+		case "go_test":
+			if proof.Issue != 0 || proof.Watchlist != "" {
+				problems = append(problems, label+" executable proof must not contain tracker identity")
+			}
+			ref := publicSurfaceProofRef{Kind: "go_test", Name: proof.Name, Path: proof.Path}
+			problems = append(problems, validatePublicSurfaceStoreParityProofs(label, proof.Profile, []publicSurfaceProofRef{ref}, ctx, policy)...)
+			identity := strings.TrimSpace(proof.Name) + "@" + filepath.ToSlash(filepath.Clean(proof.Path))
+			if owner, ok := goTestOwners[identity]; ok {
+				problems = append(problems, fmt.Sprintf("%s duplicates selector identity owned by proof %s", label, owner))
+			} else {
+				goTestOwners[identity] = id
+			}
+		case "tracker":
+			if proof.Issue == 0 || proof.Watchlist == "" {
+				problems = append(problems, label+" missing concrete tracker identity")
+			} else if _, ok := activeTrackers[trackerKey(proof.Issue, proof.Watchlist)]; !ok {
+				problems = append(problems, fmt.Sprintf("%s issue #%d watchlist %q is not active", label, proof.Issue, proof.Watchlist))
+			}
+			if proof.Name != "" || proof.Path != "" || proof.Profile != "" || len(proof.Backends) != 0 || len(proof.PurposeIDs) != 0 {
+				problems = append(problems, label+" tracker must not claim executable or selected-purpose scope")
+			}
+		default:
+			problems = append(problems, fmt.Sprintf("%s kind %q is not allowed", label, proof.Kind))
+		}
+	}
+	if len(proofs) == 0 {
+		problems = append(problems, "store parity proof_catalog is required")
+	}
+	return proofs, problems
+}
+
+func validatePublicSurfaceStoreParityProofReferences(layer publicSurfaceStoreParity, proofs map[string]publicSurfaceStoreParityProof) []string {
+	references := map[string]int{}
+	claimUses := map[string]map[string]bool{}
+	riskUses := map[string]map[string]map[string]bool{}
+	markClaim := func(proofID, claimID string) {
+		if claimUses[proofID] == nil {
+			claimUses[proofID] = map[string]bool{}
+		}
+		claimUses[proofID][claimID] = true
+	}
+	markRisk := func(proofID, claimID, risk string) {
+		if riskUses[proofID] == nil {
+			riskUses[proofID] = map[string]map[string]bool{}
+		}
+		if riskUses[proofID][claimID] == nil {
+			riskUses[proofID][claimID] = map[string]bool{}
+		}
+		riskUses[proofID][claimID][risk] = true
+	}
+	for _, purpose := range layer.SelectedPurposes {
+		for _, id := range append(append([]string(nil), purpose.ProofIDs...), purpose.CloseProofIDs...) {
+			references[id]++
+		}
+		for _, claim := range layer.Claims {
+			if !publicSurfaceHasValue(claim.SelectedPurposes, purpose.ID) {
+				continue
+			}
+			for _, id := range purpose.ProofIDs {
+				if proof, ok := proofs[id]; ok && findPublicSurfaceStoreProofCapability(proof, claim.ID) != nil {
+					markClaim(id, claim.ID)
+				}
+			}
+		}
+	}
+	for _, claim := range layer.Claims {
+		if claim.SplitProofID != "" {
+			references[claim.SplitProofID]++
+			markClaim(claim.SplitProofID, claim.ID)
+		}
+		for _, evidence := range claim.Evidence {
+			for _, id := range evidence.ProofIDs {
+				references[id]++
+				markClaim(id, claim.ID)
+				for _, risk := range evidence.RiskDimensions {
+					markRisk(id, claim.ID, risk)
+				}
+			}
+		}
+	}
+	var problems []string
+	for id := range proofs {
+		if references[id] == 0 {
+			problems = append(problems, fmt.Sprintf("store parity proof %s is not referenced", id))
+		}
+		for _, capability := range proofs[id].Capabilities {
+			if !claimUses[id][capability.ClaimID] {
+				problems = append(problems, fmt.Sprintf("store parity proof %s claim capability %s is not consumed", id, capability.ClaimID))
+			}
+			for _, risk := range capability.RiskDimensions {
+				if !riskUses[id][capability.ClaimID][risk] {
+					problems = append(problems, fmt.Sprintf("store parity proof %s claim %s risk capability %s is not consumed", id, capability.ClaimID, risk))
+				}
+			}
+		}
+	}
 	return problems
 }
 
@@ -563,7 +791,7 @@ func validatePublicSurfaceStoreParityMethodLinks(claims []publicSurfaceStorePari
 	return problems
 }
 
-func validatePublicSurfaceStoreParityClaim(root string, claim publicSurfaceStoreParityClaim, ctx publicSurfaceValidationContext, policy testplanning.Policy, activeTrackers map[string]struct{}) []string {
+func validatePublicSurfaceStoreParityClaim(root string, claim publicSurfaceStoreParityClaim, ctx publicSurfaceValidationContext, policy testplanning.Policy, proofs map[string]publicSurfaceStoreParityProof) []string {
 	var problems []string
 	label := "store parity claim " + strings.TrimSpace(claim.ID)
 	if len(claim.SemanticOwners) == 0 {
@@ -643,23 +871,9 @@ func validatePublicSurfaceStoreParityClaim(root string, claim publicSurfaceStore
 				problems = append(problems, evidenceLabel+" risk evidence must not claim backend disposition coverage")
 			}
 		}
-		if evidence.Role == "risk_split" {
-			if evidence.Tracker == nil || evidence.Tracker.Kind != "tracker" || evidence.Tracker.Issue == 0 {
-				problems = append(problems, evidenceLabel+" missing concrete tracker")
-			} else if _, ok := activeTrackers[trackerKey(evidence.Tracker.Issue, evidence.Tracker.Watchlist)]; !ok {
-				problems = append(problems, fmt.Sprintf("%s tracker issue #%d watchlist %q is not active", evidenceLabel, evidence.Tracker.Issue, evidence.Tracker.Watchlist))
-			}
-			if evidence.ProofProfile != "" || len(evidence.ProofRefs) != 0 {
-				problems = append(problems, evidenceLabel+" tracker evidence must not also own executable proof")
-			}
-			continue
-		}
-		if evidence.Tracker != nil {
-			problems = append(problems, evidenceLabel+" executable evidence must not contain tracker")
-		}
-		problems = append(problems, validatePublicSurfaceStoreParityEvidenceProofs(evidenceLabel, evidence, ctx, policy)...)
+		problems = append(problems, validatePublicSurfaceStoreParityEvidenceProofs(evidenceLabel, claim.ID, evidence, proofs)...)
 		for _, dimension := range evidence.RiskDimensions {
-			problems = append(problems, validatePublicSurfaceStoreParityRiskExecution(evidenceLabel, dimension, evidence)...)
+			problems = append(problems, validatePublicSurfaceStoreParityRiskExecution(evidenceLabel, claim.ID, dimension, evidence, proofs)...)
 		}
 	}
 
@@ -687,12 +901,12 @@ func validatePublicSurfaceStoreParityClaim(root string, claim publicSurfaceStore
 	if needsSplit {
 		if claim.SplitIssue == 0 {
 			problems = append(problems, label+" split disposition missing split_issue")
-		} else if claim.SplitTracker == nil || claim.SplitTracker.Kind != "tracker" || claim.SplitTracker.Issue != claim.SplitIssue {
+		} else if claim.SplitProofID == "" {
 			problems = append(problems, fmt.Sprintf("%s split issue #%d missing exact split_tracker", label, claim.SplitIssue))
-		} else if _, ok := activeTrackers[trackerKey(claim.SplitTracker.Issue, claim.SplitTracker.Watchlist)]; !ok {
-			problems = append(problems, fmt.Sprintf("%s split issue #%d is not active", label, claim.SplitIssue))
+		} else if proof, ok := proofs[claim.SplitProofID]; !ok || proof.Kind != "tracker" || proof.Issue != claim.SplitIssue || findPublicSurfaceStoreProofCapability(proof, claim.ID) == nil {
+			problems = append(problems, fmt.Sprintf("%s split issue #%d missing exact split_tracker", label, claim.SplitIssue))
 		}
-	} else if claim.SplitIssue != 0 || claim.SplitTracker != nil {
+	} else if claim.SplitIssue != 0 || claim.SplitProofID != "" {
 		problems = append(problems, fmt.Sprintf("%s has split tracker without split disposition", label))
 	}
 	for dimension := range declaredRisks {
@@ -703,67 +917,111 @@ func validatePublicSurfaceStoreParityClaim(root string, claim publicSurfaceStore
 	return problems
 }
 
-func validatePublicSurfaceStoreParityEvidenceProofs(label string, evidence publicSurfaceStoreParityEvidence, ctx publicSurfaceValidationContext, policy testplanning.Policy) []string {
-	problems := validatePublicSurfaceStoreParityProofs(label, evidence.ProofProfile, evidence.ProofRefs, ctx, policy)
+func validatePublicSurfaceStoreParityEvidenceProofs(label, claimID string, evidence publicSurfaceStoreParityEvidence, proofs map[string]publicSurfaceStoreParityProof) []string {
+	var problems []string
+	if len(evidence.ProofIDs) == 0 {
+		return []string{label + " missing proof_ids"}
+	}
 	coveredBackends := map[string]struct{}{}
-	for _, ref := range evidence.ProofRefs {
-		if len(ref.Backends) == 0 {
-			problems = append(problems, fmt.Sprintf("%s go_test proof_ref %s missing exact backends", label, ref.Name))
+	coveredRisks := map[string]struct{}{}
+	seen := map[string]struct{}{}
+	for _, proofID := range evidence.ProofIDs {
+		if _, ok := seen[proofID]; ok {
+			problems = append(problems, fmt.Sprintf("%s repeats proof %s", label, proofID))
 		}
-		seen := map[string]struct{}{}
-		for _, backend := range ref.Backends {
-			if backend != "default_sqlite" && backend != "explicit_postgres" {
-				problems = append(problems, fmt.Sprintf("%s go_test proof_ref %s backend %q is not allowed", label, ref.Name, backend))
-				continue
-			}
-			if _, ok := seen[backend]; ok {
-				problems = append(problems, fmt.Sprintf("%s go_test proof_ref %s repeats backend %s", label, ref.Name, backend))
-			}
-			seen[backend] = struct{}{}
+		seen[proofID] = struct{}{}
+		proof, ok := proofs[proofID]
+		if !ok {
+			problems = append(problems, fmt.Sprintf("%s references unknown proof %s", label, proofID))
+			continue
+		}
+		capability := findPublicSurfaceStoreProofCapability(proof, claimID)
+		if capability == nil {
+			problems = append(problems, fmt.Sprintf("%s proof %s does not own claim %s", label, proofID, claimID))
+			continue
+		}
+		wantKind := "go_test"
+		if evidence.Role == "risk_split" {
+			wantKind = "tracker"
+		}
+		if proof.Kind != wantKind {
+			problems = append(problems, fmt.Sprintf("%s proof %s kind = %s, want %s", label, proofID, proof.Kind, wantKind))
+			continue
+		}
+		for _, backend := range proof.Backends {
 			coveredBackends[backend] = struct{}{}
+		}
+		for _, risk := range capability.RiskDimensions {
+			coveredRisks[risk] = struct{}{}
 		}
 	}
 	for _, backend := range evidence.Backends {
 		if _, ok := coveredBackends[backend]; !ok {
-			problems = append(problems, fmt.Sprintf("%s backend %s lacks backend-bearing proof", label, backend))
+			problems = append(problems, fmt.Sprintf("%s backend %s lacks catalog-owned proof", label, backend))
+		}
+	}
+	for _, risk := range evidence.RiskDimensions {
+		if _, ok := coveredRisks[risk]; !ok {
+			owner := "proof"
+			if evidence.Role == "risk_split" {
+				owner = "tracker"
+			}
+			problems = append(problems, fmt.Sprintf("%s %s %s does not own claim %s risk_dimension %s", label, owner, strings.Join(evidence.ProofIDs, ","), claimID, risk))
 		}
 	}
 	return problems
 }
 
-func validatePublicSurfaceStoreParityRiskExecution(label, dimension string, evidence publicSurfaceStoreParityEvidence) []string {
-	requiredTest := ""
-	switch dimension {
-	case "restart", "forced_death":
-		requiredTest = "TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends"
-	case "contention":
-		requiredTest = "TestGoldenAgentWorkloadBurstConcurrencyOnBothBackends"
-	default:
+func validatePublicSurfaceStoreParityRiskExecution(label, claimID, dimension string, evidence publicSurfaceStoreParityEvidence, proofs map[string]publicSurfaceStoreParityProof) []string {
+	if evidence.Role == "risk_split" {
 		return nil
 	}
-	if evidence.Role == "risk_split" {
+	if dimension != "restart" && dimension != "forced_death" && dimension != "contention" {
 		return nil
 	}
 	if evidence.Role != "risk_proof" {
 		return []string{fmt.Sprintf("%s risk_dimension %s requires dedicated risk_proof evidence", label, dimension)}
 	}
-	if evidence.ProofProfile != "full" && evidence.ProofProfile != "nightly" {
-		return []string{fmt.Sprintf("%s risk_dimension %s proof profile %q does not execute the canonical proof", label, dimension, evidence.ProofProfile)}
+	coveredBackends := map[string]struct{}{}
+	for _, proofID := range evidence.ProofIDs {
+		proof, ok := proofs[proofID]
+		if !ok || proof.Kind != "go_test" {
+			continue
+		}
+		capability := findPublicSurfaceStoreProofCapability(proof, claimID)
+		if capability == nil || !publicSurfaceHasValue(capability.RiskDimensions, dimension) {
+			continue
+		}
+		if proof.Profile != "full" && proof.Profile != "nightly" {
+			return []string{fmt.Sprintf("%s risk_dimension %s proof %s profile %q does not execute escalated risk proof", label, dimension, proofID, proof.Profile)}
+		}
+		for _, backend := range proof.Backends {
+			coveredBackends[backend] = struct{}{}
+		}
 	}
-	for _, ref := range evidence.ProofRefs {
-		if ref.Name == requiredTest && publicSurfaceHasValue(ref.Backends, "default_sqlite") && publicSurfaceHasValue(ref.Backends, "explicit_postgres") {
+	if _, sqlite := coveredBackends["default_sqlite"]; sqlite {
+		if _, postgres := coveredBackends["explicit_postgres"]; postgres {
 			return nil
 		}
 	}
-	return []string{fmt.Sprintf("%s risk_dimension %s missing canonical dual-backend proof %s", label, dimension, requiredTest)}
+	return []string{fmt.Sprintf("%s risk_dimension %s lacks exact dual-backend catalog proof", label, dimension)}
 }
 
-func validatePublicSurfaceSelectedPurposes(purposes []publicSurfaceSelectedPurposeClaim, claims map[string]publicSurfaceStoreParityClaim, sources publicSurfaceStoreParitySourceSets, ctx publicSurfaceValidationContext, policy testplanning.Policy) []string {
+func findPublicSurfaceStoreProofCapability(proof publicSurfaceStoreParityProof, claimID string) *publicSurfaceStoreProofCapability {
+	for index := range proof.Capabilities {
+		if proof.Capabilities[index].ClaimID == claimID {
+			return &proof.Capabilities[index]
+		}
+	}
+	return nil
+}
+
+func validatePublicSurfaceSelectedPurposes(purposes []publicSurfaceSelectedPurposeClaim, claims map[string]publicSurfaceStoreParityClaim, proofs map[string]publicSurfaceStoreParityProof, sources publicSurfaceStoreParitySourceSets) []string {
 	var problems []string
 	constructors := map[string]struct{}{}
 	consumers := map[string]struct{}{}
 	seenIDs := map[string]struct{}{}
-	claimReferences := map[string]int{}
+	purposesByID := map[string]publicSurfaceSelectedPurposeClaim{}
 	for _, purpose := range purposes {
 		label := "selected purpose " + strings.TrimSpace(purpose.ID)
 		if purpose.ID == "" {
@@ -773,6 +1031,7 @@ func validatePublicSurfaceSelectedPurposes(purposes []publicSurfaceSelectedPurpo
 			problems = append(problems, label+" appears more than once")
 		}
 		seenIDs[purpose.ID] = struct{}{}
+		purposesByID[purpose.ID] = purpose
 		constructors[strings.TrimSpace(purpose.Constructor)] = struct{}{}
 		if len(purpose.Consumers) == 0 {
 			problems = append(problems, label+" missing consumers")
@@ -784,33 +1043,79 @@ func validatePublicSurfaceSelectedPurposes(purposes []publicSurfaceSelectedPurpo
 		if strings.TrimSpace(purpose.SemanticOwner) == "" {
 			problems = append(problems, label+" missing semantic_owner")
 		}
-		if len(purpose.ClaimIDs) == 0 {
-			problems = append(problems, label+" missing claim_ids")
-		}
-		purposeClaims := map[string]struct{}{}
-		for _, claimID := range purpose.ClaimIDs {
-			claimID = strings.TrimSpace(claimID)
-			if _, ok := purposeClaims[claimID]; ok {
-				problems = append(problems, fmt.Sprintf("%s references claim %s more than once", label, claimID))
-			}
-			purposeClaims[claimID] = struct{}{}
-			if _, ok := claims[claimID]; !ok {
-				problems = append(problems, fmt.Sprintf("%s references unknown claim %s", label, claimID))
-				continue
-			}
-			claimReferences[claimID]++
-		}
-		problems = append(problems, validatePublicSurfaceStoreParityProofs(label, purpose.ProofProfile, purpose.ProofRefs, ctx, policy)...)
-		problems = append(problems, validatePublicSurfaceStoreParityProofs(label+" close", purpose.ProofProfile, purpose.CloseProofRefs, ctx, policy)...)
+		problems = append(problems, validatePublicSurfaceSelectedPurposeProofIDs(label, purpose.ID, purpose.ProofIDs, proofs)...)
+		problems = append(problems, validatePublicSurfaceSelectedPurposeProofIDs(label+" close", purpose.ID, purpose.CloseProofIDs, proofs)...)
 	}
 	problems = append(problems, validatePublicSurfaceStoreParitySet("selected production constructor", constructors, sources.constructors)...)
 	problems = append(problems, validatePublicSurfaceStoreParitySet("selected production consumer", consumers, sources.consumers)...)
-	for claimID := range claims {
-		if claimReferences[claimID] == 0 {
+	claimsByPurpose := map[string][]string{}
+	for claimID, claim := range claims {
+		seenPurposes := map[string]struct{}{}
+		for _, purposeID := range claim.SelectedPurposes {
+			if _, ok := seenPurposes[purposeID]; ok {
+				problems = append(problems, fmt.Sprintf("store parity claim %s references selected purpose %s more than once", claimID, purposeID))
+			}
+			seenPurposes[purposeID] = struct{}{}
+			if _, ok := purposesByID[purposeID]; !ok {
+				problems = append(problems, fmt.Sprintf("store parity claim %s references unknown selected purpose %s", claimID, purposeID))
+				continue
+			}
+			claimsByPurpose[purposeID] = append(claimsByPurpose[purposeID], claimID)
+		}
+		if len(claim.SelectedPurposes) == 0 && !publicSurfaceStoreParityClaimIsDifferentConcept(claim) {
 			problems = append(problems, fmt.Sprintf("store parity claim %s is not linked to any selected purpose", claimID))
 		}
 	}
+	for purposeID, purpose := range purposesByID {
+		claimIDs := claimsByPurpose[purposeID]
+		if len(claimIDs) == 0 {
+			problems = append(problems, fmt.Sprintf("selected purpose %s is not linked to any store parity claim", purposeID))
+			continue
+		}
+		for _, claimID := range claimIDs {
+			owned := false
+			for _, proofID := range purpose.ProofIDs {
+				proof, ok := proofs[proofID]
+				owned = owned || (ok && publicSurfaceHasValue(proof.PurposeIDs, purposeID) && findPublicSurfaceStoreProofCapability(proof, claimID) != nil)
+			}
+			if !owned {
+				problems = append(problems, fmt.Sprintf("selected purpose %s has no catalog-scoped proof for claim %s", purposeID, claimID))
+			}
+		}
+	}
 	return problems
+}
+
+func validatePublicSurfaceSelectedPurposeProofIDs(label, purposeID string, proofIDs []string, proofs map[string]publicSurfaceStoreParityProof) []string {
+	if len(proofIDs) == 0 {
+		return []string{label + " missing proof_ids"}
+	}
+	var problems []string
+	seen := map[string]struct{}{}
+	for _, proofID := range proofIDs {
+		if _, ok := seen[proofID]; ok {
+			problems = append(problems, fmt.Sprintf("%s repeats proof %s", label, proofID))
+		}
+		seen[proofID] = struct{}{}
+		proof, ok := proofs[proofID]
+		if !ok {
+			problems = append(problems, fmt.Sprintf("%s references unknown proof %s", label, proofID))
+			continue
+		}
+		if proof.Kind != "go_test" || !publicSurfaceHasValue(proof.PurposeIDs, purposeID) {
+			problems = append(problems, fmt.Sprintf("%s proof %s does not own selected purpose %s", label, proofID, purposeID))
+		}
+	}
+	return problems
+}
+
+func publicSurfaceStoreParityClaimIsDifferentConcept(claim publicSurfaceStoreParityClaim) bool {
+	for _, disposition := range claim.BackendDispositions {
+		if disposition != "not_applicable_different_semantic_concept_with_proof" {
+			return false
+		}
+	}
+	return len(claim.BackendDispositions) != 0
 }
 
 func validatePublicSurfaceStoreParityProofs(label, profile string, refs []publicSurfaceProofRef, ctx publicSurfaceValidationContext, policy testplanning.Policy) []string {
@@ -1433,5 +1738,6 @@ func allowedPublicSurfaceStoreParityRisks() map[string]struct{} {
 		"structural_census", "selected_construction", "real_v1_handler", "served_lifecycle",
 		"restart", "forced_death", "contention", "n_load", "store_size", "fail_closed",
 		"schema_coherence", "proof_schedule", "read_snapshot", "writer_ownership",
+		"dev_forced_restart_abandonment",
 	})
 }
