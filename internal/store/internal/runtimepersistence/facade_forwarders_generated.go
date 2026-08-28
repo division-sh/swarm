@@ -7,7 +7,6 @@ import (
 	apiidempotency "github.com/division-sh/swarm/internal/apiidempotency"
 	bundlecatalog "github.com/division-sh/swarm/internal/bundlecatalog"
 	channelonboarding "github.com/division-sh/swarm/internal/channelonboarding"
-	durabledata "github.com/division-sh/swarm/internal/durabledata"
 	events "github.com/division-sh/swarm/internal/events"
 	mailbox "github.com/division-sh/swarm/internal/mailbox"
 	operatorchannel "github.com/division-sh/swarm/internal/operatorchannel"
@@ -382,10 +381,6 @@ func (s *PostgresStore) ExecuteCompletionCandidate(ctx context.Context, candidat
 	return s.runLifecyclePostgresOwner.ExecuteCompletionCandidate(ctx, candidate, catalog)
 }
 
-func (s *PostgresStore) ExecuteSourceOperation(ctx context.Context, command durabledata.SourceCommand) (durabledata.SourceOperationResult, error) {
-	return s.durableDataOwner.ExecuteSourceOperation(ctx, command)
-}
-
 func (s *PostgresStore) ExpireChannelBinding(ctx context.Context, req operatorchannel.ExpireRequest) (operatorchannel.Operation, error) {
 	return s.operatorChannelPostgresOwner.ExpireChannelBinding(ctx, req)
 }
@@ -546,10 +541,6 @@ func (s *PostgresStore) ListDecisionCards(ctx context.Context, opts decisioncard
 	return s.decisionPostgresOwner.ListDecisionCards(ctx, opts)
 }
 
-func (s *PostgresStore) ListDeclarationSummaries(ctx context.Context, bundleHash string) ([]durabledata.DeclarationSummary, error) {
-	return s.durableDataOwner.ListDeclarationSummaries(ctx, bundleHash)
-}
-
 func (s *PostgresStore) ListDueHumanTaskExpiryEvents(ctx context.Context, now time.Time, limit int) ([]events.Event, error) {
 	return s.decisionPostgresOwner.ListDueHumanTaskExpiryEvents(ctx, now, limit)
 }
@@ -572,10 +563,6 @@ func (s *PostgresStore) ListFlowInstanceRouteRecords(ctx context.Context, identi
 
 func (s *PostgresStore) ListFlowInstanceRoutes(ctx context.Context) ([]flowidentity.Route, error) {
 	return s.pipelinePostgresOwner.ListFlowInstanceRoutes(ctx)
-}
-
-func (s *PostgresStore) ListHeadHistory(ctx context.Context, ref durabledata.DeclarationRef, afterRevision uint64, limit int) ([]durabledata.HeadHistory, error) {
-	return s.durableDataOwner.ListHeadHistory(ctx, ref, afterRevision, limit)
 }
 
 func (s *PostgresStore) ListMailboxItems(ctx context.Context, status string, limit int) ([]tools.MailboxItem, error) {
@@ -634,10 +621,6 @@ func (s *PostgresStore) ListPendingProofResponsibilities(ctx context.Context) ([
 	return s.operatorChannelPostgresOwner.ListPendingProofResponsibilities(ctx)
 }
 
-func (s *PostgresStore) ListPins(ctx context.Context, versionID durabledata.VersionID, afterRunID string, limit int) ([]durabledata.Pin, error) {
-	return s.durableDataOwner.ListPins(ctx, versionID, afterRunID, limit)
-}
-
 func (s *PostgresStore) ListRunDebugRuns(ctx context.Context, limit int) ([]operatorread.RunDebugRunSummary, error) {
 	return s.operatorRunPostgres.ListRunDebugRuns(ctx, limit)
 }
@@ -668,14 +651,6 @@ func (s *PostgresStore) ListUnnotifiedCriticalMailboxItems(ctx context.Context, 
 
 func (s *PostgresStore) ListV1MailboxItems(ctx context.Context, opts mailbox.V1ListOptions) ([]mailbox.V1Item, string, error) {
 	return s.mailboxPostgresOwner.ListV1MailboxItems(ctx, opts)
-}
-
-func (s *PostgresStore) ListVersionProvenance(ctx context.Context, versionID durabledata.VersionID, afterSequence uint64, limit int) ([]durabledata.Provenance, error) {
-	return s.durableDataOwner.ListVersionProvenance(ctx, versionID, afterSequence, limit)
-}
-
-func (s *PostgresStore) ListVersionSummaries(ctx context.Context, ref durabledata.DeclarationRef, afterSequence uint64, limit int) ([]durabledata.VersionSummary, error) {
-	return s.durableDataOwner.ListVersionSummaries(ctx, ref, afterSequence, limit)
 }
 
 func (s *PostgresStore) ListWorkflowInstances(ctx context.Context) ([]pipeline.WorkflowInstance, error) {
@@ -738,10 +713,6 @@ func (s *PostgresStore) LoadEntityState(ctx context.Context, identity tools.Enti
 	return s.entityPostgresOwner.LoadEntityState(ctx, identity)
 }
 
-func (s *PostgresStore) LoadHeadHistory(ctx context.Context, ref durabledata.DeclarationRef) ([]durabledata.HeadHistory, error) {
-	return s.durableDataOwner.LoadHeadHistory(ctx, ref)
-}
-
 func (s *PostgresStore) LoadHumanTaskContinuation(ctx context.Context, cardID string) (decisioncard.HumanTaskContinuation, error) {
 	return s.decisionPostgresOwner.LoadHumanTaskContinuation(ctx, cardID)
 }
@@ -794,24 +765,12 @@ func (s *PostgresStore) LoadOperatorEvent(ctx context.Context, eventID string) (
 	return s.operatorObservabilityPostgres.LoadOperatorEvent(ctx, eventID)
 }
 
-func (s *PostgresStore) LoadPins(ctx context.Context, versionID durabledata.VersionID) ([]durabledata.Pin, error) {
-	return s.durableDataOwner.LoadPins(ctx, versionID)
-}
-
 func (s *PostgresStore) LoadPreparedPublishEvent(ctx context.Context, eventID string) (bus.PreparedPublishEvent, bool, error) {
 	return s.eventPostgresOwner.LoadPreparedPublishEvent(ctx, eventID)
 }
 
 func (s *PostgresStore) LoadProposedEffectContinuation(ctx context.Context, cardID string) (decisioncard.ProposedEffectContinuation, error) {
 	return s.decisionPostgresOwner.LoadProposedEffectContinuation(ctx, cardID)
-}
-
-func (s *PostgresStore) LoadPruneOperation(ctx context.Context, id string) (durabledata.PruneOperationResult, error) {
-	return s.durableDataOwner.LoadPruneOperation(ctx, id)
-}
-
-func (s *PostgresStore) LoadPruneOperationPins(ctx context.Context, id string) ([]durabledata.Pin, error) {
-	return s.durableDataOwner.LoadPruneOperationPins(ctx, id)
 }
 
 func (s *PostgresStore) LoadReconciledStandingService(ctx context.Context, candidate pipeline.StandingServiceCandidate) (pipeline.StandingServiceReconciliation, bool, error) {
@@ -828,10 +787,6 @@ func (s *PostgresStore) LoadReplyContext(ctx context.Context, id string) (replyc
 
 func (s *PostgresStore) LoadRoutingRules(ctx context.Context) ([]manager.PersistedRoutingRule, error) {
 	return s.routingPostgresOwner.LoadRoutingRules(ctx)
-}
-
-func (s *PostgresStore) LoadRunCreationOperation(ctx context.Context, runID string) (durabledata.RunCreationOperationRecord, error) {
-	return s.durableDataOwner.LoadRunCreationOperation(ctx, runID)
 }
 
 func (s *PostgresStore) LoadRunDebugReport(ctx context.Context, runID string, opts operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error) {
@@ -880,10 +835,6 @@ func (s *PostgresStore) LoadRunTestQuiescence(ctx context.Context, runID string,
 
 func (s *PostgresStore) LoadRuntimeIngressState(ctx context.Context) (ingress.State, error) {
 	return s.runtimeIngressPostgresOwner.LoadRuntimeIngressState(ctx)
-}
-
-func (s *PostgresStore) LoadSourceOperation(ctx context.Context, id string) (durabledata.SourceOperationRecord, error) {
-	return s.durableDataOwner.LoadSourceOperation(ctx, id)
 }
 
 func (s *PostgresStore) LoadWorkflowEntityState(ctx context.Context, route flowidentity.Route, entityID identity.EntityID) (pipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
@@ -988,10 +939,6 @@ func (s *PostgresStore) ProposedEffectReadback(ctx context.Context, cardID strin
 
 func (s *PostgresStore) ProveHandoff(ctx context.Context, eventID string, route events.DeliveryRoute) (deliverylifecycle.DurableHandoffProof, error) {
 	return s.deliveryPostgresOwner.ProveHandoff(ctx, eventID, route)
-}
-
-func (s *PostgresStore) Prune(ctx context.Context, command durabledata.PruneCommand) (durabledata.PruneOperationResult, error) {
-	return s.durableDataOwner.Prune(ctx, command)
 }
 
 func (s *PostgresStore) PublishConnectedChannelActivation(ctx context.Context, req channelonboarding.PublishActivationRequest) (channelonboarding.Operation, channelonboarding.ConnectedChannelActivation, error) {
@@ -1186,14 +1133,6 @@ func (s *PostgresStore) ResolveOperatorAgentIdentity(ctx context.Context, agentI
 	return s.agentPostgresOwner.ResolveOperatorAgentIdentity(ctx, agentID, flowInstance)
 }
 
-func (s *PostgresStore) ResolveVersionPayload(ctx context.Context, ref durabledata.DeclarationRef, selector durabledata.VersionSelector) (durabledata.VersionSummary, durabledata.Version, error) {
-	return s.durableDataOwner.ResolveVersionPayload(ctx, ref, selector)
-}
-
-func (s *PostgresStore) ResolveVersionSummary(ctx context.Context, ref durabledata.DeclarationRef, selector durabledata.VersionSelector) (durabledata.VersionSummary, error) {
-	return s.durableDataOwner.ResolveVersionSummary(ctx, ref, selector)
-}
-
 func (s *PostgresStore) ResumeStandingService(ctx context.Context, operation pipeline.StandingServiceOperation) (pipeline.StandingServiceReconciliation, error) {
 	return s.pipelinePostgresOwner.ResumeStandingService(ctx, operation)
 }
@@ -1272,10 +1211,6 @@ func (s *PostgresStore) SettleSuccess(ctx context.Context, claim deliverylifecyc
 
 func (s *PostgresStore) SetupScenarioEntities(ctx context.Context, req pipeline.ScenarioSetupRequest) (pipeline.ScenarioSetupResult, error) {
 	return s.pipelinePostgresOwner.SetupScenarioEntities(ctx, req)
-}
-
-func (s *PostgresStore) Show(ctx context.Context, bundleHash string, ref durabledata.DeclarationRef) (durabledata.ResourceSnapshot, error) {
-	return s.durableDataOwner.Show(ctx, bundleHash, ref)
 }
 
 func (s *PostgresStore) Snapshot(ctx context.Context, deliveryID string) (deliverylifecycle.Snapshot, error) {
@@ -1662,10 +1597,6 @@ func (s *SQLiteRuntimeStore) ExecuteCompletionCandidate(ctx context.Context, can
 	return s.runLifecycleSQLiteOwner.ExecuteCompletionCandidate(ctx, candidate, catalog)
 }
 
-func (s *SQLiteRuntimeStore) ExecuteSourceOperation(ctx context.Context, command durabledata.SourceCommand) (durabledata.SourceOperationResult, error) {
-	return s.durableDataOwner.ExecuteSourceOperation(ctx, command)
-}
-
 func (s *SQLiteRuntimeStore) ExpireChannelBinding(ctx context.Context, req operatorchannel.ExpireRequest) (operatorchannel.Operation, error) {
 	return s.operatorChannelSQLiteOwner.ExpireChannelBinding(ctx, req)
 }
@@ -1826,10 +1757,6 @@ func (s *SQLiteRuntimeStore) ListDecisionCards(ctx context.Context, opts decisio
 	return s.decisionSQLiteOwner.ListDecisionCards(ctx, opts)
 }
 
-func (s *SQLiteRuntimeStore) ListDeclarationSummaries(ctx context.Context, bundleHash string) ([]durabledata.DeclarationSummary, error) {
-	return s.durableDataOwner.ListDeclarationSummaries(ctx, bundleHash)
-}
-
 func (s *SQLiteRuntimeStore) ListDueHumanTaskExpiryEvents(ctx context.Context, now time.Time, limit int) ([]events.Event, error) {
 	return s.decisionSQLiteOwner.ListDueHumanTaskExpiryEvents(ctx, now, limit)
 }
@@ -1844,10 +1771,6 @@ func (s *SQLiteRuntimeStore) ListFlowInstanceRouteRecords(ctx context.Context, i
 
 func (s *SQLiteRuntimeStore) ListFlowInstanceRoutes(ctx context.Context) ([]flowidentity.Route, error) {
 	return s.pipelineSQLiteOwner.ListFlowInstanceRoutes(ctx)
-}
-
-func (s *SQLiteRuntimeStore) ListHeadHistory(ctx context.Context, ref durabledata.DeclarationRef, afterRevision uint64, limit int) ([]durabledata.HeadHistory, error) {
-	return s.durableDataOwner.ListHeadHistory(ctx, ref, afterRevision, limit)
 }
 
 func (s *SQLiteRuntimeStore) ListMailboxItems(ctx context.Context, status string, limit int) ([]tools.MailboxItem, error) {
@@ -1898,10 +1821,6 @@ func (s *SQLiteRuntimeStore) ListPendingProofResponsibilities(ctx context.Contex
 	return s.operatorChannelSQLiteOwner.ListPendingProofResponsibilities(ctx)
 }
 
-func (s *SQLiteRuntimeStore) ListPins(ctx context.Context, versionID durabledata.VersionID, afterRunID string, limit int) ([]durabledata.Pin, error) {
-	return s.durableDataOwner.ListPins(ctx, versionID, afterRunID, limit)
-}
-
 func (s *SQLiteRuntimeStore) ListRunForkSelectedContractRouteRecoveries(ctx context.Context) ([]runfork.RunForkSelectedContractRouteRecovery, error) {
 	return s.runForkSQLiteOwner.ListRunForkSelectedContractRouteRecoveries(ctx)
 }
@@ -1928,14 +1847,6 @@ func (s *SQLiteRuntimeStore) ListUnnotifiedCriticalMailboxItems(ctx context.Cont
 
 func (s *SQLiteRuntimeStore) ListV1MailboxItems(ctx context.Context, opts mailbox.V1ListOptions) ([]mailbox.V1Item, string, error) {
 	return s.mailboxSQLiteOwner.ListV1MailboxItems(ctx, opts)
-}
-
-func (s *SQLiteRuntimeStore) ListVersionProvenance(ctx context.Context, versionID durabledata.VersionID, afterSequence uint64, limit int) ([]durabledata.Provenance, error) {
-	return s.durableDataOwner.ListVersionProvenance(ctx, versionID, afterSequence, limit)
-}
-
-func (s *SQLiteRuntimeStore) ListVersionSummaries(ctx context.Context, ref durabledata.DeclarationRef, afterSequence uint64, limit int) ([]durabledata.VersionSummary, error) {
-	return s.durableDataOwner.ListVersionSummaries(ctx, ref, afterSequence, limit)
 }
 
 func (s *SQLiteRuntimeStore) ListWorkflowInstances(ctx context.Context) ([]pipeline.WorkflowInstance, error) {
@@ -1990,10 +1901,6 @@ func (s *SQLiteRuntimeStore) LoadEntityState(ctx context.Context, identity tools
 	return s.entitySQLiteOwner.LoadEntityState(ctx, identity)
 }
 
-func (s *SQLiteRuntimeStore) LoadHeadHistory(ctx context.Context, ref durabledata.DeclarationRef) ([]durabledata.HeadHistory, error) {
-	return s.durableDataOwner.LoadHeadHistory(ctx, ref)
-}
-
 func (s *SQLiteRuntimeStore) LoadHumanTaskContinuation(ctx context.Context, cardID string) (decisioncard.HumanTaskContinuation, error) {
 	return s.decisionSQLiteOwner.LoadHumanTaskContinuation(ctx, cardID)
 }
@@ -2046,24 +1953,12 @@ func (s *SQLiteRuntimeStore) LoadOperatorEvent(ctx context.Context, eventID stri
 	return s.operatorObservabilitySQLite.LoadOperatorEvent(ctx, eventID)
 }
 
-func (s *SQLiteRuntimeStore) LoadPins(ctx context.Context, versionID durabledata.VersionID) ([]durabledata.Pin, error) {
-	return s.durableDataOwner.LoadPins(ctx, versionID)
-}
-
 func (s *SQLiteRuntimeStore) LoadPreparedPublishEvent(ctx context.Context, eventID string) (bus.PreparedPublishEvent, bool, error) {
 	return s.eventSQLiteOwner.LoadPreparedPublishEvent(ctx, eventID)
 }
 
 func (s *SQLiteRuntimeStore) LoadProposedEffectContinuation(ctx context.Context, cardID string) (decisioncard.ProposedEffectContinuation, error) {
 	return s.decisionSQLiteOwner.LoadProposedEffectContinuation(ctx, cardID)
-}
-
-func (s *SQLiteRuntimeStore) LoadPruneOperation(ctx context.Context, id string) (durabledata.PruneOperationResult, error) {
-	return s.durableDataOwner.LoadPruneOperation(ctx, id)
-}
-
-func (s *SQLiteRuntimeStore) LoadPruneOperationPins(ctx context.Context, id string) ([]durabledata.Pin, error) {
-	return s.durableDataOwner.LoadPruneOperationPins(ctx, id)
 }
 
 func (s *SQLiteRuntimeStore) LoadReconciledStandingService(ctx context.Context, candidate pipeline.StandingServiceCandidate) (pipeline.StandingServiceReconciliation, bool, error) {
@@ -2076,10 +1971,6 @@ func (s *SQLiteRuntimeStore) LoadRecordedActivityResult(ctx context.Context, req
 
 func (s *SQLiteRuntimeStore) LoadReplyContext(ctx context.Context, id string) (replycontext.Record, error) {
 	return s.replySQLiteOwner.LoadReplyContext(ctx, id)
-}
-
-func (s *SQLiteRuntimeStore) LoadRunCreationOperation(ctx context.Context, runID string) (durabledata.RunCreationOperationRecord, error) {
-	return s.durableDataOwner.LoadRunCreationOperation(ctx, runID)
 }
 
 func (s *SQLiteRuntimeStore) LoadRunDebugReport(ctx context.Context, runID string, opts operatorread.RunDebugQueryOptions) (operatorread.RunDebugReport, error) {
@@ -2124,10 +2015,6 @@ func (s *SQLiteRuntimeStore) LoadRunTestQuiescence(ctx context.Context, runID st
 
 func (s *SQLiteRuntimeStore) LoadRuntimeIngressState(ctx context.Context) (ingress.State, error) {
 	return s.runtimeIngressSQLiteOwner.LoadRuntimeIngressState(ctx)
-}
-
-func (s *SQLiteRuntimeStore) LoadSourceOperation(ctx context.Context, id string) (durabledata.SourceOperationRecord, error) {
-	return s.durableDataOwner.LoadSourceOperation(ctx, id)
 }
 
 func (s *SQLiteRuntimeStore) LoadWorkflowEntityState(ctx context.Context, route flowidentity.Route, entityID identity.EntityID) (pipeline.WorkflowEntityStatePersistenceRecord, bool, error) {
@@ -2228,10 +2115,6 @@ func (s *SQLiteRuntimeStore) ProposedEffectReadback(ctx context.Context, cardID 
 
 func (s *SQLiteRuntimeStore) ProveHandoff(ctx context.Context, eventID string, route events.DeliveryRoute) (deliverylifecycle.DurableHandoffProof, error) {
 	return s.deliverySQLiteOwner.ProveHandoff(ctx, eventID, route)
-}
-
-func (s *SQLiteRuntimeStore) Prune(ctx context.Context, command durabledata.PruneCommand) (durabledata.PruneOperationResult, error) {
-	return s.durableDataOwner.Prune(ctx, command)
 }
 
 func (s *SQLiteRuntimeStore) PublishConnectedChannelActivation(ctx context.Context, req channelonboarding.PublishActivationRequest) (channelonboarding.Operation, channelonboarding.ConnectedChannelActivation, error) {
@@ -2422,14 +2305,6 @@ func (s *SQLiteRuntimeStore) ResolveOperatorAgentIdentity(ctx context.Context, a
 	return s.agentSQLiteOwner.ResolveOperatorAgentIdentity(ctx, agentID, flowInstance)
 }
 
-func (s *SQLiteRuntimeStore) ResolveVersionPayload(ctx context.Context, ref durabledata.DeclarationRef, selector durabledata.VersionSelector) (durabledata.VersionSummary, durabledata.Version, error) {
-	return s.durableDataOwner.ResolveVersionPayload(ctx, ref, selector)
-}
-
-func (s *SQLiteRuntimeStore) ResolveVersionSummary(ctx context.Context, ref durabledata.DeclarationRef, selector durabledata.VersionSelector) (durabledata.VersionSummary, error) {
-	return s.durableDataOwner.ResolveVersionSummary(ctx, ref, selector)
-}
-
 func (s *SQLiteRuntimeStore) ResumeStandingService(ctx context.Context, operation pipeline.StandingServiceOperation) (pipeline.StandingServiceReconciliation, error) {
 	return s.pipelineSQLiteOwner.ResumeStandingService(ctx, operation)
 }
@@ -2512,10 +2387,6 @@ func (s *SQLiteRuntimeStore) SettleSuccess(ctx context.Context, claim deliveryli
 
 func (s *SQLiteRuntimeStore) SetupScenarioEntities(ctx context.Context, req pipeline.ScenarioSetupRequest) (pipeline.ScenarioSetupResult, error) {
 	return s.pipelineSQLiteOwner.SetupScenarioEntities(ctx, req)
-}
-
-func (s *SQLiteRuntimeStore) Show(ctx context.Context, bundleHash string, ref durabledata.DeclarationRef) (durabledata.ResourceSnapshot, error) {
-	return s.durableDataOwner.Show(ctx, bundleHash, ref)
 }
 
 func (s *SQLiteRuntimeStore) Snapshot(ctx context.Context, deliveryID string) (deliverylifecycle.Snapshot, error) {

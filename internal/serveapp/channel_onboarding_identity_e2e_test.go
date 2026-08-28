@@ -2,6 +2,7 @@ package serveapp
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
+	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/servedparity"
 	"github.com/division-sh/swarm/internal/testutil"
 )
@@ -100,6 +102,11 @@ func TestChannelOnboardingE2E08OperatorRejection(t *testing.T) {
 			if registrations, deliveries := harness.provider.Counts(); registrations != 1 || deliveries != 0 {
 				t.Fatalf("%s E2E-08 provider effects = %d/%d, want 1/0", backend, registrations, deliveries)
 			}
+			retired := submitChannelOnboardingClaim(t, callbackURL, signingSecret, begun.IdentityOperation.Challenge, 7109, "rejected_after_settlement")
+			if retired.StatusCode != http.StatusNotFound {
+				t.Fatalf("%s E2E-08 rejected callback remained admitted: %#v", backend, retired)
+			}
+			assertChannelOnboardingNoRecoveryGuidance(t, harness, begun.Operation.OperationID)
 			reacquired := startChannelOnboardingRPC(t, harness, channelonboarding.VerbConnect, "reacquired-token", nil)
 			if reacquired.Operation.OperationID == begun.Operation.OperationID || reacquired.Operation.Phase != channelonboarding.PhaseAwaitingExternalIdentity {
 				t.Fatalf("%s E2E-08 slot reacquisition = %#v", backend, reacquired.Operation)
@@ -215,7 +222,17 @@ func TestChannelOnboardingE2E18IngressUnavailable(t *testing.T) {
 		t.Run(string(backend), func(t *testing.T) {
 			harness := newChannelOnboardingE2EHarness(t, backend, false)
 			harness.start(t)
-			result := startChannelOnboardingRPC(t, harness, channelonboarding.VerbConnect, "no-ingress-token", nil)
+			const secret = "no-ingress-token-e2e18-private"
+			startEnvelope := requestServedJSONRPC(t, harness.rpcEndpoint(), "channel.onboarding_start", map[string]any{
+				"provider": "telegram", "verb": string(channelonboarding.VerbConnect), "provider_credential": secret, "save_proof": true,
+			})
+			if startEnvelope.Error != nil {
+				t.Fatalf("%s E2E-18 start error = %#v", backend, startEnvelope.Error)
+			}
+			var result channelonboarding.Result
+			if err := json.Unmarshal(startEnvelope.Result, &result); err != nil {
+				t.Fatalf("%s E2E-18 decode start result: %v\n%s", backend, err, startEnvelope.Result)
+			}
 			if result.Operation.Phase != channelonboarding.PhaseFailed || result.Operation.FailureCode != "public_ingress_unavailable" || result.Readiness == nil || result.Readiness.Ready {
 				t.Fatalf("%s E2E-18 result = %#v", backend, result)
 			}
@@ -224,6 +241,16 @@ func TestChannelOnboardingE2E18IngressUnavailable(t *testing.T) {
 				t.Fatalf("%s E2E-18 provider effects = %d/%d, want 0/0", backend, registrations, deliveries)
 			}
 			assertChannelOnboardingCredentialStoreEmpty(t, harness.credentialPath, string(backend)+" E2E-18 no ingress")
+			getEnvelope := requestServedJSONRPC(t, harness.rpcEndpoint(), "channel.onboarding_get", map[string]any{"operation_id": result.Operation.OperationID})
+			jsonList, humanList := channelOnboardingListSurfaces(t, harness)
+			assertChannelOnboardingSecretAbsent(t, secret, map[string]string{
+				"start RPC result/error": mustMarshalChannelOnboardingSurface(t, startEnvelope),
+				"get RPC result/error":   mustMarshalChannelOnboardingSurface(t, getEnvelope),
+				"JSON list":              jsonList,
+				"human list":             humanList,
+				"serve output/logs":      harness.process.outputString(),
+				"selected-store row":     channelOnboardingPersistedOperationSurface(t, harness, result.Operation.OperationID),
+			})
 			harness.stop(t)
 		})
 	}
@@ -414,6 +441,8 @@ type channelOnboardingE2EHarness struct {
 	provider       *channelOnboardingTelegramProvider
 	telegram       *httptest.Server
 	credentialPath string
+	backend        servedparity.Backend
+	storeDSN       string
 	endpoint       string
 	process        *serveRuntimeTestProcess
 }
@@ -440,13 +469,16 @@ func newChannelOnboardingE2EHarness(t *testing.T, backend servedparity.Backend, 
 		opts.PublicWebhookBaseURL = "https://hooks.channel-onboarding.test"
 		opts.PublicWebhookListen = publicListen
 	}
+	storeDSN := ""
 	switch backend {
 	case servedparity.BackendDefaultSQLite:
 		sqlitePath := filepath.Join(t.TempDir(), "channel-onboarding-e2e.sqlite")
+		storeDSN = sqlitePath
 		opts.ConfigPath = writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, channelOnboardingHostWorkspaceFields())
 		opts.StoreMode = "sqlite"
 	case servedparity.BackendExplicitPostgres:
 		dsn, _, _ := testutil.StartPostgres(t)
+		storeDSN = dsn
 		opts.ConfigPath = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
 		opts.StoreMode = "postgres"
 	default:
@@ -454,7 +486,7 @@ func newChannelOnboardingE2EHarness(t *testing.T, backend servedparity.Backend, 
 	}
 	opts.StoreModeSet = true
 	enableChannelOnboardingRecoveryOnStartup(t, opts.ConfigPath)
-	return &channelOnboardingE2EHarness{opts: opts, provider: provider, telegram: telegram, credentialPath: credentialPath}
+	return &channelOnboardingE2EHarness{opts: opts, provider: provider, telegram: telegram, credentialPath: credentialPath, backend: backend, storeDSN: storeDSN}
 }
 
 func (h *channelOnboardingE2EHarness) start(t *testing.T) {
@@ -506,6 +538,130 @@ func retryChannelOnboardingRPC(t *testing.T, harness *channelOnboardingE2EHarnes
 	var result channelonboarding.Result
 	requireServedJSONRPCResult(t, harness.rpcEndpoint(), "channel.onboarding_retry", params, &result)
 	return result
+}
+
+func assertChannelOnboardingNoRecoveryGuidance(t *testing.T, harness *channelOnboardingE2EHarness, operationID string) {
+	t.Helper()
+	jsonList, humanList := channelOnboardingListSurfaces(t, harness)
+	resume := "swarm channel resume " + operationID
+	for label, surface := range map[string]string{"JSON list": jsonList, "human list": humanList} {
+		if strings.Contains(surface, operationID) || strings.Contains(surface, resume) {
+			t.Fatalf("%s retained recovery guidance for rejected operation %s:\n%s", label, operationID, surface)
+		}
+	}
+}
+
+func channelOnboardingListSurfaces(t *testing.T, harness *channelOnboardingE2EHarness) (string, string) {
+	t.Helper()
+	run := func(jsonOutput bool) string {
+		stdout, stderr := &lockedBuffer{}, &lockedBuffer{}
+		args := []string{"--config", harness.opts.ConfigPath, "channel", "list", "--api-server", harness.endpoint}
+		if jsonOutput {
+			args = append(args, "--json")
+		}
+		if code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), args, stdout, stderr, nil); code != 0 {
+			t.Fatalf("channel list exited %d\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+		}
+		return stdout.String() + "\n" + stderr.String()
+	}
+	return run(true), run(false)
+}
+
+func assertChannelOnboardingSecretAbsent(t *testing.T, secret string, surfaces map[string]string) {
+	t.Helper()
+	digest := runtimeeffects.Fingerprint([]byte(secret))
+	for label, surface := range surfaces {
+		if strings.Contains(surface, secret) || strings.Contains(strings.ToLower(surface), strings.ToLower(digest)) {
+			t.Fatalf("%s leaked the provider credential or its reusable digest", label)
+		}
+	}
+}
+
+func mustMarshalChannelOnboardingSurface(t *testing.T, value any) string {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal channel onboarding surface: %v", err)
+	}
+	return string(raw)
+}
+
+func channelOnboardingPersistedOperationSurface(t *testing.T, harness *channelOnboardingE2EHarness, operationID string) string {
+	t.Helper()
+	driver, placeholder := "sqlite", "?"
+	if harness.backend == servedparity.BackendExplicitPostgres {
+		driver, placeholder = "postgres", "$1"
+	}
+	db, err := sql.Open(driver, harness.storeDSN)
+	if err != nil {
+		t.Fatalf("open %s channel onboarding store: %v", harness.backend, err)
+	}
+	defer db.Close()
+	rows, err := db.QueryContext(context.Background(), "SELECT * FROM channel_onboarding_operations WHERE operation_id="+placeholder, operationID)
+	if err != nil {
+		t.Fatalf("query %s channel onboarding operation: %v", harness.backend, err)
+	}
+	defer rows.Close()
+	columns, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("read %s channel onboarding columns: %v", harness.backend, err)
+	}
+	if !rows.Next() {
+		t.Fatalf("%s selected store has no channel onboarding operation %s", harness.backend, operationID)
+	}
+	values := make([]any, len(columns))
+	destinations := make([]any, len(columns))
+	for index := range values {
+		destinations[index] = &values[index]
+	}
+	if err := rows.Scan(destinations...); err != nil {
+		t.Fatalf("scan %s channel onboarding operation: %v", harness.backend, err)
+	}
+	record := make(map[string]string, len(columns))
+	for index, column := range columns {
+		switch value := values[index].(type) {
+		case []byte:
+			record[column] = string(value)
+		default:
+			record[column] = fmt.Sprint(value)
+		}
+	}
+	return mustMarshalChannelOnboardingSurface(t, record)
+}
+
+type channelOnboardingPersistedHandoff struct {
+	OperationPhase              string
+	OperationActivationRevision int64
+	OperationRuntimeInstanceID  string
+	ActivationRevision          int64
+	ActivationRuntimeInstanceID string
+	ActivationStatus            string
+}
+
+func channelOnboardingPersistedHandoffAtPublication(t *testing.T, harness *channelOnboardingE2EHarness, operationID string) channelOnboardingPersistedHandoff {
+	t.Helper()
+	driver, placeholder := "sqlite", "?"
+	if harness.backend == servedparity.BackendExplicitPostgres {
+		driver, placeholder = "postgres", "$1"
+	}
+	db, err := sql.Open(driver, harness.storeDSN)
+	if err != nil {
+		t.Fatalf("open %s channel onboarding store: %v", harness.backend, err)
+	}
+	defer db.Close()
+	query := `SELECT operation.phase,operation.activation_revision,operation.runtime_instance_id,
+		activation.activation_revision,activation.runtime_instance_id,activation.status
+		FROM channel_onboarding_operations operation
+		JOIN connected_channel_activations activation ON activation.operation_id=operation.operation_id
+		WHERE operation.operation_id=` + placeholder + ` ORDER BY activation.activation_revision DESC LIMIT 1`
+	var out channelOnboardingPersistedHandoff
+	if err := db.QueryRowContext(context.Background(), query, operationID).Scan(
+		&out.OperationPhase, &out.OperationActivationRevision, &out.OperationRuntimeInstanceID,
+		&out.ActivationRevision, &out.ActivationRuntimeInstanceID, &out.ActivationStatus,
+	); err != nil {
+		t.Fatalf("query %s channel onboarding publication handoff: %v", harness.backend, err)
+	}
+	return out
 }
 
 type channelOnboardingClaimAdmission struct {
