@@ -357,8 +357,7 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	runID := goldenPublishIngress(t, process.rpc, bundleHash, options.candidateIDs)
 	var preRestartRuntimeLog *goldenRuntimeLog
 	if restart {
-		waitForGoldenCrashCheckpoint(t, process.rpc, runID, options.candidateIDs, runDeadline)
-		log := waitForGoldenPreRestartRuntimeLog(t, process.rpc, runID, runDeadline)
+		log := waitForGoldenCrashCheckpoint(t, process.rpc, runID, options.candidateIDs, runDeadline)
 		preRestartRuntimeLog = &log
 		if err := process.killAndWait(5 * time.Second); err != nil {
 			t.Fatalf("force-kill release serve: %v\n%s", err, process.output.String())
@@ -567,11 +566,13 @@ type goldenDiagnosis struct {
 	TestQuiescence   goldenQuiescence  `json:"test_quiescence"`
 }
 
-func waitForGoldenCrashCheckpoint(t *testing.T, rpc *releaseRPCClient, runID string, candidateIDs []string, deadline time.Duration) {
+func waitForGoldenCrashCheckpoint(t *testing.T, rpc *releaseRPCClient, runID string, candidateIDs []string, deadline time.Duration) goldenRuntimeLog {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), deadline)
 	defer cancel()
 	var last goldenDiagnosis
+	var lastLogs []goldenRuntimeLog
+	var selected goldenRuntimeLog
 	err := pollReleaseCondition(ctx, 5*time.Millisecond, func() (bool, error) {
 		events, err := listGoldenEvents(ctx, rpc, runID)
 		if err != nil {
@@ -583,11 +584,36 @@ func waitForGoldenCrashCheckpoint(t *testing.T, rpc *releaseRPCClient, runID str
 		if err := rpc.call(ctx, "run.diagnose", map[string]any{"run_id": runID}, &last); err != nil {
 			return false, err
 		}
-		return last.Run.Status == "running" && !last.TestQuiescence.Ready && goldenActiveWork(last.TestQuiescence) > 0, nil
+		if last.Run.Status != "running" || last.TestQuiescence.Ready || goldenActiveWork(last.TestQuiescence) == 0 {
+			return false, nil
+		}
+		var result struct {
+			Logs []goldenRuntimeLog `json:"logs"`
+		}
+		if err := rpc.call(ctx, "runtime.logs", map[string]any{"run_id": runID, "component": "eventbus", "limit": 100, "order": "asc"}, &result); err != nil {
+			return false, err
+		}
+		lastLogs = result.Logs
+		for _, log := range result.Logs {
+			if log.stringField("action") != "published" {
+				continue
+			}
+			if log.stringField("log_id") == "" || log.stringField("run_id") != runID || log.stringField("event_id") == "" ||
+				log.stringField("parent_event_id") == "" || log.stringField("source") == "" || log.stringField("agent_id") == "" {
+				continue
+			}
+			selected = log
+			return true, nil
+		}
+		return false, nil
 	})
 	if err != nil {
-		t.Fatalf("wait for public durable forced-kill checkpoint: %v; last diagnosis=%#v", err, last)
+		t.Fatalf("wait for public durable forced-kill checkpoint: %v; last diagnosis=%#v; last runtime logs=%#v", err, last, lastLogs)
 	}
+	if selected.stringField("source") != selected.stringField("agent_id") {
+		t.Fatalf("pre-restart runtime log source = %q, want exact agent source %q", selected.stringField("source"), selected.stringField("agent_id"))
+	}
+	return selected
 }
 
 func goldenActiveWork(quiescence goldenQuiescence) int {
@@ -691,42 +717,6 @@ func (l goldenRuntimeLog) stringField(name string) string {
 		return ""
 	}
 	return value
-}
-
-func waitForGoldenPreRestartRuntimeLog(t *testing.T, rpc *releaseRPCClient, runID string, deadline time.Duration) goldenRuntimeLog {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), deadline)
-	defer cancel()
-	var last []goldenRuntimeLog
-	var selected goldenRuntimeLog
-	err := pollReleaseCondition(ctx, 5*time.Millisecond, func() (bool, error) {
-		var result struct {
-			Logs []goldenRuntimeLog `json:"logs"`
-		}
-		if err := rpc.call(ctx, "runtime.logs", map[string]any{"run_id": runID, "component": "agent-manager", "limit": 100, "order": "asc"}, &result); err != nil {
-			return false, err
-		}
-		last = result.Logs
-		for _, log := range result.Logs {
-			if log.stringField("action") != "delivery_lifecycle_transition" {
-				continue
-			}
-			if log.stringField("log_id") == "" || log.stringField("run_id") != runID || log.stringField("event_id") == "" ||
-				log.stringField("parent_event_id") == "" || log.stringField("source") == "" || log.stringField("agent_id") == "" {
-				continue
-			}
-			selected = log
-			return true, nil
-		}
-		return false, nil
-	})
-	if err != nil {
-		t.Fatalf("wait for pre-restart durable runtime log: %v; last logs=%#v", err, last)
-	}
-	if selected.stringField("source") != selected.stringField("agent_id") {
-		t.Fatalf("pre-restart runtime log source = %q, want exact agent source %q", selected.stringField("source"), selected.stringField("agent_id"))
-	}
-	return selected
 }
 
 type goldenEventDelivery struct {
