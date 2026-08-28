@@ -289,13 +289,11 @@ func TestPublicSurfaceStoreParityRejectsCoverageDrift(t *testing.T) {
 			want: "store parity claim non_store_transport method agent.frame different-concept ledger classification conflicts with claim dispositions",
 		},
 		{
-			name: "stale split",
+			name: "stale split tracker",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
-				claim := storeParityClaimByID(t, matrix, "selected_contract_fork")
-				claim.SplitIssue = 999999
-				storeParityProofByID(t, matrix, claim.SplitProofID).Issue = 999999
+				storeParityProofByID(t, matrix, "fanout-contention-2274").Issue = 999999
 			},
-			want: "store parity proof backend-split-2276 issue #999999",
+			want: "store parity proof fanout-contention-2274 issue #999999",
 		},
 		{
 			name: "teaching proof",
