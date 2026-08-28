@@ -16,7 +16,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/lib/pq"
 	"gopkg.in/yaml.v3"
 )
@@ -684,7 +683,15 @@ type goldenEvent struct {
 	DeadLetters []json.RawMessage     `json:"dead_letters"`
 }
 
-type goldenRuntimeLog = operatorread.OperatorRuntimeLogEntry
+type goldenRuntimeLog map[string]json.RawMessage
+
+func (l goldenRuntimeLog) stringField(name string) string {
+	var value string
+	if err := json.Unmarshal(l[name], &value); err != nil {
+		return ""
+	}
+	return value
+}
 
 func waitForGoldenPreRestartRuntimeLog(t *testing.T, rpc *releaseRPCClient, runID string, deadline time.Duration) goldenRuntimeLog {
 	t.Helper()
@@ -701,10 +708,11 @@ func waitForGoldenPreRestartRuntimeLog(t *testing.T, rpc *releaseRPCClient, runI
 		}
 		last = result.Logs
 		for _, log := range result.Logs {
-			if log.Action != "delivery_lifecycle_transition" {
+			if log.stringField("action") != "delivery_lifecycle_transition" {
 				continue
 			}
-			if log.LogID == "" || log.RunID != runID || log.EventID == "" || log.ParentEventID == "" || log.Source == "" || log.AgentID == "" {
+			if log.stringField("log_id") == "" || log.stringField("run_id") != runID || log.stringField("event_id") == "" ||
+				log.stringField("parent_event_id") == "" || log.stringField("source") == "" || log.stringField("agent_id") == "" {
 				continue
 			}
 			selected = log
@@ -715,8 +723,8 @@ func waitForGoldenPreRestartRuntimeLog(t *testing.T, rpc *releaseRPCClient, runI
 	if err != nil {
 		t.Fatalf("wait for pre-restart durable runtime log: %v; last logs=%#v", err, last)
 	}
-	if selected.Source != selected.AgentID {
-		t.Fatalf("pre-restart runtime log source = %q, want exact agent source %q", selected.Source, selected.AgentID)
+	if selected.stringField("source") != selected.stringField("agent_id") {
+		t.Fatalf("pre-restart runtime log source = %q, want exact agent source %q", selected.stringField("source"), selected.stringField("agent_id"))
 	}
 	return selected
 }
@@ -906,11 +914,14 @@ func assertGoldenRestartedRuntimeLog(t *testing.T, ctx context.Context, rpc *rel
 	var result struct {
 		Logs []goldenRuntimeLog `json:"logs"`
 	}
-	if err := rpc.call(ctx, "runtime.logs", map[string]any{"run_id": runID, "component": expected.Component, "source": expected.Source, "limit": 100, "order": "asc"}, &result); err != nil {
+	component := expected.stringField("component")
+	source := expected.stringField("source")
+	logID := expected.stringField("log_id")
+	if err := rpc.call(ctx, "runtime.logs", map[string]any{"run_id": runID, "component": component, "source": source, "limit": 100, "order": "asc"}, &result); err != nil {
 		t.Fatalf("read durable runtime logs after restart: %v", err)
 	}
 	for _, log := range result.Logs {
-		if log.LogID != expected.LogID {
+		if log.stringField("log_id") != logID {
 			continue
 		}
 		if !reflect.DeepEqual(log, *expected) {
@@ -918,7 +929,7 @@ func assertGoldenRestartedRuntimeLog(t *testing.T, ctx context.Context, rpc *rel
 		}
 		return
 	}
-	t.Fatalf("post-restart runtime logs = %#v, want pre-restart fact %s with source %s and parent %s", result.Logs, expected.LogID, expected.Source, expected.ParentEventID)
+	t.Fatalf("post-restart runtime logs = %#v, want pre-restart fact %s with source %s and parent %s", result.Logs, logID, source, expected.stringField("parent_event_id"))
 }
 
 func assertGoldenNoDelivery(t *testing.T, event goldenEvent) {
