@@ -131,6 +131,7 @@ func newTier8Runtime(t testing.TB, bundle *runtimecontracts.WorkflowContractBund
 	})
 	selected := storetest.StartSQLiteRuntimeStore(t)
 	cfg := testRuntimeConfig()
+	bundleSourceFact := catalogBundleSourceFact(t, bundle)
 	deps := catalogSQLiteRuntimeDeps(
 		cfg,
 		selected,
@@ -138,14 +139,16 @@ func newTier8Runtime(t testing.TB, bundle *runtimecontracts.WorkflowContractBund
 		module,
 		newScriptedLLMRuntime(),
 		processOwner,
+		bundleSourceFact,
 	)
 	deps.Options.LLMRuntime = runtimellm.NewNoopRuntime(runtimellm.AnthropicAPIProviderContract())
 	deps.Options.ProviderCredentials = tier8ProviderCredentialStore(t, "ANTHROPIC_API_KEY", "test-key")
-	rt, err := runtime.NewRuntime(testAuthorActivityContext(context.Background()), deps)
+	ctx := testAuthorActivityContextForBundle(context.Background(), bundleSourceFact)
+	rt, err := runtime.NewRuntime(ctx, deps)
 	if err != nil {
 		return nil, err
 	}
-	installCatalogRuntimeStartupGrant(t, testAuthorActivityContext(context.Background()), selected, rt)
+	installCatalogRuntimeStartupGrant(t, ctx, selected, rt)
 	return rt, nil
 
 }

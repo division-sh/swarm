@@ -19,7 +19,9 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -305,12 +307,29 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 		}),
 		time.Now().UTC(),
 	)
-	result, err := exec.Execute(testAuthorActivityContext(context.Background()), runtimeengine.ExecutionRequest{
-		EntityID:       runtimeidentity.EntityID(portfolioEntityID),
-		Node:           portfolioNode,
-		Event:          parent,
-		ProducerSource: parent.RoutingSource(),
-		Handler:        handler,
+	claim, err := runtimedelivery.AdmitPersistedClaim(
+		eventtest.UUID("delivery-notify-all-children"),
+		parent.RunID(),
+		"notify-all-children:"+portfolioNode.Key(),
+		eventtest.UUID("claim-notify-all-children"),
+		1,
+		runtimedelivery.SubscriberNode,
+		portfolioNode.Key(),
+	)
+	if err != nil {
+		t.Fatalf("admit fan-out delivery claim: %v", err)
+	}
+	executionCtx := runtimedelivery.WithClaim(testAuthorActivityContext(context.Background()), claim)
+	result, err := exec.Execute(executionCtx, runtimeengine.ExecutionRequest{
+		EntityID:        runtimeidentity.EntityID(portfolioEntityID),
+		Node:            portfolioNode,
+		ExecutionFlowID: runtimeidentity.FlowID(notifyallchildren.OwnerFlowID),
+		Route:           runtimeflowidentity.DeriveRoute(notifyallchildren.OwnerFlowID, parent.RunID()),
+		Event:           parent,
+		ProducerSource:  parent.RoutingSource(),
+		HandlerEventKey: notifyallchildren.OwnerTriggerEvent,
+		Handler:         handler,
+		FanOutPlans:     source.FanOutPlansForHandler(portfolioNode, notifyallchildren.OwnerTriggerEvent),
 		State: runtimeengine.StateSnapshot{
 			EntityID:     runtimeidentity.EntityID(portfolioEntityID),
 			CurrentState: "active",
@@ -320,8 +339,25 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 	if err != nil {
 		t.Fatalf("Execute fan_out: %v", err)
 	}
-	if result.Status != runtimeengine.OutcomeFannedOut || result.FanOutCount != 2 || len(result.EmitIntents) != 2 {
-		t.Fatalf("fan_out result = status:%s count:%d intents:%d", result.Status, result.FanOutCount, len(result.EmitIntents))
+	if result.Status != runtimeengine.OutcomeFannedOut || result.FanOutCount != 2 || result.FanOutIntent == nil || len(result.EmitIntents) != 0 {
+		t.Fatalf("fan_out result = status:%s count:%d obligation:%#v eager:%d", result.Status, result.FanOutCount, result.FanOutIntent, len(result.EmitIntents))
+	}
+	now := time.Now().UTC()
+	intent := fanoutobligation.Intent{
+		Request: *result.FanOutIntent, Source: result.FanOutIntent.Source,
+		Status: fanoutobligation.StatusOpen, NextChunkSize: fanoutobligation.InitialChunkSize,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if intent.Source.Kind == fanoutobligation.SourceEntityField {
+		intent.Source.MutationID = eventtest.UUID("notify-all-children-source-revision")
+	}
+	itemIntents := make([]runtimeengine.EmitIntent, 0, result.FanOutCount)
+	for ordinal, item := range []any{"acct-a", "acct-b"} {
+		emit, evalErr := exec.EvaluateFanOutOrdinal(testAuthorActivityContext(context.Background()), intent, parent, item, ordinal)
+		if evalErr != nil {
+			t.Fatalf("EvaluateFanOutOrdinal(%d): %v", ordinal, evalErr)
+		}
+		itemIntents = append(itemIntents, emit)
 	}
 
 	accountAEntityID := runtimeflowidentity.EntityID("account/acct-a")
@@ -376,7 +412,7 @@ func TestNotifyAllChildrenConformance_CoversTargetlessFanOutEmitRouteAuthority(t
 		"acct-a": {FlowID: "account", FlowInstance: "account/acct-a", EntityID: accountAEntityID},
 		"acct-b": {FlowID: "account", FlowInstance: "account/acct-b", EntityID: accountBEntityID},
 	}
-	for idx, intent := range result.EmitIntents {
+	for idx, intent := range itemIntents {
 		evt := eventtest.Child(
 			eventtest.UUID("evt-notify-all-children-child-"+string(rune('a'+idx))),
 			intent.Event.Type(),

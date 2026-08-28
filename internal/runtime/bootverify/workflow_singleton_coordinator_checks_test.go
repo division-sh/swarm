@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
@@ -293,8 +294,8 @@ pins:
 `, `
 coordinator_state:
   verticals:
-    type: map[text]VerticalState
-    initial: {}
+    type: "[VerticalState]"
+    initial: []
 `, "", `
 coordinator-node:
   id: coordinator-node
@@ -307,6 +308,10 @@ coordinator-node:
 	if flow == nil {
 		t.Fatal("coordinator flow view is missing")
 	}
+	elementID, err := contractelementidentity.ParseContractElementID("06825f28-d51d-46ed-87fc-edb9d6a91476")
+	if err != nil {
+		t.Fatal(err)
+	}
 	flow.Children = append(flow.Children, runtimecontracts.FlowContractView{
 		Paths: runtimecontracts.FlowContractPaths{
 			PackageKey: "flows/coordinator/nested",
@@ -316,11 +321,20 @@ coordinator-node:
 			"nested-reader": {
 				ID: "nested-reader",
 				EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{
-					"job.received": {FanOut: &runtimecontracts.FanOutSpec{ItemsFrom: "entity.verticals"}},
+					"job.received": {FanOut: &runtimecontracts.FanOutSpec{
+						ElementID: elementID, ItemsFrom: "entity.verticals", As: "vertical", Identity: "vertical.status",
+						Emit: runtimecontracts.EmitSpec{Event: "job.received", Fields: map[string]runtimecontracts.ExpressionValue{
+							"vertical_id": runtimecontracts.CELExpression("vertical.status"),
+							"job":         runtimecontracts.LiteralExpression(map[string]any{"id": "nested", "title": "nested"}),
+						}},
+					}},
 				},
 			},
 		},
 	})
+	if failures := bundle.PrepareFanOutPlans(); len(failures) != 0 {
+		t.Fatalf("prepare nested project-package fan-out owner: %v", failures)
+	}
 
 	for _, demand := range BuildSingletonCoordinatorDemandProjection(semanticview.Wrap(bundle)) {
 		if demand.FlowID == "coordinator" && demand.Node.NodeID() == "nested-reader" && demand.Kind == "entity_read.fan_out.items_from" && demand.Target == "entity.verticals" && demand.SourceFile == "flows/coordinator/nested/nodes.yaml" {

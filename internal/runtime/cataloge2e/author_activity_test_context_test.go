@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 )
 
@@ -23,11 +24,28 @@ func mustAuthorActivityTestBundleSourceFact() runtimecorrelation.BundleSourceFac
 }
 
 func testAuthorActivityContext(ctx context.Context) context.Context {
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, authorActivityTestBundleSourceFact)
+	return testAuthorActivityContextForBundle(ctx, authorActivityTestBundleSourceFact)
+}
+
+func testAuthorActivityContextForBundle(ctx context.Context, fact runtimecorrelation.BundleSourceFact) context.Context {
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		authorActivityTestRuntimeInstanceID,
-		authorActivityTestBundleSourceFact.BundleHash(),
+		fact.BundleHash(),
 	))
+}
+
+func catalogBundleSourceFact(t testing.TB, bundle *runtimecontracts.WorkflowContractBundle) runtimecorrelation.BundleSourceFact {
+	t.Helper()
+	hash, err := runtimecontracts.BundleHash(bundle)
+	if err != nil {
+		t.Fatalf("compute catalog fixture bundle identity: %v", err)
+	}
+	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(hash)
+	if err != nil {
+		t.Fatalf("admit catalog fixture bundle source fact: %v", err)
+	}
+	return fact
 }
 
 type testAuthorActivityCatalogRegistrar interface {

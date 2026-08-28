@@ -116,17 +116,20 @@ func (s *failingNotifyAllChildrenSQLiteStore) ReplaceFlowInstanceRouteTopology(
 }
 
 type notifyAllChildrenRuntime struct {
-	bus         *runtimebus.EventBus
-	diagnostics *fanInBarrierDiagnosticBus
-	manager     *runtimemanager.AgentManager
-	pipeline    *runtimepipeline.PipelineCoordinator
-	workOwner   *worklifetime.RuntimeOccurrence
+	bus              *runtimebus.EventBus
+	diagnostics      *fanInBarrierDiagnosticBus
+	manager          *runtimemanager.AgentManager
+	pipeline         *runtimepipeline.PipelineCoordinator
+	workOwner        *worklifetime.RuntimeOccurrence
+	selected         notifyAllChildrenStore
+	bundleSourceFact runtimecorrelation.BundleSourceFact
 }
 
 type notifyAllChildrenRuntimeOptions struct {
-	realMockAgents  bool
-	agentGate       *notifyAllChildrenAgentGate
-	processTopology *notifyAllChildrenProcessTopology
+	realMockAgents   bool
+	agentGate        *notifyAllChildrenAgentGate
+	processTopology  *notifyAllChildrenProcessTopology
+	bundleSourceFact runtimecorrelation.BundleSourceFact
 }
 
 type notifyAllChildrenProcessTopology struct {
@@ -208,13 +211,14 @@ func (p *notifyAllChildrenProcessTopology) install(
 	ctx context.Context,
 	manager *runtimemanager.AgentManager,
 	source semanticview.Source,
+	bundleSourceFact runtimecorrelation.BundleSourceFact,
 	lifecycle *notifyAllChildrenLifecycleOwner,
 ) {
 	t.Helper()
 	if p == nil || p.capability == nil {
 		t.Fatal("notify-all-children process topology capability is required")
 	}
-	bundleHash, bundleSource := authorActivityTestBundleSourceFact.StorageValues()
+	bundleHash, bundleSource := bundleSourceFact.StorageValues()
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: bundleHash, BundleSource: bundleSource}
 	desired, err := manager.CompileStaticTopologyDesiredAgents(source, coordinate)
 	if err != nil {
@@ -414,25 +418,27 @@ func proveDynamicFlowSourceRevisionConvergence(
 ) {
 	t.Helper()
 	runID := uuid.NewString()
-	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	sourceV1 := notifyallchildren.LoadSource(t, notifyallchildren.Options{
 		AgentTopologyRevision: 1,
 		AutoEmitOnCreate:      autoEmit,
 	})
+	ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
 	processTopology := newNotifyAllChildrenProcessTopology(t, ctx, selected)
 	scopeV1, ok := semanticview.FlowScopeByID(sourceV1, notifyallchildren.ChildFlowID)
 	if !ok || len(scopeV1.Agents) != 2 {
 		t.Fatalf("v1 account agent contract = %#v found=%t, want reader/retired", scopeV1.Agents, ok)
 	}
-	runtimeV1 := newNotifyAllChildrenRuntime(t, selected, db, sourceV1, time.Now, notifyAllChildrenRuntimeOptions{processTopology: processTopology})
-	if err := runtimeV1.manager.Run(managedConformanceExecutionContext(t, ctx, "dynamic-flow-source-v1")); err != nil {
+	runtimeV1 := newNotifyAllChildrenRuntime(t, selected, db, sourceV1, time.Now, notifyAllChildrenRuntimeOptions{
+		processTopology: processTopology, bundleSourceFact: authorActivityTestBundleSourceFact,
+	})
+	if err := runtimeV1.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "dynamic-flow-source-v1", runtimeV1.bundleSourceFact)); err != nil {
 		t.Fatalf("run v1 manager: %v", err)
 	}
 
-	publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtimeV1.bus, sourceV1, runID, "portfolio.opened", map[string]any{
+	publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtimeV1, sourceV1, runID, "portfolio.opened", map[string]any{
 		"portfolio_id": "portfolio-main",
 	})
-	publishNotifyAllChildrenEvent(t, ctx, runtimeV1.bus, sourceV1, runID, "portfolio.account.register.requested", map[string]any{
+	publishNotifyAllChildrenEvent(t, ctx, runtimeV1, sourceV1, runID, "portfolio.account.register.requested", map[string]any{
 		"portfolio_id": "portfolio-main",
 		"account_id":   "acct-revision",
 	})
@@ -467,11 +473,14 @@ func proveDynamicFlowSourceRevisionConvergence(
 	if _, found := scopeV2.Agents["retired"]; found {
 		t.Fatalf("v2 account contract retained removed agent: %#v", scopeV2.Agents)
 	}
-	runtimeV2 := newNotifyAllChildrenRuntime(t, selected, db, sourceV2, time.Now, notifyAllChildrenRuntimeOptions{processTopology: processTopology})
-	if err := runtimeV2.manager.Run(managedConformanceExecutionContext(t, ctx, "dynamic-flow-source-v2")); err != nil {
+	runtimeV2 := newNotifyAllChildrenRuntime(t, selected, db, sourceV2, time.Now, notifyAllChildrenRuntimeOptions{
+		processTopology: processTopology, bundleSourceFact: authorActivityTestBundleSourceFact,
+	})
+	ctxV2 := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), runtimeV2.bundleSourceFact), runID)
+	if err := runtimeV2.manager.Run(managedConformanceExecutionContextForBundle(t, ctxV2, "dynamic-flow-source-v2", runtimeV2.bundleSourceFact)); err != nil {
 		t.Fatalf("run v2 manager: %v", err)
 	}
-	reconcileCtx := worklifetime.WithOccurrence(ctx, runtimeV2.workOwner)
+	reconcileCtx := worklifetime.WithOccurrence(ctxV2, runtimeV2.workOwner)
 	failNextRouteReplacement()
 	sourceRevisionErr := make(chan error, 1)
 	start := make(chan struct{})
@@ -490,7 +499,7 @@ func proveDynamicFlowSourceRevisionConvergence(
 	if err := <-sourceRevisionErr; err != nil && !strings.Contains(err.Error(), "injected transient") {
 		t.Fatalf("reconcile revised source: %v", err)
 	}
-	revisedReadiness := waitNotifyAllChildrenRuntimeReadiness(t, ctx, runtimeV2.pipeline, runID, descriptor.FlowInstance)
+	revisedReadiness := waitNotifyAllChildrenRuntimeReadiness(t, ctxV2, runtimeV2.pipeline, runID, descriptor.FlowInstance)
 	if failures := transientRouteFailures(); failures != 1 {
 		t.Fatalf("transient revised-route failures = %d, want exactly one automatic-retry trigger", failures)
 	}
@@ -532,18 +541,20 @@ func proveDynamicFlowSourceRevisionConvergence(
 		t.Fatalf("removed lifecycle state = %#v found=%t err=%v", terminated, found, err)
 	}
 
-	runtimeV3 := newNotifyAllChildrenRuntime(t, selected, db, sourceV2, time.Now, notifyAllChildrenRuntimeOptions{processTopology: processTopology})
-	startupV3, err := runtimeV3.manager.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx, authorActivityTestBundleSourceFact, true)
+	runtimeV3 := newNotifyAllChildrenRuntime(t, selected, db, sourceV2, time.Now, notifyAllChildrenRuntimeOptions{
+		processTopology: processTopology, bundleSourceFact: authorActivityTestBundleSourceFact,
+	})
+	startupV3, err := runtimeV3.manager.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctxV2, runtimeV3.bundleSourceFact, true)
 	if err != nil {
 		t.Fatalf("canonicalize v2 restart topology: %v", err)
 	}
-	if err := runtimeV3.manager.Run(managedConformanceExecutionContext(t, ctx, "dynamic-flow-source-v2-restart")); err != nil {
+	if err := runtimeV3.manager.Run(managedConformanceExecutionContextForBundle(t, ctxV2, "dynamic-flow-source-v2-restart", runtimeV3.bundleSourceFact)); err != nil {
 		t.Fatalf("run v2 restart manager: %v", err)
 	}
-	if err := runtimeV3.manager.CompleteDynamicFlowRuntimeStartupTopology(ctx, startupV3); err != nil {
+	if err := runtimeV3.manager.CompleteDynamicFlowRuntimeStartupTopology(ctxV2, startupV3); err != nil {
 		t.Fatalf("reconstruct v2 restart topology: %v", err)
 	}
-	if _, err := runtimeV3.manager.HydrateForStartup(ctx); err != nil {
+	if _, err := runtimeV3.manager.HydrateForStartup(ctxV2); err != nil {
 		t.Fatalf("restart hydration: %v", err)
 	}
 	for _, agentID := range []string{readerID, writerID} {
@@ -559,19 +570,22 @@ func proveDynamicFlowSourceRevisionConvergence(
 		AgentTopologyRevision: 3,
 		AutoEmitOnCreate:      autoEmit,
 	})
-	runtimeV4 := newNotifyAllChildrenRuntime(t, selected, db, sourceV3, time.Now, notifyAllChildrenRuntimeOptions{processTopology: processTopology})
-	if err := runtimeV4.manager.Run(managedConformanceExecutionContext(t, ctx, "dynamic-flow-source-v3")); err != nil {
+	runtimeV4 := newNotifyAllChildrenRuntime(t, selected, db, sourceV3, time.Now, notifyAllChildrenRuntimeOptions{
+		processTopology: processTopology, bundleSourceFact: authorActivityTestBundleSourceFact,
+	})
+	ctxV3 := runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), runtimeV4.bundleSourceFact), runID)
+	if err := runtimeV4.manager.Run(managedConformanceExecutionContextForBundle(t, ctxV3, "dynamic-flow-source-v3", runtimeV4.bundleSourceFact)); err != nil {
 		t.Fatalf("run v3 manager: %v", err)
 	}
 	failNextRouteReplacement()
 	if err := runtimeV4.pipeline.CommitDynamicFlowRuntimeReadinessReconciliation(
-		worklifetime.WithOccurrence(ctx, runtimeV4.workOwner),
+		worklifetime.WithOccurrence(ctxV3, runtimeV4.workOwner),
 		time.Now().UTC(),
 		runtimeV4.manager,
 	); err != nil && !strings.Contains(err.Error(), "injected transient") {
 		t.Fatalf("reconcile reintroduced source: %v", err)
 	}
-	waitNotifyAllChildrenRuntimeReadiness(t, ctx, runtimeV4.pipeline, runID, descriptor.FlowInstance)
+	waitNotifyAllChildrenRuntimeReadiness(t, ctxV3, runtimeV4.pipeline, runID, descriptor.FlowInstance)
 	if failures := transientRouteFailures(); failures != 2 {
 		t.Fatalf("transient revised-route failures = %d, want one per revised source", failures)
 	}
@@ -598,18 +612,20 @@ func proveDynamicFlowSourceRevisionConvergence(
 		t.Fatalf("reintroduced process config = %#v err=%v", cfg, err)
 	}
 
-	runtimeV5 := newNotifyAllChildrenRuntime(t, selected, db, sourceV3, time.Now, notifyAllChildrenRuntimeOptions{processTopology: processTopology})
-	startupV5, err := runtimeV5.manager.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctx, authorActivityTestBundleSourceFact, true)
+	runtimeV5 := newNotifyAllChildrenRuntime(t, selected, db, sourceV3, time.Now, notifyAllChildrenRuntimeOptions{
+		processTopology: processTopology, bundleSourceFact: authorActivityTestBundleSourceFact,
+	})
+	startupV5, err := runtimeV5.manager.CanonicalizeDynamicFlowRuntimeStartupReadiness(ctxV3, runtimeV5.bundleSourceFact, true)
 	if err != nil {
 		t.Fatalf("canonicalize v3 restart topology: %v", err)
 	}
-	if err := runtimeV5.manager.Run(managedConformanceExecutionContext(t, ctx, "dynamic-flow-source-v3-restart")); err != nil {
+	if err := runtimeV5.manager.Run(managedConformanceExecutionContextForBundle(t, ctxV3, "dynamic-flow-source-v3-restart", runtimeV5.bundleSourceFact)); err != nil {
 		t.Fatalf("run v3 restart manager: %v", err)
 	}
-	if err := runtimeV5.manager.CompleteDynamicFlowRuntimeStartupTopology(ctx, startupV5); err != nil {
+	if err := runtimeV5.manager.CompleteDynamicFlowRuntimeStartupTopology(ctxV3, startupV5); err != nil {
 		t.Fatalf("reconstruct v3 restart topology: %v", err)
 	}
-	if _, err := runtimeV5.manager.HydrateForStartup(ctx); err != nil {
+	if _, err := runtimeV5.manager.HydrateForStartup(ctxV3); err != nil {
 		t.Fatalf("reintroduced restart hydration: %v", err)
 	}
 	for _, agentID := range []string{readerID, writerID, retiredID} {
@@ -706,10 +722,10 @@ func TestDynamicFlowTerminalizationAndRouteReplacementRollbackTogetherOnBothBack
 			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
 			runtime := newNotifyAllChildrenRuntime(t, selected, db, source, time.Now)
 
-			publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime.bus, source, runID, "portfolio.opened", map[string]any{
+			publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime, source, runID, "portfolio.opened", map[string]any{
 				"portfolio_id": "portfolio-main",
 			})
-			publishNotifyAllChildrenEvent(t, ctx, runtime.bus, source, runID, "portfolio.account.register.requested", map[string]any{
+			publishNotifyAllChildrenEvent(t, ctx, runtime, source, runID, "portfolio.account.register.requested", map[string]any{
 				"portfolio_id": "portfolio-main",
 				"account_id":   "acct-rollback",
 			})
@@ -813,18 +829,18 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNodeAndTerminali
 							t.Logf("notify-all-children runtime diagnostics: %#v", runtime.diagnostics.snapshot())
 						}
 					})
-					if err := runtime.manager.Run(managedConformanceExecutionContext(t, ctx, "notify-all-children-fixed-slug")); err != nil {
+					if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "notify-all-children-fixed-slug", runtime.bundleSourceFact)); err != nil {
 						t.Fatalf("run manager: %v", err)
 					}
 
-					publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime.bus, source, runID, "portfolio.opened", map[string]any{
+					publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime, source, runID, "portfolio.opened", map[string]any{
 						"portfolio_id": "portfolio-main",
 					})
 					accountIDs := make([]string, 0, cardinality)
 					for i := 0; i < cardinality; i++ {
 						accountIDs = append(accountIDs, fmt.Sprintf("acct-%d", i+1))
 					}
-					publishNotifyAllChildrenEvent(t, ctx, runtime.bus, source, runID, "portfolio.accounts.register.requested", map[string]any{
+					publishNotifyAllChildrenEvent(t, ctx, runtime, source, runID, "portfolio.accounts.register.requested", map[string]any{
 						"portfolio_id": "portfolio-main",
 						"account_ids":  accountIDs,
 					})
@@ -837,7 +853,7 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNodeAndTerminali
 
 					blocked := descriptors[accountIDs[len(accountIDs)-1]].FlowInstance
 					gate.block(blocked)
-					publishNotifyAllChildrenEventAsync(t, ctx, runtime.bus, source, runID, "portfolio.notify.requested", map[string]any{
+					publishNotifyAllChildrenEventAsync(t, ctx, runtime, source, runID, "portfolio.notify.requested", map[string]any{
 						"portfolio_id": "portfolio-main",
 						"command":      "notify-every-account",
 					})
@@ -855,7 +871,7 @@ func TestHandleEmitTool_TemplateAgentEmissionReachesSameInstanceNodeAndTerminali
 					waitNotifyAllChildrenAgentDeliveryStatus(t, ctx, backend, db, runID, nameCase.agentID, blocked, "in_progress")
 
 					gate.release(blocked)
-					waitNotifyAllChildrenBus(t, runtime.bus)
+					waitNotifyAllChildrenRuntime(t, runtime, runID)
 					for _, accountID := range accountIDs {
 						instancePath := descriptors[accountID].FlowInstance
 						waitNotifyAllChildrenEntityState(t, ctx, backend, db, instancePath, "completed")
@@ -933,17 +949,22 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			fixedEngineNow := time.Date(2026, time.July, 12, 12, 0, 0, 1, time.UTC)
 			ctx = runtimecorrelation.WithRunID(ctx, runID)
 			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{})
-			runtime := newNotifyAllChildrenRuntime(t, backend, db, source, func() time.Time { return fixedEngineNow })
-			if err := runtime.manager.Run(managedConformanceExecutionContext(t, ctx, "notify-all-children-stale-route")); err != nil {
+			processTopology := newNotifyAllChildrenProcessTopology(
+				t,
+				testAuthorActivityContextForBundle(context.Background(), conformanceBundleSourceFact(t, source)),
+				backend,
+			)
+			runtime := newNotifyAllChildrenRuntime(t, backend, db, source, func() time.Time { return fixedEngineNow }, notifyAllChildrenRuntimeOptions{processTopology: processTopology})
+			if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "notify-all-children-stale-route", runtime.bundleSourceFact)); err != nil {
 				t.Fatalf("run manager: %v", err)
 			}
 
-			publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime.bus, source, runID, "portfolio.opened", map[string]any{
+			publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime, source, runID, "portfolio.opened", map[string]any{
 				"portfolio_id": "portfolio-main",
 			})
 			assertNotifyAllChildrenRunPersisted(t, ctx, backend, db, runID)
 			for _, accountID := range []string{"acct-a", "acct-b", "acct-stale"} {
-				publishNotifyAllChildrenEvent(t, ctx, runtime.bus, source, runID, "portfolio.account.register.requested", map[string]any{
+				publishNotifyAllChildrenEvent(t, ctx, runtime, source, runID, "portfolio.account.register.requested", map[string]any{
 					"portfolio_id": "portfolio-main",
 					"account_id":   accountID,
 				})
@@ -962,11 +983,11 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 			}
 
 			orderedMembership := []string{"acct-b", "acct-a", "acct-b"}
-			publishNotifyAllChildrenEvent(t, ctx, runtime.bus, source, runID, "portfolio.membership.seeded", map[string]any{
+			publishNotifyAllChildrenEvent(t, ctx, runtime, source, runID, "portfolio.membership.seeded", map[string]any{
 				"portfolio_id": "portfolio-main",
 				"account_ids":  orderedMembership,
 			})
-			orderedNotifyID := publishNotifyAllChildrenEvent(t, ctx, runtime.bus, source, runID, "portfolio.notify.requested", map[string]any{
+			orderedNotifyID := publishNotifyAllChildrenEvent(t, ctx, runtime, source, runID, "portfolio.notify.requested", map[string]any{
 				"portfolio_id": "portfolio-main",
 				"command":      "ordered-duplicate",
 			})
@@ -976,7 +997,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 				t.Logf("notify-all-children runtime diagnostics: %#v", runtime.diagnostics.snapshot())
 			}
 			assertNotifyAllChildrenItemSequence(t, orderedItems, orderedMembership)
-			assertNotifyAllChildrenDistinctItemTimestamps(t, ctx, backend, db, runID, orderedNotifyID, len(orderedMembership))
+			assertNotifyAllChildrenContiguousItemOrdinals(t, orderedItems)
 			for index, item := range orderedItems {
 				routes, err := backend.ListEventDeliveryRoutes(ctx, item.ID)
 				if err != nil {
@@ -986,7 +1007,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 				assertNotifyAllChildrenExactRoutes(t, routes, want)
 			}
 
-			publishNotifyAllChildrenEvent(t, ctx, runtime.bus, source, runID, "portfolio.membership.seeded", map[string]any{
+			publishNotifyAllChildrenEvent(t, ctx, runtime, source, runID, "portfolio.membership.seeded", map[string]any{
 				"portfolio_id": "portfolio-main",
 				"account_ids":  []string{"acct-a", "acct-b", "acct-stale"},
 			})
@@ -1008,7 +1029,7 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 				t.Fatalf("deactivate stale account: %v", err)
 			}
 
-			notifyID := publishNotifyAllChildrenEvent(t, ctx, runtime.bus, source, runID, "portfolio.notify.requested", map[string]any{
+			notifyID := publishNotifyAllChildrenEvent(t, ctx, runtime, source, runID, "portfolio.notify.requested", map[string]any{
 				"portfolio_id": "portfolio-main",
 				"command":      "refresh",
 			})
@@ -1043,16 +1064,16 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 
 			// A later supported write changes current membership and state. Replaying
 			// the original A item must still use its persisted route and payload.
-			publishNotifyAllChildrenEvent(t, ctx, runtime.bus, source, runID, "portfolio.membership.seeded", map[string]any{
+			publishNotifyAllChildrenEvent(t, ctx, runtime, source, runID, "portfolio.membership.seeded", map[string]any{
 				"portfolio_id": "portfolio-main",
 				"account_ids":  []string{"acct-a"},
 			})
-			publishNotifyAllChildrenEvent(t, ctx, runtime.bus, source, runID, "portfolio.notify.requested", map[string]any{
+			publishNotifyAllChildrenEvent(t, ctx, runtime, source, runID, "portfolio.notify.requested", map[string]any{
 				"portfolio_id": "portfolio-main",
 				"command":      "newer",
 			})
 			assertNotifyAllChildrenMetadata(t, ctx, backend, db, descriptors["acct-a"].FlowInstance, "last_command", "newer")
-			publishNotifyAllChildrenEvent(t, ctx, runtime.bus, source, runID, "portfolio.membership.seeded", map[string]any{
+			publishNotifyAllChildrenEvent(t, ctx, runtime, source, runID, "portfolio.membership.seeded", map[string]any{
 				"portfolio_id": "portfolio-main",
 				"account_ids":  []string{"acct-b"},
 			})
@@ -1081,9 +1102,9 @@ func TestNotifyAllChildrenRuntimeConformance_MixedValidAndStaleRoutesPersistAndR
 				runtimepipelineobligation.ScopeSubscribed, storetest.AcknowledgedPipelineDisposition(),
 			)
 			eventCountBefore := countNotifyAllChildrenItemEvents(t, ctx, backend, db, runID)
-			restarted := newNotifyAllChildrenRuntime(t, backend, db, source, func() time.Time { return fixedEngineNow })
+			restarted := newNotifyAllChildrenRuntime(t, backend, db, source, func() time.Time { return fixedEngineNow }, notifyAllChildrenRuntimeOptions{processTopology: processTopology})
 			startNotifyAllChildrenDeliveryContinuations(t, ctx, backend, restarted, recoveryEvent.ID(), routes[0])
-			waitNotifyAllChildrenBus(t, restarted.bus)
+			waitNotifyAllChildrenRuntime(t, restarted, runID)
 			assertNotifyAllChildrenMetadata(t, ctx, backend, db, descriptors["acct-a"].FlowInstance, "last_command", "refresh")
 			if got := countNotifyAllChildrenItemEvents(t, ctx, backend, db, runID); got != eventCountBefore {
 				t.Fatalf("item event count after replay = %d, want %d; replay must not re-expand current membership", got, eventCountBefore)
@@ -1168,7 +1189,7 @@ func startNotifyAllChildrenDeliveryContinuations(
 	if err := runtime.bus.SetDeliveryContinuationOwner(coordinator); err != nil {
 		t.Fatalf("configure delivery continuation owner: %v", err)
 	}
-	if err := coordinator.Start(ctx); err != nil {
+	if err := coordinator.Start(testAuthorActivityContextForBundle(ctx, runtime.bundleSourceFact)); err != nil {
 		t.Fatalf("start delivery continuation coordinator: %v", err)
 	}
 	t.Cleanup(func() {
@@ -1193,12 +1214,24 @@ func newNotifyAllChildrenRuntime(
 	if len(options) > 0 {
 		opts = options[0]
 	}
+	bundleSourceFact := opts.bundleSourceFact
+	if bundleSourceFact.Validate() != nil {
+		bundleSourceFact = conformanceBundleSourceFact(t, source)
+	}
+	if opts.processTopology == nil {
+		opts.processTopology = newNotifyAllChildrenProcessTopology(
+			t,
+			testAuthorActivityContextForBundle(context.Background(), bundleSourceFact),
+			backend,
+		)
+	}
 	var coordinator *runtimepipeline.PipelineCoordinator
 	var manager *runtimemanager.AgentManager
-	workOwner := conformanceTestRuntimeOccurrence(t, authorActivityTestBundleSourceFact.BundleHash())
+	workOwner := conformanceTestRuntimeOccurrence(t, bundleSourceFact.BundleHash())
 	eventBus, err := newScopedTestEventBus(t, backend, durableConformanceEventBusOptions(backend, runtimebus.EventBusOptions{
-		ContractBundle: source,
-		WorkOwner:      workOwner,
+		ContractBundle:   source,
+		BundleSourceFact: bundleSourceFact,
+		WorkOwner:        workOwner,
 		InterceptorProvider: func() []runtimebus.EventInterceptor {
 			if coordinator == nil {
 				return nil
@@ -1228,7 +1261,7 @@ func newNotifyAllChildrenRuntime(
 		t.Fatalf("NewEventBusWithOptions: %v", err)
 	}
 	if routeStore, ok := backend.(runtimebus.FlowInstanceRoutePersistence); ok {
-		routes, err := routeStore.ListFlowInstanceRoutes(testAuthorActivityContext(context.Background()))
+		routes, err := routeStore.ListFlowInstanceRoutes(testAuthorActivityContextForBundle(context.Background(), bundleSourceFact))
 		if err != nil {
 			t.Fatalf("ListFlowInstanceRoutes: %v", err)
 		}
@@ -1328,6 +1361,7 @@ func newNotifyAllChildrenRuntime(
 	coordinator = runtimepipeline.NewPipelineCoordinatorWithOptions(diagnosticBus, runtimepipeline.PipelineCoordinatorOptions{
 		ExecutionPosture: executionposture.Live,
 		Module:           module,
+		BundleSourceFact: bundleSourceFact,
 		InstanceActivator: func(ctx context.Context, req runtimepipeline.FlowInstanceActivationRequest) error {
 			if manager == nil {
 				return fmt.Errorf("agent manager is not initialized")
@@ -1356,18 +1390,12 @@ func newNotifyAllChildrenRuntime(
 		WorkOwner:               workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
 
-	var lifecycleStore runtimemanager.AgentLifecyclePersistence
-	var generationLifecycle *notifyAllChildrenLifecycleOwner
-	if opts.processTopology != nil {
-		generationLifecycle = &notifyAllChildrenLifecycleOwner{}
-		lifecycleStore = generationLifecycle
-	} else {
-		lifecycleStore = storetest.AgentLifecycleFixture(t, backend)
-	}
+	generationLifecycle := &notifyAllChildrenLifecycleOwner{}
+	var lifecycleStore runtimemanager.AgentLifecyclePersistence = generationLifecycle
 	manager = ownConformanceTestAgentManager(t, runtimemanager.NewAgentManagerWithOptions(eventBus, agentFactory, runtimemanager.AgentManagerOptions{
 		ExecutionPosture:  executionposture.Live,
-		BaseContext:       testAuthorActivityContext(context.Background()),
-		BundleSourceFact:  authorActivityTestBundleSourceFact,
+		BaseContext:       testAuthorActivityContextForBundle(context.Background(), bundleSourceFact),
+		BundleSourceFact:  bundleSourceFact,
 		WorkflowInstances: coordinator,
 		WorkOwner:         workOwner,
 		DeliveryStore:     backend,
@@ -1377,12 +1405,20 @@ func newNotifyAllChildrenRuntime(
 		LLMBackend:        llmBackend,
 		PersistenceRoles:  conformanceManagerPersistenceRoles(backend, eventBus, coordinator), ReceiverExecution: eventreceiver.NormalExecution(),
 	}, backend))
-	if opts.processTopology != nil {
-		opts.processTopology.install(t, testAuthorActivityContext(context.Background()), manager, source, generationLifecycle)
-	}
+	opts.processTopology.install(t, testAuthorActivityContextForBundle(context.Background(), bundleSourceFact), manager, source, bundleSourceFact, generationLifecycle)
+	maintenanceCtx, stopMaintenance := context.WithCancel(testAuthorActivityContextForBundle(context.Background(), bundleSourceFact))
+	maintenanceDone := make(chan struct{})
+	go func() {
+		defer close(maintenanceDone)
+		coordinator.RunMaintenance(maintenanceCtx)
+	}()
+	t.Cleanup(func() {
+		stopMaintenance()
+		<-maintenanceDone
+	})
 	return notifyAllChildrenRuntime{
 		bus: eventBus, diagnostics: diagnosticBus, manager: manager, pipeline: coordinator,
-		workOwner: workOwner,
+		workOwner: workOwner, selected: backend, bundleSourceFact: bundleSourceFact,
 	}
 }
 
@@ -1641,21 +1677,21 @@ func loadNotifyAllChildrenFlowInstanceStatus(
 	return strings.TrimSpace(status)
 }
 
-func publishNotifyAllChildrenEvent(t *testing.T, ctx context.Context, eventBus *runtimebus.EventBus, source semanticview.Source, runID, localEvent string, payload map[string]any) string {
+func publishNotifyAllChildrenEvent(t *testing.T, ctx context.Context, runtime notifyAllChildrenRuntime, source semanticview.Source, runID, localEvent string, payload map[string]any) string {
 	t.Helper()
-	id := publishNotifyAllChildrenEventClass(t, ctx, eventBus, source, runID, localEvent, payload, false)
-	waitNotifyAllChildrenBus(t, eventBus)
+	id := publishNotifyAllChildrenEventClass(t, ctx, runtime, source, runID, localEvent, payload, false)
+	waitNotifyAllChildrenRuntime(t, runtime, runID)
 	return id
 }
 
-func publishNotifyAllChildrenRunCreatingEvent(t *testing.T, ctx context.Context, eventBus *runtimebus.EventBus, source semanticview.Source, runID, localEvent string, payload map[string]any) string {
+func publishNotifyAllChildrenRunCreatingEvent(t *testing.T, ctx context.Context, runtime notifyAllChildrenRuntime, source semanticview.Source, runID, localEvent string, payload map[string]any) string {
 	t.Helper()
-	id := publishNotifyAllChildrenEventClass(t, ctx, eventBus, source, runID, localEvent, payload, true)
-	waitNotifyAllChildrenBus(t, eventBus)
+	id := publishNotifyAllChildrenEventClass(t, ctx, runtime, source, runID, localEvent, payload, true)
+	waitNotifyAllChildrenRuntime(t, runtime, runID)
 	return id
 }
 
-func publishNotifyAllChildrenEventClass(t *testing.T, ctx context.Context, eventBus *runtimebus.EventBus, source semanticview.Source, runID, localEvent string, payload map[string]any, runCreating bool) string {
+func publishNotifyAllChildrenEventClass(t *testing.T, ctx context.Context, runtime notifyAllChildrenRuntime, source semanticview.Source, runID, localEvent string, payload map[string]any, runCreating bool) string {
 	t.Helper()
 	raw, err := json.Marshal(payload)
 	if err != nil {
@@ -1672,23 +1708,49 @@ func publishNotifyAllChildrenEventClass(t *testing.T, ctx context.Context, event
 			id, eventType, notifyallchildren.OwnerFlowID, "", raw, 0, runID, "", events.EventEnvelope{}, createdAt,
 		)
 	}
-	if err := eventBus.PublishAcknowledged(ctx, evt); err != nil {
+	publishCtx := testAuthorActivityContextForBundle(ctx, runtime.bundleSourceFact)
+	if err := runtime.bus.PublishAcknowledged(publishCtx, evt); err != nil {
 		t.Fatalf("PublishAcknowledged(%s): %v", localEvent, err)
 	}
 	return id
 }
 
-func publishNotifyAllChildrenEventAsync(t *testing.T, ctx context.Context, eventBus *runtimebus.EventBus, source semanticview.Source, runID, localEvent string, payload map[string]any) string {
+func publishNotifyAllChildrenEventAsync(t *testing.T, ctx context.Context, runtime notifyAllChildrenRuntime, source semanticview.Source, runID, localEvent string, payload map[string]any) string {
 	t.Helper()
-	return publishNotifyAllChildrenEventClass(t, ctx, eventBus, source, runID, localEvent, payload, false)
+	return publishNotifyAllChildrenEventClass(t, ctx, runtime, source, runID, localEvent, payload, false)
 }
 
-func waitNotifyAllChildrenBus(t *testing.T, eventBus *runtimebus.EventBus) {
+func waitNotifyAllChildrenRuntime(t *testing.T, runtime notifyAllChildrenRuntime, runID string) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(testAuthorActivityContext(context.Background()), 30*time.Second)
+	ctx, cancel := context.WithTimeout(testAuthorActivityContextForBundle(context.Background(), runtime.bundleSourceFact), 30*time.Second)
 	defer cancel()
-	if err := eventBus.WaitForQuiescence(ctx); err != nil {
-		t.Fatalf("WaitForQuiescence: %v", err)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if err := runtime.bus.WaitForQuiescence(ctx); err != nil {
+			t.Fatalf("WaitForQuiescence: %v", err)
+		}
+		summary, err := runtime.selected.FanOutRunSummary(ctx, runID, time.Now().UTC())
+		if err != nil {
+			t.Fatalf("FanOutRunSummary(%s): %v", runID, err)
+		}
+		if summary.Owed == 0 && summary.Open == 0 && summary.Blocked == 0 && summary.Unsettled == 0 {
+			if err := runtime.bus.WaitForQuiescence(ctx); err != nil {
+				t.Fatalf("WaitForQuiescence after fan-out settlement: %v", err)
+			}
+			confirmed, err := runtime.selected.FanOutRunSummary(ctx, runID, time.Now().UTC())
+			if err != nil {
+				t.Fatalf("confirm FanOutRunSummary(%s): %v", runID, err)
+			}
+			if confirmed.Owed == 0 && confirmed.Open == 0 && confirmed.Blocked == 0 && confirmed.Unsettled == 0 {
+				return
+			}
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("wait for durable fan-out settlement: %v; summary=%#v", ctx.Err(), summary)
+		case <-ticker.C:
+		}
 	}
 }
 
@@ -1729,13 +1791,14 @@ type notifyAllChildrenItemEvent struct {
 	ID        string
 	AccountID string
 	CreatedAt string
+	Ordinal   int
 }
 
 func loadNotifyAllChildrenItemEvents(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, runID, sourceEventID string) []notifyAllChildrenItemEvent {
 	t.Helper()
-	query := `SELECT event_id::text, payload, created_at FROM events WHERE run_id = $1::uuid AND event_name = $2 AND source_event_id = $3::uuid ORDER BY created_at, event_id`
+	query := `SELECT e.event_id::text,e.payload,e.created_at,o.ordinal FROM fan_out_outcomes o JOIN events e ON e.event_id=o.event_id AND e.run_id=o.run_id WHERE o.run_id=$1::uuid AND e.event_name=$2 AND e.source_event_id=$3::uuid AND o.outcome_kind='committed' ORDER BY o.ordinal`
 	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `SELECT event_id, payload, created_at FROM events WHERE run_id = ? AND event_name = ? AND source_event_id = ? ORDER BY created_at, event_id`
+		query = `SELECT e.event_id,e.payload,e.created_at,o.ordinal FROM fan_out_outcomes o JOIN events e ON e.event_id=o.event_id AND e.run_id=o.run_id WHERE o.run_id=? AND e.event_name=? AND e.source_event_id=? AND o.outcome_kind='committed' ORDER BY o.ordinal`
 	}
 	rows, err := db.QueryContext(ctx, query, runID, "portfolio/account.notify.requested", sourceEventID)
 	if err != nil {
@@ -1745,8 +1808,9 @@ func loadNotifyAllChildrenItemEvents(t *testing.T, ctx context.Context, backend 
 	out := []notifyAllChildrenItemEvent{}
 	for rows.Next() {
 		var id string
+		var ordinal int
 		var raw, createdAt any
-		if err := rows.Scan(&id, &raw, &createdAt); err != nil {
+		if err := rows.Scan(&id, &raw, &createdAt, &ordinal); err != nil {
 			t.Fatalf("scan fan-out item event: %v", err)
 		}
 		payload := map[string]any{}
@@ -1754,7 +1818,7 @@ func loadNotifyAllChildrenItemEvents(t *testing.T, ctx context.Context, backend 
 			t.Fatalf("decode fan-out item payload: %v", err)
 		}
 		accountID, _ := payload["account_id"].(string)
-		out = append(out, notifyAllChildrenItemEvent{ID: id, AccountID: accountID, CreatedAt: fmt.Sprint(createdAt)})
+		out = append(out, notifyAllChildrenItemEvent{ID: id, AccountID: accountID, CreatedAt: fmt.Sprint(createdAt), Ordinal: ordinal})
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("read fan-out item events: %v", err)
@@ -1773,18 +1837,12 @@ func assertNotifyAllChildrenItemSequence(t *testing.T, items []notifyAllChildren
 	}
 }
 
-func assertNotifyAllChildrenDistinctItemTimestamps(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, runID, sourceEventID string, want int) {
+func assertNotifyAllChildrenContiguousItemOrdinals(t *testing.T, items []notifyAllChildrenItemEvent) {
 	t.Helper()
-	query := `SELECT COUNT(DISTINCT created_at) FROM events WHERE run_id = $1::uuid AND event_name = $2 AND source_event_id = $3::uuid`
-	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
-		query = `SELECT COUNT(DISTINCT created_at) FROM events WHERE run_id = ? AND event_name = ? AND source_event_id = ?`
-	}
-	var count int
-	if err := db.QueryRowContext(ctx, query, runID, "portfolio/account.notify.requested", sourceEventID).Scan(&count); err != nil {
-		t.Fatalf("count distinct persisted fan-out timestamps: %v", err)
-	}
-	if count != want {
-		t.Fatalf("distinct persisted fan-out timestamps = %d, want %d from equal engine clock ticks", count, want)
+	for want, item := range items {
+		if item.Ordinal != want {
+			t.Fatalf("persisted fan-out item ordinal[%d] = %d (%#v), want contiguous durable order", want, item.Ordinal, items)
+		}
 	}
 }
 
