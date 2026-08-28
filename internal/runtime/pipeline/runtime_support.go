@@ -178,15 +178,6 @@ func asString(v any) string {
 	return strings.TrimSpace(runtimesharedjson.AsString(v))
 }
 
-func firstNonEmptyString(vals ...string) string {
-	for _, val := range vals {
-		if trimmed := strings.TrimSpace(val); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
-}
-
 func workflowExpressionLookupPath(root map[string]any, path string) (any, bool) {
 	current := any(root)
 	for _, segment := range strings.Split(strings.TrimSpace(path), ".") {

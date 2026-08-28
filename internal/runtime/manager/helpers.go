@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimeagentidentity "github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/stringsutil"
 	"github.com/google/uuid"
 )
 
@@ -116,14 +117,7 @@ func mustJSON(v any) []byte {
 	return MustJSON(v)
 }
 
-func FirstNonEmptyString(vals ...string) string {
-	for _, val := range vals {
-		if trimmed := strings.TrimSpace(val); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
-}
+func FirstNonEmptyString(vals ...string) string { return stringsutil.FirstNonEmpty(vals...) }
 
 func stringifyPromptTemplateValue(value any) string {
 	switch typed := value.(type) {

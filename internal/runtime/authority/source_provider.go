@@ -8,6 +8,7 @@ import (
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 type sourceProvider struct {
@@ -149,7 +150,7 @@ func buildProducerRegistry(source semanticview.Source) map[string][]string {
 		role := ""
 		switch endpoint.Kind {
 		case semanticview.EventEndpointAgent:
-			role = canonicalRole(firstNonEmpty(endpoint.Role, endpoint.AgentID))
+			role = canonicalRole(stringsutil.FirstNonEmpty(endpoint.Role, endpoint.AgentID))
 		case semanticview.EventEndpointNodeHandler, semanticview.EventEndpointNodeGenerated:
 			role = canonicalRole(endpoint.NodeID)
 		default:
@@ -251,13 +252,4 @@ func PeerManagerFallback(actor, target models.AgentConfig) bool {
 	actorFallback := strings.TrimSpace(actor.ManagerFallback)
 	targetFallback := strings.TrimSpace(target.ManagerFallback)
 	return actorFallback != "" && actorFallback == targetFallback
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
 }

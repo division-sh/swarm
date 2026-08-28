@@ -206,12 +206,3 @@ func agentPersistedStatus(raw string) string {
 		return "active"
 	}
 }
-
-func coalesce(vals ...string) string {
-	for _, val := range vals {
-		if trimmed := strings.TrimSpace(val); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
-}

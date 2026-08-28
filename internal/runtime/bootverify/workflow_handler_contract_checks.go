@@ -10,6 +10,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 func checkHandlerFieldCompliance(c *checkerContext) []Finding { return c.handlerFieldCompliance() }
@@ -33,7 +34,7 @@ func (c *checkerContext) handlerFieldCompliance() []Finding {
 			if !ok {
 				continue
 			}
-			if action.Executable() || isSupportedWorkflowHandlerActionID(firstNonEmptyString(action.Builtin, action.Key.String())) {
+			if action.Executable() || isSupportedWorkflowHandlerActionID(stringsutil.FirstNonEmpty(action.Builtin, action.Key.String())) {
 				continue
 			}
 			c.handlerFindings = append(c.handlerFindings, Finding{
@@ -236,15 +237,6 @@ func supportedWorkflowRuntimeExecutorIDs(source semanticview.Source) map[string]
 		}
 	}
 	return out
-}
-
-func firstNonEmptyString(vals ...string) string {
-	for _, val := range vals {
-		if trimmed := strings.TrimSpace(val); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }
 
 func normalizeWorkflowBuiltinActionID(id string) string {

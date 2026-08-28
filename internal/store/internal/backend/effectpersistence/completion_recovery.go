@@ -17,6 +17,7 @@ import (
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storellm "github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
 	storemanagedcapability "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
+	"github.com/division-sh/swarm/internal/stringsutil"
 	"github.com/google/uuid"
 )
 
@@ -400,7 +401,7 @@ func completionRecoverySettlement(recovered completionRecoveryAttempt, state run
 		Spend: runtimeeffects.CompletionSpend{
 			EntityID: target.EntityID, FlowInstance: flowInstance, AgentID: agentID, Model: "unknown", ModelAlias: "unknown",
 			BackendProfile: "unknown", Provider: recovered.Adapter, Transport: recovered.Transport,
-			ResolvedModel: "unknown", InvocationType: coalesce(recovered.Adapter, "completion_recovery"),
+			ResolvedModel: "unknown", InvocationType: stringsutil.FirstNonEmpty(recovered.Adapter, "completion_recovery"),
 		},
 		Now: now,
 	}

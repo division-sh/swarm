@@ -19,6 +19,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/packartifact"
 	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
+	"github.com/division-sh/swarm/internal/stringsutil"
 	"github.com/division-sh/swarm/internal/yamlsource"
 	"golang.org/x/text/unicode/norm"
 )
@@ -770,7 +771,7 @@ func bundleHashEntryRawContent(entry bundleHashEntry) ([]byte, error) {
 				return nil, err
 			}
 			if !bytes.Equal(raw, entry.SourceExact) {
-				return nil, fmt.Errorf("canonical input changed after %s", firstNonEmpty(strings.TrimSpace(entry.ExactOwner), "exact source admission"))
+				return nil, fmt.Errorf("canonical input changed after %s", stringsutil.FirstNonEmpty(strings.TrimSpace(entry.ExactOwner), "exact source admission"))
 			}
 		}
 		return append([]byte(nil), entry.SourceExact...), nil

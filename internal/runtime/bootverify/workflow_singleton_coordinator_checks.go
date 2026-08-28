@@ -6,6 +6,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 func checkSingletonCoordinatorValidation(c *checkerContext) []Finding {
@@ -48,7 +49,7 @@ func checkSingletonCoordinatorValidation(c *checkerContext) []Finding {
 				CheckID:  "singleton_coordinator_validation",
 				Severity: SeverityHardInvalidity,
 				Message:  fmt.Sprintf("%s requires singleton coordinator state: %v", demand.Detail(), err),
-				Location: firstNonEmptyString(demand.Location, demand.FlowID),
+				Location: stringsutil.FirstNonEmpty(demand.Location, demand.FlowID),
 			})
 		}
 	}

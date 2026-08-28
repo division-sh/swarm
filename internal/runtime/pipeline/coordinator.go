@@ -35,6 +35,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetimercancellation "github.com/division-sh/swarm/internal/runtime/timercancellation"
 	runtimetimerobligation "github.com/division-sh/swarm/internal/runtime/timerobligation"
+	"github.com/division-sh/swarm/internal/stringsutil"
 	"github.com/google/uuid"
 )
 
@@ -903,7 +904,7 @@ func (pc *PipelineCoordinator) recordInterceptedEmitDeadLetters(ctx context.Cont
 			FlowInstance:    "runtime",
 			Failure:         failure.Failure,
 			ChainDepth:      intercepted.ChainDepth,
-			HandlerNode:     firstNonEmptyString(nodeID+":"+eventType, nodeID),
+			HandlerNode:     stringsutil.FirstNonEmpty(nodeID+":"+eventType, nodeID),
 			Timestamp:       time.Now().UTC().Format(time.RFC3339Nano),
 		}
 		if pc.deadLetters == nil {

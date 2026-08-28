@@ -14,6 +14,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 type HandlerOutcomeStatus string
@@ -147,7 +148,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 			flowID = executionFlowID
 		}
 	}
-	entityID := strings.TrimSpace(firstNonEmptyString(
+	entityID := strings.TrimSpace(stringsutil.FirstNonEmpty(
 		triggerCtx.State.EntityID,
 		workflowEventEntityID(triggerCtx.Event),
 	))
@@ -156,7 +157,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if exactDelivery {
 		admittedApplication, ok := deliveryTargetApplicationFromContext(ctx)
 		if !ok {
-			exactHandler := handlerFact.ForEvent(events.EventType(firstNonEmptyString(triggerCtx.HandlerEventKey, string(triggerCtx.Event.Type()))))
+			exactHandler := handlerFact.ForEvent(events.EventType(stringsutil.FirstNonEmpty(triggerCtx.HandlerEventKey, string(triggerCtx.Event.Type()))))
 			var err error
 			if preview {
 				admittedApplication, err = pc.prepareDeliveryTargetApplication(ctx, node.Key(), exactHandler, handler, triggerCtx.Event, stampedOwner, triggerCtx.State)
@@ -211,7 +212,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 		stateRoute, err := canonicalHandlerRoute(
 			source,
 			flowID,
-			firstNonEmptyString(triggerCtx.State.Control.FlowPath, triggerCtx.Event.FlowInstance()),
+			stringsutil.FirstNonEmpty(triggerCtx.State.Control.FlowPath, triggerCtx.Event.FlowInstance()),
 			triggerCtx.Event,
 		)
 		if err != nil {
@@ -270,7 +271,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	if err != nil {
 		return contractHandlerExecutionResult{}, err
 	}
-	statePath := firstNonEmptyString(triggerCtx.State.Control.FlowPath, triggerCtx.Event.FlowInstance())
+	statePath := stringsutil.FirstNonEmpty(triggerCtx.State.Control.FlowPath, triggerCtx.Event.FlowInstance())
 	if exactDelivery {
 		statePath = application.Route().InstancePath
 	}
@@ -355,7 +356,7 @@ func (pc *PipelineCoordinator) executeNodeContractHandler(
 	}
 	outcome := handlerOutcomeFromExecutionResult(result)
 	plan := handlerExecutionPlanFromNodeHandler(node, strings.TrimSpace(string(triggerCtx.Event.Type())), handler)
-	plan.AdvancesTo = firstNonEmptyString(outcome.AdvancesTo, plan.AdvancesTo)
+	plan.AdvancesTo = stringsutil.FirstNonEmpty(outcome.AdvancesTo, plan.AdvancesTo)
 	if len(outcome.Emits) > 0 {
 		plan.EmitEvents = append([]string{}, outcome.Emits...)
 		if len(outcome.Emits) == 1 {

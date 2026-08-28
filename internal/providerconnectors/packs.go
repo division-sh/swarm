@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/packs"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 //go:embed catalog/generated-packs.yaml catalog/generator-profiles/*.yaml
@@ -139,11 +140,11 @@ func NewPackRegistry(loaded ...LoadedPack) (*PackRegistry, error) {
 		if registry.byProvider[provider] == nil {
 			registry.byProvider[provider] = map[string]LoadedPack{}
 		}
-		source := firstNonEmpty(pack.Source, pack.Envelope.Provenance.Source+":"+pack.Envelope.ID)
+		source := stringsutil.FirstNonEmpty(pack.Source, pack.Envelope.Provenance.Source+":"+pack.Envelope.ID)
 		names := manifestToolNames(pack.Manifest)
 		for _, toolID := range names {
 			if existing, exists := registry.byProvider[provider][toolID]; exists {
-				existingSource := firstNonEmpty(existing.Source, existing.Envelope.Provenance.Source+":"+existing.Envelope.ID)
+				existingSource := stringsutil.FirstNonEmpty(existing.Source, existing.Envelope.Provenance.Source+":"+existing.Envelope.ID)
 				return nil, fmt.Errorf("duplicate provider connector pack tool %q for provider %q from %s and %s", toolID, provider, existingSource, source)
 			}
 			pack.Source = source
@@ -416,7 +417,7 @@ func SourceWithConnectorPackImports(source semanticview.Source, registry *PackRe
 			PackID:       strings.TrimSpace(pack.Envelope.ID),
 			Version:      strings.TrimSpace(pack.Envelope.Version),
 			ManifestHash: strings.TrimSpace(pack.Envelope.ManifestHash),
-			Source:       strings.TrimSpace(firstNonEmpty(pack.Source, pack.Envelope.Provenance.Source)),
+			Source:       strings.TrimSpace(stringsutil.FirstNonEmpty(pack.Source, pack.Envelope.Provenance.Source)),
 		}
 		if importedByProjectScope[item.projectScopeKey] == nil {
 			importedByProjectScope[item.projectScopeKey] = map[string]runtimecontracts.ToolSchemaEntry{}
@@ -685,15 +686,6 @@ func appendIfMissing(values []string, value string) []string {
 		}
 	}
 	return append(values, value)
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func joinValidationErrors(errs []error) string {

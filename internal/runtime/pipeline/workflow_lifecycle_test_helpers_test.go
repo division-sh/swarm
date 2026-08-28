@@ -13,6 +13,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
+	"github.com/division-sh/swarm/internal/stringsutil"
 	"github.com/google/uuid"
 )
 
@@ -163,7 +164,7 @@ func reconcileWorkflowTimerForTest(ctx context.Context, pc *PipelineCoordinator,
 	} else {
 		var transition *runtimeworkflowlifecycle.Transition
 		if strings.TrimSpace(currentStage) != "" && strings.TrimSpace(currentStage) != strings.TrimSpace(nextStage) {
-			transitionID := firstNonEmptyString(cause.TransitionID, "test_"+uuid.NewString())
+			transitionID := stringsutil.FirstNonEmpty(cause.TransitionID, "test_"+uuid.NewString())
 			value, transitionErr := runtimeworkflowlifecycle.NewTransition(currentStage, nextStage, transitionID)
 			if transitionErr != nil {
 				return transitionErr
@@ -173,8 +174,8 @@ func reconcileWorkflowTimerForTest(ctx context.Context, pc *PipelineCoordinator,
 		effect, err = runtimeworkflowlifecycle.NewAcceptedEvent(
 			route,
 			identity.NormalizeEntityID(entityID),
-			firstNonEmptyString(cause.EventID, uuid.NewString()),
-			firstNonEmptyString(cause.EventType, "test.timer_event"),
+			stringsutil.FirstNonEmpty(cause.EventID, uuid.NewString()),
+			stringsutil.FirstNonEmpty(cause.EventType, "test.timer_event"),
 			mode,
 			cause.OccurredAt,
 			transition,

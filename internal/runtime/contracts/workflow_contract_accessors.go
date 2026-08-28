@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	flowmodel "github.com/division-sh/swarm/internal/runtime/flowmodel"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 func (b *WorkflowContractBundle) WorkflowName() string {
@@ -1305,7 +1306,7 @@ func (b *WorkflowContractBundle) flowLocalEvents(flowID string) []string {
 			)
 		}
 	}
-	return uniqueOrderedStrings(out)
+	return stringsutil.Unique(out)
 }
 
 func (b *WorkflowContractBundle) flowEventScope(flowID string) eventidentity.Scope {

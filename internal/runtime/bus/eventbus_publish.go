@@ -29,6 +29,7 @@ import (
 	runtimereplycontext "github.com/division-sh/swarm/internal/runtime/replycontext"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 type TargetFailureDeadLetterRecorder = runtimedeadletters.Recorder
@@ -2443,8 +2444,8 @@ func targetDeliveryFailureRecord(evt events.Event, plan RoutePlan, failure runti
 		OriginalEventID: strings.TrimSpace(evt.ID()),
 		OriginalEvent:   strings.TrimSpace(string(evt.Type())),
 		OriginalPayload: evt.Payload(),
-		EntityID:        firstNonEmptyString(deadLetterRoute.EntityID, evt.EntityID()),
-		FlowInstance:    firstNonEmptyString(deadLetterRoute.FlowInstance, evt.FlowInstance(), "runtime"),
+		EntityID:        stringsutil.FirstNonEmpty(deadLetterRoute.EntityID, evt.EntityID()),
+		FlowInstance:    stringsutil.FirstNonEmpty(deadLetterRoute.FlowInstance, evt.FlowInstance(), "runtime"),
 		Failure:         canonical.Failure,
 		RetryCount:      0,
 		ChainDepth:      evt.ChainDepth(),
@@ -2464,13 +2465,4 @@ func canonicalTargetDeliveryFailure(failure runtimepinrouting.TargetFailure, det
 		err = runtimefailures.NewTarget(failure.Code(), "eventbus", "resolve_delivery_target", detail)
 	}
 	return runtimefailures.FromError(err, "eventbus", "resolve_delivery_target")
-}
-
-func firstNonEmptyString(vals ...string) string {
-	for _, val := range vals {
-		if trimmed := strings.TrimSpace(val); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }

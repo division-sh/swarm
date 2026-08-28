@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 type contractIDRegistry struct {
@@ -52,7 +53,7 @@ func (r contractGuardRegistry) IsExecutable(id identity.GuardKey) bool {
 	if instruction.Kind() == runtimeregistry.InstructionCEL {
 		return true
 	}
-	return isSupportedWorkflowGuardBuiltin(firstNonEmptyString(instruction.Builtin, instruction.Key.String()))
+	return isSupportedWorkflowGuardBuiltin(stringsutil.FirstNonEmpty(instruction.Builtin, instruction.Key.String()))
 }
 func (r contractGuardRegistry) GuardIDs() []string { return r.registry.sortedIDs() }
 func (r contractGuardRegistry) Guard(id identity.GuardKey) (runtimeregistry.GuardInstruction, bool) {
@@ -76,7 +77,7 @@ func (r contractActionRegistry) IsExecutable(id identity.ActionKey) bool {
 	if instruction.Emits != "" {
 		return true
 	}
-	return isSupportedWorkflowHandlerActionID(firstNonEmptyString(instruction.Builtin, instruction.Key.String()))
+	return isSupportedWorkflowHandlerActionID(stringsutil.FirstNonEmpty(instruction.Builtin, instruction.Key.String()))
 }
 func (r contractActionRegistry) ActionIDs() []string { return r.registry.sortedIDs() }
 func (r contractActionRegistry) Action(id identity.ActionKey) (runtimeregistry.ActionInstruction, bool) {

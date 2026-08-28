@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 type SelectedContractBindingReader interface {
@@ -462,7 +463,7 @@ func BuildSelectedContractExecutionAdmission(ctx context.Context, req SelectedCo
 		return runfork.RunForkSelectedContractExecutionAdmission{}, fmt.Errorf("selected-contract execution admission requires selected source loader bound to %s", runfork.RunForkSelectedContractBindingOwner)
 	}
 	loadedSource, err := loadRunForkSelectedContractSource(ctx, req.SourceLoader, SelectedContractSourceLoadRequest{
-		SourceRunID:      firstNonEmpty(req.SourceRunID, binding.SourceRunID),
+		SourceRunID:      stringsutil.FirstNonEmpty(req.SourceRunID, binding.SourceRunID),
 		BundleHash:       req.BundleSourceFact.BundleHash(),
 		BundleSourceFact: req.BundleSourceFact,
 		Selection:        binding.ContractSelection,
@@ -531,15 +532,6 @@ func BuildSelectedContractExecutionAdmission(ctx context.Context, req SelectedCo
 		InvalidPaths:        append([]runfork.RunForkSelectedContractExecutionBoundary(nil), req.ExecutionModel.InvalidPaths...),
 		UnsupportedBlockers: unsupportedBlockers,
 	}, nil
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }
 
 func validateSelectedContractExecutionBinding(forkRunID string, binding runfork.RunForkSelectedContractBinding) error {

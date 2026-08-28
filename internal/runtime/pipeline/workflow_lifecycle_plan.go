@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 type WorkflowTimerMutationKind string
@@ -408,7 +409,7 @@ func (pc *PipelineCoordinator) planWorkflowTimerEffect(ctx context.Context, inst
 		activeByDeclaration[workflowTimerGenerationKey(activation.Ref.DeclarationKey, activation.Ref.Generation)] = activation
 	}
 
-	generationStage := firstNonEmptyString(nextState, currentState, instance.CurrentState)
+	generationStage := stringsutil.FirstNonEmpty(nextState, currentState, instance.CurrentState)
 	generation, _, err := workflowLoopGenerationForStage(source, &instance, generationStage)
 	if err != nil {
 		return err
@@ -578,7 +579,7 @@ func (pc *PipelineCoordinator) planWorkflowGateEffect(ctx context.Context, insta
 		if activation.Status == gateruntime.StatusDecisionCommitted {
 			return fmt.Errorf("stage %s cannot exit while decision card %s has a committed verdict awaiting its frozen route", currentStage, activation.CardID)
 		}
-		if !activation.Supersede(firstNonEmptyString(sourceEvent, "stage_exited"), now) {
+		if !activation.Supersede(stringsutil.FirstNonEmpty(sourceEvent, "stage_exited"), now) {
 			continue
 		}
 		if err := gateruntime.Store(carrier.StateBuckets, activation); err != nil {

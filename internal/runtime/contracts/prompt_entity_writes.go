@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 type PromptEntityWriteEvidence struct {
@@ -117,7 +119,7 @@ func extractPromptEntityWriteEvidence(promptText string) (bool, bool, []string) 
 			blankContinuationBudget = 0
 		}
 	}
-	return createEntity, true, uniquePromptStrings(fields)
+	return createEntity, true, stringsutil.Unique(fields)
 }
 
 func promptEntityWriteToolToken(token string) bool {

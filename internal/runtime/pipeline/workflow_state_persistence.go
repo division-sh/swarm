@@ -10,6 +10,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 func (pc *PipelineCoordinator) currentWorkflowState(ctx context.Context, route runtimeflowidentity.Route, entityID identity.EntityID) (WorkflowState, error) {
@@ -148,7 +149,7 @@ func workflowTransitionRecord(workflow *WorkflowDefinition, fromState, toState, 
 		record.TransitionID = strings.TrimSpace(transition.Name)
 		record.GuardsEvaluated = append([]string{}, transition.GuardIDs...)
 	} else {
-		record.TransitionID = firstNonEmptyString(
+		record.TransitionID = stringsutil.FirstNonEmpty(
 			sourceEventType,
 			"legacy_"+strings.ReplaceAll(fromState, "-", "_")+"_to_"+strings.ReplaceAll(toState, "-", "_"),
 		)

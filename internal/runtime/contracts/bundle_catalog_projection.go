@@ -10,6 +10,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/durabledata"
 	runtimeagentintent "github.com/division-sh/swarm/internal/runtime/agentintent"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 const bundleCatalogProjectionVersion = "swarm.bundle.catalog.v2"
@@ -118,7 +119,7 @@ func BuildBundleCatalogProjectionWithOptions(bundle *WorkflowContractBundle, opt
 	}
 	metadata := map[string]any{
 		"projection_version": bundleCatalogProjectionVersion,
-		"source":             firstNonEmpty(opts.Source, "swarm serve --contracts"),
+		"source":             stringsutil.FirstNonEmpty(opts.Source, "swarm serve --contracts"),
 		"workflow_name":      strings.TrimSpace(bundle.Semantics.Name),
 		"workflow_version":   strings.TrimSpace(bundle.Semantics.Version),
 		"file_count":         len(files),
@@ -299,7 +300,7 @@ func bundleCatalogAgentsJSON(bundle *WorkflowContractBundle) ([]any, error) {
 			return nil, fmt.Errorf("project bundle catalog agent %q is missing its canonical scoped owner", record.LogicalID)
 		}
 		addStringField(def, "role", entry.Role)
-		addStringField(def, "type", firstNonEmpty(entry.Type, entry.NodeType))
+		addStringField(def, "type", stringsutil.FirstNonEmpty(entry.Type, entry.NodeType))
 		addStringField(def, "model", entry.Model)
 		def["memory"] = entry.MemoryPlan.Enabled
 		addStringField(def, "memory_source", string(entry.MemoryPlan.Source))
@@ -349,13 +350,4 @@ func addStringListField(values map[string]any, key string, raw []string) {
 	}
 	sort.Strings(items)
 	values[key] = items
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			return value
-		}
-	}
-	return ""
 }

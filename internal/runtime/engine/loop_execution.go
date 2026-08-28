@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 func validateHandlerLoopRuntime(handler runtimecontracts.SystemNodeEventHandler) error {
@@ -120,7 +121,7 @@ func (e *Executor) rejectUnadmittedLoopHandler(frame *executionFrame) error {
 			continue
 		}
 		plan, ok := workflowLoopPlan(e.deps.Source, activation.FlowID, activation.LoopID)
-		if !ok || !containsLoopStage(plan.RegionStages, currentStage) {
+		if !ok || !stringsutil.ContainsTrimmed(plan.RegionStages, currentStage) {
 			continue
 		}
 		return loopAdmissionFailure(failures.ClassUnexpectedArrival, "loop_operation_missing", plan, "", currentStage, currentStage, &activation, frame.req.Event.ID())
@@ -240,14 +241,4 @@ func loopEventTime(frame *executionFrame) time.Time {
 		}
 	}
 	return time.Unix(0, 0).UTC()
-}
-
-func containsLoopStage(stages []string, stage string) bool {
-	stage = strings.TrimSpace(stage)
-	for _, candidate := range stages {
-		if strings.TrimSpace(candidate) == stage {
-			return true
-		}
-	}
-	return false
 }

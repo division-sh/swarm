@@ -203,15 +203,6 @@ func nullUUIDString(raw string) any {
 
 func sqliteNullString(raw string) any { return nullUUIDString(raw) }
 
-func coalesce(values ...string) string {
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			return value
-		}
-	}
-	return ""
-}
-
 func requirePostgresRunActive(ctx context.Context, tx *sql.Tx, runID string) error {
 	return storerunstate.RequirePostgresActiveTx(ctx, tx, runID)
 }

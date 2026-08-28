@@ -14,6 +14,7 @@ import (
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 type Event = events.Event
@@ -244,7 +245,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	if exactDelivery {
 		admittedApplication, ok := deliveryTargetApplicationFromContext(ctx)
 		if !ok {
-			exactHandler := handlerFact.ForEvent(events.EventType(firstNonEmptyString(handlerEventKey, string(evt.Type()))))
+			exactHandler := handlerFact.ForEvent(events.EventType(stringsutil.FirstNonEmpty(handlerEventKey, string(evt.Type()))))
 			var err error
 			admittedApplication, err = e.coordinator.prepareDeliveryTargetApplication(ctx, e.nodeRef.Key(), exactHandler, handler, evt, stampedOwner)
 			if err != nil {
@@ -294,7 +295,7 @@ func (e *coordinatorHandlerExecutionEngine) ExecuteHandlerSteps(ctx context.Cont
 	}
 	ctx = withPipelineFlowScope(ctx, flowID)
 	ctx = runtimecorrelation.WithInboundEvent(ctx, evt)
-	statePath := firstNonEmptyString(selectedState.Control.FlowPath, evt.FlowInstance())
+	statePath := stringsutil.FirstNonEmpty(selectedState.Control.FlowPath, evt.FlowInstance())
 	if exactDelivery {
 		statePath = application.Route().InstancePath
 	}
@@ -406,7 +407,7 @@ func canonicalHandlerMaterializationTarget(source semanticview.Source, flowID st
 }
 
 func ensureHandlerEntityID(source semanticview.Source, flowID string, handler SystemNodeEventHandler, entityID string, evt Event) (string, Event, error) {
-	entityID = strings.TrimSpace(firstNonEmptyString(entityID, evt.TargetRoute().EntityID))
+	entityID = strings.TrimSpace(stringsutil.FirstNonEmpty(entityID, evt.TargetRoute().EntityID))
 	if entityID != "" {
 		if strings.TrimSpace(evt.EntityID()) == "" {
 			resolved, err := events.ResolveEnvelope(evt, events.EnvelopeForEntityID(evt.NormalizedEnvelope(), entityID))

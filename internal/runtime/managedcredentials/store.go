@@ -25,6 +25,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	managedcredentialmodel "github.com/division-sh/swarm/internal/runtime/managedcredentials/model"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 const (
@@ -386,7 +387,7 @@ func (s *TokenSource) ConnectGitHubAppInstallation(ctx context.Context, req GitH
 	}
 	record := Record{
 		Key:            strings.TrimSpace(req.Key),
-		Provider:       firstNonEmpty(strings.TrimSpace(req.Provider), "github"),
+		Provider:       stringsutil.FirstNonEmpty(strings.TrimSpace(req.Provider), "github"),
 		Account:        strings.TrimSpace(req.Account),
 		GrantType:      GrantGitHubAppInstallation,
 		APIBaseURL:     normalizeGitHubAPIBaseURL(req.APIBaseURL),
@@ -1252,16 +1253,6 @@ func normalizeGitHubAPIBaseURL(raw string) string {
 		return "https://api.github.com"
 	}
 	return strings.TrimRight(raw, "/")
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func statusOrUnconnected(status string) string {

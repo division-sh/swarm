@@ -12,6 +12,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 func (s *MailboxPostgresOwner) ListV1MailboxItems(ctx context.Context, opts mailboxcontract.V1ListOptions) ([]mailboxcontract.V1Item, string, error) {
@@ -306,7 +307,7 @@ func (r mailboxV1Row) projectItem() mailboxcontract.V1Item {
 func (r mailboxV1Row) projectDetail() mailboxcontract.V1ItemDetail {
 	history := []mailboxcontract.V1HistoryEntry{{
 		Action:       "created",
-		ActorTokenID: strings.TrimSpace(coalesce(r.FromAgent, "system")),
+		ActorTokenID: strings.TrimSpace(stringsutil.FirstNonEmpty(r.FromAgent, "system")),
 		TS:           r.CreatedAtTime.UTC().Format(time.RFC3339Nano),
 	}}
 	if r.DecidedAt.Valid {
@@ -316,7 +317,7 @@ func (r mailboxV1Row) projectDetail() mailboxcontract.V1ItemDetail {
 		}
 		entry := mailboxcontract.V1HistoryEntry{
 			Action:       action,
-			ActorTokenID: strings.TrimSpace(coalesce(r.DecidedBy, "unknown")),
+			ActorTokenID: strings.TrimSpace(stringsutil.FirstNonEmpty(r.DecidedBy, "unknown")),
 			TS:           r.DecidedAt.Time.UTC().Format(time.RFC3339Nano),
 		}
 		if strings.TrimSpace(r.DecisionNotes) != "" {

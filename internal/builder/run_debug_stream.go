@@ -10,6 +10,7 @@ import (
 
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 const builderRunDebugReplayLimit = 128
@@ -306,7 +307,7 @@ func canonicalRuntimeLogCandidate(item operatorread.OperatorRuntimeLogEntry, key
 		payload["detail"] = detail
 	}
 	event := RunEventEnvelope{
-		"id":        firstNonEmpty(strings.TrimSpace(item.LogID), key),
+		"id":        stringsutil.FirstNonEmpty(strings.TrimSpace(item.LogID), key),
 		"type":      "runtime.log",
 		"timestamp": item.TS.UTC().Format(time.RFC3339),
 		"payload":   payload,
@@ -411,13 +412,4 @@ func runDurationMillis(startedAt, endedAt time.Time) int64 {
 		return 0
 	}
 	return endedAt.Sub(startedAt).Milliseconds()
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			return value
-		}
-	}
-	return ""
 }

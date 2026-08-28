@@ -17,6 +17,7 @@ import (
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/stringsutil"
 	"github.com/google/uuid"
 )
 
@@ -300,7 +301,7 @@ func runTargetOwnerArc(t *testing.T, test targetOwnerArcCase) {
 		t.Fatalf("load committed replay route: %v", err)
 	}
 	wantRecipientKey := persisted[0].Recipient.ID()
-	if !containsString(live, wantRecipientKey) || !containsString(internal, wantRecipientKey) || len(replayRoutes) != 1 {
+	if !stringsutil.ContainsTrimmed(live, wantRecipientKey) || !stringsutil.ContainsTrimmed(internal, wantRecipientKey) || len(replayRoutes) != 1 {
 		t.Fatalf("replay live/internal/routes = %#v/%#v/%#v", live, internal, replayRoutes)
 	}
 	assertTargetOwnerArcRoute(t, replayRoutes[0], wantOwner)

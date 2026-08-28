@@ -18,6 +18,7 @@ import (
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 type StandingIngressBinding struct {
@@ -433,7 +434,7 @@ func standingDeclarationLocation(pkg runtimecontracts.LoadedProjectPackage, flow
 	if path == "" {
 		path = "package.yaml"
 	}
-	return fmt.Sprintf("%s flows[%s]", path, firstNonEmpty(flowID, "<missing>"))
+	return fmt.Sprintf("%s flows[%s]", path, stringsutil.FirstNonEmpty(flowID, "<missing>"))
 }
 
 func validateStandingIngressRawPin(source semanticview.Source, flowID, provider string, eventNames providertriggers.EventNameManifest) error {

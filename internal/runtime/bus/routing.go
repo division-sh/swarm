@@ -27,6 +27,14 @@ func IsValidEventTypeName(raw string) bool {
 	return eventidentity.IsValidName(raw)
 }
 
+// UniqueStrings returns in with entries trimmed, empty entries removed, and
+// duplicates removed, preserving first-occurrence order.
+//
+// This helper is intentionally kept local rather than consolidated into
+// stringsutil.Unique: for inputs of length <= 1 it returns the input slice
+// verbatim, so a single element is returned untrimmed (and the input slice is
+// never reallocated). stringsutil.Unique always trims every element and
+// returns a fresh, non-nil slice.
 func UniqueStrings(in []string) []string {
 	if len(in) <= 1 {
 		return in

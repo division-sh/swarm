@@ -1392,13 +1392,3 @@ func workflowInstanceRowID(ref string) string {
 func FlowInstanceEntityID(ref string) string {
 	return runtimeflowidentity.EntityID(ref)
 }
-
-func containsString(items []string, target string) bool {
-	target = strings.TrimSpace(target)
-	for _, item := range items {
-		if strings.TrimSpace(item) == target {
-			return true
-		}
-	}
-	return false
-}

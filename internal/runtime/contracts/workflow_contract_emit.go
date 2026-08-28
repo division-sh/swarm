@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 type HandlerDeclarativeEmitSite struct {
@@ -60,7 +61,7 @@ func HandlerEmitEvents(handler SystemNodeEventHandler) []string {
 			out = append(out, eventType)
 		}
 	}
-	return uniqueOrderedStrings(out)
+	return stringsutil.Unique(out)
 }
 
 func HandlerDeclarativeEmitSites(handler SystemNodeEventHandler) []HandlerDeclarativeEmitSite {
@@ -204,7 +205,7 @@ func ruleEmitEvents(rule HandlerRuleEntry) []string {
 			out = append(out, eventType)
 		}
 	}
-	return uniqueOrderedStrings(out)
+	return stringsutil.Unique(out)
 }
 
 func completionRuleEmitEvents(rule HandlerRuleEntry) []string {
@@ -217,7 +218,7 @@ func completionRuleEmitEvents(rule HandlerRuleEntry) []string {
 			out = append(out, eventType)
 		}
 	}
-	return uniqueOrderedStrings(out)
+	return stringsutil.Unique(out)
 }
 
 func actionResultEvents(action ActionSpec) []string {
@@ -445,25 +446,5 @@ func HandlerRuleActionIDs(handler SystemNodeEventHandler) []string {
 			out = append(out, id)
 		}
 	}
-	return uniqueOrderedStrings(out)
-}
-
-func uniqueOrderedStrings(values []string) []string {
-	if len(values) == 0 {
-		return nil
-	}
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-	return out
+	return stringsutil.Unique(out)
 }

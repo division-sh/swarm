@@ -15,6 +15,7 @@ import (
 	runtimerequiredagents "github.com/division-sh/swarm/internal/runtime/requiredagents"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 type Check struct {
@@ -1679,7 +1680,7 @@ func workflowFindEventCyclesLocal(graph map[string]map[string]struct{}) [][]stri
 				cycles = append(cycles, cycle)
 				continue
 			}
-			if _, ok := graph[next]; !ok || containsString(path, next) {
+			if _, ok := graph[next]; !ok || stringsutil.Contains(path, next) {
 				continue
 			}
 			walk(start, next, append(path, next))
@@ -1701,13 +1702,4 @@ func sortedSetKeysFromGraphLocal(graph map[string]map[string]struct{}) []string 
 	}
 	sort.Strings(keys)
 	return keys
-}
-
-func containsString(items []string, target string) bool {
-	for _, item := range items {
-		if item == target {
-			return true
-		}
-	}
-	return false
 }

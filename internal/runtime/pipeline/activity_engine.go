@@ -32,6 +32,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/division-sh/swarm/internal/runtime/semanticvalue"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 const activityRequestEventType = events.EventType("platform.activity_requested")
@@ -139,7 +140,7 @@ func (pc *PipelineCoordinator) buildProposedEffectCard(ctx context.Context, inte
 	}
 	runID := strings.TrimSpace(intent.SourceRunID)
 	requestEventID := activityRequestEventID(intent)
-	flowInstance := firstNonEmptyString(intent.FlowInstance, intent.ExecutionFlowID.String(), "root")
+	flowInstance := stringsutil.FirstNonEmpty(intent.FlowInstance, intent.ExecutionFlowID.String(), "root")
 	createdAt := time.Now().UTC()
 	bundleHash := workflowGateBundleHash(ctx, pc)
 	if bundleHash == "" {
@@ -812,7 +813,7 @@ func activityRequestEmitIntentFromAdmittedSource(intent runtimeengine.ActivityIn
 		},
 		Lineage: events.EventLineage{
 			RunID:         intent.SourceRunID,
-			ParentEventID: firstNonEmptyString(intent.SourceEventID, intent.ParentEventID),
+			ParentEventID: stringsutil.FirstNonEmpty(intent.SourceEventID, intent.ParentEventID),
 			TaskID:        intent.SourceTaskID,
 			ExecutionMode: intent.ExecutionMode,
 		},
@@ -1506,7 +1507,7 @@ func (d pipelineActivityDispatcher) publishActivityResultWithID(ctx context.Cont
 		},
 		Lineage: events.EventLineage{
 			RunID:         intent.SourceRunID,
-			ParentEventID: firstNonEmptyString(intent.SourceEventID, intent.ParentEventID),
+			ParentEventID: stringsutil.FirstNonEmpty(intent.SourceEventID, intent.ParentEventID),
 			TaskID:        intent.SourceTaskID,
 			ExecutionMode: intent.ExecutionMode,
 		},
@@ -1570,7 +1571,7 @@ func activityAttemptStartRecord(intent runtimeengine.ActivityIntent, inputHash s
 		SourceEventID:   intent.SourceEventID,
 		ParentEventID:   intent.ParentEventID,
 		EntityID:        intent.EntityID.String(),
-		FlowInstance:    firstNonEmptyString(intent.FlowInstance, intent.ExecutionFlowID.String()),
+		FlowInstance:    stringsutil.FirstNonEmpty(intent.FlowInstance, intent.ExecutionFlowID.String()),
 		NodeID:          intent.Owner.Key(),
 		HandlerEventKey: intent.HandlerEventKey,
 		ActivityID:      intent.ActivityID,

@@ -10,6 +10,7 @@ import (
 
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 type Dialect uint8
@@ -90,7 +91,7 @@ func List(ctx context.Context, db Queryer, dialect Dialect, opts runtimeauthorac
 		}
 		where = append(where, "runtime_instance_id = "+runtimePlaceholder)
 		var scopes []string
-		bundleHashes := normalizedUniqueStrings(opts.BundleHashes)
+		bundleHashes := stringsutil.Unique(opts.BundleHashes)
 		if len(bundleHashes) > 0 {
 			placeholders := make([]string, 0, len(bundleHashes))
 			for _, bundleHash := range bundleHashes {
@@ -199,23 +200,6 @@ func parseStoredTime(value string) (time.Time, error) {
 		lastErr = err
 	}
 	return time.Time{}, lastErr
-}
-
-func normalizedUniqueStrings(values []string) []string {
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-	return out
 }
 
 func bind(dialect Dialect, index int) string {

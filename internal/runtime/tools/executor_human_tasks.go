@@ -16,6 +16,7 @@ import (
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
+	"github.com/division-sh/swarm/internal/stringsutil"
 	"github.com/google/uuid"
 )
 
@@ -130,7 +131,7 @@ func (e *Executor) execAskHuman(ctx context.Context, actor models.AgentConfig, i
 	switch scope.Kind {
 	case decisioncard.ScopeEntity:
 		scope.FlowInstance = flowInstance
-		scope.EntityID = strings.TrimSpace(firstNonEmptyHumanTask(in.EntityID, actor.EffectiveEntityID()))
+		scope.EntityID = strings.TrimSpace(stringsutil.FirstNonEmpty(in.EntityID, actor.EffectiveEntityID()))
 	case decisioncard.ScopeFlow:
 		scope.FlowInstance = flowInstance
 	case decisioncard.ScopeGlobal:
@@ -236,13 +237,4 @@ func (e *Executor) execAskHuman(ctx context.Context, actor models.AgentConfig, i
 		return nil, err
 	}
 	return map[string]any{"card_id": card.CardID, "status": decisioncard.StatusPending}, nil
-}
-
-func firstNonEmptyHumanTask(values ...string) string {
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			return value
-		}
-	}
-	return ""
 }

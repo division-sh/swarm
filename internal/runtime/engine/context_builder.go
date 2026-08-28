@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/values"
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 type BaseContext = values.Context
@@ -38,7 +39,7 @@ func BuildBaseContext(input ContextBuilderInput) (BaseContext, error) {
 	materializedState.StateCarrier.Fields = materializedFields
 	base.Entity = values.Wrap(materializedState.EntityContext())
 	base.PlatformEntity = values.Wrap(materializedState.PlatformEntityContext(contextFlowInstance(input.State, input.Event, input.FlowID)))
-	base.FlowID = firstNonEmpty(strings.TrimSpace(input.State.WorkflowName), strings.TrimSpace(input.FlowID))
+	base.FlowID = stringsutil.FirstNonEmpty(strings.TrimSpace(input.State.WorkflowName), strings.TrimSpace(input.FlowID))
 	base.Metadata = values.Wrap(cloneStringAnyMap(input.State.StateCarrier.Fields))
 	base.Gates = values.Wrap(boolMapToAnyMap(input.State.StateCarrier.Gates))
 	base.Event = values.Wrap(input.Event.ContextMap(input.State.CurrentState))
@@ -50,7 +51,7 @@ func BuildBaseContext(input ContextBuilderInput) (BaseContext, error) {
 }
 
 func contextFlowInstance(state StateSnapshot, evt events.Event, fallbackFlowID string) string {
-	return firstNonEmpty(
+	return stringsutil.FirstNonEmpty(
 		normalizedContextFlowInstance(state.StateCarrier.Control.FlowPath),
 		normalizedContextFlowInstance(evt.FlowInstance()),
 		normalizedContextFlowInstance(fallbackFlowID),
