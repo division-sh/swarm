@@ -229,8 +229,6 @@ type connectProducerEventEvidenceCodec struct {
 	AcceptanceSchemaDigest string `json:"acceptance_schema_digest"`
 	BusinessKeyField       string `json:"business_key_field,omitempty"`
 	BusinessKeyType        string `json:"business_key_type,omitempty"`
-	SourceFlowID           string `json:"source_flow_id,omitempty"`
-	SourceFile             string `json:"source_file,omitempty"`
 }
 
 type connectExecutionClaimPlanCodec struct {
@@ -272,12 +270,7 @@ func connectPlanIdentityCodec(plan ConnectRoutePlan) connectPlanIdentityWire {
 		}
 	}
 	if plan.producerEvent != nil {
-		codec.ProducerEvent = &connectProducerEventEvidenceCodec{
-			PackageKey: plan.producerEvent.packageKey, EventName: plan.producerEvent.eventName,
-			AcceptanceSchemaDigest: plan.producerEvent.acceptanceSchemaDigest,
-			BusinessKeyField:       plan.producerEvent.businessKeyField, BusinessKeyType: plan.producerEvent.businessKeyType,
-			SourceFlowID: plan.producerEvent.sourceFlowID, SourceFile: plan.producerEvent.sourceFile,
-		}
+		codec.ProducerEvent = connectEventEvidenceCodec(plan.producerEvent)
 	}
 	if plan.receiverEvent != nil {
 		codec.ReceiverEvent = connectEventEvidenceCodec(plan.receiverEvent)
@@ -312,7 +305,6 @@ func connectEventEvidenceCodec(evidence *connectProducerEventEvidence) *connectP
 		PackageKey: evidence.packageKey, EventName: evidence.eventName,
 		AcceptanceSchemaDigest: evidence.acceptanceSchemaDigest,
 		BusinessKeyField:       evidence.businessKeyField, BusinessKeyType: evidence.businessKeyType,
-		SourceFlowID: evidence.sourceFlowID, SourceFile: evidence.sourceFile,
 	}
 }
 
