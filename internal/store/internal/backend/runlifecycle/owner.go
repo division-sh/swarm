@@ -12,6 +12,7 @@ import (
 	runtimefanoutbarrier "github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	runtimefanout "github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	deliverystore "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	postgresbackend "github.com/division-sh/swarm/internal/store/internal/backend/postgres"
@@ -43,7 +44,7 @@ type pipelineTerminalizer interface {
 	TerminalizeRunTx(context.Context, *sql.Tx, *privaterunforkrevision.Effects, string, runtimepipelineobligation.Disposition, time.Time) (int, error)
 	SummarizeRunTx(context.Context, *sql.Tx, string) (runtimepipelineobligation.RunSummary, error)
 	SummarizeFanOutRunTx(context.Context, *sql.Tx, string, time.Time) (runtimefanout.RunSummary, error)
-	AdvanceFanOutDeliveryBarriersTx(context.Context, *sql.Tx, *privaterunforkrevision.Effects, string, time.Time) error
+	AdvanceFanOutDeliveryBarriersTx(context.Context, *sql.Tx, *privaterunforkrevision.Effects, string, time.Time) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error)
 	SummarizeFanOutDeliveryBarriersRunTx(context.Context, *sql.Tx, string) (runtimefanoutbarrier.RunSummary, error)
 }
 

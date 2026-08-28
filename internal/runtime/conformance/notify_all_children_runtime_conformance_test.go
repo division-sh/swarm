@@ -16,6 +16,7 @@ import (
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
+	"github.com/division-sh/swarm/internal/operatorread"
 	runtimeagents "github.com/division-sh/swarm/internal/runtime/agents"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeauthority "github.com/division-sh/swarm/internal/runtime/authority"
@@ -30,11 +31,13 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimestartupownership "github.com/division-sh/swarm/internal/runtime/startupownership"
@@ -123,13 +126,27 @@ type notifyAllChildrenRuntime struct {
 	workOwner        *worklifetime.RuntimeOccurrence
 	selected         notifyAllChildrenStore
 	bundleSourceFact runtimecorrelation.BundleSourceFact
+	genericSchedules *runtimegenericschedule.Lifecycle
 }
 
 type notifyAllChildrenRuntimeOptions struct {
-	realMockAgents   bool
-	agentGate        *notifyAllChildrenAgentGate
-	processTopology  *notifyAllChildrenProcessTopology
-	bundleSourceFact runtimecorrelation.BundleSourceFact
+	realMockAgents         bool
+	agentGate              *notifyAllChildrenAgentGate
+	processTopology        *notifyAllChildrenProcessTopology
+	bundleSourceFact       runtimecorrelation.BundleSourceFact
+	enableGenericSchedules bool
+}
+
+type notifyAllChildrenGenericScheduleLogger struct {
+	t testing.TB
+}
+
+func (l notifyAllChildrenGenericScheduleLogger) GenericScheduleFailure(_ context.Context, action, activationID string, err error) {
+	l.t.Logf("generic schedule %s for %s failed: %v", action, activationID, err)
+}
+
+func (l notifyAllChildrenGenericScheduleLogger) GenericScheduleCatchupWarning(_ context.Context, activationID string, depth int) {
+	l.t.Logf("generic schedule %s catchup depth %d", activationID, depth)
 }
 
 type notifyAllChildrenProcessTopology struct {
@@ -355,6 +372,142 @@ func (g *notifyAllChildrenAgentGate) release(flowInstance string) {
 			close(entry.release)
 		}
 	}
+}
+
+func TestFanOutDeliveryBarrierCompletesThroughRealEventBusAndPublicReadbackOnBothBackends(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(*testing.T) (notifyAllChildrenStore, *sql.DB)
+	}{
+		{
+			name: "postgres",
+			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
+				_, db, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				return storetest.AdmitPostgresRuntimeStore(t, db), db
+			},
+		},
+		{
+			name: "sqlite",
+			setup: func(t *testing.T) (notifyAllChildrenStore, *sql.DB) {
+				selected := storetest.StartSQLiteRuntimeStore(t)
+				return selected, storetest.DatabaseForTest(selected)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			selected, db := tc.setup(t)
+			runID := uuid.NewString()
+			ctx := runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), runID)
+			source := notifyallchildren.LoadSource(t, notifyallchildren.Options{FanOutDeliveryBarrier: true})
+			runtime := newNotifyAllChildrenRuntime(
+				t,
+				selected,
+				db,
+				source,
+				time.Now,
+				notifyAllChildrenRuntimeOptions{enableGenericSchedules: true},
+			)
+			if err := runtime.manager.Run(managedConformanceExecutionContextForBundle(t, ctx, "fan-out-delivery-barrier", runtime.bundleSourceFact)); err != nil {
+				t.Fatalf("run manager: %v", err)
+			}
+
+			publishNotifyAllChildrenRunCreatingEvent(t, ctx, runtime, source, runID, "portfolio.opened", map[string]any{
+				"portfolio_id": "portfolio-main",
+			})
+			accountIDs := []string{"acct-c", "acct-a", "acct-b"}
+			publishNotifyAllChildrenEvent(t, ctx, runtime, source, runID, "portfolio.accounts.register.requested", map[string]any{
+				"portfolio_id": "portfolio-main",
+				"account_ids":  accountIDs,
+			})
+			notifyID := publishNotifyAllChildrenEventAsync(t, ctx, runtime, source, runID, "portfolio.notify.requested", map[string]any{
+				"portfolio_id": "portfolio-main",
+				"command":      "barrier-proof",
+			})
+			waitNotifyAllChildrenRuntime(t, runtime, runID)
+
+			items := loadNotifyAllChildrenItemEvents(t, ctx, selected, db, runID, notifyID)
+			if len(items) != len(accountIDs) {
+				t.Fatalf("fan-out item events = %#v, want %d", items, len(accountIDs))
+			}
+			operatorStore, ok := selected.(interface {
+				LoadOperatorEvent(context.Context, string) (operatorread.OperatorEventFull, error)
+			})
+			if !ok {
+				t.Fatalf("notify-all-children store %T lacks operator event readback", selected)
+			}
+			for _, item := range items {
+				view, err := operatorStore.LoadOperatorEvent(ctx, item.ID)
+				if err != nil {
+					t.Fatalf("load fan-out item %s: %v", item.ID, err)
+				}
+				allDelivered := len(view.Deliveries) == 2
+				for _, delivery := range view.Deliveries {
+					allDelivered = allDelivered && delivery.Status == string(runtimedelivery.StatusDelivered) && delivery.Terminal
+				}
+				if view.NoDelivery != nil || !allDelivered {
+					t.Fatalf("fan-out item %s public settlement = deliveries:%#v no_delivery:%#v", item.ID, view.Deliveries, view.NoDelivery)
+				}
+			}
+
+			completionID := loadNotifyAllChildrenSingleEventID(t, ctx, selected, db, runID, source.ResolveFlowEventReference(notifyallchildren.OwnerFlowID, "portfolio.notify.completed"))
+			completion, err := operatorStore.LoadOperatorEvent(ctx, completionID)
+			if err != nil {
+				t.Fatalf("load fan-out barrier output: %v", err)
+			}
+			wantPayload := map[string]int{
+				"total": len(accountIDs), "succeeded": len(accountIDs), "dead_lettered": 0,
+				"no_route": 0, "semantic_rejected": 0, "canceled": 0,
+			}
+			for field, want := range wantPayload {
+				if got, ok := completion.Payload[field].(float64); !ok || int(got) != want {
+					t.Fatalf("barrier output %s = %#v, want %d; payload=%#v", field, completion.Payload[field], want, completion.Payload)
+				}
+			}
+			if completion.NoDelivery == nil || len(completion.Deliveries) != 0 {
+				t.Fatalf("barrier business output settlement = deliveries:%#v no_delivery:%#v", completion.Deliveries, completion.NoDelivery)
+			}
+			var status string
+			if err := db.QueryRowContext(ctx, `SELECT status FROM fan_out_obligation_barriers WHERE run_id=$1`, runID).Scan(&status); err != nil {
+				t.Fatal(err)
+			}
+			if status != "fired" {
+				t.Fatalf("fan-out barrier status = %s, want fired", status)
+			}
+			summary, err := selected.FanOutRunSummary(ctx, runID, time.Now().UTC())
+			if err != nil || summary.BarrierArmed != 0 || summary.BarrierPending != 0 || summary.BarrierTerminal != 1 || summary.BlocksCompletion() {
+				t.Fatalf("public fan-out barrier summary = %#v err=%v", summary, err)
+			}
+		})
+	}
+}
+
+func loadNotifyAllChildrenSingleEventID(t *testing.T, ctx context.Context, backend notifyAllChildrenStore, db *sql.DB, runID, eventName string) string {
+	t.Helper()
+	query := `SELECT CAST(event_id AS TEXT) FROM events WHERE run_id=$1::uuid AND event_name=$2 ORDER BY created_at,event_id`
+	if _, ok := backend.(*store.SQLiteRuntimeStore); ok {
+		query = `SELECT event_id FROM events WHERE run_id=? AND event_name=? ORDER BY created_at,event_id`
+	}
+	rows, err := db.QueryContext(ctx, query, runID, eventName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	ids := make([]string, 0, 2)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 {
+		t.Fatalf("events %s for run %s = %#v, want exactly one", eventName, runID, ids)
+	}
+	return ids[0]
 }
 
 func TestDynamicFlowSourceRevisionConvergesExactAgentSetAndFencesPredecessorsOnBothBackends(t *testing.T) {
@@ -1228,6 +1381,10 @@ func newNotifyAllChildrenRuntime(
 	var coordinator *runtimepipeline.PipelineCoordinator
 	var manager *runtimemanager.AgentManager
 	workOwner := conformanceTestRuntimeOccurrence(t, bundleSourceFact.BundleHash())
+	var runtimeControlEvents []string
+	if opts.enableGenericSchedules {
+		runtimeControlEvents = append(runtimeControlEvents, "platform.join_complete")
+	}
 	eventBus, err := newScopedTestEventBus(t, backend, durableConformanceEventBusOptions(backend, runtimebus.EventBusOptions{
 		ContractBundle:   source,
 		BundleSourceFact: bundleSourceFact,
@@ -1256,9 +1413,31 @@ func newNotifyAllChildrenRuntime(
 			}
 			return manager.FinalizeCommittedFlowInstanceActivation(ctx, committed)
 		}),
-	}))
+	}), runtimeControlEvents...)
 	if err != nil {
 		t.Fatalf("NewEventBusWithOptions: %v", err)
+	}
+	var (
+		genericSchedules *runtimegenericschedule.Lifecycle
+		scheduler        *runtimepipeline.Scheduler
+	)
+	if opts.enableGenericSchedules {
+		genericScheduleStore, ok := backend.(runtimegenericschedule.Store)
+		if !ok {
+			t.Fatalf("notify-all-children store %T does not implement generic schedule persistence", backend)
+		}
+		scheduler = runtimepipeline.NewSchedulerWithWorkOwner(workOwner)
+		genericSchedules, err = runtimegenericschedule.NewLifecycle(
+			genericScheduleStore,
+			scheduler,
+			eventBus,
+			eventBus.EngineDispatcher(),
+			notifyAllChildrenGenericScheduleLogger{t: t},
+			executionposture.Live,
+		)
+		if err != nil {
+			t.Fatalf("construct notify-all-children generic schedule lifecycle: %v", err)
+		}
 	}
 	if routeStore, ok := backend.(runtimebus.FlowInstanceRoutePersistence); ok {
 		routes, err := routeStore.ListFlowInstanceRoutes(testAuthorActivityContextForBundle(context.Background(), bundleSourceFact))
@@ -1386,6 +1565,8 @@ func newNotifyAllChildrenRuntime(
 		HumanTaskExpiry:         backend,
 		DeliveryRuntime:         eventBus,
 		FlowRoutes:              eventBus,
+		TimerScheduler:          scheduler,
+		GenericSchedules:        genericSchedules,
 		TestEngineEmitNow:       engineNow,
 		WorkOwner:               workOwner, ReceiverExecution: eventreceiver.NormalExecution(),
 	})
@@ -1406,6 +1587,44 @@ func newNotifyAllChildrenRuntime(
 		PersistenceRoles:  conformanceManagerPersistenceRoles(backend, eventBus, coordinator), ReceiverExecution: eventreceiver.NormalExecution(),
 	}, backend))
 	opts.processTopology.install(t, testAuthorActivityContextForBundle(context.Background(), bundleSourceFact), manager, source, bundleSourceFact, generationLifecycle)
+	if opts.enableGenericSchedules {
+		candidateOwner, ok := backend.(runtimerunlifecycle.CandidateOwner)
+		if !ok {
+			t.Fatalf("notify-all-children store %T does not implement run lifecycle candidates", backend)
+		}
+		executor, err := runtimerunlifecycle.NewExecutor(
+			candidateOwner,
+			runtimerunlifecycle.CandidateScope{BundleHash: bundleSourceFact.BundleHash()},
+			notifyAllChildrenTerminalCatalog(source),
+			workOwner,
+			runtimerunlifecycle.ExecutorOptions{GenericSchedules: genericSchedules},
+		)
+		if err != nil {
+			t.Fatalf("construct notify-all-children completion executor: %v", err)
+		}
+		runtimeCtx := worklifetime.WithRuntimeOccurrence(testAuthorActivityContextForBundle(context.Background(), bundleSourceFact), workOwner)
+		registration, err := candidateOwner.RegisterCompletionCandidateSink(
+			runtimeCtx,
+			runtimerunlifecycle.CandidateScope{BundleHash: bundleSourceFact.BundleHash()},
+			executor,
+		)
+		if err != nil {
+			t.Fatalf("register notify-all-children completion executor: %v", err)
+		}
+		if err := executor.Start(runtimeCtx); err != nil {
+			registration.Release()
+			t.Fatalf("start notify-all-children completion executor: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := executor.Retire(context.Background()); err != nil {
+				t.Errorf("retire notify-all-children completion executor: %v", err)
+			}
+			registration.Release()
+			if err := genericSchedules.Stop(context.Background()); err != nil {
+				t.Errorf("stop notify-all-children generic schedules: %v", err)
+			}
+		})
+	}
 	maintenanceCtx, stopMaintenance := context.WithCancel(testAuthorActivityContextForBundle(context.Background(), bundleSourceFact))
 	maintenanceDone := make(chan struct{})
 	go func() {
@@ -1418,8 +1637,24 @@ func newNotifyAllChildrenRuntime(
 	})
 	return notifyAllChildrenRuntime{
 		bus: eventBus, diagnostics: diagnosticBus, manager: manager, pipeline: coordinator,
-		workOwner: workOwner, selected: backend, bundleSourceFact: bundleSourceFact,
+		workOwner: workOwner, selected: backend, bundleSourceFact: bundleSourceFact, genericSchedules: genericSchedules,
 	}
+}
+
+func notifyAllChildrenTerminalCatalog(source semanticview.Source) runtimerunlifecycle.TerminalCatalog {
+	workflow := source.FlowTerminalStages("")
+	flows := make(map[string][]string)
+	for flowID := range source.FlowSchemaEntries() {
+		states := source.FlowTerminalStages(flowID)
+		if len(states) == 0 {
+			continue
+		}
+		flows[flowID] = states
+		if path := strings.Trim(strings.TrimSpace(source.FlowPath(flowID)), "/"); path != "" {
+			flows[path] = states
+		}
+	}
+	return runtimerunlifecycle.NewTerminalCatalog(workflow, flows)
 }
 
 func loadNotifyAllChildrenAgentsByID(
@@ -1734,7 +1969,7 @@ func waitNotifyAllChildrenRuntime(t *testing.T, runtime notifyAllChildrenRuntime
 		if err != nil {
 			t.Fatalf("FanOutRunSummary(%s): %v", runID, err)
 		}
-		if summary.Owed == 0 && summary.Open == 0 && summary.Blocked == 0 && summary.Unsettled == 0 {
+		if summary.Owed == 0 && summary.Open == 0 && summary.Blocked == 0 && summary.Unsettled == 0 && summary.BarrierArmed == 0 && summary.BarrierPending == 0 {
 			if err := runtime.bus.WaitForQuiescence(ctx); err != nil {
 				t.Fatalf("WaitForQuiescence after fan-out settlement: %v", err)
 			}
@@ -1742,7 +1977,7 @@ func waitNotifyAllChildrenRuntime(t *testing.T, runtime notifyAllChildrenRuntime
 			if err != nil {
 				t.Fatalf("confirm FanOutRunSummary(%s): %v", runID, err)
 			}
-			if confirmed.Owed == 0 && confirmed.Open == 0 && confirmed.Blocked == 0 && confirmed.Unsettled == 0 {
+			if confirmed.Owed == 0 && confirmed.Open == 0 && confirmed.Blocked == 0 && confirmed.Unsettled == 0 && confirmed.BarrierArmed == 0 && confirmed.BarrierPending == 0 {
 				return
 			}
 		}

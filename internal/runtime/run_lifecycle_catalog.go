@@ -3,9 +3,22 @@ package runtime
 import (
 	"strings"
 
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
+
+func runLifecycleRequiresGenericSchedules(source semanticview.Source) bool {
+	if source == nil {
+		return false
+	}
+	for _, join := range source.WorkflowJoins() {
+		if join.Mode == runtimecontracts.WorkflowJoinModeFanOutDelivery {
+			return true
+		}
+	}
+	return false
+}
 
 func runLifecycleTerminalCatalog(source semanticview.Source) runtimerunlifecycle.TerminalCatalog {
 	if source == nil {

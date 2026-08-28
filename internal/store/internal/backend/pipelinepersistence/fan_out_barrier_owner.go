@@ -19,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
+	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
@@ -243,6 +244,9 @@ func loadFanOutBarriersByStatus(
 	}
 	out := make([]fanoutbarrier.Registration, 0, len(persistedRows))
 	for _, item := range persistedRows {
+		item.registration.PlanRef = runtimecontracts.FanOutPlanRef{
+			BundleHash: item.bundleHash, ElementRef: item.registration.IntentKey.ElementRef, SemanticDigest: item.digest,
+		}
 		if err := json.Unmarshal(item.routingRaw, &item.registration.RoutingSource); err != nil {
 			return nil, fmt.Errorf("decode fan-out barrier routing source: %w", err)
 		}
@@ -337,28 +341,29 @@ func advanceFanOutDeliveryBarriersTx(
 	genericSchedules GenericScheduleTxOwner,
 	runID string,
 	selectedNow time.Time,
-) error {
+) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error) {
 	if tx == nil || effects == nil || genericSchedules == nil || strings.TrimSpace(runID) == "" || selectedNow.IsZero() {
-		return fmt.Errorf("fan-out barrier advancement requires transaction, owners, run, and selected-store time")
+		return nil, fmt.Errorf("fan-out barrier advancement requires transaction, owners, run, and selected-store time")
 	}
 	registrations, err := loadArmedFanOutBarriers(ctx, tx, postgres, runID)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	activations := make([]runtimerunlifecycle.CommittedGenericScheduleActivation, 0, len(registrations))
 	for _, registration := range registrations {
 		current, err := fanOutBarrierGenerationCurrent(ctx, tx, registration)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if !current {
 			if err := suppressSupersededArmedFanOutBarrierTx(ctx, tx, postgres, effects, registration, selectedNow); err != nil {
-				return err
+				return nil, err
 			}
 			continue
 		}
 		fold, err := foldFanOutIntentTerminalDispositions(ctx, tx, postgres, registration.IntentKey)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if !fold.Terminal() {
 			continue
@@ -367,15 +372,24 @@ func advanceFanOutDeliveryBarriersTx(
 		scheduleKey := any(nil)
 		command, err := fanOutBarrierSchedule(registration, fold.Summary, selectedNow)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		if _, err := genericSchedules.AdmitTx(ctx, tx, effects, command); err != nil {
-			return fmt.Errorf("admit fan-out barrier completion: %w", err)
+		admitted, err := genericSchedules.AdmitTx(ctx, tx, effects, command)
+		if err != nil {
+			return nil, fmt.Errorf("admit fan-out barrier completion: %w", err)
 		}
+		if err := admitted.Validate(); err != nil {
+			return nil, fmt.Errorf("validate admitted fan-out barrier completion: %w", err)
+		}
+		activation, err := runtimerunlifecycle.NewCommittedGenericScheduleActivation(admitted.Activation.ID)
+		if err != nil {
+			return nil, err
+		}
+		activations = append(activations, activation)
 		scheduleKey = command.ScheduleKey
 		summaryRaw, err := json.Marshal(fold.Summary)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		query := `
 			UPDATE fan_out_obligation_barriers
@@ -390,20 +404,23 @@ func advanceFanOutDeliveryBarriersTx(
 			registration.IntentKey.RunID, registration.IntentKey.TriggeringDeliveryID,
 			registration.IntentKey.ElementRef.PackageKey, registration.IntentKey.ElementRef.ElementID)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		changed, err := result.RowsAffected()
 		if err != nil || changed != 1 {
-			return fmt.Errorf("fan-out barrier close lost exact armed owner")
+			return nil, fmt.Errorf("fan-out barrier close lost exact armed owner")
 		}
 		if err := effects.Add(runID, privaterunforkrevision.FamilyFanOutObligations); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if err := suppressSupersededPendingFanOutBarriersTx(ctx, tx, postgres, effects, runID, selectedNow); err != nil {
-		return err
+		return nil, err
 	}
-	return terminalizeDeadLetteredFanOutBarrierOutcomesTx(ctx, tx, postgres, effects, runID, selectedNow)
+	if err := terminalizeDeadLetteredFanOutBarrierOutcomesTx(ctx, tx, postgres, effects, runID, selectedNow); err != nil {
+		return nil, err
+	}
+	return activations, nil
 }
 
 func suppressSupersededArmedFanOutBarrierTx(
@@ -703,11 +720,11 @@ func summarizeFanOutDeliveryBarriersRun(ctx context.Context, queryer pipelineQue
 	return summary, summary.Validate()
 }
 
-func (s *PipelinePostgresOwner) AdvanceFanOutDeliveryBarriersTx(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, runID string, selectedNow time.Time) error {
+func (s *PipelinePostgresOwner) AdvanceFanOutDeliveryBarriersTx(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, runID string, selectedNow time.Time) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error) {
 	return advanceFanOutDeliveryBarriersTx(ctx, tx, true, effects, s.genericSchedules, runID, selectedNow)
 }
 
-func (s *PipelineSQLiteOwner) AdvanceFanOutDeliveryBarriersTx(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, runID string, selectedNow time.Time) error {
+func (s *PipelineSQLiteOwner) AdvanceFanOutDeliveryBarriersTx(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, runID string, selectedNow time.Time) ([]runtimerunlifecycle.CommittedGenericScheduleActivation, error) {
 	return advanceFanOutDeliveryBarriersTx(ctx, tx, false, effects, s.genericSchedules, runID, selectedNow)
 }
 
@@ -780,6 +797,7 @@ func materializeRunForkFanOutBarrierTx(
 	registration := source.Registration
 	registration.IntentKey.RunID = strings.TrimSpace(forkRunID)
 	registration.IntentKey.ElementRef = selectedRef.ElementRef
+	registration.PlanRef = selectedRef
 	registration.Handle = handle
 	registration.CreatedAt = at.UTC()
 	if err := commitFanOutBarrierRegistrationTx(ctx, tx, postgres, registration); err != nil {
@@ -847,7 +865,6 @@ func commitFanOutBarrierRegistrationTx(
 		return err
 	}
 	ref, _ := registration.Handle.JoinRef()
-	fanOut, _ := ref.FanOutDelivery()
 	handle, err := json.Marshal(registration.Handle)
 	if err != nil {
 		return fmt.Errorf("encode fan-out delivery barrier handle: %w", err)
@@ -877,8 +894,8 @@ func commitFanOutBarrierRegistrationTx(
 		registration.IntentKey.TriggeringDeliveryID,
 		registration.IntentKey.ElementRef.PackageKey,
 		registration.IntentKey.ElementRef.ElementID,
-		fanOut.BundleHash(),
-		fanOut.SemanticDigest(),
+		registration.PlanRef.BundleHash,
+		registration.PlanRef.SemanticDigest,
 		ref.Node().PackageKey(),
 		ref.Node().FlowID(),
 		ref.Node().NodeID(),

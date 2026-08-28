@@ -306,7 +306,7 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 		if err := c.FanOutBarrier.Validate(); err != nil {
 			return fmt.Errorf("workflow engine fan-out barrier: %w", err)
 		}
-		if c.FanOutBarrier.IntentKey != c.FanOutIntent.Key {
+		if c.FanOutBarrier.IntentKey != c.FanOutIntent.Key || c.FanOutBarrier.PlanRef != c.FanOutIntent.PlanRef {
 			return fmt.Errorf("workflow engine fan-out barrier disagrees with its exact intent")
 		}
 	}

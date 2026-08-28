@@ -183,7 +183,7 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 				t.Fatal(err)
 			}
 			barrier := fanoutbarrier.Registration{
-				IntentKey: intent.Key, Handle: handle,
+				IntentKey: intent.Key, PlanRef: intent.PlanRef, Handle: handle,
 				Route:    runtimeflowidentity.StoredRoute(flowID, runtimeflowidentity.LogicalInstanceID(instancePath), instancePath),
 				EntityID: entityID, RoutingSource: barrierSource,
 				ExecutionMode: event.ExecutionMode(), CreatedAt: createdAt,
@@ -205,6 +205,43 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 			}
 			assertFanOutIntentCount(t, ctx, db, backend, runID, 0)
 			assertFanOutBarrierCount(t, ctx, db, runID, 0)
+
+			hostilePlanRef := intent.PlanRef
+			hostilePlanRef.BundleHash = "bundle-v1:sha256:" + strings.Repeat("a", 64)
+			hostilePlanRef.SemanticDigest = "sha256:" + strings.Repeat("b", 64)
+			hostileJoinRef, err := timeridentity.NewFanOutDeliveryJoinRef(
+				mustPersistenceNode(flowID, "engine-fan-out"), string(event.Type()), "fan-out-complete",
+				element.PackageKey, element.ElementID, hostilePlanRef.BundleHash, hostilePlanRef.SemanticDigest,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hostileJoinRef, err = hostileJoinRef.BindFanOutIntent(claimed.Claim.DeliveryID(), hostileJoinRef.Generation())
+			if err != nil {
+				t.Fatal(err)
+			}
+			hostileHandle, err := timeridentity.JoinCompleteHandle(hostileJoinRef)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hostile = barrier
+			hostile.PlanRef = hostilePlanRef
+			hostile.Handle = hostileHandle
+			if err := hostile.Validate(); err != nil {
+				t.Fatalf("hostile alternate-plan barrier should be internally self-consistent: %v", err)
+			}
+			if _, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{
+				State: record, FanOutIntent: &intent, FanOutBarrier: &hostile,
+				DeliverySuccess: &runtimepipeline.WorkflowEngineDeliverySuccess{
+					Claim: claimed.Claim, SideEffects: []string{"handler_completed"}, Duration: time.Second,
+					RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
+				},
+			}); err == nil || !strings.Contains(err.Error(), "disagrees with its exact intent") {
+				t.Fatalf("alternate compiled plan barrier error = %v, want exact-plan rejection", err)
+			}
+			assertFanOutIntentCount(t, ctx, db, backend, runID, 0)
+			assertFanOutBarrierCount(t, ctx, db, runID, 0)
+
 			committed, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{
 				State: record, FanOutIntent: &intent, FanOutBarrier: &barrier,
 				DeliverySuccess: &runtimepipeline.WorkflowEngineDeliverySuccess{

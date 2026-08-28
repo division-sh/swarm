@@ -14,6 +14,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -461,6 +462,49 @@ func TestClassifyDeliveryTargetOwnershipTargetedEventPreservesExactOwnerBeforeDe
 				t.Fatalf("targeted owner = %s %#v, want exact existing owner %#v", owner.Code(), owner.Route(), exact)
 			}
 		})
+	}
+}
+
+func TestClassifyDeliveryTargetOwnershipJoinOccurrencePreservesDeclarationOwnerBeforeDeclaredKeyAcquisition(t *testing.T) {
+	bundle := workflowJoinLifecycleBundle(t)
+	node := bundle.Nodes["join-node"]
+	handler := node.EventHandlers["item.completed"]
+	handler.SelectEntity = &runtimecontracts.SelectEntitySpec{Bindings: []runtimecontracts.SelectEntityKeyBinding{{
+		Field: "portfolio_id", Ref: "payload.portfolio_id", RefPath: paths.Parse("payload.portfolio_id"),
+	}}}
+	node.EventHandlers["item.completed"] = handler
+	bundle.Nodes["join-node"] = node
+
+	plan := bundle.Semantics.Joins[0]
+	plan.Node = mustPipelineNode("", "join-node")
+	source := exactWorkflowJoinSource{
+		Source: workflowJoinLifecycleRootAndFlowSource(bundle), plans: []runtimecontracts.WorkflowJoinPlan{plan},
+	}
+	entityID := eventtest.UUID("join-declaration-owner")
+	routingSource, err := events.NewRootRoutingSource(entityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle := pipelineJoinHandle(t, "", timeridentity.TimerHandleJoinTimeout)
+	evt := exactJoinOccurrenceEvent(t, "join-declaration-owner", handle, routingSource, events.EventEnvelope{EntityID: entityID})
+	target := events.RouteIdentity{
+		FlowID: source.WorkflowName(), FlowInstance: evt.RunID(), EntityID: entityID,
+	}.Normalized()
+	targetHandler, err := NewDeliveryTargetHandler(plan.Node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := ClassifyDeliveryTargetOwnership(DeliveryTargetOwnershipRequest{
+		Context: context.Background(), Source: source, Event: evt,
+		Recipient: events.MustNodeDeliveryRecipient(plan.Node), Blueprint: target,
+		Handler:    targetHandler.ForEvent("item.completed"),
+		Candidates: []DeliveryTargetOwnerCandidate{{Route: target}},
+	})
+	if err != nil {
+		t.Fatalf("classify declaration-bound join occurrence without selector payload: %v", err)
+	}
+	if !owner.ExistingEntity() || owner.Route() != target {
+		t.Fatalf("join occurrence owner = %s %#v, want exact declaration owner %#v", owner.Code(), owner.Route(), target)
 	}
 }
 

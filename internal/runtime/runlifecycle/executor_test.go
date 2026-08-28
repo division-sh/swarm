@@ -45,6 +45,82 @@ type blockingRetryPolicy struct {
 	release chan struct{}
 }
 
+type recordingGenericScheduleWakeupOwner struct {
+	activationIDs chan string
+	queued        bool
+	err           error
+}
+
+func (o *recordingGenericScheduleWakeupOwner) ReconcileWakeupWithRecovery(_ context.Context, activationID string) (bool, error) {
+	o.activationIDs <- activationID
+	return o.queued, o.err
+}
+
+func TestExecutorHandsCommittedGenericScheduleToRecoveryBackedOwnerBeforeDroppingCandidate(t *testing.T) {
+	candidate := executorTestCandidate(1)
+	activation, err := NewCommittedGenericScheduleActivation("33333333-3333-4333-8333-333333333333")
+	if err != nil {
+		t.Fatal(err)
+	}
+	executions := make(chan struct{}, 1)
+	store := &executorTestStore{
+		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
+			return CandidatePage{Exhausted: true}, nil
+		},
+		execute: func(context.Context, Candidate, TerminalCatalog) (CompletionResult, error) {
+			executions <- struct{}{}
+			return CompletionResult{Outcome: OutcomeAwaitMutation, GenericScheduleActivations: []CommittedGenericScheduleActivation{activation}}, nil
+		},
+	}
+	wakeups := &recordingGenericScheduleWakeupOwner{activationIDs: make(chan string, 1)}
+	executor, occurrence := newExecutorTestSubject(t, store, ExecutorOptions{GenericSchedules: wakeups})
+	if err := executor.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := executor.SubmitCompletionCandidate(context.Background(), candidate); err != nil {
+		t.Fatal(err)
+	}
+	receiveSignal(t, executions, "candidate execution")
+	if got := receiveValue(t, wakeups.activationIDs, "generic schedule handoff"); got != activation.ID() {
+		t.Fatalf("generic schedule handoff = %s, want %s", got, activation.ID())
+	}
+	awaitExecutorCandidates(t, executor, 0)
+	retireExecutorTestSubject(t, executor, occurrence)
+}
+
+func TestExecutorAcceptsRecoveryOwnershipAfterImmediateGenericScheduleProjectionFailure(t *testing.T) {
+	activation, err := NewCommittedGenericScheduleActivation("44444444-4444-4444-8444-444444444444")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var executions atomic.Int64
+	store := &executorTestStore{
+		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
+			return CandidatePage{Exhausted: true}, nil
+		},
+		execute: func(context.Context, Candidate, TerminalCatalog) (CompletionResult, error) {
+			executions.Add(1)
+			return CompletionResult{Outcome: OutcomeAwaitMutation, GenericScheduleActivations: []CommittedGenericScheduleActivation{activation}}, nil
+		},
+	}
+	wakeups := &recordingGenericScheduleWakeupOwner{
+		activationIDs: make(chan string, 1), queued: true, err: errors.New("injected immediate projection failure"),
+	}
+	executor, occurrence := newExecutorTestSubject(t, store, ExecutorOptions{GenericSchedules: wakeups})
+	if err := executor.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := executor.SubmitCompletionCandidate(context.Background(), executorTestCandidate(1)); err != nil {
+		t.Fatal(err)
+	}
+	receiveValue(t, wakeups.activationIDs, "recovery-backed generic schedule handoff")
+	awaitExecutorCandidates(t, executor, 0)
+	if got := executions.Load(); got != 1 {
+		t.Fatalf("candidate executions = %d, want one committed execution", got)
+	}
+	retireExecutorTestSubject(t, executor, occurrence)
+}
+
 func (p *blockingRetryPolicy) Delay(int) time.Duration {
 	close(p.started)
 	<-p.release

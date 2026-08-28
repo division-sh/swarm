@@ -1069,23 +1069,6 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 		ManagedCredentials:        boot.ManagedCredentials,
 		workOccurrence:            workOccurrence,
 	}
-	if candidateOwner := runtimeDeps.RunLifecycleCandidates; candidateOwner != nil {
-		scope := runtimerunlifecycle.CandidateScope{BundleHash: boot.BundleSourceFact.BundleHash()}
-		executor, err := runtimerunlifecycle.NewExecutor(
-			candidateOwner,
-			scope,
-			runLifecycleTerminalCatalog(source),
-			workOccurrence,
-			runtimerunlifecycle.ExecutorOptions{},
-		)
-		if err != nil {
-			return nil, fmt.Errorf("build run lifecycle completion executor: %w", err)
-		}
-		rt.runLifecycleExecutor = executor
-	} else if runtimeDeps.WorkflowPersistence.Configured() {
-		return nil, fmt.Errorf("selected runtime store run lifecycle candidate owner is required")
-	}
-
 	if runtimeDeps.RuntimeLogStore != nil {
 		rt.Logger = NewRuntimeLogger(runtimeDeps.RuntimeLogStore, rt.ExecutionPosture)
 	}
@@ -1144,6 +1127,25 @@ func newRuntime(ctx context.Context, deps RuntimeDeps, allowValidationHarness bo
 			return nil, fmt.Errorf("build generic schedule lifecycle: %w", err)
 		}
 		rt.GenericSchedules = genericSchedules
+	}
+	if candidateOwner := runtimeDeps.RunLifecycleCandidates; candidateOwner != nil {
+		if runLifecycleRequiresGenericSchedules(source) && rt.GenericSchedules == nil {
+			return nil, fmt.Errorf("workflow run lifecycle completion executor requires the generic schedule lifecycle")
+		}
+		scope := runtimerunlifecycle.CandidateScope{BundleHash: boot.BundleSourceFact.BundleHash()}
+		executor, err := runtimerunlifecycle.NewExecutor(
+			candidateOwner,
+			scope,
+			runLifecycleTerminalCatalog(source),
+			workOccurrence,
+			runtimerunlifecycle.ExecutorOptions{GenericSchedules: rt.GenericSchedules},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("build run lifecycle completion executor: %w", err)
+		}
+		rt.runLifecycleExecutor = executor
+	} else if runtimeDeps.WorkflowPersistence.Configured() {
+		return nil, fmt.Errorf("selected runtime store run lifecycle candidate owner is required")
 	}
 	if runtimeDeps.WorkflowPersistence.Valid() {
 		artifactRoot, err := runtimepipeline.ResolveArtifactRepoRoot("")

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
@@ -145,6 +146,7 @@ func (s Status) Terminal() bool         { return s.Valid() && !s.BlocksCompletio
 
 type Registration struct {
 	IntentKey     fanoutobligation.IntentKey
+	PlanRef       runtimecontracts.FanOutPlanRef
 	Handle        timeridentity.TimerHandle
 	Route         flowidentity.Route
 	EntityID      string
@@ -157,6 +159,9 @@ func (r Registration) Validate() error {
 	if err := r.IntentKey.Validate(); err != nil {
 		return err
 	}
+	if r.PlanRef.ElementRef != r.IntentKey.ElementRef || strings.TrimSpace(r.PlanRef.BundleHash) == "" || strings.TrimSpace(r.PlanRef.SemanticDigest) == "" {
+		return fmt.Errorf("fan-out barrier plan identity is incomplete or contradicts its exact intent")
+	}
 	joinRef, ok := r.Handle.JoinRef()
 	if !ok || r.Handle.Kind() != timeridentity.TimerHandleJoinComplete || joinRef.Mode() != timeridentity.JoinRefModeFanOutDelivery {
 		return fmt.Errorf("fan-out barrier registration requires a typed delivery completion handle")
@@ -164,7 +169,9 @@ func (r Registration) Validate() error {
 	fanOut, ok := joinRef.FanOutDelivery()
 	if !ok || fanOut.TriggeringDeliveryID() != strings.TrimSpace(r.IntentKey.TriggeringDeliveryID) ||
 		fanOut.PackageKey() != strings.TrimSpace(r.IntentKey.ElementRef.PackageKey) ||
-		fanOut.ElementID() != strings.TrimSpace(r.IntentKey.ElementRef.ElementID) {
+		fanOut.ElementID() != strings.TrimSpace(r.IntentKey.ElementRef.ElementID) ||
+		fanOut.BundleHash() != strings.TrimSpace(r.PlanRef.BundleHash) ||
+		fanOut.SemanticDigest() != strings.TrimSpace(r.PlanRef.SemanticDigest) {
 		return fmt.Errorf("fan-out barrier handle disagrees with exact intent identity")
 	}
 	if !r.Route.Valid() || strings.TrimSpace(r.EntityID) == "" || !r.ExecutionMode.Valid() || r.CreatedAt.IsZero() {

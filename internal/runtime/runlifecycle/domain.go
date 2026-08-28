@@ -14,6 +14,7 @@ import (
 	runtimebundleidentity "github.com/division-sh/swarm/internal/runtime/core/bundleidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/google/uuid"
 )
 
 type State string
@@ -717,9 +718,33 @@ const (
 )
 
 type CompletionResult struct {
-	Outcome   CompletionOutcome
-	Candidate Candidate
-	Retryable error
+	Outcome                    CompletionOutcome
+	Candidate                  Candidate
+	Retryable                  error
+	GenericScheduleActivations []CommittedGenericScheduleActivation
+}
+
+// CommittedGenericScheduleActivation is post-commit projection evidence. The
+// generic-schedule lifecycle remains the sole interpreter of the activation.
+type CommittedGenericScheduleActivation struct {
+	id string
+}
+
+func NewCommittedGenericScheduleActivation(id string) (CommittedGenericScheduleActivation, error) {
+	activation := CommittedGenericScheduleActivation{id: strings.TrimSpace(id)}
+	if err := activation.Validate(); err != nil {
+		return CommittedGenericScheduleActivation{}, err
+	}
+	return activation, nil
+}
+
+func (a CommittedGenericScheduleActivation) ID() string { return strings.TrimSpace(a.id) }
+
+func (a CommittedGenericScheduleActivation) Validate() error {
+	if _, err := uuid.Parse(a.ID()); err != nil {
+		return fmt.Errorf("committed generic schedule activation requires a UUID identity: %w", err)
+	}
+	return nil
 }
 
 type SelectedStoreBeforeRunStartError struct {
@@ -741,6 +766,16 @@ func (e *SelectedStoreBeforeRunStartError) Error() string {
 }
 
 func (r CompletionResult) Validate() error {
+	seenActivations := make(map[string]struct{}, len(r.GenericScheduleActivations))
+	for _, activation := range r.GenericScheduleActivations {
+		if err := activation.Validate(); err != nil {
+			return fmt.Errorf("completion result generic schedule activation: %w", err)
+		}
+		if _, exists := seenActivations[activation.ID()]; exists {
+			return fmt.Errorf("completion result repeats generic schedule activation %s", activation.ID())
+		}
+		seenActivations[activation.ID()] = struct{}{}
+	}
 	switch r.Outcome {
 	case OutcomeTerminallyEligible, OutcomeAwaitMutation, OutcomeExactNoop:
 		if r.Retryable != nil {
@@ -755,6 +790,9 @@ func (r CompletionResult) Validate() error {
 	case OutcomeRetryCurrent:
 		if r.Retryable == nil {
 			return errors.New("retry_current completion outcome requires retry error")
+		}
+		if len(r.GenericScheduleActivations) != 0 {
+			return errors.New("retry_current completion outcome forbids committed generic schedule activations")
 		}
 		return nil
 	default:

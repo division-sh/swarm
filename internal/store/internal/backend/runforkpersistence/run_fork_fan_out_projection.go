@@ -190,7 +190,10 @@ func projectRunForkFanOutBarrier(runID string, fact *runForkRevisionFanOutFact, 
 	}
 	registration := fanoutbarrier.Registration{
 		IntentKey: key,
-		Handle:    handle,
+		PlanRef: runtimecontracts.FanOutPlanRef{
+			BundleHash: fact.BundleHash, ElementRef: key.ElementRef, SemanticDigest: fact.SemanticDigest,
+		},
+		Handle: handle,
 		Route: runtimeflowidentity.StoredRoute(
 			fact.BarrierRouteScopeKey, fact.BarrierRouteInstanceID, fact.BarrierRouteInstancePath,
 		),

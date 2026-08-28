@@ -14,6 +14,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/google/uuid"
 )
@@ -115,6 +116,76 @@ func TestDeliveryTargetApplicationPreservesCommittedSelectOrCreateTargetOnSQLite
 			sibling, exists, err := store.Load(ctx, testWorkflowInstanceRoute(siblingPath))
 			if err != nil || !exists || sibling.EntityID != siblingEntityID || sibling.Fields["account_id"] != "account-1" {
 				t.Fatalf("hostile conflict mutated sibling: found=%t err=%v instance=%#v", exists, err, sibling)
+			}
+		})
+	}
+}
+
+func TestDeliveryTargetApplicationConsumesDeclarationBoundJoinTargetWithoutPayloadSelectorOnBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			db, store := openHandlerEntityRequirementStore(t, backend)
+			bundle := workflowJoinLifecycleBundle(t)
+			node := bundle.Nodes["join-node"]
+			handler := node.EventHandlers["item.completed"]
+			handler.SelectEntity = &runtimecontracts.SelectEntitySpec{Bindings: []runtimecontracts.SelectEntityKeyBinding{{
+				Field: "portfolio_id", Ref: "payload.portfolio_id", RefPath: paths.Parse("payload.portfolio_id"),
+			}}}
+			node.EventHandlers["item.completed"] = handler
+			bundle.Nodes["join-node"] = node
+
+			plan := bundle.Semantics.Joins[0]
+			plan.Node = mustPipelineNode("", "join-node")
+			source := exactWorkflowJoinSource{
+				Source: workflowJoinLifecycleRootAndFlowSource(bundle), plans: []runtimecontracts.WorkflowJoinPlan{plan},
+			}
+			pc := newDurablePipelineCoordinatorForTest(&recordingPipelineBus{}, db, PipelineCoordinatorOptions{
+				Module:              staticSemanticWorkflowModule{source: source},
+				Persistence:         workflowPersistenceForTest(store),
+				PipelineObligations: unavailablePipelineTestObligationOwner{},
+			})
+			var ctx context.Context
+			if backend == "sqlite" {
+				ctx = sqliteExactOnceRunContext(t, db)
+			} else {
+				ctx = testPipelineRunContext(t, db)
+			}
+
+			entityID := eventtest.UUID("join-declaration-application-owner-" + backend)
+			if err := store.upsert(ctx, materializedWorkflowInstanceForTest(WorkflowInstance{
+				InstanceID: testPipelineRunID, StorageRef: testPipelineRunID, EntityID: entityID,
+				WorkflowName: source.WorkflowName(), WorkflowVersion: "1", CurrentState: "awaiting",
+				Fields: map[string]any{"portfolio_id": "portfolio-main"}, EntityType: "test_entity",
+			})); err != nil {
+				t.Fatalf("seed exact declaration target: %v", err)
+			}
+			routingSource, err := events.NewRootRoutingSource(entityID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			handle := pipelineJoinHandle(t, "", timeridentity.TimerHandleJoinComplete)
+			payload, err := json.Marshal(handle.PayloadMetadata())
+			if err != nil {
+				t.Fatal(err)
+			}
+			evt := eventtest.RuntimeControlWithRoutingSource(
+				"join-declaration-application-"+backend, events.EventType(handle.EventType()),
+				"runtime.generic_schedule", handle.TaskID(), payload, 0, testPipelineRunID, "",
+				events.EnvelopeForEntityID(events.EventEnvelope{}, entityID), routingSource, time.Now().UTC(),
+			)
+			target := events.RouteIdentity{FlowID: source.WorkflowName(), FlowInstance: testPipelineRunID, EntityID: entityID}.Normalized()
+			handlerFact, err := NewDeliveryTargetHandler(plan.Node)
+			if err != nil {
+				t.Fatal(err)
+			}
+			application, err := pc.prepareDeliveryTargetApplication(
+				ctx, plan.Node.Key(), handlerFact.ForEvent("item.completed"), handler, evt, events.MustExistingEntityTarget(target),
+			)
+			if err != nil {
+				t.Fatalf("prepare declaration-bound join target without selector payload: %v", err)
+			}
+			if !application.Owner().ExistingEntity() || application.Route().InstancePath != testPipelineRunID || application.EntityID() != entityID {
+				t.Fatalf("declaration-bound application = owner:%#v route:%#v entity:%q", application.Owner(), application.Route(), application.EntityID())
 			}
 		})
 	}
