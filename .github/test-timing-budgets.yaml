@@ -7,5 +7,5 @@ hard:
     limit_seconds: 240
     justification: Broad and partitioned store proof units must complete within the four-minute CI target.
   full_conformance_command_seconds:
-    limit_seconds: 450
-    justification: Ratified from isolated selected-store full command observations 415s and 367s.
+    limit_seconds: 540
+    justification: Ratified after the required 20-journey served lifecycle matrix produced isolated primary and confirmation observations of 492s and 461s.
