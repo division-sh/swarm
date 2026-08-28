@@ -581,6 +581,9 @@ func (s *RunLifecyclePostgresOwner) executeCompletionCandidateTx(
 		if catalog.Empty() {
 			return runtimerunlifecycle.CompletionResult{}, errors.New("normal run completion requires terminal catalog")
 		}
+		if err := s.pipeline.AdvanceFanOutDeliveryBarriersTx(ctx, tx, effects, candidate.RunID, selectedNow); err != nil {
+			return runtimerunlifecycle.CompletionResult{}, fmt.Errorf("advance fan-out delivery barriers: %w", err)
+		}
 		summaries, err := s.loadPostgresRunCompletionOwnerSummaries(ctx, tx, candidate.RunID, selectedNow, catalog)
 		if err != nil {
 			return runtimerunlifecycle.CompletionResult{}, err
@@ -708,6 +711,9 @@ func (s *RunLifecycleSQLiteOwner) executeCompletionCandidateTx(
 	} else {
 		if catalog.Empty() {
 			return runtimerunlifecycle.CompletionResult{}, errors.New("normal run completion requires terminal catalog")
+		}
+		if err := s.pipeline.AdvanceFanOutDeliveryBarriersTx(ctx, tx, effects, candidate.RunID, selectedNow); err != nil {
+			return runtimerunlifecycle.CompletionResult{}, fmt.Errorf("advance sqlite fan-out delivery barriers: %w", err)
 		}
 		summaries, err := s.loadSQLiteRunCompletionOwnerSummaries(ctx, tx, candidate.RunID, selectedNow, catalog)
 		if err != nil {

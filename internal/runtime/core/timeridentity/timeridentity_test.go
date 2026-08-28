@@ -159,6 +159,81 @@ func TestJoinHandleGenerationHasOneCanonicalOwner(t *testing.T) {
 	}
 }
 
+func TestFanOutDeliveryJoinHandleRoundTripPreservesExactDeclarationIntentAndGeneration(t *testing.T) {
+	generation := attemptgeneration.Generation{LoopID: "revision", ActivationID: "activation", RevisionField: "revision_id", RevisionID: "rev-2", Attempt: 2}
+	declaration, err := NewFanOutDeliveryJoinRef(
+		identitytest.ExecutableNode(t, "dependency", "worker", "producer"),
+		"batch.requested",
+		"all-items-delivered",
+		"dependency",
+		"a1111111-1111-4111-8111-111111111111",
+		"bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound, err := declaration.BindFanOutIntent("c1111111-1111-4111-8111-111111111111", generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle, err := JoinCompleteHandle(bound)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, ok := ParseTimerHandle(handle.PayloadMetadata())
+	ref, refOK := parsed.JoinRef()
+	fanOut, fanOutOK := ref.FanOutDelivery()
+	if !ok || !refOK || !fanOutOK || !ref.Equal(bound) || ref.Stage() != "" ||
+		fanOut.PackageKey() != "dependency" || fanOut.ElementID() != "a1111111-1111-4111-8111-111111111111" ||
+		fanOut.TriggeringDeliveryID() != "c1111111-1111-4111-8111-111111111111" || !ref.Generation().Equal(generation) {
+		t.Fatalf("fan-out delivery handle round trip = parsed:%#v ref:%#v fan-out:%#v", parsed, ref, fanOut)
+	}
+	if handle.TaskID() == "" || handle.TaskID() != parsed.TaskID() {
+		t.Fatalf("fan-out delivery task identity = %q parsed %q", handle.TaskID(), parsed.TaskID())
+	}
+}
+
+func TestFanOutDeliveryJoinHandleSeparatesPackageElementIntentAndGeneration(t *testing.T) {
+	base := mustFanOutDeliveryJoinHandle(t, "root", "worker", "producer", "root", "a1111111-1111-4111-8111-111111111111", "c1111111-1111-4111-8111-111111111111", attemptgeneration.Generation{})
+	tests := map[string]TimerHandle{
+		"declaration package": mustFanOutDeliveryJoinHandle(t, "dependency", "worker", "producer", "root", "a1111111-1111-4111-8111-111111111111", "c1111111-1111-4111-8111-111111111111", attemptgeneration.Generation{}),
+		"fan-out package":     mustFanOutDeliveryJoinHandle(t, "root", "worker", "producer", "dependency", "a1111111-1111-4111-8111-111111111111", "c1111111-1111-4111-8111-111111111111", attemptgeneration.Generation{}),
+		"element":             mustFanOutDeliveryJoinHandle(t, "root", "worker", "producer", "root", "a2222222-2222-4222-8222-222222222222", "c1111111-1111-4111-8111-111111111111", attemptgeneration.Generation{}),
+		"intent":              mustFanOutDeliveryJoinHandle(t, "root", "worker", "producer", "root", "a1111111-1111-4111-8111-111111111111", "c2222222-2222-4222-8222-222222222222", attemptgeneration.Generation{}),
+		"generation":          mustFanOutDeliveryJoinHandle(t, "root", "worker", "producer", "root", "a1111111-1111-4111-8111-111111111111", "c1111111-1111-4111-8111-111111111111", attemptgeneration.Generation{LoopID: "loop", ActivationID: "activation", RevisionField: "revision", RevisionID: "2", Attempt: 1}),
+	}
+	for name, other := range tests {
+		t.Run(name, func(t *testing.T) {
+			if other.TaskID() == base.TaskID() {
+				t.Fatalf("fan-out delivery handle collided at %q", base.TaskID())
+			}
+		})
+	}
+}
+
+func mustFanOutDeliveryJoinHandle(t *testing.T, declarationPackage, flowID, nodeID, fanOutPackage, elementID, deliveryID string, generation attemptgeneration.Generation) TimerHandle {
+	t.Helper()
+	ref, err := NewFanOutDeliveryJoinRef(
+		identitytest.ExecutableNode(t, declarationPackage, flowID, nodeID), "batch.requested", "all-items-delivered",
+		fanOutPackage, elementID,
+		"bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err = ref.BindFanOutIntent(deliveryID, generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle, err := JoinCompleteHandle(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return handle
+}
+
 func TestJoinHandleCodecRejectsMissingOrContradictoryDeclarationIdentity(t *testing.T) {
 	generation := attemptgeneration.Generation{LoopID: "revision", ActivationID: "activation", RevisionField: "revision_id", RevisionID: "rev-2", Attempt: 2}
 	root := mustJoinHandle(t, TimerHandleJoinTimeout, "", "join-node", "item.completed", "awaiting", "shared", "window-1", generation)

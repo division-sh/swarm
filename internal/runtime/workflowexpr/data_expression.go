@@ -58,7 +58,15 @@ type ValueExpressionOptions struct {
 	AllowJoin      bool
 	RequireBool    bool
 	JoinResultType runtimecontracts.CatalogTypeReference
+	JoinContext    JoinContext
 }
+
+type JoinContext uint8
+
+const (
+	JoinContextArrival JoinContext = iota
+	JoinContextFanOutDelivery
+)
 
 func ValidateValueExpression(expression string) error {
 	return ValidateValueExpressionWithOptions(expression, ValueExpressionOptions{})
@@ -102,11 +110,11 @@ func compileValueExpression(env *cel.Env, expression string, opts ValueExpressio
 	}
 	typeChecked := compiled
 	if opts.AllowJoin {
-		if err := validateJoinAccesses(compiled); err != nil {
+		if err := validateJoinAccesses(compiled, opts.JoinContext); err != nil {
 			return nil, err
 		}
 		var err error
-		typeChecked, err = typeCheckJoinExpression(env, compiled, opts.JoinResultType)
+		typeChecked, err = typeCheckJoinExpression(env, compiled, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -117,17 +125,37 @@ func compileValueExpression(env *cel.Env, expression string, opts ValueExpressio
 	return compiled, nil
 }
 
-func validateJoinAccesses(compiled *cel.Ast) error {
+func validateJoinAccesses(compiled *cel.Ast, context JoinContext) error {
 	if compiled == nil || compiled.NativeRep() == nil {
 		return fmt.Errorf("workflow expression AST is unavailable")
 	}
-	allowed := make(map[string]struct{}, len(joinruntime.SupportedContextFields()))
-	for _, field := range joinruntime.SupportedContextFields() {
-		allowed[field] = struct{}{}
+	allowed := make(map[string]struct{})
+	if context == JoinContextFanOutDelivery {
+		allowed["total"] = struct{}{}
+		allowed["dispositions"] = struct{}{}
+	} else {
+		for _, field := range joinruntime.SupportedContextFields() {
+			allowed[field] = struct{}{}
+		}
 	}
 	root := celast.NavigateAST(compiled.NativeRep())
 	var visit func(celast.NavigableExpr) error
 	visit = func(expr celast.NavigableExpr) error {
+		if context == JoinContextFanOutDelivery && expr.Kind() == celast.SelectKind {
+			selection := expr.AsSelect()
+			parent := selection.Operand()
+			if parent.Kind() == celast.SelectKind {
+				root := parent.AsSelect()
+				operand := root.Operand()
+				if operand.Kind() == celast.IdentKind && operand.AsIdent() == "join" && root.FieldName() == "dispositions" {
+					switch strings.TrimSpace(selection.FieldName()) {
+					case "succeeded", "dead_lettered", "no_route", "semantic_rejected", "canceled":
+					default:
+						return fmt.Errorf("unsupported join.dispositions.%s", selection.FieldName())
+					}
+				}
+			}
+		}
 		if expr.Kind() == celast.IdentKind && expr.AsIdent() == "join" {
 			parent, ok := expr.Parent()
 			if !ok {
@@ -180,20 +208,29 @@ func (joinFieldTypeOptimizer) Optimize(ctx *cel.OptimizerContext, expression *ce
 	return ctx.NewAST(expression.Expr())
 }
 
-func typeCheckJoinExpression(env *cel.Env, compiled *cel.Ast, resultType runtimecontracts.CatalogTypeReference) (*cel.Ast, error) {
-	provider := newJoinCatalogTypeProvider(env.CELTypeProvider(), resultType)
-	resultCELType, err := provider.resolve(resultType.Type)
-	if err != nil {
-		return nil, err
+func typeCheckJoinExpression(env *cel.Env, compiled *cel.Ast, opts ValueExpressionOptions) (*cel.Ast, error) {
+	var typedEnv *cel.Env
+	var err error
+	if opts.JoinContext == JoinContextFanOutDelivery {
+		typedEnv, err = env.Extend(
+			cel.Variable(joinTypedVariable("total"), cel.IntType),
+			cel.Variable(joinTypedVariable("dispositions"), cel.MapType(cel.StringType, cel.IntType)),
+		)
+	} else {
+		provider := newJoinCatalogTypeProvider(env.CELTypeProvider(), opts.JoinResultType)
+		resultCELType, resolveErr := provider.resolve(opts.JoinResultType.Type)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		typedEnv, err = env.Extend(
+			cel.CustomTypeProvider(provider),
+			cel.Variable(joinTypedVariable("expected"), cel.IntType),
+			cel.Variable(joinTypedVariable("completed"), cel.IntType),
+			cel.Variable(joinTypedVariable("missing"), cel.ListType(cel.StringType)),
+			cel.Variable(joinTypedVariable("results"), cel.ListType(resultCELType)),
+			cel.Variable(joinTypedVariable("timed_out"), cel.BoolType),
+		)
 	}
-	typedEnv, err := env.Extend(
-		cel.CustomTypeProvider(provider),
-		cel.Variable(joinTypedVariable("expected"), cel.IntType),
-		cel.Variable(joinTypedVariable("completed"), cel.IntType),
-		cel.Variable(joinTypedVariable("missing"), cel.ListType(cel.StringType)),
-		cel.Variable(joinTypedVariable("results"), cel.ListType(resultCELType)),
-		cel.Variable(joinTypedVariable("timed_out"), cel.BoolType),
-	)
 	if err != nil {
 		return nil, err
 	}

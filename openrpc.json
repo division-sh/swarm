@@ -19862,6 +19862,21 @@
         "additionalProperties": false,
         "description": "Canonical run-scoped durable fan-out issuance and downstream-settlement diagnostic projection.",
         "properties": {
+          "barrier_armed": {
+            "description": "Exact armed per-intent delivery barriers.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "barrier_closed_pending": {
+            "description": "Closed barriers with an admitted outcome schedule not yet terminalized.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "barrier_terminal": {
+            "description": "Fired, dead-lettered, or explicitly suppressed delivery barriers.",
+            "minimum": 0,
+            "type": "integer"
+          },
           "blocked": {
             "minimum": 0,
             "type": "integer"
@@ -19949,6 +19964,9 @@
           "canceled",
           "settled",
           "unsettled",
+          "barrier_armed",
+          "barrier_closed_pending",
+          "barrier_terminal",
           "min_next_chunk",
           "max_next_chunk",
           "last_chunk_max_ms",
@@ -21595,13 +21613,18 @@
             "minimum": 0,
             "type": "integer"
           },
+          "fan_out_barriers": {
+            "description": "Armed plus closed-unfired fan-out delivery barriers whose exact outcomes still block quiescence.",
+            "minimum": 0,
+            "type": "integer"
+          },
           "fan_out_owed": {
             "description": "Unissued fan-out ordinals still owned by open or blocked durable fan-out intents for the run.",
             "minimum": 0,
             "type": "integer"
           },
           "ready": {
-            "description": "True exactly when active_deliveries, unsettled_pipeline_events, fan_out_owed, due_timers, and active_session_leases are all zero.",
+            "description": "True exactly when active_deliveries, unsettled_pipeline_events, fan_out_owed, fan_out_barriers, due_timers, and active_session_leases are all zero.",
             "type": "boolean"
           },
           "unsettled_pipeline_events": {
@@ -21615,6 +21638,7 @@
           "active_deliveries",
           "unsettled_pipeline_events",
           "fan_out_owed",
+          "fan_out_barriers",
           "due_timers",
           "active_session_leases"
         ],

@@ -19,6 +19,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/plangeneration"
@@ -480,28 +481,30 @@ type RuleMatch struct {
 }
 
 type ExecutionResult struct {
-	Status               OutcomeStatus
-	Failure              *failures.Envelope
-	FailureDisposition   FailureDisposition
-	ExecutedSteps        []Step
-	CurrentState         string
-	NextState            string
-	GuardsEvaluated      []string
-	ActionsExecuted      []string
-	ClearGates           []string
-	SetsGate             string
-	HandlerRuleSelection handlerselection.HandlerRuleSelectionFact
-	FanOutCount          int
-	FanOutIntent         *fanoutobligation.IntentRequest
-	Computed             map[string]any
-	StateMutation        StateMutation
-	EmitIntents          []EmitIntent
-	ActivityIntents      []ActivityIntent
-	ComputeModuleTraces  []ComputeModuleTrace
-	DeadLetterIntents    []EmitIntent
-	ChainDepth           int
-	LoopTrace            *LoopExecutionTrace
-	SettledDeliveryClaim *runtimedelivery.Claim
+	Status                  OutcomeStatus
+	Failure                 *failures.Envelope
+	FailureDisposition      FailureDisposition
+	ExecutedSteps           []Step
+	CurrentState            string
+	NextState               string
+	GuardsEvaluated         []string
+	ActionsExecuted         []string
+	ClearGates              []string
+	SetsGate                string
+	HandlerRuleSelection    handlerselection.HandlerRuleSelectionFact
+	FanOutCount             int
+	FanOutIntent            *fanoutobligation.IntentRequest
+	FanOutBarrier           *fanoutbarrier.Registration
+	FanOutBarrierCompletion *fanoutbarrier.Completion
+	Computed                map[string]any
+	StateMutation           StateMutation
+	EmitIntents             []EmitIntent
+	ActivityIntents         []ActivityIntent
+	ComputeModuleTraces     []ComputeModuleTrace
+	DeadLetterIntents       []EmitIntent
+	ChainDepth              int
+	LoopTrace               *LoopExecutionTrace
+	SettledDeliveryClaim    *runtimedelivery.Claim
 }
 
 type LoopExecutionTrace struct {

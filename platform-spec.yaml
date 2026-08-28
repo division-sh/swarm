@@ -3870,12 +3870,16 @@ handler_specification:
           they are never parsed into rejection or blindly retried.
         lifecycle: >-
           Open or blocked owed suffix prevents normal run completion and test quiescence. Run stop/cancel atomically
-          preserves the issued prefix and terminalizes the suffix. Startup, multiprocess serving, destructive reset,
-          diagnostics, and global-work accounting consume this same owner.
+          preserves the issued prefix and terminalizes the suffix. An armed or closed-unfired delivery barrier also
+          prevents completion and quiescence until its outcome fires, dead-letters, or is explicitly suppressed by run
+          terminality or generation supersession. Startup, multiprocess serving, destructive reset, diagnostics, and
+          global-work accounting consume this same owner.
         fork: >-
           fan_out_obligations is a closed fixed-revision family. A child inherits exact capsule, source, cardinality,
-          cursor, and terminal prefix at the selected revision, resets operational claim/tuning facts, and never reissues
-          the prefix. Same-contract and selected-contract execution require the same stable element identity and semantic
+          cursor, terminal prefix, and exact delivery-barrier state at the selected revision, resets operational
+          claim/tuning facts, and never reissues the prefix. An armed barrier resumes against the child-local intent;
+          closed-unfired work receives one child-local schedule; fired, dead-lettered, and suppressed states remain
+          terminal. Same-contract and selected-contract execution require the same stable element identity and semantic
           digest. Unsupported historical prefix work, missing retained bundle/source, or digest disagreement fails closed;
           source event and delivery rows are never copied.
     join:
@@ -3944,6 +3948,35 @@ handler_specification:
         streams and may not be paired with handler-level on_complete.
       graph_surface: >-
         describe --graph renders stage-scoped join completion and timeout edges. Timeout edges include after and the join ID.
+      delivery_barrier_variant:
+        authored_shape: >-
+          `members: {from_fan_out: <element_id>}` selects the fan-out delivery variant. It requires an explicit stable
+          join `id` and a non-empty `on_complete`, and forbids stage, members.from, members.by, window, output,
+          complete_when, remaining, and timeout. The reference resolves to exactly one top-level fan_out on the same
+          handler; missing, mismatched, duplicate, nested, or package-ambiguous references fail strict loading.
+        canonical_owner: >-
+          The effective WorkflowJoinPlan carries the exact compiled fan-out plan identity (bundle hash, package key,
+          element ID, and semantic digest), target declaration, route, execution mode, and typed completion handle.
+          Boot verification, semantic view, engine, persistence, schedules, replay, fork, diagnostics, and authoring
+          consume that plan and never reconstruct identity from a bare name, handler position, event type, or current
+          bundle.
+        registration: >-
+          The fan-out trigger transaction atomically persists the S1 intent and one armed barrier for that exact intent
+          identity. Registration failure rolls back both. No polling job, copied delivery status, counter, or second
+          scheduler is permitted.
+        terminal_fold: >-
+          Once enumeration is closed, each direct ordinal contributes exactly one disposition: succeeded when every
+          concrete route delivered; dead_lettered when every concrete route is terminal and at least one dead-lettered;
+          no_route when canonical route settlement created no deliveries; semantic_rejected from the durable ordinal
+          outcome; or canceled for the unissued suffix terminalized by cancellation. Pending, in-progress, and retryable
+          routes keep the barrier armed. The five counts must be nonnegative and sum exactly to the intent cardinality.
+          Descendant fan-outs and unrelated intents never contribute.
+        completion: >-
+          The terminal fold atomically stores its typed summary and admits one declaration-bound generic schedule.
+          Duplicate candidates and occurrences are idempotent. The completion evaluates `on_complete` with
+          `join.total` plus `join.dispositions.{succeeded,dead_lettered,no_route,semantic_rejected,canceled}` and publishes
+          through the ordinary EventBus. Successful delivery marks fired; no-route or terminal delivery failure marks
+          outcome_dead_lettered. Run terminality and stale loop generation suppress owed outcomes explicitly.
     query:
       field: query
       type: object or list of objects
@@ -13887,6 +13920,7 @@ platform_tables:
         - run_fork_selected_contract_bindings
       delete_by_run_id:
         - resource_version_pins
+        - fan_out_obligation_barriers
         - fan_out_outcomes
         - fan_out_intents
         - author_activity_occurrences
@@ -16823,14 +16857,53 @@ platform_tables:
             outcome_kind              TEXT NOT NULL CHECK (outcome_kind IN ('committed', 'semantic_rejected')),
             event_id                  UUID REFERENCES events(event_id),
             source_event_id           UUID REFERENCES events(event_id),
+            inherited_disposition     TEXT CHECK (inherited_disposition IN ('succeeded', 'dead_lettered', 'no_route')),
             failure                   JSONB,
             created_at                TIMESTAMPTZ NOT NULL,
             PRIMARY KEY (run_id, triggering_delivery_id, package_key, element_id, ordinal),
             FOREIGN KEY (run_id, triggering_delivery_id, package_key, element_id) REFERENCES fan_out_intents(run_id, triggering_delivery_id, package_key, element_id),
             CHECK ((outcome_kind = 'committed') = ((event_id IS NOT NULL) <> (source_event_id IS NOT NULL))),
+            CHECK ((source_event_id IS NULL AND inherited_disposition IS NULL) OR (source_event_id IS NOT NULL AND inherited_disposition IS NOT NULL)),
             CHECK ((outcome_kind = 'semantic_rejected') = (failure IS NOT NULL)),
             UNIQUE (event_id),
             INDEX idx_fan_out_outcomes_run (run_id, outcome_kind)
+        );
+    fan_out_obligation_barriers:
+      description: >-
+        Canonical per-intent terminal-disposition barrier. The row binds one exact compiled delivery-barrier declaration
+        to one exact fan-out intent and selected execution target. Raw delivery and route facts remain in their owners;
+        this row stores only the closed ordinal summary and barrier lifecycle. Armed and closed_pending rows block run
+        completion. There is no polling, count inference, fake stage, or compatibility representation.
+      ddl: |
+        CREATE TABLE fan_out_obligation_barriers (
+            run_id                    UUID NOT NULL,
+            triggering_delivery_id    UUID NOT NULL,
+            package_key               TEXT NOT NULL,
+            element_id                TEXT NOT NULL,
+            bundle_hash               TEXT NOT NULL CHECK (bundle_hash ~ '^bundle-v1:sha256:[0-9a-f]{64}$'),
+            semantic_digest           TEXT NOT NULL CHECK (SUBSTR(semantic_digest, 1, 7) = 'sha256:' AND LENGTH(semantic_digest) = 71),
+            target_package_key        TEXT NOT NULL,
+            target_flow_id            TEXT NOT NULL,
+            target_node_id            TEXT NOT NULL,
+            handler_event             TEXT NOT NULL,
+            join_id                   TEXT NOT NULL,
+            route_scope_key           TEXT NOT NULL,
+            route_instance_id         TEXT NOT NULL,
+            route_instance_path       TEXT NOT NULL,
+            entity_id                 UUID NOT NULL,
+            routing_source            JSONB NOT NULL,
+            execution_mode            TEXT NOT NULL CHECK (execution_mode IN ('live', 'mock')),
+            timer_handle               JSONB NOT NULL,
+            status                    TEXT NOT NULL CHECK (status IN ('armed', 'closed_pending', 'fired', 'outcome_dead_lettered', 'outcome_suppressed_run_terminal', 'outcome_suppressed_generation_superseded')),
+            summary                   JSONB,
+            schedule_key              TEXT,
+            created_at                TIMESTAMPTZ NOT NULL,
+            updated_at                TIMESTAMPTZ NOT NULL,
+            PRIMARY KEY (run_id, triggering_delivery_id, package_key, element_id),
+            FOREIGN KEY (run_id, triggering_delivery_id, package_key, element_id) REFERENCES fan_out_intents(run_id, triggering_delivery_id, package_key, element_id),
+            CHECK ((status = 'armed' AND summary IS NULL AND schedule_key IS NULL) OR (status = 'outcome_suppressed_generation_superseded') OR (status = 'outcome_suppressed_run_terminal' AND summary IS NOT NULL) OR (status IN ('closed_pending', 'fired', 'outcome_dead_lettered') AND summary IS NOT NULL AND schedule_key IS NOT NULL)),
+            INDEX idx_fan_out_obligation_barriers_run (run_id, status),
+            INDEX idx_fan_out_obligation_barriers_schedule (schedule_key) WHERE schedule_key IS NOT NULL
         );
     runtime_store_metadata:
       description: 'Immutable creation-origin evidence for a selected runtime store. The stored versions explain which Swarm
@@ -22408,7 +22481,7 @@ test_specification:
         by reading `/v1/rpc run.diagnose` result.test_quiescence until the
         current run has no active deliveries, no unsettled same-run pipeline
         receipt work represented by committed typed post-commit evidence, no owed durable
-        fan-out issuance, no currently due
+        fan-out issuance, no armed or closed-unfired fan-out delivery barrier, no currently due
         timer work, and no active session lease/callback evidence that can
         synchronously enqueue more work for the same run.
       timers: >
@@ -29682,12 +29755,13 @@ api_specification:
         - active_deliveries
         - unsettled_pipeline_events
         - fan_out_owed
+        - fan_out_barriers
         - due_timers
         - active_session_leases
         properties:
           ready:
             type: boolean
-            description: True exactly when active_deliveries, unsettled_pipeline_events, fan_out_owed, due_timers, and active_session_leases are all zero.
+            description: True exactly when active_deliveries, unsettled_pipeline_events, fan_out_owed, fan_out_barriers, due_timers, and active_session_leases are all zero.
           active_deliveries:
             type: integer
             minimum: 0
@@ -29703,6 +29777,10 @@ api_specification:
             type: integer
             minimum: 0
             description: Unissued fan-out ordinals still owned by open or blocked durable fan-out intents for the run.
+          fan_out_barriers:
+            type: integer
+            minimum: 0
+            description: Armed plus closed-unfired fan-out delivery barriers whose exact outcomes still block quiescence.
           due_timers:
             type: integer
             minimum: 0
@@ -29715,7 +29793,7 @@ api_specification:
         description: Canonical run-scoped durable fan-out issuance and downstream-settlement diagnostic projection.
         type: object
         additionalProperties: false
-        required: [run_id, intents, open, blocked, blocked_intents, cardinality, cursor, owed, committed, rejected, canceled, settled, unsettled, min_next_chunk, max_next_chunk, last_chunk_max_ms, oldest_age_ms]
+        required: [run_id, intents, open, blocked, blocked_intents, cardinality, cursor, owed, committed, rejected, canceled, settled, unsettled, barrier_armed, barrier_closed_pending, barrier_terminal, min_next_chunk, max_next_chunk, last_chunk_max_ms, oldest_age_ms]
         properties:
           run_id: {type: string}
           intents: {type: integer, minimum: 0}
@@ -29733,6 +29811,9 @@ api_specification:
           canceled: {type: integer, minimum: 0}
           settled: {type: integer, minimum: 0}
           unsettled: {type: integer, minimum: 0}
+          barrier_armed: {type: integer, minimum: 0, description: "Exact armed per-intent delivery barriers."}
+          barrier_closed_pending: {type: integer, minimum: 0, description: "Closed barriers with an admitted outcome schedule not yet terminalized."}
+          barrier_terminal: {type: integer, minimum: 0, description: "Fired, dead-lettered, or explicitly suppressed delivery barriers."}
           min_next_chunk: {type: integer, minimum: 0, maximum: 32}
           max_next_chunk: {type: integer, minimum: 0, maximum: 32}
           last_chunk_max_ms: {type: integer, minimum: 0}

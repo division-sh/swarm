@@ -281,12 +281,25 @@ const (
 )
 
 type Outcome struct {
-	Ordinal       int             `json:"ordinal"`
-	Kind          OutcomeKind     `json:"kind"`
-	EventID       string          `json:"event_id,omitempty"`
-	SourceEventID string          `json:"source_event_id,omitempty"`
-	Failure       json.RawMessage `json:"failure,omitempty"`
-	CreatedAt     time.Time       `json:"created_at"`
+	Ordinal              int                          `json:"ordinal"`
+	Kind                 OutcomeKind                  `json:"kind"`
+	EventID              string                       `json:"event_id,omitempty"`
+	SourceEventID        string                       `json:"source_event_id,omitempty"`
+	InheritedDisposition InheritedTerminalDisposition `json:"inherited_disposition,omitempty"`
+	Failure              json.RawMessage              `json:"failure,omitempty"`
+	CreatedAt            time.Time                    `json:"created_at"`
+}
+
+type InheritedTerminalDisposition string
+
+const (
+	InheritedSucceeded    InheritedTerminalDisposition = "succeeded"
+	InheritedDeadLettered InheritedTerminalDisposition = "dead_lettered"
+	InheritedNoRoute      InheritedTerminalDisposition = "no_route"
+)
+
+func (d InheritedTerminalDisposition) Valid() bool {
+	return d == InheritedSucceeded || d == InheritedDeadLettered || d == InheritedNoRoute
 }
 
 func (o Outcome) Validate() error {
@@ -298,8 +311,11 @@ func (o Outcome) Validate() error {
 		if (strings.TrimSpace(o.EventID) == "") == (strings.TrimSpace(o.SourceEventID) == "") || len(o.Failure) != 0 {
 			return errors.New("committed fan-out outcome requires exactly one owned or inherited event")
 		}
+		if strings.TrimSpace(o.SourceEventID) == "" && o.InheritedDisposition != "" || strings.TrimSpace(o.SourceEventID) != "" && !o.InheritedDisposition.Valid() {
+			return errors.New("fan-out inherited event requires its exact terminal disposition")
+		}
 	case OutcomeSemanticRejected:
-		if o.EventID != "" || o.SourceEventID != "" {
+		if o.EventID != "" || o.SourceEventID != "" || o.InheritedDisposition != "" {
 			return errors.New("rejected fan-out outcome requires only typed failure evidence")
 		}
 		if err := ValidateSemanticRejection(o.Failure); err != nil {
@@ -323,23 +339,26 @@ func ValidateSemanticRejection(raw json.RawMessage) error {
 }
 
 type RunSummary struct {
-	RunID          string                   `json:"run_id"`
-	Intents        int                      `json:"intents"`
-	Open           int                      `json:"open"`
-	Blocked        int                      `json:"blocked"`
-	BlockedIntents []BlockedIntentDiagnosis `json:"blocked_intents"`
-	Cardinality    int                      `json:"cardinality"`
-	Cursor         int                      `json:"cursor"`
-	Owed           int                      `json:"owed"`
-	Committed      int                      `json:"committed"`
-	Rejected       int                      `json:"rejected"`
-	Canceled       int                      `json:"canceled"`
-	Settled        int                      `json:"settled"`
-	Unsettled      int                      `json:"unsettled"`
-	MinNextChunk   int                      `json:"min_next_chunk"`
-	MaxNextChunk   int                      `json:"max_next_chunk"`
-	LastChunkMaxMS int64                    `json:"last_chunk_max_ms"`
-	OldestAgeMS    int64                    `json:"oldest_age_ms"`
+	RunID           string                   `json:"run_id"`
+	Intents         int                      `json:"intents"`
+	Open            int                      `json:"open"`
+	Blocked         int                      `json:"blocked"`
+	BlockedIntents  []BlockedIntentDiagnosis `json:"blocked_intents"`
+	Cardinality     int                      `json:"cardinality"`
+	Cursor          int                      `json:"cursor"`
+	Owed            int                      `json:"owed"`
+	Committed       int                      `json:"committed"`
+	Rejected        int                      `json:"rejected"`
+	Canceled        int                      `json:"canceled"`
+	Settled         int                      `json:"settled"`
+	Unsettled       int                      `json:"unsettled"`
+	BarrierArmed    int                      `json:"barrier_armed"`
+	BarrierPending  int                      `json:"barrier_closed_pending"`
+	BarrierTerminal int                      `json:"barrier_terminal"`
+	MinNextChunk    int                      `json:"min_next_chunk"`
+	MaxNextChunk    int                      `json:"max_next_chunk"`
+	LastChunkMaxMS  int64                    `json:"last_chunk_max_ms"`
+	OldestAgeMS     int64                    `json:"oldest_age_ms"`
 }
 
 type BlockedIntentDiagnosis struct {
@@ -368,7 +387,7 @@ func (s RunSummary) Validate() error {
 	if _, err := uuid.Parse(strings.TrimSpace(s.RunID)); err != nil {
 		return errors.New("fan-out run summary requires canonical run identity")
 	}
-	if s.Intents < 0 || s.Open < 0 || s.Blocked < 0 || s.Cardinality < 0 || s.Cursor < 0 || s.Owed < 0 || s.Committed < 0 || s.Rejected < 0 || s.Canceled < 0 || s.Settled < 0 || s.Unsettled < 0 || s.MinNextChunk < 0 || s.MaxNextChunk < 0 || s.LastChunkMaxMS < 0 || s.OldestAgeMS < 0 {
+	if s.Intents < 0 || s.Open < 0 || s.Blocked < 0 || s.Cardinality < 0 || s.Cursor < 0 || s.Owed < 0 || s.Committed < 0 || s.Rejected < 0 || s.Canceled < 0 || s.Settled < 0 || s.Unsettled < 0 || s.BarrierArmed < 0 || s.BarrierPending < 0 || s.BarrierTerminal < 0 || s.MinNextChunk < 0 || s.MaxNextChunk < 0 || s.LastChunkMaxMS < 0 || s.OldestAgeMS < 0 {
 		return errors.New("fan-out run summary counts cannot be negative")
 	}
 	if s.Cursor != s.Committed+s.Rejected || s.Cardinality != s.Cursor+s.Owed+s.Canceled || s.Committed != s.Settled+s.Unsettled {
@@ -392,5 +411,5 @@ func (s RunSummary) Validate() error {
 }
 
 func (s RunSummary) BlocksCompletion() bool {
-	return s.Open > 0 || s.Blocked > 0 || s.Owed > 0
+	return s.Open > 0 || s.Blocked > 0 || s.Owed > 0 || s.BarrierArmed > 0 || s.BarrierPending > 0
 }

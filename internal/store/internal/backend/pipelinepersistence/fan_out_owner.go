@@ -16,7 +16,6 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
@@ -617,7 +616,7 @@ func commitFanOutChunk(
 			} else {
 				failure = string(outcome.Failure)
 			}
-			query := `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,package_key,element_id,ordinal,outcome_kind,event_id,source_event_id,failure,created_at) VALUES ($1,$2,$3,$4,$5,$6,NULLIF($7,''),NULL,$8,$9)`
+			query := `INSERT INTO fan_out_outcomes (run_id,triggering_delivery_id,package_key,element_id,ordinal,outcome_kind,event_id,source_event_id,inherited_disposition,failure,created_at) VALUES ($1,$2,$3,$4,$5,$6,NULLIF($7,''),NULL,NULL,$8,$9)`
 			if postgres {
 				query = strings.ReplaceAll(query, "NULLIF($7,'')", "NULLIF($7,'')::uuid")
 				query = strings.ReplaceAll(query, "$8", "$8::jsonb")
@@ -772,7 +771,7 @@ func reconcileFanOutChunk(ctx context.Context, db pipelineQueryer, postgres bool
 	}
 	start := command.Outcomes[0].Ordinal
 	end := start + len(command.Outcomes)
-	query := `SELECT ordinal,outcome_kind,COALESCE(event_id::text,''),COALESCE(source_event_id::text,''),failure FROM fan_out_outcomes WHERE run_id=$1 AND triggering_delivery_id=$2 AND package_key=$3 AND element_id=$4 AND ordinal>=$5 AND ordinal<$6 ORDER BY ordinal`
+	query := `SELECT ordinal,outcome_kind,COALESCE(event_id::text,''),COALESCE(source_event_id::text,''),COALESCE(inherited_disposition,''),failure FROM fan_out_outcomes WHERE run_id=$1 AND triggering_delivery_id=$2 AND package_key=$3 AND element_id=$4 AND ordinal>=$5 AND ordinal<$6 ORDER BY ordinal`
 	if !postgres {
 		query = strings.ReplaceAll(query, "event_id::text", "event_id")
 		query = strings.ReplaceAll(query, "source_event_id::text", "source_event_id")
@@ -783,14 +782,14 @@ func reconcileFanOutChunk(ctx context.Context, db pipelineQueryer, postgres bool
 	}
 	defer rows.Close()
 	type persistedOutcome struct {
-		ordinal                 int
-		kind, eventID, sourceID string
-		failure                 any
+		ordinal                                       int
+		kind, eventID, sourceID, inheritedDisposition string
+		failure                                       any
 	}
 	persisted := make([]persistedOutcome, 0, len(command.Outcomes))
 	for rows.Next() {
 		var outcome persistedOutcome
-		if err := rows.Scan(&outcome.ordinal, &outcome.kind, &outcome.eventID, &outcome.sourceID, &outcome.failure); err != nil {
+		if err := rows.Scan(&outcome.ordinal, &outcome.kind, &outcome.eventID, &outcome.sourceID, &outcome.inheritedDisposition, &outcome.failure); err != nil {
 			return false, err
 		}
 		persisted = append(persisted, outcome)
@@ -806,7 +805,7 @@ func reconcileFanOutChunk(ctx context.Context, db pipelineQueryer, postgres bool
 	}
 	for index, actual := range persisted {
 		want := command.Outcomes[index]
-		if actual.ordinal != want.Ordinal || actual.sourceID != "" {
+		if actual.ordinal != want.Ordinal || actual.sourceID != "" || actual.inheritedDisposition != "" {
 			return false, fmt.Errorf("fan-out commit readback disagrees at ordinal %d", want.Ordinal)
 		}
 		if want.Publication != nil {
@@ -938,6 +937,9 @@ func cancelRunFanOut(ctx context.Context, postgres bool, effects *revisionEffect
 			return err
 		}
 	}
+	if err := suppressRunTerminalFanOutBarriersTx(ctx, tx, postgres, effects, runID, at); err != nil {
+		return err
+	}
 	if len(intents) > 0 {
 		return effects.Add(runID, privaterunforkrevision.FamilyFanOutObligations)
 	}
@@ -976,6 +978,13 @@ func fanOutRunSummary(ctx context.Context, db pipelineQueryer, postgres bool, ru
 	if err := foldFanOutPublicationSettlement(ctx, db, postgres, summary.RunID, &summary); err != nil {
 		return summary, err
 	}
+	barriers, err := summarizeFanOutDeliveryBarriersRun(ctx, db, summary.RunID)
+	if err != nil {
+		return summary, err
+	}
+	summary.BarrierArmed = barriers.Armed
+	summary.BarrierPending = barriers.ClosedPending
+	summary.BarrierTerminal = barriers.Terminal
 	blocked, err := db.QueryContext(ctx, `SELECT triggering_delivery_id,package_key,element_id,cursor,cardinality-cursor,blocked_reason FROM fan_out_intents WHERE run_id=$1 AND status='blocked' ORDER BY triggering_delivery_id,package_key,element_id`, summary.RunID)
 	if err != nil {
 		return summary, err
@@ -1011,35 +1020,24 @@ func fanOutRunSummary(ctx context.Context, db pipelineQueryer, postgres bool, ru
 }
 
 func foldFanOutPublicationSettlement(ctx context.Context, db pipelineQueryer, postgres bool, runID string, summary *fanoutobligation.RunSummary) error {
-	query := `SELECT event_id,source_event_id FROM fan_out_outcomes
-			WHERE run_id=$1 AND outcome_kind='committed'
-			ORDER BY triggering_delivery_id,package_key,element_id,ordinal`
-	rows, err := db.QueryContext(ctx, query, runID)
+	rows, err := db.QueryContext(ctx, `
+		SELECT triggering_delivery_id, package_key, element_id
+		FROM fan_out_intents
+		WHERE run_id=$1
+		ORDER BY triggering_delivery_id, package_key, element_id
+	`, runID)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
-	type settlementRef struct {
-		eventID       string
-		inheritedFrom string
-	}
-	refs := make([]settlementRef, 0)
+	keys := make([]fanoutobligation.IntentKey, 0)
 	for rows.Next() {
-		var eventID, sourceEventID sql.NullString
-		if err := rows.Scan(&eventID, &sourceEventID); err != nil {
+		var key fanoutobligation.IntentKey
+		key.RunID = runID
+		if err := rows.Scan(&key.TriggeringDeliveryID, &key.ElementRef.PackageKey, &key.ElementRef.ElementID); err != nil {
 			return err
 		}
-		if sourceEventID.Valid {
-			if eventID.Valid {
-				return fmt.Errorf("inherited fan-out outcome carries child-local settlement evidence")
-			}
-			refs = append(refs, settlementRef{inheritedFrom: sourceEventID.String})
-			continue
-		}
-		if !eventID.Valid {
-			return fmt.Errorf("owned fan-out outcome is missing canonical event settlement")
-		}
-		refs = append(refs, settlementRef{eventID: eventID.String})
+		keys = append(keys, key)
 	}
 	if err := rows.Err(); err != nil {
 		return err
@@ -1050,41 +1048,13 @@ func foldFanOutPublicationSettlement(ctx context.Context, db pipelineQueryer, po
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	for _, ref := range refs {
-		if ref.inheritedFrom != "" {
-			summary.Settled++
-			continue
-		}
-		_, settlement, err := loadFanOutSourceEvent(ctx, db, ref.eventID, postgres)
+	for _, key := range keys {
+		fold, err := foldFanOutIntentTerminalDispositions(ctx, db, postgres, key)
 		if err != nil {
-			return fmt.Errorf("load fan-out publication settlement for %s: %w", ref.eventID, err)
+			return err
 		}
-		adapter := sqliteDeliveryAdapter
-		if postgres {
-			adapter = postgresDeliveryAdapter
-		}
-		deliverySnapshots, err := adapter.SnapshotsForEvent(ctx, db, ref.eventID)
-		if err != nil {
-			return fmt.Errorf("load fan-out publication deliveries for %s: %w", ref.eventID, err)
-		}
-		active := 0
-		for _, delivery := range deliverySnapshots {
-			switch delivery.Status {
-			case runtimedelivery.StatusPending, runtimedelivery.StatusInProgress, runtimedelivery.StatusFailed:
-				active++
-			}
-		}
-		deliveries := len(deliverySnapshots)
-		switch {
-		case settlement.NoDelivery() && deliveries == 0:
-			summary.Settled++
-		case settlement.Delivered() && deliveries > 0 && active == 0:
-			summary.Settled++
-		case settlement.Delivered() && deliveries > 0:
-			summary.Unsettled++
-		default:
-			return fmt.Errorf("fan-out publication %s route and delivery settlement are contradictory", ref.eventID)
-		}
+		summary.Settled += fold.Summary.Succeeded + fold.Summary.DeadLettered + fold.Summary.NoRoute
+		summary.Unsettled += fold.PendingCommitted
 	}
 	return nil
 }

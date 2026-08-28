@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/paths"
 	"gopkg.in/yaml.v3"
 )
@@ -28,14 +29,31 @@ type JoinSpec struct {
 	Timeout         JoinTimeoutSpec  `yaml:"-"`
 	OnCompleteFound bool             `yaml:"-"`
 	TimeoutFound    bool             `yaml:"-"`
+	stageFound      bool
+	windowFound     bool
+	outputFound     bool
+	completeFound   bool
+	remainingFound  bool
 }
 
 type JoinMembersSpec struct {
-	From     string     `yaml:"from"`
-	FromPath paths.Path `yaml:"-"`
-	By       string     `yaml:"by"`
-	ByPath   paths.Path `yaml:"-"`
+	From            string                                    `yaml:"from"`
+	FromPath        paths.Path                                `yaml:"-"`
+	By              string                                    `yaml:"by"`
+	ByPath          paths.Path                                `yaml:"-"`
+	FromFanOut      contractelementidentity.ContractElementID `yaml:"from_fan_out"`
+	fromFound       bool
+	byFound         bool
+	fromFanOutFound bool
 }
+
+type WorkflowJoinMode uint8
+
+const (
+	WorkflowJoinModeInvalid WorkflowJoinMode = iota
+	WorkflowJoinModeArrival
+	WorkflowJoinModeFanOutDelivery
+)
 
 type JoinWindowSpec struct {
 	From     string     `yaml:"from"`
@@ -62,8 +80,9 @@ var joinFieldOptions = map[string]struct{}{
 }
 
 var joinMembersFieldOptions = map[string]struct{}{
-	"from": {},
-	"by":   {},
+	"from":         {},
+	"by":           {},
+	"from_fan_out": {},
 }
 
 var joinWindowFieldOptions = map[string]struct{}{
@@ -108,14 +127,19 @@ func (s *JoinSpec) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	*s = JoinSpec{
-		ID:           strings.TrimSpace(aux.ID),
-		Stage:        strings.TrimSpace(aux.Stage),
-		Members:      aux.Members,
-		Window:       aux.Window,
-		Output:       strings.TrimSpace(aux.Output),
-		OutputPath:   paths.Parse(aux.Output),
-		CompleteWhen: strings.TrimSpace(aux.CompleteWhen),
-		Remaining:    strings.TrimSpace(strings.ToLower(aux.Remaining)),
+		ID:             strings.TrimSpace(aux.ID),
+		Stage:          strings.TrimSpace(aux.Stage),
+		Members:        aux.Members,
+		Window:         aux.Window,
+		Output:         strings.TrimSpace(aux.Output),
+		OutputPath:     paths.Parse(aux.Output),
+		CompleteWhen:   strings.TrimSpace(aux.CompleteWhen),
+		Remaining:      strings.TrimSpace(strings.ToLower(aux.Remaining)),
+		stageFound:     joinMappingHasKey(node, "stage"),
+		windowFound:    joinMappingHasKey(node, "window"),
+		outputFound:    joinMappingHasKey(node, "output"),
+		completeFound:  joinMappingHasKey(node, "complete_when"),
+		remainingFound: joinMappingHasKey(node, "remaining"),
 	}
 	if s.ID == "" {
 		s.ID = s.Stage
@@ -140,7 +164,7 @@ func (s *JoinSpec) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	s.TimeoutFound = aux.Timeout.Kind != 0 && !yamlNodeIsNull(&aux.Timeout)
-	return nil
+	return s.ValidateAuthoredShape()
 }
 
 func (s *JoinMembersSpec) UnmarshalYAML(node *yaml.Node) error {
@@ -151,18 +175,23 @@ func (s *JoinMembersSpec) UnmarshalYAML(node *yaml.Node) error {
 		return err
 	}
 	type wire struct {
-		From string `yaml:"from"`
-		By   string `yaml:"by"`
+		From       string                                    `yaml:"from"`
+		By         string                                    `yaml:"by"`
+		FromFanOut contractelementidentity.ContractElementID `yaml:"from_fan_out"`
 	}
 	var aux wire
 	if err := node.Decode(&aux); err != nil {
 		return err
 	}
 	*s = JoinMembersSpec{
-		From:     strings.TrimSpace(aux.From),
-		FromPath: paths.Parse(aux.From),
-		By:       strings.TrimSpace(aux.By),
-		ByPath:   paths.Parse(aux.By),
+		From:            strings.TrimSpace(aux.From),
+		FromPath:        paths.Parse(aux.From),
+		By:              strings.TrimSpace(aux.By),
+		ByPath:          paths.Parse(aux.By),
+		FromFanOut:      aux.FromFanOut,
+		fromFound:       joinMappingHasKey(node, "from"),
+		byFound:         joinMappingHasKey(node, "by"),
+		fromFanOutFound: joinMappingHasKey(node, "from_fan_out"),
 	}
 	return nil
 }
@@ -239,6 +268,18 @@ func validateJoinMapping(context string, node *yaml.Node, allowed map[string]str
 	return nil
 }
 
+func joinMappingHasKey(node *yaml.Node, want string) bool {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return false
+	}
+	for index := 0; index+1 < len(node.Content); index += 2 {
+		if strings.TrimSpace(node.Content[index].Value) == want {
+			return true
+		}
+	}
+	return false
+}
+
 func yamlNodeIsNull(node *yaml.Node) bool {
 	return node != nil && node.Kind == yaml.ScalarNode && strings.EqualFold(strings.TrimSpace(node.Tag), "!!null")
 }
@@ -256,6 +297,57 @@ func (s JoinSpec) EffectiveID() string {
 
 func (s JoinSpec) TimeoutOutcome() HandlerRuleEntry {
 	return s.Timeout.Outcome
+}
+
+func (s JoinSpec) Mode() WorkflowJoinMode {
+	if s.Members.FromFanOut.Valid() || s.Members.fromFanOutFound {
+		return WorkflowJoinModeFanOutDelivery
+	}
+	if strings.TrimSpace(s.Stage) != "" || strings.TrimSpace(s.Members.From) != "" || strings.TrimSpace(s.Members.By) != "" {
+		return WorkflowJoinModeArrival
+	}
+	return WorkflowJoinModeInvalid
+}
+
+func (s JoinSpec) IsFanOutDeliveryBarrier() bool {
+	return s.Mode() == WorkflowJoinModeFanOutDelivery
+}
+
+func (s JoinSpec) ValidateAuthoredShape() error {
+	if s.Mode() != WorkflowJoinModeFanOutDelivery {
+		return nil
+	}
+	if !s.Members.FromFanOut.Valid() {
+		return fmt.Errorf("join.members.from_fan_out requires one canonical non-zero lowercase UUID")
+	}
+	if strings.TrimSpace(s.ID) == "" {
+		return fmt.Errorf("fan-out delivery join requires explicit join.id")
+	}
+	if !s.OnCompleteFound || joinOutcomeEmpty(s.OnComplete) {
+		return fmt.Errorf("fan-out delivery join requires non-empty on_complete")
+	}
+	forbidden := make([]string, 0, 8)
+	add := func(name string, present bool) {
+		if present {
+			forbidden = append(forbidden, name)
+		}
+	}
+	add("stage", s.stageFound || strings.TrimSpace(s.Stage) != "")
+	add("members.from", s.Members.fromFound || strings.TrimSpace(s.Members.From) != "")
+	add("members.by", s.Members.byFound || strings.TrimSpace(s.Members.By) != "")
+	add("window", s.windowFound || s.Window != nil)
+	add("output", s.outputFound || strings.TrimSpace(s.Output) != "")
+	add("complete_when", s.completeFound || strings.TrimSpace(s.CompleteWhen) != "")
+	add("remaining", s.remainingFound || strings.TrimSpace(s.Remaining) != "")
+	add("timeout", s.TimeoutFound)
+	if len(forbidden) != 0 {
+		return fmt.Errorf("fan-out delivery join forbids arrival-only fields %s", strings.Join(forbidden, ", "))
+	}
+	return nil
+}
+
+func joinOutcomeEmpty(rule HandlerRuleEntry) bool {
+	return strings.TrimSpace(rule.AdvancesTo) == "" && rule.Emit.Empty() && !rule.DataAccumulation.HasWrites()
 }
 
 func ValidateJoinHandlerIsolation(handler SystemNodeEventHandler) error {
@@ -285,12 +377,17 @@ func ValidateJoinHandlerIsolation(handler SystemNodeEventHandler) error {
 	add("activity", !handler.Activity.Empty())
 	add("compute", handler.Compute != nil)
 	add("query", handler.Query != nil)
-	add("fan_out", handler.FanOut != nil)
+	pairedFanOut := handler.Join.IsFanOutDeliveryBarrier() && handler.FanOut != nil &&
+		handler.FanOut.ElementID.Valid() && handler.FanOut.ElementID.Equal(handler.Join.Members.FromFanOut)
+	add("fan_out", handler.FanOut != nil && !pairedFanOut)
 	add("group_by", handler.GroupBy != nil)
 	add("filter", handler.Filter != nil)
 	add("reduce", handler.Reduce != nil)
 	add("count", handler.Count != nil)
 	add("clear", handler.Clear != nil)
+	if handler.Join.IsFanOutDeliveryBarrier() && !pairedFanOut {
+		return fmt.Errorf("fan-out delivery join must name the exact top-level handler.fan_out element_id")
+	}
 	if len(conflicts) == 0 {
 		return nil
 	}

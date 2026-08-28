@@ -138,6 +138,9 @@ func (s *RunForkPostgresOwner) ActivateRunFork(ctx context.Context, req runfork.
 		if err := validateRunForkDeliveryEventReplayWorkAgainstPlan(plan.PendingWork, historicalReplayExecution.DeliveryEventReplayWork); err != nil {
 			return result, err
 		}
+		if err := runfork.ValidateFanOutPendingReplayExecution(plan, historicalReplayExecution.DeliveryEventReplayWork); err != nil {
+			return result, err
+		}
 	}
 
 	now := time.Now().UTC()
@@ -152,6 +155,9 @@ func (s *RunForkPostgresOwner) ActivateRunFork(ctx context.Context, req runfork.
 		if err != nil {
 			return result, err
 		}
+	}
+	if err := bindRunForkFanOutPendingReplays(ctx, tx, effects, lineage.ForkRunID, plan, now); err != nil {
+		return result, err
 	}
 	if err := s.applyRunForkSourceFreeze(ctx, tx, story, effects, lineage, now, req.ConfirmSourceFreeze, handoff); err != nil {
 		return result, err
@@ -272,6 +278,9 @@ func (s *RunForkSQLiteOwner) ActivateRunFork(ctx context.Context, req runfork.Ru
 			if err := validateRunForkDeliveryEventReplayWorkAgainstPlan(plan.PendingWork, historicalReplayExecution.DeliveryEventReplayWork); err != nil {
 				return err
 			}
+			if err := runfork.ValidateFanOutPendingReplayExecution(plan, historicalReplayExecution.DeliveryEventReplayWork); err != nil {
+				return err
+			}
 		}
 		now := s.now()
 		effects := privaterunforkrevision.NewEffects()
@@ -281,6 +290,9 @@ func (s *RunForkSQLiteOwner) ActivateRunFork(ctx context.Context, req runfork.Ru
 			if err != nil {
 				return err
 			}
+		}
+		if err := bindRunForkFanOutPendingReplays(txctx, tx, effects, lineage.ForkRunID, plan, now); err != nil {
+			return err
 		}
 		if err := s.applyRunForkSourceFreeze(txctx, tx, story, effects, lineage, now, req.ConfirmSourceFreeze, handoff); err != nil {
 			return err

@@ -67,6 +67,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 	assertCleanupTableResult(t, result, "event_receipts", 1, 1)
 	assertCleanupTableResult(t, result, "dead_letters", 2, 2)
 	assertCleanupTableResult(t, result, "event_delivery_handler_rule_selections", 3, 3)
+	assertCleanupTableResult(t, result, "fan_out_obligation_barriers", 1, 1)
 	assertCleanupTableResult(t, result, "fan_out_outcomes", 1, 1)
 	assertCleanupTableResult(t, result, "fan_out_intents", 1, 1)
 	assertCleanupTableResult(t, result, "timers", 3, 3)
@@ -80,6 +81,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DeletesRunScopedRowsAndPrese
 		"runs",
 		"event_delivery_handler_rule_selections",
 		"event_deliveries",
+		"fan_out_obligation_barriers",
 		"fan_out_outcomes",
 		"fan_out_intents",
 		"run_fork_delivery_event_replays",
@@ -159,6 +161,7 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunCountsWithoutMutation(
 	}
 	assertCleanupTableResult(t, result, "runs", 2, 0)
 	assertCleanupTableResult(t, result, "events", 6, 0)
+	assertCleanupTableResult(t, result, "fan_out_obligation_barriers", 1, 0)
 	assertCleanupTableResult(t, result, "fan_out_outcomes", 1, 0)
 	assertCleanupTableResult(t, result, "fan_out_intents", 1, 0)
 	assertCleanupTableResult(t, result, "conversation_forks", 1, 0)
@@ -170,6 +173,9 @@ func TestPostgresStore_ApplyDestructiveResetCleanup_DryRunCountsWithoutMutation(
 	}
 	if got := countRows(t, ctx, pg, "events"); got != 7 {
 		t.Fatalf("events after dry-run = %d, want 7 including preserved no-run event", got)
+	}
+	if got := countRows(t, ctx, pg, "fan_out_obligation_barriers"); got != 1 {
+		t.Fatalf("fan_out_obligation_barriers after dry-run = %d, want preserved", got)
 	}
 	if got := countRows(t, ctx, pg, "fan_out_intents"); got != 1 {
 		t.Fatalf("fan_out_intents after dry-run = %d, want preserved", got)
@@ -1336,6 +1342,25 @@ func seedDestructiveResetCleanupRows(t *testing.T, ctx context.Context, pg *Post
 		FROM fan_out_intents WHERE run_id=$1::uuid
 	`, runA, seededAt); err != nil {
 		t.Fatalf("seed destructive-reset fan-out outcome: %v", err)
+	}
+	if _, err := pg.backend.ExecContext(ctx, `
+		INSERT INTO fan_out_obligation_barriers (
+			run_id, triggering_delivery_id, package_key, element_id,
+			bundle_hash, semantic_digest, target_package_key, target_flow_id,
+			target_node_id, handler_event, join_id, route_scope_key,
+			route_instance_id, route_instance_path, entity_id, routing_source,
+			execution_mode, timer_handle, status, summary, schedule_key,
+			created_at, updated_at
+		)
+		SELECT run_id, triggering_delivery_id, package_key, element_id,
+			bundle_hash, semantic_digest, '.', '',
+			'cleanup-node', 'cleanup.event', 'cleanup-join', 'cleanup-scope',
+			'cleanup-instance', 'cleanup-path', $2::uuid, '{}'::jsonb,
+			'live', '{}'::jsonb, 'armed', NULL, NULL,
+			$3, $3
+		FROM fan_out_intents WHERE run_id=$1::uuid
+	`, runA, entityID, seededAt); err != nil {
+		t.Fatalf("seed destructive-reset fan-out barrier: %v", err)
 	}
 	if err := commitDeliveryReplayEventFixture(
 		ctx, pg, sourceSemanticEvent, runB, sourceDeliverySnapshot.DeliveryID, "", "agent", "agent-a", seededAt.Add(4*time.Second),

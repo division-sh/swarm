@@ -30,6 +30,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
 	"github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
@@ -745,10 +746,13 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 		return false, nil
 	}
 	plan, found := e.joinPlan(frame.req)
-	if !found || plan.ResultType.Empty() {
+	if !found || plan.Mode == runtimecontracts.WorkflowJoinModeArrival && plan.ResultType.Empty() {
 		return false, fmt.Errorf("join %s has no resolved effective semantic plan", frame.req.Handler.Join.EffectiveID())
 	}
 	spec := &plan.Spec
+	if plan.Mode == runtimecontracts.WorkflowJoinModeFanOutDelivery {
+		return e.stepFanOutDeliveryJoin(frame, plan)
+	}
 	frame.joinResultType = plan.ResultType
 	payload := frame.payload
 	ref, timerKind, internal := timeridentity.ParseJoinRef(payload)
@@ -884,6 +888,47 @@ func (e *Executor) stepJoin(frame *executionFrame) (bool, error) {
 	if err := e.selectJoinOutcome(frame, &spec.OnComplete, handlerRuleSourceJoinOnComplete, activation); err != nil {
 		return false, err
 	}
+	return false, nil
+}
+
+func (e *Executor) stepFanOutDeliveryJoin(frame *executionFrame, plan runtimecontracts.WorkflowJoinPlan) (bool, error) {
+	declaration := frame.req.JoinDeclaration.Declaration()
+	if declaration.Mode() != timeridentity.JoinRefModeFanOutDelivery || !declaration.Valid() {
+		return false, fmt.Errorf("fan-out delivery join %s is missing its exact declaration identity", plan.Spec.EffectiveID())
+	}
+	joinRef, timerKind, internal := timeridentity.ParseJoinRef(frame.payload)
+	if !internal {
+		return false, nil
+	}
+	if timerKind != timeridentity.TimerHandleJoinComplete || joinRef.Mode() != timeridentity.JoinRefModeFanOutDelivery || !joinRef.Declaration().Equal(declaration) {
+		return false, failures.New(failures.ClassUnexpectedArrival, "fan_out_delivery_join_identity_mismatch", "runtime.engine", "join", map[string]any{
+			"row_id": plan.Spec.EffectiveID(), "node_id": frame.req.Node.Key(), "handler_event": strings.TrimSpace(frame.req.HandlerEventKey),
+		})
+	}
+	context, ok := frame.payload["join"].(map[string]any)
+	if !ok {
+		return false, fmt.Errorf("fan-out delivery join completion is missing its typed disposition context")
+	}
+	summary, err := fanoutbarrier.SummaryFromContext(context)
+	if err != nil {
+		return false, err
+	}
+	frame.state.Join = summary.Context()
+	frame.rule = &plan.Spec.OnComplete
+	frame.ruleSource = handlerRuleSourceJoinOnComplete
+	frame.ruleIndex = 0
+	if err := e.applyRule(frame, &plan.Spec.OnComplete); err != nil {
+		return false, err
+	}
+	handle, err := timeridentity.JoinCompleteHandle(joinRef)
+	if err != nil {
+		return false, err
+	}
+	completion := fanoutbarrier.Completion{Handle: handle, Summary: summary}
+	if err := completion.Validate(); err != nil {
+		return false, err
+	}
+	frame.result.FanOutBarrierCompletion = &completion
 	return false, nil
 }
 
@@ -1744,12 +1789,51 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 			return false, err
 		}
 		frame.result.FanOutIntent = &intent
+		if frame.req.JoinDeclaration.Mode() == timeridentity.JoinRefModeFanOutDelivery {
+			generation := attemptgeneration.Generation{}
+			if frame.loopActivation != nil {
+				generation = frame.loopActivation.Generation()
+			}
+			ref, err := frame.req.JoinDeclaration.BindFanOutIntent(intent.Key.TriggeringDeliveryID, generation)
+			if err != nil {
+				return false, err
+			}
+			handle, err := timeridentity.JoinCompleteHandle(ref)
+			if err != nil {
+				return false, err
+			}
+			routingSource, err := fanOutBarrierRoutingSource(ref, frame.req.Route, frame.req.EntityID.String())
+			if err != nil {
+				return false, err
+			}
+			registration := fanoutbarrier.Registration{
+				IntentKey: intent.Key, Handle: handle, Route: frame.req.Route,
+				EntityID: frame.req.EntityID.String(), RoutingSource: routingSource,
+				ExecutionMode: frame.req.Event.ExecutionMode(), CreatedAt: frame.req.Event.CreatedAt(),
+			}
+			if err := registration.Validate(); err != nil {
+				return false, err
+			}
+			frame.result.FanOutBarrier = &registration
+		}
 	}
 	if err := e.stepAdvancesTo(frame); err != nil {
 		return false, err
 	}
 	frame.result.Status = OutcomeFannedOut
 	return true, nil
+}
+
+func fanOutBarrierRoutingSource(ref timeridentity.JoinRef, route runtimeflowidentity.Route, entityID string) (events.RoutingSource, error) {
+	entityID = strings.TrimSpace(entityID)
+	if ref.FlowID() == "" {
+		return events.NewRootRoutingSource(entityID)
+	}
+	return events.NewFlowOwnedControlRoutingSource(events.RouteIdentity{
+		FlowID:       ref.FlowID(),
+		FlowInstance: strings.Trim(strings.TrimSpace(route.InstancePath), "/"),
+		EntityID:     entityID,
+	})
 }
 
 func (e *Executor) buildFanOutIntent(frame *executionFrame, plan runtimecontracts.FanOutCompiledPlan, cardinality int) (fanoutobligation.IntentRequest, error) {
@@ -1966,7 +2050,11 @@ func joinExpressionOptions(frame *executionFrame) workflowexpr.ValueExpressionOp
 	if !allowJoin {
 		return workflowexpr.ValueExpressionOptions{}
 	}
-	return workflowexpr.ValueExpressionOptions{AllowJoin: true, JoinResultType: frame.joinResultType}
+	options := workflowexpr.ValueExpressionOptions{AllowJoin: true, JoinResultType: frame.joinResultType}
+	if frame.req.JoinDeclaration.Mode() == timeridentity.JoinRefModeFanOutDelivery {
+		options.JoinContext = workflowexpr.JoinContextFanOutDelivery
+	}
+	return options
 }
 
 func (e *Executor) joinPlan(req ExecutionRequest) (runtimecontracts.WorkflowJoinPlan, bool) {
@@ -2545,14 +2633,16 @@ func (e *Executor) persist(ctx context.Context, frame executionFrame) (Committed
 		prerequisites = e.emitPersistencePrerequisites(frame)
 	}
 	return e.deps.MutationOwner.CommitEngineMutation(ctx, EngineMutation{
-		Address:              frame.req.StateAddress(),
-		State:                frame.result.StateMutation,
-		HandlerRuleSelection: frame.result.HandlerRuleSelection,
-		LifecycleEffects:     effects,
-		ActivityIntents:      append([]ActivityIntent(nil), frame.result.ActivityIntents...),
-		EmitIntents:          append([]EmitIntent(nil), frame.result.EmitIntents...),
-		EmitPrerequisites:    prerequisites,
-		FanOutIntent:         frame.result.FanOutIntent,
+		Address:                 frame.req.StateAddress(),
+		State:                   frame.result.StateMutation,
+		HandlerRuleSelection:    frame.result.HandlerRuleSelection,
+		LifecycleEffects:        effects,
+		ActivityIntents:         append([]ActivityIntent(nil), frame.result.ActivityIntents...),
+		EmitIntents:             append([]EmitIntent(nil), frame.result.EmitIntents...),
+		EmitPrerequisites:       prerequisites,
+		FanOutIntent:            frame.result.FanOutIntent,
+		FanOutBarrier:           frame.result.FanOutBarrier,
+		FanOutBarrierCompletion: frame.result.FanOutBarrierCompletion,
 	})
 }
 

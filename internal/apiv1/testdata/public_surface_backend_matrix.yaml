@@ -380,7 +380,7 @@ store_parity:
       required_ports: [runs, entities, testSetup]
       runtime_deps: [WorkflowPersistence, PipelineObligations, MailboxMaterializer]
       nested_roles: {runtime_workflow: [entityquery.Reader, runtimeworkflowroute.RecoveryReader, runtimeactivityresult.Reader, ActivityAttemptJournal, GateRouteAdmissionReader, runtimetimerobligation.Reader, WorkflowEngineMutationOwner, FanOutObligationOwner, DecisionCardMutationOwner, WorkflowTimerOccurrenceOwner, WorkflowTimerActivationPersistence, DynamicFlowRuntimeReadinessPersistence, StandingServicePersistence, WorkflowDecisionRouteOwner, WorkflowInstancePersistenceReader, WorkflowEntityStatePersistenceReader, WorkflowTargetPersistenceReader, WorkflowInitialMaterializationCommitOwner]}
-      platform_tables: [entity_state, workflow_instance_initial_materializations, routing_rules, flow_instances, flow_instance_runtime_readiness, runs, entity_mutations, fan_out_intents, fan_out_outcomes, standing_service_generations, standing_service_journal, standing_services]
+      platform_tables: [entity_state, workflow_instance_initial_materializations, routing_rules, flow_instances, flow_instance_runtime_readiness, runs, entity_mutations, fan_out_intents, fan_out_outcomes, fan_out_obligation_barriers, standing_service_generations, standing_service_journal, standing_services]
       public_methods: [entity.aggregate, entity.get, entity.list, run.diagnose, run.get, run.list, test.setup_entities, standing.suspend, standing.resume, standing.reset]
     - id: session_conversation
       semantic_owners: [internal/runtime session registry, internal/store conversation]

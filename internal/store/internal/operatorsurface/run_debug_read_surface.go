@@ -437,6 +437,7 @@ func (s *RunPostgres) LoadRunTestQuiescence(ctx context.Context, runID string, o
 		return operatorread.RunTestQuiescence{}, fmt.Errorf("load run test quiescence fan-out obligations: %w", err)
 	}
 	out.FanOutOwed = fanOut.Owed
+	out.FanOutBarriers = fanOut.BarrierArmed + fanOut.BarrierPending
 	scope, err := runtimetimerobligation.Run(runID)
 	if err != nil {
 		return operatorread.RunTestQuiescence{}, err
@@ -469,6 +470,7 @@ func runTestQuiescenceReady(value operatorread.RunTestQuiescence) bool {
 	return value.ActiveDeliveries == 0 &&
 		value.UnsettledPipelineEvents == 0 &&
 		value.FanOutOwed == 0 &&
+		value.FanOutBarriers == 0 &&
 		value.DueTimers == 0 &&
 		value.ActiveSessionLeases == 0
 }

@@ -9,6 +9,7 @@ import (
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
@@ -108,6 +109,9 @@ func (a selectedContractDeferredWorkAdmission) validate(sourceRunID, forkEventID
 }
 
 func admitSelectedContractFanOutPlans(plan runfork.RunForkPlan, source semanticview.Source) ([]runtimecontracts.FanOutPlanRef, error) {
+	if err := runfork.ValidateFanOutPendingReplayAdmission(plan); err != nil {
+		return nil, err
+	}
 	compiled, err := selectedContractCompiledFanOutPlans(source)
 	if err != nil {
 		return nil, err
@@ -125,6 +129,30 @@ func admitSelectedContractFanOutPlans(plan runfork.RunForkPlan, source semanticv
 		}
 		if selectedRef.SemanticDigest != sourceRef.SemanticDigest {
 			return nil, fmt.Errorf("selected contract fan_out element %s/%s changed semantic digest", sourceRef.ElementRef.PackageKey, sourceRef.ElementRef.ElementID)
+		}
+		if obligation.Barrier != nil {
+			if err := obligation.Barrier.Validate(); err != nil {
+				return nil, fmt.Errorf("selected contract fan_out barrier: %w", err)
+			}
+			if obligation.Barrier.Registration.IntentKey != obligation.Intent.Request.Key {
+				return nil, fmt.Errorf("selected contract fan_out barrier disagrees with fixed intent")
+			}
+			sourceJoin, _ := obligation.Barrier.Registration.Handle.JoinRef()
+			selectedJoin, err := timeridentity.NewFanOutDeliveryJoinRef(
+				sourceJoin.Node(), sourceJoin.HandlerEvent(), sourceJoin.JoinID(),
+				selectedRef.ElementRef.PackageKey, selectedRef.ElementRef.ElementID,
+				selectedRef.BundleHash, selectedRef.SemanticDigest,
+			)
+			if err != nil {
+				return nil, err
+			}
+			selectedJoin, err = selectedJoin.BindFanOutIntent(obligation.Intent.Request.Key.TriggeringDeliveryID, sourceJoin.Generation())
+			if err != nil {
+				return nil, err
+			}
+			if _, ok := semanticview.WorkflowJoinPlanForRef(source, selectedJoin.Declaration()); !ok {
+				return nil, fmt.Errorf("selected contract changed fan_out delivery join declaration %s/%s", sourceJoin.NodeID(), sourceJoin.JoinID())
+			}
 		}
 		if _, duplicate := seen[selectedRef.ElementRef]; duplicate {
 			continue

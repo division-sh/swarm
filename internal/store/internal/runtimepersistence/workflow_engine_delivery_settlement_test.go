@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -11,7 +12,9 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/google/uuid"
@@ -160,9 +163,50 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 					DeliveryRoute: &route, Lineage: events.LineageFromEvent(event), CurrentState: "active",
 				},
 			}
+			joinRef, err := timeridentity.NewFanOutDeliveryJoinRef(
+				mustPersistenceNode(flowID, "engine-fan-out"), string(event.Type()), "fan-out-complete",
+				element.PackageKey, element.ElementID, intent.PlanRef.BundleHash, intent.PlanRef.SemanticDigest,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			joinRef, err = joinRef.BindFanOutIntent(claimed.Claim.DeliveryID(), joinRef.Generation())
+			if err != nil {
+				t.Fatal(err)
+			}
+			handle, err := timeridentity.JoinCompleteHandle(joinRef)
+			if err != nil {
+				t.Fatal(err)
+			}
+			barrierSource, err := events.NewFlowOwnedControlRoutingSource(targetRoute)
+			if err != nil {
+				t.Fatal(err)
+			}
+			barrier := fanoutbarrier.Registration{
+				IntentKey: intent.Key, Handle: handle,
+				Route:    runtimeflowidentity.StoredRoute(flowID, runtimeflowidentity.LogicalInstanceID(instancePath), instancePath),
+				EntityID: entityID, RoutingSource: barrierSource,
+				ExecutionMode: event.ExecutionMode(), CreatedAt: createdAt,
+			}
+			if err := barrier.Validate(); err != nil {
+				t.Fatalf("validate workflow engine fan-out barrier: %v", err)
+			}
 			record := stateOnlyWorkflowEngineMutationRecord(t, runID, flowID, instancePath, entityID, "active", 1, createdAt)
+			hostile := barrier
+			hostile.IntentKey.RunID = uuid.NewString()
+			if _, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{
+				State: record, FanOutIntent: &intent, FanOutBarrier: &hostile,
+				DeliverySuccess: &runtimepipeline.WorkflowEngineDeliverySuccess{
+					Claim: claimed.Claim, SideEffects: []string{"handler_completed"}, Duration: time.Second,
+					RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
+				},
+			}); err == nil {
+				t.Fatal("mismatched fan-out barrier registration committed")
+			}
+			assertFanOutIntentCount(t, ctx, db, backend, runID, 0)
+			assertFanOutBarrierCount(t, ctx, db, runID, 0)
 			committed, err := owner.CommitWorkflowEngineMutation(ctx, runtimepipeline.WorkflowEngineMutationCommand{
-				State: record, FanOutIntent: &intent,
+				State: record, FanOutIntent: &intent, FanOutBarrier: &barrier,
 				DeliverySuccess: &runtimepipeline.WorkflowEngineDeliverySuccess{
 					Claim: claimed.Claim, SideEffects: []string{"handler_completed"}, Duration: time.Second,
 					RuleSelection: runtimedelivery.NotApplicableHandlerRuleSelection(),
@@ -175,7 +219,36 @@ func TestWorkflowEngineMutationCommitsPayloadFanOutIntentAndDeliveryAtomicallyOn
 				t.Fatal("workflow engine fan-out mutation did not return the exact committed delivery claim")
 			}
 			assertFanOutIntentCount(t, ctx, db, backend, runID, 1)
+			assertFanOutBarrierCount(t, ctx, db, runID, 1)
+			var status string
+			var persistedHandle []byte
+			var summary, schedule any
+			if err := db.QueryRowContext(ctx, `
+				SELECT status,timer_handle,summary,schedule_key
+				FROM fan_out_obligation_barriers
+				WHERE run_id=$1 AND triggering_delivery_id=$2 AND package_key=$3 AND element_id=$4
+			`, runID, claimed.Claim.DeliveryID(), element.PackageKey, element.ElementID).Scan(&status, &persistedHandle, &summary, &schedule); err != nil {
+				t.Fatalf("load committed fan-out barrier: %v", err)
+			}
+			var persisted timeridentity.TimerHandle
+			if err := json.Unmarshal(persistedHandle, &persisted); err != nil {
+				t.Fatalf("decode committed fan-out barrier handle: %v", err)
+			}
+			if status != "armed" || persisted.TaskID() != handle.TaskID() || summary != nil || schedule != nil {
+				t.Fatalf("committed fan-out barrier = status:%s handle:%s summary:%v schedule:%v", status, persisted.TaskID(), summary, schedule)
+			}
 		})
+	}
+}
+
+func assertFanOutBarrierCount(t *testing.T, ctx context.Context, db *sql.DB, runID string, want int) {
+	t.Helper()
+	var got int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_obligation_barriers WHERE run_id=$1`, runID).Scan(&got); err != nil {
+		t.Fatalf("count fan-out barriers: %v", err)
+	}
+	if got != want {
+		t.Fatalf("fan-out barrier count = %d, want %d", got, want)
 	}
 }
 

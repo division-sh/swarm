@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimeregistry "github.com/division-sh/swarm/internal/runtime/core/registry"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
+	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
@@ -69,14 +70,16 @@ type EmitPersistenceVerifier interface {
 }
 
 type EngineMutation struct {
-	Address              StateAddress
-	State                StateMutation
-	HandlerRuleSelection handlerselection.HandlerRuleSelectionFact
-	LifecycleEffects     []runtimeworkflowlifecycle.Effect
-	ActivityIntents      []ActivityIntent
-	EmitIntents          []EmitIntent
-	EmitPrerequisites    EmitPersistencePrerequisites
-	FanOutIntent         *fanoutobligation.IntentRequest
+	Address                 StateAddress
+	State                   StateMutation
+	HandlerRuleSelection    handlerselection.HandlerRuleSelectionFact
+	LifecycleEffects        []runtimeworkflowlifecycle.Effect
+	ActivityIntents         []ActivityIntent
+	EmitIntents             []EmitIntent
+	EmitPrerequisites       EmitPersistencePrerequisites
+	FanOutIntent            *fanoutobligation.IntentRequest
+	FanOutBarrier           *fanoutbarrier.Registration
+	FanOutBarrierCompletion *fanoutbarrier.Completion
 }
 
 // DurablePublicationPlan is an immutable, already-admitted publication plan.

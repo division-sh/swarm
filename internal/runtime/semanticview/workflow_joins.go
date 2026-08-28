@@ -88,18 +88,35 @@ func WorkflowJoinPlanForExecutionHandler(source Source, node runtimeidentity.Exe
 		return runtimecontracts.WorkflowJoinPlan{}, false
 	}
 	plan, ok := WorkflowJoinPlanForHandler(source, node, handlerEvent)
-	if !ok || strings.TrimSpace(plan.Spec.Stage) != strings.TrimSpace(spec.Stage) || plan.Spec.EffectiveID() != spec.EffectiveID() {
+	if !ok || plan.Mode != spec.Mode() || strings.TrimSpace(plan.Spec.Stage) != strings.TrimSpace(spec.Stage) || plan.Spec.EffectiveID() != spec.EffectiveID() {
 		return runtimecontracts.WorkflowJoinPlan{}, false
 	}
 	return plan, true
 }
 
-func WorkflowJoinPlanForRef(source Source, ref timeridentity.JoinRef) (runtimecontracts.WorkflowJoinPlan, bool) {
-	if source == nil || !ref.Valid() {
+func WorkflowJoinPlanForRef(source Source, joinRef timeridentity.JoinRef) (runtimecontracts.WorkflowJoinPlan, bool) {
+	if source == nil || !joinRef.Valid() {
 		return runtimecontracts.WorkflowJoinPlan{}, false
 	}
-	plan, ok := WorkflowJoinPlanForHandler(source, ref.Node(), ref.HandlerEvent())
-	if !ok || strings.TrimSpace(plan.Spec.Stage) != ref.Stage() || plan.Spec.EffectiveID() != ref.JoinID() {
+	plan, ok := WorkflowJoinPlanForHandler(source, joinRef.Node(), joinRef.HandlerEvent())
+	if !ok || plan.Spec.EffectiveID() != joinRef.JoinID() {
+		return runtimecontracts.WorkflowJoinPlan{}, false
+	}
+	switch joinRef.Mode() {
+	case timeridentity.JoinRefModeArrival:
+		if plan.Mode != runtimecontracts.WorkflowJoinModeArrival || strings.TrimSpace(plan.Spec.Stage) != joinRef.Stage() {
+			return runtimecontracts.WorkflowJoinPlan{}, false
+		}
+	case timeridentity.JoinRefModeFanOutDelivery:
+		fanOut, found := joinRef.FanOutDelivery()
+		if !found || plan.Mode != runtimecontracts.WorkflowJoinModeFanOutDelivery ||
+			plan.FanOut.FanOut.ElementRef.PackageKey != fanOut.PackageKey() ||
+			plan.FanOut.FanOut.ElementRef.ElementID != fanOut.ElementID() ||
+			plan.FanOut.FanOut.BundleHash != fanOut.BundleHash() ||
+			plan.FanOut.FanOut.SemanticDigest != fanOut.SemanticDigest() {
+			return runtimecontracts.WorkflowJoinPlan{}, false
+		}
+	default:
 		return runtimecontracts.WorkflowJoinPlan{}, false
 	}
 	return plan, true

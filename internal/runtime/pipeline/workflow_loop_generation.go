@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/attemptgeneration"
+	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 )
@@ -47,7 +48,15 @@ func workflowLoopGenerationCurrent(instance *WorkflowInstance, generation attemp
 	if err != nil {
 		return false, err
 	}
-	activation, ok, err := loopruntime.Load(carrier.StateBuckets, generation.FlowID, generation.LoopID)
+	return workflowLoopGenerationCurrentInBuckets(carrier.StateBuckets, generation, expectedStage)
+}
+
+func workflowLoopGenerationCurrentInBuckets(stateBuckets map[string]map[string]any, generation attemptgeneration.Generation, expectedStage string) (bool, error) {
+	generation = generation.Normalize()
+	if !generation.Valid() {
+		return true, nil
+	}
+	activation, ok, err := loopruntime.Load(stateBuckets, generation.FlowID, generation.LoopID)
 	if err != nil || !ok {
 		return false, err
 	}
@@ -56,7 +65,11 @@ func workflowLoopGenerationCurrent(instance *WorkflowInstance, generation attemp
 }
 
 func WorkflowLoopGenerationCurrent(fields, stateBuckets map[string]any, generation attemptgeneration.Generation, expectedStage string) (bool, error) {
-	return workflowLoopGenerationCurrent(&WorkflowInstance{Fields: fields, StateBuckets: stateBuckets}, generation, expectedStage)
+	carrier, err := runtimeengine.StateCarrierFromPersisted(fields, nil, nil, stateBuckets)
+	if err != nil {
+		return false, err
+	}
+	return workflowLoopGenerationCurrentInBuckets(carrier.StateBuckets, generation.Normalize(), expectedStage)
 }
 
 func loopPlanOwnsStage(source semanticview.Source, flowID, loopID, stage string) bool {

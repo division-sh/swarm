@@ -616,6 +616,11 @@ func commitWorkflowEngineMutation(
 			if err := commitFanOutIntentTx(txctx, tx, postgres, effects, *command.FanOutIntent, runID, fields, triggerEventID, createdAt); err != nil {
 				return err
 			}
+			if command.FanOutBarrier != nil {
+				if err := commitFanOutBarrierRegistrationTx(txctx, tx, postgres, *command.FanOutBarrier); err != nil {
+					return err
+				}
+			}
 		}
 		for index, value := range command.Publications {
 			plan, ok := value.(runtimebus.EnginePublicationPlan)
@@ -631,6 +636,17 @@ func commitWorkflowEngineMutation(
 				return err
 			}
 			result.Publications = append(result.Publications, evidence)
+		}
+		if command.FanOutBarrierCompletion != nil {
+			runID := command.State.RunID
+			updatedAt := command.State.UpdatedAt
+			if entityless {
+				runID = command.EntitylessRunID
+				updatedAt = time.Now().UTC()
+			}
+			if err := commitFanOutBarrierCompletionTx(txctx, tx, postgres, effects, runID, *command.FanOutBarrierCompletion, updatedAt); err != nil {
+				return err
+			}
 		}
 		if success := command.DeliverySuccess; success != nil {
 			if _, err := store.SettleWorkflowNodeSuccessTx(

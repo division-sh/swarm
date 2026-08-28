@@ -111,6 +111,7 @@ func deleteSelectedContractForkState(ctx context.Context, tx *sql.Tx, forkRunID 
 		label string
 		query string
 	}{
+		{"fan-out barriers", `DELETE FROM fan_out_obligation_barriers WHERE run_id = $1`},
 		{"fan-out outcomes", `DELETE FROM fan_out_outcomes WHERE run_id = $1`},
 		{"fan-out intents", `DELETE FROM fan_out_intents WHERE run_id = $1`},
 		{"dead letters", `DELETE FROM dead_letters WHERE original_event_id IN (SELECT event_id FROM events WHERE run_id = $1)`},
