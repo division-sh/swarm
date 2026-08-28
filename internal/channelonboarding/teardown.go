@@ -175,16 +175,17 @@ type DestructiveService struct {
 	credentials OperationCredentialReleaser
 	activations ActivationAuthorityRefresher
 	now         func() time.Time
+	testBarrier TestLifecycleBarrier
 }
 
-func NewDestructiveService(store DestructiveStore, identities DestructiveIdentityLifecycle, credentials OperationCredentialReleaser, activations ActivationAuthorityRefresher, now func() time.Time) (*DestructiveService, error) {
+func NewDestructiveService(store DestructiveStore, identities DestructiveIdentityLifecycle, credentials OperationCredentialReleaser, activations ActivationAuthorityRefresher, now func() time.Time, testBarrier TestLifecycleBarrier) (*DestructiveService, error) {
 	if store == nil || identities == nil || credentials == nil || activations == nil {
 		return nil, fmt.Errorf("channel destructive lifecycle requires teardown, identity, credential, and activation owners")
 	}
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
 	}
-	return &DestructiveService{store: store, identities: identities, credentials: credentials, activations: activations, now: now}, nil
+	return &DestructiveService{store: store, identities: identities, credentials: credentials, activations: activations, now: now, testBarrier: testBarrier}, nil
 }
 
 func (s *DestructiveService) Unbind(ctx context.Context, selector string, expectedRevision int64, requestKey, requestHash string) (operatorchannel.Operation, operatorchannel.Binding, error) {
@@ -379,6 +380,11 @@ func (s *DestructiveService) retireAuthority(ctx context.Context, op TeardownOpe
 		})
 		if err != nil {
 			return op, err
+		}
+		if s.testBarrier != nil {
+			if err := s.testBarrier(TestAfterAuthorityRetirementBeforeCleanup, op.TeardownID); err != nil {
+				return op, err
+			}
 		}
 	}
 	if op.Phase != TeardownAuthorityRetired && op.Phase != TeardownSucceeded {

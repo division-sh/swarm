@@ -117,37 +117,46 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 	process.waitForReadyLine()
 	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, process.outputString())
 
-	direct := runChannelOnboardingCLIJourney(t, opts.ConfigPath, endpoint, provider, "connect", "bot-token", 1001, "private", 0)
-	if direct.Identity.ConversationScope != "direct" || direct.Readiness == nil || !direct.Readiness.Ready {
-		t.Fatalf("%s direct channel readback = %#v", backend, direct)
-	}
-	assertChannelOnboardingReadinessGeneration(t, string(backend)+" direct", direct)
-	reconnected := runChannelOnboardingReconnectJourney(t, opts.ConfigPath, endpoint, provider, 1, "")
-	assertChannelOnboardingIdentityPreserved(t, string(backend)+" direct reconnect", direct, reconnected)
-	assertChannelOnboardingReadinessGeneration(t, string(backend)+" direct reconnect", reconnected)
-	if reconnected.Activation == nil || direct.Activation == nil || reconnected.Activation.Revision <= direct.Activation.Revision {
-		t.Fatalf("%s reconnect activation revisions = %#v/%#v", backend, direct.Activation, reconnected.Activation)
-	}
-	if reconnected.Readiness.ActivationGeneration == direct.Readiness.ActivationGeneration {
-		t.Fatalf("%s reconnect retained predecessor activation generation %q", backend, direct.Readiness.ActivationGeneration)
-	}
-	shared := runChannelOnboardingCLIJourney(t, opts.ConfigPath, endpoint, provider, "rebind", "", -2001, "group", 2)
-	if shared.Identity.ConversationScope != "shared" || shared.Readiness == nil || !shared.Readiness.Ready {
-		t.Fatalf("%s shared channel readback = %#v", backend, shared)
-	}
-	assertChannelOnboardingReadinessGeneration(t, string(backend)+" shared", shared)
-	if shared.Identity.BindingRevision <= direct.Identity.BindingRevision || shared.Activation == nil || shared.Activation.Revision <= reconnected.Activation.Revision {
-		t.Fatalf("%s rebind revisions direct/reconnected/shared = %#v/%#v/%#v", backend, direct, reconnected, shared)
-	}
-	if shared.Readiness.ActivationGeneration == reconnected.Readiness.ActivationGeneration {
-		t.Fatalf("%s rebind retained predecessor activation generation %q", backend, reconnected.Readiness.ActivationGeneration)
-	}
-	runChannelOnboardingUnbindJourney(t, opts.ConfigPath, endpoint, shared.Identity.Interface.Selector)
-	unbound := readChannelOnboardingRow(t, opts.ConfigPath, endpoint, "unbound")
-	if unbound.Identity.ProofID != shared.Identity.ProofID || unbound.Identity.ProofRevision != shared.Identity.ProofRevision || unbound.Identity.ProofStatus != "active" {
-		t.Fatalf("%s unbound proof readback = %#v, want retained active proof %#v", backend, unbound.Identity, shared.Identity)
-	}
-	assertChannelOnboardingCredentialStoreEmpty(t, credentialPath, string(backend)+" unbind")
+	var direct, reconnected, shared channelOnboardingJourneyReadback
+	t.Run("E2E-01_first_connect_direct", func(t *testing.T) {
+		direct = runChannelOnboardingCLIJourney(t, opts.ConfigPath, endpoint, provider, "connect", "bot-token", 1001, "private", 0)
+		if direct.Identity.ConversationScope != "direct" || direct.Readiness == nil || !direct.Readiness.Ready {
+			t.Fatalf("%s direct channel readback = %#v", backend, direct)
+		}
+		assertChannelOnboardingReadinessGeneration(t, string(backend)+" direct", direct)
+	})
+	t.Run("E2E-02_reconnect_preserves_identity", func(t *testing.T) {
+		reconnected = runChannelOnboardingReconnectJourney(t, opts.ConfigPath, endpoint, provider, 1, "")
+		assertChannelOnboardingIdentityPreserved(t, string(backend)+" direct reconnect", direct, reconnected)
+		assertChannelOnboardingReadinessGeneration(t, string(backend)+" direct reconnect", reconnected)
+		if reconnected.Activation == nil || direct.Activation == nil || reconnected.Activation.Revision <= direct.Activation.Revision {
+			t.Fatalf("%s reconnect activation revisions = %#v/%#v", backend, direct.Activation, reconnected.Activation)
+		}
+		if reconnected.Readiness.ActivationGeneration == direct.Readiness.ActivationGeneration {
+			t.Fatalf("%s reconnect retained predecessor activation generation %q", backend, direct.Readiness.ActivationGeneration)
+		}
+	})
+	t.Run("E2E-03_rebind_replaces_identity", func(t *testing.T) {
+		shared = runChannelOnboardingCLIJourney(t, opts.ConfigPath, endpoint, provider, "rebind", "", -2001, "group", 2)
+		if shared.Identity.ConversationScope != "shared" || shared.Readiness == nil || !shared.Readiness.Ready {
+			t.Fatalf("%s shared channel readback = %#v", backend, shared)
+		}
+		assertChannelOnboardingReadinessGeneration(t, string(backend)+" shared", shared)
+		if shared.Identity.BindingRevision <= direct.Identity.BindingRevision || shared.Activation == nil || shared.Activation.Revision <= reconnected.Activation.Revision {
+			t.Fatalf("%s rebind revisions direct/reconnected/shared = %#v/%#v/%#v", backend, direct, reconnected, shared)
+		}
+		if shared.Readiness.ActivationGeneration == reconnected.Readiness.ActivationGeneration {
+			t.Fatalf("%s rebind retained predecessor activation generation %q", backend, reconnected.Readiness.ActivationGeneration)
+		}
+	})
+	t.Run("E2E-11_unbind_retires_activation_before_identity", func(t *testing.T) {
+		runChannelOnboardingUnbindJourney(t, opts.ConfigPath, endpoint, shared.Identity.Interface.Selector)
+		unbound := readChannelOnboardingRow(t, opts.ConfigPath, endpoint, "unbound")
+		if unbound.Identity.ProofID != shared.Identity.ProofID || unbound.Identity.ProofRevision != shared.Identity.ProofRevision || unbound.Identity.ProofStatus != "active" {
+			t.Fatalf("%s unbound proof readback = %#v, want retained active proof %#v", backend, unbound.Identity, shared.Identity)
+		}
+		assertChannelOnboardingCredentialStoreEmpty(t, credentialPath, string(backend)+" unbind")
+	})
 	if code := process.stop(); code != 0 {
 		t.Fatalf("%s pre-reset serve exit = %d", backend, code)
 	}
@@ -282,13 +291,15 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 		t.Fatalf("%s E2E-10 corrected replacement effects registrations=%d deliveries=%d, want %d/%d", backend, registrations, deliveries, registrationsBeforeReject+1, deliveriesBeforeReject+1)
 	}
 	recovered = corrected
-	runChannelOnboardingUnbindJourney(t, opts.ConfigPath, endpoint, recovered.Identity.Interface.Selector)
-	assertChannelOnboardingCredentialStoreEmpty(t, credentialPath, string(backend)+" recovered unbind")
-	runChannelOnboardingProofRevokeJourney(t, opts.ConfigPath, endpoint, recovered.Identity.Interface.Selector)
-	revoked := readChannelOnboardingRow(t, opts.ConfigPath, endpoint, "unbound")
-	if revoked.Identity.ProofStatus != "revoked" || revoked.Identity.ProofID != recovered.Identity.ProofID || revoked.Identity.ProofRevision <= recovered.Identity.ProofRevision {
-		t.Fatalf("%s revoked proof readback = %#v, want retained revoked proof identity %#v", backend, revoked.Identity, recovered.Identity)
-	}
+	t.Run("E2E-11_proof_revoke_preserves_no_activation", func(t *testing.T) {
+		runChannelOnboardingUnbindJourney(t, opts.ConfigPath, endpoint, recovered.Identity.Interface.Selector)
+		assertChannelOnboardingCredentialStoreEmpty(t, credentialPath, string(backend)+" recovered unbind")
+		runChannelOnboardingProofRevokeJourney(t, opts.ConfigPath, endpoint, recovered.Identity.Interface.Selector)
+		revoked := readChannelOnboardingRow(t, opts.ConfigPath, endpoint, "unbound")
+		if revoked.Identity.ProofStatus != "revoked" || revoked.Identity.ProofID != recovered.Identity.ProofID || revoked.Identity.ProofRevision <= recovered.Identity.ProofRevision {
+			t.Fatalf("%s revoked proof readback = %#v, want retained revoked proof identity %#v", backend, revoked.Identity, recovered.Identity)
+		}
+	})
 	if err := crashProcess.stop(); err != nil {
 		t.Fatalf("%s final channel serve shutdown: %v", backend, err)
 	}

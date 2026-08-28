@@ -4,6 +4,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/runtime"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimelifecycleprobe "github.com/division-sh/swarm/internal/runtime/lifecycleprobe"
@@ -56,6 +57,8 @@ type ServeOptions struct {
 	TestRuntimeContextsReadyHook     func(*runtime.RuntimeContextManager)
 	TestBeforeReadinessCommit        func() error
 	TestAfterAuthorActivityHead      func() error
+	TestChannelOnboardingNow         func() time.Time
+	TestChannelOnboardingBarrier     channelonboarding.TestLifecycleBarrier
 }
 
 func DefaultServeOptions() ServeOptions {
