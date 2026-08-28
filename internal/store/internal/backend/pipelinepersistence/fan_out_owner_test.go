@@ -201,7 +201,7 @@ func fanOutReadbackTestDB(t *testing.T, backend string) *sql.DB {
 			PRIMARY KEY (run_id,triggering_delivery_id,package_key,element_id))`,
 		`CREATE TABLE fan_out_outcomes (
 			run_id TEXT NOT NULL, triggering_delivery_id TEXT NOT NULL, package_key TEXT NOT NULL, element_id TEXT NOT NULL,
-			ordinal INTEGER NOT NULL, outcome_kind TEXT NOT NULL, event_id TEXT, source_event_id TEXT, failure TEXT, created_at TIMESTAMP NOT NULL,
+			ordinal INTEGER NOT NULL, outcome_kind TEXT NOT NULL, event_id TEXT, source_event_id TEXT, inherited_disposition TEXT, failure TEXT, created_at TIMESTAMP NOT NULL,
 			PRIMARY KEY (run_id,triggering_delivery_id,package_key,element_id,ordinal))`,
 	}
 	if backend == "postgres" {

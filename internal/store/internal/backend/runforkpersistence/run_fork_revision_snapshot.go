@@ -25,22 +25,23 @@ type RunForkRevisionedFact = runForkRevisionedFact
 
 type runForkRevisionEvent struct {
 	runForkRevisionedFact
-	EventID        string               `json:"event_id"`
-	EventName      string               `json:"event_name"`
-	EntityID       string               `json:"entity_id"`
-	FlowInstance   string               `json:"flow_instance"`
-	RoutingSource  events.RoutingSource `json:"routing_source"`
-	TargetRoute    json.RawMessage      `json:"target_route"`
-	TargetSet      json.RawMessage      `json:"target_set"`
-	Scope          string               `json:"scope"`
-	Payload        json.RawMessage      `json:"-"`
-	ChainDepth     int                  `json:"chain_depth"`
-	ProducedBy     string               `json:"produced_by"`
-	ProducedByType string               `json:"produced_by_type"`
-	HandlerNode    string               `json:"handler_node"`
-	IdempotencyKey string               `json:"idempotency_key"`
-	SourceEventID  string               `json:"source_event_id"`
-	CreatedAt      time.Time            `json:"created_at"`
+	EventID         string               `json:"event_id"`
+	EventName       string               `json:"event_name"`
+	EntityID        string               `json:"entity_id"`
+	FlowInstance    string               `json:"flow_instance"`
+	RoutingSource   events.RoutingSource `json:"routing_source"`
+	TargetRoute     json.RawMessage      `json:"target_route"`
+	TargetSet       json.RawMessage      `json:"target_set"`
+	RouteSettlement json.RawMessage      `json:"route_settlement"`
+	Scope           string               `json:"scope"`
+	Payload         json.RawMessage      `json:"-"`
+	ChainDepth      int                  `json:"chain_depth"`
+	ProducedBy      string               `json:"produced_by"`
+	ProducedByType  string               `json:"produced_by_type"`
+	HandlerNode     string               `json:"handler_node"`
+	IdempotencyKey  string               `json:"idempotency_key"`
+	SourceEventID   string               `json:"source_event_id"`
+	CreatedAt       time.Time            `json:"created_at"`
 }
 
 type RunForkRevisionEvent = runForkRevisionEvent
@@ -214,7 +215,24 @@ type runForkRevisionFanOutFact struct {
 	OutcomeKind              string          `json:"outcome_kind"`
 	EventID                  string          `json:"event_id"`
 	SourceOutcomeEventID     string          `json:"outcome_source_event_id"`
+	InheritedDisposition     string          `json:"inherited_disposition"`
 	Failure                  json.RawMessage `json:"failure"`
+	BarrierTargetPackageKey  string          `json:"barrier_target_package_key"`
+	BarrierTargetFlowID      string          `json:"barrier_target_flow_id"`
+	BarrierTargetNodeID      string          `json:"barrier_target_node_id"`
+	BarrierHandlerEvent      string          `json:"barrier_handler_event"`
+	BarrierJoinID            string          `json:"barrier_join_id"`
+	BarrierRouteScopeKey     string          `json:"barrier_route_scope_key"`
+	BarrierRouteInstanceID   string          `json:"barrier_route_instance_id"`
+	BarrierRouteInstancePath string          `json:"barrier_route_instance_path"`
+	BarrierEntityID          string          `json:"barrier_entity_id"`
+	BarrierRoutingSource     json.RawMessage `json:"barrier_routing_source"`
+	BarrierExecutionMode     string          `json:"barrier_execution_mode"`
+	BarrierTimerHandle       json.RawMessage `json:"barrier_timer_handle"`
+	BarrierStatus            string          `json:"barrier_status"`
+	BarrierSummary           json.RawMessage `json:"barrier_summary"`
+	BarrierScheduleKey       string          `json:"barrier_schedule_key"`
+	BarrierUpdatedAt         time.Time       `json:"barrier_updated_at"`
 }
 
 type runForkRevisionSnapshot struct {

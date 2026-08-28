@@ -394,8 +394,8 @@ func TestWorkflowJoinDurableIdentityIncludesStageOnBothStores(t *testing.T) {
 			bundle.Semantics.Stages = append(bundle.Semantics.Stages, runtimecontracts.WorkflowStageContract{ID: "reviewing"})
 			resultType := runtimecontracts.CatalogTypeReference{Type: "jsonb"}
 			bundle.Semantics.Joins = []runtimecontracts.WorkflowJoinPlan{
-				{Node: mustPipelineNode("orders", "join-node"), HandlerEvent: "item.completed", Spec: first, ResultType: resultType},
-				{Node: mustPipelineNode("orders", "join-node"), HandlerEvent: "approval.completed", Spec: second, ResultType: resultType},
+				{Node: mustPipelineNode("orders", "join-node"), HandlerEvent: "item.completed", Mode: runtimecontracts.WorkflowJoinModeArrival, Spec: first, ResultType: resultType},
+				{Node: mustPipelineNode("orders", "join-node"), HandlerEvent: "approval.completed", Mode: runtimecontracts.WorkflowJoinModeArrival, Spec: second, ResultType: resultType},
 			}
 			bundle.Semantics.NodeHandlers["join-node"] = node.EventHandlers
 			bundle.Semantics.EffectiveNodes["join-node"] = runtimecontracts.SystemNodeEffectiveSemantics{ID: "join-node", RuntimeSubscriptions: runtimecontracts.EffectiveSystemNodeSubscriptions(node)}
@@ -1135,7 +1135,7 @@ func workflowJoinLifecycleBundle(t *testing.T) *runtimecontracts.WorkflowContrac
 		Events: eventCatalog,
 		Semantics: runtimecontracts.WorkflowSemanticView{
 			Name: "workflow-join-lifecycle", Version: "1.0.0", InitialStage: "dispatching", Stages: []runtimecontracts.WorkflowStageContract{{ID: "dispatching"}, {ID: "awaiting"}, {ID: "ready"}, {ID: "attention"}}, TerminalStages: []string{"ready", "attention"},
-			Joins: []runtimecontracts.WorkflowJoinPlan{{Node: mustPipelineNode("orders", "join-node"), HandlerEvent: "item.completed", Spec: spec, ResultType: resultType}},
+			Joins: []runtimecontracts.WorkflowJoinPlan{{Node: mustPipelineNode("orders", "join-node"), HandlerEvent: "item.completed", Mode: runtimecontracts.WorkflowJoinModeArrival, Spec: spec, ResultType: resultType}},
 			EffectiveNodes: map[string]runtimecontracts.SystemNodeEffectiveSemantics{
 				"join-node":  {ID: "join-node", RuntimeSubscriptions: runtimecontracts.EffectiveSystemNodeSubscriptions(joinNode)},
 				"dispatcher": {ID: "dispatcher", RuntimeSubscriptions: runtimecontracts.EffectiveSystemNodeSubscriptions(dispatcher)},

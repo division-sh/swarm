@@ -2031,7 +2031,7 @@ func TestExecutor_JoinUsesPersistedActivationAndMembershipOrder(t *testing.T) {
 	}
 	exec, err := NewExecutor(RuntimeDependencies{
 		Source: semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "orders", Joins: []runtimecontracts.WorkflowJoinPlan{{Node: testFlowExecutableNode(t, "orders", "join-node"), HandlerEvent: "item.completed", Spec: spec, ResultType: resultType}},
+			Name: "orders", Joins: []runtimecontracts.WorkflowJoinPlan{{Mode: runtimecontracts.WorkflowJoinModeArrival, Node: testFlowExecutableNode(t, "orders", "join-node"), HandlerEvent: "item.completed", Spec: spec, ResultType: resultType}},
 		}}), StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},
 	}, nil)
 	if err != nil {
@@ -2233,7 +2233,7 @@ func TestExecutor_JoinCompletionConsumesCatalogResultType(t *testing.T) {
 			joinNode := testFlowExecutableNode(t, "orders", "join-node")
 			source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{
 				Name:  "orders",
-				Joins: []runtimecontracts.WorkflowJoinPlan{{Node: joinNode, HandlerEvent: "item.completed", Spec: spec, ResultType: resultType}},
+				Joins: []runtimecontracts.WorkflowJoinPlan{{Mode: runtimecontracts.WorkflowJoinModeArrival, Node: joinNode, HandlerEvent: "item.completed", Spec: spec, ResultType: resultType}},
 			}})
 			exec, err := NewExecutor(RuntimeDependencies{
 				Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{}, Dispatcher: stubDispatcher{},

@@ -361,9 +361,15 @@ func (r HandlerRuleEntry) ContractElementRef() (contractelementidentity.Contract
 type WorkflowJoinPlan struct {
 	Node         runtimeidentity.ExecutableNode
 	HandlerEvent string
+	Mode         WorkflowJoinMode
 	Spec         JoinSpec
 	ResultType   CatalogTypeReference
 	Derivation   WorkflowJoinPlanDerivation
+	FanOut       WorkflowFanOutDeliveryJoinPlan
+}
+
+type WorkflowFanOutDeliveryJoinPlan struct {
+	FanOut FanOutPlanRef
 }
 
 type WorkflowJoinPlanDerivation struct {

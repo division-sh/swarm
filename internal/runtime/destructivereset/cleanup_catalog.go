@@ -21,6 +21,7 @@ type CleanupPolicy struct {
 
 func DefaultPlatformCleanupCatalog() []CleanupCatalogEntry {
 	return []CleanupCatalogEntry{
+		{Table: "fan_out_obligation_barriers", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "fan_out_obligation_barriers.run_id", DeleteOrderGroup: 1},
 		{Table: "fan_out_outcomes", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "fan_out_outcomes.run_id", DeleteOrderGroup: 1},
 		{Table: "fan_out_intents", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "fan_out_intents.run_id", DeleteOrderGroup: 2},
 		{Table: "resource_version_pins", TableKind: CleanupTableKindPlatform, Classification: CleanupDeleteByRunID, PredicateOwner: "resource_version_pins.run_id", DeleteOrderGroup: 1},

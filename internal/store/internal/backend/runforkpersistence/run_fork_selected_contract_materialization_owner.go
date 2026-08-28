@@ -25,28 +25,29 @@ import (
 // It exposes persistence mechanics while the materialization lifecycle executes
 // once in materializeRunForkForSelectedContractExecution.
 type runForkSelectedContractMaterializationPort struct {
-	requireCurrent    func() error
-	runMutation       func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runforkrevision.Effects) error) error
-	lockSourceStatus  func(context.Context, *sql.Tx, string) (string, error)
-	plan              func(context.Context, *sql.Tx, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
-	deliveries        *storedelivery.Adapter
-	loadSource        func(context.Context, *sql.Tx, string) (runtimecorrelation.BundleSourceFact, error)
-	activeForkSource  func(context.Context, *sql.Tx, string) (runtimecorrelation.BundleSourceFact, error)
-	admitProfile      func(context.Context, *sql.Tx, string, scenarioexecution.EffectiveSourceIdentity, runtimecorrelation.BundleSourceFact) (scenarioexecution.Profile, bool, error)
-	loadSnapshot      runForkLifecycleSnapshotLoader
-	requireProfile    func(context.Context, *sql.Tx, string, scenarioexecution.Profile, bool) error
-	durableData       *storedurabledata.Owner
-	insertRun         func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, string, string, string, int, time.Time, runtimecorrelation.BundleSourceFact) error
-	ensureProfile     func(context.Context, *sql.Tx, string, scenarioexecution.Profile, time.Time) error
-	materializeEntity func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, activeRunSourceOwnerFunc, *runforkrevision.Effects, string, runfork.RunForkPlan, runfork.RunForkEntityState, runForkEntityMetadata, time.Time) error
-	now               func() time.Time
+	requireCurrent      func() error
+	runMutation         func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runforkrevision.Effects) error) error
+	lockSourceStatus    func(context.Context, *sql.Tx, string) (string, error)
+	plan                func(context.Context, *sql.Tx, runfork.RunForkPlanRequest) (runfork.RunForkPlan, error)
+	deliveries          *storedelivery.Adapter
+	loadSource          func(context.Context, *sql.Tx, string) (runtimecorrelation.BundleSourceFact, error)
+	activeForkSource    func(context.Context, *sql.Tx, string) (runtimecorrelation.BundleSourceFact, error)
+	admitProfile        func(context.Context, *sql.Tx, string, scenarioexecution.EffectiveSourceIdentity, runtimecorrelation.BundleSourceFact) (scenarioexecution.Profile, bool, error)
+	loadSnapshot        runForkLifecycleSnapshotLoader
+	requireProfile      func(context.Context, *sql.Tx, string, scenarioexecution.Profile, bool) error
+	durableData         *storedurabledata.Owner
+	insertRun           func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, string, string, string, int, time.Time, runtimecorrelation.BundleSourceFact) error
+	ensureProfile       func(context.Context, *sql.Tx, string, scenarioexecution.Profile, time.Time) error
+	materializeEntity   func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, activeRunSourceOwnerFunc, *runforkrevision.Effects, string, runfork.RunForkPlan, runfork.RunForkEntityState, runForkEntityMetadata, time.Time) error
+	materializeBarriers runForkFanOutBarrierOwner
+	now                 func() time.Time
 }
 
 func materializeRunForkForSelectedContractExecution(ctx context.Context, req runfork.RunForkSelectedContractExecutionMaterializeRequest, port runForkSelectedContractMaterializationPort) (materialization runfork.RunForkMaterialization, err error) {
 	if port.requireCurrent == nil || port.runMutation == nil || port.lockSourceStatus == nil || port.plan == nil ||
 		port.deliveries == nil || port.loadSource == nil || port.activeForkSource == nil || port.admitProfile == nil || port.loadSnapshot == nil ||
 		port.requireProfile == nil || port.durableData == nil || port.insertRun == nil || port.ensureProfile == nil ||
-		port.materializeEntity == nil || port.now == nil {
+		port.materializeEntity == nil || port.materializeBarriers == nil || port.now == nil {
 		return runfork.RunForkMaterialization{}, fmt.Errorf("selected-contract fork materialization operations are incomplete")
 	}
 	if err := port.requireCurrent(); err != nil {
@@ -181,7 +182,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 				return err
 			}
 		}
-		materializedFanOutCount, err := materializeRunForkFanOutObligations(txctx, tx, effects, forkRunID, plan, fanOutPlanRefs, now)
+		materializedFanOutCount, err := materializeRunForkFanOutObligations(txctx, tx, effects, port.materializeBarriers, forkRunID, plan, fanOutPlanRefs, now)
 		if err != nil {
 			return err
 		}
@@ -272,7 +273,8 @@ func postgresRunForkSelectedContractMaterializationPort(s *RunForkPostgresOwner)
 		materializeEntity: func(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, source activeRunSourceOwnerFunc, effects *runforkrevision.Effects, forkRunID string, plan runfork.RunForkPlan, entity runfork.RunForkEntityState, metadata runForkEntityMetadata, now time.Time) error {
 			return materializeRunForkEntityState(ctx, s.DecisionPostgresOwner, s.MaterializeRunForkProposedEffectCardsTx, privatemutationlog.InsertEntityStateDiffWithStory, tx, story, source, effects, forkRunID, plan, entity, metadata, now)
 		},
-		now: func() time.Time { return time.Now().UTC() },
+		materializeBarriers: s.PipelinePostgresOwner,
+		now:                 func() time.Time { return time.Now().UTC() },
 	}
 }
 
@@ -327,6 +329,7 @@ func sqliteRunForkSelectedContractMaterializationPort(s *RunForkSQLiteOwner) run
 		materializeEntity: func(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, source activeRunSourceOwnerFunc, effects *runforkrevision.Effects, forkRunID string, plan runfork.RunForkPlan, entity runfork.RunForkEntityState, metadata runForkEntityMetadata, now time.Time) error {
 			return materializeRunForkEntityState(ctx, s.DecisionSQLiteOwner, s.MaterializeRunForkProposedEffectCardsTx, privatemutationlog.InsertSQLiteEntityStateDiffWithStory, tx, story, source, effects, forkRunID, plan, entity, metadata, now)
 		},
-		now: s.now,
+		materializeBarriers: s.PipelineSQLiteOwner,
+		now:                 s.now,
 	}
 }

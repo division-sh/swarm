@@ -121,6 +121,7 @@ func normalizeProjectionValue(raw any, kind valueKind) (any, error) {
 			"2006-01-02 15:04:05.999999 -0700 MST",
 			"2006-01-02 15:04:05 -0700 MST",
 			"2006-01-02 15:04:05.999999999-07:00",
+			"2006-01-02 15:04:05.999999999-07",
 			"2006-01-02 15:04:05.999999999Z07:00",
 			"2006-01-02 15:04:05.999999999",
 			"2006-01-02 15:04:05-07:00",
@@ -207,14 +208,14 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 		spec = projectionSpec{
 			query: `SELECT CAST(e.event_id AS TEXT), CAST(e.event_id AS TEXT), e.event_name,
 				CAST(e.entity_id AS TEXT), e.flow_instance, e.routing_source_kind, e.source_route,
-				COALESCE(e.routing_source_authority, ''), e.target_route, e.target_set, e.scope,
+				COALESCE(e.routing_source_authority, ''), e.target_route, e.target_set, e.route_settlement, e.scope,
 				e.payload_bytes, e.chain_depth, e.produced_by, e.produced_by_type, e.handler_node,
 				e.idempotency_key, CAST(e.source_event_id AS TEXT), e.created_at
 			FROM events e WHERE e.run_id = $1`,
 			columns: typedColumns(map[string]valueKind{
-				"source_route": valueJSON, "target_route": valueJSON, "target_set": valueJSON,
+				"source_route": valueJSON, "target_route": valueJSON, "target_set": valueJSON, "route_settlement": valueJSON,
 				"payload_base64": valueBytesBase64, "created_at": valueTime,
-			}, "event_id", "event_name", "entity_id", "flow_instance", "routing_source_kind", "source_route", "routing_source_authority", "target_route", "target_set", "scope", "payload_base64", "chain_depth", "produced_by", "produced_by_type", "handler_node", "idempotency_key", "source_event_id", "created_at"),
+			}, "event_id", "event_name", "entity_id", "flow_instance", "routing_source_kind", "source_route", "routing_source_authority", "target_route", "target_set", "route_settlement", "scope", "payload_base64", "chain_depth", "produced_by", "produced_by_type", "handler_node", "idempotency_key", "source_event_id", "created_at"),
 			build: func(values map[string]any) map[string]any {
 				values["routing_source"] = map[string]any{
 					"kind": values["routing_source_kind"], "route": values["source_route"], "authority": values["routing_source_authority"],
@@ -287,7 +288,10 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 			"source_kind", "source_event_id", "source_run_id", "source_entity_id", "source_field", "source_mutation_id",
 			"source_resource_package_key", "source_resource_event_name", "source_resource_version_id",
 			"cardinality", "cursor", "status", "capsule", "blocked_reason",
-			"created_at", "ordinal", "outcome_kind", "event_id", "outcome_source_event_id", "failure",
+			"created_at", "ordinal", "outcome_kind", "event_id", "outcome_source_event_id", "inherited_disposition", "failure",
+			"barrier_target_package_key", "barrier_target_flow_id", "barrier_target_node_id", "barrier_handler_event", "barrier_join_id",
+			"barrier_route_scope_key", "barrier_route_instance_id", "barrier_route_instance_path", "barrier_entity_id",
+			"barrier_routing_source", "barrier_execution_mode", "barrier_timer_handle", "barrier_status", "barrier_summary", "barrier_schedule_key", "barrier_updated_at",
 		}
 		spec = projectionSpec{
 			query: `
@@ -295,18 +299,31 @@ func canonicalProjectionSpec(family Family) (projectionSpec, bool) {
 					'intent', CAST(i.triggering_delivery_id AS TEXT), i.package_key, i.element_id, i.bundle_hash, i.semantic_digest,
 					i.source_kind, CAST(i.source_event_id AS TEXT), CAST(i.source_run_id AS TEXT), CAST(i.source_entity_id AS TEXT), i.source_field, CAST(i.source_mutation_id AS TEXT),
 					i.source_resource_package_key, i.source_resource_event_name, i.source_resource_version_id,
-					i.cardinality, i.cursor, i.status, i.capsule, i.blocked_reason,
-					i.created_at, NULL, NULL, NULL, NULL, NULL
+					i.cardinality, i.cursor, i.status, CAST(i.capsule AS TEXT), i.blocked_reason,
+					CAST(i.created_at AS TEXT), NULL, NULL, NULL, NULL, NULL, NULL,
+					NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
 				FROM fan_out_intents i WHERE i.run_id=$1
 				UNION ALL
 				SELECT 'outcome|' || CAST(o.triggering_delivery_id AS TEXT) || '|' || o.package_key || '|' || o.element_id || '|' || CAST(o.ordinal AS TEXT),
 					'outcome', CAST(o.triggering_delivery_id AS TEXT), o.package_key, o.element_id, NULL, NULL,
 					NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
 					NULL, NULL, NULL, NULL, NULL,
-					o.created_at, o.ordinal, o.outcome_kind, CAST(o.event_id AS TEXT), CAST(o.source_event_id AS TEXT), o.failure
-				FROM fan_out_outcomes o WHERE o.run_id=$1`,
+					CAST(o.created_at AS TEXT), o.ordinal, o.outcome_kind, CAST(o.event_id AS TEXT), CAST(o.source_event_id AS TEXT), o.inherited_disposition, CAST(o.failure AS TEXT),
+					NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+				FROM fan_out_outcomes o WHERE o.run_id=$1
+				UNION ALL
+				SELECT 'barrier|' || CAST(b.triggering_delivery_id AS TEXT) || '|' || b.package_key || '|' || b.element_id,
+					'barrier', CAST(b.triggering_delivery_id AS TEXT), b.package_key, b.element_id, b.bundle_hash, b.semantic_digest,
+					NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+					NULL, NULL, NULL, NULL, NULL,
+					CAST(b.created_at AS TEXT), NULL, NULL, NULL, NULL, NULL, NULL,
+					b.target_package_key, b.target_flow_id, b.target_node_id, b.handler_event, b.join_id,
+					b.route_scope_key, CAST(b.route_instance_id AS TEXT), b.route_instance_path, CAST(b.entity_id AS TEXT),
+					CAST(b.routing_source AS TEXT), b.execution_mode, CAST(b.timer_handle AS TEXT), b.status, CAST(b.summary AS TEXT), b.schedule_key, CAST(b.updated_at AS TEXT)
+				FROM fan_out_obligation_barriers b WHERE b.run_id=$1`,
 			columns: typedColumns(map[string]valueKind{
 				"capsule": valueJSON, "failure": valueJSON, "created_at": valueTime,
+				"barrier_routing_source": valueJSON, "barrier_timer_handle": valueJSON, "barrier_summary": valueJSON, "barrier_updated_at": valueTime,
 			}, names...),
 		}
 	case FamilyTimers:

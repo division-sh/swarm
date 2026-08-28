@@ -241,7 +241,9 @@ func (o pipelineEngineMutationOwner) CommitEngineMutation(ctx context.Context, m
 		committed, commitErr := o.store.engineMutations.CommitWorkflowEngineMutation(ctx, WorkflowEngineMutationCommand{
 			State: state, Lifecycle: lifecycle.Commit,
 			ProposedEffects: proposedEffects, Publications: publications, DeliverySuccess: deliverySuccess, PostCommit: postCommit,
-			FanOutIntent: mutation.FanOutIntent,
+			FanOutIntent:            mutation.FanOutIntent,
+			FanOutBarrier:           mutation.FanOutBarrier,
+			FanOutBarrierCompletion: mutation.FanOutBarrierCompletion,
 		})
 		if commitErr == nil && mutation.FanOutIntent != nil {
 			o.state.coordinator.signalFanOutWork()
@@ -377,11 +379,13 @@ func (o pipelineEngineMutationOwner) commitEntitylessEngineMutation(ctx context.
 		return runtimeengine.CommittedEngineMutation{}, err
 	}
 	committed, commitErr := o.store.engineMutations.CommitWorkflowEngineMutation(ctx, WorkflowEngineMutationCommand{
-		EntitylessTarget: target,
-		EntitylessRunID:  runID,
-		Publications:     publications,
-		DeliverySuccess:  deliverySuccess,
-		FanOutIntent:     mutation.FanOutIntent,
+		EntitylessTarget:        target,
+		EntitylessRunID:         runID,
+		Publications:            publications,
+		DeliverySuccess:         deliverySuccess,
+		FanOutIntent:            mutation.FanOutIntent,
+		FanOutBarrier:           mutation.FanOutBarrier,
+		FanOutBarrierCompletion: mutation.FanOutBarrierCompletion,
 	})
 	if commitErr == nil && mutation.FanOutIntent != nil {
 		o.state.coordinator.signalFanOutWork()

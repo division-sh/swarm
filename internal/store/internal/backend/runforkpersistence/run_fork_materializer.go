@@ -176,7 +176,7 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 			return runfork.RunForkMaterialization{}, err
 		}
 	}
-	materializedFanOutCount, err := materializeRunForkFanOutObligations(ctx, tx, effects, forkRunID, plan, fanOutPlanRefs, now)
+	materializedFanOutCount, err := materializeRunForkFanOutObligations(ctx, tx, effects, s.PipelinePostgresOwner, forkRunID, plan, fanOutPlanRefs, now)
 	if err != nil {
 		return runfork.RunForkMaterialization{}, err
 	}

@@ -200,6 +200,7 @@ func (s *RunSQLite) LoadRunTestQuiescence(ctx context.Context, runID string, obs
 		return operatorread.RunTestQuiescence{}, fmt.Errorf("load sqlite run test quiescence fan-out obligations: %w", err)
 	}
 	out.FanOutOwed = fanOut.Owed
+	out.FanOutBarriers = fanOut.BarrierArmed + fanOut.BarrierPending
 	scope, err := runtimetimerobligation.Run(runID)
 	if err != nil {
 		return operatorread.RunTestQuiescence{}, err

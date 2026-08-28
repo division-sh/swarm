@@ -53,8 +53,8 @@ func TestWorkflowJoinPlanForRefDistinguishesRootAndSameLeafFlowDeclarations(t *t
 		t.Fatal(err)
 	}
 	bundle := &runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{Joins: []runtimecontracts.WorkflowJoinPlan{
-		{Node: root, HandlerEvent: "item.completed", Spec: spec},
-		{Node: orders, HandlerEvent: "item.completed", Spec: spec},
+		{Node: root, HandlerEvent: "item.completed", Mode: runtimecontracts.WorkflowJoinModeArrival, Spec: spec},
+		{Node: orders, HandlerEvent: "item.completed", Mode: runtimecontracts.WorkflowJoinModeArrival, Spec: spec},
 	}}}
 	source := semanticview.Wrap(bundle)
 	for _, node := range []runtimeidentity.ExecutableNode{root, orders} {
@@ -91,8 +91,8 @@ func TestWorkflowJoinPlanForRefPreservesSameFlowPackageDeclarationsInEitherOrder
 		t.Fatal(err)
 	}
 	for _, plans := range [][]runtimecontracts.WorkflowJoinPlan{
-		{{Node: first, HandlerEvent: "item.completed", Spec: spec}, {Node: second, HandlerEvent: "item.completed", Spec: spec}},
-		{{Node: second, HandlerEvent: "item.completed", Spec: spec}, {Node: first, HandlerEvent: "item.completed", Spec: spec}},
+		{{Node: first, HandlerEvent: "item.completed", Mode: runtimecontracts.WorkflowJoinModeArrival, Spec: spec}, {Node: second, HandlerEvent: "item.completed", Mode: runtimecontracts.WorkflowJoinModeArrival, Spec: spec}},
+		{{Node: second, HandlerEvent: "item.completed", Mode: runtimecontracts.WorkflowJoinModeArrival, Spec: spec}, {Node: first, HandlerEvent: "item.completed", Mode: runtimecontracts.WorkflowJoinModeArrival, Spec: spec}},
 	} {
 		source := semanticview.Wrap(&runtimecontracts.WorkflowContractBundle{Semantics: runtimecontracts.WorkflowSemanticView{Joins: plans}})
 		for _, node := range []runtimeidentity.ExecutableNode{first, second} {

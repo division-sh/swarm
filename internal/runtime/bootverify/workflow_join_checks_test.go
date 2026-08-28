@@ -267,8 +267,8 @@ func TestRun_JoinValidationAttributesSameFlowPackageFailureExactlyInEitherOrder(
 		}
 		children := []runtimecontracts.FlowContractView{validView, invalidView}
 		plans := []runtimecontracts.WorkflowJoinPlan{
-			{Node: validNode, HandlerEvent: "item.completed", Spec: validSpec},
-			{Node: invalidNode, HandlerEvent: "item.completed", Spec: invalidSpec},
+			{Node: validNode, HandlerEvent: "item.completed", Mode: runtimecontracts.WorkflowJoinModeArrival, Spec: validSpec},
+			{Node: invalidNode, HandlerEvent: "item.completed", Mode: runtimecontracts.WorkflowJoinModeArrival, Spec: invalidSpec},
 		}
 		if reverse {
 			children[0], children[1] = children[1], children[0]
@@ -344,7 +344,7 @@ func rebuildJoinValidationTopology(bundle *runtimecontracts.WorkflowContractBund
 			})
 			if handler.Join != nil {
 				resultType, _ := runtimecontracts.ResolveEventFieldType(bundle, "", eventType, "result")
-				joins = append(joins, runtimecontracts.WorkflowJoinPlan{Node: nodeRef, HandlerEvent: eventType, Spec: *handler.Join, ResultType: resultType})
+				joins = append(joins, runtimecontracts.WorkflowJoinPlan{Node: nodeRef, HandlerEvent: eventType, Mode: runtimecontracts.WorkflowJoinModeArrival, Spec: *handler.Join, ResultType: resultType})
 			}
 		}
 	}

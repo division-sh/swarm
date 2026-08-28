@@ -13,6 +13,7 @@ import (
 	decisioncard "github.com/division-sh/swarm/internal/runtime/decisioncard"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
+	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 )
 
@@ -172,6 +173,8 @@ type WorkflowEngineMutationCommand struct {
 	DeliverySuccess         *WorkflowEngineDeliverySuccess
 	PostCommit              WorkflowEnginePostCommitPlan
 	FanOutIntent            *fanoutobligation.IntentRequest
+	FanOutBarrier           *fanoutbarrier.Registration
+	FanOutBarrierCompletion *fanoutbarrier.Completion
 }
 
 // WorkflowEngineDeliverySuccess declares the exact inbound node claim that
@@ -294,6 +297,29 @@ func (c WorkflowEngineMutationCommand) Validate() error {
 		}
 		if c.FanOutIntent.Key.RunID != runID || c.FanOutIntent.Key.TriggeringDeliveryID != c.DeliverySuccess.Claim.DeliveryID() {
 			return fmt.Errorf("workflow engine fan-out intent disagrees with the settled delivery")
+		}
+	}
+	if c.FanOutBarrier != nil && c.FanOutIntent == nil {
+		return fmt.Errorf("workflow engine fan-out delivery barrier must be committed with its exact intent")
+	}
+	if c.FanOutBarrier != nil {
+		if err := c.FanOutBarrier.Validate(); err != nil {
+			return fmt.Errorf("workflow engine fan-out barrier: %w", err)
+		}
+		if c.FanOutBarrier.IntentKey != c.FanOutIntent.Key {
+			return fmt.Errorf("workflow engine fan-out barrier disagrees with its exact intent")
+		}
+	}
+	if c.FanOutBarrierCompletion != nil {
+		if err := c.FanOutBarrierCompletion.Validate(); err != nil {
+			return fmt.Errorf("workflow engine fan-out barrier completion: %w", err)
+		}
+		key, err := c.FanOutBarrierCompletion.IntentKey(runID)
+		if err != nil {
+			return err
+		}
+		if key.RunID != runID || c.DeliverySuccess == nil {
+			return fmt.Errorf("workflow engine fan-out barrier completion requires exact delivery settlement")
 		}
 	}
 	seen := make(map[string]struct{}, len(c.Publications))

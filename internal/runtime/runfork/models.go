@@ -16,6 +16,7 @@ import (
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
+	"github.com/division-sh/swarm/internal/runtime/fanoutbarrier"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 
 	"sort"
@@ -26,6 +27,7 @@ import (
 
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/runtime/scenarioexecution"
+	"github.com/google/uuid"
 )
 
 func sortedTrimmedStrings(values []string) []string {
@@ -335,8 +337,94 @@ type RunForkPlan struct {
 // fixed fork revision. Claim, lease, pacing, and service timestamps are not
 // historical authority and are reset when this fact is materialized.
 type RunForkFanOutObligation struct {
-	Intent   fanoutobligation.Intent    `json:"intent"`
-	Outcomes []fanoutobligation.Outcome `json:"outcomes,omitempty"`
+	Intent         fanoutobligation.Intent      `json:"intent"`
+	Outcomes       []fanoutobligation.Outcome   `json:"outcomes,omitempty"`
+	PendingReplays []RunForkFanOutPendingReplay `json:"pending_replays,omitempty"`
+	Barrier        *fanoutbarrier.Barrier       `json:"barrier,omitempty"`
+}
+
+// RunForkFanOutPendingReplay is a fixed-revision nonterminal ordinal that may
+// become child-local only through the existing historical delivery replay.
+type RunForkFanOutPendingReplay struct {
+	Ordinal       int    `json:"ordinal"`
+	SourceEventID string `json:"source_event_id"`
+}
+
+// ValidateFanOutPendingReplayAdmission proves that every nonterminal fan-out
+// ordinal can be reconstructed entirely by the existing historical replay.
+func ValidateFanOutPendingReplayAdmission(plan RunForkPlan) error {
+	for _, obligation := range plan.FanOutObligations {
+		seenOrdinals := make(map[int]struct{}, obligation.Intent.Cursor)
+		for _, outcome := range obligation.Outcomes {
+			if outcome.Ordinal < 0 || outcome.Ordinal >= obligation.Intent.Cursor {
+				return fmt.Errorf("fork fan-out outcome ordinal %d is outside cursor %d", outcome.Ordinal, obligation.Intent.Cursor)
+			}
+			if _, duplicate := seenOrdinals[outcome.Ordinal]; duplicate {
+				return fmt.Errorf("fork fan-out ordinal %d has duplicate fixed-revision facts", outcome.Ordinal)
+			}
+			seenOrdinals[outcome.Ordinal] = struct{}{}
+		}
+		seenEvents := make(map[string]struct{}, len(obligation.PendingReplays))
+		for _, replay := range obligation.PendingReplays {
+			eventID := strings.TrimSpace(replay.SourceEventID)
+			if replay.Ordinal < 0 || replay.Ordinal >= obligation.Intent.Cursor {
+				return fmt.Errorf("fork fan-out pending ordinal %d is outside cursor %d", replay.Ordinal, obligation.Intent.Cursor)
+			}
+			if _, duplicate := seenOrdinals[replay.Ordinal]; duplicate {
+				return fmt.Errorf("fork fan-out ordinal %d has duplicate fixed-revision facts", replay.Ordinal)
+			}
+			if _, err := uuid.Parse(eventID); err != nil {
+				return fmt.Errorf("fork fan-out pending ordinal %d requires source event UUID: %w", replay.Ordinal, err)
+			}
+			if _, duplicate := seenEvents[eventID]; duplicate {
+				return fmt.Errorf("fork fan-out pending source event %s is bound to multiple ordinals", eventID)
+			}
+			seenOrdinals[replay.Ordinal] = struct{}{}
+			seenEvents[eventID] = struct{}{}
+
+			deliveries := 0
+			for _, pending := range plan.PendingWork {
+				if strings.TrimSpace(pending.EventID) != eventID {
+					continue
+				}
+				deliveries++
+				if !RunForkPendingWorkReplayableForHistoricalReplay(pending) {
+					return fmt.Errorf("fork fan-out pending event %s includes unsupported delivery %s", eventID, strings.TrimSpace(pending.DeliveryID))
+				}
+			}
+			if deliveries == 0 {
+				return fmt.Errorf("fork fan-out pending event %s has no replayable delivery evidence", eventID)
+			}
+		}
+		if len(seenOrdinals) != obligation.Intent.Cursor {
+			return fmt.Errorf("fork fan-out cursor %d has %d exact ordinal facts", obligation.Intent.Cursor, len(seenOrdinals))
+		}
+	}
+	return nil
+}
+
+func ValidateFanOutPendingReplayExecution(plan RunForkPlan, work []RunForkHistoricalReplayExecutableWork) error {
+	if err := ValidateFanOutPendingReplayAdmission(plan); err != nil {
+		return err
+	}
+	workByDelivery := make(map[string]RunForkHistoricalReplayExecutableWork, len(work))
+	for _, item := range work {
+		workByDelivery[strings.TrimSpace(item.SourceDeliveryID)] = item
+	}
+	for _, obligation := range plan.FanOutObligations {
+		for _, replay := range obligation.PendingReplays {
+			for _, pending := range plan.PendingWork {
+				if strings.TrimSpace(pending.EventID) != strings.TrimSpace(replay.SourceEventID) {
+					continue
+				}
+				item, ok := workByDelivery[strings.TrimSpace(pending.DeliveryID)]
+				if !ok || strings.TrimSpace(item.SourceEventID) != strings.TrimSpace(replay.SourceEventID) {
+					return fmt.Errorf("fork fan-out pending event %s delivery %s is absent from exact replay execution", replay.SourceEventID, pending.DeliveryID)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func (p RunForkPlan) WithHistoricalEvents(revision int64, eventIDs []string) RunForkPlan {

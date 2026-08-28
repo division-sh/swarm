@@ -130,7 +130,24 @@ func workflowJoinDeclarationRef(source semanticview.Source, node runtimeidentity
 	if !ok {
 		return timeridentity.JoinRef{}, fmt.Errorf("join handler has no declaration in exact executable node scope %q", node.Key())
 	}
-	ref, err := timeridentity.NewJoinRef(plan.Node, handlerEvent, handler.Join.Stage, handler.Join.EffectiveID(), "")
+	var ref timeridentity.JoinRef
+	var err error
+	switch plan.Mode {
+	case runtimecontracts.WorkflowJoinModeArrival:
+		ref, err = timeridentity.NewJoinRef(plan.Node, handlerEvent, handler.Join.Stage, handler.Join.EffectiveID(), "")
+	case runtimecontracts.WorkflowJoinModeFanOutDelivery:
+		ref, err = timeridentity.NewFanOutDeliveryJoinRef(
+			plan.Node,
+			handlerEvent,
+			handler.Join.EffectiveID(),
+			plan.FanOut.FanOut.ElementRef.PackageKey,
+			plan.FanOut.FanOut.ElementRef.ElementID,
+			plan.FanOut.FanOut.BundleHash,
+			plan.FanOut.FanOut.SemanticDigest,
+		)
+	default:
+		err = fmt.Errorf("join handler has invalid compiled mode")
+	}
 	if err != nil {
 		return timeridentity.JoinRef{}, err
 	}
