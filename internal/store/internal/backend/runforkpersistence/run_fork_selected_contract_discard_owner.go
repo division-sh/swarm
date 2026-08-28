@@ -97,7 +97,7 @@ func discardMaterializedSelectedContractExecutionFork(ctx context.Context, forkR
 			runforkrevision.FamilyEvents, runforkrevision.FamilyEntityMutations,
 			runforkrevision.FamilyEntityMetadata, runforkrevision.FamilyEventDeliveries,
 			runforkrevision.FamilyCommittedReplayScopes, runforkrevision.FamilyEventReceipts,
-			 runforkrevision.FamilyDeadLetters, runforkrevision.FamilyTimers,
+			runforkrevision.FamilyDeadLetters, runforkrevision.FamilyTimers,
 			runforkrevision.FamilyAgentSessions, runforkrevision.FamilyFanOutObligations,
 		); err != nil {
 			return err
