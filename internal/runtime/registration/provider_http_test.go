@@ -44,8 +44,9 @@ func channelConfirmationTestContext(harness *channelConfirmationHarness, operati
 		ChannelConfirmation: runtimeeffects.ChannelConfirmationAuthority{
 			EffectOperationID: operationID, OnboardingOperationID: uuid.NewString(), OnboardingRevision: 4,
 			ActivationID: uuid.NewString(), ActivationRevision: 2, BindingRevision: 3, PrincipalID: uuid.NewString(),
-			BundleHash: "bundle-v1:sha256:" + strings.Repeat("a", 64), RuntimeInstanceID: uuid.NewString(),
-			ContextPublicationGeneration: 7, PlanGeneration: planGeneration,
+			BundleHash: "bundle-v1:sha256:" + strings.Repeat("a", 64), BundleSource: "persisted",
+			BundleIdentity: "bundle:test@sha256:confirmation", PackInventoryGeneration: "sha256:confirmation-inventory",
+			RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 7, PlanGeneration: planGeneration, TargetGeneration: 1,
 		},
 	}
 	ctx := runtimeeffects.WithExecutionMode(context.Background(), runtimeeffects.ExecutionModeLive)

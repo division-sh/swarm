@@ -170,7 +170,7 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	}
 	bundleHash, bundleSource := loadedContext.BundleSourceFact.StorageValues()
 	learnedPublication, err := channelonboarding.NewChannelActivationPublication([]channelonboarding.CompiledActivation{{
-		Source: channelonboarding.ActivationSourceLearned, OnboardingOperationID: "activation-readiness-operation",
+		Source: channelonboarding.ActivationSourceLearned, OnboardingOperationID: uuid.NewString(), OnboardingRevision: 1,
 		Coordinate: channelonboarding.ChannelRuntimeContextCoordinate{
 			BundleHash: bundleHash, BundleSource: bundleSource, BundleIdentity: "telegram@1.0.0#activation-readiness",
 			PackInventoryGeneration: loadedContext.PackInventoryDigest, RuntimeInstanceID: loadedContext.RuntimeInstanceID,
@@ -242,8 +242,16 @@ func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *t
 	if err != nil {
 		t.Fatalf("PlanGeneration: %v", err)
 	}
+	onboardingID := uuid.NewString()
+	coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
+		BundleHash: bundleHash, BundleSource: "persisted",
+		BundleIdentity: "bundle:test@sha256:inbound-registration", PackInventoryGeneration: "sha256:inbound-registration-inventory",
+		RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1,
+		PlanGeneration: planGeneration, TargetGeneration: uint64(target.Generation),
+	}
 	pair := runtimepublicingress.RegistrationPair{
-		BindingID: "telegram", PlanGeneration: planGeneration, OnboardingOperationID: "test-prebinding-telegram", PrebindingOperationID: "test-prebinding-telegram", Registration: registration,
+		BindingID: "telegram", PlanGeneration: planGeneration, OnboardingOperationID: onboardingID, OnboardingRevision: 1,
+		OnboardingCoordinate: coordinate, PrebindingOperationID: onboardingID, Registration: registration,
 		CredentialKeys: map[string]string{"telegram_bot_token": "bot"},
 		Target: runtimepublicingress.RegistrationTarget{
 			Selector: "ingress:telegram-package:telegram-chat:telegram", BundleHash: bundleHash, ServiceID: target.ServiceID,

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1126,6 +1127,7 @@ func TestChannelOnboardingRecoveryEveryNonterminalPhase(t *testing.T) {
 		PhaseDeliveringConfirmation,
 	} {
 		t.Run(string(phase), func(t *testing.T) {
+			events := []string{}
 			candidate := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
 			predecessorCoordinate := candidate.Coordinate
 			candidate.Coordinate.RuntimeInstanceID = "22222222-2222-4222-8222-222222222222"
@@ -1182,7 +1184,7 @@ func TestChannelOnboardingRecoveryEveryNonterminalPhase(t *testing.T) {
 				phase == PhasePublishingProcessActivation || phase == PhasePromotingRegistration || phase == PhaseRetiringPredecessor || phase == PhaseDeliveringConfirmation {
 				op.BindingRevision = 4
 			}
-			store := &cancellationTestStore{op: op}
+			store := &cancellationTestStore{op: op, events: &events}
 			if phase == PhasePublishingProcessActivation || phase == PhasePromotingRegistration || phase == PhaseRetiringPredecessor || phase == PhaseDeliveringConfirmation {
 				store.activation = testCurrentActivation(op, admissions, now)
 				store.op.ActivationRevision = store.activation.Revision
@@ -1194,10 +1196,12 @@ func TestChannelOnboardingRecoveryEveryNonterminalPhase(t *testing.T) {
 					Revision: 4, Status: operatorchannel.BindingCurrent,
 				},
 			}
+			activations := &cancellationTestActivations{events: &events}
+			confirmation := &recordingTestConfirmation{events: &events, disposition: EffectRebindDisposition{RetryAllowed: true}}
 			service, err := NewService(ServiceOptions{
 				Store: store, Identities: identities, Credentials: credentials,
 				Catalog:     func() (*CandidateCatalog, error) { return catalog, nil },
-				Activations: &cancellationTestActivations{}, Confirmation: successfulTestConfirmation{}, Readiness: cancellationTestReadiness{},
+				Activations: activations, Confirmation: confirmation, Readiness: cancellationTestReadiness{},
 				Now: func() time.Time { return now },
 			})
 			if err != nil {
@@ -1220,8 +1224,99 @@ func TestChannelOnboardingRecoveryEveryNonterminalPhase(t *testing.T) {
 			if !store.activation.Coordinate.Matches(candidate.Coordinate) {
 				t.Fatalf("recovered activation coordinate = %#v, want successor %#v", store.activation.Coordinate, candidate.Coordinate)
 			}
+			rebindIndex := slices.Index(events, "cas_rebind")
+			if rebindIndex < 0 {
+				t.Fatalf("recovery did not CAS-rebind successor: events=%v", events)
+			}
+			if phaseMayOwnExternalEffect(phase) {
+				reconcileIndex := slices.Index(events, "effect_reconcile")
+				if reconcileIndex < 0 || reconcileIndex >= rebindIndex {
+					t.Fatalf("durable effect reconciliation did not precede CAS rebind: events=%v", events)
+				}
+				consumerIndex := firstChannelSuccessorConsumer(events)
+				if consumerIndex <= rebindIndex {
+					t.Fatalf("successor publication/consumption did not follow CAS rebind: events=%v", events)
+				}
+			} else if slices.Contains(events[:rebindIndex], "effect_reconcile") {
+				t.Fatalf("pre-effect phase performed effect reconciliation before direct rebind: events=%v", events)
+			}
 		})
 	}
+}
+
+func TestChannelOnboardingEffectDispositionPrecedesRebindAndBlocksUncertainReplay(t *testing.T) {
+	now := time.Date(2026, 8, 27, 22, 0, 0, 0, time.UTC)
+	predecessor := testCandidate("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "support")
+	successor := predecessor
+	successor.Coordinate.RuntimeInstanceID = uuid.NewString()
+	successor.Coordinate.ContextPublicationGeneration++
+	successor.Coordinate.TargetGeneration++
+	successor.Target.Generation = successor.Coordinate.TargetGeneration
+	catalog, err := NewCandidateCatalog([]Candidate{successor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	op := Operation{
+		OperationID: uuid.NewString(), Provider: predecessor.Provider, Interface: predecessor.Interface,
+		Coordinate: predecessor.Coordinate, TargetSelector: predecessor.Target.Selector,
+		Posture: predecessor.Posture, Ceremony: predecessor.Ceremony, Phase: PhaseDeliveringConfirmation,
+		Revision: 9, ConfirmationOperationID: uuid.NewString(), UpdatedAt: now,
+	}
+
+	t.Run("uncertain predecessor blocks CAS and redispatch", func(t *testing.T) {
+		events := []string{}
+		store := &cancellationTestStore{op: op, events: &events}
+		confirmation := &recordingTestConfirmation{
+			events: &events,
+			disposition: EffectRebindDisposition{
+				RetryAllowed: false, BlockingEffectOperationID: op.ConfirmationOperationID,
+				BlockingEffectState: "outcome_uncertain",
+			},
+		}
+		service := &Service{
+			store: store, effects: confirmation, catalog: func() (*CandidateCatalog, error) { return catalog, nil },
+			now: func() time.Time { return now },
+		}
+		if _, _, err := service.bindCurrentCandidate(context.Background(), op); err == nil {
+			t.Fatal("uncertain predecessor admitted successor rebind")
+		}
+		if !store.op.Coordinate.Matches(predecessor.Coordinate) || confirmation.dispatches != 0 || !slices.Equal(events, []string{"effect_reconcile"}) {
+			t.Fatalf("blocked rebind mutated or dispatched: operation=%#v dispatches=%d events=%v", store.op, confirmation.dispatches, events)
+		}
+	})
+
+	t.Run("prelaunch predecessor clears confirmation before successor CAS", func(t *testing.T) {
+		events := []string{}
+		store := &cancellationTestStore{op: op, events: &events}
+		confirmation := &recordingTestConfirmation{
+			events: &events,
+			disposition: EffectRebindDisposition{
+				RetryAllowed: true, RemintConfirmationOperation: true,
+			},
+		}
+		service := &Service{
+			store: store, effects: confirmation, catalog: func() (*CandidateCatalog, error) { return catalog, nil },
+			now: func() time.Time { return now },
+		}
+		rebound, _, err := service.bindCurrentCandidate(context.Background(), op)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !rebound.Coordinate.Matches(successor.Coordinate) || rebound.ConfirmationOperationID != "" ||
+			!slices.Equal(events, []string{"effect_reconcile", "cas_rebind"}) {
+			t.Fatalf("safe predecessor rebind=%#v events=%v", rebound, events)
+		}
+	})
+}
+
+func firstChannelSuccessorConsumer(events []string) int {
+	first := -1
+	for _, name := range []string{"provider_refresh", "process_publication", "registration_promotion", "confirmation_dispatch"} {
+		if index := slices.Index(events, name); index >= 0 && (first < 0 || index < first) {
+			first = index
+		}
+	}
+	return first
 }
 
 func TestStartupLocalReconciliationRebindsSucceededActivationToSuccessorOccurrence(t *testing.T) {
@@ -1374,6 +1469,7 @@ type cancellationTestStore struct {
 	cancelled          bool
 	sawCanceledContext bool
 	advanceErrOnce     error
+	events             *[]string
 }
 
 func (s *cancellationTestStore) observe(ctx context.Context) {
@@ -1439,6 +1535,9 @@ func (s *cancellationTestStore) AdvanceChannelOnboarding(ctx context.Context, re
 		return Operation{}, ErrRevisionConflict
 	}
 	if req.RebindCoordinate != nil {
+		if s.events != nil {
+			*s.events = append(*s.events, "cas_rebind")
+		}
 		if !s.op.Coordinate.MatchesDurableIdentity(*req.RebindCoordinate) {
 			return Operation{}, ErrConflict
 		}
@@ -1453,6 +1552,9 @@ func (s *cancellationTestStore) AdvanceChannelOnboarding(ctx context.Context, re
 			s.activation.OperationRevision = s.op.Revision + 1
 			s.activation.UpdatedAt = req.Now
 			s.op.ActivationRevision = s.activation.Revision
+		}
+		if req.ClearConfirmationOperationID {
+			s.op.ConfirmationOperationID = ""
 		}
 	}
 	s.op.Phase = req.Phase
@@ -1631,6 +1733,7 @@ type cancellationTestActivations struct {
 	publishErrOnce     error
 	publications       int
 	promotions         int
+	events             *[]string
 }
 
 func (a *cancellationTestActivations) PreflightChannelActivation(ctx context.Context, _ Operation, _ Candidate) error {
@@ -1654,6 +1757,9 @@ func (a *cancellationTestActivations) RefreshChannelActivations(ctx context.Cont
 }
 
 func (a *cancellationTestActivations) RefreshChannelActivationCandidates(ctx context.Context) error {
+	if a.events != nil {
+		*a.events = append(*a.events, "provider_refresh")
+	}
 	return a.RefreshChannelActivations(ctx)
 }
 
@@ -1662,6 +1768,9 @@ func (a *cancellationTestActivations) PublishChannelActivation(ctx context.Conte
 		a.sawCanceledContext = true
 	}
 	a.publications++
+	if a.events != nil {
+		*a.events = append(*a.events, "process_publication")
+	}
 	if a.publishErrOnce != nil {
 		err := a.publishErrOnce
 		a.publishErrOnce = nil
@@ -1675,10 +1784,17 @@ func (a *cancellationTestActivations) PromoteChannelRegistration(ctx context.Con
 		a.sawCanceledContext = true
 	}
 	a.promotions++
+	if a.events != nil {
+		*a.events = append(*a.events, "registration_promotion")
+	}
 	return nil
 }
 
 type cancellationTestConfirmation struct{}
+
+func (cancellationTestConfirmation) ReconcileChannelEffectsBeforeRebind(context.Context, Operation) (EffectRebindDisposition, error) {
+	return EffectRebindDisposition{RetryAllowed: true}, nil
+}
 
 func (cancellationTestConfirmation) DispatchChannelConfirmation(context.Context, ConfirmationRequest) (ConfirmationResult, error) {
 	return ConfirmationResult{}, nil
@@ -1686,7 +1802,32 @@ func (cancellationTestConfirmation) DispatchChannelConfirmation(context.Context,
 
 type successfulTestConfirmation struct{}
 
+func (successfulTestConfirmation) ReconcileChannelEffectsBeforeRebind(context.Context, Operation) (EffectRebindDisposition, error) {
+	return EffectRebindDisposition{RetryAllowed: true}, nil
+}
+
 func (successfulTestConfirmation) DispatchChannelConfirmation(_ context.Context, request ConfirmationRequest) (ConfirmationResult, error) {
+	return ConfirmationResult{OperationID: request.Operation.ConfirmationOperationID, TerminalSuccess: true}, nil
+}
+
+type recordingTestConfirmation struct {
+	events      *[]string
+	disposition EffectRebindDisposition
+	dispatches  int
+}
+
+func (c *recordingTestConfirmation) ReconcileChannelEffectsBeforeRebind(context.Context, Operation) (EffectRebindDisposition, error) {
+	if c.events != nil {
+		*c.events = append(*c.events, "effect_reconcile")
+	}
+	return c.disposition, nil
+}
+
+func (c *recordingTestConfirmation) DispatchChannelConfirmation(_ context.Context, request ConfirmationRequest) (ConfirmationResult, error) {
+	c.dispatches++
+	if c.events != nil {
+		*c.events = append(*c.events, "confirmation_dispatch")
+	}
 	return ConfirmationResult{OperationID: request.Operation.ConfirmationOperationID, TerminalSuccess: true}, nil
 }
 

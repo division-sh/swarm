@@ -271,7 +271,7 @@ func (p *serveLifecyclePresenter) recordPublicIngressDisabledHint() {
 		return
 	}
 	p.mu.Lock()
-	p.operatorWarnings = append(p.operatorWarnings, "declared ingress is local only; use --dev --expose or --dev --public-webhook-base-url <https-origin> --public-webhook-listen <loopback:port>")
+	p.operatorWarnings = append(p.operatorWarnings, "declared ingress is local only; use --dev --expose or --public-webhook-base-url <https-origin> --public-webhook-listen <loopback:port>")
 	p.mu.Unlock()
 }
 

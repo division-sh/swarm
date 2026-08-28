@@ -327,7 +327,7 @@ func TestCompileChannelActivationsRejectsDeclaredLearnedCollisionAndContradictio
 	}
 	for _, plans := range [][2]packs.OutboundBindingPlan{{declaredPlan, learnedPlan}, {learnedPlan, declaredPlan}} {
 		declared := channelonboarding.CompiledActivation{Source: channelonboarding.ActivationSourceDeclared, Coordinate: coordinate, Plan: plans[0], CredentialAdmissions: admissions}
-		learned := channelonboarding.CompiledActivation{Source: channelonboarding.ActivationSourceLearned, OnboardingOperationID: "collision-operation", Coordinate: coordinate, ActivationRevision: 1, Plan: plans[1], CredentialAdmissions: admissions}
+		learned := channelonboarding.CompiledActivation{Source: channelonboarding.ActivationSourceLearned, OnboardingOperationID: "collision-operation", OnboardingRevision: 1, Coordinate: coordinate, ActivationRevision: 1, Plan: plans[1], CredentialAdmissions: admissions}
 		if _, err := channelonboarding.MergeCompiledActivations([]channelonboarding.CompiledActivation{declared}, []channelonboarding.CompiledActivation{learned}); err == nil || !strings.Contains(err.Error(), "target collision") {
 			t.Fatalf("declared/learned target collision error = %v", err)
 		}
@@ -397,6 +397,7 @@ func TestChannelActivationPublicationGenerationRetainsCompleteNonSecretProvenanc
 		"source and revision": func(value channelonboarding.CompiledActivation) channelonboarding.CompiledActivation {
 			value.Source = channelonboarding.ActivationSourceLearned
 			value.OnboardingOperationID = "publication-provenance-operation"
+			value.OnboardingRevision = 1
 			value.ActivationRevision = 1
 			return value
 		},
@@ -841,8 +842,16 @@ func TestDifferentialMockRegistrationExecutesThroughProviderNeutralLifecycle(t *
 		GenerationID: exposure.ID, Mode: exposure.Mode, PublicOrigin: exposure.PublicOrigin, ListenAddress: exposure.ListenAddress,
 		StartupAuthorityID: startup.GrantID, ObservedAt: exposure.CreatedAt, ExpiresAt: exposure.CreatedAt.Add(runtimepublicingress.EvidenceTTL),
 	})
+	onboardingID := uuid.NewString()
+	coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
+		BundleHash: "bundle-v1:sha256:" + strings.Repeat("e", 64), BundleSource: "persisted",
+		BundleIdentity: "bundle:test@sha256:mock-registration", PackInventoryGeneration: "sha256:mock-registration-inventory",
+		RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1,
+		PlanGeneration: planGeneration, TargetGeneration: 1,
+	}
 	pair := runtimepublicingress.RegistrationPair{
-		BindingID: "mock-hitl", PlanGeneration: planGeneration, OnboardingOperationID: "test-prebinding-mock-hitl", PrebindingOperationID: "test-prebinding-mock-hitl", Registration: registration,
+		BindingID: "mock-hitl", PlanGeneration: planGeneration, OnboardingOperationID: onboardingID, OnboardingRevision: 1,
+		OnboardingCoordinate: coordinate, PrebindingOperationID: onboardingID, Registration: registration,
 		CredentialKeys: map[string]string{"mock_api_key": "api"},
 		Target: runtimepublicingress.RegistrationTarget{
 			Selector: "ingress:support:mock:mock", BundleHash: "bundle-v1:sha256:" + strings.Repeat("e", 64),

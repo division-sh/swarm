@@ -49,6 +49,8 @@ type RegistrationPair struct {
 	PlanGeneration              plangeneration.Generation
 	ActivationSource            channelonboarding.ActivationSource
 	OnboardingOperationID       string
+	OnboardingRevision          int64
+	OnboardingCoordinate        channelonboarding.ChannelRuntimeContextCoordinate
 	ChannelActivationGeneration channelonboarding.ChannelActivationGeneration
 	PrebindingOperationID       string
 	Registration                packs.CompiledChannelRegistration
@@ -170,7 +172,7 @@ func (c *ProviderRegistrationController) StartupCurrent(ctx context.Context, exp
 	if startup.GrantID != strings.TrimSpace(expectedAuthorityID) {
 		return false, nil
 	}
-	authority := serveRegistrationAuthority(startup, uuid.NewString(), c.opts.Posture, c.opts.Now())
+	authority := serveRegistrationAuthority(startup, uuid.NewString(), c.opts.Posture, c.opts.Now(), RegistrationPair{})
 	return c.opts.EffectsStore.IsExternalEffectAuthorityCurrent(ctx, authority)
 }
 
@@ -417,7 +419,7 @@ func (c *ProviderRegistrationController) reconcilePair(ctx context.Context, expo
 	}
 	if state.LastVerified != nil && state.LastVerified.BaseFingerprint == candidate.base {
 		intent := cloneRegistrationIntent(*state.LastVerified)
-		intent.Authority = serveRegistrationAuthority(startup, intent.IntentID, c.opts.Posture, c.opts.Now())
+		intent.Authority = serveRegistrationAuthority(startup, intent.IntentID, c.opts.Posture, c.opts.Now(), candidate.pair)
 		state.LastVerified = &intent
 		state.Attempt = nil
 		state.Phase = registrationPhaseVerified
@@ -451,7 +453,7 @@ func (c *ProviderRegistrationController) newRegistrationIntent(exposure Generati
 	return registrationIntent{
 		BaseFingerprint: candidate.base, ExposureGenerationID: exposure.ID,
 		IntentID: intentID, CallbackToken: token, CallbackURL: callbackURL, SlotID: candidate.slotID,
-		Authority:        serveRegistrationAuthority(startup, intentID, c.opts.Posture, c.opts.Now()),
+		Authority:        serveRegistrationAuthority(startup, intentID, c.opts.Posture, c.opts.Now(), candidate.pair),
 		CredentialEpochs: candidateCredentialEpochs(candidate),
 	}, nil
 }
@@ -463,7 +465,7 @@ func (c *ProviderRegistrationController) launchAttempt(ctx context.Context, expo
 	}
 	intent := cloneRegistrationIntent(state.Attempt.Intent)
 	intent.ExposureGenerationID = exposure.ID
-	intent.Authority = serveRegistrationAuthority(startup, intent.IntentID, c.opts.Posture, c.opts.Now())
+	intent.Authority = serveRegistrationAuthority(startup, intent.IntentID, c.opts.Posture, c.opts.Now(), candidate.pair)
 	state.Attempt.Intent = intent
 	state.Phase = registrationPhasePrelaunch
 	state.Failure = ""
@@ -875,13 +877,19 @@ func candidateCredentialEpochs(candidate admittedPair) map[string]string {
 	return out
 }
 
-func serveRegistrationAuthority(startup runtimestartupownership.GrantEvidence, intentID string, posture executionposture.Posture, now time.Time) runtimeeffects.Authority {
+func serveRegistrationAuthority(startup runtimestartupownership.GrantEvidence, intentID string, posture executionposture.Posture, now time.Time, pair RegistrationPair) runtimeeffects.Authority {
+	coordinate := pair.OnboardingCoordinate.Normalized()
 	return runtimeeffects.Authority{
 		Kind: runtimeeffects.AuthorityServeRegistration, ID: strings.TrimSpace(intentID),
 		ExecutionOwner: startup.ProcessOwnerID, LeaseExpiresAt: now.UTC().Add(5 * time.Minute), FenceGeneration: startup.RuntimeGeneration,
 		ExecutionMode: runtimeeffects.ExecutionMode(posture.RootMode()),
 		ServeRegistration: runtimeeffects.ServeRegistrationAuthority{
 			IntentID: strings.TrimSpace(intentID), StartupAuthorityID: startup.GrantID, StartupStateVersion: startup.StateVersion,
+			OnboardingOperationID: strings.TrimSpace(pair.OnboardingOperationID), OnboardingRevision: pair.OnboardingRevision,
+			BundleHash: coordinate.BundleHash, BundleSource: coordinate.BundleSource, BundleIdentity: coordinate.BundleIdentity,
+			PackInventoryGeneration: coordinate.PackInventoryGeneration, RuntimeInstanceID: coordinate.RuntimeInstanceID,
+			ContextPublicationGeneration: coordinate.ContextPublicationGeneration, PlanGeneration: coordinate.PlanGeneration,
+			TargetGeneration: coordinate.TargetGeneration,
 		},
 	}
 }

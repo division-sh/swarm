@@ -170,9 +170,19 @@ type StartupProbeAuthority struct {
 }
 
 type ServeRegistrationAuthority struct {
-	IntentID            string
-	StartupAuthorityID  string
-	StartupStateVersion uint64
+	IntentID                     string
+	StartupAuthorityID           string
+	StartupStateVersion          uint64
+	OnboardingOperationID        string
+	OnboardingRevision           int64
+	BundleHash                   string
+	BundleSource                 string
+	BundleIdentity               string
+	PackInventoryGeneration      string
+	RuntimeInstanceID            string
+	ContextPublicationGeneration uint64
+	PlanGeneration               plangeneration.Generation
+	TargetGeneration             uint64
 }
 
 type ChannelConfirmationAuthority struct {
@@ -184,9 +194,13 @@ type ChannelConfirmationAuthority struct {
 	BindingRevision              int64
 	PrincipalID                  string
 	BundleHash                   string
+	BundleSource                 string
+	BundleIdentity               string
+	PackInventoryGeneration      string
 	RuntimeInstanceID            string
 	ContextPublicationGeneration uint64
 	PlanGeneration               plangeneration.Generation
+	TargetGeneration             uint64
 }
 
 type Authority struct {
@@ -244,15 +258,29 @@ func (a Authority) Valid() bool {
 			a.ID == strings.TrimSpace(a.StartupProbe.ProbeID) && a.StartupProbe.StartupStateVersion > 0 &&
 			nonEmpty(a.StartupProbe.ActorID, a.StartupProbe.ExecutionKind, a.StartupProbe.ExecutionAuthorityID)
 	case AuthorityServeRegistration:
-		return validUUIDs(a.ServeRegistration.IntentID, a.ServeRegistration.StartupAuthorityID) &&
-			a.ID == strings.TrimSpace(a.ServeRegistration.IntentID) && a.ServeRegistration.StartupStateVersion > 0
+		registration := a.ServeRegistration
+		if !validUUIDs(registration.IntentID, registration.StartupAuthorityID) ||
+			a.ID != strings.TrimSpace(registration.IntentID) || registration.StartupStateVersion == 0 {
+			return false
+		}
+		if strings.TrimSpace(registration.OnboardingOperationID) == "" {
+			return registration.OnboardingRevision == 0 && registration.BundleHash == "" &&
+				registration.BundleSource == "" && registration.BundleIdentity == "" && registration.PackInventoryGeneration == "" &&
+				registration.RuntimeInstanceID == "" && registration.ContextPublicationGeneration == 0 &&
+				!registration.PlanGeneration.Valid() && registration.TargetGeneration == 0
+		}
+		return validUUIDs(registration.OnboardingOperationID) && registration.OnboardingRevision > 0 &&
+			nonEmpty(registration.BundleHash, registration.BundleSource, registration.BundleIdentity,
+				registration.PackInventoryGeneration, registration.RuntimeInstanceID) &&
+			registration.ContextPublicationGeneration > 0 && registration.PlanGeneration.Valid() && registration.TargetGeneration > 0
 	case AuthorityChannelConfirmation:
 		confirmation := a.ChannelConfirmation
 		return validUUIDs(confirmation.EffectOperationID, confirmation.OnboardingOperationID, confirmation.ActivationID, confirmation.PrincipalID, confirmation.RuntimeInstanceID) &&
 			a.ID == strings.TrimSpace(confirmation.EffectOperationID) && confirmation.OnboardingRevision > 0 &&
 			confirmation.ActivationRevision > 0 && confirmation.BindingRevision > 0 &&
 			confirmation.ContextPublicationGeneration == a.FenceGeneration &&
-			nonEmpty(confirmation.BundleHash) && confirmation.PlanGeneration.Valid()
+			nonEmpty(confirmation.BundleHash, confirmation.BundleSource, confirmation.BundleIdentity,
+				confirmation.PackInventoryGeneration) && confirmation.PlanGeneration.Valid() && confirmation.TargetGeneration > 0
 	default:
 		return false
 	}
@@ -328,6 +356,18 @@ func (a Authority) Evidence() map[string]any {
 		evidence["intent_id"] = a.ServeRegistration.IntentID
 		evidence["startup_authority_id"] = a.ServeRegistration.StartupAuthorityID
 		evidence["startup_state_version"] = a.ServeRegistration.StartupStateVersion
+		if strings.TrimSpace(a.ServeRegistration.OnboardingOperationID) != "" {
+			evidence["onboarding_operation_id"] = a.ServeRegistration.OnboardingOperationID
+			evidence["onboarding_revision"] = a.ServeRegistration.OnboardingRevision
+			evidence["bundle_hash"] = a.ServeRegistration.BundleHash
+			evidence["bundle_source"] = a.ServeRegistration.BundleSource
+			evidence["bundle_identity"] = a.ServeRegistration.BundleIdentity
+			evidence["pack_inventory_generation"] = a.ServeRegistration.PackInventoryGeneration
+			evidence["runtime_instance_id"] = a.ServeRegistration.RuntimeInstanceID
+			evidence["context_publication_generation"] = a.ServeRegistration.ContextPublicationGeneration
+			evidence["plan_generation"] = a.ServeRegistration.PlanGeneration.Diagnostic()
+			evidence["target_generation"] = a.ServeRegistration.TargetGeneration
+		}
 	case AuthorityChannelConfirmation:
 		confirmation := a.ChannelConfirmation
 		evidence["effect_operation_id"] = confirmation.EffectOperationID
@@ -338,9 +378,13 @@ func (a Authority) Evidence() map[string]any {
 		evidence["binding_revision"] = confirmation.BindingRevision
 		evidence["principal_id"] = confirmation.PrincipalID
 		evidence["bundle_hash"] = confirmation.BundleHash
+		evidence["bundle_source"] = confirmation.BundleSource
+		evidence["bundle_identity"] = confirmation.BundleIdentity
+		evidence["pack_inventory_generation"] = confirmation.PackInventoryGeneration
 		evidence["runtime_instance_id"] = confirmation.RuntimeInstanceID
 		evidence["context_publication_generation"] = confirmation.ContextPublicationGeneration
 		evidence["plan_generation"] = confirmation.PlanGeneration.Diagnostic()
+		evidence["target_generation"] = confirmation.TargetGeneration
 	}
 	return evidence
 }

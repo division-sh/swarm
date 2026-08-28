@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/packs"
@@ -673,8 +674,16 @@ func selectedStoreRegistrationPair(t *testing.T, registration packs.CompiledChan
 	if err != nil {
 		t.Fatalf("plan generation: %v", err)
 	}
+	onboardingID := uuid.NewString()
+	coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
+		BundleHash: testCanonicalBundleHash, BundleSource: "persisted",
+		BundleIdentity: "bundle:test@sha256:selected-store-registration", PackInventoryGeneration: "sha256:selected-store-registration-inventory",
+		RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1,
+		PlanGeneration: planGeneration, TargetGeneration: 1,
+	}
 	return runtimepublicingress.RegistrationPair{
-		BindingID: "selected-store-telegram", PlanGeneration: planGeneration, OnboardingOperationID: "test-prebinding-selected-store-telegram", PrebindingOperationID: "test-prebinding-selected-store-telegram", Registration: registration,
+		BindingID: "selected-store-telegram", PlanGeneration: planGeneration, OnboardingOperationID: onboardingID, OnboardingRevision: 1,
+		OnboardingCoordinate: coordinate, PrebindingOperationID: onboardingID, Registration: registration,
 		CredentialKeys: map[string]string{"telegram_bot_token": "bot"},
 		Target: runtimepublicingress.RegistrationTarget{
 			Selector: "ingress:support:telegram:telegram", BundleHash: testCanonicalBundleHash,

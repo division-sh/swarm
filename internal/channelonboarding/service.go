@@ -88,6 +88,26 @@ type ConfirmationDispatcher interface {
 	DispatchChannelConfirmation(context.Context, ConfirmationRequest) (ConfirmationResult, error)
 }
 
+type EffectRebindDisposition struct {
+	RetryAllowed                bool
+	RemintConfirmationOperation bool
+	BlockingEffectOperationID   string
+	BlockingEffectState         string
+}
+
+type EffectRebindReconciler interface {
+	ReconcileChannelEffectsBeforeRebind(context.Context, Operation) (EffectRebindDisposition, error)
+}
+
+type EffectRetryBlockedError struct {
+	OperationID string
+	State       string
+}
+
+func (e *EffectRetryBlockedError) Error() string {
+	return fmt.Sprintf("channel effect %s is %s; refusing blind retry", strings.TrimSpace(e.OperationID), strings.TrimSpace(e.State))
+}
+
 type ReadinessProjector interface {
 	ProjectConnectedChannelReadiness(context.Context, Operation, Candidate) (ConnectedChannelReadiness, bool, error)
 }
@@ -127,6 +147,7 @@ type Service struct {
 	catalog      CatalogProvider
 	activations  ActivationRefresher
 	confirmation ConfirmationDispatcher
+	effects      EffectRebindReconciler
 	readiness    ReadinessProjector
 	now          func() time.Time
 	secret       func() (string, error)
@@ -157,6 +178,10 @@ func NewService(opts ServiceOptions) (*Service, error) {
 	if opts.Store == nil || opts.Identities == nil || opts.Credentials == nil || opts.Catalog == nil || opts.Activations == nil || opts.Confirmation == nil || opts.Readiness == nil {
 		return nil, fmt.Errorf("channel onboarding service requires store, identity, credential, catalog, activation, confirmation, and readiness owners")
 	}
+	effects, ok := opts.Confirmation.(EffectRebindReconciler)
+	if !ok {
+		return nil, fmt.Errorf("channel onboarding confirmation owner must reconcile durable effects before retry or rebind")
+	}
 	if opts.Now == nil {
 		opts.Now = func() time.Time { return time.Now().UTC() }
 	}
@@ -165,7 +190,7 @@ func NewService(opts ServiceOptions) (*Service, error) {
 	}
 	return &Service{
 		store: opts.Store, identities: opts.Identities, credentials: opts.Credentials, catalog: opts.Catalog,
-		activations: opts.Activations, confirmation: opts.Confirmation, readiness: opts.Readiness, now: opts.Now, secret: opts.Secret,
+		activations: opts.Activations, confirmation: opts.Confirmation, effects: effects, readiness: opts.Readiness, now: opts.Now, secret: opts.Secret,
 	}, nil
 }
 
@@ -426,6 +451,10 @@ func (s *Service) ReconcileLocal(ctx context.Context) error {
 		}
 		op, candidate, err := s.bindCurrentCandidate(context.WithoutCancel(ctx), op)
 		if err != nil {
+			var blocked *EffectRetryBlockedError
+			if errors.As(err, &blocked) {
+				continue
+			}
 			if op.Phase.Terminal() {
 				continue
 			}
@@ -546,6 +575,10 @@ func (s *Service) Recover(ctx context.Context) error {
 		}
 		rebound, candidate, err := s.bindCurrentCandidate(context.WithoutCancel(ctx), op)
 		if err != nil {
+			var blocked *EffectRetryBlockedError
+			if errors.As(err, &blocked) {
+				continue
+			}
 			if errors.Is(err, errOnboardingRuntimeContextRetired) {
 				_, failErr := s.failOperation(
 					context.WithoutCancel(ctx),
@@ -1117,18 +1150,48 @@ func (s *Service) bindCurrentCandidate(ctx context.Context, op Operation) (Opera
 	if err != nil {
 		return op, Candidate{}, err
 	}
-	if op.Coordinate.Matches(candidate.Coordinate) {
-		return op, candidate, nil
+	disposition := EffectRebindDisposition{RetryAllowed: true}
+	if phaseMayOwnExternalEffect(op.Phase) {
+		disposition, err = s.effects.ReconcileChannelEffectsBeforeRebind(context.WithoutCancel(ctx), op)
+		if err != nil {
+			return op, Candidate{}, fmt.Errorf("reconcile onboarding operation %s effects before retry or rebind: %w", op.OperationID, err)
+		}
 	}
-	coordinate := candidate.Coordinate
-	rebound, err := s.store.AdvanceChannelOnboarding(context.WithoutCancel(ctx), AdvanceRequest{
-		OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: op.Phase,
-		RebindCoordinate: &coordinate, Now: s.now().UTC(),
-	})
-	if err != nil {
-		return op, Candidate{}, fmt.Errorf("rebind onboarding operation %s to current runtime occurrence: %w", op.OperationID, err)
+	if !disposition.RetryAllowed {
+		return op, candidate, &EffectRetryBlockedError{
+			OperationID: disposition.BlockingEffectOperationID,
+			State:       disposition.BlockingEffectState,
+		}
+	}
+	rebound := op
+	if !op.Coordinate.Matches(candidate.Coordinate) {
+		coordinate := candidate.Coordinate
+		rebound, err = s.store.AdvanceChannelOnboarding(context.WithoutCancel(ctx), AdvanceRequest{
+			OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: op.Phase,
+			RebindCoordinate: &coordinate, ClearConfirmationOperationID: disposition.RemintConfirmationOperation,
+			Now: s.now().UTC(),
+		})
+		if err != nil {
+			return op, Candidate{}, fmt.Errorf("rebind onboarding operation %s to current runtime occurrence: %w", op.OperationID, err)
+		}
 	}
 	return rebound, candidate, nil
+}
+
+func phaseMayOwnExternalEffect(phase Phase) bool {
+	switch phase {
+	case PhaseActivatingProvider,
+		PhaseAwaitingExternalIdentity,
+		PhaseAwaitingOperatorConfirmation,
+		PhasePublishingActivation,
+		PhasePublishingProcessActivation,
+		PhasePromotingRegistration,
+		PhaseRetiringPredecessor,
+		PhaseDeliveringConfirmation:
+		return true
+	default:
+		return false
+	}
 }
 
 func historicalCandidate(op Operation) Candidate {

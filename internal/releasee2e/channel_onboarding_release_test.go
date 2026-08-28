@@ -61,7 +61,7 @@ func TestChannelOnboardingReleaseBinaryJourneys(t *testing.T) {
 	start := func() *releaseServeProcess {
 		process := startReleaseServe(t, releaseProcessSpec{
 			BinaryPath: binaryPath, WorkingDir: root, ConfigPath: configPath, Contracts: contracts,
-			Store: "sqlite", Dev: true, APIPort: apiPort, MCPPort: mcpPort,
+			Store: "sqlite", APIPort: apiPort, MCPPort: mcpPort,
 			PublicWebhookBaseURL: "https://" + releaseChannelPublicHost, PublicWebhookListen: publicListen,
 			TokenFile: tokenFile, Token: releaseChannelAPIToken, Env: env,
 		})
