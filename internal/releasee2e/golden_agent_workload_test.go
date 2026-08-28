@@ -355,15 +355,18 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 	process := start()
 	bundleHash := goldenServedBundleHash(t, process.rpc)
 	runID := goldenPublishIngress(t, process.rpc, bundleHash, options.candidateIDs)
+	var preRestartRuntimeLog *goldenRuntimeLog
 	if restart {
 		waitForGoldenCrashCheckpoint(t, process.rpc, runID, options.candidateIDs, runDeadline)
+		log := waitForGoldenPreRestartRuntimeLog(t, process.rpc, runID, runDeadline)
+		preRestartRuntimeLog = &log
 		if err := process.killAndWait(5 * time.Second); err != nil {
 			t.Fatalf("force-kill release serve: %v\n%s", err, process.output.String())
 		}
 		process = start()
 	}
 	waitForGoldenTerminalRun(t, process, store, runID, runDeadline)
-	assertGoldenPublicProof(t, process.rpc, runID, restart, options.candidateIDs)
+	assertGoldenPublicProof(t, process.rpc, runID, restart, options.candidateIDs, preRestartRuntimeLog)
 }
 
 func assertGoldenFixtureHasSingleMockOwner(t *testing.T) {
@@ -680,6 +683,61 @@ type goldenEvent struct {
 	DeadLetters []json.RawMessage     `json:"dead_letters"`
 }
 
+type goldenRuntimeLog struct {
+	LogID         string `json:"log_id"`
+	TS            string `json:"ts"`
+	Level         string `json:"level"`
+	Component     string `json:"component"`
+	Source        string `json:"source"`
+	RunID         string `json:"run_id"`
+	EntityID      string `json:"entity_id"`
+	SessionID     string `json:"session_id"`
+	Message       string `json:"message"`
+	EventID       string `json:"event_id"`
+	Action        string `json:"action"`
+	EventType     string `json:"event_type"`
+	ParentEventID string `json:"parent_event_id"`
+	AgentID       string `json:"agent_id"`
+}
+
+func waitForGoldenPreRestartRuntimeLog(t *testing.T, rpc *releaseRPCClient, runID string, deadline time.Duration) goldenRuntimeLog {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), deadline)
+	defer cancel()
+	var last []goldenRuntimeLog
+	var selected goldenRuntimeLog
+	err := pollReleaseCondition(ctx, 5*time.Millisecond, func() (bool, error) {
+		var result struct {
+			Logs []goldenRuntimeLog `json:"logs"`
+		}
+		if err := rpc.call(ctx, "runtime.logs", map[string]any{"run_id": runID, "component": "agent-manager", "limit": 100, "order": "asc"}, &result); err != nil {
+			return false, err
+		}
+		last = result.Logs
+		for _, log := range result.Logs {
+			if log.Action != "delivery_lifecycle_transition" {
+				continue
+			}
+			if log.LogID == "" || log.RunID != runID || log.EventID == "" || log.ParentEventID == "" || log.Source == "" || log.AgentID == "" {
+				continue
+			}
+			selected = log
+			return true, nil
+		}
+		return false, nil
+	})
+	if err != nil {
+		t.Fatalf("wait for pre-restart durable runtime log: %v; last logs=%#v", err, last)
+	}
+	if selected.ParentEventID != selected.EventID {
+		t.Fatalf("pre-restart runtime log lineage = parent %q event %q, want exact subject-event parent", selected.ParentEventID, selected.EventID)
+	}
+	if selected.Source != selected.AgentID {
+		t.Fatalf("pre-restart runtime log source = %q, want exact agent source %q", selected.Source, selected.AgentID)
+	}
+	return selected
+}
+
 type goldenEventDelivery struct {
 	DeliveryID     string               `json:"delivery_id"`
 	SubscriberType string               `json:"subscriber_type"`
@@ -784,7 +842,7 @@ type goldenConversation struct {
 	Status        string `json:"status"`
 }
 
-func assertGoldenPublicProof(t *testing.T, rpc *releaseRPCClient, runID string, restarted bool, candidateIDs []string) {
+func assertGoldenPublicProof(t *testing.T, rpc *releaseRPCClient, runID string, restarted bool, candidateIDs []string, preRestartRuntimeLog *goldenRuntimeLog) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -794,6 +852,9 @@ func assertGoldenPublicProof(t *testing.T, rpc *releaseRPCClient, runID string, 
 	}
 	if diagnosis.Run.Status != "completed" || !diagnosis.TestQuiescence.Ready || goldenActiveWork(diagnosis.TestQuiescence) != 0 || len(diagnosis.FailedDeliveries) != 0 {
 		t.Fatalf("run.diagnose = %#v, want completed, quiescent, and failure-free (restarted=%t)", diagnosis, restarted)
+	}
+	if restarted {
+		assertGoldenRestartedRuntimeLog(t, ctx, rpc, runID, preRestartRuntimeLog)
 	}
 
 	entities := listGoldenEntities(t, ctx, rpc, runID)
@@ -852,6 +913,29 @@ func assertGoldenPublicProof(t *testing.T, rpc *releaseRPCClient, runID string, 
 			assertGoldenDeliveryTarget(t, event, delivery)
 		}
 	}
+}
+
+func assertGoldenRestartedRuntimeLog(t *testing.T, ctx context.Context, rpc *releaseRPCClient, runID string, expected *goldenRuntimeLog) {
+	t.Helper()
+	if expected == nil {
+		t.Fatal("forced-restart proof is missing its pre-restart runtime log fact")
+	}
+	var result struct {
+		Logs []goldenRuntimeLog `json:"logs"`
+	}
+	if err := rpc.call(ctx, "runtime.logs", map[string]any{"run_id": runID, "component": expected.Component, "source": expected.Source, "limit": 100, "order": "asc"}, &result); err != nil {
+		t.Fatalf("read durable runtime logs after restart: %v", err)
+	}
+	for _, log := range result.Logs {
+		if log.LogID != expected.LogID {
+			continue
+		}
+		if !reflect.DeepEqual(log, *expected) {
+			t.Fatalf("post-restart runtime log = %#v, want exact pre-restart fact %#v", log, *expected)
+		}
+		return
+	}
+	t.Fatalf("post-restart runtime logs = %#v, want pre-restart fact %s with source %s and parent %s", result.Logs, expected.LogID, expected.Source, expected.ParentEventID)
 }
 
 func assertGoldenNoDelivery(t *testing.T, event goldenEvent) {

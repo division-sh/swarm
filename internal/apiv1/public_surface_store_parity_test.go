@@ -168,6 +168,17 @@ func TestPublicSurfaceStoreParityRejectsCoverageDrift(t *testing.T) {
 			want: "selected purpose authority_inspection has no catalog-scoped proof for claim event_delivery",
 		},
 		{
+			name: "optional product claim borrows generic runtime projection",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				purpose := storeParityPurposeByID(t, matrix, "runtime")
+				purpose.ProofIDs = storeParityStringsExcept(purpose.ProofIDs, "bundle-delete-postgres")
+				purpose.ProofIDs = storeParityStringsExcept(purpose.ProofIDs, "sqlite-optional-mutators-fail-closed")
+				projection := storeParityProofByID(t, matrix, "runtime-port-projection")
+				projection.Capabilities = append(projection.Capabilities, publicSurfaceStoreProofCapability{ClaimID: "bundle_delete"})
+			},
+			want: "selected purpose runtime optional-product claim bundle_delete has no catalog-scoped execution proof",
+		},
+		{
 			name: "required port",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
 				storeParityClaimByID(t, matrix, "store_infrastructure").RequiredPorts = []string{"schema", "workspace"}
@@ -1074,16 +1085,35 @@ func validatePublicSurfaceSelectedPurposes(purposes []publicSurfaceSelectedPurpo
 		}
 		for _, claimID := range claimIDs {
 			owned := false
+			executionOwned := false
+			evidenceProofIDs := publicSurfaceStoreParityEvidenceProofIDs(claims[claimID].Evidence)
 			for _, proofID := range purpose.ProofIDs {
 				proof, ok := proofs[proofID]
-				owned = owned || (ok && publicSurfaceHasValue(proof.PurposeIDs, purposeID) && findPublicSurfaceStoreProofCapability(proof, claimID) != nil)
+				proofOwnsClaim := ok && publicSurfaceHasValue(proof.PurposeIDs, purposeID) && findPublicSurfaceStoreProofCapability(proof, claimID) != nil
+				owned = owned || proofOwnsClaim
+				_, isExecutionEvidence := evidenceProofIDs[proofID]
+				executionOwned = executionOwned || (proofOwnsClaim && isExecutionEvidence)
 			}
 			if !owned {
 				problems = append(problems, fmt.Sprintf("selected purpose %s has no catalog-scoped proof for claim %s", purposeID, claimID))
 			}
+			claim := claims[claimID]
+			if len(claim.OptionalProducts) > 0 && len(claim.RequiredPorts) == 0 && len(claim.RuntimeDeps) == 0 && !executionOwned {
+				problems = append(problems, fmt.Sprintf("selected purpose %s optional-product claim %s has no catalog-scoped execution proof", purposeID, claimID))
+			}
 		}
 	}
 	return problems
+}
+
+func publicSurfaceStoreParityEvidenceProofIDs(evidence []publicSurfaceStoreParityEvidence) map[string]struct{} {
+	proofIDs := map[string]struct{}{}
+	for _, record := range evidence {
+		for _, proofID := range record.ProofIDs {
+			proofIDs[proofID] = struct{}{}
+		}
+	}
+	return proofIDs
 }
 
 func validatePublicSurfaceSelectedPurposeProofIDs(label, purposeID string, proofIDs []string, proofs map[string]publicSurfaceStoreParityProof) []string {
