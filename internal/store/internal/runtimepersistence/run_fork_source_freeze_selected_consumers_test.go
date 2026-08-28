@@ -14,7 +14,7 @@ type forkedSelectedExecutionSurface interface {
 }
 
 func TestForkedRunSelectedContractExecutionRefusesAdmissionAndAllowsExactFinalization(t *testing.T) {
-	for _, backend := range []string{"postgres"} {
+	for _, backend := range []string{"sqlite", "postgres"} {
 		t.Run(backend, func(t *testing.T) {
 			var surface forkedSelectedExecutionSurface
 			var fixture selectedCompletionFixture
