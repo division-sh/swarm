@@ -276,6 +276,72 @@ func TestChannelProofRevokeRecoveryResumesAfterAuthorityRetirement(t *testing.T)
 	}
 }
 
+func TestChannelProofRevokeRecoveryReplaysCommittedProofFileBeforeResponsibilityCompletion(t *testing.T) {
+	ctx := context.Background()
+	identity := testTeardownInterface()
+	now := testTeardownNow()
+	proofs, err := operatorchannel.NewFileProofStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof := operatorchannel.VerifiedProof{
+		Format: operatorchannel.ProofFormat, ProofID: operatorchannel.ProofIDForInterface(identity), Revision: 2,
+		Status: operatorchannel.ProofActive, Interface: identity, ExternalAccountRef: "account-a",
+		ConversationRef: "conversation-a", ConversationScope: operatorchannel.ConversationScopeDirect,
+		Method: "manual", Challenge: operatorchannel.ChallengePrefix + "AAAAAAAAAAAAAAAA",
+		OriginalOperationID: "proof-operation-a", MintingStoreID: "store-a", MintingDeploymentID: "deployment-a",
+		VerifiedAt: now, OperatorConfirmed: true, ConsentScopes: []operatorchannel.ConsentScope{operatorchannel.ConsentNotify},
+	}
+	if err := proofs.Put(ctx, proof); err != nil {
+		t.Fatal(err)
+	}
+	responsibilityFailure := errors.New("proof responsibility unavailable")
+	operatorStore := &proofReplayOperatorStore{
+		principal: operatorchannel.Principal{ID: "11111111-1111-4111-8111-111111111111", CreatedAt: now},
+		operations: []operatorchannel.Operation{{
+			OperationID: "proof-operation-a", PrincipalID: "11111111-1111-4111-8111-111111111111",
+			Interface: identity, State: operatorchannel.StateBound, ProofID: proof.ProofID, ProofRevision: proof.Revision,
+		}},
+		completionFailure: responsibilityFailure,
+	}
+	identities, err := operatorchannel.NewService(operatorStore, proofs, []operatorchannel.InterfaceIdentity{identity}, "deployment-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := identities.Bootstrap(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := identities.RevokeProof(ctx, identity.Selector, proof.Revision, now.Add(time.Minute)); !errors.Is(err, responsibilityFailure) {
+		t.Fatalf("first proof revoke error = %v, want responsibility failure", err)
+	}
+	committed, found, err := proofs.Get(ctx, identity)
+	if err != nil || !found || committed.Status != operatorchannel.ProofRevoked || committed.Revision != proof.Revision+1 {
+		t.Fatalf("committed proof after responsibility failure = %#v, found=%v, err=%v", committed, found, err)
+	}
+
+	calls := []string{}
+	teardowns := &recordingTeardownStore{calls: &calls, operations: []TeardownOperation{{
+		TeardownID: "teardown-a", RequestKeyHash: "revoke-key", RequestHash: "revoke-hash",
+		Kind: TeardownProofRevoke, PrincipalID: operatorStore.principal.ID, Scope: TeardownScope{Interface: identity},
+		ExpectedProofRevision: proof.Revision, Phase: TeardownAuthorityRetired, Revision: 2,
+		RequestedAt: now, UpdatedAt: now,
+	}}}
+	destructive, err := NewDestructiveService(teardowns, identities, recordingCredentialReleaser{}, recordingActivationRefresher{calls: &calls}, testTeardownNow, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := destructive.Recover(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if teardowns.operations[0].Phase != TeardownSucceeded || operatorStore.completionCalls != 2 {
+		t.Fatalf("recovery teardown=%s responsibility completions=%d, want succeeded/2", teardowns.operations[0].Phase, operatorStore.completionCalls)
+	}
+	replayed, found, err := proofs.Get(ctx, identity)
+	if err != nil || !found || !reflect.DeepEqual(replayed, committed) {
+		t.Fatalf("replayed proof = %#v, found=%v, err=%v; want %#v", replayed, found, err, committed)
+	}
+}
+
 func testTeardownInterface() operatorchannel.InterfaceIdentity {
 	return operatorchannel.InterfaceIdentity{
 		InterfaceRef:  operatorchannel.InterfaceHITLChannelV2,
@@ -292,6 +358,44 @@ type recordingTeardownStore struct {
 	cancelAfterReserve context.CancelFunc
 	sawCanceledContext bool
 	onboarding         []Operation
+}
+
+type proofReplayOperatorStore struct {
+	operatorchannel.Store
+	principal         operatorchannel.Principal
+	operations        []operatorchannel.Operation
+	completionFailure error
+	completionCalls   int
+}
+
+func (s *proofReplayOperatorStore) EnsureOperatorPrincipal(context.Context, time.Time) (operatorchannel.Principal, error) {
+	return s.principal, nil
+}
+
+func (s *proofReplayOperatorStore) BindOperatorChannelFromProof(_ context.Context, req operatorchannel.BootBindRequest) (operatorchannel.Binding, error) {
+	return operatorchannel.Binding{PrincipalID: req.PrincipalID, Interface: req.Interface, Revision: 1, Status: operatorchannel.BindingCurrent}, nil
+}
+
+func (s *proofReplayOperatorStore) ListOperatorChannelOperations(context.Context, string) ([]operatorchannel.Operation, error) {
+	return append([]operatorchannel.Operation(nil), s.operations...), nil
+}
+
+func (s *proofReplayOperatorStore) ListOperatorChannelBindings(context.Context, string) ([]operatorchannel.Binding, error) {
+	return nil, nil
+}
+
+func (s *proofReplayOperatorStore) ListPendingProofResponsibilities(context.Context) ([]operatorchannel.ProofResponsibility, error) {
+	return nil, nil
+}
+
+func (s *proofReplayOperatorStore) CompleteProofResponsibility(context.Context, string, string, int64, operatorchannel.ProofStatus, string, time.Time) error {
+	s.completionCalls++
+	if s.completionFailure != nil {
+		err := s.completionFailure
+		s.completionFailure = nil
+		return err
+	}
+	return nil
 }
 
 func (s *recordingTeardownStore) ListChannelOnboardingOperations(ctx context.Context) ([]Operation, error) {
