@@ -69,6 +69,10 @@ func gateSpecString(spec *runtimecontracts.GateSpec) string {
 func handlerExecutionPlanFromNodeHandler(source interface {
 	FanOutPlansForHandler(runtimeidentity.ExecutableNode, string) []runtimecontracts.FanOutCompiledPlan
 }, node runtimeidentity.ExecutableNode, eventType string, handler runtimecontracts.SystemNodeEventHandler) handlerExecutionPlan {
+	var fanOutPlans []runtimecontracts.FanOutCompiledPlan
+	if source != nil {
+		fanOutPlans = source.FanOutPlansForHandler(node, strings.TrimSpace(eventType))
+	}
 	plan := handlerExecutionPlan{
 		Node:             node,
 		EventType:        strings.TrimSpace(eventType),
@@ -82,7 +86,7 @@ func handlerExecutionPlanFromNodeHandler(source interface {
 		ConfigFrom:       handler.Action.ConfigFrom,
 		Accumulate:       handler.Accumulate,
 		Compute:          handler.Compute,
-		FanOutPlans:      source.FanOutPlansForHandler(node, strings.TrimSpace(eventType)),
+		FanOutPlans:      fanOutPlans,
 		AdvancesTo:       strings.TrimSpace(handler.AdvancesTo),
 		SetsGate:         gateSpecString(handler.SetsGate),
 		ClearGates:       len(handler.ClearGates) > 0,

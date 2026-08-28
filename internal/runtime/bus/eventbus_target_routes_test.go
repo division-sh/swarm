@@ -20,6 +20,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentitytest"
+	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
@@ -732,12 +733,17 @@ func TestEventBusRecipientPlanMaterializerPersistsRoutesBeforeInterceptors(t *te
 }
 
 func TestEventBusRejectsEntitylessOwnershipForCompleteHandlerShapeBeforePersistence(t *testing.T) {
+	fanOutElementID, err := contractelementidentity.ParseContractElementID("00000000-0000-4000-8000-000000002274")
+	if err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
 		name    string
 		handler runtimecontracts.SystemNodeEventHandler
 	}{
 		{name: "fan out", handler: runtimecontracts.SystemNodeEventHandler{FanOut: &runtimecontracts.FanOutSpec{
-			ItemsFrom: "entity.items", As: "item", Identity: "item.id", Emit: runtimecontracts.EmitSpec{Event: "item.ready", From: "payload"},
+			ElementID: fanOutElementID,
+			ItemsFrom: "entity.items", As: "row_item", Identity: "row_item", Emit: runtimecontracts.EmitSpec{Event: "item.ready"},
 		}}},
 		{name: "group by", handler: runtimecontracts.SystemNodeEventHandler{GroupBy: &runtimecontracts.GroupBySpec{
 			ItemsFrom: "entity.items", Key: "item.kind", StoreAs: "computed.groups",
@@ -1357,7 +1363,9 @@ func materializedTargetBundleWithHandler(t *testing.T, flowID, nodeID, eventType
 	flow := runtimecontracts.FlowContractView{
 		Path: flowID, Paths: runtimecontracts.FlowContractPaths{ID: flowID, Flow: flowID},
 		Schema: runtimecontracts.FlowSchemaDocument{Mode: "template"},
-		Events: map[string]runtimecontracts.EventCatalogEntry{eventType: {}},
+		Events: map[string]runtimecontracts.EventCatalogEntry{eventType: {}, "item.ready": {
+			Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"item": {Type: "text"}}},
+		}},
 		Nodes: map[string]runtimecontracts.SystemNodeContract{
 			nodeID: {
 				ID: nodeID, ExecutionType: "system_node", SubscribesTo: []string{eventType},
@@ -1375,10 +1383,16 @@ func materializedTargetBundleWithHandler(t *testing.T, flowID, nodeID, eventType
 	admitted := loadTargetRouteTempBundle(t, map[string]string{
 		"package.yaml": fmt.Sprintf("name: target-route-test\nversion: 1.0.0\nflows:\n  - id: %s\n    flow: %s\n    mode: template\n", flowID, flowID),
 		filepath.Join("flows", flowID, "schema.yaml"):   fmt.Sprintf("name: %s\nmode: template\ninitial_state: active\nstates: [active]\n", flowID),
-		filepath.Join("flows", flowID, "entities.yaml"): "test_entity: {}\n",
+		filepath.Join("flows", flowID, "entities.yaml"): "test_entity:\n  items:\n    type: '[text]'\n",
 	})
 	admitted.FlowTree = base.FlowTree
 	admitted.FlowSchemas = base.FlowSchemas
+	if err := runtimecontracts.CompileWorkflowSemantics(admitted); err != nil {
+		t.Fatalf("compile materialized target semantics: %v", err)
+	}
+	if failures := admitted.PrepareFanOutPlans(); len(failures) != 0 {
+		t.Fatalf("compile materialized target fan-out plans: %v", failures)
+	}
 	return admitted
 }
 

@@ -19,6 +19,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
@@ -325,15 +326,15 @@ func fanOutMixedRouteBundle() *runtimecontracts.WorkflowContractBundle {
 	outputPins := make([]runtimecontracts.FlowOutputEventPin, 0, len(eventNames))
 	producerEvents := make(map[string]runtimecontracts.EventCatalogEntry, len(eventNames))
 	for _, eventName := range eventNames {
-		outputPins = append(outputPins, runtimecontracts.FlowOutputEventPin{Name: strings.ReplaceAll(eventName, ".", "_"), Event: eventName})
+		outputPins = append(outputPins, runtimecontracts.FlowOutputEventPin{Event: eventName})
 		producerEvents[eventName] = runtimecontracts.EventCatalogEntry{Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{}}}
 	}
 	producerSchema := runtimecontracts.FlowSchemaDocument{
 		Mode: runtimecontracts.FlowModeStatic,
-		Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{Events: append([]string(nil), eventNames...), EventPins: outputPins}},
+		Pins: runtimecontracts.FlowPins{Outputs: runtimecontracts.FlowOutputPins{EventPins: outputPins}},
 	}
 	producer := runtimecontracts.FlowContractView{
-		Path: "producer", Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer"}, Schema: producerSchema, Events: producerEvents,
+		Path: "producer", Paths: runtimecontracts.FlowContractPaths{ID: "producer", Flow: "producer", PackageKey: "."}, Schema: producerSchema, Events: producerEvents,
 	}
 	flow := func(id, mode, eventName string, nodeIDs ...string) runtimecontracts.FlowContractView {
 		handlers := make(map[string]runtimecontracts.SystemNodeContract, len(nodeIDs))
@@ -350,11 +351,11 @@ func fanOutMixedRouteBundle() *runtimecontracts.WorkflowContractBundle {
 		schema := runtimecontracts.FlowSchemaDocument{
 			Mode: mode, Entity: "test_entity", InitialState: "active", States: []string{"active"},
 			Pins: runtimecontracts.FlowPins{Inputs: runtimecontracts.FlowInputPins{
-				Events: []string{eventName}, EventPins: []runtimecontracts.FlowInputEventPin{{Name: strings.ReplaceAll(eventName, ".", "_"), Event: eventName}},
+				EventPins: []runtimecontracts.FlowInputEventPin{{Event: eventName}},
 			}},
 		}
 		return runtimecontracts.FlowContractView{
-			Path: id, Paths: runtimecontracts.FlowContractPaths{ID: id, Flow: id}, Schema: schema, Nodes: handlers,
+			Path: id, Paths: runtimecontracts.FlowContractPaths{ID: id, Flow: id, PackageKey: "."}, Schema: schema, Nodes: handlers,
 		}
 	}
 	one := flow("one", runtimecontracts.FlowModeStatic, "mixed.one", "one-node")
@@ -366,7 +367,12 @@ func fanOutMixedRouteBundle() *runtimecontracts.WorkflowContractBundle {
 		{SourceFile: "package.yaml", SourceLine: 2, Event: "mixed.multi", From: "producer", To: "multi"},
 		{SourceFile: "package.yaml", SourceLine: 3, Event: "mixed.multi", From: "producer", To: "child"},
 	}
-	return &runtimecontracts.WorkflowContractBundle{
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Package: runtimecontracts.ProjectPackageDocument{Name: "mixed-route", Version: "1.0.0"},
+		PackageTree: []runtimecontracts.LoadedProjectPackage{{
+			Key: ".", Paths: runtimecontracts.ProjectPackagePaths{PackageFile: "package.yaml"},
+			Manifest: runtimecontracts.ProjectPackageDocument{Name: "mixed-route", Version: "1.0.0", Connect: connects},
+		}},
 		RootEntities: runtimecontracts.EntityContractsDocument{"test_entity": {Fields: map[string]runtimecontracts.EntityFieldDecl{}}},
 		FlowTree: runtimecontracts.FlowTree{
 			Root: &root,
@@ -377,23 +383,11 @@ func fanOutMixedRouteBundle() *runtimecontracts.WorkflowContractBundle {
 		FlowSchemas: map[string]runtimecontracts.FlowSchemaDocument{
 			"producer": producerSchema, "one": one.Schema, "multi": multi.Schema, "child": child.Schema,
 		},
-		Semantics: runtimecontracts.WorkflowSemanticView{
-			Name: "mixed-route", Version: "1.0.0",
-			FlowInputs:  map[string][]string{"one": {"mixed.one"}, "multi": {"mixed.multi"}, "child": {"mixed.multi"}},
-			FlowOutputs: map[string][]string{"producer": append([]string(nil), eventNames...)},
-			FlowInputEventPins: map[string][]runtimecontracts.FlowInputEventPin{
-				"one": one.Schema.Pins.Inputs.EventPins, "multi": multi.Schema.Pins.Inputs.EventPins, "child": child.Schema.Pins.Inputs.EventPins,
-			},
-			FlowOutputEventPins: map[string][]runtimecontracts.FlowOutputEventPin{"producer": outputPins},
-			CompositionConnects: connects,
-			NodeHandlers: map[string]map[string]runtimecontracts.SystemNodeEventHandler{
-				"one-node":   one.Nodes["one-node"].EventHandlers,
-				"multi-a":    multi.Nodes["multi-a"].EventHandlers,
-				"multi-b":    multi.Nodes["multi-b"].EventHandlers,
-				"child-node": child.Nodes["child-node"].EventHandlers,
-			},
-		},
 	}
+	if err := runtimecontracts.CompileWorkflowSemantics(bundle); err != nil {
+		panic(err)
+	}
+	return bundle
 }
 
 func TestFanOutCardinalityMatrixIsConstantAtTriggerAndExactAfterPumpOnBothStores(t *testing.T) {
@@ -760,9 +754,44 @@ func TestFanOutLifecycleBlocksCompletionAndStopCancelsClaimedSuffixOnBothStores(
 			}
 			terminals := map[string][]string{semanticRunFixtureFlow: {"completed"}}
 			if err := executeRunCompletionCandidateForEvent(ctx, selected, completing.eventID, nil, terminals); err != nil {
-				t.Fatalf("execute blocked completion candidate: %v", err)
+			t.Fatalf("execute blocked completion candidate: %v", err)
 			}
 			assertPortableRunStatus(t, ctx, db, completing.runID, "running", false)
+
+			candidateOwner := selected.(runtimerunlifecycle.OperationOwner)
+			candidateRegistrar := selected.(runtimerunlifecycle.CandidateRegistrar)
+			if disposition, err := candidateOwner.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(completing.runID)); err != nil || disposition != runtimerunlifecycle.CandidateRequested {
+				t.Fatalf("request racing completion candidate = %s/%v", disposition, err)
+			}
+			process := worklifetime.NewProcess()
+			occurrence := newRunLifecycleExecutorOccurrenceForBundle(t, process, completing.bundleHash)
+			runtimeCtx := worklifetime.WithRuntimeOccurrence(ctx, occurrence)
+			intercept := &runLifecycleSameRevisionInterceptStore{
+				delegate:       selected.(runtimerunlifecycle.CandidateStore),
+				firstStarted:   make(chan struct{}),
+				releaseFirst:   make(chan struct{}),
+				secondExecuted: make(chan struct{}),
+			}
+			executor := newRunLifecycleParityExecutorForScope(
+				t,
+				intercept,
+				occurrence,
+				completing.bundleHash,
+				runtimerunlifecycle.NewTerminalCatalog(nil, terminals),
+			)
+			registration, err := candidateRegistrar.RegisterCompletionCandidateSink(
+				runtimeCtx,
+				runtimerunlifecycle.CandidateScope{BundleHash: completing.bundleHash},
+				executor,
+			)
+			if err != nil {
+				t.Fatalf("register racing completion executor: %v", err)
+			}
+			defer registration.Release()
+			if err := executor.Start(runtimeCtx); err != nil {
+				t.Fatalf("start racing completion executor: %v", err)
+			}
+			awaitRunLifecycleSignal(t, intercept.firstStarted, "fan-out-blocked candidate execution")
 
 			_, claim, found, err := owner.ClaimFanOutIntent(ctx, pipeline.FanOutClaimRequest{
 				Owner: "completion-worker", BundleHash: completing.bundleHash, Now: base.Add(time.Second), Lease: time.Minute,
@@ -770,16 +799,17 @@ func TestFanOutLifecycleBlocksCompletionAndStopCancelsClaimedSuffixOnBothStores(
 			if err != nil || !found {
 				t.Fatalf("claim final completion range: found=%v err=%v", found, err)
 			}
-			if _, err := owner.CommitFanOutChunk(ctx, rejectedFanOutChunk(claim, 0, 1, base.Add(2*time.Second))); err != nil {
+			if _, err := owner.CommitFanOutChunk(runtimeCtx, rejectedFanOutChunk(claim, 0, 1, base.Add(2*time.Second))); err != nil {
 				t.Fatalf("close completion fan-out: %v", err)
 			}
-			result, err := executeRunCompletionCandidateForRun(
-				ctx, selected.(runtimerunlifecycle.CandidateStore), completing.bundleHash, completing.runID,
-				runtimerunlifecycle.NewTerminalCatalog(nil, terminals),
-			)
-			if err != nil || result.Outcome != runtimerunlifecycle.OutcomeTerminallyEligible {
-				t.Fatalf("execute unblocked completion candidate = %#v err=%v", result, err)
+			close(intercept.releaseFirst)
+			awaitRunLifecycleSignal(t, intercept.secondExecuted, "fan-out-close same-revision recheck")
+			awaitRunLifecycleState(t, selected.(runLifecycleCandidateParityStore), completing.runID, runtimerunlifecycle.StateCompleted)
+			if err := executor.Retire(context.Background()); err != nil {
+				t.Fatalf("retire racing completion executor: %v", err)
 			}
+			retireRunLifecycleExecutorOccurrence(t, occurrence)
+			retireRunLifecycleProcess(t, process)
 			assertPortableRunStatus(t, ctx, db, completing.runID, "completed", true)
 
 			stopping := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 3, base.Add(10*time.Second))
