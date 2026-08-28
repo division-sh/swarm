@@ -1245,6 +1245,10 @@ func (s *standingServiceAdapter) repairStandingServiceTx(ctx context.Context, tx
 	if err := s.copyStandingEntityStateTx(ctx, tx, current.RunID, nextRunID, candidate.EntityID, now); err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
+	effectiveState := "active"
+	if current.OperatorOverride == "suspended" {
+		effectiveState = "suspended"
+	}
 	if s.isSQLite() {
 		if _, err := tx.ExecContext(ctx, `UPDATE standing_service_generations SET retired_at = ?, retired_reason = ?, retired_by = 'runtime' WHERE service_id = ? AND generation = ? AND retired_at IS NULL`, now, standingRestartAbandonReason, candidate.ServiceID, current.Generation); err != nil {
 			return runtimepipeline.StandingServiceReconciliation{}, err
@@ -1278,12 +1282,13 @@ func (s *standingServiceAdapter) repairStandingServiceTx(ctx context.Context, tx
 			return runtimepipeline.StandingServiceReconciliation{}, err
 		}
 	}
+	if effectiveState == "suspended" {
+		if err := s.setStandingRunPausedTx(ctx, tx, nextRunID, "standing_repair_preserved_suspend", "runtime", now); err != nil {
+			return runtimepipeline.StandingServiceReconciliation{}, err
+		}
+	}
 	if err := s.requestCompletionCandidate(ctx, tx, nextRunID); err != nil {
 		return runtimepipeline.StandingServiceReconciliation{}, err
-	}
-	effectiveState := "active"
-	if current.OperatorOverride == "suspended" {
-		effectiveState = "suspended"
 	}
 	result := standingResult(candidate, nextRunID, nextGeneration, current.PublicationSequence, "repaired", effectiveState, standingRestartAbandonReason)
 	if err := s.insertStandingJournalTx(ctx, tx, result, current.EffectiveState, "runtime", now); err != nil {
