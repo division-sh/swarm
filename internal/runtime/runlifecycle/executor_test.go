@@ -99,12 +99,423 @@ func TestExecutorRepresentsCandidateAcrossStartupEnumerationOverlap(t *testing.T
 	retireExecutorTestSubject(t, executor, occurrence)
 }
 
+func TestExecutorSameRevisionHandoffDuringAttemptForcesSerializedRecheck(t *testing.T) {
+	for _, outcome := range []CompletionOutcome{
+		OutcomeAwaitMutation,
+		OutcomeExactNoop,
+		OutcomeTerminallyEligible,
+	} {
+		outcome := outcome
+		t.Run(string(outcome), func(t *testing.T) {
+			candidate := executorTestCandidate(1)
+			firstStarted := make(chan struct{})
+			releaseFirst := make(chan struct{})
+			secondCompleted := make(chan struct{})
+			var calls atomic.Int64
+			store := &executorTestStore{
+				list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
+					return CandidatePage{Exhausted: true}, nil
+				},
+				execute: func(context.Context, Candidate, TerminalCatalog) (CompletionResult, error) {
+					switch calls.Add(1) {
+					case 1:
+						close(firstStarted)
+						<-releaseFirst
+					case 2:
+						close(secondCompleted)
+					}
+					return CompletionResult{Outcome: outcome}, nil
+				},
+			}
+			executor, occurrence := newExecutorTestSubject(t, store, ExecutorOptions{})
+			if err := executor.Start(context.Background()); err != nil {
+				t.Fatalf("start executor: %v", err)
+			}
+			if err := executor.SubmitCompletionCandidate(context.Background(), candidate); err != nil {
+				t.Fatalf("submit first candidate: %v", err)
+			}
+			receiveSignal(t, firstStarted, "first candidate attempt")
+			if err := executor.SubmitCompletionCandidate(context.Background(), candidate); err != nil {
+				t.Fatalf("submit same-revision handoff: %v", err)
+			}
+			close(releaseFirst)
+			receiveSignal(t, secondCompleted, "same-revision recheck")
+			awaitExecutorCandidates(t, executor, 0)
+			if got := calls.Load(); got != 2 {
+				t.Fatalf("candidate executions = %d, want 2", got)
+			}
+			retireExecutorTestSubject(t, executor, occurrence)
+		})
+	}
+}
+
+func TestExecutorSameRevisionHandoffAfterResultBeforeRemovalForcesRecheck(t *testing.T) {
+	candidate := executorTestCandidate(1)
+	handoffResult := make(chan error, 1)
+	secondCompleted := make(chan struct{})
+	var calls atomic.Int64
+	var executor *Executor
+	store := &executorTestStore{
+		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
+			return CandidatePage{Exhausted: true}, nil
+		},
+		execute: func(context.Context, Candidate, TerminalCatalog) (CompletionResult, error) {
+			if calls.Add(1) == 1 {
+				// Return values are evaluated before deferred functions run. This
+				// commits the handoff after the result exists but before the
+				// executor can enter its result/removal transition.
+				defer func() {
+					handoffResult <- executor.SubmitCompletionCandidate(context.Background(), candidate)
+				}()
+			} else {
+				close(secondCompleted)
+			}
+			return CompletionResult{Outcome: OutcomeAwaitMutation}, nil
+		},
+	}
+	var occurrence *worklifetime.RuntimeOccurrence
+	executor, occurrence = newExecutorTestSubject(t, store, ExecutorOptions{})
+	if err := executor.Start(context.Background()); err != nil {
+		t.Fatalf("start executor: %v", err)
+	}
+	if err := executor.SubmitCompletionCandidate(context.Background(), candidate); err != nil {
+		t.Fatalf("submit first candidate: %v", err)
+	}
+	if err := receiveValue(t, handoffResult, "result/removal handoff"); err != nil {
+		t.Fatalf("submit candidate in result/removal window: %v", err)
+	}
+	receiveSignal(t, secondCompleted, "result/removal recheck")
+	awaitExecutorCandidates(t, executor, 0)
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("candidate executions = %d, want 2", got)
+	}
+	retireExecutorTestSubject(t, executor, occurrence)
+}
+
+func TestExecutorSameRevisionHandoffAfterRemovalStartsNewChain(t *testing.T) {
+	candidate := executorTestCandidate(1)
+	executed := make(chan struct{}, 2)
+	var calls atomic.Int64
+	store := &executorTestStore{
+		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
+			return CandidatePage{Exhausted: true}, nil
+		},
+		execute: func(context.Context, Candidate, TerminalCatalog) (CompletionResult, error) {
+			calls.Add(1)
+			executed <- struct{}{}
+			return CompletionResult{Outcome: OutcomeAwaitMutation}, nil
+		},
+	}
+	executor, occurrence := newExecutorTestSubject(t, store, ExecutorOptions{})
+	if err := executor.Start(context.Background()); err != nil {
+		t.Fatalf("start executor: %v", err)
+	}
+	if err := executor.SubmitCompletionCandidate(context.Background(), candidate); err != nil {
+		t.Fatalf("submit first candidate: %v", err)
+	}
+	receiveSignal(t, executed, "first candidate execution")
+	awaitExecutorCandidates(t, executor, 0)
+	if err := executor.SubmitCompletionCandidate(context.Background(), candidate); err != nil {
+		t.Fatalf("submit post-removal candidate: %v", err)
+	}
+	receiveSignal(t, executed, "post-removal candidate execution")
+	awaitExecutorCandidates(t, executor, 0)
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("candidate executions = %d, want 2", got)
+	}
+	retireExecutorTestSubject(t, executor, occurrence)
+}
+
+func TestExecutorCoalescesSameRevisionNotificationsPerAttempt(t *testing.T) {
+	candidate := executorTestCandidate(1)
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	secondStarted := make(chan struct{})
+	releaseSecond := make(chan struct{})
+	thirdCompleted := make(chan struct{})
+	var calls atomic.Int64
+	store := &executorTestStore{
+		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
+			return CandidatePage{Exhausted: true}, nil
+		},
+		execute: func(context.Context, Candidate, TerminalCatalog) (CompletionResult, error) {
+			switch calls.Add(1) {
+			case 1:
+				close(firstStarted)
+				<-releaseFirst
+			case 2:
+				close(secondStarted)
+				<-releaseSecond
+			case 3:
+				close(thirdCompleted)
+			}
+			return CompletionResult{Outcome: OutcomeAwaitMutation}, nil
+		},
+	}
+	executor, occurrence := newExecutorTestSubject(t, store, ExecutorOptions{})
+	if err := executor.Start(context.Background()); err != nil {
+		t.Fatalf("start executor: %v", err)
+	}
+	if err := executor.SubmitCompletionCandidate(context.Background(), candidate); err != nil {
+		t.Fatalf("submit first candidate: %v", err)
+	}
+	receiveSignal(t, firstStarted, "first candidate attempt")
+	for i := 0; i < 5; i++ {
+		if err := executor.SubmitCompletionCandidate(context.Background(), candidate); err != nil {
+			t.Fatalf("submit coalesced notification %d: %v", i, err)
+		}
+	}
+	close(releaseFirst)
+	receiveSignal(t, secondStarted, "coalesced candidate recheck")
+	if err := executor.SubmitCompletionCandidate(context.Background(), candidate); err != nil {
+		t.Fatalf("submit notification during recheck: %v", err)
+	}
+	close(releaseSecond)
+	receiveSignal(t, thirdCompleted, "notification-during-recheck attempt")
+	awaitExecutorCandidates(t, executor, 0)
+	if got := calls.Load(); got != 3 {
+		t.Fatalf("candidate executions = %d, want 3", got)
+	}
+	retireExecutorTestSubject(t, executor, occurrence)
+}
+
+func TestExecutorSerializesAndCollapsesNewerSuccessors(t *testing.T) {
+	first := executorTestCandidate(1)
+	second := executorTestCandidate(2)
+	third := executorTestCandidate(3)
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	thirdCompleted := make(chan struct{})
+	executed := make(chan Candidate, 3)
+	var active atomic.Int64
+	var maxActive atomic.Int64
+	store := &executorTestStore{
+		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
+			return CandidatePage{Exhausted: true}, nil
+		},
+		execute: func(_ context.Context, candidate Candidate, _ TerminalCatalog) (CompletionResult, error) {
+			current := active.Add(1)
+			updateAtomicMax(&maxActive, current)
+			defer active.Add(-1)
+			executed <- candidate
+			switch candidate.Revision {
+			case 1:
+				close(firstStarted)
+				<-releaseFirst
+			case 3:
+				close(thirdCompleted)
+			}
+			return CompletionResult{Outcome: OutcomeExactNoop}, nil
+		},
+	}
+	executor, occurrence := newExecutorTestSubject(t, store, ExecutorOptions{})
+	if err := executor.Start(context.Background()); err != nil {
+		t.Fatalf("start executor: %v", err)
+	}
+	if err := executor.SubmitCompletionCandidate(context.Background(), first); err != nil {
+		t.Fatalf("submit first candidate: %v", err)
+	}
+	receiveSignal(t, firstStarted, "first candidate attempt")
+	if err := executor.SubmitCompletionCandidate(context.Background(), second); err != nil {
+		t.Fatalf("submit second candidate: %v", err)
+	}
+	if err := executor.SubmitCompletionCandidate(context.Background(), third); err != nil {
+		t.Fatalf("submit third candidate: %v", err)
+	}
+	if err := executor.SubmitCompletionCandidate(context.Background(), first); err != nil {
+		t.Fatalf("submit stale first candidate: %v", err)
+	}
+	close(releaseFirst)
+	receiveSignal(t, thirdCompleted, "newest successor attempt")
+	awaitExecutorCandidates(t, executor, 0)
+	close(executed)
+	var revisions []int64
+	for candidate := range executed {
+		revisions = append(revisions, candidate.Revision)
+	}
+	if len(revisions) != 2 || revisions[0] != 1 || revisions[1] != 3 {
+		t.Fatalf("executed revisions = %v, want [1 3]", revisions)
+	}
+	if got := maxActive.Load(); got != 1 {
+		t.Fatalf("max concurrent same-run executions = %d, want 1", got)
+	}
+	retireExecutorTestSubject(t, executor, occurrence)
+}
+
+func TestExecutorRejectsConflictingSameRevisionIdentity(t *testing.T) {
+	candidate := executorTestCandidate(1)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	store := &executorTestStore{
+		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
+			return CandidatePage{Exhausted: true}, nil
+		},
+		execute: func(context.Context, Candidate, TerminalCatalog) (CompletionResult, error) {
+			close(started)
+			<-release
+			return CompletionResult{Outcome: OutcomeAwaitMutation}, nil
+		},
+	}
+	executor, occurrence := newExecutorTestSubject(t, store, ExecutorOptions{})
+	if err := executor.Start(context.Background()); err != nil {
+		t.Fatalf("start executor: %v", err)
+	}
+	if err := executor.SubmitCompletionCandidate(context.Background(), candidate); err != nil {
+		t.Fatalf("submit candidate: %v", err)
+	}
+	receiveSignal(t, started, "candidate attempt")
+	conflicting := candidate
+	conflicting.DueAt = conflicting.DueAt.Add(time.Microsecond)
+	if err := executor.SubmitCompletionCandidate(context.Background(), conflicting); err == nil {
+		t.Fatal("conflicting same-revision identity was accepted")
+	}
+	close(release)
+	awaitExecutorCandidates(t, executor, 0)
+	retireExecutorTestSubject(t, executor, occurrence)
+}
+
+func TestExecutorHandoffBeforeAttemptAdmissionIsRepresentedByThatAttempt(t *testing.T) {
+	candidate := executorTestCandidate(1)
+	candidate.DueAt = candidate.DueAt.Add(time.Hour)
+	clock := &gatedExecutorTestClock{
+		now:     candidate.DueAt.Add(-time.Hour),
+		started: make(chan struct{}),
+		release: make(chan time.Time),
+	}
+	executed := make(chan struct{})
+	var calls atomic.Int64
+	store := &executorTestStore{
+		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
+			return CandidatePage{Exhausted: true}, nil
+		},
+		execute: func(context.Context, Candidate, TerminalCatalog) (CompletionResult, error) {
+			calls.Add(1)
+			close(executed)
+			return CompletionResult{Outcome: OutcomeExactNoop}, nil
+		},
+	}
+	executor, occurrence := newExecutorTestSubject(t, store, ExecutorOptions{Clock: clock})
+	if err := executor.Start(context.Background()); err != nil {
+		t.Fatalf("start executor: %v", err)
+	}
+	if err := executor.SubmitCompletionCandidate(context.Background(), candidate); err != nil {
+		t.Fatalf("submit candidate: %v", err)
+	}
+	receiveSignal(t, clock.started, "future candidate wait")
+	if err := executor.SubmitCompletionCandidate(context.Background(), candidate); err != nil {
+		t.Fatalf("submit pre-admission handoff: %v", err)
+	}
+	close(clock.release)
+	receiveSignal(t, executed, "future candidate execution")
+	awaitExecutorCandidates(t, executor, 0)
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("candidate executions = %d, want 1", got)
+	}
+	retireExecutorTestSubject(t, executor, occurrence)
+}
+
+func TestExecutorAllowsDifferentRunsToExecuteConcurrently(t *testing.T) {
+	first := executorTestCandidate(1)
+	second := first
+	second.RunID = "33333333-3333-4333-8333-333333333333"
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	var active atomic.Int64
+	var maxActive atomic.Int64
+	store := &executorTestStore{
+		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
+			return CandidatePage{Exhausted: true}, nil
+		},
+		execute: func(context.Context, Candidate, TerminalCatalog) (CompletionResult, error) {
+			current := active.Add(1)
+			updateAtomicMax(&maxActive, current)
+			started <- struct{}{}
+			<-release
+			active.Add(-1)
+			return CompletionResult{Outcome: OutcomeAwaitMutation}, nil
+		},
+	}
+	executor, occurrence := newExecutorTestSubject(t, store, ExecutorOptions{})
+	if err := executor.Start(context.Background()); err != nil {
+		t.Fatalf("start executor: %v", err)
+	}
+	if err := executor.SubmitCompletionCandidate(context.Background(), first); err != nil {
+		t.Fatalf("submit first run: %v", err)
+	}
+	if err := executor.SubmitCompletionCandidate(context.Background(), second); err != nil {
+		t.Fatalf("submit second run: %v", err)
+	}
+	receiveSignal(t, started, "first concurrent run")
+	receiveSignal(t, started, "second concurrent run")
+	close(release)
+	awaitExecutorCandidates(t, executor, 0)
+	if got := maxActive.Load(); got != 2 {
+		t.Fatalf("max concurrent different-run executions = %d, want 2", got)
+	}
+	retireExecutorTestSubject(t, executor, occurrence)
+}
+
+func TestExecutorCrossBundleSameRevisionRetainsNewScopeRepresentation(t *testing.T) {
+	oldCandidate := executorTestCandidate(1)
+	newBundleHash := "bundle-v1:sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	newCandidate := oldCandidate
+	newCandidate.BundleHash = newBundleHash
+	oldStarted := make(chan struct{})
+	releaseOld := make(chan struct{})
+	newCompleted := make(chan struct{})
+	var rowLock sync.Mutex
+	store := &executorTestStore{
+		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
+			return CandidatePage{Exhausted: true}, nil
+		},
+		execute: func(_ context.Context, candidate Candidate, _ TerminalCatalog) (CompletionResult, error) {
+			rowLock.Lock()
+			defer rowLock.Unlock()
+			if candidate.BundleHash == executorTestBundleHash {
+				close(oldStarted)
+				<-releaseOld
+			} else {
+				close(newCompleted)
+			}
+			return CompletionResult{Outcome: OutcomeExactNoop}, nil
+		},
+	}
+	oldExecutor, oldOccurrence := newExecutorTestSubjectForBundle(t, store, ExecutorOptions{}, executorTestBundleHash)
+	newExecutor, newOccurrence := newExecutorTestSubjectForBundle(t, store, ExecutorOptions{}, newBundleHash)
+	if err := oldExecutor.Start(context.Background()); err != nil {
+		t.Fatalf("start old executor: %v", err)
+	}
+	if err := newExecutor.Start(context.Background()); err != nil {
+		t.Fatalf("start new executor: %v", err)
+	}
+	if err := oldExecutor.SubmitCompletionCandidate(context.Background(), oldCandidate); err != nil {
+		t.Fatalf("submit old-bundle candidate: %v", err)
+	}
+	receiveSignal(t, oldStarted, "old-bundle execution")
+	if err := newExecutor.SubmitCompletionCandidate(context.Background(), newCandidate); err != nil {
+		t.Fatalf("submit new-bundle candidate: %v", err)
+	}
+	awaitExecutorCandidates(t, newExecutor, 1)
+	select {
+	case <-newCompleted:
+		t.Fatal("new-bundle selected-store execution bypassed run-row serialization")
+	default:
+	}
+	close(releaseOld)
+	receiveSignal(t, newCompleted, "new-bundle retained execution")
+	awaitExecutorCandidates(t, oldExecutor, 0)
+	awaitExecutorCandidates(t, newExecutor, 0)
+	retireExecutorTestSubject(t, oldExecutor, oldOccurrence)
+	retireExecutorTestSubject(t, newExecutor, newOccurrence)
+}
+
 func TestExecutorRetriesCurrentRevisionAndRearmsBeforeSettling(t *testing.T) {
 	candidate := executorTestCandidate(1)
 	completed := make(chan struct{})
 	var (
-		mu    sync.Mutex
-		calls int
+		mu         sync.Mutex
+		calls      int
+		candidates []Candidate
 	)
 	store := &executorTestStore{
 		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
@@ -114,6 +525,7 @@ func TestExecutorRetriesCurrentRevisionAndRearmsBeforeSettling(t *testing.T) {
 			mu.Lock()
 			defer mu.Unlock()
 			calls++
+			candidates = append(candidates, got)
 			switch calls {
 			case 1:
 				return CompletionResult{}, errors.New("transient selected-store failure")
@@ -140,12 +552,91 @@ func TestExecutorRetriesCurrentRevisionAndRearmsBeforeSettling(t *testing.T) {
 	receiveSignal(t, completed, "retry and rearm completion")
 	mu.Lock()
 	gotCalls := calls
+	gotCandidates := append([]Candidate(nil), candidates...)
 	mu.Unlock()
 	if gotCalls != 3 {
 		t.Fatalf("candidate executions = %d, want 3", gotCalls)
 	}
+	if gotCandidates[2].DueAt != candidate.DueAt.Add(time.Second) {
+		t.Fatalf("rearmed due_at = %s, want %s", gotCandidates[2].DueAt, candidate.DueAt.Add(time.Second))
+	}
 
 	retireExecutorTestSubject(t, executor, occurrence)
+}
+
+func TestExecutorDirtyNotificationSurvivesRetryAndRearmResults(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		result func(Candidate) CompletionResult
+		want   func(Candidate) Candidate
+	}{
+		{
+			name: "retry_current",
+			result: func(Candidate) CompletionResult {
+				return CompletionResult{Outcome: OutcomeRetryCurrent, Retryable: errors.New("retry")}
+			},
+			want: func(candidate Candidate) Candidate { return candidate },
+		},
+		{
+			name:   "invalid_result_converted_to_retry",
+			result: func(Candidate) CompletionResult { return CompletionResult{} },
+			want:   func(candidate Candidate) Candidate { return candidate },
+		},
+		{
+			name: "rearm_at_same_revision",
+			result: func(candidate Candidate) CompletionResult {
+				candidate.DueAt = candidate.DueAt.Add(time.Microsecond)
+				return CompletionResult{Outcome: OutcomeRearmAt, Candidate: candidate}
+			},
+			want: func(candidate Candidate) Candidate {
+				candidate.DueAt = candidate.DueAt.Add(time.Microsecond)
+				return candidate
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate := executorTestCandidate(1)
+			firstStarted := make(chan struct{})
+			releaseFirst := make(chan struct{})
+			secondExecuted := make(chan Candidate, 1)
+			var calls atomic.Int64
+			store := &executorTestStore{
+				list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
+					return CandidatePage{Exhausted: true}, nil
+				},
+				execute: func(_ context.Context, got Candidate, _ TerminalCatalog) (CompletionResult, error) {
+					if calls.Add(1) == 1 {
+						close(firstStarted)
+						<-releaseFirst
+						return tc.result(got), nil
+					}
+					secondExecuted <- got
+					return CompletionResult{Outcome: OutcomeAwaitMutation}, nil
+				},
+			}
+			executor, occurrence := newExecutorTestSubject(t, store, ExecutorOptions{RetryPolicy: immediateRetryPolicy{}})
+			if err := executor.Start(context.Background()); err != nil {
+				t.Fatalf("start executor: %v", err)
+			}
+			if err := executor.SubmitCompletionCandidate(context.Background(), candidate); err != nil {
+				t.Fatalf("submit first candidate: %v", err)
+			}
+			receiveSignal(t, firstStarted, "first candidate attempt")
+			if err := executor.SubmitCompletionCandidate(context.Background(), candidate); err != nil {
+				t.Fatalf("submit dirty notification: %v", err)
+			}
+			close(releaseFirst)
+			got := receiveValue(t, secondExecuted, "dirty-result recheck")
+			if want := tc.want(candidate); !got.SameIdentity(want) {
+				t.Fatalf("recheck candidate = %#v, want %#v", got, want)
+			}
+			awaitExecutorCandidates(t, executor, 0)
+			if got := calls.Load(); got != 2 {
+				t.Fatalf("candidate executions = %d, want 2", got)
+			}
+			retireExecutorTestSubject(t, executor, occurrence)
+		})
+	}
 }
 
 func TestExecutorRetirementJoinsAcceptedPersistenceAndRejectsNewAdmission(t *testing.T) {
@@ -299,6 +790,59 @@ func TestExecutorRetirementRejectsElapsedRearmAfterActiveAttemptSettles(t *testi
 	}
 }
 
+func TestExecutorRetirementDropsDirtyGenerationAndPendingSuccessor(t *testing.T) {
+	candidate := executorTestCandidate(1)
+	successor := candidate
+	successor.Revision++
+	executing := make(chan struct{})
+	release := make(chan struct{})
+	executions := make(chan Candidate, 3)
+	store := &executorTestStore{
+		list: func(context.Context, CandidateScope, CandidateCursor, int) (CandidatePage, error) {
+			return CandidatePage{Exhausted: true}, nil
+		},
+		execute: func(_ context.Context, got Candidate, _ TerminalCatalog) (CompletionResult, error) {
+			executions <- got
+			if got.SameIdentity(candidate) {
+				close(executing)
+				<-release
+			}
+			return CompletionResult{Outcome: OutcomeAwaitMutation}, nil
+		},
+	}
+	executor, occurrence := newExecutorTestSubject(t, store, ExecutorOptions{})
+	if err := executor.Start(context.Background()); err != nil {
+		t.Fatalf("start executor: %v", err)
+	}
+	if err := executor.SubmitCompletionCandidate(context.Background(), candidate); err != nil {
+		t.Fatalf("submit candidate: %v", err)
+	}
+	receiveSignal(t, executing, "candidate execution")
+	if err := executor.SubmitCompletionCandidate(context.Background(), candidate); err != nil {
+		t.Fatalf("submit dirty notification: %v", err)
+	}
+	if err := executor.SubmitCompletionCandidate(context.Background(), successor); err != nil {
+		t.Fatalf("submit pending successor: %v", err)
+	}
+
+	if err := executor.Retire(context.Background()); err != nil {
+		t.Fatalf("retire executor: %v", err)
+	}
+	close(release)
+	retireRuntimeOccurrence(t, occurrence)
+	if got := receiveValue(t, executions, "first candidate execution"); !got.SameIdentity(candidate) {
+		t.Fatalf("first candidate execution = %#v, want %#v", got, candidate)
+	}
+	select {
+	case got := <-executions:
+		t.Fatalf("candidate execution %#v started after retirement fence", got)
+	default:
+	}
+	if got := executor.ActiveCandidates(); got != 0 {
+		t.Fatalf("active candidates after retirement = %d, want 0", got)
+	}
+}
+
 func TestExecutorRetirementDuringRetryDelayRejectsSuccessorAttempt(t *testing.T) {
 	candidate := executorTestCandidate(1)
 	executions := make(chan int, 2)
@@ -436,6 +980,20 @@ type executorTestClock struct {
 	now time.Time
 }
 
+type gatedExecutorTestClock struct {
+	now     time.Time
+	started chan struct{}
+	release chan time.Time
+	once    sync.Once
+}
+
+func (c *gatedExecutorTestClock) Now() time.Time { return c.now }
+
+func (c *gatedExecutorTestClock) After(time.Duration) <-chan time.Time {
+	c.once.Do(func() { close(c.started) })
+	return c.release
+}
+
 func (c *executorTestClock) Now() time.Time {
 	return c.now
 }
@@ -481,18 +1039,27 @@ func newExecutorTestSubject(
 	store CandidateStore,
 	options ExecutorOptions,
 ) (*Executor, *worklifetime.RuntimeOccurrence) {
+	return newExecutorTestSubjectForBundle(t, store, options, executorTestBundleHash)
+}
+
+func newExecutorTestSubjectForBundle(
+	t *testing.T,
+	store CandidateStore,
+	options ExecutorOptions,
+	bundleHash string,
+) (*Executor, *worklifetime.RuntimeOccurrence) {
 	t.Helper()
 	process := worklifetime.NewProcess()
 	occurrence, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
 		RuntimeInstanceID: "22222222-2222-4222-8222-222222222222",
-		BundleHash:        executorTestBundleHash,
+		BundleHash:        bundleHash,
 	})
 	if err != nil {
 		t.Fatalf("create runtime occurrence: %v", err)
 	}
 	executor, err := NewExecutor(
 		store,
-		CandidateScope{BundleHash: executorTestBundleHash},
+		CandidateScope{BundleHash: bundleHash},
 		TerminalCatalog{},
 		occurrence,
 		options,
@@ -501,6 +1068,15 @@ func newExecutorTestSubject(
 		t.Fatalf("create executor: %v", err)
 	}
 	return executor, occurrence
+}
+
+func updateAtomicMax(target *atomic.Int64, value int64) {
+	for {
+		current := target.Load()
+		if value <= current || target.CompareAndSwap(current, value) {
+			return
+		}
+	}
 }
 
 func retireExecutorTestSubject(t *testing.T, executor *Executor, occurrence *worklifetime.RuntimeOccurrence) {
@@ -538,5 +1114,16 @@ func receiveValue[T any](t *testing.T, ch <-chan T, label string) T {
 		var zero T
 		t.Fatalf("timed out waiting for %s", label)
 		return zero
+	}
+}
+
+func awaitExecutorCandidates(t *testing.T, executor *Executor, want int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for executor.ActiveCandidates() != want {
+		if time.Now().After(deadline) {
+			t.Fatalf("active candidates = %d, want %d", executor.ActiveCandidates(), want)
+		}
+		goruntime.Gosched()
 	}
 }

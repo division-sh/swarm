@@ -16159,8 +16159,11 @@ platform_tables:
           durable_identity: >
             One nullable completion_due_at and monotonic completion_revision pair on the canonical runs row is the only
             durable candidate authority. The candidate identity is exact {run_id, bundle_hash, completion_revision,
-            completion_due_at}. Candidate SQL and columns are private to lifecycle adapters. There is no callback
-            owner, queue table, scheduler, polling loop, retry registry, or reader-side completion inference.
+            completion_due_at}. A committed handoff occurrence is not part of that durable identity: distinct
+            transactions may commit the same exact identity and every such occurrence must remain represented until an
+            attempt admitted after it observes the selected store. Candidate SQL and columns are private to lifecycle
+            adapters. There is no callback owner, queue table, scheduler, polling loop, retry registry, or reader-side
+            completion inference.
           request_outcomes:
             requested: A nonterminal row records a new exact revision and selected-store due coordinate.
             already_current: An exact current coordinate or an already-due current coordinate is unchanged and does not churn revision.
@@ -16206,20 +16209,31 @@ platform_tables:
             selected-store transaction that observes no registered sink retains one store-owned registration barrier
             until its exact commit or rollback outcome. Registration installs the sink, then waits context-bounded for
             every such earlier transaction before enumeration begins; later transactions observe the sink and reserve
-            the normal post-commit handoff. Registration, transaction-outcome reconciliation, and monotonic per-run
-            revision representation close the startup race without a timestamp watermark, fallback scan, or polling.
-            Runtime readiness publishes only after enumeration is exhausted and every accepted identity is represented
-            by an execution chain or exact future wake.
+            the normal post-commit handoff. Registration, transaction-outcome reconciliation, and exact per-run
+            candidate representation close the startup race without a timestamp watermark, fallback scan, or polling.
+            The executor owns one serialized chain per run. It may coalesce the same exact candidate only when one
+            selected-store transaction reports that identity more than once; separately committed handoffs for the same
+            exact identity advance a process-local notification generation. Runtime readiness publishes only after
+            enumeration is exhausted and every accepted identity is represented by an execution chain or exact future
+            wake.
           post_commit_handoff: >
             A candidate-producing operation acquires generation work admission before its mutation becomes
             commit-capable. Commit submits the exact durable identity through a detached handoff and releases admission
-            only after representation; rollback cancels that admission. Successful selected-store commit is the
-            irreversible handoff boundary: subsequent session cleanup, claim release, or other post-commit failures are
-            joined and reported only after every required typed post-commit effect has settled, and they never route the reserved
-            admission through rollback. Pipeline settlement retires its exact claim before submitting the candidate so
-            candidate execution cannot observe work already durably settled as still live. Caller cancellation after
-            commit cannot cancel the handoff. A process crash after commit is recovered by successor startup enumeration
-            because process memory is never durable authority.
+            only after representation; rollback cancels that admission. Immediately before each selected-store
+            execution admission, the chain snapshots its notification generation. Selected-store result classification,
+            observation of handoffs committed after that snapshot, exact successor promotion, and chain removal are one
+            atomic process-local transition. A later handoff therefore forces one serialized recheck even when the
+            earlier attempt returned await_mutation, exact_noop, or terminally_eligible. Strictly newer revisions occupy
+            one exact pending-successor slot; stale revisions are ignored and a same-revision handoff identity conflict
+            fails closed. An admitted selected-store rearm result remains authoritative and may replace the same
+            revision's due coordinate in the current chain. No two attempts for the same run execute concurrently, while
+            different runs remain independent.
+            Successful selected-store commit is the irreversible handoff boundary: subsequent session cleanup, claim
+            release, or other post-commit failures are joined and reported only after every required typed post-commit
+            effect has settled, and they never route the reserved admission through rollback. Pipeline settlement
+            retires its exact claim before submitting the candidate so candidate execution cannot observe work already
+            durably settled as still live. Caller cancellation after commit cannot cancel the handoff. A process crash
+            after commit is recovered by successor startup enumeration because process memory is never durable authority.
           retirement: >
             Retirement atomically rejects new candidate admission, cancels process-local waits, and joins every
             accepted chain before selected-store release. Its wait for already-reserved commit/rollback handoffs is
@@ -16228,8 +16242,10 @@ platform_tables:
             after retirement; a committed candidate remains durable for successor startup recovery. Grace expiry does
             not release accepted work or selected-store ownership: the reachable shutdown owner still joins the runtime
             occurrence before store release. A rearm operation commits and represents its newer exact revision before
-            settling the current chain. A retired generation cannot mutate or block its successor; successor startup
-            reconstructs every durable candidate and future wake before readiness.
+            settling the current chain. Once the retirement fence is established, an admitted attempt may settle but its
+            result, dirty notification generation, and pending successor cannot start another attempt. A retired
+            generation cannot mutate or block its successor; successor startup reconstructs every durable candidate and
+            future wake before readiness.
           backend_contract: >
             SQLite and PostgreSQL share the typed request, execution, stale-revision, rollback, readback, startup,
             retirement, and late-settlement contract. Selected-fork source terminalization remains PostgreSQL-only and

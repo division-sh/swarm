@@ -3,13 +3,19 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"runtime"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/division-sh/swarm/internal/events"
+	"github.com/division-sh/swarm/internal/events/eventtest"
+	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
+	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	storerunhandoff "github.com/division-sh/swarm/internal/store/internal/runhandoff"
@@ -23,6 +29,17 @@ type runLifecycleCandidateInterceptStore struct {
 	releaseList    chan struct{}
 	executed       chan runtimerunlifecycle.Candidate
 	listOnce       sync.Once
+}
+
+type runLifecycleSameRevisionInterceptStore struct {
+	delegate       runtimerunlifecycle.CandidateStore
+	firstStarted   chan struct{}
+	releaseFirst   chan struct{}
+	secondExecuted chan struct{}
+	calls          int
+	candidates     []runtimerunlifecycle.Candidate
+	results        []runtimerunlifecycle.CompletionResult
+	mu             sync.Mutex
 }
 
 type runLifecycleExecutorImmediateClock struct{}
@@ -64,6 +81,477 @@ func (s *runLifecycleCandidateInterceptStore) ExecuteCompletionCandidate(
 		return runtimerunlifecycle.CompletionResult{}, context.Cause(ctx)
 	case s.executed <- candidate:
 		return runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeAwaitMutation}, nil
+	}
+}
+
+func (s *runLifecycleSameRevisionInterceptStore) ListCompletionCandidates(
+	ctx context.Context,
+	scope runtimerunlifecycle.CandidateScope,
+	cursor runtimerunlifecycle.CandidateCursor,
+	limit int,
+) (runtimerunlifecycle.CandidatePage, error) {
+	return s.delegate.ListCompletionCandidates(ctx, scope, cursor, limit)
+}
+
+func (s *runLifecycleSameRevisionInterceptStore) ExecuteCompletionCandidate(
+	ctx context.Context,
+	candidate runtimerunlifecycle.Candidate,
+	catalog runtimerunlifecycle.TerminalCatalog,
+) (runtimerunlifecycle.CompletionResult, error) {
+	s.mu.Lock()
+	s.calls++
+	call := s.calls
+	s.candidates = append(s.candidates, candidate)
+	s.mu.Unlock()
+	if call == 1 {
+		close(s.firstStarted)
+		select {
+		case <-ctx.Done():
+			return runtimerunlifecycle.CompletionResult{}, context.Cause(ctx)
+		case <-s.releaseFirst:
+		}
+		result := runtimerunlifecycle.CompletionResult{Outcome: runtimerunlifecycle.OutcomeAwaitMutation}
+		s.mu.Lock()
+		if len(s.results) < 16 {
+			s.results = append(s.results, result)
+		}
+		s.mu.Unlock()
+		return result, nil
+	}
+	result, err := s.delegate.ExecuteCompletionCandidate(ctx, candidate, catalog)
+	s.mu.Lock()
+	if len(s.results) < 16 {
+		s.results = append(s.results, result)
+	}
+	s.mu.Unlock()
+	if call == 2 {
+		close(s.secondExecuted)
+	}
+	return result, err
+}
+
+func TestRunLifecycleSameRevisionCommittedHandoffParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			fixture := openRunLifecycleCandidateParityFixture(t, backend)
+			registrar := fixture.store.(runtimerunlifecycle.CandidateRegistrar)
+			owner := fixture.store.(runtimerunlifecycle.OperationOwner)
+			ctx := testAuthorActivityBundleSourceContext()
+			runID := uuid.NewString()
+			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, time.Date(2026, 7, 29, 11, 0, 0, 0, time.UTC))
+			if err := materializeCompletedRunEntityForTest(ctx, fixture.store, runID); err != nil {
+				t.Fatalf("materialize terminal entity: %v", err)
+			}
+			if disposition, err := owner.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil || disposition != runtimerunlifecycle.CandidateRequested {
+				t.Fatalf("request initial candidate = %s/%v", disposition, err)
+			}
+
+			process := worklifetime.NewProcess()
+			occurrence := newRunLifecycleExecutorOccurrence(t, process)
+			runtimeCtx := worklifetime.WithRuntimeOccurrence(ctx, occurrence)
+			intercept := &runLifecycleSameRevisionInterceptStore{
+				delegate:       fixture.store,
+				firstStarted:   make(chan struct{}),
+				releaseFirst:   make(chan struct{}),
+				secondExecuted: make(chan struct{}),
+			}
+			executor := newRunLifecycleParityExecutorWithCatalog(
+				t,
+				intercept,
+				occurrence,
+				runtimerunlifecycle.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}),
+			)
+			registration, err := registrar.RegisterCompletionCandidateSink(
+				runtimeCtx,
+				runtimerunlifecycle.CandidateScope{BundleHash: runLifecycleCandidateParityBundleHash},
+				executor,
+			)
+			if err != nil {
+				t.Fatalf("register candidate executor: %v", err)
+			}
+			defer registration.Release()
+			if err := executor.Start(runtimeCtx); err != nil {
+				t.Fatalf("start candidate executor: %v", err)
+			}
+			awaitRunLifecycleSignal(t, intercept.firstStarted, "first candidate execution")
+
+			if disposition, err := owner.RequestCompletionCandidate(runtimeCtx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil || disposition != runtimerunlifecycle.CandidateAlreadyCurrent {
+				t.Fatalf("request same-revision candidate = %s/%v", disposition, err)
+			}
+			close(intercept.releaseFirst)
+			awaitRunLifecycleSignal(t, intercept.secondExecuted, "same-revision selected-store recheck")
+			awaitRunLifecycleState(t, fixture.store, runID, runtimerunlifecycle.StateCompleted)
+
+			intercept.mu.Lock()
+			calls := intercept.calls
+			intercept.mu.Unlock()
+			if calls != 2 {
+				t.Fatalf("candidate executions = %d, want 2", calls)
+			}
+			if err := executor.Retire(context.Background()); err != nil {
+				t.Fatalf("retire candidate executor: %v", err)
+			}
+			retireRunLifecycleExecutorOccurrence(t, occurrence)
+			retireRunLifecycleProcess(t, process)
+		})
+	}
+}
+
+func TestRunLifecyclePauseResumeSuccessorRaceParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			fixture := openRunLifecycleCandidateParityFixture(t, backend)
+			registrar := fixture.store.(runtimerunlifecycle.CandidateRegistrar)
+			owner := fixture.store.(runtimerunlifecycle.OperationOwner)
+			ctx := testAuthorActivityBundleSourceContext()
+			runID := uuid.NewString()
+			startedAt := time.Date(2026, 7, 29, 11, 0, 0, 0, time.UTC)
+			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, startedAt)
+			if err := materializeCompletedRunEntityForTest(ctx, fixture.store, runID); err != nil {
+				t.Fatalf("materialize terminal entity: %v", err)
+			}
+			if disposition, err := owner.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil || disposition != runtimerunlifecycle.CandidateRequested {
+				t.Fatalf("request initial candidate = %s/%v", disposition, err)
+			}
+
+			process := worklifetime.NewProcess()
+			occurrence := newRunLifecycleExecutorOccurrence(t, process)
+			runtimeCtx := worklifetime.WithRuntimeOccurrence(ctx, occurrence)
+			intercept := &runLifecycleSameRevisionInterceptStore{
+				delegate:       fixture.store,
+				firstStarted:   make(chan struct{}),
+				releaseFirst:   make(chan struct{}),
+				secondExecuted: make(chan struct{}),
+			}
+			executor := newRunLifecycleParityExecutorWithCatalog(
+				t,
+				intercept,
+				occurrence,
+				runtimerunlifecycle.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}}),
+			)
+			registration, err := registrar.RegisterCompletionCandidateSink(
+				runtimeCtx,
+				runtimerunlifecycle.CandidateScope{BundleHash: runLifecycleCandidateParityBundleHash},
+				executor,
+			)
+			if err != nil {
+				t.Fatalf("register candidate executor: %v", err)
+			}
+			defer registration.Release()
+			if err := executor.Start(runtimeCtx); err != nil {
+				t.Fatalf("start candidate executor: %v", err)
+			}
+			awaitRunLifecycleSignal(t, intercept.firstStarted, "pre-pause candidate execution")
+
+			if disposition, err := transitionRunLifecycleParity(fixture, runtimeCtx, runID, runtimerunlifecycle.StatePaused); err != nil || disposition != runtimerunlifecycle.MutationApplied {
+				t.Fatalf("pause run = %s/%v", disposition, err)
+			}
+			if disposition, err := transitionRunLifecycleParity(fixture, runtimeCtx, runID, runtimerunlifecycle.StateRunning); err != nil || disposition != runtimerunlifecycle.MutationApplied {
+				t.Fatalf("resume run = %s/%v", disposition, err)
+			}
+			close(intercept.releaseFirst)
+			awaitRunLifecycleSignal(t, intercept.secondExecuted, "post-resume successor execution")
+			awaitRunLifecycleState(t, fixture.store, runID, runtimerunlifecycle.StateCompleted)
+
+			intercept.mu.Lock()
+			candidates := append([]runtimerunlifecycle.Candidate(nil), intercept.candidates...)
+			intercept.mu.Unlock()
+			if len(candidates) != 2 || candidates[1].Revision <= candidates[0].Revision {
+				t.Fatalf("executed candidates = %#v, want serialized newer successor", candidates)
+			}
+			if err := executor.Retire(context.Background()); err != nil {
+				t.Fatalf("retire candidate executor: %v", err)
+			}
+			retireRunLifecycleExecutorOccurrence(t, occurrence)
+			retireRunLifecycleProcess(t, process)
+		})
+	}
+}
+
+func TestRunLifecycleTerminalClearDuringAttemptDoesNotReviveCandidateParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			fixture := openRunLifecycleCandidateParityFixture(t, backend)
+			registrar := fixture.store.(runtimerunlifecycle.CandidateRegistrar)
+			owner := fixture.store.(runtimerunlifecycle.OperationOwner)
+			ctx := testAuthorActivityBundleSourceContext()
+			runID := uuid.NewString()
+			startedAt := time.Date(2026, 7, 29, 11, 0, 0, 0, time.UTC)
+			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, startedAt)
+			if disposition, err := owner.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil || disposition != runtimerunlifecycle.CandidateRequested {
+				t.Fatalf("request initial candidate = %s/%v", disposition, err)
+			}
+
+			process := worklifetime.NewProcess()
+			occurrence := newRunLifecycleExecutorOccurrence(t, process)
+			runtimeCtx := worklifetime.WithRuntimeOccurrence(ctx, occurrence)
+			intercept := &runLifecycleSameRevisionInterceptStore{
+				delegate:       fixture.store,
+				firstStarted:   make(chan struct{}),
+				releaseFirst:   make(chan struct{}),
+				secondExecuted: make(chan struct{}),
+			}
+			executor := newRunLifecycleParityExecutor(t, intercept, occurrence)
+			registration, err := registrar.RegisterCompletionCandidateSink(
+				runtimeCtx,
+				runtimerunlifecycle.CandidateScope{BundleHash: runLifecycleCandidateParityBundleHash},
+				executor,
+			)
+			if err != nil {
+				t.Fatalf("register candidate executor: %v", err)
+			}
+			defer registration.Release()
+			if err := executor.Start(runtimeCtx); err != nil {
+				t.Fatalf("start candidate executor: %v", err)
+			}
+			awaitRunLifecycleSignal(t, intercept.firstStarted, "pre-terminal candidate execution")
+
+			if _, disposition, err := terminalizeRunLifecycleCandidateParity(
+				fixture,
+				runtimeCtx,
+				runID,
+				runtimerunlifecycle.StateCancelled,
+				startedAt.Add(time.Minute),
+			); err != nil || disposition != runtimerunlifecycle.MutationApplied {
+				t.Fatalf("terminalize run = %s/%v", disposition, err)
+			}
+			close(intercept.releaseFirst)
+			awaitRunLifecycleExecutorCandidates(t, executor, 0)
+			select {
+			case <-intercept.secondExecuted:
+				t.Fatal("terminal clearing started a successor candidate execution")
+			default:
+			}
+			state, duePresent, _ := loadRunLifecycleCandidateFacts(t, fixture, ctx, runID)
+			if state != string(runtimerunlifecycle.StateCancelled) || duePresent {
+				t.Fatalf("terminal candidate state = state:%s due:%v, want cancelled/false", state, duePresent)
+			}
+			if err := executor.Retire(context.Background()); err != nil {
+				t.Fatalf("retire candidate executor: %v", err)
+			}
+			retireRunLifecycleExecutorOccurrence(t, occurrence)
+			retireRunLifecycleProcess(t, process)
+		})
+	}
+}
+
+func TestRunLifecycleCrossBundleSameRevisionHandoffParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			fixture := openRunLifecycleCandidateParityFixture(t, backend)
+			registrar := fixture.store.(runtimerunlifecycle.CandidateRegistrar)
+			owner := fixture.store.(runtimerunlifecycle.OperationOwner)
+			ctx := testAuthorActivityBundleSourceContext()
+			runID := uuid.NewString()
+			ensureRunLifecycleCandidateParityRun(t, fixture, ctx, runID, time.Date(2026, 7, 29, 11, 0, 0, 0, time.UTC))
+			if err := materializeCompletedRunEntityForTest(ctx, fixture.store, runID); err != nil {
+				t.Fatalf("materialize terminal entity: %v", err)
+			}
+			if disposition, err := owner.RequestCompletionCandidate(ctx, runtimerunlifecycle.ImmediateCandidate(runID)); err != nil || disposition != runtimerunlifecycle.CandidateRequested {
+				t.Fatalf("request initial candidate = %s/%v", disposition, err)
+			}
+
+			process := worklifetime.NewProcess()
+			oldOccurrence := newRunLifecycleExecutorOccurrenceForBundle(t, process, runLifecycleCandidateParityBundleHash)
+			newOccurrence := newRunLifecycleExecutorOccurrenceForBundle(t, process, runLifecycleCandidateParityReplacementHash)
+			oldCtx := worklifetime.WithRuntimeOccurrence(ctx, oldOccurrence)
+			intercept := &runLifecycleSameRevisionInterceptStore{
+				delegate:       fixture.store,
+				firstStarted:   make(chan struct{}),
+				releaseFirst:   make(chan struct{}),
+				secondExecuted: make(chan struct{}),
+			}
+			catalog := runtimerunlifecycle.NewTerminalCatalog(nil, map[string][]string{semanticRunFixtureFlow: {"completed"}})
+			oldExecutor := newRunLifecycleParityExecutorForScope(t, intercept, oldOccurrence, runLifecycleCandidateParityBundleHash, catalog)
+			newExecutor := newRunLifecycleParityExecutorForScope(t, intercept, newOccurrence, runLifecycleCandidateParityReplacementHash, catalog)
+			oldRegistration, err := registrar.RegisterCompletionCandidateSink(
+				oldCtx,
+				runtimerunlifecycle.CandidateScope{BundleHash: runLifecycleCandidateParityBundleHash},
+				oldExecutor,
+			)
+			if err != nil {
+				t.Fatalf("register old-bundle candidate executor: %v", err)
+			}
+			defer oldRegistration.Release()
+			newCtx := worklifetime.WithRuntimeOccurrence(ctx, newOccurrence)
+			newRegistration, err := registrar.RegisterCompletionCandidateSink(
+				newCtx,
+				runtimerunlifecycle.CandidateScope{BundleHash: runLifecycleCandidateParityReplacementHash},
+				newExecutor,
+			)
+			if err != nil {
+				t.Fatalf("register new-bundle candidate executor: %v", err)
+			}
+			defer newRegistration.Release()
+			if err := oldExecutor.Start(oldCtx); err != nil {
+				t.Fatalf("start old-bundle executor: %v", err)
+			}
+			if err := newExecutor.Start(newCtx); err != nil {
+				t.Fatalf("start new-bundle executor: %v", err)
+			}
+			awaitRunLifecycleSignal(t, intercept.firstStarted, "old-bundle candidate execution")
+
+			replacement, err := runtimecorrelation.NewEphemeralBundleSourceFact(runLifecycleCandidateParityReplacementHash)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if disposition, err := reviseRunLifecycleSourceParity(fixture, oldCtx, runID, replacement); err != nil || disposition != runtimerunlifecycle.MutationApplied {
+				t.Fatalf("revise run source = %s/%v", disposition, err)
+			}
+			awaitRunLifecycleSignal(t, intercept.secondExecuted, "new-bundle same-revision execution")
+			awaitRunLifecycleState(t, fixture.store, runID, runtimerunlifecycle.StateCompleted)
+			close(intercept.releaseFirst)
+			awaitRunLifecycleExecutorCandidates(t, oldExecutor, 0)
+
+			intercept.mu.Lock()
+			candidates := append([]runtimerunlifecycle.Candidate(nil), intercept.candidates...)
+			intercept.mu.Unlock()
+			if len(candidates) != 2 || candidates[0].Revision != candidates[1].Revision ||
+				candidates[0].BundleHash == candidates[1].BundleHash ||
+				candidates[1].BundleHash != runLifecycleCandidateParityReplacementHash {
+				t.Fatalf("cross-bundle candidate identities = %#v", candidates)
+			}
+			if err := oldExecutor.Retire(context.Background()); err != nil {
+				t.Fatalf("retire old-bundle executor: %v", err)
+			}
+			if err := newExecutor.Retire(context.Background()); err != nil {
+				t.Fatalf("retire new-bundle executor: %v", err)
+			}
+			retireRunLifecycleExecutorOccurrence(t, oldOccurrence)
+			retireRunLifecycleExecutorOccurrence(t, newOccurrence)
+			retireRunLifecycleProcess(t, process)
+		})
+	}
+}
+
+func TestRunLifecycleServedDeliverySameRevisionHandoffParity(t *testing.T) {
+	for _, backend := range []struct {
+		name string
+		open func(*testing.T) authorActivityReceiptFixture
+	}{
+		{name: "sqlite", open: openSQLiteAuthorActivityReceiptFixture},
+		{name: "postgres", open: openPostgresAuthorActivityReceiptFixture},
+	} {
+		backend := backend
+		t.Run(backend.name, func(t *testing.T) {
+			fixture := backend.open(t)
+			registrar := fixture.store.(runtimerunlifecycle.CandidateRegistrar)
+			ctx := testAuthorActivityContext()
+			process := worklifetime.NewProcess()
+			occurrence := newRunLifecycleExecutorOccurrence(t, process)
+			runtimeCtx := worklifetime.WithRuntimeOccurrence(ctx, occurrence)
+			intercept := &runLifecycleSameRevisionInterceptStore{
+				delegate:       fixture.store.(runtimerunlifecycle.CandidateStore),
+				firstStarted:   make(chan struct{}),
+				releaseFirst:   make(chan struct{}),
+				secondExecuted: make(chan struct{}),
+			}
+			executor, err := runtimerunlifecycle.NewExecutor(
+				intercept,
+				runtimerunlifecycle.CandidateScope{BundleHash: runLifecycleCandidateParityBundleHash},
+				runtimerunlifecycle.TerminalCatalog{},
+				occurrence,
+				runtimerunlifecycle.ExecutorOptions{},
+			)
+			if err != nil {
+				t.Fatalf("create candidate executor: %v", err)
+			}
+			registration, err := registrar.RegisterCompletionCandidateSink(
+				runtimeCtx,
+				runtimerunlifecycle.CandidateScope{BundleHash: runLifecycleCandidateParityBundleHash},
+				executor,
+			)
+			if err != nil {
+				t.Fatalf("register candidate executor: %v", err)
+			}
+			defer registration.Release()
+			if err := executor.Start(runtimeCtx); err != nil {
+				t.Fatalf("start candidate executor: %v", err)
+			}
+
+			eventBus, err := newRunConvergenceEventBus(t, fixture.store)
+			if err != nil {
+				t.Fatalf("create EventBus: %v", err)
+			}
+			agentID := "candidate-handoff-served-agent"
+			agentIdentity := runtimebustest.Identity(t, agentID, "")
+			seedStandaloneConvergenceAgent(t, fixture.store, runtimeCtx, agentIdentity)
+			event := eventtest.RuntimeControl(
+				uuid.NewString(),
+				"platform.boot",
+				"runtime",
+				"",
+				json.RawMessage(`{}`),
+				0,
+				"",
+				"",
+				events.EventEnvelope{},
+				time.Date(2025, 7, 29, 12, 0, 0, 0, time.UTC),
+			)
+			delivery := runtimebustest.Subscribe(t, eventBus, agentID, event.Type())
+			defer runtimebustest.Unsubscribe(eventBus, agentID)
+			if err := eventBus.Publish(runtimeCtx, event); err != nil {
+				t.Fatalf("publish routed standalone event: %v", err)
+			}
+			awaitRunLifecycleSignal(t, intercept.firstStarted, "pre-settlement candidate execution")
+			var delivered events.Event
+			select {
+			case local := <-delivery:
+				delivered = local.Event()
+				_ = local.Complete()
+			case <-time.After(5 * time.Second):
+				t.Fatal("timed out waiting for routed standalone delivery")
+			}
+			route := events.DeliveryRoute{
+				Recipient:     events.MustAgentDeliveryRecipient(agentID),
+				AgentIdentity: agentIdentity,
+			}
+			claimed, err := claimDeliveryFixture(runtimeCtx, fixture.store, delivered, route)
+			if err != nil {
+				t.Fatalf("claim routed standalone delivery: %v", err)
+			}
+			if _, err := fixture.store.SettleSuccess(
+				runtimeCtx,
+				claimed.Claim,
+				nil,
+				0,
+				runtimedelivery.NotApplicableHandlerRuleSelection(),
+			); err != nil {
+				t.Fatalf("settle routed standalone delivery: %v", err)
+			}
+			close(intercept.releaseFirst)
+			awaitRunLifecycleSignal(t, intercept.secondExecuted, "post-settlement candidate execution")
+			stateDeadline := time.Now().Add(5 * time.Second)
+			for {
+				snapshot, loadErr := fixture.store.(runLifecycleCandidateParityStore).LoadRunLifecycleSnapshot(context.Background(), delivered.RunID())
+				if loadErr == nil && snapshot.Status == string(runtimerunlifecycle.StateCompleted) {
+					break
+				}
+				if time.Now().After(stateDeadline) {
+					intercept.mu.Lock()
+					results := append([]runtimerunlifecycle.CompletionResult(nil), intercept.results...)
+					intercept.mu.Unlock()
+					t.Fatalf("served run state = %#v/%v, want completed; candidate results = %#v", snapshot, loadErr, results)
+				}
+				runtime.Gosched()
+			}
+
+			intercept.mu.Lock()
+			candidates := append([]runtimerunlifecycle.Candidate(nil), intercept.candidates...)
+			intercept.mu.Unlock()
+			if len(candidates) != 2 || !candidates[0].SameIdentity(candidates[1]) {
+				t.Fatalf("served candidate executions = %#v, want two exact same-revision identities", candidates)
+			}
+			if err := executor.Retire(context.Background()); err != nil {
+				t.Fatalf("retire candidate executor: %v", err)
+			}
+			retireRunLifecycleExecutorOccurrence(t, occurrence)
+			retireRunLifecycleProcess(t, process)
+		})
 	}
 }
 
@@ -480,10 +968,18 @@ func newRunLifecycleExecutorOccurrence(
 	t *testing.T,
 	process *worklifetime.Process,
 ) *worklifetime.RuntimeOccurrence {
+	return newRunLifecycleExecutorOccurrenceForBundle(t, process, runLifecycleCandidateParityBundleHash)
+}
+
+func newRunLifecycleExecutorOccurrenceForBundle(
+	t *testing.T,
+	process *worklifetime.Process,
+	bundleHash string,
+) *worklifetime.RuntimeOccurrence {
 	t.Helper()
 	occurrence, err := process.NewRuntime(context.Background(), worklifetime.RuntimeIdentity{
 		RuntimeInstanceID: uuid.NewString(),
-		BundleHash:        runLifecycleCandidateParityBundleHash,
+		BundleHash:        bundleHash,
 	})
 	if err != nil {
 		t.Fatalf("create candidate runtime occurrence: %v", err)
@@ -496,11 +992,30 @@ func newRunLifecycleParityExecutor(
 	store runtimerunlifecycle.CandidateStore,
 	occurrence *worklifetime.RuntimeOccurrence,
 ) *runtimerunlifecycle.Executor {
+	return newRunLifecycleParityExecutorWithCatalog(t, store, occurrence, runtimerunlifecycle.TerminalCatalog{})
+}
+
+func newRunLifecycleParityExecutorWithCatalog(
+	t *testing.T,
+	store runtimerunlifecycle.CandidateStore,
+	occurrence *worklifetime.RuntimeOccurrence,
+	catalog runtimerunlifecycle.TerminalCatalog,
+) *runtimerunlifecycle.Executor {
+	return newRunLifecycleParityExecutorForScope(t, store, occurrence, runLifecycleCandidateParityBundleHash, catalog)
+}
+
+func newRunLifecycleParityExecutorForScope(
+	t *testing.T,
+	store runtimerunlifecycle.CandidateStore,
+	occurrence *worklifetime.RuntimeOccurrence,
+	bundleHash string,
+	catalog runtimerunlifecycle.TerminalCatalog,
+) *runtimerunlifecycle.Executor {
 	t.Helper()
 	executor, err := runtimerunlifecycle.NewExecutor(
 		store,
-		runtimerunlifecycle.CandidateScope{BundleHash: runLifecycleCandidateParityBundleHash},
-		runtimerunlifecycle.TerminalCatalog{},
+		runtimerunlifecycle.CandidateScope{BundleHash: bundleHash},
+		catalog,
 		occurrence,
 		runtimerunlifecycle.ExecutorOptions{Clock: runLifecycleExecutorImmediateClock{}},
 	)
@@ -508,6 +1023,41 @@ func newRunLifecycleParityExecutor(
 		t.Fatalf("create candidate executor: %v", err)
 	}
 	return executor
+}
+
+func awaitRunLifecycleState(
+	t *testing.T,
+	store runLifecycleCandidateParityStore,
+	runID string,
+	want runtimerunlifecycle.State,
+) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		snapshot, err := store.LoadRunLifecycleSnapshot(context.Background(), runID)
+		if err == nil && snapshot.Status == string(want) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("run state = %#v/%v, want %s", snapshot, err, want)
+		}
+		runtime.Gosched()
+	}
+}
+
+func awaitRunLifecycleExecutorCandidates(
+	t *testing.T,
+	executor *runtimerunlifecycle.Executor,
+	want int,
+) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for executor.ActiveCandidates() != want {
+		if time.Now().After(deadline) {
+			t.Fatalf("active lifecycle candidates = %d, want %d", executor.ActiveCandidates(), want)
+		}
+		runtime.Gosched()
+	}
 }
 
 func retireRunLifecycleExecutorOccurrence(t *testing.T, occurrence *worklifetime.RuntimeOccurrence) {

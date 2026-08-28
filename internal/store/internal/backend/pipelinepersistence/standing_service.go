@@ -151,6 +151,18 @@ func (s *standingServiceAdapter) createRun(ctx context.Context, tx *sql.Tx, requ
 	return s.sqliteStore.RunLifecycleSQLiteOwner.CreateRunTx(ctx, tx, s.story, request)
 }
 
+func (s *standingServiceAdapter) requestCompletionCandidate(ctx context.Context, tx *sql.Tx, runID string) error {
+	if !s.validRunLifecycleMutation(tx) || s.handoff == nil {
+		return errors.New("standing completion candidate requires run lifecycle handoff ownership")
+	}
+	if s.postgresStore != nil {
+		_, err := s.postgresStore.RunLifecyclePostgresOwner.RequestCompletionCandidateTx(ctx, tx, runID, nil, s.handoff)
+		return err
+	}
+	_, err := s.sqliteStore.RunLifecycleSQLiteOwner.RequestCompletionCandidateTx(ctx, tx, runID, nil, s.handoff)
+	return err
+}
+
 func (s *standingServiceAdapter) reviseRunSource(ctx context.Context, tx *sql.Tx, request runtimerunlifecycle.SourceRevisionRequest) (runtimerunlifecycle.MutationDisposition, error) {
 	if !s.validRunLifecycleMutation(tx) {
 		return "", errors.New("standing run lifecycle mutation owner is required")
@@ -1265,6 +1277,9 @@ func (s *standingServiceAdapter) repairStandingServiceTx(ctx context.Context, tx
 		`, candidate.ServiceID, bundleHash, bundleSource, nextGeneration, nextRunID, now); err != nil {
 			return runtimepipeline.StandingServiceReconciliation{}, err
 		}
+	}
+	if err := s.requestCompletionCandidate(ctx, tx, nextRunID); err != nil {
+		return runtimepipeline.StandingServiceReconciliation{}, err
 	}
 	effectiveState := "active"
 	if current.OperatorOverride == "suspended" {

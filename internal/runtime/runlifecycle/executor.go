@@ -49,9 +49,20 @@ type ExecutorOptions struct {
 }
 
 type candidateChain struct {
-	candidate Candidate
-	cancel    context.CancelCauseFunc
+	candidate              Candidate
+	successor              *Candidate
+	notificationGeneration uint64
+	cancel                 context.CancelCauseFunc
+	wake                   chan struct{}
 }
+
+type candidateChainAction uint8
+
+const (
+	candidateChainStop candidateChainAction = iota
+	candidateChainContinue
+	candidateChainRetry
+)
 
 type candidateAdmission struct {
 	executor *Executor
@@ -70,7 +81,7 @@ type Executor struct {
 	pageSize   int
 
 	mu          sync.Mutex
-	chains      map[string]candidateChain
+	chains      map[string]*candidateChain
 	started     bool
 	ready       bool
 	retiring    bool
@@ -106,7 +117,7 @@ func NewExecutor(
 	return &Executor{
 		store: store, scope: scope, catalog: catalog, occurrence: occurrence,
 		clock: opts.Clock, retry: opts.RetryPolicy, pageSize: opts.PageSize,
-		chains: make(map[string]candidateChain),
+		chains: make(map[string]*candidateChain),
 	}, nil
 }
 
@@ -245,38 +256,86 @@ func (e *Executor) installReserved(lease *worklifetime.Lease, candidate Candidat
 		return worklifetime.ErrRetired
 	}
 	if current, ok := e.chains[candidate.RunID]; ok {
-		if current.candidate.Revision >= candidate.Revision {
-			e.mu.Unlock()
-			return lease.Done()
+		err := e.installIntoChainLocked(current, candidate)
+		e.mu.Unlock()
+		if err != nil {
+			return err
 		}
-		current.cancel(errors.New("completion candidate superseded"))
+		return lease.Done()
 	}
 	chainCtx, cancel := context.WithCancelCause(lease.Context())
-	e.chains[candidate.RunID] = candidateChain{candidate: candidate, cancel: cancel}
+	chain := &candidateChain{
+		candidate:              candidate,
+		notificationGeneration: 1,
+		cancel:                 cancel,
+		wake:                   make(chan struct{}, 1),
+	}
+	e.chains[candidate.RunID] = chain
 	e.mu.Unlock()
 
-	go e.runChain(chainCtx, lease, candidate)
+	go e.runChain(chainCtx, lease, chain)
 	return nil
 }
 
-func (e *Executor) runChain(ctx context.Context, lease *worklifetime.Lease, candidate Candidate) {
-	defer func() {
-		e.mu.Lock()
-		current, ok := e.chains[candidate.RunID]
-		if ok && current.candidate.Revision == candidate.Revision {
-			delete(e.chains, candidate.RunID)
+func (e *Executor) installIntoChainLocked(chain *candidateChain, candidate Candidate) error {
+	authority := chain.candidate
+	if chain.successor != nil && chain.successor.Revision > authority.Revision {
+		authority = *chain.successor
+	}
+	if candidate.Revision < authority.Revision {
+		return nil
+	}
+	if candidate.Revision == authority.Revision {
+		if !candidate.SameIdentity(authority) {
+			return fmt.Errorf(
+				"completion candidate conflicts with represented identity for run_id=%s revision=%d",
+				candidate.RunID,
+				candidate.Revision,
+			)
 		}
-		e.mu.Unlock()
-		_ = lease.Done()
-	}()
+		if chain.successor == nil {
+			chain.notificationGeneration++
+		}
+		return nil
+	}
+	candidateCopy := candidate
+	chain.successor = &candidateCopy
+	signalCandidateChain(chain)
+	return nil
+}
+
+func signalCandidateChain(chain *candidateChain) {
+	select {
+	case chain.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (e *Executor) runChain(ctx context.Context, lease *worklifetime.Lease, chain *candidateChain) {
+	defer func() { _ = lease.Done() }()
 
 	attempt := 0
 	for {
-		if err := e.waitUntilDue(ctx, candidate.DueAt); err != nil {
+		candidate, ok := e.currentChainCandidate(ctx, chain)
+		if !ok {
 			return
 		}
-		if !e.admitAttempt(ctx) {
+		woke, err := e.waitUntilDue(ctx, chain, candidate.DueAt)
+		if err != nil {
+			e.removeChain(chain)
 			return
+		}
+		if woke {
+			attempt = 0
+			continue
+		}
+		candidate, generation, admitted, stopped := e.admitAttempt(ctx, chain)
+		if stopped {
+			return
+		}
+		if !admitted {
+			attempt = 0
+			continue
 		}
 		// Retirement cancels waits and retries, but an admitted persistence
 		// operation must finish before its occurrence lease can settle.
@@ -287,33 +346,22 @@ func (e *Executor) runChain(ctx context.Context, lease *worklifetime.Lease, cand
 		if validationErr := result.Validate(); validationErr != nil {
 			result = CompletionResult{Outcome: OutcomeRetryCurrent, Retryable: validationErr}
 		}
-		// The admitted attempt may settle during retirement, but its result does
-		// not retain authority to start a successor attempt.
-		if ctx.Err() != nil {
-			return
-		}
-		switch result.Outcome {
-		case OutcomeRetryCurrent:
+		action := e.finishAttempt(ctx, chain, candidate, generation, result)
+		switch action {
+		case candidateChainRetry:
 			delay := e.retry.Delay(attempt)
 			attempt++
-			if err := e.wait(ctx, delay); err != nil {
-				return
-			}
-		case OutcomeRearmAt:
-			if result.Candidate.Revision == candidate.Revision {
-				candidate = result.Candidate
-				attempt = 0
-				continue
-			}
-			admission, err := e.ReserveCompletionCandidate(context.WithoutCancel(ctx))
+			woke, err := e.wait(ctx, chain, delay)
 			if err != nil {
+				e.removeChain(chain)
 				return
 			}
-			if err := admission.Submit(result.Candidate); err != nil {
-				return
+			if woke {
+				attempt = 0
 			}
-			return
-		case OutcomeTerminallyEligible, OutcomeAwaitMutation, OutcomeExactNoop:
+		case candidateChainContinue:
+			attempt = 0
+		case candidateChainStop:
 			return
 		default:
 			return
@@ -321,29 +369,153 @@ func (e *Executor) runChain(ctx context.Context, lease *worklifetime.Lease, cand
 	}
 }
 
-func (e *Executor) admitAttempt(ctx context.Context) bool {
+func (e *Executor) currentChainCandidate(ctx context.Context, chain *candidateChain) (Candidate, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return !e.retiring && ctx.Err() == nil
+	current, ok := e.chains[chain.candidate.RunID]
+	if !ok || current != chain || e.retiring || ctx.Err() != nil {
+		if ok && current == chain {
+			delete(e.chains, chain.candidate.RunID)
+		}
+		return Candidate{}, false
+	}
+	e.promoteSuccessorLocked(chain)
+	return chain.candidate, true
 }
 
-func (e *Executor) waitUntilDue(ctx context.Context, dueAt time.Time) error {
-	delay := dueAt.Sub(e.clock.Now())
-	if delay <= 0 {
+func (e *Executor) admitAttempt(ctx context.Context, chain *candidateChain) (Candidate, uint64, bool, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	current, ok := e.chains[chain.candidate.RunID]
+	if !ok || current != chain || e.retiring || ctx.Err() != nil {
+		if ok && current == chain {
+			delete(e.chains, chain.candidate.RunID)
+		}
+		return Candidate{}, 0, false, true
+	}
+	if chain.successor != nil {
+		e.promoteSuccessorLocked(chain)
+		return Candidate{}, 0, false, false
+	}
+	return chain.candidate, chain.notificationGeneration, true, false
+}
+
+func (e *Executor) finishAttempt(
+	ctx context.Context,
+	chain *candidateChain,
+	candidate Candidate,
+	generation uint64,
+	result CompletionResult,
+) candidateChainAction {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	current, ok := e.chains[candidate.RunID]
+	if !ok || current != chain {
+		return candidateChainStop
+	}
+	// The admitted attempt may settle during retirement, but its result does
+	// not retain authority to start a successor attempt.
+	if e.retiring || ctx.Err() != nil {
+		delete(e.chains, candidate.RunID)
+		return candidateChainStop
+	}
+	if result.Outcome == OutcomeRearmAt {
+		if err := e.mergeRearmLocked(chain, result.Candidate); err != nil {
+			result = CompletionResult{Outcome: OutcomeRetryCurrent, Retryable: err}
+		}
+	}
+	if chain.successor != nil {
+		e.promoteSuccessorLocked(chain)
+		return candidateChainContinue
+	}
+	if chain.notificationGeneration > generation {
+		return candidateChainContinue
+	}
+	switch result.Outcome {
+	case OutcomeRetryCurrent:
+		return candidateChainRetry
+	case OutcomeRearmAt:
+		return candidateChainContinue
+	case OutcomeTerminallyEligible, OutcomeAwaitMutation, OutcomeExactNoop:
+		delete(e.chains, candidate.RunID)
+		return candidateChainStop
+	default:
+		delete(e.chains, candidate.RunID)
+		return candidateChainStop
+	}
+}
+
+func (e *Executor) mergeRearmLocked(chain *candidateChain, candidate Candidate) error {
+	if err := candidate.Validate(); err != nil {
+		return err
+	}
+	if candidate.RunID != chain.candidate.RunID || candidate.BundleHash != e.scope.BundleHash {
+		return errors.New("rearmed completion candidate does not match its executor run and bundle scope")
+	}
+	if candidate.Revision < chain.candidate.Revision {
+		return errors.New("rearmed completion candidate revision moved backwards")
+	}
+	if candidate.Revision == chain.candidate.Revision {
+		// The selected store owns rearm coordinates. Unlike an external
+		// handoff, its admitted result may replace the due coordinate without
+		// advancing the durable revision.
+		chain.candidate = candidate
 		return nil
 	}
-	return e.wait(ctx, delay)
+	if chain.successor != nil {
+		if candidate.Revision < chain.successor.Revision {
+			return nil
+		}
+		if candidate.Revision == chain.successor.Revision && !candidate.SameIdentity(*chain.successor) {
+			return errors.New("rearmed completion candidate conflicts with pending successor identity")
+		}
+	}
+	candidateCopy := candidate
+	chain.successor = &candidateCopy
+	return nil
 }
 
-func (e *Executor) wait(ctx context.Context, delay time.Duration) error {
+func (e *Executor) promoteSuccessorLocked(chain *candidateChain) {
+	if chain.successor == nil {
+		return
+	}
+	chain.candidate = *chain.successor
+	chain.successor = nil
+	chain.notificationGeneration = 1
+	select {
+	case <-chain.wake:
+	default:
+	}
+}
+
+func (e *Executor) removeChain(chain *candidateChain) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	current, ok := e.chains[chain.candidate.RunID]
+	if ok && current == chain {
+		delete(e.chains, chain.candidate.RunID)
+	}
+}
+
+func (e *Executor) waitUntilDue(ctx context.Context, chain *candidateChain, dueAt time.Time) (bool, error) {
+	delay := dueAt.Sub(e.clock.Now())
 	if delay <= 0 {
-		return nil
+		return false, nil
+	}
+	return e.wait(ctx, chain, delay)
+}
+
+func (e *Executor) wait(ctx context.Context, chain *candidateChain, delay time.Duration) (bool, error) {
+	if delay <= 0 {
+		return false, nil
 	}
 	select {
 	case <-ctx.Done():
-		return context.Cause(ctx)
+		return false, context.Cause(ctx)
+	case <-chain.wake:
+		return true, nil
 	case <-e.clock.After(delay):
-		return nil
+		return false, nil
 	}
 }
 
@@ -359,7 +531,7 @@ func (e *Executor) Retire(ctx context.Context) error {
 		e.retiring = true
 	}
 	pendingZero := e.pendingZero
-	chains := make([]candidateChain, 0, len(e.chains))
+	chains := make([]*candidateChain, 0, len(e.chains))
 	for _, chain := range e.chains {
 		chains = append(chains, chain)
 	}

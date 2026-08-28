@@ -36,7 +36,7 @@ type CandidateHandoff struct {
 	ctx        context.Context
 	handoffs   []candidateHandoff
 	barriers   []*candidateRegistrationBarrier
-	identities map[string]struct{}
+	identities map[runtimerunlifecycle.CandidateIdentity]struct{}
 	settled    bool
 }
 
@@ -123,9 +123,9 @@ func (r *CandidateHandoff) Prepare(
 	if err := result.Candidate.Validate(); err != nil {
 		return err
 	}
-	identity := fmt.Sprintf("%s/%d", result.Candidate.RunID, result.Candidate.Revision)
+	identity := result.Candidate.Identity()
 	if r.identities == nil {
-		r.identities = make(map[string]struct{})
+		r.identities = make(map[runtimerunlifecycle.CandidateIdentity]struct{})
 	}
 	if _, exists := r.identities[identity]; exists {
 		return nil
