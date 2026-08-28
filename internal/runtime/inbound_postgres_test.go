@@ -1129,7 +1129,7 @@ func seedPostgresInboundGatewayRuntime(
 		t.Fatalf("seed entity state: %v", err)
 	}
 	if strings.TrimSpace(agentID) != "" {
-		if err := storetest.UpsertAgentFixture(t, ctx, pg, runtimemanager.PersistedAgent{
+		if err := storetest.UpsertStaticAgentFixture(t, ctx, pg, runtimemanager.PersistedAgent{
 			Config: runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 				ExecutionMode:      "live",
 				ResolvedLLMBackend: "anthropic",
@@ -1238,7 +1238,7 @@ func seedSQLiteInboundGatewayRuntime(
 		t.Fatalf("seed sqlite entity state: %v", err)
 	}
 	if strings.TrimSpace(agentID) != "" {
-		if err := storetest.UpsertAgentFixture(t, ctx, sqliteStore, runtimemanager.PersistedAgent{
+		if err := storetest.UpsertStaticAgentFixture(t, ctx, sqliteStore, runtimemanager.PersistedAgent{
 			Config: runtimeTestAgentConfig(t, runtimeactors.AgentConfig{
 				ExecutionMode:      "live",
 				ResolvedLLMBackend: "anthropic",

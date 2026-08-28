@@ -175,7 +175,7 @@ func seedStandaloneConvergenceAgent(t *testing.T, selected any, ctx context.Cont
 		t.Fatalf("standalone convergence store %T cannot persist agents", selected)
 	}
 	agentID := identity.AgentID()
-	if err := agentfixture.Upsert(t, ctx, store, runtimemanager.PersistedAgent{
+	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID: agentID, Identity: identity, Role: "observer", FlowID: "global", Type: "stub", Model: "regular",
 			ExecutionMode: "live", Config: json.RawMessage(`{}`),

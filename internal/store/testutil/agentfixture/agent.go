@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -21,38 +22,38 @@ const agentFixtureBundleHash = "bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 type Store interface {
 	runtimestartupownership.Store
 	runtimemanager.AgentLifecycleStateReader
+	runtimemanager.AgentLifecycleCellCensus
 	LoadAgents(context.Context) ([]runtimemanager.PersistedAgent, error)
 }
 
 type lifecycleStore struct {
 	t        testing.TB
 	selected Store
-	session  *fixtureSession
 }
 
 func (s *lifecycleStore) CommitAgentLifecycleTransition(ctx context.Context, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
-	return Commit(s.t, ctx, s.selected, req)
+	return CommitExact(s.t, ctx, s.selected, req)
 }
 
 func Lifecycle(t testing.TB, selected Store) runtimemanager.AgentLifecyclePersistence {
 	t.Helper()
-	session, err := fixtureSessionFor(t, context.Background(), selected)
-	if err != nil {
-		t.Fatalf("acquire agent lifecycle fixture process capability: %v", err)
-	}
-	return &lifecycleStore{t: t, selected: selected, session: session}
+	return &lifecycleStore{t: t, selected: selected}
 }
 
 func (s *lifecycleStore) ProcessExecutionBinding() (runtimemanager.ProcessExecutionBinding, error) {
-	if s == nil || s.session == nil {
+	if s == nil || s.selected == nil {
 		return runtimemanager.ProcessExecutionBinding{}, fmt.Errorf("agent lifecycle fixture process capability is required")
 	}
-	s.session.mu.Lock()
-	defer s.session.mu.Unlock()
-	if s.session.grant == nil {
+	session, err := fixtureSessionFor(s.t, context.Background(), s.selected)
+	if err != nil {
+		return runtimemanager.ProcessExecutionBinding{}, err
+	}
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	if session.grant == nil {
 		return runtimemanager.ProcessExecutionBinding{}, fmt.Errorf("agent lifecycle fixture generation grant is required")
 	}
-	return s.session.grant.ProcessExecutionBinding()
+	return session.grant.ProcessExecutionBinding()
 }
 
 type fixtureSession struct {
@@ -103,49 +104,49 @@ func ProcessCapability(t testing.TB, ctx context.Context, selected Store) (runti
 	return session.capability, nil
 }
 
-func validateFixtureStaticSourceSetRebind(ctx context.Context, selected Store, skipIdentityKey string) error {
-	agents, err := selected.LoadAgents(ctx)
+func validateFixtureStaticSourceSetRebind(ctx context.Context, selected Store) ([]runtimemanager.AgentLifecycleState, error) {
+	states, err := selected.ListDurableAgentLifecycleStates(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	for _, rec := range agents {
-		if rec.ProcessBinding.BundleHash != agentFixtureBundleHash || rec.ProcessBinding.BundleSource != "ephemeral" {
+	sort.Slice(states, func(i, j int) bool {
+		left, _ := states[i].Identity.Normalize().Fingerprint()
+		right, _ := states[j].Identity.Normalize().Fingerprint()
+		return left < right
+	})
+	for _, state := range states {
+		if state.Phase == runtimemanager.AgentLifecycleTerminated ||
+			state.ProcessBinding.BundleHash != agentFixtureBundleHash || state.ProcessBinding.BundleSource != "ephemeral" {
 			continue
 		}
-		identity, identityErr := rec.Config.ConcreteIdentity()
-		if identityErr != nil {
-			return identityErr
+		identity := state.Identity.Normalize()
+		if err := identity.Validate(); err != nil {
+			return nil, fmt.Errorf("agent fixture source-set rebind found invalid identity: %w", err)
 		}
-		identityKey, identityErr := identity.Fingerprint()
-		if identityErr != nil {
-			return identityErr
+		if err := state.Topology.Validate(); err != nil {
+			return nil, fmt.Errorf("agent fixture source-set rebind found invalid topology for %s: %w", identity.Description(), err)
 		}
-		if identityKey == skipIdentityKey {
-			continue
-		}
-		if err := rec.Topology.Validate(); err != nil {
-			return fmt.Errorf("agent fixture source-set rebind found invalid topology for %s: %w", identity.Description(), err)
-		}
-		if rec.Topology.Authority.Kind != runtimeagenttopology.AuthorityStaticDeclarationPlan {
-			return fmt.Errorf(
+		if state.Topology.Authority.Kind != runtimeagenttopology.AuthorityStaticDeclarationPlan {
+			return nil, fmt.Errorf(
 				"agent fixture cannot change static source-set authority while %s retains %s topology",
-				identity.Description(), rec.Topology.Authority.Kind,
+				identity.Description(), state.Topology.Authority.Kind,
 			)
 		}
 	}
-	return nil
+	return states, nil
 }
 
-func (s *fixtureSession) grantForPlan(ctx context.Context, selected Store, plan runtimeagenttopology.SourceSetPlan, skipIdentityKey string) (runtimestartupownership.GenerationGrant, error) {
+func (s *fixtureSession) grantForStaticPlan(ctx context.Context, selected Store, plan runtimeagenttopology.SourceSetPlan, skipIdentityKey string) (runtimestartupownership.GenerationGrant, error) {
+	states, err := validateFixtureStaticSourceSetRebind(ctx, selected)
+	if err != nil {
+		return nil, err
+	}
 	if s.grant != nil && s.grantRevision == plan.Revision {
 		if _, err := s.grant.Evidence(); err == nil {
 			return s.grant, nil
 		}
 	}
-	grant, err := s.capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
-		BundleHash: agentFixtureBundleHash, BundleSource: "ephemeral", RuntimeInstanceID: s.runtimeInstanceID,
-		RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
-	})
+	grant, err := s.issueGrant(ctx, plan)
 	if err != nil {
 		return nil, err
 	}
@@ -153,47 +154,19 @@ func (s *fixtureSession) grantForPlan(ctx context.Context, selected Store, plan 
 	if err != nil {
 		return nil, err
 	}
-	agents, err := selected.LoadAgents(ctx)
-	if err != nil {
-		return nil, err
-	}
-	sort.Slice(agents, func(i, j int) bool {
-		left, _ := agents[i].Config.ConcreteIdentity()
-		right, _ := agents[j].Config.ConcreteIdentity()
-		leftKey, _ := left.Fingerprint()
-		rightKey, _ := right.Fingerprint()
-		return leftKey < rightKey
-	})
-	for _, rec := range agents {
-		if rec.ProcessBinding.BundleHash != agentFixtureBundleHash || rec.ProcessBinding.BundleSource != "ephemeral" || rec.ProcessBinding.Equal(target) {
+	for _, state := range states {
+		if state.Phase == runtimemanager.AgentLifecycleTerminated ||
+			state.ProcessBinding.BundleHash != agentFixtureBundleHash || state.ProcessBinding.BundleSource != "ephemeral" ||
+			state.ProcessBinding.Equal(target) {
 			continue
 		}
-		identity, identityErr := rec.Config.ConcreteIdentity()
-		if identityErr != nil {
-			return nil, identityErr
-		}
+		identity := state.Identity.Normalize()
 		identityKey, identityErr := identity.Fingerprint()
 		if identityErr != nil {
 			return nil, identityErr
 		}
 		if identityKey == skipIdentityKey {
 			continue
-		}
-		if err := rec.Topology.Validate(); err != nil {
-			return nil, fmt.Errorf("agent fixture source-set rebind found invalid topology for %s: %w", identity.Description(), err)
-		}
-		if rec.Topology.Authority.Kind != runtimeagenttopology.AuthorityStaticDeclarationPlan {
-			return nil, fmt.Errorf(
-				"agent fixture cannot change static source-set authority while %s retains %s topology",
-				identity.Description(), rec.Topology.Authority.Kind,
-			)
-		}
-		state, found, stateErr := selected.LoadAgentLifecycleState(ctx, identity)
-		if stateErr != nil {
-			return nil, stateErr
-		}
-		if !found {
-			return nil, fmt.Errorf("agent fixture lifecycle state disappeared for %s", identity.Description())
 		}
 		kind := "source_set_rebind"
 		targetEpoch, targetGeneration := state.RuntimeEpoch, state.Generation
@@ -225,9 +198,103 @@ func (s *fixtureSession) grantForPlan(ctx context.Context, selected Store, plan 
 	return grant, nil
 }
 
-// Upsert admits a durable agent fixture through the same complete source-set
-// and generation-grant boundary as production startup.
-func Upsert(t testing.TB, ctx context.Context, selected Store, rec runtimemanager.PersistedAgent) error {
+func (s *fixtureSession) grantForExactPlan(ctx context.Context, plan runtimeagenttopology.SourceSetPlan) (runtimestartupownership.GenerationGrant, error) {
+	if s.grant != nil && s.grantRevision == plan.Revision {
+		if _, err := s.grant.Evidence(); err == nil {
+			return s.grant, nil
+		}
+	}
+	grant, err := s.issueGrant(ctx, plan)
+	if err != nil {
+		return nil, err
+	}
+	s.grant = grant
+	s.grantRevision = plan.Revision
+	return grant, nil
+}
+
+func (s *fixtureSession) issueGrant(ctx context.Context, plan runtimeagenttopology.SourceSetPlan) (runtimestartupownership.GenerationGrant, error) {
+	return s.capability.IssueGenerationGrant(ctx, runtimestartupownership.GrantRequest{
+		BundleHash: agentFixtureBundleHash, BundleSource: "ephemeral", RuntimeInstanceID: s.runtimeInstanceID,
+		RuntimeGeneration: 1, SourceSetRevision: plan.Revision,
+	})
+}
+
+func admissionIsZero(admission runtimeagenttopology.Admission) bool {
+	return admission.Lifetime == "" && admission.Authority.Kind == "" &&
+		admission.Authority.Static == nil && admission.Authority.Readiness == nil && admission.Authority.Ephemeral == nil
+}
+
+func validateSyntheticStaticAdmission(admission runtimeagenttopology.Admission, field string) error {
+	if !admissionIsZero(admission) {
+		return fmt.Errorf("%s must not carry topology; use the exact durable fixture operation", field)
+	}
+	return nil
+}
+
+func validateSyntheticStaticTransition(req runtimemanager.AgentLifecycleTransition) (runtimeagentidentity.Identity, string, error) {
+	if err := validateSyntheticStaticAdmission(req.Topology, "synthetic static lifecycle transition"); err != nil {
+		return runtimeagentidentity.Identity{}, "", err
+	}
+	identity := req.Identity.Normalize()
+	key, err := identity.Fingerprint()
+	if err != nil {
+		return runtimeagentidentity.Identity{}, "", err
+	}
+	if req.Agent == nil {
+		return identity, key, nil
+	}
+	if err := validateSyntheticStaticAdmission(req.Agent.Topology, "synthetic static lifecycle agent"); err != nil {
+		return runtimeagentidentity.Identity{}, "", err
+	}
+	agentIdentity, err := req.Agent.Config.ConcreteIdentity()
+	if err != nil {
+		return runtimeagentidentity.Identity{}, "", err
+	}
+	if agentIdentity.Normalize() != identity {
+		return runtimeagentidentity.Identity{}, "", fmt.Errorf("synthetic static lifecycle agent identity does not match transition identity")
+	}
+	return identity, key, nil
+}
+
+func validateExactDurableTransition(req runtimemanager.AgentLifecycleTransition) (runtimeagentidentity.Identity, string, runtimeagenttopology.AuthorityKind, error) {
+	if err := req.Topology.Validate(); err != nil {
+		return runtimeagentidentity.Identity{}, "", "", fmt.Errorf("exact lifecycle fixture topology: %w", err)
+	}
+	if req.Topology.Lifetime != runtimeagenttopology.LifetimeDurableManaged {
+		return runtimeagentidentity.Identity{}, "", "", fmt.Errorf("exact lifecycle fixture requires durable managed topology")
+	}
+	switch req.Topology.Authority.Kind {
+	case runtimeagenttopology.AuthorityStaticDeclarationPlan, runtimeagenttopology.AuthorityFlowReadinessPlan:
+	case runtimeagenttopology.AuthorityEphemeralExecution:
+		return runtimeagentidentity.Identity{}, "", "", fmt.Errorf("exact lifecycle fixture cannot persist ephemeral execution topology")
+	default:
+		return runtimeagentidentity.Identity{}, "", "", fmt.Errorf("exact lifecycle fixture topology kind %q is unsupported", req.Topology.Authority.Kind)
+	}
+	identity := req.Identity.Normalize()
+	key, err := identity.Fingerprint()
+	if err != nil {
+		return runtimeagentidentity.Identity{}, "", "", err
+	}
+	if req.Agent != nil {
+		if !req.Agent.Topology.Equal(req.Topology) {
+			return runtimeagentidentity.Identity{}, "", "", fmt.Errorf("exact lifecycle fixture agent topology does not match transition topology")
+		}
+		agentIdentity, identityErr := req.Agent.Config.ConcreteIdentity()
+		if identityErr != nil {
+			return runtimeagentidentity.Identity{}, "", "", identityErr
+		}
+		if agentIdentity.Normalize() != identity {
+			return runtimeagentidentity.Identity{}, "", "", fmt.Errorf("exact lifecycle fixture agent identity does not match transition identity")
+		}
+	}
+	return identity, key, req.Topology.Authority.Kind, nil
+}
+
+// UpsertStatic admits a synthetic static durable agent through the complete
+// source-set and generation-grant boundary. Caller-provided topology is never
+// interpreted or overwritten.
+func UpsertStatic(t testing.TB, ctx context.Context, selected Store, rec runtimemanager.PersistedAgent) error {
 	t.Helper()
 	if selected == nil {
 		return fmt.Errorf("agent fixture selected store is required")
@@ -235,12 +302,19 @@ func Upsert(t testing.TB, ctx context.Context, selected Store, rec runtimemanage
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := validateSyntheticStaticAdmission(rec.Topology, "synthetic static agent"); err != nil {
+		return err
+	}
 	identity, err := rec.Config.ConcreteIdentity()
 	if err != nil {
 		return err
 	}
 	configRevision, err := canonicaljson.Hash(rec.Config)
 	if err != nil {
+		return err
+	}
+	configRevision = strings.TrimPrefix(configRevision, "sha256:")
+	if _, err := validateFixtureStaticSourceSetRebind(ctx, selected); err != nil {
 		return err
 	}
 	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: agentFixtureBundleHash, BundleSource: "ephemeral"}
@@ -293,10 +367,10 @@ func Upsert(t testing.TB, ctx context.Context, selected Store, rec runtimemanage
 	if replaced {
 		skipRebindKey = key
 	}
+	if _, err := validateFixtureStaticSourceSetRebind(ctx, selected); err != nil {
+		return err
+	}
 	if !exists || current.Revision != plan.Revision {
-		if err := validateFixtureStaticSourceSetRebind(ctx, selected, skipRebindKey); err != nil {
-			return err
-		}
 		commit := runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}
 		if exists {
 			commit.ExpectedRevision = current.Revision
@@ -308,7 +382,7 @@ func Upsert(t testing.TB, ctx context.Context, selected Store, rec runtimemanage
 			return err
 		}
 	}
-	grant, err := session.grantForPlan(ctx, selected, plan, skipRebindKey)
+	grant, err := session.grantForStaticPlan(ctx, selected, plan, skipRebindKey)
 	if err != nil {
 		return err
 	}
@@ -360,16 +434,23 @@ func Upsert(t testing.TB, ctx context.Context, selected Store, rec runtimemanage
 	return nil
 }
 
-// Commit admits an exact lifecycle fixture through a retained process
-// capability. Static transitions update the complete fixture source set;
-// flow-readiness transitions retain that set and its current generation grant.
-func Commit(t testing.TB, ctx context.Context, selected Store, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
+// CommitStatic applies one synthetic static lifecycle transition. It is the
+// only direct lifecycle fixture operation allowed to derive source-set
+// membership and static admission.
+func CommitStatic(t testing.TB, ctx context.Context, selected Store, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
 	t.Helper()
 	if selected == nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, fmt.Errorf("agent lifecycle fixture selected store is required")
 	}
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	identity, key, err := validateSyntheticStaticTransition(req)
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	if _, err := validateFixtureStaticSourceSetRebind(ctx, selected); err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
 	session, err := fixtureSessionFor(t, ctx, selected)
 	if err != nil {
@@ -394,11 +475,6 @@ func Commit(t testing.TB, ctx context.Context, selected Store, req runtimemanage
 		sources = append(sources, coordinate)
 	}
 	agents := append([]runtimeagenttopology.DesiredAgent(nil), current.Agents...)
-	identity := req.Identity.Normalize()
-	key, err := identity.Fingerprint()
-	if err != nil {
-		return runtimemanager.AgentLifecycleTransitionResult{}, err
-	}
 	stateBeforePlan, stateBeforePlanFound, err := loadState(ctx, selected, identity)
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
@@ -406,34 +482,19 @@ func Commit(t testing.TB, ctx context.Context, selected Store, req runtimemanage
 	if stateBeforePlanFound && req.OperationKind != "spawn" && req.OperationKind != "reconfigure" {
 		req.ConfigRevision = stateBeforePlan.ConfigRevision
 	}
-	flowReadiness := req.Topology.Validate() == nil && req.Topology.Authority.Kind == runtimeagenttopology.AuthorityFlowReadinessPlan
-	if flowReadiness {
-		for _, agent := range agents {
-			candidate, keyErr := agent.Identity.Normalize().Fingerprint()
-			if keyErr != nil {
-				return runtimemanager.AgentLifecycleTransitionResult{}, keyErr
-			}
-			if candidate == key {
-				return runtimemanager.AgentLifecycleTransitionResult{}, fmt.Errorf(
-					"flow-readiness fixture %s conflicts with static desired-agent authority", identity.Description(),
-				)
-			}
+	filtered := agents[:0]
+	for _, agent := range agents {
+		candidate, keyErr := agent.Identity.Normalize().Fingerprint()
+		if keyErr != nil {
+			return runtimemanager.AgentLifecycleTransitionResult{}, keyErr
 		}
-	} else {
-		filtered := agents[:0]
-		for _, agent := range agents {
-			candidate, keyErr := agent.Identity.Normalize().Fingerprint()
-			if keyErr != nil {
-				return runtimemanager.AgentLifecycleTransitionResult{}, keyErr
-			}
-			if candidate != key {
-				filtered = append(filtered, agent)
-			}
+		if candidate != key {
+			filtered = append(filtered, agent)
 		}
-		agents = filtered
-		if req.TargetPhase != runtimemanager.AgentLifecycleTerminated {
-			agents = append(agents, runtimeagenttopology.DesiredAgent{Identity: identity, Source: coordinate, ConfigRevision: req.ConfigRevision})
-		}
+	}
+	agents = filtered
+	if req.TargetPhase != runtimemanager.AgentLifecycleTerminated {
+		agents = append(agents, runtimeagenttopology.DesiredAgent{Identity: identity, Source: coordinate, ConfigRevision: req.ConfigRevision})
 	}
 	plan, err := runtimeagenttopology.NewSourceSetPlan(sources, agents)
 	if err != nil {
@@ -443,10 +504,10 @@ func Commit(t testing.TB, ctx context.Context, selected Store, req runtimemanage
 	if stateBeforePlanFound {
 		skipRebindKey = key
 	}
+	if _, err := validateFixtureStaticSourceSetRebind(ctx, selected); err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
 	if !exists || current.Revision != plan.Revision {
-		if err := validateFixtureStaticSourceSetRebind(ctx, selected, skipRebindKey); err != nil {
-			return runtimemanager.AgentLifecycleTransitionResult{}, err
-		}
 		commit := runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}
 		if exists {
 			commit.ExpectedRevision = current.Revision
@@ -458,18 +519,16 @@ func Commit(t testing.TB, ctx context.Context, selected Store, req runtimemanage
 			return runtimemanager.AgentLifecycleTransitionResult{}, err
 		}
 	}
-	grant, err := session.grantForPlan(ctx, selected, plan, skipRebindKey)
+	grant, err := session.grantForStaticPlan(ctx, selected, plan, skipRebindKey)
 	if err != nil {
 		return runtimemanager.AgentLifecycleTransitionResult{}, err
 	}
-	if req.Topology.Validate() != nil || req.Topology.Authority.Kind == runtimeagenttopology.AuthorityStaticDeclarationPlan {
-		req.Topology, err = runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged)
-		if err != nil {
-			return runtimemanager.AgentLifecycleTransitionResult{}, err
-		}
-		if req.Agent != nil {
-			req.Agent.Topology = req.Topology
-		}
+	req.Topology, err = runtimeagenttopology.StaticAdmission(plan.Revision, coordinate.BundleHash, coordinate.BundleSource, runtimeagenttopology.LifetimeDurableManaged)
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	if req.Agent != nil {
+		req.Agent.Topology = req.Topology
 	}
 	if stateBeforePlanFound {
 		stateAfterPlan, found, stateErr := loadState(ctx, selected, identity)
@@ -489,6 +548,127 @@ func Commit(t testing.TB, ctx context.Context, selected Store, req runtimemanage
 			return runtimemanager.AgentLifecycleTransitionResult{}, bindingErr
 		}
 		classifyFixtureTransition(&req, stateAfterPlan, binding)
+	}
+	return grant.CommitAgentLifecycleTransition(ctx, req)
+}
+
+// CommitExact persists one caller-supplied durable sealed topology. Flow
+// readiness never enters the static desired-agent set, and exact static
+// authority must already agree with that complete set.
+func CommitExact(t testing.TB, ctx context.Context, selected Store, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
+	t.Helper()
+	if selected == nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, fmt.Errorf("agent lifecycle fixture selected store is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	identity, key, kind, err := validateExactDurableTransition(req)
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	session, err := fixtureSessionFor(t, ctx, selected)
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	current, exists, err := session.capability.CurrentSourceSet(ctx)
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	coordinate := runtimeagenttopology.SourceCoordinate{BundleHash: agentFixtureBundleHash, BundleSource: "ephemeral"}
+	plan := current
+	switch kind {
+	case runtimeagenttopology.AuthorityFlowReadinessPlan:
+		for _, agent := range current.Agents {
+			candidate, keyErr := agent.Identity.Normalize().Fingerprint()
+			if keyErr != nil {
+				return runtimemanager.AgentLifecycleTransitionResult{}, keyErr
+			}
+			if candidate == key {
+				return runtimemanager.AgentLifecycleTransitionResult{}, fmt.Errorf(
+					"flow-readiness fixture %s conflicts with static desired-agent authority", identity.Description(),
+				)
+			}
+		}
+		sources := append([]runtimeagenttopology.SourceCoordinate(nil), current.Sources...)
+		foundSource := false
+		for _, source := range sources {
+			if source.Normalize().Key() == coordinate.Key() {
+				foundSource = true
+				break
+			}
+		}
+		if !foundSource {
+			sources = append(sources, coordinate)
+			plan, err = runtimeagenttopology.NewSourceSetPlan(sources, current.Agents)
+			if err != nil {
+				return runtimemanager.AgentLifecycleTransitionResult{}, err
+			}
+			states, censusErr := selected.ListDurableAgentLifecycleStates(ctx)
+			if censusErr != nil {
+				return runtimemanager.AgentLifecycleTransitionResult{}, censusErr
+			}
+			for _, state := range states {
+				if state.Phase != runtimemanager.AgentLifecycleTerminated &&
+					state.ProcessBinding.BundleHash == agentFixtureBundleHash && state.ProcessBinding.BundleSource == "ephemeral" {
+					return runtimemanager.AgentLifecycleTransitionResult{}, fmt.Errorf("agent fixture source coordinate is missing while durable fixture lifecycle cells remain")
+				}
+			}
+			commit := runtimeagenttopology.SourceSetCommitRequest{OperationID: uuid.NewString(), Plan: plan}
+			if exists {
+				commit.ExpectedRevision = current.Revision
+				_, err = session.capability.ReplaceSourceSet(ctx, commit)
+			} else {
+				_, err = session.capability.InstallCompleteSourceSet(ctx, commit)
+			}
+			if err != nil {
+				return runtimemanager.AgentLifecycleTransitionResult{}, err
+			}
+		}
+	case runtimeagenttopology.AuthorityStaticDeclarationPlan:
+		static := req.Topology.Authority.Static
+		if !exists || static == nil || static.SourceSetRevision != current.Revision ||
+			static.BundleHash != coordinate.BundleHash || static.BundleSource != coordinate.BundleSource {
+			return runtimemanager.AgentLifecycleTransitionResult{}, fmt.Errorf("exact static lifecycle topology does not match the current fixture source set")
+		}
+		matched := false
+		desiredRevision := ""
+		desiredSource := runtimeagenttopology.SourceCoordinate{}
+		for _, agent := range current.Agents {
+			candidate, keyErr := agent.Identity.Normalize().Fingerprint()
+			if keyErr != nil {
+				return runtimemanager.AgentLifecycleTransitionResult{}, keyErr
+			}
+			if candidate == key {
+				desiredRevision = agent.ConfigRevision
+				desiredSource = agent.Source.Normalize()
+				matched = agent.ConfigRevision == req.ConfigRevision && agent.Source.Normalize().Key() == coordinate.Key()
+				break
+			}
+		}
+		if !matched {
+			return runtimemanager.AgentLifecycleTransitionResult{}, fmt.Errorf(
+				"exact static lifecycle topology is not present in the current fixture source set: desired_revision=%q requested_revision=%q desired_source=%q requested_source=%q",
+				desiredRevision, req.ConfigRevision, desiredSource.Key(), coordinate.Key(),
+			)
+		}
+	}
+	grant, err := session.grantForExactPlan(ctx, plan)
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	state, stateFound, err := loadState(ctx, selected, identity)
+	if err != nil {
+		return runtimemanager.AgentLifecycleTransitionResult{}, err
+	}
+	if stateFound {
+		binding, bindingErr := grant.ProcessExecutionBinding()
+		if bindingErr != nil {
+			return runtimemanager.AgentLifecycleTransitionResult{}, bindingErr
+		}
+		classifyFixtureTransition(&req, state, binding)
 	}
 	return grant.CommitAgentLifecycleTransition(ctx, req)
 }

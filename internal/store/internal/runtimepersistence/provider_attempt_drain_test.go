@@ -11,6 +11,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
@@ -630,16 +631,17 @@ func TestProviderAttemptDrainRejectsTransitionWhilePendingParity(t *testing.T) {
 	forEachProviderDrainStore(t, func(t *testing.T, fixture completionSettlementFixture) {
 		ctx := providerDrainContext(t, fixture, "pending-drain-transition-fence")
 		handle := beginObservedCompletionForSettlementTest(t, ctx, "anthropic_api", "pending-drain-transition-fence")
-		transition := supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleTerminated)
+		transition := supersedeProviderDrainFixture(t, fixture, runtimemanager.AgentLifecycleFailed)
 		for _, operation := range []string{"restart", "reconfigure"} {
+			state := providerDrainFixtureState(t, fixture)
 			_, err := fixture.lifecycle.CommitAgentLifecycleTransition(testAuthorActivityContext(), runtimemanager.AgentLifecycleTransition{
 				OperationID: uuid.NewString(), OperationKind: operation, RequestHash: "pending-drain-" + operation,
 				Identity: fixture.authority.Normal.Identity, AgentID: fixture.agentID, Trigger: "provider_drain_test",
 				ExpectedEpoch: fixture.authority.Normal.RuntimeEpoch, ExpectedGeneration: transition.Generation,
 				ExpectedPhase: runtimemanager.AgentLifecycleDraining,
 				TargetEpoch:   fixture.authority.Normal.RuntimeEpoch, TargetGeneration: transition.Generation + 1,
-				TargetPhase: runtimemanager.AgentLifecycleRunning, ConfigRevision: "pending-drain-reintroduction",
-				RunMode: runtimemanager.AgentRunModeStandard, Now: time.Now().UTC(),
+				TargetPhase: runtimemanager.AgentLifecycleRunning, ConfigRevision: state.ConfigRevision,
+				RunMode: runtimemanager.AgentRunModeStandard, Topology: state.Topology, Now: time.Now().UTC(),
 			})
 			failure, matched := runtimefailures.As(err)
 			if err == nil || !matched || failure.Failure.Detail.Code != "provider_attempt_drain_transition_blocked" {
@@ -785,14 +787,30 @@ func commitProviderDrainTransition(t testing.TB, fixture completionSettlementFix
 	if phase == runtimemanager.AgentLifecycleRunning {
 		runMode = runtimemanager.AgentRunModeStandard
 	}
-	return fixture.lifecycle.CommitAgentLifecycleTransition(testAuthorActivityContext(), runtimemanager.AgentLifecycleTransition{
+	state := providerDrainFixtureState(t, fixture)
+	transition := runtimemanager.AgentLifecycleTransition{
 		OperationID: uuid.NewString(), OperationKind: kind, RequestHash: "provider-drain-" + kind,
 		Identity: fixture.authority.Normal.Identity, AgentID: fixture.agentID, Trigger: "provider_drain_test",
 		ExpectedEpoch: fixture.authority.Normal.RuntimeEpoch, ExpectedGeneration: fixture.authority.Normal.Generation,
 		ExpectedPhase: runtimemanager.AgentLifecycleRunning,
 		TargetEpoch:   fixture.authority.Normal.RuntimeEpoch, TargetGeneration: fixture.authority.Normal.Generation + 1,
-		TargetPhase: phase, ConfigRevision: "provider-drain-revision", RunMode: runMode, Now: time.Now().UTC(),
-	})
+		TargetPhase: phase, ConfigRevision: state.ConfigRevision, RunMode: runMode,
+		Topology: state.Topology, Now: time.Now().UTC(),
+	}
+	if kind == "teardown" {
+		transition.Topology = runtimeagenttopology.Admission{}
+		return agentfixture.CommitStatic(fixture.agentOwner, testAuthorActivityContext(), fixture.store, transition)
+	}
+	return fixture.lifecycle.CommitAgentLifecycleTransition(testAuthorActivityContext(), transition)
+}
+
+func providerDrainFixtureState(t testing.TB, fixture completionSettlementFixture) runtimemanager.AgentLifecycleState {
+	t.Helper()
+	state, found, err := fixture.store.LoadAgentLifecycleState(testAuthorActivityContext(), fixture.authority.Normal.Identity)
+	if err != nil || !found {
+		t.Fatalf("load provider-drain fixture topology: found=%v err=%v", found, err)
+	}
+	return state
 }
 
 func requireProviderDrainCount(t *testing.T, fixture completionSettlementFixture, attemptID string, want int) {
@@ -1062,7 +1080,7 @@ func newProviderDrainSiblingFixture(t *testing.T, fixture completionSettlementFi
 		t.Fatalf("same-slug sibling identity: %v", err)
 	}
 	now := time.Now().UTC()
-	if err := agentfixture.Upsert(fixture.agentOwner, testAuthorActivityContext(), fixture.store, runtimemanager.PersistedAgent{
+	if err := agentfixture.UpsertStatic(fixture.agentOwner, testAuthorActivityContext(), fixture.store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ExecutionMode: "live", ID: fields.AgentID, Identity: sibling.authority.Normal.Identity,
 			Role: "worker", Type: "managed", Model: "regular", LLMBackend: "claude_cli",

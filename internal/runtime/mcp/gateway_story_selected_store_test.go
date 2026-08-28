@@ -323,7 +323,7 @@ func seedGatewayStoryRuntime(t *testing.T, selected gatewayStorySelectedStore, r
 	} else {
 		runlifecyclefixture.RequireSQLite(t, context.Background(), selected.db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, StartedAt: now, BundleHash: bundleHash, BundleSource: bundleSource})
 	}
-	if err := storetest.UpsertAgentFixture(t, context.Background(), selected.backend, runtimemanager.PersistedAgent{
+	if err := storetest.UpsertStaticAgentFixture(t, context.Background(), selected.backend, runtimemanager.PersistedAgent{
 		Config: actor, Status: "active", StartedAt: now,
 		LifecycleEpoch: 7, LifecycleGeneration: 3,
 		LifecyclePhase: runtimemanager.AgentLifecycleRunning, LifecycleRunMode: runtimemanager.AgentRunModeStandard,

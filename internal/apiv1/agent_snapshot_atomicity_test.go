@@ -588,7 +588,7 @@ func newAgentSnapshotBoundaryFixture(t *testing.T, backend agentSnapshotBackend)
 	for _, agentID := range []string{"snapshot-agent-a", "snapshot-agent-b"} {
 		identity := sqliteAgentUsageIdentity(t, agentID)
 		identities[agentID] = identity
-		if err := storetest.UpsertAgentFixture(t, ctx, store, runtimemanager.PersistedAgent{
+		if err := storetest.UpsertStaticAgentFixture(t, ctx, store, runtimemanager.PersistedAgent{
 			Config: runtimeactors.AgentConfig{
 				Identity: identity, ID: agentID, Role: "worker", Type: "managed", Model: "regular",
 				ExecutionMode: "live", ResolvedLLMBackend: "anthropic", FlowID: "flow",

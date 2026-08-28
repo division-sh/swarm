@@ -91,14 +91,15 @@ func TestDestructiveResetFailsClosedWhileDirectiveBoardStepIsRunning(t *testing.
 		HiredBy:   "destructive-reset-test",
 		StartedAt: time.Now().UTC(),
 	}
-	rec.Topology, err = runtimeagenttopology.NewEphemeralAdmission(uuid.NewString(), "runtime_shard")
+	if err := agentfixture.UpsertStatic(t, ctx, pg, rec); err != nil {
+		t.Fatalf("UpsertAgent: %v", err)
+	}
+	executionRec := rec
+	executionRec.Topology, err = runtimeagenttopology.NewEphemeralAdmission(uuid.NewString(), "runtime_shard")
 	if err != nil {
 		t.Fatalf("build ephemeral topology admission: %v", err)
 	}
-	if err := agentfixture.Upsert(t, ctx, pg, rec); err != nil {
-		t.Fatalf("UpsertAgent: %v", err)
-	}
-	if err := manager.MaterializeAdmittedAgentForExecution(ctx, rec); err != nil {
+	if err := manager.MaterializeAdmittedAgentForExecution(ctx, executionRec); err != nil {
 		t.Fatalf("MaterializeAdmittedAgentForExecution: %v", err)
 	}
 	request := runtimeagentcontrol.SendDirectiveRequest{

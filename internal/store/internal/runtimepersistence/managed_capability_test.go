@@ -236,7 +236,7 @@ func seedManagedTurnFixtureAgent(t testing.TB, ctx context.Context, store comple
 	if strings.TrimSpace(flowInstance) != "" {
 		memory = agentmemory.Authored(true)
 	}
-	if err := agentfixture.Upsert(t, ctx, store, runtimemanager.PersistedAgent{
+	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ExecutionMode: "live", ID: agentID, Identity: identity.Agent, Role: "worker", Type: "managed",
 			Model: "regular", LLMBackend: "anthropic", ResolvedLLMBackend: "anthropic",

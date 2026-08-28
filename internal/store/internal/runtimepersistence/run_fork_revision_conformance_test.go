@@ -616,7 +616,7 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 		}),
 		Status: "active", HiredBy: "revision-proof", StartedAt: now,
 	}
-	spawned, err := agentfixture.Commit(t, ctx, store, runtimemanager.AgentLifecycleTransition{
+	spawned, err := agentfixture.CommitStatic(t, ctx, store, runtimemanager.AgentLifecycleTransition{
 		OperationID: uuid.NewString(), OperationKind: "spawn", RequestHash: "revision-spawn",
 		Identity: identity, AgentID: agentID, Trigger: "spawn", TargetEpoch: 1, TargetGeneration: 1,
 		TargetPhase: runtimemanager.AgentLifecycleRegistered, ConfigRevision: "revision-1",
@@ -625,7 +625,7 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 	if err != nil {
 		t.Fatalf("spawn lifecycle agent: %v", err)
 	}
-	started, err := agentfixture.Commit(t, ctx, store, runtimemanager.AgentLifecycleTransition{
+	started, err := agentfixture.CommitStatic(t, ctx, store, runtimemanager.AgentLifecycleTransition{
 		OperationID: uuid.NewString(), OperationKind: "start", RequestHash: "revision-start",
 		Identity: identity, AgentID: agentID, Trigger: "start", ExpectedEpoch: spawned.RuntimeEpoch,
 		ExpectedGeneration: spawned.Generation, ExpectedPhase: spawned.Phase,
@@ -668,7 +668,7 @@ func TestPostgresLifecycleSessionMutationPublishesRunForkRevision(t *testing.T) 
 		t.Fatalf("commit lifecycle source revision: %v", err)
 	}
 
-	if _, err := agentfixture.Commit(t, ctx, store, runtimemanager.AgentLifecycleTransition{
+	if _, err := agentfixture.CommitStatic(t, ctx, store, runtimemanager.AgentLifecycleTransition{
 		OperationID: uuid.NewString(), OperationKind: "teardown", RequestHash: "revision-terminate",
 		Identity: identity, AgentID: agentID, Trigger: "terminate", ExpectedEpoch: started.RuntimeEpoch,
 		ExpectedGeneration: started.Generation, ExpectedPhase: started.Phase,

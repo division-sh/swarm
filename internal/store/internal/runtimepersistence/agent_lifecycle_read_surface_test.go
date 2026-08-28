@@ -235,7 +235,7 @@ func seedAgentLifecycleSession(t *testing.T, ctx context.Context, pg *PostgresSt
 	if err != nil {
 		t.Fatalf("seed lifecycle identity: %v", err)
 	}
-	if err := agentfixture.Upsert(t, ctx, pg, runtimemanager.PersistedAgent{
+	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ExecutionMode: "live", ID: fields.AgentID, Identity: identity, Role: "worker", Type: "managed",
 			Model: "test", Memory: agentmemory.Authored(true), FlowPath: fields.FlowInstancePath,

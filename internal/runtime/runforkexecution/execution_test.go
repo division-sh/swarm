@@ -4700,7 +4700,7 @@ func seedSelectedExecutionTestAgent(
 		FlowPath:           identity.FlowInstance(),
 		Config:             []byte(`{}`),
 	})
-	if err := storetest.UpsertAgentFixture(t, ctx, selected, runtimemanager.PersistedAgent{
+	if err := storetest.UpsertStaticAgentFixture(t, ctx, selected, runtimemanager.PersistedAgent{
 		Config: config, Status: "active", HiredBy: "test", StartedAt: at,
 	}); err != nil {
 		t.Fatalf("seed selected-execution test agent: %v", err)

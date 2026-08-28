@@ -40,7 +40,7 @@ func TestOperatorDeadLetterEvidenceIsScopedToExactDeliveryParity(t *testing.T) {
 			eventID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			identity := testAgentIdentity(t, "agent-a", "global")
-			if err := agentfixture.Upsert(t, ctx, selected, runtimemanager.PersistedAgent{
+			if err := agentfixture.UpsertStatic(t, ctx, selected, runtimemanager.PersistedAgent{
 				Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 					Identity: identity, ID: "agent-a", Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
 					Memory: agentmemory.PlatformDefault(), FlowPath: "global", Config: json.RawMessage(`{}`),
@@ -132,7 +132,7 @@ func TestOperatorRunTerminalizationPreservesExactDeadLetterEvidenceParity(t *tes
 			eventID := uuid.NewString()
 			seedAuthorActivityReceiptRun(t, fixture, ctx, runID)
 			identity := testAgentIdentity(t, "terminal-agent", "global")
-			if err := agentfixture.Upsert(t, ctx, selected, runtimemanager.PersistedAgent{
+			if err := agentfixture.UpsertStatic(t, ctx, selected, runtimemanager.PersistedAgent{
 				Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 					Identity: identity, ID: "terminal-agent", Role: "worker", Type: "managed", Model: "regular", ExecutionMode: "live",
 					Memory: agentmemory.PlatformDefault(), FlowPath: "global", Config: json.RawMessage(`{}`),

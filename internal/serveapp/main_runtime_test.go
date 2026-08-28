@@ -152,7 +152,7 @@ func requireServeTestAgentFixture(t testing.TB, selected storetest.AgentFixtureS
 	if cfg.ExecutionMode == "" {
 		cfg.ExecutionMode = runtimeeffects.ExecutionModeLive
 	}
-	storetest.RequireAgentFixture(t, context.Background(), selected, runtimemanager.PersistedAgent{
+	storetest.RequireStaticAgentFixture(t, context.Background(), selected, runtimemanager.PersistedAgent{
 		Config: cfg, Status: "active", HiredBy: "serve-test-fixture",
 	})
 }

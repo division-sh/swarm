@@ -1859,7 +1859,7 @@ func seedConformanceAgent(t *testing.T, ctx context.Context, pg *store.PostgresS
 	if err != nil {
 		t.Fatalf("derive conformance agent prompt: %v", err)
 	}
-	if err := storetest.UpsertAgentFixture(t, ctx, pg, runtimemanager.PersistedAgent{
+	if err := storetest.UpsertStaticAgentFixture(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID:                 agentID,
 			Identity:           identity,
