@@ -222,11 +222,15 @@ func (s *FileStore) Snapshot(_ context.Context, key string) (AtomicSnapshot, err
 		Writable: true,
 	}
 	if item, ok := doc.Entries[key]; ok {
+		epoch := strings.TrimSpace(item.Epoch)
+		if epoch == "" {
+			return AtomicSnapshot{}, fmt.Errorf("credential %q exists without an occurrence epoch", key)
+		}
 		snapshot.Present = true
 		snapshot.Source = SourceFile
 		snapshot.UpdatedAt = timePtr(item.UpdatedAt)
 		snapshot.value = item.Value
-		snapshot.occurrenceEpoch = strings.TrimSpace(item.Epoch)
+		snapshot.occurrenceEpoch = epoch
 	}
 	return snapshot, nil
 }

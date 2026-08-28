@@ -3,7 +3,9 @@ package credentials
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -177,6 +179,30 @@ func TestCredentialSnapshotOwnerUsesAtomicValueMetadataAndPrivateEpoch(t *testin
 	}
 	if missing.Present || missing.Epoch() == rotated.Epoch() {
 		t.Fatal("credential disappearance did not revoke the snapshot epoch")
+	}
+}
+
+func TestCredentialSnapshotOwnerRejectsFileOccurrenceWithoutPersistedEpoch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "credentials.json")
+	original := `{"version":1,"entries":{"bot":{"value":"unsupported-token","updated_at":"2026-08-28T00:00:00Z"}}}`
+	writeCredentialsFixtureFile(t, path, original)
+	store, err := NewFileStore(path)
+	if err != nil {
+		t.Fatalf("NewFileStore: %v", err)
+	}
+	owner, err := NewSnapshotOwner(store)
+	if err != nil {
+		t.Fatalf("NewSnapshotOwner: %v", err)
+	}
+	if _, err := owner.Observe(context.Background(), "bot"); err == nil || !strings.Contains(err.Error(), `credential "bot" exists without an occurrence epoch`) {
+		t.Fatalf("Observe error = %v, want missing occurrence epoch", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(raw) != original {
+		t.Fatalf("unsupported credential file was mutated:\n%s", raw)
 	}
 }
 

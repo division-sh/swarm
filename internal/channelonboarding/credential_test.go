@@ -84,6 +84,32 @@ func TestOnboardingCredentialOccurrenceSurvivesSnapshotOwnerRestart(t *testing.T
 	}
 }
 
+func TestOnboardingCredentialObservationRejectsFileOccurrenceWithoutPersistedEpoch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "credentials.json")
+	original := `{"version":1,"entries":{"channel.telegram.provider":{"value":"unsupported-token","updated_at":"2026-08-28T00:00:00Z"}}}`
+	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := runtimecredentials.NewFileStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer, err := NewCredentialWriter(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.Observe(context.Background(), "channel.telegram.provider"); err == nil || !strings.Contains(err.Error(), "exists without an occurrence epoch") {
+		t.Fatalf("Observe error = %v, want missing occurrence epoch", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != original {
+		t.Fatalf("unsupported credential file was mutated:\n%s", raw)
+	}
+}
+
 func TestOnboardingCredentialReleaseOwnsOnlyWrittenCurrentOccurrence(t *testing.T) {
 	store, err := runtimecredentials.NewFileStore(filepath.Join(t.TempDir(), "credentials.json"))
 	if err != nil {
