@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,6 +19,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
+	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -41,6 +41,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimesessions "github.com/division-sh/swarm/internal/runtime/sessions"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	agentfixture "github.com/division-sh/swarm/internal/store/testutil/agentfixture"
 	runtimepipelinefixture "github.com/division-sh/swarm/internal/testutil/runtimepipelinefixture"
 	"github.com/google/uuid"
 )
@@ -572,6 +573,18 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 		"reviewer\x00review/component-a",
 		"reviewer\x00review/component-b",
 	)
+	assertSQLiteActivatedAgentFlowTopologies(t, agents, runID, "review/component-a", "review/component-b")
+	capability, err := agentfixture.ProcessCapability(t, ctx, sqliteStore)
+	if err != nil {
+		t.Fatalf("load fixture process capability: %v", err)
+	}
+	plan, exists, err := capability.CurrentSourceSet(ctx)
+	if err != nil {
+		t.Fatalf("load fixture source set: %v", err)
+	}
+	if !exists || len(plan.Agents) != 0 {
+		t.Fatalf("fixture source set exists=%v agents=%#v, want no flow-owned static desired agents", exists, plan.Agents)
+	}
 	assertSQLiteAddedRoutes(t, bus, "review/component-a", "review/component-b")
 	assertSQLiteRouteMaterializationVars(t, bus, "review/component-a", map[string]string{
 		"flow_instance_path": "review/component-a",
@@ -896,6 +909,28 @@ func assertSQLiteActivatedAgentRoutes(t *testing.T, agents []runtimemanager.Pers
 	for _, want := range wantRoutes {
 		if _, ok := got[want]; !ok {
 			t.Fatalf("activated agent routes = %#v, missing %q", got, want)
+		}
+	}
+}
+
+func assertSQLiteActivatedAgentFlowTopologies(t *testing.T, agents []runtimemanager.PersistedAgent, runID string, wantPaths ...string) {
+	t.Helper()
+	byPath := make(map[string]runtimemanager.PersistedAgent, len(agents))
+	for _, rec := range agents {
+		byPath[rec.Config.Identity.FlowInstance()] = rec
+	}
+	for _, path := range wantPaths {
+		rec, ok := byPath[path]
+		if !ok {
+			t.Fatalf("activated agent for flow path %q is missing", path)
+		}
+		if err := rec.Topology.Validate(); err != nil {
+			t.Fatalf("activated agent topology for %s is invalid: %v", path, err)
+		}
+		readiness := rec.Topology.Authority.Readiness
+		if rec.Topology.Authority.Kind != runtimeagenttopology.AuthorityFlowReadinessPlan || readiness == nil ||
+			readiness.RunID != runID || readiness.InstancePath != path || strings.TrimSpace(readiness.PlanFingerprint) == "" {
+			t.Fatalf("activated agent topology for %s = %#v, want exact flow-readiness authority for run %s", path, rec.Topology, runID)
 		}
 	}
 }
