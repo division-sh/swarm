@@ -2371,30 +2371,30 @@ func TestW2RejectsNullEmptyAndRedundantPinForms(t *testing.T) {
 func TestW2RejectsNonExactAndBlankMappingKeysAtEveryLayer(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
-		raw     string
+		snippet canonicalrouting.W2MappingKeySnippet
 		project bool
 	}{
-		{name: "flow pins surrounding", raw: "pins:\n  \" inputs \":\n    events: [work.requested]\n"},
-		{name: "flow pins blank", raw: "pins:\n  \" \": {}\n"},
-		{name: "input direction surrounding", raw: "pins:\n  inputs:\n    \" events \": [work.requested]\n"},
-		{name: "input direction blank", raw: "pins:\n  inputs:\n    \" \": [work.requested]\n"},
-		{name: "input event surrounding", raw: "pins:\n  inputs:\n    events:\n      - \" event \": work.requested\n        source: external\n"},
-		{name: "input event blank", raw: "pins:\n  inputs:\n    events:\n      - \" \": ignored\n        event: work.requested\n        source: external\n"},
-		{name: "output event surrounding", raw: "pins:\n  outputs:\n    events:\n      - event: work.completed\n        \" sink \": harness\n"},
-		{name: "output event blank", raw: "pins:\n  outputs:\n    events:\n      - \" \": ignored\n        event: work.completed\n        sink: harness\n"},
-		{name: "resolution surrounding", raw: "pins:\n  inputs:\n    events:\n      - event: work.requested\n        resolution:\n          \" mode \": create\n"},
-		{name: "resolution blank", raw: "pins:\n  inputs:\n    events:\n      - event: work.requested\n        resolution:\n          \" \": ignored\n          mode: create\n"},
-		{name: "connect surrounding", project: true, raw: "name: hostile-connect\nconnect:\n  - \" event \": work.requested\n    from: producer\n    to: consumer\n"},
-		{name: "connect blank", project: true, raw: "name: hostile-connect\nconnect:\n  - \" \": ignored\n    event: work.requested\n    from: producer\n    to: consumer\n"},
+		{name: "flow pins surrounding", snippet: canonicalrouting.W2FlowPinsSurroundingKey},
+		{name: "flow pins blank", snippet: canonicalrouting.W2FlowPinsBlankKey},
+		{name: "input direction surrounding", snippet: canonicalrouting.W2InputDirectionSurroundingKey},
+		{name: "input direction blank", snippet: canonicalrouting.W2InputDirectionBlankKey},
+		{name: "input event surrounding", snippet: canonicalrouting.W2InputEventSurroundingKey},
+		{name: "input event blank", snippet: canonicalrouting.W2InputEventBlankKey},
+		{name: "output event surrounding", snippet: canonicalrouting.W2OutputEventSurroundingKey},
+		{name: "output event blank", snippet: canonicalrouting.W2OutputEventBlankKey},
+		{name: "resolution surrounding", snippet: canonicalrouting.W2ResolutionSurroundingKey},
+		{name: "resolution blank", snippet: canonicalrouting.W2ResolutionBlankKey},
+		{name: "connect surrounding", snippet: canonicalrouting.W2ConnectSurroundingKey, project: true},
+		{name: "connect blank", snippet: canonicalrouting.W2ConnectBlankKey, project: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var err error
 			if tc.project {
 				var project ProjectPackageDocument
-				err = yaml.Unmarshal([]byte(tc.raw), &project)
+				err = canonicalrouting.W2MappingKeyParserSnippet(t, tc.snippet).Decode(&project)
 			} else {
 				var schema FlowSchemaDocument
-				err = yaml.Unmarshal([]byte(tc.raw), &schema)
+				err = canonicalrouting.W2MappingKeyParserSnippet(t, tc.snippet).Decode(&schema)
 			}
 			if err == nil || !strings.Contains(err.Error(), "must be one exact non-empty canonical spelling") {
 				t.Fatalf("yaml.Unmarshal error = %v, want byte-exact W2 key rejection", err)
