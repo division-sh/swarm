@@ -42,7 +42,7 @@ store_parity:
       constructor: OpenRuntime
       consumers: [internal/serveapp/main.go, internal/serveapp/store_runtime.go, internal/serveapp/store_capabilities.go]
       semantic_owner: internal/store/selected.Owner
-      proof_ids: [runtime-open-sqlite, runtime-open-postgres, runtime-port-projection]
+      proof_ids: [runtime-open-sqlite, runtime-open-postgres, runtime-port-projection, bundle-delete-postgres, sqlite-optional-mutators-fail-closed, selected-contract-fork-postgres, destructive-reset-postgres]
       close_proof_ids: [runtime-close-postgres-ping, runtime-close-unactivated]
     - id: authority_inspection
       constructor: OpenAuthorityInspection
@@ -91,14 +91,12 @@ store_parity:
         - {claim_id: store_infrastructure}
         - {claim_id: resource_data}
         - {claim_id: bundle_catalog}
-        - {claim_id: bundle_delete}
         - {claim_id: event_delivery}
         - {claim_id: author_activity}
         - {claim_id: run_fork_revision}
         - {claim_id: operator_channels}
         - {claim_id: agent_lifecycle}
         - {claim_id: external_effects}
-        - {claim_id: selected_contract_fork}
         - {claim_id: workflow_runtime}
         - {claim_id: session_conversation}
         - {claim_id: mailbox_decision}
@@ -108,7 +106,6 @@ store_parity:
         - {claim_id: timer_schedule}
         - {claim_id: scenario_execution}
         - {claim_id: observability}
-        - {claim_id: destructive_reset}
     - {id: runtime-close-postgres-ping, kind: go_test, name: TestPostgresFailedPingClosesTheConstructedPool, path: internal/store/selected/selected_test.go, profile: pr-common, purpose_ids: [runtime]}
     - {id: runtime-close-unactivated, kind: go_test, name: TestOwnerUnactivatedCloseFailureRetainsCloseAuthority, path: internal/store/selected/selected_test.go, profile: pr-common, purpose_ids: [runtime]}
     - id: authority-inspection-sqlite
@@ -149,13 +146,14 @@ store_parity:
     - {id: schema-ddl, kind: go_test, name: TestGeneratePlatformTableDDLs, path: internal/store/internal/schemastore/ddl_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: store_infrastructure, risk_dimensions: [schema_coherence, proof_schedule]}]}
     - {id: resource-data-surface, kind: go_test, name: TestDurableDataHTTPPublicSurfaceAcrossSelectedStores, path: internal/apiv1/operator_data_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: resource_data, risk_dimensions: [real_v1_handler, served_lifecycle]}]}
     - {id: served-bundle-register, kind: go_test, name: TestServedParityHarnessBundleRegisterLifecycle, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: bundle_catalog, risk_dimensions: [selected_construction, real_v1_handler, served_lifecycle]}]}
-    - {id: bundle-delete-postgres, kind: go_test, name: TestRunServeRuntimeBundleDeleteForceQuiescesSessionWriterBeforeCleanupPostgres, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [explicit_postgres], capabilities: [{claim_id: bundle_delete, risk_dimensions: [writer_ownership]}]}
+    - {id: bundle-delete-postgres, kind: go_test, name: TestRunServeRuntimeBundleDeleteForceQuiescesSessionWriterBeforeCleanupPostgres, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [explicit_postgres], purpose_ids: [runtime], capabilities: [{claim_id: bundle_delete, risk_dimensions: [writer_ownership]}]}
     - id: sqlite-optional-mutators-fail-closed
       kind: go_test
       name: TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed
       path: internal/serveapp/main_runtime_test.go
       profile: pr-common
       backends: [default_sqlite]
+      purpose_ids: [runtime]
       capabilities:
         - {claim_id: bundle_delete, risk_dimensions: [fail_closed]}
         - {claim_id: selected_contract_fork, risk_dimensions: [fail_closed]}
@@ -170,7 +168,7 @@ store_parity:
     - {id: served-agent-directive, kind: go_test, name: TestServedParityHarnessAgentDirectiveOutcomeLifecycle, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: agent_lifecycle, risk_dimensions: [served_lifecycle]}]}
     - {id: agent-manager-roles, kind: go_test, name: TestAgentManagerPersistenceRolesAreExplicit, path: internal/runtime/persistence_ownership_guard_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: agent_lifecycle, risk_dimensions: [served_lifecycle]}]}
     - {id: external-effect-recovery, kind: go_test, name: TestExternalEffectRecoveryPostureAdmissionGenericSQLiteAndPostgres, path: internal/store/internal/runtimepersistence/external_effect_recovery_posture_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: external_effects, risk_dimensions: [writer_ownership]}]}
-    - {id: selected-contract-fork-postgres, kind: go_test, name: TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersistedIdentity, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [explicit_postgres], capabilities: [{claim_id: selected_contract_fork, risk_dimensions: [served_lifecycle]}]}
+    - {id: selected-contract-fork-postgres, kind: go_test, name: TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersistedIdentity, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [explicit_postgres], purpose_ids: [runtime], capabilities: [{claim_id: selected_contract_fork, risk_dimensions: [served_lifecycle]}]}
     - {id: workflow-settlement-parity, kind: go_test, name: TestWorkflowEngineMutationSettlesExactNodeDeliveryAtomicallyOnBothStores, path: internal/store/internal/runtimepersistence/workflow_engine_delivery_settlement_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: workflow_runtime, risk_dimensions: [writer_ownership]}]}
     - {id: served-test-setup, kind: go_test, name: TestServedParityHarnessTestSetupEntitiesLifecycle, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: workflow_runtime, risk_dimensions: [served_lifecycle]}]}
     - {id: workflow-opaque-owner, kind: go_test, name: TestWorkflowPersistenceIsOpaqueAndConcreteStoreDoesNotEscape, path: internal/runtime/persistence_ownership_guard_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: workflow_runtime, risk_dimensions: [writer_ownership]}]}
@@ -188,7 +186,7 @@ store_parity:
     - {id: scenario-execution-postgres, kind: go_test, name: TestPostgresScenarioSetupPersistsExactExecutionProfileAtomically, path: internal/store/internal/runtimepersistence/scenario_setup_test.go, profile: pr-common, backends: [explicit_postgres], capabilities: [{claim_id: scenario_execution, risk_dimensions: [writer_ownership]}]}
     - {id: observability-sqlite, kind: go_test, name: TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability, path: internal/store/internal/runtimepersistence/runtime_log_persistence_test.go, profile: pr-common, backends: [default_sqlite], capabilities: [{claim_id: observability, risk_dimensions: [read_snapshot, writer_ownership]}]}
     - {id: observability-postgres, kind: go_test, name: TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage, path: internal/store/internal/runtimepersistence/runtime_log_persistence_test.go, profile: pr-common, backends: [explicit_postgres], capabilities: [{claim_id: observability, risk_dimensions: [read_snapshot, writer_ownership]}]}
-    - {id: destructive-reset-postgres, kind: go_test, name: TestRunServeRuntimeNukeQuiescesSessionWriterBeforeCleanupPostgres, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [explicit_postgres], capabilities: [{claim_id: destructive_reset, risk_dimensions: [writer_ownership]}]}
+    - {id: destructive-reset-postgres, kind: go_test, name: TestRunServeRuntimeNukeQuiescesSessionWriterBeforeCleanupPostgres, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [explicit_postgres], purpose_ids: [runtime], capabilities: [{claim_id: destructive_reset, risk_dimensions: [writer_ownership]}]}
     - {id: websocket-different-concept, kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes, path: internal/apiv1/openrpc_ws_runtime_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: non_store_transport, risk_dimensions: [structural_census, proof_schedule]}]}
     - id: golden-forced-restart
       kind: go_test
