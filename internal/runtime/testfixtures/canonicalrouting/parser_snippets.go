@@ -31,6 +31,24 @@ const (
 	InputPinSourceInvalid  InputPinSourceSnippet = "invalid"
 )
 
+// W2MappingKeySnippet identifies one closed byte-exact mapping-key failure.
+type W2MappingKeySnippet string
+
+const (
+	W2FlowPinsSurroundingKey       W2MappingKeySnippet = "flow-pins-surrounding-key"
+	W2FlowPinsBlankKey             W2MappingKeySnippet = "flow-pins-blank-key"
+	W2InputDirectionSurroundingKey W2MappingKeySnippet = "input-direction-surrounding-key"
+	W2InputDirectionBlankKey       W2MappingKeySnippet = "input-direction-blank-key"
+	W2InputEventSurroundingKey     W2MappingKeySnippet = "input-event-surrounding-key"
+	W2InputEventBlankKey           W2MappingKeySnippet = "input-event-blank-key"
+	W2OutputEventSurroundingKey    W2MappingKeySnippet = "output-event-surrounding-key"
+	W2OutputEventBlankKey          W2MappingKeySnippet = "output-event-blank-key"
+	W2ResolutionSurroundingKey     W2MappingKeySnippet = "resolution-surrounding-key"
+	W2ResolutionBlankKey           W2MappingKeySnippet = "resolution-blank-key"
+	W2ConnectSurroundingKey        W2MappingKeySnippet = "connect-surrounding-key"
+	W2ConnectBlankKey              W2MappingKeySnippet = "connect-blank-key"
+)
+
 // RetiredReceiverRoutingSnippet identifies one non-materializing old-form
 // parser specimen. These sources cannot create a complete fixture bundle.
 type RetiredReceiverRoutingSnippet string
@@ -101,6 +119,40 @@ pins:
 func W2EmptyResolutionParserSnippet(t testing.TB) ParserSnippet {
 	t.Helper()
 	return NewParserSnippet(t, "pins:\n  inputs:\n    events:\n      - event: work.requested\n        resolution: {}\n")
+}
+
+func W2MappingKeyParserSnippet(t testing.TB, id W2MappingKeySnippet) ParserSnippet {
+	t.Helper()
+	var source string
+	switch id {
+	case W2FlowPinsSurroundingKey:
+		source = "pins:\n  \" inputs \":\n    events: [work.requested]\n"
+	case W2FlowPinsBlankKey:
+		source = "pins:\n  \" \": {}\n"
+	case W2InputDirectionSurroundingKey:
+		source = "pins:\n  inputs:\n    \" events \": [work.requested]\n"
+	case W2InputDirectionBlankKey:
+		source = "pins:\n  inputs:\n    \" \": [work.requested]\n"
+	case W2InputEventSurroundingKey:
+		source = "pins:\n  inputs:\n    events:\n      - \" event \": work.requested\n        source: external\n"
+	case W2InputEventBlankKey:
+		source = "pins:\n  inputs:\n    events:\n      - \" \": ignored\n        event: work.requested\n        source: external\n"
+	case W2OutputEventSurroundingKey:
+		source = "pins:\n  outputs:\n    events:\n      - event: work.completed\n        \" sink \": harness\n"
+	case W2OutputEventBlankKey:
+		source = "pins:\n  outputs:\n    events:\n      - \" \": ignored\n        event: work.completed\n        sink: harness\n"
+	case W2ResolutionSurroundingKey:
+		source = "pins:\n  inputs:\n    events:\n      - event: work.requested\n        resolution:\n          \" mode \": create\n"
+	case W2ResolutionBlankKey:
+		source = "pins:\n  inputs:\n    events:\n      - event: work.requested\n        resolution:\n          \" \": ignored\n          mode: create\n"
+	case W2ConnectSurroundingKey:
+		source = "name: hostile-connect\nconnect:\n  - \" event \": work.requested\n    from: producer\n    to: consumer\n"
+	case W2ConnectBlankKey:
+		source = "name: hostile-connect\nconnect:\n  - \" \": ignored\n    event: work.requested\n    from: producer\n    to: consumer\n"
+	default:
+		t.Fatalf("unsupported W2 mapping-key parser snippet %q", id)
+	}
+	return NewParserSnippet(t, source)
 }
 
 func PackageRequiresBindConnectSnippet(t testing.TB) ParserSnippet {
