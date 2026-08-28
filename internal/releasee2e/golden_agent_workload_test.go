@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	runtimefanout "github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/lib/pq"
 	"gopkg.in/yaml.v3"
 )
@@ -200,9 +201,10 @@ func TestGoldenAgentWorkloadSQLiteDevScratchRestartStartsFreshEpoch(t *testing.T
 }
 
 type goldenStoreSelection struct {
-	name        string
-	configYAML  string
-	passwordEnv string
+	name         string
+	configYAML   string
+	passwordEnv  string
+	diagnosticDB *sql.DB
 }
 
 func goldenReleaseRoot(t *testing.T) string {
@@ -260,6 +262,17 @@ func goldenPostgresStore(t *testing.T, dsn string) goldenStoreSelection {
 		_, _ = admin.ExecContext(cleanupCtx, "DROP DATABASE IF EXISTS "+pq.QuoteIdentifier(databaseName)+" WITH (FORCE)")
 		_ = admin.Close()
 	})
+	config.Database = databaseName
+	connector, err := pq.NewConnectorConfig(config)
+	if err != nil {
+		t.Fatalf("configure isolated PostgreSQL diagnostic connection: %v", err)
+	}
+	diagnosticDB := sql.OpenDB(connector)
+	if err := diagnosticDB.PingContext(ctx); err != nil {
+		_ = diagnosticDB.Close()
+		t.Fatalf("connect to isolated PostgreSQL database %s: %v", databaseName, err)
+	}
+	t.Cleanup(func() { _ = diagnosticDB.Close() })
 	configYAML := fmt.Sprintf(`store:
   backend: postgres
 database:
@@ -271,7 +284,7 @@ database:
   sslmode: %s
   pool_size: 5
 `, strconv.Quote(config.Host), config.Port, strconv.Quote(databaseName), strconv.Quote(config.User), goldenPostgresPass, strconv.Quote(sslMode))
-	return goldenStoreSelection{name: "postgres", configYAML: configYAML, passwordEnv: config.Password}
+	return goldenStoreSelection{name: "postgres", configYAML: configYAML, passwordEnv: config.Password, diagnosticDB: diagnosticDB}
 }
 
 func goldenDatabaseName(t *testing.T) string {
@@ -350,7 +363,7 @@ func runGoldenAgentWorkload(t *testing.T, binaryPath, root string, store goldenS
 		}
 		process = start()
 	}
-	waitForGoldenTerminalRun(t, process, runID, runDeadline)
+	waitForGoldenTerminalRun(t, process, store, runID, runDeadline)
 	assertGoldenPublicProof(t, process.rpc, runID, restart, options.candidateIDs)
 }
 
@@ -536,15 +549,20 @@ type goldenQuiescence struct {
 	Ready                   bool `json:"ready"`
 	ActiveDeliveries        int  `json:"active_deliveries"`
 	UnsettledPipelineEvents int  `json:"unsettled_pipeline_events"`
+	FanOutOwed              int  `json:"fan_out_owed"`
 	DueTimers               int  `json:"due_timers"`
 	ActiveSessionLeases     int  `json:"active_session_leases"`
 }
 
 type goldenDiagnosis struct {
-	Run              goldenRunHeader   `json:"run"`
-	OperationalState string            `json:"operational_state"`
-	FailedDeliveries []json.RawMessage `json:"failed_deliveries"`
-	TestQuiescence   goldenQuiescence  `json:"test_quiescence"`
+	Run              goldenRunHeader          `json:"run"`
+	OperationalState string                   `json:"operational_state"`
+	BlockingLayer    string                   `json:"blocking_layer"`
+	BlockingReason   string                   `json:"blocking_reason"`
+	Heuristics       []string                 `json:"heuristics"`
+	FailedDeliveries []json.RawMessage        `json:"failed_deliveries"`
+	FanOut           runtimefanout.RunSummary `json:"fan_out"`
+	TestQuiescence   goldenQuiescence         `json:"test_quiescence"`
 }
 
 func waitForGoldenCrashCheckpoint(t *testing.T, rpc *releaseRPCClient, runID string, candidateIDs []string, deadline time.Duration) {
@@ -571,10 +589,10 @@ func waitForGoldenCrashCheckpoint(t *testing.T, rpc *releaseRPCClient, runID str
 }
 
 func goldenActiveWork(quiescence goldenQuiescence) int {
-	return quiescence.ActiveDeliveries + quiescence.UnsettledPipelineEvents + quiescence.DueTimers + quiescence.ActiveSessionLeases
+	return quiescence.ActiveDeliveries + quiescence.UnsettledPipelineEvents + quiescence.FanOutOwed + quiescence.DueTimers + quiescence.ActiveSessionLeases
 }
 
-func waitForGoldenTerminalRun(t *testing.T, process *releaseServeProcess, runID string, deadline time.Duration) {
+func waitForGoldenTerminalRun(t *testing.T, process *releaseServeProcess, store goldenStoreSelection, runID string, deadline time.Duration) {
 	t.Helper()
 	rpc := process.rpc
 	ctx, cancel := context.WithTimeout(context.Background(), deadline)
@@ -603,12 +621,53 @@ func waitForGoldenTerminalRun(t *testing.T, process *releaseServeProcess, runID 
 		var diagnosis goldenDiagnosis
 		diagnosisErr := rpc.call(diagnosticCtx, "run.diagnose", map[string]any{"run_id": runID}, &diagnosis)
 		events, eventsErr := listGoldenEvents(diagnosticCtx, rpc, runID)
+		eventCounts := make(map[string]int)
+		deliveryCounts := make(map[string]int)
+		for _, event := range events {
+			eventCounts[event.EventName]++
+			for _, delivery := range event.Deliveries {
+				deliveryCounts[delivery.Status]++
+			}
+		}
+		entities := listGoldenEntities(t, diagnosticCtx, rpc, runID)
 		var logs struct {
 			Logs []map[string]any `json:"logs"`
 		}
-		logsErr := rpc.call(diagnosticCtx, "runtime.logs", map[string]any{"run_id": runID, "limit": 100, "order": "asc"}, &logs)
-		t.Fatalf("wait for golden run completion: %v; last run=%#v; diagnosis=%#v diagnosis_err=%v; events=%#v events_err=%v; runtime_logs=%#v logs_err=%v\nserve output:\n%s", err, last, diagnosis, diagnosisErr, events, eventsErr, logs.Logs, logsErr, process.output.String())
+		logsErr := rpc.call(diagnosticCtx, "runtime.logs", map[string]any{"run_id": runID, "limit": 100, "order": "desc"}, &logs)
+		logCounts := make(map[string]int)
+		for _, log := range logs.Logs {
+			logCounts[fmt.Sprintf("%v/%v", log["component"], log["action"])]++
+		}
+		completion, completionErr := readGoldenCompletionCandidate(diagnosticCtx, store.diagnosticDB, runID)
+		t.Fatalf("wait for golden run completion: %v; last run=%#v; completion=%#v completion_err=%v; diagnosis=%#v diagnosis_err=%v; event_counts=%#v delivery_counts=%#v events_err=%v; entities=%#v; runtime_log_counts=%#v logs_err=%v\nserve output:\n%s", err, last, completion, completionErr, diagnosis, diagnosisErr, eventCounts, deliveryCounts, eventsErr, entities, logCounts, logsErr, process.output.String())
 	}
+}
+
+type goldenCompletionCandidate struct {
+	Status     string
+	Revision   int64
+	DueAt      time.Time
+	DueAtValid bool
+}
+
+func readGoldenCompletionCandidate(ctx context.Context, db *sql.DB, runID string) (goldenCompletionCandidate, error) {
+	if db == nil {
+		return goldenCompletionCandidate{}, nil
+	}
+	var (
+		result goldenCompletionCandidate
+		dueAt  sql.NullTime
+	)
+	if err := db.QueryRowContext(ctx, `
+		SELECT LOWER(status), completion_revision, completion_due_at
+		FROM runs
+		WHERE run_id = $1::uuid
+	`, runID).Scan(&result.Status, &result.Revision, &dueAt); err != nil {
+		return goldenCompletionCandidate{}, err
+	}
+	result.DueAt = dueAt.Time
+	result.DueAtValid = dueAt.Valid
+	return result, nil
 }
 
 type goldenEvent struct {

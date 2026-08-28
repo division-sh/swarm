@@ -238,6 +238,82 @@ func TestFanOutCommitFailureAlgebraIsClosed(t *testing.T) {
 	})
 }
 
+func TestFanOutBlockedTurnCausePreservesTypedFailuresAndNamesRawFailureStage(t *testing.T) {
+	intent := fanoutobligation.Intent{
+		Request: fanoutobligation.IntentRequest{Key: fanoutobligation.IntentKey{
+			RunID: "run-1", TriggeringDeliveryID: "delivery-1",
+			ElementRef: runtimecontracts.FanOutElementRef{PackageKey: "root", ElementID: "fan-out-1"},
+		}},
+		Cursor: 4,
+	}
+
+	typed := runtimefailures.New(
+		runtimefailures.ClassDependencyUnavailable,
+		"fan_out_test_dependency_unavailable",
+		"test.owner",
+		"read",
+		nil,
+	)
+	if got := fanOutBlockedTurnCause("load_evaluation", -1, intent, typed); got != typed {
+		t.Fatalf("typed cause identity changed: got %v, want %v", got, typed)
+	}
+
+	raw := errors.New("driver returned an untyped failure")
+	wrapped := fanOutBlockedTurnCause("prepare_publication", 7, intent, raw)
+	if !errors.Is(wrapped, raw) {
+		t.Fatalf("wrapped cause does not preserve source error: %v", wrapped)
+	}
+	failure, ok := runtimefailures.As(wrapped)
+	if !ok {
+		t.Fatalf("wrapped cause is not typed: %v", wrapped)
+	}
+	if failure.Failure.Class != runtimefailures.ClassInternalFailure ||
+		failure.Failure.Detail.Code != "fan_out_prepare_publication_failed" ||
+		failure.Failure.Component != "runtime.fan_out" ||
+		failure.Failure.Operation != "prepare_publication" {
+		t.Fatalf("failure identity = %#v", failure.Failure)
+	}
+	want := map[string]any{
+		"run_id": "run-1", "triggering_delivery_id": "delivery-1",
+		"package_key": "root", "element_id": "fan-out-1",
+		"cursor": 4, "ordinal": 7, "cause": raw.Error(),
+	}
+	if fmt.Sprint(failure.Failure.Detail.Attributes) != fmt.Sprint(want) {
+		t.Fatalf("failure attributes = %#v, want %#v", failure.Failure.Detail.Attributes, want)
+	}
+}
+
+func TestFanOutPrecommitRetryReleasesPlansAndAdaptivelyReleasesClaim(t *testing.T) {
+	claim := fanOutFailureTestClaim()
+	planner := &fanOutFailureTestPlanner{}
+	owner := &fanOutFailureTestOwner{commit: func(FanOutChunkCommand) (CommittedFanOutChunk, error) {
+		t.Fatal("precommit retry must not enter the selected-store commit")
+		return CommittedFanOutChunk{}, nil
+	}}
+	cause := runtimefailures.New(
+		runtimefailures.ClassDependencyUnavailable,
+		"connect_route_snapshot_stale",
+		"eventbus",
+		"plan_connect_routes",
+		map[string]any{"reason": "route_table_generation_changed"},
+	)
+	if _, disposition := fanOutPrecommitFailure(cause); disposition != fanOutFailureRetry {
+		t.Fatalf("stale route generation disposition = %d, want retry", disposition)
+	}
+
+	released, err := releaseFanOutPrecommitRetry(
+		context.Background(), owner, planner, claim,
+		[]runtimeengine.DurablePublicationPlan{fanOutFailureTestPlan("event-0"), fanOutFailureTestPlan("event-1")},
+		cause, time.Now().Add(-time.Millisecond),
+	)
+	if !released || err == nil || len(owner.commands) != 0 || len(owner.blocks) != 0 ||
+		len(owner.retryRelease) != 1 || owner.retryRelease[0].Claim != claim ||
+		owner.retryRelease[0].ObservedDuration <= 0 || fmt.Sprint(planner.released) != "[[event-0 event-1]]" {
+		t.Fatalf("precommit retry = released:%v err:%v commands:%d blocks:%d releases:%#v plans:%v",
+			released, err, len(owner.commands), len(owner.blocks), owner.retryRelease, planner.released)
+	}
+}
+
 func fanOutFailureTestClaim() fanoutobligation.Claim {
 	return fanoutobligation.Claim{
 		Key: fanoutobligation.IntentKey{

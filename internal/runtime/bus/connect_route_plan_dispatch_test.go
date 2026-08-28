@@ -2394,8 +2394,17 @@ func TestCompiledConnectEvaluationStaleSnapshotFailureLeavesLifecycleUnchanged(t
 		events.EventType("producer/deploy.done"), "", "", json.RawMessage(`{"vertical_id":"v-stale"}`), 0, uuid.NewString(), "", events.EventEnvelope{}, time.Now().UTC())
 
 	err = eb.Publish(context.Background(), evt)
-	if err == nil || !strings.Contains(err.Error(), "connect route snapshot generation is stale") {
-		t.Fatalf("Publish error = %v, want exhausted stale-generation failure", err)
+	failure, ok := runtimefailures.As(err)
+	if err == nil || !ok ||
+		failure.Failure.Class != runtimefailures.ClassDependencyUnavailable ||
+		failure.Failure.Detail.Code != "connect_route_snapshot_stale" ||
+		!failure.Failure.Retryable || failure.Failure.Deterministic ||
+		failure.Failure.Component != "eventbus" || failure.Failure.Operation != "plan_connect_routes" {
+		t.Fatalf("Publish error = %v, want typed retryable exhausted stale-generation failure", err)
+	}
+	var stale staleConnectRoutePlanSnapshotError
+	if !errors.As(err, &stale) {
+		t.Fatalf("Publish error = %v, want preserved stale-generation cause", err)
 	}
 	if got := len(store.activations); got != 0 {
 		t.Fatalf("activations = %d, want no lifecycle mutation", got)
