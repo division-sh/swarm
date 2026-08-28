@@ -10007,7 +10007,9 @@ tool_model:
         and epoch, never by rewriting or guessing the secret, and the complete admission set commits in a
         credentials_admitted checkpoint before provider preflight. Provider activation preflight validates the staged
         candidate's exact credential occurrence and provider identity without changing registration selection or launching
-        a registration effect. Rejection compare-deletes operation-written candidate occurrences and returns the operation
+        a registration effect. A present file-store credential without a persisted occurrence epoch fails closed at snapshot
+        admission; runtime never assigns a process-local epoch, backfills the file, or migrates that unsupported occurrence.
+        Rejection compare-deletes operation-written candidate occurrences and returns the operation
         to preparing, so resume can admit a different credential while the predecessor activation and registration remain
         current. Fresh webhook connect generates a missing signing value;
         replay, reconnect, and rebind do not rotate credentials without an explicit newly admitted epoch. Reconnect,
