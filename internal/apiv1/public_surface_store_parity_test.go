@@ -110,6 +110,22 @@ func TestPublicSurfaceStoreParityRejectsCoverageDrift(t *testing.T) {
 			want: "selected production consumer census missing authority_inspection@internal/cliapp/store_authority.go",
 		},
 		{
+			name: "claim linked from selected purpose",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				purpose := storeParityPurposeByID(t, matrix, "runtime")
+				purpose.ClaimIDs = storeParityStringsExcept(purpose.ClaimIDs, "event_delivery")
+			},
+			want: "store parity claim event_delivery is not linked to any selected purpose",
+		},
+		{
+			name: "duplicate claim within selected purpose",
+			mutate: func(matrix *publicSurfaceBackendMatrix) {
+				purpose := storeParityPurposeByID(t, matrix, "runtime")
+				purpose.ClaimIDs = append(purpose.ClaimIDs, "event_delivery")
+			},
+			want: "selected purpose runtime references claim event_delivery more than once",
+		},
+		{
 			name: "required port",
 			mutate: func(matrix *publicSurfaceBackendMatrix) {
 				storeParityClaimByID(t, matrix, "store_infrastructure").RequiredPorts = []string{"schema", "workspace"}
@@ -471,6 +487,7 @@ func validatePublicSurfaceSelectedPurposes(purposes []publicSurfaceSelectedPurpo
 	constructors := map[string]struct{}{}
 	consumers := map[string]struct{}{}
 	seenIDs := map[string]struct{}{}
+	claimReferences := map[string]int{}
 	for _, purpose := range purposes {
 		label := "selected purpose " + strings.TrimSpace(purpose.ID)
 		if purpose.ID == "" {
@@ -494,16 +511,29 @@ func validatePublicSurfaceSelectedPurposes(purposes []publicSurfaceSelectedPurpo
 		if len(purpose.ClaimIDs) == 0 {
 			problems = append(problems, label+" missing claim_ids")
 		}
+		purposeClaims := map[string]struct{}{}
 		for _, claimID := range purpose.ClaimIDs {
+			claimID = strings.TrimSpace(claimID)
+			if _, ok := purposeClaims[claimID]; ok {
+				problems = append(problems, fmt.Sprintf("%s references claim %s more than once", label, claimID))
+			}
+			purposeClaims[claimID] = struct{}{}
 			if _, ok := claims[claimID]; !ok {
 				problems = append(problems, fmt.Sprintf("%s references unknown claim %s", label, claimID))
+				continue
 			}
+			claimReferences[claimID]++
 		}
 		problems = append(problems, validatePublicSurfaceStoreParityProofs(label, purpose.ProofProfile, purpose.ProofRefs, ctx, policy)...)
 		problems = append(problems, validatePublicSurfaceStoreParityProofs(label+" close", purpose.ProofProfile, purpose.CloseProofRefs, ctx, policy)...)
 	}
 	problems = append(problems, validatePublicSurfaceStoreParitySet("selected production constructor", constructors, sources.constructors)...)
 	problems = append(problems, validatePublicSurfaceStoreParitySet("selected production consumer", consumers, sources.consumers)...)
+	for claimID := range claims {
+		if claimReferences[claimID] == 0 {
+			problems = append(problems, fmt.Sprintf("store parity claim %s is not linked to any selected purpose", claimID))
+		}
+	}
 	return problems
 }
 
