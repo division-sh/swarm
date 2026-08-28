@@ -128,6 +128,17 @@ func (e *CredentialRequiredError) ResumeCommand() string {
 
 type CatalogProvider func() (*CandidateCatalog, error)
 
+type TestLifecycleBoundary string
+
+const (
+	TestAfterCredentialWriteBeforeCheckpoint   TestLifecycleBoundary = "credential_write_before_checkpoint"
+	TestAfterActivationCommitBeforePublication TestLifecycleBoundary = "activation_commit_before_process_publication"
+	TestAfterProcessPublicationBeforePromotion TestLifecycleBoundary = "process_publication_before_promotion"
+	TestAfterAuthorityRetirementBeforeCleanup  TestLifecycleBoundary = "authority_retirement_before_cleanup"
+)
+
+type TestLifecycleBarrier func(TestLifecycleBoundary, string) error
+
 type ServiceOptions struct {
 	Store        Store
 	Identities   IdentityLifecycle
@@ -138,6 +149,7 @@ type ServiceOptions struct {
 	Readiness    ReadinessProjector
 	Now          func() time.Time
 	Secret       func() (string, error)
+	TestBarrier  TestLifecycleBarrier
 }
 
 type Service struct {
@@ -151,6 +163,7 @@ type Service struct {
 	readiness    ReadinessProjector
 	now          func() time.Time
 	secret       func() (string, error)
+	testBarrier  TestLifecycleBarrier
 }
 
 type StartInput struct {
@@ -191,6 +204,7 @@ func NewService(opts ServiceOptions) (*Service, error) {
 	return &Service{
 		store: opts.Store, identities: opts.Identities, credentials: opts.Credentials, catalog: opts.Catalog,
 		activations: opts.Activations, confirmation: opts.Confirmation, effects: effects, readiness: opts.Readiness, now: opts.Now, secret: opts.Secret,
+		testBarrier: opts.TestBarrier,
 	}, nil
 }
 
@@ -616,6 +630,9 @@ func (s *Service) drive(ctx context.Context, op Operation, candidate Candidate, 
 			if err != nil {
 				return s.blockedResult(ctx, op, candidate, err)
 			}
+			if err := s.reachTestBarrier(TestAfterCredentialWriteBeforeCheckpoint, op.OperationID); err != nil {
+				return Result{}, err
+			}
 			next, err := s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{
 				OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: PhaseCredentialsAdmitted,
 				CredentialAdmissions: admissions, ReplaceCredentialAdmissions: true, Now: s.now().UTC(),
@@ -728,6 +745,9 @@ func (s *Service) drive(ctx context.Context, op Operation, candidate Candidate, 
 			if err != nil {
 				return Result{}, err
 			}
+			if err := s.reachTestBarrier(TestAfterActivationCommitBeforePublication, op.OperationID); err != nil {
+				return Result{}, err
+			}
 		case PhasePublishingProcessActivation:
 			activation, err := s.currentOperationActivation(ctx, op)
 			if err != nil {
@@ -735,6 +755,9 @@ func (s *Service) drive(ctx context.Context, op Operation, candidate Candidate, 
 			}
 			if err := s.activations.PublishChannelActivation(ctx, op, activation); err != nil {
 				return s.blockedResult(ctx, op, candidate, err)
+			}
+			if err := s.reachTestBarrier(TestAfterProcessPublicationBeforePromotion, op.OperationID); err != nil {
+				return Result{}, err
 			}
 			op, err = s.store.AdvanceChannelOnboarding(ctx, AdvanceRequest{
 				OperationID: op.OperationID, ExpectedRevision: op.Revision, Phase: PhasePromotingRegistration, Now: s.now().UTC(),
@@ -816,6 +839,13 @@ func (s *Service) drive(ctx context.Context, op Operation, candidate Candidate, 
 			return Result{}, fmt.Errorf("%w: unsupported onboarding phase %q", ErrConflict, op.Phase)
 		}
 	}
+}
+
+func (s *Service) reachTestBarrier(boundary TestLifecycleBoundary, responsibilityID string) error {
+	if s == nil || s.testBarrier == nil {
+		return nil
+	}
+	return s.testBarrier(boundary, responsibilityID)
 }
 
 func (s *Service) releaseCandidateCredentials(ctx context.Context, admissions []CredentialAdmission) error {

@@ -1474,12 +1474,13 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 			return serveChannelOnboardingCatalog(runtimeContextManager)
 		},
 		Activations: channelActivationRefresher, Confirmation: confirmationDispatcher, Readiness: connectedChannelReadiness,
+		Now: opts.TestChannelOnboardingNow, TestBarrier: opts.TestChannelOnboardingBarrier,
 	})
 	if err != nil {
 		presenter.fail(20, "channel_onboarding", err)
 		return 1
 	}
-	channelDestructive, err := channelonboarding.NewDestructiveService(channelOnboardingStore, operatorChannels, credentialWriter, channelActivationRefresher, nil)
+	channelDestructive, err := channelonboarding.NewDestructiveService(channelOnboardingStore, operatorChannels, credentialWriter, channelActivationRefresher, opts.TestChannelOnboardingNow, opts.TestChannelOnboardingBarrier)
 	if err != nil {
 		presenter.fail(20, "channel_onboarding", err)
 		return 1
@@ -1521,7 +1522,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		apiv1.OperatorRuntimeControlHandlers(apiv1.RuntimeControlHandlerOptions{Ingress: rt.RuntimeIngress, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
 		apiv1.OperatorRuntimeNukeHandlers(apiv1.RuntimeNukeHandlerOptions{Coordinator: apiStoreCaps.ResetCoordinator, Idempotency: idempotency}),
 		apiv1.OperatorAgentControlHandlers(apiv1.AgentControlHandlerOptions{Controller: dashboardDynamicAgentControl{supervisor: supervisor}, Idempotency: idempotency, RuntimeContexts: apiStoreCaps.RuntimeContexts}),
-		apiv1.OperatorChannelHandlers(apiv1.OperatorChannelHandlerOptions{Channels: operatorChannels, Destructive: channelDestructive, Readback: channelOnboarding, Idempotency: idempotency}),
+		apiv1.OperatorChannelHandlers(apiv1.OperatorChannelHandlerOptions{Channels: operatorChannels, Destructive: channelDestructive, Readback: channelOnboarding, Idempotency: idempotency, Now: opts.TestChannelOnboardingNow}),
 		apiv1.ChannelOnboardingHandlers(apiv1.ChannelOnboardingHandlerOptions{Onboarding: channelOnboarding, Channels: operatorChannels}),
 	)
 	apiV1Handler, err := apiv1.NewHandler(apiv1.Options{

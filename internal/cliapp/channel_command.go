@@ -428,7 +428,7 @@ func waitForChannelOnboardingClaim(ctx context.Context, client *cliAPIClient, be
 		}
 		select {
 		case <-ctx.Done():
-			return channelOnboardingResult{}, ctx.Err()
+			return channelOnboardingResult{}, fmt.Errorf("%w: channel claim wait stopped; resume operation %s with `swarm channel resume %s`", ctx.Err(), begun.Operation.OperationID, begun.Operation.OperationID)
 		case <-deadline.C:
 			return channelOnboardingResult{}, fmt.Errorf("timed out waiting for channel claim; resume operation %s with `swarm channel resume %s`", begun.Operation.OperationID, begun.Operation.OperationID)
 		case <-ticker.C:
