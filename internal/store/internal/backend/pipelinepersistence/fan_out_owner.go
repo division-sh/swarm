@@ -1090,11 +1090,23 @@ func foldFanOutPublicationSettlement(ctx context.Context, db pipelineQueryer, po
 }
 
 func (s *PipelinePostgresOwner) FanOutRunSummary(ctx context.Context, runID string, now time.Time) (fanoutobligation.RunSummary, error) {
-	return fanOutRunSummary(ctx, s.backend.ConstructionHandle(), true, runID, now)
+	var summary fanoutobligation.RunSummary
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		summary, err = fanOutRunSummary(txctx, tx, true, runID, now)
+		return err
+	})
+	return summary, err
 }
 
 func (s *PipelineSQLiteOwner) FanOutRunSummary(ctx context.Context, runID string, now time.Time) (fanoutobligation.RunSummary, error) {
-	return fanOutRunSummary(ctx, s.backend.ConstructionHandle(), false, runID, now)
+	var summary fanoutobligation.RunSummary
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		summary, err = fanOutRunSummary(txctx, tx, false, runID, now)
+		return err
+	})
+	return summary, err
 }
 
 func (s *PipelinePostgresOwner) SummarizeFanOutRunTx(ctx context.Context, tx *sql.Tx, runID string, now time.Time) (fanoutobligation.RunSummary, error) {

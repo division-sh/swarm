@@ -47,7 +47,6 @@ func TestTier12RuntimeFork_SelectedContractForkExecutionFixture(t *testing.T) {
 	loadYAML(t, filepath.Join(fixtureRoot, "expected.yaml"), &expected)
 
 	h := newRuntimeHarness(t, fixtureRoot, true)
-	storetest.RequireDurableDataCatalog(t, h.ctx, h.pg, authorActivityTestBundleSourceFact.BundleHash())
 	// Source execution is paused at T; register recipient evidence through runtime APIs before publishing.
 	declarationOwner, ok := semanticview.AgentDeclarationOwner(semanticview.Wrap(h.bundle), "", "test-agent")
 	if !ok {

@@ -322,6 +322,7 @@ worker-completion:
   event_handlers:
     agent.completed:
       fan_out:
+        element_id: 5701b215-b826-4535-a076-c23628d87121
         items_from: entity.requests
         as: completed_request
         identity: completed_request

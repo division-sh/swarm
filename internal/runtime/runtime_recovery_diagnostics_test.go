@@ -25,6 +25,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	runtimefanout "github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	runtimegenericschedule "github.com/division-sh/swarm/internal/runtime/genericschedule"
 	runtimemanager "github.com/division-sh/swarm/internal/runtime/manager"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
@@ -69,6 +70,38 @@ func (startupRecoveryWorkflowOwner) ListWorkflowTimerActivations(context.Context
 
 func (startupRecoveryWorkflowOwner) StandingRunUsesIntrinsicRecovery(context.Context, string) (bool, error) {
 	return false, nil
+}
+
+func (startupRecoveryWorkflowOwner) ClaimFanOutIntent(context.Context, runtimepipeline.FanOutClaimRequest) (runtimefanout.Intent, runtimefanout.Claim, bool, error) {
+	return runtimefanout.Intent{}, runtimefanout.Claim{}, false, nil
+}
+
+func (startupRecoveryWorkflowOwner) LoadFanOutEvaluation(context.Context, runtimefanout.Claim) (runtimepipeline.FanOutEvaluationInput, error) {
+	return runtimepipeline.FanOutEvaluationInput{}, errors.New("startup recovery fixture has no fan-out work")
+}
+
+func (startupRecoveryWorkflowOwner) CommitFanOutChunk(context.Context, runtimepipeline.FanOutChunkCommand) (runtimepipeline.CommittedFanOutChunk, error) {
+	return runtimepipeline.CommittedFanOutChunk{}, errors.New("startup recovery fixture has no fan-out work")
+}
+
+func (startupRecoveryWorkflowOwner) ReleaseFanOutClaim(context.Context, runtimefanout.Claim) error {
+	return nil
+}
+
+func (startupRecoveryWorkflowOwner) ReleaseFanOutRetryable(context.Context, runtimepipeline.FanOutRetryableRelease) error {
+	return nil
+}
+
+func (startupRecoveryWorkflowOwner) BlockFanOutClaim(context.Context, runtimepipeline.FanOutBlockRequest) error {
+	return nil
+}
+
+func (startupRecoveryWorkflowOwner) CancelRunFanOut(context.Context, string, string, time.Time) error {
+	return nil
+}
+
+func (startupRecoveryWorkflowOwner) FanOutRunSummary(_ context.Context, runID string, _ time.Time) (runtimefanout.RunSummary, error) {
+	return runtimefanout.RunSummary{RunID: runID}, nil
 }
 
 func startupRecoveryWorkflowPersistence(db *sql.DB, timers runtimetimerobligation.Reader) runtimepipeline.WorkflowPersistence {

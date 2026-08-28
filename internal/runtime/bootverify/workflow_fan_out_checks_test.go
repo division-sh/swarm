@@ -255,6 +255,7 @@ func completeBootverifyFanOutFixture(t testing.TB, bundle *runtimecontracts.Work
 		ProjectPackageFile: packageFile,
 		PlatformSpecFile:   platformFile,
 	}
+	bundle.PrepareFanOutPlans()
 }
 
 func fanOutValidationBundle(spec runtimecontracts.FanOutSpec) *runtimecontracts.WorkflowContractBundle {

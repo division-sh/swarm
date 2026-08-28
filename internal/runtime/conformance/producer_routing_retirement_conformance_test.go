@@ -188,7 +188,12 @@ func TestProducerRoutingCanonicalConsumerManifestationsExecute(t *testing.T) {
 			if wantRuntimeEvent == "" {
 				wantRuntimeEvent = tc.emitted
 			}
-			if !containsProducerRoutingValue(preview.Emits, wantRuntimeEvent) {
+			if tc.id == "B002" {
+				plans := source.FanOutPlansForHandler(node, tc.trigger)
+				if preview.FanOutCount != 1 || len(preview.Emits) != 0 || len(plans) != 1 || plans[0].Emit.EventType() != tc.emitted {
+					t.Fatalf("deferred fan-out preview = count:%d eager:%v plans:%#v, want one compiled %q obligation and no eager event", preview.FanOutCount, preview.Emits, plans, tc.emitted)
+				}
+			} else if !containsProducerRoutingValue(preview.Emits, wantRuntimeEvent) {
 				t.Fatalf("preview emits = %v, want %q", preview.Emits, wantRuntimeEvent)
 			}
 			switch tc.disposition {

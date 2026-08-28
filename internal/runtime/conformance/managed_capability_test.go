@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/core/managedexecution"
+	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimellm "github.com/division-sh/swarm/internal/runtime/llm"
 	"github.com/division-sh/swarm/internal/store"
 	"github.com/division-sh/swarm/internal/store/storetest"
@@ -17,6 +18,10 @@ import (
 )
 
 func managedConformanceExecutionContext(t testing.TB, ctx context.Context, authorityID string) context.Context {
+	return managedConformanceExecutionContextForBundle(t, ctx, authorityID, authorActivityTestBundleSourceFact)
+}
+
+func managedConformanceExecutionContextForBundle(t testing.TB, ctx context.Context, authorityID string, fact runtimecorrelation.BundleSourceFact) context.Context {
 	t.Helper()
 	admission, err := managedexecution.New(
 		managedexecution.KindNormalRuntime,
@@ -24,7 +29,7 @@ func managedConformanceExecutionContext(t testing.TB, ctx context.Context, autho
 		1,
 		"",
 		"conformance-actors",
-		"bundle-v1:sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		fact.BundleHash(),
 		nil,
 	)
 	if err != nil {

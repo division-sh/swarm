@@ -48,7 +48,12 @@ func TestExecutableReaderCensusCoversEveryReaderFamily(t *testing.T) {
 		{name: "compute validation", handler: runtimecontracts.SystemNodeEventHandler{Compute: &runtimecontracts.ComputeSpec{Validation: &runtimecontracts.ComputeValidationSpec{Input: map[string]string{"value": "entity.verticals"}}}}},
 		{name: "compute module", handler: runtimecontracts.SystemNodeEventHandler{Compute: &runtimecontracts.ComputeSpec{Module: &runtimecontracts.ComputeModuleSpec{Input: map[string]string{"value": "entity.verticals"}}}}},
 		{name: "query source", handler: runtimecontracts.SystemNodeEventHandler{Query: &runtimecontracts.QuerySpec{Source: "entity.verticals"}}},
-		{name: "fan out", handler: runtimecontracts.SystemNodeEventHandler{FanOut: &runtimecontracts.FanOutSpec{ItemsFrom: "entity.verticals"}}},
+		{name: "fan out", handler: runtimecontracts.SystemNodeEventHandler{FanOut: &runtimecontracts.FanOutSpec{
+			ItemsFrom: "entity.verticals", As: "vertical", Identity: "vertical.id",
+			Emit: runtimecontracts.EmitSpec{Event: "line_item.requested", Fields: map[string]runtimecontracts.ExpressionValue{
+				"line_item_id": runtimecontracts.CELExpression("vertical.id"),
+			}},
+		}}},
 		{name: "group by key", handler: runtimecontracts.SystemNodeEventHandler{GroupBy: &runtimecontracts.GroupBySpec{Key: "entity.verticals"}}},
 		{name: "filter", handler: runtimecontracts.SystemNodeEventHandler{Filter: &runtimecontracts.FilterSpec{Source: "entity.verticals"}}},
 		{name: "reduce source", handler: runtimecontracts.SystemNodeEventHandler{Reduce: &runtimecontracts.ReduceSpec{Source: "entity.verticals"}}},
@@ -58,6 +63,9 @@ func TestExecutableReaderCensusCoversEveryReaderFamily(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			readers := handlerExecutableReaderExpressionsForSource(nil, identitytest.FlowNode(t, "coordinator", "node"), "event", tc.handler)
+			if tc.handler.FanOut != nil {
+				readers = canonicalFanOutExecutableReaders(t, tc.handler)
+			}
 			for _, reader := range readers {
 				if reader.Expression == "entity.verticals" || reader.Expression == "size(entity.verticals) > 0" {
 					return
@@ -189,7 +197,12 @@ func TestExecutableReaderCensusPreservesExecutionPhases(t *testing.T) {
 		Accumulate: &runtimecontracts.AccumulateSpec{From: "entity.status", Window: "entity.items"},
 		GroupBy:    &runtimecontracts.GroupBySpec{Key: "entity.status"},
 		Compute:    &runtimecontracts.ComputeSpec{Lookup: &runtimecontracts.ComputeLookupSpec{On: []string{"entity.status"}}},
-		FanOut:     &runtimecontracts.FanOutSpec{ItemsFrom: "entity.items"},
+		FanOut: &runtimecontracts.FanOutSpec{
+			ItemsFrom: "entity.items", As: "line_item", Identity: "line_item.id",
+			Emit: runtimecontracts.EmitSpec{Event: "line_item.requested", Fields: map[string]runtimecontracts.ExpressionValue{
+				"line_item_id": runtimecontracts.CELExpression("line_item.id"),
+			}},
+		},
 		OnComplete: []runtimecontracts.HandlerRuleEntry{{Condition: "entity.status == 'done'"}},
 	}
 	want := map[string]runtimepipeline.WorkflowEntityFieldLifecyclePhase{
@@ -200,7 +213,7 @@ func TestExecutableReaderCensusPreservesExecutionPhases(t *testing.T) {
 		"fan_out.items_from":       runtimepipeline.WorkflowEntityFieldLifecycleFanOut,
 		"on_complete[0].condition": runtimepipeline.WorkflowEntityFieldLifecycleOnComplete,
 	}
-	for _, reader := range handlerExecutableReaderExpressionsForSource(nil, identitytest.FlowNode(t, "flow", "node"), "event", handler) {
+	for _, reader := range canonicalFanOutExecutableReaders(t, handler) {
 		phase, ok := want[reader.Kind]
 		if !ok {
 			continue
@@ -213,6 +226,34 @@ func TestExecutableReaderCensusPreservesExecutionPhases(t *testing.T) {
 	if len(want) > 0 {
 		t.Fatalf("reader census omitted phase rows: %#v", want)
 	}
+}
+
+func canonicalFanOutExecutableReaders(t testing.TB, handler runtimecontracts.SystemNodeEventHandler) []expressionReference {
+	t.Helper()
+	if handler.FanOut == nil {
+		t.Fatal("canonical fan-out reader fixture requires a fan-out site")
+	}
+	bundle := fanOutValidationBundle(*handler.FanOut)
+	field := strings.TrimPrefix(strings.TrimSpace(handler.FanOut.ItemsFrom), "entity.")
+	if field != handler.FanOut.ItemsFrom {
+		bundle.RootEntities = runtimecontracts.EntityContractsDocument{
+			"subject": {Fields: map[string]runtimecontracts.EntityFieldDecl{field: {Type: "[LineItem]"}}},
+		}
+	}
+	node := bundle.Nodes["dispatcher"]
+	node.EventHandlers["order.accepted"] = handler
+	bundle.Nodes["dispatcher"] = node
+	completeBootverifyFanOutFixture(t, bundle, "dispatcher", "order.accepted")
+	if failures := bundle.FanOutPlanFailures(); len(failures) != 0 {
+		t.Fatalf("prepare canonical fan-out reader fixture: %v", failures)
+	}
+	source := semanticview.Wrap(bundle)
+	owner := identitytest.RootNode(t, "dispatcher")
+	compiled, ok := source.ExecutableNodeEventHandler(owner, "order.accepted")
+	if !ok {
+		t.Fatal("canonical fan-out reader handler is missing")
+	}
+	return handlerExecutableReaderExpressionsForSource(source, owner, "order.accepted", compiled)
 }
 
 func TestRun_CompleteReaderCensusOwnsEntityReferenceValidation(t *testing.T) {

@@ -15,6 +15,7 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimebustest "github.com/division-sh/swarm/internal/runtime/bus/bustest"
+	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
 	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
@@ -116,12 +117,33 @@ func conformanceManagerPersistenceRoles(selected any, eventBus *runtimebus.Event
 }
 
 func testAuthorActivityContext(ctx context.Context) context.Context {
-	ctx = runtimecorrelation.WithBundleSourceFact(ctx, authorActivityTestBundleSourceFact)
+	return testAuthorActivityContextForBundle(ctx, authorActivityTestBundleSourceFact)
+}
+
+func testAuthorActivityContextForBundle(ctx context.Context, fact runtimecorrelation.BundleSourceFact) context.Context {
+	ctx = runtimecorrelation.WithBundleSourceFact(ctx, fact)
 	ctx = runtimeeffects.WithExecutionMode(ctx, runtimeeffects.ExecutionModeLive)
 	return runtimeauthoractivity.WithScope(ctx, runtimeauthoractivity.BundleScope(
 		authorActivityTestRuntimeInstanceID,
-		authorActivityTestBundleSourceFact.BundleHash(),
+		fact.BundleHash(),
 	))
+}
+
+func conformanceBundleSourceFact(t testing.TB, source semanticview.Source) runtimecorrelation.BundleSourceFact {
+	t.Helper()
+	bundle, ok := semanticview.Bundle(source)
+	if !ok || bundle == nil {
+		t.Fatal("conformance source must retain its admitted bundle")
+	}
+	hash, err := runtimecontracts.BundleHash(bundle)
+	if err != nil {
+		t.Fatalf("compute conformance bundle identity: %v", err)
+	}
+	fact, err := runtimecorrelation.NewEphemeralBundleSourceFact(hash)
+	if err != nil {
+		t.Fatalf("admit conformance bundle source fact: %v", err)
+	}
+	return fact
 }
 
 func testAuthorActivityRuntimeContext(ctx context.Context) context.Context {
@@ -325,9 +347,13 @@ func completeConformanceWorkflowDeps(store conformanceDurableEventBusStore, deps
 }
 
 func registerTestAuthorActivityCatalog(t *testing.T, target testAuthorActivityCatalogRegistrar, descriptors []runtimeauthoractivity.EventDescriptor) {
+	registerTestAuthorActivityCatalogForBundle(t, target, authorActivityTestBundleSourceFact, descriptors)
+}
+
+func registerTestAuthorActivityCatalogForBundle(t *testing.T, target testAuthorActivityCatalogRegistrar, fact runtimecorrelation.BundleSourceFact, descriptors []runtimeauthoractivity.EventDescriptor) {
 	t.Helper()
 	lease, err := target.RegisterAuthorActivityEventCatalog(
-		runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, authorActivityTestBundleSourceFact.BundleHash()),
+		runtimeauthoractivity.BundleScope(authorActivityTestRuntimeInstanceID, fact.BundleHash()),
 		descriptors,
 	)
 	if err != nil {
@@ -383,7 +409,7 @@ func newScopedTestEventBus(t *testing.T, eventStore runtimebus.EventStore, opts 
 				EventType: strings.TrimSpace(eventType), Disposition: runtimeauthoractivity.StoryDifferent,
 			})
 		}
-		registerTestAuthorActivityCatalog(t, registrar, descriptors)
+		registerTestAuthorActivityCatalogForBundle(t, registrar, opts.BundleSourceFact, descriptors)
 	}
 	if opts.PipelineObligations != nil {
 		durable, ok := eventStore.(conformanceDurableEventBusStore)

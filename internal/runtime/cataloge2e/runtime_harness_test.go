@@ -242,6 +242,7 @@ func newRuntimeHarnessFromTranscript(t *testing.T, fixtureRoot string, backend c
 	if err != nil {
 		t.Fatalf("newFixtureWorkflowModule: %v", err)
 	}
+	bundleSourceFact := catalogBundleSourceFact(t, bundle)
 
 	cfg := testRuntimeConfig()
 	cfg.LLM.Backend = "anthropic"
@@ -274,19 +275,19 @@ func newRuntimeHarnessFromTranscript(t *testing.T, fixtureRoot string, backend c
 		t.Fatalf("unsupported catalog runtime backend %q", backend)
 	}
 
-	ctx, cancel := context.WithCancel(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), catalogRuntimeRunID))
+	ctx, cancel := context.WithCancel(runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), bundleSourceFact), catalogRuntimeRunID))
 	processOwner := worklifetime.NewProcess()
-	fixture := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID, BundleHash: authorActivityTestBundleSourceFact.BundleHash(), BundleSource: "ephemeral"}
+	fixture := runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: catalogRuntimeRunID, BundleHash: bundleSourceFact.BundleHash(), BundleSource: "ephemeral"}
 	var workflowPersistence runtimepipeline.WorkflowPersistence
 	var deps runtime.RuntimeDeps
 	if pg != nil {
 		runlifecyclefixture.RequirePostgres(t, ctx, db, fixture)
 		workflowPersistence = runtimepipeline.NewWorkflowPersistence(pg)
-		deps = catalogPostgresRuntimeDeps(cfg, pg, workflowPersistence, module, llmRuntime, processOwner)
+		deps = catalogPostgresRuntimeDeps(cfg, pg, workflowPersistence, module, llmRuntime, processOwner, bundleSourceFact)
 	} else {
 		runlifecyclefixture.RequireSQLite(t, ctx, db, fixture)
 		workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqlite)
-		deps = catalogSQLiteRuntimeDeps(cfg, sqlite, workflowPersistence, module, llmRuntime, processOwner)
+		deps = catalogSQLiteRuntimeDeps(cfg, sqlite, workflowPersistence, module, llmRuntime, processOwner, bundleSourceFact)
 	}
 
 	rt, err := runtime.NewValidationHarnessRuntime(ctx, deps)
@@ -403,7 +404,7 @@ func installCatalogRuntimeStartupGrant(
 	return capability
 }
 
-func catalogPostgresRuntimeDeps(cfg *config.Config, pg *store.PostgresStore, workflowPersistence runtimepipeline.WorkflowPersistence, module runtimepipeline.WorkflowModule, llmRuntime *scriptedLLMRuntime, processOwner *worklifetime.Process) runtime.RuntimeDeps {
+func catalogPostgresRuntimeDeps(cfg *config.Config, pg *store.PostgresStore, workflowPersistence runtimepipeline.WorkflowPersistence, module runtimepipeline.WorkflowModule, llmRuntime *scriptedLLMRuntime, processOwner *worklifetime.Process, bundleSourceFact runtimecorrelation.BundleSourceFact) runtime.RuntimeDeps {
 	return runtime.RuntimeDeps{Config: cfg,
 		WorkflowPersistence: workflowPersistence,
 		EventStore:          pg,
@@ -456,12 +457,12 @@ func catalogPostgresRuntimeDeps(cfg *config.Config, pg *store.PostgresStore, wor
 			WorkflowModule:    module,
 			LLMRuntime:        llmRuntime,
 			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-			BundleSourceFact:  authorActivityTestBundleSourceFact,
+			BundleSourceFact:  bundleSourceFact,
 			ProcessWorkOwner:  processOwner,
 		}}
 }
 
-func catalogSQLiteRuntimeDeps(cfg *config.Config, sqlite *store.SQLiteRuntimeStore, workflowPersistence runtimepipeline.WorkflowPersistence, module runtimepipeline.WorkflowModule, llmRuntime *scriptedLLMRuntime, processOwner *worklifetime.Process) runtime.RuntimeDeps {
+func catalogSQLiteRuntimeDeps(cfg *config.Config, sqlite *store.SQLiteRuntimeStore, workflowPersistence runtimepipeline.WorkflowPersistence, module runtimepipeline.WorkflowModule, llmRuntime *scriptedLLMRuntime, processOwner *worklifetime.Process, bundleSourceFact runtimecorrelation.BundleSourceFact) runtime.RuntimeDeps {
 	return runtime.RuntimeDeps{Config: cfg,
 		WorkflowPersistence: workflowPersistence,
 		EventStore:          sqlite,
@@ -514,7 +515,7 @@ func catalogSQLiteRuntimeDeps(cfg *config.Config, sqlite *store.SQLiteRuntimeSto
 			WorkflowModule:    module,
 			LLMRuntime:        llmRuntime,
 			RuntimeInstanceID: authorActivityTestRuntimeInstanceID,
-			BundleSourceFact:  authorActivityTestBundleSourceFact,
+			BundleSourceFact:  bundleSourceFact,
 			ProcessWorkOwner:  processOwner,
 		}}
 }
@@ -522,7 +523,7 @@ func catalogSQLiteRuntimeDeps(cfg *config.Config, sqlite *store.SQLiteRuntimeSto
 func installCatalogHarnessDeliveryAuthority(t testing.TB, ctx context.Context, rt *runtime.Runtime, pg *store.PostgresStore, sqlite *store.SQLiteRuntimeStore) {
 	t.Helper()
 	authority, err := runtimedelivery.NewNormalExecutionAuthority(
-		authorActivityTestBundleSourceFact,
+		rt.Options.BundleSourceFact,
 		authorActivityTestRuntimeInstanceID,
 		1,
 	)
@@ -592,6 +593,7 @@ func (h *runtimeHarness) reopenFromTranscript(transcript *catalogExecutionTransc
 	if err != nil {
 		h.t.Fatalf("reopen fixture workflow module: %v", err)
 	}
+	bundleSourceFact := catalogBundleSourceFact(h.t, bundle)
 	cfg := testRuntimeConfig()
 	cfg.LLM.Backend = "anthropic"
 	cfg.Runtime.RecoveryOnStartup = true
@@ -619,16 +621,16 @@ func (h *runtimeHarness) reopenFromTranscript(transcript *catalogExecutionTransc
 		h.t.Fatalf("unsupported catalog runtime backend %q", h.backend)
 	}
 
-	ctx, cancel := context.WithCancel(runtimecorrelation.WithRunID(testAuthorActivityContext(context.Background()), catalogRuntimeRunID))
+	ctx, cancel := context.WithCancel(runtimecorrelation.WithRunID(testAuthorActivityContextForBundle(context.Background(), bundleSourceFact), catalogRuntimeRunID))
 	processOwner := worklifetime.NewProcess()
 	var workflowPersistence runtimepipeline.WorkflowPersistence
 	var deps runtime.RuntimeDeps
 	if pg != nil {
 		workflowPersistence = runtimepipeline.NewWorkflowPersistence(pg)
-		deps = catalogPostgresRuntimeDeps(cfg, pg, workflowPersistence, module, llmRuntime, processOwner)
+		deps = catalogPostgresRuntimeDeps(cfg, pg, workflowPersistence, module, llmRuntime, processOwner, bundleSourceFact)
 	} else {
 		workflowPersistence = runtimepipeline.NewWorkflowPersistence(sqlite)
-		deps = catalogSQLiteRuntimeDeps(cfg, sqlite, workflowPersistence, module, llmRuntime, processOwner)
+		deps = catalogSQLiteRuntimeDeps(cfg, sqlite, workflowPersistence, module, llmRuntime, processOwner, bundleSourceFact)
 	}
 	rt, err := runtime.NewValidationHarnessRuntime(ctx, deps)
 	if err != nil {

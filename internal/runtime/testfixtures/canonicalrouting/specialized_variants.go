@@ -159,6 +159,7 @@ line_item.requested:
     ticket.opened:
       create_entity: true
       fan_out:
+        element_id: 0a6260af-2543-447b-bd04-05cab98e6f31
         items_from: payload.line_items
         as: line_item
         identity: line_item

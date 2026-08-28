@@ -16,7 +16,6 @@ import (
 	"testing"
 	"time"
 
-	runtimefanout "github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/lib/pq"
 	"gopkg.in/yaml.v3"
 )
@@ -555,14 +554,14 @@ type goldenQuiescence struct {
 }
 
 type goldenDiagnosis struct {
-	Run              goldenRunHeader          `json:"run"`
-	OperationalState string                   `json:"operational_state"`
-	BlockingLayer    string                   `json:"blocking_layer"`
-	BlockingReason   string                   `json:"blocking_reason"`
-	Heuristics       []string                 `json:"heuristics"`
-	FailedDeliveries []json.RawMessage        `json:"failed_deliveries"`
-	FanOut           runtimefanout.RunSummary `json:"fan_out"`
-	TestQuiescence   goldenQuiescence         `json:"test_quiescence"`
+	Run              goldenRunHeader   `json:"run"`
+	OperationalState string            `json:"operational_state"`
+	BlockingLayer    string            `json:"blocking_layer"`
+	BlockingReason   string            `json:"blocking_reason"`
+	Heuristics       []string          `json:"heuristics"`
+	FailedDeliveries []json.RawMessage `json:"failed_deliveries"`
+	FanOut           json.RawMessage   `json:"fan_out"`
+	TestQuiescence   goldenQuiescence  `json:"test_quiescence"`
 }
 
 func waitForGoldenCrashCheckpoint(t *testing.T, rpc *releaseRPCClient, runID string, candidateIDs []string, deadline time.Duration) {
