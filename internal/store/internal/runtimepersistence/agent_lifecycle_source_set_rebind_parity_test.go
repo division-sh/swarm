@@ -155,7 +155,7 @@ func proveAgentLifecycleProcessBindingReadback(t *testing.T, store lifecycleSour
 	ctx := testAuthorActivityContext()
 	staticIdentity := testAgentIdentity(t, "process-static-agent", "")
 	readinessIdentity := testAgentIdentity(t, "process-readiness-agent", "readiness/instance-1")
-	if err := agentfixture.Upsert(t, ctx, store, runtimemanager.PersistedAgent{
+	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ExecutionMode: "live", ID: "process-static-agent", Identity: staticIdentity,
 			Role: "worker", Type: "sonnet", Model: "regular", Memory: agentmemory.PlatformDefault(),
@@ -418,7 +418,7 @@ func proveAgentLifecycleSourceSetRebind(t *testing.T, store lifecycleSourceSetRe
 		}),
 		Status: "active", HiredBy: "source-set-rebind-test", StartedAt: now,
 	}
-	if err := agentfixture.Upsert(t, ctx, store, record); err != nil {
+	if err := agentfixture.UpsertStatic(t, ctx, store, record); err != nil {
 		t.Fatalf("seed lifecycle cell: %v", err)
 	}
 	before, exists, err := store.LoadAgentLifecycleState(ctx, identity)
@@ -433,7 +433,7 @@ func proveAgentLifecycleSourceSetRebind(t *testing.T, store lifecycleSourceSetRe
 		TargetEpoch: before.RuntimeEpoch, TargetGeneration: before.Generation, TargetPhase: before.Phase,
 		ConfigRevision: before.ConfigRevision, RunMode: before.RunMode, Topology: before.Topology, Now: now.Add(time.Second),
 	}
-	result, err := agentfixture.Commit(t, ctx, store, request)
+	result, err := agentfixture.CommitExact(t, ctx, store, request)
 	if err != nil {
 		t.Fatalf("commit source-set rebind: %v", err)
 	}
@@ -441,13 +441,13 @@ func proveAgentLifecycleSourceSetRebind(t *testing.T, store lifecycleSourceSetRe
 		result.ConfigRevision != before.ConfigRevision || result.RunMode != before.RunMode || !result.Topology.Equal(before.Topology) {
 		t.Fatalf("source-set rebind result = %#v, want unchanged lifecycle with exact topology", result)
 	}
-	replayed, err := agentfixture.Commit(t, ctx, store, request)
+	replayed, err := agentfixture.CommitExact(t, ctx, store, request)
 	if err != nil || !replayed.Replayed || replayed.TransitionID != result.TransitionID {
 		t.Fatalf("exact source-set rebind replay = %#v err=%v, want transition %s", replayed, err, result.TransitionID)
 	}
 	changed := request
 	changed.RequestHash = "source-set-rebind-conflict"
-	if _, err := agentfixture.Commit(t, ctx, store, changed); err == nil {
+	if _, err := agentfixture.CommitExact(t, ctx, store, changed); err == nil {
 		t.Fatal("changed source-set rebind duplicate was accepted")
 	} else {
 		var failure *runtimefailures.Error

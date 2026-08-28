@@ -229,9 +229,9 @@ func seedProviderRawSettlementAgent(t *testing.T, ctx context.Context, selected 
 	var err error
 	switch typed := selected.(type) {
 	case *store.PostgresStore:
-		err = storetest.UpsertAgentFixture(t, ctx, typed, agent)
+		err = storetest.UpsertStaticAgentFixture(t, ctx, typed, agent)
 	case *store.SQLiteRuntimeStore:
-		err = storetest.UpsertAgentFixture(t, ctx, typed, agent)
+		err = storetest.UpsertStaticAgentFixture(t, ctx, typed, agent)
 	default:
 		t.Fatalf("unsupported provider raw agent store %T", selected)
 	}

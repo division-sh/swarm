@@ -17,19 +17,14 @@ func AgentLifecycleFixture(t testing.TB, selected AgentFixtureStore) runtimemana
 	return agentfixture.Lifecycle(t, selected)
 }
 
-func UpsertAgentFixture(t testing.TB, ctx context.Context, selected agentfixture.Store, rec runtimemanager.PersistedAgent) error {
+func UpsertStaticAgentFixture(t testing.TB, ctx context.Context, selected agentfixture.Store, rec runtimemanager.PersistedAgent) error {
 	t.Helper()
-	return agentfixture.Upsert(t, ctx, selected, rec)
+	return agentfixture.UpsertStatic(t, ctx, selected, rec)
 }
 
-func CommitAgentLifecycleFixture(t testing.TB, ctx context.Context, selected agentfixture.Store, req runtimemanager.AgentLifecycleTransition) (runtimemanager.AgentLifecycleTransitionResult, error) {
+func RequireStaticAgentFixture(t testing.TB, ctx context.Context, selected agentfixture.Store, rec runtimemanager.PersistedAgent) {
 	t.Helper()
-	return agentfixture.Commit(t, ctx, selected, req)
-}
-
-func RequireAgentFixture(t testing.TB, ctx context.Context, selected agentfixture.Store, rec runtimemanager.PersistedAgent) {
-	t.Helper()
-	if err := agentfixture.Upsert(t, ctx, selected, rec); err != nil {
+	if err := agentfixture.UpsertStatic(t, ctx, selected, rec); err != nil {
 		t.Fatalf("admit agent fixture %s: %v", rec.Config.ID, err)
 	}
 }

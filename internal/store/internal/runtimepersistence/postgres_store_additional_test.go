@@ -136,7 +136,7 @@ func terminateSpecAgentViaLifecycle(t *testing.T, ctx context.Context, pg *Postg
 	if targetEpoch == 0 {
 		targetEpoch = 1
 	}
-	result, err := agentfixture.Commit(t, ctx, pg, runtimemanager.AgentLifecycleTransition{
+	result, err := agentfixture.CommitStatic(t, ctx, pg, runtimemanager.AgentLifecycleTransition{
 		OperationID: uuid.NewString(), OperationKind: "teardown", RequestHash: "test-terminate-" + identity.AgentID(),
 		Identity: identity, AgentID: identity.AgentID(), Trigger: "test", ExpectedEpoch: epoch, ExpectedGeneration: generation, ExpectedPhase: phase,
 		TargetEpoch: targetEpoch, TargetGeneration: generation + 1, TargetPhase: runtimemanager.AgentLifecycleTerminated,
@@ -662,7 +662,7 @@ func seedSpecAgent(t *testing.T, ctx context.Context, pg *PostgresStore, agentID
 		Config:        []byte(`{}`),
 		Identity:      specMemoryIdentity(agentID, "global").Agent,
 	})
-	if err := agentfixture.Upsert(t, ctx, pg, runtimemanager.PersistedAgent{
+	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config:    cfg,
 		Status:    "active",
 		HiredBy:   "test",
@@ -1314,7 +1314,7 @@ func TestManagerStore_LoadRoutingRules_AndDeactivateValidation(t *testing.T) {
 		t.Fatalf("expected entity_id required")
 	}
 
-	if _, err := agentfixture.Commit(t, ctx, pg, runtimemanager.AgentLifecycleTransition{}); err == nil {
+	if _, err := agentfixture.CommitExact(t, ctx, pg, runtimemanager.AgentLifecycleTransition{}); err == nil {
 		t.Fatalf("expected lifecycle transition fields required")
 	}
 
@@ -2477,7 +2477,7 @@ func TestManagerStore_UpsertAgent_MergesSubscriptions(t *testing.T) {
 		Status:  "active",
 		HiredBy: "test",
 	}
-	if err := agentfixture.Upsert(t, ctx, pg, rec); err != nil {
+	if err := agentfixture.UpsertStatic(t, ctx, pg, rec); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
 	agents, err := pg.LoadAgents(ctx)
@@ -2497,7 +2497,7 @@ func TestManagerStore_UpsertAgent_MergesSubscriptions(t *testing.T) {
 		t.Fatalf("expected agent loaded")
 	}
 
-	if err := agentfixture.Upsert(t, ctx, pg, runtimemanager.PersistedAgent{Config: runtimeactors.AgentConfig{ExecutionMode: "live"}}); err == nil {
+	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{Config: runtimeactors.AgentConfig{ExecutionMode: "live"}}); err == nil {
 		t.Fatalf("expected agent id required error")
 	}
 }
@@ -2539,7 +2539,7 @@ func TestManagerStore_UpsertAgent_PersistsCanonicalControlPlaneOwnership(t *test
 		}),
 		Status: "active",
 	}
-	if err := agentfixture.Upsert(t, ctx, pg, rec); err != nil {
+	if err := agentfixture.UpsertStatic(t, ctx, pg, rec); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
 
@@ -2702,7 +2702,7 @@ func TestManagerStore_LoadAgentsSpec_FailsClosedWhenOpaqueConfigContainsRuntimeK
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	identity := testAgentIdentity(t, "agent-invalid-config", "")
-	if err := agentfixture.Upsert(t, ctx, pg, runtimemanager.PersistedAgent{
+	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ExecutionMode: "live", ID: identity.AgentID(), Identity: identity,
 			Role: "reviewer", Type: "review-worker", Model: "regular",
@@ -2727,7 +2727,7 @@ func TestManagerStore_LoadAgents_FailsClosedWhenCanonicalModelMissing(t *testing
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	identity := testAgentIdentity(t, "agent-missing-type", "")
-	if err := agentfixture.Upsert(t, ctx, pg, runtimemanager.PersistedAgent{
+	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ExecutionMode: "live", ID: identity.AgentID(), Identity: identity,
 			Role: "reviewer", Type: "review-worker", Model: "regular",
@@ -2757,7 +2757,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 	entityID := uuid.NewString()
 	seedSpecEntityState(t, ctx, db, entityID, "testco", "testco", "TestCo", "operating")
 	a1Identity := testAgentIdentity(t, "a1", "")
-	if err := agentfixture.Upsert(t, ctx, pg, runtimemanager.PersistedAgent{
+	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "a1",
 			Identity: a1Identity,
 			Role:     "role",
@@ -2788,7 +2788,7 @@ func TestPostgresStore_Manager_MoreCoverage(t *testing.T) {
 
 	ceoID := "operator-" + entityID
 	ceoIdentity := testAgentIdentity(t, ceoID, "operating/global")
-	_ = agentfixture.Upsert(t, ctx, pg, runtimemanager.PersistedAgent{
+	_ = agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: ceoID,
 			Identity: ceoIdentity,
 			Role:     "operator",
@@ -2902,7 +2902,7 @@ func TestPostgresStore_LoadAgents_FailsClosedOnLegacyRuntimeMetadataInConfig(t *
 	pg := newTestPostgresStore(t, db)
 	ctx := testAuthorActivityContext()
 	identity := testAgentIdentity(t, "legacy-session-agent", "")
-	if err := agentfixture.Upsert(t, ctx, pg, runtimemanager.PersistedAgent{
+	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ExecutionMode: "live", ID: identity.AgentID(), Identity: identity,
 			Role: "worker", Type: "review-worker", Model: "regular",
@@ -2939,7 +2939,7 @@ func TestPostgresStore_LifecycleTerminationCleansMutableRuntimeState(t *testing.
 	ctx := runtimeeffects.WithDifferentOwner(testAuthorActivityContext(), runtimeeffects.OwnerBuildTestInfrastructure)
 	resetAgentSessionsSpecTable(t, ctx, pg)
 
-	if err := agentfixture.Upsert(t, ctx, pg, runtimemanager.PersistedAgent{
+	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{ExecutionMode: "live", ID: "agent-cleanup-1",
 			Identity: testAgentIdentity(t, "agent-cleanup-1", "global"),
 			Role:     "worker",

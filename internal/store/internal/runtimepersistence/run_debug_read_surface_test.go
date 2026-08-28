@@ -29,7 +29,7 @@ import (
 func seedRunDebugAgent(t *testing.T, pg *PostgresStore, ctx context.Context, agentID string, entityID string, memory agentmemory.Plan, flowPath string) {
 	t.Helper()
 	identity := testAgentIdentity(t, agentID, flowPath)
-	if err := agentfixture.Upsert(t, ctx, pg, runtimemanager.PersistedAgent{
+	if err := agentfixture.UpsertStatic(t, ctx, pg, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID:            agentID,
 			Identity:      identity,

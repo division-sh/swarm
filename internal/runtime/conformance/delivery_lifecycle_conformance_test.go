@@ -1617,7 +1617,7 @@ func seedDeliveryAgentSession(t *testing.T, ctx context.Context, backend deliver
 	if !ok {
 		t.Fatalf("delivery lifecycle selected store %T lacks canonical agent fixture admission", backend.selected)
 	}
-	storetest.RequireAgentFixture(t, ctx, selected, runtimemanager.PersistedAgent{
+	storetest.RequireStaticAgentFixture(t, ctx, selected, runtimemanager.PersistedAgent{
 		Config: runtimeactors.AgentConfig{
 			ID: agentID, Identity: identity, Role: "delivery-test", Type: "stub", Model: "regular", ExecutionMode: "live",
 			ResolvedLLMBackend: "anthropic", Intent: deliveryLifecycleAgentIntent(t, agentID),

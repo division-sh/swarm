@@ -154,7 +154,7 @@ func seedSelectedStoreIntentAgent(t testing.TB, ctx context.Context, store agent
 		Prompt:             prompt,
 		Criteria:           []string{"hostile-replacement"},
 	}
-	if err := agentfixture.Upsert(t, ctx, store, runtimemanager.PersistedAgent{Config: cfg, Status: "active", StartedAt: time.Now().UTC()}); err != nil {
+	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{Config: cfg, Status: "active", StartedAt: time.Now().UTC()}); err != nil {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
 }

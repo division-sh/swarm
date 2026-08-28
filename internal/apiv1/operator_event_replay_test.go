@@ -290,7 +290,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				createdAt := time.Unix(1700001300, 123456000).UTC()
 				seedCompleteReplayRun(t, ctx, f.db, f.sqlite, runID, createdAt.Add(-time.Minute))
 				envelope := routeShape.envelope(entityID, auditEntityID)
-				if err := storetest.UpsertAgentFixture(t, ctx, f.store, runtimemanager.PersistedAgent{
+				if err := storetest.UpsertStaticAgentFixture(t, ctx, f.store, runtimemanager.PersistedAgent{
 					Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 						Identity: agentIdentity, ID: agentID, Role: "observer",
 						FlowID: "target-flow", FlowPath: agentIdentity.FlowInstance(), EntityID: entityID,
@@ -305,7 +305,7 @@ func TestOperatorEventReplayDispatchesCompleteCanonicalSnapshotParity(t *testing
 				if routeShape.fanOut {
 					auditCh = subscribeOperatorReplayIdentity(t, bus, auditIdentity)
 					defer runtimebustest.Unsubscribe(bus, auditIdentity.AgentID())
-					if err := storetest.UpsertAgentFixture(t, ctx, f.store, runtimemanager.PersistedAgent{
+					if err := storetest.UpsertStaticAgentFixture(t, ctx, f.store, runtimemanager.PersistedAgent{
 						Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 							Identity: auditIdentity, ID: auditIdentity.AgentID(), Role: "auditor",
 							FlowID: "audit-flow", FlowPath: auditIdentity.FlowInstance(), EntityID: auditEntityID,
@@ -504,7 +504,7 @@ func TestOperatorReplayPreservesFailedEligibilityAndEveryExactRouteSiblingParity
 			originalID := uuid.NewString()
 			createdAt := time.Unix(1700001400, 0).UTC()
 			seedCompleteReplayRun(t, ctx, f.db, tc.name == "sqlite", runID, createdAt.Add(-time.Minute))
-			if err := storetest.UpsertAgentFixture(t, ctx, f.store, runtimemanager.PersistedAgent{
+			if err := storetest.UpsertStaticAgentFixture(t, ctx, f.store, runtimemanager.PersistedAgent{
 				Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 					Identity: identity, ID: agentID,
 					Role: "observer", Type: "stub", Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic",
@@ -781,7 +781,7 @@ func seedOperatorReplayDeliverySession(t testing.TB, ctx context.Context, select
 	if _, found, err := selected.LoadAgentLifecycleState(ctx, identity); err != nil {
 		t.Fatalf("load operator replay delivery agent: %v", err)
 	} else if !found {
-		if err := storetest.UpsertAgentFixture(t, ctx, selected, runtimemanager.PersistedAgent{
+		if err := storetest.UpsertStaticAgentFixture(t, ctx, selected, runtimemanager.PersistedAgent{
 			Config: withAPITestIntent(t, runtimeactors.AgentConfig{
 				Identity: identity, ID: identity.AgentID(), Role: "operator-replay-test", Type: "stub",
 				Model: "regular", ExecutionMode: "live", ResolvedLLMBackend: "anthropic",

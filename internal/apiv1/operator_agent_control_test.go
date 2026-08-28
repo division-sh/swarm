@@ -390,7 +390,7 @@ func materializeAPITestAgent(t testing.TB, ctx context.Context, selected storete
 	if cfg.Type == "" {
 		cfg.Type = "stub"
 	}
-	storetest.RequireAgentFixture(t, ctx, selected, runtimemanager.PersistedAgent{
+	storetest.RequireStaticAgentFixture(t, ctx, selected, runtimemanager.PersistedAgent{
 		Config: cfg, Status: "active", HiredBy: "api-test",
 	})
 	persisted, err := selected.LoadAgents(ctx)

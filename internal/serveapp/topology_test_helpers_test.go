@@ -310,7 +310,7 @@ func registerServeTestDurableAgent(
 	rec := runtimemanager.PersistedAgent{
 		Config: cfg, Status: "active", HiredBy: "serve-test-declaration",
 	}
-	if err := storetest.UpsertAgentFixture(t, ctx, selected, rec); err != nil {
+	if err := storetest.UpsertStaticAgentFixture(t, ctx, selected, rec); err != nil {
 		t.Fatalf("persist serve test durable agent: %v", err)
 	}
 	committed, err := selected.LoadAgents(ctx)

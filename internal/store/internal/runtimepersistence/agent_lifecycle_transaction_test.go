@@ -60,7 +60,7 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 		}),
 		Status: "active", HiredBy: "test", StartedAt: now,
 	}
-	spawned, err := agentfixture.Commit(t, ctx, store, runtimemanager.AgentLifecycleTransition{
+	spawned, err := agentfixture.CommitStatic(t, ctx, store, runtimemanager.AgentLifecycleTransition{
 		OperationID: uuid.NewString(), OperationKind: "spawn", RequestHash: "subordinate-spawn",
 		Identity: identity, AgentID: agentID, Trigger: "spawn", TargetEpoch: 71, TargetGeneration: 1,
 		TargetPhase: runtimemanager.AgentLifecycleRegistered, ConfigRevision: "revision-1",
@@ -69,7 +69,7 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 	if err != nil {
 		t.Fatalf("spawn: %v", err)
 	}
-	started, err := agentfixture.Commit(t, ctx, store, runtimemanager.AgentLifecycleTransition{
+	started, err := agentfixture.CommitStatic(t, ctx, store, runtimemanager.AgentLifecycleTransition{
 		OperationID: uuid.NewString(), OperationKind: "start", RequestHash: "subordinate-start",
 		Identity: identity, AgentID: agentID, Trigger: "start", ExpectedEpoch: spawned.RuntimeEpoch,
 		ExpectedGeneration: spawned.Generation, ExpectedPhase: spawned.Phase,
@@ -143,7 +143,7 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 		},
 		Now: now.Add(2 * time.Second),
 	}
-	rotated, err := agentfixture.Commit(t, ctx, store, rotate)
+	rotated, err := agentfixture.CommitStatic(t, ctx, store, rotate)
 	if err != nil {
 		t.Fatalf("rotate complete set: %v", err)
 	}
@@ -160,13 +160,13 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 			t.Fatalf("successor retained mutable state: conversation=%s runtime_state=%s turns=%d status=%s mutation=%#v", conversation, runtimeState, turnCount, status, mutation)
 		}
 	}
-	replayed, err := agentfixture.Commit(t, ctx, store, rotate)
+	replayed, err := agentfixture.CommitStatic(t, ctx, store, rotate)
 	if err != nil || !replayed.Replayed || !reflect.DeepEqual(replayed.Subordinate, rotated.Subordinate) {
 		t.Fatalf("exact replay = %#v err=%v, want subordinate %#v", replayed, err, rotated.Subordinate)
 	}
 	changed := rotate
 	changed.RequestHash = "changed-plan-hash"
-	if _, err := agentfixture.Commit(t, ctx, store, changed); err == nil {
+	if _, err := agentfixture.CommitStatic(t, ctx, store, changed); err == nil {
 		t.Fatal("changed replay request was accepted")
 	} else {
 		var failure *runtimefailures.Error
@@ -189,7 +189,7 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 		},
 		Now: now.Add(3 * time.Second),
 	}
-	if _, err := agentfixture.Commit(t, ctx, store, failedTerminate); err == nil {
+	if _, err := agentfixture.CommitStatic(t, ctx, store, failedTerminate); err == nil {
 		t.Fatal("injected lifecycle-cell failure committed subordinate mutation")
 	}
 	dropLifecycleCellFailure(t, ctx, db, sqlite)
@@ -205,7 +205,7 @@ func proveLifecycleSubordinateTransaction(t *testing.T, store lifecycleSubordina
 
 	failedTerminate.OperationID = uuid.NewString()
 	failedTerminate.RequestHash = "successful-termination"
-	terminated, err := agentfixture.Commit(t, ctx, store, failedTerminate)
+	terminated, err := agentfixture.CommitStatic(t, ctx, store, failedTerminate)
 	if err != nil {
 		t.Fatalf("terminate complete set: %v", err)
 	}

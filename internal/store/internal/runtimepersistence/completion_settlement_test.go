@@ -1118,7 +1118,7 @@ func newCompletionSettlementFixtureWithMemory(t *testing.T, store completionSett
 	if err != nil {
 		t.Fatalf("completion agent identity: %v", err)
 	}
-	if err := agentfixture.Upsert(t, ctx, store, runtimemanager.PersistedAgent{
+	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ExecutionMode: "live", ID: agentID, Identity: identity, Role: "worker", Type: "managed",
 			Model: "regular", LLMBackend: "claude_cli", ResolvedLLMBackend: "claude_cli",

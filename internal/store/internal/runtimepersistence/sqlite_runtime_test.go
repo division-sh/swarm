@@ -21,6 +21,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	runtimeagenttopology "github.com/division-sh/swarm/internal/runtime/agenttopology"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
+	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
 	"github.com/division-sh/swarm/internal/runtime/core/eventreceiver"
@@ -69,7 +70,7 @@ func TestSQLiteRuntimeStoreSelectedCoreContracts(t *testing.T) {
 		t.Fatalf("recipients = %#v, want agent-1", recipients)
 	}
 
-	if err := agentfixture.Upsert(t, ctx, store, runtimemanager.PersistedAgent{
+	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID:            "agent-1",
 			Identity:      testAgentIdentity(t, "agent-1", ""),
@@ -406,7 +407,7 @@ func TestSQLiteRuntimeStoreUpsertAgentIgnoresAmbientPipelineTransaction(t *testi
 	}
 	now := time.Now().UTC()
 	txctx := runtimepipelinefixture.WithSQLTx(ctx, tx)
-	if err := agentfixture.Upsert(t, txctx, store, runtimemanager.PersistedAgent{
+	if err := agentfixture.UpsertStatic(t, txctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID:            "agent-in-pipeline-tx",
 			Identity:      testAgentIdentity(t, "agent-in-pipeline-tx", ""),
@@ -573,7 +574,7 @@ func TestSQLiteDynamicFlowActivationConcurrentFanOutChildrenPersist(t *testing.T
 		"reviewer\x00review/component-a",
 		"reviewer\x00review/component-b",
 	)
-	assertSQLiteActivatedAgentFlowTopologies(t, agents, runID, "review/component-a", "review/component-b")
+	assertSQLiteActivatedAgentFlowTopologies(t, ctx, sqliteStore, agents, runID, "review/component-a", "review/component-b")
 	capability, err := agentfixture.ProcessCapability(t, ctx, sqliteStore)
 	if err != nil {
 		t.Fatalf("load fixture process capability: %v", err)
@@ -913,7 +914,14 @@ func assertSQLiteActivatedAgentRoutes(t *testing.T, agents []runtimemanager.Pers
 	}
 }
 
-func assertSQLiteActivatedAgentFlowTopologies(t *testing.T, agents []runtimemanager.PersistedAgent, runID string, wantPaths ...string) {
+func assertSQLiteActivatedAgentFlowTopologies(
+	t *testing.T,
+	ctx context.Context,
+	selected *SQLiteRuntimeStore,
+	agents []runtimemanager.PersistedAgent,
+	runID string,
+	wantPaths ...string,
+) {
 	t.Helper()
 	byPath := make(map[string]runtimemanager.PersistedAgent, len(agents))
 	for _, rec := range agents {
@@ -927,10 +935,20 @@ func assertSQLiteActivatedAgentFlowTopologies(t *testing.T, agents []runtimemana
 		if err := rec.Topology.Validate(); err != nil {
 			t.Fatalf("activated agent topology for %s is invalid: %v", path, err)
 		}
-		readiness := rec.Topology.Authority.Readiness
-		if rec.Topology.Authority.Kind != runtimeagenttopology.AuthorityFlowReadinessPlan || readiness == nil ||
-			readiness.RunID != runID || readiness.InstancePath != path || strings.TrimSpace(readiness.PlanFingerprint) == "" {
-			t.Fatalf("activated agent topology for %s = %#v, want exact flow-readiness authority for run %s", path, rec.Topology, runID)
+		readiness, found, err := selected.LoadDynamicFlowRuntimeReadiness(ctx, runID, runtimeflowidentity.RouteForInstancePath(path))
+		if err != nil || !found {
+			t.Fatalf("load readiness owner for %s: found=%v err=%v", path, found, err)
+		}
+		fingerprint, err := canonicaljson.Hash(readiness.Plan)
+		if err != nil {
+			t.Fatalf("fingerprint readiness owner for %s: %v", path, err)
+		}
+		want, err := runtimeagenttopology.FlowReadinessAdmission(runID, path, fingerprint)
+		if err != nil {
+			t.Fatalf("build exact readiness topology for %s: %v", path, err)
+		}
+		if !rec.Topology.Equal(want) {
+			t.Fatalf("activated agent topology for %s = %#v, want %#v", path, rec.Topology, want)
 		}
 	}
 }
@@ -1394,7 +1412,7 @@ func TestSQLiteRuntimeStoreSessionStartupConversationAndTraceVisibility(t *testi
 	ctx = runtimecorrelation.WithRunID(ctx, runID)
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 
-	if err := agentfixture.Upsert(t, ctx, store, runtimemanager.PersistedAgent{
+	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID:            "agent-1",
 			Identity:      testAgentIdentity(t, "agent-1", "global"),
@@ -1721,7 +1739,7 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 	runID := uuid.NewString()
 	requireRunFixtureForTest(t, ctx, NewSQLiteRuntimeStoreForTest(store.backend.ConstructionHandle()), semanticRunFixture{Origin: semanticScenarioSetupRunOriginForTest(), RunID: runID, StartedAt: now})
 
-	if err := agentfixture.Upsert(t, ctx, store, runtimemanager.PersistedAgent{
+	if err := agentfixture.UpsertStatic(t, ctx, store, runtimemanager.PersistedAgent{
 		Config: withRuntimePersistenceTestIntent(t, runtimeactors.AgentConfig{
 			ID:            "agent-cleanup-1",
 			Identity:      testAgentIdentity(t, "agent-cleanup-1", "global"),
@@ -1774,7 +1792,7 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 	if err != nil || !found {
 		t.Fatalf("load lifecycle state before termination: found=%v err=%v", found, err)
 	}
-	if _, err := agentfixture.Commit(t, ctx, store, runtimemanager.AgentLifecycleTransition{
+	if _, err := agentfixture.CommitStatic(t, ctx, store, runtimemanager.AgentLifecycleTransition{
 		OperationID: uuid.NewString(), OperationKind: "teardown", RequestHash: "sqlite-test-terminate-agent-cleanup-1",
 		Identity: identity.Agent, AgentID: "agent-cleanup-1", Trigger: "test",
 		ExpectedEpoch: state.RuntimeEpoch, ExpectedGeneration: state.Generation, ExpectedPhase: state.Phase,
@@ -1783,7 +1801,7 @@ func TestSQLiteRuntimeStoreLifecycleTerminationCleansMutableRuntimeState(t *test
 		Subordinate: runtimesessions.LifecycleMutationPlan{
 			Action: runtimesessions.LifecycleMutationTerminateCurrentSet, TerminationReason: runtimesessions.TerminationReasonCancelled,
 		},
-		Topology: state.Topology, Now: now,
+		Now: now,
 	}); err != nil {
 		t.Fatalf("terminate through lifecycle authority: %v", err)
 	}
