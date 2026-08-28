@@ -103,6 +103,10 @@ func (s *RunLifecyclePostgresOwner) ForkSourceTx(ctx context.Context, tx *sql.Tx
 	return (postgresRunLifecycleMutation{store: s, tx: tx, story: story, effects: effects}).ForkSource(ctx, request)
 }
 
+func (s *RunLifecycleSQLiteOwner) ForkSourceTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, effects *privaterunforkrevision.Effects, request runtimerunlifecycle.ForkSourceRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	return (sqliteRunLifecycleMutation{store: s, tx: tx, story: story, effects: effects}).ForkSource(ctx, request)
+}
+
 func (s *RunLifecyclePostgresOwner) ReviseSourceTx(ctx context.Context, tx *sql.Tx, story runtimeauthoractivity.Mutation, handoff *CandidateHandoff, request runtimerunlifecycle.SourceRevisionRequest) (runtimerunlifecycle.MutationDisposition, error) {
 	return (postgresRunLifecycleMutation{store: s, tx: tx, story: story, handoff: handoff}).ReviseSource(ctx, request)
 }
@@ -298,7 +302,15 @@ func (s *RunLifecyclePostgresOwner) ForkRunSource(ctx context.Context, request r
 }
 
 func (s *RunLifecycleSQLiteOwner) ForkRunSource(ctx context.Context, request runtimerunlifecycle.ForkSourceRequest) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return runtimerunlifecycle.Snapshot{}, "", fmt.Errorf("%w: backend=sqlite run_id=%s", runtimerunlifecycle.ErrForkSourceUnsupported, strings.TrimSpace(request.RunID))
+	type result struct {
+		snapshot    runtimerunlifecycle.Snapshot
+		disposition runtimerunlifecycle.MutationDisposition
+	}
+	value, err := runSQLiteLifecycleOperation(ctx, s, func(ctx context.Context, mutation sqliteRunLifecycleMutation) (result, error) {
+		snapshot, disposition, err := mutation.ForkSource(ctx, request)
+		return result{snapshot: snapshot, disposition: disposition}, err
+	})
+	return value.snapshot, value.disposition, err
 }
 
 func (s *RunLifecyclePostgresOwner) ReviseRunSource(ctx context.Context, request runtimerunlifecycle.SourceRevisionRequest) (runtimerunlifecycle.MutationDisposition, error) {
@@ -670,6 +682,58 @@ func (s *RunLifecyclePostgresOwner) InsertRunForkRunTx(
 	})
 }
 
+func (s *RunLifecycleSQLiteOwner) InsertRunForkRunTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	story runtimeauthoractivity.Mutation,
+	forkRunID, sourceRunID, forkEventID string,
+	entityCount int,
+	startedAt time.Time,
+	identity runtimecorrelation.BundleSourceFact,
+) error {
+	if tx == nil {
+		return errors.New("fork run lifecycle creation requires transaction")
+	}
+	if err := identity.Validate(); err != nil {
+		return fmt.Errorf("fork run lifecycle creation requires canonical executable bundle identity: %w", err)
+	}
+	if story == nil {
+		return errors.New("fork run lifecycle creation requires private story ownership")
+	}
+	mutation := sqliteRunLifecycleMutation{store: s, tx: tx}
+	if err := mutation.requirePersistedSource(ctx, identity); err != nil {
+		return err
+	}
+	bundleHash, bundleSource := identity.StorageValues()
+	origin, err := runtimerunlifecycle.ForkMaterializationRunOrigin(sourceRunID, forkEventID)
+	if err != nil {
+		return err
+	}
+	startedAt = runtimerunlifecycle.CanonicalTimestamp(startedAt)
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO runs (
+			run_id, status, origin_kind, forked_from_run_id, forked_from_event_id,
+			entity_count, event_count, started_at, bundle_hash, bundle_source
+		)
+		VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+	`, forkRunID, string(runtimerunlifecycle.StatePaused), origin.Kind(), origin.SourceRunID(), origin.SourceEventID(),
+		entityCount, startedAt.UTC(), bundleHash, bundleSource); err != nil {
+		return fmt.Errorf("insert fork run lifecycle: %w", err)
+	}
+	scope, err := runtimeauthoractivity.BundleScopeForSource(ctx, bundleHash)
+	if err != nil {
+		return err
+	}
+	return story.Record(ctx, runtimeauthoractivity.Draft{
+		Kind: runtimeauthoractivity.KindRunLifecycle, Transition: "fork_prepared",
+		SourceOwner: "runs", SourceIdentity: forkRunID, DedupKey: "run-created:" + forkRunID,
+		OccurredAt: startedAt.UTC(), RunID: forkRunID, Scope: scope,
+		Projection: runtimeauthoractivity.Projection{
+			SubjectType: "run", SubjectID: forkRunID, ParentRunID: sourceRunID, TriggerEventType: "run.fork",
+		},
+	})
+}
+
 func (m postgresRunLifecycleMutation) TransitionActive(
 	ctx context.Context,
 	request runtimerunlifecycle.ActiveTransitionRequest,
@@ -801,14 +865,13 @@ func (m postgresRunLifecycleMutation) ForkSource(
 }
 
 func (m sqliteRunLifecycleMutation) ForkSource(
-	_ context.Context,
+	ctx context.Context,
 	request runtimerunlifecycle.ForkSourceRequest,
 ) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
-	return runtimerunlifecycle.Snapshot{}, "", fmt.Errorf(
-		"%w: backend=sqlite run_id=%s",
-		runtimerunlifecycle.ErrForkSourceUnsupported,
-		strings.TrimSpace(request.RunID),
-	)
+	if m.store == nil {
+		return runtimerunlifecycle.Snapshot{}, "", errors.New("SQLite fork source lifecycle transition requires selected store")
+	}
+	return m.store.markForkSourceTx(ctx, m.tx, m.story, m.effects, request)
 }
 
 func (m postgresRunLifecycleMutation) classifyCreateExisting(
@@ -1020,5 +1083,9 @@ func deleteMaterializedForkRunTx(ctx context.Context, tx *sql.Tx, runID string) 
 }
 
 func (s *RunLifecyclePostgresOwner) DeleteMaterializedForkRunTx(ctx context.Context, tx *sql.Tx, runID string) error {
+	return deleteMaterializedForkRunTx(ctx, tx, runID)
+}
+
+func (s *RunLifecycleSQLiteOwner) DeleteMaterializedForkRunTx(ctx context.Context, tx *sql.Tx, runID string) error {
 	return deleteMaterializedForkRunTx(ctx, tx, runID)
 }

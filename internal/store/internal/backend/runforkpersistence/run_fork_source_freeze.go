@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 )
 
@@ -30,7 +31,7 @@ func (s *RunForkPostgresOwner) applyRunForkSourceFreeze(ctx context.Context, tx 
 	} else {
 		now = now.UTC()
 	}
-	if err := requireRunForkSourceFreezeReady(ctx, tx, lineage.SourceRunID, now); err != nil {
+	if err := requireRunForkSourceFreezeReady(ctx, tx, postgresDeliveryAdapter, postgresManagedExternalAttemptRunQuery, lineage.SourceRunID, now); err != nil {
 		return err
 	}
 	if _, _, err := s.RunLifecyclePostgresOwner.ForkSourceTx(ctx, tx, story, effects, runtimerunlifecycle.ForkSourceRequest{
@@ -52,12 +53,64 @@ func (s *RunForkPostgresOwner) applyRunForkSourceFreeze(ctx context.Context, tx 
 	return nil
 }
 
+func (s *RunForkSQLiteOwner) applyRunForkSourceFreeze(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *runforkrevision.Effects, lineage runForkActivationLineage, now time.Time, confirmed bool, handoff *runLifecycleCandidateHandoffReservation) error {
+	if tx == nil {
+		return fmt.Errorf("run fork source freeze transaction is required")
+	}
+	if err := requireSQLiteRunActive(ctx, tx, lineage.SourceRunID); err != nil {
+		return fmt.Errorf("admit run fork source freeze: %w", err)
+	}
+	if !confirmed {
+		return &runfork.RunForkSourceFreezeConfirmationError{SourceRunID: lineage.SourceRunID, ForkRunID: lineage.ForkRunID}
+	}
+	if now.IsZero() {
+		now = s.now()
+	} else {
+		now = now.UTC()
+	}
+	if err := requireRunForkSourceFreezeReady(ctx, tx, sqliteDeliveryAdapter, sqliteManagedExternalAttemptRunQuery, lineage.SourceRunID, now); err != nil {
+		return err
+	}
+	if _, _, err := s.RunLifecycleSQLiteOwner.ForkSourceTx(ctx, tx, story, effects, runtimerunlifecycle.ForkSourceRequest{
+		RunID: lineage.SourceRunID, ContinuedAsRunID: lineage.ForkRunID, EndedAt: now,
+	}); err != nil {
+		return fmt.Errorf("freeze source run lifecycle: %w", err)
+	}
+	if _, err := s.RunLifecycleSQLiteOwner.TransitionActiveTx(ctx, tx, story, handoff, runtimerunlifecycle.ActiveTransitionRequest{
+		RunID: lineage.ForkRunID, State: runtimerunlifecycle.StateRunning,
+	}); err != nil {
+		return fmt.Errorf("activate fork run lifecycle: %w", err)
+	}
+	return recordRunForkActivationAuthorActivity(ctx, story, lineage, now)
+}
+
 func (s *RunForkPostgresOwner) ApplyRunForkSourceFreezeTx(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *runforkrevision.Effects, lineage RunForkActivationLineage, now time.Time, confirmed bool, handoff *runLifecycleCandidateHandoffReservation) error {
 	return s.applyRunForkSourceFreeze(ctx, tx, story, effects, lineage, now, confirmed, handoff)
 }
 
-func requireRunForkSourceFreezeReady(ctx context.Context, tx *sql.Tx, sourceRunID string, now time.Time) error {
-	deliveries, err := postgresDeliveryAdapter.ActiveRunSnapshots(ctx, tx, sourceRunID)
+const postgresManagedExternalAttemptRunQuery = `SELECT EXISTS (
+	SELECT 1
+	FROM runtime_external_effect_attempts a
+	JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
+	WHERE a.state IN ('authorized', 'launched', 'response_observed')
+	  AND a.lease_expires_at > $2
+	  AND COALESCE(NULLIF(o.lineage->>'run_id', ''), NULLIF(o.authority_evidence #>> '{usage_target,run_id}', '')) = $1::text
+)`
+
+const sqliteManagedExternalAttemptRunQuery = `SELECT EXISTS (
+	SELECT 1
+	FROM runtime_external_effect_attempts a
+	JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
+	WHERE a.state IN ('authorized', 'launched', 'response_observed')
+	  AND a.lease_expires_at > $2
+	  AND COALESCE(NULLIF(CAST(json_extract(o.lineage, '$.run_id') AS TEXT), ''), NULLIF(CAST(json_extract(o.authority_evidence, '$.usage_target.run_id') AS TEXT), '')) = $1
+)`
+
+func requireRunForkSourceFreezeReady(ctx context.Context, tx *sql.Tx, deliveryOwner *storedelivery.Adapter, managedAttemptQuery, sourceRunID string, now time.Time) error {
+	if deliveryOwner == nil || managedAttemptQuery == "" {
+		return fmt.Errorf("source freeze inspection owners are required")
+	}
+	deliveries, err := deliveryOwner.ActiveRunSnapshots(ctx, tx, sourceRunID)
 	if err != nil {
 		return fmt.Errorf("inspect source freeze delivery authority: %w", err)
 	}
@@ -77,7 +130,7 @@ func requireRunForkSourceFreezeReady(ctx context.Context, tx *sql.Tx, sourceRunI
 			name: "leased_session",
 			query: `SELECT EXISTS (
 				SELECT 1 FROM agent_sessions
-				WHERE run_id = $1::uuid AND status = 'active'
+					WHERE run_id = $1 AND status = 'active'
 				  AND NULLIF(lease_holder, '') IS NOT NULL
 				  AND lease_expires_at > $2
 			)`,
@@ -87,7 +140,7 @@ func requireRunForkSourceFreezeReady(ctx context.Context, tx *sql.Tx, sourceRunI
 			name: "started_activity",
 			query: `SELECT EXISTS (
 				SELECT 1 FROM activity_attempts
-				WHERE run_id = $1::uuid AND status = 'started'
+					WHERE run_id = $1 AND status = 'started'
 			)`,
 			args: []any{sourceRunID},
 		},
@@ -95,22 +148,15 @@ func requireRunForkSourceFreezeReady(ctx context.Context, tx *sql.Tx, sourceRunI
 			name: "directive_operation",
 			query: `SELECT EXISTS (
 				SELECT 1 FROM agent_directive_operations
-				WHERE resolved_run_id = $1::uuid
+					WHERE resolved_run_id = $1
 				  AND state IN ('prepared', 'executing', 'executed')
 			)`,
 			args: []any{sourceRunID},
 		},
 		{
-			name: "managed_external_attempt",
-			query: `SELECT EXISTS (
-				SELECT 1
-				FROM runtime_external_effect_attempts a
-				JOIN runtime_external_effect_operations o ON o.operation_id = a.operation_id
-				WHERE a.state IN ('authorized', 'launched', 'response_observed')
-				  AND a.lease_expires_at > $2
-				  AND COALESCE(NULLIF(o.lineage->>'run_id', ''), NULLIF(o.authority_evidence #>> '{usage_target,run_id}', '')) = $1::text
-			)`,
-			args: []any{sourceRunID, now},
+			name:  "managed_external_attempt",
+			query: managedAttemptQuery,
+			args:  []any{sourceRunID, now},
 		},
 	}
 	for _, check := range checks {

@@ -50,6 +50,40 @@ func (s *RunForkPostgresOwner) PlanRunFork(ctx context.Context, req runfork.RunF
 	if err := s.requireCurrentSchema(); err != nil {
 		return runfork.RunForkPlan{}, err
 	}
+	tx, err := s.backend.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return runfork.RunForkPlan{}, fmt.Errorf("begin run fork revision snapshot: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	return planRunForkSnapshot(ctx, tx, req, runforkrevision.ValidateCompletePostgres, resolveRunForkRevisionPoint)
+}
+
+func (s *RunForkSQLiteOwner) PlanRunFork(ctx context.Context, req runfork.RunForkPlanRequest) (runfork.RunForkPlan, error) {
+	if s == nil || s.backend == nil {
+		return runfork.RunForkPlan{}, fmt.Errorf("sqlite store is required")
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return runfork.RunForkPlan{}, err
+	}
+	var plan runfork.RunForkPlan
+	err := s.backend.RunReadTransaction(ctx, func(txctx context.Context, tx *sql.Tx) error {
+		var err error
+		plan, err = planRunForkSnapshot(txctx, tx, req, runforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint)
+		return err
+	})
+	return plan, err
+}
+
+type runForkRevisionValidator func(context.Context, *sql.Tx, string) error
+type runForkRevisionPointResolver func(context.Context, *sql.Tx, string, string) (runForkEventCursor, error)
+
+func planRunForkSnapshot(
+	ctx context.Context,
+	tx *sql.Tx,
+	req runfork.RunForkPlanRequest,
+	validate runForkRevisionValidator,
+	resolve runForkRevisionPointResolver,
+) (runfork.RunForkPlan, error) {
 	runID := strings.TrimSpace(req.SourceRunID)
 	if runID == "" {
 		return runfork.RunForkPlan{}, fmt.Errorf("source run_id is required")
@@ -59,17 +93,14 @@ func (s *RunForkPostgresOwner) PlanRunFork(ctx context.Context, req runfork.RunF
 	}
 	at := strings.TrimSpace(req.At)
 
-	tx, err := s.backend.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
-	if err != nil {
-		return runfork.RunForkPlan{}, fmt.Errorf("begin run fork revision snapshot: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
 	plan := runfork.RunForkPlan{SourceRunID: runID}
 	if err := loadRunForkSourceSummary(ctx, tx, &plan); err != nil {
 		return runfork.RunForkPlan{}, err
 	}
-	if err := runforkrevision.ValidateCompletePostgres(ctx, tx, runID); err != nil {
+	if validate == nil {
+		return runfork.RunForkPlan{}, fmt.Errorf("run fork revision validator is required")
+	}
+	if err := validate(ctx, tx, runID); err != nil {
 		return runfork.RunForkPlan{}, err
 	}
 	if at != "" {
@@ -77,7 +108,10 @@ func (s *RunForkPostgresOwner) PlanRunFork(ctx context.Context, req runfork.RunF
 			return runfork.RunForkPlan{}, fmt.Errorf("fork point --at must be an event UUID: %w", err)
 		}
 	}
-	cursor, err := resolveRunForkRevisionPoint(ctx, tx, runID, at)
+	if resolve == nil {
+		return runfork.RunForkPlan{}, fmt.Errorf("run fork revision point resolver is required")
+	}
+	cursor, err := resolve(ctx, tx, runID, at)
 	if err != nil {
 		return runfork.RunForkPlan{}, err
 	}
@@ -155,23 +189,31 @@ func runForkPointRevisionEvent(snapshot *runForkRevisionSnapshot, cursor runFork
 }
 
 func loadRunForkSourceSummary(ctx context.Context, q rowQueryer, plan *runfork.RunForkPlan) error {
-	var started, ended sql.NullTime
+	var startedRaw, endedRaw any
 	if err := q.QueryRowContext(ctx, `
 		SELECT COALESCE(status, ''), started_at, ended_at
 		FROM runs
-		WHERE run_id = $1::uuid
-	`, plan.SourceRunID).Scan(&plan.SourceRunStatus, &started, &ended); err != nil {
+		WHERE run_id = $1
+	`, plan.SourceRunID).Scan(&plan.SourceRunStatus, &startedRaw, &endedRaw); err != nil {
 		if err == sql.ErrNoRows {
 			return fmt.Errorf("source run %s not found", plan.SourceRunID)
 		}
 		return fmt.Errorf("load source run: %w", err)
 	}
-	if started.Valid {
-		tm := started.Time
+	started, present, err := sqliteTimeValue(startedRaw)
+	if err != nil {
+		return fmt.Errorf("decode source run started_at: %w", err)
+	}
+	if present {
+		tm := started
 		plan.SourceRunStartedAt = &tm
 	}
-	if ended.Valid {
-		tm := ended.Time
+	ended, present, err := sqliteTimeValue(endedRaw)
+	if err != nil {
+		return fmt.Errorf("decode source run ended_at: %w", err)
+	}
+	if present {
+		tm := ended
 		plan.SourceRunEndedAt = &tm
 	}
 	return nil

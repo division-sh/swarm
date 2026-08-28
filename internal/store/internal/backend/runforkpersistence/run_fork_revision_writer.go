@@ -15,3 +15,12 @@ func finalizePostgresRunForkRevisionTx(ctx context.Context, tx *sql.Tx, effects 
 func (s *RunForkPostgresOwner) FinalizeRunForkRevisionTx(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects) error {
 	return finalizePostgresRunForkRevisionTx(ctx, tx, effects)
 }
+
+func finalizeSQLiteRunForkRevisionTx(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects) error {
+	_, err := privaterunforkrevision.FinalizeSQLite(ctx, tx, effects)
+	return err
+}
+
+func (s *RunForkSQLiteOwner) FinalizeRunForkRevisionTx(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects) error {
+	return finalizeSQLiteRunForkRevisionTx(ctx, tx, effects)
+}

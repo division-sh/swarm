@@ -70,19 +70,6 @@ func TestRunForkSourceFreezeIsTheOnlyForkedStatusWriter(t *testing.T) {
 	}
 }
 
-func TestRunForkMutationUnsupportedSQLite(t *testing.T) {
-	store := newBootstrappedSQLiteRuntimeStoreForTest(t)
-	ctx := testAuthorActivityBundleSourceContext()
-	_, _, err := store.ForkRunSource(ctx, storerunlifecycle.ForkSourceRequest{
-		RunID:            uuid.NewString(),
-		ContinuedAsRunID: uuid.NewString(),
-		EndedAt:          time.Now().UTC(),
-	})
-	if !errors.Is(err, storerunlifecycle.ErrForkSourceUnsupported) {
-		t.Fatalf("fork source mutation error = %v, want typed unsupported", err)
-	}
-}
-
 func TestRunForkSourceFreezeCommitsCoupledLifecycleDecisionAndActivityOutcome(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	pg := admitTestPostgresStore(t, db)

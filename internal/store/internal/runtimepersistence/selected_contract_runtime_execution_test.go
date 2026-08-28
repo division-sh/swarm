@@ -370,6 +370,192 @@ func proveSelectedForkCompletionAuthorityRecoveryNoRedispatch(t *testing.T, fixt
 	}
 }
 
+type selectedForkDiscardStore interface {
+	selectedCompletionAuthorityStore
+	deliveryFixtureStore
+	DiscardMaterializedSelectedContractExecutionFork(context.Context, string) error
+}
+
+type selectedForkDiscardProof struct {
+	RunStatus     string
+	RunRows       int
+	EventRows     int
+	DeliveryRows  int
+	AttemptRows   int
+	OutcomeRows   int
+	ExecutionRows int
+	BindingRows   int
+}
+
+func TestSelectedForkDiscardSelectedStoreParity(t *testing.T) {
+	proofs := make(map[string]selectedForkDiscardProof, 2)
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			store, db, sqlite := selectedForkDiscardTestStore(t, backend)
+			fixture := newSelectedCompletionFixture(t, store, db, sqlite)
+			ctx := testAuthorActivityContext()
+			issued, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
+			if err != nil {
+				t.Fatalf("issue retained selected execution: %v", err)
+			}
+			eventsByState, deliveries := seedSelectedForkDiscardDeliveries(t, ctx, store, fixture)
+
+			cancelled, cancel := context.WithCancel(ctx)
+			cancel()
+			before := loadSelectedForkDiscardProof(t, ctx, db, sqlite, fixture.forkRun, issued.ExecutionID)
+			if err := store.DiscardMaterializedSelectedContractExecutionFork(cancelled, fixture.forkRun); err == nil {
+				t.Fatal("pre-cancelled selected fork discard succeeded")
+			}
+			afterCancellation := loadSelectedForkDiscardProof(t, ctx, db, sqlite, fixture.forkRun, issued.ExecutionID)
+			if !reflect.DeepEqual(afterCancellation, before) {
+				t.Fatalf("pre-cancelled discard changed durable state:\nbefore=%#v\nafter=%#v", before, afterCancellation)
+			}
+
+			if err := store.DiscardMaterializedSelectedContractExecutionFork(ctx, fixture.forkRun); err != nil {
+				t.Fatalf("discard selected fork: %v", err)
+			}
+			proofs[backend] = loadSelectedForkDiscardProof(t, ctx, db, sqlite, fixture.forkRun, issued.ExecutionID)
+			if proofs[backend] != (selectedForkDiscardProof{RunStatus: "cancelled", RunRows: 1, ExecutionRows: 1, BindingRows: 1}) {
+				t.Fatalf("selected fork discard proof = %#v", proofs[backend])
+			}
+			for _, claimed := range deliveries {
+				if claimed.Snapshot.DeliveryID == "" {
+					t.Fatal("discard proof delivery has no durable identity")
+				}
+			}
+			for _, event := range eventsByState {
+				if event.ID() == "" {
+					t.Fatal("discard proof event has no durable identity")
+				}
+			}
+		})
+	}
+	if !reflect.DeepEqual(proofs["sqlite"], proofs["postgres"]) {
+		t.Fatalf("selected-store discard differs:\nsqlite=%#v\npostgres=%#v", proofs["sqlite"], proofs["postgres"])
+	}
+}
+
+func TestSelectedForkDiscardRollbackSelectedStoreParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			store, db, sqlite := selectedForkDiscardTestStore(t, backend)
+			fixture := newSelectedCompletionFixture(t, store, db, sqlite)
+			ctx := testAuthorActivityContext()
+			issued, err := store.IssueRunForkSelectedContractRuntimeExecution(ctx, fixture.request)
+			if err != nil {
+				t.Fatalf("issue rollback selected execution: %v", err)
+			}
+			seedSelectedForkDiscardDeliveries(t, ctx, store, fixture)
+			installSelectedForkDiscardFailure(t, ctx, db, sqlite)
+			before := loadSelectedForkDiscardProof(t, ctx, db, sqlite, fixture.forkRun, issued.ExecutionID)
+			err = store.DiscardMaterializedSelectedContractExecutionFork(ctx, fixture.forkRun)
+			if err == nil || !strings.Contains(err.Error(), "injected selected discard failure") {
+				t.Fatalf("selected fork discard failure = %v, want injected rollback", err)
+			}
+			after := loadSelectedForkDiscardProof(t, ctx, db, sqlite, fixture.forkRun, issued.ExecutionID)
+			if !reflect.DeepEqual(after, before) {
+				t.Fatalf("selected fork discard rollback changed durable state:\nbefore=%#v\nafter=%#v", before, after)
+			}
+		})
+	}
+}
+
+func TestSelectedForkDiscardMissingRunIsIdempotentOnBothStores(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			store, _, _ := selectedForkDiscardTestStore(t, backend)
+			missing := uuid.NewString()
+			if err := store.DiscardMaterializedSelectedContractExecutionFork(testAuthorActivityContext(), missing); err != nil {
+				t.Fatalf("discard missing selected fork: %v", err)
+			}
+			if err := store.DiscardMaterializedSelectedContractExecutionFork(testAuthorActivityContext(), missing); err != nil {
+				t.Fatalf("repeat discard missing selected fork: %v", err)
+			}
+		})
+	}
+}
+
+func selectedForkDiscardTestStore(t *testing.T, backend string) (selectedForkDiscardStore, *sql.DB, bool) {
+	t.Helper()
+	if backend == "sqlite" {
+		store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+		return store, store.backend.ConstructionHandle(), true
+	}
+	_, db, _ := testutil.StartPostgres(t)
+	return admitTestPostgresStore(t, db), db, false
+}
+
+func seedSelectedForkDiscardDeliveries(t *testing.T, ctx context.Context, store selectedForkDiscardStore, fixture selectedCompletionFixture) ([]events.Event, []runtimedelivery.ClaimedObligation) {
+	t.Helper()
+	route := testAgentDeliveryRoute(t, "selected-agent", "fixture/selected-agent")
+	eventsByState := []events.Event{
+		eventtest.PersistedProjection(uuid.NewString(), "selected.claimed", "selected-test", "", json.RawMessage(`{}`), 0, fixture.forkRun, "", events.EventEnvelope{}, time.Now().UTC()),
+		eventtest.PersistedProjection(uuid.NewString(), "selected.settled", "selected-test", "", json.RawMessage(`{}`), 0, fixture.forkRun, "", events.EventEnvelope{}, time.Now().UTC()),
+	}
+	deliveries := make([]runtimedelivery.ClaimedObligation, 0, len(eventsByState))
+	for _, event := range eventsByState {
+		if err := commitSemanticEventFixtureWithRoutes(ctx, store, event, []events.DeliveryRoute{route}); err != nil {
+			t.Fatalf("commit selected-fork delivery %s: %v", event.ID(), err)
+		}
+		claimed, err := claimDeliveryFixture(ctx, store, event, route)
+		if err != nil {
+			t.Fatalf("claim selected-fork delivery %s: %v", event.ID(), err)
+		}
+		deliveries = append(deliveries, claimed)
+	}
+	if _, err := store.SettleSuccess(ctx, deliveries[1].Claim, nil, 0, runtimedelivery.NotApplicableHandlerRuleSelection()); err != nil {
+		t.Fatalf("settle selected-fork delivery: %v", err)
+	}
+	return eventsByState, deliveries
+}
+
+func loadSelectedForkDiscardProof(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool, runID, executionID string) selectedForkDiscardProof {
+	t.Helper()
+	placeholder := "$1::uuid"
+	executionPlaceholder := "$2::uuid"
+	if sqlite {
+		placeholder = "?"
+		executionPlaceholder = "?"
+	}
+	proof := selectedForkDiscardProof{}
+	_ = db.QueryRowContext(ctx, "SELECT status FROM runs WHERE run_id = "+placeholder, runID).Scan(&proof.RunStatus)
+	queries := []struct {
+		dest  *int
+		query string
+		args  []any
+	}{
+		{&proof.RunRows, "SELECT COUNT(*) FROM runs WHERE run_id = " + placeholder, []any{runID}},
+		{&proof.EventRows, "SELECT COUNT(*) FROM events WHERE run_id = " + placeholder, []any{runID}},
+		{&proof.DeliveryRows, "SELECT COUNT(*) FROM event_deliveries WHERE run_id = " + placeholder, []any{runID}},
+		{&proof.AttemptRows, "SELECT COUNT(*) FROM event_delivery_attempts WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id = " + placeholder + ")", []any{runID}},
+		{&proof.OutcomeRows, "SELECT COUNT(*) FROM event_delivery_outcomes WHERE delivery_id IN (SELECT delivery_id FROM event_deliveries WHERE run_id = " + placeholder + ")", []any{runID}},
+		{&proof.ExecutionRows, "SELECT COUNT(*) FROM run_fork_selected_contract_runtime_executions WHERE fork_run_id = " + placeholder + " AND execution_id = " + executionPlaceholder, []any{runID, executionID}},
+		{&proof.BindingRows, "SELECT COUNT(*) FROM run_fork_selected_contract_bindings WHERE fork_run_id = " + placeholder, []any{runID}},
+	}
+	for _, query := range queries {
+		if err := db.QueryRowContext(ctx, query.query, query.args...).Scan(query.dest); err != nil {
+			t.Fatalf("load selected fork discard proof with %q: %v", query.query, err)
+		}
+	}
+	return proof
+}
+
+func installSelectedForkDiscardFailure(t *testing.T, ctx context.Context, db *sql.DB, sqlite bool) {
+	t.Helper()
+	if sqlite {
+		if _, err := db.ExecContext(ctx, `CREATE TRIGGER fail_selected_discard BEFORE DELETE ON events BEGIN SELECT RAISE(ABORT, 'injected selected discard failure'); END`); err != nil {
+			t.Fatalf("create SQLite selected-discard failure trigger: %v", err)
+		}
+		return
+	}
+	if _, err := db.ExecContext(ctx, `CREATE OR REPLACE FUNCTION fail_selected_discard_parity() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected selected discard failure'; END $$`); err != nil {
+		t.Fatalf("create PostgreSQL selected-discard failure function: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE TRIGGER fail_selected_discard BEFORE DELETE ON events FOR EACH STATEMENT EXECUTE FUNCTION fail_selected_discard_parity()`); err != nil {
+		t.Fatalf("create PostgreSQL selected-discard failure trigger: %v", err)
+	}
+}
+
 func TestSelectedForkRetainedDiscardPublishesHistoricalTombstoneRevisionPostgres(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)
 	store := admitTestPostgresStore(t, db)
@@ -443,7 +629,7 @@ func TestSelectedForkRetainedDiscardPublishesHistoricalTombstoneRevisionPostgres
 	if err != nil {
 		t.Fatalf("begin retained-discard history seed: %v", err)
 	}
-	seedRunForkRevisionMatrixFacts(t, ctx, seedTx, matrix, false)
+	seedRunForkRevisionMatrixFacts(t, ctx, seedTx, matrix, false, true)
 	effects, err := runforkrevision.ForRun(fixture.forkRun, runforkrevision.AllFamilies()...)
 	if err != nil {
 		t.Fatalf("declare retained-discard history effects: %v", err)

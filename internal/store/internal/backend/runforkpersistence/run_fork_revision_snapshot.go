@@ -252,6 +252,59 @@ func resolveRunForkRevisionPoint(ctx context.Context, tx *sql.Tx, runID, at stri
 	return cursor, nil
 }
 
+func resolveSQLiteRunForkRevisionPoint(ctx context.Context, tx *sql.Tx, runID, at string) (runForkEventCursor, error) {
+	if tx == nil {
+		return runForkEventCursor{}, fmt.Errorf("run fork revision point requires a database snapshot")
+	}
+	at = strings.TrimSpace(at)
+	where := ""
+	args := []any{runID}
+	if at != "" {
+		if _, err := uuid.Parse(at); err != nil {
+			return runForkEventCursor{}, fmt.Errorf("run fork selector must be an event UUID: %w", err)
+		}
+		where = "AND fact_key = $2"
+		args = append(args, at)
+	}
+	row := tx.QueryRowContext(ctx, `
+		WITH ranked_events AS (
+			SELECT fact_key, revision, fact,
+			       ROW_NUMBER() OVER (PARTITION BY fact_key ORDER BY revision ASC) AS first_rank
+			FROM run_fork_fact_revisions
+			WHERE run_id = $1 AND family = 'events' `+where+`
+		)
+		SELECT
+			fact_key,
+			COALESCE(CAST(json_extract(fact, '$.event_name') AS TEXT), ''),
+			COALESCE(CAST(json_extract(fact, '$.source_event_id') AS TEXT), ''),
+			COALESCE(CAST(json_extract(fact, '$.produced_by') AS TEXT), ''),
+			COALESCE(CAST(json_extract(fact, '$.produced_by_type') AS TEXT), ''),
+			COALESCE(CAST(json_extract(fact, '$.created_at') AS TEXT), ''),
+			revision
+		FROM ranked_events
+		WHERE first_rank = 1
+		ORDER BY revision DESC, fact_key DESC
+		LIMIT 1
+	`, args...)
+	var cursor runForkEventCursor
+	var createdAt string
+	if err := row.Scan(&cursor.EventID, &cursor.EventName, &cursor.SourceEventID, &cursor.ProducedBy, &cursor.ProducedByType, &createdAt, &cursor.Revision); err != nil {
+		if err == sql.ErrNoRows {
+			if at == "" {
+				return runForkEventCursor{}, fmt.Errorf("no revisioned source-run event exists for fork source run %s", runID)
+			}
+			return runForkEventCursor{}, fmt.Errorf("fork point event %s not found in revisioned source run %s", at, runID)
+		}
+		return runForkEventCursor{}, fmt.Errorf("resolve fork event revision: %w", err)
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(createdAt))
+	if err != nil {
+		return runForkEventCursor{}, fmt.Errorf("decode fork event revision timestamp: %w", err)
+	}
+	cursor.CreatedAt = parsed.UTC()
+	return cursor, nil
+}
+
 func loadRunForkRevisionSnapshot(ctx context.Context, tx *sql.Tx, runID string, revision int64) (*runForkRevisionSnapshot, error) {
 	if tx == nil {
 		return nil, fmt.Errorf("run fork revision snapshot requires a database transaction")
@@ -265,7 +318,7 @@ func loadRunForkRevisionSnapshot(ctx context.Context, tx *sql.Tx, runID string, 
 			       MIN(revision) OVER (PARTITION BY family, fact_key) AS first_revision,
 			       ROW_NUMBER() OVER (PARTITION BY family, fact_key ORDER BY revision DESC) AS latest_rank
 			FROM run_fork_fact_revisions
-			WHERE run_id = $1::uuid AND revision <= $2
+			WHERE run_id = $1 AND revision <= $2
 		)
 		SELECT family, first_revision, revision, fact
 		FROM bounded

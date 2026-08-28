@@ -227,11 +227,12 @@ func TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore(t *testing.T) {
 	if apiCaps.ConversationForkLifecycle == nil {
 		t.Fatal("sqlite apiCapabilities missing ConversationForkLifecycle mutation owner")
 	}
+	if apiCaps.RunForkAvailability == nil || apiCaps.RunFork == nil || apiCaps.RunForkSelector == nil {
+		t.Fatal("sqlite apiCapabilities missing complete run-fork capability family")
+	}
 	classifiedOut := map[string]any{
-		"BundleDelete":        apiCaps.BundleDelete,
-		"RunForkAvailability": apiCaps.RunForkAvailability,
-		"RunFork":             apiCaps.RunFork,
-		"ResetCoordinator":    apiCaps.ResetCoordinator,
+		"BundleDelete":     apiCaps.BundleDelete,
+		"ResetCoordinator": apiCaps.ResetCoordinator,
 	}
 	for name, capability := range classifiedOut {
 		if capability != nil {
@@ -379,6 +380,8 @@ func TestSelectedOwnerAPICapabilityMatrixIsExplicitAcrossBackends(t *testing.T) 
 		"sqlite bundle register":             sqliteCaps.BundleRegister != nil,
 		"sqlite conversation reads":          sqliteCaps.ConversationForks != nil,
 		"sqlite conversation lifecycle":      sqliteCaps.ConversationForkLifecycle != nil,
+		"sqlite run fork":                    sqliteCaps.RunFork != nil,
+		"sqlite run fork selector":           sqliteCaps.RunForkSelector != nil,
 		"postgres bundle register":           postgresCaps.BundleRegister != nil,
 		"postgres required serve ingest":     postgres.ServeBundleIngestWriter() != nil,
 		"postgres required run availability": postgres.RunBundleAvailability() != nil,
@@ -392,10 +395,8 @@ func TestSelectedOwnerAPICapabilityMatrixIsExplicitAcrossBackends(t *testing.T) 
 		}
 	}
 	for name, available := range map[string]bool{
-		"sqlite bundle delete":     sqliteCaps.BundleDelete != nil,
-		"sqlite run fork":          sqliteCaps.RunFork != nil,
-		"sqlite run fork selector": sqliteCaps.RunForkSelector != nil,
-		"sqlite reset":             sqliteCaps.ResetCoordinator != nil,
+		"sqlite bundle delete": sqliteCaps.BundleDelete != nil,
+		"sqlite reset":         sqliteCaps.ResetCoordinator != nil,
 	} {
 		if available {
 			t.Fatalf("%s capability unexpectedly available", name)

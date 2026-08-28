@@ -31,6 +31,7 @@ const (
 	ScenarioRunStopControlLifecycle              = "run_stop_control_lifecycle"
 	ScenarioRunPauseControlLifecycle             = "run_pause_control_lifecycle"
 	ScenarioRunContinueControlLifecycle          = "run_continue_control_lifecycle"
+	ScenarioRunForkLifecycle                     = "run_fork_lifecycle"
 	ScenarioAgentRestartLifecycle                = "agent_restart_lifecycle"
 	ScenarioAgentDirectiveOutcomeLifecycle       = "agent_directive_outcome_lifecycle"
 	ScenarioRuntimePauseIngressLifecycle         = "runtime_pause_ingress_lifecycle"
@@ -90,6 +91,7 @@ func Scenarios() []Scenario {
 		servedControlScenario(ScenarioRunStopControlLifecycle, "run.stop", "TestServedParityHarnessRunControlLifecycle"),
 		servedControlScenario(ScenarioRunPauseControlLifecycle, "run.pause", "TestServedParityHarnessRunControlLifecycle"),
 		servedControlScenario(ScenarioRunContinueControlLifecycle, "run.continue", "TestServedParityHarnessRunControlLifecycle"),
+		servedControlScenario(ScenarioRunForkLifecycle, "run.fork", "TestServedParityHarnessRunForkLifecycle"),
 		servedControlScenario(ScenarioAgentRestartLifecycle, "agent.restart", "TestServedParityHarnessAgentRestartLifecycle"),
 		servedControlScenario(ScenarioAgentDirectiveOutcomeLifecycle, "agent.send_directive", "TestServedParityHarnessAgentDirectiveOutcomeLifecycle"),
 		servedControlScenario(ScenarioRuntimePauseIngressLifecycle, "runtime.pause", "TestServedParityHarnessRuntimeIngressControlLifecycle"),

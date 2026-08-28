@@ -8,18 +8,52 @@ import (
 	"time"
 
 	"github.com/division-sh/swarm/internal/events"
+	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimepipelineobligation "github.com/division-sh/swarm/internal/runtime/pipelineobligation"
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	eventrecordpostgres "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/postgres"
+	eventrecordsqlite "github.com/division-sh/swarm/internal/store/internal/backend/eventrecord/sqlite"
 	"github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	"github.com/google/uuid"
 )
 
-func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *runforkrevision.Effects, store *RunForkPostgresOwner, lineage runForkActivationLineage, execution runfork.RunForkHistoricalReplayExecution, now time.Time) (runfork.RunForkDeliveryEventReplayResult, error) {
+const (
+	runForkDeliveryEventReplayTable = "run_fork_delivery_event_replays"
+)
+
+type runForkDeliveryEventReplayAdapter struct {
+	requireCurrent func() error
+	events         eventCommitOwner
+	deliveries     *storedelivery.Adapter
+	loadSource     func(context.Context, *sql.Tx, string, string) (events.Event, error)
+	commitScope    func(context.Context, *sql.Tx, *runforkrevision.Effects, string, runtimepipelineobligation.CommittedScope, time.Time) error
+	syncCounters   func(context.Context, *sql.Tx, runtimeauthoractivity.Mutation, string) error
+}
+
+func (s *RunForkPostgresOwner) deliveryEventReplayAdapter() runForkDeliveryEventReplayAdapter {
+	return runForkDeliveryEventReplayAdapter{
+		requireCurrent: s.requireCurrentSchema, events: s.events, deliveries: postgresDeliveryAdapter,
+		loadSource:   loadRunForkReplaySourceEvent,
+		commitScope:  s.PipelinePostgresOwner.CommitScopeAtTx,
+		syncCounters: s.RunLifecyclePostgresOwner.SyncCountersTx,
+	}
+}
+
+func (s *RunForkSQLiteOwner) deliveryEventReplayAdapter() runForkDeliveryEventReplayAdapter {
+	return runForkDeliveryEventReplayAdapter{
+		requireCurrent: s.requireCurrentSchema, events: s.events, deliveries: sqliteDeliveryAdapter,
+		loadSource:   loadSQLiteRunForkReplaySourceEvent,
+		commitScope:  s.PipelineSQLiteOwner.CommitScopeAtTx,
+		syncCounters: s.RunLifecycleSQLiteOwner.SyncCountersTx,
+	}
+}
+
+func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, effects *runforkrevision.Effects, store runForkDeliveryEventReplayAdapter, lineage runForkActivationLineage, execution runfork.RunForkHistoricalReplayExecution, now time.Time) (runfork.RunForkDeliveryEventReplayResult, error) {
 	result := runfork.RunForkDeliveryEventReplayResult{
 		Owner:       runfork.RunForkDeliveryEventReplayOwner,
 		SourceRunID: lineage.SourceRunID,
@@ -40,7 +74,10 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, story *pri
 		return result, fmt.Errorf("store.run_fork.delivery_event_replay requires at least one owner-authorized delivery")
 	}
 
-	if err := store.requireCurrentSchema(); err != nil {
+	if store.requireCurrent == nil || store.events == nil || store.deliveries == nil || store.loadSource == nil || store.commitScope == nil || store.syncCounters == nil {
+		return result, fmt.Errorf("run fork delivery/event replay adapters are required")
+	}
+	if err := store.requireCurrent(); err != nil {
 		return result, err
 	}
 	sourceEvents := map[string]events.Event{}
@@ -72,7 +109,7 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, story *pri
 		}
 		sourceEvent, ok := sourceEvents[sourceEventID]
 		if !ok {
-			loaded, err := loadRunForkReplaySourceEvent(ctx, tx, lineage.SourceRunID, sourceEventID)
+			loaded, err := store.loadSource(ctx, tx, lineage.SourceRunID, sourceEventID)
 			if err != nil {
 				return result, err
 			}
@@ -88,7 +125,7 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, story *pri
 			preparedEvents[forkEventID] = replayed
 			eventOrder = append(eventOrder, forkEventID)
 		}
-		sourceDelivery, err := postgresDeliveryAdapter.Snapshot(ctx, tx, sourceDeliveryID)
+		sourceDelivery, err := store.deliveries.Snapshot(ctx, tx, sourceDeliveryID)
 		if err != nil {
 			return result, fmt.Errorf("load source delivery %s for fork replay: %w", sourceDeliveryID, err)
 		}
@@ -130,7 +167,7 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, story *pri
 		if err != nil {
 			return result, err
 		}
-		if err := store.PipelinePostgresOwner.CommitScopeAtTx(ctx, tx, effects, forkEventID, runtimepipelineobligation.ScopeDirect, now); err != nil {
+		if err := store.commitScope(ctx, tx, effects, forkEventID, runtimepipelineobligation.ScopeDirect, now); err != nil {
 			return result, err
 		}
 		if outcome == runtimebus.EventAppendInserted {
@@ -138,7 +175,7 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, story *pri
 		}
 	}
 	for _, prepared := range preparedDeliveries {
-		inserted, err := insertRunForkReplayDelivery(ctx, tx, lineage, prepared.item, prepared.sourceEventID, prepared.forkEventID, prepared.obligation, now)
+		inserted, err := insertRunForkReplayDeliveryWithAdapter(ctx, tx, store.deliveries, lineage, prepared.item, prepared.sourceEventID, prepared.forkEventID, prepared.obligation, now)
 		if err != nil {
 			return result, err
 		}
@@ -146,7 +183,7 @@ func applyRunForkDeliveryEventReplay(ctx context.Context, tx *sql.Tx, story *pri
 			result.ReplayedDeliveryCount++
 		}
 	}
-	if err := syncRunForkReplayEventCount(ctx, tx, store, lineage.ForkRunID); err != nil {
+	if err := store.syncCounters(ctx, tx, nil, lineage.ForkRunID); err != nil {
 		return result, err
 	}
 	return result, nil
@@ -227,6 +264,24 @@ func LoadRunForkReplaySourceEvent(ctx context.Context, tx *sql.Tx, sourceRunID, 
 	return loadRunForkReplaySourceEvent(ctx, tx, sourceRunID, sourceEventID)
 }
 
+func loadSQLiteRunForkReplaySourceEvent(ctx context.Context, tx *sql.Tx, sourceRunID, sourceEventID string) (events.Event, error) {
+	row, found, err := eventrecordsqlite.Load(ctx, tx, sourceEventID)
+	if err != nil {
+		var event events.Event
+		return event, fmt.Errorf("load sqlite fork delivery/event replay source event: %w", err)
+	}
+	if !found || row.RunID != strings.TrimSpace(sourceRunID) {
+		var event events.Event
+		return event, fmt.Errorf("fork delivery/event replay source event %s not found in run %s", sourceEventID, sourceRunID)
+	}
+	admitted, err := row.Decode()
+	if err != nil {
+		var empty events.Event
+		return empty, fmt.Errorf("load sqlite fork delivery/event replay source event: %w", err)
+	}
+	return admitted.Event(), nil
+}
+
 func projectRunForkReplayEvent(source events.Event, lineage runForkActivationLineage, forkEventID string, now time.Time) (events.AdmittedEvent, error) {
 	selected, err := events.NewSelectedForkLineage(
 		lineage.ForkRunID,
@@ -263,7 +318,14 @@ func ProjectRunForkReplayEvent(source events.Event, lineage RunForkActivationLin
 }
 
 func insertRunForkReplayDelivery(ctx context.Context, tx *sql.Tx, lineage runForkActivationLineage, item runfork.RunForkHistoricalReplayExecutableWork, sourceEventID, forkEventID string, obligation runtimedelivery.Obligation, now time.Time) (bool, error) {
-	if _, err := postgresDeliveryAdapter.CommitInitial(ctx, tx, forkEventID, lineage.ForkRunID, []events.DeliveryRoute{obligation.Route()}, obligation.Authority()); err != nil {
+	return insertRunForkReplayDeliveryWithAdapter(ctx, tx, postgresDeliveryAdapter, lineage, item, sourceEventID, forkEventID, obligation, now)
+}
+
+func insertRunForkReplayDeliveryWithAdapter(ctx context.Context, tx *sql.Tx, deliveries *storedelivery.Adapter, lineage runForkActivationLineage, item runfork.RunForkHistoricalReplayExecutableWork, sourceEventID, forkEventID string, obligation runtimedelivery.Obligation, now time.Time) (bool, error) {
+	if deliveries == nil {
+		return false, fmt.Errorf("fork replay delivery adapter is required")
+	}
+	if _, err := deliveries.CommitInitial(ctx, tx, forkEventID, lineage.ForkRunID, []events.DeliveryRoute{obligation.Route()}, obligation.Authority()); err != nil {
 		return false, fmt.Errorf("insert fork replay delivery %s from source delivery %s: %w", obligation.DeliveryID(), item.SourceDeliveryID, err)
 	}
 	res, err := tx.ExecContext(ctx, `
@@ -273,8 +335,8 @@ func insertRunForkReplayDelivery(ctx context.Context, tx *sql.Tx, lineage runFor
 			selection_authority, created_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid,
-			$6::uuid, $7::uuid, $8, $9, $10, $11
+			$1, $2, $3, $4, $5,
+			$6, $7, $8, $9, $10, $11
 		)
 		ON CONFLICT (fork_run_id, source_delivery_id) DO NOTHING
 	`, deterministicRunForkReplayLineageID(lineage.ForkRunID, item.SourceDeliveryID), lineage.ForkRunID, lineage.SourceRunID,
@@ -288,13 +350,6 @@ func insertRunForkReplayDelivery(ctx context.Context, tx *sql.Tx, lineage runFor
 
 func InsertRunForkReplayDelivery(ctx context.Context, tx *sql.Tx, lineage RunForkActivationLineage, item runfork.RunForkHistoricalReplayExecutableWork, sourceEventID, forkEventID string, obligation runtimedelivery.Obligation, now time.Time) (bool, error) {
 	return insertRunForkReplayDelivery(ctx, tx, lineage, item, sourceEventID, forkEventID, obligation, now)
-}
-
-func syncRunForkReplayEventCount(ctx context.Context, tx *sql.Tx, store *RunForkPostgresOwner, forkRunID string) error {
-	if err := store.RunLifecyclePostgresOwner.SyncCountersTx(ctx, tx, nil, forkRunID); err != nil {
-		return fmt.Errorf("sync fork replay event count: %w", err)
-	}
-	return nil
 }
 
 func deterministicRunForkReplayEventID(forkRunID, sourceEventID string) string {

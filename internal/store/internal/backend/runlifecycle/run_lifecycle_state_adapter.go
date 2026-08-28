@@ -341,6 +341,20 @@ func (s *RunLifecyclePostgresOwner) markForkSourceTx(
 	return s.markRunTerminalStateTx(ctx, tx, story, effects, mutation)
 }
 
+func (s *RunLifecycleSQLiteOwner) markForkSourceTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	story runtimeauthoractivity.Mutation,
+	effects *privaterunforkrevision.Effects,
+	request runtimerunlifecycle.ForkSourceRequest,
+) (runtimerunlifecycle.Snapshot, runtimerunlifecycle.MutationDisposition, error) {
+	mutation, err := terminalRunMutationFromForkSource(request)
+	if err != nil {
+		return runtimerunlifecycle.Snapshot{}, "", err
+	}
+	return s.markRunTerminalStateTx(ctx, tx, story, effects, mutation)
+}
+
 func (s *RunLifecyclePostgresOwner) completeRunTx(
 	ctx context.Context,
 	tx *sql.Tx,

@@ -17,7 +17,33 @@ func admitRunForkScenarioProfile(
 	target scenarioexecution.EffectiveSourceIdentity,
 	targetBundle runtimecorrelation.BundleSourceFact,
 ) (scenarioexecution.Profile, bool, error) {
-	profile, found, err := scenarioexecutionpersistence.LoadPostgresTx(ctx, tx, sourceRunID)
+	return admitRunForkScenarioProfileWithLoader(ctx, tx, sourceRunID, target, targetBundle, scenarioexecutionpersistence.LoadPostgresTx)
+}
+
+func admitSQLiteRunForkScenarioProfile(
+	ctx context.Context,
+	tx *sql.Tx,
+	sourceRunID string,
+	target scenarioexecution.EffectiveSourceIdentity,
+	targetBundle runtimecorrelation.BundleSourceFact,
+) (scenarioexecution.Profile, bool, error) {
+	return admitRunForkScenarioProfileWithLoader(ctx, tx, sourceRunID, target, targetBundle, scenarioexecutionpersistence.LoadSQLiteTx)
+}
+
+type runForkScenarioProfileLoader func(context.Context, *sql.Tx, string) (scenarioexecution.Profile, bool, error)
+
+func admitRunForkScenarioProfileWithLoader(
+	ctx context.Context,
+	tx *sql.Tx,
+	sourceRunID string,
+	target scenarioexecution.EffectiveSourceIdentity,
+	targetBundle runtimecorrelation.BundleSourceFact,
+	load runForkScenarioProfileLoader,
+) (scenarioexecution.Profile, bool, error) {
+	if load == nil {
+		return scenarioexecution.Profile{}, false, fmt.Errorf("run fork scenario profile loader is required")
+	}
+	profile, found, err := load(ctx, tx, sourceRunID)
 	if err != nil {
 		return scenarioexecution.Profile{}, false, fmt.Errorf("load source run scenario execution profile: %w", err)
 	}
@@ -40,7 +66,20 @@ func admitRunForkScenarioProfile(
 }
 
 func requireExactRunForkScenarioProfile(ctx context.Context, tx *sql.Tx, forkRunID string, source scenarioexecution.Profile, sourceProfiled bool) error {
-	forkProfile, found, err := scenarioexecutionpersistence.LoadPostgresTx(ctx, tx, forkRunID)
+	return requireExactRunForkScenarioProfileWithLoader(ctx, tx, forkRunID, source, sourceProfiled, scenarioexecutionpersistence.LoadPostgresTx, scenarioexecutionpersistence.RequirePostgresExact)
+}
+
+func requireExactSQLiteRunForkScenarioProfile(ctx context.Context, tx *sql.Tx, forkRunID string, source scenarioexecution.Profile, sourceProfiled bool) error {
+	return requireExactRunForkScenarioProfileWithLoader(ctx, tx, forkRunID, source, sourceProfiled, scenarioexecutionpersistence.LoadSQLiteTx, scenarioexecutionpersistence.RequireSQLiteExact)
+}
+
+type runForkScenarioProfileExact func(context.Context, *sql.Tx, string, scenarioexecution.Profile) error
+
+func requireExactRunForkScenarioProfileWithLoader(ctx context.Context, tx *sql.Tx, forkRunID string, source scenarioexecution.Profile, sourceProfiled bool, load runForkScenarioProfileLoader, requireExact runForkScenarioProfileExact) error {
+	if load == nil || requireExact == nil {
+		return fmt.Errorf("run fork scenario profile verification owner is required")
+	}
+	forkProfile, found, err := load(ctx, tx, forkRunID)
 	if err != nil {
 		return fmt.Errorf("load fork scenario execution profile: %w", err)
 	}
@@ -51,7 +90,7 @@ func requireExactRunForkScenarioProfile(ctx context.Context, tx *sql.Tx, forkRun
 		if forkProfile.Digest() != source.Digest() || !forkProfile.EffectiveSourceIdentity().Equal(source.EffectiveSourceIdentity()) {
 			return fmt.Errorf("fork materialization %s scenario execution profile conflicts with source", forkRunID)
 		}
-		return scenarioexecutionpersistence.RequirePostgresExact(ctx, tx, forkRunID, source)
+		return requireExact(ctx, tx, forkRunID, source)
 	}
 	if found {
 		return fmt.Errorf("fork materialization %s has an unexpected scenario execution profile", forkRunID)

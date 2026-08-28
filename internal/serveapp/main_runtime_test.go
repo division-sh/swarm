@@ -1609,13 +1609,13 @@ func TestRunForkEndToEndPostgresCapturesCompleteRevisionHistory(t *testing.T) {
 	if fork.SourceRunID != proof.RunID || fork.ForkEventID != proof.FollowUpEventID || fork.ForkRunID == "" || fork.BundleHash != registration.BundleHash || fork.ExecutedEventCount != 1 {
 		t.Fatalf("run.fork real served path result = %#v", fork)
 	}
-	requireServedRunForkCounterfactualCompleted(t, db, fork.ForkRunID)
+	requireServedRunForkCounterfactualCompleted(t, db, fork.ForkRunID, 1)
 	if code := restarted.stop(); code != 0 {
 		t.Fatalf("restarted served runtime exit code = %d\noutput:\n%s", code, restarted.outputString())
 	}
 }
 
-func requireServedRunForkCounterfactualCompleted(t *testing.T, db *sql.DB, forkRunID string) {
+func requireServedRunForkCounterfactualCompleted(t *testing.T, db *sql.DB, forkRunID string, wantDeliveredEvents int) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
@@ -1623,19 +1623,19 @@ func requireServedRunForkCounterfactualCompleted(t *testing.T, db *sql.DB, forkR
 		var executionState string
 		err := db.QueryRowContext(context.Background(), `
 			SELECT
-				(SELECT COUNT(*) FROM entity_state WHERE run_id=$1::uuid AND current_state='done'),
+					(SELECT COUNT(*) FROM entity_state WHERE run_id=$1 AND current_state='done'),
 				(SELECT COUNT(*)
 				 FROM events e
 				 JOIN event_deliveries d ON d.event_id=e.event_id AND d.run_id=e.run_id
-				 WHERE e.run_id=$1::uuid
+					 WHERE e.run_id=$1
 				   AND e.event_name='item.processed'
 				   AND d.subscriber_id=$2
 				   AND d.status='delivered'),
 				(SELECT state
 				 FROM run_fork_selected_contract_runtime_executions
-				 WHERE fork_run_id=$1::uuid)
+					 WHERE fork_run_id=$1)
 		`, forkRunID, identitytest.RootNode(t, "item-observer").Key()).Scan(&terminalEntities, &deliveredEvents, &executionState)
-		if err == nil && terminalEntities == 1 && deliveredEvents == 1 && executionState == "closed" {
+		if err == nil && terminalEntities == 1 && deliveredEvents == wantDeliveredEvents && executionState == "closed" {
 			return
 		}
 		if time.Now().After(deadline) {
@@ -2109,6 +2109,11 @@ func TestServedParityHarnessRunControlLifecycle(t *testing.T) {
 	servedparity.RunScenarioGroup(t, scenarios, runServedRunControlBackendProof)
 }
 
+func TestServedParityHarnessRunForkLifecycle(t *testing.T) {
+	scenario := servedparity.MustScenario(servedparity.ScenarioRunForkLifecycle)
+	servedparity.Run(t, scenario, runServedRunForkBackendProof)
+}
+
 func TestServedParityHarnessAgentRestartLifecycle(t *testing.T) {
 	scenario := servedparity.MustScenario(servedparity.ScenarioAgentRestartLifecycle)
 	servedparity.Run(t, scenario, runServedAgentRestartBackendProof)
@@ -2177,14 +2182,6 @@ func TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed(t *testing.T) {
 				"bundle_hash":     rt.BundleHash,
 				"force":           true,
 				"idempotency_key": "issue-1386-sqlite-bundle-delete",
-			},
-		},
-		{
-			method: "run.fork",
-			params: map[string]any{
-				"source_run_id":   uuid.NewString(),
-				"fork_event_id":   uuid.NewString(),
-				"idempotency_key": "issue-1386-sqlite-run-fork",
 			},
 		},
 		{
@@ -2413,6 +2410,109 @@ func runServedRunControlBackendProof(t *testing.T, backend servedparity.Backend)
 	t.Helper()
 	rt := startServedControlProofRuntime(t, backend)
 	runServedRunControlLifecycleProof(t, rt)
+}
+
+func runServedRunForkBackendProof(t *testing.T, backend servedparity.Backend) {
+	t.Helper()
+	rt := startServedControlProofRuntimeWithFixture(t, backend, func(t *testing.T) string {
+		return canonicalrouting.CopyRootIngressServedFollowUp(t)
+	})
+	started := requireServedEventPublishRPCResult(t, rt.Endpoint, map[string]any{
+		"bundle_hash":     rt.BundleHash,
+		"event_name":      "item.received",
+		"payload":         map[string]any{"item_id": "selected-store-fork"},
+		"idempotency_key": "issue-2361-" + rt.Backend + "-source",
+	})
+	if !started.NewRunCreated || strings.TrimSpace(started.RunID) == "" || strings.TrimSpace(started.EventID) == "" {
+		t.Fatalf("initial event.publish result = %#v, want a new run and event", started)
+	}
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.Backend, started.RunID, started.EventID, identitytest.RootNode(t, "item-handler").Key(), rt.Probe)
+	var published struct {
+		EventID string `json:"event_id"`
+		RunID   string `json:"run_id"`
+	}
+	requireServedJSONRPCResult(t, rt.Endpoint, "event.publish", map[string]any{
+		"bundle_hash":     rt.BundleHash,
+		"run_id":          started.RunID,
+		"event_name":      "item.processed",
+		"payload":         map[string]any{"item_id": "hold"},
+		"idempotency_key": "issue-2361-" + rt.Backend + "-fork-point",
+	}, &published)
+	if published.RunID != started.RunID || strings.TrimSpace(published.EventID) == "" {
+		t.Fatalf("fork-point event.publish result = %#v", published)
+	}
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.Backend, started.RunID, published.EventID, identitytest.RootNode(t, "item-observer").Key(), rt.Probe)
+	requireServedRunStatusWithDebug(t, rt.Endpoint, rt.DB, rt.Backend, started.RunID, "running")
+
+	forkParams := map[string]any{
+		"source_run_id":         started.RunID,
+		"fork_event_id":         published.EventID,
+		"confirm_source_freeze": true,
+		"idempotency_key":       "issue-2361-" + rt.Backend + "-run-fork",
+	}
+	stdout, stderr, code := runServedCLICommand(t, rt.Endpoint, []string{
+		"run", "fork", started.RunID,
+		"--at-event", published.EventID,
+		"--confirm-source-freeze",
+		"--idempotency-key", forkParams["idempotency_key"].(string),
+		"--json",
+	})
+	if code != 0 || strings.TrimSpace(stderr) != "" {
+		t.Fatalf("swarm run fork code=%d stderr=%q stdout=%s\nsource debug:\n%s", code, stderr, stdout, servedEventPublishDebugSummary(t, rt.DB, rt.Backend, started.RunID))
+	}
+	var fork apiv1.RunForkExecutionResult
+	if err := json.Unmarshal([]byte(stdout), &fork); err != nil {
+		t.Fatalf("decode swarm run fork result: %v\n%s", err, stdout)
+	}
+	if fork.SourceRunID != started.RunID || fork.ForkEventID != published.EventID || fork.ForkRunID == "" || fork.SourceFrozen || fork.SourceRunStatus != "running" || fork.ExecutedEventCount != 1 {
+		t.Fatalf("run.fork result = %#v", fork)
+	}
+	var replay apiv1.RunForkExecutionResult
+	requireServedJSONRPCResult(t, rt.Endpoint, "run.fork", forkParams, &replay)
+	if !reflect.DeepEqual(replay, fork) {
+		t.Fatalf("run.fork idempotent replay = %#v, want exact %#v", replay, fork)
+	}
+	forkCountQuery := `SELECT COUNT(*) FROM runs WHERE forked_from_run_id = ? AND forked_from_event_id = ?`
+	if rt.Backend == "postgres" {
+		forkCountQuery = `SELECT COUNT(*) FROM runs WHERE forked_from_run_id = $1::uuid AND forked_from_event_id = $2::uuid`
+	}
+	var forkRows int
+	if err := rt.DB.QueryRowContext(context.Background(), forkCountQuery, started.RunID, published.EventID).Scan(&forkRows); err != nil || forkRows != 1 {
+		t.Fatalf("%s durable fork rows = %d, err=%v, want 1", rt.Backend, forkRows, err)
+	}
+	var completed struct {
+		EventID string `json:"event_id"`
+		RunID   string `json:"run_id"`
+	}
+	requireServedJSONRPCResult(t, rt.Endpoint, "event.publish", map[string]any{
+		"bundle_hash":     rt.BundleHash,
+		"run_id":          fork.ForkRunID,
+		"event_name":      "item.processed",
+		"payload":         map[string]any{"item_id": "review"},
+		"idempotency_key": "issue-2361-" + rt.Backend + "-fork-completion",
+	}, &completed)
+	if completed.RunID != fork.ForkRunID || strings.TrimSpace(completed.EventID) == "" {
+		t.Fatalf("fork completion event.publish result = %#v", completed)
+	}
+	waitForServedEventPublishNodeDeliveryLifecycleForNode(t, rt.DB, rt.Backend, fork.ForkRunID, completed.EventID, identitytest.RootNode(t, "item-observer").Key(), rt.Probe)
+	waitServedRunDeliveryQuiescence(t, rt.DB, rt.Backend, fork.ForkRunID)
+	requireServedRunStatusWithDebug(t, rt.Endpoint, rt.DB, rt.Backend, fork.ForkRunID, "completed")
+	requireServedRunForkCounterfactualCompleted(t, rt.DB, fork.ForkRunID, 2)
+
+	for method, params := range map[string]map[string]any{
+		"run.get":           {"run_id": fork.ForkRunID},
+		"entity.list":       {"run_id": fork.ForkRunID, "limit": 500},
+		"event.list":        {"filter": map[string]any{"run_id": fork.ForkRunID}, "limit": 500},
+		"conversation.list": {"run_id": fork.ForkRunID, "limit": 500},
+	} {
+		var readback map[string]any
+		requireServedJSONRPCResult(t, rt.Endpoint, method, params, &readback)
+		if len(readback) == 0 {
+			t.Fatalf("%s returned empty result envelope", method)
+		}
+	}
+	requireServedStatusCLIReadback(t, rt.Endpoint, fork.ForkRunID, "  completed")
+	requireServedParitySettlementPostconditions(t, rt.Endpoint, rt.DB, rt.Backend, fork.ForkRunID, servedparity.MustScenario(servedparity.ScenarioRunForkLifecycle))
 }
 
 func runServedBundleRegisterBackendProof(t *testing.T, backend servedparity.Backend) {

@@ -21,6 +21,10 @@ func (s *RunForkPostgresOwner) requireRunForkSelectedContractRouteRecoveryAccess
 	return s.requireCurrentSchema()
 }
 
+func (s *RunForkSQLiteOwner) requireRunForkSelectedContractRouteRecoveryAccess() error {
+	return s.requireCurrentSchema()
+}
+
 func (s *RunForkPostgresOwner) RecordRunForkSelectedContractRouteRecovery(ctx context.Context, req runfork.RunForkSelectedContractRouteRecoveryRequest) (runfork.RunForkSelectedContractRouteRecovery, error) {
 	if s == nil || s.backend == nil {
 		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("postgres store is required")
@@ -52,6 +56,32 @@ func (s *RunForkPostgresOwner) RecordRunForkSelectedContractRouteRecovery(ctx co
 	return record, nil
 }
 
+func (s *RunForkSQLiteOwner) RecordRunForkSelectedContractRouteRecovery(ctx context.Context, req runfork.RunForkSelectedContractRouteRecoveryRequest) (runfork.RunForkSelectedContractRouteRecovery, error) {
+	if s == nil || s.backend == nil {
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("sqlite store is required")
+	}
+	if err := s.requireRunForkSelectedContractRouteRecoveryAccess(); err != nil {
+		return runfork.RunForkSelectedContractRouteRecovery{}, err
+	}
+	record, err := normalizeRunForkSelectedContractRouteRecovery(req, s.now())
+	if err != nil {
+		return runfork.RunForkSelectedContractRouteRecovery{}, err
+	}
+	err = s.backend.RunTransaction(ctx, "record selected-contract route recovery", func(ctx context.Context, tx *sql.Tx) error {
+		if err := requireSQLiteRunActive(ctx, tx, record.SourceRunID); err != nil {
+			return fmt.Errorf("admit selected-contract route recovery source: %w", err)
+		}
+		if err := requireSQLiteRunActive(ctx, tx, record.ForkRunID); err != nil {
+			return fmt.Errorf("admit selected-contract route recovery fork: %w", err)
+		}
+		return insertRunForkSelectedContractRouteRecovery(ctx, tx, record)
+	})
+	if err != nil {
+		return runfork.RunForkSelectedContractRouteRecovery{}, err
+	}
+	return record, nil
+}
+
 type runForkSelectedContractRouteRecoveryExecer interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }
@@ -68,13 +98,13 @@ func insertRunForkSelectedContractRouteRecovery(ctx context.Context, execer runF
 			route_topology, recipient_planning, created_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, $3::uuid,
+			$1, $2, $3,
 			$4, $5,
 			$6, NULLIF($7, ''), NULLIF($8, ''), $9, $10,
 			$11, NULLIF($12, ''), $13,
 			$14, $15, $16,
 			$17, $18, $19,
-			$20::jsonb, $21::jsonb, $22
+			$20, $21, $22
 		)
 		ON CONFLICT (fork_run_id) DO UPDATE
 		SET owner = EXCLUDED.owner,
@@ -109,7 +139,7 @@ func insertRunForkSelectedContractRouteRecovery(ctx context.Context, execer runF
 }
 
 func validateRunForkSelectedContractRouteRecoveryAtActivation(ctx context.Context, tx *sql.Tx, expected runfork.RunForkSelectedContractRouteRecovery) error {
-	actual, err := loadRunForkSelectedContractRouteRecovery(ctx, tx, `WHERE fork_run_id = $1::uuid`, expected.ForkRunID)
+	actual, err := loadRunForkSelectedContractRouteRecovery(ctx, tx, `WHERE fork_run_id = $1`, expected.ForkRunID)
 	if err == sql.ErrNoRows {
 		return runForkReplayResumeError(
 			runfork.RunForkBlockerFlowRouteHistoryUnproven,
@@ -159,7 +189,31 @@ func (s *RunForkPostgresOwner) LoadRunForkSelectedContractRouteRecovery(ctx cont
 	if err := s.requireRunForkSelectedContractRouteRecoveryAccess(); err != nil {
 		return runfork.RunForkSelectedContractRouteRecovery{}, false, err
 	}
-	record, err := loadRunForkSelectedContractRouteRecovery(ctx, s.backend, `WHERE fork_run_id = $1::uuid`, forkRunID)
+	record, err := loadRunForkSelectedContractRouteRecovery(ctx, s.backend, `WHERE fork_run_id = $1`, forkRunID)
+	if err == sql.ErrNoRows {
+		return runfork.RunForkSelectedContractRouteRecovery{}, false, nil
+	}
+	if err != nil {
+		return runfork.RunForkSelectedContractRouteRecovery{}, false, err
+	}
+	return record, true, nil
+}
+
+func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractRouteRecovery(ctx context.Context, forkRunID string) (runfork.RunForkSelectedContractRouteRecovery, bool, error) {
+	if s == nil || s.backend == nil {
+		return runfork.RunForkSelectedContractRouteRecovery{}, false, fmt.Errorf("sqlite store is required")
+	}
+	forkRunID = strings.TrimSpace(forkRunID)
+	if forkRunID == "" {
+		return runfork.RunForkSelectedContractRouteRecovery{}, false, fmt.Errorf("fork run_id is required")
+	}
+	if _, err := uuid.Parse(forkRunID); err != nil {
+		return runfork.RunForkSelectedContractRouteRecovery{}, false, fmt.Errorf("fork run_id must be a UUID: %w", err)
+	}
+	if err := s.requireRunForkSelectedContractRouteRecoveryAccess(); err != nil {
+		return runfork.RunForkSelectedContractRouteRecovery{}, false, err
+	}
+	record, err := loadRunForkSelectedContractRouteRecovery(ctx, s.backend, `WHERE fork_run_id = $1`, forkRunID)
 	if err == sql.ErrNoRows {
 		return runfork.RunForkSelectedContractRouteRecovery{}, false, nil
 	}
@@ -172,6 +226,34 @@ func (s *RunForkPostgresOwner) LoadRunForkSelectedContractRouteRecovery(ctx cont
 func (s *RunForkPostgresOwner) ListRunForkSelectedContractRouteRecoveries(ctx context.Context) ([]runfork.RunForkSelectedContractRouteRecovery, error) {
 	if s == nil || s.backend == nil {
 		return nil, fmt.Errorf("postgres store is required")
+	}
+	if err := s.requireRunForkSelectedContractRouteRecoveryAccess(); err != nil {
+		return nil, err
+	}
+	rows, err := s.backend.QueryContext(ctx, runForkSelectedContractRouteRecoverySelect()+`
+		ORDER BY created_at ASC, fork_run_id ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list selected-contract route recoveries: %w", err)
+	}
+	defer rows.Close()
+	out := []runfork.RunForkSelectedContractRouteRecovery{}
+	for rows.Next() {
+		record, err := scanRunForkSelectedContractRouteRecovery(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read selected-contract route recoveries: %w", err)
+	}
+	return out, nil
+}
+
+func (s *RunForkSQLiteOwner) ListRunForkSelectedContractRouteRecoveries(ctx context.Context) ([]runfork.RunForkSelectedContractRouteRecovery, error) {
+	if s == nil || s.backend == nil {
+		return nil, fmt.Errorf("sqlite store is required")
 	}
 	if err := s.requireRunForkSelectedContractRouteRecoveryAccess(); err != nil {
 		return nil, err
@@ -225,6 +307,35 @@ func (s *RunForkPostgresOwner) ListSelectedContractRouteRecoveryRecords(ctx cont
 		})
 	}
 	return out, nil
+}
+
+func (s *RunForkSQLiteOwner) ListSelectedContractRouteRecoveryRecords(ctx context.Context) ([]runtimemanager.SelectedContractRouteRecoveryRecord, error) {
+	records, err := s.ListRunForkSelectedContractRouteRecoveries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return projectSelectedContractRouteRecoveryRecords(records), nil
+}
+
+func projectSelectedContractRouteRecoveryRecords(records []runfork.RunForkSelectedContractRouteRecovery) []runtimemanager.SelectedContractRouteRecoveryRecord {
+	out := make([]runtimemanager.SelectedContractRouteRecoveryRecord, 0, len(records))
+	for _, record := range records {
+		out = append(out, runtimemanager.SelectedContractRouteRecoveryRecord{
+			Owner: record.Owner, RuntimeRecoveryOwner: record.RuntimeRecoveryOwner,
+			ForkRunID: record.ForkRunID, SourceRunID: record.SourceRunID, ForkEventID: record.ForkEventID,
+			RouteTopologyOwner: record.RouteTopologyOwner, DynamicTopologyOwner: record.DynamicTopologyOwner,
+			RecipientPlanningOwner:       record.RecipientPlanningOwner,
+			FrontierEvidenceFingerprint:  record.FrontierEvidenceFingerprint,
+			RouteTopologyFingerprint:     record.RouteTopologyFingerprint,
+			RecipientPlanningFingerprint: record.RecipientPlanningFingerprint,
+			StaticRouteEventCount:        record.StaticRouteEventCount,
+			DynamicTopologyProofCount:    record.DynamicTopologyProofCount,
+			RecipientPlanEventCount:      record.RecipientPlanEventCount,
+			RouteTopology:                append([]byte(nil), record.RouteTopology...),
+			RecipientPlanning:            append([]byte(nil), record.RecipientPlanning...), CreatedAt: record.CreatedAt,
+		})
+	}
+	return out
 }
 
 func normalizeRunForkSelectedContractRouteRecovery(req runfork.RunForkSelectedContractRouteRecoveryRequest, createdAt time.Time) (runfork.RunForkSelectedContractRouteRecovery, error) {
@@ -377,9 +488,9 @@ func runForkSelectedContractRouteRecoverySelect() string {
 		SELECT
 			owner,
 			runtime_recovery_owner,
-			fork_run_id::text,
-			source_run_id::text,
-			fork_event_id::text,
+			fork_run_id,
+			source_run_id,
+			fork_event_id,
 			mode,
 			COALESCE(contracts_root, ''),
 			COALESCE(bundle_hash, ''),
@@ -416,6 +527,7 @@ func scanRunForkSelectedContractRouteRecovery(row runForkSelectedContractRouteRe
 	var record runfork.RunForkSelectedContractRouteRecovery
 	var selection runfork.RunForkContractSelection
 	var routeTopology, recipientPlanning []byte
+	var createdAt any
 	err := row.Scan(
 		&record.Owner,
 		&record.RuntimeRecoveryOwner,
@@ -438,7 +550,7 @@ func scanRunForkSelectedContractRouteRecovery(row runForkSelectedContractRouteRe
 		&record.RecipientPlanEventCount,
 		&routeTopology,
 		&recipientPlanning,
-		&record.CreatedAt,
+		&createdAt,
 	)
 	if err != nil {
 		return runfork.RunForkSelectedContractRouteRecovery{}, err
@@ -446,5 +558,13 @@ func scanRunForkSelectedContractRouteRecovery(row runForkSelectedContractRouteRe
 	record.ContractSelection = selection
 	record.RouteTopology = append(json.RawMessage(nil), routeTopology...)
 	record.RecipientPlanning = append(json.RawMessage(nil), recipientPlanning...)
+	parsedCreatedAt, ok, err := sqliteTimeValue(createdAt)
+	if err != nil {
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("decode selected-contract route recovery created_at: %w", err)
+	}
+	if !ok {
+		return runfork.RunForkSelectedContractRouteRecovery{}, fmt.Errorf("selected-contract route recovery created_at is required")
+	}
+	record.CreatedAt = parsedCreatedAt
 	return record, nil
 }

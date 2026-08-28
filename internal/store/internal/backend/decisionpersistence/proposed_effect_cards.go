@@ -193,6 +193,10 @@ func (s *DecisionPostgresOwner) LoadProposedEffectTx(ctx context.Context, tx *sq
 	return loadProposedEffectContinuation(ctx, tx, cardID, true, forUpdate)
 }
 
+func (s *DecisionSQLiteOwner) LoadProposedEffectTx(ctx context.Context, tx *sql.Tx, cardID string, forUpdate bool) (decisioncard.ProposedEffectContinuation, error) {
+	return loadProposedEffectContinuation(ctx, tx, cardID, false, forUpdate)
+}
+
 type proposedEffectProjection struct {
 	RequestEventID   string                       `json:"request_event_id"`
 	ActivityID       string                       `json:"activity_id"`
