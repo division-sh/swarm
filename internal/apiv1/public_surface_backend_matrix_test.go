@@ -108,7 +108,7 @@ type publicSurfaceValidationContext struct {
 	openRPCMatrixMethods   map[string]struct{}
 	openRPCMatrixTransport map[string]string
 	cliCommands            map[string]struct{}
-	goTests                map[string]string
+	goTests                map[string][]string
 	servedScenarios        map[string]servedparity.Scenario
 	storeParity            publicSurfaceStoreParityValidationContext
 }
@@ -1256,7 +1256,7 @@ func validatePublicSurfaceMutatingLedgerProofRefs(root, label string, refs []pub
 				problems = append(problems, fmt.Sprintf("%s go_test proof_ref missing name", label))
 				continue
 			}
-			if _, ok := ctx.goTests[ref.Name]; !ok {
+			if len(ctx.goTests[ref.Name]) == 0 {
 				problems = append(problems, fmt.Sprintf("%s go_test proof_ref %s does not resolve", label, ref.Name))
 			}
 		case "artifact":
@@ -1779,7 +1779,7 @@ func validatePublicSurfaceProofRefs(root, rowID string, row publicSurfaceMatrixR
 				problems = append(problems, fmt.Sprintf("%s go_test proof_ref missing name", rowID))
 				continue
 			}
-			if _, ok := ctx.goTests[ref.Name]; !ok {
+			if len(ctx.goTests[ref.Name]) == 0 {
 				problems = append(problems, fmt.Sprintf("%s go_test proof_ref %s does not resolve", rowID, ref.Name))
 			}
 		case "artifact":
@@ -1837,8 +1837,8 @@ func loadPublicSurfaceCLICommands(t *testing.T, root string) map[string]struct{}
 	return out
 }
 
-func loadPublicSurfaceGoTests(root string) (map[string]string, error) {
-	out := map[string]string{}
+func loadPublicSurfaceGoTests(root string) (map[string][]string, error) {
+	out := map[string][]string{}
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -1866,13 +1866,16 @@ func loadPublicSurfaceGoTests(root string) (map[string]string, error) {
 				continue
 			}
 			if name := fn.Name.Name; strings.HasPrefix(name, "Test") {
-				out[name] = rel
+				out[name] = append(out[name], filepath.ToSlash(rel))
 			}
 		}
 		return nil
 	})
 	if err != nil {
 		return nil, err
+	}
+	for name := range out {
+		sort.Strings(out[name])
 	}
 	return out, nil
 }
