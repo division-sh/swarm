@@ -199,6 +199,152 @@ func TestGoldenAgentWorkloadSQLiteDevScratchRestartStartsFreshEpoch(t *testing.T
 	}
 }
 
+func TestGoldenInvocationRootDevReadiness(t *testing.T) {
+	releaseRoot := goldenReleaseRoot(t)
+	binaryPath := buildReleaseBinary(t, releaseRoot)
+	checkoutRoot := filepath.Join(releaseRoot, "go-checkout")
+	writeReleaseFile(t, filepath.Join(checkoutRoot, "go.mod"), "module hostile-ancestor\n\ngo 1.23.0\n")
+	writeReleaseFile(t, filepath.Join(checkoutRoot, ".swarm", "swarm.yaml"), "store:\n  backend: postgres\n")
+
+	for _, test := range []struct {
+		name string
+		root string
+	}{
+		{name: "outside-go-checkout", root: filepath.Join(releaseRoot, "yaml-only-project")},
+		{name: "inside-go-checkout", root: filepath.Join(checkoutRoot, "yaml-project")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := os.MkdirAll(test.root, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal", "releasee2e", "testdata", "golden_agent_workload"), filepath.Join(test.root, "contracts"))
+			writeReleaseFile(t, filepath.Join(test.root, ".swarm", "swarm.yaml"), goldenRuntimeConfig(goldenStoreSelection{name: "sqlite", configYAML: "store:\n  backend: sqlite\n"}))
+			writeReleaseFile(t, filepath.Join(test.root, "api-token"), goldenAPIToken+"\n")
+			env := goldenProcessEnv(t, test.root, "", 0)
+			assertGoldenProcessHasNoExternalExecutables(t, env)
+
+			verify := runReleaseCommand(t, goldenStartupTimeout, test.root, env, "", binaryPath, "verify", "--json")
+			if verify.err != nil {
+				t.Fatalf("relative invocation-root verify failed: %v\n%s", verify.err, verify.output)
+			}
+			var verifyResult struct {
+				OK bool `json:"ok"`
+			}
+			if err := json.Unmarshal([]byte(strings.TrimSpace(verify.output)), &verifyResult); err != nil || !verifyResult.OK {
+				t.Fatalf("relative invocation-root verify result: err=%v output=%s", err, verify.output)
+			}
+
+			process := startReleaseServe(t, releaseProcessSpec{
+				BinaryPath: binaryPath,
+				WorkingDir: test.root,
+				Dev:        true,
+				APIPort:    freeReleaseTCPPort(t),
+				MCPPort:    freeReleaseTCPPort(t),
+				TokenFile:  "api-token",
+				Token:      goldenAPIToken,
+				Env:        env,
+			})
+			readyCtx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
+			if err := process.waitReady(readyCtx); err != nil {
+				cancel()
+				t.Fatal(err)
+			}
+			cancel()
+			goldenServedBundleHash(t, process.rpc)
+			scratchPath := filepath.Join(test.root, ".swarm", "stores", "dev-scratch.db")
+			if info, err := os.Stat(scratchPath); err != nil || !info.Mode().IsRegular() {
+				t.Fatalf("canonical dev scratch store %s: info=%v err=%v", scratchPath, info, err)
+			}
+			if err := process.stopAndWait(5 * time.Second); err != nil {
+				t.Fatalf("clean dev serve teardown: %v\n%s", err, process.output.String())
+			}
+		})
+	}
+
+	t.Run("borrowed-project-boundary", func(t *testing.T) {
+		invocationRoot := filepath.Join(releaseRoot, "borrowed-invocation")
+		projectRoot := filepath.Join(releaseRoot, "borrowed-project")
+		for _, root := range []string{invocationRoot, projectRoot} {
+			if err := os.MkdirAll(root, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeReleaseFile(t, filepath.Join(root, ".swarm", "swarm.yaml"), goldenRuntimeConfig(goldenStoreSelection{name: "sqlite", configYAML: "store:\n  backend: sqlite\n"}))
+			writeReleaseFile(t, filepath.Join(root, "api-token"), goldenAPIToken+"\n")
+		}
+		contracts := filepath.Join(projectRoot, "contracts")
+		copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal", "releasee2e", "testdata", "golden_agent_workload"), contracts)
+		invocationEnv := goldenProcessEnv(t, invocationRoot, "", 0)
+		assertGoldenProcessHasNoExternalExecutables(t, invocationEnv)
+
+		refused := runReleaseCommand(t, goldenStartupTimeout, invocationRoot, invocationEnv, "", binaryPath,
+			"serve", "--dev", "--contracts", contracts,
+			"--backend", "claude_cli", "--workspace-backend", "host",
+			"--api-listen-addr", fmt.Sprintf("127.0.0.1:%d", freeReleaseTCPPort(t)),
+			"--mcp-listen-addr", fmt.Sprintf("127.0.0.1:%d", freeReleaseTCPPort(t)),
+			"--api-token-file", "api-token", "--shutdown-grace", "2s", "--no-color")
+		if refused.err == nil || !strings.Contains(refused.output, "run from the contracts-owning project root") {
+			t.Fatalf("borrowed dev refusal: err=%v output=%s", refused.err, refused.output)
+		}
+		for _, path := range []string{
+			filepath.Join(invocationRoot, ".swarm", "stores"),
+			filepath.Join(projectRoot, ".swarm", "stores"),
+		} {
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Fatalf("borrowed dev refusal mutated %s: %v", path, err)
+			}
+		}
+
+		borrowed := startReleaseServe(t, releaseProcessSpec{
+			BinaryPath: binaryPath,
+			WorkingDir: invocationRoot,
+			Contracts:  contracts,
+			APIPort:    freeReleaseTCPPort(t),
+			MCPPort:    freeReleaseTCPPort(t),
+			TokenFile:  "api-token",
+			Token:      goldenAPIToken,
+			Env:        invocationEnv,
+		})
+		borrowedCtx, borrowedCancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
+		if err := borrowed.waitReady(borrowedCtx); err != nil {
+			borrowedCancel()
+			t.Fatal(err)
+		}
+		borrowedCancel()
+		goldenServedBundleHash(t, borrowed.rpc)
+		if err := borrowed.stopAndWait(5 * time.Second); err != nil {
+			t.Fatalf("borrowed non-dev teardown: %v\n%s", err, borrowed.output.String())
+		}
+		if _, err := os.Stat(filepath.Join(projectRoot, ".swarm", "stores")); !os.IsNotExist(err) {
+			t.Fatalf("borrowed non-dev wrote selected-project state: %v", err)
+		}
+
+		projectEnv := goldenProcessEnv(t, projectRoot, "", 0)
+		local := startReleaseServe(t, releaseProcessSpec{
+			BinaryPath: binaryPath,
+			WorkingDir: projectRoot,
+			Dev:        true,
+			APIPort:    freeReleaseTCPPort(t),
+			MCPPort:    freeReleaseTCPPort(t),
+			TokenFile:  "api-token",
+			Token:      goldenAPIToken,
+			Env:        projectEnv,
+		})
+		localCtx, localCancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
+		if err := local.waitReady(localCtx); err != nil {
+			localCancel()
+			t.Fatal(err)
+		}
+		localCancel()
+		goldenServedBundleHash(t, local.rpc)
+		if err := local.stopAndWait(5 * time.Second); err != nil {
+			t.Fatalf("remediated local dev teardown: %v\n%s", err, local.output.String())
+		}
+		if _, err := os.Stat(filepath.Join(projectRoot, ".swarm", "stores", "dev-scratch.db")); err != nil {
+			t.Fatalf("remediated local dev scratch store: %v", err)
+		}
+	})
+}
+
 type goldenStoreSelection struct {
 	name         string
 	configYAML   string

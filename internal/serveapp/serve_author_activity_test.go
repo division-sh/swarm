@@ -304,7 +304,7 @@ func serveStoryCallsContainExactScope(calls []runtimeauthoractivity.ListOptions,
 
 func TestServeNoFeedRequiresDevBeforeSideEffects(t *testing.T) {
 	var out, errOut bytes.Buffer
-	code := Run(context.Background(), t.TempDir(), cliapp.ServeOptions{
+	code := runFrom(context.Background(), t.TempDir(), cliapp.ServeOptions{
 		NoFeed: true, Output: &out, ErrorOutput: &errOut,
 	})
 	if code != 2 {

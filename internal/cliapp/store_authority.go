@@ -36,7 +36,7 @@ type authorityInspectionStore interface {
 	Close() error
 }
 
-func newStoreAuthorityCommand(ctx context.Context, repo string) *cobra.Command {
+func newStoreAuthorityCommand(ctx context.Context, root InvocationRoot) *cobra.Command {
 	opts := storeAuthorityOptions{storeMode: storebackend.ActiveDefaultBackend().String()}
 	cmd := &cobra.Command{
 		Use:   "store",
@@ -51,7 +51,7 @@ func newStoreAuthorityCommand(ctx context.Context, repo string) *cobra.Command {
 		Short: "Show who the selected store records as project owner.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			inspection, err := inspectSelectedStoreAuthority(ctx, repo, cmd, opts)
+			inspection, err := inspectSelectedStoreAuthority(ctx, root, cmd, opts)
 			if err != nil {
 				return err
 			}
@@ -64,7 +64,7 @@ func newStoreAuthorityCommand(ctx context.Context, repo string) *cobra.Command {
 		Short: "Repair an inconsistent project ownership record after inspection.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) (runErr error) {
-			selected, closeStore, err := openAuthorityMaintenanceStore(ctx, repo, cmd, opts)
+			selected, closeStore, err := openAuthorityMaintenanceStore(ctx, root, cmd, opts)
 			if err != nil {
 				return err
 			}
@@ -109,7 +109,8 @@ func newStoreAuthorityCommand(ctx context.Context, repo string) *cobra.Command {
 	return cmd
 }
 
-func inspectSelectedStoreAuthority(ctx context.Context, repo string, cmd *cobra.Command, opts storeAuthorityOptions) (inspection runtimestartupownership.AuthorityInspection, resultErr error) {
+func inspectSelectedStoreAuthority(ctx context.Context, root InvocationRoot, cmd *cobra.Command, opts storeAuthorityOptions) (inspection runtimestartupownership.AuthorityInspection, resultErr error) {
+	repo := root.Path()
 	configPath, _, err := effectiveCommandConfigPath(cmd, opts.configPath, cmd.Flags().Changed("config"))
 	if err != nil {
 		return runtimestartupownership.AuthorityInspection{}, err
@@ -122,7 +123,7 @@ func inspectSelectedStoreAuthority(ctx context.Context, repo string, cmd *cobra.
 	if err != nil {
 		return runtimestartupownership.AuthorityInspection{}, err
 	}
-	selection, err := resolveAuthorityStoreSelection(repo, configPath, cmd, cfgResult.Config, paths, opts.storeMode, cmd.Flags().Changed("store"))
+	selection, err := resolveAuthorityStoreSelection(root, configPath, cmd, cfgResult.Config, paths, opts.storeMode, cmd.Flags().Changed("store"))
 	if err != nil {
 		return runtimestartupownership.AuthorityInspection{}, err
 	}
@@ -173,7 +174,8 @@ func authorityInspectionLine(inspection runtimestartupownership.AuthorityInspect
 	}
 }
 
-func openAuthorityMaintenanceStore(ctx context.Context, repo string, cmd *cobra.Command, opts storeAuthorityOptions) (authorityMaintenanceStore, func() error, error) {
+func openAuthorityMaintenanceStore(ctx context.Context, root InvocationRoot, cmd *cobra.Command, opts storeAuthorityOptions) (authorityMaintenanceStore, func() error, error) {
+	repo := root.Path()
 	noClose := func() error { return nil }
 	configPath, _, err := effectiveCommandConfigPath(cmd, opts.configPath, cmd.Flags().Changed("config"))
 	if err != nil {
@@ -195,7 +197,7 @@ func openAuthorityMaintenanceStore(ctx context.Context, repo string, cmd *cobra.
 	if err != nil {
 		return nil, noClose, err
 	}
-	selection, err := resolveAuthorityStoreSelection(repo, configPath, cmd, cfgResult.Config, paths, opts.storeMode, cmd.Flags().Changed("store"))
+	selection, err := resolveAuthorityStoreSelection(root, configPath, cmd, cfgResult.Config, paths, opts.storeMode, cmd.Flags().Changed("store"))
 	if err != nil {
 		return nil, noClose, err
 	}
@@ -220,7 +222,8 @@ func openAuthorityMaintenanceStore(ctx context.Context, repo string, cmd *cobra.
 	return selected, closeStore, nil
 }
 
-func openAuthorityInspectionStore(ctx context.Context, repo string, cmd *cobra.Command, opts doctorOptions) (authorityInspectionStore, func() error, error) {
+func openAuthorityInspectionStore(ctx context.Context, root InvocationRoot, cmd *cobra.Command, opts doctorOptions) (authorityInspectionStore, func() error, error) {
+	repo := root.Path()
 	noClose := func() error { return nil }
 	configPath, _, err := effectiveCommandConfigPath(cmd, opts.configPath, cmd.Flags().Changed("config"))
 	if err != nil {
@@ -236,7 +239,7 @@ func openAuthorityInspectionStore(ctx context.Context, repo string, cmd *cobra.C
 	if err != nil {
 		return nil, noClose, err
 	}
-	selection, err := resolveAuthorityStoreSelection(repo, configPath, cmd, cfgResult.Config, paths, storebackend.ActiveDefaultBackend().String(), false)
+	selection, err := resolveAuthorityStoreSelection(root, configPath, cmd, cfgResult.Config, paths, storebackend.ActiveDefaultBackend().String(), false)
 	if err != nil {
 		return nil, noClose, err
 	}
@@ -255,13 +258,14 @@ func constructAuthorityInspectionStore(ctx context.Context, selection storebacke
 	return storeselected.OpenAuthorityInspection(ctx, request)
 }
 
-func resolveAuthorityStoreSelection(repo, configPath string, cmd *cobra.Command, cfg *config.Config, paths CLIContractPlatformSpecPaths, storeMode string, storeModeSet bool) (storebackend.Selection, error) {
+func resolveAuthorityStoreSelection(root InvocationRoot, configPath string, cmd *cobra.Command, cfg *config.Config, paths CLIContractPlatformSpecPaths, storeMode string, storeModeSet bool) (storebackend.Selection, error) {
+	repo := root.Path()
 	cliCfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: repo, ExplicitPath: configPath})
 	if err != nil {
 		return storebackend.Selection{}, err
 	}
 	swarmDirFlag, swarmDirFlagSet := rootSwarmDirFlag(cmd)
-	swarmDir, err := resolveCLISwarmDirFromConfig(cliSwarmDirOptions{SwarmDir: swarmDirFlag, SwarmDirFlagSet: swarmDirFlagSet}, cliCfg)
+	swarmDir, err := resolveCLISwarmDirFromConfig(root, cliSwarmDirOptions{SwarmDir: swarmDirFlag, SwarmDirFlagSet: swarmDirFlagSet}, cliCfg)
 	if err != nil {
 		return storebackend.Selection{}, err
 	}

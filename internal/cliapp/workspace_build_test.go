@@ -97,17 +97,14 @@ func TestWorkspaceBuildClaudeCLIImageOverride(t *testing.T) {
 	}
 }
 
-func TestWorkspaceBuildConfigPathResolvesFromDiscoveredRepoRoot(t *testing.T) {
+func TestWorkspaceBuildConfigPathResolvesFromInvocationRoot(t *testing.T) {
 	repo := t.TempDir()
-	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module workspace-build-config-test\n"), 0o644); err != nil {
-		t.Fatalf("write go.mod: %v", err)
-	}
 	stub := configureWorkspaceBuildDockerStub(t)
 	writeRuntimeConfigText(t, filepath.Join(repo, "swarm.yaml"), strings.Join([]string{
 		"runtime:",
 		"  recovery_on_startup: false",
 		"workspace:",
-		"  image: repo-config-image:test",
+		"  image: ancestor-config-must-not-load:test",
 		fmt.Sprintf("  docker_bin: %q", stub.dockerPath),
 		"llm:",
 		"  backend: anthropic",
@@ -120,6 +117,19 @@ func TestWorkspaceBuildConfigPathResolvesFromDiscoveredRepoRoot(t *testing.T) {
 	if err := os.MkdirAll(subdir, 0o755); err != nil {
 		t.Fatalf("mkdir nested cwd: %v", err)
 	}
+	writeRuntimeConfigText(t, filepath.Join(subdir, "swarm.yaml"), strings.Join([]string{
+		"runtime:",
+		"  recovery_on_startup: false",
+		"workspace:",
+		"  image: invocation-config-image:test",
+		fmt.Sprintf("  docker_bin: %q", stub.dockerPath),
+		"llm:",
+		"  backend: anthropic",
+		"  session:",
+		"    lock_ttl: 10s",
+		"    rotate_after_turns: 40",
+		"    rotate_on_parse_failures: 3",
+	}, "\n")+"\n")
 	chdirForTest(t, subdir)
 
 	var stdout, stderr bytes.Buffer
@@ -128,11 +138,11 @@ func TestWorkspaceBuildConfigPathResolvesFromDiscoveredRepoRoot(t *testing.T) {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	calls := strings.Join(readWorkspaceBuildDockerCalls(t, stub.callsPath), "\n")
-	if !strings.Contains(calls, " repo-config-image:test") {
-		t.Fatalf("docker calls did not use workspace.image from repo-root config:\n%s", calls)
+	if !strings.Contains(calls, " invocation-config-image:test") {
+		t.Fatalf("docker calls did not use workspace.image from invocation-root config:\n%s", calls)
 	}
-	if strings.Contains(calls, " swarm-workspace:latest") {
-		t.Fatalf("docker calls used default image instead of repo-root config:\n%s", calls)
+	if strings.Contains(calls, "ancestor-config-must-not-load:test") {
+		t.Fatalf("docker calls loaded ancestor config:\n%s", calls)
 	}
 }
 

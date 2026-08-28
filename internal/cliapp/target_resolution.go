@@ -33,40 +33,33 @@ type CLISwarmDirResolution struct {
 	Source string
 }
 
-func resolveCLISwarmDir(opts cliSwarmDirOptions) (CLISwarmDirResolution, error) {
-	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{})
+func resolveCLISwarmDirAt(root InvocationRoot, opts cliSwarmDirOptions) (CLISwarmDirResolution, error) {
+	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: root.Path()})
 	if err != nil {
 		return CLISwarmDirResolution{}, err
 	}
-	return resolveCLISwarmDirFromConfig(opts, cfg)
+	return resolveCLISwarmDirFromConfig(root, opts, cfg)
 }
 
-func resolveCLISwarmDirFromConfig(opts cliSwarmDirOptions, cfg cliCommandConfig) (CLISwarmDirResolution, error) {
+func resolveCLISwarmDirFromConfig(root InvocationRoot, opts cliSwarmDirOptions, cfg cliCommandConfig) (CLISwarmDirResolution, error) {
 	if opts.SwarmDirFlagSet {
-		path, err := normalizeCLISwarmDir(opts.SwarmDir, "--swarm-dir")
+		path, err := normalizeCLISwarmDir(root, opts.SwarmDir, "--swarm-dir")
 		return CLISwarmDirResolution{Path: path, Source: "--swarm-dir"}, err
 	}
 	if cfg.Paths.SwarmDirSet {
-		path, err := normalizeCLISwarmDir(cfg.Paths.SwarmDir, "config paths.swarm_dir")
+		path, err := normalizeCLISwarmDir(root, cfg.Paths.SwarmDir, "config paths.swarm_dir")
 		return CLISwarmDirResolution{Path: path, Source: "config paths.swarm_dir"}, err
 	}
 	path, err := defaultCLISwarmDir()
 	return CLISwarmDirResolution{Path: path, Source: "default ~/.swarm"}, err
 }
 
-func normalizeCLISwarmDir(raw, source string) (string, error) {
+func normalizeCLISwarmDir(root InvocationRoot, raw, source string) (string, error) {
 	path := strings.TrimSpace(raw)
 	if path == "" {
 		return "", &cliAPIValidationError{message: fmt.Sprintf("%s must be non-empty", source)}
 	}
-	if !filepath.IsAbs(path) {
-		abs, err := filepath.Abs(path)
-		if err != nil {
-			return "", &cliAPIValidationError{message: fmt.Sprintf("resolve %s: %v", source, err)}
-		}
-		path = abs
-	}
-	return filepath.Clean(path), nil
+	return filepath.Clean(root.Resolve(path)), nil
 }
 
 func defaultCLISwarmDir() (string, error) {
@@ -156,7 +149,7 @@ func runDoctorTargetCommand(repo string, cmd *cobra.Command, opts doctorOptions)
 		cfg = cliCommandConfig{}
 	}
 	swarmDirFlag, swarmDirFlagSet := rootSwarmDirFlag(cmd)
-	swarmDir, err := resolveCLISwarmDirFromConfig(cliSwarmDirOptions{SwarmDir: swarmDirFlag, SwarmDirFlagSet: swarmDirFlagSet}, cfg)
+	swarmDir, err := resolveCLISwarmDirFromConfig(opts.apiOptions.invocationRoot, cliSwarmDirOptions{SwarmDir: swarmDirFlag, SwarmDirFlagSet: swarmDirFlagSet}, cfg)
 	if err != nil {
 		return returnCLIValidationError(cmd.ErrOrStderr(), err)
 	}
@@ -258,7 +251,7 @@ func doctorTargetProjectOwner(ctx context.Context, repo string, cmd *cobra.Comma
 	}
 	inspectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	selected, _, err := openAuthorityInspectionStore(inspectCtx, repo, cmd, opts)
+	selected, _, err := openAuthorityInspectionStore(inspectCtx, opts.apiOptions.invocationRoot, cmd, opts)
 	if err != nil {
 		return doctorTargetPendingFact{Status: "unavailable", Owner: selectedStoreOwnerReader, Detail: "Project owner: unavailable because the selected store cannot be inspected: " + err.Error()}
 	}
@@ -346,7 +339,7 @@ func resolveDoctorTargetAPI(repo string, opts doctorOptions, cfg cliCommandConfi
 		contextName:     opts.apiOptions.contextName,
 		swarmDir:        swarmDir.Path,
 		rootFlags:       &rootCommandFlagState{swarmDir: swarmDir.Path, swarmDirSet: true},
-		RepoRoot:        repo,
+		invocationRoot:  opts.apiOptions.invocationRoot,
 		apiCommandClass: cliAPICommandClassTargetDiagnostic,
 	}
 	target, err := resolveCLIAPITarget(targetOpts, cfg)
@@ -358,7 +351,8 @@ func resolveDoctorTargetAPI(repo string, opts doctorOptions, cfg cliCommandConfi
 		return doctorTargetAPI{}, err
 	}
 	token, err := resolveDoctorTargetAPITokenForTarget(rootCommandOptions{
-		apiTokenFile: opts.apiOptions.apiTokenFile,
+		apiTokenFile:   opts.apiOptions.apiTokenFile,
+		invocationRoot: opts.apiOptions.invocationRoot,
 	}, cfg, target)
 	auth := doctorTargetAuth{}
 	if err != nil {
@@ -380,10 +374,10 @@ func resolveDoctorTargetAPI(repo string, opts doctorOptions, cfg cliCommandConfi
 
 func resolveDoctorTargetAPITokenForTarget(opts rootCommandOptions, cfg cliCommandConfig, target cliAPITargetResolution) (cliAPITokenResolution, error) {
 	if tokenFile := strings.TrimSpace(opts.apiTokenFile); tokenFile != "" {
-		return readCLIAPIExplicitTokenFile(tokenFile, "--api-token-file")
+		return readCLIAPIExplicitTokenFile(opts.invocationRoot, tokenFile, "--api-token-file")
 	}
 	if target.descriptor == nil {
-		return resolveDoctorTargetCLIToken(cfg, target.rpcEndpoint)
+		return resolveDoctorTargetCLIToken(opts.invocationRoot, cfg, target.rpcEndpoint)
 	}
 	token, err := localContextDescriptorToken(*target.descriptor, target.rpcEndpoint)
 	if err != nil {
@@ -392,9 +386,9 @@ func resolveDoctorTargetAPITokenForTarget(opts rootCommandOptions, cfg cliComman
 	return cliAPITokenResolution{token: token, source: "context descriptor " + target.descriptor.Auth.Mode}, nil
 }
 
-func resolveDoctorTargetCLIToken(cfg cliCommandConfig, rpcEndpoint string) (cliAPITokenResolution, error) {
+func resolveDoctorTargetCLIToken(root InvocationRoot, cfg cliCommandConfig, rpcEndpoint string) (cliAPITokenResolution, error) {
 	if tokenFile := strings.TrimSpace(cfg.Connection.APITokenFile); tokenFile != "" {
-		return readCLIAPIExplicitTokenFile(tokenFile, cliAPIConfigTokenFileSource)
+		return readCLIAPIExplicitTokenFile(root, tokenFile, cliAPIConfigTokenFileSource)
 	}
 	if cliAPIRPCEndpointAllowsDefaultToken(rpcEndpoint) {
 		return cliAPITokenResolution{
@@ -459,7 +453,7 @@ func resolveDoctorTargetProject(repo string, opts doctorOptions, cfg cliCommandC
 		return doctorTargetProject{
 			CanonicalizationStatus: "not_applicable",
 			Status:                 "no_contract_source",
-			Detail:                 "no --contracts, SWARM_CONTRACTS_PATH, config paths.contracts_path, or repo-local contracts/package.yaml source was resolved",
+			Detail:                 "no --contracts, SWARM_CONTRACTS_PATH, config paths.contracts_path, or invocation-root contracts/package.yaml source was resolved",
 		}
 	}
 	projectRoot := inferProjectRootFromContractsPath(contractsPath)
@@ -484,8 +478,8 @@ func firstDoctorTargetContractsPath(repo string, opts doctorOptions, cfg cliComm
 	if path := strings.TrimSpace(cfg.Paths.ContractsPath); path != "" {
 		return ResolvePath(repo, path), "config paths.contracts_path"
 	}
-	if path := discoverRepoContractsPath(repo); path != "" {
-		return path, "repo contracts/package.yaml"
+	if path := discoverInvocationRootContractsPath(repo); path != "" {
+		return path, "invocation-root contracts/package.yaml"
 	}
 	return "", ""
 }

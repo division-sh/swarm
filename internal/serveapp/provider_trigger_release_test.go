@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/cliapp"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	"github.com/division-sh/swarm/internal/store"
@@ -21,12 +20,12 @@ func TestReleaseBinaryUsesEmbeddedPackInventoryWithoutAdjacentPackTree(t *testin
 	releaseRoot := t.TempDir()
 	binaryPath := filepath.Join(releaseRoot, "swarm")
 	build := exec.Command("go", "build", "-o", binaryPath, "./cmd/swarm")
-	build.Dir = cliapp.RepoRoot()
+	build.Dir = repoRootForTest()
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build release-shaped swarm binary: %v\n%s", err, output)
 	}
-	copyReleaseFixtureTree(t, filepath.Join(cliapp.RepoRoot(), "tests", "tier8-boot-verification", "test-boot-success"), filepath.Join(releaseRoot, "contracts"))
-	platformSpecBody, err := os.ReadFile(filepath.Join(cliapp.RepoRoot(), "platform-spec.yaml"))
+	copyReleaseFixtureTree(t, filepath.Join(repoRootForTest(), "tests", "tier8-boot-verification", "test-boot-success"), filepath.Join(releaseRoot, "contracts"))
+	platformSpecBody, err := os.ReadFile(filepath.Join(repoRootForTest(), "platform-spec.yaml"))
 	if err != nil {
 		t.Fatalf("read platform spec: %v", err)
 	}

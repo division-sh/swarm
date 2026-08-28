@@ -9,6 +9,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/division-sh/swarm/internal/durabledata"
@@ -61,6 +64,85 @@ func TestStreamDataJSONLAcceptsOneBasedMultiPageExport(t *testing.T) {
 	}
 	if got, want := output.String(), string(rows[0])+string(rows[1]); got != want || requests != 2 {
 		t.Fatalf("streamed export = %q over %d requests, want %q over 2", got, requests, want)
+	}
+}
+
+func TestDataFileOperandsUseInvocationRoot(t *testing.T) {
+	root := mustInvocationRootForTest(t.TempDir())
+	content := []byte("{\"slug\":\"alpha\"}\n")
+	if err := os.WriteFile(root.Resolve("rows.jsonl"), content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ref, err := durabledata.ParseDeclarationRef(".", "records.loaded")
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary := durabledata.DeclarationSummary{
+		Declaration: ref,
+		LocalName:   "records",
+		SchemaDigest: durabledata.SchemaDigest(
+			"resource-schema-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		),
+		Head: durabledata.AbsentHead(),
+	}
+	var imported bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req jsonRPCRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatal(err)
+		}
+		switch req.Method {
+		case dataShowMethod:
+			writeJSONRPCResult(t, w, req.ID, map[string]any{
+				"items": []durabledata.DeclarationSummary{summary}, "item_count": 1, "encoded_items_bytes": 1,
+				"continuation": map[string]any{"state": "end"},
+			})
+		case dataImportMethod:
+			input, _ := req.Params["input"].(map[string]any)
+			encoded, _ := input["content_base64"].(string)
+			if encoded != base64.StdEncoding.EncodeToString(content) {
+				t.Errorf("data.import content = %q", encoded)
+			}
+			imported = true
+			writeBundleInvalidParamsJSONRPCError(t, w, req.ID, "stop after operand proof")
+		default:
+			t.Errorf("unexpected method %q", req.Method)
+		}
+	}))
+	defer server.Close()
+	client, err := newCLIAPIClientForTest(t, rootCommandOptions{invocationRoot: root, apiServer: server.URL, httpClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chdirForTest(t, t.TempDir())
+	bundleHash := "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	envelope, err := buildRunDataEnvelope(context.Background(), root, client, bundleHash, "run-1", []string{"records=rows.jsonl"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	imports, _ := envelope["imports"].([]any)
+	if len(imports) != 1 {
+		t.Fatalf("relative --data imports = %#v", envelope)
+	}
+	absolute := filepath.Join(t.TempDir(), "absolute.jsonl")
+	if err := os.WriteFile(absolute, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := buildRunDataEnvelope(context.Background(), root, client, bundleHash, "run-2", []string{"records=" + absolute}, nil); err != nil {
+		t.Fatalf("absolute --data: %v", err)
+	}
+
+	var out, errOut bytes.Buffer
+	err = runDataImportCommand(context.Background(), &out, &errOut, dataImportOptions{
+		dataCommandOptions: dataCommandOptions{apiOptions: rootCommandOptions{invocationRoot: root, apiServer: server.URL, httpClient: server.Client()}, bundleHash: bundleHash},
+		sourceInvocationID: "00000000-0000-4000-8000-000000000001",
+		expectedHead:       "absent",
+	}, "records", "rows.jsonl")
+	if err == nil || !strings.Contains(errOut.String(), "stop after operand proof") {
+		t.Fatalf("data import err=%v stderr=%q", err, errOut.String())
+	}
+	if !imported {
+		t.Fatal("relative data import did not reach the API")
 	}
 }
 

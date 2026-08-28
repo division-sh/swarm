@@ -180,7 +180,7 @@ func TestServeCommandCapturesStoreFlagForCanonicalResolver(t *testing.T) {
 
 	var captured ServeOptions
 	opts := defaultRootCommandOptions()
-	opts.runServe = func(_ context.Context, _ string, serveOpts ServeOptions) int {
+	opts.runServe = func(_ context.Context, _ InvocationRoot, serveOpts ServeOptions) int {
 		captured = serveOpts
 		return 0
 	}

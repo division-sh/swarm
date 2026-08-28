@@ -19,14 +19,14 @@ type mintElementIDsResult struct {
 	IDsMinted     int    `json:"ids_minted"`
 }
 
-func newMintElementIDsCommand(repo string) *cobra.Command {
+func newMintElementIDsCommand(root InvocationRoot) *cobra.Command {
 	opts := mintElementIDsOptions{}
 	cmd := &cobra.Command{
 		Use:   "mint-element-ids",
 		Short: "Mint stable IDs for adopted authored contract elements.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runMintElementIDsCommand(cmd.OutOrStdout(), cmd.ErrOrStderr(), assetCommandRepoRoot(repo), opts)
+			return runMintElementIDsCommand(cmd.OutOrStdout(), cmd.ErrOrStderr(), root.Path(), opts)
 		},
 	}
 	cmd.Flags().StringVar(&opts.contractsPath, "contracts", "", "Path to one contract bundle or a corpus tree")

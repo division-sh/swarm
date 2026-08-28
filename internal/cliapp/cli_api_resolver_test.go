@@ -26,7 +26,7 @@ func TestResolveCLIAPISettingsPrecedence(t *testing.T) {
 		})
 		t.Setenv("SWARM_CONFIG", configPath)
 
-		client, err := newCLIAPIClient(rootCommandOptions{
+		client, err := newCLIAPIClientForTest(t, rootCommandOptions{
 			apiServer:    "http://127.0.0.1:6666",
 			apiTokenFile: flagToken,
 		})
@@ -53,7 +53,7 @@ func TestResolveCLIAPISettingsPrecedence(t *testing.T) {
 		t.Setenv("SWARM_API_TOKEN", "env-token")
 		t.Setenv("SWARM_API_TOKEN_FILE", envToken)
 
-		_, err := newCLIAPIClient(rootCommandOptions{})
+		_, err := newCLIAPIClientForTest(t, rootCommandOptions{})
 		if err == nil {
 			t.Fatal("newCLIAPIClient returned nil error")
 		}
@@ -74,7 +74,7 @@ func TestResolveCLIAPISettingsPrecedence(t *testing.T) {
 		}))
 		t.Setenv("SWARM_API_TOKEN_FILE", envToken)
 
-		_, err := newCLIAPIClient(rootCommandOptions{})
+		_, err := newCLIAPIClientForTest(t, rootCommandOptions{})
 		if err == nil {
 			t.Fatal("newCLIAPIClient returned nil error")
 		}
@@ -91,7 +91,7 @@ func TestResolveCLIAPISettingsPrecedence(t *testing.T) {
 			"api_token_file": configToken,
 		}))
 
-		client, err := newCLIAPIClient(rootCommandOptions{})
+		client, err := newCLIAPIClientForTest(t, rootCommandOptions{})
 		if err != nil {
 			t.Fatalf("newCLIAPIClient: %v", err)
 		}
@@ -106,7 +106,7 @@ func TestResolveCLIAPISettingsPrecedence(t *testing.T) {
 	t.Run("built in API server default remains loopback base", func(t *testing.T) {
 		isolateCLIAPIConfigEnv(t)
 
-		client, err := newCLIAPIClient(rootCommandOptions{})
+		client, err := newCLIAPIClientForTest(t, rootCommandOptions{})
 		if err != nil {
 			t.Fatalf("newCLIAPIClient: %v", err)
 		}
@@ -157,7 +157,7 @@ func TestCLIAPISettingsDefaultTokenLoopbackBoundary(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
-			settings, err := resolveCLIAPISettings(rootCommandOptions{apiServer: tc.apiServer})
+			settings, err := resolveCLIAPISettingsForTest(t, rootCommandOptions{apiServer: tc.apiServer})
 			if tc.wantErr != "" {
 				if err == nil {
 					t.Fatal("resolveCLIAPISettings returned nil error")
@@ -191,7 +191,7 @@ func TestCLIAPIResolverToleratesContractPathConfigKeys(t *testing.T) {
 		"platform_spec_path": "platform-from-config.yaml",
 	}))
 
-	client, err := newCLIAPIClient(rootCommandOptions{})
+	client, err := newCLIAPIClientForTest(t, rootCommandOptions{})
 	if err != nil {
 		t.Fatalf("newCLIAPIClient: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestCLIAPIResolverIgnoresServeListenerConfigKeys(t *testing.T) {
 		"serve_mcp_listen_addr": "http://127.0.0.1:9002",
 	}))
 
-	client, err := newCLIAPIClient(rootCommandOptions{})
+	client, err := newCLIAPIClientForTest(t, rootCommandOptions{})
 	if err != nil {
 		t.Fatalf("newCLIAPIClient: %v", err)
 	}
@@ -421,7 +421,7 @@ func TestCLIAPISettingsFailClosed(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			isolateCLIAPIConfigEnv(t)
 			opts := tc.setup(t)
-			_, err := newCLIAPIClient(opts)
+			_, err := newCLIAPIClientForTest(t, opts)
 			if err == nil {
 				t.Fatal("newCLIAPIClient returned nil error")
 			}
@@ -489,7 +489,7 @@ func TestServeContextFlagPassesRootPrevalidation(t *testing.T) {
 	called := false
 	var got ServeOptions
 	opts := defaultRootCommandOptions()
-	opts.runServe = func(_ context.Context, _ string, serveOpts ServeOptions) int {
+	opts.runServe = func(_ context.Context, _ InvocationRoot, serveOpts ServeOptions) int {
 		called = true
 		got = serveOpts
 		return 0
@@ -517,7 +517,7 @@ func TestServeAPITokenFileFlagPassesRootPrevalidation(t *testing.T) {
 	called := false
 	var got ServeOptions
 	opts := defaultRootCommandOptions()
-	opts.runServe = func(_ context.Context, _ string, serveOpts ServeOptions) int {
+	opts.runServe = func(_ context.Context, _ InvocationRoot, serveOpts ServeOptions) int {
 		called = true
 		got = serveOpts
 		return 0
@@ -685,8 +685,8 @@ func TestCLIAPIProjectContextOutranksSelectedGlobal(t *testing.T) {
 		t.Fatalf("set current: %v", err)
 	}
 
-	client, err := newCLIAPIClient(rootCommandOptions{
-		RepoRoot: project.root,
+	client, err := newCLIAPIClientForTest(t, rootCommandOptions{
+		invocationRoot: mustInvocationRootForTest(project.root),
 		rootFlags: &rootCommandFlagState{
 			swarmDir:    swarmDir,
 			swarmDirSet: true,
@@ -716,8 +716,8 @@ func TestCLIAPIContextDescriptorAuthOutranksConfigTokenFile(t *testing.T) {
 	registry := newLocalContextRegistry(swarmDir)
 	writeCLIAPITestContext(t, registry, localProjectContextName(project.canonicalRoot), "runtime-project", server.URL, project.canonicalRoot)
 
-	client, err := newCLIAPIClient(rootCommandOptions{
-		RepoRoot: project.root,
+	client, err := newCLIAPIClientForTest(t, rootCommandOptions{
+		invocationRoot: mustInvocationRootForTest(project.root),
 		rootFlags: &rootCommandFlagState{
 			swarmDir:    swarmDir,
 			swarmDirSet: true,
@@ -734,9 +734,9 @@ func TestCLIAPIContextDescriptorAuthOutranksConfigTokenFile(t *testing.T) {
 	}
 
 	flagToken := writeCLIAPITokenFile(t, "flag-token")
-	settings, err := resolveCLIAPISettings(rootCommandOptions{
-		apiTokenFile: flagToken,
-		RepoRoot:     project.root,
+	settings, err := resolveCLIAPISettingsForTest(t, rootCommandOptions{
+		apiTokenFile:   flagToken,
+		invocationRoot: mustInvocationRootForTest(project.root),
 		rootFlags: &rootCommandFlagState{
 			swarmDir:    swarmDir,
 			swarmDirSet: true,
@@ -764,10 +764,10 @@ func TestCLIAPIExplicitAPIServerAndContextPrecedence(t *testing.T) {
 	writeCLIAPITestContext(t, registry, localProjectContextName(project.canonicalRoot), "runtime-project", projectServer.URL, project.canonicalRoot)
 	writeCLIAPITestContext(t, registry, "chosen", "runtime-explicit", explicitContextServer.URL, "")
 
-	client, err := newCLIAPIClient(rootCommandOptions{
-		RepoRoot:    project.root,
-		apiServer:   apiServer.URL,
-		contextName: "chosen",
+	client, err := newCLIAPIClientForTest(t, rootCommandOptions{
+		invocationRoot: mustInvocationRootForTest(project.root),
+		apiServer:      apiServer.URL,
+		contextName:    "chosen",
 		rootFlags: &rootCommandFlagState{
 			swarmDir:    swarmDir,
 			swarmDirSet: true,
@@ -783,9 +783,9 @@ func TestCLIAPIExplicitAPIServerAndContextPrecedence(t *testing.T) {
 		t.Fatalf("api-server target source = %q", client.target.source)
 	}
 
-	client, err = newCLIAPIClient(rootCommandOptions{
-		RepoRoot:    project.root,
-		contextName: "chosen",
+	client, err = newCLIAPIClientForTest(t, rootCommandOptions{
+		invocationRoot: mustInvocationRootForTest(project.root),
+		contextName:    "chosen",
 		rootFlags: &rootCommandFlagState{
 			swarmDir:    swarmDir,
 			swarmDirSet: true,
@@ -866,8 +866,8 @@ func TestCLIAPIProjectContextFailureClassesFailClosed(t *testing.T) {
 			registry := newLocalContextRegistry(swarmDir)
 			tc.setup(t, registry, project)
 
-			_, err := newCLIAPIClient(rootCommandOptions{
-				RepoRoot: project.root,
+			_, err := newCLIAPIClientForTest(t, rootCommandOptions{
+				invocationRoot: mustInvocationRootForTest(project.root),
 				rootFlags: &rootCommandFlagState{
 					swarmDir:    swarmDir,
 					swarmDirSet: true,
@@ -894,8 +894,8 @@ func TestCLIAPIMutatingCommandDoesNotFallThroughFromProjectWithoutContext(t *tes
 		t.Fatalf("set current: %v", err)
 	}
 
-	_, err := newCLIAPIClient(rootCommandOptions{
-		RepoRoot:        project.root,
+	_, err := newCLIAPIClientForTest(t, rootCommandOptions{
+		invocationRoot:  mustInvocationRootForTest(project.root),
 		apiCommandClass: cliAPICommandClassMutating,
 		rootFlags: &rootCommandFlagState{
 			swarmDir:    swarmDir,
@@ -923,8 +923,8 @@ func TestCLIAPIProjectContextUsesRealpathForSymlinkedRoot(t *testing.T) {
 	registry := newLocalContextRegistry(swarmDir)
 	writeCLIAPITestContext(t, registry, localProjectContextName(project.canonicalRoot), "runtime-project", server.URL, project.canonicalRoot)
 
-	client, err := newCLIAPIClient(rootCommandOptions{
-		RepoRoot: link,
+	client, err := newCLIAPIClientForTest(t, rootCommandOptions{
+		invocationRoot: mustInvocationRootForTest(link),
 		rootFlags: &rootCommandFlagState{
 			swarmDir:    swarmDir,
 			swarmDirSet: true,
@@ -1084,6 +1084,7 @@ func writeCLIAPIProjectFixture(t *testing.T) cliAPITestProject {
 	if err := os.WriteFile(filepath.Join(contracts, "package.yaml"), []byte("name: test\nversion: 1.0.0\n"), 0o600); err != nil {
 		t.Fatalf("write package: %v", err)
 	}
+	writeRuntimeConfigText(t, filepath.Join(root, "swarm.yaml"), "paths:\n  contracts_path: ./contracts\n")
 	canonical, status := canonicalizeDoctorTargetPath(root)
 	if status != "resolved" {
 		t.Fatalf("canonicalize project root status = %q", status)

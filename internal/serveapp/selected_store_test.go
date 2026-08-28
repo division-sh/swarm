@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/store"
 	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
@@ -30,7 +29,7 @@ func openSelectedPostgresOwner(t testing.TB, dsn string, db *sql.DB, cfg *config
 	if err != nil {
 		t.Fatalf("open PostgreSQL selected store: %v", err)
 	}
-	if _, err := initializeServePlatformStateStores(context.Background(), owner.Schema(), filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath)); err != nil {
+	if _, err := initializeServePlatformStateStores(context.Background(), owner.Schema(), filepath.Join(repoRootForTest(), defaultPlatformSpecPath)); err != nil {
 		_ = owner.CloseUnactivated()
 		t.Fatalf("admit PostgreSQL selected store: %v", err)
 	}

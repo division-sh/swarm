@@ -141,7 +141,7 @@ func resolveCLIAPISelectedConfigOrDefaultTarget(opts rootCommandOptions, cfg cli
 }
 
 func cliAPILocalContextRegistry(opts rootCommandOptions, cfg cliCommandConfig) (localContextRegistry, error) {
-	swarmDir, err := resolveCLISwarmDirFromConfig(opts.swarmDirResolutionOptions(), cfg)
+	swarmDir, err := resolveCLISwarmDirFromConfig(opts.invocationRoot, opts.swarmDirResolutionOptions(), cfg)
 	if err != nil {
 		return localContextRegistry{}, err
 	}
@@ -152,12 +152,11 @@ func resolveCLIAPIProject(opts rootCommandOptions, cfg cliCommandConfig) (cliPro
 	contractsPath := firstNonEmpty(
 		os.Getenv(cliContractsPathEnv),
 		cfg.Paths.ContractsPath,
-		discoverRepoContractsPath(opts.RepoRoot),
 	)
 	if strings.TrimSpace(contractsPath) == "" {
 		return cliProjectResolution{}, false
 	}
-	contractsPath = ResolvePath(opts.RepoRoot, contractsPath)
+	contractsPath = ResolvePath(opts.invocationRoot.Path(), contractsPath)
 	projectRoot := inferProjectRootFromContractsPath(contractsPath)
 	canonical, _ := canonicalizeDoctorTargetPath(projectRoot)
 	if strings.TrimSpace(canonical) == "" {
@@ -190,7 +189,7 @@ func resolveCLIAPITokenForTarget(opts rootCommandOptions, cfg cliCommandConfig, 
 		return cliAPITokenResolution{}, err
 	}
 	if tokenFile := strings.TrimSpace(opts.apiTokenFile); tokenFile != "" {
-		return readCLIAPIExplicitTokenFile(tokenFile, "--api-token-file")
+		return readCLIAPIExplicitTokenFile(opts.invocationRoot, tokenFile, "--api-token-file")
 	}
 	if target.descriptor == nil {
 		return resolveCLIAPIToken(opts, cfg, target.rpcEndpoint)

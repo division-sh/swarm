@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/division-sh/swarm/internal/cliapp"
 )
 
 type providerIngressProofRole struct {
@@ -15,7 +13,7 @@ type providerIngressProofRole struct {
 }
 
 func TestProviderIngressProofRoleRegistryRejectsHiddenAuthorityFromSupportedProof(t *testing.T) {
-	root := cliapp.RepoRoot()
+	root := repoRootForTest()
 	affected := map[string]providerIngressProofRole{
 		"internal/serveapp/provider_trigger_smoke_helpers_test.go":                                {"demoted_bounded", "seeded smoke helper; capture utility only"},
 		"internal/cliapp/provider_trigger_packs_test.go":                                          {"demoted_bounded", "release-layout pack integration; not standing-ingress E2E"},

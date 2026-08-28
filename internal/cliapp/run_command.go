@@ -151,7 +151,7 @@ type foregroundRunTraceRenderer struct {
 	stopOnce sync.Once
 }
 
-func newRunCommand(repo string, rootOpts rootCommandOptions) *cobra.Command {
+func newRunCommand(root InvocationRoot, rootOpts rootCommandOptions) *cobra.Command {
 	opts := runCommandOptions{apiOptions: rootOpts}
 	cmd := &cobra.Command{
 		Use:   "start",
@@ -175,7 +175,7 @@ func newRunCommand(repo string, rootOpts rootCommandOptions) *cobra.Command {
 				rootFlags.configPathSet = true
 				runOpts.apiOptions.rootFlags = &rootFlags
 			}
-			return runRunCommand(cmd.Context(), repo, cmd.OutOrStdout(), cmd.ErrOrStderr(), runOpts)
+			return runRunCommand(cmd.Context(), root, cmd.OutOrStdout(), cmd.ErrOrStderr(), runOpts)
 		},
 	}
 	cmd.Flags().StringVar(&opts.eventName, "event", "", "Declared event name to publish as the run trigger")
@@ -207,7 +207,8 @@ func runCommandChangedFlags(cmd *cobra.Command) map[string]bool {
 	return changed
 }
 
-func runRunCommand(ctx context.Context, repo string, out, errOut io.Writer, opts runCommandOptions) error {
+func runRunCommand(ctx context.Context, root InvocationRoot, out, errOut io.Writer, opts runCommandOptions) error {
+	opts.apiOptions.invocationRoot = root
 	if err := opts.validate(); err != nil {
 		writeCLIAPIError(errOut, err)
 		return commandExitError{code: 2}
@@ -224,7 +225,7 @@ func runRunCommand(ctx context.Context, repo string, out, errOut io.Writer, opts
 		return runReattachCommand(ctx, out, errOut, opts, wsEndpoint)
 	}
 
-	payload, err := loadRunCommandPayload(opts.payloadPath)
+	payload, err := loadRunCommandPayload(root.Resolve(opts.payloadPath))
 	if err != nil {
 		writeCLIAPIError(errOut, err)
 		return commandExitError{code: 2}
@@ -232,9 +233,8 @@ func runRunCommand(ctx context.Context, repo string, out, errOut io.Writer, opts
 
 	var stopLocal func()
 	if strings.TrimSpace(opts.connectURL) == "" {
-		repo = assetCommandRepoRoot(repo)
 		var err error
-		opts, err = opts.withLocalForegroundServeAuth(repo)
+		opts, err = opts.withLocalForegroundServeAuth(root)
 		if err != nil {
 			writeCLIAPIError(errOut, err)
 			return commandExitError{code: runCommandErrorExitCode(err)}
@@ -243,7 +243,7 @@ func runRunCommand(ctx context.Context, repo string, out, errOut io.Writer, opts
 			writeCLIAPIError(errOut, err)
 			return commandExitError{code: runCommandErrorExitCode(err)}
 		}
-		stopLocal, err = startLocalRunServe(ctx, repo, opts, errOut)
+		stopLocal, err = startLocalRunServe(ctx, root, opts, errOut)
 		if err != nil {
 			writeCLIAPIError(errOut, err)
 			return commandExitError{code: runCommandErrorExitCode(err)}
@@ -262,7 +262,7 @@ func runRunCommand(ctx context.Context, repo string, out, errOut io.Writer, opts
 		return commandExitError{code: runCommandErrorExitCode(err)}
 	}
 	traceReplaySince := time.Now().UTC()
-	start, err := runCommandStart(ctx, client, health, opts, payload)
+	start, err := runCommandStart(ctx, root, client, health, opts, payload)
 	if err != nil {
 		writeCLIAPIError(errOut, err)
 		return commandExitError{code: runCommandErrorExitCode(err)}
@@ -353,10 +353,10 @@ func (o runCommandOptions) validate() error {
 	return nil
 }
 
-func (o runCommandOptions) withLocalForegroundServeAuth(repo string) (runCommandOptions, error) {
+func (o runCommandOptions) withLocalForegroundServeAuth(root InvocationRoot) (runCommandOptions, error) {
 	serveOpts := DefaultServeOptions()
 	serveOpts.ConfigPath = o.configPath
-	auth, err := ResolveServeAPIAuth(repo, serveOpts)
+	auth, err := ResolveServeAPIAuth(root, serveOpts)
 	if err != nil {
 		return o, err
 	}
@@ -471,7 +471,9 @@ func (o *runStartupOutput) finish() []byte {
 	return output
 }
 
-func startLocalRunServe(ctx context.Context, repo string, opts runCommandOptions, startupErrOut io.Writer) (func(), error) {
+func startLocalRunServe(ctx context.Context, root InvocationRoot, opts runCommandOptions, startupErrOut io.Writer) (func(), error) {
+	opts.apiOptions.invocationRoot = root
+	repo := root.Path()
 	runServe := opts.apiOptions.runServe
 	if runServe == nil {
 		return nil, fmt.Errorf("serve runtime is unavailable")
@@ -509,7 +511,7 @@ func startLocalRunServe(ctx context.Context, repo string, opts runCommandOptions
 	serveCtx, cancel := context.WithCancel(ctx)
 	done := make(chan int, 1)
 	go func() {
-		done <- runServe(serveCtx, repo, serveOpts)
+		done <- runServe(serveCtx, root, serveOpts)
 		close(done)
 	}()
 	stop := func() {
@@ -540,7 +542,7 @@ func prepareLocalRunProjectClaim(ctx context.Context, repo string, opts runComma
 	if err != nil {
 		return nil, err
 	}
-	swarmDir, err := resolveCLISwarmDirFromConfig(opts.apiOptions.swarmDirResolutionOptions(), cliCfg)
+	swarmDir, err := resolveCLISwarmDirFromConfig(opts.apiOptions.invocationRoot, opts.apiOptions.swarmDirResolutionOptions(), cliCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -613,7 +615,7 @@ func runCommandHealth(ctx context.Context, client *cliAPIClient) (diagnosticHeal
 	return result, nil
 }
 
-func runCommandStart(ctx context.Context, client *cliAPIClient, health diagnosticHealthCheckResult, opts runCommandOptions, payload map[string]any) (runStartResult, error) {
+func runCommandStart(ctx context.Context, root InvocationRoot, client *cliAPIClient, health diagnosticHealthCheckResult, opts runCommandOptions, payload map[string]any) (runStartResult, error) {
 	params := map[string]any{
 		"event_name": strings.TrimSpace(opts.eventName),
 		"payload":    payload,
@@ -629,7 +631,7 @@ func runCommandStart(ctx context.Context, client *cliAPIClient, health diagnosti
 			runID = uuid.NewString()
 		}
 		bundleHash, _ := params["bundle_hash"].(string)
-		data, err := buildRunDataEnvelope(ctx, client, bundleHash, runID, opts.dataImports, opts.dataPins)
+		data, err := buildRunDataEnvelope(ctx, root, client, bundleHash, runID, opts.dataImports, opts.dataPins)
 		if err != nil {
 			return runStartResult{}, err
 		}

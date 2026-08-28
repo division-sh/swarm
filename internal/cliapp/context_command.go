@@ -78,7 +78,7 @@ func newContextPruneCommand(ctx context.Context, opts rootCommandOptions) *cobra
 		Short: "Remove stale, mismatched, corrupt, or unsupported local Swarm context descriptors.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			swarmDir, err := resolveSwarmDirForCommand(cmd)
+			swarmDir, err := resolveSwarmDirForCommand(cmd, opts)
 			if err != nil {
 				return returnCLIValidationError(cmd.ErrOrStderr(), err)
 			}
@@ -99,7 +99,7 @@ func newContextPruneCommand(ctx context.Context, opts rootCommandOptions) *cobra
 }
 
 func inspectLocalContextRegistryForCommand(ctx context.Context, cmd *cobra.Command, opts rootCommandOptions) (localContextRegistryReport, error) {
-	swarmDir, err := resolveSwarmDirForCommand(cmd)
+	swarmDir, err := resolveSwarmDirForCommand(cmd, opts)
 	if err != nil {
 		return localContextRegistryReport{}, err
 	}
@@ -107,21 +107,21 @@ func inspectLocalContextRegistryForCommand(ctx context.Context, cmd *cobra.Comma
 	return registry.Inspect(ctx, cliRuntimeIdentityCaller{httpClient: opts.httpClient})
 }
 
-func resolveSwarmDirForCommand(cmd *cobra.Command) (CLISwarmDirResolution, error) {
+func resolveSwarmDirForCommand(cmd *cobra.Command, opts rootCommandOptions) (CLISwarmDirResolution, error) {
 	swarmDirFlag, swarmDirFlagSet := rootSwarmDirFlag(cmd)
 	if swarmDirFlagSet {
-		path, err := normalizeCLISwarmDir(swarmDirFlag, "--swarm-dir")
+		path, err := normalizeCLISwarmDir(opts.invocationRoot, swarmDirFlag, "--swarm-dir")
 		return CLISwarmDirResolution{Path: path, Source: "--swarm-dir"}, err
 	}
 	configPath, _, err := effectiveCommandConfigPath(cmd, "", false)
 	if err != nil {
 		return CLISwarmDirResolution{}, err
 	}
-	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{ExplicitPath: configPath})
+	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: opts.invocationRoot.Path(), ExplicitPath: configPath})
 	if err != nil {
 		return CLISwarmDirResolution{}, err
 	}
-	return resolveCLISwarmDirFromConfig(cliSwarmDirOptions{}, cfg)
+	return resolveCLISwarmDirFromConfig(opts.invocationRoot, cliSwarmDirOptions{}, cfg)
 }
 
 func writeContextCurrentText(out io.Writer, report localContextRegistryReport) {

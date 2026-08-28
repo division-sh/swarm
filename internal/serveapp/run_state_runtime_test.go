@@ -154,7 +154,7 @@ func TestCLI_ServeRetiredPlatformSpecWritesOnlyStderr(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	var stdout, stderr bytes.Buffer
 	configPath := writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", filepath.Join(t.TempDir(), "retired-spec.sqlite"), nil)
-	code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
+	code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
 		"serve",
 		"--config", configPath,
 		"--contracts", filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),

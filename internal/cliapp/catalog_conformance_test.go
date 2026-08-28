@@ -215,7 +215,7 @@ func materializeRequiredArchetypeBundles(t testing.TB) []requiredConformanceBund
 	bundles := make([]requiredConformanceBundle, 0, len(ids))
 	for _, id := range ids {
 		destination := filepath.Join(t.TempDir(), id)
-		if err := scaffoldArchetype(io.Discard, id, destination); err != nil {
+		if err := scaffoldArchetype(mustInvocationRootForTest(t.TempDir()), io.Discard, id, destination); err != nil {
 			t.Fatalf("materialize required archetype %s: %v", id, err)
 		}
 		bundles = append(bundles, requiredConformanceBundle{

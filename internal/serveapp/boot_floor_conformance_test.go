@@ -67,7 +67,7 @@ func TestBootFloorConformanceVerifyDescribeReportNativeBashWorkspaceRequirement(
 
 	t.Run("verify text", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
-		code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{"verify", "--contracts", contractsRoot, "--config", configPath}, &stdout, &stderr, Run)
+		code := executeCLIFrom(context.Background(), repoRootForTest(), []string{"verify", "--contracts", contractsRoot, "--config", configPath}, &stdout, &stderr, Run)
 		if code != 0 {
 			t.Fatalf("verify code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 		}
@@ -76,7 +76,7 @@ func TestBootFloorConformanceVerifyDescribeReportNativeBashWorkspaceRequirement(
 
 	t.Run("verify json", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
-		code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{"verify", "--contracts", contractsRoot, "--config", configPath, "--json"}, &stdout, &stderr, Run)
+		code := executeCLIFrom(context.Background(), repoRootForTest(), []string{"verify", "--contracts", contractsRoot, "--config", configPath, "--json"}, &stdout, &stderr, Run)
 		if code != 0 {
 			t.Fatalf("verify --json code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 		}
@@ -94,7 +94,7 @@ func TestBootFloorConformanceVerifyDescribeReportNativeBashWorkspaceRequirement(
 
 	t.Run("describe text", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
-		code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
+		code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
 			"describe",
 			"--contracts", contractsRoot,
 			"--config", configPath,
@@ -107,7 +107,7 @@ func TestBootFloorConformanceVerifyDescribeReportNativeBashWorkspaceRequirement(
 
 	t.Run("describe json", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
-		code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
+		code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
 			"describe",
 			"--contracts", contractsRoot,
 			"--config", configPath,
@@ -137,7 +137,7 @@ func TestBootFloorExplicitHostRefusalAcrossServeVerifyDescribe(t *testing.T) {
 	t.Run("serve", func(t *testing.T) {
 		var out lockedBuffer
 		swarmDir := t.TempDir()
-		code := Run(context.Background(), cliapp.RepoRoot(), cliapp.ServeOptions{
+		code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
 			ConfigPath:           configPath,
 			ContractsPath:        contractsPath,
 			PlatformSpecPath:     defaultPlatformSpecPath,
@@ -159,7 +159,7 @@ func TestBootFloorExplicitHostRefusalAcrossServeVerifyDescribe(t *testing.T) {
 
 	t.Run("verify", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
-		if code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{"verify", "--config", configPath, "--contracts", contractsPath}, &stdout, &stderr, Run); code == 0 {
+		if code := executeCLIFrom(context.Background(), repoRootForTest(), []string{"verify", "--config", configPath, "--contracts", contractsPath}, &stdout, &stderr, Run); code == 0 {
 			t.Fatalf("verify unexpectedly succeeded stdout=%s stderr=%s", stdout.String(), stderr.String())
 		}
 		assertClaudeHostRefusal(t, stderr.String())
@@ -167,7 +167,7 @@ func TestBootFloorExplicitHostRefusalAcrossServeVerifyDescribe(t *testing.T) {
 
 	t.Run("describe", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
-		if code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{"describe", "--config", configPath, "--contracts", contractsPath}, &stdout, &stderr, Run); code == 0 {
+		if code := executeCLIFrom(context.Background(), repoRootForTest(), []string{"describe", "--config", configPath, "--contracts", contractsPath}, &stdout, &stderr, Run); code == 0 {
 			t.Fatalf("describe unexpectedly succeeded stdout=%s stderr=%s", stdout.String(), stderr.String())
 		}
 		assertClaudeHostRefusal(t, stderr.String())

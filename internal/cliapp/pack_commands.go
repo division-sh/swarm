@@ -54,9 +54,9 @@ type packShowReadback struct {
 	ManifestYAML string                     `json:"manifest_yaml" yaml:"manifest_yaml"`
 }
 
-func newPacksCommand(ctx context.Context, repo string, root rootCommandOptions) *cobra.Command {
+func newPacksCommand(ctx context.Context, invocationRoot InvocationRoot, root rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{Use: "packs", Short: "Inspect the selected platform and project pack inventory.", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() }}
-	cmd.AddCommand(newPacksListCommand(ctx, repo, root), newPacksShowCommand(ctx, repo, root))
+	cmd.AddCommand(newPacksListCommand(ctx, invocationRoot.Path(), root), newPacksShowCommand(ctx, invocationRoot.Path(), root))
 	return cmd
 }
 
@@ -128,8 +128,8 @@ func newPacksShowCommand(_ context.Context, repo string, root rootCommandOptions
 	return cmd
 }
 
-func newImportPackCommand(repo string, root rootCommandOptions) *cobra.Command {
-	opts := packCommandOptions{repoRoot: repo, root: root}
+func newImportPackCommand(invocationRoot InvocationRoot, root rootCommandOptions) *cobra.Command {
+	opts := packCommandOptions{repoRoot: invocationRoot.Path(), root: root}
 	cmd := &cobra.Command{
 		Use: "import <pack-id>", Short: "Import an embedded pack into the selected project.", Args: argcount.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

@@ -176,7 +176,7 @@ func TestGeneratedInputFixturePublishesResolvedEventThroughPublicRPC(t *testing.
 		writeJSONRPCResult(t, w, rpc.ID, eventPublishTestResult(true))
 	}))
 	defer server.Close()
-	client, err := newCLIAPIClient(rootCommandOptions{apiServer: strings.TrimSuffix(server.URL, "/")})
+	client, err := newCLIAPIClientForTest(t, rootCommandOptions{invocationRoot: mustInvocationRootForTest(t.TempDir()), apiServer: strings.TrimSuffix(server.URL, "/")})
 	if err != nil {
 		t.Fatalf("client: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestGeneratedInputFixtureLoadsComposedTelegramSchemaAndPublishesNormalizedE
 		writeJSONRPCResult(t, w, call.ID, eventPublishTestResult(true))
 	}))
 	defer server.Close()
-	client, err := newCLIAPIClient(rootCommandOptions{apiServer: strings.TrimSuffix(server.URL, "/")})
+	client, err := newCLIAPIClientForTest(t, rootCommandOptions{invocationRoot: mustInvocationRootForTest(t.TempDir()), apiServer: strings.TrimSuffix(server.URL, "/")})
 	if err != nil {
 		t.Fatalf("client: %v", err)
 	}
@@ -316,7 +316,7 @@ text: authored fixture
 				writeJSONRPCResult(t, w, call.ID, eventPublishTestResult(true))
 			}))
 			defer server.Close()
-			client, err := newCLIAPIClient(rootCommandOptions{apiServer: strings.TrimSuffix(server.URL, "/")})
+			client, err := newCLIAPIClientForTest(t, rootCommandOptions{invocationRoot: mustInvocationRootForTest(t.TempDir()), apiServer: strings.TrimSuffix(server.URL, "/")})
 			if err != nil {
 				t.Fatalf("client: %v", err)
 			}

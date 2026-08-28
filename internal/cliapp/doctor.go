@@ -26,10 +26,11 @@ type doctorOptions struct {
 	apiOptions          rootCommandOptions
 }
 
-func newDoctorCommand(ctx context.Context, repo string, rootOpts rootCommandOptions) *cobra.Command {
+func newDoctorCommand(ctx context.Context, root InvocationRoot, rootOpts rootCommandOptions) *cobra.Command {
 	opts := doctorOptions{
 		apiListenAddr: defaultAPIListenAddr,
 		mcpListenAddr: defaultMCPListenAddr,
+		apiOptions:    rootOpts,
 	}
 	cmd := &cobra.Command{
 		Use:   "doctor",
@@ -66,7 +67,7 @@ func newDoctorCommand(ctx context.Context, repo string, rootOpts rootCommandOpti
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDoctorCommand(ctx, assetCommandRepoRoot(repo), cmd, opts)
+			return runDoctorCommand(ctx, root.Path(), cmd, opts)
 		},
 	}
 	cmd.Flags().StringVar(&opts.configPath, "config", opts.configPath, "Path to swarm.yaml config")
@@ -79,7 +80,6 @@ func newDoctorCommand(ctx context.Context, repo string, rootOpts rootCommandOpti
 	cmd.Flags().BoolVar(&opts.target, "target", false, "Explain local target, state directory, project, and context resolution without runtime preflight")
 	cmd.Flags().BoolVar(&opts.asJSON, "json", false, "Render the diagnostic report as JSON")
 	cmd.Flags().BoolVar(&opts.schemaInventory, "schema-inventory", false, "Show the generated state-store table and column inventory without starting runtime")
-	opts.apiOptions.rootFlags = rootOpts.rootFlags
 	bindCLIAPIConnectionFlags(cmd, &opts.apiOptions)
 	return cmd
 }
@@ -212,7 +212,7 @@ func runDoctorCommand(ctx context.Context, repo string, cmd *cobra.Command, opts
 		return returnLocalPreflightResult(cmd, report.finalize(), opts.asJSON)
 	}
 	swarmDirFlag, swarmDirFlagSet := rootSwarmDirFlag(cmd)
-	swarmDir, err := resolveCLISwarmDirFromConfig(cliSwarmDirOptions{SwarmDir: swarmDirFlag, SwarmDirFlagSet: swarmDirFlagSet}, cliCfg)
+	swarmDir, err := resolveCLISwarmDirFromConfig(opts.apiOptions.invocationRoot, cliSwarmDirOptions{SwarmDir: swarmDirFlag, SwarmDirFlagSet: swarmDirFlagSet}, cliCfg)
 	if err != nil {
 		report := configReport
 		report.add(localPreflightBackendPrerequisite, "swarm_dir_resolution_failed", LocalPreflightSeverityBlocker, LocalPreflightStatusFailed, err.Error(), "fix --swarm-dir or config paths.swarm_dir")

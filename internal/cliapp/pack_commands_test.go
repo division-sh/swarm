@@ -413,7 +413,7 @@ func TestPresentZeroOptionalFileFailsBeforeEveryCLIPublishingSurface(t *testing.
 func runPacksCommand(t testing.TB, repo string, args ...string) (int, string, string) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	code := Execute(context.Background(), repo, args, &stdout, &stderr, nil)
+	code := executeRootCommand(context.Background(), repo, args, &stdout, &stderr)
 	return code, stdout.String(), stderr.String()
 }
 

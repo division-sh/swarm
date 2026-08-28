@@ -1354,7 +1354,7 @@ func TestScenarioEntityExpectationConsumesAllPages(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client, err := newCLIAPIClient(rootCommandOptions{apiServer: strings.TrimSuffix(server.URL, "/")})
+	client, err := newCLIAPIClientForTest(t, rootCommandOptions{invocationRoot: mustInvocationRootForTest(t.TempDir()), apiServer: strings.TrimSuffix(server.URL, "/")})
 	if err != nil {
 		t.Fatalf("client: %v", err)
 	}
@@ -1400,7 +1400,7 @@ func TestScenarioEntityExpectationConsumesCanonicalDetail(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client, err := newCLIAPIClient(rootCommandOptions{apiServer: strings.TrimSuffix(server.URL, "/")})
+	client, err := newCLIAPIClientForTest(t, rootCommandOptions{invocationRoot: mustInvocationRootForTest(t.TempDir()), apiServer: strings.TrimSuffix(server.URL, "/")})
 	if err != nil {
 		t.Fatalf("client: %v", err)
 	}
@@ -1443,7 +1443,7 @@ func TestScenarioEntityDetailExpectationFailsClosedOnMultipleMatches(t *testing.
 		writeJSONRPCResult(t, w, req.ID, map[string]any{"entities": []map[string]any{entity1, entity2}})
 	}))
 	defer server.Close()
-	client, err := newCLIAPIClient(rootCommandOptions{apiServer: strings.TrimSuffix(server.URL, "/")})
+	client, err := newCLIAPIClientForTest(t, rootCommandOptions{invocationRoot: mustInvocationRootForTest(t.TempDir()), apiServer: strings.TrimSuffix(server.URL, "/")})
 	if err != nil {
 		t.Fatalf("client: %v", err)
 	}
@@ -1604,7 +1604,7 @@ func TestScenarioTestBundleSourceFactConsumesExactRuntimeIdentity(t *testing.T) 
 				})
 			}))
 			defer server.Close()
-			client, err := newCLIAPIClient(rootCommandOptions{apiServer: server.URL})
+			client, err := newCLIAPIClientForTest(t, rootCommandOptions{invocationRoot: mustInvocationRootForTest(t.TempDir()), apiServer: server.URL})
 			if err != nil {
 				t.Fatalf("client: %v", err)
 			}

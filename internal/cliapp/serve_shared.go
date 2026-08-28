@@ -2,7 +2,6 @@ package cliapp
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -95,28 +94,4 @@ func (summary serveSchemaPlanSummary) text() string {
 		return "verified 0 generated tables"
 	}
 	return fmt.Sprintf("verified %d generated tables", summary.tableCount)
-}
-
-func DiscoverRepoRoot() string {
-	dir, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return ""
-		}
-		dir = parent
-	}
-}
-
-func assetCommandRepoRoot(repo string) string {
-	if repo = strings.TrimSpace(repo); repo != "" {
-		return repo
-	}
-	return DiscoverRepoRoot()
 }

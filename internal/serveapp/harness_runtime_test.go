@@ -16,7 +16,7 @@ import (
 )
 
 func TestServeRejectsHarnessInjectionBeforeRuntime(t *testing.T) {
-	repo := cliapp.RepoRoot()
+	repo := repoRootForTest()
 	root := canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection)
 	loaded, err := loadServeRuntimeBundle(context.Background(), repo, nil, cliapp.CLIContractPlatformSpecPaths{
 		ContractsPath: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
@@ -44,7 +44,7 @@ func TestServeRejectsHarnessInjectionBeforeRuntime(t *testing.T) {
 }
 
 func TestBuildServeRuntimeContextFailureAfterRuntimeConstructionJoinsOccurrence(t *testing.T) {
-	repo := cliapp.RepoRoot()
+	repo := repoRootForTest()
 	root := canonicalrouting.WriteNovelDerivedScenarioBundle(t)
 	loaded, err := loadServeRuntimeBundle(context.Background(), repo, nil, cliapp.CLIContractPlatformSpecPaths{
 		ContractsPath: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),

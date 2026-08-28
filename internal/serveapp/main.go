@@ -821,7 +821,8 @@ func serveOperatorChannelInterfaces(contexts []serveRuntimeBundleContext) ([]ope
 	return identities, nil
 }
 
-func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
+func Run(ctx context.Context, invocationRoot cliapp.InvocationRoot, opts cliapp.ServeOptions) int {
+	repo := invocationRoot.Path()
 	ctx, cancelServe := context.WithCancel(ctx)
 	defer cancelServe()
 	bootStartedAt := time.Now().UTC()
@@ -859,7 +860,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 		}
 	}
 	presenter.boot(1, "process_start", "ok", "")
-	apiAuth, err := cliapp.ResolveServeAPIAuth(repo, opts)
+	apiAuth, err := cliapp.ResolveServeAPIAuth(invocationRoot, opts)
 	if err != nil {
 		presenter.fail(2, "config_load", err)
 		return 1
@@ -907,7 +908,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 			return 3
 		}
 	}
-	swarmDir, err := cliapp.ResolveServeContextRegistrationSwarmDir(opts)
+	swarmDir, err := cliapp.ResolveServeContextRegistrationSwarmDir(invocationRoot, opts)
 	if err != nil {
 		presenter.fail(2, "config_load", err)
 		return 1
@@ -959,7 +960,7 @@ func Run(ctx context.Context, repo string, opts cliapp.ServeOptions) int {
 			return 3
 		}
 	}
-	projectContextRegistration, err := cliapp.PrepareServeProjectContextRegistration(opts, resolvedPaths, scratchRegistrationGrant)
+	projectContextRegistration, err := cliapp.PrepareServeProjectContextRegistration(invocationRoot, opts, resolvedPaths, scratchRegistrationGrant)
 	if err != nil {
 		presenter.fail(2, "serve_admission", err)
 		return 3

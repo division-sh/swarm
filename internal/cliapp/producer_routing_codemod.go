@@ -18,14 +18,14 @@ type migrateProducerRoutingResult struct {
 	Removed       int    `json:"removed"`
 }
 
-func newMigrateProducerRoutingCommand(repo string) *cobra.Command {
+func newMigrateProducerRoutingCommand(root InvocationRoot) *cobra.Command {
 	opts := migrateProducerRoutingOptions{}
 	cmd := &cobra.Command{
 		Use:   "migrate-producer-routing",
 		Short: "Remove deterministic retired emit.broadcast: true declarations.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runMigrateProducerRoutingCommand(cmd.OutOrStdout(), cmd.ErrOrStderr(), assetCommandRepoRoot(repo), opts)
+			return runMigrateProducerRoutingCommand(cmd.OutOrStdout(), cmd.ErrOrStderr(), root.Path(), opts)
 		},
 	}
 	cmd.Flags().StringVar(&opts.contractsPath, "contracts", "", "Path to the Swarm contract bundle root")

@@ -243,7 +243,7 @@ func TestCLILoggingUnsupportedSurfacesFailClosedBeforeSideEffects(t *testing.T) 
 
 	var serveCalls atomic.Int32
 	opts := testRootCommandOptions(server)
-	opts.runServe = func(context.Context, string, ServeOptions) int {
+	opts.runServe = func(context.Context, InvocationRoot, ServeOptions) int {
 		serveCalls.Add(1)
 		return 0
 	}

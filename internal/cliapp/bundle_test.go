@@ -528,7 +528,7 @@ func TestBundleAgentsUsesSQLitePagerThroughV1API(t *testing.T) {
 
 func TestBundleDeleteHelpDocumentsCanonicalFlags(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"bundle", "delete", "--help"}, &stdout, &stderr, rootCommandOptions{})
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"bundle", "delete", "--help"}, &stdout, &stderr, rootCommandOptions{invocationRoot: mustInvocationRootForTest(t.TempDir())})
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -664,7 +664,7 @@ func TestBundleBuildUsesConfiguredDevelopmentPackBase(t *testing.T) {
 
 func TestBundleBuildHelpAndOutOfScopeShapes(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"bundle", "build", "--help"}, &stdout, &stderr, rootCommandOptions{})
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"bundle", "build", "--help"}, &stdout, &stderr, rootCommandOptions{invocationRoot: mustInvocationRootForTest(t.TempDir())})
 	if code != 0 {
 		t.Fatalf("help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -691,7 +691,7 @@ func TestBundleBuildHelpAndOutOfScopeShapes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			stdout.Reset()
 			stderr.Reset()
-			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, rootCommandOptions{})
+			code := executeRootCommandWithOptions(context.Background(), t.TempDir(), tc.args, &stdout, &stderr, rootCommandOptions{invocationRoot: mustInvocationRootForTest(t.TempDir())})
 			if code != CLIExitValidation {
 				t.Fatalf("%v code = %d, want %d stdout=%s stderr=%s", tc.args, code, CLIExitValidation, stdout.String(), stderr.String())
 			}
@@ -704,7 +704,7 @@ func TestBundleBuildHelpAndOutOfScopeShapes(t *testing.T) {
 
 func TestBundleRegisterHelpDocumentsPreparedEnvelopeAndContractsBoundary(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"bundle", "register", "--help"}, &stdout, &stderr, rootCommandOptions{})
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"bundle", "register", "--help"}, &stdout, &stderr, rootCommandOptions{invocationRoot: mustInvocationRootForTest(t.TempDir())})
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -1058,7 +1058,7 @@ func TestBundleReadSelectorValidationPrecedesAPIConfiguration(t *testing.T) {
 		{"bundle", "agents", "bad-"},
 	} {
 		var stdout, stderr bytes.Buffer
-		code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, rootCommandOptions{apiServer: "://bad"})
+		code := executeRootCommandWithOptions(context.Background(), t.TempDir(), args, &stdout, &stderr, rootCommandOptions{invocationRoot: mustInvocationRootForTest(t.TempDir()), apiServer: "://bad"})
 		if code != CLIExitValidation {
 			t.Fatalf("%v code=%d stderr=%s", args, code, stderr.String())
 		}
@@ -1570,5 +1570,42 @@ func writeBundleInvalidParamsJSONRPCError(t *testing.T, w http.ResponseWriter, i
 		},
 	}); err != nil {
 		t.Fatalf("encode response: %v", err)
+	}
+}
+
+func TestBundleRegisterFileOperandsUseInvocationRoot(t *testing.T) {
+	root := mustInvocationRootForTest(t.TempDir())
+	if err := os.WriteFile(root.Resolve("registration.yaml"), []byte("schema_version: bundle-registration-v1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(root.Resolve("data.json"), []byte(`{"entries":[]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	chdirForTest(t, t.TempDir())
+	prepared, err := (bundleRegisterCommandOptions{
+		invocationRoot: root,
+		dataBlobPath:   "data.json",
+		dataBlobSet:    true,
+	}).preparedEnvelopeParams("registration.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared["content_yaml"] != "schema_version: bundle-registration-v1\n" {
+		t.Fatalf("relative envelope = %#v", prepared["content_yaml"])
+	}
+	if _, ok := prepared["data_blob"].(map[string]any); !ok {
+		t.Fatalf("relative data blob = %#v", prepared["data_blob"])
+	}
+
+	absoluteEnvelope := filepath.Join(t.TempDir(), "absolute.yaml")
+	if err := os.WriteFile(absoluteEnvelope, []byte("absolute: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err = (bundleRegisterCommandOptions{invocationRoot: root}).preparedEnvelopeParams(absoluteEnvelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared["content_yaml"] != "absolute: true\n" {
+		t.Fatalf("absolute envelope = %#v", prepared["content_yaml"])
 	}
 }

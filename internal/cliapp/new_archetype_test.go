@@ -22,7 +22,8 @@ func TestScaffoldAdmittedArchetypesAndTeachNextCommands(t *testing.T) {
 		t.Run(archetype, func(t *testing.T) {
 			destination := filepath.Join(t.TempDir(), archetype)
 			var out bytes.Buffer
-			if err := scaffoldArchetype(&out, archetype, destination); err != nil {
+			root := mustInvocationRootForTest(filepath.Dir(destination))
+			if err := scaffoldArchetype(root, &out, archetype, destination); err != nil {
 				t.Fatal(err)
 			}
 			source := admittedArchetypes[archetype]
@@ -48,7 +49,7 @@ func TestScaffoldAdmittedArchetypesAndTeachNextCommands(t *testing.T) {
 					t.Fatalf("output %q does not teach %s", out.String(), command)
 				}
 			}
-			if err := scaffoldArchetype(&out, archetype, destination); err == nil || !strings.Contains(err.Error(), "already exists") {
+			if err := scaffoldArchetype(root, &out, archetype, destination); err == nil || !strings.Contains(err.Error(), "already exists") {
 				t.Fatalf("existing destination error = %v", err)
 			}
 		})
@@ -158,7 +159,8 @@ func assertArchetypeTreeEqual(t *testing.T, wantFS fs.FS, wantRoot, gotRoot stri
 }
 
 func TestScaffoldRejectsUnadmittedArchetype(t *testing.T) {
-	if err := scaffoldArchetype(&bytes.Buffer{}, "approval-gate", filepath.Join(t.TempDir(), "approval")); err == nil || !strings.Contains(err.Error(), "admitted archetypes") {
+	root := mustInvocationRootForTest(t.TempDir())
+	if err := scaffoldArchetype(root, &bytes.Buffer{}, "approval-gate", root.Resolve("approval")); err == nil || !strings.Contains(err.Error(), "admitted archetypes") {
 		t.Fatalf("unadmitted archetype error = %v", err)
 	}
 }

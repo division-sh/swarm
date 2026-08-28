@@ -24,5 +24,5 @@ func main() {
 		Commit:  binaryCommit,
 		Date:    binaryDate,
 	})
-	os.Exit(cliapp.Execute(ctx, "", os.Args[1:], os.Stdout, os.Stderr, serveapp.Run))
+	os.Exit(cliapp.Execute(ctx, os.Args[1:], os.Stdout, os.Stderr, serveapp.Run))
 }

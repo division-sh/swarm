@@ -99,14 +99,14 @@ func TestResolveCLIContractPlatformSpecPathsPrecedenceAndDiscovery(t *testing.T)
 	})
 }
 
-func TestResolveCLIContractPlatformSpecPathsEmbeddedDefaultDoesNotRequireRepoRoot(t *testing.T) {
+func TestResolveCLIContractPlatformSpecPathsEmbeddedDefaultUsesInvocationRoot(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	outsideRepo := t.TempDir()
 	contractsRoot := filepath.Join(t.TempDir(), "contracts")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(contractsRoot, "package.yaml"), `name: external`)
 	chdirForTest(t, outsideRepo)
 
-	got, err := ResolveCLIContractPlatformSpecPaths("", CLIContractPlatformSpecPathOptions{
+	got, err := ResolveCLIContractPlatformSpecPaths(outsideRepo, CLIContractPlatformSpecPathOptions{
 		ContractsPath: contractsRoot,
 	})
 	if err != nil {
@@ -128,6 +128,13 @@ func TestResolveCLIContractPlatformSpecPathsEmbeddedDefaultDoesNotRequireRepoRoo
 	}
 	if !bytes.Contains(data, []byte("cli_specification:")) {
 		t.Fatalf("materialized platform spec missing cli_specification")
+	}
+}
+
+func TestResolveCLIContractPlatformSpecPathsRejectsMissingInvocationRoot(t *testing.T) {
+	isolateCLIAPIConfigEnv(t)
+	if _, err := ResolveCLIContractPlatformSpecPaths("", CLIContractPlatformSpecPathOptions{}); err == nil || !strings.Contains(err.Error(), "CLI invocation root is required") {
+		t.Fatalf("missing invocation root error = %v", err)
 	}
 }
 

@@ -19,7 +19,7 @@ type migrateConnectDeliveryOneResult struct {
 	Removed     int    `json:"removed"`
 }
 
-func newMigrateConnectDeliveryOneCommand(repo string) *cobra.Command {
+func newMigrateConnectDeliveryOneCommand(root InvocationRoot) *cobra.Command {
 	opts := migrateConnectDeliveryOneOptions{}
 	cmd := &cobra.Command{
 		Use:   "migrate-connect-delivery-one",
@@ -29,7 +29,7 @@ func newMigrateConnectDeliveryOneCommand(repo string) *cobra.Command {
 			return runMigrateConnectDeliveryOneCommand(
 				cmd.OutOrStdout(),
 				cmd.ErrOrStderr(),
-				assetCommandRepoRoot(repo),
+				root.Path(),
 				opts,
 			)
 		},

@@ -58,7 +58,8 @@ type secretsCheckResult struct {
 	Missing []secretRecord `json:"missing"`
 }
 
-func newSecretsCommand(ctx context.Context, repo string) *cobra.Command {
+func newSecretsCommand(ctx context.Context, root InvocationRoot) *cobra.Command {
+	repo := root.Path()
 	cmd := &cobra.Command{
 		Use:   "secrets",
 		Short: "Manage local secrets used by tools and providers.",
@@ -326,7 +327,7 @@ func loadSecretsSource(cmd *cobra.Command, repo, contractsPath, platformSpecPath
 }
 
 func loadSecretsSourceRequired(repo, contractsPath, platformSpecPath, configPath string) (semanticview.Source, error) {
-	_, bundle, _, err := loadConfiguredCLIWorkflowModule(assetCommandRepoRoot(repo), CLIContractPlatformSpecPathOptions{
+	_, bundle, _, err := loadConfiguredCLIWorkflowModule(repo, CLIContractPlatformSpecPathOptions{
 		ContractsPath:    contractsPath,
 		PlatformSpecPath: platformSpecPath,
 		ConfigPath:       configPath,

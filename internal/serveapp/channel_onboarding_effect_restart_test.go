@@ -146,7 +146,7 @@ func startChannelOnboardingEffectRestartCommand(t *testing.T, configPath, endpoi
 		_ = input.Close()
 	})
 	go func() {
-		done <- cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
+		done <- executeCLI(context.Background(), []string{
 			"--config", configPath, "channel", "connect", "telegram", "--yes", "--api-server", endpoint,
 		}, stdout, stderr, nil)
 	}()

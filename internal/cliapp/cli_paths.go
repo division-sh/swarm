@@ -20,28 +20,30 @@ type CLIContractPlatformSpecPaths struct {
 	PlatformSpecPath string
 }
 
-func ResolveCLIContractPlatformSpecPaths(RepoRoot string, opts CLIContractPlatformSpecPathOptions) (CLIContractPlatformSpecPaths, error) {
-	RepoRoot = strings.TrimSpace(RepoRoot)
-	if RepoRoot == "" {
-		RepoRoot = DiscoverRepoRoot()
-	}
-	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: RepoRoot, ExplicitPath: opts.ConfigPath})
+func ResolveCLIContractPlatformSpecPaths(invocationRootPath string, opts CLIContractPlatformSpecPathOptions) (CLIContractPlatformSpecPaths, error) {
+	var err error
+	invocationRootPath, err = requireInvocationRootPath(invocationRootPath)
 	if err != nil {
 		return CLIContractPlatformSpecPaths{}, err
 	}
-	return resolveCLIContractPlatformSpecPathsFromConfig(RepoRoot, opts, cfg)
+	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: invocationRootPath, ExplicitPath: opts.ConfigPath})
+	if err != nil {
+		return CLIContractPlatformSpecPaths{}, err
+	}
+	return resolveCLIContractPlatformSpecPathsFromConfig(invocationRootPath, opts, cfg)
 }
 
-func resolveCLIContractPlatformSpecPathsFromConfig(RepoRoot string, opts CLIContractPlatformSpecPathOptions, cfg cliCommandConfig) (CLIContractPlatformSpecPaths, error) {
-	RepoRoot = strings.TrimSpace(RepoRoot)
-	if RepoRoot == "" {
-		RepoRoot = DiscoverRepoRoot()
+func resolveCLIContractPlatformSpecPathsFromConfig(invocationRootPath string, opts CLIContractPlatformSpecPathOptions, cfg cliCommandConfig) (CLIContractPlatformSpecPaths, error) {
+	var err error
+	invocationRootPath, err = requireInvocationRootPath(invocationRootPath)
+	if err != nil {
+		return CLIContractPlatformSpecPaths{}, err
 	}
 	contractsPath := firstNonEmpty(
 		opts.ContractsPath,
 		os.Getenv(cliContractsPathEnv),
 		cfg.Paths.ContractsPath,
-		discoverRepoContractsPath(RepoRoot),
+		discoverInvocationRootContractsPath(invocationRootPath),
 	)
 	configPlatformSpecPath := strings.TrimSpace(cfg.Paths.PlatformSpecPath)
 	platformSpecPath := firstNonEmpty(
@@ -56,17 +58,17 @@ func resolveCLIContractPlatformSpecPathsFromConfig(RepoRoot string, opts CLICont
 		platformSpecPath = embedded
 	}
 	return CLIContractPlatformSpecPaths{
-		ContractsPath:    ResolvePath(RepoRoot, contractsPath),
-		PlatformSpecPath: ResolvePath(RepoRoot, platformSpecPath),
+		ContractsPath:    ResolvePath(invocationRootPath, contractsPath),
+		PlatformSpecPath: ResolvePath(invocationRootPath, platformSpecPath),
 	}, nil
 }
 
-func discoverRepoContractsPath(RepoRoot string) string {
-	RepoRoot = strings.TrimSpace(RepoRoot)
-	if RepoRoot == "" {
+func discoverInvocationRootContractsPath(invocationRootPath string) string {
+	invocationRootPath = strings.TrimSpace(invocationRootPath)
+	if invocationRootPath == "" {
 		return ""
 	}
-	candidate := filepath.Join(RepoRoot, "contracts")
+	candidate := filepath.Join(invocationRootPath, "contracts")
 	if regularFileExists(filepath.Join(candidate, "package.yaml")) {
 		return candidate
 	}
@@ -76,11 +78,4 @@ func discoverRepoContractsPath(RepoRoot string) string {
 func regularFileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
-}
-
-func ResolveContractsPath(RepoRoot, raw string) string {
-	if resolved := ResolvePath(RepoRoot, raw); strings.TrimSpace(resolved) != "" {
-		return resolved
-	}
-	return discoverRepoContractsPath(RepoRoot)
 }

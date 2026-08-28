@@ -61,7 +61,7 @@ type bundleRegisterCommandOptions struct {
 	dataBlobSet       bool
 	contractsSet      bool
 	idempotencyKeySet bool
-	RepoRoot          string
+	invocationRoot    InvocationRoot
 }
 
 type bundleRegisterPreparation struct {
@@ -70,11 +70,11 @@ type bundleRegisterPreparation struct {
 }
 
 type bundleBuildCommandOptions struct {
-	contractsDir string
-	outputRoot   string
-	report       string
-	RepoRoot     string
-	root         rootCommandOptions
+	contractsDir   string
+	outputRoot     string
+	report         string
+	invocationRoot InvocationRoot
+	root           rootCommandOptions
 }
 
 type bundleDeleteCommandOptions struct {
@@ -171,7 +171,7 @@ type bundleAgentDefinition struct {
 	Tools             []string `json:"tools,omitempty"`
 }
 
-func newBundleCommand(RepoRoot string, opts rootCommandOptions) *cobra.Command {
+func newBundleCommand(root InvocationRoot, opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "bundle",
 		Short: "Inspect registered contract bundles.",
@@ -184,8 +184,8 @@ func newBundleCommand(RepoRoot string, opts rootCommandOptions) *cobra.Command {
 		newBundleListCommand(opts),
 		newBundleShowCommand(opts),
 		newBundleAgentsCommand(opts),
-		newBundleBuildCommand(RepoRoot, opts),
-		newBundleRegisterCommand(RepoRoot, opts),
+		newBundleBuildCommand(root, opts),
+		newBundleRegisterCommand(root, opts),
 		newBundleDeleteCommand(opts),
 	)
 	return cmd
@@ -256,8 +256,8 @@ func newBundleAgentsCommand(opts rootCommandOptions) *cobra.Command {
 	return cmd
 }
 
-func newBundleBuildCommand(RepoRoot string, root rootCommandOptions) *cobra.Command {
-	buildOpts := bundleBuildCommandOptions{RepoRoot: RepoRoot, root: root}
+func newBundleBuildCommand(invocationRoot InvocationRoot, root rootCommandOptions) *cobra.Command {
+	buildOpts := bundleBuildCommandOptions{invocationRoot: invocationRoot, root: root}
 	cmd := &cobra.Command{
 		Use:   "build",
 		Short: "Materialize a local contract bundle for explicit consumption.",
@@ -274,8 +274,8 @@ func newBundleBuildCommand(RepoRoot string, root rootCommandOptions) *cobra.Comm
 
 const bundleRegisterUse = "register <registration-envelope-yaml> | register --contracts <contracts-directory>"
 
-func newBundleRegisterCommand(RepoRoot string, opts rootCommandOptions) *cobra.Command {
-	registerOpts := bundleRegisterCommandOptions{apiOptions: opts, RepoRoot: RepoRoot}
+func newBundleRegisterCommand(invocationRoot InvocationRoot, opts rootCommandOptions) *cobra.Command {
+	registerOpts := bundleRegisterCommandOptions{apiOptions: opts, invocationRoot: invocationRoot}
 	cmd := &cobra.Command{
 		Use:   bundleRegisterUse,
 		Short: "Register a contract bundle with the runtime.",
@@ -559,17 +559,7 @@ func (opts bundleBuildCommandOptions) request() (runtimecontracts.BundleBuildReq
 	default:
 		return runtimecontracts.BundleBuildRequest{}, false, fmt.Errorf("--report supports only json")
 	}
-	RepoRoot := strings.TrimSpace(opts.RepoRoot)
-	if RepoRoot == "" {
-		RepoRoot = DiscoverRepoRoot()
-	}
-	if RepoRoot == "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return runtimecontracts.BundleBuildRequest{}, false, fmt.Errorf("resolve repo root: %w", err)
-		}
-		RepoRoot = cwd
-	}
+	RepoRoot := opts.invocationRoot.Path()
 	cfgResult, err := loadPackInventoryConfig(RepoRoot, rootConfigPath(opts.root))
 	if err != nil {
 		return runtimecontracts.BundleBuildRequest{}, false, fmt.Errorf("load pack inventory config: %w", err)
@@ -617,13 +607,13 @@ func (opts bundleRegisterCommandOptions) params(args []string) (bundleRegisterPr
 }
 
 func (opts bundleRegisterCommandOptions) preparedEnvelopeParams(envelopePath string) (map[string]any, error) {
-	contentYAML, err := readBundleRegisterTextFile("registration envelope", envelopePath)
+	contentYAML, err := readBundleRegisterTextFile("registration envelope", opts.invocationRoot.Resolve(envelopePath))
 	if err != nil {
 		return nil, err
 	}
 	params := map[string]any{"content_yaml": contentYAML}
 	if opts.dataBlobSet {
-		dataBlob, err := readBundleRegisterDataBlob(opts.dataBlobPath)
+		dataBlob, err := readBundleRegisterDataBlob(opts.invocationRoot.Resolve(opts.dataBlobPath))
 		if err != nil {
 			return nil, err
 		}
@@ -648,17 +638,7 @@ func (opts bundleRegisterCommandOptions) contractsDirectoryParams(args []string)
 	if err != nil {
 		return bundleRegisterPreparation{}, err
 	}
-	RepoRoot := strings.TrimSpace(opts.RepoRoot)
-	if RepoRoot == "" {
-		RepoRoot = DiscoverRepoRoot()
-	}
-	if RepoRoot == "" {
-		cwd, err := os.Getwd()
-		if err != nil {
-			return bundleRegisterPreparation{}, fmt.Errorf("resolve repo root: %w", err)
-		}
-		RepoRoot = cwd
-	}
+	RepoRoot := opts.invocationRoot.Path()
 	configPath := ""
 	if opts.apiOptions.rootFlags != nil && opts.apiOptions.rootFlags.configPathSet {
 		configPath = opts.apiOptions.rootFlags.configPath

@@ -5536,6 +5536,10 @@ engine:
           a retired environment source and MUST NOT affect backend selection.
     sqlite_path:
       canonical_owner: internal/store/backendselection SQLite path resolver
+      invocation_root_rule: >-
+        Relative `store.sqlite.path` values are projected from the one canonical CLI invocation root captured by
+        `cliapp.Execute`. Absolute values are preserved. Store selection MUST NOT recover cwd, search a repository,
+        or reinterpret a missing root.
       runtime_config_key: store.sqlite.path
       default_authority: platform-spec.yaml#cli_specification.foundations.local_runtime_state_authority
       project_default_path: .swarm/stores/dev.db
@@ -5548,9 +5552,9 @@ engine:
       - local_runtime_state_default
       retired_environment: SWARM_SQLITE_PATH
       lifecycle:
-      - Project-local startup whose canonical project root matches the active repo root uses `<project-root>/.swarm/stores/dev.db`.
+      - Project-local startup whose canonical project root is equal to or below the canonical invocation root uses `<project-root>/.swarm/stores/dev.db`.
       - Startup with no project uses `<swarm-dir>/stores/default/dev.db`.
-      - Startup pointed at a contracts root outside the active repo root uses a Swarm-dir project hash store and MUST NOT silently write `.swarm` state into the borrowed contracts tree.
+      - Startup pointed at a contracts root outside the canonical invocation root uses a Swarm-dir project hash store and MUST NOT silently write `.swarm` state into the borrowed contracts tree.
       - A legacy `<project-root>/.swarm/dev.db` file MUST NOT be silently orphaned behind an empty replacement; startup must either migrate/read through it or fail closed with the old path, new path, and remediation.
       - Runtime SQLite support must create parent directories on demand when the SQLite backend is implemented.
       - The SQLite file is persistent until the operator deletes it.
@@ -20322,6 +20326,8 @@ configuration_source_authority:
       executable-adjacent `config.yaml` invalidation, and minimum doctor provenance. #1844 implements the generated
       `swarm.example.yaml` public guidance cleanup. Provider-trigger runtime behavior changes, sharding runtime
       promotion, serve/connection family cleanup, and seeded env-row shrinkage remain split to later children.
+      For CLI invocation, project and local-operator layers are anchored only at the canonical invocation root
+      captured by `cliapp.Execute`; config loading never walks ancestors or discovers a repository root.
     invariant: >
       Swarm configuration is explicit, typed, and provenance-bearing. Environment variables are never a normal
       precedence layer; they are accepted only as the `SWARM_CONFIG` config-file locator/replacement, as a
@@ -20343,13 +20349,14 @@ configuration_source_authority:
         explicit_config: >
           A global `--config <path>` selects a full-trust unified `swarm.yaml` file. `SWARM_CONFIG`, when non-empty and
           no `--config` flag is supplied, is only a bootstrap locator/replacement for a config file; it never injects
-          individual values or creates env-over-config precedence.
+          individual values or creates env-over-config precedence. Relative flag and locator paths resolve from the
+          canonical invocation root; absolute paths are preserved.
         local_operator_config: >
-          A gitignored `.swarm/swarm.yaml` under the current project root is the local operator layer. It may set
+          A gitignored `.swarm/swarm.yaml` under the canonical invocation root is the local operator layer. It may set
           runtime behavior and local overrides but not connection/auth values. Individual elevated runtime keys may be
           admitted from local-operator config only when their owning section allows local machine-specific overrides.
         project_config: >
-          A checked-in `./swarm.yaml` is the low-trust project layer. It may set only project-safe runtime behavior.
+          A checked-in `./swarm.yaml` under the canonical invocation root is the low-trust project layer. It may set only project-safe runtime behavior.
           It cannot set connection/auth keys, non-loopback or wildcard listener binds, serve token files,
           `workspace.allow_exec_on_host`, or absolute/outside-project path references.
         user_global_config: >
@@ -22907,9 +22914,10 @@ cli_specification:
         defaults, multi-bundle work, or README/public-doc polish.
       rule: >
         An installed `swarm` binary MUST construct the Cobra command tree and run no-asset command surfaces without a
-        source checkout, repo-root discovery, or `go.mod` walk. Source checkout discovery may occur only after command
-        selection inside local asset-consuming commands, and failure to discover a checkout MUST NOT block help,
-        completion, or local version output.
+        source checkout, repo-root discovery, or `go.mod` walk. CLI commands consume the canonical invocation root and
+        explicit/configured source facts; command selection never authorizes source-checkout discovery as invocation
+        identity. Separately owned runtime artifacts may consume their exact named source, but failure to have a checkout
+        MUST NOT block help, completion, or local version output.
       embedded_assets:
         platform_spec: >
           The built-in platform spec default is compiled into the binary from the tracked
@@ -24672,6 +24680,25 @@ cli_specification:
       Runtime-state commands use v1 bearer auth through token sources governed by
       cli_specification.foundations.api_connection_auth_config_precedence. Legacy
       `SWARM_BUILDER_AUTH_TOKEN` and `SWARM_OPERATOR_AUTH_TOKEN` fallback is invalid.
+    invocation_root_authority:
+      promoted_by: '#2382'
+      implementation_status: implemented
+      canonical_owner: internal/cliapp.InvocationRoot captured by cliapp.Execute
+      rule: >
+        The shipped CLI captures the process working directory exactly once at `cliapp.Execute`, requires it to be an
+        existing directory, canonicalizes symlinks, and carries that immutable typed fact to every command consumer.
+        Relative CLI config, source, selected-store, mount, output, token-file, payload, import, and registration-file
+        operands are pure projections from this root. Absolute operands are preserved.
+      forbidden_interpreters:
+      - caller-supplied production Execute root
+      - empty or optional root
+      - upward go.mod or .git search
+      - manifest, config, environment, or selected-source fallback for invocation identity
+      - per-command os.Getwd or filepath.Abs cwd recovery
+      - raw and derived dual root fields
+      source_free_rule: >
+        Receiving the invocation root to resolve config or an explicit file/output operand does not authorize contracts
+        discovery. Help, version, completion, remote/API, and other source-free forms remain source-free.
     local_target_resolution_authority:
       promoted_by: '#1612'
       implementation_status: implemented_first_slice
@@ -24708,7 +24735,8 @@ cli_specification:
             configuration_source_authority.unified_swarm_config.
         normalization_rule: >
           Explicit relative `--swarm-dir` and config `paths.swarm_dir` paths are resolved to clean absolute filesystem paths
-          without creating the directory. Blank explicit values fail closed before target diagnostics or runtime action.
+          from the canonical invocation root without creating the directory. Absolute paths are preserved. Blank explicit
+          values fail closed before target diagnostics or runtime action.
       project_root_resolution:
         source_owner: cli_specification.foundations.contract_platform_spec_path_resolution
         rule: >
@@ -24846,9 +24874,9 @@ cli_specification:
         selection.
       invariant: >
         Explicit store/data/backend inputs win. Otherwise, if the command is in a real project whose canonical contracts
-        project root matches the active repo root, local state is project-local. If there is no project, Swarm-dir
+        project root matches the canonical invocation root or is below it, local state is project-local. If there is no project, Swarm-dir
         managed store state is allowed but workspace data must be explicit. If contracts point at a borrowed project
-        outside the active repo root, Swarm MUST NOT write `.swarm` state into that borrowed tree.
+        outside the canonical invocation root, Swarm MUST NOT write `.swarm` state into that borrowed tree.
       dev_scratch_epoch:
         promoted_by: '#2360'
         owner: internal/store/devscratch.EpochAuthority
@@ -24869,8 +24897,9 @@ cli_specification:
       project_resolution:
         owner: cli_specification.foundations.contract_platform_spec_path_resolution
         local_project_rule: >
-          A project is project-local only when the resolved contracts-derived project root canonicalizes to the active repo
-          root or a directory under it. Explicit `--contracts` paths outside the active repo root are borrowed-project inputs.
+          A project is project-local only when the resolved contracts-derived project root canonicalizes to the canonical
+          invocation root or a directory under it. The invocation root is captured once by `cliapp.Execute`; it is never a
+          discovered repository. Explicit `--contracts` paths outside it are borrowed-project inputs.
       store_resolution:
         sqlite_source_order:
         - store.sqlite.path
@@ -25112,7 +25141,9 @@ cli_specification:
         token_file_rule: >
           Token-file sources are read once during CLI command startup by the API client/auth resolver. Missing,
           unreadable, or blank token-file contents classify through the shared CLI error/exit-code contract and
-          MUST NOT fall back to the built-in loopback default.
+          MUST NOT fall back to the built-in loopback default. Relative `--api-token-file` and
+          `connection.api_token_file` values resolve from the canonical invocation root; absolute values are preserved.
+          Context-descriptor token files remain descriptor-owned persisted absolute coordinates.
         built_in_loopback_default:
           token_value: swarm-dev-loopback-api-token
           source: built-in-loopback-default
@@ -25220,8 +25251,8 @@ cli_specification:
       canonical_owner: platform-spec.yaml#cli_specification.foundations.contract_platform_spec_path_resolution
       scope: >
         Merge-bearing CLI v2 authority for selecting the local workflow contract bundle path and the platform
-        spec YAML path. This owner covers the currently implemented local file-contract surfaces only: `swarm
-        verify`, `swarm serve`, and local foreground `swarm run start` before it starts the serve owner. It does not add
+        spec YAML path. This owner covers every current local file-contract consumer, including verify, describe,
+        scenario test, doctor, serve, bundle/pack authoring, codemods, and local foreground run before it starts the serve owner. It does not add
         API connection behavior, OpenRPC methods, serve listener binding, retry/follow
         policy, output rendering, or absent command families.
       applies_to:
@@ -25240,26 +25271,26 @@ cli_specification:
           flag: --contracts <path>
           environment: SWARM_CONTRACTS_PATH
           config_key: paths.contracts_path
-          discovered_default: repo-local contracts/package.yaml when present
+          discovered_default: invocation-root contracts/package.yaml when present
         source_order:
         - --contracts
         - SWARM_CONTRACTS_PATH
         - config paths.contracts_path
-        - repo contracts/package.yaml
+        - invocation-root contracts/package.yaml
         rejected_sources:
           SWARM_CONTRACTS_DIR: >
             Not a CLI source. This legacy internal runtime contracts helper environment name MUST NOT compete with
             the promoted CLI resolver. If it remains for non-CLI internals, supported CLI surfaces must bypass it.
         missing_source_rule: >
-          If no source yields a contracts root and repo discovery does not find `contracts/package.yaml`, the
+          If no source yields a contracts root and the invocation root does not contain `contracts/package.yaml`, the
           command fails closed during local contract resolution with the promoted missing-contracts-source error.
-          There is no implicit contracts root default without a discovered package file.
+          There is no upward search and no implicit contracts root default without that exact package file.
         explicit_source_validation_rule: >
           Values from `--contracts`, `SWARM_CONTRACTS_PATH`, and config `paths.contracts_path` are explicit operator
           inputs. After normal relative-path resolution, the resolver MUST validate the named value itself as either
           a directory containing `package.yaml` or that directory's `package.yaml` file shorthand. It MUST NOT walk
-          upward or fall back to a parent directory to satisfy a typo/non-root child path. Repo-local
-          `contracts/package.yaml` discovery remains the only discovered default.
+          upward or fall back to a parent directory to satisfy a typo/non-root child path. Invocation-root
+          `contracts/package.yaml` is the only discovered default.
       platform_spec_path:
         accepted_sources:
           config_key: paths.platform_spec_path
@@ -25279,8 +25310,8 @@ cli_specification:
           from `platform-spec.yaml`; it MUST NOT require source checkout,
           repo-root discovery, or a `go.mod` walk. Implementations may materialize the embedded bytes to an internal
           cache path for path-based readers, but that materialized path is not a user-facing config source. Relative
-          explicit/config values are resolved against the repo root when one is available; without a repo root they use
-          normal filesystem semantics from the current working directory. Absolute values are preserved.
+          explicit/config values are always resolved against the canonical invocation root. Absolute values are preserved;
+          a missing root fails closed rather than using ambient filesystem semantics.
       cli_config_file:
         shared_parser: >
           Global `--config`, `SWARM_CONFIG`, and user-global/project/local-operator `swarm.yaml` discovery are owned by
@@ -25600,7 +25631,7 @@ cli_specification:
       flags:
       - name: --contracts <path>
         behavior: Contract package root used for bundle loading and scenario discovery. Omitted uses config paths.contracts_path,
-          then repo-local contracts when present, then the repo root.
+          then invocation-root contracts when present, then the invocation root. No ancestor or repository search occurs.
       - name: --timeout <duration>
         behavior: Positive safety deadline for test quiescence waits. Reaching it fails the scenario with diagnostic context.
       - name: --poll-interval <duration>
@@ -26040,7 +26071,9 @@ cli_specification:
                 Not promoted. Inline bearer tokens in config files leak secret material into durable plaintext config.
             token_file_rule: >
               Token-file sources are read once during `swarm serve` startup. Missing, unreadable, or blank token-file
-              contents fail closed and MUST NOT fall back to the built-in loopback default.
+              contents fail closed and MUST NOT fall back to the built-in loopback default. Relative
+              `--api-token-file` and `serve.api_token_file` values resolve from the canonical invocation root;
+              absolute values are preserved.
           unified_config_file:
             accepted_sources:
             - global --config <path>

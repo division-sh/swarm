@@ -191,7 +191,7 @@ func TestRuntimeProjectSupervisorRejectsExecutionPostureChangeBeforeQuiesceOrPub
 
 func TestRuntimeProjectSupervisorReloadRecompilesAndInstallsChannelPlans(t *testing.T) {
 	projectRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
-	module, bundle, err := cliapp.NewSwarmWorkflowModule(cliapp.RepoRoot(), projectRoot, runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot()))
+	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), projectRoot, runtimecontracts.DefaultPlatformSpecFile(repoRootForTest()))
 	if err != nil {
 		t.Fatalf("NewSwarmWorkflowModule: %v", err)
 	}
@@ -423,7 +423,7 @@ func TestStandingIngressAliasGrammarMatchesProcessWebhookRouter(t *testing.T) {
 
 func TestRuntimeProcessInboundHandlerSelectsExactLoadedContext(t *testing.T) {
 	contractsRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
-	_, bundle, err := cliapp.NewSwarmWorkflowModule(cliapp.RepoRoot(), contractsRoot, cliapp.ResolvePath(cliapp.RepoRoot(), defaultPlatformSpecPath))
+	_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), contractsRoot, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
 	if err != nil {
 		t.Fatalf("load standing fixture: %v", err)
 	}
@@ -878,7 +878,7 @@ func TestStandingReplacementAdoptionRestoresWorkflowTimersOnBothStores(t *testin
 			}
 			writeStandingCandidateFile(t, schemaPath, withTimer)
 
-			repoRoot := cliapp.RepoRoot()
+			repoRoot := repoRootForTest()
 			module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRoot, contractsRoot, cliapp.ResolvePath(repoRoot, defaultPlatformSpecPath))
 			if err != nil {
 				t.Fatalf("load standing workflow module: %v", err)
@@ -1045,7 +1045,7 @@ func TestRuntimeProjectSupervisorStandingReplacementPublishesAdoptedTimerAtomica
 					}
 					writeStandingCandidateFile(t, schemaPath, withTimer)
 
-					repoRoot := cliapp.RepoRoot()
+					repoRoot := repoRootForTest()
 					module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRoot, contractsRoot, cliapp.ResolvePath(repoRoot, defaultPlatformSpecPath))
 					if err != nil {
 						t.Fatalf("load standing workflow module: %v", err)
@@ -1922,7 +1922,7 @@ func writeProjectRoot(t *testing.T) string {
 func testBuilderSupervisorBundle(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
 	dir := t.TempDir()
-	repoRoot := cliapp.RepoRoot()
+	repoRoot := repoRootForTest()
 	platformPath := runtimecontracts.DefaultPlatformSpecFile(repoRoot)
 	packagePath := filepath.Join(dir, "package.yaml")
 	if err := os.WriteFile(packagePath, []byte("name: test\nversion: 1.0.0\nplatform_version: \">=0.7.0 <0.8.0\"\nflows: []\n"), 0o644); err != nil {
@@ -2036,8 +2036,8 @@ func TestRuntimeProjectSupervisorReloadSelectsFreshBaseAndRetainsPredecessorGene
 	supervisor := newSupervisorForLoadProjectFailureTest(t, projectRoot, stubWorkspaceLifecycle{}, func(_ context.Context, deps runtimepkg.RuntimeDeps) (*runtimepkg.Runtime, error) {
 		return &runtimepkg.Runtime{ExecutionPosture: executionposture.Live, Options: deps.Options}, nil
 	})
-	supervisor.RepoRoot = cliapp.RepoRoot()
-	supervisor.platformSpecPath = runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot())
+	supervisor.RepoRoot = repoRootForTest()
+	supervisor.platformSpecPath = runtimecontracts.DefaultPlatformSpecFile(repoRootForTest())
 	supervisor.startRuntime = func(context.Context, *runtimepkg.Runtime) error { return nil }
 	supervisor.shutdownRuntime = func(context.Context, *runtimepkg.Runtime, runtimepkg.ShutdownOptions) error { return nil }
 	selectedDirs := firstDirs
@@ -2137,7 +2137,7 @@ func TestRuntimeProjectSupervisorLoadProjectUsesNoAmbientWorkspaceMountSources(t
 
 func TestRuntimeProjectSupervisorReverifiesProviderCatalogAndPublishesAdmittedSource(t *testing.T) {
 	projectRoot := canonicalrouting.CopyExample(t, canonicalrouting.TelegramAgent)
-	module, bundle, err := cliapp.NewSwarmWorkflowModule(cliapp.RepoRoot(), projectRoot, runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot()))
+	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), projectRoot, runtimecontracts.DefaultPlatformSpecFile(repoRootForTest()))
 	if err != nil {
 		t.Fatalf("NewSwarmWorkflowModule: %v", err)
 	}
@@ -2202,7 +2202,7 @@ provider_trigger_events:
 flows:
   - {id: telegram-chat, flow: telegram-chat, mode: template}
 `)
-	module, bundle, err := cliapp.NewSwarmWorkflowModule(cliapp.RepoRoot(), projectRoot, runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot()))
+	module, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), projectRoot, runtimecontracts.DefaultPlatformSpecFile(repoRootForTest()))
 	if err != nil {
 		t.Fatalf("NewSwarmWorkflowModule: %v", err)
 	}
@@ -2227,7 +2227,7 @@ flows:
 	}
 	var ready atomic.Bool
 	supervisor := newRuntimeProjectSupervisor(
-		cliapp.RepoRoot(), runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot()), cfg, projectServeRuntimePersistence(stores), &ready,
+		repoRootForTest(), runtimecontracts.DefaultPlatformSpecFile(repoRootForTest()), cfg, projectServeRuntimePersistence(stores), &ready,
 		cliapp.WorkspaceMountSources{}, cliapp.WorkspaceBackendSelection{Backend: workspace.BackendDocker, Source: "test"},
 		nil, processIngressCredentialStore{}, candidateCatalog, packfixture.EmbeddedBase(t), "", nil, nil, nil,
 	)
@@ -2325,7 +2325,7 @@ flows:
 		BundleIdentity:             replacementIdentity,
 		Source:                     source,
 		ContractsRoot:              projectRoot,
-		PlatformSpecPath:           cliapp.ResolvePath(cliapp.RepoRoot(), defaultPlatformSpecPath),
+		PlatformSpecPath:           cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath),
 		Runtime:                    replacementRuntime,
 		WorkOwner:                  replacementRuntime.WorkOccurrence(),
 		ChannelPlans:               replacementRuntime.Options.ChannelPlans,
@@ -2357,7 +2357,7 @@ flows:
 		Bundle:           replacementIdentity,
 	}
 	handler, err := apiv1.NewHandler(apiv1.Options{
-		PlatformSpecPath: cliapp.ResolvePath(cliapp.RepoRoot(), defaultPlatformSpecPath),
+		PlatformSpecPath: cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath),
 		AuthTokens:       []string{apiv1.DefaultLoopbackAPIToken},
 		ProcessWorkOwner: supervisor.processWorkOwner,
 		Handlers:         apiv1.OperatorEventPublishHandlers(apiv1.EventPublishHandlerOptions{Publication: publication}),

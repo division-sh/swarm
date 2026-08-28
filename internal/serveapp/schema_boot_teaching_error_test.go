@@ -21,7 +21,7 @@ import (
 // SchemaCompatibilityError text — both versions, drift evidence, fresh-store
 // remediation — and never surfaces raw driver text.
 func TestServeBootLegacySchemaRendersTeachingError(t *testing.T) {
-	repo := cliapp.RepoRoot()
+	repo := repoRootForTest()
 	root := canonicalrouting.ExampleRoot(t, canonicalrouting.HarnessInjection)
 	loaded, err := loadServeRuntimeBundle(context.Background(), repo, nil, cliapp.CLIContractPlatformSpecPaths{
 		ContractsPath: root, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repo),
