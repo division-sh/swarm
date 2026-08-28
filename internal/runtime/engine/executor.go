@@ -1807,7 +1807,7 @@ func (e *Executor) stepFanOut(frame *executionFrame) (bool, error) {
 				return false, err
 			}
 			registration := fanoutbarrier.Registration{
-				IntentKey: intent.Key, Handle: handle, Route: frame.req.Route,
+				IntentKey: intent.Key, PlanRef: intent.PlanRef, Handle: handle, Route: frame.req.Route,
 				EntityID: frame.req.EntityID.String(), RoutingSource: routingSource,
 				ExecutionMode: frame.req.Event.ExecutionMode(), CreatedAt: frame.req.Event.CreatedAt(),
 			}

@@ -25,6 +25,7 @@ import (
 // It exposes persistence mechanics while the materialization lifecycle executes
 // once in materializeRunForkForSelectedContractExecution.
 type runForkSelectedContractMaterializationPort struct {
+	postgres            bool
 	requireCurrent      func() error
 	runMutation         func(context.Context, func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runforkrevision.Effects) error) error
 	lockSourceStatus    func(context.Context, *sql.Tx, string) (string, error)
@@ -114,7 +115,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 			return err
 		}
 		if found {
-			if err := requireExactMaterializedRunForkFanOut(txctx, tx, forkRunID, plan, fanOutPlanRefs); err != nil {
+			if err := requireExactMaterializedRunForkFanOut(txctx, tx, port.postgres, forkRunID, plan, fanOutPlanRefs); err != nil {
 				return err
 			}
 			if err := port.requireProfile(txctx, tx, forkRunID, scenarioProfile, sourceProfiled); err != nil {
@@ -182,7 +183,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 				return err
 			}
 		}
-		materializedFanOutCount, err := materializeRunForkFanOutObligations(txctx, tx, effects, port.materializeBarriers, forkRunID, plan, fanOutPlanRefs, now)
+		materializedFanOutCount, err := materializeRunForkFanOutObligations(txctx, tx, port.postgres, effects, port.materializeBarriers, forkRunID, plan, fanOutPlanRefs, now)
 		if err != nil {
 			return err
 		}
@@ -216,6 +217,7 @@ func materializeRunForkForSelectedContractExecution(ctx context.Context, req run
 
 func postgresRunForkSelectedContractMaterializationPort(s *RunForkPostgresOwner) runForkSelectedContractMaterializationPort {
 	return runForkSelectedContractMaterializationPort{
+		postgres:       true,
 		requireCurrent: s.requireRunForkSelectedContractExecutionAccess,
 		runMutation: func(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runforkrevision.Effects) error) error {
 			tx, err := s.backend.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
@@ -280,6 +282,7 @@ func postgresRunForkSelectedContractMaterializationPort(s *RunForkPostgresOwner)
 
 func sqliteRunForkSelectedContractMaterializationPort(s *RunForkSQLiteOwner) runForkSelectedContractMaterializationPort {
 	return runForkSelectedContractMaterializationPort{
+		postgres:       false,
 		requireCurrent: s.requireRunForkSelectedContractExecutionAccess,
 		runMutation: func(ctx context.Context, operation func(context.Context, *sql.Tx, *privateauthoractivity.Mutation, *runforkrevision.Effects) error) error {
 			return s.runRuntimeMutation(ctx, "sqlite selected-contract fork materialization", func(txctx context.Context, tx *sql.Tx) error {

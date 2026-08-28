@@ -4486,6 +4486,139 @@ func TestExecutor_FanOutCreatesShapedEmitIntentsAndStopsLoop(t *testing.T) {
 	}
 }
 
+func TestExecutor_FanOutDeliveryBarrierTriggerAndCompletionUseDisjointExecutionPaths(t *testing.T) {
+	node := testRootExecutableNode(t, "dispatcher")
+	var handler runtimecontracts.SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte(`
+fan_out:
+  element_id: a1111111-1111-4111-8111-111111111111
+  items_from: payload.items
+  as: fan_item
+  identity: fan_item
+  emit:
+    event: item.requested
+    fields:
+      item: fan_item
+join:
+  id: all-items-delivered
+  members:
+    from_fan_out: a1111111-1111-4111-8111-111111111111
+  on_complete:
+    element_id: b1111111-1111-4111-8111-111111111111
+    emit:
+      event: batch.completed
+      fields:
+        total: join.total
+        succeeded: join.dispositions.succeeded
+`), &handler); err != nil {
+		t.Fatal(err)
+	}
+	qualified, err := runtimecontracts.QualifySystemNodeHandlerRuleRefs(node, handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"dispatcher": {ID: "dispatcher", ExecutionType: runtimecontracts.SystemNodeExecutionType, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"batch.requested": qualified}},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"batch.requested": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"items": {Type: "[text]"}}}},
+			"item.requested":  {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"item": {Type: "text"}}}},
+			"batch.completed": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"total": {Type: "integer"}, "succeeded": {Type: "integer"}}}},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{Name: "root", Version: "v-test"},
+	}
+	source := fanOutSourceWithBundleIdentity(t, bundle)
+	if err := bundle.CompileFanOutHandlerPlans(node, "batch.requested", qualified); err != nil {
+		t.Fatal(err)
+	}
+	plans := bundle.FanOutPlansForHandler(node, "batch.requested")
+	if len(plans) != 1 {
+		t.Fatalf("compiled fan-out plans = %#v", plans)
+	}
+	bundle.Semantics.Joins = []runtimecontracts.WorkflowJoinPlan{{
+		Node: node, HandlerEvent: "batch.requested", Mode: runtimecontracts.WorkflowJoinModeFanOutDelivery,
+		Spec: *qualified.Join, FanOut: runtimecontracts.WorkflowFanOutDeliveryJoinPlan{FanOut: plans[0].Ref},
+	}}
+	declaration, err := timeridentity.NewFanOutDeliveryJoinRef(
+		node, "batch.requested", qualified.Join.EffectiveID(),
+		plans[0].Ref.ElementRef.PackageKey, plans[0].Ref.ElementRef.ElementID,
+		plans[0].Ref.BundleHash, plans[0].Ref.SemanticDigest,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{},
+		Dispatcher: stubDispatcher{}, PayloadShaper: stubPayloadShaper{}, MaxChainDepth: 5,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	createdAt := time.Now().UTC()
+	trigger := eventtest.RunCreatingRootIngress(
+		eventtest.UUID("fan-out-delivery-trigger"), "batch.requested", "operator", "",
+		json.RawMessage(`{"items":["a","b"]}`), 0, semanticExecutionFixtureRunID, "", events.EventEnvelope{}, createdAt,
+	)
+	request := ExecutionRequest{
+		EntityID: "entity-1", Node: node, HandlerEventKey: "batch.requested", Event: trigger,
+		Handler: qualified, JoinDeclaration: declaration,
+		State: testStateSnapshot("active", map[string]any{}, nil, map[string]map[string]any{}),
+	}
+	triggerResult, err := exec.ExecuteSemanticFixture(context.Background(), request)
+	if err != nil {
+		t.Fatalf("execute barrier trigger: %v", err)
+	}
+	if triggerResult.Status != OutcomeFannedOut || triggerResult.FanOutIntent == nil || triggerResult.FanOutBarrier == nil || triggerResult.FanOutBarrierCompletion != nil {
+		t.Fatalf("barrier trigger result = %#v", triggerResult)
+	}
+	if triggerResult.FanOutIntent.Cardinality != 2 || triggerResult.FanOutBarrier.IntentKey != triggerResult.FanOutIntent.Key || len(triggerResult.EmitIntents) != 0 {
+		t.Fatalf("barrier trigger ownership = intent:%#v barrier:%#v emits:%#v", triggerResult.FanOutIntent, triggerResult.FanOutBarrier, triggerResult.EmitIntents)
+	}
+
+	bound, err := declaration.BindFanOutIntent(triggerResult.FanOutIntent.Key.TriggeringDeliveryID, declaration.Generation())
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle, err := timeridentity.JoinCompleteHandle(bound)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := handle.PayloadMetadata()
+	payload["join"] = map[string]any{
+		"total": 2,
+		"dispositions": map[string]any{
+			"succeeded": 2, "dead_lettered": 0, "no_route": 0, "semantic_rejected": 0, "canceled": 0,
+		},
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completionEvent := eventtest.ExistingRunRootIngress(
+		eventtest.UUID("fan-out-delivery-completion"), events.EventType(handle.EventType()), "platform", handle.TaskID(), raw, 0,
+		semanticExecutionFixtureRunID, events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), createdAt.Add(time.Second),
+	)
+	request.Event = completionEvent
+	completionResult, err := exec.ExecuteSemanticFixture(context.Background(), request)
+	if err != nil {
+		t.Fatalf("execute barrier completion: %v", err)
+	}
+	if completionResult.Status == OutcomeFannedOut || completionResult.FanOutIntent != nil || completionResult.FanOutBarrier != nil || completionResult.FanOutBarrierCompletion == nil {
+		t.Fatalf("completion re-entered trigger path = %#v", completionResult)
+	}
+	if len(completionResult.EmitIntents) != 1 || completionResult.EmitIntents[0].Event.Type() != "batch.completed" {
+		t.Fatalf("completion output = %#v", completionResult.EmitIntents)
+	}
+	var completed map[string]any
+	if err := json.Unmarshal(completionResult.EmitIntents[0].Event.Payload(), &completed); err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(completed["total"]) != "2" || fmt.Sprint(completed["succeeded"]) != "2" {
+		t.Fatalf("completion summary payload = %#v", completed)
+	}
+}
+
 func TestExecutor_DeferredFanOutRejectsUndeclaredBusinessPayload(t *testing.T) {
 	node := testRootExecutableNode(t, "fan-out-node")
 	elementID, err := contractelementidentity.ParseContractElementID("418dadf9-0ebd-418d-a904-53d3a849b7df")

@@ -129,7 +129,7 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 		return runfork.RunForkMaterialization{}, err
 	}
 	if found {
-		if err := requireExactMaterializedRunForkFanOut(ctx, tx, forkRunID, plan, fanOutPlanRefs); err != nil {
+		if err := requireExactMaterializedRunForkFanOut(ctx, tx, true, forkRunID, plan, fanOutPlanRefs); err != nil {
 			return runfork.RunForkMaterialization{}, err
 		}
 		if err := requireExactRunForkScenarioProfile(ctx, tx, forkRunID, scenarioProfile, sourceProfiled); err != nil {
@@ -176,7 +176,7 @@ func (s *RunForkPostgresOwner) MaterializeRunFork(ctx context.Context, req runfo
 			return runfork.RunForkMaterialization{}, err
 		}
 	}
-	materializedFanOutCount, err := materializeRunForkFanOutObligations(ctx, tx, effects, s.PipelinePostgresOwner, forkRunID, plan, fanOutPlanRefs, now)
+	materializedFanOutCount, err := materializeRunForkFanOutObligations(ctx, tx, true, effects, s.PipelinePostgresOwner, forkRunID, plan, fanOutPlanRefs, now)
 	if err != nil {
 		return runfork.RunForkMaterialization{}, err
 	}
@@ -262,6 +262,10 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 		if err != nil {
 			return fmt.Errorf("resolve fork bundle identity: %w", err)
 		}
+		fanOutPlanRefs, err := resolveRunForkFanOutPlanRefs(plan, identity.BundleSourceFact.BundleHash(), req.FanOutPlanRefs)
+		if err != nil {
+			return err
+		}
 		scenarioProfile, sourceProfiled, err := admitSQLiteRunForkScenarioProfile(txctx, tx, plan.SourceRunID, req.EffectiveSourceIdentity, identity.BundleSourceFact)
 		if err != nil {
 			return err
@@ -277,6 +281,9 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 			return err
 		}
 		if found {
+			if err := requireExactMaterializedRunForkFanOut(txctx, tx, false, forkRunID, plan, fanOutPlanRefs); err != nil {
+				return err
+			}
 			if err := requireExactSQLiteRunForkScenarioProfile(txctx, tx, forkRunID, scenarioProfile, sourceProfiled); err != nil {
 				return err
 			}
@@ -285,6 +292,7 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 				return err
 			}
 			existing.DataPins = pins
+			existing.MaterializedFanOutCount = len(plan.FanOutObligations)
 			materialization = existing
 			return nil
 		}
@@ -318,6 +326,10 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 				return err
 			}
 		}
+		materializedFanOutCount, err := materializeRunForkFanOutObligations(txctx, tx, false, effects, s.PipelineSQLiteOwner, forkRunID, plan, fanOutPlanRefs, now)
+		if err != nil {
+			return err
+		}
 		var selectedContractBinding *runfork.RunForkSelectedContractBinding
 		if selection != nil {
 			binding, err := insertRunForkSelectedContractBinding(txctx, tx, runfork.RunForkSelectedContractBindingRequest{
@@ -337,7 +349,7 @@ func (s *RunForkSQLiteOwner) MaterializeRunFork(ctx context.Context, req runfork
 		}
 		materialization = runfork.RunForkMaterialization{
 			SourceRunID: plan.SourceRunID, ForkRunID: forkRunID, ForkRunStatus: runfork.RunForkMaterializedStatus,
-			ForkPoint: plan.ForkPoint, MaterializedEntityCount: len(plan.Entities), ExecutionReady: true,
+			ForkPoint: plan.ForkPoint, MaterializedEntityCount: len(plan.Entities), MaterializedFanOutCount: materializedFanOutCount, ExecutionReady: true,
 			ReplayResumeAdmission: plan.ReplayResumeAdmission, SelectedContractBinding: selectedContractBinding,
 			DeliveryResumeBlocked: true, SourceRunStatusUnchanged: true, DataPins: pins,
 		}

@@ -43,9 +43,14 @@ func (boundedRetryPolicy) Delay(attempt int) time.Duration {
 }
 
 type ExecutorOptions struct {
-	Clock       WakeClock
-	RetryPolicy RetryPolicy
-	PageSize    int
+	Clock            WakeClock
+	RetryPolicy      RetryPolicy
+	PageSize         int
+	GenericSchedules GenericScheduleWakeupOwner
+}
+
+type GenericScheduleWakeupOwner interface {
+	ReconcileWakeupWithRecovery(context.Context, string) (bool, error)
 }
 
 type candidateChain struct {
@@ -72,13 +77,14 @@ type candidateAdmission struct {
 }
 
 type Executor struct {
-	store      CandidateStore
-	scope      CandidateScope
-	catalog    TerminalCatalog
-	occurrence *worklifetime.RuntimeOccurrence
-	clock      WakeClock
-	retry      RetryPolicy
-	pageSize   int
+	store            CandidateStore
+	scope            CandidateScope
+	catalog          TerminalCatalog
+	occurrence       *worklifetime.RuntimeOccurrence
+	clock            WakeClock
+	retry            RetryPolicy
+	pageSize         int
+	genericSchedules GenericScheduleWakeupOwner
 
 	mu          sync.Mutex
 	chains      map[string]*candidateChain
@@ -116,7 +122,7 @@ func NewExecutor(
 	}
 	return &Executor{
 		store: store, scope: scope, catalog: catalog, occurrence: occurrence,
-		clock: opts.Clock, retry: opts.RetryPolicy, pageSize: opts.PageSize,
+		clock: opts.Clock, retry: opts.RetryPolicy, pageSize: opts.PageSize, genericSchedules: opts.GenericSchedules,
 		chains: make(map[string]*candidateChain),
 	}, nil
 }
@@ -346,6 +352,10 @@ func (e *Executor) runChain(ctx context.Context, lease *worklifetime.Lease, chai
 		if validationErr := result.Validate(); validationErr != nil {
 			result = CompletionResult{Outcome: OutcomeRetryCurrent, Retryable: validationErr}
 		}
+		if result.Outcome != OutcomeRetryCurrent && !e.reconcileCommittedGenericSchedules(ctx, result.GenericScheduleActivations) {
+			e.removeChain(chain)
+			return
+		}
 		action := e.finishAttempt(ctx, chain, candidate, generation, result)
 		switch action {
 		case candidateChainRetry:
@@ -367,6 +377,28 @@ func (e *Executor) runChain(ctx context.Context, lease *worklifetime.Lease, chai
 			return
 		}
 	}
+}
+
+func (e *Executor) reconcileCommittedGenericSchedules(ctx context.Context, activations []CommittedGenericScheduleActivation) bool {
+	for _, activation := range activations {
+		attempt := 0
+		for {
+			if e.genericSchedules != nil {
+				queued, err := e.genericSchedules.ReconcileWakeupWithRecovery(context.WithoutCancel(ctx), activation.ID())
+				if err == nil || queued {
+					break
+				}
+			}
+			delay := e.retry.Delay(attempt)
+			attempt++
+			select {
+			case <-ctx.Done():
+				return false
+			case <-e.clock.After(delay):
+			}
+		}
+	}
+	return true
 }
 
 func (e *Executor) currentChainCandidate(ctx context.Context, chain *candidateChain) (Candidate, bool) {

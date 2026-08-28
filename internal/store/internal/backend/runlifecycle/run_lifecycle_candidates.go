@@ -581,7 +581,8 @@ func (s *RunLifecyclePostgresOwner) executeCompletionCandidateTx(
 		if catalog.Empty() {
 			return runtimerunlifecycle.CompletionResult{}, errors.New("normal run completion requires terminal catalog")
 		}
-		if err := s.pipeline.AdvanceFanOutDeliveryBarriersTx(ctx, tx, effects, candidate.RunID, selectedNow); err != nil {
+		barrierActivations, err := s.pipeline.AdvanceFanOutDeliveryBarriersTx(ctx, tx, effects, candidate.RunID, selectedNow)
+		if err != nil {
 			return runtimerunlifecycle.CompletionResult{}, fmt.Errorf("advance fan-out delivery barriers: %w", err)
 		}
 		summaries, err := s.loadPostgresRunCompletionOwnerSummaries(ctx, tx, candidate.RunID, selectedNow, catalog)
@@ -589,7 +590,12 @@ func (s *RunLifecyclePostgresOwner) executeCompletionCandidateTx(
 			return runtimerunlifecycle.CompletionResult{}, err
 		}
 		if summaries.blocksCompletion() {
-			return s.finishBlockedPostgresCandidate(ctx, tx, candidate, optionalWake(summaries.Sessions.NextExpiry))
+			result, err := s.finishBlockedPostgresCandidate(ctx, tx, candidate, optionalWake(summaries.Sessions.NextExpiry))
+			result.GenericScheduleActivations = barrierActivations
+			return result, err
+		}
+		if len(barrierActivations) != 0 {
+			return runtimerunlifecycle.CompletionResult{}, errors.New("new fan-out barrier completion did not block run completion")
 		}
 	}
 	if _, _, err := s.completeRunTx(ctx, tx, story, effects, candidate.RunID, selectedNow); err != nil {
@@ -712,7 +718,8 @@ func (s *RunLifecycleSQLiteOwner) executeCompletionCandidateTx(
 		if catalog.Empty() {
 			return runtimerunlifecycle.CompletionResult{}, errors.New("normal run completion requires terminal catalog")
 		}
-		if err := s.pipeline.AdvanceFanOutDeliveryBarriersTx(ctx, tx, effects, candidate.RunID, selectedNow); err != nil {
+		barrierActivations, err := s.pipeline.AdvanceFanOutDeliveryBarriersTx(ctx, tx, effects, candidate.RunID, selectedNow)
+		if err != nil {
 			return runtimerunlifecycle.CompletionResult{}, fmt.Errorf("advance sqlite fan-out delivery barriers: %w", err)
 		}
 		summaries, err := s.loadSQLiteRunCompletionOwnerSummaries(ctx, tx, candidate.RunID, selectedNow, catalog)
@@ -720,7 +727,12 @@ func (s *RunLifecycleSQLiteOwner) executeCompletionCandidateTx(
 			return runtimerunlifecycle.CompletionResult{}, err
 		}
 		if summaries.blocksCompletion() {
-			return s.finishBlockedSQLiteCandidate(ctx, tx, candidate, optionalWake(summaries.Sessions.NextExpiry), selectedNow)
+			result, err := s.finishBlockedSQLiteCandidate(ctx, tx, candidate, optionalWake(summaries.Sessions.NextExpiry), selectedNow)
+			result.GenericScheduleActivations = barrierActivations
+			return result, err
+		}
+		if len(barrierActivations) != 0 {
+			return runtimerunlifecycle.CompletionResult{}, errors.New("new sqlite fan-out barrier completion did not block run completion")
 		}
 	}
 	if _, _, err := s.completeRunTx(ctx, tx, story, effects, candidate.RunID, selectedNow); err != nil {

@@ -20,9 +20,9 @@ type runForkFanOutBarrierOwner interface {
 	MaterializeRunForkFanOutBarrierTx(context.Context, *sql.Tx, *runforkrevision.Effects, string, fanoutbarrier.Barrier, runtimecontracts.FanOutPlanRef, time.Time) error
 }
 
-func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, forkRunID string, plan runfork.RunForkPlan, planRefs map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef) error {
+func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, postgres bool, forkRunID string, plan runfork.RunForkPlan, planRefs map[runtimecontracts.FanOutElementRef]runtimecontracts.FanOutPlanRef) error {
 	var intentCount int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1::uuid`, forkRunID).Scan(&intentCount); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM fan_out_intents WHERE run_id=$1`, forkRunID).Scan(&intentCount); err != nil {
 		return fmt.Errorf("count materialized fork fan-out intents: %w", err)
 	}
 	if intentCount != len(plan.FanOutObligations) {
@@ -41,16 +41,22 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, fork
 			claimGeneration                                                            uint64
 			leaseExpires, lastServed                                                   sql.NullTime
 		)
-		if err := tx.QueryRowContext(ctx, `
+		intentQuery := `
 			SELECT bundle_hash, semantic_digest, source_kind,
-				source_event_id::text, source_run_id::text, source_entity_id::text,
-				COALESCE(source_field, ''), source_mutation_id::text,
+				source_event_id, source_run_id, source_entity_id,
+				COALESCE(source_field, ''), source_mutation_id,
 				source_resource_package_key, source_resource_event_name, source_resource_version_id,
 				cardinality, cursor, status, next_chunk_size, capsule,
 				claim_owner, claim_generation, lease_expires_at, last_served_at, COALESCE(blocked_reason, '')
 			FROM fan_out_intents
-			WHERE run_id=$1::uuid AND triggering_delivery_id=$2::uuid AND package_key=$3 AND element_id=$4
-		`, forkRunID, sourceIntent.Request.Key.TriggeringDeliveryID, sourceIntent.Request.Key.ElementRef.PackageKey, sourceIntent.Request.Key.ElementRef.ElementID).Scan(
+			WHERE run_id=$1 AND triggering_delivery_id=$2 AND package_key=$3 AND element_id=$4`
+		if postgres {
+			intentQuery = strings.NewReplacer(
+				"source_event_id, source_run_id, source_entity_id", "source_event_id::text, source_run_id::text, source_entity_id::text",
+				"source_mutation_id,", "source_mutation_id::text,",
+			).Replace(intentQuery)
+		}
+		if err := tx.QueryRowContext(ctx, intentQuery, forkRunID, sourceIntent.Request.Key.TriggeringDeliveryID, sourceIntent.Request.Key.ElementRef.PackageKey, sourceIntent.Request.Key.ElementRef.ElementID).Scan(
 			&bundleHash, &semanticDigest, &sourceKind,
 			&sourceEvent, &sourceRun, &sourceEntity, &sourceField, &sourceMutation,
 			&resourcePackage, &resourceEvent, &resourceVersion,
@@ -73,12 +79,15 @@ func requireExactMaterializedRunForkFanOut(ctx context.Context, tx *sql.Tx, fork
 			!reflect.DeepEqual(capsule, sourceIntent.Request.Capsule) || claimOwner.Valid || claimGeneration != 0 || leaseExpires.Valid || lastServed.Valid || blockedReason != strings.TrimSpace(sourceIntent.BlockedReason) {
 			return fmt.Errorf("fork materialization %s fan-out intent conflicts with fixed plan", forkRunID)
 		}
-		rows, err := tx.QueryContext(ctx, `
-			SELECT ordinal, outcome_kind, event_id::text, source_event_id::text, inherited_disposition, failure, created_at
+		outcomeQuery := `
+			SELECT ordinal, outcome_kind, event_id, source_event_id, inherited_disposition, failure, created_at
 			FROM fan_out_outcomes
-			WHERE run_id=$1::uuid AND triggering_delivery_id=$2::uuid AND package_key=$3 AND element_id=$4
-			ORDER BY ordinal
-		`, forkRunID, sourceIntent.Request.Key.TriggeringDeliveryID, sourceIntent.Request.Key.ElementRef.PackageKey, sourceIntent.Request.Key.ElementRef.ElementID)
+			WHERE run_id=$1 AND triggering_delivery_id=$2 AND package_key=$3 AND element_id=$4
+			ORDER BY ordinal`
+		if postgres {
+			outcomeQuery = strings.Replace(outcomeQuery, "event_id, source_event_id", "event_id::text, source_event_id::text", 1)
+		}
+		rows, err := tx.QueryContext(ctx, outcomeQuery, forkRunID, sourceIntent.Request.Key.TriggeringDeliveryID, sourceIntent.Request.Key.ElementRef.PackageKey, sourceIntent.Request.Key.ElementRef.ElementID)
 		if err != nil {
 			return fmt.Errorf("load materialized fork fan-out outcomes: %w", err)
 		}
@@ -179,6 +188,7 @@ func resolveRunForkFanOutPlanRefs(plan runfork.RunForkPlan, targetBundleHash str
 func materializeRunForkFanOutObligations(
 	ctx context.Context,
 	tx *sql.Tx,
+	postgres bool,
 	effects *runforkrevision.Effects,
 	barriers runForkFanOutBarrierOwner,
 	forkRunID string,
@@ -212,7 +222,7 @@ func materializeRunForkFanOutObligations(
 		if err != nil {
 			return 0, fmt.Errorf("encode materialized fork fan-out capsule: %w", err)
 		}
-		if _, err := tx.ExecContext(ctx, `
+		intentInsert := `
 			INSERT INTO fan_out_intents (
 				run_id, triggering_delivery_id, package_key, element_id,
 				bundle_hash, semantic_digest, source_kind, source_event_id,
@@ -222,17 +232,20 @@ func materializeRunForkFanOutObligations(
 				created_at, updated_at, claim_owner, claim_generation, lease_expires_at,
 				last_served_at, blocked_reason
 			) VALUES (
-				$1::uuid, $2::uuid, $3, $4, $5, $6, $7,
-				NULLIF($8, '')::uuid, NULLIF($9, '')::uuid, NULLIF($10, '')::uuid, NULLIF($11, ''), NULLIF($12, '')::uuid,
-				NULLIF($13, ''), NULLIF($14, ''), NULLIF($15, ''),
-				$16, $17, $18, $19, $20::jsonb,
-				$21, $21, NULL, 0, NULL, NULL, NULLIF($22, '')
+				$1, $2, $3, $4, $5, $6, $7,
+				$8, $9, $10, $11, $12, $13, $14, $15,
+				$16, $17, $18, $19, $20,
+				$21, $21, NULL, 0, NULL, NULL, $22
 			)
-		`, forkRunID, intent.Request.Key.TriggeringDeliveryID, intent.Request.Key.ElementRef.PackageKey, intent.Request.Key.ElementRef.ElementID,
-			planRef.BundleHash, planRef.SemanticDigest, string(intent.Source.Kind), intent.Source.EventID,
-			intent.Source.RunID, intent.Source.EntityID, intent.Source.Field, intent.Source.MutationID,
-			intent.Source.Declaration.PackageKey, intent.Source.Declaration.EventName, string(intent.Source.VersionID),
-			intent.Request.Cardinality, intent.Cursor, string(intent.Status), intent.NextChunkSize, capsule, now, intent.BlockedReason); err != nil {
+		`
+		if postgres {
+			intentInsert = strings.Replace(intentInsert, "$20,", "$20::jsonb,", 1)
+		}
+		if _, err := tx.ExecContext(ctx, intentInsert, forkRunID, intent.Request.Key.TriggeringDeliveryID, intent.Request.Key.ElementRef.PackageKey, intent.Request.Key.ElementRef.ElementID,
+			planRef.BundleHash, planRef.SemanticDigest, string(intent.Source.Kind), nullableRunForkString(intent.Source.EventID),
+			nullableRunForkString(intent.Source.RunID), nullableRunForkString(intent.Source.EntityID), nullableRunForkString(intent.Source.Field), nullableRunForkString(intent.Source.MutationID),
+			nullableRunForkString(intent.Source.Declaration.PackageKey), nullableRunForkString(intent.Source.Declaration.EventName), nullableRunForkString(string(intent.Source.VersionID)),
+			intent.Request.Cardinality, intent.Cursor, string(intent.Status), intent.NextChunkSize, capsule, now, nullableRunForkString(intent.BlockedReason)); err != nil {
 			return 0, fmt.Errorf("insert materialized fork fan-out %s: %w", intent.Request.Key.String(), err)
 		}
 		for _, sourceOutcome := range obligation.Outcomes {
@@ -245,16 +258,20 @@ func materializeRunForkFanOutObligations(
 			if len(outcome.Failure) != 0 {
 				failure = string(outcome.Failure)
 			}
-			if _, err := tx.ExecContext(ctx, `
+			outcomeInsert := `
 				INSERT INTO fan_out_outcomes (
 					run_id, triggering_delivery_id, package_key, element_id,
 					ordinal, outcome_kind, event_id, source_event_id, inherited_disposition, failure, created_at
 				) VALUES (
-					$1::uuid, $2::uuid, $3, $4, $5, $6,
-					NULLIF($7, '')::uuid, NULLIF($8, '')::uuid, NULLIF($9, ''), $10::jsonb, $11
+					$1, $2, $3, $4, $5, $6,
+					$7, $8, $9, $10, $11
 				)
-			`, forkRunID, intent.Request.Key.TriggeringDeliveryID, intent.Request.Key.ElementRef.PackageKey, intent.Request.Key.ElementRef.ElementID,
-				outcome.Ordinal, string(outcome.Kind), outcome.EventID, outcome.SourceEventID, string(outcome.InheritedDisposition), failure, now); err != nil {
+			`
+			if postgres {
+				outcomeInsert = strings.Replace(outcomeInsert, "$10,", "$10::jsonb,", 1)
+			}
+			if _, err := tx.ExecContext(ctx, outcomeInsert, forkRunID, intent.Request.Key.TriggeringDeliveryID, intent.Request.Key.ElementRef.PackageKey, intent.Request.Key.ElementRef.ElementID,
+				outcome.Ordinal, string(outcome.Kind), nullableRunForkString(outcome.EventID), nullableRunForkString(outcome.SourceEventID), nullableRunForkString(string(outcome.InheritedDisposition)), failure, now); err != nil {
 				return 0, fmt.Errorf("insert inherited fork fan-out outcome %d: %w", outcome.Ordinal, err)
 			}
 		}

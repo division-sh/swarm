@@ -141,12 +141,17 @@ func testRegistration(t *testing.T) Registration {
 	if err != nil {
 		t.Fatal(err)
 	}
+	planRef := runtimecontracts.FanOutPlanRef{
+		BundleHash:     "bundle-v1:sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		ElementRef:     runtimecontracts.FanOutElementRef{PackageKey: "root", ElementID: elementID},
+		SemanticDigest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+	}
 	return Registration{
 		IntentKey: fanoutobligation.IntentKey{
 			RunID: uuid.NewString(), TriggeringDeliveryID: triggeringDeliveryID,
-			ElementRef: runtimecontracts.FanOutElementRef{PackageKey: "root", ElementID: elementID},
+			ElementRef: planRef.ElementRef,
 		},
-		Handle: handle, Route: route, EntityID: entityID, RoutingSource: routingSource,
+		PlanRef: planRef, Handle: handle, Route: route, EntityID: entityID, RoutingSource: routingSource,
 		ExecutionMode: executionmode.Live, CreatedAt: time.Now().UTC().Truncate(time.Microsecond),
 	}
 }

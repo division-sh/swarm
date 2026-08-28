@@ -204,6 +204,7 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 	if !req.Recipient.IsNode() {
 		return events.DeliveryTargetOwnership{}, fmt.Errorf("delivery target ownership classification requires a node recipient")
 	}
+	declarationBoundTarget := false
 	if isJoinLifecycleEvent(req.Event.Type()) {
 		recipient, target, handler, ok, err := ResolveWorkflowJoinOccurrenceDeliveryTarget(req.Source, req.Event)
 		if err != nil {
@@ -220,6 +221,7 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 		}
 		req.Handler = handler
 		req.Blueprint = target
+		declarationBoundTarget = true
 	}
 	blueprint := req.Blueprint.Normalized()
 	handler, admitted := req.Handler.resolve(req.Source, req.Event.Type())
@@ -235,10 +237,11 @@ func ClassifyDeliveryTargetOwnership(req DeliveryTargetOwnershipRequest) (events
 	if err != nil {
 		return events.DeliveryTargetOwnership{}, err
 	}
-	if deliveryTargetHandlerUsesDeclaredKey(handler, policy.Acquisition) && !req.Event.HasTargetRoute() {
+	if deliveryTargetHandlerUsesDeclaredKey(handler, policy.Acquisition) && !req.Event.HasTargetRoute() && !declarationBoundTarget {
 		// Declared-key acquisition owns selection only for an explicitly untargeted
-		// event. A targeted event already carries admitted exact receiver evidence;
-		// re-resolving its payload key could redirect it to another entity.
+		// event. A targeted event or declaration-bound lifecycle occurrence already
+		// carries admitted exact receiver evidence; re-resolving its payload key
+		// could redirect it to another entity.
 		blueprint = events.RouteIdentity{FlowID: flowID}
 		acquired, err := acquireDeliveryTargetByDeclaredKey(req.Context, req.WorkflowInstances, req.Source, flowID, req.Recipient.ID(), handler, req.Event, policy.Acquisition)
 		if err != nil {

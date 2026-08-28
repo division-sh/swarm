@@ -43,6 +43,7 @@ type NotifyAllChildrenOptions struct {
 	AgentTopologyRevision       int
 	AutoEmitOnCreate            bool
 	AutoEmitEventRevision       int
+	FanOutDeliveryBarrier       bool
 }
 
 // CopyNotifyAllChildren derives one closed variant from the checked-in owner.
@@ -113,6 +114,48 @@ auto_emit_on_create:
   outputs:
     events:
       - account.created
+`)
+	}
+	if opts.FanOutDeliveryBarrier {
+		applyClosedReplacement(t, ownerNodes, `            command: payload.command
+`, `            command: payload.command
+      join:
+        id: all-account-notifications-delivered
+        members:
+          from_fan_out: cf377b4f-e952-4ddb-9ecc-a1f380af032d
+        on_complete:
+          element_id: 4c6f93a5-21f9-40d0-8b2a-7b074a11e30d
+          emit:
+            event: portfolio.notify.completed
+            fields:
+              total: join.total
+              succeeded: join.dispositions.succeeded
+              dead_lettered: join.dispositions.dead_lettered
+              no_route: join.dispositions.no_route
+              semantic_rejected: join.dispositions.semantic_rejected
+              canceled: join.dispositions.canceled
+`)
+		applyClosedReplacement(t, filepath.Join(root, "flows", NotifyAllChildrenOwnerFlowID, "events.yaml"), `account.notify.requested:
+  key: account_id
+  account_id: text
+  command: text
+`, `account.notify.requested:
+  key: account_id
+  account_id: text
+  command: text
+portfolio.notify.completed:
+  swarm:
+    consumer: external
+  total: integer
+  succeeded: integer
+  dead_lettered: integer
+  no_route: integer
+  semantic_rejected: integer
+  canceled: integer
+`)
+		applyClosedReplacement(t, ownerSchema, `      - account.notify.requested
+`, `      - account.notify.requested
+      - portfolio.notify.completed
 `)
 	}
 	if opts.AutoEmitEventRevision == 2 {
