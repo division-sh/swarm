@@ -23,6 +23,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
+	"github.com/division-sh/swarm/internal/stringsutil"
 	"github.com/google/uuid"
 )
 
@@ -677,10 +678,10 @@ func completionSpendForContext(ctx context.Context, profile llmselection.Profile
 		AgentIdentity:  turn.Identity.Agent,
 		Model:          usage.ResolvedModel,
 		ModelAlias:     mapString(meta, "model_alias"),
-		BackendProfile: coalesce(mapString(meta, "backend_profile"), profile.ID),
-		Provider:       coalesce(mapString(meta, "provider"), profile.Provider),
-		Transport:      coalesce(mapString(meta, "transport"), profile.Transport),
-		ResolvedModel:  coalesce(mapString(meta, "resolved_model"), usage.ResolvedModel),
+		BackendProfile: stringsutil.FirstNonEmpty(mapString(meta, "backend_profile"), profile.ID),
+		Provider:       stringsutil.FirstNonEmpty(mapString(meta, "provider"), profile.Provider),
+		Transport:      stringsutil.FirstNonEmpty(mapString(meta, "transport"), profile.Transport),
+		ResolvedModel:  stringsutil.FirstNonEmpty(mapString(meta, "resolved_model"), usage.ResolvedModel),
 		CostUSD:        cost,
 		InvocationType: profile.ID,
 	}
@@ -692,7 +693,7 @@ func completionUsage(input, output int, model string, exactness runtimeeffects.C
 }
 
 func unavailableCompletionUsage(model string) runtimeeffects.CompletionUsage {
-	return runtimeeffects.CompletionUsage{ResolvedModel: coalesce(strings.TrimSpace(model), "unknown"), Exactness: runtimeeffects.CompletionUsageUnavailable}
+	return runtimeeffects.CompletionUsage{ResolvedModel: stringsutil.FirstNonEmpty(strings.TrimSpace(model), "unknown"), Exactness: runtimeeffects.CompletionUsageUnavailable}
 }
 
 func claudeCompletionUsageFromRaw(raw []byte, fallbackModel string) (runtimeeffects.CompletionUsage, error) {
@@ -733,7 +734,7 @@ func claudeCompletionUsageFromRaw(raw []byte, fallbackModel string) (runtimeeffe
 	if !found || terminal.Usage.InputTokens == nil || terminal.Usage.OutputTokens == nil {
 		return runtimeeffects.CompletionUsage{}, fmt.Errorf("claude ResultMessage missing exact usage")
 	}
-	model := strings.TrimSpace(coalesce(terminal.Model, fallbackModel))
+	model := strings.TrimSpace(stringsutil.FirstNonEmpty(terminal.Model, fallbackModel))
 	if model == "" {
 		return runtimeeffects.CompletionUsage{}, fmt.Errorf("claude ResultMessage completion model is unavailable")
 	}

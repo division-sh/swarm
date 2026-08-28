@@ -32,6 +32,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
+	"github.com/division-sh/swarm/internal/stringsutil"
 	"github.com/google/uuid"
 )
 
@@ -1015,7 +1016,7 @@ func TestStaticConnectRouteUsesExactPersistedTargetOwner(t *testing.T) {
 		t.Fatalf("replayRecipientsForCommittedEvent: %v", err)
 	}
 	wantRecipientKey := want.Recipient.ID()
-	if !containsString(live, wantRecipientKey) || !containsString(internal, wantRecipientKey) {
+	if !stringsutil.ContainsTrimmed(live, wantRecipientKey) || !stringsutil.ContainsTrimmed(internal, wantRecipientKey) {
 		t.Fatalf("replay live=%#v internal=%#v, want exact recipient %q from persisted connect route", live, internal, wantRecipientKey)
 	}
 	if !deliveryRoutesContain(replayRoutes, want) {
@@ -1295,7 +1296,7 @@ func TestEventBusPublish_RootConnectToNestedStaticPersistsExactCurrentOwner(t *t
 		t.Fatalf("replayRecipientsForCommittedEvent: %v", err)
 	}
 	wantRecipientKey := want.Recipient.ID()
-	if !containsString(live, wantRecipientKey) || !containsString(internal, wantRecipientKey) || len(replayRoutes) != 1 || !deliveryRoutesContain(replayRoutes, want) {
+	if !stringsutil.ContainsTrimmed(live, wantRecipientKey) || !stringsutil.ContainsTrimmed(internal, wantRecipientKey) || len(replayRoutes) != 1 || !deliveryRoutesContain(replayRoutes, want) {
 		t.Fatalf("replay live/internal/routes = %#v/%#v/%#v, want exact persisted structural owner", live, internal, replayRoutes)
 	}
 }
@@ -1393,7 +1394,7 @@ func TestEventBusPublish_RootConnectToSingletonUsesReceiverOwnedMaterializingTar
 		t.Fatalf("replayRecipientsForCommittedEvent: %v", err)
 	}
 	wantRecipientKey := want.Recipient.ID()
-	if !containsString(live, wantRecipientKey) || !containsString(internal, wantRecipientKey) || len(replayRoutes) != 1 || !deliveryRoutesContain(replayRoutes, want) {
+	if !stringsutil.ContainsTrimmed(live, wantRecipientKey) || !stringsutil.ContainsTrimmed(internal, wantRecipientKey) || len(replayRoutes) != 1 || !deliveryRoutesContain(replayRoutes, want) {
 		t.Fatalf("replay live/internal/routes = %#v/%#v/%#v, want persisted singleton receiver owner", live, internal, replayRoutes)
 	}
 }
@@ -2233,7 +2234,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsTemplateInstanceKeyTarget(t *te
 		t.Fatalf("replayRecipientsForCommittedEvent: %v", err)
 	}
 	wantRecipientKey := want.Recipient.ID()
-	if !containsString(live, wantRecipientKey) || !containsString(internal, wantRecipientKey) {
+	if !stringsutil.ContainsTrimmed(live, wantRecipientKey) || !stringsutil.ContainsTrimmed(internal, wantRecipientKey) {
 		t.Fatalf("replay live=%#v internal=%#v, want exact declared consumer node from persisted connect route", live, internal)
 	}
 	if !deliveryRoutesContain(replayRoutes, want) {
@@ -3916,7 +3917,7 @@ func TestEventBusPublish_ConnectRoutePlanPersistsRenamedTemplateInstanceKeyTarge
 		t.Fatalf("replayRecipientsForCommittedEvent: %v", err)
 	}
 	wantRecipientKey := want.Recipient.ID()
-	if !containsString(live, wantRecipientKey) || !containsString(internal, wantRecipientKey) {
+	if !stringsutil.ContainsTrimmed(live, wantRecipientKey) || !stringsutil.ContainsTrimmed(internal, wantRecipientKey) {
 		t.Fatalf("replay live=%#v internal=%#v, want exact declared consumer node from persisted connect route", live, internal)
 	}
 	if !deliveryRoutesContain(replayRoutes, want) {
@@ -4307,7 +4308,7 @@ func TestEventBusPlan_UnmatchedCanonicalRouteUsesLowerPrecedenceFallback(t *test
 	if routePlan.AuthorityState != RoutePlanAuthorityLowerPrecedence || routePlan.AuthorityOwner != routePlanSourceAgentPolicy {
 		t.Fatalf("route plan authority = %q/%q, want lower-precedence agent policy", routePlan.AuthorityState, routePlan.AuthorityOwner)
 	}
-	if !containsString(routePlan.RecipientIDs(), "legacy-agent") {
+	if !stringsutil.ContainsTrimmed(routePlan.RecipientIDs(), "legacy-agent") {
 		t.Fatalf("route plan recipients = %#v, want legacy-agent", routePlan.RecipientIDs())
 	}
 

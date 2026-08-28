@@ -37,6 +37,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 type Step string
@@ -496,7 +497,7 @@ func (e *Executor) Execute(ctx context.Context, req ExecutionRequest) (Execution
 		SetExecutionFailure(&result, err, "runtime.engine", "validate_request")
 		return result, err
 	}
-	entityID := identity.NormalizeEntityID(firstNonEmpty(
+	entityID := identity.NormalizeEntityID(stringsutil.FirstNonEmpty(
 		req.EntityID.String(),
 		req.State.EntityID.String(),
 		req.Event.EntityID(),
@@ -984,7 +985,7 @@ func (e *Executor) stepQuery(frame *executionFrame) error {
 		}
 		value = selected
 	}
-	if err := e.writeStepValue(frame, firstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.query"), value); err != nil {
+	if err := e.writeStepValue(frame, stringsutil.FirstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.query"), value); err != nil {
 		return err
 	}
 	return nil
@@ -1077,7 +1078,7 @@ func (e *Executor) stepFilter(frame *executionFrame) error {
 		return nil
 	}
 	current := e.currentContext(frame)
-	sourceValue, _ := resolveContractPath(current, frame.state, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source))
+	sourceValue, _ := resolveContractPath(current, frame.state, spec.ItemsPath, stringsutil.FirstNonEmpty(spec.ItemsFrom, spec.Source))
 	items := executionItems(sourceValue)
 	compiled, err := compileExecutionCondition(strings.TrimSpace(spec.Condition))
 	if err != nil {
@@ -1094,7 +1095,7 @@ func (e *Executor) stepFilter(frame *executionFrame) error {
 			filtered = append(filtered, item)
 		}
 	}
-	if err := e.writeStepValue(frame, firstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.filter"), filtered); err != nil {
+	if err := e.writeStepValue(frame, stringsutil.FirstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.filter"), filtered); err != nil {
 		return err
 	}
 	return nil
@@ -1106,10 +1107,10 @@ func (e *Executor) stepReduce(frame *executionFrame) error {
 		return nil
 	}
 	current := e.currentContext(frame)
-	sourceValue, _ := resolveContractPath(current, frame.state, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source))
+	sourceValue, _ := resolveContractPath(current, frame.state, spec.ItemsPath, stringsutil.FirstNonEmpty(spec.ItemsFrom, spec.Source))
 	items := executionItems(sourceValue)
 	value := executionReduceValue(items, strings.TrimSpace(spec.Operation))
-	if err := e.writeStepValue(frame, firstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.reduce"), value); err != nil {
+	if err := e.writeStepValue(frame, stringsutil.FirstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.reduce"), value); err != nil {
 		return err
 	}
 	return nil
@@ -1121,7 +1122,7 @@ func (e *Executor) stepCount(frame *executionFrame) error {
 		return nil
 	}
 	current := e.currentContext(frame)
-	sourceValue, _ := resolveContractPath(current, frame.state, spec.ItemsPath, firstNonEmpty(spec.ItemsFrom, spec.Source))
+	sourceValue, _ := resolveContractPath(current, frame.state, spec.ItemsPath, stringsutil.FirstNonEmpty(spec.ItemsFrom, spec.Source))
 	items := executionItems(sourceValue)
 	compiled, err := compileExecutionCondition(strings.TrimSpace(spec.Condition))
 	if err != nil {
@@ -1142,7 +1143,7 @@ func (e *Executor) stepCount(frame *executionFrame) error {
 			count++
 		}
 	}
-	if err := e.writeStepValue(frame, firstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.count"), count); err != nil {
+	if err := e.writeStepValue(frame, stringsutil.FirstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.count"), count); err != nil {
 		return err
 	}
 	return nil
@@ -1799,7 +1800,7 @@ func (e *Executor) stepGroupBy(frame *executionFrame) error {
 		existing, _ := grouped[key].([]any)
 		grouped[key] = append(existing, item)
 	}
-	if err := e.writeStepValue(frame, firstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.group_by"), grouped); err != nil {
+	if err := e.writeStepValue(frame, stringsutil.FirstNonEmpty(strings.TrimSpace(spec.StoreAs), "computed.group_by"), grouped); err != nil {
 		return err
 	}
 	return nil
@@ -2628,16 +2629,6 @@ func encodePayload(payload map[string]any) (json.RawMessage, error) {
 	return json.RawMessage(encoded), nil
 }
 
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value != "" {
-			return value
-		}
-	}
-	return ""
-}
-
 func handlerDeclaresConflictingCompletion(handler runtimecontracts.SystemNodeEventHandler) bool {
 	if len(handler.Rules) == 0 {
 		return false
@@ -2685,7 +2676,7 @@ func (e *Executor) currentContext(frame *executionFrame) BaseContext {
 	ctx.Gates = values.Wrap(boolMapToAnyMap(frame.state.State.StateCarrier.Gates))
 	ctx.Entity = values.Wrap(frame.state.State.EntityContext())
 	ctx.PlatformEntity = values.Wrap(frame.state.State.PlatformEntityContext(contextFlowInstance(frame.state.State, frame.req.Event, frame.req.ExecutionFlowID.String())))
-	ctx.FlowID = firstNonEmpty(strings.TrimSpace(frame.state.State.WorkflowName), frame.req.ExecutionFlowID.String())
+	ctx.FlowID = stringsutil.FirstNonEmpty(strings.TrimSpace(frame.state.State.WorkflowName), frame.req.ExecutionFlowID.String())
 	ctx.Computed = values.Wrap(cloneStringAnyMap(frame.state.Computed))
 	return ctx
 }
@@ -2822,7 +2813,7 @@ func (e *Executor) evaluateGuardCheck(frame *executionFrame, id, check, policyRe
 			return passed, evaluated, nil
 		}
 		if err != ErrNotImplemented || id == "" {
-			return false, []string{firstNonEmpty(id, check)}, err
+			return false, []string{stringsutil.FirstNonEmpty(id, check)}, err
 		}
 	}
 	if id == "" {

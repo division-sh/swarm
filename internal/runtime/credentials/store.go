@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/division-sh/swarm/internal/stringsutil"
 	"github.com/google/uuid"
 )
 
@@ -333,25 +334,5 @@ func credentialEnvCandidates(key string) []string {
 	if upper != normalized {
 		candidates = append(candidates, upper)
 	}
-	return dedupeStrings(candidates)
-}
-
-func dedupeStrings(values []string) []string {
-	if len(values) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(values))
-	seen := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-	return out
+	return stringsutil.Unique(candidates)
 }

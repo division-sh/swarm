@@ -16,6 +16,7 @@ import (
 	runtimepkg "github.com/division-sh/swarm/internal/runtime"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/stringsutil"
 	"github.com/google/uuid"
 )
 
@@ -709,9 +710,9 @@ func operatorRuntimeLogEntry(eventID, runID, rowEntityID, producedBy string, cre
 		TS:              createdAt.UTC(),
 		Level:           strings.TrimSpace(payload.LogLevel),
 		Component:       strings.TrimSpace(payload.Component),
-		Source:          firstNonEmptyStore(payload.AgentID, producedBy, "runtime"),
+		Source:          stringsutil.FirstNonEmpty(payload.AgentID, producedBy, "runtime"),
 		RunID:           strings.TrimSpace(runID),
-		EntityID:        firstNonEmptyStore(payload.EntityID, rowEntityID),
+		EntityID:        stringsutil.FirstNonEmpty(payload.EntityID, rowEntityID),
 		SessionID:       strings.TrimSpace(payload.SessionID),
 		ErrorCode:       strings.TrimSpace(payload.ErrorCode),
 		Failure:         runtimefailures.CloneEnvelope(payload.Failure),
@@ -830,15 +831,6 @@ func decodeObservabilityPositionCursor(raw string, kind string) (observabilityPo
 func operatorIncidentID(key string) string {
 	sum := sha256.Sum256([]byte(key))
 	return "inc_" + hex.EncodeToString(sum[:8])
-}
-
-func firstNonEmptyStore(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
 }
 
 func sortedStoreStringSet(values map[string]struct{}) []string {

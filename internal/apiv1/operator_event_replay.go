@@ -17,6 +17,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/runbundle"
+	"github.com/division-sh/swarm/internal/stringsutil"
 	"github.com/google/uuid"
 )
 
@@ -320,7 +321,7 @@ func eventReplayRouteSubscriberIDs(routes []events.DeliveryRoute) []string {
 	for _, route := range routes {
 		ids = append(ids, route.Recipient.ID())
 	}
-	return uniqueTrimmedStrings(ids)
+	return stringsutil.Unique(ids)
 }
 
 func eventReplayEvidencePersisted(ctx context.Context, opts EventReplayHandlerOptions, replayEventID string) (bool, error) {
@@ -415,7 +416,7 @@ func eventReplayTargets(original operatorread.OperatorEventFull, requested []str
 	if len(orderedSubscribers) == 0 {
 		return nil, nil, NewApplicationError(EventReplayNoDeliveryHistoryCode, false, map[string]any{"event_id": original.EventID})
 	}
-	requested = uniqueTrimmedStrings(requested)
+	requested = stringsutil.Unique(requested)
 	if len(requested) == 0 {
 		deliveries, err := deliveriesForSubscribers(original.EventID, originalBySubscriber, orderedSubscribers)
 		if err != nil {
@@ -739,27 +740,7 @@ func optionalStringListParam(params map[string]any, name string) ([]string, bool
 		}
 		out = append(out, text)
 	}
-	return uniqueTrimmedStrings(out), true, nil
-}
-
-func uniqueTrimmedStrings(in []string) []string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(in))
-	seen := map[string]struct{}{}
-	for _, value := range in {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-	return out
+	return stringsutil.Unique(out), true, nil
 }
 
 func eventReplayError(err error) error {

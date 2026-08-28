@@ -17,6 +17,7 @@ import (
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	llmselection "github.com/division-sh/swarm/internal/runtime/llm/selection"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 const claudeCLICompletionAdapter = "claude_cli"
@@ -180,7 +181,7 @@ func (r *ClaudeCLIRuntime) runStreamingPrepared(ctx context.Context, cmd *exec.C
 		return nil, returnClaudeAttemptFailure(ctx, attempt, runtimeeffects.StateOutcomeUncertain, err, "mark_response_observed", map[string]any{"response_fingerprint": runtimeeffects.Fingerprint(resp.Raw)})
 	}
 	if monitor != nil {
-		monitor.WriteNotice("turn.end ok=true session=%s", strings.TrimSpace(coalesce(resp.SessionID, meta.SessionID)))
+		monitor.WriteNotice("turn.end ok=true session=%s", strings.TrimSpace(stringsutil.FirstNonEmpty(resp.SessionID, meta.SessionID)))
 	}
 	return resp, nil
 }

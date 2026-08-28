@@ -25,6 +25,7 @@ import (
 	runtimeeventschema "github.com/division-sh/swarm/internal/runtime/eventschema"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 type pipelineEngineEvaluator struct {
@@ -47,7 +48,7 @@ func (e pipelineEngineEvaluator) EvalBool(expression string, ctx runtimeengine.B
 		FanOut:         cloneStringAnyMap(ctx.FanOut.Raw()),
 		Join:           cloneStringAnyMap(ctx.Join.Raw()),
 		Loop:           cloneStringAnyMap(ctx.Loop.Raw()),
-		WorkflowName:   firstNonEmptyString(strings.TrimSpace(ctx.FlowID), e.workflowName()),
+		WorkflowName:   stringsutil.FirstNonEmpty(strings.TrimSpace(ctx.FlowID), e.workflowName()),
 	}
 	queryCtx.QueryEntityCount = func(predicate string) (int, error) {
 		return e.queryEntityCount(queryCtx, predicate)
@@ -600,10 +601,10 @@ func (r pipelineEngineStateRepo) prepareMutation(
 		workflowName := flowID
 		workflowVersion := ""
 		if source != nil {
-			workflowName = firstNonEmptyString(workflowName, semanticview.RootExecutionFlowID(source))
+			workflowName = stringsutil.FirstNonEmpty(workflowName, semanticview.RootExecutionFlowID(source))
 			workflowVersion = source.WorkflowVersion()
 		}
-		initialState := strings.TrimSpace(firstNonEmptyString(workflowInitialStateForFlow(source, flowID), "pending"))
+		initialState := strings.TrimSpace(stringsutil.FirstNonEmpty(workflowInitialStateForFlow(source, flowID), "pending"))
 		mode := workflowPersistedFlowMode(source, flowID)
 		if mode == "" {
 			return preparedWorkflowEngineState{}, fmt.Errorf("workflow initial materialization rejects unsupported persistence mode for flow %s", flowID)
@@ -1043,7 +1044,7 @@ func (r pipelineEngineGuardRunner) EvaluateGuard(ctx context.Context, id identit
 	if pc == nil {
 		return false, false, nil
 	}
-	builtin := strings.TrimSpace(firstNonEmptyString(entry.Builtin, id.String()))
+	builtin := strings.TrimSpace(stringsutil.FirstNonEmpty(entry.Builtin, id.String()))
 	state := workflowStateFromEngine(execCtx.Request.State)
 	payload := parsePayloadMap(execCtx.Request.Event.Payload())
 	switch builtin {
@@ -1123,7 +1124,7 @@ func (r pipelineEngineActionRunner) ExecuteAction(ctx context.Context, action ru
 	if pc == nil {
 		return runtimeengine.ActionExecution{}, nil
 	}
-	actionID := runtimecontracts.NormalizeHandlerActionID(firstNonEmptyString(entry.Builtin, entry.Key.String(), action.ID))
+	actionID := runtimecontracts.NormalizeHandlerActionID(stringsutil.FirstNonEmpty(entry.Builtin, entry.Key.String(), action.ID))
 	if actionID == "" {
 		return runtimeengine.ActionExecution{}, nil
 	}
@@ -1309,7 +1310,7 @@ func applyEngineStateMutation(instance *WorkflowInstance, mutation runtimeengine
 		instance.WorkflowVersion = strings.TrimSpace(source.WorkflowVersion())
 	}
 	if strings.TrimSpace(instance.CurrentState) == "" {
-		instance.CurrentState = strings.TrimSpace(firstNonEmptyString(workflowInitialStateForFlow(source, flowID), "pending"))
+		instance.CurrentState = strings.TrimSpace(stringsutil.FirstNonEmpty(workflowInitialStateForFlow(source, flowID), "pending"))
 	}
 	if instance.EnteredStageAt.IsZero() {
 		return fmt.Errorf("workflow mutation requires materialized entry time")

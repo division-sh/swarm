@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 type PromptSchemaGuardFinding struct {
@@ -136,24 +138,14 @@ func extractPromptEmitTopLevelFields(promptText, emitTool string) []string {
 			}
 		}
 	}
-	return uniquePromptStrings(fields)
+	return stringsutil.Unique(fields)
 }
 
 func promptMentionsField(promptText string, parsedFields []string, field string) bool {
-	if containsExactPrompt(parsedFields, field) {
+	if stringsutil.ContainsTrimmed(parsedFields, field) {
 		return true
 	}
 	return promptContainsToken(promptText, field)
-}
-
-func containsExactPrompt(in []string, want string) bool {
-	want = strings.TrimSpace(want)
-	for _, item := range in {
-		if strings.TrimSpace(item) == want {
-			return true
-		}
-	}
-	return false
 }
 
 func promptContainsToken(text, token string) bool {
@@ -163,23 +155,6 @@ func promptContainsToken(text, token string) bool {
 	}
 	pattern := regexp.MustCompile(`\b` + regexp.QuoteMeta(token) + `\b`)
 	return pattern.FindStringIndex(text) != nil
-}
-
-func uniquePromptStrings(values []string) []string {
-	seen := make(map[string]struct{}, len(values))
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-	return out
 }
 
 func schemaProperties(raw any) map[string]any {

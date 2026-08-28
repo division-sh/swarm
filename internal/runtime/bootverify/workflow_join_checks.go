@@ -9,6 +9,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/workflowexpr"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 const joinValidationCheckID = "join_validation"
@@ -58,7 +59,7 @@ func checkJoinValidation(c *checkerContext) []Finding {
 			if !flowUsesAuthoredStages(c.source, flowID) {
 				findings = append(findings, joinFinding(declarationLocation, flowID, nodeID, eventType, prefix+" requires an authored stages: lifecycle"))
 			}
-			if spec.Stage == "" || !containsString(c.source.FlowStates(flowID), spec.Stage) {
+			if spec.Stage == "" || !stringsutil.Contains(c.source.FlowStates(flowID), spec.Stage) {
 				findings = append(findings, joinFinding(declarationLocation, flowID, nodeID, eventType, fmt.Sprintf("%s references unknown stage %q", prefix, spec.Stage)))
 			}
 			identityKey := strings.Join([]string{nodeRef.Key(), spec.Stage, spec.EffectiveID()}, "|")
@@ -138,7 +139,7 @@ func (c *checkerContext) validateJoinPaths(location, flowID, nodeID, eventType s
 
 func validateJoinOutcome(location, flowID, nodeID, eventType, label string, rule runtimecontracts.HandlerRuleEntry, states []string, resultType runtimecontracts.CatalogTypeReference) []Finding {
 	out := make([]Finding, 0)
-	if target := strings.TrimSpace(rule.AdvancesTo); target != "" && !containsString(states, target) {
+	if target := strings.TrimSpace(rule.AdvancesTo); target != "" && !stringsutil.Contains(states, target) {
 		out = append(out, joinFinding(location, flowID, nodeID, eventType, fmt.Sprintf("join.%s advances_to references unknown stage %s", label, target)))
 	}
 	for field, expr := range rule.Emit.Fields {

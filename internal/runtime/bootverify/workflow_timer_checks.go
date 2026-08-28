@@ -7,6 +7,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 func checkTimerValidation(c *checkerContext) []Finding { return c.timerValidation() }
@@ -103,7 +104,7 @@ func (c *checkerContext) validateStageTimerSemantics(timer runtimecontracts.Work
 		return
 	}
 	stage := strings.TrimSpace(timer.Stage)
-	if stage == "" || !containsString(flowStatesForTimer(c.source, timer.OwningFlowID()), stage) {
+	if stage == "" || !stringsutil.Contains(flowStatesForTimer(c.source, timer.OwningFlowID()), stage) {
 		c.timerFindings = append(c.timerFindings, Finding{
 			CheckID:  "timer_validation",
 			Severity: "error",
@@ -127,7 +128,7 @@ func (c *checkerContext) validateStageTimerSemantics(timer runtimecontracts.Work
 			Location: strings.TrimSpace(timer.ID),
 		})
 	}
-	if strings.TrimSpace(timer.AdvancesTo) != "" && !containsString(flowStatesForTimer(c.source, timer.OwningFlowID()), timer.AdvancesTo) {
+	if strings.TrimSpace(timer.AdvancesTo) != "" && !stringsutil.Contains(flowStatesForTimer(c.source, timer.OwningFlowID()), timer.AdvancesTo) {
 		c.timerFindings = append(c.timerFindings, Finding{
 			CheckID:  "timer_validation",
 			Severity: "error",
@@ -194,7 +195,7 @@ func (c *checkerContext) validateTimerTrigger(timer runtimecontracts.WorkflowTim
 	}
 	switch trigger.Kind {
 	case timeridentity.TriggerKindState:
-		if !containsString(flowStatesForTimer(c.source, timer.OwningFlowID()), trigger.Name) {
+		if !stringsutil.Contains(flowStatesForTimer(c.source, timer.OwningFlowID()), trigger.Name) {
 			c.timerFindings = append(c.timerFindings, Finding{
 				CheckID:  "timer_validation",
 				Severity: "error",

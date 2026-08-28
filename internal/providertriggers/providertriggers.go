@@ -24,6 +24,7 @@ import (
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	runtimeprovideroutput "github.com/division-sh/swarm/internal/runtime/core/provideroutput"
 	"github.com/division-sh/swarm/internal/runtime/triggergeneration"
+	"github.com/division-sh/swarm/internal/stringsutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -44,7 +45,7 @@ type Target struct {
 }
 
 func (t Target) EffectiveEntityID() string {
-	return firstNonEmpty(t.EntityID, t.EntitySlug)
+	return stringsutil.FirstNonEmpty(t.EntityID, t.EntitySlug)
 }
 
 type Request struct {
@@ -184,7 +185,7 @@ func NewCatalogSnapshot(entries ...CatalogEntry) (*CatalogSnapshot, error) {
 		entry.Manifest.Provider = provider
 		entry.Identity.Provenance = strings.TrimSpace(entry.Identity.Provenance)
 		entry.SourcePath = strings.TrimSpace(entry.SourcePath)
-		entry.Source = firstNonEmpty(entry.Source, "unknown")
+		entry.Source = stringsutil.FirstNonEmpty(entry.Source, "unknown")
 		clonedManifest, err := cloneManifest(entry.Manifest)
 		if err != nil {
 			return nil, fmt.Errorf("clone provider trigger manifest %q: %w", provider, err)
@@ -291,7 +292,7 @@ func CatalogEntriesFromLoadedPacks(loaded ...LoadedPack) []CatalogEntry {
 				ManifestHash: pack.Envelope.ManifestHash, Provenance: pack.Envelope.Provenance.Source,
 			},
 			Manifest: pack.Manifest, SourcePath: strings.TrimSpace(pack.SourcePath),
-			Source: firstNonEmpty(pack.Source, loadedPackSource(pack)),
+			Source: stringsutil.FirstNonEmpty(pack.Source, loadedPackSource(pack)),
 		})
 	}
 	return entries
@@ -850,7 +851,7 @@ func (m Manifest) admitRequest(req Request) (manifestAdmission, error) {
 	}
 	if m.PayloadObjectRequired {
 		if _, ok := req.Payload.(map[string]any); !ok {
-			return manifestAdmission{}, badRequest(firstNonEmpty(m.PayloadObjectError, provider+" payload object is required"))
+			return manifestAdmission{}, badRequest(stringsutil.FirstNonEmpty(m.PayloadObjectError, provider+" payload object is required"))
 		}
 	}
 	if m.Challenge != nil {
@@ -861,13 +862,13 @@ func (m Manifest) admitRequest(req Request) (manifestAdmission, error) {
 		if matched {
 			value, ok := stringFromJSONPath(req.Payload, m.Challenge.Response.JSONPath)
 			if !ok || strings.TrimSpace(value) == "" {
-				return manifestAdmission{}, badRequest(firstNonEmpty(m.Challenge.Response.MissingErr, provider+" challenge is required"))
+				return manifestAdmission{}, badRequest(stringsutil.FirstNonEmpty(m.Challenge.Response.MissingErr, provider+" challenge is required"))
 			}
 			status := m.Challenge.Response.Status
 			if status == 0 {
 				status = http.StatusOK
 			}
-			contentType := firstNonEmpty(m.Challenge.Response.ContentType, "text/plain; charset=utf-8")
+			contentType := stringsutil.FirstNonEmpty(m.Challenge.Response.ContentType, "text/plain; charset=utf-8")
 			return manifestAdmission{request: req, provider: provider, response: &Response{Status: status, ContentType: contentType, Body: []byte(value)}}, nil
 		}
 	}
@@ -877,16 +878,16 @@ func (m Manifest) admitRequest(req Request) (manifestAdmission, error) {
 			return manifestAdmission{}, err
 		}
 		if !matched {
-			return manifestAdmission{}, badRequest(firstNonEmpty(m.DeliveryCondition.MismatchErr, "unsupported "+provider+" payload type"))
+			return manifestAdmission{}, badRequest(stringsutil.FirstNonEmpty(m.DeliveryCondition.MismatchErr, "unsupported "+provider+" payload type"))
 		}
 	}
 	deliveryID, ok := m.DeliveryID.Resolve(req)
 	if !ok || strings.TrimSpace(deliveryID) == "" {
-		return manifestAdmission{}, badRequest(firstNonEmpty(m.DeliveryID.MissingError, provider+" delivery id is required"))
+		return manifestAdmission{}, badRequest(stringsutil.FirstNonEmpty(m.DeliveryID.MissingError, provider+" delivery id is required"))
 	}
 	rawEventType, ok := m.EventType.Resolve(req)
 	if !ok || strings.TrimSpace(rawEventType) == "" {
-		return manifestAdmission{}, badRequest(firstNonEmpty(m.EventType.MissingError, provider+" event type is required"))
+		return manifestAdmission{}, badRequest(stringsutil.FirstNonEmpty(m.EventType.MissingError, provider+" event type is required"))
 	}
 	eventType := NormalizeEventToken(rawEventType)
 	return manifestAdmission{request: req, provider: provider, deliveryID: strings.TrimSpace(deliveryID), eventType: eventType}, nil
@@ -932,7 +933,7 @@ func (m Manifest) verifySignature(secret string, req Request) error {
 	}
 	sigHeader := strings.TrimSpace(req.Headers.Get(m.Signature.Header))
 	if sigHeader == "" {
-		return unauthorized(firstNonEmpty(m.Signature.MissingError, "signature is required"))
+		return unauthorized(stringsutil.FirstNonEmpty(m.Signature.MissingError, "signature is required"))
 	}
 	var (
 		timestamp  string
@@ -941,11 +942,11 @@ func (m Manifest) verifySignature(secret string, req Request) error {
 	if strings.TrimSpace(m.Signature.SignatureParam) != "" {
 		params, err := parseHeaderParams(sigHeader)
 		if err != nil {
-			return unauthorized(firstNonEmpty(m.Signature.InvalidError, "invalid signature"))
+			return unauthorized(stringsutil.FirstNonEmpty(m.Signature.InvalidError, "invalid signature"))
 		}
-		timestampValues := params.Values(firstNonEmpty(m.Signature.TimestampParam(), "t"))
+		timestampValues := params.Values(stringsutil.FirstNonEmpty(m.Signature.TimestampParam(), "t"))
 		if len(timestampValues) > 1 {
-			return unauthorized(firstNonEmpty(m.Signature.InvalidError, "invalid signature"))
+			return unauthorized(stringsutil.FirstNonEmpty(m.Signature.InvalidError, "invalid signature"))
 		}
 		if len(timestampValues) > 0 {
 			timestamp = timestampValues[0]
@@ -956,7 +957,7 @@ func (m Manifest) verifySignature(secret string, req Request) error {
 			lower := strings.ToLower(sigHeader)
 			prefix := strings.ToLower(m.Signature.Prefix)
 			if !strings.HasPrefix(lower, prefix) {
-				return unauthorized(firstNonEmpty(m.Signature.MissingError, "signature is required"))
+				return unauthorized(stringsutil.FirstNonEmpty(m.Signature.MissingError, "signature is required"))
 			}
 			candidates = []string{strings.TrimSpace(sigHeader[len(m.Signature.Prefix):])}
 		} else {
@@ -971,7 +972,7 @@ func (m Manifest) verifySignature(secret string, req Request) error {
 		}
 	}
 	if len(candidates) == 0 {
-		return unauthorized(firstNonEmpty(m.Signature.MissingError, "signature is required"))
+		return unauthorized(stringsutil.FirstNonEmpty(m.Signature.MissingError, "signature is required"))
 	}
 	signedPayload, err := m.Signature.signedPayload(timestamp, req)
 	if err != nil {
@@ -989,22 +990,22 @@ func (m Manifest) verifySignature(secret string, req Request) error {
 			return nil
 		}
 	}
-	return unauthorized(firstNonEmpty(m.Signature.InvalidError, "invalid signature"))
+	return unauthorized(stringsutil.FirstNonEmpty(m.Signature.InvalidError, "invalid signature"))
 }
 
 func (m Manifest) verifyTokenEquality(secret string, req Request) error {
 	values := req.Headers.Values(m.Signature.Header)
 	if len(values) == 0 || strings.TrimSpace(values[0]) == "" {
-		return unauthorized(firstNonEmpty(m.Signature.MissingError, "signature is required"))
+		return unauthorized(stringsutil.FirstNonEmpty(m.Signature.MissingError, "signature is required"))
 	}
 	if len(values) != 1 {
-		return unauthorized(firstNonEmpty(m.Signature.InvalidError, "invalid signature"))
+		return unauthorized(stringsutil.FirstNonEmpty(m.Signature.InvalidError, "invalid signature"))
 	}
 	token := strings.TrimSpace(values[0])
 	if hmac.Equal([]byte(token), []byte(strings.TrimSpace(secret))) {
 		return nil
 	}
-	return unauthorized(firstNonEmpty(m.Signature.InvalidError, "invalid signature"))
+	return unauthorized(stringsutil.FirstNonEmpty(m.Signature.InvalidError, "invalid signature"))
 }
 
 func (s SignatureManifest) TimestampParam() string {
@@ -1021,7 +1022,7 @@ func (s SignatureManifest) hashFunc() (func() hash.Hash, error) {
 	case signatureTypeHMACSHA1:
 		return sha1.New, nil
 	default:
-		return nil, unauthorized(firstNonEmpty(s.InvalidError, "invalid signature"))
+		return nil, unauthorized(stringsutil.FirstNonEmpty(s.InvalidError, "invalid signature"))
 	}
 }
 
@@ -1062,7 +1063,7 @@ func (s SignatureManifest) signedPayload(timestamp string, req Request) ([]byte,
 	case "url_plus_sorted_form":
 		return signedPayloadURLPlusSortedForm(s, req)
 	default:
-		return nil, unauthorized(firstNonEmpty(s.InvalidError, "invalid signature"))
+		return nil, unauthorized(stringsutil.FirstNonEmpty(s.InvalidError, "invalid signature"))
 	}
 }
 
@@ -1072,21 +1073,21 @@ func (t TimestampManifest) Resolve(paramTimestamp string, req Request) (string, 
 		raw = strings.TrimSpace(req.Headers.Get(t.Header))
 	}
 	if raw == "" {
-		return "", unauthorized(firstNonEmpty(t.MissingError, "signature timestamp is required"))
+		return "", unauthorized(stringsutil.FirstNonEmpty(t.MissingError, "signature timestamp is required"))
 	}
 	secs, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil {
-		return "", unauthorized(firstNonEmpty(t.InvalidError, "invalid signature timestamp"))
+		return "", unauthorized(stringsutil.FirstNonEmpty(t.InvalidError, "invalid signature timestamp"))
 	}
 	if strings.TrimSpace(t.Tolerance) != "" {
 		tolerance, err := time.ParseDuration(strings.TrimSpace(t.Tolerance))
 		if err != nil {
-			return "", unauthorized(firstNonEmpty(t.InvalidError, "invalid signature timestamp"))
+			return "", unauthorized(stringsutil.FirstNonEmpty(t.InvalidError, "invalid signature timestamp"))
 		}
 		requestTime := time.Unix(secs, 0).UTC()
 		now := req.Received.UTC()
 		if requestTime.After(now.Add(tolerance)) || requestTime.Before(now.Add(-tolerance)) {
-			return "", unauthorized(firstNonEmpty(t.StaleError, "stale signature timestamp"))
+			return "", unauthorized(stringsutil.FirstNonEmpty(t.StaleError, "stale signature timestamp"))
 		}
 	}
 	return raw, nil
@@ -1170,16 +1171,16 @@ func (m Manifest) buildPublishPayload(provider, entityID, deliveryID, eventType 
 
 func signedPayloadURLPlusSortedForm(s SignatureManifest, req Request) ([]byte, error) {
 	if strings.TrimSpace(req.URL) == "" {
-		return nil, unauthorized(firstNonEmpty(s.InvalidError, "invalid signature"))
+		return nil, unauthorized(stringsutil.FirstNonEmpty(s.InvalidError, "invalid signature"))
 	}
 	if strings.TrimSpace(req.QueryParseError) != "" || strings.TrimSpace(req.FormParseError) != "" {
-		return nil, unauthorized(firstNonEmpty(s.InvalidError, "invalid signature"))
+		return nil, unauthorized(stringsutil.FirstNonEmpty(s.InvalidError, "invalid signature"))
 	}
 	if !req.FormParsed {
-		return nil, unauthorized(firstNonEmpty(s.InvalidError, "invalid signature"))
+		return nil, unauthorized(stringsutil.FirstNonEmpty(s.InvalidError, "invalid signature"))
 	}
 	if hasDuplicateValues(req.Query) || hasDuplicateValues(req.Form) {
-		return nil, unauthorized(firstNonEmpty(s.InvalidError, "invalid signature"))
+		return nil, unauthorized(stringsutil.FirstNonEmpty(s.InvalidError, "invalid signature"))
 	}
 	keys := make([]string, 0, len(req.Form))
 	for key := range req.Form {
@@ -1407,15 +1408,6 @@ func NormalizeEventToken(raw string) string {
 		return "event"
 	}
 	return token
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
 }
 
 func badRequest(message string) Error {

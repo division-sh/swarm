@@ -11,6 +11,7 @@ import (
 
 	"github.com/division-sh/swarm/internal/runtime/agentmemory"
 	"github.com/division-sh/swarm/internal/runtime/core/agentidentity"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 const defaultMonitorDir = "/tmp/runtime-monitor"
@@ -167,7 +168,7 @@ func summarizeMonitorEventLine(line []byte) string {
 		if subtype == "" {
 			subtype = "system"
 		}
-		if sid := strings.TrimSpace(coalesce(asString(obj["session_id"]), asString(obj["sessionId"]))); sid != "" {
+		if sid := strings.TrimSpace(stringsutil.FirstNonEmpty(asString(obj["session_id"]), asString(obj["sessionId"]))); sid != "" {
 			return fmt.Sprintf("system[%s] session=%s", subtype, sid)
 		}
 		return fmt.Sprintf("system[%s]", subtype)
@@ -179,7 +180,7 @@ func summarizeMonitorEventLine(line []byte) string {
 		if result == "" {
 			result = "completed"
 		}
-		if sid := strings.TrimSpace(coalesce(asString(obj["session_id"]), asString(obj["sessionId"]))); sid != "" {
+		if sid := strings.TrimSpace(stringsutil.FirstNonEmpty(asString(obj["session_id"]), asString(obj["sessionId"]))); sid != "" {
 			return fmt.Sprintf("result session=%s %s", sid, result)
 		}
 		return "result " + result

@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 func TestPreviewContractHandlerExecution_DeniesImportBoundaryWildcardRawFallback(t *testing.T) {
@@ -45,7 +46,7 @@ func TestPreviewContractHandlerExecution_AllowsGrantedImportBoundaryWildcard(t *
 	if err != nil {
 		t.Fatalf("PreviewContractHandlerExecution: %v", err)
 	}
-	if !containsString(preview.ClearGates, "sibling_gate") {
+	if !stringsutil.ContainsTrimmed(preview.ClearGates, "sibling_gate") {
 		t.Fatalf("preview ClearGates = %#v, want sibling_gate", preview.ClearGates)
 	}
 }

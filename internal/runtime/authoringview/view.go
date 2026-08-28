@@ -12,6 +12,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/entityruntime"
 	"github.com/division-sh/swarm/internal/runtime/routingtopology"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 type View struct {
@@ -1203,7 +1204,7 @@ func authoredLocationForFinding(bundle *runtimecontracts.WorkflowContractBundle,
 	}
 	location := strings.TrimSpace(finding.Location)
 	if location == "" || location == "<root>" || location == "root" {
-		return firstNonEmpty(bundle.Paths.RootSchemaFile, bundle.Paths.ProjectPackageFile)
+		return stringsutil.FirstNonEmpty(bundle.Paths.RootSchemaFile, bundle.Paths.ProjectPackageFile)
 	}
 	if node, err := runtimeidentity.ParseExecutableNodeKey(location); err == nil {
 		if record, ok := bundle.ExecutableNode(node); ok {
@@ -1221,7 +1222,7 @@ func authoredLocationForFinding(bundle *runtimecontracts.WorkflowContractBundle,
 			return strings.TrimSpace(flow.Paths.SchemaFile)
 		}
 	}
-	return firstNonEmpty(bundle.Paths.ProjectPackageFile, bundle.Paths.RootSchemaFile)
+	return stringsutil.FirstNonEmpty(bundle.Paths.ProjectPackageFile, bundle.Paths.RootSchemaFile)
 }
 
 func authoredFileForSource(bundle *runtimecontracts.WorkflowContractBundle, source runtimecontracts.ContractItemSource) string {
@@ -1232,11 +1233,11 @@ func authoredFileForSource(bundle *runtimecontracts.WorkflowContractBundle, sour
 		if flow, ok := bundle.FlowViewByID(flowID); ok {
 			switch strings.TrimSpace(source.Layer) {
 			case "nodes", "node", "flow":
-				return firstNonEmpty(flow.Paths.NodesFile, flow.Paths.SchemaFile)
+				return stringsutil.FirstNonEmpty(flow.Paths.NodesFile, flow.Paths.SchemaFile)
 			case "events", "event":
-				return firstNonEmpty(flow.Paths.EventsFile, flow.Paths.SchemaFile)
+				return stringsutil.FirstNonEmpty(flow.Paths.EventsFile, flow.Paths.SchemaFile)
 			default:
-				return firstNonEmpty(flow.Paths.NodesFile, flow.Paths.SchemaFile)
+				return stringsutil.FirstNonEmpty(flow.Paths.NodesFile, flow.Paths.SchemaFile)
 			}
 		}
 	}
@@ -1292,13 +1293,4 @@ func normalizedStrings(in []string) []string {
 		}
 	}
 	return out
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			return value
-		}
-	}
-	return ""
 }

@@ -8,6 +8,7 @@ import (
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/stringsutil"
 	"github.com/google/uuid"
 )
 
@@ -188,7 +189,7 @@ func resolveEmittedEntityID(
 	inboundEntityID string,
 ) string {
 	instance := workflowStateIdentity(source, flowID, state)
-	entityID := strings.TrimSpace(firstNonEmptyString(
+	entityID := strings.TrimSpace(stringsutil.FirstNonEmpty(
 		currentEntityID,
 		instance.EntityID,
 		inboundEntityID,

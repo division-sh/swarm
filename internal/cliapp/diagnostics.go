@@ -1825,6 +1825,11 @@ func emptyDash(value string) string {
 	return value
 }
 
+// firstNonEmpty returns the first value whose trimmed form is non-empty,
+// returning the ORIGINAL (untrimmed) value. This deliberately differs from
+// stringsutil.FirstNonEmpty, which returns the trimmed value: cliapp callers
+// branch on raw output (e.g. turn != "" checks) and pass env-derived paths
+// that must round-trip untrimmed. Keep local; do not consolidate.
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {

@@ -910,13 +910,3 @@ func cloneStringAnyMap(in map[string]any) map[string]any {
 	}
 	return out
 }
-
-func containsString(in []string, want string) bool {
-	want = strings.TrimSpace(want)
-	for _, item := range in {
-		if strings.TrimSpace(item) == want {
-			return true
-		}
-	}
-	return false
-}

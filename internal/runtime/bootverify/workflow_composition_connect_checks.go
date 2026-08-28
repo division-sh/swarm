@@ -10,6 +10,7 @@ import (
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimepinrouting "github.com/division-sh/swarm/internal/runtime/core/pinrouting"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 func checkCompositionConnectValidation(c *checkerContext) []Finding {
@@ -120,7 +121,7 @@ func validateReplyInputPinResolution(source semanticview.Source, flowID string, 
 		return append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", fmt.Sprintf("resolution mode reply replies_to %q must name a same-flow output pin", requestPinName), location))
 	}
 	correlationKey := strings.TrimSpace(resolution.CorrelationKey)
-	if correlationKey != "" && !containsTrimmedString(requestPin.Carries, correlationKey) {
+	if correlationKey != "" && !stringsutil.ContainsTrimmed(requestPin.Carries, correlationKey) {
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", fmt.Sprintf("resolution mode reply correlation_key %q must name a carry declared by output pin %s", correlationKey, requestPinName), location))
 	}
 	graph := runtimepinrouting.CompileConnectGraph(source)
@@ -140,16 +141,6 @@ func validateReplyInputPinResolution(source semanticview.Source, flowID string, 
 		findings = append(findings, inputPinResolutionFinding(flowID, pin, "reply_lineage_missing", "resolution mode reply request and reply edges must connect the same provider flow", location))
 	}
 	return findings
-}
-
-func containsTrimmedString(values []string, want string) bool {
-	want = strings.TrimSpace(want)
-	for _, value := range values {
-		if strings.TrimSpace(value) == want {
-			return true
-		}
-	}
-	return false
 }
 
 func validateFanInInputPinResolution(source semanticview.Source, flowID string, pin runtimecontracts.FlowInputEventPin) []Finding {

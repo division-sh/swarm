@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/canonicaljson"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 const (
@@ -234,8 +235,8 @@ func replayFinding(kind ReplayFindingKind, field string, expected, actual Replay
 		Schema:      ReplayEvidenceSchema,
 		Kind:        kind,
 		Field:       field,
-		ModuleID:    firstNonEmpty(actual.ModuleID, expected.ModuleID),
-		RowID:       firstNonEmpty(actual.RowID, expected.RowID),
+		ModuleID:    stringsutil.FirstNonEmpty(actual.ModuleID, expected.ModuleID),
+		RowID:       stringsutil.FirstNonEmpty(actual.RowID, expected.RowID),
 		Expected:    want,
 		Actual:      got,
 		Message:     fmt.Sprintf("compute_module replay %s on %s", kind, field),
@@ -270,13 +271,4 @@ func CanonicalJSONHashRaw(raw []byte) (string, error) {
 
 func HashBytes(raw []byte) string {
 	return canonicaljson.HashBytes(raw)
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }

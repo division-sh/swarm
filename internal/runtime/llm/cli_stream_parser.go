@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/division-sh/swarm/internal/runtime/core/toolidentity"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 type cliStreamAccumulator struct {
@@ -61,7 +62,7 @@ func (a *cliStreamAccumulator) AddLine(line []byte) {
 		return
 	}
 	a.captureDiagnostics(obj)
-	if sid := strings.TrimSpace(coalesce(asString(obj["session_id"]), asString(obj["sessionId"]))); sid != "" {
+	if sid := strings.TrimSpace(stringsutil.FirstNonEmpty(asString(obj["session_id"]), asString(obj["sessionId"]))); sid != "" {
 		a.sessionID = sid
 	}
 

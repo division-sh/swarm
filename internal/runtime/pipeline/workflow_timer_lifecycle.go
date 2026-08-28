@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimeworkflowlifecycle "github.com/division-sh/swarm/internal/runtime/workflowlifecycle"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 func (pc *PipelineCoordinator) handleWorkflowStageTimerFire(ctx context.Context, evt events.Event) (bool, bool, error) {
@@ -240,7 +241,7 @@ func workflowTimerLeavesBoundedLoop(source semanticview.Source, timer runtimecon
 		if !loopFlowIDMatches(source, plan.FlowID, timer.OwningFlowID()) || !workflowTimerConnectedToPlan(timer, plan) {
 			continue
 		}
-		if !containsLoopStage(plan.RegionStages, target) {
+		if !stringsutil.ContainsTrimmed(plan.RegionStages, target) {
 			return true
 		}
 	}
@@ -258,15 +259,6 @@ func workflowTimerConnectedToPlan(timer runtimecontracts.WorkflowTimerContract, 
 	}
 	for _, operation := range plan.Operations {
 		if strings.TrimSpace(timer.Event) == strings.TrimSpace(operation.HandlerEvent) {
-			return true
-		}
-	}
-	return false
-}
-
-func containsLoopStage(stages []string, stage string) bool {
-	for _, candidate := range stages {
-		if strings.TrimSpace(candidate) == strings.TrimSpace(stage) {
 			return true
 		}
 	}

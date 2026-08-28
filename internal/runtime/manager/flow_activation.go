@@ -26,6 +26,7 @@ import (
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	runtimetools "github.com/division-sh/swarm/internal/runtime/tools"
+	"github.com/division-sh/swarm/internal/stringsutil"
 	"github.com/google/uuid"
 )
 
@@ -959,7 +960,7 @@ func buildFlowAgentConfig(
 		}
 		rendered = append(rendered, subscription)
 	}
-	rendered = dedupeStrings(rendered)
+	rendered = stringsutil.Unique(rendered)
 
 	cfgPayload := map[string]any{}
 	for k, v := range config {
@@ -1105,7 +1106,7 @@ func buildStaticFlowAgentConfig(
 		subscription = eventidentity.ExternalizeForFlow(flowPath, localEventList(localEvents), subscription)
 		rendered = append(rendered, subscription)
 	}
-	rendered = dedupeStrings(rendered)
+	rendered = stringsutil.Unique(rendered)
 
 	rawConfig, err := json.Marshal(map[string]any{})
 	if err != nil {
@@ -1167,7 +1168,7 @@ func normalizedFlowAgentEmitEvents(events []string, vars map[string]string, loca
 	for _, eventType := range rendered {
 		out = append(out, eventidentity.ExternalizeForFlow(flowPath, localEventList(localEvents), eventType))
 	}
-	return dedupeStrings(out)
+	return stringsutil.Unique(out)
 }
 
 func normalizedStaticFlowEmitEvents(events []string, vars map[string]string, localEvents map[string]struct{}, flowPath string) []string {
@@ -1180,7 +1181,7 @@ func normalizedStaticFlowEmitEvents(events []string, vars map[string]string, loc
 	for _, eventType := range rendered {
 		out = append(out, eventidentity.ExternalizeForFlow(flowPath, localEventList(localEvents), eventType))
 	}
-	return dedupeStrings(out)
+	return stringsutil.Unique(out)
 }
 
 func localEventList(localEvents map[string]struct{}) []string {
@@ -1261,7 +1262,7 @@ func cloneFlowConfig(in map[string]any) map[string]any {
 }
 
 func normalizedConfiguredToolList(raw []string) []string {
-	return dedupeStrings(raw)
+	return stringsutil.Unique(raw)
 }
 
 func normalizedConfiguredNativeTools(raw map[string]any) map[string]bool {
@@ -1295,7 +1296,7 @@ func normalizedConfiguredEventList(raw []string, vars map[string]string) []strin
 		}
 		rendered = append(rendered, eventType)
 	}
-	return dedupeStrings(rendered)
+	return stringsutil.Unique(rendered)
 }
 
 func flowLocalEventSet(schema runtimecontracts.FlowSchemaDocument, scope semanticview.FlowScope) map[string]struct{} {
@@ -1338,24 +1339,4 @@ func renderFlowTemplate(raw string, vars map[string]string) string {
 		replacer = append(replacer, "{"+key+"}", value, "{{"+key+"}}", value)
 	}
 	return strings.NewReplacer(replacer...).Replace(raw)
-}
-
-func dedupeStrings(in []string) []string {
-	if len(in) == 0 {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(in))
-	out := make([]string, 0, len(in))
-	for _, item := range in {
-		item = strings.TrimSpace(item)
-		if item == "" {
-			continue
-		}
-		if _, ok := seen[item]; ok {
-			continue
-		}
-		seen[item] = struct{}{}
-		out = append(out, item)
-	}
-	return out
 }

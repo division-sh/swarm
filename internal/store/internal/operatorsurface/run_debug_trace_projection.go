@@ -10,6 +10,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/handlerselection"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 type runDebugTraceInputs struct {
@@ -489,7 +490,7 @@ func appendProjectedTraceRow(out []operatorread.RunDebugTraceRow, event operator
 		row.TurnFailure = runtimefailures.CloneEnvelope(turn.row.TurnFailure)
 		row.TurnCreatedAt = traceTimePtrFromPointer(turn.row.TurnCreatedAt)
 	}
-	sessionID := firstNonEmptyStore(turn.sessionID, snapshot.ActiveSessionID)
+	sessionID := stringsutil.FirstNonEmpty(turn.sessionID, snapshot.ActiveSessionID)
 	if session, ok := sessions[sessionID]; ok {
 		row.SessionID = sessionID
 		row.SessionKind = session.kind

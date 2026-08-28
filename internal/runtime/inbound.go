@@ -27,6 +27,7 @@ import (
 	runtimeinbound "github.com/division-sh/swarm/internal/runtime/inboundpublication"
 	runtimeingress "github.com/division-sh/swarm/internal/runtime/ingress"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 const inboundWebhookMaxBodyBytes = 1 << 20
@@ -52,11 +53,11 @@ type InboundTarget struct {
 }
 
 func (t InboundTarget) EffectiveEntityID() string {
-	return firstNonEmpty(t.EntityID)
+	return stringsutil.FirstNonEmpty(t.EntityID)
 }
 
 func (t InboundTarget) EffectiveEntitySlug() string {
-	return firstNonEmpty(t.EntitySlug)
+	return stringsutil.FirstNonEmpty(t.EntitySlug)
 }
 
 func (t *InboundTarget) NormalizeEntity() {
@@ -779,15 +780,6 @@ func inboundFormValues(contentType string, body []byte) (url.Values, bool, strin
 		return nil, true, err.Error()
 	}
 	return values, true, ""
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-	}
-	return ""
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

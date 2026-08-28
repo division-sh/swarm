@@ -17,6 +17,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/sessions"
 	"github.com/division-sh/swarm/internal/runtime/toolgateway"
 	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 type ClaudeCLIRuntime struct {
@@ -272,7 +273,7 @@ func (r *ClaudeCLIRuntime) continueSession(ctx context.Context, s *Session, mess
 		return nil, err
 	}
 	completionModel := strings.TrimSpace(providerModel.ConcreteModel)
-	usageModel := coalesce(completionModel, "unknown")
+	usageModel := stringsutil.FirstNonEmpty(completionModel, "unknown")
 	toolProjection, err := projectClaudeInvocationTools(ctx, actor, s.Tools)
 	if err != nil {
 		return nil, err

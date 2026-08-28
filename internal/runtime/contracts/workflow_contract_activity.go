@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/stringsutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -439,7 +440,7 @@ func (b *WorkflowContractBundle) GeneratedActivityEventsForExecutableNode(node r
 			out = append(out, events.RevisionRequested, events.Rejected)
 		}
 	}
-	return uniqueOrderedStrings(out)
+	return stringsutil.Unique(out)
 }
 
 func toolInputSchemaToJSONSchema(schema ToolInputSchema) map[string]any {

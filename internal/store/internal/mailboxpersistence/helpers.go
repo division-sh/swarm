@@ -66,12 +66,3 @@ func parseSQLiteTime(raw string) (time.Time, bool, error) {
 	}
 	return time.Time{}, false, fmt.Errorf("invalid sqlite time %q", raw)
 }
-
-func coalesce(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
-}

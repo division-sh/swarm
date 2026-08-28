@@ -8,6 +8,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimeidentity "github.com/division-sh/swarm/internal/runtime/core/identity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 func validateDurableActivitySurface(source semanticview.Source) []error {
@@ -253,7 +254,7 @@ func activitySiteContext(site runtimecontracts.ActivitySite) string {
 func validateActivityInputAgainstToolSchema(context string, activity runtimecontracts.ActivitySpec, schema runtimecontracts.ToolInputSchema) []error {
 	var errs []error
 	input := activity.Input
-	required := normalizeStrings(schema.RequiredProperties())
+	required := stringsutil.Unique(schema.RequiredProperties())
 	for _, field := range required {
 		if _, ok := input[field]; !ok {
 			errs = append(errs, fmt.Errorf("%s.input: required tool input field %q is not mapped", context, field))
@@ -274,21 +275,4 @@ func validateActivityInputAgainstToolSchema(context string, activity runtimecont
 		}
 	}
 	return errs
-}
-
-func normalizeStrings(in []string) []string {
-	out := make([]string, 0, len(in))
-	seen := map[string]struct{}{}
-	for _, value := range in {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		if _, ok := seen[value]; ok {
-			continue
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-	return out
 }

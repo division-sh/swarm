@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/eventidentity"
 	runtimepaths "github.com/division-sh/swarm/internal/runtime/core/paths"
 	"github.com/division-sh/swarm/internal/runtime/eventschema"
+	"github.com/division-sh/swarm/internal/stringsutil"
 )
 
 type OutputKind string
@@ -438,7 +439,7 @@ func normalizedWhenMatches(payload any, when NormalizedEventWhen) bool {
 			return false
 		}
 		text, ok := got.(string)
-		if !ok || !containsExactText(allowed, text) {
+		if !ok || !stringsutil.Contains(allowed, text) {
 			return false
 		}
 	}
@@ -504,15 +505,6 @@ func cloneTextMap(in map[string]string) map[string]string {
 		out[key] = value
 	}
 	return out
-}
-
-func containsExactText(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }
 
 func exactNumberText(value any) (string, error) {

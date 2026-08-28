@@ -1,6 +1,10 @@
 package agentpersistence
 
-import runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+import (
+	runtimeactors "github.com/division-sh/swarm/internal/runtime/core/actors"
+
+	"github.com/division-sh/swarm/internal/stringsutil"
+)
 
 func DecodePersistedAgentRuntimeDescriptor(raw []byte) (PersistedAgentRuntimeDescriptor, error) {
 	return decodePersistedAgentRuntimeDescriptor(raw)
@@ -38,4 +42,4 @@ func HydrateAgentConfig(projection PersistedAgentProjection) (runtimeactors.Agen
 
 func PersistedStatus(raw string) string { return agentPersistedStatus(raw) }
 
-func Coalesce(values ...string) string { return coalesce(values...) }
+func Coalesce(values ...string) string { return stringsutil.FirstNonEmpty(values...) }
