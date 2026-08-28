@@ -54,11 +54,12 @@ func TestPublicIngressReadinessRevocationAndRegistrationReplacement(t *testing.T
 	owner.SetExposure(ExposureEvidence{GenerationID: "exposure-1", ObservedAt: now, ExpiresAt: now.Add(EvidenceTTL)})
 	installReadinessRegistration(t, owner, RegistrationEvidence{BindingID: "old", Target: "old", Applied: true, CallbackMatched: true, ObservedAt: now, ExpiresAt: now.Add(EvidenceTTL)})
 	installReadinessRegistration(t, owner, RegistrationEvidence{BindingID: "current", Target: "current", Applied: true, CallbackMatched: true, ObservedAt: now, ExpiresAt: now.Add(EvidenceTTL)})
-	current, ok := owner.registration.state("current\x00current")
+	currentPair := RegistrationPair{BindingID: "current", Target: RegistrationTarget{Selector: "current"}}
+	current, ok := owner.registration.state(registrationSelectionKey(currentPair, "provider:slot:current"))
 	if !ok {
 		t.Fatal("current registration state is missing")
 	}
-	owner.registration.replaceSelected([]RegistrationPair{current.Pair})
+	owner.registration.replaceSelected([]admittedPair{{pair: current.Pair, slotID: current.SelectionSlotID}})
 	snapshot := owner.Snapshot(now)
 	if len(snapshot.Registrations) != 1 || snapshot.Registrations[0].BindingID != "current" {
 		t.Fatalf("registrations = %#v, want current only", snapshot.Registrations)
@@ -95,16 +96,17 @@ func TestRegistrationSnapshotSelectionReplacesRoutesAndStatesAtomically(t *testi
 	owner := newRegistrationSnapshotOwner()
 	left := RegistrationPair{BindingID: "left", Target: RegistrationTarget{Selector: "ingress:left:telegram:telegram", Alias: "left", Provider: "telegram"}}
 	right := RegistrationPair{BindingID: "right", Target: RegistrationTarget{Selector: "ingress:right:telegram:telegram", Alias: "right", Provider: "telegram"}}
-	owner.replaceSelected([]RegistrationPair{left})
+	leftSlot, rightSlot := "provider:slot:left", "provider:slot:right"
+	owner.replaceSelected([]admittedPair{{pair: left, slotID: leftSlot}})
 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		for index := 0; index < 2000; index++ {
 			if index%2 == 0 {
-				owner.replaceSelected([]RegistrationPair{right})
+				owner.replaceSelected([]admittedPair{{pair: right, slotID: rightSlot}})
 			} else {
-				owner.replaceSelected([]RegistrationPair{left})
+				owner.replaceSelected([]admittedPair{{pair: left, slotID: leftSlot}})
 			}
 		}
 	}()
@@ -113,9 +115,9 @@ func TestRegistrationSnapshotSelectionReplacesRoutesAndStatesAtomically(t *testi
 		if len(snapshot.registrations) != 1 || len(snapshot.routes) != 1 {
 			t.Fatalf("partial selected snapshot = %#v", snapshot)
 		}
-		_, hasLeftState := snapshot.registrations[pairKey(left)]
+		_, hasLeftState := snapshot.registrations[registrationSelectionKey(left, leftSlot)]
 		_, hasLeftRoute := snapshot.routes[registrationRouteKey("left", "telegram")]
-		_, hasRightState := snapshot.registrations[pairKey(right)]
+		_, hasRightState := snapshot.registrations[registrationSelectionKey(right, rightSlot)]
 		_, hasRightRoute := snapshot.routes[registrationRouteKey("right", "telegram")]
 		if hasLeftState != hasLeftRoute || hasRightState != hasRightRoute || hasLeftState == hasRightState {
 			t.Fatalf("mixed route/state selected snapshot = %#v", snapshot)
@@ -134,20 +136,22 @@ func TestRegistrationSnapshotInvalidatesChangedSameKeyBeforeReconcile(t *testing
 		BindingID: "binding",
 		Target:    RegistrationTarget{Selector: "ingress:support:telegram:telegram", Alias: "support", Provider: "telegram", Generation: 1},
 	}
-	owner.replaceSelected([]RegistrationPair{pair})
-	state, ok := owner.state(pairKey(pair))
+	const slotID = "provider:slot:binding"
+	owner.replaceSelected([]admittedPair{{pair: pair, slotID: slotID}})
+	key := registrationSelectionKey(pair, slotID)
+	state, ok := owner.state(key)
 	if !ok {
 		t.Fatal("selected registration state is missing")
 	}
 	state.SelectedBase = "base-v1"
 	state.LastVerified = &registrationIntent{BaseFingerprint: "base-v1"}
 	state.Phase = registrationPhaseVerified
-	owner.publishState(pairKey(pair), state)
+	owner.publishState(key, state)
 
 	changed := pair
 	changed.Target.Generation = 2
-	owner.replaceSelected([]RegistrationPair{changed})
-	invalidated, ok := owner.state(pairKey(changed))
+	owner.replaceSelected([]admittedPair{{pair: changed, slotID: slotID}})
+	invalidated, ok := owner.state(registrationSelectionKey(changed, slotID))
 	if !ok || invalidated.SelectedBase != "" || invalidated.Failure == "" || invalidated.LastVerified == nil {
 		t.Fatalf("changed same-key selection state = %#v", invalidated)
 	}
@@ -172,16 +176,21 @@ func installReadinessRegistration(t *testing.T, owner *ReadinessOwner, evidence 
 	if exposure != nil {
 		exposureGeneration = exposure.GenerationID
 	}
+	slotID := strings.TrimSpace(evidence.SlotID)
+	if slotID == "" {
+		slotID = "provider:slot:" + evidence.BindingID
+	}
 	base := "base:" + evidence.BindingID
 	state := registrationState{
-		Pair:         pair,
-		SelectedBase: base,
-		Phase:        registrationPhaseVerified,
+		Pair:            pair,
+		SelectionSlotID: slotID,
+		SelectedBase:    base,
+		Phase:           registrationPhaseVerified,
 		LastVerified: &registrationIntent{
 			BaseFingerprint:      base,
 			ExposureGenerationID: exposureGeneration,
 			IntentID:             evidence.IntentID,
-			SlotID:               evidence.SlotID,
+			SlotID:               slotID,
 			CallbackURL:          evidence.CallbackURL,
 			Applied:              true,
 			Matched:              true,
@@ -193,11 +202,11 @@ func installReadinessRegistration(t *testing.T, owner *ReadinessOwner, evidence 
 		},
 	}
 	prior := owner.registration.capture()
-	pairs := make([]RegistrationPair, 0, len(prior.registrations)+1)
+	pairs := make([]admittedPair, 0, len(prior.registrations)+1)
 	for _, existing := range prior.registrations {
-		pairs = append(pairs, existing.Pair)
+		pairs = append(pairs, admittedPair{pair: existing.Pair, slotID: existing.SelectionSlotID})
 	}
-	pairs = append(pairs, pair)
+	pairs = append(pairs, admittedPair{pair: pair, slotID: slotID})
 	owner.registration.replaceSelected(pairs)
-	owner.registration.publishState(pairKey(pair), state)
+	owner.registration.publishState(registrationSelectionKey(pair, slotID), state)
 }

@@ -137,7 +137,30 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 		}
 	})
 	t.Run("E2E-03_rebind_replaces_identity", func(t *testing.T) {
-		shared = runChannelOnboardingCLIJourney(t, opts.ConfigPath, endpoint, provider, "rebind", "", -2001, "group", 2)
+		predecessorCallback, predecessorSigning, _ := provider.Registration()
+		provider.SetResourceID("replacement-bot-token", 420080)
+		command := startChannelOnboardingCLICommand(t, opts.ConfigPath, endpoint, []string{
+			"channel", "rebind", "telegram", "--yes", "--credential-stdin",
+		}, "replacement-bot-token\n")
+		challenge := waitChannelOnboardingChallenge(t, command.stdout, command.stderr, command.done)
+		successorCallback, successorSigning := waitChannelOnboardingRegistrationForCredential(t, provider, "replacement-bot-token", 2, command)
+		requireChannelClaimDisposition(t, "E2E-03 predecessor callback during handoff",
+			submitChannelOnboardingClaim(t, predecessorCallback, predecessorSigning, "SWARM-AAAAAAAAAAAAAAAA", 2002, "predecessor_during_rebind"), "rejected_binding_claim")
+		requireChannelClaimDisposition(t, "E2E-03 successor callback",
+			submitChannelOnboardingClaimWithChatType(t, successorCallback, successorSigning, challenge, 2003, 7002, -2001, "group", "replacement_operator"), "consumed_by_binding")
+		requireChannelOnboardingCommandSuccess(t, command)
+		if surface := command.stdout.String() + "\n" + command.stderr.String(); !strings.Contains(surface, "READY") || strings.Contains(surface, "replacement-bot-token") {
+			t.Fatalf("%s E2E-03 readiness/secret contract violated\n%s", backend, surface)
+		}
+		delivery := waitChannelOnboardingDelivery(t, provider, 2)
+		if fmt.Sprint(delivery["chat_id"]) != "-2001" || delivery["text"] != "Swarm channel connected." {
+			t.Fatalf("%s E2E-03 confirmation = %#v", backend, delivery)
+		}
+		retired := submitChannelOnboardingClaim(t, predecessorCallback, predecessorSigning, challenge, 2004, "retired_predecessor")
+		if retired.StatusCode != http.StatusNotFound {
+			t.Fatalf("%s E2E-03 predecessor callback remained admitted after handoff: %#v", backend, retired)
+		}
+		shared = readCurrentChannelOnboardingJourney(t, opts.ConfigPath, endpoint)
 		if shared.Identity.ConversationScope != "shared" || shared.Readiness == nil || !shared.Readiness.Ready {
 			t.Fatalf("%s shared channel readback = %#v", backend, shared)
 		}
@@ -921,6 +944,27 @@ func waitChannelOnboardingRegistration(t *testing.T, provider *channelOnboarding
 			t.Fatalf("channel command exited %d before registration\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
 		case <-deadline.C:
 			t.Fatalf("timed out waiting for provider registration\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+		case <-ticker.C:
+		}
+	}
+}
+
+func waitChannelOnboardingRegistrationForCredential(t *testing.T, provider *channelOnboardingTelegramProvider, credential string, minimumCount int, command channelOnboardingCLICommand) (string, string) {
+	t.Helper()
+	deadline := time.NewTimer(15 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		callbackURL, signingSecret, count := provider.RegistrationForCredential(credential)
+		if callbackURL != "" && signingSecret != "" && count >= minimumCount {
+			return callbackURL, signingSecret
+		}
+		select {
+		case code := <-command.done:
+			t.Fatalf("channel command exited %d before credential registration\nstdout:\n%s\nstderr:\n%s", code, command.stdout.String(), command.stderr.String())
+		case <-deadline.C:
+			t.Fatalf("timed out waiting for credential registration\nstdout:\n%s\nstderr:\n%s", command.stdout.String(), command.stderr.String())
 		case <-ticker.C:
 		}
 	}

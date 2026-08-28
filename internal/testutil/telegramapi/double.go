@@ -14,12 +14,19 @@ type Double struct {
 	mu                           sync.Mutex
 	callbackURL                  string
 	signingSecret                string
+	registrations                map[string]registration
+	resourceIDs                  map[string]int64
 	registrationRequests         []map[string]any
 	deliveries                   []map[string]any
 	rejectNextCredential         bool
 	loseNextRegistrationResponse bool
 	registrationResponseBarrier  *responseBarrier
 	deliveryResponseBarrier      *responseBarrier
+}
+
+type registration struct {
+	callbackURL   string
+	signingSecret string
 }
 
 type responseBarrier struct {
@@ -30,18 +37,23 @@ type responseBarrier struct {
 
 func (p *Double) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+	credential := credentialFromPath(request.URL.Path)
 	switch {
 	case strings.HasSuffix(request.URL.Path, "/getMe"):
 		p.mu.Lock()
 		reject := p.rejectNextCredential
 		p.rejectNextCredential = false
+		resourceID := p.resourceIDs[credential]
 		p.mu.Unlock()
 		if reject {
 			w.WriteHeader(http.StatusUnauthorized)
 			_, _ = w.Write([]byte(`{"ok":false,"error_code":401,"description":"Unauthorized"}`))
 			return
 		}
-		_, _ = w.Write([]byte(`{"ok":true,"result":{"id":420079}}`))
+		if resourceID == 0 {
+			resourceID = 420079
+		}
+		_, _ = fmt.Fprintf(w, `{"ok":true,"result":{"id":%d}}`, resourceID)
 	case strings.HasSuffix(request.URL.Path, "/setWebhook"):
 		var payload map[string]any
 		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
@@ -51,6 +63,10 @@ func (p *Double) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 		p.mu.Lock()
 		p.callbackURL = strings.TrimSpace(fmt.Sprint(payload["url"]))
 		p.signingSecret = strings.TrimSpace(fmt.Sprint(payload["secret_token"]))
+		if p.registrations == nil {
+			p.registrations = map[string]registration{}
+		}
+		p.registrations[credential] = registration{callbackURL: p.callbackURL, signingSecret: p.signingSecret}
 		p.registrationRequests = append(p.registrationRequests, clonePayload(payload))
 		loseResponse := p.loseNextRegistrationResponse
 		p.loseNextRegistrationResponse = false
@@ -76,7 +92,7 @@ func (p *Double) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 		_, _ = w.Write([]byte(`{"ok":true,"result":true}`))
 	case strings.HasSuffix(request.URL.Path, "/getWebhookInfo"):
 		p.mu.Lock()
-		callbackURL := p.callbackURL
+		callbackURL := p.registrations[credential].callbackURL
 		p.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"url": callbackURL}})
 	case strings.HasSuffix(request.URL.Path, "/sendMessage"):
@@ -99,6 +115,25 @@ func (p *Double) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	default:
 		http.Error(w, `{"ok":false}`, http.StatusNotFound)
 	}
+}
+
+// SetResourceID makes one credential represent a distinct provider resource.
+func (p *Double) SetResourceID(credential string, resourceID int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.resourceIDs == nil {
+		p.resourceIDs = map[string]int64{}
+	}
+	p.resourceIDs[strings.TrimSpace(credential)] = resourceID
+}
+
+// RegistrationForCredential returns the current provider registration for one
+// exact credential and the total number of registration effects.
+func (p *Double) RegistrationForCredential(credential string) (string, string, int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	current := p.registrations[strings.TrimSpace(credential)]
+	return current.callbackURL, current.signingSecret, len(p.registrationRequests)
 }
 
 func (p *Double) Registration() (string, string, int) {
@@ -167,4 +202,8 @@ func clonePayload(payload map[string]any) map[string]any {
 		cloned[key] = value
 	}
 	return cloned
+}
+
+func credentialFromPath(path string) string {
+	return strings.SplitN(strings.TrimPrefix(path, "/bot"), "/", 2)[0]
 }
