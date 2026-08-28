@@ -500,3 +500,21 @@ func CopyProviderRollbackInvalidSourceType(t testing.TB) string {
 		"inbound.telegram.text_message:\n  chat_id: integer\n")
 	return root
 }
+
+func CopyProviderRollbackSyntheticCollision(t testing.TB, mint CreateMint) string {
+	t.Helper()
+	root := CopyProviderRollback(t, true)
+	var source string
+	switch mint {
+	case CreateMintUUID:
+		source = "generated.uuid"
+	case CreateMintEventID:
+		source = "event.id"
+	default:
+		t.Fatalf("provider rollback synthetic collision requires UUID or event-ID source, got %d", mint)
+	}
+	applyClosedReplacement(t, filepath.Join(root, "flows", "consumer", "schema.yaml"),
+		"        resolution: {mode: select-or-create}",
+		"        resolution: {mode: create, from: "+source+"}")
+	return root
+}
