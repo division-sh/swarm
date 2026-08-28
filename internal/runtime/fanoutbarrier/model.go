@@ -14,6 +14,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
+	"github.com/google/uuid"
 )
 
 type Disposition string
@@ -190,11 +191,12 @@ func (r Registration) Validate() error {
 }
 
 type Barrier struct {
-	Registration Registration
-	Status       Status
-	Summary      *Summary
-	ScheduleKey  string
-	UpdatedAt    time.Time
+	Registration         Registration
+	Status               Status
+	Summary              *Summary
+	ScheduleKey          string
+	ScheduleActivationID string
+	UpdatedAt            time.Time
 }
 
 type Completion struct {
@@ -235,20 +237,36 @@ func (b Barrier) Validate() error {
 	if !b.Status.Valid() || b.UpdatedAt.IsZero() || b.UpdatedAt.Before(b.Registration.CreatedAt) {
 		return fmt.Errorf("fan-out barrier requires valid state and timestamps")
 	}
+	scheduleKey := strings.TrimSpace(b.ScheduleKey)
+	activationID := strings.TrimSpace(b.ScheduleActivationID)
+	if activationID != "" {
+		if _, err := uuid.Parse(activationID); err != nil {
+			return fmt.Errorf("fan-out barrier schedule activation identity is invalid")
+		}
+		if scheduleKey == "" {
+			return fmt.Errorf("fan-out barrier schedule activation requires its exact schedule key")
+		}
+	}
 	if b.Status == StatusArmed {
-		if b.Summary != nil || strings.TrimSpace(b.ScheduleKey) != "" {
+		if b.Summary != nil || scheduleKey != "" || activationID != "" {
 			return fmt.Errorf("armed fan-out barrier cannot carry a terminal summary or schedule")
 		}
 		return nil
 	}
 	if b.Status == StatusSuppressedGenerationSuperseded && b.Summary == nil {
+		if scheduleKey != "" || activationID != "" {
+			return fmt.Errorf("unscheduled superseded fan-out barrier cannot carry schedule identity")
+		}
 		return nil
 	}
 	if b.Summary == nil {
 		return fmt.Errorf("closed fan-out barrier requires its exact terminal summary")
 	}
-	if (b.Status == StatusClosedPending || b.Status == StatusFired || b.Status == StatusOutcomeDeadLettered) && strings.TrimSpace(b.ScheduleKey) == "" {
+	if (b.Status == StatusClosedPending || b.Status == StatusFired || b.Status == StatusOutcomeDeadLettered) && scheduleKey == "" {
 		return fmt.Errorf("scheduled fan-out barrier state requires its exact schedule key")
+	}
+	if b.Status == StatusClosedPending && activationID == "" {
+		return fmt.Errorf("pending fan-out barrier state requires its exact schedule activation")
 	}
 	return b.Summary.Validate()
 }

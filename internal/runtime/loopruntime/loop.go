@@ -248,6 +248,21 @@ func Load(buckets map[string]map[string]any, flowID, loopID string) (Activation,
 	return activation, true, nil
 }
 
+// GenerationCurrent reports whether the exact persisted loop activation still
+// owns a generation and, when supplied, its expected current stage.
+func GenerationCurrent(buckets map[string]map[string]any, generation attemptgeneration.Generation, expectedStage string) (bool, error) {
+	generation = generation.Normalize()
+	if !generation.Valid() {
+		return true, nil
+	}
+	activation, ok, err := Load(buckets, generation.FlowID, generation.LoopID)
+	if err != nil || !ok {
+		return false, err
+	}
+	return activation.Status == StatusOpen && activation.Generation().Equal(generation) &&
+		(strings.TrimSpace(expectedStage) == "" || activation.CurrentStage == strings.TrimSpace(expectedStage)), nil
+}
+
 func List(buckets map[string]map[string]any) ([]Activation, error) {
 	if buckets == nil || buckets[BucketKey] == nil {
 		return nil, nil

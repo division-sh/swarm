@@ -204,10 +204,11 @@ func projectRunForkFanOutBarrier(runID string, fact *runForkRevisionFanOutFact, 
 	}
 	registration.IntentKey.RunID = strings.TrimSpace(runID)
 	barrier := &fanoutbarrier.Barrier{
-		Registration: registration,
-		Status:       fanoutbarrier.Status(fact.BarrierStatus),
-		ScheduleKey:  strings.TrimSpace(fact.BarrierScheduleKey),
-		UpdatedAt:    fact.BarrierUpdatedAt,
+		Registration:         registration,
+		Status:               fanoutbarrier.Status(fact.BarrierStatus),
+		ScheduleKey:          strings.TrimSpace(fact.BarrierScheduleKey),
+		ScheduleActivationID: strings.TrimSpace(fact.BarrierScheduleActivationID),
+		UpdatedAt:            fact.BarrierUpdatedAt,
 	}
 	if len(fact.BarrierSummary) != 0 && string(fact.BarrierSummary) != "null" {
 		var summary fanoutbarrier.Summary

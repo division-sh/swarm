@@ -905,6 +905,14 @@ func (e *Executor) stepFanOutDeliveryJoin(frame *executionFrame, plan runtimecon
 			"row_id": plan.Spec.EffectiveID(), "node_id": frame.req.Node.Key(), "handler_event": strings.TrimSpace(frame.req.HandlerEventKey),
 		})
 	}
+	current, err := loopruntime.GenerationCurrent(frame.state.State.StateCarrier.StateBuckets, joinRef.Generation(), "")
+	if err != nil {
+		return false, fmt.Errorf("validate fan-out delivery join generation: %w", err)
+	}
+	if !current {
+		frame.result.Status = OutcomeDiscarded
+		return true, nil
+	}
 	context, ok := frame.payload["join"].(map[string]any)
 	if !ok {
 		return false, fmt.Errorf("fan-out delivery join completion is missing its typed disposition context")

@@ -75,6 +75,8 @@ type eventCommitTxStore interface {
 type GenericScheduleTxOwner interface {
 	AdmitTx(context.Context, *sql.Tx, *revisionEffects, runtimegenericschedule.AdmissionCommand) (runtimegenericschedule.AdmissionResult, error)
 	CancelAdmissionTx(context.Context, *sql.Tx, *revisionEffects, runtimegenericschedule.AdmissionCommand, string, time.Time) (runtimegenericschedule.CancelResult, error)
+	LoadActivationTx(context.Context, *sql.Tx, string) (runtimegenericschedule.Activation, bool, error)
+	CancelActivationTx(context.Context, *sql.Tx, *revisionEffects, runtimegenericschedule.CancelCommand) (runtimegenericschedule.CancelResult, error)
 }
 
 type runLifecycleCandidateHandoffReservation = runhandoff.CandidateHandoff
