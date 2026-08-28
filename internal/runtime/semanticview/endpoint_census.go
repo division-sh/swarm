@@ -1337,12 +1337,16 @@ func sortedFlowScopes(scopes []FlowScope) []FlowScope {
 
 func sortedInputPins(pins []runtimecontracts.CompiledFlowInputPin) []runtimecontracts.CompiledFlowInputPin {
 	out := append([]runtimecontracts.CompiledFlowInputPin(nil), pins...)
-	sort.SliceStable(out, func(i, j int) bool { return strings.TrimSpace(out[i].EventType()) < strings.TrimSpace(out[j].EventType()) })
+	sort.SliceStable(out, func(i, j int) bool {
+		return strings.TrimSpace(out[i].EventType()) < strings.TrimSpace(out[j].EventType())
+	})
 	return out
 }
 
 func sortedOutputPins(pins []runtimecontracts.CompiledFlowOutputPin) []runtimecontracts.CompiledFlowOutputPin {
 	out := append([]runtimecontracts.CompiledFlowOutputPin(nil), pins...)
-	sort.SliceStable(out, func(i, j int) bool { return strings.TrimSpace(out[i].EventType()) < strings.TrimSpace(out[j].EventType()) })
+	sort.SliceStable(out, func(i, j int) bool {
+		return strings.TrimSpace(out[i].EventType()) < strings.TrimSpace(out[j].EventType())
+	})
 	return out
 }
