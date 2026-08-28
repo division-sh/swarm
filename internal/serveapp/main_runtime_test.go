@@ -1523,6 +1523,7 @@ func TestRunForkEndToEndPostgresCapturesCompleteRevisionHistory(t *testing.T) {
 	endpoint := "http://" + serveRuntimeAPIListenerFromOutput(t, serve.outputString()) + "/v1/rpc"
 
 	proof := runServedEventPublishFollowUpProof(t, endpoint, db, "postgres", bundleHash, probe)
+	requirePersistedRunForkBranchAuthority(t, db, proof.RunID, proof.FollowUpEventID)
 
 	amendedContractsPath := writeServedEventPublishFollowUpFixture(t)
 	packagePath := filepath.Join(amendedContractsPath, "package.yaml")
@@ -1567,8 +1568,18 @@ func TestRunForkEndToEndPostgresCapturesCompleteRevisionHistory(t *testing.T) {
 		t.Fatalf("reopen PostgreSQL runtime store: %v", err)
 	}
 	t.Cleanup(func() { _ = storetest.DatabaseForTest(reopened).Close() })
+	storetest.BootstrapPostgresRuntimeStore(t, reopened)
+	plan, err := reopened.PlanRunFork(context.Background(), runfork.RunForkPlanRequest{
+		SourceRunID: proof.RunID,
+		At:          proof.FollowUpEventID,
+	})
+	if err != nil {
+		t.Fatalf("load persisted restart fork authority: %v", err)
+	}
+	if plan.ForkPoint.EventID != proof.FollowUpEventID || plan.ForkPoint.Revision <= 0 || plan.SourceRunID != proof.RunID {
+		t.Fatalf("persisted restart fork authority = %#v", plan.ForkPoint)
+	}
 	buildStoresForServe = func(ctx context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-		storetest.BootstrapPostgresRuntimeStore(t, reopened)
 		return openSelectedPostgresOwner(t, dsn, storetest.DatabaseForTest(reopened), cfg), nil
 	}
 
@@ -1613,6 +1624,34 @@ func TestRunForkEndToEndPostgresCapturesCompleteRevisionHistory(t *testing.T) {
 	if code := restarted.stop(); code != 0 {
 		t.Fatalf("restarted served runtime exit code = %d\noutput:\n%s", code, restarted.outputString())
 	}
+}
+
+func requirePersistedRunForkBranchAuthority(t *testing.T, db *sql.DB, runID, eventID string) {
+	t.Helper()
+	deadline := time.Now().Add(servedProofPollDeadline)
+	var status string
+	var eventRevision, headRevision int64
+	var lastErr error
+	for time.Now().Before(deadline) {
+		lastErr = db.QueryRowContext(context.Background(), `
+			SELECT r.status, f.revision, h.last_revision
+			FROM runs r
+			JOIN run_fork_fact_revisions f
+			  ON f.run_id = r.run_id
+			 AND f.family = 'events'
+			 AND f.fact_key = $2
+			 AND f.present
+			JOIN run_fork_revision_heads h ON h.run_id = r.run_id
+			WHERE r.run_id = $1::uuid
+			ORDER BY f.revision
+			LIMIT 1
+		`, runID, eventID).Scan(&status, &eventRevision, &headRevision)
+		if lastErr == nil && status == "completed" && eventRevision > 0 && headRevision >= eventRevision {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("persisted restart fork authority for run=%s event=%s = status:%q event_revision:%d head_revision:%d err:%v", runID, eventID, status, eventRevision, headRevision, lastErr)
 }
 
 func requireServedRunForkCounterfactualCompleted(t *testing.T, db *sql.DB, forkRunID string, wantDeliveredEvents int) {

@@ -16656,6 +16656,23 @@ run_model:
     planning_owner: 'Fork planning/admission is owned by the canonical store-backed fork planner. CLI,
       Builder, dashboard, and other operator surfaces MUST consume that owner and MUST NOT reimplement
       fork planning with direct SQL joins.'
+    selected_contract_lifecycle_owner: >
+      Selected-contract materialization, activation, and discard are each interpreted once by the backend-neutral
+      selected-contract run-fork owner. PostgreSQL and SQLite provide only private operation-specific transaction,
+      lock, read, write, and finalize ports; they MUST NOT independently interpret lifecycle status, duplicate
+      disposition, source advancement, source freeze, route recovery, blocker meaning, cleanup, or result semantics.
+      Planning that guards one of these mutations executes inside the same source/fork-locked transaction. A generic
+      repository, backend switch, ambient transaction detection, compatibility path, or backend-owned semantic
+      state machine is forbidden.
+    source_and_fork_projection_identity: >
+      Historical source lookup identity and fork-local projection identity are separate mandatory facts. Source
+      entity, flow-instance, decision-card, and proposed-effect rows are selected only by their persisted source
+      coordinates. Copied fork authority is then re-keyed explicitly to the projected fork entity and flow instance,
+      including StageGateAnchor route and routing source plus proposed-effect continuation, scope, routing source,
+      source run, event lineage, and content hash. For the canonical root entity, source coordinates are
+      {source_run_id, source_run_id} and fork coordinates are {fork_run_id, fork_run_id}; one coordinate MUST NOT be
+      reused for both lookup and projection. Both stores must prove that copied root stage-gate and proposed-effect
+      authority remains executable through the canonical decision/effect operations.
     mutation_locking: >
       PostgreSQL fork materialization, selected-contract runtime issuance, source-event preparation, and activation use
       READ COMMITTED transactions plus the canonical source/fork lifecycle row locks, owner-specific binding locks,
@@ -16695,14 +16712,15 @@ run_model:
         external work. Retained-run deletion emits present=false for every removed fact in the same transaction.
       read_contract: >-
         PostgreSQL and SQLite private adapters validate and decode the same twelve-family historical projection.
-        PlanRunFork currently exposes the PostgreSQL public consumer: it resolves the event UUID to its first revision
+        PlanRunFork exposes the same selected-store consumer on both backends: it resolves the event UUID to its first revision
         and reads all twelve families through one read-only repeatable-read snapshot. Every generic and selected
         planning, readiness, materialization, and historical activation replan consumes that projection. RunForkPoint carries the exact selected event's
-        normalized revisioned source_route for both explicit event and implicit latest selection. Selected route-history
+        normalized revisioned source_route and a canonical UTC timestamp for both explicit event and implicit latest
+        selection. Selected route-history
         lookup and dynamic flow-instance accounting consume that typed fork-point fact even when no delivery row exists;
         they MUST NOT recover it from an event name, current route state, receiver flow_instance, or a synthetic delivery.
         Missing, ambiguous, lineage-invalid, partially deleted, or unrevisioned facts fail closed; old stores are unsupported
-        and must be recreated. SQLite does not expose the public fork mutation/planning surface in this contract.
+        and must be recreated.
       route_projection: >-
         Global routing_rules are current unversioned state and are never queried as historical authority. The fixed
         projection emits not_applicable when no route-relevant source fact exists and unknown_unversioned otherwise.
@@ -37592,7 +37610,7 @@ llm_completion_execution_authority:
     unavailable_accounting: One synthetic spend row uses MAX reservation amount, usage_accounting estimated, and accounting_basis accounting_unavailable_exhaustion; reservations are deleted in the same transaction.
   selected_fork:
     issuer: run_fork_selected_contract_runtime_executions is the sole container-generation issuer. The non-mutating admission is prerequisite evidence, never the execution grant.
-    lifecycle: prepared -> running -> quiesced -> closed; prepared or running may become failed, then closed. Successful quiescence consumes one store-owned current-authority guard that atomically binds execution ID, fork run, generation, all four fingerprints, owner/fence, database-time lease freshness, and absence of live child attempts before transition.
+    lifecycle: prepared -> running -> quiesced -> closed; prepared or running may become failed, then closed. Successful quiescence consumes one store-owned current-authority guard that atomically binds execution ID, fork run, generation, all four fingerprints, owner/fence, database-time lease freshness, and absence of live child attempts before transition. Runtime execution admission, claim, launch, and new child effects require an active fork run. Exact fenced quiescence/failure and terminal close are completion finalizers and remain available after accepted fork-local work terminalizes the run; they MUST NOT reuse the active-run admission guard or leave a live execution generation behind a completed run.
     uniqueness: Exactly one non-closed current generation exists per fork, including when no budget cap applies. Fingerprint conflict, stale generation/owner/fence, quiesced/terminal reuse, and second-process claim fail before provider launch.
     cleanup: Mutable cleanup quiesces/closes the authority, retains the cancelled runs parent tombstone, and preserves authority, effect attempt, turn/usage, spend, terminal evidence, and their foreign-key validity.
     backend: Authority schema/issuance/fencing/settlement/recovery and the selected-contract served lifecycle are parity obligations on SQLite and PostgreSQL. SQLite support is the selected local/dev single-process surface; cross-process SQLite competition remains unsupported and receives no emulation, while PostgreSQL retains the process-competition proof.
