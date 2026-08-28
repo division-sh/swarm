@@ -42,37 +42,20 @@ store_parity:
       constructor: OpenRuntime
       consumers: [internal/serveapp/main.go, internal/serveapp/store_runtime.go, internal/serveapp/store_capabilities.go]
       semantic_owner: internal/store/selected.Owner
-      claim_ids: [store_infrastructure, resource_data, bundle_catalog, bundle_delete, event_delivery, author_activity, run_fork_revision, operator_channels, agent_lifecycle, external_effects, selected_contract_fork, workflow_runtime, session_conversation, mailbox_decision, api_idempotency, runtime_controls, budget_spend, timer_schedule, scenario_execution, observability, destructive_reset, non_store_transport]
-      proof_profile: pr-common
-      proof_refs:
-        - {kind: go_test, name: TestOpenRuntimeSQLiteResolvesRequiredAndOptionalProductsOnce, path: internal/store/selected/selected_test.go}
-        - {kind: go_test, name: TestOpenRuntimePostgresResolvesRequiredAndOptionalBundleWritersOnce, path: internal/store/selected/selected_test.go}
-        - {kind: go_test, name: TestServeCompositionProvidesExactRuntimePorts, path: internal/runtime/persistence_ownership_guard_test.go}
-      close_proof_refs:
-        - {kind: go_test, name: TestPostgresFailedPingClosesTheConstructedPool, path: internal/store/selected/selected_test.go}
-        - {kind: go_test, name: TestOwnerUnactivatedCloseFailureRetainsCloseAuthority, path: internal/store/selected/selected_test.go}
+      proof_ids: [runtime-open-sqlite, runtime-open-postgres, runtime-port-projection]
+      close_proof_ids: [runtime-close-postgres-ping, runtime-close-unactivated]
     - id: authority_inspection
       constructor: OpenAuthorityInspection
       consumers: [internal/cliapp/store_authority.go]
       semantic_owner: internal/runtime/startupownership inspection through internal/store/selected
-      claim_ids: [startup_authority]
-      proof_profile: pr-common
-      proof_refs:
-        - {kind: go_test, name: TestStoreStatusReadsCurrentSQLiteStoreWithoutMutationBootstrap, path: internal/cliapp/store_authority_test.go}
-        - {kind: go_test, name: TestStoreStatusDoesNotBootstrapEmptyPostgres, path: internal/cliapp/store_authority_test.go}
-      close_proof_refs:
-        - {kind: go_test, name: TestAuthorityInspectionPropagatesOperationAndCloseErrors, path: internal/cliapp/store_authority_test.go}
+      proof_ids: [authority-inspection-sqlite, authority-inspection-postgres]
+      close_proof_ids: [authority-inspection-close]
     - id: authority_maintenance
       constructor: OpenAuthorityMaintenance
       consumers: [internal/cliapp/store_authority.go]
       semantic_owner: internal/runtime/startupownership maintenance through internal/store/selected
-      claim_ids: [startup_authority]
-      proof_profile: pr-common
-      proof_refs:
-        - {kind: go_test, name: TestAuthorityRepairParity, path: internal/store/internal/runtimepersistence/runtime_startup_ownership_test.go}
-        - {kind: go_test, name: TestSQLiteAuthorityMaintenanceConstructionRetainsBackendPossession, path: internal/cliapp/store_authority_test.go}
-      close_proof_refs:
-        - {kind: go_test, name: TestAuthorityMaintenancePropagatesCloseError, path: internal/cliapp/store_authority_test.go}
+      proof_ids: [authority-repair-parity, authority-maintenance-sqlite]
+      close_proof_ids: [authority-maintenance-close]
   different_construction:
     runtime_deps: [Config, Options, StartupGrant]
   composite_owners:
@@ -88,44 +71,189 @@ store_parity:
     - {id: product_run_fork, parent: productPorts.runFork, role_source_path: internal/store/selected/selected.go, role_type: RunFork}
     - {id: product_destructive_reset, parent: productPorts.destructiveReset, role_source_path: internal/store/selected/selected.go, role_type: DestructiveReset}
     - {id: product_startup_recovery, parent: productPorts.startupRecovery, role_source_path: internal/store/selected/selected.go, role_type: StartupRecovery}
+  proof_catalog:
+    - {id: runtime-open-sqlite, kind: go_test, name: TestOpenRuntimeSQLiteResolvesRequiredAndOptionalProductsOnce, path: internal/store/selected/selected_test.go, profile: pr-common, backends: [default_sqlite], purpose_ids: [runtime]}
+    - id: runtime-open-postgres
+      kind: go_test
+      name: TestOpenRuntimePostgresResolvesRequiredAndOptionalBundleWritersOnce
+      path: internal/store/selected/selected_test.go
+      profile: pr-common
+      backends: [explicit_postgres]
+      purpose_ids: [runtime]
+      capabilities: [{claim_id: store_infrastructure, risk_dimensions: [structural_census, selected_construction]}]
+    - id: runtime-port-projection
+      kind: go_test
+      name: TestServeCompositionProvidesExactRuntimePorts
+      path: internal/runtime/persistence_ownership_guard_test.go
+      profile: pr-common
+      purpose_ids: [runtime]
+      capabilities:
+        - {claim_id: store_infrastructure}
+        - {claim_id: resource_data}
+        - {claim_id: bundle_catalog}
+        - {claim_id: bundle_delete}
+        - {claim_id: event_delivery}
+        - {claim_id: author_activity}
+        - {claim_id: run_fork_revision}
+        - {claim_id: operator_channels}
+        - {claim_id: agent_lifecycle}
+        - {claim_id: external_effects}
+        - {claim_id: selected_contract_fork}
+        - {claim_id: workflow_runtime}
+        - {claim_id: session_conversation}
+        - {claim_id: mailbox_decision}
+        - {claim_id: api_idempotency}
+        - {claim_id: runtime_controls}
+        - {claim_id: budget_spend}
+        - {claim_id: timer_schedule}
+        - {claim_id: scenario_execution}
+        - {claim_id: observability}
+        - {claim_id: destructive_reset}
+    - {id: runtime-close-postgres-ping, kind: go_test, name: TestPostgresFailedPingClosesTheConstructedPool, path: internal/store/selected/selected_test.go, profile: pr-common, purpose_ids: [runtime]}
+    - {id: runtime-close-unactivated, kind: go_test, name: TestOwnerUnactivatedCloseFailureRetainsCloseAuthority, path: internal/store/selected/selected_test.go, profile: pr-common, purpose_ids: [runtime]}
+    - id: authority-inspection-sqlite
+      kind: go_test
+      name: TestStoreStatusReadsCurrentSQLiteStoreWithoutMutationBootstrap
+      path: internal/cliapp/store_authority_test.go
+      profile: pr-common
+      backends: [default_sqlite]
+      purpose_ids: [authority_inspection]
+      capabilities: [{claim_id: startup_authority, risk_dimensions: [selected_construction]}]
+    - id: authority-inspection-postgres
+      kind: go_test
+      name: TestStoreStatusDoesNotBootstrapEmptyPostgres
+      path: internal/cliapp/store_authority_test.go
+      profile: pr-common
+      backends: [explicit_postgres]
+      purpose_ids: [authority_inspection]
+      capabilities: [{claim_id: startup_authority, risk_dimensions: [selected_construction]}]
+    - {id: authority-inspection-close, kind: go_test, name: TestAuthorityInspectionPropagatesOperationAndCloseErrors, path: internal/cliapp/store_authority_test.go, profile: pr-common, purpose_ids: [authority_inspection]}
+    - id: authority-repair-parity
+      kind: go_test
+      name: TestAuthorityRepairParity
+      path: internal/store/internal/runtimepersistence/runtime_startup_ownership_test.go
+      profile: pr-common
+      backends: [default_sqlite, explicit_postgres]
+      purpose_ids: [authority_maintenance]
+      capabilities: [{claim_id: startup_authority, risk_dimensions: [selected_construction, fail_closed]}]
+    - id: authority-maintenance-sqlite
+      kind: go_test
+      name: TestSQLiteAuthorityMaintenanceConstructionRetainsBackendPossession
+      path: internal/cliapp/store_authority_test.go
+      profile: pr-common
+      backends: [default_sqlite]
+      purpose_ids: [authority_maintenance]
+      capabilities: [{claim_id: startup_authority}]
+    - {id: authority-maintenance-close, kind: go_test, name: TestAuthorityMaintenancePropagatesCloseError, path: internal/cliapp/store_authority_test.go, profile: pr-common, purpose_ids: [authority_maintenance]}
+    - {id: store-infrastructure-sqlite, kind: go_test, name: TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore, path: internal/serveapp/store_backend_selection_test.go, profile: pr-common, backends: [default_sqlite], capabilities: [{claim_id: store_infrastructure, risk_dimensions: [structural_census, selected_construction]}]}
+    - {id: schema-ddl, kind: go_test, name: TestGeneratePlatformTableDDLs, path: internal/store/internal/schemastore/ddl_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: store_infrastructure, risk_dimensions: [schema_coherence, proof_schedule]}]}
+    - {id: resource-data-surface, kind: go_test, name: TestDurableDataHTTPPublicSurfaceAcrossSelectedStores, path: internal/apiv1/operator_data_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: resource_data, risk_dimensions: [real_v1_handler, served_lifecycle]}]}
+    - {id: served-bundle-register, kind: go_test, name: TestServedParityHarnessBundleRegisterLifecycle, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: bundle_catalog, risk_dimensions: [selected_construction, real_v1_handler, served_lifecycle]}]}
+    - {id: bundle-delete-postgres, kind: go_test, name: TestRunServeRuntimeBundleDeleteForceQuiescesSessionWriterBeforeCleanupPostgres, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [explicit_postgres], capabilities: [{claim_id: bundle_delete, risk_dimensions: [writer_ownership]}]}
+    - id: sqlite-optional-mutators-fail-closed
+      kind: go_test
+      name: TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed
+      path: internal/serveapp/main_runtime_test.go
+      profile: pr-common
+      backends: [default_sqlite]
+      capabilities:
+        - {claim_id: bundle_delete, risk_dimensions: [fail_closed]}
+        - {claim_id: selected_contract_fork, risk_dimensions: [fail_closed]}
+        - {claim_id: destructive_reset, risk_dimensions: [fail_closed]}
+    - {id: served-event-publish, kind: go_test, name: TestServedParityHarnessEventPublishDynamicAutoEmitLifecycle, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: event_delivery, risk_dimensions: [served_lifecycle, writer_ownership]}]}
+    - {id: served-event-replay, kind: go_test, name: TestServedParityHarnessLiveAgentEventReplayLifecycle, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: event_delivery, risk_dimensions: [served_lifecycle, writer_ownership]}]}
+    - {id: event-bus-roles, kind: go_test, name: TestEventBusDurableDependenciesAreExplicit, path: internal/runtime/persistence_ownership_guard_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: event_delivery, risk_dimensions: [writer_ownership]}]}
+    - {id: author-activity-parity, kind: go_test, name: TestAuthorActivityRollbackReusesSequenceOnBothStores, path: internal/store/internal/runtimepersistence/author_activity_adapter_parity_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: author_activity, risk_dimensions: [writer_ownership]}]}
+    - {id: run-fork-revision-parity, kind: go_test, name: TestRunForkRevisionTwelveFamilySelectedStoreParity, path: internal/store/internal/runtimepersistence/run_fork_revision_selected_store_parity_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: run_fork_revision, risk_dimensions: [structural_census, writer_ownership]}]}
+    - {id: operator-channel-surface, kind: go_test, name: TestServedParityHarnessOperatorChannelLifecycle, path: internal/store/internal/runtimepersistence/operator_channel_supported_surface_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: operator_channels, risk_dimensions: [real_v1_handler, served_lifecycle]}]}
+    - {id: served-agent-restart, kind: go_test, name: TestServedParityHarnessAgentRestartLifecycle, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: agent_lifecycle, risk_dimensions: [served_lifecycle]}]}
+    - {id: served-agent-directive, kind: go_test, name: TestServedParityHarnessAgentDirectiveOutcomeLifecycle, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: agent_lifecycle, risk_dimensions: [served_lifecycle]}]}
+    - {id: agent-manager-roles, kind: go_test, name: TestAgentManagerPersistenceRolesAreExplicit, path: internal/runtime/persistence_ownership_guard_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: agent_lifecycle, risk_dimensions: [served_lifecycle]}]}
+    - {id: external-effect-recovery, kind: go_test, name: TestExternalEffectRecoveryPostureAdmissionGenericSQLiteAndPostgres, path: internal/store/internal/runtimepersistence/external_effect_recovery_posture_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: external_effects, risk_dimensions: [writer_ownership]}]}
+    - {id: selected-contract-fork-postgres, kind: go_test, name: TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersistedIdentity, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [explicit_postgres], capabilities: [{claim_id: selected_contract_fork, risk_dimensions: [served_lifecycle]}]}
+    - {id: workflow-settlement-parity, kind: go_test, name: TestWorkflowEngineMutationSettlesExactNodeDeliveryAtomicallyOnBothStores, path: internal/store/internal/runtimepersistence/workflow_engine_delivery_settlement_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: workflow_runtime, risk_dimensions: [writer_ownership]}]}
+    - {id: served-test-setup, kind: go_test, name: TestServedParityHarnessTestSetupEntitiesLifecycle, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: workflow_runtime, risk_dimensions: [served_lifecycle]}]}
+    - {id: workflow-opaque-owner, kind: go_test, name: TestWorkflowPersistenceIsOpaqueAndConcreteStoreDoesNotEscape, path: internal/runtime/persistence_ownership_guard_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: workflow_runtime, risk_dimensions: [writer_ownership]}]}
+    - {id: conversation-sqlite, kind: go_test, name: TestSQLiteAgentConversationOwnerBacksSupportedAPISurface, path: internal/apiv1/sqlite_operator_read_supported_surface_test.go, profile: pr-common, backends: [default_sqlite], capabilities: [{claim_id: session_conversation, risk_dimensions: [real_v1_handler, read_snapshot]}]}
+    - {id: conversation-postgres, kind: go_test, name: TestPostgresAgentConversationOwnerBacksSupportedAPISurface, path: internal/apiv1/selected_store_read_supported_surface_test.go, profile: pr-common, backends: [explicit_postgres], capabilities: [{claim_id: session_conversation, risk_dimensions: [real_v1_handler, read_snapshot]}]}
+    - {id: served-conversation-fork, kind: go_test, name: TestServedParityHarnessConversationForkLifecycle, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: session_conversation, risk_dimensions: [real_v1_handler, read_snapshot]}]}
+    - {id: served-mailbox-decision, kind: go_test, name: TestServedParityHarnessMailboxDecisionLifecycle, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: mailbox_decision, risk_dimensions: [served_lifecycle]}]}
+    - {id: api-idempotency-sqlite, kind: go_test, name: TestSQLiteRuntimeStoreAPIIdempotencySerializesAcrossSamePathHandles, path: internal/store/internal/runtimepersistence/sqlite_runtime_test.go, profile: pr-common, backends: [default_sqlite], capabilities: [{claim_id: api_idempotency, risk_dimensions: [real_v1_handler, writer_ownership]}]}
+    - {id: api-idempotency-postgres, kind: go_test, name: TestPostgresStore_APIIdempotencyReplaysAndConflicts, path: internal/store/internal/runtimepersistence/mailbox_v1_test.go, profile: pr-common, backends: [explicit_postgres], capabilities: [{claim_id: api_idempotency, risk_dimensions: [real_v1_handler, writer_ownership]}]}
+    - {id: served-run-control, kind: go_test, name: TestServedParityHarnessRunControlLifecycle, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: runtime_controls, risk_dimensions: [served_lifecycle]}]}
+    - {id: served-ingress-control, kind: go_test, name: TestServedParityHarnessRuntimeIngressControlLifecycle, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: runtime_controls, risk_dimensions: [served_lifecycle]}]}
+    - {id: budget-recovery-parity, kind: go_test, name: TestCompletionBudgetRecoveryProjectionParity, path: internal/runtime/budget_recovery_parity_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: budget_spend, risk_dimensions: [writer_ownership]}]}
+    - {id: timer-schedule-parity, kind: go_test, name: TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRuntimeOnBothStores, path: internal/runtime/workflow_timer_startup_recovery_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: timer_schedule, risk_dimensions: [writer_ownership]}]}
+    - {id: scenario-execution-sqlite, kind: go_test, name: TestSQLiteScenarioSetupPersistsExactExecutionProfileAtomically, path: internal/store/internal/runtimepersistence/scenario_setup_test.go, profile: pr-common, backends: [default_sqlite], capabilities: [{claim_id: scenario_execution, risk_dimensions: [writer_ownership]}]}
+    - {id: scenario-execution-postgres, kind: go_test, name: TestPostgresScenarioSetupPersistsExactExecutionProfileAtomically, path: internal/store/internal/runtimepersistence/scenario_setup_test.go, profile: pr-common, backends: [explicit_postgres], capabilities: [{claim_id: scenario_execution, risk_dimensions: [writer_ownership]}]}
+    - {id: observability-sqlite, kind: go_test, name: TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability, path: internal/store/internal/runtimepersistence/runtime_log_persistence_test.go, profile: pr-common, backends: [default_sqlite], capabilities: [{claim_id: observability, risk_dimensions: [read_snapshot, writer_ownership]}]}
+    - {id: observability-postgres, kind: go_test, name: TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage, path: internal/store/internal/runtimepersistence/runtime_log_persistence_test.go, profile: pr-common, backends: [explicit_postgres], capabilities: [{claim_id: observability, risk_dimensions: [read_snapshot, writer_ownership]}]}
+    - {id: destructive-reset-postgres, kind: go_test, name: TestRunServeRuntimeNukeQuiescesSessionWriterBeforeCleanupPostgres, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [explicit_postgres], capabilities: [{claim_id: destructive_reset, risk_dimensions: [writer_ownership]}]}
+    - {id: websocket-different-concept, kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes, path: internal/apiv1/openrpc_ws_runtime_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: non_store_transport, risk_dimensions: [structural_census, proof_schedule]}]}
+    - id: golden-forced-restart
+      kind: go_test
+      name: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends
+      path: internal/releasee2e/golden_agent_workload_test.go
+      profile: full
+      backends: [default_sqlite, explicit_postgres]
+      capabilities:
+        - {claim_id: bundle_catalog, risk_dimensions: [restart]}
+        - {claim_id: event_delivery, risk_dimensions: [restart]}
+        - {claim_id: agent_lifecycle, risk_dimensions: [restart, forced_death]}
+        - {claim_id: workflow_runtime, risk_dimensions: [restart]}
+        - {claim_id: session_conversation, risk_dimensions: [restart]}
+        - {claim_id: startup_authority, risk_dimensions: [restart, forced_death]}
+        - {claim_id: observability, risk_dimensions: [restart]}
+    - id: backend-split-2276
+      kind: tracker
+      issue: 2276
+      watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
+      capabilities: [{claim_id: bundle_delete}, {claim_id: selected_contract_fork}]
+    - id: fanout-contention-2274
+      kind: tracker
+      issue: 2274
+      watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
+      capabilities:
+        - {claim_id: event_delivery, risk_dimensions: [contention]}
+        - {claim_id: agent_lifecycle, risk_dimensions: [contention]}
+    - id: dev-restart-abandonment-2364
+      kind: tracker
+      issue: 2364
+      watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
+      capabilities: [{claim_id: startup_authority, risk_dimensions: [dev_forced_restart_abandonment]}]
   claims:
     - id: store_infrastructure
       semantic_owners: [internal/store/selected, internal/store/internal/schemastore]
+      selected_purposes: [runtime]
       backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
       risk_dimensions: [structural_census, selected_construction, schema_coherence, proof_schedule]
       evidence:
-        - role: backend_support
-          backends: [default_sqlite, explicit_postgres]
-          risk_dimensions: [structural_census, selected_construction, schema_coherence, proof_schedule]
-          proof_profile: pr-common
-          proof_refs:
-            - {kind: go_test, name: TestBuildStoresAcceptsSQLiteSelectedCoreRuntimeStore, path: internal/serveapp/store_backend_selection_test.go, backends: [default_sqlite]}
-            - {kind: go_test, name: TestOpenRuntimePostgresResolvesRequiredAndOptionalBundleWritersOnce, path: internal/store/selected/selected_test.go, backends: [explicit_postgres]}
-            - {kind: go_test, name: TestGeneratePlatformTableDDLs, path: internal/store/internal/schemastore/ddl_test.go, backends: [default_sqlite, explicit_postgres]}
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [structural_census, selected_construction, schema_coherence, proof_schedule], proof_ids: [store-infrastructure-sqlite, runtime-open-postgres, schema-ddl]}
       required_ports: [schema, workspace, pinger]
       platform_tables: [runtime_store_metadata]
       public_methods: [health.check]
     - id: resource_data
       semantic_owners: [internal/store/resource, internal/apiv1 data surface]
+      selected_purposes: [runtime]
       backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
-      risk_dimensions: [real_v1_handler, served_lifecycle, restart]
+      risk_dimensions: [real_v1_handler, served_lifecycle]
       evidence:
-        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [real_v1_handler, served_lifecycle], proof_profile: pr-common, proof_refs: [{kind: go_test, name: TestDurableDataHTTPPublicSurfaceAcrossSelectedStores, path: internal/apiv1/operator_data_test.go, backends: [default_sqlite, explicit_postgres]}]}
-        - {role: risk_proof, risk_dimensions: [restart], proof_profile: full, proof_refs: [{kind: go_test, name: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends, path: internal/releasee2e/golden_agent_workload_test.go, backends: [default_sqlite, explicit_postgres]}]}
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [real_v1_handler, served_lifecycle], proof_ids: [resource-data-surface]}
       required_ports: [data, dataAccess]
       runtime_deps: [ToolEntityStore, DataAccessStore]
       platform_tables: [resource_bundle_declarations, resource_declarations, resource_head_history, resource_heads, resource_prune_invocations, resource_prune_pin_evidence, resource_run_creation_child_evaluations, resource_run_creation_child_reservations, resource_run_creation_operations, resource_source_invocations, resource_version_pins, resource_version_provenance, resource_versions, bundle_static_data]
       public_methods: [data.check, data.import, data.prune, data.show]
     - id: bundle_catalog
       semantic_owners: [internal/store/selected bundle catalog and ingest]
+      selected_purposes: [runtime]
       backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
       risk_dimensions: [selected_construction, real_v1_handler, served_lifecycle, restart]
       evidence:
-        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [selected_construction, real_v1_handler, served_lifecycle], proof_profile: pr-common, proof_refs: [{kind: go_test, name: TestServedParityHarnessBundleRegisterLifecycle, path: internal/serveapp/main_runtime_test.go, backends: [default_sqlite, explicit_postgres]}]}
-        - {role: risk_proof, risk_dimensions: [restart], proof_profile: full, proof_refs: [{kind: go_test, name: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends, path: internal/releasee2e/golden_agent_workload_test.go, backends: [default_sqlite, explicit_postgres]}]}
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [selected_construction, real_v1_handler, served_lifecycle], proof_ids: [served-bundle-register]}
+        - {role: risk_proof, risk_dimensions: [restart], proof_ids: [golden-forced-restart]}
       required_ports: [runBundleContext, runBundleAvailability, serveBundleIngest]
       runtime_deps: [RunBundleAvailability]
       optional_products: [bundleCatalog, bundleRegister]
@@ -133,87 +261,75 @@ store_parity:
       public_methods: [bundle.register, bundle.agents, bundle.get, bundle.list]
     - id: bundle_delete
       semantic_owners: [internal/apiv1 bundle.delete, internal/store/selected.BundleDelete]
+      selected_purposes: [runtime]
       backend_dispositions: {default_sqlite: split_with_active_issue_and_fail_closed_proof, explicit_postgres: supported_with_dual_backend_proof}
       split_issue: 2276
+      split_proof_id: backend-split-2276
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.bundle_delete]
-      risk_dimensions: [fail_closed, writer_ownership, restart]
-      split_tracker: {kind: tracker, issue: 2276, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}
+      risk_dimensions: [fail_closed, writer_ownership]
       evidence:
-        - {role: backend_support, backends: [explicit_postgres], risk_dimensions: [writer_ownership], proof_profile: pr-common, proof_refs: [{kind: go_test, name: TestRunServeRuntimeBundleDeleteForceQuiescesSessionWriterBeforeCleanupPostgres, path: internal/serveapp/main_runtime_test.go, backends: [explicit_postgres]}]}
-        - {role: teaching_failure, backends: [default_sqlite], risk_dimensions: [fail_closed], proof_profile: pr-common, proof_refs: [{kind: go_test, name: TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed, path: internal/serveapp/main_runtime_test.go, backends: [default_sqlite]}]}
-        - {role: risk_proof, risk_dimensions: [restart], proof_profile: full, proof_refs: [{kind: go_test, name: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends, path: internal/releasee2e/golden_agent_workload_test.go, backends: [default_sqlite, explicit_postgres]}]}
+        - {role: backend_support, backends: [explicit_postgres], risk_dimensions: [writer_ownership], proof_ids: [bundle-delete-postgres]}
+        - {role: teaching_failure, backends: [default_sqlite], risk_dimensions: [fail_closed], proof_ids: [sqlite-optional-mutators-fail-closed]}
       optional_products: [bundleDelete]
       nested_roles: {product_bundle_delete: [planner, cleaner, locks]}
       platform_tables: [agent_topology_source_set_head, agent_topology_source_set_operations, bundle_delete_final_mutation_replays]
       public_methods: [bundle.delete]
     - id: event_delivery
       semantic_owners: [internal/runtime/bus, internal/store event persistence]
+      selected_purposes: [runtime]
       backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
       risk_dimensions: [served_lifecycle, restart, contention, writer_ownership]
       evidence:
-        - role: backend_support
-          backends: [default_sqlite, explicit_postgres]
-          risk_dimensions: [served_lifecycle, writer_ownership]
-          proof_profile: pr-common
-          proof_refs:
-            - {kind: go_test, name: TestServedParityHarnessEventPublishDynamicAutoEmitLifecycle, path: internal/serveapp/main_runtime_test.go, backends: [default_sqlite, explicit_postgres]}
-            - {kind: go_test, name: TestServedParityHarnessLiveAgentEventReplayLifecycle, path: internal/serveapp/main_runtime_test.go, backends: [default_sqlite, explicit_postgres]}
-            - {kind: go_test, name: TestEventBusDurableDependenciesAreExplicit, path: internal/runtime/persistence_ownership_guard_test.go, backends: [default_sqlite, explicit_postgres]}
-        - {role: risk_proof, risk_dimensions: [restart], proof_profile: full, proof_refs: [{kind: go_test, name: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends, path: internal/releasee2e/golden_agent_workload_test.go, backends: [default_sqlite, explicit_postgres]}]}
-        - {role: risk_split, risk_dimensions: [contention], tracker: {kind: tracker, issue: 2274, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}}
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [served_lifecycle, writer_ownership], proof_ids: [served-event-publish, served-event-replay, event-bus-roles]}
+        - {role: risk_proof, risk_dimensions: [restart], proof_ids: [golden-forced-restart]}
+        - {role: risk_split, risk_dimensions: [contention], proof_ids: [fanout-contention-2274]}
       runtime_deps: [EventStore, EventBusDurable, EventPayloadValidationBinder, DeliveryStore]
       nested_roles: {runtime_event_bus: [ReplyContext, RunLifecycle, DeliveryLifecycle, FlowRoutes, FlowRouteRecords, FlowRouteSets, FlowRouteTopology, FlowRouteRollback, ActiveAgents, ActiveFlows, TargetOwners, WorkflowInstances, PreparedEvents, TargetFailureRecorder, RunOrigins]}
       platform_tables: [events, event_deliveries, event_delivery_handler_rule_selections, event_delivery_attempts, event_delivery_outcomes, committed_replay_scopes, run_fork_delivery_event_replays, event_receipts]
       public_methods: [event.publish, event.replay, event.get, event.list, agent.replay, run.start]
     - id: author_activity
       semantic_owners: [internal/store author activity]
+      selected_purposes: [runtime]
       backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
-      risk_dimensions: [writer_ownership, contention]
+      risk_dimensions: [writer_ownership]
       evidence:
-        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [writer_ownership], proof_profile: pr-common, proof_refs: [{kind: go_test, name: TestAuthorActivityRollbackReusesSequenceOnBothStores, path: internal/store/internal/runtimepersistence/author_activity_adapter_parity_test.go, backends: [default_sqlite, explicit_postgres]}]}
-        - {role: risk_split, risk_dimensions: [contention], tracker: {kind: tracker, issue: 2274, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}}
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [writer_ownership], proof_ids: [author-activity-parity]}
       required_ports: [authorActivity]
       runtime_deps: [AuthorActivityRegistrars]
       platform_tables: [author_activity_order, author_activity_occurrences]
     - id: run_fork_revision
       semantic_owners: [internal/store/internal/runtimepersistence run fork revision]
+      selected_purposes: [runtime]
       backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
-      risk_dimensions: [structural_census, writer_ownership, contention]
+      risk_dimensions: [structural_census, writer_ownership]
       evidence:
-        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [structural_census, writer_ownership], proof_profile: pr-common, proof_refs: [{kind: go_test, name: TestRunForkRevisionTwelveFamilySelectedStoreParity, path: internal/store/internal/runtimepersistence/run_fork_revision_selected_store_parity_test.go, backends: [default_sqlite, explicit_postgres]}]}
-        - {role: risk_split, risk_dimensions: [contention], tracker: {kind: tracker, issue: 2274, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}}
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [structural_census, writer_ownership], proof_ids: [run-fork-revision-parity]}
       platform_tables: [run_fork_revision_heads, run_fork_revisions, run_fork_fact_revisions]
     - id: operator_channels
       semantic_owners: [internal/store operator channels]
+      selected_purposes: [runtime]
       backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
-      risk_dimensions: [real_v1_handler, served_lifecycle, restart]
+      risk_dimensions: [real_v1_handler, served_lifecycle]
       evidence:
-        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [real_v1_handler, served_lifecycle], proof_profile: pr-common, proof_refs: [{kind: go_test, name: TestServedParityHarnessOperatorChannelLifecycle, path: internal/store/internal/runtimepersistence/operator_channel_supported_surface_test.go, backends: [default_sqlite, explicit_postgres]}]}
-        - {role: risk_proof, risk_dimensions: [restart], proof_profile: full, proof_refs: [{kind: go_test, name: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends, path: internal/releasee2e/golden_agent_workload_test.go, backends: [default_sqlite, explicit_postgres]}]}
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [real_v1_handler, served_lifecycle], proof_ids: [operator-channel-surface]}
       required_ports: [operatorChannels]
       runtime_deps: [InboundPayloadValidationBinder, InboundStore]
       platform_tables: [operator_principals, operator_channel_operations, operator_channel_bindings, inbound_publications, inbound_publication_events, operator_channel_claim_receipts]
       public_methods: [channel.connect, channel.reconnect, channel.rebind, channel.confirm, channel.unbind, channel.proof_revoke, channel.list]
     - id: agent_lifecycle
       semantic_owners: [internal/runtime/manager, internal/store agent lifecycle]
+      selected_purposes: [runtime]
       backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
       risk_dimensions: [served_lifecycle, restart, forced_death, contention]
       evidence:
-        - role: backend_support
-          backends: [default_sqlite, explicit_postgres]
-          risk_dimensions: [served_lifecycle]
-          proof_profile: pr-common
-          proof_refs:
-            - {kind: go_test, name: TestServedParityHarnessAgentRestartLifecycle, path: internal/serveapp/main_runtime_test.go, backends: [default_sqlite, explicit_postgres]}
-            - {kind: go_test, name: TestServedParityHarnessAgentDirectiveOutcomeLifecycle, path: internal/serveapp/main_runtime_test.go, backends: [default_sqlite, explicit_postgres]}
-            - {kind: go_test, name: TestAgentManagerPersistenceRolesAreExplicit, path: internal/runtime/persistence_ownership_guard_test.go, backends: [default_sqlite, explicit_postgres]}
-        - {role: risk_proof, risk_dimensions: [restart, forced_death], proof_profile: full, proof_refs: [{kind: go_test, name: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends, path: internal/releasee2e/golden_agent_workload_test.go, backends: [default_sqlite, explicit_postgres]}]}
-        - {role: risk_split, risk_dimensions: [contention], tracker: {kind: tracker, issue: 2274, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}}
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [served_lifecycle], proof_ids: [served-agent-restart, served-agent-directive, agent-manager-roles]}
+        - {role: risk_proof, risk_dimensions: [restart, forced_death], proof_ids: [golden-forced-restart]}
+        - {role: risk_split, risk_dimensions: [contention], proof_ids: [fanout-contention-2274]}
       required_ports: [agentUsage, agentDeliveryLifecycle, agents]
       runtime_deps: [ManagerStore, ManagerLifecycleDiagnostics, ManagerPersistenceRoles]
       nested_roles: {runtime_manager: [LifecycleCensus, LifecycleState, LifecycleEffects, LifecycleDiagnostics, EffectsRecovery, DeliveryQuiescence, EventExistence, DirectiveOperations, DirectiveTargets, FlowRoutes]}
@@ -221,44 +337,38 @@ store_parity:
       public_methods: [agent.delivery_diagnostics, agent.delivery_lifecycle, agent.diagnose, agent.get, agent.list, agent.usage, agent.send_directive, agent.restart]
     - id: external_effects
       semantic_owners: [internal/runtime external effects]
+      selected_purposes: [runtime]
       backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
-      risk_dimensions: [restart, forced_death, writer_ownership]
+      risk_dimensions: [writer_ownership]
       evidence:
-        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [writer_ownership], proof_profile: pr-common, proof_refs: [{kind: go_test, name: TestExternalEffectRecoveryPostureAdmissionGenericSQLiteAndPostgres, path: internal/store/internal/runtimepersistence/external_effect_recovery_posture_test.go, backends: [default_sqlite, explicit_postgres]}]}
-        - {role: risk_proof, risk_dimensions: [restart, forced_death], proof_profile: full, proof_refs: [{kind: go_test, name: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends, path: internal/releasee2e/golden_agent_workload_test.go, backends: [default_sqlite, explicit_postgres]}]}
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [writer_ownership], proof_ids: [external-effect-recovery]}
       runtime_deps: [EffectsStore, CompletionStore, CompletionHeartbeatStore, EffectsRecoveryStore, ManagedCapabilitiesStore]
       platform_tables: [runtime_external_effect_operations, runtime_external_effect_attempts, runtime_provider_attempt_drains, reply_contexts, activity_attempts]
     - id: selected_contract_fork
       semantic_owners: [internal/store/selected.RunFork]
+      selected_purposes: [runtime]
       backend_dispositions: {default_sqlite: split_with_active_issue_and_fail_closed_proof, explicit_postgres: supported_with_dual_backend_proof}
       split_issue: 2276
+      split_proof_id: backend-split-2276
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork]
-      risk_dimensions: [fail_closed, served_lifecycle, restart]
-      split_tracker: {kind: tracker, issue: 2276, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}
+      risk_dimensions: [fail_closed, served_lifecycle]
       evidence:
-        - {role: backend_support, backends: [explicit_postgres], risk_dimensions: [served_lifecycle], proof_profile: pr-common, proof_refs: [{kind: go_test, name: TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersistedIdentity, path: internal/serveapp/main_runtime_test.go, backends: [explicit_postgres]}]}
-        - {role: teaching_failure, backends: [default_sqlite], risk_dimensions: [fail_closed], proof_profile: pr-common, proof_refs: [{kind: go_test, name: TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed, path: internal/serveapp/main_runtime_test.go, backends: [default_sqlite]}]}
-        - {role: risk_proof, risk_dimensions: [restart], proof_profile: full, proof_refs: [{kind: go_test, name: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends, path: internal/releasee2e/golden_agent_workload_test.go, backends: [default_sqlite, explicit_postgres]}]}
+        - {role: backend_support, backends: [explicit_postgres], risk_dimensions: [served_lifecycle], proof_ids: [selected-contract-fork-postgres]}
+        - {role: teaching_failure, backends: [default_sqlite], risk_dimensions: [fail_closed], proof_ids: [sqlite-optional-mutators-fail-closed]}
       optional_products: [bundleRuntimeCatalog, runFork]
       nested_roles: {product_run_fork: [planner, availability, activation, executionOwner]}
       platform_tables: [run_fork_selected_contract_bindings, run_fork_selected_contract_branch_divergences, run_fork_selected_contract_executions, run_fork_selected_contract_route_recoveries, run_fork_selected_contract_runtime_executions]
       public_methods: [run.fork]
     - id: workflow_runtime
       semantic_owners: [internal/runtime/pipeline workflow persistence]
+      selected_purposes: [runtime]
       backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
       risk_dimensions: [writer_ownership, served_lifecycle, restart]
       evidence:
-        - role: backend_support
-          backends: [default_sqlite, explicit_postgres]
-          risk_dimensions: [writer_ownership, served_lifecycle]
-          proof_profile: pr-common
-          proof_refs:
-            - {kind: go_test, name: TestWorkflowEngineMutationSettlesExactNodeDeliveryAtomicallyOnBothStores, path: internal/store/internal/runtimepersistence/workflow_engine_delivery_settlement_test.go, backends: [default_sqlite, explicit_postgres]}
-            - {kind: go_test, name: TestServedParityHarnessTestSetupEntitiesLifecycle, path: internal/serveapp/main_runtime_test.go, backends: [default_sqlite, explicit_postgres]}
-            - {kind: go_test, name: TestWorkflowPersistenceIsOpaqueAndConcreteStoreDoesNotEscape, path: internal/runtime/persistence_ownership_guard_test.go, backends: [default_sqlite, explicit_postgres]}
-        - {role: risk_proof, risk_dimensions: [restart], proof_profile: full, proof_refs: [{kind: go_test, name: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends, path: internal/releasee2e/golden_agent_workload_test.go, backends: [default_sqlite, explicit_postgres]}]}
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [writer_ownership, served_lifecycle], proof_ids: [workflow-settlement-parity, served-test-setup, workflow-opaque-owner]}
+        - {role: risk_proof, risk_dimensions: [restart], proof_ids: [golden-forced-restart]}
       required_ports: [runs, entities, testSetup]
       runtime_deps: [WorkflowPersistence, PipelineObligations, MailboxMaterializer]
       nested_roles: {runtime_workflow: [entityquery.Reader, runtimeworkflowroute.RecoveryReader, runtimeactivityresult.Reader, ActivityAttemptJournal, GateRouteAdmissionReader, runtimetimerobligation.Reader, WorkflowEngineMutationOwner, DecisionCardMutationOwner, WorkflowTimerOccurrenceOwner, WorkflowTimerActivationPersistence, DynamicFlowRuntimeReadinessPersistence, StandingServicePersistence, WorkflowDecisionRouteOwner, WorkflowInstancePersistenceReader, WorkflowEntityStatePersistenceReader, WorkflowTargetPersistenceReader, WorkflowInitialMaterializationCommitOwner]}
@@ -266,19 +376,13 @@ store_parity:
       public_methods: [entity.aggregate, entity.get, entity.list, run.diagnose, run.get, run.list, test.setup_entities, standing.suspend, standing.resume, standing.reset]
     - id: session_conversation
       semantic_owners: [internal/runtime session registry, internal/store conversation]
+      selected_purposes: [runtime]
       backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
       risk_dimensions: [real_v1_handler, restart, read_snapshot]
       evidence:
-        - role: backend_support
-          backends: [default_sqlite, explicit_postgres]
-          risk_dimensions: [real_v1_handler, read_snapshot]
-          proof_profile: pr-common
-          proof_refs:
-            - {kind: go_test, name: TestSQLiteAgentConversationOwnerBacksSupportedAPISurface, path: internal/apiv1/sqlite_operator_read_supported_surface_test.go, backends: [default_sqlite]}
-            - {kind: go_test, name: TestPostgresAgentConversationOwnerBacksSupportedAPISurface, path: internal/apiv1/selected_store_read_supported_surface_test.go, backends: [explicit_postgres]}
-            - {kind: go_test, name: TestServedParityHarnessConversationForkLifecycle, path: internal/serveapp/main_runtime_test.go, backends: [default_sqlite, explicit_postgres]}
-        - {role: risk_proof, risk_dimensions: [restart], proof_profile: full, proof_refs: [{kind: go_test, name: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends, path: internal/releasee2e/golden_agent_workload_test.go, backends: [default_sqlite, explicit_postgres]}]}
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [real_v1_handler, read_snapshot], proof_ids: [conversation-sqlite, conversation-postgres, served-conversation-fork]}
+        - {role: risk_proof, risk_dimensions: [restart], proof_ids: [golden-forced-restart]}
       required_ports: [conversations]
       runtime_deps: [SessionRegistry, LiveSessionAcquirer, SessionResetter, ConversationStore]
       optional_products: [conversationFork]
@@ -287,130 +391,101 @@ store_parity:
       public_methods: [conversation.fork, conversation.fork_chat, conversation.fork_delete, conversation.fork_list, conversation.fork_view, conversation.get_turn, conversation.list, conversation.list_turns]
     - id: startup_authority
       semantic_owners: [internal/runtime/startupownership, internal/store/selected authority purposes]
+      selected_purposes: [authority_inspection, authority_maintenance]
       backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
       spec_refs: [platform-spec.yaml#agent_topology_authority]
-      risk_dimensions: [selected_construction, restart, forced_death, fail_closed]
+      risk_dimensions: [selected_construction, restart, forced_death, fail_closed, dev_forced_restart_abandonment]
       evidence:
-        - role: backend_support
-          backends: [default_sqlite, explicit_postgres]
-          risk_dimensions: [selected_construction, fail_closed]
-          proof_profile: pr-common
-          proof_refs:
-            - {kind: go_test, name: TestAuthorityRepairParity, path: internal/store/internal/runtimepersistence/runtime_startup_ownership_test.go, backends: [default_sqlite, explicit_postgres]}
-            - {kind: go_test, name: TestStoreStatusReadsSelectedStoreOwnershipWithoutContextInference, path: internal/cliapp/store_authority_test.go, backends: [default_sqlite, explicit_postgres]}
-        - {role: risk_proof, risk_dimensions: [restart, forced_death], proof_profile: full, proof_refs: [{kind: go_test, name: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends, path: internal/releasee2e/golden_agent_workload_test.go, backends: [default_sqlite, explicit_postgres]}]}
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [selected_construction, fail_closed], proof_ids: [authority-repair-parity, authority-inspection-sqlite, authority-inspection-postgres]}
+        - {role: risk_proof, risk_dimensions: [restart, forced_death], proof_ids: [golden-forced-restart]}
+        - {role: risk_split, risk_dimensions: [dev_forced_restart_abandonment], proof_ids: [dev-restart-abandonment-2364]}
       required_ports: [startupOwnership]
       platform_tables: [runtime_startup_authority_facts, runtime_startup_authority_repairs, runtime_generation_grants]
     - id: mailbox_decision
       semantic_owners: [internal/runtime mailbox]
+      selected_purposes: [runtime]
       backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
-      risk_dimensions: [served_lifecycle, restart, contention]
+      risk_dimensions: [served_lifecycle]
       evidence:
-        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [served_lifecycle], proof_profile: pr-common, proof_refs: [{kind: go_test, name: TestServedParityHarnessMailboxDecisionLifecycle, path: internal/serveapp/main_runtime_test.go, backends: [default_sqlite, explicit_postgres]}]}
-        - {role: risk_proof, risk_dimensions: [restart], proof_profile: full, proof_refs: [{kind: go_test, name: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends, path: internal/releasee2e/golden_agent_workload_test.go, backends: [default_sqlite, explicit_postgres]}]}
-        - {role: risk_split, risk_dimensions: [contention], tracker: {kind: tracker, issue: 2274, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}}
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [served_lifecycle], proof_ids: [served-mailbox-decision]}
       required_ports: [mailboxAPI, mailboxNoticeAck]
       runtime_deps: [DecisionCards, ProposedEffects, DecisionCardHumanTasks, DecisionCardDraftExpiry, HumanTaskExpiry, MailboxStore, HumanTaskStore]
       platform_tables: [mailbox, decision_cards, proposed_effect_continuations, human_task_continuations, decision_card_input_drafts, decision_card_changes, decision_card_route_obligations]
       public_methods: [mailbox.acknowledge, mailbox.begin_input, mailbox.cancel_input, mailbox.decide, mailbox.defer, mailbox.get, mailbox.list]
     - id: api_idempotency
       semantic_owners: [internal/apiv1 idempotency]
+      selected_purposes: [runtime]
       backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
       risk_dimensions: [real_v1_handler, writer_ownership]
       evidence:
-        - role: backend_support
-          backends: [default_sqlite, explicit_postgres]
-          risk_dimensions: [real_v1_handler, writer_ownership]
-          proof_profile: pr-common
-          proof_refs:
-            - {kind: go_test, name: TestSQLiteRuntimeStoreAPIIdempotencySerializesAcrossSamePathHandles, path: internal/store/internal/runtimepersistence/sqlite_runtime_test.go, backends: [default_sqlite]}
-            - {kind: go_test, name: TestPostgresStore_APIIdempotencyReplaysAndConflicts, path: internal/store/internal/runtimepersistence/mailbox_v1_test.go, backends: [explicit_postgres]}
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [real_v1_handler, writer_ownership], proof_ids: [api-idempotency-sqlite, api-idempotency-postgres]}
       required_ports: [idempotency]
       platform_tables: [api_idempotency]
     - id: runtime_controls
       semantic_owners: [internal/runtime run and ingress controls]
+      selected_purposes: [runtime]
       backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
-      risk_dimensions: [served_lifecycle, restart, contention]
+      risk_dimensions: [served_lifecycle]
       evidence:
-        - role: backend_support
-          backends: [default_sqlite, explicit_postgres]
-          risk_dimensions: [served_lifecycle]
-          proof_profile: pr-common
-          proof_refs:
-            - {kind: go_test, name: TestServedParityHarnessRunControlLifecycle, path: internal/serveapp/main_runtime_test.go, backends: [default_sqlite, explicit_postgres]}
-            - {kind: go_test, name: TestServedParityHarnessRuntimeIngressControlLifecycle, path: internal/serveapp/main_runtime_test.go, backends: [default_sqlite, explicit_postgres]}
-        - {role: risk_proof, risk_dimensions: [restart], proof_profile: full, proof_refs: [{kind: go_test, name: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends, path: internal/releasee2e/golden_agent_workload_test.go, backends: [default_sqlite, explicit_postgres]}]}
-        - {role: risk_split, risk_dimensions: [contention], tracker: {kind: tracker, issue: 2274, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}}
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [served_lifecycle], proof_ids: [served-run-control, served-ingress-control]}
       required_ports: [runQuiescence, runStalled]
       runtime_deps: [RunControlStore, RunLifecycleCandidates, RuntimeIngressStore]
       platform_tables: [run_control_state, runtime_ingress_state]
       public_methods: [run.stop, run.pause, run.continue, runtime.pause, runtime.resume]
     - id: budget_spend
       semantic_owners: [internal/runtime budget]
+      selected_purposes: [runtime]
       backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
-      risk_dimensions: [restart, writer_ownership]
+      risk_dimensions: [writer_ownership]
       evidence:
-        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [writer_ownership], proof_profile: pr-common, proof_refs: [{kind: go_test, name: TestCompletionBudgetRecoveryProjectionParity, path: internal/runtime/budget_recovery_parity_test.go, backends: [default_sqlite, explicit_postgres]}]}
-        - {role: risk_proof, risk_dimensions: [restart], proof_profile: full, proof_refs: [{kind: go_test, name: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends, path: internal/releasee2e/golden_agent_workload_test.go, backends: [default_sqlite, explicit_postgres]}]}
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [writer_ownership], proof_ids: [budget-recovery-parity]}
       runtime_deps: [BudgetSpendStore]
       platform_tables: [budget_admission_scopes, runtime_effect_budget_reservations, spend_ledger]
     - id: timer_schedule
       semantic_owners: [internal/runtime timer obligations]
+      selected_purposes: [runtime]
       backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
-      risk_dimensions: [restart, contention, writer_ownership]
+      risk_dimensions: [writer_ownership]
       evidence:
-        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [writer_ownership], proof_profile: pr-common, proof_refs: [{kind: go_test, name: TestGenericScheduleLifecyclePublishesOneShotAndRecurringThroughWorkflowRuntimeOnBothStores, path: internal/runtime/workflow_timer_startup_recovery_test.go, backends: [default_sqlite, explicit_postgres]}]}
-        - {role: risk_proof, risk_dimensions: [restart], proof_profile: full, proof_refs: [{kind: go_test, name: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends, path: internal/releasee2e/golden_agent_workload_test.go, backends: [default_sqlite, explicit_postgres]}]}
-        - {role: risk_split, risk_dimensions: [contention], tracker: {kind: tracker, issue: 2274, watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability}}
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [writer_ownership], proof_ids: [timer-schedule-parity]}
       runtime_deps: [GenericScheduleStore, TimerObligationReader]
       platform_tables: [timers, dead_letters]
     - id: scenario_execution
       semantic_owners: [internal/store scenario execution profiles]
+      selected_purposes: [runtime]
       backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
-      risk_dimensions: [writer_ownership, restart]
+      risk_dimensions: [writer_ownership]
       evidence:
-        - role: backend_support
-          backends: [default_sqlite, explicit_postgres]
-          risk_dimensions: [writer_ownership]
-          proof_profile: pr-common
-          proof_refs:
-            - {kind: go_test, name: TestSQLiteScenarioSetupPersistsExactExecutionProfileAtomically, path: internal/store/internal/runtimepersistence/scenario_setup_test.go, backends: [default_sqlite]}
-            - {kind: go_test, name: TestPostgresScenarioSetupPersistsExactExecutionProfileAtomically, path: internal/store/internal/runtimepersistence/scenario_setup_test.go, backends: [explicit_postgres]}
-        - {role: risk_proof, risk_dimensions: [restart], proof_profile: full, proof_refs: [{kind: go_test, name: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends, path: internal/releasee2e/golden_agent_workload_test.go, backends: [default_sqlite, explicit_postgres]}]}
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [writer_ownership], proof_ids: [scenario-execution-sqlite, scenario-execution-postgres]}
       runtime_deps: [ScenarioExecutionProfiles]
       platform_tables: [run_scenario_execution_profiles]
     - id: observability
       semantic_owners: [internal/store runtime logs, internal/apiv1 observability]
+      selected_purposes: [runtime]
       backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts]
       risk_dimensions: [read_snapshot, restart, writer_ownership]
       evidence:
-        - role: backend_support
-          backends: [default_sqlite, explicit_postgres]
-          risk_dimensions: [read_snapshot, writer_ownership]
-          proof_profile: pr-common
-          proof_refs:
-            - {kind: go_test, name: TestSQLiteRuntimeLogPersistenceWritesLoggerRowsForObservability, path: internal/store/internal/runtimepersistence/runtime_log_persistence_test.go, backends: [default_sqlite]}
-            - {kind: go_test, name: TestPostgresRuntimeLogPersistencePreservesRunSourceAndLineage, path: internal/store/internal/runtimepersistence/runtime_log_persistence_test.go, backends: [explicit_postgres]}
-        - {role: risk_proof, risk_dimensions: [restart], proof_profile: full, proof_refs: [{kind: go_test, name: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends, path: internal/releasee2e/golden_agent_workload_test.go, backends: [default_sqlite, explicit_postgres]}]}
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [read_snapshot, writer_ownership], proof_ids: [observability-sqlite, observability-postgres]}
+        - {role: risk_proof, risk_dimensions: [restart], proof_ids: [golden-forced-restart]}
       required_ports: [observability]
       runtime_deps: [RuntimeLogStore]
       public_methods: [run.trace, runtime.incidents, runtime.logs]
     - id: destructive_reset
       semantic_owners: [internal/store/selected destructive reset and startup recovery]
+      selected_purposes: [runtime]
       backend_dispositions: {default_sqlite: unsupported_with_exact_spec_and_teaching_proof, explicit_postgres: supported_with_dual_backend_proof}
       spec_refs: [platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.runtime_nuke]
-      risk_dimensions: [fail_closed, restart, writer_ownership]
+      risk_dimensions: [fail_closed, writer_ownership]
       evidence:
-        - {role: backend_support, backends: [explicit_postgres], risk_dimensions: [writer_ownership], proof_profile: pr-common, proof_refs: [{kind: go_test, name: TestRunServeRuntimeNukeQuiescesSessionWriterBeforeCleanupPostgres, path: internal/serveapp/main_runtime_test.go, backends: [explicit_postgres]}]}
-        - {role: teaching_failure, backends: [default_sqlite], risk_dimensions: [fail_closed], proof_profile: pr-common, proof_refs: [{kind: go_test, name: TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed, path: internal/serveapp/main_runtime_test.go, backends: [default_sqlite]}]}
-        - {role: risk_proof, risk_dimensions: [restart], proof_profile: full, proof_refs: [{kind: go_test, name: TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends, path: internal/releasee2e/golden_agent_workload_test.go, backends: [default_sqlite, explicit_postgres]}]}
+        - {role: backend_support, backends: [explicit_postgres], risk_dimensions: [writer_ownership], proof_ids: [destructive-reset-postgres]}
+        - {role: teaching_failure, backends: [default_sqlite], risk_dimensions: [fail_closed], proof_ids: [sqlite-optional-mutators-fail-closed]}
       optional_products: [destructiveReset, startupRecovery]
       nested_roles: {product_destructive_reset: [inventory, locks, quiescence], product_startup_recovery: [availability, cleanup]}
       public_methods: [runtime.nuke]
@@ -420,7 +495,7 @@ store_parity:
       spec_refs: [platform-spec.yaml#api_specification]
       risk_dimensions: [structural_census, proof_schedule]
       evidence:
-        - {role: different_concept, backends: [default_sqlite, explicit_postgres], risk_dimensions: [structural_census, proof_schedule], proof_profile: pr-common, proof_refs: [{kind: go_test, name: TestOpenRPCWebSocketRuntimeProbes, path: internal/apiv1/openrpc_ws_runtime_test.go, backends: [default_sqlite, explicit_postgres]}]}
+        - {role: different_concept, backends: [default_sqlite, explicit_postgres], risk_dimensions: [structural_census, proof_schedule], proof_ids: [websocket-different-concept]}
       public_methods: [agent.frame, event.subscribe, health.ping, health.subscribe, mailbox.subscribe, rpc.unsubscribe, run.subscribe_trace, runtime.identity, runtime.subscribe_logs]
 active_trackers:
   - kind: github_issue
@@ -428,6 +503,9 @@ active_trackers:
     watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
   - kind: github_issue
     issue: 2276
+    watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
+  - kind: github_issue
+    issue: 2364
     watchlist: runtime_operations.runtime_store_backend_default_and_sqlite_portability
   - kind: watchlist
     issue: 0
