@@ -19,8 +19,8 @@ import (
 	runtimeauthoractivity "github.com/division-sh/swarm/internal/runtime/authoractivity"
 	runtimebus "github.com/division-sh/swarm/internal/runtime/bus"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
-	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	"github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimecorrelation "github.com/division-sh/swarm/internal/runtime/correlation"
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	runtimeengine "github.com/division-sh/swarm/internal/runtime/engine"
@@ -62,6 +62,10 @@ type selectedFanOutMixedRouteOwner interface {
 	selectedFanOutOwner
 	storeTestDurableEventBusStore
 	RegisterAuthorActivityEventCatalog(runtimeauthoractivity.Scope, []runtimeauthoractivity.EventDescriptor) (*runtimeauthoractivity.EventCatalogLease, error)
+}
+
+type selectedFanOutTxSummaryOwner interface {
+	SummarizeFanOutRunTx(context.Context, *sql.Tx, string, time.Time) (fanoutobligation.RunSummary, error)
 }
 
 type fanOutOwnerFixture struct {
@@ -190,17 +194,21 @@ func TestFanOutChunkCommitsMixedRealEventBusPlansAtomicallyOnBothStores(t *testi
 				runtimeauthoractivity.BundleScope(runtimeInstanceID, authorActivityTestBundleHash),
 			)
 			var (
-				owner    selectedFanOutMixedRouteOwner
-				db       *sql.DB
-				postgres bool
+				owner        selectedFanOutMixedRouteOwner
+				summaryOwner selectedFanOutTxSummaryOwner
+				db           *sql.DB
+				postgres     bool
 			)
 			if backend == "postgres" {
 				_, db, _ = testutil.StartPostgres(t)
-				owner = admitTestPostgresStore(t, db)
+				store := admitTestPostgresStore(t, db)
+				owner = store
+				summaryOwner = store.pipelinePostgresOwner
 				postgres = true
 			} else {
 				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
 				db, owner = store.backend.ConstructionHandle(), store
+				summaryOwner = store.pipelineSQLiteOwner
 			}
 
 			fixture := seedFanOutOwnerFixture(t, ctx, db, owner, postgres, 4, time.Now().UTC().Truncate(time.Microsecond))
@@ -316,6 +324,26 @@ func TestFanOutChunkCommitsMixedRealEventBusPlansAtomicallyOnBothStores(t *testi
 			}
 			if committedEvents != 3 || committedDeliveries != 4 || outcomesCount != 4 || readbackMaterializing != 1 {
 				t.Fatalf("mixed-route durable facts = events:%d deliveries:%d outcomes:%d", committedEvents, committedDeliveries, outcomesCount)
+			}
+
+			tx, err := db.BeginTx(runCtx, nil)
+			if err != nil {
+				t.Fatalf("begin fan-out settlement summary transaction: %v", err)
+			}
+			defer tx.Rollback()
+			summary, err := summaryOwner.SummarizeFanOutRunTx(runCtx, tx, fixture.runID, fixture.createdAt.Add(12*time.Second))
+			if err != nil {
+				t.Fatalf("summarize mixed-route fan-out in one transaction: %v", err)
+			}
+			if summary.Committed != 3 || summary.Rejected != 1 || summary.Settled != 1 || summary.Unsettled != 2 || summary.BlocksCompletion() {
+				t.Fatalf("mixed-route fan-out settlement summary = %#v", summary)
+			}
+			var sameTransactionOutcomes int
+			if err := tx.QueryRowContext(runCtx, `SELECT COUNT(*) FROM fan_out_outcomes WHERE run_id=$1`, fixture.runID).Scan(&sameTransactionOutcomes); err != nil {
+				t.Fatalf("reuse fan-out summary transaction: %v", err)
+			}
+			if sameTransactionOutcomes != 4 {
+				t.Fatalf("same-transaction fan-out outcomes = %d, want 4", sameTransactionOutcomes)
 			}
 		})
 	}
@@ -754,7 +782,7 @@ func TestFanOutLifecycleBlocksCompletionAndStopCancelsClaimedSuffixOnBothStores(
 			}
 			terminals := map[string][]string{semanticRunFixtureFlow: {"completed"}}
 			if err := executeRunCompletionCandidateForEvent(ctx, selected, completing.eventID, nil, terminals); err != nil {
-			t.Fatalf("execute blocked completion candidate: %v", err)
+				t.Fatalf("execute blocked completion candidate: %v", err)
 			}
 			assertPortableRunStatus(t, ctx, db, completing.runID, "running", false)
 

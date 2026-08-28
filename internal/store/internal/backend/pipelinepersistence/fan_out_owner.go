@@ -1019,6 +1019,11 @@ func foldFanOutPublicationSettlement(ctx context.Context, db pipelineQueryer, po
 		return err
 	}
 	defer rows.Close()
+	type settlementRef struct {
+		eventID       string
+		inheritedFrom string
+	}
+	refs := make([]settlementRef, 0)
 	for rows.Next() {
 		var eventID, sourceEventID sql.NullString
 		if err := rows.Scan(&eventID, &sourceEventID); err != nil {
@@ -1028,23 +1033,39 @@ func foldFanOutPublicationSettlement(ctx context.Context, db pipelineQueryer, po
 			if eventID.Valid {
 				return fmt.Errorf("inherited fan-out outcome carries child-local settlement evidence")
 			}
-			summary.Settled++
+			refs = append(refs, settlementRef{inheritedFrom: sourceEventID.String})
 			continue
 		}
 		if !eventID.Valid {
 			return fmt.Errorf("owned fan-out outcome is missing canonical event settlement")
 		}
-		_, settlement, err := loadFanOutSourceEvent(ctx, db, eventID.String, postgres)
+		refs = append(refs, settlementRef{eventID: eventID.String})
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	// PostgreSQL permits only one active result stream per transaction
+	// connection. Finish the canonical outcome read before consulting each
+	// event and delivery owner.
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, ref := range refs {
+		if ref.inheritedFrom != "" {
+			summary.Settled++
+			continue
+		}
+		_, settlement, err := loadFanOutSourceEvent(ctx, db, ref.eventID, postgres)
 		if err != nil {
-			return fmt.Errorf("load fan-out publication settlement for %s: %w", eventID.String, err)
+			return fmt.Errorf("load fan-out publication settlement for %s: %w", ref.eventID, err)
 		}
 		adapter := sqliteDeliveryAdapter
 		if postgres {
 			adapter = postgresDeliveryAdapter
 		}
-		deliverySnapshots, err := adapter.SnapshotsForEvent(ctx, db, eventID.String)
+		deliverySnapshots, err := adapter.SnapshotsForEvent(ctx, db, ref.eventID)
 		if err != nil {
-			return fmt.Errorf("load fan-out publication deliveries for %s: %w", eventID.String, err)
+			return fmt.Errorf("load fan-out publication deliveries for %s: %w", ref.eventID, err)
 		}
 		active := 0
 		for _, delivery := range deliverySnapshots {
@@ -1062,10 +1083,10 @@ func foldFanOutPublicationSettlement(ctx context.Context, db pipelineQueryer, po
 		case settlement.Delivered() && deliveries > 0:
 			summary.Unsettled++
 		default:
-			return fmt.Errorf("fan-out publication %s route and delivery settlement are contradictory", eventID.String)
+			return fmt.Errorf("fan-out publication %s route and delivery settlement are contradictory", ref.eventID)
 		}
 	}
-	return rows.Err()
+	return nil
 }
 
 func (s *PipelinePostgresOwner) FanOutRunSummary(ctx context.Context, runID string, now time.Time) (fanoutobligation.RunSummary, error) {
