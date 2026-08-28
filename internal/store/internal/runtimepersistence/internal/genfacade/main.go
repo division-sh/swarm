@@ -111,7 +111,7 @@ func main() {
 
 func facadeOwnerField(name string) bool {
 	switch name {
-	case "backend", "runBundles", "workflowEntityQueries", "workflowRoutes", "workspaceLookups", "schemaOwner", "schema", "nowFn", "runLifecycleCandidates":
+	case "backend", "runBundles", "workflowEntityQueries", "workflowRoutes", "workspaceLookups", "schemaOwner", "schema", "nowFn", "runLifecycleCandidates", "durableDataOwner":
 		return false
 	default:
 		return true

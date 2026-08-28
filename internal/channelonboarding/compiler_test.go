@@ -25,7 +25,7 @@ func TestChannelActivationPublicationModesHaveDistinctIdentity(t *testing.T) {
 func TestMergeCompiledActivationsRejectsInvalidPlanBeforeUnion(t *testing.T) {
 	coordinate := testCoordinate()
 	left := CompiledActivation{Source: ActivationSourceDeclared, Coordinate: coordinate}
-	right := CompiledActivation{Source: ActivationSourceLearned, Coordinate: coordinate, ActivationRevision: 1}
+	right := CompiledActivation{Source: ActivationSourceLearned, OnboardingOperationID: "operation", OnboardingRevision: 1, Coordinate: coordinate, ActivationRevision: 1}
 	// Invalid plans fail before a producer can use source precedence as a
 	// fallback. Integration coverage supplies executable plans.
 	if _, err := MergeCompiledActivations([]CompiledActivation{left}, []CompiledActivation{right}); err == nil || !strings.Contains(err.Error(), "generation") {

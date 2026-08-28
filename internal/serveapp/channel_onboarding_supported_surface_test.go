@@ -21,12 +21,8 @@ import (
 
 	"github.com/division-sh/swarm/internal/channelonboarding"
 	"github.com/division-sh/swarm/internal/cliapp"
-	"github.com/division-sh/swarm/internal/config"
 	runtimecredentials "github.com/division-sh/swarm/internal/runtime/credentials"
-	"github.com/division-sh/swarm/internal/runtime/semanticview"
-	workspace "github.com/division-sh/swarm/internal/runtime/workspace"
 	"github.com/division-sh/swarm/internal/servedparity"
-	storebackend "github.com/division-sh/swarm/internal/store/backendselection"
 	"github.com/division-sh/swarm/internal/testpostgres"
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/division-sh/swarm/internal/testutil/telegramapi"
@@ -61,30 +57,27 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 
 	var db *sql.DB
 	var resetSelectedStore func()
-	postgresDSN := ""
 	diagnosticDSN := ""
 	opts := cliapp.ServeOptions{
 		ContractsPath: contractsRoot, PlatformSpecPath: defaultPlatformSpecPath,
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		PublicWebhookBaseURL: "https://hooks.channel-onboarding.test", PublicWebhookListen: publicListen,
-		SelfCheck: true, RequireBundleMatch: false, Dev: true, AbandonActiveRuns: true, Verbose: true,
-		TestLLMRuntime: telegramPhraseBotLLMRuntime{},
+		SelfCheck: true, RequireBundleMatch: false, AbandonActiveRuns: true, Verbose: true,
+		WorkspaceBackend: "host", WorkspaceBackendSet: true, TestLLMRuntime: telegramPhraseBotLLMRuntime{},
 	}
 	switch backend {
 	case servedparity.BackendDefaultSQLite:
 		sqlitePath := filepath.Join(t.TempDir(), "channel-onboarding.sqlite")
 		diagnosticDSN = sqlitePath
-		oldBuildStores := buildStoresForServe
-		buildStoresForServe = func(ctx context.Context, selection storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-			stores, err := oldBuildStores(ctx, selection, cfg)
-			if err == nil {
-				db = selectedStoreDatabaseForTest(t, stores)
-			}
-			return stores, err
+		var err error
+		db, err = sql.Open("sqlite", sqlitePath)
+		if err != nil {
+			t.Fatalf("open SQLite channel diagnostics: %v", err)
 		}
-		t.Cleanup(func() { buildStoresForServe = oldBuildStores })
-		opts.ConfigPath = writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, nil)
+		t.Cleanup(func() { _ = db.Close() })
+		opts.ConfigPath = writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", sqlitePath, channelOnboardingHostWorkspaceFields())
 		opts.StoreMode = "sqlite"
+		opts.StoreModeSet = true
 		resetSelectedStore = func() {
 			if err := os.Remove(sqlitePath); err != nil && !os.IsNotExist(err) {
 				t.Fatalf("reset SQLite channel selected store: %v", err)
@@ -92,23 +85,11 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 		}
 	case servedparity.BackendExplicitPostgres:
 		dsn, postgresDB, _ := testutil.StartPostgres(t)
-		postgresDSN = dsn
 		diagnosticDSN = dsn
 		db = postgresDB
-		oldBuildStores := buildStoresForServe
-		oldWorkspace := cliapp.ConfiguredWorkspaceLifecycleForServe
-		buildStoresForServe = func(_ context.Context, _ storebackend.Selection, cfg *config.Config) (*selectedStoreOwner, error) {
-			return openSelectedPostgresOwner(t, dsn, db, cfg), nil
-		}
-		cliapp.ConfiguredWorkspaceLifecycleForServe = func(workspace.Lookup, *config.Config, string, semanticview.Source, cliapp.WorkspaceMountSources, cliapp.WorkspaceBackendSelection) (cliapp.ServeWorkspaceLifecycle, error) {
-			return serveRuntimeWorkspaceStub{}, nil
-		}
-		t.Cleanup(func() {
-			buildStoresForServe = oldBuildStores
-			cliapp.ConfiguredWorkspaceLifecycleForServe = oldWorkspace
-		})
-		opts.ConfigPath = writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "postgres", "", nil)
+		opts.ConfigPath = writeChannelOnboardingPostgresRuntimeConfig(t, dsn)
 		opts.StoreMode = "postgres"
+		opts.StoreModeSet = true
 		resetSelectedStore = func() {
 			resetDB, err := sql.Open("postgres", dsn)
 			if err != nil {
@@ -172,9 +153,6 @@ func runChannelConnectTelegramFirstUserJourney(t *testing.T, backend servedparit
 	}
 	assertChannelOnboardingProjectClaimsReleased(t, string(backend)+" graceful shutdown")
 	resetSelectedStore()
-	if postgresDSN != "" {
-		opts.ConfigPath = writeChannelOnboardingPostgresProcessConfig(t, postgresDSN)
-	}
 	crashProcess := startChannelOnboardingCrashServeProcess(t, opts, telegram.URL)
 	endpoint = crashProcess.endpoint(t)
 	restartedIdentity := readCurrentChannelOnboardingJourney(t, opts.ConfigPath, endpoint)
@@ -522,7 +500,6 @@ func TestChannelOnboardingCrashServeProcessHelper(t *testing.T) {
 	opts.WorkspaceBackendSet = true
 	opts.SelfCheck = true
 	opts.RequireBundleMatch = false
-	opts.Dev = true
 	opts.AbandonActiveRuns = true
 	opts.Verbose = true
 	opts.Output = os.Stdout
@@ -570,43 +547,6 @@ func serveRuntimeAPIListenerFromOutputIfPresent(output string) string {
 		}
 	}
 	return ""
-}
-
-func writeChannelOnboardingPostgresProcessConfig(t *testing.T, dsn string) string {
-	t.Helper()
-	connection, err := testpostgres.ParseConnection(dsn)
-	if err != nil {
-		t.Fatalf("parse channel onboarding PostgreSQL DSN: %v", err)
-	}
-	parameters := connection.Parameters()
-	t.Setenv("PGPASSWORD", parameters.Password)
-	configText := fmt.Sprintf(`runtime:
-  execution_posture: live
-  recovery_on_startup: true
-workspace:
-  allow_exec_on_host: true
-store:
-  backend: postgres
-database:
-  host: %q
-  port: %d
-  name: %q
-  user: %q
-  password_env: PGPASSWORD
-  sslmode: %q
-  pool_size: 5
-llm:
-  backend: anthropic
-  session:
-    lock_ttl: 10s
-    rotate_after_turns: 40
-    rotate_on_parse_failures: 3
-`, parameters.Host, parameters.Port, parameters.Database, parameters.User, parameters.SSLMode)
-	path := filepath.Join(t.TempDir(), "swarm-postgres-process.yaml")
-	if err := os.WriteFile(path, []byte(withTestProviderTriggerPlatformInventory(t, configText)), 0o644); err != nil {
-		t.Fatalf("write channel onboarding PostgreSQL process config: %v", err)
-	}
-	return path
 }
 
 type channelOnboardingJourneyReadback struct {
@@ -999,6 +939,51 @@ func reserveChannelOnboardingListenAddress(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return address
+}
+
+func channelOnboardingHostWorkspaceFields() []string {
+	return []string{
+		"  backend: host",
+		"  allow_exec_on_host: true",
+	}
+}
+
+func writeChannelOnboardingPostgresRuntimeConfig(t *testing.T, dsn string) string {
+	t.Helper()
+	connection, err := testpostgres.ParseConnection(dsn)
+	if err != nil {
+		t.Fatalf("parse channel onboarding PostgreSQL DSN: %v", err)
+	}
+	parameters := connection.Parameters()
+	t.Setenv("PGPASSWORD", parameters.Password)
+	configText := fmt.Sprintf(`runtime:
+  execution_posture: live
+  recovery_on_startup: false
+workspace:
+  backend: host
+  allow_exec_on_host: true
+store:
+  backend: postgres
+database:
+  host: %q
+  port: %d
+  name: %q
+  user: %q
+  password_env: PGPASSWORD
+  sslmode: %q
+  pool_size: 5
+llm:
+  backend: anthropic
+  session:
+    lock_ttl: 10s
+    rotate_after_turns: 40
+    rotate_on_parse_failures: 3
+`, parameters.Host, parameters.Port, parameters.Database, parameters.User, parameters.SSLMode)
+	path := filepath.Join(t.TempDir(), "swarm-postgres.yaml")
+	if err := os.WriteFile(path, []byte(withTestProviderTriggerPlatformInventory(t, configText)), 0o644); err != nil {
+		t.Fatalf("write channel onboarding PostgreSQL runtime config: %v", err)
+	}
+	return path
 }
 
 func enableChannelOnboardingRecoveryOnStartup(t *testing.T, configPath string) {

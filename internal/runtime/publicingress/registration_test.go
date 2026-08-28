@@ -1144,8 +1144,16 @@ func testRegistrationPair(t *testing.T, registration packs.CompiledChannelRegist
 	if err != nil {
 		t.Fatal(err)
 	}
+	onboardingID := uuid.NewString()
+	coordinate := channelonboarding.ChannelRuntimeContextCoordinate{
+		BundleHash: "bundle-v1:sha256:" + strings.Repeat("b", 64), BundleSource: "persisted",
+		BundleIdentity: "bundle:test@sha256:registration", PackInventoryGeneration: "sha256:registration-inventory",
+		RuntimeInstanceID: uuid.NewString(), ContextPublicationGeneration: 1,
+		PlanGeneration: planGeneration, TargetGeneration: 1,
+	}
 	return RegistrationPair{
-		BindingID: bindingID, PlanGeneration: planGeneration, OnboardingOperationID: "test-prebinding-" + bindingID, PrebindingOperationID: "test-prebinding-" + bindingID, Registration: registration,
+		BindingID: bindingID, PlanGeneration: planGeneration, OnboardingOperationID: onboardingID, OnboardingRevision: 1,
+		OnboardingCoordinate: coordinate, PrebindingOperationID: onboardingID, Registration: registration,
 		CredentialKeys: map[string]string{"telegram_bot_token": "bot"},
 		Target: RegistrationTarget{
 			Selector: selector, BundleHash: "bundle-v1:sha256:" + strings.Repeat("b", 64), ServiceID: "service-" + bindingID,

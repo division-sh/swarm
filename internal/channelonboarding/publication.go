@@ -219,6 +219,7 @@ func canonicalActivationPublication(activations []CompiledActivation) (canonical
 		values = append(values, map[string]any{
 			"source":                  activation.Source,
 			"onboarding_operation_id": activation.OnboardingOperationID,
+			"onboarding_revision":     activation.OnboardingRevision,
 			"coordinate":              coordinate,
 			"activation_revision":     activation.ActivationRevision,
 			"plan":                    planValue,

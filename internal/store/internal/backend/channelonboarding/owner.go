@@ -293,6 +293,11 @@ func advance(ctx context.Context, r runner, req domain.AdvanceRequest) (domain.O
 				op.ActivationRevision = activation.Revision
 			}
 			op.Coordinate = *req.RebindCoordinate
+			if req.ClearConfirmationOperationID {
+				op.ConfirmationOperationID = ""
+			}
+		} else if req.ClearConfirmationOperationID {
+			return domain.ErrInvalidRequest
 		}
 		if req.ReplaceCredentialAdmissions {
 			op.CredentialAdmissions = append([]domain.CredentialAdmission(nil), req.CredentialAdmissions...)

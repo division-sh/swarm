@@ -18,6 +18,14 @@ type Double struct {
 	deliveries                   []map[string]any
 	rejectNextCredential         bool
 	loseNextRegistrationResponse bool
+	registrationResponseBarrier  *responseBarrier
+	deliveryResponseBarrier      *responseBarrier
+}
+
+type responseBarrier struct {
+	arrived chan struct{}
+	release chan struct{}
+	once    sync.Once
 }
 
 func (p *Double) ServeHTTP(w http.ResponseWriter, request *http.Request) {
@@ -46,7 +54,13 @@ func (p *Double) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 		p.registrationRequests = append(p.registrationRequests, clonePayload(payload))
 		loseResponse := p.loseNextRegistrationResponse
 		p.loseNextRegistrationResponse = false
+		barrier := p.registrationResponseBarrier
+		p.registrationResponseBarrier = nil
 		p.mu.Unlock()
+		if barrier != nil {
+			close(barrier.arrived)
+			<-barrier.release
+		}
 		if loseResponse {
 			hijacker, ok := w.(http.Hijacker)
 			if !ok {
@@ -74,7 +88,13 @@ func (p *Double) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 		p.mu.Lock()
 		p.deliveries = append(p.deliveries, clonePayload(payload))
 		messageID := len(p.deliveries)
+		barrier := p.deliveryResponseBarrier
+		p.deliveryResponseBarrier = nil
 		p.mu.Unlock()
+		if barrier != nil {
+			close(barrier.arrived)
+			<-barrier.release
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"message_id": messageID}})
 	default:
 		http.Error(w, `{"ok":false}`, http.StatusNotFound)
@@ -112,6 +132,33 @@ func (p *Double) LoseNextRegistrationAcknowledgment() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.loseNextRegistrationResponse = true
+}
+
+func (p *Double) PauseNextRegistrationResponse() (<-chan struct{}, func()) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	barrier := newResponseBarrier()
+	p.registrationResponseBarrier = barrier
+	return barrier.arrived, barrier.releaseResponse
+}
+
+func (p *Double) PauseNextDeliveryResponse() (<-chan struct{}, func()) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	barrier := newResponseBarrier()
+	p.deliveryResponseBarrier = barrier
+	return barrier.arrived, barrier.releaseResponse
+}
+
+func newResponseBarrier() *responseBarrier {
+	return &responseBarrier{arrived: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (b *responseBarrier) releaseResponse() {
+	if b == nil {
+		return
+	}
+	b.once.Do(func() { close(b.release) })
 }
 
 func clonePayload(payload map[string]any) map[string]any {

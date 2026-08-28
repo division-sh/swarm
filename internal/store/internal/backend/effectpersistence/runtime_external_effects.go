@@ -17,6 +17,7 @@ import (
 	runtimeeffects "github.com/division-sh/swarm/internal/runtime/effects"
 	"github.com/division-sh/swarm/internal/runtime/executionmode"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
 	storellm "github.com/division-sh/swarm/internal/store/internal/backend/llmpersistence"
 	storemanagedcapability "github.com/division-sh/swarm/internal/store/internal/backend/managedcapability"
@@ -24,6 +25,8 @@ import (
 
 var _ runtimeeffects.Store = (*EffectPostgresOwner)(nil)
 var _ runtimeeffects.Store = (*EffectSQLiteOwner)(nil)
+var _ runtimeeffects.ChannelOnboardingOutcomeStore = (*EffectPostgresOwner)(nil)
+var _ runtimeeffects.ChannelOnboardingOutcomeStore = (*EffectSQLiteOwner)(nil)
 var _ runtimeeffects.CompletionHeartbeatStore = (*EffectPostgresOwner)(nil)
 var _ runtimeeffects.CompletionHeartbeatStore = (*EffectSQLiteOwner)(nil)
 var _ runtimeeffects.RecoveryStore = (*EffectPostgresOwner)(nil)
@@ -158,6 +161,207 @@ func (s *EffectSQLiteOwner) GetExternalEffectOutcome(ctx context.Context, operat
 	outcome.Kind, outcome.AuthorityKind = runtimeeffects.Kind(kind), runtimeeffects.AuthorityKind(authorityKind)
 	outcome.State, outcome.AttemptState = runtimeeffects.State(state), runtimeeffects.State(attemptState)
 	return outcome, true, nil
+}
+
+func (s *EffectPostgresOwner) ReconcileChannelOnboardingEffectOutcomes(ctx context.Context, onboardingOperationID string, now time.Time) ([]runtimeeffects.ChannelOnboardingEffectOutcome, error) {
+	if err := validateChannelOnboardingEffectReconciliation(onboardingOperationID, now); err != nil {
+		return nil, err
+	}
+	onboardingOperationID = strings.TrimSpace(onboardingOperationID)
+	var outcomes []runtimeeffects.ChannelOnboardingEffectOutcome
+	err := s.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, _ *revisionEffects) error {
+		if err := reconcileChannelOnboardingEffectAttempts(txctx, tx, story, onboardingOperationID, now.UTC(), true); err != nil {
+			return err
+		}
+		var err error
+		outcomes, err = queryChannelOnboardingEffectOutcomes(txctx, tx, onboardingOperationID, true)
+		return err
+	})
+	return outcomes, err
+}
+
+func (s *EffectSQLiteOwner) ReconcileChannelOnboardingEffectOutcomes(ctx context.Context, onboardingOperationID string, now time.Time) ([]runtimeeffects.ChannelOnboardingEffectOutcome, error) {
+	if err := validateChannelOnboardingEffectReconciliation(onboardingOperationID, now); err != nil {
+		return nil, err
+	}
+	onboardingOperationID = strings.TrimSpace(onboardingOperationID)
+	var outcomes []runtimeeffects.ChannelOnboardingEffectOutcome
+	err := s.runPrivateAuthorActivityMutation(ctx, "sqlite reconcile channel onboarding effect outcomes", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, _ *revisionEffects) error {
+		if err := reconcileChannelOnboardingEffectAttempts(txctx, tx, story, onboardingOperationID, now.UTC(), false); err != nil {
+			return err
+		}
+		var err error
+		outcomes, err = queryChannelOnboardingEffectOutcomes(txctx, tx, onboardingOperationID, false)
+		return err
+	})
+	return outcomes, err
+}
+
+func validateChannelOnboardingEffectReconciliation(onboardingOperationID string, now time.Time) error {
+	if strings.TrimSpace(onboardingOperationID) == "" {
+		return fmt.Errorf("channel onboarding operation id is required")
+	}
+	if now.IsZero() {
+		return fmt.Errorf("channel onboarding effect reconciliation time is required")
+	}
+	return nil
+}
+
+func queryChannelOnboardingEffectOutcomes(ctx context.Context, queryer schemaQueryer, onboardingOperationID string, postgres bool) ([]runtimeeffects.ChannelOnboardingEffectOutcome, error) {
+	query := `
+		SELECT o.operation_id::text,o.effect_kind,o.authority_kind,o.authority_id,o.state,a.state,
+		       o.authority_evidence->>'onboarding_operation_id',
+		       COALESCE((o.authority_evidence->>'onboarding_revision')::bigint,0),
+		       COALESCE(o.authority_evidence->>'bundle_hash',''),
+		       COALESCE(o.authority_evidence->>'bundle_source',''),
+		       COALESCE(o.authority_evidence->>'bundle_identity',''),
+		       COALESCE(o.authority_evidence->>'pack_inventory_generation',''),
+		       COALESCE(o.authority_evidence->>'runtime_instance_id',''),
+		       COALESCE((o.authority_evidence->>'context_publication_generation')::bigint,0),
+		       COALESCE(o.authority_evidence->>'plan_generation',''),
+		       COALESCE((o.authority_evidence->>'target_generation')::bigint,0),
+		       (a.launched_at IS NOT NULL),COALESCE(a.failure,'{}'::jsonb)::text
+		FROM runtime_external_effect_operations o
+		JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
+		 AND a.attempt_ordinal=(SELECT MAX(latest.attempt_ordinal) FROM runtime_external_effect_attempts latest WHERE latest.operation_id=o.operation_id)
+		WHERE o.authority_kind IN ('serve_registration','channel_confirmation')
+		  AND o.authority_evidence->>'onboarding_operation_id'=$1
+		ORDER BY o.operation_id
+	`
+	if !postgres {
+		query = `
+		SELECT o.operation_id,o.effect_kind,o.authority_kind,o.authority_id,o.state,a.state,
+		       json_extract(o.authority_evidence,'$.onboarding_operation_id'),
+		       COALESCE(json_extract(o.authority_evidence,'$.onboarding_revision'),0),
+		       COALESCE(json_extract(o.authority_evidence,'$.bundle_hash'),''),
+		       COALESCE(json_extract(o.authority_evidence,'$.bundle_source'),''),
+		       COALESCE(json_extract(o.authority_evidence,'$.bundle_identity'),''),
+		       COALESCE(json_extract(o.authority_evidence,'$.pack_inventory_generation'),''),
+		       COALESCE(json_extract(o.authority_evidence,'$.runtime_instance_id'),''),
+		       COALESCE(json_extract(o.authority_evidence,'$.context_publication_generation'),0),
+		       COALESCE(json_extract(o.authority_evidence,'$.plan_generation'),''),
+		       COALESCE(json_extract(o.authority_evidence,'$.target_generation'),0),
+		       (a.launched_at IS NOT NULL),COALESCE(a.failure,'{}')
+		FROM runtime_external_effect_operations o
+		JOIN runtime_external_effect_attempts a ON a.operation_id=o.operation_id
+		 AND a.attempt_ordinal=(SELECT MAX(latest.attempt_ordinal) FROM runtime_external_effect_attempts latest WHERE latest.operation_id=o.operation_id)
+		WHERE o.authority_kind IN ('serve_registration','channel_confirmation')
+		  AND json_extract(o.authority_evidence,'$.onboarding_operation_id')=?
+		ORDER BY o.operation_id
+		`
+	}
+	rows, err := queryer.QueryContext(ctx, query, onboardingOperationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanChannelOnboardingEffectOutcomes(rows)
+}
+
+func reconcileChannelOnboardingEffectAttempts(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, onboardingOperationID string, now time.Time, postgres bool) error {
+	prelaunchFailure, err := channelOnboardingEffectRecoveryFailure(runtimefailures.ClassLifecycleConflict, "channel_effect_prelaunch_abandoned", now, true)
+	if err != nil {
+		return err
+	}
+	uncertainFailure, err := channelOnboardingEffectRecoveryFailure(runtimefailures.ClassOutcomeUncertain, "channel_effect_outcome_unconfirmed", now, false)
+	if err != nil {
+		return err
+	}
+	candidates, err := channelOnboardingActiveEffectCandidates(ctx, tx, onboardingOperationID, postgres)
+	if err != nil {
+		return err
+	}
+	if postgres {
+		if _, err := tx.ExecContext(ctx, `UPDATE runtime_external_effect_attempts a SET state='terminal_failure', failure=$1::jsonb, completed_at=$2, updated_at=$2 FROM runtime_external_effect_operations o WHERE o.operation_id=a.operation_id AND a.state='authorized' AND o.authority_kind IN ('serve_registration','channel_confirmation') AND o.authority_evidence->>'onboarding_operation_id'=$3`, string(prelaunchFailure), now, onboardingOperationID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE runtime_external_effect_attempts a SET state='outcome_uncertain', failure=$1::jsonb, completed_at=$2, updated_at=$2 FROM runtime_external_effect_operations o WHERE o.operation_id=a.operation_id AND a.state IN ('launched','response_observed') AND o.authority_kind IN ('serve_registration','channel_confirmation') AND o.authority_evidence->>'onboarding_operation_id'=$3`, string(uncertainFailure), now, onboardingOperationID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE runtime_external_effect_operations o SET state=a.state, completed_at=$2, updated_at=$2 FROM runtime_external_effect_attempts a WHERE a.operation_id=o.operation_id AND a.attempt_ordinal=(SELECT MAX(latest.attempt_ordinal) FROM runtime_external_effect_attempts latest WHERE latest.operation_id=o.operation_id) AND a.state IN ('terminal_failure','outcome_uncertain') AND o.authority_kind IN ('serve_registration','channel_confirmation') AND o.authority_evidence->>'onboarding_operation_id'=$1`, onboardingOperationID, now); err != nil {
+			return err
+		}
+	} else {
+		if _, err := tx.ExecContext(ctx, `UPDATE runtime_external_effect_attempts SET state='terminal_failure', failure=?, completed_at=?, updated_at=? WHERE state='authorized' AND operation_id IN (SELECT o.operation_id FROM runtime_external_effect_operations o WHERE o.operation_id=runtime_external_effect_attempts.operation_id AND o.authority_kind IN ('serve_registration','channel_confirmation') AND json_extract(o.authority_evidence,'$.onboarding_operation_id')=?)`, string(prelaunchFailure), now, now, onboardingOperationID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE runtime_external_effect_attempts SET state='outcome_uncertain', failure=?, completed_at=?, updated_at=? WHERE state IN ('launched','response_observed') AND operation_id IN (SELECT o.operation_id FROM runtime_external_effect_operations o WHERE o.operation_id=runtime_external_effect_attempts.operation_id AND o.authority_kind IN ('serve_registration','channel_confirmation') AND json_extract(o.authority_evidence,'$.onboarding_operation_id')=?)`, string(uncertainFailure), now, now, onboardingOperationID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE runtime_external_effect_operations SET state=(SELECT a.state FROM runtime_external_effect_attempts a WHERE a.operation_id=runtime_external_effect_operations.operation_id ORDER BY a.attempt_ordinal DESC LIMIT 1), completed_at=?, updated_at=? WHERE authority_kind IN ('serve_registration','channel_confirmation') AND json_extract(authority_evidence,'$.onboarding_operation_id')=? AND EXISTS (SELECT 1 FROM runtime_external_effect_attempts a WHERE a.operation_id=runtime_external_effect_operations.operation_id AND a.attempt_ordinal=(SELECT MAX(latest.attempt_ordinal) FROM runtime_external_effect_attempts latest WHERE latest.operation_id=runtime_external_effect_operations.operation_id) AND a.state IN ('terminal_failure','outcome_uncertain'))`, now, now, onboardingOperationID); err != nil {
+			return err
+		}
+	}
+	return recordRecoveredExternalEffectStories(ctx, story, tx, candidates, now, postgres)
+}
+
+func channelOnboardingActiveEffectCandidates(ctx context.Context, tx *sql.Tx, onboardingOperationID string, postgres bool) ([]externalEffectRecoveryCandidate, error) {
+	query := `SELECT a.attempt_id::text FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE a.state IN ('authorized','launched','response_observed') AND o.authority_kind IN ('serve_registration','channel_confirmation') AND o.authority_evidence->>'onboarding_operation_id'=$1`
+	if !postgres {
+		query = `SELECT a.attempt_id FROM runtime_external_effect_attempts a JOIN runtime_external_effect_operations o ON o.operation_id=a.operation_id WHERE a.state IN ('authorized','launched','response_observed') AND o.authority_kind IN ('serve_registration','channel_confirmation') AND json_extract(o.authority_evidence,'$.onboarding_operation_id')=?`
+	}
+	rows, err := tx.QueryContext(ctx, query, onboardingOperationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var candidates []externalEffectRecoveryCandidate
+	for rows.Next() {
+		var candidate externalEffectRecoveryCandidate
+		if err := rows.Scan(&candidate.AttemptID); err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, candidate)
+	}
+	return candidates, rows.Err()
+}
+
+func channelOnboardingEffectRecoveryFailure(class runtimefailures.Class, code string, now time.Time, launchRejected bool) ([]byte, error) {
+	err := runtimefailures.New(class, code, "external-effects", "channel_onboarding_reconcile", map[string]any{
+		"recovered_at": now.UTC().Format(time.RFC3339Nano), "launch_rejected": launchRejected,
+	})
+	envelope, ok := runtimefailures.EnvelopeFromError(err)
+	if !ok {
+		return nil, fmt.Errorf("construct channel onboarding effect recovery failure")
+	}
+	return json.Marshal(envelope)
+}
+
+func scanChannelOnboardingEffectOutcomes(rows *sql.Rows) ([]runtimeeffects.ChannelOnboardingEffectOutcome, error) {
+	out := []runtimeeffects.ChannelOnboardingEffectOutcome{}
+	for rows.Next() {
+		var item runtimeeffects.ChannelOnboardingEffectOutcome
+		var kind, authorityKind, state, attemptState, planGeneration, failureRaw string
+		if err := rows.Scan(
+			&item.OperationID, &kind, &authorityKind, &item.AuthorityID, &state, &attemptState,
+			&item.OnboardingOperationID, &item.OnboardingRevision, &item.BundleHash, &item.BundleSource,
+			&item.BundleIdentity, &item.PackInventoryGeneration, &item.RuntimeInstanceID,
+			&item.ContextPublicationGeneration, &planGeneration, &item.TargetGeneration, &item.Launched, &failureRaw,
+		); err != nil {
+			return nil, err
+		}
+		var err error
+		item.PlanGeneration, err = plangeneration.Parse(planGeneration)
+		if err != nil {
+			return nil, fmt.Errorf("decode channel onboarding effect %s plan generation: %w", item.OperationID, err)
+		}
+		item.Kind = runtimeeffects.Kind(kind)
+		item.AuthorityKind = runtimeeffects.AuthorityKind(authorityKind)
+		item.State = runtimeeffects.State(state)
+		item.AttemptState = runtimeeffects.State(attemptState)
+		if strings.TrimSpace(failureRaw) != "" && strings.TrimSpace(failureRaw) != "{}" {
+			failure, err := runtimefailures.UnmarshalEnvelope([]byte(failureRaw))
+			if err != nil {
+				return nil, fmt.Errorf("decode channel onboarding effect %s failure: %w", item.OperationID, err)
+			}
+			item.LaunchRejected, _ = failure.Detail.Attributes["launch_rejected"].(bool)
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (s *EffectPostgresOwner) AuthorizeExternalAttempt(ctx context.Context, authority runtimeeffects.Authority, req runtimeeffects.AuthorizeRequest) (runtimeeffects.Attempt, error) {

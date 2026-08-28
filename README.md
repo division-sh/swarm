@@ -114,9 +114,10 @@ binding. Managed exposure requires `cloudflared` 2021.7.0 or newer (`brew instal
 cloudflared`). Quick-tunnel URLs are ephemeral and have no availability SLA. To
 use an externally managed HTTPS origin instead, provide both
 `--public-webhook-base-url` and an explicit loopback
-`--public-webhook-listen`; these options are development-only. The public
-listener exposes `/webhooks/*` only and never exposes API, MCP, health, or other
-control-plane routes.
+`--public-webhook-listen`. This explicit external-origin mode works with both
+development serve and plain retained serve; only the managed quick tunnel is
+development-only. The public listener exposes `/webhooks/*` only and never
+exposes API, MCP, health, or other control-plane routes.
 
 For credentialless end-to-end agent runs, select `llm.backend: mock` and give each
 agent one contracts-root-relative Python performance:

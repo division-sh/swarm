@@ -10061,12 +10061,19 @@ tool_model:
         Temporary authority cannot survive successful handoff, and an uncertain provider acknowledgment prevents blind
         resend, cleanup, or successor publication. Candidate catalog declaration remains available without public ingress;
         webhook pre-binding is rejected at activation when no exposure owner exists, while non-webhook catalog candidates
-        acquire no invented ingress requirement.
+        acquire no invented ingress requirement. Every onboarding-owned registration effect durably records the exact
+        onboarding revision and complete durable/live context coordinate that authorized it. Before an operation can bind
+        a successor live occurrence, the effect owner atomically terminalizes an authorized zero-launch attempt, marks a
+        launched or response-observed attempt outcome-uncertain, and preserves terminal success. Outcome uncertainty blocks
+        rebinding and redispatch.
       confirmation_rule: >
         Onboarding confirmation is one operator-origin, generation-pinned channel activity using the compiled activation
         and the existing one-attempt provider effect journal. It fabricates no workflow run, event, entity, agent, or
         inbound context. Durable dispatch acceptance is insufficient: terminal provider success for the exact activation
         and binding revisions is required, while failure or acknowledgment uncertainty remains non-successful and NOT_READY.
+        The journal retains the authorizing onboarding revision and complete durable/live context coordinate. A proven
+        prelaunch failure may clear and remint the confirmation operation only in the successor-coordinate CAS; terminal
+        success retains its operation identity, and launched, response-observed, or uncertain work is never redispatched.
       destructive_rule: >
         unbind, linked proof revocation, active-interface retirement, runtime-context unload, and activation supersession
         reserve selected-store teardown responsibility and retire every matching pending operation and learned activation
@@ -10107,9 +10114,13 @@ tool_model:
         managed agent startup consumes the runtime-owned MCP endpoint, but public readiness and ready hooks remain closed.
         Before executable publication, registration, or public readiness, startup retires every selected current activation
         whose exact durable source/identity/inventory/plan/interface/target responsibility has no unique successor, preserving
-        retained identity while removing activation and credential authority. It then CAS-rebinds every surviving operation
-        and semantic current activation to the exact successor live occurrence and completes local-only onboarding
-        reconciliation. Effectful onboarding recovery runs unconditionally after posture-specific exposure and runtime
+        retained identity while removing activation and credential authority. For every phase that may own a provider
+        registration or confirmation effect, the durable effect owner first atomically classifies the predecessor attempt:
+        authorized zero-launch becomes terminal prelaunch failure, launched or response-observed becomes outcome-uncertain,
+        and terminal success remains settled. Contradictory provenance or outcome uncertainty blocks rebinding and retry.
+        Only after that durable disposition does one CAS-rebind the surviving operation and semantic current activation to
+        the exact successor live occurrence; phases that provably precede all effects rebind directly. Local-only onboarding
+        reconciliation then completes. Effectful onboarding recovery runs unconditionally after posture-specific exposure and runtime
         activation, when present, and before ready hooks or public readiness. Webhook activation
         still fails terminally at its ingress admission boundary when no public exposure owner exists. Selected-store
         reset removes learned activation and operation facts. A surviving machine proof may restore identity only; it cannot
@@ -10121,10 +10132,11 @@ tool_model:
         runtime_context_retired terminal failure, compare-deletes only that operation's receipt/epoch-owned credentials,
         refreshes activation authority, and continues; catalog construction or contradiction errors still fail startup closed.
         Graceful process restart preserves each nonterminal operation and semantic current activation, resolves them by
-        durable identity without registration-order or primary-context inference, and CAS-rebinds operation and activation
-        rows to the successor runtime instance/publication/target occurrence before any process publication or external
-        effect. Every nonterminal phase reconciles already admitted effects through its durable effect owner before
-        rebinding or retry; startup reconstructs executable activation and readiness only under the successor occurrence.
+        durable identity without registration-order or primary-context inference, reconciles admitted predecessor effects,
+        and only then CAS-rebinds operation and activation rows to the successor runtime instance/publication/target
+        occurrence before successor process publication or effect consumption. Every effect-bearing nonterminal phase
+        reconciles already admitted effects through its durable effect owner before rebinding or retry; startup reconstructs
+        executable activation and readiness only under the successor occurrence.
       no_legacy_rule: >
         No config writer, migration, adoption, export, purge, selected-store fallback, provider-specific generic-runtime
         branch, placeholder destination, manual callback/conversation/signing value, compatibility flag, dual executable
@@ -10265,13 +10277,15 @@ tool_model:
       owner: serve-scoped PublicExposureController under startup authority and process work lifetime
       modes:
         managed_quick_tunnel: '`swarm serve --dev --expose`; requires parseable cloudflared semver >= 2021.7.0, a Swarm-owned empty temporary config, exact `/ready` and `/quicktunnel` endpoint admission, and one `*.trycloudflare.com` hostname'
-        external_origin: '`swarm serve --dev --public-webhook-base-url <https-origin> --public-webhook-listen <explicit-loopback-host:port>`'
+        external_origin: '`swarm serve --public-webhook-base-url <https-origin> --public-webhook-listen <explicit-loopback-host:port>` under either retained plain serve or development serve; it uses the invocation''s selected-store posture without changing its lifetime'
       route_scope: >
         A dedicated loopback listener fronts only `/webhooks/*`. API, JSON-RPC, WebSocket, MCP, tools, health, and
         readiness routes are absent. `/webhooks/_swarm_probe/*` is reserved for one unguessable reachability nonce and
         cannot be selected by an ingress alias.
       lifecycle: >
-        Exposure is explicit and process-local. Initial managed quick-tunnel reachability tolerates hostname propagation by
+        Exposure is explicit and process-local. Managed quick tunnels remain development-only, while an operator-supplied
+        external origin is an independent ingress capability available to retained plain serve without dev scratch,
+        migration, row copying, or another posture flag. Initial managed quick-tunnel reachability tolerates hostname propagation by
         probing immediately and after bounded 1s, 2s, and 4s delays; failure after that exact sequence is terminal. External
         origins remain single-probe and do not inherit managed-tunnel retry semantics. Successful public nonce proof mints one random exposure generation.
         Tunnel loss revokes readiness immediately, then performs at most three re-establishment attempts after 1s, 2s,

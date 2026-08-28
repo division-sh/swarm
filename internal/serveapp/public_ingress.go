@@ -20,12 +20,11 @@ import (
 func resolveServePublicIngressMode(opts cliapp.ServeOptions) (string, bool, error) {
 	externalOrigin := strings.TrimSpace(opts.PublicWebhookBaseURL)
 	externalListen := strings.TrimSpace(opts.PublicWebhookListen)
-	enabled := opts.Expose || externalOrigin != "" || externalListen != ""
-	if enabled && !opts.Dev {
-		return "", false, fmt.Errorf("--expose and external public webhook options require --dev")
-	}
 	if opts.Expose && (externalOrigin != "" || externalListen != "") {
 		return "", false, fmt.Errorf("--expose is mutually exclusive with --public-webhook-base-url and --public-webhook-listen")
+	}
+	if opts.Expose && !opts.Dev {
+		return "", false, fmt.Errorf("--expose requires --dev")
 	}
 	if (externalOrigin == "") != (externalListen == "") {
 		return "", false, fmt.Errorf("--public-webhook-base-url and --public-webhook-listen must be set together")
@@ -121,6 +120,8 @@ func resolveServeRegistrationPairs(snapshot serveChannelActivationSnapshot, mana
 			BindingID: binding.BindingID(), PlanGeneration: planGeneration,
 			ActivationSource:            activation.Source,
 			OnboardingOperationID:       activation.OnboardingOperationID,
+			OnboardingRevision:          activation.OnboardingRevision,
+			OnboardingCoordinate:        activation.Coordinate,
 			ChannelActivationGeneration: activationGenerations[activation.Coordinate.BundleHash+"\x00"+activation.Coordinate.RuntimeInstanceID+"\x00"+fmt.Sprint(activation.Coordinate.ContextPublicationGeneration)],
 			Registration:                registration,
 			CredentialKeys:              credentialKeys,
@@ -169,6 +170,7 @@ func resolveServePrebindingRegistrationPair(intent servePrebindingActivation) (r
 	return runtimepublicingress.RegistrationPair{
 		BindingID: channelonboarding.LearnedBindingID(intent.Operation.SlotKey), PlanGeneration: generation,
 		OnboardingOperationID: intent.Operation.OperationID, PrebindingOperationID: intent.Operation.OperationID,
+		OnboardingRevision: intent.Operation.Revision, OnboardingCoordinate: intent.Operation.Coordinate,
 		Registration: registration, CredentialKeys: credentials,
 		Target: runtimepublicingress.RegistrationTarget{
 			Selector: target.Selector, BundleHash: intent.Candidate.Coordinate.BundleHash, ServiceID: target.ServiceID,

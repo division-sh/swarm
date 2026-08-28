@@ -19,6 +19,7 @@ const (
 type CompiledActivation struct {
 	Source                ActivationSource
 	OnboardingOperationID string
+	OnboardingRevision    int64
 	Coordinate            ChannelRuntimeContextCoordinate
 	ActivationRevision    int64
 	Plan                  packs.OutboundBindingPlan
@@ -42,8 +43,8 @@ func (a CompiledActivation) Validate() error {
 	if !generation.Equal(a.Coordinate.PlanGeneration) {
 		return fmt.Errorf("channel activation plan generation contradicts its runtime coordinate")
 	}
-	if a.Source == ActivationSourceLearned && a.ActivationRevision < 1 {
-		return fmt.Errorf("learned channel activation requires a positive revision")
+	if a.Source == ActivationSourceLearned && (a.OnboardingRevision < 1 || a.ActivationRevision < 1) {
+		return fmt.Errorf("learned channel activation requires positive onboarding and activation revisions")
 	}
 	if a.Source == ActivationSourceLearned && strings.TrimSpace(a.OnboardingOperationID) == "" {
 		return fmt.Errorf("learned channel activation requires its exact onboarding operation")
@@ -111,7 +112,7 @@ func CompileLearnedActivation(candidate Candidate, activation ConnectedChannelAc
 		return CompiledActivation{}, err
 	}
 	compiled := CompiledActivation{
-		Source: ActivationSourceLearned, OnboardingOperationID: activation.OperationID, Coordinate: activation.Coordinate,
+		Source: ActivationSourceLearned, OnboardingOperationID: activation.OperationID, OnboardingRevision: activation.OperationRevision, Coordinate: activation.Coordinate,
 		ActivationRevision: activation.Revision, Plan: plan,
 		CredentialAdmissions: append([]CredentialAdmission(nil), activation.CredentialAdmissions...),
 	}

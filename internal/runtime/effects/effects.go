@@ -19,6 +19,7 @@ import (
 	runtimedelivery "github.com/division-sh/swarm/internal/runtime/deliverylifecycle"
 	"github.com/division-sh/swarm/internal/runtime/executionposture"
 	runtimefailures "github.com/division-sh/swarm/internal/runtime/failures"
+	"github.com/division-sh/swarm/internal/runtime/plangeneration"
 	"github.com/google/uuid"
 )
 
@@ -424,6 +425,28 @@ func (o OperationOutcome) TerminalSuccess() bool {
 
 type OutcomeStore interface {
 	GetExternalEffectOutcome(context.Context, string) (OperationOutcome, bool, error)
+}
+
+// ChannelOnboardingEffectOutcome retains the predecessor occurrence and launch
+// disposition needed before a connected-channel operation can bind a successor.
+type ChannelOnboardingEffectOutcome struct {
+	OperationOutcome
+	OnboardingOperationID        string
+	OnboardingRevision           int64
+	BundleHash                   string
+	BundleSource                 string
+	BundleIdentity               string
+	PackInventoryGeneration      string
+	RuntimeInstanceID            string
+	ContextPublicationGeneration uint64
+	PlanGeneration               plangeneration.Generation
+	TargetGeneration             uint64
+	Launched                     bool
+	LaunchRejected               bool
+}
+
+type ChannelOnboardingOutcomeStore interface {
+	ReconcileChannelOnboardingEffectOutcomes(context.Context, string, time.Time) ([]ChannelOnboardingEffectOutcome, error)
 }
 
 type CompletionStore interface {

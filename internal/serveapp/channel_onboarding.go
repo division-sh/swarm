@@ -485,6 +485,7 @@ func (o *serveConnectedChannelReadiness) observedAt() time.Time {
 type channelConfirmationEffectStore interface {
 	runtimeeffects.Store
 	runtimeeffects.OutcomeStore
+	runtimeeffects.ChannelOnboardingOutcomeStore
 }
 
 type serveChannelConfirmationDispatcher struct {
@@ -511,6 +512,98 @@ func newServeChannelConfirmationDispatcher(
 		runtimeInstanceID: strings.TrimSpace(runtimeInstanceID), httpClient: httpClient,
 		now: func() time.Time { return time.Now().UTC() },
 	}, nil
+}
+
+func (d *serveChannelConfirmationDispatcher) ReconcileChannelEffectsBeforeRebind(ctx context.Context, op channelonboarding.Operation) (channelonboarding.EffectRebindDisposition, error) {
+	disposition := channelonboarding.EffectRebindDisposition{RetryAllowed: true}
+	if d == nil || d.effects == nil {
+		return disposition, fmt.Errorf("channel effect reconciliation owner is unavailable")
+	}
+	outcomes, err := d.effects.ReconcileChannelOnboardingEffectOutcomes(ctx, op.OperationID, d.now().UTC())
+	if err != nil {
+		return disposition, err
+	}
+	return classifyChannelEffectsBeforeRebind(op, outcomes)
+}
+
+func classifyChannelEffectsBeforeRebind(op channelonboarding.Operation, outcomes []runtimeeffects.ChannelOnboardingEffectOutcome) (channelonboarding.EffectRebindDisposition, error) {
+	disposition := channelonboarding.EffectRebindDisposition{RetryAllowed: true}
+	coordinate := op.Coordinate.Normalized()
+	confirmationID := strings.TrimSpace(op.ConfirmationOperationID)
+	confirmationFound := false
+	for _, outcome := range outcomes {
+		if err := validateChannelEffectProvenance(op, outcome); err != nil {
+			return disposition, err
+		}
+		currentOccurrence := outcome.BundleHash == coordinate.BundleHash &&
+			outcome.BundleSource == coordinate.BundleSource &&
+			outcome.BundleIdentity == coordinate.BundleIdentity &&
+			outcome.PackInventoryGeneration == coordinate.PackInventoryGeneration &&
+			outcome.RuntimeInstanceID == coordinate.RuntimeInstanceID &&
+			outcome.ContextPublicationGeneration == coordinate.ContextPublicationGeneration &&
+			outcome.PlanGeneration.Equal(coordinate.PlanGeneration) &&
+			outcome.TargetGeneration == coordinate.TargetGeneration
+		if !currentOccurrence && !channelEffectTerminal(outcome) {
+			return disposition, fmt.Errorf("channel effect %s retains nonterminal authority for a historical runtime occurrence", outcome.OperationID)
+		}
+		if outcome.AuthorityKind == runtimeeffects.AuthorityChannelConfirmation && outcome.OperationID == confirmationID {
+			if confirmationFound {
+				return disposition, fmt.Errorf("channel confirmation %s has duplicate durable outcomes", confirmationID)
+			}
+			confirmationFound = true
+		}
+		if outcome.TerminalSuccess() {
+			continue
+		}
+		if outcome.State == runtimeeffects.StateTerminalFailure && outcome.AttemptState == runtimeeffects.StateTerminalFailure && !outcome.Launched {
+			if outcome.AuthorityKind == runtimeeffects.AuthorityChannelConfirmation && outcome.OperationID == confirmationID {
+				disposition.RemintConfirmationOperation = true
+			}
+			continue
+		}
+		disposition.RetryAllowed = false
+		disposition.BlockingEffectOperationID = outcome.OperationID
+		disposition.BlockingEffectState = string(outcome.AttemptState)
+		if outcome.State != outcome.AttemptState {
+			disposition.BlockingEffectState = string(outcome.State) + "/" + string(outcome.AttemptState)
+		}
+		return disposition, nil
+	}
+	if confirmationID != "" && !confirmationFound {
+		disposition.RemintConfirmationOperation = true
+	}
+	return disposition, nil
+}
+
+func validateChannelEffectProvenance(op channelonboarding.Operation, outcome runtimeeffects.ChannelOnboardingEffectOutcome) error {
+	if outcome.OperationID == "" || outcome.AuthorityID == "" ||
+		outcome.OnboardingOperationID != op.OperationID || outcome.OnboardingRevision < 1 || outcome.OnboardingRevision > op.Revision {
+		return fmt.Errorf("channel effect journal identity contradicts onboarding operation %s", op.OperationID)
+	}
+	if outcome.BundleHash == "" || outcome.BundleSource == "" || outcome.BundleIdentity == "" ||
+		outcome.PackInventoryGeneration == "" || outcome.RuntimeInstanceID == "" ||
+		outcome.ContextPublicationGeneration == 0 || !outcome.PlanGeneration.Valid() || outcome.TargetGeneration == 0 {
+		return fmt.Errorf("channel effect %s lacks exact runtime occurrence provenance", outcome.OperationID)
+	}
+	switch outcome.AuthorityKind {
+	case runtimeeffects.AuthorityServeRegistration:
+		if outcome.Kind != runtimeeffects.KindServeRegistration {
+			return fmt.Errorf("channel registration %s has contradictory effect kind %s", outcome.OperationID, outcome.Kind)
+		}
+	case runtimeeffects.AuthorityChannelConfirmation:
+		if outcome.Kind != runtimeeffects.KindChannelConfirmation || outcome.OperationID != outcome.AuthorityID {
+			return fmt.Errorf("channel confirmation %s has contradictory effect kind %s", outcome.OperationID, outcome.Kind)
+		}
+	default:
+		return fmt.Errorf("channel effect %s has unsupported authority %s", outcome.OperationID, outcome.AuthorityKind)
+	}
+	return nil
+}
+
+func channelEffectTerminal(outcome runtimeeffects.ChannelOnboardingEffectOutcome) bool {
+	return outcome.TerminalSuccess() ||
+		(outcome.State == runtimeeffects.StateTerminalFailure && outcome.AttemptState == runtimeeffects.StateTerminalFailure) ||
+		(outcome.State == runtimeeffects.StateOutcomeUncertain && outcome.AttemptState == runtimeeffects.StateOutcomeUncertain)
 }
 
 func (d *serveChannelConfirmationDispatcher) DispatchChannelConfirmation(ctx context.Context, request channelonboarding.ConfirmationRequest) (channelonboarding.ConfirmationResult, error) {
@@ -597,8 +690,10 @@ func (d *serveChannelConfirmationDispatcher) DispatchChannelConfirmation(ctx con
 		ChannelConfirmation: runtimeeffects.ChannelConfirmationAuthority{
 			EffectOperationID: operationID, OnboardingOperationID: op.OperationID, OnboardingRevision: op.Revision,
 			ActivationID: activation.ActivationID, ActivationRevision: activation.Revision, BindingRevision: binding.Revision,
-			PrincipalID: binding.PrincipalID, BundleHash: op.Coordinate.BundleHash, RuntimeInstanceID: op.Coordinate.RuntimeInstanceID,
-			ContextPublicationGeneration: op.Coordinate.ContextPublicationGeneration, PlanGeneration: op.Coordinate.PlanGeneration,
+			PrincipalID: binding.PrincipalID, BundleHash: op.Coordinate.BundleHash, BundleSource: op.Coordinate.BundleSource,
+			BundleIdentity: op.Coordinate.BundleIdentity, PackInventoryGeneration: op.Coordinate.PackInventoryGeneration,
+			RuntimeInstanceID: op.Coordinate.RuntimeInstanceID, ContextPublicationGeneration: op.Coordinate.ContextPublicationGeneration,
+			PlanGeneration: op.Coordinate.PlanGeneration, TargetGeneration: op.Coordinate.TargetGeneration,
 		},
 	}
 	if !authority.Valid() {

@@ -175,6 +175,8 @@ func sameRegistrationSelection(left, right RegistrationPair) bool {
 	return left.BindingID == right.BindingID &&
 		left.PlanGeneration.Diagnostic() == right.PlanGeneration.Diagnostic() &&
 		left.ChannelActivationGeneration.Diagnostic() == right.ChannelActivationGeneration.Diagnostic() &&
+		left.OnboardingRevision == right.OnboardingRevision &&
+		left.OnboardingCoordinate.Matches(right.OnboardingCoordinate) &&
 		strings.TrimSpace(left.PrebindingOperationID) == strings.TrimSpace(right.PrebindingOperationID) &&
 		maps.Equal(left.CredentialKeys, right.CredentialKeys) &&
 		left.Target.Selector == right.Target.Selector &&

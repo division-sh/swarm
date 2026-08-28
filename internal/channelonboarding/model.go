@@ -534,18 +534,19 @@ type Operation struct {
 }
 
 type AdvanceRequest struct {
-	OperationID                 string
-	ExpectedRevision            int64
-	Phase                       Phase
-	RebindCoordinate            *ChannelRuntimeContextCoordinate
-	CredentialAdmissions        []CredentialAdmission
-	ReplaceCredentialAdmissions bool
-	IdentityOperationID         string
-	BindingRevision             int64
-	ConfirmationOperationID     string
-	FailureCode                 string
-	FailureMessage              string
-	Now                         time.Time
+	OperationID                  string
+	ExpectedRevision             int64
+	Phase                        Phase
+	RebindCoordinate             *ChannelRuntimeContextCoordinate
+	CredentialAdmissions         []CredentialAdmission
+	ReplaceCredentialAdmissions  bool
+	IdentityOperationID          string
+	BindingRevision              int64
+	ConfirmationOperationID      string
+	ClearConfirmationOperationID bool
+	FailureCode                  string
+	FailureMessage               string
+	Now                          time.Time
 }
 
 type ActivationStatus string

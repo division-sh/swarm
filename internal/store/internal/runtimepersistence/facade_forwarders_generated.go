@@ -1022,6 +1022,10 @@ func (s *PostgresStore) ReadTimerObligations(ctx context.Context, scope timerobl
 	return s.timerObligationPostgresReader.ReadTimerObligations(ctx, scope, observedAt)
 }
 
+func (s *PostgresStore) ReconcileChannelOnboardingEffectOutcomes(ctx context.Context, onboardingOperationID string, now time.Time) ([]effects.ChannelOnboardingEffectOutcome, error) {
+	return s.effectPostgresOwner.ReconcileChannelOnboardingEffectOutcomes(ctx, onboardingOperationID, now)
+}
+
 func (s *PostgresStore) ReconcileDirectiveOperation(ctx context.Context, operationID string, now time.Time, ttl time.Duration) (agentcontrol.DirectiveOperation, bool, error) {
 	return s.agentPostgresOwner.ReconcileDirectiveOperation(ctx, operationID, now, ttl)
 }
@@ -2252,6 +2256,10 @@ func (s *SQLiteRuntimeStore) Read(ctx context.Context, scope timerobligation.Sco
 
 func (s *SQLiteRuntimeStore) ReadTimerObligations(ctx context.Context, scope timerobligation.Scope, observedAt time.Time) (timerobligation.Snapshot, error) {
 	return s.timerObligationSQLiteReader.ReadTimerObligations(ctx, scope, observedAt)
+}
+
+func (s *SQLiteRuntimeStore) ReconcileChannelOnboardingEffectOutcomes(ctx context.Context, onboardingOperationID string, now time.Time) ([]effects.ChannelOnboardingEffectOutcome, error) {
+	return s.effectSQLiteOwner.ReconcileChannelOnboardingEffectOutcomes(ctx, onboardingOperationID, now)
 }
 
 func (s *SQLiteRuntimeStore) ReconcileDirectiveOperation(ctx context.Context, operationID string, now time.Time, ttl time.Duration) (agentcontrol.DirectiveOperation, bool, error) {

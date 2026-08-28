@@ -152,6 +152,10 @@ func (retiredOnboardingActivations) PromoteChannelRegistration(context.Context, 
 
 type retiredOnboardingConfirmation struct{}
 
+func (retiredOnboardingConfirmation) ReconcileChannelEffectsBeforeRebind(context.Context, channelonboarding.Operation) (channelonboarding.EffectRebindDisposition, error) {
+	return channelonboarding.EffectRebindDisposition{RetryAllowed: true}, nil
+}
+
 func (retiredOnboardingConfirmation) DispatchChannelConfirmation(context.Context, channelonboarding.ConfirmationRequest) (channelonboarding.ConfirmationResult, error) {
 	return channelonboarding.ConfirmationResult{}, nil
 }
