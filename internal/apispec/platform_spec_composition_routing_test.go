@@ -17,6 +17,9 @@ func TestPlatformSpecCompositionRoutingSourceAuthority(t *testing.T) {
 	assertScalarValue(t, mustMappingValue(t, composition, "promoted_by"), "#1467")
 	assertScalarValue(t, mustMappingValue(t, composition, "parent_decision"), "#1466")
 	assertScalarValue(t, mustMappingValue(t, composition, "owner"), "platform-spec.yaml#flow_model.flow_package.composition_routing")
+	wave2 := mustMappingValue(t, composition, "w2_compiled_pin_edge_ownership")
+	assertScalarContains(t, mustMappingValue(t, wave2, "rule"), "target-free public/provider input edges uniformly reject")
+	assertScalarContains(t, mustMappingValue(t, wave2, "rule"), "event schema already declares the receiver instance field")
 	assertScalarContains(t, mustMappingValue(t, composition, "rule"), "Parent-authored composition routing is the canonical source authority")
 	assertScalarContains(t, mustMappingValue(t, composition, "rule"), "Producer emit sites MUST NOT own consumer routing")
 

@@ -2394,6 +2394,16 @@ func lowerTargetFreeInputRoutePlan(source semanticview.Source, scope semanticvie
 			return ConnectRoutePlan{}, issue
 		}
 	}
+	if schema, ok := inputPin.EventSchema(); ok {
+		if detail := connectSyntheticResolutionSchemaCollision(inputPin.EventType(), schema, instanceKey); detail != "" {
+			return ConnectRoutePlan{}, ConnectRoutePlanIssue{
+				Connect: connect, AuthoredLocation: flowID + "." + inputPin.EventType(),
+				Failure: ConnectFailureResolutionProjectionCollision, Detail: detail,
+				sourceEndpoint: sourceEndpoint, receiverEndpoint: receiverEndpoint,
+				providerOutputAuthorization: cloneProviderOutputAuthorization(authorization),
+			}
+		}
+	}
 	planSpec := connectRoutePlanSpec{
 		authoredLocation:            flowID + "." + inputPin.EventType(),
 		source:                      sourceEndpoint,
@@ -2757,19 +2767,17 @@ func lowerCompositionConnectRoutePlan(source semanticview.Source, connect runtim
 }
 
 func connectSyntheticResolutionCollision(source semanticview.Source, from compositionConnectPinRef, sourceEndpoint ConnectRoutePlanEndpoint, outputPin runtimecontracts.CompiledFlowOutputPin, instanceKey *ConnectRoutePlanInstanceKey) string {
+	if schema, ok := outputPin.EventSchema(); ok {
+		if detail := connectSyntheticResolutionSchemaCollision(outputPin.EventType(), schema, instanceKey); detail != "" {
+			return detail
+		}
+	}
 	if instanceKey == nil || !instanceKey.RequiresDeliveryProjection() {
 		return ""
 	}
 	field := strings.TrimSpace(instanceKey.field.Path())
 	if field == "" {
 		return ""
-	}
-	if schema, ok := outputPin.EventSchema(); ok {
-		for _, declared := range schema.Fields() {
-			if declared.Name() == field {
-				return fmt.Sprintf("producer event %s field %s conflicts with receiver-owned resolution projection %s", outputPin.EventType(), field, instanceKey.source.path.value)
-			}
-		}
 	}
 	if from.Root {
 		return ""
@@ -2781,6 +2789,22 @@ func connectSyntheticResolutionCollision(source semanticview.Source, from compos
 		}
 		if _, authored := site.Spec.Fields[field]; authored {
 			return fmt.Sprintf("producer %s emit field %s conflicts with receiver-owned resolution projection %s", site.Node.Key(), field, instanceKey.source.path.value)
+		}
+	}
+	return ""
+}
+
+func connectSyntheticResolutionSchemaCollision(eventType string, schema runtimecontracts.CompiledEventSchema, instanceKey *ConnectRoutePlanInstanceKey) string {
+	if instanceKey == nil || !instanceKey.RequiresDeliveryProjection() {
+		return ""
+	}
+	field := strings.TrimSpace(instanceKey.field.Path())
+	if field == "" {
+		return ""
+	}
+	for _, declared := range schema.Fields() {
+		if declared.Name() == field {
+			return fmt.Sprintf("producer event %s field %s conflicts with receiver-owned resolution projection %s", eventType, field, instanceKey.source.path.value)
 		}
 	}
 	return ""

@@ -12179,7 +12179,10 @@ flow_model:
           closed immutable edge containing endpoint, schema, projection, resolution,
           reply/fan-in, provenance, and digest evidence. Verify, runtime, durable claims,
           restart, retry, replay, selected fork, graph, and readback consume those values
-          without authored-map fallback or reconstruction.
+          without authored-map fallback or reconstruction. Compiled composed edges and
+          target-free public/provider input edges uniformly reject a receiver-owned
+          synthetic resolution projection when the bound event schema already declares
+          the receiver instance field.
         retired_on_presence:
         - pins.inputs.events[].name
         - pins.outputs.events[].name

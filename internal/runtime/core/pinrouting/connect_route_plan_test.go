@@ -1191,6 +1191,64 @@ func TestLowerTargetFreeInputRoutePlansRejectsAuthoritativeSourceTypeMismatch(t 
 	}
 }
 
+func TestLowerPublicInputRoutePlanRejectsSyntheticProjectionCollision(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mint canonicalrouting.CreateMint
+	}{
+		{name: "generated_uuid", mint: canonicalrouting.CreateMintUUID},
+		{name: "event_id", mint: canonicalrouting.CreateMintEventID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source, endpoint := targetFreeSyntheticCollisionFixture(t, tc.mint)
+			_, issue := LowerPublicInputRoutePlan(source, endpoint)
+			if issue.Failure != ConnectFailureResolutionProjectionCollision || !strings.Contains(issue.Detail, "field chat_id conflicts") {
+				t.Fatalf("public input issue = %#v, want synthetic projection collision", issue)
+			}
+		})
+	}
+}
+
+func TestLowerTargetFreeInputRoutePlansRejectsSyntheticProjectionCollision(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mint canonicalrouting.CreateMint
+	}{
+		{name: "generated_uuid", mint: canonicalrouting.CreateMintUUID},
+		{name: "event_id", mint: canonicalrouting.CreateMintEventID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			source, _ := targetFreeSyntheticCollisionFixture(t, tc.mint)
+			authorization := runtimeprovideroutput.MustAuthorization(
+				"telegram", "inbound.telegram.text_message", "provider.telegram", "1.0.0",
+				"sha256:"+strings.Repeat("a", 64),
+				triggergeneration.FromCanonicalBytes([]byte("target-free-synthetic-collision")),
+			)
+			plans, issues := lowerTargetFreeInputRoutePlans(source, []runtimeprovideroutput.Authorization{authorization})
+			if len(plans) != 0 || len(issues) != 1 || issues[0].Failure != ConnectFailureResolutionProjectionCollision || !strings.Contains(issues[0].Detail, "field chat_id conflicts") {
+				t.Fatalf("provider plans/issues = %#v/%#v, want synthetic projection collision", plans, issues)
+			}
+		})
+	}
+}
+
+func targetFreeSyntheticCollisionFixture(t testing.TB, mint canonicalrouting.CreateMint) (semanticview.Source, semanticview.AuthoredEventEndpoint) {
+	t.Helper()
+	repoRoot := canonicalrouting.RepoRoot(t)
+	root := canonicalrouting.CopyProviderRollbackSyntheticCollision(t, mint)
+	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	if err != nil {
+		t.Fatalf("load target-free synthetic collision artifact: %v", err)
+	}
+	source := semanticview.Wrap(bundle)
+	association := semanticview.BuildAuthoredEventEndpointCensus(source).ResolveDeclaredInputEndpoint("consumer", "inbound.telegram.text_message")
+	endpoint, ok := association.Endpoint()
+	if !ok {
+		t.Fatalf("resolve target-free input endpoint: %v", association.Err())
+	}
+	return source, endpoint
+}
+
 func TestConnectRoutePlanProductionAPIHasNoRetiredIdentityOrPolicyFacts(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
