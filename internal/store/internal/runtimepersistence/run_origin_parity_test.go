@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/events/eventtest"
 	"github.com/division-sh/swarm/internal/operatorread"
 	runtimeflowidentity "github.com/division-sh/swarm/internal/runtime/core/flowidentity"
+	worklifetime "github.com/division-sh/swarm/internal/runtime/core/worklifetime"
 	runtimemutationlog "github.com/division-sh/swarm/internal/runtime/mutationlog"
 	runtimepipeline "github.com/division-sh/swarm/internal/runtime/pipeline"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
@@ -228,6 +229,109 @@ func TestStandingGenerationRunOriginNamedOperationParity(t *testing.T) {
 				!strings.Contains(err.Error(), "standing generation origin relation is invalid") {
 				t.Fatalf("mismatched standing relation readback error = %v", err)
 			}
+		})
+	}
+}
+
+func TestStandingGenerationRepairSeedsCompletionCandidateParity(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			var (
+				db       *sql.DB
+				selected workflowTestSelectedStore
+				workflow *runtimepipeline.PipelineCoordinator
+			)
+			if backend == "sqlite" {
+				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+				db = store.backend.ConstructionHandle()
+				selected = store
+				workflow = newSQLiteWorkflowTestCoordinator(t, db, store)
+			} else {
+				_, postgresDB, cleanup := testutil.StartPostgres(t)
+				t.Cleanup(cleanup)
+				store := admitTestPostgresStore(t, postgresDB)
+				db = postgresDB
+				selected = store
+				workflow = newPostgresWorkflowTestCoordinator(t, db, store)
+			}
+			candidateStore := selected.(runLifecycleCandidateParityStore)
+			registrar := selected.(runtimerunlifecycle.CandidateRegistrar)
+			ctx := testAuthorActivityRuntimeContext()
+			serviceID := runtimeflowidentity.StandingServiceID("repair-candidate", "standing")
+			firstHash := "bundle-v1:sha256:3333333333333333333333333333333333333333333333333333333333333333"
+			secondHash := "bundle-v1:sha256:4444444444444444444444444444444444444444444444444444444444444444"
+			candidate := runtimepipeline.StandingServiceCandidate{
+				ServiceID: serviceID, PackageKey: "repair-candidate", FlowID: "standing",
+				InstanceID: uuid.NewString(), EntityID: uuid.NewString(),
+				Source: mustStoreTestPersistedBundleSourceFact(firstHash),
+			}
+			seedStoreTestPersistedBundle(t, db, firstHash)
+			fresh, err := workflow.ReconcileStandingService(ctx, candidate)
+			if err != nil {
+				t.Fatalf("create standing generation: %v", err)
+			}
+			if _, err := workflow.PublishStandingService(ctx, serviceID, fresh.RunID, fresh.Generation); err != nil {
+				t.Fatalf("publish standing generation: %v", err)
+			}
+			seedStandingRepairEntityState(t, ctx, db, backend, fresh.RunID, candidate.EntityID)
+			query := `UPDATE entity_state SET current_state = 'completed' WHERE run_id = ? AND entity_id = ?`
+			args := []any{fresh.RunID, candidate.EntityID}
+			if backend == "postgres" {
+				query = `UPDATE entity_state SET current_state = 'completed' WHERE run_id = $1::uuid AND entity_id = $2::uuid`
+			}
+			if _, err := db.ExecContext(ctx, query, args...); err != nil {
+				t.Fatalf("make standing entity terminal: %v", err)
+			}
+			if _, err := markRunTerminalStatusForTest(ctx, selected, fresh.RunID, string(runtimerunlifecycle.StateCancelled), nil, time.Now().UTC()); err != nil {
+				t.Fatalf("cancel abandoned standing generation: %v", err)
+			}
+			insertStandingRestartAbandonControl(t, ctx, db, backend, fresh.RunID)
+
+			candidate.Source = mustStoreTestPersistedBundleSourceFact(secondHash)
+			seedStoreTestPersistedBundle(t, db, secondHash)
+			process := worklifetime.NewProcess()
+			occurrence := newRunLifecycleExecutorOccurrenceForBundle(t, process, secondHash)
+			runtimeCtx := worklifetime.WithRuntimeOccurrence(ctx, occurrence)
+			executor := newRunLifecycleParityExecutorForScope(
+				t,
+				candidateStore,
+				occurrence,
+				secondHash,
+				runtimerunlifecycle.NewTerminalCatalog(nil, map[string][]string{"standing/root": {"completed"}}),
+			)
+			registration, err := registrar.RegisterCompletionCandidateSink(
+				runtimeCtx,
+				runtimerunlifecycle.CandidateScope{BundleHash: secondHash},
+				executor,
+			)
+			if err != nil {
+				t.Fatalf("register repair candidate executor: %v", err)
+			}
+			defer registration.Release()
+			if err := executor.Start(runtimeCtx); err != nil {
+				t.Fatalf("start repair candidate executor: %v", err)
+			}
+
+			repaired, err := workflow.ReconcileStandingService(runtimeCtx, candidate)
+			if err != nil {
+				t.Fatalf("repair standing generation: %v", err)
+			}
+			if repaired.Transition != "repaired" {
+				t.Fatalf("repair transition = %q, want repaired", repaired.Transition)
+			}
+			awaitRunLifecycleState(t, candidateStore, repaired.RunID, runtimerunlifecycle.StateCompleted)
+			fixture := runLifecycleCandidateParityFixture{store: candidateStore, db: db, postgres: backend == "postgres"}
+			state, duePresent, _ := loadRunLifecycleCandidateFacts(t, fixture, ctx, repaired.RunID)
+			if state != string(runtimerunlifecycle.StateCompleted) || duePresent {
+				t.Fatalf("repaired candidate convergence = state:%s due:%v, want completed/false", state, duePresent)
+			}
+
+			if err := executor.Retire(context.Background()); err != nil {
+				t.Fatalf("retire repair candidate executor: %v", err)
+			}
+			retireRunLifecycleExecutorOccurrence(t, occurrence)
+			retireRunLifecycleProcess(t, process)
 		})
 	}
 }

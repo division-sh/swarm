@@ -567,6 +567,26 @@ type Candidate struct {
 	DueAt      time.Time
 }
 
+type CandidateIdentity struct {
+	RunID          string
+	BundleHash     string
+	Revision       int64
+	DueAtUnixMicro int64
+}
+
+func (c Candidate) Identity() CandidateIdentity {
+	return CandidateIdentity{
+		RunID:          c.RunID,
+		BundleHash:     c.BundleHash,
+		Revision:       c.Revision,
+		DueAtUnixMicro: c.DueAt.UnixMicro(),
+	}
+}
+
+func (c Candidate) SameIdentity(other Candidate) bool {
+	return c.Identity() == other.Identity()
+}
+
 func (c Candidate) Validate() error {
 	if strings.TrimSpace(c.RunID) == "" {
 		return errors.New("completion candidate requires run_id")
