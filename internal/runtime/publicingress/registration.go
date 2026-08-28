@@ -98,13 +98,14 @@ const (
 )
 
 type registrationState struct {
-	Pair         RegistrationPair
-	SelectedBase string
-	LastVerified *registrationIntent
-	Attempt      *registrationAttempt
-	Terminal     *registrationIntent
-	Phase        registrationPhase
-	Failure      string
+	Pair            RegistrationPair
+	SelectionSlotID string
+	SelectedBase    string
+	LastVerified    *registrationIntent
+	Attempt         *registrationAttempt
+	Terminal        *registrationIntent
+	Phase           registrationPhase
+	Failure         string
 }
 
 type registrationIntent struct {
@@ -218,11 +219,7 @@ func (c *ProviderRegistrationController) Reconcile(ctx context.Context, exposure
 	if err != nil {
 		return err
 	}
-	selected := make([]RegistrationPair, 0, len(admitted))
-	for _, pair := range admitted {
-		selected = append(selected, pair.pair)
-	}
-	c.snapshot.replaceSelected(selected)
+	c.snapshot.replaceSelected(admitted)
 	for _, pair := range admitted {
 		if err := c.reconcilePair(ctx, exposure, startup, pair); err != nil {
 			return err
@@ -296,7 +293,7 @@ func (c *ProviderRegistrationController) prepareStartupHandoffLocked(ctx context
 }
 
 func (c *ProviderRegistrationController) admitAndIdentify(ctx context.Context, exposure Generation, pair RegistrationPair) (admittedPair, error) {
-	key := pairKey(pair)
+	key := pairSemanticKey(pair)
 	activationAuthority := pair.ChannelActivationGeneration.Valid()
 	prebindingAuthority := strings.TrimSpace(pair.PrebindingOperationID) != ""
 	if key == "" || !pair.PlanGeneration.Valid() || activationAuthority == prebindingAuthority || !pair.Target.AdmissionPlanGeneration.Valid() || strings.TrimSpace(pair.Target.BundleHash) == "" {
@@ -357,7 +354,7 @@ func (c *ProviderRegistrationController) admitAndIdentify(ctx context.Context, e
 }
 
 func (c *ProviderRegistrationController) admitCredentials(ctx context.Context, pair RegistrationPair) (map[string]runtimecredentials.AdmittedSnapshot, runtimecredentials.AdmittedSnapshot, error) {
-	key := pairKey(pair)
+	key := pairSemanticKey(pair)
 	provider := make(map[string]runtimecredentials.AdmittedSnapshot, len(pair.Registration.ProviderCredentials()))
 	for _, logical := range pair.Registration.ProviderCredentials() {
 		storeKey := pair.CredentialKeys[logical]
@@ -401,7 +398,7 @@ func (c *ProviderRegistrationController) admitReadbackCandidate(ctx context.Cont
 }
 
 func (c *ProviderRegistrationController) reconcilePair(ctx context.Context, exposure Generation, startup runtimestartupownership.GrantEvidence, candidate admittedPair) error {
-	key := pairKey(candidate.pair)
+	key := admittedPairKey(candidate)
 	state, _ := c.snapshot.state(key)
 	state.Pair = candidate.pair
 	state.SelectedBase = candidate.base
@@ -459,7 +456,7 @@ func (c *ProviderRegistrationController) newRegistrationIntent(exposure Generati
 }
 
 func (c *ProviderRegistrationController) launchAttempt(ctx context.Context, exposure Generation, startup runtimestartupownership.GrantEvidence, candidate admittedPair, state registrationState) error {
-	key := pairKey(candidate.pair)
+	key := admittedPairKey(candidate)
 	if state.Attempt == nil {
 		return fmt.Errorf("provider registration pre-launch attempt is missing")
 	}
@@ -522,7 +519,7 @@ func (c *ProviderRegistrationController) launchAttempt(ctx context.Context, expo
 }
 
 func (c *ProviderRegistrationController) refreshReadback(ctx context.Context, candidate admittedPair, state registrationState, fromAttempt bool) error {
-	key := pairKey(candidate.pair)
+	key := admittedPairKey(candidate)
 	active := state.activeIntent()
 	if active == nil {
 		return fmt.Errorf("provider registration intent is missing")
@@ -756,8 +753,17 @@ func cloneStringMap(source map[string]string) map[string]string {
 	return out
 }
 
-func pairKey(pair RegistrationPair) string {
-	return pairSemanticKey(pair)
+func admittedPairKey(pair admittedPair) string {
+	return registrationSelectionKey(pair.pair, pair.slotID)
+}
+
+func registrationSelectionKey(pair RegistrationPair, slotID string) string {
+	base := pairSemanticKey(pair)
+	slotID = strings.TrimSpace(slotID)
+	if base == "" || slotID == "" {
+		return ""
+	}
+	return base + "\x00slot:" + slotID
 }
 
 func pairAuthorityKey(pair RegistrationPair) string {

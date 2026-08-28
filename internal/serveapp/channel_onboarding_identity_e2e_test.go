@@ -523,11 +523,16 @@ func submitChannelOnboardingClaim(t *testing.T, callbackURL, signingSecret, chal
 
 func submitChannelOnboardingClaimAs(t *testing.T, callbackURL, signingSecret, challenge string, updateID, claimantID, chatID int64, username string) channelOnboardingClaimAdmission {
 	t.Helper()
+	return submitChannelOnboardingClaimWithChatType(t, callbackURL, signingSecret, challenge, updateID, claimantID, chatID, "private", username)
+}
+
+func submitChannelOnboardingClaimWithChatType(t *testing.T, callbackURL, signingSecret, challenge string, updateID, claimantID, chatID int64, chatType, username string) channelOnboardingClaimAdmission {
+	t.Helper()
 	body, err := json.Marshal(map[string]any{
 		"update_id": updateID,
 		"message": map[string]any{
 			"message_id": updateID, "from": map[string]any{"id": claimantID, "username": username},
-			"chat": map[string]any{"id": chatID, "type": "private"}, "text": challenge,
+			"chat": map[string]any{"id": chatID, "type": chatType}, "text": challenge,
 		},
 	})
 	if err != nil {

@@ -132,16 +132,18 @@ func (o *RegistrationSnapshotOwner) revokeExposure(cause string) {
 	})
 }
 
-func (o *RegistrationSnapshotOwner) replaceSelected(pairs []RegistrationPair) {
+func (o *RegistrationSnapshotOwner) replaceSelected(pairs []admittedPair) {
 	o.mutate(func(next *registrationProcessSnapshot) {
 		selected := make(map[string]registrationState, len(pairs))
 		routes := make(map[string]struct{}, len(pairs))
-		for _, pair := range pairs {
-			key := pairKey(pair)
-			state := registrationState{Pair: pair, Phase: registrationPhaseNoAttempt}
+		for _, candidate := range pairs {
+			pair := candidate.pair
+			key := admittedPairKey(candidate)
+			state := registrationState{Pair: pair, SelectionSlotID: candidate.slotID, Phase: registrationPhaseNoAttempt}
 			if prior, ok := next.registrations[key]; ok {
 				state = cloneRegistrationState(prior)
 				state.Pair = pair
+				state.SelectionSlotID = candidate.slotID
 				if !sameRegistrationSelection(prior.Pair, pair) {
 					state.SelectedBase = ""
 					state.Failure = "provider registration selection changed and is pending reconciliation"
@@ -157,12 +159,31 @@ func (o *RegistrationSnapshotOwner) replaceSelected(pairs []RegistrationPair) {
 
 func (o *RegistrationSnapshotOwner) recordAdmissionFailure(pair RegistrationPair, failure string) {
 	o.mutate(func(next *registrationProcessSnapshot) {
-		key := pairKey(pair)
-		state, selected := next.registrations[key]
-		if selected && !sameRegistrationSelection(state.Pair, pair) {
+		semanticKey := pairSemanticKey(pair)
+		if semanticKey == "" {
 			return
 		}
+		key := ""
+		hasSemanticSelection := false
+		for candidateKey, candidate := range next.registrations {
+			if pairSemanticKey(candidate.Pair) != semanticKey {
+				continue
+			}
+			hasSemanticSelection = true
+			if sameRegistrationSelection(candidate.Pair, pair) {
+				key = candidateKey
+				break
+			}
+		}
+		if key == "" && hasSemanticSelection {
+			return
+		}
+		state, selected := next.registrations[key]
 		if !selected {
+			key = pairAuthorityKey(pair)
+			if key == "" {
+				return
+			}
 			state = registrationState{Pair: pair, Phase: registrationPhaseNoAttempt}
 		}
 		state.Failure = strings.TrimSpace(failure)

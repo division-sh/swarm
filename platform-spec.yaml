@@ -10330,7 +10330,9 @@ tool_model:
         explicit phase per selected pair: no_attempt, pre_launch, pending_settlement, verified, or outcome_uncertain. Failed identify,
         admission, collision, credential, authority, and readback observations are recorded separately from lifecycle
         identity: they lower currentness immediately without erasing last_verified or a pending operation. Registration
-        selection, route selection, replacement, and removal publish as one atomic selected set; exposure mutation and
+        selection identity is the exact semantic binding/target pair plus its admitted provider slot, so a current activation
+        and a staged prebinding for different provider resources coexist until handoff without sharing lifecycle state.
+        Route selection, replacement, and removal publish with registration selection as one atomic selected set; exposure mutation and
         revocation use the same snapshot owner.
       startup_handoff: >
         Before runtime-context withdrawal or predecessor quiescence, one registration-controller barrier settles live

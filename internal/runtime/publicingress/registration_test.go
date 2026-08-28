@@ -433,6 +433,11 @@ func TestProviderRegistrationHandoffKeepsAuthoritiesDistinctUntilPromotion(t *te
 			if !test.wantPre && prebindings != 0 {
 				t.Fatalf("same-slot candidate replaced predecessor: %#v", selected)
 			}
+			owner := newRegistrationSnapshotOwner()
+			owner.replaceSelected(selected)
+			if got := len(owner.capture().registrations); got != test.want {
+				t.Fatalf("selected registration snapshot states = %d, want %d", got, test.want)
+			}
 		})
 	}
 }
@@ -1018,7 +1023,7 @@ func TestProviderRegistrationStartupHandoffPhaseBarrier(t *testing.T) {
 			} else if release != nil {
 				t.Fatal("failed startup handoff retained the registration renewal lock")
 			}
-			state, ok := f.controller.snapshot.state(pairKey(f.pair))
+			state, ok := f.controller.snapshot.state(registrationSelectionKey(f.pair, "telegram:bot_webhook:42"))
 			if !ok && tc.wantPhase == registrationPhaseNoAttempt {
 				return
 			}
