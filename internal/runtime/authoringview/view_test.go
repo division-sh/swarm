@@ -605,6 +605,45 @@ func TestBuildStageGraphShowsJoinCompleteAndTimeoutEdges(t *testing.T) {
 	}
 }
 
+func TestBuildStageGraphShowsDeliveryJoinCompletionFromHandlerScope(t *testing.T) {
+	elementID, err := contractelementidentity.ParseContractElementID("cf377b4f-e952-4ddb-9ecc-a1f380af032d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := identitytest.RootNode(t, "dispatcher")
+	join := runtimecontracts.JoinSpec{
+		ID: "all-delivered", Members: runtimecontracts.JoinMembersSpec{FromFanOut: elementID},
+		OnComplete: runtimecontracts.HandlerRuleEntry{AdvancesTo: "done"}, OnCompleteFound: true,
+	}
+	topology := runtimecontracts.BuildWorkflowStageTopology(
+		"", "active", []string{"active", "done"}, []string{"done"},
+		[]runtimecontracts.HandlerTransitionSemantic{{Node: node, EventType: "batch.requested", Join: &join}}, nil, nil,
+	)
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		RootSchema: &runtimecontracts.FlowSchemaDocument{StageDeclarations: runtimecontracts.FlowStageDeclarations{Declared: true, Entries: []runtimecontracts.FlowStageDeclaration{{ID: "active", Initial: true}, {ID: "done", Terminal: true}}}},
+		Semantics: runtimecontracts.WorkflowSemanticView{
+			InitialStage: "active", Stages: []runtimecontracts.WorkflowStageContract{{ID: "active"}, {ID: "done"}}, TerminalStages: []string{"done"},
+			StageTopologies: map[string]runtimecontracts.WorkflowStageTopology{"": topology},
+		},
+	}
+	view, err := Build(context.Background(), semanticview.Wrap(bundle), BuildOptions{IncludeStageGraph: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.StageGraphs) != 1 || view.StageGraphs[0].FlowID != "root" {
+		t.Fatalf("stage graphs = %#v, want root graph", view.StageGraphs)
+	}
+	var completion StageGraphEdgeView
+	for _, edge := range view.StageGraphs[0].Edges {
+		if edge.Source == string(runtimecontracts.HandlerAdvanceCarrierJoinOnComplete) {
+			completion = edge
+		}
+	}
+	if len(completion.From) != 1 || completion.From[0] != "active" || completion.To != "done" || completion.NodeID != node.Key() {
+		t.Fatalf("delivery join authoring edge = %#v", completion)
+	}
+}
+
 func TestBuildStageGraphShowsBoundedLoopBackEdgeAndEscape(t *testing.T) {
 	loopNode := identitytest.RootNode(t, "loop-node")
 	bundle := &runtimecontracts.WorkflowContractBundle{

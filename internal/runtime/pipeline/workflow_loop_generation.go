@@ -52,16 +52,7 @@ func workflowLoopGenerationCurrent(instance *WorkflowInstance, generation attemp
 }
 
 func workflowLoopGenerationCurrentInBuckets(stateBuckets map[string]map[string]any, generation attemptgeneration.Generation, expectedStage string) (bool, error) {
-	generation = generation.Normalize()
-	if !generation.Valid() {
-		return true, nil
-	}
-	activation, ok, err := loopruntime.Load(stateBuckets, generation.FlowID, generation.LoopID)
-	if err != nil || !ok {
-		return false, err
-	}
-	return activation.Status == loopruntime.StatusOpen && activation.Generation().Equal(generation) &&
-		(strings.TrimSpace(expectedStage) == "" || activation.CurrentStage == strings.TrimSpace(expectedStage)), nil
+	return loopruntime.GenerationCurrent(stateBuckets, generation, expectedStage)
 }
 
 func WorkflowLoopGenerationCurrent(fields, stateBuckets map[string]any, generation attemptgeneration.Generation, expectedStage string) (bool, error) {

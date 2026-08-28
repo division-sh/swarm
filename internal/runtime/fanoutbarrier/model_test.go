@@ -65,6 +65,7 @@ func TestSummaryContextIsClosedAndTyped(t *testing.T) {
 func TestBarrierStateMachineRequiresExactEvidence(t *testing.T) {
 	registration := testRegistration(t)
 	summary := Summary{Total: 1, Succeeded: 1}
+	activationID := uuid.NewString()
 	now := registration.CreatedAt.Add(time.Second)
 	tests := []struct {
 		name  string
@@ -74,8 +75,11 @@ func TestBarrierStateMachineRequiresExactEvidence(t *testing.T) {
 		{name: "armed", value: Barrier{Registration: registration, Status: StatusArmed, UpdatedAt: now}, valid: true},
 		{name: "armed with summary", value: Barrier{Registration: registration, Status: StatusArmed, Summary: &summary, UpdatedAt: now}},
 		{name: "closed missing schedule", value: Barrier{Registration: registration, Status: StatusClosedPending, Summary: &summary, UpdatedAt: now}},
-		{name: "closed", value: Barrier{Registration: registration, Status: StatusClosedPending, Summary: &summary, ScheduleKey: registration.Handle.TaskID(), UpdatedAt: now}, valid: true},
+		{name: "closed missing activation", value: Barrier{Registration: registration, Status: StatusClosedPending, Summary: &summary, ScheduleKey: registration.Handle.TaskID(), UpdatedAt: now}},
+		{name: "closed invalid activation", value: Barrier{Registration: registration, Status: StatusClosedPending, Summary: &summary, ScheduleKey: registration.Handle.TaskID(), ScheduleActivationID: "not-a-uuid", UpdatedAt: now}},
+		{name: "closed", value: Barrier{Registration: registration, Status: StatusClosedPending, Summary: &summary, ScheduleKey: registration.Handle.TaskID(), ScheduleActivationID: activationID, UpdatedAt: now}, valid: true},
 		{name: "fired", value: Barrier{Registration: registration, Status: StatusFired, Summary: &summary, ScheduleKey: registration.Handle.TaskID(), UpdatedAt: now}, valid: true},
+		{name: "generation suppression after close", value: Barrier{Registration: registration, Status: StatusSuppressedGenerationSuperseded, Summary: &summary, ScheduleKey: registration.Handle.TaskID(), ScheduleActivationID: activationID, UpdatedAt: now}, valid: true},
 		{name: "run terminal suppression", value: Barrier{Registration: registration, Status: StatusSuppressedRunTerminal, Summary: &summary, UpdatedAt: now}, valid: true},
 		{name: "generation suppression before fold", value: Barrier{Registration: registration, Status: StatusSuppressedGenerationSuperseded, UpdatedAt: now}, valid: true},
 		{name: "unknown status", value: Barrier{Registration: registration, Status: "unknown", Summary: &summary, UpdatedAt: now}},

@@ -56,3 +56,53 @@ func TestActivationPersistenceKeyIsJSONBPortable(t *testing.T) {
 		t.Fatalf("loaded activation = %#v found=%v err=%v", loaded, ok, err)
 	}
 }
+
+func TestGenerationCurrentRequiresExactOpenActivationAndOptionalStage(t *testing.T) {
+	now := time.Date(2026, time.July, 11, 12, 0, 0, 0, time.UTC)
+	activation, err := New("run-a", "entity-a", "validation", "revision", "revision_id", "event-a", "drafting", 3, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := activation.Generation()
+	buckets := map[string]map[string]any{}
+	if err := Store(buckets, activation); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name  string
+		stage string
+		want  bool
+	}{
+		{name: "exact generation", want: true},
+		{name: "exact generation and stage", stage: "drafting", want: true},
+		{name: "wrong stage", stage: "review"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := GenerationCurrent(buckets, first, tc.stage)
+			if err != nil || got != tc.want {
+				t.Fatalf("GenerationCurrent() = %v, %v, want %v", got, err, tc.want)
+			}
+		})
+	}
+	if _, err := activation.Repeat("drafting", "event-b", now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := Store(buckets, activation); err != nil {
+		t.Fatal(err)
+	}
+	if current, err := GenerationCurrent(buckets, first, ""); err != nil || current {
+		t.Fatalf("superseded generation current = %v, %v, want false", current, err)
+	}
+	if current, err := GenerationCurrent(buckets, activation.Generation(), ""); err != nil || !current {
+		t.Fatalf("replacement generation current = %v, %v, want true", current, err)
+	}
+	if err := activation.Close("approved", "event-c", now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := Store(buckets, activation); err != nil {
+		t.Fatal(err)
+	}
+	if current, err := GenerationCurrent(buckets, activation.Generation(), ""); err != nil || current {
+		t.Fatalf("closed generation current = %v, %v, want false", current, err)
+	}
+}

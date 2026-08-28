@@ -2,13 +2,16 @@ package bootverify
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 	"github.com/division-sh/swarm/internal/runtime/core/timeridentity"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
+	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
 )
 
 func TestRunAcceptsTimerOnlyReachableTerminalStage(t *testing.T) {
@@ -39,6 +42,55 @@ stages:
 	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
 	if reportContains(report.Errors(), "semantic_drift_unreachable_state", "closed") {
 		t.Fatalf("timer-only terminal was classified unreachable: %#v", report.Errors())
+	}
+}
+
+func TestRunAcceptsNestedDeliveryJoinOnlyReachableTerminalStage(t *testing.T) {
+	root := canonicalrouting.CopyNotifyAllChildren(t, canonicalrouting.NotifyAllChildrenOptions{FanOutDeliveryBarrier: true})
+	nodesPath := filepath.Join(root, "flows", canonicalrouting.NotifyAllChildrenOwnerFlowID, "nodes.yaml")
+	schemaPath := filepath.Join(root, "flows", canonicalrouting.NotifyAllChildrenOwnerFlowID, "schema.yaml")
+	nodesRaw, err := os.ReadFile(nodesPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes := strings.Replace(string(nodesRaw), `        on_complete:
+          element_id: 4c6f93a5-21f9-40d0-8b2a-7b074a11e30d
+          emit:`, `        on_complete:
+          element_id: 4c6f93a5-21f9-40d0-8b2a-7b074a11e30d
+          advances_to: done
+          emit:`, 1)
+	if nodes == string(nodesRaw) {
+		t.Fatal("delivery join completion fixture replacement did not apply")
+	}
+	if err := os.WriteFile(nodesPath, []byte(nodes), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	schemaRaw, err := os.ReadFile(schemaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := strings.Replace(string(schemaRaw), "states: [active]\n", "states: [active, done]\nterminal_states: [done]\n", 1)
+	if schema == string(schemaRaw) {
+		t.Fatal("delivery join lifecycle fixture replacement did not apply")
+	}
+	if err := os.WriteFile(schemaPath, []byte(schema), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repoRoot := repoRootForBootverifyTest(t)
+	bundle := loadFixtureBundleAt(t, repoRoot, root, runtimecontracts.DefaultPlatformSpecFile(repoRoot))
+	topology := bundle.Semantics.StageTopologies[canonicalrouting.NotifyAllChildrenOwnerFlowID]
+	var found bool
+	for _, edge := range topology.Edges {
+		if edge.Source == string(runtimecontracts.HandlerAdvanceCarrierJoinOnComplete) && edge.From == "active" && edge.To == "done" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("nested delivery join topology = %#v, want active -> done completion edge", topology.Edges)
+	}
+	report := Run(context.Background(), semanticview.Wrap(bundle), Options{})
+	if reportContains(report.Errors(), "semantic_drift_unreachable_state", "done") {
+		t.Fatalf("delivery-join-only terminal was classified unreachable: %#v", report.Errors())
 	}
 }
 

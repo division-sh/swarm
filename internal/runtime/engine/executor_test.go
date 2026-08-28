@@ -31,6 +31,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/fanoutobligation"
 	"github.com/division-sh/swarm/internal/runtime/flowmodel"
 	"github.com/division-sh/swarm/internal/runtime/joinruntime"
+	"github.com/division-sh/swarm/internal/runtime/loopruntime"
 	"github.com/division-sh/swarm/internal/runtime/pythonmodule"
 	"github.com/division-sh/swarm/internal/runtime/semanticview"
 	"github.com/division-sh/swarm/internal/runtime/testfixtures/canonicalrouting"
@@ -4616,6 +4617,116 @@ join:
 	}
 	if fmt.Sprint(completed["total"]) != "2" || fmt.Sprint(completed["succeeded"]) != "2" {
 		t.Fatalf("completion summary payload = %#v", completed)
+	}
+}
+
+func TestExecutor_FanOutDeliveryBarrierStaleGenerationIsMutationFreeDiscard(t *testing.T) {
+	node := testRootExecutableNode(t, "dispatcher")
+	var handler runtimecontracts.SystemNodeEventHandler
+	if err := yaml.Unmarshal([]byte(`
+fan_out:
+  element_id: a1111111-1111-4111-8111-111111111111
+  items_from: payload.items
+  as: fan_item
+  identity: fan_item
+  emit:
+    event: item.requested
+join:
+  id: all-items-delivered
+  members:
+    from_fan_out: a1111111-1111-4111-8111-111111111111
+  on_complete:
+    element_id: b1111111-1111-4111-8111-111111111111
+    advances_to: complete
+    emit:
+      event: batch.completed
+`), &handler); err != nil {
+		t.Fatal(err)
+	}
+	qualified, err := runtimecontracts.QualifySystemNodeHandlerRuleRefs(node, handler)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle := &runtimecontracts.WorkflowContractBundle{
+		Nodes: map[string]runtimecontracts.SystemNodeContract{
+			"dispatcher": {ID: "dispatcher", ExecutionType: runtimecontracts.SystemNodeExecutionType, EventHandlers: map[string]runtimecontracts.SystemNodeEventHandler{"batch.requested": qualified}},
+		},
+		Events: map[string]runtimecontracts.EventCatalogEntry{
+			"batch.requested": {Payload: runtimecontracts.EventPayloadSpec{Properties: map[string]runtimecontracts.EventFieldSpec{"items": {Type: "[text]"}}}},
+			"item.requested":  {},
+			"batch.completed": {},
+		},
+		Semantics: runtimecontracts.WorkflowSemanticView{Name: "root", Version: "v-test"},
+	}
+	source := fanOutSourceWithBundleIdentity(t, bundle)
+	if err := bundle.CompileFanOutHandlerPlans(node, "batch.requested", qualified); err != nil {
+		t.Fatal(err)
+	}
+	plan := bundle.FanOutPlansForHandler(node, "batch.requested")[0]
+	bundle.Semantics.Joins = []runtimecontracts.WorkflowJoinPlan{{
+		Node: node, HandlerEvent: "batch.requested", Mode: runtimecontracts.WorkflowJoinModeFanOutDelivery,
+		Spec: *qualified.Join, FanOut: runtimecontracts.WorkflowFanOutDeliveryJoinPlan{FanOut: plan.Ref},
+	}}
+	declaration, err := timeridentity.NewFanOutDeliveryJoinRef(
+		node, "batch.requested", qualified.Join.EffectiveID(), plan.Ref.ElementRef.PackageKey,
+		plan.Ref.ElementRef.ElementID, plan.Ref.BundleHash, plan.Ref.SemanticDigest,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, time.August, 28, 12, 0, 0, 0, time.UTC)
+	activation, err := loopruntime.New(semanticExecutionFixtureRunID, "entity-1", "", "revision", "revision_id", eventtest.UUID("loop-start"), "active", 3, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleGeneration := activation.Generation()
+	if _, err := activation.Repeat("active", eventtest.UUID("loop-repeat"), now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	buckets := map[string]map[string]any{}
+	if err := loopruntime.Store(buckets, activation); err != nil {
+		t.Fatal(err)
+	}
+	bound, err := declaration.BindFanOutIntent(eventtest.UUID("fan-out-trigger"), staleGeneration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle, err := timeridentity.JoinCompleteHandle(bound)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := handle.PayloadMetadata()
+	payload["join"] = map[string]any{"total": 1, "dispositions": map[string]any{
+		"succeeded": 1, "dead_lettered": 0, "no_route": 0, "semantic_rejected": 0, "canceled": 0,
+	}}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exec, err := NewExecutor(RuntimeDependencies{
+		Source: source, StateRepo: stubStateRepo{}, MutationOwner: stubMutationOwner{}, Locker: stubLocker{},
+		Dispatcher: stubDispatcher{}, PayloadShaper: stubPayloadShaper{}, MaxChainDepth: 5,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := exec.ExecuteSemanticFixture(context.Background(), ExecutionRequest{
+		EntityID: "entity-1", Node: node, HandlerEventKey: "batch.requested", Handler: qualified,
+		JoinDeclaration: declaration,
+		Event: eventtest.ExistingRunRootIngress(
+			eventtest.UUID("stale-fan-out-completion"), events.EventType(handle.EventType()), "platform", handle.TaskID(), raw, 0,
+			semanticExecutionFixtureRunID, events.EnvelopeForEntityID(events.EventEnvelope{}, "entity-1"), now.Add(2*time.Second),
+		),
+		State: testStateSnapshot("active", map[string]any{"sentinel": "unchanged"}, nil, buckets),
+	})
+	if err != nil {
+		t.Fatalf("execute stale completion: %v", err)
+	}
+	if result.Status != OutcomeDiscarded || result.FanOutBarrierCompletion != nil || len(result.EmitIntents) != 0 || result.StateMutation.NextState != "" || len(result.ActionsExecuted) != 0 {
+		t.Fatalf("stale completion result = %#v, want mutation-free discard", result)
+	}
+	if !reflect.DeepEqual(result.StateMutation.StateBuckets, map[string]map[string]any(nil)) || len(result.StateMutation.Fields) != 0 {
+		t.Fatalf("stale completion mutated state = %#v", result.StateMutation)
 	}
 }
 

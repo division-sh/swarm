@@ -3,6 +3,7 @@ package contracts
 import (
 	"testing"
 
+	"github.com/division-sh/swarm/internal/runtime/core/contractelementidentity"
 	"github.com/division-sh/swarm/internal/runtime/core/identitytest"
 )
 
@@ -90,5 +91,80 @@ func TestTopologyEdgeIdentityIncludesHandlerOrigin(t *testing.T) {
 	edges = appendTopologyEdge(edges, stages, WorkflowStageTopologyEdge{From: "waiting", To: "done", Source: "handler.join.timeout", Node: node, HandlerEvent: "b", EventType: "platform.join_timeout"})
 	if len(edges) != 2 {
 		t.Fatalf("edges = %#v, want distinct handler origins", edges)
+	}
+}
+
+func TestWorkflowStageTopologyScopesDeliveryJoinCompletionToHandlerLifecycle(t *testing.T) {
+	elementID, err := contractelementidentity.ParseContractElementID("cf377b4f-e952-4ddb-9ecc-a1f380af032d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivery := JoinSpec{
+		ID: "all-delivered", Members: JoinMembersSpec{FromFanOut: elementID},
+		OnComplete: HandlerRuleEntry{AdvancesTo: "done"}, OnCompleteFound: true,
+	}
+	for _, tc := range []struct {
+		name   string
+		flowID string
+		nodeID string
+	}{
+		{name: "root", nodeID: "dispatcher"},
+		{name: "nested flow", flowID: "child", nodeID: "dispatcher"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			node := identitytest.RootNode(t, tc.nodeID)
+			if tc.flowID != "" {
+				node = identitytest.FlowNode(t, tc.flowID, tc.nodeID)
+			}
+			topology := BuildWorkflowStageTopology(
+				tc.flowID, "active", []string{"active", "waiting", "done"}, []string{"done"},
+				[]HandlerTransitionSemantic{{Node: node, EventType: "batch.requested", Join: &delivery}}, nil, nil,
+			)
+			var got []WorkflowStageTopologyEdge
+			for _, edge := range topology.Edges {
+				if edge.Source == string(HandlerAdvanceCarrierJoinOnComplete) {
+					got = append(got, edge)
+				}
+			}
+			if len(got) != 2 || got[0].From != "active" || got[1].From != "waiting" || got[0].To != "done" || got[1].To != "done" {
+				t.Fatalf("delivery join completion edges = %#v, want every ordinary nonterminal handler stage -> done", got)
+			}
+		})
+	}
+}
+
+func TestWorkflowStageTopologyKeepsDeliveryJoinCompletionInsideLoopRegion(t *testing.T) {
+	elementID, err := contractelementidentity.ParseContractElementID("cf377b4f-e952-4ddb-9ecc-a1f380af032d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	delivery := JoinSpec{
+		ID: "all-delivered", Members: JoinMembersSpec{FromFanOut: elementID},
+		OnComplete: HandlerRuleEntry{AdvancesTo: "drafting"}, OnCompleteFound: true,
+	}
+	node := identitytest.FlowNode(t, "child", "dispatcher")
+	topology := BuildWorkflowStageTopology(
+		"child", "drafting", []string{"drafting", "review", "done"}, []string{"done"},
+		[]HandlerTransitionSemantic{
+			{Node: node, EventType: "draft.ready", AdvancesTo: "review", Loop: &LoopOperationSpec{Admit: "revision", From: "drafting"}},
+			{Node: node, EventType: "batch.requested", Join: &delivery, Loop: &LoopOperationSpec{Repeat: "revision", From: "review"}},
+		}, nil,
+		[]WorkflowLoopPlan{{
+			FlowID: "child", ID: "revision", Escape: LoopEscapeSpec{AdvancesTo: "done"},
+			Operations: []WorkflowLoopOperationPlan{{Node: node, HandlerEvent: "batch.requested", Kind: LoopOperationRepeat, From: "review"}},
+		}},
+	)
+	component := topology.StronglyConnectedComponent("review")
+	if len(component) != 2 || component[0] != "drafting" || component[1] != "review" {
+		t.Fatalf("delivery join loop component = %#v, want [drafting review]", component)
+	}
+	var completion WorkflowStageTopologyEdge
+	for _, edge := range topology.Edges {
+		if edge.Source == "loop.repeat" && edge.HandlerEvent == "batch.requested" && edge.To == "drafting" {
+			completion = edge
+		}
+	}
+	if completion.From != "review" || completion.LoopID != "revision" || completion.LoopOperation != LoopOperationRepeat {
+		t.Fatalf("delivery join loop completion edge = %#v", completion)
 	}
 }

@@ -60,7 +60,7 @@ func BuildWorkflowStageTopology(
 			if loopKind != "" {
 				edgeSource = "loop." + string(loopKind)
 			}
-			if transition.Loop == nil && transition.Join != nil {
+			if transition.Loop == nil && transition.Join != nil && transition.Join.Mode() == WorkflowJoinModeArrival {
 				switch carrier.Kind {
 				case HandlerAdvanceCarrierJoinOnComplete:
 					from = []string{strings.TrimSpace(transition.Join.Stage)}

@@ -177,7 +177,7 @@ func loadFanOutBarriersByStatus(
 	postgres bool,
 	runID string,
 	status fanoutbarrier.Status,
-) ([]fanoutbarrier.Registration, error) {
+) ([]fanoutbarrier.Barrier, error) {
 	if !status.Valid() {
 		return nil, fmt.Errorf("fan-out barrier load requires valid status")
 	}
@@ -186,7 +186,8 @@ func loadFanOutBarriersByStatus(
 		       bundle_hash, semantic_digest, target_package_key, target_flow_id,
 		       target_node_id, handler_event, join_id,
 		       route_scope_key, route_instance_id, route_instance_path,
-		       entity_id, routing_source, execution_mode, timer_handle, created_at
+		       entity_id, routing_source, execution_mode, timer_handle,
+		       summary, schedule_key, schedule_activation_id, created_at, updated_at
 		FROM fan_out_obligation_barriers
 		WHERE run_id=$1 AND status=$2
 		ORDER BY triggering_delivery_id, package_key, element_id`
@@ -199,31 +200,36 @@ func loadFanOutBarriersByStatus(
 	}
 	defer rows.Close()
 	type persisted struct {
-		registration fanoutbarrier.Registration
-		bundleHash   string
-		digest       string
-		targetPkg    string
-		targetFlow   string
-		targetNode   string
-		handlerEvent string
-		joinID       string
-		routingRaw   []byte
-		handleRaw    []byte
-		execution    string
+		barrier            fanoutbarrier.Barrier
+		bundleHash         string
+		digest             string
+		targetPkg          string
+		targetFlow         string
+		targetNode         string
+		handlerEvent       string
+		joinID             string
+		routingRaw         []byte
+		handleRaw          []byte
+		summaryRaw         []byte
+		execution          string
+		scheduleKey        sql.NullString
+		scheduleActivation sql.NullString
 	}
 	persistedRows := make([]persisted, 0)
 	for rows.Next() {
 		var item persisted
-		item.registration.IntentKey.RunID = runID
-		var routingRaw, handleRaw, createdAtRaw any
+		item.barrier.Registration.IntentKey.RunID = runID
+		item.barrier.Status = status
+		var routingRaw, handleRaw, summaryRaw, createdAtRaw, updatedAtRaw any
 		if err := rows.Scan(
-			&item.registration.IntentKey.TriggeringDeliveryID,
-			&item.registration.IntentKey.ElementRef.PackageKey,
-			&item.registration.IntentKey.ElementRef.ElementID,
+			&item.barrier.Registration.IntentKey.TriggeringDeliveryID,
+			&item.barrier.Registration.IntentKey.ElementRef.PackageKey,
+			&item.barrier.Registration.IntentKey.ElementRef.ElementID,
 			&item.bundleHash, &item.digest, &item.targetPkg, &item.targetFlow,
 			&item.targetNode, &item.handlerEvent, &item.joinID,
-			&item.registration.Route.ScopeKey, &item.registration.Route.InstanceID, &item.registration.Route.InstancePath,
-			&item.registration.EntityID, &routingRaw, &item.execution, &handleRaw, &createdAtRaw,
+			&item.barrier.Registration.Route.ScopeKey, &item.barrier.Registration.Route.InstanceID, &item.barrier.Registration.Route.InstancePath,
+			&item.barrier.Registration.EntityID, &routingRaw, &item.execution, &handleRaw,
+			&summaryRaw, &item.scheduleKey, &item.scheduleActivation, &createdAtRaw, &updatedAtRaw,
 		); err != nil {
 			return nil, err
 		}
@@ -231,9 +237,15 @@ func loadFanOutBarriersByStatus(
 		if err != nil || !present {
 			return nil, fmt.Errorf("decode fan-out barrier created time: %w", err)
 		}
-		item.registration.CreatedAt = createdAt
+		updatedAt, updatedPresent, err := sqliteTimeValue(updatedAtRaw)
+		if err != nil || !updatedPresent {
+			return nil, fmt.Errorf("decode fan-out barrier updated time: %w", err)
+		}
+		item.barrier.Registration.CreatedAt = createdAt
+		item.barrier.UpdatedAt = updatedAt
 		item.routingRaw = append([]byte(nil), jsonRawMessageValue(routingRaw)...)
 		item.handleRaw = append([]byte(nil), jsonRawMessageValue(handleRaw)...)
+		item.summaryRaw = append([]byte(nil), jsonRawMessageValue(summaryRaw)...)
 		persistedRows = append(persistedRows, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -242,26 +254,35 @@ func loadFanOutBarriersByStatus(
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
-	out := make([]fanoutbarrier.Registration, 0, len(persistedRows))
+	out := make([]fanoutbarrier.Barrier, 0, len(persistedRows))
 	for _, item := range persistedRows {
-		item.registration.PlanRef = runtimecontracts.FanOutPlanRef{
-			BundleHash: item.bundleHash, ElementRef: item.registration.IntentKey.ElementRef, SemanticDigest: item.digest,
+		item.barrier.Registration.PlanRef = runtimecontracts.FanOutPlanRef{
+			BundleHash: item.bundleHash, ElementRef: item.barrier.Registration.IntentKey.ElementRef, SemanticDigest: item.digest,
 		}
-		if err := json.Unmarshal(item.routingRaw, &item.registration.RoutingSource); err != nil {
+		if err := json.Unmarshal(item.routingRaw, &item.barrier.Registration.RoutingSource); err != nil {
 			return nil, fmt.Errorf("decode fan-out barrier routing source: %w", err)
 		}
-		if err := json.Unmarshal(item.handleRaw, &item.registration.Handle); err != nil {
+		if err := json.Unmarshal(item.handleRaw, &item.barrier.Registration.Handle); err != nil {
 			return nil, fmt.Errorf("decode fan-out barrier timer handle: %w", err)
 		}
+		if len(item.summaryRaw) != 0 && string(item.summaryRaw) != "null" {
+			var summary fanoutbarrier.Summary
+			if err := json.Unmarshal(item.summaryRaw, &summary); err != nil {
+				return nil, fmt.Errorf("decode fan-out barrier summary: %w", err)
+			}
+			item.barrier.Summary = &summary
+		}
+		item.barrier.ScheduleKey = strings.TrimSpace(item.scheduleKey.String)
+		item.barrier.ScheduleActivationID = strings.TrimSpace(item.scheduleActivation.String)
 		mode, ok := executionmode.Parse(item.execution)
 		if !ok {
 			return nil, fmt.Errorf("fan-out barrier execution mode %q is invalid", item.execution)
 		}
-		item.registration.ExecutionMode = mode
-		if err := item.registration.Validate(); err != nil {
+		item.barrier.Registration.ExecutionMode = mode
+		if err := item.barrier.Validate(); err != nil {
 			return nil, err
 		}
-		ref, _ := item.registration.Handle.JoinRef()
+		ref, _ := item.barrier.Registration.Handle.JoinRef()
 		fanOut, _ := ref.FanOutDelivery()
 		if fanOut.BundleHash() != strings.TrimSpace(item.bundleHash) || fanOut.SemanticDigest() != strings.TrimSpace(item.digest) ||
 			ref.PackageKey() != strings.TrimSpace(item.targetPkg) || ref.FlowID() != strings.TrimSpace(item.targetFlow) ||
@@ -269,13 +290,21 @@ func loadFanOutBarriersByStatus(
 			ref.JoinID() != strings.TrimSpace(item.joinID) {
 			return nil, fmt.Errorf("fan-out barrier persisted identity contradicts its typed handle")
 		}
-		out = append(out, item.registration)
+		out = append(out, item.barrier)
 	}
 	return out, nil
 }
 
 func loadArmedFanOutBarriers(ctx context.Context, tx *sql.Tx, postgres bool, runID string) ([]fanoutbarrier.Registration, error) {
-	return loadFanOutBarriersByStatus(ctx, tx, postgres, runID, fanoutbarrier.StatusArmed)
+	barriers, err := loadFanOutBarriersByStatus(ctx, tx, postgres, runID, fanoutbarrier.StatusArmed)
+	if err != nil {
+		return nil, err
+	}
+	registrations := make([]fanoutbarrier.Registration, 0, len(barriers))
+	for _, barrier := range barriers {
+		registrations = append(registrations, barrier.Registration)
+	}
+	return registrations, nil
 }
 
 func fanOutBarrierGenerationCurrent(ctx context.Context, tx *sql.Tx, registration fanoutbarrier.Registration) (bool, error) {
@@ -370,6 +399,7 @@ func advanceFanOutDeliveryBarriersTx(
 		}
 		status := fanoutbarrier.StatusClosedPending
 		scheduleKey := any(nil)
+		scheduleActivationID := any(nil)
 		command, err := fanOutBarrierSchedule(registration, fold.Summary, selectedNow)
 		if err != nil {
 			return nil, err
@@ -387,20 +417,21 @@ func advanceFanOutDeliveryBarriersTx(
 		}
 		activations = append(activations, activation)
 		scheduleKey = command.ScheduleKey
+		scheduleActivationID = admitted.Activation.ID
 		summaryRaw, err := json.Marshal(fold.Summary)
 		if err != nil {
 			return nil, err
 		}
 		query := `
 			UPDATE fan_out_obligation_barriers
-			SET status=$1, summary=$2, schedule_key=$3, updated_at=$4
-			WHERE run_id=$5 AND triggering_delivery_id=$6 AND package_key=$7 AND element_id=$8 AND status='armed'`
+			SET status=$1, summary=$2, schedule_key=$3, schedule_activation_id=$4, updated_at=$5
+			WHERE run_id=$6 AND triggering_delivery_id=$7 AND package_key=$8 AND element_id=$9 AND status='armed'`
 		if postgres {
 			query = strings.ReplaceAll(query, "$2", "$2::jsonb")
 		} else {
-			query = postgresPlaceholdersToSQLite(query, 8)
+			query = postgresPlaceholdersToSQLite(query, 9)
 		}
-		result, err := tx.ExecContext(ctx, query, string(status), string(summaryRaw), scheduleKey, selectedNow.UTC(),
+		result, err := tx.ExecContext(ctx, query, string(status), string(summaryRaw), scheduleKey, scheduleActivationID, selectedNow.UTC(),
 			registration.IntentKey.RunID, registration.IntentKey.TriggeringDeliveryID,
 			registration.IntentKey.ElementRef.PackageKey, registration.IntentKey.ElementRef.ElementID)
 		if err != nil {
@@ -414,7 +445,7 @@ func advanceFanOutDeliveryBarriersTx(
 			return nil, err
 		}
 	}
-	if err := suppressSupersededPendingFanOutBarriersTx(ctx, tx, postgres, effects, runID, selectedNow); err != nil {
+	if err := suppressSupersededPendingFanOutBarriersTx(ctx, tx, postgres, effects, genericSchedules, runID, selectedNow); err != nil {
 		return nil, err
 	}
 	if err := terminalizeDeadLetteredFanOutBarrierOutcomesTx(ctx, tx, postgres, effects, runID, selectedNow); err != nil {
@@ -456,14 +487,16 @@ func suppressSupersededPendingFanOutBarriersTx(
 	tx *sql.Tx,
 	postgres bool,
 	effects *privaterunforkrevision.Effects,
+	genericSchedules GenericScheduleTxOwner,
 	runID string,
 	at time.Time,
 ) error {
-	registrations, err := loadFanOutBarriersByStatus(ctx, tx, postgres, runID, fanoutbarrier.StatusClosedPending)
+	barriers, err := loadFanOutBarriersByStatus(ctx, tx, postgres, runID, fanoutbarrier.StatusClosedPending)
 	if err != nil {
 		return err
 	}
-	for _, registration := range registrations {
+	for _, barrier := range barriers {
+		registration := barrier.Registration
 		current, err := fanOutBarrierGenerationCurrent(ctx, tx, registration)
 		if err != nil {
 			return err
@@ -471,16 +504,20 @@ func suppressSupersededPendingFanOutBarriersTx(
 		if current {
 			continue
 		}
+		if err := cancelSupersededFanOutBarrierScheduleTx(ctx, tx, effects, genericSchedules, barrier, at); err != nil {
+			return err
+		}
 		update := `
 			UPDATE fan_out_obligation_barriers
 			SET status=$1, updated_at=$2
-			WHERE run_id=$3 AND triggering_delivery_id=$4 AND package_key=$5 AND element_id=$6 AND status='closed_pending'`
+			WHERE run_id=$3 AND triggering_delivery_id=$4 AND package_key=$5 AND element_id=$6 AND status='closed_pending' AND schedule_key=$7 AND schedule_activation_id=$8`
 		if !postgres {
-			update = postgresPlaceholdersToSQLite(update, 6)
+			update = postgresPlaceholdersToSQLite(update, 8)
 		}
 		result, err := tx.ExecContext(ctx, update, string(fanoutbarrier.StatusSuppressedGenerationSuperseded), at.UTC(),
 			registration.IntentKey.RunID, registration.IntentKey.TriggeringDeliveryID,
-			registration.IntentKey.ElementRef.PackageKey, registration.IntentKey.ElementRef.ElementID)
+			registration.IntentKey.ElementRef.PackageKey, registration.IntentKey.ElementRef.ElementID,
+			barrier.ScheduleKey, barrier.ScheduleActivationID)
 		if err != nil {
 			return err
 		}
@@ -495,6 +532,61 @@ func suppressSupersededPendingFanOutBarriersTx(
 	return nil
 }
 
+func cancelSupersededFanOutBarrierScheduleTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	effects *privaterunforkrevision.Effects,
+	genericSchedules GenericScheduleTxOwner,
+	barrier fanoutbarrier.Barrier,
+	at time.Time,
+) error {
+	if genericSchedules == nil || barrier.Summary == nil {
+		return fmt.Errorf("superseded pending fan-out barrier requires its generic schedule owner and summary")
+	}
+	activation, found, err := genericSchedules.LoadActivationTx(ctx, tx, barrier.ScheduleActivationID)
+	if err != nil {
+		return fmt.Errorf("load superseded fan-out barrier schedule: %w", err)
+	}
+	if !found {
+		return fmt.Errorf("superseded fan-out barrier schedule activation %s is missing", barrier.ScheduleActivationID)
+	}
+	expected, err := fanOutBarrierSchedule(barrier.Registration, *barrier.Summary, activation.InitialDueAt)
+	if err != nil {
+		return err
+	}
+	expectedHash, err := expected.ImmutableHash()
+	if err != nil {
+		return err
+	}
+	if activation.ID != strings.TrimSpace(barrier.ScheduleActivationID) ||
+		activation.Command.ScheduleKey != strings.TrimSpace(barrier.ScheduleKey) ||
+		activation.Command.TaskID != barrier.Registration.Handle.TaskID() ||
+		activation.ImmutableHash != expectedHash {
+		return fmt.Errorf("superseded fan-out barrier schedule activation contradicts its exact barrier owner")
+	}
+	cancelled, err := genericSchedules.CancelActivationTx(ctx, tx, effects, runtimegenericschedule.CancelCommand{
+		ActivationID: activation.ID,
+		Cause:        "fan_out_generation_superseded",
+		CancelledAt:  at,
+	})
+	if err != nil {
+		return fmt.Errorf("cancel superseded fan-out barrier schedule: %w", err)
+	}
+	switch cancelled.Outcome {
+	case runtimegenericschedule.CancelChanged:
+		if cancelled.Activation.Status != runtimegenericschedule.StatusCancelled {
+			return fmt.Errorf("superseded fan-out barrier schedule cancellation did not terminalize its activation")
+		}
+	case runtimegenericschedule.CancelTerminal:
+		if cancelled.Activation.Status != runtimegenericschedule.StatusFired {
+			return fmt.Errorf("superseded fan-out barrier schedule reached unexpected terminal status %q", cancelled.Activation.Status)
+		}
+	default:
+		return fmt.Errorf("superseded fan-out barrier schedule cancellation outcome is %q", cancelled.Outcome)
+	}
+	return nil
+}
+
 func terminalizeDeadLetteredFanOutBarrierOutcomesTx(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -504,7 +596,7 @@ func terminalizeDeadLetteredFanOutBarrierOutcomesTx(
 	selectedNow time.Time,
 ) error {
 	query := `
-		SELECT triggering_delivery_id, package_key, element_id, schedule_key
+		SELECT triggering_delivery_id, package_key, element_id, schedule_key, schedule_activation_id
 		FROM fan_out_obligation_barriers
 		WHERE run_id=$1 AND status='closed_pending'
 		ORDER BY triggering_delivery_id, package_key, element_id`
@@ -520,11 +612,12 @@ func terminalizeDeadLetteredFanOutBarrierOutcomesTx(
 		packageKey           string
 		elementID            string
 		scheduleKey          string
+		scheduleActivationID string
 	}
 	pendingRows := make([]pending, 0)
 	for rows.Next() {
 		var item pending
-		if err := rows.Scan(&item.triggeringDeliveryID, &item.packageKey, &item.elementID, &item.scheduleKey); err != nil {
+		if err := rows.Scan(&item.triggeringDeliveryID, &item.packageKey, &item.elementID, &item.scheduleKey, &item.scheduleActivationID); err != nil {
 			rows.Close()
 			return err
 		}
@@ -547,8 +640,8 @@ func terminalizeDeadLetteredFanOutBarrierOutcomesTx(
 		err := tx.QueryRowContext(ctx, `
 			SELECT occurrence_event_id, status
 			FROM timers
-			WHERE run_id=$1 AND schedule_key=$2 AND task_type='timer'
-		`, runID, item.scheduleKey).Scan(&occurrenceEventID, &scheduleStatus)
+			WHERE timer_id=$1 AND run_id=$2 AND schedule_key=$3 AND task_type='timer'
+		`, item.scheduleActivationID, runID, item.scheduleKey).Scan(&occurrenceEventID, &scheduleStatus)
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("closed fan-out barrier schedule %s is missing", item.scheduleKey)
 		}
@@ -815,6 +908,7 @@ func materializeRunForkFanOutBarrierTx(
 		summaryRaw = string(raw)
 	}
 	var scheduleKey any
+	var scheduleActivationID any
 	if source.Status == fanoutbarrier.StatusClosedPending {
 		if genericSchedules == nil || source.Summary == nil {
 			return fmt.Errorf("closed fork fan-out barrier requires generic schedule owner and summary")
@@ -823,23 +917,25 @@ func materializeRunForkFanOutBarrierTx(
 		if err != nil {
 			return err
 		}
-		if _, err := genericSchedules.AdmitTx(ctx, tx, effects, command); err != nil {
+		admitted, err := genericSchedules.AdmitTx(ctx, tx, effects, command)
+		if err != nil {
 			return fmt.Errorf("admit fork fan-out barrier completion: %w", err)
 		}
 		scheduleKey = command.ScheduleKey
+		scheduleActivationID = admitted.Activation.ID
 	} else if source.Status == fanoutbarrier.StatusFired || source.Status == fanoutbarrier.StatusOutcomeDeadLettered {
 		scheduleKey = handle.TaskID()
 	}
 	query := `
 		UPDATE fan_out_obligation_barriers
-		SET status=$1, summary=$2, schedule_key=$3, updated_at=$4
-		WHERE run_id=$5 AND triggering_delivery_id=$6 AND package_key=$7 AND element_id=$8 AND status='armed'`
+		SET status=$1, summary=$2, schedule_key=$3, schedule_activation_id=$4, updated_at=$5
+		WHERE run_id=$6 AND triggering_delivery_id=$7 AND package_key=$8 AND element_id=$9 AND status='armed'`
 	if postgres {
 		query = strings.ReplaceAll(query, "$2", "$2::jsonb")
 	} else {
-		query = postgresPlaceholdersToSQLite(query, 8)
+		query = postgresPlaceholdersToSQLite(query, 9)
 	}
-	result, err := tx.ExecContext(ctx, query, string(source.Status), summaryRaw, scheduleKey, at.UTC(),
+	result, err := tx.ExecContext(ctx, query, string(source.Status), summaryRaw, scheduleKey, scheduleActivationID, at.UTC(),
 		registration.IntentKey.RunID, registration.IntentKey.TriggeringDeliveryID,
 		registration.IntentKey.ElementRef.PackageKey, registration.IntentKey.ElementRef.ElementID)
 	if err != nil {
@@ -934,7 +1030,7 @@ func commitFanOutBarrierCompletionTx(
 		return err
 	}
 	query := `
-		SELECT status, summary, schedule_key
+		SELECT status, summary, schedule_key, schedule_activation_id
 		FROM fan_out_obligation_barriers
 		WHERE run_id=$1 AND triggering_delivery_id=$2 AND package_key=$3 AND element_id=$4`
 	if postgres {
@@ -943,7 +1039,8 @@ func commitFanOutBarrierCompletionTx(
 	var status string
 	var summaryRaw any
 	var scheduleKey sql.NullString
-	err = tx.QueryRowContext(ctx, query, key.RunID, key.TriggeringDeliveryID, key.ElementRef.PackageKey, key.ElementRef.ElementID).Scan(&status, &summaryRaw, &scheduleKey)
+	var scheduleActivationID sql.NullString
+	err = tx.QueryRowContext(ctx, query, key.RunID, key.TriggeringDeliveryID, key.ElementRef.PackageKey, key.ElementRef.ElementID).Scan(&status, &summaryRaw, &scheduleKey, &scheduleActivationID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("fan-out barrier completion owner is missing")
 	}
@@ -954,7 +1051,7 @@ func commitFanOutBarrierCompletionTx(
 	if err := json.Unmarshal(jsonRawMessageValue(summaryRaw), &persisted); err != nil {
 		return fmt.Errorf("decode fan-out barrier completion summary: %w", err)
 	}
-	if persisted != completion.Summary || !scheduleKey.Valid || strings.TrimSpace(scheduleKey.String) != completion.Handle.TaskID() {
+	if persisted != completion.Summary || !scheduleKey.Valid || strings.TrimSpace(scheduleKey.String) != completion.Handle.TaskID() || !scheduleActivationID.Valid || strings.TrimSpace(scheduleActivationID.String) == "" {
 		return fmt.Errorf("fan-out barrier completion contradicts its closed schedule")
 	}
 	switch fanoutbarrier.Status(strings.TrimSpace(status)) {

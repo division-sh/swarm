@@ -663,6 +663,31 @@ func CancelTx(ctx context.Context, tx *sql.Tx, postgres bool, effects *privateru
 	return runtimegenericschedule.CancelResult{Outcome: runtimegenericschedule.CancelChanged, Activation: activation}, nil
 }
 
+// LoadActivationTx loads and locks one exact server-minted activation for a
+// composing lifecycle owner that must validate it before a coupled mutation.
+func LoadActivationTx(ctx context.Context, tx *sql.Tx, postgres bool, activationID string) (runtimegenericschedule.Activation, bool, error) {
+	if tx == nil || strings.TrimSpace(activationID) == "" {
+		return runtimegenericschedule.Activation{}, false, errors.New("generic schedule activation load requires transaction and activation identity")
+	}
+	return loadByIDTx(ctx, tx, dialectFor(postgres), strings.TrimSpace(activationID), postgres)
+}
+
+func (o *PostgresOwner) LoadActivationTx(ctx context.Context, tx *sql.Tx, activationID string) (runtimegenericschedule.Activation, bool, error) {
+	return LoadActivationTx(ctx, tx, true, activationID)
+}
+
+func (o *SQLiteOwner) LoadActivationTx(ctx context.Context, tx *sql.Tx, activationID string) (runtimegenericschedule.Activation, bool, error) {
+	return LoadActivationTx(ctx, tx, false, activationID)
+}
+
+func (o *PostgresOwner) CancelActivationTx(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, command runtimegenericschedule.CancelCommand) (runtimegenericschedule.CancelResult, error) {
+	return CancelTx(ctx, tx, true, effects, command)
+}
+
+func (o *SQLiteOwner) CancelActivationTx(ctx context.Context, tx *sql.Tx, effects *privaterunforkrevision.Effects, command runtimegenericschedule.CancelCommand) (runtimegenericschedule.CancelResult, error) {
+	return CancelTx(ctx, tx, false, effects, command)
+}
+
 // CancelAdmissionTx cancels the exact immutable activation selected by the
 // admission command. It is the private composition form for outer workflow
 // transactions that know the stable schedule key but not the server-minted ID.

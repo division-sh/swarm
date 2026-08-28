@@ -3947,7 +3947,10 @@ handler_specification:
         threshold/completion, timeout_ms, nested on_complete, and nested on_timeout. Accumulate owns only open/windowed
         streams and may not be paired with handler-level on_complete.
       graph_surface: >-
-        describe --graph renders stage-scoped join completion and timeout edges. Timeout edges include after and the join ID.
+        describe --graph renders stage-scoped join completion and timeout edges. Arrival-join completion and timeout
+        originate at the declared join stage. Delivery-barrier completion originates from the ordinary handler stage
+        scope, including the exact loop-operation source when the handler is loop-scoped. Timeout edges include after
+        and the join ID.
       delivery_barrier_variant:
         authored_shape: >-
           `members: {from_fan_out: <element_id>}` selects the fan-out delivery variant. It requires an explicit stable
@@ -3976,7 +3979,13 @@ handler_specification:
           Duplicate candidates and occurrences are idempotent. The completion evaluates `on_complete` with
           `join.total` plus `join.dispositions.{succeeded,dead_lettered,no_route,semantic_rejected,canceled}` and publishes
           through the ordinary EventBus. Successful delivery marks fired; no-route or terminal delivery failure marks
-          outcome_dead_lettered. Run terminality and stale loop generation suppress owed outcomes explicitly.
+          outcome_dead_lettered. Run terminality and stale loop generation suppress owed outcomes explicitly. A
+          closed-pending generation supersession validates and retires the exact persisted generic-schedule activation
+          in the same selected-store transaction before making the barrier nonblocking; it never reconstructs schedule
+          identity or cancels run-wide work. If occurrence publication already won, executor admission compares the
+          occurrence's bound generation with canonical loop state before evaluating `on_complete`; stale occurrences
+          settle as mutation-free terminal no-ops and are never retried, dead-lettered, or rebound to the current
+          generation.
     query:
       field: query
       type: object or list of objects
@@ -16872,8 +16881,10 @@ platform_tables:
       description: >-
         Canonical per-intent terminal-disposition barrier. The row binds one exact compiled delivery-barrier declaration
         to one exact fan-out intent and selected execution target. Raw delivery and route facts remain in their owners;
-        this row stores only the closed ordinal summary and barrier lifecycle. Armed and closed_pending rows block run
-        completion. There is no polling, count inference, fake stage, or compatibility representation.
+        this row stores only the closed ordinal summary and barrier lifecycle. A closed_pending row also owns the exact
+        server-minted generic-schedule activation that must either fire or be transactionally cancelled before the
+        barrier becomes terminal. Armed and closed_pending rows block run completion. There is no polling, count
+        inference, fake stage, or compatibility representation.
       ddl: |
         CREATE TABLE fan_out_obligation_barriers (
             run_id                    UUID NOT NULL,
@@ -16897,13 +16908,16 @@ platform_tables:
             status                    TEXT NOT NULL CHECK (status IN ('armed', 'closed_pending', 'fired', 'outcome_dead_lettered', 'outcome_suppressed_run_terminal', 'outcome_suppressed_generation_superseded')),
             summary                   JSONB,
             schedule_key              TEXT,
+            schedule_activation_id    UUID,
             created_at                TIMESTAMPTZ NOT NULL,
             updated_at                TIMESTAMPTZ NOT NULL,
             PRIMARY KEY (run_id, triggering_delivery_id, package_key, element_id),
             FOREIGN KEY (run_id, triggering_delivery_id, package_key, element_id) REFERENCES fan_out_intents(run_id, triggering_delivery_id, package_key, element_id),
-            CHECK ((status = 'armed' AND summary IS NULL AND schedule_key IS NULL) OR (status = 'outcome_suppressed_generation_superseded') OR (status = 'outcome_suppressed_run_terminal' AND summary IS NOT NULL) OR (status IN ('closed_pending', 'fired', 'outcome_dead_lettered') AND summary IS NOT NULL AND schedule_key IS NOT NULL)),
+            CHECK ((schedule_activation_id IS NULL) OR (schedule_key IS NOT NULL)),
+            CHECK ((status = 'armed' AND summary IS NULL AND schedule_key IS NULL AND schedule_activation_id IS NULL) OR (status = 'outcome_suppressed_generation_superseded' AND ((summary IS NULL AND schedule_key IS NULL AND schedule_activation_id IS NULL) OR (summary IS NOT NULL AND schedule_key IS NOT NULL AND schedule_activation_id IS NOT NULL))) OR (status = 'outcome_suppressed_run_terminal' AND summary IS NOT NULL) OR (status = 'closed_pending' AND summary IS NOT NULL AND schedule_key IS NOT NULL AND schedule_activation_id IS NOT NULL) OR (status IN ('fired', 'outcome_dead_lettered') AND summary IS NOT NULL AND schedule_key IS NOT NULL)),
             INDEX idx_fan_out_obligation_barriers_run (run_id, status),
-            INDEX idx_fan_out_obligation_barriers_schedule (schedule_key) WHERE schedule_key IS NOT NULL
+            INDEX idx_fan_out_obligation_barriers_schedule (schedule_key) WHERE schedule_key IS NOT NULL,
+            UNIQUE INDEX idx_fan_out_obligation_barriers_activation (schedule_activation_id) WHERE schedule_activation_id IS NOT NULL
         );
     runtime_store_metadata:
       description: 'Immutable creation-origin evidence for a selected runtime store. The stored versions explain which Swarm
