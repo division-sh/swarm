@@ -618,7 +618,6 @@ func TestHandlerEntityClassifierRejectsEntitylessOwnershipAcrossNestedOperators(
 		name    string
 		handler runtimecontracts.SystemNodeEventHandler
 	}{
-		{name: "fan out source", handler: runtimecontracts.SystemNodeEventHandler{FanOut: &runtimecontracts.FanOutSpec{ItemsFrom: "entity.items"}}},
 		{name: "group by source", handler: runtimecontracts.SystemNodeEventHandler{GroupBy: &runtimecontracts.GroupBySpec{ItemsFrom: "entity.items"}}},
 		{name: "on success emission", handler: runtimecontracts.SystemNodeEventHandler{OnSuccess: runtimecontracts.HandlerOnSuccessSpec{Emit: runtimecontracts.EmitSpec{Event: "work.done", From: "entity"}}}},
 		{name: "join membership", handler: runtimecontracts.SystemNodeEventHandler{Join: &runtimecontracts.JoinSpec{Members: runtimecontracts.JoinMembersSpec{From: "entity.expected"}}}},
@@ -628,7 +627,6 @@ func TestHandlerEntityClassifierRejectsEntitylessOwnershipAcrossNestedOperators(
 		{name: "platform entity identity", handler: runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{Check: `_entity.id != ""`}}},
 		{name: "platform entity state", handler: runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{Check: `_entity.current_state == "active"`}}},
 		{name: "platform entity gate", handler: runtimecontracts.SystemNodeEventHandler{Guard: &runtimecontracts.GuardSpec{Check: `_entity.gates.ready`}}},
-		{name: "nested rule fan out", handler: runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{FanOut: &runtimecontracts.FanOutSpec{ItemsFrom: "entity.items"}}}}},
 		{name: "nested rule activity", handler: runtimecontracts.SystemNodeEventHandler{Rules: []runtimecontracts.HandlerRuleEntry{{Activity: runtimecontracts.ActivitySpec{Input: map[string]runtimecontracts.ExpressionValue{"owner": runtimecontracts.CELExpression("entity.owner")}}}}}},
 	}
 	for _, test := range tests {
@@ -647,6 +645,90 @@ func TestHandlerEntityClassifierRejectsEntitylessOwnershipAcrossNestedOperators(
 		Guard: &runtimecontracts.GuardSpec{Check: `_entity.flow_instance == "review/one"`},
 	}) != DeliveryTargetEntityOptional {
 		t.Fatal("flow-instance-only platform metadata classified as entity-scoped")
+	}
+}
+
+func TestCompiledFanOutEntityRequirementRejectsEntitylessOwnershipAcrossSites(t *testing.T) {
+	bundle := loadWorkflowTempBundle(t, map[string]string{
+		"package.yaml": `name: compiled-fan-out-entity-requirement
+version: "1.0.0"
+platform_version: ">=0.7.0 <0.8.0"
+flows:
+  - id: review
+    flow: review
+    mode: template
+`,
+		"schema.yaml": "name: compiled-fan-out-entity-requirement\n",
+		"flows/review/schema.yaml": `name: review
+mode: template
+initial_state: active
+states: [active]
+`,
+		"flows/review/entities.yaml": `review_entity:
+  items:
+    type: "[text]"
+`,
+		"flows/review/events.yaml": `top.ready: {}
+nested.ready: {}
+item.requested:
+  item: string
+`,
+		"flows/review/nodes.yaml": `top-level-reader:
+  id: top-level-reader
+  execution_type: system_node
+  subscribes_to: [top.ready]
+  event_handlers:
+    top.ready:
+      fan_out:
+        element_id: 00000000-0000-4000-8000-000000002275
+        items_from: entity.items
+        as: row
+        identity: row
+        emit:
+          event: item.requested
+          fields:
+            item: row
+nested-reader:
+  id: nested-reader
+  execution_type: system_node
+  subscribes_to: [nested.ready]
+  event_handlers:
+    nested.ready:
+      rules:
+        entity-rows:
+          element_id: 00000000-0000-4000-8000-000000002276
+          condition: "true"
+          fan_out:
+            element_id: 00000000-0000-4000-8000-000000002277
+            items_from: entity.items
+            as: row
+            identity: row
+            emit:
+              event: item.requested
+              fields:
+                item: row
+`,
+	})
+	source := semanticview.Wrap(bundle)
+	for _, test := range []struct{ nodeID, eventType string }{
+		{nodeID: "top-level-reader", eventType: "top.ready"},
+		{nodeID: "nested-reader", eventType: "nested.ready"},
+	} {
+		t.Run(test.nodeID, func(t *testing.T) {
+			node := pipelineNode(t, "review", test.nodeID)
+			handlerFact, err := AdmitDeliveryTargetHandler(source, node)
+			if err != nil {
+				t.Fatal(err)
+			}
+			handlerFact = handlerFact.ForEvent(events.EventType(test.eventType))
+			handler, ok := handlerFact.resolve(source, events.EventType(test.eventType))
+			if !ok {
+				t.Fatal("resolve admitted fan-out handler")
+			}
+			if got := handlerExecutionEntityRequirementForNode(source, node, events.EventType(test.eventType), "review", handler); got == DeliveryTargetEntityOptional {
+				t.Fatalf("compiled fan-out requirement = %v, want entity ownership", got)
+			}
+		})
 	}
 }
 
