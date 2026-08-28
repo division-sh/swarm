@@ -42,7 +42,7 @@ store_parity:
       constructor: OpenRuntime
       consumers: [internal/serveapp/main.go, internal/serveapp/store_runtime.go, internal/serveapp/store_capabilities.go]
       semantic_owner: internal/store/selected.Owner
-      proof_ids: [runtime-open-sqlite, runtime-open-postgres, runtime-port-projection, bundle-delete-postgres, sqlite-optional-mutators-fail-closed, served-selected-contract-fork, destructive-reset-postgres]
+      proof_ids: [runtime-open-sqlite, runtime-open-postgres, runtime-port-projection, connected-channel-onboarding-surface, bundle-delete-postgres, sqlite-optional-mutators-fail-closed, served-selected-contract-fork, destructive-reset-postgres]
       close_proof_ids: [runtime-close-postgres-ping, runtime-close-unactivated]
     - id: authority_inspection
       constructor: OpenAuthorityInspection
@@ -163,6 +163,15 @@ store_parity:
     - {id: author-activity-parity, kind: go_test, name: TestAuthorActivityRollbackReusesSequenceOnBothStores, path: internal/store/internal/runtimepersistence/author_activity_adapter_parity_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: author_activity, risk_dimensions: [writer_ownership]}]}
     - {id: run-fork-revision-parity, kind: go_test, name: TestRunForkRevisionTwelveFamilySelectedStoreParity, path: internal/store/internal/runtimepersistence/run_fork_revision_selected_store_parity_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: run_fork_revision, risk_dimensions: [structural_census, writer_ownership]}]}
     - {id: operator-channel-surface, kind: go_test, name: TestServedParityHarnessOperatorChannelLifecycle, path: internal/store/internal/runtimepersistence/operator_channel_supported_surface_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: operator_channels, risk_dimensions: [real_v1_handler, served_lifecycle]}]}
+    - id: connected-channel-onboarding-surface
+      kind: go_test
+      name: TestChannelConnectTelegramFirstUserJourney
+      path: internal/serveapp/channel_onboarding_supported_surface_test.go
+      profile: full
+      backends: [default_sqlite, explicit_postgres]
+      purpose_ids: [runtime]
+      capabilities:
+        - {claim_id: connected_channel_onboarding, risk_dimensions: [selected_construction, real_v1_handler, served_lifecycle, restart]}
     - {id: served-agent-restart, kind: go_test, name: TestServedParityHarnessAgentRestartLifecycle, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: agent_lifecycle, risk_dimensions: [served_lifecycle]}]}
     - {id: served-agent-directive, kind: go_test, name: TestServedParityHarnessAgentDirectiveOutcomeLifecycle, path: internal/serveapp/main_runtime_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: agent_lifecycle, risk_dimensions: [served_lifecycle]}]}
     - {id: agent-manager-roles, kind: go_test, name: TestAgentManagerPersistenceRolesAreExplicit, path: internal/runtime/persistence_ownership_guard_test.go, profile: pr-common, backends: [default_sqlite, explicit_postgres], capabilities: [{claim_id: agent_lifecycle, risk_dimensions: [served_lifecycle]}]}
@@ -310,6 +319,18 @@ store_parity:
       runtime_deps: [InboundPayloadValidationBinder, InboundStore]
       platform_tables: [operator_principals, operator_channel_operations, operator_channel_bindings, inbound_publications, inbound_publication_events, operator_channel_claim_receipts]
       public_methods: [channel.connect, channel.reconnect, channel.rebind, channel.confirm, channel.unbind, channel.proof_revoke, channel.list]
+    - id: connected_channel_onboarding
+      semantic_owners: [internal/channelonboarding, internal/store selected channelOnboarding]
+      selected_purposes: [runtime]
+      backend_dispositions: {default_sqlite: supported_with_dual_backend_proof, explicit_postgres: supported_with_dual_backend_proof}
+      spec_refs: [platform-spec.yaml#tool_model.hitl_channel_pack_interface.connected_channel_onboarding]
+      risk_dimensions: [selected_construction, real_v1_handler, served_lifecycle, restart]
+      evidence:
+        - {role: backend_support, backends: [default_sqlite, explicit_postgres], risk_dimensions: [selected_construction, real_v1_handler, served_lifecycle], proof_ids: [connected-channel-onboarding-surface]}
+        - {role: risk_proof, risk_dimensions: [restart], proof_ids: [connected-channel-onboarding-surface]}
+      required_ports: [channelOnboarding]
+      platform_tables: [channel_onboarding_operations, channel_onboarding_teardowns, connected_channel_activations]
+      public_methods: [channel.onboarding_start, channel.onboarding_get, channel.onboarding_retry]
     - id: agent_lifecycle
       semantic_owners: [internal/runtime/manager, internal/store agent lifecycle]
       selected_purposes: [runtime]
