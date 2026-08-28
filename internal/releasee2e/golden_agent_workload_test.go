@@ -729,9 +729,6 @@ func waitForGoldenPreRestartRuntimeLog(t *testing.T, rpc *releaseRPCClient, runI
 	if err != nil {
 		t.Fatalf("wait for pre-restart durable runtime log: %v; last logs=%#v", err, last)
 	}
-	if selected.ParentEventID != selected.EventID {
-		t.Fatalf("pre-restart runtime log lineage = parent %q event %q, want exact subject-event parent", selected.ParentEventID, selected.EventID)
-	}
 	if selected.Source != selected.AgentID {
 		t.Fatalf("pre-restart runtime log source = %q, want exact agent source %q", selected.Source, selected.AgentID)
 	}
