@@ -33,21 +33,21 @@ var admittedArchetypes = map[string]admittedArchetype{
 	},
 }
 
-func newArchetypeCommand() *cobra.Command {
+func newArchetypeCommand(root InvocationRoot) *cobra.Command {
 	var output string
 	cmd := &cobra.Command{
 		Use:   "new <archetype>",
 		Short: "Create a proven flow starter.",
 		Args:  argcount.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return scaffoldArchetype(cmd.OutOrStdout(), args[0], output)
+			return scaffoldArchetype(root, cmd.OutOrStdout(), args[0], output)
 		},
 	}
 	cmd.Flags().StringVarP(&output, "output", "o", "", "Destination directory (defaults to the archetype name)")
 	return cmd
 }
 
-func scaffoldArchetype(out io.Writer, rawName, rawOutput string) error {
+func scaffoldArchetype(root InvocationRoot, out io.Writer, rawName, rawOutput string) error {
 	name := strings.TrimSpace(rawName)
 	source, ok := admittedArchetypes[name]
 	if !ok {
@@ -62,10 +62,7 @@ func scaffoldArchetype(out io.Writer, rawName, rawOutput string) error {
 	if destination == "" {
 		destination = name
 	}
-	absDestination, err := filepath.Abs(destination)
-	if err != nil {
-		return fmt.Errorf("resolve scaffold destination: %w", err)
-	}
+	absDestination := root.Resolve(destination)
 	if _, err := os.Stat(absDestination); err == nil {
 		return fmt.Errorf("scaffold destination already exists: %s", absDestination)
 	} else if !os.IsNotExist(err) {

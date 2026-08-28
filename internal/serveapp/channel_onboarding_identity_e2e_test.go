@@ -43,7 +43,7 @@ func TestChannelOnboardingE2E07ClaimTimeoutResume(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
 			defer cancel()
 			stdout, stderr := &lockedBuffer{}, &lockedBuffer{}
-			code := cliapp.Execute(ctx, cliapp.RepoRoot(), []string{
+			code := executeCLI(ctx, []string{
 				"--config", harness.opts.ConfigPath, "channel", "connect", "telegram", "--yes", "--api-server", harness.endpoint,
 			}, stdout, stderr, nil)
 			surface := stdout.String() + "\n" + stderr.String()
@@ -180,7 +180,7 @@ func TestChannelOnboardingE2E12MultipleExactContexts(t *testing.T) {
 			}
 
 			blockedOut, blockedErr := &lockedBuffer{}, &lockedBuffer{}
-			blockedCode := cliapp.Execute(context.Background(), cliapp.RepoRoot(), append([]string{"--config", harness.opts.ConfigPath}, append(exactChannelOnboardingArgs("reconnect", second), "--api-server", harness.endpoint)...), blockedOut, blockedErr, nil)
+			blockedCode := executeCLI(context.Background(), append([]string{"--config", harness.opts.ConfigPath}, append(exactChannelOnboardingArgs("reconnect", second), "--api-server", harness.endpoint)...), blockedOut, blockedErr, nil)
 			blockedSurface := blockedOut.String() + "\n" + blockedErr.String()
 			blockedOperationID := channelOnboardingOperationIDPattern.FindString(blockedSurface)
 			if blockedCode == 0 || blockedOperationID == "" || !strings.Contains(blockedSurface, "CHANNEL_CREDENTIAL_REQUIRED") {
@@ -352,7 +352,7 @@ func TestChannelOnboardingE2E20FailedReplacementPreservesPredecessor(t *testing.
 func requireAmbiguousChannelOnboardingChoices(t *testing.T, harness *channelOnboardingE2EHarness, want int) []channelOnboardingExactChoice {
 	t.Helper()
 	stdout, stderr := &lockedBuffer{}, &lockedBuffer{}
-	code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
+	code := executeCLI(context.Background(), []string{
 		"--config", harness.opts.ConfigPath, "channel", "reconnect", "telegram", "--yes", "--api-server", harness.endpoint,
 	}, stdout, stderr, nil)
 	surface := stdout.String() + "\n" + stderr.String()
@@ -559,7 +559,7 @@ func channelOnboardingListSurfaces(t *testing.T, harness *channelOnboardingE2EHa
 		if jsonOutput {
 			args = append(args, "--json")
 		}
-		if code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), args, stdout, stderr, nil); code != 0 {
+		if code := executeCLI(context.Background(), args, stdout, stderr, nil); code != 0 {
 			t.Fatalf("channel list exited %d\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
 		}
 		return stdout.String() + "\n" + stderr.String()
@@ -768,7 +768,7 @@ func startChannelOnboardingCLICommand(t *testing.T, configPath, endpoint string,
 	commandArgs := append([]string{"--config", configPath}, args...)
 	commandArgs = append(commandArgs, "--api-server", endpoint)
 	go func() {
-		done <- cliapp.Execute(context.Background(), cliapp.RepoRoot(), commandArgs, stdout, stderr, nil)
+		done <- executeCLI(context.Background(), commandArgs, stdout, stderr, nil)
 	}()
 	return channelOnboardingCLICommand{stdout: stdout, stderr: stderr, done: done}
 }

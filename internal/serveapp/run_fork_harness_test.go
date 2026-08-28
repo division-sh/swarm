@@ -116,7 +116,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 	resolvedPlatformSpecPath := cliapp.ResolvePath(repo, *platformSpecPath)
 	if strings.TrimSpace(*platformSpecPath) == defaultPlatformSpecPath {
 		if _, statErr := os.Stat(resolvedPlatformSpecPath); statErr != nil {
-			resolvedPlatformSpecPath = cliapp.ResolvePath(cliapp.RepoRoot(), defaultPlatformSpecPath)
+			resolvedPlatformSpecPath = cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath)
 		}
 	}
 	platformSpec, err := loadServePlatformSpecDocument(resolvedPlatformSpecPath)
@@ -187,7 +187,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 	if *materializeOnly {
 		var contractSelection *runfork.RunForkContractSelection
 		if contracts := strings.TrimSpace(*contractsPath); contracts != "" {
-			contractsRoot, err := cliapp.NormalizeContractsRoot(cliapp.ResolveContractsPath(repo, contracts))
+			contractsRoot, err := cliapp.NormalizeContractsRoot(cliapp.ResolvePath(repo, contracts))
 			if err != nil {
 				writeForkContractLoadError(out, "fork failed: resolve contracts", err)
 				return cliapp.CLIExitValidation
@@ -258,7 +258,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		return 0
 	}
 	if modeCount == 0 && selectedContractsRequested {
-		contractsRoot, err := cliapp.NormalizeContractsRoot(cliapp.ResolveContractsPath(repo, *contractsPath))
+		contractsRoot, err := cliapp.NormalizeContractsRoot(cliapp.ResolvePath(repo, *contractsPath))
 		if err != nil {
 			writeForkContractLoadError(out, "fork failed: resolve contracts", err)
 			return cliapp.CLIExitValidation
@@ -290,7 +290,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 			}
 			return 1
 		}
-		swarmDir, err := cliapp.ResolveServeContextRegistrationSwarmDir(cliapp.DefaultServeOptions())
+		swarmDir, err := cliapp.ResolveServeContextRegistrationSwarmDir(invocationRootForTest(repo), cliapp.DefaultServeOptions())
 		if err != nil {
 			if out != nil {
 				fmt.Fprintf(out, "fork failed: resolve Swarm directory: %v\n", err)
@@ -405,7 +405,7 @@ func runForkRuntimeOwnerHarness(ctx context.Context, repo string, args []string,
 		plan.ReplayResumeAdmission = replayAdmission
 		plan.ExecutionReady = replayAdmission.StateOnlyExecutionReady || replayAdmission.DeliveryEventReplayReady
 
-		contractsRoot, err := cliapp.NormalizeContractsRoot(cliapp.ResolveContractsPath(repo, contracts))
+		contractsRoot, err := cliapp.NormalizeContractsRoot(cliapp.ResolvePath(repo, contracts))
 		if err != nil {
 			writeForkContractLoadError(out, "fork failed: resolve contracts", err)
 			return cliapp.CLIExitValidation

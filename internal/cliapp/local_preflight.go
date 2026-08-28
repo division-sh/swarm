@@ -568,7 +568,7 @@ func loadLocalPreflightSource(repo string, paths CLIContractPlatformSpecPaths, b
 	if err != nil {
 		return nil, "", err
 	}
-	_, bundle, err := NewSwarmWorkflowModuleWithPackBase(assetCommandRepoRoot(repo), contractsRoot, paths.PlatformSpecPath, base)
+	_, bundle, err := NewSwarmWorkflowModuleWithPackBase(repo, contractsRoot, paths.PlatformSpecPath, base)
 	if err != nil {
 		return nil, "", fmt.Errorf("load Swarm contracts: %w", err)
 	}

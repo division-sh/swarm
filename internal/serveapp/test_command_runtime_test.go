@@ -58,7 +58,7 @@ func TestSwarmTestServedSQLiteNoLiveLLMProof(t *testing.T) {
 	})
 
 	var stdout, stderr bytes.Buffer
-	code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
+	code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
 		"test",
 		"--config", configPath,
 		"--contracts", contractsPath,
@@ -118,9 +118,9 @@ expect:
 				}
 
 				configPath := ""
-				repo := cliapp.RepoRoot()
+				repo := repoRootForTest()
 				opts := cliapp.ServeOptions{
-					ContractsPath: contractsPath, PlatformSpecPath: filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath),
+					ContractsPath: contractsPath, PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
 					APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0", Dev: dev,
 					SelfCheck: true, RequireBundleMatch: false, NoRequireBundleMatch: true, Verbose: true,
 					TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
@@ -152,7 +152,7 @@ expect:
 				} {
 					var stdout, stderr bytes.Buffer
 					commandArgs := append(append([]string(nil), args...), "--api-server", endpoint, "--config", configPath)
-					if code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), commandArgs, &stdout, &stderr, nil); code != 0 {
+					if code := executeCLIFrom(context.Background(), repoRootForTest(), commandArgs, &stdout, &stderr, nil); code != 0 {
 						t.Fatalf("%s command %v code=%d stdout=%s stderr=%s", name, args, code, stdout.String(), stderr.String())
 					}
 					if !strings.Contains(stdout.String(), "swarm test ok: scenarios=1") {
@@ -193,7 +193,7 @@ expect:
 	managerReady := make(chan *runtimepkg.RuntimeContextManager, 1)
 	process := startServeRuntimeTestProcessAtRepo(t, contractsPath, cliapp.ServeOptions{
 		ConfigPath: configPath, ContractsPath: contractsPath,
-		PlatformSpecPath: filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath),
+		PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
 		APIListenAddr:    "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		Dev: true, NoFeed: true, SelfCheck: true, RequireBundleMatch: false, NoRequireBundleMatch: true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
@@ -254,7 +254,7 @@ expect:
 	} {
 		var stdout, stderr bytes.Buffer
 		commandArgs := append(append([]string(nil), args...), "--api-server", endpoint, "--config", configPath)
-		if code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), commandArgs, &stdout, &stderr, nil); code != 3 {
+		if code := executeCLIFrom(context.Background(), repoRootForTest(), commandArgs, &stdout, &stderr, nil); code != 3 {
 			t.Fatalf("changed-source command %v code=%d stdout=%s stderr=%s, want bundle mismatch", args, code, stdout.String(), stderr.String())
 		}
 		if !strings.Contains(stderr.String(), "target runtime does not serve bundle_hash") {
@@ -268,7 +268,7 @@ expect:
 	}
 	t.Setenv("SWARM_CONFIG", configPath)
 	var runStdout, runStderr bytes.Buffer
-	if code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
+	if code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
 		"run", "start", "--connect", endpoint, "--event", "fulfillment.requested", "--payload", payloadPath, "--no-follow",
 	}, &runStdout, &runStderr, nil); code != 0 {
 		t.Fatalf("connected replacement run code=%d stdout=%s stderr=%s", code, runStdout.String(), runStderr.String())
@@ -339,7 +339,7 @@ channels:
 	}
 	process := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
 		ConfigPath: configPath, ContractsPath: contractsPath,
-		PlatformSpecPath: filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath),
+		PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
 		APIListenAddr:    "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true, RequireBundleMatch: false, NoRequireBundleMatch: true,
 	})
@@ -594,7 +594,7 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 	}
 	opts.ConfigPath = configPath
 	var verifyOut, verifyErr bytes.Buffer
-	if code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
+	if code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
 		"verify", "--contracts", contractsPath, "--config", configPath,
 	}, &verifyOut, &verifyErr, nil); code != 0 {
 		t.Fatalf("%s verify code = %d stderr=%s stdout=%s", backend, code, verifyErr.String(), verifyOut.String())
@@ -605,7 +605,7 @@ func runServedPublicMockApprovalBackendProof(t *testing.T, backend servedparity.
 	var stdout, stderr bytes.Buffer
 	started := time.Now()
 	scenario := filepath.ToSlash(filepath.Join("flows", "telegram-chat", "tests", "public-mock-approval.yaml"))
-	code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
+	code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
 		"test",
 		"--contracts", contractsPath,
 		"--config", configPath,
@@ -667,7 +667,7 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 	var db *sql.DB
 	var configPath string
 	var postgresDSN string
-	platformSpecPath := filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath)
+	platformSpecPath := filepath.Join(repoRootForTest(), defaultPlatformSpecPath)
 	opts := cliapp.ServeOptions{
 		ContractsPath: contractsPath, PlatformSpecPath: platformSpecPath,
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
@@ -756,7 +756,7 @@ func runServedDerivedScenarioBackendProof(t *testing.T, backend servedparity.Bac
 
 	var stdout, stderr bytes.Buffer
 	started := time.Now()
-	code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
+	code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
 		"test", "--derive", "fulfillment", "--input", "fulfillment.requested",
 		"--contracts", contractsPath, "--config", configPath,
 		"--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"),
@@ -834,7 +834,7 @@ func runScaffoldArchetypeSQLiteProof(t *testing.T, archetype string) {
 	configPath := filepath.Join(contractsPath, "swarm.yaml")
 
 	var verifyOut, verifyErr bytes.Buffer
-	if code := cliapp.Execute(context.Background(), contractsPath, []string{"verify", "--config", configPath, "--contracts", contractsPath}, &verifyOut, &verifyErr, nil); code != 0 {
+	if code := executeCLIFrom(context.Background(), contractsPath, []string{"verify", "--config", configPath, "--contracts", contractsPath}, &verifyOut, &verifyErr, nil); code != 0 {
 		t.Fatalf("%s generated verify code=%d stdout=%s stderr=%s", archetype, code, verifyOut.String(), verifyErr.String())
 	}
 	oldBuildStores := buildStoresForServe
@@ -848,7 +848,7 @@ func runScaffoldArchetypeSQLiteProof(t *testing.T, archetype string) {
 	}
 	t.Cleanup(func() { buildStoresForServe = oldBuildStores })
 	endpoint, rt := startServedEventPublishFollowUpRuntimeAtRepo(t, contractsPath, cliapp.ServeOptions{
-		ConfigPath: configPath, ContractsPath: contractsPath, PlatformSpecPath: filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath),
+		ConfigPath: configPath, ContractsPath: contractsPath, PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true, RequireBundleMatch: false, NoRequireBundleMatch: true, Verbose: true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
@@ -858,7 +858,7 @@ func runScaffoldArchetypeSQLiteProof(t *testing.T, archetype string) {
 	}
 	var stdout, stderr bytes.Buffer
 	started := time.Now()
-	code := cliapp.Execute(context.Background(), contractsPath, []string{
+	code := executeCLIFrom(context.Background(), contractsPath, []string{
 		"test", "--config", configPath, "--contracts", contractsPath,
 		"--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"),
 		"--timeout", "30s", "--poll-interval", "25ms", filepath.Join("tests", "smoke.yaml"),
@@ -879,7 +879,7 @@ func scaffoldConformanceArchetype(t *testing.T, archetype string) string {
 	t.Helper()
 	destination := filepath.Join(t.TempDir(), archetype)
 	var stdout, stderr bytes.Buffer
-	if code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{"new", archetype, "--output", destination}, &stdout, &stderr, nil); code != 0 {
+	if code := executeCLIFrom(context.Background(), repoRootForTest(), []string{"new", archetype, "--output", destination}, &stdout, &stderr, nil); code != 0 {
 		t.Fatalf("scaffold %s code=%d stdout=%s stderr=%s", archetype, code, stdout.String(), stderr.String())
 	}
 	return destination
@@ -980,7 +980,7 @@ func startServedEventPublishFollowUpRuntimeAtRepo(t *testing.T, repoRoot string,
 		}
 	}
 	opts.Output = &out
-	go func() { done <- Run(serveCtx, repoRoot, opts) }()
+	go func() { done <- runFrom(serveCtx, repoRoot, opts) }()
 	waitForServeReadyLine(t, &out, done)
 	var rt *runtimepkg.Runtime
 	select {
@@ -1087,7 +1087,7 @@ func runServedGeneratedInputFixtureBackendProof(t *testing.T, backend servedpari
 
 	var stdout, stderr bytes.Buffer
 	scenario := filepath.ToSlash(filepath.Join("flows", "telegram-chat", "tests", "generated-input.yaml"))
-	code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
+	code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
 		"test",
 		"--contracts", contractsPath,
 		"--config", configPath,
@@ -1368,7 +1368,7 @@ func TestSwarmTestCanonicalRoutingExamplesRunFullAuthoredPathsOnServedSQLite(t *
 			endpoint, _ := startServedEventPublishFollowUpRuntime(t, options)
 
 			var stdout, stderr bytes.Buffer
-			code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
+			code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
 				"test",
 				"--config", configPath,
 				"--contracts", contractsPath,

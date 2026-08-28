@@ -18,8 +18,8 @@ func TestServeCommandIgnoresMalformedRepoDotEnv(t *testing.T) {
 
 	var capturedRepo string
 	opts := defaultRootCommandOptions()
-	opts.runServe = func(_ context.Context, repo string, _ ServeOptions) int {
-		capturedRepo = repo
+	opts.runServe = func(_ context.Context, root InvocationRoot, _ ServeOptions) int {
+		capturedRepo = root.Path()
 		return 0
 	}
 
@@ -654,7 +654,7 @@ func TestSwarmEnvGuardAllowsTypedDatabasePasswordEnvDelegation(t *testing.T) {
 
 	called := false
 	opts := defaultRootCommandOptions()
-	opts.runServe = func(_ context.Context, _ string, _ ServeOptions) int {
+	opts.runServe = func(_ context.Context, _ InvocationRoot, _ ServeOptions) int {
 		called = true
 		return 0
 	}
@@ -710,7 +710,7 @@ func TestSwarmEnvGuardAllowsTypedDatabasePasswordEnvDelegationFromTrustedLayers(
 
 			called := false
 			opts := defaultRootCommandOptions()
-			opts.runServe = func(_ context.Context, _ string, _ ServeOptions) int {
+			opts.runServe = func(_ context.Context, _ InvocationRoot, _ ServeOptions) int {
 				called = true
 				return 0
 			}
@@ -739,7 +739,7 @@ func TestSwarmEnvGuardRejectsProjectTypedDatabasePasswordEnvDelegation(t *testin
 
 	called := false
 	opts := defaultRootCommandOptions()
-	opts.runServe = func(_ context.Context, _ string, _ ServeOptions) int {
+	opts.runServe = func(_ context.Context, _ InvocationRoot, _ ServeOptions) int {
 		called = true
 		return 0
 	}
@@ -784,7 +784,7 @@ func TestSwarmEnvGuardHonorsTypedDatabasePasswordEnvClearOverride(t *testing.T) 
 
 	called := false
 	opts := defaultRootCommandOptions()
-	opts.runServe = func(_ context.Context, _ string, _ ServeOptions) int {
+	opts.runServe = func(_ context.Context, _ InvocationRoot, _ ServeOptions) int {
 		called = true
 		return 0
 	}
@@ -825,7 +825,7 @@ func TestSwarmEnvGuardRejectsExecutableAdjacentTypedDatabasePasswordEnvDelegatio
 
 	called := false
 	opts := defaultRootCommandOptions()
-	opts.runServe = func(_ context.Context, _ string, _ ServeOptions) int {
+	opts.runServe = func(_ context.Context, _ InvocationRoot, _ ServeOptions) int {
 		called = true
 		return 0
 	}
@@ -856,7 +856,7 @@ func TestSwarmEnvGuardEmptyRetiredEnvUsesNonEmptyBoundary(t *testing.T) {
 
 	called := false
 	opts := defaultRootCommandOptions()
-	opts.runServe = func(_ context.Context, _ string, _ ServeOptions) int {
+	opts.runServe = func(_ context.Context, _ InvocationRoot, _ ServeOptions) int {
 		called = true
 		return 0
 	}

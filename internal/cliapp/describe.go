@@ -41,7 +41,7 @@ func defaultDescribeCommandOptions() describeCommandOptions {
 	}
 }
 
-func newDescribeCommand(ctx context.Context, repo string, rootOpts rootCommandOptions) *cobra.Command {
+func newDescribeCommand(ctx context.Context, root InvocationRoot, rootOpts rootCommandOptions) *cobra.Command {
 	opts := defaultDescribeCommandOptions()
 	cmd := &cobra.Command{
 		Use:   "describe",
@@ -62,7 +62,7 @@ func newDescribeCommand(ctx context.Context, repo string, rootOpts rootCommandOp
 			if rootOpts.rootFlags != nil && rootOpts.rootFlags.configPathSet {
 				opts.configPath = rootOpts.rootFlags.configPath
 			}
-			code := runDescribeCommandWithOutput(ctx, assetCommandRepoRoot(repo), opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
+			code := runDescribeCommandWithOutput(ctx, root.Path(), opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			if code != 0 {
 				return commandExitError{code: code}
 			}
@@ -74,11 +74,11 @@ func newDescribeCommand(ctx context.Context, repo string, rootOpts rootCommandOp
 	cmd.Flags().BoolVar(&opts.graph, "graph", opts.graph, "Render the per-flow lifecycle stage graph")
 	bindCLIOutputFlags(cmd, &opts.output)
 	bindCLILoggingFlags(cmd, &opts.logging)
-	cmd.AddCommand(newDescribeRoutesCommand(ctx, repo, rootOpts))
+	cmd.AddCommand(newDescribeRoutesCommand(ctx, root, rootOpts))
 	return cmd
 }
 
-func newDescribeRoutesCommand(ctx context.Context, repo string, rootOpts rootCommandOptions) *cobra.Command {
+func newDescribeRoutesCommand(ctx context.Context, root InvocationRoot, rootOpts rootCommandOptions) *cobra.Command {
 	opts := describeRoutesCommandOptions{logging: defaultCLILoggingOptions()}
 	cmd := &cobra.Command{
 		Use:   "routes",
@@ -93,7 +93,7 @@ func newDescribeRoutesCommand(ctx context.Context, repo string, rootOpts rootCom
 			if rootOpts.rootFlags != nil && rootOpts.rootFlags.configPathSet {
 				opts.configPath = rootOpts.rootFlags.configPath
 			}
-			code := runDescribeRoutesCommandWithOutput(ctx, assetCommandRepoRoot(repo), opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
+			code := runDescribeRoutesCommandWithOutput(ctx, root.Path(), opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			if code != 0 {
 				return commandExitError{code: code}
 			}

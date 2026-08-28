@@ -42,7 +42,7 @@ func TestRunServeRuntimeConsumesLocalClaudePreflightAfterBundleDecision(t *testi
 	t.Setenv("SWARM_TOOL_GATEWAY_TOKEN", "")
 
 	var out bytes.Buffer
-	code := Run(context.Background(), cliapp.RepoRoot(), cliapp.ServeOptions{
+	code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
 		ConfigPath:         writeDoctorClaudeConfig(t, dockerBin),
 		ContractsPath:      doctorAgentContractsPath,
 		PlatformSpecPath:   defaultPlatformSpecPath,
@@ -89,7 +89,7 @@ func TestRunServeRuntimeRejectsDeclaredDevelopmentPackInventoryBeforeStoreSelect
 	}, "\n")+"\n")
 
 	var out bytes.Buffer
-	code := Run(context.Background(), cliapp.RepoRoot(), cliapp.ServeOptions{
+	code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
 		ConfigPath:         configPath,
 		ContractsPath:      doctorAgentContractsPath,
 		PlatformSpecPath:   defaultPlatformSpecPath,

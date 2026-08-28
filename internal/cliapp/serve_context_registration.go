@@ -19,11 +19,11 @@ type ServeProjectContextRegistration struct {
 	registered  bool
 }
 
-func PrepareServeProjectContextRegistration(opts ServeOptions, resolvedPaths CLIContractPlatformSpecPaths, grant devscratch.RegistrationGrant) (*ServeProjectContextRegistration, error) {
+func PrepareServeProjectContextRegistration(root InvocationRoot, opts ServeOptions, resolvedPaths CLIContractPlatformSpecPaths, grant devscratch.RegistrationGrant) (*ServeProjectContextRegistration, error) {
 	if !opts.Dev || opts.LocalRun {
 		return nil, nil
 	}
-	swarmDir, err := ResolveServeContextRegistrationSwarmDir(opts)
+	swarmDir, err := ResolveServeContextRegistrationSwarmDir(root, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -89,16 +89,16 @@ func reconcileServeProjectContextRegistration(registry localContextRegistry, pro
 	return nil
 }
 
-func ResolveServeContextRegistrationSwarmDir(opts ServeOptions) (CLISwarmDirResolution, error) {
+func ResolveServeContextRegistrationSwarmDir(root InvocationRoot, opts ServeOptions) (CLISwarmDirResolution, error) {
 	if opts.SwarmDirSet {
-		path, err := normalizeCLISwarmDir(opts.SwarmDir, "--swarm-dir")
+		path, err := normalizeCLISwarmDir(root, opts.SwarmDir, "--swarm-dir")
 		return CLISwarmDirResolution{Path: path, Source: "--swarm-dir"}, err
 	}
-	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{ExplicitPath: opts.ConfigPath})
+	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: root.Path(), ExplicitPath: opts.ConfigPath})
 	if err != nil {
 		return CLISwarmDirResolution{}, err
 	}
-	return resolveCLISwarmDirFromConfig(cliSwarmDirOptions{}, cfg)
+	return resolveCLISwarmDirFromConfig(root, cliSwarmDirOptions{}, cfg)
 }
 
 func (r *ServeProjectContextRegistration) Unregister() {

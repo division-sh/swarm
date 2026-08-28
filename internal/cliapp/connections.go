@@ -80,7 +80,8 @@ type connectionsConnectResult struct {
 	State        string           `json:"state,omitempty"`
 }
 
-func newConnectionsCommand(ctx context.Context, repo string) *cobra.Command {
+func newConnectionsCommand(ctx context.Context, root InvocationRoot) *cobra.Command {
+	repo := root.Path()
 	cmd := &cobra.Command{
 		Use:   "connections",
 		Short: "Manage local managed credential connections.",

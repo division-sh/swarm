@@ -82,7 +82,7 @@ func (transport *supportedTelegramRegistrationTransport) applies() int {
 
 func TestProviderRegistrationSigningRotationTraversesRuntimeInboundVerifier(t *testing.T) {
 	contractsRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
-	_, bundle, err := cliapp.NewSwarmWorkflowModule(cliapp.RepoRoot(), contractsRoot, cliapp.ResolvePath(cliapp.RepoRoot(), defaultPlatformSpecPath))
+	_, bundle, err := cliapp.NewSwarmWorkflowModule(repoRootForTest(), contractsRoot, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
 	if err != nil {
 		t.Fatalf("load standing fixture: %v", err)
 	}
@@ -428,7 +428,7 @@ func loadSupportedTelegramRegistration(t *testing.T) packs.CompiledChannelRegist
 
 func loadSupportedTelegramChannelPlan(t *testing.T) packs.SatisfactionPlan {
 	t.Helper()
-	repo := cliapp.RepoRoot()
+	repo := repoRootForTest()
 	snapshot, err := yamlsource.LoadFile(filepath.Join(repo, "platform-spec.yaml"))
 	if err != nil {
 		t.Fatalf("load platform spec: %v", err)

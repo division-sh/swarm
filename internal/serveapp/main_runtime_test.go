@@ -127,8 +127,8 @@ func TestLoadServeRuntimeBundleRejectsMalformedPackBodiesBeforePublication(t *te
 			if err := os.WriteFile(filepath.Join(project, "packs", tc.id, tc.bodyFile), []byte("unknown_field: true\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			_, err := loadServeRuntimeBundle(context.Background(), cliapp.RepoRoot(), nil, cliapp.CLIContractPlatformSpecPaths{
-				ContractsPath: project, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot()),
+			_, err := loadServeRuntimeBundle(context.Background(), repoRootForTest(), nil, cliapp.CLIContractPlatformSpecPaths{
+				ContractsPath: project, PlatformSpecPath: runtimecontracts.DefaultPlatformSpecFile(repoRootForTest()),
 			}, cliapp.ServeOptions{}, testPlatformPackBaseGenerations(t))
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("serve malformed %s error = %v, want %q", tc.name, err, tc.wantErr)
@@ -337,7 +337,7 @@ func TestPlatformSpecWorkspaceDataProjectionAuthorityPromoted(t *testing.T) {
 			} `yaml:"command_catalog"`
 		} `yaml:"cli_specification"`
 	}
-	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath), &spec)
+	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRootForTest(), defaultPlatformSpecPath), &spec)
 	authority := spec.WorkspaceModel.DataProjectionAuthority
 	if authority.PromotedBy != "#2295" || strings.TrimSpace(authority.ImplementationStatus) != "implemented" {
 		t.Fatalf("workspace data projection authority status = promoted_by:%q implementation_status:%q", authority.PromotedBy, authority.ImplementationStatus)
@@ -509,14 +509,14 @@ func TestCLI_ServeLifecycleRoutesDiagnosticsToStderr(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			runServe := func(_ context.Context, _ string, serveOpts cliapp.ServeOptions) int {
+			runServe := func(_ context.Context, _ cliapp.InvocationRoot, serveOpts cliapp.ServeOptions) int {
 				presenter := newServeLifecyclePresenter(serveOpts)
 				test.run(presenter)
 				presenter.finish()
 				return test.code
 			}
 			var stdout, stderr bytes.Buffer
-			code := cliapp.Execute(context.Background(), t.TempDir(), []string{"serve", "--config", configPath}, &stdout, &stderr, runServe)
+			code := executeCLIFrom(context.Background(), t.TempDir(), []string{"serve", "--config", configPath}, &stdout, &stderr, runServe)
 			if code != test.code {
 				t.Fatalf("code = %d, want %d\nstdout=%s\nstderr=%s", code, test.code, stdout.String(), stderr.String())
 			}
@@ -717,8 +717,8 @@ func TestLoadServeRuntimeBundleFromCatalogLoadsPersistedRuntimeSource(t *testing
 	}); err != nil {
 		t.Fatalf("UpsertBundleCatalog: %v", err)
 	}
-	runningPlatformSpecPath := runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot())
-	if _, err := loadServeRuntimeBundleFromCatalog(ctx, cliapp.RepoRoot(), nil, projection.BundleHash, runningPlatformSpecPath, testPlatformPackBaseGenerations(t)); err == nil || !strings.Contains(err.Error(), "requires selected bundle catalog store") {
+	runningPlatformSpecPath := runtimecontracts.DefaultPlatformSpecFile(repoRootForTest())
+	if _, err := loadServeRuntimeBundleFromCatalog(ctx, repoRootForTest(), nil, projection.BundleHash, runningPlatformSpecPath, testPlatformPackBaseGenerations(t)); err == nil || !strings.Contains(err.Error(), "requires selected bundle catalog store") {
 		t.Fatalf("loadServeRuntimeBundleFromCatalog without selected catalog err = %v, want selected-owner failure", err)
 	}
 
@@ -731,7 +731,7 @@ func TestLoadServeRuntimeBundleFromCatalogLoadsPersistedRuntimeSource(t *testing
 	if !available {
 		t.Fatal("selected PostgreSQL owner missing bundle runtime catalog")
 	}
-	loaded, err := loadServeRuntimeBundleFromCatalog(ctx, cliapp.RepoRoot(), catalog, projection.BundleHash, runningPlatformSpecPath, testPlatformPackBaseGenerations(t))
+	loaded, err := loadServeRuntimeBundleFromCatalog(ctx, repoRootForTest(), catalog, projection.BundleHash, runningPlatformSpecPath, testPlatformPackBaseGenerations(t))
 	if err != nil {
 		t.Fatalf("loadServeRuntimeBundleFromCatalog: %v", err)
 	}
@@ -803,10 +803,10 @@ func TestLoadServeRuntimeBundleFromCatalogRejectsPresentZeroBeforePublication(t 
 
 	_, err = loadServeRuntimeBundleFromCatalog(
 		ctx,
-		cliapp.RepoRoot(),
+		repoRootForTest(),
 		catalog,
 		projection.BundleHash,
-		runtimecontracts.DefaultPlatformSpecFile(cliapp.RepoRoot()),
+		runtimecontracts.DefaultPlatformSpecFile(repoRootForTest()),
 		testPlatformPackBaseGenerations(t),
 	)
 	if err == nil || !strings.Contains(err.Error(), "agents.yaml declares nothing - delete the file (absent means empty)") {
@@ -877,7 +877,7 @@ func TestRunServeRuntimeDBLoadedExecutesExplicitHostRefusal(t *testing.T) {
 	ctx := context.Background()
 	bundleHash := seedServeRuntimeBundleCatalog(t, ctx, pg, doctorAgentContractsPath)
 	var out lockedBuffer
-	code := Run(ctx, cliapp.RepoRoot(), cliapp.ServeOptions{
+	code := runFrom(ctx, repoRootForTest(), cliapp.ServeOptions{
 		ConfigPath:         writeDoctorClaudeHostConfig(t, ""),
 		BundleHash:         bundleHash,
 		PlatformSpecPath:   defaultPlatformSpecPath,
@@ -918,7 +918,7 @@ func TestRunServeRuntimeDBLoadedExecutesDockerManagerRecovery(t *testing.T) {
 	ctx := context.Background()
 	bundleHash := seedServeRuntimeBundleCatalogRoot(t, ctx, pg, contractsRoot)
 	var out lockedBuffer
-	code := Run(ctx, cliapp.RepoRoot(), cliapp.ServeOptions{
+	code := runFrom(ctx, repoRootForTest(), cliapp.ServeOptions{
 		ConfigPath:         writeServeRuntimeTestConfig(t),
 		BundleHash:         bundleHash,
 		PlatformSpecPath:   defaultPlatformSpecPath,
@@ -1417,7 +1417,7 @@ func TestRunServeRuntimeDBLoadedRunForkCrossBundleTargetExecutesAndStampsTargetI
 	reviseServeTestRunSource(t, serve.runtimeWorkContext(ctx), pg, sourceRunID, sourceProjection.BundleHash)
 
 	var stdout, stderr bytes.Buffer
-	code := cliapp.Execute(ctx, t.TempDir(), []string{
+	code := executeCLIFrom(ctx, t.TempDir(), []string{
 		"run", "fork", sourceRunID,
 		"--bundle-hash", targetProjection.BundleHash,
 		"--at-event", sourceEventID,
@@ -5864,7 +5864,7 @@ func startServedEventPublishFollowUpRuntime(t *testing.T, opts cliapp.ServeOptio
 	}
 	opts.Output = &out
 	go func() {
-		done <- Run(serveCtx, cliapp.RepoRoot(), opts)
+		done <- runFrom(serveCtx, repoRootForTest(), opts)
 	}()
 	stopped := false
 	waitForServeReadyLine(t, &out, done)
@@ -6382,7 +6382,7 @@ func runServedCLICommand(t *testing.T, endpoint string, args []string) (string, 
 		"--api-server", strings.TrimSuffix(endpoint, "/v1/rpc"),
 		"--config", writeTestVerifyRuntimeConfig(t),
 	)
-	code := cliapp.Execute(context.Background(), t.TempDir(), args, &stdout, &stderr, nil)
+	code := executeCLIFrom(context.Background(), t.TempDir(), args, &stdout, &stderr, nil)
 	return stdout.String(), stderr.String(), code
 }
 
@@ -7589,7 +7589,7 @@ func TestRunServeRuntimeNativeBashDefaultDockerFailsWithoutDocker(t *testing.T) 
 	missingDocker := filepath.Join(t.TempDir(), "missing-docker")
 
 	var out lockedBuffer
-	code := Run(context.Background(), cliapp.RepoRoot(), cliapp.ServeOptions{
+	code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
 		ConfigPath: writeStoreBackendRuntimeConfigWithWorkspaceFields(t, storebackend.BackendSQLite.String(), filepath.Join(t.TempDir(), "runtime.db"), []string{
 			fmt.Sprintf("  docker_bin: %q", missingDocker),
 		}),
@@ -7699,7 +7699,7 @@ func TestServeDevContextAndSwarmDirCannotPartitionScratchEpoch(t *testing.T) {
 		return cliapp.ServeOptions{
 			ConfigPath:           writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), ""),
 			ContractsPath:        contractsPath,
-			PlatformSpecPath:     filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath),
+			PlatformSpecPath:     filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
 			SwarmDir:             swarmDir,
 			SwarmDirSet:          true,
 			ContextName:          contextName,
@@ -7721,7 +7721,7 @@ func TestServeDevContextAndSwarmDirCannotPartitionScratchEpoch(t *testing.T) {
 		t.Helper()
 		var out lockedBuffer
 		opts.Output = &out
-		code := Run(context.Background(), repo, opts)
+		code := runFrom(context.Background(), repo, opts)
 		if code != 3 || !strings.Contains(out.String(), "another swarm serve --dev runtime owns this canonical project scratch epoch") {
 			t.Fatalf("second dev owner code=%d output:\n%s", code, out.String())
 		}
@@ -7891,7 +7891,7 @@ func TestNonDevServeOwnershipParity(t *testing.T) {
 		var out lockedBuffer
 		second := opts
 		second.Output = &out
-		if code := Run(context.Background(), cliapp.RepoRoot(), second); code != 3 || !strings.Contains(out.String(), "Another swarm serve is already running for this project") {
+		if code := runFrom(context.Background(), repoRootForTest(), second); code != 3 || !strings.Contains(out.String(), "Another swarm serve is already running for this project") {
 			t.Fatalf("second non-dev serve code=%d output:\n%s", code, out.String())
 		}
 		if code := first.stop(); code != 0 {
@@ -7925,7 +7925,7 @@ func TestRunStartLocalCrashRecoveryParity(t *testing.T) {
 			mcpPort = freeDoctorTCPPort(t)
 		}
 		var stdout, stderr bytes.Buffer
-		code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
+		code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
 			"--swarm-dir", t.TempDir(),
 			"run", "start", "--event", "task.requested", "--payload", payloadPath,
 			"--config", configPath, "--contracts", contractsPath, "--api-port", apiPort, "--mcp-port", mcpPort,
@@ -7942,7 +7942,7 @@ func TestRunStartLocalCrashRecoveryParity(t *testing.T) {
 		stubServeRuntimeWorkspaceLifecycle(t)
 		unsetStoreSelectorEnv(t)
 		path := filepath.Join(t.TempDir(), "runtime.db")
-		spec, err := loadServePlatformSpecDocument(filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath))
+		spec, err := loadServePlatformSpecDocument(filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
 		if err != nil {
 			t.Fatalf("load platform spec: %v", err)
 		}
@@ -7971,7 +7971,7 @@ func TestRunStartLocalCrashRecoveryParity(t *testing.T) {
 
 func TestLocalRunStaleContextAndAbandonedStoreRecovers(t *testing.T) {
 	contractsPath := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
-	canonicalProject, err := filepath.EvalSymlinks(filepath.Join(cliapp.RepoRoot(), contractsPath))
+	canonicalProject, err := filepath.EvalSymlinks(filepath.Join(repoRootForTest(), contractsPath))
 	if err != nil {
 		t.Fatalf("canonicalize project: %v", err)
 	}
@@ -8000,7 +8000,7 @@ func TestLocalRunStaleContextAndAbandonedStoreRecovers(t *testing.T) {
 		stubServeRuntimeWorkspaceLifecycle(t)
 		unsetStoreSelectorEnv(t)
 		path := filepath.Join(t.TempDir(), "runtime.db")
-		spec, err := loadServePlatformSpecDocument(filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath))
+		spec, err := loadServePlatformSpecDocument(filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
 		if err != nil {
 			t.Fatalf("load platform spec: %v", err)
 		}
@@ -8120,7 +8120,7 @@ func TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForUnusableArtifac
 	t.Setenv("SWARM_ARTIFACT_ROOT", rootFile)
 
 	var out lockedBuffer
-	code := Run(context.Background(), cliapp.RepoRoot(), cliapp.ServeOptions{
+	code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
 		ConfigPath:           writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 		ContractsPath:        writeArtifactRepoCommitServeFixture(t),
 		PlatformSpecPath:     defaultPlatformSpecPath,
@@ -8166,7 +8166,7 @@ func TestRunServeRuntimeArtifactRepoCommitFailsBeforeReadinessForBlockedRepoStor
 	t.Setenv("SWARM_ARTIFACT_ROOT", artifactRoot)
 
 	var out lockedBuffer
-	code := Run(context.Background(), cliapp.RepoRoot(), cliapp.ServeOptions{
+	code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
 		ConfigPath:           writeStoreBackendRuntimeConfig(t, storebackend.BackendSQLite.String(), sqlitePath),
 		ContractsPath:        writeArtifactRepoCommitServeFixture(t),
 		PlatformSpecPath:     defaultPlatformSpecPath,
@@ -8240,7 +8240,7 @@ func TestRunServeRuntimeSQLiteAbandonActiveRunsQuiescesBeforeReadiness(t *testin
 	unsetStoreSelectorEnv(t)
 	sqlitePath := filepath.Join(t.TempDir(), ".swarm", "dev.db")
 	contractsPath := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
-	bundleHash := servedEventPublishFixtureBundleHash(t, filepath.Join(cliapp.RepoRoot(), contractsPath))
+	bundleHash := servedEventPublishFixtureBundleHash(t, filepath.Join(repoRootForTest(), contractsPath))
 	runID, eventID := seedServeRuntimeSQLiteAbandonWork(t, sqlitePath, bundleHash)
 	ctx := context.Background()
 	serve := startServeRuntimeTestProcess(t, cliapp.ServeOptions{
@@ -8336,7 +8336,7 @@ func TestRunServeRuntimeBundleHashMissingFailsBeforeReadiness(t *testing.T) {
 	})
 	missingHash := "bundle-v1:sha256:2222222222222222222222222222222222222222222222222222222222222222"
 	var out lockedBuffer
-	code := Run(context.Background(), cliapp.RepoRoot(), cliapp.ServeOptions{
+	code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
 		ConfigPath:         writeServeRuntimeTestConfig(t),
 		BundleHash:         missingHash,
 		PlatformSpecPath:   defaultPlatformSpecPath,
@@ -8445,7 +8445,7 @@ func TestRunServeRuntimeDuplicateAgentSlugFailsBeforeReadiness(t *testing.T) {
 	}
 
 	var out lockedBuffer
-	code := Run(ctx, cliapp.RepoRoot(), cliapp.ServeOptions{
+	code := runFrom(ctx, repoRootForTest(), cliapp.ServeOptions{
 		ConfigPath:         writeServeRuntimeTestConfig(t),
 		BundleHash:         firstHash,
 		BundleHashes:       []string{secondHash},
@@ -8486,7 +8486,7 @@ func TestRunServeRuntimeRejectsPresentZeroBeforeContextPublication(t *testing.T)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(project, "agents.yaml"), "{}\n")
 	var published atomic.Bool
 	var out lockedBuffer
-	code := Run(context.Background(), cliapp.RepoRoot(), cliapp.ServeOptions{
+	code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
 		ConfigPath:       writeStoreBackendRuntimeConfig(t, "sqlite", filepath.Join(t.TempDir(), "runtime.db")),
 		ContractsPath:    project,
 		PlatformSpecPath: defaultPlatformSpecPath,
@@ -8802,7 +8802,7 @@ func TestRunServeRuntimeMultiContextClaudeCLIFailsClosedBeforePrimaryGatewayOrFo
 	}
 
 	var out lockedBuffer
-	code := Run(ctx, cliapp.RepoRoot(), cliapp.ServeOptions{
+	code := runFrom(ctx, repoRootForTest(), cliapp.ServeOptions{
 		ConfigPath:         writeDoctorClaudeConfig(t, ""),
 		Backend:            "claude_cli",
 		BundleHash:         firstHash,
@@ -8856,7 +8856,7 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryFailsPersistedMissingBef
 	})
 
 	var out lockedBuffer
-	code := Run(context.Background(), cliapp.RepoRoot(), cliapp.ServeOptions{
+	code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
 		ConfigPath:         writeServeRuntimeTestConfig(t),
 		ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
 		PlatformSpecPath:   defaultPlatformSpecPath,
@@ -8897,11 +8897,11 @@ func TestRunServeRuntimeUnavailableBundleStartupRecoveryOrphansExpectedUnavailab
 		Type: "default", Role: "operator", Model: "default", LLMBackend: "anthropic",
 		Memory: runtimeagentmemory.Authored(true),
 	})
-	contractsRoot, err := cliapp.NormalizeContractsRoot(cliapp.ResolvePath(cliapp.RepoRoot(), filepath.Join("tests", "tier8-boot-verification", "test-boot-success")))
+	contractsRoot, err := cliapp.NormalizeContractsRoot(cliapp.ResolvePath(repoRootForTest(), filepath.Join("tests", "tier8-boot-verification", "test-boot-success")))
 	if err != nil {
 		t.Fatalf("contracts root: %v", err)
 	}
-	_, _, err = cliapp.NewSwarmWorkflowModule(cliapp.RepoRoot(), contractsRoot, cliapp.ResolvePath(cliapp.RepoRoot(), defaultPlatformSpecPath))
+	_, _, err = cliapp.NewSwarmWorkflowModule(repoRootForTest(), contractsRoot, cliapp.ResolvePath(repoRootForTest(), defaultPlatformSpecPath))
 	if err != nil {
 		t.Fatalf("load test workflow bundle: %v", err)
 	}
@@ -8981,7 +8981,7 @@ func installServeRuntimeEmptyPostgresTestStores(t *testing.T, workspaceFactory f
 
 func seedServeRuntimeSQLiteAbandonWork(t *testing.T, sqlitePath, bundleHash string) (string, string) {
 	t.Helper()
-	spec, err := loadServePlatformSpecDocument(filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath))
+	spec, err := loadServePlatformSpecDocument(filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
 	if err != nil {
 		t.Fatalf("load platform spec: %v", err)
 	}
@@ -9334,7 +9334,7 @@ func TestPrepareServeBundleSourceSQLitePersistsCatalogForContractsServe(t *testi
 	ctx := context.Background()
 	stores := openSelectedSQLiteOwner(t, filepath.Join(t.TempDir(), "runtime.sqlite"), nil)
 	t.Cleanup(func() { closeUnactivatedSelectedStore(t, stores) })
-	if _, err := initializeServePlatformStateStores(ctx, stores.Schema(), filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath)); err != nil {
+	if _, err := initializeServePlatformStateStores(ctx, stores.Schema(), filepath.Join(repoRootForTest(), defaultPlatformSpecPath)); err != nil {
 		t.Fatalf("initialize SQLite platform state: %v", err)
 	}
 	bundle := loadWorkflowValidationFixtureBundle(t, "examples/routing/root-ingress")
@@ -9358,7 +9358,7 @@ func TestPrepareServeBundleSourceSQLiteDevPersistsCatalogRow(t *testing.T) {
 	ctx := context.Background()
 	stores := openSelectedSQLiteOwner(t, filepath.Join(t.TempDir(), "runtime.sqlite"), nil)
 	t.Cleanup(func() { closeUnactivatedSelectedStore(t, stores) })
-	if _, err := initializeServePlatformStateStores(ctx, stores.Schema(), filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath)); err != nil {
+	if _, err := initializeServePlatformStateStores(ctx, stores.Schema(), filepath.Join(repoRootForTest(), defaultPlatformSpecPath)); err != nil {
 		t.Fatalf("initialize SQLite platform state: %v", err)
 	}
 	bundle := loadWorkflowValidationFixtureBundle(t, "examples/routing/root-ingress")
@@ -9629,7 +9629,7 @@ func TestInitializeServeSchemaStateStoresNeverExposeTableInventory(t *testing.T)
 		}
 	}
 
-	defaultPlatformSummary, err := initializeServePlatformStateStores(ctx, schema, filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath))
+	defaultPlatformSummary, err := initializeServePlatformStateStores(ctx, schema, filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
 	if err != nil {
 		t.Fatalf("initializeServePlatformStateStores: %v", err)
 	}
@@ -9725,7 +9725,7 @@ type capturingSchemaBootstrapper struct {
 
 func workflowBundleWithGeneratedEntitySchemaForStateStoreTest(t *testing.T) *runtimecontracts.WorkflowContractBundle {
 	t.Helper()
-	spec, err := loadServePlatformSpecDocument(filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath))
+	spec, err := loadServePlatformSpecDocument(filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
 	if err != nil {
 		t.Fatalf("load platform spec: %v", err)
 	}
@@ -9877,7 +9877,7 @@ func TestRunServeRuntimeListenerBindFailuresExitBeforeReadiness(t *testing.T) {
 			verbose := !tt.occupyAPI
 
 			var out lockedBuffer
-			code := Run(context.Background(), cliapp.RepoRoot(), cliapp.ServeOptions{
+			code := runFrom(context.Background(), repoRootForTest(), cliapp.ServeOptions{
 				ConfigPath:         writeStoreBackendRuntimeConfigWithWorkspaceFields(t, "sqlite", filepath.Join(t.TempDir(), "listener-bind.sqlite"), nil),
 				ContractsPath:      filepath.Join("tests", "tier8-boot-verification", "test-boot-success"),
 				PlatformSpecPath:   defaultPlatformSpecPath,
@@ -10036,7 +10036,7 @@ func TestStartLocalRunServeClaudeCLIStaleGatewayEnvUsesTypedBinding(t *testing.T
 
 	bindingCh := make(chan toolgateway.Binding, 1)
 	serveStarted := make(chan cliapp.ServeOptions, 1)
-	runServe := func(ctx context.Context, repo string, serveOpts cliapp.ServeOptions) int {
+	runServe := func(ctx context.Context, root cliapp.InvocationRoot, serveOpts cliapp.ServeOptions) int {
 		t.Setenv("SWARM_TOOL_GATEWAY_URL", "http://127.0.0.1:"+stalePort)
 		t.Setenv("SWARM_TOOL_GATEWAY_CONTAINER_URL", "http://host.docker.internal:"+stalePort)
 		if !serveOpts.LocalRun {
@@ -10052,7 +10052,7 @@ func TestStartLocalRunServeClaudeCLIStaleGatewayEnvUsesTypedBinding(t *testing.T
 		}
 		assertServePreflightStaleGatewayWarning(t, serveOpts, "run_local")
 		serveStarted <- serveOpts
-		return Run(ctx, repo, serveOpts)
+		return Run(ctx, root, serveOpts)
 	}
 	payloadPath := filepath.Join(t.TempDir(), "payload.json")
 	if err := os.WriteFile(payloadPath, []byte("{}\n"), 0o600); err != nil {
@@ -10065,7 +10065,7 @@ func TestStartLocalRunServeClaudeCLIStaleGatewayEnvUsesTypedBinding(t *testing.T
 	done := make(chan int, 1)
 	var stdout, stderr bytes.Buffer
 	go func() {
-		done <- cliapp.Execute(ctx, cliapp.RepoRoot(), []string{
+		done <- executeCLIFrom(ctx, repoRootForTest(), []string{
 			"run", "start",
 			"--event", "task.requested",
 			"--payload", payloadPath,
@@ -10097,7 +10097,7 @@ func TestStartLocalRunServeLateReadinessGateFailureDoesNotCommit(t *testing.T) {
 	apiPortText := freeDoctorTCPPort(t)
 	mcpListenAddr := "127.0.0.1:" + freeDoctorTCPPort(t)
 	var readyStatus atomic.Int32
-	runServe := func(ctx context.Context, repo string, serveOpts cliapp.ServeOptions) int {
+	runServe := func(ctx context.Context, root cliapp.InvocationRoot, serveOpts cliapp.ServeOptions) int {
 		serveOpts.MCPListenAddr = mcpListenAddr
 		serveOpts.TestBeforeReadinessCommit = func() error {
 			response, probeErr := http.Get("http://127.0.0.1:" + apiPortText + "/readyz")
@@ -10108,7 +10108,7 @@ func TestStartLocalRunServeLateReadinessGateFailureDoesNotCommit(t *testing.T) {
 			_ = response.Body.Close()
 			return errors.New("late readiness proof failed")
 		}
-		return Run(ctx, repo, serveOpts)
+		return Run(ctx, root, serveOpts)
 	}
 
 	payloadPath := filepath.Join(t.TempDir(), "payload.json")
@@ -10116,7 +10116,7 @@ func TestStartLocalRunServeLateReadinessGateFailureDoesNotCommit(t *testing.T) {
 		t.Fatalf("write payload: %v", err)
 	}
 	var stdout, stderr bytes.Buffer
-	code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
+	code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
 		"run", "start",
 		"--event", "task.requested",
 		"--payload", payloadPath,
@@ -10239,7 +10239,7 @@ func assertRunServeRuntimeRetiredGatewayURLAdmissionFailure(t *testing.T, envNam
 	var out lockedBuffer
 	opts.Verbose = true
 	opts.Output = &out
-	code := Run(context.Background(), cliapp.RepoRoot(), opts)
+	code := runFrom(context.Background(), repoRootForTest(), opts)
 	if code != cliapp.CLIExitRuntime {
 		t.Fatalf("Run code = %d, want %d\noutput:\n%s", code, cliapp.CLIExitRuntime, out.String())
 	}
@@ -10266,14 +10266,14 @@ func assertRunServeRuntimeRetiredGatewayURLAdmissionFailure(t *testing.T, envNam
 func assertServePreflightStaleGatewayWarning(t *testing.T, opts cliapp.ServeOptions, wantMode string) {
 	t.Helper()
 	cfgResult, err := cliapp.LoadRuntimeConfigWithOptions(cliapp.RuntimeConfigLoadOptions{
-		RepoRoot:        cliapp.RepoRoot(),
+		RepoRoot:        repoRootForTest(),
 		ExplicitPath:    opts.ConfigPath,
 		BackendOverride: opts.Backend,
 	})
 	if err != nil {
 		t.Fatalf("load config for preflight proof: %v", err)
 	}
-	resolvedPaths, err := cliapp.ResolveCLIContractPlatformSpecPaths(cliapp.RepoRoot(), cliapp.CLIContractPlatformSpecPathOptions{
+	resolvedPaths, err := cliapp.ResolveCLIContractPlatformSpecPaths(repoRootForTest(), cliapp.CLIContractPlatformSpecPathOptions{
 		ContractsPath:    opts.ContractsPath,
 		PlatformSpecPath: opts.PlatformSpecPath,
 		ConfigPath:       opts.ConfigPath,
@@ -10285,11 +10285,11 @@ func assertServePreflightStaleGatewayWarning(t *testing.T, opts cliapp.ServeOpti
 	if err != nil {
 		t.Fatalf("resolve workspace backend for preflight proof: %v", err)
 	}
-	platformPackBase, err := cliapp.LoadConfiguredPlatformPackBase(cliapp.RepoRoot(), cfgResult)
+	platformPackBase, err := cliapp.LoadConfiguredPlatformPackBase(repoRootForTest(), cfgResult)
 	if err != nil {
 		t.Fatalf("load platform pack base for preflight proof: %v", err)
 	}
-	_, bundle, err := cliapp.NewSwarmWorkflowModuleWithPackBase(cliapp.RepoRoot(), resolvedPaths.ContractsPath, resolvedPaths.PlatformSpecPath, platformPackBase)
+	_, bundle, err := cliapp.NewSwarmWorkflowModuleWithPackBase(repoRootForTest(), resolvedPaths.ContractsPath, resolvedPaths.PlatformSpecPath, platformPackBase)
 	if err != nil {
 		t.Fatalf("load workflow bundle for preflight proof: %v", err)
 	}
@@ -10301,7 +10301,7 @@ func assertServePreflightStaleGatewayWarning(t *testing.T, opts cliapp.ServeOpti
 	if err != nil {
 		t.Fatalf("load bundle pack runtime for preflight proof: %v", err)
 	}
-	report := cliapp.RunServeLocalClaudeCLIPreflight(context.Background(), cliapp.RepoRoot(), opts, cfgResult.Config, resolvedPaths, workspaceBackend, cliapp.WorkspaceMountSources{}, platformPackBase, packRuntime.ProviderTriggers.Loaded, packRuntime.ProviderTriggers.Catalog, providerCredentials, packRuntime.Channels)
+	report := cliapp.RunServeLocalClaudeCLIPreflight(context.Background(), repoRootForTest(), opts, cfgResult.Config, resolvedPaths, workspaceBackend, cliapp.WorkspaceMountSources{}, platformPackBase, packRuntime.ProviderTriggers.Loaded, packRuntime.ProviderTriggers.Catalog, providerCredentials, packRuntime.Channels)
 	if report.Mode != wantMode {
 		t.Fatalf("preflight mode = %q, want %q", report.Mode, wantMode)
 	}
@@ -10431,7 +10431,7 @@ func TestRunServeRuntimeAbandonActiveRunsQuiescesBeforeBundleMatchAdmission(t *t
 	activeSessionID := uuid.NewString()
 	identity := servedRuntimeFlowIdentityFields(t, "agent-a", "serve-abandon", "agent-a")
 	contractsPath := filepath.Join("tests", "tier8-boot-verification", "test-boot-success")
-	bundleHash := servedEventPublishFixtureBundleHash(t, filepath.Join(cliapp.RepoRoot(), contractsPath))
+	bundleHash := servedEventPublishFixtureBundleHash(t, filepath.Join(repoRootForTest(), contractsPath))
 	runlifecyclefixture.RequirePostgres(t, ctx, db, runlifecyclefixture.Fixture{Origin: runlifecyclefixture.ScenarioSetupOrigin(), RunID: runID, BundleHash: bundleHash, BundleSource: storerunlifecycle.BundleSourceEphemeral})
 	requireServeTestAgentFixture(t, runtimePG, runtimeactors.AgentConfig{
 		ID: identity.AgentID, Identity: servedRuntimeFlowIdentity(t, "agent-a", "serve-abandon", "agent-a"),
@@ -10586,7 +10586,7 @@ func loadServeBootProgressSequenceFromSpec(t *testing.T) []serveBootProgressSpec
 			} `yaml:"command_catalog"`
 		} `yaml:"cli_specification"`
 	}
-	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath), &spec)
+	decodeAuthoritativeYAMLFileForTest(t, filepath.Join(repoRootForTest(), defaultPlatformSpecPath), &spec)
 	sequence := spec.CLISpecification.CommandCatalog.Serve.BootObservability.BootProgressSequence
 	if sequence.TotalSteps != runtimepkg.BootProgressTotalSteps {
 		t.Fatalf("platform spec total_steps = %d, want %d", sequence.TotalSteps, runtimepkg.BootProgressTotalSteps)
@@ -10647,7 +10647,7 @@ type serveRuntimeTestProcess struct {
 }
 
 func startServeRuntimeTestProcess(t *testing.T, opts cliapp.ServeOptions) *serveRuntimeTestProcess {
-	return startServeRuntimeTestProcessAtRepo(t, cliapp.RepoRoot(), opts)
+	return startServeRuntimeTestProcessAtRepo(t, repoRootForTest(), opts)
 }
 
 func startServeRuntimeTestProcessAtRepo(t *testing.T, repo string, opts cliapp.ServeOptions) *serveRuntimeTestProcess {
@@ -10673,7 +10673,7 @@ func startServeRuntimeTestProcessAtRepo(t *testing.T, repo string, opts cliapp.S
 	}
 	t.Cleanup(process.cleanup)
 	go func() {
-		done <- Run(ctx, repo, opts)
+		done <- runFrom(ctx, repo, opts)
 	}()
 	return process
 }

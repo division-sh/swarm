@@ -42,14 +42,6 @@ func (r RuntimeConfigLoadResult) Detail() string {
 	return fmt.Sprintf("%s:%s", source, filepath.Clean(path))
 }
 
-func loadRuntimeConfig(path string) (*config.Config, error) {
-	result, err := LoadRuntimeConfigWithOptions(RuntimeConfigLoadOptions{ExplicitPath: path})
-	if err != nil {
-		return nil, err
-	}
-	return result.Config, nil
-}
-
 func LoadRuntimeConfigWithOptions(opts RuntimeConfigLoadOptions) (RuntimeConfigLoadResult, error) {
 	loaded, err := loadUnifiedConfig(unifiedConfigLoadOptions{
 		RepoRoot:        opts.RepoRoot,

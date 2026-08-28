@@ -27,12 +27,12 @@ type workspaceBuildOptions struct {
 	dockerBin  string
 }
 
-func newWorkspaceCommand(ctx context.Context, RepoRoot string) *cobra.Command {
+func newWorkspaceCommand(ctx context.Context, root InvocationRoot) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "workspace",
 		Short: "Manage local workspace setup.",
 	}
-	cmd.AddCommand(newWorkspaceBuildCommand(ctx, RepoRoot))
+	cmd.AddCommand(newWorkspaceBuildCommand(ctx, root.Path()))
 	return cmd
 }
 

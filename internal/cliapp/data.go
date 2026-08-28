@@ -95,7 +95,7 @@ func runDataImportCommand(ctx context.Context, out, errOut io.Writer, opts dataI
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
-	input, err := readBoundedDataFile(path)
+	input, err := readBoundedDataFile(opts.apiOptions.invocationRoot.Resolve(path))
 	if err != nil {
 		return returnCLIValidationError(errOut, err)
 	}
@@ -409,7 +409,7 @@ func resolveDataDeclarationFromList(bundleHash, selector string, declarations []
 	return durabledata.DeclarationSummary{}, fmt.Errorf("data name %q is not declared in bundle %s; candidates: %s", selector, bundleHash, strings.Join(candidates, ", "))
 }
 
-func buildRunDataEnvelope(ctx context.Context, client *cliAPIClient, bundleHash, runID string, imports, pins []string) (map[string]any, error) {
+func buildRunDataEnvelope(ctx context.Context, root InvocationRoot, client *cliAPIClient, bundleHash, runID string, imports, pins []string) (map[string]any, error) {
 	if len(imports) == 0 && len(pins) == 0 {
 		return nil, nil
 	}
@@ -432,7 +432,7 @@ func buildRunDataEnvelope(ctx context.Context, client *cliAPIClient, bundleHash,
 		if prior := selected[key]; prior != "" {
 			return nil, fmt.Errorf("data declaration %s is selected by both %s and --data", dataDeclarationLabel(declaration), prior)
 		}
-		input, err := readBoundedDataFile(path)
+		input, err := readBoundedDataFile(root.Resolve(path))
 		if err != nil {
 			return nil, err
 		}

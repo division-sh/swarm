@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/config"
 	"github.com/division-sh/swarm/internal/events"
 	"github.com/division-sh/swarm/internal/events/eventtest"
@@ -497,7 +496,7 @@ func newClaudeAttemptProofBackend(t *testing.T, name string) claudeAttemptProofB
 	t.Helper()
 	switch name {
 	case "sqlite":
-		spec, err := loadServePlatformSpecDocument(filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath))
+		spec, err := loadServePlatformSpecDocument(filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
 		if err != nil {
 			t.Fatalf("load platform spec: %v", err)
 		}

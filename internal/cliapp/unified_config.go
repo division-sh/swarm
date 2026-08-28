@@ -120,7 +120,10 @@ func loadUnifiedConfigAllowDiagnostics(opts unifiedConfigLoadOptions) (unifiedCo
 	if err := rejectRetiredLLMEnvSelectors(); err != nil {
 		return unifiedConfigLoadResult{}, err
 	}
-	RepoRoot := unifiedConfigRepoRoot(opts.RepoRoot)
+	RepoRoot, err := requireInvocationRootPath(opts.RepoRoot)
+	if err != nil {
+		return unifiedConfigLoadResult{}, err
+	}
 	layers, diagnostics := discoverUnifiedConfigLayers(RepoRoot, opts.ExplicitPath)
 	keyOrigins := map[string]unifiedConfigKeyOrigin{}
 	var merged yaml.Node
@@ -280,19 +283,6 @@ func unifiedConfigBlockers(diagnostics []unifiedConfigDiagnostic) []unifiedConfi
 	return blockers
 }
 
-func unifiedConfigRepoRoot(RepoRoot string) string {
-	RepoRoot = strings.TrimSpace(RepoRoot)
-	if RepoRoot == "" {
-		RepoRoot = DiscoverRepoRoot()
-	}
-	if RepoRoot == "" {
-		if cwd, err := os.Getwd(); err == nil {
-			RepoRoot = cwd
-		}
-	}
-	return filepath.Clean(RepoRoot)
-}
-
 func discoverUnifiedConfigLayers(RepoRoot, explicitPath string) ([]unifiedConfigLayer, []unifiedConfigDiagnostic) {
 	layers := []unifiedConfigLayer{}
 	diagnostics := []unifiedConfigDiagnostic{}
@@ -300,15 +290,13 @@ func discoverUnifiedConfigLayers(RepoRoot, explicitPath string) ([]unifiedConfig
 	if fileExists(userPath) {
 		layers = append(layers, unifiedConfigLayer{Name: unifiedLayerUserGlobal, Path: userPath})
 	}
-	if RepoRoot != "" {
-		projectPath := filepath.Join(RepoRoot, "swarm.yaml")
-		if fileExists(projectPath) {
-			layers = append(layers, unifiedConfigLayer{Name: unifiedLayerProject, Path: projectPath})
-		}
-		localPath := filepath.Join(RepoRoot, ".swarm", "swarm.yaml")
-		if fileExists(localPath) {
-			layers = append(layers, unifiedConfigLayer{Name: unifiedLayerLocalOperator, Path: localPath})
-		}
+	projectPath := filepath.Join(RepoRoot, "swarm.yaml")
+	if fileExists(projectPath) {
+		layers = append(layers, unifiedConfigLayer{Name: unifiedLayerProject, Path: projectPath})
+	}
+	localPath := filepath.Join(RepoRoot, ".swarm", "swarm.yaml")
+	if fileExists(localPath) {
+		layers = append(layers, unifiedConfigLayer{Name: unifiedLayerLocalOperator, Path: localPath})
 	}
 	if path := strings.TrimSpace(explicitPath); path != "" {
 		explicit := ResolvePath(RepoRoot, path)
@@ -341,11 +329,7 @@ func canonicalConfigPath(path string) string {
 	if strings.TrimSpace(path) == "" {
 		return ""
 	}
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return filepath.Clean(path)
-	}
-	return filepath.Clean(abs)
+	return filepath.Clean(path)
 }
 
 func userGlobalUnifiedConfigPath() string {
@@ -1007,7 +991,11 @@ func unifiedConfigDiagnosticsFromError(err error) []unifiedConfigDiagnostic {
 
 func unifiedConfigDelegatedSwarmEnvSources(RepoRoot, explicitPath string) map[string]string {
 	out := map[string]string{}
-	RepoRoot = unifiedConfigRepoRoot(RepoRoot)
+	var err error
+	RepoRoot, err = requireInvocationRootPath(RepoRoot)
+	if err != nil {
+		return out
+	}
 	layers, _ := discoverUnifiedConfigLayers(RepoRoot, explicitPath)
 	var merged yaml.Node
 	merged.Kind = yaml.MappingNode

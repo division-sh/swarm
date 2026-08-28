@@ -159,7 +159,7 @@ func TestCanonicalTelegramAgentExplicitLiveGraduation(t *testing.T) {
 	}
 
 	var verifyOut, verifyErr bytes.Buffer
-	if code := cliapp.Execute(context.Background(), contractsRoot, []string{
+	if code := executeCLIFrom(context.Background(), contractsRoot, []string{
 		"verify", "--config", configPath, "--contracts", contractsRoot,
 	}, &verifyOut, &verifyErr, Run); code != 0 {
 		t.Fatalf("explicit live graduation verify exit=%d\nstdout:\n%s\nstderr:\n%s", code, verifyOut.String(), verifyErr.String())
@@ -192,7 +192,7 @@ func TestCanonicalTelegramAgentExplicitLiveGraduation(t *testing.T) {
 	})
 
 	opts := cliapp.ServeOptions{
-		ConfigPath: configPath, ContractsPath: contractsRoot, PlatformSpecPath: filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath),
+		ConfigPath: configPath, ContractsPath: contractsRoot, PlatformSpecPath: filepath.Join(repoRootForTest(), defaultPlatformSpecPath),
 		APIListenAddr: "127.0.0.1:0", MCPListenAddr: "127.0.0.1:0",
 		SelfCheck: true, RequireBundleMatch: false, Dev: true, LocalRun: true, Verbose: true,
 		TestOutboxSweeperConfig: servedEventPublishProofOutboxSweeperConfig(),
@@ -257,7 +257,7 @@ func startTelegramAgentServeRuntimeTestProcess(t *testing.T, repo string, opts c
 	}
 	t.Cleanup(process.cleanup)
 	go func() {
-		done <- Run(ctx, repo, opts)
+		done <- runFrom(ctx, repo, opts)
 	}()
 	return process
 }

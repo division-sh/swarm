@@ -320,7 +320,7 @@ func TestCLI_ServeBundleHashValidationAndSerialScope(t *testing.T) {
 			var captured ServeOptions
 			called := false
 			opts := defaultRootCommandOptions()
-			opts.runServe = func(_ context.Context, _ string, serveOpts ServeOptions) int {
+			opts.runServe = func(_ context.Context, _ InvocationRoot, serveOpts ServeOptions) int {
 				called = true
 				captured = serveOpts
 				return 0
@@ -402,7 +402,7 @@ func TestCLI_ServeListenAddrFlagsConsumeIndependentOwners(t *testing.T) {
 
 	var captured ServeOptions
 	opts := defaultRootCommandOptions()
-	opts.runServe = func(_ context.Context, _ string, serveOpts ServeOptions) int {
+	opts.runServe = func(_ context.Context, _ InvocationRoot, serveOpts ServeOptions) int {
 		captured = serveOpts
 		return 0
 	}
@@ -470,7 +470,7 @@ func TestCLI_ServeListenAddrSourcePrecedence(t *testing.T) {
 			}
 			var captured ServeOptions
 			opts := defaultRootCommandOptions()
-			opts.runServe = func(_ context.Context, _ string, serveOpts ServeOptions) int {
+			opts.runServe = func(_ context.Context, _ InvocationRoot, serveOpts ServeOptions) int {
 				captured = serveOpts
 				return 0
 			}
@@ -531,7 +531,7 @@ func TestCLI_ServeListenAddrEnvConfigValidation(t *testing.T) {
 			tc.setup(t)
 			ran := false
 			opts := defaultRootCommandOptions()
-			opts.runServe = func(context.Context, string, ServeOptions) int {
+			opts.runServe = func(context.Context, InvocationRoot, ServeOptions) int {
 				ran = true
 				return 0
 			}
@@ -554,7 +554,7 @@ func TestCLI_ServeListenAddrEnvConfigValidation(t *testing.T) {
 func TestResolveServeAPIAuthSourceAuthority(t *testing.T) {
 	t.Run("default loopback when no explicit source", func(t *testing.T) {
 		isolateCLIAPIConfigEnv(t)
-		auth, err := ResolveServeAPIAuth("", DefaultServeOptions())
+		auth, err := ResolveServeAPIAuth(mustInvocationRootForTest(t.TempDir()), DefaultServeOptions())
 		if err != nil {
 			t.Fatalf("ResolveServeAPIAuth: %v", err)
 		}
@@ -570,7 +570,7 @@ func TestResolveServeAPIAuthSourceAuthority(t *testing.T) {
 		t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
 			"serve_api_token_file": configTokenFile,
 		}))
-		auth, err := ResolveServeAPIAuth("", ServeOptions{APITokenFile: flagTokenFile, APITokenFileFlagSet: true})
+		auth, err := ResolveServeAPIAuth(mustInvocationRootForTest(t.TempDir()), ServeOptions{APITokenFile: flagTokenFile, APITokenFileFlagSet: true})
 		if err != nil {
 			t.Fatalf("ResolveServeAPIAuth: %v", err)
 		}
@@ -588,7 +588,7 @@ func TestResolveServeAPIAuthSourceAuthority(t *testing.T) {
 		t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
 			"serve_api_token_file": configTokenFile,
 		}))
-		auth, err := ResolveServeAPIAuth("", DefaultServeOptions())
+		auth, err := ResolveServeAPIAuth(mustInvocationRootForTest(t.TempDir()), DefaultServeOptions())
 		if err != nil {
 			t.Fatalf("ResolveServeAPIAuth: %v", err)
 		}
@@ -604,7 +604,7 @@ func TestResolveServeAPIAuthSourceAuthority(t *testing.T) {
 		isolateCLIAPIConfigEnv(t)
 		tokenFile := writeCLIAPITokenFile(t, "flag-token")
 		t.Setenv("SWARM_API_TOKEN", "env-token")
-		_, err := ResolveServeAPIAuth("", ServeOptions{APITokenFile: tokenFile, APITokenFileFlagSet: true})
+		_, err := ResolveServeAPIAuth(mustInvocationRootForTest(t.TempDir()), ServeOptions{APITokenFile: tokenFile, APITokenFileFlagSet: true})
 		if err == nil || !strings.Contains(err.Error(), "server-side API environment source is no longer accepted") || !strings.Contains(err.Error(), "serve.api_token_file") {
 			t.Fatalf("err = %v, want removed-env diagnostic", err)
 		}
@@ -613,11 +613,11 @@ func TestResolveServeAPIAuthSourceAuthority(t *testing.T) {
 	t.Run("blank and missing token files fail closed", func(t *testing.T) {
 		isolateCLIAPIConfigEnv(t)
 		blank := writeCLIAPITokenFile(t, "  \n")
-		if _, err := ResolveServeAPIAuth("", ServeOptions{APITokenFile: blank, APITokenFileFlagSet: true}); err == nil || !strings.Contains(err.Error(), "--api-token-file is blank") {
+		if _, err := ResolveServeAPIAuth(mustInvocationRootForTest(t.TempDir()), ServeOptions{APITokenFile: blank, APITokenFileFlagSet: true}); err == nil || !strings.Contains(err.Error(), "--api-token-file is blank") {
 			t.Fatalf("blank token err = %v, want blank token failure", err)
 		}
 		missing := filepath.Join(t.TempDir(), "missing-token")
-		if _, err := ResolveServeAPIAuth("", ServeOptions{APITokenFile: missing, APITokenFileFlagSet: true}); err == nil || !strings.Contains(err.Error(), "read --api-token-file") {
+		if _, err := ResolveServeAPIAuth(mustInvocationRootForTest(t.TempDir()), ServeOptions{APITokenFile: missing, APITokenFileFlagSet: true}); err == nil || !strings.Contains(err.Error(), "read --api-token-file") {
 			t.Fatalf("missing token err = %v, want read failure", err)
 		}
 	})
@@ -632,7 +632,7 @@ func TestCLI_ServeUnifiedConfigFeedsListenerConfig(t *testing.T) {
 
 	var captured ServeOptions
 	opts := defaultRootCommandOptions()
-	opts.runServe = func(_ context.Context, _ string, serveOpts ServeOptions) int {
+	opts.runServe = func(_ context.Context, _ InvocationRoot, serveOpts ServeOptions) int {
 		captured = serveOpts
 		return 0
 	}
@@ -667,7 +667,7 @@ func TestCLI_ServeRejectsRetiredDataFlag(t *testing.T) {
 func TestCLI_ServeWorkspaceBackendFlagFeedsServeOptions(t *testing.T) {
 	var captured ServeOptions
 	opts := defaultRootCommandOptions()
-	opts.runServe = func(_ context.Context, _ string, serveOpts ServeOptions) int {
+	opts.runServe = func(_ context.Context, _ InvocationRoot, serveOpts ServeOptions) int {
 		captured = serveOpts
 		return 0
 	}
@@ -744,7 +744,7 @@ func TestCLI_ServeListenAddrHigherPrecedenceSourcesSkipCLIConfig(t *testing.T) {
 			var captured ServeOptions
 			ran := false
 			opts := defaultRootCommandOptions()
-			opts.runServe = func(_ context.Context, _ string, serveOpts ServeOptions) int {
+			opts.runServe = func(_ context.Context, _ InvocationRoot, serveOpts ServeOptions) int {
 				captured = serveOpts
 				ran = true
 				return 0
@@ -783,7 +783,7 @@ func TestCLI_ServeListenAddrHigherPrecedenceSourcesSkipCLIConfig(t *testing.T) {
 func TestCLI_ServeDevFlagComposesClosedServeOwners(t *testing.T) {
 	var captured ServeOptions
 	opts := defaultRootCommandOptions()
-	opts.runServe = func(_ context.Context, _ string, serveOpts ServeOptions) int {
+	opts.runServe = func(_ context.Context, _ InvocationRoot, serveOpts ServeOptions) int {
 		captured = serveOpts
 		return 0
 	}
@@ -814,7 +814,7 @@ func TestCLI_ServeDevFlagComposesClosedServeOwners(t *testing.T) {
 func TestCLI_ServeDevAndExplicitVerboseComposeIndependently(t *testing.T) {
 	var captured ServeOptions
 	opts := defaultRootCommandOptions()
-	opts.runServe = func(_ context.Context, _ string, serveOpts ServeOptions) int {
+	opts.runServe = func(_ context.Context, _ InvocationRoot, serveOpts ServeOptions) int {
 		captured = serveOpts
 		return 0
 	}
@@ -832,7 +832,7 @@ func TestCLI_ServeDevAndExplicitVerboseComposeIndependently(t *testing.T) {
 func TestCLI_ServeDevRejectsRequireBundleMatchBeforeOwner(t *testing.T) {
 	var called atomic.Bool
 	opts := defaultRootCommandOptions()
-	opts.runServe = func(context.Context, string, ServeOptions) int {
+	opts.runServe = func(context.Context, InvocationRoot, ServeOptions) int {
 		called.Store(true)
 		return 0
 	}
@@ -853,7 +853,7 @@ func TestCLI_ServeDevRejectsRequireBundleMatchBeforeOwner(t *testing.T) {
 func TestCLI_ServeDevAcceptsExplicitRequireBundleMatchFalse(t *testing.T) {
 	var captured ServeOptions
 	opts := defaultRootCommandOptions()
-	opts.runServe = func(_ context.Context, _ string, serveOpts ServeOptions) int {
+	opts.runServe = func(_ context.Context, _ InvocationRoot, serveOpts ServeOptions) int {
 		captured = serveOpts
 		return 0
 	}
@@ -1271,7 +1271,7 @@ func TestPlatformSpecCLIAPIConnectionAuthConfigPrecedencePromoted(t *testing.T) 
 	}
 }
 
-func TestRootNoAssetCommandsDoNotRequireRepoRoot(t *testing.T) {
+func TestSourceFreeCommandsDoNotRequireSourceCheckout(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		args []string
@@ -1304,15 +1304,14 @@ func TestRootNoAssetCommandsDoNotRequireRepoRoot(t *testing.T) {
 	}
 }
 
-func TestAssetCommandsDiscoverRepoRootAtExecution(t *testing.T) {
+func TestAssetCommandsCaptureInvocationRootAtExecution(t *testing.T) {
 	repo := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, "go.mod"), "module testrepo\n")
 	chdirForTest(t, repo)
 
 	var capturedRepo string
 	opts := defaultRootCommandOptions()
-	opts.runServe = func(_ context.Context, repo string, _ ServeOptions) int {
-		capturedRepo = repo
+	opts.runServe = func(_ context.Context, root InvocationRoot, _ ServeOptions) int {
+		capturedRepo = root.Path()
 		return 0
 	}
 
@@ -1326,11 +1325,10 @@ func TestAssetCommandsDiscoverRepoRootAtExecution(t *testing.T) {
 	}
 }
 
-func TestVerifyCommandIgnoresRepoDotEnvAfterLazyRepoDiscovery(t *testing.T) {
+func TestVerifyCommandIgnoresInvocationRootDotEnv(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	_ = os.Unsetenv("SWARM_CONTRACTS_PATH")
 	repo := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, "go.mod"), "module testrepo\n")
 	contractsRoot := writeEnvAuthorityContractsFixture(t, "dot-env-contracts")
 	configPath := writeTestVerifyRuntimeConfig(t)
 	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, ".env"), "SWARM_CONTRACTS_PATH="+contractsRoot+"\nBROKEN\n")
@@ -1356,11 +1354,10 @@ func TestVerifyCommandIgnoresRepoDotEnvAfterLazyRepoDiscovery(t *testing.T) {
 	}
 }
 
-func TestLocalRunDiscoversRepoRootWithoutLoadingDotEnv(t *testing.T) {
+func TestLocalRunUsesInvocationRootWithoutLoadingDotEnv(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	_ = os.Unsetenv("SWARM_API_TOKEN")
 	repo := t.TempDir()
-	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, "go.mod"), "module testrepo\n")
 	writeWorkflowValidationFixtureFile(t, filepath.Join(repo, ".env"), "SWARM_API_TOKEN=test-token\nBROKEN\n")
 	payloadPath := filepath.Join(t.TempDir(), "payload.json")
 	writeWorkflowValidationFixtureFile(t, payloadPath, "{}\n")
@@ -1373,8 +1370,8 @@ func TestLocalRunDiscoversRepoRootWithoutLoadingDotEnv(t *testing.T) {
 		payloadPath:  payloadPath,
 		changedFlags: map[string]bool{},
 	}
-	opts.apiOptions.runServe = func(ctx context.Context, repo string, _ ServeOptions) int {
-		capturedRepo = repo
+	opts.apiOptions.runServe = func(ctx context.Context, root InvocationRoot, _ ServeOptions) int {
+		capturedRepo = root.Path()
 		<-ctx.Done()
 		return 1
 	}
@@ -1382,7 +1379,7 @@ func TestLocalRunDiscoversRepoRootWithoutLoadingDotEnv(t *testing.T) {
 	opts.apiOptions.runReadyPoll = time.Millisecond
 
 	var stdout, stderr bytes.Buffer
-	_ = runRunCommand(context.Background(), "", &stdout, &stderr, opts)
+	_ = runRunCommand(context.Background(), mustInvocationRootForTest(repo), &stdout, &stderr, opts)
 	if capturedRepo != repo {
 		t.Fatalf("local run serve repo = %q, want discovered repo %q; stderr=%s stdout=%s", capturedRepo, repo, stderr.String(), stdout.String())
 	}
@@ -2773,7 +2770,7 @@ func TestPlatformSpecContractPlatformSpecPathResolutionPromoted(t *testing.T) {
 			t.Fatalf("not_applies_to missing %q: %#v", want, spec.NotAppliesTo)
 		}
 	}
-	wantContractsOrder := []string{"--contracts", "SWARM_CONTRACTS_PATH", "config paths.contracts_path", "repo contracts/package.yaml"}
+	wantContractsOrder := []string{"--contracts", "SWARM_CONTRACTS_PATH", "config paths.contracts_path", "invocation-root contracts/package.yaml"}
 	if len(spec.ContractsPath.SourceOrder) != len(wantContractsOrder) {
 		t.Fatalf("contracts source order = %#v, want %#v", spec.ContractsPath.SourceOrder, wantContractsOrder)
 	}
@@ -2831,7 +2828,7 @@ func TestPlatformSpecContractPlatformSpecPathResolutionPromoted(t *testing.T) {
 func TestCLI_ServeVerboseFlagConsumesServeOwner(t *testing.T) {
 	var captured ServeOptions
 	opts := defaultRootCommandOptions()
-	opts.runServe = func(_ context.Context, _ string, serveOpts ServeOptions) int {
+	opts.runServe = func(_ context.Context, _ InvocationRoot, serveOpts ServeOptions) int {
 		captured = serveOpts
 		return 0
 	}
@@ -2852,7 +2849,7 @@ func TestCLI_ServeVerboseFlagConsumesServeOwner(t *testing.T) {
 func TestCLI_ServeAbandonActiveRunsFlagConsumesServeOwner(t *testing.T) {
 	var captured ServeOptions
 	opts := defaultRootCommandOptions()
-	opts.runServe = func(_ context.Context, _ string, serveOpts ServeOptions) int {
+	opts.runServe = func(_ context.Context, _ InvocationRoot, serveOpts ServeOptions) int {
 		captured = serveOpts
 		return 0
 	}
@@ -2870,7 +2867,7 @@ func TestCLI_ServeAbandonActiveRunsFlagConsumesServeOwner(t *testing.T) {
 func TestCLI_ServeShutdownGraceFlagConsumesServeOwner(t *testing.T) {
 	var captured ServeOptions
 	opts := defaultRootCommandOptions()
-	opts.runServe = func(_ context.Context, _ string, serveOpts ServeOptions) int {
+	opts.runServe = func(_ context.Context, _ InvocationRoot, serveOpts ServeOptions) int {
 		captured = serveOpts
 		return 0
 	}
@@ -2895,7 +2892,7 @@ func TestCLI_ServeShutdownGraceRejectsNonPositiveDurationBeforeOwner(t *testing.
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
 			var called atomic.Bool
 			opts := defaultRootCommandOptions()
-			opts.runServe = func(context.Context, string, ServeOptions) int {
+			opts.runServe = func(context.Context, InvocationRoot, ServeOptions) int {
 				called.Store(true)
 				return 0
 			}
@@ -3456,6 +3453,9 @@ func runVerifyCommandWithContractsForTest(t *testing.T, ctx context.Context, rep
 
 func runVerifyCommandWithContractsOutputForTest(t *testing.T, ctx context.Context, repo, contractsPath string, out, errOut *bytes.Buffer) int {
 	t.Helper()
+	if repo == "" {
+		repo = t.TempDir()
+	}
 	opts := defaultVerifyCommandOptions()
 	opts.contractsPath = contractsPath
 	opts.configPath = writeTestVerifyRuntimeConfig(t)

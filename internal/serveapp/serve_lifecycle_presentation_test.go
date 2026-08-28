@@ -507,7 +507,7 @@ func TestServeLifecyclePresenterUsesResolvedStoreSelectionVerbatim(t *testing.T)
 }
 
 func TestServeLifecycleOwnerRejectsParallelTerminalWriters(t *testing.T) {
-	path := filepath.Join(cliapp.RepoRoot(), "cmd", "swarm", "main.go")
+	path := filepath.Join(repoRootForTest(), "cmd", "swarm", "main.go")
 	parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
 	if err != nil {
 		t.Fatalf("parse main.go: %v", err)
@@ -555,7 +555,7 @@ func TestServeLifecycleOwnerRejectsParallelTerminalWriters(t *testing.T) {
 		}
 	}
 
-	presenterSource, err := os.ReadFile(filepath.Join(cliapp.RepoRoot(), "internal", "serveapp", "serve_lifecycle_presentation.go"))
+	presenterSource, err := os.ReadFile(filepath.Join(repoRootForTest(), "internal", "serveapp", "serve_lifecycle_presentation.go"))
 	if err != nil {
 		t.Fatalf("read serve lifecycle presenter: %v", err)
 	}
@@ -607,7 +607,7 @@ func TestPlatformSpecOwnsServeLifecycleAndDoctorSchemaPresentation(t *testing.T)
 			} `yaml:"command_catalog"`
 		} `yaml:"cli_specification"`
 	}
-	raw, err := os.ReadFile(filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath))
+	raw, err := os.ReadFile(filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
 	if err != nil {
 		t.Fatalf("read platform spec: %v", err)
 	}

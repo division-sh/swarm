@@ -15,7 +15,7 @@ import (
 
 func TestRunServeRuntimeConsumesContractPathResolverBeforeBundleLoad(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
-	repo := cliapp.RepoRoot()
+	repo := repoRootForTest()
 	configContracts := filepath.Join(repo, "tests", "tier8-boot-verification", "test-boot-success", "zzz-not-a-real-dir")
 	t.Setenv("SWARM_CONFIG", writeCLIAPIConfigFile(t, map[string]string{
 		"contracts_path": configContracts,
@@ -31,7 +31,7 @@ func TestRunServeRuntimeConsumesContractPathResolverBeforeBundleLoad(t *testing.
 	})
 
 	var out bytes.Buffer
-	code := Run(context.Background(), repo, cliapp.ServeOptions{
+	code := runFrom(context.Background(), repo, cliapp.ServeOptions{
 		StoreMode:          "postgres",
 		APIListenAddr:      defaultAPIListenAddr,
 		MCPListenAddr:      defaultMCPListenAddr,

@@ -10,7 +10,6 @@ import (
 	"net/url"
 	"os"
 	"path"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -80,14 +79,14 @@ type rootCommandOptions struct {
 	contextName            string
 	swarmDir               string
 	rootFlags              *rootCommandFlagState
-	RepoRoot               string
+	invocationRoot         InvocationRoot
 	apiCommandClass        cliAPICommandClass
 	apiCommandName         string
 	disableLocalTargeting  bool
 	httpClient             *http.Client
 	input                  io.Reader
 	stdinIsTerminal        func() bool
-	runServe               func(context.Context, string, ServeOptions) int
+	runServe               ServeRunner
 	runReadyTimeout        time.Duration
 	runReadyPoll           time.Duration
 	runStatusPoll          time.Duration
@@ -135,9 +134,9 @@ func (opts rootCommandOptions) swarmDirResolutionOptions() cliSwarmDirOptions {
 
 func (opts rootCommandOptions) unifiedConfigLoadOptions() unifiedConfigLoadOptions {
 	if opts.rootFlags != nil && opts.rootFlags.configPathSet {
-		return unifiedConfigLoadOptions{RepoRoot: opts.RepoRoot, ExplicitPath: opts.rootFlags.configPath}
+		return unifiedConfigLoadOptions{RepoRoot: opts.invocationRoot.Path(), ExplicitPath: opts.rootFlags.configPath}
 	}
-	return unifiedConfigLoadOptions{RepoRoot: opts.RepoRoot}
+	return unifiedConfigLoadOptions{RepoRoot: opts.invocationRoot.Path()}
 }
 
 func processStdinIsTerminal() bool {
@@ -266,10 +265,10 @@ func resolveCLIAPIToken(opts rootCommandOptions, cfg cliCommandConfig, rpcEndpoi
 		return cliAPITokenResolution{}, err
 	}
 	if tokenFile := strings.TrimSpace(opts.apiTokenFile); tokenFile != "" {
-		return readCLIAPIExplicitTokenFile(tokenFile, "--api-token-file")
+		return readCLIAPIExplicitTokenFile(opts.invocationRoot, tokenFile, "--api-token-file")
 	}
 	if tokenFile := strings.TrimSpace(cfg.Connection.APITokenFile); tokenFile != "" {
-		return readCLIAPIExplicitTokenFile(tokenFile, cliAPIConfigTokenFileSource)
+		return readCLIAPIExplicitTokenFile(opts.invocationRoot, tokenFile, cliAPIConfigTokenFileSource)
 	}
 	if cliAPIRPCEndpointAllowsDefaultToken(rpcEndpoint) {
 		return cliAPITokenResolution{
@@ -359,7 +358,7 @@ func rejectRemovedServeListenerEnvSources() error {
 	return &cliAPIValidationError{message: "serve listener environment sources are no longer accepted: " + strings.Join(found, "; ")}
 }
 
-func ResolveServeAPIAuth(repo string, opts ServeOptions) (apiv1.AuthTokenResolution, error) {
+func ResolveServeAPIAuth(root InvocationRoot, opts ServeOptions) (apiv1.AuthTokenResolution, error) {
 	if err := rejectRemovedServeAPIEnvSource(); err != nil {
 		return apiv1.AuthTokenResolution{}, err
 	}
@@ -368,14 +367,14 @@ func ResolveServeAPIAuth(repo string, opts ServeOptions) (apiv1.AuthTokenResolut
 		if tokenFile == "" {
 			return apiv1.AuthTokenResolution{}, &cliAPIAuthConfigError{message: serveAPITokenFileFlagSource + " is blank"}
 		}
-		return readServeAPITokenFile(tokenFile, serveAPITokenFileFlagSource)
+		return readServeAPITokenFile(root.Resolve(tokenFile), serveAPITokenFileFlagSource)
 	}
-	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: repo, ExplicitPath: opts.ConfigPath})
+	cfg, err := loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{RepoRoot: root.Path(), ExplicitPath: opts.ConfigPath})
 	if err != nil {
 		return apiv1.AuthTokenResolution{}, err
 	}
 	if tokenFile := strings.TrimSpace(cfg.Serve.APITokenFile); tokenFile != "" {
-		return readServeAPITokenFile(tokenFile, serveAPITokenFileConfigSource)
+		return readServeAPITokenFile(root.Resolve(tokenFile), serveAPITokenFileConfigSource)
 	}
 	return defaultServeAPIAuthResolution(), nil
 }
@@ -392,15 +391,11 @@ func readServeAPITokenFile(tokenFile, source string) (apiv1.AuthTokenResolution,
 	if err != nil {
 		return apiv1.AuthTokenResolution{}, err
 	}
-	absoluteTokenFile, err := filepath.Abs(strings.TrimSpace(tokenFile))
-	if err != nil {
-		return apiv1.AuthTokenResolution{}, &cliAPIAuthConfigError{message: fmt.Sprintf("resolve %s path: %v", source, err)}
-	}
 	return apiv1.AuthTokenResolution{
 		Tokens:    []string{token},
 		Source:    apiv1.AuthTokenSource(source),
 		Explicit:  true,
-		TokenFile: absoluteTokenFile,
+		TokenFile: tokenFile,
 	}, nil
 }
 
@@ -411,8 +406,8 @@ func defaultServeAPIAuthResolution() apiv1.AuthTokenResolution {
 	}
 }
 
-func readCLIAPIExplicitTokenFile(tokenFile, source string) (cliAPITokenResolution, error) {
-	token, err := readCLIAPITokenFile(tokenFile, source)
+func readCLIAPIExplicitTokenFile(root InvocationRoot, tokenFile, source string) (cliAPITokenResolution, error) {
+	token, err := readCLIAPITokenFile(root.Resolve(tokenFile), source)
 	if err != nil {
 		return cliAPITokenResolution{}, err
 	}
@@ -437,10 +432,6 @@ func readCLIAPITokenFile(tokenFile, source string) (string, error) {
 		return "", &cliAPIAuthConfigError{message: fmt.Sprintf("%s is blank", source)}
 	}
 	return token, nil
-}
-
-func loadCLICommandConfig() (cliCommandConfig, error) {
-	return loadCLICommandConfigWithOptions(unifiedConfigLoadOptions{})
 }
 
 func loadCLICommandConfigWithOptions(opts unifiedConfigLoadOptions) (cliCommandConfig, error) {

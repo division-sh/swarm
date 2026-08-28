@@ -20,7 +20,7 @@ func TestContextListCommandUsesSwarmDirRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errOut bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"--swarm-dir", swarmDir, "context", "list"}, &out, &errOut, rootCommandOptions{
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"--swarm-dir", swarmDir, "context", "list"}, &out, &errOut, rootCommandOptions{invocationRoot: mustInvocationRootForTest(t.TempDir()),
 		httpClient: &http.Client{Transport: contextNoServerRoundTripper{}},
 	})
 	if code != 0 {
@@ -42,7 +42,7 @@ func TestContextListCommandSwarmDirFlagBypassesBrokenConfig(t *testing.T) {
 	swarmDir := t.TempDir()
 	t.Setenv("SWARM_CONFIG", filepath.Join(t.TempDir(), "missing-config.yaml"))
 	var out, errOut bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"--swarm-dir", swarmDir, "context", "list"}, &out, &errOut, rootCommandOptions{})
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"--swarm-dir", swarmDir, "context", "list"}, &out, &errOut, rootCommandOptions{invocationRoot: mustInvocationRootForTest(t.TempDir())})
 	if code != 0 {
 		t.Fatalf("exit = %d stderr=%s", code, errOut.String())
 	}
@@ -57,7 +57,7 @@ func TestContextListCommandSurfacesZeroEntryRegistryFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errOut bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"--swarm-dir", swarmDir, "context", "list"}, &out, &errOut, rootCommandOptions{})
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"--swarm-dir", swarmDir, "context", "list"}, &out, &errOut, rootCommandOptions{invocationRoot: mustInvocationRootForTest(t.TempDir())})
 	if code != 0 {
 		t.Fatalf("exit = %d stderr=%s", code, errOut.String())
 	}
@@ -71,7 +71,7 @@ func TestContextListCommandSurfacesZeroEntryRegistryFailure(t *testing.T) {
 
 func TestContextCurrentCommandReportsEmptyRegistry(t *testing.T) {
 	var out, errOut bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"--swarm-dir", filepath.Join(t.TempDir(), "state"), "context", "current"}, &out, &errOut, rootCommandOptions{})
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"--swarm-dir", filepath.Join(t.TempDir(), "state"), "context", "current"}, &out, &errOut, rootCommandOptions{invocationRoot: mustInvocationRootForTest(t.TempDir())})
 	if code != 0 {
 		t.Fatalf("exit = %d stderr=%s", code, errOut.String())
 	}

@@ -84,7 +84,7 @@ func TestRunServeRuntimeConsumesCanonicalStoreSelectionBeforeStoreConstruction(t
 			})
 
 			var out bytes.Buffer
-			code := Run(context.Background(), t.TempDir(), cliapp.ServeOptions{
+			code := runFrom(context.Background(), t.TempDir(), cliapp.ServeOptions{
 				ConfigPath:         writeStoreBackendRuntimeConfig(t, tt.configStore, tt.configPath),
 				StoreMode:          tt.storeMode,
 				StoreModeSet:       tt.storeFlag,
@@ -124,7 +124,7 @@ func TestRunServeRuntimeStoreFlagCanOverrideConfigPostgresBeforePasswordRequirem
 	})
 
 	var out bytes.Buffer
-	code := Run(context.Background(), t.TempDir(), cliapp.ServeOptions{
+	code := runFrom(context.Background(), t.TempDir(), cliapp.ServeOptions{
 		ConfigPath:         configPath,
 		StoreMode:          storebackend.BackendSQLite.String(),
 		StoreModeSet:       true,
@@ -276,7 +276,7 @@ func TestBuildStoresSQLiteBindsOwnershipToConstructedBackendIdentity(t *testing.
 	path := filepath.Join(t.TempDir(), "runtime.db")
 	stores := openSelectedSQLiteOwner(t, path, &config.Config{})
 	t.Cleanup(func() { closeUnactivatedSelectedStore(t, stores) })
-	if _, err := initializeServePlatformStateStores(ctx, stores.Schema(), filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath)); err != nil {
+	if _, err := initializeServePlatformStateStores(ctx, stores.Schema(), filepath.Join(repoRootForTest(), defaultPlatformSpecPath)); err != nil {
 		t.Fatalf("bootstrap SQLite selected store: %v", err)
 	}
 

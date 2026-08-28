@@ -50,7 +50,7 @@ func TestStandingServiceMutationsUseSelectedRuntimePipelineOnBothStores(t *testi
 
 			catalog := testProviderTriggerCatalog(t)
 			contractsRoot := writeStandingTelegramServeFixture(t, "http://127.0.0.1:1")
-			repoRoot := cliapp.RepoRoot()
+			repoRoot := repoRootForTest()
 			selectedModule, selectedBundle, err := cliapp.NewSwarmWorkflowModule(
 				repoRoot,
 				contractsRoot,
@@ -210,7 +210,7 @@ func openStandingRuntimeContextStore(t *testing.T, backend, suffix string) *sele
 		path := filepath.Join(t.TempDir(), suffix+".sqlite")
 		stores := openSelectedSQLiteOwner(t, path, &config.Config{})
 		t.Cleanup(func() { closeUnactivatedSelectedStore(t, stores) })
-		spec, err := loadServePlatformSpecDocument(filepath.Join(cliapp.RepoRoot(), defaultPlatformSpecPath))
+		spec, err := loadServePlatformSpecDocument(filepath.Join(repoRootForTest(), defaultPlatformSpecPath))
 		if err != nil {
 			t.Fatalf("load platform spec for %s SQLite store: %v", suffix, err)
 		}

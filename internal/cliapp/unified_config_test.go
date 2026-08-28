@@ -19,7 +19,7 @@ func TestUnifiedConfigExplicitPathBeatsSWARMCONFIGLocator(t *testing.T) {
 	writeRuntimeConfigText(t, explicitPath, "connection:\n  api_server: http://127.0.0.1:2222\n")
 	t.Setenv("SWARM_CONFIG", envPath)
 
-	got, err := loadUnifiedConfig(unifiedConfigLoadOptions{ExplicitPath: explicitPath})
+	got, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{ExplicitPath: explicitPath})
 	if err != nil {
 		t.Fatalf("loadUnifiedConfig: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestGeneratedUnifiedConfigExampleValidationSampleLoads(t *testing.T) {
 	isolateCLIAPIConfigEnv(t)
 	path := filepath.Join(t.TempDir(), "swarm.yaml")
 	writeRuntimeConfigText(t, path, generatedUnifiedConfigValidationSample())
-	if _, err := loadUnifiedConfig(unifiedConfigLoadOptions{ExplicitPath: path}); err != nil {
+	if _, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{ExplicitPath: path}); err != nil {
 		t.Fatalf("generated validation sample failed unified parser: %v\n%s", err, generatedUnifiedConfigValidationSample())
 	}
 }
@@ -215,7 +215,7 @@ func TestUnifiedConfigLayerOrderAndExplicitEmptyOverride(t *testing.T) {
 		"  contracts_path: \"\"",
 	}, "\n")+"\n")
 
-	got, err := loadUnifiedConfig(unifiedConfigLoadOptions{RepoRoot: repo})
+	got, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{RepoRoot: repo})
 	if err != nil {
 		t.Fatalf("loadUnifiedConfig: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestUnifiedConfigLayerOrderAndExplicitEmptyOverride(t *testing.T) {
 
 	explicitPath := filepath.Join(t.TempDir(), "explicit.yaml")
 	writeRuntimeConfigText(t, explicitPath, "serve:\n  api_listen_addr: 127.0.0.1:4444\n")
-	got, err = loadUnifiedConfig(unifiedConfigLoadOptions{RepoRoot: repo, ExplicitPath: explicitPath})
+	got, err = loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{RepoRoot: repo, ExplicitPath: explicitPath})
 	if err != nil {
 		t.Fatalf("load explicit unified config: %v", err)
 	}
@@ -261,7 +261,7 @@ func TestUnifiedConfigRejectsLegacyFlatShapeAndSplitUnsupported(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "swarm.yaml")
 			writeRuntimeConfigText(t, path, tt.body)
-			_, err := loadUnifiedConfig(unifiedConfigLoadOptions{ExplicitPath: path})
+			_, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{ExplicitPath: path})
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("loadUnifiedConfig error = %v, want %q", err, tt.want)
 			}
@@ -284,7 +284,7 @@ func TestUnifiedConfigAllowsProviderLimitsDynamicProfilesAndModels(t *testing.T)
 		"          rate_limit_max_wait: 1s",
 	}, "\n")+"\n")
 
-	got, err := loadUnifiedConfig(unifiedConfigLoadOptions{ExplicitPath: path})
+	got, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{ExplicitPath: path})
 	if err != nil {
 		t.Fatalf("loadUnifiedConfig: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestUnifiedConfigRejectsProjectTrustAndPathEscapes(t *testing.T) {
 	t.Run("connection key in project config", func(t *testing.T) {
 		repo := t.TempDir()
 		writeRuntimeConfigText(t, filepath.Join(repo, "swarm.yaml"), "connection:\n  api_server: http://127.0.0.1:8081\n")
-		_, err := loadUnifiedConfig(unifiedConfigLoadOptions{RepoRoot: repo})
+		_, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{RepoRoot: repo})
 		if err == nil || !strings.Contains(err.Error(), "not allowed in project_config") {
 			t.Fatalf("loadUnifiedConfig error = %v, want project trust rejection", err)
 		}
@@ -311,7 +311,7 @@ func TestUnifiedConfigRejectsProjectTrustAndPathEscapes(t *testing.T) {
 			t.Skipf("symlink unavailable: %v", err)
 		}
 		writeRuntimeConfigText(t, filepath.Join(repo, "swarm.yaml"), "paths:\n  contracts_path: contracts-link\n")
-		_, err := loadUnifiedConfig(unifiedConfigLoadOptions{RepoRoot: repo})
+		_, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{RepoRoot: repo})
 		if err == nil || !strings.Contains(err.Error(), "path escapes project root") {
 			t.Fatalf("loadUnifiedConfig error = %v, want project path containment rejection", err)
 		}
@@ -328,7 +328,7 @@ func TestUnifiedConfigRejectsExecutableAdjacentConfigYAML(t *testing.T) {
 	}
 	t.Cleanup(func() { runtimeConfigExecutablePath = originalExecutablePath })
 
-	_, err := loadUnifiedConfig(unifiedConfigLoadOptions{RepoRoot: t.TempDir()})
+	_, err := loadUnifiedConfigForTest(t, unifiedConfigLoadOptions{RepoRoot: t.TempDir()})
 	if err == nil || !strings.Contains(err.Error(), "executable-adjacent runtime config") || !strings.Contains(err.Error(), "no longer a config source") {
 		t.Fatalf("loadUnifiedConfig error = %v, want executable-adjacent legacy diagnostic", err)
 	}

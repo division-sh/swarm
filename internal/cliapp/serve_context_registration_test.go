@@ -164,7 +164,7 @@ func TestServeProjectContextRegistrationRequiresMatchingEpochGrant(t *testing.T)
 	opts.SwarmDirSet = true
 
 	paths := CLIContractPlatformSpecPaths{ContractsPath: project.contracts}
-	if _, err := PrepareServeProjectContextRegistration(opts, paths, devscratch.RegistrationGrant{}); err == nil || !strings.Contains(err.Error(), "registration grant is required") {
+	if _, err := PrepareServeProjectContextRegistration(mustInvocationRootForTest(project.root), opts, paths, devscratch.RegistrationGrant{}); err == nil || !strings.Contains(err.Error(), "registration grant is required") {
 		t.Fatalf("zero grant error = %v, want fail-closed epoch admission", err)
 	}
 
@@ -181,7 +181,7 @@ func TestServeProjectContextRegistrationRequiresMatchingEpochGrant(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := PrepareServeProjectContextRegistration(opts, paths, grant); err == nil || !strings.Contains(err.Error(), "belongs to another canonical project") {
+	if _, err := PrepareServeProjectContextRegistration(mustInvocationRootForTest(project.root), opts, paths, grant); err == nil || !strings.Contains(err.Error(), "belongs to another canonical project") {
 		t.Fatalf("foreign grant error = %v, want project-bound epoch admission", err)
 	}
 }
@@ -272,7 +272,7 @@ func prepareServeProjectContextRegistrationForTest(t *testing.T, project cliAPIT
 	if err != nil {
 		t.Fatal(err)
 	}
-	return PrepareServeProjectContextRegistration(opts, CLIContractPlatformSpecPaths{ContractsPath: project.contracts}, grant)
+	return PrepareServeProjectContextRegistration(mustInvocationRootForTest(project.root), opts, CLIContractPlatformSpecPaths{ContractsPath: project.contracts}, grant)
 }
 
 func listenLoopbackTestListener(t *testing.T) net.Listener {

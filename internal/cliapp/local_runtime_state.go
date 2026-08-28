@@ -229,7 +229,11 @@ func pathExists(path string) bool {
 }
 
 func ResolveRuntimeStoreSelection(repo string, storeMode string, storeModeSet bool, cfg *config.Config) (storebackend.Selection, error) {
-	swarmDir, err := resolveCLISwarmDir(cliSwarmDirOptions{})
+	root, err := NewInvocationRoot(repo)
+	if err != nil {
+		return storebackend.Selection{}, err
+	}
+	swarmDir, err := resolveCLISwarmDirAt(root, cliSwarmDirOptions{})
 	if err != nil {
 		return storebackend.Selection{}, err
 	}

@@ -219,7 +219,7 @@ type scenarioExpressionEvaluator struct {
 	vars map[string]any
 }
 
-func newTestCommand(RepoRoot string, opts rootCommandOptions) *cobra.Command {
+func newTestCommand(root InvocationRoot, opts rootCommandOptions) *cobra.Command {
 	testOpts := scenarioTestCommandOptions{
 		apiOptions:   opts,
 		timeout:      defaultScenarioTestTimeout,
@@ -233,7 +233,7 @@ func newTestCommand(RepoRoot string, opts rootCommandOptions) *cobra.Command {
 			if err := rejectRetiredPlatformSpecFlag(cmd); err != nil {
 				return returnScenarioTestValidationError(cmd.ErrOrStderr(), err)
 			}
-			return runScenarioTestCommand(cmd.Context(), RepoRoot, cmd.OutOrStdout(), cmd.ErrOrStderr(), args, testOpts)
+			return runScenarioTestCommand(cmd.Context(), root.Path(), cmd.OutOrStdout(), cmd.ErrOrStderr(), args, testOpts)
 		},
 	}
 	cmd.Flags().StringVar(&testOpts.contracts, "contracts", "", "Contract package root containing scenario tests")
@@ -412,9 +412,10 @@ func scenarioTestBundleSourceFact(ctx context.Context, client *cliAPIClient, bun
 }
 
 func resolveScenarioTestSources(RepoRoot, contractsFlag string, cfg cliCommandConfig) (string, string, error) {
-	RepoRoot = strings.TrimSpace(RepoRoot)
-	if RepoRoot == "" {
-		RepoRoot = "."
+	var err error
+	RepoRoot, err = requireInvocationRootPath(RepoRoot)
+	if err != nil {
+		return "", "", err
 	}
 	contractsDir := strings.TrimSpace(contractsFlag)
 	if contractsDir == "" {
@@ -426,7 +427,7 @@ func resolveScenarioTestSources(RepoRoot, contractsFlag string, cfg cliCommandCo
 			contractsDir = RepoRoot
 		}
 	}
-	contractsDir, err := absFrom(RepoRoot, contractsDir)
+	contractsDir, err = absFrom(RepoRoot, contractsDir)
 	if err != nil {
 		return "", "", err
 	}

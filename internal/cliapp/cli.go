@@ -24,7 +24,7 @@ type BuildMetadata struct {
 	Date    string
 }
 
-type ServeRunner func(context.Context, string, ServeOptions) int
+type ServeRunner func(context.Context, InvocationRoot, ServeOptions) int
 
 func ConfigureBuildMetadata(metadata BuildMetadata) {
 	binaryVersion = metadata.Version
@@ -36,10 +36,17 @@ func InjectedBuildMetadata() versionmetadata.Injected {
 	return versionmetadata.Injected{Version: binaryVersion, Commit: binaryCommit, Date: binaryDate}
 }
 
-func Execute(ctx context.Context, repo string, args []string, out, errOut io.Writer, runServe ServeRunner) int {
+func Execute(ctx context.Context, args []string, out, errOut io.Writer, runServe ServeRunner) int {
+	root, err := captureInvocationRoot()
+	if err != nil {
+		if errOut != nil {
+			fmt.Fprintf(errOut, "resolve CLI invocation root: %v\n", err)
+		}
+		return CLIExitValidation
+	}
 	opts := defaultRootCommandOptions()
 	opts.runServe = runServe
-	return executeRootCommandWithOptions(ctx, repo, args, out, errOut, opts)
+	return executeRootCommandAtInvocation(ctx, root, args, out, errOut, opts)
 }
 
 type commandExitError struct {
@@ -50,11 +57,13 @@ func (e commandExitError) Error() string {
 	return fmt.Sprintf("exit %d", e.code)
 }
 
-func executeRootCommand(ctx context.Context, repo string, args []string, out, errOut io.Writer) int {
-	return executeRootCommandWithOptions(ctx, repo, args, out, errOut, defaultRootCommandOptions())
-}
-
-func executeRootCommandWithOptions(ctx context.Context, repo string, args []string, out, errOut io.Writer, opts rootCommandOptions) int {
+func executeRootCommandAtInvocation(ctx context.Context, root InvocationRoot, args []string, out, errOut io.Writer, opts rootCommandOptions) int {
+	if err := root.validate(); err != nil {
+		if errOut != nil {
+			fmt.Fprintf(errOut, "resolve CLI invocation root: %v\n", err)
+		}
+		return CLIExitValidation
+	}
 	if err := validateCLIAPIConnectionFlagPlacement(args); err != nil {
 		if errOut != nil {
 			fmt.Fprintln(errOut, err)
@@ -67,13 +76,13 @@ func executeRootCommandWithOptions(ctx context.Context, repo string, args []stri
 		}
 		return CLIExitValidation
 	}
-	if err := validateSwarmEnvForCommand(args, repo); err != nil {
+	if err := validateSwarmEnvForCommand(args, root.Path()); err != nil {
 		if errOut != nil {
 			fmt.Fprintln(errOut, err)
 		}
 		return CLIExitValidation
 	}
-	cmd := newRootCommandWithOptions(ctx, repo, out, errOut, opts)
+	cmd := newRootCommandAtInvocation(ctx, root, out, errOut, opts)
 	cmd.SetArgs(args)
 	if err := cmd.ExecuteContext(ctx); err != nil {
 		if exit, ok := err.(commandExitError); ok {
@@ -87,13 +96,9 @@ func executeRootCommandWithOptions(ctx context.Context, repo string, args []stri
 	return 0
 }
 
-func newRootCommand(ctx context.Context, repo string, out, errOut io.Writer) *cobra.Command {
-	return newRootCommandWithOptions(ctx, repo, out, errOut, defaultRootCommandOptions())
-}
-
-func newRootCommandWithOptions(ctx context.Context, repo string, out, errOut io.Writer, opts rootCommandOptions) *cobra.Command {
+func newRootCommandAtInvocation(ctx context.Context, root InvocationRoot, out, errOut io.Writer, opts rootCommandOptions) *cobra.Command {
 	opts = opts.ensureRootFlagState()
-	opts.RepoRoot = assetCommandRepoRoot(repo)
+	opts.invocationRoot = root
 	cmd := &cobra.Command{
 		Use:   "swarm",
 		Short: "Run and inspect Swarm workflows.",
@@ -135,29 +140,29 @@ with 'swarm run trace', 'swarm event list', and 'swarm mailbox'.`,
 		}
 	}
 	addToGroup(commandGroupStart,
-		newArchetypeCommand(),
-		newDoctorCommand(ctx, repo, opts),
-		newStoreAuthorityCommand(ctx, repo),
-		newWorkspaceCommand(ctx, opts.RepoRoot),
+		newArchetypeCommand(root),
+		newDoctorCommand(ctx, root, opts),
+		newStoreAuthorityCommand(ctx, root),
+		newWorkspaceCommand(ctx, root),
 		newContextCommand(ctx, opts),
-		newServeCommand(ctx, repo, opts.runServe),
+		newServeCommand(ctx, root, opts.runServe),
 		newVersionCommand(opts),
 	)
 	addToGroup(commandGroupAuthor,
-		newVerifyCommand(ctx, repo, opts),
-		newMintElementIDsCommand(repo),
-		newMigrateConnectDeliveryOneCommand(repo),
-		newMigrateProducerRoutingCommand(repo),
-		newTestCommand(repo, opts),
-		newDescribeCommand(ctx, repo, opts),
-		newPacksCommand(ctx, repo, opts),
-		newImportPackCommand(repo, opts),
-		newBundleCommand(repo, opts),
-		newSecretsCommand(ctx, repo),
-		newConnectionsCommand(ctx, repo),
+		newVerifyCommand(ctx, root, opts),
+		newMintElementIDsCommand(root),
+		newMigrateConnectDeliveryOneCommand(root),
+		newMigrateProducerRoutingCommand(root),
+		newTestCommand(root, opts),
+		newDescribeCommand(ctx, root, opts),
+		newPacksCommand(ctx, root, opts),
+		newImportPackCommand(root, opts),
+		newBundleCommand(root, opts),
+		newSecretsCommand(ctx, root),
+		newConnectionsCommand(ctx, root),
 	)
 	addToGroup(commandGroupOperate,
-		newRunGroupCommand(repo, opts),
+		newRunGroupCommand(root, opts),
 		newDataCommand(opts),
 		newControlCommand(opts),
 		newStandingCommand(opts),
@@ -196,7 +201,7 @@ const (
 // newRunGroupCommand is the CLI v2.2 run noun-group: bare `swarm run` prints
 // group help; the start form moved to `swarm run start`
 // (cli_specification.topology_revision_v2_2.target_rows.run_group).
-func newRunGroupCommand(repo string, opts rootCommandOptions) *cobra.Command {
+func newRunGroupCommand(root InvocationRoot, opts rootCommandOptions) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Start, inspect, trace, and branch workflow runs.",
@@ -217,7 +222,7 @@ func newRunGroupCommand(repo string, opts rootCommandOptions) *cobra.Command {
 		return err
 	})
 	cmd.AddCommand(
-		newRunCommand(repo, opts),
+		newRunCommand(root, opts),
 		newRunsCommand(opts),
 		newStatusCommand(opts),
 		newTraceCommand(opts),
@@ -279,7 +284,7 @@ func effectiveCommandConfigPath(cmd *cobra.Command, localPath string, localSet b
 	return "", false, nil
 }
 
-func newServeCommand(ctx context.Context, repo string, runServe func(context.Context, string, ServeOptions) int) *cobra.Command {
+func newServeCommand(ctx context.Context, root InvocationRoot, runServe ServeRunner) *cobra.Command {
 	opts := DefaultServeOptions()
 	cmd := &cobra.Command{
 		Use:   "serve",
@@ -352,7 +357,7 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 				APIListenAddrFlagSet: cmd.Flags().Changed("api-listen-addr"),
 				MCPListenAddrFlagSet: cmd.Flags().Changed("mcp-listen-addr"),
 				ConfigPath:           opts.ConfigPath,
-				RepoRoot:             assetCommandRepoRoot(repo),
+				RepoRoot:             root.Path(),
 			})
 			if err != nil {
 				return err
@@ -374,7 +379,7 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 			opts.Output = cmd.OutOrStdout()
 			opts.ErrorOutput = cmd.ErrOrStderr()
 			opts.SwarmDir, opts.SwarmDirSet = rootSwarmDirFlag(cmd)
-			code := runServe(ctx, assetCommandRepoRoot(repo), opts)
+			code := runServe(ctx, root, opts)
 			if code != 0 {
 				return commandExitError{code: code}
 			}
@@ -407,7 +412,7 @@ func newServeCommand(ctx context.Context, repo string, runServe func(context.Con
 	return cmd
 }
 
-func newVerifyCommand(ctx context.Context, repo string, rootOpts rootCommandOptions) *cobra.Command {
+func newVerifyCommand(ctx context.Context, root InvocationRoot, rootOpts rootCommandOptions) *cobra.Command {
 	opts := defaultVerifyCommandOptions()
 	cmd := &cobra.Command{
 		Use:     "verify",
@@ -429,7 +434,7 @@ func newVerifyCommand(ctx context.Context, repo string, rootOpts rootCommandOpti
 			if rootOpts.rootFlags != nil && rootOpts.rootFlags.configPathSet {
 				opts.configPath = rootOpts.rootFlags.configPath
 			}
-			code := runVerifyCommandWithOutput(ctx, assetCommandRepoRoot(repo), opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
+			code := runVerifyCommandWithOutput(ctx, root.Path(), opts, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			if code != 0 {
 				return commandExitError{code: code}
 			}

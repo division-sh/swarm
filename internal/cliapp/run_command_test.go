@@ -65,7 +65,7 @@ func TestRunCommandLocalForegroundConsumesServeOwnerAndV1API(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte("runtime:\n  recovery_on_startup: true\n"), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
-	opts.runServe = func(ctx context.Context, repo string, serveOpts ServeOptions) int {
+	opts.runServe = func(ctx context.Context, root InvocationRoot, serveOpts ServeOptions) int {
 		serveCalled.Add(1)
 		if serveOpts.ConfigPath != configPath || serveOpts.Backend != "claude_cli" || serveOpts.ContractsPath != filepath.Join(repo, "contracts") || serveOpts.DataSource != "" {
 			t.Errorf("serve opts = %#v", serveOpts)
@@ -150,7 +150,7 @@ func TestRunCommandLocalForegroundUsesServeAPITokenFileForEmbeddedClient(t *test
 
 	opts := testRunCommandOptions(server)
 	var serveCalled atomic.Int32
-	opts.runServe = func(ctx context.Context, repo string, serveOpts ServeOptions) int {
+	opts.runServe = func(ctx context.Context, root InvocationRoot, serveOpts ServeOptions) int {
 		serveCalled.Add(1)
 		if !serveOpts.LocalRun {
 			t.Errorf("local run serve opts LocalRun = false, want true")
@@ -202,13 +202,13 @@ func TestStartLocalRunServeConsumesContractPathConfigResolver(t *testing.T) {
 
 	opts := runCommandOptions{apiOptions: testRunCommandOptions(server), apiPort: 19001}
 	serveStarted := make(chan ServeOptions, 1)
-	opts.apiOptions.runServe = func(ctx context.Context, repo string, serveOpts ServeOptions) int {
+	opts.apiOptions.runServe = func(ctx context.Context, root InvocationRoot, serveOpts ServeOptions) int {
 		serveStarted <- serveOpts
 		<-ctx.Done()
 		return 0
 	}
 
-	stop, err := startLocalRunServe(context.Background(), repo, opts, io.Discard)
+	stop, err := startLocalRunServe(context.Background(), mustInvocationRootForTest(repo), opts, io.Discard)
 	if err != nil {
 		t.Fatalf("startLocalRunServe: %v", err)
 	}
@@ -259,13 +259,13 @@ func TestRunStartLocalServeUsesMCPListenerOwner(t *testing.T) {
 
 	opts := runCommandOptions{apiOptions: testRunCommandOptions(server), mcpPort: 19002}
 	serveStarted := make(chan ServeOptions, 1)
-	opts.apiOptions.runServe = func(ctx context.Context, repo string, serveOpts ServeOptions) int {
+	opts.apiOptions.runServe = func(ctx context.Context, root InvocationRoot, serveOpts ServeOptions) int {
 		serveStarted <- serveOpts
 		<-ctx.Done()
 		return 0
 	}
 
-	stop, err := startLocalRunServe(context.Background(), repo, opts, io.Discard)
+	stop, err := startLocalRunServe(context.Background(), mustInvocationRootForTest(repo), opts, io.Discard)
 	if err != nil {
 		t.Fatalf("startLocalRunServe: %v", err)
 	}
@@ -281,7 +281,7 @@ func TestRunStartLocalServeUsesMCPListenerOwner(t *testing.T) {
 
 func TestRunCommandHelpShowsDataFlag(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--help"}, &stdout, &stderr, rootCommandOptions{})
+	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--help"}, &stdout, &stderr, rootCommandOptions{invocationRoot: mustInvocationRootForTest(t.TempDir())})
 	if code != 0 {
 		t.Fatalf("run --help code = %d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
@@ -294,7 +294,15 @@ func TestRunCommandHelpShowsDataFlag(t *testing.T) {
 
 func TestRunCommandConnectedNoFollowUsesHealthAndRunStartOnly(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
-	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
+	root := t.TempDir()
+	payloadPath := filepath.Join(root, "payload.json")
+	payload, err := json.Marshal(map[string]any{"ok": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(payloadPath, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	server, calls, wsRequests := newRunCommandServer(t, runCommandServerOptions{
 		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
 			switch req.Method {
@@ -313,8 +321,9 @@ func TestRunCommandConnectedNoFollowUsesHealthAndRunStartOnly(t *testing.T) {
 	})
 	defer server.Close()
 
+	chdirForTest(t, t.TempDir())
 	var stdout, stderr bytes.Buffer
-	code := executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath, "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
+	code := executeRootCommandWithOptions(context.Background(), root, []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", filepath.Base(payloadPath), "--no-follow"}, &stdout, &stderr, testRunCommandOptions(server))
 	if code != 0 {
 		t.Fatalf("code = %d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
@@ -352,7 +361,7 @@ func TestRunStartRemoteModesDoNotAcquireLocalOwnership(t *testing.T) {
 	})
 	defer server.Close()
 	opts := testRunCommandOptions(server)
-	opts.runServe = func(context.Context, string, ServeOptions) int {
+	opts.runServe = func(context.Context, InvocationRoot, ServeOptions) int {
 		t.Fatal("remote run mode attempted to acquire local serve ownership")
 		return 1
 	}
@@ -780,7 +789,7 @@ func TestRunCommandLocalReadinessAuthFailureFailsFast(t *testing.T) {
 	opts := testRunCommandOptions(server)
 	opts.runReadyTimeout = time.Minute
 	opts.runReadyPoll = time.Millisecond
-	opts.runServe = func(ctx context.Context, repo string, serveOpts ServeOptions) int {
+	opts.runServe = func(ctx context.Context, root InvocationRoot, serveOpts ServeOptions) int {
 		<-ctx.Done()
 		serveCanceled.Store(true)
 		return 0
@@ -1177,7 +1186,7 @@ func testRunCommandOptions(server *httptest.Server) rootCommandOptions {
 	opts.runReadyTimeout = time.Second
 	opts.runReadyPoll = time.Millisecond
 	opts.runStatusPoll = time.Millisecond
-	opts.runServe = func(ctx context.Context, repo string, serveOpts ServeOptions) int {
+	opts.runServe = func(ctx context.Context, root InvocationRoot, serveOpts ServeOptions) int {
 		<-ctx.Done()
 		return 0
 	}

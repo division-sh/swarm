@@ -134,7 +134,7 @@ func TestRunForkRuntimeOwnerHarness_DryRunContractsAddsContractFrontierAdmission
 		}})
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
 
-	repo := cliapp.RepoRoot()
+	repo := repoRootForTest()
 	var buf bytes.Buffer
 	code := runForkRuntimeOwnerHarness(ctx, repo, []string{
 		"--store", "postgres",
@@ -292,7 +292,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateWithContractsReachesSelectedActivati
 func TestRunForkRuntimeOwnerHarness_SelectedContractsBorrowedDoNotRequireAmbientData(t *testing.T) {
 	dsn, _, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)
-	repo := cliapp.RepoRoot()
+	repo := repoRootForTest()
 	borrowedRoot := t.TempDir()
 	writeWorkflowValidationFixtureFile(t, filepath.Join(borrowedRoot, "package.yaml"), `
 name: borrowed-selected-contracts
@@ -332,7 +332,7 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecutesExplicitHostRefusal
 	}
 	writeRuntimeConfigText(t, configPath, string(rawConfig)+"workspace:\n  backend: host\n")
 	var out bytes.Buffer
-	code := runForkRuntimeOwnerHarness(context.Background(), cliapp.RepoRoot(), []string{
+	code := runForkRuntimeOwnerHarness(context.Background(), repoRootForTest(), []string{
 		"--store", "postgres",
 		"--config", configPath,
 		"--contracts", doctorAgentContractsPath,
@@ -348,7 +348,7 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecutesExplicitHostRefusal
 func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwnerJSON(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)
-	repo := cliapp.RepoRoot()
+	repo := repoRootForTest()
 	contractsRoot := filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple")
 	registerRunForkCLIContractCatalog(t, context.Background(), db, contractsRoot)
 	sourceRunID := uuid.NewString()
@@ -454,7 +454,7 @@ func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteThroughCanonicalOwne
 func TestRunForkRuntimeOwnerHarness_SelectedContractsExecuteReportsSourceAdvancedBranchJSON(t *testing.T) {
 	dsn, db, _ := testutil.StartPostgres(t)
 	setPostgresEnvFromDSN(t, dsn)
-	repo := cliapp.RepoRoot()
+	repo := repoRootForTest()
 	contractsRoot := filepath.Join(repo, "tests/tier1-primitives/test-emits-multiple")
 	registerRunForkCLIContractCatalog(t, context.Background(), db, contractsRoot)
 	sourceRunID := uuid.NewString()
@@ -536,7 +536,7 @@ func TestRunForkRuntimeOwnerHarness_MaterializeOnlyUsesCanonicalStoreOwnerJSON(t
 		t.Fatalf("seed entity_state: %v", err)
 	}
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
-	repo := cliapp.RepoRoot()
+	repo := repoRootForTest()
 	contractsRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
 	registerRunForkCLIContractCatalog(t, ctx, db, contractsRoot)
 	var buf bytes.Buffer
@@ -691,7 +691,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingConsumesRuntimeAdmiss
 	at := time.Unix(1700000330, 0).UTC()
 	ctx := context.Background()
 	seedRunForkCLIActivationSource(t, db, runID, entityID, eventID, at)
-	repo := cliapp.RepoRoot()
+	repo := repoRootForTest()
 	contractsRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
 	registerRunForkCLIContractCatalog(t, ctx, db, contractsRoot)
 
@@ -761,7 +761,7 @@ func TestRunForkRuntimeOwnerHarness_ActivateSelectedBindingRejectsDeliveryReplay
 			AgentIdentity: servedRuntimeRootIdentity(t, "safe-agent"),
 		}})
 	captureRunForkCLIRevision(t, db, runID, runforkrevision.AllFamilies()...)
-	repo := cliapp.RepoRoot()
+	repo := repoRootForTest()
 	contractsRoot := filepath.Join(repo, "tests", "tier11-flow-composition", "test-sibling-both-instantiated-isolated")
 	registerRunForkCLIContractCatalog(t, ctx, db, contractsRoot)
 
@@ -887,7 +887,7 @@ func registerRunForkCLIDataCatalog(t *testing.T, ctx context.Context, db *sql.DB
 
 func registerRunForkCLIContractCatalog(t *testing.T, ctx context.Context, db *sql.DB, contractsRoot string) {
 	t.Helper()
-	repo := cliapp.RepoRoot()
+	repo := repoRootForTest()
 	_, bundle, err := cliapp.NewSwarmWorkflowModule(repo, contractsRoot, runtimecontracts.DefaultPlatformSpecFile(repo))
 	if err != nil {
 		t.Fatalf("load run-fork selected contracts %s: %v", contractsRoot, err)

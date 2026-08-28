@@ -85,16 +85,24 @@ func startReleaseServe(t *testing.T, options releaseProcessSpec) *releaseServePr
 	output := &releaseProcessOutput{}
 	args := []string{
 		"serve",
-		"--config", options.ConfigPath,
-		"--contracts", options.Contracts,
-		"--store", options.Store,
 		"--backend", "claude_cli",
 		"--workspace-backend", "host",
 		"--api-listen-addr", fmt.Sprintf("127.0.0.1:%d", options.APIPort),
 		"--mcp-listen-addr", fmt.Sprintf("127.0.0.1:%d", options.MCPPort),
-		"--api-token-file", options.TokenFile,
 		"--shutdown-grace", "2s",
 		"--no-color",
+	}
+	if options.ConfigPath != "" {
+		args = append(args, "--config", options.ConfigPath)
+	}
+	if options.Contracts != "" {
+		args = append(args, "--contracts", options.Contracts)
+	}
+	if options.Store != "" {
+		args = append(args, "--store", options.Store)
+	}
+	if options.TokenFile != "" {
+		args = append(args, "--api-token-file", options.TokenFile)
 	}
 	if options.Dev {
 		args = append(args, "--dev")

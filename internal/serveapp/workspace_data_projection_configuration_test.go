@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/division-sh/swarm/internal/cliapp"
 	"github.com/division-sh/swarm/internal/durabledata"
 	runtimecontracts "github.com/division-sh/swarm/internal/runtime/contracts"
 	models "github.com/division-sh/swarm/internal/runtime/core/actors"
@@ -71,7 +70,7 @@ func TestConfigureWorkspaceDataProjectionMaterializesCanonicalEmptyDataForGrantF
 }
 
 func TestConfigureWorkspaceDataProjectionRejectsMissingStoreForDataBearingBundle(t *testing.T) {
-	repo := cliapp.RepoRoot()
+	repo := repoRootForTest()
 	bundle, err := runtimecontracts.LoadWorkflowContractBundleWithOverrides(
 		repo,
 		filepath.Join(repo, "tests", "tier12-runtime-tools", "test-flow-data-access"),

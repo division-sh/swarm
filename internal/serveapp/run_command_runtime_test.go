@@ -15,7 +15,7 @@ func TestRunCommandLocalForegroundRendersRealExplicitHostRefusal(t *testing.T) {
 	configPath := writeDoctorClaudeHostConfig(t, "")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"entity_id": "entity-1"})
 	var stdout, stderr bytes.Buffer
-	code := cliapp.Execute(context.Background(), cliapp.RepoRoot(), []string{
+	code := executeCLIFrom(context.Background(), repoRootForTest(), []string{
 		"--swarm-dir", t.TempDir(),
 		"run", "start",
 		"--event", "task.requested",
