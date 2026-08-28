@@ -11563,7 +11563,11 @@ flow_model:
         First materialization consumes the full canonical ActivateFlowInstance path, including routes, agents, initial
         timers, schedules, and creation effects. Restart rehydrates durable state and process-local effects without replaying
         creation effects. A restart-abandoned generation may advance only through the explicit repair rule after proving the
-        predecessor owns no live work; every other terminal current generation requires the explicit standing reset command.
+        predecessor owns no live work. Repair creates the successor, copies its canonical entity state, and, when the durable
+        operator override is suspended, transitions the successor run to paused through the lifecycle owner before requesting
+        completion. That request remains mandatory and returns deferred_paused; it is never skipped or interpreted locally.
+        Only the real operator resume clears the override, writes running, and owns the next immediate completion request.
+        Every other terminal current generation requires the explicit standing reset command.
         service_id, current_generation, current_run_id, instance_id, and entity_id are the standing semantic authority. The
         standing instance continues to use the ordinary canonical flow-instance identity owner; a special path namespace,
         source-equality validator, entity_state scan, or alternate route matcher is forbidden.
@@ -16178,12 +16182,15 @@ platform_tables:
           eligibility_origins: >
             Fresh ordinary non-standalone run creation declares no candidate because that transaction cannot establish
             completion eligibility; standalone run-plus-trigger creation requests an immediate candidate in the same
-            event transaction. Real resume from paused to running, active source revision, standing generation repair,
+            event transaction. Real resume from paused to running, active source revision, active standing generation repair,
             ordinary or selected-contract fork activation, and final settlement or expiry of delivery, pipeline,
             workflow-timer, session, decision/gate, external-effect, and entity obligations declare their exact candidate
             effect inside the named mutation. A byte-identical duplicate does not advance revision. Paused runs carry no
             completion candidate: requests return deferred_paused without changing durable identity, and the exact
-            paused-to-running transition requests an immediate candidate after it writes running. Every future operation
+            paused-to-running transition requests an immediate candidate after it writes running. A standing repair that
+            preserves a suspended operator override first writes the replacement run paused, then still invokes this candidate
+            owner and receives deferred_paused in the same transaction; copied terminal state cannot execute before operator
+            resume. Every future operation
             that can expose terminal eligibility must choose immediate request, exact future request, deferred paused,
             terminal clear, or a structurally enforced proof that eligibility cannot change.
           terminal_absorption: >
