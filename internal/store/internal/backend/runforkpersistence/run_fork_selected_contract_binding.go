@@ -16,9 +16,37 @@ func (s *RunForkPostgresOwner) requireRunForkSelectedContractBindingAccess() err
 	return s.requireCurrentSchema()
 }
 
+func (s *RunForkSQLiteOwner) requireRunForkSelectedContractBindingAccess() error {
+	return s.requireCurrentSchema()
+}
+
 func (s *RunForkPostgresOwner) LoadRunForkSelectedContractBinding(ctx context.Context, forkRunID string) (runfork.RunForkSelectedContractBinding, bool, error) {
 	if s == nil || s.backend == nil {
 		return runfork.RunForkSelectedContractBinding{}, false, fmt.Errorf("postgres store is required")
+	}
+	forkRunID = strings.TrimSpace(forkRunID)
+	if forkRunID == "" {
+		return runfork.RunForkSelectedContractBinding{}, false, fmt.Errorf("fork run_id is required")
+	}
+	if _, err := uuid.Parse(forkRunID); err != nil {
+		return runfork.RunForkSelectedContractBinding{}, false, fmt.Errorf("fork run_id must be a UUID: %w", err)
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return runfork.RunForkSelectedContractBinding{}, false, err
+	}
+	binding, err := loadRunForkSelectedContractBinding(ctx, s.backend, forkRunID)
+	if err == sql.ErrNoRows {
+		return runfork.RunForkSelectedContractBinding{}, false, nil
+	}
+	if err != nil {
+		return runfork.RunForkSelectedContractBinding{}, false, err
+	}
+	return binding, true, nil
+}
+
+func (s *RunForkSQLiteOwner) LoadRunForkSelectedContractBinding(ctx context.Context, forkRunID string) (runfork.RunForkSelectedContractBinding, bool, error) {
+	if s == nil || s.backend == nil {
+		return runfork.RunForkSelectedContractBinding{}, false, fmt.Errorf("sqlite store is required")
 	}
 	forkRunID = strings.TrimSpace(forkRunID)
 	if forkRunID == "" {
@@ -54,6 +82,20 @@ func (s *RunForkPostgresOwner) RequireRunForkSelectedContractBinding(ctx context
 	return binding, nil
 }
 
+func (s *RunForkSQLiteOwner) RequireRunForkSelectedContractBinding(ctx context.Context, forkRunID string) (runfork.RunForkSelectedContractBinding, error) {
+	if err := s.requireRunForkSelectedContractBindingAccess(); err != nil {
+		return runfork.RunForkSelectedContractBinding{}, err
+	}
+	binding, ok, err := s.LoadRunForkSelectedContractBinding(ctx, forkRunID)
+	if err != nil {
+		return runfork.RunForkSelectedContractBinding{}, err
+	}
+	if !ok {
+		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding for fork run %s not found", strings.TrimSpace(forkRunID))
+	}
+	return binding, nil
+}
+
 func insertRunForkSelectedContractBinding(ctx context.Context, tx *sql.Tx, req runfork.RunForkSelectedContractBindingRequest, createdAt time.Time) (runfork.RunForkSelectedContractBinding, error) {
 	if tx == nil {
 		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding transaction is required")
@@ -68,7 +110,7 @@ func insertRunForkSelectedContractBinding(ctx context.Context, tx *sql.Tx, req r
 			mode, contracts_root, bundle_hash, workflow_name, workflow_version, created_at
 		)
 		VALUES (
-			$1::uuid, $2::uuid, $3::uuid,
+			$1, $2, $3,
 			$4, NULLIF($5, ''), NULLIF($6, ''), $7, $8, $9
 		)
 	`, binding.ForkRunID, binding.SourceRunID, binding.ForkEventID,
@@ -88,11 +130,12 @@ func loadRunForkSelectedContractBinding(ctx context.Context, querier interface {
 }, forkRunID string) (runfork.RunForkSelectedContractBinding, error) {
 	var binding runfork.RunForkSelectedContractBinding
 	var selection runfork.RunForkContractSelection
+	var createdAt any
 	err := querier.QueryRowContext(ctx, `
 		SELECT
-			fork_run_id::text,
-			source_run_id::text,
-			fork_event_id::text,
+			CAST(fork_run_id AS TEXT),
+			CAST(source_run_id AS TEXT),
+			CAST(fork_event_id AS TEXT),
 			mode,
 			COALESCE(contracts_root, ''),
 			COALESCE(bundle_hash, ''),
@@ -100,7 +143,7 @@ func loadRunForkSelectedContractBinding(ctx context.Context, querier interface {
 			workflow_version,
 			created_at
 		FROM run_fork_selected_contract_bindings
-		WHERE fork_run_id = $1::uuid
+		WHERE fork_run_id = $1
 	`, forkRunID).Scan(
 		&binding.ForkRunID,
 		&binding.SourceRunID,
@@ -110,13 +153,21 @@ func loadRunForkSelectedContractBinding(ctx context.Context, querier interface {
 		&selection.BundleHash,
 		&selection.WorkflowName,
 		&selection.WorkflowVersion,
-		&binding.CreatedAt,
+		&createdAt,
 	)
 	if err != nil {
 		return runfork.RunForkSelectedContractBinding{}, err
 	}
+	parsedCreatedAt, ok, err := sqliteTimeValue(createdAt)
+	if err != nil {
+		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("decode selected contract binding created_at: %w", err)
+	}
+	if !ok {
+		return runfork.RunForkSelectedContractBinding{}, fmt.Errorf("selected contract binding created_at is required")
+	}
 	binding.Owner = runfork.RunForkSelectedContractBindingOwner
 	binding.ContractSelection = selection
+	binding.CreatedAt = parsedCreatedAt
 	return binding, nil
 }
 

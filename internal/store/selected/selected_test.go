@@ -162,9 +162,11 @@ func TestOpenRuntimeSQLiteResolvesRequiredAndOptionalProductsOnce(t *testing.T) 
 	if _, available := owner.BundleRegisterWriter(); !available {
 		t.Fatal("SQLite public bundle-register writer must be available")
 	}
+	if _, available := owner.RunFork(); !available {
+		t.Fatal("SQLite run fork must be available")
+	}
 	for name, available := range map[string]bool{
 		"bundle delete":     func() bool { _, ok := owner.BundleDelete(); return ok }(),
-		"run fork":          func() bool { _, ok := owner.RunFork(); return ok }(),
 		"destructive reset": func() bool { _, ok := owner.DestructiveReset(); return ok }(),
 		"startup recovery":  func() bool { _, ok := owner.StartupRecovery(); return ok }(),
 	} {

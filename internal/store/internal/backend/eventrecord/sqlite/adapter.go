@@ -101,6 +101,19 @@ func Insert(ctx context.Context, exec Execer, record eventrecord.Record) (bool, 
 	return rows == 1, nil
 }
 
+// DeleteSelectedForkRunEvents is the event-record portion of the closed
+// selected-fork discard operation.
+func DeleteSelectedForkRunEvents(ctx context.Context, exec Execer, forkRunID string) error {
+	forkRunID = strings.TrimSpace(forkRunID)
+	if forkRunID == "" {
+		return fmt.Errorf("delete selected-fork event records: fork run id is required")
+	}
+	if _, err := exec.ExecContext(ctx, `DELETE FROM events WHERE run_id = $1`, forkRunID); err != nil {
+		return fmt.Errorf("delete selected-fork event records: %w", err)
+	}
+	return nil
+}
+
 const selectRecord = `
 	SELECT
 		e.event_class, e.event_id, COALESCE(e.run_id, ''), e.event_name, COALESCE(e.task_id, ''),

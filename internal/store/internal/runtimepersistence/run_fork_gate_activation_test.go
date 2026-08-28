@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +20,160 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
+
+type runForkGateSelectedStore interface {
+	decisioncard.Store
+	decisioncard.ProposedEffectStore
+}
+
+type runForkGateSelectedStoreProof struct {
+	StageGatePending            bool
+	StageGateForkLocal          bool
+	StageGateProvenanceRetained bool
+	ProposedEffectPending       bool
+	ProposedEffectForkLocal     bool
+	ProposedEffectReplyDetached bool
+	ProposedEffectInputRetained bool
+}
+
+func TestMaterializeRunForkGateAuthoritiesSelectedStoreParity(t *testing.T) {
+	proofs := make(map[string]runForkGateSelectedStoreProof, 2)
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := testAuthorActivityContext()
+			var db *sql.DB
+			var selected runForkGateSelectedStore
+			if backend == "sqlite" {
+				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+				db, selected = store.backend.ConstructionHandle(), store
+			} else {
+				_, db, _ = testutil.StartPostgres(t)
+				selected = admitTestPostgresStore(t, db)
+			}
+			sourceRunID := "00000000-0000-0000-0000-000000023610"
+			forkRunID := "00000000-0000-0000-0000-000000023611"
+			entityID := "00000000-0000-0000-0000-000000023612"
+			now := time.Date(2026, 8, 26, 15, 0, 0, 0, time.UTC)
+			requireRunningRunForTest(t, ctx, selected, sourceRunID, now)
+			requireRunningRunForTest(t, ctx, selected, forkRunID, now)
+
+			sourceActivation, err := gateruntime.New(sourceRunID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", authorActivityTestBundleHash, testGateRoutes(t), "event-1", now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sourceCard, err := decisioncard.New(decisioncard.Card{
+				CardID: sourceActivation.CardID, RunID: sourceRunID, ExecutionMode: "live",
+				Anchor: newDecisionCardTestStageAnchor("launch/review", "launch", entityID, sourceActivation.Stage, sourceActivation.ActivationID),
+				Snapshot: freezeDecisionCardTestSnapshot(t, sourceActivation.DecisionID, map[string]any{"summary": "source snapshot"}, map[string]runtimecontracts.WorkflowGateOutcomePlan{
+					"approve": {Verdict: "approve", AdvancesTo: "done"},
+				}),
+				BundleHash: sourceActivation.BundleHash, WorkflowVersion: "1", CreatedAt: now,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := selected.CreateDecisionCard(ctx, sourceCard); err != nil {
+				t.Fatalf("create source stage gate: %v", err)
+			}
+			sourceEffectCard, sourceEffect := newProposedEffectTestCard(t, sourceRunID, now, attemptgeneration.Generation{})
+			if err := selected.CreateProposedEffectCard(ctx, sourceEffectCard, sourceEffect); err != nil {
+				t.Fatalf("create source proposed effect: %v", err)
+			}
+			if _, err := db.ExecContext(ctx, `
+				INSERT INTO entity_state (
+					run_id, entity_id, flow_instance, entity_type, current_state,
+					gates, fields, accumulator, entered_state_at, created_at, updated_at
+				) VALUES ($1, $2, 'root', 'default', 'operating', '{}', '{}', '{}', $3, $3, $3)
+			`, forkRunID, sourceEffect.EntityID, now); err != nil {
+				t.Fatalf("create fork proposed-effect entity: %v", err)
+			}
+			forkActivation, err := gateruntime.New(forkRunID, "launch/review", entityID, "launch", "awaiting_review", "launch_review", sourceActivation.BundleHash, sourceActivation.RoutesJSON, sourceActivation.StartedByEvent, sourceActivation.OpenedAt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := materializeRunForkGateAuthoritiesForTest(ctx, selected, sourceRunID, forkRunID, entityID, sourceEffect.EntityID, sourceActivation, forkActivation, runfork.RunForkPoint{EventID: uuid.NewString(), Timestamp: now.Add(time.Minute)}, now.Add(2*time.Minute)); err != nil {
+				t.Fatalf("materialize fork-local gate authorities: %v", err)
+			}
+
+			forkStageCard, err := selected.GetDecisionCard(ctx, forkActivation.CardID)
+			if err != nil {
+				t.Fatalf("load fork stage gate: %v", err)
+			}
+			forkedFrom, _ := forkStageCard.Provenance.Lookup("forked_from_card_id")
+			items, _, err := selected.ListDecisionCards(ctx, decisioncard.ListOptions{RunID: forkRunID, Limit: 10})
+			if err != nil {
+				t.Fatalf("list fork gate authorities: %v", err)
+			}
+			var forkEffectCard decisioncard.Card
+			for _, item := range items {
+				card, loadErr := selected.GetDecisionCard(ctx, item.CardID)
+				if loadErr != nil {
+					t.Fatalf("load fork gate authority %s: %v", item.CardID, loadErr)
+				}
+				if card.Anchor.Kind() == decisioncard.AnchorKindProposedEffect {
+					forkEffectCard = card
+				}
+			}
+			if forkEffectCard.CardID == "" {
+				t.Fatalf("fork proposed-effect authority missing: %#v", items)
+			}
+			forkEffect, err := selected.LoadProposedEffectContinuation(ctx, forkEffectCard.CardID)
+			if err != nil {
+				t.Fatalf("load fork proposed-effect continuation: %v", err)
+			}
+			proofs[backend] = runForkGateSelectedStoreProof{
+				StageGatePending:            forkStageCard.Status == decisioncard.StatusPending,
+				StageGateForkLocal:          forkStageCard.RunID == forkRunID && forkStageCard.CardID != sourceCard.CardID,
+				StageGateProvenanceRetained: forkedFrom.Interface() == sourceCard.CardID,
+				ProposedEffectPending:       forkEffectCard.Status == decisioncard.StatusPending && forkEffect.State == decisioncard.ProposedEffectPending,
+				ProposedEffectForkLocal:     forkEffect.RunID == forkRunID && forkEffect.CardID != sourceEffect.CardID && forkEffect.SourceRunID == forkRunID,
+				ProposedEffectReplyDetached: sourceEffect.ReplyContextID != "" && forkEffect.ReplyContextID == "",
+				ProposedEffectInputRetained: forkEffect.Input.Equal(sourceEffect.Input),
+			}
+		})
+	}
+	if !reflect.DeepEqual(proofs["sqlite"], proofs["postgres"]) {
+		t.Fatalf("selected-store fork gate materialization differs:\nsqlite=%#v\npostgres=%#v", proofs["sqlite"], proofs["postgres"])
+	}
+	for backend, proof := range proofs {
+		if !proof.StageGatePending || !proof.StageGateForkLocal || !proof.StageGateProvenanceRetained || !proof.ProposedEffectPending || !proof.ProposedEffectForkLocal || !proof.ProposedEffectReplyDetached || !proof.ProposedEffectInputRetained {
+			t.Fatalf("%s fork gate proof incomplete: %#v", backend, proof)
+		}
+	}
+}
+
+func materializeRunForkGateAuthoritiesForTest(ctx context.Context, selected runForkGateSelectedStore, sourceRunID, forkRunID, decisionEntityID, effectEntityID string, sourceActivation, forkActivation gateruntime.Activation, point runfork.RunForkPoint, now time.Time) error {
+	operation := func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation, decisionMaterializer func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error, effectMaterializer func(context.Context, *sql.Tx, *privateauthoractivity.Mutation) error) error {
+		if err := decisionMaterializer(txctx, tx, story); err != nil {
+			return err
+		}
+		return effectMaterializer(txctx, tx, story)
+	}
+	switch store := selected.(type) {
+	case *PostgresStore:
+		return store.runPrivateAuthorActivityMutation(ctx, func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+			return operation(txctx, tx, story,
+				func(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+					return store.runForkPostgresOwner.MaterializeRunForkDecisionCardsTx(ctx, tx, story, forkRunID, decisionEntityID, []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}, now)
+				},
+				func(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+					return store.runForkPostgresOwner.MaterializeRunForkProposedEffectCardsTx(ctx, tx, story, sourceRunID, forkRunID, effectEntityID, point, now)
+				})
+		})
+	case *SQLiteRuntimeStore:
+		return store.runPrivateAuthorActivityMutation(ctx, "test materialize SQLite run-fork gate authorities", func(txctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+			return operation(txctx, tx, story,
+				func(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+					return store.runForkSQLiteOwner.MaterializeRunForkDecisionCardsTx(ctx, tx, story, forkRunID, decisionEntityID, []runForkGateActivationBinding{{Source: sourceActivation, Fork: forkActivation}}, now)
+				},
+				func(ctx context.Context, tx *sql.Tx, story *privateauthoractivity.Mutation) error {
+					return store.runForkSQLiteOwner.MaterializeRunForkProposedEffectCardsTx(ctx, tx, story, sourceRunID, forkRunID, effectEntityID, point, now)
+				})
+		})
+	default:
+		return fmt.Errorf("unsupported selected-store gate test owner %T", selected)
+	}
+}
 
 func TestMaterializeRunForkDecisionCardsCreatesForkLocalPendingAuthority(t *testing.T) {
 	_, db, _ := testutil.StartPostgres(t)

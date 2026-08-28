@@ -318,6 +318,10 @@ func composePostgres(selected *private.PostgresStore) (*Owner, error) {
 
 func composeSQLite(selected *private.SQLiteRuntimeStore) (*Owner, error) {
 	workflow := runtimepipeline.NewWorkflowPersistence(selected)
+	runFork, err := newSQLiteRunFork(selected, workflow)
+	if err != nil {
+		return nil, err
+	}
 	return &Owner{
 		lifetime: lifecycle{resource: selected, state: ownershipUnactivated},
 		core: runtime.RuntimeDeps{
@@ -361,6 +365,7 @@ func composeSQLite(selected *private.SQLiteRuntimeStore) (*Owner, error) {
 			bundleCatalog: selected, bundleCatalogAvailable: true,
 			bundleRegister: selected, bundleRegisterAvailable: true,
 			conversationFork: ConversationFork{reader: selected, lifecycle: selected}, conversationAvailable: true,
+			runFork: runFork, runForkAvailable: true,
 		},
 	}, nil
 }
@@ -392,6 +397,25 @@ func newPostgresRunFork(selected *private.PostgresStore, workflow runtimepipelin
 	execution, err := runtimerunforkexecution.NewSelectedContractExecutionOwner(
 		workflow, selected, selected, selected, selected, durable, selected.PipelineObligations(),
 		selected, managerRoles(selected), selected, selected, selected, selected, selected,
+		selected, selected, selected, selected, selected, selected, selected, selected,
+	)
+	if err != nil {
+		return RunFork{}, err
+	}
+	return RunFork{planner: selected, availability: selected, activation: selected, executionOwner: execution}, nil
+}
+
+func newSQLiteRunFork(selected *private.SQLiteRuntimeStore, workflow runtimepipeline.WorkflowPersistence) (RunFork, error) {
+	durable := runtimebus.DurableDependencies{
+		ReplyContext: selected, RunLifecycle: selected, DeliveryLifecycle: selected,
+		FlowRoutes: selected, FlowRouteRecords: selected, FlowRouteSets: selected,
+		FlowRouteTopology: selected, FlowRouteRollback: selected, ActiveAgents: selected,
+		ActiveFlows: selected, TargetOwners: selected, WorkflowInstances: selected,
+		PreparedEvents: selected, TargetFailureRecorder: selected, RunOrigins: selected,
+	}
+	execution, err := runtimerunforkexecution.NewSelectedContractExecutionOwner(
+		workflow, selected, selected, selected, selected, durable, selected.PipelineObligations(),
+		selected, sqliteManagerRoles(selected), selected, selected, selected, selected, selected,
 		selected, selected, selected, selected, selected, selected, selected, selected,
 	)
 	if err != nil {

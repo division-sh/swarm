@@ -763,12 +763,24 @@ func TestRunCommandQueueOverflowDetachesExactlyOnce(t *testing.T) {
 func TestRunCommandTerminalJoinPublishesEstablishedObserverOverflow(t *testing.T) {
 	setCLIAPITestToken(t, "test-token")
 	payloadPath := writeRunCommandPayloadFile(t, map[string]any{"ok": true})
-	warning := &notifyingBuffer{needle: string(runTraceDetachQueueOverflow), notify: make(chan struct{})}
+	warning := newBlockingRunWriter(string(runTraceDetachQueueOverflow))
 	stdout := newBlockingTraceWriter()
+	defer func() {
+		for _, writer := range []*blockingRunWriter{stdout, warning} {
+			select {
+			case <-writer.release:
+			default:
+				close(writer.release)
+			}
+		}
+	}()
 	rows := make([]map[string]any, 64)
 	for i := range rows {
 		rows[i] = validRunCommandTraceRow(fmt.Sprintf("evt-terminal-overflow-%03d", i))
 	}
+	subscribed := make(chan struct{})
+	terminalObserved := make(chan struct{})
+	var terminalObservedOnce sync.Once
 	server, _, _ := newRunCommandServer(t, runCommandServerOptions{
 		rpcResponder: func(req jsonRPCRequest, _ int) map[string]any {
 			switch req.Method {
@@ -779,12 +791,10 @@ func TestRunCommandTerminalJoinPublishesEstablishedObserverOverflow(t *testing.T
 			case "run.get":
 				run := validDiagnosticRunHeader("run-terminal-overflow")
 				select {
-				case <-stdout.blocked:
+				case <-warning.blocked:
 					run["status"] = "completed"
 					run["ended_at"] = "2026-05-13T10:01:00Z"
-				case <-warning.notify:
-					run["status"] = "completed"
-					run["ended_at"] = "2026-05-13T10:01:00Z"
+					terminalObservedOnce.Do(func() { close(terminalObserved) })
 				default:
 				}
 				return map[string]any{"run": run}
@@ -793,22 +803,22 @@ func TestRunCommandTerminalJoinPublishesEstablishedObserverOverflow(t *testing.T
 			}
 			return nil
 		},
-		wsRows: rows,
+		wsRows:       rows,
+		wsSubscribed: subscribed,
 	})
 	defer server.Close()
 
+	opts := testRunCommandOptions(server)
+	opts.runTraceAttachTimeout = 30 * time.Second
 	done := make(chan int, 1)
 	go func() {
-		done <- executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, stdout, warning, testRunCommandOptions(server))
+		done <- executeRootCommandWithOptions(context.Background(), t.TempDir(), []string{"run", "start", "--connect", server.URL, "--event", "scan.requested", "--payload", payloadPath}, stdout, warning, opts)
 	}()
-	select {
-	case <-stdout.blocked:
-	case <-warning.notify:
-	case <-time.After(2 * time.Second):
-		t.Fatal("trace observer neither blocked output nor reported overflow")
-	}
-	time.Sleep(100 * time.Millisecond)
+	requireSignalWithin(t, subscribed, "terminal trace subscription", 30*time.Second)
+	requireSignalWithin(t, warning.blocked, "established terminal trace queue-overflow fact", 30*time.Second)
+	requireSignalWithin(t, terminalObserved, "terminal status after established queue overflow", 30*time.Second)
 	close(stdout.release)
+	close(warning.release)
 	select {
 	case code := <-done:
 		if code != 0 {
@@ -900,9 +910,14 @@ func assertRunTraceDetachFact(t *testing.T, fact runTraceObserverDetachedFact, r
 
 func requireSignal(t *testing.T, signal <-chan struct{}, name string) {
 	t.Helper()
+	requireSignalWithin(t, signal, name, 2*time.Second)
+}
+
+func requireSignalWithin(t *testing.T, signal <-chan struct{}, name string, timeout time.Duration) {
+	t.Helper()
 	select {
 	case <-signal:
-	case <-time.After(2 * time.Second):
+	case <-time.After(timeout):
 		t.Fatalf("timed out waiting for %s", name)
 	}
 }

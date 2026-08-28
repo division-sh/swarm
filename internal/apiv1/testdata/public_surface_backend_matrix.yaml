@@ -79,13 +79,18 @@ mutating_api_parity_ledger:
       - {kind: go_test, name: TestOperatorBundleDeleteForceUsesOwnerChainAndIdempotency}
       - {kind: go_test, name: TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed}
   - method: run.fork
-    classification: postgres_only_with_spec_ref
-    backends: [postgres_only]
+    classification: dual_backend_served_proof
+    backends: [default_sqlite, explicit_postgres]
+    scenario: run_fork_lifecycle
     spec_ref: platform-spec.yaml#engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork
     proof_refs:
       - {kind: artifact, path: platform-spec.yaml}
-      - {kind: go_test, name: TestRunServeRuntimeDBLoadedRunForkSupportedSurfaceExecutesAndStampsPersistedIdentity}
-      - {kind: go_test, name: TestRunServeRuntimeSQLiteOptionalMutatorsFailClosed}
+      - {kind: go_test, name: TestServedParityHarnessRunForkLifecycle}
+    notes: >
+      The shared served harness proves the same event.publish, run.fork,
+      settlement, terminal run, and public readback lifecycle through
+      selected SQLite and PostgreSQL stores. The same-invocation development
+      scratch proof remains an additional SQLite execution surface.
   - method: agent.replay
     classification: dual_backend_served_proof
     backends: [default_sqlite, explicit_postgres]

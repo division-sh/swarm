@@ -1205,6 +1205,13 @@ func (s *PipelinePostgresOwner) CommitScopeAtTx(ctx context.Context, tx *sql.Tx,
 	return declareEventRevisionFamily(ctx, tx, effects, eventID, privaterunforkrevision.FamilyCommittedReplayScopes)
 }
 
+func (s *PipelineSQLiteOwner) CommitScopeAtTx(ctx context.Context, tx *sql.Tx, effects *revisionEffects, eventID string, scope runtimepipelineobligation.CommittedScope, at time.Time) error {
+	if err := insertCommittedPipelineScopeTx(ctx, tx, eventID, scope, false, at.UTC()); err != nil {
+		return err
+	}
+	return declareEventRevisionFamily(ctx, tx, effects, eventID, privaterunforkrevision.FamilyCommittedReplayScopes)
+}
+
 func (s *PipelineSQLiteOwner) CommitInitialPipelineScopeTx(ctx context.Context, tx *sql.Tx, effects *revisionEffects, eventID string, scope runtimepipelineobligation.CommittedScope) error {
 	if tx == nil {
 		return errors.New("initial sqlite pipeline scope transaction is required")

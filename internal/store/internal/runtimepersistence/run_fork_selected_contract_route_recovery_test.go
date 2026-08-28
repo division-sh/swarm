@@ -3,6 +3,7 @@ package runtimepersistence
 import (
 	"context"
 	"database/sql"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -23,6 +24,108 @@ import (
 	"github.com/division-sh/swarm/internal/testutil"
 	"github.com/google/uuid"
 )
+
+type selectedRouteRecoveryStore interface {
+	RecordRunForkSelectedContractRouteRecovery(context.Context, runfork.RunForkSelectedContractRouteRecoveryRequest) (runfork.RunForkSelectedContractRouteRecovery, error)
+	LoadRunForkSelectedContractRouteRecovery(context.Context, string) (runfork.RunForkSelectedContractRouteRecovery, bool, error)
+	ListRunForkSelectedContractRouteRecoveries(context.Context) ([]runfork.RunForkSelectedContractRouteRecovery, error)
+}
+
+type selectedRouteRecoveryProof struct {
+	Owner                       string
+	RuntimeOwner                string
+	SelectionMode               string
+	RouteOwner                  string
+	RecipientOwner              string
+	StaticRouteEvents           int
+	RecipientPlanEvents         int
+	RouteFingerprintPresent     bool
+	RecipientFingerprintPresent bool
+	RouteEventReadBack          bool
+	RecipientReadBack           bool
+	ExactReplaySingleRow        bool
+}
+
+func TestRunForkSelectedContractRouteRecoverySelectedStoreParity(t *testing.T) {
+	proofs := make(map[string]selectedRouteRecoveryProof, 2)
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			ctx := testAuthorActivityContext()
+			var selected selectedRouteRecoveryStore
+			var eventStore any
+			if backend == "sqlite" {
+				store := newBootstrappedSQLiteRuntimeStoreForTest(t)
+				selected, eventStore = store, store
+			} else {
+				_, db, _ := testutil.StartPostgres(t)
+				store := admitTestPostgresStore(t, db)
+				selected, eventStore = store, store
+			}
+			sourceRunID := "00000000-0000-0000-0000-000000023620"
+			forkRunID := "00000000-0000-0000-0000-000000023621"
+			eventID := "00000000-0000-0000-0000-000000023622"
+			now := time.Date(2026, 8, 26, 16, 0, 0, 0, time.UTC)
+			requireRunningRunForTest(t, ctx, eventStore, sourceRunID, now)
+			requireRunningRunForTest(t, ctx, eventStore, forkRunID, now)
+			event := eventtest.ExistingRunRootIngress(eventID, "item.received", "route-recovery", "", []byte(`{}`), 0, sourceRunID, events.EventEnvelope{}, now)
+			if err := commitSemanticEventFixture(ctx, eventStore, event); err != nil {
+				t.Fatalf("commit route-recovery source event: %v", err)
+			}
+			selection, topology, planning := testSelectedRouteRecoveryEvidence(eventID)
+			req := runfork.RunForkSelectedContractRouteRecoveryRequest{
+				ForkRunID: forkRunID, SourceRunID: sourceRunID, ForkEventID: eventID,
+				ContractSelection: selection, RouteTopology: topology, RecipientPlanning: planning,
+			}
+			cancelled, cancel := context.WithCancel(ctx)
+			cancel()
+			if _, err := selected.RecordRunForkSelectedContractRouteRecovery(cancelled, req); err == nil {
+				t.Fatal("pre-cancelled route-recovery record succeeded")
+			}
+			if _, ok, err := selected.LoadRunForkSelectedContractRouteRecovery(ctx, forkRunID); err != nil || ok {
+				t.Fatalf("pre-cancelled route recovery persisted: ok=%v err=%v", ok, err)
+			}
+
+			recorded, err := selected.RecordRunForkSelectedContractRouteRecovery(ctx, req)
+			if err != nil {
+				t.Fatalf("record selected-contract route recovery: %v", err)
+			}
+			replayed, err := selected.RecordRunForkSelectedContractRouteRecovery(ctx, req)
+			if err != nil {
+				t.Fatalf("replay selected-contract route recovery: %v", err)
+			}
+			loaded, ok, err := selected.LoadRunForkSelectedContractRouteRecovery(ctx, forkRunID)
+			if err != nil || !ok {
+				t.Fatalf("load selected-contract route recovery: ok=%v err=%v", ok, err)
+			}
+			rows, err := selected.ListRunForkSelectedContractRouteRecoveries(ctx)
+			if err != nil {
+				t.Fatalf("list selected-contract route recoveries: %v", err)
+			}
+			proofs[backend] = selectedRouteRecoveryProof{
+				Owner:                       loaded.Owner,
+				RuntimeOwner:                loaded.RuntimeRecoveryOwner,
+				SelectionMode:               loaded.ContractSelection.Mode,
+				RouteOwner:                  loaded.RouteTopologyOwner,
+				RecipientOwner:              loaded.RecipientPlanningOwner,
+				StaticRouteEvents:           loaded.StaticRouteEventCount,
+				RecipientPlanEvents:         loaded.RecipientPlanEventCount,
+				RouteFingerprintPresent:     loaded.RouteTopologyFingerprint != "",
+				RecipientFingerprintPresent: loaded.RecipientPlanningFingerprint != "",
+				RouteEventReadBack:          strings.Contains(string(loaded.RouteTopology), "item.received"),
+				RecipientReadBack:           strings.Contains(string(loaded.RecipientPlanning), "node-a"),
+				ExactReplaySingleRow:        len(rows) == 1 && replayed.RouteTopologyFingerprint == recorded.RouteTopologyFingerprint && replayed.RecipientPlanningFingerprint == recorded.RecipientPlanningFingerprint,
+			}
+		})
+	}
+	if !reflect.DeepEqual(proofs["sqlite"], proofs["postgres"]) {
+		t.Fatalf("selected-store route-recovery proof differs:\nsqlite=%#v\npostgres=%#v", proofs["sqlite"], proofs["postgres"])
+	}
+	for backend, proof := range proofs {
+		if proof.Owner != runfork.RunForkSelectedContractRoutePersistenceOwner || proof.RuntimeOwner != runfork.RunForkSelectedContractRouteRecoveryOwner || !proof.RouteFingerprintPresent || !proof.RecipientFingerprintPresent || !proof.RouteEventReadBack || !proof.RecipientReadBack || !proof.ExactReplaySingleRow {
+			t.Fatalf("%s route-recovery proof incomplete: %#v", backend, proof)
+		}
+	}
+}
 
 func seedSelectedRouteRecoveryEvent(t testing.TB, ctx context.Context, db *sql.DB, runID, eventID string) {
 	t.Helper()

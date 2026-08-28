@@ -152,11 +152,40 @@ func LoadPostgresTx(ctx context.Context, tx *sql.Tx, runID string) (scenarioexec
 	return profile, err == nil, err
 }
 
+func LoadSQLiteTx(ctx context.Context, tx *sql.Tx, runID string) (scenarioexecution.Profile, bool, error) {
+	if tx == nil {
+		return scenarioexecution.Profile{}, false, fmt.Errorf("sqlite scenario execution profile transaction is required")
+	}
+	if err := validateRunID(runID); err != nil {
+		return scenarioexecution.Profile{}, false, err
+	}
+	stored, err := loadSQLiteTx(ctx, tx, runID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return scenarioexecution.Profile{}, false, nil
+		}
+		return scenarioexecution.Profile{}, false, err
+	}
+	profile, err := decodeStored(runID, stored)
+	return profile, err == nil, err
+}
+
 func RequirePostgresExact(ctx context.Context, tx *sql.Tx, runID string, profile scenarioexecution.Profile) error {
 	if err := validateWrite(runID, profile); err != nil {
 		return err
 	}
 	stored, err := loadPostgresTx(ctx, tx, runID)
+	if err != nil {
+		return err
+	}
+	return requireExact(runID, profile, stored)
+}
+
+func RequireSQLiteExact(ctx context.Context, tx *sql.Tx, runID string, profile scenarioexecution.Profile) error {
+	if err := validateWrite(runID, profile); err != nil {
+		return err
+	}
+	stored, err := loadSQLiteTx(ctx, tx, runID)
 	if err != nil {
 		return err
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/division-sh/swarm/internal/runtime/runfork"
 	runtimerunlifecycle "github.com/division-sh/swarm/internal/runtime/runlifecycle"
 	privateauthoractivity "github.com/division-sh/swarm/internal/store/internal/backend/authoractivity"
+	storedelivery "github.com/division-sh/swarm/internal/store/internal/backend/delivery"
 	privaterunforkrevision "github.com/division-sh/swarm/internal/store/internal/backend/runforkrevision"
 	privaterunlifecycle "github.com/division-sh/swarm/internal/store/internal/backend/runlifecycle"
 	"github.com/google/uuid"
@@ -121,7 +122,7 @@ func (s *RunForkPostgresOwner) ActivateRunFork(ctx context.Context, req runfork.
 		}
 		return result, err
 	}
-	if err := ensureRunForkActivationNoForkReplayState(ctx, tx, lineage.ForkRunID); err != nil {
+	if err := ensureRunForkActivationNoForkReplayState(ctx, tx, postgresDeliveryAdapter, lineage.ForkRunID); err != nil {
 		if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
 			result.UnsupportedBlockers = appendRunForkBlocker(result.UnsupportedBlockers, blocker)
 			result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithBlocker(result.ReplayResumeAdmission, fact, blocker)
@@ -147,7 +148,7 @@ func (s *RunForkPostgresOwner) ActivateRunFork(ctx context.Context, req runfork.
 		ForkRunID:   lineage.ForkRunID,
 	}
 	if historicalReplayExecution.DeliveryEventReplayReady {
-		replayResult, err = applyRunForkDeliveryEventReplay(ctx, tx, story, effects, s, lineage, historicalReplayExecution, now)
+		replayResult, err = applyRunForkDeliveryEventReplay(ctx, tx, story, effects, s.deliveryEventReplayAdapter(), lineage, historicalReplayExecution, now)
 		if err != nil {
 			return result, err
 		}
@@ -168,6 +169,140 @@ func (s *RunForkPostgresOwner) ActivateRunFork(ctx context.Context, req runfork.
 		return result, fmt.Errorf("commit fork activation: %w", err)
 	}
 	committed = true
+	if err := handoff.Commit(); err != nil {
+		return result, err
+	}
+	result.ForkRunStatus = runfork.RunForkActivatedStatus
+	result.SourceRunStatus = runfork.RunForkSourceFrozenStatus
+	result.Activated = true
+	result.SourceFrozen = true
+	if replayResult.ReplayedEventCount > 0 || replayResult.ReplayedDeliveryCount > 0 {
+		historicalReplayExecution.DeliveryEventReplay = &replayResult
+		result.HistoricalReplayExecution = &historicalReplayExecution
+		result.DeliveryEventReplay = &replayResult
+	}
+	return result, nil
+}
+
+func (s *RunForkSQLiteOwner) ActivateRunFork(ctx context.Context, req runfork.RunForkActivateRequest) (result runfork.RunForkActivation, err error) {
+	if s == nil || s.backend == nil {
+		return runfork.RunForkActivation{}, fmt.Errorf("sqlite store is required")
+	}
+	forkRunID := strings.TrimSpace(req.ForkRunID)
+	if forkRunID == "" {
+		return runfork.RunForkActivation{}, fmt.Errorf("fork run_id is required")
+	}
+	if _, err := uuid.Parse(forkRunID); err != nil {
+		return runfork.RunForkActivation{}, fmt.Errorf("fork run_id must be a UUID: %w", err)
+	}
+	if err := s.requireCurrentSchema(); err != nil {
+		return runfork.RunForkActivation{}, err
+	}
+	handoff, err := reserveRunLifecycleCandidateHandoff(ctx)
+	if err != nil {
+		return runfork.RunForkActivation{}, err
+	}
+	defer handoff.Rollback()
+	var historicalReplayExecution runfork.RunForkHistoricalReplayExecution
+	var replayResult runfork.RunForkDeliveryEventReplayResult
+	err = s.runRuntimeMutation(ctx, "sqlite run fork activation", func(txctx context.Context, tx *sql.Tx) error {
+		story, err := privateauthoractivity.Begin(txctx, tx, privateauthoractivity.DialectSQLite)
+		if err != nil {
+			return err
+		}
+		lineage, err := loadSQLiteRunForkActivationLineage(txctx, s.RunLifecycleSQLiteOwner, tx, forkRunID)
+		if err != nil {
+			return err
+		}
+		if err := lockSQLiteRunForkSourceRevisionFrontier(txctx, tx, &lineage); err != nil {
+			return err
+		}
+		result = runfork.RunForkActivation{
+			SourceRunID: lineage.SourceRunID, ForkRunID: lineage.ForkRunID, ForkRunStatus: lineage.ForkStatus,
+			SourceRunStatus:     lineage.SourceRunStatus,
+			ForkPoint:           runfork.RunForkPoint{Input: lineage.ForkEventID, EventID: lineage.ForkEventID, EventName: lineage.ForkEventName, Timestamp: lineage.ForkEventTime, Revision: lineage.ForkEventRevision},
+			ReplayResumeBlocked: true, MaterializedEntityCount: len(lineage.EntityIDs),
+		}
+		if lineage.ForkStatus != runfork.RunForkMaterializedStatus {
+			result.RepeatedActivationFailed = lineage.ForkStatus == runfork.RunForkActivatedStatus
+			return fmt.Errorf("fork activation requires materialized fork status %q; got %q", runfork.RunForkMaterializedStatus, lineage.ForkStatus)
+		}
+		sourceState, sourceStateErr := runtimerunlifecycle.ParseState(lineage.SourceRunStatus)
+		if sourceStateErr != nil || !sourceState.Active() {
+			return fmt.Errorf("fork activation requires source run status running or paused before freeze; got %q", lineage.SourceRunStatus)
+		}
+		if len(lineage.EntityIDs) == 0 {
+			return fmt.Errorf("fork activation requires materialized fork entity_state rows")
+		}
+		binding, err := loadRunForkSelectedContractBinding(txctx, tx, lineage.ForkRunID)
+		if err == nil {
+			result.SelectedContractBinding = &binding
+		} else if err != sql.ErrNoRows {
+			return fmt.Errorf("load selected contract binding: %w", err)
+		}
+		plan, err := planRunForkSnapshot(txctx, tx, runfork.RunForkPlanRequest{SourceRunID: lineage.SourceRunID, At: lineage.ForkEventID}, privaterunforkrevision.ValidateCompleteSQLite, resolveSQLiteRunForkRevisionPoint)
+		if err != nil {
+			return err
+		}
+		result.ReplayResumeAdmission = plan.ReplayResumeAdmission
+		if !plan.ExecutionReady {
+			result.UnsupportedBlockers = plan.UnsupportedBlockers
+			return fmt.Errorf("fork activation requires execution-ready materialized fork; blockers: %s", runForkBlockerCodes(plan.UnsupportedBlockers))
+		}
+		if err := ensureRunForkSourceNotAdvanced(txctx, tx, lineage); err != nil {
+			result.SourceAdvancedAfterFork = true
+			if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
+				result.UnsupportedBlockers = appendRunForkBlocker(result.UnsupportedBlockers, blocker)
+				result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithBlocker(result.ReplayResumeAdmission, fact, blocker)
+			}
+			return err
+		}
+		if err := ensureRunForkActivationNoForkReplayState(txctx, tx, sqliteDeliveryAdapter, lineage.ForkRunID); err != nil {
+			if blocker, fact, ok := runForkReplayResumeBlockerFromError(err); ok {
+				result.UnsupportedBlockers = appendRunForkBlocker(result.UnsupportedBlockers, blocker)
+				result.ReplayResumeAdmission = runForkReplayResumeAdmissionWithBlocker(result.ReplayResumeAdmission, fact, blocker)
+			}
+			return err
+		}
+		historicalReplayExecution, err = requireRunForkHistoricalReplayExecution(txctx, req.HistoricalReplayExecutionAdmitter, lineage, plan)
+		if err != nil {
+			return err
+		}
+		if historicalReplayExecution.DeliveryEventReplayReady {
+			if err := validateRunForkDeliveryEventReplayWorkAgainstPlan(plan.PendingWork, historicalReplayExecution.DeliveryEventReplayWork); err != nil {
+				return err
+			}
+		}
+		now := s.now()
+		effects := privaterunforkrevision.NewEffects()
+		replayResult = runfork.RunForkDeliveryEventReplayResult{Owner: runfork.RunForkDeliveryEventReplayOwner, SourceRunID: lineage.SourceRunID, ForkRunID: lineage.ForkRunID}
+		if historicalReplayExecution.DeliveryEventReplayReady {
+			replayResult, err = applyRunForkDeliveryEventReplay(txctx, tx, story, effects, s.deliveryEventReplayAdapter(), lineage, historicalReplayExecution, now)
+			if err != nil {
+				return err
+			}
+		}
+		if err := s.applyRunForkSourceFreeze(txctx, tx, story, effects, lineage, now, req.ConfirmSourceFreeze, handoff); err != nil {
+			return err
+		}
+		if err := effects.Add(lineage.ForkRunID,
+			privaterunforkrevision.FamilyEvents, privaterunforkrevision.FamilyEventDeliveries,
+			privaterunforkrevision.FamilyCommittedReplayScopes, privaterunforkrevision.FamilyEventReceipts,
+			privaterunforkrevision.FamilyReplyContexts,
+		); err != nil {
+			return err
+		}
+		if err := story.Finalize(txctx); err != nil {
+			return err
+		}
+		if _, err := privaterunforkrevision.FinalizeSQLite(txctx, tx, effects); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return result, err
+	}
 	if err := handoff.Commit(); err != nil {
 		return result, err
 	}
@@ -346,6 +481,83 @@ func loadRunForkActivationLineage(ctx context.Context, lifecycle *privaterunlife
 	return lineage, nil
 }
 
+func loadSQLiteRunForkActivationLineage(ctx context.Context, lifecycle *privaterunlifecycle.RunLifecycleSQLiteOwner, tx *sql.Tx, forkRunID string) (runForkActivationLineage, error) {
+	snapshot, err := lifecycle.LoadSnapshotTx(ctx, tx, forkRunID)
+	if err != nil {
+		if errors.Is(err, runtimerunlifecycle.ErrRunNotFound) {
+			return runForkActivationLineage{}, fmt.Errorf("fork run %s not found", forkRunID)
+		}
+		return runForkActivationLineage{}, fmt.Errorf("load sqlite fork activation lifecycle: %w", err)
+	}
+	if snapshot.Origin.Kind() != runtimerunlifecycle.OriginForkMaterialization {
+		return runForkActivationLineage{}, fmt.Errorf("fork activation requires fork materialization origin; run %s has %s", forkRunID, snapshot.Origin.Kind())
+	}
+	lineage := runForkActivationLineage{
+		ForkRunID: snapshot.RunID, ForkStatus: string(snapshot.State), ForkBundleHash: snapshot.BundleHash,
+		SourceRunID: snapshot.Origin.SourceRunID(), ForkEventID: snapshot.Origin.SourceEventID(),
+	}
+	var forkEventTimeRaw any
+	err = tx.QueryRowContext(ctx, `
+		SELECT COALESCE(s.status, ''), COALESCE(s.bundle_hash, ''), COALESCE(e.event_name, ''), e.created_at
+		FROM runs s
+		LEFT JOIN events e ON e.run_id = s.run_id AND e.event_id = $2
+		WHERE s.run_id = $1
+	`, lineage.SourceRunID, lineage.ForkEventID).Scan(
+		&lineage.SourceRunStatus, &lineage.SourceBundleHash, &lineage.ForkEventName, &forkEventTimeRaw,
+	)
+	if err == sql.ErrNoRows {
+		return runForkActivationLineage{}, fmt.Errorf("fork activation requires source run")
+	}
+	if err != nil {
+		return runForkActivationLineage{}, fmt.Errorf("load sqlite fork activation lineage: %w", err)
+	}
+	forkEventTime, present, err := sqliteTimeValue(forkEventTimeRaw)
+	if err != nil {
+		return runForkActivationLineage{}, fmt.Errorf("decode sqlite fork activation event time: %w", err)
+	}
+	if lineage.SourceRunStatus == "" || !present {
+		return runForkActivationLineage{}, fmt.Errorf("fork activation requires source run and fork point event")
+	}
+	lineage.ForkEventTime = forkEventTime
+	rows, err := tx.QueryContext(ctx, `
+		SELECT CAST(entity_id AS TEXT), COALESCE(flow_instance, '')
+		FROM entity_state
+		WHERE run_id = $1
+		ORDER BY entity_id
+	`, lineage.ForkRunID)
+	if err != nil {
+		return runForkActivationLineage{}, fmt.Errorf("load sqlite fork materialized state facts: %w", err)
+	}
+	defer rows.Close()
+	flowSet := map[string]struct{}{}
+	sourceFlowSet := map[string]struct{}{}
+	for rows.Next() {
+		var entityID, flowInstance string
+		if err := rows.Scan(&entityID, &flowInstance); err != nil {
+			return runForkActivationLineage{}, fmt.Errorf("scan sqlite fork materialized state facts: %w", err)
+		}
+		if entityID = strings.TrimSpace(entityID); entityID != "" {
+			lineage.EntityIDs = append(lineage.EntityIDs, entityID)
+		}
+		if flowInstance = strings.TrimSpace(flowInstance); flowInstance != "" {
+			if _, ok := flowSet[flowInstance]; !ok {
+				flowSet[flowInstance] = struct{}{}
+				lineage.FlowInstances = append(lineage.FlowInstances, flowInstance)
+			}
+			if sourceFlow := runtimeflowidentity.SemanticScope(flowInstance); sourceFlow != "" {
+				sourceFlowSet[sourceFlow] = struct{}{}
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return runForkActivationLineage{}, fmt.Errorf("read sqlite fork materialized state facts: %w", err)
+	}
+	lineage.SourceFlows = stringSetValues(sourceFlowSet)
+	lineage.ForkBundleHash = strings.TrimSpace(lineage.ForkBundleHash)
+	lineage.SourceBundleHash = strings.TrimSpace(lineage.SourceBundleHash)
+	return lineage, nil
+}
+
 func lockRunForkSourceRevisionFrontier(ctx context.Context, tx *sql.Tx, lineage *runForkActivationLineage) error {
 	if lineage == nil {
 		return fmt.Errorf("fork activation requires lineage")
@@ -381,11 +593,40 @@ func lockRunForkSourceRevisionFrontier(ctx context.Context, tx *sql.Tx, lineage 
 	return nil
 }
 
+func lockSQLiteRunForkSourceRevisionFrontier(ctx context.Context, tx *sql.Tx, lineage *runForkActivationLineage) error {
+	if lineage == nil {
+		return fmt.Errorf("fork activation requires lineage")
+	}
+	if err := tx.QueryRowContext(ctx, `
+		SELECT MIN(revision)
+		FROM run_fork_fact_revisions
+		WHERE run_id = $1 AND family = 'events' AND fact_key = $2 AND present
+	`, lineage.SourceRunID, lineage.ForkEventID).Scan(&lineage.ForkEventRevision); err != nil {
+		return fmt.Errorf("resolve sqlite fork activation event revision: %w", err)
+	}
+	if lineage.ForkEventRevision <= 0 {
+		return fmt.Errorf("fork activation source event is not revisioned; recreate the store and retry")
+	}
+	var currentRevision int64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT last_revision FROM run_fork_revision_heads WHERE run_id = $1
+	`, lineage.SourceRunID).Scan(&currentRevision); err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("fork activation source revision frontier is missing; recreate the store and retry")
+		}
+		return fmt.Errorf("load sqlite fork activation source revision frontier: %w", err)
+	}
+	if currentRevision < lineage.ForkEventRevision {
+		return fmt.Errorf("fork activation source revision frontier is corrupt; recreate the store and retry")
+	}
+	return nil
+}
+
 func collectRunForkSourceAdvancedFacts(ctx context.Context, tx *sql.Tx, lineage runForkActivationLineage) ([]string, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT DISTINCT family
 		FROM run_fork_fact_revisions
-		WHERE run_id = $1::uuid
+		WHERE run_id = $1
 		  AND revision > $2
 		ORDER BY family
 	`, lineage.SourceRunID, lineage.ForkEventRevision)
@@ -453,8 +694,11 @@ func runForkSourceAdvancedCode(family string) (string, bool) {
 	}
 }
 
-func ensureRunForkActivationNoForkReplayState(ctx context.Context, tx *sql.Tx, forkRunID string) error {
-	hasDeliveries, err := postgresDeliveryAdapter.RunHasDeliveryObligations(ctx, tx, forkRunID)
+func ensureRunForkActivationNoForkReplayState(ctx context.Context, tx *sql.Tx, deliveries *storedelivery.Adapter, forkRunID string) error {
+	if deliveries == nil {
+		return fmt.Errorf("fork delivery inspection owner is required")
+	}
+	hasDeliveries, err := deliveries.RunHasDeliveryObligations(ctx, tx, forkRunID)
 	if err != nil {
 		return fmt.Errorf("check fork_deliveries_already_exist: %w", err)
 	}
@@ -465,10 +709,10 @@ func ensureRunForkActivationNoForkReplayState(ctx context.Context, tx *sql.Tx, f
 		code  string
 		query string
 	}{
-		{"fork_events_already_exist", `SELECT EXISTS (SELECT 1 FROM events WHERE run_id = $1::uuid)`},
-		{"fork_sessions_already_exist", `SELECT EXISTS (SELECT 1 FROM agent_sessions WHERE run_id = $1::uuid)`},
-		{"fork_conversation_audits_already_exist", `SELECT EXISTS (SELECT 1 FROM agent_conversation_audits WHERE run_id = $1::uuid)`},
-		{"fork_turns_already_exist", `SELECT EXISTS (SELECT 1 FROM agent_turns WHERE run_id = $1::uuid)`},
+		{"fork_events_already_exist", `SELECT EXISTS (SELECT 1 FROM events WHERE run_id = $1)`},
+		{"fork_sessions_already_exist", `SELECT EXISTS (SELECT 1 FROM agent_sessions WHERE run_id = $1)`},
+		{"fork_conversation_audits_already_exist", `SELECT EXISTS (SELECT 1 FROM agent_conversation_audits WHERE run_id = $1)`},
+		{"fork_turns_already_exist", `SELECT EXISTS (SELECT 1 FROM agent_turns WHERE run_id = $1)`},
 	}
 	for _, check := range checks {
 		var exists bool

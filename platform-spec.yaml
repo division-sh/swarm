@@ -6345,8 +6345,15 @@ engine:
       run_fork:
         method: run.fork
         selected_capability: RunForkAvailability plus RunFork
-        postgres_support: supported through the selected-contract Postgres run-fork runtime owner
-        sqlite_support: unsupported; SQLite omits selected-contract run.fork runtime lifecycle mutation until separately promoted
+        postgres_support: supported through the backend-neutral selected-contract run-fork owner and private PostgreSQL transaction adapters
+        sqlite_support: supported for disk-loaded same-bundle local/dev runtimes through the same backend-neutral selected-contract run-fork owner and private SQLite transaction adapters
+        semantic_owner: internal/runtime/runforkexecution plus the closed internal/store/selected RunFork capability
+        boundary: >
+          Both selected backends expose the same planning, historical readback, materialization, source-freeze,
+          decision/effect gate, binding, route-recovery, activation, selected execution, delivery/settlement,
+          cleanup, and terminal public-readback contract. Backend SQL is private adapter implementation and does
+          not own fork meaning. SQLite DB-loaded --bundle-hash boot remains unsupported, and changed-bundle or
+          post-boot Dynamic Load remains split; neither may be inferred or emulated by the run.fork capability.
       runtime_nuke:
         method: runtime.nuke
         selected_capability: apiv1.DestructiveResetCoordinator
@@ -16136,10 +16143,10 @@ platform_tables:
           MarkTerminalRun accepts only failed and cancelled transitions, with typed failure evidence where the status
           requires it, and returns the authoritative persisted snapshot and exact mutation disposition from one named
           selected-store transaction. It rejects completed and forked because generic terminalization owns neither
-          successful-completion eligibility nor selected-fork source lineage. PostgreSQL acquires the run row before
-          delivery rows so concurrent claim/settlement and terminalization use one lock order. The PostgreSQL-only
-          selected-fork source operation owns the exact forked transition and continuation pointer; SQLite returns a
-          typed unsupported result and never emulates that operation.
+          successful-completion eligibility nor selected-fork source lineage. Each selected-store adapter acquires the
+          run row before delivery rows so concurrent claim/settlement and terminalization use one lock order. The
+          selected-fork source operation owns the exact forked transition and continuation pointer on PostgreSQL and
+          SQLite; no generic terminal writer may emulate that operation.
         normal_completion_operation: >
           The durable completion-candidate executor is the sole successful-completion writer. For an ordinary run, one
           selected-store transaction locks the exact current candidate revision, observes selected-store time, and
@@ -16194,7 +16201,7 @@ platform_tables:
             that can expose terminal eligibility must choose immediate request, exact future request, deferred paused,
             terminal clear, or a structurally enforced proof that eligibility cannot change.
           terminal_absorption: >
-            Completed, failed, cancelled, and PostgreSQL forked transitions clear completion_due_at in the same update
+            Completed, failed, cancelled, and selected-store forked transitions clear completion_due_at in the same update
             that establishes terminal status. Exact duplicate terminal writes preserve the original snapshot and clear
             only an impossible stale current marker; conflicting terminal writes fail closed. Late blocker settlement
             returns absorbed_terminal and cannot reopen, revise, or otherwise mutate the terminal run.
@@ -16255,8 +16262,7 @@ platform_tables:
             future wake before readiness.
           backend_contract: >
             SQLite and PostgreSQL share the typed request, execution, stale-revision, rollback, readback, startup,
-            retirement, and late-settlement contract. Selected-fork source terminalization remains PostgreSQL-only and
-            SQLite proves the typed unsupported result.
+            retirement, late-settlement, and selected-fork source-terminalization contract.
           fresh_schema_only: >
             Existing selected stores are unsupported. No migration, legacy candidate adoption, trigger backfill,
             compatibility reader, fallback completion path, dual writer, or old callback behavior exists.
@@ -17945,7 +17951,7 @@ multi_bundle_persistence:
       split_boundaries:
         - DB-loaded same-bundle source/fork loaders consume the persisted bundle catalog runtime source owner.
         - New-work routing and bundle_hash admission remain #1022.
-        - SQLite public bundle.register is implemented by #2359; selected-contract run.fork remains the final #2276 child. Backend-neutral capture is implemented by #2272.
+        - SQLite public bundle.register is implemented by #2359 and disk-loaded same-bundle selected-contract run.fork parity is implemented by #2361. Backend-neutral capture is implemented by #2272.
         - Bundle delete remains outside this projection.
         - SQLite DB-loaded `--bundle-hash` bundle-catalog boot remains unsupported unless separately gated.
     serve_db_loaded_runtime_source:
@@ -18266,10 +18272,12 @@ multi_bundle_persistence:
           cli_flag: --idempotency-key <key>
       same_bundle_rule: >
         If bundle_hash is omitted or equals the source run bundle_hash, same-bundle fork admission consumes the source
-        bundle row when available. Disk-loaded selected_contracts execution consumes the existing runtime ownership.
-        DB-loaded selected_contracts execution must load source bytes from the persisted bundle catalog runtime source
-        owner for the source run bundle_hash, verify the reconstructed hash, and stamp fork-created runs with
-        bundle_source=persisted and that canonical bundle_hash.
+        bundle row when available. Disk-loaded selected_contracts execution consumes the existing runtime ownership and
+        is supported through the same complete selected-contract lifecycle on PostgreSQL and local/dev SQLite. DB-loaded
+        selected_contracts execution on a supported boot surface must load source bytes from the persisted bundle catalog
+        runtime source owner for the source run bundle_hash, verify the reconstructed hash, and stamp fork-created runs
+        with bundle_source=persisted and that canonical bundle_hash. SQLite DB-loaded --bundle-hash boot is not a supported
+        surface and fails closed; same-bundle SQLite fork support must not infer or construct that loader.
       cross_bundle_rule: >
         If bundle_hash differs from the source run bundle_hash, the target hash selects an already loaded/boot-pinned
         RuntimeContextManager BundleContext under current Option A. The fork loads target bundle bytes from the persisted
@@ -18283,6 +18291,13 @@ multi_bundle_persistence:
       unavailable_rule: >
         Source runs with bundle_source ephemeral or deleted return BUNDLE_UNAVAILABLE for fork admission because
         the server lacks authoritative persisted bundle bytes.
+      selected_store_proof: >
+        The shared served run-fork lifecycle scenario executes swarm run fork over /v1/rpc on fresh PostgreSQL and
+        SQLite selected stores, proves exact idempotent replay, and reads terminal run, entity, event, and conversation
+        state through public API/CLI owners. The selected-store persistence matrix separately proves explicit/latest
+        planning, twelve-family historical reconstruction, exact snapshots, active/paused source freeze, rollback,
+        cancellation, retained cleanup evidence, and missing-cleanup idempotency. Same-invocation --dev SQLite composition
+        is an additional process proof, not authority for DB-loaded or changed-bundle loading.
   cli_surface:
     publication_status: bundle_inventory_register_envelope_directory_delete_run_fork_and_boot_pinned_serve_bundle_hash_implemented_other_cli_children_pending
     bundle_commands_supported:
@@ -21287,10 +21302,11 @@ test_specification:
         The 94 ordinary event-driven runtime fixtures execute from one typed
         transcript on a PostgreSQL source and fresh PostgreSQL and SQLite
         destinations, including runtime reconstruction and selected-store
-        reopen proof. The two selected-contract run-fork fixtures are explicitly
-        PostgreSQL product proofs. SQLite run.fork remains typed unsupported under
-        storage_backends.runtime_store_selection.optional_product_capability_matrix
-        and its fail-closed capability tests receive no fork-execution credit.
+        reopen proof. The two catalog selected-contract run-fork fixtures remain
+        PostgreSQL corpus proofs and do not independently claim backend parity.
+        SQLite run.fork product support is instead established by the shared
+        served selected-store lifecycle and persistence matrices named by
+        engine.runtime_core_persistence_store_contracts.optional_public_mutating_backend_support.run_fork.
         The direct tool row and boot-only row retain separate supported proofs
         and receive no empty-journal replay credit.
       parent_tail: >
@@ -21669,9 +21685,9 @@ test_specification:
         Restart and replacement publish the effective-source identity and profile catalog atomically with the runtime context.
         A predecessor run cannot execute under a same-base but different effective identity. Failed replacement leaves the
         predecessor authoritative. An already-admitted runtime context supplies its exact module/source/identity to selected-
-        contract execution; disk/catalog loaders compile through the same projection and fail closed when required external
-        provenance is unavailable. PostgreSQL fork inherits exact profile bytes only when effective identities match before
-        materialization; SQLite fork remains unsupported and non-mutating.
+          contract execution; disk/catalog loaders compile through the same projection and fail closed when required external
+          provenance is unavailable. PostgreSQL and SQLite selected-contract forks inherit exact profile bytes only when
+          effective identities match before materialization.
       archetype_admission: >-
         Every admitted `swarm new` archetype contains an authored derived smoke scenario, verifies, boots under mock_only, and
         runs through the public scenario runner with zero credentials and zero Docker in under 60 seconds. `swarm new` writes
@@ -37602,7 +37618,7 @@ llm_completion_execution_authority:
     lifecycle: prepared -> running -> quiesced -> closed; prepared or running may become failed, then closed. Successful quiescence consumes one store-owned current-authority guard that atomically binds execution ID, fork run, generation, all four fingerprints, owner/fence, database-time lease freshness, and absence of live child attempts before transition.
     uniqueness: Exactly one non-closed current generation exists per fork, including when no budget cap applies. Fingerprint conflict, stale generation/owner/fence, quiesced/terminal reuse, and second-process claim fail before provider launch.
     cleanup: Mutable cleanup quiesces/closes the authority, retains the cancelled runs parent tombstone, and preserves authority, effect attempt, turn/usage, spend, terminal evidence, and their foreign-key validity.
-    backend: Authority schema/issuance/fencing/settlement/recovery are parity obligations on SQLite and PostgreSQL. Full served/standalone selected-fork runtime and process-competition proof are PostgreSQL-only until separately gated.
+    backend: Authority schema/issuance/fencing/settlement/recovery and the selected-contract served lifecycle are parity obligations on SQLite and PostgreSQL. SQLite support is the selected local/dev single-process surface; cross-process SQLite competition remains unsupported and receives no emulation, while PostgreSQL retains the process-competition proof.
   forkchat:
     group_owner: conversation_fork_turns is preallocated before provider authorization and owns request occurrence, actor/hash/idempotency binding, group fence, terminal transcript, abandonment, and no-repeat recovery.
     child_owner: conversation_fork_turn_completions stores one immutable ordered result per provider attempt and remains valid across later tool rounds or failures.

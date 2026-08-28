@@ -143,7 +143,7 @@ func loadRunForkProposedEffectAuthority(ctx context.Context, tx *sql.Tx, request
 		SELECT c.status, COALESCE(c.verdict, ''), p.state
 		FROM proposed_effect_continuations p
 		JOIN decision_cards c ON c.card_id = p.card_id
-		WHERE p.request_event_id = $1::uuid
+		WHERE p.request_event_id = $1
 	`, strings.TrimSpace(requestEventID)).Scan(&status, &verdict, &state)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
@@ -171,7 +171,7 @@ func loadRunForkEntityGenerations(ctx context.Context, tx *sql.Tx, forkRunID, en
 		return nil, nil
 	}
 	var raw []byte
-	if err := tx.QueryRowContext(ctx, `SELECT accumulator FROM entity_state WHERE run_id = $1::uuid AND entity_id = $2::uuid`, forkRunID, entityID).Scan(&raw); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT accumulator FROM entity_state WHERE run_id = $1 AND entity_id = $2`, forkRunID, entityID).Scan(&raw); err != nil {
 		return nil, fmt.Errorf("load fork-local loop state for entity %s: %w", entityID, err)
 	}
 	state := map[string]any{}
@@ -261,9 +261,9 @@ func loadRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, request
 	var resultPayload, failure []byte
 	var completedAt sql.NullTime
 	err := tx.QueryRowContext(ctx, `
-		SELECT status, execution_mode, COALESCE(result_event_type, ''), COALESCE(result_payload, '{}'::jsonb),
-		       COALESCE(failure, 'null'::jsonb), input_hash, started_at, completed_at, updated_at
-		FROM activity_attempts WHERE request_event_id = $1::uuid
+		SELECT status, execution_mode, COALESCE(result_event_type, ''), COALESCE(result_payload, '{}'),
+		       COALESCE(failure, 'null'), input_hash, started_at, completed_at, updated_at
+		FROM activity_attempts WHERE request_event_id = $1
 	`, requestEventID).Scan(&evidence.Status, &evidence.ExecutionMode, &evidence.ResultEventType, &resultPayload, &failure, &evidence.InputHash, &evidence.StartedAt, &completedAt, &evidence.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return evidence, fmt.Errorf("activity request %s has no recorded attempt evidence for fork reuse", requestEventID)
@@ -332,17 +332,17 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, story r
 			failure, input_hash, loop_generation, loop_stage, reply_context_id,
 			started_at, completed_at, updated_at
 		) VALUES (
-			$1::uuid, $2::uuid, $25, NULLIF($3, '')::uuid, NULLIF($4, '')::uuid, NULLIF($5, '')::uuid, NULLIF($24, ''),
+			$1, $2, $25, $3, $4, $5, $24,
 			$6, $7, $8, $9, $10, 1, $11,
-			$12, $13, $14::uuid, $15, $16::jsonb,
-			$17::jsonb, $18, $19::jsonb, NULLIF($20, ''), NULL,
+			$12, $13, $14, $15, $16,
+			$17, $18, $19, $20, NULL,
 			$21, $22, $23
 		) ON CONFLICT (request_event_id) DO NOTHING
-	`, requestEventID, forkRunID, request.SourceEventID, request.ParentEventID, request.EntityID,
+	`, requestEventID, forkRunID, nullableRunForkString(request.SourceEventID), nullableRunForkString(request.ParentEventID), nullableRunForkString(request.EntityID),
 		request.NodeID, request.HandlerEventKey, request.ActivityID, request.Tool, request.EffectClass, evidence.Status,
 		request.SuccessEvent, request.FailureEvent, resultEventID, evidence.ResultEventType, string(resultPayload),
-		failure, evidence.InputHash, string(generationJSON), request.LoopStage,
-		evidence.StartedAt, evidence.CompletedAt, evidence.UpdatedAt, strings.TrimSpace(flowInstance), evidence.ExecutionMode)
+		failure, evidence.InputHash, string(generationJSON), nullableRunForkString(request.LoopStage),
+		evidence.StartedAt, evidence.CompletedAt, evidence.UpdatedAt, nullableRunForkString(flowInstance), evidence.ExecutionMode)
 	if err != nil {
 		return fmt.Errorf("copy fork-local activity evidence %s: %w", request.ActivityID, err)
 	}
@@ -353,7 +353,7 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, story r
 	var gotRunID, gotStatus, gotResultID string
 	var gotExecutionMode executionmode.Mode
 	var gotGeneration []byte
-	if err := tx.QueryRowContext(ctx, `SELECT run_id::text, execution_mode, status, result_event_id::text, loop_generation FROM activity_attempts WHERE request_event_id = $1::uuid`, requestEventID).
+	if err := tx.QueryRowContext(ctx, `SELECT CAST(run_id AS TEXT), execution_mode, status, CAST(result_event_id AS TEXT), loop_generation FROM activity_attempts WHERE request_event_id = $1`, requestEventID).
 		Scan(&gotRunID, &gotExecutionMode, &gotStatus, &gotResultID, &gotGeneration); err != nil {
 		return fmt.Errorf("confirm fork-local activity evidence %s: %w", request.ActivityID, err)
 	}
@@ -388,6 +388,14 @@ func copyRunForkActivityAttemptEvidence(ctx context.Context, tx *sql.Tx, story r
 		},
 		Failure: canonicalFailure,
 	})
+}
+
+func nullableRunForkString(value string) any {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 func generationsForRunForkActivity(generation attemptgeneration.Generation) []attemptgeneration.Generation {

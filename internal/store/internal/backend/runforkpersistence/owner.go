@@ -174,6 +174,7 @@ func workflowCommitJSONEqual(actual, expected []byte) bool {
 }
 
 var postgresDeliveryAdapter = mustDeliveryAdapter(storedelivery.DialectPostgres)
+var sqliteDeliveryAdapter = mustDeliveryAdapter(storedelivery.DialectSQLite)
 
 func mustDeliveryAdapter(dialect storedelivery.Dialect) *storedelivery.Adapter {
 	adapter, err := storedelivery.NewAdapter(dialect)
@@ -185,6 +186,7 @@ func mustDeliveryAdapter(dialect storedelivery.Dialect) *storedelivery.Adapter {
 
 func (s *RunForkPostgresOwner) requireCurrentSchema() error { return s.requireCurrent() }
 func (s *RunForkSQLiteOwner) requireCurrentSchema() error   { return s.requireCurrent() }
+func (s *RunForkSQLiteOwner) now() time.Time                { return s.nowFn().UTC() }
 
 func (s *RunForkSQLiteOwner) runRuntimeMutation(ctx context.Context, label string, operation func(context.Context, *sql.Tx) error) error {
 	if err := s.requireCurrentSchema(); err != nil {
