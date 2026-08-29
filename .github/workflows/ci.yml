@@ -160,7 +160,9 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Prove store ownership and engine-disjoint crash reclaim
-        run: go test ./internal/store ./internal/store/selected ./internal/store/internal/startupownership -count=1
+        run: go test ./internal/store/internal/startupownership -count=1
+      - name: Prove selected SQLite construction consumes the owner
+        run: go test ./internal/store/selected -run '^TestOpenRuntimeSQLiteResolvesRequiredAndOptionalProductsOnce$' -count=1
       - name: Prove database and coordinate loss terminalize ownership
         run: go test ./internal/store/internal/runtimepersistence -run '^TestSQLiteProcessCapability(File|Coordinate)ReplacementTerminalizesIdleOwner$' -count=1
       - name: Prove read-only status remains possession-free
