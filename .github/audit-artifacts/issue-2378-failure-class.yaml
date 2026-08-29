@@ -1,0 +1,516 @@
+version: 1
+kind: pre_implementation_failure_class_artifact
+issue: 2378
+audit_base: 1c20c23a4bdeb8eec98e0d4953d223792d4fa36e
+phase: pre_implementation_gate_cycle_1
+implementation_frozen: true
+
+binding_context:
+  issue: https://github.com/division-sh/swarm/issues/2378
+  production_discovery: https://github.com/division-sh/swarm/pull/2374#pullrequestreview-5052355854
+  fixture_proof_owner: 2379
+  fixture_proof_pr: 2374
+  declaration_topology_parent: 2125
+  declaration_topology_pr: 2235
+  startup_reconstruction_sibling: 2351
+  architecture_parent: 2250
+  architecture_parent_update: https://github.com/division-sh/swarm/issues/2250#issuecomment-5459800084
+  watchlist_commit: 1aef708844180ee6cf397b9b2ceece4a51a9a519
+  exact_spec_refs:
+    - platform-spec.yaml#agent_topology_authority.source_set
+    - platform-spec.yaml#agent_topology_authority.admission
+    - platform-spec.yaml#agent_topology_authority.process_capability.lifecycle_reconciliation
+    - platform-spec.yaml#agent_lifecycle_authority.durable_cell
+    - platform-spec.yaml#agent_lifecycle_authority.process_execution_projection
+    - platform-spec.yaml#agent_lifecycle_authority.transitions
+  guidelines:
+    - /Users/youmew/dev/swarm-docs/docs/IMPLEMENTER_GUIDELINES.md
+    - /Users/youmew/dev/swarm-docs/docs/SEMANTIC_DRIFT.md
+
+class_model:
+  issue_category: p1_runtime_lifecycle_selected_store_semantic_drift_architecture_and_backend_parity
+  observed_symptom: >-
+    Live complete-source-set replacement rotates each surviving runtime to an
+    admitted successor generation grant, but the prepared manager helper
+    inventories only StaticDeclarationPlan cells. A surviving durable
+    FlowReadinessPlan cell can retain the predecessor process binding and remain
+    reachable through an already-published lifecycle route.
+  exact_concepts:
+    - complete_durable_lifecycle_survivor_census
+    - sealed_variant_specific_topology_rebind
+    - successor_runtime_generation_process_binding
+    - process_local_lifecycle_projection_publication
+    - creator_replacer_destroyer_transition_serialization
+    - prepared_and_partial_progress_execution_admission_fencing
+    - deterministic_partial_rebind_replay
+    - aggregate_cross_runtime_convergence_before_execution_reopening
+  chosen_working_failure_class: live_source_set_transition_complete_durable_survivor_rebind_and_execution_admission_fencing
+  immediate_parent_failure_class: mixed_authority_survivor_generation_reconciliation
+  parent_failure_class: declaration_source_set_and_lifecycle_process_authority_atomic_publication
+  broadest_parent_failure_class: multi_phase_runtime_topology_and_lifecycle_orchestration
+  architecture_parent_issue: 2250
+  framing_before_audit: too_narrow_flow_cell_write_only
+  framing_after_audit: broad_enough_after_absorbing_census_creator_serialization_and_retained_aggregate_execution_fence
+  class_stop_reason: >-
+    Live replacement, predecessor rollback, and bundle-delete survivor replay
+    share one complete source-set transition, one lifecycle census, one runtime
+    generation grant relation, and one all-survivor publication boundary. Cold
+    startup takeover, removed-source retirement, empty destructive reset, and
+    ephemeral execution have different operation and lifetime owners.
+  entry_point_not_boundary: >-
+    PrepareStaticTopologySourceSetRebind and the fixture failure were entry
+    points. The audit covers every complete-source-set writer, every live
+    survivor producer and lifecycle consumer, process and route selection,
+    success, abort, partial progress, rollback, retained retry, restart/readback,
+    multi-context publication, and both selected stores.
+  intended_closure_level: chosen_working_failure_class_eliminated
+  chosen_class_closure_commitment: true
+  closure_feasible_in_one_pr: true
+  local_endpoint_fix_leaves_same_concept_interpreters: true
+  complete_bounded_fix_leaves_same_concept_interpreters: false
+
+governing_contract:
+  already_binding:
+    - one_complete_sorted_source_set_and_five_closed_writers
+    - every_durable_static_and_flow_readiness_cell_carries_exact_current_process_binding
+    - complete_lifecycle_census_is_selected_store_owned_and_not_a_hydration_or_status_projection
+    - source_set_rebind_preserves_lifecycle_occurrence_phase_run_mode_and_config_revision
+    - process_local_topology_and_binding_publish_only_after_every_durable_rebind_commits
+    - durable_partial_progress_is_deterministic_idempotent_and_resumable
+    - predecessor_bound_stale_and_partially_rebound_survivors_are_unselectable
+    - ephemeral_execution_is_nonpersistable
+    - fresh_store_only_without_migration_inference_or_compatibility
+  same_pr_spec_clarification_required:
+    stale_text:
+      - source_set_ordering_names_only_static_lifecycle_cells_during_survivor_reservation
+      - source_set_ordering_says_each_survivor_replaces_admission_without_distinguishing_sealed_variants
+    replacement_text_semantics:
+      - reserve_every_nonterminated_durable_static_or_flow_readiness_survivor
+      - static_survivor_receives_successor_StaticDeclarationPlan
+      - flow_readiness_survivor_preserves_exact_FlowReadinessPlan
+      - both_variants_receive_successor_process_binding
+      - aggregate_execution_admission_reopens_only_after_every_runtime_converges_and_publication_succeeds
+    decision_status: proposed_here_and_requires_independent_gate_before_implementation
+
+binding_design:
+  canonical_census:
+    owner: AgentLifecycleCellCensus
+    operation: ListDurableAgentLifecycleStates
+    source_selection: >-
+      Consume the complete validated census and select the manager's exact
+      BundleSourceFact from canonical ProcessExecutionBinding fields. Admission
+      JSON, HiredBy, identity syntax, flow-path shape, process hydration lists,
+      and lifecycle status filters are not census owners.
+    row_validation:
+      - identity_is_canonical_and_unique
+      - topology_admission_is_valid_and_matches_persisted_authority_kind_and_lifetime
+      - execution_lifetime_is_durable_managed
+      - process_binding_is_valid
+      - source_coordinate_matches_exact_runtime_or_is_a_different_context
+  process_cross_check:
+    rules:
+      - every_exact_source_nonterminated_durable_row_has_one_exact_process_local_cell
+      - every_exact_source_nonterminated_durable_process_cell_has_one_census_row
+      - lifecycle_identity_epoch_generation_phase_run_mode_config_revision_topology_and_binding_are_compared
+      - terminated_rows_are_census_visible_and_inert
+      - ephemeral_process_cells_are_excluded_and_cannot_appear_in_the_durable_census
+    missing_process_cell: fail_preparation_before_source_set_mutation
+    reconstruction: forbidden_in_live_replacement_and_owned_by_2351_startup
+  per_variant_target:
+    static_declaration_plan:
+      topology: exact_successor_static_admission_for_the_same_source_coordinate
+      process_binding: exact_successor_runtime_generation_grant
+      preserved:
+        - lifecycle_epoch
+        - lifecycle_generation
+        - lifecycle_phase
+        - lifecycle_run_mode
+        - config_revision
+    flow_readiness_plan:
+      topology: exact_existing_sealed_readiness_admission
+      process_binding: exact_successor_runtime_generation_grant
+      preserved:
+        - lifecycle_epoch
+        - lifecycle_generation
+        - lifecycle_phase
+        - lifecycle_run_mode
+        - config_revision
+        - run_id
+        - instance_path
+        - plan_fingerprint
+  transition_serialization:
+    owner: existing_AgentManager_lifecycle_coordinator
+    publication_lock: executionPublishMu
+    identity_lock: agentLifecycleCell.opMu
+    required_creator_change: registerExecutionWithTopology_consumes_existing_publication_lock
+    already_serialized:
+      - start_restart_reconfigure_replacement_via_replaceExecutionTargetConfigWithTopology
+      - teardown_self_release_and_delivery_acquisition_via_per_identity_operation_lock
+    rule: >-
+      Preparation acquires creator publication serialization before the durable
+      census and holds every inventoried identity operation lock before the
+      complete source-set head can mutate. A creator cannot publish a new
+      durable cell between census and head mutation.
+  aggregate_execution_fence:
+    owner: existing_prepared_RuntimeContextManager_to_Runtime_to_AgentManager_source_set_transition
+    behavior:
+      - close_new_execution_selection_before_source_set_mutation
+      - preserve_already_accepted_work_and_existing_route_identity
+      - make_dequeued_delivery_wait_or_fail_as_unaccepted_without_success_settlement
+      - reject_new_direct_execution_and_lifecycle_mutation_with_typed_transition_conflict
+      - reopen_predecessor_execution_on_pre_head_abort_only
+      - retain_fence_after_head_commit_or_any_partial_survivor_failure
+      - reopen_only_after_every_runtime_durable_and_process_projection_converges_and_aggregate_publication_succeeds
+    forbidden_shortcuts:
+      - context_visibility_only
+      - remove_and_recreate_EventBus_routes
+      - mark_execution_permanently_fenced_and_kill_the_existing_loop
+      - settle_waiting_delivery_as_success_or_dead_letter_because_transition_is_pending
+      - reopen_an_earlier_runtime_before_a_later_runtime_converges
+      - infer_completion_from_the_current_source_set_head_alone
+  durable_commit_and_replay:
+    transaction_scope: one_existing_selected_store_lifecycle_transition_per_cell
+    no_cross_row_transaction: true
+    operation_identity: deterministic_from_exact_source_set_operation_scope_plan_identity_and_lifecycle_coordinate
+    target_binding: exact_successor_generation_grant
+    replay_coordinates:
+      - exact_predecessor_binding_for_first_or_partially_uncommitted_row
+      - exact_successor_binding_for_already_committed_row
+    reject:
+      - foreign_process_authority_owner_or_boot
+      - foreign_source_or_runtime_instance
+      - non_adjacent_runtime_generation
+      - changed_lifecycle_occurrence
+      - changed_topology_or_config_revision
+      - conflicting_operation_id_or_request_hash
+    process_publication: all_or_none_per_runtime_after_every_row_commit
+    aggregate_execution_publication: all_or_none_across_every_surviving_runtime
+
+full_execution_paths:
+  live_runtime_replacement:
+    - step: settle_any_retained_prior_source_set_transition
+      gate: same_chosen_class_precondition
+    - step: compile_complete_candidate_source_set_from_all_contexts
+      gate: different_semantic_concept_existing_source_set_plan_owner
+    - step: withdraw_and_quiesce_the_replaced_runtime
+      gate: different_semantic_concept_runtime_replacement_lifecycle
+    - step: fence_every_surviving_context_and_close_aggregate_execution_admission
+      gate: same_chosen_class
+    - step: census_cross_check_and_lock_every_durable_survivor_in_each_runtime
+      gate: same_chosen_class
+    - step: commit_ReplaceSourceSet
+      gate: existing_canonical_head_writer_consumed_by_chosen_class
+    - step: install_and_start_candidate_runtime
+      gate: different_semantic_concept_candidate_generation
+    - step: issue_successor_grant_and_commit_every_survivor_rebind
+      gate: same_chosen_class
+    - step: publish_process_local_topology_and_binding_per_runtime
+      gate: same_chosen_class
+    - step: verify_all_runtime_survivors_then_publish_context_visibility_and_open_execution
+      gate: same_chosen_class
+    - step: publish_candidate_and_reconcile_public_ingress
+      gate: different_semantic_concept_existing_replacement_publication_owner
+  rollback_after_candidate_head:
+    - step: retain_exact_candidate_and_predecessor_plans_and_restore_operation
+      gate: existing_typed_rollback_owner
+    - step: prepare_predecessor_survivors_and_close_execution_admission
+      gate: same_chosen_class
+    - step: commit_RestoreSourceSet
+      gate: existing_canonical_head_writer_consumed_by_chosen_class
+    - step: rebind_every_survivor_to_exact_predecessor_successor_grant_relation
+      gate: same_chosen_class
+    - step: keep_all_survivors_unselectable_on_partial_failure_and_resume_exact_retry
+      gate: same_chosen_class
+    - step: publish_predecessor_only_after_aggregate_convergence
+      gate: same_chosen_class
+  bundle_delete_with_survivors:
+    - step: quiesce_and_terminalize_the_removed_runtime
+      gate: different_semantic_concept_source_set_retire_and_bundle_delete
+    - step: prepare_and_fence_every_surviving_context
+      gate: same_chosen_class
+    - step: atomically_commit_bundle_delete_final_mutation_and_source_set_removal
+      gate: existing_bundle_delete_owner
+    - step: commit_or_resume_exact_survivor_rebind
+      gate: same_chosen_class
+    - step: block_reload_replacement_delete_and_close_until_pending_refresh_converges
+      gate: same_chosen_class_existing_boundary_consumers
+  cold_restart:
+    - step: process_takeover_censuses_and_rebinds_every_durable_cell
+      gate: different_semantic_concept_closed_by_2351_and_existing_startup_owner
+    - step: exact_source_dynamic_topology_reconstruction_before_autonomous_work
+      gate: different_semantic_concept_closed_by_2351
+
+canonical_owners:
+  - concept: complete_source_set_head_and_diff
+    owner: startupownership.ProcessCapability_closed_source_set_operation_family
+    real_semantic_owner: true
+    touched_consumers:
+      - runtime_project_supervisor_replacement_and_restore
+      - process_owned_bundle_delete_finalizer
+      - startup_install_restore
+      - destructive_reset_topology
+  - concept: complete_durable_lifecycle_survivor_census
+    owner: AgentLifecycleCellCensus_selected_store_role
+    real_semantic_owner: true
+    touched_consumers:
+      - startup_process_takeover_already_consumes
+      - live_source_set_transition_moves_to_owner
+      - fixture_preflight_already_consumes
+  - concept: lifecycle_transition_and_process_projection
+    owner: AgentManager_agentLifecycleCoordinator_plus_selected_store_CommitAgentLifecycleTransition
+    real_semantic_owner: true
+    touched_consumers:
+      - static_and_flow_registration
+      - start_restart_reconfigure
+      - source_set_rebind_and_retire
+      - teardown_self_release_shutdown_reset
+      - direct_and_delivery_execution_acquisition
+  - concept: aggregate_survivor_visibility_and_retry
+    owner: RuntimeContextManager_PreparedRuntimeSourceSetTransition
+    real_semantic_owner: true
+    touched_consumers:
+      - replacement_success
+      - predecessor_rollback
+      - pending_replacement_recovery
+      - bundle_delete_and_replay
+      - process_close_reload_and_later_operation_boundaries
+  - concept: sealed_topology_variant
+    owner: agenttopology.Admission
+    real_semantic_owner: true
+    touched_consumers:
+      - static_admission_target_derivation
+      - flow_readiness_topology_preservation
+      - durable_census_validation
+      - lifecycle_transition_request_hash_and_readback
+  - concept: exact_generation_route_and_delivery_handoff
+    owner: EventBus_exact_lifecycle_route_handle_plus_lifecycle_execution_lease
+    real_semantic_owner: true
+    touched_consumers:
+      - subscribed_delivery
+      - identity_owned_delivery
+      - direct_execution
+      - pending_delivery_replay
+
+systematic_consumption_audit:
+  source_set_writers:
+    InstallCompleteSourceSet: different_startup_operation_before_live_runtime_publication
+    ReplaceSourceSet: same_chosen_class_live_replacement_head_writer
+    RestoreSourceSet: same_chosen_class_live_rollback_head_writer
+    RemoveBundleSource: same_chosen_class_only_for_surviving_context_rebind_removed_cell_uses_source_set_retire
+    ApplyDestructiveResetTopology: different_empty_plan_operation_after_runtime_quiescence_with_no_survivors
+  survivor_authority_variants:
+    StaticDeclarationPlan: moved_from_static_only_helper_to_complete_survivor_owner
+    FlowReadinessPlan: moved_to_complete_survivor_owner_preserving_exact_admission
+    EphemeralExecution: different_nonpersistable_lifetime_and_excluded
+    terminated_durable_cell: different_inert_terminal_evidence_but_census_visible
+    failed_durable_cell: same_chosen_class_rebound_without_becoming_executable
+    registered_durable_cell: same_chosen_class
+    running_durable_cell: same_chosen_class
+  lifecycle_entrances:
+    registerExecutionWithTopology: moves_to_existing_execution_publication_serialization_and_transition_admission
+    registerExecution: delegates_to_registerExecutionWithTopology
+    registerExecutableAgentLifecycle: delegates_to_registerExecutionWithTopology
+    adoptPersistedAgentForLifecycle: delegates_to_registerExecutionWithTopology
+    adoptPersistedAgentLifecycleOnly: delegates_to_registerExecutionWithTopology
+    replaceExecutionTargetConfigWithTopology: already_consumes_execution_publication_and_per_identity_locks_add_transition_conflict_check
+    start_restart_reconfigure: already_delegate_to_replacement_owner_add_transition_conflict_check
+    teardown_self_release: already_consume_per_identity_lock_add_transition_conflict_check_or_retirement_precedence
+    shutdown_reset: different_manager_terminal_transition_must_not_reopen_or_bypass_pending_source_set_fence
+    beginRun: different_manager_occurrence_start_already_consumes_execution_publication_lock
+  execution_and_route_consumers:
+    acquireDeliveryExecution: moves_to_retry_aware_source_set_transition_admission
+    acquireExecutionIdentity: moves_to_fail_closed_source_set_transition_admission
+    executionSnapshotByIdentity: moves_to_nonselectable_transition_projection_for_execution_bearing_callers
+    executionIdentities_and_executionConfigs: observation_consumers_must_not_mint_execution_authority
+    executableReadinessByIdentity: moves_to_transition_unavailable_result
+    existing_EventBus_route_handle: already_exact_generation_owned_and_preserved_not_replaced
+    RuntimeContextManager_AcquireRun_AcquireIngress_AcquireBundleHash: already_consume_aggregate_context_visibility_fence
+  operation_boundaries:
+    runtime_replacement: already_uses_PrepareSourceSetTransition_move_complete_survivor_owner_under_it
+    retained_replacement_rollback: already_uses_exact_PrepareSourceSetTransition_and_pending_retry
+    bundle_delete_apply_and_replay: already_use_prepare_and_pending_transition_move_mixed_survivor_proof_here
+    reload_replacement_later_delete_close: already_settle_pending_transition_before_new_operation
+    startup_takeover: already_consumes_complete_census_different_operation
+    dynamic_readiness_source_revision: different_topology_plan_owner_does_not_change_complete_source_set
+    selected_fork: different_ephemeral_owner
+
+old_non_authoritative_paths:
+  - PreparedStaticTopologySourceSetRebind_as_the_complete_survivor_owner
+  - PreparedStaticSourceSetGenerationRefresh_static_only_contract_and_names
+  - resolvedStaticTopologyRecords_as_the_live_survivor_census
+  - process_local_cells_or_execution_hydration_as_durable_census
+  - context_visibility_as_the_only_post_commit_execution_fence
+  - registerExecutionWithTopology_outside_execution_publication_serialization
+  - releasing_execution_admission_after_one_runtime_or_one_partial_commit_failure
+  - replacing_every_survivor_topology_with_StaticDeclarationPlan
+  - live_reconstruction_of_a_missing_process_cell
+  - route_removal_recreation_or_delivery_settlement_as_transition_fencing
+
+manifestations_and_proof_plan:
+  - manifestation: running_static_survivor_success
+    disposition: in_scope
+    proof: manager_unit_plus_dual_store_supported_replacement_exact_topology_binding_and_unchanged_lifecycle
+  - manifestation: registered_static_survivor_success
+    disposition: in_scope
+    proof: manager_state_matrix_on_both_stores
+  - manifestation: failed_static_survivor_success_without_execution
+    disposition: in_scope
+    proof: existing_failed_static_test_extended_through_complete_census_and_both_store_readback
+  - manifestation: running_flow_readiness_survivor_success
+    disposition: in_scope
+    proof: exact_readiness_admission_preserved_successor_binding_and_real_route_execution_after_reopen_on_both_stores
+  - manifestation: registered_flow_readiness_survivor_success
+    disposition: in_scope
+    proof: dual_store_lifecycle_state_matrix
+  - manifestation: failed_flow_readiness_survivor_success_without_execution
+    disposition: in_scope
+    proof: dual_store_manager_state_matrix
+  - manifestation: terminated_static_or_flow_cell
+    disposition: different_inert_manifestation
+    proof: census_visible_no_rebind_no_execution_and_no_transition_count_change
+  - manifestation: ephemeral_process_cell
+    disposition: different_nonpersistable_manifestation
+    proof: excluded_from_census_and_live_rebind_without_durable_write
+  - manifestation: missing_process_cell_for_nonterminated_durable_survivor
+    disposition: in_scope
+    proof: fail_before_source_set_capability_call_and_zero_durable_or_process_mutation
+  - manifestation: missing_durable_row_for_nonterminated_durable_process_cell
+    disposition: in_scope
+    proof: fail_before_source_set_capability_call_and_zero_mutation
+  - manifestation: malformed_or_foreign_census_row
+    disposition: in_scope
+    proof: exact_invalid_identity_topology_lifetime_binding_and_source_counterexamples_fail_closed
+  - manifestation: registration_after_census_before_head_mutation
+    disposition: in_scope
+    proof: deterministic_barrier_race_proves_registration_cannot_commit_inside_prepared_window
+  - manifestation: reconfigure_restart_or_teardown_during_prepared_transition
+    disposition: in_scope
+    proof: lifecycle_operation_matrix_proves_typed_conflict_or_required_terminal_precedence_without_bypass
+  - manifestation: queued_delivery_during_prepared_transition
+    disposition: in_scope
+    proof: real_EventBus_route_delivery_remains_unaccepted_and_unsettled_until_abort_or_complete_convergence
+  - manifestation: direct_directive_or_backlog_execution_during_prepared_transition
+    disposition: in_scope
+    proof: exact_execution_lease_refused_without_agent_call_or_external_effect
+  - manifestation: pre_head_abort
+    disposition: in_scope
+    proof: predecessor_bindings_routes_and_execution_reopen_exactly_with_no_durable_transition
+  - manifestation: later_row_durable_commit_failure_within_one_runtime
+    disposition: in_scope
+    proof: SQLite_and_PostgreSQL_fault_injection_proves_partial_rows_resumable_process_projection_unchanged_and_execution_fence_retained
+  - manifestation: later_runtime_failure_after_an_earlier_runtime_converges
+    disposition: in_scope
+    proof: multi_context_dual_store_fault_injection_proves_no_runtime_reopens_before_aggregate_success
+  - manifestation: exact_same_operation_retry_after_partial_progress
+    disposition: in_scope
+    proof: deterministic_operation_replay_finishes_once_without_extra_lifecycle_or_grant_generation
+  - manifestation: changed_or_non_adjacent_retry_evidence
+    disposition: in_scope
+    proof: conflict_keeps_all_contexts_and_execution_fenced
+  - manifestation: rollback_to_exact_predecessor_plan
+    disposition: in_scope
+    proof: supported_supervisor_dual_store_candidate_failure_then_exact_predecessor_static_and_flow_survivor_convergence
+  - manifestation: rollback_rebind_failure_and_later_boundary_retry
+    disposition: in_scope
+    proof: reload_or_replacement_boundary_resumes_exact_pending_transition_before_new_work
+  - manifestation: bundle_delete_with_mixed_surviving_context
+    disposition: in_scope
+    proof: SQLite_and_host_PostgreSQL_delete_replay_matrix_with_static_and_flow_survivors
+  - manifestation: cold_restart_after_committed_partial_progress
+    disposition: in_scope_interaction_with_existing_startup_owner
+    proof: both_stores_readback_then_existing_process_takeover_and_dynamic_topology_reconstruction_converge_once
+  - manifestation: removed_source_lifecycle_cell
+    disposition: different_source_set_retire_operation
+    proof: unchanged_exact_terminalization_tests
+  - manifestation: destructive_reset_empty_source_set
+    disposition: different_no_survivor_operation
+    proof: unchanged_destructive_reset_quiescence_and_empty_plan_tests
+  - manifestation: startup_process_takeover
+    disposition: different_cold_start_operation_closed_by_2351
+    proof: unchanged_dual_store_complete_census_takeover_tests
+
+required_supported_surface_proof:
+  parity_issue: true
+  surfaces:
+    - real_runtime_project_supervisor_replacement_on_default_SQLite
+    - real_runtime_project_supervisor_replacement_on_host_PostgreSQL
+    - process_owned_bundle_delete_survivor_and_replay_on_SQLite
+    - process_owned_bundle_delete_survivor_and_replay_on_host_PostgreSQL
+    - multi_context_aggregate_visibility_and_execution_fence
+    - cold_restart_readback_after_partial_progress_on_both_stores
+  focused_commands:
+    - go_test_internal_runtime_manager_source_set_and_lifecycle_tests
+    - go_test_internal_store_internal_runtimepersistence_source_set_rebind_parity
+    - go_test_internal_serveapp_replacement_and_bundle_delete_matrix
+    - go_test_internal_apispec
+  whole_suite: go run ./cmd/swarm-test -- ./... -count=1
+
+parent_and_sibling_probe:
+  parent_action: absorb_complete_live_survivor_class_now
+  parent_issue_2125:
+    state: closed
+    decision: do_not_reopen_the_completed_parent_record
+    relation: record_2378_as_a_missed_focused_tail
+  siblings:
+    startup_process_takeover_and_topology_reconstruction_2351: different_operation_execution_proven_complete_census
+    source_set_retire_removed_cell: different_terminal_operation
+    static_startup_reconciliation: different_desired_state_operation
+    dynamic_readiness_source_revision: different_exact_readiness_plan_operation
+    selected_fork_ephemeral_registration: different_execution_lifetime
+    destructive_reset_empty_plan: different_no_survivor_operation
+    live_replacement_and_restore: same_chosen_class
+    bundle_delete_survivor_refresh_and_replay: same_chosen_class
+  remaining_parent_tail_after_this_pr:
+    - broader_runtime_phase_decomposition_under_2250
+  tail_estimate: multi_pr_high_effort_architecture_decomposition_not_required_for_this_bounded_fix
+  confidence: high
+
+tracker_state:
+  decision: current_issue_updated_before_coding
+  issue_body_repair: complete
+  new_child_required: false
+  parent_update: update_2250_with_bounded_manifestation_without_reopening_2125
+  older_stream_superseded: false
+  watchlist_mapping: declaration_owned_agent_topology_ownership
+  watchlist_decision: existing_node_refined
+  watchlist_promotion_check:
+    broader_class_already_tracked: declaration_and_runtime_lifecycle_dual_ownership
+    additional_live_siblings_named_by_node: registration_serialization_and_restart_source_revision_races
+    absorption_result: >-
+      The node confirms that the census omission and registration race are one
+      live ownership boundary. The complete bounded live-transition class is
+      absorbed now; the general #2250 orchestrator decomposition remains open.
+
+architecture_feedback:
+  smell: >-
+    The source-set transition is split across RuntimeContextManager, Runtime,
+    AgentManager, and a helper named for the first static consumer. Context
+    visibility, durable row convergence, process projection, and execution
+    selection can therefore settle at different levels.
+  long_run_direction: >-
+    Typed runtime lifecycle phases with explicit prepare, durable convergence,
+    process projection, aggregate publication, and execution-release boundaries.
+    This issue should only make the existing prepared source-set operation own
+    those bounded phases; it must not create a general startup or rollback
+    framework.
+  tracking_decision: update_existing_issue_2250_and_refine_watchlist
+  new_issue_required: false
+  estimated_effort: multi_pr_for_general_decomposition
+  roi: high_but_non_closure_bearing_for_2378
+
+blocking_ambiguity_and_split_conditions:
+  current_blocker: independent_pre_implementation_gate_not_yet_recorded
+  resolved_design_decisions:
+    - missing_process_cell_fails_before_source_set_mutation
+    - no_live_reconstruction
+    - flow_readiness_topology_is_preserved
+    - no_cross_row_transaction
+    - aggregate_execution_fence_survives_partial_progress
+    - no_route_replacement_or_delivery_settlement_shortcut
+  stop_and_repair_if_implementation_discovers:
+    - another_complete_source_set_writer_outside_the_closed_operation_family
+    - another_durable_lifecycle_creator_outside_the_census_and_coordinator
+    - a_delivery_or_direct_execution_path_that_cannot_consume_the_transition_fence
+    - need_for_cross_row_transaction_outbox_ledger_or_generic_rollback_framework
+    - spec_semantics_beyond_the_recorded_variant_specific_rebind_clarification
+  broad_refactor_escalation_required_now: false
