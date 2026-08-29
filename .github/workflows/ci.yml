@@ -149,6 +149,25 @@ jobs:
             --payload "$payload" \
             --api-port 18091
 
+  macos-sqlite-possession:
+    name: macOS SQLite possession
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Prove store ownership and engine-disjoint crash reclaim
+        run: go test ./internal/store ./internal/store/selected ./internal/store/internal/startupownership -count=1
+      - name: Prove database and coordinate loss terminalize ownership
+        run: go test ./internal/store/internal/runtimepersistence -run '^TestSQLiteProcessCapability(File|Coordinate)ReplacementTerminalizesIdleOwner$' -count=1
+      - name: Prove read-only status remains possession-free
+        run: go test ./internal/cliapp -run '^TestStoreStatusReads(CurrentSQLiteStoreWithoutMutationBootstrap|SelectedStoreOwnershipWithoutContextInference)$' -count=1
+      - name: Prove shipped dev and non-dev SQLite serve
+        run: go test ./internal/releasee2e -run '^TestGoldenSQLitePossessionServeJourney$' -count=1 -v
+
   proof-unit:
     name: Go proof ${{ matrix.unit }}
     needs: [ci-plan]
@@ -367,7 +386,7 @@ jobs:
   required-tests:
     name: ${{ github.event_name == 'workflow_dispatch' && 'Full dispatch summary' || 'Required test summary' }}
     if: always()
-    needs: [ci-plan, static-checks, sqlite-local-dev, proof-unit, semantic-smoke, timing-budget]
+    needs: [ci-plan, static-checks, sqlite-local-dev, macos-sqlite-possession, proof-unit, semantic-smoke, timing-budget]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -380,6 +399,7 @@ jobs:
             "ci-plan:${{ needs.ci-plan.result }}" \
             "static-checks:${{ needs.static-checks.result }}" \
             "sqlite-local-dev:${{ needs.sqlite-local-dev.result }}" \
+            "macos-sqlite-possession:${{ needs.macos-sqlite-possession.result }}" \
             "proof-unit:${{ needs.proof-unit.result }}" \
             "semantic-smoke:${{ needs.semantic-smoke.result }}" \
             "timing-budget:${{ needs.timing-budget.result }}"

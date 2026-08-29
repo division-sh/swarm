@@ -287,14 +287,14 @@ func TestBuildStoresSQLiteBindsOwnershipToConstructedBackendIdentity(t *testing.
 	if err := os.WriteFile(path, nil, 0o600); err != nil {
 		t.Fatalf("create replacement SQLite identity: %v", err)
 	}
-	contender, _, contenderErr := storeconstruction.OpenSQLiteRuntimeWithOwnershipBinding(retiredPath)
+	contender, _, contenderErr := storeconstruction.OpenSQLiteRuntimeWithOwnershipBinding(path)
 	if contender != nil {
 		_ = contender.Close()
-		t.Fatal("renamed constructed SQLite backend admitted a concurrent process constructor")
+		t.Fatal("replaced SQLite path admitted a concurrent process constructor while its possession coordinate was held")
 	}
 	var contenderAcquisitionErr *runtimestartupownership.AcquisitionError
 	if !errors.As(contenderErr, &contenderAcquisitionErr) || contenderAcquisitionErr.Failure != runtimestartupownership.AcquisitionTakeoverRequired {
-		t.Fatalf("renamed backend contender error=%v, want takeover_required", contenderErr)
+		t.Fatalf("replaced-path contender error=%v, want takeover_required", contenderErr)
 	}
 
 	capability, err := stores.StartupOwnership().AcquireProcessCapability(ctx, runtimestartupownership.AcquireRequest{

@@ -11,4 +11,8 @@ func acquireSQLiteFilePossession(string) (sqlitePossession, error) {
 	}
 }
 
+func acquireSQLiteConstructionPossession(path string) (sqlitePossession, error) {
+	return acquireSQLiteFilePossession(path)
+}
+
 func sameSQLitePossessionResource(sqlitePossession, sqlitePossession) bool { return false }

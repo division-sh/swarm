@@ -6229,9 +6229,16 @@ engine:
       sqlite_owner: internal/store.SQLiteRuntimeStore process capability
       postgres_owner: internal/store.PostgresStore retained-session process capability
       scope: >
-        SQLite startup ownership retains an operating-system lock bound to the canonical open database file on a supported
-        local filesystem, preventing competing runtime processes from acquiring the same selected store. This exact
-        process-capability lock does not promote general production multi-writer SQLite semantics. One process capability
+        SQLite startup ownership retains an operating-system lock only on the persistent
+        `<canonical database path>.possession` coordinate on a supported local filesystem, preventing competing runtime
+        processes from acquiring the same selected store without contending with SQLite's engine locks. The coordinate is
+        derived from the canonical database parent and basename, is never database identity, and is retained as a second
+        exact identity alongside the canonical database resource. Swarm never deletes, replaces, migrates, exports, or
+        rotates the coordinate. No advisory lock may target the database, WAL, journal, SHM, or another SQLite-managed file.
+        Missing or replaced database/coordinate identity fails closed and terminalizes retained authority as
+        ownership_unprovable. Deliberate same-user coordinate replacement is unsupported filesystem tampering, not a
+        hostile-filesystem exclusion guarantee. This exact process-capability lock does not promote general production
+        multi-writer SQLite semantics. One process capability
         owns the complete source set and issues one revocable grant per
         admitted runtime generation. Shared-store consumers execute only under those grants: pipeline maintenance, system
         nodes, manager loops, schedule callbacks, outbox sweeping, and inbound admission are included. Live replacement MUST
@@ -15601,13 +15608,13 @@ platform_tables:
           monitor deadline. Timeout, backend unreachability, or failed proof terminalizes the capability as
           ownership_unprovable and retires its local generation grants; no unbounded background-context recheck is allowed.
         terminal_readback: >-
-          After a retained PostgreSQL session is discarded or a SQLite file-possession lock is released unexpectedly,
+          After a retained PostgreSQL session is discarded or a SQLite possession-coordinate lock is released unexpectedly,
           successor classification is bounded by that same configured monitor deadline. Only exact validated successor
           lineage may classify ownership_superseded. Timeout, unavailable storage, malformed evidence, or any incomplete
           readback promptly classifies ownership_unprovable so released physical possession cannot coexist with locally
           live process capability or generation-grant authority.
       diagnostic_inspection_contract: >-
-        `swarm store status` is read-only. It never creates a SQLite parent or database file, bootstraps or origin-stamps
+        `swarm store status` is read-only. It never creates a SQLite parent, database file, or possession coordinate, bootstraps or origin-stamps
         either selected store, or creates PostgreSQL schema objects. An absent SQLite target or an empty PostgreSQL/SQLite
         catalog reports the canonical empty authority inspection. Existing SQLite inspection opens the selected file in
         read-only mode. A non-empty catalog missing the authority table fails closed instead of being reported as empty.
@@ -38018,12 +38025,18 @@ agent_topology_authority:
     owner: one retained selected-store session acquired only by process composition
     acquisition: >-
       Acquisition first proves exact backend-exclusive possession: one retained PostgreSQL advisory-lock session or
-      one retained SQLite OS lock applied directly to the canonical open database file on a supported local filesystem.
-      A replaceable sidecar, path marker, or independently recreated inode is never SQLite possession authority. Only
-      process/repair SQLite construction opens and configures its backend pool while holding that same file coordinate and
-      records the resulting immutable backend-file identity. Every later acquisition or repair must lock that exact
-      recorded identity before selected-store mutation; a pool bound to one inode and a possession lock bound to
-      another fails closed. Only then may the same retained capability lock and classify the global durable authority head. A valid active
+      one retained SQLite OS lock applied only to the persistent `<canonical database path>.possession` coordinate on a
+      supported local filesystem. Construction resolves the canonical parent and basename, opens the coordinate with
+      no-follow and close-on-exec semantics, and requires one owner-only unaliased regular file on a supported local
+      filesystem. It acquires and revalidates that coordinate before creating or opening a fresh database or allowing pool
+      and schema mutation. The coordinate is engine-lock-disjoint: advisory locks on the database, WAL, journal, SHM, or
+      another SQLite-managed file are prohibited. One opaque possession records both the resulting immutable backend-file
+      identity and the exact coordinate identity. Every later acquisition or repair must lock and match that complete pair
+      before selected-store mutation; a pool bound to one inode and a possession value bound to another database or
+      coordinate fails closed. Swarm never deletes, replaces, rotates, migrates, or exports the coordinate. Missing or
+      replaced database/coordinate identity terminalizes the retained process capability as ownership_unprovable.
+      Deliberate same-user coordinate replacement is unsupported filesystem tampering and is not claimed as a hostile
+      zero-overlap boundary. Only then may the same retained capability lock and classify the global durable authority head. A valid active
       predecessor with absent backend possession is atomically superseded, every predecessor new-work grant is
       retired, and one monotonic successor authority generation is appended in the same transaction. Source-set
       topology, durable delivery continuations, and provider drains are distinct facts and remain unchanged.

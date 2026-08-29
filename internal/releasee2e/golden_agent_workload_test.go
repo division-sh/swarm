@@ -52,6 +52,83 @@ func TestGoldenAgentWorkloadSQLiteSmoke(t *testing.T) {
 	})
 }
 
+func TestGoldenSQLitePossessionServeJourney(t *testing.T) {
+	releaseRoot := goldenReleaseRoot(t)
+	binaryPath := buildReleaseBinary(t, releaseRoot)
+	root := filepath.Join(releaseRoot, "sqlite-possession-serve")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("create release project: %v", err)
+	}
+	contracts := filepath.Join(root, "contracts")
+	copyReleaseTree(t, filepath.Join(releaseE2ERepoRoot(t), "internal", "releasee2e", "testdata", "golden_agent_workload"), contracts)
+	writeReleaseFile(t, filepath.Join(root, "go.mod"), "module golden-sqlite-possession-e2e\n\ngo 1.23.0\n")
+	store := goldenSQLiteStore(root)
+	configPath := filepath.Join(root, "config", "swarm.yaml")
+	writeReleaseFile(t, configPath, goldenRuntimeConfig(store))
+	devConfigPath := filepath.Join(root, ".swarm", "swarm.yaml")
+	writeReleaseFile(t, devConfigPath, goldenRuntimeConfig(goldenStoreSelection{
+		name: "sqlite", configYAML: "store:\n  backend: sqlite\n",
+	}))
+	tokenFile := filepath.Join(root, "api-token")
+	writeReleaseFile(t, tokenFile, goldenAPIToken+"\n")
+	env := goldenProcessEnv(t, root, "", 0)
+	assertGoldenProcessHasNoExternalExecutables(t, env)
+
+	verify := runReleaseCommand(t, goldenStartupTimeout, root, env, "", binaryPath,
+		"verify", "--config", configPath, "--contracts", contracts, "--json")
+	if verify.err != nil {
+		t.Fatalf("release verify failed: %v\n%s", verify.err, verify.output)
+	}
+	var verifyResult struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(verify.output)), &verifyResult); err != nil || !verifyResult.OK {
+		t.Fatalf("release verify result: err=%v output=%s", err, verify.output)
+	}
+
+	for _, test := range []struct {
+		name           string
+		dev            bool
+		configPath     string
+		possessionPath string
+	}{
+		{name: "non-dev", configPath: configPath, possessionPath: filepath.Join(root, "runtime.db.possession")},
+		{name: "dev", dev: true, possessionPath: filepath.Join(root, ".swarm", "stores", "dev-scratch.db.possession")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			process := startReleaseServe(t, releaseProcessSpec{
+				BinaryPath: binaryPath,
+				WorkingDir: root,
+				ConfigPath: test.configPath,
+				Contracts:  contracts,
+				Store:      store.name,
+				Dev:        test.dev,
+				APIPort:    freeReleaseTCPPort(t),
+				MCPPort:    freeReleaseTCPPort(t),
+				TokenFile:  tokenFile,
+				Token:      goldenAPIToken,
+				Env:        env,
+			})
+			readyCtx, cancel := context.WithTimeout(context.Background(), goldenStartupTimeout)
+			err := process.waitReady(readyCtx)
+			cancel()
+			if err != nil {
+				t.Fatal(err)
+			}
+			goldenServedBundleHash(t, process.rpc)
+			if info, err := os.Stat(test.possessionPath); err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
+				t.Fatalf("serve possession coordinate %s: info=%v err=%v", test.possessionPath, info, err)
+			}
+			if err := process.stopAndWait(5 * time.Second); err != nil {
+				t.Fatalf("clean serve teardown: %v\n%s", err, process.output.String())
+			}
+			if info, err := os.Stat(test.possessionPath); err != nil || !info.Mode().IsRegular() {
+				t.Fatalf("persistent possession coordinate after teardown %s: info=%v err=%v", test.possessionPath, info, err)
+			}
+		})
+	}
+}
+
 func TestGoldenAgentWorkloadRestartAndForcedKillOnBothBackends(t *testing.T) {
 	if profile, continuous := goldenContinuousProofProfile(t); profile != "" && !continuous {
 		t.Skipf("forced-restart proof runs in full/nightly, not %s", profile)

@@ -1213,6 +1213,32 @@ func TestSQLiteProcessCapabilityFileReplacementTerminalizesIdleOwner(t *testing.
 	}
 }
 
+func TestSQLiteProcessCapabilityCoordinateReplacementTerminalizesIdleOwner(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runtime.db")
+	selected := newBootstrappedSQLiteRuntimeStoreForPath(t, path)
+	capability, err := selected.AcquireProcessCapability(context.Background(), testStartupAcquireRequest("sqlite-coordinate-replaced-owner"))
+	if err != nil {
+		t.Fatalf("AcquireProcessCapability: %v", err)
+	}
+	t.Cleanup(func() { _ = capability.Release(context.Background()) })
+	coordinatePath := path + ".possession"
+	if err := os.Rename(coordinatePath, coordinatePath+".retired"); err != nil {
+		t.Fatalf("retire possession coordinate: %v", err)
+	}
+	if err := os.WriteFile(coordinatePath, nil, 0o600); err != nil {
+		t.Fatalf("write replacement possession coordinate: %v", err)
+	}
+	select {
+	case <-capability.Done():
+	case <-time.After(4 * time.Second):
+		t.Fatal("SQLite possession-coordinate replacement did not terminalize the idle process capability")
+	}
+	result, ok := capability.TerminalResult()
+	if !ok || result.Cause != runtimestartupownership.TerminalOwnershipUnprovable || result.SuccessorAuthorityID != "" {
+		t.Fatalf("terminal result=%#v ok=%v, want ownership_unprovable", result, ok)
+	}
+}
+
 const sqliteForcedDeathChildMarker = "SWARM_TEST_SQLITE_FORCED_DEATH_CHILD"
 
 type sqliteForcedDeathEvidence struct {
