@@ -17,16 +17,15 @@ type sqlitePossession interface {
 	Release() error
 }
 
-// SQLiteConstructionGuard keeps the selected file stable while the SQLite
-// pool opens and records the exact file identity that later possession must
-// protect.
+// SQLiteConstructionGuard keeps the selected database and its dedicated
+// possession coordinate stable while the SQLite pool opens.
 type SQLiteConstructionGuard struct {
 	mu         sync.Mutex
 	possession sqlitePossession
 }
 
-// SQLiteBackendIdentity is the immutable file identity captured while the
-// backend pool was opened under SQLiteConstructionGuard.
+// SQLiteBackendIdentity is the immutable database/coordinate pair captured
+// while the backend pool was opened under SQLiteConstructionGuard.
 type SQLiteBackendIdentity struct {
 	mu        sync.Mutex
 	reference sqlitePossession
@@ -45,14 +44,7 @@ func AcquireSQLiteConstructionGuard(selectedPath string) (*SQLiteConstructionGua
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return nil, fmt.Errorf("create SQLite selected-store parent: %w", err)
 	}
-	coordinate, err := os.OpenFile(abs, os.O_RDWR|os.O_CREATE, 0o600)
-	if err != nil {
-		return nil, fmt.Errorf("create SQLite selected-store coordinate: %w", err)
-	}
-	if err := coordinate.Close(); err != nil {
-		return nil, fmt.Errorf("close SQLite selected-store coordinate: %w", err)
-	}
-	possession, err := acquireSQLiteFilePossession(abs)
+	possession, err := acquireSQLiteConstructionPossession(abs)
 	if err != nil {
 		return nil, err
 	}

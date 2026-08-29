@@ -98,6 +98,10 @@ func TestStoreStatusReadsCurrentSQLiteStoreWithoutMutationBootstrap(t *testing.T
 	configPath := writeStoreAuthorityConfig(t, sqlitePath)
 	bootstrapStoreAuthoritySQLite(t, configPath, sqlitePath)
 	seedValidAuthorityHead(t, sqlitePath, "durable-status-owner")
+	possessionPath := sqlitePath + ".possession"
+	if err := os.Remove(possessionPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("remove inactive possession coordinate before read-only status: %v", err)
+	}
 	beforeInfo, err := os.Stat(sqlitePath)
 	if err != nil {
 		t.Fatalf("stat selected SQLite store before status: %v", err)
@@ -116,6 +120,9 @@ func TestStoreStatusReadsCurrentSQLiteStoreWithoutMutationBootstrap(t *testing.T
 	}
 	if beforeInfo.Size() != afterInfo.Size() || !beforeInfo.ModTime().Equal(afterInfo.ModTime()) {
 		t.Fatalf("store status mutated selected SQLite database: before=(%d,%s) after=(%d,%s)", beforeInfo.Size(), beforeInfo.ModTime(), afterInfo.Size(), afterInfo.ModTime())
+	}
+	if _, err := os.Stat(possessionPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("read-only store status created SQLite possession coordinate: %v", err)
 	}
 }
 
@@ -242,14 +249,18 @@ func TestPlatformSpecBindsOwnershipLossDeadlinesAndReadOnlyStatus(t *testing.T) 
 		if !strings.Contains(value, "monitor deadline") && name != "diagnostic inspection" {
 			t.Fatalf("%s contract does not bind the configured monitor deadline: %q", name, value)
 		}
-		if name == "diagnostic inspection" && (!strings.Contains(value, "read-only") || !strings.Contains(value, "never creates")) {
+		if name == "diagnostic inspection" && (!strings.Contains(value, "read-only") || !strings.Contains(value, "possession coordinate")) {
 			t.Fatalf("diagnostic inspection contract does not prohibit bootstrap mutation: %q", value)
 		}
 	}
 	process := spec.AgentTopologyAuthority.ProcessCapability
 	if !strings.Contains(process.Acquisition, "backend-file identity") ||
 		!strings.Contains(process.Acquisition, "pool bound to one inode") ||
-		!strings.Contains(process.Acquisition, "acquisition or repair") {
+		!strings.Contains(process.Acquisition, "acquisition or repair") ||
+		!strings.Contains(process.Acquisition, "<canonical database path>.possession") ||
+		!strings.Contains(process.Acquisition, "another SQLite-managed file are prohibited") ||
+		!strings.Contains(process.Acquisition, "complete pair") ||
+		!strings.Contains(process.Acquisition, "unsupported filesystem tampering") {
 		t.Fatalf("process acquisition contract does not bind the SQLite pool and retained possession: %q", process.Acquisition)
 	}
 	if !strings.Contains(process.Grants, "release error can never publish released") || !strings.Contains(process.Grants, "configured monitor deadline") {
