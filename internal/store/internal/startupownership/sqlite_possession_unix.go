@@ -48,10 +48,10 @@ func acquireSQLitePossession(selectedPath string, createDatabase bool) (sqlitePo
 	if err != nil {
 		return nil, err
 	}
-	if err := prevalidateSQLiteDatabasePath(databasePath, createDatabase); err != nil {
+	if err := requireSupportedLocalFilesystem(filepath.Dir(databasePath)); err != nil {
 		return nil, err
 	}
-	if err := requireSupportedLocalFilesystem(filepath.Dir(databasePath)); err != nil {
+	if err := prevalidateSQLiteDatabasePath(databasePath, createDatabase); err != nil {
 		return nil, err
 	}
 
